@@ -8,15 +8,10 @@ tiras de hasta 16 vertices. Registro 0: la calzada."""
 import struct
 from . import vif
 
-class Segmento:
-    def __init__(self, iso, entradas):
-        self.iso = iso; self.m = iso.m; self.ent = entradas
-        for h, o, s in entradas:
-            w = struct.unpack('<4I', self.m[o:o + 16])
-            if 1 <= w[0] <= 0x20 and w[2] + w[3] + 16 == s and s > 1_000_000:
-                self.o, self.w = o, w; break
-        else: raise ValueError('segmento sin bloque principal')
-        self.A = self.o + 16
+class Bloque:
+    """un bloque de geometria y texturas (cabecera n registros, n texturas, tamano A, tamano B)"""
+    def __init__(self, iso, o, w):
+        self.iso = iso; self.m = iso.m; self.o = o; self.w = w; self.A = o + 16
 
     def registros(self):
         r = []
@@ -33,6 +28,17 @@ class Segmento:
             e = struct.unpack('<6I', self.m[self.A + off + 24 * i:self.A + off + 24 * i + 24])
             res.extend(vif.datos(self.m, self.A + e[2], self.A + self.w[2]))
         return res
+
+class Segmento(Bloque):
+    """un segmento: su bloque principal (el mayor) y la lista de todos sus bloques"""
+    def __init__(self, iso, entradas):
+        self.ent = entradas; self.bloques = []
+        for h, o, s in entradas:
+            w = struct.unpack('<4I', iso.m[o:o + 16])
+            if 1 <= w[0] <= 0x20 and w[2] + w[3] + 16 == s: self.bloques.append(Bloque(iso, o, w))
+        if not self.bloques: raise ValueError('segmento sin bloques')
+        p = max(self.bloques, key=lambda b: b.w[2] + b.w[3])
+        Bloque.__init__(self, iso, p.o, p.w)
 
 def segmentos(iso):
     g = []; cur = None
