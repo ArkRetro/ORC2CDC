@@ -5,7 +5,7 @@ Disposicion de un GD-ROM: zona de densidad simple con una pista de datos (track0
 silencio, 4 s), y la de alta densidad desde el LBA 45000 (track03): IP.BIN en los 16 primeros sectores y un ISO 9660
 con el 1ST_READ.BIN (en GD-ROM sin desordenar: eso solo hace falta en CD-R) y los ficheros de --datos.
 Herramientas: sh-elf-objcopy, makeip de KallistiOS y genisoimage."""
-import argparse, os, shutil, subprocess, sys, tempfile
+import argparse, os, shutil, struct, subprocess, sys, tempfile
 
 KOS = os.environ.get('KOS_BASE', '/opt/toolchains/dc/kos')
 CC = os.environ.get('KOS_CC_BASE', '/opt/toolchains/dc/sh-elf')
@@ -27,9 +27,26 @@ def main():
         sh(os.path.join(CC, 'bin', 'sh-elf-objcopy'), '-R', '.stack', '-O', 'binary', a.elf, os.path.join(raiz, '1ST_READ.BIN'))
         ip = os.path.join(t, 'IP.BIN')
         sh(os.path.join(KOS, 'utils', 'makeip', 'makeip'), '-g', a.nombre[:128], '-c', 'HOMEBREW', '-f', ip)
-        # track03: ISO 9660 que empieza en el LBA 45000, con el IP.BIN en la zona de sistema
+        # track03: ISO 9660 que empieza en el LBA 45000, con el IP.BIN en la zona de sistema. En un GD-ROM la BIOS solo
+        # carga 1ST_READ.BIN si esta al final del disco (probado con Flycast y la BIOS real: con el fichero en 45 024 lee
+        # el directorio y vuelve al menu; cerca de 549 150, arranca): primero los datos, luego un relleno de ceros (0.0)
+        # y el ejecutable el ultimo. Dos pasadas: la primera mide donde acaba sin relleno
         t3 = os.path.join(a.salida, 'track03.iso')
-        sh('genisoimage', '-quiet', '-C', '0,45000', '-V', 'OUTRUN_DC', '-G', ip, '-l', '-r', '-J', '-o', t3, raiz)
+        orden = os.path.join(t, 'orden.txt')
+        def iso(relleno):
+            pr = os.path.join(raiz, '0.0')
+            if os.path.exists(pr): os.remove(pr)
+            if relleno: open(pr, 'wb').truncate(relleno * 2048)
+            with open(orden, 'w') as f:            # mas peso, antes: los datos (3), el relleno (2) y el ejecutable (1)
+                for dp, _, fs in os.walk(raiz):
+                    for x in fs:
+                        r = os.path.relpath(os.path.join(dp, x), raiz)
+                        f.write('%s %d\n' % (os.path.join(dp, x), 1 if r == '1ST_READ.BIN' else 2 if r == '0.0' else 3))
+            sh('genisoimage', '-quiet', '-C', '0,45000', '-V', 'OUTRUN_DC', '-G', ip, '-l', '-no-pad', '-sort', orden, '-o', t3, raiz)
+            return os.path.getsize(t3) // 2048
+        n3 = iso(0)
+        fin = 549150 - 32                        # ultimo sector de datos del GD-ROM, con margen
+        if 45000 + n3 < fin: n3 = iso(fin - 45000 - n3)
         # track01: un ISO pequeno (300 sectores) y track02: 4 s de silencio
         r1 = os.path.join(t, 'r1'); os.makedirs(r1)
         open(os.path.join(r1, 'LEEME.TXT'), 'w').write('Disco de Dreamcast (GD-ROM). Uso personal.\r\n')
