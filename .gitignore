@@ -4,3 +4,4 @@
 *.iso
 *.raw
 *.gdi
+__pycache__/
