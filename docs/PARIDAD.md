@@ -47,8 +47,8 @@ Estado: OK (conectado y verificado al nivel indicado), PARCIAL, PROVISIONAL (apr
 | Eventos, scripts, progresion, misiones | SCRIPTS.PS2 (Races, RaceAttack, OutrunMiles, Req_*) | FALTA | — | — | — | — |
 | Coches del jugador | CARS.PS2 1-32 / 33-63, disposicion 0x3d3ff0; materiales tabla 4/5 del bloque; colores 0x35ad48 (PC 64D120/408C80); mapa de entorno del bloque | PARCIAL | 15 coches montados como 46A560 (port comprobado), con interior, 9320-11195 vertices dibujados; pintura, 8 colores (Y en la seleccion), reflejo y luces (+7C/+80/+84/+60, CEX2) del original | UV de entorno con la formula esferica clasica (la del microcodigo VU1 sin leer); piezas sin animar; sin bits de noche/tunel | ver secciones Coches | E |
 | Escenarios, texturas, materiales | STAGE.PS2, VQ, scn_env_fog_<zona> | PARCIAL | 15 tramos + 15 uniones; mallas sin textura con su material (tabla 5); niebla del original; tiras (ADC), nodos, LOD y planos del original | sin objetos de tramo (obj_course_obj_cs_*), sol (cs_ENV_* no es de la escena: es del reflejo del coche); niebla mezclada por distancia en la union (el original por tiempo) | — | E |
-| HUD, menus, transiciones | SPRANI/XST, TEXT.PS2 (espanol: SPANISH.bin y XST _sxst) | PARCIAL | HUD.DAT, MENU.DAT; todas las pantallas del menu principal y de un jugador, licencia con VMU, seleccion de coche del original (ver Menus) | titulo es un cuadro del video (la pelicula de titulo en bucle detras del rotulo, sin hacer); textos bfont antiguos en la demo automatica y el aviso de rama; rotulos de las filas de opciones (sprites sin localizar) | quitar textos bfont | E |
-| Musica y efectos | MUSIC.PS2, SOUND.PS2 ICS/MENU/FE | PARCIAL | musica.c, sfx.c | 48 kHz supuesto; sin sonido por superficie ni del choque fuerte | — | E |
+| HUD, menus, transiciones | SPRANI/XST, TEXT.PS2 (espanol: SPANISH.bin y XST _sxst) | PARCIAL | HUD.DAT, MENU.DAT; todas las pantallas del menu principal y de un jugador, licencia con VMU, seleccion de coche del original, menu de pausa con AUDIO (ver Menus y Pausa y mezcla) | titulo es un cuadro del video (la pelicula de titulo en bucle detras del rotulo, sin hacer); textos bfont antiguos en la demo automatica y el aviso de rama; rotulos de las filas de opciones (sprites sin localizar) | quitar textos bfont | E |
+| Musica y efectos | MUSIC.PS2, SOUND.PS2 ICS/MENU/FE; volumenes 0x11ae38 / 0x100210 / 0x11b600, SOUNDCD.IRX 0x2118 | PARCIAL | musica.c, sfx.c; mezcla del original (ver Pausa y mezcla) | 48 kHz supuesto; sin sonido por superficie ni del choque fuerte | — | E |
 | Voces (acompanante y locutor) | SOUND.PS2 `\SPANISH\ORC.PAK`, `PERO.pak`; race_robots 489A90/488D80 = PS2 0x202e60..0x205cac; 4B93E0, 4B9CD0, 49C9C0, 499020, GAME 0x1b83e8 | OK | VOCES.DAT (conv_sonido.py), voces.c; verificado en Flycast (ver Voces y video) | una voz nueva corta la anterior (SUPUESTO); "choque con otro coche" = contacto con impulso del trafico (traf_choca) en un choque; sin voces de asustada/trompo (solo Coast 2 Coast) | — | E |
 | Peliculas (titulo y atraccion) | MV.PS2 ts50/attr50.pss; 0x12d480, ADVERTISE 0x25e1d8 | OK | MVTS.VQV / MVATTR.VQV (conv_video.py), video.c | VQ de la PowerVR a 512x256 estirado a 640x480 (el original: MPEG-2 640x480); al arrancar y por inactividad del titulo, en vez de la demo de carrera | — | E |
 | Cargas y estabilidad | — | PARCIAL | carga en segundo plano, mutex del GD | — | medir en GDEMU | E |
@@ -89,8 +89,9 @@ o igual; cada entrada suena y ocupa 120 cuadros. Las voces de asustada (0x16d, 0
 dice en Coast 2 Coast (variantes 3 y 4). El id lleva a veces 0x800 o 0x5000 encima (banderas del controlador de sonido
 del IOP, sin estudiar): se usan los 9 bits bajos. No hay voces en los menus principales (Fe.pak y MENU.pak son
 efectos; la voz de ranking 0x158 es de SPRANK.pak).
-SUPUESTOS: una voz nueva corta la que suena (un canal para voces y otro para los efectos de carrera); el volumen
-0x3fff de las voces es el maximo del AICA (255; la musica va a 200). Sin la voz de GAME OVER 0x154 (no hay modo GAME OVER).
+SUPUESTO: una voz nueva corta la que suena (un canal para voces y otro para los efectos de carrera). El volumen de las
+voces sale de la tabla SE (0x3fff) por el general como en el IRX (ver Pausa y mezcla). Sin la voz de GAME OVER 0x154
+(no hay modo GAME OVER).
 
 **Peliculas.** MV.PS2: `ts50/ts60.pss` (pantalla de titulo con el rotulo, 17,6 s) y `attr50/attr60.pss` (atraccion,
 55 s); MPEG-2 640x480 a 25 fps (las de 50 Hz) o 29,97, audio PCM de 16 bits estereo a 48 kHz en paquetes privados (sin
@@ -152,11 +153,68 @@ consola, el port lo fija al convertir). Hoja de capturas de Flycast: scratchpad 
 - Ganchos: `menu_gancho(pantalla, evento, valor)` (comun/menu.h) al entrar en cada pantalla y al elegir; `video_titulo()`
   (simbolo debil en demo/main.c) antes del primer titulo.
 - VRAM por pantalla (MENU.DAT): COMUN 170 KB, MENU 290, MODO 68, COCHE 512, CAMBIO 256, MUSICA 802, LICENCIA 546,
-  RANKING 52, MULTI 34, OPCIONES 34, TITULO 38; con el coche (127-187 KB) el peor caso es MUSICA + COMUN + coche
-  (~1,15 MB de 1,54 MB libres). TA: el 2D del menu son menos de 300 cuadrilateros por cuadro.
+  RANKING 52, MULTI 34, OPCIONES 34, TITULO 38, PAUSA 18 (se sube al pulsar START en carrera). TA: el 2D del menu son
+  menos de 300 cuadrilateros por cuadro.
+- Pantalla de musica en blanco (queja del probador, 2026-11-08; reproducido en Flycast: solo el fondo y la barra, y
+  `out of PVR memory`). Causa: la VRAM partida. El coche 3D de la seleccion (Dino: 37 texturas) se sube cuando las
+  pantallas del menu ya estan; al echar COCHE / CAMBIO quedan huecos a los lados de sus texturas: 1319 KB libres pero
+  el mayor bloque seguido era de 704 KB, y MUSICA son 3 texturas de 256 KB + 34 KB (802 KB). asegura() no encontraba
+  sitio, esperaba 90 cuadros y dibujaba sin texturas. Arreglo (menu.c / main.c): si una pantalla no cabe, a los 2
+  cuadros el menu pide soltar el coche 3D (gancho `menu_suelta_coche`; main lo vuelve a cargar al volver a la
+  seleccion o al empezar la carrera) y, si a los 20 cuadros aun no cabe, baja todas sus pantallas y las sube otra vez,
+  las de mas VRAM primero. Ademas musica_pon ya no espera (hasta 3 s) a llenar el colchon antes de sonar: arranca
+  en musica_poll; antes el menu se quedaba sin dibujar al entrar en la musica y al cambiar de tema. Verificado en E:
+  la musica sale entera tras el cambio, cambio de tema y vuelta a la seleccion con el coche recargado; sin avisos de
+  VRAM.
 - Verificado en E (Flycast): todas las pantallas y transiciones, crear y editar licencia, guardar y leer la VMU entre
   arranques, coche bloqueado, variante, color, cambio, musica y salida a carrera con el Dino; demo y vuelta al titulo.
   No probado en R.
+
+## Pausa y mezcla de audio (2026-11-08)
+
+**Menu de pausa** (START en carrera; comun/menu.c `menu_pausa_*`, demo/main.c). Es el 4D5E40 / 4D7300 del PC con la
+raiz 3; en el PS2, 0x247b40 con la raiz 16: filas 8, 7, 6, 10, 11, 14 de la tabla de filas 0x4187F8 (PC 0x5CBF10) =
+VOLVER A LA PARTIDA, REINTENTAR, ABANDONAR, CONFIGURACION, CONTROLES, AUDIO (escena 0x2C00EE del banco ETC_CVT con su
+XST en espanol, cuadros 9, 8, 7, 0, 1, 4). Barra de la fila 0x2C00ED (cuadro 10 normal, 12 elegida), lista en (-13,
+-72) del centro y 16 px por fila (FrontendChoiceList 48D970), ventana en (135, 110) de 350 de ancho (0x375CF0..) y
+alto filas * 16 + 104 (48CAC0). Los botones esperan 15 cuadros (692C9C = 15,05). A / START elige, B cierra (guarda la
+licencia si cambio, 4D66D0 / 4D7DA0), arriba / abajo con vuelta. REINTENTAR y ABANDONAR preguntan "Estas seguro?"
+(0x3A6; PS2 0x249d40: 0x3D1 solo en contrarreloj y 0x3A7 en red) con A ELEGIR / B ATRAS; REINTENTAR vuelve a la
+salida con el mismo coche, cambio y musica; ABANDONAR vuelve al titulo del frontal. AUDIO (PS2 0x2492a0 = 4D78C0,
+control 0x249530 = 4D89B0): filas 26 y 27 (0x2C00FB cuadros 12 y 13: VOLUMEN DE SONIDO y VOLUMEN DE MUSICA), medidor
+0x2C00EF cuadro = valor (tabla 0x418988), de 0 a 10 con izquierda / derecha y sonido de cursor; se oye al momento; la
+fila de la musica manda tambien su valor al volumen general de efectos (asi lo hace el PS2) hasta cambiar de fila o
+salir; B (o A) lo guarda en la licencia (+D4 efectos, +D0 musica, 4D7AB0) y vuelve a la lista; se escribe en la VMU al
+cerrar la pausa (tambien al reintentar o abandonar: SUPUESTO, el original guarda despues). El PS2 no tiene volumen de
+voz (la tercera opcion del PC, +ED orden de la musica, no tiene fila). Los textos y botones con la fuente 14.
+PROVISIONAL: CONFIGURACION y CONTROLES suenan bloqueadas (brillo, pantalla, velocimetro, sensibilidad, vibracion...
+no estan); la ventana es un rectangulo claro con cabecera, franja de botones y pie oscuros con las medidas de 48C5F0 (sus
+imagenes 0x3004x son de un XST sin localizar en el PS2), las flechas del medidor son "<" ">" de la fuente y los
+iconos de los botones, la letra A / B. Verificado en E: abrir, mover, AUDIO (subir, bajar, cambiar de fila), volver,
+confirmar y cancelar REINTENTAR (la carrera vuelve a la cuenta atras), ABANDONAR al frontal, guardado en la VMU.
+
+**Mezcla** (antes: efectos x3 inventado, musica a 200, voces a 255). Del original:
+- Opciones de la licencia: efectos +D4 y musica +D0, de 0 a 10, 10 en una licencia nueva (4471A0). Se aplican al
+  leer la licencia (PS2 0x1a1a8c) y en AUDIO.
+- Musica: 0x100210(v / 10): volumen del flujo = nivel * 0x3fff (comando 11 al IOP); con 10, el maximo. En el AICA,
+  nivel * 255 (musica_nivel; el volumen del AICA en KallistiOS es lineal: TL = 16 log2(255 / v)).
+- General de efectos: 0x11ae38(trunc(v / 10 * 144)) (comando 0xA001 al IOP, guardado tambien en el EE 0x530fb4);
+  144 con la opcion a 10 (el IRX arranca con 128).
+- Efectos SE (menus y voces de ORC.PAK / PERO.pak): SOUNDCD.IRX 0x2118 / 0x2380: volumen de la tabla SE (0x3fff) *
+  general >> 7. Con 144 sale 0x47ff, que no cabe en los 15 bits con signo del volumen de la SPU2 (sceSdSetParam lo
+  escribe tal cual): fase invertida, 0,875 del maximo (223 en el AICA). Con 9 (general 129) sale 0x407f: 0,99. Asi
+  se reproduce (sfx.c vol_se); el efecto audible del desbordamiento es PROBABLE (el calculo esta CONFIRMADO).
+- Motor, derrape y golpe (ICS): 0x11b600 del ELF: volumen de cada capa = 0x3fff * canal / 144 * curva / 127 *
+  2^-((15 - aten) / 2) * factor de la definicion (floats en 0x352748: motor con y sin gas 1,75, derrape 2,0, golpe 1,0)
+  * general / 144, hasta 0x3fff. El canal (0..127) es el de antes (motor 51,5 * D, derrape 151,2 * D, golpe 0,56 * 127).
+  Respecto de lo de antes: motor 0,52 veces (-5,8 dB), derrape 0,59, golpe 0,29; musica +2,1 dB; voces -1,2 dB. El
+  motor queda unos 8 dB por debajo de la musica de lo que estaba y la voz 4,6 dB mas por encima del motor.
+- Peliculas: el audio sin atenuar (255, como la musica; el PC lo mezcla tal cual).
+Medido en Flycast (SDL_AUDIODRIVER=disk, 44,1 kHz; una grabacion por fuente con `-DPRUEBA_MEZCLA` = bits 1 musica, 2
+ICS, 4 SE callados; menu -> carrera con el Dino y gas a fondo 25 s, opciones a 10): todo -17,5 dBFS RMS; motor solo
+-21,5 dBFS (maximo en 0,5 s -18,7); musica sola (SPLASH WAVE) -19,0 (-17,5); voz 0x82 de la salida -15,5 dBFS RMS
+mientras suena (pico -1,9). Es decir: la musica 2,5 dB por encima del motor y la voz unos 3,5 dB por encima de la
+musica. No hay medida del PS2 con que comparar (sin grabacion de referencia): los niveles salen del calculo de arriba.
 
 ## Auditoria de inventos (2026-11-08)
 
