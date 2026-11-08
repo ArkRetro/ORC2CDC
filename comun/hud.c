@@ -125,7 +125,7 @@ void hud_dibuja(const hud_estado_t *e)
     dibuja("RUTA5_ACTUAL", 0, e->etapa, (e->cuadro & 32) ? 1.0f : 0.4f);
     zcapa = 40.0f;
     /* capa 4: REV (solo con cambio manual) */
-    if (e->manual) { dibuja("REV_TEXTO", 0, 0, 1); dibuja("REV_LUZ", 0, 0, 1); if (e->rev_on) dibuja("REV_ON", 0, 0, (e->cuadro & 4) ? 1.0f : 0.6f); }
+    if (e->manual) { dibuja("REV_TEXTO", 0, 0, 1); dibuja("REV_LUZ", 0, 0, 1); if (e->rev_on && (e->cuadro & 8)) dibuja("REV_ON", 0, 0, 1); }
     zcapa = 50.0f;
     /* capa 5: unidades y rebufo */
     dibuja("KMH", e->rebufo, 0, 1);
@@ -144,4 +144,13 @@ void hud_dibuja(const hud_estado_t *e)
     sprintf(b, "%07d", e->puntos % 10000000); numero("PUNTOS", e->derrape, b, -9999);
     t = e->kmh < 0 ? 0 : e->kmh > 999 ? 999 : e->kmh;
     sprintf(b, "%03d", t); numero("VELOCIDAD", e->rebufo, b, -9999);
+}
+
+/* avisos animados (cuenta atras, GOAL, EXTEND TIME...): llamar despues de hud_dibuja; dibuja el cuadro dado del uso */
+void hud_aviso(const char *nombre, int cuadro, float alfa)
+{
+    if (!dat) return;
+    if (zcapa < 100.0f) zcapa = 100.0f;
+    ult_tex = -1;
+    dibuja(nombre, 0, cuadro, alfa);
 }

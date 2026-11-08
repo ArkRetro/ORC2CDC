@@ -1,8 +1,18 @@
 """HUD de carrera (modo OutRun) de OutRun 2006 Coast 2 Coast (PS2) -> HUD.DAT para la Dreamcast.
 
-Uso: python3 conv_hud.py <iso> <dir_salida> [dir_previas]
+Uso: python3 conv_hud.py <iso> <dir_salida> [dir_previas] [dir_previas_avisos]
 Escribe <dir_salida>/HUD.DAT y, en dir_previas (por defecto el directorio de salida), PNG de las texturas con
-los rectangulos de los sprites y una maqueta del HUD completo a 640x480.
+los rectangulos de los sprites y una maqueta del HUD completo a 640x480; en dir_previas_avisos (por defecto
+dir_previas) una tira por grupo de aviso (aviso_*.png), la hoja de todos (avisos_hoja.png) y los atlas.
+
+Avisos (grupos y usos anadidos al final, mismo formato; ver avisos()): cuadro = cuadros de 60 Hz desde que empieza
+el aviso (los de "paso 5" avanzan un cuadro cada 5):
+ CUENTA (4 cuadros quietos: 3, 2, 1, GO) y CUENTA_PRE/_3/_2/_1/_GO (60 cuadros cada uno, escena 2C000A de 300
+   cuadros cortada por segundos: t = 0..299 -> grupo t/60, cuadro t%60); META (GOAL, 60 cuadros, despues el 59;
+   uso en (0,-130)); TIEMPO_EXT (EXTEND TIME, 48 cuadros de paso 5 = 240); BIFURCA ("<- EASY", bucle de 60);
+   FIN_TIEMPO (TIME OVER, 48: 0..39 entrada, luego bucle 40..47); CAMBIA ("Shift up!!", bucle de 30, si cabe en
+   el limite de 350 KB de texturas nuevas; GAME_OVER igual); REV_ON (piloto REV encendido, 1 cuadro, parpadea
+   con el bit 3 del contador de cuadros). Sus texturas son atlas recortados al alfa (clase Atlas).
 
 Origen de los datos (todo se lee del disco al convertir):
  - SPRANI.PS2: animaciones 2D "SPRANI" (tipo After Effects). El paquete esta en orden alfabetico (sin distinguir
@@ -106,6 +116,23 @@ class Disco:
         o = va - 0x328700 + 0x228780
         return struct.unpack_from('<%dI' % n, self.elf, o)
 
+def desordena_xst(datos, psm, w, h, bw_sub):
+    """como gs.desordena, pero el rectangulo PSMCT32/PSMCT16 se sube con su propio ancho de bufer bw_sub (palabra 2
+    de la cabecera XST / 64 = la mitad del de PSMT8/PSMT4): con el mismo ancho que la lectura (lo que hace
+    gs.desordena) se perdian las filas desde la 64 (PSMT8) o la 128 (PSMT4) de las texturas de mas de una pagina."""
+    wu, hu = w // 2, h // 2
+    bw = max(2, (w + 63) // 64); bw += bw & 1
+    mem = np.zeros(bw * 64 * (h + 128) * 4, np.uint8)
+    y, x = np.mgrid[0:hu, 0:wu]
+    if psm == 0x13:
+        mem.view(np.uint32)[gs.dir32(x, y, bw_sub)] = np.frombuffer(datos[:wu * hu * 4], '<u4').reshape(hu, wu)
+        y, x = np.mgrid[0:h, 0:w]
+        return mem[gs.dir8(x, y, bw)]
+    mem.view(np.uint16)[gs.dir16(x, y, bw_sub)] = np.frombuffer(datos[:wu * hu * 2], '<u2').reshape(hu, wu)
+    y, x = np.mgrid[0:h, 0:w]
+    a = gs.dir4(x, y, bw)
+    return (mem[a >> 1] >> ((a & 1) * 4)) & 15
+
 def texturas(d):
     """texturas RGBA (alfa 0-255) de un XST"""
     H = d[4:]; meta, nt = struct.unpack_from('<II', H, 4); P = meta; res = []
@@ -116,13 +143,14 @@ def texturas(d):
         lleno = W * Ht * {0: 32, 0x13: 8, 0x14: 4}[psm] // 8
         raw = lz(H[dd:], h[3] * 16) if h[11] & 0x8000 else H[dd:dd + h[3] * 16]
         raw = raw + bytes(lleno - len(raw))                     # lo no subido queda a cero
+        bws = max(1, h[2] // 64)                                # ancho (pixeles) del rectangulo subido / 64
         if psm == 0: a = np.frombuffer(raw, 'u1').reshape(Ht, W, 4).copy()
         elif psm == 0x13:
             pal = np.frombuffer(H[P + h[1]:P + h[1] + 1024], 'u1').reshape(256, 4)
-            a = pal[tex._SW[gs.desordena(raw, 0x13, W, Ht)]]
+            a = pal[tex._SW[desordena_xst(raw, 0x13, W, Ht, bws)]]
         else:
             pal = np.frombuffer(H[P + h[1]:P + h[1] + 96], 'u1').reshape(24, 4)
-            a = pal[list(range(8)) + list(range(16, 24))][gs.desordena(raw, 0x14, W, Ht)]
+            a = pal[list(range(8)) + list(range(16, 24))][desordena_xst(raw, 0x14, W, Ht, bws)]
         a = a.copy(); a[..., 3] = np.minimum(255, a[..., 3].astype(np.int32) * 2)
         res.append(a)
     return res
@@ -196,6 +224,147 @@ def escena(a, k, f=0.0):
     return out
 
 # ---------------------------------------------------------------- conversion
+class Atlas:
+    """texturas nuevas de los avisos: cada rectangulo de textura usado se recorta a su alfa (con 1 pixel de margen) y
+    se empaqueta en texturas potencia de 2 (estantes), para no subir texturas de 256x256 enteras a la PowerVR"""
+    def __init__(s): s.reg = {}; s.donde = {}
+    @staticmethod
+    def _clave(banco, p): return (banco, p['tex'], tuple(round(v, 3) for v in p['src']))
+    def registra(s, banco, texs, p):
+        k = s._clave(banco, p)
+        if k in s.reg: return
+        a = texs[p['tex']]; l, t, r, b = p['src']
+        L, T = max(0, int(np.floor(l))), max(0, int(np.floor(t)))
+        R, B = min(a.shape[1], int(np.ceil(r))), min(a.shape[0], int(np.ceil(b)))
+        al = a[T:B, L:R, 3] > 3
+        if al.any():
+            ys, xs = np.nonzero(al)
+            L, R, T, B = max(L, L + xs.min() - 1), min(R, L + xs.max() + 2), max(T, T + ys.min() - 1), min(B, T + ys.max() + 2)
+        else: R, B = L + 1, T + 1
+        s.reg[k] = (a, (L, T, R, B))
+    def plan(s, claves, margen=2):
+        """[(ancho, alto, {clave: (x, y)})] de las texturas necesarias para las claves: el mejor de varios ordenes"""
+        dim = lambda k: (s.reg[k][1][2] - s.reg[k][1][0], s.reg[k][1][3] - s.reg[k][1][1])
+        ordenes = (lambda k: (-dim(k)[1], k), lambda k: (-dim(k)[0], k), lambda k: (-dim(k)[0] * dim(k)[1], k),
+                   lambda k: (-max(dim(k)), k))
+        return min((s._plan(sorted(set(claves), key=o), margen, dim) for o in ordenes), key=lambda pl: (s.bytes_plan(pl), len(pl)))
+    def _plan(s, pend, margen, dim):
+        res = []
+        def coloca(W, H, ks):
+            """horizonte (skyline) abajo-izquierda: cada rectangulo donde su borde superior quede mas bajo"""
+            sky = [[0, 0, W]]; pos = {}; resto = []
+            for k in ks:
+                L, T, R, B = s.reg[k][1]; w, h = R - L + margen, B - T + margen
+                mejor = None
+                for i in range(len(sky)):
+                    x = sky[i][0]
+                    if x + w > W: break
+                    y = 0; j = i; anc = 0
+                    while anc < w: y = max(y, sky[j][1]); anc += sky[j][2]; j += 1
+                    if y + h <= H + margen and (mejor is None or (y + h, x) < (mejor[0] + h, mejor[1])): mejor = (y, x)
+                if mejor is None: resto.append(k); continue
+                y, x = mejor; pos[k] = (x, y)
+                nuevo = []; fin = x + w
+                for sx, sy, sw in sky:
+                    if sx + sw <= x or sx >= fin: nuevo.append([sx, sy, sw]); continue
+                    if sx < x: nuevo.append([sx, sy, x - sx])
+                    if sx + sw > fin: nuevo.append([fin, sy, sx + sw - fin])
+                nuevo.append([x, y + h, w]); nuevo.sort(); sky = []
+                for seg in nuevo:
+                    if sky and sky[-1][1] == seg[1] and sky[-1][0] + sky[-1][2] == seg[0]: sky[-1][2] += seg[2]
+                    else: sky.append(seg)
+            return pos, resto
+        tam = sorted(((1 << i, 1 << j) for i in range(5, 10) for j in range(5, 10) if i + j <= 17), key=lambda v: (v[0] * v[1], v))
+        while pend:
+            for W, H in tam:
+                pos, resto = coloca(W, H, pend)
+                if not resto: break
+            else:
+                # no cabe en una: se llena la de 512x256 o 256x512 que mas aproveche
+                W, H, pos, resto = max(((W, H) + coloca(W, H, pend) for W, H in ((512, 256), (256, 512))),
+                                       key=lambda v: sum(dim(k)[0] * dim(k)[1] for k in v[2]))
+            res.append((W, H, pos)); pend = resto
+        return res
+    @staticmethod
+    def bytes_plan(pl): return sum(W * H * 2 for W, H, _ in pl)
+    def empaqueta(s, hud, pl):
+        s.texs = [(W, H) for W, H, _ in pl]; s.bytes = s.bytes_plan(pl)
+        for i, (W, H, pos) in enumerate(pl):
+            img = np.zeros((H, W, 4), np.uint8)
+            ti = hud.textura(('atlas', i), img)
+            for k, (x, y) in pos.items():
+                a, (L, T, R, B) = s.reg[k]; img[y:y + B - T, x:x + R - L] = a[T:B, L:R]; s.donde[k] = (ti, x - L, y - T)
+    def busca(s, banco, p):
+        k = s._clave(banco, p); ti, ox, oy = s.donde[k]; L, T, R, B = s.reg[k][1]
+        l, t, r, b = p['src']; kx, ky = p['w'] / (r - l), p['h'] / (b - t)
+        sl, st, sr, sb = max(l, L), max(t, T), min(r, R), min(b, B)
+        return (ti, (sl + ox, st + oy, sr + ox, sb + oy), int(round((sr - sl) * kx)), int(round((sb - st) * ky)),
+                (sl - l) * kx, (st - t) * ky)
+
+def avisos(hud, D, a, T):
+    """avisos de carrera (grupos y usos nuevos, al final de los existentes). Tokens y parametros del codigo MIPS:
+    cuenta atras 2C000A: guion de salida en .data 0x36D3A4/0x36D744/0x36DBEC {token, capa 4, modo 3};
+    GOAL 2C0009: 0x19E7B4 crea (capa 2, modo 1, cuadros 0..90) con traslacion (0, -130);
+    TIME OVER 2C000C: 0x19F3AC / 0x19F3C4 (capa 0, modo 1); GAME OVER 2C000B: 0x1A0538 (capa 0, modo 1);
+    EXTEND TIME 2C00AC: 0x1BEC94 (temporizador 0x5A3A0E == 180: capa 6, modo 3, cuadros 0..240) y 0x231484;
+    bifurcacion "<- EASY" 2B0000: 0x1C5130 / 0x1C51C0 (capa 0, modo 0 = bucle) con el avance car+0x102C entre
+    0.65 y 0.72 (tramo 0) / 0.70 y 0.75 (tramo 1) (4BB890 del PC); aviso de marcha: 0x1BE20C dibuja el grupo 2 de
+    spr_etc (banco 3) en (40, 18) con prioridad 5 si (cuadro & 8) y rpm (car+0x48) > 7900 y marcha < maxima (4B9010 del
+    PC); "Shift up!!" 2C009A: 0x1C07B0 (capa 4, modo 0) si el cambio es manual y car+0xE80 (4BA070 del PC)."""
+    ag, Tg, _ = D.banco(0x2b)
+    etc = D._ent(D.p_spr, D.n_spr.index('spr_etc_xst.sz')); Te = texturas(etc)
+    at = Atlas(); grupos = []          # (nombre, [(cuadro, banco, texs, piezas)])
+
+    def anim(nombre, banco, A, Tx, k, fotos):
+        lst = [(i, banco, Tx, escena(A, k, float(f))) for i, f in enumerate(fotos)]
+        grupos.append((nombre, len(fotos), lst))
+    tok = lambda t: t & 0xffff
+    # cuenta atras: 300 cuadros; '3' entra 50..59, quieto 59..99, sale 100..119 (el siguiente entra a la vez)
+    anim('CUENTA', 0x2c, a, T, tok(0x2c000a), [90, 150, 210, 270])
+    for n, f0 in (('CUENTA_PRE', 0), ('CUENTA_3', 60), ('CUENTA_2', 120), ('CUENTA_1', 180), ('CUENTA_GO', 240)):
+        anim(n, 0x2c, a, T, tok(0x2c000a), range(f0, f0 + 60))
+    anim('META', 0x2c, a, T, tok(0x2c0009), range(60))              # 0..59 anima; 60..90 = cuadro 59
+    anim('TIEMPO_EXT', 0x2c, a, T, tok(0x2c00ac), range(0, 240, 5)) # parpadeo: 0-29, 60-89, 120-239
+    anim('BIFURCA', 0x2b, ag, Tg, 0, range(60))                     # bucle de 60
+    anim('FIN_TIEMPO', 0x2c, a, T, tok(0x2c000c), range(48))        # 0..39 entra; 40..47 bucle (estrella 2.5/cuadro, 18 rayos)
+    anim('GAME_OVER', 0x2c, a, T, tok(0x2c000b), range(0, 300, 5))
+    anim('CAMBIA', 0x2c, a, T, tok(0x2c009a), range(30))            # "Shift up!!" bucle de 30
+    # REV encendido: grupo 2 de spr_etc = imagen 0 (resplandor rojo 64x64) en (94, 283) + (40, 18)
+    ng, pg = struct.unpack_from('<2I', etc, 4 + 0x10)
+    n, pi = struct.unpack_from('<2I', etc, 4 + pg + 8 * 2); piezas = []
+    for j in range(n):
+        im, dx, dy = struct.unpack_from('<I2h', etc, 4 + pi + 16 * j)
+        t, l, tp, r, b = imagen_xst(etc, im)
+        piezas.append(dict(tex=t, src=(l, tp, r, b), w=int(r - l), h=int(b - tp), M=_t(dx + 40, dy + 18), alfa=1.0,
+                           anc=(0.0, 0.0), gira=False))
+    grupos.append(('REV_ON', 1, [(0, 3, Te, piezas)]))
+    claves = {}
+    for nombre, _, lst in grupos:
+        claves[nombre] = []
+        for _, banco, Tx, ps in lst:
+            for p in ps:
+                if p['alfa'] >= 0.004 and abs(np.linalg.det(p['M'][:2, :2])) >= 1e-6:
+                    at.registra(banco, Tx, p); claves[nombre].append(at._clave(banco, p))
+    # memoria de video: los pedidos siempre; los opcionales solo si el total sigue <= 350 KB
+    opcionales = ('GAME_OVER', 'CAMBIA')
+    usar = [g[0] for g in grupos if g[0] not in opcionales]
+    pl = at.plan(sum((claves[n] for n in usar), []))
+    for n in opcionales:
+        p2 = at.plan(sum((claves[m] for m in usar + [n]), []))
+        if at.bytes_plan(p2) <= 350 * 1024: usar.append(n); pl = p2
+    grupos = [g for g in grupos if g[0] in usar]
+    at.empaqueta(hud, pl)
+    gi = {}
+    for nombre, nf, lst in grupos:
+        g = hud.grupo(nombre, nf); gi[nombre] = g
+        for c, banco, Tx, ps in lst: hud.piezas_escena(g, c, banco, Tx, ps, atlas=at)
+    for nombre, x, y, capa in (('CUENTA', 0, 0, 4), ('CUENTA_PRE', 0, 0, 4), ('CUENTA_3', 0, 0, 4),
+                               ('CUENTA_2', 0, 0, 4), ('CUENTA_1', 0, 0, 4), ('CUENTA_GO', 0, 0, 4),
+                               ('META', 0, -130, 2), ('TIEMPO_EXT', 0, 0, 6), ('BIFURCA', 0, 0, 0),
+                               ('FIN_TIEMPO', 0, 0, 0), ('GAME_OVER', 0, 0, 0), ('CAMBIA', 0, 0, 4), ('REV_ON', 0, 0, 5)):
+        if nombre in gi: hud.uso(nombre, gi[nombre], x, y, capa=capa)
+    return at
+
 class Hud:
     def __init__(s):
         s.tex = []; s.texkey = {}; s.spr = []; s.sprkey = {}; s.grp = []; s.pie = []; s.lay = []
@@ -212,11 +381,20 @@ class Hud:
     def grupo(s, nombre, nframes=1, paso=0.0):
         s.grp.append(dict(nombre=nombre, n=nframes, pri=len(s.pie), paso=paso)); return len(s.grp) - 1
 
-    def piezas_escena(s, g, cuadro, banco, texs, piezas, cero_gira=None):
+    def piezas_escena(s, g, cuadro, banco, texs, piezas, cero_gira=None, atlas=None):
         for p in piezas:
+            M = p['M']; ax, ay = p['anc']
+            if atlas is not None:                               # avisos: atlas recortado y sin piezas invisibles
+                if p['alfa'] < 0.004 or abs(np.linalg.det(M[:2, :2])) < 1e-6: continue
+                ti, rect, w, h, dx, dy = atlas.busca(banco, p)  # sprite recortado: su (0,0) es el (dx,dy) original
+                si = s.sprite(ti, rect, w, h)
+                x, y = (np.array([ax, ay, 1.0]) @ M)[:2]
+                ang = np.degrees(np.arctan2(M[0, 1], M[0, 0]))
+                sx, sy = np.hypot(M[0, 0], M[0, 1]), np.hypot(M[1, 0], M[1, 1])
+                s.pie.append((g, cuadro, si, 0, x, y, ax - dx, ay - dy, ang, sx, sy, p['alfa']))
+                continue
             ti = s.textura((banco, p['tex']), texs[p['tex']])
             si = s.sprite(ti, p['src'], p['w'], p['h'])
-            M = p['M']; ax, ay = p['anc']
             x, y = (np.array([ax, ay, 1.0]) @ M)[:2]
             ang = np.degrees(np.arctan2(M[0, 1], M[0, 0]))
             sx, sy = np.hypot(M[0, 0], M[0, 1]), np.hypot(M[1, 0], M[1, 1])
@@ -262,7 +440,7 @@ class Hud:
         open(ruta, 'wb').write(out)
         return texs
 
-def convierte(iso, salida, previas):
+def convierte(iso, salida, previas, previas_av=None):
     D = Disco(iso); hud = Hud()
     a, T, xst = D.banco(0x2c)
     # tabla de fuentes de digitos (16 bytes: token o -1, avance, f32 dx, dy) y de marchas
@@ -322,9 +500,14 @@ def convierte(iso, salida, previas):
             hud.uso(nombre[:15], g, -219, 127, capa=2); bancos.append(b); hud.taco_g = getattr(hud, 'taco_g', {})
             hud.taco_g[b] = g
         hud.taco[i] = hud.taco_g[b]
+    ng0 = len(hud.grp); nt0 = len(hud.tex)
+    at = avisos(hud, D, a, T)
     os.makedirs(salida, exist_ok=True)
     texs = hud.escribe(os.path.join(salida, 'HUD.DAT'))
     previews(hud, previas)
+    previas_avisos(hud, ng0, previas_av or previas)
+    print('avisos: %d grupos nuevos, %d texturas nuevas %s, %d bytes' % (len(hud.grp) - ng0, len(hud.tex) - nt0,
+          at.texs, sum(len(t[4]) for t in texs[nt0:])))
     return hud, texs
 
 # ---------------------------------------------------------------- previas
@@ -377,8 +560,33 @@ def previews(hud, d):
     for _, f in sorted(orden, key=lambda x: x[0]): f()
     img.save(os.path.join(d, 'maqueta_hud.png'))
 
+def previas_avisos(hud, g0, d):
+    """hoja por grupo nuevo: hasta 12 cuadros repartidos, a media escala, con el uso aplicado"""
+    from PIL import Image, ImageDraw
+    os.makedirs(d, exist_ok=True); U = {u[1]: u for u in hud.lay}; filas = []
+    for g in range(g0, len(hud.grp)):
+        G = hud.grp[g]; u = U[g]; n = G['n']; cs = sorted(set(int(round(i * (n - 1) / 11)) for i in range(12))) if n > 1 else [0]
+        fila = Image.new('RGBA', (12 * 320, 262), (0, 0, 0, 255)); dr = ImageDraw.Draw(fila)
+        for j, c in enumerate(cs):
+            img = Image.new('RGBA', (640, 480), (52, 70, 110, 255))
+            ImageDraw.Draw(img).rectangle((0, 300, 639, 479), fill=(80, 80, 88, 255))
+            dibuja_grupo(img, hud, g, c, u[3], u[4])
+            fila.paste(img.resize((320, 240)), (j * 320, 22))
+            dr.text((j * 320 + 4, 24), 'cuadro %d' % c, fill=(255, 255, 0, 255))
+        dr.text((4, 4), '%s  (grupo %d, %d cuadros, uso (%d,%d) capa %d)' % (G['nombre'], g, n, u[3], u[4], u[6]),
+                fill=(255, 255, 255, 255))
+        fila.save(os.path.join(d, 'aviso_%s.png' % G['nombre'].lower())); filas.append(fila)
+    hoja = Image.new('RGBA', (12 * 320, 262 * len(filas)))
+    for i, f in enumerate(filas): hoja.paste(f, (0, 262 * i))
+    hoja.save(os.path.join(d, 'avisos_hoja.png'))
+    for ti in range(len(hud.tex)):
+        if hud.texkey.get(('atlas', 0)) is not None and ti >= hud.texkey[('atlas', 0)]:
+            a = hud.tex[ti]; im = Image.new('RGBA', (a.shape[1], a.shape[0]), (48, 48, 64, 255))
+            im.alpha_composite(Image.fromarray(a)); im.save(os.path.join(d, 'atlas_%02d.png' % ti))
+
 if __name__ == '__main__':
     if len(sys.argv) < 3: sys.exit(__doc__)
-    hud, texs = convierte(sys.argv[1], sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else sys.argv[2])
+    hud, texs = convierte(sys.argv[1], sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else sys.argv[2],
+                          sys.argv[4] if len(sys.argv) > 4 else None)
     print('%d texturas (%d bytes), %d sprites, %d grupos, %d piezas, %d usos' % (
         len(texs), sum(len(t[4]) for t in texs), len(hud.spr), len(hud.grp), len(hud.pie), len(hud.lay)))

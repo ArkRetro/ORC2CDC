@@ -14,6 +14,7 @@
 #include "../comun/musica.h"
 #include "../comun/or2_fisica.h"
 #include "../comun/hud.h"
+#include "../comun/sfx.h"
 
 /* ---------------------------------------------------------------- modelos */
 typedef struct { uint32_t w, h, fmt, lista, off, tam; } tex_t;
@@ -265,7 +266,7 @@ static coche_t yo;
 #ifndef ACEL
 #define ACEL 1.35f                                              /* multiplicador del par motor */
 #endif
-static int manual_, pide_cambio, auto_piloto;
+static int manual_, pide_cambio, auto_piloto, sfx_ok, golpe_cd;
 static or2_param_t fpar; static or2_coche_t fis; static int fis_ok;
 static int fisica_carga(void)
 {
@@ -402,6 +403,7 @@ static void traf_paso(float dt)
         if (fabsf(yo.s - t->c.s) < l && fabsf(yo.x - t->c.x) < 1.9f) {
             if (yo.s < t->c.s) { yo.s = t->c.s - l; if (yo.v > t->c.v) yo.v = fmaxf(t->c.v, yo.v * 0.82f); }   /* pierde poco */
             else { yo.s = t->c.s + l; }
+            if (sfx_ok && !golpe_cd) { golpe_cd = 20; sfx_golpe(fminf(0.4f + fabsf(yo.v - t->c.v) / 25.0f, 1.0f)); }
             yo.x += yo.x > t->c.x ? 0.6f : -0.6f; yo.a *= -0.3f; yo.choque = 2;
             if (fis_ok) { float p[3], th; ruta_en(yo.s, p, &th, NULL, NULL); fis_empuja(th + yo.a, yo.v); }
             coche_coloca(&yo);
@@ -445,6 +447,7 @@ static void coche_paso(coche_t *c, float giro, float gas, float freno, float dt)
             if (c->x > lim) { c->x = lim; if (c->a > 0) c->a = -c->a * 0.4f; toca = 1; }
             if (toca) {                                          /* muro: recoloca el modelo con lo que queda */
                 c->choque = 1; c->v -= c->v * (antes ? 0.05f * dt : 0.15f); c->t_muro = 30;
+                if (!antes && sfx_ok && !golpe_cd) { golpe_cd = 20; sfx_golpe(fminf(c->v / 40.0f, 1.0f)); }
                 fis_empuja(th1 + c->a, c->v); c->deriva = 0;
             }
         }
@@ -678,6 +681,7 @@ enum { TITULO, CUENTA, CARRERA, META, AGOTADO };
 #define PERIODO 16683                                           /* us por paso de logica (59,94 Hz) */
 /* bifurcacion al final de la primera etapa: rama izquierda y derecha */
 static const char *RAMA_FICH[2] = { "SEG07.DAT", "SEG03.DAT" }, *RAMA_NOMBRE[2] = { "BOSQUE", "INDUSTRIA" };
+static int t_cuenta = 9999, t_ext = 9999, t_bif;
 static int etapa_n, hud_ok, crono, puntos; static float puntos_f, vmax;
 static void texto_arriba(const char *l1, const char *l2, const char *l3);
 /* panel de resultados al terminar (meta o tiempo agotado) */
@@ -742,6 +746,7 @@ int main(int argc, char **argv)
     coche_paso(&yo, 0, 0, 0, 0);
     t_carga = (timer_ms_gettime64() - t_ini) / 1000.0f;
     musica_inicia(); musica_pon(pista);
+    sfx_ok = !sfx_inicia();
     texto_arriba("", NULL, NULL); texto_centro("PULSA START");
     t0 = timer_ms_gettime64();
 
@@ -787,6 +792,10 @@ int main(int argc, char **argv)
         /* estados (una vez por paso de logica) */
         for (paso = 0; paso < pasos; paso++) {
         if (paso) { nuevo = 0; t_estado++; }
+        if (t_cuenta < 9999) t_cuenta++;
+        if (t_ext < 9999) t_ext++;
+        if (golpe_cd) golpe_cd--;
+        t_bif++;
         if (estado == TITULO) {
             ttit += 1.0f / 60;
             if (nuevo & (CONT_DPAD_LEFT | CONT_DPAD_RIGHT)) {   /* elegir la musica, como la radio del original */
@@ -804,13 +813,13 @@ int main(int argc, char **argv)
                 }
                 memset(&yo, 0, sizeof yo); yo.s = SALIDA; yo.x = carril_x(SALIDA, 4); coche_paso(&yo, 0, 0, 0, 0); traf_inicia(SALIDA); efectos_borra();
                 if (fis_ok) { float p[3], th; ruta_en(yo.s, p, &th, NULL, NULL); or2_coloca(&fis, &fpar, th, 0); }
-                tiempo = TIEMPO_ETAPA; estado = CUENTA; t_estado = 0; pausa = 0; crono = 0; puntos = 0; puntos_f = 0; vmax = 0;
+                tiempo = TIEMPO_ETAPA; estado = CUENTA; t_estado = 0; t_cuenta = 0; pausa = 0; crono = 0; puntos = 0; puntos_f = 0; vmax = 0;
             }
         } else if (estado == CUENTA) {
             int n = 3 - (int)(t_estado / 60);
             sprintf(s1, n > 0 ? "%d" : "GO!", n);
             if (strcmp(s1, msg)) { strcpy(msg, s1); texto_centro(msg); }
-            if (t_estado >= 180) { estado = CARRERA; t_estado = 0; }
+            if (t_estado >= 240) { estado = CARRERA; t_estado = 0; }      /* GO! a los 4 s de la escena */
             if (auto_ && (nuevo & CONT_START)) { estado = TITULO; ttit = -30; texto_centro("PULSA START"); }
             coche_paso(&yo, 0, 0, 0, 1.0f / 60);
         } else if (estado == CARRERA) {
@@ -845,7 +854,7 @@ int main(int argc, char **argv)
                     t_carga = (timer_ms_gettime64() - tc) / 1000.0f;
                     memset(&yo, 0, sizeof yo); yo.s = 40.0f; yo.x = carril_x(40.0f, 4); yo.v = v; coche_paso(&yo, 0, 0, 0, 0);
                     if (fis_ok) { float p[3], th; ruta_en(yo.s, p, &th, NULL, NULL); or2_coloca(&fis, &fpar, th, v); }
-                    traf_inicia(yo.s); efectos_borra(); tiempo += 60.0f; aviso_rama = 0;
+                    traf_inicia(yo.s); efectos_borra(); tiempo += 60.0f; aviso_rama = 0; t_ext = 0;
                     sprintf(msg, "%s  +60", RAMA_NOMBRE[rama]); texto_centro(msg); t_estado = 0;
                 }
                 else if (yo.s >= longitud - 40.0f) { estado = META; t_estado = 0; texto_centro("GOAL!"); resultados(1); }
@@ -875,6 +884,15 @@ int main(int argc, char **argv)
             cam_y += (yo.pos[1] - cam_y) * 0.15f;
             ojo_[0] = yo.pos[0] - 6.5f * cam_fw[0]; ojo_[1] = cam_y + 2.4f; ojo_[2] = yo.pos[2] - 6.5f * cam_fw[2];
             mira[0] = yo.pos[0] + 6.0f * cam_fw[0]; mira[1] = cam_y + 1.1f; mira[2] = yo.pos[2] + 6.0f * cam_fw[2];
+        }
+
+        /* efectos de sonido del coche (una vez por cuadro) */
+        if (sfx_ok) {
+            if (estado == TITULO || pausa || !fis_ok) sfx_para();
+            else {
+                sfx_motor((float)fis.rpm_i, fis.ac_motor / 256.0f, fis.marcha);
+                sfx_derrape(yo.t_derrape ? fminf(fabsf(fis.desliz_grados) / 30.0f, 1.0f) : 0.0f);
+            }
         }
 
         /* marcador (cada 6 cuadros) */
@@ -932,8 +950,17 @@ int main(int argc, char **argv)
                     he.tiempo = (int)ceilf(tiempo); he.crono_ms = (int)(crono * 1000.0f / 60.0f); he.puntos = puntos;
                     he.kmh = fis_ok ? (int)fis.velocidad_hud : (int)(yo.v * 3.6f); he.marcha = fis_ok ? fis.marcha : 1;
                     he.etapa = etapa_n; he.cuadro = cuadro; he.rpm = fis_ok ? (float)fis.rpm_suave : 0;
-                    he.rebufo = 0; he.derrape = yo.t_derrape != 0; he.manual = manual_ && !auto_; he.rev_on = he.manual && fis_ok && fis.w_motor > fpar.w_corte * 0.93f; he.seis = fis_ok && fpar.marchas >= 6;
+                    he.rebufo = 0; he.derrape = yo.t_derrape != 0; he.manual = manual_ && !auto_; he.rev_on = he.manual && fis_ok && fis.rpm_i > 7900 && fis.marcha < fpar.marchas; he.seis = fis_ok && fpar.marchas >= 6;
                     hud_dibuja(&he);
+                    if (t_cuenta < 300) {                       /* 3, 2, 1, GO! (la escena dura 5 s; GO a los 4) */
+                        static const char *const CU[5] = { "CUENTA_PRE", "CUENTA_3", "CUENTA_2", "CUENTA_1", "CUENTA_GO" };
+                        hud_aviso(CU[t_cuenta / 60], t_cuenta % 60, 1);
+                    }
+                    if (estado == CARRERA && aviso_rama) hud_aviso("BIFURCA", t_bif % 60, 1);
+                    if (t_ext < 240) hud_aviso("TIEMPO_EXT", t_ext / 5, 1);
+                    if (estado == META) hud_aviso("META", t_estado < 59 ? t_estado : 59, 1);
+                    if (estado == AGOTADO) hud_aviso("FIN_TIEMPO", t_estado < 40 ? t_estado : 40 + (t_estado - 40) % 8, 1);
+                    if (he.rev_on) hud_aviso("CAMBIA", cuadro % 30, 1);
                 }
                 if (estado == META || estado == AGOTADO) {      /* resultados y fundido a negro al final */
                     caja(64, 150, 512, 110, 0xA0000000);
@@ -943,7 +970,7 @@ int main(int argc, char **argv)
                 }
                 if (texto) caja(36, 18, 568, ver ? 92 : 34, 0x90000000);
                 if (texto) rect_txr(txt_arr, 512, 128, 40, 20, 512, 128, PVR_LIST_TR_POLY);
-                if (estado != CARRERA || t_estado < 50 || auto_ || aviso_rama) rect_txr(txt_cen, 256, 32, 64, 180, 512, 64, PVR_LIST_TR_POLY);
+                if (!hud_ok ? (estado != CARRERA || t_estado < 50 || auto_ || aviso_rama) : (estado == TITULO || (estado == CARRERA && auto_ && t_estado >= 50))) rect_txr(txt_cen, 256, 32, 64, 180, 512, 64, PVR_LIST_TR_POLY);
             }
             pvr_list_finish();
         }
