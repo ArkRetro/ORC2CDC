@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
-"""conv_trafico.py tu.iso carpeta [--solo-tablas]: los coches del trafico (CARS.PS2, entrada 0: unos 17 registros por
-coche: carroceria, luces, sombra, dos ruedas en su origen y, 8 registros despues, la carroceria ligera) a TRAFn.DAT
-(formato ORD6, modelo.py): la carroceria ligera con las ruedas en sus cuatro sitios y solo las texturas que usa.
+"""conv_trafico.py tu.iso carpeta [--solo-tablas]: los coches del trafico (CARS.PS2, \\CARS\\obj_othcar_pmt.sz y la
+sombra de \\COMMON\\obj_vshadow_pmt.sz) a TRAFn.DAT (formato de modelo.py) montados como el original los dibuja de
+cerca (llamadas: 4AE0F0 / 4ADBC0 del PC con el LOD 0 del registro de 4866C0): carroceria, sombra (subida 0,1 m) y las
+cuatro ruedas de su descriptor (las del otro lado giradas pi en y), parado y sin luces; solo las texturas que usa.
+Antes se usaba la carroceria del LOD 2 (que ya trae las ruedas) con otras cuatro ruedas puestas a ojo (inventado:
+ruedas dobles).
 Materiales del original (tabla 4 y 5 del registro, como conv_coche.py): las mallas sin textura con su difuso por la luz
 (+ emision); los cristales (sin UV, capa 1 = mapa de entorno esferico del bloque) con UV de entorno fijas por la normal
 del modelo vista desde detras (como las calcularia la demo con la camara alineada con el coche; el trafico no las
@@ -25,7 +28,6 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ps2 import iso as isomod, stage, vif
 import modelo
 
-COCHES = [1, 52, 69, 103, 35, 120, 86, 136, 18]        # utilitario, berlinas, autocaravana, autobus...
 # modelo del juego (car+0x11, 30..43 = trafico) de cada uno: las texturas de su carroceria son las claves de la lista
 # de colores de ese modelo (tabla_colores; antes se emparejaban por medidas y 69 / 136 iban al reves)
 MODELOS = [30, 32, 33, 35, 38, 36, 34, 37, 31]

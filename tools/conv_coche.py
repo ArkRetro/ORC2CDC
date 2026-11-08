@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""conv_coche.py: coches del jugador de CARS.PS2 al formato de modelo de la Dreamcast (modelo.py, ORD6 con VQ).
+"""conv_coche.py: coches del jugador de CARS.PS2 al formato de modelo de la Dreamcast (modelo.py, con VQ).
 
 Uso:
   conv_coche.py <iso> --todos <dir> [--fichas 0,9,..] [--tope 11000] [--vista dir]
@@ -7,42 +7,47 @@ Uso:
       ficha, 0xFF si no esta; lo lee demo/main.c)
   conv_coche.py <iso> --modelo m <salida.dat> [--tope n] [--vista dir]   un modelo (byte car+0x11)
 
-Montaje (todo se lee del disco al convertir; aqui no hay datos del juego):
+Montaje (todo se lee del disco al convertir; aqui no hay datos del juego): el de 46A560 (el coche en la seleccion; en
+carrera 46AE70 / 469600 hacen lo mismo) portado tal cual en llamadas(): pila de matrices del PC (Pila), piezas en su
+orden y con su matriz. Comprobado contra un port independiente de vehicle_model_draw.cpp: mismas piezas y matrices en
+los 15 coches, en reposo, con freno y con luces.
  - Tabla de disposiciones por modelo del ELF (30 punteros consecutivos a registros de 0x128 bytes; en el PC 5B2F68 ->
-   5B0CB8, la usan 46AE70 / 46A560 para dibujar el coche en carrera y en la seleccion). Se localiza por firma: 30
-   punteros seguidos con paso 0x128. Cada pieza es un id `recurso << 16 | registro del bloque`; el recurso es el
-   indice de la tabla de ficheros del ELF (punteros a cadenas; la 0 es \\COMMON\\obj_common_pmt.sz), y de ahi el
-   nombre de la entrada de CARS.PS2. Campos que se usan (desplazamiento en el registro):
-     +00 carroceria; +14 pieza extra (o -1);
-     +18 pieza en +1C (palanca, o el aleron del modelo 5) sin giro;
+   5B0CB8). Se localiza por firma: 30 punteros seguidos con paso 0x128. Cada pieza es un id `recurso << 16 |
+   registro del bloque`; el recurso es el indice de la tabla de ficheros del ELF (punteros a cadenas; la 0 es
+   \\COMMON\\obj_common_pmt.sz), y de ahi el nombre de la entrada de CARS.PS2. Campos:
+     +00 carroceria; +14 pieza extra (o -1: en el F40 una copia entera de la carroceria con la pintura, dibujada antes:
+     la tapa la carroceria);
+     +18 pieza en +1C (palanca, o el aleron del modelo 5 girado por la velocidad: parado, 0);
      +28 y +38: {pieza, x, y, z} puertas en su bisagra;
-     +48 volante en +4C, girado en x +58;
-     +64 faros escamoteables en +68 (cerrados: angulo 0), o -1;
-     +7C pilotos traseros (sin freno); +80 con freno y +84 tras el choque no se usan;
-     +88 + 0x20 k: rueda k {buje (llanta y neumatico), pinza, disco, disco borroso, x, y, z, caida}.
-   No se dibujan (como en el original): +04 la vista interior, +08/+10 los volumenes de luz, +0C la sombra (en el PC
-   es un RET), +60 (solo con luces).
+     +48 volante en +4C, girado en x +58 (y en z por car+204: 0);
+     +64 faros escamoteables en +68 (cerrados: car+2FC = 0); +60 luz de los faros (noche y abiertos);
+     +7C pilotos; +80 pilotos con luces (noche o tunel, car+4 & 0x300); +84 con el freno (car+38 != 0);
+     +88 + 0x20 k: rueda k {buje (llanta y neumatico), pinza, disco, disco caliente, x, y, z, caida}: pinza sin el giro
+     de la rueda, buje y disco con el; las del lado derecho son registros propios (no hay escalas negativas).
+   Las luces van todas, cada una con su grupo (CEX2), y la demo enciende las que tocan (coche_luces).
+   No se dibujan (como en el original con vm = 1): +04 la vista interior, +08/+10 los volumenes de sombra, +0C la
+   sombra plana (en el PC es un RET).
+ - Registros: cada pieza es un registro con un solo nodo sin matriz (tabla 0, campo +1C = -1) cuyas tiras son todas
+   las del registro (tabla 1: opacas y de mezcla); comprobado en los 360 registros que montan coches y trafico, asi que
+   no hay jerarquia ni matrices de la tabla 6 dentro de las piezas. Las tiras se parten donde el original no dibuja
+   (bandera ADC del VU1: modelo.py / vif.no_dibuja).
  - Materiales del original (materiales()): tabla 4 del registro (material, textura de la capa 1 y de la capa 2) y
    tabla 5 (difuso, ambiente, especular, potencia, emision; 128 = 1). La pintura es una textura de 8x8 de un color
    cuya clave (recurso << 16 | textura) esta en la lista de colores del modelo (PC 64D120 y 408C80; en SLES-53998 la
    tabla de 30 listas de 0x35ad48, localizada por estructura en tabla_colores): {clave, colores 1..8}, cada color otra
    textura de 8x8 (de \\COMMON\\obj_pc_color_pmt.sz o del propio coche); car+0x12 = color elegido + 1. La carroceria
    lleva en la capa 2 el mapa de entorno esferico del coche; cristales, espejos y cromados no tienen UV y su capa 1 es
-   ese mapa. Todo va al bloque CEX1 (extension()) que usa demo/main.c (coche_cex, coche_color, coche_entorno).
- - Uniones entre tiras: el original empaqueta varias tiras en lotes de hasta 59 vertices y no dibuja los triangulos
-   que las unen; se quitan siempre (astillas()), cortando la tira.
- - Tope y vaciado: TOPE vertices por coche (11000; ver docs/DREAMCAST.md). Montados enteros, con su interior (se ve
-   por los cristales translucidos), tienen 9350-11800 vertices. Si el coche pasa del tope se aplica por orden:
-   1. fuera lo que no se ve: con todas las piezas montadas se pinta cada triangulo con un z-buffer (tools/c/visible.c)
-      desde las camaras del juego: la de la seleccion de coche (6 m, 1,4 m de alto, vuelta entera), la de carrera
-      (6,5 m detras y 2,4 m arriba, con la deriva del derrape a los lados) y una vuelta a 0,9 m (choques). Los
-      cristales y los recortes no tapan. Se quitan los triangulos que no se ven desde ninguna (bajos, caras de dentro,
-      el lado interior de las ruedas...);
-   2. solo las camaras de la seleccion y de carrera;
-   3. (ultimo recurso, hoy no hace falta) ruedas del modelo ligero del rival (obj_rc_*): el original dibuja siempre
-      las del buje en el coche del jugador (46AE70), asi que no es lo del original.
-   Las tiras se cortan donde hay mas de 2 triangulos seguidos ocultos (cortar cuesta 2 vertices). No se tapa ni se
-   anade ninguna pieza.
+   ese mapa. Todo va al bloque CEX2 (extension()) que usa demo/main.c (coche_cex, coche_color, coche_entorno,
+   coche_luces).
+ - Tope del TA: TOPE vertices dibujados a la vez por coche (11000; ver docs/DREAMCAST.md). Enteros como el original
+   dibujan 9320-12080 (el F40 17376, por la copia de la carroceria). Si pasan del tope, fuera lo que no se ve: con
+   todas las piezas montadas y en el orden del original se pinta cada triangulo con un z-buffer (tools/c/visible.c; a
+   igual profundidad gana el dibujado despues) desde las camaras del juego: la de la seleccion de coche (6 m, 1,4 m de
+   alto, vuelta entera), la de carrera (6,5 m detras y 2,4 m arriba, con la deriva del derrape a los lados) y una
+   vuelta a 0,9 m (choques; si aun no cabe, sin ella). Los cristales, los recortes y las luces no tapan; las luces no
+   se quitan. Se quitan los triangulos que no se ven desde ninguna (bajos, caras de dentro, el lado interior de las
+   ruedas, la copia tapada del F40...). Las tiras se cortan donde hay mas de 2 triangulos seguidos ocultos. No se
+   tapa, no se anade y no se cambia ninguna pieza: el render desde esas camaras sale igual que el del original entero.
 La fisica no cambia: sale de PARAM.DAT por modelo (conv_param.py). Sale de tu disco: no se distribuye."""
 import ctypes, os, struct, subprocess, sys
 import numpy as np
@@ -273,7 +278,7 @@ def _tex_copia(mod, ti, translucida):
         cache[(ti, translucida)] = len(mod.texs) - 1
     return cache[(ti, translucida)]
 
-ESP_COLOR, ESP_ENTORNO, ESP_SUMA = 1, 2, 3   # mallas especiales (CEX1): color de pintura; entorno; entorno sumado
+ESP_COLOR, ESP_ENTORNO, ESP_SUMA = 1, 2, 3   # mallas especiales (CEX2): color de pintura; entorno; entorno sumado
 
 def materiales(A, mod, m, recurso):
     """aplica el material del original a cada malla (tabla 4 del registro: material, texturas de las dos capas; tabla

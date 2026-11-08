@@ -257,7 +257,9 @@ static int ta_en_etapa;                                  /* lo que se envia ahor
 static inline int ta_cabe(uint32_t n)
 {
     uint32_t c = n * ta_bpv;
+#ifndef DIAG_SIN_TOPE                                    /* medida en Flycast: sin tope (en la consola se colgaria) */
     if (ta_vb + c > ta_lim || (ta_en_etapa && ta_et + c > ta_tope_etapa)) { ta_corto = 1; return 0; }
+#endif
     ta_vb += c; if (ta_en_etapa) ta_et += c;
     return 1;
 }
@@ -401,7 +403,9 @@ static void dibuja_rango(const modelo_t *mo, int l, uint32_t k0, uint32_t k1, in
         if (recorta) {
             float dx, dy, dz, zv, xv, yv;
             if (mo->vis && m->nodo >= 0 && !(mo->vis[m->nodo >> 5] & (1u << (m->nodo & 31)))) continue;
+#ifndef DIAG_SIN_TOPE
             if (vtx_et + (vtx_env - vtx_et0) > VTX_ETAPA_MAX) { ta_corto = 1; continue; }
+#endif
             cartel = malla_de_cartel(mo, m);
             if (!cartel) {
                 dx = m->cx - ojo[0]; dy = m->cy - ojo[1]; dz = m->cz - ojo[2];
@@ -1894,14 +1898,15 @@ static int curso_paso(void)
 }
 #ifdef PRUEBA_RAMA
 static int piloto_rama(float s) { return cur_rama < 0 && s_decide >= 0 && s > s_decide - 400.0f; }
+#endif
 /* ---------------------------------------------------------------- nodos visibles (como el original)
-   Lo que dibuja el original de la etapa en cada cuadro (decompilacion del PC): race_area_geometry_44de10 recorre, de
-   cada registro del modelo, solo los nodos de la lista de la seccion de carretera del coche (car+0x64) en la tabla de
-   visibilidad cs_CS_<zona>_bin (tools/conv_tramo.py lee_visibilidad); de cada nodo, 404B00: esfera contra el plano
-   cercano, los cuatro laterales y el lejano, y el LOD por tamano en pantalla: w = r / (z tan(fov vertical / 2)); se
-   descarta si 127 - exponente(w) >= umbral (4044E0(6) en la etapa; 7 con la bandera 0x40 del nodo), es decir, se
-   dibuja si z <= r 2^(umbral - 1) / tan(fov vertical / 2). Las uniones no tienen tabla: todos sus nodos, con el LOD, y
-   de las ramas solo la del coche una vez elegida (race_area_stage_draw_44e290: obj | 1 o | 2). */
+   Lo que dibuja el original de la etapa en cada cuadro (decompilacion del PC): de cada nodo (tools/modelo.py nodos),
+   404B00: esfera contra el plano cercano, los cuatro laterales y el lejano, y el LOD por tamano en pantalla:
+   w = r / (z tan(fov vertical / 2)); se descarta si 127 - exponente(w) >= umbral (4044E0(6) en la etapa,
+   race_area_display_44f120; 7 con la bandera 0x40 del nodo), es decir, se dibuja si z <= r 2^(umbral - 1) /
+   tan(fov vertical / 2). De las ramas de la union, solo la del coche una vez elegida (race_area_stage_draw_44e290:
+   obj | 1 o | 2). La lista de nodos por seccion de la etapa (cs_CS_<zona>_bin) solo se usaria si el fichero la trae
+   (nsec): el formato de PS2 de esas listas esta sin descifrar (tools/conv_tramo.py lee_visibilidad). */
 static float dist2_ruta(const modelo_t *m, uint32_t i, const float *p)
 {
     const float *a = m->ruta + m->paso_ruta * i;
@@ -1936,7 +1941,6 @@ static void nodos_visibles(modelo_t *mo)
         mo->vis[i >> 5] |= 1u << (i & 31);
     }
 }
-#endif
 
 /* ---------------------------------------------------------------- niebla del original
    scn_env_fog_<zona> (CURSO.DAT): tramos por posicion de carretera con densidad y color al principio y al final

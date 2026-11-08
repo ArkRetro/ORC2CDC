@@ -448,12 +448,15 @@ def transforma(mod, M):
     mod.ruta = r
 
 def lee_visibilidad(d):
-    """tabla de visibilidad por secciones de carretera (cs_CS_<zona>_bin y cs_ENV_<zona>_bin de la etapa; las usa
-    race_area_geometry_44de10 / race_env_model_44cd30 del PC, 7D306C / 7D3070): u32 0, u32 0 (varias partes, una por
-    registro del modelo; con el primer u32 distinto de 0 seria una sola) y el desplazamiento de cada parte; en cada
-    parte un u32 por seccion (desde la parte) a su lista de nodos: u16 n y n pares (byte, mascara): los nodos 8 byte + bit.
-    El original recorre en cada cuadro solo los nodos de la lista de la seccion del coche (car+0x64). Devuelve
-    [parte][seccion] -> conjunto de nodos, o None si no es una tabla"""
+    """tabla de nodos por secciones de carretera (cs_CS_<zona>_bin y cs_ENV_<zona>_bin de la etapa; en el PC las usan
+    race_area_geometry_44de10 / race_env_model_44cd30, 7D306C / 7D3070, con la seccion del coche car+0x64): u32 0, u32 0
+    (varias partes, una por registro del modelo; con el primer u32 distinto de 0 seria una sola) y el desplazamiento de
+    cada parte; en cada parte un u32 por seccion (desde la parte) a su lista: u16 n y n pares (byte, mascara), los nodos
+    8 byte + bit. En el PC la lista son u16 terminados en 0xFFFF y el formato de PS2 es otro: las listas de PS2 no son
+    el conjunto visible desde la seccion (los nodos de la calzada bajo el coche no estan en la de su seccion; ni el
+    complemento ni diferencias acumuladas cuadran; ver docs/PARIDAD.md), asi que de momento solo se usa para saber que
+    registros no dibuja nunca la etapa (sin ningun nodo en ninguna seccion). Devuelve [parte][seccion] -> conjunto de
+    nodos, o None si no es una tabla"""
     if len(d) < 16 or d[:8] != b'\0' * 8: return None
     w = lambda o: struct.unpack_from('<I', d, o)[0]
     p0 = w(8)
@@ -490,32 +493,19 @@ def visibilidad_de(seg, blq):
         if c > cub: mejor, cub = v, c
     return mejor
 
-def secciones_de_la_ruta(seg, cam):
-    """seccion (posicion de carretera del original, car+0x64: seccion 5 de COLI0200 en los poligonos principales) de
-    cada punto de la ruta: la del poligono principal mas cercano"""
-    from scipy.spatial import cKDTree
-    for h, o, s in seg.ent:
-        d = bytes(seg.m[o:o + s])
-        if d[:8] != b'COLI0200': continue
-        n, nprim = struct.unpack('<2I', d[8:16]); sec = struct.unpack('<8I', d[20:52])
-        P = np.frombuffer(d[sec[2]:sec[2] + 64 * n], np.uint8).reshape(n, 64)[:nprim, :48].copy().view('<f4')
-        c = P.reshape(nprim, 4, 3).astype(float).mean(1)
-        L = np.frombuffer(d[sec[5]:sec[5] + 2 * n], '<u2')[:nprim].astype(int)
-        _, j = cKDTree(c).query(cam)
-        return L[j]
-    return None
-
 def convierte(seg, n, sal, mundo=None, cielo=True):
     """el segmento seg (numero n) a sal; mundo: transformacion al marco del curso (transforma)"""
     mod = modelo.Modelo()
-    tablas = []                                                # (bloque, tabla) de los que tienen visibilidad
     for blq in seg.bloques:
         if blq.o == seg.o:
-            # el bloque principal (cs_CS_<zona>): solo los nodos de su tabla de visibilidad (cs_CS_<zona>_bin)
+            # el bloque principal (cs_CS_<zona>), con la tabla de nodos por secciones de la etapa
+            # (cs_CS_<zona>_bin): fuera los registros que la tabla no nombra nunca (copias: en PALM el 8 repite en
+            # instancias la geometria del 2 y el 9 un 35 % de la del 4, que se cruzaban)
             t = visibilidad_de(seg, blq)
-            v = None if t is None else {r: set().union(*t[r]) for r in range(blq.w[0])}
+            v = None if t is None else {r: (set(range(regs[r][0][0])) if any(t[r]) else set()) for r, regs in
+                                        ((r, blq.registros()) for r in range(blq.w[0]))}
             mod.bloque(blq, objetos=True, sin_textura='material', vis=v)
-            if t is not None: tablas.append((blq, t))
+            if v is not None: print('registros sin nodos en la tabla (no se dibujan): %s' % [r for r in v if not v[r]])
         elif es_cielo(blq):
             if cielo: mod.bloque(blq, lista=3, sin_textura='material')   # el cielo: alrededor de la camara, sin niebla
         # los otros no son de la escena: cs_ENV_<zona> (con su tabla cs_ENV_<zona>_bin) solo lo dibuja el cubo del reflejo
@@ -549,14 +539,6 @@ def convierte(seg, n, sal, mundo=None, cielo=True):
         pf = np.where(fuera, sup[3], pf)
     if not sup[1].any(): sup = (sup[0], np.repeat(pf[:, [0, -1]], NEXT, 1), sup[2])
     mod.ruta = np.concatenate([cam, an, pf, car, sup[0], sup[1], sup[2]], 1)
-    sr = secciones_de_la_ruta(seg, cam) if tablas else None
-    nsec = len(tablas[0][1][0]) if tablas else 0
-    if sr is not None:                                         # visibilidad por secciones (la del original)
-        mod.secciones = [sorted(mod.gid[(id(b), r, k)] for b, t in tablas for r in range(len(t)) for k in t[r][s]
-                                if (id(b), r, k) in mod.gid) for s in range(nsec)]
-        mod.mapa = np.clip(sr, 0, nsec - 1)
-        print('visibilidad: %d secciones, %d nodos, %.0f nodos por seccion (max %d)' % (nsec, len(mod.nodos),
-              np.mean([len(L) for L in mod.secciones]), max(len(L) for L in mod.secciones)))
     mod.recorta_texturas()                                     # solo las texturas que se usan (memoria de video)
     if mundo is not None: transforma(mod, mundo)
     ini = mod.escribe(sal)
