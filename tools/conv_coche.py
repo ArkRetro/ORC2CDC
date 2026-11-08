@@ -39,7 +39,7 @@ def main():
     largo = hi[2] - lo[2]; xr = hi[0] - 0.18; zd = lo[2] + 0.2 * largo + 0.25; zt = hi[2] - 0.2 * largo - 0.2
     copias = {ruedas[0]: [(-xr, rad, zd), (-xr, rad, zt)], ruedas[1 % len(ruedas)]: [(xr, rad, zd), (xr, rad, zt)]}
     print('registros', sorted(resto), 'ruedas', ruedas[:2], 'radio %.2f' % rad, 'largo %.2f' % largo)
-    mod = modelo.Modelo()
+    mod = modelo.Modelo(); mod.ruta = np.zeros((0, 5))
     mod.bloque(b, sorted(set(resto + ruedas[:2])), sin_textura=None, copias=copias)
     ini = mod.escribe(sal)
     print('coche %d: %d tiras, %d triangulos, %d texturas (%d KB), %d KB' % (k, len(mod.mallas),

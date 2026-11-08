@@ -72,18 +72,62 @@ def anchos(seg, cam):
     k = np.ones(9) / 9
     return np.stack([np.convolve(np.pad(res[:, j], 4, mode='edge'), k, 'valid') for j in range(2)], 1)
 
+NPERF = 16
+
+def perfil(seg, cam, an):
+    """alturas de la calzada a lo ancho en cada punto de la ruta (NPERF muestras de -izquierdo-2 a derecho+2): rayo
+    vertical contra los triangulos casi horizontales del registro 0 y 1; el mas cercano a la altura de la ruta"""
+    tris = []
+    for r in (0, 1):
+        for pk in seg.mallas(r):
+            for tr in vif.tiras(pk):
+                P = tr[0x68].astype(float)
+                if len(P) < 3 or not np.isfinite(P).all(): continue
+                e = np.linalg.norm(np.diff(P, axis=0), axis=1); med = np.median(e)
+                for j in range(len(P) - 2):
+                    if max(e[j], e[j + 1]) > 6 * med and max(e[j], e[j + 1]) > 15: continue
+                    T = P[j:j + 3]; n = np.cross(T[1] - T[0], T[2] - T[0]); ln = np.linalg.norm(n)
+                    if ln > 1e-6 and abs(n[1]) / ln > 0.6: tris.append(T)
+    T = np.array(tris); C = 8.0; rej = {}
+    lo = np.floor(T[:, :, [0, 2]].min(1) / C).astype(int); hi = np.floor(T[:, :, [0, 2]].max(1) / C).astype(int)
+    for k in range(len(T)):
+        for gx in range(lo[k, 0], hi[k, 0] + 1):
+            for gz in range(lo[k, 1], hi[k, 1] + 1): rej.setdefault((gx, gz), []).append(k)
+    t = np.gradient(cam, axis=0); t[:, 1] = 0; t /= np.linalg.norm(t, axis=1, keepdims=True) + 1e-9
+    der = np.stack([-t[:, 2], np.zeros(len(t)), t[:, 0]], 1)
+    res = np.zeros((len(cam), NPERF))
+    for i, c in enumerate(cam):
+        xs = np.linspace(-an[i, 0] - 2, an[i, 1] + 2, NPERF)
+        for j, x in enumerate(xs):
+            p = c + x * der[i]; best = None
+            for k in rej.get((int(np.floor(p[0] / C)), int(np.floor(p[2] / C))), []):
+                a, b, d = T[k]
+                v0 = b - a; v1 = d - a; v2 = p - a
+                den = v0[0] * v1[2] - v1[0] * v0[2]
+                if abs(den) < 1e-9: continue
+                u = (v2[0] * v1[2] - v1[0] * v2[2]) / den; w = (v0[0] * v2[2] - v2[0] * v0[2]) / den
+                if u < -1e-4 or w < -1e-4 or u + w > 1 + 1e-4: continue
+                y = a[1] + u * v0[1] + w * v1[1]
+                if abs(y - c[1]) < 8 and (best is None or abs(y - c[1]) < abs(best - c[1])): best = y
+            res[i, j] = best if best is not None else np.nan
+        fila = res[i]
+        if np.isnan(fila).all(): fila[:] = c[1]
+        else:
+            ok = ~np.isnan(fila); fila[:] = np.interp(np.arange(NPERF), np.nonzero(ok)[0], fila[ok])
+    return res
+
 def main():
     ruta, n, sal = sys.argv[1], int(sys.argv[2]), sys.argv[3]
     seg = stage.segmentos(isomod.Iso(ruta))[n]
-    mod = modelo.Modelo()
+    mod = modelo.Modelo(); mod.limita = True
     for blq in seg.bloques:
-        if blq.o == seg.o:                                     # el bloque principal sin los prototipos (arboles...)
-            mod.bloque(blq, [r for r in range(blq.w[0]) if not local(blq, r)])
+        if blq.o == seg.o:                                     # el bloque principal, con los objetos en su sitio
+            mod.bloque(blq, objetos=True)
         elif es_cielo(blq):
             mod.bloque(blq, lista=3)                           # el cielo: alrededor de la camara, sin niebla
         # los otros bloques: versiones de lejos (LOD), aparte
-    cam = recorrido(seg)
-    mod.ruta = np.concatenate([cam, anchos(seg, cam)], 1)
+    cam = recorrido(seg); an = anchos(seg, cam)
+    mod.ruta = np.concatenate([cam, an, perfil(seg, cam, an)], 1)
     ini = mod.escribe(sal)
     print('segmento %d: %d tiras (%d opacas, %d recorte, %d transparentes, %d cielo), %d vertices, %d triangulos, '
           '%d texturas (%d KB), ruta %d puntos (%.0f m), %d KB'

@@ -1,11 +1,15 @@
-"""Modelos para la Dreamcast a partir de bloques de PS2 (etapas de STAGE.PS2 y coches de CARS.PS2), formato ORD4:
- 'ORD4', nmallas, nvert, nruta, ntex, inicio de cada lista (opaca, recorte, transparente, cielo, fin);
+"""Modelos para la Dreamcast a partir de bloques de PS2 (etapas de STAGE.PS2 y coches de CARS.PS2), formato ORD5:
+ 'ORD5', nmallas, nvert, nruta, floats por punto de ruta, ntex, inicio de cada lista (opaca, recorte, transparente,
+ cielo, fin);
  texturas (ancho, alto, formato 0 ARGB1555 / 1 RGB565 / 2 ARGB4444, lista, desplazamiento, tamano: 24 bytes);
- mallas ordenadas por lista y textura (cx, cy, cz, radio float, primer vertice, cuenta, textura o -1: 28 bytes);
- vertices (x, y, z, u, v float, color ARGB: 24 bytes); ruta (x, y, z, ancho izquierdo, ancho derecho float);
+ mallas ordenadas por lista y textura (cx, cy, cz, radio float, primer vertice, cuenta, textura o -1, distancia
+ maxima de dibujo o 0: 32 bytes);
+ vertices (x, y, z, u, v float, color ARGB: 24 bytes); ruta (x, y, z, ancho izquierdo, ancho derecho y el perfil
+ de alturas de la calzada a lo ancho: NPERF alturas de -izquierdo-2 a derecho+2);
  relleno a 32; texeles twiddled de 16 bits.
-Cada malla es una tira de triangulos (un UNPACK de posiciones del paquete VIF); su textura sale de la tabla 2 del
-registro (cuenta desde 1; 0 = sin textura)."""
+Cada malla es una tira de triangulos (un UNPACK de posiciones del paquete VIF); su textura: la tabla 2 del registro
+da una entrada de la tabla 4 (lista de texturas del registro, 36 bytes), cuyo cuarto campo es el indice de la
+textura en el bloque."""
 import os, struct
 import numpy as np
 from ps2 import tex, vif
@@ -37,30 +41,90 @@ def textura_dc(a):
     out = np.zeros(w * h, np.uint16); out[twiddle(w, h).ravel()] = v.ravel()
     return fmt, lista, out.tobytes()
 
+def colocaciones(blq, reg):
+    """objetos de un registro: tabla 0 (56 bytes: el campo 10 es su grupo y el 7 su matriz o -1), tabla 1 (grupos:
+    tipo 0 = cuenta mallas desde la primera; tipo 1 = una sola malla, la del cuarto campo) y tabla 6 (matrices 4x4
+    de fila: rotacion/escala y traslacion en la ultima fila). Devuelve {malla: [matriz o None, ...]}; las mallas sin
+    objeto no aparecen (se dibujan tal cual)."""
+    m, A = blq.m, blq.A
+    n0, o0 = reg[0]; n1, o1 = reg[1]; n6, o6 = reg[6]
+    usos = {}
+    for k in range(n0):
+        x = struct.unpack('<I4f9i', m[A + o0 + 56 * k:A + o0 + 56 * k + 56])
+        g, mi = x[10], x[7]
+        if not 0 <= g < n1: continue
+        cnt, tipo, pri, uno = struct.unpack('<4i', m[A + o1 + 16 * g:A + o1 + 16 * g + 16])
+        mallas = range(pri, pri + cnt) if tipo == 0 and cnt > 0 else ([uno] if tipo == 1 and uno >= 0 else [])
+        M = np.frombuffer(m[A + o6 + 64 * mi:A + o6 + 64 * mi + 64], '<f4').reshape(4, 4).astype(float) \
+            if 0 <= mi < n6 else None
+        if tipo == 1 and M is not None: continue            # planos de los objetos colocados (sombras): fuera
+        for i in mallas: usos.setdefault(i, []).append(M)
+    return usos
+
+def texturas_de_carteles(blq):
+    """texturas de los carteles del bloque: apaisadas (2:1) en mallas de 4 a 6 vertices, de 6 a 16 m de ancho y 3 a 9 de alto"""
+    m, A = blq.m, blq.A; res = []
+    for reg in blq.registros():
+        c, o = reg[3]; t2 = reg[2][1]; n4, o4 = reg[4]
+        for i in range(c):
+            e = struct.unpack('<6I', m[A + o + 24 * i:A + o + 24 * i + 24])
+            k = struct.unpack('<i', m[A + t2 + 16 * i:A + t2 + 16 * i + 4])[0]
+            if not 0 <= k < n4: continue
+            ti = struct.unpack('<i', m[A + o4 + 36 * k + 12:A + o4 + 36 * k + 16])[0]
+            if ti < 0 or ti in res: continue
+            h = tex.cabeceras(blq)[ti] if ti < len(tex.cabeceras(blq)) else None
+            if h is None or (h[11] >> 24) < (h[12] & 0xff) + 1: continue      # los anuncios son apaisados (2:1)
+            for pk in vif.datos(m, A + e[2], A + blq.w[2]):
+                for tr in vif.tiras(pk):
+                    P = tr[0x68]; ext = P.max(0) - P.min(0)
+                    if 4 <= len(P) <= 6 and 6 < max(ext[0], ext[2]) < 16 and 3 < ext[1] < 9 and ti not in res: res.append(ti)
+    return res
+
+def esta_en_tipo1(blq, reg, i):
+    m, A = blq.m, blq.A; n1, o1 = reg[1]
+    for g in range(n1):
+        cnt, tipo, pri, uno = struct.unpack('<4i', m[A + o1 + 16 * g:A + o1 + 16 * g + 16])
+        if tipo == 1 and uno == i: return True
+    return False
+
 class Modelo:
     def __init__(self):
         self.texs = []; self.blob = b''; self.mallas = []; self.verts = []; self.nv = 0; self.ruta = np.zeros((0, 5))
+        self.limita = False                                     # distancia maxima por tamano en las mallas pequenas
 
-    def bloque(self, blq, registros=None, lista=None, sin_textura=int(os.environ.get("SINTEX", "0x60202020"), 16), copias=None):
+    def bloque(self, blq, registros=None, lista=None, objetos=False, sin_textura=int(os.environ.get("SINTEX", "0x60202020"), 16), copias=None):
         """anade los registros de un bloque (todos si registros es None). lista: fuerza la lista de sus mallas.
         sin_textura: color ARGB de las mallas sin textura, o None para iluminarlas por la normal (opacas).
-        copias: {registro: [desplazamiento (x, y, z), ...]} para repetir un registro (ruedas)."""
+        copias: {registro: [desplazamiento (x, y, z), ...]} para repetir un registro (ruedas).
+        objetos: coloca las mallas segun los objetos del registro (colocaciones)."""
         m, A = blq.m, blq.A; base = len(self.texs)
         for h in tex.cabeceras(blq):
             a = tex.imagen(blq, h); fmt, li, d = textura_dc(a)
             self.texs.append((a.shape[1], a.shape[0], fmt, li, len(self.blob), len(d))); self.blob += d
         ntb = len(self.texs) - base
+        anuncios = texturas_de_carteles(blq); n_anuncio = 0
         for r, reg in enumerate(blq.registros()):
             if registros is not None and r not in registros: continue
             c, o = reg[3]; t2 = reg[2][1]
+            usos = colocaciones(blq, reg) if objetos else {}
             for i in range(c):
                 e = struct.unpack('<6I', m[A + o + 24 * i:A + o + 24 * i + 24])
-                ti = struct.unpack('<i', m[A + t2 + 16 * i:A + t2 + 16 * i + 4])[0] - 1
+                k = struct.unpack('<i', m[A + t2 + 16 * i:A + t2 + 16 * i + 4])[0]
+                ti = struct.unpack('<i', m[A + reg[4][1] + 36 * k + 12:A + reg[4][1] + 36 * k + 16])[0] \
+                    if 0 <= k < reg[4][0] else -1                # la lista de texturas del registro (tabla 4)
                 ti = base + ti if 0 <= ti < ntb else -1
+                if objetos and i not in usos and esta_en_tipo1(blq, reg, i): continue
+                mats = usos.get(i, [None])
                 for pk in vif.datos(m, A + e[2], A + blq.w[2]):
                     for tr in vif.tiras(pk):
-                        for dx in (copias or {}).get(r, [(0, 0, 0)]):
-                            self._tira(tr, ti, lista, sin_textura, np.array(dx, np.float32), blq)
+                        for M in mats:
+                            for dx in (copias or {}).get(r, [(0, 0, 0)]):
+                                t = tr
+                                if M is not None:
+                                    t = dict(tr); t[0x68] = tr[0x68].astype(float) @ M[:3, :3] + M[3, :3]
+                                    if 0x69 in tr: t[0x69] = tr[0x69].astype(float) @ M[:3, :3]
+                                self._dmax = 0.0 if M is None else 450.0
+                                self._tira(t, ti, lista, sin_textura, np.array(dx, np.float32), blq)
 
     def _tira(self, tr, ti, lista, sin_textura, dx, blq):
         """una tira; si une piezas separadas (una arista 6 veces mas larga que la mediana y de mas de 15 m: la PS2
@@ -100,7 +164,9 @@ class Modelo:
         if ti < 0 and sin_textura is None and li == 2: argb[:] = 0x90000000
         if lista is not None: li = lista
         cc = P.mean(0); rad = float(np.sqrt(((P - cc) ** 2).sum(1).max()))
-        self.mallas.append([li, ti, cc, rad, self.nv, nn, blq])
+        dmax = getattr(self, '_dmax', 0.0)
+        if self.limita and dmax == 0.0 and rad < 40: dmax = float(np.clip(rad * 45, 250, 1200))
+        self.mallas.append([li, ti, cc, rad, self.nv, nn, blq, dmax])
         v = np.zeros(nn, dtype=[('x', '<f4'), ('y', '<f4'), ('z', '<f4'), ('u', '<f4'), ('v', '<f4'), ('c', '<u4')])
         v['x'], v['y'], v['z'], v['u'], v['v'], v['c'] = P[:, 0], P[:, 1], P[:, 2], uv[:, 0], uv[:, 1], argb
         self.verts.append(v); self.nv += nn
@@ -109,9 +175,11 @@ class Modelo:
         self.mallas.sort(key=lambda x: (x[0], x[1]))
         inicio = [sum(1 for x in self.mallas if x[0] < l) for l in range(5)]
         with open(sal, 'wb') as f:
-            f.write(b'ORD4' + struct.pack('<9I', len(self.mallas), self.nv, len(self.ruta), len(self.texs), *inicio))
+            f.write(b'ORD5' + struct.pack('<10I', len(self.mallas), self.nv, len(self.ruta), self.ruta.shape[1],
+                                          len(self.texs), *inicio))
             for t in self.texs: f.write(struct.pack('<6I', *t))
-            for li, ti, cc, rad, i0, cnt, _ in self.mallas: f.write(struct.pack('<4f2Ii', *cc, rad, i0, cnt, ti))
+            for li, ti, cc, rad, i0, cnt, _, dmax in self.mallas:
+                f.write(struct.pack('<4f2Iif', *cc, rad, i0, cnt, ti, dmax))
             for v in self.verts: f.write(v.tobytes())
             f.write(self.ruta.astype('<f4').tobytes())
             f.write(b'\0' * (-f.tell() % 32)); f.write(self.blob)
