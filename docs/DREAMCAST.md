@@ -166,7 +166,7 @@ Coches del jugador (`tools/conv_coche.py`): tope de 11000 vertices dibujados a l
 el original (46A560, con las uniones de tiras que no dibuja el VU1 ya quitadas) dibujan 9320-12080, y el F40 17376 (su
 pieza +14 es una copia entera de la carroceria que la carroceria tapa). Por encima del tope se quita solo lo que no se
 ve desde las camaras del juego (seleccion, carrera con deriva y, si cabe, una vuelta baja): 10 de los 15 pasan por ahi
-y quedan en 10348-11195; el render desde esas camaras sale igual que el del original entero (0,00-0,09 % de pixeles
+y quedan en 10348-11195 (desde las piezas animadas, PARIDAD.md Coches: piezas animadas, el vaciado mira 6 posturas: 10035-11674, cinco por encima de 11000; COCHE06 +6 KB de VRAM por el disco caliente: BK09 + IMPE con COCHE06 medido con DIAG_VTX en Flycast, 67 KB libres); el render desde esas camaras sale igual que el del original entero (0,00-0,09 % de pixeles
 distintos, de la compresion VQ). El original no tiene LOD para el coche del jugador (46AE70 dibuja la disposicion de
 5B2F68 entera; los 5 LOD del registro de 4866C0 de los modelos 0..29 son para cuando ese coche lo dibuja 4AE0F0, el de
 los otros coches): en carrera es lo que mas gasta del TA (~600 KB de 1664). Las luces van todas en el fichero (pilotos,

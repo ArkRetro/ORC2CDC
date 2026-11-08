@@ -2874,51 +2874,42 @@ static void niebla_pon(void)
 }
 /* ---------------------------------------------------------------- cielo y sol (ver "entorno del original")
    Cielo: las mallas de la lista 3 llevan su grupo en el campo del nodo (-256 - grupo; tools/conv_tramo.py pon_cielo).
-   El original lo dibuja sin z, antes de todo (4521C0, estado 7 = 0); aqui va en la escena a su distancia (lo tapa
-   todo lo de delante). Un objeto con alfa >= 0,9 se dibuja entero (452080); con menos, en la lista transparente con
-   el alfa del vertice (un 2 % mas cerca que el que tapa, para que la prueba de z no lo quite). */
-static pvr_poly_hdr_t cie_tr_cab[8]; static pvr_ptr_t cie_tr_dir[8]; static int cie_tr_n;
-static const pvr_poly_hdr_t *cielo_cab_tr(const modelo_t *mo, int i, int niebla)
+   El original lo dibuja sin z, antes de todo (4521C0, estado 7 = 0); aqui va en la escena sin escribir la z (lo tapa
+   todo lo demas, y entre si manda el orden, como en el original). Un objeto con alfa >= 0,9 se dibuja entero (452080)
+   en la lista de su textura; con menos, en la transparente con el alfa del vertice. */
+static pvr_poly_hdr_t cie_cab[16]; static uintptr_t cie_clave[16]; static int cie_n;
+static const pvr_poly_hdr_t *cielo_cab(const modelo_t *mo, int i, int niebla, int l)
 {
     pvr_poly_cxt_t cx; const tex_t *t = mo->texs + i; int k;
     uint32_t fb = t->fmt & 0xff, vq = t->fmt & 0x100, n = ((t->fmt >> 16) & 0xff) + 1;
     pvr_ptr_t dir = vq ? (pvr_ptr_t)((uintptr_t)mo->tv[i] - (2048 - 8 * n)) : mo->tv[i];
-    for (k = 0; k < cie_tr_n; k++) if (cie_tr_dir[k] == (pvr_ptr_t)((uintptr_t)dir + niebla)) return cie_tr_cab + k;
-    if (cie_tr_n == 8) cie_tr_n = 0;                            /* pocas texturas de cielo: se reaprovecha */
-    k = cie_tr_n++;
-    pvr_poly_cxt_txr(&cx, PVR_LIST_TR_POLY, FMT[fb] | PVR_TXRFMT_TWIDDLED | (vq ? PVR_TXRFMT_VQ_ENABLE : 0), t->w, t->h, dir,
+    uintptr_t clave = (uintptr_t)dir | (uintptr_t)niebla | (uintptr_t)l << 1;   /* dir: multiplo de 8 */
+    for (k = 0; k < cie_n; k++) if (cie_clave[k] == clave) return cie_cab + k;
+    if (cie_n == 16) cie_n = 0;                                 /* pocas texturas de cielo: se reaprovecha */
+    k = cie_n++;
+    pvr_poly_cxt_txr(&cx, LISTA[l], FMT[fb] | PVR_TXRFMT_TWIDDLED | (vq ? PVR_TXRFMT_VQ_ENABLE : 0), t->w, t->h, dir,
                      PVR_FILTER_BILINEAR);
     cx.gen.fog_type = niebla ? PVR_FOG_TABLE : PVR_FOG_DISABLE; cx.gen.culling = PVR_CULLING_NONE;
-    cx.txr.env = PVR_TXRENV_MODULATEALPHA; cx.depth.write = PVR_DEPTHWRITE_DISABLE;
-    pvr_poly_compile(cie_tr_cab + k, &cx);
-    cie_tr_dir[k] = (pvr_ptr_t)((uintptr_t)dir + niebla);
-    return cie_tr_cab + k;
+    cx.txr.env = l == 2 ? PVR_TXRENV_MODULATEALPHA : PVR_TXRENV_MODULATE; cx.depth.write = PVR_DEPTHWRITE_DISABLE;
+    pvr_poly_compile(cie_cab + k, &cx);
+    cie_clave[k] = clave;
+    return cie_cab + k;
 }
 /* el grupo g del cielo de mo en la lista l con alfa a */
 static void cielo_grupo(const modelo_t *mo, int g, int l, float a, int niebla)
 {
-    static matrix_t vc __attribute__((aligned(32)));
-    uint32_t k; int j;
+    uint32_t k;
     if (!mo || !mo->tv || a <= 0.1f || (a < 0.9f && l != 2)) return;
-    if (a < 0.9f) {                                             /* un poco mas cerca que el de debajo */
-        memcpy(vc, vista_cielo, sizeof vc);
-        for (j = 0; j < 4; j++) { vc[0][j] *= 0.98f; vc[1][j] *= 0.98f; vc[2][j] *= 0.98f; }
-        mat_load(&vc); color_mul = ((uint32_t)(a * 255) << 24) | 0xFFFFFF;
-    }
+    if (a < 0.9f) color_mul = ((uint32_t)(a * 255) << 24) | 0xFFFFFF;
     for (k = mo->inicio[3]; k < mo->inicio[4]; k++) {
         const malla_t *m = mo->mallas + k; int gm = m->nodo <= -256 ? -256 - m->nodo : 0;
-        if (m->n < 3 || gm != g) continue;
-        if (a >= 0.9f) {
-            if ((m->tex >= 0 ? (int)mo->texs[m->tex].lista : 0) != l) continue;
-            if (m->tex >= 0) pvr_prim(&mo->cabs[!niebla][m->tex], sizeof(pvr_poly_hdr_t));
-            else pvr_prim(&cab_col[!niebla][l], sizeof(pvr_poly_hdr_t));
-        } else {
-            if (m->tex >= 0) pvr_prim(cielo_cab_tr(mo, m->tex, niebla), sizeof(pvr_poly_hdr_t));
-            else pvr_prim(&cab_col[!niebla][2], sizeof(pvr_poly_hdr_t));
-        }
+        int lm = m->tex >= 0 ? (int)mo->texs[m->tex].lista : 0;
+        if (m->n < 3 || gm != g || (a >= 0.9f && lm != l)) continue;
+        if (m->tex >= 0) pvr_prim(cielo_cab(mo, m->tex, niebla, a >= 0.9f ? lm : 2), sizeof(pvr_poly_hdr_t));
+        else pvr_prim(&cab_col[!niebla][a >= 0.9f ? l : 2], sizeof(pvr_poly_hdr_t));
         dibuja_malla(mo, m);
     }
-    color_mul = 0; mat_load(&vista_cielo);
+    color_mul = 0;
 }
 /* el cielo del cuadro en la lista l (como 4521C0: primero el nuevo, grupo 0 y 1; luego el viejo, grupo 1 y 0) */
 static void cielo_dibuja(int l)
