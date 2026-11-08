@@ -65,8 +65,9 @@ Medido en Flycast (`DIAG_VTX`, pruebas encadenadas por las dos rutas y por IMPE,
 | | Valor |
 |---|---|
 | RAM libre en carrera (con los dos huecos reservados) | 2510-2650 KB; peor momento: union + ruta derecha recien leida |
-| VRAM libre, etapa + union | 287-640 KB (GHOS + BK09: 287 KB) |
-| VRAM libre, union + etapa siguiente | 155-741 KB (BK09 + IMPE, la etapa de texturas mayor (890 KB): 155 KB) |
+| VRAM libre, etapa + union | 287-640 KB (GHOS + BK09: 287 KB; 256 KB con el coche de mas texturas, COCHE04 180 KB, y el trafico nuevo de 261 KB) |
+| VRAM libre, union + etapa siguiente | 155-741 KB (BK09 + IMPE, la etapa de texturas mayor (890 KB): 155 KB; peor caso con COCHE04 y el trafico nuevo: **124 KB**) |
+| VRAM libre, IMPE + su meta BK13 (COCHE04, trafico nuevo) | 150 KB |
 | VRAM libre con solo la union (etapa soltada) | 1044-1108 KB |
 | Lectura de una bifurcacion BKkk.DAT (1,5 MB) | 0,85-0,96 s |
 | Lectura de una meta BKkk.DAT (0,4-0,8 MB) | 0,31-0,45 s |
@@ -78,6 +79,12 @@ En un GD real las lecturas seran mas lentas: entre la peticion de la etapa sigui
 (`carga_espera`). Texturas de las metas: las de mas de error RMS 9 se aceptan en VQ hasta 24 (`UMBRAL_META` de
 `tools/conv_union.py`, error medio 3,6-5,8, maximo 14,7): sin eso la meta de TULI (812 KB) o METR (712 KB) no cabia
 con su etapa. Datos del curso en el GD: 15 SEGnn.DAT (62 MB), 15 BKkk.DAT + BKD.DAT (17 MB).
+
+Peor caso de VRAM medido el 2026-11-08 (Flycast, `-DPRUEBA_FICHA=4 -DPRUEBA_NODO=9 -DPRUEBA_RAMA=0`): 124 KB libres
+con la bifurcacion de GHOS y la etapa IMPE subidas, el coche de mas texturas y el trafico de 261 KB. Cabe sin recortar
+nada; las otras combinaciones posibles (INDU/CLOU -> METR, METR + su meta) suman menos texturas. Si un coche o el
+trafico crecen mas de ~120 KB, el margen se acaba ahi (primero: compartir las texturas repetidas de cs_BK_PALM y
+cs_ENVBK_PALM, que van duplicadas en cada BKkk.DAT, o pasar a VQ las pequenas que aun no lo estan).
 
 ## 2. Presupuesto del TA
 

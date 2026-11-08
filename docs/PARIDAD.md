@@ -151,6 +151,16 @@ Ahora (tools/conv_coche.py `materiales`, `extension`; tools/conv_trafico.py; dem
   el disco: se usan los de PALM (SUPUESTO: que el original haga lo mismo).
 - Niebla: lista 1 de scn_env_fog_<zona> (exp/exp2, densidad y color por posicion de carretera, ~7,9 m cada una), en
   la tabla de niebla de la PowerVR junto con el fundido de la distancia de dibujo.
+- Fallo de la union (coche hundido y planos grises inclinados al entrar en ella), causa y arreglo: (1) la ruta de cada
+  etapa acababa hasta 20 m antes del principio de la union (la de LAKE, 19,7 m) y la de la carrera daba ese salto en
+  un paso de 4 m; ahora conv_tramo alarga la ruta en recto hasta el extremo de la calzada de su colision (quedan
+  1-9 m) y ruta_anade rellena lo que falte con puntos interpolados. (2) cs_ENVBK_PALM (malla 8, muros de 5 m) une en
+  una misma tira los muros de los dos lados de la calzada y el triangulo puente cruzaba la carretera a 0,4-2,9 m de
+  altura entre 15 y 35 m dentro de la union (medido en el PC con la malla colocada: tools en el scratchpad); la PS2 no
+  lo dibuja: modelo.py quita en las uniones los triangulos cuyos vertices tienen normales opuestas (mod.puentes). Las
+  alturas de la malla, la colision y la ruta coinciden (0 m de diferencia en la calzada). Verificado en E (nodo 1,
+  PRUEBA_FIN=900). Queda: la calzada de cs_ENVBK_PALM repite la de cs_BK_PALM a la misma altura (parpadeo de las
+  rayas a lo lejos).
 - Inventado que se ha quitado: las mallas sin textura de los tramos iban con un gris translucido fijo (0x60202020,
   `SINTEX` de modelo.py); ahora llevan el difuso de su material (tabla 5) con la luz por normal, opacas si su alfa es
   128. La ruta de TULI y METR sale de la colision (su SOO no da la carretera); el rotulo de bifurcacion usa nombres de

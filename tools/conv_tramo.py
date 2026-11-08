@@ -129,6 +129,34 @@ def recorrido_coli(seg):
         return np.stack([np.convolve(np.pad(q[:, j], 2, mode='edge'), k, 'valid') for j in range(3)], 1)
     return None
 
+def alarga_a_la_colision(seg, cam):
+    """la ruta de los carriles (SOO) o del asfalto se queda hasta 20 m antes de los extremos del tramo, que son el
+    principio (origen) y el final (donde se coloca la union) de su colision: se alarga en recto, cada 4 m, hasta el
+    vertice de la calzada de la colision mas alejado en cada sentido. Sin eso la ruta de la carrera daba un salto de
+    hasta 20 m en un paso de 4 m al pasar de una etapa a su union y de la union a la etapa siguiente"""
+    for h, o, s in seg.ent:
+        d = bytes(seg.m[o:o + s])
+        if d[:8] != b'COLI0200': continue
+        n, nprim = struct.unpack('<2I', d[8:16]); sec = struct.unpack('<8I', d[20:52])
+        P = np.frombuffer(d[sec[2]:sec[2] + 64 * n], np.uint8).reshape(n, 64)[:nprim, :48].copy().view('<f4')
+        P = P.reshape(-1, 3).astype(float)
+        res = cam
+        for fin in (True, False):
+            a = res[-1] if fin else res[0]; b = res[-5] if fin else res[4]
+            t = a - b; t[1] = 0; t /= np.linalg.norm(t) + 1e-9
+            q = P[np.abs((P - a)[:, [0, 2]] @ np.array([-t[2], t[0]])) < 12]   # la calzada, no lo de los lados
+            if not len(q): continue
+            ext = float(((q - a)[:, [0, 2]] @ t[[0, 2]]).max())
+            k = int(ext // 4.0)
+            if k < 1: continue
+            y = q[np.argmax((q - a)[:, [0, 2]] @ t[[0, 2]]), 1]
+            nuevos = np.array([a + t * 4.0 * i for i in range(1, k + 1)])
+            nuevos[:, 1] = a[1] + (y - a[1]) * np.arange(1, k + 1) / k
+            res = np.vstack([res, nuevos]) if fin else np.vstack([nuevos[::-1], res])
+            print('ruta alargada %.1f m por el %s (hasta la colision)' % (4.0 * k, 'final' if fin else 'principio'))
+        return res
+    return cam
+
 def longitud(q): return float(np.linalg.norm(np.diff(q, axis=0), axis=1).sum()) if q is not None and len(q) > 1 else 0.0
 
 def puntos_asfalto(seg):
@@ -422,12 +450,13 @@ def convierte(seg, n, sal, mundo=None, cielo=True):
         # los otros bloques: versiones de lejos (LOD), aparte
     try: cam = recorrido_soo(seg)
     except ValueError: cam = None                              # SOO sin puntos utiles
-    cc = recorrido_coli(seg)
-    if cc is not None and longitud(cam) < 0.8 * longitud(cc):  # el SOO no cubre la carretera: la de la colision
-        print('ruta del SOO %.0f m, la de la colision %.0f m: se usa la de la colision' % (longitud(cam), longitud(cc)))
-        cam = cc
     if cam is None: cam = recorrido(seg)
+    cc = recorrido_coli(seg)
+    if cc is not None and longitud(cam) < 0.8 * longitud(cc):  # no cubre la carretera: la de la colision
+        print('ruta del SOO o del asfalto %.0f m, la de la colision %.0f m: se usa la de la colision' % (longitud(cam), longitud(cc)))
+        cam = cc
     if np.linalg.norm(cam[-1, [0, 2]]) < np.linalg.norm(cam[0, [0, 2]]): cam = cam[::-1].copy()   # empieza en el origen
+    cam = alarga_a_la_colision(seg, cam)
     cam, an, car = ajusta_al_asfalto(seg, cam)                 # centro, bordes y carriles: los del asfalto
     if an is None: an = anchos(seg, cam); car = np.zeros((len(cam), NCARRIL))
     car = carriles_uniformes(an, car)                          # donde no se reconocieron carriles

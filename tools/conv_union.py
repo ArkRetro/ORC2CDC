@@ -238,7 +238,7 @@ def curso(A, dsal, con_tramos=True):
         tx, ty, tz, rx, ry, rz = f32(E, d0 + 0x98, 6)
         assert abs(rx) < 1e-4 and abs(rz) < 1e-4, 'union con giro en x o z: no soportado'
         dbk = u32(E, base2 + 4 * ui); c_todo = cadena(E, dbk + 0x0c)
-        mod = modelo.Modelo(); mod.limita = True
+        mod = modelo.Modelo(); mod.limita = True; mod.puentes = True
         if hi >= 0:                                   # bifurcacion: la de PALM (las demas no estan en el disco)
             mod.bloque(A.bloque(A.entrada('BK.PS2', 'cs_BK_PALM_pmt')), objetos=True, sin_textura='material')
             mod.bloque(A.bloque(A.entrada('BK.PS2', '\\ENV\\cs_ENVBK_PALM_pmt')), objetos=True, sin_textura='material')
@@ -262,6 +262,7 @@ def curso(A, dsal, con_tramos=True):
         if hi < 0: vq.UMBRAL = max(umbral, UMBRAL_META)
         try: mod.escribe(f)
         finally: vq.UMBRAL = umbral
+        print('triangulos puente quitados: %d' % getattr(mod, 'puentes_quitados', 0))
         r = dict(zona=z, seg=n, nivel=nivel[clave], izq=hi, der=hd, bk=(tx, ty, tz, ry), ramas=ramas,
                  m_pos=m_por_posicion(segs[n]), meta=meta, niebla=niebla(A, z))
         sal.append(r)

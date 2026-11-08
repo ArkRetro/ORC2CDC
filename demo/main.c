@@ -523,7 +523,8 @@ static int ruta_pon(const modelo_t *m)
    esa posicion fraccionaria, interpolando: el paso sigue siendo PASO y el coche no da un tiron) y su centro arranca en
    el de la actual y vuelve al suyo en RECENTRA puntos (dos ficheros no tienen por que coincidir en el centro: la ruta
    de una etapa sigue los carriles y la de la union el poligono de la calzada; el coche no debe saltar de lado).
-   Devuelve el primer punto anadido, o -1 */
+   Si m empieza mas de 1,5 PASO por delante, el hueco se rellena con puntos interpolados (la ruta de la carrera no da
+   saltos). Devuelve el primer punto de m en la ruta, o -1 */
 #define RECENTRA 25
 static uint32_t ruta_salto;                                     /* primer punto de m usado (la parte entera) */
 static int ruta_anade(const modelo_t *m)
@@ -540,6 +541,17 @@ static int ruta_anade(const modelo_t *m)
         if (d1 >= PASO) { f = (PASO - d0) / (d1 - d0 + 1e-6f); break; }
     }
     n = m->nruta - j - 1;
+    if (d0 >= 1.5f * PASO) {                                    /* hueco entre los dos ficheros: se rellena cada ~PASO m */
+        uint32_t nf = (uint32_t)(d0 / PASO + 0.5f) - 1;
+        if (ruta_reserva(ruta_n + nf + n)) return -1;
+        for (k = 1; k <= nf; k++) {
+            const float *p = ruta_p + PR * (ruta_n - 1), *q = b + PR * j; float *o = ruta_p + PR * (ruta_n - 1 + k), t = (float)k / (nf + 1);
+            for (c = 0; c < ruta_pr; c++) o[c] = p[c] + t * (q[c] - p[c]);
+            if (CON_SUP) for (c = 0; c < NBANDA; c++) o[C_BANDA + 2 * c + 1] = p[C_BANDA + 2 * c + 1];
+        }
+        ruta_n += nf; i0 = ruta_n;
+        ax = ruta_p[PR * (ruta_n - 1)]; az = ruta_p[PR * (ruta_n - 1) + 2];
+    }
     if (ruta_reserva(ruta_n + n)) return -1;
     for (k = 0; k < n; k++) {
         const float *p = b + PR * (j + k), *q = p + PR; float *o = ruta_p + PR * (ruta_n + k);
@@ -2092,6 +2104,9 @@ int main(int argc, char **argv)
     }
     coches_m = coches_lee();                                    /* fichas con coche; se empieza por el Testarossa */
     ficha_ini = (coches_m >> 9) & 1 || !coches_m ? 9 : __builtin_ctz(coches_m);
+#ifdef PRUEBA_FICHA
+    if ((coches_m >> PRUEBA_FICHA) & 1) ficha_ini = PRUEBA_FICHA;   /* prueba: sale con ese coche */
+#endif
     if (ficha_modelo[ficha_ini] < 30) modelo_jug = ficha_modelo[ficha_ini];
     for (i = 0; i < NMODTRAF; i++) {
         char nom[16]; sprintf(nom, "TRAF%d.DAT", i);

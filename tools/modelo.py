@@ -149,13 +149,36 @@ class Modelo:
         no dibuja esos triangulos de union), se corta en trozos"""
         P = tr[0x68].astype(float)
         if len(P) < 3 or not np.isfinite(P).all(): return
-        e = np.linalg.norm(np.diff(P, axis=0), axis=1); med = np.median(e)
-        cortes = [j for j in range(len(e)) if e[j] > 6 * med and e[j] > 15]
-        if not cortes: return self._trozo(tr, ti, lista, sin_textura, dx, blq, 0, len(P))
-        a = 0
-        for j in cortes + [len(P) - 1]:
-            if j + 1 - a >= 3: self._trozo(tr, ti, lista, sin_textura, dx, blq, a, j + 1)
-            a = j + 1
+        for a0, b0 in self._sin_puentes(tr, P):
+            Q = P[a0:b0]
+            e = np.linalg.norm(np.diff(Q, axis=0), axis=1); med = np.median(e)
+            cortes = [j for j in range(len(e)) if e[j] > 6 * med and e[j] > 15]
+            a = 0
+            for j in cortes + [len(Q) - 1]:
+                if j + 1 - a >= 3: self._trozo(tr, ti, lista, sin_textura, dx, blq, a0 + a, a0 + j + 1)
+                a = j + 1
+
+    def _sin_puentes(self, tr, P):
+        """trozos [a, b) de la tira sin sus triangulos puente (solo con self.puentes: las uniones de BK.PS2): la PS2 junta en
+        una tira piezas sueltas (p. ej. los dos muros de una calzada, cada uno con su normal) y no dibuja los
+        triangulos que las unen; aqui se reconocen porque sus vertices tienen normales opuestas (producto < -0,3: en
+        una pieza de verdad las aristas vivas llevan vertices aparte y las normales de un triangulo no se oponen). Sin esto cruzaban la carretera de la union por
+        encima de la calzada (cs_ENVBK_PALM, malla 8)"""
+        n = len(P)
+        if not getattr(self, 'puentes', False) or 0x69 not in tr or len(tr[0x69]) != n: return [(0, n)]
+        N = tr[0x69].astype(float) / 32768; N /= np.linalg.norm(N, axis=1, keepdims=True) + 1e-9
+        malos = []
+        for j in range(n - 2):
+            m = N[j:j + 3]
+            if min(m[0] @ m[1], m[0] @ m[2], m[1] @ m[2]) < -0.3: malos.append(j)
+        if not malos: return [(0, n)]
+        self.puentes_quitados = getattr(self, 'puentes_quitados', 0) + len(malos)
+        res = []; s = 0
+        for j in malos:
+            if j + 2 - s >= 3: res.append((s, j + 2))
+            s = max(s, j + 1)
+        if n - s >= 3: res.append((s, n))
+        return res
 
     def _trozo(self, tr, ti, lista, sin_textura, dx, blq, a, b):
         tr = {k: (v[a:b] if v is not None and k != 0x6c and len(v) == len(tr[0x68]) else v) for k, v in tr.items()}
