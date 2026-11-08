@@ -111,7 +111,7 @@ static uint32_t vtx_env, vtx_ult;                        /* vertices enviados en
 /* La PowerVR real se cuelga si el TA llena el bufer de vertices (Flycast no). El TA guarda unos 34 bytes por triangulo
    en tiras: con 1 MB de bufer caben ~30000. Tope de vertices de la etapa por cuadro; el coche (~6700), el trafico y
    los efectos van aparte. */
-#define VTX_ETAPA_MAX 19000
+#define VTX_ETAPA_MAX 16000
 static inline void envia(const pt_t *p, int fin)
 {
     pvr_vertex_t *v = pvr_dr_target(); vtx_env++;
@@ -1226,10 +1226,30 @@ static void resultados(int meta)
 #define SALIDA 100.0f                                           /* metros desde el principio de la ruta */
 #endif
 
+/* La PowerVR no termina el cuadro (en la consola real, por un bufer lleno o un parametro ilegal): se escribe el
+   diagnostico directamente en la imagen que se esta viendo, para que el probador lo pueda leer. */
+static int pvr_fallos;
+static void pvr_colgado(int estado)
+{
+    char s[96]; uint16_t *fb = (uint16_t *)(0xa5000000 + (PVR_GET(0x0050) & 0x7ffffc)); int i;
+    uint32_t err = *(volatile uint32_t *)0xa05f6908;
+    for (i = 0; i < 6 * 24 * 640; i++) fb[i] = 0;
+    sprintf(s, "PVR COLGADO  estado %d  tri %u  vtx %u  err %08lx", estado, (unsigned)tri_enviados, (unsigned)vtx_ult, (unsigned long)err);
+    bfont_draw_str(fb + 8 * 640 + 8, 640, 1, s);
+    sprintf(s, "VB %lu/%lu  OPB %lu/%lu  lejos %d", (unsigned long)(PVR_GET(PVR_TA_VERTBUF_POS) - PVR_GET(PVR_TA_VERTBUF_START)),
+            (unsigned long)(PVR_GET(PVR_TA_VERTBUF_END) - PVR_GET(PVR_TA_VERTBUF_START)),
+            (unsigned long)((PVR_GET(PVR_TA_OPB_POS) << 2) - PVR_GET(PVR_TA_OPB_START)),
+            (unsigned long)(PVR_GET(PVR_TA_OPB_END) - PVR_GET(PVR_TA_OPB_START)), (int)lejos);
+    bfont_draw_str(fb + 36 * 640 + 8, 640, 1, s);
+    sprintf(s, "fallos seguidos %d (haz una foto y mandala)", pvr_fallos);
+    bfont_draw_str(fb + 64 * 640 + 8, 640, 1, s);
+}
+
 int main(int argc, char **argv)
 {
-    /* bufer de vertices de 1 MB (x2) y 4 OPB de reserva: en la consola real un bufer u OPB lleno cuelga el TA */
-    pvr_init_params_t pp = { { PVR_BINSIZE_16, 0, PVR_BINSIZE_16, 0, PVR_BINSIZE_16 }, 1024 * 1024, 0, 0, 0, 4 };
+    /* bufer de vertices de 1 MB (x2); opacos con bloques de 32 (el suelo cercano toca muchas teselas) y 5 OPB de
+       reserva: en la consola real un bufer u OPB lleno cuelga el TA */
+    pvr_init_params_t pp = { { PVR_BINSIZE_32, 0, PVR_BINSIZE_16, 0, PVR_BINSIZE_16 }, 1024 * 1024, 0, 0, 0, 5 };
     int estado = TITULO, auto_ = 0, ver = VER, pausa = 0, l, i, r;
     uint32_t cuadro = 0, bot_ant = 0, t_estado = 0; uint64_t t0, tcpu = 0, c0;
     float cam_y = 0, tiempo = TIEMPO_ETAPA, fps = 0, ms = 0, cam_fw[3] = { 0, 0, -1 }, ttit = 0;
@@ -1450,7 +1470,7 @@ int main(int argc, char **argv)
         }
 
         t_log += timer_us_gettime64() - c_log;
-        pvr_wait_ready();
+        if (pvr_wait_ready() < 0) { if (++pvr_fallos >= 5) pvr_colgado(estado); } else pvr_fallos = 0;
         c0 = timer_us_gettime64();
         if (estado == TITULO) pvr_set_bg_color(54 / 255.0f, 62 / 255.0f, 74 / 255.0f);   /* fondo gris del frontal */
         else pvr_set_bg_color(0.45f, 0.65f, 0.95f);
