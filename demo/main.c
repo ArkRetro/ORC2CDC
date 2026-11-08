@@ -254,7 +254,7 @@ static float altura(float s, float x)
 }
 
 /* ---------------------------------------------------------------- coche */
-typedef struct { float s, x, a, v; float pos[3], fw[3], up[3]; int choque, derrape; float deriva; } coche_t;
+typedef struct { float s, x, a, v; float pos[3], fw[3], up[3]; int choque, derrape, t_derrape, t_muro; float deriva, freno_ant, gas_ant; } coche_t;
 static coche_t yo;
 #define VMAX 82.0f
 /* posicion y orientacion en el mundo a partir de (s, x, a), apoyado en la calzada (altura, cabeceo, balanceo) */
@@ -323,33 +323,62 @@ static void traf_paso(float dt)
     }
 }
 
+/* Conduccion, siguiendo el modelo del original (SlipAngleCtrl / RearGripCtrl / CorneringCtrl de la decompilacion de
+   PC), simplificado: a = direccion de avance respecto a la carretera; deriva = carroceria respecto al avance.
+   - derrape: un toque de freno (o soltar el gas frenando) arranca un temporizador de 40 cuadros; se mantiene mientras
+     la deriva pasa de 8,4 grados y acaba 12 cuadros despues de bajar de ahi.
+   - en derrape la carroceria apunta hacia dentro de la curva: la deriva busca giro x 0,6 rad mas el sesgo de la
+     curva que viene (la curva marca el angulo de equilibrio); contravolante la reduce; tope 73 grados.
+   - el derrape casi no quita velocidad; una ayuda lleva el avance hacia la carretera en proporcion a |sin deriva|.
+   - sin derrape la deriva vuelve deprisa a una pequena (giro x 0,05). */
+#define DERIVA_MAX 1.276f                                       /* 0x3400 = 73 grados */
 static void coche_paso(coche_t *c, float giro, float gas, float freno, float dt)
 {
-    float p[3], th0, th1, iz, de, g, yaw, lim;
+    float p[3], th0, th1, iz, de, g, yaw, lim, sesgo, obj; int f;
     ruta_en(c->s, p, &th0, NULL, NULL);
     g = fminf(c->v / 8.0f, 1.0f) * (1.0f - 0.45f * c->v / VMAX);
-    /* derrape: a mas de 90 km/h, girando y con un toque de freno; dura mientras se mantiene el giro */
-    if (!c->derrape && c->v > 25.0f && fabsf(giro) > 0.5f && freno > 0.3f) c->derrape = giro > 0 ? 1 : -1;
-    if (c->derrape && (fabsf(giro) < 0.15f || c->v < 18.0f || giro * c->derrape < 0)) c->derrape = 0;
-    if (c->derrape) freno *= 0.2f;
-    c->deriva += ((c->derrape ? 0.35f * c->derrape : 0) - c->deriva) * 4.0f * dt;
-    yaw = giro * 1.6f * g * (c->derrape ? 1.3f : 1.0f);
+    /* temporizador de derrape (RearGripCtrl): toque de freno con el gas no a fondo, o soltar gas frenando */
+    f = c->t_derrape > 0 ? c->t_derrape - 1 : 0;
+    if (c->v > 16.0f && fabsf(giro) > 0.2f &&
+        ((freno > 0.04f && c->freno_ant <= 0.04f && gas < 0.98f) || (gas < 0.98f && c->gas_ant >= 0.98f && freno > 0.04f))) f = 40;
+    if (f > 0 && fabsf(c->deriva) > 0.147f) f = f > 12 ? f : 12;      /* se mantiene mientras deriva > 8,4 grados */
+    c->t_derrape = f; c->derrape = f > 0 ? (c->deriva >= 0 ? 1 : -1) : 0;
+    c->freno_ant = freno; c->gas_ant = gas;
+    {   /* sesgo de la curva que viene: el angulo de equilibrio del derrape */
+        float q[3], tq; ruta_en(c->s + 40.0f, q, &tq, NULL, NULL);
+        sesgo = fmaxf(-0.6f, fminf(0.6f, 2.5f * (tq - th0)));
+    }
+    if (f > 0) {
+        obj = giro * 0.6f + sesgo * 0.8f;
+        if (giro * c->deriva < 0) obj = c->deriva * (1.0f - 1.5f * fabsf(giro)) * 0.5f;   /* contravolante: endereza */
+        c->deriva += (obj - c->deriva) * 2.2f * dt;
+        if (c->deriva > DERIVA_MAX) c->deriva = DERIVA_MAX;
+        if (c->deriva < -DERIVA_MAX) c->deriva = -DERIVA_MAX;
+        freno *= 0.25f;                                         /* el derrape casi no frena */
+        yaw = giro * 1.6f * g * 1.25f;                          /* derrapando se cierra mas la curva */
+        c->a -= c->a * 1.5f * fabsf(sinf(c->deriva)) * dt;      /* ayuda: el avance va hacia la carretera */
+    } else {
+        c->deriva += (giro * 0.05f * fminf(c->v / 30.0f, 1.0f) - c->deriva) * 8.0f * dt;
+        yaw = giro * 1.6f * g;
+        c->a -= c->a * 0.15f * dt;
+    }
     c->a += yaw * dt;
-    c->a -= c->a * 0.3f * dt;                                   /* un poco de agarre: el coche se endereza */
     c->v += (gas * 9.5f * (1.0f - c->v / VMAX) - freno * 18.0f - 0.0004f * c->v * c->v - 0.3f) * dt;
     if (c->v < 0) c->v = 0;
     c->s += c->v * cosf(c->a) * dt;
     c->x += c->v * sinf(c->a) * dt;
     ruta_en(c->s, p, &th1, &iz, &de);
     c->a -= th1 - th0;                                          /* la carretera gira bajo el coche */
-    c->choque = 0;
-    lim = iz - 1.0f;
-    if (c->x < -lim) { c->x = -lim; if (c->a < 0) c->a = -c->a * 0.3f; c->v -= c->v * 1.5f * dt; c->choque = 1; }
-    lim = de - 1.0f;
-    if (c->x > lim) { c->x = lim; if (c->a > 0) c->a = -c->a * 0.3f; c->v -= c->v * 1.5f * dt; c->choque = 1; }
-    {   float am = c->derrape ? 0.45f : 1.2f;                    /* al derrapar, sin cruzarse del todo */
-        if (c->a > am) c->a = am;
-        if (c->a < -am) c->a = -am; }
+    {   /* muros: un golpe al tocar (15 %) y un roce suave mientras se sigue pegado; el coche rebota hacia dentro */
+        int antes = c->t_muro > 0; c->choque = 0; if (c->t_muro > 0) c->t_muro--;
+        lim = iz - 1.0f;
+        if (c->x < -lim) { c->x = -lim; if (c->a < 0) c->a = -c->a * 0.4f; c->choque = 1; }
+        lim = de - 1.0f;
+        if (c->x > lim) { c->x = lim; if (c->a > 0) c->a = -c->a * 0.4f; c->choque = 1; }
+        if (c->choque) { c->v -= c->v * (antes ? 0.35f * dt : 0.15f); c->deriva *= 0.9f; c->t_muro = 30; }
+    }
+    if (c->a > 1.2f) c->a = 1.2f;
+    if (c->a < -1.2f) c->a = -1.2f;
     coche_coloca(c);
 }
 
@@ -678,7 +707,12 @@ int main(int argc, char **argv)
             mira[0] = q[0]; mira[1] = q[1] + 4.0f; mira[2] = q[2];
             yo.s = s; coche_paso(&yo, 0, 0, 0, 0);
         } else {
-            for (i = 0; i < 3; i += 2) cam_fw[i] += (yo.fw[i] - cam_fw[i]) * 0.12f;
+            {   /* camara (SetCarCamera): entre el avance y la carroceria, mas hacia la carroceria con mas deriva */
+                float p[3], th, d = yo.deriva * (0.5f + 0.3f * fabsf(sinf(yo.deriva))), cy, fwc[3];
+                ruta_en(yo.s, p, &th, NULL, NULL); cy = th + yo.a + d;
+                fwc[0] = sinf(cy); fwc[2] = -cosf(cy);
+                for (i = 0; i < 3; i += 2) cam_fw[i] += (fwc[i] - cam_fw[i]) * 0.15f;
+            }
             norm(cam_fw);
             cam_y += (yo.pos[1] - cam_y) * 0.15f;
             ojo_[0] = yo.pos[0] - 6.5f * cam_fw[0]; ojo_[1] = cam_y + 2.4f; ojo_[2] = yo.pos[2] - 6.5f * cam_fw[2];
@@ -695,7 +729,7 @@ int main(int argc, char **argv)
                 pvr_get_stats(&ps);
                 sprintf(s2, "%.1ffps %lutri cpu %.1f+%.1f pvr %.1fms", (double)fps, (unsigned long)tri_enviados,
                         (double)ms_log, (double)ms, (double)(ps.rnd_last_time / 1000000.0));
-                sprintf(s3, "d%d vb%uK ram%uK vram%uK carga%.1fs", (int)lejos, (unsigned)(ps.vtx_buffer_used >> 10),
+                sprintf(s3, "d%d der%d%s ram%uK vram%uK carga%.1fs", (int)lejos, (int)(yo.deriva * 57.3f), yo.t_derrape ? "D" : "",
                         (unsigned)(mi.uordblks >> 10), (unsigned)(pvr_mem_available() >> 10), (double)t_carga);
             }
             texto_arriba(s1, ver ? s2 : NULL, ver ? s3 : NULL);
