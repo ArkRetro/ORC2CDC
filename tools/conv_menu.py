@@ -31,7 +31,7 @@ MENU.DAT: mismo formato que HUD.DAT (ver conv_hud.py; cabecera 'HUD1', texturas,
 que el lector de comun/hud.c no mira:
   'MNU1', u32 n_pantallas, u32 n_tramos, u32 0
   pantallas 48 bytes: char nombre[16]; u16 primer grupo, n grupos, primer uso, n usos, primera textura, n texturas;
-    u32 bytes de VRAM de sus texturas; u32 0, 0, 0
+    u32 bytes de VRAM de sus texturas; u32 0, 0, 0, 0
   tramos 32 bytes: char nombre[16]; u16 uso, cuadro inicial, cuadro final, modo (0 una vez y se queda en el final,
     1 bucle, 2 quieto); u32 0, 0
 Cada pantalla tiene sus propias texturas (atlas recortados al alfa, clase conv_hud.Atlas): un cargador de menus sube
@@ -44,7 +44,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from conv_hud import Disco, Ani, Atlas, Hud, texturas, escena, imagen_xst, dibuja_grupo, _t, _s
 
 B = 0x44                                # SUMO_FE_CVT
-MAX_CUADROS, MAX_PIEZAS = 400, 12000   # limites por grupo (evitan conversiones desbocadas)
+MAX_CUADROS, MAX_PIEZAS = 1000, 12000   # limites por grupo (evitan conversiones desbocadas)
 
 def banco_menu(D, b):
     """(Ani, texturas, xst) del banco b con el indice de SPRITE.PS2 corregido (ver docstring)"""
@@ -95,7 +95,7 @@ def logo_titulo(D):
     return rgba, (L, T)
 
 # ---------------------------------------------------------------- conversion
-def parte(p, lim=500):
+def parte(p, lim=500, lim2=250):
     """divide una pieza cuyo rectangulo de textura pase de lim texeles (las tiras de 1024 del fondo no caben en un
     atlas de 512) en trozos; cada trozo lleva su matriz desplazada y la misma ancla en pantalla"""
     l, t, r, b = p['src']; w, h = p['w'], p['h']
@@ -104,14 +104,14 @@ def parte(p, lim=500):
         for i in range(n):
             q = dict(p); l0, l1 = l + (r - l) * i / n, l + (r - l) * (i + 1) / n; x0 = w * i / n
             q['src'] = (l0, t, l1, b); q['w'] = w / n; q['M'] = _t(x0, 0) @ p['M']; q['anc'] = (p['anc'][0] - x0, p['anc'][1])
-            out += parte(q, lim)
+            out += parte(q, lim, lim2)
         return out
-    if b - t > lim:
-        n = int(np.ceil((b - t) / lim)); out = []
+    if b - t > lim or (b - t > lim2 and r - l > lim2):      # el atlas mayor es 512x256 o 256x512
+        n = int(np.ceil((b - t) / (lim2 if r - l > lim2 else lim))); out = []
         for i in range(n):
             q = dict(p); t0, t1 = t + (b - t) * i / n, t + (b - t) * (i + 1) / n; y0 = h * i / n
             q['src'] = (l, t0, r, t1); q['h'] = h / n; q['M'] = _t(0, y0) @ p['M']; q['anc'] = (p['anc'][0], p['anc'][1] - y0)
-            out += parte(q, lim)
+            out += parte(q, lim, lim2)
         return out
     return [p]
 
@@ -207,7 +207,7 @@ def convierte(iso, salida, previas):
     pantalla('COMUN', [('FONDO', 0x4400ab, [0], 0, (0, 0), [], False)])
 
     def cab(nombre, tok):
-        return (nombre, tok, R(0, 199), 5, (0, 0), [('ENTRA', 0, 30, U)], True)
+        return (nombre, tok, R(0, 40), 5, (0, 0), [('ENTRA', 0, 30, U), ('QUIETA', 40, 40, Q)], True)
     # MENU PRINCIPAL: SINGLE PLAYER, MULTIPLAYER, OUTRUN2SP, RANKINGS, OPTIONS
     sel = lambda n, paso, ini: [('ENTRA', 0, ini, U)] + [('SEL%d' % i, ini + paso * i, ini + paso * i, Q) for i in range(n)] + \
         [('MUEVE%d%d' % (i, i + 1), ini + paso * i, ini + paso * (i + 1), U) for i in range(n - 1)]
@@ -235,14 +235,15 @@ def convierte(iso, salida, previas):
     pantalla('MUSICA', [('MUSICA_RADIO', 0x4400a7, R(0, 25), 5, (0, 0), [('ENTRA', 0, 25, U), ('SALE', 25, 0, U)], False),
                         ('MUSICA_AYUDA', 0x4400a6, R(0, 35), 6, (0, 0), [('ENTRA', 0, 35, U)], False),
                         ('MUSICA_L0', 0x4400c6, R(0, 340), 3, (0, 0), tr_lista(9), False),
-                        ('MUSICA_L1', 0x4400c7, [20 + 40 * k for k in range(7)], 3, (0, 0), [], False),
-                        ('MUSICA_L2', 0x440033, [20 + 40 * k for k in range(12)], 3, (0, 0), [], False),
                         ('MUSICA_T0', 0x440030, R(0, 989), 6, (0, 0),
                          [('TEMA%d' % k, 110 * k, 110 * k + 109, BU) for k in range(9)], False),
-                        ('MUSICA_T1', 0x44002f, [110 * k + 55 for k in range(7)], 6, (0, 0), [], False),
-                        ('MUSICA_T2', 0x44002e, [110 * k + 55 for k in range(12)], 6, (0, 0), [], False),
                         ('MUSICA_LISTA', 0x4400c8, [1, 2, 0], 6, (0, 0), [], False),
                         ('MUSICA_CANDADO', 0x440066, [5], 6, (0, 0), [], False)])
+    # listas 1 y 2 (temas 1986/1989 y remezclas; en la demo, bloqueadas): aparte para no pasar de ~1,2 MB de VRAM
+    pantalla('MUSICA_EXTRA', [('MUSICA_L1', 0x4400c7, [20 + 40 * k for k in range(7)], 3, (0, 0), [], False),
+                              ('MUSICA_L2', 0x440033, [20 + 40 * k for k in range(12)], 3, (0, 0), [], False),
+                              ('MUSICA_T1', 0x44002f, [110 * k + 55 for k in range(7)], 6, (0, 0), [], False),
+                              ('MUSICA_T2', 0x44002e, [110 * k + 55 for k in range(12)], 6, (0, 0), [], False)])
     os.makedirs(salida, exist_ok=True)
     texs = escribe(m, os.path.join(salida, 'MENU.DAT'))
     maquetas(m, previas, hojas)
@@ -255,8 +256,8 @@ def escribe(m, ruta):
     c = struct.unpack_from('<12I', d, 0); off_taco = c[11]; o_dat = off_taco + 16
     blq = bytearray(b'MNU1' + struct.pack('<3I', len(m.pant), len(m.tramos), 0))
     for p in m.pant:
-        blq += struct.pack('<16s6HI3I', p['nombre'].encode(), p['g0'], p['ng'], p['u0'], p['nu'], p['t0'], p['nt'],
-                           p['vram'], 0, 0, 0)
+        blq += struct.pack('<16s6HI4I', p['nombre'].encode(), p['g0'], p['ng'], p['u0'], p['nu'], p['t0'], p['nt'],
+                           p['vram'], 0, 0, 0, 0)
     for n, u, i0, i1, modo in m.tramos:
         blq += struct.pack('<16s4H2I', n.encode(), u, i0, i1, modo, 0, 0)
     # el bloque va entre los tacometros y los datos de textura: se desplazan los datos y sus desplazamientos
