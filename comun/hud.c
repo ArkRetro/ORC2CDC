@@ -16,7 +16,7 @@ static h_tex_t *tex; static h_spr_t *spr; static h_grp_t *grp; static h_pie_t *p
 static uint32_t n_tex, n_grp, n_uso;
 static pvr_ptr_t *vtex;
 static pvr_poly_hdr_t *cab;                                     /* una cabecera por textura (TR, modula alfa) */
-static int taco = -1, ult_tex = -1;
+static int taco = -1, ult_tex = -1, g_fuera = -1;           /* g_fuera: DIG_PUNTOS_FUERA (estilo 0xD, sin uso propio) */
 static float zcapa;
 
 static int busca_uso(const char *n)
@@ -41,6 +41,7 @@ int hud_carga(const char *fich, int modelo)
     tex = (h_tex_t *)(dat + c[6]); spr = (h_spr_t *)(dat + c[7]); grp = (h_grp_t *)(dat + c[8]);
     pie = (h_pie_t *)(dat + c[9]); uso = (h_uso_t *)(dat + c[10]);
     taco = dat[c[11] + (modelo & 15)]; if (taco == 0xff) taco = -1;
+    for (i = 0, g_fuera = -1; i < n_grp; i++) if (!strncmp(grp[i].nombre, "DIG_PUNTOS_FUERA", 16)) g_fuera = i;
     vtex = calloc(n_tex, sizeof *vtex); cab = calloc(n_tex, sizeof *cab); usada = calloc(n_tex, 1);
     for (i = 0; i < n_grp; i++)
         if (grupo_util(i)) for (j = grp[i].pri; j < (uint32_t)grp[i].pri + grp[i].np; j++) usada[spr[pie[j].spr].tex] = 1;
@@ -95,15 +96,28 @@ static void dibuja(const char *nombre, int alt, int cuadro, float alfa)
     grupo(g, cuadro, uso[u].x, uso[u].y, alfa);
 }
 
-/* numero: un caracter por cifra (' ' solo avanza), en x (o en la del uso si x < -9000) */
+/* cifras de un uso con el grupo g en (x, y): un caracter por cifra (' ' solo avanza) */
+static void cifras(int u, int g, const char *txt, float x, float y, float alfa)
+{
+    int i;
+    for (i = 0; txt[i]; i++)
+        if (txt[i] >= '0' && txt[i] <= '9') grupo(g, txt[i] - '0', x + i * uso[u].avance, y, alfa);
+}
+/* numero: en x (o en la del uso si x < -9000) */
 static void numero(const char *nombre, int alt, const char *txt, float x)
 {
-    int u = busca_uso(nombre), g, i;
+    int u = busca_uso(nombre), g;
     if (u < 0) return;
     g = alt && uso[u].alt != 0xffff ? uso[u].alt : uso[u].grp;
     if (x < -9000) x = uso[u].x;
-    for (i = 0; txt[i]; i++)
-        if (txt[i] >= '0' && txt[i] <= '9') grupo(g, txt[i] - '0', x + i * uso[u].avance, uso[u].y, 1);
+    cifras(u, g, txt, x, uso[u].y, 1);
+}
+/* grupo de las cifras de la puntuacion por estilo (0 normal, 1 rebufo = alternativo, 2 fuera) */
+static int grupo_puntos(int u, int estilo)
+{
+    if (estilo == 2 && g_fuera >= 0) return g_fuera;
+    if (estilo == 1 && uso[u].alt != 0xffff) return uso[u].alt;
+    return uso[u].grp;
 }
 
 /* dentro de la lista TR, despues de todo lo demas (z por encima de la escena) */
@@ -141,7 +155,9 @@ void hud_dibuja(const hud_estado_t *e)
     else { sprintf(b, "%02d", t); numero("TIEMPO", 0, b, -9999); }
     cs = e->crono_ms; if (cs > 99 * 60000 + 59999) cs = 99 * 60000 + 59999;
     sprintf(b, "%2d %02d %03d", cs / 60000, (cs / 1000) % 60, cs % 1000); numero("CRONO", 0, b, -9999);
-    sprintf(b, "%07d", e->puntos % 10000000); numero("PUNTOS", e->derrape, b, -9999);
+    t = busca_uso("PUNTOS");                                    /* 4BD480: "%07d", 9999999 como mucho */
+    if (t >= 0) { sprintf(b, "%07d", e->puntos > 9999999 ? 9999999 : e->puntos < 0 ? 0 : e->puntos);
+                  cifras(t, grupo_puntos(t, e->puntos_estilo), b, uso[t].x, uso[t].y, 1); }
     t = e->kmh < 0 ? 0 : e->kmh > 999 ? 999 : e->kmh;
     sprintf(b, "%03d", t); numero("VELOCIDAD", e->rebufo, b, -9999);
 }
@@ -153,4 +169,15 @@ void hud_aviso(const char *nombre, int cuadro, float alfa)
     if (zcapa < 100.0f) zcapa = 100.0f;
     ult_tex = -1;
     dibuja(nombre, 0, cuadro, alfa);
+}
+
+/* 4BD480: cada mensaje de la cola en (0x1E0, y + 0x49) con "%7d" */
+void hud_puntos_msg(int puntos, int estilo, float dy, float alfa)
+{
+    char b[16]; int u;
+    if (!dat || (u = busca_uso("PUNTOS")) < 0 || alfa <= 0.004f) return;
+    if (zcapa < 100.0f) zcapa = 100.0f;
+    ult_tex = -1;
+    sprintf(b, "%7d", puntos > 9999999 ? 9999999 : puntos < 0 ? 0 : puntos);
+    cifras(u, grupo_puntos(u, estilo), b, uso[u].x - 1, uso[u].y + dy, alfa);
 }

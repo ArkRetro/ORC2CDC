@@ -371,6 +371,39 @@ static void prueba_choques(const or2_param_t *p)
     prueba_rebufo(p);
 }
 
+/* fuera del asfalto: velocidad tras 5 s a fondo partiendo de 200 km/h y radio de giro con el volante a 0,5, en
+   asfalto (material 1) y en tierra (material 3: mu 0,7 y resistencia de SetRunningResistance) */
+static void prueba_tierra(const or2_param_t *p)
+{
+    static const uint32_t sup[2] = { 1u << 1, 1u << 3 };
+    static const char *nom[2] = { "asfalto", "tierra " };
+    int k, i;
+    printf("\n== Superficie (GetRoadMu + SetRunningResistance) ==\n");
+    for (k = 0; k < 2; ++k) {
+        or2_coche_t c;
+        or2_entrada_t e;
+        float v5, gmax = 0.0f;
+        entrada_libre(&e);
+        for (i = 0; i < 4; ++i) e.sup[i] = sup[k];
+        e.sup_centro = sup[k];
+        or2_coloca(&c, p, 0.0f, fis_de_hud(p, 200.0f));
+        e.acelerador = 1.0f;
+        for (i = 0; i < (int)(5.0f * HZ); ++i) or2_paso(&c, p, &e, 0.0f);
+        v5 = c.velocidad_hud;
+        e.acelerador = 0.0f;
+        for (i = 0; i < (int)(3.0f * HZ); ++i) or2_paso(&c, p, &e, 0.0f);
+        printf("  %s: a fondo 5 s desde 200 -> %5.1f km/h; sin gas 3 s mas -> %5.1f km/h; mu %.2f/%.2f",
+               nom[k], v5, c.velocidad_hud, c.r[0].mu, c.r[2].mu);
+        or2_coloca(&c, p, 0.0f, fis_de_hud(p, 120.0f));
+        e.acelerador = 0.6f; e.stick = 0.5f;
+        for (i = 0; i < (int)(4.0f * HZ); ++i) {
+            or2_paso(&c, p, &e, 0.0f);
+            if (i > 60) { float g = fabsf(c.guinada * c.velocidad) / 9.80665f; if (g > gmax) gmax = g; }
+        }
+        printf("; giro a 0,5 desde 120: %.2f g max, %5.1f km/h a los 4 s\n", gmax, c.velocidad_hud);
+    }
+}
+
 int main(int argc, char **argv)
 {
     or2_param_t p;
@@ -420,6 +453,7 @@ int main(int argc, char **argv)
     prueba_derrape(&p, 0, 120.0f, -0.3f);
     prueba_viraje(&p, 1.0f);
     prueba_viraje(&p, 0.5f);
+    prueba_tierra(&p);
     /* coste */
     {
         or2_coche_t c;

@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """conv_tramo.py tu.iso n salida.dat: segmento (etapa) n de STAGE.PS2 al formato ORD4 de la Dreamcast (modelo.py):
 el bloque principal con sus texturas, el cielo aparte y la ruta (centro de la calzada cada 4 m con el ancho a cada
-lado). Sale de tu disco: no se distribuye."""
+lado). Sale de tu disco: no se distribuye.
+Cada punto de la ruta: x, y, z, ancho del asfalto izquierdo y derecho, NPERF alturas de -izq-2 a der+2, NCARRIL
+desvios de carril, y de la colision del original (COLI0200 de la etapa): limite transitable izquierdo y derecho (hasta
+el muro o el vacio, positivos), NEXT alturas a cada lado entre el perfil y el limite (de dentro afuera, izquierda y
+luego derecha) y NBANDA franjas de superficie de izquierda a derecha (desvio donde empieza, indice de material del
+original: bandera 1 << indice; las que sobran empiezan en el limite derecho)."""
 import os, struct, sys
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -256,6 +261,97 @@ def perfil(seg, cam, an):
             ok = ~np.isnan(fila); fila[:] = np.interp(np.arange(NPERF), np.nonzero(ok)[0], fila[ok])
     return res
 
+NEXT = 3
+NBANDA = 10
+MURO = 0x010f4060                       # materiales de muro (CbwColiWall: contactos con r.u32(8) & 0x010f4060)
+
+def es_muro(m):
+    return m <= 0 or bool((1 << m) & MURO)
+
+def superficies(seg, cam, an):
+    """de la colision del original: en cada punto de la ruta se recorre la perpendicular cada 0,5 m (-60 a 60) desde el
+    centro hacia fuera, tomando el poligono de colision mas cercano en altura al anterior; el limite transitable es el
+    primer muro o vacio pasado el borde del asfalto. Devuelve (limites (n, 2), alturas exteriores (n, 2 * NEXT),
+    franjas (n, 2 * NBANDA), alturas de la colision en las x del perfil (n, NPERF), NaN donde no hay); None si la
+    etapa no tiene colision"""
+    c = stage.coli(seg)
+    if c is None: return None
+    V, mat = c; C = 8.0; rej = {}
+    lo = np.floor(V[:, :, [0, 2]].min(1) / C).astype(int); hi = np.floor(V[:, :, [0, 2]].max(1) / C).astype(int)
+    for k in range(len(V)):
+        for gx in range(lo[k, 0], hi[k, 0] + 1):
+            for gz in range(lo[k, 1], hi[k, 1] + 1): rej.setdefault((gx, gz), []).append(k)
+    # cada cuadrilatero en dos triangulos (0, 1, 2) y (0, 2, 3)
+    TA = np.concatenate([V[:, 0], V[:, 0]]); TB = np.concatenate([V[:, 1], V[:, 2]]); TD = np.concatenate([V[:, 2], V[:, 3]])
+    TM = np.concatenate([mat, mat]); nq = len(V)
+    t = np.gradient(cam, axis=0); t[:, 1] = 0; t /= np.linalg.norm(t, axis=1, keepdims=True) + 1e-9
+    der = np.stack([-t[:, 2], np.zeros(len(t)), t[:, 0]], 1)
+    xs = np.arange(-60, 60.01, 0.5); j0 = len(xs) // 2
+    lim = np.zeros((len(cam), 2)); ext = np.zeros((len(cam), 2 * NEXT)); ban = np.zeros((len(cam), 2 * NBANDA))
+    hpf = np.full((len(cam), NPERF), np.nan)
+    for i, c0 in enumerate(cam):
+        P = c0[None, :] + xs[:, None] * der[i][None, :]
+        cel = set(zip(np.floor(P[:, 0] / C).astype(int), np.floor(P[:, 2] / C).astype(int)))
+        q = sorted({k for cc in cel for k in rej.get(cc, [])})
+        alt = np.full(len(xs), np.nan); m = np.full(len(xs), -1)
+        if q:
+            q = np.array(q); q = np.concatenate([q, q + nq])
+            a = TA[q]; v0 = TB[q] - a; v1 = TD[q] - a
+            v2x = P[:, None, 0] - a[None, :, 0]; v2z = P[:, None, 2] - a[None, :, 2]
+            den = v0[:, 0] * v1[:, 2] - v1[:, 0] * v0[:, 2]; ok = np.abs(den) > 1e-9; den = np.where(ok, den, 1)
+            u = (v2x * v1[None, :, 2] - v1[None, :, 0] * v2z) / den; w = (v0[None, :, 0] * v2z - v2x * v0[None, :, 2]) / den
+            dentro = ok[None, :] & (u >= -1e-4) & (w >= -1e-4) & (u + w <= 1 + 1e-4)
+            H = np.where(dentro, a[None, :, 1] + u * v0[None, :, 1] + w * v1[None, :, 1], np.nan)
+            for paso in (range(j0, -1, -1), range(j0, len(xs))):          # del centro hacia cada lado
+                y = c0[1]; tol = 6.0
+                for j in paso:
+                    d = np.abs(H[j] - y)
+                    if np.isfinite(d).any():
+                        k = int(np.nanargmin(d))
+                        if d[k] < tol: alt[j] = H[j, k]; m[j] = TM[q[k]]; y = alt[j]; tol = 2.5
+        # huecos sueltos (juntas entre poligonos): el material del vecino
+        for j in range(1, len(xs) - 1):
+            if m[j] < 0 and m[j - 1] >= 0 and (m[j + 1] >= 0 or (j + 2 < len(xs) and m[j + 2] >= 0)):
+                m[j] = m[j - 1]; alt[j] = alt[j - 1]
+        ok = np.isfinite(alt)
+        xp = np.linspace(-an[i, 0] - 2, an[i, 1] + 2, NPERF); jp = np.clip(np.round((xp + 60) / 0.5).astype(int), 0, len(xs) - 1)
+        hpf[i] = np.where(ok[jp], alt[jp], np.nan)                             # la colision en las x del perfil
+        if ok.any(): alt = np.interp(np.arange(len(xs)), np.nonzero(ok)[0], alt[ok])
+        else: alt[:] = c0[1]
+        # desde dentro de cada borde del asfalto hacia fuera, hasta el primer muro o vacio
+        def borde(x0, sg):
+            j = int(np.clip(round((x0 + 60) / 0.5), 0, len(xs) - 1))
+            while es_muro(m[j]) and j != j0: j -= sg                          # hacia el centro hasta pisar algo
+            if es_muro(m[j]): return x0
+            while 0 <= j + sg < len(xs) and not es_muro(m[j + sg]): j += sg
+            return xs[j] + 0.25 * sg
+        # nunca por dentro del borde del asfalto (puntos sin colision bajo la ruta, como la salida de algunas etapas)
+        li = max(-borde(-an[i, 0] + 1.0, -1), an[i, 0]); ld = max(borde(an[i, 1] - 1.0, 1), an[i, 1])
+        lim[i] = (li, ld)
+        # alturas exteriores: de -izq-2 (fin del perfil) al limite, y de der+2 al limite
+        for lado, (x0, x1) in enumerate(((-an[i, 0] - 2, -li), (an[i, 1] + 2, ld))):
+            for k in range(NEXT):
+                x = x0 + (k + 1) / NEXT * (x1 - x0) if abs(x1) > abs(x0) else x0
+                ext[i, lado * NEXT + k] = np.interp(x, xs, alt)
+        # franjas entre los limites; sobre el asfalto (bordes de ajusta_al_asfalto) no se deja muro ni vacio
+        sobre = (xs >= -an[i, 0]) & (xs <= an[i, 1]) & np.array([es_muro(v) for v in m])
+        m[sobre] = 1
+        ja = int(round((-li + 60.25) / 0.5)); jb = int(round((ld + 59.75) / 0.5)) + 1
+        f = []
+        for j in range(ja, max(jb, ja + 1)):
+            mm = int(m[j]) if m[j] >= 0 else 0
+            if not f or f[-1][1] != mm: f.append([xs[j] - 0.25, mm])
+        if not f: f = [[-li, 1]]
+        f[0][0] = -li
+        while len(f) > NBANDA:                                               # la mas estrecha, con su vecina
+            w = [(f[k + 1][0] if k + 1 < len(f) else ld) - f[k][0] for k in range(len(f))]
+            k = int(np.argmin(w[1:])) + 1
+            del f[k]
+            if k < len(f) and f[k - 1][1] == f[k][1]: del f[k]
+        f += [[ld, f[-1][1]]] * (NBANDA - len(f))
+        ban[i] = np.array(f, float).reshape(-1)
+    return lim, ext, ban, hpf
+
 def main():
     ruta, n, sal = sys.argv[1], int(sys.argv[2]), sys.argv[3]
     seg = stage.segmentos(isomod.Iso(ruta))[n]
@@ -270,7 +366,22 @@ def main():
     if cam is None: cam = recorrido(seg)
     cam, an, car = ajusta_al_asfalto(seg, cam)                 # centro, bordes y carriles: los del asfalto
     if an is None: an = anchos(seg, cam); car = np.zeros((len(cam), NCARRIL))
-    mod.ruta = np.concatenate([cam, an, perfil(seg, cam, an), car], 1)
+    sup = superficies(seg, cam, an)
+    if sup is None:                                            # sin colision: el limite es el borde del asfalto
+        ban = np.zeros((len(cam), NBANDA, 2)); ban[:, :, 0] = an[:, 1:2]; ban[:, :, 1] = 1; ban[:, 0, 0] = -an[:, 0]
+        sup = (an.copy(), np.zeros((len(cam), 2 * NEXT)), ban.reshape(len(cam), -1))
+    pf = perfil(seg, cam, an)
+    if len(sup) > 3:
+        # fuera del asfalto el perfil (rayos contra la geometria visible) puede caer en el terreno de mas abajo: alli
+        # manda la altura del suelo de la colision, el que pisa el coche en el original
+        xp = np.linspace(-an[:, :1] - 2, an[:, 1:] + 2, NPERF, axis=1)[:, :, 0]
+        fuera = ((xp < -an[:, :1] + 0.5) | (xp > an[:, 1:] - 0.5)) & np.isfinite(sup[3])
+        dentro = ~fuera & np.isfinite(sup[3])
+        if dentro.any(): print('colision - perfil en el asfalto: mediana %.2f m, p95 %.2f m'
+                               % (np.median(np.abs(sup[3] - pf)[dentro]), np.percentile(np.abs(sup[3] - pf)[dentro], 95)))
+        pf = np.where(fuera, sup[3], pf)
+    if not sup[1].any(): sup = (sup[0], np.repeat(pf[:, [0, -1]], NEXT, 1), sup[2])
+    mod.ruta = np.concatenate([cam, an, pf, car, sup[0], sup[1], sup[2]], 1)
     ini = mod.escribe(sal)
     print('segmento %d: %d tiras (%d opacas, %d recorte, %d transparentes, %d cielo), %d vertices, %d triangulos, '
           '%d texturas (%d KB), ruta %d puntos (%.0f m), %d KB'

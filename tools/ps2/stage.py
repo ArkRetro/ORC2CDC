@@ -40,6 +40,22 @@ class Segmento(Bloque):
         p = max(self.bloques, key=lambda b: b.w[2] + b.w[3])
         Bloque.__init__(self, iso, p.o, p.w)
 
+def coli(seg):
+    """colision del segmento (su primera entrada, 'COLI0200', el mismo formato que los coli*.bin del PC sin el prefijo de
+    tamano): cuenta de poligonos (+8), los de la carretera principal (+12), tamano de cabecera (+16), 8 secciones (+20):
+    0 listas de la rejilla, 1 un byte por poligono (material: su indice en los 5 bits bajos, la bandera es 1 << indice),
+    2 poligonos de 64 bytes (4 vertices x, y, z float, centro, banderas +60), 3 normales, 4 banderas extra, 5 longitud
+    de la carretera de cada poligono. Devuelve (vertices (n, 4, 3), material (n,)) o None"""
+    import numpy as np
+    for h, o, s in seg.ent:
+        d = bytes(seg.m[o:o + s])
+        if d[:8] != b'COLI0200': continue
+        n = struct.unpack('<I', d[8:12])[0]; sec = struct.unpack('<8I', d[20:52])
+        mat = np.frombuffer(d[sec[1]:sec[1] + n], np.uint8) & 31
+        P = np.frombuffer(d[sec[2]:sec[2] + 64 * n], np.uint8).reshape(n, 64)
+        return P[:, :48].copy().view('<f4').reshape(n, 4, 3).astype(float), mat.astype(int)
+    return None
+
 def segmentos(iso):
     g = []; cur = None
     for h, o, s in iso.paquete('STAGE.PS2'):

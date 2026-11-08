@@ -182,7 +182,17 @@ typedef struct {
     /* rumbo de la carretera alli (rad, + derecha). grua_ok = 0: sin punto.  */
     int   grua_ok;
     float grua_dx, grua_dy, grua_rumbo;
+    /* superficie (atributo de colision del poligono bajo cada rueda y bajo el centro, como wheel+0x14 y
+       event+0x248 del original): bandera 1 << indice de material de la COLI. 0 = sin dato (se usa mu para las
+       cuatro ruedas y no hay resistencia de tierra). Ver or2_mu_superficie y OR2_SUP_TIERRA. */
+    uint32_t sup[4];
+    uint32_t sup_centro;
 } or2_entrada_t;
+
+/* materiales de tierra/arena/hierba (2, 3, 4 y 15): mu 0,7 y resistencia de rodadura (SetRunningResistance) */
+#define OR2_SUP_TIERRA 0x801cu
+/* materiales de muro (CbwColiWall): 5, 6, 14, 16..19 y 24 */
+#define OR2_SUP_MURO   0x010f4060u
 
 typedef struct {
     float carga_ref, carga; /* kgf                                           */
@@ -190,6 +200,8 @@ typedef struct {
     float omega, omega_t;   /* rad/s                                         */
     float freno, agarre, comp, toe_ang, toe_comp;
     float f_lat, f_lon, resist;
+    float mu;               /* +E8 adherencia del firme bajo la rueda (GetRoadMu + assMuControl)    */
+    float r_tierra;         /* +94 resistencia fuera del asfalto (kgf, contra la velocidad de rueda)*/
     int16_t ang, ang_vel, desliz; /* unidades 65536 = 2pi (+ izquierda)    */
     float fx, fy;           /* fuerza total en el cuerpo (kgf), x adel y izq */
     float vdx, vdy;         /* direccion de la velocidad de la rueda (cuerpo)*/
@@ -256,6 +268,8 @@ typedef struct {
     float rebufo;           /* +E68 mejor puntuacion de rebufo (0..1; >0.18 = rebufo en el HUD)       */
     float rebufo_k;         /* +E6C fraccion de resistencia del aire que se quita                     */
     int   rebufo_n;         /* +E70 rampa (0..180 cuadros)                                            */
+    uint32_t rebufo_marca;  /* salida de or2_rebufo: bit i = el otro i ha sido el mejor hasta ese momento con  */
+                            /* mas de 0,18 y |+162| < 1500 (el original le pone +B72 = 180: rebufo reciente) */
     /* choque fuerte contra el muro (CwCrushStatus 5038D0) y grua (PlWrecker 504900 / WrecPlBody 4A0C70) */
     int   grua;             /* +D68 cuadros que le quedan a la grua (0 = inactiva)                    */
     int   grua_ini;         /* +D6A cuadros con que empezo                                            */
@@ -279,6 +293,8 @@ void or2_inicia(or2_coche_t *c, const or2_param_t *p);
 void or2_coloca(or2_coche_t *c, const or2_param_t *p, float rumbo, float velocidad);
 /* Avanza dt segundos (pasos internos de 1/60.2 s). dt<=0: un paso exacto. */
 void or2_paso(or2_coche_t *c, const or2_param_t *p, const or2_entrada_t *e, float dt);
+/* mu de una bandera de superficie (GetRoadMu 500B30 sin el servicio de red: 1 -> 0, tierra -> 0,7, resto 1) */
+float or2_mu_superficie(uint32_t sup);
 
 /* Bloques de choques detras de las curvas en PARAM.DAT (datos = todo el fichero). 0 si va bien. Los punteros
    de las animaciones apuntan dentro de datos, que debe seguir vivo. */

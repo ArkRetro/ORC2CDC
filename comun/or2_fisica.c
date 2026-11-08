@@ -547,6 +547,30 @@ static void rodadura(or2_coche_t *c, const or2_param_t *p)
     }
 }
 
+/* SetRunningResistance (PC 502120, pc_wheel_dynamics.cpp running_resistance): fuera del asfalto (materiales
+   0x801c bajo la rueda, o bajo el centro del coche para las cuatro) una fuerza contra la velocidad de la rueda de
+   |cos(deriva de la rueda)| * 0,175 * kmh^2 * 0,0225 kgf. Constantes 6AE4E4..6AE4F8; sin ella durante el rebote
+   (+283). La parte del handicap (+DF8 / +DB4) es nula para el jugador. */
+static void resistencia_tierra(or2_coche_t *c, const or2_entrada_t *e)
+{
+    int i, centro = (e->sup_centro & OR2_SUP_TIERRA) != 0;
+    float base = 0.0f;
+    if (c->c283 <= 0) { float k = (float)c->kmh; base = -(k * k * 0.0225f); }
+    for (i = 0; i < 4; ++i) {
+        or2_rueda_t *q = &c->r[i];
+        float esc = 0.0f;
+        if (centro || (e->sup[i] & OR2_SUP_TIERRA)) esc = 0.175f;
+        q->r_tierra = esc != 0.0f ? fabsf(cosf((float)q->desliz * U2R)) * esc * base : 0.0f;
+    }
+}
+
+float or2_mu_superficie(uint32_t sup)
+{
+    if (sup == 1u) return 0.0f;
+    if (sup == 4u || sup == 8u || sup == 16u || sup == 0x8000u) return 0.699999988f;   /* PC 5C403C */
+    return 1.0f;
+}
+
 /* -------------------------------------------- RearGripCtrl (pcc:60-110) */
 static float curva_agarre(const or2_coche_t *c, const or2_param_t *p, int idx)
 {
@@ -819,6 +843,16 @@ static void tick(or2_coche_t *c, const or2_param_t *p, const or2_entrada_t *e)
         }
     }
 
+    /* --- mu del firme bajo cada rueda (GetRoadMu 500B30 + assMuControl 518420, pc_road_mu.cpp) --- */
+    for (i = 0; i < 4; ++i) c->r[i].mu = e->sup[i] ? or2_mu_superficie(e->sup[i]) : mu;
+    {
+        or2_rueda_t *q = c->r;
+        if (q[2].desliz < 0 && q[1].mu > q[0].mu) q[1].mu = q[0].mu;
+        if (q[3].desliz > 0 && q[0].mu > q[1].mu) q[0].mu = q[1].mu;
+        if (q[0].mu > q[2].mu) q[2].mu = q[0].mu;
+        if (q[1].mu > q[3].mu) q[3].mu = q[1].mu;
+    }
+
     /* --- agarre, rigidez y fuerza lateral --- */
     for (i = 0; i < 4; ++i) {
         or2_rueda_t *q = &c->r[i];
@@ -827,7 +861,7 @@ static void tick(or2_coche_t *c, const or2_param_t *p, const or2_entrada_t *e)
         float coef = clampf(mx - (mx - p->mu_min[ax]) * rat * rat, 0.0f, mx);
         float x, load, ang, f, esc;
         int32_t a;
-        q->agarre = e->en_suelo ? q->carga * mu * coef : 0.0f;
+        q->agarre = e->en_suelo ? q->carga * q->mu * coef : 0.0f;
         x = 1.0f / p->rigidez[ax] + q->toe_comp;
         q->comp = x > 0.0f ? x : 0.0f;
         a = s16((int32_t)q->ang - q->ang_vel);
@@ -846,6 +880,7 @@ static void tick(or2_coche_t *c, const or2_param_t *p, const or2_entrada_t *e)
     giro_delantero(c, p);
     giro_trasero(c, p);
     rodadura(c, p);
+    resistencia_tierra(c, e);
 
     /* --- copy_physical_work + make_force_work_tire: fuerzas al cuerpo ---
        (cuerpo: x adelante, y izquierda; kgf). La correccion 0xa0 quita
@@ -886,6 +921,8 @@ static void tick(or2_coche_t *c, const or2_param_t *p, const or2_entrada_t *e)
             }
         }
         fbx += q->fx; fby += q->fy;
+        /* +94: resistencia de tierra, en el centro de la rueda sin par (set_force_obsolete con flags 1) */
+        fbx += q->r_tierra * vx; fby += q->r_tierra * vy;
     }
     /* arrastre aerodinamico (calc_game_resist), kgf */
     {
@@ -1474,6 +1511,9 @@ void or2_rebufo(or2_coche_t *c, const or2_otro_t *otros, int n)
     float best = 0.0f, base, obj, cur;
     v2 va = unidad(mk(c->vx, c->vy));
     int i, cnt;
+    /* +162 = rumbo de la velocidad (+160) menos el del cuerpo (+2E) */
+    int32_t ang = iabs(s16((int32_t)c->rumbo_v16 - s16(tr(c->psi * R2U))));
+    c->rebufo_marca = 0;
     for (i = 0; i < n; ++i) {
         const or2_otro_t *o = otros + i;
         float d = sqrtf(o->dx * o->dx + o->dy * o->dy), fd, sv, fv, al, fa, sc, vo;
@@ -1489,7 +1529,10 @@ void or2_rebufo(or2_coche_t *c, const or2_otro_t *otros, int n)
         /* el otro tiene que ir delante, a menos de 20 grados (todo a menos de 5) de su propia velocidad */
         fa = cl01(((vb.x * to.x + vb.y * to.y) - 0.939692616f) / (0.996194720f - 0.939692616f));
         sc = fa * al * fv * fd;
-        if (sc > best) best = sc;
+        if (sc > best) {
+            best = sc;
+            if (sc > 0.180000007f && ang < 1500 && i < 32) c->rebufo_marca |= 1u << i;   /* +B72 = 180 */
+        }
     }
     c->rebufo = best;
     /* objetivo = best * acelerador * (1 - freno) * cos(d46), rampa de 180 cuadros */
