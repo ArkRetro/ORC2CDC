@@ -177,6 +177,10 @@ int video_reproduce(const char *nombre)
     }
     fin_lector = 1;
     thd_join(hilo, NULL);
+    if (saltado) {                                              /* que el START no lo vea tambien el titulo */
+        int t;
+        for (t = 0; t < 200 && boton_start(); t++) thd_sleep(10);
+    }
     if (hv != SND_STREAM_INVALID) snd_stream_stop(hv);
     pvr_wait_ready();                                           /* la PowerVR ya no lee las texturas */
     pvr_mem_free(tex[0]); pvr_mem_free(tex[1]);

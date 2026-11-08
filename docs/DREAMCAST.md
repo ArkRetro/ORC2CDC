@@ -88,6 +88,9 @@ van duplicadas en cada BKkk.DAT, o pasar a VQ las pequenas que aun no lo estan).
 llevan cs_ENVBK_PALM (es del reflejo): 146-222 KB de texturas cada uno.
 Despues (coches montados como el original y trafico con su LOD 0): el coche de mas texturas es COCHE06 (187 KB, +7
 sobre los 180 de COCHE04) y el trafico 297 KB (+32): en ese peor caso quedan unos 85 KB (calculado, sin medir).
+Medido el 2026-11-08 con el trafico con sus 5 LOD (328 KB) y COCHE06 (Flycast, `-DPRUEBA_FICHA=6 -DPRUEBA_NODO=9
+-DPRUEBA_RAMA=0 -DPRUEBA_FIN=400`): BK09 + GHOS 220 KB libres, BK09 + IMPE (SEG16) **88 KB**, IMPE + su meta BK13
+**79 KB** (el peor). No hay sitio para agrandar el bufer de parametros (cada 64 KB mas son 128 KB).
 
 ## 2. Presupuesto del TA
 
@@ -98,67 +101,104 @@ Demo 12c en GDEMU, primer cuadro de carrera (diagnostico `pvr_colgado`):
 entero (error 0x0C: bits 2 y 3) con 24656 vertices contados (sin los del HUD): **mas de 42,5 bytes por vertice**.
 El OPB iba al 30 %.
 
-### La cuenta teorica (se queda corta)
+### La cuenta por tira (formato de los parametros del TA)
 
 Formato de los parametros que guarda el TA para nuestros poligonos (cabecera tipo 0, vertice tipo 3: textura, UV de
-32 bits, color empaquetado, sin color de desplazamiento):
+32 bits, color empaquetado; el coche ademas con color de desplazamiento):
 
 - el TA corta cada tira en trozos de hasta 6 triangulos (8 vertices) que comparten 2 vertices;
-- cada trozo: palabras ISP/TSP/TCW (12 bytes) + sus vertices de 24 bytes (x, y, z, u, v, color; 16 sin textura);
-- tira de n vertices con k = techo((n - 2) / 6) trozos: `24 (n - 2) + 60 k` bytes: ~34 por triangulo en tiras
-  largas, 84 un triangulo suelto, 108 un cuadrilatero (sprites del HUD, recortes).
+- cada trozo: palabras ISP/TSP/TCW (12 bytes) + sus vertices de 24 bytes (x, y, z, u, v, color; 28 con color de
+  desplazamiento);
+- tira de n vertices con k = techo((n - 2) / 6) trozos: `24 (n - 2) + 60 k` bytes (`28 (n - 2) + 68 k` con
+  desplazamiento; `ta_teo` en `demo/main.c`): 25,5 bytes por vertice en una tira de 8 (la mejor), 28 un triangulo
+  suelto, 27 un cuadrilatero, ~34 en tiras largas (10 bytes por triangulo de cabeceras).
 - OPB: una palabra por trozo y por tesela de 32x32 que toca; el primer bloque de cada tesela esta en la zona fija y
   los siguientes salen de la reserva comun (bloques de 32 o 16 palabras, la ultima enlaza).
 
-Con esta cuenta el cuadro que colgo la consola ocupaba unos 780 KB (unos 32 bytes por vertice): la consola gasto al
-menos 1,34 veces mas. Por eso el presupuesto no se apoya en la formula sino en la medida.
+Con esta cuenta el cuadro que colgo la consola ocupaba unos 780 KB (22012 triangulos y 24656 vertices: unas 1322
+tiras de 18,6 vertices de media, ~4300 trozos): la consola gasto al menos 1,34 veces mas. Lo que mandamos hoy, medido
+en Flycast (`DIAG_VTX`: `tiras` y `teo` son las tiras aceptadas y su cuenta), son tiras cortas: 3000-5000 tiras por
+cuadro, 5,7 vertices por tira de media en las etapas (SEG00/SEG03/BK00: 28 bytes teoricos por vertice; resto medio de
+3,5 triangulos sin usar en el ultimo trozo), 8,4 en el coche (30 bytes) y 7,1 en el trafico (29 bytes); un cuadro de
+carrera entero sale a 29-31 bytes teoricos por vertice.
 
 ### El tope (demo/main.c, `ta_*`)
 
-Se cuentan **todos** los vertices del cuadro: etapa, coche, trafico y efectos (`ta_cabe`, antes de enviar cada
-tira: si no cabe no se envia) y lo 2D (HUD, menus y textos: `ta_prim`; `hud.c` y `menu.c` se compilan con
-`-Dpvr_prim=ta_prim` desde `demo/Makefile`). Cada vertice cuesta `ta_bpv` bytes: 56 de salida (1,3 x 42,5) y, en la
-consola, el valor real del cuadro anterior x 1,2 si es mayor (registro `TA_ITP_CURRENT`; Flycast no lo actualiza).
+Se cuentan **todas** las tiras del cuadro: etapa, coche, trafico y efectos (`ta_cabe`, antes de enviar cada tira: si
+no cabe no se envia) y lo 2D (HUD, menus y textos: `ta_prim`; `hud.c` y `menu.c` se compilan con `-Dpvr_prim=ta_prim`
+desde `demo/Makefile`). Cada tira 3D cuesta `ta_teo` x `ta_f` / 256 con `ta_f` = 448 (1,75): con eso el cuadro que
+colgo la consola costaria 56 bytes por vertice, el mismo margen que antes (1,3 x 42,5), y lo que la consola guarda
+mejor (tiras de 8) cuesta menos y lo que guarda peor (triangulos sueltos del recorte cercano, tiras de 9-13) mas. Lo 2D
+cuesta `ta_bpv` = 56 bytes por vertice. En la consola, `ta_f` sube solo si el TA gasta mas (registro
+`TA_ITP_CURRENT` del cuadro anterior / lo teorico x 1,2; `ta_bpv` en proporcion); Flycast no lo actualiza.
 
 | Tope por cuadro | Valor |
 |---|---|
 | total | `TA_VB_BYTES - TA_MARGEN` = 1792 - 64 = 1728 KB |
 | 2D (va al final, no se corta) | max(64 KB, 2 x lo 2D del cuadro anterior x ta_bpv) |
 | 3D (`ta_lim`) | total - 2D = 1664 KB |
-| etapa (`ta_tope_etapa`) | 3D - max(1,25 x coche+trafico+efectos del cuadro anterior, coche + 3 coches de trafico) |
+| etapa (`ta_tope_etapa`) | 3D - max(coche+trafico+efectos del cuadro anterior + 2 coches de trafico con LOD 0, coche + 3 coches de trafico con LOD 0) |
 
-Medidas (Flycast, `-DDIAG_VTX`, con 56 B/vertice): peor cuadro de carrera 28263 vertices contados (etapa 19615,
-coche 6972, trafico y efectos ~1700) + ~150 de HUD = **1545 KB de 1664**; con 42,5 B/vertice reales serian unos
-1,2 MB del bufer de 1,75 MB (69 %). Peor menu: coche 6972 + 412 de 2D = 413 KB. El tope aguanta mientras la consola
-gaste menos de ~60 B por vertice contado, y la calibracion sube `ta_bpv` sola si gasta mas de 46.
+Antes la reserva era 1,25 x lo del cuadro anterior: con el coche de ~600 KB se perdian ~150 KB de la etapa; un coche de
+trafico que se acerca pasa de su LOD 3-4 al 0 (~50 KB), y como mucho dos cambian de un cuadro al siguiente.
+
+Medido (Flycast, `-DDIAG_VTX -DDIAG_SIN_CPU`, PRUEBA_AUTO a 100 km/h, 60 s en PALM, LAKE, ALPI, CAST y la union de
+PALM, 2026-11-08): cuadros de 14588-29624 vertices, 3D contado hasta **1530 KB de 1664** (antes 1500), 53,1-54,5 bytes
+contados por vertice (antes 56 fijos) y 30,4-31,1 teoricos; ninguna tira rechazada (sin `TOPE` ni `CORTO`). Si la
+consola gastara de verdad 1,34 x lo teorico, el peor cuadro llenaria 0,9 MB del bufer de 1,75 MB; si gastara 56 bytes
+por vertice (la hipotesis de antes), 1,62 MB. El numero de vertices por cuadro es el de antes (24000-29000): lo ganado
+para la etapa sale del trafico (LOD) y de la reserva, no de apretar el margen.
+
+Optimizaciones que conservan la imagen (medidas con `ta_teo` sobre los .DAT y en Flycast):
+
+- cuenta por tira en vez de 56 bytes por vertice: 53,1-54,5 bytes contados por vertice en carrera (un 3-5 % mas de
+  vertices con el mismo margen);
+- tiras mas largas: no ganan nada en este formato. El TA ya trocea en 6 triangulos; unir dos tiras con triangulos
+  degenerados no quita trozos (cada trozo lleva su cabecera) y anade 2-3 vertices: no se hace;
+- duplicados exactos (misma textura y posiciones): 14 mallas / 56 vertices en SEG00, 16 / 237 en SEG03, 47 / 188 en
+  BK00 (<= 0,5 %); en el trafico ninguno salvo lo que el LOD 1 repite del 0 (ya una sola vez). No compensa;
+- culling: la PowerVR va sin culling (`PVR_CULLING_NONE`) como el GS de la PS2, que no tiene; con culling se perderian
+  las caras que el original ve por detras. Se queda;
+- texeles del trafico fuera de la RAM tras subirlos (`compacta_modelo`): -330 KB de RAM (no cambia el TA);
+- compartir texturas (las de cs_BK_PALM van repetidas en cada BKkk.DAT): ahorraria VRAM, no TA; pendiente.
 
 Coches del jugador (`tools/conv_coche.py`): tope de 11000 vertices dibujados a la vez por coche. Montados enteros como
 el original (46A560, con las uniones de tiras que no dibuja el VU1 ya quitadas) dibujan 9320-12080, y el F40 17376 (su
-pieza +14 es una copia entera de la carroceria que la carroceria tapa). Por que hace falta el tope: el 3D del cuadro son
-1664 KB, unos 30400 vertices a 56 B; la etapa recibe lo que queda tras reservar 1,25 x (coche + trafico + efectos)
-del cuadro anterior. Con el F40 entero y unos 3000 de trafico quedarian ~4960 vertices para la etapa (su pico medido
-es 19615); con el tope, ~16000 (Flycast, `DIAG_VTX`, salida de PALM con el F40: 27159 vertices, etapa 15984 en su
-tope de 874 KB). Por encima del tope se quita solo lo que no se ve desde las camaras del juego (seleccion, carrera con
-deriva y, si cabe, una vuelta baja): 10 de los 15 pasan por ahi y quedan en 10348-11195; el render desde esas camaras
-sale igual que el del original entero (0,00-0,09 % de pixeles distintos, de la compresion VQ). Las luces van todas en
-el fichero (pilotos, con luces, freno y luz de faros: 76-490 vertices) pero solo se dibuja un juego (`coche_luces`).
-El reflejo no anade vertices (una pasada con color de desplazamiento: 4 bytes mas por vertice en el bufer de
-parametros, 1615-5347 vertices de entorno por coche, <= 22 KB) y cuesta en la CPU unas 4000 transformaciones de
-normal por cuadro (`coche_entorno`). VRAM: COCHEnn.DAT 127-187 KB y el trafico 297 KB (antes 265: ahora el LOD 0 del
-original, con sus ruedas y su sombra). Trafico: 823-1089 vertices por coche (antes 472-794: la carroceria del LOD 2
-con ruedas puestas a ojo); lo cuenta `ta_cabe` como todo lo demas, y `ta_vmin_otros` reserva el coche y tres de
-trafico. Un coche cada vez (`coche_carga` en `demo/main.c`: libera RAM y VRAM del anterior; en el menu, si no cabe,
-echa la cache de pantallas).
+pieza +14 es una copia entera de la carroceria que la carroceria tapa). Por encima del tope se quita solo lo que no se
+ve desde las camaras del juego (seleccion, carrera con deriva y, si cabe, una vuelta baja): 10 de los 15 pasan por ahi
+y quedan en 10348-11195; el render desde esas camaras sale igual que el del original entero (0,00-0,09 % de pixeles
+distintos, de la compresion VQ). El original no tiene LOD para el coche del jugador (46AE70 dibuja la disposicion de
+5B2F68 entera; los 5 LOD del registro de 4866C0 de los modelos 0..29 son para cuando ese coche lo dibuja 4AE0F0, el de
+los otros coches): en carrera es lo que mas gasta del TA (~600 KB de 1664). Las luces van todas en el fichero (pilotos,
+con luces, freno y luz de faros: 76-490 vertices) pero solo se dibuja un juego (`coche_luces`). El reflejo no anade
+vertices (una pasada con color de desplazamiento: 4 bytes mas por vertice y 8 por trozo, ya en `ta_teo`) y cuesta en
+la CPU unas 4000 transformaciones de normal por cuadro (`coche_entorno`). VRAM: COCHEnn.DAT 127-187 KB. Un coche cada
+vez (`coche_carga` en `demo/main.c`: libera RAM y VRAM del anterior; en el menu, si no cabe, echa la cache de
+pantallas).
+
+Trafico: con los 5 LOD del original (`tools/conv_trafico.py`; registro de 4866C0, descriptores de 4ADBC0 / 4ADD80 /
+4ADF00) y el LOD por distancia de 46DF50 (en SLES-53998 0x1dd728; `traf_lod` en `demo/main.c`): LOD 1 desde 40 m, 2
+desde 50, 3 desde 85 y 4 desde 130 (z de la camara; +35 m los modelos 0x1f y 0x27, +25 el 0x28). Vertices por LOD:
+823-1089 / igual / 341-517 / 69-207 / 20-68. En carrera el trafico pasa de ~9500 vertices (11 coches con el LOD 0) a
+~1000-1500. El original ademas baja el LOD de los mas cercanos si la suma de poligonos pasa de su tope (46E170, tope
+de 46E110: 12000 menos lo del coche + 5000 + 44C520): no hace falta (cabe con el tope del TA) y no se porta. VRAM del
+trafico 328 KB (antes 297: texturas de los LOD 2-4); RAM: los TRAFn.DAT pasan de 543 a 730 KB, pero ahora sueltan sus
+texeles tras subirlos (`compacta_modelo`, como el coche): quedan ~400 KB en la RAM (antes 543). Las mallas que repite
+el LOD 1 del LOD 0 van una vez (mascara de LOD en el campo del nodo).
 
 OPB: 4 juegos de reserva (307 KB por cuadro); en la consola se midieron 141568 bytes en total (65 KB de reserva) en
 el cuadro que se colgo (incompleto). Si el registro `TA_OPB_POS` pasa del 70 % del OPB, `ta_freno` baja el tope de la
-etapa por cuartos (y con ello `corte_d`).
+etapa por cuartos.
 
-Distancia y que se dibuja de la etapa (2026-11-08, ver PARIDAD.md, seccion Graficos): lo del original. Planos 0,1 y
-4000 (camara de PS2, 0x178580), LOD por tamano en pantalla de cada nodo (404B00: se dibuja hasta z = r 2^(umbral-1) /
-tan(fov_v / 2), umbral 6 o 7) y recorte por esfera de nodos y tiras (`nodos_visibles`, `dibuja_rango`). Lo que el
-original dibuja no cabe en el TA de la Dreamcast; medido en Flycast con `-DDIAG_SIN_TOPE` (sin tope; solo para medir,
-en la consola se colgaria), salida de PALM a 100 km/h, cada 60 cuadros:
+Bufer de parametros mas grande: no cabe. Cada 64 KB mas son 128 KB de VRAM (doble bufer) y en el peor caso medido
+quedan 79 KB libres (seccion 1). Quitar juegos de reserva del OPB daria sitio (154 KB por juego) pero el OPB crece
+con la geometria y en la consola solo se ha medido un cuadro: no se toca.
+
+Distancia y que se dibuja de la etapa (ver PARIDAD.md, seccion Graficos): lo del original. Planos 0,1 y 4000 (camara
+de PS2, 0x178580), LOD por tamano en pantalla de cada nodo (404B00: se dibuja hasta z = r 2^(umbral-1) / tan(fov_v /
+2), umbral 6 o 7) y recorte por esfera de nodos y tiras (`nodos_visibles`, `dibuja_rango`). Lo que el original dibuja
+no cabe en el TA de la Dreamcast; medido en Flycast con `-DDIAG_SIN_TOPE` (sin tope; solo para medir, en la consola se
+colgaria), salida de PALM a 100 km/h, cada 60 cuadros:
 
 | s (m) | vertices etapa (original) | coche + trafico + efectos | total |
 |---|---|---|---|
@@ -168,17 +208,40 @@ en la consola se colgaria), salida de PALM a 100 km/h, cada 60 cuadros:
 | 1452 | 21038 | 20425 | 41463 |
 | 1952 | 5944 | 19534 | 25478 |
 
-El 3D del cuadro son unos 30400 vertices a 56 B (1664 KB). Con el coche del jugador (10900-11600 vertices) y hasta 11
-coches de trafico (823-1089 cada uno) quedan 4000-7000 para la etapa (antes de este cambio el coche y el trafico
-sumaban unos 13000 y la etapa 12000). Por eso, ademas de lo del original, la etapa se recorta por presupuesto, y lo que
-se quita es lo de mas lejos: `corte_d` (distancia de la parte mas cercana de cada tira) baja un 20 % en cuanto una
-tira de la etapa no cabe (`ta_cabe`, `VTX_ETAPA_MAX`) y sube un 6 % por cuadro mientras sobre mas del 20 %, hasta
-`lejos`. Medido (Flycast, PALM, 100 km/h): `corte_d` 92-157 m con la etapa en 4300-8800 vertices; sin el recorte, la
-etapa se quedaba sin la calzada (el tope se agotaba por el orden de las texturas). Para ver mas lejos hace falta bajar
-lo que gastan el coche y el trafico (el original usa LOD 2-4 en el trafico lejano, PARIDAD.md: pendiente) o subir
-`TA_VB_BYTES`. `lejos` solo baja (50 m cada 30 cuadros, minimo `LEJOS_MIN` 600 m) si la CPU pasa de 15 ms; Flycast no
-da el tiempo del SH4, en la consola se ajusta solo. Antes: distancia adaptativa 600-1000 m (inventada), `detalle` y
-`dmax` (clip(rad x 30, 150, 1000), 450 m las instanciadas, inventados): fuera.
+(con el trafico del LOD 0; ahora coche + trafico + efectos son ~11500.)
+
+Reparto del tope de la etapa (`nodos_visibles_todos`), como lo veria el jugador:
+
+- clase de distancia de cada nodo visible por la parte mas cercana de su esfera (4 log2(z - r): pasos del 19 %); se
+  dibujan enteras las clases cercanas mientras quepan en 3/4 del tope: lo cercano y la calzada siempre;
+- de lo de mas alla, primero se quita lo que el LOD del original quitaria antes: clase de LOD por p = z / (r 2^(umbral
+  - 1) / tan(fov_v / 2)), la fraccion de la distancia de LOD de 404B00 (8 log2(p): pasos del 9 %); se quedan los nodos
+  grandes (montes, mar, calzada lejana) y se van los pequenos y lejanos;
+- lo que la niebla del original (scn_env_fog) ya tapa (63/64 o mas en la parte mas cercana) va a la ultima clase: es
+  lo primero que se quita. No se anade ningun fundido propio a la distancia del recorte: la niebla es la del original
+  (el fundido de 0,55 lejos a lejos solo si la CPU acorta `lejos`, como antes);
+- histeresis: los cortes bajan en el mismo cuadro si no cabe y suben de una clase en una, cada 4 cuadros y con 2 clases
+  de holgura: lo del limite no aparece y desaparece de un cuadro a otro;
+- el coste estimado de cada clase es la cuenta teorica de sus nodos (`relleno[0]`, al leer el fichero) x `ta_f` x
+  `prio_alfa` (lo enviado / lo estimado del cuadro anterior: 0,5-0,9, porque las mallas se recortan una a una); si aun
+  asi una tira no cabe, baja el corte y sube `prio_alfa` un 15 %.
+
+Antes se quitaba todo lo que estuviera mas alla de `corte_d` (que bajaba un 20 % si algo no cabia y subia un 6 % por
+cuadro: las mallas del limite parpadeaban). Medido (Flycast, mismas pruebas; "distancia efectiva" = la del nodo
+quitado mas cercano, por la parte mas cercana de su esfera; antes `corte_d`):
+
+| Prueba | distancia efectiva antes: min / mediana (m) | despues: min / mediana (m) | vertices de la etapa antes / despues (media) |
+|---|---|---|---|
+| PALM | 60 / 166 | 130 / 224 | 5837 / 15208 |
+| LAKE | 119 / 278 | 513 / 660 | 5692 / 15042 |
+| ALPI | 111 / 200 | 196 / 387 | 5731 / 11584 |
+| CAST | 92 / 185 | 129 / 258 | 5286 / 15730 |
+| union de PALM | 85 / 291 | 193 / 655 | 5198 / 13234 |
+
+Mas alla de esa distancia ya no falta todo, como antes, sino solo lo pequeno: los nodos grandes siguen hasta su LOD del
+original. `lejos` solo baja (50 m cada 30 cuadros, minimo `LEJOS_MIN` 600 m) si la CPU pasa de 15 ms. Ojo: Flycast da
+24-29 ms por cuadro en carrera (antes y despues) y sin `-DDIAG_SIN_CPU` `lejos` acaba en 600 m; si la consola tarda lo
+mismo, eso corta antes que el TA (no medido en la consola).
 
 El diagnostico `pvr_colgado()` (si `pvr_wait_ready` falla 5 veces seguidas escribe en la imagen el estado, los
 vertices, el registro de errores y el uso de VB y OPB) se queda: es lo que permite medir en la consola.
@@ -201,6 +264,9 @@ vertices, el registro de errores y el uso de VB y OPB) se queda: es lo que permi
 ## 4. Pruebas
 
 - `cd demo && make` sin avisos; `make CPPFLAGS=-DDIAG_VTX` imprime por la consola serie cada 60 cuadros los
-  vertices (total y etapa), la CPU, la distancia, `corte_d`, la VRAM libre, el presupuesto del TA (3D, etapa y su
-  tope, 2D, `ta_bpv`) y, en la consola, lo que gasto de verdad el TA (`real`, `opb`).
+  vertices (total y etapa), la CPU, la distancia, la VRAM libre, el presupuesto del TA (3D, etapa y su tope, 2D,
+  `ta_f`), las tiras aceptadas y su cuenta teorica (`tiras`, `teo`), lo que dibujaria el original de la etapa (`orig`,
+  vertices de los nodos visibles), los cortes del reparto (`cerca`, `clase`, `alfa`), el nodo quitado mas cercano
+  (`desde`, su radio) y la niebla; en la consola, lo que gasto de verdad el TA (`real`, `opb`). `-DDIAG_SIN_CPU` deja
+  `lejos` fijo (para medir en Flycast, que no da el tiempo del SH4).
 - En la consola: si se cuelga, foto del texto de `pvr_colgado`; con `DIAG_VTX` y un cable serie, las lineas `DIAG`.

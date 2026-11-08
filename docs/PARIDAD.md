@@ -412,8 +412,19 @@ Diferencias encontradas y su causa:
   registro de 4866C0 / PC 650500): carroceria, sombra de \COMMON\obj_vshadow_pmt.sz subida 0,1 m y las ruedas del
   descriptor en +3C/+4C/+5C/+6C (las del otro lado giradas pi en y); sin luces (+C, vacia en estos modelos). 823-1089
   vertices por coche (antes 472-794), VRAM 297 KB (antes 265).
-- PENDIENTE: LOD del trafico por distancia (2-4; umbrales 5B4354..5B4364 del PC, sin localizar en el ELF de PS2);
-  luces del trafico (+10/+14: noche y freno); animaciones (volante con car+204, giro y direccion de las ruedas, aleron
+- LOD del trafico (CONFIRMADO, 2026-11-08): el registro de 4866C0 tiene 5 descriptores (LOD 0..4); 4ADBC0 (0),
+  4ADD80 (1) y 4ADF00 (2..4) dibujan carroceria, pilotos y sombra (subida 0,1 m solo en el 0), y la lista +9C y las
+  ruedas solo en el 0 y el 1. El LOD sale de la z de la camara en 46DF50; en SLES-53998 es 0x1dd728 (localizado por el
+  tope de poligonos 46E110 = 0x1dd9f8: addiu 0x2ee0 / 0x1388): lui 0xc302 / 0xc2aa / 0xc248 / 0xc220 = -130 / -85 /
+  -50 / -40 (LOD 4 / 3 / 2 / 1), 0x40a0 = 5 (LOD 0 hasta ahi; detras, 4), y base lui 0xc20c = -35 en los modelos 0x1f
+  y 0x27 y 0xc1c8 = -25 en el 0x28 (los umbrales del PC 5B4354..5B4360 son 40 / 50 / 85 / 130; 5B4358 = 50 ya estaba en
+  race_traffic.cpp). Ahora `tools/conv_trafico.py` monta los 5 LOD (mascara de LOD por malla) y `traf_lod` de
+  `demo/main.c` elige como 46DF50. Vertices por LOD 823-1089 / igual / 341-517 / 69-207 / 20-68: el trafico en carrera
+  pasa de ~9500 vertices a ~1000-1500. No portado: 46E170 (baja el LOD de los mas cercanos si la suma de poligonos pasa
+  del tope de 46E110), innecesario con el tope del TA. Verificado en E (hoja en el scratchpad, dist/hoja.png).
+- Coche del jugador: el original no tiene LOD (46AE70 dibuja su disposicion entera; los LOD de 4866C0 de los modelos
+  0..29 solo los usa 4AE0F0, el dibujo de los otros coches). Se queda entero.
+- PENDIENTE: luces del trafico (+10/+14: noche y freno); animaciones (volante con car+204, giro y direccion de las ruedas, aleron
   del Enzo con la velocidad, faros escamoteables al abrirse, disco +94 con car+1F4); los bits de noche y tunel
   (SCN_EFC) para +80 y +60; suspension (car+130 y car+F0 de la fisica).
 
@@ -469,15 +480,20 @@ inventada. Causas y arreglo:
   ancha quitaba mallas de los bordes). El VU1 no dibuja el triangulo con algun vertice fuera de su volumen (banda de
   guarda del GS); la PowerVR no la necesita: se recorta contra el plano cercano (`tri_recortado`) y no desaparece nada
   cerca de la camara. La distancia solo se acorta por seguridad si un cuadro no cabe (ver DREAMCAST.md).
-- Presupuesto: lo que dibuja el original de la etapa (16000-47000 vertices en PALM) no cabe con el coche y el trafico
-  (unos 20000): se quita lo mas lejano (`corte_d`, DREAMCAST.md). DIFERENCIA medida y documentada.
+- Presupuesto: lo que dibuja el original de la etapa (16000-47000 vertices en PALM) no cabe con el coche (~10000) y el
+  trafico (~1000-1500 con su LOD). DIFERENCIA medida y documentada (DREAMCAST.md, seccion 2): se dibuja entero lo
+  cercano (3/4 del tope de la etapa, por la distancia de la parte mas cercana de cada nodo) y de lo de mas alla se
+  quita primero lo que el LOD de 404B00 quitaria antes (p = z / distancia de LOD del nodo: lo pequeno y lejano) y lo que
+  la niebla del original ya tapa; cortes con histeresis. Antes (2026-11-08, `corte_d`) se quitaba todo lo que estuviera
+  mas alla de una distancia que oscilaba. Distancia del nodo quitado mas cercano (Flycast, mediana): PALM 166 -> 224 m,
+  LAKE 278 -> 660, ALPI 200 -> 387, CAST 185 -> 258, union de PALM 291 -> 655; vertices de la etapa ~5500 -> 11600-15700.
 - Verificado (E, Flycast, PRUEBA_AUTO a 100 km/h, PALM, LAKE, ALPI, CAST y la union de PALM): compila sin avisos; hoja
   antes/despues en el scratchpad (graf/hoja.png): sin las placas y arcos translucidos de la salida de PALM ni los
   carteles retorcidos de ALPI, calzada completa; con `-DDIAG_SIN_TOPE` la vista entera del original (playa con
   windsurfistas y ciudad al fondo en PALM).
 - PENDIENTE: descifrar las listas por seccion de cs_CS_<zona>_bin (en la PS2; el PC usa otro formato) para no tener
-  que recortar por distancia; LOD del trafico (el que mas gasta del TA); banderas 0x4/0x8 de los nodos (sin uso
-  conocido); 451350 (rama antes de elegir).
+  que recortar; medir en la consola real lo que gasta el TA por tira (`ta_f`) y el tiempo de CPU del cuadro; banderas
+  0x4/0x8 de los nodos (sin uso conocido); 451350 (rama antes de elegir).
 - Coordenadas (comprobado, sin cambios): posiciones V3-32 float sin STMOD; normales V3-16 /32768; UV V4-16 con STROW y
   STMOD 2 (sumas acumuladas) /4096; STCYCL 1/3 (paso de 3 qwords); W de la posicion sin escribir (el microcodigo no la
   lee). Matrices de la tabla 6: vectores fila, traslacion en la ultima fila (igual que el PC).
@@ -521,6 +537,10 @@ inventada. Causas y arreglo:
 Fisica (2026-11-08): auditoria completa contra el PC y SLES-53998 (ver Fisica: auditoria): error de los coeficientes
 de ass_compulsive_move, suspension y cargas del original, volante del mando del original, cambio manual completo, curva de
 par del manual (PAR2), ayudas de CheckWanderer y del muro, redondeo hacia cero. Verificado: banco, demo sin avisos, Flycast.
+
+Distancia de dibujo (2026-11-08): LOD del trafico del original (46DF50 / PS2 0x1dd728), presupuesto del TA por tira
+(formato de los parametros), reparto de la etapa como lo veria el jugador (cercano entero, luego por el LOD de 404B00,
+con histeresis) y reserva ajustada. Verificado en E (DREAMCAST.md seccion 2, PARIDAD.md seccion Graficos).
 
 Graficos (2026-11-08): tiras con la bandera ADC del VU1, nodos y matrices como 404D10, carteles orientados, sin
 cs_ENV/cs_ENVBK (reflejo), planos 0,1/4000 y LOD de 404B00, recorte de la etapa por presupuesto desde lo mas lejano.
