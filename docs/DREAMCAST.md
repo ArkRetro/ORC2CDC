@@ -83,8 +83,9 @@ con su etapa. Datos del curso en el GD: 15 SEGnn.DAT (62 MB), 15 BKkk.DAT + BKD.
 Peor caso de VRAM medido el 2026-11-08 (Flycast, `-DPRUEBA_FICHA=4 -DPRUEBA_NODO=9 -DPRUEBA_RAMA=0`): 124 KB libres
 con la bifurcacion de GHOS y la etapa IMPE subidas, el coche de mas texturas y el trafico de 261 KB. Cabe sin recortar
 nada; las otras combinaciones posibles (INDU/CLOU -> METR, METR + su meta) suman menos texturas. Si un coche o el
-trafico crecen mas de ~120 KB, el margen se acaba ahi (primero: compartir las texturas repetidas de cs_BK_PALM y
-cs_ENVBK_PALM, que van duplicadas en cada BKkk.DAT, o pasar a VQ las pequenas que aun no lo estan).
+trafico crecen mas de ~120 KB, el margen se acaba ahi (primero: compartir las texturas repetidas de cs_BK_PALM, que
+van duplicadas en cada BKkk.DAT, o pasar a VQ las pequenas que aun no lo estan). Desde 2026-11-08 los BKkk.DAT ya no
+llevan cs_ENVBK_PALM (es del reflejo): 146-222 KB de texturas cada uno.
 Despues (coches montados como el original y trafico con su LOD 0): el coche de mas texturas es COCHE06 (187 KB, +7
 sobre los 180 de COCHE04) y el trafico 297 KB (+32): en ese peor caso quedan unos 85 KB (calculado, sin medir).
 
@@ -151,12 +152,33 @@ echa la cache de pantallas).
 
 OPB: 4 juegos de reserva (307 KB por cuadro); en la consola se midieron 141568 bytes en total (65 KB de reserva) en
 el cuadro que se colgo (incompleto). Si el registro `TA_OPB_POS` pasa del 70 % del OPB, `ta_freno` baja el tope de la
-etapa por cuartos y acorta la distancia.
+etapa por cuartos (y con ello `corte_d`).
 
-Distancia: cada carrera y cada etapa nueva empiezan a `LEJOS_MIN` (600 m) y la distancia crece si sobra presupuesto
-y CPU; si se corta geometria (`ta_corto`) o la CPU pasa de 15 ms, primero baja la distancia y, en el minimo, el
-detalle (`detalle`: escala la distancia maxima de las mallas pequenas, `dmax` de conv_tramo.py). `VTX_ETAPA_MAX`
-(20000) es el tope de CPU de la etapa.
+Distancia y que se dibuja de la etapa (2026-11-08, ver PARIDAD.md, seccion Graficos): lo del original. Planos 0,1 y
+4000 (camara de PS2, 0x178580), LOD por tamano en pantalla de cada nodo (404B00: se dibuja hasta z = r 2^(umbral-1) /
+tan(fov_v / 2), umbral 6 o 7) y recorte por esfera de nodos y tiras (`nodos_visibles`, `dibuja_rango`). Lo que el
+original dibuja no cabe en el TA de la Dreamcast; medido en Flycast con `-DDIAG_SIN_TOPE` (sin tope; solo para medir,
+en la consola se colgaria), salida de PALM a 100 km/h, cada 60 cuadros:
+
+| s (m) | vertices etapa (original) | coche + trafico + efectos | total |
+|---|---|---|---|
+| 667 | 47365 | 20990 | 68355 |
+| 906 | 33299 | 19631 | 52930 |
+| 1100 | 24021 | 19299 | 43320 |
+| 1452 | 21038 | 20425 | 41463 |
+| 1952 | 5944 | 19534 | 25478 |
+
+El 3D del cuadro son unos 30400 vertices a 56 B (1664 KB). Con el coche del jugador (10900-11600 vertices) y hasta 11
+coches de trafico (823-1089 cada uno) quedan 4000-7000 para la etapa (antes de este cambio el coche y el trafico
+sumaban unos 13000 y la etapa 12000). Por eso, ademas de lo del original, la etapa se recorta por presupuesto, y lo que
+se quita es lo de mas lejos: `corte_d` (distancia de la parte mas cercana de cada tira) baja un 20 % en cuanto una
+tira de la etapa no cabe (`ta_cabe`, `VTX_ETAPA_MAX`) y sube un 6 % por cuadro mientras sobre mas del 20 %, hasta
+`lejos`. Medido (Flycast, PALM, 100 km/h): `corte_d` 92-157 m con la etapa en 4300-8800 vertices; sin el recorte, la
+etapa se quedaba sin la calzada (el tope se agotaba por el orden de las texturas). Para ver mas lejos hace falta bajar
+lo que gastan el coche y el trafico (el original usa LOD 2-4 en el trafico lejano, PARIDAD.md: pendiente) o subir
+`TA_VB_BYTES`. `lejos` solo baja (50 m cada 30 cuadros, minimo `LEJOS_MIN` 600 m) si la CPU pasa de 15 ms; Flycast no
+da el tiempo del SH4, en la consola se ajusta solo. Antes: distancia adaptativa 600-1000 m (inventada), `detalle` y
+`dmax` (clip(rad x 30, 150, 1000), 450 m las instanciadas, inventados): fuera.
 
 El diagnostico `pvr_colgado()` (si `pvr_wait_ready` falla 5 veces seguidas escribe en la imagen el estado, los
 vertices, el registro de errores y el uso de VB y OPB) se queda: es lo que permite medir en la consola.
@@ -172,13 +194,13 @@ vertices, el registro de errores y el uso de VB y OPB) se queda: es lo que permi
 | `snd_sh4_to_aica` | en esta version de KallistiOS no espera al ARM; `sfx.c` solo manda cambios (frecuencia > 0,2 % o volumen), unas pocas ordenes por cuadro. |
 | Musica a 48 kHz | el AICA reproduce cada canal con su paso (OCT/FNS); 48 kHz es un paso algo mayor que 1 sobre la salida de 44,1 kHz: valido. |
 | Alineaciones | blob de texturas a 32 (cada textura en multiplos de 32, `pvr_txr_load` copia de 32 en 32), vertices de 24 bytes (floats a 4), texturas VQ en direcciones multiplo de 8. |
-| CPU | Flycast no reproduce el tiempo del SH4; la distancia adaptativa usa el reloj real (`ms + ms_log`), asi que se ajusta sola en la consola. |
+| CPU | Flycast no reproduce el tiempo del SH4; el acortado de seguridad de `lejos` usa el reloj real (`ms + ms_log`), asi que se ajusta solo en la consola. |
 | Video | VGA: 640x480 a 60 Hz. Sin VGA: NTSC entrelazado a 60 Hz (el generico de KallistiOS). En una consola PAL (flash: Europa) sin VGA se pregunta a 50 Hz: A = 60 Hz, B o nada en 10 s = 50 Hz (`elige_video`). La logica va a 60 pasos por segundo con el reloj (salto de cuadros), asi que a 50 Hz va a la misma velocidad. Probado en Flycast con region Europa y emision PAL. |
 | Arranque desde GDEMU | `tools/mkgdi.py`: IP.BIN de `makeip` con areas JUE (sin region), soporte VGA (perifericos E000F10), 1ST_READ.BIN sin desordenar (GD, no CD-R) al final de la pista 3 (LBA 45000). |
 
 ## 4. Pruebas
 
 - `cd demo && make` sin avisos; `make CPPFLAGS=-DDIAG_VTX` imprime por la consola serie cada 60 cuadros los
-  vertices (total y etapa), la CPU, la distancia, el detalle, la VRAM libre, el presupuesto del TA (3D, etapa y su
+  vertices (total y etapa), la CPU, la distancia, `corte_d`, la VRAM libre, el presupuesto del TA (3D, etapa y su
   tope, 2D, `ta_bpv`) y, en la consola, lo que gasto de verdad el TA (`real`, `opb`).
 - En la consola: si se cuelga, foto del texto de `pvr_colgado`; con `DIAG_VTX` y un cable serie, las lineas `DIAG`.

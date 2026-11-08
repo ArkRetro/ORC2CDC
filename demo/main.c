@@ -74,6 +74,9 @@ static int lee_modelo_en(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t
     m->sec_mapa = m->nsec ? (const uint16_t *)p : NULL; p += m->nsec ? m->nruta * 2 : 0;
     p = b + ((p - b + 3) & ~3);
     if (!v7) for (i = 0; i < m->nmallas; i++) m->mallas[i].nodo = -1;   /* ORD5/6: distancia maxima, sin nodos */
+    for (i = 0; i < m->nnodos; i++) m->nodos[i].relleno[0] = 0;   /* vertices de cada nodo (presupuesto del TA) */
+    for (i = 0; i < m->nmallas; i++)
+        if (m->mallas[i].nodo >= 0 && (uint32_t)m->mallas[i].nodo < m->nnodos) m->nodos[m->mallas[i].nodo].relleno[0] += m->mallas[i].n;
     m->vis = m->nnodos ? calloc((m->nnodos + 31) / 32, 4) : NULL; m->ruta_i = 0;
     m->blob = b + ((p - b + 31) & ~31); m->datos = b;
     return 0;
@@ -192,6 +195,7 @@ static void carga_espera(void) { while (carga.estado == 1) thd_sleep(5); }
 #define CERCA_PS2 0.1f
 #define LEJOS_PS2 4000.0f
 static float ojo[3], der[3], arr[3], ade[3], fx = 320.0f / 0.75f, cerca = CERCA_PS2, lejos = LEJOS_PS2;
+static float corte_d = LEJOS_PS2;                        /* recorte de la etapa por el presupuesto del TA (corte_ajusta) */
 static matrix_t vista __attribute__((aligned(32))), vista_cielo __attribute__((aligned(32))),
                 mod_coche __attribute__((aligned(32)));
 static uint32_t tri_enviados;
@@ -253,12 +257,13 @@ static uint32_t ta_bpv = TA_BPV_MIN, ta_vb, ta_et, ta_lim, ta_tope_etapa, ta_cor
 static uint32_t ta_real_ult, ta_opb_ult;                 /* lo que gasto de verdad el TA en el cuadro anterior */
 static int ta_freno;                                     /* 0..3: OPB muy lleno, la etapa baja a (4 - freno) / 4 */
 static int ta_en_etapa;                                  /* lo que se envia ahora es de la etapa (su tope) */
+static int ta_et_corto;                                  /* en este cuadro no cupo alguna tira de la etapa */
 /* reserva una tira de n vertices; 0 si no cabe (y no se envia) */
 static inline int ta_cabe(uint32_t n)
 {
     uint32_t c = n * ta_bpv;
 #ifndef DIAG_SIN_TOPE                                    /* medida en Flycast: sin tope (en la consola se colgaria) */
-    if (ta_vb + c > ta_lim || (ta_en_etapa && ta_et + c > ta_tope_etapa)) { ta_corto = 1; return 0; }
+    if (ta_vb + c > ta_lim || (ta_en_etapa && ta_et + c > ta_tope_etapa)) { ta_corto = 1; ta_et_corto |= ta_en_etapa; return 0; }
 #endif
     ta_vb += c; if (ta_en_etapa) ta_et += c;
     return 1;
@@ -404,13 +409,14 @@ static void dibuja_rango(const modelo_t *mo, int l, uint32_t k0, uint32_t k1, in
             float dx, dy, dz, zv, xv, yv;
             if (mo->vis && m->nodo >= 0 && !(mo->vis[m->nodo >> 5] & (1u << (m->nodo & 31)))) continue;
 #ifndef DIAG_SIN_TOPE
-            if (vtx_et + (vtx_env - vtx_et0) > VTX_ETAPA_MAX) { ta_corto = 1; continue; }
+            if (vtx_et + (vtx_env - vtx_et0) > VTX_ETAPA_MAX) { ta_corto = 1; ta_et_corto = 1; continue; }
 #endif
             cartel = malla_de_cartel(mo, m);
             if (!cartel) {
                 dx = m->cx - ojo[0]; dy = m->cy - ojo[1]; dz = m->cz - ojo[2];
                 zv = dx * ade[0] + dy * ade[1] + dz * ade[2];
                 if (zv + m->r < cerca || zv - m->r > lejos) continue;
+                if (mo->vis && zv - m->r > corte_d) continue;   /* presupuesto del TA: fuera lo mas lejano */
                 xv = dx * der[0] + dy * der[1] + dz * der[2];
                 yv = dx * arr[0] + dy * arr[1] + dz * arr[2];
                 if (fabsf(xv) - zv * tanh > m->r * kh || fabsf(yv) - zv * tanv > m->r * kv) continue;
@@ -1941,6 +1947,23 @@ static void nodos_visibles(modelo_t *mo)
         mo->vis[i >> 5] |= 1u << (i & 31);
     }
 }
+/* Todo lo que pasa las pruebas del original se dibuja si cabe en el presupuesto de la etapa en el TA (ta_tope_etapa y
+   VTX_ETAPA_MAX; docs/DREAMCAST.md). Si no cabe, se quita lo mas lejano: las tiras de la etapa cuya parte mas cercana
+   esta a mas de corte_d no se envian (dibuja_rango), y corte_d se ajusta en cada cuadro con lo que se envio y lo que
+   no cupo en el anterior (corte_ajusta). Asi lo que falta es lo de mas lejos y no lo que toque por el orden de las
+   texturas. Sin falta de presupuesto, corte_d = lejos (la distancia del original). */
+static void nodos_visibles_todos(void)
+{
+    uint32_t i;
+    for (i = 0; i < 3; i++) if (tramos[i]->tv) nodos_visibles(tramos[i]);
+}
+static void corte_ajusta(int corto, uint32_t usado, uint32_t tope)
+{
+    if (corto) corte_d *= 0.8f;                                 /* no cupo: mas corto (rapido) */
+    else if (usado < tope / 10 * 8) corte_d *= 1.06f;           /* sobra: mas largo (despacio) */
+    if (corte_d < 60.0f) corte_d = 60.0f;
+    if (corte_d > lejos) corte_d = lejos;
+}
 
 /* ---------------------------------------------------------------- niebla del original
    scn_env_fog_<zona> (CURSO.DAT): tramos por posicion de carretera con densidad y color al principio y al final
@@ -2606,7 +2629,7 @@ int main(int argc, char **argv)
         if (cex_n) coche_luces(0, estado != TITULO && yo.freno_ant > 0.0f);
         if (cex_n) coche_entorno(mod_coche);
         tri_enviados = 0; vtx_ult = vtx_env; vtx_env = 0; ta_inicia_cuadro(); vtx_et_ult = vtx_et; vtx_et = 0;
-        if (estado != TITULO) for (i = 0; i < 3; i++) if (tramos[i]->tv) nodos_visibles(tramos[i]);   /* los del original */
+        if (estado != TITULO) nodos_visibles_todos();          /* los del original que caben en el TA */
         for (l = 0; l < 3; l++) {
             pvr_list_begin(LISTA[l]);
             if (estado != TITULO) {                             /* en el menu no se ve la etapa */
@@ -2671,11 +2694,13 @@ int main(int argc, char **argv)
             pvr_list_finish();
         }
 #ifdef DIAG_VTX
-        if (cuadro % 60 == 0) dbglog(DBG_INFO, "DIAG est%d s %.0f/%.0f ram %uK/%uK v%u (etapa %u) tri %u ms %.1f+%.1f lejos %d (%.2f) vram %u ta %uK etapa %uK/%uK 2d %u bpv %u real %uK opb %uK%s\n", estado,
+        if (cuadro % 60 == 0) dbglog(DBG_INFO, "DIAG est%d s %.0f/%.0f ram %uK/%uK v%u (etapa %u) tri %u ms %.1f+%.1f lejos %d (%.2f) vram %u ta %uK etapa %uK/%uK 2d %u bpv %u real %uK opb %uK corte %d m (%u)%s\n", estado,
                                      (double)yo.s, (double)longitud, (unsigned)(mallinfo().uordblks >> 10), (unsigned)(mallinfo().fordblks >> 10),
                                      (unsigned)vtx_env, (unsigned)vtx_et, (unsigned)tri_enviados, (double)ms_log, (double)ms, (int)lejos, (double)(lejos / LEJOS_PS2), (unsigned)pvr_mem_available(), (unsigned)(ta_vb >> 10),
-                                     (unsigned)(ta_et >> 10), (unsigned)(ta_tope_etapa >> 10), (unsigned)ta_v2d, (unsigned)ta_bpv, (unsigned)(ta_real_ult >> 10), (unsigned)(ta_opb_ult >> 10), ta_corto ? " TOPE" : "");
+                                     (unsigned)(ta_et >> 10), (unsigned)(ta_tope_etapa >> 10), (unsigned)ta_v2d, (unsigned)ta_bpv, (unsigned)(ta_real_ult >> 10), (unsigned)(ta_opb_ult >> 10), (int)corte_d, (unsigned)ta_et_corto, ta_corto ? " TOPE" : "");
 #endif
+        if (estado != TITULO) corte_ajusta(ta_et_corto, ta_et, ta_tope_etapa);
+        ta_et_corto = 0;
         pvr_scene_finish();
         tcpu += timer_us_gettime64() - c0;
         if (++cuadro % 30 == 0) {
@@ -2685,7 +2710,8 @@ int main(int argc, char **argv)
             /* ta_corto: algun cuadro se quedo sin presupuesto (de vertices de la etapa o del TA) y se saltaron mallas;
                se acorta la distancia para que lo que falte sea lo de lejos (antes contaba el coche y el trafico en el
                tope de la etapa y la distancia acababa siempre en el minimo) */
-            if (ms + ms_log > 15.0f || ta_corto) {         /* acorta (seguridad: la consola no puede con el cuadro) */
+            /* el presupuesto del TA ya lo reparte nodos_visibles_todos (quita lo mas lejano): aqui solo la CPU */
+            if (ms + ms_log > 15.0f) {                      /* acorta (seguridad: la CPU no llega al cuadro) */
                 if (lejos > LEJOS_MIN) lejos -= 50.0f;
             } else if (ms + ms_log < 11.5f && vtx_et_ult < VTX_ETAPA_MAX * 0.85f && ta_et < ta_tope_etapa / 10 * 8) {
                 if (lejos < lejos_obj) lejos += 50.0f;         /* vuelve a la del original */

@@ -93,9 +93,15 @@ orden alfabetico en mayusculas; STAGE.PS2 no sigue ese orden dentro de cada zona
 **Modelo / bloque de geometria** (`*_pmt`, `*_pmt.sz`; STAGE sin comprimir, el resto zlib). Cabecera
 `{u32 n registros, u32 n texturas, u32 tamano A, u32 tamano B}` + A + B. A: registros de 72 bytes (8 tablas
 `(cuenta, desplazamiento)` y la marca `87658765 12341234`), tablas y paquetes DMA/VIF de geometria; B: texeles.
-Tabla 0 objetos de 56 bytes (esfera), 3 mallas de 24 bytes (tercer word = paquete DMA en A), 4 de 36 bytes.
-Mallas: GIFtag, posiciones V3-32, normales V3-16 (/32768), UV V2-16 (/4096) o V2-32, tiras de hasta 16 vertices,
-STROW/STMOD (las UV pueden ir en diferencias). Texturas: tabla de desplazamientos a cabeceras de 56 bytes (datos,
+Tabla 0 nodos de 56 bytes (el PmtNode del PC: banderas, esfera, sesgo de LOD, animacion, matriz de la tabla 6, hijo,
+hermano, malla de cada LOD), 1 mallas de nodo de 16 bytes (n opacas, n de mezcla, primera opaca, primera de mezcla en
+la tabla 3), 3 tiras de 24 bytes (palabras 0 y 1 = clave del microcodigo del VU1; tercera = paquete DMA en A), 4 de 36
+bytes, 6 matrices 4x4 de vectores fila. Mallas: GIFtag (NLOOP = vertices), posiciones V3-32, normales V3-16
+(/32768), UV V4-16 (/4096) o V2-32, STCYCL 1/3, lotes de hasta 59 vertices con varias tiras: el bit 1 de la y de cada
+posicion es la bandera de no dibujar el triangulo que cierra (ADC; `vif.no_dibuja`, microcodigo en PARIDAD.md,
+Graficos). STROW/STMOD (las UV pueden ir en diferencias). Por etapa, `cs_CS_<zona>_bin` y `cs_ENV_<zona>_bin`: listas
+de nodos por seccion de carretera (una parte por registro; u16 n y n pares byte/mascara; semantica de PS2 sin
+descifrar, `conv_tramo.lee_visibilidad`); `cs_ENV_*` y `\ENV\cs_ENVBK_*` son del cubo del reflejo del coche. Texturas: tabla de desplazamientos a cabeceras de 56 bytes (datos,
 paleta, qwords, `log2 ancho/psm`, `log2 alto`, mips); PSMCT32, PSMT8 subido como PSMCT32, PSMT4 como PSMCT16,
 paletas CSM1, alfa 0x80 = opaco. Codigo: `ps2/stage.py`, `ps2/vif.py`, `ps2/tex.py`, `ps2/gs.py`, `modelo.py`.
 Su equivalente en el PC es el `.pmt` de `pc_pmt.hpp`/`pc_pmt.cpp` (codificacion de vertices distinta).
