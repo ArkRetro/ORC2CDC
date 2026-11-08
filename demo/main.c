@@ -13,6 +13,7 @@
 #include "../comun/gd.h"
 #include "../comun/musica.h"
 #include "../comun/or2_fisica.h"
+#include "../comun/hud.h"
 
 /* ---------------------------------------------------------------- modelos */
 typedef struct { uint32_t w, h, fmt, lista, off, tam; } tex_t;
@@ -633,7 +634,7 @@ enum { TITULO, CUENTA, CARRERA, META, AGOTADO };
 #define PERIODO 16683                                           /* us por paso de logica (59,94 Hz) */
 /* bifurcacion al final de la primera etapa: rama izquierda y derecha */
 static const char *RAMA_FICH[2] = { "SEG07.DAT", "SEG03.DAT" }, *RAMA_NOMBRE[2] = { "BOSQUE", "INDUSTRIA" };
-static int etapa_n;                                             /* 0: la primera; 1: ya en una rama */
+static int etapa_n, hud_ok, crono, puntos; static float puntos_f;                                             /* 0: la primera; 1: ya en una rama */
 #define TIEMPO_ETAPA 80.0f
 #ifndef VER
 #define VER 0
@@ -674,6 +675,7 @@ int main(int argc, char **argv)
     if (r || sube_modelo(&etapa) || sube_modelo(&coche)) {
         vid_set_mode(DM_640x480, PM_RGB565); aviso("Sin memoria de video para las texturas"); for (;;) thd_sleep(1000);
     }
+    hud_ok = !hud_carga("HUD.DAT", 6);                          /* 6 = tacometro del Testarossa */
     for (l = 0; l < 3; l++) for (i = 0; i < 2; i++) {
         pvr_poly_cxt_t cx; pvr_poly_cxt_col(&cx, LISTA[l]);
         cx.gen.fog_type = i ? PVR_FOG_DISABLE : PVR_FOG_TABLE; cx.gen.culling = PVR_CULLING_NONE;
@@ -738,7 +740,7 @@ int main(int argc, char **argv)
                 }
                 memset(&yo, 0, sizeof yo); yo.s = SALIDA; yo.x = carril_x(SALIDA, 4); coche_paso(&yo, 0, 0, 0, 0); traf_inicia(SALIDA); efectos_borra();
                 if (fis_ok) { float p[3], th; ruta_en(yo.s, p, &th, NULL, NULL); or2_coloca(&fis, &fpar, th, 0); }
-                tiempo = TIEMPO_ETAPA; estado = CUENTA; t_estado = 0; pausa = 0;
+                tiempo = TIEMPO_ETAPA; estado = CUENTA; t_estado = 0; pausa = 0; crono = 0; puntos = 0; puntos_f = 0;
             }
         } else if (estado == CUENTA) {
             int n = 3 - (int)(t_estado / 60);
@@ -757,6 +759,8 @@ int main(int argc, char **argv)
                 traf_paso(1.0f / 60);
                 efectos_paso(&yo, 1.0f / 60);
                 tiempo -= 1.0f / 60;
+                crono++;                                        /* puntos: por velocidad y mas al derrapar */
+                puntos_f += (fis_ok ? fis.velocidad_hud : yo.v * 3.6f) * (yo.t_derrape ? 0.06f : 0.02f); puntos = (int)puntos_f;
                 if (etapa_n == 0 && yo.s >= longitud - 400.0f && yo.s < longitud - 40.0f && t_estado % 30 == 0) {
                     char b[40]; sprintf(b, "< %s  %s >", RAMA_NOMBRE[0], RAMA_NOMBRE[1]); texto_centro(b); aviso_rama = 1;
                 }
@@ -857,8 +861,17 @@ int main(int argc, char **argv)
             }
             if (l == 2 && estado != TITULO) { mat_load(&vista); efectos_dibuja(); }
             if (l == 2) {
-                caja(36, 18, 568, ver ? 92 : 34, 0x90000000);
-                rect_txr(txt_arr, 512, 128, 40, 20, 512, 128, PVR_LIST_TR_POLY);
+                int texto = estado == TITULO || ver || !hud_ok;
+                if (hud_ok && estado != TITULO) {
+                    hud_estado_t he;
+                    he.tiempo = (int)ceilf(tiempo); he.crono_ms = (int)(crono * 1000.0f / 60.0f); he.puntos = puntos;
+                    he.kmh = fis_ok ? (int)fis.velocidad_hud : (int)(yo.v * 3.6f); he.marcha = fis_ok ? fis.marcha : 1;
+                    he.etapa = etapa_n; he.cuadro = cuadro; he.rpm = fis_ok ? (float)fis.rpm_suave : 0;
+                    he.rebufo = 0; he.derrape = yo.t_derrape != 0; he.manual = 0; he.seis = fis_ok && fpar.marchas >= 6;
+                    hud_dibuja(&he);
+                }
+                if (texto) caja(36, 18, 568, ver ? 92 : 34, 0x90000000);
+                if (texto) rect_txr(txt_arr, 512, 128, 40, 20, 512, 128, PVR_LIST_TR_POLY);
                 if (estado != CARRERA || t_estado < 50 || auto_ || aviso_rama) rect_txr(txt_cen, 256, 32, 64, 180, 512, 64, PVR_LIST_TR_POLY);
             }
             pvr_list_finish();
