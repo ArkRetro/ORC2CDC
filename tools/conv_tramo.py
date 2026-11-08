@@ -352,15 +352,38 @@ def superficies(seg, cam, an):
         ban[i] = np.array(f, float).reshape(-1)
     return lim, ext, ban, hpf
 
-def main():
-    ruta, n, sal = sys.argv[1], int(sys.argv[2]), sys.argv[3]
-    seg = stage.segmentos(isomod.Iso(ruta))[n]
+def transforma(mod, M):
+    """lleva el modelo y su ruta al marco del curso: M = (tx, ty, tz, ry), giro alrededor de y (x' = x cos + z sen,
+    z' = -x sen + z cos, el de pc_matrix_rotate_y del original) y traslacion. El cielo (lista 3, centrado en la camara)
+    solo gira. En la ruta se mueven la posicion y las alturas (perfil y alturas exteriores); el resto son desvios"""
+    tx, ty, tz, ry = M; c, s = np.cos(ry), np.sin(ry)
+    def gira(x, z): return x * c + z * s, -x * s + z * c
+    cielo = {x[4] for x in mod.mallas if x[0] == 3}
+    i0 = 0
+    for v in mod.verts:
+        x, z = gira(v['x'].astype(float), v['z'].astype(float)); en_cielo = i0 in cielo
+        v['x'] = x + (0 if en_cielo else tx); v['z'] = z + (0 if en_cielo else tz)
+        if not en_cielo: v['y'] = v['y'] + ty
+        i0 += len(v)
+    for x in mod.mallas:
+        cx, cz = gira(x[2][0], x[2][2])
+        x[2] = np.array([cx, x[2][1], cz]) + (0 if x[0] == 3 else np.array([tx, ty, tz]))
+    r = mod.ruta.copy()
+    if len(r):
+        x, z = gira(r[:, 0], r[:, 2]); r[:, 0] = x + tx; r[:, 2] = z + tz; r[:, 1] += ty
+        r[:, 5:5 + NPERF] += ty
+        c_ext = 5 + NPERF + NCARRIL + 2
+        if r.shape[1] >= c_ext + 2 * NEXT: r[:, c_ext:c_ext + 2 * NEXT] += ty
+    mod.ruta = r
+
+def convierte(seg, n, sal, mundo=None, cielo=True):
+    """el segmento seg (numero n) a sal; mundo: transformacion al marco del curso (transforma)"""
     mod = modelo.Modelo(); mod.limita = True
     for blq in seg.bloques:
         if blq.o == seg.o:                                     # el bloque principal, con los objetos en su sitio
             mod.bloque(blq, objetos=True)
         elif es_cielo(blq):
-            mod.bloque(blq, lista=3)                           # el cielo: alrededor de la camara, sin niebla
+            if cielo: mod.bloque(blq, lista=3)                 # el cielo: alrededor de la camara, sin niebla
         # los otros bloques: versiones de lejos (LOD), aparte
     cam = recorrido_soo(seg)
     if cam is None: cam = recorrido(seg)
@@ -383,12 +406,22 @@ def main():
     if not sup[1].any(): sup = (sup[0], np.repeat(pf[:, [0, -1]], NEXT, 1), sup[2])
     mod.ruta = np.concatenate([cam, an, pf, car, sup[0], sup[1], sup[2]], 1)
     mod.recorta_texturas()                                     # solo las texturas que se usan (memoria de video)
+    if mundo is not None: transforma(mod, mundo)
     ini = mod.escribe(sal)
     print('segmento %d: %d tiras (%d opacas, %d recorte, %d transparentes, %d cielo), %d vertices, %d triangulos, '
           '%d texturas (%d KB), ruta %d puntos (%.0f m), %d KB'
           % (n, len(mod.mallas), ini[1], ini[2] - ini[1], ini[3] - ini[2], ini[4] - ini[3], mod.nv,
              sum(x[5] - 2 for x in mod.mallas), len(mod.texs), len(mod.blob) >> 10, len(cam), 4 * len(cam),
              os.path.getsize(sal) >> 10))
+    return mod
+
+def main():
+    """conv_tramo.py tu.iso n salida.dat [tx ty tz ry]: con los cuatro numeros, el tramo va colocado en el marco del
+    curso (conv_union.py los saca de los descriptores del ejecutable)"""
+    ruta, n, sal = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+    mundo = tuple(float(x) for x in sys.argv[4:8]) if len(sys.argv) >= 8 else None
+    seg = stage.segmentos(isomod.Iso(ruta))[n]
+    convierte(seg, n, sal, mundo)
 
 if __name__ == '__main__':
     main()

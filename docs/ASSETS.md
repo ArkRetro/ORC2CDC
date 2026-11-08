@@ -75,7 +75,7 @@ orden alfabetico en mayusculas; STAGE.PS2 no sigue ese orden dentro de cada zona
 | Escenarios | COMMON.PS2 | carteles de bifurcacion por zona (`obj_OBJ_<ZONA>_BUNKI_TX_pmt`), objetos comunes y puertas, sombra de vehiculo, colores, base de objetos (`object_db`), huesos, tabla de movimientos, destellos, records por defecto, datos de curso | modelo, binarios | no |
 | Escenarios | BK.PS2 | fondos (finales y zonas especiales): colisiones (`COLI0200` y una version 0105), modelos `cs_BK_*`, entorno, objetos animados del fondo (aviones, pajaros, barcos...: subdirectorio `ANIMS`), tablas SO | COLI, modelo, SO, oso | no |
 | Escenarios | OSO.PS2 | `oso_qt_*` y `oso_dyn_*`: colocaciones/trayectorias (probable) | oso (sin estudiar) | no |
-| Coches | CARS.PS2 | coches del jugador (`obj_plcar_*`, con variante `_t`), rivales (`obj_rc_*`, `obj_rc_all`) y trafico (`obj_othcar`) | modelo (zlib) | `conv_coche.py` (COCHE.DAT), `conv_trafico.py` (TRAFn.DAT, TRAFC.DAT), `conv_param.py` (PARAM.DAT, del ELF) |
+| Coches | CARS.PS2 | coches del jugador (`obj_plcar_*`, con variante `_t`), rivales (`obj_rc_*`, `obj_rc_all`) y trafico (`obj_othcar`) | modelo (zlib) | `conv_coche.py` (COCHEnn.DAT por ficha del menu y COCHES.DAT; montaje con la tabla de disposiciones del ELF), `conv_trafico.py` (TRAFn.DAT, TRAFC.DAT), `conv_param.py` (PARAM.DAT, del ELF) |
 | Personajes | DRIVER.PS2, CHR.PS2, ANIMS.PS2 | pilotos y acompanantes (modelos), datos de personaje `CHR_*.bin`, movimientos `mot_*` (celebraciones, finales, salida) | modelo, binario, movimiento | no |
 | Finales | OBJ.PS2, AS.PS2 | escenas de final (`obj_end_*`) y guiones de escena (`as_e_NN`, `as_SPE_*`) | modelo, binario | no |
 | Fantasmas | GHOST.PS2, GHOSTS.PS2 | repeticiones grabadas (`gc_default_*`, `gc_RACE_*`) para contrarreloj, rivales y demo | `QHOT`/`NHOT` (zlib del paquete) | no |
@@ -169,8 +169,8 @@ Falta, por orden aproximado de necesidad para un juego completo:
    de mision), enlazarlos por bifurcaciones con `csc_data_*` y `Req_*` de SCRIPTS, carteles de bifurcacion y
    puertas de COMMON, entorno lejano (`cs_ENV_*_pmt`) y cielo, niebla/sol (`scn_env_fog/sun`), spline
    (`maya_spl`) en lugar de la ruta deducida, tablas SO y `oso_cs_*` (sin estudiar).
-2. **Coches**: los 15+ coches del jugador (`obj_plcar_*`, ya convertibles con `conv_coche.py`), tacometros por coche
-   (bancos METER en `conv_hud.py`), rivales `obj_rc_*`, sombra (`obj_vshadow`).
+2. **Coches**: hechos los 15 del modo OUTRUN (`conv_coche.py --todos`); faltan las variantes `_t` (modelos 15-29),
+   los colores de pintura, rivales `obj_rc_*`, sombra (`obj_vshadow`).
 3. **Menus y textos**: resto de SPRANI/XST (titulo, seleccion de coche y musica, carga, ranking, entrada de nombre,
    finales) en `conv_menu.py`, y los textos `txet` por idioma (TEXT.PS2) con la fuente `spr_font_xst`.
 4. **Modos**: reglas de Coast 2 Coast/misiones (`Races`, `RaceAttack`, `OutrunMiles`, metas), records por defecto,

@@ -136,6 +136,15 @@ int hud_carga(const char *fich, int modelo)
     return hudd_sube(hud_principal, 0, -1) ? -2 : 0;
 }
 void hud_baja_tex(void) { hudd_baja(hud_principal, 0, -1); }
+void hud_pon_modelo(int modelo)
+{
+    hud_dat_t *h = hud_principal; uint32_t i, j;
+    if (!h) return;
+    H = h; h->taco = h->dat[h->off_taco + (modelo & 15)]; if (h->taco == 0xff) h->taco = -1;
+    memset(h->usada, 0, h->n_tex);                          /* texturas que se suben: las del tacometro nuevo */
+    for (i = 0; i < h->n_grp; i++)
+        if (grupo_util(i)) for (j = h->grp[i].pri; j < (uint32_t)h->grp[i].pri + h->grp[i].np; j++) h->usada[h->spr[h->pie[j].spr].tex] = 1;
+}
 int hud_sube_tex(void) { return hud_principal ? hudd_sube(hud_principal, 0, -1) : -1; }
 
 static void pieza(const h_pie_t *p, const h_grp_t *g, int cuadro, float X, float Y, float alfa)

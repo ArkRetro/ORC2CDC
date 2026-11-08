@@ -11,6 +11,10 @@ void menu_dibuja(void);                     /* dentro de la lista TR */
 void menu_sale(void);                       /* libera toda la VRAM del menu */
 int menu_manual(void);                      /* cambio elegido: 0 AT, 1 MT */
 int menu_pista(void);                       /* musica elegida */
-int menu_coche3d(void);                     /* 1 si hay que dibujar el coche 3D (seleccion de coche) */
-unsigned menu_vram(void);                   /* bytes de VRAM del menu en uso */
+int menu_coche3d(void);                     /* 1 si hay que dibujar el coche 3D (seleccion de coche, ficha con coche y
+                                               quieta) */
+int menu_coche(void);                       /* ficha del coche elegido (0..14, orden del menu) */
+void menu_coches(unsigned mascara);         /* fichas que tienen coche (bit k = COCHEkk.DAT); antes de menu_entra */
+unsigned menu_vram(void);
+void menu_libera_vram(void);                /* echa las pantallas guardadas que no hacen falta ahora */                   /* bytes de VRAM del menu en uso */
 #endif

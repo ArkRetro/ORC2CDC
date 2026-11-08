@@ -41,7 +41,8 @@ ORD6): libro de hasta 256 entradas de 4 texeles de 16 bits (2 KB) + 1 byte por b
 | SEG00.DAT | 1801 KB | 496 KB |
 | SEG03.DAT | 2541 KB | 644 KB |
 | SEG07.DAT | 2398 KB | 563 KB |
-| COCHE.DAT | 439 KB | 133 KB |
+| COCHE.DAT (el de antes: era el 512 BB) | 439 KB | 133 KB |
+| COCHE00-14.DAT (texturas de cada uno) | | 86-151 KB |
 | TRAF0-8.DAT (suma) | 573 KB | 140 KB |
 
 Error RMS medio 4,4-4,8 (maximo 9). VRAM libre medida (Flycast, `DIAG_VTX`): en carrera 961 KB con SEG00 y 809 KB
@@ -90,6 +91,14 @@ Medidas (Flycast, `-DDIAG_VTX`, con 56 B/vertice): peor cuadro de carrera 28263 
 coche 6972, trafico y efectos ~1700) + ~150 de HUD = **1545 KB de 1664**; con 42,5 B/vertice reales serian unos
 1,2 MB del bufer de 1,75 MB (69 %). Peor menu: coche 6972 + 412 de 2D = 413 KB. El tope aguanta mientras la consola
 gaste menos de ~60 B por vertice contado, y la calibracion sube `ta_bpv` sola si gasta mas de 46.
+
+Coches del jugador (`tools/conv_coche.py`): tope de 9200 vertices por coche. Montados enteros (carroceria, puertas,
+volante, faros, pilotos y las cuatro ruedas del original) tienen 9400-11800; los que pasan se vacian (fuera lo que no
+se ve desde las camaras del juego, el interior bajo una tapa oscura y, si hace falta, ruedas del modelo ligero) y
+quedan en 6800-9130. Un coche cada vez (`coche_carga` en `demo/main.c`: libera RAM y VRAM del anterior; en el menu,
+si no cabe, echa la cache de pantallas). `ta_vmin_otros` se recalcula con el coche cargado; con 9100 vertices de
+coche el peor cuadro de carrera pasaria de los 1664 KB contados a 56 B/vertice y `ta_cabe` recorta la etapa de lejos
+(en la consola, a ~42,5 B/vertice, cabe entero: unos 1,3 MB de 1,75).
 
 OPB: 4 juegos de reserva (307 KB por cuadro); en la consola se midieron 141568 bytes en total (65 KB de reserva) en
 el cuadro que se colgo (incompleto). Si el registro `TA_OPB_POS` pasa del 70 % del OPB, `ta_freno` baja el tope de la

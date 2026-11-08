@@ -6,8 +6,9 @@
    AT_OK/MT_OK o AT_ATRAS/MT_ATRAS al confirmar o volver, radio de la musica ENTRA/SALE. Cabeceras: ENTRA y luego
    BRILLO (destello del rotulo en bucle). Barra de ayuda de cada pantalla (AYUDA_*: botones y textos del original,
    ya compuestos en MENU.DAT con la fuente del juego), en COMUN.
-   Demo: solo el Testarossa (coche 9), los modos COAST 2 COAST y OUTRUN (los dos a la misma carrera) y los temas con
-   pista en el disco (MUSn); lo demas queda bloqueado (candado o sacudida).
+   Demo: los coches convertidos (COCHEnn.DAT, ficha nn; menu_coches() dice cuales hay; por defecto solo el Testarossa,
+   ficha 9), los modos COAST 2 COAST y OUTRUN (los dos a la misma carrera) y los temas con pista en el disco (MUSn); lo
+   demas queda bloqueado (candado o sacudida). El coche 3D de la ficha lo carga y lo dibuja la demo (menu_coche).
    Sonido (como el original): efectos del frontal con sfx_menu (cursor, aceptar, bloqueado, cancelar); el titulo va
    sin musica (en el original suena la pelicula), al salir de el arranca la musica de menu (pista 30 de MUSIC.PS2,
    MUS30.ADP); en la musica cada tema suena con su avance (pista 33 + tema, MUSnn.ADP; si no esta, el tema entero) y
@@ -44,6 +45,8 @@ static const char *const UNOM[NU] = { "TITULO_FONDO", "TITULO_LOGO", "TITULO_STA
 #define N_OPC 5                                             /* opciones del menu principal y de un jugador */
 #define N_COCHES 15
 #define COCHE_DEMO 9                                        /* Testarossa (logo del cuadro 200 de 0x44007E) */
+static unsigned coches_ok = 1u << COCHE_DEMO;               /* fichas con coche (menu_coches) */
+#define COCHE_OK(k) ((coches_ok >> (k)) & 1)
 #define N_TEMAS 9                                           /* lista 0 */
 #define T_DEMO (8 * 60)                                     /* inactividad en el titulo hasta la demo */
 #define T_FUNDIDO 12
@@ -140,6 +143,8 @@ unsigned menu_vram(void)
     return s;
 }
 void menu_sale(void) { int p; for (p = 0; p < NP; p++) baja_p(p); }
+/* echa de la VRAM las pantallas guardadas que no usa la actual (para subir otro coche) */
+void menu_libera_vram(void) { int p; for (p = 0; p < NP; p++) if (pant < 0 || !(MASCARA[pant] & (1 << p))) baja_p(p); }
 
 /* ---------------------------------------------------------------- carga */
 int menu_inicia(void)
@@ -231,7 +236,13 @@ void menu_entra(int man, int pista, int npistas)
 
 int menu_manual(void) { return manual; }
 int menu_pista(void) { return tema < n_ok ? tema : 0; }
-int menu_coche3d(void) { return md && pant == P_COCHE && c_coche == COCHE_DEMO && fase != F_SALE; }
+int menu_coche3d(void) { return md && pant == P_COCHE && COCHE_OK(c_coche) && fase != F_SALE && an_hecho(&a_sel); }
+int menu_coche(void) { return c_coche; }
+void menu_coches(unsigned mascara)
+{
+    coches_ok = mascara ? mascara : 1u << COCHE_DEMO;
+    if (!COCHE_OK(c_coche)) for (c_coche = 0; c_coche < N_COCHES - 1 && !COCHE_OK(c_coche); c_coche++) ;
+}
 
 static void sale(int destino, int ok) { fase = F_SALE; t = 0; sig = destino; sale_ok = ok; sfx_menu(ok ? SFX_ACEPTA : SFX_CANCELA); }
 static void bloqueado(void) { t_bloq = 14; sfx_menu(SFX_BLOQUEADO); }
@@ -258,7 +269,7 @@ static void control(unsigned n)
         if (!an_hecho(&a_sel)) break;
         if (izq && c_coche > 0) { an_mueve(&a_sel, c_coche, c_coche - 1); c_coche--; sfx_menu(SFX_CURSOR); }
         else if (der && c_coche < N_COCHES - 1) { an_mueve(&a_sel, c_coche, c_coche + 1); c_coche++; sfx_menu(SFX_CURSOR); }
-        else if (ok) { if (c_coche == COCHE_DEMO) sale(P_CAMBIO, 1); else bloqueado(); }
+        else if (ok) { if (COCHE_OK(c_coche)) sale(P_CAMBIO, 1); else bloqueado(); }
         else if (atras) sale(P_MODO, 0);
         break;
     case P_CAMBIO:
@@ -353,7 +364,7 @@ void menu_dibuja(void)
         break;
     case P_COCHE:
         an_dibuja(&a_sel, sacude, a_ent * a_sal, 4, 0);
-        if (c_coche != COCHE_DEMO && an_hecho(&a_sel)) hudd_dibuja(md, us[U_CAND], 0, sacude, 0, a_ent * a_sal, 5, 0);
+        if (!COCHE_OK(c_coche) && an_hecho(&a_sel)) hudd_dibuja(md, us[U_CAND], 0, sacude, 0, a_ent * a_sal, 5, 0);
         break;
     case P_CAMBIO:
         an_dibuja(&a_sel, 0, 1, 7, 0);

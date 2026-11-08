@@ -15,6 +15,7 @@ void hud_aviso(const char *nombre, int cuadro, float alfa);   /* despues de hud_
 void hud_puntos_msg(int puntos, int estilo, float dy, float alfa);
 /* texturas del HUD de carrera fuera/dentro de la VRAM (los datos siguen en la RAM): los menus usan ese hueco */
 void hud_baja_tex(void);
+void hud_pon_modelo(int modelo);                        /* tacometro de otro modelo (con las texturas bajadas) */
 int hud_sube_tex(void);                                  /* 0 bien */
 
 /* ---- acceso generico a un fichero con el formato de HUD.DAT (ver tools/conv_hud.py), p.ej. MENU.DAT ---- */

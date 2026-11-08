@@ -16,17 +16,33 @@ int gd_ocupado(uint32_t ms) { return ult_primer_plano && timer_ms_gettime64() - 
    serializa los accesos al GD (semaforo del G1) e invalida la cache de datos sobre el destino de un DMA; el destino no
    se debe tocar mientras tanto ni compartir linea de cache (32 bytes) con otros datos: por eso va alineado a 32 y en
    multiplos de 2048 */
+/* Dos hilos pueden leer a la vez (la musica y la carga de etapa en segundo plano, demo/main.c): con las ordenes de
+   KallistiOS solapadas el GD devuelve a veces ERR_SYS (visto en Flycast). Cada lectura va entera bajo un mutex propio
+   y, si falla, se repite (hasta 4 veces). gd_busca tambien lo toma (su sector es comun): recursivo */
+static mutex_t m_gd = RECURSIVE_MUTEX_INITIALIZER;
 static int lee(uint32_t lba, int n, void *dst)
 {
-    int r, pp = thd_get_current() != fondo;
+    int r, pp = thd_get_current() != fondo, k;
+    mutex_lock(&m_gd);
     if (pp) ult_primer_plano = timer_ms_gettime64();
-    r = cdrom_read_sectors_ex(dst, lba + 150, n, ((uintptr_t)dst & 31) == 0);
+    for (k = 0; k < 4; k++) {
+        if (!(r = cdrom_read_sectors_ex(dst, lba + 150, n, ((uintptr_t)dst & 31) == 0))) break;
+        thd_sleep(20);
+    }
     if (pp) ult_primer_plano = timer_ms_gettime64();
+    mutex_unlock(&m_gd);
     return r;
 }
 int gd_lee(uint32_t lba, int n, void *dst) { return lee(lba, n, dst); }
 
+static int busca(const char *nombre, uint32_t *lba, uint32_t *tam);
 int gd_busca(const char *nombre, uint32_t *lba, uint32_t *tam)
+{
+    int r;
+    mutex_lock(&m_gd); r = busca(nombre, lba, tam); mutex_unlock(&m_gd);
+    return r;
+}
+static int busca(const char *nombre, uint32_t *lba, uint32_t *tam)
 {
     uint32_t rl, rs, o; size_t ln = strlen(nombre);
     if (lee(45016, 1, sec) || memcmp(sec + 1, "CD001", 5)) return -1;

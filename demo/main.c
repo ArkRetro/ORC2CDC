@@ -1,4 +1,4 @@
-/* Demo jugable del port de OutRun 2006 C2C a Dreamcast: la primera etapa (SEG00.DAT) y un coche (COCHE.DAT),
+/* Demo jugable del port de OutRun 2006 C2C a Dreamcast: la primera etapa (SEG00.DAT) y los coches (COCHEnn.DAT),
    convertidos de tu DVD con tools/conv_tramo.py y tools/conv_coche.py (formato ORD6 con texturas VQ, ver tools/modelo.py
    y tools/vq.py). Necesidades de la consola real (presupuesto del TA, VRAM, GD, video): docs/DREAMCAST.md.
    Orden de carga: datos del GD a la RAM (con aviso en pantalla), PowerVR, texturas a la memoria de video, cabeceras
@@ -95,6 +95,42 @@ static void libera_modelo(modelo_t *m)
     free(m->tv); free(m->cabs[0]); free(m->cabs[1]); free(m->datos);
     memset(m, 0, sizeof *m);
 }
+
+/* tras sube_modelo los texeles (al final del fichero) ya no hacen falta en la RAM: se devuelven (realloc a menos) */
+static void compacta_modelo(modelo_t *m)
+{
+    uint8_t *d;
+    if (!m->datos || !m->blob) return;
+    d = realloc(m->datos, m->blob - m->datos);
+    if (!d) return;
+    if (d != m->datos) {                                          /* se ha movido: los punteros, al bloque nuevo */
+        uintptr_t k = (uintptr_t)d - (uintptr_t)m->datos;
+        m->texs = (tex_t *)((uintptr_t)m->texs + k); m->mallas = (malla_t *)((uintptr_t)m->mallas + k);
+        m->verts = (vert_t *)((uintptr_t)m->verts + k); m->ruta = (float *)((uintptr_t)m->ruta + k);
+        m->datos = d;
+    }
+    m->blob = NULL;
+}
+
+/* Carga en segundo plano: un hilo lee del GD el fichero de un modelo (lee_modelo) mientras el bucle sigue dibujando;
+   las texturas las sube luego el bucle (sube_modelo: la memoria de video y las Store Queues son del hilo principal).
+   Las lecturas de este hilo son de primer plano para gd.c: el lector de la musica espera mientras tanto y la musica
+   sigue del anillo (~21 s). Una carga a la vez; estado 0 libre, 1 leyendo, 2 leido (r: resultado de lee_modelo). */
+typedef struct { modelo_t *m; const char *nombre; volatile int estado; int r; uint64_t t0; float s; } carga_t;
+static carga_t carga;
+static void *carga_hilo(void *p)
+{
+    carga_t *c = p;
+    c->r = lee_modelo(c->m, c->nombre);
+    c->estado = 2;
+    return NULL;
+}
+static void carga_pide(modelo_t *m, const char *nombre)
+{
+    carga.m = m; carga.nombre = nombre; carga.r = 0; carga.estado = 1; carga.t0 = timer_ms_gettime64();
+    if (!thd_create(1, carga_hilo, &carga)) carga_hilo(&carga);   /* sin hilo: aqui mismo */
+}
+static void carga_espera(void) { while (carga.estado == 1) thd_sleep(5); }
 
 /* ---------------------------------------------------------------- camara y dibujo */
 static float ojo[3], der[3], arr[3], ade[3], fx = 320.0f / 0.75f, cerca = 0.5f, lejos = 1000.0f;
@@ -301,18 +337,23 @@ static void dibuja_rango(const modelo_t *mo, int l, uint32_t k0, uint32_t k1, in
     if (ta_en_etapa) vtx_et += vtx_env - vtx_et0;
 }
 
-/* ---------------------------------------------------------------- ruta de la etapa */
+/* ---------------------------------------------------------------- ruta de la carrera
+   Un punto cada PASO m (tools/conv_tramo.py: centro, anchos, perfil, carriles y columnas de la colision). Es la ruta de
+   la etapa de salida seguida de la de la union (la rama elegida) y de la etapa siguiente en cuanto estan cargadas
+   (curso_paso): la distancia s sigue sin cortes de una a otra. Sus ficheros ya vienen colocados en el marco de la etapa
+   de salida (tools/conv_union.py). */
 static modelo_t etapa, coche;
-static float *rumbo, longitud;                                  /* rumbo de la carretera en cada punto (rad) */
+static float *ruta_p, *rumbo, longitud;                         /* puntos; rumbo de la carretera en cada punto (rad) */
+static uint32_t ruta_n, ruta_cap, ruta_pr;                      /* puntos, capacidad y floats por punto */
 #define PASO 4.0f
-#define PR ((int)etapa.paso_ruta)
+#define PR ((int)ruta_pr)
 #define NPERF 16
 static void ruta_prepara(void)
 {
-    uint32_t i, n = etapa.nruta; float ant = 0;
+    uint32_t i, n = ruta_n; float ant = 0;
     free(rumbo); rumbo = malloc(n * sizeof(float));
     for (i = 0; i < n; i++) {
-        const float *a = etapa.ruta + PR * (i ? i - 1 : 0), *b = etapa.ruta + PR * (i + 1 < n ? i + 1 : n - 1);
+        const float *a = ruta_p + PR * (i ? i - 1 : 0), *b = ruta_p + PR * (i + 1 < n ? i + 1 : n - 1);
         float t = atan2f(b[0] - a[0], -(b[2] - a[2]));            /* t = (sin, 0, -cos): girar a la derecha suma */
         while (t - ant > M_PI) t -= 2 * M_PI;
         while (t - ant < -M_PI) t += 2 * M_PI;
@@ -326,7 +367,7 @@ static void ruta_en(float s, float *p, float *th, float *iz, float *de)
     int i; float f; const float *a, *b;
     if (s < 0) s = 0;
     if (s > longitud - 0.01f) s = longitud - 0.01f;
-    i = (int)(s / PASO); f = s / PASO - i; a = etapa.ruta + PR * i; b = a + PR;
+    i = (int)(s / PASO); f = s / PASO - i; a = ruta_p + PR * i; b = a + PR;
     p[0] = a[0] + f * (b[0] - a[0]); p[1] = a[1] + f * (b[1] - a[1]); p[2] = a[2] + f * (b[2] - a[2]);
     *th = rumbo[i] + f * (rumbo[i + 1] - rumbo[i]);
     if (iz) *iz = a[3] + f * (b[3] - a[3]);
@@ -369,7 +410,7 @@ static float altura(float s, float x)
     int i; float f; const float *a;
     if (s < 0) s = 0;
     if (s > longitud - 0.01f) s = longitud - 0.01f;
-    i = (int)(s / PASO); f = s / PASO - i; a = etapa.ruta + PR * i;
+    i = (int)(s / PASO); f = s / PASO - i; a = ruta_p + PR * i;
     return altura_punto(a, x) + f * (altura_punto(a + PR, x) - altura_punto(a, x));
 }
 /* limites transitables (positivos) en s: los de la colision, o sin ella los bordes del asfalto */
@@ -378,7 +419,7 @@ static void limites(float s, float *li, float *ld)
     int i, c = CON_SUP ? C_LIM : 3; float f; const float *a;
     if (s < 0) s = 0;
     if (s > longitud - 0.01f) s = longitud - 0.01f;
-    i = (int)(s / PASO); f = s / PASO - i; a = etapa.ruta + PR * i;
+    i = (int)(s / PASO); f = s / PASO - i; a = ruta_p + PR * i;
     *li = a[c] + f * (a[PR + c] - a[c]); *ld = a[c + 1] + f * (a[PR + c + 1] - a[c + 1]);
 }
 /* franjas del punto de la ruta mas cercano a s */
@@ -387,8 +428,8 @@ static const float *franjas(float s)
     int i;
     if (s < 0) s = 0;
     if (s > longitud - 0.01f) s = longitud - 0.01f;
-    i = (int)(s / PASO + 0.5f); if (i > (int)etapa.nruta - 1) i = etapa.nruta - 1;
-    return etapa.ruta + PR * i + C_BANDA;
+    i = (int)(s / PASO + 0.5f); if (i > (int)ruta_n - 1) i = ruta_n - 1;
+    return ruta_p + PR * i + C_BANDA;
 }
 /* bandera de superficie (1 << material de la COLI) en (s, x), como wheel+0x14 del original; 0 sin datos. Fuera de
    los limites, vacio (1) */
@@ -416,6 +457,63 @@ static int muro_interior(float s, float x, float m, float *xa, float *xb)
     return 0;
 }
 
+/* mueve el centro del punto a de la ruta o metros a la derecha (r: vector a la derecha) sin mover la calzada: los
+   desvios se miden desde el centro nuevo (anchos, carriles, limites y franjas; el perfil y las alturas exteriores van
+   de borde a borde y no cambian) */
+static void ruta_recentra(float *a, float o, float rx, float rz)
+{
+    int k;
+    a[0] += o * rx; a[2] += o * rz; a[3] += o; a[4] -= o;
+    for (k = 0; k < C_LIM - 5 - NPERF; k++) a[5 + NPERF + k] -= o;  /* carriles */
+    if (CON_SUP) {
+        a[C_LIM] += o; a[C_LIM + 1] -= o;
+        for (k = 0; k < NBANDA; k++) a[C_BANDA + 2 * k] -= o;
+    }
+}
+static int ruta_reserva(uint32_t n)
+{
+    float *q;
+    if (n <= ruta_cap) return 0;
+    if (!(q = realloc(ruta_p, n * PR * sizeof(float)))) return -1;
+    ruta_p = q; ruta_cap = n;
+    return 0;
+}
+/* la ruta de la carrera = la del modelo (la etapa de salida), con sitio para la union y la etapa siguiente */
+static int ruta_pon(const modelo_t *m)
+{
+    ruta_n = 0; ruta_pr = m->paso_ruta;
+    if (ruta_reserva(m->nruta + 2000)) return -1;
+    memcpy(ruta_p, m->ruta, m->nruta * PR * sizeof(float)); ruta_n = m->nruta;
+    ruta_prepara();
+    return 0;
+}
+/* Anade la ruta del modelo m detras de la actual: se salta sus puntos que no pasan del ultimo (ruta_salto) y su centro
+   arranca en el de la actual y vuelve al suyo en RECENTRA puntos (dos ficheros no tienen por que coincidir en el
+   centro: la ruta de una etapa sigue los carriles y la de la union el poligono de la calzada; el coche no debe saltar
+   de lado). Devuelve el primer punto anadido, o -1 */
+#define RECENTRA 25
+static uint32_t ruta_salto;
+static int ruta_anade(const modelo_t *m)
+{
+    const float *b = m->ruta; uint32_t j = 0, k, i0 = ruta_n, n; float ax, az, tx, tz, l, o0 = 0;
+    if ((int)m->paso_ruta != PR || m->nruta < 4 || !ruta_n) return -1;
+    ax = ruta_p[PR * (ruta_n - 1)]; az = ruta_p[PR * (ruta_n - 1) + 2];
+    tx = b[PR] - b[0]; tz = b[PR + 2] - b[2]; l = sqrtf(tx * tx + tz * tz) + 1e-6f; tx /= l; tz /= l;
+    while (j + 4 < m->nruta && (b[PR * j] - ax) * tx + (b[PR * j + 2] - az) * tz < 0.5f * PASO) j++;
+    n = m->nruta - j;
+    if (ruta_reserva(ruta_n + n)) return -1;
+    memcpy(ruta_p + PR * ruta_n, b + PR * j, n * PR * sizeof(float));
+    for (k = 0; k < RECENTRA && k < n; k++) {
+        const float *p0 = b + PR * (j + k - (j + k > 0)), *p1 = b + PR * (j + k + 1 < m->nruta ? j + k + 1 : j + k);
+        float rx = -(p1[2] - p0[2]), rz = p1[0] - p0[0]; l = sqrtf(rx * rx + rz * rz) + 1e-6f; rx /= l; rz /= l;
+        if (!k) o0 = (ax - b[PR * j]) * rx + (az - b[PR * j + 2]) * rz;   /* el centro de la actual, a la derecha */
+        ruta_recentra(ruta_p + PR * (ruta_n + k), o0 * 0.5f * (1 + cosf((float)M_PI * k / RECENTRA)), rx, rz);
+    }
+    ruta_salto = j; ruta_n += n;
+    ruta_prepara();
+    return i0;
+}
+
 /* ---------------------------------------------------------------- coche */
 typedef struct { float s, x, a, v; float pos[3], fw[3], up[3]; int choque, derrape, t_derrape, t_muro; float deriva, freno_ant, gas_ant;
                  float pose_t[3], pose_r[3]; } coche_t;   /* pose: animacion de choque del original (solo al dibujar) */
@@ -429,6 +527,11 @@ static coche_t yo;
 #endif
 static int manual_, pide_cambio, auto_piloto, sfx_ok, golpe_cd;
 static or2_param_t fpar; static or2_coche_t fis; static int fis_ok, columna = -1;
+/* coche elegido: ficha del menu (COCHEnn.DAT, tools/conv_coche.py) y su modelo (car+0x11) segun COCHES.DAT ('CCH1' y
+   un byte por ficha, 0xFF = sin coche); el modelo da la columna de la fisica y el tacometro del HUD */
+#define N_FICHAS 15
+static uint8_t ficha_modelo[N_FICHAS]; static int coche_ficha = -1, coche_malo = -1, modelo_jug = MODELO;
+static int fisica_modelo(int m);
 static or2_choques_t choq;                                      /* choques del original (bloques de PARAM.DAT) */
 static float *param_dat;                                        /* se queda en memoria: las animaciones apuntan aqui */
 /* grua del choque fuerte: PlWrecker avanza 10 posiciones de la carretera del original (pc_advance_on_road_place);
@@ -440,16 +543,23 @@ static int fisica_carga(void)
     uint32_t sz; float *t = gd_carga("PARAM.DAT", &sz);
     if (!t || sz < (200 * 19 + 162 + 256) * 4) return -1;
     or2_carga_choques(t, sz, &choq);
+    param_dat = t;
+    return fisica_modelo(modelo_jug);
+}
+/* la columna de PARAM.DAT del modelo (peso, agarre, motor, marchas: los del original para ese coche) */
+static int fisica_modelo(int m)
+{
+    if (!param_dat) return -1;
 #ifdef COLUMNA
-    columna = COLUMNA;
+    columna = COLUMNA; (void)m;
 #else
-    columna = or2_columna_modelo(&choq, MODELO);                /* la tabla de columnas del juego (5051D0) */
+    columna = or2_columna_modelo(&choq, m);                     /* la tabla de columnas del juego (5051D0) */
     if (columna < 0) columna = 4;                               /* la del Testarossa si el fichero es antiguo */
 #endif
-    if (or2_carga_param(t, 200, columna, &fpar) < 0) return -2;
-    or2_carga_curvas(&fpar, t + 200 * 19, t + 200 * 19 + 162);
+    if (or2_carga_param(param_dat, 200, columna, &fpar) < 0) { fis_ok = 0; return -2; }
+    or2_carga_curvas(&fpar, param_dat + 200 * 19, param_dat + 200 * 19 + 162);
     fpar.par_mult *= ACEL;                                      /* mas aceleracion (a peticion del tester) */
-    param_dat = t; fis_ok = 1; return 0;
+    fis_ok = 1; return 0;
 }
 static float dif_ang(float a) { while (a > M_PI) a -= 2 * M_PI; while (a < -M_PI) a += 2 * M_PI; return a; }
 #define VMAX 100.0f                                          /* techo teorico; punta real unos 300 km/h */
@@ -526,7 +636,7 @@ static float carril_x(float s, int k)
     int i; float f; const float *a;
     if (s < 0) s = 0;
     if (s > longitud - 0.01f) s = longitud - 0.01f;
-    i = (int)(s / PASO); f = s / PASO - i; a = etapa.ruta + PR * i;
+    i = (int)(s / PASO); f = s / PASO - i; a = ruta_p + PR * i;
     return a[5 + NPERF + k] + f * (a[PR + 5 + NPERF + k] - a[5 + NPERF + k]);
 }
 /* carril mas cercano a x en s */
@@ -1210,10 +1320,106 @@ enum { TITULO, CUENTA, CARRERA, META, AGOTADO };
 #define MENU_CAM_Y 1.4f
 #define MENU_CAM_MIRA 0.2f
 #define PERIODO 16683                                           /* us por paso de logica (59,94 Hz) */
-/* bifurcacion al final de la primera etapa: rama izquierda y derecha */
-static const char *RAMA_FICH[2] = { "SEG07.DAT", "SEG03.DAT" }, *RAMA_NOMBRE[2] = { "BOSQUE", "INDUSTRIA" };
 static int t_cuenta = 9999, t_ext = 9999, t_bif;
 static int etapa_n, hud_ok, crono, puntos; static float vmax;
+
+/* ---------------------------------------------------------------- el curso: etapa, union y etapa siguiente
+   Como en el original (tools/conv_union.py): al final de la etapa de salida esta la union (la bifurcacion: BKI.DAT con
+   su geometria y la ruta de la rama izquierda, BKD.DAT con la ruta de la derecha) y al final de cada rama empieza la
+   etapa siguiente (las del arbol del curso: rama izquierda y derecha). Todo se lee en segundo plano mientras se
+   conduce, sin pararse: la union cuando faltan UNION_ANTES m de etapa; la rama se elige al llegar a la separacion
+   (s_decide) por el centro de rama mas cercano al coche; la etapa de salida se libera UNION_LIBERA m despues de
+   dejarla (RAM y VRAM para la siguiente) y entonces se pide la etapa de la rama, que se ve en cuanto esta subida. La
+   union se libera UNION_LIBERA m dentro de la etapa siguiente. Memoria: etapa + union o union + etapa siguiente. */
+#define UNION_ANTES 2500.0f
+#define UNION_LIBERA 300.0f
+#define RAMA_SEPARA 6.0f                                        /* m entre los centros de las ramas para elegir */
+enum { CUR_RAMA = 1, CUR_UNION = 2, CUR_SIGUIENTE = 4 };        /* sucesos de curso_paso */
+static const char *RAMA_FICH[2] = { "SEG03.DAT", "SEG05.DAT" }, *RAMA_NOMBRE[2] = { "DEEP LAKE", "ALPINE" };
+static modelo_t uni, uni_der, sig;                             /* union, ruta de su rama derecha, etapa siguiente */
+static modelo_t *const tramos[3] = { &etapa, &uni, &sig };     /* lo que se dibuja (lo que este subido) */
+static const modelo_t *cielo;                                   /* el cielo que se dibuja */
+static int cur_rama, cur_en_union;
+static float s_union, s_decide, s_sig, t_carga_ult;             /* s donde empieza la union, se elige rama, etapa sig. */
+static uint32_t i_union, j_union;                               /* primer punto de la union en la ruta y en su fichero */
+
+static void curso_error(const char *s) { dbglog(DBG_ERROR, "CURSO: %s\n", s); vid_set_mode(modo_video, PM_RGB565); aviso(s); for (;;) thd_sleep(1000); }
+static void sube_etapa(modelo_t *m)
+{
+    if (sube_modelo(m)) curso_error("Sin memoria de video para la etapa");
+    compacta_modelo(m);
+}
+/* al empezar una carrera: la etapa de salida (leida otra vez si ya se habia liberado) y nada mas */
+static void curso_reinicia(void)
+{
+    carga_espera(); carga.estado = 0;
+    libera_modelo(&uni); libera_modelo(&uni_der); libera_modelo(&sig);
+    if (!etapa.tv) {
+        int r;
+        libera_modelo(&etapa);
+        musica_pausa_lectura(1);                                /* el GD para la etapa (la musica tira del anillo) */
+        r = lee_modelo(&etapa, "SEG00.DAT");
+        musica_pausa_lectura(0);
+        if (r) curso_error("No se pudo leer SEG00.DAT");
+        sube_etapa(&etapa);
+    }
+    if (ruta_pon(&etapa)) curso_error("Sin memoria para la ruta");
+    cielo = &etapa; etapa_n = 0; cur_rama = -1; cur_en_union = 0; s_union = s_decide = s_sig = -1;
+}
+/* posicion del centro de la ruta del fichero m en su punto i (m->ruta) */
+static float dist_centro(const modelo_t *m, uint32_t i, const float *p)
+{
+    const float *a = m->ruta + m->paso_ruta * (i < m->nruta ? i : m->nruta - 1);
+    return sqrtf((a[0] - p[0]) * (a[0] - p[0]) + (a[2] - p[2]) * (a[2] - p[2]));
+}
+/* una vez por paso de logica en carrera: cargas, eleccion de rama y liberaciones; devuelve los sucesos CUR_* */
+static int curso_paso(void)
+{
+    int ev = 0;
+    if (carga.estado == 1 && yo.s > longitud - 60.0f) carga_espera();   /* GD lento: la carretera aun no esta */
+    if (carga.estado == 2) {                                    /* leido: texturas a la VRAM y ruta detras */
+        modelo_t *m = carga.m; carga.estado = 0;
+        if (carga.r) curso_error("No se pudo leer la etapa siguiente");
+        t_carga_ult = (timer_ms_gettime64() - carga.t0) / 1000.0f;
+        if (m == &uni) {
+            sube_etapa(m);
+            if ((int)(i_union = ruta_anade(m)) < 0) curso_error("Sin memoria para la ruta");
+            j_union = ruta_salto; s_union = i_union * PASO;
+            carga_pide(&uni_der, "BKD.DAT");
+        } else if (m == &uni_der) {
+            uint32_t k = j_union;                              /* la separacion: donde los centros se apartan */
+            while (k + 1 < uni.nruta && k + 1 < uni_der.nruta && dist_centro(&uni, k, uni_der.ruta + uni_der.paso_ruta * k) < RAMA_SEPARA) k++;
+            s_decide = (i_union + k - j_union) * PASO;
+        } else if (m == &sig) {
+            int i;
+            sube_etapa(m);
+            if ((i = ruta_anade(m)) < 0) curso_error("Sin memoria para la ruta");
+            s_sig = i * PASO;
+        }
+        dbglog(DBG_INFO, "CURSO: %s en %.2f s (s %.0f), ram %uK\n", m == &uni ? "union" : m == &uni_der ? "rama derecha" : "etapa siguiente",
+               (double)t_carga_ult, (double)yo.s, (unsigned)(mallinfo().uordblks >> 10));
+    }
+    if (!uni.datos && carga.estado == 0 && yo.s > longitud - UNION_ANTES) carga_pide(&uni, "BKI.DAT");
+    if (s_union >= 0 && !cur_en_union && yo.s >= s_union) { cur_en_union = 1; ev |= CUR_UNION; }
+    if (s_decide >= 0 && cur_rama < 0 && yo.s >= s_decide) {   /* la rama: el centro mas cercano al coche */
+        uint32_t k = j_union + (uint32_t)((yo.s - s_union) / PASO);
+        cur_rama = dist_centro(&uni_der, k, yo.pos) < dist_centro(&uni, k, yo.pos);
+        if (cur_rama) {                                         /* la derecha: su ruta en lugar de la izquierda */
+            float p[3], th;
+            ruta_n = i_union;
+            if (ruta_anade(&uni_der) < 0) curso_error("Sin memoria para la ruta");
+            ruta_en(yo.s, p, &th, NULL, NULL);                  /* el mismo sitio, desde el centro nuevo */
+            yo.x = (yo.pos[0] - p[0]) * cosf(th) + (yo.pos[2] - p[2]) * sinf(th);
+        }
+        libera_modelo(&uni_der);
+        ev |= CUR_RAMA;
+    }
+    if (etapa.datos && cur_en_union && yo.s > s_union + UNION_LIBERA) { libera_modelo(&etapa); cielo = &uni; }
+    if (cur_rama >= 0 && !etapa.datos && !sig.datos && carga.estado == 0) carga_pide(&sig, RAMA_FICH[cur_rama]);
+    if (s_sig >= 0 && !etapa_n && yo.s >= s_sig) { etapa_n = 1; cielo = &sig; ev |= CUR_SIGUIENTE; }
+    if (etapa_n && uni.datos && yo.s > s_sig + UNION_LIBERA) libera_modelo(&uni);
+    return ev;
+}
 /* ---------------------------------------------------------------- puntuacion del modo OutRun
    Del original (PS2 0x28F8C8 / PC 4F2DF0 cada cuadro; 4F2860 adelantamientos; 4F2CD0 estadisticas; 4F2B20 bonus de
    etapa; 4B9770 suma y cola de mensajes; 4BD480 dibujo). puntos = [8447DC] del jugador. La posicion de la
@@ -1367,6 +1573,45 @@ static void pvr_colgado(int estado)
     bfont_draw_str(fb + 64 * 640 + 8, 640, 1, s);
 }
 
+/* ---------------------------------------------------------------- coches del jugador
+   COCHES.DAT dice que fichas tienen coche; sin el, el COCHE.DAT de siempre como Testarossa (ficha 9, modelo 6).
+   Devuelve la mascara de fichas con coche. */
+static unsigned coches_lee(void)
+{
+    uint32_t sz, i; unsigned m = 0; uint8_t *b = gd_carga("COCHES.DAT", &sz);
+    memset(ficha_modelo, 0xFF, sizeof ficha_modelo);
+    if (b && sz >= 4 + N_FICHAS && !memcmp(b, "CCH1", 4)) memcpy(ficha_modelo, b + 4, N_FICHAS);
+    free(b);
+    for (i = 0; i < N_FICHAS; i++) if (ficha_modelo[i] < 30) m |= 1u << i;
+    return m;
+}
+/* un coche cada vez: libera el anterior (RAM y VRAM) y carga el de la ficha k; en el menu, si no cabe en la VRAM, se
+   echan las pantallas guardadas del menu. 0 bien */
+static int coche_carga(int k)
+{
+    char nom[16]; int r; uint32_t ct = 0, c, i;
+    if (k == coche_ficha && coche.tv) return 0;
+    libera_modelo(&coche); coche_ficha = -1;
+    if (ficha_modelo[k] < 30) sprintf(nom, "COCHE%02d.DAT", k); else strcpy(nom, "COCHE.DAT");
+    musica_pausa_lectura(1);                                    /* el GD para el coche (la musica tira del anillo) */
+    r = lee_modelo(&coche, nom);
+    musica_pausa_lectura(0);
+    if (r) return r;
+    if ((r = sube_modelo(&coche))) {                            /* sin VRAM: fuera la cache del menu y otra vez */
+        for (i = 0; i < coche.ntex; i++) if (coche.tv[i]) pvr_mem_free(coche.tv[i]);
+        free(coche.tv); free(coche.cabs[0]); free(coche.cabs[1]); coche.tv = NULL; coche.cabs[0] = coche.cabs[1] = NULL;
+        menu_libera_vram();
+        if ((r = sube_modelo(&coche))) { libera_modelo(&coche); return r; }
+    }
+    compacta_modelo(&coche);                                    /* los texeles ya estan en la VRAM */
+    coche_ficha = k; modelo_jug = ficha_modelo[k] < 30 ? ficha_modelo[k] : MODELO;
+    for (i = 0; i < NMODTRAF; i++) if ((c = modelo_vtx(&mtraf[i])) > ct) ct = c;
+    ta_vmin_otros = modelo_vtx(&coche) + 3 * ct;                /* lo reservado: este coche y tres de trafico */
+    dbglog(DBG_INFO, "coche: ficha %d %s modelo %d, %u vertices, %u texturas, VRAM libre %uK\n", k, nom, modelo_jug,
+           (unsigned)modelo_vtx(&coche), (unsigned)coche.ntex, (unsigned)(pvr_mem_available() >> 10));
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     /* bufer de parametros de TA_VB_BYTES (x2); opacos con bloques de 32 (el suelo cercano toca muchas teselas) y 4
@@ -1374,6 +1619,7 @@ int main(int argc, char **argv)
        en la consola real un bufer u OPB lleno cuelga el TA. Cuentas en docs/DREAMCAST.md */
     pvr_init_params_t pp = { { PVR_BINSIZE_32, 0, PVR_BINSIZE_16, 0, PVR_BINSIZE_16 }, TA_VB_BYTES, 0, 0, 0, 4 };
     int estado = TITULO, auto_ = 0, ver = VER, pausa = 0, l, i, r;
+    unsigned coches_m; int ficha_ini;
     uint32_t cuadro = 0, bot_ant = 0, t_estado = 0; uint64_t t0, tcpu = 0, c0;
     float cam_y = 0, tiempo = TIEMPO_ETAPA, fps = 0, ms = 0, cam_fw[3] = { 0, 0, -1 }, ttit = 0;
     char s1[96], s2[96], s3[96], msg[32] = ""; int aviso_rama = 0, pista = 0, pasos = 1, paso, saltos = 0, saltos_ver = 0;
@@ -1385,25 +1631,32 @@ int main(int argc, char **argv)
     elige_video();
     vid_set_mode(modo_video, PM_RGB565);
     aviso("OutRun 2006 C2C - demo Dreamcast. Cargando la etapa...");
-    if ((r = lee_modelo(&etapa, "SEG00.DAT")) || (r = lee_modelo(&coche, "COCHE.DAT"))) {
+    if ((r = lee_modelo(&etapa, "SEG00.DAT"))) {
         sprintf(s1, "No se pudieron leer los datos (%d)", r); aviso(s1); for (;;) thd_sleep(1000);
     }
+    coches_m = coches_lee();                                    /* fichas con coche; se empieza por el Testarossa */
+    ficha_ini = (coches_m >> 9) & 1 || !coches_m ? 9 : __builtin_ctz(coches_m);
+    if (ficha_modelo[ficha_ini] < 30) modelo_jug = ficha_modelo[ficha_ini];
     for (i = 0; i < NMODTRAF; i++) {
         char nom[16]; sprintf(nom, "TRAF%d.DAT", i);
         if ((r = lee_modelo(&mtraf[i], nom))) { sprintf(s1, "No se pudo leer %s (%d)", nom, r); aviso(s1); for (;;) thd_sleep(1000); }
     }
     traf_medidas();
     traf_tablas();                                              /* clases y cajas del trafico (TRAFC.DAT) */
-    ruta_prepara();
+    if (ruta_pon(&etapa)) { aviso("Sin memoria para la ruta"); for (;;) thd_sleep(1000); }
     fisica_carga();
     /* 2: PowerVR, texturas a la memoria de video y cabeceras */
     pvr_init(&pp);
     pvr_set_bg_color(0.45f, 0.65f, 0.95f);
     txt_arr = pvr_mem_malloc(sizeof buf_arr); txt_cen = pvr_mem_malloc(sizeof buf_cen);
     for (i = 0, r = 0; i < NMODTRAF; i++) r |= sube_modelo(&mtraf[i]);
-    if (r || sube_modelo(&etapa) || sube_modelo(&coche)) {
+    if (r || sube_modelo(&etapa)) {
         vid_set_mode(modo_video, PM_RGB565); aviso("Sin memoria de video para las texturas"); for (;;) thd_sleep(1000);
     }
+    if ((r = coche_carga(ficha_ini))) {
+        vid_set_mode(modo_video, PM_RGB565); sprintf(s1, "No se pudo cargar el coche (%d)", r); aviso(s1); for (;;) thd_sleep(1000);
+    }
+    compacta_modelo(&etapa); cielo = &etapa;                    /* sus texeles ya estan en la VRAM */
     {   /* minimo que se guarda para lo que no es la etapa: el coche y tres coches de trafico (el primer cuadro de carrera
            no tiene medida del anterior) */
         uint32_t ct = 0, c;
@@ -1412,7 +1665,7 @@ int main(int argc, char **argv)
         dbglog(DBG_INFO, "TA: bufer %uK, coche %u vertices, trafico hasta %u, minimo reservado %u\n", TA_VB_BYTES >> 10,
                (unsigned)modelo_vtx(&coche), (unsigned)ct, (unsigned)ta_vmin_otros);
     }
-    hud_ok = !hud_carga("HUD.DAT", 6);                          /* 6 = tacometro del Testarossa */
+    hud_ok = !hud_carga("HUD.DAT", modelo_jug);                 /* el tacometro del modelo (6 = Testarossa) */
     for (l = 0; l < 3; l++) for (i = 0; i < 2; i++) {
         pvr_poly_cxt_t cx; pvr_poly_cxt_col(&cx, LISTA[l]);
         cx.gen.fog_type = i ? PVR_FOG_DISABLE : PVR_FOG_TABLE; cx.gen.culling = PVR_CULLING_NONE;
@@ -1430,6 +1683,7 @@ int main(int argc, char **argv)
     /* menus del original (MENU.DAT): usan la VRAM del HUD de carrera, que se baja mientras tanto */
     if (menu_inicia()) { sprintf(s1, "Sin MENU.DAT"); texto_centro(s1); musica_pon(pista); }
     if (hud_ok) hud_baja_tex();
+    menu_coches(coches_m);
     menu_entra(manual_, pista, NPISTAS);
     t0 = timer_ms_gettime64();
 
@@ -1474,6 +1728,8 @@ int main(int argc, char **argv)
         if (estado == TITULO) {
             int rm = menu_paso(nuevo);                          /* titulo, modos, coche, cambio y musica */
             ttit += 1.0f / 60;
+            if (menu_coche3d() && menu_coche() != coche_ficha && menu_coche() != coche_malo &&   /* el de la ficha */
+                coche_carga(menu_coche())) coche_malo = menu_coche();                              /* (sin reintentos) */
 #ifdef PRUEBA_JUGADOR
             rm = MENU_CARRERA;                                  /* prueba: directo a la carrera con el mando */
 #endif
@@ -1481,14 +1737,11 @@ int main(int argc, char **argv)
                 auto_ = rm == MENU_DEMO;
                 if (!auto_) { manual_ = menu_manual(); pista = menu_pista(); }
                 menu_sale();                                    /* la VRAM del menu vuelve al HUD */
+                if (!auto_ && menu_coche() != coche_ficha && coche_carga(menu_coche())) coche_carga(9);
+                fisica_modelo(modelo_jug);                      /* peso, agarre, motor y marchas de ese coche */
+                if (hud_ok) hud_pon_modelo(modelo_jug);         /* y su tacometro */
                 if (hud_ok && hud_sube_tex()) hud_ok = 0;
-                if (etapa_n) {                                  /* volver a la primera etapa */
-                    libera_modelo(&etapa);
-                    musica_pausa_lectura(1);                    /* el GD para la etapa (la musica tira del anillo) */
-                    if (lee_modelo(&etapa, "SEG00.DAT") || sube_modelo(&etapa)) { vid_set_mode(modo_video, PM_RGB565); aviso("Error"); for (;;) thd_sleep(1000); }
-                    musica_pausa_lectura(0);
-                    ruta_prepara(); etapa_n = 0;
-                }
+                curso_reinicia();                               /* la etapa de salida (otra vez, si hacia falta) */
                 memset(&yo, 0, sizeof yo); yo.s = SALIDA; yo.x = carril_x(SALIDA, 4);
 #ifdef PRUEBA_X
                 yo.x = PRUEBA_X;                                /* prueba: salida en otro desvio (p.ej. la hierba) */
@@ -1503,6 +1756,7 @@ int main(int argc, char **argv)
             sprintf(s1, n > 0 ? "%d" : "GO!", n);
             if (strcmp(s1, msg)) { strcpy(msg, s1); texto_centro(msg); }
             if (t_estado >= 240) { estado = CARRERA; t_estado = 0; }      /* GO! a los 4 s de la escena */
+            curso_paso();                                       /* la union ya se puede ir leyendo */
             if (auto_ && (nuevo & CONT_START)) { estado = TITULO; auto_ = 0; nuevo = 0; texto_centro(""); hud_baja_tex(); menu_entra(manual_, pista, NPISTAS); }
             coche_paso(&yo, 0, 0, 0, 1.0f / 60);
         } else if (estado == CARRERA) {
@@ -1510,6 +1764,12 @@ int main(int argc, char **argv)
             if (auto_ && (nuevo & CONT_START)) { estado = TITULO; nuevo = 0; auto_ = 0; texto_centro(""); hud_baja_tex(); menu_entra(manual_, pista, NPISTAS); }
             else if (nuevo & CONT_START) pausa ^= 1;
             if (!pausa) {
+#ifdef PRUEBA_V
+                if (t_estado == 1 && fis_ok) {                  /* prueba: sale lanzado a PRUEBA_V km/h */
+                    float p[3], th; ruta_en(yo.s, p, &th, NULL, NULL);
+                    or2_coloca(&fis, &fpar, th, PRUEBA_V / (fpar.hud * 3.6f));
+                }
+#endif
 #ifdef PRUEBA_CHOQUE
                 if (t_estado == 60 && fis_ok) {                 /* prueba: a ~280 km/h y 50 grados contra el muro derecho */
                     float p[3], th; ruta_en(yo.s, p, &th, NULL, NULL);
@@ -1523,35 +1783,16 @@ int main(int argc, char **argv)
                 tiempo -= 1.0f / 60;
                 crono++; if (fis_ok && fis.velocidad_hud > vmax) vmax = fis.velocidad_hud;
                 pt_paso(); pt_msg_paso();                       /* puntuacion del original */
-                if (etapa_n == 0 && yo.s >= longitud - 400.0f && yo.s < longitud - 40.0f && t_estado % 30 == 0) {
-                    char b[40]; sprintf(b, "< %s  %s >", RAMA_NOMBRE[0], RAMA_NOMBRE[1]); texto_centro(b); aviso_rama = 1;
-                }
-                if (etapa_n == 0 && yo.s >= longitud - 40.0f) {   /* bifurcacion: la rama del lado por el que va */
-                    int rama = yo.x < carril_x(yo.s, 0) * 0.5f + carril_x(yo.s, NCARRIL - 1) * 0.5f ? 0 : 1;
-                    uint64_t tc = timer_ms_gettime64(); float v = yo.v;
-                    pt_bonus_etapa();                           /* 4F2B20 al pasar la etapa */
-                    texto_centro("CARGANDO");
-                    pvr_wait_ready(); pvr_scene_begin();
-                    pvr_list_begin(PVR_LIST_OP_POLY); pvr_list_finish();
-                    pvr_list_begin(PVR_LIST_TR_POLY); rect_txr(txt_cen, 256, 32, 64, 200, 512, 64, PVR_LIST_TR_POLY); pvr_list_finish();
-                    pvr_scene_finish(); pvr_wait_ready();
-                    libera_modelo(&etapa);
-                    musica_pausa_lectura(1);                    /* el GD para la etapa (la musica tira del anillo) */
-                    r = lee_modelo(&etapa, RAMA_FICH[rama]) || sube_modelo(&etapa);
-                    musica_pausa_lectura(0);
-                    if (r) {
-                        vid_set_mode(modo_video, PM_RGB565); aviso("No se pudo cargar la etapa siguiente"); for (;;) thd_sleep(1000);
+                {   /* el curso: union, bifurcacion y etapa siguiente sin parar (curso_paso) */
+                    int ev = curso_paso();
+                    if (cur_rama < 0 && s_decide >= 0 && yo.s >= s_decide - 450.0f && t_estado % 30 == 0) {
+                        char b[40]; sprintf(b, "< %s  %s >", RAMA_NOMBRE[0], RAMA_NOMBRE[1]); texto_centro(b); aviso_rama = 1;
                     }
-                    ruta_prepara(); etapa_n = 1;
-                    lejos = LEJOS_MIN; pvr_fog_table_linear(lejos * 0.55f, lejos);
-                    t_carga = (timer_ms_gettime64() - tc) / 1000.0f;
-                    memset(&yo, 0, sizeof yo); yo.s = 40.0f; yo.x = carril_x(40.0f, 4); yo.v = v; coche_paso(&yo, 0, 0, 0, 0);
-                    if (fis_ok) { float p[3], th; ruta_en(yo.s, p, &th, NULL, NULL); or2_coloca(&fis, &fpar, th, v); }
-                    traf_inicia(yo.s); efectos_borra(); tiempo += 60.0f; aviso_rama = 0; t_ext = 0;
-                    pt_pos_ant = pt_odo_pos = pt_pos(); pt_odo = 0;
-                    sprintf(msg, "%s  +60", RAMA_NOMBRE[rama]); texto_centro(msg); t_estado = 0;
+                    if (ev & CUR_UNION) { pt_bonus_etapa(); tiempo += 60.0f; t_ext = 0; }   /* 4F2B20 al pasar la etapa */
+                    if (ev & CUR_RAMA) { texto_centro(RAMA_NOMBRE[cur_rama]); aviso_rama = 0; t_estado = 0; }
+                    if (ev & CUR_SIGUIENTE) { texto_centro(RAMA_NOMBRE[cur_rama]); t_estado = 0; }
                 }
-                else if (yo.s >= longitud - 40.0f) { estado = META; t_estado = 0; pt_bonus_etapa(); texto_centro("GOAL!"); resultados(1); }
+                if (etapa_n && yo.s >= longitud - 40.0f) { estado = META; t_estado = 0; pt_bonus_etapa(); texto_centro("GOAL!"); resultados(1); }
                 else if (tiempo <= 0) { tiempo = 0; estado = AGOTADO; t_estado = 0; texto_centro("TIEMPO AGOTADO"); resultados(0); }
             }
         } else {                                                /* META o AGOTADO: el coche se para solo */
@@ -1623,13 +1864,13 @@ int main(int argc, char **argv)
             pvr_list_begin(LISTA[l]);
             if (estado != TITULO) {                             /* en el menu no se ve la etapa */
                 ta_en_etapa = 1;
-                mat_load(&vista_cielo);
-                dibuja_rango(&etapa, l, etapa.inicio[3], etapa.inicio[4], 0, 1, 1);
+                if (cielo && cielo->tv) { mat_load(&vista_cielo); dibuja_rango(cielo, l, cielo->inicio[3], cielo->inicio[4], 0, 1, 1); }
                 mat_load(&vista);
 #ifdef DEP_LISTA
                 color_fijo = l == DEP_LISTA ? 0xFFFF00FF : 0;
 #endif
-                dibuja_rango(&etapa, l, etapa.inicio[l], etapa.inicio[l + 1], 1, 0, 0);
+                for (i = 0; i < 3; i++)                         /* etapa, union y etapa siguiente: las que esten subidas */
+                    if (tramos[i]->tv) dibuja_rango(tramos[i], l, tramos[i]->inicio[l], tramos[i]->inicio[l + 1], 1, 0, 0);
                 color_fijo = 0; ta_en_etapa = 0;
             }
             if (estado != TITULO || menu_coche3d()) {
@@ -1681,7 +1922,8 @@ int main(int argc, char **argv)
             pvr_list_finish();
         }
 #ifdef DIAG_VTX
-        if (cuadro % 60 == 0) dbglog(DBG_INFO, "DIAG est%d v%u (etapa %u) tri %u ms %.1f+%.1f lejos %d det %.1f vram %u ta %uK etapa %uK/%uK 2d %u bpv %u real %uK opb %uK%s\n", estado,
+        if (cuadro % 60 == 0) dbglog(DBG_INFO, "DIAG est%d s %.0f/%.0f ram %uK v%u (etapa %u) tri %u ms %.1f+%.1f lejos %d det %.1f vram %u ta %uK etapa %uK/%uK 2d %u bpv %u real %uK opb %uK%s\n", estado,
+                                     (double)yo.s, (double)longitud, (unsigned)(mallinfo().uordblks >> 10),
                                      (unsigned)vtx_env, (unsigned)vtx_et, (unsigned)tri_enviados, (double)ms_log, (double)ms, (int)lejos, (double)detalle, (unsigned)pvr_mem_available(), (unsigned)(ta_vb >> 10),
                                      (unsigned)(ta_et >> 10), (unsigned)(ta_tope_etapa >> 10), (unsigned)ta_v2d, (unsigned)ta_bpv, (unsigned)(ta_real_ult >> 10), (unsigned)(ta_opb_ult >> 10), ta_corto ? " TOPE" : "");
 #endif
