@@ -93,13 +93,64 @@ def disposicion(A, m):
     return d, recurso, nombre
 
 # ------------------------------------------------------------------ montaje
-def rot_x(a):
-    c, s = np.cos(a), np.sin(a); return np.array([[1, 0, 0], [0, c, s], [0, -s, c]])
+NADA, G_PILOTOS, G_NOCHE, G_FRENO, G_FARO = 0, 1, 2, 3, 4   # grupos de piezas que la demo enciende y apaga (CEX2)
 
-def rot_z(a):
-    c, s = np.cos(a), np.sin(a); return np.array([[c, s, 0], [-s, c, 0], [0, 0, 1]])
+class Pila:
+    """pila de matrices 4x4 de fila del PC (driving/pc_matrix_stack.cpp): cada operacion multiplica por la izquierda
+    (D3DXMatrixMultiply(cur, op, cur)): el punto se transforma p @ op @ cur"""
+    def __init__(s): s.m = [np.eye(4)]
+    def push(s): s.m.append(s.m[-1].copy())
+    def pop(s): s.m.pop()
+    def _izq(s, L): s.m[-1] = L @ s.m[-1]
+    def translate(s, v): T = np.eye(4); T[3, :3] = v; s._izq(T)
+    def rot_x(s, a): c, n = np.cos(a), np.sin(a); s._izq(np.array([[1, 0, 0, 0], [0, c, n, 0], [0, -n, c, 0], [0, 0, 0, 1.0]]))
+    def rot_y(s, a): c, n = np.cos(a), np.sin(a); s._izq(np.array([[c, 0, -n, 0], [0, 1, 0, 0], [n, 0, c, 0], [0, 0, 0, 1.0]]))
+    def rot_z(s, a): c, n = np.cos(a), np.sin(a); s._izq(np.array([[c, n, 0, 0], [-n, c, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1.0]]))
 
-def pieza(mod, blq, ident, R=None, t=None, nombre=''):
+def llamadas(A, m):
+    """las piezas que dibuja el original y con que matriz: 46A560 (el coche en la seleccion; 46AE70/469600 en carrera
+    hacen lo mismo con vm = 1), en su orden, con el coche parado: matriz local car+F0 = identidad, volante, ruedas y
+    aleron del modelo 5 sin girar (car+204, giros de 82E7F0 y car+1C4 a 0), faros escamoteables cerrados (car+2FC = 0),
+    ruedas en car+130 = su sitio de la disposicion +98 (lo que usa 469FF0, el dibujo de los finales, sin fisica).
+    Las luces van todas, cada una con su grupo; el original elige (vm = 1):
+      +60 (G_FARO) si car+4 & 0x100 (noche) y 0x800 (faros abiertos del todo, o sin escamoteables);
+      c38 (car+38, pedal de freno) = 0: +80 (G_NOCHE) si car+4 & 0x300 (noche o tunel; 4A25F0), si no +7C (G_PILOTOS);
+      c38 != 0: +84 (G_FRENO) y, en el modelo 5, 0x4001a en +1C con el angulo del aleron (G_FRENO).
+    No van (como en el original con vm = 1): +04 (vista interior, vm = 2), +08/+10 (volumenes de sombra), +0C (sombra
+    plana: 49A650 es un RET). El disco +94 (c38 > 200 y car+1F4 != 0) no va (car+1F4 sin leer).
+    Devuelve [(id, matriz 4x4, nombre, grupo)]"""
+    E = A.elf; L = disposiciones(A) + 0x128 * m
+    u = lambda o: E.u32(L + o); f = lambda o: E.f32(L + o)
+    g3 = lambda o: np.array(E.f32(L + o, 3), float)
+    s = Pila(); res = []
+    def dib(ident, nombre, grupo=NADA):
+        if ident != NINGUNO: res.append((ident, s.m[-1].copy(), nombre, grupo))
+    s.push()                                                    # 409FD0: car+F0 (identidad)
+    for i in range(2):                                          # puertas en su bisagra
+        s.push(); s.translate(g3(0x2c + 0x10 * i)); dib(u(0x28 + 0x10 * i), 'puerta'); s.pop()
+    dib(u(0x14), 'extra')
+    dib(u(0), 'carroceria')
+    s.push(); s.translate(g3(0x4c)); s.rot_x(f(0x58)); s.rot_z(0.0); dib(u(0x48), 'volante'); s.pop()
+    if u(0x18) != NINGUNO:
+        s.push(); s.translate(g3(0x1c))
+        if m == 5: s.rot_x(0.0)                                 # aleron: roof_angle(car+1C4 = 0) = 0
+        dib(u(0x18), 'palanca'); s.pop()
+    if u(0x64) != NINGUNO:
+        s.push(); s.translate(g3(0x68)); s.rot_x(0.0); dib(u(0x64), 'faros'); s.pop()
+    dib(u(0x60), 'faro_luz', G_FARO)
+    dib(u(0x7c), 'pilotos', G_PILOTOS); dib(u(0x80), 'pilotos_noche', G_NOCHE); dib(u(0x84), 'pilotos_freno', G_FRENO)
+    if m == 5:
+        s.push(); s.translate(g3(0x1c)); s.rot_x(0.0); dib(0x4001a, 'aleron_freno', G_FRENO); s.pop()
+    s.pop()
+    for k in range(4):                                          # ruedas: pinza (sin el giro de la rueda), buje, disco
+        w = 0x8c + 0x20 * k
+        s.push(); s.translate(g3(w + 0xc))
+        if f(w + 0x18) != 0: s.rot_z(f(w + 0x18))              # caida
+        dib(u(w), 'pinza'); dib(u(0x88 + 0x20 * k), 'buje'); dib(u(w + 4), 'disco')
+        s.pop()
+    return res
+
+def pieza(mod, blq, ident, R=None, t=None, nombre='', grupo=NADA):
     """anade el registro ident & 0xFFFF del bloque, girado (fila: p @ R) y desplazado"""
     if ident == NINGUNO: return
     r = ident & 0xFFFF
@@ -118,57 +169,30 @@ def pieza(mod, blq, ident, R=None, t=None, nombre=''):
         if R is not None: P = P @ R
         if t is not None: P = P + t
         v['x'], v['y'], v['z'] = P[:, 0], P[:, 1], P[:, 2]
+    if R is not None and np.linalg.det(R) < 0:                  # simetria: el orden de los vertices da la vuelta
+        raise SystemExit('pieza con escala negativa: no la usa ninguna disposicion')
     V = np.concatenate(mod.verts) if mod.verts else None
     for x, ex in zip(mod.mallas[m0:], mod.extra[m0:]):
         if R is not None: ex['N'] = (ex['N'].astype(float) @ R).astype(np.float32)
+        ex['grupo'] = grupo
         x.append(nombre); x.append(ex)
         q = np.stack([V['x'][x[4]:x[4] + x[5]], V['y'][x[4]:x[4] + x[5]], V['z'][x[4]:x[4] + x[5]]], 1)
         x[2] = q.mean(0); x[3] = float(np.sqrt(((q - x[2]) ** 2).sum(1).max()))
-
-def ruedas_ligeras(A, nombre):
-    """bloque del modelo ligero del mismo coche (obj_rc_*) y sus dos ruedas (registros pequenos y redondos alrededor
-    del origen): [(registro, radio, centro x)]"""
-    e = A.entrada('CARS.PS2', nombre.split('\\')[-1].replace('plcar', 'rc'))
-    b = A.bloque(e); r = []
-    for k in range(b.w[0]):
-        c = caja(b, k)
-        if c is None: continue
-        lo, hi = c
-        if np.abs(lo).max() < 0.5 and np.abs(hi).max() < 0.5 and hi[1] - lo[1] > 0.4: r.append((k, hi[1], (lo[0] + hi[0]) / 2))
-    return b, r[:2]
 
 def caja(b, r):
     P = [tr[0x68] for pk in b.mallas(r) for tr in vif.tiras(pk)]
     if not P: return None
     P = np.vstack(P).astype(float); return P.min(0), P.max(0)
 
-def monta(A, m, ligeras=False):
-    """el coche entero segun su disposicion (con su interior). ligeras: ruedas del modelo ligero (menos vertices) en
-    lugar de las del buje"""
+def monta(A, m):
+    """el coche entero como lo monta el original (llamadas), con todas sus luces"""
     d, recurso, nombre = disposicion(A, m)
     e = A.entrada('CARS.PS2', nombre.split('\\')[-1])
     blq = A.bloque(e)
     mod = modelo.Modelo(); mod.ruta = np.zeros((0, 5)); mod.extra = []; mod._blq_coche = blq
-    pieza(mod, blq, d['cuerpo'], nombre='carroceria')
-    if d['extra'] != NINGUNO and sum(len(tr[0x68]) for pk in blq.mallas(d['extra'] & 0xFFFF) for tr in vif.tiras(pk)) < 2000:
-        pieza(mod, blq, d['extra'], nombre='extra')             # (la del F40 es una segunda capa de toda la carroceria)
-    pieza(mod, blq, d['palanca'][0], t=d['palanca'][1], nombre='palanca')
-    for pz, t in d['puertas']: pieza(mod, blq, pz, t=t, nombre='puerta')
-    pz, t, a = d['volante']; pieza(mod, blq, pz, R=rot_x(a), t=t, nombre='volante')
-    pz, t = d['faros']; pieza(mod, blq, pz, t=t, nombre='faros')
-    pieza(mod, blq, d['pilotos'], nombre='pilotos')
-    if ligeras: bl, rl = ruedas_ligeras(A, nombre)
-    for k, (buje, pinza, disco, t, caida) in enumerate(d['ruedas']):
-        R = rot_z(caida) if caida else np.eye(3)
-        if not ligeras:
-            pieza(mod, blq, pinza, R=R, t=t, nombre='rueda'); pieza(mod, blq, buje, R=R, t=t, nombre='rueda')
-            pieza(mod, blq, disco, R=R, t=t, nombre='rueda')
-            continue
-        cb = caja(blq, buje & 0xFFFF); rad = cb[1][1] if cb else 0.33
-        reg, _, cx = min(rl, key=lambda q: abs(q[1] - rad))     # la de radio mas parecido (delante / detras)
-        lado = (cb[0][0] + cb[1][0]) / 2 if cb else -t[0]       # hacia donde mira la llanta del buje
-        esp = np.diag([-1.0, 1, 1]) if (lado > 0) != (cx > 0) and abs(cx) > 1e-3 else np.eye(3)
-        pieza(mod, bl, reg, R=esp @ R, t=t, nombre='rueda')
+    for ident, M, nom, grupo in llamadas(A, m):
+        b = blq if ident >> 16 == recurso else _bloque_recurso(A, ident >> 16)
+        pieza(mod, b, ident, R=M[:3, :3], t=M[3, :3], nombre=nom, grupo=grupo)
     materiales(A, mod, m, recurso)
     return mod, e, d
 
@@ -344,34 +368,16 @@ def triangulos(mod):
     return np.ascontiguousarray(T), np.array(dueno)
 
 def visibilidad(mod, res=(960, 720), bajas=True):
-    """triangulos que se ven desde alguna camara (los de la lista transparente y los de recorte no tapan)"""
+    """triangulos que se ven desde alguna camara (los de la lista transparente y los de recorte no tapan; las luces
+    que se encienden y apagan (grupos) ni tapan ni se quitan: dos de ellas ocupan el mismo sitio)"""
     T, dueno = triangulos(mod)
-    op = np.array([0 if mod.mallas[k][0] != 0 else 1 for k in dueno], np.uint8)
+    grupo = np.array([mod.mallas[k][9].get('grupo', NADA) for k in dueno])
+    op = np.array([1 if mod.mallas[k][0] == 0 and grupo[i] == NADA else 0 for i, k in enumerate(dueno)], np.uint8)
     C = camaras(bajas); cuenta = np.zeros(len(T), np.int32); lib = _lib()
     f = ctypes.POINTER(ctypes.c_float)
     lib.visibles(T.ctypes.data_as(f), len(T), op.ctypes.data_as(ctypes.POINTER(ctypes.c_ubyte)), C.ctypes.data_as(f),
                  len(C), res[0], res[1], cuenta.ctypes.data_as(ctypes.POINTER(ctypes.c_int)))
-    a = T[:, 0:3]; b = T[:, 3:6]; c = T[:, 6:9]                 # astillas: los triangulos de union de piezas de
-    area = np.linalg.norm(np.cross(b - a, c - a), axis=1) / 2   # una tira (casi sin area y largos) no se ven
-    largo = np.maximum(np.linalg.norm(b - a, axis=1), np.maximum(np.linalg.norm(c - b, axis=1), np.linalg.norm(a - c, axis=1)))
-    return (cuenta > 0) & ~astillas(mod, T), dueno
-
-def astillas(mod, T=None):
-    """triangulos de union entre trozos de una misma tira (el original empaqueta varias tiras en un lote de hasta
-    59 vertices y no dibuja los triangulos que las unen): largos y casi sin area, o largos y con la cara cruzada
-    respecto a las normales de sus vertices (une superficies distintas)"""
-    if T is None: T, _ = triangulos(mod)
-    N = np.concatenate([x[9]['N'] for x in mod.mallas]).astype(float)
-    idx = np.concatenate([np.arange(x[4], x[4] + x[5] - 2) for x in mod.mallas])
-    a = T[:, 0:3]; b = T[:, 3:6]; c = T[:, 6:9]
-    fn = np.cross(b - a, c - a); area = np.linalg.norm(fn, axis=1) / 2; fn /= np.maximum(2 * area, 1e-12)[:, None]
-    largo = np.maximum(np.linalg.norm(b - a, axis=1), np.maximum(np.linalg.norm(c - b, axis=1), np.linalg.norm(a - c, axis=1)))
-    vn = N[idx] + N[idx + 1] + N[idx + 2]; ln = np.linalg.norm(vn, axis=1); vn /= np.maximum(ln, 1e-9)[:, None]
-    cruzada = (ln > 0.5) & (np.abs((fn * vn).sum(1)) < 0.3)
-    med = np.concatenate([np.full(x[5] - 2, np.median(np.linalg.norm(np.diff(np.stack([v['x'], v['y'], v['z']], 1), axis=0), axis=1)))
-                          for x, v in zip(mod.mallas, mod.verts)])
-    salto = (largo > 6 * med) & (2 * area < 0.03 * largo * largo)   # une dos trozos: largo y fino
-    return (largo > 0.25) & ((area < 0.004 * largo) | cruzada | salto)
+    return (cuenta > 0) | (grupo != NADA), dueno
 
 def vacia(mod, vis, dueno, hueco=2, maximo=256):
     """rehace las tiras con solo los triangulos visibles (corta si hay mas de hueco ocultos seguidos; tiras de
@@ -402,20 +408,28 @@ def vacia(mod, vis, dueno, hueco=2, maximo=256):
 def vertices(mod):
     return sum(x[5] for x in mod.mallas)
 
+def vertices_dibujados(mod):
+    """los que se dibujan a la vez: todo lo fijo, el faro encendido y el mayor de los tres juegos de pilotos"""
+    g = {}
+    for x in mod.mallas: k = x[9].get('grupo', NADA) if len(x) > 9 else NADA; g[k] = g.get(k, 0) + x[5]
+    return g.get(NADA, 0) + g.get(G_FARO, 0) + max(g.get(G_PILOTOS, 0), g.get(G_NOCHE, 0), g.get(G_FRENO, 0))
+
 def triangulos_n(mod):
     return sum(x[5] - 2 for x in mod.mallas)
 
 # ------------------------------------------------------------------ salida
 def extension(mod):
-    """bloque CEX1 (va en el sitio de la ruta del modelo, que los coches no tienen: nruta = palabras, 1 por punto):
-    'CEX1', u32 colores por ranura (8), ranuras de pintura, mallas especiales, palabras de vertice;
+    """bloque CEX2 (va en el sitio de la ruta del modelo, que los coches no tienen: nruta = palabras, 1 por punto):
+    'CEX2', u32 colores por ranura (8), ranuras de pintura, mallas especiales, palabras de vertice, mallas con grupo;
     colores: ranuras x 8 ARGB (colores 1..8 de la lista del original; el 1 es el de serie, el que ya llevan los
-    vertices); mallas: {u32 malla (orden del fichero), tipo (1 color de pintura, 2 entorno), i32 ranura o -1, ARGB
-    fijo de desplazamiento (si no hay ranura), u32 primera palabra de vertice}; vertices: por vertice de cada malla
-    especial una palabra {s8 nx, s8 ny, s8 nz, u8 luz} (normal del modelo x 127, luz x 255)"""
+    vertices); mallas: {u32 malla (orden del fichero), tipo (1 color de pintura, 2 entorno, 3 entorno sumado), i32
+    ranura o -1, ARGB fijo de desplazamiento (si no hay ranura), u32 primera palabra de vertice}; vertices: por vertice
+    de cada malla especial una palabra {s8 nx, s8 ny, s8 nz, u8 luz} (normal del modelo x 127, luz x 255); grupos:
+    {u32 malla, u32 grupo} de las luces que se encienden y apagan (G_PILOTOS, G_NOCHE, G_FRENO, G_FARO: llamadas)"""
     cols = getattr(mod, '_colores', [])
-    recs = []; vd = []
+    recs = []; vd = []; grs = []
     for k, x in enumerate(mod.mallas):
+        if x[9].get('grupo', NADA): grs.append((k, x[9]['grupo']))
         esp = x[9].get('esp')
         if not esp: continue
         N = x[9]['N'].astype(float); N = N / np.maximum(np.linalg.norm(N, axis=1, keepdims=True), 1e-6)
@@ -424,44 +438,41 @@ def extension(mod):
         w = q[:, 0] | (q[:, 1] << 8) | (q[:, 2] << 16) | (np.round(luz * 255).astype(np.uint32) << 24)
         assert len(w) == x[5]
         recs.append((k, esp[0], esp[1], esp[2], len(vd))); vd.extend(w.tolist())
-    pal = [b'CEX1', struct.pack('<4I', 8, len(cols), len(recs), len(vd))]
+    pal = [b'CEX2', struct.pack('<5I', 8, len(cols), len(recs), len(vd), len(grs))]
     for _, c in cols: pal.append(struct.pack('<8I', *c))
     for r in recs: pal.append(struct.pack('<IIiII', *r))
     pal.append(struct.pack('<%dI' % len(vd), *vd))
+    for g in grs: pal.append(struct.pack('<2I', *g))
     b = b''.join(pal)
     return np.frombuffer(b, '<f4').reshape(-1, 1)
 
 def convierte(A, m, sal, tope=TOPE, vista=None):
-    """escalera hasta caber en el tope: completo; sin lo oculto (desde las camaras del juego, con la vuelta baja de
-    los choques); + sin la vuelta baja; + ruedas del modelo ligero (las del rival: el original dibuja siempre las del
-    buje en el coche del jugador, 46AE70). No se tapa ni se inventa nada: el interior real se queda (se ve por los
-    cristales) y solo se quita lo que no se ve"""
+    """el coche montado como el original (llamadas) y, si lo que se dibuja a la vez pasa del tope del TA, sin lo que
+    no se ve desde las camaras del juego (con la vuelta baja de los choques y, si aun no cabe, sin ella). No se tapa,
+    no se anade y no se cambia ninguna pieza"""
     mod, e, d = monta(A, m)
-    t0, v0 = triangulos_n(mod), vertices(mod); nota = 'completo'
-    vacia(mod, ~astillas(mod), None, hueco=0)                   # fuera las uniones entre tiras (no se dibujan)
-    if vertices(mod) > tope:
-        for lig, baj, nota in ((False, True, 'sin lo oculto'), (False, False, '+ sin la vuelta baja'),
-                               (True, False, '+ ruedas ligeras')):
-            mod, e, d = monta(A, m, ligeras=lig); vacia(mod, ~astillas(mod), None, hueco=0)
+    t0, v0 = triangulos_n(mod), vertices_dibujados(mod); nota = 'completo'
+    if v0 > tope:
+        for baj, nota in ((True, 'sin lo oculto'), (False, 'sin lo oculto ni la vuelta baja')):
+            mod, e, d = monta(A, m)
             vis, dueno = visibilidad(mod, bajas=baj); vacia(mod, vis, dueno)
-            print("   %s: %d vertices" % (nota, vertices(mod)))
-            if vertices(mod) <= tope: break
+            print("   %s: %d vertices" % (nota, vertices_dibujados(mod)))
+            if vertices_dibujados(mod) <= tope: break
     if vista:
         try:
             dibuja_vista(mod, os.path.join(vista, os.path.basename(sal).replace('.DAT', '.png')))
         except Exception as ex: print('vista:', ex)
     mod.recorta_texturas()
-    mod.mallas.sort(key=lambda x: (x[0], x[1]))                # el orden de escribe (estable): el de CEX1
+    mod.mallas.sort(key=lambda x: (x[0], x[1]))                # el orden de escribe (estable): el de CEX2
     mod.ruta = extension(mod)
-    nesp = sum(1 for x in mod.mallas if x[9].get('esp'))
     vesp = sum(x[5] for x in mod.mallas if x[9].get('esp') and x[9]['esp'][0] >= ESP_ENTORNO)
+    vd = vertices_dibujados(mod); vt = vertices(mod)
     mod.mallas = [x[:8] for x in mod.mallas]                    # fuera el nombre de la pieza y lo demas
     mod.escribe(sal)
     kb = len(mod.blob) >> 10
-    print('modelo %2d %-28s tri %5d -> %5d  vtx %5d -> %5d  tex %2d (%3d KB)  entorno %4d vtx  %s  -> %s' % (
-        m, e.nombre, t0, triangulos_n(mod), v0, vertices(mod), len(mod.texs), kb, vesp, nota, os.path.basename(sal)))
-    return dict(modelo=m, nombre=e.nombre, tri0=t0, tri=triangulos_n(mod), vtx0=v0, vtx=vertices(mod), kb=kb, nota=nota,
-                entorno=vesp)
+    print('modelo %2d %-28s tri %5d -> %5d  vtx %5d -> %5d (en el fichero %5d)  tex %2d (%3d KB)  entorno %4d vtx  %s'
+          '  -> %s' % (m, e.nombre, t0, triangulos_n(mod), v0, vd, vt, len(mod.texs), kb, vesp, nota, os.path.basename(sal)))
+    return dict(modelo=m, nombre=e.nombre, tri0=t0, tri=triangulos_n(mod), vtx0=v0, vtx=vd, kb=kb, nota=nota, entorno=vesp)
 
 def dibuja_vista(mod, ruta):
     """perfil y tres cuartos (comprobacion rapida, sin z-buffer)"""

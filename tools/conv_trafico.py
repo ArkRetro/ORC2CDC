@@ -57,12 +57,12 @@ def tabla_colores(A):
 
 NCOLOR = {38: 2, 39: 1, 41: 1}                         # colores que recorre el original (el resto 3; PC 478B90)
 
-def materiales(mod, b):
+def materiales(mod):
     """material del original en cada malla (ver el docstring)"""
     import conv_coche as cc
     for x, ex in zip(mod.mallas, mod.extra):
         x.append(None)
-        r, i, k4, fl = ex['origen']; reg = b.registros()[r]
+        b = x[6]; r, i, k4, fl = ex['origen']; reg = b.registros()[r]
         if not 0 <= k4 < reg[4][0]: continue
         t4 = struct.unpack('<9i', b.m[b.A + reg[4][1] + 36 * k4:b.A + reg[4][1] + 36 * k4 + 36])
         col = np.frombuffer(b.m[b.A + reg[5][1] + 64 * t4[0]:b.A + reg[5][1] + 64 * t4[0] + 64], '<f4') * 2 \
@@ -75,6 +75,44 @@ def materiales(mod, b):
         elif not ex['uv']:
             Nn = N / np.maximum(np.linalg.norm(N, axis=1, keepdims=True), 1e-6)
             x[-1] = ('entorno', np.stack([0.5 + 0.5 * Nn[:, 0], 0.5 - 0.5 * Nn[:, 1]], 1), alfa, esp)
+
+NINGUNO = 0xFFFFFFFF
+
+def llamadas(E, tm, m):
+    """piezas del coche de trafico m y su matriz como las dibuja el original cerca (4AE0F0 -> model con LOD 0:
+    4ADBC0, race_ghost_car.cpp), parado y sin luces: registro de 4866C0 (PC 650500, 0x44 bytes por modelo): +0 lista
+    de 5 LOD, cada uno {descriptor, segundo descriptor (remolque) o 0}. Descriptor: +0 carroceria (con el color),
+    +4 sombra (plano bajo el coche; en el LOD 0 subida 0,1 m: 40A290), +8 luz de noche (car+4 & 0x100), +C/+10/+14
+    pilotos (normales / car+4 & 0x300 / freno car+38 > 0: los normales, sin luces), +18/+1C intermitentes (car+C5C,
+    apagados), +9C lista de piezas con el color {id, x, y, z}; ruedas (4AD530, giros 0): +38 en +3C, +48 en +4C girada
+    pi en y (la del otro lado), +58 en +5C, +78 en +7C (si hay), +68 en +6C girada pi, +88 en +8C girada pi (si hay).
+    La matriz local car+F0 es la identidad parado. Devuelve [(id, matriz 4x4, nombre)]"""
+    import conv_coche as cc
+    L = E.u32(E.u32(tm + 0x44 * m)); d, d2 = E.u32(L, 2)
+    if d2: raise SystemExit('modelo %d: remolque (segundo descriptor) sin portar' % m)
+    u = lambda o: E.u32(d + o); g3 = lambda o: np.array(E.f32(d + o, 3), float)
+    s = cc.Pila(); res = []
+    def dib(ident, nombre):
+        if ident != NINGUNO: res.append((ident, s.m[-1].copy(), nombre))
+    s.push()                                                    # car+F0
+    dib(u(0), 'carroceria')
+    dib(u(0xc), 'pilotos')
+    p = u(0x9c)
+    if p and E.u32(p) != NINGUNO:
+        e = 0
+        while True:
+            s.push(); s.translate(np.array(E.f32(p + e + 4, 3), float)); dib(E.u32(p + e), 'lista'); s.pop()
+            if E.u32(p + e + 0x10) == NINGUNO: break
+            e += 0x10
+    s.pop()
+    if u(4) != NINGUNO: s.push(); s.translate((0.0, 0.1, 0.0)); dib(u(4), 'sombra'); s.pop()
+    def rueda(o, otro_lado):
+        if u(o) == NINGUNO: return
+        s.push(); s.translate(g3(o + 4))
+        if otro_lado: s.rot_y(np.pi)
+        dib(u(o), 'rueda'); s.pop()
+    rueda(0x38, False); rueda(0x48, True); rueda(0x58, False); rueda(0x78, False); rueda(0x68, True); rueda(0x88, True)
+    return res
 
 class Mem:
     def __init__(self, d): self.m = d
@@ -156,24 +194,20 @@ def main():
         p = E.u32(T + 4 * m); claves[m] = []
         while E.u32(p): claves[m].append(E.u32(E.u32(p), 3)); p += 4
     print('colores del trafico: tabla en 0x%x' % T)
-    h, o, s = iso.paquete('CARS.PS2')[0]; d = zlib.decompress(iso.m[o:o + s])
-    w = struct.unpack('<4I', d[:16]); b = stage.Bloque(Mem(d), 0, w)
+    nombre = next(k for k in iso.fich if k.startswith('SLES') or k.startswith('SLUS') or k.startswith('SLPM'))
+    o, s = iso.fich[nombre]; tm = E.va(tabla_modelos(bytes(iso.m[o:o + s])))
+    import conv_coche as cc
     medidas = []
-    for n, r in enumerate(COCHES):
-        cuerpo = r + 8
-        cb = caja(b, cuerpo); lo, hi = cb; medidas.append(caja(b, r))
-        ruedas = [q for q in range(r, r + 17) if q != cuerpo and (c := caja(b, q)) is not None
-                  and np.abs(c[0]).max() < 0.6 and np.abs(c[1]).max() < 0.6 and c[1][1] - c[0][1] > 0.5]
-        rad = max(caja(b, q)[1][1] for q in ruedas[:2]) if ruedas else 0.35
-        largo = hi[2] - lo[2]; xr = hi[0] - 0.2
-        zd = lo[2] + 0.17 * largo + 0.25; zt = hi[2] - 0.17 * largo - 0.25
-        copias = {}
-        if ruedas:
-            copias[ruedas[0]] = [(-xr, rad, zd), (-xr, rad, zt)]
-            copias[ruedas[1 % len(ruedas)]] = copias.get(ruedas[1 % len(ruedas)], []) + [(xr, rad, zd), (xr, rad, zt)]
-        mod = modelo.Modelo(); mod.ruta = np.zeros((0, 5)); mod.extra = []
-        mod.bloque(b, [cuerpo] + ruedas[:2], sin_textura='material', copias=copias, lista=None)
-        materiales(mod, b)
+    for n, m in enumerate(MODELOS):
+        mod = modelo.Modelo(); mod.ruta = np.zeros((0, 5)); mod.extra = []; vistos = {}
+        piezas = llamadas(E, tm, m)
+        for ident, M, nom in piezas:
+            b = cc._bloque_recurso(A, ident >> 16)
+            if nom == 'carroceria': cuerpo = ident & 0xFFFF; medidas.append(caja(b, cuerpo)); lo, hi = medidas[-1]
+            if id(b) not in vistos: vistos[id(b)] = b
+            cc.pieza(mod, b, ident, R=M[:3, :3], t=M[3, :3], nombre=nom)
+        largo = hi[2] - lo[2]
+        materiales(mod)
         import conv_coche as cc
         for x, v in zip(mod.mallas, mod.verts):
             q = x[-1]
@@ -200,9 +234,10 @@ def main():
         mod.ruta = np.frombuffer(b''.join(tcx), '<f4').reshape(-1, 1)
         mod.mallas = [x[:8] for x in mod.mallas]
         ini = mod.escribe(os.path.join(dest, 'TRAF%d.DAT' % n))
-        print('trafico %d (registro %d): %.1f m, %d tiras, %d triangulos, %d texturas (%d KB), ruedas %s'
-              % (n, cuerpo, largo, len(mod.mallas), sum(x[5] - 2 for x in mod.mallas), len(mod.texs),
-                 len(mod.blob) >> 10, ruedas[:2]))
+        print('trafico %d (modelo %d, registro %d): %.1f m, %d tiras, %d vertices, %d triangulos, %d texturas (%d KB), '
+              'piezas %s' % (n, m, cuerpo, largo, len(mod.mallas), sum(x[5] for x in mod.mallas),
+                             sum(x[5] - 2 for x in mod.mallas), len(mod.texs), len(mod.blob) >> 10,
+                             ' '.join('%s %d:%d' % (q[2], q[0] >> 16, q[0] & 0xFFFF) for q in piezas)))
     tablas(iso, dest, medidas)
 
 if __name__ == '__main__':

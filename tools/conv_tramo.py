@@ -181,13 +181,13 @@ def puntos_asfalto(seg):
     return por_tex[mejor] if mejor is not None else None
 
 def triangulos(tiras):
+    """los triangulos que dibuja el original de las tiras (posiciones float32 tal cual: la bandera ADC va en la y)"""
     T = []
     for P in tiras:
         if len(P) < 3 or not np.isfinite(P).all(): continue
-        e = np.linalg.norm(np.diff(P, axis=0), axis=1); med = np.median(e)
+        dib = vif.triangulos_dibujados(P); P = P.astype(float)
         for j in range(len(P) - 2):
-            if max(e[j], e[j + 1]) > 6 * med and max(e[j], e[j + 1]) > 15: continue
-            T.append(P[j:j + 3])
+            if dib[j]: T.append(P[j:j + 3])
     return np.array(T)
 
 class Rejilla:
@@ -278,11 +278,11 @@ def perfil(seg, cam, an):
     for r in (0, 1):
         for pk in seg.mallas(r):
             for tr in vif.tiras(pk):
-                P = tr[0x68].astype(float)
+                P = tr[0x68]
                 if len(P) < 3 or not np.isfinite(P).all(): continue
-                e = np.linalg.norm(np.diff(P, axis=0), axis=1); med = np.median(e)
+                dib = vif.triangulos_dibujados(P); P = P.astype(float)
                 for j in range(len(P) - 2):
-                    if max(e[j], e[j + 1]) > 6 * med and max(e[j], e[j + 1]) > 15: continue
+                    if not dib[j]: continue
                     T = P[j:j + 3]; n = np.cross(T[1] - T[0], T[2] - T[0]); ln = np.linalg.norm(n)
                     if ln > 1e-6 and abs(n[1]) / ln > 0.6: tris.append(T)
     T = np.array(tris); C = 8.0; rej = {}
@@ -422,8 +422,10 @@ def transforma(mod, M):
     tx, ty, tz, ry = M; c, s = np.cos(ry), np.sin(ry)
     def gira(x, z): return x * c + z * s, -x * s + z * c
     cielo = {x[4] for x in mod.mallas if x[0] == 3}
+    locales = {x[4] for x in mod.mallas if isinstance(x[7], int) and x[7] >= 0 and mod.nodos[x[7]][3] >= 0}
     i0 = 0
     for v in mod.verts:
+        if i0 in locales: i0 += len(v); continue               # tiras de carteles: en el marco de su nodo
         x, z = gira(v['x'].astype(float), v['z'].astype(float)); en_cielo = i0 in cielo
         v['x'] = x + (0 if en_cielo else tx); v['z'] = z + (0 if en_cielo else tz)
         if not en_cielo: v['y'] = v['y'] + ty
@@ -431,6 +433,12 @@ def transforma(mod, M):
     for x in mod.mallas:
         cx, cz = gira(x[2][0], x[2][2])
         x[2] = np.array([cx, x[2][1], cz]) + (0 if x[0] == 3 else np.array([tx, ty, tz]))
+    for nd in mod.nodos:
+        cx, cz = gira(nd[0][0], nd[0][2]); nd[0] = np.array([cx, nd[0][1] + ty, cz], np.float32) + np.array([tx, 0, tz], np.float32)
+    G = np.array([[c, 0, -s], [0, 1, 0], [s, 0, c]])          # el giro en vectores fila (v @ G)
+    for W in mod.carteles:
+        W[:3, :3] = W[:3, :3] @ G; W[3, :3] = W[3, :3] @ G + np.array([tx, ty, tz])
+        W[0, 3], W[2, 3] = gira(W[0, 3], W[2, 3])              # el eje z del padre
     r = mod.ruta.copy()
     if len(r):
         x, z = gira(r[:, 0], r[:, 2]); r[:, 0] = x + tx; r[:, 2] = z + tz; r[:, 1] += ty
@@ -439,15 +447,80 @@ def transforma(mod, M):
         if r.shape[1] >= c_ext + 2 * NEXT: r[:, c_ext:c_ext + 2 * NEXT] += ty
     mod.ruta = r
 
+def lee_visibilidad(d):
+    """tabla de visibilidad por secciones de carretera (cs_CS_<zona>_bin y cs_ENV_<zona>_bin de la etapa; las usa
+    race_area_geometry_44de10 / race_env_model_44cd30 del PC, 7D306C / 7D3070): u32 0, u32 0 (varias partes, una por
+    registro del modelo; con el primer u32 distinto de 0 seria una sola) y el desplazamiento de cada parte; en cada
+    parte un u32 por seccion (desde la parte) a su lista de nodos: u16 n y n pares (byte, mascara): los nodos 8 byte + bit.
+    El original recorre en cada cuadro solo los nodos de la lista de la seccion del coche (car+0x64). Devuelve
+    [parte][seccion] -> conjunto de nodos, o None si no es una tabla"""
+    if len(d) < 16 or d[:8] != b'\0' * 8: return None
+    w = lambda o: struct.unpack_from('<I', d, o)[0]
+    p0 = w(8)
+    if p0 < 12 or p0 % 4 or p0 >= len(d): return None
+    res = []
+    for k in range((p0 - 8) // 4):
+        p = w(8 + 4 * k)
+        if p + 4 > len(d): return None
+        nsec = w(p) // 4
+        if not 0 < nsec < 5000: return None
+        secs = []
+        for sc in range(nsec):
+            o = p + w(p + 4 * sc)
+            if o + 2 > len(d): return None
+            n = struct.unpack_from('<H', d, o)[0]; S = set()
+            for j in range(n):
+                i, mk = d[o + 2 + 2 * j], d[o + 3 + 2 * j]
+                S.update(8 * i + b for b in range(8) if mk >> b & 1)
+            secs.append(S)
+        res.append(secs)
+    if len({len(x) for x in res}) != 1: return None
+    return res
+
+def visibilidad_de(seg, blq):
+    """la tabla de visibilidad del bloque blq (lee_visibilidad): de las del segmento, la que tiene una parte por registro y
+    nombra mas nodos de los que tiene cada registro (ninguno de fuera); None si no hay"""
+    regs = blq.registros(); mejor, cub = None, 0.0
+    for h, o, s in seg.ent:
+        v = lee_visibilidad(bytes(seg.m[o:o + s]))
+        if v is None or len(v) != len(regs): continue
+        usados = [set().union(*p) for p in v]
+        if any(u and max(u) >= regs[r][0][0] for r, u in enumerate(usados)): continue
+        c = sum(len(u) for u in usados) / max(1, sum(r[0][0] for r in regs))
+        if c > cub: mejor, cub = v, c
+    return mejor
+
+def secciones_de_la_ruta(seg, cam):
+    """seccion (posicion de carretera del original, car+0x64: seccion 5 de COLI0200 en los poligonos principales) de
+    cada punto de la ruta: la del poligono principal mas cercano"""
+    from scipy.spatial import cKDTree
+    for h, o, s in seg.ent:
+        d = bytes(seg.m[o:o + s])
+        if d[:8] != b'COLI0200': continue
+        n, nprim = struct.unpack('<2I', d[8:16]); sec = struct.unpack('<8I', d[20:52])
+        P = np.frombuffer(d[sec[2]:sec[2] + 64 * n], np.uint8).reshape(n, 64)[:nprim, :48].copy().view('<f4')
+        c = P.reshape(nprim, 4, 3).astype(float).mean(1)
+        L = np.frombuffer(d[sec[5]:sec[5] + 2 * n], '<u2')[:nprim].astype(int)
+        _, j = cKDTree(c).query(cam)
+        return L[j]
+    return None
+
 def convierte(seg, n, sal, mundo=None, cielo=True):
     """el segmento seg (numero n) a sal; mundo: transformacion al marco del curso (transforma)"""
-    mod = modelo.Modelo(); mod.limita = True
+    mod = modelo.Modelo()
+    tablas = []                                                # (bloque, tabla) de los que tienen visibilidad
     for blq in seg.bloques:
-        if blq.o == seg.o:                                     # el bloque principal, con los objetos en su sitio
-            mod.bloque(blq, objetos=True, sin_textura='material')
+        if blq.o == seg.o:
+            # el bloque principal (cs_CS_<zona>): solo los nodos de su tabla de visibilidad (cs_CS_<zona>_bin)
+            t = visibilidad_de(seg, blq)
+            v = None if t is None else {r: set().union(*t[r]) for r in range(blq.w[0])}
+            mod.bloque(blq, objetos=True, sin_textura='material', vis=v)
+            if t is not None: tablas.append((blq, t))
         elif es_cielo(blq):
             if cielo: mod.bloque(blq, lista=3, sin_textura='material')   # el cielo: alrededor de la camara, sin niebla
-        # los otros bloques: versiones de lejos (LOD), aparte
+        # los otros no son de la escena: cs_ENV_<zona> (con su tabla cs_ENV_<zona>_bin) solo lo dibuja el cubo del reflejo
+        # del coche (race_env_model_44cd30, desde cube_scene / 414340 en la decompilacion del PC); obj_course_obj_cs_<zona>
+        # tampoco lo dibuja la geometria de la etapa (race_area_geometry_44de10)
     try: cam = recorrido_soo(seg)
     except ValueError: cam = None                              # SOO sin puntos utiles
     if cam is None: cam = recorrido(seg)
@@ -476,9 +549,18 @@ def convierte(seg, n, sal, mundo=None, cielo=True):
         pf = np.where(fuera, sup[3], pf)
     if not sup[1].any(): sup = (sup[0], np.repeat(pf[:, [0, -1]], NEXT, 1), sup[2])
     mod.ruta = np.concatenate([cam, an, pf, car, sup[0], sup[1], sup[2]], 1)
+    sr = secciones_de_la_ruta(seg, cam) if tablas else None
+    nsec = len(tablas[0][1][0]) if tablas else 0
+    if sr is not None:                                         # visibilidad por secciones (la del original)
+        mod.secciones = [sorted(mod.gid[(id(b), r, k)] for b, t in tablas for r in range(len(t)) for k in t[r][s]
+                                if (id(b), r, k) in mod.gid) for s in range(nsec)]
+        mod.mapa = np.clip(sr, 0, nsec - 1)
+        print('visibilidad: %d secciones, %d nodos, %.0f nodos por seccion (max %d)' % (nsec, len(mod.nodos),
+              np.mean([len(L) for L in mod.secciones]), max(len(L) for L in mod.secciones)))
     mod.recorta_texturas()                                     # solo las texturas que se usan (memoria de video)
     if mundo is not None: transforma(mod, mundo)
     ini = mod.escribe(sal)
+    print('triangulos de las tiras del VU1: %d, sin dibujar por la bandera ADC: %d' % (mod.tri_total, mod.tri_adc))
     print('segmento %d: %d tiras (%d opacas, %d recorte, %d transparentes, %d cielo), %d vertices, %d triangulos, '
           '%d texturas (%d KB), ruta %d puntos (%.0f m), %d KB'
           % (n, len(mod.mallas), ini[1], ini[2] - ini[1], ini[3] - ini[2], ini[4] - ini[3], mod.nv,

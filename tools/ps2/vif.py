@@ -54,6 +54,20 @@ def datos(m,p,fin):
         if tid in (6,7): break
     return res
 
+def no_dibuja(P):
+    """bandera de no dibujar de cada vertice de una tira (V3-32 de posiciones, float32): el bit 1 de la palabra de la y.
+    Asi lo hace el microcodigo del VU1 de las mallas (SLES-53998, tabla de programas en 0x3592b0, p. ej. el de la
+    clave 0x10200 en 0x31aae0): por vertice MTIR vi7, y (los 16 bits bajos de la y), IAND vi7, vi7, 2;
+    FCAND vi1, 0x3ffff (la CLIP de los tres ultimos vertices: alguno fuera del volumen de recorte);
+    IADDIU vi1, vi1, 0x7fff; IADD vi1, vi1, vi7; MFIR.w -> la palabra W del XYZ2 que va al GS, cuyo bit 15 es el
+    ADC: el GS no dibuja el triangulo que cierra ese vertice. Los dos primeros de cada tira la llevan siempre."""
+    import numpy as np
+    return ((np.ascontiguousarray(P[:, 1], dtype='<f4').view('<u4') >> 1) & 1).astype(bool)
+
+def triangulos_dibujados(P):
+    """triangulo j (vertices j, j+1, j+2) dibujado por el original: sin la bandera en su ultimo vertice (no_dibuja)"""
+    return ~no_dibuja(P)[2:]
+
 def tiras(pk):
     """tiras de un paquete: cada una empieza por su GIFtag (UNPACK 0x6c); dict tipo -> array"""
     res=[]

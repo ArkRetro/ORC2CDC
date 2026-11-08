@@ -17,10 +17,10 @@ runtime_course_matrix_44c0d0 de la decompilacion):
    origen hacia -z). Los tramos y la union se cargan a la vez en el original (cuatro raices de colision; las que no
    son la 0 comparten la matriz de la union).
 
-Salida (formato ORD6 de modelo.py, cada fichero en su propio marco; la demo los coloca al leerlos):
+Salida (formato ORD7 de modelo.py, cada fichero en su propio marco; la demo los coloca al leerlos):
  SEGnn.DAT las etapas (n = segmento de STAGE.PS2; conv_tramo.py), empiezan en el origen hacia -z
- BKkk.DAT  la union de la etapa de clave kk: bifurcacion (cs_BK_PALM, su entorno cs_ENVBK_PALM, los porticos de
-           COMMON obj_course_obj_bk_palm con los carteles obj_OBJ_<ZONA>_BUNKI_TX de sus dos destinos, el cielo de la
+ BKkk.DAT  la union de la etapa de clave kk: bifurcacion (cs_BK_PALM: tronco y ramas, sin su entorno cs_ENVBK_PALM, que
+           es del reflejo del coche; los porticos de COMMON obj_course_obj_bk_palm con los carteles obj_OBJ_<ZONA>_BUNKI_TX de sus dos destinos, el cielo de la
            etapa y la ruta de la rama izquierda) o meta (cs_BK_<zona> con su colision, el cielo de la etapa y su ruta)
  BKD.DAT   solo la ruta de la rama derecha de la bifurcacion (la misma en todas)
  CURSO.DAT el arbol: zona, SEGnn, nivel, hijos, colocaciones, metros por posicion de carretera, meta y niebla
@@ -238,10 +238,13 @@ def curso(A, dsal, con_tramos=True):
         tx, ty, tz, rx, ry, rz = f32(E, d0 + 0x98, 6)
         assert abs(rx) < 1e-4 and abs(rz) < 1e-4, 'union con giro en x o z: no soportado'
         dbk = u32(E, base2 + 4 * ui); c_todo = cadena(E, dbk + 0x0c)
-        mod = modelo.Modelo(); mod.limita = True; mod.puentes = True
+        mod = modelo.Modelo()
         if hi >= 0:                                   # bifurcacion: la de PALM (las demas no estan en el disco)
-            mod.bloque(A.bloque(A.entrada('BK.PS2', 'cs_BK_PALM_pmt')), objetos=True, sin_textura='material')
-            mod.bloque(A.bloque(A.entrada('BK.PS2', '\\ENV\\cs_ENVBK_PALM_pmt')), objetos=True, sin_textura='material')
+            # registros: 0 el tronco, 1 la rama izquierda, 2 la derecha; el original dibuja el 0 y, pasada la posicion
+            # 0x1C de la union, solo el de la rama del coche (race_area_stage_draw_44e290: obj | 1 o | 2 segun 451350).
+            # El entorno \ENV\cs_ENVBK_PALM no es de la escena: solo lo dibuja el cubo del reflejo del coche
+            # (race_env_model_44cd30), y repite la calzada a la misma altura (parpadeaba)
+            mod.bloque(A.bloque(A.entrada('BK.PS2', 'cs_BK_PALM_pmt')), objetos=True, sin_textura='material', rama={1: 1, 2: 2})
             zi = zona_de(cadena(E, descs[porclave[hi][1]] + 0x0c)); zd = zona_de(cadena(E, descs[porclave[hd][1]] + 0x0c))
             carteles(A, mod, zi, zd)
             mod.ruta = ri.copy(); meta = -1.0
@@ -262,7 +265,7 @@ def curso(A, dsal, con_tramos=True):
         if hi < 0: vq.UMBRAL = max(umbral, UMBRAL_META)
         try: mod.escribe(f)
         finally: vq.UMBRAL = umbral
-        print('triangulos puente quitados: %d' % getattr(mod, 'puentes_quitados', 0))
+        print('triangulos de las tiras del VU1: %d, sin dibujar por la bandera ADC: %d' % (mod.tri_total, mod.tri_adc))
         r = dict(zona=z, seg=n, nivel=nivel[clave], izq=hi, der=hd, bk=(tx, ty, tz, ry), ramas=ramas,
                  m_pos=m_por_posicion(segs[n]), meta=meta, niebla=niebla(A, z))
         sal.append(r)

@@ -58,7 +58,10 @@ int visibles(const float *tri, int ntri, const unsigned char *opaco, const float
         for (i = 0; i < ntri; i++) {                                    /* los opacos: z-buffer con su numero */
             const float *t = sc + 9 * i;
             if (!ok[i] || !opaco[i]) continue;
-            RASTER(t, if (iz > zb[py * an + px]) { zb[py * an + px] = iz; id[py * an + px] = i; });
+            /* a igual profundidad gana el dibujado despues (el orden de llamadas de conv_coche.py): ZTEST GEQUAL del
+               GS / D3DCMP_LESSEQUAL del PC; asi una capa que coincide con otra posterior (el +14 del F40, una copia
+               entera de la carroceria con la pintura) queda tapada como en el original */
+            RASTER(t, if (iz >= zb[py * an + px]) { zb[py * an + px] = iz; id[py * an + px] = i; });
         }
         for (i = 0; i < an * al; i++) if (id[i] >= 0) visto[id[i]] = 1;
         for (i = 0; i < ntri; i++) {                                    /* los transparentes: delante del opaco */

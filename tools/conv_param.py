@@ -22,6 +22,10 @@ con etiqueta para los choques y la eleccion de columna:
          7D2E98 segun el preset: indices 0, 1, 5 y 6 de la tabla base), en cuadros de 60,2 Hz:
          [preset][fila de variante][nivel de etapa][dificultad]. Se localiza por el codigo que la copia (memcpy de
          0x1C2 bytes con la direccion en lui/addiu), no por su contenido.
+  'KTE1' + 15 i16 + 2 bytes de relleno: correccion del tiempo por clave de etapa (k636904 del PC / 0x35a938 de
+         SLES-53998) que GetExtendedTime (44DC70 / PS2 0x176730) suma en una partida de un jugador del curso de 5
+         niveles. Se localiza por el codigo de esa funcion: 'addiu a0, zero, 0xa' y 'addiu a1, zero, 0x96' (indice
+         nivel x 10 + fila x 150 de la tabla de tiempos) y, detras, el lui/addiu de la tabla que se suma con 'lh'.
 Sale de tu disco: no se distribuye."""
 import os, struct, sys
 import numpy as np
@@ -133,6 +137,27 @@ def busca_tiempos(d, segs):
             return t[[0, 1, 5, 6]].astype('<i2').tobytes(), va
     return None, None
 
+def busca_ajuste_etapa(d, segs):
+    """codigo de 44DC70 (PS2 0x176730): 'addiu a0, zero, 0xa' + 'addiu a1, zero, 0x96'; en las 32 instrucciones
+    siguientes, un lui rX / addiu rX, rX con la direccion de la tabla de 15 i16 (todas entre -600 y 0, la primera 0)"""
+    u = np.frombuffer(d[:len(d) // 4 * 4], '<u4')
+    for i in np.where((u[:-1] == 0x2404000a) & (u[1:] == 0x24050096))[0]:
+        for k in range(i + 2, i + 34):
+            w = int(u[k])
+            if (w >> 26) != 0x0f: continue                                  # lui rt, hi
+            rt = (w >> 16) & 31
+            for j in range(k + 1, k + 6):
+                x = int(u[j])
+                if (x >> 26) == 0x09 and ((x >> 21) & 31) == rt and ((x >> 16) & 31) == rt:   # addiu rt, rt, lo
+                    lo = x & 0xffff
+                    va = ((w & 0xffff) << 16) + (lo - 0x10000 if lo & 0x8000 else lo)
+                    o = va_off(segs, va)
+                    if o is None: continue
+                    t = np.frombuffer(d[o:o + 30], '<i2')
+                    if t[0] == 0 and np.all((t >= -600) & (t <= 0)) and np.any(t < 0):
+                        return t.astype('<i2').tobytes() + b'\0\0', va
+    return None, None
+
 def busca_camara(d, segs):
     """codigo de 484EE0 (PS2 0x178500): 'addiu a2, zero, 0x5460' con la fuente en lui a1 / addiu a1 antes; la tabla de
     vistas (0x64c) acaba 4 bytes antes y la de modelos (0x438) va detras. Se comprueba la estructura."""
@@ -177,9 +202,11 @@ def main():
     if cam is None: sys.exit('no encuentro las tablas de la camara')
     tim, tva = busca_tiempos(d, segs)
     if tim is None: sys.exit('no encuentro las tablas de tiempo por zona')
+    kte, kva = busca_ajuste_etapa(d, segs)
+    if kte is None: sys.exit('no encuentro la correccion de tiempo por etapa')
     open(sys.argv[2], 'wb').write(d[b:b + 0x4c * FILAS] + par + fre + b'MAP1' + mapas.tobytes() +
-                                  b'CHQ1' + chq + b'POS1' + pos + b'CAM1' + cam + b'TIM1' + tim)
-    print('tablas de tiempo en 0x%x, de la camara en 0x%x' % (tva, cva))
+                                  b'CHQ1' + chq + b'POS1' + pos + b'CAM1' + cam + b'TIM1' + tim + b'KTE1' + kte)
+    print('tablas de tiempo en 0x%x, correccion por etapa en 0x%x, de la camara en 0x%x' % (tva, kva, cva))
     print('tabla de %s en 0x%x: %d filas de %d coches, curvas de par y freno, mapas, choques y %d animaciones' %
           (nombre, b, FILAS, C, struct.unpack('<I', pos[:4])[0]))
 

@@ -123,7 +123,9 @@ static void carretera(const curva_t *k, float x, float y, or2_entrada_t *e)
     float dx = x - k->cx, dy = y - k->cy, r = sqrtf(dx * dx + dy * dy);
     float th = atan2f(dy, dx);                 /* angulo polar */
     float rumbo = atan2f(sinf(th), -cosf(th)); /* tangente horaria, + der. */
-    float th2 = th - 40.0f / k->R;             /* punto 40 m por delante */
+    /* punto 16 posiciones de carretera por delante (+D4E del original: 16 x ~7,95 m; ADELANTE=m lo cambia) */
+    float adelante = getenv("ADELANTE") ? (float)atof(getenv("ADELANTE")) : 16.0f * 7.95f;
+    float th2 = th - adelante / k->R;
     float ax = k->cx + k->R * cosf(th), ay = k->cy + k->R * sinf(th);
     float bx = k->cx + k->R * cosf(th2), by = k->cy + k->R * sinf(th2);
     e->rumbo_carretera = rumbo;

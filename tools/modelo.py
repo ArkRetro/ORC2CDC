@@ -1,17 +1,22 @@
-"""Modelos para la Dreamcast a partir de bloques de PS2 (etapas de STAGE.PS2 y coches de CARS.PS2), formato ORD5:
- 'ORD5', nmallas, nvert, nruta, floats por punto de ruta, ntex, inicio de cada lista (opaca, recorte, transparente,
- cielo, fin);
+"""Modelos para la Dreamcast a partir de bloques de PS2 (etapas de STAGE.PS2 y coches de CARS.PS2), formato ORD7:
+ 'ORD7', nmallas, nvert, nruta, floats por punto de ruta, ntex, inicio de cada lista (opaca, recorte, transparente,
+ cielo, fin), nnodos, ncarteles, nsecciones;
  texturas (ancho, alto, formato, lista, desplazamiento, tamano: 24 bytes); formato: bits 0-7 0 ARGB1555 / 1 RGB565 /
  2 ARGB4444, bit 8 comprimida VQ (vq.py: libro de N entradas de 8 bytes y un byte por bloque de 2x2), bits 16-23 N - 1;
- mallas ordenadas por lista y textura (cx, cy, cz, radio float, primer vertice, cuenta, textura o -1, distancia
- maxima de dibujo o 0: 32 bytes);
+ mallas ordenadas por lista y textura (cx, cy, cz, radio float, primer vertice, cuenta, textura o -1, nodo o -1: 32
+ bytes);
  vertices (x, y, z, u, v float, color ARGB: 24 bytes); ruta (x, y, z, ancho izquierdo, ancho derecho y el perfil
- de alturas de la calzada a lo ancho: NPERF alturas de -izquierdo-2 a derecho+2);
+ de alturas de la calzada a lo ancho: NPERF alturas de -izquierdo-2 a derecho+2...);
+ nodos del original (cx, cy, cz, radio, banderas: bits 0-3 umbral de LOD, bit 4 orientado a la camara, bits 8-9 rama;
+ cartel o -1, 2 de relleno: 32 bytes); carteles orientados a la camara (matriz 4x4 de vectores fila del nodo; en la
+ columna 3 el eje z del padre: 64 bytes; las tiras de esos nodos van en el marco del nodo);
+ si hay secciones: inicio de la lista de cada seccion (nsecciones + 1 u32), las listas (u16, nodos visibles en la
+ seccion: la tabla de visibilidad del original) y la seccion de cada punto de la ruta (u16), relleno a 4;
  relleno a 32; texeles twiddled de 16 bits o VQ, cada textura alineada a 32.
-Cabecera 'ORD6' (la 'ORD5' era la misma sin VQ). VQ=0 en el entorno: sin comprimir (y cabecera ORD5).
-Cada malla es una tira de triangulos (un UNPACK de posiciones del paquete VIF); su textura: la tabla 2 del registro
-da una entrada de la tabla 4 (lista de texturas del registro, 36 bytes), cuyo cuarto campo es el indice de la
-textura en el bloque."""
+(ORD6 era lo mismo sin nodos ni secciones y con una distancia maxima en lugar del nodo; ORD5, ademas sin VQ.)
+Cada malla es una tira de triangulos que dibuja el GS: una tira del VU1 (un UNPACK de posiciones) partida por las
+banderas ADC (vif.no_dibuja); su textura: la tabla 2 del registro da una entrada de la tabla 4 (lista de texturas del
+registro, 36 bytes), cuyo cuarto campo es el indice de la textura en el bloque."""
 import os, struct, time
 import numpy as np
 from ps2 import tex, vif
@@ -43,25 +48,42 @@ def textura_dc(a):
     out = np.zeros(w * h, np.uint16); out[twiddle(w, h).ravel()] = v.ravel()
     return fmt, lista, out.tobytes()
 
-def colocaciones(blq, reg):
-    """objetos de un registro: tabla 0 (56 bytes: el campo 10 es su grupo y el 7 su matriz o -1), tabla 1 (grupos:
-    tipo 0 = cuenta mallas desde la primera; tipo 1 = una sola malla, la del cuarto campo) y tabla 6 (matrices 4x4
-    de fila: rotacion/escala y traslacion en la ultima fila). Devuelve {malla: [matriz o None, ...]}; las mallas sin
-    objeto no aparecen (se dibujan tal cual)."""
+NODO = 56                                                       # registro de nodo de la tabla 0 (PmtNode del PC)
+UMBRAL_CURSO = 6                                                # 4044E0(6): umbral de LOD de la etapa (race_area_display_44f120)
+
+def nodos(blq, reg):
+    """los nodos de un registro como los recorre el original (walk_404d10 de la decompilacion del PC, pc_render_queue.cpp;
+    la tabla 0 es el PmtNode de 56 bytes: +00 banderas, +04 esfera x, y, z, radio, +14 sesgo de LOD, +18 animacion,
+    +1C matriz (tabla 6, -1 ninguna), +20 primer hijo, +24 siguiente hermano, +28 malla de cada LOD (tabla 1)):
+    desde el nodo 0, hermanos en orden y cada hijo antes que el hermano siguiente; la matriz del nodo se multiplica por
+    la del padre (409FD0: nueva = m * actual, vectores fila: v * m * padre). Tabla 1 (16 bytes, la malla del nodo):
+    cuenta y primera de las tiras opacas (tabla 3) y de las de mezcla: (n_op, n_mez, primera_op, primera_mez).
+    Devuelve [(indice, banderas, matriz 4x4 o None, esfera (c, r) en el marco del bloque, [tiras de la tabla 3])]"""
     m, A = blq.m, blq.A
-    n0, o0 = reg[0]; n1, o1 = reg[1]; n6, o6 = reg[6]
-    usos = {}
-    for k in range(n0):
-        x = struct.unpack('<I4f9i', m[A + o0 + 56 * k:A + o0 + 56 * k + 56])
-        g, mi = x[10], x[7]
-        if not 0 <= g < n1: continue
-        cnt, tipo, pri, uno = struct.unpack('<4i', m[A + o1 + 16 * g:A + o1 + 16 * g + 16])
-        mallas = range(pri, pri + cnt) if tipo == 0 and cnt > 0 else ([uno] if tipo == 1 and uno >= 0 else [])
-        M = np.frombuffer(m[A + o6 + 64 * mi:A + o6 + 64 * mi + 64], '<f4').reshape(4, 4).astype(float) \
-            if 0 <= mi < n6 else None
-        if tipo == 1 and M is not None: continue            # planos de los objetos colocados (sombras): fuera
-        for i in mallas: usos.setdefault(i, []).append(M)
-    return usos
+    n0, o0 = reg[0]; n1, o1 = reg[1]; n6, o6 = reg[6]; n3 = reg[3][0]
+    res = []; vistos = set()
+    def mat(i):
+        return np.frombuffer(m[A + o6 + 64 * i:A + o6 + 64 * i + 64], '<f4').reshape(4, 4).astype(float) if 0 <= i < n6 else None
+    def anda(k, padre):
+        while 0 <= k < n0 and k not in vistos:
+            vistos.add(k)
+            x = struct.unpack('<I4f9i', m[A + o0 + NODO * k:A + o0 + NODO * k + NODO])
+            M = mat(x[7]); W = padre if M is None else (M if padre is None else M @ padre)
+            c = np.array(x[1:4], float); r = float(x[4])
+            if W is not None:
+                c = c @ W[:3, :3] + W[3, :3]
+                r *= float(np.linalg.norm(np.full(3, 0.577350259) @ W[:3, :3]))
+            tiras = []
+            g = x[10]                                            # malla del LOD 0 (los de PS2 no traen otros)
+            if 0 <= g < n1:
+                nop, nmez, pop, pmez = struct.unpack('<4i', m[A + o1 + 16 * g:A + o1 + 16 * g + 16])
+                for n, p in ((nop, pop), (nmez, pmez)):
+                    if n > 0 and p >= 0: tiras += [i for i in range(p, p + n) if i < n3]
+            res.append((k, x[0], W, (c, r), tiras, x[7] >= 0))
+            if x[8] >= 0: anda(x[8], W)
+            k = x[9]
+    anda(0, None)
+    return res
 
 def material_de(blq, reg, k):
     """color del material de la entrada k de la lista de texturas del registro (tabla 4, 36 bytes: el primer campo es
@@ -92,38 +114,40 @@ def texturas_de_carteles(blq):
                     if 4 <= len(P) <= 6 and 6 < max(ext[0], ext[2]) < 16 and 3 < ext[1] < 9 and ti not in res: res.append(ti)
     return res
 
-def esta_en_tipo1(blq, reg, i):
-    m, A = blq.m, blq.A; n1, o1 = reg[1]
-    for g in range(n1):
-        cnt, tipo, pri, uno = struct.unpack('<4i', m[A + o1 + 16 * g:A + o1 + 16 * g + 16])
-        if tipo == 1 and uno == i: return True
-    return False
-
 class Modelo:
     def __init__(self):
         self.texs = []; self.blob = b''; self.mallas = []; self.verts = []; self.nv = 0; self.ruta = np.zeros((0, 5))
-        self.limita = False                                     # distancia maxima por tamano en las mallas pequenas
         self.rgba = []                                          # imagen de cada textura (para la compresion VQ)
         self.vq = os.environ.get("VQ", "1") != "0"
+        # nodos del original (bloque con objetos=True): esfera en el marco del fichero, banderas para la demo (bits 0-3
+        # umbral de LOD, bit 4 orientado a la camara, bits 8-9 rama de la union: 1 izquierda, 2 derecha) e indice en
+        # self.carteles (los orientados a la camara: matriz del nodo y eje z del padre) o -1
+        self.nodos = []; self.carteles = []
+        self.gid = {}                                           # (id del bloque, registro, nodo) -> indice en self.nodos
+        self.secciones = []                                     # por seccion de carretera: lista de nodos visibles
+        self.mapa = None                                        # por punto de la ruta: su seccion (u16)
+        self.tri_adc = 0; self.tri_total = 0                    # triangulos sin dibujar por la bandera ADC / total
 
-    def bloque(self, blq, registros=None, lista=None, objetos=False, sin_textura=int(os.environ.get("SINTEX", "0x60202020"), 16), copias=None):
+    def bloque(self, blq, registros=None, lista=None, objetos=False, sin_textura=int(os.environ.get("SINTEX", "0x60202020"), 16),
+               copias=None, vis=None, umbral=UMBRAL_CURSO, rama=None):
         """anade los registros de un bloque (todos si registros es None). lista: fuerza la lista de sus mallas.
         sin_textura: color ARGB de las mallas sin textura, o None para iluminarlas en blanco por la normal, o
         'material' para darles el color de su material del original (material_de).
         copias: {registro: [desplazamiento (x, y, z), ...]} para repetir un registro (ruedas).
-        objetos: coloca las mallas segun los objetos del registro (colocaciones)."""
+        objetos: como el original, solo las tiras de los nodos (nodos), cada una con la matriz de su nodo; las tiras que
+        no son de ningun nodo no se dibujan. vis: {registro: conjunto de nodos} (los que nombra la tabla de visibilidad
+        por secciones de la etapa, lee_visibilidad): los demas no se dibujan nunca. umbral: el de LOD del original (6 la
+        etapa; la bandera 0x40 del nodo lo sube a 7). rama: {registro: 1 izquierda / 2 derecha} (uniones)."""
         m, A = blq.m, blq.A; base = len(self.texs)
         for h in tex.cabeceras(blq):
             a = tex.imagen(blq, h); fmt, li, d = textura_dc(a)
             self.texs.append((a.shape[1], a.shape[0], fmt, li, len(self.blob), len(d))); self.blob += d
             self.rgba.append(a)
         ntb = len(self.texs) - base
-        anuncios = texturas_de_carteles(blq); n_anuncio = 0
         for r, reg in enumerate(blq.registros()):
             if registros is not None and r not in registros: continue
             c, o = reg[3]; t2 = reg[2][1]
-            usos = colocaciones(blq, reg) if objetos else {}
-            for i in range(c):
+            def tira_de(i):
                 e = struct.unpack('<6I', m[A + o + 24 * i:A + o + 24 * i + 24])
                 k = struct.unpack('<i', m[A + t2 + 16 * i:A + t2 + 16 * i + 4])[0]
                 ti = struct.unpack('<i', m[A + reg[4][1] + 36 * k + 12:A + reg[4][1] + 36 * k + 16])[0] \
@@ -131,54 +155,53 @@ class Modelo:
                 ti = base + ti if 0 <= ti < ntb else -1
                 self._mat = material_de(blq, reg, k) if sin_textura == 'material' and ti < 0 else None
                 self._origen = (r, i, k, e[0])                   # registro, malla, entrada de la tabla 4 y banderas
-                if objetos and i not in usos and esta_en_tipo1(blq, reg, i): continue
-                mats = usos.get(i, [None])
-                for pk in vif.datos(m, A + e[2], A + blq.w[2]):
-                    for tr in vif.tiras(pk):
-                        for M in mats:
+                return e, ti
+            if not objetos:
+                self._nodo = -1
+                for i in range(c):
+                    e, ti = tira_de(i)
+                    for pk in vif.datos(m, A + e[2], A + blq.w[2]):
+                        for tr in vif.tiras(pk):
                             for dx in (copias or {}).get(r, [(0, 0, 0)]):
-                                t = tr
-                                if M is not None:
-                                    t = dict(tr); t[0x68] = tr[0x68].astype(float) @ M[:3, :3] + M[3, :3]
-                                    if 0x69 in tr: t[0x69] = tr[0x69].astype(float) @ M[:3, :3]
-                                self._dmax = 0.0 if M is None else 450.0
-                                self._tira(t, ti, lista, sin_textura, np.array(dx, np.float32), blq)
+                                self._tira(tr, None, ti, lista, sin_textura, np.array(dx, np.float32), blq)
+                continue
+            visibles = None if vis is None else vis.get(r, set())
+            for k, fl, W, (cc, rad), tiras, con_matriz in nodos(blq, reg):
+                if visibles is not None and k not in visibles: continue
+                if not tiras: continue
+                cartel = bool(fl & 0x800) and con_matriz          # 404D10: face_camera solo si el nodo tiene matriz
+                u = (7 if fl & 0x40 else umbral) | (0x10 if cartel else 0) | ((rama or {}).get(r, 0) << 8)
+                ib = -1
+                if cartel:                                       # vertices en el marco del nodo; la demo gira y coloca
+                    ib = len(self.carteles); Wc = W.astype(np.float32).copy()
+                    Wc[:3, 3] = (0, 0, 1); Wc[3, 3] = 1                  # columna 3: eje z del padre (el del bloque)
+                    self.carteles.append(Wc)
+                    rad = rad + float(np.linalg.norm(W[3, :3] - cc))
+                self.gid[(id(blq), r, k)] = len(self.nodos)
+                self._nodo = len(self.nodos); self.nodos.append([cc.astype(np.float32), rad, u, ib])
+                for i in tiras:
+                    e, ti = tira_de(i)
+                    for pk in vif.datos(m, A + e[2], A + blq.w[2]):
+                        for tr in vif.tiras(pk):
+                            self._tira(tr, None if cartel else W, ti, lista, sin_textura, np.zeros(3, np.float32), blq)
 
-    def _tira(self, tr, ti, lista, sin_textura, dx, blq):
-        """una tira; si une piezas separadas (una arista 6 veces mas larga que la mediana y de mas de 15 m: la PS2
-        no dibuja esos triangulos de union), se corta en trozos"""
-        P = tr[0x68].astype(float)
+    def _tira(self, tr, M, ti, lista, sin_textura, dx, blq):
+        """una tira del VU1 partida en las tiras que dibuja de verdad el GS: el triangulo que cierra un vertice con la
+        bandera ADC (vif.no_dibuja: bit 1 de la y de la posicion) no se dibuja; los demas seguidos forman una tira.
+        M: matriz del nodo (vectores fila) o None"""
+        P = tr[0x68]
         if len(P) < 3 or not np.isfinite(P).all(): return
-        for a0, b0 in self._sin_puentes(tr, P):
-            Q = P[a0:b0]
-            e = np.linalg.norm(np.diff(Q, axis=0), axis=1); med = np.median(e)
-            cortes = [j for j in range(len(e)) if e[j] > 6 * med and e[j] > 15]
-            a = 0
-            for j in cortes + [len(Q) - 1]:
-                if j + 1 - a >= 3: self._trozo(tr, ti, lista, sin_textura, dx, blq, a0 + a, a0 + j + 1)
-                a = j + 1
-
-    def _sin_puentes(self, tr, P):
-        """trozos [a, b) de la tira sin sus triangulos puente (solo con self.puentes: las uniones de BK.PS2): la PS2 junta en
-        una tira piezas sueltas (p. ej. los dos muros de una calzada, cada uno con su normal) y no dibuja los
-        triangulos que las unen; aqui se reconocen porque sus vertices tienen normales opuestas (producto < -0,3: en
-        una pieza de verdad las aristas vivas llevan vertices aparte y las normales de un triangulo no se oponen). Sin esto cruzaban la carretera de la union por
-        encima de la calzada (cs_ENVBK_PALM, malla 8)"""
-        n = len(P)
-        if not getattr(self, 'puentes', False) or 0x69 not in tr or len(tr[0x69]) != n: return [(0, n)]
-        N = tr[0x69].astype(float) / 32768; N /= np.linalg.norm(N, axis=1, keepdims=True) + 1e-9
-        malos = []
-        for j in range(n - 2):
-            m = N[j:j + 3]
-            if min(m[0] @ m[1], m[0] @ m[2], m[1] @ m[2]) < -0.3: malos.append(j)
-        if not malos: return [(0, n)]
-        self.puentes_quitados = getattr(self, 'puentes_quitados', 0) + len(malos)
-        res = []; s = 0
-        for j in malos:
-            if j + 2 - s >= 3: res.append((s, j + 2))
-            s = max(s, j + 1)
-        if n - s >= 3: res.append((s, n))
-        return res
+        dib = vif.triangulos_dibujados(P)
+        self.tri_total += len(dib); self.tri_adc += int((~dib).sum())
+        if M is not None:
+            tr = dict(tr); tr[0x68] = P.astype(float) @ M[:3, :3] + M[3, :3]
+            if 0x69 in tr: tr[0x69] = tr[0x69].astype(float) @ M[:3, :3]
+        j = 0; n = len(dib)
+        while j < n:
+            if not dib[j]: j += 1; continue
+            a = j
+            while j < n and dib[j]: j += 1
+            self._trozo(tr, ti, lista, sin_textura, dx, blq, a, j + 2)   # triangulos a..j-1: vertices a..j+1
 
     def _trozo(self, tr, ti, lista, sin_textura, dx, blq, a, b):
         tr = {k: (v[a:b] if v is not None and k != 0x6c and len(v) == len(tr[0x68]) else v) for k, v in tr.items()}
@@ -207,9 +230,7 @@ class Modelo:
         elif ti < 0 and sin_textura is not None and not isinstance(sin_textura, str): argb[:] = sin_textura
         if lista is not None: li = lista
         cc = P.mean(0); rad = float(np.sqrt(((P - cc) ** 2).sum(1).max()))
-        dmax = getattr(self, '_dmax', 0.0)
-        if self.limita and dmax == 0.0 and rad < 40: dmax = float(np.clip(rad * 30, 150, 1000))
-        self.mallas.append([li, ti, cc, rad, self.nv, nn, blq, dmax])
+        self.mallas.append([li, ti, cc, rad, self.nv, nn, blq, getattr(self, '_nodo', -1)])
         if getattr(self, 'extra', None) is not None:            # coches (conv_coche.py): origen, UV y normales
             self.extra.append(dict(origen=getattr(self, '_origen', None), uv=con_uv, N=N.astype(np.float32)))
         v = np.zeros(nn, dtype=[('x', '<f4'), ('y', '<f4'), ('z', '<f4'), ('u', '<f4'), ('v', '<f4'), ('c', '<u4')])
@@ -251,13 +272,23 @@ class Modelo:
         if self.vq and not getattr(self, '_comprimido', False): self.comprime(); self._comprimido = True
         self.mallas.sort(key=lambda x: (x[0], x[1]))
         inicio = [sum(1 for x in self.mallas if x[0] < l) for l in range(5)]
+        nsec = len(self.secciones) if self.mapa is not None else 0
         with open(sal, 'wb') as f:
-            f.write((b'ORD6' if self.vq else b'ORD5') + struct.pack('<10I', len(self.mallas), self.nv, len(self.ruta), self.ruta.shape[1],
-                                          len(self.texs), *inicio))
+            f.write(b'ORD7' + struct.pack('<13I', len(self.mallas), self.nv, len(self.ruta), self.ruta.shape[1],
+                                          len(self.texs), *inicio, len(self.nodos), len(self.carteles), nsec))
             for t in self.texs: f.write(struct.pack('<6I', *t))
-            for li, ti, cc, rad, i0, cnt, _, dmax in self.mallas:
-                f.write(struct.pack('<4f2Iif', *cc, rad, i0, cnt, ti, dmax))
+            for li, ti, cc, rad, i0, cnt, _, nodo in self.mallas:
+                f.write(struct.pack('<4f2Iii', *cc, rad, i0, cnt, ti, nodo if isinstance(nodo, (int, np.integer)) else -1))
             for v in self.verts: f.write(v.tobytes())
             f.write(self.ruta.astype('<f4').tobytes())
+            for cc, rad, u, ib in self.nodos: f.write(struct.pack('<4fIi2I', *cc, rad, u, ib, 0, 0))
+            for W in self.carteles:
+                f.write(W.astype('<f4').tobytes())
+            if nsec:
+                ini = np.cumsum([0] + [len(L) for L in self.secciones]).astype('<u4')
+                f.write(ini.tobytes())
+                f.write(np.array([g for L in self.secciones for g in L], '<u2').tobytes())
+                f.write(np.asarray(self.mapa, '<u2').tobytes())
+                f.write(b'\0' * (-f.tell() % 4))
             f.write(b'\0' * (-f.tell() % 32)); f.write(self.blob)
         return inicio
