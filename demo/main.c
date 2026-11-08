@@ -2656,10 +2656,12 @@ int main(int argc, char **argv)
 #ifdef PRUEBA_AUTO
             rm = MENU_DEMO;                                     /* prueba: directo a la carrera con el piloto */
 #endif
+#ifndef PRUEBA_AUTO
             if (rm == MENU_DEMO && video_atraccion) {           /* inactividad en el titulo: las peliculas del modo */
                 menu_sale();                                    /* ADVERTISE del original en vez de la demo de carrera */
                 if (video_atraccion() >= 0) { menu_entra(manual_, pista, NPISTAS); rm = MENU_SIGUE; nuevo = 0; }
             }
+#endif
             if (rm != MENU_SIGUE) {
                 auto_ = rm == MENU_DEMO;
                 if (!auto_) { manual_ = menu_manual(); pista = menu_pista(); }
