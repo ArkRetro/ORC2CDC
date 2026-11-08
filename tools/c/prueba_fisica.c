@@ -266,7 +266,8 @@ static void prueba_muro(const or2_param_t *p, float hud, float ang)
     for (i = 0; i < (int)(2.0f * HZ); ++i) {
         e.dist_izq = x + 7.0f; e.dist_der = 7.0f - x;   /* calzada de 14 m, muro izquierdo en x = -7 */
         or2_paso(&c, p, &e, 0.0f);
-        x += sinf(c.rumbo_vel) * c.velocidad * DT;
+        x += sinf(c.rumbo_vel) * c.velocidad * DT + c.corr_lat;   /* correccion lateral del rebote */
+        c.corr_lat = 0.0f;
         if (x < -6.0f) {
             r |= or2_choque_muro(&c, p, 1.0f, 0.0f, -6.0f - x);
             x = -6.0f; ++toques;
@@ -275,6 +276,47 @@ static void prueba_muro(const or2_param_t *p, float hud, float ang)
             printf(" [%.2fs %3.0f %5.1fgr x%5.1f]", (i + 1) * DT, c.velocidad_hud, c.rumbo_vel * 57.29578f, x);
     }
     printf("  %s, %d cuadros de contacto\n", r ? "rebote" : "roce", toques);
+}
+
+/* choque fuerte: recta con muro a la izquierda (x = -7), el coche a hud km/h con angulo ang grados hacia el muro,
+   gas a fondo. La grua lleva el coche al centro de la calzada 25 m por delante (10 posiciones de la carretera
+   del original, ~2,5 m cada una, como en main.c) */
+static void prueba_choque_fuerte(const or2_param_t *p, float hud, float ang, float x0)
+{
+    or2_coche_t c;
+    or2_entrada_t e;
+    int i, r, estado = -1, golpe = 0, fin = -1;
+    float v = fis_de_hud(p, hud), x = x0, y = 0.0f, ys = 0.0f, antes, pmax = 0.0f, gmax = 0.0f;
+    or2_coloca(&c, p, -ang / 57.29578f, v);
+    entrada_libre(&e);
+    e.acelerador = 1.0f;
+    or2_paso(&c, p, &e, 0.0f);
+    antes = c.velocidad_hud;
+    printf("  %3.0f km/h (%3d del modelo) a %4.1f gr:", antes, c.kmh, ang);
+    for (i = 0; i < (int)(4.0f * HZ); ++i) {
+        e.dist_izq = x + 7.0f; e.dist_der = 7.0f - x;
+        e.grua_ok = c.grua > 0; e.grua_dx = 0.0f - x; e.grua_dy = ys - y; e.grua_rumbo = 0.0f;
+        or2_paso(&c, p, &e, 0.0f);
+        x += sinf(c.rumbo_vel) * c.velocidad * DT + c.corr_lat; c.corr_lat = 0.0f;
+        y += cosf(c.rumbo_vel) * c.velocidad * DT;
+        if (c.recolocar) { c.recolocar = 0; x = 0.0f; y = ys; fin = i; }
+        if (x < -6.0f) {
+            r = or2_choque_muro(&c, p, 1.0f, 0.0f, -6.0f - x);
+            x = -6.0f;
+            if (r == 2 && !golpe) { golpe = 1; estado = c.choque; ys = y + 25.0f;
+                printf(" estado %d (%.2f s, lado %d, grua %d cuadros) a %.2fs;", c.choque, c.t_choque, c.lado, c.grua, i * DT); }
+        }
+        if (c.t_choque > 0.0f) {
+            if (fabsf(c.pose_t[1]) > pmax) pmax = fabsf(c.pose_t[1]);
+            if (fabsf(c.pose_r[0]) + fabsf(c.pose_r[1]) + fabsf(c.pose_r[2]) > gmax)
+                gmax = fabsf(c.pose_r[0]) + fabsf(c.pose_r[1]) + fabsf(c.pose_r[2]);
+        }
+        if (i % 30 == 29)
+            printf(" [%.1fs %3.0f x%5.1f y%6.1f%s]", (i + 1) * DT, c.velocidad_hud, x, y, c.grua ? " G" : "");
+    }
+    if (!golpe) printf("  sin choque fuerte\n");
+    else printf("\n      estado %d: pose max. altura %.2f m, giro %.2f rad; grua acaba a %.2fs en x %.1f y %.1f, "
+                "despues %.0f km/h\n", estado, pmax, gmax, fin * DT, 0.0f, ys, c.velocidad_hud);
 }
 
 /* punta a fondo 60 s con un coche 15 m delante a la misma velocidad (rebufo) o sin el */
@@ -319,6 +361,12 @@ static void prueba_choques(const or2_param_t *p)
     prueba_muro(p, 200.0f, 8.0f);
     prueba_muro(p, 200.0f, 25.0f);
     prueba_muro(p, 60.0f, 25.0f);
+    printf("-- choque fuerte contra el muro (punta al corte %d km/h del modelo: nada hasta %d, estado 1 desde %d):\n",
+           (int)(p->v_tope * 216.72f), (int)(p->v_tope * 216.72f) - 70, (int)(p->v_tope * 216.72f) - 20);
+    prueba_choque_fuerte(p, 290.0f, 50.0f, 0.0f);
+    prueba_choque_fuerte(p, 265.0f, 50.0f, 0.0f);
+    prueba_choque_fuerte(p, 265.0f, 30.0f, 0.0f);
+    prueba_choque_fuerte(p, 200.0f, 60.0f, 0.0f);
     printf("-- rebufo:\n");
     prueba_rebufo(p);
 }

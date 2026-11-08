@@ -119,6 +119,7 @@ int or2_carga_param(const float *t, int filas, int col, or2_param_t *p)
     p->adj_fuera = P(0x22bc); p->adj_pend = P(0x2308); p->adj_opu = P(0x2354);
     p->adj_opu_k = P(0x23a0); p->adj_dentro = P(0x23ec);
     p->hud = P(0x2438);
+    p->v_tope = P(0x1300);                  /* aqui solo la relacion; se completa abajo */
     /* multiplicador de empuje por marcha: fila (marcha+0x7b) */
     for (g = 0; g <= 6; ++g) p->empuje[g] = P((g + 0x7b) * 0x4c);
 #undef P
@@ -150,6 +151,8 @@ int or2_carga_param(const float *t, int filas, int col, or2_param_t *p)
         p->baja[g] = src / p->rel[g - 1] * k;
         p->baja_fr[g] = (g == 2 ? p->w_baja2 : p->w_baja_freno) / p->rel[g - 1] * k;
     }
+    /* e+0xE64 (vehicle_gear_thresholds_487570): corte / fila 0x1300 (fija, aunque haya menos marchas) */
+    p->v_tope = p->v_tope > 0.0f ? p->w_corte / p->v_tope * k : 10000.0f;
 
     /* curvas aproximadas por si no se cargan las reales:
        par plano tipo V12 normalizado y freno lineal con zona muerta */
@@ -925,10 +928,58 @@ static void tick(or2_coche_t *c, const or2_param_t *p, const or2_entrada_t *e)
         }
         d = dir_ang((float)c->h286 * U2R);
         v0 = mk(d.x * sp0, d.y * sp0);
+        /* RebPlBody_Sub2 (4A0320): correccion lateral de la posicion hacia el centro de la calzada, o a 2 m
+           dentro del borde mas cercano si queda mas cerca; se resta lo que ya mueve la velocidad lateral
+           (cada vez menos) y se reparte con un perfil coseno de 3 grados por cuadro que acaba en el ultimo
+           cuadro del rebote. Si pide mas que la velocidad de un cuadro no se aplica. Sin los tramos de las
+           etapas 0x12 y 0x1C en que el original se la salta. */
+        if (c->rebote == 1 && tiene_bordes) {
+            v2 h = dir_ang((float)c->d4c * U2R), der = mk(h.y, -h.x);
+            float dl2 = -ofs, a1, b1, am, fn, fp, corr;
+            if (!(1.1920929e-7f > fabsf(ofs))) {
+                a1 = e->dist_der - 2.0f;             /* (+264 + 2) / +26C: a 2 m del borde derecho      */
+                b1 = 2.0f - e->dist_izq;             /* (+268 - 2) / +26C: a 2 m del borde izquierdo    */
+                if (fabsf(a1) > fabsf(b1)) a1 = b1;
+                if (fabsf(dl2) > fabsf(a1)) dl2 = a1;
+            }
+            am = (v0.x * der.x + v0.y * der.y) * DT * (1.0f - (float)cnt * 0.0333333351f);
+            dl2 -= am;
+            fn = 1.0f - cosf((float)cnt * 0.0523598790f);
+            fp = 1.0f - cosf((float)(cnt - 1) * 0.0523598790f);
+            corr = (1.0f - fp / fn) * fabsf(dl2);
+            if (!(corr > sp0 * DT)) c->corr_lat += dl2 < 0.0f ? -corr : corr;
+        }
         c->s4e = 0; c->s4c = 0;
         c->c283--;
         sin_arcade = 1;
     } else if (c->c284 > 0) c->c284--;
+    /* WrecPlBody (4A0C70): la grua del choque fuerte lleva el coche en linea recta al punto de la carretera
+       (el que da el juego en e->grua_*) en los cuadros que quedan, sin fuerzas, y gira el cuerpo hacia el rumbo
+       de la carretera; en el ultimo, PlWrecker (504900 fase 1) lo deja alli con el rumbo de la carretera, parado
+       (estado 1) o con 0,67 de la velocidad y como mucho 0,7383 m/cuadro (160 km/h del modelo; estados 2 y 5) */
+    if (c->grua > 0) {
+        int cnt = --c->grua, k;
+        int16_t yaw = s16(tr(c->psi * R2U));
+        int16_t obj = e->grua_ok ? s16(tr(angw(-e->grua_rumbo) * R2U)) : c->d4c;
+        c->d44 = 0; c->d46 = 0; c->s4e = 0; c->s4c = 0;
+        if (cnt <= 0) {
+            float vf = (c->choque == 2 || c->choque == 5) ? c->vel_mf * 0.670000017f : 0.0f;
+            v2 d;
+            if (vf > 0.738279819f) vf = 0.738279819f;
+            c->psi = angw((float)obj * U2R);
+            d = dir_ang(c->psi);
+            v0 = mk(d.x * vf * HZ, d.y * vf * HZ);
+            c->w = 0.0f;
+            c->w_motor = p->w_ralenti;
+            for (k = 0; k < 4; ++k) { c->r[k].vel = vf * HZ; c->r[k].omega = vf * HZ / p->radio[k >> 1]; }
+            c->recolocar = 1;
+        } else {
+            v0 = e->grua_ok ? mk(e->grua_dx / (float)cnt * HZ, e->grua_dy / (float)cnt * HZ) : mk(0.0f, 0.0f);
+            c->w = (float)((int32_t)s16((int32_t)obj - yaw) / cnt) * U2R * HZ;
+        }
+        fbx = fby = tau = 0.0f;
+        sin_arcade = 1;
+    }
 
     /* ActionForce2 sobre la copia: velocidad y guinada previstas */
     ax = (fbx * fwd.x + fby * izq.x) * G_ACC / p->masa;
@@ -1319,12 +1370,38 @@ void or2_choque_coche(or2_coche_t *c, const or2_param_t *p, const or2_choques_t 
     c->kmh = tr(c->vel_mf * 216.720001f);
 }
 
-/* CbwColiWall (5041B0) para el jugador; sin el aplastamiento (pc_cw_crush_status) */
+/* CwCrushStatus (5038D0): choque fuerte contra el muro si el angulo de impacto llega al de aplastamiento.
+   Sin handicap (+DB4 = 0) ni asistencia (+DF8 = 0), y sin los tramos de atrapamiento por etapa (5C2570,
+   check_crush_entrapment_length) ni el desvio del estado 1 al 5 (resolve_entry): son posiciones de la malla de
+   la carretera del original, que la demo no tiene. Velocidades en km/h del modelo (+1F4); n = punta al corte:
+   n - 70 o menos, nada (solo el temporizador de colision); por encima de n - 20 el estado 1 (vuelta de campana);
+   si no, 5 (a 10 grados o mas) o 2. Entra con StartCrash (4A2270) y la grua (PlWrecker fase > 1: cuadros =
+   duracion * 60.2 + 1). lado: +670 & 0xA0000000 (puntos 0 y 2 de la forma del coche contra el muro), aqui el
+   costado izquierdo del coche (supuesto: los puntos pares son los del lado izquierdo). */
+static int aplasta(or2_coche_t *c, const or2_param_t *p, float imp, int lado)
+{
+    const or2_choques_t *q = choques_act;
+    int n, bajo, alto, estado, fase;
+    if (!q || !q->ok) return 0;
+    if (c->t_choque > 0.0f || c->t_recup > 0.0f || c->grua > 0) return 0;
+    n = tr(p->v_tope * 216.720001f);
+    bajo = n - 70; alto = n - 20;
+    if (c->kmh <= bajo) return 0;
+    estado = c->kmh > alto ? 1 : (imp >= 0.174532920f ? 5 : 2);
+    entra_choque(c, estado, lado);
+    fase = tr(q->dur[estado] * 60.2000008f);
+    if (fase > 1) { c->grua = fase + 1; c->grua_ini = fase + 1; }
+    return 1;
+}
+
+/* CbwColiWall (5041B0) para el jugador: roce, rebote y choque fuerte (CwCrushStatus) */
+#define ANG_APLASTA 0.785398185f   /* crush_threshold: 45 grados (propiedad de la etapa 0; si no, 25 o 18) */
 int or2_choque_muro(or2_coche_t *c, const or2_param_t *p, float nx, float ny, float pen)
 {
     v2 v = mk(c->vx, c->vy), n = mk(nx, ny), f;
     float sp = lon2(v), vn, imp, lim;
     int16_t dl;
+    int lado, fuerte = 0;
     if (sp < 0.0001f) return 0;
     vn = v.x * n.x + v.y * n.y;
     /* calc_wall_impact_angle: 90 grados - acos(|v . n|) */
@@ -1335,7 +1412,14 @@ int or2_choque_muro(or2_coche_t *c, const or2_param_t *p, float nx, float ny, fl
         lim = 0.0872664601f;
         if (iabs(dl) > 0x400 && (float)dl * c->ofs < 0.0f) lim = 0.174532920f;
     } else lim = 0.436332315f;
-    if (vn < 0.0f && imp >= lim) {
+    /* lado del coche que da contra el muro: el izquierdo si la normal (hacia la calzada) apunta a su derecha */
+    {
+        v2 izq = mk(-cosf(c->psi), -sinf(c->psi));
+        lado = (n.x * izq.x + n.y * izq.y) < 0.0f ? 1 : 0;
+    }
+    /* impacto entre el aplastamiento y el rebote: solo si se acepta el choque fuerte hay rebote */
+    if (vn < 0.0f && !(imp >= lim) && imp >= ANG_APLASTA) fuerte = aplasta(c, p, imp, lado);
+    if (vn < 0.0f && (imp >= lim || fuerte)) {
         /* cw_rebound_status: rumbo del muro (el sentido de la carretera) y rumbo de rebote */
         int16_t muro = s16(tr(atan2f(ny, nx) * R2U)), dif;
         if (iabs(s16((int32_t)muro - c->d4c)) >= 0x4000) muro = s16((int32_t)muro - 0x8000);
@@ -1356,7 +1440,9 @@ int or2_choque_muro(or2_coche_t *c, const or2_param_t *p, float nx, float ny, fl
         c->c283 = 30;
         c->c284 = 36;
         c->golpe_sonido = 1;
-        return 1;
+        /* despues del rebote, el choque fuerte si el impacto llega al angulo de aplastamiento */
+        if (!fuerte && imp >= ANG_APLASTA) fuerte = aplasta(c, p, imp, lado);
+        return fuerte ? 2 : 1;
     }
     /* calc_friction_status: frenada de kmh >> 7 cuadros, el cuerpo gira hacia el muro 2608 unidades por metro
        de penetracion y la velocidad sigue el muro sin perder modulo */

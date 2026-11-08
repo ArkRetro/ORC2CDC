@@ -60,18 +60,22 @@ def dir4(x, y, bw):
     pg = (y >> 7) * (bw >> 1) + (x >> 7)
     return pg * 16384 + BT4[(y >> 4) & 7, (x >> 5) & 3] * 512 + CT4[y & 15, x & 31]
 
-def desordena(datos, psm, w, h):
+def desordena(datos, psm, w, h, bw_sub=None):
     """datos tal como se suben al GS: PSMT8 como rectangulo PSMCT32 de w/2 x h/2, PSMT4 como PSMCT16 de w/2 x h/2.
-    Devuelve la imagen w x h de indices."""
+    Devuelve la imagen w x h de indices.
+    El rectangulo se escribe con su propio ancho de bufer bw_sub (por defecto la mitad del de la lectura PSMT8/PSMT4:
+    las paginas de PSMCT32/PSMCT16 miden la mitad de ancho en pixeles subidos). Antes se escribia con el mismo ancho
+    que la lectura y se perdian las filas desde la 64 (PSMT8) o la 128 (PSMT4) en texturas de mas de una pagina."""
     wu, hu = w // 2, h // 2
     bw = max(2, (w + 63) // 64); bw += bw & 1
+    if bw_sub is None: bw_sub = bw >> 1
     mem = np.zeros(bw * 64 * (h + 128) * 4, np.uint8)
     y, x = np.mgrid[0:hu, 0:wu]
     if psm == 0x13:
-        mem.view(np.uint32)[dir32(x, y, bw)] = np.frombuffer(datos[:wu * hu * 4], '<u4').reshape(hu, wu)
+        mem.view(np.uint32)[dir32(x, y, bw_sub)] = np.frombuffer(datos[:wu * hu * 4], '<u4').reshape(hu, wu)
         y, x = np.mgrid[0:h, 0:w]
         return mem[dir8(x, y, bw)]
-    mem.view(np.uint16)[dir16(x, y, bw)] = np.frombuffer(datos[:wu * hu * 2], '<u2').reshape(hu, wu)
+    mem.view(np.uint16)[dir16(x, y, bw_sub)] = np.frombuffer(datos[:wu * hu * 2], '<u2').reshape(hu, wu)
     y, x = np.mgrid[0:h, 0:w]
     a = dir4(x, y, bw)
     return (mem[a >> 1] >> ((a & 1) * 4)) & 15

@@ -127,6 +127,9 @@ typedef struct {
     float cg_del, cg_tras; /* distancia CG-eje m                            */
     float carga_est[2];    /* carga estatica por rueda kgf                  */
     float sube[8], baja[8], baja_fr[8]; /* umbrales m/cuadro               */
+    float v_tope;          /* e+0xE64: punta al corte (0x1644) con la fila  */
+                           /* 0x1300 (6a relacion), m/cuadro; la usa el     */
+                           /* choque fuerte contra el muro (CwCrushStatus)  */
 } or2_param_t;
 
 /* --- choques (PARAM.DAT, bloques MAP1 / CHQ1 / POS1 de tools/conv_param.py) --- */
@@ -174,6 +177,11 @@ typedef struct {
     int   manual;           /* 1 = cambio manual (cambio_pide decide)        */
     int   cambio_pide;      /* +1 subir, -1 bajar (solo en el paso en que se */
                             /* pulsa)                                        */
+    /* grua (PlWrecker) mientras c->grua > 0: punto de la carretera donde se  */
+    /* recoloca el coche, relativo al coche (mundo: x der., y adelante, m) y  */
+    /* rumbo de la carretera alli (rad, + derecha). grua_ok = 0: sin punto.  */
+    int   grua_ok;
+    float grua_dx, grua_dy, grua_rumbo;
 } or2_entrada_t;
 
 typedef struct {
@@ -248,6 +256,13 @@ typedef struct {
     float rebufo;           /* +E68 mejor puntuacion de rebufo (0..1; >0.18 = rebufo en el HUD)       */
     float rebufo_k;         /* +E6C fraccion de resistencia del aire que se quita                     */
     int   rebufo_n;         /* +E70 rampa (0..180 cuadros)                                            */
+    /* choque fuerte contra el muro (CwCrushStatus 5038D0) y grua (PlWrecker 504900 / WrecPlBody 4A0C70) */
+    int   grua;             /* +D68 cuadros que le quedan a la grua (0 = inactiva)                    */
+    int   grua_ini;         /* +D6A cuadros con que empezo                                            */
+    int   recolocar;        /* 1 en el paso en que la grua deja el coche en la carretera: el juego    */
+                            /* lo pone en el punto de la grua (lo borra quien lo lee)                 */
+    float corr_lat;         /* RebPlBody_Sub2 4A0320: desplazamiento lateral pedido durante el rebote */
+                            /* (m, + derecha de la carretera); lo suma y lo borra el juego            */
 } or2_coche_t;
 
 /* Copia los campos de una columna. tabla = floats LE tal cual (filas*19).
@@ -278,7 +293,8 @@ void or2_choque_coche(or2_coche_t *c, const or2_param_t *p, const or2_choques_t 
 
 /* Contacto con el muro (CbwColiWall 5041B0: CalcFrictionStatus / CwReboundStatus): nx, ny = normal del muro
    hacia la calzada (mundo, unitaria), pen = penetracion (m). Llamar cada cuadro de contacto, despues de
-   or2_paso. Devuelve 1 si ha sido un golpe (rebote), 0 si un roce. */
+   or2_paso. Devuelve 1 si ha sido un golpe (rebote), 0 si un roce y 2 si ademas es un choque fuerte (estados 1,
+   2 o 5: animacion, perdida de velocidad y grua; ver c->grua y or2_entrada_t.grua_*). */
 int  or2_choque_muro(or2_coche_t *c, const or2_param_t *p, float nx, float ny, float pen);
 
 /* Rebufo (CheckSlipStream 4A4D20): los n coches cercanos (dx, dy, vx, vy de or2_otro_t). Llamar una vez por

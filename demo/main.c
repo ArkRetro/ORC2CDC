@@ -271,6 +271,10 @@ static int manual_, pide_cambio, auto_piloto, sfx_ok, golpe_cd;
 static or2_param_t fpar; static or2_coche_t fis; static int fis_ok, columna = -1;
 static or2_choques_t choq;                                      /* choques del original (bloques de PARAM.DAT) */
 static float *param_dat;                                        /* se queda en memoria: las animaciones apuntan aqui */
+/* grua del choque fuerte: PlWrecker avanza 10 posiciones de la carretera del original (pc_advance_on_road_place);
+   como en rumbo_adelante (16 posiciones ~ 40 m) se toman ~2,5 m por posicion */
+#define GRUA_AVANCE 25.0f
+static float grua_s, grua_x; static int grua_on;
 static int fisica_carga(void)
 {
     uint32_t sz; float *t = gd_carga("PARAM.DAT", &sz);
@@ -487,6 +491,18 @@ static void coche_paso(coche_t *c, float giro, float gas, float freno, float dt)
         e.rumbo_carretera = th0; e.rumbo_adelante = th0 + dif_ang(atan2f(dx, -dz) - th0);
         e.dist_izq = iz + c->x; e.dist_der = de - c->x;
         e.manual = manual_ && !auto_piloto; e.cambio_pide = pide_cambio; pide_cambio = 0;
+        if (fis.grua > 0) {                                     /* grua del choque fuerte (PlWrecker) */
+            float g[3], tg, gi, gd, gx, gz;
+            if (!grua_on) {                                     /* el punto: 10 posiciones de carretera por delante */
+                grua_s = fminf(c->s + GRUA_AVANCE, longitud - 50.0f); if (grua_s < c->s) grua_s = c->s;
+                ruta_en(grua_s, g, &tg, &gi, &gd);
+                grua_x = (gd - gi) * 0.5f;                      /* el centro de la calzada (GetCsRoadInfoByCsLen) */
+                grua_on = 1;
+            }
+            ruta_en(grua_s, g, &tg, NULL, NULL);
+            gx = g[0] + grua_x * cosf(tg); gz = g[2] + grua_x * sinf(tg);
+            e.grua_ok = 1; e.grua_dx = gx - c->pos[0]; e.grua_dy = -(gz - c->pos[2]); e.grua_rumbo = tg;
+        } else grua_on = 0;
         {   /* rebufo (CheckSlipStream): los coches de trafico cercanos */
             or2_otro_t ot[NTRAF]; int i, n = 0; float f0 = sinf(th0), f1 = cosf(th0), r0 = cosf(th0), r1 = -sinf(th0);
             for (i = 0; i < NTRAF; i++) {
@@ -501,7 +517,9 @@ static void coche_paso(coche_t *c, float giro, float gas, float freno, float dt)
         c->v = fis.velocidad; c->a = dif_ang(fis.rumbo_vel - th0); c->deriva = fis.beta;
         c->derrape = fis.temporizador > 0 ? (fis.beta >= 0 ? 1 : -1) : 0; c->t_derrape = fis.temporizador;
         c->s += c->v * cosf(c->a) * dt;
-        c->x += c->v * sinf(c->a) * dt;
+        c->x += c->v * sinf(c->a) * dt + fis.corr_lat;         /* + la correccion lateral del rebote */
+        fis.corr_lat = 0;
+        if (fis.recolocar) { fis.recolocar = 0; grua_on = 0; c->s = grua_s; c->x = grua_x; }   /* fin de la grua */
         ruta_en(c->s, p, &th1, &iz, &de);
         c->a = dif_ang(c->a - (th1 - th0));
         {   /* muros: CbwColiWall del original (roce o rebote) con la normal hacia la calzada */
@@ -511,7 +529,7 @@ static void coche_paso(coche_t *c, float giro, float gas, float freno, float dt)
             lim = de - 1.0f;
             if (c->x > lim) { pen = c->x - lim; c->x = lim; nx = -cosf(th1); ny = sinf(th1); }
             if (nx != 0 || ny != 0) {
-                int golpe = or2_choque_muro(&fis, &fpar, nx, ny, pen);
+                int golpe = or2_choque_muro(&fis, &fpar, nx, ny, pen);   /* 2 = choque fuerte (estados 1, 2, 5) */
                 c->choque = 1; c->t_muro = 30;
                 if (golpe && sfx_ok && !golpe_cd) { golpe_cd = 20; sfx_golpe(fminf(c->v / 40.0f, 1.0f)); }
                 h = atan2f(fis.vx, fis.vy);                     /* rumbo de la velocidad (+ derecha) */
@@ -905,6 +923,12 @@ int main(int argc, char **argv)
             if (auto_ && (nuevo & CONT_START)) { estado = TITULO; ttit = 9.0f; nuevo = 0; auto_ = 0; }
             else if (nuevo & CONT_START) pausa ^= 1;
             if (!pausa) {
+#ifdef PRUEBA_CHOQUE
+                if (t_estado == 60 && fis_ok) {                 /* prueba: a ~280 km/h y 50 grados contra el muro derecho */
+                    float p[3], th; ruta_en(yo.s, p, &th, NULL, NULL);
+                    or2_coloca(&fis, &fpar, th + 0.87f, 280.0f / (fpar.hud * 3.6f));
+                }
+#endif
                 if (auto_) piloto(&yo, &giro, &gas, &freno);
                 coche_paso(&yo, giro, gas, freno, 1.0f / 60);
                 traf_paso(1.0f / 60);
