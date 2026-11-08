@@ -125,7 +125,7 @@ void hud_dibuja(const hud_estado_t *e)
     dibuja("RUTA5_ACTUAL", 0, e->etapa, (e->cuadro & 32) ? 1.0f : 0.4f);
     zcapa = 40.0f;
     /* capa 4: REV (solo con cambio manual) */
-    if (e->manual) { dibuja("REV_TEXTO", 0, 0, 1); dibuja("REV_LUZ", 0, 0, 1); }
+    if (e->manual) { dibuja("REV_TEXTO", 0, 0, 1); dibuja("REV_LUZ", 0, 0, 1); if (e->rev_on) dibuja("REV_ON", 0, 0, (e->cuadro & 4) ? 1.0f : 0.6f); }
     zcapa = 50.0f;
     /* capa 5: unidades y rebufo */
     dibuja("KMH", e->rebufo, 0, 1);

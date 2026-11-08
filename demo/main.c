@@ -265,6 +265,7 @@ static coche_t yo;
 #ifndef ACEL
 #define ACEL 1.35f                                              /* multiplicador del par motor */
 #endif
+static int manual_, pide_cambio, auto_piloto;
 static or2_param_t fpar; static or2_coche_t fis; static int fis_ok;
 static int fisica_carga(void)
 {
@@ -304,7 +305,7 @@ static void coche_coloca(coche_t *c)
 /* ---------------------------------------------------------------- trafico */
 #define NCARRIL 6
 #define NTRAF 11                                                /* un 10 % menos que antes */
-typedef struct { coche_t c; int carril, modelo; } trafico_t;
+typedef struct { coche_t c; int carril, modelo, destino; float v_des, f_cambio, t_sig; } trafico_t;
 static trafico_t traf[NTRAF];
 #define NMODTRAF 9                                              /* coches de calle (TRAFn.DAT) */
 static modelo_t mtraf[NMODTRAF];
@@ -328,30 +329,72 @@ static float carril_x(float s, int k)
     i = (int)(s / PASO); f = s / PASO - i; a = etapa.ruta + PR * i;
     return a[5 + NPERF + k] + f * (a[PR + 5 + NPERF + k] - a[5 + NPERF + k]);
 }
+/* el carril k esta libre entre s-atras y s+delante (sin contar al propio coche) */
+static int carril_libre(const trafico_t *yo_t, int k, float s, float atras, float delante)
+{
+    int i;
+    for (i = 0; i < NTRAF; i++) {
+        const trafico_t *t = traf + i; float d;
+        if (t == yo_t) continue;
+        if (t->carril != k && t->destino != k) continue;
+        d = t->c.s - s;
+        if (d > -atras && d < delante) return 0;
+    }
+    return 1;
+}
 static void traf_nace(trafico_t *t, float s)
 {
-    t->carril = (int)(azar() * NCARRIL) % NCARRIL; t->modelo = (int)(azar() * NMODTRAF) % NMODTRAF;
-    t->c.s = s; t->c.v = 36.0f + azar() * 14.0f; t->c.a = 0;
+    int k, n;
+    t->modelo = (int)(azar() * NMODTRAF) % NMODTRAF;
+    k = (int)(azar() * NCARRIL) % NCARRIL;
+    for (n = 0; n < NCARRIL && !carril_libre(t, k, s, 25.0f, 25.0f); n++) k = (k + 1) % NCARRIL;   /* sin montarse */
+    t->carril = t->destino = k; t->f_cambio = 0; t->t_sig = 4.0f + azar() * 10.0f;
+    t->c.s = s; t->v_des = t->c.v = 36.0f + azar() * 14.0f; t->c.a = 0;
     t->c.x = carril_x(s, t->carril); coche_coloca(&t->c);
 }
 static void traf_inicia(float s0)
 {
     int i;
+    for (i = 0; i < NTRAF; i++) traf[i].carril = traf[i].destino = -1;
     for (i = 0; i < NTRAF; i++) traf_nace(traf + i, s0 + 130.0f + i * 121.0f + azar() * 66.0f);
 #ifdef PRUEBA_TRAFICO
-    for (i = 0; i < 3; i++) { traf_nace(traf + i, s0 + 25.0f + i * 18.0f); traf[i].carril = 2 + i; traf[i].modelo = i * 4;
-        traf[i].c.v = 5.0f; traf[i].c.x = carril_x(traf[i].c.s, traf[i].carril); coche_coloca(&traf[i].c); }
+    for (i = 0; i < 3; i++) { traf_nace(traf + i, s0 + 25.0f + i * 18.0f); traf[i].carril = traf[i].destino = 2 + i; traf[i].modelo = i * 4;
+        traf[i].c.v = traf[i].v_des = 5.0f; traf[i].c.x = carril_x(traf[i].c.s, traf[i].carril); coche_coloca(&traf[i].c); }
 #endif
 }
+/* trafico: guarda la distancia con el de delante, cambia de carril suave (2,5 s) si va tapado o de vez en cuando */
 static void traf_paso(float dt)
 {
-    int i;
+    int i, j;
     for (i = 0; i < NTRAF; i++) {
-        trafico_t *t = traf + i; float x0 = t->c.x;
+        trafico_t *t = traf + i; float x0 = t->c.x, hueco = 1e9f, v_del = 0, v_obj;
+        for (j = 0; j < NTRAF; j++) {                           /* el de delante en mi carril (o en el que voy) */
+            const trafico_t *o = traf + j; float d = o->c.s - t->c.s;
+            if (o == t || d <= 0 || d > 60.0f) continue;
+            if (o->carril != t->carril && o->carril != t->destino && o->destino != t->carril) continue;
+            if (d < hueco) { hueco = d; v_del = o->c.v; }
+        }
+        v_obj = t->v_des;
+        if (hueco < 45.0f) v_obj = fminf(v_obj, v_del + (hueco - 18.0f) * 0.4f);   /* 18 m de distancia */
+        if (v_obj < 0) v_obj = 0;
+        t->c.v += fmaxf(-6.0f * dt, fminf(2.5f * dt, v_obj - t->c.v));
+        t->t_sig -= dt;
+        if (t->destino == t->carril && (t->t_sig <= 0 || (hueco < 35.0f && v_del < t->v_des - 3.0f))) {
+            int k = t->carril + (azar() < 0.5f ? -1 : 1);
+            if (k < 0 || k >= NCARRIL) k = 2 * t->carril - k;
+            if (k >= 0 && k < NCARRIL && carril_libre(t, k, t->c.s, 15.0f, 30.0f)
+                && !(fabsf(yo.s - t->c.s) < 12.0f && fabsf(yo.x - carril_x(t->c.s, k)) < 3.0f)) { t->destino = k; t->f_cambio = 0; }
+            t->t_sig = 6.0f + azar() * 10.0f;
+        }
         t->c.s += t->c.v * dt;
         if (t->c.s < yo.s - 150.0f || t->c.s > longitud - 20.0f) traf_nace(t, yo.s + 550.0f + azar() * 550.0f);
         if (t->c.s > longitud - 20.0f) t->c.s = longitud - 20.0f;
-        t->c.x = carril_x(t->c.s, t->carril);
+        if (t->destino != t->carril) {
+            float f, sm;
+            t->f_cambio += dt / 2.5f; f = fminf(t->f_cambio, 1.0f); sm = f * f * (3 - 2 * f);
+            t->c.x = carril_x(t->c.s, t->carril) + sm * (carril_x(t->c.s, t->destino) - carril_x(t->c.s, t->carril));
+            if (f >= 1.0f) t->carril = t->destino;
+        } else t->c.x = carril_x(t->c.s, t->carril);
         t->c.a = atan2f(t->c.x - x0, t->c.v * dt + 1e-4f);
         coche_coloca(&t->c);
         /* choque con el jugador: le frena y le aparta */
@@ -387,6 +430,7 @@ static void coche_paso(coche_t *c, float giro, float gas, float freno, float dt)
         e.stick = giro; e.acelerador = gas; e.freno = freno; e.mu = 1.0f; e.en_suelo = 1;
         e.rumbo_carretera = th0; e.rumbo_adelante = th0 + dif_ang(atan2f(dx, -dz) - th0);
         e.dist_izq = iz + c->x; e.dist_der = de - c->x;
+        e.manual = manual_ && !auto_piloto; e.cambio_pide = pide_cambio; pide_cambio = 0;
         or2_paso(&fis, &fpar, &e, 0.0f);
         c->v = fis.velocidad; c->a = dif_ang(fis.rumbo_vel - th0); c->deriva = fis.beta;
         c->derrape = fis.temporizador > 0 ? (fis.beta >= 0 ? 1 : -1) : 0; c->t_derrape = fis.temporizador;
@@ -634,7 +678,17 @@ enum { TITULO, CUENTA, CARRERA, META, AGOTADO };
 #define PERIODO 16683                                           /* us por paso de logica (59,94 Hz) */
 /* bifurcacion al final de la primera etapa: rama izquierda y derecha */
 static const char *RAMA_FICH[2] = { "SEG07.DAT", "SEG03.DAT" }, *RAMA_NOMBRE[2] = { "BOSQUE", "INDUSTRIA" };
-static int etapa_n, hud_ok, crono, puntos; static float puntos_f;                                             /* 0: la primera; 1: ya en una rama */
+static int etapa_n, hud_ok, crono, puntos; static float puntos_f, vmax;
+static void texto_arriba(const char *l1, const char *l2, const char *l3);
+/* panel de resultados al terminar (meta o tiempo agotado) */
+static void resultados(int meta)
+{
+    char a[64], b[64], c[64]; int ms = (int)(crono * 1000.0f / 60.0f);
+    sprintf(a, meta ? "   GOAL!   %s" : "   TIEMPO AGOTADO", meta ? (etapa_n ? "RECORRIDO COMPLETO" : "") : "");
+    sprintf(b, "   TIEMPO TOTAL %d'%02d\"%03d", ms / 60000, (ms / 1000) % 60, ms % 1000);
+    sprintf(c, "   PUNTOS %07d   MAX %d km/h", puntos, (int)vmax);
+    texto_arriba(a, b, c);
+}                                             /* 0: la primera; 1: ya en una rama */
 #define TIEMPO_ETAPA 80.0f
 #ifndef VER
 #define VER 0
@@ -696,7 +750,7 @@ int main(int argc, char **argv)
         cont_state_t *st = mc ? (cont_state_t *)maple_dev_status(mc) : NULL;
         uint32_t b = st ? st->buttons : 0, nuevo = b & ~bot_ant;
         float giro = 0, gas = 0, freno = 0, ojo_[3], mira[3];
-        bot_ant = b; t_estado++; c_log = timer_us_gettime64();
+        bot_ant = b; auto_piloto = auto_; t_estado++; c_log = timer_us_gettime64();
         {   /* salto de cuadros: tantos pasos de logica (60 Hz) como haya pasado de tiempo real, hasta 3 */
             uint64_t ahora = timer_us_gettime64();
             if (!reloj) reloj = ahora;
@@ -707,8 +761,18 @@ int main(int argc, char **argv)
         }
         musica_poll();
         if (nuevo & CONT_Y) ver ^= 1;
-        if ((nuevo & CONT_DPAD_UP) && lejos_obj < 2000) { lejos_obj += 100; lejos = lejos_obj; pvr_fog_table_linear(lejos * 0.55f, lejos); }
-        if ((nuevo & CONT_DPAD_DOWN) && lejos_obj > 300) { lejos_obj -= 100; lejos = lejos_obj; pvr_fog_table_linear(lejos * 0.55f, lejos); }
+        if (estado == TITULO && (nuevo & (CONT_DPAD_UP | CONT_DPAD_DOWN))) {
+            if (ver) {                                          /* con el panel de depuracion: distancia de dibujado */
+                if ((nuevo & CONT_DPAD_UP) && lejos_obj < 2000) lejos_obj += 100;
+                if ((nuevo & CONT_DPAD_DOWN) && lejos_obj > 300) lejos_obj -= 100;
+                lejos = lejos_obj; pvr_fog_table_linear(lejos * 0.55f, lejos);
+            } else manual_ ^= 1;                                /* cambio automatico / manual */
+            ttit = 0;
+        }
+        if (estado != TITULO && manual_) {                      /* cambio manual: cruceta arriba sube, abajo baja */
+            if (nuevo & CONT_DPAD_UP) pide_cambio = 1;
+            if (nuevo & CONT_DPAD_DOWN) pide_cambio = -1;
+        }
         if (st) {
             giro = st->joyx / 110.0f;
             if (b & CONT_DPAD_LEFT) giro = -1;
@@ -740,7 +804,7 @@ int main(int argc, char **argv)
                 }
                 memset(&yo, 0, sizeof yo); yo.s = SALIDA; yo.x = carril_x(SALIDA, 4); coche_paso(&yo, 0, 0, 0, 0); traf_inicia(SALIDA); efectos_borra();
                 if (fis_ok) { float p[3], th; ruta_en(yo.s, p, &th, NULL, NULL); or2_coloca(&fis, &fpar, th, 0); }
-                tiempo = TIEMPO_ETAPA; estado = CUENTA; t_estado = 0; pausa = 0; crono = 0; puntos = 0; puntos_f = 0;
+                tiempo = TIEMPO_ETAPA; estado = CUENTA; t_estado = 0; pausa = 0; crono = 0; puntos = 0; puntos_f = 0; vmax = 0;
             }
         } else if (estado == CUENTA) {
             int n = 3 - (int)(t_estado / 60);
@@ -759,7 +823,8 @@ int main(int argc, char **argv)
                 traf_paso(1.0f / 60);
                 efectos_paso(&yo, 1.0f / 60);
                 tiempo -= 1.0f / 60;
-                crono++;                                        /* puntos: por velocidad y mas al derrapar */
+                crono++; if (fis_ok && fis.velocidad_hud > vmax) vmax = fis.velocidad_hud;
+                                                       /* puntos: por velocidad y mas al derrapar */
                 puntos_f += (fis_ok ? fis.velocidad_hud : yo.v * 3.6f) * (yo.t_derrape ? 0.06f : 0.02f); puntos = (int)puntos_f;
                 if (etapa_n == 0 && yo.s >= longitud - 400.0f && yo.s < longitud - 40.0f && t_estado % 30 == 0) {
                     char b[40]; sprintf(b, "< %s  %s >", RAMA_NOMBRE[0], RAMA_NOMBRE[1]); texto_centro(b); aviso_rama = 1;
@@ -783,12 +848,12 @@ int main(int argc, char **argv)
                     traf_inicia(yo.s); efectos_borra(); tiempo += 60.0f; aviso_rama = 0;
                     sprintf(msg, "%s  +60", RAMA_NOMBRE[rama]); texto_centro(msg); t_estado = 0;
                 }
-                else if (yo.s >= longitud - 40.0f) { estado = META; t_estado = 0; texto_centro("GOAL!"); }
-                else if (tiempo <= 0) { tiempo = 0; estado = AGOTADO; t_estado = 0; texto_centro("TIEMPO AGOTADO"); }
+                else if (yo.s >= longitud - 40.0f) { estado = META; t_estado = 0; texto_centro("GOAL!"); resultados(1); }
+                else if (tiempo <= 0) { tiempo = 0; estado = AGOTADO; t_estado = 0; texto_centro("TIEMPO AGOTADO"); resultados(0); }
             }
         } else {                                                /* META o AGOTADO: el coche se para solo */
             coche_paso(&yo, 0, 0, 0.6f, 1.0f / 60);
-            if ((nuevo & CONT_START) || t_estado > 360) { estado = TITULO; ttit = auto_ ? 0 : 0; texto_centro("PULSA START"); }
+            if ((nuevo & CONT_START) || t_estado > 600) { estado = TITULO; ttit = auto_ ? 0 : 0; texto_centro("PULSA START"); }
         }
         }
 
@@ -813,8 +878,8 @@ int main(int argc, char **argv)
         }
 
         /* marcador (cada 6 cuadros) */
-        if (cuadro % 6 == 0) {
-            if (estado == TITULO) sprintf(s1, "OUTRUN 2006 C2C - DEMO DC   MUSICA %d/%d <>", pista + 1, NPISTAS);
+        if (cuadro % 6 == 0 && estado != META && estado != AGOTADO) {
+            if (estado == TITULO) sprintf(s1, "OUTRUN C2C DC  MUSICA %d/%d <>  CAMBIO %s ^v", pista + 1, NPISTAS, manual_ ? "MANUAL" : "AUTO");
             else sprintf(s1, "TIEMPO %3d  %3d km/h %d  %3d%%%s", (int)ceilf(tiempo), fis_ok ? (int)fis.velocidad_hud : (int)(yo.v * 3.6f), fis.marcha,
                          (int)(100 * yo.s / longitud), yo.choque ? "  !" : "");
             if (ver) {
@@ -867,8 +932,14 @@ int main(int argc, char **argv)
                     he.tiempo = (int)ceilf(tiempo); he.crono_ms = (int)(crono * 1000.0f / 60.0f); he.puntos = puntos;
                     he.kmh = fis_ok ? (int)fis.velocidad_hud : (int)(yo.v * 3.6f); he.marcha = fis_ok ? fis.marcha : 1;
                     he.etapa = etapa_n; he.cuadro = cuadro; he.rpm = fis_ok ? (float)fis.rpm_suave : 0;
-                    he.rebufo = 0; he.derrape = yo.t_derrape != 0; he.manual = 0; he.seis = fis_ok && fpar.marchas >= 6;
+                    he.rebufo = 0; he.derrape = yo.t_derrape != 0; he.manual = manual_ && !auto_; he.rev_on = he.manual && fis_ok && fis.w_motor > fpar.w_corte * 0.93f; he.seis = fis_ok && fpar.marchas >= 6;
                     hud_dibuja(&he);
+                }
+                if (estado == META || estado == AGOTADO) {      /* resultados y fundido a negro al final */
+                    caja(64, 150, 512, 110, 0xA0000000);
+                    rect_txr(txt_arr, 512, 128, 68, 156, 512, 128, PVR_LIST_TR_POLY);
+                    if (t_estado > 540) caja(0, 0, 640, 480, (uint32_t)(fminf((t_estado - 540) / 60.0f, 1.0f) * 255) << 24);
+                    texto = 0;
                 }
                 if (texto) caja(36, 18, 568, ver ? 92 : 34, 0x90000000);
                 if (texto) rect_txr(txt_arr, 512, 128, 40, 20, 512, 128, PVR_LIST_TR_POLY);

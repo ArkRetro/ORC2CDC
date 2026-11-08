@@ -141,6 +141,9 @@ typedef struct {
     float mu;               /* adherencia del firme (1.0 asfalto, 0.7 tierra)*/
                             /* 0 se interpreta como 1.0                      */
     int   en_suelo;         /* 0 = en el aire: sin fuerzas de neumatico      */
+    int   manual;           /* 1 = cambio manual (cambio_pide decide)        */
+    int   cambio_pide;      /* +1 subir, -1 bajar (solo en el paso en que se */
+                            /* pulsa)                                        */
 } or2_entrada_t;
 
 typedef struct {

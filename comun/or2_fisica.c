@@ -256,6 +256,14 @@ static void cambio_auto(or2_coche_t *c, const or2_param_t *p)
     c->marcha = g;
 }
 
+/* cambio manual: el mismo ciclo de embrague y acelerador que el automatico (estados 1 y 3) */
+static void cambio_manual(or2_coche_t *c, const or2_param_t *p, int pide)
+{
+    if (c->marcha == 0) { c->marcha = 1; return; }
+    if (pide > 0 && c->marcha < p->marchas) { c->marcha++; c->cambio = 1; }
+    else if (pide < 0 && c->marcha > 1) { c->marcha--; c->cambio = 3; }
+}
+
 static void acelerador_op(or2_coche_t *c, const or2_param_t *p)
 {
     float pred = vel_motor_prevista(c, p, c->marcha);
@@ -768,7 +776,8 @@ static void tick(or2_coche_t *c, const or2_param_t *p, const or2_entrada_t *e)
     }
 
     /* --- transmision, motor y frenos --- */
-    cambio_auto(c, p);
+    if (e->manual) cambio_manual(c, p, e->cambio_pide);
+    else cambio_auto(c, p);
     acelerador_op(c, p);
     reparte_freno(c, p);
     embrague_auto(c, p);
