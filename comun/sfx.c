@@ -14,7 +14,9 @@
      2^((curva_pitch(x)/3 - nota*115)/4096) con curva_pitch = semitonos*1024 + fino*16. Las curvas se interpolan
      linealmente en el tramo x0 < x <= x1. Una capa con volumen 0 se apaga y vuelve a empezar la muestra al
      reaparecer (como el original).
-   Aqui x es real (interpolando entre umbrales de rpm) para que el tono no vaya a saltos. */
+   Aqui x es real (interpolando entre umbrales de rpm) para que el tono no vaya a saltos.
+   Menus: sfx_menu(id) toca la muestra "se%03x" una vez (sin bucle) a su frecuencia y con el volumen de la tabla SE del
+   IRX (u16 final de la muestra en SFX.DAT), alternando entre dos canales para que un efecto no corte al anterior. */
 #include <kos.h>
 #include <dc/sound/sound.h>
 #include <dc/sound/sfxmgr.h>
@@ -38,7 +40,7 @@ typedef struct {                /* como en SFX.DAT */
     char nombre[12];
     uint32_t desp, bytes, frec, ini, fin;
     uint8_t formato, bucle;
-    uint16_t nada;
+    uint16_t vol;               /* efectos de menu: volumen de la tabla SE (0..0x3fff) */
 } muestra_dat_t;
 
 typedef struct {
@@ -73,6 +75,9 @@ static float umbral_rpm[128];
 static float vol_general = 1.0f;
 static float golpe_x = -1.0f, golpe_vol;
 static int listo;
+#define N_CANAL_MENU 2
+static int canal_menu[N_CANAL_MENU] = { -1, -1 }, menu_turno;
+#define VOL_MENU 0.8f           /* nivel de los efectos de menu (volumen 0x3fff del IRX) */
 
 /* curva de volumen (0..127) en x */
 static float curva_vol(const int8_t p[8][2], float x)
@@ -218,6 +223,7 @@ int sfx_inicia(void)
         }
         off += 16 + nc * sizeof(capa_dat_t);
     }
+    for (i = 0; i < N_CANAL_MENU; i++) canal_menu[i] = snd_sfx_chn_alloc();
     listo = 1;
     return 0;
 }
@@ -278,4 +284,22 @@ void sfx_para(void)
     if (!listo) return;
     for (g = 0; g < N_GRUPOS; g++) calla_grupo(g);
     golpe_x = -1.0f;
+}
+
+void sfx_menu(int id)
+{
+    char nm[12];
+    int i, c, vol;
+    if (!listo) return;
+    sprintf(nm, "se%03x", id & 0xfff);
+    for (i = 0; i < n_mues && strncmp(mues[i].nombre, nm, 12); i++) ;
+    if (i >= n_mues) return;
+    c = canal_menu[menu_turno];
+    menu_turno = (menu_turno + 1) % N_CANAL_MENU;
+    if (c < 0) return;
+    vol = (int)(mues[i].vol * (1.0f / 0x3fff) * VOL_MENU * vol_general * 255.0f + 0.5f);
+    if (vol > 255) vol = 255;
+    if (vol <= 0) return;
+    snd_sfx_stop(c);
+    manda(c, AICA_CH_CMD_START, &mues[i], base_spu[i], mues[i].frec, vol, 128);
 }

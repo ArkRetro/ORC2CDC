@@ -15,6 +15,7 @@
 #include "../comun/or2_fisica.h"
 #include "../comun/hud.h"
 #include "../comun/sfx.h"
+#include "../comun/menu.h"
 
 /* ---------------------------------------------------------------- modelos */
 typedef struct { uint32_t w, h, fmt, lista, off, tam; } tex_t;
@@ -1076,6 +1077,10 @@ static void aviso(const char *s)
 /* ---------------------------------------------------------------- juego */
 enum { TITULO, CUENTA, CARRERA, META, AGOTADO };
 #define NPISTAS 3
+/* camara de la seleccion de coche: distancia, altura y punto de mira sobre el coche (m) */
+#define MENU_CAM_D 6.0f
+#define MENU_CAM_Y 1.4f
+#define MENU_CAM_MIRA 0.2f
 #define PERIODO 16683                                           /* us por paso de logica (59,94 Hz) */
 /* bifurcacion al final de la primera etapa: rama izquierda y derecha */
 static const char *RAMA_FICH[2] = { "SEG07.DAT", "SEG03.DAT" }, *RAMA_NOMBRE[2] = { "BOSQUE", "INDUSTRIA" };
@@ -1260,9 +1265,13 @@ int main(int argc, char **argv)
     memset(&yo, 0, sizeof yo);
     coche_paso(&yo, 0, 0, 0, 0);
     t_carga = (timer_ms_gettime64() - t_ini) / 1000.0f;
-    musica_inicia(); musica_pon(pista);
+    musica_inicia();                                            /* la musica la pone el menu (sin MENU.DAT, aqui) */
     sfx_ok = !sfx_inicia();
-    texto_arriba("", NULL, NULL); texto_centro("PULSA START");
+    texto_arriba("", NULL, NULL); texto_centro("");
+    /* menus del original (MENU.DAT): usan la VRAM del HUD de carrera, que se baja mientras tanto */
+    if (menu_inicia()) { sprintf(s1, "Sin MENU.DAT"); texto_centro(s1); musica_pon(pista); }
+    if (hud_ok) hud_baja_tex();
+    menu_entra(manual_, pista, NPISTAS);
     t0 = timer_ms_gettime64();
 
     for (;;) {
@@ -1280,15 +1289,7 @@ int main(int argc, char **argv)
             reloj += (uint64_t)pasos * PERIODO; saltos += pasos - 1;
         }
         musica_poll();
-        if (nuevo & CONT_Y) ver ^= 1;
-        if (estado == TITULO && (nuevo & (CONT_DPAD_UP | CONT_DPAD_DOWN))) {
-            if (ver) {                                          /* con el panel de depuracion: distancia de dibujado */
-                if ((nuevo & CONT_DPAD_UP) && lejos_obj < 2000) lejos_obj += 100;
-                if ((nuevo & CONT_DPAD_DOWN) && lejos_obj > 300) lejos_obj -= 100;
-                lejos = lejos_obj; pvr_fog_table_linear(lejos * 0.55f, lejos);
-            } else manual_ ^= 1;                                /* cambio automatico / manual */
-            ttit = 0;
-        }
+        if (estado != TITULO && (nuevo & CONT_Y)) ver ^= 1;      /* en el menu, Y es el tema al azar */
         if (estado != TITULO && manual_) {                      /* cambio manual: cruceta arriba sube, abajo baja */
             if (nuevo & CONT_DPAD_UP) pide_cambio = 1;
             if (nuevo & CONT_DPAD_DOWN) pide_cambio = -1;
@@ -1312,15 +1313,16 @@ int main(int argc, char **argv)
         if (golpe_cd) golpe_cd--;
         t_bif++;
         if (estado == TITULO) {
+            int rm = menu_paso(nuevo);                          /* titulo, modos, coche, cambio y musica */
             ttit += 1.0f / 60;
-            if (nuevo & (CONT_DPAD_LEFT | CONT_DPAD_RIGHT)) {   /* elegir la musica, como la radio del original */
-                pista = (pista + (nuevo & CONT_DPAD_RIGHT ? 1 : NPISTAS - 1)) % NPISTAS; musica_pon(pista); ttit = 0;
-            }
 #ifdef PRUEBA_JUGADOR
-            nuevo |= CONT_START;                                /* prueba: directo a la carrera con el mando */
+            rm = MENU_CARRERA;                                  /* prueba: directo a la carrera con el mando */
 #endif
-            if ((nuevo & CONT_START) || ttit > 8.0f) {
-                auto_ = !(nuevo & CONT_START);
+            if (rm != MENU_SIGUE) {
+                auto_ = rm == MENU_DEMO;
+                if (!auto_) { manual_ = menu_manual(); pista = menu_pista(); }
+                menu_sale();                                    /* la VRAM del menu vuelve al HUD */
+                if (hud_ok && hud_sube_tex()) hud_ok = 0;
                 if (etapa_n) {                                  /* volver a la primera etapa */
                     libera_modelo(&etapa);
                     if (lee_modelo(&etapa, "SEG00.DAT") || sube_modelo(&etapa)) { vid_set_mode(DM_640x480, PM_RGB565); aviso("Error"); for (;;) thd_sleep(1000); }
@@ -1339,11 +1341,11 @@ int main(int argc, char **argv)
             sprintf(s1, n > 0 ? "%d" : "GO!", n);
             if (strcmp(s1, msg)) { strcpy(msg, s1); texto_centro(msg); }
             if (t_estado >= 240) { estado = CARRERA; t_estado = 0; }      /* GO! a los 4 s de la escena */
-            if (auto_ && (nuevo & CONT_START)) { estado = TITULO; ttit = -30; texto_centro("PULSA START"); }
+            if (auto_ && (nuevo & CONT_START)) { estado = TITULO; auto_ = 0; nuevo = 0; texto_centro(""); hud_baja_tex(); menu_entra(manual_, pista, NPISTAS); }
             coche_paso(&yo, 0, 0, 0, 1.0f / 60);
         } else if (estado == CARRERA) {
             if (t_estado == 50 && !aviso_rama) texto_centro(auto_ ? "DEMO" : "");
-            if (auto_ && (nuevo & CONT_START)) { estado = TITULO; ttit = 9.0f; nuevo = 0; auto_ = 0; }
+            if (auto_ && (nuevo & CONT_START)) { estado = TITULO; nuevo = 0; auto_ = 0; texto_centro(""); hud_baja_tex(); menu_entra(manual_, pista, NPISTAS); }
             else if (nuevo & CONT_START) pausa ^= 1;
             if (!pausa) {
 #ifdef PRUEBA_CHOQUE
@@ -1389,17 +1391,18 @@ int main(int argc, char **argv)
         } else {                                                /* META o AGOTADO: el coche se para solo */
             coche_paso(&yo, 0, 0, 0.6f, 1.0f / 60);
             pt_msg_paso();
-            if ((nuevo & CONT_START) || t_estado > 600) { estado = TITULO; ttit = auto_ ? 0 : 0; texto_centro("PULSA START"); }
+            if ((nuevo & CONT_START) || t_estado > 600) {
+                estado = TITULO; auto_ = 0; nuevo = 0; texto_centro(""); hud_baja_tex(); menu_entra(manual_, pista, NPISTAS);
+            }
         }
         }
 
-        /* camara: en el titulo vuela por la etapa; en carrera, detras del coche */
+        /* camara: en el menu gira alrededor del coche (seleccion de coche); en carrera, detras del coche */
         if (estado == TITULO) {
-            float p[3], th, q[3], th2; float s = fmodf(ttit * 25.0f + 200.0f, longitud - 100.0f);
-            ruta_en(s, p, &th, NULL, NULL); ruta_en(s + 30.0f, q, &th2, NULL, NULL); cam_y = p[1];
-            ojo_[0] = p[0]; ojo_[1] = p[1] + 12.0f; ojo_[2] = p[2];
-            mira[0] = q[0]; mira[1] = q[1] + 4.0f; mira[2] = q[2];
-            yo.s = s; coche_paso(&yo, 0, 0, 0, 0);
+            float a = ttit * 0.6f;
+            yo.s = SALIDA; yo.x = carril_x(SALIDA, 4); yo.v = 0; coche_paso(&yo, 0, 0, 0, 0); cam_y = yo.pos[1];
+            ojo_[0] = yo.pos[0] + MENU_CAM_D * sinf(a); ojo_[1] = yo.pos[1] + MENU_CAM_Y; ojo_[2] = yo.pos[2] + MENU_CAM_D * cosf(a);
+            mira[0] = yo.pos[0]; mira[1] = yo.pos[1] + MENU_CAM_MIRA; mira[2] = yo.pos[2];
         } else {
             {   /* camara (SetCarCamera): entre el avance y la carroceria, mas hacia la carroceria con mas deriva */
                 float p[3], th, d = yo.deriva * (0.5f + 0.3f * fabsf(sinf(yo.deriva))), cy, fwc[3];
@@ -1424,7 +1427,7 @@ int main(int argc, char **argv)
 
         /* marcador (cada 6 cuadros) */
         if (cuadro % 6 == 0 && estado != META && estado != AGOTADO) {
-            if (estado == TITULO) sprintf(s1, "OUTRUN C2C DC  MUSICA %d/%d <>  CAMBIO %s ^v", pista + 1, NPISTAS, manual_ ? "MANUAL" : "AUTO");
+            if (estado == TITULO) sprintf(s1, "MENU  VRAM menu %uK libre %uK", menu_vram() >> 10, (unsigned)(pvr_mem_available() >> 10));
             else sprintf(s1, "TIEMPO %3d  %3d km/h %d  %3d%%%s", (int)ceilf(tiempo), fis_ok ? (int)fis.velocidad_hud : (int)(yo.v * 3.6f), fis.marcha,
                          (int)(100 * yo.s / longitud), yo.choque ? "  !" : "");
             if (ver) {
@@ -1442,6 +1445,8 @@ int main(int argc, char **argv)
         t_log += timer_us_gettime64() - c_log;
         pvr_wait_ready();
         c0 = timer_us_gettime64();
+        if (estado == TITULO) pvr_set_bg_color(54 / 255.0f, 62 / 255.0f, 74 / 255.0f);   /* fondo gris del frontal */
+        else pvr_set_bg_color(0.45f, 0.65f, 0.95f);
         pvr_scene_begin();
         fx = 320.0f / (0.75f + 0.07f * fminf(yo.v / 85.0f, 1.0f));   /* algo mas angular cuanto mas rapido */
         pon_vista(ojo_, mira);
@@ -1449,15 +1454,17 @@ int main(int argc, char **argv)
         tri_enviados = 0;
         for (l = 0; l < 3; l++) {
             pvr_list_begin(LISTA[l]);
-            mat_load(&vista_cielo);
-            dibuja_rango(&etapa, l, etapa.inicio[3], etapa.inicio[4], 0, 1, 1);
-            mat_load(&vista);
+            if (estado != TITULO) {                             /* en el menu no se ve la etapa */
+                mat_load(&vista_cielo);
+                dibuja_rango(&etapa, l, etapa.inicio[3], etapa.inicio[4], 0, 1, 1);
+                mat_load(&vista);
 #ifdef DEP_LISTA
-            color_fijo = l == DEP_LISTA ? 0xFFFF00FF : 0;
+                color_fijo = l == DEP_LISTA ? 0xFFFF00FF : 0;
 #endif
-            dibuja_rango(&etapa, l, etapa.inicio[l], etapa.inicio[l + 1], 1, 0, 0);
-            color_fijo = 0;
-            if (estado != TITULO) {
+                dibuja_rango(&etapa, l, etapa.inicio[l], etapa.inicio[l + 1], 1, 0, 0);
+                color_fijo = 0;
+            }
+            if (estado != TITULO || menu_coche3d()) {
                 mat_load(&vista); mat_apply(&mod_coche);
                 dibuja_rango(&coche, l, coche.inicio[l], coche.inicio[l + 1], 0, 0, 0);
             }
@@ -1472,7 +1479,8 @@ int main(int argc, char **argv)
             }
             if (l == 2 && estado != TITULO) { mat_load(&vista); efectos_dibuja(); }
             if (l == 2) {
-                int texto = estado == TITULO || ver || !hud_ok;
+                int texto = ver || (!hud_ok && estado != TITULO);
+                if (estado == TITULO) menu_dibuja();
                 if (hud_ok && estado != TITULO) {
                     hud_estado_t he;
                     he.tiempo = (int)ceilf(tiempo); he.crono_ms = (int)(crono * 1000.0f / 60.0f); he.puntos = pt_visible(); he.puntos_estilo = pt_estilo;
@@ -1500,7 +1508,7 @@ int main(int argc, char **argv)
                 }
                 if (texto) caja(36, 18, 568, ver ? 92 : 34, 0x90000000);
                 if (texto) rect_txr(txt_arr, 512, 128, 40, 20, 512, 128, PVR_LIST_TR_POLY);
-                if (!hud_ok ? (estado != CARRERA || t_estado < 50 || auto_ || aviso_rama) : (estado == TITULO || (estado == CARRERA && auto_ && t_estado >= 50))) rect_txr(txt_cen, 256, 32, 64, 180, 512, 64, PVR_LIST_TR_POLY);
+                if (estado != TITULO && (!hud_ok ? (estado != CARRERA || t_estado < 50 || auto_ || aviso_rama) : (estado == CARRERA && auto_ && t_estado >= 50))) rect_txr(txt_cen, 256, 32, 64, 180, 512, 64, PVR_LIST_TR_POLY);
             }
             pvr_list_finish();
         }

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""conv_sonido.py <iso> <dir_salida>: efectos del coche del jugador (motor, derrape, golpe) -> SFX.DAT para la Dreamcast.
+"""conv_sonido.py <iso> <dir_salida>: efectos del coche del jugador (motor, derrape, golpe) y de los menus -> SFX.DAT.
 
 De donde salen (todo se lee de tu ISO; aqui solo hay direcciones y formatos):
 - SOUND.PS2 es un paquete de ficheros por hash: h = h*131 + toupper(c), recorriendo el nombre de atras adelante
@@ -16,6 +16,12 @@ De donde salen (todo se lee de tu ISO; aqui solo hay direcciones y formatos):
   x0 < x <= x1 (fuera de todos, 0).
   Canales del juego (0x11ebc8): 0 = definicion 18 (motor con gas), 1 = 19 (motor sin gas), 3 = 0 (derrape),
   6 = 3 (golpe contra muro; tabla de muros en 0x3c1350, primera entrada mascara 0x20 -> definicion 3, ganancia 0.56).
+- Efectos de los menus (bancos "SE"): \\MENU.pak y \\Fe.pak de SOUND.PS2. Cabecera {u32 tamano A, 0, u32 tamano B,
+  0}, A = PS-ADPCM desde +16, B (aqui vacio) y detras la tabla {u32 n, n x {u32 id, u32 desplazamiento en A}}; cada
+  muestra llega hasta el bloque con la marca de fin (bit 0). El id es el numero de efecto del juego (comandos del
+  frontal del port de PC, menu_audio.cpp): 1 cursor, 0x40 aceptar, 3 bloqueado, 0 cancelar/volver. Su pitch y volumen
+  estan en el .data de SOUNDCD.IRX, direccion 0x4b98 + 12*id: {u16 pitch SPU, u16 volumen (0x3fff = maximo), ...}.
+  Sin bucle; en SFX.DAT se llaman "se%03x" (id) y llevan el volumen del IRX en el u16 final de la muestra.
 - Umbrales de rpm para el parametro x del motor: 128 floats en 0x3c13b0 del ELF (0, 1100, 1125 ... 10000).
 
 SFX.DAT (little endian):
@@ -23,7 +29,7 @@ SFX.DAT (little endian):
                      u32 off_rpm (128 floats), u32 tamano total
   muestra 36 bytes:  char nombre[12], u32 desp (desde off_datos), u32 bytes, u32 frecuencia (Hz),
                      u32 ini_bucle, u32 fin_bucle (en muestras), u8 formato (0 = PCM 16, 2 = ADPCM Yamaha),
-                     u8 bucle, u16 0
+                     u8 bucle, u16 volumen (efectos de menu: el del IRX, 0..0x3fff; 0 en los ICS)
   grupo:             char nombre[12], u32 n_capas, y n_capas capas de 52 bytes:
                      u8 muestra, s8 atenuacion, s8 nota, u8 0, 8 x {s8 x, s8 semitonos, s8 fino, u8 0},
                      8 x {s8 x, s8 v}
@@ -40,6 +46,8 @@ ELF_DEF_N, ELF_DEF_T = 0x3526a4, 0x3526a8
 ELF_RPM = 0x3c13b0
 IRX_TABLA = 0x66a0
 GRUPOS = [('motor_acel', 18), ('motor_suelta', 19), ('derrape', 0), ('golpe', 3)]
+IRX_SE = 0x4b98         # tabla de efectos SE del IRX: 12 bytes por id
+MENU_SE = [('\\MENU.pak', (0x00, 0x01, 0x40)), ('\\Fe.pak', (0x03,))]   # cancelar, cursor, aceptar, bloqueado
 K_PREVIO = 256          # muestras de calentamiento del ADPCM antes del bucle
 
 
@@ -108,6 +116,31 @@ def enc_yamaha(pcm):
     return bytes(nib[i] | (nib[i + 1] << 4) for i in range(0, len(nib), 2))
 
 
+def frecuencia(p):
+    """pitch de la SPU (0x1000 = 48 kHz) a Hz, redondeado a la frecuencia estandar mas cercana"""
+    if p == 0x1000: return 48000
+    f = round(p * 48000 / 4096)
+    return min((16000, 22050, 11025, 32000, 44100, 48000, 24000, 30000, 12000, 8000), key=lambda r: abs(r - f))
+
+
+def efectos_menu(iso, irx, tb, td):
+    """[(nombre, pcm, frecuencia, volumen)] de los efectos de menu de los bancos SE"""
+    r = []
+    for banco, ids in MENU_SE:
+        d = fichero_paquete(iso, 'SOUND.PS2', banco)
+        a, tipo, b, _ = struct.unpack_from('<4I', d, 0)
+        assert tipo == 0, '%s no es un banco SE' % banco
+        o = 16 + a + b; n, = struct.unpack_from('<I', d, o)
+        tabla = dict(struct.unpack_from('<2I', d, o + 4 + 8 * i) for i in range(n))
+        for i in ids:
+            ini = 16 + tabla[i]; fin = ini
+            while not d[fin + 1] & 1: fin += 16
+            p, v = struct.unpack_from('<HH', irx, td + IRX_SE - tb + 12 * i)
+            assert 0x100 <= p <= 0x3fff and 0 < v <= 0x3fff, 'tabla SE del IRX inesperada (id %d)' % i
+            r.append(('se%03x' % i, dec_psx(d[ini:fin + 16]), frecuencia(p), v))
+    return r
+
+
 def main():
     if len(sys.argv) < 3:
         raise SystemExit(__doc__.split('\n')[0])
@@ -151,9 +184,7 @@ def main():
     for m in usadas:
         o, n, p = muestras_ps[m]
         pcm = dec_psx(datos_ics[o:o + n])
-        frec = round(p * 48000 / 4096)
-        frec = min((16000, 22050, 11025, 32000, 44100, 48000, 24000, 8000), key=lambda r: abs(r - frec)) \
-            if p != 0x1000 else 48000           # 0x555 / 0x759 / 0x3ac son 16000 / 22050 / 11025 redondeados
+        frec = frecuencia(p)                    # 0x555 / 0x759 / 0x3ac son 16000 / 22050 / 11025 redondeados
         while len(blob) % 32: blob.append(0)
         if pcm16:
             datos = struct.pack('<%dh' % len(pcm), *pcm); ini, fin, fmt = 0, len(pcm), 0
@@ -161,7 +192,14 @@ def main():
             k = max(0, min(K_PREVIO, len(pcm), 65534 - len(pcm))) & ~1   # LSA/LEA del AICA: 16 bits
             datos = enc_yamaha(pcm[len(pcm) - k:] + pcm); ini, fin, fmt = k, k + len(pcm), 2
         assert fin < 65536, 'muestra %d demasiado larga para un bucle del AICA' % m
-        tabla.append((('ics%02x' % m).encode(), len(blob), len(datos), frec, ini, fin, fmt))
+        tabla.append((('ics%02x' % m).encode(), len(blob), len(datos), frec, ini, fin, fmt, 1, 0))
+        blob += datos
+    for nm, pcm, frec, vol in efectos_menu(iso, irx, tb, td):  # sin bucle: sin muestras previas
+        while len(blob) % 32: blob.append(0)
+        if pcm16: datos = struct.pack('<%dh' % len(pcm), *pcm); fmt = 0
+        else: datos = enc_yamaha(pcm); fmt = 2
+        assert len(pcm) < 65536, '%s demasiado larga para el AICA' % nm
+        tabla.append((nm.encode(), len(blob), len(datos), frec, 0, len(pcm), fmt, 0, vol))
         blob += datos
 
     n_m = len(tabla); off_m = 32; off_g = off_m + 36 * n_m
@@ -169,16 +207,16 @@ def main():
     off_r = off_g + len(g_bytes); off_d = (off_r + 512 + 31) & ~31
     total = off_d + len(blob)
     out = bytearray(b'SFX1' + struct.pack('<7I', n_m, len(grupos), off_m, off_g, off_d, off_r, total))
-    for nm, d, n, f, ini, fin, fmt in tabla:
-        out += nm.ljust(12, b'\0') + struct.pack('<5IBBH', d, n, f, ini, fin, fmt, 1, 0)
+    for nm, d, n, f, ini, fin, fmt, bucle, vol in tabla:
+        out += nm.ljust(12, b'\0') + struct.pack('<5IBBH', d, n, f, ini, fin, fmt, bucle, vol)
     out += g_bytes + struct.pack('<128f', *rpm)
     out += bytes(off_d - len(out)) + blob
     with open(os.path.join(sal, 'SFX.DAT'), 'wb') as f:
         f.write(out)
     print('SFX.DAT: %d bytes, %d muestras (%s), grupos %s' % (len(out), n_m, 'PCM16' if pcm16 else 'ADPCM',
           ', '.join('%s=%d capas' % (g, len(c)) for g, c in grupos)))
-    for nm, d, n, f, ini, fin, fmt in tabla:
-        print('  %s %6d bytes %5d Hz bucle %d..%d' % (nm.decode(), n, f, ini, fin))
+    for nm, d, n, f, ini, fin, fmt, bucle, vol in tabla:
+        print('  %s %6d bytes %5d Hz %s %d..%d' % (nm.decode(), n, f, 'bucle' if bucle else 'vol 0x%x' % vol, ini, fin))
 
 
 if __name__ == '__main__':

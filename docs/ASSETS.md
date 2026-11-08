@@ -83,7 +83,7 @@ orden alfabetico en mayusculas; STAGE.PS2 no sigue ese orden dentro de cada zona
 | HUD y menus | SPRANI.PS2 | animaciones 2D `ani_SPRANI_*` (HUD, menus, carga, ranking, finales, tacometros por coche) | SPRANI (zlib) | `conv_hud.py` (HUD de carrera); menus: `conv_menu.py` (en curso) |
 | HUD y menus | SPRITE.PS2 | texturas `spr_*xst` de cada SPRANI (variantes por idioma `_E/_F/_G/_I/_S` y `J`), fuente, seleccion, ranking, entrada de nombre | XST (zlib, LZ dentro) | idem |
 | Textos | TEXT.PS2 | un fichero por idioma | `txet` | no |
-| Sonido | SOUND.PS2 | bancos `.PAK`: efectos del coche (ICS), interfaz, resultados, finales, objetos del fondo; voces por idioma (`\IDIOMA\...`: locutor, misiones, ranking...) | banco ICS, banco SE | `conv_sonido.py` (solo ICS: motor, derrape, golpe) |
+| Sonido | SOUND.PS2 | bancos `.PAK`: efectos del coche (ICS), interfaz, resultados, finales, objetos del fondo; voces por idioma (`\IDIOMA\...`: locutor, misiones, ranking...) | banco ICS, banco SE | `conv_sonido.py` (ICS: motor, derrape, golpe; SE: efectos de menu de MENU.pak y Fe.pak) |
 | Musica | MUSIC.PS2 | una pista por fichero `\NN.ps2` | PS-ADPCM estereo | `tools/c/musica.c` (a ADPCM de Yamaha) |
 | Video | MV.PS2 | videos de titulo y demo (50 y 60 Hz) | PSS (MPEG-2 + audio) | no |
 | Sistema | SYSTEM.PS2 | modulos del IOP (`\IRX\*`), iconos de tarjeta, DNAS | IRX, icono | `conv_sonido.py` lee la tabla de muestras de `\IRX\SOUNDCD.IRX` |

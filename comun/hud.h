@@ -1,5 +1,6 @@
 #ifndef HUD_H
 #define HUD_H
+#include <stdint.h>
 typedef struct {
     int tiempo, crono_ms, puntos, kmh, marcha, etapa, cuadro;
     float rpm;
@@ -12,4 +13,20 @@ void hud_aviso(const char *nombre, int cuadro, float alfa);   /* despues de hud_
 /* mensaje de puntos de la cola de 4B9770 ("%7d" bajo la puntuacion, 4BD480): estilo como puntos_estilo, dy pixeles
    por debajo de la puntuacion; despues de hud_dibuja */
 void hud_puntos_msg(int puntos, int estilo, float dy, float alfa);
+/* texturas del HUD de carrera fuera/dentro de la VRAM (los datos siguen en la RAM): los menus usan ese hueco */
+void hud_baja_tex(void);
+int hud_sube_tex(void);                                  /* 0 bien */
+
+/* ---- acceso generico a un fichero con el formato de HUD.DAT (ver tools/conv_hud.py), p.ej. MENU.DAT ---- */
+typedef struct hud_dat hud_dat_t;
+/* parcial = 1: en la RAM solo las tablas; las texturas se leen del GD al subirlas (ficheros grandes) */
+hud_dat_t *hudd_abre(const char *fich, int modelo, int parcial);
+int hudd_sube(hud_dat_t *h, int t0, int nt);             /* texturas [t0, t0+nt) a la VRAM (nt < 0: todas); 0 bien */
+void hudd_baja(hud_dat_t *h, int t0, int nt);
+int hudd_uso(const hud_dat_t *h, const char *nombre);    /* indice del uso o -1 */
+int hudd_cuadros(const hud_dat_t *h, int uso);           /* cuadros del grupo del uso */
+/* dibuja el cuadro dado (se recorta al ultimo) del uso desplazado (dx, dy), con la capa z (z > 1: encima de todo;
+   fondo = 1: z baja y comparacion de profundidad normal, queda detras de la escena 3D); dentro de la lista TR */
+void hudd_dibuja(hud_dat_t *h, int uso, int cuadro, float dx, float dy, float alfa, float z, int fondo);
+const uint8_t *hudd_extra(const hud_dat_t *h);           /* lo que va detras de los 16 bytes de tacometros */
 #endif
