@@ -75,6 +75,7 @@ static const char *const UNOM[NU] = { "TITULO_FONDO", "TITULO_LOGO", "TITULO_STA
 #define T_FUNDIDO 12
 #define T_CARGA_MAX 90                                      /* cuadros que se espera a la VRAM de una pantalla */
 #define PRECARGA_MARGEN (128 * 1024)                        /* VRAM que se deja libre al precargar */
+#define HOLGURA (256 * 1024)                                /* libre de mas antes de subir sin echar nada */
 #define PISTA_MENU 30                                       /* musica de los menus */
 #define PISTA_AVANCE 33                                     /* avance del tema k: pista 33 + k */
 
@@ -295,9 +296,10 @@ static int asegura(int mascara)
         if (!(mascara & (1 << p)) || pidx[p] < 0) continue;
         for (;;) {
             if (cargada[p]) { edad[p] = ++reloj; break; }
-            if (pvr_mem_available() >= pan[pidx[p]].vram + 16384 && !sube_p(p)) break;
             for (q = 0, v = -1; q < NV; q++)
                 if (cargada[q] && !(mascara & (1 << q)) && (v < 0 || edad[q] < edad[v])) v = q;
+            /* con holgura (la VRAM libre puede estar partida: un intento fallido avisa "out of PVR memory") */
+            if (pvr_mem_available() >= pan[pidx[p]].vram + (v < 0 ? 16384 : HOLGURA) && !sube_p(p)) break;
             if (v < 0) { if (!hudd_pendiente() && !sube_p(p)) break; ok = 0; break; }
             baja_p(v);
         }

@@ -20,7 +20,8 @@
    Voces (VOCES.DAT, tools/conv_sonido.py): las muestras del banco de voz del idioma (ORC.PAK y PERO.pak) y dos efectos
    de carrera (0x4d EXTEND TIME y 0x18d aviso de poco tiempo) a la RAM del AICA al arrancar (214 KB en espanol: caben
    junto a SFX.DAT y los buferes de la musica). sfx_voz(id) toca la del id a su frecuencia (12 kHz) con el volumen de
-   la tabla SE del IRX y el mismo nivel que los efectos de menu; las voces van por un canal propio (una voz nueva corta
+   la tabla SE del IRX (0x3fff, el maximo de la SPU2 = 255 del AICA: las voces, como en el original, por encima de la
+   musica, que va a 200 en musica.c); las voces van por un canal propio (una voz nueva corta
    la anterior: SUPUESTO, el original las manda a la cola de sonido de la carrera) y los efectos por otro. */
 #include <kos.h>
 #include <dc/sound/sound.h>
@@ -357,7 +358,7 @@ static void toca_voz(int id, int canal)
     if (canal < 0) return;
     for (i = 0; i < n_voz && voz[i].id != (id & 0x1ff); i++) ;
     if (i >= n_voz) return;
-    vol = (int)(voz[i].vol * (1.0f / 0x3fff) * VOL_MENU * vol_general * 255.0f + 0.5f);
+    vol = (int)(voz[i].vol * (1.0f / 0x3fff) * vol_general * 255.0f + 0.5f);   /* 0x3fff = el maximo del AICA */
     if (vol > 255) vol = 255;
     if (vol <= 0) return;
     if ((id & 0x1ff) != 0x18d) dbglog(DBG_INFO, "VOZ 0x%x\n", id & 0x1ff);   /* para las pruebas (consola) */

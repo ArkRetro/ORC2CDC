@@ -47,7 +47,7 @@ Estado: OK (conectado y verificado al nivel indicado), PARCIAL, PROVISIONAL (apr
 | Eventos, scripts, progresion, misiones | SCRIPTS.PS2 (Races, RaceAttack, OutrunMiles, Req_*) | FALTA | — | — | — | — |
 | Coches del jugador | CARS.PS2 1-32 / 33-63, disposicion 0x3d3ff0; materiales tabla 4/5 del bloque; colores 0x35ad48 (PC 64D120/408C80); mapa de entorno del bloque | PARCIAL | 15 coches montados como 46A560 (port comprobado), con interior, 9320-11195 vertices dibujados; pintura, 8 colores (Y en la seleccion), reflejo y luces (+7C/+80/+84/+60, CEX2) del original | UV de entorno con la formula esferica clasica (la del microcodigo VU1 sin leer); piezas sin animar; sin bits de noche/tunel | ver secciones Coches | E |
 | Escenarios, texturas, materiales | STAGE.PS2, VQ, scn_env_fog_<zona> | PARCIAL | 15 tramos + 15 uniones; mallas sin textura con su material (tabla 5); niebla del original; tiras (ADC), nodos, LOD y planos del original | sin objetos de tramo (obj_course_obj_cs_*), sol (cs_ENV_* no es de la escena: es del reflejo del coche); niebla mezclada por distancia en la union (el original por tiempo) | — | E |
-| HUD, menus, transiciones | SPRANI/XST, TEXT.PS2 | PARCIAL | HUD.DAT, MENU.DAT | titulo es un cuadro del video (la pelicula de titulo en bucle detras del rotulo, sin hacer); textos bfont antiguos en la demo automatica y el aviso de rama | quitar textos bfont | E |
+| HUD, menus, transiciones | SPRANI/XST, TEXT.PS2 (espanol: SPANISH.bin y XST _sxst) | PARCIAL | HUD.DAT, MENU.DAT; todas las pantallas del menu principal y de un jugador, licencia con VMU, seleccion de coche del original (ver Menus) | titulo es un cuadro del video (la pelicula de titulo en bucle detras del rotulo, sin hacer); textos bfont antiguos en la demo automatica y el aviso de rama; rotulos de las filas de opciones (sprites sin localizar) | quitar textos bfont | E |
 | Musica y efectos | MUSIC.PS2, SOUND.PS2 ICS/MENU/FE | PARCIAL | musica.c, sfx.c | 48 kHz supuesto; sin sonido por superficie ni del choque fuerte | — | E |
 | Voces (acompanante y locutor) | SOUND.PS2 `\SPANISH\ORC.PAK`, `PERO.pak`; race_robots 489A90/488D80 = PS2 0x202e60..0x205cac; 4B93E0, 4B9CD0, 49C9C0, 499020, GAME 0x1b83e8 | OK | VOCES.DAT (conv_sonido.py), voces.c; verificado en Flycast (ver Voces y video) | una voz nueva corta la anterior (SUPUESTO); "choque con otro coche" = contacto con impulso del trafico (traf_choca) en un choque; sin voces de asustada/trompo (solo Coast 2 Coast) | — | E |
 | Peliculas (titulo y atraccion) | MV.PS2 ts50/attr50.pss; 0x12d480, ADVERTISE 0x25e1d8 | OK | MVTS.VQV / MVATTR.VQV (conv_video.py), video.c | VQ de la PowerVR a 512x256 estirado a 640x480 (el original: MPEG-2 640x480); al arrancar y por inactividad del titulo, en vez de la demo de carrera | — | E |
@@ -77,7 +77,7 @@ cola y los comentarios en 0x2059c0..0x205cac, las reacciones en 0x202e60..0x203d
 | Despues del checkpoint, a 40 posiciones de carretera en la etapa nueva | 0x79..0x7c (zona 1..4 = nivel en el arbol) | 488BD0 (solo modo OutRun), tabla 0x36f958, por la cola |
 | Derrapes (cada uno cuenta a los 120 cuadros) | 1.o 0x6e, 2.o-5.o 0x6f, 6.o-13.o 0x70, 7.o y 10.o 0x74, desde el 14.o uno al azar de 0x75/0x76/0x77 | 4882B0 / 488C90, tabla 0x36f9a8, por la cola |
 | Derrape largo | 0x72 a los 360 cuadros, 0x73 a los 600 | 488220, tabla 0x36fa80, por la cola |
-| Empieza un choque (estados 1, 2, 5) | 0x15a, 0x15a, 0x159 | 489A90 "aire" (car+2C8 > 0), lista 0x40eba8 (personaje 9) |
+| Empieza un choque (estados 1, 2, 5) | 0x15a, 0x15a, 0x159 | 489A90 "aire" (car+2C8 > 0), lista 0x40eba8 (personajes 9 y 10; la acompanante del modo OutRun es la 9 sin licencia en 487F50: PROBABLE; con licencia, 0x40ebb8: 0x15d/0x15c/0x15b) |
 | Recuperacion tras el choque | grande (estados 2 y 5): 0x169/0x162/0x15f/0x160 por turno (2 en uso); el resto y el fin del estado 7: 0x167 | 489A90 (car+2F8 > 0), listas 0x40eb10 / 0x40eb20 |
 | Choque con otro coche durante un choque | una de 0x15d/0x15c/0x15b/0x15a/0x159 al azar, espera 90 cuadros | 489A90 (car+4 & 0x4000000 y +2F0 & 2), lista 0x40ef70 |
 | GOAL | 0x16b | 49C9C0 (4249F0) |
@@ -89,8 +89,8 @@ o igual; cada entrada suena y ocupa 120 cuadros. Las voces de asustada (0x16d, 0
 dice en Coast 2 Coast (variantes 3 y 4). El id lleva a veces 0x800 o 0x5000 encima (banderas del controlador de sonido
 del IOP, sin estudiar): se usan los 9 bits bajos. No hay voces en los menus principales (Fe.pak y MENU.pak son
 efectos; la voz de ranking 0x158 es de SPRANK.pak).
-SUPUESTOS: una voz nueva corta la que suena (un canal para voces y otro para los efectos de carrera); el volumen de
-las voces es el de los efectos de menu (0x3fff -> 0,8). Sin la voz de GAME OVER 0x154 (no hay modo GAME OVER).
+SUPUESTOS: una voz nueva corta la que suena (un canal para voces y otro para los efectos de carrera); el volumen
+0x3fff de las voces es el maximo del AICA (255; la musica va a 200). Sin la voz de GAME OVER 0x154 (no hay modo GAME OVER).
 
 **Peliculas.** MV.PS2: `ts50/ts60.pss` (pantalla de titulo con el rotulo, 17,6 s) y `attr50/attr60.pss` (atraccion,
 55 s); MPEG-2 640x480 a 25 fps (las de 50 Hz) o 29,97, audio PCM de 16 bits estereo a 48 kHz en paquetes privados (sin
@@ -102,6 +102,61 @@ chip) con el audio en ADPCM de Yamaha a 48 kHz, cuadros de 36 KB alineados a sec
 de 50 Hz (la demo sale en PAL 50 Hz). MVTS.VQV 16 MB, MVATTR.VQV 50 MB. video.c las pasa al arrancar (gancho
 `video_titulo` antes del primer titulo) y por inactividad en el titulo (MENU_DEMO, en vez de la demo de carrera);
 START las salta. Las pruebas con PRUEBA_AUTO / PRUEBA_JUGADOR no las pasan.
+
+## Menus (2026-11-08)
+
+Todo de SUMO_FE_CVT (banco 0x44) y de tablas del ELF localizadas por su codigo (comprobadas en conv_menu.comprueba_tablas);
+textos de TEXT.PS2 en espanol (OR2_IDIOMA=es por defecto en conv_menu y conv_hud; la PAL elige el idioma por el de la
+consola, el port lo fija al convertir). Hoja de capturas de Flycast: scratchpad `menu3/hoja.png`.
+
+- Fallos graficos y causa: (1) hudd_baja liberaba la VRAM de una pantalla en el paso de logica, cuando la PowerVR aun
+  dibujaba el cuadro anterior con ella; la pantalla nueva se subia en ese hueco y salia un cuadro con basura. Ahora
+  hud.c apunta el ultimo cuadro en que se uso cada textura y la libera 3 cuadros despues (hudd_fin_cuadro tras
+  pvr_scene_finish; hudd_vacia espera 40 ms antes de una carga: carrera, coche nuevo). (2) Si no cabia, el menu subia
+  "lo que hubiera" y dibujaba la pantalla a medias; ahora espera (sin fundido) a que este entera (hasta 90 cuadros).
+  (3) `pvr_mem: out of PVR memory`: se intentaba subir con la VRAM libre justa (partida); ahora echa antes las pantallas
+  viejas si no sobran 256 KB. Verificado: ningun aviso en Flycast recorriendo todo, coches incluidos. (4) RAM: 35 000
+  piezas (1,4 MB) por guardar cada pieza en cada cuadro; ahora una pieza vale para una racha de cuadros iguales
+  (banderas >> 4, orden de capas de la escena, conv_menu.tramos_piezas): 23 000 piezas con el doble de pantallas, 960 KB.
+- Pantallas (flujo de 4D7300 / 4C9290 / 4E2970 / 4DE2B0 del PC con los tokens del PS2): titulo -> sin licencia, elegir
+  licencia -> menu principal (UN JUGADOR, MULTIJUGADOR, OUTRUN2SP, RANKINGS, OPCIONES) -> un jugador -> coche -> cambio ->
+  musica -> carrera; LICENCIA (X) desde el menu principal y un jugador. MULTIJUGADOR (0x44002A, tabla 0x41C260: en
+  linea, LAN), RANKINGS (0x4400A3, 0x41D908: un jugador, OUTRUN2SP, multijugador), OUTRUN2SP, HEART ATTACK, TIME ATTACK y
+  SHOWROOM existen con la accion bloqueada (sin red, ranking ni esos modos). OPCIONES (cabecera 0x44006D, barra
+  0x44000B): vista (+D8, textos 3-5), unidades (+DC, 6-7) y dificultad (+E0, 8-0xC) de la licencia, sin dar la vuelta,
+  se guardan al salir (4D76F0); los rotulos de fila del original son sprites no localizados: se escriben "Ver config." y
+  "Config. juego" (0x2B, 0x2A) (PROVISIONAL). menu_vista/menu_mph/menu_dificultad las exportan (la carrera aun no las
+  usa: TIM_DIF sigue en 0).
+- Licencia (CONFIRMADO en el ELF: tablas 0x416EA8 y 0x41F8E0, menu 0x23FFC0 y resalte 0x23FB90 = 4DD9C0 / 4DD990 del
+  PC): tarjeta 0x440088 (entra 0-12), flechas 0x44008D/0x44008E a +-200, CREATE NEW LICENSE (0x218) y nombre nuevo
+  0x219; menu de la licencia Elegir / Editar / Reiniciar (0x233 / 0x237 / 0x234, con si / no). Editor: rayas 0x440087
+  (opcion i en 51+i), tarjeta 0x44009F en -8, rejillas de bandera (26, 4 columnas) y signo (12, 3 columnas), LISTO
+  0x440090 en (-84, 110); desde el nombre se baja a la nacionalidad (la foto no se alcanza: igual en PS2 y PC); B deshace
+  nombre, bandera y signo; los nombres ENTIRETY (todo desbloqueado, 447360) y MILESANDMILES se aplican al salir con B,
+  como el original. Registro de 0x40C bytes con la disposicion del original y los valores nuevos de 4471A0; hasta 4.
+  Guardado: VMU A1, fichero OR2C2C (vmu_pkg con un icono liso), al elegir, al acabar el editor y al salir de opciones.
+  El teclado del nombre (468D40: 1-0, A-Z, espacio y borrar; START acepta) no tiene sprites en el disco del PS2: se
+  escribe con la fuente 14 en 6 columnas donde van las rejillas (PROVISIONAL). Textos de la tarjeta con la fuente 14
+  y el color de sus rotulos (medido en la textura); sin cifras de COMPLETADO / RANKING / T.CONDUC. (la demo no las lleva).
+- Seleccion de coche (0x2445D8 = 4C9010, control 0x2448xx = 4C9290): carrusel 0x4400E5 (normales) y 0x4400E6 ("_t"),
+  ficha k quieta en 20(k+1) (antes 0x44007E, que es otro carrusel con otro orden: el fallo de "coches no correctos");
+  orden = tabla 0x375968 (Dino 246, 365 GTS/4, F50, 360 Spider, F355 Spider, Superamerica, Testarossa, GTO, 328 GTS,
+  250 GTO, 512 BB, F40, 550 Barchetta, F430, Enzo); desbloqueo 0x3759E0 (las 2 primeras siempre, el resto por bit de la
+  licencia +0x28: con una licencia nueva solo Dino y 365, como el original), colores 0x375A1C (-1 siempre, -2 nunca) y
+  color inicial 0x375C00; Y = siguiente color desbloqueado (sin sonido, como el PC), A en una bloqueada = sonido 3,
+  candado 0x440066 cuadro 5 en (-275, -24). Variante "_t" con X (en el original el bit 0x2000 del mando: boton de la DC
+  SUPUESTO); los modelos "_t" no estan convertidos y se ven y corren con el normal (PROVISIONAL). La ficha del coche lleva
+  barras de manejo / velocidad / aceleracion, clase y cambios de la propia escena. El coche gira +100/65536 de vuelta por
+  paso (4A5B20, CONFIRMADO en el PC); la camara de la seleccion sigue siendo la de antes (la del evento 0x181 sin leer).
+  Los movimientos del carrusel guardan un cuadro de cada dos (RAM).
+- Ganchos: `menu_gancho(pantalla, evento, valor)` (comun/menu.h) al entrar en cada pantalla y al elegir; `video_titulo()`
+  (simbolo debil en demo/main.c) antes del primer titulo.
+- VRAM por pantalla (MENU.DAT): COMUN 170 KB, MENU 290, MODO 68, COCHE 512, CAMBIO 256, MUSICA 802, LICENCIA 546,
+  RANKING 52, MULTI 34, OPCIONES 34, TITULO 38; con el coche (127-187 KB) el peor caso es MUSICA + COMUN + coche
+  (~1,15 MB de 1,54 MB libres). TA: el 2D del menu son menos de 300 cuadrilateros por cuadro.
+- Verificado en E (Flycast): todas las pantallas y transiciones, crear y editar licencia, guardar y leer la VMU entre
+  arranques, coche bloqueado, variante, color, cambio, musica y salida a carrera con el Dino; demo y vuelta al titulo.
+  No probado en R.
 
 ## Auditoria de inventos (2026-11-08)
 

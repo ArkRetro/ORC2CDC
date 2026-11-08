@@ -17,8 +17,9 @@ Origen (todo se lee del disco al convertir; aqui solo hay tokens de escena, dire
      ayuda de musica 0x4400A6 (PC 0x440087, 0-35), listas de musica (tabla 0x419298): carrusel 0x4400C6 / 0x4400C7 /
        0x440033 (9 / 7 / 12 temas: entra 0-20, tema k quieto en 20+40k), titulos 0x440030 / 0x44002F / 0x44002E
        (110 cuadros por tema), nombre de lista 0x4400C8 (cuadros 1, 2, 0), candado 0x440066 cuadro 5,
-     ficha del coche 0x44007E (logo, clase, cambios y barras; coche k quieto en 20(k+1), 15 coches; Testarossa k=9:
-       logo "testarossa" del cuadro 200; con las texturas mal desordenadas parecia el 8),
+     ficha del coche 0x4400E5 / 0x4400E6 (normales / "_t", del codigo 0x2445D8 = 4C9010 del PC; logo, clase, cambios y
+       barras; coche k quieto en 20(k+1), 15 coches en el orden de la tabla 0x375968; el 0x44007E de antes es otro
+       carrusel, con otro orden),
      cabeceras rojas 0x440070 (main menu), 0x4400C4 (mode select), 0x440072 (car select), 0x44006E (music select;
        tabla de 0x23D4B8 por clave de pantalla), fondo 0x4400AB,
      boton START = imagen 1480 del XST (textura 354).
