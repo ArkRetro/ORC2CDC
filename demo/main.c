@@ -65,7 +65,7 @@ static int lee_modelo(modelo_t *m, const char *nombre) { return lee_modelo_en(m,
    Formato de la textura (tools/modelo.py): bits 0-7 el de 16 bits, bit 8 VQ, bits 16-23 entradas del libro - 1. Una
    VQ con libro reducido (N < 256 entradas, las ultimas) se direcciona 2048 - 8 N bytes antes de sus datos: la PowerVR
    lee el libro en la direccion de la textura y los indices 2 KB despues, y nunca toca las entradas que faltan. */
-static void compila_cab(modelo_t *m, uint32_t i, int especular)
+static void compila_cab(modelo_t *m, uint32_t i, int especular)   /* especular: 1 desplazamiento, 2 ademas sumada */
 {
     pvr_poly_cxt_t cx; tex_t *t = m->texs + i; uint32_t f, fb = t->fmt & 0xff, vq = t->fmt & 0x100, n = ((t->fmt >> 16) & 0xff) + 1;
     pvr_ptr_t dir = vq ? (pvr_ptr_t)((uintptr_t)m->tv[i] - (2048 - 8 * n)) : m->tv[i];
@@ -75,6 +75,7 @@ static void compila_cab(modelo_t *m, uint32_t i, int especular)
         cx.gen.fog_type = f ? PVR_FOG_DISABLE : PVR_FOG_TABLE; cx.gen.culling = PVR_CULLING_NONE;
         cx.txr.env = PVR_TXRENV_MODULATE;
         if (especular) cx.gen.specular = PVR_SPECULAR_ENABLE;   /* textura x color + desplazamiento (oargb) */
+        if (especular & 2) { cx.blend.src = PVR_BLEND_ONE; cx.blend.dst = PVR_BLEND_ONE; }   /* sumada a lo de detras */
         pvr_poly_compile(&m->cabs[f][i], &cx);
     }
 }
@@ -1965,7 +1966,8 @@ static unsigned coches_lee(void)
 /* Pintura, color elegido y reflejo del coche (bloque CEX1 de tools/conv_coche.py, en el sitio de la ruta, que los
    coches no usan). Del original: los colores 1..8 de la lista de colores del modelo (texturas de 8x8 de un color de
    \COMMON\obj_pc_color_pmt.sz o del coche; PC 64D120 / 408C80, car+0x12 = color elegido + 1) y el mapa de entorno
-   esferico de cada coche. Mallas especiales: tipo 1, la pintura es el color del vertice (pintura x luz); tipo 2,
+   esferico de cada coche. Mallas especiales: tipo 1, la pintura es el color del vertice (pintura x luz); tipo 2 (3:
+   ademas sumada a lo de detras, cristales),
    textura = mapa de entorno con UV calculadas cada cuadro por la normal en el espacio de la camara, color base =
    especular del material y color de desplazamiento = pintura (o el difuso del material) x luz: pintura + reflejo en
    una sola pasada (sin vertices de mas; el TA guarda 4 bytes mas por vertice con desplazamiento). */
@@ -2005,7 +2007,7 @@ static void coche_cex(int c)
     cex_n = w[3];
     for (k = 0; k < cex_n; k++) {
         int32_t t = coche.mallas[cex_m[k].malla].tex;
-        if (cex_m[k].tipo == 2 && t >= 0) compila_cab(&coche, t, 1);
+        if (cex_m[k].tipo >= 2 && t >= 0) compila_cab(&coche, t, cex_m[k].tipo == 3 ? 3 : 1);
     }
     coche_color(c);
 }
@@ -2021,7 +2023,7 @@ static void coche_entorno(matrix_t mc)
     for (k = 0; k < cex_n; k++) {
         const cex_t *e = cex_m + k; const malla_t *m = coche.mallas + e->malla; vert_t *v = coche.verts + m->v0;
         const uint32_t *q = cex_vd + e->v0;
-        if (e->tipo != 2) continue;
+        if (e->tipo < 2) continue;
         for (i = 0; i < m->n; i++) {
             float x = (int8_t)q[i], y = (int8_t)(q[i] >> 8), z = (int8_t)(q[i] >> 16);
             v[i].u = 0.5f + x * a[0] + y * a[1] + z * a[2];
@@ -2253,7 +2255,10 @@ int main(int argc, char **argv)
                 {   /* el curso: union, bifurcacion y etapa siguiente sin parar (curso_paso) */
                     int ev = curso_paso();
                     if (cur_rama < 0 && s_decide >= 0 && yo.s >= s_decide - 450.0f && t_estado % 30 == 0) {
-                        char b[64]; sprintf(b, "< %s  %s >", zona_nombre(curso[cur_nodo].izq), zona_nombre(curso[cur_nodo].der)); texto_centro(b); aviso_rama = 1;
+                        char b[64]; const char *zi = zona_nombre(curso[cur_nodo].izq), *zd = zona_nombre(curso[cur_nodo].der);
+                        if (strlen(zi) + strlen(zd) > 14) sprintf(b, "< %.4s  %.4s >", curso[curso[cur_nodo].izq].zona, curso[curso[cur_nodo].der].zona);   /* cabe en el rotulo */
+                        else sprintf(b, "< %s  %s >", zi, zd);
+                        texto_centro(b); aviso_rama = 1;
                     }
                     /* 450CC0 / 4F2B20 al pasar la etapa: ampliacion con el nivel (0..4) de la etapa siguiente (las dos
                        ramas son del mismo nivel); en la meta no hay ampliacion */

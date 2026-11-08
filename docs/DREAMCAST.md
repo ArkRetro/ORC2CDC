@@ -52,14 +52,32 @@ con la union y la etapa siguiente (SEG03 644 KB, SEG05 626 KB); en los menus la 
 
 ### RAM y cargas durante la carrera
 
-La etapa de salida, la union y la etapa siguiente se leen mientras se conduce (`curso_paso` en `demo/main.c`): un
-hilo lee el fichero del GD y el bucle sube las texturas al terminar. Nunca hay mas de dos a la vez: etapa + union
-hasta UNION_LIBERA (300 m) dentro de la union, y union + etapa siguiente despues. Las etapas van siempre en el mismo
-hueco fijo de RAM (el tamano del mayor fichero, 5,3 MB) y la union en otro (1,2 MB), reservados al arrancar: entre
-carreras se cargan y liberan coches y, sin huecos fijos, la RAM se trocea y la etapa de salida dejaba de caber a la
-segunda carrera. Medido en Flycast: RAM libre en carrera ~3,9 MB en el peor momento; lectura de BKI.DAT 0,6-0,8 s,
-SEG03/SEG05 2,0-3,0 s (en un GD real, mas: hay ~20 s de margen a 300 km/h). Si la carretera se acaba antes de que
-llegue la lectura, el bucle espera (`carga_espera`).
+El curso entero (15 etapas, 10 bifurcaciones y 5 metas, `CURSO.DAT`) se lee mientras se conduce (`curso_paso` en
+`demo/main.c`): un hilo lee el fichero del GD y lo coloca en el marco de la carrera (`modelo_coloca`) y el bucle sube
+las texturas al terminar. Nunca hay mas de dos a la vez: etapa + union hasta UNION_LIBERA (300 m) dentro de la union
+(y con la rama elegida), y union + etapa siguiente despues. Las etapas van siempre en el mismo hueco fijo de RAM (el
+tamano del mayor SEGnn.DAT: 6090 KB, METR) y la union en otro (el mayor BKkk.DAT: 1568 KB), reservados al arrancar.
+La ruta es una ventana: al soltar una etapa se quitan sus puntos (`ruta_recorta`) y el marco se recentra en el
+principio de la union (`curso_recentra`), asi que ni la RAM de la ruta ni las coordenadas crecen de etapa en etapa.
+
+Medido en Flycast (`DIAG_VTX`, pruebas encadenadas por las dos rutas y por IMPE, 2026-11-08):
+
+| | Valor |
+|---|---|
+| RAM libre en carrera (con los dos huecos reservados) | 2510-2650 KB; peor momento: union + ruta derecha recien leida |
+| VRAM libre, etapa + union | 287-640 KB (GHOS + BK09: 287 KB) |
+| VRAM libre, union + etapa siguiente | 155-741 KB (BK09 + IMPE, la etapa de texturas mayor (890 KB): 155 KB) |
+| VRAM libre con solo la union (etapa soltada) | 1044-1108 KB |
+| Lectura de una bifurcacion BKkk.DAT (1,5 MB) | 0,85-0,96 s |
+| Lectura de una meta BKkk.DAT (0,4-0,8 MB) | 0,31-0,45 s |
+| Lectura de BKD.DAT (ruta derecha) | 0,11-0,12 s |
+| Lectura y colocacion de una etapa SEGnn.DAT (2,9-6,1 MB) | 2,07-2,84 s |
+
+En un GD real las lecturas seran mas lentas: entre la peticion de la etapa siguiente y el final de la union quedan
+~1000 m (~12 s a 300 km/h); si la carretera se acaba antes de que llegue la lectura, el bucle espera
+(`carga_espera`). Texturas de las metas: las de mas de error RMS 9 se aceptan en VQ hasta 24 (`UMBRAL_META` de
+`tools/conv_union.py`, error medio 3,6-5,8, maximo 14,7): sin eso la meta de TULI (812 KB) o METR (712 KB) no cabia
+con su etapa. Datos del curso en el GD: 15 SEGnn.DAT (62 MB), 15 BKkk.DAT + BKD.DAT (17 MB).
 
 ## 2. Presupuesto del TA
 

@@ -228,18 +228,28 @@ def _rgb(argb):
 
 def _tex_copia(mod, ti, translucida):
     """copia de la textura ti del modelo (el mapa de entorno, que tiene alfa 0 fuera del circulo): opaca (RGB565,
-    lista 0) o para la lista translucida (su alfa por el del vertice)"""
+    lista 0), para la lista translucida (True: su alfa por el del vertice) o 'suma' (lista translucida, sumada: sin
+    alfa)"""
     cache = mod.__dict__.setdefault('_copias', {})
     if (ti, translucida) not in cache:
         a = mod.rgba[ti].copy()
-        if not translucida: a[..., 3] = 255
+        if translucida is not True:                                     # fuera del circulo (alfa 0): el color de su borde,
+            fuera = a[..., 3] < 128                             # para que las UV del borde no cojan otro color
+            if fuera.any() and not fuera.all():
+                yy, xx = np.nonzero(~fuera); cy, cx = yy.mean(), xx.mean()
+                R = 0.97 * np.sqrt(((yy - cy) ** 2 + (xx - cx) ** 2).max())
+                fy, fx = np.nonzero(fuera); d = np.maximum(np.hypot(fy - cy, fx - cx), 1e-6)
+                sy = np.clip(np.round(cy + (fy - cy) * R / d), 0, a.shape[0] - 1).astype(int)
+                sx = np.clip(np.round(cx + (fx - cx) * R / d), 0, a.shape[1] - 1).astype(int)
+                a[fy, fx] = a[sy, sx]
+            a[..., 3] = 255
         fmt, li, dd = modelo.textura_dc(a)
         if translucida: li = 2
         mod.texs.append((a.shape[1], a.shape[0], fmt, li, len(mod.blob), len(dd))); mod.blob += dd; mod.rgba.append(a)
         cache[(ti, translucida)] = len(mod.texs) - 1
     return cache[(ti, translucida)]
 
-ESP_COLOR, ESP_ENTORNO = 1, 2               # tipos de malla especial (CEX1): color de pintura por vertice; entorno
+ESP_COLOR, ESP_ENTORNO, ESP_SUMA = 1, 2, 3   # mallas especiales (CEX1): color de pintura; entorno; entorno sumado
 
 def materiales(A, mod, m, recurso):
     """aplica el material del original a cada malla (tabla 4 del registro: material, texturas de las dos capas; tabla
@@ -250,7 +260,8 @@ def materiales(A, mod, m, recurso):
        cada cuadro por la normal (demo/main.c) y la pintura por la luz como color de desplazamiento (suma): pintura +
        entorno x especular en una sola pasada;
      - mallas sin UV (cristales, espejos, cromados: la capa 1 es el mapa de entorno): UV de entorno; color base =
-       especular con el alfa del difuso (translucida si es menor que 1), desplazamiento = difuso por la luz;
+       especular con el alfa del difuso (translucida si es menor que 1), desplazamiento = difuso por la luz; las de
+       bandera 0x800 (cristales) con alfa 1 se suman a lo de detras (SUPUESTO: mezcla aditiva del GS);
      - sin textura: difuso por la luz (y la emision), alfa del difuso;
      - el resto (textura con UV): como estaba (la capa 2, si la hay, no se dibuja).
     Deja en cada malla x[9] el dict extra con 'esp' = (tipo, ranura de pintura o -1, color fijo de desplazamiento)"""
@@ -281,11 +292,12 @@ def materiales(A, mod, m, recurso):
                 x[1] = -1; x[0] = 0; v['c'] = _argb(pint * dif[:3] / 255, luz)
                 ex['esp'] = (ESP_COLOR, sl, 0)
         elif t1 >= 0 and not ex['uv']:
+            suma = bool(fl & 0x800) and alfa >= 250             # cristal opaco de alfa: el reflejo se suma
             transl = alfa < 250
-            x[1] = _tex_copia(mod, b0 + t1, transl); x[0] = 2 if transl else 0
+            x[1] = _tex_copia(mod, b0 + t1, 'suma' if suma else transl); x[0] = 2 if transl or suma else 0
             v['c'] = _argb(np.minimum(esp, 255), np.ones(len(v)), alfa if transl else 255)
             fijo = int(_argb(dif[:3], np.ones(1))[0])
-            ex['esp'] = (ESP_ENTORNO, -1, fijo)
+            ex['esp'] = (ESP_SUMA if suma else ESP_ENTORNO, -1, fijo)
         elif t1 < 0:
             x[1] = -1; x[0] = 0 if alfa >= 250 else 2
             c = np.clip(dif[None, :3] * luz[:, None] + emi[None, :], 0, 255).astype(np.uint32)
@@ -442,7 +454,7 @@ def convierte(A, m, sal, tope=TOPE, vista=None):
     mod.mallas.sort(key=lambda x: (x[0], x[1]))                # el orden de escribe (estable): el de CEX1
     mod.ruta = extension(mod)
     nesp = sum(1 for x in mod.mallas if x[9].get('esp'))
-    vesp = sum(x[5] for x in mod.mallas if x[9].get('esp') and x[9]['esp'][0] == ESP_ENTORNO)
+    vesp = sum(x[5] for x in mod.mallas if x[9].get('esp') and x[9]['esp'][0] >= ESP_ENTORNO)
     mod.mallas = [x[:8] for x in mod.mallas]                    # fuera el nombre de la pieza y lo demas
     mod.escribe(sal)
     kb = len(mod.blob) >> 10
