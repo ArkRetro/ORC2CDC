@@ -1322,6 +1322,13 @@ static void camara_paso(int boton, int salida)
     memcpy(e.pose_t, yo.pose_t, 12); memcpy(e.pose_r, yo.pose_r, 12);
     e.boton_vista = boton; e.salida = salida; e.suelo = cam_suelo;
     cam_paso(&cam, &cam_tab, &e);
+#ifdef DIAG_CAM
+    {   static int n;
+        if (++n % 15 == 0) dbglog(DBG_INFO, "CAM s %.1f base %.1f pos %.1f %.1f %.1f ojo %.1f %.1f %.1f mira %.1f %.1f %.1f v%d suelo %.2f fw %.2f %.2f %.2f up %.2f %.2f %.2f\n",
+            (double)yo.s, (double)s_base, (double)yo.pos[0], (double)yo.pos[1], (double)yo.pos[2], (double)cam.ojo[0], (double)cam.ojo[1],
+            (double)cam.ojo[2], (double)cam.mira[0], (double)cam.mira[1], (double)cam.mira[2], cam.vista, (double)cam_suelo(cam.ojo),
+            (double)yo.fw[0], (double)yo.fw[1], (double)yo.fw[2], (double)yo.up[0], (double)yo.up[1], (double)yo.up[2]); }
+#endif
 }
 
 /* ---------------------------------------------------------------- huellas y humo del derrape */
@@ -2201,6 +2208,9 @@ int main(int argc, char **argv)
                 if (hud_ok && hud_sube_tex()) hud_ok = 0;
                 curso_reinicia();                               /* la etapa de salida (otra vez, si hacia falta) */
                 memset(&yo, 0, sizeof yo); yo.s = SALIDA; yo.x = carril_x(SALIDA, 4);
+#ifdef PRUEBA_FIN
+                yo.s = longitud - PRUEBA_FIN; yo.x = carril_x(yo.s, 4);   /* prueba: a PRUEBA_FIN m del final */
+#endif
 #ifdef PRUEBA_X
                 yo.x = PRUEBA_X;                                /* prueba: salida en otro desvio (p.ej. la hierba) */
 #endif
