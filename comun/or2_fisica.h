@@ -129,6 +129,36 @@ typedef struct {
     float sube[8], baja[8], baja_fr[8]; /* umbrales m/cuadro               */
 } or2_param_t;
 
+/* --- choques (PARAM.DAT, bloques MAP1 / CHQ1 / POS1 de tools/conv_param.py) --- */
+#define OR2_ESTADOS_CHOQUE 20
+#define OR2_CLASES         7
+typedef struct { int n; const float *k; } or2_canal_t;   /* n claves de 4 floats: t, valor, tang. sal., tang. ent. */
+typedef struct {
+    int      ok;
+    uint32_t mapa[4][16];        /* columna de la tabla por modelo (5051D0); [1] = el normal                */
+    float    umbral[2];          /* velocidad de cierre (m/cuadro): 80 y 280 km/h del modelo / 216.72        */
+    float    rest[3];            /* restitucion por banda de cierre (bajo, medio, alto)                      */
+    uint32_t estado_traf[8];     /* estados de choque del trafico (4F76E0)                                   */
+    float    masa[3];            /* factor de masa: jugador, coche, pesado (clases 0..2)                     */
+    float    reparto[OR2_CLASES * OR2_CLASES];  /* minimo del reparto de la separacion [clase A * 7 + B] */
+    float    dur[OR2_ESTADOS_CHOQUE], recup[OR2_ESTADOS_CHOQUE];
+    or2_canal_t pose[OR2_ESTADOS_CHOQUE][6];  /* desplazamiento x,y,z y giro x,y,z (unidades del PC)       */
+} or2_choques_t;
+
+/* Lo que el juego sabe del otro coche en un contacto (convencion exterior: mundo x a la derecha del rumbo 0,
+   y hacia delante; velocidades en m/s). */
+typedef struct {
+    float dx, dy;           /* posicion del otro menos la mia (m)                                    */
+    float vx, vy;           /* velocidad del otro (m/s); a la salida, la nueva                       */
+    int   clase;            /* clase del otro (+324: 0..2 pesados, 3..5 coches, 6 rivales)            */
+    int   frontal;          /* 1 = el contacto es por delante o por detras (no un roce lateral)      */
+    /* salidas */
+    float reparto;          /* fraccion de la separacion que se lleva el jugador (el resto, el otro) */
+    int   golpe;            /* estado de choque del otro (16..19) o -1                               */
+    int   cambia_vel;       /* 1 si se ha cambiado la velocidad del otro                             */
+    int   reaccion;         /* 1 si el jugador ha entrado en el estado 7 (salto y derrape)           */
+} or2_otro_t;
+
 typedef struct {
     float stick;            /* -1..1, + = derecha                           */
     float acelerador;       /* 0..1                                          */
@@ -199,6 +229,25 @@ typedef struct {
     int   ac_guardado;      /* event+0x29c                                   */
     int   rpm_i, rpm_ant;   /* event+0x48, 0x210                             */
     or2_rueda_t r[4];       /* 0 del-izq, 1 del-der, 2 tras-izq, 3 tras-der  */
+    /* choques (crash state +2C8.., rebote +282..+290, paso derrapando +1030) */
+    int   choque;           /* estado de choque (+2F0 >> 2 & 31), valido si t_choque > 0             */
+    float t_choque;         /* +2C8 tiempo que queda (s)                                             */
+    float t_pose;           /* +2D0 tiempo de la animacion                                           */
+    float t_recup;          /* +2F8 recuperacion                                                     */
+    int   lado;             /* +2F0 >> 7: 1 = animacion reflejada                                    */
+    float pose_t[3];        /* +2D8 desplazamiento del cuerpo (m, x der., y arriba, z atras)         */
+    float pose_r[3];        /* +2E4 giro del cuerpo (rad: cabeceo, guinada, balanceo; PC)            */
+    int   c282, c283, c284; /* frenada tras golpe, cuadros de rebote, espera de rebote              */
+    int   rebote;           /* +290 tipo de rebote (0 simple, 1 siguiendo la carretera)              */
+    int16_t h286, h288;     /* rumbo objetivo de la velocidad y giro pendiente del cuerpo            */
+    float v28c;             /* velocidad al empezar el rebote (m/cuadro)                             */
+    int   roce;             /* cuadros desde el ultimo roce con el muro (work+0x244 bit 3)           */
+    int   paso;             /* +1030 cuadros en que se atraviesa el trafico derrapando               */
+    int   golpe_sonido;     /* se pone a 1 en cada golpe (para el sonido), lo borra quien lo lee     */
+    float ofs;              /* +26C desplazamiento lateral del ultimo paso (m, <0 izquierda)          */
+    float rebufo;           /* +E68 mejor puntuacion de rebufo (0..1; >0.18 = rebufo en el HUD)       */
+    float rebufo_k;         /* +E6C fraccion de resistencia del aire que se quita                     */
+    int   rebufo_n;         /* +E70 rampa (0..180 cuadros)                                            */
 } or2_coche_t;
 
 /* Copia los campos de una columna. tabla = floats LE tal cual (filas*19).
@@ -215,6 +264,30 @@ void or2_inicia(or2_coche_t *c, const or2_param_t *p);
 void or2_coloca(or2_coche_t *c, const or2_param_t *p, float rumbo, float velocidad);
 /* Avanza dt segundos (pasos internos de 1/60.2 s). dt<=0: un paso exacto. */
 void or2_paso(or2_coche_t *c, const or2_param_t *p, const or2_entrada_t *e, float dt);
+
+/* Bloques de choques detras de las curvas en PARAM.DAT (datos = todo el fichero). 0 si va bien. Los punteros
+   de las animaciones apuntan dentro de datos, que debe seguir vivo. */
+int  or2_carga_choques(const void *datos, uint32_t tam, or2_choques_t *q);
+/* Columna de la tabla de un modelo (byte car+0x11) en la partida normal; -1 si no hay datos. */
+int  or2_columna_modelo(const or2_choques_t *q, int modelo);
+
+/* Contacto con otro coche (4F9450: 4F8490 reparto, 4F6FE0 reaccion, 4F7BF0 intercambio de velocidad,
+   4F6820 tope de velocidad). Cambia la velocidad y el estado de choque del jugador y devuelve la reaccion del
+   otro en o. Llamar una vez por cuadro de contacto. */
+void or2_choque_coche(or2_coche_t *c, const or2_param_t *p, const or2_choques_t *q, or2_otro_t *o);
+
+/* Contacto con el muro (CbwColiWall 5041B0: CalcFrictionStatus / CwReboundStatus): nx, ny = normal del muro
+   hacia la calzada (mundo, unitaria), pen = penetracion (m). Llamar cada cuadro de contacto, despues de
+   or2_paso. Devuelve 1 si ha sido un golpe (rebote), 0 si un roce. */
+int  or2_choque_muro(or2_coche_t *c, const or2_param_t *p, float nx, float ny, float pen);
+
+/* Rebufo (CheckSlipStream 4A4D20): los n coches cercanos (dx, dy, vx, vy de or2_otro_t). Llamar una vez por
+   cuadro antes de or2_paso. Quita resistencia del aire y sube el corte en la ultima marcha. */
+void or2_rebufo(or2_coche_t *c, const or2_otro_t *otros, int n);
+
+/* Estado de choque de otro coche (el trafico): avanza su animacion. t = tiempo transcurrido del estado.
+   Devuelve 0 cuando ha acabado; tr y gr = desplazamiento y giro (rad) del cuerpo. lado refleja la animacion. */
+int  or2_pose(const or2_choques_t *q, int estado, float t, int lado, float tr[3], float gr[3]);
 
 #ifdef __cplusplus
 }

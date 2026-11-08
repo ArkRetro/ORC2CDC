@@ -257,31 +257,35 @@ static float altura(float s, float x)
 }
 
 /* ---------------------------------------------------------------- coche */
-typedef struct { float s, x, a, v; float pos[3], fw[3], up[3]; int choque, derrape, t_derrape, t_muro; float deriva, freno_ant, gas_ant; } coche_t;
+typedef struct { float s, x, a, v; float pos[3], fw[3], up[3]; int choque, derrape, t_derrape, t_muro; float deriva, freno_ant, gas_ant;
+                 float pose_t[3], pose_r[3]; } coche_t;   /* pose: animacion de choque del original (solo al dibujar) */
 static coche_t yo;
 /* fisica del original para el coche del jugador (comun/or2_fisica.c) con la tabla de PARAM.DAT */
-#ifndef COLUMNA
-#define COLUMNA 6                                               /* columna de la tabla de coches */
+#ifndef MODELO
+#define MODELO 6                                                /* modelo del coche (car+0x11): 6 = Testarossa */
 #endif
 #ifndef ACEL
 #define ACEL 1.35f                                              /* multiplicador del par motor */
 #endif
 static int manual_, pide_cambio, auto_piloto, sfx_ok, golpe_cd;
-static or2_param_t fpar; static or2_coche_t fis; static int fis_ok;
+static or2_param_t fpar; static or2_coche_t fis; static int fis_ok, columna = -1;
+static or2_choques_t choq;                                      /* choques del original (bloques de PARAM.DAT) */
+static float *param_dat;                                        /* se queda en memoria: las animaciones apuntan aqui */
 static int fisica_carga(void)
 {
     uint32_t sz; float *t = gd_carga("PARAM.DAT", &sz);
     if (!t || sz < (200 * 19 + 162 + 256) * 4) return -1;
-    if (or2_carga_param(t, 200, COLUMNA, &fpar) < 0) return -2;
+    or2_carga_choques(t, sz, &choq);
+#ifdef COLUMNA
+    columna = COLUMNA;
+#else
+    columna = or2_columna_modelo(&choq, MODELO);                /* la tabla de columnas del juego (5051D0) */
+    if (columna < 0) columna = 4;                               /* la del Testarossa si el fichero es antiguo */
+#endif
+    if (or2_carga_param(t, 200, columna, &fpar) < 0) return -2;
     or2_carga_curvas(&fpar, t + 200 * 19, t + 200 * 19 + 162);
     fpar.par_mult *= ACEL;                                      /* mas aceleracion (a peticion del tester) */
-    free(t); fis_ok = 1; return 0;
-}
-/* muros y choques: cambia solo la velocidad (rumbo h, modulo v) y endereza la carroceria, sin reiniciar el
-   motor, el cambio ni las ruedas (convencion interna del modelo: psi + izquierda, vx der., vy adelante) */
-static void fis_empuja(float h, float v)
-{
-    fis.vx = sinf(h) * v; fis.vy = cosf(h) * v; fis.psi = -h; fis.w = 0;
+    param_dat = t; fis_ok = 1; return 0;
 }
 static float dif_ang(float a) { while (a > M_PI) a -= 2 * M_PI; while (a < -M_PI) a += 2 * M_PI; return a; }
 #define VMAX 100.0f                                          /* techo teorico; punta real unos 300 km/h */
@@ -306,7 +310,8 @@ static void coche_coloca(coche_t *c)
 /* ---------------------------------------------------------------- trafico */
 #define NCARRIL 6
 #define NTRAF 11                                                /* un 10 % menos que antes */
-typedef struct { coche_t c; int carril, modelo, destino; float v_des, f_cambio, t_sig; } trafico_t;
+typedef struct { coche_t c; int carril, modelo, destino; float v_des, f_cambio, t_sig;
+                 int golpe, lado; float t_golpe, vlat, xo; } trafico_t;   /* golpe: estado de choque (16..19) o -1 */
 static trafico_t traf[NTRAF];
 #define NMODTRAF 9                                              /* coches de calle (TRAFn.DAT) */
 static modelo_t mtraf[NMODTRAF];
@@ -351,6 +356,7 @@ static void traf_nace(trafico_t *t, float s)
     for (n = 0; n < NCARRIL && !carril_libre(t, k, s, 25.0f, 25.0f); n++) k = (k + 1) % NCARRIL;   /* sin montarse */
     t->carril = t->destino = k; t->f_cambio = 0; t->t_sig = 4.0f + azar() * 10.0f;
     t->c.s = s; t->v_des = t->c.v = 36.0f + azar() * 14.0f; t->c.a = 0;
+    t->golpe = -1; t->t_golpe = 0; t->vlat = 0; t->xo = 0; memset(t->c.pose_t, 0, 12); memset(t->c.pose_r, 0, 12);
     t->c.x = carril_x(s, t->carril); coche_coloca(&t->c);
 }
 static void traf_inicia(float s0)
@@ -362,6 +368,53 @@ static void traf_inicia(float s0)
     for (i = 0; i < 3; i++) { traf_nace(traf + i, s0 + 25.0f + i * 18.0f); traf[i].carril = traf[i].destino = 2 + i; traf[i].modelo = i * 4;
         traf[i].c.v = traf[i].v_des = 5.0f; traf[i].c.x = carril_x(traf[i].c.s, traf[i].carril); coche_coloca(&traf[i].c); }
 #endif
+}
+/* carril mas cercano a x en s */
+static int carril_cerca(float s, float x)
+{
+    int k, m = 0; float d = 1e9f;
+    for (k = 0; k < NCARRIL; k++) { float e = fabsf(carril_x(s, k) - x); if (e < d) { d = e; m = k; } }
+    return m;
+}
+/* choque del jugador con un coche de trafico (4F9450 del original via or2_choque_coche): separacion repartida,
+   intercambio de velocidad, salto y derrape del jugador (estado 7) y animacion de golpe del trafico (16..19) */
+static void traf_choca(trafico_t *t, float l, float ancho)
+{
+    or2_otro_t o; float p[3], th, ds = t->c.s - yo.s, dx = t->c.x - yo.x, ps, px, ht, f[2], r[2];
+    ruta_en(yo.s, p, &th, NULL, NULL);
+    f[0] = sinf(th); f[1] = cosf(th); r[0] = cosf(th); r[1] = -sinf(th);
+    ps = l - fabsf(ds); px = ancho - fabsf(dx);                 /* penetracion a lo largo y de lado */
+    memset(&o, 0, sizeof o);
+    o.dx = f[0] * ds + r[0] * dx; o.dy = f[1] * ds + r[1] * dx;
+    ht = th + t->c.a;
+    o.vx = sinf(ht) * t->c.v + r[0] * t->vlat; o.vy = cosf(ht) * t->c.v + r[1] * t->vlat;
+    o.clase = 3;                                                /* coches de calle (+324 = 3..5) */
+    o.frontal = ps < px;                                        /* se separan a lo largo: golpe por delante/detras */
+    if (fis_ok) or2_choque_coche(&fis, &fpar, &choq, &o); else o.reparto = 0.5f;
+    if (o.frontal) {                                            /* 4F8490: separacion repartida */
+        float sg = ds > 0 ? 1.0f : -1.0f;
+        yo.s -= sg * ps * o.reparto; t->c.s += sg * ps * (1.0f - o.reparto);
+    } else {
+        float sg = dx > 0 ? 1.0f : -1.0f;
+        yo.x -= sg * px * o.reparto; t->xo += sg * px * (1.0f - o.reparto);
+    }
+    if (o.cambia_vel) {                                         /* la velocidad nueva del otro, en la carretera */
+        float vl = o.vx * f[0] + o.vy * f[1];
+        t->vlat = o.vx * r[0] + o.vy * r[1];
+        t->c.v = vl > 0 ? vl : 0;
+    }
+    if (o.golpe >= 0 && t->golpe < 0) { t->golpe = o.golpe; t->t_golpe = 0; t->lado = dx < 0; }
+    if (fis_ok) {
+        float h = atan2f(fis.vx, fis.vy);
+        yo.v = sqrtf(fis.vx * fis.vx + fis.vy * fis.vy);
+        yo.a = dif_ang(h - th); yo.deriva = dif_ang(-fis.psi - h);
+    }
+    yo.choque = 2;
+    if (sfx_ok && !golpe_cd && fis.golpe_sonido) {
+        golpe_cd = 20; sfx_golpe(fminf(0.4f + fabsf(yo.v - t->c.v) / 25.0f, 1.0f));
+    }
+    fis.golpe_sonido = 0;
+    coche_coloca(&yo);
 }
 /* trafico: guarda la distancia con el de delante, cambia de carril suave (2,5 s) si va tapado o de vez en cuando */
 static void traf_paso(float dt)
@@ -375,39 +428,40 @@ static void traf_paso(float dt)
             if (o->carril != t->carril && o->carril != t->destino && o->destino != t->carril) continue;
             if (d < hueco) { hueco = d; v_del = o->c.v; }
         }
-        v_obj = t->v_des;
+        v_obj = t->golpe >= 0 ? t->c.v : t->v_des;             /* golpeado: no acelera ni frena */
         if (hueco < 45.0f) v_obj = fminf(v_obj, v_del + (hueco - 18.0f) * 0.4f);   /* 18 m de distancia */
         if (v_obj < 0) v_obj = 0;
         t->c.v += fmaxf(-6.0f * dt, fminf(2.5f * dt, v_obj - t->c.v));
         t->t_sig -= dt;
-        if (t->destino == t->carril && (t->t_sig <= 0 || (hueco < 35.0f && v_del < t->v_des - 3.0f))) {
+        if (t->golpe < 0 && t->destino == t->carril && (t->t_sig <= 0 || (hueco < 35.0f && v_del < t->v_des - 3.0f))) {
             int k = t->carril + (azar() < 0.5f ? -1 : 1);
             if (k < 0 || k >= NCARRIL) k = 2 * t->carril - k;
             if (k >= 0 && k < NCARRIL && carril_libre(t, k, t->c.s, 15.0f, 30.0f)
                 && !(fabsf(yo.s - t->c.s) < 12.0f && fabsf(yo.x - carril_x(t->c.s, k)) < 3.0f)) { t->destino = k; t->f_cambio = 0; }
             t->t_sig = 6.0f + azar() * 10.0f;
         }
+        if (t->golpe >= 0) {                                    /* golpeado: sigue con su velocidad y su animacion */
+            t->t_golpe += dt;
+            if (!or2_pose(&choq, t->golpe, t->t_golpe, t->lado, t->c.pose_t, t->c.pose_r)) {
+                t->golpe = -1; t->carril = t->destino = carril_cerca(t->c.s, t->c.x);
+                t->xo = t->c.x - carril_x(t->c.s, t->carril); t->vlat = 0;
+            }
+            t->xo += t->vlat * dt; t->vlat -= t->vlat * fminf(1.0f, 1.5f * dt);
+        } else t->xo -= t->xo * fminf(1.0f, 1.2f * dt);          /* vuelve a su carril */
         t->c.s += t->c.v * dt;
         if (t->c.s < yo.s - 150.0f || t->c.s > longitud - 20.0f) traf_nace(t, yo.s + 550.0f + azar() * 550.0f);
         if (t->c.s > longitud - 20.0f) t->c.s = longitud - 20.0f;
         if (t->destino != t->carril) {
             float f, sm;
             t->f_cambio += dt / 2.5f; f = fminf(t->f_cambio, 1.0f); sm = f * f * (3 - 2 * f);
-            t->c.x = carril_x(t->c.s, t->carril) + sm * (carril_x(t->c.s, t->destino) - carril_x(t->c.s, t->carril));
+            t->c.x = carril_x(t->c.s, t->carril) + sm * (carril_x(t->c.s, t->destino) - carril_x(t->c.s, t->carril)) + t->xo;
             if (f >= 1.0f) t->carril = t->destino;
-        } else t->c.x = carril_x(t->c.s, t->carril);
+        } else t->c.x = carril_x(t->c.s, t->carril) + t->xo;
         t->c.a = atan2f(t->c.x - x0, t->c.v * dt + 1e-4f);
         coche_coloca(&t->c);
-        /* choque con el jugador: le frena y le aparta */
+        /* choque con el jugador */
         {   float l = largo_traf[t->modelo] + 2.3f;
-        if (fabsf(yo.s - t->c.s) < l && fabsf(yo.x - t->c.x) < 1.9f) {
-            if (yo.s < t->c.s) { yo.s = t->c.s - l; if (yo.v > t->c.v) yo.v = fmaxf(t->c.v, yo.v * 0.82f); }   /* pierde poco */
-            else { yo.s = t->c.s + l; }
-            if (sfx_ok && !golpe_cd) { golpe_cd = 20; sfx_golpe(fminf(0.4f + fabsf(yo.v - t->c.v) / 25.0f, 1.0f)); }
-            yo.x += yo.x > t->c.x ? 0.6f : -0.6f; yo.a *= -0.3f; yo.choque = 2;
-            if (fis_ok) { float p[3], th; ruta_en(yo.s, p, &th, NULL, NULL); fis_empuja(th + yo.a, yo.v); }
-            coche_coloca(&yo);
-        } }
+            if (fabsf(yo.s - t->c.s) < l && fabsf(yo.x - t->c.x) < 1.9f) traf_choca(t, l, 1.9f); }
     }
 }
 
@@ -433,6 +487,16 @@ static void coche_paso(coche_t *c, float giro, float gas, float freno, float dt)
         e.rumbo_carretera = th0; e.rumbo_adelante = th0 + dif_ang(atan2f(dx, -dz) - th0);
         e.dist_izq = iz + c->x; e.dist_der = de - c->x;
         e.manual = manual_ && !auto_piloto; e.cambio_pide = pide_cambio; pide_cambio = 0;
+        {   /* rebufo (CheckSlipStream): los coches de trafico cercanos */
+            or2_otro_t ot[NTRAF]; int i, n = 0; float f0 = sinf(th0), f1 = cosf(th0), r0 = cosf(th0), r1 = -sinf(th0);
+            for (i = 0; i < NTRAF; i++) {
+                const trafico_t *t = traf + i; float ds = t->c.s - c->s, dx = t->c.x - c->x, ht = th0 + t->c.a;
+                if (ds < -60.0f || ds > 60.0f) continue;
+                ot[n].dx = f0 * ds + r0 * dx; ot[n].dy = f1 * ds + r1 * dx;
+                ot[n].vx = sinf(ht) * t->c.v + r0 * t->vlat; ot[n].vy = cosf(ht) * t->c.v + r1 * t->vlat; n++;
+            }
+            or2_rebufo(&fis, ot, n);
+        }
         or2_paso(&fis, &fpar, &e, 0.0f);
         c->v = fis.velocidad; c->a = dif_ang(fis.rumbo_vel - th0); c->deriva = fis.beta;
         c->derrape = fis.temporizador > 0 ? (fis.beta >= 0 ? 1 : -1) : 0; c->t_derrape = fis.temporizador;
@@ -440,17 +504,22 @@ static void coche_paso(coche_t *c, float giro, float gas, float freno, float dt)
         c->x += c->v * sinf(c->a) * dt;
         ruta_en(c->s, p, &th1, &iz, &de);
         c->a = dif_ang(c->a - (th1 - th0));
-        {   int antes = c->t_muro > 0, toca = 0; c->choque = 0; if (c->t_muro > 0) c->t_muro--;
+        {   /* muros: CbwColiWall del original (roce o rebote) con la normal hacia la calzada */
+            float nx = 0, ny = 0, pen = 0, h; c->choque = 0; if (c->t_muro > 0) c->t_muro--;
             lim = iz - 1.0f;
-            if (c->x < -lim) { c->x = -lim; if (c->a < 0) c->a = -c->a * 0.4f; toca = 1; }
+            if (c->x < -lim) { pen = -lim - c->x; c->x = -lim; nx = cosf(th1); ny = -sinf(th1); }
             lim = de - 1.0f;
-            if (c->x > lim) { c->x = lim; if (c->a > 0) c->a = -c->a * 0.4f; toca = 1; }
-            if (toca) {                                          /* muro: recoloca el modelo con lo que queda */
-                c->choque = 1; c->v -= c->v * (antes ? 0.05f * dt : 0.15f); c->t_muro = 30;
-                if (!antes && sfx_ok && !golpe_cd) { golpe_cd = 20; sfx_golpe(fminf(c->v / 40.0f, 1.0f)); }
-                fis_empuja(th1 + c->a, c->v); c->deriva = 0;
+            if (c->x > lim) { pen = c->x - lim; c->x = lim; nx = -cosf(th1); ny = sinf(th1); }
+            if (nx != 0 || ny != 0) {
+                int golpe = or2_choque_muro(&fis, &fpar, nx, ny, pen);
+                c->choque = 1; c->t_muro = 30;
+                if (golpe && sfx_ok && !golpe_cd) { golpe_cd = 20; sfx_golpe(fminf(c->v / 40.0f, 1.0f)); }
+                h = atan2f(fis.vx, fis.vy);                     /* rumbo de la velocidad (+ derecha) */
+                c->v = sqrtf(fis.vx * fis.vx + fis.vy * fis.vy);
+                c->a = dif_ang(h - th1); c->deriva = dif_ang(-fis.psi - h);
             }
         }
+        memcpy(c->pose_t, fis.pose_t, sizeof c->pose_t); memcpy(c->pose_r, fis.pose_r, sizeof c->pose_r);
         coche_coloca(c);
         return;
     }
@@ -535,14 +604,23 @@ static void piloto(const coche_t *c, float *giro, float *gas, float *freno)
 /* matriz del coche: x del modelo a la derecha, y arriba, el morro (-z) hacia delante */
 static void pon_coche(const coche_t *c, matrix_t mod_coche)
 {
-    float r[3];                                                 /* derecha = adelante x arriba */
-    r[0] = c->fw[1] * c->up[2] - c->fw[2] * c->up[1]; r[1] = c->fw[2] * c->up[0] - c->fw[0] * c->up[2];
-    r[2] = c->fw[0] * c->up[1] - c->fw[1] * c->up[0];
+    float r[3], fw[3], up[3], r2[3], k, sn; int i;               /* derecha = adelante x arriba */
+    memcpy(fw, c->fw, 12); memcpy(up, c->up, 12);
+    r[0] = fw[1] * up[2] - fw[2] * up[1]; r[1] = fw[2] * up[0] - fw[0] * up[2]; r[2] = fw[0] * up[1] - fw[1] * up[0];
+    /* animacion de choque (pc_sample_crash_pose): giro y (+ izquierda), x (morro arriba), z, y desplazamiento */
+    if (c->pose_r[1] != 0) { k = cosf(c->pose_r[1]); sn = sinf(c->pose_r[1]);
+        for (i = 0; i < 3; i++) { r2[i] = r[i] * k + fw[i] * sn; fw[i] = fw[i] * k - r[i] * sn; r[i] = r2[i]; } }
+    if (c->pose_r[0] != 0) { k = cosf(c->pose_r[0]); sn = sinf(c->pose_r[0]);
+        for (i = 0; i < 3; i++) { r2[i] = fw[i] * k + up[i] * sn; up[i] = up[i] * k - fw[i] * sn; fw[i] = r2[i]; } }
+    if (c->pose_r[2] != 0) { k = cosf(c->pose_r[2]); sn = sinf(c->pose_r[2]);
+        for (i = 0; i < 3; i++) { r2[i] = up[i] * k - r[i] * sn; r[i] = r[i] * k + up[i] * sn; up[i] = r2[i]; } }
     memset(mod_coche, 0, sizeof(matrix_t));
     mod_coche[0][0] = r[0]; mod_coche[0][1] = r[1]; mod_coche[0][2] = r[2];
-    mod_coche[1][0] = c->up[0]; mod_coche[1][1] = c->up[1]; mod_coche[1][2] = c->up[2];
-    mod_coche[2][0] = -c->fw[0]; mod_coche[2][1] = -c->fw[1]; mod_coche[2][2] = -c->fw[2];
-    mod_coche[3][0] = c->pos[0]; mod_coche[3][1] = c->pos[1]; mod_coche[3][2] = c->pos[2]; mod_coche[3][3] = 1.0f;
+    mod_coche[1][0] = up[0]; mod_coche[1][1] = up[1]; mod_coche[1][2] = up[2];
+    mod_coche[2][0] = -fw[0]; mod_coche[2][1] = -fw[1]; mod_coche[2][2] = -fw[2];
+    for (i = 0; i < 3; i++)
+        mod_coche[3][i] = c->pos[i] + r[i] * c->pose_t[0] + up[i] * c->pose_t[1] - fw[i] * c->pose_t[2];
+    mod_coche[3][3] = 1.0f;
 }
 
 /* ---------------------------------------------------------------- huellas y humo del derrape */
@@ -950,7 +1028,7 @@ int main(int argc, char **argv)
                     he.tiempo = (int)ceilf(tiempo); he.crono_ms = (int)(crono * 1000.0f / 60.0f); he.puntos = puntos;
                     he.kmh = fis_ok ? (int)fis.velocidad_hud : (int)(yo.v * 3.6f); he.marcha = fis_ok ? fis.marcha : 1;
                     he.etapa = etapa_n; he.cuadro = cuadro; he.rpm = fis_ok ? (float)fis.rpm_suave : 0;
-                    he.rebufo = 0; he.derrape = yo.t_derrape != 0; he.manual = manual_ && !auto_; he.rev_on = he.manual && fis_ok && fis.rpm_i > 7900 && fis.marcha < fpar.marchas; he.seis = fis_ok && fpar.marchas >= 6;
+                    he.rebufo = fis_ok && fis.rebufo > 0.18f; he.derrape = yo.t_derrape != 0; he.manual = manual_ && !auto_; he.rev_on = he.manual && fis_ok && fis.rpm_i > 7900 && fis.marcha < fpar.marchas; he.seis = fis_ok && fpar.marchas >= 6;
                     hud_dibuja(&he);
                     if (t_cuenta < 300) {                       /* 3, 2, 1, GO! (la escena dura 5 s; GO a los 4) */
                         static const char *const CU[5] = { "CUENTA_PRE", "CUENTA_3", "CUENTA_2", "CUENTA_1", "CUENTA_GO" };

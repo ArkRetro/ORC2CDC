@@ -10,6 +10,11 @@
  *   pc_chassis.cpp          ActionForce2, calc_game_resist, make_force_work_tire
  *   pc_common_control.cpp   RearGripCtrl, SlipAngleCtrl, CorneringCtrl,
  *                           CalcPlBody_2nd, ass_compulsive_move, CopyCarWork
+ *   pc_wall_controller.cpp / pc_wall_response.cpp / pc_wall_rebound.cpp
+ *                           muros (CbwColiWall, CalcFrictionStatus, CwReboundStatus)
+ *   pc_common_control.cpp   RebPlBody (rebote), pc_chassis.cpp force_work_49fed0 (frenada)
+ *   pc_crash.cpp / pc_crash_entry.cpp  estados de choque y su animacion
+ *   platform/race_traffic.cpp  choques entre coches (4F9450, 4F6FE0, 4F7BF0, 4F6820)
  *   platform/vehicle_constructor.cpp  umbrales de cambio
  *   platform/vehicle_body_init.cpp    geometria / cargas estaticas
  *
@@ -18,8 +23,8 @@
  *    son las estaticas del juego mas una transferencia longitudinal
  *    cuasiestatica (el original las obtiene de la suspension, pero
  *    normaliza la carga total; el mu no depende de la carga en la tabla).
- *  - No hay pendientes, muros, choques, rebufo, NOS, handicap ni modo
- *    manual (solo cambio automatico, que es el arcade por defecto).
+ *  - No hay pendientes, rebufo, NOS ni handicap. Muros y choques entre
+ *    coches: or2_choque_muro / or2_choque_coche (al final del fichero).
  *  - El firme se da con un mu global (GetRoadMu da 1.0 o 0.7).
  *  - ass_compulsive_move usa los rumbos/bordes que pasa el llamador en vez
  *    de muestrear la spline del circuito.
@@ -250,7 +255,7 @@ static void cambio_auto(or2_coche_t *c, const or2_param_t *p)
     int g = c->marcha;
     const float *baja = c->pedal_fr < 128 ? p->baja : p->baja_fr;
     if (c->vel_mf > p->sube[g] && c->pedal_fr < 128) { ++g; c->cambio = 1; }
-    else if (baja[g] > c->vel_mf) { --g; c->cambio = 3; }
+    else if (baja[g] > c->vel_mf && c->c282 == 0) { --g; c->cambio = 3; }
     if (g > p->marchas) g = p->marchas;
     if (g < 0) g = 0;
     c->marcha = g;
@@ -351,7 +356,8 @@ static void par_motor(or2_coche_t *c, const or2_param_t *p)
     }
     par *= obj;
     paso = c->embrague < 128 ? 0.8f : (c->marcha == p->marchas ? 0.2f : 0.4f);
-    umbral = p->w_corte;   /* (con rebufo el original lo sube en la ultima) */
+    umbral = p->w_corte;
+    if (c->marcha == p->marchas) umbral *= 1.0f + c->rebufo_k * 0.0649999976f;   /* rebufo (pc_driving 158) */
     if (rpm >= umbral) c->limitador -= paso; else c->limitador += paso;
     c->limitador = cl01(c->limitador);
     ral = p->w_ralenti >= rpm ? friccion_motor(p, p->w_ralenti) * 2.0f : 0.0f;
@@ -683,6 +689,9 @@ static v2 unidad(v2 a)
 }
 static float cruz(v2 a, v2 b) { return a.x * b.y - a.y * b.x; } /* >0: b a la izq. de a */
 
+static void avanza_choque(or2_coche_t *c);
+static const or2_choques_t *choques_act;   /* datos de choques (para las animaciones), los da or2_choque_coche */
+
 /* -------------------------------------------------------- paso de 1/60.2 */
 static void tick(or2_coche_t *c, const or2_param_t *p, const or2_entrada_t *e)
 {
@@ -695,7 +704,7 @@ static void tick(or2_coche_t *c, const or2_param_t *p, const or2_entrada_t *e)
     float ofs, fbx = 0.0f, fby = 0.0f, tau = 0.0f, blend, ax, ay, alpha;
     v2 v0 = mk(c->vx, c->vy), vp, cl = mk(0.0f, 0.0f);
     float w_p, psi_p, cang = 0.0f;
-    int tiene_bordes;
+    int tiene_bordes, sin_ruedas, sin_arcade;
 
     /* --- entradas (operation_input) --- */
     c->pedal_ac_ant = c->pedal_ac; c->pedal_fr_ant = c->pedal_fr;
@@ -706,6 +715,17 @@ static void tick(or2_coche_t *c, const or2_param_t *p, const or2_entrada_t *e)
     tiene_bordes = (e->dist_izq + e->dist_der) > 0.01f;
     /* event+0x26c con signo: <0 lado izquierdo, >0 lado derecho */
     ofs = tiene_bordes ? (e->dist_izq - e->dist_der) * 0.5f : 0.0f;
+    c->ofs = ofs;
+    /* estado de choque y su animacion (4A2400 / pc_advance_crash_state) */
+    avanza_choque(c);
+    if (c->roce > 0) c->roce--;
+    /* 4F9450: derrapando (deriva trasera de 5,6 a 90 grados a 100 km/h del modelo) se atraviesa el trafico
+       sin reaccion durante 60 cuadros */
+    {
+        int32_t a = iabs(c->s4e);
+        if (c->kmh >= 100 && a > 0x400 && a < 0x4000) c->paso = 60;
+        else if (c->paso > 0) c->paso--;
+    }
 
     /* --- velocidades de rueda (tire_velocity) --- */
     for (i = 0; i < 4; ++i) {
@@ -829,6 +849,10 @@ static void tick(or2_coche_t *c, const or2_param_t *p, const or2_entrada_t *e)
        la componente de arrastre de la fuerza lateral durante el derrape
        y en coches con 0x20a8 = 0; se aplica sin par, como el original. */
     blend = cl01(1.0f - (float)c->d36 * 0.0833333358f) * p->arrastre_lat;
+    /* make_force_work_tire: en choque solo empujan las ruedas en los estados 3, 6 y 7 */
+    sin_ruedas = c->t_choque > 0.0f && !(c->choque == 3 || c->choque == 6 || c->choque == 7);
+    /* CalcPlBody_2nd: en choque (salvo 3 y 6) se anulan las aceleraciones de las capas arcade */
+    sin_arcade = c->t_choque > 9.99999975e-05f && !(c->choque == 3 || c->choque == 6);
     for (i = 0; i < 4; ++i) {
         or2_rueda_t *q = &c->r[i];
         float th = (float)q->ang * U2R, hx = cosf(th), hy = sinf(th);
@@ -844,7 +868,7 @@ static void tick(or2_coche_t *c, const or2_param_t *p, const or2_entrada_t *e)
         ajy = appy - pj * vy + pj * vy * blend;
         la = sqrtf(ajx * ajx + ajy * ajy);
         if (la > 0.0001f) { la = fabsf(q->f_lat) / la; ajx *= la; ajy *= la; }
-        if (!e->en_suelo) { q->fx = q->fy = 0.0f; continue; }
+        if (!e->en_suelo || sin_ruedas) { q->fx = q->fy = 0.0f; continue; }
         pos_rueda(p, i, &x, &y);
         q->fx = f7x + f8x + (ajx - appx);
         q->fy = f7y + f8y + (ajy - appy);
@@ -864,10 +888,48 @@ static void tick(or2_coche_t *c, const or2_param_t *p, const or2_entrada_t *e)
     {
         float v2l = u * u + wl * wl, vm = sqrtf(v2l);
         if (vm > 0.0001f) {
-            float f = v2l * p->cx * p->area * 0.0600224324f;
+            float f = v2l * p->cx * p->area * 0.0600224324f * (1.0f - c->rebufo_k);   /* menos con rebufo */
             fbx -= u / vm * f; fby -= wl / vm * f;
         }
+        /* force_work_49fed0: +282 cuadros de frenada tras un golpe, masa * 4 * (0, .25, .5, .75, 1) kgf contra
+           la velocidad, menos por debajo de 0.1384 m/cuadro */
+        if (c->c282 > 0) {
+            static const float tabla[5] = { 0.0f, 0.25f, 0.5f, 0.75f, 1.0f };
+            int k = c->c282 > 4 ? 4 : c->c282;
+            float am = tabla[k] * p->masa * 4.0f, d = vm * DT;
+            float r = am / (0.138427466f > d ? 0.138427466f : d);
+            c->c282--;
+            fbx -= r * u * DT; fby -= r * wl * DT;
+        }
     }
+    /* RebPlBody (4A62E0): durante el rebote la velocidad sigue el rumbo +286 (sin perder modulo), el cuerpo
+       gira hacia la carretera y no hay capas arcade */
+    if (c->c283 > 0) {
+        int cnt = c->c283;
+        float sp0 = lon2(v0);
+        int16_t yaw = s16(tr(c->psi * R2U)), obj;
+        int32_t q1, q2, raw;
+        v2 d;
+        if (c->rebote == 1) {
+            int16_t dl = s16((int32_t)c->d4e - c->d4c), mid;
+            obj = c->d4e;
+            if (iabs(dl) > 0x400 && (float)dl * ofs < 0.0f) obj = c->d4c;
+            mid = s16((int32_t)obj - (int32_t)s16((int32_t)obj - c->d4c) / 2);
+            c->h286 = s16((int32_t)c->h286 + (int32_t)s16((int32_t)mid - c->h286) / cnt);
+            raw = s16((int32_t)obj - yaw);
+            q1 = raw / cnt;
+            q2 = (int32_t)s16(raw - q1) / cnt;
+            c->psi = angw(c->psi + (float)s16(q1 + q2) * U2R);
+        } else {
+            c->psi = angw(c->psi + (float)((int32_t)c->h288 / 30) * U2R);
+        }
+        d = dir_ang((float)c->h286 * U2R);
+        v0 = mk(d.x * sp0, d.y * sp0);
+        c->s4e = 0; c->s4c = 0;
+        c->c283--;
+        sin_arcade = 1;
+    } else if (c->c284 > 0) c->c284--;
+
     /* ActionForce2 sobre la copia: velocidad y guinada previstas */
     ax = (fbx * fwd.x + fby * izq.x) * G_ACC / p->masa;
     ay = (fbx * fwd.y + fby * izq.y) * G_ACC / p->masa;
@@ -880,7 +942,7 @@ static void tick(or2_coche_t *c, const or2_param_t *p, const or2_entrada_t *e)
     ctrl_agarre_trasero(c, p, ofs);
     ctrl_deriva(c, p);
 
-    if (e->en_suelo) {
+    if (e->en_suelo && !sin_arcade) {
         float speed = lon2(vp);
         /* CorneringCtrl (pcc:296-357): bicicleta cinematica con angulo
            delantero d44+s32 y trasero d46. El original resuelve el centro
@@ -1049,4 +1111,312 @@ void or2_paso(or2_coche_t *c, const or2_param_t *p, const or2_entrada_t *e, floa
         if (n == 8) c->acum = 0.0f;
     }
     salidas(c, p);
+}
+
+/* ======================================================= choques */
+/* PC 62812C: paso de los temporizadores de choque (bits 3C881469, no 1/60) */
+#define DT_CHOQUE 0.0166112948f
+
+/* pc_find_crash_segment + pc_interpolate_crash_keys: Hermite entre claves (t, valor, tangente de salida,
+   tangente de entrada) */
+static float muestra_canal(const or2_canal_t *ch, float t)
+{
+    int lo = 0, hi = 0, resto;
+    const float *a, *b;
+    float d, span, s;
+    if (!ch->k || ch->n <= 0) return 0.0f;
+    resto = ch->n - 1;
+    while (resto && !(ch->k[hi * 4] >= t)) { lo = hi; ++hi; --resto; }
+    if (!resto && t > ch->k[hi * 4]) lo = hi;
+    a = ch->k + lo * 4; b = ch->k + hi * 4;
+    if (lo == hi) return a[1];
+    d = t - a[0]; span = b[0] - a[0];
+    if (!(span > 0.0f)) return a[1];
+    s = d / span;
+    return d * (s - 1.0f) * (s - 1.0f) * a[3] + (2.0f * s * s * s - 3.0f * s * s + 1.0f) * a[1] +
+           (3.0f * s * s - 2.0f * s * s * s) * b[1] + d * s * (s - 1.0f) * b[2];
+}
+
+int or2_pose(const or2_choques_t *q, int estado, float t, int lado, float tr3[3], float gr[3])
+{
+    int i;
+    for (i = 0; i < 3; ++i) tr3[i] = gr[i] = 0.0f;
+    if (!q || !q->ok || estado < 0 || estado >= OR2_ESTADOS_CHOQUE) return 0;
+    if (t >= q->dur[estado]) return 0;
+    for (i = 0; i < 3; ++i) {
+        tr3[i] = muestra_canal(&q->pose[estado][i], t);
+        gr[i] = muestra_canal(&q->pose[estado][3 + i], t);
+    }
+    /* +2F0 >> 7: 1 refleja guinada y balanceo, 2 cabeceo y guinada */
+    if (lado == 1) { gr[1] = -gr[1]; gr[2] = -gr[2]; }
+    else if (lado == 2) { gr[0] = -gr[0]; gr[1] = -gr[1]; }
+    return 1;
+}
+
+/* pc_enter_crash (4A6EA0) para el coche del jugador */
+static void entra_choque(or2_coche_t *c, int estado, int lado)
+{
+    const or2_choques_t *q = choques_act;
+    if (!q || !q->ok || estado < 0 || estado >= OR2_ESTADOS_CHOQUE) return;
+    c->choque = estado;
+    c->lado = lado & 7;
+    c->t_choque = q->dur[estado];
+    c->t_pose = 0.0f;
+    c->t_recup = 0.0f;
+    c->golpe_sonido = 1;
+}
+
+/* pc_advance_crash_state (4A2400) */
+static void avanza_choque(or2_coche_t *c)
+{
+    const or2_choques_t *q = choques_act;
+    float sig;
+    if (c->t_choque > 0.0f) {
+        sig = c->t_choque - DT_CHOQUE;
+        c->t_choque = sig;
+        c->t_pose += DT_CHOQUE;
+        if (!(0.0f < sig)) {
+            c->t_choque = 0.0f;
+            c->t_recup = (q && q->ok) ? q->recup[c->choque] : 0.0f;
+            memset(c->pose_t, 0, sizeof c->pose_t);
+            memset(c->pose_r, 0, sizeof c->pose_r);
+            return;
+        }
+        or2_pose(q, c->choque, c->t_pose, c->lado, c->pose_t, c->pose_r);
+    } else if (c->t_recup > 0.0f) c->t_recup -= DT_CHOQUE;
+}
+
+static uint32_t lee32(const uint8_t *b) { uint32_t v; memcpy(&v, b, 4); return v; }
+
+int or2_carga_choques(const void *datos, uint32_t tam, or2_choques_t *q)
+{
+    const uint8_t *d = (const uint8_t *)datos;
+    uint32_t o = (200 * OR2_COLUMNAS + 162 + 256) * 4, n, i, k;
+    if (!q) return -1;
+    memset(q, 0, sizeof(*q));
+    if (!d || tam < o + 4 + 256 + 4 + 300 + 8 || memcmp(d + o, "MAP1", 4)) return -2;
+    memcpy(q->mapa, d + o + 4, sizeof q->mapa);
+    o += 4 + 256;
+    if (memcmp(d + o, "CHQ1", 4)) return -3;
+    o += 4;
+    q->umbral[0] = (float)lee32(d + o) * 0.00461420696f;      /* km/h del modelo -> m/cuadro (1/216.72) */
+    q->umbral[1] = (float)lee32(d + o + 4) * 0.00461420696f;
+    memcpy(q->rest, d + o + 8, 12);
+    memcpy(q->estado_traf, d + o + 20, 32);
+    memcpy(q->masa, d + o + 52, 12);
+    memcpy(q->reparto, d + o + 64, sizeof q->reparto);
+    o += 64 + sizeof q->reparto;
+    if (o + 8 > tam || memcmp(d + o, "POS1", 4)) return -4;
+    n = lee32(d + o + 4);
+    o += 8;
+    if (n > OR2_ESTADOS_CHOQUE) return -5;
+    for (i = 0; i < n; ++i) {
+        if (o + 8 > tam) return -6;
+        memcpy(&q->dur[i], d + o, 4); memcpy(&q->recup[i], d + o + 4, 4);
+        o += 8;
+        for (k = 0; k < 6; ++k) {
+            uint32_t m;
+            if (o + 4 > tam) return -6;
+            m = lee32(d + o); o += 4;
+            if (o + m * 16 > tam) return -6;
+            q->pose[i][k].n = (int)m;
+            q->pose[i][k].k = (const float *)(const void *)(d + o);   /* PARAM.DAT esta alineado a 4 */
+            o += m * 16;
+        }
+    }
+    q->ok = 1;
+    choques_act = q;
+    return 0;
+}
+
+int or2_columna_modelo(const or2_choques_t *q, int modelo)
+{
+    /* 5051D0 / PS2 18D7B8: modelo >= 15 = preparado (tablas 0/3); partida empezada (35B9B8 != 0) = 1 o 0 */
+    if (!q || !q->ok || modelo < 0 || modelo >= 30) return -1;
+    return (int)q->mapa[modelo >= 15 ? 0 : 1][modelo % 15];
+}
+
+/* 4F9450 / 4F8490 / 4F6FE0 / 4F7BF0 / 4F6820 para el jugador (A) contra otro coche (B) */
+void or2_choque_coche(or2_coche_t *c, const or2_param_t *p, const or2_choques_t *q, or2_otro_t *o)
+{
+    v2 va, vb, dp, rel, jj, ua, nn;
+    float sa, sb, ratio, tb, closing, lj, e, ma, mb, dd;
+    int clase, pesado;
+    (void)p;
+    o->golpe = -1; o->cambia_vel = 0; o->reaccion = 0; o->reparto = 0.5f;
+    if (!q || !q->ok) return;
+    choques_act = q;
+    clase = o->clase < 0 ? 3 : (o->clase > 6 ? 6 : o->clase);
+    pesado = clase <= 2;
+    va = mk(c->vx * DT, c->vy * DT);            /* m/cuadro, como +20 */
+    vb = mk(o->vx * DT, o->vy * DT);
+    sa = lon2(va); sb = lon2(vb);
+    dp = mk(o->dx, o->dy);
+    /* 4F8490: reparto de la separacion; el jugador tiene la clase 0 (no se le asigna) */
+    ratio = (sa + sb) > 0.0f ? sb / (sa + sb) : 0.5f;
+    tb = q->reparto[0 * OR2_CLASES + clase];
+    if (!(tb < ratio)) ratio = tb;
+    o->reparto = ratio;
+    c->golpe_sonido = 1;
+    /* +1030: derrapando no hay reaccion ni intercambio (solo el sonido) */
+    if (c->paso > 0) return;
+    /* roce lateral: los dos quedan marcados (+4 bit 22) y no hay intercambio de velocidad */
+    if (!o->frontal) return;
+    /* ya en choque o recuperandose: ni reaccion ni intercambio */
+    if (c->t_choque > 0.0f || c->t_recup > 0.0f) return;
+    dd = lon2(dp);
+    if (dd < 0.0001f) return;
+    nn = mk(dp.x / dd, dp.y / dd);
+    rel = mk(va.x - vb.x, va.y - vb.y);
+    /* 4F68F0: proyeccion de vA - vB sobre la recta entre los coches */
+    {
+        float pr = rel.x * nn.x + rel.y * nn.y;
+        jj = mk(nn.x * pr, nn.y * pr);
+        lj = fabsf(pr);
+    }
+    /* 4F6960: si el otro queda detras de mi velocidad, el cierre cuenta 0 */
+    ua = sa > 0.0001f ? mk(va.x / sa, va.y / sa) : mk(0.0f, 0.0f);
+    closing = (ua.x * nn.x + ua.y * nn.y) < 0.0f ? 0.0f : lj;
+    /* 4F6FE0: clase de golpe; 1 = salto y derrape del jugador (estado 7) */
+    if (closing > q->umbral[0] || !(sa < q->umbral[0])) {
+        /* lado del golpe: 1 si el otro esta a la derecha del rumbo (refleja la animacion) */
+        int lado = cruz(ua, nn) < 0.0f ? 1 : 0;
+        entra_choque(c, 7, lado);
+        o->reaccion = 1;
+    }
+    /* golpe al otro (476260 / 476040) si el cierre llega a 0.1384 m/cuadro (30 km/h del modelo) */
+    if (!(closing < 0.138427466f)) {
+        if (closing >= q->umbral[0]) o->golpe = pesado ? 19 : 16;
+        else o->golpe = pesado ? 18 : 17;
+    }
+    /* 4F7BF0: intercambio de velocidad */
+    e = lj > q->umbral[1] ? q->rest[2] : (lj > q->umbral[0] ? q->rest[1] : q->rest[0]);
+    ma = q->masa[0];
+    mb = pesado ? q->masa[2] : q->masa[1];
+    (void)jj;
+    {
+        v2 a0 = va, b0 = vb;
+        if (!(lj > q->umbral[0])) {
+            /* cierre bajo: cada uno recibe hasta 80 km/h hacia la velocidad del otro */
+            v2 n1 = unidad(mk(b0.x - a0.x, b0.y - a0.y)), n2 = unidad(mk(a0.x - b0.x, a0.y - b0.y));
+            float s1 = q->umbral[0] > sa ? sa : q->umbral[0], s2 = q->umbral[0] > sb ? sb : q->umbral[0];
+            va = mk(a0.x + n1.x * s1, a0.y + n1.y * s1);
+            vb = mk(b0.x + n2.x * s2, b0.y + n2.y * s2);
+        } else {
+            va = mk(a0.x + (b0.x - a0.x) * ma * e, a0.y + (b0.y - a0.y) * ma * e);
+            vb = mk(b0.x + (a0.x - b0.x) * mb * e, b0.y + (a0.y - b0.y) * mb * e);
+        }
+    }
+    /* 4F6820: en el estado 7 la velocidad no pasa de 1.3843 m/cuadro (300 km/h del modelo) */
+    if (c->t_choque > 0.0f && c->choque == 7) {
+        float s = lon2(va);
+        if (s > 1.38427f) { va.x *= 1.38427f / s; va.y *= 1.38427f / s; }
+    }
+    c->vx = va.x * HZ; c->vy = va.y * HZ;
+    o->vx = vb.x * HZ; o->vy = vb.y * HZ;
+    o->cambia_vel = 1;
+    c->vel_mf = lon2(va);
+    c->kmh = tr(c->vel_mf * 216.720001f);
+}
+
+/* CbwColiWall (5041B0) para el jugador; sin el aplastamiento (pc_cw_crush_status) */
+int or2_choque_muro(or2_coche_t *c, const or2_param_t *p, float nx, float ny, float pen)
+{
+    v2 v = mk(c->vx, c->vy), n = mk(nx, ny), f;
+    float sp = lon2(v), vn, imp, lim;
+    int16_t dl;
+    if (sp < 0.0001f) return 0;
+    vn = v.x * n.x + v.y * n.y;
+    /* calc_wall_impact_angle: 90 grados - acos(|v . n|) */
+    imp = 1.57079637f - acosf(clampf(fabsf(vn) / sp, 0.0f, 1.0f));
+    dl = s16((int32_t)c->d4e - c->d4c);
+    /* rebound_threshold: 5 grados (10 si la curva va hacia el otro lado), 25 rozando o tras un golpe */
+    if (c->kmh >= 50 && c->roce == 0 && c->c282 == 0) {
+        lim = 0.0872664601f;
+        if (iabs(dl) > 0x400 && (float)dl * c->ofs < 0.0f) lim = 0.174532920f;
+    } else lim = 0.436332315f;
+    if (vn < 0.0f && imp >= lim) {
+        /* cw_rebound_status: rumbo del muro (el sentido de la carretera) y rumbo de rebote */
+        int16_t muro = s16(tr(atan2f(ny, nx) * R2U)), dif;
+        if (iabs(s16((int32_t)muro - c->d4c)) >= 0x4000) muro = s16((int32_t)muro - 0x8000);
+        dif = s16((int32_t)c->rumbo_v16 - muro);
+        if (c->c284 == 0 && c->c282 < 24) c->c282 = 24;
+        if (c->kmh >= 100 && c->c284 == 0) {
+            /* calc_rebound_heading: un cuarto de reflexion mas la mitad de la curva que viene */
+            int32_t cuarto = -(int32_t)dif / 4, mitad = (int32_t)dl / 2;
+            if ((mitad + cuarto) * cuarto < 0) mitad = -(cuarto / 2);
+            c->rebote = 1;
+            c->h286 = s16((int32_t)c->rumbo_v16 + mitad + cuarto - dif);
+        } else {
+            c->rebote = 0;
+            c->h286 = s16((int32_t)c->rumbo_v16 - ((int32_t)dif * 5) / 4);
+        }
+        c->v28c = c->vel_mf;
+        c->h288 = s16((int32_t)c->h286 - (int32_t)s16(tr(c->psi * R2U)));
+        c->c283 = 30;
+        c->c284 = 36;
+        c->golpe_sonido = 1;
+        return 1;
+    }
+    /* calc_friction_status: frenada de kmh >> 7 cuadros, el cuerpo gira hacia el muro 2608 unidades por metro
+       de penetracion y la velocidad sigue el muro sin perder modulo */
+    {
+        int b = (c->kmh >> 7) & 255;
+        float giro = pen * 2608.0f * U2R, a;
+        v2 t;
+        if (c->c282 < b) c->c282 = b;
+        c->roce = 2;
+        t = mk(-n.y, n.x);                       /* tangente del muro en el sentido de la marcha */
+        if (t.x * v.x + t.y * v.y < 0.0f) t = mk(-t.x, -t.y);
+        f = dir_ang(c->psi);
+        a = atan2f(cruz(f, t), f.x * t.x + f.y * t.y);   /* >0: la tangente queda a la izquierda */
+        if (fabsf(a) < giro) giro = fabsf(a);
+        c->psi = angw(c->psi + (a > 0.0f ? giro : -giro));
+        if (vn < 0.0f) {
+            v2 w = mk(v.x - n.x * vn, v.y - n.y * vn);
+            float l = lon2(w);
+            if (l > 0.0001f) { c->vx = w.x * sp / l; c->vy = w.y * sp / l; }
+        }
+    }
+    (void)p;
+    return 0;
+}
+
+/* CheckSlipStream (4A4D20) */
+void or2_rebufo(or2_coche_t *c, const or2_otro_t *otros, int n)
+{
+    float best = 0.0f, base, obj, cur;
+    v2 va = unidad(mk(c->vx, c->vy));
+    int i, cnt;
+    for (i = 0; i < n; ++i) {
+        const or2_otro_t *o = otros + i;
+        float d = sqrtf(o->dx * o->dx + o->dy * o->dy), fd, sv, fv, al, fa, sc, vo;
+        v2 vb, to;
+        if (d < 10.0f) d = 10.0f; else if (d > 50.0f) d = 50.0f;
+        fd = 1.0f - (d - 10.0f) * 0.0250000004f;
+        vo = sqrtf(o->vx * o->vx + o->vy * o->vy);
+        sv = vo * DT * 216.720001f;
+        fv = 300.0f > sv ? sv * 0.00333333341f : 1.0f;
+        vb = unidad(mk(o->vx, o->vy));
+        al = cl01(vb.x * va.x + vb.y * va.y);
+        to = unidad(mk(o->dx, o->dy));
+        /* el otro tiene que ir delante, a menos de 20 grados (todo a menos de 5) de su propia velocidad */
+        fa = cl01(((vb.x * to.x + vb.y * to.y) - 0.939692616f) / (0.996194720f - 0.939692616f));
+        sc = fa * al * fv * fd;
+        if (sc > best) best = sc;
+    }
+    c->rebufo = best;
+    /* objetivo = best * acelerador * (1 - freno) * cos(d46), rampa de 180 cuadros */
+    base = (1.0f - (float)c->pedal_fr * 0.00392156886f) * best * (float)c->pedal_ac * 0.00392156886f;
+    obj = cosf((float)c->d46 * U2R) * base;
+    cnt = c->rebufo_n;
+    cur = c->rebufo_k;
+    if ((float)(cnt + 1) * obj * 0.00555555569f > cur) {
+        if (cnt < 180) ++cnt;
+        c->rebufo_n = cnt;
+        c->rebufo_k = (float)cnt * obj * 0.00555555569f;
+    } else if (cnt > 0) {
+        c->rebufo_k = cur - cur / (float)cnt;
+        c->rebufo_n = cnt - 1;
+    } else { c->rebufo_n = 0; c->rebufo_k = 0.0f; }
 }
