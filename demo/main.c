@@ -225,7 +225,6 @@ static void pon_vista(const float *o, const float *mira, float bal)
 typedef struct { float x, y, w, u, v; uint32_t c, o; } pt_t;   /* o: color de desplazamiento */
 static uint32_t vtx_env, vtx_ult;                        /* vertices enviados en el cuadro (y en el anterior) */
 static uint32_t vtx_et, vtx_et_ult;                      /* los de la etapa */
-static float detalle = 1.0f;                             /* escala de la distancia maxima de las mallas pequenas */
 /* ---------------------------------------------------------------- presupuesto del TA (docs/DREAMCAST.md)
    La PowerVR real se cuelga si el TA llena el bufer de parametros (vertices) del cuadro (o el de punteros, OPB);
    Flycast no. Medida en la consola real (demo 12c, GDEMU): 24656 vertices contados y 22012 triangulos llenaron 1 MB
@@ -245,8 +244,9 @@ static float detalle = 1.0f;                             /* escala de la distanc
 #define TA_MARGEN (64 * 1024)                            /* cabeceras vacias de fin de lista y prudencia */
 #define TA_RESERVA_2D (64 * 1024)                        /* minimo para lo 2D (medido: unos 450 vertices) */
 #define TA_BPV_MIN 56                                    /* bytes por vertice contado (>= 42,5 medidos en la consola) */
-/* tope de vertices de la etapa por cuadro (tiempo de CPU: transformar y enviar) y distancia de dibujo minima de la
-   distancia adaptativa (tambien la de salida: el primer cuadro de carrera empieza corto y luego se alarga) */
+/* tope de vertices de la etapa por cuadro (tiempo de CPU: transformar y enviar) y distancia de dibujo minima del
+   recorte de seguridad: la distancia es la del original (LEJOS_PS2) y solo se acorta si un cuadro no cabe (ta_corto o
+   mas de 15 ms de CPU), lo que con la visibilidad y el LOD del original no deberia pasar (docs/DREAMCAST.md) */
 #define VTX_ETAPA_MAX 20000
 #define LEJOS_MIN 600.0f
 static uint32_t ta_bpv = TA_BPV_MIN, ta_vb, ta_et, ta_lim, ta_tope_etapa, ta_corto, ta_v2d, ta_v2d_ult, ta_votros_ult, ta_vmin_otros;
@@ -1942,9 +1942,9 @@ static void nodos_visibles(modelo_t *mo)
    scn_env_fog_<zona> (CURSO.DAT): tramos por posicion de carretera con densidad y color al principio y al final
    (course_environment_progress_44b020 del PC: mezcla lineal dentro del tramo; modo 1 exp, 2 exp2). En la union se
    pasa de la niebla del final de la etapa a la del principio de la siguiente (el original la mezcla por tiempo al
-   cruzar: course_environment_phase_44a000). En la PowerVR va en la tabla de niebla junto con el fundido de la
-   distancia de dibujo (de 0,55 lejos a lejos), que tapa lo que aparece; sin niebla del original (densidad 0), solo el
-   fundido con el color de siempre. */
+   cruzar: course_environment_phase_44a000). En la PowerVR va en la tabla de niebla; solo si la distancia de dibujo se
+   ha tenido que acortar por debajo de la del original (LEJOS_PS2) se le suma un fundido de 0,55 lejos a lejos que tapa
+   lo que aparece (con el color de siempre si la etapa no tiene niebla). */
 static float niebla_d, niebla_d_hecha = -1, niebla_lejos_hecho; static int niebla_modo, niebla_modo_hecho; static uint32_t niebla_c, niebla_c_hecho;
 static void niebla_de(const etapa_t *e, float pos, float *d, int *modo, uint32_t *c)
 {
@@ -1993,6 +1993,7 @@ static void niebla_pon(void)
     for (i = 0; i < 129; i++) {
         float t = i ? (float)(1 << (i >> 4)) * (16 + (i & 15)) / 16.0f : 1.0f, z = lejos / t, f, g;
         f = (z - lejos * 0.55f) / (lejos * 0.45f); f = f < 0 ? 0 : f > 1 ? 1 : f;
+        if (lejos >= LEJOS_PS2) f = 0;                          /* la del original: sin fundido (no lo tiene) */
         g = niebla_d * z; g = niebla_d <= 0 ? 0 : niebla_modo == 2 ? 1 - expf(-g * g) : 1 - expf(-g);
         tab[i] = 1 - (1 - f) * (1 - g);
     }
@@ -2445,7 +2446,7 @@ int main(int argc, char **argv)
 #endif
                 coche_paso(&yo, 0, 0, 0, 0); traf_inicia(SALIDA); efectos_borra();
                 if (fis_ok) { float p[3], th; ruta_en(yo.s, p, &th, NULL, NULL); or2_coloca(&fis, &fpar, th, 0); }
-                lejos = LEJOS_MIN; niebla_paso(); niebla_pon();   /* empieza corta y luego crece */
+                lejos = LEJOS_PS2; niebla_paso(); niebla_pon();   /* la distancia del original */
                 tim_cuadros = tim_zona(cur_nodo, etapa_n); tiempo = tim_cuadros / TIM_HZ; estado = CUENTA; t_estado = 0; t_cuenta = 0; pausa = 0; crono = 0; vmax = 0; pt_inicia();
                 if (cam_ok) { cam_inicia(&cam, &cam_tab); cam_t_choque = 0; }   /* 484EE0 */
             }
@@ -2666,9 +2667,9 @@ int main(int argc, char **argv)
             pvr_list_finish();
         }
 #ifdef DIAG_VTX
-        if (cuadro % 60 == 0) dbglog(DBG_INFO, "DIAG est%d s %.0f/%.0f ram %uK/%uK v%u (etapa %u) tri %u ms %.1f+%.1f lejos %d det %.1f vram %u ta %uK etapa %uK/%uK 2d %u bpv %u real %uK opb %uK%s\n", estado,
+        if (cuadro % 60 == 0) dbglog(DBG_INFO, "DIAG est%d s %.0f/%.0f ram %uK/%uK v%u (etapa %u) tri %u ms %.1f+%.1f lejos %d (%.2f) vram %u ta %uK etapa %uK/%uK 2d %u bpv %u real %uK opb %uK%s\n", estado,
                                      (double)yo.s, (double)longitud, (unsigned)(mallinfo().uordblks >> 10), (unsigned)(mallinfo().fordblks >> 10),
-                                     (unsigned)vtx_env, (unsigned)vtx_et, (unsigned)tri_enviados, (double)ms_log, (double)ms, (int)lejos, (double)detalle, (unsigned)pvr_mem_available(), (unsigned)(ta_vb >> 10),
+                                     (unsigned)vtx_env, (unsigned)vtx_et, (unsigned)tri_enviados, (double)ms_log, (double)ms, (int)lejos, (double)(lejos / LEJOS_PS2), (unsigned)pvr_mem_available(), (unsigned)(ta_vb >> 10),
                                      (unsigned)(ta_et >> 10), (unsigned)(ta_tope_etapa >> 10), (unsigned)ta_v2d, (unsigned)ta_bpv, (unsigned)(ta_real_ult >> 10), (unsigned)(ta_opb_ult >> 10), ta_corto ? " TOPE" : "");
 #endif
         pvr_scene_finish();
@@ -2680,12 +2681,10 @@ int main(int argc, char **argv)
             /* ta_corto: algun cuadro se quedo sin presupuesto (de vertices de la etapa o del TA) y se saltaron mallas;
                se acorta la distancia para que lo que falte sea lo de lejos (antes contaba el coche y el trafico en el
                tope de la etapa y la distancia acababa siempre en el minimo) */
-            if (ms + ms_log > 15.0f || ta_corto) {         /* acorta: la distancia y, en el minimo, el detalle */
+            if (ms + ms_log > 15.0f || ta_corto) {         /* acorta (seguridad: la consola no puede con el cuadro) */
                 if (lejos > LEJOS_MIN) lejos -= 50.0f;
-                else if (detalle > 0.35f) detalle -= 0.1f;
             } else if (ms + ms_log < 11.5f && vtx_et_ult < VTX_ETAPA_MAX * 0.85f && ta_et < ta_tope_etapa / 10 * 8) {
-                if (detalle < 0.95f) detalle += 0.1f;          /* alarga: primero el detalle y luego la distancia */
-                else if (lejos < lejos_obj) lejos += 50.0f;
+                if (lejos < lejos_obj) lejos += 50.0f;         /* vuelve a la del original */
             }
             ta_corto = 0;
             saltos_ver = saltos; saltos = 0;
