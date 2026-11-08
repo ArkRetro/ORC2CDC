@@ -9,6 +9,7 @@
 #include <dc/matrix.h>
 #include <dc/biosfont.h>
 #include <math.h>
+#include <malloc.h>
 #include "../comun/gd.h"
 
 /* ---------------------------------------------------------------- modelos */
@@ -116,6 +117,26 @@ static void tri_recortado(const pt_t *p)
 }
 static uint32_t color_fijo;
 static pt_t pw[256];                                     /* depuracion: si no es 0, color de todas las tiras */
+/* 1/w con FSRRA (1/raiz de w*w; w > 0): mucho mas rapida que la division */
+static inline float inv_w(float w) { float r = w * w; __asm__("fsrra %0" : "+f"(r)); return r; }
+
+/* malla entera delante del plano cercano: cada vertice se transforma y va directo a la PowerVR */
+static void dibuja_malla_directa(const modelo_t *mo, const malla_t *m)
+{
+    const vert_t *v = mo->verts + m->v0; uint32_t i, n = m->n;
+    for (i = 0; i < n; i++, v++) {
+        float x = v->x, y = v->y, z = v->z, w, iw; pvr_vertex_t *d;
+        mat_trans_single3_nodivw(x, y, z, w);
+        iw = inv_w(w);
+        d = pvr_dr_target();
+        d->flags = i == n - 1 ? PVR_CMD_VERTEX_EOL : PVR_CMD_VERTEX;
+        d->x = x * iw; d->y = y * iw; d->z = iw; d->u = v->u; d->v = v->v;
+        d->argb = color_fijo ? color_fijo : v->c; d->oargb = 0;
+        pvr_dr_commit(d);
+    }
+    tri_enviados += n - 2;
+}
+
 static void dibuja_malla(const modelo_t *mo, const malla_t *m)
 {
     const vert_t *v = mo->verts + m->v0; uint32_t i, n = m->n; int detras = 0;
@@ -140,7 +161,7 @@ static void dibuja_malla(const modelo_t *mo, const malla_t *m)
 /* mallas [k0, k1) de la lista l; recorte por esfera con la camara si recorta; sin_niebla para el cielo */
 static void dibuja_rango(const modelo_t *mo, int l, uint32_t k0, uint32_t k1, int recorta, int sin_niebla, int solo_lista)
 {
-    float tanh = 320.0f / fx; uint32_t k; int ult = -2;
+    float tanh = 320.0f / fx; uint32_t k; int ult = -2, seguro = 0;
     for (k = k0; k < k1; k++) {
         const malla_t *m = mo->mallas + k;
         if (solo_lista && (m->tex < 0 || (int)mo->texs[m->tex].lista != l)) continue;
@@ -148,6 +169,7 @@ static void dibuja_rango(const modelo_t *mo, int l, uint32_t k0, uint32_t k1, in
             float dx = m->cx - ojo[0], dy = m->cy - ojo[1], dz = m->cz - ojo[2];
             float zv = dx * ade[0] + dy * ade[1] + dz * ade[2], xv, yv;
             if (zv + m->r < cerca || zv - m->r > lejos) continue;
+            seguro = zv - m->r > cerca * 1.5f && m->n <= 256;
             if (m->dmax > 0 && zv - m->r > m->dmax) continue;
             xv = dx * der[0] + dy * der[1] + dz * der[2];
             yv = dx * arr[0] + dy * arr[1] + dz * arr[2];
@@ -165,7 +187,8 @@ static void dibuja_rango(const modelo_t *mo, int l, uint32_t k0, uint32_t k1, in
             if (m->tex >= 0) pvr_prim(&mo->cabs[sin_niebla][m->tex], sizeof(pvr_poly_hdr_t));
             else pvr_prim(&cab_col[sin_niebla][l], sizeof(pvr_poly_hdr_t));
         }
-        dibuja_malla(mo, m);
+        if (recorta && seguro) dibuja_malla_directa(mo, m);
+        else dibuja_malla(mo, m);
     }
 }
 
@@ -221,6 +244,71 @@ static float altura(float s, float x)
 typedef struct { float s, x, a, v; float pos[3], fw[3], up[3]; int choque; } coche_t;
 static coche_t yo;
 #define VMAX 82.0f
+/* posicion y orientacion en el mundo a partir de (s, x, a), apoyado en la calzada (altura, cabeceo, balanceo) */
+static void coche_coloca(coche_t *c)
+{
+    float p[3], th, t[3], r[3], ca = cosf(c->a), sa = sinf(c->a), hd, ht, hi, hr, rr[3];
+    ruta_en(c->s, p, &th, NULL, NULL);
+    t[0] = sinf(th); t[1] = 0; t[2] = -cosf(th); r[0] = cosf(th); r[1] = 0; r[2] = sinf(th);
+    c->pos[0] = p[0] + c->x * r[0]; c->pos[2] = p[2] + c->x * r[2];
+    c->fw[0] = ca * t[0] + sa * r[0]; c->fw[2] = ca * t[2] + sa * r[2];
+    hd = altura(c->s + 1.6f * ca, c->x + 1.6f * sa); ht = altura(c->s - 1.6f * ca, c->x - 1.6f * sa);
+    hi = altura(c->s, c->x - 0.8f); hr = altura(c->s, c->x + 0.8f);
+    c->pos[1] = 0.25f * (hd + ht + hi + hr);
+    c->fw[1] = (hd - ht) / 3.2f; norm(c->fw);
+    rr[0] = -c->fw[2]; rr[1] = (hr - hi) / 1.6f; rr[2] = c->fw[0]; norm(rr);
+    c->up[0] = rr[1] * c->fw[2] - rr[2] * c->fw[1]; c->up[1] = rr[2] * c->fw[0] - rr[0] * c->fw[2];
+    c->up[2] = rr[0] * c->fw[1] - rr[1] * c->fw[0]; norm(c->up);
+}
+
+/* ---------------------------------------------------------------- trafico */
+#define NCARRIL 6
+#define NTRAF 12
+typedef struct { coche_t c; int carril, modelo; } trafico_t;
+static trafico_t traf[NTRAF];
+static modelo_t mtraf[3];
+static uint32_t semilla = 12345;
+static float azar(void) { semilla = semilla * 1103515245u + 12345u; return ((semilla >> 8) & 0xFFFF) / 65536.0f; }
+static float carril_x(float s, int k)
+{
+    int i; float f; const float *a;
+    if (s < 0) s = 0;
+    if (s > longitud - 0.01f) s = longitud - 0.01f;
+    i = (int)(s / PASO); f = s / PASO - i; a = etapa.ruta + PR * i;
+    return a[5 + NPERF + k] + f * (a[PR + 5 + NPERF + k] - a[5 + NPERF + k]);
+}
+static void traf_nace(trafico_t *t, float s)
+{
+    t->carril = (int)(azar() * NCARRIL) % NCARRIL; t->modelo = (int)(azar() * 3) % 3;
+    t->c.s = s; t->c.v = 22.0f + azar() * 9.0f; t->c.a = 0;
+    t->c.x = carril_x(s, t->carril); coche_coloca(&t->c);
+}
+static void traf_inicia(float s0)
+{
+    int i;
+    for (i = 0; i < NTRAF; i++) traf_nace(traf + i, s0 + 120.0f + i * 110.0f + azar() * 60.0f);
+}
+static void traf_paso(float dt)
+{
+    int i;
+    for (i = 0; i < NTRAF; i++) {
+        trafico_t *t = traf + i; float x0 = t->c.x;
+        t->c.s += t->c.v * dt;
+        if (t->c.s < yo.s - 150.0f || t->c.s > longitud - 20.0f) traf_nace(t, yo.s + 500.0f + azar() * 500.0f);
+        if (t->c.s > longitud - 20.0f) t->c.s = longitud - 20.0f;
+        t->c.x = carril_x(t->c.s, t->carril);
+        t->c.a = atan2f(t->c.x - x0, t->c.v * dt + 1e-4f);
+        coche_coloca(&t->c);
+        /* choque con el jugador: le frena y le aparta */
+        if (fabsf(yo.s - t->c.s) < 4.4f && fabsf(yo.x - t->c.x) < 1.9f) {
+            if (yo.s < t->c.s) { yo.s = t->c.s - 4.4f; if (yo.v > t->c.v) yo.v = t->c.v * 0.6f; }
+            else { yo.s = t->c.s + 4.4f; }
+            yo.x += yo.x > t->c.x ? 0.6f : -0.6f; yo.a *= -0.3f; yo.choque = 2;
+            coche_coloca(&yo);
+        }
+    }
+}
+
 static void coche_paso(coche_t *c, float giro, float gas, float freno, float dt)
 {
     float p[3], th0, th1, iz, de, g, yaw, lim;
@@ -242,20 +330,7 @@ static void coche_paso(coche_t *c, float giro, float gas, float freno, float dt)
     if (c->x > lim) { c->x = lim; if (c->a > 0) c->a = -c->a * 0.3f; c->v -= c->v * 1.5f * dt; c->choque = 1; }
     if (c->a > 1.2f) c->a = 1.2f;
     if (c->a < -1.2f) c->a = -1.2f;
-    {   /* posicion y direccion en el mundo */
-        float t[3] = { sinf(th1), 0, -cosf(th1) }, r[3] = { cosf(th1), 0, sinf(th1) }, ca = cosf(c->a), sa = sinf(c->a);
-        float hd, ht, hi, hr, rr[3];
-        c->pos[0] = p[0] + c->x * r[0]; c->pos[2] = p[2] + c->x * r[2];
-        c->fw[0] = ca * t[0] + sa * r[0]; c->fw[2] = ca * t[2] + sa * r[2];
-        /* altura de la calzada bajo el coche y su inclinacion (cabeceo y balanceo) */
-        hd = altura(c->s + 1.6f * ca, c->x + 1.6f * sa); ht = altura(c->s - 1.6f * ca, c->x - 1.6f * sa);
-        hi = altura(c->s, c->x - 0.8f); hr = altura(c->s, c->x + 0.8f);
-        c->pos[1] = 0.25f * (hd + ht + hi + hr);
-        c->fw[1] = (hd - ht) / 3.2f; norm(c->fw);
-        rr[0] = -c->fw[2]; rr[1] = (hr - hi) / 1.6f; rr[2] = c->fw[0]; norm(rr);
-        c->up[0] = rr[1] * c->fw[2] - rr[2] * c->fw[1]; c->up[1] = rr[2] * c->fw[0] - rr[0] * c->fw[2];
-        c->up[2] = rr[0] * c->fw[1] - rr[1] * c->fw[0]; norm(c->up);
-    }
+    coche_coloca(c);
 }
 
 /* piloto automatico: sigue el centro de la calzada y frena antes de las curvas cerradas */
@@ -270,7 +345,17 @@ static void piloto(const coche_t *c, float *giro, float *gas, float *freno)
         kap = fmaxf(kap, fabsf(tb - ta) / 20.0f);
     }
     ruta_en(c->s + 8.0f, p, &th2, NULL, NULL);
-    xc = (de - iz) * 0.5f;
+    {   /* el carril con el coche de delante mas lejos (y si empata, el mas cercano) */
+        int k, i, mejor = 0; float dmej = -1;
+        for (k = 0; k < NCARRIL; k++) {
+            float d = 300.0f, xk = carril_x(c->s + 30.0f, k);
+            for (i = 0; i < NTRAF; i++)
+                if (traf[i].c.s > c->s - 3.0f && fabsf(traf[i].c.x - xk) < 2.2f) d = fminf(d, traf[i].c.s - c->s);
+            d -= fabsf(xk - c->x) * 0.8f;
+            if (d > dmej) { dmej = d; mejor = k; }
+        }
+        xc = carril_x(c->s + 30.0f, mejor);
+    }
     ad = fmaxf(-0.25f, fminf(0.25f, 0.06f * (xc - c->x)));
     g = fmaxf(0.05f, fminf(c->v / 8.0f, 1.0f) * (1.0f - 0.45f * c->v / VMAX));
     need = (th2 - th) / 8.0f * c->v + (ad - c->a) * 3.0f;
@@ -281,12 +366,12 @@ static void piloto(const coche_t *c, float *giro, float *gas, float *freno)
 }
 
 /* matriz del coche: x del modelo a la derecha, y arriba, el morro (-z) hacia delante */
-static void pon_coche(const coche_t *c)
+static void pon_coche(const coche_t *c, matrix_t mod_coche)
 {
     float r[3];                                                 /* derecha = adelante x arriba */
     r[0] = c->fw[1] * c->up[2] - c->fw[2] * c->up[1]; r[1] = c->fw[2] * c->up[0] - c->fw[0] * c->up[2];
     r[2] = c->fw[0] * c->up[1] - c->fw[1] * c->up[0];
-    memset(mod_coche, 0, sizeof mod_coche);
+    memset(mod_coche, 0, sizeof(matrix_t));
     mod_coche[0][0] = r[0]; mod_coche[0][1] = r[1]; mod_coche[0][2] = r[2];
     mod_coche[1][0] = c->up[0]; mod_coche[1][1] = c->up[1]; mod_coche[1][2] = c->up[2];
     mod_coche[2][0] = -c->fw[0]; mod_coche[2][1] = -c->fw[1]; mod_coche[2][2] = -c->fw[2];
@@ -295,12 +380,13 @@ static void pon_coche(const coche_t *c)
 
 /* ---------------------------------------------------------------- textos */
 static pvr_ptr_t txt_arr, txt_cen;
-static uint16_t buf_arr[512 * 64] __attribute__((aligned(32))), buf_cen[256 * 32] __attribute__((aligned(32)));
-static void texto_arriba(const char *l1, const char *l2)
+static uint16_t buf_arr[512 * 128] __attribute__((aligned(32))), buf_cen[256 * 32] __attribute__((aligned(32)));
+static void texto_arriba(const char *l1, const char *l2, const char *l3)
 {
     memset(buf_arr, 0, sizeof buf_arr);
     bfont_draw_str(buf_arr + 4 * 512 + 4, 512, 1, l1);
-    if (l2) bfont_draw_str(buf_arr + 34 * 512 + 4, 512, 1, l2);
+    if (l2) bfont_draw_str(buf_arr + 32 * 512 + 4, 512, 1, l2);
+    if (l3) bfont_draw_str(buf_arr + 60 * 512 + 4, 512, 1, l3);
     pvr_txr_load(buf_arr, txt_arr, sizeof buf_arr);
 }
 static void texto_centro(const char *s)
@@ -357,13 +443,16 @@ int main(int argc, char **argv)
     int estado = TITULO, auto_ = 0, ver = VER, pausa = 0, l, i, r;
     uint32_t cuadro = 0, bot_ant = 0, t_estado = 0; uint64_t t0, tcpu = 0, c0;
     float cam_y = 0, tiempo = TIEMPO_ETAPA, fps = 0, ms = 0, cam_fw[3] = { 0, 0, -1 }, ttit = 0;
-    char s1[96], s2[96], msg[32] = "";
+    char s1[96], s2[96], s3[96], msg[32] = "";
+    uint64_t c_log = 0, t_log = 0, t_ini = timer_ms_gettime64(); float ms_log = 0, t_carga = 0;
     (void)argc; (void)argv;
 
     /* 1: datos del disco a la RAM (la pantalla de texto aun sin PowerVR) */
     vid_set_mode(DM_640x480, PM_RGB565);
     aviso("OutRun 2006 C2C - demo Dreamcast. Cargando la etapa...");
-    if ((r = lee_modelo(&etapa, "SEG00.DAT")) || (r = lee_modelo(&coche, "COCHE.DAT"))) {
+    if ((r = lee_modelo(&etapa, "SEG00.DAT")) || (r = lee_modelo(&coche, "COCHE.DAT")) ||
+        (r = lee_modelo(&mtraf[0], "TRAF0.DAT")) || (r = lee_modelo(&mtraf[1], "TRAF1.DAT")) ||
+        (r = lee_modelo(&mtraf[2], "TRAF2.DAT"))) {
         sprintf(s1, "No se pudieron leer los datos (%d)", r); aviso(s1); for (;;) thd_sleep(1000);
     }
     ruta_prepara();
@@ -371,7 +460,8 @@ int main(int argc, char **argv)
     pvr_init(&pp);
     pvr_set_bg_color(0.45f, 0.65f, 0.95f);
     txt_arr = pvr_mem_malloc(sizeof buf_arr); txt_cen = pvr_mem_malloc(sizeof buf_cen);
-    if (sube_modelo(&etapa) || sube_modelo(&coche)) {
+    if (sube_modelo(&etapa) || sube_modelo(&coche) || sube_modelo(&mtraf[0]) || sube_modelo(&mtraf[1]) ||
+        sube_modelo(&mtraf[2])) {
         vid_set_mode(DM_640x480, PM_RGB565); aviso("Sin memoria de video para las texturas"); for (;;) thd_sleep(1000);
     }
     for (l = 0; l < 3; l++) for (i = 0; i < 2; i++) {
@@ -383,7 +473,8 @@ int main(int argc, char **argv)
     pvr_fog_table_linear(lejos * 0.55f, lejos);
     memset(&yo, 0, sizeof yo);
     coche_paso(&yo, 0, 0, 0, 0);
-    texto_arriba("", NULL); texto_centro("PULSA START");
+    t_carga = (timer_ms_gettime64() - t_ini) / 1000.0f;
+    texto_arriba("", NULL, NULL); texto_centro("PULSA START");
     t0 = timer_ms_gettime64();
 
     for (;;) {
@@ -391,7 +482,7 @@ int main(int argc, char **argv)
         cont_state_t *st = mc ? (cont_state_t *)maple_dev_status(mc) : NULL;
         uint32_t b = st ? st->buttons : 0, nuevo = b & ~bot_ant;
         float giro = 0, gas = 0, freno = 0, ojo_[3], mira[3];
-        bot_ant = b; t_estado++;
+        bot_ant = b; t_estado++; c_log = timer_us_gettime64();
         if (nuevo & CONT_Y) ver ^= 1;
         if ((nuevo & CONT_DPAD_UP) && lejos < 1500) { lejos += 100; pvr_fog_table_linear(lejos * 0.55f, lejos); }
         if ((nuevo & CONT_DPAD_DOWN) && lejos > 300) { lejos -= 100; pvr_fog_table_linear(lejos * 0.55f, lejos); }
@@ -411,7 +502,7 @@ int main(int argc, char **argv)
             ttit += 1.0f / 60;
             if ((nuevo & CONT_START) || ttit > 8.0f) {
                 auto_ = !(nuevo & CONT_START);
-                memset(&yo, 0, sizeof yo); yo.s = SALIDA; coche_paso(&yo, 0, 0, 0, 0);
+                memset(&yo, 0, sizeof yo); yo.s = SALIDA; yo.x = carril_x(SALIDA, 4); coche_paso(&yo, 0, 0, 0, 0); traf_inicia(SALIDA);
                 tiempo = TIEMPO_ETAPA; estado = CUENTA; t_estado = 0; pausa = 0;
             }
         } else if (estado == CUENTA) {
@@ -428,6 +519,7 @@ int main(int argc, char **argv)
             if (!pausa) {
                 if (auto_) piloto(&yo, &giro, &gas, &freno);
                 coche_paso(&yo, giro, gas, freno, 1.0f / 60);
+                traf_paso(1.0f / 60);
                 tiempo -= 1.0f / 60;
                 if (yo.s >= longitud - 40.0f) { estado = META; t_estado = 0; texto_centro("GOAL!"); }
                 else if (tiempo <= 0) { tiempo = 0; estado = AGOTADO; t_estado = 0; texto_centro("TIEMPO AGOTADO"); }
@@ -457,15 +549,23 @@ int main(int argc, char **argv)
             if (estado == TITULO) sprintf(s1, "OUTRUN 2006 C2C - DEMO DREAMCAST");
             else sprintf(s1, "TIEMPO %3d   %3d km/h   %3d%%%s", (int)ceilf(tiempo), (int)(yo.v * 3.6f),
                          (int)(100 * yo.s / longitud), yo.choque ? "  !" : "");
-            if (ver) sprintf(s2, "%.1f fps %lu tri %.1fms d%d", (double)fps, (unsigned long)tri_enviados, (double)ms, (int)lejos);
-            texto_arriba(s1, ver ? s2 : NULL);
+            if (ver) {
+                pvr_stats_t ps; struct mallinfo mi = mallinfo();
+                pvr_get_stats(&ps);
+                sprintf(s2, "%.1ffps %lutri cpu %.1f+%.1f pvr %.1fms", (double)fps, (unsigned long)tri_enviados,
+                        (double)ms_log, (double)ms, (double)(ps.rnd_last_time / 1000000.0));
+                sprintf(s3, "d%d vb%uK ram%uK vram%uK carga%.1fs", (int)lejos, (unsigned)(ps.vtx_buffer_used >> 10),
+                        (unsigned)(mi.uordblks >> 10), (unsigned)(pvr_mem_available() >> 10), (double)t_carga);
+            }
+            texto_arriba(s1, ver ? s2 : NULL, ver ? s3 : NULL);
         }
 
+        t_log += timer_us_gettime64() - c_log;
         pvr_wait_ready();
         c0 = timer_us_gettime64();
         pvr_scene_begin();
         pon_vista(ojo_, mira);
-        pon_coche(&yo);
+        pon_coche(&yo, mod_coche);
         tri_enviados = 0;
         for (l = 0; l < 3; l++) {
             pvr_list_begin(LISTA[l]);
@@ -481,9 +581,18 @@ int main(int argc, char **argv)
                 mat_load(&vista); mat_apply(&mod_coche);
                 dibuja_rango(&coche, l, coche.inicio[l], coche.inicio[l + 1], 0, 0, 0);
             }
+            for (i = 0; i < NTRAF; i++) {                       /* trafico: solo el que esta delante a la vista */
+                static matrix_t mt __attribute__((aligned(32)));
+                trafico_t *t = traf + i; float dx = t->c.pos[0] - ojo[0], dy = t->c.pos[1] - ojo[1], dz = t->c.pos[2] - ojo[2];
+                float zv = dx * ade[0] + dy * ade[1] + dz * ade[2], xv = dx * der[0] + dy * der[1] + dz * der[2];
+                if (estado == TITULO || zv < -3.0f || zv > 450.0f || fabsf(xv) > zv * (320.0f / fx) + 4.0f) continue;
+                pon_coche(&t->c, mt);
+                mat_load(&vista); mat_apply(&mt);
+                dibuja_rango(&mtraf[t->modelo], l, mtraf[t->modelo].inicio[l], mtraf[t->modelo].inicio[l + 1], 0, 0, 0);
+            }
             if (l == 2) {
-                caja(36, 18, 472, ver ? 64 : 34, 0x90000000);
-                rect_txr(txt_arr, 512, 64, 40, 20, 512, 64, PVR_LIST_TR_POLY);
+                caja(36, 18, 568, ver ? 92 : 34, 0x90000000);
+                rect_txr(txt_arr, 512, 128, 40, 20, 512, 128, PVR_LIST_TR_POLY);
                 if (estado != CARRERA || t_estado < 50 || auto_) rect_txr(txt_cen, 256, 32, 64, 180, 512, 64, PVR_LIST_TR_POLY);
             }
             pvr_list_finish();
@@ -492,7 +601,7 @@ int main(int argc, char **argv)
         tcpu += timer_us_gettime64() - c0;
         if (++cuadro % 30 == 0) {
             uint64_t t1 = timer_ms_gettime64();
-            fps = 30000.0f / (float)(t1 - t0); ms = tcpu / 30000.0f; t0 = t1; tcpu = 0;
+            fps = 30000.0f / (float)(t1 - t0); ms = tcpu / 30000.0f; ms_log = t_log / 30000.0f; t0 = t1; tcpu = 0; t_log = 0;
         }
     }
     return 0;
