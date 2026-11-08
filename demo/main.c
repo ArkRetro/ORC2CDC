@@ -11,6 +11,7 @@
 #include <math.h>
 #include <malloc.h>
 #include "../comun/gd.h"
+#include "../comun/musica.h"
 
 /* ---------------------------------------------------------------- modelos */
 typedef struct { uint32_t w, h, fmt, lista, off, tam; } tex_t;
@@ -529,6 +530,7 @@ static void aviso(const char *s)
 
 /* ---------------------------------------------------------------- juego */
 enum { TITULO, CUENTA, CARRERA, META, AGOTADO };
+#define NPISTAS 3
 /* bifurcacion al final de la primera etapa: rama izquierda y derecha */
 static const char *RAMA_FICH[2] = { "SEG07.DAT", "SEG03.DAT" }, *RAMA_NOMBRE[2] = { "BOSQUE", "INDUSTRIA" };
 static int etapa_n;                                             /* 0: la primera; 1: ya en una rama */
@@ -546,7 +548,7 @@ int main(int argc, char **argv)
     int estado = TITULO, auto_ = 0, ver = VER, pausa = 0, l, i, r;
     uint32_t cuadro = 0, bot_ant = 0, t_estado = 0; uint64_t t0, tcpu = 0, c0;
     float cam_y = 0, tiempo = TIEMPO_ETAPA, fps = 0, ms = 0, cam_fw[3] = { 0, 0, -1 }, ttit = 0;
-    char s1[96], s2[96], s3[96], msg[32] = ""; int aviso_rama = 0;
+    char s1[96], s2[96], s3[96], msg[32] = ""; int aviso_rama = 0, pista = 0;
     uint64_t c_log = 0, t_log = 0, t_ini = timer_ms_gettime64(); float ms_log = 0, t_carga = 0;
     (void)argc; (void)argv;
 
@@ -578,6 +580,7 @@ int main(int argc, char **argv)
     memset(&yo, 0, sizeof yo);
     coche_paso(&yo, 0, 0, 0, 0);
     t_carga = (timer_ms_gettime64() - t_ini) / 1000.0f;
+    musica_inicia(); musica_pon(pista);
     texto_arriba("", NULL, NULL); texto_centro("PULSA START");
     t0 = timer_ms_gettime64();
 
@@ -587,6 +590,7 @@ int main(int argc, char **argv)
         uint32_t b = st ? st->buttons : 0, nuevo = b & ~bot_ant;
         float giro = 0, gas = 0, freno = 0, ojo_[3], mira[3];
         bot_ant = b; t_estado++; c_log = timer_us_gettime64();
+        musica_poll();
         if (nuevo & CONT_Y) ver ^= 1;
         if ((nuevo & CONT_DPAD_UP) && lejos < 1500) { lejos += 100; pvr_fog_table_linear(lejos * 0.55f, lejos); }
         if ((nuevo & CONT_DPAD_DOWN) && lejos > 300) { lejos -= 100; pvr_fog_table_linear(lejos * 0.55f, lejos); }
@@ -604,6 +608,9 @@ int main(int argc, char **argv)
         /* estados */
         if (estado == TITULO) {
             ttit += 1.0f / 60;
+            if (nuevo & (CONT_DPAD_LEFT | CONT_DPAD_RIGHT)) {   /* elegir la musica, como la radio del original */
+                pista = (pista + (nuevo & CONT_DPAD_RIGHT ? 1 : NPISTAS - 1)) % NPISTAS; musica_pon(pista); ttit = 0;
+            }
 #ifdef PRUEBA_JUGADOR
             nuevo |= CONT_START;                                /* prueba: directo a la carrera con el mando */
 #endif
@@ -680,7 +687,7 @@ int main(int argc, char **argv)
 
         /* marcador (cada 6 cuadros) */
         if (cuadro % 6 == 0) {
-            if (estado == TITULO) sprintf(s1, "OUTRUN 2006 C2C - DEMO DREAMCAST");
+            if (estado == TITULO) sprintf(s1, "OUTRUN 2006 C2C - DEMO DC   MUSICA %d/%d <>", pista + 1, NPISTAS);
             else sprintf(s1, "TIEMPO %3d   %3d km/h   %3d%%%s", (int)ceilf(tiempo), (int)(yo.v * 3.6f),
                          (int)(100 * yo.s / longitud), yo.choque ? "  !" : "");
             if (ver) {

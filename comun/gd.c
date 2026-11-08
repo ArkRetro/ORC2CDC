@@ -7,7 +7,12 @@
 
 static uint8_t sec[2048] __attribute__((aligned(32)));
 
-static int lee(uint32_t lba, int n, void *dst) { return cdrom_read_sectors(dst, lba + 150, n); }
+/* por DMA si el destino esta alineado a 32 (la CPU queda libre mientras llegan los datos); si no, PIO */
+static int lee(uint32_t lba, int n, void *dst)
+{
+    return cdrom_read_sectors_ex(dst, lba + 150, n, ((uintptr_t)dst & 31) == 0);
+}
+int gd_lee(uint32_t lba, int n, void *dst) { return lee(lba, n, dst); }
 
 int gd_busca(const char *nombre, uint32_t *lba, uint32_t *tam)
 {
