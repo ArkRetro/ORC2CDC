@@ -24,7 +24,11 @@ los 15 coches, en reposo, con freno y con luces.
      +7C pilotos; +80 pilotos con luces (noche o tunel, car+4 & 0x300); +84 con el freno (car+38 != 0);
      +88 + 0x20 k: rueda k {buje (llanta y neumatico), pinza, disco, disco caliente, x, y, z, caida}: pinza sin el giro
      de la rueda, buje y disco con el; las del lado derecho son registros propios (no hay escalas negativas).
-   Las luces van todas, cada una con su grupo (CEX2), y la demo enciende las que tocan (coche_luces).
+   Las luces van todas, cada una con su grupo (CEX2), y la demo enciende las que tocan (coche_luces); igual los dos
+   discos (+90 y el caliente +94).
+ - Piezas animadas (animadas(), bloque ANI1 detras de SVL1): volante, aleron del modelo 5, faros escamoteables, pinzas
+   y ruedas van en su marco (la inversa de su matriz de reposo) con la pieza en el campo del nodo (<< 8); la demo pone
+   la matriz de cada cuadro como 46AE70 (demo/main.c coche_anima_matrices). El vaciado mira 6 posturas (poses()).
    +0C la sombra plana: en el PC es un RET, pero SLES-53998 la dibuja (subida 1 cm, en la matriz del coche). +08/+10
    los volumenes de sombra: mallas cerradas que el original extruye por la luz (sombra con plantilla: 0x1138b8 de
    SLES-53998, 422550/421740 del PC); van en el bloque SVL1 (volumenes()). No se dibuja (como en el original con
