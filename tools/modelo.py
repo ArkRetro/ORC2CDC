@@ -165,7 +165,7 @@ class Modelo:
         if lista is not None: li = lista
         cc = P.mean(0); rad = float(np.sqrt(((P - cc) ** 2).sum(1).max()))
         dmax = getattr(self, '_dmax', 0.0)
-        if self.limita and dmax == 0.0 and rad < 40: dmax = float(np.clip(rad * 45, 250, 1200))
+        if self.limita and dmax == 0.0 and rad < 40: dmax = float(np.clip(rad * 30, 150, 1000))
         self.mallas.append([li, ti, cc, rad, self.nv, nn, blq, dmax])
         v = np.zeros(nn, dtype=[('x', '<f4'), ('y', '<f4'), ('z', '<f4'), ('u', '<f4'), ('v', '<f4'), ('c', '<u4')])
         v['x'], v['y'], v['z'], v['u'], v['v'], v['c'] = P[:, 0], P[:, 1], P[:, 2], uv[:, 0], uv[:, 1], argb

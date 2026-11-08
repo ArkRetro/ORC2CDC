@@ -20,6 +20,7 @@ typedef struct {
     tex_t *texs; malla_t *mallas; vert_t *verts; float *ruta;
     uint32_t nmallas, nvert, nruta, paso_ruta, ntex, inicio[5];
     uint8_t *datos, *blob; pvr_poly_hdr_t *cabs[2];               /* [0] con niebla, [1] sin niebla (cielo) */
+    pvr_ptr_t *tv;                                                /* texturas en la memoria de video */
 } modelo_t;
 
 static const uint32_t FMT[3] = { PVR_TXRFMT_ARGB1555, PVR_TXRFMT_RGB565, PVR_TXRFMT_ARGB4444 };
@@ -48,9 +49,11 @@ static int sube_modelo(modelo_t *m)
 {
     pvr_poly_cxt_t cx; uint32_t i, f;
     for (f = 0; f < 2; f++) m->cabs[f] = memalign(32, (m->ntex + 1) * sizeof(pvr_poly_hdr_t));
+    m->tv = calloc(m->ntex + 1, sizeof(pvr_ptr_t));
     for (i = 0; i < m->ntex; i++) {
         tex_t *t = m->texs + i; pvr_ptr_t v = pvr_mem_malloc(t->tam);
         if (!v) return -3;
+        m->tv[i] = v;
         pvr_txr_load(m->blob + t->off, v, t->tam);
         for (f = 0; f < 2; f++) {
             pvr_poly_cxt_txr(&cx, LISTA[t->lista], FMT[t->fmt] | PVR_TXRFMT_TWIDDLED, t->w, t->h, v, PVR_FILTER_BILINEAR);
@@ -60,6 +63,15 @@ static int sube_modelo(modelo_t *m)
         }
     }
     return 0;
+}
+
+/* libera un modelo: texturas de la memoria de video, cabeceras y datos */
+static void libera_modelo(modelo_t *m)
+{
+    uint32_t i;
+    for (i = 0; i < m->ntex; i++) if (m->tv && m->tv[i]) pvr_mem_free(m->tv[i]);
+    free(m->tv); free(m->cabs[0]); free(m->cabs[1]); free(m->datos);
+    memset(m, 0, sizeof *m);
 }
 
 /* ---------------------------------------------------------------- camara y dibujo */
@@ -201,7 +213,7 @@ static float *rumbo, longitud;                                  /* rumbo de la c
 static void ruta_prepara(void)
 {
     uint32_t i, n = etapa.nruta; float ant = 0;
-    rumbo = malloc(n * sizeof(float));
+    free(rumbo); rumbo = malloc(n * sizeof(float));
     for (i = 0; i < n; i++) {
         const float *a = etapa.ruta + PR * (i ? i - 1 : 0), *b = etapa.ruta + PR * (i + 1 < n ? i + 1 : n - 1);
         float t = atan2f(b[0] - a[0], -(b[2] - a[2]));            /* t = (sin, 0, -cos): girar a la derecha suma */
@@ -241,17 +253,18 @@ static float altura(float s, float x)
 }
 
 /* ---------------------------------------------------------------- coche */
-typedef struct { float s, x, a, v; float pos[3], fw[3], up[3]; int choque; } coche_t;
+typedef struct { float s, x, a, v; float pos[3], fw[3], up[3]; int choque, derrape; float deriva; } coche_t;
 static coche_t yo;
 #define VMAX 82.0f
 /* posicion y orientacion en el mundo a partir de (s, x, a), apoyado en la calzada (altura, cabeceo, balanceo) */
 static void coche_coloca(coche_t *c)
 {
     float p[3], th, t[3], r[3], ca = cosf(c->a), sa = sinf(c->a), hd, ht, hi, hr, rr[3];
+    float cv = cosf(c->a + c->deriva), sv = sinf(c->a + c->deriva);  /* la carroceria, cruzada al derrapar */
     ruta_en(c->s, p, &th, NULL, NULL);
     t[0] = sinf(th); t[1] = 0; t[2] = -cosf(th); r[0] = cosf(th); r[1] = 0; r[2] = sinf(th);
     c->pos[0] = p[0] + c->x * r[0]; c->pos[2] = p[2] + c->x * r[2];
-    c->fw[0] = ca * t[0] + sa * r[0]; c->fw[2] = ca * t[2] + sa * r[2];
+    c->fw[0] = cv * t[0] + sv * r[0]; c->fw[2] = cv * t[2] + sv * r[2];
     hd = altura(c->s + 1.6f * ca, c->x + 1.6f * sa); ht = altura(c->s - 1.6f * ca, c->x - 1.6f * sa);
     hi = altura(c->s, c->x - 0.8f); hr = altura(c->s, c->x + 0.8f);
     c->pos[1] = 0.25f * (hd + ht + hi + hr);
@@ -314,7 +327,12 @@ static void coche_paso(coche_t *c, float giro, float gas, float freno, float dt)
     float p[3], th0, th1, iz, de, g, yaw, lim;
     ruta_en(c->s, p, &th0, NULL, NULL);
     g = fminf(c->v / 8.0f, 1.0f) * (1.0f - 0.45f * c->v / VMAX);
-    yaw = giro * 1.6f * g;
+    /* derrape: a mas de 90 km/h, girando y con un toque de freno; dura mientras se mantiene el giro */
+    if (!c->derrape && c->v > 25.0f && fabsf(giro) > 0.5f && freno > 0.3f) c->derrape = giro > 0 ? 1 : -1;
+    if (c->derrape && (fabsf(giro) < 0.15f || c->v < 18.0f || giro * c->derrape < 0)) c->derrape = 0;
+    if (c->derrape) freno *= 0.2f;
+    c->deriva += ((c->derrape ? 0.35f * c->derrape : 0) - c->deriva) * 4.0f * dt;
+    yaw = giro * 1.6f * g * (c->derrape ? 1.3f : 1.0f);
     c->a += yaw * dt;
     c->a -= c->a * 0.3f * dt;                                   /* un poco de agarre: el coche se endereza */
     c->v += (gas * 9.5f * (1.0f - c->v / VMAX) - freno * 18.0f - 0.0004f * c->v * c->v - 0.3f) * dt;
@@ -328,8 +346,9 @@ static void coche_paso(coche_t *c, float giro, float gas, float freno, float dt)
     if (c->x < -lim) { c->x = -lim; if (c->a < 0) c->a = -c->a * 0.3f; c->v -= c->v * 1.5f * dt; c->choque = 1; }
     lim = de - 1.0f;
     if (c->x > lim) { c->x = lim; if (c->a > 0) c->a = -c->a * 0.3f; c->v -= c->v * 1.5f * dt; c->choque = 1; }
-    if (c->a > 1.2f) c->a = 1.2f;
-    if (c->a < -1.2f) c->a = -1.2f;
+    {   float am = c->derrape ? 0.45f : 1.2f;                    /* al derrapar, sin cruzarse del todo */
+        if (c->a > am) c->a = am;
+        if (c->a < -am) c->a = -am; }
     coche_coloca(c);
 }
 
@@ -376,6 +395,87 @@ static void pon_coche(const coche_t *c, matrix_t mod_coche)
     mod_coche[1][0] = c->up[0]; mod_coche[1][1] = c->up[1]; mod_coche[1][2] = c->up[2];
     mod_coche[2][0] = -c->fw[0]; mod_coche[2][1] = -c->fw[1]; mod_coche[2][2] = -c->fw[2];
     mod_coche[3][0] = c->pos[0]; mod_coche[3][1] = c->pos[1]; mod_coche[3][2] = c->pos[2]; mod_coche[3][3] = 1.0f;
+}
+
+/* ---------------------------------------------------------------- huellas y humo del derrape */
+#define NHUELLA 256
+#define NHUMO 32
+typedef struct { float p[4][3]; } huella_t;
+static huella_t huellas[NHUELLA]; static int nhuella, huella_sig;
+static float rueda_ant[2][3]; static int hay_ant;
+typedef struct { float p[3], edad; } humo_t;
+static humo_t humos[NHUMO]; static int humo_sig;
+static pvr_ptr_t tex_humo; static pvr_poly_hdr_t cab_humo, cab_huella;
+
+static void efectos_inicia(void)
+{
+    static uint16_t t[32 * 32] __attribute__((aligned(32))); int x, y; pvr_poly_cxt_t cx;
+    for (y = 0; y < 32; y++) for (x = 0; x < 32; x++) {           /* mancha redonda y suave (ARGB4444, lineal) */
+        float d = sqrtf((x - 15.5f) * (x - 15.5f) + (y - 15.5f) * (y - 15.5f)) / 15.5f, a = fmaxf(0, 1 - d);
+        t[y * 32 + x] = ((int)(a * a * 15) << 12) | 0x0EEE;
+    }
+    tex_humo = pvr_mem_malloc(sizeof t); pvr_txr_load(t, tex_humo, sizeof t);
+    pvr_poly_cxt_txr(&cx, PVR_LIST_TR_POLY, PVR_TXRFMT_ARGB4444 | PVR_TXRFMT_NONTWIDDLED, 32, 32, tex_humo, PVR_FILTER_BILINEAR);
+    cx.gen.fog_type = PVR_FOG_TABLE; cx.txr.env = PVR_TXRENV_MODULATEALPHA; pvr_poly_compile(&cab_humo, &cx);
+    pvr_poly_cxt_col(&cx, PVR_LIST_TR_POLY); cx.gen.fog_type = PVR_FOG_TABLE; cx.gen.culling = PVR_CULLING_NONE;
+    pvr_poly_compile(&cab_huella, &cx);
+}
+static void efectos_borra(void) { nhuella = huella_sig = 0; hay_ant = 0; memset(humos, 0, sizeof humos); }
+
+/* cada cuadro: huellas de las ruedas traseras y humo mientras se derrapa */
+static void efectos_paso(const coche_t *c, float dt)
+{
+    int i, k; float r[3] = { -c->fw[2], 0, c->fw[0] }, q[2][3];
+    for (i = 0; i < NHUMO; i++) if (humos[i].edad > 0) { humos[i].edad += dt; humos[i].p[1] += 0.8f * dt; if (humos[i].edad > 1.0f) humos[i].edad = 0; }
+    if (!c->derrape) { hay_ant = 0; return; }
+    for (k = 0; k < 2; k++) {
+        float lado = k ? 0.75f : -0.75f;
+        q[k][0] = c->pos[0] - 1.3f * c->fw[0] + lado * r[0]; q[k][2] = c->pos[2] - 1.3f * c->fw[2] + lado * r[2];
+        q[k][1] = c->pos[1] + 0.04f;
+    }
+    if (hay_ant) for (k = 0; k < 2; k++) {
+        huella_t *h = huellas + huella_sig; float a = 0.13f;
+        h->p[0][0] = rueda_ant[k][0] - a * r[0]; h->p[0][1] = rueda_ant[k][1]; h->p[0][2] = rueda_ant[k][2] - a * r[2];
+        h->p[1][0] = rueda_ant[k][0] + a * r[0]; h->p[1][1] = rueda_ant[k][1]; h->p[1][2] = rueda_ant[k][2] + a * r[2];
+        h->p[2][0] = q[k][0] - a * r[0]; h->p[2][1] = q[k][1]; h->p[2][2] = q[k][2] - a * r[2];
+        h->p[3][0] = q[k][0] + a * r[0]; h->p[3][1] = q[k][1]; h->p[3][2] = q[k][2] + a * r[2];
+        huella_sig = (huella_sig + 1) % NHUELLA; if (nhuella < NHUELLA) nhuella++;
+    }
+    memcpy(rueda_ant, q, sizeof q); hay_ant = 1;
+    {   static int alterna; if (++alterna & 1) { humo_t *h = humos + humo_sig; memcpy(h->p, q[alterna & 2 ? 1 : 0], 12); h->edad = 0.01f; humo_sig = (humo_sig + 1) % NHUMO; } }
+}
+
+static void pt_envia(const float *p, float u, float v, uint32_t c, int fin)
+{
+    float x = p[0], y = p[1], z = p[2], w; pt_t t;
+    mat_trans_single3_nodivw(x, y, z, w);
+    if (w < cerca) return;
+    t.x = x; t.y = y; t.w = w; t.u = u; t.v = v; t.c = c; envia(&t, fin);
+}
+/* en la lista translucida, con la matriz de vista cargada */
+static void efectos_dibuja(void)
+{
+    int i;
+    pvr_prim(&cab_huella, sizeof cab_huella);
+    for (i = 0; i < nhuella; i++) {
+        const huella_t *h = huellas + i;
+        float dx = h->p[0][0] - ojo[0], dz = h->p[0][2] - ojo[2];
+        if (dx * dx + dz * dz > 250.0f * 250.0f || dx * ade[0] + dz * ade[2] < 1.0f) continue;
+        pt_envia(h->p[0], 0, 0, 0x60101010, 0); pt_envia(h->p[1], 0, 0, 0x60101010, 0);
+        pt_envia(h->p[2], 0, 0, 0x60101010, 0); pt_envia(h->p[3], 0, 0, 0x60101010, 1);
+    }
+    pvr_prim(&cab_humo, sizeof cab_humo);
+    for (i = 0; i < NHUMO; i++) {
+        const humo_t *h = humos + i; float t = h->edad, tam, p[4][3]; int k; uint32_t col;
+        if (t <= 0) continue;
+        tam = 0.6f + 2.6f * t; col = ((uint32_t)((1 - t) * 140) << 24) | 0xE0E0E0;
+        for (k = 0; k < 4; k++) {
+            float sx = (k & 1) ? tam : -tam, sy = (k & 2) ? -tam : tam;
+            p[k][0] = h->p[0] + sx * der[0] + sy * arr[0]; p[k][1] = h->p[1] + sx * der[1] + sy * arr[1] + tam * 0.5f;
+            p[k][2] = h->p[2] + sx * der[2] + sy * arr[2];
+        }
+        pt_envia(p[0], 0, 0, col, 0); pt_envia(p[1], 1, 0, col, 0); pt_envia(p[2], 0, 1, col, 0); pt_envia(p[3], 1, 1, col, 1);
+    }
 }
 
 /* ---------------------------------------------------------------- textos */
@@ -429,6 +529,9 @@ static void aviso(const char *s)
 
 /* ---------------------------------------------------------------- juego */
 enum { TITULO, CUENTA, CARRERA, META, AGOTADO };
+/* bifurcacion al final de la primera etapa: rama izquierda y derecha */
+static const char *RAMA_FICH[2] = { "SEG07.DAT", "SEG03.DAT" }, *RAMA_NOMBRE[2] = { "BOSQUE", "INDUSTRIA" };
+static int etapa_n;                                             /* 0: la primera; 1: ya en una rama */
 #define TIEMPO_ETAPA 100.0f
 #ifndef VER
 #define VER 0
@@ -443,7 +546,7 @@ int main(int argc, char **argv)
     int estado = TITULO, auto_ = 0, ver = VER, pausa = 0, l, i, r;
     uint32_t cuadro = 0, bot_ant = 0, t_estado = 0; uint64_t t0, tcpu = 0, c0;
     float cam_y = 0, tiempo = TIEMPO_ETAPA, fps = 0, ms = 0, cam_fw[3] = { 0, 0, -1 }, ttit = 0;
-    char s1[96], s2[96], s3[96], msg[32] = "";
+    char s1[96], s2[96], s3[96], msg[32] = ""; int aviso_rama = 0;
     uint64_t c_log = 0, t_log = 0, t_ini = timer_ms_gettime64(); float ms_log = 0, t_carga = 0;
     (void)argc; (void)argv;
 
@@ -469,6 +572,7 @@ int main(int argc, char **argv)
         cx.gen.fog_type = i ? PVR_FOG_DISABLE : PVR_FOG_TABLE; cx.gen.culling = PVR_CULLING_NONE;
         pvr_poly_compile(&cab_col[i][l], &cx);
     }
+    efectos_inicia();
     pvr_fog_table_color(1.0f, 0.55f, 0.70f, 0.92f);
     pvr_fog_table_linear(lejos * 0.55f, lejos);
     memset(&yo, 0, sizeof yo);
@@ -500,9 +604,17 @@ int main(int argc, char **argv)
         /* estados */
         if (estado == TITULO) {
             ttit += 1.0f / 60;
+#ifdef PRUEBA_JUGADOR
+            nuevo |= CONT_START;                                /* prueba: directo a la carrera con el mando */
+#endif
             if ((nuevo & CONT_START) || ttit > 8.0f) {
                 auto_ = !(nuevo & CONT_START);
-                memset(&yo, 0, sizeof yo); yo.s = SALIDA; yo.x = carril_x(SALIDA, 4); coche_paso(&yo, 0, 0, 0, 0); traf_inicia(SALIDA);
+                if (etapa_n) {                                  /* volver a la primera etapa */
+                    libera_modelo(&etapa);
+                    if (lee_modelo(&etapa, "SEG00.DAT") || sube_modelo(&etapa)) { vid_set_mode(DM_640x480, PM_RGB565); aviso("Error"); for (;;) thd_sleep(1000); }
+                    ruta_prepara(); etapa_n = 0;
+                }
+                memset(&yo, 0, sizeof yo); yo.s = SALIDA; yo.x = carril_x(SALIDA, 4); coche_paso(&yo, 0, 0, 0, 0); traf_inicia(SALIDA); efectos_borra();
                 tiempo = TIEMPO_ETAPA; estado = CUENTA; t_estado = 0; pausa = 0;
             }
         } else if (estado == CUENTA) {
@@ -513,15 +625,37 @@ int main(int argc, char **argv)
             if (auto_ && (nuevo & CONT_START)) { estado = TITULO; ttit = -30; texto_centro("PULSA START"); }
             coche_paso(&yo, 0, 0, 0, 1.0f / 60);
         } else if (estado == CARRERA) {
-            if (t_estado == 50) texto_centro(auto_ ? "DEMO" : "");
+            if (t_estado == 50 && !aviso_rama) texto_centro(auto_ ? "DEMO" : "");
             if (auto_ && (nuevo & CONT_START)) { estado = TITULO; ttit = 9.0f; nuevo = 0; auto_ = 0; }
             else if (nuevo & CONT_START) pausa ^= 1;
             if (!pausa) {
                 if (auto_) piloto(&yo, &giro, &gas, &freno);
                 coche_paso(&yo, giro, gas, freno, 1.0f / 60);
                 traf_paso(1.0f / 60);
+                efectos_paso(&yo, 1.0f / 60);
                 tiempo -= 1.0f / 60;
-                if (yo.s >= longitud - 40.0f) { estado = META; t_estado = 0; texto_centro("GOAL!"); }
+                if (etapa_n == 0 && yo.s >= longitud - 400.0f && yo.s < longitud - 40.0f && t_estado % 30 == 0) {
+                    char b[40]; sprintf(b, "< %s  %s >", RAMA_NOMBRE[0], RAMA_NOMBRE[1]); texto_centro(b); aviso_rama = 1;
+                }
+                if (etapa_n == 0 && yo.s >= longitud - 40.0f) {   /* bifurcacion: la rama del lado por el que va */
+                    int rama = yo.x < carril_x(yo.s, 0) * 0.5f + carril_x(yo.s, NCARRIL - 1) * 0.5f ? 0 : 1;
+                    uint64_t tc = timer_ms_gettime64(); float v = yo.v;
+                    texto_centro("CARGANDO");
+                    pvr_wait_ready(); pvr_scene_begin();
+                    pvr_list_begin(PVR_LIST_OP_POLY); pvr_list_finish();
+                    pvr_list_begin(PVR_LIST_TR_POLY); rect_txr(txt_cen, 256, 32, 64, 200, 512, 64, PVR_LIST_TR_POLY); pvr_list_finish();
+                    pvr_scene_finish(); pvr_wait_ready();
+                    libera_modelo(&etapa);
+                    if (lee_modelo(&etapa, RAMA_FICH[rama]) || sube_modelo(&etapa)) {
+                        vid_set_mode(DM_640x480, PM_RGB565); aviso("No se pudo cargar la etapa siguiente"); for (;;) thd_sleep(1000);
+                    }
+                    ruta_prepara(); etapa_n = 1;
+                    t_carga = (timer_ms_gettime64() - tc) / 1000.0f;
+                    memset(&yo, 0, sizeof yo); yo.s = 40.0f; yo.x = carril_x(40.0f, 4); yo.v = v; coche_paso(&yo, 0, 0, 0, 0);
+                    traf_inicia(yo.s); efectos_borra(); tiempo += 60.0f; aviso_rama = 0;
+                    sprintf(msg, "%s  +60", RAMA_NOMBRE[rama]); texto_centro(msg); t_estado = 0;
+                }
+                else if (yo.s >= longitud - 40.0f) { estado = META; t_estado = 0; texto_centro("GOAL!"); }
                 else if (tiempo <= 0) { tiempo = 0; estado = AGOTADO; t_estado = 0; texto_centro("TIEMPO AGOTADO"); }
             }
         } else {                                                /* META o AGOTADO: el coche se para solo */
@@ -590,10 +724,11 @@ int main(int argc, char **argv)
                 mat_load(&vista); mat_apply(&mt);
                 dibuja_rango(&mtraf[t->modelo], l, mtraf[t->modelo].inicio[l], mtraf[t->modelo].inicio[l + 1], 0, 0, 0);
             }
+            if (l == 2 && estado != TITULO) { mat_load(&vista); efectos_dibuja(); }
             if (l == 2) {
                 caja(36, 18, 568, ver ? 92 : 34, 0x90000000);
                 rect_txr(txt_arr, 512, 128, 40, 20, 512, 128, PVR_LIST_TR_POLY);
-                if (estado != CARRERA || t_estado < 50 || auto_) rect_txr(txt_cen, 256, 32, 64, 180, 512, 64, PVR_LIST_TR_POLY);
+                if (estado != CARRERA || t_estado < 50 || auto_ || aviso_rama) rect_txr(txt_cen, 256, 32, 64, 180, 512, 64, PVR_LIST_TR_POLY);
             }
             pvr_list_finish();
         }
