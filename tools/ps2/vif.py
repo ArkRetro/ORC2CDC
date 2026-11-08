@@ -39,7 +39,7 @@ def datos(m,p,fin):
                 elif vl==1: a=np.frombuffer(raw,'<u2' if usn else '<i2')[:n*vn].reshape(n,vn)
                 elif vl==2: a=np.frombuffer(raw,'u1' if usn else 'i1')[:n*vn].reshape(n,vn)
                 else: a=None
-                if a is not None and vl and modo:
+                if a is not None and modo and (vl or (cmd&0x6f) not in (0x68,0x6c)):
                     a=a.astype(np.int64)
                     if modo==1: a=a+fila[:vn]
                     else: a=fila[:vn]+np.cumsum(a,0); fila[:vn]=a[-1]

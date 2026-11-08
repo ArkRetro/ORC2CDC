@@ -114,8 +114,8 @@ static void tri_recortado(const pt_t *p)
     if (n == 3) { envia(o, 0); envia(o + 1, 0); envia(o + 2, 1); tri_enviados++; }
     else { envia(o, 0); envia(o + 1, 0); envia(o + 3, 0); envia(o + 2, 1); tri_enviados += 2; }
 }
-static pt_t pw[256];
-static uint32_t color_fijo;                                     /* depuracion: si no es 0, color de todas las tiras */
+static uint32_t color_fijo;
+static pt_t pw[256];                                     /* depuracion: si no es 0, color de todas las tiras */
 static void dibuja_malla(const modelo_t *mo, const malla_t *m)
 {
     const vert_t *v = mo->verts + m->v0; uint32_t i, n = m->n; int detras = 0;
@@ -153,6 +153,13 @@ static void dibuja_rango(const modelo_t *mo, int l, uint32_t k0, uint32_t k1, in
             yv = dx * arr[0] + dy * arr[1] + dz * arr[2];
             if (fabsf(xv) > zv * tanh + m->r * 1.3f || fabsf(yv) > zv * tanh * 0.75f + m->r * 1.3f) continue;
         }
+#ifdef DEP_TEX
+        if (recorta && !sin_niebla) {                      /* depuracion: color = numero de textura */
+            if (ult == -2) pvr_prim(&cab_col[1][l], sizeof(pvr_poly_hdr_t));
+            ult = m->tex; color_fijo = 0xFF000000 | ((((m->tex + 1) & 31) << 3) << 16) | (((((m->tex + 1) >> 5) & 7) << 5) << 8) | 0x40;
+            dibuja_malla(mo, m); color_fijo = 0; continue;
+        }
+#endif
         if (m->tex != ult) {
             ult = m->tex;
             if (m->tex >= 0) pvr_prim(&mo->cabs[sin_niebla][m->tex], sizeof(pvr_poly_hdr_t));

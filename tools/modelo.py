@@ -143,7 +143,7 @@ class Modelo:
         tr = {k: (v[a:b] if v is not None and k != 0x6c and len(v) == len(tr[0x68]) else v) for k, v in tr.items()}
         P = tr[0x68].astype(np.float32) + dx; nn = len(P)
         uv = np.zeros((nn, 2))
-        for cl in (0x6d, 0x65):
+        for cl in (0x6d, 0x65, 0x64):                           # UV en 1/4096 (16 o 32 bits)
             if cl in tr and len(tr[cl]) == nn: uv = tr[cl][:, :2].astype(float) / 4096; break
         N = tr[0x69].astype(float) / 32768 if 0x69 in tr and len(tr[0x69]) == nn else np.zeros_like(P)
         if 0x6e in tr and len(tr[0x6e]) == nn:
