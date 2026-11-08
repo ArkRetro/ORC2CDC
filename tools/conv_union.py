@@ -249,7 +249,17 @@ def sol_dat(A, sal):
         reg = blq.registros()[r]; k = struct.unpack('<i', blq.m[blq.A + reg[2][1]:blq.A + reg[2][1] + 4])[0]
         mat = modelo.material_de(blq, reg, k); a = 255 if mat is None else min(255, int(round(mat[3] * 2)))
         for v in mod.verts[k0:]: v['c'] = (np.uint32(a) << 24) | np.uint32(0xFFFFFF)
-    mod.recorta_texturas(); mod.escribe(sal)
+    mod.recorta_texturas()
+    # cada registro anade las texturas del bloque otra vez: una sola copia de cada una (memoria de video)
+    uno = {}; texs = []; rgba = []; blob = b''; nuevo = {}
+    for ti, (w, h, fmt, li, off, tam) in enumerate(mod.texs):
+        k = mod.rgba[ti].tobytes()
+        if k not in uno:
+            uno[k] = len(texs); texs.append((w, h, fmt, li, len(blob), tam)); blob += mod.blob[off:off + tam]; rgba.append(mod.rgba[ti])
+        nuevo[ti] = uno[k]
+    for x in mod.mallas: x[1] = nuevo.get(x[1], -1)
+    mod.texs, mod.rgba, mod.blob = texs, rgba, blob
+    mod.escribe(sal)
     print('SOL.DAT: %d mallas, %d texturas (%d KB)' % (len(mod.mallas), len(mod.texs), len(mod.blob) >> 10))
 
 def m_por_posicion(seg):

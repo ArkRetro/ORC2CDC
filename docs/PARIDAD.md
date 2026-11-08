@@ -36,7 +36,7 @@ Estado: OK (conectado y verificado al nivel indicado), PARCIAL, PROVISIONAL (apr
 | Aceleracion, motor, cambio auto/manual | tabla de parametros 0x2dbc30 (19 col.), par 162 f x 2 (automatico y manual, PAR2), freno 256 f; cambio PS2 0x18d530 | OK | or2_fisica.c clonado; columna por modelo MAP1 | ninguna conocida (`ACEL` = 1 por defecto; `-DACEL=1.35f` da la aceleracion de mas que se pidio antes, no es del juego) | — | H, E |
 | Direccion, derrape (inicio/mantenimiento/salida) | SlipAngleCtrl / RearGripCtrl / CorneringCtrl; temporizador 40 cuadros | OK | decompilacion + banco | ninguna conocida | trazas de entrada comparables con PS2 | H, E |
 | Adherencia por superficie | get_road_mu 500B30, running_resistance 502120, COLI0200 | OK | coli por rueda | ninguna conocida | — | H, E |
-| Choques coche-coche y muro, choque fuerte, grua | 4F9450/4F8490/4F6FE0/4F7BF0, cbw_coli_wall, 5038D0, PlWrecker | PARCIAL | CHQ1/POS1 de PARAM.DAT | grua recoloca en el carril mas cercano (no en la fila de poligonos); avance 10 posiciones x m_pos (CONFIRMADO, antes 25 m supuestos) | — | H, E |
+| Choques coche-coche y muro, choque fuerte, grua | 4F9450/4F9000/4F8490/4F6FE0/4F76E0/4F7BF0/476040/473F30 (ver Choques entre coches), cbw_coli_wall, 5038D0, PlWrecker | PARCIAL | CHQ1/POS1 de PARAM.DAT, CJM1/SEC1 de TRAFC.DAT, efectos de IGC.PAK en SFX.DAT | coche-coche: ver Choques entre coches (PROVISIONALES alli); grua recoloca en el carril mas cercano (no en la fila de poligonos); avance 10 posiciones x m_pos (CONFIRMADO, antes 25 m supuestos) | — | H, E |
 | Camara de carrera | evento CAMERA 385: 4858D0, 484810, 483110, 4A1680 SetCarCamera, 485590/483CE0/4834A0/483600, 4832F0/484A40, 483C10/484BD0 (PS2 0x178500..0x17b540, 0x1817c0) | PARCIAL | demo/camara.c con las tablas CAM1 de PARAM.DAT (vistas 0x2ccd88, por vista y modelo 0x2cd3d8, por modelo 0x2d2838 del fichero SLES) | vista 1 sin interior (no se dibuja el coche); camara de salida en los 60 primeros cuadros de la cuenta (SUPUESTO); sin vista 0x1D (780258 = 0) ni camaras de meta/fin | ver seccion Camara de carrera | E |
 | Trafico (clases, IA, reaccion) | 472090, 472450, 472A50, 47DC10, 4736D0, hit_476040; aparicion 479080 (PS2 0x1dcdd0): 478B90 (0x1dbba0), 4787E0 (0x1db6d0), 4EFB90 (0x1f3818), 4F0030 (0x1f1a88), 46CE30, 478430, 46CC10; cierre 477F60 | PARCIAL | TRAFC.DAT (TRC1, ACL1 y TAP1: tablas de aparicion, velocidad y puntos fijos por etapa); colores (tabla 0x36bc18, modelos 30..43) y materiales en TRAFn.DAT (TCX1) | camino "Lead" de 472450 (velocidad segun el jugador) sin portar: todos a la velocidad del registro; 478640/46CDA0 en la union simplificados; puntos fijos de coches de carreras y de los modelos 39..43 sin coche | ver Trafico: densidad del original | E |
 | Rivales | — | FALTA | — | no hay rivales | — | — |
@@ -45,11 +45,11 @@ Estado: OK (conectado y verificado al nivel indicado), PARCIAL, PROVISIONAL (apr
 | Checkpoints, meta, resultados | 44FF20 / 4515B0 (branch_state 7D38E8) con las banderas +0x3C de COLI0200; 4513C0 meta | OK | ampliacion al pasar la pancarta CHECK POINT del principio de la etapa siguiente (ver Checkpoint); meta del original en las 5 etapas finales (z = 0 de la union); voz y efecto de EXTEND TIME, GOAL y TIME OVER (voces.c) | sin pantalla de resultados ni final del original; sin la voz de GAME OVER (0x154: no hay pantalla de GAME OVER) | — | E |
 | Puntuacion modo OutRun | 4F2DF0, 4F2660, 4F2B20, 4B9770 | PARCIAL | main.c pt_* | posicion de carretera = m_pos de CURSO.DAT (CONFIRMADO; antes 2,5 m supuestos, 3,2 veces los puntos por avance); bonus de etapa en el checkpoint | el salto de +64 al cambiar de curso (PENDIENTE) | E |
 | Eventos, scripts, progresion, misiones | SCRIPTS.PS2 (Races, RaceAttack, OutrunMiles, Req_*) | FALTA | — | — | — | — |
-| Coches del jugador | CARS.PS2 1-32 / 33-63, disposicion 0x3d3ff0; materiales tabla 4/5 del bloque; colores 0x35ad48 (PC 64D120/408C80); mapa de entorno del bloque | PARCIAL | 15 coches montados como 46A560 (port comprobado), con interior, 9320-11195 vertices dibujados; pintura, 8 colores (Y en la seleccion), reflejo y luces (+7C/+80/+84/+60, CEX2) del original | UV de entorno con la formula esferica clasica (la del microcodigo VU1 sin leer); piezas sin animar; sin bits de noche/tunel | ver secciones Coches | E |
+| Coches del jugador | CARS.PS2 1-32 / 33-63, disposicion 0x3d3ff0; materiales tabla 4/5 del bloque; colores 0x35ad48 (PC 64D120/408C80); mapa de entorno del bloque | PARCIAL | 15 coches montados como 46A560 (port comprobado), con interior, 9320-11195 vertices dibujados; pintura, 8 colores (Y en la seleccion), reflejo y luces (+7C/+80/+84/+60, CEX2) del original; piezas animadas (ruedas, volante, aleron, faros, disco caliente, car+F0 y el cuerpo de la fisica; ANI1) | UV de entorno con la formula esferica clasica (la del microcodigo VU1 sin leer); sin bits de noche/tunel | ver secciones Coches | E |
 | Escenarios, texturas, materiales | STAGE.PS2, VQ, scn_env_fog_<zona> | PARCIAL | 15 tramos + 15 uniones; mallas sin textura con su material (tabla 5); niebla del original; tiras (ADC), nodos, LOD y planos del original | sin objetos de tramo (obj_course_obj_cs_*), sol (cs_ENV_* no es de la escena: es del reflejo del coche); niebla mezclada por distancia en la union (el original por tiempo) | — | E |
 | HUD, menus, transiciones | SPRANI/XST, TEXT.PS2 (espanol: SPANISH.bin y XST _sxst) | PARCIAL | HUD.DAT, MENU.DAT; todas las pantallas del menu principal y de un jugador, licencia con VMU, seleccion de coche del original, menu de pausa con AUDIO (ver Menus y Pausa y mezcla) | titulo es un cuadro del video (la pelicula de titulo en bucle detras del rotulo, sin hacer); textos bfont antiguos en la demo automatica y el aviso de rama; rotulos de las filas de opciones (sprites sin localizar) | quitar textos bfont | E |
 | Musica y efectos | MUSIC.PS2, SOUND.PS2 ICS/MENU/FE; volumenes 0x11ae38 / 0x100210 / 0x11b600, SOUNDCD.IRX 0x2118 | PARCIAL | musica.c, sfx.c; mezcla del original (ver Pausa y mezcla) | 48 kHz supuesto; sin sonido por superficie ni del choque fuerte | — | E |
-| Voces (acompanante y locutor) | SOUND.PS2 `\SPANISH\ORC.PAK`, `PERO.pak`; race_robots 489A90/488D80 = PS2 0x202e60..0x205cac; 4B93E0, 4B9CD0, 49C9C0, 499020, GAME 0x1b83e8 | OK | VOCES.DAT (conv_sonido.py), voces.c; verificado en Flycast (ver Voces y video) | una voz nueva corta la anterior (SUPUESTO); "choque con otro coche" = contacto con impulso del trafico (traf_choca) en un choque; sin voces de asustada/trompo (solo Coast 2 Coast) | — | E |
+| Voces (acompanante y locutor) | SOUND.PS2 `\SPANISH\ORC.PAK`, `PERO.pak`; race_robots 489A90/488D80 = PS2 0x202e60..0x205cac; 4B93E0, 4B9CD0, 49C9C0, 499020, GAME 0x1b83e8 | OK | VOCES.DAT (conv_sonido.py), voces.c; verificado en Flycast (ver Voces y video) | una voz nueva corta la anterior (SUPUESTO); "choque con otro coche" = +4 0x4000000 del jugador (4F7BF0 le ha cambiado la velocidad) en un choque; sin voces de asustada/trompo (solo Coast 2 Coast) | — | E |
 | Peliculas (titulo y atraccion) | MV.PS2 ts50/attr50.pss; 0x12d480, ADVERTISE 0x25e1d8 | OK | MVTS.VQV / MVATTR.VQV (conv_video.py), video.c | VQ de la PowerVR a 512x256 estirado a 640x480 (el original: MPEG-2 640x480); al arrancar y por inactividad del titulo, en vez de la demo de carrera | — | E |
 | Cargas y estabilidad | — | PARCIAL | carga en segundo plano, mutex del GD | — | medir en GDEMU | E |
 | Rendimiento / TA en consola real | — | PARCIAL | tope global del TA (DREAMCAST.md) | primer cuelgue medido en la consola (VB lleno a 24656 vtx) | esperar prueba R de la demo 14+ | E (R pendiente) |
@@ -241,11 +241,12 @@ estaba y se dice lo que falta). Estado: CORREGIDO, SE QUEDA (ya era del original
 | Trafico: reaparece a 550..1100 m si queda 150 m detras | 477F60 cierra con distancia < -2 o > 60 posiciones; 4787E0 abre a 50 posiciones (0x32; 35 en la union pasada la 120) cada max(3, registro +5) posiciones | -2 / +60 / +50 (35) posiciones, separacion del registro (12..20 en el curso) | CONFIRMADO | CORREGIDO (2026-11-08: separacion del registro de aparicion y caso de la union) |
 | `NTRAF 11` (todas las plazas llenas) | tope 20 (0x14) x densidad 46CD60 (1 fuera de la red) x registro +4 de 4EFB90 (por tramo), mas los puntos fijos de 478B90 | registro +4: 0..12 en el curso (PALM 5/5/3/0/4, LAKE 12/7/5/2/3) | CONFIRMADO (tablas TAP1) | CORREGIDO (NTRAF 16 = plazas; cuantos abre lo dice el registro) |
 | Velocidad del trafico 36-50 m/s al azar | 4F0030 (PS2 0x1f1a88): registro de 0x46 bytes del sitio del coche (+0xC i16 x K5B43A4 = 0,0046142, PS2 0x1dba94), tabla 84BF60 copiada por 4EFAF0 del descriptor +0x84 (PS2) | 100 km/h del modelo (27,7 m/s) en todo el curso | CONFIRMADO | CORREGIDO (la velocidad por clase y el camino "Lead" de 472450 siguen sin portar) |
-| Trafico: frenar a 0,9 del de delante a < 10 m, carril libre 15/30 m y 25 m al nacer | el original tiene choques entre coches de trafico (4F9450) | — | PROVISIONAL | SE QUEDA |
-| Trafico: vuelta al centro del carril 0,02 m/cuadro | 6280EC = 0,02 (ese tope si); la vuelta (473620) sin portar | — | PROVISIONAL | SE QUEDA |
-| Caja de choque con el jugador: medio largo + 2,3 m, ancho + 1 m | 4F9450: cajas de los dos coches (520950 / disposicion) | — | PROVISIONAL | SE QUEDA |
+| Trafico: frenar a 0,9 del de delante a < 10 m y carril libre 15/30 m al cambiar | el original tiene choques entre coches de trafico (4F9450) | ahora portados | CONFIRMADO | CORREGIDO (2026-11-08: quitados; 25 m al nacer = 43EB60, se queda) |
+| Trafico: vuelta al centro del carril 0,02 m/cuadro | 6280EC = 0,02 es un tope (B08 no se acerca a 0 mas de eso); lo que lo devuelve es 473D10 (x 0,995 o 0,05 apartandose del jugador) y los cambios de carril | 473D10 portado (PS2 0x1e77e0) | CONFIRMADO | CORREGIDO (2026-11-08) |
+| Caja de choque con el jugador: medio largo + 2,3 m, ancho + 1 m | cajas del descriptor 520950 de los dos modelos, esquinas contra bordes (4F9000) | CJM1/TRC1 | CONFIRMADO | CORREGIDO (2026-11-08) |
+| Golpe al trafico: deriva segun la posicion lateral relativa, animacion reflejada segun el lado, fuerza del sonido por diferencia de velocidad | 476040: +B58 por +26C del jugador, 4A6EA0 con lado 0, efectos por tabla | — | CONFIRMADO | CORREGIDO (2026-11-08) |
 | Muro a 1 m del limite | CbwColiWall con los puntos de la carroceria | — | PROVISIONAL | SE QUEDA |
-| Altura y orientacion del coche: 4 muestras a 1,6/0,8 m | suspension y contactos de las ruedas | — | PROVISIONAL (solo dibujo) | SE QUEDA |
+| Altura y orientacion del coche: 4 muestras a 1,6/0,8 m | suspension y contactos de las ruedas | — | PROVISIONAL (solo dibujo; encima van la altura, el cabeceo y el balanceo de la fisica y car+F0: Coches: piezas animadas) | SE QUEDA |
 | Escala de puntos por avance (x10, x110) | PS2 0x28F984 / 4F2DF0 (K628244, K5C68E0) | igual | CONFIRMADO | SE QUEDA (ahora con m_pos) |
 | Piloto automatico de la demo (DEMO del titulo) | el original pasa la pelicula de MV.PS2 (ahora tambien la demo: video.c) | — | invento propio (solo si faltan las peliculas, o pruebas) | SE QUEDA |
 | META/AGOTADO: freno 0,6 y vuelta al titulo a los 600 cuadros | el original conduce solo hasta el final (camaras 4853D0..) | — | PROVISIONAL | SE QUEDA |
@@ -356,6 +357,48 @@ y -0,3 gr de cabeceo; viraje a 150 km/h 347/195 delante y 0,7 gr de balanceo. Ma
 Volante (opcion 4): eje 32 -> 0 (zona muerta), 64 -> 42, 127 -> 125; de 0 a 127 en 8 cuadros, de 127 a 0 en mas de 10.
 Flycast (-DPRUEBA_AUTO -DPRUEBA_FISICA, resumen cada segundo): hasta el checkpoint de LAKE sin incidencias, cargas
 entre 166 y 479 kgf, cabeceo -0,15..0,03 gr, balanceo +-0,9 gr.
+
+## Choques entre coches (2026-11-08)
+
+Auditoria del choque jugador-trafico y trafico-trafico contra el PC (race_traffic.cpp) y SLES-53998 (capstone): la
+estructura de PS2 es la del PC, con los mismos desplazamientos del coche. Codigo: comun/or2_fisica.c (or2_contacto,
+or2_choque_coche, or2_choque_trafico), demo/main.c (traf_choques, traf_choca, traf_golpeado, traf_recupera,
+traf_esquiva). Datos: TRAFC.DAT (tools/conv_trafico.py) lleva ahora CJM1 (registro 4866C0 y caja 520950 de los modelos
+0..29 del jugador: clase 5, radio 2,2..2,5) y SEC1 (tabla de efectos 4F65D0/4F67A0, PS2 0x3de318); SFX.DAT
+(tools/conv_sonido.py) lleva los efectos de \\IGC.PAK que usan (0x47, 0x49, 0x4a, 0x4c, 0x4f, 0x5e, 0x64, 0x65,
+0x66, 0x67); sfx.c admite 48 muestras y 4 canales de efectos.
+
+| Paso | Original (PC / PS2) | Antes en la demo | Ahora |
+|---|---|---|---|
+| deteccion | 4F9450 (PS2 0x191fa0): radios 4866C0+0x18, altura (+2DC - radio/2 > alto de la caja del otro: no se tocan); 4F9000/4F8E70/4F86C0 (0x196850/0x196c40/0x196e00): cada esquina de una caja del pose anterior al actual contra los 4 bordes de la otra (epsilon 1e-8, filtro por la diagonal de la esquina) | rectangulo en coordenadas de carretera, +2,3 m / +1 m inventados | igual (en el plano; solo la caja 0) |
+| separacion | 4F8490: el cruce mas largo, sin su componente a lo largo del borde, repartido vB/(vA+vB) con el minimo de la tabla [clase A*7+B]; el jugador es la clase 5 (0x17e288) | reparto con la fila 0 | fila 5: contra coches de calle y pesados el jugador se lleva toda la separacion (contra la clase 4, al menos la mitad); al trafico solo la parte a lo largo (su IA lo devuelve a carril+B08 cada cuadro) |
+| reaccion del jugador | 4F6FE0 (0x1942d8): roce (+4 0x400000, sin cambio de velocidad) si una esquina del otro entra por mis lados o morro contra morro, si mis esquinas de cola entran, o si mi esquina entra en su lado mas alla del 5 % de cola; mismo coche en 120 cuadros (+DA0/+DA4) = roce; me dan por detras = sin reaccion; estado 7 si cierre > 80 km/h del modelo o (otro con +320 != 3 y yo >= 80); golpe al otro si cierre >= 30 | cualquier contacto por delante o detras; estado 7 si iba a >= 80 contra todo | igual; los coches de calle tienen +320 = 3: a menos de 80 de cierre no hay salto |
+| lado del estado 7 | 4F6640: esquinas/bordes de la caja (derecha 0 = sin reflejar) | invertido | igual |
+| reaccion del trafico | 4F76E0 (0x194f48): roce por los mismos bordes; el trafico (+4 bit 0 a 0) nunca toma estado propio: solo el efecto 4F67A0 tipo 0 | — | igual |
+| golpe al trafico | 476040 (0x1ec620): estado 16/17 coche, 19/18 pesado (475F70, cierre 80), lado 0, +B58 0xB/0xC por +26C del jugador, +B60 = +B64 = 120, v = 1,5 x la del jugador (la pisa el intercambio), efecto 0x4f/0x5e/0x64/0x65 | lado por posicion relativa, animacion reflejada | igual |
+| intercambio | 4F7BF0 (0x195708), solo si el +2C8 del jugador <= 1,2e-7 antes de reaccionar, sin derrape (+1030) y el otro sin choque: cierre <= 80: += unidad(vO - vS) x min(v, 80 km/h); si no += (vO - vS) x masa (1; 0,7; 0,1 pesados) x e (1/0,9/0,8); el trafico guarda el modulo (+1C4) | durante la recuperacion no habia intercambio; el trafico guardaba la componente a lo largo | igual (en la recuperacion, +2F8, si hay intercambio) |
+| estado 7 | 4F6820 (0x1960e8): tope 1,3843 m/cuadro; POS1: 1,5 s, salto de 0,5 m, guinada +-2 gr, balanceo +-6 gr | igual | igual |
+| derrapando | +1030 = 60 con >= 100 km/h y deriva 0x400..0x4000: hay separacion (no se atraviesa), sin reaccion ni intercambio, efecto tipo 0 | igual salvo el efecto | igual |
+| en cadena | +B64 = 120 saca al golpeado de la pasada (no choca con nadie); el resto del trafico si choca entre si (4F76E0 + 4F7BF0) | sin choques entre trafico | igual; solo reacciona el ultimo coche tocado de cada uno |
+| recuperacion | 473F30 (0x1e7ef0): 120 cuadros derivando 0,2/cuadro (hasta +-12) mientras siga dentro (+268 > 0 / +264 < 0); al acabar, los pesados cambian de carril; los coches de calle siguen con su B08 | carril +-0,5 como borde; vuelta al centro 0,02/cuadro inventada | bordes de la carretera (en la union, los de su calzada); vuelta por 473D10 (0x1e77e0) y los cambios de carril |
+| efectos | 4F65D0 (jugador, tipo 3 golpe, 0 roce/derrape) por familia del otro (coche, camion 39..43, autobus 31), cada 60 cuadros (+D22); 4F67A0 del trafico (si esta a menos de 100 m de la camara) | ICS del muro con fuerza inventada | igual (SE de la tabla; la profundidad se mide desde el jugador) |
+| puntos y voz | 4F2860: el ultimo tocado sin puntos si al jugador le cambio la velocidad (+4 0x4000000), a la mitad si no; la voz de choque lee el mismo bit | golpe o cambio del otro | igual |
+
+Banco (tools/c/prueba_fisica.c con TRAFC=TRAFC.DAT, m6; km/h del modelo; "a mano" = 4F68F0/4F7BF0 con CHQ1):
+alcance 150 a 100: cierre 65, sin salto, 165 -> 85 (a mano 85), el otro 100 -> 180 (180), golpe 17; 250 a 100: cierre
+157, estado 7, 257 -> 116 (116), otro -> 199 (199), golpe 16; 420 a 100: 422 -> 164 (164), otro -> 280; desfase
++-1,2 m: lado 0 / 1 como 4F6640; laterales (15 gr y de lado): roce, sin cambio de velocidad; frontal: roce (morro
+contra morro); me alcanza a 250 yendo a 100: 108 -> 236 (236), sin salto; derrapando: sin cambio, efecto de roce;
+autobus 150 a 100 y 90 a 70: estado 7 (+320 = 0), golpe 18, efectos 0x847 + 0x849. POS1: 16 vuela (3 m, vuelta y
+media), 17 trompo (720 gr), 18 sacudida, 19 vuelco (-82 gr de balanceo), 3 s, sin +2F8.
+Flycast (-DPRUEBA_GUION -DPRUEBA_EMBISTE -DPRUEBA_TRAFICO -DDIAG_CHOQUE; capturas en scratchpad choques2/a_*.png):
+golpe a 64 km/h de velocimetro -> estado 7, el otro estado 16 (vuela) y a 47; roce largo con el autobus (separacion,
+sin cambio de velocidad, mismo coche en +DA0) y empujon por detras; 65 s de -DPRUEBA_AUTO: 11 roces laterales, sin
+choques en cadena ni incidencias.
+PROVISIONAL: solo la caja 0 (camiones con remolque 39..43 no estan en la demo); sin el filtro +300 < K(5E0AC0) ni
++329 > 10 de la pasada (constantes sin localizar en PS2); la profundidad de camara de 4F67A0 se mide desde el jugador;
+lane_range (46D0C0) con la calzada por carriles 0..2 / 3..5; el rumbo del pose anterior del trafico es el de su
+avance (sin +2E8 ni cabeceo/balanceo).
 
 ## Checkpoint
 
@@ -512,9 +555,62 @@ Diferencias encontradas y su causa:
   del tope de 46E110), innecesario con el tope del TA. Verificado en E (hoja en el scratchpad, dist/hoja.png).
 - Coche del jugador: el original no tiene LOD (46AE70 dibuja su disposicion entera; los LOD de 4866C0 de los modelos
   0..29 solo los usa 4AE0F0, el dibujo de los otros coches). Se queda entero.
-- PENDIENTE: luces del trafico (+10/+14: noche y freno); animaciones (volante con car+204, giro y direccion de las ruedas, aleron
-  del Enzo con la velocidad, faros escamoteables al abrirse, disco +94 con car+1F4); los bits de noche y tunel
-  (SCN_EFC) para +80 y +60; suspension (car+130 y car+F0 de la fisica).
+- PENDIENTE: luces del trafico (+10/+14: noche y freno); los bits de noche y tunel (SCN_EFC) para +80 y +60 (y
+  para abrir los faros escamoteables: coche_ban en demo/main.c se queda a 0); direccion de las ruedas del trafico
+  (car+32 del trafico sin localizar) y su car+F0 (4A2910 con car+D34).
+
+## Coches: piezas animadas (como 46AE70 / 469600)
+
+Queja del probador: "las ruedas cuando haces el derrape no se ve como giran" y detalles del coche que no se animan.
+Antes todo el coche era una malla fija en reposo. Ahora (tools/conv_coche.py llamadas(pose) / animadas, bloque ANI1
+de CEX2; tools/conv_trafico.py bloque TAN1; demo/main.c coche_anima_paso / coche_anima_matrices / coche_dibuja /
+traf_dibuja) cada pieza animada va en su marco (la inversa de su matriz de reposo; la pieza en el campo del nodo << 8)
+y la demo le pone cada cuadro la matriz del original:
+
+- Ruedas (46AE70, ruedas fuera de car+F0): T(car+130) Rz(caida +A4) Ry(rueda +32) -> pinza; Rx(rueda +30) -> buje y
+  discos. +30 avanza -omega x 65536 / 2 pi / 60,2 por paso (advance_angle de pc_wheel_dynamics, 501190 / 4A0000):
+  en la demo -fis.r[k].omega x dt, la velocidad angular de cada rueda de la fisica, asi que en el derrape las traseras
+  giran a otra velocidad que las delanteras (medido en Flycast: 289 / 337 rad/s detras contra 198 / 213 delante).
+  +32 = fis.r[k].ang (toe + car+32 en las delanteras: hasta 14 grados de contravolante en la prueba de derrape).
+  car+130: x y z de la disposicion +98 (constructor 4A5830); y = car+134 de CopyCarWork 4A1140 (fis.rueda_y).
+  CONFIRMADO (decompilacion del PC; mismo orden de operaciones que conv_coche.py, que esta comprobado contra 46A560).
+- Cuerpo: el original dibuja el coche en car+14 = CG - R (0, +224, 0) con la R del cuerpo de la fisica; la demo lo
+  ponia en la calzada (coche_coloca) sin la suspension. Ahora el coche (carroceria y ruedas) va ademas con la altura del
+  CG (fis.alt), el cabeceo y el balanceo de ActionForce2 alrededor del CG, menos alt_cg. PROBABLE (car+14 de
+  CopyCarWork; los desplazamientos x y z de work+220/+228 se toman 0). Consecuencia: la geometria de la suspension de
+  PARAM.DAT es la misma en las 19 columnas (radio 0,314 / 0,329, anclaje 0,465), no la del modelo: en reposo el centro
+  de la rueda queda a 0,316 / 0,328 m del suelo; con las ruedas de radio 0,345 del Enzo (+08 de 4866C0) hunden 1-3 cm
+  y las de 0,308 del Testarossa quedan 1-2 cm por encima. Es lo que sale de las formulas del PC; sin comprobar en PS2
+  (no se ha localizado CopyCarWork en SLES-53998).
+- car+F0 (CheckReverseCar 4A2910, en GamePlCar_Ctrl por 4A7690): T(0, subida) Rx(cabeceo) Rz(balanceo) sobre el
+  cuerpo. Subida = base + base x (0,5 + rand / 32768) x 0,6667 x sin(fase) x a / 2 con car+1F4 > 100 (base = +1C / 2
+  del registro de 4866C0 = 5 mm); cabeceo = (x < 0 ? +20 t : +24 (1 - t)) x x^2 x 0,4053 acotado a [+20, +24] (x =
+  car+1CC, media de 30 cuadros de 1000 x el cambio de velocidad, 4A2D70; t = car+1F4 / 480): el morro baja al frenar
+  hasta 1,2-2,5 grados y sube al acelerar hasta 1,5-3; balanceo 0 en el jugador (solo con car+4 & 1 = 0). +1C..+2C de
+  4866C0 leidos del ELF de PS2 (registros localizados por firma como en conv_trafico.py). CONFIRMADO (PC).
+- Volante: T(+4C) Rx(+58) Rz(-car+204 x 2 pi / 65536 x 0,41667); car+204 = media de 30 cuadros de -car+32 acotado
+  a +-5461 y x 6 (4A4710). Se ve por los cristales (en carrera la vista interior no se dibuja). CONFIRMADO (PC).
+- Aleron del modelo 5 (+18 en +1C y la luz 0x4001a): Rx(roof_angle): x = car+1C4 x 216,72 x 0,72917; hasta 300 baja
+  hasta -17,5 grados, de 300 a 350 vuelve a 0. Palanca de los demas: fija (el original no la mueve). CONFIRMADO (PC).
+- Faros escamoteables (+64 en +68): Rx(car+2FC), +78 / +74 por cuadro con car+4 & 0x500 hasta +78 (entonces 0x800, que
+  enciende la luz +60). La demo no tiene los bits de noche (coche_ban = 0): se quedan cerrados como de dia. Probado
+  forzando la noche (GTO: se levantan 55 grados en 1 s).
+- Disco caliente (+94 de la rueda): en vez del +90 con car+38 > 200 y car+1F4 != 0 (grupos G_DISCO / G_DISCO_CAL de
+  CEX2; coche_luces). CONFIRMADO (PC). En COCHE06 anade su textura: +6 KB de VRAM.
+- Rueda "borrosa" a alta velocidad: el original no la tiene (46AE70 / 469600 no cambian de pieza ni de textura con la
+  velocidad; la disposicion no tiene otra rueda). No se hace.
+- Seleccion de coche: el original no anima nada (4A5B20 llama a 4A2910 y 4A4710 con el coche parado): todo en reposo.
+- Trafico cerca (LOD 0 y 1, 4AD530): cada rueda T(+3C..) [Ry(pi) las del otro lado] Rx(-car+40 / -car+44, con el
+  signo cambiado al otro lado); 47E780 suma a +40 y +44 +1C4 / radio (+08 de 4866C0) cada cuadro (traf_giro en la
+  demo, con la velocidad del coche de trafico). Sin direccion (car+32 del trafico sin localizar).
+- Vaciado (tope del TA): una pieza que se mueve destapa lo de detras, asi que un triangulo se queda si se ve desde
+  alguna camara en alguna de 6 posturas (giro de rueda cada 60 grados, direccion y volante a +-30 grados y al centro,
+  faros abiertos y aleron abajo en la mitad; margenes de vaciado, no datos del juego: 30 grados es el tope de car+32 en
+  4A4710). Los dos discos no tapan y se vacian. Vertices dibujados 9374-11674 (antes 9320-11195): el 575 11674, el
+  F40 11511, el F430 11288, el Enzo 11212 y el 550 11091 pasan del tope de 11000 (el TA lo reparte ta_cabe).
+- Verificado: render de referencia (llamadas con una postura) contra el .DAT con las matrices de la demo (0,00-0,11 %
+  de pixeles distintos en el Testarossa y el GTO, 1,5 % en el Enzo desde camaras bajas fuera del vaciado) y Flycast
+  con PRUEBA_GUION (hoja en el scratchpad, ruedas/hoja.png).
 
 ## Graficos: tiras, nodos, recorte y distancia (como el original)
 
@@ -621,6 +717,11 @@ inventada. Causas y arreglo:
 - PENDIENTE: mezcla de cielo en la union, sol, entorno lejano, objetos animados de BK; probar en R.
 
 ## Ultimo cambio verificado
+
+Choques entre coches (2026-11-08): auditoria completa (ver Choques entre coches): cajas 520950, esquinas contra bordes,
+reparto con la clase 5 del jugador, roces, estado 7 solo con cierre > 80 (o pesados), lado del original, choques
+trafico-trafico, recuperacion 473F30 y vuelta 473D10, efectos SE del original. Verificado: banco (cuenta a mano),
+demo sin avisos, Flycast.
 
 Fisica (2026-11-08): auditoria completa contra el PC y SLES-53998 (ver Fisica: auditoria): error de los coeficientes
 de ass_compulsive_move, suspension y cargas del original, volante del mando del original, cambio manual completo, curva de
