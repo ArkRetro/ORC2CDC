@@ -39,7 +39,7 @@
 #include "sfx.h"
 
 #define MAX_CAPAS 8
-#define MAX_MUESTRAS 32
+#define MAX_MUESTRAS 48       /* ICS + menus + golpes entre coches (38 en SFX.DAT) */
 #define D_ORIG 0.37f            /* factor de volumen del original tras su rampa inicial */
 #define CANAL_MAX 144.0f        /* 0x11b768: el volumen del canal (0..127 de la carrera) se divide por 144 */
 #define MASTER_MAX 144.0f       /* 0x11b7b0: volumen general (0x530fb4, 0x11ae38) / 144 */
@@ -93,8 +93,8 @@ static int master = 144;        /* volumen general del controlador de sonido (0.
 #endif
 static float golpe_x = -1.0f, golpe_vol;
 static int listo;
-#define N_CANAL_MENU 2
-static int canal_menu[N_CANAL_MENU] = { -1, -1 }, menu_turno;
+#define N_CANAL_MENU 4          /* un golpe entre coches suena hasta 3 efectos en el mismo cuadro (4F65D0, 476040, 4F67A0) */
+static int canal_menu[N_CANAL_MENU] = { -1, -1, -1, -1 }, menu_turno;
 #define MAX_VOCES 64
 
 typedef struct {                /* como en VOCES.DAT */

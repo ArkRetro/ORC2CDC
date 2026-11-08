@@ -3,6 +3,7 @@
  *
  * gcc -O2 -std=c99 -Wall -I../../comun prueba_fisica.c ../../comun/or2_fisica.c -lm -o prueba_fisica
  * ./prueba_fisica PARAM.DAT [columna|m<modelo>] [SLES_539.98|-] [choques]
+ * TRAFC=TRAFC.DAT (tools/conv_trafico.py): cajas de los coches para las pruebas de choque entre coches
  *
  * PARAM.DAT de tools/conv_param.py (tabla, curvas y bloques de choques). "m6" elige la columna del modelo 6
  * (Testarossa) con la tabla de columnas del juego. "choques" solo hace la aceleracion y las pruebas de choques.
@@ -318,33 +319,133 @@ static void prueba_cambios(const or2_param_t *p)
     }
 }
 
-/* un coche de trafico delante a v_otro (m/s), el jugador llega a hud km/h; desfase lateral dx (m) */
-static void prueba_alcance(const or2_param_t *p, float hud, float v_otro, float dx, int clase, float stick)
+/* --- choques entre coches con las cajas del original (TRAFC.DAT de tools/conv_trafico.py: TRC1 del trafico, CJM1 de los
+   coches del jugador y SEC1 de los efectos; variable de entorno TRAFC) */
+typedef struct { int modelo, clase, se, k320; float radio, caja[7]; } trafc_t;   /* 48 bytes, como en TRAFC.DAT */
+static trafc_t trc[9], cjm[30];
+static int hay_cajas;
+static void carga_trafc(void)
 {
-    or2_coche_t c;
-    or2_entrada_t e;
-    or2_otro_t o;
-    int i;
-    float v = fis_de_hud(p, hud), antes;
-    or2_coloca(&c, p, 0.0f, v);
-    entrada_libre(&e);
-    e.acelerador = 1.0f; e.stick = stick;
-    for (i = 0; i < (stick != 0.0f ? 60 : 30); ++i) or2_paso(&c, p, &e, 0.0f);
-    antes = c.velocidad_hud;
-    memset(&o, 0, sizeof o);
-    o.dx = dx + sinf(c.rumbo_vel) * 4.5f; o.dy = cosf(c.rumbo_vel) * 4.5f; o.vx = 0.0f; o.vy = v_otro; o.clase = clase; o.frontal = 1;
-    or2_choque_coche(&c, p, &choques, &o);
-    printf("  %5.0f km/h contra %4.1f m/s (%3.0f km/h) clase %d dx %.1f: queda a %5.1f km/h, estado %d (%.2f s), "
-           "otro a %4.1f m/s lat %4.1f, golpe %d, reparto %.2f\n", antes, v_otro, v_otro * p->hud * 3.6f, clase,
-           dx, sqrtf(c.vx * c.vx + c.vy * c.vy) * p->hud * 3.6f, c.t_choque > 0 ? c.choque : -1, c.t_choque, o.vy, o.vx, o.golpe, o.reparto);
-    printf("      despues (gas a fondo, volante %.1f):", stick);
-    for (i = 1; i <= (int)(2.0f * HZ); ++i) {
+    static unsigned char d[65536]; FILE *f; size_t sz; uint32_t n;
+    const char *ruta = getenv("TRAFC");
+    if (!ruta || !(f = fopen(ruta, "rb"))) return;
+    sz = fread(d, 1, sizeof d, f); fclose(f);
+    if (sz < 8 || memcmp(d, "TRC1", 4)) return;
+    memcpy(&n, d + 4, 4);
+    if (n != 9 || sz < 68 + 8 + 30 * sizeof(trafc_t) || memcmp(d + sz - 68, "SEC1", 4) ||
+        memcmp(d + sz - 68 - 8 - 30 * sizeof(trafc_t), "CJM1", 4)) return;
+    memcpy(trc, d + 8, sizeof trc);
+    memcpy(cjm, d + sz - 68 - 30 * sizeof(trafc_t), sizeof cjm);
+    memcpy(choques.se, d + sz - 64, sizeof choques.se); choques.se_ok = 1;
+    hay_cajas = 1;
+}
+static int traf_de_modelo(int m) { int i; for (i = 0; i < 9; ++i) if (trc[i].modelo == m) return i; return -1; }
+#define KMH_M 0.00461420696f   /* km/h del modelo -> m/cuadro */
+/* El jugador (modelo del banco) en (0, 0) con rumbo 0 a v_jug km/h del modelo (velocidad del modelo, no la del
+   velocimetro); el coche de trafico del modelo m delante a dy m, desplazado dx, con rumbo ang grados y v_otro km/h del
+   modelo. Se avanza cuadro a cuadro (posiciones con la velocidad, el jugador con or2_paso sin entrada salvo gas) hasta
+   el primer contacto; ahi se separa, se llama a or2_choque_coche y se compara con la cuenta a mano de 4F7BF0. */
+static void prueba_contacto(const or2_param_t *p, const char *nombre, float v_jug, int m, float v_otro, float dx, float dy,
+                            float ang, int derrape)
+{
+    or2_coche_t c; or2_entrada_t e; or2_forma_t fa, fb; or2_contacto_t k; or2_otro_t o;
+    const trafc_t *tj = cjm + (p->modelo >= 0 && p->modelo < 30 ? p->modelo : 6), *tt;
+    float x = 0.0f, y = 0.0f, bx = dx, by = dy, br = ang * 0.0174532925f, vb, i_a_x, i_a_y;
+    int i, it = traf_de_modelo(m);
+    if (it < 0) { printf("  %s: sin el modelo %d en TRAFC.DAT\n", nombre, m); return; }
+    tt = trc + it;
+    or2_coloca(&c, p, 0.0f, v_jug * KMH_M * HZ);
+    entrada_libre(&e); e.acelerador = 1.0f;
+    vb = v_otro * KMH_M * HZ;
+    for (i = 0; i < 600; ++i) {
+        float pxa = x, pya = y, pra = c.rumbo_cuerpo, qxa = bx, qya = by;
+        float va_x, va_y, vb_x = sinf(br) * vb, vb_y = cosf(br) * vb, sa, sb, rp, lj, ee, dpx, dpy, l, pr, ma, mb;
+        int lado_mano;
         or2_paso(&c, p, &e, 0.0f);
-        if (i % 20 == 0)
-            printf(" [%.1fs %3.0fkm/h beta %4.1f guin %5.1f pose(y %.2f g %.2f)]", i * DT, c.velocidad_hud,
-                   c.beta * 57.29578f, c.guinada * 57.29578f, c.pose_t[1], c.pose_r[1] * 57.29578f);
+        if (derrape) c.paso = 60;                               /* +1030: derrapando (5,6..90 grados a 100 km/h) */
+        x += c.vx * DT; y += c.vy * DT; bx += vb_x * DT; by += vb_y * DT;
+        fa.x = x; fa.y = y; fa.rumbo = c.rumbo_cuerpo; fa.xa = pxa; fa.ya = pya; fa.rumbo_a = pra;
+        memcpy(fa.caja, tj->caja, sizeof fa.caja); fa.radio = tj->radio; fa.pose_y = c.pose_t[1];
+        fb.x = bx; fb.y = by; fb.rumbo = br; fb.xa = qxa; fb.ya = qya; fb.rumbo_a = br;
+        memcpy(fb.caja, tt->caja, sizeof fb.caja); fb.radio = tt->radio; fb.pose_y = 0.0f;
+        if (!or2_contacto(&fa, &fb, &k)) continue;
+        /* 4F8490 */
+        va_x = c.vx; va_y = c.vy; sa = sqrtf(va_x * va_x + va_y * va_y); sb = vb;
+        rp = or2_reparto(&choques, 5, tt->clase, sa, sb);
+        x -= rp * k.sep[0]; y -= rp * k.sep[1]; bx += (1.0f - rp) * k.sep[0]; by += (1.0f - rp) * k.sep[1];
+        memset(&o, 0, sizeof o);
+        o.dx = bx - x; o.dy = by - y; o.vx = vb_x; o.vy = vb_y; o.clase = tt->clase; o.k320 = tt->k320;
+        o.modelo = tt->modelo; o.se = tt->se; o.id = 1; o.k = &k;
+        /* la cuenta a mano (4F68F0 / 4F7BF0 con las tablas de CHQ1), en m/cuadro */
+        dpx = o.dx; dpy = o.dy; l = sqrtf(dpx * dpx + dpy * dpy);
+        pr = ((va_x - vb_x) * dpx + (va_y - vb_y) * dpy) / (l * HZ);
+        lj = fabsf(pr);
+        ee = lj > choques.umbral[1] ? choques.rest[2] : (lj > choques.umbral[0] ? choques.rest[1] : choques.rest[0]);
+        ma = choques.masa[0]; mb = choques.masa[tt->clase <= 2 ? 2 : 1];
+        if (lj > choques.umbral[0]) {
+            i_a_x = va_x + (vb_x - va_x) * ma * ee; i_a_y = va_y + (vb_y - va_y) * ma * ee;
+        } else {
+            float nx = vb_x - va_x, ny = vb_y - va_y, nl = sqrtf(nx * nx + ny * ny), s = fminf(sa / HZ, choques.umbral[0]) * HZ;
+            i_a_x = va_x + (nl > 0 ? nx / nl * s : 0); i_a_y = va_y + (nl > 0 ? ny / nl * s : 0);
+        }
+        lado_mano = dx < -0.05f ? 1 : 0;                        /* 4F6640: por la derecha (o centrado: la esquina 0 del otro, a
+                                                                   la derecha) 0 = sin reflejar; por la izquierda 1 */
+        or2_choque_coche(&c, p, &choques, &o);
+        printf("  %-34s cuadro %3d: bordes A [%d %d %d %d] B [%d %d %d %d] esq A %d%d%d%d reparto %.2f cierre %.0f km/h\n",
+               nombre, i, k.borde_a[0], k.borde_a[1], k.borde_a[2], k.borde_a[3], k.borde_b[0], k.borde_b[1], k.borde_b[2],
+               k.borde_b[3], k.esq_a[0], k.esq_a[1], k.esq_a[2], k.esq_a[3], rp, lj * 216.72f);
+        printf("      jugador %3.0f -> %3.0f km/h (a mano %3.0f%s) estado %d lado %d (a mano %d) | otro %3.0f -> %3.0f km/h"
+               " (a mano %3.0f) golpe %d | roce %d impulso %d | efectos", sa / HZ * 216.72f,
+               sqrtf(c.vx * c.vx + c.vy * c.vy) / HZ * 216.72f, sqrtf(i_a_x * i_a_x + i_a_y * i_a_y) / HZ * 216.72f,
+               o.impulso ? "" : ", sin cambio", c.t_choque > 0 ? c.choque : -1, c.lado, lado_mano, sb / HZ * 216.72f,
+               sqrtf(o.vx * o.vx + o.vy * o.vy) / HZ * 216.72f,
+               (lj > choques.umbral[0] ? sqrtf(powf(vb_x + (va_x - vb_x) * mb * ee, 2) + powf(vb_y + (va_y - vb_y) * mb * ee, 2))
+                                       : (sb + fminf(sb / HZ, choques.umbral[0]) * HZ)) / HZ * 216.72f, o.golpe, o.roce, o.impulso);
+        for (i = 0; i < o.se_n; ++i) printf(" 0x%x", o.se_id[i]);
+        printf("\n");
+        if (c.t_choque > 0.0f) {
+            float t0 = c.t_choque;
+            printf("      estado %d: %.2f s; pose:", c.choque, t0);
+            for (i = 1; i <= (int)(t0 * HZ) + 2; ++i) {
+                or2_paso(&c, p, &e, 0.0f);
+                if (i % 15 == 0)
+                    printf(" [%.2fs y %.2f gui %5.1f bal %5.1f %3.0fkm/h]", i * DT, c.pose_t[1], c.pose_r[1] * 57.29578f,
+                           c.pose_r[2] * 57.29578f, c.velocidad / HZ * 216.72f);
+            }
+            printf(" recup %.2f s\n", c.t_recup);
+        }
+        return;
     }
-    printf("\n");
+    printf("  %-34s sin contacto\n", nombre);
+}
+static void prueba_coches(const or2_param_t *p)
+{
+    int i;
+    carga_trafc();
+    if (!hay_cajas || !hay_choques) { printf("\n(sin TRAFC.DAT con CJM1/SEC1: export TRAFC=...)\n"); return; }
+    printf("\n== Choques entre coches (cajas 520950; jugador modelo %d: x %.3f..%.3f z %.3f..%.3f radio %.1f) ==\n",
+           p->modelo, cjm[p->modelo].caja[3], cjm[p->modelo].caja[0], cjm[p->modelo].caja[5], cjm[p->modelo].caja[2],
+           cjm[p->modelo].radio);
+    for (i = 0; i < 9; ++i)
+        printf("  trafico modelo %d clase %d +320 %d +31C %d radio %.2f caja x %.3f z %.3f..%.3f alto %.2f\n", trc[i].modelo,
+               trc[i].clase, trc[i].k320, trc[i].se, trc[i].radio, trc[i].caja[0], trc[i].caja[5], trc[i].caja[2], trc[i].caja[1]);
+    printf("  estados del trafico 16..19: %.2f %.2f %.2f %.2f s (recup %.2f %.2f %.2f %.2f); estado 7 %.2f s recup %.2f\n",
+           choques.dur[16], choques.dur[17], choques.dur[18], choques.dur[19], choques.recup[16], choques.recup[17],
+           choques.recup[18], choques.recup[19], choques.dur[7], choques.recup[7]);
+    printf("  efectos SEC1:"); for (i = 0; i < 16; ++i) printf(" %x", choques.se[i]); printf("\n");
+    prueba_contacto(p, "alcance 150 a 100 (cierre bajo)", 150, 30, 100, 0.0f, 12.0f, 0.0f, 0);
+    prueba_contacto(p, "alcance 250 a 100 (cierre medio)", 250, 30, 100, 0.0f, 12.0f, 0.0f, 0);
+    prueba_contacto(p, "alcance 420 a 100 (cierre alto)", 420, 30, 100, 0.0f, 15.0f, 0.0f, 0);
+    prueba_contacto(p, "alcance 250 a 100 desfase der. 1,2", 250, 30, 100, 1.2f, 12.0f, 0.0f, 0);
+    prueba_contacto(p, "alcance 250 a 100 desfase izq. 1,2", 250, 30, 100, -1.2f, 12.0f, 0.0f, 0);
+    prueba_contacto(p, "lateral: el otro entra 15 gr", 200, 30, 200, 2.6f, 0.3f, -15.0f, 0);
+    prueba_contacto(p, "lateral: entro yo de lado", 200, 30, 200, 2.2f, 0.0f, -6.0f, 0);
+    prueba_contacto(p, "frontal 150 contra 100", 150, 30, 100, 0.0f, 20.0f, 180.0f, 0);
+    prueba_contacto(p, "me alcanza (el otro a 250, yo 100)", 100, 30, 250, 0.0f, -10.0f, 0.0f, 0);
+    prueba_contacto(p, "derrapando 250 a 100", 250, 30, 100, 0.0f, 12.0f, 0.0f, 1);
+    prueba_contacto(p, "autobus 150 a 100", 150, 31, 100, 0.0f, 15.0f, 0.0f, 0);
+    prueba_contacto(p, "autobus 90 a 70 (cierre 20)", 90, 31, 70, 0.0f, 15.0f, 0.0f, 0);
+    prueba_contacto(p, "pesado modelo 34 (clase 4) 250 a 100", 250, 34, 100, 0.0f, 12.0f, 0.0f, 0);
 }
 
 /* muro a la izquierda (normal +x), el coche a hud km/h con angulo ang grados hacia el muro */
@@ -446,13 +547,7 @@ static void prueba_choques(const or2_param_t *p)
            choques.masa[0], choques.masa[1], choques.masa[2]);
     printf("  estado 7: %.2f s; trafico 16..19: %.2f %.2f %.2f %.2f s\n", choques.dur[7], choques.dur[16],
            choques.dur[17], choques.dur[18], choques.dur[19]);
-    printf("-- alcanzar a un coche (por detras):\n");
-    prueba_alcance(p, 120.0f, 36.0f, 0.0f, 3, 0.0f);
-    prueba_alcance(p, 200.0f, 36.0f, 0.0f, 3, 0.0f);
-    prueba_alcance(p, 280.0f, 40.0f, 0.0f, 3, 0.0f);
-    prueba_alcance(p, 280.0f, 40.0f, 1.2f, 3, 0.0f);
-    prueba_alcance(p, 200.0f, 36.0f, 0.0f, 0, 0.0f);
-    prueba_alcance(p, 200.0f, 36.0f, 0.0f, 3, 0.6f);
+    prueba_coches(p);
     printf("-- muro:\n");
     prueba_muro(p, 200.0f, 2.0f);
     prueba_muro(p, 200.0f, 8.0f);

@@ -493,9 +493,23 @@ def visibilidad_de(seg, blq):
         if c > cub: mejor, cub = v, c
     return mejor
 
-def convierte(seg, n, sal, mundo=None, cielo=True):
-    """el segmento seg (numero n) a sal; mundo: transformacion al marco del curso (transforma)"""
+def pon_cielo(mod, cielo, luz=None):
+    """el cielo de la etapa como lo dibuja el original (SKY, 4521C0 de la decompilacion del PC): del banco del cielo
+    (descriptor de tramo +0x44, obj_course_obj_sky_<zona>) los objetos +0x4C y +0x50 (grupo 0, el que se ve siempre) y
+    +0x54 (grupo 1, solo en el fundido de un cielo al siguiente); el +0x48 es el del cubo del reflejo del coche
+    (451C20) y no va. cielo = (bloque, registros del grupo 0, registros del grupo 1). Las mallas van en la lista 3 con
+    el grupo en el campo del nodo (-256 - grupo) y la luz del entorno 0 del original (luz: modelo.luz_entorno)"""
+    blq, g0, g1 = cielo; mod.luz = luz
+    for g, regs in ((0, g0), (1, g1)):
+        if regs: mod.bloque(blq, registros=set(regs), lista=3, sin_textura='material', nodo_fijo=-256 - g)
+    mod.luz = None
+
+def convierte(seg, n, sal, mundo=None, cielo=True, luz=None):
+    """el segmento seg (numero n) a sal; mundo: transformacion al marco del curso (transforma). cielo: True (el bloque
+    que parece cielo, entero), False (sin cielo) o (bloque, grupo 0, grupo 1) del descriptor (pon_cielo). luz: (luz
+    del entorno 1, la de la etapa; luz del entorno 0, la del cielo) del original (modelo.luz_entorno) o None"""
     mod = modelo.Modelo()
+    if isinstance(cielo, tuple): pon_cielo(mod, cielo, luz[1] if luz else None)
     for blq in seg.bloques:
         if blq.o == seg.o:
             # el bloque principal (cs_CS_<zona>), con la tabla de nodos por secciones de la etapa
@@ -504,10 +518,12 @@ def convierte(seg, n, sal, mundo=None, cielo=True):
             t = visibilidad_de(seg, blq)
             v = None if t is None else {r: (set(range(regs[r][0][0])) if any(t[r]) else set()) for r, regs in
                                         ((r, blq.registros()) for r in range(blq.w[0]))}
+            mod.luz = luz[0] if luz else None
             mod.bloque(blq, objetos=True, sin_textura='material', vis=v)
+            mod.luz = None
             if v is not None: print('registros sin nodos en la tabla (no se dibujan): %s' % [r for r in v if not v[r]])
         elif es_cielo(blq):
-            if cielo: mod.bloque(blq, lista=3, sin_textura='material')   # el cielo: alrededor de la camara, sin niebla
+            if cielo is True: mod.bloque(blq, lista=3, sin_textura='material')   # alrededor de la camara, sin niebla
         # los otros no son de la escena: cs_ENV_<zona> (con su tabla cs_ENV_<zona>_bin) solo lo dibuja el cubo del reflejo
         # del coche (race_env_model_44cd30, desde cube_scene / 414340 en la decompilacion del PC); obj_course_obj_cs_<zona>
         # tampoco lo dibuja la geometria de la etapa (race_area_geometry_44de10)

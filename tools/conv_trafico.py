@@ -26,6 +26,9 @@ Ademas TRAFC.DAT con lo que el juego sabe de cada modelo de trafico, sacado del 
          Registros de 4866C0 (0x44 bytes por modelo) y descriptores de 520950 (0x3C por modelo), localizados por firma.
   'ACL1' + u32 7 + 7 x 5 f32 la tabla por clase de 472090 / 47E780 (5B3E08 del PC): velocidad de referencia (km/h del
          modelo), aceleracion, frenada, aceleracion fuerte y frenada fuerte (m/cuadro por cuadro).
+  'TAP1' (ver aparicion), y detras:
+  'CJM1' + u32 30 + por modelo del jugador 0..29 el mismo registro que TRC1 (clase 5, radio y caja de 520950).
+  'SEC1' + 16 u32: efectos del golpe entre coches de 4F65D0 / 4F67A0 ([tipo * 4 + familia], ver tabla_se_golpe).
 Con --solo-tablas solo se escribe TRAFC.DAT. Sale de tu disco: no se distribuye."""
 import os, struct, sys, zlib
 import numpy as np
@@ -84,6 +87,10 @@ def materiales(mod):
             x[-1] = ('entorno', np.stack([0.5 + 0.5 * Nn[:, 0], 0.5 - 0.5 * Nn[:, 1]], 1), alfa, esp)
 
 NINGUNO = 0xFFFFFFFF
+# ruedas del descriptor como las pone 4AD530: {posicion de la pieza, del otro lado (girada pi en y), delantera}; la
+# pieza animada k + 1 (campo del nodo << 8) y su fila del bloque TAN1
+RUEDAS = [(0x38, False, True), (0x48, True, True), (0x58, False, False), (0x78, False, False), (0x68, True, False),
+          (0x88, True, False)]
 
 def llamadas(E, tm, m, lod=0):
     """piezas del coche de trafico m y su matriz como las dibuja el original con el LOD lod (4AE0F0 -> model: 4ADBC0
@@ -117,14 +124,26 @@ def llamadas(E, tm, m, lod=0):
             e += 0x10
     s.pop()
     if u(4) != NINGUNO: s.push(); s.translate((0.0, 0.1 if lod == 0 else 0.0, 0.0)); dib(u(4), 'sombra'); s.pop()
-    def rueda(o, otro_lado):
+    def rueda(k):
+        o, otro_lado, _ = RUEDAS[k]
         if u(o) == NINGUNO: return
         s.push(); s.translate(g3(o + 4))
         if otro_lado: s.rot_y(np.pi)
-        dib(u(o), 'rueda'); s.pop()
+        dib(u(o), 'rueda%d' % (k + 1)); s.pop()               # 4AD530: + el giro en x (car+40 / +44, animado)
     if cerca:
-        rueda(0x38, False); rueda(0x48, True); rueda(0x58, False); rueda(0x78, False); rueda(0x68, True); rueda(0x88, True)
+        for k in range(6): rueda(k)
     return res
+
+def bloque_tan(E, tm, m):
+    """TAN1 (detras de los pares de TCX1): 'TAN1', u32 ruedas (6), f32 radio (+08 del registro de 4866C0: el control del
+    trafico 47E780 suma a car+40 y +44 +1C4 / radio x 10430,38 cada cuadro), 6 x {f32 x, y, z, del otro lado, delantera} (las del descriptor del
+    LOD 0; x = y = z = 0 y sin pieza si no estan). La demo gira cada rueda en x (4AD530) con su matriz"""
+    d = E.u32(E.u32(E.u32(tm + 0x44 * m)))
+    b = [b'TAN1', struct.pack('<If', len(RUEDAS), E.f32(tm + 0x44 * m + 8))]
+    for o, otro, dl in RUEDAS:
+        p = E.f32(d + o + 4, 3) if E.u32(d + o) != NINGUNO else (0.0, 0.0, 0.0)
+        b.append(struct.pack('<5f', *p, 1.0 if otro else 0.0, 1.0 if dl else 0.0))
+    return b''.join(b)
 
 class Mem:
     def __init__(self, d): self.m = d
@@ -162,6 +181,16 @@ def tabla_cajas(d):
     for o in range(0, len(d) - 44 * 0x3c, 4):
         if all(bien(o + m * 0x3c) for m in range(44)): return o
     return None
+
+def tabla_se_golpe(d, tc):
+    """efectos del golpe entre coches de 4F65D0 / 4F67A0 (PC 5E0A78; SLES-53998 0x3de318, la lee 0x194cf8 con
+    lui/addiu): 4 tipos x 4 familias de u32 id de SE (con las banderas 0x800 de 424940). Va justo delante de los
+    descriptores de 520950 (0x48 bytes antes); se comprueba que son ids de efecto (9 bits bajos 0x40..0x7f)."""
+    o = tc - 0x48
+    t = struct.unpack('<16I', d[o:o + 64])
+    if not all(0x40 <= (x & 0x1ff) < 0x80 and (x & ~0x9ff) == 0 for x in t):
+        sys.exit('no encuentro la tabla de efectos del golpe entre coches')
+    return t
 
 def tabla_clases(d):
     """5B3E08: 7 filas de 5 floats; las clases 0..5 con la misma referencia y aceleracion y frenada creciente"""
@@ -302,6 +331,15 @@ def tablas(iso, dest, cajas_malla=None):
               % (n, m, clase, radio, caja[0], caja[1], caja[5], caja[2], extra))
     b += b'ACL1' + struct.pack('<I', 7) + d[tk:tk + 35 * 4]
     b += aparicion(iso)
+    # coches del jugador (modelos 0..29) con el mismo registro que los de trafico, para la prueba de choque
+    b += b'CJM1' + struct.pack('<I', 30)
+    for m in range(30):
+        r = tm + m * 0x44
+        se, k320, clase = struct.unpack('<3i', d[r + 0xc:r + 0x18]); radio, = struct.unpack('<f', d[r + 0x18:r + 0x1c])
+        caja = struct.unpack('<7f', d[tc + m * 0x3c + 4:tc + m * 0x3c + 32])
+        b += struct.pack('<4i', m, clase, se, k320) + struct.pack('<8f', radio, *caja)
+    sec = tabla_se_golpe(d, tc)
+    b += b'SEC1' + struct.pack('<16I', *sec)
     open(os.path.join(dest, 'TRAFC.DAT'), 'wb').write(b)
     print('TRAFC.DAT: modelos en 0x%x, cajas en 0x%x, tabla por clase en 0x%x' % (tm, tc, tk))
 
@@ -327,8 +365,9 @@ def main():
                 b = cc._bloque_recurso(A, ident >> 16)
                 if nom == 'carroceria' and lod == 0: cuerpo = ident & 0xFFFF; medidas.append(caja(b, cuerpo)); lo, hi = medidas[-1]
                 if id(b) not in vistos: vistos[id(b)] = b
-                cc.pieza(mod, b, ident, R=M[:3, :3], t=M[3, :3], nombre=nom)
-            for x in mod.mallas[m0:]: x[7] = lod               # el LOD en el campo del nodo
+                cc.pieza(mod, b, ident, R=M[:3, :3], t=M[3, :3], nombre=nom,
+                         pieza_id=int(nom[5:]) if nom.startswith('rueda') else 0)
+            for x in mod.mallas[m0:]: x[7] = lod               # el LOD en el campo del nodo (la pieza, abajo)
             if lod == 0: piezas0 = piezas
         piezas = piezas0
         largo = hi[2] - lo[2]
@@ -343,6 +382,14 @@ def main():
                 x[1] = cc._tex_copia(mod, x[1], tr); x[0] = 2 if tr else 0
                 v['u'], v['v'] = uvs[:, 0], uvs[:, 1]
                 e = int(min(255, esp.max())); v['c'] = ((alfa if tr else 255) << 24) | (e << 16) | (e << 8) | e
+        # ruedas: los vertices a su marco (antes de su giro de reposo: la inversa de su matriz), la demo pone la matriz
+        for x, v in zip(mod.mallas, mod.verts):
+            if len(x) > 9 and isinstance(x[9], dict) and x[9].get('pieza'):
+                Mi = np.linalg.inv(x[9]['M'])
+                P = np.stack([v['x'], v['y'], v['z']], 1).astype(float) @ Mi[:3, :3] + Mi[3, :3]
+                v['x'], v['y'], v['z'] = P[:, 0], P[:, 1], P[:, 2]
+                x[2] = P.mean(0); x[3] = float(np.sqrt(((P - x[2]) ** 2).sum(1).max()))
+                x[7] = x[7] | x[9]['pieza'] << 8
         # colores del original: las texturas alternativas, que recorta_texturas conserva con mallas de mentira (la
         # clave y sus dos colores; recorta les pone el indice nuevo)
         m = MODELOS[n]; pares = []
@@ -356,6 +403,7 @@ def main():
         mod.mallas = [x for x in mod.mallas if id(x) not in falsas]
         tcx = [b'TCX1', struct.pack('<2I', NCOLOR.get(m, 3), len(pares))]
         for f in pares: tcx.append(struct.pack('<3I', *[q[1] for q in f]))
+        tcx.append(bloque_tan(E, tm, m))
         mod.ruta = np.frombuffer(b''.join(tcx), '<f4').reshape(-1, 1)
         mod.mallas = [x[:8] for x in mod.mallas]
         # las mallas que repite otro LOD (el 1 lleva las del 0 salvo la sombra subida) van una vez, con la mascara de
@@ -363,9 +411,9 @@ def main():
         assert len(mod.mallas) == len(mod.verts)
         clave = {}; mallas = []; verts = []; nv = 0
         for x, v in zip(mod.mallas, mod.verts):
-            k = (x[0], x[1], v.tobytes())
-            if k in clave: clave[k][7] |= 1 << x[7]; continue
-            y = list(x); y[7] = 1 << x[7]; y[4] = nv; nv += len(v)
+            k = (x[0], x[1], x[7] >> 8, v.tobytes()); lod = x[7] & 0xFF   # x[7] = LOD | pieza << 8
+            if k in clave: clave[k][7] |= 1 << lod; continue
+            y = list(x); y[7] = 1 << lod | (x[7] >> 8) << 8; y[4] = nv; nv += len(v)
             clave[k] = y; mallas.append(y); verts.append(v)
         mod.mallas, mod.verts, mod.nv = mallas, verts, nv
         ini = mod.escribe(os.path.join(dest, 'TRAF%d.DAT' % n))

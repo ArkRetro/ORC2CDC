@@ -250,13 +250,43 @@ estaba y se dice lo que falta). Estado: CORREGIDO, SE QUEDA (ya era del original
 | Piloto automatico de la demo (DEMO del titulo) | el original pasa la pelicula de MV.PS2 (ahora tambien la demo: video.c) | — | invento propio (solo si faltan las peliculas, o pruebas) | SE QUEDA |
 | META/AGOTADO: freno 0,6 y vuelta al titulo a los 600 cuadros | el original conduce solo hasta el final (camaras 4853D0..) | — | PROVISIONAL | SE QUEDA |
 | Aviso de bifurcacion a 450 m de la separacion | 4BB890: BIFURCA con el avance car+0x102C entre 0,65 y 0,72 / 0,70 y 0,75 | — | PROVISIONAL | SE QUEDA |
-| Marcas de derrape (256, ancho 0,26 m) y humo (32, vida 1 s, tamano 0,6 + 2,6 t) | tire_mark_init 41FB10 / tire_mark_req 41FB50 / 486450 y PcTireSmoke 41C420/41C570 (race_particles*) | — | PROVISIONAL | SE QUEDA (proximo paso: portar race_particles) |
+| Marcas de las ruedas: 4 ruedas, media anchura del neumatico (filas 40/41 de la tabla de parametros), 0,2 m entre tramos, alfa 0,5, +0,05 m, v = longitud x 0,5, anillos 256/64/64, texturas 0x570000..2 (EFECTOS.DAT), clase por la superficie (0xC02 asfalto, 0x8004 tierra/arena, 0x18 hierba) | tire_mark_req 41FB50 / 41FDD0 / 4862C0 del PC; SLES-53998 0x10dcd0 / 0x10df38 / 0x1198f0, tabla 0x344d90, constantes 0x32b390..98 | igual | CONFIRMADO | CORREGIDO (2026-11-08) |
+| Marcas en asfalto: las traseras mientras dura el derrape | el original usa la mascara 95AFA8 de PcTireSmokeReq 41C570 (deslizamiento +E0 y agarre +E4 de cada rueda contra 74FF5C) | — | PROVISIONAL (la fisica de la demo no da +E0) | SE QUEDA |
+| Humo del derrape (32, vida 1 s, tamano 0,6 + 2,6 t), ahora desde las ruedas traseras de la fisica | PcTireSmoke 41C420 / 41C570 / 41CB30 / 41D1E0 / 41D330 (fuente 4: 512 particulas, textura 0x19 del PC = 0x2e de obj_course_obj_common en PS2) | — | PROVISIONAL | SE QUEDA (pendiente: portar 41C570..41D5C0 y polvo / chispas 41D6B0..41F4B0) |
 | Sonido: `ESCALA 3` de los efectos frente a la musica | balance 4279C0 (624238 / 624258) | — | PROVISIONAL (mezcla del AICA) | SE QUEDA |
 | Sonido del derrape: deslizamiento / 30 grados | 4260E0 PlaySkid: maximo del deslizamiento de las 4 ruedas (+60/+64.. del cuerpo) | — | PROVISIONAL | SE QUEDA |
 | Golpe: fuerza 0,4 + dv/25 y v/40, 20 cuadros entre golpes | 4264C0 PlayWall, 4F65D0 (una vez cada 60 cuadros) | — | PROVISIONAL | SE QUEDA |
 | Salto de cuadros (paso de 16683 us, hasta 3) | tick 1/60,2 s (CONFIRMADO); pasos por segundo de la version PAL | — | PROVISIONAL (tecnico) | SE QUEDA |
 | camara.c: la carrera siguiente empieza con la vista elegida | — | — | PROVISIONAL | SE QUEDA |
 | Voz y sonido de EXTEND TIME | 4B93E0 del PC (race_hud_navi.cpp timer_4b93e0) = PS2 0x1be78c: efecto 0x4d (0x84d) y voz 0x16c (0x96c) | — | CONFIRMADO | SE QUEDA (voces.c) |
+
+## Sombras y marcas (2026-11-08)
+
+Peticion del probador: efectos de sombras. Lo que hace el original y como va en la Dreamcast:
+
+- Sombra del coche del jugador (SLES-53998 0x1893f8, el dibujo en carrera, vm = 1): (1) los volumenes de sombra +08 y
+  +10 de la disposicion (mallas cerradas en el marco del coche: la parte baja de la carroceria y las piezas altas) con
+  0x1138b8: luz en el marco del coche, silueta 0x113bf8 (aristas de 0x24 bytes con las normales de sus dos caras, como
+  4211F0 / 421680 / 421740 del PC) y cuadrilateros extruidos por la luz, dos pasadas en una plantilla emulada en el GS
+  (estados 0x169ce0) y 0x114150 oscurece lo marcado leyendo el bufer de imagen como textura, antes de dibujar la
+  carroceria (la carroceria no recibe su sombra); el PC hace lo mismo con la plantilla de D3D (422550 / 421A90, cuadro
+  0x5F000000 de 4220F0). (2) La sombra plana +0C (mancha negra con alfa, 128x32) en la matriz del coche subida 0,01 m
+  (0x189904, vector 0x3d3fe0); en el PC 49A650 es un RET. Luz: la 1 del entorno (4082B0(1, 0, 0) + 44): scn_env_sun
+  lista 1, (0, 0, -1) girada por la inclinacion y el rumbo (44A430) en el marco de la etapa (CURSO.DAT, `sol`; PALM
+  -40 / -60). CONFIRMADO (codigo de PS2 y PC). En la demo: volumen modificador OP_MOD "cheap shadow" (`sombra_dibuja`,
+  bloque SVL1 de COCHEnn.DAT) y la +0C como pieza del coche (`tools/conv_coche.py llamadas`). Diferencias: (a)
+  oscurecimiento 1 - 0x5F / 255 (el del PC; el factor exacto de 0x114150 no se ha descifrado: PROBABLE); (b) extrusion
+  25 m (6282D0 del PC; la PS2 la lleva hasta el borde de la vista), acortada si llegara al plano cercano; (c) envolvente
+  convexa de cada parte (la PowerVR cuenta par / impar y el original suma: DREAMCAST.md); (d) recibe la sombra lo
+  opaco y lo recortado (la escena y el trafico), no lo translucido. Verificado en E (hoja en el scratchpad,
+  sombras/hoja.png). Prueba: `-DSOL_PRUEBA=grados` gira el sol para verla de lado.
+- Trafico: su sombra plana (obj_vshadow, subida 0,1 m en el LOD 0) ya iba (Coches: trafico).
+- Marcas de las ruedas: ver la tabla (CORREGIDO). El original tambien deja marcas de tierra y hierba (siempre, sin
+  derrapar) y la demo ahora tambien (superficie de la COLI bajo cada rueda).
+- PENDIENTE: humo, polvo, grava, hierba y chispas de race_particles (41C570.., 41D6B0 chispas al rozar, 41DE20 grava,
+  41E360 hierba; texturas 0x29 chispa, 0x2a grava, 0x2b hierba, 0x2e humo, 0x2f polvo de obj_course_obj_common en
+  SLES-53998); sombras de la escena sobre el coche y oscurecimiento en tuneles (bit 0x200 de 4A25F0 y
+  \OBJ\obj_cs_shadow_pmt.sz, recurso 0x56, sin estudiar); reflejos de la carretera.
 
 ## Fisica: auditoria (2026-11-08)
 

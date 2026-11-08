@@ -158,20 +158,64 @@ typedef struct {
     float    reparto[OR2_CLASES * OR2_CLASES];  /* minimo del reparto de la separacion [clase A * 7 + B] */
     float    dur[OR2_ESTADOS_CHOQUE], recup[OR2_ESTADOS_CHOQUE];
     or2_canal_t pose[OR2_ESTADOS_CHOQUE][6];  /* desplazamiento x,y,z y giro x,y,z (unidades del PC)       */
+    /* efectos del golpe entre coches (4F65D0 / 4F67A0): id de SE por [tipo * 4 + familia]; tipo 0 roce, 3 golpe
+       (1 y 2 los usa el golpe de los rivales); familia 0 coche, 1 camion (modelos 39..43), 2 autobus (31). Los pone
+       quien llama (bloque SEC1 de TRAFC.DAT, tools/conv_trafico.py); se_ok = 0: sin efectos. */
+    uint32_t se[16];
+    int      se_ok;
 } or2_choques_t;
+
+/* Un coche en la prueba de choque entre coches (4F9450: 4F9000 / 4F8E70 / 4F86C0), en el plano: mundo x a la
+   derecha y y adelante (m), rumbo + a la derecha (rad). La caja es la del descriptor de 520950 del modelo en ejes
+   del coche (x a la derecha, z hacia atras; x0 >= x1, z0 >= z1); el original prueba cada esquina de una caja del
+   otro coche desde su sitio del cuadro anterior hasta el de ahora contra los cuatro bordes de la mia. */
+typedef struct {
+    float x, y, rumbo;      /* ahora                                                                  */
+    float xa, ya, rumbo_a;  /* en el cuadro anterior (+16C.., +17C..)                                 */
+    float caja[7];          /* x0, y0 (alto), z0, x1, y1, z1, r                                       */
+    float radio;            /* 4866C0 +0x18: radio de la prueba de cercania                           */
+    float pose_y;           /* +2DC: altura de la animacion de choque (m)                             */
+} or2_forma_t;
+
+/* Resultado de or2_contacto(a, b): registros de 4F9000 como los guarda el original (A+0x36C.. y A+0x514..) */
+typedef struct {
+    int   toca;             /* 1 si alguna esquina ha entrado                                         */
+    int   borde_a[4];       /* borde de la caja de A que ha cruzado la esquina i de B: 0 x0 (derecha), 1 z1 (morro),
+                               2 x1 (izquierda), 3 z0 (cola); -1 ninguno (A+0x378 + i*0x34)            */
+    float s_a[4];           /* sitio en ese borde: 0 en el extremo x0 / z0, 1 en x1 / z1 (A+0x37C..)   */
+    int   borde_b[4];       /* lo mismo con las esquinas de A en la caja de B                         */
+    float s_b[4];
+    int   esq_a[4];         /* esquinas de A (0 der.-cola, 1 der.-morro, 2 izq.-morro, 3 izq.-cola) que han entrado
+                               en la caja de B (A+0x514..)                                             */
+    int   esq_b[4];
+    float sep[2];           /* 4F8490: separacion entera (m, mundo); B se mueve (1 - reparto) x sep y A - reparto x sep */
+} or2_contacto_t;
 
 /* Lo que el juego sabe del otro coche en un contacto (convencion exterior: mundo x a la derecha del rumbo 0,
    y hacia delante; velocidades en m/s). */
 typedef struct {
     float dx, dy;           /* posicion del otro menos la mia (m)                                    */
     float vx, vy;           /* velocidad del otro (m/s); a la salida, la nueva                       */
-    int   clase;            /* clase del otro (+324: 0..2 pesados, 3..5 coches, 6 rivales)            */
-    int   frontal;          /* 1 = el contacto es por delante o por detras (no un roce lateral)      */
+    int   clase;            /* clase del otro (+324: 0..2 pesados, 3..4 coches de calle, 5 el jugador) */
+    /* para or2_choque_coche / or2_choque_trafico (los demas campos no los usa or2_rebufo) */
+    int   id;               /* identidad del otro (la de +DA0: el mismo coche durante 120 cuadros)    */
+    int   k320;             /* +320 del modelo (3 los coches de calle; 0..2 autobus y camiones)       */
+    int   modelo;           /* +11 (familia del efecto de 4F65D0)                                     */
+    int   se;               /* +31C (familia del efecto de 4F67A0)                                    */
+    float t_choque;         /* +2C8 del otro (s que le quedan del estado de choque; 0 = ninguno)      */
+    float t_recup;          /* +2F8 del otro                                                         */
+    int   b58;              /* +B58 (0x12: estado especial del original; 0xB / 0xC tras un golpe)     */
+    int   d22;              /* +D22 del otro: cuadros hasta poder sonar otra vez; entrada y salida    */
+    float lado_26c;         /* +26C del otro (lo usa el estado 3 de 4F6FE0)                           */
+    const or2_contacto_t *k;/* el contacto (A = el jugador, B = el otro)                             */
     /* salidas */
-    float reparto;          /* fraccion de la separacion que se lleva el jugador (el resto, el otro) */
-    int   golpe;            /* estado de choque del otro (16..19) o -1                               */
-    int   cambia_vel;       /* 1 si se ha cambiado la velocidad del otro                             */
+    float reparto;          /* fraccion de la separacion que se lleva A (el jugador); B, el resto     */
+    int   golpe;            /* estado de choque que toma el otro (16..19, hit_476040) o -1            */
+    int   cambia_vel;       /* 1 si se ha cambiado la velocidad del otro (4F7BF0)                     */
     int   reaccion;         /* 1 si el jugador ha entrado en el estado 7 (salto y derrape)           */
+    int   impulso;          /* 1 si se ha cambiado la velocidad del jugador (+4 0x4000000)           */
+    int   roce;             /* 1 si el otro se ha quedado en roce (+4 0x400000: sin cambio de velocidad) */
+    int   se_n, se_id[3];   /* efectos que suenan (ids de SE con las banderas de 424940)              */
 } or2_otro_t;
 
 typedef struct {
@@ -299,7 +343,9 @@ typedef struct {
     float v28c;             /* velocidad al empezar el rebote (m/cuadro)                             */
     int   roce;             /* cuadros desde el ultimo roce con el muro (work+0x244 bit 3)           */
     int   paso;             /* +1030 cuadros en que se atraviesa el trafico derrapando               */
-    int   golpe_sonido;     /* se pone a 1 en cada golpe (para el sonido), lo borra quien lo lee     */
+    int   golpe_sonido;     /* se pone a 1 en cada golpe contra el muro (para el sonido), lo borra quien lo lee */
+    int   d22;              /* +D22 cuadros hasta que puede sonar otro golpe entre coches (4F65D0: 60)  */
+    int   da0, da4;         /* +DA0 / +DA4 ultimo coche rozado (-1 ninguno) y cuadros que lo recuerda  */
     float ofs;              /* +26C desplazamiento lateral del ultimo paso (m, <0 izquierda)          */
     float rebufo;           /* +E68 mejor puntuacion de rebufo (0..1; >0.18 = rebufo en el HUD)       */
     float rebufo_k;         /* +E6C fraccion de resistencia del aire que se quita                     */
@@ -345,10 +391,23 @@ int  or2_carga_choques(const void *datos, uint32_t tam, or2_choques_t *q);
 /* Columna de la tabla de un modelo (byte car+0x11) en la partida normal; -1 si no hay datos. */
 int  or2_columna_modelo(const or2_choques_t *q, int modelo);
 
-/* Contacto con otro coche (4F9450: 4F8490 reparto, 4F6FE0 reaccion, 4F7BF0 intercambio de velocidad,
-   4F6820 tope de velocidad). Cambia la velocidad y el estado de choque del jugador y devuelve la reaccion del
-   otro en o. Llamar una vez por cuadro de contacto. */
+/* Prueba de choque entre dos coches (4F9450, pareja de cajas 0): cercania por radios (radio A + radio B), altura
+   de la animacion (+2DC menos medio radio por encima del alto de la caja del otro: no se tocan) y las esquinas de
+   cada caja contra los bordes de la otra (4F9000). Devuelve k->toca. */
+int  or2_contacto(const or2_forma_t *a, const or2_forma_t *b, or2_contacto_t *k);
+/* 4F9450: fraccion de la separacion que se lleva A: vB / (vA + vB) con el minimo de la tabla [clase A * 7 + B]
+   (el jugador es la clase 5); va y vb en cualquier unidad */
+float or2_reparto(const or2_choques_t *q, int clase_a, int clase_b, float va, float vb);
+/* Contacto del jugador (A, clase 5) con otro coche (B) ya probado con or2_contacto (o->k): 4F9450 (reparto de la
+   separacion), 4F6FE0 (reaccion del jugador: roce, estado 7, golpe al otro), 4F76E0 (reaccion del otro: roce),
+   4F7BF0 (intercambio de velocidad), 4F6820 (tope del estado 7) y los efectos de 4F65D0 / 4F67A0 / 476040.
+   Cambia la velocidad y el estado del jugador y devuelve lo del otro en o. Una vez por cuadro, con el ultimo
+   coche que ha tocado (el original solo reacciona con ese; la separacion es con todos). */
 void or2_choque_coche(or2_coche_t *c, const or2_param_t *p, const or2_choques_t *q, or2_otro_t *o);
+/* Contacto entre dos coches de trafico (A el de menor indice, B el otro; a->k = el contacto de A con B): reparto
+   (a->reparto, el de A), 4F76E0 para los dos e intercambio de velocidad (4F7BF0); a->vx.. y b->vx.. son la
+   velocidad de cada uno (m/s, mundo) y a la salida la nueva si cambia_vel. */
+void or2_choque_trafico(const or2_choques_t *q, or2_otro_t *a, or2_otro_t *b);
 
 /* Contacto con el muro (CbwColiWall 5041B0: CalcFrictionStatus / CwReboundStatus): nx, ny = normal del muro
    hacia la calzada (mundo, unitaria), pen = penetracion (m). Llamar cada cuadro de contacto, despues de

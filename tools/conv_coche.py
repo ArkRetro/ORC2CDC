@@ -25,8 +25,10 @@ los 15 coches, en reposo, con freno y con luces.
      +88 + 0x20 k: rueda k {buje (llanta y neumatico), pinza, disco, disco caliente, x, y, z, caida}: pinza sin el giro
      de la rueda, buje y disco con el; las del lado derecho son registros propios (no hay escalas negativas).
    Las luces van todas, cada una con su grupo (CEX2), y la demo enciende las que tocan (coche_luces).
-   No se dibujan (como en el original con vm = 1): +04 la vista interior, +08/+10 los volumenes de sombra, +0C la
-   sombra plana (en el PC es un RET).
+   +0C la sombra plana: en el PC es un RET, pero SLES-53998 la dibuja (subida 1 cm, en la matriz del coche). +08/+10
+   los volumenes de sombra: mallas cerradas que el original extruye por la luz (sombra con plantilla: 0x1138b8 de
+   SLES-53998, 422550/421740 del PC); van en el bloque SVL1 (volumenes()). No se dibuja (como en el original con
+   vm = 1): +04 la vista interior.
  - Registros: cada pieza es un registro con un solo nodo sin matriz (tabla 0, campo +1C = -1) cuyas tiras son todas
    las del registro (tabla 1: opacas y de mezcla); comprobado en los 360 registros que montan coches y trafico, asi que
    no hay jerarquia ni matrices de la tabla 6 dentro de las piezas. Las tiras se parten donde el original no dibuja
@@ -99,6 +101,13 @@ def disposicion(A, m):
 
 # ------------------------------------------------------------------ montaje
 NADA, G_PILOTOS, G_NOCHE, G_FRENO, G_FARO = 0, 1, 2, 3, 4   # grupos de piezas que la demo enciende y apaga (CEX2)
+G_DISCO, G_DISCO_CAL = 5, 6     # disco de freno +90 de la rueda o el caliente +94 (c38 > 200 y car+1F4 != 0)
+# piezas animadas (bloque ANI1, campo del nodo de cada malla << 8): sus vertices van en el marco de la pieza (el de la
+# ultima operacion de la pila antes del giro animado) y la demo pone la matriz de cada cuadro (coche_anima)
+P_CUERPO, P_VOLANTE, P_ALERON, P_FAROS, P_PINZA, P_RUEDA, NPIEZAS = 0, 1, 2, 3, 4, 8, 12   # pinza y rueda: + k (0..3)
+# margenes del vaciado con piezas animadas (no son datos del juego: rangos que cubren lo que se ve al moverse):
+# direccion +-30 grados (el tope de car+32 en 4A4710: 5461 = 30 grados), volante +-5461 x 6 x 0,41667 (46AE70)
+DIR_MAX = 5461 * 2 * np.pi / 65536; VOL_MAX = 5461 * 6 * 2 * np.pi / 65536 * 0.416666657; ALERON_MIN = -0.305432618
 
 class Pila:
     """pila de matrices 4x4 de fila del PC (driving/pc_matrix_stack.cpp): cada operacion multiplica por la izquierda
@@ -112,7 +121,7 @@ class Pila:
     def rot_y(s, a): c, n = np.cos(a), np.sin(a); s._izq(np.array([[c, 0, -n, 0], [0, 1, 0, 0], [n, 0, c, 0], [0, 0, 0, 1.0]]))
     def rot_z(s, a): c, n = np.cos(a), np.sin(a); s._izq(np.array([[c, n, 0, 0], [-n, c, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1.0]]))
 
-def llamadas(A, m):
+def llamadas(A, m, pose=None):
     """las piezas que dibuja el original y con que matriz: 46A560 (el coche en la seleccion; 46AE70/469600 en carrera
     hacen lo mismo con vm = 1), en su orden, con el coche parado: matriz local car+F0 = identidad, volante, ruedas y
     aleron del modelo 5 sin girar (car+204, giros de 82E7F0 y car+1C4 a 0), faros escamoteables cerrados (car+2FC = 0),
@@ -121,42 +130,73 @@ def llamadas(A, m):
       +60 (G_FARO) si car+4 & 0x100 (noche) y 0x800 (faros abiertos del todo, o sin escamoteables);
       c38 (car+38, pedal de freno) = 0: +80 (G_NOCHE) si car+4 & 0x300 (noche o tunel; 4A25F0), si no +7C (G_PILOTOS);
       c38 != 0: +84 (G_FRENO) y, en el modelo 5, 0x4001a en +1C con el angulo del aleron (G_FRENO).
-    No van (como en el original con vm = 1): +04 (vista interior, vm = 2), +08/+10 (volumenes de sombra), +0C (sombra
-    plana: 49A650 es un RET). El disco +94 (c38 > 200 y car+1F4 != 0) no va (car+1F4 sin leer).
-    Devuelve [(id, matriz 4x4, nombre, grupo)]"""
+    +0C (sombra plana bajo el coche): en el PC 49A650 es un RET, pero SLES-53998 la dibuja (0x1893f8, el dibujo en
+    carrera: 0x189904..0x189950) con la matriz del coche (car+F0) subida (0, 0,01, 0) (vector 0x3d3fe0), tras los faros
+    y antes de +60. +08/+10 (volumenes de sombra) no son piezas: van aparte (volumenes(), bloque SVL1 de CEX2).
+    No va (como en el original con vm = 1): +04 (vista interior, vm = 2). Discos: +90 (G_DISCO) o el caliente +94
+    (G_DISCO_CAL) con c38 > 200 y car+1F4 (km/h del modelo) != 0, los dos con su grupo (la demo elige).
+    Animadas (pose: dict con 'giro' y 'dir' (4 ruedas), 'volante', 'aleron', 'faros' en radianes; None = parado):
+    volante girado en z por car+204, aleron del modelo 5 en x (roof_angle, car+2FC), faros en x (car+2FC), ruedas en
+    car+130 con la caida, la direccion en y (pinza) y el giro en x (buje y discos). Las ruedas van fuera de car+F0.
+    Devuelve [(id, matriz 4x4, nombre, grupo, pieza)]"""
     E = A.elf; L = disposiciones(A) + 0x128 * m
     u = lambda o: E.u32(L + o); f = lambda o: E.f32(L + o)
     g3 = lambda o: np.array(E.f32(L + o, 3), float)
     s = Pila(); res = []
-    def dib(ident, nombre, grupo=NADA):
-        if ident != NINGUNO: res.append((ident, s.m[-1].copy(), nombre, grupo))
+    q = pose or {}; giro = q.get('giro', [0.0] * 4); dire = q.get('dir', [0.0] * 4)
+    def dib(ident, nombre, grupo=NADA, pieza=P_CUERPO):
+        if ident != NINGUNO: res.append((ident, s.m[-1].copy(), nombre, grupo, pieza))
     s.push()                                                    # 409FD0: car+F0 (identidad)
     for i in range(2):                                          # puertas en su bisagra
         s.push(); s.translate(g3(0x2c + 0x10 * i)); dib(u(0x28 + 0x10 * i), 'puerta'); s.pop()
     dib(u(0x14), 'extra')
     dib(u(0), 'carroceria')
-    s.push(); s.translate(g3(0x4c)); s.rot_x(f(0x58)); s.rot_z(0.0); dib(u(0x48), 'volante'); s.pop()
+    s.push(); s.translate(g3(0x4c)); s.rot_x(f(0x58)); s.rot_z(q.get('volante', 0.0)); dib(u(0x48), 'volante', pieza=P_VOLANTE)
+    s.pop()
     if u(0x18) != NINGUNO:
         s.push(); s.translate(g3(0x1c))
-        if m == 5: s.rot_x(0.0)                                 # aleron: roof_angle(car+1C4 = 0) = 0
-        dib(u(0x18), 'palanca'); s.pop()
+        if m == 5:                                              # aleron: roof_angle (car+1C4 = 0: 0)
+            s.rot_x(q.get('aleron', 0.0)); dib(u(0x18), 'aleron', pieza=P_ALERON)
+        else: dib(u(0x18), 'palanca')
+        s.pop()
     if u(0x64) != NINGUNO:
-        s.push(); s.translate(g3(0x68)); s.rot_x(0.0); dib(u(0x64), 'faros'); s.pop()
+        s.push(); s.translate(g3(0x68)); s.rot_x(q.get('faros', 0.0)); dib(u(0x64), 'faros', pieza=P_FAROS); s.pop()
+    s.push(); s.translate((0.0, 0.01, 0.0)); dib(u(0xc), 'sombra'); s.pop()   # SLES-53998 0x189904: +0C subida 1 cm
     dib(u(0x60), 'faro_luz', G_FARO)
     dib(u(0x7c), 'pilotos', G_PILOTOS); dib(u(0x80), 'pilotos_noche', G_NOCHE); dib(u(0x84), 'pilotos_freno', G_FRENO)
     if m == 5:
-        s.push(); s.translate(g3(0x1c)); s.rot_x(0.0); dib(0x4001a, 'aleron_freno', G_FRENO); s.pop()
+        s.push(); s.translate(g3(0x1c)); s.rot_x(q.get('aleron', 0.0)); dib(0x4001a, 'aleron_freno', G_FRENO, P_ALERON)
+        s.pop()
     s.pop()
     for k in range(4):                                          # ruedas: pinza (sin el giro de la rueda), buje, disco
         w = 0x8c + 0x20 * k
-        s.push(); s.translate(g3(w + 0xc))
+        s.push(); s.translate(g3(w + 0xc))                      # car+130 (parado: +98)
         if f(w + 0x18) != 0: s.rot_z(f(w + 0x18))              # caida
-        dib(u(w), 'pinza'); dib(u(0x88 + 0x20 * k), 'buje'); dib(u(w + 4), 'disco')
+        if dire[k] != 0: s.rot_y(dire[k])                       # direccion (rueda +32)
+        dib(u(w), 'pinza', pieza=P_PINZA + k)
+        if giro[k] != 0: s.rot_x(giro[k])                       # giro (rueda +30)
+        dib(u(0x88 + 0x20 * k), 'buje', pieza=P_RUEDA + k)
+        if u(w + 4) != NINGUNO:
+            dib(u(w + 4), 'disco', G_DISCO, P_RUEDA + k); dib(u(w + 8), 'disco_cal', G_DISCO_CAL, P_RUEDA + k)
         s.pop()
     return res
 
-def pieza(mod, blq, ident, R=None, t=None, nombre='', grupo=NADA):
-    """anade el registro ident & 0xFFFF del bloque, girado (fila: p @ R) y desplazado"""
+def poses(A, m):
+    """matrices de las piezas animadas en las posturas con que se hace el vaciado: giro de las ruedas cada 60 grados,
+    direccion y volante a un lado, al centro y al otro, faros abiertos (+78) y aleron abajo en la mitad. Devuelve
+    [{pieza: matriz}] (la primera es la de reposo)"""
+    L = disposiciones(A) + 0x128 * m; arriba = A.elf.f32(L + 0x78) if A.elf.u32(L + 0x64) != NINGUNO else 0.0
+    res = []
+    for i in range(6):
+        sg = (0, 1, -1)[i % 3]; ab = i % 2
+        q = {'giro': [i * np.pi / 3] * 4, 'dir': [sg * DIR_MAX] * 2 + [0.0] * 2, 'volante': sg * VOL_MAX,
+             'aleron': ALERON_MIN * ab, 'faros': arriba * ab}
+        res.append({p: M for _, M, _, _, p in llamadas(A, m, q) if p != P_CUERPO})
+    return res
+
+def pieza(mod, blq, ident, R=None, t=None, nombre='', grupo=NADA, pieza_id=P_CUERPO):
+    """anade el registro ident & 0xFFFF del bloque, girado (fila: p @ R) y desplazado; guarda en el extra de cada
+    malla la pieza animada y su matriz de reposo ('pieza', 'M')"""
     if ident == NINGUNO: return
     r = ident & 0xFFFF
     if r >= blq.w[0]: return
@@ -179,7 +219,11 @@ def pieza(mod, blq, ident, R=None, t=None, nombre='', grupo=NADA):
     V = np.concatenate(mod.verts) if mod.verts else None
     for x, ex in zip(mod.mallas[m0:], mod.extra[m0:]):
         if R is not None: ex['N'] = (ex['N'].astype(float) @ R).astype(np.float32)
-        ex['grupo'] = grupo
+        ex['grupo'] = grupo; ex['pieza'] = pieza_id
+        M = np.eye(4)
+        if R is not None: M[:3, :3] = R
+        if t is not None: M[3, :3] = t
+        ex['M'] = M
         x.append(nombre); x.append(ex)
         q = np.stack([V['x'][x[4]:x[4] + x[5]], V['y'][x[4]:x[4] + x[5]], V['z'][x[4]:x[4] + x[5]]], 1)
         x[2] = q.mean(0); x[3] = float(np.sqrt(((q - x[2]) ** 2).sum(1).max()))
@@ -195,9 +239,9 @@ def monta(A, m):
     e = A.entrada('CARS.PS2', nombre.split('\\')[-1])
     blq = A.bloque(e)
     mod = modelo.Modelo(); mod.ruta = np.zeros((0, 5)); mod.extra = []; mod._blq_coche = blq
-    for ident, M, nom, grupo in llamadas(A, m):
+    for ident, M, nom, grupo, pz in llamadas(A, m):
         b = blq if ident >> 16 == recurso else _bloque_recurso(A, ident >> 16)
-        pieza(mod, b, ident, R=M[:3, :3], t=M[3, :3], nombre=nom, grupo=grupo)
+        pieza(mod, b, ident, R=M[:3, :3], t=M[3, :3], nombre=nom, grupo=grupo, pieza_id=pz)
     materiales(A, mod, m, recurso)
     return mod, e, d
 
@@ -363,8 +407,20 @@ def camaras(bajas=True):
         a = 2 * np.pi * k / 32; C.append(mira(np.array([7 * np.sin(a), 0.9, 7 * np.cos(a)]), [0, 0.4, 0]))
     return np.array(C, np.float32)
 
-def triangulos(mod):
-    V = np.concatenate(mod.verts); T = []; dueno = []
+def posa(mod, D):
+    """vertices (x, y, z) del coche con las piezas animadas en otra postura: D = {pieza: matriz de la postura}; cada
+    malla de una pieza animada pasa de su matriz de reposo (extra 'M') a la de D"""
+    V = np.concatenate(mod.verts).copy()
+    for x in mod.mallas:
+        p = x[9].get('pieza', P_CUERPO)
+        if p == P_CUERPO or p not in D: continue
+        T = np.linalg.inv(x[9]['M']) @ D[p]
+        q = V[x[4]:x[4] + x[5]]; P = np.stack([q['x'], q['y'], q['z']], 1).astype(float) @ T[:3, :3] + T[3, :3]
+        V['x'][x[4]:x[4] + x[5]], V['y'][x[4]:x[4] + x[5]], V['z'][x[4]:x[4] + x[5]] = P[:, 0], P[:, 1], P[:, 2]
+    return V
+
+def triangulos(mod, V=None):
+    V = np.concatenate(mod.verts) if V is None else V; T = []; dueno = []
     for k, x in enumerate(mod.mallas):
         i0, n = x[4], x[5]
         for j in range(n - 2):
@@ -372,17 +428,23 @@ def triangulos(mod):
     T = np.array(T, np.float32).transpose(0, 2, 1).reshape(-1, 9)
     return np.ascontiguousarray(T), np.array(dueno)
 
-def visibilidad(mod, res=(960, 720), bajas=True):
+def visibilidad(mod, res=(960, 720), bajas=True, posturas=None):
     """triangulos que se ven desde alguna camara (los de la lista transparente y los de recorte no tapan; las luces
-    que se encienden y apagan (grupos) ni tapan ni se quitan: dos de ellas ocupan el mismo sitio)"""
+    que se encienden y apagan (grupos) ni tapan ni se quitan: dos de ellas ocupan el mismo sitio; los dos discos (frio
+    y caliente, en el mismo sitio) no tapan y se vacian como el resto).
+    Con posturas (poses()): se ve si se ve en alguna de ellas (las piezas animadas destapan lo de detras al moverse)"""
     T, dueno = triangulos(mod)
     grupo = np.array([mod.mallas[k][9].get('grupo', NADA) for k in dueno])
     op = np.array([1 if mod.mallas[k][0] == 0 and grupo[i] == NADA else 0 for i, k in enumerate(dueno)], np.uint8)
-    C = camaras(bajas); cuenta = np.zeros(len(T), np.int32); lib = _lib()
+    C = camaras(bajas); vis = np.zeros(len(T), bool); lib = _lib()
     f = ctypes.POINTER(ctypes.c_float)
-    lib.visibles(T.ctypes.data_as(f), len(T), op.ctypes.data_as(ctypes.POINTER(ctypes.c_ubyte)), C.ctypes.data_as(f),
-                 len(C), res[0], res[1], cuenta.ctypes.data_as(ctypes.POINTER(ctypes.c_int)))
-    return (cuenta > 0) | (grupo != NADA), dueno
+    for D in (posturas or [None]):
+        if D is not None: T, _ = triangulos(mod, posa(mod, D))
+        cuenta = np.zeros(len(T), np.int32)
+        lib.visibles(T.ctypes.data_as(f), len(T), op.ctypes.data_as(ctypes.POINTER(ctypes.c_ubyte)), C.ctypes.data_as(f),
+                     len(C), res[0], res[1], cuenta.ctypes.data_as(ctypes.POINTER(ctypes.c_int)))
+        vis |= cuenta > 0
+    return vis | ((grupo != NADA) & (grupo != G_DISCO) & (grupo != G_DISCO_CAL)), dueno
 
 def vacia(mod, vis, dueno, hueco=2, maximo=256):
     """rehace las tiras con solo los triangulos visibles (corta si hay mas de hueco ocultos seguidos; tiras de
@@ -414,15 +476,123 @@ def vertices(mod):
     return sum(x[5] for x in mod.mallas)
 
 def vertices_dibujados(mod):
-    """los que se dibujan a la vez: todo lo fijo, el faro encendido y el mayor de los tres juegos de pilotos"""
+    """los que se dibujan a la vez: todo lo fijo, el faro encendido, el mayor de los tres juegos de pilotos y el
+    mayor de los dos juegos de discos"""
     g = {}
     for x in mod.mallas: k = x[9].get('grupo', NADA) if len(x) > 9 else NADA; g[k] = g.get(k, 0) + x[5]
-    return g.get(NADA, 0) + g.get(G_FARO, 0) + max(g.get(G_PILOTOS, 0), g.get(G_NOCHE, 0), g.get(G_FRENO, 0))
+    return g.get(NADA, 0) + g.get(G_FARO, 0) + max(g.get(G_PILOTOS, 0), g.get(G_NOCHE, 0), g.get(G_FRENO, 0)) + \
+        max(g.get(G_DISCO, 0), g.get(G_DISCO_CAL, 0))
 
 def triangulos_n(mod):
     return sum(x[5] - 2 for x in mod.mallas)
 
 # ------------------------------------------------------------------ salida
+def volumenes(A, m):
+    """volumenes de sombra del coche (+08 y +10 de la disposicion; PC 46BA20 -> 420E50 / 4211F0, SLES-53998 0x1138b8
+    -> 0x113bf8): mallas cerradas (o placas de dos caras) en el marco del coche, de los triangulos que dibuja el VU1 (sin
+    la bandera ADC). El original cuenta en la plantilla (sube con las caras de delante, baja con las de detras: sombra
+    si no es 0), asi que le valen mallas no convexas; la PowerVR solo sabe par / impar (una sombra donde la silueta
+    extruida se dobla sobre si misma, por ejemplo entre el capo y la cabina, sale par: sin sombra). Por eso cada parte
+    conexa de cada volumen va como su envolvente convexa (scipy): la silueta extruida de un convexo no se dobla y par /
+    impar da lo mismo que la cuenta del original; la sombra en el suelo es la de la envolvente (rellena las muescas).
+    Aristas como 4211F0 / 421680: cada triangulo con su normal de cara (hacia fuera) aporta sus 3 aristas y una arista se
+    empareja con la inversa (segunda cara). Devuelve [(posiciones (n, 3), aristas [(a, b, n1, n2 o None)])]"""
+    from scipy.spatial import ConvexHull
+    L = disposiciones(A) + 0x128 * m; E = A.elf; res = []
+    for off in (0x8, 0x10):
+        ident = E.u32(L + off)
+        if ident == NINGUNO: continue
+        b = _bloque_recurso(A, ident >> 16)
+        P = []; idx = {}; tris = []
+        def pos(p):                                     # el bit 1 de la y es la bandera ADC: fuera al comparar
+            k = tuple(np.round(p[:3].astype(np.float64), 4).tolist())
+            if k not in idx: idx[k] = len(P); P.append(k)
+            return idx[k]
+        for pk in b.mallas(ident & 0xFFFF):
+            for tr in vif.tiras(pk):
+                Q = np.asarray(tr[0x68]); nd = vif.no_dibuja(Q)
+                for j in range(len(Q) - 2):
+                    if not nd[j + 2]: tris.append([pos(Q[j]), pos(Q[j + 1]), pos(Q[j + 2])])
+        P = np.array(P, np.float64)
+        padre = list(range(len(P)))                     # partes conexas (vertices compartidos)
+        def raiz(i):
+            while padre[i] != i: padre[i] = padre[padre[i]]; i = padre[i]
+            return i
+        for t in tris:
+            for k in t[1:]: padre[raiz(k)] = raiz(t[0])
+        partes = {}
+        for t in tris: partes.setdefault(raiz(t[0]), set()).update(t)
+        for vs in partes.values():
+            V = P[sorted(vs)]
+            if len(V) < 4: continue
+            try: H = ConvexHull(V)
+            except Exception: continue
+            usa = sorted(set(H.simplices.ravel())); nuevo = {v: i for i, v in enumerate(usa)}; aris = []
+            for t, eq in zip(H.simplices, H.equations):
+                a, c, d = (nuevo[v] for v in t); n = eq[:3]
+                if np.dot(np.cross(V[t[1]] - V[t[0]], V[t[2]] - V[t[0]]), n) < 0: c, d = d, c   # hacia fuera
+                for x, y in ((a, c), (c, d), (d, a)):
+                    for e in aris:                      # 421680: la inversa por posicion
+                        if e[0] == y and e[1] == x and e[3] is None: e[3] = n; break
+                    else: aris.append([x, y, n, None])
+            res.append((V[usa].astype(np.float32), aris))
+        print('   volumen +%02X: %d triangulos, %d partes; envolventes: %s' % (off, len(tris), len(partes),
+              ', '.join('%d vertices %d aristas' % (len(v), len(a)) for v, a in res[-len(partes):])))
+    return res
+
+def bloque_svl(vols):
+    """SVL1 (detras de los grupos de CEX2): 'SVL1', u32 volumenes (partes convexas); por volumen u32 vertices, u32 aristas, los
+    vertices (3 floats) y las aristas {u16 a, u16 b, s8 n1x, n1y, n1z, u8 caras (1 o 2), s8 n2x, n2y, n2z, 0}"""
+    b = [b'SVL1', struct.pack('<I', len(vols))]
+    for P, aris in vols:
+        b.append(struct.pack('<2I', len(P), len(aris))); b.append(P.astype('<f4').tobytes())
+        for a, c, n1, n2 in aris:
+            q1 = np.clip(np.round(n1 * 127), -127, 127).astype(np.int8)
+            q2 = np.clip(np.round((n2 if n2 is not None else np.zeros(3)) * 127), -127, 127).astype(np.int8)
+            b.append(struct.pack('<2H3bB3bx', a, c, *q1.tolist(), 1 if n2 is None else 2, *q2.tolist()))
+    return b''.join(b)
+
+def registro_modelo(A, m):
+    """registro de 4866C0 del modelo m (PC 650500, 0x44 bytes; en SLES-53998 localizado por firma como en
+    conv_trafico.py): +08 radio de la rueda, +1C (car+30C = la mitad: balanceo vertical de 4A2910), +20/+24 cabeceo
+    al frenar / acelerar y +28/+2C balanceo (4A2910 CheckReverseCar)"""
+    import conv_trafico
+    E = A.elf; tm = E.va(conv_trafico.tabla_modelos(E.d)); r = tm + 0x44 * m
+    return E.f32(r + 8), E.f32(r + 0x1c), E.f32(r + 0x20, 4)
+
+def animadas(A, mod, m):
+    """pasa las mallas de las piezas animadas a su marco (la inversa de su matriz de reposo: vertices, normales,
+    esfera) y les pone la pieza en el campo del nodo (pieza << 8); devuelve el bloque ANI1 (detras de SVL1 en CEX2):
+    'ANI1', u32 palabras del bloque, u32 modelo, f32 radio de rueda (+08 de 4866C0), f32 car+30C (+1C x 0,5),
+    f32 +20, +24, +28, +2C de 4866C0 (4A2910), y 12 piezas x 5 f32 {x, y, z, a, b}: 0 carroceria (0), 1 volante
+    (+4C, a = giro en x +58), 2 aleron del modelo 5 (+1C), 3 faros escamoteables (+68, a = abiertos +78, b = cuadros
+    +74; sin faros, b = 0), 4..7 pinza de la rueda k y 8..11 rueda k (+98 + 0x20 k = car+130 parado, a = caida +A4)"""
+    E = A.elf; L = disposiciones(A) + 0x128 * m
+    for x in mod.mallas: x[7] = x[9].get('pieza', P_CUERPO) << 8
+    # los vertices de cada malla son una entrada de mod.verts (pieza() anade una por trozo de tira; vacia() igual)
+    off = 0; trozos = []
+    for v in mod.verts: trozos.append((off, v)); off += len(v)
+    por_inicio = {o: v for o, v in trozos}
+    for x in mod.mallas:
+        p = x[9].get('pieza', P_CUERPO)
+        if p == P_CUERPO: continue
+        v = por_inicio[x[4]]; assert len(v) == x[5]
+        Mi = np.linalg.inv(x[9]['M'])
+        P = np.stack([v['x'], v['y'], v['z']], 1).astype(float) @ Mi[:3, :3] + Mi[3, :3]
+        v['x'], v['y'], v['z'] = P[:, 0], P[:, 1], P[:, 2]
+        x[9]['N'] = (x[9]['N'].astype(float) @ Mi[:3, :3]).astype(np.float32)
+        x[2] = P.mean(0); x[3] = float(np.sqrt(((P - x[2]) ** 2).sum(1).max()))
+    radio, k1c, k20 = registro_modelo(A, m)
+    pz = np.zeros((NPIEZAS, 5), np.float32)
+    pz[P_VOLANTE, :3] = E.f32(L + 0x4c, 3); pz[P_VOLANTE, 3] = E.f32(L + 0x58)
+    pz[P_ALERON, :3] = E.f32(L + 0x1c, 3)
+    if E.u32(L + 0x64) != NINGUNO: pz[P_FAROS, :3] = E.f32(L + 0x68, 3); pz[P_FAROS, 3] = E.f32(L + 0x78); pz[P_FAROS, 4] = E.f32(L + 0x74)
+    for k in range(4):
+        for b in (P_PINZA, P_RUEDA): pz[b + k, :3] = E.f32(L + 0x98 + 0x20 * k, 3); pz[b + k, 3] = E.f32(L + 0xa4 + 0x20 * k)
+    cab = struct.pack('<I6f', m, radio, k1c * 0.5, *k20)
+    n = (4 + len(cab) + pz.nbytes + 4) // 4
+    return b'ANI1' + struct.pack('<I', n) + cab + pz.astype('<f4').tobytes()
+
 def extension(mod):
     """bloque CEX2 (va en el sitio de la ruta del modelo, que los coches no tienen: nruta = palabras, 1 por punto):
     'CEX2', u32 colores por ranura (8), ranuras de pintura, mallas especiales, palabras de vertice, mallas con grupo;
@@ -448,6 +618,8 @@ def extension(mod):
     for r in recs: pal.append(struct.pack('<IIiII', *r))
     pal.append(struct.pack('<%dI' % len(vd), *vd))
     for g in grs: pal.append(struct.pack('<2I', *g))
+    if getattr(mod, '_svol', None): pal.append(bloque_svl(mod._svol))
+    if getattr(mod, '_ani', None): pal.append(mod._ani)
     b = b''.join(pal)
     return np.frombuffer(b, '<f4').reshape(-1, 1)
 
@@ -460,7 +632,7 @@ def convierte(A, m, sal, tope=TOPE, vista=None):
     if v0 > tope:
         for baj, nota in ((True, 'sin lo oculto'), (False, 'sin lo oculto ni la vuelta baja')):
             mod, e, d = monta(A, m)
-            vis, dueno = visibilidad(mod, bajas=baj); vacia(mod, vis, dueno)
+            vis, dueno = visibilidad(mod, bajas=baj, posturas=poses(A, m)); vacia(mod, vis, dueno)
             print("   %s: %d vertices" % (nota, vertices_dibujados(mod)))
             if vertices_dibujados(mod) <= tope: break
     if vista:
@@ -468,6 +640,8 @@ def convierte(A, m, sal, tope=TOPE, vista=None):
             dibuja_vista(mod, os.path.join(vista, os.path.basename(sal).replace('.DAT', '.png')))
         except Exception as ex: print('vista:', ex)
     mod.recorta_texturas()
+    mod._svol = volumenes(A, m)
+    mod._ani = animadas(A, mod, m)                              # piezas animadas a su marco y bloque ANI1
     mod.mallas.sort(key=lambda x: (x[0], x[1]))                # el orden de escribe (estable): el de CEX2
     mod.ruta = extension(mod)
     vesp = sum(x[5] for x in mod.mallas if x[9].get('esp') and x[9]['esp'][0] >= ESP_ENTORNO)

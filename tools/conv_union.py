@@ -139,20 +139,21 @@ def compone(M1, M2):
 
 UMBRAL_META = 24.0                                  # error RMS de la VQ aceptado en las uniones de meta
 NIEBLA_MAX = 8                                      # tramos de niebla por etapa en CURSO.DAT
-REG = 4 + 4 + 16 + 32 + 8 + 4 + 24 * NIEBLA_MAX     # bytes de un registro de CURSO.DAT
+# bytes de un registro de CURSO.DAT: el de antes (con el sol de la sombra) y el entorno (escribe_curso)
+REG = 4 + 4 + 16 + 32 + 8 + 4 + 24 * NIEBLA_MAX + 8 + 4 + 4 + 4 + 3 * 64 + 4 + 24 * NIEBLA_MAX
 
 def zona_de(ruta):
     """codigo de zona de una ruta del ejecutable (\\Stage\\ZONA\\...)"""
     return ruta.split('\\')[2]
 
-def niebla(A, zona):
+def niebla(A, zona, lista=1):
     """tramos de niebla de la etapa (scn_env_fog_<zona>, lista 1: la de la carretera, entorno 1 del original; lista
     0/2: lo de lejos y los coches). Registros de 0xb0 bytes hasta la marca 0xffff (0xfffe: hueco), como los lee
     course_environment_progress_44b020 del PC: +0x00 posicion de carretera inicial, +0x10 final, +0x34 modo (1 exp,
     2 exp2, 3 lineal), +0x38 inicio, fin y densidad, +0x48 color RGB; +0x54 / +0x64 los mismos al final del tramo.
     Devuelve [(p0, p1, modo, densidad0, densidad1, color0, color1)]"""
     d = A.datos(A.entrada('STAGE.PS2', '\\%s\\scn_env_fog_%s_bin' % (zona, zona)))
-    o = struct.unpack_from('<I', d, 4)[0]; res = []
+    o = struct.unpack_from('<I', d, 4 * lista)[0]; res = []
     while o + 0xb0 <= len(d) and len(res) < NIEBLA_MAX:
         p0 = struct.unpack_from('<H', d, o)[0]
         if p0 == 0xffff: break
@@ -164,6 +165,92 @@ def niebla(A, zona):
             res.append((p0, p1, modo, d0, d1, c0, c1))
         o += 0xb0
     return res
+
+def sol(A, zona):
+    """luz del sol de la etapa que proyecta la sombra del coche: la luz 1 (lista 1 de scn_env_sun_<zona>, la de la
+    carretera; el coche usa 4082B0(1, 0, 0) del PC: luz 1 del entorno 0). Registros de 0xb0 bytes como los de la
+    niebla (course_environment_progress_44b020 del PC, carril 1): +0x30 16 floats al principio (+0x70 al final): difuso,
+    especular, +6C, +78, inclinacion y rumbo (grados, +0x60 / +0x64), +8C y alcance. Direccion = (0, 0, -1) girada en x
+    por la inclinacion y en y por el rumbo (44A430), en el marco de la etapa. En las 15 etapas la lista 1 tiene un solo
+    registro con los mismos valores al principio y al final. Devuelve (inclinacion, rumbo) en grados"""
+    d = A.datos(A.entrada('STAGE.PS2', '\\%s\\scn_env_sun_%s_bin' % (zona, zona)))
+    o = struct.unpack_from('<I', d, 4)[0]
+    while o + 0xb0 <= len(d):
+        p0 = struct.unpack_from('<H', d, o)[0]
+        if p0 == 0xffff: break
+        if p0 != 0xfffe: return struct.unpack_from('<2f', d, o + 0x60)
+        o += 0xb0
+    return (0.0, 0.0)
+
+def soles(A, zona):
+    """las tres luces del entorno de la etapa (scn_env_sun_<zona>, listas 0, 1 y 2; 16 floats de +0x30 del primer
+    registro: difuso, especular, color del lado de la luz +6C, del lado de la sombra +78, inclinacion, rumbo, +8C y
+    potencia). Que es cada una: el entorno e del original (40D840(e): niebla 7D3A10 + e 0x1C y luces 899B98 + e 0xA0)
+    lo elige cada capa del dibujo (449050, tabla 5A27B4 {1,1,-1,0,1,1,2,2,2}): el 0 es el de la capa 3 (el cielo), el 1
+    el de las capas de la escena (la etapa y su reflejo) y el 2 el de los coches (46C140 / 46BD30 llaman 40D840(2)).
+    En las 15 etapas cada lista tiene un solo registro con la posicion inicial igual a la final (fijo en toda la etapa:
+    course_environment_progress_44b020 usa entonces los valores del principio)"""
+    d = A.datos(A.entrada('STAGE.PS2', '\\%s\\scn_env_sun_%s_bin' % (zona, zona))); res = []
+    for k in range(3):
+        o = struct.unpack_from('<I', d, 4 * k)[0]; v = [0.0] * 16
+        while o + 0xb0 <= len(d):
+            p0 = struct.unpack_from('<H', d, o)[0]
+            if p0 == 0xffff: break
+            if p0 != 0xfffe: v = list(struct.unpack_from('<16f', d, o + 0x30)); break
+            o += 0xb0
+        res.append(v)
+    return res
+
+def cielo_de(A, E, d0):
+    """bloque del cielo de la etapa y sus objetos (descriptor de tramo: +0x44 el banco obj_course_obj_sky_<zona>,
+    +0x4C / +0x50 / +0x54 los objetos que dibuja el cielo (race_sky_ids_44c420 / 4521C0 del PC; 0xFFFFFFFF: ninguno),
+    +0x48 el del reflejo del coche): (bloque, registros del grupo 0, del grupo 1) para conv_tramo.pon_cielo"""
+    import conv_coche
+    rec = u32(E, d0 + 0x44); ids = [u32(E, d0 + o) for o in (0x4c, 0x50, 0x54)]
+    nombre = E.cadena(u32(E, conv_coche.recursos(A) + 4 * rec))       # \Stage\ZONA\obj_course_obj_sky_<zona>_pmt
+    blq = A.bloque(A.entrada('STAGE.PS2', '\\' + nombre.split('\\', 2)[2]))
+    regs = [i & 0xffff if i != 0xffffffff and i >> 16 == rec else None for i in ids]
+    return blq, [r for r in regs[:2] if r is not None], [r for r in regs[2:] if r is not None]
+
+def transicion(A, E, d0):
+    """cambio de entorno al entrar en la etapa (descriptor de tramo +0x58: u16 posicion de carretera de la union a la
+    que empieza y s8 segundos que dura; 44C610 / 44C640 del PC, 100 y 2 si no hay) y banderas de efectos (+0x3C,
+    weather_44bd50: 1 lluvia, 2 sol con destello, 4 sombra, 8 faros, 0x10 luces del coche)"""
+    p = u32(E, d0 + 0x58)
+    pos, seg = struct.unpack('<Hb', E.lee(p, 3)) if p else (100, 2)
+    return pos, seg, u32(E, d0 + 0x3c)
+
+def metros_a_posicion(d_rama, pos):
+    """metros desde el principio de la union hasta el centro de la seccion pos de la colision de una rama (la
+    "posicion de carretera" car+0x64 dentro de la union)"""
+    V, L = principales(d_rama); secs = sorted(set(L))
+    C = np.array([V[L == l].reshape(-1, 3).mean(0) for l in secs])
+    Ls = np.concatenate([[0], np.cumsum(np.linalg.norm(np.diff(C, axis=0), axis=1))]) + np.linalg.norm(C[0, [0, 2]])
+    return float(np.interp(pos, secs, Ls))
+
+def luces(sol, ry=0.0):
+    """(luz de la escena, luz del cielo) del entorno para modelo.py, en un marco girado ry respecto al de la etapa"""
+    def una(v):
+        L = modelo.luz_entorno(v); d = L['dir']; c, s_ = np.cos(-ry), np.sin(-ry)
+        L['dir'] = np.array([d[0] * c + d[2] * s_, d[1], -d[0] * s_ + d[2] * c]); return L
+    return una(sol[1]), una(sol[0])
+
+def sol_dat(A, sal):
+    """SOL.DAT: el sol y el destello del original (40CBC0 de la decompilacion del PC, pase del sol de SCN_EFC): objetos
+    del banco 0x57 (\\Common\\obj_course_obj_common_pmt): 2 el disco, 6 el brillo, 0x0F y 0x10 los del sol a lo lejos,
+    3..5 y 7..0x0E los destellos. Cada registro con su numero en el campo del nodo y el alfa de su material en el del
+    color de sus vertices (la demo los tine y les da la intensidad)"""
+    import conv_coche
+    nombre = E_ = A.elf; nombre = E_.cadena(E_.u32(conv_coche.recursos(A) + 4 * 0x57)).split('\\')[-1]
+    blq = A.bloque(A.entrada('COMMON.PS2', nombre)); mod = modelo.Modelo()
+    for r in range(2, 0x11):
+        k0 = len(mod.mallas)
+        mod.bloque(blq, registros={r}, lista=2, sin_textura=0xFFFFFFFF, nodo_fijo=r)
+        reg = blq.registros()[r]; k = struct.unpack('<i', blq.m[blq.A + reg[2][1]:blq.A + reg[2][1] + 4])[0]
+        mat = modelo.material_de(blq, reg, k); a = 255 if mat is None else min(255, int(round(mat[3] * 2)))
+        for v in mod.verts[k0:]: v['c'] = (np.uint32(a) << 24) | np.uint32(0xFFFFFF)
+    mod.recorta_texturas(); mod.escribe(sal)
+    print('SOL.DAT: %d mallas, %d texturas (%d KB)' % (len(mod.mallas), len(mod.texs), len(mod.blob) >> 10))
 
 def m_por_posicion(seg):
     """metros de ruta por "posicion de carretera" (seccion 5 de la colision: una cada ~8 m)"""
@@ -206,9 +293,16 @@ def escribe_curso(sal, regs):
             b += struct.pack('<4f', *r['bk']) + struct.pack('<8f', *r['ramas'][0], *r['ramas'][1])
             b += struct.pack('<2f', r['m_pos'], r['meta']) + struct.pack('<I', len(r['niebla']))
             for p0, p1, modo, d0, d1, c0, c1 in r['niebla']: b += struct.pack('<2HB3x2f2I', p0, p1, modo, d0, d1, c0, c1)
-            b += b'\0' * (REG - len(b)); f.write(b)
+            b += b'\0' * (4 + 4 + 16 + 32 + 8 + 4 + 24 * NIEBLA_MAX - len(b)) + struct.pack('<2f', *r['sol'])
+            # entorno: banderas de efectos, transicion (posicion y segundos), metros de la union hasta ella, las tres
+            # luces (soles) y la niebla del cielo (lista 0)
+            b += struct.pack('<IHbxf', r['clima'], r['trans'][0], r['trans'][1], r['trans_m'])
+            for v in r['soles']: b += struct.pack('<16f', *v)
+            b += struct.pack('<I', len(r['niebla0']))
+            for p0, p1, modo, d0, d1, c0, c1 in r['niebla0']: b += struct.pack('<2HB3x2f2I', p0, p1, modo, d0, d1, c0, c1)
+            b += b'\0' * (REG - len(b)); assert len(b) == REG; f.write(b)
 
-def curso(A, dsal, con_tramos=True):
+def curso(A, dsal, con_tramos=True, solo_curso=False):
     """todo el arbol del modo (csc_data_2: 15 etapas en 5 niveles): SEGnn.DAT de cada etapa en su marco (empieza en
     el origen hacia -z), BKkk.DAT la union de la etapa de clave kk en su marco (la bifurcacion con los carteles de sus
     dos destinos, o la meta en las etapas finales), BKD.DAT la ruta de la rama derecha de la bifurcacion (la misma en
@@ -232,30 +326,53 @@ def curso(A, dsal, con_tramos=True):
     ramas = []
     for dr in (d_izq, d_der):
         p, a = fin_rama(dr); ramas.append((float(p[0]), float(p[1]), float(p[2]), a))
-    sal = []
+    sal = []; cielos = {}
     for clave, ti, ui, hi, hd in regs:
         d0 = descs[ti]; ruta_c = cadena(E, d0 + 0x0c); z = zona_de(ruta_c); n = segmento_de(A, ruta_c)
+        sol3 = soles(A, z); tpos, tseg, clima = transicion(A, E, d0); cielos[n] = (cielo_de(A, E, d0), sol3)
+        # la transicion es la de la etapa a la que se entra: en la union de esta etapa, la de sus hijos (iguales en
+        # las 15: posicion 100, 2 s); metros hasta ella en la rama izquierda (la derecha es simetrica)
+        th = transicion(A, E, descs[porclave[hi][1]]) if hi >= 0 else None
+        ent = dict(clima=clima, soles=sol3, niebla0=niebla(A, z, 0),
+                   trans=(th[0], th[1]) if th else (tpos, tseg), trans_m=metros_a_posicion(d_izq, th[0]) if th else -1.0)
         tx, ty, tz, rx, ry, rz = f32(E, d0 + 0x98, 6)
         assert abs(rx) < 1e-4 and abs(rz) < 1e-4, 'union con giro en x o z: no soportado'
         dbk = u32(E, base2 + 4 * ui); c_todo = cadena(E, dbk + 0x0c)
         mod = modelo.Modelo()
+        if solo_curso:                                # solo CURSO.DAT (las uniones ya estan)
+            meta = -1.0 if hi >= 0 else 0.0
+            r = dict(zona=z, seg=n, nivel=nivel[clave], izq=hi, der=hd, bk=(tx, ty, tz, ry), ramas=ramas,
+                     m_pos=m_por_posicion(segs[n]), meta=meta, niebla=niebla(A, z), sol=sol(A, z), **ent)
+            sal.append(r); print('etapa %2d %s sol %.1f %.1f clima %x transicion %d (%.0f m) %d s'
+                                 % (clave, z, *r['sol'], clima, *r['trans'][:1], r['trans_m'], r['trans'][1])); continue
         if hi >= 0:                                   # bifurcacion: la de PALM (las demas no estan en el disco)
             # registros: 0 el tronco, 1 la rama izquierda, 2 la derecha; el original dibuja el 0 y, pasada la posicion
             # 0x1C de la union, solo el de la rama del coche (race_area_stage_draw_44e290: obj | 1 o | 2 segun 451350).
             # El entorno \ENV\cs_ENVBK_PALM no es de la escena: solo lo dibuja el cubo del reflejo del coche
             # (race_env_model_44cd30), y repite la calzada a la misma altura (parpadeaba)
+            mod.luz = luces(sol3, ry)[0]                 # la luz de la etapa que se deja, en el marco de la union
             mod.bloque(A.bloque(A.entrada('BK.PS2', 'cs_BK_PALM_pmt')), objetos=True, sin_textura='material', rama={1: 1, 2: 2})
+            mod.luz = None
             zi = zona_de(cadena(E, descs[porclave[hi][1]] + 0x0c)); zd = zona_de(cadena(E, descs[porclave[hd][1]] + 0x0c))
             carteles(A, mod, zi, zd)
             mod.ruta = ri.copy(); meta = -1.0
         else:                                         # meta: cs_BK_<zona> con su colision (una calzada)
             nm = c_todo.split('\\')[-1].replace('coli_', 'cs_').replace('_bin', '_pmt')
+            mod.luz = luces(sol3, ry)[0]
             mod.bloque(A.bloque(A.entrada('BK.PS2', nm)), objetos=True, sin_textura='material')
+            mod.luz = None
             dm = coli_bytes(A, c_todo); mod.ruta, _ = ruta_rama(dm, dm)
             meta = 0.0                                # la pancarta GOAL esta en el principio (z = 0)
             zi = zd = '-'
-        for blq in segs[n].bloques:                   # el cielo de la etapa que se deja
-            if blq.o != segs[n].o and conv_tramo.es_cielo(blq): mod.bloque(blq, lista=3, sin_textura='material')
+        # el cielo de la etapa que se deja: va con la camara y orientado con la etapa (el original lo dibuja con la
+        # matriz de la etapa, 7D2DA0, guardada al cambiar de entorno: 451A30 / 451E90); la demo gira la lista 3 de la
+        # union con la union, asi que aqui va girado -ry
+        k0 = len(mod.mallas); conv_tramo.pon_cielo(mod, cielo_de(A, E, d0), luces(sol3)[1])
+        c_, s_ = np.cos(ry), -np.sin(ry)
+        for x, v in zip(mod.mallas[k0:], mod.verts[k0:]):
+            vx, vz = v['x'].astype(float), v['z'].astype(float)
+            v['x'] = vx * c_ + vz * s_; v['z'] = -vx * s_ + vz * c_
+            x[2] = np.array([x[2][0] * c_ + x[2][2] * s_, x[2][1], -x[2][0] * s_ + x[2][2] * c_])
         mod.recorta_texturas()
         f = os.path.join(dsal, 'BK%02d.DAT' % clave)
         import vq; umbral = vq.UMBRAL
@@ -267,21 +384,25 @@ def curso(A, dsal, con_tramos=True):
         finally: vq.UMBRAL = umbral
         print('triangulos de las tiras del VU1: %d, sin dibujar por la bandera ADC: %d' % (mod.tri_total, mod.tri_adc))
         r = dict(zona=z, seg=n, nivel=nivel[clave], izq=hi, der=hd, bk=(tx, ty, tz, ry), ramas=ramas,
-                 m_pos=m_por_posicion(segs[n]), meta=meta, niebla=niebla(A, z))
+                 m_pos=m_por_posicion(segs[n]), meta=meta, niebla=niebla(A, z), sol=sol(A, z), **ent)
         sal.append(r)
         print('etapa %2d %s SEG%02d nivel %d hijos %2d %2d union %s (%.1f, %.1f, %.1f, %.3f) %s/%s %s: %d mallas, '
               '%d texturas (%d KB), %d KB; %.2f m/pos, %d tramos de niebla'
               % (clave, z, n, nivel[clave], hi, hd, c_todo.split('\\')[-1], tx, ty, tz, ry, zi, zd, os.path.basename(f),
                  len(mod.mallas), len(mod.texs), len(mod.blob) >> 10, os.path.getsize(f) >> 10, r['m_pos'], len(r['niebla'])))
     escribe_curso(os.path.join(dsal, 'CURSO.DAT'), sal)
-    if con_tramos:
-        for r in sal: conv_tramo.convierte(segs[r['seg']], r['seg'], os.path.join(dsal, 'SEG%02d.DAT' % r['seg']))
+    sol_dat(A, os.path.join(dsal, 'SOL.DAT'))
+    if con_tramos and not solo_curso:
+        for r in sal:
+            cb, sol3 = cielos[r['seg']]
+            conv_tramo.convierte(segs[r['seg']], r['seg'], os.path.join(dsal, 'SEG%02d.DAT' % r['seg']), cielo=cb,
+                                 luz=luces(sol3))
 
 def main():
-    """conv_union.py tu.iso salida/ [--sin-tramos]: todo el arbol del curso (curso); --sin-tramos: sin convertir las
-    etapas (SEGnn.DAT, con conv_tramo.py aparte)"""
+    """conv_union.py tu.iso salida/ [--sin-tramos] [--solo-curso]: todo el arbol del curso (curso); --sin-tramos: sin
+    convertir las etapas (SEGnn.DAT, con conv_tramo.py aparte); --solo-curso: solo CURSO.DAT"""
     arg = [a for a in sys.argv[1:] if not a.startswith('--')]
-    curso(Assets(arg[0]), arg[1], '--sin-tramos' not in sys.argv)
+    curso(Assets(arg[0]), arg[1], '--sin-tramos' not in sys.argv, '--solo-curso' in sys.argv)
 
 if __name__ == '__main__':
     main()

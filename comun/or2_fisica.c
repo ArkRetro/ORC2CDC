@@ -262,6 +262,7 @@ void or2_inicia(or2_coche_t *c, const or2_param_t *p)
     }
     sus_reposo(c, p);
     c->marcha = 1;                       /* vehicle_construct_4a5830: event+0x208 = 1 */
+    c->da0 = -1;                         /* +DA0 = 0x19A: ningun coche */
 }
 
 void or2_coloca(or2_coche_t *c, const or2_param_t *p, float rumbo, float v)
@@ -1050,6 +1051,8 @@ static void tick(or2_coche_t *c, const or2_param_t *p, const or2_entrada_t *e)
     /* estado de choque y su animacion (4A2400 / pc_advance_crash_state) */
     avanza_choque(c);
     if (c->roce > 0) c->roce--;
+    if (c->d22 > 0) c->d22--;                           /* 0x17bfa8: +D22 y +DA4 bajan uno por cuadro */
+    if (c->da4 > 0) c->da4--;
     /* 4F9450: derrapando (deriva trasera de 5,6 a 90 grados a 100 km/h del modelo) se atraviesa el trafico
        sin reaccion durante 60 cuadros */
     {
@@ -1675,87 +1678,351 @@ int or2_columna_modelo(const or2_choques_t *q, int modelo)
     return (int)q->mapa[modelo >= 15 ? 0 : 1][modelo % 15];
 }
 
-/* 4F9450 / 4F8490 / 4F6FE0 / 4F7BF0 / 4F6820 para el jugador (A) contra otro coche (B) */
+/* ---------------------------------------------- choques entre coches (4F9450, modulo 4F65A0..4F9E94 del PC; SLES-53998
+   0x191fa0 (pasada), 0x196850 (4F9000), 0x196c40 (4F8E70), 0x196e00 (4F86C0), 0x1942d8 (4F6FE0), 0x194f48 (4F76E0),
+   0x195708 (4F7BF0), 0x1960e8 (4F6820), 0x194cf8 / 0x195628 (4F65D0 / 4F67A0), 0x1ec540 / 0x1ec620 (475F70 / 476040)) */
+#define EPS_CHOQUE 9.99999975e-05f   /* 5A29E0 (PS2 0x38d1b717): "esta en choque" (+2C8 / +2F8 > esto) */
+#define EPS_CAMBIO 1.1920929e-07f    /* 6281F0 (PS2 0x34000000): +2C8 del jugador para el intercambio */
+#define CIERRE_7   0.369139910f      /* 5B440C (PS2 0x3ebcffe8): 80 km/h del modelo, umbral del estado 7 */
+#define CIERRE_G   0.138427630f      /* 5A923C (PS2 0x3e0dbfee): 30 km/h del modelo, umbral del golpe al otro */
+#define TOPE_7     1.38427508f       /* 4F6820 (PS2 0x3fb12fea): 300 km/h del modelo */
+
+/* esquina i de una caja (4F8E70): 0 (x0, z0), 1 (x0, z1), 2 (x1, z1), 3 (x1, z0) */
+static void esquina(const float *cj, int i, float *x, float *z)
+{
+    *x = i < 2 ? cj[0] : cj[3];
+    *z = (i == 0 || i == 3) ? cj[2] : cj[5];
+}
+/* ejes del coche en el mundo: derecha (cos r, -sin r), atras -(sin r, cos r) */
+static void a_mundo(float px, float py, float r, float x, float z, float *wx, float *wy)
+{
+    float c = cosf(r), s = sinf(r);
+    *wx = px + x * c - z * s;
+    *wy = py - x * s - z * c;
+}
+static void a_local(float px, float py, float r, float wx, float wy, float *x, float *z)
+{
+    float c = cosf(r), s = sinf(r), dx = wx - px, dy = wy - py;
+    *x = dx * c - dy * s;
+    *z = -dx * s - dy * c;
+}
+/* 4F86C0: el recorrido de la esquina P1 -> P2 (ejes de la caja A) contra sus cuatro bordes; dir = diagonal hacia fuera
+   de la esquina; dentro = P2 dentro de la caja (entonces se acepta el cruce hacia atras y se pega al borde). Devuelve
+   el borde (-1 ninguno), su sitio s y el punto de cruce. */
+static int borde_cruza(const float *cj, float p1x, float p1z, float p2x, float p2z, float dx, float dz, int dentro,
+                       float *s_out, float *qx, float *qz)
+{
+    /* hueco: id, eje (0 x, 1 z), plano, sentido (P1 >= P2 en el eje), signo exigido a dir en el eje */
+    static const int id_[4] = { 0, 2, 3, 1 }, eje_[4] = { 0, 0, 1, 1 }, pl_[4] = { 0, 3, 2, 5 };
+    static const int ge_[4] = { 1, 0, 1, 0 }, sg_[4] = { 1, -1, 1, -1 };
+    int k, mejor = -1; float dmin = 3.40282347e38f, sm = 0.0f, mx = 0.0f, mz = 0.0f;
+    for (k = 0; k < 4; ++k) {
+        float a = eje_[k] ? p1z : p1x, b = eje_[k] ? p2z : p2x, av = eje_[k] ? p1x : p1z, bv = eje_[k] ? p2x : p2z;
+        float plano = cj[pl_[k]], d = b - a, t, dv, pv, lo, hi, cx, cz, dist;
+        int ebx = ge_[k] ? !(a < b) : !(b < a);
+        if (fabsf(d) < 1e-8f) continue;                        /* 0x197600: 0x322bcc77 */
+        t = (plano - a) / d;
+        if (ebx) { if (!dentro && t < 0.0f) continue; if (1.0f < t) continue; }
+        else if (dentro) { if (t < 0.0f) continue; }
+        else { if (t < 0.0f || 1.0f < t) continue; }
+        dv = eje_[k] ? dz : dx;
+        if (sg_[k] > 0 ? !(dv < 0.0f) : !(0.0f < dv)) continue;
+        pv = (1.0f - t) * av + bv * t;
+        if (eje_[k] == 0) { cx = plano; cz = pv; } else { cx = pv; cz = plano; }
+        dist = sqrtf((cx - p1x) * (cx - p1x) + (cz - p1z) * (cz - p1z));   /* 40F140: desde P1 al punto sin pegar */
+        lo = eje_[k] == 0 ? cj[5] : cj[3]; hi = eje_[k] == 0 ? cj[2] : cj[0];
+        if (dentro) { if (lo > pv) pv = lo; if (pv > hi) pv = hi; }
+        else if (lo > pv || pv > hi) continue;
+        if (eje_[k] == 0) cz = pv; else cx = pv;
+        if (!(dmin > dist)) continue;
+        dmin = dist; mejor = id_[k]; sm = (hi - pv) / (hi - lo); mx = cx; mz = cz;
+    }
+    *s_out = sm; *qx = mx; *qz = mz;
+    return mejor;
+}
+/* 4F9000 (caja ib de B vista desde la caja ia de A) + 4F8E70: registros de A (las esquinas de B en A); devuelve la
+   separacion mas larga (punto de cruce - esquina, mundo) y la direccion de su borde (4F6AC0) */
+static int esquinas_en(const or2_forma_t *a, const or2_forma_t *b, int *borde, float *s, int *esq_b,
+                       float *vx, float *vy, float *wx, float *wy)
+{
+    int i, alguna = 0; float lmax = -1.0f;
+    *vx = *vy = *wx = *wy = 0.0f;
+    for (i = 0; i < 4; ++i) {
+        float cx, cz, w1x, w1y, w2x, w2y, p1x, p1z, p2x, p2z, ox, oz, d1x, d1y, dx, dz, qx, qz, sq, ex, ey, fx, fy;
+        int id, dentro;
+        borde[i] = -1; s[i] = 0.0f;
+        esquina(b->caja, i, &cx, &cz);
+        a_mundo(b->xa, b->ya, b->rumbo_a, cx, cz, &w1x, &w1y);   /* M1: los dos en el cuadro anterior */
+        a_local(a->xa, a->ya, a->rumbo_a, w1x, w1y, &p1x, &p1z);
+        a_mundo(b->x, b->y, b->rumbo, cx, cz, &w2x, &w2y);       /* M2: ahora */
+        a_local(a->x, a->y, a->rumbo, w2x, w2y, &p2x, &p2z);
+        ox = i >= 2 ? -1.0f : 1.0f; oz = (i == 0 || i == 3) ? 1.0f : -1.0f;
+        a_mundo(0.0f, 0.0f, b->rumbo, ox, oz, &d1x, &d1y);       /* la diagonal con la rotacion de M2 */
+        a_local(0.0f, 0.0f, a->rumbo, d1x, d1y, &dx, &dz);
+        dentro = !(p2x > a->caja[0]) && !(a->caja[3] > p2x) && !(p2z > a->caja[2]) && !(a->caja[5] > p2z);
+        id = borde_cruza(a->caja, p1x, p1z, p2x, p2z, dx, dz, dentro, &sq, &qx, &qz);
+        if (id < 0) continue;
+        borde[i] = id; s[i] = sq; esq_b[i] = 1; alguna = 1;
+        /* 4F6AC0: el punto de cruce menos la esquina, en el mundo, y la "normal" del borde (es su direccion) */
+        a_mundo(a->x, a->y, a->rumbo, qx, qz, &ex, &ey);
+        ex -= w2x; ey -= w2y;
+        {
+            float l = ex * ex + ey * ey;
+            if (lmax < 0.0f || l > lmax) {
+                float nx = 0.0f, nz = 0.0f;
+                if (id == 0) nz = -1.0f; else if (id == 1) nx = -1.0f; else if (id == 2) nz = 1.0f; else nx = 1.0f;
+                a_mundo(0.0f, 0.0f, a->rumbo, nx, nz, &fx, &fy);
+                lmax = l; *vx = ex; *vy = ey; *wx = fx; *wy = fy;
+            }
+        }
+    }
+    return alguna;
+}
+
+int or2_contacto(const or2_forma_t *a, const or2_forma_t *b, or2_contacto_t *k)
+{
+    float dx = b->x - a->x, dy = b->y - a->y, ra = a->radio, rb = b->radio;
+    float v1x, v1y, w1x, w1y, v2x, v2y, w2x, w2y, vx, vy, wx, wy, pr;
+    int r1, r2, i;
+    memset(k, 0, sizeof *k);
+    for (i = 0; i < 4; ++i) k->borde_a[i] = k->borde_b[i] = -1;
+    /* 4F9450: cercania (40F140 en 3D; aqui en el plano) y altura de la animacion de cada uno contra la caja del otro */
+    if (!(sqrtf(dx * dx + dy * dy) < ra + rb)) return 0;
+    if (b->pose_y - rb * 0.5f > a->caja[1]) return 0;
+    if (a->pose_y - ra * 0.5f > b->caja[1]) return 0;
+    r1 = esquinas_en(a, b, k->borde_a, k->s_a, k->esq_b, &v1x, &v1y, &w1x, &w1y);   /* recA: B en A */
+    r2 = esquinas_en(b, a, k->borde_b, k->s_b, k->esq_a, &v2x, &v2y, &w2x, &w2y);   /* recB: A en B */
+    if (!r1 && !r2) return 0;
+    k->toca = 1;
+    /* 4F8490: la separacion mas larga (la de B en A, o la de A en B cambiada de signo), sin su parte a lo largo del
+       borde (40F1F0) */
+    if (!r1 || (r2 && !(v1x * v1x + v1y * v1y > v2x * v2x + v2y * v2y))) { vx = -v2x; vy = -v2y; wx = w2x; wy = w2y; }
+    else { vx = v1x; vy = v1y; wx = w1x; wy = w1y; }
+    pr = vx * wx + vy * wy;
+    k->sep[0] = vx - wx * pr; k->sep[1] = vy - wy * pr;
+    return 1;
+}
+
+/* 4F6640: el lado del golpe por las esquinas y bordes de la caja 0 de A (0xff = derecha) */
+static int lado_golpe(const or2_contacto_t *k)
+{
+    int j;
+    if (k->esq_a[0] || k->esq_a[1]) return 0;                 /* +514 / +518: esquinas de la derecha */
+    if (k->esq_a[2] || k->esq_a[3]) return 1;
+    for (j = 0; j < 4; ++j) {
+        int id = k->borde_a[j];
+        if (id < 0) continue;
+        if (id == 0) return 0;
+        if (id == 2) return 1;
+        return !(0.5f >= k->s_a[j]) ? 1 : 0;                   /* borde de morro o cola: s <= 0,5 en el lado x0 */
+    }
+    return 1;
+}
+/* 4F65D0: familia del efecto por el modelo del otro (0x1f autobus 2, 0x27..0x2b camiones 1) */
+static int familia_modelo(int m) { return m == 0x1f ? 2 : (m > 0x26 && m <= 0x2b ? 1 : 0); }
+/* 4F67A0: familia por +31C (1 -> 2, 2 -> 1) */
+static int familia_se(int se) { return se == 1 ? 2 : (se == 2 ? 1 : 0); }
+static void suena(or2_otro_t *o, uint32_t id) { if (id && o->se_n < 3) o->se_id[o->se_n++] = (int)id; }
+/* 475F70: estado del golpeado por el cierre (16/17 coche, 19/18 pesado: clases 0..2) */
+static int tipo_golpe(float cierre, int clase)
+{
+    int peq = clase >= 0 && clase <= 2;
+    if (!(cierre >= CIERRE_7)) return peq ? 0x12 : 0x11;
+    return peq ? 0x13 : 0x10;
+}
+static int recorta_clase(int c) { return c < 0 ? 0 : (c > 6 ? 6 : c); }
+/* 4F68F0: |proyeccion de vA - vB sobre la recta de A a B| */
+static float cierre(v2 va, v2 vb, v2 dp)
+{
+    float l2 = dp.x * dp.x + dp.y * dp.y, pr;
+    if (!(l2 > 0.0f)) return 0.0f;
+    pr = ((va.x - vb.x) * dp.x + (va.y - vb.y) * dp.y) / sqrtf(l2);
+    return fabsf(pr);
+}
+/* 4F7BF0: el intercambio de un coche S con el otro O (copias de antes, Sv / Ov); m = factor de masa (6AC8E0) */
+static v2 empuja(v2 sv, v2 ov, float s_vel, float lj, float lo, float m, float e)
+{
+    if (!(lj > lo)) {
+        v2 n = unidad(mk(ov.x - sv.x, ov.y - sv.y));
+        float s = lo > s_vel ? s_vel : lo;
+        return mk(sv.x + n.x * s, sv.y + n.y * s);
+    }
+    return mk(sv.x + (ov.x - sv.x) * m * e, sv.y + (ov.y - sv.y) * m * e);
+}
+static float restitucion(const or2_choques_t *q, float lj)
+{
+    return lj > q->umbral[1] ? q->rest[2] : (lj > q->umbral[0] ? q->rest[1] : q->rest[0]);
+}
+static float masa_clase(const or2_choques_t *q, int clase) { return q->masa[clase <= 2 ? 2 : 1]; }
+static float reparto_de(const or2_choques_t *q, int ca, int cb, float sa, float sb)
+{
+    float r = (sa + sb) > 0.0f ? sb / (sa + sb) : 0.0f, tb = q->reparto[recorta_clase(ca) * OR2_CLASES + recorta_clase(cb)];
+    if (!(tb < r)) r = tb;                                      /* el minimo de la tabla [A * 7 + B] */
+    return r;
+}
+/* 4F76E0 de un coche de trafico X contra Y (con los registros de X, rx, y los de Y, ry): 1 si queda en roce (+4
+   0x400000: sin intercambio). y_estado7 = Y es el jugador y acaba de entrar en el estado 7 (+4 0x80000). Sin +4 bit 0
+   (el trafico) solo suena (4F67A0 tipo 0). */
+static int reacciona_trafico(const or2_choques_t *q, or2_otro_t *x, const int *rx, const int *ry, int y_estado7)
+{
+    int j;
+    if (!(x->t_choque > EPS_CHOQUE || x->t_recup > EPS_CHOQUE || y_estado7)) {   /* +B5C == 0x12: no lo hay */
+        for (j = 0; j < 4; ++j) {
+            if (rx[j] == 0 || rx[j] == 2 || ((j == 1 || j == 2) && rx[j] == 1)) return 1;
+            if (ry[j] == 0 || ry[j] == 2 || ((j == 1 || j == 2) && ry[j] == 1)) return 1;
+        }
+    }
+    if (q->se_ok && x->d22 <= 0) {                              /* 4F67A0 (+300 >= -100: siempre en la demo) */
+        suena(x, q->se[familia_se(x->se)]);
+        x->d22 = 60;
+    }
+    return 0;
+}
+
+float or2_reparto(const or2_choques_t *q, int clase_a, int clase_b, float va, float vb)
+{
+    if (!q || !q->ok) return 0.5f;
+    return reparto_de(q, clase_a, clase_b, fabsf(va), fabsf(vb));
+}
+
 void or2_choque_coche(or2_coche_t *c, const or2_param_t *p, const or2_choques_t *q, or2_otro_t *o)
 {
-    v2 va, vb, dp, rel, jj, ua, nn;
-    float sa, sb, ratio, tb, closing, lj, e, ma, mb, dd;
-    int clase, pesado;
+    const or2_contacto_t *k = o->k;
+    v2 va, vb, dp, a0, b0;
+    float sa, sb, a2c8, b2c8, flag = 0.0f, lj, e;
+    int clase, j, roce_a = 0, roce_b = 0, e7 = 0;
     (void)p;
-    o->golpe = -1; o->cambia_vel = 0; o->reaccion = 0; o->reparto = 0.5f;
-    if (!q || !q->ok) return;
+    o->golpe = -1; o->cambia_vel = 0; o->reaccion = 0; o->impulso = 0; o->roce = 0; o->se_n = 0;
+    o->reparto = 1.0f;
+    if (!q || !q->ok || !k || !k->toca) return;
     choques_act = q;
-    clase = o->clase < 0 ? 3 : (o->clase > 6 ? 6 : o->clase);
-    pesado = clase <= 2;
-    va = mk(c->vx * DT, c->vy * DT);            /* m/cuadro, como +20 */
+    clase = recorta_clase(o->clase);
+    va = mk(c->vx * DT, c->vy * DT);                            /* m/cuadro, como +20 */
     vb = mk(o->vx * DT, o->vy * DT);
     sa = lon2(va); sb = lon2(vb);
     dp = mk(o->dx, o->dy);
-    /* 4F8490: reparto de la separacion; el jugador tiene la clase 0 (no se le asigna) */
-    ratio = (sa + sb) > 0.0f ? sb / (sa + sb) : 0.5f;
-    tb = q->reparto[0 * OR2_CLASES + clase];
-    if (!(tb < ratio)) ratio = tb;
-    o->reparto = ratio;
-    c->golpe_sonido = 1;
-    /* +1030: derrapando no hay reaccion ni intercambio (solo el sonido) */
-    if (c->paso > 0) return;
-    /* roce lateral: los dos quedan marcados (+4 bit 22) y no hay intercambio de velocidad */
-    if (!o->frontal) return;
-    /* ya en choque o recuperandose: ni reaccion ni intercambio */
-    if (c->t_choque > 0.0f || c->t_recup > 0.0f) return;
-    dd = lon2(dp);
-    if (dd < 0.0001f) return;
-    nn = mk(dp.x / dd, dp.y / dd);
-    rel = mk(va.x - vb.x, va.y - vb.y);
-    /* 4F68F0: proyeccion de vA - vB sobre la recta entre los coches */
-    {
-        float pr = rel.x * nn.x + rel.y * nn.y;
-        jj = mk(nn.x * pr, nn.y * pr);
-        lj = fabsf(pr);
+    /* 4F9450: reparto con la tabla [jugador (clase 5) * 7 + otro]; +2C8 de los dos antes de las reacciones */
+    o->reparto = reparto_de(q, 5, clase, sa, sb);
+    a2c8 = c->t_choque; b2c8 = o->t_choque;
+    /* ---- 4F6FE0 (A = el jugador, B = el otro) */
+    do {
+        int mismo, cola, cl, lado;
+        if (c->paso > 0) break;                                 /* +1030: derrapando, nada (4F65D0 tipo 0 abajo) */
+        mismo = c->da0 == o->id && c->da4 > 0;
+        cola = o->b58 == 0x12 || o->t_choque > EPS_CHOQUE || o->t_recup > EPS_CHOQUE;
+        if (!cola) {
+            int sale = 0;
+            roce_a = 1; c->da0 = o->id; c->da4 = 120;
+            if (mismo) break;
+            if (k->esq_a[0] || k->esq_a[3]) break;              /* +514 / +520: mis esquinas de cola dentro del otro */
+            for (j = 0; j < 4 && !sale; ++j) {
+                int id = k->borde_a[j];
+                if (id == 0 || id == 2 || ((j == 1 || j == 2) && id == 1)) sale = 1;
+            }
+            for (j = 0; j < 4 && !sale; ++j) {
+                int id = k->borde_b[j];
+                if ((id == 0 || id == 2) && !(k->s_b[j] < 0.05f)) sale = 1;   /* 628128 */
+                if ((j == 1 || j == 2) && id == 1) sale = 1;
+            }
+            if (!sale && o->k320 == 1)
+                for (j = 0; j < 4 && !sale; ++j) {
+                    if (k->borde_a[j] == 1) sale = 1;
+                    if (k->borde_b[j] == 3 || k->borde_b[j] == 0 || k->borde_b[j] == 2) sale = 1;
+                }
+            if (sale) break;
+        }
+        /* L4F7237 */
+        c->da0 = -1; c->da4 = 0; roce_a = 0;
+        if (c->t_choque > EPS_CHOQUE || c->t_recup > EPS_CHOQUE) break;
+        for (j = 0; j < 4; ++j) if (k->borde_a[j] == 3) break;  /* me han dado por detras: sin reaccion */
+        if (j < 4) break;
+        /* (sin handicap +DB4 ni partida en red: no hay solo efecto) */
+        if (o->t_choque > EPS_CHOQUE || o->t_recup > EPS_CHOQUE || o->t_choque > 0.0f) {
+            o->golpe = tipo_golpe(cierre(va, vb, dp), clase);   /* el otro ya va en choque: 476260 otra vez */
+            break;
+        }
+        lado = lado_golpe(k);
+        /* 4F6960: si mi velocidad se aleja del otro, el cierre cuenta 0 */
+        {
+            v2 u = unidad(va), d = unidad(dp);
+            flag = (u.x * d.x + u.y * d.y) < 0.0f ? 0.0f : cierre(va, vb, dp);
+        }
+        if (flag > CIERRE_7) cl = 1;
+        else if (o->k320 != 3 && !(sa < CIERRE_7)) cl = 1;      /* autobus y camiones: basta con ir a 80 km/h */
+        else cl = o->b58 == 0x12 ? 3 : 2;
+        if (cl == 1 || cl == 3) {
+            if (cl == 3) lado = o->lado_26c < 0.0f;
+            entra_choque(c, 7, lado);
+            e7 = 1; o->reaccion = 1;
+        }
+        if ((cl == 1 || cl == 2) && !(flag < CIERRE_G)) o->golpe = tipo_golpe(flag, clase);
+        if (q->se_ok && c->d22 <= 0) { suena(o, q->se[3 * 4 + familia_modelo(o->modelo)]); c->d22 = 60; }
+    } while (0);
+    /* ---- 4F76E0 (A = el otro, B = el jugador) */
+    if (o->golpe >= 0) {                                        /* 476040 ya le ha puesto el estado (+2C8 > 0) */
+        if (o->t_choque <= EPS_CHOQUE) o->t_choque = q->dur[o->golpe];
     }
-    /* 4F6960: si el otro queda detras de mi velocidad, el cierre cuenta 0 */
-    ua = sa > 0.0001f ? mk(va.x / sa, va.y / sa) : mk(0.0f, 0.0f);
-    closing = (ua.x * nn.x + ua.y * nn.y) < 0.0f ? 0.0f : lj;
-    /* 4F6FE0: clase de golpe; 1 = salto y derrape del jugador (estado 7) */
-    if (closing > q->umbral[0] || !(sa < q->umbral[0])) {
-        /* lado del golpe: 1 si el otro esta a la derecha del rumbo (refleja la animacion) */
-        int lado = cruz(ua, nn) < 0.0f ? 1 : 0;
-        entra_choque(c, 7, lado);
-        o->reaccion = 1;
-    }
-    /* golpe al otro (476260 / 476040) si el cierre llega a 0.1384 m/cuadro (30 km/h del modelo) */
-    if (!(closing < 0.138427466f)) {
-        if (closing >= q->umbral[0]) o->golpe = pesado ? 19 : 16;
-        else o->golpe = pesado ? 18 : 17;
-    }
-    /* 4F7BF0: intercambio de velocidad */
-    e = lj > q->umbral[1] ? q->rest[2] : (lj > q->umbral[0] ? q->rest[1] : q->rest[0]);
-    ma = q->masa[0];
-    mb = pesado ? q->masa[2] : q->masa[1];
-    (void)jj;
-    {
-        v2 a0 = va, b0 = vb;
-        if (!(lj > q->umbral[0])) {
-            /* cierre bajo: cada uno recibe hasta 80 km/h hacia la velocidad del otro */
-            v2 n1 = unidad(mk(b0.x - a0.x, b0.y - a0.y)), n2 = unidad(mk(a0.x - b0.x, a0.y - b0.y));
-            float s1 = q->umbral[0] > sa ? sa : q->umbral[0], s2 = q->umbral[0] > sb ? sb : q->umbral[0];
-            va = mk(a0.x + n1.x * s1, a0.y + n1.y * s1);
-            vb = mk(b0.x + n2.x * s2, b0.y + n2.y * s2);
+    roce_b = reacciona_trafico(q, o, k->borde_b, k->borde_a, e7);
+    /* ---- intercambio (4F9450 tras las reacciones) */
+    if (!(a2c8 > EPS_CAMBIO)) {
+        if (c->paso > 0 || b2c8 > 0.0f) {
+            if (q->se_ok && c->d22 <= 0) { suena(o, q->se[familia_modelo(o->modelo)]); c->d22 = 60; }
         } else {
-            va = mk(a0.x + (b0.x - a0.x) * ma * e, a0.y + (b0.y - a0.y) * ma * e);
-            vb = mk(b0.x + (a0.x - b0.x) * mb * e, b0.y + (a0.y - b0.y) * mb * e);
+            a0 = va; b0 = vb;
+            lj = cierre(a0, b0, dp);
+            e = restitucion(q, lj);
+            if (!roce_a) {
+                va = empuja(a0, b0, sa, lj, q->umbral[0], q->masa[0], e);
+                o->impulso = 1;
+                /* 4F6820: en el estado 7 no pasa de 300 km/h del modelo */
+                if (c->t_choque > 0.0f && c->choque == 7) {
+                    float s = lon2(va);
+                    if (s > TOPE_7) { va.x *= TOPE_7 / s; va.y *= TOPE_7 / s; }
+                }
+                c->vx = va.x * HZ; c->vy = va.y * HZ;
+                c->vel_mf = lon2(va);
+                c->kmh = tr(c->vel_mf * 216.720001f);
+            }
+            if (!roce_b) {
+                vb = empuja(b0, a0, sb, lj, q->umbral[0], masa_clase(q, clase), e);
+                o->vx = vb.x * HZ; o->vy = vb.y * HZ;
+                o->cambia_vel = 1;
+            }
         }
     }
-    /* 4F6820: en el estado 7 la velocidad no pasa de 1.3843 m/cuadro (300 km/h del modelo) */
-    if (c->t_choque > 0.0f && c->choque == 7) {
-        float s = lon2(va);
-        if (s > 1.38427f) { va.x *= 1.38427f / s; va.y *= 1.38427f / s; }
+    o->roce = roce_b;
+}
+
+void or2_choque_trafico(const or2_choques_t *q, or2_otro_t *a, or2_otro_t *b)
+{
+    const or2_contacto_t *k = a->k;
+    v2 va, vb, dp, a0, b0;
+    float sa, sb, lj, e, a2c8;
+    int ra, rb;
+    a->golpe = b->golpe = -1; a->cambia_vel = b->cambia_vel = 0; a->se_n = b->se_n = 0;
+    a->reaccion = b->reaccion = a->impulso = b->impulso = 0;
+    if (!q || !q->ok || !k || !k->toca) return;
+    va = mk(a->vx * DT, a->vy * DT); vb = mk(b->vx * DT, b->vy * DT);
+    sa = lon2(va); sb = lon2(vb);
+    dp = mk(b->dx - a->dx, b->dy - a->dy);
+    a->reparto = reparto_de(q, a->clase, b->clase, sa, sb);
+    b->reparto = 1.0f - a->reparto;
+    a2c8 = a->t_choque;
+    ra = reacciona_trafico(q, a, k->borde_a, k->borde_b, 0);
+    rb = reacciona_trafico(q, b, k->borde_b, k->borde_a, 0);
+    a->roce = ra; b->roce = rb;
+    if (a2c8 > EPS_CAMBIO) return;
+    a0 = va; b0 = vb;
+    lj = cierre(a0, b0, dp);
+    e = restitucion(q, lj);
+    if (!ra) {
+        va = empuja(a0, b0, sa, lj, q->umbral[0], masa_clase(q, recorta_clase(a->clase)), e);
+        a->vx = va.x * HZ; a->vy = va.y * HZ; a->cambia_vel = 1;
     }
-    c->vx = va.x * HZ; c->vy = va.y * HZ;
-    o->vx = vb.x * HZ; o->vy = vb.y * HZ;
-    o->cambia_vel = 1;
-    c->vel_mf = lon2(va);
-    c->kmh = tr(c->vel_mf * 216.720001f);
+    if (!rb) {
+        vb = empuja(b0, a0, sb, lj, q->umbral[0], masa_clase(q, recorta_clase(b->clase)), e);
+        b->vx = vb.x * HZ; b->vy = vb.y * HZ; b->cambia_vel = 1;
+    }
 }
 
 /* CwCrushStatus (5038D0): choque fuerte contra el muro si el angulo de impacto llega al de aplastamiento.

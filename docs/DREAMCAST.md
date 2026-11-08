@@ -13,7 +13,7 @@ dibuja el otro), cada uno con
 | Parte | Tamano por juego |
 |---|---|
 | bufer de parametros (vertices), `TA_VB_BYTES` | 1792 KB |
-| OPB: 300 teselas x (opacos 32 + translucidos 16 + recorte 16 palabras) = 76,8 KB, por 1 + 4 de reserva | 384 KB |
+| OPB: 300 teselas x (opacos 32 + modificadores opacos 8 + translucidos 8 + recorte 16 palabras) = 76,8 KB, por 1 + 4 de reserva | 384 KB |
 | matriz de teselas | 7 KB |
 | imagen 640x480 a 16 bits | 600 KB |
 | **total** | **~2783 KB** |
@@ -124,8 +124,8 @@ carrera entero sale a 29-31 bytes teoricos por vertice.
 
 ### El tope (demo/main.c, `ta_*`)
 
-Se cuentan **todas** las tiras del cuadro: etapa, coche, trafico y efectos (`ta_cabe`, antes de enviar cada tira: si
-no cabe no se envia) y lo 2D (HUD, menus y textos: `ta_prim`; `hud.c` y `menu.c` se compilan con `-Dpvr_prim=ta_prim`
+Se cuentan **todas** las tiras del cuadro: etapa, coche, trafico, efectos y el volumen de la sombra (`ta_cabe`, antes
+de enviar cada tira, y `sombra_dibuja`: si no cabe no se envia) y lo 2D (HUD, menus y textos: `ta_prim`; `hud.c` y `menu.c` se compilan con `-Dpvr_prim=ta_prim`
 desde `demo/Makefile`). Cada tira 3D cuesta `ta_teo` x `ta_f` / 256 con `ta_f` = 448 (1,75): con eso el cuadro que
 colgo la consola costaria 56 bytes por vertice, el mismo margen que antes (1,3 x 42,5), y lo que la consola guarda
 mejor (tiras de 8) cuesta menos y lo que guarda peor (triangulos sueltos del recorte cercano, tiras de 9-13) mas. Lo 2D
@@ -246,6 +246,35 @@ mismo, eso corta antes que el TA (no medido en la consola).
 
 El diagnostico `pvr_colgado()` (si `pvr_wait_ready` falla 5 veces seguidas escribe en la imagen el estado, los
 vertices, el registro de errores y el uso de VB y OPB) se queda: es lo que permite medir en la consola.
+
+### Sombra del coche y marcas de las ruedas (2026-11-08)
+
+La sombra del coche del jugador va como en el original: volumenes de sombra (+08 y +10 de la disposicion) extruidos
+por la luz del sol (PARIDAD.md, Sombras y marcas). En la PowerVR es un volumen modificador en la lista OP_MOD en modo
+"cheap shadow" (`sombra_dibuja` en `demo/main.c`): lo opaco y lo recortado de la escena y del trafico (cabeceras con el
+bit de modificador; el coche del jugador no) que queda dentro se multiplica por 160/255.
+
+- OPB: la lista OP_MOD necesita sus bloques en cada tesela. Se pasan los translucidos de 16 a 8 palabras y los
+  modificadores opacos llevan 8: `{32, 8, 8, 0, 16}` = 64 palabras por tesela, lo mismo que antes
+  (`{32, 0, 16, 0, 16}`): la VRAM del OPB no cambia (384 KB por juego). Los translucidos con mas de 7 punteros en una
+  tesela enlazan bloques de la reserva comun (4 juegos), que en la consola iba al 30 % en el cuadro medido.
+- TA: cada triangulo del volumen son 40 bytes teoricos (palabra ISP y 9 floats) x `ta_f`; el volumen va entero o no va
+  (`ta_cabe` no puede cortarlo: un volumen sin su ultimo triangulo no se cierra). Medido (Flycast, `DIAG_VTX`, campo
+  `sombra`): 118-186 triangulos por cuadro, 4-7 KB teoricos (7-12 KB contados). Solo los dibuja el coche del jugador
+  (el trafico lleva su sombra plana).
+- Paridad: la PowerVR decide dentro / fuera por par / impar de las caras del volumen delante de cada pixel (Flycast
+  igual: plantilla con XOR), el original cuenta (+1 / -1 en la plantilla). Con las mallas tal cual, donde la silueta
+  extruida se dobla (entre el capo y la cabina) la sombra salia par (vacia); por eso cada parte conexa va como su
+  envolvente convexa (`tools/conv_coche.py volumenes`): 1-5 volumenes por coche.
+- Marcas (`efectos_paso` / `efectos_dibuja`): anillos del original de 256 + 64 + 64 cuadrilateros (4 vertices, 108
+  bytes teoricos cada uno; solo los de menos de 250 m delante): 41 KB teoricos como mucho. Texturas: EFECTOS.DAT, 3 de
+  64x32 ARGB4444 (12 KB de VRAM).
+- VRAM: la sombra plana +0C anade su textura (128x32) a cada COCHEnn.DAT: COCHE06 pasa de 187 a 196 KB (el de mas
+  texturas). Medido el 2026-11-08 (Flycast, `-DPRUEBA_FICHA=6 -DPRUEBA_NODO=9 -DPRUEBA_RAMA=0 -DPRUEBA_FIN=400`):
+  BK09 + IMPE (SEG16) **51 KB libres** (antes 88: -9 del coche, -12 de EFECTOS.DAT y el resto de otros cambios del
+  mismo dia en el arbol); IMPE + su meta BK13 (antes 79) queda, por la misma diferencia, en unos 42 KB (sin medir).
+  Si hace falta sitio: la sombra plana es negra con 16 niveles de alfa (cabria en 4 bits con paleta: 2 KB en vez de
+  8) y lo mismo las marcas.
 
 ## 3. Otros riesgos de la consola real
 

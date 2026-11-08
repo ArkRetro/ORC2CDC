@@ -72,7 +72,7 @@ orden alfabetico en mayusculas; STAGE.PS2 no sigue ese orden dentro de cada zona
 | Categoria | Paquete | Contenido | Formatos | Conversor del port |
 |---|---|---|---|---|
 | Escenarios | STAGE.PS2 | un directorio por zona y variante (`ZONA` y variantes `ZONA_R`, `ZONA_T`, `ZONA_BR`/`_BT`...: sentido inverso y versiones de mision, probable); por tramo: colision, geometria de la calzada y decorado, entorno lejano, cielo, objetos colocados, niebla, sol, spline, 8 tablas SO, `oso_cs_*` | COLI0200, modelo, SO, oso, binarios | `conv_tramo.py` (geometria, texturas, ruta, superficies y muros de la colision) |
-| Escenarios | COMMON.PS2 | carteles de bifurcacion por zona (`obj_OBJ_<ZONA>_BUNKI_TX_pmt`), objetos comunes y puertas, sombra de vehiculo, colores, base de objetos (`object_db`), huesos, tabla de movimientos, destellos, records por defecto, datos de curso | modelo, binarios | no |
+| Escenarios | COMMON.PS2 | carteles de bifurcacion por zona (`obj_OBJ_<ZONA>_BUNKI_TX_pmt`), objetos comunes y puertas, sombra de vehiculo, colores, base de objetos (`object_db`), huesos, tabla de movimientos, destellos, records por defecto, datos de curso; `obj_course_obj_common_pmt` (recurso 0x57): texturas de efectos (0-2 marcas de rueda, 0x29 chispa, 0x2a grava, 0x2b hierba, 0x2e humo, 0x2f polvo) | modelo, binarios | `conv_efectos.py` (marcas de rueda -> EFECTOS.DAT) |
 | Escenarios | BK.PS2 | uniones entre tramos y metas: la bifurcacion (`coli_BK_PALM`, `coli_LBK/RBK/LRBK_PALM`: las dos ramas, una sola o la variante de mision; modelo `cs_BK_PALM_pmt`, el mismo para todas las bifurcaciones), las metas de los tramos finales (`coli_BK_<zona>`, `cs_BK_<zona>[_R]_pmt`) y los finales (`ENDA`-`ENDE`, `SUMOEND`); entorno `ENV\cs_ENVBK_*`, objetos animados del fondo (aviones, pajaros, barcos...: `ANIMS`), tablas SO; una colision `COLI0105` | COLI, modelo, SO, oso | `conv_union.py` (todo el arbol: bifurcaciones con sus carteles, metas, CURSO.DAT) |
 | Escenarios | OSO.PS2 | `oso_qt_*` y `oso_dyn_*`: colocaciones/trayectorias (probable) | oso (sin estudiar) | no |
 | Coches | CARS.PS2 | coches del jugador (`obj_plcar_*`, con variante `_t`), rivales (`obj_rc_*`, `obj_rc_all`) y trafico (`obj_othcar`) | modelo (zlib) | `conv_coche.py` (COCHEnn.DAT por ficha del menu y COCHES.DAT; montaje con la tabla de disposiciones del ELF), `conv_trafico.py` (TRAFn.DAT, TRAFC.DAT), `conv_param.py` (PARAM.DAT, del ELF) |
@@ -215,7 +215,8 @@ Falta, por orden aproximado de necesidad para un juego completo:
    (`obj_course_obj_cs_*`, `oso_cs_*`), sol (`scn_env_sun`), objetos animados de BK (`ANIMS`), spline (`maya_spl`)
    en lugar de la ruta deducida, tablas SO (sin estudiar).
 2. **Coches**: hechos los 15 del modo OUTRUN (`conv_coche.py --todos`) con sus materiales, colores y reflejo;
-   faltan las variantes `_t` (modelos 15-29), luces de freno, rivales `obj_rc_*`, sombra (`obj_vshadow`).
+   faltan las variantes `_t` (modelos 15-29), luces de freno, rivales `obj_rc_*`. La sombra va: plana (+0C) como pieza
+   y los volumenes +08/+10 en el bloque SVL1 (`conv_coche.py volumenes`); la del trafico es `obj_vshadow`.
 3. **Menus y textos**: resto de SPRANI/XST (titulo, seleccion de coche y musica, carga, ranking, entrada de nombre,
    finales) en `conv_menu.py`, y los textos `txet` por idioma (TEXT.PS2) con la fuente `spr_font_xst`.
 4. **Modos**: reglas de Coast 2 Coast/misiones (`Races`, `RaceAttack`, `OutrunMiles`, metas), records por defecto,

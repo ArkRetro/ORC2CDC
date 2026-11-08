@@ -95,6 +95,40 @@ def material_de(blq, reg, k):
     if not 0 <= mi < n5: return None
     return tuple(float(x) for x in np.frombuffer(m[A + o5 + 64 * mi:A + o5 + 64 * mi + 16], '<f4'))
 
+def material_completo(blq, reg, k):
+    """material entero de la entrada k de la tabla 4 del registro (tabla 5, 64 bytes): difuso RGBA, ambiente RGBA,
+    especular RGB y potencia, emision RGBA, en unidades del GS (128 = 1). None si no lo hay"""
+    m, A = blq.m, blq.A; n4, o4 = reg[4]; n5, o5 = reg[5]
+    if not 0 <= k < n4: return None
+    mi = struct.unpack('<i', m[A + o4 + 36 * k:A + o4 + 36 * k + 4])[0]
+    if not 0 <= mi < n5: return None
+    return np.frombuffer(m[A + o5 + 64 * mi:A + o5 + 64 * mi + 64], '<f4').astype(float)
+
+def luz_entorno(sol, d=None):
+    """luz de un entorno del original (un registro de scn_env_sun_<zona>, carril 1 de course_environment_progress_44b020
+    del PC: 16 floats de +0x30) para luz_vertices: difuso (+8 de la luz), color del lado de la luz (+6C) y del lado de
+    la sombra (+78) y la direccion (hacia donde va la luz) = (0, 0, -1) girada en x por la inclinacion y en y por el
+    rumbo (44A430), en el marco del fichero (d la da ya girada si hace falta)"""
+    v = np.asarray(sol, float)
+    if d is None:
+        p, y = np.radians(v[12]), np.radians(v[13])
+        d = np.array([-np.cos(p) * np.sin(y), np.sin(p), -np.cos(p) * np.cos(y)])
+    return dict(dif=v[0:3], lado=v[6:9], sombra=v[9:12], dir=np.asarray(d, float))
+
+def luz_vertices(luz, N, mat):
+    """color de los vertices con la luz del entorno, como el vertex shader de luz del PC (vs_15 de
+    pc_shader_programs_generated: R0 = max(n.l, 0), R1 = (c1A n.l + c1B) x ambiente del material + emision, con
+    c1A = (+6C - +78) / 2 y c1B = +78 + (+6C - +78) / 2 del 40DD70 / 410810): difuso del material x difuso de la luz x
+    max(n.l, 0) + ambiente del material x (+78 + (+6C - +78) (1 + n.l) / 2) + emision; n.l con l hacia la luz. Material
+    en unidades del GS (128 = 1; sin material: difuso y ambiente 1). Las normales de los datos de PS2 apuntan hacia
+    dentro (la calzada: n.y = -1 en las 269 tiras horizontales del registro 0 de PALM; vs_15 las niega: dp3(-R10, c37)),
+    asi que n.l = normal del fichero . direccion de la luz. Devuelve (n, 3), 1 = color neutro"""
+    if mat is None: md = ma = np.ones(3); me = np.zeros(3)
+    else: md, ma, me = mat[0:3] / 128, mat[4:7] / 128, mat[12:15] / 128
+    nl = N.astype(float) @ luz['dir']
+    lado = luz['sombra'][None, :] + (luz['lado'] - luz['sombra'])[None, :] * (1 + nl[:, None]) / 2
+    return md[None, :] * luz['dif'][None, :] * np.clip(nl, 0, None)[:, None] + ma[None, :] * lado + me[None, :]
+
 def texturas_de_carteles(blq):
     """texturas de los carteles del bloque: apaisadas (2:1) en mallas de 4 a 6 vertices, de 6 a 16 m de ancho y 3 a 9 de alto"""
     m, A = blq.m, blq.A; res = []
@@ -127,9 +161,12 @@ class Modelo:
         self.secciones = []                                     # por seccion de carretera: lista de nodos visibles
         self.mapa = None                                        # por punto de la ruta: su seccion (u16)
         self.tri_adc = 0; self.tri_total = 0                    # triangulos sin dibujar por la bandera ADC / total
+        # luz del entorno del original (luz_entorno) para las mallas sin color de vertice (etapas, uniones y cielo);
+        # None: la luz de siempre (LUZ, coches y trafico)
+        self.luz = None
 
     def bloque(self, blq, registros=None, lista=None, objetos=False, sin_textura=int(os.environ.get("SINTEX", "0x60202020"), 16),
-               copias=None, vis=None, umbral=UMBRAL_CURSO, rama=None):
+               copias=None, vis=None, umbral=UMBRAL_CURSO, rama=None, nodo_fijo=None):
         """anade los registros de un bloque (todos si registros es None). lista: fuerza la lista de sus mallas.
         sin_textura: color ARGB de las mallas sin textura, o None para iluminarlas en blanco por la normal, o
         'material' para darles el color de su material del original (material_de).
@@ -137,7 +174,8 @@ class Modelo:
         objetos: como el original, solo las tiras de los nodos (nodos), cada una con la matriz de su nodo; las tiras que
         no son de ningun nodo no se dibujan. vis: {registro: conjunto de nodos} (los que nombra la tabla de visibilidad
         por secciones de la etapa, lee_visibilidad): los demas no se dibujan nunca. umbral: el de LOD del original (6 la
-        etapa; la bandera 0x40 del nodo lo sube a 7). rama: {registro: 1 izquierda / 2 derecha} (uniones)."""
+        etapa; la bandera 0x40 del nodo lo sube a 7). rama: {registro: 1 izquierda / 2 derecha} (uniones).
+        nodo_fijo: valor del campo del nodo de todas sus mallas (sin objetos; el cielo: su grupo)."""
         m, A = blq.m, blq.A; base = len(self.texs)
         for h in tex.cabeceras(blq):
             a = tex.imagen(blq, h); fmt, li, d = textura_dc(a)
@@ -154,10 +192,11 @@ class Modelo:
                     if 0 <= k < reg[4][0] else -1                # la lista de texturas del registro (tabla 4)
                 ti = base + ti if 0 <= ti < ntb else -1
                 self._mat = material_de(blq, reg, k) if sin_textura == 'material' and ti < 0 else None
+                self._matc = material_completo(blq, reg, k) if self.luz is not None else None
                 self._origen = (r, i, k, e[0])                   # registro, malla, entrada de la tabla 4 y banderas
                 return e, ti
             if not objetos:
-                self._nodo = -1
+                self._nodo = -1 if nodo_fijo is None else nodo_fijo
                 for i in range(c):
                     e, ti = tira_de(i)
                     for pk in vif.datos(m, A + e[2], A + blq.w[2]):
@@ -210,8 +249,11 @@ class Modelo:
         for cl in (0x6d, 0x65, 0x64):                           # UV en 1/4096 (16 o 32 bits)
             if cl in tr and len(tr[cl]) == nn: uv = tr[cl][:, :2].astype(float) / 4096; con_uv = True; break
         N = tr[0x69].astype(float) / 32768 if 0x69 in tr and len(tr[0x69]) == nn else np.zeros_like(P)
+        lz = luz_vertices(self.luz, N, getattr(self, '_matc', None)) if self.luz is not None else None
         if 0x6e in tr and len(tr[0x6e]) == nn:
             col = np.clip(tr[0x6e][:, :3].astype(float) * 2, 0, 255)
+        elif lz is not None:                                    # con textura: 1 = la textura tal cual (GS 128)
+            col = np.clip(255 * lz, 0, 255)
         else:
             luz = 0.7 + 0.3 * np.clip(np.abs(N @ LUZ), 0, 1)
             col = np.repeat(255 * luz[:, None], 3, 1)
@@ -219,8 +261,10 @@ class Modelo:
         mat = getattr(self, '_mat', None) if isinstance(sin_textura, str) else None
         if ti < 0 and isinstance(sin_textura, str):            # color del material (GS: 255 = blanco, 128 = alfa 1)
             if mat is None: return                               # sin material no hay color que dar: fuera
-            luz = 0.7 + 0.3 * np.clip(np.abs(N @ LUZ), 0, 1)
-            col = np.clip(np.array(mat[:3])[None, :] * luz[:, None], 0, 255)
+            if lz is not None: col = np.clip(128 * lz, 0, 255)   # el difuso del material ya va en lz
+            else:
+                luz = 0.7 + 0.3 * np.clip(np.abs(N @ LUZ), 0, 1)
+                col = np.clip(np.array(mat[:3])[None, :] * luz[:, None], 0, 255)
             li = 0 if mat[3] >= 127 else 2
         elif ti < 0 and sin_textura is None: li = 0             # sin textura y sin color dado: blanco con luz
         col = col.astype(np.uint32)

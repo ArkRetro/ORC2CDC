@@ -22,6 +22,8 @@ De donde salen (todo se lee de tu ISO; aqui solo hay direcciones y formatos):
   frontal del port de PC, menu_audio.cpp): 1 cursor, 0x40 aceptar, 3 bloqueado, 0 cancelar/volver. Su pitch y volumen
   estan en el .data de SOUNDCD.IRX, direccion 0x4b98 + 12*id: {u16 pitch SPU, u16 volumen (0x3fff = maximo), ...}.
   Sin bucle; en SFX.DAT se llaman "se%03x" (id) y llevan el volumen del IRX en el u16 final de la muestra.
+- Efectos del golpe entre coches (efectos_golpe): de \\IGC.PAK (banco SE de la carrera, partes A y B), los ids de la
+  tabla de 4F65D0 / 4F67A0 del ELF (tipos roce y golpe) y los de 476040; van en SFX.DAT como los de los menus.
 - Umbrales de rpm para el parametro x del motor: 128 floats en 0x3c13b0 del ELF (0, 1100, 1125 ... 10000).
 
 SFX.DAT (little endian):
@@ -170,6 +172,25 @@ def efectos_menu(iso, irx, tb, td):
     return r
 
 
+GOLPE_SE = (0x4f, 0x5e, 0x64, 0x65)     # 476040 (PS2 0x1ec620): golpe al trafico, estados 16..19 (li a0 del codigo)
+
+
+def efectos_golpe(iso, irx, tb, td, elf):
+    """[(nombre, pcm, frecuencia, volumen)] de los efectos del golpe entre coches de \\IGC.PAK: los de la tabla de
+    4F65D0 / 4F67A0 (tipos 0 roce y 3 golpe, familias 0..2; conv_trafico.tabla_se_golpe) y los de 476040"""
+    import conv_trafico
+    t = conv_trafico.tabla_se_golpe(elf, conv_trafico.tabla_cajas(elf))
+    ids = sorted(set([t[k * 4 + f] & 0x1ff for k in (0, 3) for f in range(3)] + list(GOLPE_SE)))
+    A, B, tablas = banco_tablas(fichero_paquete(iso, 'SOUND.PS2', '\\IGC.PAK'))
+    r = []
+    for i in ids:
+        parte = 0 if i in tablas[0] else 1
+        p, v = struct.unpack_from('<HH', irx, td + IRX_SE - tb + 12 * i)
+        assert 0x100 <= p <= 0x3fff and 0 < v <= 0x3fff, 'tabla SE del IRX inesperada (id 0x%x)' % i
+        r.append(('se%03x' % i, muestra_banco((A, B)[parte], tablas[parte][i]), frecuencia(p), v))
+    return r
+
+
 def main():
     if len(sys.argv) < 3:
         raise SystemExit(__doc__.split('\n')[0])
@@ -223,7 +244,7 @@ def main():
         assert fin < 65536, 'muestra %d demasiado larga para un bucle del AICA' % m
         tabla.append((('ics%02x' % m).encode(), len(blob), len(datos), frec, ini, fin, fmt, 1, 0))
         blob += datos
-    for nm, pcm, frec, vol in efectos_menu(iso, irx, tb, td):  # sin bucle: sin muestras previas
+    for nm, pcm, frec, vol in efectos_menu(iso, irx, tb, td) + efectos_golpe(iso, irx, tb, td, bytes(elf)):
         while len(blob) % 32: blob.append(0)
         if pcm16: datos = struct.pack('<%dh' % len(pcm), *pcm); fmt = 0
         else: datos = enc_yamaha(pcm); fmt = 2
