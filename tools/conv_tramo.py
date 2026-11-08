@@ -109,6 +109,28 @@ def recorrido_soo(seg):
     k = np.ones(5) / 5
     return np.stack([np.convolve(np.pad(q[:, j], 2, mode='edge'), k, 'valid') for j in range(3)], 1)
 
+def recorrido_coli(seg):
+    """ruta = centro de los poligonos principales de la colision (la calzada, uno o varios por seccion de 8 m: seccion
+    5 de COLI0200, la "posicion de carretera" del original), cada 4 m y suavizada; None sin colision. Para los tramos
+    cuyo SOO no cubre la carretera entera"""
+    for h, o, s in seg.ent:
+        d = bytes(seg.m[o:o + s])
+        if d[:8] != b'COLI0200': continue
+        n, nprim = struct.unpack('<2I', d[8:16]); sec = struct.unpack('<8I', d[20:52])
+        P = np.frombuffer(d[sec[2]:sec[2] + 64 * n], np.uint8).reshape(n, 64)[:nprim, :48].copy().view('<f4')
+        P = P.reshape(nprim, 4, 3).astype(float)
+        L = np.frombuffer(d[sec[5]:sec[5] + 2 * n], '<u2')[:nprim].astype(int)
+        c = np.array([P[L == l].reshape(-1, 3).mean(0) for l in np.unique(L)])
+        if c[0, 2] < c[-1, 2]: c = c[::-1]
+        Ls = np.concatenate([[0], np.cumsum(np.linalg.norm(np.diff(c, axis=0), axis=1))])
+        sm = np.arange(0, Ls[-1], 4.0)
+        q = np.stack([np.interp(sm, Ls, c[:, k]) for k in range(3)], 1)
+        k = np.ones(5) / 5
+        return np.stack([np.convolve(np.pad(q[:, j], 2, mode='edge'), k, 'valid') for j in range(3)], 1)
+    return None
+
+def longitud(q): return float(np.linalg.norm(np.diff(q, axis=0), axis=1).sum()) if q is not None and len(q) > 1 else 0.0
+
 def puntos_asfalto(seg):
     """vertices del asfalto: tiras casi horizontales del registro 0 con la textura de carretera (la de mas area entre
     las grises del registro: saturacion baja y brillo medio)"""
@@ -394,12 +416,18 @@ def convierte(seg, n, sal, mundo=None, cielo=True):
     mod = modelo.Modelo(); mod.limita = True
     for blq in seg.bloques:
         if blq.o == seg.o:                                     # el bloque principal, con los objetos en su sitio
-            mod.bloque(blq, objetos=True)
+            mod.bloque(blq, objetos=True, sin_textura='material')
         elif es_cielo(blq):
-            if cielo: mod.bloque(blq, lista=3)                 # el cielo: alrededor de la camara, sin niebla
+            if cielo: mod.bloque(blq, lista=3, sin_textura='material')   # el cielo: alrededor de la camara, sin niebla
         # los otros bloques: versiones de lejos (LOD), aparte
-    cam = recorrido_soo(seg)
+    try: cam = recorrido_soo(seg)
+    except ValueError: cam = None                              # SOO sin puntos utiles
+    cc = recorrido_coli(seg)
+    if cc is not None and longitud(cam) < 0.8 * longitud(cc):  # el SOO no cubre la carretera: la de la colision
+        print('ruta del SOO %.0f m, la de la colision %.0f m: se usa la de la colision' % (longitud(cam), longitud(cc)))
+        cam = cc
     if cam is None: cam = recorrido(seg)
+    if np.linalg.norm(cam[-1, [0, 2]]) < np.linalg.norm(cam[0, [0, 2]]): cam = cam[::-1].copy()   # empieza en el origen
     cam, an, car = ajusta_al_asfalto(seg, cam)                 # centro, bordes y carriles: los del asfalto
     if an is None: an = anchos(seg, cam); car = np.zeros((len(cam), NCARRIL))
     car = carriles_uniformes(an, car)                          # donde no se reconocieron carriles

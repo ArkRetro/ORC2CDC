@@ -1,7 +1,5 @@
-#!/usr/bin/env python3
-"""conv_union.py tu.iso salida/ [zona] [--sin-tramos]: la carretera que une un tramo con los dos siguientes (la bifurcacion) y los
-dos tramos siguientes, todo colocado en el marco del tramo de salida (el de SEG<n>.DAT, sin transformar). Sale de tu
-disco: no se distribuye.
+"""conv_union.py tu.iso salida/ [--sin-tramos]: el curso entero del modo (las 15 etapas del arbol, sus uniones y metas)
+para la demo: SEGnn.DAT, BKkk.DAT, BKD.DAT y CURSO.DAT (ver curso). Sale de tu disco: no se distribuye.
 
 Como lo hace el original (descriptores del ejecutable, como en el PC: runtime_apply_course_data_44d720 y
 runtime_course_matrix_44c0d0 de la decompilacion):
@@ -19,10 +17,13 @@ runtime_course_matrix_44c0d0 de la decompilacion):
    origen hacia -z). Los tramos y la union se cargan a la vez en el original (cuatro raices de colision; las que no
    son la 0 comparten la matriz de la union).
 
-Salida (formato ORD6 de modelo.py, en el marco del tramo de salida):
- BKI.DAT  la union (geometria, cielo del tramo de salida, ruta de la rama izquierda)
- BKD.DAT  solo la ruta de la rama derecha (sin mallas ni texturas)
- SEGnn.DAT los dos tramos siguientes (n = segmento de STAGE.PS2), ya colocados al final de su rama
+Salida (formato ORD6 de modelo.py, cada fichero en su propio marco; la demo los coloca al leerlos):
+ SEGnn.DAT las etapas (n = segmento de STAGE.PS2; conv_tramo.py), empiezan en el origen hacia -z
+ BKkk.DAT  la union de la etapa de clave kk: bifurcacion (cs_BK_PALM, su entorno cs_ENVBK_PALM, los porticos de
+           COMMON obj_course_obj_bk_palm con los carteles obj_OBJ_<ZONA>_BUNKI_TX de sus dos destinos, el cielo de la
+           etapa y la ruta de la rama izquierda) o meta (cs_BK_<zona> con su colision, el cielo de la etapa y su ruta)
+ BKD.DAT   solo la ruta de la rama derecha de la bifurcacion (la misma en todas)
+ CURSO.DAT el arbol: zona, SEGnn, nivel, hijos, colocaciones, metros por posicion de carretera, meta y niebla
 Las rutas de la union salen de la colision: el poligono principal de cada seccion (8 m) da el centro y los bordes de
 la calzada; limites, franjas y alturas como en conv_tramo.py (superficies), con la colision de las dos ramas."""
 import os, struct, sys
@@ -136,51 +137,147 @@ def compone(M1, M2):
     x, y, z, r2 = M2
     return (tx + x * c + z * s, ty + y, tz - x * s + z * c, ry + r2)
 
-def main():
-    arg = [a for a in sys.argv[1:] if not a.startswith('--')]
-    iso, dsal = arg[0], arg[1]; zona0 = arg[2] if len(arg) > 2 else 'PALM'
-    A = Assets(iso); E = A.elf
-    base, nprim, base2 = tablas(A, zona0)
+UMBRAL_META = 24.0                                  # error RMS de la VQ aceptado en las uniones de meta
+NIEBLA_MAX = 8                                      # tramos de niebla por etapa en CURSO.DAT
+REG = 4 + 4 + 16 + 32 + 8 + 4 + 24 * NIEBLA_MAX     # bytes de un registro de CURSO.DAT
+
+def zona_de(ruta):
+    """codigo de zona de una ruta del ejecutable (\\Stage\\ZONA\\...)"""
+    return ruta.split('\\')[2]
+
+def niebla(A, zona):
+    """tramos de niebla de la etapa (scn_env_fog_<zona>, lista 1: la de la carretera, entorno 1 del original; lista
+    0/2: lo de lejos y los coches). Registros de 0xb0 bytes hasta la marca 0xffff (0xfffe: hueco), como los lee
+    course_environment_progress_44b020 del PC: +0x00 posicion de carretera inicial, +0x10 final, +0x34 modo (1 exp,
+    2 exp2, 3 lineal), +0x38 inicio, fin y densidad, +0x48 color RGB; +0x54 / +0x64 los mismos al final del tramo.
+    Devuelve [(p0, p1, modo, densidad0, densidad1, color0, color1)]"""
+    d = A.datos(A.entrada('STAGE.PS2', '\\%s\\scn_env_fog_%s_bin' % (zona, zona)))
+    o = struct.unpack_from('<I', d, 4)[0]; res = []
+    while o + 0xb0 <= len(d) and len(res) < NIEBLA_MAX:
+        p0 = struct.unpack_from('<H', d, o)[0]
+        if p0 == 0xffff: break
+        if p0 != 0xfffe:
+            p1 = struct.unpack_from('<H', d, o + 0x10)[0]; modo = struct.unpack_from('<I', d, o + 0x34)[0]
+            d0 = struct.unpack_from('<f', d, o + 0x40)[0]; d1 = struct.unpack_from('<f', d, o + 0x5c)[0]
+            c0 = 0xFF000000 | int.from_bytes(d[o + 0x48:o + 0x4b], 'big')
+            c1 = 0xFF000000 | int.from_bytes(d[o + 0x64:o + 0x67], 'big')
+            res.append((p0, p1, modo, d0, d1, c0, c1))
+        o += 0xb0
+    return res
+
+def m_por_posicion(seg):
+    """metros de ruta por "posicion de carretera" (seccion 5 de la colision: una cada ~8 m)"""
+    for h, o, s in seg.ent:
+        d = bytes(seg.m[o:o + s])
+        if d[:8] != b'COLI0200': continue
+        n, nprim = struct.unpack('<2I', d[8:16]); sec = struct.unpack('<8I', d[20:52])
+        L = np.frombuffer(d[sec[5]:sec[5] + 2 * n], '<u2')[:nprim]
+        return conv_tramo.longitud(conv_tramo.recorrido_coli(seg)) / max(1, int(L.max()))
+    return 8.0
+
+def cambia_texturas(mod, base, nuevas):
+    """sustituye las texturas base + i del modelo por las imagenes RGBA de nuevas {i: imagen} (carteles)"""
+    for i, a in nuevas.items():
+        fmt, li, d = modelo.textura_dc(a)
+        mod.texs[base + i] = (a.shape[1], a.shape[0], fmt, li, len(mod.blob), len(d)); mod.blob += d
+        mod.rgba[base + i] = a
+
+def carteles(A, mod, izq, der):
+    """objetos de la bifurcacion (COMMON obj_course_obj_bk_<zona>, en el disco solo el de PALM: los porticos de los
+    carteles) con los carteles de los dos destinos: sus cuatro texturas de 8x8 son huecos que el juego llena con las de
+    obj_OBJ_<ZONA>_BUNKI_TX de cada destino (icono, nombre con flecha a la izquierda, nombre con flecha a la derecha).
+    Por la posicion de cada malla: 0 icono del derecho (x +10..+13), 1 icono del izquierdo (x -13..-10), 2 nombre del
+    izquierdo (x -10..-4), 3 nombre del derecho (x +4..+10)"""
+    from ps2 import tex
+    e = A.entrada('COMMON.PS2', 'obj_course_obj_bk_palm_pmt.sz'); blq = A.bloque(e); base = len(mod.texs)
+    mod.bloque(blq, objetos=True, sin_textura='material')
+    def tx(z):
+        b = A.bloque(A.entrada('COMMON.PS2', 'obj_OBJ_%s_BUNKI_TX_pmt.sz' % z))
+        return [tex.imagen(b, h) for h in tex.cabeceras(b)]
+    ti, td = tx(izq), tx(der)
+    cambia_texturas(mod, base, {0: td[0], 1: ti[0], 2: ti[1], 3: td[2]})
+
+def escribe_curso(sal, regs):
+    with open(sal, 'wb') as f:
+        f.write(b'CUR1' + struct.pack('<2I', len(regs), REG))
+        for r in regs:
+            b = r['zona'].encode()[:4].ljust(4, b'\0')
+            b += struct.pack('<BBbb', r['seg'], r['nivel'], r['izq'], r['der'])
+            b += struct.pack('<4f', *r['bk']) + struct.pack('<8f', *r['ramas'][0], *r['ramas'][1])
+            b += struct.pack('<2f', r['m_pos'], r['meta']) + struct.pack('<I', len(r['niebla']))
+            for p0, p1, modo, d0, d1, c0, c1 in r['niebla']: b += struct.pack('<2HB3x2f2I', p0, p1, modo, d0, d1, c0, c1)
+            b += b'\0' * (REG - len(b)); f.write(b)
+
+def curso(A, dsal, con_tramos=True):
+    """todo el arbol del modo (csc_data_2: 15 etapas en 5 niveles): SEGnn.DAT de cada etapa en su marco (empieza en
+    el origen hacia -z), BKkk.DAT la union de la etapa de clave kk en su marco (la bifurcacion con los carteles de sus
+    dos destinos, o la meta en las etapas finales), BKD.DAT la ruta de la rama derecha de la bifurcacion (la misma en
+    todas) y CURSO.DAT el arbol: por etapa su zona, fichero, nivel, hijos, colocacion de la union en la etapa (+0x98
+    del descriptor), colocacion del principio de cada rama en la union, metros por posicion de carretera, sitio de la
+    meta en la union y niebla. La demo encadena las etapas con esas colocaciones y recentra el marco en cada union."""
+    E = A.elf; base, nprim, base2 = tablas(A)
     descs = [u32(E, base + 4 * i) for i in range(nprim)]
-    i0 = [i for i, dd in enumerate(descs) if ('\\%s\\' % zona0) in cadena(E, dd + 0x0c)][0]
-    regs = arbol(A, i0)
-    raiz = [r for r in regs if r[1] == i0][0]
-    porclave = {r[0]: r for r in regs}
-    hijos = [porclave[raiz[3]], porclave[raiz[4]]]
-    d0 = descs[i0]; tx, ty, tz, rx, ry, rz = f32(E, d0 + 0x98, 6)
-    assert abs(rx) < 1e-4 and abs(rz) < 1e-4, 'union con giro en x o z: no soportado'
-    M_bk = (tx, ty, tz, ry)
-    dbk = u32(E, base2 + 4 * raiz[2])
-    c_todo, c_izq, c_der = cadena(E, dbk + 0x0c), cadena(E, dbk + 0x18), cadena(E, dbk + 0x1c)
-    print('salida %s (descriptor %d), union %s, ramas %s / %s; union en (%.2f, %.2f, %.2f) giro %.4f' %
-          (zona0, i0, c_todo, cadena(E, descs[hijos[0][1]] + 0x0c), cadena(E, descs[hijos[1][1]] + 0x0c), tx, ty, tz, ry))
-    d_todo, d_izq, d_der = coli_bytes(A, c_todo), coli_bytes(A, c_izq), coli_bytes(A, c_der)
-    segs = A.segmentos(); s0 = segmento_de(A, cadena(E, d0 + 0x0c))
-    # la union: geometria, el cielo del tramo de salida y la ruta izquierda
-    mod = modelo.Modelo(); mod.limita = True
-    nm = c_todo.split('\\')[-1].replace('coli_', 'cs_').replace('_bin', '_pmt')
-    try: A.entrada('BK.PS2', nm)
-    except KeyError: nm = 'cs_BK_PALM_pmt'
-    mod.bloque(A.bloque(A.entrada('BK.PS2', nm)), objetos=True)
-    for blq in segs[s0].bloques:
-        if blq.o != segs[s0].o and conv_tramo.es_cielo(blq): mod.bloque(blq, lista=3)
-    ri, Ci = ruta_rama(d_izq, d_todo); rd, Cd = ruta_rama(d_der, d_todo)
-    sep = np.linalg.norm(ri[:min(len(ri), len(rd)), [0, 2]] - rd[:min(len(ri), len(rd)), [0, 2]], axis=1)
-    print('rutas de la union: %d y %d puntos; se separan (1 m) en el punto %d' % (len(ri), len(rd), int(np.argmax(sep > 1.0))))
-    mod.ruta = ri; mod.recorta_texturas(); conv_tramo.transforma(mod, M_bk)
-    ini = mod.escribe(os.path.join(dsal, 'BKI.DAT'))
-    print('BKI.DAT: %d mallas (%d cielo), %d vertices, %d texturas (%d KB), %d KB' % (len(mod.mallas), ini[4] - ini[3],
-          mod.nv, len(mod.texs), len(mod.blob) >> 10, os.path.getsize(os.path.join(dsal, 'BKI.DAT')) >> 10))
-    md = modelo.Modelo(); md.ruta = rd; conv_tramo.transforma(md, M_bk); md.escribe(os.path.join(dsal, 'BKD.DAT'))
-    # los tramos siguientes, al final de cada rama
-    if '--sin-tramos' in sys.argv: return
-    for lado, (h, dr) in enumerate(zip(hijos, (d_izq, d_der))):
-        p, a = fin_rama(dr)
-        M = compone(M_bk, (p[0], p[1], p[2], a))
-        n = segmento_de(A, cadena(E, descs[h[1]] + 0x0c))
-        print('rama %s: %s (segmento %d) en (%.2f, %.2f, %.2f) giro %.4f' % ('izquierda' if lado == 0 else 'derecha',
-              cadena(E, descs[h[1]] + 0x0c), n, *M))
-        conv_tramo.convierte(segs[n], n, os.path.join(dsal, 'SEG%02d.DAT' % n), M)
+    regs = arbol(A, 0); porclave = {r[0]: r for r in regs}
+    nivel = {regs[0][0]: 0}; cola = [regs[0][0]]
+    while cola:                                       # nivel = profundidad en el arbol (0..4)
+        k = cola.pop(0)
+        for h in porclave[k][3:5]:
+            if h >= 0 and h not in nivel: nivel[h] = nivel[k] + 1; cola.append(h)
+    segs = A.segmentos()
+    # la bifurcacion (la misma geometria y colisiones en todas): rutas de las dos ramas y el principio de cada etapa
+    # siguiente en el marco de la union
+    d_todo, d_izq, d_der = (coli_bytes(A, '\\BK\\coli_%s_PALM_bin' % x) for x in ('BK', 'LBK', 'RBK'))
+    ri, _ = ruta_rama(d_izq, d_todo); rd, _ = ruta_rama(d_der, d_todo)
+    md = modelo.Modelo(); md.ruta = rd; md.escribe(os.path.join(dsal, 'BKD.DAT'))
+    ramas = []
+    for dr in (d_izq, d_der):
+        p, a = fin_rama(dr); ramas.append((float(p[0]), float(p[1]), float(p[2]), a))
+    sal = []
+    for clave, ti, ui, hi, hd in regs:
+        d0 = descs[ti]; ruta_c = cadena(E, d0 + 0x0c); z = zona_de(ruta_c); n = segmento_de(A, ruta_c)
+        tx, ty, tz, rx, ry, rz = f32(E, d0 + 0x98, 6)
+        assert abs(rx) < 1e-4 and abs(rz) < 1e-4, 'union con giro en x o z: no soportado'
+        dbk = u32(E, base2 + 4 * ui); c_todo = cadena(E, dbk + 0x0c)
+        mod = modelo.Modelo(); mod.limita = True
+        if hi >= 0:                                   # bifurcacion: la de PALM (las demas no estan en el disco)
+            mod.bloque(A.bloque(A.entrada('BK.PS2', 'cs_BK_PALM_pmt')), objetos=True, sin_textura='material')
+            mod.bloque(A.bloque(A.entrada('BK.PS2', '\\ENV\\cs_ENVBK_PALM_pmt')), objetos=True, sin_textura='material')
+            zi = zona_de(cadena(E, descs[porclave[hi][1]] + 0x0c)); zd = zona_de(cadena(E, descs[porclave[hd][1]] + 0x0c))
+            carteles(A, mod, zi, zd)
+            mod.ruta = ri.copy(); meta = -1.0
+        else:                                         # meta: cs_BK_<zona> con su colision (una calzada)
+            nm = c_todo.split('\\')[-1].replace('coli_', 'cs_').replace('_bin', '_pmt')
+            mod.bloque(A.bloque(A.entrada('BK.PS2', nm)), objetos=True, sin_textura='material')
+            dm = coli_bytes(A, c_todo); mod.ruta, _ = ruta_rama(dm, dm)
+            meta = 0.0                                # la pancarta GOAL esta en el principio (z = 0)
+            zi = zd = '-'
+        for blq in segs[n].bloques:                   # el cielo de la etapa que se deja
+            if blq.o != segs[n].o and conv_tramo.es_cielo(blq): mod.bloque(blq, lista=3, sin_textura='material')
+        mod.recorta_texturas()
+        f = os.path.join(dsal, 'BK%02d.DAT' % clave)
+        import vq; umbral = vq.UMBRAL
+        # la meta y la etapa final no caben a la vez en la memoria de video con las texturas grandes de la meta sin
+        # comprimir (las que pasan del error RMS 9: 512x512 del publico, 256x256 de METR): en la meta se aceptan
+        # hasta UMBRAL_META (docs/DREAMCAST.md)
+        if hi < 0: vq.UMBRAL = max(umbral, UMBRAL_META)
+        try: mod.escribe(f)
+        finally: vq.UMBRAL = umbral
+        r = dict(zona=z, seg=n, nivel=nivel[clave], izq=hi, der=hd, bk=(tx, ty, tz, ry), ramas=ramas,
+                 m_pos=m_por_posicion(segs[n]), meta=meta, niebla=niebla(A, z))
+        sal.append(r)
+        print('etapa %2d %s SEG%02d nivel %d hijos %2d %2d union %s (%.1f, %.1f, %.1f, %.3f) %s/%s %s: %d mallas, '
+              '%d texturas (%d KB), %d KB; %.2f m/pos, %d tramos de niebla'
+              % (clave, z, n, nivel[clave], hi, hd, c_todo.split('\\')[-1], tx, ty, tz, ry, zi, zd, os.path.basename(f),
+                 len(mod.mallas), len(mod.texs), len(mod.blob) >> 10, os.path.getsize(f) >> 10, r['m_pos'], len(r['niebla'])))
+    escribe_curso(os.path.join(dsal, 'CURSO.DAT'), sal)
+    if con_tramos:
+        for r in sal: conv_tramo.convierte(segs[r['seg']], r['seg'], os.path.join(dsal, 'SEG%02d.DAT' % r['seg']))
+
+def main():
+    """conv_union.py tu.iso salida/ [--sin-tramos]: todo el arbol del curso (curso); --sin-tramos: sin convertir las
+    etapas (SEGnn.DAT, con conv_tramo.py aparte)"""
+    arg = [a for a in sys.argv[1:] if not a.startswith('--')]
+    curso(Assets(arg[0]), arg[1], '--sin-tramos' not in sys.argv)
 
 if __name__ == '__main__':
     main()

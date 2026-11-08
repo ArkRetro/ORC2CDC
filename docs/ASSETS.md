@@ -73,7 +73,7 @@ orden alfabetico en mayusculas; STAGE.PS2 no sigue ese orden dentro de cada zona
 |---|---|---|---|---|
 | Escenarios | STAGE.PS2 | un directorio por zona y variante (`ZONA` y variantes `ZONA_R`, `ZONA_T`, `ZONA_BR`/`_BT`...: sentido inverso y versiones de mision, probable); por tramo: colision, geometria de la calzada y decorado, entorno lejano, cielo, objetos colocados, niebla, sol, spline, 8 tablas SO, `oso_cs_*` | COLI0200, modelo, SO, oso, binarios | `conv_tramo.py` (geometria, texturas, ruta, superficies y muros de la colision) |
 | Escenarios | COMMON.PS2 | carteles de bifurcacion por zona (`obj_OBJ_<ZONA>_BUNKI_TX_pmt`), objetos comunes y puertas, sombra de vehiculo, colores, base de objetos (`object_db`), huesos, tabla de movimientos, destellos, records por defecto, datos de curso | modelo, binarios | no |
-| Escenarios | BK.PS2 | uniones entre tramos y metas: la bifurcacion (`coli_BK_PALM`, `coli_LBK/RBK/LRBK_PALM`: las dos ramas, una sola o la variante de mision; modelo `cs_BK_PALM_pmt`, el mismo para todas las bifurcaciones), las metas de los tramos finales (`coli_BK_<zona>`, `cs_BK_<zona>[_R]_pmt`) y los finales (`ENDA`-`ENDE`, `SUMOEND`); entorno `ENV\cs_ENVBK_*`, objetos animados del fondo (aviones, pajaros, barcos...: `ANIMS`), tablas SO; una colision `COLI0105` | COLI, modelo, SO, oso | `conv_union.py` (la bifurcacion de PALM y sus dos tramos siguientes) |
+| Escenarios | BK.PS2 | uniones entre tramos y metas: la bifurcacion (`coli_BK_PALM`, `coli_LBK/RBK/LRBK_PALM`: las dos ramas, una sola o la variante de mision; modelo `cs_BK_PALM_pmt`, el mismo para todas las bifurcaciones), las metas de los tramos finales (`coli_BK_<zona>`, `cs_BK_<zona>[_R]_pmt`) y los finales (`ENDA`-`ENDE`, `SUMOEND`); entorno `ENV\cs_ENVBK_*`, objetos animados del fondo (aviones, pajaros, barcos...: `ANIMS`), tablas SO; una colision `COLI0105` | COLI, modelo, SO, oso | `conv_union.py` (todo el arbol: bifurcaciones con sus carteles, metas, CURSO.DAT) |
 | Escenarios | OSO.PS2 | `oso_qt_*` y `oso_dyn_*`: colocaciones/trayectorias (probable) | oso (sin estudiar) | no |
 | Coches | CARS.PS2 | coches del jugador (`obj_plcar_*`, con variante `_t`), rivales (`obj_rc_*`, `obj_rc_all`) y trafico (`obj_othcar`) | modelo (zlib) | `conv_coche.py` (COCHEnn.DAT por ficha del menu y COCHES.DAT; montaje con la tabla de disposiciones del ELF), `conv_trafico.py` (TRAFn.DAT, TRAFC.DAT), `conv_param.py` (PARAM.DAT, del ELF) |
 | Personajes | DRIVER.PS2, CHR.PS2, ANIMS.PS2 | pilotos y acompanantes (modelos), datos de personaje `CHR_*.bin`, movimientos `mot_*` (celebraciones, finales, salida) | modelo, binario, movimiento | no |
@@ -162,7 +162,23 @@ hacia -z; la union tambien, y sus ramas acaban en (+-1207,6, 0, -987,6) hacia -z
 **Arbol del curso** (`\bin\csc_data_2.bin` para OutRun 2, `_cvt` el de Coast 2 Coast, `_easy`; zlib del paquete):
 categoria reubicable (`u32` categorias, `u32` reubicaciones, indice de 12 bytes `{hash, cuenta, desplazamiento}`) y
 registros de 0x78 bytes: +0x04 clave, +0x1c descriptor de tramo, +0x20 de union, +0x2c / +0x30 clave del hijo
-izquierdo / derecho (-1 en las metas). `conv_union.py` los lee.
+izquierdo / derecho (-1 en las metas); el +0x08 (nivel, que lee 44C940 para la tabla de tiempos) vale 0 en todos:
+la demo usa la profundidad en el arbol (0..4). `conv_union.py` los lee.
+
+**Niebla** (`scn_env_fog_<zona>_bin`, STAGE): tres desplazamientos `u32` (listas 0, 1 y 2: entornos del original;
+la 1 es la de la carretera) a registros de 0xb0 bytes terminados en 0xffff (0xfffe: hueco), como los lee
+`course_environment_progress_44b020` del PC: +0x00 / +0x10 posicion de carretera inicial / final, +0x34 modo (1 exp,
+2 exp2, 3 lineal), +0x38 inicio, fin y densidad, +0x48 color RGB, +0x54 / +0x64 los mismos al final del tramo. La
+posicion de carretera es la seccion 5 de la colision: una cada ~7,9 m.
+
+**Materiales** (tabla 5 de cada registro de modelo, 64 bytes): difuso r, g, b, a en unidades del GS (128 = 1),
+ambiente, especular, potencia, emision. El primer campo de la entrada de la tabla 4 (36 bytes) es el material y el
+cuarto la textura. `modelo.material_de`.
+
+**Carteles de bifurcacion**: `COMMON obj_course_obj_bk_<zona>` (en el disco solo el de PALM) son los porticos; sus
+texturas 0-3 son huecos de 8x8 que se llenan con las de `obj_OBJ_<ZONA>_BUNKI_TX` de cada destino (icono, nombre con
+flecha a la izquierda, nombre con flecha a la derecha). Las metas llevan la pancarta GOAL en el principio de
+`cs_BK_<zona>` (z = 0).
 
 **Ejecutable**: `Assets.elf` lee por direccion virtual. Tablas ya localizadas (por direccion o por firma) en los
 conversores: parametros de coches (`conv_param.py`), trafico (`conv_trafico.py`), HUD (`conv_hud.py`: 0x404818,
@@ -173,18 +189,17 @@ conversores: parametros de coches (`conv_param.py`), trafico (`conv_trafico.py`)
 Hecho: un tramo jugable con geometria, texturas, ruta y colision del original (`conv_tramo.py`), coche del
 jugador y trafico (`conv_coche.py`, `conv_trafico.py`), fisica y choques con las tablas del ELF (`conv_param.py`),
 HUD de carrera y rotulos (`conv_hud.py`), efectos ICS (`conv_sonido.py`), musica por streaming (`musica.c`); la
-bifurcacion del primer tramo con sus dos ramas conducibles y los dos tramos siguientes colocados en el marco del
-primero (`conv_union.py`), cargados mientras se conduce.
+arbol entero del modo OutRun (15 etapas, 10 bifurcaciones con sus carteles, 5 metas, niebla de cada etapa) encadenado
+mientras se conduce (`conv_union.py`, `CURSO.DAT`).
 
 Falta, por orden aproximado de necesidad para un juego completo:
 
-1. **Todos los tramos y la estructura de curso**: convertir los 66 tramos de STAGE (y sus variantes inversas/
-   de mision) y el resto de bifurcaciones del arbol (`conv_union.py` hace la primera; en cada union el marco se
-   puede volver a poner en el origen para no acumular coordenadas grandes), `Req_*` de SCRIPTS, carteles de bifurcacion y
-   puertas de COMMON, entorno lejano (`cs_ENV_*_pmt`) y cielo, niebla/sol (`scn_env_fog/sun`), spline
-   (`maya_spl`) en lugar de la ruta deducida, tablas SO y `oso_cs_*` (sin estudiar).
-2. **Coches**: hechos los 15 del modo OUTRUN (`conv_coche.py --todos`); faltan las variantes `_t` (modelos 15-29),
-   los colores de pintura, rivales `obj_rc_*`, sombra (`obj_vshadow`).
+1. **Resto de tramos y cursos**: los tramos de Coast 2 Coast (`csc_data_cvt`) y las variantes inversas/de mision,
+   `Req_*` de SCRIPTS, puertas de COMMON, entorno lejano (`cs_ENV_*_pmt`), objetos de tramo
+   (`obj_course_obj_cs_*`, `oso_cs_*`), sol (`scn_env_sun`), objetos animados de BK (`ANIMS`), spline (`maya_spl`)
+   en lugar de la ruta deducida, tablas SO (sin estudiar).
+2. **Coches**: hechos los 15 del modo OUTRUN (`conv_coche.py --todos`) con sus materiales, colores y reflejo;
+   faltan las variantes `_t` (modelos 15-29), luces de freno, rivales `obj_rc_*`, sombra (`obj_vshadow`).
 3. **Menus y textos**: resto de SPRANI/XST (titulo, seleccion de coche y musica, carga, ranking, entrada de nombre,
    finales) en `conv_menu.py`, y los textos `txet` por idioma (TEXT.PS2) con la fuente `spr_font_xst`.
 4. **Modos**: reglas de Coast 2 Coast/misiones (`Races`, `RaceAttack`, `OutrunMiles`, metas), records por defecto,

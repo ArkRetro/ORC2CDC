@@ -12,6 +12,12 @@ con etiqueta para los choques y la eleccion de columna:
   'POS1' + u32 n y por estado de choque: f32 duracion, f32 recuperacion y 6 canales (u32 cuenta y cuenta x 4 f32:
          tiempo, valor, tangentes) de la animacion (desplazamiento x, y, z y giro x, y, z del cuerpo); tablas de
          4F6580 / 4F6590 del PC, localizadas por su firma.
+  'CAM1' + tablas de la camara de carrera (las que copia 484EE0 del PC / 0x178500 de SLES-53998): 31 vistas x 13
+         f32 (ojo, mira, desplazamiento x/y de la proyeccion, balanceo, FOV horizontal en rad, +28, pivote z, u32
+         matriz con o sin carroceria), 20 vistas (2..21) x 30 modelos x 9 f32 (ojo, mira, factor del cabeceo,
+         tope alto y bajo en grados) y 30 modelos x 9 f32 (ojo de la vista interior y caja del coche). Se localiza
+         por el codigo que las copia (memcpy de 0x5460 bytes con la direccion en lui/addiu): las otras dos van
+         pegadas a esa (0x64c + 4 bytes antes y justo despues), como en el PC.
   'TIM1' + 4 x 3 x 15 x 5 i16: tablas de tiempo por zona (las que 44C020 del PC / 0x176040 de SLES-53998 copian a
          7D2E98 segun el preset: indices 0, 1, 5 y 6 de la tabla base), en cuadros de 60,2 Hz:
          [preset][fila de variante][nivel de etapa][dificultad]. Se localiza por el codigo que la copia (memcpy de
@@ -127,6 +133,29 @@ def busca_tiempos(d, segs):
             return t[[0, 1, 5, 6]].astype('<i2').tobytes(), va
     return None, None
 
+def busca_camara(d, segs):
+    """codigo de 484EE0 (PS2 0x178500): 'addiu a2, zero, 0x5460' con la fuente en lui a1 / addiu a1 antes; la tabla de
+    vistas (0x64c) acaba 4 bytes antes y la de modelos (0x438) va detras. Se comprueba la estructura."""
+    u = np.frombuffer(d[:len(d) // 4 * 4], '<u4')
+    for i in np.where(u == 0x24065460)[0]:
+        lo = hi = None
+        for k in range(1, 12):
+            w = int(u[i - k])
+            if lo is None and (w >> 16) == 0x24a5: lo = w & 0xffff          # addiu a1, a1, lo
+            elif lo is not None and (w >> 16) == 0x3c05: hi = w & 0xffff    # lui a1, hi
+            if hi is not None: break
+        if lo is None or hi is None: continue
+        va = (hi << 16) + (lo - 0x10000 if lo & 0x8000 else lo)
+        o = va_off(segs, va)
+        if o is None or o < 0x650: continue
+        vis = np.frombuffer(d[o - 4 - 0x64c:o - 4], '<f4').reshape(31, 13)
+        ban = np.frombuffer(d[o - 4 - 0x64c:o - 4], '<u4').reshape(31, 13)[:, 12]
+        mod = np.frombuffer(d[o:o + 0x5460], '<f4').reshape(20, 30, 9)
+        if not (np.all(ban <= 1) and np.all((vis[:, 9] > 0.3) & (vis[:, 9] < 1.8))): continue
+        if not (np.all(mod[0, :, 2] > 2) and np.all(mod[0, :, 7] >= mod[0, :, 8])): continue
+        return d[o - 4 - 0x64c:o - 4] + d[o:o + 0x5460 + 0x438], va
+    return None, None
+
 def main():
     iso = isomod.Iso(sys.argv[1])
     nombre = next(k for k in iso.fich if k.startswith('SLES') or k.startswith('SLUS') or k.startswith('SLPM'))
@@ -144,11 +173,13 @@ def main():
     if chq is None: sys.exit('no encuentro el bloque de choques entre coches')
     pos = busca_poses(d, segs)
     if pos is None: sys.exit('no encuentro las animaciones de choque')
+    cam, cva = busca_camara(d, segs)
+    if cam is None: sys.exit('no encuentro las tablas de la camara')
     tim, tva = busca_tiempos(d, segs)
     if tim is None: sys.exit('no encuentro las tablas de tiempo por zona')
     open(sys.argv[2], 'wb').write(d[b:b + 0x4c * FILAS] + par + fre + b'MAP1' + mapas.tobytes() +
-                                  b'CHQ1' + chq + b'POS1' + pos + b'TIM1' + tim)
-    print('tablas de tiempo en 0x%x' % tva)
+                                  b'CHQ1' + chq + b'POS1' + pos + b'CAM1' + cam + b'TIM1' + tim)
+    print('tablas de tiempo en 0x%x, de la camara en 0x%x' % (tva, cva))
     print('tabla de %s en 0x%x: %d filas de %d coches, curvas de par y freno, mapas, choques y %d animaciones' %
           (nombre, b, FILAS, C, struct.unpack('<I', pos[:4])[0]))
 

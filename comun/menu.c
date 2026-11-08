@@ -62,6 +62,7 @@ typedef struct { int u; float c; int ini, fin, modo; } anim_t;
 enum { F_ENTRA, F_QUIETO, F_SALE };
 static anim_t a_cab, a_sel, a_aux, a_radio, a_ayuda;
 static int pant, fase, t, sig, inact, t_bloq, entra_atras, barra_ant = -1;
+static uint8_t color_ficha[N_COCHES];                       /* color elegido de cada ficha - 1 (0..7) */
 static int c_menu, c_modo, c_coche = COCHE_DEMO, manual, tema, n_ok, pista_sonando, sale_ok;
 
 /* ---------------------------------------------------------------- tramos */
@@ -238,6 +239,7 @@ int menu_manual(void) { return manual; }
 int menu_pista(void) { return tema < n_ok ? tema : 0; }
 int menu_coche3d(void) { return md && pant == P_COCHE && COCHE_OK(c_coche) && fase != F_SALE && an_hecho(&a_sel); }
 int menu_coche(void) { return c_coche; }
+int menu_color(void) { return color_ficha[c_coche] + 1; }
 void menu_coches(unsigned mascara)
 {
     coches_ok = mascara ? mascara : 1u << COCHE_DEMO;
@@ -270,6 +272,10 @@ static void control(unsigned n)
         if (izq && c_coche > 0) { an_mueve(&a_sel, c_coche, c_coche - 1); c_coche--; sfx_menu(SFX_CURSOR); }
         else if (der && c_coche < N_COCHES - 1) { an_mueve(&a_sel, c_coche, c_coche + 1); c_coche++; sfx_menu(SFX_CURSOR); }
         else if (ok) { if (COCHE_OK(c_coche)) sale(P_CAMBIO, 1); else bloqueado(); }
+        else if (n & CONT_Y) {                              /* COLOR: el siguiente de los 8 en bucle (PC: tabla 68ECA8, (c + 1) % 8) */
+            if (COCHE_OK(c_coche)) { color_ficha[c_coche] = (color_ficha[c_coche] + 1) & 7; sfx_menu(SFX_CURSOR); }
+            else bloqueado();
+        }
         else if (atras) sale(P_MODO, 0);
         break;
     case P_CAMBIO:

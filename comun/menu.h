@@ -14,6 +14,7 @@ int menu_pista(void);                       /* musica elegida */
 int menu_coche3d(void);                     /* 1 si hay que dibujar el coche 3D (seleccion de coche, ficha con coche y
                                                quieta) */
 int menu_coche(void);                       /* ficha del coche elegido (0..14, orden del menu) */
+int menu_color(void);                       /* color elegido de esa ficha: 1..8 (car+0x12 del original; boton Y) */
 void menu_coches(unsigned mascara);         /* fichas que tienen coche (bit k = COCHEkk.DAT); antes de menu_entra */
 unsigned menu_vram(void);
 void menu_libera_vram(void);                /* echa las pantallas guardadas que no hacen falta ahora */                   /* bytes de VRAM del menu en uso */

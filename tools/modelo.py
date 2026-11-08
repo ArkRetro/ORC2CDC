@@ -63,6 +63,16 @@ def colocaciones(blq, reg):
         for i in mallas: usos.setdefault(i, []).append(M)
     return usos
 
+def material_de(blq, reg, k):
+    """color del material de la entrada k de la lista de texturas del registro (tabla 4, 36 bytes: el primer campo es
+    el material): tabla 5, 64 bytes, difuso r, g, b, a en unidades del GS (128 = 1), luego ambiente, especular,
+    potencia y emision. None si no lo hay"""
+    m, A = blq.m, blq.A; n4, o4 = reg[4]; n5, o5 = reg[5]
+    if not 0 <= k < n4: return None
+    mi = struct.unpack('<i', m[A + o4 + 36 * k:A + o4 + 36 * k + 4])[0]
+    if not 0 <= mi < n5: return None
+    return tuple(float(x) for x in np.frombuffer(m[A + o5 + 64 * mi:A + o5 + 64 * mi + 16], '<f4'))
+
 def texturas_de_carteles(blq):
     """texturas de los carteles del bloque: apaisadas (2:1) en mallas de 4 a 6 vertices, de 6 a 16 m de ancho y 3 a 9 de alto"""
     m, A = blq.m, blq.A; res = []
@@ -98,7 +108,8 @@ class Modelo:
 
     def bloque(self, blq, registros=None, lista=None, objetos=False, sin_textura=int(os.environ.get("SINTEX", "0x60202020"), 16), copias=None):
         """anade los registros de un bloque (todos si registros es None). lista: fuerza la lista de sus mallas.
-        sin_textura: color ARGB de las mallas sin textura, o None para iluminarlas por la normal (opacas).
+        sin_textura: color ARGB de las mallas sin textura, o None para iluminarlas en blanco por la normal, o
+        'material' para darles el color de su material del original (material_de).
         copias: {registro: [desplazamiento (x, y, z), ...]} para repetir un registro (ruedas).
         objetos: coloca las mallas segun los objetos del registro (colocaciones)."""
         m, A = blq.m, blq.A; base = len(self.texs)
@@ -118,6 +129,8 @@ class Modelo:
                 ti = struct.unpack('<i', m[A + reg[4][1] + 36 * k + 12:A + reg[4][1] + 36 * k + 16])[0] \
                     if 0 <= k < reg[4][0] else -1                # la lista de texturas del registro (tabla 4)
                 ti = base + ti if 0 <= ti < ntb else -1
+                self._mat = material_de(blq, reg, k) if sin_textura == 'material' and ti < 0 else None
+                self._origen = (r, i, k, e[0])                   # registro, malla, entrada de la tabla 4 y banderas
                 if objetos and i not in usos and esta_en_tipo1(blq, reg, i): continue
                 mats = usos.get(i, [None])
                 for pk in vif.datos(m, A + e[2], A + blq.w[2]):
@@ -147,9 +160,9 @@ class Modelo:
     def _trozo(self, tr, ti, lista, sin_textura, dx, blq, a, b):
         tr = {k: (v[a:b] if v is not None and k != 0x6c and len(v) == len(tr[0x68]) else v) for k, v in tr.items()}
         P = tr[0x68].astype(np.float32) + dx; nn = len(P)
-        uv = np.zeros((nn, 2))
+        uv = np.zeros((nn, 2)); con_uv = False
         for cl in (0x6d, 0x65, 0x64):                           # UV en 1/4096 (16 o 32 bits)
-            if cl in tr and len(tr[cl]) == nn: uv = tr[cl][:, :2].astype(float) / 4096; break
+            if cl in tr and len(tr[cl]) == nn: uv = tr[cl][:, :2].astype(float) / 4096; con_uv = True; break
         N = tr[0x69].astype(float) / 32768 if 0x69 in tr and len(tr[0x69]) == nn else np.zeros_like(P)
         if 0x6e in tr and len(tr[0x6e]) == nn:
             col = np.clip(tr[0x6e][:, :3].astype(float) * 2, 0, 255)
@@ -157,21 +170,25 @@ class Modelo:
             luz = 0.7 + 0.3 * np.clip(np.abs(N @ LUZ), 0, 1)
             col = np.repeat(255 * luz[:, None], 3, 1)
         li = self.texs[ti][3] if ti >= 0 else 2
-        if ti < 0 and sin_textura is None and P[:, 1].max() < 0.3:   # plano bajo el coche: su sombra
-            col = np.zeros((nn, 3)); li = 2
-        elif ti < 0 and sin_textura is None:                   # pintura: rojo con luz y un brillo por arriba
-            luz = 0.35 + 0.65 * np.clip(N @ LUZ, 0, 1)
-            col = np.stack([200 * luz + 50 * luz ** 8, 20 * luz + 60 * luz ** 8, 20 * luz + 60 * luz ** 8], 1)
-            col = np.clip(col, 0, 255); li = 0
+        mat = getattr(self, '_mat', None) if isinstance(sin_textura, str) else None
+        if ti < 0 and isinstance(sin_textura, str):            # color del material (GS: 255 = blanco, 128 = alfa 1)
+            if mat is None: return                               # sin material no hay color que dar: fuera
+            luz = 0.7 + 0.3 * np.clip(np.abs(N @ LUZ), 0, 1)
+            col = np.clip(np.array(mat[:3])[None, :] * luz[:, None], 0, 255)
+            li = 0 if mat[3] >= 127 else 2
+        elif ti < 0 and sin_textura is None: li = 0             # sin textura y sin color dado: blanco con luz
         col = col.astype(np.uint32)
         argb = (0xFF << 24) | (col[:, 0] << 16) | (col[:, 1] << 8) | col[:, 2]
-        if ti < 0 and sin_textura is not None: argb[:] = sin_textura
-        if ti < 0 and sin_textura is None and li == 2: argb[:] = 0x90000000
+        if ti < 0 and isinstance(sin_textura, str) and li == 2:
+            argb = (np.uint32(min(255, int(mat[3] * 2))) << 24) | (argb & 0xFFFFFF)
+        elif ti < 0 and sin_textura is not None and not isinstance(sin_textura, str): argb[:] = sin_textura
         if lista is not None: li = lista
         cc = P.mean(0); rad = float(np.sqrt(((P - cc) ** 2).sum(1).max()))
         dmax = getattr(self, '_dmax', 0.0)
         if self.limita and dmax == 0.0 and rad < 40: dmax = float(np.clip(rad * 30, 150, 1000))
         self.mallas.append([li, ti, cc, rad, self.nv, nn, blq, dmax])
+        if getattr(self, 'extra', None) is not None:            # coches (conv_coche.py): origen, UV y normales
+            self.extra.append(dict(origen=getattr(self, '_origen', None), uv=con_uv, N=N.astype(np.float32)))
         v = np.zeros(nn, dtype=[('x', '<f4'), ('y', '<f4'), ('z', '<f4'), ('u', '<f4'), ('v', '<f4'), ('c', '<u4')])
         v['x'], v['y'], v['z'], v['u'], v['v'], v['c'] = P[:, 0], P[:, 1], P[:, 2], uv[:, 0], uv[:, 1], argb
         self.verts.append(v); self.nv += nn

@@ -104,13 +104,18 @@ coche 6972, trafico y efectos ~1700) + ~150 de HUD = **1545 KB de 1664**; con 42
 1,2 MB del bufer de 1,75 MB (69 %). Peor menu: coche 6972 + 412 de 2D = 413 KB. El tope aguanta mientras la consola
 gaste menos de ~60 B por vertice contado, y la calibracion sube `ta_bpv` sola si gasta mas de 46.
 
-Coches del jugador (`tools/conv_coche.py`): tope de 9200 vertices por coche. Montados enteros (carroceria, puertas,
-volante, faros, pilotos y las cuatro ruedas del original) tienen 9400-11800; los que pasan se vacian (fuera lo que no
-se ve desde las camaras del juego, el interior bajo una tapa oscura y, si hace falta, ruedas del modelo ligero) y
-quedan en 6800-9130. Un coche cada vez (`coche_carga` en `demo/main.c`: libera RAM y VRAM del anterior; en el menu,
-si no cabe, echa la cache de pantallas). `ta_vmin_otros` se recalcula con el coche cargado; con 9100 vertices de
-coche el peor cuadro de carrera pasaria de los 1664 KB contados a 56 B/vertice y `ta_cabe` recorta la etapa de lejos
-(en la consola, a ~42,5 B/vertice, cabe entero: unos 1,3 MB de 1,75).
+Coches del jugador (`tools/conv_coche.py`): tope de 11000 vertices por coche (antes 9200, cuando el interior se tapaba
+con una pieza inventada y se ponian las ruedas del rival). Enteros, con su interior y las ruedas del buje del original,
+tienen 9350-11800; quitando lo que no se ve desde las camaras del juego y las uniones entre tiras quedan en 9540-10915
+(5 de 15 enteros). Coste frente al tope anterior: hasta +1715 vertices de coche (unos 94 KB contados a 56 B/vertice, 73
+KB a 42,5); `ta_vmin_otros` se recalcula con el coche cargado, asi que en el peor cuadro `ta_cabe` recorta algo antes
+la etapa lejana (no hay riesgo de colgar el TA: lo cuenta todo). El reflejo no anade vertices (una pasada con color de
+desplazamiento: 4 bytes mas por vertice en el bufer de parametros, 1680-4980 vertices de entorno por coche, <= 20 KB) y
+cuesta en la CPU unas 4000 transformaciones de normal por cuadro (`coche_entorno`). Margen: la medida de la consola
+(42,5 B/vertice) deja el peor cuadro de carrera en ~1,3 MB de 1,75. VRAM: COCHEnn.DAT 115-180 KB (antes 86-151: el mapa
+de entorno va dos veces, opaco y translucido) y el trafico 261 KB (antes 140: las texturas de sus otros colores). Un
+coche cada vez (`coche_carga` en `demo/main.c`: libera RAM y VRAM del anterior; en el menu, si no cabe, echa la cache
+de pantallas).
 
 OPB: 4 juegos de reserva (307 KB por cuadro); en la consola se midieron 141568 bytes en total (65 KB de reserva) en
 el cuadro que se colgo (incompleto). Si el registro `TA_OPB_POS` pasa del 70 % del OPB, `ta_freno` baja el tope de la

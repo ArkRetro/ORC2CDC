@@ -2,7 +2,7 @@
 """conv_coche.py: coches del jugador de CARS.PS2 al formato de modelo de la Dreamcast (modelo.py, ORD6 con VQ).
 
 Uso:
-  conv_coche.py <iso> --todos <dir> [--fichas 0,9,..] [--tope 9200] [--vista dir]
+  conv_coche.py <iso> --todos <dir> [--fichas 0,9,..] [--tope 11000] [--vista dir]
       los 15 coches del modo OUTRUN: COCHEnn.DAT (nn = ficha del menu) y COCHES.DAT ('CCH1' y el modelo de cada
       ficha, 0xFF si no esta; lo lee demo/main.c)
   conv_coche.py <iso> --modelo m <salida.dat> [--tope n] [--vista dir]   un modelo (byte car+0x11)
@@ -22,34 +22,40 @@ Montaje (todo se lee del disco al convertir; aqui no hay datos del juego):
      +88 + 0x20 k: rueda k {buje (llanta y neumatico), pinza, disco, disco borroso, x, y, z, caida}.
    No se dibujan (como en el original): +04 la vista interior, +08/+10 los volumenes de luz, +0C la sombra (en el PC
    es un RET), +60 (solo con luces).
- - La pintura ya va en las texturas (color por defecto); las mallas sin textura van como en modelo.py.
- - Tope y vaciado: TOPE vertices por coche (9200; ver docs/DREAMCAST.md). Los modelos altos de C2C, montados enteros,
-   tienen 9400-11800 vertices (carroceria 6000-8500, ruedas 1500-3000); solo lo que se ve de la carroceria pasa de
-   7000 en la mitad de ellos, asi que menos que eso no se alcanza sin rebajar el exterior. Si el coche pasa del tope
-   se aplica por orden hasta que cabe:
+ - Materiales del original (materiales()): tabla 4 del registro (material, textura de la capa 1 y de la capa 2) y
+   tabla 5 (difuso, ambiente, especular, potencia, emision; 128 = 1). La pintura es una textura de 8x8 de un color
+   cuya clave (recurso << 16 | textura) esta en la lista de colores del modelo (PC 64D120 y 408C80; en SLES-53998 la
+   tabla de 30 listas de 0x35ad48, localizada por estructura en tabla_colores): {clave, colores 1..8}, cada color otra
+   textura de 8x8 (de \\COMMON\\obj_pc_color_pmt.sz o del propio coche); car+0x12 = color elegido + 1. La carroceria
+   lleva en la capa 2 el mapa de entorno esferico del coche; cristales, espejos y cromados no tienen UV y su capa 1 es
+   ese mapa. Todo va al bloque CEX1 (extension()) que usa demo/main.c (coche_cex, coche_color, coche_entorno).
+ - Uniones entre tiras: el original empaqueta varias tiras en lotes de hasta 59 vertices y no dibuja los triangulos
+   que las unen; se quitan siempre (astillas()), cortando la tira.
+ - Tope y vaciado: TOPE vertices por coche (11000; ver docs/DREAMCAST.md). Montados enteros, con su interior (se ve
+   por los cristales translucidos), tienen 9350-11800 vertices. Si el coche pasa del tope se aplica por orden:
    1. fuera lo que no se ve: con todas las piezas montadas se pinta cada triangulo con un z-buffer (tools/c/visible.c)
       desde las camaras del juego: la de la seleccion de coche (6 m, 1,4 m de alto, vuelta entera), la de carrera
       (6,5 m detras y 2,4 m arriba, con la deriva del derrape a los lados) y una vuelta a 0,9 m (choques). Los
       cristales y los recortes no tapan. Se quitan los triangulos que no se ven desde ninguna (bajos, caras de dentro,
-      el lado interior de las ruedas...) y las astillas (triangulos de union de piezas de una tira, sin anchura);
-   2. fuera el interior: un rectangulo oscuro a la altura de la cintura (de los asientos +108/+118 y el volante de
-      la disposicion) cierra el habitaculo y tapa asientos, salpicadero y paneles de dentro;
-   3. ruedas del modelo ligero (obj_rc_*, unos 90 vertices) en lugar de las del buje (unos 600);
-   4. solo las camaras de la seleccion y de carrera.
-   Las tiras se cortan donde hay mas de 2 triangulos seguidos ocultos (cortar cuesta 2 vertices).
+      el lado interior de las ruedas...);
+   2. solo las camaras de la seleccion y de carrera;
+   3. (ultimo recurso, hoy no hace falta) ruedas del modelo ligero del rival (obj_rc_*): el original dibuja siempre
+      las del buje en el coche del jugador (46AE70), asi que no es lo del original.
+   Las tiras se cortan donde hay mas de 2 triangulos seguidos ocultos (cortar cuesta 2 vertices). No se tapa ni se
+   anade ninguna pieza.
 La fisica no cambia: sale de PARAM.DAT por modelo (conv_param.py). Sale de tu disco: no se distribuye."""
-import ctypes, os, subprocess, sys
+import ctypes, os, struct, subprocess, sys
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ps2.assets import Assets
-from ps2 import vif
+from ps2 import tex, vif
 import modelo
 
 NINGUNO = 0xFFFFFFFF
 # fichas del menu (comun/menu.c, orden de la escena 0x44007E del frontal) -> modelo (car+0x11). Visto en los logos de
 # cada ficha (cuadro 20 (k + 1)) y en los nombres de fichero de la tabla de recursos de cada modelo.
 FICHA_MODELO = [7, 14, 2, 9, 8, 12, 5, 0, 10, 6, 11, 3, 13, 1, 4]
-TOPE = 9200                                     # vertices por coche (docs/DREAMCAST.md: tope por coche)
+TOPE = 11000                                    # vertices por coche (docs/DREAMCAST.md: tope por coche)
 
 # ------------------------------------------------------------------ ELF: disposiciones y ficheros
 def disposiciones(A):
@@ -99,7 +105,7 @@ def pieza(mod, blq, ident, R=None, t=None, nombre=''):
     r = ident & 0xFFFF
     if r >= blq.w[0]: return
     k0, m0, t0, b0 = len(mod.verts), len(mod.mallas), len(mod.texs), len(mod.blob)
-    mod.bloque(blq, [r], sin_textura=None)
+    mod.bloque(blq, [r], sin_textura='material')
     base = getattr(mod, '_base_tex', {})
     if id(blq) in base:                                         # modelo.bloque vuelve a anadir todas las texturas
         for x in mod.mallas[m0:]:                               # del bloque: se usan las de la primera vez
@@ -113,8 +119,9 @@ def pieza(mod, blq, ident, R=None, t=None, nombre=''):
         if t is not None: P = P + t
         v['x'], v['y'], v['z'] = P[:, 0], P[:, 1], P[:, 2]
     V = np.concatenate(mod.verts) if mod.verts else None
-    for x in mod.mallas[m0:]:
-        x.append(nombre)
+    for x, ex in zip(mod.mallas[m0:], mod.extra[m0:]):
+        if R is not None: ex['N'] = (ex['N'].astype(float) @ R).astype(np.float32)
+        x.append(nombre); x.append(ex)
         q = np.stack([V['x'][x[4]:x[4] + x[5]], V['y'][x[4]:x[4] + x[5]], V['z'][x[4]:x[4] + x[5]]], 1)
         x[2] = q.mean(0); x[3] = float(np.sqrt(((q - x[2]) ** 2).sum(1).max()))
 
@@ -135,13 +142,13 @@ def caja(b, r):
     if not P: return None
     P = np.vstack(P).astype(float); return P.min(0), P.max(0)
 
-def monta(A, m, ligeras=False, tapa=None):
-    """el coche entero segun su disposicion. ligeras: ruedas del modelo ligero (menos vertices) en lugar de las del
-    buje; tapa: (x0, x1, z0, z1, y) rectangulo oscuro que cierra el habitaculo (el interior se ha quitado)"""
+def monta(A, m, ligeras=False):
+    """el coche entero segun su disposicion (con su interior). ligeras: ruedas del modelo ligero (menos vertices) en
+    lugar de las del buje"""
     d, recurso, nombre = disposicion(A, m)
     e = A.entrada('CARS.PS2', nombre.split('\\')[-1])
     blq = A.bloque(e)
-    mod = modelo.Modelo(); mod.ruta = np.zeros((0, 5))
+    mod = modelo.Modelo(); mod.ruta = np.zeros((0, 5)); mod.extra = []; mod._blq_coche = blq
     pieza(mod, blq, d['cuerpo'], nombre='carroceria')
     if d['extra'] != NINGUNO and sum(len(tr[0x68]) for pk in blq.mallas(d['extra'] & 0xFFFF) for tr in vif.tiras(pk)) < 2000:
         pieza(mod, blq, d['extra'], nombre='extra')             # (la del F40 es una segunda capa de toda la carroceria)
@@ -162,27 +169,127 @@ def monta(A, m, ligeras=False, tapa=None):
         lado = (cb[0][0] + cb[1][0]) / 2 if cb else -t[0]       # hacia donde mira la llanta del buje
         esp = np.diag([-1.0, 1, 1]) if (lado > 0) != (cx > 0) and abs(cx) > 1e-3 else np.eye(3)
         pieza(mod, bl, reg, R=esp @ R, t=t, nombre='rueda')
-    if tapa is not None:
-        x0, x1, z0, z1, y = tapa
-        v = np.zeros(4, dtype=mod.verts[0].dtype)
-        v['x'] = [x0, x1, x0, x1]; v['y'] = y; v['z'] = [z0, z0, z1, z1]; v['c'] = 0xFF101418
-        mod.mallas.append([0, -1, np.array([(x0 + x1) / 2, y, (z0 + z1) / 2]), float(np.hypot(x1 - x0, z1 - z0) / 2),
-                           mod.nv, 4, None, 0.0, 'tapa'])
-        mod.verts.append(v); mod.nv += 4
+    materiales(A, mod, m, recurso)
     return mod, e, d
 
-def tapa_de(mod, d):
-    """rectangulo que cierra el habitaculo a la altura de la cintura: de los asientos (disposicion +108/+118) y el
-    volante; ancho hasta la cara interior de las puertas"""
-    a = np.array(d['asientos']); vol = d['volante'][1]
-    xs = sorted([a[0][0], a[1][0]]); y = vol[1] + 0.2
-    V = np.concatenate([v for v, x in zip(mod.verts, mod.mallas) if x[8] == 'carroceria'])
-    P = np.stack([V['x'], V['y'], V['z']], 1)
-    z0, z1 = vol[2] - 0.25, max(a[0][2], a[1][2]) + 0.6
-    sel = P[(P[:, 2] > z0) & (P[:, 2] < z1) & (np.abs(P[:, 1] - y) < 0.08)]
-    xm = np.percentile(np.abs(sel[:, 0]), 90) if len(sel) else 0.8
-    xm = min(xm - 0.04, max(abs(xs[0]), abs(xs[1])) + 0.45)
-    return (-xm, xm, z0, z1, y)
+# ------------------------------------------------------------------ pintura, colores y reflejo
+def tabla_colores(A):
+    """tabla de listas de colores de los 30 coches del jugador (PC 64D120; en SLES-53998 la de 0x35ad48): 30 punteros
+    a listas terminadas en 0 de punteros a entradas {clave, color 1..8} (clave = recurso << 16 | textura). Se localiza
+    por estructura: 30 punteros seguidos a listas cuya primera clave es del recurso de la carroceria del modelo"""
+    if getattr(A, '_tcol', None): return A._tcol
+    E = A.elf; rec = [disposicion(A, m)[1] for m in range(30)]
+    def lista(p):
+        r = []
+        try:
+            while E.u32(p) and len(r) < 8: r.append(E.u32(E.u32(p), 9)); p += 4
+        except Exception: return None
+        return r
+    for va, off, fs, ms in E.segmentos:
+        w = np.frombuffer(E.d[off:off + fs // 4 * 4], '<u4').astype(np.int64)
+        dentro = ((w >= va) & (w < va + fs)).astype(int)
+        for i in np.nonzero(np.convolve(dentro, np.ones(30, int), 'valid') == 30)[0]:
+            ok = True
+            for m in range(30):
+                L = lista(int(w[i + m]))
+                if not L or any((x[0] >> 16) != rec[m] for x in L): ok = False; break
+            if ok: A._tcol = va + 4 * int(i); return A._tcol
+    raise SystemExit('no se encuentra la tabla de colores de los coches')
+
+def colores(A, m):
+    """[(clave, [ARGB de los colores 1..8])] de la lista del modelo m: cada color es una textura de 8x8 de un solo
+    color (la de \\COMMON\\obj_pc_color_pmt.sz o la del propio coche): se guarda su color"""
+    E = A.elf; p = E.u32(tabla_colores(A) + 4 * m); R = recursos(A); res = []
+    while E.u32(p):
+        ent = E.u32(E.u32(p), 9); cols = []
+        for alt in ent[1:]:
+            b = _bloque_recurso(A, alt >> 16)
+            h = tex.cabeceras(b)[alt & 0xFFFF]; a = tex.imagen(b, h).reshape(-1, 4).astype(float).mean(0)
+            cols.append(0xFF000000 | int(round(a[0])) << 16 | int(round(a[1])) << 8 | int(round(a[2])))
+        res.append((ent[0], cols)); p += 4
+    return res
+
+def _bloque_recurso(A, rec):
+    cache = A.__dict__.setdefault('_brec', {})
+    if rec not in cache:
+        nombre = A.elf.cadena(A.elf.u32(recursos(A) + 4 * rec)).split('\\')
+        cache[rec] = A.bloque(A.entrada(nombre[-2] + '.PS2', nombre[-1]))
+    return cache[rec]
+
+def _luz(N):
+    return 0.7 + 0.3 * np.clip(np.abs(N.astype(float) @ modelo.LUZ), 0, 1)       # la misma que modelo.py
+
+def _argb(rgb, luz, a=255):
+    c = np.clip(np.asarray(rgb, float)[None, :3] * luz[:, None], 0, 255).astype(np.uint32)
+    return (np.uint32(a) << 24) | (c[:, 0] << 16) | (c[:, 1] << 8) | c[:, 2]
+
+def _rgb(argb):
+    return np.array([(argb >> 16) & 255, (argb >> 8) & 255, argb & 255], float)
+
+def _tex_copia(mod, ti, translucida):
+    """copia de la textura ti del modelo (el mapa de entorno, que tiene alfa 0 fuera del circulo): opaca (RGB565,
+    lista 0) o para la lista translucida (su alfa por el del vertice)"""
+    cache = mod.__dict__.setdefault('_copias', {})
+    if (ti, translucida) not in cache:
+        a = mod.rgba[ti].copy()
+        if not translucida: a[..., 3] = 255
+        fmt, li, dd = modelo.textura_dc(a)
+        if translucida: li = 2
+        mod.texs.append((a.shape[1], a.shape[0], fmt, li, len(mod.blob), len(dd))); mod.blob += dd; mod.rgba.append(a)
+        cache[(ti, translucida)] = len(mod.texs) - 1
+    return cache[(ti, translucida)]
+
+ESP_COLOR, ESP_ENTORNO = 1, 2               # tipos de malla especial (CEX1): color de pintura por vertice; entorno
+
+def materiales(A, mod, m, recurso):
+    """aplica el material del original a cada malla (tabla 4 del registro: material, texturas de las dos capas; tabla
+    5: difuso, ambiente, especular, potencia, emision; 128 = 1):
+     - pintura (la textura de la capa 1 es una clave de la lista de colores del modelo; textura de 8x8 de un color):
+       sin textura, color de la pintura por la luz (se cambia en la demo con el color elegido). Si tiene capa 2 (el
+       mapa de entorno esferico del bloque): textura = mapa de entorno (copia opaca) con UV de entorno calculadas en
+       cada cuadro por la normal (demo/main.c) y la pintura por la luz como color de desplazamiento (suma): pintura +
+       entorno x especular en una sola pasada;
+     - mallas sin UV (cristales, espejos, cromados: la capa 1 es el mapa de entorno): UV de entorno; color base =
+       especular con el alfa del difuso (translucida si es menor que 1), desplazamiento = difuso por la luz;
+     - sin textura: difuso por la luz (y la emision), alfa del difuso;
+     - el resto (textura con UV): como estaba (la capa 2, si la hay, no se dibuja).
+    Deja en cada malla x[9] el dict extra con 'esp' = (tipo, ranura de pintura o -1, color fijo de desplazamiento)"""
+    claves = colores(A, m); mod._colores = claves
+    ranura = {c: k for k, (c, _) in enumerate(claves)}
+    V = mod.verts; base_tex = mod._base_tex
+    for k, x in enumerate(mod.mallas):
+        ex = x[9]; ex['esp'] = None
+        blq = x[6]; r, i, k4, fl = ex['origen']; reg = blq.registros()[r]
+        if not 0 <= k4 < reg[4][0]: continue
+        t4 = struct.unpack('<9i', blq.m[blq.A + reg[4][1] + 36 * k4:blq.A + reg[4][1] + 36 * k4 + 36])
+        col = np.frombuffer(blq.m[blq.A + reg[5][1] + 64 * t4[0]:blq.A + reg[5][1] + 64 * t4[0] + 64], '<f4') \
+            if 0 <= t4[0] < reg[5][0] else np.full(16, 128.0, np.float32)
+        dif, esp, emi = col[0:4] * 2, col[8:11] * 2, col[12:15] * 2   # 128 = 1 -> 255
+        luz = _luz(ex['N']); v = V[k]; b0 = base_tex.get(id(blq), 0)
+        nt = len(tex.cabeceras(blq))
+        t1 = t4[3] if 0 <= t4[3] < nt else -1; t2 = t4[5] if 0 <= t4[5] < nt else -1
+        rec = recurso if blq is mod._blq_coche else -1
+        sl = ranura.get((rec << 16) | t1, -1) if t1 >= 0 else -1
+        alfa = int(min(255, dif[3]))
+        if sl >= 0:
+            pint = _rgb(claves[sl][1][0])                       # color 1: el de serie
+            if t2 >= 0 and t2 != t1:
+                x[1] = _tex_copia(mod, b0 + t2, False); x[0] = 0
+                v['c'] = _argb(np.minimum(esp, 255), np.ones(len(v)))
+                ex['esp'] = (ESP_ENTORNO, sl, 0)
+            else:
+                x[1] = -1; x[0] = 0; v['c'] = _argb(pint * dif[:3] / 255, luz)
+                ex['esp'] = (ESP_COLOR, sl, 0)
+        elif t1 >= 0 and not ex['uv']:
+            transl = alfa < 250
+            x[1] = _tex_copia(mod, b0 + t1, transl); x[0] = 2 if transl else 0
+            v['c'] = _argb(np.minimum(esp, 255), np.ones(len(v)), alfa if transl else 255)
+            fijo = int(_argb(dif[:3], np.ones(1))[0])
+            ex['esp'] = (ESP_ENTORNO, -1, fijo)
+        elif t1 < 0:
+            x[1] = -1; x[0] = 0 if alfa >= 250 else 2
+            c = np.clip(dif[None, :3] * luz[:, None] + emi[None, :], 0, 255).astype(np.uint32)
+            v['c'] = (np.uint32(alfa) << 24) | (c[:, 0] << 16) | (c[:, 1] << 8) | c[:, 2]
 
 # ------------------------------------------------------------------ vaciado
 def _lib():
@@ -235,8 +342,24 @@ def visibilidad(mod, res=(960, 720), bajas=True):
     a = T[:, 0:3]; b = T[:, 3:6]; c = T[:, 6:9]                 # astillas: los triangulos de union de piezas de
     area = np.linalg.norm(np.cross(b - a, c - a), axis=1) / 2   # una tira (casi sin area y largos) no se ven
     largo = np.maximum(np.linalg.norm(b - a, axis=1), np.maximum(np.linalg.norm(c - b, axis=1), np.linalg.norm(a - c, axis=1)))
-    astilla = (largo > 0.25) & (area < 0.004 * largo)           # menos de ~8 mm de ancho
-    return (cuenta > 0) & ~astilla, dueno
+    return (cuenta > 0) & ~astillas(mod, T), dueno
+
+def astillas(mod, T=None):
+    """triangulos de union entre trozos de una misma tira (el original empaqueta varias tiras en un lote de hasta
+    59 vertices y no dibuja los triangulos que las unen): largos y casi sin area, o largos y con la cara cruzada
+    respecto a las normales de sus vertices (une superficies distintas)"""
+    if T is None: T, _ = triangulos(mod)
+    N = np.concatenate([x[9]['N'] for x in mod.mallas]).astype(float)
+    idx = np.concatenate([np.arange(x[4], x[4] + x[5] - 2) for x in mod.mallas])
+    a = T[:, 0:3]; b = T[:, 3:6]; c = T[:, 6:9]
+    fn = np.cross(b - a, c - a); area = np.linalg.norm(fn, axis=1) / 2; fn /= np.maximum(2 * area, 1e-12)[:, None]
+    largo = np.maximum(np.linalg.norm(b - a, axis=1), np.maximum(np.linalg.norm(c - b, axis=1), np.linalg.norm(a - c, axis=1)))
+    vn = N[idx] + N[idx + 1] + N[idx + 2]; ln = np.linalg.norm(vn, axis=1); vn /= np.maximum(ln, 1e-9)[:, None]
+    cruzada = (ln > 0.5) & (np.abs((fn * vn).sum(1)) < 0.3)
+    med = np.concatenate([np.full(x[5] - 2, np.median(np.linalg.norm(np.diff(np.stack([v['x'], v['y'], v['z']], 1), axis=0), axis=1)))
+                          for x, v in zip(mod.mallas, mod.verts)])
+    salto = (largo > 6 * med) & (2 * area < 0.03 * largo * largo)   # une dos trozos: largo y fino
+    return (largo > 0.25) & ((area < 0.004 * largo) | cruzada | salto)
 
 def vacia(mod, vis, dueno, hueco=2, maximo=256):
     """rehace las tiras con solo los triangulos visibles (corta si hay mas de hueco ocultos seguidos; tiras de
@@ -259,7 +382,8 @@ def vacia(mod, vis, dueno, hueco=2, maximo=256):
                 e = min(b, j + maximo - 3)
                 q = V[x[4] + j:x[4] + e + 3].copy(); verts.append(q)
                 P = np.stack([q['x'], q['y'], q['z']], 1).astype(float); cc = P.mean(0)
-                nuevas.append([x[0], x[1], cc, float(np.sqrt(((P - cc) ** 2).sum(1).max())), nv, len(q), x[6], x[7]] + x[8:])
+                nuevas.append([x[0], x[1], cc, float(np.sqrt(((P - cc) ** 2).sum(1).max())), nv, len(q), x[6], x[7], x[8],
+                               dict(x[9], N=x[9]['N'][j:e + 3])])
                 nv += len(q); j = e + 1
     mod.mallas, mod.verts, mod.nv = nuevas, verts, nv
 
@@ -270,29 +394,62 @@ def triangulos_n(mod):
     return sum(x[5] - 2 for x in mod.mallas)
 
 # ------------------------------------------------------------------ salida
+def extension(mod):
+    """bloque CEX1 (va en el sitio de la ruta del modelo, que los coches no tienen: nruta = palabras, 1 por punto):
+    'CEX1', u32 colores por ranura (8), ranuras de pintura, mallas especiales, palabras de vertice;
+    colores: ranuras x 8 ARGB (colores 1..8 de la lista del original; el 1 es el de serie, el que ya llevan los
+    vertices); mallas: {u32 malla (orden del fichero), tipo (1 color de pintura, 2 entorno), i32 ranura o -1, ARGB
+    fijo de desplazamiento (si no hay ranura), u32 primera palabra de vertice}; vertices: por vertice de cada malla
+    especial una palabra {s8 nx, s8 ny, s8 nz, u8 luz} (normal del modelo x 127, luz x 255)"""
+    cols = getattr(mod, '_colores', [])
+    recs = []; vd = []
+    for k, x in enumerate(mod.mallas):
+        esp = x[9].get('esp')
+        if not esp: continue
+        N = x[9]['N'].astype(float); N = N / np.maximum(np.linalg.norm(N, axis=1, keepdims=True), 1e-6)
+        luz = _luz(N)
+        q = (np.round(N * 127).astype(np.int8).view(np.uint8).astype(np.uint32))
+        w = q[:, 0] | (q[:, 1] << 8) | (q[:, 2] << 16) | (np.round(luz * 255).astype(np.uint32) << 24)
+        assert len(w) == x[5]
+        recs.append((k, esp[0], esp[1], esp[2], len(vd))); vd.extend(w.tolist())
+    pal = [b'CEX1', struct.pack('<4I', 8, len(cols), len(recs), len(vd))]
+    for _, c in cols: pal.append(struct.pack('<8I', *c))
+    for r in recs: pal.append(struct.pack('<IIiII', *r))
+    pal.append(struct.pack('<%dI' % len(vd), *vd))
+    b = b''.join(pal)
+    return np.frombuffer(b, '<f4').reshape(-1, 1)
+
 def convierte(A, m, sal, tope=TOPE, vista=None):
-    """escalera hasta caber en el tope: completo; sin lo oculto; + sin el interior (tapa a la altura de la cintura);
-    + ruedas del modelo ligero; + sin las camaras bajas (solo seleccion y carrera)"""
+    """escalera hasta caber en el tope: completo; sin lo oculto (desde las camaras del juego, con la vuelta baja de
+    los choques); + sin la vuelta baja; + ruedas del modelo ligero (las del rival: el original dibuja siempre las del
+    buje en el coche del jugador, 46AE70). No se tapa ni se inventa nada: el interior real se queda (se ve por los
+    cristales) y solo se quita lo que no se ve"""
     mod, e, d = monta(A, m)
     t0, v0 = triangulos_n(mod), vertices(mod); nota = 'completo'
-    if v0 > tope:
-        for paso, (lig, tap, baj) in enumerate(((False, False, True), (False, True, True), (True, True, True), (True, True, False))):
-            mod, e, d = monta(A, m, ligeras=lig)
-            if tap: mod, e, d = monta(A, m, ligeras=lig, tapa=tapa_de(mod, d))
+    vacia(mod, ~astillas(mod), None, hueco=0)                   # fuera las uniones entre tiras (no se dibujan)
+    if vertices(mod) > tope:
+        for lig, baj, nota in ((False, True, 'sin lo oculto'), (False, False, '+ sin la vuelta baja'),
+                               (True, False, '+ ruedas ligeras')):
+            mod, e, d = monta(A, m, ligeras=lig); vacia(mod, ~astillas(mod), None, hueco=0)
             vis, dueno = visibilidad(mod, bajas=baj); vacia(mod, vis, dueno)
-            nota = ('sin lo oculto', '+ sin el interior', '+ ruedas ligeras', '+ sin la vuelta baja')[paso]
+            print("   %s: %d vertices" % (nota, vertices(mod)))
             if vertices(mod) <= tope: break
     if vista:
         try:
             dibuja_vista(mod, os.path.join(vista, os.path.basename(sal).replace('.DAT', '.png')))
         except Exception as ex: print('vista:', ex)
-    mod.mallas = [x[:8] for x in mod.mallas]                    # fuera el nombre de la pieza
     mod.recorta_texturas()
+    mod.mallas.sort(key=lambda x: (x[0], x[1]))                # el orden de escribe (estable): el de CEX1
+    mod.ruta = extension(mod)
+    nesp = sum(1 for x in mod.mallas if x[9].get('esp'))
+    vesp = sum(x[5] for x in mod.mallas if x[9].get('esp') and x[9]['esp'][0] == ESP_ENTORNO)
+    mod.mallas = [x[:8] for x in mod.mallas]                    # fuera el nombre de la pieza y lo demas
     mod.escribe(sal)
     kb = len(mod.blob) >> 10
-    print('modelo %2d %-28s tri %5d -> %5d  vtx %5d -> %5d  tex %2d (%3d KB)  %s  -> %s' % (
-        m, e.nombre, t0, triangulos_n(mod), v0, vertices(mod), len(mod.texs), kb, nota, os.path.basename(sal)))
-    return dict(modelo=m, nombre=e.nombre, tri0=t0, tri=triangulos_n(mod), vtx0=v0, vtx=vertices(mod), kb=kb, nota=nota)
+    print('modelo %2d %-28s tri %5d -> %5d  vtx %5d -> %5d  tex %2d (%3d KB)  entorno %4d vtx  %s  -> %s' % (
+        m, e.nombre, t0, triangulos_n(mod), v0, vertices(mod), len(mod.texs), kb, vesp, nota, os.path.basename(sal)))
+    return dict(modelo=m, nombre=e.nombre, tri0=t0, tri=triangulos_n(mod), vtx0=v0, vtx=vertices(mod), kb=kb, nota=nota,
+                entorno=vesp)
 
 def dibuja_vista(mod, ruta):
     """perfil y tres cuartos (comprobacion rapida, sin z-buffer)"""
