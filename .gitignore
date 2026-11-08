@@ -5,3 +5,5 @@
 *.raw
 *.gdi
 __pycache__/
+tools/c/musica
+tools/c/prueba_fisica
