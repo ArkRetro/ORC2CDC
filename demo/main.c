@@ -261,6 +261,9 @@ static coche_t yo;
 #ifndef COLUMNA
 #define COLUMNA 6                                               /* columna de la tabla de coches */
 #endif
+#ifndef ACEL
+#define ACEL 1.35f                                              /* multiplicador del par motor */
+#endif
 static or2_param_t fpar; static or2_coche_t fis; static int fis_ok;
 static int fisica_carga(void)
 {
@@ -268,6 +271,7 @@ static int fisica_carga(void)
     if (!t || sz < (200 * 19 + 162 + 256) * 4) return -1;
     if (or2_carga_param(t, 200, COLUMNA, &fpar) < 0) return -2;
     or2_carga_curvas(&fpar, t + 200 * 19, t + 200 * 19 + 162);
+    fpar.par_mult *= ACEL;                                      /* mas aceleracion (a peticion del tester) */
     free(t); fis_ok = 1; return 0;
 }
 /* muros y choques: cambia solo la velocidad (rumbo h, modulo v) y endereza la carroceria, sin reiniciar el
@@ -298,10 +302,21 @@ static void coche_coloca(coche_t *c)
 
 /* ---------------------------------------------------------------- trafico */
 #define NCARRIL 6
-#define NTRAF 12
+#define NTRAF 11                                                /* un 10 % menos que antes */
 typedef struct { coche_t c; int carril, modelo; } trafico_t;
 static trafico_t traf[NTRAF];
-static modelo_t mtraf[3];
+#define NMODTRAF 9                                              /* coches de calle (TRAFn.DAT) */
+static modelo_t mtraf[NMODTRAF];
+static float largo_traf[NMODTRAF];                              /* mitad del largo de cada modelo */
+static void traf_medidas(void)
+{
+    int m; uint32_t i;
+    for (m = 0; m < NMODTRAF; m++) {
+        float lo = 0, hi = 0;
+        for (i = 0; i < mtraf[m].nvert; i++) { float z = mtraf[m].verts[i].z; if (z < lo) lo = z; if (z > hi) hi = z; }
+        largo_traf[m] = (hi - lo) * 0.5f;
+    }
+}
 static uint32_t semilla = 12345;
 static float azar(void) { semilla = semilla * 1103515245u + 12345u; return ((semilla >> 8) & 0xFFFF) / 65536.0f; }
 static float carril_x(float s, int k)
@@ -314,14 +329,18 @@ static float carril_x(float s, int k)
 }
 static void traf_nace(trafico_t *t, float s)
 {
-    t->carril = (int)(azar() * NCARRIL) % NCARRIL; t->modelo = (int)(azar() * 3) % 3;
+    t->carril = (int)(azar() * NCARRIL) % NCARRIL; t->modelo = (int)(azar() * NMODTRAF) % NMODTRAF;
     t->c.s = s; t->c.v = 36.0f + azar() * 14.0f; t->c.a = 0;
     t->c.x = carril_x(s, t->carril); coche_coloca(&t->c);
 }
 static void traf_inicia(float s0)
 {
     int i;
-    for (i = 0; i < NTRAF; i++) traf_nace(traf + i, s0 + 120.0f + i * 110.0f + azar() * 60.0f);
+    for (i = 0; i < NTRAF; i++) traf_nace(traf + i, s0 + 130.0f + i * 121.0f + azar() * 66.0f);
+#ifdef PRUEBA_TRAFICO
+    for (i = 0; i < 3; i++) { traf_nace(traf + i, s0 + 25.0f + i * 18.0f); traf[i].carril = 2 + i; traf[i].modelo = i * 4;
+        traf[i].c.v = 5.0f; traf[i].c.x = carril_x(traf[i].c.s, traf[i].carril); coche_coloca(&traf[i].c); }
+#endif
 }
 static void traf_paso(float dt)
 {
@@ -329,19 +348,20 @@ static void traf_paso(float dt)
     for (i = 0; i < NTRAF; i++) {
         trafico_t *t = traf + i; float x0 = t->c.x;
         t->c.s += t->c.v * dt;
-        if (t->c.s < yo.s - 150.0f || t->c.s > longitud - 20.0f) traf_nace(t, yo.s + 500.0f + azar() * 500.0f);
+        if (t->c.s < yo.s - 150.0f || t->c.s > longitud - 20.0f) traf_nace(t, yo.s + 550.0f + azar() * 550.0f);
         if (t->c.s > longitud - 20.0f) t->c.s = longitud - 20.0f;
         t->c.x = carril_x(t->c.s, t->carril);
         t->c.a = atan2f(t->c.x - x0, t->c.v * dt + 1e-4f);
         coche_coloca(&t->c);
         /* choque con el jugador: le frena y le aparta */
-        if (fabsf(yo.s - t->c.s) < 4.4f && fabsf(yo.x - t->c.x) < 1.9f) {
-            if (yo.s < t->c.s) { yo.s = t->c.s - 4.4f; if (yo.v > t->c.v) yo.v = t->c.v * 0.6f; }
-            else { yo.s = t->c.s + 4.4f; }
+        {   float l = largo_traf[t->modelo] + 2.3f;
+        if (fabsf(yo.s - t->c.s) < l && fabsf(yo.x - t->c.x) < 1.9f) {
+            if (yo.s < t->c.s) { yo.s = t->c.s - l; if (yo.v > t->c.v) yo.v = fmaxf(t->c.v, yo.v * 0.82f); }   /* pierde poco */
+            else { yo.s = t->c.s + l; }
             yo.x += yo.x > t->c.x ? 0.6f : -0.6f; yo.a *= -0.3f; yo.choque = 2;
             if (fis_ok) { float p[3], th; ruta_en(yo.s, p, &th, NULL, NULL); fis_empuja(th + yo.a, yo.v); }
             coche_coloca(&yo);
-        }
+        } }
     }
 }
 
@@ -634,19 +654,22 @@ int main(int argc, char **argv)
     /* 1: datos del disco a la RAM (la pantalla de texto aun sin PowerVR) */
     vid_set_mode(DM_640x480, PM_RGB565);
     aviso("OutRun 2006 C2C - demo Dreamcast. Cargando la etapa...");
-    if ((r = lee_modelo(&etapa, "SEG00.DAT")) || (r = lee_modelo(&coche, "COCHE.DAT")) ||
-        (r = lee_modelo(&mtraf[0], "TRAF0.DAT")) || (r = lee_modelo(&mtraf[1], "TRAF1.DAT")) ||
-        (r = lee_modelo(&mtraf[2], "TRAF2.DAT"))) {
+    if ((r = lee_modelo(&etapa, "SEG00.DAT")) || (r = lee_modelo(&coche, "COCHE.DAT"))) {
         sprintf(s1, "No se pudieron leer los datos (%d)", r); aviso(s1); for (;;) thd_sleep(1000);
     }
+    for (i = 0; i < NMODTRAF; i++) {
+        char nom[16]; sprintf(nom, "TRAF%d.DAT", i);
+        if ((r = lee_modelo(&mtraf[i], nom))) { sprintf(s1, "No se pudo leer %s (%d)", nom, r); aviso(s1); for (;;) thd_sleep(1000); }
+    }
+    traf_medidas();
     ruta_prepara();
     fisica_carga();
     /* 2: PowerVR, texturas a la memoria de video y cabeceras */
     pvr_init(&pp);
     pvr_set_bg_color(0.45f, 0.65f, 0.95f);
     txt_arr = pvr_mem_malloc(sizeof buf_arr); txt_cen = pvr_mem_malloc(sizeof buf_cen);
-    if (sube_modelo(&etapa) || sube_modelo(&coche) || sube_modelo(&mtraf[0]) || sube_modelo(&mtraf[1]) ||
-        sube_modelo(&mtraf[2])) {
+    for (i = 0, r = 0; i < NMODTRAF; i++) r |= sube_modelo(&mtraf[i]);
+    if (r || sube_modelo(&etapa) || sube_modelo(&coche)) {
         vid_set_mode(DM_640x480, PM_RGB565); aviso("Sin memoria de video para las texturas"); for (;;) thd_sleep(1000);
     }
     for (l = 0; l < 3; l++) for (i = 0; i < 2; i++) {

@@ -171,6 +171,15 @@ class Modelo:
         v['x'], v['y'], v['z'], v['u'], v['v'], v['c'] = P[:, 0], P[:, 1], P[:, 2], uv[:, 0], uv[:, 1], argb
         self.verts.append(v); self.nv += nn
 
+    def recorta_texturas(self):
+        """deja solo las texturas que usan las mallas (y reordena el blob)"""
+        usadas = sorted({x[1] for x in self.mallas if x[1] >= 0}); nuevo = {}; blob = b''; texs = []
+        for ti in usadas:
+            w, h, fmt, li, off, tam = self.texs[ti]
+            nuevo[ti] = len(texs); texs.append((w, h, fmt, li, len(blob), tam)); blob += self.blob[off:off + tam]
+        for x in self.mallas: x[1] = nuevo.get(x[1], -1)
+        self.texs, self.blob = texs, blob
+
     def escribe(self, sal):
         self.mallas.sort(key=lambda x: (x[0], x[1]))
         inicio = [sum(1 for x in self.mallas if x[0] < l) for l in range(5)]
