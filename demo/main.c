@@ -630,6 +630,7 @@ static void aviso(const char *s)
 /* ---------------------------------------------------------------- juego */
 enum { TITULO, CUENTA, CARRERA, META, AGOTADO };
 #define NPISTAS 3
+#define PERIODO 16683                                           /* us por paso de logica (59,94 Hz) */
 /* bifurcacion al final de la primera etapa: rama izquierda y derecha */
 static const char *RAMA_FICH[2] = { "SEG07.DAT", "SEG03.DAT" }, *RAMA_NOMBRE[2] = { "BOSQUE", "INDUSTRIA" };
 static int etapa_n;                                             /* 0: la primera; 1: ya en una rama */
@@ -647,7 +648,8 @@ int main(int argc, char **argv)
     int estado = TITULO, auto_ = 0, ver = VER, pausa = 0, l, i, r;
     uint32_t cuadro = 0, bot_ant = 0, t_estado = 0; uint64_t t0, tcpu = 0, c0;
     float cam_y = 0, tiempo = TIEMPO_ETAPA, fps = 0, ms = 0, cam_fw[3] = { 0, 0, -1 }, ttit = 0;
-    char s1[96], s2[96], s3[96], msg[32] = ""; int aviso_rama = 0, pista = 0;
+    char s1[96], s2[96], s3[96], msg[32] = ""; int aviso_rama = 0, pista = 0, pasos = 1, paso, saltos = 0, saltos_ver = 0;
+    uint64_t reloj = 0; float lejos_obj = lejos;
     uint64_t c_log = 0, t_log = 0, t_ini = timer_ms_gettime64(); float ms_log = 0, t_carga = 0;
     (void)argc; (void)argv;
 
@@ -693,10 +695,18 @@ int main(int argc, char **argv)
         uint32_t b = st ? st->buttons : 0, nuevo = b & ~bot_ant;
         float giro = 0, gas = 0, freno = 0, ojo_[3], mira[3];
         bot_ant = b; t_estado++; c_log = timer_us_gettime64();
+        {   /* salto de cuadros: tantos pasos de logica (60 Hz) como haya pasado de tiempo real, hasta 3 */
+            uint64_t ahora = timer_us_gettime64();
+            if (!reloj) reloj = ahora;
+            pasos = (int)((ahora - reloj + PERIODO / 2) / PERIODO);
+            if (pasos < 1) pasos = 1;
+            if (pasos > 3) { pasos = 3; reloj = ahora - 3 * PERIODO; }
+            reloj += (uint64_t)pasos * PERIODO; saltos += pasos - 1;
+        }
         musica_poll();
         if (nuevo & CONT_Y) ver ^= 1;
-        if ((nuevo & CONT_DPAD_UP) && lejos < 1500) { lejos += 100; pvr_fog_table_linear(lejos * 0.55f, lejos); }
-        if ((nuevo & CONT_DPAD_DOWN) && lejos > 300) { lejos -= 100; pvr_fog_table_linear(lejos * 0.55f, lejos); }
+        if ((nuevo & CONT_DPAD_UP) && lejos_obj < 2000) { lejos_obj += 100; lejos = lejos_obj; pvr_fog_table_linear(lejos * 0.55f, lejos); }
+        if ((nuevo & CONT_DPAD_DOWN) && lejos_obj > 300) { lejos_obj -= 100; lejos = lejos_obj; pvr_fog_table_linear(lejos * 0.55f, lejos); }
         if (st) {
             giro = st->joyx / 110.0f;
             if (b & CONT_DPAD_LEFT) giro = -1;
@@ -708,7 +718,9 @@ int main(int argc, char **argv)
             freno = st->ltrig / 255.0f; if (b & (CONT_B | CONT_X)) freno = 1;
         }
 
-        /* estados */
+        /* estados (una vez por paso de logica) */
+        for (paso = 0; paso < pasos; paso++) {
+        if (paso) { nuevo = 0; t_estado++; }
         if (estado == TITULO) {
             ttit += 1.0f / 60;
             if (nuevo & (CONT_DPAD_LEFT | CONT_DPAD_RIGHT)) {   /* elegir la musica, como la radio del original */
@@ -774,6 +786,7 @@ int main(int argc, char **argv)
             coche_paso(&yo, 0, 0, 0.6f, 1.0f / 60);
             if ((nuevo & CONT_START) || t_estado > 360) { estado = TITULO; ttit = auto_ ? 0 : 0; texto_centro("PULSA START"); }
         }
+        }
 
         /* camara: en el titulo vuela por la etapa; en carrera, detras del coche */
         if (estado == TITULO) {
@@ -805,7 +818,7 @@ int main(int argc, char **argv)
                 pvr_get_stats(&ps);
                 sprintf(s2, "%.1ffps %lutri cpu %.1f+%.1f pvr %.1fms", (double)fps, (unsigned long)tri_enviados,
                         (double)ms_log, (double)ms, (double)(ps.rnd_last_time / 1000000.0));
-                sprintf(s3, "d%d der%d%s ram%uK vram%uK carga%.1fs", (int)lejos, (int)(yo.deriva * 57.3f), yo.t_derrape ? "D" : "",
+                sprintf(s3, "d%d/%d salto%d der%d%s ram%uK vram%uK c%.1fs", (int)lejos, (int)lejos_obj, saltos_ver, (int)(yo.deriva * 57.3f), yo.t_derrape ? "D" : "",
                         (unsigned)(mi.uordblks >> 10), (unsigned)(pvr_mem_available() >> 10), (double)t_carga);
             }
             texto_arriba(s1, ver ? s2 : NULL, ver ? s3 : NULL);
@@ -855,6 +868,10 @@ int main(int argc, char **argv)
         if (++cuadro % 30 == 0) {
             uint64_t t1 = timer_ms_gettime64();
             fps = 30000.0f / (float)(t1 - t0); ms = tcpu / 30000.0f; ms_log = t_log / 30000.0f; t0 = t1; tcpu = 0; t_log = 0;
+            /* distancia adaptativa: si la geometria no cabe en el cuadro, se acorta (minimo 600 m) y vuelve a crecer */
+            if (ms + ms_log > 15.0f && lejos > 600.0f) { lejos -= 50.0f; pvr_fog_table_linear(lejos * 0.55f, lejos); }
+            else if (ms + ms_log < 11.5f && lejos < lejos_obj) { lejos += 50.0f; pvr_fog_table_linear(lejos * 0.55f, lejos); }
+            saltos_ver = saltos; saltos = 0;
         }
     }
     return 0;
