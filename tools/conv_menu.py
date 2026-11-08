@@ -352,13 +352,19 @@ def convierte(iso, salida, previas):
     F = Fuente(D, FUENTE_AYUDA, fuentes_xst(D)); cad = textos(D, idioma); iconos = iconos_dc(D, F)
     m = Menu(); hojas = {}
 
+    bancos = {B: (a, T)}
     def anim(at, frames, k):
-        """lista de piezas por cuadro (registradas en el atlas)"""
-        out = []
+        """lista de piezas por cuadro (registradas en el atlas); k = token (banco << 16 | escena); las de otro banco
+        que el del frontal llevan su banco y sus texturas en 'bk' y 'tx'"""
+        bk = k >> 16 or B
+        if bk not in bancos: bancos[bk] = banco_menu(D, bk)[:2]
+        a_, T_ = bancos[bk]; out = []
         for f in frames:
-            ps = [q for p in escena(a, k, float(f)) if p['alfa'] >= 0.004 and abs(np.linalg.det(p['M'][:2, :2])) >= 1e-6
-                  for q in parte(hornea(p, T) if 'mascara' in p else p)]
-            for p in ps: at.registra(p.get('bk', B), p.get('tx', T), p)
+            ps = [q for p in escena(a_, k & 0xffff, float(f)) if p['alfa'] >= 0.004 and abs(np.linalg.det(p['M'][:2, :2])) >= 1e-6
+                  for q in parte(hornea(p, T_) if 'mascara' in p else p)]
+            for p in ps:
+                if bk != B and 'bk' not in p: p['bk'] = 'SPRANI%02X' % bk; p['tx'] = T_   # (clave de texto: se ordena con las de las fuentes)
+                at.registra(p.get('bk', B), p.get('tx', T), p)
             out.append(ps)
         return out
 
@@ -381,7 +387,7 @@ def convierte(iso, salida, previas):
             g, k, frames, capa, xy, tr, rec = e
             frames = list(frames)
             assert len(frames) <= MAX_CUADROS, '%s: demasiados cuadros' % g
-            t0_ = time.time(); lst = anim(at, frames, k & 0xffff)
+            t0_ = time.time(); lst = anim(at, frames, k)
             npz = sum(len(x) for x in lst)
             print('  %s/%s escena %06X: %d cuadros, %d piezas, %d rect. de atlas (%.1f s)' % (
                 nombre, g, k, len(frames), npz, len(at.reg), time.time() - t0_), flush=True)
@@ -531,6 +537,26 @@ def convierte(iso, salida, previas):
                               ('MUSICA_L2', 0x440033, [20 + 40 * k for k in range(12)], 3, (0, 0), [], False),
                               ('MUSICA_T1', 0x44002f, [110 * k + 55 for k in range(7)], 6, (0, 0), [], False),
                               ('MUSICA_T2', 0x44002e, [110 * k + 55 for k in range(12)], 6, (0, 0), [], False)])
+    # PAUSA (menu de pausa de la carrera, el 4D5E40 / 4D7300 del PC con la raiz 3 = PS2 0x247b40 con la raiz 16): banco
+    # 0x2C (ETC_CVT, XST en espanol) con la tabla de filas del ELF 0x4187F8 (PC 0x5CBF10): {token, primero, ultimo}.
+    # Filas de la pausa 8, 7, 6, 10, 11, 14 (VOLVER A LA PARTIDA, REINTENTAR, ABANDONAR, CONFIGURACION, CONTROLES,
+    # AUDIO: escena 0x2C00EE, cuadros 9, 8, 7, 0, 1, 4); barra de cada fila: entrada 1 (normal, 0x2C00ED cuadro 10) y 2
+    # (elegida, cuadro 12); AUDIO (PS2 0x2492a0 = 4D78C0): filas 26 y 27 (0x2C00FB cuadros 12 y 13: VOLUMEN DE SONIDO y
+    # VOLUMEN DE MUSICA) y el medidor de cada una (tabla 0x418988: 0x2C00EF cuadro = valor 0..10). Todo en la lista
+    # (-13, -72) del centro, 16 pixeles por fila (FrontendChoiceList +0x20)
+    t = tabla(D, 0x4187f8, 33)
+    assert [t[i] for i in (8, 7, 6, 10, 11, 14)] == [(0x2c00ee, f, f) for f in (9, 8, 7, 0, 1, 4)], 'filas de la pausa'
+    assert t[1] == (0x2c00ed, 10, 10) and t[2] == (0x2c00ed, 12, 12), 'barra de la lista'
+    assert t[26] == (0x2c00fb, 12, 12) and t[27] == (0x2c00fb, 13, 13), 'filas de audio'
+    assert D.elf32(0x418988, 33)[0::3] == tuple([0x2c00ef] * 11), 'medidor de volumen'
+    usados_p = set(b"AB<>")                                # letras de los botones (A ELEGIR, B ATRAS) y flechas
+    for i in TEXTOS_PAUSA: usados_p |= set(cad[i])
+    glifos_p = [F.piezas(bytes([F.pri + k]), 0, 0, 1) if (F.pri + k) in usados_p else [] for k in range(F.n)]
+    pantalla('PAUSA', [('PAUSA_FILA', 0x2c00ee, R(0, 14), 10, (-13, -72), [], False),
+                       ('PAUSA_BARRA', 0x2c00ed, [10, 12], 9, (-13, -72), [], False),
+                       ('PAUSA_OPC', 0x2c00fb, [12, 13], 10, (-13, -72), [], False),
+                       ('PAUSA_VOL', 0x2c00ef, R(0, 10), 10, (-13, -72), [], False),
+                       dict(g='FUENTE_PAUSA', lst=glifos_p, capa=11, xy=(0, 0), tr=[])])
     os.makedirs(salida, exist_ok=True)
     texs = escribe(m, os.path.join(salida, 'MENU.DAT'))
     maquetas(m, previas, hojas)
@@ -541,6 +567,8 @@ def convierte(iso, salida, previas):
 # datos de la tarjeta, si / no, NORMAL / TUNED AT / MT y el aviso de coche no disponible
 TEXTOS = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 0x2a, 0x2b, 0x218, 0x219, 0x233, 0x234, 0x237, 0x213, 0x214, 0x21b, 0x21d,
           0x2b1, 0x2b2, 0x2b3, 0x2b4, 0x32a, 0x327]
+TEXTOS_PAUSA = [0x3a6, 0x294, 0x295]   # pausa: "Estas seguro?" (PS2 0x249d40, sin partida en red) y ELEGIR / ATRAS
+TEXTOS += TEXTOS_PAUSA
 TECLADO = '1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ:%<>-'   # teclado de 468D40 (mayusculas) y signos de las cifras
 
 def mnu2(D, F, cad):

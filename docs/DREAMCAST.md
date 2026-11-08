@@ -180,7 +180,8 @@ Trafico: con los 5 LOD del original (`tools/conv_trafico.py`; registro de 4866C0
 4ADF00) y el LOD por distancia de 46DF50 (en SLES-53998 0x1dd728; `traf_lod` en `demo/main.c`): LOD 1 desde 40 m, 2
 desde 50, 3 desde 85 y 4 desde 130 (z de la camara; +35 m los modelos 0x1f y 0x27, +25 el 0x28). Vertices por LOD:
 823-1089 / igual / 341-517 / 69-207 / 20-68. En carrera el trafico pasa de ~9500 vertices (11 coches con el LOD 0) a
-~1000-1500. El original ademas baja el LOD de los mas cercanos si la suma de poligonos pasa de su tope (46E170, tope
+~1000-1500. Con la densidad del original (2026-11-08, PARIDAD.md: Trafico: densidad del original) hay 16 plazas
+pero en carrera 3-4 coches de media y como mucho 7-10 (antes siempre 11): el TA lo reparte `ta_cabe` como antes. El original ademas baja el LOD de los mas cercanos si la suma de poligonos pasa de su tope (46E170, tope
 de 46E110: 12000 menos lo del coche + 5000 + 44C520): no hace falta (cabe con el tope del TA) y no se porta. VRAM del
 trafico 328 KB (antes 297: texturas de los LOD 2-4); RAM: los TRAFn.DAT pasan de 543 a 730 KB, pero ahora sueltan sus
 texeles tras subirlos (`compacta_modelo`, como el coche): quedan ~400 KB en la RAM (antes 543). Las mallas que repite

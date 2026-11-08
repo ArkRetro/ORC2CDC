@@ -37,15 +37,17 @@
 #include "menu.h"
 
 void (*menu_gancho)(int pantalla, int evento, int valor);
+void (*menu_suelta_coche)(void);
 #define GANCHO(p, e, v) do { if (menu_gancho) menu_gancho(p, e, v); } while (0)
 
 typedef struct { char nombre[16]; uint16_t g0, ng, u0, nu, t0, nt; uint32_t vram, _r[4]; } m_pant_t;
 typedef struct { char nombre[16]; uint16_t uso, ini, fin, modo; uint32_t _r[2]; } m_tramo_t;
 
 /* pantallas de VRAM (las de conv_menu.py) */
-enum { V_TITULO, V_COMUN, V_MENU, V_MODO, V_COCHE, V_CAMBIO, V_MUSICA, V_LICENCIA, V_RANKING, V_MULTI, V_OPCIONES, NV };
+enum { V_TITULO, V_COMUN, V_MENU, V_MODO, V_COCHE, V_CAMBIO, V_MUSICA, V_LICENCIA, V_RANKING, V_MULTI, V_OPCIONES, V_PAUSA,
+       NV };
 static const char *const VNOM[NV] = { "TITULO", "COMUN", "MENU", "MODO", "COCHE", "CAMBIO", "MUSICA", "LICENCIA",
-                                      "RANKING", "MULTI", "OPCIONES" };
+                                      "RANKING", "MULTI", "OPCIONES", "PAUSA" };
 /* pantallas del menu (las de menu.h, MP_*) y la VRAM que necesita cada una */
 enum { P_TITULO, P_MENU, P_MODO, P_COCHE, P_CAMBIO, P_MUSICA, P_LICENCIA, P_EDITOR, P_OPCIONES, P_RANKING, P_MULTI, NP };
 #define VB(v) (1 << (v))
@@ -58,7 +60,8 @@ enum { U_TFONDO, U_TLOGO, U_TSTART, U_FONDO, U_CABMENU, U_PRINC, U_CABMODO, U_UN
        U_CAND, U_CAMBIO, U_RADIO, U_AYUDA, U_L0, U_T0, U_LISTA, U_MCAND, U_CABMUSICA,
        U_BARRA_MENU, U_BARRA_MODO, U_BARRA_COCHE, U_BARRA_CAMBIO, U_BARRA_MUSICA, U_BARRA_LIC, U_BARRA_OPC, U_FUENTE,
        U_CABLIC, U_TARJ, U_FL_D, U_FL_I, U_EDITOR, U_TARJ_E, U_REJ_FOTO, U_REJ_BAND, U_REJ_SIGNO, U_HECHO, U_FOTO,
-       U_BAND, U_SIGNO, U_LIC_BARRA, U_CABRANK, U_RANK, U_CABMULTI, U_MULTI, U_CABOPC, U_OPC_BARRA, NU };
+       U_BAND, U_SIGNO, U_LIC_BARRA, U_CABRANK, U_RANK, U_CABMULTI, U_MULTI, U_CABOPC, U_OPC_BARRA,
+       U_P_FILA, U_P_BARRA, U_P_OPC, U_P_VOL, U_P_FUENTE, NU };
 static const char *const UNOM[NU] = { "TITULO_FONDO", "TITULO_LOGO", "TITULO_START", "FONDO", "CABECERA_MENU",
     "MODO_PRINCIPAL", "CABECERA_MODO", "MODO_UN_JUGADOR", "CABECERA_COCHE", "COCHE_INFO", "COCHE_INFO_T",
     "COCHE_CANDADO", "CAMBIO", "MUSICA_RADIO", "MUSICA_AYUDA", "MUSICA_L0", "MUSICA_T0", "MUSICA_LISTA",
@@ -66,7 +69,8 @@ static const char *const UNOM[NU] = { "TITULO_FONDO", "TITULO_LOGO", "TITULO_STA
     "AYUDA_MENU", "AYUDA_MODO", "AYUDA_COCHE", "AYUDA_CAMBIO", "AYUDA_MUSICA", "AYUDA_LICENCIA", "AYUDA_OPCIONES",
     "FUENTE", "CABECERA_LICENCI", "LIC_TARJETA", "LIC_FLECHA_D", "LIC_FLECHA_I", "LIC_EDITOR", "LIC_TARJETA_E",
     "LIC_REJ_FOTO", "LIC_REJ_BANDERA", "LIC_REJ_SIGNO", "LIC_HECHO", "LIC_FOTO", "LIC_BANDERA", "LIC_SIGNO",
-    "LIC_BARRA", "CABECERA_RANKING", "MODO_RANKING", "CABECERA_MULTI", "MODO_MULTI", "CABECERA_OPCIONE", "OPC_BARRA" };
+    "LIC_BARRA", "CABECERA_RANKING", "MODO_RANKING", "CABECERA_MULTI", "MODO_MULTI", "CABECERA_OPCIONE", "OPC_BARRA",
+    "PAUSA_FILA", "PAUSA_BARRA", "PAUSA_OPC", "PAUSA_VOL", "FUENTE_PAUSA" };
 
 #define N_OPC 5                                             /* opciones del menu principal y de un jugador */
 #define N_COCHES 15
@@ -74,6 +78,8 @@ static const char *const UNOM[NU] = { "TITULO_FONDO", "TITULO_LOGO", "TITULO_STA
 #define T_DEMO (8 * 60)                                     /* inactividad en el titulo hasta la demo */
 #define T_FUNDIDO 12
 #define T_CARGA_MAX 90                                      /* cuadros que se espera a la VRAM de una pantalla */
+#define T_SUELTA_COCHE 2                                    /* cuadros sin VRAM hasta soltar el coche 3D */
+#define T_REORDENA 20                                       /* ... y hasta bajar todas las pantallas y subirlas otra vez */
 #define PRECARGA_MARGEN (128 * 1024)                        /* VRAM que se deja libre al precargar */
 #define HOLGURA (256 * 1024)                                /* libre de mas antes de subir sin echar nada */
 #define PISTA_MENU 30                                       /* musica de los menus */
@@ -118,11 +124,12 @@ static int f_ancho(const uint8_t *t, int n)
     }
     return a;
 }
+static int u_fuente = U_FUENTE;                             /* FUENTE (COMUN) o FUENTE_PAUSA (en carrera) */
 /* texto en (x, y) con las banderas de 42CDD0 (1 sin alinear, 4 centrado, si no a la derecha; 8 centrado en vertical) */
 static void texto(const uint8_t *t, int n, float x, float y, int flags, float alfa, float z, uint32_t col)
 {
     int i;
-    if (!f_met || us[U_FUENTE] < 0 || alfa <= 0.004f) return;
+    if (!f_met || us[u_fuente] < 0 || alfa <= 0.004f) return;
     if (!(flags & 1)) x -= (flags & 4) ? f_ancho(t, n) / 2 : f_ancho(t, n);
     if (flags & 8) y += (int)(f_h * -0.5f);
     hudd_color(col);
@@ -130,7 +137,7 @@ static void texto(const uint8_t *t, int n, float x, float y, int flags, float al
         int c = t[i], sig = i + 1 < n ? t[i + 1] : 0;
         if (c == 32) { x += (int)(f_w * 0.3f); continue; }
         if (c - f_pri < 0 || c - f_pri >= f_n) continue;
-        hudd_dibuja(md, us[U_FUENTE], c - f_pri, x, y, alfa, z, 0);
+        hudd_dibuja(md, us[u_fuente], c - f_pri, x, y, alfa, z, 0);
         x = f_par(c, sig == 32 ? 0 : sig) + x + f_esp;
     }
     hudd_color(0xFFFFFF);
@@ -289,10 +296,12 @@ static void baja_p(int p)
 }
 /* sube las pantallas de la mascara; si no caben, echa las cargadas hace mas tiempo que no hagan falta. 1 si estan
    todas (si no, la VRAM echada se libera unos cuadros despues: hay que volver a llamar) */
+static int orden_v[NV];                                     /* pantallas de mas a menos VRAM: las grandes primero */
 static int asegura(int mascara)
 {
-    int p, q, v, ok = 1;
-    for (p = 0; p < NV; p++) {
+    int i, p, q, v, ok = 1;
+    for (i = 0; i < NV; i++) {
+        p = orden_v[i];
         if (!(mascara & (1 << p)) || pidx[p] < 0) continue;
         for (;;) {
             if (cargada[p]) { edad[p] = ++reloj; break; }
@@ -333,6 +342,14 @@ int menu_inicia(void)
     for (p = 0; p < NV; p++)
         for (pidx[p] = -1, i = 0; i < n_pan; i++) if (!strncmp(pan[i].nombre, VNOM[p], 16)) pidx[p] = i;
     for (i = 0; i < NU; i++) us[i] = hudd_uso(md, UNOM[i]);
+    for (i = 0; i < NV; i++) orden_v[i] = i;
+    for (i = 1; i < NV; i++)                                /* (pantallas que no estan: al final) */
+        for (p = i; p > 0; p--) {
+            int a = orden_v[p - 1], b = orden_v[p];
+            uint32_t va = pidx[a] < 0 ? 0 : pan[pidx[a]].vram, vb = pidx[b] < 0 ? 0 : pan[pidx[b]].vram;
+            if (va >= vb) break;
+            orden_v[p - 1] = b; orden_v[p] = a;
+        }
     if (o2 && !memcmp(x + o2, "MNU2", 4)) {
         const uint32_t *h = (const uint32_t *)(x + o2); const uint8_t *f;
         mnu2 = x + o2; n_txt = h[1]; f = mnu2 + h[3];
@@ -717,14 +734,26 @@ static void control(unsigned n)
     }
 }
 
+static void aplica_audio(void);
 int menu_paso(unsigned n)
 {
     if (n) inact = 0; else inact++;
     if (!md) return (n & CONT_START) ? MENU_CARRERA : inact > T_DEMO ? MENU_DEMO : MENU_SIGUE;
+    aplica_audio();                                         /* volumen de la licencia activa (cambia al elegirla) */
     giro += 100.0f * 2.0f * (float)M_PI / 65536.0f;         /* 4A5B20: +100 por paso */
     if (giro > 2.0f * (float)M_PI) giro -= 2.0f * (float)M_PI;
     if (cargando) {                                         /* la VRAM de la pantalla aun no esta: se espera */
-        if (asegura(MASCARA[pant]) || ++t_carga > T_CARGA_MAX) cargando = 0;
+        if (asegura(MASCARA[pant])) {
+            cargando = 0;
+            if (t_carga > 2) dbglog(DBG_INFO, "menu: pantalla %d lista tras %d cuadros\n", pant, t_carga);
+        }
+        else if (++t_carga == T_SUELTA_COCHE && menu_suelta_coche) menu_suelta_coche();   /* el coche 3D parte la VRAM */
+        else if (t_carga == T_REORDENA) { int p; for (p = 0; p < NV; p++) baja_p(p); }   /* y si aun no: todo de nuevo */
+        else if (t_carga > T_CARGA_MAX) {
+            cargando = 0;
+            dbglog(DBG_INFO, "menu: pantalla %d sin VRAM (libre %uK, menu %uK)\n", pant,
+                   (unsigned)(pvr_mem_available() >> 10), menu_vram() >> 10);
+        }
         else return MENU_SIGUE;
     }
     t++;
@@ -885,4 +914,170 @@ void menu_dibuja(void)
         }
         break; }
     }
+}
+
+/* ---------------------------------------------------------------- volumen (licencia +D4 efectos, +D0 musica) */
+/* Como el original (PS2 0x1a1a8c al leer la licencia; opciones de audio 0x2492a0 / 0x249530 = 4D78C0 / 4D89B0 del PC):
+   valores 0..10 (fuera de rango: 0); efectos: 0x11ae38(trunc(v / 10 * 144)) = volumen general del controlador de
+   sonido (sfx_master); musica: 0x100210(v / 10) = volumen del flujo de musica, v / 10 * 0x3fff (musica_nivel). Sin
+   licencia, los de una licencia nueva (4471A0: 10 y 10). */
+static int ap_se = -1, ap_bgm = -1;
+static int vol_lic(int off) { const uint8_t *p = activa(); int v = p ? l32(p, off) : 10; return v < 0 || v > 10 ? 0 : v; }
+static int master_de(int v) { return (int)((float)v / 10.0f * 144.0f); }
+static void aplica_audio(void)
+{
+    int se = vol_lic(0xd4), bgm = vol_lic(0xd0);
+    if (se != ap_se) { sfx_master(master_de(se)); ap_se = se; }
+    if (bgm != ap_bgm) { musica_nivel((float)bgm / 10.0f); ap_bgm = bgm; }
+}
+void menu_aplica_audio(void) { aplica_audio(); }
+
+/* ---------------------------------------------------------------- pausa de la carrera */
+/* El menu de pausa del original (PS2 0x247b40 = 4D5E40 del PC con la raiz 16; control 4D7300): ventana con la lista
+   VOLVER A LA PARTIDA, REINTENTAR, ABANDONAR, CONFIGURACION, CONTROLES y AUDIO (filas 8, 7, 6, 10, 11, 14 de la tabla
+   0x4187F8; MENU.DAT, pantalla PAUSA). Los botones no responden hasta 15 cuadros despues de abrirla (692C9C = 15,05).
+   A / START elige, B cierra (guarda la licencia si cambio: 4D66D0 / 4D7DA0), arriba / abajo mueven el cursor (con
+   la vuelta, 48DC10 / 48DC60). REINTENTAR y ABANDONAR piden confirmacion ("Estas seguro?", 0x3A6: PS2 0x249d40 sin
+   partida en red) con A (ELEGIR) y B (ATRAS). AUDIO (0x2492a0 / 0x249530): VOLUMEN DE SONIDO (+D4) y VOLUMEN DE
+   MUSICA (+D0) de 0 a 10 con izquierda / derecha (sonido de cursor), aplicados al momento; la fila de la musica manda
+   tambien su valor al volumen general de efectos (asi lo hace el original) hasta que se cambia de fila o se sale; B
+   guarda los valores en la licencia y vuelve a la lista.
+   CONFIGURACION y CONTROLES (brillo, pantalla, velocimetro, sensibilidad, vibracion...) no estan: la fila suena
+   bloqueada (PROVISIONAL). La ventana (en el original, imagenes 0x3004x de 48C5F0 de un XST sin localizar) es un
+   rectangulo claro con barra oscura (PROVISIONAL); su sitio y tamano son los del original (135, 110, 350 x filas * 16 +
+   104; audio 120, 110, 380; confirmacion 120, 110, 380 x 150). */
+enum { PZ_LISTA, PZ_AUDIO, PZ_CONFIRMA };
+static int pz_estado, pz_sel, pz_aud, pz_conf, pz_t, pz_vol[2], pz_ok;
+static const int PZ_FILA[6] = { 9, 8, 7, 0, 1, 4 };          /* cuadro de 0x2C00EE de cada fila */
+#define PZ_ESPERA 15
+static pvr_poly_hdr_t pz_cab;
+static int pz_cab_ok;
+
+static void pz_rect(float x, float y, float w, float h, uint32_t argb, float z)
+{
+    pvr_vertex_t v; int k;
+    if (!pz_cab_ok) {
+        pvr_poly_cxt_t cx; pvr_poly_cxt_col(&cx, PVR_LIST_TR_POLY);
+        cx.depth.comparison = PVR_DEPTHCMP_ALWAYS; cx.depth.write = PVR_DEPTHWRITE_DISABLE; cx.gen.culling = PVR_CULLING_NONE;
+        pvr_poly_compile(&pz_cab, &cx); pz_cab_ok = 1;
+    }
+    pvr_prim(&pz_cab, sizeof pz_cab);
+    v.argb = argb; v.oargb = 0; v.u = v.v = 0; v.z = z;
+    for (k = 0; k < 4; k++) {
+        v.flags = k == 3 ? PVR_CMD_VERTEX_EOL : PVR_CMD_VERTEX;
+        v.x = x + ((k & 1) ? w : 0); v.y = y + ((k & 2) ? h : 0);
+        pvr_prim(&v, sizeof v);
+    }
+}
+/* ventana (PROVISIONAL, ver arriba) con las medidas de 48C5F0: cuerpo claro, cabecera de 26, pie de 16 y franja de
+   los botones de 30 en y + h - 46 */
+static void pz_ventana(float x, float y, float w, float h, float z)
+{
+    pz_rect(x, y, w, h, 0xF0D8DCE0, z);
+    pz_rect(x, y, w, 26, 0xF0303840, z + 0.001f);
+    pz_rect(x, y + h - 16, w, 16, 0xF0303840, z + 0.001f);
+    pz_rect(x + 3, y + h - 46, w - 9, 30, 0xE0505860, z + 0.001f);
+}
+
+/* botones de la ventana (48C5F0: ELEGIR 0x294 en (x + 45, y + h - 38), ATRAS 0x295 acabando en x + w - 45) con la letra
+   del boton de la Dreamcast delante (los iconos del original son imagenes del XST sin localizar) */
+static void pz_botones(float x, float y, float w, float h, float z, int elegir)
+{
+    int n; const uint8_t *t = txt(0x295, &n); float xa = x + w - 45 - f_ancho(t, n);
+    if (elegir) {
+        texto_c("A", x + 45 - 14, y + h - 38, 1, 1, z, 0xE83428);
+        texto_id(0x294, x + 45, y + h - 38, 1, 1, z, 0xF0F0F0);
+    }
+    texto_c("B", xa - 14, y + h - 38, 1, 1, z, 0x2860E8);
+    texto(t, n, xa, y + h - 38, 1, 1, z, 0xF0F0F0);
+}
+
+int menu_pausa_entra(void)
+{
+    pz_estado = PZ_LISTA; pz_sel = 0; pz_t = 0; pz_ok = 0;
+    if (!md || pidx[V_PAUSA] < 0) return -1;
+    if (sube_p(V_PAUSA)) { dbglog(DBG_INFO, "menu: pausa sin VRAM (libre %uK)\n", (unsigned)(pvr_mem_available() >> 10)); return -2; }
+    pz_ok = 1;
+    return 0;
+}
+void menu_pausa_sale(void) { if (md && pidx[V_PAUSA] >= 0) baja_p(V_PAUSA); pz_ok = 0; }
+
+static void pz_guarda(void) { const uint8_t *p = activa(); if (p && (p[0x3f4] & 2)) vmu_guarda(); }
+
+int menu_pausa_paso(unsigned n)
+{
+    int ok = n & (CONT_A | CONT_START), atras = n & CONT_B, ar = n & CONT_DPAD_UP, ab = n & CONT_DPAD_DOWN;
+    int iz = n & CONT_DPAD_LEFT, de = n & CONT_DPAD_RIGHT;
+    pz_t++;
+    if (pz_t <= PZ_ESPERA) return PAUSA_SIGUE;
+    switch (pz_estado) {
+    case PZ_LISTA:
+        if (ar) { pz_sel = (pz_sel + 5) % 6; sfx_menu(SFX_CURSOR); }
+        else if (ab) { pz_sel = (pz_sel + 1) % 6; sfx_menu(SFX_CURSOR); }
+        else if (atras) { sfx_menu(SFX_CANCELA); pz_guarda(); return PAUSA_CONTINUA; }
+        else if (ok) {
+            if (pz_sel == 0) { sfx_menu(SFX_ACEPTA); return PAUSA_CONTINUA; }
+            if (pz_sel == 1 || pz_sel == 2) { pz_estado = PZ_CONFIRMA; pz_conf = pz_sel; sfx_menu(SFX_ACEPTA); }
+            else if (pz_sel == 5) {
+                pz_estado = PZ_AUDIO; pz_aud = 0; pz_vol[0] = vol_lic(0xd4); pz_vol[1] = vol_lic(0xd0);
+                sfx_menu(SFX_ACEPTA);
+            } else sfx_menu(SFX_BLOQUEADO);                 /* CONFIGURACION, CONTROLES: no estan */
+        }
+        break;
+    case PZ_CONFIRMA:                                       /* 4D7B20 / 4D7C70: A confirma, B vuelve */
+        if (ok) { sfx_menu(SFX_ACEPTA); pz_guarda(); return pz_conf == 1 ? PAUSA_REINTENTA : PAUSA_ABANDONA; }
+        if (atras) { pz_estado = PZ_LISTA; sfx_menu(SFX_CANCELA); }
+        break;
+    case PZ_AUDIO:                                          /* 0x249530 */
+        if (ar || ab) {                                     /* cambia de fila: vuelve a mandar el de efectos */
+            sfx_master(master_de(pz_vol[0])); ap_se = pz_vol[0];
+            pz_aud ^= 1; sfx_menu(SFX_CURSOR);
+        } else if (iz || de) {
+            int v = pz_vol[pz_aud] + (de ? 1 : -1);
+            if (v >= 0 && v <= 10) { pz_vol[pz_aud] = v; sfx_menu(SFX_CURSOR); }   /* 4469F0 / 446A20 */
+            if (pz_aud == 0) { sfx_master(master_de(pz_vol[0])); ap_se = pz_vol[0]; }
+            else { musica_nivel((float)pz_vol[1] / 10.0f); ap_bgm = pz_vol[1]; sfx_master(master_de(pz_vol[1])); ap_se = -1; }
+        } else if (atras || ok) {                           /* 4D7AB0: a la licencia; y a la lista */
+            uint8_t *p = activa();
+            sfx_master(master_de(pz_vol[0])); ap_se = pz_vol[0];
+            if (p) { p32(p, 0xd4, pz_vol[0]); p32(p, 0xd0, pz_vol[1]); p[0x3f4] |= 2; }
+            pz_estado = PZ_LISTA; sfx_menu(atras ? SFX_CANCELA : SFX_ACEPTA);
+        }
+        break;
+    }
+    return PAUSA_SIGUE;
+}
+
+void menu_pausa_dibuja(void)
+{
+    float z = 200.0f; int i;
+    if (!md) return;
+    u_fuente = U_P_FUENTE;
+    if (pz_estado == PZ_LISTA) {                            /* (la confirmacion usa la misma ventana: sin lista) */
+        pz_ventana(135, 110, 350, 6 * 16 + 104, z);
+        for (i = 0; i < 6; i++) {
+            hudd_dibuja(md, us[U_P_BARRA], i == pz_sel && pz_t > PZ_ESPERA ? 1 : 0, 0, 16 * i, 1, z + 1, 0);
+            hudd_dibuja(md, us[U_P_FILA], PZ_FILA[i], 0, 16 * i, 1, z + 2, 0);
+        }
+        pz_botones(135, 110, 350, 6 * 16 + 104, z + 3, 1);
+    }
+    if (pz_estado == PZ_AUDIO) {
+        pz_ventana(120, 110, 380, 2 * 16 + 104, z);
+        pz_botones(120, 110, 380, 2 * 16 + 104, z + 3, 0);   /* 4D78C0: ventana de tipo 2 (solo ATRAS) */
+        for (i = 0; i < 2; i++) {
+            hudd_dibuja(md, us[U_P_BARRA], i == pz_aud ? 1 : 0, 0, 16 * i, 1, z + 1, 0);
+            hudd_dibuja(md, us[U_P_OPC], i, 0, 16 * i, 1, z + 2, 0);
+            hudd_dibuja(md, us[U_P_VOL], pz_vol[i], 0, 16 * i, 1, z + 2, 0);
+            /* flechas de 4463A0 (x - 12 y x + 0x97 - 12 en 321, 161 + 16 i): con la fuente 14 (las del original son
+               imagenes del XST sin localizar) */
+            if (pz_vol[i] > 0) texto_c("<", 321 - 12, 161 + 16 * i + 3, 1, 1, z + 3, 0x3f474a);
+            if (pz_vol[i] < 10) texto_c(">", 321 + 0x97 - 12, 161 + 16 * i + 3, 1, 1, z + 3, 0x3f474a);
+        }
+    }
+    if (pz_estado == PZ_CONFIRMA) {
+        pz_ventana(120, 110, 380, 150, z);
+        texto_id(0x3a6, 120 + 14, 110 + 38, 1, 1, z + 3, 0x202020);
+        pz_botones(120, 110, 380, 150, z + 3, 1);
+    }
+    u_fuente = U_FUENTE;
 }

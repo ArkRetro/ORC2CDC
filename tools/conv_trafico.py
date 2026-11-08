@@ -175,6 +175,114 @@ def tabla_clases(d):
         return i * 4
     return None
 
+# ---------------------------------------------------------------- aparicion del trafico por etapa (bloque 'TAP1')
+NFIJO = 24                                          # puntos fijos por etapa como mucho (en el curso hay hasta 18)
+
+def _lui_addiu(u, i, n):
+    """direcciones (lui rX, hi + addiu rY, rX, lo en las n instrucciones siguientes) desde la instruccion i"""
+    r = []
+    for j in range(i, i + n):
+        w = int(u[j])
+        if w >> 26 != 0x0f: continue
+        rx = (w >> 16) & 31
+        for k in range(j + 1, j + 7):
+            x = int(u[k])
+            if x >> 26 == 0x0f and (x >> 16) & 31 == rx: break           # otro lui al mismo registro
+            if x >> 26 == 0x09 and (x >> 21) & 31 == rx:
+                lo = x & 0xffff; r.append(((w & 0xffff) << 16) + (lo - 0x10000 if lo & 0x8000 else lo)); break
+    return r
+
+def _jal(w): return (w & 0x3ffffff) << 2 if w >> 26 == 3 else None
+
+def aparicion(iso):
+    """'TAP1': las tablas de aparicion del trafico del ejecutable, localizadas por el codigo que las usa:
+     - AREA (estado 0xF; PC race_area.cpp, PS2 0x173bf4): 'jal 4EFB50; lw a0, 0x80(rs); jal 4EFAF0; lw a0, 0x84(rs)':
+       el descriptor de tramo lleva en +0x80 la tabla de aparicion (PC +0x68; 4EFB50 la copia a 84BD08: hasta 8
+       registros de 12 bytes acabados en 0xFFFF) y en +0x84 la de velocidad (PC +0x6C; 4EFAF0 a 84BF60, 5 registros de
+       0x46). Detras, 'lw a0, 0x64(v1); beqz; nop; jal 4EFD20; move a1, zero': 4EFD20 con un registro del arbol (+0x64,
+       0 en todo csc_data_2) y, en su rama de la union, la direccion del registro de la union por defecto (6A5DC4 del PC:
+       el primer lui/addiu de 4EFD20).
+     - 46CC10 (PS2 0x1daa48): 'slti v0, a1, 6' ... 'lw v1, 0x324(v1)': el peso de cada clase en la cuenta por carril
+       (5B3DE4 del PC, 7 u16; el lui/addiu de la tabla esta unas instrucciones antes).
+     - 46CE30 (PS2 0x1db2a0): 'addiu v0, zero, 7; lui v1; div a0, v0; addiu v1': la lista de 7 modelos (64E198 del PC).
+     - 4EF880 (PS2 0x1f20f8): 'lui v0; sll a0, a0, 2; addiu v0, v0; addu; jr ra; lw v0, 0(a0)': la tabla de punteros
+       por etapa (6A6CE0 del PC) a la lista de puntos fijos de 478B90 (en PS2 0x18 bytes por punto: u32 etapa, u32 tipo
+       de lugar, u16 posicion, i8 carril, u32 modelo en +0xC, i8 color en +0x10, usado en +0x14; acaba en etapa 0x42).
+    Salida: 'TAP1', u32 n etapas (orden de clave del arbol csc_data_2, como CURSO.DAT), registro de la union por
+    defecto (12 bytes), 7 u16 pesos por clase + u16 0, 7 u8 modelos + u8 0, y por etapa: tabla de aparicion (0x60
+    bytes tal cual), tabla de velocidad (0x15E bytes + 2 de relleno), u32 n puntos fijos y NFIJO x {u16 posicion, i8
+    carril, u8 modelo, i8 color, u8 tipo de lugar, u16 0}."""
+    from ps2.assets import Assets
+    import conv_union
+    A = Assets(iso.ruta if hasattr(iso, 'ruta') else sys.argv[1]); E = A.elf
+    nombre = next(k for k in iso.fich if k.startswith('SLES') or k.startswith('SLUS') or k.startswith('SLPM'))
+    o, s = iso.fich[nombre]; d = bytes(iso.m[o:o + s]); u = np.frombuffer(d[:len(d) // 4 * 4], '<u4')
+    va = lambda i: E.va(int(i) * 4)
+    # 1) AREA: desplazamientos del descriptor y 4EFD20
+    o80 = o84 = defecto = None
+    for i in np.where((u[1:-6] & 0xfc1fffff) == 0x8c040080)[0] + 1:
+        rs = (int(u[i]) >> 21) & 31
+        if _jal(int(u[i - 1])) is None or _jal(int(u[i + 1])) is None or int(u[i + 2]) != (0x8c040084 | rs << 21): continue
+        for j in range(i + 3, i + 12):
+            if (int(u[j]) & 0xfc1fffff) == 0x8c040064 and _jal(int(u[j + 3])) and int(u[j + 4]) == 0x0000282d:
+                f = E.off(_jal(int(u[j + 3]))) // 4
+                c = _lui_addiu(u, f, 6)
+                if c: defecto = E.lee(c[0], 12)
+        o80, o84 = 0x80, 0x84; break
+    if o80 is None or defecto is None: sys.exit('no encuentro las tablas de aparicion (codigo de AREA / 4EFD20)')
+    # 2) pesos por clase de 46CC10
+    pesos = None
+    for i in np.where(u == 0x8c630324)[0]:
+        if not any(int(u[k]) == 0x28a20006 for k in range(i - 4, i)): continue
+        for a in _lui_addiu(u, i - 40, 40):
+            try: t = struct.unpack('<7H', E.lee(a, 14))
+            except ValueError: continue
+            if all(1 <= x <= 9 for x in t) and max(t) > 1: pesos = t; break
+        if pesos: break
+    if pesos is None: sys.exit('no encuentro los pesos por clase de 46CC10')
+    # 3) lista de modelos de 46CE30
+    lista = None
+    for i in np.where(u[:-3] == 0x24020007)[0]:
+        if int(u[i + 1]) >> 16 != 0x3c03 or int(u[i + 2]) != 0x0082001a or int(u[i + 3]) >> 16 != 0x2463: continue
+        lo = int(u[i + 3]) & 0xffff; a = ((int(u[i + 1]) & 0xffff) << 16) + (lo - 0x10000 if lo & 0x8000 else lo)
+        t = E.u32(a, 7)
+        if all(30 <= x <= 43 for x in t): lista = t; break
+    if lista is None: sys.exit('no encuentro la lista de modelos de 46CE30')
+    # 4) puntos fijos (4EF880)
+    fijos = None
+    for i in np.where((u[:-5] >> 16 == 0x3c02) & (u[1:-4] == 0x00042080) & (u[2:-3] >> 16 == 0x2442) &
+                      (u[3:-2] == 0x00822021) & (u[4:-1] == 0x03e00008) & (u[5:] == 0x8c820000))[0]:
+        lo = int(u[i + 2]) & 0xffff; fijos = ((int(u[i]) & 0xffff) << 16) + (lo - 0x10000 if lo & 0x8000 else lo)
+        if E.off(fijos) is not None and E.off(E.u32(fijos)) is not None and E.u32(E.u32(fijos)) == 0: break
+        fijos = None
+    if fijos is None: sys.exit('no encuentro la tabla de puntos fijos de 4EF880')
+    base, nprim, _ = conv_union.tablas(A)
+    regs = conv_union.arbol(A, 0)
+    b = bytearray(b'TAP1' + struct.pack('<I', len(regs)) + defecto + struct.pack('<8H', *pesos, 0) +
+                  bytes(lista) + b'\0')
+    for clave, ti, ui, hi, hd in regs:
+        de = E.u32(base + 4 * ti); ap = E.lee(E.u32(de + o80), 0x60); ve = E.lee(E.u32(de + o84), 0x15e)
+        r = [struct.unpack_from('<H', ap, 12 * k)[0] for k in range(8)]
+        assert 0xffff in r and all(r[k] < r[k + 1] for k in range(r.index(0xffff))), 'tabla de aparicion rara'
+        e = E.u32(fijos + 4 * ti); fl = []
+        while True:
+            st, tipo, pos, carril = struct.unpack('<IIHb', E.lee(e, 11)); mod, = struct.unpack('<I', E.lee(e + 12, 4))
+            col, = struct.unpack('<b', E.lee(e + 16, 1))
+            if st == 0x42 or st > ti: break
+            if st == ti: fl.append((pos, carril, mod, col, tipo))
+            e += 0x18
+        assert len(fl) <= NFIJO
+        b += ap + ve + b'\0\0' + struct.pack('<I', len(fl))
+        for k in range(NFIJO):
+            pos, carril, mod, col, tipo = fl[k] if k < len(fl) else (0, 0, 0, 0, 0)
+            b += struct.pack('<HbBbBH', pos, carril, mod, col, tipo, 0)
+        print('aparicion etapa %2d (descriptor %2d): %s; puntos fijos %d' %
+              (clave, ti, ' '.join('%d:%d/%d/%02x' % (r[k], ap[12 * k + 4], ap[12 * k + 5], ap[12 * k + 11])
+                                   for k in range(r.index(0xffff))), len(fl)))
+    print('aparicion: union por defecto %s, pesos por clase %s, modelos %s, puntos fijos en 0x%x'
+          % (list(defecto), list(pesos), list(lista), fijos))
+    return bytes(b)
+
 def tablas(iso, dest, cajas_malla=None):
     nombre = next(k for k in iso.fich if k.startswith('SLES') or k.startswith('SLUS') or k.startswith('SLPM'))
     o, s = iso.fich[nombre]; d = bytes(iso.m[o:o + s])
@@ -193,6 +301,7 @@ def tablas(iso, dest, cajas_malla=None):
         print('trafico %d: modelo %d, clase %d, radio %.2f, caja ancho %.2f alto %.2f z %.2f..%.2f%s'
               % (n, m, clase, radio, caja[0], caja[1], caja[5], caja[2], extra))
     b += b'ACL1' + struct.pack('<I', 7) + d[tk:tk + 35 * 4]
+    b += aparicion(iso)
     open(os.path.join(dest, 'TRAFC.DAT'), 'wb').write(b)
     print('TRAFC.DAT: modelos en 0x%x, cajas en 0x%x, tabla por clase en 0x%x' % (tm, tc, tk))
 

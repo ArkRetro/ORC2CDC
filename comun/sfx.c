@@ -10,18 +10,22 @@
      en asfalto (= 56).
    - Golpe contra muro: grupo de 6 capas; al chocar x = 127 y baja 0.05*127 por cuadro (20 cuadros); volumen
      0.56*127 (muro normal).
-   - Cada capa: volumen = canal/127 * curva_vol(x)/127 * 2^-((15-aten)/2); tono = frecuencia de la muestra *
+   - Cada capa (0x11b600 del ELF): volumen = canal/144 * curva_vol(x)/127 * 2^-((15-aten)/2) * factor de la
+     definicion (0x352748: motor 1,75, derrape 2, golpe 1) * general/144, de 0 a 0x3fff en la SPU2 (255 en el AICA,
+     cuyo volumen es lineal: TL = 16 log2(255 / v) en el controlador de KallistiOS); tono = frecuencia de la muestra *
      2^((curva_pitch(x)/3 - nota*115)/4096) con curva_pitch = semitonos*1024 + fino*16. Las curvas se interpolan
      linealmente en el tramo x0 < x <= x1. Una capa con volumen 0 se apaga y vuelve a empezar la muestra al
      reaparecer (como el original).
    Aqui x es real (interpolando entre umbrales de rpm) para que el tono no vaya a saltos.
+   Volumen general (sfx_master, el 0x11ae38 del original = trunc(opcion de efectos / 10 * 144), 144 por defecto): los
+   ICS lo usan / 144 y los efectos SE (menus y voces) como el IRX, (vol * general) >> 7 (ver vol_se).
    Menus: sfx_menu(id) toca la muestra "se%03x" una vez (sin bucle) a su frecuencia y con el volumen de la tabla SE del
    IRX (u16 final de la muestra en SFX.DAT), alternando entre dos canales para que un efecto no corte al anterior.
    Voces (VOCES.DAT, tools/conv_sonido.py): las muestras del banco de voz del idioma (ORC.PAK y PERO.pak) y dos efectos
    de carrera (0x4d EXTEND TIME y 0x18d aviso de poco tiempo) a la RAM del AICA al arrancar (214 KB en espanol: caben
    junto a SFX.DAT y los buferes de la musica). sfx_voz(id) toca la del id a su frecuencia (12 kHz) con el volumen de
-   la tabla SE del IRX (0x3fff, el maximo de la SPU2 = 255 del AICA: las voces, como en el original, por encima de la
-   musica, que va a 200 en musica.c); las voces van por un canal propio (una voz nueva corta
+   la tabla SE del IRX (0x3fff) por el general, como los efectos de menu (vol_se: 0,875 del maximo con las opciones
+   por defecto; la musica va al maximo, musica.c); las voces van por un canal propio (una voz nueva corta
    la anterior: SUPUESTO, el original las manda a la cola de sonido de la carrera) y los efectos por otro. */
 #include <kos.h>
 #include <dc/sound/sound.h>
@@ -37,10 +41,14 @@
 #define MAX_CAPAS 8
 #define MAX_MUESTRAS 32
 #define D_ORIG 0.37f            /* factor de volumen del original tras su rampa inicial */
-#define ESCALA 3.0f             /* nivel general frente a la musica (ajustable con sfx_volumen) */
+#define CANAL_MAX 144.0f        /* 0x11b768: el volumen del canal (0..127 de la carrera) se divide por 144 */
+#define MASTER_MAX 144.0f       /* 0x11b7b0: volumen general (0x530fb4, 0x11ae38) / 144 */
 
 enum { G_MOTOR_ACEL, G_MOTOR_SUELTA, G_DERRAPE, G_GOLPE, N_GRUPOS };
 static const char *nombres_grupo[N_GRUPOS] = { "motor_acel", "motor_suelta", "derrape", "golpe" };
+/* factor de cada definicion ICS (tabla de floats del ELF 0x352748, indice = definicion; 0x11b6f8): motor con y sin
+   gas (definiciones 18 y 19) 1,75; derrape (0) 2,0; golpe contra muro (3) 1,0 */
+static const float F_DEF[N_GRUPOS] = { 1.75f, 1.75f, 2.0f, 1.0f };
 
 typedef struct {                /* como en SFX.DAT */
     char nombre[12];
@@ -79,11 +87,14 @@ static uint32_t ram_spu;
 static grupo_t grupos[N_GRUPOS];
 static float umbral_rpm[128];
 static float vol_general = 1.0f;
+static int master = 144;        /* volumen general del controlador de sonido (0..144; 144 = opcion de efectos a 10) */
+#ifndef PRUEBA_MEZCLA
+#define PRUEBA_MEZCLA 0         /* prueba de la mezcla: bit 1 calla los ICS (motor...), bit 2 los SE (menus, voces) */
+#endif
 static float golpe_x = -1.0f, golpe_vol;
 static int listo;
 #define N_CANAL_MENU 2
 static int canal_menu[N_CANAL_MENU] = { -1, -1 }, menu_turno;
-#define VOL_MENU 0.8f           /* nivel de los efectos de menu (volumen 0x3fff del IRX) */
 #define MAX_VOCES 64
 
 typedef struct {                /* como en VOCES.DAT */
@@ -146,14 +157,31 @@ static void manda(int canal, uint32_t orden, const muestra_dat_t *m, uint32_t ba
     snd_sh4_to_aica(tmp, cmd->size);
 }
 
-/* lleva una capa a (x, volumen del canal 0..1) */
-static void pon_capa(capa_t *k, float x, float vcanal)
+/* volumen de un efecto SE (menus, voces) en el AICA (0..255): SOUNDCD.IRX 0x2118 / 0x2380 lo multiplica por el
+   general (0x4b74) y desplaza 7: (vol * master) >> 7. Con la opcion a 10 (master 144) y vol 0x3fff sale 0x47ff, que
+   no cabe en los 15 bits con signo del volumen de la SPU2 (sceSdSetParam lo escribe tal cual): suena con la fase
+   invertida y |0x47ff - 0x8000| / 0x4000 = 0,875 del maximo. Se pasa la amplitud resultante. */
+static int vol_se(int vol)
+{
+    int s = (vol * master) >> 7, a;
+    if (PRUEBA_MEZCLA & 4) return 0;
+    s &= 0x7fff;
+    a = s < 0x4000 ? s : 0x8000 - s;
+    a = (a * 255 + 0x2000) / 0x4000;
+    return a > 255 ? 255 : a;
+}
+
+/* lleva una capa a (x, volumen del canal 0..1 = canal / 144). 0x11b600: volumen de la SPU2 = 0x3fff * canal / 144 *
+   curva / 127 * 2^-((15 - aten) / 2) * factor de la definicion * general / 144 (hasta 0x3fff); en el AICA, 255 */
+static void pon_capa(capa_t *k, float x, float vcanal, float fdef)
 {
     const muestra_dat_t *m = &mues[k->c->muestra];
-    float g = vcanal * curva_vol(k->c->vol, x) * (1.0f / 127.0f) * k->ganancia * vol_general * ESCALA;
+    float g = vcanal * curva_vol(k->c->vol, x) * (1.0f / 127.0f) * k->ganancia * fdef * ((float)master / MASTER_MAX) *
+              vol_general;
     int vol = (int)(g * 255.0f + 0.5f);
     uint32_t frec;
     if (k->canal < 0) return;
+    if (PRUEBA_MEZCLA & 2) vol = 0;
     if (vol > 255) vol = 255;
     if (vol <= 0) {
         if (k->sonando) { snd_sfx_stop(k->canal); k->sonando = 0; }
@@ -185,7 +213,7 @@ static void pon_grupo(int g, float x, float vcanal)
     int i;
     if (x < 0.0f) x = 0.0f;
     if (x > 127.0f) x = 127.0f;
-    for (i = 0; i < grupos[g].n; i++) pon_capa(&grupos[g].capa[i], x, vcanal);
+    for (i = 0; i < grupos[g].n; i++) pon_capa(&grupos[g].capa[i], x, vcanal, F_DEF[g]);
 }
 
 static void calla_grupo(int g)
@@ -273,8 +301,8 @@ void sfx_motor(float rpm, float acelerador, int marcha)
     vb = b * powf(1.0f - c, 0.25f) * D_ORIG * 51.5f;
     if (va > 127.0f) va = 127.0f;
     if (vb > 127.0f) vb = 127.0f;
-    pon_grupo(G_MOTOR_ACEL, x, va * (1.0f / 127.0f));
-    pon_grupo(G_MOTOR_SUELTA, x, vb * (1.0f / 127.0f));
+    pon_grupo(G_MOTOR_ACEL, x, va * (1.0f / CANAL_MAX));
+    pon_grupo(G_MOTOR_SUELTA, x, vb * (1.0f / CANAL_MAX));
 }
 
 void sfx_derrape(float intensidad)
@@ -282,7 +310,7 @@ void sfx_derrape(float intensidad)
     if (!listo) return;
     if (intensidad <= 0.01f) { calla_grupo(G_DERRAPE); return; }
     if (intensidad > 1.0f) intensidad = 1.0f;
-    pon_grupo(G_DERRAPE, intensidad * 126.0f, sqrtf(0.4f + 0.6f) * D_ORIG * 151.2f * (1.0f / 127.0f));
+    pon_grupo(G_DERRAPE, intensidad * 126.0f, sqrtf(0.4f + 0.6f) * D_ORIG * 151.2f * (1.0f / CANAL_MAX));
 }
 
 void sfx_golpe(float fuerza)
@@ -291,10 +319,11 @@ void sfx_golpe(float fuerza)
     if (fuerza < 0.0f) fuerza = 0.0f;
     if (fuerza > 1.0f) fuerza = 1.0f;
     golpe_x = 1.0f;
-    golpe_vol = 0.56f * (0.4f + 0.6f * fuerza);    /* fuerza 1 = el original */
+    golpe_vol = 0.56f * 127.0f / CANAL_MAX * (0.4f + 0.6f * fuerza);    /* fuerza 1 = el original (canal 0,56 * 127) */
 }
 
 void sfx_volumen(float v) { vol_general = v < 0.0f ? 0.0f : v; }
+void sfx_master(int m) { master = m < 0 ? 0 : m > 0x7fff ? 0x7fff : m; }
 
 void sfx_para(void)
 {
@@ -315,7 +344,7 @@ void sfx_menu(int id)
     c = canal_menu[menu_turno];
     menu_turno = (menu_turno + 1) % N_CANAL_MENU;
     if (c < 0) return;
-    vol = (int)(mues[i].vol * (1.0f / 0x3fff) * VOL_MENU * vol_general * 255.0f + 0.5f);
+    vol = (int)(vol_se(mues[i].vol) * vol_general + 0.5f);
     if (vol > 255) vol = 255;
     if (vol <= 0) return;
     snd_sfx_stop(c);
@@ -358,7 +387,7 @@ static void toca_voz(int id, int canal)
     if (canal < 0) return;
     for (i = 0; i < n_voz && voz[i].id != (id & 0x1ff); i++) ;
     if (i >= n_voz) return;
-    vol = (int)(voz[i].vol * (1.0f / 0x3fff) * vol_general * 255.0f + 0.5f);   /* 0x3fff = el maximo del AICA */
+    vol = (int)(vol_se(voz[i].vol) * vol_general + 0.5f);   /* como los efectos SE (vol_se) */
     if (vol > 255) vol = 255;
     if (vol <= 0) return;
     if ((id & 0x1ff) != 0x18d) dbglog(DBG_INFO, "VOZ 0x%x\n", id & 0x1ff);   /* para las pruebas (consola) */

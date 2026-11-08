@@ -150,7 +150,8 @@ int video_reproduce(const char *nombre)
         for (t = 0; t < 300 && leidos < (cab.n < 8 ? cab.n : 8); t++) thd_sleep(10);
     }
     if (hv == SND_STREAM_INVALID) hv = snd_stream_alloc(datos_audio, SND_STREAM_BUFFER_MAX);
-    if (hv != SND_STREAM_INVALID) { snd_stream_start_adpcm(hv, cab.frec, 1); snd_stream_volume(hv, 200); }
+    /* el audio de la pelicula sin atenuar (el PC lo mezcla tal cual: MenuAudio::mix, movie_), como la musica */
+    if (hv != SND_STREAM_INVALID) { snd_stream_start_adpcm(hv, cab.frec, 1); snd_stream_volume(hv, 255); }
     t0 = timer_ms_gettime64();
     dbglog(DBG_INFO, "VIDEO %s: %u cuadros %ux%u a %u.%03u fps\n", nombre, (unsigned)cab.n, cab.ancho, cab.alto,
            (unsigned)(cab.fps_mil / 1000), (unsigned)(cab.fps_mil % 1000));

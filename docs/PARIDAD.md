@@ -38,7 +38,7 @@ Estado: OK (conectado y verificado al nivel indicado), PARCIAL, PROVISIONAL (apr
 | Adherencia por superficie | get_road_mu 500B30, running_resistance 502120, COLI0200 | OK | coli por rueda | ninguna conocida | — | H, E |
 | Choques coche-coche y muro, choque fuerte, grua | 4F9450/4F8490/4F6FE0/4F7BF0, cbw_coli_wall, 5038D0, PlWrecker | PARCIAL | CHQ1/POS1 de PARAM.DAT | grua recoloca en el carril mas cercano (no en la fila de poligonos); avance 10 posiciones x m_pos (CONFIRMADO, antes 25 m supuestos) | — | H, E |
 | Camara de carrera | evento CAMERA 385: 4858D0, 484810, 483110, 4A1680 SetCarCamera, 485590/483CE0/4834A0/483600, 4832F0/484A40, 483C10/484BD0 (PS2 0x178500..0x17b540, 0x1817c0) | PARCIAL | demo/camara.c con las tablas CAM1 de PARAM.DAT (vistas 0x2ccd88, por vista y modelo 0x2cd3d8, por modelo 0x2d2838 del fichero SLES) | vista 1 sin interior (no se dibuja el coche); camara de salida en los 60 primeros cuadros de la cuenta (SUPUESTO); sin vista 0x1D (780258 = 0) ni camaras de meta/fin | ver seccion Camara de carrera | E |
-| Trafico (clases, IA, reaccion) | 472090, 472450, 472A50, 47DC10, 4736D0, hit_476040; aparicion 4787E0, cierre 477F60 | PARCIAL | TRAFC.DAT; colores (tabla 0x36bc18, modelos 30..43) y materiales en TRAFn.DAT (TCX1); aparicion a 50 posiciones y cierre a -2/+60 del original | velocidades y densidad por tramo (registros 0x46 de 4F0030 y 12 bytes de 4EFB90, por etapa) sin clonar; puntos fijos 478B90 | extraer las tablas de aparicion/velocidad por etapa (4EFD20) | E |
+| Trafico (clases, IA, reaccion) | 472090, 472450, 472A50, 47DC10, 4736D0, hit_476040; aparicion 479080 (PS2 0x1dcdd0): 478B90 (0x1dbba0), 4787E0 (0x1db6d0), 4EFB90 (0x1f3818), 4F0030 (0x1f1a88), 46CE30, 478430, 46CC10; cierre 477F60 | PARCIAL | TRAFC.DAT (TRC1, ACL1 y TAP1: tablas de aparicion, velocidad y puntos fijos por etapa); colores (tabla 0x36bc18, modelos 30..43) y materiales en TRAFn.DAT (TCX1) | camino "Lead" de 472450 (velocidad segun el jugador) sin portar: todos a la velocidad del registro; 478640/46CDA0 en la union simplificados; puntos fijos de coches de carreras y de los modelos 39..43 sin coche | ver Trafico: densidad del original | E |
 | Rivales | — | FALTA | — | no hay rivales | — | — |
 | Carretera, pendientes, bifurcacion | STAGE.PS2, BK.PS2 cs_BK_PALM, COMMON obj_course_obj_bk_palm + obj_OBJ_<ZONA>_BUNKI_TX, descriptores 0xb0, csc_data_2 | OK | conv_tramo/conv_union, CURSO.DAT | arbol entero (15 etapas, 10 bifurcaciones con sus carteles, 5 metas); cielo de la union = el de la etapa que se deja, cambia al llegar a la siguiente (sin mezcla); bifurcaciones = las de PALM (las demas no estan en el disco) | objetos animados de BK (ANIMS), sol | E |
 | Temporizador (inicial y ampliacion) | 44DC70 = PS2 0x176730, 450CC0 = PS2 0x1cee40, 450AC0; tabla 7D2E98 = PS2 0x3cb708 copiada por 0x176040; k636904 = PS2 0x35a938 | OK | TIM1 y KTE1 de PARAM.DAT | formula y tablas CONFIRMADAS en el ELF; variante 1 (fila 0), preset 0 y dificultad 0 PROBABLES (frontal del PC) | trazar el frontal de PS2 | E |
@@ -180,9 +180,9 @@ estaba y se dice lo que falta). Estado: CORREGIDO, SE QUEDA (ya era del original
 | Cuenta atras: GO a los 240 cuadros de la escena | 8367BC = 180 al entrar en GAME; coche, trafico y tiempo quietos mientras > 60 (4A8100, 450AC0) | 120 cuadros de GAME; GO de la escena 2C000A en el 240 | PROBABLE (no se ha trazado cuando empieza la escena respecto a GAME) | SE QUEDA |
 | Camara de salida los 60 primeros cuadros | 485250 mientras 8367BC > 180 (durante START) | duracion de START | PROVISIONAL | SE QUEDA (falta medir START) |
 | Trafico: 11 coches al salir en s0 + 130 + i 121 + azar 66 m | 4787E0: sin coches al salir (salvo puntos fijos 478B90); aparecen de uno en uno | ninguno al salir | CONFIRMADO (logica) | CORREGIDO |
-| Trafico: reaparece a 550..1100 m si queda 150 m detras | 477F60 cierra con distancia < -2 o > 60 posiciones; 4787E0 abre a 50 posiciones (0x32; 35 en la union pasada la 120) cada max(3, registro +5) posiciones | -2 / +60 / +50 posiciones | CONFIRMADO; la separacion del registro (+5) y el 35 de la union PROVISIONALES | CORREGIDO (separacion 3, sin el caso de la union) |
-| `NTRAF 11` | tope 20 (0x14) x densidad 46CD60 x registro +4 de 4EFB90 (por tramo) | depende del tramo | PROVISIONAL (tablas de aparicion por etapa no extraidas; 11 es el tope de dibujo medido en la Dreamcast) | SE QUEDA |
-| Velocidad del trafico 36-50 m/s al azar | 4F0030: registro de 0x46 bytes del tramo (+0xC i16 x K5B43A4), copiado por 4EFD20 de tablas del ejecutable por etapa | por tramo y clase | PROVISIONAL | SE QUEDA (falta localizar las tablas 84BF60 en PS2) |
+| Trafico: reaparece a 550..1100 m si queda 150 m detras | 477F60 cierra con distancia < -2 o > 60 posiciones; 4787E0 abre a 50 posiciones (0x32; 35 en la union pasada la 120) cada max(3, registro +5) posiciones | -2 / +60 / +50 (35) posiciones, separacion del registro (12..20 en el curso) | CONFIRMADO | CORREGIDO (2026-11-08: separacion del registro de aparicion y caso de la union) |
+| `NTRAF 11` (todas las plazas llenas) | tope 20 (0x14) x densidad 46CD60 (1 fuera de la red) x registro +4 de 4EFB90 (por tramo), mas los puntos fijos de 478B90 | registro +4: 0..12 en el curso (PALM 5/5/3/0/4, LAKE 12/7/5/2/3) | CONFIRMADO (tablas TAP1) | CORREGIDO (NTRAF 16 = plazas; cuantos abre lo dice el registro) |
+| Velocidad del trafico 36-50 m/s al azar | 4F0030 (PS2 0x1f1a88): registro de 0x46 bytes del sitio del coche (+0xC i16 x K5B43A4 = 0,0046142, PS2 0x1dba94), tabla 84BF60 copiada por 4EFAF0 del descriptor +0x84 (PS2) | 100 km/h del modelo (27,7 m/s) en todo el curso | CONFIRMADO | CORREGIDO (la velocidad por clase y el camino "Lead" de 472450 siguen sin portar) |
 | Trafico: frenar a 0,9 del de delante a < 10 m, carril libre 15/30 m y 25 m al nacer | el original tiene choques entre coches de trafico (4F9450) | — | PROVISIONAL | SE QUEDA |
 | Trafico: vuelta al centro del carril 0,02 m/cuadro | 6280EC = 0,02 (ese tope si); la vuelta (473620) sin portar | — | PROVISIONAL | SE QUEDA |
 | Caja de choque con el jugador: medio largo + 2,3 m, ancho + 1 m | 4F9450: cajas de los dos coches (520950 / disposicion) | — | PROVISIONAL | SE QUEDA |
@@ -545,6 +545,39 @@ con histeresis) y reserva ajustada. Verificado en E (DREAMCAST.md seccion 2, PAR
 Graficos (2026-11-08): tiras con la bandera ADC del VU1, nodos y matrices como 404D10, carteles orientados, sin
 cs_ENV/cs_ENVBK (reflejo), planos 0,1/4000 y LOD de 404B00, recorte de la etapa por presupuesto desde lo mas lejano.
 Verificado en E (ver seccion Graficos).
+
+Trafico: densidad del original (2026-11-08). Tablas del ejecutable de PS2 (tools/conv_trafico.py `aparicion`,
+bloque TAP1 de TRAFC.DAT), localizadas por el codigo que las usa:
+- AREA estado 0xF (PS2 0x173bf4: `jal 4EFB50; lw a0, 0x80(s1); jal 4EFAF0; lw a0, 0x84(s1)`): el descriptor de tramo
+  lleva la tabla de aparicion en +0x80 (PC +0x68; hasta 8 registros de 12 bytes) y la de velocidad en +0x84 (PC +0x6C;
+  5 de 0x46). 4EFD20 (PS2 0x1f3a70) no se usa en el curso (+0x64 de csc_data_2 = 0); su rama de la union da el
+  registro por defecto 6A5DC4 (PS2 0x36bfe8): 2 coches, separacion 20, carriles 2 y 3 prohibidos.
+- Registro de aparicion: u16 posicion, +4 coches como mucho, +5 separacion (min 3), +6..+0xA pesos de clase que
+  4EFB90 deja siempre en 0,0,0,0,100 (lo confirma PS2 0x1f3a3c), +0xB carriles prohibidos. Por etapa del curso (clave
+  0..14: coches/separacion por tramo): PALM 5/15, 5/15, 3/15, 0/15, 4/15; LAKE 12/12, 7, 5, 2, 3; IMPE 12/15 al
+  principio; las demas 3..10 coches con separacion 14..20.
+- Velocidad: +0xC = 100 km/h del modelo en todas; 4F0030 pisa con constantes las velocidades por clase (+0xE = 250,
+  250, 250, 290, 290, 310; +0x1C = 270,9 / 309,6 / 309,6 / 387 / 408,5 / 473 x 1 o 0,8) y los porcentajes (+0x2A..);
+  +4 = 7 si el registro de aparicion deja 10 coches o mas, si no 10 (PS2 0x1f1ed8).
+- Puntos fijos 478B90: tabla por etapa de 4EF880 (PC 6A6CE0, PS2 0x36d1d8), en PS2 0x18 bytes por punto (u32 etapa,
+  u32 tipo de lugar, u16 posicion, i8 carril, u32 modelo +0xC, i8 color +0x10, usado +0x14; fin en etapa 0x42; el
+  PC tiene 0x14). Un coche cuando el jugador esta justo en esa posicion. Modelos 30..43 (trafico, funcion 0x59) y
+  0..29 (coches de carreras, funcion 0x55, como mucho 2): la demo solo tiene 30..38; los demas se gastan sin coche.
+- Modelos al azar: 46CE30 con la clase 4 siempre: la lista de 7 (PC 64E198, PS2 0x36bf70) = 30, 32, 33, 34, 35, 36,
+  38 en orden; carril de 478430 con los pesos por clase de 46CC10 (PC 5B3DE4, PS2 0x40b9c8: 4, 2, 3, 1, 1, 1, 1).
+- Sin trafico en sentido contrario: todos los coches van con la orientacion de la carretera del sitio (470240);
+  ninguna tabla lleva sentido. Dificultad: el trafico no lee la licencia (7C24C0) ni la dificultad; solo la variante
+  780258 (3/4 red: densidad 5B3DF0 y x0,8 las velocidades; 2 Heart Attack) y el preset 78024C (modelos de 46CE30).
+  La demo es la variante 1 (OutRun), preset 0: nada que cambiar con menu_dificultad().
+- TRAFC.DAT no se cargaba: la demo leia registros de 52 bytes y son de 48 (sizeof trafc_t); ahora se leen bien las
+  clases, cajas, aceleraciones (ACL1) y el modelo para el LOD.
+Verificacion (Flycast, `-DPRUEBA_AUTO -DVER=1 -DDIAG_TRAF`, 80 s de carrera con el piloto, `DIAGTRAF` cada 1 s):
+PALM antes 11 coches en la ruta todo el rato (media 10,4; dibujados 9,8), despues media 3,2 y como mucho 7 (dibujados
+3,0; abre uno cada 15 posiciones, el punto fijo de la 170 con el modelo 31 en el carril 5 y el de la 390); LAKE (58 s
+hasta agotar el tiempo) antes media 9,8 y siempre 11, despues media 3,9 y como mucho 10 (los 9 puntos fijos del
+principio). PENDIENTE: el camino "Lead" de 472450 (470B30, 471E70, 471F90, 472320: los coches por delante del
+siguiente al jugador ajustan su velocidad a la del jugador, con suelos de 250..310 km/h del modelo), 478640 y 46CDA0
+en la union, camiones/autobuses 39..43 y coches de carreras de los puntos fijos.
 
 Auditoria de inventos y checkpoint del original (ver arriba): ACEL 1, posicion de carretera m_pos (puntuacion, IA y
 grua), rumbo adelante a 16 posiciones, ampliacion en el principio de la etapa con 44DC70 completo (KTE1), aparicion y

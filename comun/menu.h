@@ -32,4 +32,18 @@ int menu_dificultad(void);                  /* 0 muy facil .. 4 muy dificil (lic
 enum { MP_TITULO, MP_MENU, MP_MODO, MP_COCHE, MP_CAMBIO, MP_MUSICA, MP_LICENCIA, MP_EDITOR, MP_OPCIONES, MP_RANKING,
        MP_MULTI };
 extern void (*menu_gancho)(int pantalla, int evento, int valor);
+/* lo pone quien dibuja el coche 3D de la seleccion: libera su VRAM (se vuelve a cargar cuando haga falta). El menu lo
+   llama cuando una pantalla no cabe: las texturas del coche quedan en medio de la VRAM del menu y la parten (la
+   pantalla de musica, 3 texturas de 256 KB, no encontraba hueco seguido) */
+extern void (*menu_suelta_coche)(void);
+/* volumen de efectos y de musica de la licencia activa (+D4, +D0; 0..10) al controlador de sonido y a la musica */
+void menu_aplica_audio(void);
+/* menu de pausa de la carrera (ver menu.c): menu_pausa_entra sube sus texturas (0 bien; si no, la pausa sigue sin
+   dibujarse); menu_pausa_paso una vez por paso de logica en pausa; menu_pausa_dibuja dentro de la lista TR, encima de
+   todo; menu_pausa_sale libera su VRAM */
+enum { PAUSA_SIGUE, PAUSA_CONTINUA, PAUSA_REINTENTA, PAUSA_ABANDONA };
+int menu_pausa_entra(void);
+int menu_pausa_paso(unsigned botones_nuevos);
+void menu_pausa_dibuja(void);
+void menu_pausa_sale(void);
 #endif

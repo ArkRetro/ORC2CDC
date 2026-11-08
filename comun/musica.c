@@ -12,11 +12,12 @@ static uint8_t anillo[ANILLO] __attribute__((aligned(32)));
 static uint8_t salida[2 * TROZO] __attribute__((aligned(32)));
 static uint8_t lectura[TROZO] __attribute__((aligned(32)));
 static volatile uint32_t escrito, leido;                     /* bytes totales escritos y leidos del anillo */
-static volatile int activa, pausa_lectura, fin_hilo;
+static volatile int activa, pausa_lectura, fin_hilo, arranca;   /* arranca: sonara cuando haya colchon */
+static int t_arranca;
 static uint32_t lba0, tam, pos;
 static snd_stream_hnd_t hs = SND_STREAM_INVALID;
 static kthread_t *hilo;
-static int volumen = 200, adpcm;
+static int volumen = 255, adpcm;                            /* musica_nivel: el de la opcion de musica */
 static mutex_t m_poll = MUTEX_INITIALIZER;                   /* snd_stream_poll desde el bucle o desde el lector */
 
 static void *lector(void *arg)
@@ -27,8 +28,8 @@ static void *lector(void *arg)
         /* el anillo tiene ~21 s de ADPCM (48 KB/s): durante una carga (pausa_lectura o lecturas de otro hilo hace
            menos de 300 ms) no se lee; con el anillo casi vacio se lee igualmente */
         int vacio = escrito - leido < 128 * 1024;
-        if (activa && pausa_lectura) {                          /* carga larga: el bucle no llama a musica_poll */
-            mutex_lock(&m_poll); if (activa) snd_stream_poll(hs); mutex_unlock(&m_poll);
+        if (activa && !arranca && pausa_lectura) {              /* carga larga: el bucle no llama a musica_poll */
+            mutex_lock(&m_poll); if (activa && !arranca) snd_stream_poll(hs); mutex_unlock(&m_poll);
         }
         if (!activa || ANILLO - (escrito - leido) < TROZO || (!vacio && (pausa_lectura || gd_ocupado(300)))) { thd_sleep(10); continue; }
         {
@@ -81,17 +82,44 @@ int musica_pon(int n)
         sprintf(nom, "MUS%d.PCM", n); adpcm = 0;
         if (gd_busca(nom, &lba0, &tam)) return -1;
     }
-    pos = 0; escrito = leido = 0; activa = 1;
-    {   /* colchon antes de sonar (con tope: si el GD falla no se queda aqui) */
-        int t;
-        for (t = 0; t < 300 && escrito < (adpcm ? 64 : 256) * 1024 && activa; t++) thd_sleep(10);
-    }
-    if (adpcm) snd_stream_start_adpcm(hs, 48000, 1);
-    else snd_stream_start(hs, 44100, 1);
-    snd_stream_volume(hs, volumen);
+    pos = 0; escrito = leido = 0; arranca = 1; t_arranca = 0; activa = 1;
+    /* empieza a sonar en musica_poll cuando el lector tiene colchon: antes se esperaba aqui hasta 3 s y el menu se
+       quedaba sin dibujar (pantalla de musica en blanco al cambiar de tema) */
     return 0;
 }
 
-void musica_para(void) { if (activa) { mutex_lock(&m_poll); snd_stream_stop(hs); activa = 0; mutex_unlock(&m_poll); } }
-void musica_poll(void) { if (activa) { mutex_lock(&m_poll); snd_stream_poll(hs); mutex_unlock(&m_poll); } }
+static void empieza(void)
+{
+    if (adpcm) snd_stream_start_adpcm(hs, 48000, 1);
+    else snd_stream_start(hs, 44100, 1);
+    snd_stream_volume(hs, volumen);
+    arranca = 0;
+}
+void musica_para(void)
+{
+    if (activa) { mutex_lock(&m_poll); if (!arranca) snd_stream_stop(hs); activa = 0; arranca = 0; mutex_unlock(&m_poll); }
+}
+void musica_poll(void)
+{
+    if (!activa) return;
+    mutex_lock(&m_poll);
+    if (arranca) {                                              /* colchon antes de sonar (con tope si el GD falla) */
+        if (escrito >= (adpcm ? 64u : 256u) * 1024 || ++t_arranca > 180) empieza();
+    } else snd_stream_poll(hs);
+    mutex_unlock(&m_poll);
+}
 void musica_pausa_lectura(int p) { pausa_lectura = p; }
+/* 0x100210 del original: volumen del flujo de musica = nivel * 0x3fff (nivel = opcion de musica / 10; 1 = el maximo de
+   la SPU2); en el AICA, nivel * 255 (volumen lineal) */
+#ifndef PRUEBA_MEZCLA
+#define PRUEBA_MEZCLA 0         /* prueba de la mezcla (sfx.c): bit 0 calla la musica */
+#endif
+void musica_nivel(float n)
+{
+    int v = (int)(n * 255.0f + 0.5f);
+    if (PRUEBA_MEZCLA & 1) v = 0;
+    v = v < 0 ? 0 : v > 255 ? 255 : v;
+    if (v == volumen) return;
+    volumen = v;
+    mutex_lock(&m_poll); if (activa && !arranca) snd_stream_volume(hs, volumen); mutex_unlock(&m_poll);
+}

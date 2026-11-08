@@ -11,7 +11,8 @@ int  sfx_inicia(void);                     /* carga SFX.DAT y lo sube a la RAM d
 void sfx_motor(float rpm, float acelerador, int marcha);   /* una vez por cuadro (tambien hace avanzar el golpe) */
 void sfx_derrape(float intensidad);        /* 0..1 (0 = calla), una vez por cuadro */
 void sfx_golpe(float fuerza);              /* 0..1: dispara el golpe (se apaga solo en ~1/3 s) */
-void sfx_volumen(float v);                 /* volumen general de los efectos (1 = por defecto) */
+void sfx_volumen(float v);                 /* factor de los efectos del port (1 = el del original) */
+void sfx_master(int m);                    /* volumen general del original (0x11ae38): opcion de efectos / 10 * 144 */
 void sfx_para(void);                       /* calla todo (pausa, fin de carrera); se reanuda con la siguiente llamada */
 /* efectos de los menus (bancos SE del original, muestras "se%03x" de SFX.DAT), disparo simple sin bucle por dos canales
    propios (sfx_para no los calla): */
