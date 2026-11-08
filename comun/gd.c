@@ -64,18 +64,29 @@ static int busca(const char *nombre, uint32_t *lba, uint32_t *tam)
     return -3;
 }
 
+/* el fichero entero en dst (alineado a 32, cap bytes: el tamano redondeado a sectores); 0 bien */
+int gd_carga_en(const char *nombre, void *dst, uint32_t cap, uint32_t *tam)
+{
+    uint32_t lba, n, hecho = 0; uint8_t *b = dst;
+    if (gd_busca(nombre, &lba, tam)) return -1;
+    n = (*tam + 2047) / 2048;
+    if (n * 2048 > cap) return -2;
+    while (hecho < n) {                                     /* de 64 en 64 sectores */
+        int k = n - hecho > 64 ? 64 : (int)(n - hecho);
+        if (lee(lba + hecho, k, b + hecho * 2048)) return -3;
+        hecho += k;
+    }
+    return 0;
+}
+
 /* el fichero entero en memoria (alineada a 32); NULL si no esta */
 void *gd_carga(const char *nombre, uint32_t *tam)
 {
-    uint32_t lba, n, hecho = 0; uint8_t *b;
+    uint32_t lba, n; uint8_t *b;
     if (gd_busca(nombre, &lba, tam)) return NULL;
     n = (*tam + 2047) / 2048;
     b = memalign(32, n * 2048);
     if (!b) return NULL;
-    while (hecho < n) {                                     /* de 64 en 64 sectores */
-        int k = n - hecho > 64 ? 64 : (int)(n - hecho);
-        if (lee(lba + hecho, k, b + hecho * 2048)) { free(b); return NULL; }
-        hecho += k;
-    }
+    if (gd_carga_en(nombre, b, n * 2048, tam)) { free(b); return NULL; }
     return b;
 }

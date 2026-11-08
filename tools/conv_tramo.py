@@ -6,7 +6,9 @@ Cada punto de la ruta: x, y, z, ancho del asfalto izquierdo y derecho, NPERF alt
 desvios de carril, y de la colision del original (COLI0200 de la etapa): limite transitable izquierdo y derecho (hasta
 el muro o el vacio, positivos), NEXT alturas a cada lado entre el perfil y el limite (de dentro afuera, izquierda y
 luego derecha) y NBANDA franjas de superficie de izquierda a derecha (desvio donde empieza, indice de material del
-original: bandera 1 << indice; las que sobran empiezan en el limite derecho)."""
+original: bandera 1 << indice; las que sobran empiezan en el limite derecho).
+Con cuatro numeros mas (tx ty tz giro_y) el tramo sale colocado en el marco del curso (transforma; conv_union.py los
+saca de los descriptores del ejecutable para los tramos que siguen a una bifurcacion)."""
 import os, struct, sys
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

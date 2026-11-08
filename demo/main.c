@@ -35,11 +35,17 @@ static const uint32_t FMT[3] = { PVR_TXRFMT_ARGB1555, PVR_TXRFMT_RGB565, PVR_TXR
 static const int LISTA[3] = { PVR_LIST_OP_POLY, PVR_LIST_PT_POLY, PVR_LIST_TR_POLY };
 static pvr_poly_hdr_t cab_col[2][3];                            /* sin textura: [niebla][lista] */
 
-static int lee_modelo(modelo_t *m, const char *nombre)
+/* Huecos fijos de RAM para las etapas (la de salida y luego la siguiente, nunca a la vez) y para la union: se reservan
+   al arrancar y no se liberan, para que la RAM no se trocee entre carreras (los coches del menu se cargan y liberan en
+   medio) y siempre quepa una etapa entera (curso_huecos) */
+static uint8_t *hueco_etapa, *hueco_union;
+static uint32_t cap_etapa, cap_union;
+/* lee un modelo en buf (cap bytes) o, con buf NULL, en memoria nueva */
+static int lee_modelo_en(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t cap)
 {
-    uint32_t sz, h[10], i; uint8_t *b = gd_carga(nombre, &sz), *p;
+    uint32_t sz, h[10], i; uint8_t *b = buf ? (gd_carga_en(nombre, buf, cap, &sz) ? NULL : buf) : gd_carga(nombre, &sz), *p;
     if (!b) return -1;
-    if (memcmp(b, "ORD5", 4) && memcmp(b, "ORD6", 4)) { free(b); return -2; }   /* ORD6: con texturas VQ */
+    if (memcmp(b, "ORD5", 4) && memcmp(b, "ORD6", 4)) { if (!buf) free(b); return -2; }   /* ORD6: con texturas VQ */
     memcpy(h, b + 4, sizeof h);
     m->nmallas = h[0]; m->nvert = h[1]; m->nruta = h[2]; m->paso_ruta = h[3]; m->ntex = h[4];
     for (i = 0; i < 5; i++) m->inicio[i] = h[5 + i];
@@ -51,6 +57,7 @@ static int lee_modelo(modelo_t *m, const char *nombre)
     m->blob = b + ((p - b + 31) & ~31); m->datos = b;
     return 0;
 }
+static int lee_modelo(modelo_t *m, const char *nombre) { return lee_modelo_en(m, nombre, NULL, 0); }
 
 /* texturas a la memoria de video y cabeceras; el blob de texeles ya no hace falta en la RAM tras esto.
    Formato de la textura (tools/modelo.py): bits 0-7 el de 16 bits, bit 8 VQ, bits 16-23 entradas del libro - 1. Una
@@ -93,7 +100,8 @@ static void libera_modelo(modelo_t *m)
 {
     uint32_t i;
     for (i = 0; i < m->ntex; i++) if (m->tv && m->tv[i]) pvr_mem_free(m->tv[i]);
-    free(m->tv); free(m->cabs[0]); free(m->cabs[1]); free(m->datos);
+    free(m->tv); free(m->cabs[0]); free(m->cabs[1]);
+    if (m->datos != hueco_etapa && m->datos != hueco_union) free(m->datos);
     memset(m, 0, sizeof *m);
 }
 
@@ -101,7 +109,7 @@ static void libera_modelo(modelo_t *m)
 static void compacta_modelo(modelo_t *m)
 {
     uint8_t *d;
-    if (!m->datos || !m->blob) return;
+    if (!m->datos || !m->blob || m->datos == hueco_etapa || m->datos == hueco_union) return;
     d = realloc(m->datos, m->blob - m->datos);
     if (!d) return;
     if (d != m->datos) {                                          /* se ha movido: los punteros, al bloque nuevo */
@@ -117,18 +125,18 @@ static void compacta_modelo(modelo_t *m)
    las texturas las sube luego el bucle (sube_modelo: la memoria de video y las Store Queues son del hilo principal).
    Las lecturas de este hilo son de primer plano para gd.c: el lector de la musica espera mientras tanto y la musica
    sigue del anillo (~21 s). Una carga a la vez; estado 0 libre, 1 leyendo, 2 leido (r: resultado de lee_modelo). */
-typedef struct { modelo_t *m; const char *nombre; volatile int estado; int r; uint64_t t0; float s; } carga_t;
+typedef struct { modelo_t *m; const char *nombre; uint8_t *buf; uint32_t cap; volatile int estado; int r; uint64_t t0; } carga_t;
 static carga_t carga;
 static void *carga_hilo(void *p)
 {
     carga_t *c = p;
-    c->r = lee_modelo(c->m, c->nombre);
+    c->r = lee_modelo_en(c->m, c->nombre, c->buf, c->cap);
     c->estado = 2;
     return NULL;
 }
-static void carga_pide(modelo_t *m, const char *nombre)
+static void carga_pide(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t cap)
 {
-    carga.m = m; carga.nombre = nombre; carga.r = 0; carga.estado = 1; carga.t0 = timer_ms_gettime64();
+    carga.m = m; carga.nombre = nombre; carga.buf = buf; carga.cap = cap; carga.r = 0; carga.estado = 1; carga.t0 = timer_ms_gettime64();
     if (!thd_create(1, carga_hilo, &carga)) carga_hilo(&carga);   /* sin hilo: aqui mismo */
 }
 static void carga_espera(void) { while (carga.estado == 1) thd_sleep(5); }
@@ -1106,6 +1114,9 @@ static void coche_paso(coche_t *c, float giro, float gas, float freno, float dt)
 }
 
 /* piloto automatico: sigue el centro de la calzada y frena antes de las curvas cerradas */
+#ifdef PRUEBA_RAMA
+static int piloto_rama(float s);
+#endif
 static void piloto(const coche_t *c, float *giro, float *gas, float *freno)
 {
     float p[3], th, th2, iz, de, kap = 0, xc, ad, need, g, vt; int k;
@@ -1121,6 +1132,9 @@ static void piloto(const coche_t *c, float *giro, float *gas, float *freno)
         int k, i, mejor = 0; float dmej = -1;
         for (k = 0; k < NCARRIL; k++) {
             float d = 300.0f, xk = carril_x(c->s + 30.0f, k);
+#ifdef PRUEBA_RAMA
+            if (piloto_rama(c->s) && (k < NCARRIL / 2) == PRUEBA_RAMA) continue;   /* prueba: hacia esa rama */
+#endif
             for (i = 0; i < NTRAF; i++)
                 if (traf[i].c.s > c->s - 3.0f && fabsf(traf[i].c.x - xk) < 2.2f) d = fminf(d, traf[i].c.s - c->s);
             d -= fabsf(xk - c->x) * 0.8f;
@@ -1368,7 +1382,18 @@ static void curso_error(const char *s) { dbglog(DBG_ERROR, "CURSO: %s\n", s); vi
 static void sube_etapa(modelo_t *m)
 {
     if (sube_modelo(m)) curso_error("Sin memoria de video para la etapa");
-    compacta_modelo(m);
+}
+/* reserva los huecos de RAM de las etapas y de la union (el tamano del mayor fichero de cada uno, en el GD) */
+static int curso_huecos(void)
+{
+    uint32_t lba, t, i;
+    for (i = 0; i < 3; i++) {
+        const char *n = i ? RAMA_FICH[i - 1] : "SEG00.DAT";
+        if (!gd_busca(n, &lba, &t) && (t + 2047) / 2048 * 2048 > cap_etapa) cap_etapa = (t + 2047) / 2048 * 2048;
+    }
+    if (!gd_busca("BKI.DAT", &lba, &t)) cap_union = (t + 2047) / 2048 * 2048;
+    hueco_etapa = memalign(32, cap_etapa); hueco_union = cap_union ? memalign(32, cap_union) : NULL;
+    return !hueco_etapa || (cap_union && !hueco_union);
 }
 /* al empezar una carrera: la etapa de salida (leida otra vez si ya se habia liberado) y nada mas */
 static void curso_reinicia(void)
@@ -1379,7 +1404,7 @@ static void curso_reinicia(void)
         int r;
         libera_modelo(&etapa);
         musica_pausa_lectura(1);                                /* el GD para la etapa (la musica tira del anillo) */
-        r = lee_modelo(&etapa, "SEG00.DAT");
+        r = lee_modelo_en(&etapa, "SEG00.DAT", hueco_etapa, cap_etapa);
         musica_pausa_lectura(0);
         if (r) curso_error("No se pudo leer SEG00.DAT");
         sube_etapa(&etapa);
@@ -1406,7 +1431,7 @@ static int curso_paso(void)
             sube_etapa(m);
             if ((int)(i_union = ruta_anade(m)) < 0) curso_error("Sin memoria para la ruta");
             j_union = ruta_salto; s_union = i_union * PASO;
-            carga_pide(&uni_der, "BKD.DAT");
+            carga_pide(&uni_der, "BKD.DAT", NULL, 0);
         } else if (m == &uni_der) {
             uint32_t k = j_union;                              /* la separacion: donde los centros se apartan */
             while (k + 1 < uni.nruta && k + 1 < uni_der.nruta && dist_centro(&uni, k, uni_der.ruta + uni_der.paso_ruta * k) < RAMA_SEPARA) k++;
@@ -1423,7 +1448,7 @@ static int curso_paso(void)
                    (double)t_carga_ult, (double)yo.s, u, l, (unsigned)(pvr_mem_available() >> 10));
         }
     }
-    if (!uni.datos && carga.estado == 0 && yo.s > longitud - UNION_ANTES) carga_pide(&uni, "BKI.DAT");
+    if (!etapa_n && s_union < 0 && !uni.datos && carga.estado == 0 && yo.s > longitud - UNION_ANTES) carga_pide(&uni, "BKI.DAT", hueco_union, cap_union);
     if (s_union >= 0 && !cur_en_union && yo.s >= s_union) { cur_en_union = 1; ev |= CUR_UNION; }
     if (s_decide >= 0 && cur_rama < 0 && yo.s >= s_decide) {   /* la rama: el centro mas cercano al coche */
         uint32_t k = j_union + (uint32_t)((yo.s - s_union) / PASO);
@@ -1443,19 +1468,20 @@ static int curso_paso(void)
         libera_modelo(&etapa); cielo = &uni;
         ram_kb(&u, &l); dbglog(DBG_INFO, "CURSO: etapa de salida liberada (s %.0f), RAM libre %uK, VRAM libre %uK\n", (double)yo.s, l, (unsigned)(pvr_mem_available() >> 10));
     }
-    if (cur_rama >= 0 && !etapa.datos && !sig.datos && carga.estado == 0) carga_pide(&sig, RAMA_FICH[cur_rama]);
+    if (cur_rama >= 0 && !etapa.datos && !sig.datos && carga.estado == 0) carga_pide(&sig, RAMA_FICH[cur_rama], hueco_etapa, cap_etapa);
     if (s_sig >= 0 && !etapa_n && yo.s >= s_sig) { etapa_n = 1; cielo = &sig; ev |= CUR_SIGUIENTE; }
     if (etapa_n && uni.datos && yo.s > s_sig + UNION_LIBERA) libera_modelo(&uni);
     return ev;
 }
 #ifdef PRUEBA_RAMA
+static int piloto_rama(float s) { return cur_rama < 0 && s_decide >= 0 && s > s_decide - 400.0f; }
 /* prueba: salida en s mas alla del final de la etapa de salida (dentro de la union o de la etapa siguiente): se leen
    ya la union y la etapa de la rama PRUEBA_RAMA (0 izquierda, 1 derecha) */
 static void curso_prueba_rama(float s)
 {
     const modelo_t *r = PRUEBA_RAMA ? &uni_der : &uni; const float *p;
     if (s < longitud) return;
-    yo.s = 0; carga_pide(&uni, "BKI.DAT"); carga_espera(); curso_paso();
+    yo.s = 0; carga_pide(&uni, "BKI.DAT", hueco_union, cap_union); carga_espera(); curso_paso();
     carga_espera(); curso_paso();
     yo.s = s_decide; p = r->ruta + r->paso_ruta * (j_union + (uint32_t)((s_decide - s_union) / PASO));
     yo.pos[0] = p[0]; yo.pos[2] = p[2]; curso_paso();
@@ -1673,7 +1699,7 @@ int main(int argc, char **argv)
     elige_video();
     vid_set_mode(modo_video, PM_RGB565);
     aviso("OutRun 2006 C2C - demo Dreamcast. Cargando la etapa...");
-    if ((r = lee_modelo(&etapa, "SEG00.DAT"))) {
+    if ((r = curso_huecos() ? -9 : lee_modelo_en(&etapa, "SEG00.DAT", hueco_etapa, cap_etapa))) {
         sprintf(s1, "No se pudieron leer los datos (%d)", r); aviso(s1); for (;;) thd_sleep(1000);
     }
     coches_m = coches_lee();                                    /* fichas con coche; se empieza por el Testarossa */
@@ -1698,7 +1724,7 @@ int main(int argc, char **argv)
     if ((r = coche_carga(ficha_ini))) {
         vid_set_mode(modo_video, PM_RGB565); sprintf(s1, "No se pudo cargar el coche (%d)", r); aviso(s1); for (;;) thd_sleep(1000);
     }
-    compacta_modelo(&etapa); cielo = &etapa;                    /* sus texeles ya estan en la VRAM */
+    cielo = &etapa;
     {   /* minimo que se guarda para lo que no es la etapa: el coche y tres coches de trafico (el primer cuadro de carrera
            no tiene medida del anterior) */
         uint32_t ct = 0, c;
@@ -1774,6 +1800,9 @@ int main(int argc, char **argv)
                 coche_carga(menu_coche())) coche_malo = menu_coche();                              /* (sin reintentos) */
 #ifdef PRUEBA_JUGADOR
             rm = MENU_CARRERA;                                  /* prueba: directo a la carrera con el mando */
+#endif
+#ifdef PRUEBA_AUTO
+            rm = MENU_DEMO;                                     /* prueba: directo a la carrera con el piloto */
 #endif
             if (rm != MENU_SIGUE) {
                 auto_ = rm == MENU_DEMO;

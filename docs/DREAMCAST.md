@@ -45,9 +45,21 @@ ORD6): libro de hasta 256 entradas de 4 texeles de 16 bits (2 KB) + 1 byte por b
 | COCHE00-14.DAT (texturas de cada uno) | | 86-151 KB |
 | TRAF0-8.DAT (suma) | 573 KB | 140 KB |
 
-Error RMS medio 4,4-4,8 (maximo 9). VRAM libre medida (Flycast, `DIAG_VTX`): en carrera 961 KB con SEG00 y 809 KB
-tras la bifurcacion (antes ~290 KB, con buferes mas pequenos); en los menus la cache de pantallas (`comun/menu.c`)
-ocupa lo que haya libre y echa las pantallas viejas.
+Error RMS medio 4,4-4,8 (maximo 9). VRAM libre medida (Flycast, `DIAG_VTX`, con el coche de 17 texturas): en
+carrera 845 KB con SEG00 y la union (BKI.DAT, 118 KB de texturas) ya subida, 1347 KB al liberar SEG00 y 697-715 KB
+con la union y la etapa siguiente (SEG03 644 KB, SEG05 626 KB); en los menus la cache de pantallas
+(`comun/menu.c`) ocupa lo que haya libre y echa las pantallas viejas.
+
+### RAM y cargas durante la carrera
+
+La etapa de salida, la union y la etapa siguiente se leen mientras se conduce (`curso_paso` en `demo/main.c`): un
+hilo lee el fichero del GD y el bucle sube las texturas al terminar. Nunca hay mas de dos a la vez: etapa + union
+hasta UNION_LIBERA (300 m) dentro de la union, y union + etapa siguiente despues. Las etapas van siempre en el mismo
+hueco fijo de RAM (el tamano del mayor fichero, 5,3 MB) y la union en otro (1,2 MB), reservados al arrancar: entre
+carreras se cargan y liberan coches y, sin huecos fijos, la RAM se trocea y la etapa de salida dejaba de caber a la
+segunda carrera. Medido en Flycast: RAM libre en carrera ~3,9 MB en el peor momento; lectura de BKI.DAT 0,6-0,8 s,
+SEG03/SEG05 2,0-3,0 s (en un GD real, mas: hay ~20 s de margen a 300 km/h). Si la carretera se acaba antes de que
+llegue la lectura, el bucle espera (`carga_espera`).
 
 ## 2. Presupuesto del TA
 
@@ -116,7 +128,7 @@ vertices, el registro de errores y el uso de VB y OPB) se queda: es lo que permi
 
 | Riesgo | Estado |
 |---|---|
-| Lecturas del GD de la musica mezcladas con las cargas | KallistiOS las serializa, pero en un GD real la cabeza saltaria entre ficheros en cada trozo (~100-200 ms por salto). `gd.c` marca las lecturas que no son del hilo de la musica (`gd_hilo_fondo`, `gd_ocupado`) y el lector espera 300 ms tras cada una (salvo con el anillo casi vacio). Las cargas de etapa (bifurcacion, vuelta a SEG00) van entre `musica_pausa_lectura(1/0)`; mientras tanto el lector alimenta el AICA (`snd_stream_poll` con un mutex), porque el bucle no llama a `musica_poll`. El anillo de 1 MB son ~21 s de ADPCM a 48 kHz. `musica_pon` ya no espera sin fin el colchon (3 s como mucho). |
+| Lecturas del GD de la musica mezcladas con las cargas | KallistiOS las serializa, pero en un GD real la cabeza saltaria entre ficheros en cada trozo (~100-200 ms por salto). `gd.c` marca las lecturas que no son del hilo de la musica (`gd_hilo_fondo`, `gd_ocupado`) y el lector espera 300 ms tras cada una (salvo con el anillo casi vacio). Con la carga de etapas en segundo plano leen dos hilos: cada lectura de `gd.c` va entera bajo un mutex propio y se repite si falla (con ordenes solapadas KallistiOS devolvia ERR_SYS en Flycast). Las cargas de etapa (bifurcacion, vuelta a SEG00) van entre `musica_pausa_lectura(1/0)`; mientras tanto el lector alimenta el AICA (`snd_stream_poll` con un mutex), porque el bucle no llama a `musica_poll`. El anillo de 1 MB son ~21 s de ADPCM a 48 kHz. `musica_pon` ya no espera sin fin el colchon (3 s como mucho). |
 | Store Queues (`pvr_dr`) y otros hilos | `pvr_list_begin` toma el mutex de las SQ (`sq_lock`) hasta `pvr_list_finish`; `snd_stream` y `pvr_txr_load` tambien lo toman. El hilo de la musica solo usa SQ (via `snd_stream_poll`) durante las cargas, fuera de las listas. Correcto. |
 | Tiras sin fin (EOL) | los efectos saltaban vertices sueltos detras del plano cercano y la tira se quedaba abierta antes de la siguiente cabecera (parametro ilegal para el TA real). Ahora cada cuadrilatero va entero o no va (`pt_cuad`). |
 | Cache y DMA del GD | `cdrom_read_sectors_ex` invalida la cache sobre el destino; todos los destinos van alineados a 32 y en multiplos de 2048 (`gd_carga`, `hud.c`, el lector de musica). Sin DMA hacia memoria que la CPU toque a la vez. |
