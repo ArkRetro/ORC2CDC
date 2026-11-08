@@ -40,13 +40,13 @@ Estado: OK (conectado y verificado al nivel indicado), PARCIAL, PROVISIONAL (apr
 | Camara de carrera | evento CAMERA 385: 4858D0, 484810, 483110, 4A1680 SetCarCamera, 485590/483CE0/4834A0/483600, 4832F0/484A40, 483C10/484BD0 (PS2 0x178500..0x17b540, 0x1817c0) | PARCIAL | demo/camara.c con las tablas CAM1 de PARAM.DAT (vistas 0x2ccd88, por vista y modelo 0x2cd3d8, por modelo 0x2d2838 del fichero SLES) | vista 1 sin interior (no se dibuja el coche); camara de salida en los 60 primeros cuadros de la cuenta (SUPUESTO); sin vista 0x1D (780258 = 0) ni camaras de meta/fin | ver seccion Camara de carrera | E |
 | Trafico (clases, IA, reaccion) | 472090, 472450, 472A50, 47DC10, 4736D0, hit_476040; aparicion 479080 (PS2 0x1dcdd0): 478B90 (0x1dbba0), 4787E0 (0x1db6d0), 4EFB90 (0x1f3818), 4F0030 (0x1f1a88), 46CE30, 478430, 46CC10; cierre 477F60 | PARCIAL | TRAFC.DAT (TRC1, ACL1 y TAP1: tablas de aparicion, velocidad y puntos fijos por etapa); colores (tabla 0x36bc18, modelos 30..43) y materiales en TRAFn.DAT (TCX1) | camino "Lead" de 472450 (velocidad segun el jugador) sin portar: todos a la velocidad del registro; 478640/46CDA0 en la union simplificados; puntos fijos de coches de carreras y de los modelos 39..43 sin coche | ver Trafico: densidad del original | E |
 | Rivales | — | FALTA | — | no hay rivales | — | — |
-| Carretera, pendientes, bifurcacion | STAGE.PS2, BK.PS2 cs_BK_PALM, COMMON obj_course_obj_bk_palm + obj_OBJ_<ZONA>_BUNKI_TX, descriptores 0xb0, csc_data_2 | OK | conv_tramo/conv_union, CURSO.DAT | arbol entero (15 etapas, 10 bifurcaciones con sus carteles, 5 metas); cielo de la union = el de la etapa que se deja, cambia al llegar a la siguiente (sin mezcla); bifurcaciones = las de PALM (las demas no estan en el disco) | objetos animados de BK (ANIMS), sol | E |
+| Carretera, pendientes, bifurcacion | STAGE.PS2, BK.PS2 cs_BK_PALM, COMMON obj_course_obj_bk_palm + obj_OBJ_<ZONA>_BUNKI_TX, descriptores 0xb0, csc_data_2 | OK | conv_tramo/conv_union, CURSO.DAT | arbol entero (15 etapas, 10 bifurcaciones con sus carteles, 5 metas); cielo, niebla, luz y sol de la union como el original (ver Entorno); bifurcaciones = las de PALM (las demas no estan en el disco) | objetos animados de BK (ANIMS) | E |
 | Temporizador (inicial y ampliacion) | 44DC70 = PS2 0x176730, 450CC0 = PS2 0x1cee40, 450AC0; tabla 7D2E98 = PS2 0x3cb708 copiada por 0x176040; k636904 = PS2 0x35a938 | OK | TIM1 y KTE1 de PARAM.DAT | formula y tablas CONFIRMADAS en el ELF; variante 1 (fila 0), preset 0 y dificultad 0 PROBABLES (frontal del PC) | trazar el frontal de PS2 | E |
 | Checkpoints, meta, resultados | 44FF20 / 4515B0 (branch_state 7D38E8) con las banderas +0x3C de COLI0200; 4513C0 meta | OK | ampliacion al pasar la pancarta CHECK POINT del principio de la etapa siguiente (ver Checkpoint); meta del original en las 5 etapas finales (z = 0 de la union); voz y efecto de EXTEND TIME, GOAL y TIME OVER (voces.c) | sin pantalla de resultados ni final del original; sin la voz de GAME OVER (0x154: no hay pantalla de GAME OVER) | — | E |
 | Puntuacion modo OutRun | 4F2DF0, 4F2660, 4F2B20, 4B9770 | PARCIAL | main.c pt_* | posicion de carretera = m_pos de CURSO.DAT (CONFIRMADO; antes 2,5 m supuestos, 3,2 veces los puntos por avance); bonus de etapa en el checkpoint | el salto de +64 al cambiar de curso (PENDIENTE) | E |
 | Eventos, scripts, progresion, misiones | SCRIPTS.PS2 (Races, RaceAttack, OutrunMiles, Req_*) | FALTA | — | — | — | — |
 | Coches del jugador | CARS.PS2 1-32 / 33-63, disposicion 0x3d3ff0; materiales tabla 4/5 del bloque; colores 0x35ad48 (PC 64D120/408C80); mapa de entorno del bloque | PARCIAL | 15 coches montados como 46A560 (port comprobado), con interior, 9320-11195 vertices dibujados; pintura, 8 colores (Y en la seleccion), reflejo y luces (+7C/+80/+84/+60, CEX2) del original; piezas animadas (ruedas, volante, aleron, faros, disco caliente, car+F0 y el cuerpo de la fisica; ANI1) | UV de entorno con la formula esferica clasica (la del microcodigo VU1 sin leer); sin bits de noche/tunel | ver secciones Coches | E |
-| Escenarios, texturas, materiales | STAGE.PS2, VQ, scn_env_fog_<zona> | PARCIAL | 15 tramos + 15 uniones; mallas sin textura con su material (tabla 5); niebla del original; tiras (ADC), nodos, LOD y planos del original | sin objetos de tramo (obj_course_obj_cs_*), sol (cs_ENV_* no es de la escena: es del reflejo del coche); niebla mezclada por distancia en la union (el original por tiempo) | — | E |
+| Escenarios, texturas, materiales | STAGE.PS2, VQ, scn_env_fog_<zona> | PARCIAL | 15 tramos + 15 uniones; mallas con su material (tabla 5) y la luz del entorno 1 de la zona; niebla, cielo y sol del original (ver Entorno); tiras (ADC), nodos, LOD y planos del original | sin objetos de tramo (obj_course_obj_cs_*); cs_ENV_* no es de la escena (es del reflejo del coche); destello sin consulta de oclusion; luces locales (maya_spl) sin portar | — | E |
 | HUD, menus, transiciones | SPRANI/XST, TEXT.PS2 (espanol: SPANISH.bin y XST _sxst) | PARCIAL | HUD.DAT, MENU.DAT; todas las pantallas del menu principal y de un jugador, licencia con VMU, seleccion de coche del original, menu de pausa con AUDIO (ver Menus y Pausa y mezcla) | titulo es un cuadro del video (la pelicula de titulo en bucle detras del rotulo, sin hacer); textos bfont antiguos en la demo automatica y el aviso de rama; rotulos de las filas de opciones (sprites sin localizar) | quitar textos bfont | E |
 | Musica y efectos | MUSIC.PS2, SOUND.PS2 ICS/MENU/FE; volumenes 0x11ae38 / 0x100210 / 0x11b600, SOUNDCD.IRX 0x2118 | PARCIAL | musica.c, sfx.c; mezcla del original (ver Pausa y mezcla) | 48 kHz supuesto; sin sonido por superficie ni del choque fuerte | — | E |
 | Voces (acompanante y locutor) | SOUND.PS2 `\SPANISH\ORC.PAK`, `PERO.pak`; race_robots 489A90/488D80 = PS2 0x202e60..0x205cac; 4B93E0, 4B9CD0, 49C9C0, 499020, GAME 0x1b83e8 | OK | VOCES.DAT (conv_sonido.py), voces.c; verificado en Flycast (ver Voces y video) | una voz nueva corta la anterior (SUPUESTO); "choque con otro coche" = +4 0x4000000 del jugador (4F7BF0 le ha cambiado la velocidad) en un choque; sin voces de asustada/trompo (solo Coast 2 Coast) | — | E |
@@ -694,8 +694,7 @@ inventada. Causas y arreglo:
   los dos destinos en sus 4 texturas hueco de 8x8 (asignacion por la posicion de cada malla: PROBABLE); meta =
   cs_BK_<zona>. Los cs_BK_/cs_ENVBK_/obj_course_obj_bk_<zona> de las demas zonas que nombra el ejecutable no estan en
   el disco: se usan los de PALM (SUPUESTO: que el original haga lo mismo).
-- Niebla: lista 1 de scn_env_fog_<zona> (exp/exp2, densidad y color por posicion de carretera, ~7,9 m cada una), en
-  la tabla de niebla de la PowerVR (el fundido de la distancia de dibujo solo si esta se acorta por seguridad).
+- Niebla, cielo, luz y sol: ver la seccion Entorno.
 - Fallo de la union (coche hundido y planos grises inclinados al entrar en ella), causa y arreglo: (1) la ruta de cada
   etapa acababa hasta 20 m antes del principio de la union (la de LAKE, 19,7 m) y la de la carrera daba ese salto en
   un paso de 4 m; ahora conv_tramo alarga la ruta en recto hasta el extremo de la calzada de su colision (quedan
@@ -714,7 +713,53 @@ inventada. Causas y arreglo:
   -> CAST (dos uniones, recorte de la ruta y recentrado) sin perder RAM. No probados en E: FORE, INDU, SNOW, METR,
   RUIN (convertidos y con la misma mecanica). Cifras de RAM, VRAM y cargas en DREAMCAST.md. Texturas de los 14
   tramos nuevos revisadas en hoja (sin desordenar).
-- PENDIENTE: mezcla de cielo en la union, sol, entorno lejano, objetos animados de BK; probar en R.
+- PENDIENTE: objetos animados de BK; probar en R.
+
+## Entorno: cielo, niebla, luz, sol y clima
+
+Del original (decompilacion del PC: pc_environment_blend.cpp, pc_scene_environment.cpp, pc_frame_render.cpp, race_sky.cpp,
+race_course_passes.cpp 40CBC0, race_scene_effects.cpp, pc_render_flush.cpp 40D840 / 410810, vs_15 de
+pc_shader_programs_generated.cpp; datos de SLES-53998: descriptores de tramo, scn_env_fog/sun, banco 0x57). Hecho el
+2026-11-08 (conv_tramo.py pon_cielo, conv_union.py soles / cielo_de / transicion / sol_dat, modelo.py luz_vertices,
+main.c "entorno del original", cielo_dibuja, sol_dibuja, coche_luz).
+
+- Tres entornos a la vez (CONFIRMADO): 40D840(e) carga la niebla 7D3A10 + e 0x1C y las luces 899B98 + e 0xA0; lo elige
+  cada capa del dibujo (449050, tabla 5A27B4 = {1,1,-1,0,1,1,2,2,2}): e 0 = capa 3 (el cielo), e 1 = la escena (y el
+  cubo del reflejo), e 2 = los coches (46C140 / 46BD30 llaman 40D840(2)). Las listas 0, 1 y 2 de scn_env_fog_<zona> y
+  scn_env_sun_<zona> son esos tres entornos, no dia/tarde ni tramos. Registros de 0xB0: posicion inicial y final de
+  carretera; la niebla cambia por tramos dentro de la etapa (CLOU: 6 tramos de 0,0006 a 0,005, niebla espesa;
+  INDU, IMPE, CAPE: 2), la luz no (un registro fijo por lista en las 15 etapas).
+- Luz (CONFIRMADO el modelo; PROBABLE que la PS2 lo calcule igual): vs_15 del PC: color = difuso del material x difuso
+  de la luz x max(n.l, 0) + ambiente del material x (+78 + (+6C - +78) (1 + n.l) / 2) + emision (c1A / c1B de
+  410810). Las normales de PS2 apuntan hacia dentro (la calzada de PALM: n.y = -1; vs_15 las niega). Etapas y uniones:
+  en los colores de los vertices sin color propio (antes una luz inventada 0,7 + 0,3 |n.L|), con el material de la
+  tabla 5 (tambien las texturadas). Cielo: la luz del entorno 0 (CAST, INDU, IMPE: atardecer naranja). Coche del
+  jugador: la del entorno 2 en la pintura (CEX2), por cuadro con su orientacion (coche_luz; difuso y ambiente del
+  material 1: los de la pintura son 1 y 1,09-1,1, sin el brillo car+58). Valor >1 se satura (el GS llega a 2).
+- Cielo (CONFIRMADO): descriptor +0x44 banco obj_course_obj_sky_<zona>; 4521C0 dibuja +0x4C/+0x50 (grupo 0, el que se
+  ve siempre) y +0x54 (grupo 1, solo en el cambio); +0x48 es el del reflejo (451C20). Antes se dibujaban todos los
+  registros del bloque (y en SNOW ninguno: no se reconocia). El original lo dibuja sin z; aqui va sin escribir z.
+- Union (CONFIRMADO): descriptor +0x58 = {u16 100, s8 2} en las 15: al pasar la posicion 100 de la union (807 m, con la
+  etapa siguiente elegida y leida) la niebla y las luces se mezclan en 120 cuadros (44A000 / 44AB10) del valor guardado
+  al del principio de la etapa nueva, y el cielo cambia en tres tercios de 40 cuadros (451E90): viejo +0x4C -> viejo
+  +0x54 -> nuevo +0x54 -> nuevo +0x4C. Antes: niebla por distancia en toda la union y cielo de golpe.
+- Sol y destello (CONFIRMADO salvo lo dicho): bandera 2 de +0x3C (todas menos CLOU, GHOS y METR); intensidad que sube o
+  baja en 120 cuadros en la union (4AFCC0); direccion -luz 1 con la inclinacion x cam+358; objetos 2, 3..0x10 del banco
+  0x57 (SOL.DAT) en el espacio de la camara como 40CBC0 (disco, lejanos, brillo, 11 destellos y brillo de cara al
+  sol), tenidos con el ambiente del entorno 0. DIFERENCIAS: sin consulta de oclusion (la PowerVR no la tiene): la parte
+  visible va fija en 0,22 (el tope del original), asi que el destello no se apaga detras de lo que tapa el sol; los
+  lejanos a 1000 m en vez de 2500 (el cielo esta en la escena); mezcla aditiva (PROBABLE: texturas de fondo negro).
+- Niebla en la PowerVR: una tabla para todo: la de la escena (lista 1); los coches no llevan la suya (lista 2: casi igual
+  salvo ALPI, 0,0003 frente a 0,0009, y CAPE/RUIN; DIFERENCIA); el cielo lleva la tabla solo si su lista 0 tiene
+  niebla (CLOU).
+- Clima (CONFIRMADO): bandera 1 (lluvia de SCN_EFC, la unica del original) en ninguna de las 15 etapas; no hay nieve ni
+  hojas como particulas (SNOW: bandera 6 como PALM). 8 / 0x10 (faros y luces del coche: noche) en GHOS y METR (no
+  portado aqui: coche_luces). Tuneles: nada del entorno los oscurece (la luz es fija en la etapa; solo la niebla cambia por posicion); las luces
+  locales de maya_spl_<zona> (44A1D0, puntos a menos de 500 m de la camara) no se portan (PENDIENTE).
+- cs_ENV_<zona> / cs_ENVBK: solo en el cubo del reflejo (414340 -> 44CD30); la demo usa el mapa esferico fijo del coche:
+  no se dibujan (cubo por cuadro: TA y VRAM que no hay).
+- Verificado (E, Flycast, PRUEBA_AUTO): PALM, LAKE, ALPI, SNOW, DESE, METR y la union PALM -> LAKE con la mezcla a medias
+  (hoja en el scratchpad: cielo/hoja.png); sol con PRUEBA_SOL (sol delante, solo prueba).
 
 ## Ultimo cambio verificado
 

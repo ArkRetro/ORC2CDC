@@ -2988,11 +2988,17 @@ static void sol_dibuja(void)
     if (cam_ok) p0 *= cam.f358;
     d[0] = -cosf(p0) * sinf(y0); d[1] = sinf(p0); d[2] = -cosf(p0) * cosf(y0);
     for (k = 0; k < 3; k++) q[k] = -d[k];                       /* del ojo al sol */
+#ifdef PRUEBA_SOL
+    for (k = 0; k < 3; k++) q[k] = ade[k] + 0.5f * arr[k] + 0.3f * der[k];   /* prueba: el sol delante */
+#endif
     P[0] = q[0] * der[0] + q[1] * der[1] + q[2] * der[2];        /* en la camara del original */
     P[1] = q[0] * arr[0] + q[1] * arr[1] + q[2] * arr[2];
     P[2] = -(q[0] * ade[0] + q[1] * ade[1] + q[2] * ade[2]);
     if (P[2] >= 0) return;
     sx = fx * P[0] / -P[2]; sy = fx * P[1] / -P[2];              /* 449940: en la pantalla de 640 x 480 */
+#ifdef DIAG_VTX
+    {   static int c; if (++c % 60 == 0) dbglog(DBG_INFO, "DIAG sol %.0f %.0f int %.2f\n", (double)sx, (double)sy, (double)sol_int); }
+#endif
     if (!(sx > -470 && sx < 470 && sy > -440 && sy < 440)) return;
     fov = 2 * atanf(240.0f / fx) * 57.29578f * 0.01f;           /* cam+A0 en grados / 100 */
     size = fov; spread = fov * 0.13f;

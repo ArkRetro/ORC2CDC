@@ -92,6 +92,18 @@ Medido el 2026-11-08 con el trafico con sus 5 LOD (328 KB) y COCHE06 (Flycast, `
 -DPRUEBA_RAMA=0 -DPRUEBA_FIN=400`): BK09 + GHOS 220 KB libres, BK09 + IMPE (SEG16) **88 KB**, IMPE + su meta BK13
 **79 KB** (el peor). No hay sitio para agrandar el bufer de parametros (cada 64 KB mas son 128 KB).
 
+### Entorno (cielo, sol, luz; 2026-11-08)
+
+- VRAM: SOL.DAT (sol y destello, siempre subido) 11 KB (8 texturas VQ). El cielo ya solo lleva los objetos que dibuja
+  el original: las etapas y uniones bajan 3-20 KB de texturas (BK09 -3, SEG16 IMPE -10, BK13 -10); SNOW (SEG06) +66 y
+  BK08 +67 (antes no tenia cielo), lejos del peor caso. Neto en el peor caso: BK09 + IMPE -2 KB, IMPE + BK13 -9 KB.
+  Medido en Flycast (`DIAG_VTX`, COCHE06, `-DPRUEBA_NODO=9 -DPRUEBA_RAMA=0 -DPRUEBA_FIN=400` y `-DPRUEBA_NODO=13
+  -DPRUEBA_FIN=400`, con los datos de dcwork de ese momento): BK09 + IMPE 68 KB libres, IMPE + BK13 66 KB.
+- TA: el cielo dibuja menos mallas (antes todos los registros del bloque); el fundido de la union dibuja dos capas
+  (como mucho ~500 vertices de cielo, 2 s); el sol con destello ~120 vertices cuando se ve. Sin cambios en el reparto.
+- CPU: la luz de la pintura del coche (coche_luz) se rehace solo si la luz en el marco del coche cambia (como mucho cada
+  4 cuadros): 1700-5000 vertices; la luz de la escena va en los ficheros (0 en carrera).
+
 ## 2. Presupuesto del TA
 
 ### Lo que se midio en la consola

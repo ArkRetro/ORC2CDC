@@ -180,8 +180,8 @@ registros de 0x78 bytes: +0x04 clave, +0x1c descriptor de tramo, +0x20 de union,
 izquierdo / derecho (-1 en las metas); el +0x08 (nivel, que lee 44C940 para la tabla de tiempos) vale 0 en todos:
 la demo usa la profundidad en el arbol (0..4). `conv_union.py` los lee.
 
-**Niebla** (`scn_env_fog_<zona>_bin`, STAGE): tres desplazamientos `u32` (listas 0, 1 y 2: entornos del original;
-la 1 es la de la carretera) a registros de 0xb0 bytes terminados en 0xffff (0xfffe: hueco), como los lee
+**Niebla** (`scn_env_fog_<zona>_bin`, STAGE): tres desplazamientos `u32` (listas 0, 1 y 2: entornos 0 cielo, 1 escena, 2
+coches del original, 40D840; ver PARIDAD.md Entorno) a registros de 0xb0 bytes terminados en 0xffff (0xfffe: hueco), como los lee
 `course_environment_progress_44b020` del PC: +0x00 / +0x10 posicion de carretera inicial / final, +0x34 modo (1 exp,
 2 exp2, 3 lineal), +0x38 inicio, fin y densidad, +0x48 color RGB, +0x54 / +0x64 los mismos al final del tramo. La
 posicion de carretera es la seccion 5 de la colision: una cada ~7,9 m.

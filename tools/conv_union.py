@@ -23,7 +23,9 @@ Salida (formato ORD7 de modelo.py, cada fichero en su propio marco; la demo los 
            es del reflejo del coche; los porticos de COMMON obj_course_obj_bk_palm con los carteles obj_OBJ_<ZONA>_BUNKI_TX de sus dos destinos, el cielo de la
            etapa y la ruta de la rama izquierda) o meta (cs_BK_<zona> con su colision, el cielo de la etapa y su ruta)
  BKD.DAT   solo la ruta de la rama derecha de la bifurcacion (la misma en todas)
- CURSO.DAT el arbol: zona, SEGnn, nivel, hijos, colocaciones, metros por posicion de carretera, meta y niebla
+ CURSO.DAT el arbol: zona, SEGnn, nivel, hijos, colocaciones, metros por posicion de carretera, meta, niebla y entorno
+           (banderas de efectos, transicion de la union, las tres luces, niebla del cielo)
+ SOL.DAT   el sol y el destello (banco 0x57: sol_dat)
 Las rutas de la union salen de la colision: el poligono principal de cada seccion (8 m) da el centro y los bordes de
 la calzada; limites, franjas y alturas como en conv_tramo.py (superficies), con la colision de las dos ramas."""
 import os, struct, sys
