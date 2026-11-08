@@ -559,10 +559,33 @@ static float *param_dat;                                        /* se queda en m
    como en rumbo_adelante (16 posiciones ~ 40 m) se toman ~2,5 m por posicion */
 #define GRUA_AVANCE 25.0f
 static float grua_s, grua_x; static int grua_on;
+/* Tiempo de la carrera como el original (race_manager 7D394C): un contador de cuadros de la logica que baja 1 por
+   cuadro (450AC0) y se muestra como cuadros / 60,2 + 0,34. Inicial y ampliaciones con 44DC70: tabla de tiempos por
+   zona TIM1 de PARAM.DAT (la que 44C020 / SLES-53998 0x176040 copia a 7D2E98) indexada por
+   [preset][fila de variante][nivel de la etapa][dificultad].
+   CONFIRMADO: el nivel 0 vale 5999 cuadros en las 4 tablas, 3 filas y 5 dificultades (y csc_data_2 lleva +10 = 0,
+   asi que manda la tabla): el tiempo inicial no depende de lo que falta por averiguar.
+   PENDIENTE (supuestos, ver docs/PARIDAD.md): preset 0 (78024C), fila 2 (variante 0 = 0/7), dificultad 0 (licencia
+   +E0); sin el +60 de 44DC70 (selection != 1) ni el ajuste k636904 por etapa (dependen de 43F960 / 456D60). */
+#define TIM_PRESET 0
+#define TIM_FILA 2
+#define TIM_DIF 0
+#define TIM_HZ 60.2f
+static const int16_t *tim_tab;                                  /* 4 x 3 x 15 x 5 cuadros, NULL sin TIM1 */
+static int tim_cuadros;                                         /* 7D394C */
+static int tim_zona(int nivel)
+{
+    if (!tim_tab) return (int)((nivel ? 60.0f : 80.0f) * TIM_HZ);   /* PARAM.DAT antiguo: los valores de antes */
+    if (nivel < 0) nivel = 0;
+    if (nivel > 14) nivel = 14;
+    return tim_tab[((TIM_PRESET * 3 + TIM_FILA) * 15 + nivel) * 5 + TIM_DIF];
+}
 static int fisica_carga(void)
 {
     uint32_t sz; float *t = gd_carga("PARAM.DAT", &sz);
     if (!t || sz < (200 * 19 + 162 + 256) * 4) return -1;
+    if (sz >= 4 + 4 * 0x1c2 && !memcmp((const uint8_t *)t + sz - 4 - 4 * 0x1c2, "TIM1", 4))
+        tim_tab = (const int16_t *)(const void *)((const uint8_t *)t + sz - 4 * 0x1c2);
     or2_carga_choques(t, sz, &choq);
     param_dat = t;
     return fisica_modelo(modelo_jug);
@@ -1823,7 +1846,7 @@ int main(int argc, char **argv)
                 coche_paso(&yo, 0, 0, 0, 0); traf_inicia(SALIDA); efectos_borra();
                 if (fis_ok) { float p[3], th; ruta_en(yo.s, p, &th, NULL, NULL); or2_coloca(&fis, &fpar, th, 0); }
                 lejos = LEJOS_MIN; pvr_fog_table_linear(lejos * 0.55f, lejos);   /* empieza corta y luego crece */
-                tiempo = TIEMPO_ETAPA; estado = CUENTA; t_estado = 0; t_cuenta = 0; pausa = 0; crono = 0; vmax = 0; pt_inicia();
+                tim_cuadros = tim_zona(0); tiempo = tim_cuadros / TIM_HZ; estado = CUENTA; t_estado = 0; t_cuenta = 0; pausa = 0; crono = 0; vmax = 0; pt_inicia();
             }
         } else if (estado == CUENTA) {
             int n = 3 - (int)(t_estado / 60);
@@ -1854,7 +1877,7 @@ int main(int argc, char **argv)
                 coche_paso(&yo, giro, gas, freno, 1.0f / 60);
                 traf_paso(1.0f / 60);
                 efectos_paso(&yo, 1.0f / 60);
-                tiempo -= 1.0f / 60;
+                tim_cuadros--; tiempo = tim_cuadros / TIM_HZ;  /* 450AC0: un cuadro de logica */
                 crono++; if (fis_ok && fis.velocidad_hud > vmax) vmax = fis.velocidad_hud;
                 pt_paso(); pt_msg_paso();                       /* puntuacion del original */
                 {   /* el curso: union, bifurcacion y etapa siguiente sin parar (curso_paso) */
@@ -1862,12 +1885,12 @@ int main(int argc, char **argv)
                     if (cur_rama < 0 && s_decide >= 0 && yo.s >= s_decide - 450.0f && t_estado % 30 == 0) {
                         char b[40]; sprintf(b, "< %s  %s >", RAMA_NOMBRE[0], RAMA_NOMBRE[1]); texto_centro(b); aviso_rama = 1;
                     }
-                    if (ev & CUR_UNION) { pt_bonus_etapa(); tiempo += 60.0f; t_ext = 0; }   /* 4F2B20 al pasar la etapa */
+                    if (ev & CUR_UNION) { pt_bonus_etapa(); tim_cuadros += tim_zona(1); tiempo = tim_cuadros / TIM_HZ; t_ext = 0; }   /* 450CC0 */   /* 4F2B20 al pasar la etapa */
                     if (ev & CUR_RAMA) { texto_centro(RAMA_NOMBRE[cur_rama]); aviso_rama = 0; t_estado = 0; }
                     if (ev & CUR_SIGUIENTE) { texto_centro(RAMA_NOMBRE[cur_rama]); t_estado = 0; }
                 }
                 if (etapa_n && yo.s >= longitud - 40.0f) { estado = META; t_estado = 0; pt_bonus_etapa(); texto_centro("GOAL!"); resultados(1); }
-                else if (tiempo <= 0) { tiempo = 0; estado = AGOTADO; t_estado = 0; texto_centro("TIEMPO AGOTADO"); resultados(0); }
+                else if (tim_cuadros <= 0) { tiempo = 0; estado = AGOTADO; t_estado = 0; texto_centro("TIEMPO AGOTADO"); resultados(0); }
             }
         } else {                                                /* META o AGOTADO: el coche se para solo */
             coche_paso(&yo, 0, 0, 0.6f, 1.0f / 60);
@@ -1966,7 +1989,7 @@ int main(int argc, char **argv)
                 if (estado == TITULO) menu_dibuja();
                 if (hud_ok && estado != TITULO) {
                     hud_estado_t he;
-                    he.tiempo = (int)ceilf(tiempo); he.crono_ms = (int)(crono * 1000.0f / 60.0f); he.puntos = pt_visible(); he.puntos_estilo = pt_estilo;
+                    he.tiempo = (int)(tim_cuadros / TIM_HZ + 0.34f); he.crono_ms = (int)(crono * 1000.0f / TIM_HZ); he.puntos = pt_visible(); he.puntos_estilo = pt_estilo;
                     he.kmh = fis_ok ? (int)fis.velocidad_hud : (int)(yo.v * 3.6f); he.marcha = fis_ok ? fis.marcha : 1;
                     he.etapa = etapa_n; he.cuadro = cuadro; he.rpm = fis_ok ? (float)fis.rpm_suave : 0;
                     he.rebufo = fis_ok && fis.rebufo > 0.18f; he.derrape = yo.t_derrape != 0; he.manual = manual_ && !auto_; he.rev_on = he.manual && fis_ok && fis.rpm_i > 7900 && fis.marcha < fpar.marchas; he.seis = fis_ok && fpar.marchas >= 6;

@@ -12,6 +12,10 @@ con etiqueta para los choques y la eleccion de columna:
   'POS1' + u32 n y por estado de choque: f32 duracion, f32 recuperacion y 6 canales (u32 cuenta y cuenta x 4 f32:
          tiempo, valor, tangentes) de la animacion (desplazamiento x, y, z y giro x, y, z del cuerpo); tablas de
          4F6580 / 4F6590 del PC, localizadas por su firma.
+  'TIM1' + 4 x 3 x 15 x 5 i16: tablas de tiempo por zona (las que 44C020 del PC / 0x176040 de SLES-53998 copian a
+         7D2E98 segun el preset: indices 0, 1, 5 y 6 de la tabla base), en cuadros de 60,2 Hz:
+         [preset][fila de variante][nivel de etapa][dificultad]. Se localiza por el codigo que la copia (memcpy de
+         0x1C2 bytes con la direccion en lui/addiu), no por su contenido.
 Sale de tu disco: no se distribuye."""
 import os, struct, sys
 import numpy as np
@@ -103,6 +107,26 @@ def busca_poses(d, segs):
             return bytes(b)
     return None
 
+def busca_tiempos(d, segs):
+    """codigo de 44C020 (PS2 0x176040): 'addiu a2, zero, 0x1c2' (tamano del memcpy) con la base en lui a1 / addiu a1
+    unas instrucciones antes; devuelve las 4 tablas de 0x1c2 bytes (indices 0, 1, 5, 6)"""
+    u = np.frombuffer(d[:len(d) // 4 * 4], '<u4')
+    for i in np.where(u == 0x240601c2)[0]:
+        lo = hi = None
+        for k in range(1, 12):
+            w = int(u[i - k])
+            if lo is None and (w >> 16) == 0x24a5: lo = w & 0xffff          # addiu a1, a1, lo
+            elif lo is not None and (w >> 16) == 0x3c05: hi = w & 0xffff    # lui a1, hi
+            if hi is not None: break
+        if lo is None or hi is None: continue
+        va = (hi << 16) + (lo - 0x10000 if lo & 0x8000 else lo)
+        o = va_off(segs, va)
+        if o is None: continue
+        t = np.frombuffer(d[o:o + 7 * 0x1c2], '<i2').reshape(7, 225)
+        if np.all(t[[0, 1, 5, 6]] > 600) and np.all(t[[0, 1, 5, 6]] < 20000):
+            return t[[0, 1, 5, 6]].astype('<i2').tobytes(), va
+    return None, None
+
 def main():
     iso = isomod.Iso(sys.argv[1])
     nombre = next(k for k in iso.fich if k.startswith('SLES') or k.startswith('SLUS') or k.startswith('SLPM'))
@@ -120,8 +144,11 @@ def main():
     if chq is None: sys.exit('no encuentro el bloque de choques entre coches')
     pos = busca_poses(d, segs)
     if pos is None: sys.exit('no encuentro las animaciones de choque')
+    tim, tva = busca_tiempos(d, segs)
+    if tim is None: sys.exit('no encuentro las tablas de tiempo por zona')
     open(sys.argv[2], 'wb').write(d[b:b + 0x4c * FILAS] + par + fre + b'MAP1' + mapas.tobytes() +
-                                  b'CHQ1' + chq + b'POS1' + pos)
+                                  b'CHQ1' + chq + b'POS1' + pos + b'TIM1' + tim)
+    print('tablas de tiempo en 0x%x' % tva)
     print('tabla de %s en 0x%x: %d filas de %d coches, curvas de par y freno, mapas, choques y %d animaciones' %
           (nombre, b, FILAS, C, struct.unpack('<I', pos[:4])[0]))
 
