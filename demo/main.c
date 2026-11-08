@@ -107,9 +107,14 @@ static void pon_vista(const float *o, const float *mira)
 }
 
 typedef struct { float x, y, w, u, v; uint32_t c; } pt_t;
+static uint32_t vtx_env, vtx_ult;                        /* vertices enviados en el cuadro (y en el anterior) */
+/* La PowerVR real se cuelga si el TA llena el bufer de vertices (Flycast no). El TA guarda unos 34 bytes por triangulo
+   en tiras: con 1 MB de bufer caben ~30000. Tope de vertices de la etapa por cuadro; el coche (~6700), el trafico y
+   los efectos van aparte. */
+#define VTX_ETAPA_MAX 19000
 static inline void envia(const pt_t *p, int fin)
 {
-    pvr_vertex_t *v = pvr_dr_target();
+    pvr_vertex_t *v = pvr_dr_target(); vtx_env++;
     float iw = 1.0f / p->w;
     v->flags = fin ? PVR_CMD_VERTEX_EOL : PVR_CMD_VERTEX;
     v->x = p->x * iw; v->y = p->y * iw; v->z = iw; v->u = p->u; v->v = p->v; v->argb = p->c; v->oargb = 0;
@@ -151,7 +156,7 @@ static void dibuja_malla_directa(const modelo_t *mo, const malla_t *m)
         d->argb = color_fijo ? color_fijo : v->c; d->oargb = 0;
         pvr_dr_commit(d);
     }
-    tri_enviados += n - 2;
+    tri_enviados += n - 2; vtx_env += n;
 }
 
 static void dibuja_malla(const modelo_t *mo, const malla_t *m)
@@ -186,6 +191,7 @@ static void dibuja_rango(const modelo_t *mo, int l, uint32_t k0, uint32_t k1, in
             float dx = m->cx - ojo[0], dy = m->cy - ojo[1], dz = m->cz - ojo[2];
             float zv = dx * ade[0] + dy * ade[1] + dz * ade[2], xv, yv;
             if (zv + m->r < cerca || zv - m->r > lejos) continue;
+            if (vtx_env > VTX_ETAPA_MAX) continue;
             seguro = zv - m->r > cerca * 1.5f && m->n <= 256;
             if (m->dmax > 0 && zv - m->r > m->dmax) continue;
             xv = dx * der[0] + dy * der[1] + dz * der[2];
@@ -1222,7 +1228,8 @@ static void resultados(int meta)
 
 int main(int argc, char **argv)
 {
-    pvr_init_params_t pp = { { PVR_BINSIZE_16, 0, PVR_BINSIZE_16, 0, PVR_BINSIZE_16 }, 768 * 1024, 0, 0, 0, 3 };
+    /* bufer de vertices de 1 MB (x2) y 4 OPB de reserva: en la consola real un bufer u OPB lleno cuelga el TA */
+    pvr_init_params_t pp = { { PVR_BINSIZE_16, 0, PVR_BINSIZE_16, 0, PVR_BINSIZE_16 }, 1024 * 1024, 0, 0, 0, 4 };
     int estado = TITULO, auto_ = 0, ver = VER, pausa = 0, l, i, r;
     uint32_t cuadro = 0, bot_ant = 0, t_estado = 0; uint64_t t0, tcpu = 0, c0;
     float cam_y = 0, tiempo = TIEMPO_ETAPA, fps = 0, ms = 0, cam_fw[3] = { 0, 0, -1 }, ttit = 0;
@@ -1451,7 +1458,7 @@ int main(int argc, char **argv)
         fx = 320.0f / (0.75f + 0.07f * fminf(yo.v / 85.0f, 1.0f));   /* algo mas angular cuanto mas rapido */
         pon_vista(ojo_, mira);
         pon_coche(&yo, mod_coche);
-        tri_enviados = 0;
+        tri_enviados = 0; vtx_ult = vtx_env; vtx_env = 0;
         for (l = 0; l < 3; l++) {
             pvr_list_begin(LISTA[l]);
             if (estado != TITULO) {                             /* en el menu no se ve la etapa */
@@ -1512,14 +1519,17 @@ int main(int argc, char **argv)
             }
             pvr_list_finish();
         }
+#ifdef DIAG_VTX
+        if (cuadro % 60 == 0) dbglog(DBG_INFO, "DIAG est%d v%u tri %u lejos %d vram %u\n", estado, (unsigned)vtx_env, (unsigned)tri_enviados, (int)lejos, (unsigned)pvr_mem_available());
+#endif
         pvr_scene_finish();
         tcpu += timer_us_gettime64() - c0;
         if (++cuadro % 30 == 0) {
             uint64_t t1 = timer_ms_gettime64();
             fps = 30000.0f / (float)(t1 - t0); ms = tcpu / 30000.0f; ms_log = t_log / 30000.0f; t0 = t1; tcpu = 0; t_log = 0;
             /* distancia adaptativa: si la geometria no cabe en el cuadro, se acorta (minimo 600 m) y vuelve a crecer */
-            if (ms + ms_log > 15.0f && lejos > 600.0f) { lejos -= 50.0f; pvr_fog_table_linear(lejos * 0.55f, lejos); }
-            else if (ms + ms_log < 11.5f && lejos < lejos_obj) { lejos += 50.0f; pvr_fog_table_linear(lejos * 0.55f, lejos); }
+            if ((ms + ms_log > 15.0f || vtx_ult > VTX_ETAPA_MAX + 6000) && lejos > 600.0f) { lejos -= 50.0f; pvr_fog_table_linear(lejos * 0.55f, lejos); }
+            else if (ms + ms_log < 11.5f && vtx_ult < VTX_ETAPA_MAX && lejos < lejos_obj) { lejos += 50.0f; pvr_fog_table_linear(lejos * 0.55f, lejos); }
             saltos_ver = saltos; saltos = 0;
         }
     }
