@@ -1324,7 +1324,8 @@ static void camara_paso(int boton, int salida)
     cam_paso(&cam, &cam_tab, &e);
 #ifdef DIAG_CAM
     {   static int n;
-        if (++n % 15 == 0) dbglog(DBG_INFO, "CAM s %.1f base %.1f pos %.1f %.1f %.1f ojo %.1f %.1f %.1f mira %.1f %.1f %.1f v%d suelo %.2f fw %.2f %.2f %.2f up %.2f %.2f %.2f\n",
+        float dy = cam.ojo[1] - yo.pos[1];
+        if (++n % 15 == 0 || yo.up[1] < 0.97f || fabsf(yo.fw[1]) > 0.2f || dy < 1.0f || dy > 3.6f) dbglog(DBG_INFO, "CAM s %.1f base %.1f pos %.1f %.1f %.1f ojo %.1f %.1f %.1f mira %.1f %.1f %.1f v%d suelo %.2f fw %.2f %.2f %.2f up %.2f %.2f %.2f\n",
             (double)yo.s, (double)s_base, (double)yo.pos[0], (double)yo.pos[1], (double)yo.pos[2], (double)cam.ojo[0], (double)cam.ojo[1],
             (double)cam.ojo[2], (double)cam.mira[0], (double)cam.mira[1], (double)cam.mira[2], cam.vista, (double)cam_suelo(cam.ojo),
             (double)yo.fw[0], (double)yo.fw[1], (double)yo.fw[2], (double)yo.up[0], (double)yo.up[1], (double)yo.up[2]); }
@@ -1665,7 +1666,7 @@ static void curso_recentra(float dx, float dz)
     for (k = 0; k < NHUMO; k++) { humos[k].p[0] -= dx; humos[k].p[2] -= dz; }
     for (k = 0; k < NHUELLA; k++) for (i = 0; i < 4; i++) { huellas[k].p[i][0] -= dx; huellas[k].p[i][2] -= dz; }
     for (k = 0; k < 2; k++) { rueda_ant[k][0] -= dx; rueda_ant[k][2] -= dz; }
-    cam.ojo[0] -= dx; cam.ojo[2] -= dz; cam.mira[0] -= dx; cam.mira[2] -= dz;
+    cam_traslada(&cam, dx, 0, dz);                              /* camara.c: solo el ojo y la mira van en el mundo */
     ojo[0] -= dx; ojo[2] -= dz;
 }
 /* una vez por paso de logica en carrera: cargas, eleccion de rama, liberaciones y cambio de etapa; devuelve los

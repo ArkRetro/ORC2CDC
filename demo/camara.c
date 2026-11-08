@@ -262,12 +262,18 @@ void cam_paso(cam_t *c, const cam_tablas_t *t, const cam_entrada_t *in)
             c->fov_a4 = ent[9]; c->dx_c4 = ent[6]; c->dy_c8 = ent[7]; c->f358 = ent[10];
         }
     }
-    if (in->suelo) { float y = in->suelo(c->ojo) + 0.75f; if (y >= c->ojo[1]) c->ojo[1] = y; }   /* 6282A0 */
+    if (in->suelo) { float y = in->suelo(c->ojo) + 0.75f; if (isfinite(y) && y >= c->ojo[1]) c->ojo[1] = y; }   /* 6282A0 */
 
     /* 482E80: el ojo dentro de la caja del coche */
     {   const float *b = t->modelos + modelo * 9 + 3; float zx = c->e0[2] - 1.0f;
         c->dentro = !(c->e0[0] > b[0] || c->e0[1] > b[1] || zx > b[2] || b[3] > c->e0[0] || b[4] > c->e0[1] || b[5] > zx); }
     c->fov = c->fov_a4; c->balanceo = c->rol130; c->despl[0] = c->dx_c4; c->despl[1] = c->dy_c8;
+}
+
+void cam_traslada(cam_t *c, float dx, float dy, float dz)
+{
+    c->ojo[0] -= dx; c->ojo[1] -= dy; c->ojo[2] -= dz;
+    c->mira[0] -= dx; c->mira[1] -= dy; c->mira[2] -= dz;
 }
 
 int cam_coche_visible(const cam_t *c)

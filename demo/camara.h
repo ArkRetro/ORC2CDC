@@ -51,6 +51,10 @@ typedef struct {
 /* al empezar cada carrera (484EE0); conserva la vista elegida (poner c->elegida = -1 la primera vez) */
 void cam_inicia(cam_t *c, const cam_tablas_t *t);
 void cam_paso(cam_t *c, const cam_tablas_t *t, const cam_entrada_t *e);
+/* el marco del mundo se ha trasladado (curso_recentra): resta (dx, dy, dz) a lo que esta en coordenadas del mundo.
+   Solo lo son el ojo y la mira de salida; el resto del estado es local al coche (ojo y mira locales, mezcla de vistas)
+   o angular (historia del cabeceo, giro guardado del choque), y se recalcula en cada paso desde el coche */
+void cam_traslada(cam_t *c, float dx, float dy, float dz);
 /* 4A2BA0: si se dibuja la carroceria por fuera con la vista actual */
 int  cam_coche_visible(const cam_t *c);
 #endif
