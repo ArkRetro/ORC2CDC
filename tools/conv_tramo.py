@@ -382,6 +382,7 @@ def main():
         pf = np.where(fuera, sup[3], pf)
     if not sup[1].any(): sup = (sup[0], np.repeat(pf[:, [0, -1]], NEXT, 1), sup[2])
     mod.ruta = np.concatenate([cam, an, pf, car, sup[0], sup[1], sup[2]], 1)
+    mod.recorta_texturas()                                     # solo las texturas que se usan (memoria de video)
     ini = mod.escribe(sal)
     print('segmento %d: %d tiras (%d opacas, %d recorte, %d transparentes, %d cielo), %d vertices, %d triangulos, '
           '%d texturas (%d KB), ruta %d puntos (%.0f m), %d KB'

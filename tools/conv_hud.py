@@ -40,8 +40,9 @@ Imagen 0x1C {textura, f32 u0 v0 u1 v1, u16 izq arr der abj}.
 HUD.DAT (little endian):
  cabecera 48 bytes: 'HUD1', n_tex, n_spr, n_grp, n_pie, n_lay, off_tex, off_spr, off_grp, off_pie, off_lay,
    off_tacometros (u32 cada uno)
- texturas 16 bytes: u16 ancho, alto, formato (0 ARGB1555, 1 RGB565, 2 ARGB4444), lista (0 opaca, 1 recorte,
-   2 transparente); u32 desplazamiento (desde el inicio del fichero, alineado a 32), tamano. Texeles twiddled.
+ texturas 16 bytes: u16 ancho, alto, formato (0 ARGB1555, 1 RGB565, 2 ARGB4444; + 0x100 comprimida VQ: libro de
+   256 entradas de 8 bytes y un byte por bloque de 2x2, tools/vq.py), lista (0 opaca, 1 recorte, 2 transparente);
+   u32 desplazamiento (desde el inicio del fichero, alineado a 32), tamano. Texeles twiddled.
  sprites 24 bytes: u16 textura, ancho, alto (pixeles en pantalla a 640x480), 0; f32 u0, v0, u1, v1.
  grupos (elementos graficos) 32 bytes: char nombre[16]; u16 n_cuadros, primera pieza, n piezas, 0;
    f32 paso (grados por cuadro de las piezas que giran), u32 0.
@@ -117,9 +118,9 @@ class Disco:
         return struct.unpack_from('<%dI' % n, self.elf, o)
 
 def desordena_xst(datos, psm, w, h, bw_sub):
-    """como gs.desordena, pero el rectangulo PSMCT32/PSMCT16 se sube con su propio ancho de bufer bw_sub (palabra 2
-    de la cabecera XST / 64 = la mitad del de PSMT8/PSMT4): con el mismo ancho que la lectura (lo que hace
-    gs.desordena) se perdian las filas desde la 64 (PSMT8) o la 128 (PSMT4) de las texturas de mas de una pagina."""
+    """como gs.desordena: el rectangulo PSMCT32/PSMCT16 se sube con su propio ancho de bufer bw_sub, la mitad del de
+    la lectura PSMT8/PSMT4 (= ancho / 128, minimo 1; ver texturas()). Con otro ancho se pierden o se mezclan las filas
+    de las paginas siguientes a la primera fila de paginas."""
     wu, hu = w // 2, h // 2
     bw = max(2, (w + 63) // 64); bw += bw & 1
     mem = np.zeros(bw * 64 * (h + 128) * 4, np.uint8)
@@ -143,7 +144,10 @@ def texturas(d):
         lleno = W * Ht * {0: 32, 0x13: 8, 0x14: 4}[psm] // 8
         raw = lz(H[dd:], h[3] * 16) if h[11] & 0x8000 else H[dd:dd + h[3] * 16]
         raw = raw + bytes(lleno - len(raw))                     # lo no subido queda a cero
-        bws = max(1, h[2] // 64)                                # ancho (pixeles) del rectangulo subido / 64
+        # ancho de bufer de la subida: ancho / 128 (las paginas PSMCT32/16 miden la mitad en pixeles subidos). La
+        # palabra 2 de la cabecera (/64) NO es ese ancho: con ella se rompian, p. ej., los rotulos de 512x256 PSMT8
+        # del frontal ("SINGLE PLAYER" partido a partir de la fila 64) y las texturas de 256 de ancho con 4 paginas
+        bws = max(1, W // 128)
         if psm == 0: a = np.frombuffer(raw, 'u1').reshape(Ht, W, 4).copy()
         elif psm == 0x13:
             pal = np.frombuffer(H[P + h[1]:P + h[1] + 1024], 'u1').reshape(256, 4)
@@ -197,31 +201,75 @@ def capa_mat(a, L, f):
     if a.u32(L + 0xc): M = M @ capa_mat(a, a.u32(L + 0xc), f)[0]
     return M, v[7] / 100, (v[0], v[1]), bool(m & 0x10)
 
-def _capa(a, L, f, M, al, out):
+def _capa(a, L, f, M, al, out, est):
+    """capa L en el cuadro f (429350 / 428BD0 del PC). Mascaras (flag 8): la capa de footage con el flag se guarda
+    (est['masc']) y no se dibuja; la siguiente pieza que salga lleva esa mascara (p['mascara']: el alfa de la mascara,
+    con su matriz y su recorte, multiplica el de la pieza; fuera del rectangulo de la mascara, 0; los alfas de las dos
+    se combinan con AND como los colores de 42A800). Con una mascara pendiente la capa siguiente se recorre aunque
+    este fuera de su intervalo o sin el flag de visible (429350)"""
     if not a.u32(L + 8): return
     pri, ult, d4, e6 = struct.unpack_from('<4h', a.a, L); fl = a.a[L + 0x48]
     lm, op, anc, gira = capa_mat(a, L, f)
-    if not (fl & 2 and pri <= f < ult) or fl & 8: return    # las mascaras no se exportan
+    if not (fl & 2 and pri <= f < ult) and est.get('masc') is None: return
     loc = (f - pri) * (e6 / 4096) + d4; al *= op; Mt = lm @ M; p = a.u32(L + 8)
     if fl & 1:
         w, h, ritmo, n, fr = struct.unpack_from('<iiiiI', a.a, p)
         if n < 1: return
         i = 0 if n == 1 else min(n - 1, int(ritmo * loc + 0.001))
         t, l, tp, r, b = struct.unpack_from('<I4f', a.a, fr + 20 * i)
-        out.append(dict(tex=t & 0xffff, src=(l, tp, r, b), w=w, h=h, M=Mt, alfa=al, anc=anc, gira=gira, L=L, f=f))
+        if t == 0xffffffff: return
+        q = dict(tex=t & 0xffff, src=(l, tp, r, b), w=w, h=h, M=Mt, alfa=al, anc=anc, gira=gira, L=L, f=f)
+        if fl & 8 and est.get('masc') is None: est['masc'] = q; return
+        if est.get('masc') is not None:
+            m = est['masc']; est['masc'] = None
+            q['mascara'] = m; q['alfa'] = (int(al * 255.5) & int(m['alfa'] * 255.5)) / 255.0
+        out.append(q)
     else:
         ini, fin = struct.unpack_from('<2f', a.a, p + 4)
         if not ini <= loc < fin: return
         pl = a.u32(p + 0x20)
-        for k in range(a.i32(p + 0x1c) - 1, -1, -1): _capa(a, pl + k * 0x4c, loc, Mt, al, out)
+        for k in range(a.i32(p + 0x1c) - 1, -1, -1): _capa(a, pl + k * 0x4c, loc, Mt, al, out, est)
 
 def escena(a, k, f=0.0):
-    """piezas de la escena k en el cuadro f, con la instancia en (0, 0)"""
+    """piezas de la escena k en el cuadro f, con la instancia en (0, 0). Las que llevan 'mascara' hay que hornearlas
+    (hornea) antes de usarlas"""
     sc = a.escenas[k]; nc, pc = struct.unpack_from('<2I', a.a, sc); raiz = pc + (nc - 1) * 0x24
-    w, h = struct.unpack_from('<hh', a.a, raiz); M = _t(320 - w / 2, 240 - h / 2); out = []
+    w, h = struct.unpack_from('<hh', a.a, raiz); M = _t(320 - w / 2, 240 - h / 2); out = []; est = {}
     pl = a.u32(raiz + 0x20)
-    for q in range(a.i32(raiz + 0x1c) - 1, -1, -1): _capa(a, pl + q * 0x4c, f, M, 1.0, out)
+    for q in range(a.i32(raiz + 0x1c) - 1, -1, -1): _capa(a, pl + q * 0x4c, f, M, 1.0, out, est)
     return out
+
+HORNO = {}      # texturas horneadas (pieza con mascara): clave -> RGBA
+
+def hornea(p, texs):
+    """pieza con mascara -> pieza equivalente sin ella: su rectangulo de textura con el alfa multiplicado por el de
+    la mascara (muestreo bilineal en el espacio del sprite de la mascara, 0 fuera de su recorte), en una textura
+    nueva de HORNO (tex = clave, 'bk' = 'HORNO', 'tx' = HORNO). Asi la Dreamcast no necesita multitextura ni
+    volumenes modificadores; cada combinacion distinta de posicion relativa sale una vez"""
+    m = p['mascara']; C = texs[p['tex']]; Mk = texs[m['tex']]
+    l, t, r, b = p['src']; L, T = max(0, int(np.floor(l))), max(0, int(np.floor(t)))
+    R, B = min(C.shape[1], int(np.ceil(r))), min(C.shape[0], int(np.ceil(b)))
+    rel = p['M'] @ np.linalg.inv(m['M'])                    # sprite de la pieza -> sprite de la mascara
+    clave = ('HORNO', p['tex'], (L, T, R, B), m['tex'], tuple(round(v, 2) for v in m['src']),
+             tuple(np.round(rel[:, :2].ravel(), 2)), p['w'], p['h'], m['w'], m['h'])
+    if clave not in HORNO:
+        y, x = np.mgrid[T:B, L:R] + 0.5
+        sx = (x - l) * p['w'] / (r - l); sy = (y - t) * p['h'] / (b - t)
+        q = np.stack([sx, sy, np.ones_like(sx)], -1) @ rel
+        ml, mt, mr, mb = m['src']
+        u = ml + q[..., 0] * (mr - ml) / m['w'] - 0.5; v = mt + q[..., 1] * (mb - mt) / m['h'] - 0.5
+        u0, v0 = np.floor(u).astype(int), np.floor(v).astype(int); fu, fv = u - u0, v - v0
+        def al(yy, xx):
+            ok = (xx >= int(np.floor(ml))) & (xx < int(np.ceil(mr))) & (yy >= int(np.floor(mt))) & (yy < int(np.ceil(mb)))
+            ok &= (xx >= 0) & (yy >= 0) & (xx < Mk.shape[1]) & (yy < Mk.shape[0])
+            return np.where(ok, Mk[np.clip(yy, 0, Mk.shape[0] - 1), np.clip(xx, 0, Mk.shape[1] - 1), 3] / 255.0, 0.0)
+        k = (al(v0, u0) * (1 - fu) * (1 - fv) + al(v0, u0 + 1) * fu * (1 - fv) + al(v0 + 1, u0) * (1 - fu) * fv
+             + al(v0 + 1, u0 + 1) * fu * fv)
+        img = C[T:B, L:R].copy(); img[..., 3] = np.round(img[..., 3] * k).astype(np.uint8)
+        HORNO[clave] = img
+    q = {kk: vv for kk, vv in p.items() if kk != 'mascara'}
+    q.update(tex=clave, src=(l - L, t - T, r - L, b - T), bk='HORNO', tx=HORNO)
+    return q
 
 # ---------------------------------------------------------------- conversion
 class Atlas:
@@ -393,7 +441,9 @@ class Hud:
                 sx, sy = np.hypot(M[0, 0], M[0, 1]), np.hypot(M[1, 0], M[1, 1])
                 s.pie.append((g, cuadro, si, 0, x, y, ax - dx, ay - dy, ang, sx, sy, p['alfa']))
                 continue
-            ti = s.textura((banco, p['tex']), texs[p['tex']])
+            bk, tx = banco, texs
+            if 'mascara' in p: p = hornea(p, texs); bk, tx = p['bk'], p['tx']
+            ti = s.textura((bk, p['tex']), tx[p['tex']])
             si = s.sprite(ti, p['src'], p['w'], p['h'])
             x, y = (np.array([ax, ay, 1.0]) @ M)[:2]
             ang = np.degrees(np.arctan2(M[0, 1], M[0, 0]))
@@ -411,11 +461,15 @@ class Hud:
         s.lay.append((nombre, g, alt, x, y, avance, capa, nchar))
 
     def escribe(s, ruta):
-        texs = []
-        for a in s.tex:
+        texs = []; vq = getattr(s, 'vq', None)
+        for i, a in enumerate(s.tex):
             h, w = a.shape[:2]; W = max(8, 1 << (w - 1).bit_length()); H = max(8, 1 << (h - 1).bit_length())
             if (W, H) != (w, h): b = np.zeros((H, W, 4), np.uint8); b[:h, :w] = a; a = b
-            texs.append((W, H) + textura_dc(a))
+            fmt, lista, d = textura_dc(a)
+            if vq:                                          # VQ (formato | 0x100, libro de 256 entradas) si conviene
+                r = vq(i, a, fmt, lista)
+                if r is not None: fmt, d = fmt | 0x100, r
+            texs.append((W, H, fmt, lista, d))
         n = [len(texs), len(s.spr), len(s.grp), len(s.pie), len(s.lay)]
         offs = []; o = 48
         for tam in (16 * n[0], 24 * n[1], 32 * n[2], 40 * n[3], 32 * n[4], 16):

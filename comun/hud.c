@@ -86,7 +86,10 @@ static void cabeceras(hud_dat_t *h, int i)
 {
     static const uint32_t FMT[3] = { PVR_TXRFMT_ARGB1555, PVR_TXRFMT_RGB565, PVR_TXRFMT_ARGB4444 };
     pvr_poly_cxt_t cx;
-    pvr_poly_cxt_txr(&cx, PVR_LIST_TR_POLY, FMT[h->tex[i].fmt] | PVR_TXRFMT_TWIDDLED, h->tex[i].w, h->tex[i].h, h->vtex[i], PVR_FILTER_BILINEAR);
+    /* formato: bits 0-7 el de 16 bits; bit 8 VQ (libro de 256 entradas al principio de los datos) */
+    uint32_t f = FMT[(h->tex[i].fmt & 0xff) < 3 ? (h->tex[i].fmt & 0xff) : 2] | PVR_TXRFMT_TWIDDLED;
+    if (h->tex[i].fmt & 0x100) f |= PVR_TXRFMT_VQ_ENABLE;
+    pvr_poly_cxt_txr(&cx, PVR_LIST_TR_POLY, f, h->tex[i].w, h->tex[i].h, h->vtex[i], PVR_FILTER_BILINEAR);
     cx.txr.env = PVR_TXRENV_MODULATEALPHA; cx.depth.write = PVR_DEPTHWRITE_DISABLE;
     cx.depth.comparison = PVR_DEPTHCMP_GREATER; pvr_poly_compile(h->cabf + i, &cx);
     cx.depth.comparison = PVR_DEPTHCMP_ALWAYS; pvr_poly_compile(h->cab + i, &cx);

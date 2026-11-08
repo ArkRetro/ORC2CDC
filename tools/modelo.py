@@ -1,16 +1,18 @@
 """Modelos para la Dreamcast a partir de bloques de PS2 (etapas de STAGE.PS2 y coches de CARS.PS2), formato ORD5:
  'ORD5', nmallas, nvert, nruta, floats por punto de ruta, ntex, inicio de cada lista (opaca, recorte, transparente,
  cielo, fin);
- texturas (ancho, alto, formato 0 ARGB1555 / 1 RGB565 / 2 ARGB4444, lista, desplazamiento, tamano: 24 bytes);
+ texturas (ancho, alto, formato, lista, desplazamiento, tamano: 24 bytes); formato: bits 0-7 0 ARGB1555 / 1 RGB565 /
+ 2 ARGB4444, bit 8 comprimida VQ (vq.py: libro de N entradas de 8 bytes y un byte por bloque de 2x2), bits 16-23 N - 1;
  mallas ordenadas por lista y textura (cx, cy, cz, radio float, primer vertice, cuenta, textura o -1, distancia
  maxima de dibujo o 0: 32 bytes);
  vertices (x, y, z, u, v float, color ARGB: 24 bytes); ruta (x, y, z, ancho izquierdo, ancho derecho y el perfil
  de alturas de la calzada a lo ancho: NPERF alturas de -izquierdo-2 a derecho+2);
- relleno a 32; texeles twiddled de 16 bits.
+ relleno a 32; texeles twiddled de 16 bits o VQ, cada textura alineada a 32.
+Cabecera 'ORD6' (la 'ORD5' era la misma sin VQ). VQ=0 en el entorno: sin comprimir (y cabecera ORD5).
 Cada malla es una tira de triangulos (un UNPACK de posiciones del paquete VIF); su textura: la tabla 2 del registro
 da una entrada de la tabla 4 (lista de texturas del registro, 36 bytes), cuyo cuarto campo es el indice de la
 textura en el bloque."""
-import os, struct
+import os, struct, time
 import numpy as np
 from ps2 import tex, vif
 
@@ -91,6 +93,8 @@ class Modelo:
     def __init__(self):
         self.texs = []; self.blob = b''; self.mallas = []; self.verts = []; self.nv = 0; self.ruta = np.zeros((0, 5))
         self.limita = False                                     # distancia maxima por tamano en las mallas pequenas
+        self.rgba = []                                          # imagen de cada textura (para la compresion VQ)
+        self.vq = os.environ.get("VQ", "1") != "0"
 
     def bloque(self, blq, registros=None, lista=None, objetos=False, sin_textura=int(os.environ.get("SINTEX", "0x60202020"), 16), copias=None):
         """anade los registros de un bloque (todos si registros es None). lista: fuerza la lista de sus mallas.
@@ -101,6 +105,7 @@ class Modelo:
         for h in tex.cabeceras(blq):
             a = tex.imagen(blq, h); fmt, li, d = textura_dc(a)
             self.texs.append((a.shape[1], a.shape[0], fmt, li, len(self.blob), len(d))); self.blob += d
+            self.rgba.append(a)
         ntb = len(self.texs) - base
         anuncios = texturas_de_carteles(blq); n_anuncio = 0
         for r, reg in enumerate(blq.registros()):
@@ -178,13 +183,36 @@ class Modelo:
             w, h, fmt, li, off, tam = self.texs[ti]
             nuevo[ti] = len(texs); texs.append((w, h, fmt, li, len(blob), tam)); blob += self.blob[off:off + tam]
         for x in self.mallas: x[1] = nuevo.get(x[1], -1)
+        self.rgba = [self.rgba[ti] for ti in usadas]
         self.texs, self.blob = texs, blob
 
+    def comprime(self):
+        """pasa a VQ las texturas que lo merecen (vq.elige) y rehace el blob; solo las que usa alguna malla. Con
+        VQ_PNG=directorio guarda cada textura antes y despues para compararlas"""
+        import vq
+        usadas = {x[1] for x in self.mallas if x[1] >= 0}; blob = b''; texs = []; t0 = time.time(); antes = ahora = 0
+        dpng = os.environ.get("VQ_PNG"); errs = []
+        for ti, (w, h, fmt, li, off, tam) in enumerate(self.texs):
+            d = self.blob[off:off + tam]
+            if ti in usadas and ti < len(self.rgba):
+                antes += tam
+                r = vq.elige(self.rgba[ti], fmt)
+                if r is not None:
+                    d, n, err = r; fmt = fmt | 0x100 | (n - 1) << 16; errs.append(err)
+                    if dpng: vq.compara(self.rgba[ti], d, fmt, os.path.join(dpng, 'tex%03d_%dx%d.png' % (ti, w, h)))
+                ahora += len(d)
+            d += b'\0' * (-len(d) % 32)
+            texs.append((w, h, fmt, li, len(blob), len(d))); blob += d
+        self.texs, self.blob = texs, blob
+        if errs: print('VQ: %d de %d texturas, %d KB -> %d KB, error RMS medio %.1f (max %.1f) en %.0f s'
+                       % (len(errs), len(usadas), antes >> 10, ahora >> 10, np.mean(errs), max(errs), time.time() - t0))
+
     def escribe(self, sal):
+        if self.vq and not getattr(self, '_comprimido', False): self.comprime(); self._comprimido = True
         self.mallas.sort(key=lambda x: (x[0], x[1]))
         inicio = [sum(1 for x in self.mallas if x[0] < l) for l in range(5)]
         with open(sal, 'wb') as f:
-            f.write(b'ORD5' + struct.pack('<10I', len(self.mallas), self.nv, len(self.ruta), self.ruta.shape[1],
+            f.write((b'ORD6' if self.vq else b'ORD5') + struct.pack('<10I', len(self.mallas), self.nv, len(self.ruta), self.ruta.shape[1],
                                           len(self.texs), *inicio))
             for t in self.texs: f.write(struct.pack('<6I', *t))
             for li, ti, cc, rad, i0, cnt, _, dmax in self.mallas:

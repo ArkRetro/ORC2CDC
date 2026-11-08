@@ -1,5 +1,6 @@
 /* Demo jugable del port de OutRun 2006 C2C a Dreamcast: la primera etapa (SEG00.DAT) y un coche (COCHE.DAT),
-   convertidos de tu DVD con tools/conv_tramo.py y tools/conv_coche.py (formato ORD4, ver tools/modelo.py).
+   convertidos de tu DVD con tools/conv_tramo.py y tools/conv_coche.py (formato ORD6 con texturas VQ, ver tools/modelo.py
+   y tools/vq.py). Necesidades de la consola real (presupuesto del TA, VRAM, GD, video): docs/DREAMCAST.md.
    Orden de carga: datos del GD a la RAM (con aviso en pantalla), PowerVR, texturas a la memoria de video, cabeceras
    de poligono, y a jugar. La conduccion va sobre la ruta de la etapa (distancia recorrida, desvio lateral y rumbo
    respecto a la carretera), con los bordes de la calzada como muros.
@@ -8,6 +9,7 @@
 #include <kos.h>
 #include <dc/matrix.h>
 #include <dc/biosfont.h>
+#include <dc/flashrom.h>
 #include <math.h>
 #include <malloc.h>
 #include "../comun/gd.h"
@@ -36,7 +38,7 @@ static int lee_modelo(modelo_t *m, const char *nombre)
 {
     uint32_t sz, h[10], i; uint8_t *b = gd_carga(nombre, &sz), *p;
     if (!b) return -1;
-    if (memcmp(b, "ORD5", 4)) return -2;
+    if (memcmp(b, "ORD5", 4) && memcmp(b, "ORD6", 4)) { free(b); return -2; }   /* ORD6: con texturas VQ */
     memcpy(h, b + 4, sizeof h);
     m->nmallas = h[0]; m->nvert = h[1]; m->nruta = h[2]; m->paso_ruta = h[3]; m->ntex = h[4];
     for (i = 0; i < 5; i++) m->inicio[i] = h[5 + i];
@@ -49,25 +51,40 @@ static int lee_modelo(modelo_t *m, const char *nombre)
     return 0;
 }
 
-/* texturas a la memoria de video y cabeceras; el blob de texeles ya no hace falta en la RAM tras esto */
+/* texturas a la memoria de video y cabeceras; el blob de texeles ya no hace falta en la RAM tras esto.
+   Formato de la textura (tools/modelo.py): bits 0-7 el de 16 bits, bit 8 VQ, bits 16-23 entradas del libro - 1. Una
+   VQ con libro reducido (N < 256 entradas, las ultimas) se direcciona 2048 - 8 N bytes antes de sus datos: la PowerVR
+   lee el libro en la direccion de la textura y los indices 2 KB despues, y nunca toca las entradas que faltan. */
 static int sube_modelo(modelo_t *m)
 {
     pvr_poly_cxt_t cx; uint32_t i, f;
     for (f = 0; f < 2; f++) m->cabs[f] = memalign(32, (m->ntex + 1) * sizeof(pvr_poly_hdr_t));
     m->tv = calloc(m->ntex + 1, sizeof(pvr_ptr_t));
     for (i = 0; i < m->ntex; i++) {
-        tex_t *t = m->texs + i; pvr_ptr_t v = pvr_mem_malloc(t->tam);
+        tex_t *t = m->texs + i; pvr_ptr_t v = pvr_mem_malloc(t->tam), dir;
+        uint32_t fb = t->fmt & 0xff, vq = t->fmt & 0x100, n = ((t->fmt >> 16) & 0xff) + 1;
         if (!v) return -3;
+        if (fb > 2 || (t->tam & 31)) return -4;
         m->tv[i] = v;
         pvr_txr_load(m->blob + t->off, v, t->tam);
+        dir = vq ? (pvr_ptr_t)((uintptr_t)v - (2048 - 8 * n)) : v;
         for (f = 0; f < 2; f++) {
-            pvr_poly_cxt_txr(&cx, LISTA[t->lista], FMT[t->fmt] | PVR_TXRFMT_TWIDDLED, t->w, t->h, v, PVR_FILTER_BILINEAR);
+            pvr_poly_cxt_txr(&cx, LISTA[t->lista], FMT[fb] | PVR_TXRFMT_TWIDDLED | (vq ? PVR_TXRFMT_VQ_ENABLE : 0), t->w, t->h, dir,
+                             PVR_FILTER_BILINEAR);
             cx.gen.fog_type = f ? PVR_FOG_DISABLE : PVR_FOG_TABLE; cx.gen.culling = PVR_CULLING_NONE;
             cx.txr.env = PVR_TXRENV_MODULATE;
             pvr_poly_compile(&m->cabs[f][i], &cx);
         }
     }
     return 0;
+}
+
+/* vertices del modelo entero (presupuesto del TA) */
+static uint32_t modelo_vtx(const modelo_t *m)
+{
+    uint32_t i, c = 0;
+    for (i = 0; i < m->nmallas; i++) c += m->mallas[i].n > 256 ? 256 : m->mallas[i].n;
+    return c;
 }
 
 /* libera un modelo: texturas de la memoria de video, cabeceras y datos */
@@ -108,10 +125,76 @@ static void pon_vista(const float *o, const float *mira)
 
 typedef struct { float x, y, w, u, v; uint32_t c; } pt_t;
 static uint32_t vtx_env, vtx_ult;                        /* vertices enviados en el cuadro (y en el anterior) */
-/* La PowerVR real se cuelga si el TA llena el bufer de vertices (Flycast no). El TA guarda unos 34 bytes por triangulo
-   en tiras: con 1 MB de bufer caben ~30000. Tope de vertices de la etapa por cuadro; el coche (~6700), el trafico y
-   los efectos van aparte. */
-#define VTX_ETAPA_MAX 16000
+static uint32_t vtx_et, vtx_et_ult;                      /* los de la etapa */
+static float detalle = 1.0f;                             /* escala de la distancia maxima de las mallas pequenas */
+/* ---------------------------------------------------------------- presupuesto del TA (docs/DREAMCAST.md)
+   La PowerVR real se cuelga si el TA llena el bufer de parametros (vertices) del cuadro (o el de punteros, OPB);
+   Flycast no. Medida en la consola real (demo 12c, GDEMU): 24656 vertices contados y 22012 triangulos llenaron 1 MB
+   (VB_POS = END, error 0x0C) => mas de 42,5 bytes por vertice contado, y eso sin contar los del HUD. La cuenta teorica
+   (trozos de 6 triangulos, 12 bytes de cabecera y 24 por vertice: unos 32 bytes por vertice) se queda corta, asi que
+   el presupuesto va por vertices contados con ta_bpv bytes cada uno (56 de salida, 1,3 veces lo medido) y se corrige
+   al alza con lo que gasta de verdad el TA (registro TA_ITP_CURRENT, solo en la consola: Flycast no lo actualiza).
+   Se cuentan todos: etapa, coche, trafico y efectos (ta_cabe, antes de enviar cada tira) y lo 2D (HUD, menus y
+   textos: ta_prim, por el que pasan los pvr_prim de este fichero y, desde el Makefile, los de hud.c y menu.c).
+   Topes de cada cuadro (bytes):
+     total  = TA_VB_BYTES - TA_MARGEN
+     2D     = max(TA_RESERVA_2D, 2 x lo 2D del cuadro anterior)          (lo 2D va al final y no se puede cortar)
+     3D     = total - 2D                                                 (ta_lim: nada 3D pasa de aqui)
+     etapa  = 3D - max(1,25 x coche+trafico+efectos del cuadro anterior, coche + 3 coches de trafico)
+   Si una tira no cabe, no se envia (ta_corto) y la distancia adaptativa acorta. */
+#define TA_VB_BYTES (1792 * 1024)                        /* bufer de parametros por cuadro (x2: doble bufer) */
+#define TA_MARGEN (64 * 1024)                            /* cabeceras vacias de fin de lista y prudencia */
+#define TA_RESERVA_2D (64 * 1024)                        /* minimo para lo 2D (medido: unos 450 vertices) */
+#define TA_BPV_MIN 56                                    /* bytes por vertice contado (>= 42,5 medidos en la consola) */
+/* tope de vertices de la etapa por cuadro (tiempo de CPU: transformar y enviar) y distancia de dibujo minima de la
+   distancia adaptativa (tambien la de salida: el primer cuadro de carrera empieza corto y luego se alarga) */
+#define VTX_ETAPA_MAX 20000
+#define LEJOS_MIN 600.0f
+static uint32_t ta_bpv = TA_BPV_MIN, ta_vb, ta_et, ta_lim, ta_tope_etapa, ta_corto, ta_v2d, ta_v2d_ult, ta_votros_ult, ta_vmin_otros;
+static uint32_t ta_real_ult, ta_opb_ult;                 /* lo que gasto de verdad el TA en el cuadro anterior */
+static int ta_freno;                                     /* 0..3: OPB muy lleno, la etapa baja a (4 - freno) / 4 */
+static int ta_en_etapa;                                  /* lo que se envia ahora es de la etapa (su tope) */
+/* reserva una tira de n vertices; 0 si no cabe (y no se envia) */
+static inline int ta_cabe(uint32_t n)
+{
+    uint32_t c = n * ta_bpv;
+    if (ta_vb + c > ta_lim || (ta_en_etapa && ta_et + c > ta_tope_etapa)) { ta_corto = 1; return 0; }
+    ta_vb += c; if (ta_en_etapa) ta_et += c;
+    return 1;
+}
+/* topes del cuadro, con lo medido en el anterior */
+static void ta_inicia_cuadro(void)
+{
+    uint32_t total = TA_VB_BYTES - TA_MARGEN, r2d = 2 * ta_v2d_ult * ta_bpv, ro = ta_votros_ult * ta_bpv * 5 / 4;
+    if (r2d < TA_RESERVA_2D) r2d = TA_RESERVA_2D;
+    if (ro < ta_vmin_otros * ta_bpv) ro = ta_vmin_otros * ta_bpv;
+    ta_lim = total - r2d;
+    ta_tope_etapa = ta_lim > ro ? (ta_lim - ro) / 4 * (4 - ta_freno) : 0;
+    ta_vb = ta_et = 0; ta_v2d = 0;
+}
+/* fin del cuadro (tras la ultima lista): lo contado, y lo que gasto el TA si el registro lo dice (consola real) */
+static void ta_fin_cuadro(void)
+{
+    uint32_t usado = PVR_GET(PVR_TA_VERTBUF_POS) - PVR_GET(PVR_TA_VERTBUF_START), contados = ta_vb / ta_bpv + ta_v2d;
+    uint32_t opb = (PVR_GET(PVR_TA_OPB_POS) << 2) - PVR_GET(PVR_TA_OPB_START), opb_tot = PVR_GET(PVR_TA_OPB_END) - PVR_GET(PVR_TA_OPB_START);
+    ta_v2d_ult = ta_v2d; ta_votros_ult = (ta_vb - ta_et) / ta_bpv;
+    ta_real_ult = usado < TA_VB_BYTES ? usado : 0;
+    ta_opb_ult = opb <= opb_tot ? opb : 0;               /* Flycast no lleva estos registros: 0 */
+    if (ta_opb_ult > opb_tot / 10 * 7) { if (ta_freno < 3) ta_freno++; ta_corto = 1; }
+    else if (ta_opb_ult < opb_tot / 2 && ta_freno) ta_freno--;
+    if (ta_real_ult && contados > 2000) {               /* con margen del 20 %; nunca baja de TA_BPV_MIN */
+        uint32_t b = ta_real_ult / contados * 6 / 5 + 1;
+        if (b > ta_bpv) ta_bpv = b > 128 ? 128 : b;
+    }
+}
+/* pvr_prim contando los vertices (lo 2D) */
+int ta_prim(const void *d, size_t sz)
+{
+    if ((*(const uint32_t *)d >> 29) == 7) ta_v2d++;
+    return pvr_prim(d, sz);
+}
+#define pvr_prim ta_prim
+
 static inline void envia(const pt_t *p, int fin)
 {
     pvr_vertex_t *v = pvr_dr_target(); vtx_env++;
@@ -133,7 +216,7 @@ static void tri_recortado(const pt_t *p)
             o[n].u = a->u + t * (b->u - a->u); o[n].v = a->v + t * (b->v - a->v); o[n].c = a->c; n++;
         }
     }
-    if (n < 3) return;
+    if (n < 3 || !ta_cabe(n)) return;
     if (n == 3) { envia(o, 0); envia(o + 1, 0); envia(o + 2, 1); tri_enviados++; }
     else { envia(o, 0); envia(o + 1, 0); envia(o + 3, 0); envia(o + 2, 1); tri_enviados += 2; }
 }
@@ -146,6 +229,7 @@ static inline float inv_w(float w) { float r = w * w; __asm__("fsrra %0" : "+f"(
 static void dibuja_malla_directa(const modelo_t *mo, const malla_t *m)
 {
     const vert_t *v = mo->verts + m->v0; uint32_t i, n = m->n;
+    if (!ta_cabe(n)) return;
     for (i = 0; i < n; i++, v++) {
         float x = v->x, y = v->y, z = v->z, w, iw; pvr_vertex_t *d;
         mat_trans_single3_nodivw(x, y, z, w);
@@ -170,6 +254,7 @@ static void dibuja_malla(const modelo_t *mo, const malla_t *m)
         detras |= w < cerca;
     }
     if (!detras) {
+        if (!ta_cabe(n)) return;
         for (i = 0; i < n; i++) envia(pw + i, i == n - 1);
         tri_enviados += n - 2;
         return;
@@ -183,7 +268,7 @@ static void dibuja_malla(const modelo_t *mo, const malla_t *m)
 /* mallas [k0, k1) de la lista l; recorte por esfera con la camara si recorta; sin_niebla para el cielo */
 static void dibuja_rango(const modelo_t *mo, int l, uint32_t k0, uint32_t k1, int recorta, int sin_niebla, int solo_lista)
 {
-    float tanh = 320.0f / fx; uint32_t k; int ult = -2, seguro = 0;
+    float tanh = 320.0f / fx; uint32_t k, vtx_et0 = vtx_env; int ult = -2, seguro = 0;
     for (k = k0; k < k1; k++) {
         const malla_t *m = mo->mallas + k;
         if (solo_lista && (m->tex < 0 || (int)mo->texs[m->tex].lista != l)) continue;
@@ -191,9 +276,9 @@ static void dibuja_rango(const modelo_t *mo, int l, uint32_t k0, uint32_t k1, in
             float dx = m->cx - ojo[0], dy = m->cy - ojo[1], dz = m->cz - ojo[2];
             float zv = dx * ade[0] + dy * ade[1] + dz * ade[2], xv, yv;
             if (zv + m->r < cerca || zv - m->r > lejos) continue;
-            if (vtx_env > VTX_ETAPA_MAX) continue;
+            if (vtx_et + (vtx_env - vtx_et0) > VTX_ETAPA_MAX) { ta_corto = 1; continue; }
             seguro = zv - m->r > cerca * 1.5f && m->n <= 256;
-            if (m->dmax > 0 && zv - m->r > m->dmax) continue;
+            if (m->dmax > 0 && zv - m->r > m->dmax * detalle) continue;
             xv = dx * der[0] + dy * der[1] + dz * der[2];
             yv = dx * arr[0] + dy * arr[1] + dz * arr[2];
             if (fabsf(xv) > zv * tanh + m->r * 1.3f || fabsf(yv) > zv * tanh * 0.75f + m->r * 1.3f) continue;
@@ -213,6 +298,7 @@ static void dibuja_rango(const modelo_t *mo, int l, uint32_t k0, uint32_t k1, in
         if (recorta && seguro) dibuja_malla_directa(mo, m);
         else dibuja_malla(mo, m);
     }
+    if (ta_en_etapa) vtx_et += vtx_env - vtx_et0;
 }
 
 /* ---------------------------------------------------------------- ruta de la etapa */
@@ -998,24 +1084,30 @@ static void efectos_paso(const coche_t *c, float dt)
     {   static int alterna; if (++alterna & 1) { humo_t *h = humos + humo_sig; memcpy(h->p, q[alterna & 2 ? 1 : 0], 12); h->edad = 0.01f; humo_sig = (humo_sig + 1) % NHUMO; } }
 }
 
-static void pt_envia(const float *p, float u, float v, uint32_t c, int fin)
+/* un cuadrilatero (tira de 4: p0 p1 p2 p3) entero o nada: si se saltara un vertice la tira quedaria sin su fin de
+   tira (EOL) y la siguiente cabecera llegaria a media tira, un parametro ilegal para el TA de la consola real */
+static void pt_cuad(const float p[4][3], const float *uv, uint32_t c)
 {
-    float x = p[0], y = p[1], z = p[2], w; pt_t t;
-    mat_trans_single3_nodivw(x, y, z, w);
-    if (w < cerca) return;
-    t.x = x; t.y = y; t.w = w; t.u = u; t.v = v; t.c = c; envia(&t, fin);
+    pt_t t[4]; int k;
+    for (k = 0; k < 4; k++) {
+        float x = p[k][0], y = p[k][1], z = p[k][2], w;
+        mat_trans_single3_nodivw(x, y, z, w);
+        if (w < cerca) return;
+        t[k].x = x; t[k].y = y; t[k].w = w; t[k].u = uv[2 * k]; t[k].v = uv[2 * k + 1]; t[k].c = c;
+    }
+    if (!ta_cabe(4)) return;
+    for (k = 0; k < 4; k++) envia(t + k, k == 3);
 }
 /* en la lista translucida, con la matriz de vista cargada */
 static void efectos_dibuja(void)
 {
-    int i;
+    static const float UV0[8] = { 0 }, UV1[8] = { 0, 0, 1, 0, 0, 1, 1, 1 }; int i;
     pvr_prim(&cab_huella, sizeof cab_huella);
     for (i = 0; i < nhuella; i++) {
         const huella_t *h = huellas + i;
         float dx = h->p[0][0] - ojo[0], dz = h->p[0][2] - ojo[2];
         if (dx * dx + dz * dz > 250.0f * 250.0f || dx * ade[0] + dz * ade[2] < 1.0f) continue;
-        pt_envia(h->p[0], 0, 0, 0x60101010, 0); pt_envia(h->p[1], 0, 0, 0x60101010, 0);
-        pt_envia(h->p[2], 0, 0, 0x60101010, 0); pt_envia(h->p[3], 0, 0, 0x60101010, 1);
+        pt_cuad(h->p, UV0, 0x60101010);
     }
     pvr_prim(&cab_humo, sizeof cab_humo);
     for (i = 0; i < NHUMO; i++) {
@@ -1027,7 +1119,7 @@ static void efectos_dibuja(void)
             p[k][0] = h->p[0] + sx * der[0] + sy * arr[0]; p[k][1] = h->p[1] + sx * der[1] + sy * arr[1] + tam * 0.5f;
             p[k][2] = h->p[2] + sx * der[2] + sy * arr[2];
         }
-        pt_envia(p[0], 0, 0, col, 0); pt_envia(p[1], 1, 0, col, 0); pt_envia(p[2], 0, 1, col, 0); pt_envia(p[3], 1, 1, col, 1);
+        pt_cuad((const float (*)[3])p, UV1, col);
     }
 }
 
@@ -1072,6 +1164,36 @@ static void caja(float x, float y, float W, float H, uint32_t argb)
     v.x = x + W; pvr_prim(&v, sizeof v);
     v.x = x; v.y = y + H; pvr_prim(&v, sizeof v);
     v.flags = PVR_CMD_VERTEX_EOL; v.x = x + W; pvr_prim(&v, sizeof v);
+}
+
+/* Modo de video: con cable VGA, VGA a 60 Hz; si no, el generico de KallistiOS (NTSC entrelazado a 60 Hz, que casi
+   todas las teles PAL por euroconector aceptan). En una consola PAL (region de la flash Europa) sin VGA se pregunta,
+   a 50 Hz (lo que ve cualquier tele PAL): A = 60 Hz, B o nada en 10 s = 50 Hz. La logica va a 60 pasos por segundo con
+   el reloj (salto de cuadros), asi que a 50 Hz el juego va a la misma velocidad. */
+static int modo_video = DM_640x480;
+static void elige_video(void)
+{
+    int t;
+    if (vid_check_cable() == CT_VGA || flashrom_get_region() != FLASHROM_REGION_EUROPE) return;
+    modo_video = DM_640x480_PAL_IL;
+    vid_set_mode(modo_video, PM_RGB565); vid_clear(0, 0, 0);
+    bfont_draw_str(vram_s + 200 * 640 + 120, 640, 1, "Consola PAL: A = 60 Hz   B = 50 Hz");
+    for (t = 0; t < 1000; t++) {                                /* 10 s */
+        maple_device_t *mc = maple_enum_type(0, MAPLE_FUNC_CONTROLLER);
+        cont_state_t *st = mc ? (cont_state_t *)maple_dev_status(mc) : NULL;
+        if (st && (st->buttons & CONT_A)) { modo_video = DM_640x480; break; }
+        if (st && (st->buttons & CONT_B)) break;
+        thd_sleep(10);
+    }
+    if (modo_video == DM_640x480) {                             /* NTSC entrelazado a 60 Hz (o el que diga el cable) */
+        vid_set_mode(modo_video, PM_RGB565);
+        while (1) {                                             /* que suelte A */
+            maple_device_t *mc = maple_enum_type(0, MAPLE_FUNC_CONTROLLER);
+            cont_state_t *st = mc ? (cont_state_t *)maple_dev_status(mc) : NULL;
+            if (!st || !(st->buttons & CONT_A)) break;
+            thd_sleep(10);
+        }
+    }
 }
 
 static void aviso(const char *s)
@@ -1247,9 +1369,10 @@ static void pvr_colgado(int estado)
 
 int main(int argc, char **argv)
 {
-    /* bufer de vertices de 1 MB (x2); opacos con bloques de 32 (el suelo cercano toca muchas teselas) y 5 OPB de
-       reserva: en la consola real un bufer u OPB lleno cuelga el TA */
-    pvr_init_params_t pp = { { PVR_BINSIZE_32, 0, PVR_BINSIZE_16, 0, PVR_BINSIZE_16 }, 1024 * 1024, 0, 0, 0, 5 };
+    /* bufer de parametros de TA_VB_BYTES (x2); opacos con bloques de 32 (el suelo cercano toca muchas teselas) y 4
+       juegos de OPB de reserva (307 KB por cuadro; en la consola se midieron 65 KB usados en el cuadro que se colgo):
+       en la consola real un bufer u OPB lleno cuelga el TA. Cuentas en docs/DREAMCAST.md */
+    pvr_init_params_t pp = { { PVR_BINSIZE_32, 0, PVR_BINSIZE_16, 0, PVR_BINSIZE_16 }, TA_VB_BYTES, 0, 0, 0, 4 };
     int estado = TITULO, auto_ = 0, ver = VER, pausa = 0, l, i, r;
     uint32_t cuadro = 0, bot_ant = 0, t_estado = 0; uint64_t t0, tcpu = 0, c0;
     float cam_y = 0, tiempo = TIEMPO_ETAPA, fps = 0, ms = 0, cam_fw[3] = { 0, 0, -1 }, ttit = 0;
@@ -1259,7 +1382,8 @@ int main(int argc, char **argv)
     (void)argc; (void)argv;
 
     /* 1: datos del disco a la RAM (la pantalla de texto aun sin PowerVR) */
-    vid_set_mode(DM_640x480, PM_RGB565);
+    elige_video();
+    vid_set_mode(modo_video, PM_RGB565);
     aviso("OutRun 2006 C2C - demo Dreamcast. Cargando la etapa...");
     if ((r = lee_modelo(&etapa, "SEG00.DAT")) || (r = lee_modelo(&coche, "COCHE.DAT"))) {
         sprintf(s1, "No se pudieron leer los datos (%d)", r); aviso(s1); for (;;) thd_sleep(1000);
@@ -1278,7 +1402,15 @@ int main(int argc, char **argv)
     txt_arr = pvr_mem_malloc(sizeof buf_arr); txt_cen = pvr_mem_malloc(sizeof buf_cen);
     for (i = 0, r = 0; i < NMODTRAF; i++) r |= sube_modelo(&mtraf[i]);
     if (r || sube_modelo(&etapa) || sube_modelo(&coche)) {
-        vid_set_mode(DM_640x480, PM_RGB565); aviso("Sin memoria de video para las texturas"); for (;;) thd_sleep(1000);
+        vid_set_mode(modo_video, PM_RGB565); aviso("Sin memoria de video para las texturas"); for (;;) thd_sleep(1000);
+    }
+    {   /* minimo que se guarda para lo que no es la etapa: el coche y tres coches de trafico (el primer cuadro de carrera
+           no tiene medida del anterior) */
+        uint32_t ct = 0, c;
+        for (i = 0; i < NMODTRAF; i++) if ((c = modelo_vtx(&mtraf[i])) > ct) ct = c;
+        ta_vmin_otros = modelo_vtx(&coche) + 3 * ct;
+        dbglog(DBG_INFO, "TA: bufer %uK, coche %u vertices, trafico hasta %u, minimo reservado %u\n", TA_VB_BYTES >> 10,
+               (unsigned)modelo_vtx(&coche), (unsigned)ct, (unsigned)ta_vmin_otros);
     }
     hud_ok = !hud_carga("HUD.DAT", 6);                          /* 6 = tacometro del Testarossa */
     for (l = 0; l < 3; l++) for (i = 0; i < 2; i++) {
@@ -1352,7 +1484,9 @@ int main(int argc, char **argv)
                 if (hud_ok && hud_sube_tex()) hud_ok = 0;
                 if (etapa_n) {                                  /* volver a la primera etapa */
                     libera_modelo(&etapa);
-                    if (lee_modelo(&etapa, "SEG00.DAT") || sube_modelo(&etapa)) { vid_set_mode(DM_640x480, PM_RGB565); aviso("Error"); for (;;) thd_sleep(1000); }
+                    musica_pausa_lectura(1);                    /* el GD para la etapa (la musica tira del anillo) */
+                    if (lee_modelo(&etapa, "SEG00.DAT") || sube_modelo(&etapa)) { vid_set_mode(modo_video, PM_RGB565); aviso("Error"); for (;;) thd_sleep(1000); }
+                    musica_pausa_lectura(0);
                     ruta_prepara(); etapa_n = 0;
                 }
                 memset(&yo, 0, sizeof yo); yo.s = SALIDA; yo.x = carril_x(SALIDA, 4);
@@ -1361,6 +1495,7 @@ int main(int argc, char **argv)
 #endif
                 coche_paso(&yo, 0, 0, 0, 0); traf_inicia(SALIDA); efectos_borra();
                 if (fis_ok) { float p[3], th; ruta_en(yo.s, p, &th, NULL, NULL); or2_coloca(&fis, &fpar, th, 0); }
+                lejos = LEJOS_MIN; pvr_fog_table_linear(lejos * 0.55f, lejos);   /* empieza corta y luego crece */
                 tiempo = TIEMPO_ETAPA; estado = CUENTA; t_estado = 0; t_cuenta = 0; pausa = 0; crono = 0; vmax = 0; pt_inicia();
             }
         } else if (estado == CUENTA) {
@@ -1401,10 +1536,14 @@ int main(int argc, char **argv)
                     pvr_list_begin(PVR_LIST_TR_POLY); rect_txr(txt_cen, 256, 32, 64, 200, 512, 64, PVR_LIST_TR_POLY); pvr_list_finish();
                     pvr_scene_finish(); pvr_wait_ready();
                     libera_modelo(&etapa);
-                    if (lee_modelo(&etapa, RAMA_FICH[rama]) || sube_modelo(&etapa)) {
-                        vid_set_mode(DM_640x480, PM_RGB565); aviso("No se pudo cargar la etapa siguiente"); for (;;) thd_sleep(1000);
+                    musica_pausa_lectura(1);                    /* el GD para la etapa (la musica tira del anillo) */
+                    r = lee_modelo(&etapa, RAMA_FICH[rama]) || sube_modelo(&etapa);
+                    musica_pausa_lectura(0);
+                    if (r) {
+                        vid_set_mode(modo_video, PM_RGB565); aviso("No se pudo cargar la etapa siguiente"); for (;;) thd_sleep(1000);
                     }
                     ruta_prepara(); etapa_n = 1;
+                    lejos = LEJOS_MIN; pvr_fog_table_linear(lejos * 0.55f, lejos);
                     t_carga = (timer_ms_gettime64() - tc) / 1000.0f;
                     memset(&yo, 0, sizeof yo); yo.s = 40.0f; yo.x = carril_x(40.0f, 4); yo.v = v; coche_paso(&yo, 0, 0, 0, 0);
                     if (fis_ok) { float p[3], th; ruta_en(yo.s, p, &th, NULL, NULL); or2_coloca(&fis, &fpar, th, v); }
@@ -1474,14 +1613,16 @@ int main(int argc, char **argv)
         c0 = timer_us_gettime64();
         if (estado == TITULO) pvr_set_bg_color(54 / 255.0f, 62 / 255.0f, 74 / 255.0f);   /* fondo gris del frontal */
         else pvr_set_bg_color(0.45f, 0.65f, 0.95f);
+        ta_fin_cuadro();                                        /* el TA ya termino el cuadro anterior: lo que gasto */
         pvr_scene_begin();
         fx = 320.0f / (0.75f + 0.07f * fminf(yo.v / 85.0f, 1.0f));   /* algo mas angular cuanto mas rapido */
         pon_vista(ojo_, mira);
         pon_coche(&yo, mod_coche);
-        tri_enviados = 0; vtx_ult = vtx_env; vtx_env = 0;
+        tri_enviados = 0; vtx_ult = vtx_env; vtx_env = 0; ta_inicia_cuadro(); vtx_et_ult = vtx_et; vtx_et = 0;
         for (l = 0; l < 3; l++) {
             pvr_list_begin(LISTA[l]);
             if (estado != TITULO) {                             /* en el menu no se ve la etapa */
+                ta_en_etapa = 1;
                 mat_load(&vista_cielo);
                 dibuja_rango(&etapa, l, etapa.inicio[3], etapa.inicio[4], 0, 1, 1);
                 mat_load(&vista);
@@ -1489,7 +1630,7 @@ int main(int argc, char **argv)
                 color_fijo = l == DEP_LISTA ? 0xFFFF00FF : 0;
 #endif
                 dibuja_rango(&etapa, l, etapa.inicio[l], etapa.inicio[l + 1], 1, 0, 0);
-                color_fijo = 0;
+                color_fijo = 0; ta_en_etapa = 0;
             }
             if (estado != TITULO || menu_coche3d()) {
                 mat_load(&vista); mat_apply(&mod_coche);
@@ -1540,7 +1681,9 @@ int main(int argc, char **argv)
             pvr_list_finish();
         }
 #ifdef DIAG_VTX
-        if (cuadro % 60 == 0) dbglog(DBG_INFO, "DIAG est%d v%u tri %u lejos %d vram %u\n", estado, (unsigned)vtx_env, (unsigned)tri_enviados, (int)lejos, (unsigned)pvr_mem_available());
+        if (cuadro % 60 == 0) dbglog(DBG_INFO, "DIAG est%d v%u (etapa %u) tri %u ms %.1f+%.1f lejos %d det %.1f vram %u ta %uK etapa %uK/%uK 2d %u bpv %u real %uK opb %uK%s\n", estado,
+                                     (unsigned)vtx_env, (unsigned)vtx_et, (unsigned)tri_enviados, (double)ms_log, (double)ms, (int)lejos, (double)detalle, (unsigned)pvr_mem_available(), (unsigned)(ta_vb >> 10),
+                                     (unsigned)(ta_et >> 10), (unsigned)(ta_tope_etapa >> 10), (unsigned)ta_v2d, (unsigned)ta_bpv, (unsigned)(ta_real_ult >> 10), (unsigned)(ta_opb_ult >> 10), ta_corto ? " TOPE" : "");
 #endif
         pvr_scene_finish();
         tcpu += timer_us_gettime64() - c0;
@@ -1548,8 +1691,17 @@ int main(int argc, char **argv)
             uint64_t t1 = timer_ms_gettime64();
             fps = 30000.0f / (float)(t1 - t0); ms = tcpu / 30000.0f; ms_log = t_log / 30000.0f; t0 = t1; tcpu = 0; t_log = 0;
             /* distancia adaptativa: si la geometria no cabe en el cuadro, se acorta (minimo 600 m) y vuelve a crecer */
-            if ((ms + ms_log > 15.0f || vtx_ult > VTX_ETAPA_MAX + 6000) && lejos > 600.0f) { lejos -= 50.0f; pvr_fog_table_linear(lejos * 0.55f, lejos); }
-            else if (ms + ms_log < 11.5f && vtx_ult < VTX_ETAPA_MAX && lejos < lejos_obj) { lejos += 50.0f; pvr_fog_table_linear(lejos * 0.55f, lejos); }
+            /* ta_corto: algun cuadro se quedo sin presupuesto (de vertices de la etapa o del TA) y se saltaron mallas;
+               se acorta la distancia para que lo que falte sea lo de lejos (antes contaba el coche y el trafico en el
+               tope de la etapa y la distancia acababa siempre en el minimo) */
+            if (ms + ms_log > 15.0f || ta_corto) {         /* acorta: la distancia y, en el minimo, el detalle */
+                if (lejos > LEJOS_MIN) { lejos -= 50.0f; pvr_fog_table_linear(lejos * 0.55f, lejos); }
+                else if (detalle > 0.35f) detalle -= 0.1f;
+            } else if (ms + ms_log < 11.5f && vtx_et_ult < VTX_ETAPA_MAX * 0.85f && ta_et < ta_tope_etapa / 10 * 8) {
+                if (detalle < 0.95f) detalle += 0.1f;          /* alarga: primero el detalle y luego la distancia */
+                else if (lejos < lejos_obj) { lejos += 50.0f; pvr_fog_table_linear(lejos * 0.55f, lejos); }
+            }
+            ta_corto = 0;
             saltos_ver = saltos; saltos = 0;
         }
     }

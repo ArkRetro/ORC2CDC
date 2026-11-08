@@ -113,8 +113,9 @@ ELF ni en el PC; contenido sin estudiar (desplazamientos por punto de la ruta, p
 **XST** (texturas 2D, `spr_*xst.sz`): `u32 tamano`; cabecera relativa a +4 `{0, meta, n tex, 0, n grupos,
 grupos*, n imagenes, imagenes*}`; en `+4+meta` desplazamientos a cabeceras de textura como las de los modelos; bit
 0x8000 de la palabra 11 = texeles con LZ (rutina 0x165788: bandera 1 = 12 bits de distancia + 4 de longitud+3;
-distancia 0 = relleno). Imagen 0x1C `{textura, f32 u0 v0 u1 v1, u16 izq arr der abj}`. `conv_hud.texturas`,
-`conv_hud.imagen_xst`.
+distancia 0 = relleno). Los PSMT8/PSMT4 se suben como un rectangulo PSMCT32/PSMCT16 de la mitad de ancho y alto
+con ancho de bufer = ancho / 128 (minimo 1); la palabra 2 de la cabecera no es ese ancho. Imagen 0x1C
+`{textura, f32 u0 v0 u1 v1, u16 izq arr der abj}`. `conv_hud.texturas`, `conv_hud.imagen_xst`.
 
 **SPRANI** (`ani_SPRANI_*.sz`): animaciones 2D por capas (estilo After Effects): tabla de escenas, componentes
 0x24, capas 0x4C con 6 canales de Hermite, footage 0x18 con cuadros 0x14 (textura y rectangulo). Detalle completo
@@ -135,8 +136,12 @@ ELF (0x3526a4); ver la cabecera de `tools/conv_sonido.py`. Rutas `\Sound\%s\%s` 
 **PSS** (MV.PS2): MPEG-PS de Sony (`00 00 01 BA`), video MPEG-2 y audio en paquetes privados. El PC usa Bink
 (`system/title_movie.cpp`).
 
-**Texto `txet`**: `'txet'`, `u32 tamano`, tabla de desplazamientos y cadenas. PC: `frontend_text.cpp` (465DF0,
-42CFE0). Sin conversor.
+**Texto `txet`**: `'txet'`, `u32 tamano`, tabla de desplazamientos y cadenas (cada caracter en 16 bits; el byte
+bajo es el codigo de la fuente). PC: `frontend_text.cpp` (465DF0, 42CFE0). Los numeros de texto del PS2 son los del
+PC menos 1 en la zona de la barra de ayuda. **Fuentes**: `spr_font_xst` (textura n = fuente n, celdas de 16 por
+fila) y, en el ELF, una tabla de 15 punteros a registros `{id, metricas*, interletraje*, u16 ancho, alto, primer
+caracter, i32 espaciado x, y, u16 n}` (metricas: 2 bytes por caracter, desplazamiento y ancho; interletraje n x n
+bytes). `conv_menu.Fuente`, `conv_menu.textos` (barra de ayuda de los menus).
 
 **Fantasmas `.rec`** (`QHOT`/`NHOT`): repeticiones; nombres `gc_default_<old|cvt>_<nml|tn1|tn2>..._NN_N[r].rec`.
 PC: `race_ghosts.cpp` (465F30..4687C0), `pc_car_services_ghost.cpp`.

@@ -3,8 +3,10 @@
    Flujo del original (port de PC con los tokens del PS2):
      titulo (START/A) -> menu principal -> un jugador -> coche -> cambio AT/MT -> musica -> carrera; B vuelve atras.
    Cursores con los tramos MUEVEij (20 cuadros por paso; 40 en la musica), entradas ENTRA, cambio con AT/MT en bucle y
-   AT_OK/MT_OK o AT_ATRAS/MT_ATRAS al confirmar o volver, radio de la musica ENTRA/SALE.
-   Demo: solo el Testarossa (coche 8), los modos COAST 2 COAST y OUTRUN (los dos a la misma carrera) y los temas con
+   AT_OK/MT_OK o AT_ATRAS/MT_ATRAS al confirmar o volver, radio de la musica ENTRA/SALE. Cabeceras: ENTRA y luego
+   BRILLO (destello del rotulo en bucle). Barra de ayuda de cada pantalla (AYUDA_*: botones y textos del original,
+   ya compuestos en MENU.DAT con la fuente del juego), en COMUN.
+   Demo: solo el Testarossa (coche 9), los modos COAST 2 COAST y OUTRUN (los dos a la misma carrera) y los temas con
    pista en el disco (MUSn); lo demas queda bloqueado (candado o sacudida).
    Sonido (como el original): efectos del frontal con sfx_menu (cursor, aceptar, bloqueado, cancelar); el titulo va
    sin musica (en el original suena la pelicula), al salir de el arranca la musica de menu (pista 30 de MUSIC.PS2,
@@ -32,14 +34,16 @@ static const int MASCARA[NP] = { 1 << P_TITULO, 0, (1 << P_COMUN) | (1 << P_MENU
                                  (1 << P_COMUN) | (1 << P_COCHE), (1 << P_COMUN) | (1 << P_COCHE) | (1 << P_CAMBIO),
                                  (1 << P_COMUN) | (1 << P_MUSICA) };
 enum { U_TFONDO, U_TLOGO, U_TSTART, U_FONDO, U_CABMENU, U_PRINC, U_CABMODO, U_UNJUG, U_CABCOCHE, U_INFO, U_CAND,
-       U_CAMBIO, U_RADIO, U_AYUDA, U_L0, U_T0, U_LISTA, U_MCAND, NU };
+       U_CAMBIO, U_RADIO, U_AYUDA, U_L0, U_T0, U_LISTA, U_MCAND,
+       U_BARRA_MENU, U_BARRA_MODO, U_BARRA_COCHE, U_BARRA_CAMBIO, U_BARRA_MUSICA, U_CABMUSICA, NU };
 static const char *const UNOM[NU] = { "TITULO_FONDO", "TITULO_LOGO", "TITULO_START", "FONDO", "CABECERA_MENU",
     "MODO_PRINCIPAL", "CABECERA_MODO", "MODO_UN_JUGADOR", "CABECERA_COCHE", "COCHE_INFO", "COCHE_CANDADO", "CAMBIO",
-    "MUSICA_RADIO", "MUSICA_AYUDA", "MUSICA_L0", "MUSICA_T0", "MUSICA_LISTA", "MUSICA_CANDADO" };
+    "MUSICA_RADIO", "MUSICA_AYUDA", "MUSICA_L0", "MUSICA_T0", "MUSICA_LISTA", "MUSICA_CANDADO",
+    "AYUDA_MENU", "AYUDA_MODO", "AYUDA_COCHE", "AYUDA_CAMBIO", "AYUDA_MUSICA", "CABECERA_MUSICA" };
 
 #define N_OPC 5                                             /* opciones del menu principal y de un jugador */
 #define N_COCHES 15
-#define COCHE_DEMO 8                                        /* Testarossa */
+#define COCHE_DEMO 9                                        /* Testarossa (logo del cuadro 200 de 0x44007E) */
 #define N_TEMAS 9                                           /* lista 0 */
 #define T_DEMO (8 * 60)                                     /* inactividad en el titulo hasta la demo */
 #define T_FUNDIDO 12
@@ -54,7 +58,7 @@ static int pidx[NP], cargada[NP], us[NU]; static uint32_t edad[NP], reloj;
 typedef struct { int u; float c; int ini, fin, modo; } anim_t;
 enum { F_ENTRA, F_QUIETO, F_SALE };
 static anim_t a_cab, a_sel, a_aux, a_radio, a_ayuda;
-static int pant, fase, t, sig, inact, t_bloq, entra_atras;
+static int pant, fase, t, sig, inact, t_bloq, entra_atras, barra_ant = -1;
 static int c_menu, c_modo, c_coche = COCHE_DEMO, manual, tema, n_ok, pista_sonando, sale_ok;
 
 /* ---------------------------------------------------------------- tramos */
@@ -72,6 +76,12 @@ static void an_tramo(anim_t *a, const char *n)
     if (tramo(a->u, n, &i, &f, &m)) an_va(a, i, f, m); else an_va(a, 0, 0, 2);
 }
 static void an_tramo_n(anim_t *a, const char *fmt, int k) { char b[32]; sprintf(b, fmt, k); an_tramo(a, b); }
+/* el tramo n1 o, si no esta (MENU.DAT antiguo), el n2 */
+static void an_tramo_o(anim_t *a, const char *n1, const char *n2)
+{
+    int i, f, m;
+    if (tramo(a->u, n1, &i, &f, &m)) an_va(a, i, f, m); else an_tramo(a, n2);
+}
 /* MUEVEij hacia delante o hacia atras (de j a i) */
 static void an_mueve(anim_t *a, int de, int a_) {
     char b[32]; int i, f, m, lo = de < a_ ? de : a_;
@@ -147,7 +157,23 @@ int menu_inicia(void)
 }
 
 /* ---------------------------------------------------------------- pantallas */
-static int cabecera(int p) { return p == P_MENU ? U_CABMENU : p == P_MODO ? U_CABMODO : (p == P_COCHE || p == P_CAMBIO) ? U_CABCOCHE : -1; }
+static int cabecera(int p)
+{
+    return p == P_MENU ? U_CABMENU : p == P_MODO ? U_CABMODO : (p == P_COCHE || p == P_CAMBIO) ? U_CABCOCHE :
+           p == P_MUSICA && us[U_CABMUSICA] >= 0 ? U_CABMUSICA : -1;
+}
+/* barra de ayuda (iconos de los botones y sus textos, conv_menu.AYUDA) de cada pantalla */
+static int barra(int p)
+{
+    switch (p) {
+    case P_MENU: return U_BARRA_MENU;
+    case P_MODO: return U_BARRA_MODO;
+    case P_COCHE: return U_BARRA_COCHE;
+    case P_CAMBIO: return U_BARRA_CAMBIO;
+    case P_MUSICA: return U_BARRA_MUSICA;
+    }
+    return -1;
+}
 
 /* pista n de la musica (MUSn) si no es la que suena; -1 = silencio. Devuelve 0 si suena */
 static int pon_pista(int n)
@@ -173,6 +199,7 @@ static void entra(int p, int atras)
 {
     int cab = cabecera(p);
     asegura(MASCARA[p]);
+    barra_ant = pant >= 0 ? barra(pant) : -1;
     pant = p; fase = F_ENTRA; t = 0; entra_atras = atras; t_bloq = 0;
     if (cab < 0) a_cab.u = -1;
     else if (us[cab] != a_cab.u) { a_cab.u = us[cab]; an_tramo(&a_cab, "ENTRA"); }   /* cabecera nueva */
@@ -263,7 +290,8 @@ int menu_paso(unsigned n)
     if (!md) return (n & CONT_START) ? MENU_CARRERA : inact > T_DEMO ? MENU_DEMO : MENU_SIGUE;
     t++;
     if (t_bloq) t_bloq--;
-    if (a_cab.u >= 0) { an_paso(&a_cab); if (an_hecho(&a_cab) && a_cab.modo == 0) an_tramo(&a_cab, "QUIETA"); }
+    /* cabecera: entra y luego el destello sobre el rotulo en bucle (BRILLO; QUIETA en los MENU.DAT antiguos) */
+    if (a_cab.u >= 0) { an_paso(&a_cab); if (an_hecho(&a_cab) && a_cab.modo == 0) an_tramo_o(&a_cab, "BRILLO", "QUIETA"); }
     {   int estaba = an_hecho(&a_sel);
         an_paso(&a_sel); an_paso(&a_aux); an_paso(&a_radio); an_paso(&a_ayuda);
         /* fin de un movimiento del cursor: se queda quieto en la opcion; en la musica suena el tema */
@@ -314,6 +342,11 @@ void menu_dibuja(void)
     }
     hudd_dibuja(md, us[U_FONDO], 0, 0, 0, 1, 0.0002f, 1);  /* detras del coche 3D */
     if (cab >= 0) an_dibuja(&a_cab, 0, cab_sale ? a_sal : 1, 6, 0);
+    {   /* barra de ayuda encima de la rejilla de la cabecera; se funde solo si cambia de una pantalla a otra */
+        int b = barra(pant), bs = fase == F_SALE ? (sig < 0 ? -1 : barra(sig)) : b;
+        float a = (bs != b ? a_sal : 1) * (fase == F_ENTRA && barra_ant != b ? a_ent : 1);
+        if (b >= 0) hudd_dibuja(md, us[b], 0, 0, 0, a, 7.5f, 0);
+    }
     switch (pant) {
     case P_MENU: case P_MODO:
         an_dibuja(&a_sel, sacude, (entra_atras ? a_ent : 1) * a_sal, 3, 0);

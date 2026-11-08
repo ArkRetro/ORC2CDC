@@ -7,10 +7,22 @@
 
 static uint8_t sec[2048] __attribute__((aligned(32)));
 
-/* por DMA si el destino esta alineado a 32 (la CPU queda libre mientras llegan los datos); si no, PIO */
+static kthread_t *fondo;                                /* hilo de la musica */
+static volatile uint64_t ult_primer_plano;              /* ms de la ultima lectura de otro hilo */
+void gd_hilo_fondo(void) { fondo = thd_get_current(); }
+int gd_ocupado(uint32_t ms) { return ult_primer_plano && timer_ms_gettime64() - ult_primer_plano < ms; }
+
+/* por DMA si el destino esta alineado a 32 (la CPU queda libre mientras llegan los datos); si no, PIO. KallistiOS
+   serializa los accesos al GD (semaforo del G1) e invalida la cache de datos sobre el destino de un DMA; el destino no
+   se debe tocar mientras tanto ni compartir linea de cache (32 bytes) con otros datos: por eso va alineado a 32 y en
+   multiplos de 2048 */
 static int lee(uint32_t lba, int n, void *dst)
 {
-    return cdrom_read_sectors_ex(dst, lba + 150, n, ((uintptr_t)dst & 31) == 0);
+    int r, pp = thd_get_current() != fondo;
+    if (pp) ult_primer_plano = timer_ms_gettime64();
+    r = cdrom_read_sectors_ex(dst, lba + 150, n, ((uintptr_t)dst & 31) == 0);
+    if (pp) ult_primer_plano = timer_ms_gettime64();
+    return r;
 }
 int gd_lee(uint32_t lba, int n, void *dst) { return lee(lba, n, dst); }
 

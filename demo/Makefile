@@ -2,6 +2,9 @@
 TARGET = demo.elf
 OBJS = main.o ../comun/gd.o ../comun/musica.o ../comun/or2_fisica.o ../comun/hud.o ../comun/sfx.o ../comun/menu.o
 all: rm-elf $(TARGET)
+# el HUD y los menus dibujan con pvr_prim: pasan por ta_prim (demo/main.c) para contar sus vertices en el presupuesto
+# del TA (docs/DREAMCAST.md)
+../comun/hud.o ../comun/menu.o: CFLAGS += -Dpvr_prim=ta_prim
 include $(KOS_BASE)/Makefile.rules
 clean: rm-elf
 	-rm -f $(OBJS)
