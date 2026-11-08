@@ -256,7 +256,7 @@ static float altura(float s, float x)
 /* ---------------------------------------------------------------- coche */
 typedef struct { float s, x, a, v; float pos[3], fw[3], up[3]; int choque, derrape, t_derrape, t_muro; float deriva, freno_ant, gas_ant; } coche_t;
 static coche_t yo;
-#define VMAX 82.0f
+#define VMAX 100.0f                                          /* techo teorico; punta real unos 300 km/h */
 /* posicion y orientacion en el mundo a partir de (s, x, a), apoyado en la calzada (altura, cabeceo, balanceo) */
 static void coche_coloca(coche_t *c)
 {
@@ -363,7 +363,7 @@ static void coche_paso(coche_t *c, float giro, float gas, float freno, float dt)
         c->a -= c->a * 0.15f * dt;
     }
     c->a += yaw * dt;
-    c->v += (gas * 9.5f * (1.0f - c->v / VMAX) - freno * 18.0f - 0.0004f * c->v * c->v - 0.3f) * dt;
+    c->v += (gas * 13.0f * (1.0f - c->v / VMAX) - freno * 20.0f - 0.00025f * c->v * c->v - 0.3f) * dt;
     if (c->v < 0) c->v = 0;
     c->s += c->v * cosf(c->a) * dt;
     c->x += c->v * sinf(c->a) * dt;
@@ -739,6 +739,7 @@ int main(int argc, char **argv)
         pvr_wait_ready();
         c0 = timer_us_gettime64();
         pvr_scene_begin();
+        fx = 320.0f / (0.75f + 0.07f * fminf(yo.v / 85.0f, 1.0f));   /* algo mas angular cuanto mas rapido */
         pon_vista(ojo_, mira);
         pon_coche(&yo, mod_coche);
         tri_enviados = 0;
