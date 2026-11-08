@@ -352,6 +352,17 @@ def superficies(seg, cam, an):
         ban[i] = np.array(f, float).reshape(-1)
     return lim, ext, ban, hpf
 
+def carriles_uniformes(an, car=None):
+    """carriles de unos 3,7 m repartidos a lo ancho del asfalto (NCARRIL desvios como en ajusta_al_asfalto) en los
+    puntos sin carriles (todos en el mismo sitio: sin asfalto reconocido); car None: en todos"""
+    car = np.zeros((len(an), NCARRIL)) if car is None else car.copy()
+    for i in range(len(an)):
+        if np.ptp(car[i]) > 1.0: continue
+        a2, b2 = -an[i, 0] + 0.5, an[i, 1] - 0.5; w = b2 - a2; n = max(1, int(round(w / 3.7)))
+        pos = [a2 + (m + 0.5) * w / n for m in range(n)]
+        car[i] = [pos[int(round(k * (len(pos) - 1) / (NCARRIL - 1)))] for k in range(NCARRIL)]
+    return car
+
 def transforma(mod, M):
     """lleva el modelo y su ruta al marco del curso: M = (tx, ty, tz, ry), giro alrededor de y (x' = x cos + z sen,
     z' = -x sen + z cos, el de pc_matrix_rotate_y del original) y traslacion. El cielo (lista 3, centrado en la camara)
@@ -389,6 +400,7 @@ def convierte(seg, n, sal, mundo=None, cielo=True):
     if cam is None: cam = recorrido(seg)
     cam, an, car = ajusta_al_asfalto(seg, cam)                 # centro, bordes y carriles: los del asfalto
     if an is None: an = anchos(seg, cam); car = np.zeros((len(cam), NCARRIL))
+    car = carriles_uniformes(an, car)                          # donde no se reconocieron carriles
     sup = superficies(seg, cam, an)
     if sup is None:                                            # sin colision: el limite es el borde del asfalto
         ban = np.zeros((len(cam), NBANDA, 2)); ban[:, :, 0] = an[:, 1:2]; ban[:, :, 1] = 1; ban[:, 0, 0] = -an[:, 0]

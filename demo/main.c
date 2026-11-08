@@ -1,6 +1,7 @@
-/* Demo jugable del port de OutRun 2006 C2C a Dreamcast: la primera etapa (SEG00.DAT) y los coches (COCHEnn.DAT),
-   convertidos de tu DVD con tools/conv_tramo.py y tools/conv_coche.py (formato ORD6 con texturas VQ, ver tools/modelo.py
-   y tools/vq.py). Necesidades de la consola real (presupuesto del TA, VRAM, GD, video): docs/DREAMCAST.md.
+/* Demo jugable del port de OutRun 2006 C2C a Dreamcast: la primera etapa (SEG00.DAT), la carretera de la bifurcacion
+   (BKI.DAT, BKD.DAT) y las dos etapas siguientes (SEG03.DAT, SEG05.DAT), que se leen mientras se conduce (curso_paso),
+   y los coches (COCHEnn.DAT), convertidos de tu DVD con tools/conv_tramo.py, tools/conv_union.py y tools/conv_coche.py
+   (formato ORD6 con texturas VQ, ver tools/modelo.py y tools/vq.py). Necesidades de la consola real (presupuesto del TA, VRAM, GD, video): docs/DREAMCAST.md.
    Orden de carga: datos del GD a la RAM (con aviso en pantalla), PowerVR, texturas a la memoria de video, cabeceras
    de poligono, y a jugar. La conduccion va sobre la ruta de la etapa (distancia recorrida, desvio lateral y rumbo
    respecto a la carretera), con los bordes de la calzada como muros.
@@ -487,27 +488,39 @@ static int ruta_pon(const modelo_t *m)
     ruta_prepara();
     return 0;
 }
-/* Anade la ruta del modelo m detras de la actual: se salta sus puntos que no pasan del ultimo (ruta_salto) y su centro
-   arranca en el de la actual y vuelve al suyo en RECENTRA puntos (dos ficheros no tienen por que coincidir en el
-   centro: la ruta de una etapa sigue los carriles y la de la union el poligono de la calzada; el coche no debe saltar
-   de lado). Devuelve el primer punto anadido, o -1 */
+/* Anade la ruta del modelo m detras de la actual. Empieza PASO m por delante del ultimo punto (sus puntos se toman en
+   esa posicion fraccionaria, interpolando: el paso sigue siendo PASO y el coche no da un tiron) y su centro arranca en
+   el de la actual y vuelve al suyo en RECENTRA puntos (dos ficheros no tienen por que coincidir en el centro: la ruta
+   de una etapa sigue los carriles y la de la union el poligono de la calzada; el coche no debe saltar de lado).
+   Devuelve el primer punto anadido, o -1 */
 #define RECENTRA 25
-static uint32_t ruta_salto;
+static uint32_t ruta_salto;                                     /* primer punto de m usado (la parte entera) */
 static int ruta_anade(const modelo_t *m)
 {
-    const float *b = m->ruta; uint32_t j = 0, k, i0 = ruta_n, n; float ax, az, tx, tz, l, o0 = 0;
-    if ((int)m->paso_ruta != PR || m->nruta < 4 || !ruta_n) return -1;
+    const float *b = m->ruta; uint32_t j = 0, k, c, i0 = ruta_n, n; float ax, az, tx, tz, l, o0 = 0, d0 = 0, d1, f = 0;
+    if ((int)m->paso_ruta != PR || m->nruta < 8 || !ruta_n) return -1;
     ax = ruta_p[PR * (ruta_n - 1)]; az = ruta_p[PR * (ruta_n - 1) + 2];
     tx = b[PR] - b[0]; tz = b[PR + 2] - b[2]; l = sqrtf(tx * tx + tz * tz) + 1e-6f; tx /= l; tz /= l;
-    while (j + 4 < m->nruta && (b[PR * j] - ax) * tx + (b[PR * j + 2] - az) * tz < 0.5f * PASO) j++;
-    n = m->nruta - j;
+    /* d: avance de cada punto de m sobre el ultimo de la actual; se busca d = PASO entre j y j + 1 */
+    for (j = 0; j + 6 < m->nruta; j++) {
+        d1 = (b[PR * (j + 1)] - ax) * tx + (b[PR * (j + 1) + 2] - az) * tz;
+        d0 = (b[PR * j] - ax) * tx + (b[PR * j + 2] - az) * tz;
+        if (d0 >= PASO) break;                                  /* m empieza lejos: tal cual */
+        if (d1 >= PASO) { f = (PASO - d0) / (d1 - d0 + 1e-6f); break; }
+    }
+    n = m->nruta - j - 1;
     if (ruta_reserva(ruta_n + n)) return -1;
-    memcpy(ruta_p + PR * ruta_n, b + PR * j, n * PR * sizeof(float));
+    for (k = 0; k < n; k++) {
+        const float *p = b + PR * (j + k), *q = p + PR; float *o = ruta_p + PR * (ruta_n + k);
+        for (c = 0; c < ruta_pr; c++) o[c] = p[c] + f * (q[c] - p[c]);
+        if (CON_SUP) for (c = 0; c < NBANDA; c++) o[C_BANDA + 2 * c + 1] = (f < 0.5f ? p : q)[C_BANDA + 2 * c + 1];   /* material */
+    }
     for (k = 0; k < RECENTRA && k < n; k++) {
-        const float *p0 = b + PR * (j + k - (j + k > 0)), *p1 = b + PR * (j + k + 1 < m->nruta ? j + k + 1 : j + k);
+        float *p = ruta_p + PR * (ruta_n + k);                  /* la derecha, de los puntos sin mover */
+        const float *p0 = b + PR * (j + k - (j + k > 0)), *p1 = b + PR * (j + k + 1);
         float rx = -(p1[2] - p0[2]), rz = p1[0] - p0[0]; l = sqrtf(rx * rx + rz * rz) + 1e-6f; rx /= l; rz /= l;
-        if (!k) o0 = (ax - b[PR * j]) * rx + (az - b[PR * j + 2]) * rz;   /* el centro de la actual, a la derecha */
-        ruta_recentra(ruta_p + PR * (ruta_n + k), o0 * 0.5f * (1 + cosf((float)M_PI * k / RECENTRA)), rx, rz);
+        if (!k) o0 = (ax - p[0]) * rx + (az - p[2]) * rz;      /* el centro de la actual, a la derecha */
+        ruta_recentra(p, o0 * 0.5f * (1 + cosf((float)M_PI * k / RECENTRA)), rx, rz);
     }
     ruta_salto = j; ruta_n += n;
     ruta_prepara();
@@ -1343,6 +1356,14 @@ static int cur_rama, cur_en_union;
 static float s_union, s_decide, s_sig, t_carga_ult;             /* s donde empieza la union, se elige rama, etapa sig. */
 static uint32_t i_union, j_union;                               /* primer punto de la union en la ruta y en su fichero */
 
+/* RAM: (en uso, libre) en KB; libre = huecos del monton + lo que queda hasta el final de la RAM (16 MB, menos 64 KB
+   para la pila del arranque) */
+static void ram_kb(unsigned *uso, unsigned *libre)
+{
+    struct mallinfo mi = mallinfo(); uintptr_t tope = (uintptr_t)sbrk(0);
+    *uso = mi.uordblks >> 10;
+    *libre = (unsigned)((mi.fordblks + (0x8d000000u - 0x10000u - tope)) >> 10);
+}
 static void curso_error(const char *s) { dbglog(DBG_ERROR, "CURSO: %s\n", s); vid_set_mode(modo_video, PM_RGB565); aviso(s); for (;;) thd_sleep(1000); }
 static void sube_etapa(modelo_t *m)
 {
@@ -1396,8 +1417,11 @@ static int curso_paso(void)
             if ((i = ruta_anade(m)) < 0) curso_error("Sin memoria para la ruta");
             s_sig = i * PASO;
         }
-        dbglog(DBG_INFO, "CURSO: %s en %.2f s (s %.0f), ram %uK\n", m == &uni ? "union" : m == &uni_der ? "rama derecha" : "etapa siguiente",
-               (double)t_carga_ult, (double)yo.s, (unsigned)(mallinfo().uordblks >> 10));
+        {
+            unsigned u, l; ram_kb(&u, &l);
+            dbglog(DBG_INFO, "CURSO: %s en %.2f s (s %.0f), RAM en uso %uK libre %uK, VRAM libre %uK\n", m == &uni ? "union" : m == &uni_der ? "rama derecha" : "etapa siguiente",
+                   (double)t_carga_ult, (double)yo.s, u, l, (unsigned)(pvr_mem_available() >> 10));
+        }
     }
     if (!uni.datos && carga.estado == 0 && yo.s > longitud - UNION_ANTES) carga_pide(&uni, "BKI.DAT");
     if (s_union >= 0 && !cur_en_union && yo.s >= s_union) { cur_en_union = 1; ev |= CUR_UNION; }
@@ -1414,12 +1438,30 @@ static int curso_paso(void)
         libera_modelo(&uni_der);
         ev |= CUR_RAMA;
     }
-    if (etapa.datos && cur_en_union && yo.s > s_union + UNION_LIBERA) { libera_modelo(&etapa); cielo = &uni; }
+    if (etapa.datos && cur_en_union && yo.s > s_union + UNION_LIBERA) {
+        unsigned u, l;
+        libera_modelo(&etapa); cielo = &uni;
+        ram_kb(&u, &l); dbglog(DBG_INFO, "CURSO: etapa de salida liberada (s %.0f), RAM libre %uK, VRAM libre %uK\n", (double)yo.s, l, (unsigned)(pvr_mem_available() >> 10));
+    }
     if (cur_rama >= 0 && !etapa.datos && !sig.datos && carga.estado == 0) carga_pide(&sig, RAMA_FICH[cur_rama]);
     if (s_sig >= 0 && !etapa_n && yo.s >= s_sig) { etapa_n = 1; cielo = &sig; ev |= CUR_SIGUIENTE; }
     if (etapa_n && uni.datos && yo.s > s_sig + UNION_LIBERA) libera_modelo(&uni);
     return ev;
 }
+#ifdef PRUEBA_RAMA
+/* prueba: salida en s mas alla del final de la etapa de salida (dentro de la union o de la etapa siguiente): se leen
+   ya la union y la etapa de la rama PRUEBA_RAMA (0 izquierda, 1 derecha) */
+static void curso_prueba_rama(float s)
+{
+    const modelo_t *r = PRUEBA_RAMA ? &uni_der : &uni; const float *p;
+    if (s < longitud) return;
+    yo.s = 0; carga_pide(&uni, "BKI.DAT"); carga_espera(); curso_paso();
+    carga_espera(); curso_paso();
+    yo.s = s_decide; p = r->ruta + r->paso_ruta * (j_union + (uint32_t)((s_decide - s_union) / PASO));
+    yo.pos[0] = p[0]; yo.pos[2] = p[2]; curso_paso();
+    yo.s = s_union + UNION_LIBERA + 1; curso_paso(); carga_espera(); curso_paso();
+}
+#endif
 /* ---------------------------------------------------------------- puntuacion del modo OutRun
    Del original (PS2 0x28F8C8 / PC 4F2DF0 cada cuadro; 4F2860 adelantamientos; 4F2CD0 estadisticas; 4F2B20 bonus de
    etapa; 4B9770 suma y cola de mensajes; 4BD480 dibujo). puntos = [8447DC] del jugador. La posicion de la
@@ -1742,6 +1784,9 @@ int main(int argc, char **argv)
                 if (hud_ok) hud_pon_modelo(modelo_jug);         /* y su tacometro */
                 if (hud_ok && hud_sube_tex()) hud_ok = 0;
                 curso_reinicia();                               /* la etapa de salida (otra vez, si hacia falta) */
+#ifdef PRUEBA_RAMA
+                curso_prueba_rama(SALIDA);
+#endif
                 memset(&yo, 0, sizeof yo); yo.s = SALIDA; yo.x = carril_x(SALIDA, 4);
 #ifdef PRUEBA_X
                 yo.x = PRUEBA_X;                                /* prueba: salida en otro desvio (p.ej. la hierba) */
@@ -1922,8 +1967,8 @@ int main(int argc, char **argv)
             pvr_list_finish();
         }
 #ifdef DIAG_VTX
-        if (cuadro % 60 == 0) dbglog(DBG_INFO, "DIAG est%d s %.0f/%.0f ram %uK v%u (etapa %u) tri %u ms %.1f+%.1f lejos %d det %.1f vram %u ta %uK etapa %uK/%uK 2d %u bpv %u real %uK opb %uK%s\n", estado,
-                                     (double)yo.s, (double)longitud, (unsigned)(mallinfo().uordblks >> 10),
+        if (cuadro % 60 == 0) dbglog(DBG_INFO, "DIAG est%d s %.0f/%.0f ram %uK/%uK v%u (etapa %u) tri %u ms %.1f+%.1f lejos %d det %.1f vram %u ta %uK etapa %uK/%uK 2d %u bpv %u real %uK opb %uK%s\n", estado,
+                                     (double)yo.s, (double)longitud, (unsigned)(mallinfo().uordblks >> 10), (unsigned)(mallinfo().fordblks >> 10),
                                      (unsigned)vtx_env, (unsigned)vtx_et, (unsigned)tri_enviados, (double)ms_log, (double)ms, (int)lejos, (double)detalle, (unsigned)pvr_mem_available(), (unsigned)(ta_vb >> 10),
                                      (unsigned)(ta_et >> 10), (unsigned)(ta_tope_etapa >> 10), (unsigned)ta_v2d, (unsigned)ta_bpv, (unsigned)(ta_real_ult >> 10), (unsigned)(ta_opb_ult >> 10), ta_corto ? " TOPE" : "");
 #endif

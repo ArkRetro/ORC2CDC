@@ -103,8 +103,9 @@ def ruta_rama(d_rama, d_todo):
     cam = np.stack([np.interp(s, Ls, C[:, k]) for k in range(3)], 1)
     # suavizada (84 m): donde se separan las ramas el centro pasa de golpe al de la rama (8 m en una seccion); la ruta
     # solo es la referencia de los desvios (bordes, carriles, limites y franjas se miden desde ella)
-    k = np.ones(21) / 21
-    cam = np.stack([np.convolve(np.pad(cam[:, j], 10, mode='edge'), k, 'valid') for j in range(3)], 1)
+    k = np.ones(21) / 21                                                  # (los extremos, en su sitio: impar)
+    cam = np.stack([np.convolve(np.pad(cam[:, j], 10, mode='reflect', reflect_type='odd'), k, 'valid')
+                    for j in range(3)], 1)
     t = np.gradient(cam, axis=0); t[:, 1] = 0; t /= np.linalg.norm(t, axis=1, keepdims=True) + 1e-9
     der = np.stack([-t[:, 2], np.zeros(len(t)), t[:, 0]], 1)
     # bordes: desvio lateral de los vertices de los poligonos de la seccion mas cercana
@@ -115,12 +116,7 @@ def ruta_rama(d_rama, d_todo):
         an[i] = (max(3.0, -q.min()), max(3.0, q.max()))
     k = np.ones(5) / 5
     an = np.stack([np.convolve(np.pad(an[:, j], 2, mode='edge'), k, 'valid') for j in range(2)], 1)
-    # carriles: unos 3,7 m cada uno a lo ancho, repartidos en NCARRIL como en conv_tramo.ajusta_al_asfalto
-    car = np.zeros((len(cam), NCARRIL))
-    for i in range(len(cam)):
-        a2, b2 = -an[i, 0] + 0.5, an[i, 1] - 0.5; w = b2 - a2; n = max(1, int(round(w / 3.7)))
-        pos = [a2 + (m + 0.5) * w / n for m in range(n)]
-        car[i] = [pos[int(round(kk * (len(pos) - 1) / (NCARRIL - 1)))] for kk in range(NCARRIL)]
+    car = conv_tramo.carriles_uniformes(an)
     lim, ext, ban, hpf = conv_tramo.superficies(Coli(d_todo), cam, an)
     pf = np.where(np.isfinite(hpf), hpf, cam[:, 1:2])
     if not ext.any(): ext = np.repeat(pf[:, [0, -1]], NEXT, 1)
