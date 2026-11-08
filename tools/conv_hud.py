@@ -101,11 +101,14 @@ class Disco:
         return zlib.decompress(self.iso.m[p[k][1]:p[k][1] + p[k][2]])
 
     def banco(self, b):
-        """(Ani, texturas RGBA, datos XST) del banco b (0x20..): animacion y XST ingles"""
+        """(Ani, texturas RGBA, datos XST) del banco b (0x20..): animacion y XST del idioma (OR2_IDIOMA: es por
+        defecto, el XST _sxst; en = _exst; si el banco no tiene version del idioma, la inglesa o la unica). La PAL elige
+        el idioma por el de la consola (TEXT.PS2 y XST por letra); el port lo fija al convertir"""
         nom = self.ani[b - 0x20]                                # ani_SPRANI_ETC_CVT
         clave = nom[len('ani_SPRANI_'):].lower()
         ia = self.n_ani.index(nom.lower() + '.sz')
-        cand = ['spr_sprani_%s_exst.sz' % clave, 'spr_sprani_%s_xst.sz' % clave]
+        letra = {'en': 'e', 'es': 's'}.get(os.environ.get('OR2_IDIOMA', 'es'), 'e')
+        cand = ['spr_sprani_%s_%sxst.sz' % (clave, letra), 'spr_sprani_%s_exst.sz' % clave, 'spr_sprani_%s_xst.sz' % clave]
         lo = self.n_spr
         ix = next(lo.index(c) for c in cand if c in lo)
         assert ix < lo.index('spr_sprani_ranking_cvt_exst.sz') or len(self.p_spr) == len(lo), 'indice de XST dudoso'
@@ -571,7 +574,7 @@ def dibuja_grupo(img, hud, g, cuadro, X, Y):
     for p in hud.pie[G['pri']:]:
         if p[0] != g: break
         gg, f, si, fl, x, y, ax, ay, ang, sx, sy, al = p
-        if G['n'] > 1 and f != cuadro: continue
+        if G['n'] > 1 and not f <= cuadro < f + max(1, fl >> 4): continue   # fl >> 4: cuadros que abarca (MENU.DAT)
         if fl & 1: ang = ang + G['paso'] * cuadro
         ti, (l, tp, r, b), w, h = hud.spr[si]
         src = Image.fromarray(hud.tex[ti]).crop((int(l), int(tp), int(r), int(b))).resize((max(1, w), max(1, h)))

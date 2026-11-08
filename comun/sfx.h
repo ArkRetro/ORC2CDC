@@ -1,5 +1,6 @@
 #ifndef SFX_H
 #define SFX_H
+#include <stdint.h>
 /* Efectos del coche del jugador (motor, derrape, golpe) con el sistema "ICS" del original: cada efecto es un grupo de
    capas en bucle (una muestra cada una) que se mezclan y cambian de tono segun un parametro x (0..127): las rpm en el
    motor, el deslizamiento en el derrape y el tiempo desde el impacto en el golpe. Los datos (muestras ADPCM y curvas)
@@ -16,5 +17,13 @@ void sfx_para(void);                       /* calla todo (pausa, fin de carrera)
    propios (sfx_para no los calla): */
 enum { SFX_CANCELA = 0x00, SFX_CURSOR = 0x01, SFX_BLOQUEADO = 0x03, SFX_ACEPTA = 0x40 };
 void sfx_menu(int id);
+/* voces (VOCES.DAT, despues de sfx_inicia): sfx_voz(id) toca la voz del id del original (los 9 bits bajos; tambien los
+   efectos de carrera 0x4d y 0x18d, por otro canal); sfx_voz_calla las corta. Las tablas de cuando habla (voces.c) y el
+   idioma del banco vienen en el mismo fichero. */
+int  sfx_voces_inicia(void);               /* 0 = bien */
+void sfx_voz(int id);
+void sfx_voz_calla(void);
+const void *sfx_voces_tablas(uint32_t *tam);
+const char *sfx_voces_idioma(void);
 
 #endif

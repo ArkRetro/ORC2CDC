@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""conv_sonido.py <iso> <dir_salida>: efectos del coche del jugador (motor, derrape, golpe) y de los menus -> SFX.DAT.
+"""conv_sonido.py <iso> <dir_salida> [--idioma SPANISH]: efectos del coche y de los menus -> SFX.DAT; voces -> VOCES.DAT.
 
 De donde salen (todo se lee de tu ISO; aqui solo hay direcciones y formatos):
 - SOUND.PS2 es un paquete de ficheros por hash: h = h*131 + toupper(c), recorriendo el nombre de atras adelante
@@ -36,7 +36,36 @@ SFX.DAT (little endian):
   datos de las muestras (cada una alineada a 32 bytes).
 Las muestras en bucle ADPCM llevan delante las ultimas K muestras del bucle (ini_bucle = K) para que el estado del
 decodificador al volver al principio del bucle coincida con el del final (no hay chasquido ni con el AICA que guarda
-el estado en LSA ni con uno que lo arrastre)."""
+el estado en LSA ni con uno que lo arrastre).
+VOCES.DAT (voces de la acompanante y del locutor, y los efectos de carrera que las acompanan; --idioma, por defecto
+SPANISH; se escribe a la vez que SFX.DAT):
+- Bancos de voz: \\<IDIOMA>\\ORC.PAK (carrera del modo OutRun) y \\<IDIOMA>\\PERO.pak (GOAL / TIME OVER / GAME OVER).
+  El original elige el directorio con la tabla de prefijos del ELF (0x3527a0: 5 juegos de voces x 6 idiomas;
+  "%s\\%s" en 0x3c1220); en carrera normal usa el juego 4 (SPRACE, FRENCH, GERMAN, ITALIAN, SPANISH, SPRACE): con el
+  idioma espanol, SPANISH. El banco: cabecera {u32 tamano A, 0, u32 tamano B, 0}, A y B PS-ADPCM y detras dos
+  tablas {u32 n, n x {u32 id, u32 desplazamiento}}, la primera para A y la segunda para B (cada muestra llega hasta
+  el bloque con la marca de fin). Pitch y volumen del id en la tabla SE del IRX (0x4b98 + 12*id): las voces van a
+  0x400 = 12 kHz y volumen 0x3fff.
+- Efectos: 0x4d (EXTEND TIME, parte B de \\IGC.PAK) y 0x18d (aviso de poco tiempo, parte A de \\IGC.PAK).
+- Tablas de cuando habla (ELF; las mismas que lee el port de PC en race_robots.cpp, alli en 6549E0.. y 5C1xxx):
+  0x36f958 comentarios de zona (16 bytes {id, retardo, prioridad s16, 0, zona}, hasta prioridad < 0),
+  0x36f9a8 comentarios por numero de derrapes (24 bytes {id, retardo, prioridad, exacto, desde, hasta}),
+  0x36fa80 comentarios de derrape largo (16 bytes {id, retardo, prioridad, cuadros}),
+  0x40ef60 asustada (2), 0x40ef68 trompo (2), 0x40ef70 choque con otro coche (5),
+  0x40eba8 / 0x40ebb8 al empezar un choque (3; la primera para los personajes 9 y 10),
+  0x40eb10 al recuperarse de un choque grande (4) y 0x40eb20 de uno pequeno (2), con las cuentas de sus listas de
+  movimientos en 0x40eb28 + 0x34 / + 0x3c (coche cerrado) y 0x40eb68 (descapotable).
+  Los id llevan a veces 0x800 (o 0x5000) encima: banderas del controlador de sonido; el id es el de los 9 bits bajos.
+VOCES.DAT (little endian):
+  cabecera 32 bytes: 'VOZ1', u32 n_muestras, u32 off_muestras, u32 off_tablas, u32 off_datos, u32 total,
+                     char idioma[8]
+  muestra 20 bytes:  u16 id, u16 volumen (0..0x3fff), u32 desp (desde off_datos), u32 bytes, u32 frecuencia,
+                     u32 n muestras (ADPCM Yamaha, sin bucle)
+  tablas:            24 x {u16 id, u16 retardo, s16 prioridad, s16 0, s32 a, s32 b, s32 c} (8 de zona: a = zona;
+                     12 de derrapes: a = exacto, b = desde, c = hasta; 4 de derrape largo: a = cuadros; cada lista
+                     acaba en prioridad < 0) y 24 u16: asustada[2], trompo[2], choque[5], aire9[3], aire[3],
+                     aterriza[4], salto[2], n_aterriza, n_salto, 0
+"""
 import os, struct, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -217,6 +246,99 @@ def main():
           ', '.join('%s=%d capas' % (g, len(c)) for g, c in grupos)))
     for nm, d, n, f, ini, fin, fmt, bucle, vol in tabla:
         print('  %s %6d bytes %5d Hz %s %d..%d' % (nm.decode(), n, f, 'bucle' if bucle else 'vol 0x%x' % vol, ini, fin))
+    idioma = sys.argv[sys.argv.index('--idioma') + 1].upper() if '--idioma' in sys.argv else 'SPANISH'
+    assert idioma in IDIOMAS, 'idioma: ' + ', '.join(IDIOMAS)
+    voces(iso, irx, tb, td, elf, V, idioma, sal)
+
+
+# ---------------------------------------------------------------- voces (VOCES.DAT)
+VOZ_BANCOS = ('ORC.PAK', 'PERO.pak')
+VOZ_SE = (('\\IGC.PAK', 1, 0x4d), ('\\IGC.PAK', 0, 0x18d))      # (banco, parte, id)
+VOZ_AREA, VOZ_VUELTA, VOZ_DERRAPE = 0x36f958, 0x36f9a8, 0x36fa80
+VOZ_LISTAS = ((0x40ef60, 2), (0x40ef68, 2), (0x40ef70, 5), (0x40eba8, 3), (0x40ebb8, 3), (0x40eb10, 4), (0x40eb20, 2))
+VOZ_MOV = 0x40eb28                  # movimientos del coche cerrado: {lista, cuenta} x 8
+IDIOMAS = ('ENGLISHC', 'FRENCH', 'GERMAN', 'ITALIAN', 'SPANISH', 'ENGLISHH', 'ENGLISHJ')
+
+
+def banco_tablas(d):
+    """(datos A, datos B, [tabla A, tabla B]) de un banco .PAK con sus tablas {id: desplazamiento}"""
+    a, _, b, _ = struct.unpack_from('<4I', d, 0)
+    o = 16 + a + b; t = []
+    for _ in range(2):
+        n = struct.unpack_from('<I', d, o)[0] if o + 4 <= len(d) else 0
+        t.append(dict(struct.unpack_from('<2I', d, o + 4 + 8 * k) for k in range(n))); o += 4 + 8 * n
+    return d[16:16 + a], d[16 + a:16 + a + b], t
+
+
+def muestra_banco(datos, desp):
+    fin = desp
+    while not datos[fin + 1] & 1: fin += 16
+    return dec_psx(datos[desp:fin + 16])
+
+
+def voces(iso, irx, tb, td, elf, V, idioma, sal):
+    se = lambda i: struct.unpack_from('<HH', irx, td + IRX_SE - tb + 12 * i)
+    muestras = {}
+    for nb in VOZ_BANCOS:
+        A, B, (ta, tbb) = banco_tablas(fichero_paquete(iso, 'SOUND.PS2', '\\%s\\%s' % (idioma, nb)))
+        for datos, t in ((A, ta), (B, tbb)):
+            for i, o in t.items():
+                p, v = se(i)
+                if p != 0x400 or i in muestras: continue           # solo las voces (12 kHz); los SE van aparte
+                muestras[i] = (muestra_banco(datos, o), frecuencia(p), v)
+    for nb, parte, i in VOZ_SE:
+        A, B, t = banco_tablas(fichero_paquete(iso, 'SOUND.PS2', nb))
+        p, v = se(i)
+        assert 0x100 <= p <= 0x3fff and 0 < v <= 0x3fff, 'tabla SE del IRX inesperada (id 0x%x)' % i
+        muestras[i] = (muestra_banco((A, B)[parte], t[parte][i]), frecuencia(p), v)
+
+    def u32(a): return struct.unpack_from('<I', elf, V(a))[0]
+    def lista(a, tam, conv):
+        r = []
+        while True:
+            e = conv(a); r.append(e); a += tam
+            if e[2] < 0: return r
+            assert len(r) < 12, 'tabla de comentarios sin final en 0x%x' % a
+    area = lista(VOZ_AREA, 16, lambda a: (u32(a) & 0x1ff, u32(a + 4), struct.unpack_from('<h', elf, V(a + 8))[0],
+                                          struct.unpack_from('<i', elf, V(a + 12))[0], 0, 0))
+    vuelta = lista(VOZ_VUELTA, 24, lambda a: (u32(a) & 0x1ff, u32(a + 4), struct.unpack_from('<h', elf, V(a + 8))[0],
+                                              *struct.unpack_from('<3i', elf, V(a + 12))))
+    derrape = lista(VOZ_DERRAPE, 16, lambda a: (u32(a) & 0x1ff, u32(a + 4), struct.unpack_from('<h', elf, V(a + 8))[0],
+                                                struct.unpack_from('<i', elf, V(a + 12))[0], 0, 0))
+    assert len(area) <= 8 and len(vuelta) <= 12 and len(derrape) <= 4, 'tablas de comentarios inesperadas'
+    listas = []
+    for a, n in VOZ_LISTAS:
+        listas += [u32(a + 4 * k) & 0x1ff for k in range(n)]
+    n_at, n_sa = u32(VOZ_MOV + 0x34), u32(VOZ_MOV + 0x3c)
+    assert 0 < n_at <= 4 and 0 < n_sa <= 2, 'listas de movimientos inesperadas'
+    print('  zona %s\n  derrapes %s\n  derrape largo %s\n  listas %s, cuentas %d %d' % (
+        area, vuelta, derrape, ['%x' % x for x in listas], n_at, n_sa))
+    usados = set(e[0] for e in area + vuelta + derrape if e[2] >= 0) | set(x for x in listas if x)
+    for x in sorted(usados):
+        if x not in muestras: print('  aviso: la voz 0x%x no esta en los bancos de %s' % (x, idioma))
+    tablas = bytearray()
+    for t, n in ((area, 8), (vuelta, 12), (derrape, 4)):
+        t = t + [(0, 0, -1, 0, 0, 0)] * (n - len(t))
+        for i, r, pr, a, b, c in t:
+            tablas += struct.pack('<HHhh3i', i, r, pr, 0, a, b, c)
+    tablas += struct.pack('<24H', *(listas + [n_at, n_sa, 0]))
+    blob = bytearray(); filas = []
+    for i in sorted(muestras):
+        pcm, f, v = muestras[i]
+        while len(blob) % 32: blob.append(0)
+        datos = enc_yamaha(pcm)
+        assert len(pcm) < 65536, 'voz 0x%x demasiado larga para el AICA' % i
+        filas.append(struct.pack('<HH4I', i, v, len(blob), len(datos), f, len(pcm)))
+        blob += datos
+    off_m = 32; off_t = off_m + 20 * len(filas); off_d = (off_t + len(tablas) + 31) & ~31
+    out = bytearray(b'VOZ1' + struct.pack('<5I', len(filas), off_m, off_t, off_d, off_d + len(blob)) +
+                    idioma.encode()[:8].ljust(8, b'\0'))
+    out += b''.join(filas) + tablas
+    out += bytes(off_d - len(out)) + blob
+    with open(os.path.join(sal, 'VOCES.DAT'), 'wb') as fh:
+        fh.write(out)
+    print('VOCES.DAT (%s): %d bytes, %d muestras, %.1f s' % (idioma, len(out), len(filas),
+          sum(len(m[0]) / m[1] for m in muestras.values())))
 
 
 if __name__ == '__main__':

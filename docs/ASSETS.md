@@ -83,9 +83,9 @@ orden alfabetico en mayusculas; STAGE.PS2 no sigue ese orden dentro de cada zona
 | HUD y menus | SPRANI.PS2 | animaciones 2D `ani_SPRANI_*` (HUD, menus, carga, ranking, finales, tacometros por coche) | SPRANI (zlib) | `conv_hud.py` (HUD de carrera); menus: `conv_menu.py` (en curso) |
 | HUD y menus | SPRITE.PS2 | texturas `spr_*xst` de cada SPRANI (variantes por idioma `_E/_F/_G/_I/_S` y `J`), fuente, seleccion, ranking, entrada de nombre | XST (zlib, LZ dentro) | idem |
 | Textos | TEXT.PS2 | un fichero por idioma | `txet` | no |
-| Sonido | SOUND.PS2 | bancos `.PAK`: efectos del coche (ICS), interfaz, resultados, finales, objetos del fondo; voces por idioma (`\IDIOMA\...`: locutor, misiones, ranking...) | banco ICS, banco SE | `conv_sonido.py` (ICS: motor, derrape, golpe; SE: efectos de menu de MENU.pak y Fe.pak) |
+| Sonido | SOUND.PS2 | bancos `.PAK`: efectos del coche (ICS), interfaz, resultados, finales, objetos del fondo; voces por idioma (`\IDIOMA\...`: locutor, misiones, ranking...) | banco ICS, banco SE | `conv_sonido.py` (ICS: motor, derrape, golpe; SE: efectos de menu de MENU.pak y Fe.pak -> SFX.DAT; voces de la carrera de `\<IDIOMA>\ORC.PAK` y `PERO.pak` y los efectos 0x4d / 0x18d de IGC.PAK -> VOCES.DAT) |
 | Musica | MUSIC.PS2 | una pista por fichero `\NN.ps2` | PS-ADPCM estereo | `tools/c/musica.c` (a ADPCM de Yamaha) |
-| Video | MV.PS2 | videos de titulo y demo (50 y 60 Hz) | PSS (MPEG-2 + audio) | no |
+| Video | MV.PS2 | `\ts50.pss`, `\ts60.pss` (pantalla de titulo) y `\attr50.pss`, `\attr60.pss` (atraccion), de 50 y 60 Hz | PSS (MPEG-2 + PCM) | `conv_video.py` (las de 50 Hz -> MVTS.VQV, MVATTR.VQV) |
 | Sistema | SYSTEM.PS2 | modulos del IOP (`\IRX\*`), iconos de tarjeta, DNAS | IRX, icono | `conv_sonido.py` lee la tabla de muestras de `\IRX\SOUNDCD.IRX` |
 
 ## Formatos
@@ -130,8 +130,13 @@ cadenas `\SPRANI\ani_*` del ELF). Su XST es `spr_sprani_<clave>_[E]xst.sz` (`Ass
 `frontend_sprites.cpp` (427F70/4282B0), `pc_sprite_2d.cpp`.
 
 **Bancos de sonido `.PAK`**: cabecera de 16 bytes `{u32 tamano A, u32 tipo (1 = banco ICS), u32 tamano B, 0}`,
-A = PS-ADPCM (SPU2) desde +16 (el primer bloque es mudo), B = segundo bloque ADPCM (opcional) y al final una tabla
-`{u32 n, n x {u32 id, u32 desplazamiento}}` (en los bancos SE). ICS: 68 muestras en bucle; su tabla de
+A = PS-ADPCM (SPU2) desde +16 (el primer bloque es mudo), B = segundo bloque ADPCM (opcional) y al final dos tablas
+`{u32 n, n x {u32 id, u32 desplazamiento}}` (en los bancos SE): la de las muestras de A y la de las de B (cada una
+llega hasta el bloque con la marca de fin). El id es el numero de sonido del juego (el mismo que en el PC); su pitch y
+volumen, en la tabla SE de `\IRX\SOUNDCD.IRX` (.data 0x4b98 + 12 * id; las voces a 0x400 = 12 kHz). Bancos de voz
+por idioma: `ORC` (carrera del modo OutRun), `HC`/`HEC` (Heart Attack), `TRC`/`TRE`/`TRS`, `PERO`/`PERH`/`PERR`
+(GOAL, TIME OVER, GAME OVER y resultados), `SPRANK`, `REWARD`, `HAM*` (misiones). Directorio por idioma con la tabla
+de prefijos del ELF (0x3527a0; ver PARIDAD.md, Voces y video). ICS: 68 muestras en bucle; su tabla de
 desplazamientos y pitch esta en el `.data` de `\IRX\SOUNDCD.IRX` (0x66a0) y las definiciones (capas, curvas) en el
 ELF (0x3526a4); ver la cabecera de `tools/conv_sonido.py`. Rutas `\Sound\%s\%s` (idioma y fichero) en el ELF.
 
@@ -139,8 +144,12 @@ ELF (0x3526a4); ver la cabecera de `tools/conv_sonido.py`. Rutas `\Sound\%s\%s` 
 ...); los bloques pares de cada canal terminan con la marca 3 (doble bufer de la SPU). 48 kHz (probable).
 `tools/c/musica.c`, `comun/musica.c`; `ver.py wav`.
 
-**PSS** (MV.PS2): MPEG-PS de Sony (`00 00 01 BA`), video MPEG-2 y audio en paquetes privados. El PC usa Bink
-(`system/title_movie.cpp`).
+**PSS** (MV.PS2): MPEG-PS de Sony (`00 00 01 BA`), video MPEG-2 640x480 (25 fps las de 50 Hz, 29,97 las de 60) y
+audio en paquetes privados 0xBD con 4 bytes de subcabecera `ff a0 00 00`; el primero empieza por `SShd` (u32 tamano,
+u32 tipo 1 = PCM de 16 bits, u32 48000, u32 2 canales, u32 intercalado 0x200) y `SSbd` (u32 tamano) y el resto es PCM
+intercalado por bloques de 0x200 bytes por canal. Sin idiomas ni subtitulos. El PC usa Bink (`system/title_movie.cpp`,
+`mv/TitleScreen.bik`). `conv_video.py` los pasa a `.VQV` (texturas VQ de la PowerVR + ADPCM de Yamaha; formato en su
+cabecera).
 
 **Texto `txet`**: `'txet'`, `u32 tamano`, tabla de desplazamientos y cadenas (cada caracter en 16 bits; el byte
 bajo es el codigo de la fuente). PC: `frontend_text.cpp` (465DF0, 42CFE0). Los numeros de texto del PS2 son los del
@@ -194,7 +203,8 @@ conversores: parametros de coches (`conv_param.py`), trafico (`conv_trafico.py`)
 
 Hecho: un tramo jugable con geometria, texturas, ruta y colision del original (`conv_tramo.py`), coche del
 jugador y trafico (`conv_coche.py`, `conv_trafico.py`), fisica y choques con las tablas del ELF (`conv_param.py`),
-HUD de carrera y rotulos (`conv_hud.py`), efectos ICS (`conv_sonido.py`), musica por streaming (`musica.c`); la
+HUD de carrera y rotulos (`conv_hud.py`), efectos ICS y voces de la carrera (`conv_sonido.py`), musica por streaming (`musica.c`), peliculas
+(`conv_video.py`); la
 arbol entero del modo OutRun (15 etapas, 10 bifurcaciones con sus carteles, 5 metas, niebla de cada etapa) encadenado
 mientras se conduce (`conv_union.py`, `CURSO.DAT`).
 
@@ -210,11 +220,12 @@ Falta, por orden aproximado de necesidad para un juego completo:
    finales) en `conv_menu.py`, y los textos `txet` por idioma (TEXT.PS2) con la fuente `spr_font_xst`.
 4. **Modos**: reglas de Coast 2 Coast/misiones (`Races`, `RaceAttack`, `OutrunMiles`, metas), records por defecto,
    fantasmas para contrarreloj.
-5. **Sonido**: bancos SE (interfaz, resultados, finales, objetos del fondo), voces por idioma; el resto de pistas
-   de musica (solo hace falta pasar cada `\NN.ps2` por `musica.c`).
+5. **Sonido**: bancos SE (interfaz, resultados, finales, objetos del fondo), voces de los otros modos (Heart Attack,
+   Coast 2 Coast, misiones; las de la carrera del modo OutRun ya estan); el resto de pistas de musica (solo hace falta
+   pasar cada `\NN.ps2` por `musica.c`).
 6. **Finales y personajes**: OBJ (`obj_end_*`), AS, DRIVER/CHR/ANIMS (modelos con huesos y movimientos), BK
    (fondos y objetos animados).
-7. **Videos**: PSS a un formato reproducible en Dreamcast (o prescindir de ellos).
+7. **Videos**: hechos (`conv_video.py`); falta la pelicula de titulo en bucle detras del rotulo del titulo.
 
 Sin identificar (nombre): las tablas SO de STAGE/BK, cinco fantasmas de GHOSTS, dos coches de CARS, un piloto de
 DRIVER, dos scripts, una entrada de COMMON y otra de SOUND. Sin estudiar (formato): SO, oso, AS, movimientos,

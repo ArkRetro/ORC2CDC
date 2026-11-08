@@ -3,6 +3,11 @@
 sombra de \\COMMON\\obj_vshadow_pmt.sz) a TRAFn.DAT (formato de modelo.py) montados como el original los dibuja de
 cerca (llamadas: 4AE0F0 / 4ADBC0 del PC con el LOD 0 del registro de 4866C0): carroceria, sombra (subida 0,1 m) y las
 cuatro ruedas de su descriptor (las del otro lado giradas pi en y), parado y sin luces; solo las texturas que usa.
+LOD del original: el registro de 4866C0 trae 5 descriptores (LOD 0..4); 4ADBC0 / 4ADD80 / 4ADF00 dibujan con el del
+LOD del coche (car+0x328): carroceria, pilotos y sombra siempre; la lista +9C y las ruedas solo en los LOD 0 y 1; la
+sombra subida 0,1 m solo en el LOD 0. Cada malla lleva en el campo del nodo la mascara de los LOD que la dibujan
+(bit k = LOD k: las que se repiten de un LOD a otro van una sola vez); la demo
+elige el LOD por la distancia como 46DF50 (PS2 0x1dd728: umbrales de la z de la camara en demo/main.c, traf_lod).
 Antes se usaba la carroceria del LOD 2 (que ya trae las ruedas) con otras cuatro ruedas puestas a ojo (inventado:
 ruedas dobles).
 Materiales del original (tabla 4 y 5 del registro, como conv_coche.py): las mallas sin textura con su difuso por la luz
@@ -80,17 +85,21 @@ def materiales(mod):
 
 NINGUNO = 0xFFFFFFFF
 
-def llamadas(E, tm, m):
-    """piezas del coche de trafico m y su matriz como las dibuja el original cerca (4AE0F0 -> model con LOD 0:
-    4ADBC0, race_ghost_car.cpp), parado y sin luces: registro de 4866C0 (PC 650500, 0x44 bytes por modelo): +0 lista
+def llamadas(E, tm, m, lod=0):
+    """piezas del coche de trafico m y su matriz como las dibuja el original con el LOD lod (4AE0F0 -> model: 4ADBC0
+    el LOD 0, 4ADD80 el 1, 4ADF00 los 2..4; race_ghost_car.cpp), parado y sin luces: registro de 4866C0 (PC 650500, 0x44 bytes por modelo): +0 lista
     de 5 LOD, cada uno {descriptor, segundo descriptor (remolque) o 0}. Descriptor: +0 carroceria (con el color),
     +4 sombra (plano bajo el coche; en el LOD 0 subida 0,1 m: 40A290), +8 luz de noche (car+4 & 0x100), +C/+10/+14
     pilotos (normales / car+4 & 0x300 / freno car+38 > 0: los normales, sin luces), +18/+1C intermitentes (car+C5C,
     apagados), +9C lista de piezas con el color {id, x, y, z}; ruedas (4AD530, giros 0): +38 en +3C, +48 en +4C girada
     pi en y (la del otro lado), +58 en +5C, +78 en +7C (si hay), +68 en +6C girada pi, +88 en +8C girada pi (si hay).
-    La matriz local car+F0 es la identidad parado. Devuelve [(id, matriz 4x4, nombre)]"""
+    Las ruedas y la lista +9C solo con LOD 0 y 1 (near); la sombra subida solo con LOD 0. Sin descriptor en ese LOD
+    (puntero 0) el original no dibuja nada. La matriz local car+F0 es la identidad parado. Devuelve [(id, matriz 4x4,
+    nombre)]"""
     import conv_coche as cc
-    L = E.u32(E.u32(tm + 0x44 * m)); d, d2 = E.u32(L, 2)
+    L = E.u32(E.u32(tm + 0x44 * m) + 4 * lod)
+    if not L: return []
+    d, d2 = E.u32(L, 2); cerca = lod <= 1
     if d2: raise SystemExit('modelo %d: remolque (segundo descriptor) sin portar' % m)
     u = lambda o: E.u32(d + o); g3 = lambda o: np.array(E.f32(d + o, 3), float)
     s = cc.Pila(); res = []
@@ -99,7 +108,7 @@ def llamadas(E, tm, m):
     s.push()                                                    # car+F0
     dib(u(0), 'carroceria')
     dib(u(0xc), 'pilotos')
-    p = u(0x9c)
+    p = u(0x9c) if cerca else 0
     if p and E.u32(p) != NINGUNO:
         e = 0
         while True:
@@ -107,13 +116,14 @@ def llamadas(E, tm, m):
             if E.u32(p + e + 0x10) == NINGUNO: break
             e += 0x10
     s.pop()
-    if u(4) != NINGUNO: s.push(); s.translate((0.0, 0.1, 0.0)); dib(u(4), 'sombra'); s.pop()
+    if u(4) != NINGUNO: s.push(); s.translate((0.0, 0.1 if lod == 0 else 0.0, 0.0)); dib(u(4), 'sombra'); s.pop()
     def rueda(o, otro_lado):
         if u(o) == NINGUNO: return
         s.push(); s.translate(g3(o + 4))
         if otro_lado: s.rot_y(np.pi)
         dib(u(o), 'rueda'); s.pop()
-    rueda(0x38, False); rueda(0x48, True); rueda(0x58, False); rueda(0x78, False); rueda(0x68, True); rueda(0x88, True)
+    if cerca:
+        rueda(0x38, False); rueda(0x48, True); rueda(0x58, False); rueda(0x78, False); rueda(0x68, True); rueda(0x88, True)
     return res
 
 class Mem:
@@ -202,12 +212,16 @@ def main():
     medidas = []
     for n, m in enumerate(MODELOS):
         mod = modelo.Modelo(); mod.ruta = np.zeros((0, 5)); mod.extra = []; vistos = {}
-        piezas = llamadas(E, tm, m)
-        for ident, M, nom in piezas:
-            b = cc._bloque_recurso(A, ident >> 16)
-            if nom == 'carroceria': cuerpo = ident & 0xFFFF; medidas.append(caja(b, cuerpo)); lo, hi = medidas[-1]
-            if id(b) not in vistos: vistos[id(b)] = b
-            cc.pieza(mod, b, ident, R=M[:3, :3], t=M[3, :3], nombre=nom)
+        for lod in range(5):
+            piezas = llamadas(E, tm, m, lod); m0 = len(mod.mallas)
+            for ident, M, nom in piezas:
+                b = cc._bloque_recurso(A, ident >> 16)
+                if nom == 'carroceria' and lod == 0: cuerpo = ident & 0xFFFF; medidas.append(caja(b, cuerpo)); lo, hi = medidas[-1]
+                if id(b) not in vistos: vistos[id(b)] = b
+                cc.pieza(mod, b, ident, R=M[:3, :3], t=M[3, :3], nombre=nom)
+            for x in mod.mallas[m0:]: x[7] = lod               # el LOD en el campo del nodo
+            if lod == 0: piezas0 = piezas
+        piezas = piezas0
         largo = hi[2] - lo[2]
         materiales(mod)
         import conv_coche as cc
@@ -235,11 +249,21 @@ def main():
         for f in pares: tcx.append(struct.pack('<3I', *[q[1] for q in f]))
         mod.ruta = np.frombuffer(b''.join(tcx), '<f4').reshape(-1, 1)
         mod.mallas = [x[:8] for x in mod.mallas]
+        # las mallas que repite otro LOD (el 1 lleva las del 0 salvo la sombra subida) van una vez, con la mascara de
+        # los LOD que las dibujan en el campo del nodo (bit k = LOD k)
+        assert len(mod.mallas) == len(mod.verts)
+        clave = {}; mallas = []; verts = []; nv = 0
+        for x, v in zip(mod.mallas, mod.verts):
+            k = (x[0], x[1], v.tobytes())
+            if k in clave: clave[k][7] |= 1 << x[7]; continue
+            y = list(x); y[7] = 1 << x[7]; y[4] = nv; nv += len(v)
+            clave[k] = y; mallas.append(y); verts.append(v)
+        mod.mallas, mod.verts, mod.nv = mallas, verts, nv
         ini = mod.escribe(os.path.join(dest, 'TRAF%d.DAT' % n))
-        print('trafico %d (modelo %d, registro %d): %.1f m, %d tiras, %d vertices, %d triangulos, %d texturas (%d KB), '
-              'piezas %s' % (n, m, cuerpo, largo, len(mod.mallas), sum(x[5] for x in mod.mallas),
-                             sum(x[5] - 2 for x in mod.mallas), len(mod.texs), len(mod.blob) >> 10,
-                             ' '.join('%s %d:%d' % (q[2], q[0] >> 16, q[0] & 0xFFFF) for q in piezas)))
+        print('trafico %d (modelo %d, registro %d): %.1f m, %d tiras, %d texturas (%d KB), piezas %s; vertices por LOD %s'
+              % (n, m, cuerpo, largo, len(mod.mallas), len(mod.texs), len(mod.blob) >> 10,
+                 ' '.join('%s %d:%d' % (q[2], q[0] >> 16, q[0] & 0xFFFF) for q in piezas),
+                 ' '.join(str(sum(x[5] for x in mod.mallas if x[7] >> k & 1)) for k in range(5))))
     tablas(iso, dest, medidas)
 
 if __name__ == '__main__':

@@ -44,9 +44,7 @@ typedef struct {
     float batalla;         /* 0x0130 m                                      */
     float via[2];          /* 0x017c,0x01c8 via delantera/trasera m         */
     float reparto;         /* 0x0214 d: carga del = d/(1+d)                 */
-    float alt_cg;          /* 0x0260 (aprox. altura CG para transferencia)  */
-    float transferencia;   /* no es de la tabla: 0 = sin transferencia de   */
-                           /* carga longitudinal (defecto), 1 = con ella    */
+    float alt_cg;          /* 0x0260 altura del CG sobre el origen (w+224)   */
     float toe[2];          /* 0x07b8,0x0804 rad                             */
     float comp_base[2];    /* 0x0850,0x089c complianza fija rad/kgf         */
     float comp_trac[2];    /* 0x08e8,0x0934 * fuerza motriz +               */
@@ -122,6 +120,20 @@ typedef struct {
     float par[OR2_PAR_MUESTRAS];
     float freno[OR2_FRENO_MUESTRAS];
     int   curvas_reales;   /* 1 si se cargaron del ejecutable               */
+    /* segunda curva de par (la del cambio manual: PS2 0x3db7a8, tabla de  */
+    /* punteros 0x3db118 [automatico, manual], la elige event+0x13)        */
+    float par_m_idx, par_m_gan;
+    float par_m[OR2_PAR_MUESTRAS];
+    int   par_m_ok;
+    int   modelo;          /* car+0x11 (0..29; >= 15 preparados): lo pone  */
+                           /* quien llama (0 por defecto)                  */
+    /* --- suspension (CalcSuspensionForce 4A1B70, ColiCar 519830) --- */
+    float sus_anclaje[2];  /* 0x0390,0x03dc altura del anclaje de la rueda */
+    float sus_centro[2];   /* 0x0428,0x0474 extension de reposo del muelle */
+    float sus_inf[2];      /* 0x04c0,0x050c tope de compresion             */
+    float sus_sup[2];      /* 0x0558,0x05a4 extension maxima               */
+    float sus_muelle[2];   /* 0x0688,0x06d4 rigidez N/m                    */
+    float sus_estab[2];    /* 0x0720,0x076c barra estabilizadora           */
     /* --- derivados --- */
     float dir_g;           /* angulo geometrico de direccion (unid. 16 bit) */
     float cg_del, cg_tras; /* distancia CG-eje m                            */
@@ -187,6 +199,11 @@ typedef struct {
        cuatro ruedas y no hay resistencia de tierra). Ver or2_mu_superficie y OR2_SUP_TIERRA. */
     uint32_t sup[4];
     uint32_t sup_centro;
+    /* volumen del volante ya procesado (volume0, -128..127, de or2_volante); si volumen_ok = 0 se usa  */
+    /* stick * 127                                                                                     */
+    int   volumen, volumen_ok;
+    int   nivel;            /* nivel de la etapa (0..4): CheckWanderer acepta el material 7 en el 0  */
+    int   sin_ayuda_tierra; /* 1 = sin CheckWanderer (la variante de juego 0)                        */
 } or2_entrada_t;
 
 /* materiales de tierra/arena/hierba (2, 3, 4 y 15): mu 0,7 y resistencia de rodadura (SetRunningResistance) */
@@ -199,6 +216,11 @@ typedef struct {
     float vel;              /* m/s modulo de la velocidad en la rueda        */
     float omega, omega_t;   /* rad/s                                         */
     float freno, agarre, comp, toe_ang, toe_comp;
+    float esc;              /* +E4 escala del circulo de friccion (1 = sin saturar)                 */
+    /* suspension: +28 posicion de la rueda (cuerpo), +18/+1C extension actual/anterior, +20 velocidad, */
+    /* +24 fuerza del muelle (kgf, x 6 por el apriete contra el suelo); aire = bandera +0 bit 0          */
+    float y28, ext, ext_ant, ext_vel, f_sus;
+    int   aire;
     float f_lat, f_lon, resist;
     float mu;               /* +E8 adherencia del firme bajo la rueda (GetRoadMu + assMuControl)    */
     float r_tierra;         /* +94 resistencia fuera del asfalto (kgf, contra la velocidad de rueda)*/
@@ -228,14 +250,14 @@ typedef struct {
     float psi;              /* rumbo del cuerpo                              */
     float w;                /* guinada rad/s                                 */
     float acum;             /* acumulador de tiempo                          */
-    float a_lon;            /* aceleracion longitudinal filtrada (m/s^2)     */
     float vel_mf;           /* event+0x1c4 m/cuadro                          */
     int   kmh;              /* event+0x1f4                                   */
     int16_t rumbo_v16;      /* event+0x160                                   */
     int16_t s32, s4c, s4e, s168, s16a, d44, d46, d48, d4a, d4c, d4e;
     int8_t  d36;
     float d38, d3c, d40, d54, d58;
-    int   pedal_ac, pedal_fr, pedal_ac_ant, pedal_fr_ant;
+    int   pedal_ac, pedal_fr, pedal_ac_ant, pedal_fr_ant;   /* volumenes del mando 1 y 2 (0..255)  */
+    int   freno_op;         /* event+0x38: el freno de OperationInput (255 mientras +2F8 > 0)        */
     int   stick16;          /* event+0x202                                   */
     /* motor / transmision */
     float w_motor;          /* event+0x21c rad/s                             */
@@ -249,6 +271,20 @@ typedef struct {
     int   ac_guardado;      /* event+0x29c                                   */
     int   rpm_i, rpm_ant;   /* event+0x48, 0x210                             */
     or2_rueda_t r[4];       /* 0 del-izq, 1 del-der, 2 tras-izq, 3 tras-der  */
+    /* cambio manual y ayudas (RearGripCtrl / CheckShiftWarning / CheckWanderer) */
+    int   d90;              /* +D90 cuadros de rigidez de deriva x 0,01 por debajo de 20 km/h        */
+    int   d94, d98, d9c;    /* +D94.. temporizadores de la reduccion con el motor al corte (manual)  */
+    int   manual;           /* +13 cambio manual (copia de or2_entrada_t.manual)                     */
+    int   e7c, e80, e84;    /* +E7C cuenta del aviso de cambio, +E80 aviso, +E84 cambio automatico   */
+    int   e88, e8c, e90;    /* +E88/+E8C ayuda de vuelta a la carretera, +E90 fuera del asfalto     */
+    float e94, e98;         /* +E94 lado (+26C) al salir, +E98 cuadros hasta el borde               */
+    /* cuerpo vertical (ActionForce2 en 3D reducido a altura, cabeceo y balanceo sobre un suelo plano) */
+    float alt, v_alt;       /* altura del CG sobre el suelo (m) y su velocidad (m/s)                 */
+    float cabeceo, w_cab;   /* giro alrededor del eje x del cuerpo (rad, + morro arriba) y velocidad  */
+    float balanceo, w_bal;  /* giro alrededor del eje z del cuerpo (rad, + lado derecho arriba)      */
+    float rueda_y[4];       /* +134 + i*0xC: altura de cada rueda en el modelo (m), para el dibujo   */
+    int   vol_ant;          /* volumen del volante del cuadro anterior (filtro 4537C0)               */
+    float vol_dig;          /* +7D6884 rampa de la cruceta (-1..1)                                   */
     /* choques (crash state +2C8.., rebote +282..+290, paso derrapando +1030) */
     int   choque;           /* estado de choque (+2F0 >> 2 & 31), valido si t_choque > 0             */
     float t_choque;         /* +2C8 tiempo que queda (s)                                             */
@@ -293,6 +329,13 @@ void or2_inicia(or2_coche_t *c, const or2_param_t *p);
 void or2_coloca(or2_coche_t *c, const or2_param_t *p, float rumbo, float velocidad);
 /* Avanza dt segundos (pasos internos de 1/60.2 s). dt<=0: un paso exacto. */
 void or2_paso(or2_coche_t *c, const or2_param_t *p, const or2_entrada_t *e, float dt);
+/* Volante del mando (pc_input_analog_453860 / PS2 0x1b3fb8 + 0x1b42e0): eje analogico -128..127 (0 =
+   centro), cruceta izquierda/derecha, opcion de velocidad de la direccion (0..7, 4 por defecto; 8 fuera de
+   la carrera) y mando con volante (1: zona muerta 1/128 y sin filtro). Devuelve el volumen -127..127 que va
+   a or2_entrada_t.volumen. Una llamada por cuadro de logica. */
+int  or2_volante(or2_coche_t *c, int eje, int izq, int der, int opcion, int en_carrera, int es_volante);
+/* Segunda curva de par (cambio manual), 162 floats como en or2_carga_curvas. */
+void or2_carga_par_manual(or2_param_t *p, const float *par162);
 /* mu de una bandera de superficie (GetRoadMu 500B30 sin el servicio de red: 1 -> 0, tierra -> 0,7, resto 1) */
 float or2_mu_superficie(uint32_t sup);
 

@@ -17,13 +17,51 @@ struct hud_dat {
     uint8_t *dat; uint32_t meta, lba;                       /* meta: bytes en la RAM (parcial) o 0 (fichero entero) */
     h_tex_t *tex; h_spr_t *spr; h_grp_t *grp; h_pie_t *pie; h_uso_t *uso;
     uint32_t n_tex, n_grp, n_uso;
-    pvr_ptr_t *vtex; uint8_t *usada;
+    pvr_ptr_t *vtex; uint8_t *usada; uint32_t *dibujada;      /* dibujada: ultimo cuadro en que se uso la textura */
     pvr_poly_hdr_t *cab, *cabf;                             /* por textura: encima de todo / detras de la escena 3D */
     int taco, g_fuera, off_taco;                            /* g_fuera: DIG_PUNTOS_FUERA (estilo 0xD, sin uso propio) */
 };
 
 static hud_dat_t *H, *hud_principal;                       /* H: el fichero que se esta dibujando */
 static int ult_tex = -1, modo_fondo;
+static uint32_t tinte = 0xFFFFFF;                           /* color que multiplica las piezas (textos) */
+
+/* Liberacion diferida de la VRAM: la PowerVR dibuja el cuadro anterior mientras la CPU prepara el siguiente, asi que
+   una textura que se uso hace menos de HUDD_ESPERA cuadros puede estar leyendose todavia; si se libera y en su sitio se
+   sube otra, ese cuadro sale con basura (fallos graficos al cambiar de pantalla en el menu). Se apunta y se libera
+   cuando ya no la puede leer nadie (hudd_fin_cuadro, una vez por cuadro). */
+#define HUDD_ESPERA 3
+#define HUDD_PEND 128
+static struct { pvr_ptr_t p; uint32_t cuadro; } pend[HUDD_PEND];
+static int n_pend;
+static uint32_t cuadro_hud = 16;                            /* cuadros dibujados (empieza lejos de 0) */
+
+static void libera_vram(pvr_ptr_t p, uint32_t usada)
+{
+    if (cuadro_hud - usada >= HUDD_ESPERA || n_pend >= HUDD_PEND) { pvr_mem_free(p); return; }
+    pend[n_pend].p = p; pend[n_pend].cuadro = usada; n_pend++;
+}
+void hudd_fin_cuadro(void)
+{
+    int i, j;
+    cuadro_hud++;
+    for (i = j = 0; i < n_pend; i++) {
+        if (cuadro_hud - pend[i].cuadro >= HUDD_ESPERA) pvr_mem_free(pend[i].p);
+        else pend[j++] = pend[i];
+    }
+    n_pend = j;
+}
+int hudd_pendiente(void) { return n_pend; }
+/* libera ya lo pendiente: espera a que la PowerVR acabe los cuadros en curso (cargas: carrera, coche nuevo) */
+void hudd_vacia(void)
+{
+    int i;
+    if (!n_pend) return;
+    thd_sleep(40);                                          /* mas de dos cuadros de dibujo */
+    for (i = 0; i < n_pend; i++) pvr_mem_free(pend[i].p);
+    n_pend = 0;
+}
+void hudd_color(uint32_t rgb) { tinte = rgb & 0xFFFFFF; }
 static float zcapa, zpaso = 0.001f;
 
 static int busca_uso(const char *n)
@@ -75,7 +113,7 @@ hud_dat_t *hudd_abre(const char *fich, int modelo, int parcial)
     h->taco = h->dat[c[11] + (modelo & 15)]; if (h->taco == 0xff) h->taco = -1;
     H = h;
     for (i = 0, h->g_fuera = -1; i < h->n_grp; i++) if (!strncmp(h->grp[i].nombre, "DIG_PUNTOS_FUERA", 16)) h->g_fuera = i;
-    h->vtex = calloc(h->n_tex, sizeof *h->vtex); h->usada = calloc(h->n_tex, 1);
+    h->vtex = calloc(h->n_tex, sizeof *h->vtex); h->usada = calloc(h->n_tex, 1); h->dibujada = calloc(h->n_tex, 4);
     h->cab = memalign(32, h->n_tex * sizeof *h->cab); h->cabf = memalign(32, h->n_tex * sizeof *h->cabf);
     for (i = 0; i < h->n_grp; i++)
         if (grupo_util(i)) for (j = h->grp[i].pri; j < (uint32_t)h->grp[i].pri + h->grp[i].np; j++) h->usada[h->spr[h->pie[j].spr].tex] = 1;
@@ -127,7 +165,7 @@ void hudd_baja(hud_dat_t *h, int t0, int nt)
     if (!h) return;
     if (nt < 0) nt = h->n_tex - t0;
     fin = t0 + nt; if (fin > (int)h->n_tex) fin = h->n_tex;
-    for (i = t0; i < fin; i++) if (h->vtex[i]) { pvr_mem_free(h->vtex[i]); h->vtex[i] = NULL; }
+    for (i = t0; i < fin; i++) if (h->vtex[i]) { libera_vram(h->vtex[i], h->dibujada[i]); h->vtex[i] = NULL; }
 }
 
 int hud_carga(const char *fich, int modelo)
@@ -160,8 +198,9 @@ static void pieza(const h_pie_t *p, const h_grp_t *g, int cuadro, float X, float
         px[k] = qx * c - qy * si + p->x + X; py[k] = qx * si + qy * c + p->y + Y;
     }
     if (s->tex != ult_tex) { pvr_prim((modo_fondo ? H->cabf : H->cab) + s->tex, sizeof(pvr_poly_hdr_t)); ult_tex = s->tex; }
+    H->dibujada[s->tex] = cuadro_hud;
     if (a > 1) a = 1;
-    v.argb = ((uint32_t)(a * 255) << 24) | 0xFFFFFF; v.oargb = 0; v.z = zcapa; zcapa += zpaso;
+    v.argb = ((uint32_t)(a * 255) << 24) | tinte; v.oargb = 0; v.z = zcapa; zcapa += zpaso;
     for (k = 0; k < 4; k++) {
         v.flags = k == 3 ? PVR_CMD_VERTEX_EOL : PVR_CMD_VERTEX;
         v.x = px[k]; v.y = py[k]; v.u = (k & 1) ? s->u1 : s->u0; v.v = (k & 2) ? s->v1 : s->v0;
@@ -173,7 +212,9 @@ static void grupo(int g, int cuadro, float X, float Y, float alfa)
 {
     const h_grp_t *G = H->grp + g; int j;
     for (j = G->pri; j < G->pri + G->np; j++)
-        if (G->n <= 1 || H->pie[j].cuadro == cuadro) pieza(H->pie + j, G, cuadro, X, Y, alfa);
+        if (G->n <= 1 || H->pie[j].cuadro == cuadro ||
+            (cuadro > H->pie[j].cuadro && cuadro < H->pie[j].cuadro + (H->pie[j].flags >> 4)))   /* MENU.DAT: vale */
+            pieza(H->pie + j, G, cuadro, X, Y, alfa);                                          /* flags >> 4 cuadros */
 }
 
 static void dibuja(const char *nombre, int alt, int cuadro, float alfa)

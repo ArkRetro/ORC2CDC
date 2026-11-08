@@ -1,9 +1,12 @@
 #ifndef MENU_H
 #define MENU_H
-/* Menus del modo principal (MENU.DAT, tools/conv_menu.py): titulo -> menu principal -> un jugador -> coche ->
-   cambio -> musica -> carrera, con las animaciones del original. Se dibuja en la lista TR a 640x480. */
+#include <stdint.h>
+/* Menus del modo principal (MENU.DAT, tools/conv_menu.py) con el flujo del original:
+     titulo -> (licencia: elegir / crear / editar) -> menu principal -> un jugador -> coche -> cambio -> musica ->
+     carrera; menu principal -> multijugador, rankings, opciones; LICENSE (X) desde los menus.
+   Se dibuja en la lista TR a 640x480. Las licencias y opciones se guardan en la VMU (A1). */
 enum { MENU_SIGUE, MENU_CARRERA, MENU_DEMO };
-int menu_inicia(void);                      /* abre MENU.DAT (solo tablas en la RAM); 0 bien */
+int menu_inicia(void);                      /* abre MENU.DAT (solo tablas en la RAM) y lee la VMU; 0 bien */
 /* entra en el titulo: texturas a la VRAM bajo demanda (antes hay que dejar el hueco: hud_baja_tex) */
 void menu_entra(int manual, int pista, int npistas);
 int menu_paso(unsigned botones_nuevos);     /* una vez por paso de logica (60 Hz); MENU_CARRERA / MENU_DEMO al acabar */
@@ -11,11 +14,22 @@ void menu_dibuja(void);                     /* dentro de la lista TR */
 void menu_sale(void);                       /* libera toda la VRAM del menu */
 int menu_manual(void);                      /* cambio elegido: 0 AT, 1 MT */
 int menu_pista(void);                       /* musica elegida */
-int menu_coche3d(void);                     /* 1 si hay que dibujar el coche 3D (seleccion de coche, ficha con coche y
-                                               quieta) */
-int menu_coche(void);                       /* ficha del coche elegido (0..14, orden del menu) */
+int menu_coche3d(void);                     /* 1 si hay que dibujar el coche 3D (seleccion de coche, ficha quieta) */
+int menu_coche(void);                       /* COCHEnn.DAT del coche elegido (nn, o -1 si su modelo no esta) */
+int menu_modelo(void);                      /* modelo del original (car+0x11, 0..29) del coche elegido */
 int menu_color(void);                       /* color elegido de esa ficha: 1..8 (car+0x12 del original; boton Y) */
-void menu_coches(unsigned mascara);         /* fichas que tienen coche (bit k = COCHEkk.DAT); antes de menu_entra */
-unsigned menu_vram(void);
-void menu_libera_vram(void);                /* echa las pantallas guardadas que no hacen falta ahora */                   /* bytes de VRAM del menu en uso */
+float menu_giro(void);                      /* giro del coche de la seleccion (radianes, +100/65536 de vuelta por paso) */
+void menu_coches(unsigned mascara);         /* (antiguo) fichas con coche; ver menu_fichas */
+void menu_fichas(const uint8_t *ficha_modelo, int n);   /* modelo de cada COCHEnn.DAT (0xFF si no hay) */
+unsigned menu_vram(void);                   /* bytes de VRAM del menu en uso */
+void menu_libera_vram(void);                /* echa las pantallas guardadas que no hacen falta ahora */
+/* opciones de la licencia activa (las del original: +D8 vista, +DC unidades, +E0 dificultad) */
+int menu_vista(void);                       /* 0 parachoques, 1 interior, 2 exterior */
+int menu_mph(void);                         /* 0 km/h, 1 mph */
+int menu_dificultad(void);                  /* 0 muy facil .. 4 muy dificil (licencia +E0, TIM_DIF) */
+/* ganchos para otros modulos (voces del locutor, video): se llaman al entrar en cada pantalla (evento 0) y al elegir
+   una opcion (evento 1, valor = opcion); NULL = nada */
+enum { MP_TITULO, MP_MENU, MP_MODO, MP_COCHE, MP_CAMBIO, MP_MUSICA, MP_LICENCIA, MP_EDITOR, MP_OPCIONES, MP_RANKING,
+       MP_MULTI };
+extern void (*menu_gancho)(int pantalla, int evento, int valor);
 #endif

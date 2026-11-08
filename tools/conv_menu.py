@@ -30,7 +30,8 @@ Origen (todo se lee del disco al convertir; aqui solo hay tokens de escena, dire
    0x374A60, cuadro 25) con la letra del boton de la Dreamcast, y sus textos (TEXT.PS2, formato 'txet') con la fuente
    14 del juego (spr_font_xst y metricas e interletraje del ELF, tabla 0x344D18), en los huecos de 0x4168F0, como
    0x2394E0 / 0x2398B8. Los textos se componen aqui: cada glifo es una pieza del grupo (sin codigo de texto en la DC).
-   OR2_IDIOMA=es: textos de SPANISH.bin y XST del frontal en espanol (_sxst); por defecto ingles.
+   Idioma: OR2_IDIOMA=es (por defecto): textos de SPANISH.bin y XST del frontal en espanol (_sxst); en = ingles. La
+   version PAL elige el idioma por el de la consola; el port lo fija al convertir (menu y HUD en espanol).
  - Cabeceras: 0-40 entrada, 41-132 destello sobre el rotulo (tramo BRILLO, 40-199 en bucle).
  - Texturas: arreglado el desordenado de las de mas de una fila de paginas (conv_hud.texturas: ancho de bufer de la
    subida = ancho / 128); con ello el fondo y los rotulos salen enteros. Las grandes van en VQ (tools/vq.py) si el
@@ -56,8 +57,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from conv_hud import Disco, Ani, Atlas, Hud, texturas, escena, hornea, imagen_xst, dibuja_grupo, _t, _s
 
 B = 0x44                                # SUMO_FE_CVT
-LETRA = ['e']                           # XST del idioma (OR2_IDIOMA=es: los _sxst y SPANISH.bin)
-MAX_CUADROS, MAX_PIEZAS = 1000, 12000   # limites por grupo (evitan conversiones desbocadas)
+LETRA = ['s']                           # XST del idioma (OR2_IDIOMA=es por defecto: los _sxst y SPANISH.bin)
+MAX_CUADROS, MAX_PIEZAS = 1000, 40000   # limites por grupo (evitan conversiones desbocadas)
 
 def banco_menu(D, b):
     """(Ani, texturas, xst) del banco b con el indice de SPRITE.PS2 corregido (ver docstring)"""
@@ -74,6 +75,19 @@ def tabla(D, va, n):
     """n registros {token, primero, ultimo} del ELF"""
     w = D.elf32(va, 3 * n); return [tuple(w[3 * i:3 * i + 3]) for i in range(n)]
 
+COCHE_MODELOS = 0x375968   # 30 u32: modelo (car+0x11) de cada ficha (15 normales y 15 "_t")
+COCHE_DESBLOQUEO = 0x3759e0  # 30 i16: bit de la licencia (+0x28) que desbloquea la ficha (las 2 primeras, siempre)
+COCHE_COLORES = 0x375a1c   # 30 x 8 i16: bit de cada color (-1 siempre, -2 nunca)
+COCHE_COLOR_INI = 0x375c00  # 30 i8: color por defecto de cada ficha
+
+def carrusel(D, va, n):
+    """tramos de un carrusel del ELF (51B7B0 del PC): registros {token, primero, ultimo} que alternan entrada o
+    movimiento y parada; el primero es la entrada. Devuelve (token, ENTRA, [cuadro de cada opcion])"""
+    t = tabla(D, va, n); ini = t[0][1:]; paradas = []
+    for tok, a, b in t:
+        if a == b and (not paradas or paradas[-1] != a) and b >= ini[1]: paradas.append(a)
+    return t[0][0], ini, paradas
+
 def comprueba_tablas(D):
     """los tokens y cuadros usados salen de estas tablas: si el ejecutable no es el esperado, se para"""
     assert tabla(D, 0x418ca8, 2) == [(0x440000, 0, 20), (0x440000, 20, 20)], 'tabla del menu principal'
@@ -83,6 +97,17 @@ def comprueba_tablas(D):
     w = D.elf32(0x419298, 9)
     assert w[0] == 0x4400a6 and w[4] == 0x4400a7 and w[7] == 0x440066 and w[8] == 5, 'tabla de la musica'
     assert tabla(D, 0x4195d0, 1)[0] == (0x44002f, 0, 110) and tabla(D, 0x419628, 1)[0] == (0x44002e, 0, 110)
+    # seleccion de coche (0x2445D8, el 4C9010 del PC): ori t0,t0,0xE5 / ori a3,a3,0xE6 (normales y "_t") y la tabla de
+    # modelos por ficha (el 68EA10 del PC)
+    assert D.elf32(0x244640)[0] == 0x350800e5 and D.elf32(0x244644)[0] == 0x34e700e6, 'seleccion de coche'
+    assert D.elf32(COCHE_MODELOS, 3) == (1, 4, 0), 'tabla de modelos por ficha'
+    t = tabla(D, 0x416ea8, 23)                                  # editor de licencia (el 4DD7C0 del PC)
+    assert t[0] == (0x440086, 0, 0) and t[1] == (0x44008b, 0, 0) and t[2] == (0x44008a, 0, 0), 'tabla del editor'
+    assert t[3] == (0x440087, 0, 0x33) and t[10] == (0x440091, 1, 1) and t[11] == (0x44008c, 1, 1), 'tabla del editor'
+    assert t[12] == (0x440089, 1, 1) and t[14] == (0x440090, 2, 2) and t[15] == (0x44009f, 0, 0x33), 'tabla del editor'
+    t = tabla(D, 0x41f8e0, 6)                                   # elegir licencia (el 4E2970 del PC)
+    assert t[1] == (0x440088, 0, 0) and t[3] == (0x44008d, 2, 0x16) and t[5] == (0x44008e, 2, 0x16), 'tabla de licencias'
+    assert tabla(D, 0x41d908, 1)[0] == (0x4400a3, 0, 15) and tabla(D, 0x41c260, 1)[0] == (0x44002a, 0, 14)
 
 # ---------------------------------------------------------------- pelicula del titulo
 def logo_titulo(D):
@@ -190,6 +215,8 @@ AYUDA = {
     'COCHE':  [(4, 0x294), (0x10, 0x29a), None, (8, 0x295)],
     'CAMBIO': [(4, 0x294), None, None, (8, 0x295)],
     'MUSICA': [(4, 0x294), (0x10, 0x29b), None, (8, 0x295)],
+    'LICENCIA': [(4, 0x294), None, None, (8, 0x295)],        # 4E19E0: {4, SELECT, 8, BACK}
+    'OPCIONES': [(4, 0x294), None, None, (8, 0x295)],
 }
 # en la Dreamcast: cruz -> A, circulo -> B, triangulo -> Y, cuadrado -> X (colores del mando: A rojo, B azul,
 # X amarillo, Y verde). El icono del PS2 se reutiliza (boton redondo) borrando su simbolo y poniendo la letra
@@ -260,6 +287,55 @@ def parte(p, lim=500, lim2=250):
         return out
     return [p]
 
+MAX_TRAMO = 4095            # cuadros que puede abarcar una pieza (12 bits altos de sus banderas)
+
+def _orden(ks):
+    """orden topologico de las claves de capa de unos cuadros (None si se contradicen)"""
+    import heapq
+    sig = {}; ent = {}; prim = {}
+    for c, kk in enumerate(ks):
+        for i, k in enumerate(kk):
+            prim.setdefault(k, (c, i)); ent.setdefault(k, 0); sig.setdefault(k, set())
+            if i and k not in sig[kk[i - 1]]: sig[kk[i - 1]].add(k); ent[k] += 1
+    cola = [(prim[k], k) for k in ent if ent[k] == 0]; heapq.heapify(cola); orden = []
+    while cola:
+        _, k = heapq.heappop(cola); orden.append(k)
+        for j in sig[k]:
+            ent[j] -= 1
+            if ent[j] == 0: heapq.heappush(cola, (prim[j], j))
+    return orden if len(orden) == len(ent) else None
+
+def tramos_piezas(lst):
+    """[(cuadro, pieza, n cuadros)] de las piezas de un grupo animado sin repetir las que no cambian: cada pieza sale de
+    una capa (p['L'] y su aparicion dentro del cuadro); en cada tramo de cuadros seguidos en que las capas guardan el
+    mismo orden relativo se ponen en ese orden (topologico) y cada capa se guarda una vez por racha de cuadros iguales.
+    Dentro de un cuadro el orden de dibujo es el de la escena (los tramos no se mezclan: van uno detras de otro)"""
+    def claves(ps):
+        vistas = {}; out = []
+        for i, p in enumerate(ps):
+            b = p.get('L', ('i', i)); k = vistas.get(b, 0); vistas[b] = k + 1; out.append((b, k))
+        return out
+    if len(lst) <= 1: return [(c, p, 1) for c, ps in enumerate(lst) for p in ps]
+    ks = [claves(ps) for ps in lst]
+    fp = lambda p: (p.get('bk'), p['tex'], tuple(round(v, 2) for v in p['src']), tuple(np.round(p['M'][:, :2].ravel(), 3)),
+                    round(p['alfa'], 3), p['w'], p['h'], tuple(np.round(p['anc'], 3)))
+    out = []; c0 = 0
+    while c0 < len(lst):
+        c1 = c0 + 1                                             # tramo [c0, c1) lo mas largo posible
+        while c1 < len(lst) and _orden(ks[c0:c1 + 1]) is not None: c1 += 1
+        orden = _orden(ks[c0:c1]); pos = {k: i for i, k in enumerate(orden)}; porclave = {}; sal = []
+        for c in range(c0, c1):
+            for p, k in zip(lst[c], ks[c]): porclave.setdefault(k, []).append((c, p))
+        for k in orden:
+            run = None
+            for c, p in porclave[k]:
+                if run and run[0] + run[2] == c and run[3] == fp(p) and run[2] < MAX_TRAMO: run[2] += 1; continue
+                if run: sal.append((pos[k], run[0], run[1], run[2]))
+                run = [c, p, 1, fp(p)]
+            if run: sal.append((pos[k], run[0], run[1], run[2]))
+        sal.sort(key=lambda v: (v[0], v[1])); out += [(c, p, n) for _, c, p, n in sal]; c0 = c1
+    return out
+
 def firma(ps):
     return tuple((p['tex'], tuple(round(v, 2) for v in p['src']), tuple(np.round(p['M'][:, :2].ravel(), 2)),
                   round(p['alfa'], 3)) for p in ps if p['alfa'] >= 0.004)
@@ -270,7 +346,7 @@ class Menu(Hud):
 
 def convierte(iso, salida, previas):
     D = Disco(iso); comprueba_tablas(D)
-    idioma = os.environ.get('OR2_IDIOMA', 'en'); LETRA[0] = IDIOMAS[idioma][1]
+    idioma = os.environ.get('OR2_IDIOMA', 'es'); LETRA[0] = IDIOMAS[idioma][1]
     a, T, xst = banco_menu(D, B)
     F = Fuente(D, FUENTE_AYUDA, fuentes_xst(D)); cad = textos(D, idioma); iconos = iconos_dc(D, F)
     m = Menu(); hojas = {}
@@ -325,8 +401,10 @@ def convierte(iso, salida, previas):
                 aa, (L, Tp, R, Bt) = at.reg[kk]; img[y:y + Bt - Tp, x:x + R - L] = aa[Tp:Bt, L:R]; at.donde[kk] = (ti, x - L, y - Tp)
         for g, k, frames, capa, xy, tr, lst in datos:
             gi = m.grupo(g, len(lst))
-            for c, ps in enumerate(lst):
-                for p in ps: m.piezas_escena(gi, c, p.get('bk', B), p.get('tx', T), [p], atlas=at)
+            for c, p, n in tramos_piezas(lst):
+                i0 = len(m.pie); m.piezas_escena(gi, c, p.get('bk', B), p.get('tx', T), [p], atlas=at)
+                if len(lst) > 1 and len(m.pie) > i0:          # la pieza vale en los cuadros [c, c + n)
+                    q = list(m.pie[-1]); q[3] |= n << 4; m.pie[-1] = tuple(q)
             ui = len(m.lay); m.uso(g, gi, xy[0], xy[1], capa=capa)
             for n, i0, i1, modo in tr: m.tramos.append((n, ui, i0, i1, modo))
             hojas.setdefault(nombre, []).append(gi)
@@ -362,7 +440,14 @@ def convierte(iso, salida, previas):
     # COMUN: fondo del frontal y barras de ayuda de cada pantalla (lo comparten todas las pantallas de menu)
     ayudas = [dict(g='AYUDA_' + n, lst=[barra_ayuda(D, F, cad, iconos, h)], capa=8, xy=(0, 0), tr=[])
               for n, h in AYUDA.items()]
+    # fuente 14 para los textos que se escriben en la consola (nombre de la licencia, opciones...): un cuadro por
+    # caracter (codigo - primero) con el glifo ya desplazado -metrica[0]; metricas e interletraje van en MNU2
+    usados = set(TECLADO.encode())
+    for i in TEXTOS: usados |= set(cad[i])
+    glifos = [F.piezas(bytes([F.pri + k]), 0, 0, 1) if (F.pri + k) in usados else [] for k in range(F.n)]
+    ayudas.append(dict(g='FUENTE', lst=glifos, capa=9, xy=(0, 0), tr=[]))
     pantalla('COMUN', [('FONDO', 0x4400ab, [0], 0, (0, 0), [], False)] + ayudas)
+    m.mnu2 = mnu2(D, F, cad)
 
     def cab(nombre, tok):
         # 0-40 entra; 41-132 destello sobre el rotulo; 133-199 quieta (el original la pone en bucle: 0x23D5F0 la
@@ -377,11 +462,16 @@ def convierte(iso, salida, previas):
     # UN JUGADOR: COAST 2 COAST, OUTRUN, HEART ATTACK, TIME ATTACK, SHOWROOM
     pantalla('MODO', [cab('CABECERA_MODO', 0x4400c4),
                       ('MODO_UN_JUGADOR', 0x440029, R(0, 110), 2, (0, 0), sel(5, 20, 20), True)])
-    # COCHE: ficha del coche (15 coches, k quieto en 20(k+1)); el coche 3D lo dibuja el juego
+    # COCHE: carruseles del original (0x2445D8): 0x4400E5 los 15 normales y 0x4400E6 los 15 "_t" (boton de variante),
+    # ficha k quieta en 20(k+1) y movimiento de 20k a 20(k+1); orden del menu = tabla COCHE_MODELOS. El coche 3D lo
+    # dibuja el juego. Candado 0x440066 cuadro 5 en (-275, -24) (el 0x440047 del PC, 4C9290)
+    # los movimientos van a 30 cuadros por segundo (el cuadro impar repite el par): la mitad de piezas en la RAM
+    PARES = [f - (f & 1) for f in range(301)]
+    fichas = lambda: [('COCHE%d' % k, 20 * (k + 1), 20 * (k + 1), Q) for k in range(15)] + \
+        [('MUEVE%d%d' % (k, k + 1), 20 * (k + 1), 20 * (k + 2), U) for k in range(14)] + [('ENTRA', 0, 20, U)]
     pantalla('COCHE', [cab('CABECERA_COCHE', 0x440072),
-                       ('COCHE_INFO', 0x44007e, R(0, 300), 4, (0, 0),
-                        [('COCHE%d' % k, 20 * (k + 1), 20 * (k + 1), Q) for k in range(15)] +
-                        [('MUEVE%d%d' % (k, k + 1), 20 * (k + 1), 20 * (k + 2), U) for k in range(14)], False),
+                       ('COCHE_INFO', 0x4400e5, PARES, 4, (0, 0), fichas(), False),
+                       ('COCHE_INFO_T', 0x4400e6, PARES, 4, (0, 0), fichas(), False),
                        ('COCHE_CANDADO', 0x440066, [5], 5, (-275, -24), [], False)])
     # CAMBIO AT / MT (un grupo; los usos CAMBIO_AT y CAMBIO_MT comparten grupo y se distinguen por tramo)
     pantalla('CAMBIO', [('CAMBIO', 0x440064, R(0, 168), 11, (0, 0),
@@ -402,6 +492,40 @@ def convierte(iso, salida, previas):
                         ('MUSICA_LISTA', 0x4400c8, [1, 2, 0], 6, (0, 0), [], False),
                         ('MUSICA_CANDADO', 0x440066, [5], 6, (0, 0), [], False)])
     # listas 1 y 2 (temas 1986/1989 y remezclas; en la demo, bloqueadas): aparte para no pasar de ~1,2 MB de VRAM
+    # LICENCIA (elegir, 0x4E2970 del PC con la tabla 0x41F8E0; editar, 4DD7C0 con 0x416EA8): cabecera "license
+    # select", tarjeta 0x440088 (entra 0-12, quieta hasta 24), flechas 0x44008D / 0x44008E (1 quieta, 2-22 al pulsar)
+    # a +-200; editor: rayas y rotulos 0x440087 (entra 0-51, opcion i en 51+i, sale 51-0), tarjeta 0x44009F (igual, en
+    # -8), rejillas 0x440091 (6 fotos), 0x44008C (26 banderas), 0x440089 (12 signos), cuadro = elegido + 1; foto,
+    # bandera y signo pequenos de la tarjeta 0x440086 / 0x44008B / 0x44008A (cuadro = valor) en (-199,-8), (-216,44),
+    # (-182,44); DONE 0x440090 (1, 2 resaltado) en (-84, 110)
+    pantalla('LICENCIA', [cab('CABECERA_LICENCIA', 0x440069),
+                          ('LIC_TARJETA', 0x440088, R(0, 24), 4, (77, 0), [('ENTRA', 0, 24, U)], True),
+                          ('LIC_FLECHA_D', 0x44008d, R(1, 22), 5, (200, 0), [('QUIETA', 0, 0, Q), ('PULSA', 1, 21, U)], False),
+                          ('LIC_FLECHA_I', 0x44008e, R(1, 22), 5, (-200, 0), [('QUIETA', 0, 0, Q), ('PULSA', 1, 21, U)], False),
+                          ('LIC_EDITOR', 0x440087, R(0, 55), 3, (0, 0),
+                           [('ENTRA', 0, 51, U), ('SALE', 51, 0, U)] + [('OPC%d' % i, 51 + i, 51 + i, Q) for i in range(5)], False),
+                          ('LIC_TARJETA_E', 0x44009f, R(0, 55), 4, (-8, 0),
+                           [('ENTRA', 0, 51, U), ('SALE', 51, 0, U)] + [('OPC%d' % i, 51 + i, 51 + i, Q) for i in range(5)], False),
+                          ('LIC_REJ_FOTO', 0x440091, R(1, 6), 5, (0, 0), [], False),
+                          ('LIC_REJ_BANDERA', 0x44008c, R(1, 26), 5, (0, 0), [], False),
+                          ('LIC_REJ_SIGNO', 0x440089, R(1, 12), 5, (0, 0), [], False),
+                          ('LIC_HECHO', 0x440090, R(1, 2), 5, (-84, 110), [], False),
+                          ('LIC_FOTO', 0x440086, R(0, 5), 5, (-199, -8), [], False),
+                          ('LIC_BANDERA', 0x44008b, R(0, 25), 5, (-216, 44), [], False),
+                          ('LIC_SIGNO', 0x44008a, R(0, 11), 5, (-182, 44), [], False),
+                          ('LIC_BARRA', 0x44000b, R(0, 11), 5, (0, 0), [('ENTRA', 0, 11, U)], False)])
+    # carruseles de los otros menus (tablas del ELF): RANKINGS 0x4400A3 (0x41D908: un jugador, OUTRUN2SP,
+    # multijugador) y MULTIJUGADOR 0x44002A (0x41C260: online, LAN); cabeceras "rankings" 0x440074, "multiplayer"
+    # 0x44006F y "options" 0x44006D (tabla de 0x23D4B8)
+    def carr(nombre, va, n):
+        tok, (e0, e1), par = carrusel(D, va, n)
+        tr = [('ENTRA', e0, e1, U)] + [('SEL%d' % i, f, f, Q) for i, f in enumerate(par)] + \
+             [('MUEVE%d%d' % (i, i + 1), par[i], par[i + 1], U) for i in range(len(par) - 1)]
+        return (nombre, tok, R(0, par[-1]), 2, (0, 0), tr, True)
+    pantalla('RANKING', [cab('CABECERA_RANKING', 0x440074), carr('MODO_RANKING', 0x41d908, 7)])
+    pantalla('MULTI', [cab('CABECERA_MULTI', 0x44006f), carr('MODO_MULTI', 0x41c260, 5)])
+    pantalla('OPCIONES', [cab('CABECERA_OPCIONES', 0x44006d),
+                          ('OPC_BARRA', 0x44000b, R(0, 11), 4, (0, 0), [('ENTRA', 0, 11, U)], False)])
     pantalla('MUSICA_EXTRA', [('MUSICA_L1', 0x4400c7, [20 + 40 * k for k in range(7)], 3, (0, 0), [], False),
                               ('MUSICA_L2', 0x440033, [20 + 40 * k for k in range(12)], 3, (0, 0), [], False),
                               ('MUSICA_T1', 0x44002f, [110 * k + 55 for k in range(7)], 6, (0, 0), [], False),
@@ -410,6 +534,48 @@ def convierte(iso, salida, previas):
     texs = escribe(m, os.path.join(salida, 'MENU.DAT'))
     maquetas(m, previas, hojas)
     return m, texs
+
+# textos de TEXT.PS2 que escribe la consola (ids del PS2): opciones (vista 3-5, unidades 6-7, dificultad 8-0xC), CREATE NEW
+# LICENSE y el nombre por defecto 0x219 (4E2970 / 4E1CF0), menu de una licencia (Select / Reset / Edit License),
+# datos de la tarjeta, si / no, NORMAL / TUNED AT / MT y el aviso de coche no disponible
+TEXTOS = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 0x2a, 0x2b, 0x218, 0x219, 0x233, 0x234, 0x237, 0x213, 0x214, 0x21b, 0x21d,
+          0x2b1, 0x2b2, 0x2b3, 0x2b4, 0x32a, 0x327]
+TECLADO = '1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ:%<>-'   # teclado de 468D40 (mayusculas) y signos de las cifras
+
+def mnu2(D, F, cad):
+    """bloque MNU2: textos, metricas de la fuente y tablas de la seleccion de coche (todo del disco)
+      'MNU2', u32 n textos, u32 desp. textos, u32 desp. fuente, u32 desp. coches, u32 color de la tarjeta (RGB), 2 x 0
+      textos: n x {u16 id, u16 largo, u32 desp. desde MNU2} y las cadenas (codigos de la fuente)
+      fuente: u16 ancho, alto, primer caracter, n; i16 espaciado, u16 hay interletraje; i8 metricas[2n]; i8 inter[n*n]
+      coches: u8 modelo[30], i16 desbloqueo[30], i16 colores[30][8], i8 color inicial[30]"""
+    out = bytearray(32); tab = bytearray(); dat = bytearray()
+    base = 32 + 8 * len(TEXTOS)
+    for i in TEXTOS:
+        tab += struct.pack('<2HI', i, len(cad[i]), base + len(dat)); dat += cad[i] + b'\0'
+    out += tab + dat; out += bytes((-len(out)) % 4)
+    o_f = len(out)
+    out += struct.pack('<4HhH', F.w, F.h, F.pri, F.n, F.esp, F.ker is not None)
+    out += F.met.astype(np.int8).tobytes()
+    if F.ker is not None: out += F.ker.astype(np.int8).tobytes()
+    out += bytes((-len(out)) % 4)
+    o_c = len(out)
+    rd = lambda va, fmt, n: struct.unpack_from('<%d%s' % (n, fmt), D.elf, va - 0x100000 + 0x80)
+    out += bytes(rd(COCHE_MODELOS, 'I', 30))
+    out += struct.pack('<30h', *rd(COCHE_DESBLOQUEO, 'h', 30)) + struct.pack('<240h', *rd(COCHE_COLORES, 'h', 240))
+    out += struct.pack('<30b', *rd(COCHE_COLOR_INI, 'b', 30)); out += bytes((-len(out)) % 4)
+    struct.pack_into('<4sIII', out, 0, b'MNU2', len(TEXTOS), 32, o_f); struct.pack_into('<I', out, 16, o_c)
+    struct.pack_into('<I', out, 20, color_tarjeta(D))
+    return bytes(out)
+
+def color_tarjeta(D):
+    """color de los rotulos de la tarjeta de licencia (0x44009F, cuadro 51): mediana de sus pixeles oscuros opacos;
+    con el se escriben los datos de la tarjeta"""
+    a, T, _ = banco_menu(D, B); px = []
+    for p in escena(a, 0x9f, 51.0):
+        l, t, r, b = (int(v) for v in p['src']); c = T[p['tex']][t:b, l:r].reshape(-1, 4).astype(int)
+        px.append(c[(c[:, 3] > 200) & (c[:, :3].max(1) < 110)][:, :3])
+    m = np.median(np.concatenate(px), axis=0).astype(int)
+    return int(m[0]) << 16 | int(m[1]) << 8 | int(m[2])
 
 VQ_MIN = 128 * 128          # texturas menores: sin VQ (el libro de 2 KB pesa demasiado)
 VQ_UMBRAL = (9.0, 6.5)      # error RMS maximo (0-255) para aceptar la VQ: opacas, con transparencia
@@ -436,12 +602,14 @@ def escribe(m, ruta):
         p['vram'] = sum(len(x[4]) for x in texs[p['t0']:p['t0'] + p['nt']])
     d = bytearray(open(ruta, 'rb').read())
     c = struct.unpack_from('<12I', d, 0); off_taco = c[11]; o_dat = off_taco + 16
-    blq = bytearray(b'MNU1' + struct.pack('<3I', len(m.pant), len(m.tramos), 0))
+    o2 = 16 + 48 * len(m.pant) + 32 * len(m.tramos)
+    blq = bytearray(b'MNU1' + struct.pack('<3I', len(m.pant), len(m.tramos), o2 if getattr(m, 'mnu2', None) else 0))
     for p in m.pant:
         blq += struct.pack('<16s6HI4I', p['nombre'].encode(), p['g0'], p['ng'], p['u0'], p['nu'], p['t0'], p['nt'],
                            p['vram'], 0, 0, 0, 0)
     for n, u, i0, i1, modo in m.tramos:
         blq += struct.pack('<16s4H2I', n.encode(), u, i0, i1, modo, 0, 0)
+    if getattr(m, 'mnu2', None): blq += m.mnu2
     # el bloque va entre los tacometros y los datos de textura: se desplazan los datos y sus desplazamientos
     ini = (o_dat + 31) & ~31
     datos = d[ini:]; nuevo_ini = (o_dat + len(blq) + 31) & ~31; dx = nuevo_ini - ini

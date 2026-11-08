@@ -30,4 +30,10 @@ int hudd_cuadros(const hud_dat_t *h, int uso);           /* cuadros del grupo de
    fondo = 1: z baja y comparacion de profundidad normal, queda detras de la escena 3D); dentro de la lista TR */
 void hudd_dibuja(hud_dat_t *h, int uso, int cuadro, float dx, float dy, float alfa, float z, int fondo);
 const uint8_t *hudd_extra(const hud_dat_t *h);           /* lo que va detras de los 16 bytes de tacometros */
+/* una vez por cuadro (despues de dibujar): libera la VRAM que se pidio liberar cuando ya no la lee la PowerVR (las
+   texturas de hudd_baja / hud_baja_tex se liberan HUDD_ESPERA cuadros despues de su ultimo uso) */
+void hudd_fin_cuadro(void);
+int hudd_pendiente(void);                                /* liberaciones aun pendientes */
+void hudd_vacia(void);                                   /* las libera ya (espera 40 ms): antes de una carga */
+void hudd_color(uint32_t rgb);                           /* color de las piezas que se dibujen despues (0xFFFFFF) */
 #endif

@@ -16,7 +16,12 @@
      reaparecer (como el original).
    Aqui x es real (interpolando entre umbrales de rpm) para que el tono no vaya a saltos.
    Menus: sfx_menu(id) toca la muestra "se%03x" una vez (sin bucle) a su frecuencia y con el volumen de la tabla SE del
-   IRX (u16 final de la muestra en SFX.DAT), alternando entre dos canales para que un efecto no corte al anterior. */
+   IRX (u16 final de la muestra en SFX.DAT), alternando entre dos canales para que un efecto no corte al anterior.
+   Voces (VOCES.DAT, tools/conv_sonido.py): las muestras del banco de voz del idioma (ORC.PAK y PERO.pak) y dos efectos
+   de carrera (0x4d EXTEND TIME y 0x18d aviso de poco tiempo) a la RAM del AICA al arrancar (214 KB en espanol: caben
+   junto a SFX.DAT y los buferes de la musica). sfx_voz(id) toca la del id a su frecuencia (12 kHz) con el volumen de
+   la tabla SE del IRX y el mismo nivel que los efectos de menu; las voces van por un canal propio (una voz nueva corta
+   la anterior: SUPUESTO, el original las manda a la cola de sonido de la carrera) y los efectos por otro. */
 #include <kos.h>
 #include <dc/sound/sound.h>
 #include <dc/sound/sfxmgr.h>
@@ -78,6 +83,18 @@ static int listo;
 #define N_CANAL_MENU 2
 static int canal_menu[N_CANAL_MENU] = { -1, -1 }, menu_turno;
 #define VOL_MENU 0.8f           /* nivel de los efectos de menu (volumen 0x3fff del IRX) */
+#define MAX_VOCES 64
+
+typedef struct {                /* como en VOCES.DAT */
+    uint16_t id, vol;
+    uint32_t desp, bytes, frec, n;
+} voz_dat_t;
+
+static voz_dat_t voz[MAX_VOCES];
+static uint32_t voz_spu, voz_tablas_tam;
+static uint8_t *voz_tablas;
+static int n_voz, canal_voz = -1, canal_voz_se = -1;
+static char voz_idioma[9];
 
 /* curva de volumen (0..127) en x */
 static float curva_vol(const int8_t p[8][2], float x)
@@ -302,4 +319,58 @@ void sfx_menu(int id)
     if (vol <= 0) return;
     snd_sfx_stop(c);
     manda(c, AICA_CH_CMD_START, &mues[i], base_spu[i], mues[i].frec, vol, 128);
+}
+
+/* ---------------------------------------------------------------- voces */
+int sfx_voces_inicia(void)
+{
+    uint32_t tam, h[8], i;
+    uint8_t *d;
+    if (!listo || n_voz) return n_voz ? 0 : -1;
+    d = gd_carga("VOCES.DAT", &tam);
+    if (!d) return -1;
+    memcpy(h, d, sizeof(h));    /* 'VOZ1', n, off_muestras, off_tablas, off_datos, total, idioma[8] */
+    if (tam < 32 || memcmp(h, "VOZ1", 4) || h[1] > MAX_VOCES || h[5] > tam || h[4] > tam || h[3] > h[4] ||
+        h[2] + 20 * h[1] > h[3]) { free(d); return -1; }
+    voz_spu = snd_mem_malloc((h[5] - h[4] + 31) & ~31u);
+    voz_tablas_tam = h[4] - h[3];
+    voz_tablas = malloc(voz_tablas_tam);
+    if (!voz_spu || !voz_tablas) { free(d); return -1; }
+    spu_memload(voz_spu, d + h[4], (h[5] - h[4] + 3) & ~3u);
+    memcpy(voz_tablas, d + h[3], voz_tablas_tam);
+    for (i = 0; i < h[1]; i++) memcpy(&voz[i], d + h[2] + 20 * i, 20);
+    memcpy(voz_idioma, d + 24, 8); voz_idioma[8] = 0;
+    n_voz = h[1];
+    free(d);
+    canal_voz = snd_sfx_chn_alloc();
+    canal_voz_se = snd_sfx_chn_alloc();
+    return 0;
+}
+
+const void *sfx_voces_tablas(uint32_t *tam) { if (tam) *tam = voz_tablas_tam; return voz_tablas; }
+const char *sfx_voces_idioma(void) { return voz_idioma; }
+
+static void toca_voz(int id, int canal)
+{
+    int i, vol;
+    muestra_dat_t m;
+    if (canal < 0) return;
+    for (i = 0; i < n_voz && voz[i].id != (id & 0x1ff); i++) ;
+    if (i >= n_voz) return;
+    vol = (int)(voz[i].vol * (1.0f / 0x3fff) * VOL_MENU * vol_general * 255.0f + 0.5f);
+    if (vol > 255) vol = 255;
+    if (vol <= 0) return;
+    if ((id & 0x1ff) != 0x18d) dbglog(DBG_INFO, "VOZ 0x%x\n", id & 0x1ff);   /* para las pruebas (consola) */
+    memset(&m, 0, sizeof m);
+    m.formato = 2; m.bucle = 0; m.ini = 0; m.fin = voz[i].n;
+    snd_sfx_stop(canal);
+    manda(canal, AICA_CH_CMD_START, &m, voz_spu + voz[i].desp, voz[i].frec, vol, 128);
+}
+
+void sfx_voz(int id) { if (n_voz) toca_voz(id, (id & 0x1ff) == 0x4d || (id & 0x1ff) == 0x18d ? canal_voz_se : canal_voz); }
+
+void sfx_voz_calla(void)
+{
+    if (canal_voz >= 0) snd_sfx_stop(canal_voz);
+    if (canal_voz_se >= 0) snd_sfx_stop(canal_voz_se);
 }

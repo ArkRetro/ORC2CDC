@@ -17,6 +17,7 @@
 #include "../comun/or2_fisica.h"
 #include "../comun/hud.h"
 #include "../comun/sfx.h"
+#include "../comun/voces.h"
 #include "../comun/menu.h"
 #include "camara.h"
 
@@ -46,6 +47,17 @@ static const uint32_t FMT[3] = { PVR_TXRFMT_ARGB1555, PVR_TXRFMT_RGB565, PVR_TXR
 static const int LISTA[3] = { PVR_LIST_OP_POLY, PVR_LIST_PT_POLY, PVR_LIST_TR_POLY };
 static pvr_poly_hdr_t cab_col[2][3];                            /* sin textura: [niebla][lista] */
 
+/* Bytes que ocupa en el bufer de parametros del TA una tira de n vertices tal y como la mandamos (cabecera de tipo 0,
+   vertice de tipo 3: textura con UV de 32 bits y color empaquetado; o: con color de desplazamiento, el coche). El TA
+   parte cada tira en trozos de hasta 6 triangulos (8 vertices, 2 compartidos con el trozo siguiente) y guarda por trozo
+   ISP/TSP/TCW (12 bytes) y sus vertices (x, y, z, u, v, color: 24 bytes; 28 con desplazamiento):
+   k = techo((n - 2) / 6) trozos, (24 + 4 o) (n - 2) + (60 + 8 o) k bytes (docs/DREAMCAST.md) */
+static inline uint32_t ta_teo(uint32_t n, int o)
+{
+    uint32_t t = n - 2, k = (t + 5) / 6;
+    return (24 + 4 * o) * t + (60 + 8 * o) * k;
+}
+
 /* Huecos fijos de RAM para las etapas (la de salida y luego la siguiente, nunca a la vez) y para la union: se reservan
    al arrancar y no se liberan, para que la RAM no se trocee entre carreras (los coches del menu se cargan y liberan en
    medio) y siempre quepa una etapa entera (curso_huecos) */
@@ -74,9 +86,14 @@ static int lee_modelo_en(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t
     m->sec_mapa = m->nsec ? (const uint16_t *)p : NULL; p += m->nsec ? m->nruta * 2 : 0;
     p = b + ((p - b + 3) & ~3);
     if (!v7) for (i = 0; i < m->nmallas; i++) m->mallas[i].nodo = -1;   /* ORD5/6: distancia maxima, sin nodos */
-    for (i = 0; i < m->nnodos; i++) m->nodos[i].relleno[0] = 0;   /* vertices de cada nodo (presupuesto del TA) */
+    /* presupuesto del TA (nodos_visibles): relleno[0] = bytes teoricos del TA de las tiras del nodo (ta_teo),
+       relleno[1] = sus vertices << 12 | las clases de distancia (<< 6) y de LOD del cuadro (nodos_visibles) */
+    for (i = 0; i < m->nnodos; i++) m->nodos[i].relleno[0] = m->nodos[i].relleno[1] = 0;
     for (i = 0; i < m->nmallas; i++)
-        if (m->mallas[i].nodo >= 0 && (uint32_t)m->mallas[i].nodo < m->nnodos) m->nodos[m->mallas[i].nodo].relleno[0] += m->mallas[i].n;
+        if (m->mallas[i].nodo >= 0 && (uint32_t)m->mallas[i].nodo < m->nnodos && m->mallas[i].n >= 3) {
+            uint32_t n = m->mallas[i].n > 256 ? 256 : m->mallas[i].n;
+            m->nodos[m->mallas[i].nodo].relleno[0] += ta_teo(n, 0); m->nodos[m->mallas[i].nodo].relleno[1] += n << 12;
+        }
     m->vis = m->nnodos ? calloc((m->nnodos + 31) / 32, 4) : NULL; m->ruta_i = 0;
     m->blob = b + ((p - b + 31) & ~31); m->datos = b;
     return 0;
@@ -123,11 +140,20 @@ static int sube_modelo(modelo_t *m)
     return 0;
 }
 
-/* vertices del modelo entero (presupuesto del TA) */
-static uint32_t modelo_vtx(const modelo_t *m)
+/* vertices del modelo (lod < 0: todas las mallas; si no, las de ese LOD: el trafico lleva en el campo del nodo la
+   mascara de los LOD que dibujan la malla, tools/conv_trafico.py) y bytes teoricos del TA (ta_teo; o: con color de
+   desplazamiento) */
+static uint32_t modelo_vtx(const modelo_t *m, int lod)
 {
     uint32_t i, c = 0;
-    for (i = 0; i < m->nmallas; i++) c += m->mallas[i].n > 256 ? 256 : m->mallas[i].n;
+    for (i = 0; i < m->nmallas; i++) if (m->mallas[i].n >= 3 && (lod < 0 || ((m->mallas[i].nodo >> lod) & 1))) c += m->mallas[i].n > 256 ? 256 : m->mallas[i].n;
+    return c;
+}
+static uint32_t modelo_teo(const modelo_t *m, int lod, int o)
+{
+    uint32_t i, c = 0;
+    for (i = 0; i < m->nmallas; i++)
+        if (m->mallas[i].n >= 3 && (lod < 0 || ((m->mallas[i].nodo >> lod) & 1))) c += ta_teo(m->mallas[i].n > 256 ? 256 : m->mallas[i].n, o);
     return c;
 }
 
@@ -195,7 +221,6 @@ static void carga_espera(void) { while (carga.estado == 1) thd_sleep(5); }
 #define CERCA_PS2 0.1f
 #define LEJOS_PS2 4000.0f
 static float ojo[3], der[3], arr[3], ade[3], fx = 320.0f / 0.75f, cerca = CERCA_PS2, lejos = LEJOS_PS2;
-static float corte_d = LEJOS_PS2;                        /* recorte de la etapa por el presupuesto del TA (corte_ajusta) */
 static matrix_t vista __attribute__((aligned(32))), vista_cielo __attribute__((aligned(32))),
                 mod_coche __attribute__((aligned(32)));
 static uint32_t tri_enviados;
@@ -231,66 +256,74 @@ static uint32_t vtx_env, vtx_ult;                        /* vertices enviados en
 static uint32_t vtx_et, vtx_et_ult;                      /* los de la etapa */
 /* ---------------------------------------------------------------- presupuesto del TA (docs/DREAMCAST.md)
    La PowerVR real se cuelga si el TA llena el bufer de parametros (vertices) del cuadro (o el de punteros, OPB);
-   Flycast no. Medida en la consola real (demo 12c, GDEMU): 24656 vertices contados y 22012 triangulos llenaron 1 MB
-   (VB_POS = END, error 0x0C) => mas de 42,5 bytes por vertice contado, y eso sin contar los del HUD. La cuenta teorica
-   (trozos de 6 triangulos, 12 bytes de cabecera y 24 por vertice: unos 32 bytes por vertice) se queda corta, asi que
-   el presupuesto va por vertices contados con ta_bpv bytes cada uno (56 de salida, 1,3 veces lo medido) y se corrige
-   al alza con lo que gasta de verdad el TA (registro TA_ITP_CURRENT, solo en la consola: Flycast no lo actualiza).
-   Se cuentan todos: etapa, coche, trafico y efectos (ta_cabe, antes de enviar cada tira) y lo 2D (HUD, menus y
-   textos: ta_prim, por el que pasan los pvr_prim de este fichero y, desde el Makefile, los de hud.c y menu.c).
-   Topes de cada cuadro (bytes):
+   Flycast no. Cada tira 3D cuesta ta_teo (el formato de los parametros del TA) por ta_f / 256. ta_f sale de la medida
+   en la consola real (demo 12c, GDEMU): 24656 vertices y 22012 triangulos en unas 1322 tiras llenaron 1 MB (VB_POS = END,
+   error 0x0C); con ta_teo ese cuadro eran unos 780 KB (los trozos de cada tira, estimados), asi que la consola gasto al
+   menos 1,34 veces la cuenta. ta_f = 1,75 (448 / 256): ese cuadro costaria 56 bytes por vertice, el margen de antes
+   (1,3 x 42,5); las tiras que el TA guarda mejor (de 8 vertices, 6 triangulos) cuestan menos que antes y las que guarda
+   peor (triangulos sueltos, tiras de 9 a 13) mas. En la consola, ta_f sube sola si el TA gasta mas (registro
+   TA_ITP_CURRENT del cuadro anterior / lo teorico x 1,2; Flycast no lo actualiza). Lo 2D (HUD, menus y textos: ta_prim,
+   por el que pasan los pvr_prim de este fichero y, desde el Makefile, los de hud.c y menu.c) cuenta ta_bpv (56) bytes
+   por vertice. Topes de cada cuadro (bytes):
      total  = TA_VB_BYTES - TA_MARGEN
      2D     = max(TA_RESERVA_2D, 2 x lo 2D del cuadro anterior)          (lo 2D va al final y no se puede cortar)
      3D     = total - 2D                                                 (ta_lim: nada 3D pasa de aqui)
-     etapa  = 3D - max(1,25 x coche+trafico+efectos del cuadro anterior, coche + 3 coches de trafico)
-   Si una tira no cabe, no se envia (ta_corto) y la distancia adaptativa acorta. */
+     etapa  = 3D - max(coche+trafico+efectos del cuadro anterior + 2 coches de trafico con LOD 0,
+                       coche + 3 coches de trafico con LOD 0)
+   Lo que la etapa no puede gastar lo reparte nodos_visibles_todos (quita primero lo que el LOD del original quitaria
+   antes); si aun asi una tira no cabe, no se envia (ta_corto). */
 #define TA_VB_BYTES (1792 * 1024)                        /* bufer de parametros por cuadro (x2: doble bufer) */
 #define TA_MARGEN (64 * 1024)                            /* cabeceras vacias de fin de lista y prudencia */
 #define TA_RESERVA_2D (64 * 1024)                        /* minimo para lo 2D (medido: unos 450 vertices) */
-#define TA_BPV_MIN 56                                    /* bytes por vertice contado (>= 42,5 medidos en la consola) */
+#define TA_BPV_MIN 56                                    /* bytes por vertice 2D (1,3 x 42,5 medidos en la consola) */
+#define TA_F_MIN 448                                     /* coste 3D = ta_teo x ta_f / 256 (1,75: ver arriba) */
 /* tope de vertices de la etapa por cuadro (tiempo de CPU: transformar y enviar) y distancia de dibujo minima del
-   recorte de seguridad: la distancia es la del original (LEJOS_PS2) y solo se acorta si un cuadro no cabe (ta_corto o
-   mas de 15 ms de CPU), lo que con la visibilidad y el LOD del original no deberia pasar (docs/DREAMCAST.md) */
+   recorte de seguridad por CPU: la distancia es la del original (LEJOS_PS2) y solo se acorta si la CPU pasa de 15 ms */
 #define VTX_ETAPA_MAX 20000
 #define LEJOS_MIN 600.0f
-static uint32_t ta_bpv = TA_BPV_MIN, ta_vb, ta_et, ta_lim, ta_tope_etapa, ta_corto, ta_v2d, ta_v2d_ult, ta_votros_ult, ta_vmin_otros;
+static uint32_t ta_bpv = TA_BPV_MIN, ta_f = TA_F_MIN, ta_vb, ta_et, ta_lim, ta_tope_etapa, ta_corto, ta_v2d, ta_v2d_ult;
+static uint32_t ta_otros_ult, ta_min_otros_teo, ta_traf_teo;   /* bytes de lo que no es la etapa (cuadro anterior; minimo
+                                                            teorico) y teoricos del coche de trafico mayor con LOD 0 */
+static uint32_t ta_teo_3d, ta_tiras;                     /* bytes teoricos y tiras 3D del cuadro */
 static uint32_t ta_real_ult, ta_opb_ult;                 /* lo que gasto de verdad el TA en el cuadro anterior */
 static int ta_freno;                                     /* 0..3: OPB muy lleno, la etapa baja a (4 - freno) / 4 */
 static int ta_en_etapa;                                  /* lo que se envia ahora es de la etapa (su tope) */
 static int ta_et_corto;                                  /* en este cuadro no cupo alguna tira de la etapa */
+static int ta_ofs;                                       /* las tiras que se envian llevan color de desplazamiento */
 /* reserva una tira de n vertices; 0 si no cabe (y no se envia) */
 static inline int ta_cabe(uint32_t n)
 {
-    uint32_t c = n * ta_bpv;
+    uint32_t t = ta_teo(n, ta_ofs), c = t * ta_f >> 8;
 #ifndef DIAG_SIN_TOPE                                    /* medida en Flycast: sin tope (en la consola se colgaria) */
     if (ta_vb + c > ta_lim || (ta_en_etapa && ta_et + c > ta_tope_etapa)) { ta_corto = 1; ta_et_corto |= ta_en_etapa; return 0; }
 #endif
     ta_vb += c; if (ta_en_etapa) ta_et += c;
+    ta_teo_3d += t; ta_tiras++;
     return 1;
 }
 /* topes del cuadro, con lo medido en el anterior */
 static void ta_inicia_cuadro(void)
 {
-    uint32_t total = TA_VB_BYTES - TA_MARGEN, r2d = 2 * ta_v2d_ult * ta_bpv, ro = ta_votros_ult * ta_bpv * 5 / 4;
+    uint32_t total = TA_VB_BYTES - TA_MARGEN, r2d = 2 * ta_v2d_ult * ta_bpv, ro = ta_otros_ult + (2 * ta_traf_teo * ta_f >> 8), rmin = ta_min_otros_teo * ta_f >> 8;
     if (r2d < TA_RESERVA_2D) r2d = TA_RESERVA_2D;
-    if (ro < ta_vmin_otros * ta_bpv) ro = ta_vmin_otros * ta_bpv;
+    if (ro < rmin) ro = rmin;
     ta_lim = total - r2d;
     ta_tope_etapa = ta_lim > ro ? (ta_lim - ro) / 4 * (4 - ta_freno) : 0;
-    ta_vb = ta_et = 0; ta_v2d = 0;
+    ta_vb = ta_et = 0; ta_v2d = 0; ta_teo_3d = 0; ta_tiras = 0;
 }
 /* fin del cuadro (tras la ultima lista): lo contado, y lo que gasto el TA si el registro lo dice (consola real) */
 static void ta_fin_cuadro(void)
 {
-    uint32_t usado = PVR_GET(PVR_TA_VERTBUF_POS) - PVR_GET(PVR_TA_VERTBUF_START), contados = ta_vb / ta_bpv + ta_v2d;
+    uint32_t usado = PVR_GET(PVR_TA_VERTBUF_POS) - PVR_GET(PVR_TA_VERTBUF_START), teo = ta_teo_3d + ta_v2d * 27;   /* 2D: cuadrilateros, 108 / 4 */
     uint32_t opb = (PVR_GET(PVR_TA_OPB_POS) << 2) - PVR_GET(PVR_TA_OPB_START), opb_tot = PVR_GET(PVR_TA_OPB_END) - PVR_GET(PVR_TA_OPB_START);
-    ta_v2d_ult = ta_v2d; ta_votros_ult = (ta_vb - ta_et) / ta_bpv;
+    ta_v2d_ult = ta_v2d; ta_otros_ult = ta_vb - ta_et;
     ta_real_ult = usado < TA_VB_BYTES ? usado : 0;
     ta_opb_ult = opb <= opb_tot ? opb : 0;               /* Flycast no lleva estos registros: 0 */
     if (ta_opb_ult > opb_tot / 10 * 7) { if (ta_freno < 3) ta_freno++; ta_corto = 1; }
     else if (ta_opb_ult < opb_tot / 2 && ta_freno) ta_freno--;
-    if (ta_real_ult && contados > 2000) {               /* con margen del 20 %; nunca baja de TA_BPV_MIN */
-        uint32_t b = ta_real_ult / contados * 6 / 5 + 1;
-        if (b > ta_bpv) ta_bpv = b > 128 ? 128 : b;
+    if (ta_real_ult && teo > 64 * 1024) {               /* con margen del 20 %; nunca baja de TA_F_MIN */
+        uint32_t f = (uint32_t)((uint64_t)ta_real_ult * 256 * 6 / 5 / teo) + 1;
+        if (f > ta_f) { ta_f = f > 1024 ? 1024 : f; ta_bpv = TA_BPV_MIN * ta_f / TA_F_MIN; }   /* lo 2D, en proporcion */
     }
 }
 /* pvr_prim contando los vertices (lo 2D) */
@@ -396,13 +429,16 @@ static void carga_cartel(const float (*W)[4])
 /* mallas [k0, k1) de la lista l; sin_niebla para el cielo. Con recorta (etapas y uniones): las de nodos que no estan en
    mo->vis (nodos_visibles: visibilidad por secciones, LOD y recorte del original) no se dibujan, y las demas se
    recortan por su esfera contra la piramide de la vista */
+static int solo_lod = -1;                                       /* trafico: solo las mallas de este LOD (traf_lod) */
 static void dibuja_rango(const modelo_t *mo, int l, uint32_t k0, uint32_t k1, int recorta, int sin_niebla, int solo_lista)
 {
     float tanh = 320.0f / fx, tanv = 240.0f / fx, kh = sqrtf(1 + tanh * tanh), kv = sqrtf(1 + tanv * tanv);
     uint32_t k, vtx_et0 = vtx_env; int ult = -2, seguro = 0, cartel;
+    ta_ofs = mo->ofs != NULL;
     for (k = k0; k < k1; k++) {
         const malla_t *m = mo->mallas + k;
         if (m->n < 3) continue;                                 /* apagada (luces del coche: coche_luces) */
+        if (solo_lod >= 0 && !((m->nodo >> solo_lod) & 1)) continue;   /* de otro LOD del coche de trafico */
         if (solo_lista && (m->tex < 0 || (int)mo->texs[m->tex].lista != l)) continue;
         cartel = 0;
         if (recorta) {
@@ -416,7 +452,6 @@ static void dibuja_rango(const modelo_t *mo, int l, uint32_t k0, uint32_t k1, in
                 dx = m->cx - ojo[0]; dy = m->cy - ojo[1]; dz = m->cz - ojo[2];
                 zv = dx * ade[0] + dy * ade[1] + dz * ade[2];
                 if (zv + m->r < cerca || zv - m->r > lejos) continue;
-                if (mo->vis && zv - m->r > corte_d) continue;   /* presupuesto del TA: fuera lo mas lejano */
                 xv = dx * der[0] + dy * der[1] + dz * der[2];
                 yv = dx * arr[0] + dy * arr[1] + dz * arr[2];
                 if (fabsf(xv) - zv * tanh > m->r * kh || fabsf(yv) - zv * tanv > m->r * kv) continue;
@@ -444,6 +479,7 @@ static void dibuja_rango(const modelo_t *mo, int l, uint32_t k0, uint32_t k1, in
         else dibuja_malla(mo, m);
     }
     if (ta_en_etapa) vtx_et += vtx_env - vtx_et0;
+    ta_ofs = 0;
 }
 
 /* ---------------------------------------------------------------- ruta de la carrera
@@ -705,7 +741,12 @@ static coche_t yo;
                                                                    probador antes; no es del juego) */
 #endif
 static int manual_, pide_cambio, auto_piloto, sfx_ok, golpe_cd;
+static int voz_ok, voz_contacto;                              /* voces.c; contacto con impulso en este paso */
 static or2_param_t fpar; static or2_coche_t fis; static int fis_ok, columna = -1;
+/* mando del jugador para or2_volante (volante del original: eje -128..127, cruceta, etapa para CheckWanderer); usa = 1
+   solo en el paso de carrera con el jugador al mando */
+static struct { int eje, izq, der, usa, nivel; } mando;
+#define VEL_DIRECCION 4                                         /* opcion de velocidad de la direccion (4471A0: 4) */
 /* coche elegido: ficha del menu (COCHEnn.DAT, tools/conv_coche.py) y su modelo (car+0x11) segun COCHES.DAT ('CCH1' y
    un byte por ficha, 0xFF = sin coche); el modelo da la columna de la fisica y el tacometro del HUD */
 #define N_FICHAS 15
@@ -713,6 +754,7 @@ static uint8_t ficha_modelo[N_FICHAS]; static int coche_ficha = -1, coche_malo =
 static int fisica_modelo(int m);
 static or2_choques_t choq;                                      /* choques del original (bloques de PARAM.DAT) */
 static float *param_dat;                                        /* se queda en memoria: las animaciones apuntan aqui */
+static const float *par_manual;                                 /* bloque PAR2 de PARAM.DAT (NULL si es antiguo) */
 /* camara de carrera del original (demo/camara.c) con las tablas CAM1 de PARAM.DAT; sin ellas, la de antes */
 #define CAM_BYTES (0x64c + 0x5460 + 0x438)
 static cam_tablas_t cam_tab; static int cam_ok; static cam_t cam = { .elegida = 2 };
@@ -781,6 +823,11 @@ static int fisica_carga(void)
 {
     uint32_t sz; float *t = gd_carga("PARAM.DAT", &sz);
     if (!t || sz < (200 * 19 + 162 + 256) * 4) return -1;
+    par_manual = NULL;
+    if (sz >= 652 + 36 && !memcmp((const uint8_t *)t + sz - 652, "PAR2", 4)) {   /* curva de par del manual, al final */
+        par_manual = (const float *)(const void *)((const uint8_t *)t + sz - 648);
+        sz -= 652;
+    }
     if (sz >= 36 + 4 + 4 * 0x1c2 && !memcmp((const uint8_t *)t + sz - 36, "KTE1", 4)) {   /* al final, si esta */
         tim_kte = (const int16_t *)(const void *)((const uint8_t *)t + sz - 32);
         sz -= 36;
@@ -810,6 +857,8 @@ static int fisica_modelo(int m)
 #endif
     if (or2_carga_param(param_dat, 200, columna, &fpar) < 0) { fis_ok = 0; return -2; }
     or2_carga_curvas(&fpar, param_dat + 200 * 19, param_dat + 200 * 19 + 162);
+    if (par_manual) or2_carga_par_manual(&fpar, par_manual);   /* torque_table 1 (event+0x13 = 1) */
+    fpar.modelo = m;                                            /* car+0x11: >= 15 los preparados */
     if (ACEL != 1.0f) fpar.par_mult *= ACEL;                    /* opcional (ACEL): no es del original */
     fis_ok = 1; return 0;
 }
@@ -897,6 +946,21 @@ static void traf_tablas(void)
     for (m = 0; m < n; m++) memcpy(&trc[m], d + 8 + m * 52, 52);
     memcpy(acl, d + 8 + n * 52 + 8, sizeof acl);
     trc_ok = 1;
+}
+/* LOD del coche de trafico por la distancia, como 46DF50 del PC (en SLES-53998 0x1dd728, constantes en lui): z de la
+   camara (negativa delante) frente a base - 130 (LOD 4), base - 85 (3), base - 50 (2), base - 40 (1) y 5 (0; mas alla,
+   detras de la camara, 4); base = -35 en los modelos 0x1f y 0x27 y -25 en el 0x28 (los grandes), 0 en los demas.
+   zv es la distancia delante de la camara (z = -zv). TRAFn.DAT lleva en el campo del nodo de cada malla la mascara de
+   los LOD que la dibujan (tools/conv_trafico.py); los ficheros viejos sin LOD (nodo -1) se dibujan enteros. */
+static uint8_t traf_con_lod[NMODTRAF];
+static int traf_lod(int m, float zv)
+{
+    int mod = trc_ok ? trc[m].modelo : 0; float base = mod == 0x1f || mod == 0x27 ? -35.0f : mod == 0x28 ? -25.0f : 0.0f, z = -zv;
+    if (z <= base - 130.0f) return 4;
+    if (z <= base - 85.0f) return 3;
+    if (z <= base - 50.0f) return 2;
+    if (z <= base - 40.0f) return 1;
+    return z <= 5.0f ? 0 : 4;
 }
 static uint32_t semilla = 12345;
 static float azar(void) { semilla = semilla * 1103515245u + 12345u; return ((semilla >> 8) & 0xFFFF) / 65536.0f; }
@@ -1003,6 +1067,7 @@ static void traf_choca(trafico_t *t, float l, float ancho)
     /* 4F2860: el contacto con un coche aun no adelantado le quita los puntos (con impulso, +4 0x4000000 del
        jugador: +C5C 0x800000) o los deja a la mitad (solo contacto: 0x400000); y las estadisticas de 4F2CD0 */
     if (!(t->pt_marca & PT_PASADO)) t->pt_marca |= (o.golpe >= 0 || o.cambia_vel) ? PT_SIN : PT_MITAD;
+    if (o.golpe >= 0 || o.cambia_vel) voz_contacto = 1;          /* +4 0x4000000: la voz de choque de voces.c */
     pt_toca |= o.golpe >= 0 ? 3 : 1;
     if (o.frontal) {                                            /* 4F8490: separacion repartida */
         float sg = ds > 0 ? 1.0f : -1.0f;
@@ -1268,6 +1333,10 @@ static void coche_paso(coche_t *c, float giro, float gas, float freno, float dt)
         e.rumbo_carretera = th0; e.rumbo_adelante = th0 + dif_ang(atan2f(dx, -dz) - th0);
         e.dist_izq = iz + c->x; e.dist_der = de - c->x;
         e.manual = manual_ && !auto_piloto; e.cambio_pide = pide_cambio; pide_cambio = 0;
+        e.nivel = mando.nivel;
+        if (mando.usa) {                                        /* el mando como el original (zona muerta, filtro) */
+            e.volumen = or2_volante(&fis, mando.eje, mando.izq, mando.der, VEL_DIRECCION, 1, 0); e.volumen_ok = 1;
+        }
         {   /* superficie bajo cada rueda y bajo el centro (calc_ground_coli_face: wheel+0x14 y event+0x248): de las
                franjas de la COLI; la rueda i en (cg_del | -cg_tras, +-via/2) del cuerpo, que va a a + deriva de la
                carretera */
@@ -1308,6 +1377,17 @@ static void coche_paso(coche_t *c, float giro, float gas, float freno, float dt)
         }
         x0 = c->x;
         or2_paso(&fis, &fpar, &e, 0.0f);
+#ifdef PRUEBA_FISICA
+        {   /* prueba: un resumen de la fisica cada segundo */
+            static int n_fis;
+            if (++n_fis % 60 == 0)
+                dbglog(DBG_INFO, "FISICA: %3.0f km/h m%d rpm %5d vol %4d temp %2d deriva %5.1f h %.3f cab %5.2f bal %5.2f "
+                       "cargas %3.0f %3.0f %3.0f %3.0f\n", (double)fis.velocidad_hud, fis.marcha, fis.rpm_suave, fis.stick16 >> 8,
+                       fis.temporizador, (double)fis.desliz_grados, (double)fis.alt, (double)(fis.cabeceo * 57.29578f),
+                       (double)(fis.balanceo * 57.29578f), (double)fis.r[0].carga, (double)fis.r[1].carga,
+                       (double)fis.r[2].carga, (double)fis.r[3].carga);
+        }
+#endif
         c->v = fis.velocidad; c->a = dif_ang(fis.rumbo_vel - th0); c->deriva = fis.beta;
         c->derrape = fis.temporizador > 0 ? (fis.beta >= 0 ? 1 : -1) : 0; c->t_derrape = fis.temporizador;
         c->s += c->v * cosf(c->a) * dt;
@@ -1655,6 +1735,9 @@ static void aviso(const char *s)
 }
 
 /* ---------------------------------------------------------------- juego */
+/* gancho del modulo de video: pelicula de inicio (MV.PS2) antes del titulo; sin el modulo, nada */
+extern void video_titulo(void) __attribute__((weak));
+extern int video_atraccion(void) __attribute__((weak));        /* comun/video.c */
 enum { TITULO, CUENTA, CARRERA, META, AGOTADO };
 #define NPISTAS 3
 /* camara de la seleccion de coche: distancia, altura y punto de mira sobre el coche (m) */
@@ -1918,9 +2001,41 @@ static float dist2_ruta(const modelo_t *m, uint32_t i, const float *p)
     const float *a = m->ruta + m->paso_ruta * i;
     return (a[0] - p[0]) * (a[0] - p[0]) + (a[1] - p[1]) * (a[1] - p[1]) + (a[2] - p[2]) * (a[2] - p[2]);
 }
+/* Presupuesto de la etapa: lo que dibuja el original (16000-47000 vertices en PALM) no siempre cabe en el TA con el
+   coche y el trafico. Reparto como lo veria el jugador:
+   - lo cercano y la carretera, siempre: cada nodo visible tiene una clase de distancia por la parte mas cercana de su
+     esfera, cd = 4 log2(z - r) (0..47, pasos del 19 %); se dibujan enteras las clases hasta prio_d, la mayor cuyo coste
+     acumulado cabe en 3/4 del tope de la etapa;
+   - de lo de mas alla, primero lo que el original quitaria antes: clase de LOD por p = z / (r 2^(umbral - 1) /
+     tan(fov_v / 2)), la fraccion de la distancia hasta la que lo dibuja el LOD de 404B00 (p <= 1; los nodos sin umbral
+     como si tuvieran el de la etapa, 6): cp = 40 + 8 log2(p) (0..63, pasos del 9 %). Lo pequeno y lejano tiene p alto y se
+     quita antes; lo grande (montes, mar, calzada lejana) se queda. Se dibujan las clases 0..prio_p con lo que quede del
+     tope;
+   - lo que la niebla del original (scn_env_fog) ya tapa (63/64 o mas en la parte mas cercana del nodo) va a la ultima
+     clase de LOD: es lo primero que se quita y no se nota.
+   Los cortes bajan en el mismo cuadro si no cabe y suben de una clase en una (cada 4 cuadros y con al menos 2 clases de
+   holgura), para que las mallas del limite no aparezcan y desaparezcan de un cuadro a otro. El coste de cada clase es el
+   teorico de sus nodos (relleno[0]) por ta_f y por prio_alfa, lo enviado de verdad / lo estimado (las mallas de cada
+   nodo se recortan una a una contra la vista). */
+#define ND_PRIO 48
+#define NB_PRIO 64
+static uint32_t prio_coste[ND_PRIO][NB_PRIO], prio_vtx[ND_PRIO][NB_PRIO];   /* bytes teoricos y vertices por clase */
+static int prio_d = ND_PRIO - 1, prio_p = NB_PRIO - 1, prio_esp_d, prio_esp_p;
+static float prio_alfa = 1.0f;
+static float niebla_d; static int niebla_modo;                   /* la niebla del cuadro (niebla_paso) */
+#ifdef DIAG_VTX
+static float diag_quitado_z, diag_quitado_r;                     /* el nodo quitado mas cercano (z - r) y su radio */
+static uint32_t diag_orig_vtx, diag_quitado_n;                    /* vertices de lo que dibujaria el original; nodos quitados */
+#endif
+static inline int log2x(float x, int k)                         /* k log2(x) por los bits del float (x > 0), k = 4 u 8 */
+{
+    union { float f; int32_t i; } q; q.f = x;
+    return (q.i - (127 << 23)) >> (k == 8 ? 20 : 21);
+}
 static void nodos_visibles(modelo_t *mo)
 {
     float tanh = 320.0f / fx, tanv = 240.0f / fx, kh = sqrtf(1 + tanh * tanh), kv = sqrtf(1 + tanv * tanv), lod = fx / 240.0f;
+    float z_tapa = niebla_d > 0 ? (niebla_modo == 2 ? 2.04f : 4.16f) / niebla_d : 1e30f;   /* 1 - e^-x >= 63/64 */
     uint32_t j, n; const uint16_t *L = NULL;
     if (!mo->vis) return;
     memset(mo->vis, 0, (mo->nnodos + 31) / 32 * 4);
@@ -1933,7 +2048,7 @@ static void nodos_visibles(modelo_t *mo)
         L = mo->sec_lista + mo->sec_ini[s]; n = mo->sec_ini[s + 1] - mo->sec_ini[s];
     } else n = mo->nnodos;
     for (j = 0; j < n; j++) {
-        uint32_t i = L ? L[j] : j, rama; const nodo_t *d; float dx, dy, dz, zv, xv, yv;
+        uint32_t i = L ? L[j] : j, rama, u; nodo_t *d; float dx, dy, dz, zv, xv, yv, lim; int cp, cd;
         if (i >= mo->nnodos) continue;
         d = mo->nodos + i;
         dx = d->cx - ojo[0]; dy = d->cy - ojo[1]; dz = d->cz - ojo[2];
@@ -1941,28 +2056,100 @@ static void nodos_visibles(modelo_t *mo)
         if (zv + d->r < cerca || zv - d->r > lejos) continue;
         xv = dx * der[0] + dy * der[1] + dz * der[2]; yv = dx * arr[0] + dy * arr[1] + dz * arr[2];
         if (fabsf(xv) - zv * tanh > d->r * kh || fabsf(yv) - zv * tanv > d->r * kv) continue;
-        if ((d->fl & 15) && zv > 0 && zv > d->r * lod * (float)(1u << ((d->fl & 15) - 1))) continue;   /* LOD */
+        u = d->fl & 15;
+        lim = d->r * lod * (float)(1u << ((u ? u : 6) - 1));
+        if (u && zv > 0 && zv > lim) continue;                  /* LOD */
         rama = (d->fl >> 8) & 3;
         if (rama && cur_rama >= 0 && (int)rama - 1 != cur_rama) continue;   /* la otra rama de la union */
         mo->vis[i >> 5] |= 1u << (i & 31);
+        cd = zv - d->r > 1.0f ? log2x(zv - d->r, 4) : 0; cd = cd > ND_PRIO - 1 ? ND_PRIO - 1 : cd;
+        if (zv - d->r > z_tapa) cp = NB_PRIO - 1;               /* tapado por la niebla */
+        else if (zv <= 0 || lim <= 0) cp = 0;
+        else { cp = 40 + log2x(zv / lim, 8); cp = cp < 0 ? 0 : cp > NB_PRIO - 1 ? NB_PRIO - 1 : cp; }
+        d->relleno[1] = (d->relleno[1] & ~4095u) | (uint32_t)(cd << 6 | cp);
+        prio_coste[cd][cp] += d->relleno[0]; prio_vtx[cd][cp] += d->relleno[1] >> 12;
     }
 }
-/* Todo lo que pasa las pruebas del original se dibuja si cabe en el presupuesto de la etapa en el TA (ta_tope_etapa y
-   VTX_ETAPA_MAX; docs/DREAMCAST.md). Si no cabe, se quita lo mas lejano: las tiras de la etapa cuya parte mas cercana
-   esta a mas de corte_d no se envian (dibuja_rango), y corte_d se ajusta en cada cuadro con lo que se envio y lo que
-   no cupo en el anterior (corte_ajusta). Asi lo que falta es lo de mas lejos y no lo que toque por el orden de las
-   texturas. Sin falta de presupuesto, corte_d = lejos (la distancia del original). */
+/* quita de mo->vis los nodos de las clases que no caben */
+static void nodos_quita(modelo_t *mo)
+{
+    uint32_t w, i;
+    if (!mo->vis) return;
+    for (w = 0; w < (mo->nnodos + 31) / 32; w++) {
+        uint32_t b = mo->vis[w];
+        while (b) {
+            int k = __builtin_ctz(b), cl; b &= b - 1; i = w * 32 + k; cl = mo->nodos[i].relleno[1] & 4095;
+            if ((cl >> 6) <= prio_d || (cl & 63) <= prio_p) continue;
+            mo->vis[w] &= ~(1u << k);
+#ifdef DIAG_VTX
+            {
+                const nodo_t *d = mo->nodos + i; float z = (d->cx - ojo[0]) * ade[0] + (d->cy - ojo[1]) * ade[1] + (d->cz - ojo[2]) * ade[2] - d->r;
+                if (z < diag_quitado_z) { diag_quitado_z = z; diag_quitado_r = d->r; }
+                diag_quitado_n++;
+            }
+#endif
+        }
+    }
+}
+/* corte con histeresis: baja ya; sube una clase cada 4 cuadros si el objetivo esta al menos 2 por encima */
+static int prio_sube(int actual, int objetivo, int *espera, int max)
+{
+    if (objetivo < actual) { *espera = 0; return objetivo; }
+    if (objetivo >= actual + 2 && actual < max) { if (++*espera >= 4) { *espera = 0; return actual + 1; } }
+    else *espera = 0;
+    return actual;
+}
+static uint32_t prio_est;                                       /* coste estimado de lo que se dibuja (bytes) */
 static void nodos_visibles_todos(void)
 {
-    uint32_t i;
+    static uint32_t fila_c[ND_PRIO], fila_v[ND_PRIO], col_c[NB_PRIO], col_v[NB_PRIO];
+    uint32_t i, tope = ta_tope_etapa / 100 * 95, acum, v, cerca_c, cerca_v, vmax = (uint32_t)(VTX_ETAPA_MAX / prio_alfa); int c, d, cabe;
+    float k = (float)ta_f / 256.0f * prio_alfa;                 /* bytes enviados por byte teorico de los nodos */
+    memset(prio_coste, 0, sizeof prio_coste); memset(prio_vtx, 0, sizeof prio_vtx);
     for (i = 0; i < 3; i++) if (tramos[i]->tv) nodos_visibles(tramos[i]);
+    for (d = 0; d < ND_PRIO; d++) for (fila_c[d] = fila_v[d] = 0, c = 0; c < NB_PRIO; c++) { fila_c[d] += prio_coste[d][c]; fila_v[d] += prio_vtx[d][c]; }
+    /* lo cercano: hasta 3/4 del tope (todo si cabe todo) */
+    for (acum = v = 0, cabe = -1, d = 0; d < ND_PRIO; d++) {
+        if ((float)(acum + fila_c[d]) * k > (float)tope * 0.75f || v + fila_v[d] > vmax / 4 * 3) break;
+        acum += fila_c[d]; v += fila_v[d]; cabe = d;
+    }
+    {   /* si cabe todo, todo */
+        uint32_t tc = 0, tv = 0;
+        for (d = 0; d < ND_PRIO; d++) { tc += fila_c[d]; tv += fila_v[d]; }
+        if ((float)tc * k <= (float)tope && tv <= vmax) cabe = ND_PRIO - 1;
+    }
+    prio_d = prio_sube(prio_d, cabe < 0 ? 0 : cabe, &prio_esp_d, ND_PRIO - 1);
+    for (cerca_c = cerca_v = 0, d = 0; d <= prio_d; d++) { cerca_c += fila_c[d]; cerca_v += fila_v[d]; }
+    /* lo de mas alla, por la clase de LOD */
+    memset(col_c, 0, sizeof col_c); memset(col_v, 0, sizeof col_v);
+    for (d = prio_d + 1; d < ND_PRIO; d++) for (c = 0; c < NB_PRIO; c++) { col_c[c] += prio_coste[d][c]; col_v[c] += prio_vtx[d][c]; }
+    for (acum = cerca_c, v = cerca_v, cabe = -1, c = 0; c < NB_PRIO; c++) {
+        if ((float)(acum + col_c[c]) * k > (float)tope || v + col_v[c] > vmax) break;
+        acum += col_c[c]; v += col_v[c]; cabe = c;
+    }
+    if (prio_d == ND_PRIO - 1) cabe = NB_PRIO - 1;
+    prio_p = prio_sube(prio_p, cabe, &prio_esp_p, NB_PRIO - 1);
+    for (prio_est = cerca_c, c = 0; c <= prio_p; c++) prio_est += col_c[c];
+    prio_est = prio_est * ta_f >> 8;
+#ifdef DIAG_VTX
+    diag_quitado_z = 1e9f; diag_quitado_r = 0; diag_quitado_n = 0;
+    for (diag_orig_vtx = 0, d = 0; d < ND_PRIO; d++) diag_orig_vtx += fila_v[d];
+#endif
+    if (prio_d < ND_PRIO - 1) for (i = 0; i < 3; i++) if (tramos[i]->tv) nodos_quita(tramos[i]);
 }
-static void corte_ajusta(int corto, uint32_t usado, uint32_t tope)
+/* tras el cuadro: lo que de verdad costo la etapa frente a lo estimado; si alguna tira no cupo, mas prudencia */
+static void prio_ajusta(int corto, uint32_t usado)
 {
-    if (corto) corte_d *= 0.8f;                                 /* no cupo: mas corto (rapido) */
-    else if (usado < tope / 10 * 8) corte_d *= 1.06f;           /* sobra: mas largo (despacio) */
-    if (corte_d < 60.0f) corte_d = 60.0f;
-    if (corte_d > lejos) corte_d = lejos;
+    if (prio_est > 16 * 1024) {
+        float a = (float)usado / (float)prio_est;
+        a = a < 0.2f ? 0.2f : a > 2.0f ? 2.0f : a;
+        prio_alfa = prio_alfa * 0.8f + a * 0.2f;
+    }
+    if (corto) {
+        prio_alfa *= 1.15f; if (prio_alfa > 2.0f) prio_alfa = 2.0f;
+        prio_p = prio_p > 2 ? prio_p - 2 : 0; prio_esp_p = prio_esp_d = 0;
+        if (prio_p == 0 && prio_d > 0) prio_d--;
+    }
 }
 
 /* ---------------------------------------------------------------- niebla del original
@@ -1972,7 +2159,7 @@ static void corte_ajusta(int corto, uint32_t usado, uint32_t tope)
    cruzar: course_environment_phase_44a000). En la PowerVR va en la tabla de niebla; solo si la distancia de dibujo se
    ha tenido que acortar por debajo de la del original (LEJOS_PS2) se le suma un fundido de 0,55 lejos a lejos que tapa
    lo que aparece (con el color de siempre si la etapa no tiene niebla). */
-static float niebla_d, niebla_d_hecha = -1, niebla_lejos_hecho; static int niebla_modo, niebla_modo_hecho; static uint32_t niebla_c, niebla_c_hecho;
+static float niebla_d_hecha = -1, niebla_lejos_hecho; static int niebla_modo_hecho; static uint32_t niebla_c, niebla_c_hecho;
 static void niebla_de(const etapa_t *e, float pos, float *d, int *modo, uint32_t *c)
 {
     uint32_t i; const niebla_t *n = NULL;
@@ -2314,10 +2501,10 @@ static int coche_carga(int k)
     compacta_modelo(&coche);                                    /* los texeles ya estan en la VRAM */
     coche_cex(menu_color());                                    /* pintura del color elegido y reflejo */
     coche_ficha = k; modelo_jug = ficha_modelo[k] < 30 ? ficha_modelo[k] : MODELO;
-    for (i = 0; i < NMODTRAF; i++) if ((c = modelo_vtx(&mtraf[i])) > ct) ct = c;
-    ta_vmin_otros = modelo_vtx(&coche) + 3 * ct;                /* lo reservado: este coche y tres de trafico */
+    for (i = 0; i < NMODTRAF; i++) if ((c = modelo_teo(&mtraf[i], traf_con_lod[i] ? 0 : -1, 0)) > ct) ct = c;
+    ta_min_otros_teo = modelo_teo(&coche, -1, 1) + 3 * ct; ta_traf_teo = ct;   /* lo reservado: este coche y tres de trafico (LOD 0) */
     dbglog(DBG_INFO, "coche: ficha %d %s modelo %d, %u vertices, %u texturas, VRAM libre %uK\n", k, nom, modelo_jug,
-           (unsigned)modelo_vtx(&coche), (unsigned)coche.ntex, (unsigned)(pvr_mem_available() >> 10));
+           (unsigned)modelo_vtx(&coche, -1), (unsigned)coche.ntex, (unsigned)(pvr_mem_available() >> 10));
     return 0;
 }
 
@@ -2350,9 +2537,10 @@ int main(int argc, char **argv)
 #endif
     if (ficha_modelo[ficha_ini] < 30) modelo_jug = ficha_modelo[ficha_ini];
     for (i = 0; i < NMODTRAF; i++) {
-        char nom[16]; sprintf(nom, "TRAF%d.DAT", i);
+        char nom[16]; uint32_t j; sprintf(nom, "TRAF%d.DAT", i);
         if ((r = lee_modelo(&mtraf[i], nom))) { sprintf(s1, "No se pudo leer %s (%d)", nom, r); aviso(s1); for (;;) thd_sleep(1000); }
         traf_colores(i);
+        for (j = 0; j < mtraf[i].nmallas; j++) if (mtraf[i].mallas[j].nodo > 0) traf_con_lod[i] = 1;   /* con LOD */
     }
     traf_medidas();
     traf_tablas();                                              /* clases y cajas del trafico (TRAFC.DAT) */
@@ -2362,7 +2550,7 @@ int main(int argc, char **argv)
     pvr_init(&pp);
     pvr_set_bg_color(0.45f, 0.65f, 0.95f);
     txt_arr = pvr_mem_malloc(sizeof buf_arr); txt_cen = pvr_mem_malloc(sizeof buf_cen);
-    for (i = 0, r = 0; i < NMODTRAF; i++) r |= sube_modelo(&mtraf[i]);
+    for (i = 0, r = 0; i < NMODTRAF; i++) { r |= sube_modelo(&mtraf[i]); if (!r) compacta_modelo(&mtraf[i]); }   /* texeles fuera de la RAM */
     if (r || sube_modelo(&etapa)) {
         vid_set_mode(modo_video, PM_RGB565); aviso("Sin memoria de video para las texturas"); for (;;) thd_sleep(1000);
     }
@@ -2372,11 +2560,13 @@ int main(int argc, char **argv)
     cielo = &etapa;
     {   /* minimo que se guarda para lo que no es la etapa: el coche y tres coches de trafico (el primer cuadro de carrera
            no tiene medida del anterior) */
-        uint32_t ct = 0, c;
-        for (i = 0; i < NMODTRAF; i++) if ((c = modelo_vtx(&mtraf[i])) > ct) ct = c;
-        ta_vmin_otros = modelo_vtx(&coche) + 3 * ct;
-        dbglog(DBG_INFO, "TA: bufer %uK, coche %u vertices, trafico hasta %u, minimo reservado %u\n", TA_VB_BYTES >> 10,
-               (unsigned)modelo_vtx(&coche), (unsigned)ct, (unsigned)ta_vmin_otros);
+        uint32_t ct = 0, c, cv = 0;
+        for (i = 0; i < NMODTRAF; i++) {
+            if ((c = modelo_teo(&mtraf[i], traf_con_lod[i] ? 0 : -1, 0)) > ct) { ct = c; cv = modelo_vtx(&mtraf[i], traf_con_lod[i] ? 0 : -1); }
+        }
+        ta_min_otros_teo = modelo_teo(&coche, -1, 1) + 3 * ct; ta_traf_teo = ct;
+        dbglog(DBG_INFO, "TA: bufer %uK, coche %u vertices, trafico hasta %u (LOD 0), minimo reservado %uK\n", TA_VB_BYTES >> 10,
+               (unsigned)modelo_vtx(&coche, -1), (unsigned)cv, (unsigned)((ta_min_otros_teo * ta_f >> 8) >> 10));
     }
     hud_ok = !hud_carga("HUD.DAT", modelo_jug);                 /* el tacometro del modelo (6 = Testarossa) */
     for (l = 0; l < 3; l++) for (i = 0; i < 2; i++) {
@@ -2392,11 +2582,16 @@ int main(int argc, char **argv)
     t_carga = (timer_ms_gettime64() - t_ini) / 1000.0f;
     musica_inicia();                                            /* la musica la pone el menu (sin MENU.DAT, aqui) */
     sfx_ok = !sfx_inicia();
+    voz_ok = sfx_ok && !voces_inicia();                         /* VOCES.DAT: voces de la carrera */
     texto_arriba("", NULL, NULL); texto_centro("");
     /* menus del original (MENU.DAT): usan la VRAM del HUD de carrera, que se baja mientras tanto */
     if (menu_inicia()) { sprintf(s1, "Sin MENU.DAT"); texto_centro(s1); musica_pon(pista); }
     if (hud_ok) hud_baja_tex();
     menu_coches(coches_m);
+    menu_fichas(ficha_modelo, N_FICHAS);                        /* modelo de cada COCHEnn.DAT (orden del menu: MENU.DAT) */
+#if !defined(PRUEBA_AUTO) && !defined(PRUEBA_JUGADOR)              /* las pruebas automaticas van directas */
+    if (video_titulo) video_titulo();                           /* gancho: pelicula de inicio antes del titulo */
+#endif
     menu_entra(manual_, pista, NPISTAS);
     t0 = timer_ms_gettime64();
 
@@ -2427,15 +2622,21 @@ int main(int argc, char **argv)
             if (nuevo & CONT_DPAD_DOWN) pide_cambio = -1;
         }
         if (st) {
-            giro = st->joyx / 110.0f;
-            if (b & CONT_DPAD_LEFT) giro = -1;
-            if (b & CONT_DPAD_RIGHT) giro = 1;
+            /* volante: el eje y la cruceta van a or2_volante en cada paso (zona muerta 0,25, rampa de la cruceta y
+               filtro por cuadro del original); giro queda para el modelo simple y los menus */
+            mando.eje = st->joyx < -128 ? -128 : (st->joyx > 127 ? 127 : st->joyx);
+            mando.izq = (b & CONT_DPAD_LEFT) != 0; mando.der = (b & CONT_DPAD_RIGHT) != 0;
+            giro = st->joyx / 128.0f;
+            if (mando.izq) giro = -1;
+            if (mando.der) giro = 1;
             if (giro > 1) giro = 1;
             if (giro < -1) giro = -1;
-            if (fabsf(giro) < 0.08f) giro = 0;
+            /* pedales: volumenes 1 y 2 del original, 0..255 tal cual (el original lee la presion de los botones
+               sin curva); A y B/X a fondo */
             gas = st->rtrig / 255.0f; if (b & CONT_A) gas = 1;
             freno = st->ltrig / 255.0f; if (b & (CONT_B | CONT_X)) freno = 1;
         }
+        mando.nivel = etapa_n;
 
         /* estados (una vez por paso de logica) */
         for (paso = 0; paso < pasos; paso++) {
@@ -2447,7 +2648,7 @@ int main(int argc, char **argv)
         if (estado == TITULO) {
             int rm = menu_paso(nuevo);                          /* titulo, modos, coche, cambio y musica */
             ttit += 1.0f / 60;
-            if (menu_coche3d() && menu_coche() != coche_ficha && menu_coche() != coche_malo &&   /* el de la ficha */
+            if (menu_coche3d() && menu_coche() >= 0 && menu_coche() != coche_ficha && menu_coche() != coche_malo &&
                 coche_carga(menu_coche())) coche_malo = menu_coche();                              /* (sin reintentos) */
 #ifdef PRUEBA_JUGADOR
             rm = MENU_CARRERA;                                  /* prueba: directo a la carrera con el mando */
@@ -2455,11 +2656,15 @@ int main(int argc, char **argv)
 #ifdef PRUEBA_AUTO
             rm = MENU_DEMO;                                     /* prueba: directo a la carrera con el piloto */
 #endif
+            if (rm == MENU_DEMO && video_atraccion) {           /* inactividad en el titulo: las peliculas del modo */
+                menu_sale();                                    /* ADVERTISE del original en vez de la demo de carrera */
+                if (video_atraccion() >= 0) { menu_entra(manual_, pista, NPISTAS); rm = MENU_SIGUE; nuevo = 0; }
+            }
             if (rm != MENU_SIGUE) {
                 auto_ = rm == MENU_DEMO;
                 if (!auto_) { manual_ = menu_manual(); pista = menu_pista(); }
                 menu_sale();                                    /* la VRAM del menu vuelve al HUD */
-                if (!auto_ && menu_coche() != coche_ficha && coche_carga(menu_coche())) coche_carga(9);
+                if (!auto_ && menu_coche() >= 0 && menu_coche() != coche_ficha && coche_carga(menu_coche())) coche_carga(9);
                 fisica_modelo(modelo_jug);                      /* peso, agarre, motor y marchas de ese coche */
                 if (hud_ok) hud_pon_modelo(modelo_jug);         /* y su tacometro */
                 if (hud_ok && hud_sube_tex()) hud_ok = 0;
@@ -2475,13 +2680,14 @@ int main(int argc, char **argv)
                 if (fis_ok) { float p[3], th; ruta_en(yo.s, p, &th, NULL, NULL); or2_coloca(&fis, &fpar, th, 0); }
                 lejos = LEJOS_PS2; niebla_paso(); niebla_pon();   /* la distancia del original */
                 tim_cuadros = tim_zona(cur_nodo, etapa_n); tiempo = tim_cuadros / TIM_HZ; estado = CUENTA; t_estado = 0; t_cuenta = 0; pausa = 0; crono = 0; vmax = 0; pt_inicia();
+                if (voz_ok) voces_carrera();
                 if (cam_ok) { cam_inicia(&cam, &cam_tab); cam_t_choque = 0; }   /* 484EE0 */
             }
         } else if (estado == CUENTA) {
             int n = 3 - (int)(t_estado / 60);
             sprintf(s1, n > 0 ? "%d" : "GO!", n);
             if (strcmp(s1, msg)) { strcpy(msg, s1); texto_centro(msg); }
-            if (t_estado >= 240) { estado = CARRERA; t_estado = 0; }      /* GO! a los 4 s de la escena */
+            if (t_estado >= 240) { estado = CARRERA; t_estado = 0; if (voz_ok) voces_salida(); }   /* GO! a los 4 s; modo GAME */
             curso_paso();                                       /* la union ya se puede ir leyendo */
             if (auto_ && (nuevo & CONT_START)) { estado = TITULO; auto_ = 0; nuevo = 0; texto_centro(""); hud_baja_tex(); menu_entra(manual_, pista, NPISTAS); }
             coche_paso(&yo, 0, 0, 0, 1.0f / 60);
@@ -2508,10 +2714,23 @@ int main(int argc, char **argv)
                 if (crono >= GUION_DERRAPE && crono < GUION_DERRAPE + 12) { freno = 1; gas = 0; giro = giro < 0 ? -1 : 1; }
                 if (crono == 700 || crono == 760) nuevo |= CONT_Y;
 #endif
+                mando.usa = st && !auto_;
+#ifdef PRUEBA_GUION
+                mando.usa = 0;
+#endif
                 coche_paso(&yo, giro, gas, freno, 1.0f / 60);
+                mando.usa = 0;
                 traf_paso(1.0f / 60);
                 efectos_paso(&yo, 1.0f / 60);
                 tim_cuadros--; tiempo = tim_cuadros / TIM_HZ;  /* 450AC0: un cuadro de logica */
+                if (voz_ok) {                                   /* la acompanante (489A90) y el aviso de tiempo (4B9CD0) */
+                    voces_coche_t vc;
+                    vc.derrape = yo.t_derrape != 0; vc.choque = fis_ok ? fis.choque : 0;
+                    vc.t_choque = fis_ok ? fis.t_choque : 0; vc.t_recup = fis_ok ? fis.t_recup : 0;
+                    vc.contacto = voz_contacto; vc.en_etapa = (yo.s - s_etapa) / m_pos; vc.zona = curso[cur_nodo].nivel;
+                    voces_paso(&vc); voces_tiempo(tim_cuadros);
+                }
+                voz_contacto = 0;
                 crono++; if (fis_ok && fis.velocidad_hud > vmax) vmax = fis.velocidad_hud;
 #ifdef PRUEBA_GUION
                 if (guion_i < (int)(sizeof guion_cong / sizeof guion_cong[0]) && crono == guion_cong[guion_i]) {
@@ -2542,13 +2761,14 @@ int main(int argc, char **argv)
                         texto_centro(zona_nombre(cur_nodo)); t_estado = 0;
                         int amp = tim_zona(cur_nodo, curso[cur_nodo].nivel);
                         pt_bonus_etapa(); tim_cuadros += amp; tiempo = tim_cuadros / TIM_HZ; t_ext = 0;
+                        if (voz_ok) voces_checkpoint();         /* EXTEND TIME: efecto 0x4d y voz 0x16c */
                         dbglog(DBG_INFO, "CHECKPOINT: etapa %d (%.4s) nivel %d s %.0f, +%d cuadros, quedan %d (%.1f s)\n", cur_nodo,
                                curso[cur_nodo].zona, curso[cur_nodo].nivel, (double)yo.s, amp, tim_cuadros, (double)tiempo);
                     }
                     niebla_paso();
-                    if (ev & CUR_META) { estado = META; t_estado = 0; pt_bonus_etapa(); texto_centro("GOAL!"); resultados(1); }
+                    if (ev & CUR_META) { estado = META; t_estado = 0; pt_bonus_etapa(); texto_centro("GOAL!"); resultados(1); if (voz_ok) voces_meta(); }
                 }
-                if (estado != META && tim_cuadros <= 0) { tiempo = 0; estado = AGOTADO; t_estado = 0; texto_centro("TIEMPO AGOTADO"); resultados(0); }
+                if (estado != META && tim_cuadros <= 0) { tiempo = 0; estado = AGOTADO; t_estado = 0; texto_centro("TIEMPO AGOTADO"); resultados(0); if (voz_ok) voces_tiempo_fuera(); }
             }
         } else {                                                /* META o AGOTADO: el coche se para solo */
             coche_paso(&yo, 0, 0, 0.6f, 1.0f / 60);
@@ -2565,7 +2785,7 @@ int main(int argc, char **argv)
 
         /* camara: en el menu gira alrededor del coche (seleccion de coche); en carrera, la del original (camara.c) */
         if (estado == TITULO) {
-            float a = ttit * 0.6f;
+            float a = menu_giro();                              /* el coche gira +100/65536 de vuelta por paso (4A5B20) */
             yo.s = SALIDA; yo.x = carril_x(SALIDA, 4); yo.v = 0; coche_paso(&yo, 0, 0, 0, 0); cam_y = yo.pos[1];
             ojo_[0] = yo.pos[0] + MENU_CAM_D * sinf(a); ojo_[1] = yo.pos[1] + MENU_CAM_Y; ojo_[2] = yo.pos[2] + MENU_CAM_D * cosf(a);
             mira[0] = yo.pos[0]; mira[1] = yo.pos[1] + MENU_CAM_MIRA; mira[2] = yo.pos[2];
@@ -2590,6 +2810,11 @@ int main(int argc, char **argv)
             else {
                 sfx_motor((float)fis.rpm_i, fis.ac_motor / 256.0f, fis.marcha);
                 sfx_derrape(yo.t_derrape ? fminf(fabsf(fis.desliz_grados) / 30.0f, 1.0f) : 0.0f);
+            }
+            {   static int voz_antes = -1;                      /* las voces se cortan al volver al menu o en pausa */
+                int calla = estado == TITULO || pausa;
+                if (voz_ok && calla && voz_antes == 0) voces_para();
+                voz_antes = calla;
             }
         }
 
@@ -2655,8 +2880,9 @@ int main(int argc, char **argv)
                 pon_coche(&t->c, mt);
                 mat_load(&vista); mat_apply(&mt);
                 mtraf[t->modelo].remap = t->color > 0 && t->color < traf_ncol[t->modelo] ? traf_remap[t->modelo][t->color] : NULL;
+                solo_lod = traf_con_lod[t->modelo] ? traf_lod(t->modelo, zv) : -1;
                 dibuja_rango(&mtraf[t->modelo], l, mtraf[t->modelo].inicio[l], mtraf[t->modelo].inicio[l + 1], 0, 0, 0);
-                mtraf[t->modelo].remap = NULL;
+                mtraf[t->modelo].remap = NULL; solo_lod = -1;
             }
             if (l == 2 && estado != TITULO) { mat_load(&vista); efectos_dibuja(); }
             if (l == 2) {
@@ -2694,14 +2920,17 @@ int main(int argc, char **argv)
             pvr_list_finish();
         }
 #ifdef DIAG_VTX
-        if (cuadro % 60 == 0) dbglog(DBG_INFO, "DIAG est%d s %.0f/%.0f ram %uK/%uK v%u (etapa %u) tri %u ms %.1f+%.1f lejos %d (%.2f) vram %u ta %uK etapa %uK/%uK 2d %u bpv %u real %uK opb %uK corte %d m (%u)%s\n", estado,
+        if (cuadro % 60 == 0) dbglog(DBG_INFO, "DIAG est%d s %.0f/%.0f ram %uK/%uK v%u (etapa %u) tri %u ms %.1f+%.1f lejos %d (%.2f) vram %u ta %uK etapa %uK/%uK 2d %u f %u real %uK opb %uK tiras %u teo %uK orig %u cerca %d m clase %d alfa %.2f quitados %u desde %d m (r %.1f) niebla %.5f%s%s\n", estado,
                                      (double)yo.s, (double)longitud, (unsigned)(mallinfo().uordblks >> 10), (unsigned)(mallinfo().fordblks >> 10),
                                      (unsigned)vtx_env, (unsigned)vtx_et, (unsigned)tri_enviados, (double)ms_log, (double)ms, (int)lejos, (double)(lejos / LEJOS_PS2), (unsigned)pvr_mem_available(), (unsigned)(ta_vb >> 10),
-                                     (unsigned)(ta_et >> 10), (unsigned)(ta_tope_etapa >> 10), (unsigned)ta_v2d, (unsigned)ta_bpv, (unsigned)(ta_real_ult >> 10), (unsigned)(ta_opb_ult >> 10), (int)corte_d, (unsigned)ta_et_corto, ta_corto ? " TOPE" : "");
+                                     (unsigned)(ta_et >> 10), (unsigned)(ta_tope_etapa >> 10), (unsigned)ta_v2d, (unsigned)ta_f, (unsigned)(ta_real_ult >> 10), (unsigned)(ta_opb_ult >> 10),
+                                     (unsigned)ta_tiras, (unsigned)(ta_teo_3d >> 10), (unsigned)diag_orig_vtx, (int)(prio_d >= ND_PRIO - 1 ? lejos : powf(2.0f, (prio_d + 1) / 4.0f)), prio_p, (double)prio_alfa, (unsigned)diag_quitado_n,
+                                     (int)(diag_quitado_n ? diag_quitado_z : lejos), (double)diag_quitado_r, (double)niebla_d, ta_et_corto ? " CORTO" : "", ta_corto ? " TOPE" : "");
 #endif
-        if (estado != TITULO) corte_ajusta(ta_et_corto, ta_et, ta_tope_etapa);
+        if (estado != TITULO) prio_ajusta(ta_et_corto, ta_et);
         ta_et_corto = 0;
         pvr_scene_finish();
+        hudd_fin_cuadro();                                      /* VRAM del HUD y los menus que ya no lee la PowerVR */
         tcpu += timer_us_gettime64() - c0;
         if (++cuadro % 30 == 0) {
             uint64_t t1 = timer_ms_gettime64();
@@ -2710,12 +2939,15 @@ int main(int argc, char **argv)
             /* ta_corto: algun cuadro se quedo sin presupuesto (de vertices de la etapa o del TA) y se saltaron mallas;
                se acorta la distancia para que lo que falte sea lo de lejos (antes contaba el coche y el trafico en el
                tope de la etapa y la distancia acababa siempre en el minimo) */
-            /* el presupuesto del TA ya lo reparte nodos_visibles_todos (quita lo mas lejano): aqui solo la CPU */
+            /* el presupuesto del TA ya lo reparte nodos_visibles_todos: aqui solo la CPU (DIAG_SIN_CPU: para medir en
+               Flycast, que no da el tiempo del SH4 de la consola, sin este recorte) */
+#ifndef DIAG_SIN_CPU
             if (ms + ms_log > 15.0f) {                      /* acorta (seguridad: la CPU no llega al cuadro) */
                 if (lejos > LEJOS_MIN) lejos -= 50.0f;
-            } else if (ms + ms_log < 11.5f && vtx_et_ult < VTX_ETAPA_MAX * 0.85f && ta_et < ta_tope_etapa / 10 * 8) {
+            } else if (ms + ms_log < 11.5f) {
                 if (lejos < lejos_obj) lejos += 50.0f;         /* vuelve a la del original */
             }
+#endif
             ta_corto = 0;
             saltos_ver = saltos; saltos = 0;
         }

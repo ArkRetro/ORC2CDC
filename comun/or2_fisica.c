@@ -18,14 +18,11 @@
  *   platform/vehicle_constructor.cpp  umbrales de cambio
  *   platform/vehicle_body_init.cpp    geometria / cargas estaticas
  *
- * Aproximaciones principales (resumen; detalles junto al codigo):
- *  - Plano 2D: sin suspension, cabeceo ni balanceo. Las cargas normales
- *    son las estaticas del juego mas una transferencia longitudinal
- *    cuasiestatica (el original las obtiene de la suspension, pero
- *    normaliza la carga total; el mu no depende de la carga en la tabla).
- *  - No hay pendientes, rebufo, NOS ni handicap. Muros y choques entre
- *    coches: or2_choque_muro / or2_choque_coche (al final del fichero).
- *  - El firme se da con un mu global (GetRoadMu da 1.0 o 0.7).
+ * Aproximaciones principales (resumen; detalles junto al codigo y en docs/PARIDAD.md, "Fisica: auditoria"):
+ *  - Plano de guinada 2D para el movimiento; la suspension (ColiCar, CalcSuspensionForce, CalcTireLoad) va
+ *    con el cuerpo reducido a altura, cabeceo y balanceo de angulo pequeno sobre un suelo plano (las
+ *    pendientes no cambian el avance: assCancelInclineResistance las anula en el original).
+ *  - El firme llega como banderas de material por rueda (GetRoadMu da 1.0 o 0.7).
  *  - ass_compulsive_move usa los rumbos/bordes que pasa el llamador en vez
  *    de muestrear la spline del circuito.
  * Todo en float; sin dobles. Coste: unas 30 funciones trigonometricas por
@@ -75,7 +72,6 @@ int or2_carga_param(const float *t, int filas, int col, or2_param_t *p)
     p->via[0] = P(0x017c); p->via[1] = P(0x01c8);
     p->reparto = P(0x0214);
     p->alt_cg = P(0x0260);
-    p->transferencia = 0.0f;
     p->toe[0] = P(0x07b8); p->toe[1] = P(0x0804);
     p->comp_base[0] = P(0x0850); p->comp_base[1] = P(0x089c);
     p->comp_trac[0] = P(0x08e8); p->comp_trac[1] = P(0x0934);
@@ -119,6 +115,13 @@ int or2_carga_param(const float *t, int filas, int col, or2_param_t *p)
     p->adj_fuera = P(0x22bc); p->adj_pend = P(0x2308); p->adj_opu = P(0x2354);
     p->adj_opu_k = P(0x23a0); p->adj_dentro = P(0x23ec);
     p->hud = P(0x2438);
+    /* suspension (vehicle_wheel_positions_4a1e80, car_sus_coli_check, suspension_force) */
+    p->sus_anclaje[0] = P(0x0390); p->sus_anclaje[1] = P(0x03dc);
+    p->sus_centro[0] = P(0x0428); p->sus_centro[1] = P(0x0474);
+    p->sus_inf[0] = P(0x04c0); p->sus_inf[1] = P(0x050c);
+    p->sus_sup[0] = P(0x0558); p->sus_sup[1] = P(0x05a4);
+    p->sus_muelle[0] = P(0x0688); p->sus_muelle[1] = P(0x06d4);
+    p->sus_estab[0] = P(0x0720); p->sus_estab[1] = P(0x076c);
     p->v_tope = P(0x1300);                  /* aqui solo la relacion; se completa abajo */
     /* multiplicador de empuje por marcha: fila (marcha+0x7b) */
     for (g = 0; g <= 6; ++g) p->empuje[g] = P((g + 0x7b) * 0x4c);
@@ -181,12 +184,65 @@ void or2_carga_curvas(or2_param_t *p, const float *par, const float *fr)
     if (par && fr) p->curvas_reales = 1;
 }
 
+void or2_carga_par_manual(or2_param_t *p, const float *par)
+{
+    int i;
+    if (!p || !par) return;
+    p->par_m_idx = par[0];
+    p->par_m_gan = par[1];
+    for (i = 0; i < OR2_PAR_MUESTRAS; ++i) p->par_m[i] = par[2 + i];
+    p->par_m_ok = 1;
+}
+
 /* ----------------------------------------------------------- inicio */
 static void pos_rueda(const or2_param_t *p, int i, float *x, float *y)
 {
     /* x adelante desde el CG, y a la izquierda. i par = izquierda */
     *x = (i < 2) ? p->cg_del : -p->cg_tras;
     *y = p->via[i >> 1] * ((i & 1) ? -0.5f : 0.5f);
+}
+
+/* constantes de la suspension (SuspensionTuning de la decompilacion: PC 0x628138, 0x5c36c0, 0x5b0058,
+   0x5c36bc, 0x5c36b8, 0x5c36b4) */
+#define SUS_APRIETE  5.0f            /* assGetPressDown: el suelo aprieta 5 g de mas (6 con la gravedad) */
+#define SUS_RECORR   6.66666651f
+#define SUS_FORMA    0.400000006f
+#define SUS_AMORT    19228.9883f
+#define SUS_REBOTE   0.736847579f
+#define SUS_ESCALA   0.101971619f
+
+/* posicion de la rueda i en el cuerpo con los ejes del PC (x derecha, y arriba, z atras; origen en el CG):
+   vehicle_wheel_positions_4a1e80 */
+static void rueda_pc(const or2_param_t *p, int i, float *x, float *y, float *z)
+{
+    *x = p->via[i >> 1] * ((i & 1) ? 0.5f : -0.5f);
+    *y = p->sus_anclaje[i >> 1] - p->alt_cg;
+    *z = (i < 2) ? -p->cg_del : p->cg_tras;
+}
+
+/* suspension en reposo con las cargas estaticas (la que deja CalcSuspensionForce en equilibrio) */
+static void sus_reposo(or2_coche_t *c, const or2_param_t *p)
+{
+    float a[2], zf = -p->cg_del, zr = p->cg_tras, x, y, z, ext[2];
+    int i;
+    for (i = 0; i < 2; ++i) {
+        rueda_pc(p, i * 2, &x, &y, &z);
+        ext[i] = p->sus_centro[i] - p->carga_est[i] / (p->sus_muelle[i] * SUS_ESCALA);
+        a[i] = p->radio[i] - y + ext[i];
+    }
+    c->cabeceo = (zr - zf) != 0.0f ? (a[0] - a[1]) / (zr - zf) : 0.0f;
+    c->alt = a[0] + zf * c->cabeceo;
+    c->v_alt = c->w_cab = c->balanceo = c->w_bal = 0.0f;
+    for (i = 0; i < 4; ++i) {
+        or2_rueda_t *q = &c->r[i];
+        rueda_pc(p, i, &x, &y, &z);
+        q->ext = q->ext_ant = ext[i >> 1];
+        q->ext_vel = 0.0f;
+        q->y28 = y - ext[i >> 1];
+        q->f_sus = p->carga_est[i >> 1] * (SUS_APRIETE + 1.0f);
+        q->aire = 0;
+        c->rueda_y[i] = p->alt_cg + (y - p->sus_inf[i >> 1] < q->y28 ? y - p->sus_inf[i >> 1] : q->y28);
+    }
 }
 
 void or2_inicia(or2_coche_t *c, const or2_param_t *p)
@@ -196,11 +252,16 @@ void or2_inicia(or2_coche_t *c, const or2_param_t *p)
     c->d38 = 1.0f;
     c->limitador = 1.0f;
     c->w_motor = p->w_ralenti;
+    /* vehicle_construct_4a5830: rpm de ralenti en +20C/+210/+48 */
+    c->rpm_i = c->rpm_ant = c->rpm_suave = tr(p->w_ralenti * 9.54929638f);
+    c->e98 = 3.40282347e38f;
     for (i = 0; i < 4; ++i) {
         c->r[i].carga_ref = c->r[i].carga = p->carga_est[i >> 1];
         c->r[i].vdx = 1.0f;
+        c->r[i].esc = 1.0f;
     }
-    c->marcha = 0;
+    sus_reposo(c, p);
+    c->marcha = 1;                       /* vehicle_construct_4a5830: event+0x208 = 1 */
 }
 
 void or2_coloca(or2_coche_t *c, const or2_param_t *p, float rumbo, float v)
@@ -219,9 +280,8 @@ void or2_coloca(or2_coche_t *c, const or2_param_t *p, float rumbo, float v)
     c->vel_mf = mf;
     c->kmh = tr(mf * 216.72f);
     c->rumbo_v16 = s16(tr(c->psi * R2U));
-    g = 0;
+    g = 1;
     if (v > 0.5f) {
-        g = 1;
         while (g < p->marchas && mf > p->sube[g]) ++g;
         c->embrague = 255;
         c->emb_frac = 1.0f;
@@ -233,13 +293,13 @@ void or2_coloca(or2_coche_t *c, const or2_param_t *p, float rumbo, float v)
 }
 
 /* ------------------------------------------------------- motor (pc_driving) */
-static float friccion_motor(const or2_param_t *p, float rpm)
+static float friccion_motor(const or2_param_t *p, float rpm, float gan)
 {
     float r = 0.0f, base, geo;
     if (!(0.0f > rpm)) r = rpm > p->w_corte ? p->w_corte : rpm;
     base = ((r * 0.455945313f + 143.239456f) * r + 97000.0f) * 0.102040812f;
     geo = p->diametro * p->diametro * p->carrera * p->cilindros * 0.785398185f;
-    return geo * (p->par_gan * base) * 0.0795774683f;
+    return geo * (gan * base) * 0.0795774683f;
 }
 
 static float vel_motor_prevista(const or2_coche_t *c, const or2_param_t *p, int g)
@@ -256,20 +316,53 @@ static float vel_motor_prevista(const or2_coche_t *c, const or2_param_t *p, int 
 static void cambio_auto(or2_coche_t *c, const or2_param_t *p)
 {
     int g = c->marcha;
-    const float *baja = c->pedal_fr < 128 ? p->baja : p->baja_fr;
-    if (c->vel_mf > p->sube[g] && c->pedal_fr < 128) { ++g; c->cambio = 1; }
+    const float *baja = c->freno_op < 128 ? p->baja : p->baja_fr;
+    if (c->vel_mf > p->sube[g] && c->freno_op < 128) { ++g; c->cambio = 1; }
     else if (baja[g] > c->vel_mf && c->c282 == 0) { --g; c->cambio = 3; }
     if (g > p->marchas) g = p->marchas;
     if (g < 0) g = 0;
     c->marcha = g;
 }
 
-/* cambio manual: el mismo ciclo de embrague y acelerador que el automatico (estados 1 y 3) */
+/* manual_transmission (pc_transmission.cpp; PS2 igual): con +E84 (el aviso de cambio llego a 480 cuadros) hace
+   de automatico hasta que se vuelve a tocar la palanca. Reducir con el motor al corte (rpm previstas >= 0x1644),
+   sin freno y con gas: no hay golpe de gas (+296 = 0) y arranca el derrape (+D36 = 80, +D94/+D98/+D9C) */
+static float vel_motor_prevista(const or2_coche_t *c, const or2_param_t *p, int g);
 static void cambio_manual(or2_coche_t *c, const or2_param_t *p, int pide)
 {
-    if (c->marcha == 0) { c->marcha = 1; return; }
-    if (pide > 0 && c->marcha < p->marchas) { c->marcha++; c->cambio = 1; }
-    else if (pide < 0 && c->marcha > 1) { c->marcha--; c->cambio = 3; }
+    if (c->e84) cambio_auto(c, p);
+    if (pide > 0) {
+        c->e84 = 0;
+        if (c->marcha < p->marchas) { c->marcha++; c->cambio = 1; }
+        return;
+    }
+    if (pide < 0) {
+        c->e84 = 0;
+        if (c->marcha <= 1) return;
+        c->marcha--;
+        if (vel_motor_prevista(c, p, c->marcha) >= p->w_corte && c->freno_op < 128 && c->ac_motor > 16) {
+            if (c->d36 < 12) { c->d94 = 180; c->d98 = 60; }
+            c->d9c = 60; c->d36 = 80; c->cambio = 0;
+        } else c->cambio = 3;
+    }
+}
+
+/* CheckShiftWarning (4A50F0): en manual, 480 cuadros pidiendo subir (por encima del umbral, embrague cogido,
+   gas >= 175, sin freno ni derrape) pasan al cambio automatico (+E84); +E80 enciende el aviso a los 180 */
+static void aviso_cambio(or2_coche_t *c, const or2_param_t *p)
+{
+    int act, n;
+    if (c->c282 > 0 || c->c283 > 0 || c->t_choque > 0.0f || c->t_recup > 0.0f || c->e84) return;
+    act = c->marcha < p->marchas && c->vel_mf > p->sube[c->marcha] && c->embrague >= 255 &&
+          c->pedal_ac >= 175 && c->pedal_fr <= 0 && c->d36 <= 0;
+    n = c->e7c;
+    if (act) n++; else { n--; if (n > 180) n = 180; }
+    c->e7c = n;
+    if (c->cambio == 1) { n = 0; c->e7c = 0; }
+    if (n >= 480) { c->e7c = 0; c->e84 = 1; c->e80 = 0; }
+    else { c->e84 = 0; c->e80 = n >= 180; }
+    if (c->e7c < 0) c->e7c = 0;
+    if (c->e7c > 480) c->e7c = 480;
 }
 
 static void acelerador_op(or2_coche_t *c, const or2_param_t *p)
@@ -312,15 +405,23 @@ static void fin_embrague(or2_coche_t *c, const or2_param_t *p)
 static void embrague_auto(or2_coche_t *c, const or2_param_t *p)
 {
     int sh = c->cambio;
-    if ((c->kmh == 0 || iabs(c->s4e) > 0x7000) && (c->pedal_fr > 50 || c->rpm_i < 4500)) {
+    if (c->t_recup > 0.0f) {                     /* recuperandose de un choque: embrague suelto */
+        c->embrague = 0; c->emb_estado = 1;
+        fin_embrague(c, p);
+        return;
+    }
+    if ((c->kmh == 0 || iabs(c->s4e) > 0x7000) && (c->freno_op > 50 || c->rpm_i < 4500)) {
         c->embrague = c->kmh < 255 ? c->kmh : 255;
         c->emb_estado = 1;
         fin_embrague(c, p);
         return;
     }
     if (sh == 4) {
-        /* el original mira el deslizamiento trasero; aqui siempre engrana */
-        c->embrague += 4; if (c->embrague > 255) c->embrague = 255;
+        /* media de la escala del circulo de friccion de las traseras (+E4): patinando suelta el embrague */
+        float m = (c->r[3].esc + c->r[2].esc) * 0.5f;
+        c->embrague += 1.0f > m ? -4 : 4;
+        if (c->embrague > 255) c->embrague = 255;
+        if (c->embrague < 0) c->embrague = 0;
         c->emb_estado = 4;
     } else if (sh == 1 || sh == 3) {
         c->embrague = 0; c->emb_estado = (sh == 1) ? 2 : 3;
@@ -339,14 +440,20 @@ static void embrague_auto(or2_coche_t *c, const or2_param_t *p)
     fin_embrague(c, p);
 }
 
+/* torque_table: la curva 0 (automatico) o la 1 (manual, event+0x13) salvo con +E84 */
+static int curva_manual(const or2_coche_t *c, const or2_param_t *p) { return c->manual && !c->e84 && p->par_m_ok; }
+
 static void par_motor(or2_coche_t *c, const or2_param_t *p)
 {
     float rpm = clampf(c->w_motor, 0.0f, p->w_max);
-    float fr = friccion_motor(p, rpm), par, frac, seno, obj, paso, umbral, ral;
-    int32_t idx = tr(p->par_idx * rpm), ac;
+    int m = curva_manual(c, p);
+    float gan = m ? p->par_m_gan : p->par_gan, ix = m ? p->par_m_idx : p->par_idx;
+    const float *curva = m ? p->par_m : p->par;
+    float fr = friccion_motor(p, rpm, gan), par, frac, seno, obj, paso, umbral, ral;
+    int32_t idx = tr(ix * rpm), ac;
     if (idx < 0) idx = 0;
     if (idx > OR2_PAR_MUESTRAS - 1) idx = OR2_PAR_MUESTRAS - 1;
-    par = p->par_mult * p->par_gan * p->par[idx] + fr;
+    par = p->par_mult * gan * curva[idx] + fr;
     ac = c->ac_motor; if (ac < 0) ac = 0; if (ac > 255) ac = 255;
     frac = (float)ac * 0.00392156886f;
     seno = sinf((float)((ac * 16384) / 255) * U2R);
@@ -361,15 +468,18 @@ static void par_motor(or2_coche_t *c, const or2_param_t *p)
     paso = c->embrague < 128 ? 0.8f : (c->marcha == p->marchas ? 0.2f : 0.4f);
     umbral = p->w_corte;
     if (c->marcha == p->marchas) umbral *= 1.0f + c->rebufo_k * 0.0649999976f;   /* rebufo (pc_driving 158) */
-    if (rpm >= umbral) c->limitador -= paso; else c->limitador += paso;
+    if (rpm >= umbral) {
+        if (c->marcha == p->marchas && p->modelo >= 15) paso *= 0.5f;   /* preparados (PS2 0x18ce5c) */
+        c->limitador -= paso;
+    } else c->limitador += paso;
     c->limitador = cl01(c->limitador);
-    ral = p->w_ralenti >= rpm ? friccion_motor(p, p->w_ralenti) * 2.0f : 0.0f;
+    ral = p->w_ralenti >= rpm ? friccion_motor(p, p->w_ralenti, gan) * 2.0f : 0.0f;
     c->par_neto = ral + par - fr;
 }
 
 static void reparte_freno(or2_coche_t *c, const or2_param_t *p)
 {
-    float pr = p->freno[c->pedal_fr < 0 ? 0 : (c->pedal_fr > 255 ? 255 : c->pedal_fr)];
+    float pr = p->freno[c->freno_op < 0 ? 0 : (c->freno_op > 255 ? 255 : c->freno_op)];
     float a = 1.0f / (p->freno_rep[0] + 1.0f), b = 1.0f / (p->freno_rep[1] + 1.0f);
     float sesgo = (b - a) * pr + a;
     float total = p->freno_g * p->masa;
@@ -462,10 +572,11 @@ static void circulo_friccion(or2_coche_t *c)
         float mag = sqrtf(fx * fx + fy * fy);
         float lim = c->marcha > 1 ? limite_suave(mag, g) : g;
         float esc = mag > lim ? lim / mag : 1.0f, sm;
+        q->esc = esc;                                    /* +E4 (lo usa el embrague en el estado 4) */
         if (fx >= 0.0f) fx = esc * fx;
         else { float u = 1.0f - esc; fx = (1.0f - u * u * u) * fx; }
         q->f_lon = fx;
-        sm = c->pedal_fr > 250 ? mag : fabsf(fy);
+        sm = c->freno_op > 250 ? mag : fabsf(fy);
         lim = limite_suave(sm, g);
         esc = sm > lim ? lim / sm : 1.0f;
         q->f_lat = esc * fy;
@@ -564,6 +675,52 @@ static void resistencia_tierra(or2_coche_t *c, const or2_entrada_t *e)
     }
 }
 
+/* --------------------------------------------- mando (PS2 0x1b3fb8 / 0x1b42e0, PC 453860 / 4537C0) */
+/* filas de la velocidad de la direccion (PS2 0x3f8800, 9 x 0x18 bytes; PC 5A7C30): paso y divisor alejandose
+   del centro, paso y divisor volviendo, rampa de la cruceta al pulsar y al soltar. Fila 8 fuera de la carrera. */
+static const struct { int32_t paso, div, paso2, div2; float in, out; } fila_vol[9] = {
+    { 11, 4, 16, 3, 0.0599999987f, 0.0710000023f }, { 12, 4, 17, 3, 0.0700000003f, 0.0825000033f },
+    { 14, 4, 18, 3, 0.0799999982f, 0.0939999968f }, { 15, 4, 19, 3, 0.0900000036f, 0.105499998f },
+    { 17, 4, 20, 3, 0.100000001f, 0.116999999f },   { 18, 4, 21, 3, 0.109999999f, 0.129000008f },
+    { 19, 4, 22, 3, 0.120000005f, 0.141000003f },   { 20, 4, 23, 3, 0.129999995f, 0.152999997f },
+    { 21, 4, 25, 3, 0.140000001f, 0.165000007f } };
+
+int or2_volante(or2_coche_t *c, int eje, int izq, int der, int opcion, int en_carrera, int es_volante)
+{
+    /* zona muerta: 0,25 con el mando (PS2 0x3e800000; el PC usa 0,2) y 1/128 con volante */
+    float dz = es_volante ? 0.0078125f : 0.25f, v, a, x, st;
+    int f = (opcion < 0 || opcion > 7) ? 4 : opcion, vol, prev = c->vol_ant, d;
+    int t = en_carrera ? f : 8;
+    v = (float)(eje * 256) * 3.05175781e-05f;
+    if (dz > fabsf(v)) a = 0.0f;
+    else a = (v > 0.0f ? v - dz : v + dz) / (1.0f - dz);
+    /* cruceta: rampa (bits 0x80 / 0x100 del mando) que vuelve sola al soltar */
+    x = c->vol_dig;
+    if (der) { x = fila_vol[t].in + x; if (x > 1.0f) x = 1.0f; }
+    else if (izq) { x = x - fila_vol[t].in; if (-1.0f > x) x = -1.0f; }
+    else if (x > 0.0f) { x = x - fila_vol[t].out; if (0.0f > x) x = 0.0f; }
+    else if (0.0f > x) { x = fila_vol[t].out + x; if (x > 0.0f) x = 0.0f; }
+    c->vol_dig = x;
+    st = fabsf(x) > fabsf(a) ? x : a;
+    vol = tr(st * 127.0f);
+    /* 4537C0 / 0x1b42e0: sin volante, el volumen se acerca al pedido a pasos (fila de la opcion) */
+    d = vol - prev;
+    if (!es_volante && d != 0) {
+        if ((int32_t)((uint32_t)vol * (uint32_t)prev) >= 0 && iabs(vol) > iabs(prev)) {
+            int32_t p = d < -fila_vol[f].paso ? -fila_vol[f].paso : (d > fila_vol[f].paso ? fila_vol[f].paso : d);
+            if (prev != 0) vol = p + prev;
+            else { int32_t q = p / fila_vol[f].div; vol = (q != 0 ? q : (d > 0 ? 1 : -1)) + prev; }
+        } else {
+            int32_t p = d / fila_vol[f].div2;
+            if (p == 0) p = d > 0 ? 1 : -1;
+            if (p < -fila_vol[f].paso2) p = -fila_vol[f].paso2; else if (p > fila_vol[f].paso2) p = fila_vol[f].paso2;
+            vol = p + prev;
+        }
+    }
+    c->vol_ant = vol;
+    return vol;
+}
+
 float or2_mu_superficie(uint32_t sup)
 {
     if (sup == 1u) return 0.0f;
@@ -574,10 +731,11 @@ float or2_mu_superficie(uint32_t sup)
 /* -------------------------------------------- RearGripCtrl (pcc:60-110) */
 static float curva_agarre(const or2_coche_t *c, const or2_param_t *p, int idx)
 {
-    float base = p->mu_min[idx] + 2.0f, obj, mezcla;
+    float base = p->mu_min[idx] + 2.0f, obj, mezcla, t;
     if (c->d36 <= 0) return base;
-    /* event+0xd94 solo se carga con el cambio manual: t = 0 */
-    obj = 0.0f + p->curva_der[idx];
+    /* event+0xd94: reduccion con el motor al corte en manual (180 cuadros), t = d94 * 0,1107 hasta 20 */
+    t = clampf((float)c->d94 * 0.110741965f, 0.0f, 20.0f);
+    obj = t + p->curva_der[idx];
     mezcla = fabsf(sinf((float)c->d46 * U2R));
     return mezcla * (obj - base) + base;
 }
@@ -588,6 +746,11 @@ static void ctrl_agarre_trasero(or2_coche_t *c, const or2_param_t *p, float ofs)
     if (c->d36 > 0) c->d36--;
     if (c->pedal_fr > 10 && c->pedal_fr_ant <= 10 && c->pedal_ac < 250) c->d36 = 40;
     if (c->pedal_ac < 250 && c->pedal_ac_ant >= 250 && c->pedal_fr > 10) c->d36 = 40;
+    if (c->manual) {
+        if (c->d94 > 0) c->d94--;
+        if (c->d98 > 0) c->d98--;
+        if (c->d9c > 0) c->d9c--;
+    }
     c->d38 = 1.0f;
     st = c->s4e; as = iabs(st);
     if (c->kmh != 0 && as >= 0x300 && c->d36 > 0) {
@@ -602,6 +765,11 @@ static void ctrl_agarre_trasero(or2_coche_t *c, const or2_param_t *p, float ofs)
         q = 1.0f - (float)c->pedal_ac * 0.00392156886f;
         amt = (1.0f - q * x) * (p->grip_amax - p->grip_amin) + p->grip_amin;
         c->d38 -= amt;
+    }
+    /* work+0x244 bit 3: contacto con el muro en el cuadro anterior */
+    if (c->roce > 0) {
+        float cand = fabsf(sinf((float)st * U2R)) * 0.25f + 0.75f;
+        if (cand > c->d38) c->d38 = cand;
     }
     if (as > 0x3800) {
         /* event+0x26c: desplazamiento lateral (+ = lado derecho aqui) */
@@ -701,6 +869,7 @@ static void ctrl_deriva(or2_coche_t *c, const or2_param_t *p)
     if (d48 * ang >= 0) mez = cl01((float)iabs(d48) * 0.00390625f);
     mezcla = (1.0f - mez) * (float)ebx + (float)edi2 * mez;
     c->d44 = s16(tr(mezcla));
+    if (c->c283 > 0) { c->d44 = 0; c->d46 = 0; }     /* durante el rebote */
 }
 
 /* ----------------------------------------------- vectores 2D en el mundo */
@@ -719,6 +888,135 @@ static float cruz(v2 a, v2 b) { return a.x * b.y - a.y * b.x; } /* >0: b a la iz
 static void avanza_choque(or2_coche_t *c);
 static const or2_choques_t *choques_act;   /* datos de choques (para las animaciones), los da or2_choque_coche */
 
+/* CheckWanderer (4A5260): con las cuatro ruedas fuera del asfalto (+244 sin otro material que tierra, arena o
+   hierba; en el nivel 0 tambien el 7) +E90 = 1 y el contador +E88 sube de 2 en 2 hasta 120; al volver, +E98 =
+   cuadros que faltan para el borde al ritmo de la velocidad lateral, y el contador baja de 1 en 1. Se anula en
+   el rebote, en choque, recuperandose y en derrape */
+static void ayuda_tierra(or2_coche_t *c, const or2_entrada_t *e, int bordes)
+{
+    uint32_t sup = e->sup[0] | e->sup[1] | e->sup[2] | e->sup[3], ok = e->nivel != 0 ? 0x801cu : 0x809cu;
+    int ant = c->e90;
+    if (e->sin_ayuda_tierra || !sup) { c->e88 = c->e90 = 0; return; }   /* sin datos de superficie */
+    if (!(sup & ~ok)) { c->e90 = 1; c->e94 = c->ofs; }
+    else {
+        c->e90 = 0;
+        if (ant) {
+            v2 h = dir_ang((float)c->d4c * U2R);
+            float vl = cruz(h, mk(c->vx, c->vy));           /* velocidad lateral (m/s), + hacia la izquierda */
+            c->e98 = 3.40282347e38f;
+            if (!(1.1920929e-7f > fabsf(vl)) && bordes) {
+                /* cross(lateral, rumbo).y >= 0 (hacia la derecha): +264 / |v| * -60,2; si no, +268 / |v| * 60,2 */
+                if (vl <= 0.0f) c->e98 = e->dist_der / -vl * 60.2f;
+                else c->e98 = e->dist_izq / vl * 60.2f;
+            }
+        }
+    }
+    if (c->e90) { c->e88 += 2; if (c->e88 > 120) c->e88 = 120; c->e8c = c->e88; }
+    else { c->e88--; if (c->e88 < 0) c->e88 = 0; }
+    if (c->c283 > 0 || c->t_choque > 0.0f || c->t_recup > 0.0f || c->d36 > 0) c->e88 = 0;
+}
+
+/* AssistWanderer (4A5470): al volver al asfalto gira la velocidad y la carroceria hacia el rumbo de la
+   carretera (o media curva mas alla si va hacia el lado en que se salio), con una rampa triangular de +E8C
+   cuadros escalada por +E98 * 0,1333 */
+static void asiste_tierra(or2_coche_t *c, v2 *vel)
+{
+    int32_t mitad, dif;
+    float r;
+    int16_t obj;
+    if (c->e90 || c->e88 <= 0 || c->e8c < 30) return;
+    mitad = (c->e8c - (c->e8c >> 31)) / 2;
+    if (c->e88 >= mitad) r = 2.0f - (float)c->e88 / (float)mitad;
+    else r = (float)c->e88 / (float)mitad;
+    r = cl01(r / (c->e98 * 0.13333334f));
+    obj = c->d4c;
+    dif = s16((int32_t)c->d4e - c->d4c);
+    if (iabs(dif) > 0x400 && (float)dif * c->e94 >= 0.0f) obj = s16(obj + ((dif - (dif >> 31)) >> 1));
+    {
+        float sp = lon2(*vel);
+        int16_t d1 = s16((int32_t)obj - c->rumbo_v16), d2 = s16((int32_t)obj - s16(tr(c->psi * R2U)));
+        float a1 = (float)s16(tr((float)d1 * r)) * U2R, a2 = (float)s16(tr((float)d2 * r)) * U2R;
+        v2 d = dir_ang((float)c->rumbo_v16 * U2R + a1);
+        if (sp > 0.0001f) *vel = mk(d.x * sp, d.y * sp);
+        c->psi = angw(c->psi + a2);
+    }
+}
+
+/* ColiCar (car_sus_coli_check + car_sus_bump_push, sobre un suelo plano a la altura 0), CalcSuspensionForce
+   (4A1B70) y CalcTireLoad (4A1A90 con assSpecificAmountOfTireLoad 518120 y assDiagonalTireLoad 518240).
+   Alturas en el suelo con angulos pequenos: h + y - z * cabeceo + x * balanceo. */
+static void suspension(or2_coche_t *c, const or2_param_t *p, int suelo)
+{
+    const float apr = SUS_APRIETE + 1.0f;
+    float push = 0.0f, real = 0.0f, ref = 0.0f, inv, dif, izq, der;
+    int i;
+    for (i = 0; i < 4; ++i) {
+        or2_rueda_t *q = &c->r[i];
+        int ax = i >> 1;
+        float x, y, z, hc, pb;
+        rueda_pc(p, i, &x, &y, &z);
+        /* CommonPlCar: +28 = +08 - extension maxima; la rueda baja hasta el suelo */
+        q->y28 = y - p->sus_sup[ax];
+        hc = c->alt + (q->y28 - p->radio[ax]) - z * c->cabeceo + x * c->balanceo;
+        if (suelo && 0.0f >= hc) { q->y28 += -hc; q->aire = 0; }
+        else q->aire = 1;
+        /* car_sus_bump_push: con la suspension a tope la carroceria sube lo que haga falta */
+        pb = -(c->alt + y - (p->radio[ax] + p->sus_inf[ax]) - z * c->cabeceo + x * c->balanceo);
+        if (suelo && pb > push) push = pb;
+    }
+    c->alt += push;
+    for (i = 0; i < 4; ++i) {
+        or2_rueda_t *q = &c->r[i];
+        float x, y, z, cmp, ant;
+        rueda_pc(p, i, &x, &y, &z);
+        cmp = y - q->y28;
+        if (0.0f > cmp) cmp = 0.0f;
+        ant = q->ext;
+        q->ext = cmp;
+        q->ext_vel = (cmp - ant) * HZ;
+        q->ext_ant = ant;
+    }
+    for (i = 0; i < 4; ++i) {
+        or2_rueda_t *q = &c->r[i];
+        int ax = i >> 1;
+        float cmp = q->ext, k = p->sus_muelle[ax], f, d, av, rt, am;
+        f = 0.0f - (cmp - p->sus_centro[ax]) * k * apr;
+        f -= (cmp - c->r[i ^ 1].ext) * p->sus_estab[ax] * apr;
+        if (0.0f > cmp - p->sus_inf[ax]) f -= k * (cmp - p->sus_inf[ax]) * apr;
+        if (cmp - p->sus_sup[ax] > 0.0f) f -= k * (cmp - p->sus_sup[ax]) * apr;
+        av = fabsf(q->ext_vel);
+        d = (av * av * av + 1.0f) * av * 0.5f;
+        if (d > 1.0f) d = (sqrtf(av) + av) * 0.5f;
+        rt = cl01(fabsf((cmp - p->sus_centro[ax]) * SUS_RECORR)) * SUS_FORMA;
+        am = (1.0f - rt) * SUS_AMORT * d;
+        am = q->ext_vel >= 0.0f ? -am : am * SUS_REBOTE;
+        q->f_sus = (am + f) * SUS_ESCALA;
+    }
+    /* CalcTireLoad: la fuerza del muelle (>= 0) sobre la normal del suelo / 6, nada en el aire o en el rebote */
+    for (i = 0; i < 4; ++i) {
+        or2_rueda_t *q = &c->r[i];
+        float y = 0.0f;
+        if (!q->aire && c->c283 <= 0) {
+            y = q->f_sus > 0.0f ? q->f_sus : 0.0f;
+            y *= cosf(c->cabeceo) * cosf(c->balanceo);
+        }
+        q->carga = y / apr;
+        real += q->carga; ref += q->carga_ref;
+    }
+    inv = 1.0f / ref; dif = real - ref;
+    for (i = 0; i < 4; ++i) {
+        or2_rueda_t *q = &c->r[i];
+        q->carga -= q->carga_ref * inv * dif;
+        if (0.0f > q->carga) q->carga = 0.0f;
+    }
+    izq = c->r[0].carga + c->r[3].carga; der = c->r[1].carga + c->r[2].carga; dif = izq - der;
+    c->r[0].carga -= c->r[0].carga_ref / p->masa * dif;
+    c->r[1].carga += c->r[1].carga_ref / p->masa * dif;
+    c->r[2].carga += c->r[2].carga_ref / p->masa * dif;
+    c->r[3].carga -= c->r[3].carga_ref / p->masa * dif;
+    for (i = 0; i < 4; ++i) if (0.0f > c->r[i].carga) c->r[i].carga = 0.0f;
+}
+
 /* -------------------------------------------------------- paso de 1/60.2 */
 static void tick(or2_coche_t *c, const or2_param_t *p, const or2_entrada_t *e)
 {
@@ -728,21 +1026,27 @@ static void tick(or2_coche_t *c, const or2_param_t *p, const or2_entrada_t *e)
     v2 fwd = mk(-sp, cp), izq = mk(-cp, -sp);
     float u = c->vx * fwd.x + c->vy * fwd.y;      /* velocidad en el cuerpo */
     float wl = c->vx * izq.x + c->vy * izq.y;
-    float ofs, fbx = 0.0f, fby = 0.0f, tau = 0.0f, blend, ax, ay, alpha;
+    float ofs, fbx = 0.0f, fby = 0.0f, tau = 0.0f, blend, ax, ay, alpha, tau_cab = 0.0f, tau_bal = 0.0f;
     v2 v0 = mk(c->vx, c->vy), vp, cl = mk(0.0f, 0.0f);
     float w_p, psi_p, cang = 0.0f;
     int tiene_bordes, sin_ruedas, sin_arcade;
 
-    /* --- entradas (operation_input) --- */
+    /* --- entradas (OperationInput 49FAD0 = PS2 0x17ef10): +34 = volumen 1, +38 = volumen 2 (255 mientras se
+       recupera de un choque, +2F8 > 0), +202 = volumen 0 << 8 --- */
     c->pedal_ac_ant = c->pedal_ac; c->pedal_fr_ant = c->pedal_fr;
     c->pedal_ac = tr(cl01(e->acelerador) * 255.0f + 0.5f);
     c->pedal_fr = tr(cl01(e->freno) * 255.0f + 0.5f);
-    c->stick16 = tr(clampf(e->stick, -1.0f, 1.0f) * 127.0f) * 256;
+    if (e->volumen_ok) c->stick16 = (e->volumen < -128 ? -128 : (e->volumen > 127 ? 127 : e->volumen)) * 256;
+    else c->stick16 = tr(clampf(e->stick, -1.0f, 1.0f) * 127.0f) * 256;
     c->ac_motor = c->pedal_ac;
+    c->freno_op = c->t_recup > 0.0f ? 255 : c->pedal_fr;
+    c->manual = e->manual != 0;
     tiene_bordes = (e->dist_izq + e->dist_der) > 0.01f;
     /* event+0x26c con signo: <0 lado izquierdo, >0 lado derecho */
     ofs = tiene_bordes ? (e->dist_izq - e->dist_der) * 0.5f : 0.0f;
     c->ofs = ofs;
+    if (c->manual) aviso_cambio(c, p);                  /* CheckShiftWarning 4A50F0 */
+    ayuda_tierra(c, e, tiene_bordes);                   /* CheckWanderer 4A5260 */
     /* estado de choque y su animacion (4A2400 / pc_advance_crash_state) */
     avanza_choque(c);
     if (c->roce > 0) c->roce--;
@@ -830,18 +1134,7 @@ static void tick(or2_coche_t *c, const or2_param_t *p, const or2_entrada_t *e)
     embrague_auto(c, p);
     par_motor(c, p);
 
-    /* --- cargas: estaticas + transferencia longitudinal opcional ---
-       (el original la obtiene de la suspension; con transferencia = 1 y
-       h = 0x0260 los coches con mu igual delante/detras (col. 0) acaban
-       trompeando a fondo con todo el volante a >300 km/h fisicos, lo que no
-       ocurre en el juego, asi que por defecto va desactivada) */
-    {
-        float dw = p->transferencia * p->masa * c->a_lon * p->alt_cg / (p->batalla * G_ACC) * 0.5f;
-        for (i = 0; i < 4; ++i) {
-            float ld = p->carga_est[i >> 1] + ((i < 2) ? -dw : dw);
-            c->r[i].carga = ld > 0.0f ? ld : 0.0f;
-        }
-    }
+    /* --- cargas: las de la suspension del paso anterior (CalcTireLoad 4A1A90, al final de este paso) --- */
 
     /* --- mu del firme bajo cada rueda (GetRoadMu 500B30 + assMuControl 518420, pc_road_mu.cpp) --- */
     for (i = 0; i < 4; ++i) c->r[i].mu = e->sup[i] ? or2_mu_superficie(e->sup[i]) : mu;
@@ -861,8 +1154,13 @@ static void tick(or2_coche_t *c, const or2_param_t *p, const or2_entrada_t *e)
         float coef = clampf(mx - (mx - p->mu_min[ax]) * rat * rat, 0.0f, mx);
         float x, load, ang, f, esc;
         int32_t a;
-        q->agarre = e->en_suelo ? q->carga * q->mu * coef : 0.0f;
-        x = 1.0f / p->rigidez[ax] + q->toe_comp;
+        /* tire_grip: sin agarre durante el rebote (+283) */
+        q->agarre = (e->en_suelo && c->c283 <= 0) ? q->carga * q->mu * coef : 0.0f;
+        /* cornering_power: por debajo de 20 km/h del modelo y con +D90 (60 cuadros tras el rebote o el choque)
+           la rigidez de deriva baja a la centesima */
+        x = p->rigidez[ax];
+        if (c->kmh < 20 && c->d90 > 0) x *= 0.00999999978f;
+        x = 1.0f / x + q->toe_comp;
         q->comp = x > 0.0f ? x : 0.0f;
         a = s16((int32_t)q->ang - q->ang_vel);
         if (a > 0x4000 || a < -0x4000) a = s16(-32768 - a);
@@ -906,14 +1204,22 @@ static void tick(or2_coche_t *c, const or2_param_t *p, const or2_entrada_t *e)
         ajy = appy - pj * vy + pj * vy * blend;
         la = sqrtf(ajx * ajx + ajy * ajy);
         if (la > 0.0001f) { la = fabsf(q->f_lat) / la; ajx *= la; ajy *= la; }
-        if (!e->en_suelo || sin_ruedas) { q->fx = q->fy = 0.0f; continue; }
+        /* make_force_work_tire: ni las ruedas en el aire ni las delanteras si una trasera lo esta */
+        if (!e->en_suelo || sin_ruedas || q->aire || (i < 2 && (c->r[2].aire || c->r[3].aire))) {
+            q->fx = q->fy = 0.0f; continue;
+        }
         pos_rueda(p, i, &x, &y);
         q->fx = f7x + f8x + (ajx - appx);
         q->fy = f7y + f8y + (ajy - appy);
         tau += x * (f7y + f8y) - y * (f7x + f8x);
-        /* empuje por marcha (filas 124..129) si 0x7c va a favor de la marcha */
+        /* cabeceo y balanceo de 0x7C y 0x88 aplicadas en el punto de contacto (+2C bajo el CG) */
+        tau_cab += -(q->y28 - p->radio[i >> 1]) * (f7x + f8x);
+        tau_bal += (q->y28 - p->radio[i >> 1]) * (f7y + f8y);
+        /* empuje por marcha (filas 124..129) si 0x7c va a favor de la marcha; en los preparados (modelo >= 15)
+           en la ultima marcha con el limitador por debajo de 0,975 no hay (fuente = +DC0 = 1) */
         if (c->marcha > 0 && (f7x * u + f7y * wl) > 0.0f) {
             float fac = p->empuje[c->marcha] - 1.0f, v2l = u * u + wl * wl;
+            if (c->marcha == p->marchas && p->modelo >= 15 && c->limitador < 0.975000024f) fac = 0.0f;
             if (fac < 0.0f) fac = 0.0f;
             if (v2l >= 0.0001f) {
                 float k = (f7x * fac * u + f7y * fac * wl) / v2l;
@@ -986,10 +1292,9 @@ static void tick(or2_coche_t *c, const or2_param_t *p, const or2_entrada_t *e)
             corr = (1.0f - fp / fn) * fabsf(dl2);
             if (!(corr > sp0 * DT)) c->corr_lat += dl2 < 0.0f ? -corr : corr;
         }
-        c->s4e = 0; c->s4c = 0;
-        c->c283--;
+        tau = 0.0f;                              /* se quita el par alrededor de la normal (guinada) */
         sin_arcade = 1;
-    } else if (c->c284 > 0) c->c284--;
+    }
     /* WrecPlBody (4A0C70): la grua del choque fuerte lleva el coche en linea recta al punto de la carretera
        (el que da el juego en e->grua_*) en los cuadros que quedan, sin fuerzas, y gira el cuerpo hacia el rumbo
        de la carretera; en el ultimo, PlWrecker (504900 fase 1) lo deja alli con el rumbo de la carretera, parado
@@ -1032,21 +1337,27 @@ static void tick(or2_coche_t *c, const or2_param_t *p, const or2_entrada_t *e)
 
     if (e->en_suelo && !sin_arcade) {
         float speed = lon2(vp);
-        /* CorneringCtrl (pcc:296-357): bicicleta cinematica con angulo
-           delantero d44+s32 y trasero d46. El original resuelve el centro
-           instantaneo con la ley de senos; aqui la forma tangente, que es
-           equivalente para |angulo| < 90 grados (d46 se limita a 73). */
+        /* CorneringCtrl (4A3950): bicicleta cinematica con el angulo delantero d44+s32 y el trasero d46; el
+           centro instantaneo sale de la ley de senos como en el original */
         if (!(c->s4e < -0x4000 || c->s4e > 0x4000) && c->kmh != 0) {
-            float tf = clampf((float)((int32_t)c->d44 + c->s32) * U2R, -1.4f, 1.4f);
-            float tb = clampf((float)c->d46 * U2R, -1.4f, 1.4f);
-            float tnf = tanf(tf), tnb = tanf(tb);
-            float beta = atanf((p->cg_tras * tnf + p->cg_del * tnb) / p->batalla);
-            float om = speed * cosf(beta) * (tnf - tnb) / p->batalla;
-            float rate = (beta - c->d40) * HZ;
-            v2 obj = dir_ang(psi_p + beta);
+            float th0 = (float)((int32_t)c->d44 + c->s32) * U2R, th1 = (float)c->d46 * U2R;
+            float sg = th0 > th1 ? 1.0f : -1.0f, off, A, B, ang, om, rate;
+            v2 obj;
+            if (fabsf(th1) > 1.57079637f) sg = -sg;
+            off = sg * 1.57079637f; A = off + th0; B = off + th1;
+            if (A == B) { ang = A - off; om = 0.0f; }
+            else {
+                float q = fabsf(sinf(B) * p->batalla / sinf(A - B));
+                float x = cosf(A) * q + p->cg_del, y = sinf(A) * q, phi = atan2f(y, x);
+                float quo = sinf(A) * q / sinf(phi);
+                om = speed / (fabsf(quo) * sg);
+                ang = phi - off;
+            }
+            rate = (ang - c->d40) * HZ;
             om -= rate;
             cang = (om - w_p) * HZ;
-            c->d40 = beta;
+            c->d40 = ang;
+            obj = dir_ang(psi_p + ang);
             cl = mk((obj.x * speed - vp.x) * HZ, (obj.y * speed - vp.y) * HZ);
         }
         /* CalcPlBody_2nd (pcc:886-925): mezcla por |sin deriva trasera| */
@@ -1079,7 +1390,8 @@ static void tick(or2_coche_t *c, const or2_param_t *p, const or2_entrada_t *e)
                 pr = unidad(mk(vp.x + cl.x * DT, vp.y + cl.y * DT));
                 cy = cruz(h, pr);
                 s = sinf((float)c->d46 * U2R);
-                coef = (cy * s < 0.0f) ? p->ass_dentro : p->ass_fuera;
+                /* cross(rumbo, prevista).y * sin(d46) < 0 -> 0x2140 (PC 5184B0, PS2 0x187db4) */
+                coef = (cy * s < 0.0f) ? p->ass_fuera : p->ass_dentro;
                 coef *= fabsf(s);
                 if (c->d36 <= 0) coef = s * s * p->ass_base;
                 {
@@ -1140,20 +1452,40 @@ static void tick(or2_coche_t *c, const or2_param_t *p, const or2_entrada_t *e)
         }
     }
 
-    /* --- ActionForce2 final --- */
+    /* --- ActionForce2 final (con AssistWanderer, que gira la velocidad y la carroceria antes) --- */
     {
-        float nx = vp.x + cl.x * DT, ny = vp.y + cl.y * DT, l = sqrtf(nx * nx + ny * ny);
-        float wn = w_p + cang * DT, au, al;
-        v2 vo = v0;
+        v2 vw = v0;
+        float nx, ny, l, wn = w_p + cang * DT, fs = 0.0f, tc = tau_cab, tb = tau_bal;
+        asiste_tierra(c, &vw);
+        nx = vp.x + cl.x * DT + (vw.x - v0.x); ny = vp.y + cl.y * DT + (vw.y - v0.y);
+        l = sqrtf(nx * nx + ny * ny);
         if (l > 166.666672f) { nx *= 166.666672f / l; ny *= 166.666672f / l; }
         wn = clampf(wn, -60.2f, 60.2f);
         c->vx = nx; c->vy = ny; c->w = wn;
         c->psi = angw(c->psi + wn * DT);
-        /* aceleracion longitudinal para la transferencia de carga */
-        au = ((nx - vo.x) * fwd.x + (ny - vo.y) * fwd.y) * HZ;
-        al = c->a_lon + (au - c->a_lon) * 0.15f;
-        c->a_lon = clampf(al, -60.0f, 60.0f);
+        /* make_force_work_sus + gravedad + ass_press_down_against_road: altura, cabeceo y balanceo (los mismos
+           pasos de ActionForce2: velocidad y despues posicion; inercias masa * 0x4c / 0x0e4) */
+        for (i = 0; i < 4; ++i) {
+            float x, y, z, f = c->r[i].f_sus;
+            if (c->c283 > 0 && f < 0.0f) f = 0.0f;
+            rueda_pc(p, i, &x, &y, &z);
+            fs += f; tc += -z * f; tb += x * f;
+        }
+        c->v_alt += (fs - p->masa * (SUS_APRIETE + 1.0f)) * G_ACC / p->masa * DT;
+        c->alt += c->v_alt * DT;
+        c->w_cab += tc * G_ACC / (p->masa * p->k_inercia[0]) * DT;
+        c->w_bal += tb * G_ACC / (p->masa * p->k_inercia[2]) * DT;
+        c->cabeceo += c->w_cab * DT;
+        c->balanceo += c->w_bal * DT;
     }
+    /* RebPlBody: fin del rebote (+283) y espera (+284) */
+    if (c->c283 > 0) {
+        c->s4e = 0; c->s4c = 0;
+        if (--c->c283 == 0) c->d90 = 60;
+    } else if (c->c284 > 0) c->c284--;
+
+    /* --- ColiCar (ruedas contra un suelo plano), CalcSuspensionForce y CalcTireLoad --- */
+    suspension(c, p, e->en_suelo);
 
     /* --- CopyCarWork --- */
     {
@@ -1162,7 +1494,16 @@ static void tick(or2_coche_t *c, const or2_param_t *p, const or2_entrada_t *e)
         c->kmh = tr(c->vel_mf * 216.720001f);
         if (c->vel_mf > 0.0184569955f) c->rumbo_v16 = s16(tr(atan2f(-c->vx, c->vy) * R2U));
         else c->rumbo_v16 = s16(tr(c->psi * R2U));
+        /* +134 + i*0xC: altura de la rueda para el dibujo (anclaje - tope de compresion, como mucho +28) */
+        for (i = 0; i < 4; ++i) {
+            float x, y, z, h;
+            rueda_pc(p, i, &x, &y, &z);
+            h = y - p->sus_inf[i >> 1];
+            if (h > c->r[i].y28) h = c->r[i].y28;
+            c->rueda_y[i] = p->alt_cg + h;
+        }
     }
+    if (c->d90 > 0) c->d90--;                            /* cola de CommonPlCar (4A82C4) */
 }
 
 /* -------------------------------------------------------------- API */
@@ -1188,6 +1529,12 @@ static void salidas(or2_coche_t *c, const or2_param_t *p)
 void or2_paso(or2_coche_t *c, const or2_param_t *p, const or2_entrada_t *e, float dt)
 {
     int n = 0;
+#if defined(__sh__)
+    /* la FPU del EE de la PS2 redondea hacia cero (no es IEEE): la SH4 hace lo mismo con FPSCR.RM = 1 mientras
+       dura el paso (en el banco, REDONDEO=cero); el resto del programa sigue con el redondeo al mas cercano */
+    unsigned int fpscr = __builtin_sh_get_fpscr();
+    __builtin_sh_set_fpscr((fpscr & ~3u) | 1u);
+#endif
     /* rumbos de la carretera en unidades del PC (+ izquierda) */
     c->d4c = s16(tr(angw(-e->rumbo_carretera) * R2U));
     c->d4e = s16(tr(angw(-e->rumbo_adelante) * R2U));
@@ -1199,6 +1546,9 @@ void or2_paso(or2_coche_t *c, const or2_param_t *p, const or2_entrada_t *e, floa
         if (n == 8) c->acum = 0.0f;
     }
     salidas(c, p);
+#if defined(__sh__)
+    __builtin_sh_set_fpscr(fpscr);
+#endif
 }
 
 /* ======================================================= choques */
@@ -1266,6 +1616,7 @@ static void avanza_choque(or2_coche_t *c)
         if (!(0.0f < sig)) {
             c->t_choque = 0.0f;
             c->t_recup = (q && q->ok) ? q->recup[c->choque] : 0.0f;
+            c->d90 = 60;
             memset(c->pose_t, 0, sizeof c->pose_t);
             memset(c->pose_r, 0, sizeof c->pose_r);
             return;
@@ -1536,7 +1887,7 @@ void or2_rebufo(or2_coche_t *c, const or2_otro_t *otros, int n)
     }
     c->rebufo = best;
     /* objetivo = best * acelerador * (1 - freno) * cos(d46), rampa de 180 cuadros */
-    base = (1.0f - (float)c->pedal_fr * 0.00392156886f) * best * (float)c->pedal_ac * 0.00392156886f;
+    base = (1.0f - (float)c->freno_op * 0.00392156886f) * best * (float)c->pedal_ac * 0.00392156886f;
     obj = cosf((float)c->d46 * U2R) * base;
     cnt = c->rebufo_n;
     cur = c->rebufo_k;

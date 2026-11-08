@@ -26,6 +26,9 @@ con etiqueta para los choques y la eleccion de columna:
          SLES-53998) que GetExtendedTime (44DC70 / PS2 0x176730) suma en una partida de un jugador del curso de 5
          niveles. Se localiza por el codigo de esa funcion: 'addiu a0, zero, 0xa' y 'addiu a1, zero, 0x96' (indice
          nivel x 10 + fila x 150 de la tabla de tiempos) y, detras, el lui/addiu de la tabla que se suma con 'lh'.
+  'PAR2' + 162 f32: la segunda curva de par motor (la del cambio manual: torque_table con event+0x13 = 1). Va justo
+         detras de la primera (0x288 bytes) y las dos estan en la tabla de punteros que lee 0x18d760 de SLES-53998
+         ([automatico, manual]); se localiza por esa tabla. Va al final del fichero para no mover los demas bloques.
 Sale de tu disco: no se distribuye."""
 import os, struct, sys
 import numpy as np
@@ -181,6 +184,19 @@ def busca_camara(d, segs):
         return d[o - 4 - 0x64c:o - 4] + d[o:o + 0x5460 + 0x438], va
     return None, None
 
+def busca_par_manual(d, segs, b):
+    """tabla de dos punteros [curva automatico, curva manual] con la primera = la curva de par de main (b - 0x690)"""
+    va0 = next((v + (b - 0x690 - o) for v, o, s in segs if o <= b - 0x690 < o + s), None)
+    if va0 is None: return None
+    u = np.frombuffer(d[:len(d) // 4 * 4], '<u4')
+    for i in np.where(u[:-1] == va0)[0]:
+        o = va_off(segs, int(u[i + 1]))
+        if o is None: continue
+        c = np.frombuffer(d[o:o + 162 * 4], '<f4')
+        if abs(c[0] - 0.12732396) < 1e-5 and 1.0 < c[1] < 10.0 and np.all(np.isfinite(c)):
+            return d[o:o + 162 * 4]
+    return None
+
 def main():
     iso = isomod.Iso(sys.argv[1])
     nombre = next(k for k in iso.fich if k.startswith('SLES') or k.startswith('SLUS') or k.startswith('SLPM'))
@@ -204,8 +220,11 @@ def main():
     if tim is None: sys.exit('no encuentro las tablas de tiempo por zona')
     kte, kva = busca_ajuste_etapa(d, segs)
     if kte is None: sys.exit('no encuentro la correccion de tiempo por etapa')
+    par2 = busca_par_manual(d, segs, b)
+    if par2 is None: sys.exit('no encuentro la curva de par del cambio manual')
     open(sys.argv[2], 'wb').write(d[b:b + 0x4c * FILAS] + par + fre + b'MAP1' + mapas.tobytes() +
-                                  b'CHQ1' + chq + b'POS1' + pos + b'CAM1' + cam + b'TIM1' + tim + b'KTE1' + kte)
+                                  b'CHQ1' + chq + b'POS1' + pos + b'CAM1' + cam + b'TIM1' + tim + b'KTE1' + kte +
+                                  b'PAR2' + par2)
     print('tablas de tiempo en 0x%x, correccion por etapa en 0x%x, de la camara en 0x%x' % (tva, kva, cva))
     print('tabla de %s en 0x%x: %d filas de %d coches, curvas de par y freno, mapas, choques y %d animaciones' %
           (nombre, b, FILAS, C, struct.unpack('<I', pos[:4])[0]))

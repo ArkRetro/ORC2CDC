@@ -22,7 +22,7 @@ paso por 16683 us (59,94 Hz).
 ## Como compilar y probar
 
 - `cd demo && make` (KallistiOS en /opt/toolchains/dc/kos). Defines de prueba: `PRUEBA_JUGADOR`, `PRUEBA_AUTO`,
-  `PRUEBA_TRAFICO`, `PRUEBA_CHOQUE`, `PRUEBA_RAMA=0/1` (rama que toma el piloto), `PRUEBA_NODO=k` (etapa de salida, clave del arbol), `PRUEBA_V`, `SALIDA`, `VER=1`, `DIAG_VTX`.
+  `PRUEBA_TRAFICO`, `PRUEBA_CHOQUE`, `PRUEBA_RAMA=0/1` (rama que toma el piloto), `PRUEBA_NODO=k` (etapa de salida, clave del arbol), `PRUEBA_V`, `PRUEBA_FISICA` (resumen de la fisica cada segundo), `SALIDA`, `VER=1`, `DIAG_VTX`.
 - Datos: conversores de tools/ (ver ASSETS.md) a un dir de datos; `tools/mkgdi.py demo/demo.elf dir --datos datos`.
 - Niveles de verificacion usados abajo: **C** compila, **H** verificado en host (tools/c/prueba_fisica.c),
   **E** verificado en emulador (Flycast), **R** verificado en Dreamcast real (GDEMU del probador).
@@ -33,7 +33,7 @@ Estado: OK (conectado y verificado al nivel indicado), PARCIAL, PROVISIONAL (apr
 
 | Sistema | Referencia PS2 / PC | Estado DC | Evidencia | Diferencia | Proxima accion | Verificacion |
 |---|---|---|---|---|---|---|
-| Aceleracion, motor, cambio auto/manual | tabla de parametros 0x2dbc30 (19 col.), par 162 f, freno 256 f; cambio PS2 0x18d530 | OK | or2_fisica.c clonado; columna por modelo MAP1 | ninguna conocida (`ACEL` = 1 por defecto; `-DACEL=1.35f` da la aceleracion de mas que se pidio antes, no es del juego) | — | H, E |
+| Aceleracion, motor, cambio auto/manual | tabla de parametros 0x2dbc30 (19 col.), par 162 f x 2 (automatico y manual, PAR2), freno 256 f; cambio PS2 0x18d530 | OK | or2_fisica.c clonado; columna por modelo MAP1 | ninguna conocida (`ACEL` = 1 por defecto; `-DACEL=1.35f` da la aceleracion de mas que se pidio antes, no es del juego) | — | H, E |
 | Direccion, derrape (inicio/mantenimiento/salida) | SlipAngleCtrl / RearGripCtrl / CorneringCtrl; temporizador 40 cuadros | OK | decompilacion + banco | ninguna conocida | trazas de entrada comparables con PS2 | H, E |
 | Adherencia por superficie | get_road_mu 500B30, running_resistance 502120, COLI0200 | OK | coli por rueda | ninguna conocida | — | H, E |
 | Choques coche-coche y muro, choque fuerte, grua | 4F9450/4F8490/4F6FE0/4F7BF0, cbw_coli_wall, 5038D0, PlWrecker | PARCIAL | CHQ1/POS1 de PARAM.DAT | grua recoloca en el carril mas cercano (no en la fila de poligonos); avance 10 posiciones x m_pos (CONFIRMADO, antes 25 m supuestos) | — | H, E |
@@ -42,15 +42,66 @@ Estado: OK (conectado y verificado al nivel indicado), PARCIAL, PROVISIONAL (apr
 | Rivales | — | FALTA | — | no hay rivales | — | — |
 | Carretera, pendientes, bifurcacion | STAGE.PS2, BK.PS2 cs_BK_PALM, COMMON obj_course_obj_bk_palm + obj_OBJ_<ZONA>_BUNKI_TX, descriptores 0xb0, csc_data_2 | OK | conv_tramo/conv_union, CURSO.DAT | arbol entero (15 etapas, 10 bifurcaciones con sus carteles, 5 metas); cielo de la union = el de la etapa que se deja, cambia al llegar a la siguiente (sin mezcla); bifurcaciones = las de PALM (las demas no estan en el disco) | objetos animados de BK (ANIMS), sol | E |
 | Temporizador (inicial y ampliacion) | 44DC70 = PS2 0x176730, 450CC0 = PS2 0x1cee40, 450AC0; tabla 7D2E98 = PS2 0x3cb708 copiada por 0x176040; k636904 = PS2 0x35a938 | OK | TIM1 y KTE1 de PARAM.DAT | formula y tablas CONFIRMADAS en el ELF; variante 1 (fila 0), preset 0 y dificultad 0 PROBABLES (frontal del PC) | trazar el frontal de PS2 | E |
-| Checkpoints, meta, resultados | 44FF20 / 4515B0 (branch_state 7D38E8) con las banderas +0x3C de COLI0200; 4513C0 meta | OK | ampliacion al pasar la pancarta CHECK POINT del principio de la etapa siguiente (ver Checkpoint); meta del original en las 5 etapas finales (z = 0 de la union) | sin pantalla de resultados ni final del original; sin voz | — | E |
+| Checkpoints, meta, resultados | 44FF20 / 4515B0 (branch_state 7D38E8) con las banderas +0x3C de COLI0200; 4513C0 meta | OK | ampliacion al pasar la pancarta CHECK POINT del principio de la etapa siguiente (ver Checkpoint); meta del original en las 5 etapas finales (z = 0 de la union); voz y efecto de EXTEND TIME, GOAL y TIME OVER (voces.c) | sin pantalla de resultados ni final del original; sin la voz de GAME OVER (0x154: no hay pantalla de GAME OVER) | — | E |
 | Puntuacion modo OutRun | 4F2DF0, 4F2660, 4F2B20, 4B9770 | PARCIAL | main.c pt_* | posicion de carretera = m_pos de CURSO.DAT (CONFIRMADO; antes 2,5 m supuestos, 3,2 veces los puntos por avance); bonus de etapa en el checkpoint | el salto de +64 al cambiar de curso (PENDIENTE) | E |
 | Eventos, scripts, progresion, misiones | SCRIPTS.PS2 (Races, RaceAttack, OutrunMiles, Req_*) | FALTA | — | — | — | — |
 | Coches del jugador | CARS.PS2 1-32 / 33-63, disposicion 0x3d3ff0; materiales tabla 4/5 del bloque; colores 0x35ad48 (PC 64D120/408C80); mapa de entorno del bloque | PARCIAL | 15 coches montados como 46A560 (port comprobado), con interior, 9320-11195 vertices dibujados; pintura, 8 colores (Y en la seleccion), reflejo y luces (+7C/+80/+84/+60, CEX2) del original | UV de entorno con la formula esferica clasica (la del microcodigo VU1 sin leer); piezas sin animar; sin bits de noche/tunel | ver secciones Coches | E |
 | Escenarios, texturas, materiales | STAGE.PS2, VQ, scn_env_fog_<zona> | PARCIAL | 15 tramos + 15 uniones; mallas sin textura con su material (tabla 5); niebla del original; tiras (ADC), nodos, LOD y planos del original | sin objetos de tramo (obj_course_obj_cs_*), sol (cs_ENV_* no es de la escena: es del reflejo del coche); niebla mezclada por distancia en la union (el original por tiempo) | — | E |
-| HUD, menus, transiciones | SPRANI/XST, TEXT.PS2 | PARCIAL | HUD.DAT, MENU.DAT | titulo es un cuadro del video; textos bfont antiguos en la demo automatica y el aviso de rama | quitar textos bfont | E |
-| Musica y efectos | MUSIC.PS2, SOUND.PS2 ICS/MENU/FE | PARCIAL | musica.c, sfx.c | 48 kHz supuesto; sin voces, sin sonido por superficie ni del choque fuerte | — | E |
+| HUD, menus, transiciones | SPRANI/XST, TEXT.PS2 | PARCIAL | HUD.DAT, MENU.DAT | titulo es un cuadro del video (la pelicula de titulo en bucle detras del rotulo, sin hacer); textos bfont antiguos en la demo automatica y el aviso de rama | quitar textos bfont | E |
+| Musica y efectos | MUSIC.PS2, SOUND.PS2 ICS/MENU/FE | PARCIAL | musica.c, sfx.c | 48 kHz supuesto; sin sonido por superficie ni del choque fuerte | — | E |
+| Voces (acompanante y locutor) | SOUND.PS2 `\SPANISH\ORC.PAK`, `PERO.pak`; race_robots 489A90/488D80 = PS2 0x202e60..0x205cac; 4B93E0, 4B9CD0, 49C9C0, 499020, GAME 0x1b83e8 | OK | VOCES.DAT (conv_sonido.py), voces.c; verificado en Flycast (ver Voces y video) | una voz nueva corta la anterior (SUPUESTO); "choque con otro coche" = contacto con impulso del trafico (traf_choca) en un choque; sin voces de asustada/trompo (solo Coast 2 Coast) | — | E |
+| Peliculas (titulo y atraccion) | MV.PS2 ts50/attr50.pss; 0x12d480, ADVERTISE 0x25e1d8 | OK | MVTS.VQV / MVATTR.VQV (conv_video.py), video.c | VQ de la PowerVR a 512x256 estirado a 640x480 (el original: MPEG-2 640x480); al arrancar y por inactividad del titulo, en vez de la demo de carrera | — | E |
 | Cargas y estabilidad | — | PARCIAL | carga en segundo plano, mutex del GD | — | medir en GDEMU | E |
 | Rendimiento / TA en consola real | — | PARCIAL | tope global del TA (DREAMCAST.md) | primer cuelgue medido en la consola (VB lleno a 24656 vtx) | esperar prueba R de la demo 14+ | E (R pendiente) |
+
+## Voces y video (2026-11-08)
+
+**De donde salen.** SOUND.PS2 guarda los bancos por idioma en `\<IDIOMA>\...` (ENGLISHC/H/J, FRENCH, GERMAN, ITALIAN,
+SPANISH). El ELF elige el directorio con la tabla de prefijos de 0x3527a0 (5 juegos x 6 idiomas; PC 754A88): en una
+carrera normal el juego 4 (`SPRACE`, FRENCH, GERMAN, ITALIAN, SPANISH, `SPRACE`); con el idioma espanol, `\SPANISH\`
+(por defecto en la demo; `conv_sonido.py --idioma` para otro). `SPRACE` (el ingles de la carrera) no esta en el disco
+PAL. Los bancos de voz de la carrera del modo OutRun son ORC.PAK (banco 3 de la tabla 0x352840, pedido con 0x8000 =
+con prefijo de idioma) y, para GOAL / TIME OVER / GAME OVER, PERO.pak. Los id de sonido son los mismos que en el PC:
+cada banco trae dos tablas {id, desplazamiento} (partes A y B); la tabla SE del IRX (0x4b98) da 12 kHz y volumen
+0x3fff a todas las voces. 34 muestras en espanol, 34,7 s, VOCES.DAT 214 KB (cabe entero en la RAM del AICA junto a
+SFX.DAT y los buferes de la musica).
+
+**Cuando suenan** (voces.c; tablas del ELF en VOCES.DAT; el codigo de PS2 es el del PC, comprobado con capstone: la
+cola y los comentarios en 0x2059c0..0x205cac, las reacciones en 0x202e60..0x203d94, el sonido de carrera 0x11C090 =
+424940 del PC, la variante 780258 = PS2 0x443508):
+
+| Momento | Voz (id) | Logica del original |
+|---|---|---|
+| Empieza la carrera (modo GAME) | 0x82 | 0x1b83e8 (init del modo 16), salvo al venir de RESTART |
+| Checkpoint (EXTEND TIME) | efecto 0x4d y voz 0x16c | 4B93E0 / 0x1be78c |
+| Despues del checkpoint, a 40 posiciones de carretera en la etapa nueva | 0x79..0x7c (zona 1..4 = nivel en el arbol) | 488BD0 (solo modo OutRun), tabla 0x36f958, por la cola |
+| Derrapes (cada uno cuenta a los 120 cuadros) | 1.o 0x6e, 2.o-5.o 0x6f, 6.o-13.o 0x70, 7.o y 10.o 0x74, desde el 14.o uno al azar de 0x75/0x76/0x77 | 4882B0 / 488C90, tabla 0x36f9a8, por la cola |
+| Derrape largo | 0x72 a los 360 cuadros, 0x73 a los 600 | 488220, tabla 0x36fa80, por la cola |
+| Empieza un choque (estados 1, 2, 5) | 0x15a, 0x15a, 0x159 | 489A90 "aire" (car+2C8 > 0), lista 0x40eba8 (personaje 9) |
+| Recuperacion tras el choque | grande (estados 2 y 5): 0x169/0x162/0x15f/0x160 por turno (2 en uso); el resto y el fin del estado 7: 0x167 | 489A90 (car+2F8 > 0), listas 0x40eb10 / 0x40eb20 |
+| Choque con otro coche durante un choque | una de 0x15d/0x15c/0x15b/0x15a/0x159 al azar, espera 90 cuadros | 489A90 (car+4 & 0x4000000 y +2F0 & 2), lista 0x40ef70 |
+| GOAL | 0x16b | 49C9C0 (4249F0) |
+| TIME OVER | 0x155 | 499020 |
+| Poco tiempo (600 cuadros o menos) | efecto 0x18d cada 16, 8 (< 420) o 4 (< 240) cuadros | 4B9CD0 / 0x1c00d8 |
+
+Cola de comentarios (488130 / 4881C0): 8 entradas; una nueva no entra si la anterior aun espera con prioridad mayor
+o igual; cada entrada suena y ocupa 120 cuadros. Las voces de asustada (0x16d, 0xcc) y trompo (0x160, 0x15f) solo las
+dice en Coast 2 Coast (variantes 3 y 4). El id lleva a veces 0x800 o 0x5000 encima (banderas del controlador de sonido
+del IOP, sin estudiar): se usan los 9 bits bajos. No hay voces en los menus principales (Fe.pak y MENU.pak son
+efectos; la voz de ranking 0x158 es de SPRANK.pak).
+SUPUESTOS: una voz nueva corta la que suena (un canal para voces y otro para los efectos de carrera); el volumen de
+las voces es el de los efectos de menu (0x3fff -> 0,8). Sin la voz de GAME OVER 0x154 (no hay modo GAME OVER).
+
+**Peliculas.** MV.PS2: `ts50/ts60.pss` (pantalla de titulo con el rotulo, 17,6 s) y `attr50/attr60.pss` (atraccion,
+55 s); MPEG-2 640x480 a 25 fps (las de 50 Hz) o 29,97, audio PCM de 16 bits estereo a 48 kHz en paquetes privados (sin
+idiomas ni subtitulos). 0x12d480 elige la de 50 o 60 Hz (0x328a8c) y la de titulo (1) o atraccion (0); el modo
+ADVERTISE (0x25e1d8) pone primero la de titulo y luego la de atraccion, alternando, hasta START. La Dreamcast no puede
+con MPEG-2 a 640x480 (ni KallistiOS trae RoQ ni MPEG en esta version, sin kos-ports): `conv_video.py` las pasa a
+texturas VQ de la PowerVR (512x256 RGB565, libro de 256 entradas por cuadro, 34 KB por cuadro que descomprime el
+chip) con el audio en ADPCM de Yamaha a 48 kHz, cuadros de 36 KB alineados a sector (0,9 MB/s a 25 fps). Se usan las
+de 50 Hz (la demo sale en PAL 50 Hz). MVTS.VQV 16 MB, MVATTR.VQV 50 MB. video.c las pasa al arrancar (gancho
+`video_titulo` antes del primer titulo) y por inactividad en el titulo (MENU_DEMO, en vez de la demo de carrera);
+START las salta. Las pruebas con PRUEBA_AUTO / PRUEBA_JUGADOR no las pasan.
 
 ## Auditoria de inventos (2026-11-08)
 
@@ -83,7 +134,7 @@ estaba y se dice lo que falta). Estado: CORREGIDO, SE QUEDA (ya era del original
 | Muro a 1 m del limite | CbwColiWall con los puntos de la carroceria | — | PROVISIONAL | SE QUEDA |
 | Altura y orientacion del coche: 4 muestras a 1,6/0,8 m | suspension y contactos de las ruedas | — | PROVISIONAL (solo dibujo) | SE QUEDA |
 | Escala de puntos por avance (x10, x110) | PS2 0x28F984 / 4F2DF0 (K628244, K5C68E0) | igual | CONFIRMADO | SE QUEDA (ahora con m_pos) |
-| Piloto automatico de la demo (DEMO del titulo) | el original pasa la pelicula de MV.PS2 | — | invento propio (solo prueba/atraccion) | SE QUEDA |
+| Piloto automatico de la demo (DEMO del titulo) | el original pasa la pelicula de MV.PS2 (ahora tambien la demo: video.c) | — | invento propio (solo si faltan las peliculas, o pruebas) | SE QUEDA |
 | META/AGOTADO: freno 0,6 y vuelta al titulo a los 600 cuadros | el original conduce solo hasta el final (camaras 4853D0..) | — | PROVISIONAL | SE QUEDA |
 | Aviso de bifurcacion a 450 m de la separacion | 4BB890: BIFURCA con el avance car+0x102C entre 0,65 y 0,72 / 0,70 y 0,75 | — | PROVISIONAL | SE QUEDA |
 | Marcas de derrape (256, ancho 0,26 m) y humo (32, vida 1 s, tamano 0,6 + 2,6 t) | tire_mark_init 41FB10 / tire_mark_req 41FB50 / 486450 y PcTireSmoke 41C420/41C570 (race_particles*) | — | PROVISIONAL | SE QUEDA (proximo paso: portar race_particles) |
@@ -92,7 +143,76 @@ estaba y se dice lo que falta). Estado: CORREGIDO, SE QUEDA (ya era del original
 | Golpe: fuerza 0,4 + dv/25 y v/40, 20 cuadros entre golpes | 4264C0 PlayWall, 4F65D0 (una vez cada 60 cuadros) | — | PROVISIONAL | SE QUEDA |
 | Salto de cuadros (paso de 16683 us, hasta 3) | tick 1/60,2 s (CONFIRMADO); pasos por segundo de la version PAL | — | PROVISIONAL (tecnico) | SE QUEDA |
 | camara.c: la carrera siguiente empieza con la vista elegida | — | — | PROVISIONAL | SE QUEDA |
-| Voz y sonido de EXTEND TIME | no aparecen en 450CC0 ni en 4B9630 | — | PENDIENTE (buscar en la escena 2C00AC o en race_robots) | — |
+| Voz y sonido de EXTEND TIME | 4B93E0 del PC (race_hud_navi.cpp timer_4b93e0) = PS2 0x1be78c: efecto 0x4d (0x84d) y voz 0x16c (0x96c) | — | CONFIRMADO | SE QUEDA (voces.c) |
+
+## Fisica: auditoria (2026-11-08)
+
+Recorrido de comun/or2_fisica.c funcion a funcion contra la decompilacion de PC (src/driving, src/platform:
+race_input, vehicle_constructor, vehicle_body_init) y el ELF de SLES-53998 (capstone; las funciones de PS2 del manejo
+estan en 0x17e000..0x18e000 y tienen la misma estructura que las del PC: se comprobaron las de abajo marcadas "PS2").
+La decompilacion no trae trazas del juego: sus pruebas (tests/test_driving*.cpp, test_wheel_dynamics.cpp...) son de su
+propio codigo con entradas sinteticas, asi que el banco compara magnitudes. Unidades: m/s y rad internos, +1C4 en
+m/cuadro, +1F4 = +1C4 x 216,72 (km/h del modelo), angulos de 16 bits (65536 = 2 pi), paso 1/60,2 s.
+
+| Funcion (or2_fisica.c) | Original PC / PS2 | Estado | Evidencia |
+|---|---|---|---|
+| orden del paso (tick) | GamePlCarCtrl 4A8330: OperationInput, CheckSlipStream, CheckShiftWarning, CheckWanderer, DrivingControl 502C90, CommonPlCar 4A8100 | igual (CalcCrushMotion va al principio del paso en vez de tras CopyCarWork: mismo numero de cuadros) | pc_common_control.cpp 2320, pc_driving_control.cpp |
+| or2_carga_param, umbrales | vehicle_gear_thresholds_487570, 4A6840 / tabla PS2 0x3dbbb0 | igual | conv_param.py |
+| or2_inicia / or2_coloca | vehicle_construct_4a5830 | CORREGIDO: sale en 1a (antes en punto muerto: el primer paso hacia un cambio 0->1 con el embrague suelto), rpm de ralenti en +48/+20C, +E98 = FLT_MAX | vehicle_constructor.cpp 85 |
+| or2_volante (nuevo) | pc_input_analog_453860 + 4537C0 / PS2 0x1b3fb8 + 0x1b42e0, filas 0x3f8800 | NUEVO: eje x 2^-15, zona muerta 0,25 (PS2; el PC 0,2) reescalada, rampa de la cruceta (0,10/0,117 por cuadro), x 127 y filtro por cuadro (alejandose: +-17 o /4 desde el centro; volviendo: /3 hasta +-20); opcion 4 (4471A0 del PC; PROBABLE en PS2). Antes: joyx/110, zona 0,08, cruceta a +-1 de golpe | disassembly 0x1b40ac..0x1b42a4 |
+| entradas (OperationInput) | 49FAD0 / PS2 0x17ef10 | CORREGIDO: freno +38 = 255 mientras +2F8 > 0 (recuperacion); +202 = volumen << 8. Pedales 0..255 sin curva (PS2: presion del boton tal cual) | igual en las dos |
+| steering_operation, toe_angle, tire_direction_angles | pc_steering.cpp | igual | |
+| tire_velocity | pc_tire_geometry.cpp | simplificado (2D) | |
+| cambio_auto | auto_transmission | igual | |
+| cambio_manual | manual_transmission | CORREGIDO: sin el 0->1 inventado; +E84 hace de automatico; reducir con el motor al corte, sin freno y con gas = sin golpe de gas, +D36 = 80, +D94 = 180, +D98/+D9C = 60 | pc_transmission.cpp |
+| aviso_cambio (nuevo) | CheckShiftWarning 4A50F0 | NUEVO: 480 cuadros pidiendo subir -> +E84 (automatico); +E80 a los 180 | pc_common_control.cpp 2201 |
+| acelerador_op | accel_operation | igual | |
+| reparte_freno | distribute_brake_torque | igual | |
+| embrague_auto | auto_clutch_control | CORREGIDO: estado 4 con la media de +E4 de las traseras (< 1: -4); +2F8 > 0: suelto | pc_driving.cpp |
+| par_motor, friccion_motor | engine_torque / engine_friction / PS2 0x18cc00 | CORREGIDO: la curva 1 (manual, PAR2, ganancia 4,5) con +13 y sin +E84 (tabla de punteros PS2 0x3db118); en la ultima marcha de los preparados (modelo >= 15) el limitador baja a la mitad de paso (PS2 0x18ce5c) | 0x18ccac lbu 0x13 / lw 0xe84 |
+| mu por rueda | get_road_mu + assMuControl | igual | |
+| agarre (tire_grip) | 5000xx | CORREGIDO: 0 durante el rebote (+283). Falta: bit 0x100000 de +4 (carga de referencia) e induce_spin (+304): nadie los pone en la demo | pc_driving.cpp tire_grip |
+| rigidez (cornering_power) | 500EA0 / PS2 0x18bab8 | CORREGIDO: x 0,01 por debajo de 20 km/h del modelo con +D90 > 0 (60 cuadros tras el rebote y tras el choque) | |
+| fuerza lateral, delantera, trasera, circulo, giros, rodadura | 5019C0, 500FF0, 501240, 5026F0, 501190, 501680, 501C90 | igual (+E4 guardado; +F0, +E0 slip_ratio y el angulo de giro +30 de la rueda no se usan en la fisica) | pc_wheel_dynamics.cpp |
+| resistencia_tierra | running_resistance 502120 | igual | |
+| fuerzas al cuerpo | copy_physical_work 502270 + make_force_work_tire 4A0000 | CORREGIDO: sin fuerza de las ruedas en el aire ni de las delanteras con una trasera en el aire; preparados en la ultima marcha con limitador < 0,975: sin empuje por marcha; pares de cabeceo y balanceo de +7C/+88 en el punto de contacto | pc_chassis.cpp |
+| aire, frenada tras golpe | calc_game_resist, force_work_49fed0 | igual | |
+| gravedad, apriete, pendiente | make_force_work (gravedad, assPressDown 5 g, assCancelInclineResistance) | igual en lo que importa: la pendiente no frena ni acelera (se anula); el apriete esta en la suspension | pc_chassis.cpp |
+| suspension (nueva) | ColiCar 519830 (car_sus_coli_check, car_sus_bump_push), CalcSuspensionForce 4A1B70, CalcTireLoad 4A1A90, assSpecificAmountOfTireLoad, assDiagonalTireLoad | NUEVO (antes cargas estaticas): muelle 0x688 x 6 del apriete, topes 0x4C0/0x558, estabilizadora 0x720, amortiguador (constantes 0x5c36b4..0x5c36c0); la carga es la fuerza / 6, normalizada a la total y sin diferencia entre diagonales. El cuerpo se reduce a altura, cabeceo y balanceo (angulos pequenos, inercias masa x 0x4c / 0x0e4) sobre un suelo plano; por el / 6 la transferencia es la sexta parte de la fisica real (frenando a 3,3 g: +40 kgf por rueda delantera) | pc_suspension.cpp, pc_collision.cpp |
+| ActionForce2 | 517410 | simplificado: 2D + los 3 grados de la suspension; MaximumVelocityCheck (166,7 m/s, 60,2 rad/s) igual, sin la inclinacion maxima 0x900 | |
+| ctrl_agarre_trasero | RearGripCtrl 4A2FA0 | CORREGIDO: +D94/+D98/+D9C bajan en manual; contacto con el muro (work+244 bit 3): agarre >= 0,75 + 0,25 abs(sin +4E) | pc_common_control.cpp 75 |
+| curva_agarre | 4A3260 | CORREGIDO: t = +D94 x 0,1107 (antes 0 fijo) | |
+| ctrl_deriva | SlipAngleCtrl 4A3310 | CORREGIDO: d44 = d46 = 0 durante el rebote. La ayuda de 7F94C0 es de la partida en red (0 fuera de linea) | |
+| CorneringCtrl | 4A3950 | CORREGIDO: la ley de senos del original (antes la forma tangente con tope 1,4 rad) | |
+| CalcPlBody_2nd y limitador | 4A7EC0, 4A3C60 | igual (+DC4 = 1) | |
+| ass_compulsive_move | 5184B0 / PS2 0x187d70 | ERROR CORREGIDO: los coeficientes 0x2140 / 0x218c iban cambiados (cross.y x sin(d46) < 0 -> 0x2140; PS2 0x187db4 c.olt.s / lwc1 0x2140). Cambia solo las columnas 6, 7, 17 y 18 (0,1 frente a 0). Rumbos y bordes del llamador | |
+| ayuda_tierra / asiste_tierra (nuevas) | CheckWanderer 4A5260 + AssistWanderer 4A5470 | NUEVO: con las cuatro ruedas en tierra (0x801C; 0x809C en el nivel 0) y al volver al asfalto, gira la velocidad y la carroceria hacia la carretera | pc_common_control.cpp 2427, 419 |
+| rebote | RebPlBody 4A62E0 | CORREGIDO: se quita el par de guinada; +283 baja despues de SlipAngleCtrl; +D90 = 60 al acabar | |
+| grua | WrecPlBody 4A0C70 | igual | |
+| CopyCarWork | 4A1140 | igual + alturas de rueda +134 (rueda_y) para el dibujo | |
+| choques | CalcCrushMotion 4A2400 | igual + +D90 = 60 al acabar | pc_crash.cpp 149 |
+| or2_rebufo | CheckSlipStream 4A4D20 | simplificado: los pedales son los del paso anterior (un cuadro) | |
+| redondeo | FPU del EE (redondea hacia cero, sin IEEE) | CORREGIDO: or2_paso pone FPSCR.RM = 1 en la SH4 y lo devuelve al acabar; diferencia medida en el banco (REDONDEO=cero): < 0,3 % | |
+| falta | ControlTimeupBraking 49FB70 (lo hace main.c con freno 0,6), HandicapControl 458E40 (1 para el jugador), saltos (el juego de la demo no da alturas: en_suelo siempre 1) | FALTA | |
+
+Banco (tools/c/prueba_fisica.c, PARAM.DAT de SLES-53998; antes = sin esta auditoria):
+
+| Coche (modelo) | 0-100 km/h | 0-200 km/h | punta (velocimetro) | frenada punta-100 | viraje a 200, volante a fondo | deriva a 1,99 s en la prueba de derrape |
+|---|---|---|---|---|---|---|
+| m6 Testarossa | 3,24 -> 3,21 s | 8,14 -> 8,11 s | 293,7 -> 293,7 | 2,66 -> 2,67 s | 6,50 -> 6,37 g | 53,8 -> 56,4 gr |
+| m0 | 4,30 -> 4,29 s | 10,00 -> 9,97 s | 293,7 -> 293,7 | 2,66 -> 2,66 s | 6,50 -> 6,34 g | 53,8 -> 56,5 gr |
+| m3 | 4,12 -> 4,10 s | 9,80 -> 9,77 s | 300,7 -> 300,6 | 2,77 -> 2,77 s | 6,50 -> 6,34 g | 53,8 -> 56,6 gr |
+| m16 (preparado) | 3,37 -> 3,34 s | 8,12 -> 8,09 s | 300,8 -> 300,7 | 2,79 -> 2,79 s | 7,00 -> 7,00 g | 58,5 -> 59,6 gr |
+| m20 (preparado) | 2,57 -> 2,54 s | 5,63 -> 5,60 s | 310,2 -> 309,9 | 2,87 -> 2,89 s | 6,90 -> 6,74 g | 52,7 -> 54,3 gr |
+
+El 0-100 es 0,03 s mas corto por salir en 1a sin el corte de embrague; el viraje a fondo baja un poco porque la carga
+pasa a la rueda exterior (el agarre es lineal con la carga: mu_max = mu_min en las 19 columnas) y el circulo de friccion
+suavizado no lo es. Suspension en el banco: reposo 271/374 kgf por rueda (las estaticas), CG a 0,317 m; frenando 311/334
+y -0,3 gr de cabeceo; viraje a 150 km/h 347/195 delante y 0,7 gr de balanceo. Manual (PAR2): mismos tiempos subiendo a
+8400 rpm; reducir de 4a a 3a a 200 km/h arranca el derrape (+D36 = 80); 480 cuadros sin cambiar pasan a automatico.
+Volante (opcion 4): eje 32 -> 0 (zona muerta), 64 -> 42, 127 -> 125; de 0 a 127 en 8 cuadros, de 127 a 0 en mas de 10.
+Flycast (-DPRUEBA_AUTO -DPRUEBA_FISICA, resumen cada segundo): hasta el checkpoint de LAKE sin incidencias, cargas
+entre 166 y 479 kgf, cabeceo -0,15..0,03 gr, balanceo +-0,9 gr.
 
 ## Checkpoint
 
@@ -342,6 +462,10 @@ inventada. Causas y arreglo:
 - PENDIENTE: mezcla de cielo en la union, sol, entorno lejano, objetos animados de BK; probar en R.
 
 ## Ultimo cambio verificado
+
+Fisica (2026-11-08): auditoria completa contra el PC y SLES-53998 (ver Fisica: auditoria): error de los coeficientes
+de ass_compulsive_move, suspension y cargas del original, volante del mando del original, cambio manual completo, curva de
+par del manual (PAR2), ayudas de CheckWanderer y del muro, redondeo hacia cero. Verificado: banco, demo sin avisos, Flycast.
 
 Graficos (2026-11-08): tiras con la bandera ADC del VU1, nodos y matrices como 404D10, carteles orientados, sin
 cs_ENV/cs_ENVBK (reflejo), planos 0,1/4000 y LOD de 404B00, recorte de la etapa por presupuesto desde lo mas lejano.

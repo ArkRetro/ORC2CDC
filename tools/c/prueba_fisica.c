@@ -16,6 +16,7 @@
 #include <string.h>
 #include <math.h>
 #include <time.h>
+#include <fenv.h>
 #include "or2_fisica.h"
 
 #define HZ 60.2f
@@ -73,6 +74,99 @@ static float fis_de_hud(const or2_param_t *p, float hud)
     float k = p->hud * 3.6f;
     if (!(p->arrastre_lat > 0.0f)) k *= 1.0101f;
     return hud / k;
+}
+
+/* suspension (CalcSuspensionForce / CalcTireLoad): altura, cabeceo, balanceo y cargas en reposo, acelerando,
+   frenando y en un viraje */
+static void prueba_suspension(const or2_param_t *p)
+{
+    or2_coche_t c;
+    or2_entrada_t e;
+    int i, f;
+    static const char *fase[4] = { "reposo", "gas a fondo", "freno a fondo", "volante 0,6 a 150" };
+    printf("\n== Suspension: altura del CG (m), cabeceo y balanceo (gr, + morro arriba / derecha arriba), "
+           "cargas (kgf) ==\n");
+    for (f = 0; f < 4; ++f) {
+        float v = f == 2 ? fis_de_hud(p, 200.0f) : (f == 3 ? fis_de_hud(p, 150.0f) : 0.0f);
+        or2_coloca(&c, p, 0.0f, v);
+        entrada_libre(&e);
+        e.acelerador = f == 1 ? 1.0f : (f == 3 ? 0.6f : 0.0f);
+        e.freno = f == 2 ? 1.0f : 0.0f;
+        e.stick = f == 3 ? 0.6f : 0.0f;
+        printf("  %s:", fase[f]);
+        for (i = 1; i <= (int)(1.5f * HZ); ++i) {
+            or2_paso(&c, p, &e, 0.0f);
+            if (i == 3 || i == 10 || i == 30 || i == 90)
+                printf(" [%.2fs h %.3f cab %5.2f bal %5.2f  %3.0f %3.0f %3.0f %3.0f]", i * DT, c.alt,
+                       c.cabeceo * 57.29578f, c.balanceo * 57.29578f, c.r[0].carga, c.r[1].carga, c.r[2].carga,
+                       c.r[3].carga);
+        }
+        printf("\n");
+    }
+}
+
+/* cambio manual (manual_transmission + CheckShiftWarning): subir al corte, reducir con el motor al corte (arranca
+   el derrape, +D36 = 80) y el paso a automatico tras 480 cuadros pidiendo subir */
+static void prueba_manual(const or2_param_t *p)
+{
+    or2_coche_t c;
+    or2_entrada_t e;
+    int i, n = 0;
+    printf("\n== Cambio manual (curva de par %s) ==\n", p->par_m_ok ? "PAR2" : "la del automatico");
+    or2_inicia(&c, p);
+    entrada_libre(&e);
+    e.manual = 1; e.acelerador = 1.0f;
+    printf("  subiendo al llegar a 8400 rpm:");
+    for (i = 0; i < (int)(20.0f * HZ); ++i) {
+        e.cambio_pide = (c.rpm > 8400.0f && c.marcha < p->marchas && c.cambio == 0) ? 1 : 0;
+        or2_paso(&c, p, &e, 0.0f);
+        if (e.cambio_pide) printf(" [%.2fs %d->%d %3.0f km/h]", i * DT, c.marcha - 1, c.marcha, c.velocidad_hud);
+        if (c.velocidad_hud >= 100.0f && !n) { n = 1; printf(" (0-100 %.2f s)", (i + 1) * DT); }
+    }
+    printf("\n  a los 20 s: %.1f km/h, marcha %d\n", c.velocidad_hud, c.marcha);
+    /* reducir de 5a a 3a a 200 km/h con gas: la segunda pasa del corte */
+    or2_coloca(&c, p, 0.0f, fis_de_hud(p, 200.0f));
+    e.cambio_pide = 0;
+    for (i = 0; i < 30; ++i) or2_paso(&c, p, &e, 0.0f);
+    printf("  a 200 km/h en %da:", c.marcha);
+    for (i = 0; i < 3; ++i) {
+        e.cambio_pide = -1; or2_paso(&c, p, &e, 0.0f); e.cambio_pide = 0;
+        printf(" [baja a %d: +296 %d, +D36 %d, +D94 %d]", c.marcha, c.cambio, c.temporizador, c.d94);
+        or2_paso(&c, p, &e, 0.0f);
+    }
+    printf("\n");
+    /* aviso de cambio: sin tocar la palanca en 1a a fondo */
+    or2_inicia(&c, p);
+    e.cambio_pide = 0;
+    for (i = 0; i < (int)(15.0f * HZ) && !c.e84; ++i) or2_paso(&c, p, &e, 0.0f);
+    printf("  sin cambiar en %da: +E84 (pasa a automatico) a los %.2f s; a los 15 s: marcha %d, %.0f km/h\n",
+           1, i * DT, c.marcha, c.velocidad_hud);
+    for (; i < (int)(15.0f * HZ); ++i) or2_paso(&c, p, &e, 0.0f);
+    printf("      (sigue: marcha %d, %.0f km/h)\n", c.marcha, c.velocidad_hud);
+}
+
+/* volante (or2_volante: zona muerta 0,25, filtro 4537C0 de la opcion 4, rampa de la cruceta) */
+static void prueba_volante(void)
+{
+    or2_coche_t c;
+    int i, ejes[] = { 0, 20, 32, 33, 48, 64, 96, 127, -127 };
+    memset(&c, 0, sizeof c);
+    printf("\n== Volante: eje del mando -> volumen (estable, 30 cuadros) y respuesta a un golpe a fondo ==\n  ");
+    for (i = 0; i < 9; ++i) {
+        int k, v = 0;
+        for (k = 0; k < 30; ++k) v = or2_volante(&c, ejes[i], 0, 0, 4, 1, 0);
+        printf(" %d->%d", ejes[i], v);
+    }
+    memset(&c, 0, sizeof c);
+    printf("\n   0 -> 127:");
+    for (i = 0; i < 12; ++i) printf(" %d", or2_volante(&c, 127, 0, 0, 4, 1, 0));
+    printf("\n   127 -> 0:");
+    for (i = 0; i < 10; ++i) printf(" %d", or2_volante(&c, 0, 0, 0, 4, 1, 0));
+    printf("\n   cruceta derecha:");
+    for (i = 0; i < 12; ++i) printf(" %d", or2_volante(&c, 0, 0, 1, 4, 1, 0));
+    printf("\n   suelta:");
+    for (i = 0; i < 10; ++i) printf(" %d", or2_volante(&c, 0, 0, 0, 4, 1, 0));
+    printf("\n");
 }
 
 static void prueba_aceleracion(const or2_param_t *p)
@@ -205,9 +299,10 @@ static void prueba_cambios(const or2_param_t *p)
 {
     or2_coche_t c;
     or2_entrada_t e;
-    int i, g = 0;
+    int i, g;
     printf("\n== Cambios a fondo (automatico): velocidad del velocimetro, rpm del motor y de la carretera ==\n");
     or2_inicia(&c, p);
+    g = c.marcha;
     entrada_libre(&e);
     e.acelerador = 1.0f;
     for (i = 0; i < (int)(40.0f * HZ); ++i) {
@@ -415,6 +510,8 @@ int main(int argc, char **argv)
         return 1;
     }
     if (carga_tabla(argv[1])) { fprintf(stderr, "no puedo leer la tabla\n"); return 1; }
+    /* REDONDEO=cero: la FPU del EE de la PS2 redondea hacia cero (or2_paso lo pone igual en la SH4) */
+    if (getenv("REDONDEO") && !strcmp(getenv("REDONDEO"), "cero")) { fesetround(FE_TOWARDZERO); printf("redondeo hacia cero\n"); }
     if (argc > 2) {
         if (argv[2][0] == 'm') {
             col = or2_columna_modelo(&choques, atoi(argv[2] + 1));
@@ -424,6 +521,11 @@ int main(int argc, char **argv)
     }
     r = or2_carga_param(tabla, filas, col, &p);
     if (r) { fprintf(stderr, "or2_carga_param: %d\n", r); return 1; }
+    if (argc > 2 && argv[2][0] == 'm') p.modelo = atoi(argv[2] + 1);
+    if (tam_fichero >= 652 && !memcmp((const char *)fichero + tam_fichero - 652, "PAR2", 4)) {
+        or2_carga_par_manual(&p, (const float *)((const char *)fichero + tam_fichero - 648));
+        printf("curva de par del manual (PAR2): ganancia %.2f\n", p.par_m_gan);
+    }
     if (tam_fichero >= (uint32_t)(200 * OR2_COLUMNAS + 162 + 256) * 4) {
         or2_carga_curvas(&p, fichero + 200 * OR2_COLUMNAS, fichero + 200 * OR2_COLUMNAS + 162);
         printf("curvas de PARAM.DAT\n");
@@ -446,6 +548,9 @@ int main(int argc, char **argv)
            p.dir_g, p.dir_k1 * p.dir_g * 32512.0f / (p.dir_k2 * 32768.0f) * 360.0f / 65536.0f,
            p.hud * 3.6f);
 
+    prueba_volante();
+    prueba_suspension(&p);
+    prueba_manual(&p);
     prueba_aceleracion(&p);
     prueba_cambios(&p);
     prueba_choques(&p);
