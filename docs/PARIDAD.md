@@ -1274,6 +1274,14 @@ peticion 14 (escoltas 45B5B0, +324 = 6: carrera contra ellos), que no esta en la
   media de mas de ~398, o sea ~250 km/h en el velocimetro); niveles 2 y 3: +20 corazones cada uno (por la union).
 - Modelo 0x2B (clase <= 1 de las tablas de coches): solo lo piden las tablas 20 (1 coche, mision base 4), 21 (17,
   mision especial 24) y 22 (4, especial 20); la DC no lo tiene (trafico 30..38): se gasta sin coche (PENDIENTE).
+  Estudiado (2026-11-09): el 0x2B es un camion con REMOLQUE: su lista de LOD (registro de 4866C0, PC 650500) lleva
+  segundo descriptor en +4 (conv_trafico.py llamadas() se para: "remolque sin portar"). Para portarlo hace falta, ademas
+  del modelo (TRAF9.DAT solo en el modo, VRAM fuera de la zona del curso), la cinematica del remolque: 470360 (PC
+  race_traffic.cpp "shadow_470360": punto de enganche +C70 / angulos +C7C seguido 12 unidades por detras en el marco
+  del coche, matriz +C90 con el desplazamiento del segundo descriptor +4; inicio en 1008/1010 con 43EB60), el angulo de
+  enganche +C2C de 474990 (recorte del volante) y las cajas del remolque en los choques (4F9000 con ia == 1, +C90);
+  dibujo en race_ghost_car.cpp second() (carroceria, pilotos +14/+18, luces +1C/+20, lista +68, sombra +10, ruedas
+  4AD8F0). Es terreno del trafico: no se hizo para no inventar un remolque rigido.
 - Listas de aterrizaje / salto de la acompanante del modo (PC 5C0FB0 / 5C0FD0 = PS2 0x40ea30 / 0x40ea40): iguales que
   las del OutRun (0x40eb10 / 0x40eb20) y con las mismas cuentas: CONFIRMADO (comun/voces.c). Sus listas de movimientos
   (PS2 0x40ea48 cerrado / 0x40ea88 descapotable, PC 5C0FD8 / 5C1018) SI son otras (0x6003d, 0x60025, 0x240000/1,
@@ -1282,13 +1290,43 @@ peticion 14 (escoltas 45B5B0, +324 = 6: carrera contra ellos), que no esta en la
   carrera, leido en el hueco de la union; banco HAM de la etapa por clave (4 distintos: grupos 0,0,0,1,1,1,2,2,2,1,0,3,
   0,0,3; PROBABLE que el juego lo elija por la clave). La acompanante es el personaje 6 (487F50), sin comentarios de
   zona ni de derrapes (solo variante 1 / 1, 3, 4).
-- SIN PORTAR (PENDIENTE): tipos 7, 8, 11, 15, 16, 17, 19, 20, 21, 23, 24, 25 (objetos OSO de la mision: conos,
-  monedas, arcos, cajas, lineas del carril; los objetos son los sucesos 32..307 con sus controles de
-  race_traffic_objects.inc 4AA560.. y sus posiciones de las tablas de la etapa; no empiezan, sin anuncio ni nota), 14 /
+- SIN PORTAR (PENDIENTE): tipos 7, 8, 11, 15, 16, 17, 19, 20, 21, 23, 24, 25 (no empiezan, sin anuncio ni nota), 14 /
   18 (escoltas), la hoja de resultados de la etapa 4603F0, la cara de la acompanante (45BDF0) y las reacciones del robot
   a las peticiones (487D60 / 487D90). La cuenta de
   corazones y la nota en la carrera son texto bfont (PROVISIONAL: el contador del original es 45FB80 con 5A9468).
 
+- Objetos de las peticiones (estudio 2026-11-09, para portarlos; nada de esto esta aun en la demo):
+  - Uso real en las 41 misiones (INFARTO.DAT): tipo 15 x16 (misiones base 1, 3, 4, 6, 7, 8...), 16 x15 (2, 3, 7, 8, 9,
+    13...), 7 x13 (especiales 15, 20, 21, 32, 33...), 8 x8 (5, 10, 14...), 23 x5, 9 x3, 11 x4, 24 x4, 14 x3, 19 x1 (39),
+    20 x1 (16), 25 x1 (37); 17, 18 y 21 no salen. Puesta en marcha / control / evaluacion por tipo (464350 tablas
+    464CB8 / 4650E4 / 464C5C; B[] de race_traffic_heart_main.inc): 7 y 24 comparten (45E8A0 / 463150), 8 y 23
+    (45EEB0 / 463250: sin objetos, distancia de deslizamiento con car+0x264..0x26C), 16 y 25 (461850 / 463F00).
+  - Fichero de objetos de la mision (45C470 = PS2 0x1af428): mision >= 15 y [78024C] == 0 -> tabla de saltos PS2
+    0x3f05c0 por mision - 15 (oso_qt_niag1, -, -, mach1, -, alas1, amaz1, -, lasv2, -, -, east1, maya1, prin1, -, newy1,
+    east2, maya2, prin2, flor2, newy2, east3, maya3, prin3, flor3, newy3); mision < 15 -> tabla 0x3f06a0 por 44DC50 - 15
+    = la mision base (-, sequ, niag, lasv, alas, -, sanf, amaz, mach, yose, -, newy, prin, flor, -); con [78024C] != 0
+    la 0x3f0630 (oso_qt_4c..) o ninguno. Los nombres de ciudades de C2C son solo nombres: son los del curso de OutRun 2.
+    CONFIRMADO en el codigo de PS2. Ficheros en OSO.PS2 ("\oso_qt_*.sz", zlib), u32 tamano y registros de 0x28 bytes
+    (4F0660 / 4F0D10: hasta y < -10000) {f32 pos[3], f32 angulos[3], u32 clase +18, u32 tipo +1C (funcion de suceso, PS2 0x1d76f4), u32 +20 (tamano
+    del trabajo: tabla 0x40ab50, PS2 0x1d6c54; el PC lee aqui las dos cosas), u32 +24}
+    en el marco de la etapa (7D2DA0). Clases que salen: 2 (10..30 en cada fichero), 6, 9, 10 (0xA), 11 (0xB), 18 (0x12),
+    56 (1, en flor*) y 57 (0x39).
+  - Clase -> modelo y escala (PC 5DA0A8 / 5DA0AC = PS2 0x40a958, 8 bytes por clase, lo usa 0x1d6db8): 2 0x570019,
+    6 0x57001f, 9 0x57001e, 10 0x57001c, 11 0x57002b (escala 3), 18 0x570030, 56 0x1010000, 57 0x57001d (banco 0x57 =
+    \Common\obj_course_obj_common_pmt.sz, registro = los 16 bits bajos; 0x101 = obj_course_obj_cs_flor). Tipo ->
+    funcion de suceso (PS2 0x40a918): 0x3d, 0x3f, 0x5d, 0x40, 0x41, 0x42, 0x5f, 0x60, 0x61, 0x3e, 0x63, 0x64, 0x4f,
+    0x65, 0x66 (bases de los carriles en 0x40a900: 0x20 / 0xfa, 0x11a / 0x1a, 0x15c / 0xa). En la zona 0x5C.. la PS2
+    numera una mas que el PC (PROBABLE por lo que hace cada clase): tipo 2 (clases 2, 6, 9) = PC 0x5C (cuerpo rigido
+    4ABA80 / 4ACD50 / 4ABCE0: conos), tipo 6 (10, 57) = PC 0x5E (4AA560 / 4ABF20 / 4AA620: el corazon que se toca, radio
+    [6282A4] en la 0xA), tipo 7 (11) = PC 0x5F (4AA7D0 / 4AC200 / 4AA920: la puerta de dos postes; +7C = 3 al pasar
+    entre ellos, 1 / 2 al tocar uno), tipo 12 (56) = 0x4F (luz).
+  - Logica que lee cada peticion: 15 (4617A0 / 463DF0): objetos 0xA y 0x39 con +7C != 0 y +80 == 8 (el jugador; 4AA140
+    caja del coche +D28 / +70 / +338..+34C contra el radio +90, en XZ); 16 / 25 (461850 / 463F00): clase [7F1C74] (p6 =
+    11) con +7C == 3 (25: solo derrapando, +D36 > 0); su colocacion es la accion -11 (4611D0 con la clase 16: anchos de
+    la tabla 5AFB58 + p6 x 16 entre las secciones de la accion -5, 7F24D0 / 7F24D4); 7 / 24 (45E8A0): clase [7F1C90]
+    (p6 = 9) golpeada (+3F8, +3FC == 8) menos las de la clase 6; 19 (461940): cajas 0x12 que caen. Alturas y matrices
+    sobre la carretera: 45DB70 (clases 0xA / 0x22 / 0x39 a la altura del suelo + [5B0084]; 5..9, 0xB, 0xE, 0x16 con la
+    orientacion de la carretera 45D950). Sprites 2C0000 / 2C0002 / 2C0006 (banco SPRANI 0x2C) y efecto 0xD6 al tocar.
 - Coches de la mision: parados (+1C4 = 0) y sin control (47E6C0: +C5C 0x40000 y 45D820 = 7F250C = 0) desde la
   accion -14 hasta la -17 (45D830: la velocidad de la carretera). SIMPLIFICADO: despues van a la velocidad de la
   carretera sin el camino Lead de 472450 (que en la DC los ponia a ~290 km/h por delante del jugador y no se podian
