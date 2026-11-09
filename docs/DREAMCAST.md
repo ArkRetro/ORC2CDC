@@ -56,7 +56,8 @@ El curso entero (15 etapas, 10 bifurcaciones y 5 metas, `CURSO.DAT`) se lee mien
 `demo/main.c`): un hilo lee el fichero del GD y lo coloca en el marco de la carrera (`modelo_coloca`) y el bucle sube
 las texturas al terminar. Nunca hay mas de dos a la vez: etapa + union hasta UNION_LIBERA (300 m) dentro de la union
 (y con la rama elegida), y union + etapa siguiente despues. Las etapas van siempre en el mismo hueco fijo de RAM (el
-tamano del mayor SEGnn.DAT: 6090 KB, METR) y la union en otro (el mayor BKkk.DAT: 1568 KB), reservados al arrancar.
+tamano del mayor SEGnn.DAT: 7832 KB, SEG13, desde la PVS) y la union en otro (el mayor BKkk.DAT: 1480 KB),
+reservados al arrancar. Fuera de la carrera el hueco de la union se presta (ver RAM del arranque y del menu, abajo).
 La ruta es una ventana: al soltar una etapa se quitan sus puntos (`ruta_recorta`) y el marco se recentra en el
 principio de la union (`curso_recentra`), asi que ni la RAM de la ruta ni las coordenadas crecen de etapa en etapa.
 
@@ -532,6 +533,76 @@ CAPE (`9`, `1`): 0 texturas rebajadas, ninguna fuera de la zona; lo libre medido
 la VRAM ocupada salvo la reserva): IMPE no cabe, el apuro echa el HUD (522 KB, aun sin dibujar), 26 texturas van
 rebajadas o grises (edificios borrosos), el HUD vuelve al dibujarse y la carrera llega a GOAL sin pararse.
 
+### RAM del arranque y del menu (2026-11-09)
+
+**Fallo** (recorrido completo por el menu, sin `PRUEBA_*`): (1) la pelicula de inicio no salia ("VIDEO MVATTR.VQV:
+sin memoria (anillo 0x0 de 384 KB ... RAM libre 235 KB)"); (2) las pantallas de coche, cambio y musica salian vacias
+("menu: pantalla 3/4/5 sin VRAM (libre 1949K ...)" con 1,9 MB de VRAM libres); (3) en la carrera no se dibujaba la
+carroceria del coche ("coche: ficha 9 fuera de la VRAM (la pide el menu)" y nunca se volvia a cargar). Las pruebas con
+`PRUEBA_AUTO` / `PRUEBA_FICHA` no pasan por la pelicula ni por el menu y no lo veian.
+
+**Causa: una sola, RAM.** No era VRAM. Lo residente fue creciendo hasta que el monton del arranque y del menu se quedo
+sin bloques grandes seguidos: los personajes (88803b4: CHR.DAT 177 KB + 76 KB de tablas; con el codigo de 4d90759 y
+los mismos datos la pelicula aun salia, con el anillo minimo de 512 KB; con el de 88803b4 ya no) y luego BO.DAT
+(d98608f, 74 KB). Medido en Flycast al arrancar (lineas temporales con `ram_kb` y `mallinfo`):
+
+| Paso | En uso (KB) | Libre (KB) |
+|---|---|---|
+| Programa y BSS (anillo de la musica 1 MB, etc.) | 90 | 14180 |
+| CHR.DAT, CURSO.DAT, huecos de etapa (7832) y union (1480), SEG00 en su hueco | 9622 | 4648 |
+| TRAFn.DAT (730), BO.DAT y la ruta (~770 con la holgura) | 11185 | 3085 |
+| texeles del trafico a la VRAM (`compacta_modelo`) | 10930 | 3341 |
+| coche (COCHE09 sin texeles) | 11301 | 2970 |
+| HUD.DAT entero (1211) | 12488 | 1782 |
+| musica, efectos, voces | 12589 | 1681 |
+| MENU.DAT (tablas: 974) y VMU | **13563** | **699** (235 en huecos del monton, ~464 seguidos arriba) |
+
+Con 699 KB libres en trozos: la pelicula pide 512 KB seguidos (y 192 KB de margen); `hudd_sube` de una pantalla del
+menu lee del GD sus sectores (100-400 KB seguidos: "Out of memory ... diff 352256") y devolvia -3, que el menu tomaba
+por falta de VRAM: a los 2 cuadros echaba el coche 3D (`menu_suelta_coche`, que no servia de nada) y a los 90 dejaba
+la pantalla vacia; al salir, `coche_carga` volvia a leer el COCHEnn.DAT entero (450-580 KB seguidos), fallaba sin
+avisar y la carrera salia sin carroceria (el piloto y la acompanante, que van aparte, si). Los dos "pvr_mem: ERROR --
+out of PVR memory" eran la busqueda a saltos de la zona del curso (`ar_reserva`) con la VRAM partida por eso.
+
+**Arreglo** (sin cambiar nada de lo que se ve):
+
+1. El hueco de la union (1480 KB) no se usa fuera de la carrera: se presta (`presta_union` / `union_prestable` en
+   `demo/main.c`: ni union en el ni lectura en marcha hacia el) al arrancar y en cada cuadro del menu, y se retira al
+   empezar la carrera, antes de `curso_reinicia`. Lo usan, uno cada vez y desde el hilo principal:
+   - las peliculas (`video_bufer`, comun/video.c): anillo de 1 MB y los dos de audio dentro (antes 512 KB del monton);
+   - las subidas del menu (`hudd_bufer`, comun/hud.c): los sectores leidos de MENU.DAT y los indices de las texturas
+     con paleta del HUD (en la carrera, sin prestamo, como antes: la pausa los pide al monton, 39 KB);
+   - `coche_carga`: el COCHEnn.DAT se lee en el hueco y solo lo que queda sin los texeles (300-400 KB) se copia al
+     monton (`compacta_modelo_de`; antes hacian falta los 450-580 KB del fichero entero seguidos). Si no cabe ni eso,
+     el coche no se queda en el hueco (error -5 y log).
+2. `curso_al_menu` suelta tambien los objetos de la union (`bo_quita`: hasta 360 KB de RAM de BOnn.DAT y su VRAM fuera
+   de la zona), que antes seguian ocupando en el menu hasta la carrera siguiente.
+3. El menu distingue la causa (`sube_err`: "sin RAM", "sin VRAM", "lectura del GD") y solo echa el coche 3D si lo que
+   falta es VRAM.
+4. Si la RAM no da para un BOnn.DAT en la carrera (los objetos animados de la union), no salen y la carrera sigue
+   ("BO: no se pudo leer"); antes `curso_paso` lo tomaba por la etapa siguiente y paraba el juego
+   ("No se pudo leer la etapa siguiente").
+
+Medido en Flycast (2026-11-09, recorrido completo por el menu con `nav.sh`: START y A en cada pantalla, coche por
+defecto del guardado de la VMU, ficha 13):
+
+| | Valor |
+|---|---|
+| RAM al arrancar (linea `RAM:` del log) | en uso 13563 KB, libre 699 KB (235-239 en huecos); hueco de la union prestado |
+| Pelicula de inicio | anillo de 1024 KB, precarga de 43 cuadros en 430 ms, sin faltas de audio |
+| Menu | todas las pantallas (titulo, principal, modo, coche, cambio, musica), ningun "sin RAM/VRAM" |
+| VRAM en el menu | 1968 KB libres tras el coche de arranque; 863 KB con el coche 3D (COCHE13) y las pantallas subidas |
+| VRAM en la carrera (PALM + BK00, COCHE13) | zona del curso 1344 KB, fuera 75 KB; 737 KB libres con la union |
+| RAM en la carrera | 552-720 KB libres (peor: BK09 + BKD + BO01); con el dirigible (BO11, 283 KB, `-DPRUEBA_BO=11`) 291 KB |
+| Otro coche por el menu tras abandonar una carrera (pausa, ABANDONAR) | COCHE14 leido en el hueco prestado; carrera con el 365 GTS/4 |
+
+VRAM del curso con los objetos de etapa de d98608f (pancarta CHECK POINT y carteles en cada SEGnn.DAT, +17-41 KB de
+texturas por etapa; `tools/vram.py`, COCHE06): peor BK08 / BK09 + IMPE 1127 KB en la zona (antes 1109), IMPE + BK13
+1033 (antes 1017). Medido (`-DPRUEBA_AUTO -DPRUEBA_FICHA=6 -DPRUEBA_NODO=9 -DPRUEBA_RAMA=0 -DPRUEBA_FIN=400 -DPRUEBA_V=250
+-DPRUEBA_SIN_TIEMPO -DDIAG_VTX`, dos carreras seguidas GHOS -> IMPE -> GOAL): zona 1312 KB; BK09 + IMPE **272 KB**
+libres (185 en la zona + 87; antes 290), IMPE + BK13 **366 KB** (279 + 87; antes 382), 0 texturas rebajadas,
+ninguna fuera de la zona salvo la del objeto de la union.
+
 ## 3. Otros riesgos de la consola real
 
 | Riesgo | Estado |
@@ -566,8 +637,9 @@ demas hipotesis no hacian falta para explicarlo, pero se han cubierto igual:
 | (d) CPU | El bucle se para en `pvr_wait_ready` cada cuadro; el lector duerme cuando el anillo esta lleno. Musica parada y sin leer (`musica_para`, `musica_pausa_lectura(1)`) durante la pelicula. |
 | (e) primer cuadro | Precarga de 1,5 s (o el anillo lleno) pintando en negro; con tope de 10 s. |
 
-RAM: al arrancar la demo solo quedan ~1,1 MB libres (los huecos de etapa y union ya estan reservados): anillo de
-video de 512 KB (lo que quepa dejando 192 KB libres, hasta 1 MB) + 2 x 64 KB de audio. VRAM: 2 texturas de 18 KB.
+RAM: desde 2026-11-09 los anillos van en el hueco de la union prestado (`video_bufer`, ver RAM del arranque y del
+menu): anillo de video de 1 MB (~2,3 s) + 2 x 64 KB de audio, sin pedir nada al monton. Sin bufer prestado, como
+antes: lo que quepa en el monton dejando 192 KB libres (512 KB-1 MB). VRAM: 2 texturas de 18 KB.
 
 Diagnostico para el probador (como `pvr_colgado`): si no llega un cuadro nuevo en 1 s, o la PowerVR no termina 20
 cuadros seguidos, la pelicula se para, escribe sobre la imagen (cuadros leidos/vistos/reloj, KB/s del GD leyendo y de

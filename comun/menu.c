@@ -288,12 +288,13 @@ static void an_dibuja(const anim_t *a, float dx, float alfa, float z, int fondo)
 }
 
 /* ---------------------------------------------------------------- VRAM */
+static int sube_err;                                        /* lo ultimo de hudd_sube: -2 VRAM, -3 RAM, -4 GD */
 static int sube_p(int p)
 {
     const m_pant_t *q = pan + pidx[p];
     if (pidx[p] < 0) return -1;
     if (!cargada[p]) {
-        if (hudd_sube(md, q->t0, q->nt)) return -1;
+        if ((sube_err = hudd_sube(md, q->t0, q->nt))) return -1;
         cargada[p] = 1;
     }
     edad[p] = ++reloj;
@@ -309,6 +310,7 @@ static int orden_v[NV];                                     /* pantallas de mas 
 static int asegura(int mascara)
 {
     int i, p, q, v, ok = 1;
+    sube_err = 0;
     for (i = 0; i < NV; i++) {
         p = orden_v[i];
         if (!(mascara & (1 << p)) || pidx[p] < 0) continue;
@@ -318,7 +320,7 @@ static int asegura(int mascara)
                 if (cargada[q] && !(mascara & (1 << q)) && (v < 0 || edad[q] < edad[v])) v = q;
             /* con holgura (la VRAM libre puede estar partida: un intento fallido avisa "out of PVR memory") */
             if (pvr_mem_available() >= pan[pidx[p]].vram + (v < 0 ? 16384 : HOLGURA) && !sube_p(p)) break;
-            if (v < 0) { if (!hudd_pendiente() && !sube_p(p)) break; ok = 0; break; }
+            if (v < 0) { if (!hudd_pendiente() && !sube_p(p)) break; ok = 0; if (!sube_err) sube_err = -2; break; }
             baja_p(v);
         }
     }
@@ -760,11 +762,13 @@ int menu_paso(unsigned n)
             cargando = 0;
             if (t_carga > 2) dbglog(DBG_INFO, "menu: pantalla %d lista tras %d cuadros\n", pant, t_carga);
         }
-        else if (++t_carga == T_SUELTA_COCHE && menu_suelta_coche) menu_suelta_coche();   /* el coche 3D parte la VRAM */
+        else if (++t_carga == T_SUELTA_COCHE && menu_suelta_coche && sube_err == -2) menu_suelta_coche();   /* el coche 3D
+                                                               parte la VRAM (sin RAM o con el GD fallando no sirve) */
         else if (t_carga == T_REORDENA) { int p; for (p = 0; p < NV; p++) baja_p(p); }   /* y si aun no: todo de nuevo */
         else if (t_carga > T_CARGA_MAX) {
             cargando = 0;
-            dbglog(DBG_INFO, "menu: pantalla %d sin VRAM (libre %uK, menu %uK)\n", pant,
+            dbglog(DBG_INFO, "menu: pantalla %d sin %s (VRAM libre %uK, menu %uK)\n", pant,
+                   sube_err == -3 ? "RAM" : sube_err == -4 ? "lectura del GD" : "VRAM",
                    (unsigned)(pvr_mem_available() >> 10), menu_vram() >> 10);
         }
         else return MENU_SIGUE;

@@ -1,5 +1,6 @@
 #ifndef VIDEO_H
 #define VIDEO_H
+#include <stdint.h>
 /* Peliculas del original (MV.PS2) convertidas a texturas VQ de la PowerVR con audio ADPCM (tools/conv_video.py,
    ficheros .VQV). Ver video.c. Necesita la PowerVR y snd_stream ya iniciados (pvr_init, musica_inicia). */
 
@@ -12,6 +13,11 @@ int video_reproduce(const char *nombre);
    (MVATTR.VQV); START salta las dos. Devuelve 1 si se ha pulsado START (o una se ha atascado), 0 si han acabado, -1 si
    no hay peliculas. */
 int video_atraccion(void);
+
+/* Bufer de RAM (alineado a 32) para los anillos de la pelicula: si tiene 640 KB o mas, video_reproduce no pide RAM
+   (el anillo del video, hasta 1 MB, y detras los dos de audio de 64 KB). NULL: los pide al monton como antes. Quien lo
+   presta no debe tocarlo mientras dure video_reproduce / video_atraccion / video_titulo. */
+void video_bufer(void *p, uint32_t tam);
 
 /* Gancho de demo/main.c antes del primer titulo: MVATTR.VQV y luego MVTS.VQV (START o un atasco: al titulo). */
 void video_titulo(void);

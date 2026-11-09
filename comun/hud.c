@@ -26,6 +26,22 @@ struct hud_dat {
 };
 
 static hud_dat_t *H, *hud_principal;                       /* H: el fichero que se esta dibujando */
+
+/* Bufer de RAM prestado (hudd_bufer) para lo temporal de las subidas: los sectores leidos del GD de un fichero parcial
+   (MENU.DAT: 100-400 KB por pantalla) y los indices de las texturas con paleta. Sin el (o si no cabe) se piden al
+   monton como antes. demo/main.c presta el hueco de la union mientras no hay carrera (menus): el monton del menu ya no
+   tiene esos bloques seguidos (docs/DREAMCAST.md, RAM del menu) */
+static uint8_t *pres; static uint32_t pres_tam; static int pres_ocupado;
+void hudd_bufer(void *p, uint32_t tam)
+{
+    pres = p && !((uintptr_t)p & 31) ? (uint8_t *)p : NULL; pres_tam = pres ? tam : 0; pres_ocupado = 0;
+}
+static uint8_t *toma(uint32_t n)
+{
+    if (pres && !pres_ocupado && n <= pres_tam) { pres_ocupado = 1; return pres; }
+    return memalign(32, n);
+}
+static void deja(uint8_t *b) { if (b && b == pres) pres_ocupado = 0; else free(b); }
 static int ult_tex = -1, modo_fondo;
 static uint32_t tinte = 0xFFFFFF;                           /* color que multiplica las piezas (textos) */
 
@@ -242,11 +258,11 @@ static int sube_tex(hud_dat_t *h, int i, const uint8_t *d, pvr_ptr_t v)
 {
     int16_t p = h->pal ? h->pal[i] : -1; uint32_t k, m = h->tex[i].w * h->tex[i].h, tam = tam_vram(h, i); uint8_t *o;
     const uint16_t *t = (const uint16_t *)d;
-    if (p < 0 || !(o = memalign(32, tam))) { pvr_txr_load(d, v, h->tex[i].tam); return 0; }
+    if (p < 0 || !(o = toma(tam))) { pvr_txr_load(d, v, h->tex[i].tam); return 0; }
     if (p & PAL_4) for (k = 0; k < m; k += 2) o[k >> 1] = pal_idx(p, t[k]) | pal_idx(p, t[k + 1]) << 4;   /* par: bajo */
     else for (k = 0; k < m; k++) o[k] = pal_idx(p, t[k]);  /* (twiddled: el mismo orden de texeles que la de 16 bits) */
     pvr_txr_load(o, v, tam);
-    free(o);
+    deja(o);
     return 1;
 }
 
@@ -280,17 +296,17 @@ int hudd_sube(hud_dat_t *h, int t0, int nt)
     if (hi <= lo) return 0;
     if (h->meta) {                                          /* del GD: los sectores que cubren esas texturas */
         s0 = lo / 2048; ns = (hi + 2047) / 2048 - s0;
-        if (!(b = memalign(32, ns * 2048))) return -3;
-        if (lee_sect(h->lba + s0, ns, b)) { free(b); return -4; }
+        if (!(b = toma(ns * 2048))) return -3;
+        if (lee_sect(h->lba + s0, ns, b)) { deja(b); return -4; }
     }
     for (i = t0; i < fin; i++) {
         if (!h->usada[i] || h->vtex[i]) continue;
-        if (!(h->vtex[i] = pvr_mem_malloc(tam_vram(h, i)))) { free(b); hudd_baja(h, t0, nt); return -2; }
+        if (!(h->vtex[i] = pvr_mem_malloc(tam_vram(h, i)))) { deja(b); hudd_baja(h, t0, nt); return -2; }
         if (h->con_pal) h->con_pal[i] = sube_tex(h, i, h->meta ? b + (h->tex[i].off - s0 * 2048) : h->dat + h->tex[i].off, h->vtex[i]);
         else pvr_txr_load(h->meta ? b + (h->tex[i].off - s0 * 2048) : h->dat + h->tex[i].off, h->vtex[i], h->tex[i].tam);
         cabeceras(h, i);
     }
-    free(b);
+    deja(b);
     return 0;
 }
 

@@ -23,7 +23,11 @@ uint32_t hud_suelta_quietas(uint32_t cuadros);           /* apuro de VRAM: echa 
 typedef struct hud_dat hud_dat_t;
 /* parcial = 1: en la RAM solo las tablas; las texturas se leen del GD al subirlas (ficheros grandes) */
 hud_dat_t *hudd_abre(const char *fich, int modelo, int parcial);
-int hudd_sube(hud_dat_t *h, int t0, int nt);             /* texturas [t0, t0+nt) a la VRAM (nt < 0: todas); 0 bien */
+int hudd_sube(hud_dat_t *h, int t0, int nt);             /* texturas [t0, t0+nt) a la VRAM (nt < 0: todas); 0 bien
+                                                            (-2 sin VRAM, -3 sin RAM, -4 fallo del GD) */
+/* bufer de RAM (alineado a 32) para lo temporal de hudd_sube (sectores leidos de un fichero parcial, indices de las
+   paletas) o NULL; quien lo presta no lo toca mientras este puesto */
+void hudd_bufer(void *p, uint32_t tam);
 void hudd_baja(hud_dat_t *h, int t0, int nt);
 int hudd_uso(const hud_dat_t *h, const char *nombre);    /* indice del uso o -1 */
 int hudd_cuadros(const hud_dat_t *h, int uso);           /* cuadros del grupo del uso */

@@ -62,6 +62,17 @@ static cab_t cab;
 static const char *nombre_act = "";
 static uint32_t lba0, R, t_idx;
 static uint8_t *anillo, *aud[2];
+static uint8_t *prestado; static uint32_t prestado_tam;   /* video_bufer: anillo y audio ahi, sin pedir RAM */
+static int en_prestado;                                   /* los anillos de esta pelicula estan en el prestado */
+void video_bufer(void *p, uint32_t tam)
+{
+    prestado = p && !((uintptr_t)p & 31) ? (uint8_t *)p : NULL; prestado_tam = prestado ? tam : 0;
+}
+static void suelta_anillos(void)
+{
+    if (!en_prestado) { free(anillo); free(aud[0]); free(aud[1]); }
+    anillo = aud[0] = aud[1] = NULL; en_prestado = 0;
+}
 static uint8_t libro[2048] __attribute__((aligned(32)));
 static struct { uint32_t off, tam, libro; } cola[NCOLA];
 /* compartido con el hilo lector: bytes del fichero en el anillo, primer byte que aun hace falta, siguiente registro
@@ -474,11 +485,16 @@ int video_reproduce(const char *nombre)
         dbglog(DBG_ERROR, "VIDEO %s: no es un .VQV version 2\n", nombre);
         return -1;
     }
-    /* el anillo: lo que quepa dejando 192 KB libres (pilas de los hilos, KallistiOS), de 512 KB a 1 MB (1 MB son
-       unos 2,3 s). En el arranque de la demo quedan ~1,1 MB (los huecos de la etapa y la union ya estan reservados):
-       768 KB, ~1,7 s */
-    aud[0] = memalign(32, AUDIO_ANILLO); aud[1] = memalign(32, AUDIO_ANILLO);
-    {
+    /* el anillo: en el bufer que preste quien llama (video_bufer; demo/main.c presta el hueco de la union, que fuera
+       de la carrera no se usa: 1 MB, ~2,3 s, y el audio detras) o, sin el, lo que quepa en el monton dejando 192 KB
+       libres (pilas de los hilos, KallistiOS), de 512 KB a 1 MB. Desde los personajes (CHR.DAT) el monton del
+       arranque ya no tiene 512 KB seguidos: sin el prestamo no hay pelicula (docs/DREAMCAST.md, RAM del menu) */
+    if (prestado && prestado_tam >= 4 * BLOQUE + 2 * AUDIO_ANILLO) {   /* bufer prestado (video_bufer): todo en el */
+        uint32_t cabe = (prestado_tam - 2 * AUDIO_ANILLO) / BLOQUE;
+        R = (cabe > 8 ? 8 : cabe) * BLOQUE;
+        anillo = prestado; aud[0] = prestado + R; aud[1] = aud[0] + AUDIO_ANILLO; en_prestado = 1;
+    } else {
+        aud[0] = memalign(32, AUDIO_ANILLO); aud[1] = memalign(32, AUDIO_ANILLO);
         struct mallinfo mi = mallinfo();
         uint32_t cabe = mi.fordblks > 192 * 1024 ? (mi.fordblks - 192 * 1024) / BLOQUE : 0;
         R = (cabe > 8 ? 8 : cabe < 4 ? 4 : cabe) * BLOQUE;
@@ -492,7 +508,7 @@ int video_reproduce(const char *nombre)
                tex[1], (unsigned)(mi.fordblks >> 10), (unsigned)(mi.fordblks >> 10), (unsigned)(pvr_mem_available() >> 10));
         if (tex[0]) pvr_mem_free(tex[0]);
         if (tex[1]) pvr_mem_free(tex[1]);
-        free(anillo); free(aud[0]); free(aud[1]); anillo = aud[0] = aud[1] = NULL;
+        suelta_anillos();
         return -1;
     }
     for (i = 0; i < 2; i++) memset(aud[i], 0x80, AUDIO_ANILLO);
@@ -522,7 +538,7 @@ int video_reproduce(const char *nombre)
     vigila = 0;
     if (vig) thd_join(vig, NULL);
     pvr_mem_free(tex[0]); pvr_mem_free(tex[1]);
-    free(anillo); free(aud[0]); free(aud[1]); anillo = aud[0] = aud[1] = NULL;
+    suelta_anillos();
     diag_registra(r == 1 ? "saltado" : r == 2 ? "atascado" : "fin");
     return r;
 }
