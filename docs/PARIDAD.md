@@ -1297,8 +1297,10 @@ peticion 14 (escoltas 45B5B0, +324 = 6: carrera contra ellos), que no esta en la
   tiempo no se acaba; solo para llegar a la meta): PALM 237 corazones (nota media 5) -> ALPI 0 -> FORE +20 de bono ->
   SNOW 872 -> IMPE, `INFARTO: GOAL con 1129 corazones`. Observado: la peticion tipo 0 de FORE (mision 8, 575..615) no
   acaba en su etapa (la union empieza antes de la posicion 615 en la DC) y sigue en la siguiente, como haria el codigo
-  del original (464350 no la cierra al cambiar de etapa), donde acumula 281 corazones de resultado: SIN COMPROBAR si en
-  el original la etapa llega a 615 posiciones (m_pos de CURSO.DAT).
+  del original (464350 no la cierra al cambiar de etapa), donde acumula 281 corazones de resultado. COMPROBADO con los
+  datos del original: la posicion de carretera de cada poligono de coli_CS_FORE (seccion 5 de COLI0200, la tabla que
+  lee 43F370 para car+0x64) llega como mucho a 610 (PALM 590, LAKE 676, ALPI 655, SNOW 680), asi que en el original
+  esa peticion tampoco puede acabar en FORE y sigue en la etapa siguiente igual que en la DC.
 
 **CONTRARRELOJ** verificado en E: `MODO: variante 7, dificultad 0, fila de tiempos 2`, sin un solo coche de trafico,
 union y ruta leidas como en el OutRun. GOAL (menu real con el piloto y `-DPRUEBA_SIN_TIEMPO`, 2026-11-09): PALM -> ALPI
