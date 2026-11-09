@@ -91,6 +91,57 @@ def carriles_soo(seg):
         if not any(len(v) == len(w) and np.abs(v - w).max() < 0.01 for w in ls): ls.append(v)
     return ls
 
+# Carriles del original: las tablas de muestras que lee 470120 para el trafico (PC: 0x804480, 6 bloques de 0x1030,
+# ficheros "\\OCP\\ocp" + grupo + "_stg" + curso + "_othcar_01".."_06" + "_tgt.sz" de 44C680). En SLES-53998 van en el
+# segmento de la etapa: 8 entradas 'SO' + u16 numero de muestras (las 6 primeras, una por carril, con una muestra por
+# fila de la etapa; las 2 ultimas, una muestra menos, sin usar aqui); cada muestra (x, z, y) en int16, con el bit 15 de
+# y = "no hay carril" (470120 devuelve 0: 6 bytes, K62818C x K5A29EC = 1000 / 4096 m por unidad, no 1/4: medido contra
+# la colision de la etapa y de la union).
+SO_ESCALA = 1000.0 / 4096.0
+
+def tablas_carriles(seg):
+    """los 6 carriles del original de la etapa: arrays (n, 3) de x, z (m) y 1 si la muestra es valida"""
+    ls = []
+    for h, o, s in seg.ent:
+        d = bytes(seg.m[o:o + s])
+        if d[:2] != b'SO' or s < 4: continue
+        n = struct.unpack_from('<H', d, 2)[0]
+        if 4 + 6 * n > s: continue
+        v = np.frombuffer(d[4:4 + 6 * n], '<u2').reshape(-1, 3)
+        ls.append(np.stack([v[:, 0].astype(np.int16) * SO_ESCALA, v[:, 1].astype(np.int16) * SO_ESCALA,
+                            (v[:, 2] & 0x8000) == 0], 1))
+    if len(ls) < NCARRIL: return None
+    n0 = len(ls[0]); ls = [v for v in ls if len(v) == n0]
+    return ls[:NCARRIL] if len(ls) >= NCARRIL else None
+
+def desvios_carriles(ls, cam, lejos=60.0):
+    """desvio lateral (a la derecha de la ruta) de cada carril (x, z, valido) donde lo corta la perpendicular a la ruta
+    en cada punto, solo con las muestras validas; NaN si no lo corta a menos de lejos m (en los extremos de la etapa la
+    perpendicular puede cortar otra parte del carril, lejos)"""
+    t = np.gradient(cam, axis=0); t[:, 1] = 0; t /= np.linalg.norm(t, axis=1, keepdims=True) + 1e-9
+    der = np.stack([-t[:, 2], t[:, 0]], 1); res = np.full((len(cam), len(ls)), np.nan)
+    for k, v in enumerate(ls):
+        ok = v[:, 2] > 0.5 if v.shape[1] > 2 else np.ones(len(v), bool)
+        for i, c in enumerate(cam):
+            q = v[:, :2] - c[[0, 2]]; a = q @ t[i, [0, 2]]
+            s = np.nonzero((np.sign(a[:-1]) != np.sign(a[1:])) & ok[:-1] & ok[1:])[0]
+            if not len(s): continue
+            j = s[np.argmin(np.abs(q[s] @ der[i]))]                 # el cruce mas cercano a la ruta
+            f = a[j] / (a[j] - a[j + 1]) if a[j] != a[j + 1] else 0.0
+            x = (q[j] + f * (q[j + 1] - q[j])) @ der[i]
+            if abs(x) <= lejos: res[i, k] = x
+    return res
+
+def carriles_originales(ls, cam):
+    """las NCARRIL columnas de carriles de la ruta a partir de las tablas del original (desvios_carriles); donde un
+    carril no existe o la perpendicular no lo corta, el valor del punto valido mas cercano (sin suavizar)"""
+    car = desvios_carriles(ls[:NCARRIL], cam)
+    for k in range(NCARRIL):
+        c = car[:, k]; ok = np.isfinite(c)
+        if not ok.any(): car[:, k] = (k - (NCARRIL - 1) / 2) * 4.0; continue
+        idx = np.arange(len(c)); car[:, k] = np.interp(idx, idx[ok], c[ok])
+    return car
+
 def recorrido_soo(seg):
     """ruta = centro de los carriles de la etapa (SOO), cada 4 m y suavizada; None si no hay carriles"""
     ls = carriles_soo(seg)
@@ -546,7 +597,8 @@ def convierte(seg, n, sal, mundo=None, cielo=True, luz=None, objetos=None):
     cam = alarga_a_la_colision(seg, cam)
     cam, an, car = ajusta_al_asfalto(seg, cam)                 # centro, bordes y carriles: los del asfalto
     if an is None: an = anchos(seg, cam); car = np.zeros((len(cam), NCARRIL))
-    car = carriles_uniformes(an, car)                          # donde no se reconocieron carriles
+    ls = tablas_carriles(seg)                                  # los del original; si no, repartidos por el asfalto
+    car = carriles_originales(ls, cam) if ls is not None else carriles_uniformes(an, car)
     sup = superficies(seg, cam, an)
     if sup is None:                                            # sin colision: el limite es el borde del asfalto
         ban = np.zeros((len(cam), NBANDA, 2)); ban[:, :, 0] = an[:, 1:2]; ban[:, :, 1] = 1; ban[:, 0, 0] = -an[:, 0]

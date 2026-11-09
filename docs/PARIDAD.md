@@ -597,6 +597,31 @@ ahora; el original tambien los hace (el de detras le alcanza y 471680 le aparta)
 siguiente (471680 hacia un lado y 4718D0 lo anula si es el del que le alcanza) no mueven el coche (t = 0). Arranque real
 con el menu (nav.sh): video, menus y carrera con trafico, sin cambios.
 
+### Carriles de la ruta: los del original (2026-11-09)
+
+Despues del cambio anterior quedaban vaivenes de 5-7 m al final de las uniones: los carriles de la ruta eran
+inventados. tools/conv_tramo.py los repartia cada ~3,7 m por la anchura del asfalto (ajusta_al_asfalto) en todas las
+etapas, y conv_union.py igual en las uniones (carriles_uniformes); la lectura de los SOO de la etapa (carriles_soo) solo
+reconocia la cabecera 'SOO\x02' (5 de 66 segmentos) y ya no se usaba para los carriles.
+
+| Pieza | Original | Antes | Ahora | Certeza |
+|---|---|---|---|---|
+| Tablas | 470120 lee muestras de 6 bytes (x, z, y; bit 15 de y = sin carril) a 0x804480 (etapa, 6 carriles x 0x1030) y 0x80A670 (union, 12 carriles x 0x70C), escala K62818C x K5A29EC = 1000 / 4096 m; ficheros "\\OCP\\ocp" grupo "_stg" / "_bra" curso "_othcar_01.._12_tgt.sz" (44C680). En SLES-53998: en cada segmento de STAGE.PS2 8 entradas 'SO' + u16 n (6 de n muestras, una por fila, y 2 de n - 1); en BK.PS2 las entradas 43..102 sin nombre: 12 de 242 muestras (bifurcacion, dos veces) y 12 de 86 (meta, tres veces) | carriles por la anchura del asfalto | conv_tramo.tablas_carriles / carriles_originales y conv_union.tablas_so: el corte de cada carril con la perpendicular a la ruta en cada punto | CONFIRMADO (escala: la media de los carriles al final de la rama da x = -1207,5 frente a -1207,6 de la colision; en la etapa 0 el /4 de antes daba 2,4 % de mas) |
+| Bifurcacion | carriles 0..2 por la rama izquierda y 3..5 por la derecha desde el principio; 6..8 / 9..11 solo en las ~56 ultimas filas; 46FE70 al pasar a la etapa: izquierda 0..2 -> 3..5 y 6..8 -> 0..2, derecha 3..5 -> 0..2 y 9..11 -> 3..5 | el mismo numero de carril al pasar (con los carriles del asfalto no se notaba tanto) | ruta de cada rama con los carriles 0..5; al pasar a la etapa el cambio de 46FE70 (trs_fin; el punto de mira al otro lado ya con el carril nuevo; el ultimo tramo de ruta, que mezcla los dos, no se usa); los coches de la otra rama se cierran al salirse de la calzada (en el original siguen por su rama: SIMPLIFICADO); al elegir la derecha guardan su desvio | CONFIRMADO (46FE70, 470120); el cierre, SIMPLIFICADO |
+| Coche nuevo en la union | 478640: contador de 12 llevado al lado del jugador, 14 de 16 a 6..8 / 9..11 (con 46CDA0 vuelven a 0..2 / 3..5 donde no hay muestras), mascaras propias del +0xB | 478430 (siempre el carril menos cargado: con la rama derecha, siempre uno de la izquierda) | traf_carril_478640 (sin 6..11: SIMPLIFICADO) | CONFIRMADO |
+| Punto de mira | de 2 a 3 filas segun la fraccion de la suya | 2,5 filas fijas | (3 - fraccion) filas | CONFIRMADO |
+| Jugador | - | salida en el carril 4, grua al carril mas cercano y piloto de pruebas por los carriles de la ruta | por "carriles del asfalto" (cada 3,7 m sin la mediana): la salida sigue en el mismo sitio (5 m dentro del borde derecho del asfalto, 11,5 m en la etapa 0); los carriles del trafico del original en la primera etapa van todos por la otra calzada | SUPUESTO (el sitio de salida del original no se ha localizado) |
+
+Datos: `tools/conv_union.py tu.iso datos/ --solo-carriles` cambia solo las columnas de carriles de la ruta de
+BKnn.DAT, BKD.DAT y SEGnn.DAT ya convertidos (sin volver a convertir los modelos). Medido en Flycast (`-DPRUEBA_AUTO
+-DDIAG_LAT`, rama izquierda y `-DPRUEBA_RAMA=1`): al final de la union el carril (marco de la ruta) se movia 5-7 m en
+3-4 filas y los coches con el; ahora la posicion en el mundo (`LAT` lleva x, z) solo se desvia ~0,3 m en el paso a la
+etapa (aceleracion lateral maxima 0,17 m/cuadro^2; en todo el recorrido, 1-8 casos por encima de 0,08, frente a las
+curvas normales de 0,03-0,06). PENDIENTE: la ruta de la etapa 0..2 sale del SOO con la escala de 1/4 (recorrido_soo) y
+el centro de la ruta oscila al principio de las etapas (en el marco de la ruta el carril se mueve, en el mundo no);
+los carriles 6..11 de la union; en algunas etapas (5, 13) la anchura del asfalto de la ruta no cubre los carriles del
+original (el limite de la colision si).
+
 ### Golpeados: parpadeo y cierre (2026-11-09)
 
 Queja del probador: al chocar, el coche "parece sentir el choque, difuminarse y desaparecer". En el original no hay

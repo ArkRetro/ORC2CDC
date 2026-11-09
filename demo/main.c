@@ -1270,6 +1270,7 @@ static void coche_coloca(coche_t *c)
    4787E0) mas los de los puntos fijos (478B90), en 24 sucesos; 16 plazas cubren el curso (el TA lo reparte ta_cabe) */
 #define NTRAF 16
 #define TR_JUG NTRAF                                            /* el jugador en la lista de coches de la IA */
+static float trs_fin = -1.0f; static int trs_rama;            /* final de la union y rama (tr_carril_tras) */
 /* Campos del original (car work del PC): b08 desplazamiento lateral respecto al centro del carril (m del original:
    4 m = un carril, + hacia el carril siguiente), b14/b18 cuadros que faltan / totales del cambio de carril, dir su
    sentido, b58 deriva tras el golpe (0xB / 0xC), b60 cuadros de recuperacion, b64 cuadros sin choques, b6c golpeado;
@@ -1280,7 +1281,7 @@ typedef struct { coche_t c; int carril, modelo, destino; float v_des;
                  float t_recup, wa[3]; int d22;                 /* +2F8, pose del cuadro anterior (mundo de or2), +D22 */
                  float b08; int b14, b18, dir, b58, b60, b64, b6c, b62, b53, c5c1, n2f4;
                  int pt_marca, b72, color, ha;                  /* puntuacion: +C5C (PT_*) y +B72 (rebufo reciente); ha: INFARTO */
-                 int toca; float gv[2]; } trafico_t;             /* toca: +4 0x10000 / +DD4 (el que le toco, TR_JUG el jugador); gv: +20 */
+                 int toca; float gv[2], gth; } trafico_t;             /* toca: +4 0x10000 / +DD4 (el que le toco, TR_JUG el jugador); gv: +20 en el marco de la ruta en gth */
 static trafico_t traf[NTRAF];
 static int bo_toca_coche, bo_roce;                              /* +4 0x10000 / 0x400000 del jugador en el paso (44EDE0) */
 /* +C5C del coche para la puntuacion (4F2860): 0x40 ya adelantado, 0x400000 tocado (puntos a la mitad), 0x800000
@@ -1411,14 +1412,28 @@ static int carril_cerca(float s, float x)
     for (k = 0; k < NCARRIL; k++) { float e = fabsf(carril_x(s, k) - x); if (e < d) { d = e; m = k; } }
     return m;
 }
+/* "carriles" del asfalto para el jugador (grua y piloto de pruebas): cada 3,7 m de borde a borde del asfalto, sin los
+   que caen en un muro entre calzadas; no son los del trafico (carril_x, los del original) */
+#define NASF 12
+static int asfalto_carriles(float s, float *xs)
+{
+    float p[3], th, iz, de, x, xa, xb; int n = 0;
+    ruta_en(s, p, &th, &iz, &de);
+    for (x = -iz + 1.85f; x <= de - 1.85f + 0.01f && n < NASF; x += 3.7f)
+        if (!muro_interior(s, x, 1.0f, &xa, &xb)) xs[n++] = x;
+    if (!n) xs[n++] = 0.5f * (de - iz);
+    return n;
+}
 /* el carril k esta libre entre s-atras y s+delante (sin contar al propio coche) */
 static int carril_libre(const trafico_t *yo_t, int k, float s, float atras, float delante)
 {
     int i;
     for (i = 0; i < NTRAF; i++) {
         const trafico_t *t = traf + i; float d;
-        if (t == yo_t) continue;
-        if (t->carril != k && t->destino != k) continue;
+        if (t == yo_t || t->carril < 0) continue;
+        /* el sitio, no el numero de carril: en los carriles del original hay centros repetidos (carriles que no existen
+           en ese tramo de la etapa van por el de al lado) */
+        if (t->carril != k && t->destino != k && fabsf(t->c.x - carril_x(s, k)) > 2.0f) continue;
         d = t->c.s - s;
         if (d > -atras && d < delante) return 0;
     }
@@ -1452,7 +1467,7 @@ static void traf_nace(trafico_t *t, float s)
     t->golpe = -1; t->t_golpe = 0; t->vlat = 0; t->t_recup = 0; t->d22 = 0; memset(t->c.pose_t, 0, 12); memset(t->c.pose_r, 0, 12);
     t->b08 = 0; t->b14 = t->b18 = 0; t->dir = 0; t->b58 = t->b60 = t->b64 = t->b6c = 0;   /* 4704A0 */
     t->b62 = 60; t->b53 = 0; t->c5c1 = 0; t->n2f4 = 0;          /* 4704A0 (PS2 0x1ec44c): +B62 = 60 salvo variante 4 */
-    t->pt_marca = 0; t->b72 = 0; t->toca = -1; t->gv[0] = t->c.v / 60.0f; t->gv[1] = 0;
+    t->pt_marca = 0; t->b72 = 0; t->toca = -1; t->gv[0] = t->c.v / 60.0f; t->gv[1] = 0; t->gth = 1e9f;
     t->c.x = carril_x(s, t->carril); coche_coloca(&t->c);
     traf_pose_ant(t);
 }
@@ -1471,8 +1486,8 @@ static void traf_nace(trafico_t *t, float s)
      union entre su posicion 120 y el final - 15); carril de 478430 (el menos cargado por los pesos de clase, sin los
      prohibidos; a igualdad, el de menos aperturas que no este junto al de mas); modelo de la lista de 7 de 46CE30
      en orden; color, el siguiente del modelo; velocidad, la del registro de velocidad del sitio (4F0030 +0xC).
-   No hay coches al empezar salvo los de los puntos fijos. SIMPLIFICADO: 46CDA0 (carriles sin datos) y 478640 en la
-   union (el carril va por un contador de 12) no se portan: en la union tambien 478430; los puntos fijos de coches
+   No hay coches al empezar salvo los de los puntos fijos. SIMPLIFICADO: 46CDA0 (carriles sin datos) no se porta; en
+   la union el carril es el de 478640 (traf_carril_478640); los puntos fijos de coches
    de carreras (modelos 0..29, funcion 0x55) y de modelos que la demo no tiene (39..43: camiones y autobuses) cuentan
    como abiertos (800D50, usado) sin coche; 43EB60 (sitio ocupado) es la prueba de 25 m de carril_libre. */
 #define TR_CIERRA_ATRAS 2
@@ -1562,6 +1577,30 @@ static int traf_carril_478430(const uint8_t *rec)
     for (k = 0; k < NCARRIL; k++) if (c[k] == mn && traf_hist[k] < low) { b = k; low = traf_hist[k]; }
     return b;
 }
+/* 478640 con el coche nuevo en la union: un contador de 12 carriles (800D38) llevado al lado del jugador (+60: 0x64
+   carriles 0..2, 0x65 3..5); 14 de cada 16 (803744) a los carriles 6..8 / 9..11 del final de la rama, con las mascaras
+   del registro de mask64 / mask65; despues 46CDA0: el carril de la union que no tiene muestras en esa fila pasa al de
+   +6. La demo no tiene los carriles 6..11 (SIMPLIFICADO: siempre sin muestras, lo que el original da en todas las filas
+   salvo las ~56 ultimas de cada rama): quedan los 0..2 / 3..5. -1: prohibido (no abre) */
+static int traf_carril_478640(const uint8_t *rec)
+{
+    static int cl, al;
+    static const uint8_t m64[9] = { 4, 2, 1, 0, 0, 0, 0x20, 0x10, 8 }, m65[9] = { 1, 2, 4, 0, 0, 0, 8, 0x10, 0x20 };
+    int l = cl, e, izq = carril_cerca(yo.s, yo.x) < 3;
+    cl = cl + 1 >= 12 ? 0 : cl + 1; al = (al + 1) & 0xff;
+    if (izq) {
+        if ((l >= 3 && l <= 5) || (l >= 9 && l <= 11)) l -= 3;
+        if ((al & 0xf) < 0xe && l <= 2) l += 6;
+        e = l;
+        if (e > 8 || !m64[e] || (rec && (rec[11] & m64[e]))) return -1;
+    } else {
+        if ((l >= 0 && l <= 2) || (l >= 6 && l <= 8)) l += 3;
+        if ((al & 0xf) < 0xe && l <= 5) l += 6;
+        e = l - 3;
+        if (e < 0 || e > 8 || !m65[e] || (rec && (rec[11] & m65[e]))) return -1;
+    }
+    return l >= 6 ? l - 6 : l;                                  /* 46CDA0 */
+}
 static int traf_modelo_de(int id)                               /* modelo del juego -> TRAFn.DAT (-1: no esta) */
 {
     int m;
@@ -1621,7 +1660,10 @@ static void traf_azar(int en_union, int nodo, int pos, const uint8_t *rec)
     fin = (int)(((s_sig >= 0 ? s_sig : longitud) - s_union) / m_pos);
     s = yo.s + (en_union && pos >= 0x78 && pos <= fin - 0xF ? TR_APARECE_UNION : TR_APARECE) * m_pos;
     if (s >= longitud - 20.0f) return;
-    if ((l = traf_carril_478430(rec)) < 0) return;
+    {   /* 478640: en la union, el contador; si no, 478430 (sin carril: se prueba en el cuadro siguiente) */
+        int nd, ps;
+        if ((l = traf_lugar(s, &nd, &ps) ? traf_carril_478640(rec) : traf_carril_478430(rec)) < 0) return;
+    }
     if (!carril_libre(NULL, l, s, 25.0f, 25.0f)) return;        /* 43EB60 */
     traf_mcnt = (traf_mcnt + 1) % 7;                            /* 46CE30: clase 4, la lista de 7 en orden */
     if ((m = traf_modelo_de(tap_modelos[traf_mcnt])) < 0) m = 0;
@@ -1644,7 +1686,7 @@ static void traf_inicia(float s0)
     for (i = 0; i < NTRAF; i++) traf_aparca(traf + i);
     traf_ult_s = s0 - TR_APARECE_CADA * m_pos;
     traf_cuentas_cero(); traf_lugar_ult = -1; memset(tap_usado, 0, sizeof tap_usado);
-    cambio_cd = 0;
+    cambio_cd = 0; trs_fin = -1.0f;
 #ifdef PRUEBA_TRAFICO
     for (i = 0; i < 3; i++) { traf_nace(traf + i, s0 + 25.0f + i * 18.0f); traf[i].carril = traf[i].destino = 2 + i; traf[i].modelo = i * 4;
         traf[i].c.v = traf[i].v_des = 5.0f; traf[i].c.x = carril_x(traf[i].c.s, traf[i].carril); coche_coloca(&traf[i].c); }
@@ -2063,21 +2105,29 @@ static float tr_v(int e) { return e == TR_JUG ? yo.v : traf[e].c.v; }   /* +1C4 
 static int tr_carril(int e) { return e == TR_JUG ? carril_cerca(yo.s, yo.x) : traf[e].carril; }   /* +66 */
 static int tr_cls(int e) { int c = e == TR_JUG || !trc_ok ? 3 : trc[traf[e].modelo].clase; return c < 0 || c > 6 ? 3 : c; }   /* +324 */
 static int tr_en_union(float s) { int nodo, pos; return traf_lugar(s, &nodo, &pos); }
+/* carril_x para la IA del trafico: en el ultimo tramo de la ruta antes de la etapa siguiente (trs_fin - PASO .. trs_fin)
+   la ruta mezcla el carril k de la union con el k de la etapa, que no es el mismo (46FE70 los cambia al pasar): ahi
+   el valor del ultimo punto de la union */
+static float tr_cx(float s, int k)
+{
+    if (trs_fin >= 0 && s < trs_fin && s > trs_fin - PASO) s = trs_fin - PASO;
+    return carril_x(s, k);
+}
 /* sentido de los carriles en x (+1: el carril siguiente a la derecha) */
-static float tr_sg(float s) { return carril_x(s, NCARRIL - 1) >= carril_x(s, 0) ? 1.0f : -1.0f; }
+static float tr_sg(float s) { return tr_cx(s, NCARRIL - 1) >= tr_cx(s, 0) ? 1.0f : -1.0f; }
 static int tr_base(int e) { return tr_en_union(tr_s(e)) && tr_carril(e) >= 3 ? 3 : 0; }   /* primer carril de su calzada */
 /* +268 en m: desde el borde izquierdo de su calzada (2 m a la izquierda del centro de su primer carril). En m reales
    y no en carriles: en la ruta de la demo los carriles no siempre estan a 4 m (con menos de 6 carriles de verdad hay
    centros repetidos, tools/conv_tramo.py) y el original mide y desplaza en m (B08, 474E70) */
-static float tr_268(int e) { float s = tr_s(e); return (tr_x(e) - carril_x(s, tr_base(e))) * tr_sg(s) + 2.0f; }
+static float tr_268(int e) { float s = tr_s(e); return (tr_x(e) - tr_cx(s, tr_base(e))) * tr_sg(s) + 2.0f; }
 static float tr_264(int e)                                      /* +264: hasta el borde derecho (< 0 dentro) */
 {
     float s = tr_s(e); int b = tr_base(e), h = tr_en_union(s) ? b + 2 : NCARRIL - 1;
-    return tr_268(e) - ((carril_x(s, h) - carril_x(s, b)) * tr_sg(s) + 4.0f);
+    return tr_268(e) - ((tr_cx(s, h) - tr_cx(s, b)) * tr_sg(s) + 4.0f);
 }
 /* lane x 4 (6280C0) en las coordenadas de +268 del coche e (borde izquierdo del carril k; -12 en la calzada derecha
    de la union, 471010 / 471680 / 47DC10) */
-static float tr_borde_carril(int e, int k) { float s = tr_s(e); return (carril_x(s, k) - carril_x(s, tr_base(e))) * tr_sg(s); }
+static float tr_borde_carril(int e, int k) { float s = tr_s(e); return (tr_cx(s, k) - tr_cx(s, tr_base(e))) * tr_sg(s); }
 static int tr_peso(int e)
 {
     int c = tr_cls(e), w = e == TR_JUG || !ntap ? 1 : tap_peso[c];
@@ -2109,7 +2159,7 @@ static int tr_fila(float s, int *fin, int *u)
 static void tr_calzada(int e, int *lo, int *hi)
 {
     float s = tr_s(e), xa, xb;
-    if (tr_en_union(s) || muro_interior(s, 0.5f * (carril_x(s, 2) + carril_x(s, 3)), 0.5f, &xa, &xb)) {
+    if (tr_en_union(s) || muro_interior(s, 0.5f * (tr_cx(s, 2) + tr_cx(s, 3)), 0.5f, &xa, &xb)) {
         *lo = tr_carril(e) < 3 ? 0 : 3; *hi = *lo + 2;
     } else { *lo = 0; *hi = NCARRIL - 1; }
 }
@@ -2133,7 +2183,7 @@ static void tr_enlaza(void)
     for (i = 0; i < n; i++) { tr_del[o[i]] = i > 0 ? o[i - 1] : -1; tr_det[o[i]] = i < n - 1 ? o[i + 1] : -1; }
 }
 /* 473620: desvio real del coche respecto al centro de su carril +66 (m del original) */
-static float tr_desvio(const trafico_t *t) { return (t->c.x - carril_x(t->c.s, t->carril)) * tr_sg(t->c.s); }
+static float tr_desvio(const trafico_t *t) { return (t->c.x - tr_cx(t->c.s, t->carril)) * tr_sg(t->c.s); }
 #ifdef DIAG_LAT
 static int lat_linea;                                           /* prueba: linea del que empieza o anula un cambio */
 #define LAT_MOTIVO(f) (lat_linea = __LINE__, f)
@@ -2649,26 +2699,77 @@ static float traf_objetivo(int e, int d, int *f0, int *f1, float *rate)
     *f0 = o.f0; *f1 = o.f1;
     return o.v;
 }
+/* final de la bifurcacion (46FE70, PS2 igual): al pasar a la etapa siguiente la rama izquierda lleva los carriles 0..2
+   de la union a 3..5 de la etapa y la derecha 3..5 a 0..2 (los 6..11 de la union, que solo existen al final de cada
+   rama, no se usan: la demo abre en 0..5, SIMPLIFICADO de 478640). trs_fin: s del final de la union con la rama
+   elegida (sigue valido cuando el jugador ya ha pasado a la etapa siguiente, para los de detras) */
+static int cur_rama, tr_bifurca(void);                          /* (curso_paso, mas abajo) */
+static int tr_carril_tras(int k)                                /* carril en la etapa siguiente; -1: otra rama */
+{
+    if (trs_rama == 0) return k < 3 ? k + 3 : -1;
+    return k >= 3 ? k - 3 : -1;
+}
+static float tr_carril_x(float s0, float s, int k)              /* carril k del coche que esta en s0, visto en s */
+{
+    if (trs_fin >= 0 && s0 < trs_fin && s >= trs_fin) { int n = tr_carril_tras(k); if (n >= 0) k = n; }
+    return tr_cx(s, k);
+}
 /* 47B600 + 475040 (PS2 0x1eab70..): el coche no se pone en su carril, conduce hacia el. Punto de mira: la muestra del
    carril +66 tres filas por delante de la suya (sitio + 2, muestra + 2 - 1; la primera que este a mas de lo que avanza
-   en un cuadro), desplazado B08 de lado (474E70). SIMPLIFICADO: aqui a 2,5 filas fijas (la media; en el original salta
-   de 2 a 3 filas al cambiar de fila, y con los carriles de la ruta de la demo, menos suaves, eso da tirones); avanza +1C4 hacia el (con lo que el desvio lateral se recupera en
-   v / distancia por cuadro). En las 10 primeras filas del tramo (pasada la primera etapa, 44C940) y en las 5 ultimas
-   (las muestras saltan entre la etapa y la union): la direccion nueva pesa k = (1 - c)|o| v 0,04 + 0,02 c (c = raiz
-   del coseno entre la nueva y la del cuadro anterior; o = desvio real - B08, tope 4) y el resto la velocidad del cuadro
-   anterior, y sin cambio en curso B08 += 0,02 o. SIMPLIFICADO: en el marco de la ruta, sin el giro limitado de la
-   carroceria (+2E: aqui el rumbo es el de la velocidad) */
+   en un cuadro: de 2 a 3 filas segun donde va el coche en la suya), desplazado B08 m de lado (474E70); avanza +1C4 hacia
+   el (con lo que el desvio lateral se recupera en v / distancia por cuadro); pasado el final de la union, el carril de
+   la etapa siguiente (46FE70). La carroceria (+2E) gira hacia la muestra siguiente con tope. En las 10 primeras filas
+   del tramo (pasada la primera etapa, 44C940) y en las 5 ultimas (las muestras saltan entre la etapa y la union): la
+   direccion nueva pesa k = (1 - c)|o| v 0,04 + 0,02 c (c = raiz del coseno entre la nueva y la del cuadro anterior; o
+   = desvio real - B08, tope 4) y el resto la velocidad del cuadro anterior, y sin cambio en curso B08 += 0,02 o.
+   SIMPLIFICADO: en el marco de la ruta */
+/* en la bifurcacion, el coche cuyo carril va por la otra rama (la izquierda lleva 0..2, la derecha 3..5) y ya no esta
+   en la calzada de la ruta: en el original sigue por su rama hasta que 477F60 lo cierra; aqui la ruta es la de una
+   rama (la de la otra no esta) y se cierra (SIMPLIFICADO). Sin rama elegida aun: si su carril se aparta mas de 50 m
+   (los carriles de la ruta llegan a 60 m, conv_tramo.desvios_carriles) */
+static int traf_otra_rama(const trafico_t *t)
+{
+    float li, ld, x;
+    if (s_union < 0 || t->c.s < s_union || (s_sig >= 0 && t->c.s >= s_sig) || !tr_bifurca()) return 0;
+    x = tr_cx(t->c.s, t->carril);
+    if (cur_rama < 0) return fabsf(x) > 50.0f;
+    if ((cur_rama == 0) == (t->carril < 3)) return 0;
+    limites(t->c.s, &li, &ld);
+    return x < -li - 2.0f || x > ld + 2.0f;
+}
+/* al cambiar la ruta de la union por la de la rama derecha (curso_paso): los coches de la union guardan su desvio
+   respecto a su carril (fase 0 antes, 1 despues) */
+static void traf_cambia_ruta(int fase)
+{
+    static float dv[NTRAF]; int i;
+    for (i = 0; i < NTRAF; i++) {
+        trafico_t *t = traf + i;
+        if (t->carril < 0 || s_union < 0 || t->c.s < s_union) continue;
+        if (!fase) dv[i] = t->c.x - tr_cx(t->c.s, t->carril);
+        else { t->c.x = tr_cx(t->c.s, t->carril) + dv[i]; t->gth = 1e9f; coche_coloca(&t->c); traf_pose_ant(t); }
+    }
+}
 static void traf_guia(trafico_t *t, float dt)
 {
     float s0 = t->c.s, x0 = t->c.x, v = t->c.v * dt, sT, xT, ds, dx, D, vs, vx, kg = 1.0f;
     int fila, fin, u, giro;
     fila = tr_fila(s0, &fin, &u);
-    sT = s0 + 2.5f * m_pos;                                     /* (3 - fraccion de su fila) filas: de media 2,5 */
+    {   /* (3 - fraccion de su fila) filas */
+        int nodo, pos; float b = traf_lugar(s0, &nodo, &pos) ? s_union : (s_sig >= 0 && s0 >= s_sig ? s_sig : s_etapa);
+        float ff = (s0 - b) / m_pos;
+        sT = s0 + (3.0f - (ff - floorf(ff))) * m_pos;
+    }
     if (sT > longitud - 0.02f) sT = longitud - 0.02f;
-    xT = carril_x(sT, t->carril) + t->b08 * tr_sg(sT);         /* 474E70: B08 en m */
+    xT = tr_carril_x(s0, sT, t->carril) + t->b08 * tr_sg(sT);  /* 474E70: B08 en m */
     ds = sT - s0; dx = xT - x0; D = sqrtf(ds * ds + dx * dx);
     if (D > 1e-4f) { vs = v * ds / D; vx = v * dx / D; } else { vs = v; vx = 0; }
     giro = (fila < 10 && (u || s_etapa > 0.0f || (s_sig >= 0 && s0 >= s_sig))) || fila >= fin - 5;
+    {   /* +20 del cuadro anterior, al marco de la ruta de aqui (el original la guarda en el mundo) */
+        float p[3], th, w = sqrtf(t->gv[0] * t->gv[0] + t->gv[1] * t->gv[1]), a;
+        ruta_en(s0, p, &th, NULL, NULL);
+        if (t->gth < 1e8f && w > 0) { a = atan2f(t->gv[1], t->gv[0]) - dif_ang(th - t->gth); t->gv[0] = w * cosf(a); t->gv[1] = w * sinf(a); }
+        t->gth = th;
+    }
     if (giro && v > 1e-5f) {
         float o = tr_desvio(t) - t->b08, c, k, w = sqrtf(t->gv[0] * t->gv[0] + t->gv[1] * t->gv[1]), l;
         if (!t->b14 && t->b6c == 0) {                           /* +268 > 0 y +264 < 0: en la carretera */
@@ -2693,7 +2794,7 @@ static void traf_guia(trafico_t *t, float dt)
            llegar a ella (distancia / +1C4, al menos 1 cuadro), tope 0,0698 rad (4 grados) y x 0,8 por cuadro */
         float sB = s0 + 4.0f * m_pos, xB, dB, a, n;
         if (sB > longitud - 0.02f) sB = longitud - 0.02f;
-        xB = carril_x(sB, t->carril) + t->b08 * tr_sg(sB);
+        xB = tr_carril_x(s0, sB, t->carril) + t->b08 * tr_sg(sB);
         dB = sqrtf((sB - t->c.s) * (sB - t->c.s) + (xB - t->c.x) * (xB - t->c.x));
         a = dif_ang(atan2f(xB - t->c.x, sB - t->c.s) - t->c.a);
         a *= kg;                                                /* E8: el k del giro (1 fuera de el) */
@@ -2718,6 +2819,7 @@ static void traf_paso(float dt)
 #ifdef DIAG_TRAF
     traf_diag();
 #endif
+    if (s_sig >= 0 && cur_rama >= 0 && tr_bifurca()) { trs_fin = s_sig; trs_rama = cur_rama; }
     traf_aparece();
     tr_enlaza();                                                /* 479420 */
     for (i = 0; i < NTRAF; i++) {
@@ -2749,7 +2851,18 @@ static void traf_paso(float dt)
             }
         } else if (t->t_recup > 0.0f) t->t_recup -= 0.0166112948f;
     coloca:
-        traf_guia(t, dt);                                       /* 47BC00 */
+        {
+            float s0 = t->c.s;
+            traf_guia(t, dt);                                   /* 47BC00 */
+            if (trs_fin >= 0 && s0 < trs_fin && t->c.s >= trs_fin) {   /* 46FE70: a la etapa siguiente */
+                int k = tr_carril_tras(t->carril);
+                if (k < 0) { traf_aparca(t); continue; }
+                if (t->dir) t->destino = tr_carril_tras(t->destino) >= 0 ? tr_carril_tras(t->destino) : k;
+                else t->destino = k;
+                t->carril = k;
+            }
+            if (traf_otra_rama(t)) { traf_aparca(t); continue; }
+        }
         if (t->c.s < yo.s - TR_CIERRA_ATRAS * m_pos || (!t->ha && t->c.s > yo.s + TR_CIERRA_DELANTE * m_pos) ||
             t->c.s > longitud - 20.0f) {                        /* los de la mision (+C5C 0x40000): por delante 0x270F */
             traf_aparca(t); continue;                           /* 477F60: cerrado */
@@ -2759,8 +2872,9 @@ static void traf_paso(float dt)
         {   /* prueba: desplazamiento lateral de cada coche cercano por cuadro (x en m, carril, b08, cuadros del cambio) */
             int fin_, u_, fila_ = tr_fila(t->c.s, &fin_, &u_);
             if (fabsf(t->c.s - yo.s) < 150.0f)
-                dbglog(DBG_INFO, "LAT %d %d %.1f %.3f %d %.3f %d %.1f %d %d %d %d %.2f\n", cambio_n, i, (double)(t->c.s - yo.s), (double)t->c.x,
-                       t->carril, (double)t->b08, t->b14, (double)(t->c.v * 3.6f), t->dir, u_, fila_, fin_, (double)carril_x(t->c.s, t->carril));
+                dbglog(DBG_INFO, "LAT %d %d %.1f %.3f %d %.3f %d %.1f %d %d %d %d %.2f %.3f %.3f\n", cambio_n, i, (double)(t->c.s - yo.s), (double)t->c.x,
+                       t->carril, (double)t->b08, t->b14, (double)(t->c.v * 3.6f), t->dir, u_, fila_, fin_, (double)tr_cx(t->c.s, t->carril),
+                       (double)t->c.pos[0], (double)t->c.pos[2]);
         }
 #endif
     }
@@ -2827,8 +2941,12 @@ static void coche_paso(coche_t *c, float giro, float gas, float freno, float dt)
             if (!grua_on) {                                     /* el punto: 10 posiciones de carretera por delante */
                 grua_s = fminf(c->s + GRUA_AVANCE, longitud - 50.0f); if (grua_s < c->s) grua_s = c->s;
                 /* el original toma el centro de la fila de poligonos de la carretera (GetCsRoadInfoByCsLen); aqui
-                   la ruta abarca las dos calzadas y la mediana, asi que el centro del carril mas cercano */
-                grua_x = carril_x(grua_s, carril_cerca(grua_s, c->x));
+                   la ruta abarca las dos calzadas y la mediana, asi que el centro del carril del asfalto mas cercano */
+                {
+                    float xs[NASF]; int n = asfalto_carriles(grua_s, xs), k;
+                    grua_x = xs[0];
+                    for (k = 1; k < n; k++) if (fabsf(xs[k] - c->x) < fabsf(grua_x - c->x)) grua_x = xs[k];
+                }
                 grua_on = 1;
             }
             ruta_en(grua_s, g, &tg, NULL, NULL);
@@ -2958,18 +3076,19 @@ static void piloto(const coche_t *c, float *giro, float *gas, float *freno)
     }
     ruta_en(c->s + 8.0f, p, &th2, NULL, NULL);
     {   /* el carril con el coche de delante mas lejos (y si empata, el mas cercano) */
-        int k, i, mejor = 0; float dmej = -1;
-        for (k = 0; k < NCARRIL; k++) {
-            float d = 300.0f, xk = carril_x(c->s + 30.0f, k);
-#ifdef PRUEBA_RAMA
-            if (piloto_rama(c->s) && (k < NCARRIL / 2) == PRUEBA_RAMA) continue;   /* prueba: hacia esa rama */
-#endif
+        int k, i, mejor = 0, nas; float dmej = -1, xs[NASF];
+        nas = asfalto_carriles(c->s + 30.0f, xs);              /* (los del asfalto, no los del trafico) */
+        for (k = 0; k < nas; k++) {
+            float d = 300.0f, xk = xs[k];
             for (i = 0; i < NTRAF; i++)
                 if (traf[i].c.s > c->s - 3.0f && fabsf(traf[i].c.x - xk) < 2.2f) d = fminf(d, traf[i].c.s - c->s);
             d -= fabsf(xk - c->x) * 0.8f;
             if (d > dmej) { dmej = d; mejor = k; }
         }
-        xc = carril_x(c->s + 30.0f, mejor);
+        xc = xs[mejor];
+#ifdef PRUEBA_RAMA
+        if (piloto_rama(c->s)) xc = PRUEBA_RAMA ? 9.0f : -9.0f;   /* prueba: hacia el lado de esa rama */
+#endif
     }
     ad = fmaxf(-0.25f, fminf(0.25f, 0.06f * (xc - c->x)));
     g = fmaxf(0.05f, fminf(c->v / 8.0f, 1.0f) * (1.0f - 0.45f * c->v / VMAX));
@@ -3503,6 +3622,7 @@ static void curso_recentra(float dx, float dz)
 }
 /* una vez por paso de logica en carrera: cargas, eleccion de rama, liberaciones y cambio de etapa; devuelve los
    sucesos CUR_* */
+static int tr_bifurca(void) { return cur_nodo >= 0 && curso[cur_nodo].izq >= 0; }   /* la union es una bifurcacion */
 static int curso_paso(void)
 {
     int ev = 0; const etapa_t *e = curso + cur_nodo;
@@ -3552,7 +3672,9 @@ static int curso_paso(void)
         if (cur_rama) {                                         /* la derecha: su ruta en lugar de la izquierda */
             float p[3], th;
             ruta_n = i_union;
+            traf_cambia_ruta(0);
             if (ruta_anade(&uni_der) < 0) curso_error("Sin memoria para la ruta");
+            traf_cambia_ruta(1);                                /* (los de la otra rama los cierra traf_otra_rama) */
             ruta_en(yo.s, p, &th, NULL, NULL);                  /* el mismo sitio, desde el centro nuevo */
             yo.x = (yo.pos[0] - p[0]) * cosf(th) + (yo.pos[2] - p[2]) * sinf(th);
         }
@@ -4710,6 +4832,13 @@ static void resultados(int meta)
 #ifndef SALIDA
 #define SALIDA 100.0f                                           /* metros desde el principio de la ruta */
 #endif
+#ifndef SALIDA_X
+/* desvio de salida del jugador: 5 m dentro del borde derecho del asfalto (lo que daba el carril 4 de los carriles
+   repartidos por el asfalto que habia antes en la ruta; SUPUESTO: el sitio de salida del original no se ha localizado;
+   ahora los carriles de la ruta son los del trafico del original y en la primera etapa van todos por la otra calzada) */
+static float salida_x(float s) { float p[3], th, iz, de; ruta_en(s, p, &th, &iz, &de); return de - 5.0f; }
+#define SALIDA_X salida_x(SALIDA)
+#endif
 
 /* La PowerVR no termina el cuadro (en la consola real, por un bufer lleno o un parametro ilegal): se escribe el
    diagnostico directamente en la imagen que se esta viendo, para que el probador lo pueda leer. */
@@ -5643,7 +5772,7 @@ int main(int argc, char **argv)
                 presta_union(0);                                /* el hueco de la union vuelve a la carrera */
                 curso_reinicia();                               /* la etapa de salida (otra vez, si hacia falta) */
                 bo_inicia();                                    /* sin objetos de union y las cuentas a cero */
-                memset(&yo, 0, sizeof yo); yo.s = SALIDA; yo.x = carril_x(SALIDA, 4);
+                memset(&yo, 0, sizeof yo); yo.s = SALIDA; yo.x = SALIDA_X;
 #ifdef PRUEBA_FIN
                 yo.s = longitud - PRUEBA_FIN; yo.x = carril_x(yo.s, 4);   /* prueba: a PRUEBA_FIN m del final */
 #endif
@@ -5846,7 +5975,7 @@ int main(int argc, char **argv)
         /* camara: en el menu gira alrededor del coche (seleccion de coche); en carrera, la del original (camara.c) */
         if (estado == TITULO) {
             float a = menu_giro();                              /* el coche gira +100/65536 de vuelta por paso (4A5B20) */
-            yo.s = SALIDA; yo.x = carril_x(SALIDA, 4); yo.v = 0; coche_paso(&yo, 0, 0, 0, 0); cam_y = yo.pos[1];
+            yo.s = SALIDA; yo.x = SALIDA_X; yo.v = 0; coche_paso(&yo, 0, 0, 0, 0); cam_y = yo.pos[1];
             ojo_[0] = yo.pos[0] + MENU_CAM_D * sinf(a); ojo_[1] = yo.pos[1] + MENU_CAM_Y; ojo_[2] = yo.pos[2] + MENU_CAM_D * cosf(a);
             mira[0] = yo.pos[0]; mira[1] = yo.pos[1] + MENU_CAM_MIRA; mira[2] = yo.pos[2];
         } else if (cam_ok) {

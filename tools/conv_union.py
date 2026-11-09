@@ -27,7 +27,8 @@ Salida (formato ORD7 de modelo.py, cada fichero en su propio marco; la demo los 
            (banderas de efectos, transicion de la union, las tres luces, niebla del cielo)
  SOL.DAT   el sol y el destello (banco 0x57: sol_dat)
 Las rutas de la union salen de la colision: el poligono principal de cada seccion (8 m) da el centro y los bordes de
-la calzada; limites, franjas y alturas como en conv_tramo.py (superficies), con la colision de las dos ramas."""
+la calzada; limites, franjas y alturas como en conv_tramo.py (superficies), con la colision de las dos ramas; los
+carriles, los del trafico del original (tablas_so). --solo-carriles: solo esos carriles en lo ya convertido."""
 import os, struct, sys
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -107,11 +108,44 @@ def principales(d):
     L = np.frombuffer(d[sec[5]:sec[5] + 2 * npol], '<u2').astype(int)
     return V[:nprim], L[:nprim]
 
+# Carriles de la union del original: las tablas de muestras que lee 470120 (PC: 0x80A670, 12 bloques de 0x70C por fila,
+# ficheros "\\OCP\\ocp" + grupo + "_bra" + curso + "_othcar" + "_01".."_12" + "_tgt.sz" de 44C680; en SLES-53998 son
+# las entradas sin nombre de BK.PS2 que empiezan por 'SO' + u16 numero de muestras): una muestra de 6 bytes por fila
+# de la union (x, z, y con el bit 15 = "no hay carril", en 1/4096 km = 0,244140625 m: K62818C x K5A29EC), en el marco
+# de la union. Carriles 0..11: en la bifurcacion (242 muestras) 0..2 siguen la rama izquierda y 3..5 la derecha; 6..8
+# (izquierda) y 9..11 (derecha) solo existen en las ultimas filas, donde cada rama pasa a 6 carriles; al pasar a la
+# etapa siguiente (46FE70) la rama izquierda lleva 0..2 -> 3..5 y 6..8 -> 0..2, la derecha 3..5 -> 0..2 y 9..11 ->
+# 3..5. En la meta (86 muestras, 'SOV') 6 carriles rectos. Los grupos estan repetidos (las 12 de la bifurcacion dos
+# veces, las de la meta tres: _othcar / _rvlcar).
+SO_ESCALA = conv_tramo.SO_ESCALA
+
+def tablas_so(A):
+    """{numero de muestras: [12 arrays (n, 3) x, z, valido]} con el primer grupo de 12 entradas 'SO' de BK.PS2 de cada
+    tamano"""
+    E = A.paquete('BK.PS2'); res = {}; i = 0
+    while i + 12 <= len(E):
+        ds = [bytes(A.datos(E[i + k], 4)) for k in range(12)]
+        if all(d[:2] == b'SO' for d in ds):
+            g = []
+            for k in range(12):
+                d = bytes(A.datos(E[i + k])); n = struct.unpack_from('<H', d, 2)[0]
+                v = np.frombuffer(d[4:4 + 6 * n], '<u2').reshape(-1, 3)
+                g.append(np.stack([v[:, 0].astype(np.int16) * SO_ESCALA, v[:, 1].astype(np.int16) * SO_ESCALA,
+                                   (v[:, 2] & 0x8000) == 0], 1))
+            res.setdefault(len(g[0]), g); i += 12
+        else: i += 1
+    return res
+
+def carriles_union(so, cam):
+    """las 6 columnas de carriles de la ruta de la union para la demo: los carriles 0..5 del original (en la ruta de
+    la rama izquierda 3..5 se van por la otra rama y al reves; la demo los cierra al salirse de la calzada)"""
+    return conv_tramo.carriles_originales(so[:6], cam)
+
 class Coli:
     """lo minimo de un segmento para conv_tramo.superficies: una entrada COLI0200"""
     def __init__(self, d): self.m = d; self.ent = [(0, 0, len(d))]
 
-def ruta_rama(d_rama, d_todo):
+def ruta_rama(d_rama, d_todo, so=None):
     """ruta de una rama de la union: centro, bordes y carriles del poligono principal de cada seccion; limites,
     franjas y alturas de la colision de las dos ramas (para poder ir por cualquier lado antes de separarse)"""
     V, L = principales(d_rama)
@@ -138,7 +172,8 @@ def ruta_rama(d_rama, d_todo):
         an[i] = (max(3.0, -q.min()), max(3.0, q.max()))
     k = np.ones(5) / 5
     an = np.stack([np.convolve(np.pad(an[:, j], 2, mode='edge'), k, 'valid') for j in range(2)], 1)
-    car = conv_tramo.carriles_uniformes(an)
+    # carriles: los del original (tablas_so) si estan; si no, repartidos por la anchura del asfalto
+    car = carriles_union(so, cam) if so is not None else conv_tramo.carriles_uniformes(an)
     lim, ext, ban, hpf = conv_tramo.superficies(Coli(d_todo), cam, an)
     pf = np.where(np.isfinite(hpf), hpf, cam[:, 1:2])
     if not ext.any(): ext = np.repeat(pf[:, [0, -1]], NEXT, 1)
@@ -352,7 +387,8 @@ def curso(A, dsal, con_tramos=True, solo_curso=False):
     # la bifurcacion (la misma geometria y colisiones en todas): rutas de las dos ramas y el principio de cada etapa
     # siguiente en el marco de la union
     d_todo, d_izq, d_der = (coli_bytes(A, '\\BK\\coli_%s_PALM_bin' % x) for x in ('BK', 'LBK', 'RBK'))
-    ri, _ = ruta_rama(d_izq, d_todo); rd, _ = ruta_rama(d_der, d_todo)
+    so = tablas_so(A)
+    ri, _ = ruta_rama(d_izq, d_todo, so.get(242)); rd, _ = ruta_rama(d_der, d_todo, so.get(242))
     md = modelo.Modelo(); md.ruta = rd; md.escribe(os.path.join(dsal, 'BKD.DAT'))
     ramas = []
     for dr in (d_izq, d_der):
@@ -392,7 +428,7 @@ def curso(A, dsal, con_tramos=True, solo_curso=False):
             mod.luz = luces(sol3, ry)[0]
             mod.bloque(A.bloque(A.entrada('BK.PS2', nm)), objetos=True, sin_textura='material')
             mod.luz = None
-            dm = coli_bytes(A, c_todo); mod.ruta, _ = ruta_rama(dm, dm)
+            dm = coli_bytes(A, c_todo); mod.ruta, _ = ruta_rama(dm, dm, so.get(86))
             meta = 0.0                                # la pancarta GOAL esta en el principio (z = 0)
             zi = zd = '-'
         # el cielo de la etapa que se deja: va con la camara y orientado con la etapa (el original lo dibuja con la
@@ -432,10 +468,36 @@ def curso(A, dsal, con_tramos=True, solo_curso=False):
             conv_tramo.convierte(segs[r['seg']], r['seg'], os.path.join(dsal, 'SEG%02d.DAT' % r['seg']), cielo=cb,
                                  luz=luces(sol3), objetos=r['_obj'])
 
+def solo_carriles(A, dsal):
+    """cambia en su sitio las columnas de carriles de la ruta de BKnn.DAT y BKD.DAT ya convertidos (formato ORD7 de
+    modelo.py: la ruta va tras texturas, mallas y vertices) por los del original, sin volver a convertir los modelos.
+    La ruta de cada fichero dice cual es: la rama izquierda acaba en x < 0, la derecha en x > 0, la meta recta"""
+    so = tablas_so(A); col = 5 + NPERF; segs = A.segmentos()
+    for f in sorted(os.listdir(dsal)):
+        etapa = f.startswith('SEG') and f.endswith('.DAT') and f[3:5].isdigit()
+        if not ((f.startswith('BK') or etapa) and f.endswith('.DAT')): continue
+        ruta_f = os.path.join(dsal, f)
+        with open(ruta_f, 'r+b') as fh:
+            d = fh.read(60)
+            if d[:4] != b'ORD7': continue
+            nm, nv, nr, nc, nt = struct.unpack_from('<5I', d, 4); o = 4 + 52 + 24 * nt + 32 * nm + 24 * nv
+            fh.seek(o); r = np.frombuffer(fh.read(4 * nr * nc), '<f4').reshape(nr, nc).copy()
+            cam = r[:, :3].astype(float); fin = cam[-1]
+            if etapa: g = conv_tramo.tablas_carriles(segs[int(f[3:5])])
+            else: g = so.get(242) if abs(fin[0]) > 500 else so.get(86)
+            if g is None or nc < col + NCARRIL: continue
+            car = conv_tramo.carriles_originales(g, cam)
+            antes = r[:, col:col + NCARRIL].copy(); r[:, col:col + NCARRIL] = car
+            fh.seek(o); fh.write(r.astype('<f4').tobytes())
+            print('%s: %d puntos, %s; carriles cambiados (max %.1f m)' % (f, nr, 'etapa' if etapa else 'bifurcacion' if g is so.get(242) else 'meta',
+                                                                       float(np.abs(antes - car).max())))
+
 def main():
-    """conv_union.py tu.iso salida/ [--sin-tramos] [--solo-curso]: todo el arbol del curso (curso); --sin-tramos: sin
-    convertir las etapas (SEGnn.DAT, con conv_tramo.py aparte); --solo-curso: solo CURSO.DAT"""
+    """conv_union.py tu.iso salida/ [--sin-tramos] [--solo-curso] [--solo-carriles]: todo el arbol del curso (curso);
+    --sin-tramos: sin convertir las etapas (SEGnn.DAT, con conv_tramo.py aparte); --solo-curso: solo CURSO.DAT;
+    --solo-carriles: solo los carriles de las rutas de las uniones ya convertidas (solo_carriles)"""
     arg = [a for a in sys.argv[1:] if not a.startswith('--')]
+    if '--solo-carriles' in sys.argv: solo_carriles(Assets(arg[0]), arg[1]); return
     curso(Assets(arg[0]), arg[1], '--sin-tramos' not in sys.argv, '--solo-curso' in sys.argv)
 
 if __name__ == '__main__':
