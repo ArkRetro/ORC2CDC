@@ -51,6 +51,9 @@ typedef struct {
     int lado;                                                     /* zona del curso que usa: 0 ninguna, 1 abajo, 2 arriba */
     uint32_t *ofs;                                                /* color de desplazamiento por vertice o NULL (coche) */
     const int32_t *remap;                                         /* textura -> la del color elegido, o NULL (trafico) */
+    int relleno_propio;                                           /* lo pone quien pide la lectura: relleno[0] de los
+                                                                     nodos trae datos del conversor (conv_bo.py) y no se
+                                                                     usa para el presupuesto del TA */
 } modelo_t;
 
 static modelo_t coche;                                         /* el del jugador (abajo): no recibe su sombra */
@@ -103,8 +106,10 @@ static int lee_modelo_en(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t
     if (!v7) for (i = 0; i < m->nmallas; i++) m->mallas[i].nodo = -1;   /* ORD5/6: distancia maxima, sin nodos */
     /* presupuesto del TA (nodos_visibles): relleno[0] = bytes teoricos del TA de las tiras del nodo (ta_teo),
        relleno[1] = sus vertices << 12 | las clases de distancia (<< 6) y de LOD del cuadro (nodos_visibles) */
-    for (i = 0; i < m->nnodos; i++) m->nodos[i].relleno[0] = m->nodos[i].relleno[1] = 0;
-    for (i = 0; i < m->nmallas; i++)
+    /* (con relleno_propio no: los objetos de las uniones llevan ahi su malla y su animacion, y sus mallas no apuntan a
+       nodos; antes se borraba y todas las alas usaban la animacion 0, casi quieta, y el primer pajaro no salia) */
+    if (!m->relleno_propio) for (i = 0; i < m->nnodos; i++) m->nodos[i].relleno[0] = m->nodos[i].relleno[1] = 0;
+    for (i = 0; i < m->nmallas && !m->relleno_propio; i++)
         if (m->mallas[i].nodo >= 0 && (uint32_t)m->mallas[i].nodo < m->nnodos && m->mallas[i].n >= 3) {
             uint32_t n = m->mallas[i].n > 256 ? 256 : m->mallas[i].n;
             m->nodos[m->mallas[i].nodo].relleno[0] += ta_teo(n, 0); m->nodos[m->mallas[i].nodo].relleno[1] += n << 12;
@@ -3119,8 +3124,12 @@ static int piloto_rama(float s) { return cur_rama < 0 && s_decide >= 0 && s > s_
      bandera 8 o quietos al final), retrasados +0x2C s, en el marco de la union movido en x con el coche (bandera 1: su
      x en la union al salir y luego + su velocidad lateral; bandera 4: a +0x14 m/cuadro hacia el lado si va mas despacio)
      y z = -690 con la bandera 2; en la rama derecha reflejados en x. Se quitan al llegar a la etapa siguiente.
-   - animacion de vertices de los nodos con la bandera 0x20 (alas): cuadro = valores[(base + reloj) % m] de la tabla de
-     0x328aa8 (reloj +1 por cuadro dibujado, 0x1030d0). SIN la mezcla de dos cuadros del PC (40ECC0): el cuadro entero.
+   - animacion de vertices de los nodos con la bandera 0x20 (alas): f = valores[(base + reloj) % m] de la tabla de
+     0x328aa8 (PS2 0x1031c8; reloj 0x448850, +1 por cuadro en 0x1030d0); 0x103018 da el cuadro entero k = (int) f
+     (0x448854) y la fraccion f - k, que 0x110700 guarda con cada tira en la cola (+0x14) junto al paquete del cuadro
+     k % cuadros de la tira (0x1030a8); el PC (40ECC0 / 404700) mezcla los cuadros k y k + 1 (0 tras el ultimo) con
+     pesos 1 - fraccion y fraccion (vsc 7). Aqui la mezcla se hace en la CPU con los vertices de las dos mallas
+     (bo_dibuja_malla). La mezcla en el PS2 (el VU1 con la fraccion de +0x14) es PROBABLE: no se ha seguido el microcodigo.
    PENDIENTE: sus sonidos (las funciones +0x18 / +0x1C: 0x83..0x91 de los bancos 0x30a..0x316) y que la acompanante los
    senale (race_robots_runtime). */
 #define BO_N 14
@@ -3130,7 +3139,8 @@ typedef struct { uint16_t idx, base, m, r_; const float *v; } bo_mor_t;
 static uint8_t *bo_dat; static const bo_conj_t *bo_conj; static uint32_t bo_var[7];
 static bo_mor_t bo_mor[192]; static int bo_nmor;
 static uint16_t *bo_idx, *bo_ini; static int bo_ncod;           /* mallas por (malla del original, cuadro) */
-static uint32_t bo_reloj;                                       /* 0x448850: +1 por cuadro dibujado */
+static uint32_t bo_reloj;                                       /* 0x448850: +1 por cuadro (60 por segundo) */
+static uint8_t bo_nf[64], bo_mezcla[64];                        /* por malla del original: cuadros y si se pueden mezclar */
 static int bo_c74, bo_c78, bo_c7c, bo_c80, bo_c84, bo_c88, bo_pos_ant;   /* cuentas de 44EDE0 */
 static int bo_sel = -1, bo_estado;                              /* 0 nada, 1 por leer, 2 leyendo, 3 subido, 4 fuera */
 static struct { float x, t, dur; int ini, loop; const uint8_t *tray; matrix_t M __attribute__((aligned(32))); } bo_obj[4];
@@ -3228,6 +3238,19 @@ static void bo_subido(void)
         for (k = 0; k < n; k++) { int cod = bo_mod.mallas[k].nodo; if ((cod & 0xff) * 4 + ((cod >> 8) & 3) == c) bo_idx[j++] = (uint16_t)k; }
     }
     bo_ini[4 * bo_ncod] = (uint16_t)j;
+    for (c = 0; c < bo_ncod && c < 64; c++) {                   /* cuadros seguidos desde el 0; mezcla si casan malla a malla */
+        int f, nf = 1, ok = 1;
+        while (nf < 4 && bo_ini[c * 4 + nf + 1] > bo_ini[c * 4 + nf]) nf++;
+        for (f = 1; f < nf && ok; f++) {
+            int a0 = bo_ini[c * 4], a1 = bo_ini[c * 4 + 1], b0 = bo_ini[c * 4 + f], b1 = bo_ini[c * 4 + f + 1], i;
+            if (a1 - a0 != b1 - b0) { ok = 0; break; }
+            for (i = 0; i < a1 - a0; i++) {
+                const malla_t *ma = bo_mod.mallas + bo_idx[a0 + i], *mb = bo_mod.mallas + bo_idx[b0 + i];
+                if (ma->n != mb->n || ma->tex != mb->tex || ma->n > 256) { ok = 0; break; }
+            }
+        }
+        bo_nf[c] = (uint8_t)nf; bo_mezcla[c] = (uint8_t)ok;
+    }
     bo_estado = 3;
 }
 /* al empezar la carrera */
@@ -3249,7 +3272,8 @@ static void bo_paso(int ev)
                bo_c80, bo_c84, bo_c88, (double)((s_union - s_etapa) / m_pos));
     }
     if (bo_estado == 1 && carga.estado == 0 && bo_sel >= 0 && bo_sel < BO_N) {
-        sprintf(bo_fich, "BO%02d.DAT", bo_sel); carga_pide(&bo_mod, bo_fich, NULL, 0, NULL); bo_estado = 2;
+        sprintf(bo_fich, "BO%02d.DAT", bo_sel); bo_mod.relleno_propio = 1;   /* malla y animacion de cada nodo */
+        carga_pide(&bo_mod, bo_fich, NULL, 0, NULL); bo_estado = 2;
     }
     if (bo_estado != 3 || bo_sel < 0) return;
     c = bo_conj + bo_sel;
@@ -3295,13 +3319,32 @@ static void bo_paso(int ev)
         }
     }
 }
-/* cuadro de la animacion de vertices del indice a (40ECC0 / PS2 0x1031c8): entero de valores[(base + reloj) % m] */
-static int bo_cuadro(int a)
+/* valor de la animacion de vertices del indice a (0x1031c8 / 40ECC0): valores[(base + reloj) % m]; -1 sin entrada */
+static float bo_valor(int a)
 {
     int i;
     for (i = 0; i < bo_nmor; i++)
-        if (bo_mor[i].idx == a) { float f = bo_mor[i].v[(bo_mor[i].base + bo_reloj) % bo_mor[i].m]; return ((int)f) & 3; }
-    return 0;
+        if (bo_mor[i].idx == a) return bo_mor[i].v[(bo_mor[i].base + bo_reloj) % bo_mor[i].m];
+    return -1.0f;
+}
+/* la malla ma del cuadro k mezclada con mb (la misma del cuadro k + 1) con peso w / 256 de mb (404700: los dos
+   cuadros con 1 - fraccion y fraccion): posiciones y colores de los vertices (la luz va en el color) */
+static void bo_dibuja_malla(const malla_t *ma, const malla_t *mb, int w)
+{
+    static vert_t t[256] __attribute__((aligned(32)));
+    static modelo_t mt; malla_t m = *ma;
+    const vert_t *a = bo_mod.verts + ma->v0, *b = bo_mod.verts + mb->v0;
+    float fb = (float)w * (1.0f / 256.0f), fa = 1.0f - fb; uint32_t i, n = ma->n > 256 ? 256 : ma->n, wa = 256 - (uint32_t)w;
+    if (w <= 0) { dibuja_malla(&bo_mod, ma); return; }
+    for (i = 0; i < n; i++) {
+        uint32_t ca = a[i].c, cb = b[i].c;
+        t[i].x = a[i].x * fa + b[i].x * fb; t[i].y = a[i].y * fa + b[i].y * fb; t[i].z = a[i].z * fa + b[i].z * fb;
+        t[i].u = a[i].u; t[i].v = a[i].v;
+        t[i].c = (((ca & 0xff00ffu) * wa + (cb & 0xff00ffu) * (uint32_t)w) >> 8 & 0xff00ffu) |
+                 ((((ca >> 8) & 0xff00ffu) * wa + ((cb >> 8) & 0xff00ffu) * (uint32_t)w) & 0xff00ff00u);
+    }
+    mt.verts = t; mt.ofs = NULL; m.v0 = 0; m.n = n;
+    dibuja_malla(&mt, &m);
 }
 /* 4A9DF0: cada nodo de los registros de cada objeto con su matriz (umbral de LOD 8 de 4044E0, 7 con la bandera 0x40) */
 static void bo_dibuja(int l)
@@ -3314,7 +3357,7 @@ static void bo_dibuja(int l)
         const float (*M)[4] = (const float (*)[4])bo_obj[i].M;
         for (k = 0; k < bo_mod.nnodos; k++) {
             const nodo_t *nd = bo_mod.nodos + k;
-            int g = nd->relleno[0] & 0xffff, an = nd->relleno[0] >> 16, fl = nd->fl >> 16, q, j, ult = -2;
+            int g = nd->relleno[0] & 0xffff, an = nd->relleno[0] >> 16, fl = nd->fl >> 16, q, q1, j, ult = -2, k0, k1, w;
             float wx, wy, wz, dx, dy, dz, zv, xv, yv;
             if ((int)(nd->fl & 0xffff) != c->o[i].reg || g >= bo_ncod) continue;
             wx = nd->cx * M[0][0] + nd->cy * M[1][0] + nd->cz * M[2][0] + M[3][0];
@@ -3326,8 +3369,16 @@ static void bo_dibuja(int l)
             xv = dx * der[0] + dy * der[1] + dz * der[2]; yv = dx * arr[0] + dy * arr[1] + dz * arr[2];
             if (fabsf(xv) - zv * (320.0f / fx) > nd->r * 2.0f || fabsf(yv) - zv * (240.0f / fx) > nd->r * 2.0f) continue;
             if (zv > nd->r * (float)(1 << ((fl & 0x40) ? 6 : 7)) * fx / 240.0f) continue;   /* LOD: muy pequeno */
-            q = g * 4 + ((fl & 0x20) && an != 0xffff ? bo_cuadro(an) : 0);
-            if (bo_ini[q] == bo_ini[q + 1]) q = g * 4;          /* sin ese cuadro: el primero */
+            k0 = 0; k1 = 0; w = 0;
+            if ((fl & 0x20) && an != 0xffff) {                  /* 0x103018 y 0x1030a8: cuadro k, k + 1 y la fraccion */
+                float f = bo_valor(an); int nf = g < 64 ? bo_nf[g] : 1, e;
+                if (f >= 0.0f) {
+                    e = (int)f; k0 = e % nf; k1 = k0 + 1 >= nf ? 0 : k0 + 1;
+                    if (g < 64 && bo_mezcla[g]) w = (int)((f - (float)e) * 256.0f);
+                }
+            }
+            q = g * 4 + k0; q1 = g * 4 + k1;
+            if (bo_ini[q] == bo_ini[q + 1]) { q = g * 4; w = 0; }   /* sin ese cuadro: el primero */
             memcpy(W, bo_mod.carteles[nd->cartel], sizeof W);
             mat_load(&vista); mat_apply(&bo_obj[i].M); mat_apply(&W);
             for (j = bo_ini[q]; j < bo_ini[q + 1]; j++) {
@@ -3338,7 +3389,8 @@ static void bo_dibuja(int l)
                     if (m->tex >= 0) pvr_prim(&bo_mod.cabs[0][m->tex], sizeof(pvr_poly_hdr_t));
                     else pvr_prim(&cab_col[0][l], sizeof(pvr_poly_hdr_t));
                 }
-                dibuja_malla(&bo_mod, m);
+                if (w > 0) bo_dibuja_malla(m, bo_mod.mallas + bo_idx[j - bo_ini[q] + bo_ini[q1]], w);
+                else dibuja_malla(&bo_mod, m);
             }
         }
     }
@@ -3777,14 +3829,19 @@ static void cielo_dibuja(int l)
     }
 }
 
-/* Sol y destello (40CBC0, con SCN_EFC +0 & 2 y su intensidad sol_int): objetos del banco 0x57 (SOL.DAT, tools/
-   conv_union.py sol_dat; el registro en el campo del nodo) en el espacio de la camara del original (x derecha, y arriba,
-   z atras), sumados a lo de detras (sus texturas son de fondo negro: PROBABLE) y sin niebla. El sol esta en -direccion
-   de la luz 1 (la de la escena) con la inclinacion por cam+358 (las etapas < 15). Su parte visible la da en el original
-   una consulta de oclusion del cuadro anterior (95AEF8, con tope 0,22): la PowerVR no tiene consultas de oclusion y
-   aqui va siempre entero (0,22; DIFERENCIA: el destello no se apaga detras de lo que tapa el sol). Lo de lejos (0x10 y
-   0x0F) va a 1000 m en vez de 2500 (el cielo de la demo esta en la escena, a 1500-1800 m, y lo taparia) con la prueba
-   de z: lo tapa lo que haya delante. */
+/* Sol y destello: el de SLES-53998 (0x10f190, el 40CBC0 del PC con otras constantes), con SCN_EFC +0 & 2 y su
+   intensidad sol_int: objetos del banco 0x57 (SOL.DAT, tools/conv_union.py sol_dat; el registro en el campo del nodo)
+   en el espacio de la camara del original (x derecha, y arriba, z atras), sumados a lo de detras (sus texturas son de
+   fondo negro: PROBABLE) y sin niebla. El sol esta en -direccion de la luz 1 (la de la escena) con la inclinacion por
+   cam+358 (las etapas < 15). Del PS2 (distinto del PC): se ve con |x| < 360 y |y| < 280 en la pantalla de 640 x 480
+   (cam+B0 / +B4 de 0x17b220, como en el PC) y se apaga hacia los bordes desde 100 ((360 - |x|) / 160 y
+   (280 - |y|) / 180; PC 470 / 520); el brillo 6 escala fov x 0,1 (PC brillo x 0,1); los destellos (0x10fee0) y el
+   brillo de cara al sol van x 0,75 y este con tamano 2,5 (PC 1,5); lo de lejos a 1500 m (PC 2500). Parte visible: el
+   PS2 la mide leyendo el alfa de 8 x 8 pixeles (0x103a?? -> 0x448864, media de los 64; 0x10f7d0: x 0,5 / 255, sin
+   tope); aqui no hay como leerlo y va fija al sol entero: alfa 0x80 (el 1,0 del GS) -> 0,251 (PROBABLE; el PC topa
+   en 0,22). DIFERENCIA: el destello no se apaga detras de lo que tapa el sol. Lo de lejos (0x10 y 0x0F) va a 1000 m en
+   vez de 1500 (el cielo de la demo esta en la escena, a 1500-1800 m, y lo taparia) con la prueba de z: lo tapa lo que
+   haya delante. */
 static modelo_t sol_m; static pvr_poly_hdr_t *sol_cab[2];      /* [0] sin z, [1] con la prueba de z */
 static int sol_ok;
 static void sol_carga(void)
@@ -3818,19 +3875,23 @@ static void sol_objeto(int r, const float *p, float sx, float sy, float sz, floa
     M[0][0] = sx * fx; M[1][1] = -sy * fx;
     M[2][0] = -320.0f * sz; M[2][1] = -240.0f * sz; M[2][2] = M[2][3] = -sz;
     M[3][0] = fx * p[0] - 320.0f * p[2]; M[3][1] = -fx * p[1] - 240.0f * p[2]; M[3][2] = M[3][3] = -p[2];
-    mat_load(&M); color_mul = ((uint32_t)a << 24) | (tinte & 0xFFFFFF);
+    /* 4056D0 (PS2 0x111998 desde 0x10fdc0) pone el valor en el alfa de cada material (+0xC): lo sustituye, no lo
+       multiplica (antes se multiplicaba por el alfa del material: 0x30 el destello 4, 0xAE el brillo 6, 0x76 el sol de
+       lejos 0x10, que salian 2-5 veces mas flojos) */
+    mat_load(&M); color_fijo = ((uint32_t)a << 24) | (tinte & 0xFFFFFF);
     for (i = 0; i < sol_m.nmallas; i++) {
         const malla_t *m = sol_m.mallas + i;
         if (m->nodo != r || m->n < 3 || m->tex < 0) continue;
         pvr_prim(&sol_cab[z][m->tex], sizeof(pvr_poly_hdr_t));
         dibuja_malla(&sol_m, m);
     }
-    color_mul = 0;
+    color_fijo = 0;
 }
-/* 40CBC0 (en la lista transparente, al final de la escena) */
+/* 0x10f190 / 40CBC0 (en la lista transparente, al final de la escena) */
+#define SOL_VIS (128.0f * 0.5f / 255.0f)                        /* alfa 0x80 de los 64 pixeles x 0,5 / 255 */
 static void sol_dibuja(void)
 {
-    float v[16], d[3], P[3], sx, sy, ax[3], fov, size, spread, bright, edge, flare, ring, facing, vis = 0.22f, p0, y0, q[3];
+    float v[16], d[3], P[3], sx, sy, ax[3], fov, size, spread, bright, edge, flare, ring, facing, vis = SOL_VIS, p0, y0, q[3];
     float wv[3], lw, g0[3] = { 0, 0, -0.2f }, far = 1000.0f; uint32_t tinte; int k;
     if (!sol_ok || sol_int <= 0) return;
     luz_actual(1, v, d);
@@ -3839,51 +3900,58 @@ static void sol_dibuja(void)
     d[0] = -cosf(p0) * sinf(y0); d[1] = sinf(p0); d[2] = -cosf(p0) * cosf(y0);
     for (k = 0; k < 3; k++) q[k] = -d[k];                       /* del ojo al sol */
 #ifdef PRUEBA_SOL
-    for (k = 0; k < 3; k++) q[k] = ade[k] + 0.5f * arr[k] + 0.3f * der[k];   /* prueba: el sol delante */
+#ifndef PRUEBA_SOL_Y
+#define PRUEBA_SOL_Y 0.5f                                      /* prueba: altura del sol (tangente) */
+#endif
+#ifndef PRUEBA_SOL_X
+#define PRUEBA_SOL_X 0.3f                                      /* prueba: a la derecha (tangente) */
+#endif
+    for (k = 0; k < 3; k++) q[k] = ade[k] + PRUEBA_SOL_Y * arr[k] + PRUEBA_SOL_X * der[k];   /* prueba: el sol delante */
 #endif
     P[0] = q[0] * der[0] + q[1] * der[1] + q[2] * der[2];        /* en la camara del original */
     P[1] = q[0] * arr[0] + q[1] * arr[1] + q[2] * arr[2];
     P[2] = -(q[0] * ade[0] + q[1] * ade[1] + q[2] * ade[2]);
     if (P[2] >= 0) return;
-    sx = fx * P[0] / -P[2]; sy = fx * P[1] / -P[2];              /* 449940: en la pantalla de 640 x 480 */
-#ifdef DIAG_VTX
-    {   static int c; if (++c % 60 == 0) dbglog(DBG_INFO, "DIAG sol %.0f %.0f int %.2f\n", (double)sx, (double)sy, (double)sol_int); }
+    sx = fx * P[0] / -P[2]; sy = fx * P[1] / -P[2];              /* 0x1f6b70: en la pantalla de 640 x 480 */
+#if defined(DIAG_VTX) || defined(DIAG_SOL)
+    {   static int c; if (++c % 60 == 0) dbglog(DBG_INFO, "DIAG sol %.0f %.0f int %.2f f358 %.3f fx %.0f p0 %.1f\n", (double)sx, (double)sy, (double)sol_int,
+                                     (double)(cam_ok ? cam.f358 : -1), (double)fx, (double)(p0 * 57.29578f)); }
 #endif
-    if (!(sx > -470 && sx < 470 && sy > -440 && sy < 440)) return;
+    if (!(sx > -360 && sx < 360 && sy > -280 && sy < 280)) return;   /* 0x10f4f0..0x10f56c */
     fov = 2 * atanf(240.0f / fx) * 57.29578f * 0.01f;           /* cam+A0 en grados / 100 */
     size = fov; spread = fov * 0.13f;
-    bright = 0.99f;                                             /* se apaga hacia los bordes de la pantalla */
-    if (sx < -100) bright = (sx + 470) * 0.0027027f; else if (sx > 100) bright = (470 - sx) * 0.0027027f;
-    if (sy < -100) bright = (sy + 520) * bright * 0.00294118f; else if (sy > 100) bright = (520 - sy) * bright * 0.00294118f;
+    bright = 0.99f;                                             /* se apaga hacia los bordes (0x10f654..0x10f720) */
+    if (sx < -100) bright = (sx + 360) * 0.00625f; else if (sx > 100) bright = (360 - sx) * 0.00625f;
+    if (sy < -100) bright *= (sy + 280) * 0.00555556f; else if (sy > 100) bright *= (280 - sy) * 0.00555556f;
     edge = bright; flare = bright * 0.65f;
     {   float lq = sqrtf(q[0] * q[0] + q[1] * q[1] + q[2] * q[2]);
         facing = (ade[0] * q[0] + ade[1] * q[1] + ade[2] * q[2]) / (lq > 0 ? lq : 1); }
     ax[0] = P[0] / -P[2]; ax[1] = P[1] / -P[2]; ax[2] = -1;    /* el sol en el plano z = -1 */
     {   float a0 = curso[cur_nodo].luz[0][9], a1 = curso[cur_nodo].luz[0][10], a2 = curso[cur_nodo].luz[0][11];   /* 899C10 */
         tinte = 0xFF000000u | (uint32_t)(fminf(a0, 1) * 255) << 16 | (uint32_t)(fminf(a1, 1) * 255) << 8 | (uint32_t)(fminf(a2, 1) * 255); }
-    sol_objeto(2, ax, vis * 0.1f, vis * 0.1f, vis * 0.1f, sol_int * vis, tinte, 0);   /* el disco */
     {   float at[3] = { far * ax[0], far * ax[1], far * ax[2] }, e = far * spread;   /* lo de lejos, con z */
         sol_objeto(0x10, at, e, e, e, sol_int, tinte, 1); sol_objeto(0x0f, at, e, e, e, sol_int, tinte, 1); }
-    sol_objeto(6, g0, bright * 0.1f, bright * 0.1f, bright * 0.1f, sol_int * bright * vis, tinte, 0);   /* el brillo */
-    for (k = 0; k < 3; k++) wv[k] = g0[k] - ax[k];              /* el eje de los destellos (40CAE0) */
+    sol_objeto(2, ax, vis * 0.1f, vis * 0.1f, vis * 0.1f, sol_int * vis, tinte, 0);   /* el disco */
+    sol_objeto(6, g0, fov * 0.1f, fov * 0.1f, fov * 0.1f, sol_int * bright * vis, tinte, 0);   /* el brillo */
+    for (k = 0; k < 3; k++) wv[k] = g0[k] - ax[k];              /* el eje de los destellos (0x10fdf0) */
     lw = sqrtf(wv[0] * wv[0] + wv[1] * wv[1] + wv[2] * wv[2]);
-    ring = edge < 0.4f ? edge : 0.4f;                           /* las etapas 0x14, 0x19 y 0x1A (otro modo) no */
+    ring = edge < 0.4f ? edge : 0.4f;                           /* 0x10fa08..0x10fa94 */
     if (facing > 0.92f && ring != 0) ring += (facing - 0.92f) * 6.8f;
     if (ring > 0.999f) ring = 0.999f;
     spread = lw * facing * 0.4f; size *= 0.4f;
-    flare *= vis; bright *= vis;
+    flare *= vis; bright *= vis; ring *= vis;
     {   static const struct { int r; float a, t; int k; } F[] = {   /* objeto, posicion en el eje, tamano, alfa */
             { 0x0e, -1.7f, 0.18f, 0 }, { 3, -0.52f, 0.15f, 0 }, { 4, -0.47f, 0.15f, 0 }, { 5, -0.15f, 0.15f, 0 },
             { 7, 0.12f, 0.1f, 1 }, { 8, 0.16f, 0.09f, 0 }, { 0x0a, 0.17f, 0.06f, 0 }, { 9, 0.18f, 0.11f, 0 },
             { 0x0b, 0.21f, 0.12f, 0 }, { 0x0c, 0.27f, 0.05f, 0 }, { 0x0d, 0.3f, 0.03f, 0 } };
         uint32_t i;
-        for (i = 0; i < sizeof F / sizeof F[0]; i++) {
+        for (i = 0; i < sizeof F / sizeof F[0]; i++) {           /* 0x10fee0: alfa x 0,75 */
             float al = spread * F[i].a / (lw > 0 ? lw : 1), p[3], t = size * F[i].t;
             for (k = 0; k < 3; k++) p[k] = g0[k] + al * wv[k];
-            sol_objeto(F[i].r, p, t, t, 1, sol_int * (F[i].k ? bright : flare), tinte, 0);
+            sol_objeto(F[i].r, p, t, t, 1, sol_int * (F[i].k ? bright : flare) * 0.75f, tinte, 0);
         }
         {   float p[3]; for (k = 0; k < 3; k++) p[k] = g0[k] - 0.003f * wv[k] / (lw > 0 ? lw : 1);
-            sol_objeto(8, p, 1.5f, 1.5f, 1, sol_int * ring * vis, tinte, 0); }   /* el brillo de cara al sol */
+            sol_objeto(8, p, 2.5f, 2.5f, 1, sol_int * ring * 0.75f, tinte, 0); }   /* el brillo de cara al sol (0x10fcdc) */
     }
     mat_load(&vista);
 }
@@ -5044,6 +5112,7 @@ int main(int argc, char **argv)
                 {   /* el curso: union, bifurcacion y etapa siguiente sin parar (curso_paso) */
                     int ev = curso_paso();
                     bo_cuenta(); bo_paso(ev);                   /* objetos animados de la union (44EDE0 / 44F190) */
+                    bo_reloj++;                                 /* 0x1030d0: +1 por cuadro del original (60 por s) */
                     if (cur_rama < 0 && s_decide >= 0 && yo.s >= s_decide - 450.0f && t_estado % 30 == 0) {
                         char b[64]; const char *zi = zona_nombre(curso[cur_nodo].izq), *zd = zona_nombre(curso[cur_nodo].der);
                         if (strlen(zi) + strlen(zd) > 14) sprintf(b, "< %.4s  %.4s >", curso[curso[cur_nodo].izq].zona, curso[curso[cur_nodo].der].zona);   /* cabe en el rotulo */
@@ -5184,7 +5253,6 @@ int main(int argc, char **argv)
         tri_enviados = 0; vtx_ult = vtx_env; vtx_env = 0; ta_inicia_cuadro(); vtx_et_ult = vtx_et; vtx_et = 0;
         if (estado != TITULO) nodos_visibles_todos();          /* los del original que caben en el TA */
         if (estado != TITULO) traf_parpadea(pausa || estado != CARRERA);   /* 4AE5F0 (sin traf_paso: suspendido) */
-        if (estado == CARRERA && !pausa) bo_reloj++;            /* 0x1030d0: reloj de la animacion de vertices */
         vib_cuadro();                                           /* el Puru Puru (vib_paso lo dejo en el control) */
         for (l = 0; l < 3; l++) {
             pvr_list_begin(LISTA[l]);

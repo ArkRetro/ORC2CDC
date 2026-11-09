@@ -682,13 +682,30 @@ y BOnn.DAT); demo/main.c bo_*.
   en el tramo transversal de la union (z ~ -685). Se quitan al llegar a la etapa siguiente (car+0x5C a 0).
 - Alas: los nodos con la bandera 0x20 tienen animacion de vertices (las tiras con 0x800 en la tabla 3 traen 4 paquetes,
   uno por cuadro); el cuadro sale de la tabla de 0x328aa8 (la morph_var.dat del PC dentro del ELF: 23 grupos {indice,
-  k, m, m floats}; 0x103120) con el reloj de 0x448850 (+1 por cuadro dibujado, 0x1030d0 desde 0x20d7f8). La demo usa
-  el cuadro entero (sin la mezcla de dos cuadros de 40ECC0 / vsc 7): DIFERENCIA menor.
+  k, m, m floats}; 0x103120) con el reloj de 0x448850 (+1 por cuadro, 0x1030d0 desde 0x20d7f8; aqui +1 por paso de
+  logica, 60 por segundo).
+- Alas quietas (queja del probador de la demo 22, "los pajaros no tienen animacion", 2026-11-09). CAUSA: los datos
+  estaban bien (BO01: 4 cuadros distintos, 136 vertices cada uno) pero `lee_modelo_en` pone a 0 el relleno[0] de todos
+  los nodos para el presupuesto del TA, y ahi lleva conv_bo.py la malla y el indice de animacion de cada nodo: todas
+  las alas usaban la animacion 0 (0..0,7 en 120 cuadros: casi siempre el cuadro 0) y el primer nodo de cada registro
+  recibia la suma del TA como malla (no se dibujaba: faltaba un pajaro de cada grupo). Ahora el modelo de la union se
+  pide con `relleno_propio` y el lector no lo toca. CONFIRMADO en Flycast (capturas consecutivas con poses distintas).
+- Mezcla de cuadros: PS2 0x103018 da k = (int) f (0x448854) y la fraccion f - k; 0x110700 guarda la fraccion con cada
+  tira en la cola de dibujo (+0x14) y el paquete del cuadro k % cuadros de la tira (0x1030a8); el PC (40ECC0 / 404700)
+  mezcla los cuadros k y k + 1 (0 tras el ultimo) con pesos 1 - f y f (vsc 7). Aqui se mezclan en la CPU las
+  posiciones y los colores de las dos mallas (bo_dibuja_malla; las mallas de los 4 cuadros casan una a una en n y
+  textura en los 5 conjuntos del modo OutRun, comprobado en bo_subido). CONFIRMADO en el PC; PROBABLE en el PS2 (la
+  fraccion llega a la cola; no se ha seguido el microcodigo del VU1). Coste: CPU ~1800 vertices interpolados la
+  bandada, ~2400 los halcones; el TA no cambia.
 - Memoria: cada malla del original una vez por cuadro y los nodos con su matriz (la bandada: 13 pajaros con la misma
   malla): BO01 18 KB, BO02 15 KB, BO12 37 KB, BO13 122 KB, BO11 276 KB de RAM (fichero) mientras se esta en la union;
   VRAM 1-32 KB por conjunto (fuera de la zona del curso: pvr_mem con el apuro y la rebaja de sube_tramo); BO.DAT 74 KB
   en RAM siempre (tablas, morph y las 7 trayectorias de la variante 1). TA: dibuja_malla con ta_cabe (la bandada ~70
   vertices por pajaro, el dirigible ~2300 por cuadro).
+- Dirigible (conjunto 11, el que sale si no pasa nada en la etapa): BO11.DAT (276 KB) NO cabe en la RAM con las dos
+  ramas de la union leidas (medido en Flycast, COCHE09 de PRUEBA_AUTO: 288 KB libres, 394-409 KB despues pero
+  troceados: malloc de 283 KB falla) y ese conjunto no sale. PENDIENTE (reducir el fichero: los cuadros 1..3 como
+  posiciones de 16 bits, o leerlo en otro hueco); su movimiento no se ha podido verificar.
 - PENDIENTE: los sonidos (+0x18 / +0x1C: efectos 0x83..0x91 de los bancos 0x30a..0x316), la acompanante senalandolos
   (race_robots_runtime) y el filtro de visibilidad 4F0E40 (aqui: esfera contra la vista y el LOD por tamano, umbral 8).
 - Verificado en E (`-DPRUEBA_AUTO -DPRUEBA_NODO=0 -DPRUEBA_FIN=500 -DPRUEBA_V=280 -DPRUEBA_RAMA=0`; la eleccion natural
@@ -1089,12 +1106,24 @@ main.c "entorno del original", cielo_dibuja, sol_dibuja, coche_luz).
   etapa siguiente elegida y leida) la niebla y las luces se mezclan en 120 cuadros (44A000 / 44AB10) del valor guardado
   al del principio de la etapa nueva, y el cielo cambia en tres tercios de 40 cuadros (451E90): viejo +0x4C -> viejo
   +0x54 -> nuevo +0x54 -> nuevo +0x4C. Antes: niebla por distancia en toda la union y cielo de golpe.
+- Sol y destello (queja del probador de la demo 22, "falta efecto del sol deslumbrando", 2026-11-09): el pase ahora es
+  el del PS2 (0x10f190), no el del PC. CAUSA de que apenas se viera: el valor de cada objeto (4056D0 / PS2 0x111998)
+  SUSTITUYE el alfa del material y la demo lo multiplicaba por el (0x76 el sol de lejos 0x10, 0xAE el brillo 6, 0x30
+  el destello 4: 2-5 veces mas flojos); ademas el sol solo esta en pantalla con |x| < 360 y |y| < 280 (PS2; el PC 470
+  / 440) y con la luz de las etapas (inclinacion 30-60 grados, cam+358 = 1) casi siempre queda por encima de la
+  pantalla: se ve en las etapas de 30 grados (CAST, DESE, INDU, IMPE) mirando hacia el o en las subidas. Constantes del
+  PS2 distintas del PC: bordes 360 / 280 con (360 - |x|) / 160 y (280 - |y|) / 180 desde 100; brillo 6 con escala
+  fov x 0,1; destellos y brillo de cara al sol con alfa x 0,75 (0x10fee0) y este de tamano 2,5 (PC 1,5); lejos a 1500
+  m (aqui 1000); sin las excepciones de etapa del anillo. Parte visible: el PS2 la mide con la media del alfa de 8 x 8
+  pixeles (0x1036c0..0x103af4, guardada en 0x448864 y leida por 0x103b38) x 0,5 / 255 sin tope: aqui fija en 0,251
+  (alfa 0x80 = opaco del GS; PROBABLE). Verificado en Flycast con `-DPRUEBA_SOL -DPRUEBA_SOL_X/Y` (capturas
+  aves/sol_*.png del scratchpad). DIFERENCIA que queda: sin oclusion.
 - Sol y destello (CONFIRMADO salvo lo dicho): bandera 2 de +0x3C (todas menos CLOU, GHOS y METR); intensidad que sube o
   baja en 120 cuadros en la union (4AFCC0); direccion -luz 1 con la inclinacion x cam+358; objetos 2, 3..0x10 del banco
   0x57 (SOL.DAT) en el espacio de la camara como 40CBC0 (disco, lejanos, brillo, 11 destellos y brillo de cara al
   sol), tenidos con el ambiente del entorno 0. DIFERENCIAS: sin consulta de oclusion (la PowerVR no la tiene): la parte
-  visible va fija en 0,22 (el tope del original), asi que el destello no se apaga detras de lo que tapa el sol; los
-  lejanos a 1000 m en vez de 2500 (el cielo esta en la escena); mezcla aditiva (PROBABLE: texturas de fondo negro).
+  visible va fija (0,251, ver arriba; el PC topa en 0,22), asi que el destello no se apaga detras de lo que tapa el sol; los
+  lejanos a 1000 m en vez de 1500 (PS2; PC 2500) (el cielo esta en la escena); mezcla aditiva (PROBABLE: texturas de fondo negro).
 - Niebla en la PowerVR: una tabla para todo: la de la escena (lista 1); los coches no llevan la suya (lista 2: casi igual
   salvo ALPI, 0,0003 frente a 0,0009, y CAPE/RUIN; DIFERENCIA); el cielo lleva la tabla solo si su lista 0 tiene
   niebla (CLOU).
