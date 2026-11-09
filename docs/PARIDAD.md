@@ -930,7 +930,8 @@ inventada. Causas y arreglo:
 - Verificado en E (Flycast, PRUEBA_AUTO, PRUEBA_NODO para salir en cada etapa): ruta A PALM-LAKE-CAST-CLOU-TULI y
   ruta B PALM-ALPI-DESE-GHOS-CAPE, mas GHOS-IMPE; las 3 metas probadas dan GOAL; una prueba larga encadena PALM -> LAKE
   -> CAST (dos uniones, recorte de la ruta y recentrado) sin perder RAM. No probados en E: FORE, INDU, SNOW, METR,
-  RUIN (convertidos y con la misma mecanica). Cifras de RAM, VRAM y cargas en DREAMCAST.md. Texturas de los 14
+  RUIN (convertidos y con la misma mecanica); desde 2026-11-09 las cinco metas dan GOAL en E (ver Ultimo cambio
+  verificado). Cifras de RAM, VRAM y cargas en DREAMCAST.md. Texturas de los 14
   tramos nuevos revisadas en hoja (sin desordenar).
 - PENDIENTE: objetos animados de BK; probar en R.
 
@@ -1000,6 +1001,21 @@ que la Dreamcast espera de un juego: todo sale de graficos del disco (`tools/con
   eyecatch. Previas en el scratchpad (vmu/). Pendiente: R (VMU real en GDEMU).
 
 ## Ultimo cambio verificado
+
+Memoria de video del curso (2026-11-09, ver DREAMCAST.md, Memoria de video del curso y del HUD): la meta BK13 no
+cabia tras GHOS -> IMPE (VRAM troceada por `pvr_mem`: 253 KB libres en huecos, BK13 219 KB) y la carrera se paraba.
+Ahora las etapas y uniones van en una zona propia de la VRAM (etapas desde abajo, uniones desde arriba; sin huecos),
+la meta usa las texturas iguales de su etapa, el HUD de carrera sube con paleta de 4/8 bits las texturas de 256
+colores o menos (sin perdida: mismos valores de texel; -254 KB) y la VRAM del curso se devuelve al volver al menu. Si
+algo no cabe, la carrera sigue (fuera de la zona, echando del HUD lo que no se dibuja o con la textura rebajada).
+Peor combinacion: de 29-31 KB libres a 290 KB (BK08/BK09 + IMPE) y 382 KB (IMPE + BK13). Lo que se ve no cambia
+(capturas congeladas antes/despues: HUD identico). Medida en host: `tools/vram.py`. Prueba nueva: `-DPRUEBA_SIN_TIEMPO`
+(el tiempo no se acaba, para llegar a GOAL por cualquier ruta) y `-DPRUEBA_VRAM_KB=n` (zona del curso pequena, para
+probar el ultimo recurso).
+Verificado en E (Flycast, COCHE06, PRUEBA_SIN_TIEMPO): las cinco metas hasta GOAL, GHOS -> IMPE -> BK13, SNOW -> IMPE,
+CLOU -> TULI, INDU -> METR (BK11), SNOW -> RUIN y GHOS -> CAPE, dos o tres carreras seguidas cada una (con vuelta al
+menu), sin texturas rebajadas; y el ultimo recurso con `-DPRUEBA_VRAM_KB=700` (GOAL con texturas rebajadas). Compila
+sin avisos. Sin datos regenerados (no hacia falta cambiar ningun .DAT).
 
 Piloto y acompanante (2026-11-09, ver Coches: el piloto y la acompanante): CHR_DR_M00 y CHR_DR_L00 con su esqueleto,
 pesos y movimientos del original en el coche del jugador (todos los coches, vistas exteriores). Verificado en H (motor

@@ -46,4 +46,5 @@ int menu_pausa_entra(void);
 int menu_pausa_paso(unsigned botones_nuevos);
 void menu_pausa_dibuja(void);
 void menu_pausa_sale(void);
+unsigned menu_pausa_vram(void);                          /* VRAM que pedira la pausa (bytes; 0 si ya esta subida) */
 #endif

@@ -17,6 +17,7 @@ void hud_puntos_msg(int puntos, int estilo, float dy, float alfa);
 void hud_baja_tex(void);
 void hud_pon_modelo(int modelo);                        /* tacometro de otro modelo (con las texturas bajadas) */
 int hud_sube_tex(void);                                  /* 0 bien */
+uint32_t hud_suelta_quietas(uint32_t cuadros);           /* apuro de VRAM: echa las no dibujadas en `cuadros`; bytes */
 
 /* ---- acceso generico a un fichero con el formato de HUD.DAT (ver tools/conv_hud.py), p.ej. MENU.DAT ---- */
 typedef struct hud_dat hud_dat_t;

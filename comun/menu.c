@@ -1013,6 +1013,7 @@ int menu_pausa_entra(void)
     pz_ok = 1;
     return 0;
 }
+unsigned menu_pausa_vram(void) { return md && pidx[V_PAUSA] >= 0 && !cargada[V_PAUSA] ? pan[pidx[V_PAUSA]].vram : 0; }
 void menu_pausa_sale(void) { if (md && pidx[V_PAUSA] >= 0) baja_p(V_PAUSA); pz_ok = 0; }
 
 static void pz_guarda(void) { const uint8_t *p = activa(); if (p && (p[0x3f4] & 2)) vmu_guarda(); }

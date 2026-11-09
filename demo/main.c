@@ -12,6 +12,7 @@
 #include <dc/flashrom.h>
 #include <math.h>
 #include <malloc.h>
+#include <stdlib.h>
 #include "../comun/gd.h"
 #include "../comun/musica.h"
 #include "../comun/or2_fisica.h"
@@ -45,6 +46,9 @@ typedef struct {
     uint32_t ruta_i;                                              /* punto de la ruta mas cercano al coche (ultimo) */
     uint8_t *datos, *blob; pvr_poly_hdr_t *cabs[2];               /* [0] con niebla, [1] sin niebla (cielo) */
     pvr_ptr_t *tv;                                                /* texturas en la memoria de video */
+    uint8_t *tfl;                                                 /* etapas y uniones (sube_tramo): TF_* por textura */
+    tex_t *tex0;                                                  /* texs como venian, si alguna se ha rebajado */
+    int lado;                                                     /* zona del curso que usa: 0 ninguna, 1 abajo, 2 arriba */
     uint32_t *ofs;                                                /* color de desplazamiento por vertice o NULL (coche) */
     const int32_t *remap;                                         /* textura -> la del color elegido, o NULL (trafico) */
 } modelo_t;
@@ -182,12 +186,44 @@ static uint32_t modelo_teo(const modelo_t *m, int lod, int o)
     return c;
 }
 
+/* ---------------------------------------------------------------- memoria de video del curso
+   Antes cada textura de las etapas y uniones se pedia a pvr_mem (el dlmalloc de KallistiOS) y la VRAM se troceaba:
+   GHOS abajo, BK09 encima, GHOS se suelta (hueco), IMPE ocupa ese hueco y sigue por encima de BK09, BK09 se suelta
+   (otro hueco entre trozos de IMPE) y la meta BK13 (219 KB) ya no cabia con 253 KB libres en trozos (medido en Flycast:
+   "Sin memoria de video para la etapa" y la carrera parada). Ahora el curso tiene su zona: un bloque de pvr_mem pedido
+   al empezar la carrera (curso_reinicia: lo libre menos lo que pueda pedir la pausa, ar_reserva) en el que las etapas
+   se suben desde abajo y las uniones desde arriba. Nunca hay mas de una etapa y una union y cada una se suelta entera
+   antes de que entre la siguiente de su lado, asi que no queda ningun hueco: cabe todo lo que sume menos que la zona.
+   Al volver al menu se devuelve (curso_al_menu): el menu no dibuja la etapa y asi tiene esa VRAM para sus pantallas.
+   Si algo no cabe en la zona se pide a pvr_mem, despues se echa lo prescindible (vram_apuro) y, como ultimo recurso, la
+   textura se sube rebajada (tex_rebaja): la carrera nunca se para por la VRAM. */
+#define TF_PROPIA 1                                               /* bloque propio de pvr_mem (se libera) */
+#define TF_AJENA 2                                                /* de otro modelo (compartida) o la gris: no se libera */
+#define TF_REBAJADA 4                                             /* subida a menos resolucion (tex_rebaja) */
+static pvr_ptr_t ar_bloque; static uintptr_t ar_ini, ar_fin, ar_abajo, ar_arriba;
+static uint32_t ar_max_abajo, ar_min_arriba;                     /* lo mas alto/bajo que ha llegado cada lado */
+static uint32_t vram_rebajadas, vram_fuera;                       /* texturas rebajadas y fuera de la zona (carrera) */
+static int cie_n;                                                 /* cabeceras del cielo guardadas (cielo_cab) */
+static uint32_t ar_libre(void) { return ar_bloque ? (uint32_t)(ar_arriba - ar_abajo) : 0; }
+static uint32_t vram_libre(void) { return (uint32_t)pvr_mem_available() + ar_libre(); }
+
+/* texturas de un modelo fuera de la VRAM (los datos siguen en la RAM; las rebajadas vuelven a ser como venian) */
+static void tex_suelta(modelo_t *m)
+{
+    uint32_t i;
+    for (i = 0; i < m->ntex; i++) if (m->tv && m->tv[i] && (!m->tfl || (m->tfl[i] & TF_PROPIA))) pvr_mem_free(m->tv[i]);
+    if (m->lado == 1) ar_abajo = ar_ini;                          /* su lado de la zona del curso, entero */
+    if (m->lado == 2) ar_arriba = ar_fin;
+    if (m->tex0) { memcpy(m->texs, m->tex0, m->ntex * sizeof(tex_t)); free(m->tex0); }
+    free(m->tv); free(m->tfl); free(m->cabs[0]); free(m->cabs[1]);
+    m->tv = NULL; m->tfl = NULL; m->tex0 = NULL; m->cabs[0] = m->cabs[1] = NULL; m->lado = 0;
+    cie_n = 0;                                                    /* las direcciones se reutilizan: fuera las del cielo */
+}
 /* libera un modelo: texturas de la memoria de video, cabeceras y datos */
 static void libera_modelo(modelo_t *m)
 {
-    uint32_t i;
-    for (i = 0; i < m->ntex; i++) if (m->tv && m->tv[i]) pvr_mem_free(m->tv[i]);
-    free(m->tv); free(m->cabs[0]); free(m->cabs[1]); free(m->ofs); free(m->vis); free(m->pvs_m); free(m->pvs_teo);
+    tex_suelta(m);
+    free(m->ofs); free(m->vis); free(m->pvs_m); free(m->pvs_teo);
     if (m->datos != hueco_etapa && m->datos != hueco_union) free(m->datos);
     memset(m, 0, sizeof *m);
 }
@@ -213,6 +249,181 @@ static void compacta_modelo(modelo_t *m)
         m->datos = d;
     }
     m->blob = NULL;
+}
+
+/* ---- subida de las etapas y uniones a la VRAM (ver "memoria de video del curso", arriba) */
+static void curso_error(const char *s);
+#ifndef CURSO_VRAM_RESERVA
+#define CURSO_VRAM_RESERVA (48 * 1024)                            /* fuera de la zona, ademas de la pausa del menu */
+#endif
+static pvr_ptr_t tex_gris;                                        /* 8x8 ARGB4444 gris: lo ultimo si nada cabe */
+#ifdef PRUEBA_VRAM_KB
+static pvr_ptr_t ar_lastre;                                       /* prueba: lo libre fuera de la zona, ocupado */
+#endif
+static void ar_suelta(void)
+{
+#ifdef PRUEBA_VRAM_KB
+    if (ar_lastre) pvr_mem_free(ar_lastre);
+    ar_lastre = NULL;
+#endif
+    if (ar_bloque) pvr_mem_free(ar_bloque);
+    ar_bloque = NULL; ar_ini = ar_fin = ar_abajo = ar_arriba = 0;
+}
+/* la zona del curso: el mayor bloque de lo libre menos la reserva (pvr_mem no dice cual es el mayor hueco: se busca) */
+static void ar_reserva(void)
+{
+    uint32_t r = CURSO_VRAM_RESERVA + menu_pausa_vram(), lib = pvr_mem_available(), lo = 0, hi, k; pvr_ptr_t p;
+    ar_suelta();
+    hi = lib > r ? (lib - r) & ~32767u : 0;
+#ifdef PRUEBA_VRAM_KB
+    if (hi > PRUEBA_VRAM_KB * 1024u) hi = PRUEBA_VRAM_KB * 1024u;   /* prueba: zona pequena (rebajas y apuros) */
+#endif
+    if (hi < 65536) return;
+    if (!(p = pvr_mem_malloc(hi))) {                              /* troceada: busqueda del mayor que cabe (32 KB) */
+        while (hi - lo > 32768) {
+            k = ((lo + hi) / 2) & ~32767u;
+            if (k <= lo) break;
+            if ((p = pvr_mem_malloc(k))) { pvr_mem_free(p); lo = k; } else hi = k;
+        }
+        if (!lo || !(p = pvr_mem_malloc(lo))) return;
+        hi = lo;
+    }
+    ar_bloque = p; ar_ini = ar_abajo = (uintptr_t)p; ar_fin = ar_arriba = ar_ini + hi;
+    ar_max_abajo = 0; ar_min_arriba = hi; vram_rebajadas = vram_fuera = 0;
+#ifdef PRUEBA_VRAM_KB
+    {   /* prueba: fuera de la zona solo la reserva (asi lo que no cabe pasa por el apuro y la rebaja) */
+        uint32_t f = pvr_mem_available();
+        while (f > r + 32768 && !(ar_lastre = pvr_mem_malloc(f - r))) f -= 32768;
+    }
+#endif
+    dbglog(DBG_INFO, "VRAM: zona del curso %uK (libre %uK, fuera de la zona %uK)\n", (unsigned)(hi >> 10), (unsigned)(lib >> 10),
+           (unsigned)(pvr_mem_available() >> 10));
+}
+/* un bloque de tam bytes: en la zona del curso por su lado (1 desde abajo, 2 desde arriba) o, si no cabe, de pvr_mem */
+static pvr_ptr_t vram_pide(uint32_t tam, int lado, uint8_t *fl)
+{
+    uintptr_t a; pvr_ptr_t v;
+    if (ar_bloque && lado == 1 && (a = (ar_abajo + 31) & ~(uintptr_t)31) + tam <= ar_arriba) {
+        ar_abajo = a + tam; if (ar_abajo - ar_ini > ar_max_abajo) ar_max_abajo = ar_abajo - ar_ini;
+        return (pvr_ptr_t)a;
+    }
+    if (ar_bloque && lado == 2 && ar_arriba - ar_ini >= tam && (a = (ar_arriba - tam) & ~(uintptr_t)31) >= ar_abajo) {
+        ar_arriba = a; if (ar_arriba - ar_ini < ar_min_arriba) ar_min_arriba = ar_arriba - ar_ini;
+        return (pvr_ptr_t)a;
+    }
+    if ((v = pvr_mem_malloc(tam))) { *fl |= TF_PROPIA; vram_fuera++; }
+    return v;
+}
+/* apuro: echa lo prescindible (las texturas del HUD que no se estan dibujando, que vuelven solas al dibujarlas, y lo
+   que el HUD y los menus tenian pendiente de liberar); 1 si ha echado algo */
+static int vram_apuro(void)
+{
+    uint32_t b = hud_suelta_quietas(8), p = hudd_pendiente();
+    if (p) hudd_vacia();                                          /* (espera 40 ms a la PowerVR) */
+    dbglog(DBG_INFO, "VRAM: apuro, fuera %uK del HUD y %u pendientes, libre %uK\n", (unsigned)(b >> 10), (unsigned)p, (unsigned)(vram_libre() >> 10));
+    return b || p;
+}
+/* texel k (orden twiddled) del nivel mayor de la textura t de m: 16 bits, VQ (libro reducido: N entradas, las ultimas)
+   y con mipmaps (niveles de 1x1 a la base; docs/DREAMCAST.md Suelos) */
+static uint16_t texel_de(const modelo_t *m, const tex_t *t, uint32_t k)
+{
+    const uint8_t *d = m->blob + t->off; uint32_t L = __builtin_ctz(t->w);
+    if (t->fmt & 0x100) {
+        uint32_t n = ((t->fmt >> 16) & 0xff) + 1, base = (t->fmt & 0x200) && L ? 1 + ((1u << (2 * (L - 1))) - 1) / 3 : 0;
+        uint32_t e = d[8 * n + base + (k >> 2)] - (256 - n);
+        return e < n ? ((const uint16_t *)d)[4 * e + (k & 3)] : 0;
+    }
+    if (t->fmt & 0x200) return ((const uint16_t *)(d + 6 + 2 * (((1u << (2 * L)) - 1) / 3)))[k];
+    return ((const uint16_t *)d)[k];
+}
+/* guarda las texturas como venian (tex_suelta las devuelve); 0 bien */
+static int tex_guarda(modelo_t *m)
+{
+    if (!m->tex0 && (m->tex0 = malloc(m->ntex * sizeof(tex_t)))) memcpy(m->tex0, m->texs, m->ntex * sizeof(tex_t));
+    return m->tex0 ? 0 : -1;
+}
+/* Ultimo recurso para una textura que no cabe: la misma a 1/2^s de lado (s = 1, 2...; lo primero que cabe y ocupa
+   menos que ella) en 16 bits, cada texel la media de los 4^s que cubre (en una textura twiddled, cuadrada o de bloques
+   cuadrados seguidos, son los 4^s seguidos), sin VQ ni mipmaps; mismas UV. Se ve mas borrosa. 0 bien */
+static int tex_rebaja(modelo_t *m, uint32_t i, int lado)
+{
+    static const uint8_t CAN[3][4][2] = { { { 15, 1 }, { 10, 5 }, { 5, 5 }, { 0, 5 } },          /* ARGB1555 */
+                                          { { 0, 0 }, { 11, 5 }, { 5, 6 }, { 0, 5 } },           /* RGB565 */
+                                          { { 12, 4 }, { 8, 4 }, { 4, 4 }, { 0, 4 } } };         /* ARGB4444 */
+    tex_t *t = m->texs + i; uint32_t fb = t->fmt & 0xff, s, w, h, tam, j, k, c; pvr_ptr_t v; uint16_t *o;
+    if (fb > 2 || !m->blob || tex_guarda(m)) return -1;
+    for (s = 1; (t->w >> s) >= 8 && (t->h >> s) >= 8; s++) {
+        uint32_t nb = 1u << (2 * s);
+        w = t->w >> s; h = t->h >> s; tam = (w * h * 2 + 31) & ~31u;
+        if (tam >= t->tam) continue;
+        if (!(o = memalign(32, tam))) continue;
+        if (!(v = vram_pide(tam, lado, m->tfl + i))) { free(o); continue; }
+        for (j = 0; j < w * h; j++) {
+            uint32_t sum[4] = { 0, 0, 0, 0 }, r = 0;
+            for (k = 0; k < nb; k++) {
+                uint16_t x = texel_de(m, t, j * nb + k);
+                for (c = 0; c < 4; c++) sum[c] += (x >> CAN[fb][c][0]) & ((1u << CAN[fb][c][1]) - 1);
+            }
+            for (c = 0; c < 4; c++) if (CAN[fb][c][1]) r |= ((sum[c] + nb / 2) / nb) << CAN[fb][c][0];
+            o[j] = r;
+        }
+        pvr_txr_load(o, v, tam); free(o);
+        dbglog(DBG_INFO, "VRAM: textura %u (%ux%u, %uK) rebajada a %ux%u\n", (unsigned)i, (unsigned)t->w, (unsigned)t->h, (unsigned)(t->tam >> 10), (unsigned)w, (unsigned)h);
+        t->w = w; t->h = h; t->fmt = fb | (t->fmt & 0xC00); t->tam = tam;
+        m->tv[i] = v; m->tfl[i] |= TF_REBAJADA;
+        return 0;
+    }
+    return -1;
+}
+/* textura de c igual a la i de m (mismos texeles, tamano y formato) y subida entera; -1 si no hay */
+static int tex_igual(const modelo_t *c, const modelo_t *m, uint32_t i)
+{
+    const tex_t *t = m->texs + i; uint32_t j;
+    if (!c || !c->tv || !c->blob || !m->blob) return -1;
+    for (j = 0; j < c->ntex; j++) {
+        const tex_t *u = c->texs + j;
+        if (u->w == t->w && u->h == t->h && u->tam == t->tam && !((u->fmt ^ t->fmt) & 0x00FF03FFu) && c->tv[j] &&
+            !(c->tfl && (c->tfl[j] & (TF_AJENA | TF_REBAJADA))) && !memcmp(c->blob + u->off, m->blob + t->off, t->tam)) return j;
+    }
+    return -1;
+}
+static const tex_t *ord_texs;
+static int ord_tam(const void *a, const void *b) { return (int)ord_texs[*(const uint16_t *)b].tam - (int)ord_texs[*(const uint16_t *)a].tam; }
+/* texturas de una etapa (lado 1) o union (lado 2) a la VRAM y sus cabeceras; comp: modelo cuyas texturas iguales se
+   usan en vez de subirlas otra vez (la etapa para su meta: las dos estan hasta el final de la carrera). Las grandes
+   primero (si alguna va a pvr_mem, se queda con los huecos grandes). Nunca falla: lo que no cabe va rebajado o gris */
+static void sube_tramo(modelo_t *m, int lado, const modelo_t *comp)
+{
+    uint32_t i, k, n = m->ntex, b_comp = 0, n_comp = 0, n_reb = 0; uint16_t *ord = malloc(n * sizeof *ord); int apuro = 0, j;
+    for (k = 0; k < 2; k++) m->cabs[k] = memalign(32, (n + 1) * sizeof(pvr_poly_hdr_t));
+    m->tv = calloc(n + 1, sizeof(pvr_ptr_t)); m->tfl = calloc(n + 1, 1); m->lado = lado;
+    if (!m->cabs[0] || !m->cabs[1] || !m->tv || !m->tfl) curso_error("Sin memoria para las cabeceras");
+    if (ord) { for (i = 0; i < n; i++) ord[i] = i; ord_texs = m->texs; qsort(ord, n, sizeof *ord, ord_tam); }
+    for (k = 0; k < n; k++) {
+        tex_t *t; pvr_ptr_t v = NULL;
+        i = ord ? ord[k] : k; t = m->texs + i;
+        if ((t->fmt & 0xff) <= 2 && !(t->tam & 31) && t->tam && (j = tex_igual(comp, m, i)) >= 0) {
+            v = comp->tv[j]; m->tfl[i] = TF_AJENA; b_comp += t->tam; n_comp++;
+        } else if ((t->fmt & 0xff) <= 2 && !(t->tam & 31) && t->tam) {
+            v = vram_pide(t->tam, lado, m->tfl + i);
+            if (!v && !apuro) { apuro = 1; if (vram_apuro()) v = vram_pide(t->tam, lado, m->tfl + i); }
+            if (v) pvr_txr_load(m->blob + t->off, v, t->tam);
+            else if (!tex_rebaja(m, i, lado)) { v = m->tv[i]; n_reb++; }
+        }
+        if (!v) {                                                 /* nada cabe (o formato desconocido): la gris */
+            dbglog(DBG_INFO, "VRAM: textura %u (%ux%u, %uK) sin sitio: gris\n", (unsigned)i, (unsigned)t->w, (unsigned)t->h, (unsigned)(t->tam >> 10));
+            if (!tex_guarda(m)) { t->w = t->h = 8; t->fmt = 2 | (t->fmt & 0xC00); t->tam = 128; }
+            v = tex_gris; m->tfl[i] = TF_AJENA | TF_REBAJADA; n_reb++;
+        }
+        m->tv[i] = v;
+        compila_cab(m, i, 0);
+    }
+    free(ord);
+    vram_rebajadas += n_reb;
+    dbglog(DBG_INFO, "VRAM: %u texturas al lado %d, %u compartidas (%uK), %u rebajadas; zona libre %uK (abajo %uK, arriba %uK), "
+           "fuera %uK, en pvr_mem %u\n", (unsigned)n, lado, (unsigned)n_comp, (unsigned)(b_comp >> 10), (unsigned)n_reb,
+           (unsigned)(ar_libre() >> 10), (unsigned)((ar_abajo - ar_ini) >> 10), (unsigned)((ar_fin - ar_arriba) >> 10),
+           (unsigned)(pvr_mem_available() >> 10), (unsigned)vram_fuera);
 }
 
 /* Carga en segundo plano: un hilo lee del GD el fichero de un modelo (lee_modelo) mientras el bucle sigue dibujando;
@@ -2605,10 +2816,6 @@ static void ram_kb(unsigned *uso, unsigned *libre)
     *libre = (unsigned)((mi.fordblks + (0x8d000000u - 0x10000u - tope)) >> 10);
 }
 static void curso_error(const char *s) { dbglog(DBG_ERROR, "CURSO: %s\n", s); vid_set_mode(modo_video, PM_RGB565); aviso(s); for (;;) thd_sleep(1000); }
-static void sube_etapa(modelo_t *m)
-{
-    if (sube_modelo(m)) curso_error("Sin memoria de video para la etapa");
-}
 /* el arbol (CURSO.DAT); 0 bien */
 static int curso_lee(void)
 {
@@ -2654,15 +2861,17 @@ static void curso_reinicia(void)
     int k = PRUEBA_NODO < ncurso ? PRUEBA_NODO : 0;
     carga_espera(); carga.estado = 0;
     libera_modelo(&uni); libera_modelo(&uni_der); libera_modelo(&sig);
-    if (!etapa.tv || etapa_nodo != k) {
+    if (!etapa.datos || etapa_nodo != k) {
         int r;
         libera_modelo(&etapa);
         musica_pausa_lectura(1);                                /* el GD para la etapa (la musica tira del anillo) */
         r = curso_lee_etapa(k);
         musica_pausa_lectura(0);
         if (r) curso_error("No se pudo leer la etapa de salida");
-        sube_etapa(&etapa);
-    }
+    } else tex_suelta(&etapa);                                  /* la misma: sus texeles siguen en el hueco de la RAM */
+    if (ar_bloque) { ar_suelta(); thd_sleep(40); }              /* (la PowerVR puede estar leyendo el cuadro anterior) */
+    ar_reserva();                                               /* la zona del curso: lo libre tras el HUD y el coche */
+    sube_tramo(&etapa, 1, NULL);
     if (ruta_pon(&etapa)) curso_error("Sin memoria para la ruta");
     cielo = &etapa; cur_nodo = k; cur_sig = -1; etapa_n = curso[k].nivel; cur_rama = -1; cur_en_union = 0;
     if (curso[k].m_pos > 1.0f) m_pos = curso[k].m_pos;
@@ -2721,7 +2930,7 @@ static int curso_paso(void)
         if (carga.r) curso_error("No se pudo leer la etapa siguiente");
         t_carga_ult = (timer_ms_gettime64() - carga.t0) / 1000.0f;
         if (m == &uni) {
-            sube_etapa(m);
+            sube_tramo(m, 2, e->izq < 0 && etapa.tv ? &etapa : NULL);   /* la meta comparte lo que tenga igual la etapa */
             if ((int)(i_union = ruta_anade(m)) < 0) curso_error("Sin memoria para la ruta");
             j_union = ruta_salto; s_union = s_base + i_union * PASO;
             if (e->izq >= 0) carga_pide(&uni_der, "BKD.DAT", NULL, 0, marco_un);
@@ -2732,14 +2941,14 @@ static int curso_paso(void)
             s_decide = s_union + (k - j_union) * PASO;
         } else if (m == &sig) {
             int i;
-            sube_etapa(m);
+            sube_tramo(m, 1, NULL);
             if ((i = ruta_anade(m)) < 0) curso_error("Sin memoria para la ruta");
             s_sig = s_base + i * PASO;
         }
         {
             unsigned u, l; ram_kb(&u, &l);
-            dbglog(DBG_INFO, "CURSO: %s en %.2f s (s %.0f), RAM en uso %uK libre %uK, VRAM libre %uK\n", m == &uni ? fich_union : m == &uni_der ? "BKD.DAT" : fich_sig,
-                   (double)t_carga_ult, (double)yo.s, u, l, (unsigned)(pvr_mem_available() >> 10));
+            dbglog(DBG_INFO, "CURSO: %s en %.2f s (s %.0f), RAM en uso %uK libre %uK, VRAM libre %uK (zona %uK)\n", m == &uni ? fich_union : m == &uni_der ? "BKD.DAT" : fich_sig,
+                   (double)t_carga_ult, (double)yo.s, u, l, (unsigned)(vram_libre() >> 10), (unsigned)(ar_libre() >> 10));
         }
     }
     if (s_union < 0 && !uni.datos && etapa.datos && carga.estado == 0 && yo.s > longitud - UNION_ANTES) {
@@ -2769,7 +2978,7 @@ static int curso_paso(void)
         curso_recentra(marco_un[0], marco_un[2]);               /* el marco, al principio de la union */
         marco_un[0] = marco_un[2] = 0;
         marco_compone(marco_un, e->rama[cur_rama], marco_sig); sprintf(fich_sig, "SEG%02d.DAT", curso[cur_sig].seg);
-        ram_kb(&u, &l); dbglog(DBG_INFO, "CURSO: etapa %d liberada (s %.0f), recentrado, RAM libre %uK, VRAM libre %uK\n", cur_nodo, (double)yo.s, l, (unsigned)(pvr_mem_available() >> 10));
+        ram_kb(&u, &l); dbglog(DBG_INFO, "CURSO: etapa %d liberada (s %.0f), recentrado, RAM libre %uK, VRAM libre %uK (zona %uK)\n", cur_nodo, (double)yo.s, l, (unsigned)(vram_libre() >> 10), (unsigned)(ar_libre() >> 10));
     }
     if (cur_rama >= 0 && !etapa.datos && !sig.datos && s_sig < 0 && carga.estado == 0) carga_pide(&sig, fich_sig, hueco_etapa, cap_etapa, marco_sig);
     if (s_sig >= 0 && yo.s >= s_sig) {                         /* la etapa siguiente pasa a ser la actual */
@@ -2782,6 +2991,20 @@ static int curso_paso(void)
     }
     if (s_suelta >= 0 && uni.datos && yo.s > s_suelta) { libera_modelo(&uni); s_suelta = -1; }
     return ev;
+}
+/* de vuelta al menu: fuera de la VRAM la union, la etapa siguiente y las texturas de la etapa (el menu no las dibuja;
+   la etapa de salida sigue en su hueco de la RAM y curso_reinicia las vuelve a subir) y la zona del curso, para las
+   pantallas del menu. Unos cuadros despues de dejar la carrera (la PowerVR puede estar dibujando el ultimo) */
+static void curso_al_menu(void)
+{
+    static uint64_t t0;
+    if (!ar_bloque && !etapa.tv && !uni.tv && !sig.tv) return;
+    if (!t0) { t0 = timer_ms_gettime64(); return; }
+    if (timer_ms_gettime64() - t0 < 60 || carga.estado == 1) return;   /* (una lectura en curso: al acabar) */
+    t0 = 0; carga.estado = 0;
+    libera_modelo(&uni); libera_modelo(&uni_der); libera_modelo(&sig);
+    tex_suelta(&etapa); ar_suelta();
+    dbglog(DBG_INFO, "VRAM: el curso fuera (menu), libre %uK\n", (unsigned)(pvr_mem_available() >> 10));
 }
 #ifdef PRUEBA_RAMA
 static int piloto_rama(float s) { return cur_rama < 0 && s_decide >= 0 && s > s_decide - 400.0f; }
@@ -3169,7 +3392,7 @@ static void niebla_pon(void)
    El original lo dibuja sin z, antes de todo (4521C0, estado 7 = 0); aqui va en la escena sin escribir la z (lo tapa
    todo lo demas, y entre si manda el orden, como en el original). Un objeto con alfa >= 0,9 se dibuja entero (452080)
    en la lista de su textura; con menos, en la transparente con el alfa del vertice. */
-static pvr_poly_hdr_t cie_cab[16]; static uintptr_t cie_clave[16]; static int cie_n;
+static pvr_poly_hdr_t cie_cab[16]; static uintptr_t cie_clave[16];   /* (cie_n: arriba) */
 static const pvr_poly_hdr_t *cielo_cab(const modelo_t *mo, int i, int niebla, int l)
 {
     pvr_poly_cxt_t cx; const tex_t *t = mo->texs + i; int k;
@@ -4223,8 +4446,10 @@ int main(int argc, char **argv)
     pvr_set_shadow_scale(true, SOMBRA_ESCALA);                  /* lo que queda dentro de la sombra del coche */
     pvr_set_bg_color(0.45f, 0.65f, 0.95f);
     txt_arr = pvr_mem_malloc(sizeof buf_arr); txt_cen = pvr_mem_malloc(sizeof buf_cen);
+    if ((tex_gris = pvr_mem_malloc(128))) { uint16_t g[64]; for (i = 0; i < 64; i++) g[i] = 0xF888; pvr_txr_load(g, tex_gris, 128); }
     for (i = 0, r = 0; i < NMODTRAF; i++) { r |= sube_modelo(&mtraf[i]); if (!r) compacta_modelo(&mtraf[i]); }   /* texeles fuera de la RAM */
-    if (r || sube_modelo(&etapa)) {
+    /* (la etapa de salida no: su VRAM la da curso_reinicia, en la zona del curso, al empezar la carrera) */
+    if (r) {
         vid_set_mode(modo_video, PM_RGB565); aviso("Sin memoria de video para las texturas"); for (;;) thd_sleep(1000);
     }
     sol_carga();                                                /* el sol y el destello (SOL.DAT, siempre en VRAM) */
@@ -4339,7 +4564,9 @@ int main(int argc, char **argv)
             }
         }
         if (estado == TITULO) {
-            int rm = reintenta ? MENU_CARRERA : menu_paso(nuevo);   /* titulo, modos, coche, cambio y musica */
+            int rm;
+            if (!reintenta) curso_al_menu();                    /* la VRAM del curso, para el menu */
+            rm = reintenta ? MENU_CARRERA : menu_paso(nuevo);   /* titulo, modos, coche, cambio y musica */
             ttit += 1.0f / 60;
             if (menu_coche3d() && menu_coche() >= 0 && menu_coche() != coche_ficha && menu_coche() != coche_malo &&
                 coche_carga(menu_coche())) coche_malo = menu_coche();                              /* (sin reintentos) */
@@ -4492,9 +4719,19 @@ int main(int argc, char **argv)
                                curso[cur_nodo].zona, curso[cur_nodo].nivel, (double)yo.s, amp, tim_cuadros, (double)tiempo);
                     }
                     niebla_paso();
-                    if (ev & CUR_META) { estado = META; t_estado = 0; pt_bonus_etapa(); texto_centro("GOAL!"); resultados(1); if (voz_ok) voces_meta(); }
+                    if (ev & CUR_META) {
+                        estado = META; t_estado = 0; pt_bonus_etapa(); texto_centro("GOAL!"); resultados(1); if (voz_ok) voces_meta();
+                        dbglog(DBG_INFO, "CURSO: GOAL en %.4s (s %.0f), VRAM libre %uK (zona %uK), %u texturas rebajadas\n", curso[cur_nodo].zona,
+                               (double)yo.s, (unsigned)(vram_libre() >> 10), (unsigned)(ar_libre() >> 10), (unsigned)vram_rebajadas);
+                    }
                 }
-                if (estado != META && tim_cuadros <= 0) { tiempo = 0; estado = AGOTADO; t_estado = 0; texto_centro("TIEMPO AGOTADO"); resultados(0); if (voz_ok) voces_tiempo_fuera(); }
+#ifdef PRUEBA_SIN_TIEMPO
+                if (tim_cuadros < 600) tim_cuadros = 600;        /* prueba: el tiempo no se acaba (rutas enteras hasta GOAL) */
+#endif
+                if (estado != META && tim_cuadros <= 0) {
+                    tiempo = 0; estado = AGOTADO; t_estado = 0; texto_centro("TIEMPO AGOTADO"); resultados(0); if (voz_ok) voces_tiempo_fuera();
+                    dbglog(DBG_INFO, "CURSO: tiempo agotado en %.4s (s %.0f)\n", curso[cur_nodo].zona, (double)yo.s);
+                }
             }
         } else {                                                /* META o AGOTADO: el coche se para solo */
             coche_paso(&yo, 0, 0, 0.6f, 1.0f / 60);
@@ -4680,9 +4917,9 @@ int main(int argc, char **argv)
             }
         }
 #ifdef DIAG_VTX
-        if (cuadro % 60 == 0) dbglog(DBG_INFO, "DIAG est%d s %.0f/%.0f ram %uK/%uK v%u (etapa %u) tri %u ms %.1f+%.1f lejos %d (%.2f) vram %u ta %uK etapa %uK/%uK 2d %u f %u real %uK opb %uK tiras %u teo %uK orig %u cerca %d m clase %d alfa %.2f quitados %u desde %d m (r %.1f) niebla %.5f sombra %u tri %uK pvs %d%d%d -%u rob %u v %u us%s%s\n", estado,
+        if (cuadro % 60 == 0) dbglog(DBG_INFO, "DIAG est%d s %.0f/%.0f ram %uK/%uK v%u (etapa %u) tri %u ms %.1f+%.1f lejos %d (%.2f) vram %u (zona %uK fuera %uK reb %u) ta %uK etapa %uK/%uK 2d %u f %u real %uK opb %uK tiras %u teo %uK orig %u cerca %d m clase %d alfa %.2f quitados %u desde %d m (r %.1f) niebla %.5f sombra %u tri %uK pvs %d%d%d -%u rob %u v %u us%s%s\n", estado,
                                      (double)yo.s, (double)longitud, (unsigned)(mallinfo().uordblks >> 10), (unsigned)(mallinfo().fordblks >> 10),
-                                     (unsigned)vtx_env, (unsigned)vtx_et, (unsigned)tri_enviados, (double)ms_log, (double)ms, (int)lejos, (double)(lejos / LEJOS_PS2), (unsigned)pvr_mem_available(), (unsigned)(ta_vb >> 10),
+                                     (unsigned)vtx_env, (unsigned)vtx_et, (unsigned)tri_enviados, (double)ms_log, (double)ms, (int)lejos, (double)(lejos / LEJOS_PS2), (unsigned)vram_libre(), (unsigned)(ar_libre() >> 10), (unsigned)(pvr_mem_available() >> 10), (unsigned)vram_rebajadas, (unsigned)(ta_vb >> 10),
                                      (unsigned)(ta_et >> 10), (unsigned)(ta_tope_etapa >> 10), (unsigned)ta_v2d, (unsigned)ta_f, (unsigned)(ta_real_ult >> 10), (unsigned)(ta_opb_ult >> 10),
                                      (unsigned)ta_tiras, (unsigned)(ta_teo_3d >> 10), (unsigned)diag_orig_vtx, (int)(prio_d >= ND_PRIO - 1 ? lejos : powf(2.0f, (prio_d + 1) / 4.0f)), prio_p, (double)prio_alfa, (unsigned)diag_quitado_n,
                                      (int)(diag_quitado_n ? diag_quitado_z : lejos), (double)diag_quitado_r, (double)niebla_d, (unsigned)sombra_tri, (unsigned)(sombra_teo >> 10),

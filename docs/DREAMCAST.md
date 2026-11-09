@@ -172,7 +172,7 @@ Optimizaciones que conservan la imagen (medidas con `ta_teo` sobre los .DAT y en
 - culling: la PowerVR va sin culling (`PVR_CULLING_NONE`) como el GS de la PS2, que no tiene; con culling se perderian
   las caras que el original ve por detras. Se queda;
 - texeles del trafico fuera de la RAM tras subirlos (`compacta_modelo`): -330 KB de RAM (no cambia el TA);
-- compartir texturas (las de cs_BK_PALM van repetidas en cada BKkk.DAT): ahorraria VRAM, no TA; pendiente.
+- compartir texturas: ahorra VRAM, no TA; hecho entre cada meta y su etapa (seccion 1, Memoria de video del curso).
 
 Coches del jugador (`tools/conv_coche.py`): tope de 11000 vertices dibujados a la vez por coche. Montados enteros como
 el original (46A560, con las uniones de tiras que no dibuja el VU1 ya quitadas) dibujan 9320-12080, y el F40 17376 (su
@@ -203,8 +203,8 @@ OPB: 4 juegos de reserva (307 KB por cuadro); en la consola se midieron 141568 b
 el cuadro que se colgo (incompleto). Si el registro `TA_OPB_POS` pasa del 70 % del OPB, `ta_freno` baja el tope de la
 etapa por cuartos.
 
-Bufer de parametros mas grande: no cabe. Cada 64 KB mas son 128 KB de VRAM (doble bufer) y en el peor caso medido
-quedan 79 KB libres (seccion 1). Quitar juegos de reserva del OPB daria sitio (154 KB por juego) pero el OPB crece
+Bufer de parametros mas grande: cada 64 KB mas son 128 KB de VRAM (doble bufer); en el peor caso quedan 290 KB libres
+(seccion 1, desde 2026-11-09; antes 79 KB): no se ha tocado. Quitar juegos de reserva del OPB daria sitio (154 KB por juego) pero el OPB crece
 con la geometria y en la consola solo se ha medido un cuadro: no se toca.
 
 Distancia y que se dibuja de la etapa (ver PARIDAD.md, seccion Graficos): lo del original. Planos 0,1 y 4000 (camara
@@ -415,6 +415,122 @@ relacion con los personajes (pasa igual sin CHR.DAT): en esa misma prueba (`-DPR
 BK13 sale "Sin memoria de video para la etapa" (la VRAM queda troceada al soltar BK09; empezando en IMPE, BK13 sube
 con 51 KB libres). PENDIENTE: compartir las texturas repetidas de cs_BK_PALM o subir las uniones en un hueco fijo de
 VRAM.
+
+### Memoria de video del curso y del HUD (2026-11-09)
+
+**Fallo.** En la ruta GHOS -> IMPE la meta BK13 no subia ("Sin memoria de video para la etapa" y la carrera parada en
+un bucle; tambien sin CHR.DAT). Reproducido en Flycast con el codigo y los datos de antes (`-DPRUEBA_AUTO
+-DPRUEBA_FICHA=6 -DPRUEBA_NODO=9 -DPRUEBA_RAMA=0 -DPRUEBA_FIN=400 -DDIAG_VTX`): al pedir BK13 en IMPE (s 9812) habia
+**253 KB libres** y BK13 necesita 219 KB, pero no contiguos. Causa: cada textura de las etapas y uniones se pedia a
+`pvr_mem` (el dlmalloc de KallistiOS) una a una: GHOS abajo, BK09 encima; se suelta GHOS (hueco de 771 KB); IMPE
+(893 KB) llena ese hueco y sigue por encima de BK09; se suelta BK09 y queda un hueco de 217 KB entre trozos de IMPE:
+lo libre quedaba repartido en huecos menores que las texturas grandes de BK13. Empezando en IMPE (sin pasar por GHOS)
+BK13 si subia. Ademas el margen era minimo: 29-31 KB en IMPE + BK13, BK09 + IMPE y BK08 + IMPE (COCHE06, personajes).
+
+**Medida en host.** `tools/vram.py datos/ [--zona KB]` suma las texturas de cada .DAT como la demo (antes, un bloque de
+`pvr_mem` por textura: tamano + 4 redondeado a 32, `request2size` de pvr_mem_core.c; ahora, alineadas a 32 en la zona
+del curso) para todas las combinaciones del arbol (etapa + su union, union + etapa de cada rama), lo que se repite
+entre la union y su etapa y lo fijo (coche, trafico, personajes, sol). Lo que no esta en esos .DAT se midio aparte: HUD
+de carrera 776 KB (23 texturas, casi todas ARGB4444 sin comprimir), letreros 144 KB, efectos 14 KB, pausa ~39 KB (solo
+en pausa).
+
+**Cambios** (ninguno cambia lo que se ve, salvo el ultimo recurso del punto 4, que no se da en ninguna combinacion):
+
+1. Zona del curso (`demo/main.c`: `ar_reserva`, `vram_pide`, `sube_tramo`). Al empezar la carrera (`curso_reinicia`,
+   ya subidos el coche y el HUD) se pide a `pvr_mem` un solo bloque con lo libre menos `CURSO_VRAM_RESERVA` (48 KB) y
+   lo que pedira la pausa (`menu_pausa_vram`); si `pvr_mem` estuviera troceado, el mayor bloque que cabe (busqueda a
+   32 KB). Las etapas se suben desde abajo y las uniones desde arriba. Nunca hay mas de una etapa y una union, y cada
+   una se suelta entera antes de que entre la siguiente de su lado (la etapa que se deja antes de pedir la siguiente;
+   la union UNION_LIBERA m despues de llegar a la etapa nueva, antes de pedir la siguiente union): no queda ningun
+   hueco y cabe cualquier combinacion que sume menos que la zona. Las texturas van alineadas a 32 sin la cabecera de
+   dlmalloc (3-6 KB menos por combinacion). Las grandes se suben primero (por si alguna tuviera que ir a `pvr_mem`).
+   Al volver al menu (`curso_al_menu`, 60 ms despues, cuando la PowerVR ya no las lee) se sueltan la union, la etapa
+   siguiente, las texturas de la etapa y la zona: el menu no dibuja la etapa y asi tiene esa VRAM para sus pantallas
+   (antes, tras una carrera acabada en IMPE, el menu tenia 1117 KB menos; al arrancar, los 525 KB de PALM menos; en el
+   menu de arranque ahora quedan 1521 KB libres con COCHE06). La etapa de salida sigue en su hueco de la RAM y se
+   vuelve a subir desde ahi (sin leer el GD). Las cabeceras guardadas del cielo (`cielo_cab`, por direccion) se borran
+   al soltar texturas: con la zona las direcciones se reutilizan siempre.
+2. La meta comparte con su etapa las texturas iguales (`tex_igual`: mismo tamano, formato y bytes). Cada meta (BKkk de
+   las etapas finales) lleva el cielo de su etapa y parte de cs_BK_<zona> que ya estan en la etapa: TULI 114 KB, METR
+   186, RUIN 74, IMPE 94, CAPE 131. Las dos se quedan hasta el final de la carrera. En las bifurcaciones no se
+   comparte: la etapa se suelta antes que la union, y las de cs_BK_PALM (comunes a todas las uniones, 22 texturas,
+   130 KB) no ahorran nada porque nunca hay dos uniones a la vez.
+3. HUD de carrera con paleta (`comun/hud.c`, `pal_reparte`). 17 de sus texturas ARGB4444 tienen 16 colores distintos
+   o menos (paneles, cifras de puntos y crono, marchas, mapa de ruta, la parte pequena de cada tacometro) y 19 entre 17 y
+   256 (cifras del tiempo, tacometros, rebufo, avisos de bifurcacion y tiempo extra): vienen de texturas de PS2 con
+   CLUT. Se suben con indices de 4 u 8 bits y una paleta ARGB4444 de la PowerVR con exactamente sus colores (los
+   tacometros comparten banco, las cifras del tiempo tambien: 4 bancos de 8 bits y 8 de 4 de las 1024 entradas), asi
+   que cada texel da el mismo valor de 16 bits que antes: **-254 KB** (776 -> 522 KB con el tacometro del Testarossa).
+   Se quedan como estaban la de los avisos de salida y meta (512x256, 576 colores), las ARGB1555 de la velocidad (sus
+   colores no caben exactos en una paleta 4444) y las VQ. Comprobado en Flycast con la misma imagen congelada antes y
+   despues (`-DPRUEBA_AUTO -DPRUEBA_GUION`, crono 300): 0 pixeles distintos en paneles, cifras, tacometro y marchas
+   (los 7001 distintos son el coche, cuya luz cambia sola aun congelado, la aguja y el punto que parpadea en el mapa).
+4. Si aun asi algo no cabe (no pasa en ninguna combinacion; la consola podria diferir): la textura va a `pvr_mem` fuera
+   de la zona; si tampoco, `vram_apuro` echa lo prescindible (las texturas del HUD que no se han dibujado en 8
+   cuadros, que vuelven solas el cuadro en que se quieren dibujar, y lo pendiente de liberar del HUD y los menus) y
+   reintenta; como ultimo recurso la textura se sube rebajada (`tex_rebaja`: 1/2, 1/4... de lado en 16 bits, cada
+   texel la media de los que cubre: se ve borrosa) y si ni eso cabe, una gris de 8x8. La carrera ya no se para por la
+   VRAM (antes: mensaje y bucle infinito). `CURSO: GOAL` y `DIAG` dicen cuantas texturas se rebajaron (`reb`).
+
+No hicieron falta (no se han hecho): quitar los mipmaps de IMPE (~13 KB), subir el umbral de VQ ni paletas en las
+texturas de las etapas.
+
+VRAM por combinacion (KB; con COCHE06, el coche de mas texturas, trafico, HUD, personajes, efectos y sol). Antes: suma
+con la cabecera de dlmalloc; libre = 1146 - suma (lo que quedaba para el curso: 29-31 KB medidos en las tres peores),
+sin contar que estaba troceada. Despues: lo que ocupa en la zona (sin lo compartido) y libre = zona (1312 KB medidos) -
+ocupado + 87 KB fuera de la zona (reserva y pausa). Calculado con `tools/vram.py`; las cifras en negrita se midieron
+en Flycast (`DIAG_VTX`, lineas `VRAM:` y `CURSO:`) y coinciden con el calculo a 1-2 KB:
+
+| Combinacion | Etapa | Union | Antes: suma | Antes: libre | Compartido | Despues: en la zona | Despues: libre |
+|---|---|---|---|---|---|---|---|
+| PALM + BK00 | 525 | 157 | 681 | 465 | 0 | 675 | 724 |
+| BK00 + LAKE | 474 | 157 | 631 | 515 | 0 | 625 | 774 |
+| BK00 + ALPI | 639 | 157 | 796 | 350 | 0 | 790 | 609 |
+| LAKE + BK01 | 474 | 157 | 631 | 515 | 0 | 625 | 774 |
+| BK01 + CAST | 421 | 157 | 578 | 568 | 0 | 574 | 825 |
+| BK01 + FORE | 703 | 157 | 859 | 287 | 0 | 856 | 543 |
+| ALPI + BK02 | 639 | 217 | 856 | 290 | 0 | 850 | 549 |
+| BK02 + FORE | 703 | 217 | 919 | 227 | 0 | 916 | 483 |
+| BK02 + DESE | 314 | 217 | 531 | 615 | 0 | 528 | 871 |
+| CAST + BK03 | 421 | 217 | 638 | 508 | 0 | 634 | 765 |
+| BK03 + CLOU | 569 | 217 | 785 | 361 | 0 | 783 | 616 |
+| BK03 + INDU | 590 | 217 | 807 | 339 | 0 | 801 | 598 |
+| FORE + BK04 | 703 | 217 | 919 | 227 | 0 | 916 | 483 |
+| BK04 + INDU | 590 | 217 | 807 | 339 | 0 | 801 | 598 |
+| BK04 + SNOW | 756 | 217 | 973 | 173 | 0 | 969 | 430 |
+| DESE + BK05 | 314 | 217 | 531 | 615 | 0 | 528 | 871 |
+| BK05 + SNOW | 756 | 217 | 973 | 173 | 0 | 969 | 430 |
+| BK05 + GHOS | 771 | 217 | 988 | 158 | 0 | 985 | 414 |
+| CLOU + BK06 | 569 | 169 | 737 | 409 | 0 | 735 | **664** (medido) |
+| BK06 + TULI | 682 | 169 | 851 | 295 | 0 | 846 | **553** (medido) |
+| BK06 + METR | 509 | 169 | 678 | 468 | 0 | 673 | 726 |
+| INDU + BK07 | 590 | 217 | 807 | 339 | 0 | 801 | **598** (medido) |
+| BK07 + METR | 509 | 217 | 726 | 420 | 0 | 721 | **678** (medido) |
+| BK07 + RUIN | 418 | 217 | 634 | 512 | 0 | 632 | 767 |
+| SNOW + BK08 | 756 | 217 | 973 | 173 | 0 | 969 | **430** (medido) |
+| BK08 + RUIN | 418 | 217 | 634 | 512 | 0 | 632 | **767** (medido) |
+| BK08 + IMPE | 898 | 217 | 1115 | 31 | 0 | 1109 | **290** (medido) |
+| GHOS + BK09 | 771 | 217 | 988 | 158 | 0 | 985 | **414** (medido) |
+| BK09 + IMPE | 898 | 217 | 1115 | 31 | 0 | 1109 | **290** (medido: 202 en la zona + 87) |
+| BK09 + CAPE | 587 | 217 | 804 | 342 | 0 | 799 | **600** (medido) |
+| TULI + BK10 | 682 | 232 | 914 | 232 | 114 | 795 | **604** (medido) |
+| METR + BK11 | 509 | 251 | 760 | 386 | 186 | 568 | **831** (medido) |
+| RUIN + BK12 | 418 | 222 | 640 | 506 | 74 | 564 | **835** (medido) |
+| IMPE + BK13 | 898 | 219 | 1117 | 29 | 94 | 1017 | **382** (medido: 294 en la zona + 87) |
+| CAPE + BK14 | 587 | 191 | 778 | 368 | 131 | 643 | **756** (medido) |
+
+Peor caso: BK08 + IMPE y BK09 + IMPE, **290 KB libres** (antes ~30), e IMPE + BK13 **382 KB** (antes 29 y troceada).
+Con un coche de menos texturas la zona es mayor (lo que le sobra al coche).
+
+Verificacion en Flycast (`-DPRUEBA_AUTO -DPRUEBA_FICHA=6 -DPRUEBA_FIN=400 -DPRUEBA_V=250 -DPRUEBA_SIN_TIEMPO -DDIAG_VTX`;
+`PRUEBA_SIN_TIEMPO`, nuevo, no deja que se acabe el tiempo para llegar a la meta saliendo de 400 m antes del final de
+la etapa del nivel 3), las cinco metas hasta GOAL, cada una dos o tres carreras seguidas (GOAL, menu, carrera otra
+vez: mismas cifras en cada vuelta, sin perder VRAM): GHOS -> IMPE (`-DPRUEBA_NODO=9 -DPRUEBA_RAMA=0`, el fallo de
+antes), SNOW -> IMPE (`8`, `1`), CLOU -> TULI (`6`, `0`), INDU -> METR (`7`, `0`), SNOW -> RUIN (`8`, `0`) y GHOS ->
+CAPE (`9`, `1`): 0 texturas rebajadas, ninguna fuera de la zona; lo libre medido coincide con `tools/vram.py` a
+1-2 KB (tabla). Ultimo recurso: `-DPRUEBA_NODO=13 -DPRUEBA_FIN=2000 -DPRUEBA_VRAM_KB=700` (zona de 700 KB y el resto de
+la VRAM ocupada salvo la reserva): IMPE no cabe, el apuro echa el HUD (522 KB, aun sin dibujar), 26 texturas van
+rebajadas o grises (edificios borrosos), el HUD vuelve al dibujarse y la carrera llega a GOAL sin pararse.
 
 ## 3. Otros riesgos de la consola real
 

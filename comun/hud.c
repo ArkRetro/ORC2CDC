@@ -20,6 +20,9 @@ struct hud_dat {
     pvr_ptr_t *vtex; uint8_t *usada; uint32_t *dibujada;      /* dibujada: ultimo cuadro en que se uso la textura */
     pvr_poly_hdr_t *cab, *cabf;                             /* por textura: encima de todo / detras de la escena 3D */
     int taco, g_fuera, off_taco;                            /* g_fuera: DIG_PUNTOS_FUERA (estilo 0xD, sin uso propio) */
+    int16_t *pal;                                           /* por textura: paleta (pal_reparte) o -1; NULL sin paletas */
+    uint8_t *con_pal;                                       /* por textura: subida con su paleta (cabeceras) */
+    uint8_t *falta;                                         /* por textura: echada por hud_suelta_quietas y pedida */
 };
 
 static hud_dat_t *H, *hud_principal;                       /* H: el fichero que se esta dibujando */
@@ -43,7 +46,9 @@ static void libera_vram(pvr_ptr_t p, uint32_t usada)
 }
 void hudd_fin_cuadro(void)
 {
-    int i, j;
+    int i, j; hud_dat_t *h = hud_principal;
+    if (h && h->falta)                                      /* las echadas en un apuro que se han querido dibujar */
+        for (i = 0; i < (int)h->n_tex; i++) if (h->falta[i]) { h->falta[i] = 0; if (h->usada[i] && !h->vtex[i]) hudd_sube(h, i, 1); }
     cuadro_hud++;
     for (i = j = 0; i < n_pend; i++) {
         if (cuadro_hud - pend[i].cuadro >= HUDD_ESPERA) pvr_mem_free(pend[i].p);
@@ -120,6 +125,131 @@ hud_dat_t *hudd_abre(const char *fich, int modelo, int parcial)
     return h;
 }
 
+/* ---- paletas (solo el HUD de carrera, HUD.DAT; docs/DREAMCAST.md, Memoria de video)
+   Casi todas las texturas ARGB4444 del HUD vienen de texturas de PS2 con paleta (CLUT de 16 o 256 colores) y tienen
+   16 colores distintos o menos (paneles, cifras, marchas, mapa de ruta) o 256 o menos (cifras del tiempo, tacometros,
+   rebufo, avisos de bifurcacion y tiempo extra). Esas se suben con indices de 4 u 8 bits y una paleta ARGB4444 de la
+   PowerVR con exactamente sus colores: cada texel da el mismo valor de 16 bits que antes (sin perdida; la imagen es la
+   misma) y ocupan 1/4 o 1/2. Las demas (la de los avisos de la salida y la meta, 576 colores; las ARGB1555 de la
+   velocidad, que no caben exactas en una paleta 4444; las VQ) se quedan como estaban.
+   La PowerVR tiene una tabla de 1024 entradas y un formato para todas (aqui ARGB4444; nadie mas usa paletas): las de
+   8 bits usan un banco de 256 (4 bancos) y las de 4 bits uno de 16 (64). pal_reparte llena los bancos de 8 bits por
+   orden de colores (las que caben juntas en 256 comparten banco: los tacometros, las cifras del tiempo) y pone las de
+   4 bits en las entradas que sobran al final de los bancos (o con otra de 4 bits si caben juntas en 16); la que no
+   cabe se queda en 16 bits. Los colores de cada banco van ordenados: el indice de un texel es su posicion (pal_idx). */
+static uint16_t pal_col[1024];                              /* la tabla de la PowerVR (colores ordenados por banco) */
+static uint16_t pal_n8[4];                                  /* entradas usadas al principio de cada banco de 8 bits */
+static uint8_t pal_n4[64];                                  /* entradas usadas de cada banco de 4 bits (0: libre) */
+#define PAL_4 0x4000                                        /* pal[]: banco de 4 bits (si no, de 8); bits 0-9: entrada */
+
+/* colores distintos de la textura i (ordenados) en c[] si son <= 256; devuelve cuantos (257: mas) */
+static int pal_colores(const hud_dat_t *h, int i, uint16_t *c)
+{
+    static uint32_t visto[2048];                            /* 65536 bits */
+    const uint16_t *t = (const uint16_t *)(h->dat + h->tex[i].off); uint32_t k, n = 0, m = h->tex[i].w * h->tex[i].h;
+    for (k = 0; k < m && n <= 256; k++) {
+        uint16_t v = t[k];
+        if (!(visto[v >> 5] & (1u << (v & 31)))) { visto[v >> 5] |= 1u << (v & 31); if (n < 256) c[n] = v; n++; }
+    }
+    for (k = 0; k < n && k < 256; k++) visto[c[k] >> 5] &= ~(1u << (c[k] & 31));
+    if (n > 256) { memset(visto, 0, sizeof visto); return 257; }
+    for (k = 1; k < n; k++) { uint16_t v = c[k]; int j = k; while (j > 0 && c[j - 1] > v) { c[j] = c[j - 1]; j--; } c[j] = v; }
+    return n;
+}
+/* union ordenada de a (na) y b (nb) en o (hasta max; devuelve el tamano, max + 1 si no cabe) */
+static int pal_une(const uint16_t *a, int na, const uint16_t *b, int nb, uint16_t *o, int max)
+{
+    int i = 0, j = 0, n = 0;
+    while (i < na || j < nb) {
+        uint16_t v = j >= nb || (i < na && a[i] <= b[j]) ? a[i] : b[j];
+        if (i < na && a[i] == v) i++;
+        if (j < nb && b[j] == v) j++;
+        if (n == max) return max + 1;
+        o[n++] = v;
+    }
+    return n;
+}
+static uint32_t tam_vram(const hud_dat_t *h, int i);
+static void pal_reparte(hud_dat_t *h)
+{
+    uint16_t *col, *nc, tmp[256]; int16_t *orden; uint32_t i, j, n = h->n_tex; int k, b, s;
+    h->pal = malloc(n * sizeof *h->pal); h->con_pal = calloc(n, 1);
+    col = malloc(n * 256 * sizeof *col); nc = malloc(n * sizeof *nc); orden = malloc(n * sizeof *orden);
+    if (!h->pal || !h->con_pal || !col || !nc || !orden) {
+        free(h->pal); free(h->con_pal); h->pal = NULL; h->con_pal = NULL; free(col); free(nc); free(orden); return;
+    }
+    memset(pal_n8, 0, sizeof pal_n8); memset(pal_n4, 0, sizeof pal_n4);
+    for (i = 0; i < n; i++) {                               /* solo ARGB4444 sin VQ (las 1555 no caben exactas) */
+        h->pal[i] = -1;
+        nc[i] = h->tex[i].fmt == 2 && h->tex[i].w >= 8 && h->tex[i].h >= 8 ? pal_colores(h, i, col + 256 * i) : 257;
+        orden[i] = i;
+    }
+    for (i = 1; i < n; i++) { int16_t v = orden[i]; j = i; while (j > 0 && nc[orden[j - 1]] < nc[v]) { orden[j] = orden[j - 1]; j--; } orden[j] = v; }
+    for (j = 0; j < n; j++) {                               /* 8 bits, de mas a menos colores: el primer banco que vale */
+        i = orden[j];
+        if (nc[i] <= 16 || nc[i] > 256) continue;
+        for (b = 0; b < 4; b++) {
+            k = pal_une(pal_col + 256 * b, pal_n8[b], col + 256 * i, nc[i], tmp, 256);
+            if (k <= 256) { memcpy(pal_col + 256 * b, tmp, k * 2); pal_n8[b] = k; h->pal[i] = 256 * b; break; }
+        }
+    }
+    for (j = 0; j < n; j++) {                               /* 4 bits: con otra si caben, si no en un banco libre */
+        i = orden[j];
+        if (nc[i] > 16) continue;
+        for (s = 63; s >= 0; s--) {
+            if (!pal_n4[s]) continue;
+            k = pal_une(pal_col + 16 * s, pal_n4[s], col + 256 * i, nc[i], tmp, 16);
+            if (k <= 16) { memcpy(pal_col + 16 * s, tmp, k * 2); pal_n4[s] = k; h->pal[i] = PAL_4 | 16 * s; break; }
+        }
+        if (h->pal[i] >= 0) continue;
+        for (s = 63; s >= 0; s--)                           /* libre: ni de 4 bits ni dentro de lo usado de su banco */
+            if (!pal_n4[s] && 16 * s >= 256 * (s / 16) + pal_n8[s / 16]) {
+                memcpy(pal_col + 16 * s, col + 256 * i, nc[i] * 2); pal_n4[s] = nc[i] ? nc[i] : 1; h->pal[i] = PAL_4 | 16 * s; break;
+            }
+        if (h->pal[i] >= 0) continue;
+        for (b = 0; b < 4; b++) {                           /* sin banco de 4 bits: en uno de 8 que no pise los de 4 */
+            k = pal_une(pal_col + 256 * b, pal_n8[b], col + 256 * i, nc[i], tmp, 256);
+            for (s = 16 * b; k <= 256 && s < 16 * b + 16; s++) if (pal_n4[s] && 16 * s < 256 * b + k) k = 257;
+            if (k <= 256) { memcpy(pal_col + 256 * b, tmp, k * 2); pal_n8[b] = k; h->pal[i] = 256 * b; break; }
+        }
+    }
+    pvr_set_pal_format(PVR_PAL_ARGB4444);
+    for (i = 0; i < 1024; i++) pvr_set_pal_entry(i, pal_col[i]);
+    {
+        uint32_t ahorro = 0; int n8 = 0, n4 = 0;
+        for (i = 0; i < n; i++) if (h->pal[i] >= 0 && h->usada[i]) ahorro += h->tex[i].tam - tam_vram(h, i);
+        for (b = 0; b < 4; b++) n8 += pal_n8[b] > 0;
+        for (s = 0; s < 64; s++) n4 += pal_n4[s] > 0;
+        dbglog(DBG_INFO, "HUD: paletas en %d bancos de 8 bits y %d de 4, %uK menos de VRAM\n", n8, n4, (unsigned)(ahorro >> 10));
+    }
+    free(col); free(nc); free(orden);
+}
+/* indice del texel v en el banco de la textura (busqueda en sus colores ordenados) */
+static inline uint32_t pal_idx(int16_t p, uint16_t v)
+{
+    const uint16_t *c = pal_col + (p & 1023); int lo = 0, hi = (p & PAL_4) ? pal_n4[(p & 1023) >> 4] : pal_n8[(p & 1023) >> 8];
+    while (lo < hi) { int m = (lo + hi) >> 1; if (c[m] < v) lo = m + 1; else hi = m; }
+    return lo;
+}
+/* bytes de la textura i en la VRAM (con su paleta: 1/2 o 1/4) */
+static uint32_t tam_vram(const hud_dat_t *h, int i)
+{
+    if (!h->pal || h->pal[i] < 0) return h->tex[i].tam;
+    return ((h->tex[i].w * h->tex[i].h >> ((h->pal[i] & PAL_4) ? 1 : 0)) + 31) & ~31u;
+}
+/* sube la textura i (los texeles en d) a v: con su paleta si la tiene y hay RAM para los indices; 1 con paleta */
+static int sube_tex(hud_dat_t *h, int i, const uint8_t *d, pvr_ptr_t v)
+{
+    int16_t p = h->pal ? h->pal[i] : -1; uint32_t k, m = h->tex[i].w * h->tex[i].h, tam = tam_vram(h, i); uint8_t *o;
+    const uint16_t *t = (const uint16_t *)d;
+    if (p < 0 || !(o = memalign(32, tam))) { pvr_txr_load(d, v, h->tex[i].tam); return 0; }
+    if (p & PAL_4) for (k = 0; k < m; k += 2) o[k >> 1] = pal_idx(p, t[k]) | pal_idx(p, t[k + 1]) << 4;   /* par: bajo */
+    else for (k = 0; k < m; k++) o[k] = pal_idx(p, t[k]);  /* (twiddled: el mismo orden de texeles que la de 16 bits) */
+    pvr_txr_load(o, v, tam);
+    free(o);
+    return 1;
+}
+
 static void cabeceras(hud_dat_t *h, int i)
 {
     static const uint32_t FMT[3] = { PVR_TXRFMT_ARGB1555, PVR_TXRFMT_RGB565, PVR_TXRFMT_ARGB4444 };
@@ -127,6 +257,10 @@ static void cabeceras(hud_dat_t *h, int i)
     /* formato: bits 0-7 el de 16 bits; bit 8 VQ (libro de 256 entradas al principio de los datos) */
     uint32_t f = FMT[(h->tex[i].fmt & 0xff) < 3 ? (h->tex[i].fmt & 0xff) : 2] | PVR_TXRFMT_TWIDDLED;
     if (h->tex[i].fmt & 0x100) f |= PVR_TXRFMT_VQ_ENABLE;
+    if (h->con_pal && h->con_pal[i]) {                      /* con paleta (pal_reparte): siempre twiddled */
+        int16_t p = h->pal[i];
+        f = (p & PAL_4) ? PVR_TXRFMT_PAL4BPP | PVR_TXRFMT_4BPP_PAL((p & 1023) >> 4) : PVR_TXRFMT_PAL8BPP | PVR_TXRFMT_8BPP_PAL((p & 1023) >> 8);
+    }
     pvr_poly_cxt_txr(&cx, PVR_LIST_TR_POLY, f, h->tex[i].w, h->tex[i].h, h->vtex[i], PVR_FILTER_BILINEAR);
     cx.txr.env = PVR_TXRENV_MODULATEALPHA; cx.depth.write = PVR_DEPTHWRITE_DISABLE;
     cx.depth.comparison = PVR_DEPTHCMP_GREATER; pvr_poly_compile(h->cabf + i, &cx);
@@ -151,8 +285,9 @@ int hudd_sube(hud_dat_t *h, int t0, int nt)
     }
     for (i = t0; i < fin; i++) {
         if (!h->usada[i] || h->vtex[i]) continue;
-        if (!(h->vtex[i] = pvr_mem_malloc(h->tex[i].tam))) { free(b); hudd_baja(h, t0, nt); return -2; }
-        pvr_txr_load(h->meta ? b + (h->tex[i].off - s0 * 2048) : h->dat + h->tex[i].off, h->vtex[i], h->tex[i].tam);
+        if (!(h->vtex[i] = pvr_mem_malloc(tam_vram(h, i)))) { free(b); hudd_baja(h, t0, nt); return -2; }
+        if (h->con_pal) h->con_pal[i] = sube_tex(h, i, h->meta ? b + (h->tex[i].off - s0 * 2048) : h->dat + h->tex[i].off, h->vtex[i]);
+        else pvr_txr_load(h->meta ? b + (h->tex[i].off - s0 * 2048) : h->dat + h->tex[i].off, h->vtex[i], h->tex[i].tam);
         cabeceras(h, i);
     }
     free(b);
@@ -171,9 +306,22 @@ void hudd_baja(hud_dat_t *h, int t0, int nt)
 int hud_carga(const char *fich, int modelo)
 {
     if (!(hud_principal = hudd_abre(fich, modelo, 0))) return -1;
+    pal_reparte(hud_principal);                             /* el fichero entero esta en la RAM */
+    hud_principal->falta = calloc(hud_principal->n_tex, 1);
     return hudd_sube(hud_principal, 0, -1) ? -2 : 0;
 }
 void hud_baja_tex(void) { hudd_baja(hud_principal, 0, -1); }
+/* en un apuro de VRAM (demo/main.c vram_apuro): echa ya las texturas del HUD de carrera que no se han dibujado en los
+   ultimos `cuadros` cuadros (los avisos de la salida, la meta, el tiempo extra...; la PowerVR ya no las lee) y vuelven
+   a subirse solas el cuadro en que se quieran dibujar (si caben; si no, ese aviso no se ve). Devuelve los bytes */
+uint32_t hud_suelta_quietas(uint32_t cuadros)
+{
+    hud_dat_t *h = hud_principal; uint32_t i, b = 0;
+    if (!h) return 0;
+    for (i = 0; i < h->n_tex; i++)
+        if (h->vtex[i] && cuadro_hud - h->dibujada[i] > cuadros) { pvr_mem_free(h->vtex[i]); h->vtex[i] = NULL; b += tam_vram(h, i); }
+    return b;
+}
 void hud_pon_modelo(int modelo)
 {
     hud_dat_t *h = hud_principal; uint32_t i, j;
@@ -189,7 +337,8 @@ static void pieza(const h_pie_t *p, const h_grp_t *g, int cuadro, float X, float
 {
     const h_spr_t *s = H->spr + p->spr;
     float ang = p->ang, c, si, px[4], py[4], a = p->alfa * alfa; int k; pvr_vertex_t v;
-    if (a <= 0.004f || !H->vtex[s->tex]) return;
+    if (a <= 0.004f) return;
+    if (!H->vtex[s->tex]) { if (H->falta && H->usada[s->tex]) H->falta[s->tex] = 1; return; }   /* hud_suelta_quietas */
     if (p->flags & 1) ang += g->paso * cuadro;
     ang *= (float)M_PI / 180.0f; c = cosf(ang); si = sinf(ang);
     for (k = 0; k < 4; k++) {
