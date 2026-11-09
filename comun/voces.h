@@ -21,6 +21,7 @@ void voces_paso(const voces_coche_t *c);   /* un paso de logica de la carrera (6
 void voces_tiempo(int cuadros);     /* un paso de logica: aviso de poco tiempo (cuadros que quedan) */
 void voces_meta(void);              /* GOAL */
 void voces_tiempo_fuera(void);      /* TIME OVER */
-void voces_para(void);              /* calla las voces (fin de carrera, menu) */
+void voces_para(void);
+void voces_modo(int infarto);       /* 1: carrera del INFARTO (variante 2), 0: OutRun */              /* calla las voces (fin de carrera, menu) */
 
 #endif

@@ -319,6 +319,16 @@ void hudd_baja(hud_dat_t *h, int t0, int nt)
     for (i = t0; i < fin; i++) if (h->vtex[i]) { libera_vram(h->vtex[i], h->dibujada[i]); h->vtex[i] = NULL; }
 }
 
+/* cierra un fichero de hudd_abre: su VRAM (con la espera de hudd_baja) y su RAM */
+void hudd_cierra(hud_dat_t *h)
+{
+    if (!h || h == hud_principal) return;
+    hudd_baja(h, 0, -1); hudd_vacia();
+    if (H == h) H = NULL;
+    free(h->dat); free(h->vtex); free(h->usada); free(h->dibujada); free(h->cab); free(h->cabf);
+    free(h->pal); free(h->con_pal); free(h->falta); free(h);
+}
+
 int hud_carga(const char *fich, int modelo)
 {
     if (!(hud_principal = hudd_abre(fich, modelo, 0))) return -1;

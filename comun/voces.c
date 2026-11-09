@@ -18,6 +18,10 @@
      choque (car+4 & 0x4000000 y +2F0 & 2), una de las 5 de "choque" al azar con una espera de 90 cuadros. La lista de
      "aire" es la de los personajes 9 y 10: en el modo OutRun la acompanante es el 9 (487F50 sin licencia).
      Las de asustada y trompo solo las dice en Coast 2 Coast (variantes 3 y 4): aqui no.
+   - INFARTO (variante 2, voces_modo(1)): la acompanante es el personaje 6 (487F50: 9 solo en las variantes 1, 3, 4 y
+     5), asi que "aire" es la lista 0x40ebb8; sin los comentarios de zona (488BD0 solo OutRun) ni de derrapes (488C90
+     solo 1, 3, 4); las listas de aterrizaje / salto del INFARTO (PC 5C0FB0 / 5C0FD0) no estan localizadas en el ELF
+     de PS2: se usan las del OutRun (PROVISIONAL). Sus voces son las de VOCESH.DAT (comun/infarto.c).
    - Locutor: al empezar el modo GAME (0x1b83e8: cuando no viene de RESTART) la voz 0x82; con el EXTEND TIME el efecto
      0x4d y la voz 0x16c (4B93E0 / 0x1be78c); GOAL 0x16b (49C9C0) y TIME OVER 0x155 (499020); el aviso de poco tiempo
      (4B9CD0 / 0x1c00d8) es el efecto 0x18d cuando quedan 600 cuadros o menos, cada 16, 8 o 4 cuadros (por debajo de
@@ -44,6 +48,8 @@ static const com_t *pend[8];
 static int zona_arma, zona_pend, checkpoint;
 static int vueltas, derr_cuadros, derr_visto, derrapando, com_vuelta, com_l1, com_l2;
 static int reaccion, espera, turno_salto, turno_aterriza, listo;
+static int infarto;                                     /* variante 2: sin comentarios del modo OutRun */
+void voces_modo(int ha) { infarto = ha; }
 
 int voces_inicia(void)
 {
@@ -127,7 +133,7 @@ static void reacciona(const voces_coche_t *c)
     int k = c->choque - 1;
     if (c->t_choque > 0.0f) {                                   /* choque en curso */
         if (reaccion != R_AIRE) {
-            if (k == 0 || k == 1 || k == 4) { reaccion = R_AIRE; sfx_voz(T->aire9[k == 0 ? 0 : k == 1 ? 1 : 2]); }
+            if (k == 0 || k == 1 || k == 4) { reaccion = R_AIRE; sfx_voz((infarto ? T->aire : T->aire9)[k == 0 ? 0 : k == 1 ? 1 : 2]); }
             else if (k == 6) reaccion = R_AIRE;
         }
     } else if (c->t_recup > 0.0f) {                             /* recuperacion */
@@ -146,6 +152,7 @@ void voces_paso(const voces_coche_t *c)
     const com_t *e;
     if (!listo) return;
     reacciona(c);
+    if (infarto) { if (espera > 0) espera--; checkpoint = 0; return; }   /* 488BD0 / 488C90: solo OutRun (y red) */
     /* 488BD0 zona */
     if (checkpoint) zona_arma = 1;
     else if (zona_arma && c->en_etapa > 40.0f) {

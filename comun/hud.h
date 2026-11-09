@@ -29,6 +29,7 @@ int hudd_sube(hud_dat_t *h, int t0, int nt);             /* texturas [t0, t0+nt)
    paletas) o NULL; quien lo presta no lo toca mientras este puesto */
 void hudd_bufer(void *p, uint32_t tam);
 void hudd_baja(hud_dat_t *h, int t0, int nt);
+void hudd_cierra(hud_dat_t *h);                          /* libera su VRAM y su RAM */
 int hudd_uso(const hud_dat_t *h, const char *nombre);    /* indice del uso o -1 */
 int hudd_cuadros(const hud_dat_t *h, int uso);           /* cuadros del grupo del uso */
 /* dibuja el cuadro dado (se recorta al ultimo) del uso desplazado (dx, dy), con la capa z (z > 1: encima de todo;

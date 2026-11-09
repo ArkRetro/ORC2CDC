@@ -5,8 +5,9 @@
      titulo (START/A) -> sin licencia: elegir licencia (crear) -> menu principal (SINGLE PLAYER, MULTIPLAYER, OUTRUN2SP,
      RANKINGS, OPTIONS) -> un jugador (COAST 2 COAST, OUTRUN, HEART ATTACK, TIME ATTACK, SHOWROOM) -> coche -> cambio
      AT/MT -> musica -> carrera; B vuelve atras. LICENSE (X en el menu principal y en un jugador) abre la eleccion de
-     licencia. Lo que necesita modos que la demo no tiene (multijugador, OUTRUN2SP, rankings, HEART ATTACK, TIME
-     ATTACK, SHOWROOM) tiene su pantalla y la accion bloqueada (sacudida y sonido 3, como un coche sin desbloquear).
+     licencia. HEART ATTACK (INFARTO) y TIME ATTACK (CONTRARRELOJ) llevan a la carrera con su variante (menu_modo);
+     lo que necesita modos que la demo no tiene (multijugador, OUTRUN2SP, rankings, SHOWROOM) tiene su pantalla y la
+     accion bloqueada (sacudida y sonido 3, como un coche sin desbloquear).
    Cursores con los tramos MUEVEij (20 cuadros por paso; 40 en la musica), entradas ENTRA, cambio con AT/MT en bucle y
    AT_OK/MT_OK o AT_ATRAS/MT_ATRAS al confirmar o volver, radio de la musica ENTRA/SALE. Cabeceras: ENTRA y luego
    BRILLO (destello del rotulo en bucle). Barra de ayuda de cada pantalla (AYUDA_*: botones y textos del original,
@@ -257,6 +258,7 @@ typedef struct { int u; float c; int ini, fin, modo; } anim_t;
 enum { F_ENTRA, F_QUIETO, F_SALE };
 static anim_t a_cab, a_sel, a_aux, a_radio, a_ayuda, a_tarj, a_fl_d, a_fl_i, a_ed, a_ed_t, a_barra;
 static int pant = -1, fase, t, sig, inact, t_bloq, entra_atras, barra_ant = -1, cargando, t_carga;
+static int modo_sel = 1;                                    /* opcion de un jugador elegida */
 static int c_menu, c_modo, c_rank, c_multi, manual, n_ok, pista_sonando, sale_ok;
 static int lista, curs[N_LISTAS], elegido;                  /* 84B0F4, 84B0EC y 830364 del PC */
 
@@ -564,6 +566,9 @@ void menu_entra(int man, int pista, int npistas)
     if (md) entra(P_TITULO, 0);
 }
 
+/* variante de [780258] (PS2 0x443508) del modo elegido, como 4EEAD0 del PC (runtime_route_mode: 1 OutRun, 2 Heart
+   Attack, 7 Time Attack); COAST 2 COAST (las misiones de Races.bin, variante 5) no esta: corre como OutRun */
+int menu_modo(void) { return modo_sel == 2 ? 2 : modo_sel == 3 ? 7 : 1; }
 int menu_manual(void) { return manual; }
 int menu_pista(void) { return elegido < n_ok ? elegido : 0; }
 int menu_coche3d(void)
@@ -722,7 +727,7 @@ static void control(unsigned n)
             if (pant == P_MENU) {                           /* SINGLE PLAYER, MULTIPLAYER, OUTRUN2SP, RANKINGS, OPTIONS */
                 if (c == 0) sale(P_MODO, 1); else if (c == 1) sale(P_MULTI, 1); else if (c == 3) sale(P_RANKING, 1);
                 else if (c == 4) sale(P_OPCIONES, 1); else bloqueado();
-            } else if (c <= 1) sale(P_COCHE, 1); else bloqueado();   /* COAST 2 COAST, OUTRUN */
+            } else if (c <= 3) { modo_sel = c; sale(P_COCHE, 1); } else bloqueado();   /* C2C, OUTRUN, HEART ATTACK, TIME ATTACK */
         } else if (n & CONT_X) a_licencia(pant);            /* LICENSE */
         else if (n & CONT_Y) bloqueado();                   /* FRIENDS: en linea */
         else if (atras) sale(pant == P_MENU ? P_TITULO : P_MENU, 0);

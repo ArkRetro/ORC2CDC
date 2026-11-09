@@ -53,6 +53,7 @@ Estado: OK (conectado y verificado al nivel indicado), PARCIAL, PROVISIONAL (apr
 | Checkpoints, meta, resultados | 44FF20 / 4515B0 (branch_state 7D38E8) con las banderas +0x3C de COLI0200; 4513C0 meta | OK | ampliacion al pasar la pancarta CHECK POINT del principio de la etapa siguiente (ver Checkpoint); meta del original en las 5 etapas finales (z = 0 de la union); voz y efecto de EXTEND TIME, GOAL y TIME OVER (voces.c) | sin pantalla de resultados ni final del original; sin la voz de GAME OVER (0x154: no hay pantalla de GAME OVER) | — | E |
 | Puntuacion modo OutRun | 4F2DF0, 4F2660, 4F2B20, 4B9770 | PARCIAL | main.c pt_* | posicion de carretera = m_pos de CURSO.DAT (CONFIRMADO; antes 2,5 m supuestos, 3,2 veces los puntos por avance); bonus de etapa en el checkpoint | el salto de +64 al cambiar de curso (PENDIENTE) | E |
 | Eventos, scripts, progresion, misiones | SCRIPTS.PS2 (Races, RaceAttack, OutrunMiles, Req_*) | FALTA | — | — | — | — |
+| Modos de un jugador (INFARTO, CONTRARRELOJ) | 464350 / 464D20 (PS2 0x1ae440 / 0x1a7f28), 44DC70, 479080 | PARCIAL | ver Modos de un jugador | tipos de peticion con objetos, fantasma | — | E |
 | Coches del jugador | CARS.PS2 1-32 / 33-63, disposicion 0x3d3ff0; materiales tabla 4/5 del bloque; colores 0x35ad48 (PC 64D120/408C80); mapa de entorno del bloque | PARCIAL | 15 coches montados como 46A560 (port comprobado), con interior, 9320-11195 vertices dibujados; pintura, 8 colores (Y en la seleccion), reflejo y luces (+7C/+80/+84/+60, CEX2) del original; piezas animadas (ruedas, volante, aleron, faros, disco caliente, car+F0 y el cuerpo de la fisica; ANI1) | UV de entorno con la formula esferica clasica (la del microcodigo VU1 sin leer); sin bits de noche/tunel | ver secciones Coches | E |
 | Escenarios, texturas, materiales | STAGE.PS2, VQ, scn_env_fog_<zona> | PARCIAL | 15 tramos + 15 uniones; mallas con su material (tabla 5) y la luz del entorno 1 de la zona; niebla, cielo y sol del original (ver Entorno); tiras (ADC), nodos, LOD y planos del original | objetos de tramo: el registro de obj_course_obj_cs_<zona> que dibuja la etapa (pancarta CHECK POINT y carteles, ver Checkpoint: la pancarta); objetos animados de las uniones (ver Objetos animados de las uniones); cs_ENV_* no es de la escena (es del reflejo del coche); destello con oclusion aproximada por rayos (ver Entorno); luces locales (maya_spl) sin portar | — | E |
 | HUD, menus, transiciones | SPRANI/XST, TEXT.PS2 (espanol: SPANISH.bin y XST _sxst) | PARCIAL | HUD.DAT, MENU.DAT; todas las pantallas del menu principal y de un jugador, licencia con VMU (icono, eyecatch y LCD: VMU.DAT, ver VMU), seleccion de coche del original, menu de pausa con AUDIO (ver Menus y Pausa y mezcla) | titulo es un cuadro del video (la pelicula de titulo en bucle detras del rotulo, sin hacer); textos bfont antiguos en la demo automatica y el aviso de rama; rotulos de las filas de opciones (sprites sin localizar) | quitar textos bfont | E |
@@ -136,7 +137,8 @@ consola, el port lo fija al convertir). Hoja de capturas de Flycast: scratchpad 
   licencia -> menu principal (UN JUGADOR, MULTIJUGADOR, OUTRUN2SP, RANKINGS, OPCIONES) -> un jugador -> coche -> cambio ->
   musica -> carrera; LICENCIA (X) desde el menu principal y un jugador. MULTIJUGADOR (0x44002A, tabla 0x41C260: en
   linea, LAN), RANKINGS (0x4400A3, 0x41D908: un jugador, OUTRUN2SP, multijugador), OUTRUN2SP, HEART ATTACK, TIME ATTACK y
-  SHOWROOM existen con la accion bloqueada (sin red, ranking ni esos modos). OPCIONES (cabecera 0x44006D, barra
+  SHOWROOM existen con la accion bloqueada (sin red, ranking ni esos modos); desde 2026-11-09 HEART ATTACK y TIME ATTACK
+  llevan a su carrera (ver Modos de un jugador). OPCIONES (cabecera 0x44006D, barra
   0x44000B): vista (+D8, textos 3-5), unidades (+DC, 6-7) y dificultad (+E0, 8-0xC) de la licencia, sin dar la vuelta,
   se guardan al salir (4D76F0); los rotulos de fila del original son sprites no localizados: se escriben "Ver config." y
   "Config. juego" (0x2B, 0x2A) (PROVISIONAL). menu_vista/menu_mph/menu_dificultad las exportan (la carrera aun no las
@@ -1171,6 +1173,80 @@ que la Dreamcast espera de un juego: todo sale de graficos del disco (`tools/con
   acepta), guarda con la cabecera nueva y la relee ("cabecera VMS bien (2 iconos, eyecatch 2)"); LCD del logo en A1 y
   A2 en el titulo y velocidad / marcha en carrera (`PRUEBA_AUTO`); gestor de memoria de la BIOS con el icono y el
   eyecatch. Previas en el scratchpad (vmu/). Pendiente: R (VMU real en GDEMU).
+
+## Modos de un jugador (2026-11-09)
+
+Inventario de las opciones del original (menu UN JUGADOR del frontal SUMO_FE: COAST 2 COAST, OUTRUN, INFARTO, CONTRARRELOJ,
+SALON). La opcion elegida pasa al juego por la palabra empaquetada del frontal (4EEC80 del PC: `runtime_route_mode_4eead0`,
+selector 1..6 -> variante [780258] = 1 OutRun, 2 Heart Attack, 9, 7 Time Attack, 8, 10; selector 0 -> misiones de
+Races.bin, variante 5 C2C o 6) y el preset del curso [78024C] (4EEA70). En SLES-53998 la variante es 0x443508
+(reiniciada a 1 en 0x1b4898). El port: `menu_modo()` (comun/menu.c) da 1 / 2 / 7 y main.c la usa en toda la carrera.
+
+| Modo / opcion | Original (evidencia) | Estado en la DC | Verificacion |
+|---|---|---|---|
+| OUTRUN (variante 1) | fila 0 de los tiempos (44DC70), trafico, puntos 4F2DF0, voces ORC/PERO | OK (lo que ya habia) | E |
+| INFARTO (variante 2) | gestor de peticiones 464350/464D20 (PS2 0x1ae440 / 0x1a7f28), misiones 5A94D8 (PS2 0x3f0b98, 41 x 0x140), fila 1 de los tiempos, voces HC/PERH + HAM\<etapa> | PARCIAL: ver abajo | E |
+| CONTRARRELOJ (variante 7) | fila 2 de los tiempos (44DC70: 0 y 7 -> 2; 450CC0 pasa el 7 como 0), sin trafico (479080 y 47EC00 vuelven con la variante 0, 7 u 8), gestor 0x193 / funcion 0x22 (48B8F0..: curso por codigo [656234], fantasma 465F30..4687C0, GHOST.PS2) | PARCIAL: reglas de tiempo y sin trafico; corre el curso entero con eleccion de rama como el OutRun | E |
+| COAST 2 COAST (variante 5/6) | misiones de Races.bin / RaceAssignment.bin / Req_*.bin (gestor 7F9460, evento 0x190), rivales (47CF40) | FALTA: corre como OutRun (como antes) | - |
+| SALON (showroom) | frontal 4D4230.. | FALTA (accion bloqueada, como antes) | - |
+| Dificultad (opcion de la licencia +E0) | difficulty_of de 44DC70: [7C24C0] (licencia activa) salvo en el juego de OUTRUN2SP (43F860) | OK: `tim_dif = menu_dificultad()` en la fila de tiempos | C (log `MODO:`) |
+| Multijugador | red / LAN (variantes 3, 4) | no se hace (orden del usuario): la pantalla queda como estaba, con la accion bloqueada | - |
+
+**Rival en las etapas.** No hay rival en OUTRUN, INFARTO ni CONTRARRELOJ: los coches de carreras (sucesos 8.. de
+`racer_setup_47cf40`) solo los monta el gestor de misiones de C2C (mission_manager.cpp:136, registro de Races.bin) y
+el de la variante 9 (race_variant_owners.cpp:252); 4F2DF0 solo cuenta adelantamientos de rivales si [8421C0] != 0
+(4B00D0, el de esas misiones). En el INFARTO hay coches de la mision (45D470, tablas de 45D710, ver abajo) y los de la
+peticion 14 (escoltas 45B5B0, +324 = 6: carrera contra ellos), que no esta en las misiones base 0..14.
+
+**INFARTO** (comun/infarto.c, tools/conv_infarto.py -> INFARTO.DAT, VOCESH.DAT, HAHUD.DAT):
+- Mision de la etapa: base = indice del descriptor de tramo de la clave (44DC50; claves 0..14 -> 0, 1, 3, 6, 8, 9, 5,
+  2, 4, 7, 10, 11, 12, 14, 13); desde el nivel 2 la variante especial 0x0F..0x28 segun las notas de los niveles
+  anteriores (45C2C0 / 45C160 = PS2 0x1aedb8 / 0x1aec08). Cada mision: acciones previas (seccion, -1..-19, ...) y
+  peticiones (seccion, fin, tipo, p6, p8). Ejemplo PALM (mision 0): -5, -1 (sin trafico), -14 tabla 0 (coches), -3,
+  -6 anuncio (tipo 2: voz 0xE7), (90..400) tipo 2 con p6 15 / p8 21, (535..570) tipo 0.
+- Corazones 7F23C4 (PS2 0x58a530), 10000 por corazon; nota 45C990 (PS2 0x1b0780: 12, 20, 30, 45, 60, >79; tope 5 con
+  golpe, -3 adelantado, -4 choque); corazones del resultado 45DCE0 (PS2 0x1b3708; tabla por byte de nivel 0x3f0908 =
+  0, 20, 50, 100 y suma por clave 0x3f0920 x 30000 con nota >= 5, segun el numero de peticiones de la mision); voz de
+  la nota 45DDC0 (PS2 0x1b3880, tablas 0x3f0960..0x3f09e0 por tipo, ids de los bancos HAM). Fuera de peticion: choque
+  -50 (0x150), adelantado tras choque -20 (0x14C), golpe de un coche mas rapido -10 (0x14B) (PS2 0x1a8100..0x1a8250).
+- Tipos portados: 0 (derrape: PS2 0x1a8d88 / 0x1a90a8), 2 y 22 (adelantar: 0x1aab18 / 0x1aad20), 6 (sin incidentes:
+  0x1aaf18 / 0x1ab058, tope por nota 0x3f07f0); tablas de puntos 45E2F0 (0x3efb20, 0x3efd60, 0x3efd78, 0x3efda8 =
+  {choque, adelantado, muro/cuadro, golpe, rueda fuera/cuadro, trompo}: 250000, 250000, 833/333/666/83, 150000,
+  83/83/0/0, 0/0/666/333). Donde el PC y la PS2 difieren manda la PS2: evaluacion del tipo 0 = (q - 0,9) / 0,1 x
+  300000 + mantiene x 400000 + 800000 (PS2 0x1a9134..0x1a91c0; el PC resta el segundo termino).
+- Coches de la mision (45D710 / 45D7A0 / 45D470 = PS2 0x1b2e58 / 0x1b2b20): tablas de 0x320 bytes en 0x35c958, clase
+  3/4 -> modelo de 0x3f0850 [id % 7], 2 -> 0x1F, <= 1 -> 0x2B (no esta en la DC: se gasta sin coche); se abren de 30 a
+  50 posiciones antes de su seccion y no se cierran por delante (+C5C 0x40000) hasta el fin de la peticion (45D8E0).
+  Acciones -1 / -2 (46E4A0, 64E08C): sin trafico normal (46CA60 cierra el de la etapa) / con el.
+- Medidor (45FB80 = PS2 0x1ac580): anillo de hasta 19 corazones (resultado / 10000 + 1, x 0,25; radio 64, 0,33 rad,
+  centro (176, -96)) con 2B0015 / 2B000E / 2B000F del banco 0x2B y el efecto 0xD7 al aparecer uno: es lo que se ve al
+  adelantar en la peticion de adelantar (cada adelantamiento: 800000 / p6 de resultado, efecto 0x50, voz de
+  animo 0xC6..0xCA y el contador de efectos 0xD5).
+- Voces: el juego de voces del modo se cambia en el AICA (VOCESH.DAT 740 KB por VOCES.DAT 207 KB) al empezar la
+  carrera, leido en el hueco de la union; banco HAM de la etapa por clave (4 distintos: grupos 0,0,0,1,1,1,2,2,2,1,0,3,
+  0,0,3; PROBABLE que el juego lo elija por la clave). La acompanante es el personaje 6 (487F50), sin comentarios de
+  zona ni de derrapes (solo variante 1 / 1, 3, 4).
+- SIN PORTAR (PENDIENTE): tipos 7, 8, 11, 15, 16, 17, 19, 20, 21, 23, 24, 25 (objetos OSO HAM_OSOnn: conos, monedas,
+  arcos, cajas, lineas del carril; no empiezan, sin anuncio ni nota), 14 / 18 (escoltas), el bono de nivel 45D360, la
+  hoja de resultados de la etapa 4603F0, los rotulos de las peticiones (460970 / 460AD0, tokens 0x5a93f0) y la cara de
+  la acompanante (45BDF0), las reacciones del robot a las peticiones (487D60 / 487D90) y las listas de aterrizaje /
+  salto del modo (PC 5C0FB0 / 5C0FD0). El texto de la carrera (CORAZONES, PETICION, NOTA) es bfont (PROVISIONAL).
+
+- Coches de la mision: parados (+1C4 = 0) y sin control (47E6C0: +C5C 0x40000 y 45D820 = 7F250C = 0) desde la
+  accion -14 hasta la -17 (45D830: la velocidad de la carretera). SIMPLIFICADO: despues van a la velocidad de la
+  carretera sin el camino Lead de 472450 (que en la DC los ponia a ~290 km/h por delante del jugador y no se podian
+  adelantar).
+- Verificado en E (2026-11-09, recorrido real del menu: titulo, UN JUGADOR, INFARTO, coche, cambio, musica; 120 s de
+  acelerador): log `MODO: variante 2, dificultad 0, fila de tiempos 1`; PALM: voz 0x82 de salida, anuncio 0xE7,
+  0xE8, peticion tipo 2 en la seccion 90 (90..400, p6 15, p8 21), coches de la mision de la tabla 0 abiertos 30..50
+  posiciones antes (clase 3 modelos 33, 34, 30, 32...; clase 2 modelo 31), adelantamientos con 0x50 + animo + 0xD5,
+  fin con resultado 102 corazones, nota 7, +187; peticion tipo 0 (535..570) nota 1; etapa terminada: 187 corazones,
+  nota media 4; CHECKPOINT y etapa 2. El anillo del medidor sale lleno (19) con el resultado de la peticion.
+
+**CONTRARRELOJ** verificado en E: `MODO: variante 7, dificultad 0, fila de tiempos 2`, sin un solo coche de trafico,
+union y ruta leidas como en el OutRun. SIN PORTAR: la eleccion de etapa / curso por codigo (48B550: una etapa con su meta GOAL_*_TA o el
+curso entero), el fantasma (GHOST.PS2 gc_default_*, formato QHOT/NHOT, modulo 465F30..4687C0) y su record y la
+pantalla de resultado 0x50 del modo 25.
 
 ## Ultimo cambio verificado
 

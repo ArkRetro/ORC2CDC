@@ -26,5 +26,9 @@ void sfx_voz(int id);
 void sfx_voz_calla(void);
 const void *sfx_voces_tablas(uint32_t *tam);
 const char *sfx_voces_idioma(void);
+/* otro juego de voces (VOCESH.DAT del INFARTO / VOCES.DAT); buf, cap: RAM prestada para leerlo. 0 = bien */
+int  sfx_voces_juego(const char *fich, void *buf, uint32_t cap);
+void sfx_voz_grupo(int g);                 /* banco HAM de la etapa (-1: ninguno) */
+void sfx_voz_se(int id);                   /* un efecto del banco de voces por el canal de efectos */
 
 #endif

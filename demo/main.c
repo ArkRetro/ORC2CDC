@@ -20,6 +20,7 @@
 #include "../comun/sfx.h"
 #include "../comun/voces.h"
 #include "../comun/menu.h"
+#include "../comun/infarto.h"
 #include "../comun/vmu.h"
 #include "../comun/robot.h"
 #include "camara.h"
@@ -1151,11 +1152,18 @@ static float grua_s, grua_x; static int grua_on;
    - dificultad 0: [7C24C0] = licencia +E0, que 4471A0 (licencia nueva) pone a 0; 0 tambien si 43F860.
    - 456D60 <= 1 (un jugador): se suma k636904 de la clave de la etapa.
    - 48B1A0 (83036D) != 1 con el coche de serie (1 = preparado, 5051D0): +60 cuadros en los niveles 1..4.
-   CONFIRMADO en el ELF: la formula (0x176730), la tabla k636904 y su uso. PROBABLE: variante 1, preset 0 y
-   dificultad 0 (del frontal del PC, sin trazar en el de PS2). */
+   CONFIRMADO en el ELF: la formula (0x176730), la tabla k636904 y su uso. PROBABLE: preset 0 (del frontal del PC,
+   sin trazar en el de PS2).
+   Modos (2026-11-09): la fila sale de la variante del modo elegido (menu_modo: 4EEAD0 del PC, 1 OutRun, 2 Heart
+   Attack, 7 Time Attack) como en 44DC70 (race_extended_time_44dc70: 1 -> 0, 2 y 5 -> 1, 0 y 7 -> 2), y la
+   dificultad de la licencia activa (opcion +E0, menu_dificultad; difficulty_of de 44DC70: [7C24C0] salvo en el juego
+   de OUTRUN2SP, 43F860). La ampliacion del checkpoint (450CC0) pasa la variante 7 como 0: la misma fila 2. */
+static int variante = 1;
+static hud_dat_t *ha_hud;                                       /* HAHUD.DAT en el modo INFARTO */                                        /* [780258] (PS2 0x443508) de la carrera */
 #define TIM_PRESET 0
-#define TIM_FILA 0                                              /* variante 1 (OutRun) */
-#define TIM_DIF 0
+#define TIM_FILA (variante == 1 ? 0 : variante == 2 || variante == 5 ? 1 : variante == 0 || variante == 7 ? 2 : 0)
+static int tim_dif;                                             /* [7C24C0]: licencia +E0 */
+#define TIM_DIF tim_dif
 #define TIM_SERIE 1                                             /* coche sin preparar: 48B1A0 != 1 */
 #define TIM_HZ 60.2f
 static const int16_t *tim_tab;                                  /* 4 x 3 x 15 x 5 cuadros, NULL sin TIM1 */
@@ -1260,7 +1268,7 @@ typedef struct { coche_t c; int carril, modelo, destino; float v_des;
                  int golpe, lado; float t_golpe, vlat;          /* golpe: estado de choque (16..19) o -1 */
                  float t_recup, wa[3]; int d22;                 /* +2F8, pose del cuadro anterior (mundo de or2), +D22 */
                  float b08; int b14, b18, dir, b58, b60, b64, b6c, b62, b53, c5c1, n2f4;
-                 int pt_marca, b72, color; } trafico_t;               /* puntuacion: +C5C (PT_*) y +B72 (rebufo reciente) */
+                 int pt_marca, b72, color, ha; } trafico_t;               /* puntuacion: +C5C (PT_*) y +B72 (rebufo reciente) */
 static trafico_t traf[NTRAF];
 static int bo_toca_coche, bo_roce;                              /* +4 0x10000 / 0x400000 del jugador en el paso (44EDE0) */
 /* +C5C del coche para la puntuacion (4F2860): 0x40 ya adelantado, 0x400000 tocado (puntos a la mitad), 0x800000
@@ -1268,6 +1276,9 @@ static int bo_toca_coche, bo_roce;                              /* +4 0x10000 / 
 #define PT_PASADO 0x40
 #define PT_MITAD  0x400000
 #define PT_SIN    0x800000
+static int pt_pasados;                                          /* 84DF0C: coches adelantados en la carrera (4F2860) */
+static int ha_impulso;                                          /* +4 0x4000000 del jugador en este paso */
+static int ha_rapido;                                           /* el golpe con impulso fue de un coche mas rapido (+1C4) */
 static int pt_toca;                                             /* contacto con el trafico en este cuadro: 1, 3 golpe */
 static uint32_t sup_jug = 2u;                                   /* +244 del jugador: OR de las superficies de las ruedas */
 static uint32_t sup_cen = 2u;                                   /* +248 del jugador: la superficie bajo el centro */
@@ -1624,7 +1635,7 @@ static void traf_azar(int en_union, int nodo, int pos, const uint8_t *rec)
 static void traf_aparca(trafico_t *t)
 {
     t->carril = t->destino = -1; t->c.s = -1.0e6f; t->c.v = 0; t->golpe = -1; t->b72 = 0; t->b6c = 0; t->b14 = 0;
-    t->c5c1 = 0; t->b64 = 0; t->b62 = 0; t->b53 = 0;
+    t->c5c1 = 0; t->b64 = 0; t->b62 = 0; t->b53 = 0; t->ha = 0;
 }
 static float traf_ult_s;                                        /* sin tablas: s del jugador en la ultima aparicion */
 static void traf_inicia(float s0)
@@ -1653,10 +1664,54 @@ static void traf_libera(void)
             traf_aparca(traf + i);
         }
 }
+/* INFARTO (variante 2): 46CA60 con 64E08C = 0 cierra el trafico normal de la etapa (ni en la union, ni los de la mision:
+   +C5C 0x40000, ni los que ya se cierran) y 479080 no abre; los coches de la mision (45D470): en su seccion de la
+   etapa y su carril, modelo de la clase (main no tiene el 0x2B: ese registro se da por gastado), color del modelo
+   (0x26: id % 2; 0x2B: id % 2; el resto id % 3) y la velocidad de la carretera (como los otros, 470240) */
+static void traf_infarto(void)
+{
+    infarto_coche_nuevo_t n; int i, m, l; float s;
+    if (!infarto_trafico() && !cur_en_union)
+        for (i = 0; i < NTRAF; i++) {
+            trafico_t *t = traf + i;
+            if (t->carril < 0 || t->ha || t->c5c1 || (s_union >= 0 && t->c.s >= s_union)) continue;
+            t->b64 = 0x3c; t->c5c1 = 1;
+        }
+    {   static int antes = 1; int ahora = infarto_mueven();
+        if (ahora && !antes)                                    /* 45D830: a la velocidad de la carretera (470240) */
+            for (i = 0; i < NTRAF; i++) if (traf[i].carril >= 0 && traf[i].ha) traf[i].c.v = traf[i].v_des;
+        antes = ahora;
+    }
+    if (!infarto_coche_pide(&n)) return;
+    m = n.modelo >= 0x1e ? traf_modelo_de(n.modelo) : -1;
+    s = s_etapa + n.seccion * m_pos;
+    if (m < 0 || s >= longitud - 20.0f) {                       /* gastado sin coche */
+        dbglog(DBG_INFO, "INFARTO: coche de la mision sin modelo (%d) o fuera de la ruta: gastado\n", n.modelo);
+        infarto_coche_abierto(1); return;
+    }
+    for (i = 0; i < NTRAF && traf[i].carril >= 0; i++) ;
+    if (i >= NTRAF) { infarto_coche_abierto(0); return; }
+    l = n.carril < 0 ? 0 : n.carril >= NCARRIL ? NCARRIL - 1 : n.carril;
+    traf_abre(traf + i, s, l, m, n.modelo == 0x26 || n.modelo == 0x2b ? n.id % 2 : n.id % 3, traf_ult_pos);
+    traf[i].ha = 1; traf[i].c.v = 0;                            /* 45D470: +1C4 = 0, +B58 = +B5C = 0x12 */
+    dbglog(DBG_INFO, "INFARTO: coche de la mision clase %d modelo %d seccion %d carril %d (jugador en %.0f m de la etapa)\n",
+           n.clase, n.modelo, n.seccion, l, (double)(yo.s - s_etapa));
+    infarto_coche_abierto(1);
+}
 static void traf_aparece(void)
 {
     int nodo, pos, u;
     traf_libera();
+    if (variante == 0 || variante == 7 || variante == 8) return;   /* 479080: sin trafico en el Time Attack */
+    if (variante == 2) {
+        static int vistas;
+        if (infarto_sueltas() != vistas) {
+            int i; vistas = infarto_sueltas();
+            for (i = 0; i < NTRAF; i++) if (traf[i].carril >= 0 && traf[i].ha) { traf[i].ha = 0; traf[i].b64 = 0x3c; traf[i].c5c1 = 1; }
+        }
+        traf_infarto();
+        if (!infarto_trafico()) return;
+    }
     if (!ntap) {                                                /* sin tablas: la aparicion de antes (separacion 3) */
         int i;
         if (yo.s - traf_ult_s >= TR_APARECE_CADA * m_pos && yo.s + TR_APARECE * m_pos < longitud - 20.0f) {
@@ -1753,7 +1808,7 @@ static void traf_choca(trafico_t *t, int id, const or2_contacto_t *k, float ox, 
     /* 4F2860: tocado el ultimo coche (+4 0x10000 y +DD4): sin puntos si el jugador ha cambiado de velocidad (+4
        0x4000000), si no a la mitad; la voz de choque de voces.c lee el mismo bit */
     if (!(t->pt_marca & PT_PASADO)) t->pt_marca |= o.impulso ? PT_SIN : PT_MITAD;
-    if (o.impulso) voz_contacto = 1;
+    if (o.impulso) { voz_contacto = 1; ha_impulso = 1; if (t->c.v > v_jug) ha_rapido = 1; }
     if (o.roce_a) bo_roce = 1;                                  /* +4 0x400000 del jugador (cuentas de 44EDE0) */
     pt_toca |= o.golpe >= 0 ? 3 : 1;
     if (o.impulso) {
@@ -2245,10 +2300,17 @@ static void traf_paso(float dt)
             if (dd < hueco) { hueco = dd; del = o; }
         }
         jug_del = yo.s > t->c.s && yo.s - t->c.s < dsig;            /* el siguiente de la lista es el jugador */
+        if (t->ha && variante == 2 && !infarto_mueven()) {         /* 47E6C0: los de la mision (+C5C 0x40000) sin
+                                                                       control hasta 45D820 (7F250C): parados */
+            t->c.v = 0;
+            goto coloca;
+        }
         /* 472450: objetivo y ritmo segun la distancia al jugador (en posiciones de la carretera; ver traf_objetivo) */
         d = (int)floorf((t->c.s - yo.s) / TR_POS);
         aparte = (int)(fabsf(traf_pos(t) - yo_pos(t->c.s)));
         obj = traf_objetivo(t, d, aparte, &f0, &f1, &rate);
+        if (t->ha) { obj = t->v_des; f0 = 0; f1 = 1; rate = 0.05f; }   /* INFARTO: la velocidad de la carretera (45D830);
+                                                                        SIMPLIFICADO: sin el camino Lead de 472450 */
         if (del && hueco < TR_HUECO && t->c.v > del->c.v) obj = fminf(obj, del->c.v);   /* 472A50 */
         traf_acelera(t, rate, obj, f0, f1);
         /* 47E4A0: golpeado, recuperacion; si no, carriles (47E110) */
@@ -2269,8 +2331,10 @@ static void traf_paso(float dt)
                 t->t_recup = choq.recup[t->golpe]; t->golpe = -1;
             }
         } else if (t->t_recup > 0.0f) t->t_recup -= 0.0166112948f;
+    coloca:
         t->c.s += t->c.v * dt;
-        if (t->c.s < yo.s - TR_CIERRA_ATRAS * m_pos || t->c.s > yo.s + TR_CIERRA_DELANTE * m_pos || t->c.s > longitud - 20.0f) {
+        if (t->c.s < yo.s - TR_CIERRA_ATRAS * m_pos || (!t->ha && t->c.s > yo.s + TR_CIERRA_DELANTE * m_pos) ||
+            t->c.s > longitud - 20.0f) {                        /* los de la mision (+C5C 0x40000): por delante 0x270F */
             traf_aparca(t); continue;                           /* 477F60: cerrado */
         }
         if (t->c.s > longitud - 20.0f) t->c.s = longitud - 20.0f;
@@ -4146,7 +4210,7 @@ static void pt_paso(void)
         if (py - (int)floorf(t->c.s / m_pos) < -2 || t->c.s - yo.s > 0.0f) continue;   /* aun delante */
         clase = trc_ok ? trc[t->modelo].clase : 3;
         if (clase == 5 && py - (int)floorf(t->c.s / m_pos) < 2) continue;
-        t->pt_marca |= PT_PASADO;
+        t->pt_marca |= PT_PASADO; pt_pasados++;               /* 84DF0C++ antes de mirar +C5C 0x800000 */
         if (t->pt_marca & PT_SIN) continue;
         if (clase == 5) { pts = (t->pt_marca & PT_MITAD) ? 12500 : t->b72 > 0 ? 50000 : 25000; tipo = 3; }
         else {
@@ -4214,7 +4278,8 @@ static void resultados(int meta)
     char a[64], b[64], c[64]; int ms = cuadros_ms(crono);                 /* CalcFrame2Time (449B30 / PS2 0x1f6d70) */
     sprintf(a, meta ? "   GOAL!   %s" : "   TIEMPO AGOTADO", meta ? zona_nombre(cur_nodo) : "");
     sprintf(b, "   TIEMPO TOTAL %d'%02d\"%03d", ms / 60000, (ms / 1000) % 60, ms % 1000);
-    sprintf(c, "   PUNTOS %07d   MAX %d km/h", puntos, (int)vmax);
+    if (variante == 2) sprintf(c, "   CORAZONES %d   PUNTOS %07d", infarto_total(), puntos);   /* 447A60: corazones */
+    else sprintf(c, "   PUNTOS %07d   MAX %d km/h", puntos, (int)vmax);
     texto_arriba(a, b, c);
 }                                             /* 0: la primera; 1: ya en una rama */
 #define TIEMPO_ETAPA 80.0f
@@ -5112,6 +5177,7 @@ int main(int argc, char **argv)
         if (estado == TITULO) {
             int rm;
             if (!reintenta) curso_al_menu();                    /* la VRAM del curso, para el menu */
+            if (ha_hud && !reintenta) { hudd_cierra(ha_hud); ha_hud = NULL; }   /* los corazones del INFARTO */
             presta_union(1);                                    /* (en cuanto el curso suelta la union) */
             rm = reintenta ? MENU_CARRERA : menu_paso(nuevo);   /* titulo, modos, coche, cambio y musica */
             ttit += 1.0f / 60;
@@ -5132,6 +5198,19 @@ int main(int argc, char **argv)
             if (rm != MENU_SIGUE) {
                 auto_ = rm == MENU_DEMO;
                 if (!auto_) { manual_ = menu_manual(); pista = menu_pista(); }
+                variante = auto_ ? 1 : menu_modo();             /* la demo de atraccion es la del modo OutRun */
+#ifdef PRUEBA_VARIANTE
+                variante = PRUEBA_VARIANTE;                     /* prueba: 2 INFARTO, 7 Time Attack */
+#endif
+                tim_dif = auto_ ? 0 : menu_dificultad();
+                /* voces del modo (bancos HC/PERH/HAM del INFARTO o ORC/PERO): se leen en el hueco de la union, aun
+                   prestado (el AICA guarda uno de los dos juegos) */
+                if (voz_ok && union_prestable())
+                    sfx_voces_juego(variante == 2 ? "VOCESH.DAT" : "VOCES.DAT", hueco_union, cap_union);
+                if (variante == 2) { if (infarto_inicia()) { dbglog(DBG_ERROR, "MODO: sin INFARTO.DAT\n"); variante = 1; } }
+                else infarto_libera();                          /* 64 KB de tablas: solo en su modo */
+                if (voz_ok) { voces_modo(variante == 2); if (variante != 2) sfx_voz_grupo(-1); }
+                dbglog(DBG_INFO, "MODO: variante %d, dificultad %d, fila de tiempos %d\n", variante, tim_dif, TIM_FILA);
                 menu_sale();                                    /* la VRAM del menu vuelve al HUD */
 #ifndef PRUEBA_FICHA                                            /* prueba: el coche de PRUEBA_FICHA, no el del menu */
                 if (!auto_ && menu_coche() >= 0 && menu_coche() != coche_ficha && coche_carga(menu_coche())) coche_carga(9);
@@ -5156,6 +5235,13 @@ int main(int argc, char **argv)
                 tim_cuadros = tim_zona(cur_nodo, etapa_n); tiempo = tim_cuadros / TIM_HZ; estado = CUENTA; t_estado = 0; t_cuenta = 0; pausa = 0; crono = 0; vmax = 0; pt_inicia();
                 reintenta = 0;
                 if (voz_ok) voces_carrera();
+                if (variante == 2) {
+                    infarto_carrera(cur_nodo, curso[cur_nodo].nivel);   /* 45E0F0 */
+                    /* los corazones del medidor (HAHUD.DAT: solo sus tablas en la RAM; la textura VQ, 10 KB, se lee
+                       del GD al subirla, ya con la zona del curso reservada) */
+                    if (!ha_hud) ha_hud = hudd_abre("HAHUD.DAT", 0, 1);
+                    if (ha_hud && hudd_sube(ha_hud, 0, -1)) dbglog(DBG_ERROR, "HAHUD: sin VRAM para los corazones\n");
+                }
                 if (cam_ok) { cam_inicia(&cam, &cam_tab); cam_t_choque = 0; }   /* 484EE0 */
                 if (chr_ok == 1) robot_carrera(modelo_jug);          /* 4884D0 / 4885A0 */
             }
@@ -5239,7 +5325,27 @@ int main(int argc, char **argv)
                     guion_hasta = timer_ms_gettime64() + 3000; guion_i++; pasos = paso + 1;
                 }
 #endif
-                pt_paso(); pt_msg_paso();                       /* puntuacion del original */
+                {   int toca = pt_toca;
+                    pt_paso(); pt_msg_paso();                   /* puntuacion del original */
+                    if (variante == 2) {                        /* 464D20: el INFARTO (el gestor de peticiones) */
+                        static float t_choque_ant; infarto_coche_t hc;
+                        hc.en_union = cur_en_union; hc.seccion = cur_en_union ? 0 : (int)floorf((yo.s - s_etapa) / m_pos);
+                        hc.pasados = pt_pasados;
+                        hc.choque = fis_ok ? fis.choque : 0;
+                        hc.choque_ini = fis_ok && fis.t_choque > 0.0f && t_choque_ant <= 0.0f; t_choque_ant = fis_ok ? fis.t_choque : 0;
+                        hc.impulso = ha_impulso; hc.impulso_rapido = ha_rapido; hc.roce = (toca & 2) != 0;
+                        hc.muro = yo.choque == 1; memcpy(hc.sup, sup_rueda, sizeof hc.sup);
+                        hc.d36 = fis_ok ? fis.d36 : 0; hc.kmh = fis_ok ? fis.velocidad_hud : yo.v * 3.6f; hc.vel_mf = fis_ok ? fis.vel_mf : 0;
+                        infarto_paso(&hc);
+#ifdef DIAG_HA
+                        if (crono % 60 == 0) { int q;
+                            for (q = 0; q < NTRAF; q++) if (traf[q].carril >= 0)
+                                dbglog(DBG_INFO, "DIAGHA %d ha %d s %.0f (yo %.0f) carril %d v %.1f c5c1 %d b64 %d\n", q, traf[q].ha,
+                                       (double)traf[q].c.s, (double)yo.s, traf[q].carril, (double)traf[q].c.v, traf[q].c5c1, traf[q].b64); }
+#endif
+                    }
+                    ha_rapido = ha_impulso = 0;
+                }
                 {   /* el curso: union, bifurcacion y etapa siguiente sin parar (curso_paso) */
                     int ev = curso_paso();
                     bo_cuenta(); bo_paso(ev);                   /* objetos animados de la union (44EDE0 / 44F190) */
@@ -5266,12 +5372,15 @@ int main(int argc, char **argv)
                         int amp = tim_zona(cur_nodo, curso[cur_nodo].nivel);
                         pt_bonus_etapa(); tim_cuadros += amp; tiempo = tim_cuadros / TIM_HZ; t_ext = 0;
                         if (voz_ok) voces_checkpoint();         /* EXTEND TIME: efecto 0x4d y voz 0x16c */
+                        if (variante == 2) infarto_etapa(cur_nodo, curso[cur_nodo].nivel);   /* stage clear */
                         dbglog(DBG_INFO, "CHECKPOINT: etapa %d (%.4s) nivel %d s %.0f, +%d cuadros, quedan %d (%.1f s)\n", cur_nodo,
                                curso[cur_nodo].zona, curso[cur_nodo].nivel, (double)yo.s, amp, tim_cuadros, (double)tiempo);
                     }
                     niebla_paso();
                     if (ev & CUR_META) {
-                        estado = META; t_estado = 0; pt_bonus_etapa(); texto_centro("GOAL!"); resultados(1); if (voz_ok) voces_meta();
+                        estado = META; t_estado = 0; pt_bonus_etapa(); texto_centro("GOAL!");
+                        if (variante == 2) infarto_meta();      /* 44FF10 */
+                        resultados(1); if (voz_ok) voces_meta();
                         dbglog(DBG_INFO, "CURSO: GOAL en %.4s (s %.0f), VRAM libre %uK (zona %uK), %u texturas rebajadas\n", curso[cur_nodo].zona,
                                (double)yo.s, (unsigned)(vram_libre() >> 10), (unsigned)(ar_libre() >> 10), (unsigned)vram_rebajadas);
                     }
@@ -5354,7 +5463,19 @@ int main(int argc, char **argv)
                         (unsigned)(mi.uordblks >> 10), (unsigned)(pvr_mem_available() >> 10), (double)t_carga,
                         (double)yo.x, (double)fis.r[0].mu, (double)fis.r[2].mu);   /* desvio y mu delante/detras izq. */
             }
-            texto_arriba(s1, ver ? s2 : NULL, ver ? s3 : NULL);
+            if (variante == 2 && !ver && estado != TITULO) {   /* INFARTO: corazones y peticion (PROVISIONAL: texto, no los
+                                                           rotulos SPRANI del banco 0x2B) */
+                const infarto_hud_t *h = infarto_hud();
+                static const char *const NOMBRE[26] = { "DERRAPA", 0, "ADELANTA", 0, 0, 0, "SIN INCIDENTES", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                                                        "ADELANTA", 0, 0, 0 };
+                sprintf(s1, "CORAZONES %d", h->corazones);
+                if (h->tipo != 3 && h->tipo >= 0 && h->tipo < 26 && NOMBRE[h->tipo]) sprintf(s2, "PETICION: %s  %d", NOMBRE[h->tipo], h->resultado);
+                else s2[0] = 0;
+                if (h->t_nota < 240) sprintf(s3, "NOTA %d", h->nota);
+                else if (h->t_etapa < 400) sprintf(s3, "NOTA DE LA ETAPA %d", h->nota_etapa);
+                else s3[0] = 0;
+                texto_arriba(s1, s2, s3);
+            } else texto_arriba(s1, ver ? s2 : NULL, ver ? s3 : NULL);
         }
 
         t_log += timer_us_gettime64() - c_log;
@@ -5429,7 +5550,7 @@ int main(int argc, char **argv)
             if (l == 2 && estado != TITULO) { mat_load(&vista); efectos_dibuja(); }
             if (l == 2 && estado != TITULO) sol_dibuja();       /* el sol y su destello (40CBC0) */
             if (l == 2) {
-                int texto = ver || (!hud_ok && estado != TITULO);
+                int texto = ver || (!hud_ok && estado != TITULO) || (variante == 2 && estado == CARRERA);
                 if (estado == TITULO) menu_dibuja();
                 if (hud_ok && estado != TITULO) {
                     hud_estado_t he;
@@ -5449,6 +5570,17 @@ int main(int argc, char **argv)
                     if (estado == META) hud_aviso("META", t_estado < 59 ? t_estado : 59, 1);
                     if (estado == AGOTADO) hud_aviso("FIN_TIEMPO", t_estado < 40 ? t_estado : 40 + (t_estado - 40) % 8, 1);
                     if (he.rev_on) hud_aviso("CAMBIA", cuadro % 30, 1);
+                    if (variante == 2 && (estado == CARRERA || estado == META)) {   /* INFARTO: el medidor (45FB80) */
+                        float rx[19], ry[19], rc[19], cc; const infarto_corazon_t *an = infarto_anillo(rx, ry, rc, &cc);
+                        if (ha_hud) {
+                            int uc = hudd_uso(ha_hud, "HA_CORAZON"), ur = hudd_uso(ha_hud, "HA_ROTO"), ue = hudd_uso(ha_hud, "HA_CENTRO");
+                            if (cc >= 0) hudd_dibuja(ha_hud, ue, (int)cc - 0x1f, 234, 108, 1, 120, 0);
+                            for (i = 0; i < 19; i++) {
+                                if (an[i].cuadro >= 0) hudd_dibuja(ha_hud, uc, an[i].cuadro, an[i].x, an[i].y, 1, 121, 0);
+                                if (rc[i] >= 0) hudd_dibuja(ha_hud, ur, (int)rc[i], rx[i], ry[i], 1, 121, 0);
+                            }
+                        }
+                    }
                 }
                 if (estado == META || estado == AGOTADO) {      /* resultados y fundido a negro al final */
                     caja(64, 150, 512, 110, 0xA0000000);
@@ -5457,8 +5589,11 @@ int main(int argc, char **argv)
                     texto = 0;
                 }
                 if (pausa && estado == CARRERA) menu_pausa_dibuja();   /* menu de pausa encima de todo */
-                if (texto) caja(36, 18, 568, ver ? 92 : 34, 0x90000000);
-                if (texto) rect_txr(txt_arr, 512, 128, 40, 20, 512, 128, PVR_LIST_TR_POLY);
+                {   float ty = variante == 2 && !ver && estado == CARRERA && !pausa ? 104.0f : 18.0f;   /* INFARTO: bajo el marcador */
+                    if (texto && ty > 100 && !pausa) caja(36, ty, 568, 92, 0x90000000);
+                    else if (texto) caja(36, 18, 568, ver ? 92 : 34, 0x90000000);
+                    if (texto && !(ty > 100 && pausa)) rect_txr(txt_arr, 512, 128, 40, ty + 2, 512, 128, PVR_LIST_TR_POLY);
+                }
                 if (estado != TITULO && (!hud_ok ? (estado != CARRERA || t_estado < 50 || auto_ || aviso_rama) : (estado == CARRERA && auto_ && t_estado >= 50))) rect_txr(txt_cen, 256, 32, 64, 180, 512, 64, PVR_LIST_TR_POLY);
             }
             pvr_list_finish();

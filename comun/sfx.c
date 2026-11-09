@@ -95,7 +95,7 @@ static float golpe_x = -1.0f, golpe_vol;
 static int listo;
 #define N_CANAL_MENU 4          /* un golpe entre coches suena hasta 3 efectos en el mismo cuadro (4F65D0, 476040, 4F67A0) */
 static int canal_menu[N_CANAL_MENU] = { -1, -1, -1, -1 }, menu_turno;
-#define MAX_VOCES 64
+#define MAX_VOCES 160                                           /* VOCESH.DAT (INFARTO): 117 */
 
 typedef struct {                /* como en VOCES.DAT */
     uint16_t id, vol;
@@ -352,30 +352,56 @@ void sfx_menu(int id)
 }
 
 /* ---------------------------------------------------------------- voces */
-int sfx_voces_inicia(void)
+/* lee un VOZ1 (VOCES.DAT o VOCESH.DAT) en el AICA; buf/cap: RAM prestada para el fichero (NULL: del monton). Las
+   tablas de cuando habla se quedan con las del primero que las traiga (VOCESH.DAT no lleva) */
+static int voces_lee(const char *fich, void *buf, uint32_t cap)
 {
-    uint32_t tam, h[8], i;
+    uint32_t tam = 0, h[8], i, n;
     uint8_t *d;
-    if (!listo || n_voz) return n_voz ? 0 : -1;
-    d = gd_carga("VOCES.DAT", &tam);
-    if (!d) return -1;
+    if (buf) { if (gd_carga_en(fich, buf, cap, &tam)) return -1; d = buf; }
+    else if (!(d = gd_carga(fich, &tam))) return -1;
     memcpy(h, d, sizeof(h));    /* 'VOZ1', n, off_muestras, off_tablas, off_datos, total, idioma[8] */
     if (tam < 32 || memcmp(h, "VOZ1", 4) || h[1] > MAX_VOCES || h[5] > tam || h[4] > tam || h[3] > h[4] ||
-        h[2] + 20 * h[1] > h[3]) { free(d); return -1; }
+        h[2] + 20 * h[1] > h[3]) { if (!buf) free(d); return -1; }
+    if (voz_spu) { sfx_voz_calla(); snd_mem_free(voz_spu); voz_spu = 0; n_voz = 0; }
     voz_spu = snd_mem_malloc((h[5] - h[4] + 31) & ~31u);
-    voz_tablas_tam = h[4] - h[3];
-    voz_tablas = malloc(voz_tablas_tam);
-    if (!voz_spu || !voz_tablas) { free(d); return -1; }
+    if (!voz_spu) { if (!buf) free(d); dbglog(DBG_ERROR, "VOZ: %s no cabe en el AICA\n", fich); return -1; }
+    if (!voz_tablas && h[4] > h[3] + 32) {
+        voz_tablas_tam = h[4] - h[3];
+        if (!(voz_tablas = malloc(voz_tablas_tam))) { if (!buf) free(d); return -1; }
+        memcpy(voz_tablas, d + h[3], voz_tablas_tam);
+    }
     spu_memload(voz_spu, d + h[4], (h[5] - h[4] + 3) & ~3u);
-    memcpy(voz_tablas, d + h[3], voz_tablas_tam);
-    for (i = 0; i < h[1]; i++) memcpy(&voz[i], d + h[2] + 20 * i, 20);
+    n = h[1];
+    for (i = 0; i < n; i++) memcpy(&voz[i], d + h[2] + 20 * i, 20);
     memcpy(voz_idioma, d + 24, 8); voz_idioma[8] = 0;
-    n_voz = h[1];
-    free(d);
+    n_voz = n;
+    if (!buf) free(d);
+    dbglog(DBG_INFO, "VOZ: %s, %u muestras, %u KB en el AICA\n", fich, (unsigned)n, (unsigned)((h[5] - h[4]) >> 10));
+    return 0;
+}
+static const char *voz_fich;
+int sfx_voces_inicia(void)
+{
+    if (!listo || n_voz) return n_voz ? 0 : -1;
+    if (voces_lee("VOCES.DAT", NULL, 0)) return -1;
+    voz_fich = "VOCES.DAT";
     canal_voz = snd_sfx_chn_alloc();
     canal_voz_se = snd_sfx_chn_alloc();
     return 0;
 }
+/* el juego de voces del modo (el original pide otros bancos por variante: ORC/PERO en OutRun, HC/PERH/HAM en el
+   INFARTO); solo relee si cambia */
+int sfx_voces_juego(const char *fich, void *buf, uint32_t cap)
+{
+    if (!listo || !voz_fich) return -1;
+    if (!strcmp(voz_fich, fich)) return 0;
+    if (voces_lee(fich, buf, cap)) { voces_lee(voz_fich, buf, cap); return -1; }
+    voz_fich = fich;
+    return 0;
+}
+static int voz_grupo = -1;
+void sfx_voz_grupo(int g) { voz_grupo = g; }
 
 const void *sfx_voces_tablas(uint32_t *tam) { if (tam) *tam = voz_tablas_tam; return voz_tablas; }
 const char *sfx_voces_idioma(void) { return voz_idioma; }
@@ -385,7 +411,12 @@ static void toca_voz(int id, int canal)
     int i, vol;
     muestra_dat_t m;
     if (canal < 0) return;
-    for (i = 0; i < n_voz && voz[i].id != (id & 0x1ff); i++) ;
+    i = n_voz;
+    if (voz_grupo >= 0) {                                       /* la del banco de la etapa (HAM: id + 0x200 (g + 1)) */
+        int k = (id & 0x1ff) + 0x200 * (voz_grupo + 1);
+        for (i = 0; i < n_voz && voz[i].id != k; i++) ;
+    }
+    if (i >= n_voz) for (i = 0; i < n_voz && voz[i].id != (id & 0x1ff); i++) ;
     if (i >= n_voz) return;
     vol = (int)(vol_se(voz[i].vol) * vol_general + 0.5f);   /* como los efectos SE (vol_se) */
     if (vol > 255) vol = 255;
@@ -398,6 +429,7 @@ static void toca_voz(int id, int canal)
 }
 
 void sfx_voz(int id) { if (n_voz) toca_voz(id, (id & 0x1ff) == 0x4d || (id & 0x1ff) == 0x18d ? canal_voz_se : canal_voz); }
+void sfx_voz_se(int id) { if (n_voz) toca_voz(id, canal_voz_se); }   /* efectos de los bancos de voz (424940 directo) */
 
 void sfx_voz_calla(void)
 {

@@ -613,6 +613,22 @@ monton como antes. El monton no cambia (medido en la carrera desde el menu: "BO1
 frente a 279K antes de leerlo), y fuera de la carrera (pelicula, menus) no se usa: el prestamo del hueco de la union
 (presta_union) no se toca. libera_modelo no libera un modelo que este dentro del hueco de la union.
 
+### Modos INFARTO y CONTRARRELOJ (2026-11-09)
+
+- RAM: el modo OutRun queda igual salvo ~17 KB (codigo de comun/infarto.c, la cola de voces mas larga y un bufer de 4 KB
+  para las tablas de coches). En el INFARTO, al empezar su carrera: las tablas de INFARTO.DAT (13 KB; las de coches,
+  51 KB, se leen del GD de 2 en 2 sectores en cada accion -14, ~10 por etapa) y las de HAHUD.DAT (hudd_abre parcial,
+  ~22 KB), que se liberan al volver al menu. Medido en Flycast (recorrido real del menu, PALM -> BK00 -> LAKE, 2026-11-09):
+  OutRun 342 / 269 / 248 KB libres al leer BK00 / BKD / BO01 (sin estos cambios 359 / 286 / 265), INFARTO 313 / 240 /
+  220. Con el HUD de los corazones dentro de HUD.DAT (+31 KB siempre en la RAM) la lectura de BKD fallaba
+  ("No se pudo leer la etapa siguiente"): por eso van aparte. El margen ya era poco (la RAM del arranque bajo de 699 KB
+  a ~375 KB con los cambios de la musica del menu): cualquier aumento puede volver a romper la lectura de la union.
+- AICA: el juego de voces del modo se cambia al empezar la carrera (sfx_voces_juego): VOCES.DAT (207 KB) o VOCESH.DAT
+  (740 KB, 117 muestras); se lee entero en el hueco de la union aun prestado, asi que no pide RAM.
+- VRAM: HAHUD.DAT es una textura VQ de 128 x 512 (10 KB) que se sube despues de reservar la zona del curso (va fuera
+  de la zona). Dentro de HUD.DAT partia la zona del curso (1344 -> 832 KB): no se hace.
+- TA: el CONTRARRELOJ no abre trafico (menos vertices y CPU que el OutRun).
+
 ## 3. Otros riesgos de la consola real
 
 | Riesgo | Estado |
