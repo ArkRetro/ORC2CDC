@@ -43,7 +43,7 @@ Estado: OK (conectado y verificado al nivel indicado), PARCIAL, PROVISIONAL (apr
 | Aceleracion, motor, cambio auto/manual | tabla de parametros 0x2dbc30 (19 col.), par 162 f x 2 (automatico y manual, PAR2), freno 256 f; cambio PS2 0x18d530 | OK | or2_fisica.c clonado; columna por modelo MAP1 | ninguna conocida (`ACEL` = 1 por defecto; `-DACEL=1.35f` da la aceleracion de mas que se pidio antes, no es del juego) | — | H, E |
 | Direccion, derrape (inicio/mantenimiento/salida) | SlipAngleCtrl / RearGripCtrl / CorneringCtrl; temporizador 40 cuadros | OK | decompilacion + banco | ninguna conocida | trazas de entrada comparables con PS2 | H, E |
 | Adherencia por superficie | get_road_mu 500B30, running_resistance 502120, COLI0200 | OK | coli por rueda | ninguna conocida | — | H, E |
-| Choques coche-coche y muro, choque fuerte, grua | 4F9450/4F9000/4F8490/4F6FE0/4F76E0/4F7BF0/476040/473F30 (ver Choques entre coches), cbw_coli_wall, 5038D0, PlWrecker | PARCIAL | CHQ1/POS1 de PARAM.DAT, CJM1/SEC1 de TRAFC.DAT, efectos de IGC.PAK en SFX.DAT | coche-coche: ver Choques entre coches (PROVISIONALES alli); grua recoloca en el carril mas cercano (no en la fila de poligonos); avance 10 posiciones x m_pos (CONFIRMADO, antes 25 m supuestos) | — | H, E |
+| Choques coche-coche y muro, choque fuerte, grua | 4F9450/4F9000/4F8490/4F6FE0/4F76E0/4F7BF0/476040/473F30 (ver Choques entre coches), cbw_coli_wall, 5038D0, PlWrecker | PARCIAL | CHQ1/POS1 de PARAM.DAT, CJM1/SEC1 de TRAFC.DAT, efectos de IGC.PAK en SFX.DAT | coche-coche: ver Choques entre coches (PROVISIONALES alli; golpeados: parpadeo y cierre del original); vibracion del mando de PS2 (0x1d0420) salvo la de la superficie; grua recoloca en el carril mas cercano (no en la fila de poligonos); avance 10 posiciones x m_pos (CONFIRMADO, antes 25 m supuestos) | — | H, E |
 | Camara de carrera | evento CAMERA 385: 4858D0, 484810, 483110, 4A1680 SetCarCamera, 485590/483CE0/4834A0/483600, 4832F0/484A40, 483C10/484BD0 (PS2 0x178500..0x17b540, 0x1817c0) | PARCIAL | demo/camara.c con las tablas CAM1 de PARAM.DAT (vistas 0x2ccd88, por vista y modelo 0x2cd3d8, por modelo 0x2d2838 del fichero SLES) | vista 1 sin interior (no se dibuja el coche); camara de salida en los 60 primeros cuadros de la cuenta (SUPUESTO); sin vista 0x1D (780258 = 0) ni camaras de meta/fin | ver seccion Camara de carrera | E |
 | Trafico (clases, IA, reaccion) | 472090, 472450, 472A50, 47DC10, 4736D0, hit_476040; aparicion 479080 (PS2 0x1dcdd0): 478B90 (0x1dbba0), 4787E0 (0x1db6d0), 4EFB90 (0x1f3818), 4F0030 (0x1f1a88), 46CE30, 478430, 46CC10; cierre 477F60 | PARCIAL | TRAFC.DAT (TRC1, ACL1 y TAP1: tablas de aparicion, velocidad y puntos fijos por etapa); colores (tabla 0x36bc18, modelos 30..43) y materiales en TRAFn.DAT (TCX1) | camino "Lead" de 472450 (velocidad segun el jugador) sin portar: todos a la velocidad del registro; 478640/46CDA0 en la union simplificados; puntos fijos de coches de carreras y de los modelos 39..43 sin coche | ver Trafico: densidad del original | E |
 | Rivales | — | FALTA | — | no hay rivales | — | — |
@@ -299,8 +299,86 @@ Peticion del probador: efectos de sombras. Lo que hace el original y como va en 
   derrapar) y la demo ahora tambien (superficie de la COLI bajo cada rueda).
 - PENDIENTE: humo, polvo, grava, hierba y chispas de race_particles (41C570.., 41D6B0 chispas al rozar, 41DE20 grava,
   41E360 hierba; texturas 0x29 chispa, 0x2a grava, 0x2b hierba, 0x2e humo, 0x2f polvo de obj_course_obj_common en
-  SLES-53998); sombras de la escena sobre el coche y oscurecimiento en tuneles (bit 0x200 de 4A25F0 y
-  \OBJ\obj_cs_shadow_pmt.sz, recurso 0x56, sin estudiar); reflejos de la carretera.
+  SLES-53998); sombras de la escena sobre el coche y oscurecimiento en tuneles (bit 0x200 de 4A25F0); reflejos de la
+  carretera (capa 2: ver Suelos). \OBJ\obj_cs_shadow_pmt.sz (recurso 0x56) no esta en el disco de PS2 (ver Suelos).
+
+## Suelos: estado del GS, mipmaps y capas (2026-11-09)
+
+Queja del probador: "hay suelos que no se dibujan bien y efectos en el suelo que no estan". Recorrido en Flycast
+(PRUEBA_AUTO: PALM, LAKE, ALPI, CAST, DESE, SNOW, METR y la union de PALM) y en los datos de SLES-53998. Causas:
+
+- Tabla 7 del registro (CONFIRMADO, datos y microcodigo): 48 bytes por estado, la plantilla del paquete del GS que
+  manda el VU1 (GIFtag con PRE y PRIM: 0x1C tira con textura, 0x5C con mezcla (ABE), 0x0C / 0x4C sin textura; en +08
+  el registro ALPHA; +10 TEST; +18 CLAMP; +20 TEX1). La tabla 4 (36 bytes) da {material, 2 campos sin descifrar,
+  textura y estado de la capa 1, textura y estado de la capa 2, un par sin descifrar}; el grupo de la malla del nodo
+  (tabla 1: opacas / de mezcla) coincide siempre con ABE. Valores: TEST 0x5040B (prueba de alfa >= 0x40, z GEQUAL;
+  el 90 % de lo opaco), 0x5040A (sin prueba de alfa), 0x5004B (mezcla, alfa >= 4), 0x51001 (ATST NEVER + FB_ONLY: sin
+  escribir z, solo en capas 2); ALPHA 0x44 (Cs - Cd) As + Cd, 0x48 Cs As + Cd (aditiva), 0x58 Cs Ad + Cd y 0x89 Cd As
+  (capas 2); ZTST GEQUAL en todos; TEX1 MXL = niveles de mip - 1 (los mismos que la cabecera de la textura).
+  `modelo.estado_gs` / `lista_gs`.
+- Lista de la PowerVR por el contenido de la textura (antes, `textura_dc`) en vez de por el estado: (a) texturas con
+  alfa que el GS dibuja opacas (sin ABE ni prueba de alfa: el alfa es la mascara del brillo de la capa 2) iban a la
+  transparente: las calzadas de METR (texturas 1 y 2 del registro 0, 9 000 vertices) y de CAPE (4 173) y trozos de LAKE
+  y TULI se veian translucidas (el color de fondo a traves del asfalto: la calzada azulada de METR) y en 4444; (b) lo
+  que el GS dibuja con prueba de alfa (arboles, vallas, hierba) iba a la transparente si su alfa no era casi binario:
+  9 324 vertices en PALM (ordenados por la PowerVR por triangulo, sin escribir bien la z); (c) lo que el GS mezcla
+  iba a la opaca o a la de recorte si el alfa de la textura era casi constante: ALPI 3 266 vertices, SNOW 748, METR 809,
+  CAPE 356, INDU 254. Ahora la lista sale del estado (sin ABE ni prueba: opaca, en RGB565; prueba de alfa y algun
+  texel por debajo de AREF: recorte, ARGB1555 con el umbral de AREF; ABE: transparente) y una textura usada en dos
+  listas lleva una entrada por lista (3 en PALM). Vertices transparentes de cada etapa (datos): PALM 13 097 -> 3 811,
+  METR 14 953 -> 4 695, CAPE 4 346 -> 529, TULI 3 079 -> 2 947; ALPI 1 986 -> 5 252 y SNOW 1 729 -> 2 477 (lo que
+  mezcla el original).
+- Mezcla aditiva (ALPHA 0x48): el brillo del mar de PALM (registro 5, textura 116 de 64x64, dos tiras sobre la bahia
+  a 10 m bajo la calzada) y los destellos de METR iban con la mezcla normal (una capa de ruido gris sobre el mar). Ahora
+  SRCALPHA / ONE, y el alfa de los vertices de lo que mezcla (0x6E de las tiras; el GS: alfa = textura x vertice, TFX
+  MODULATE) con MODULATEALPHA: el brillo del mar se funde hacia sus bordes (alfa 0 en el borde exterior). PROBABLE: el
+  color 0x6E va en cada vertice (STCYCL 4/1: posicion, color, normal, UV), como ya se usaba su RGB; el programa del
+  VU1 que lo lee no se ha comprobado.
+- Mipmaps (CONFIRMADO que el original los usa): las texturas del suelo traen sus niveles en el disco (cabecera de la textura +0x34) y
+  su estado TEX1 los pide (MXL 1-4, MMIN 4 = bilineal en el nivel mas cercano); la demo no los tenia y el suelo lejano
+  centelleaba (rayas y bordillos a mas de 100 m). Ahora las texturas cuadradas de mas de la mitad de sus vertices en
+  el suelo (normal |y| > 0,7) y con MXL > 0 van con mipmaps de la PowerVR (bilineal + mipmap, el mismo filtro):
+  niveles por promedio de 2x2 de la base (`modelo.niveles_mip`; los del disco son de la misma base), en VQ con un
+  libro para todos los niveles (`vq.codifica_mip`); si la VQ con niveles no pasa el umbral de error, la textura va sin
+  mipmaps (sin VQ costaria 2,7 veces mas). La PowerVR solo los admite en texturas cuadradas: las rectangulares del
+  suelo (bordillos, arcenes de 128x64...) siguen sin ellos (DIFERENCIA). Por etapa 6-27 texturas.
+- z: el GS compara con GEQUAL (lo coplanario que llega despues gana); la PowerVR con GREATER por defecto. Las
+  cabeceras de la escena van ahora con GEQUAL. Comprobado en los datos: las manchas de sombra pintadas de la calzada
+  (registro 0, mezcla) van 5-15 cm por encima del asfalto (mediana 10 cm), sin z-fighting; tiras opacas coplanarias
+  con otra de distinta textura hay pocas (LAKE registro 8, ~70 triangulos): con GEQUAL gana la ultima enviada, que en
+  la demo es la del orden por textura y no la del original (DIFERENCIA menor).
+- Lo que no es causa: culling (el GS no recorta caras; la demo tampoco), geometria de la calzada (tiras ADC y nodos,
+  ver Graficos), orden de las listas (opaco, recorte, transparente, como las pasadas del original 405890).
+
+Efectos del suelo del original y su estado:
+
+- Sombras pintadas: en el PC el recurso 0x56 `\OBJ\obj_cs_shadow_pmt.sz` (XMT_CS_SHADOW 86); el nombre esta en el
+  ELF de PS2 pero no en el disco (OBJ.PS2 tiene 11 entradas, todas con nombre; el hash del nombre no esta en ningun
+  paquete: CONFIRMADO). En la PS2 las sombras pintadas son tiras de mezcla de las propias etapas (PALM registro 0,
+  textura 0 de 64x8; LAKE textura 30), que ya se dibujaban y ahora van con su alfa de vertice.
+- Agua: el mar de PALM es opaco con su brillo aditivo (arriba); el lago de LAKE es una malla opaca con su textura
+  (registro 8, textura 12, 370 m a 95 m bajo la salida), sin capa 2 ni mezcla. Sin animacion de textura en sus nodos
+  (sin la bandera 0x20 de 404D10).
+- Capas 2 (PENDIENTE, sin portar): la mayoria de las tiras de la escena llevan una segunda capa (tabla 4 +14/+18) y su
+  programa del VU1 la dibuja en una segunda pasada: guarda dos ST por vertice y manda el mismo bufer dos veces
+  (XGKICK) con los REGS del GIFtag cambiados (0x3F80412F: la ST del hueco 2; 0x3F8041F2: la del hueco 1) y entre medias
+  un paquete de estado que el EE deja en las direcciones 0x31 / 0x3A del VU (no localizado). Lo leido: (1) clave 0x10200
+  (programa 0x31AAE0): ST2 = matriz de textura (VU 15-18) x vector reflejado 2 N (N.V) - V: mapa de entorno, con la
+  textura 12 de PALM (256x256 negra, alfa ~1) o la 53 de LAKE (512x512, alfa con siluetas) y ALPHA 0x89 (Cd As:
+  oscurece lo de detras); el alfa del vertice sale de 1 - |N.V| (fresnel) con una potencia aproximada (ITOF/FTOI de los
+  bits del float). (2) Calzada (clave 0x5610200, programa 0x31B1B0): color = ambiente + difuso x max(N.L, 0) y alfa =
+  especular (R.V)^n aproximado, R la luz reflejada; segunda pasada con la textura 13 de PALM / 54 de LAKE (mancha de
+  64x64), ALPHA 0x58 (Cs Ad + Cd: suma por el alfa de destino que dejo la primera pasada = mascara del asfalto x
+  especular) y prueba de alfa >= 0x60; las dos ST son la misma UV. (3) Edificios con mapa esferico (PALM texturas 95/96,
+  clave 0x15D600) y focos proyectados por la posicion (clave 0x158200, programa 0x317CF0). No se portan: el paquete de
+  estado de la segunda pasada no esta localizado (la textura y la mezcla exactas son PROBABLES), la PowerVR a 16 bits no
+  tiene alfa de destino (Cs Ad), y una segunda pasada de la calzada duplica sus vertices en el TA (ver DREAMCAST.md).
+- Luces en el suelo de METR: en los datos no hay manchas de luz en la calzada; lo aditivo de METR son destellos y haces
+  (registros 4, 5 y 10, textura 131 de 16x16, pilas de cuadrilateros verticales). Van ahora con la mezcla aditiva.
+
+Codigo: `tools/modelo.py` (estado_gs, lista_gs, _variante, ajusta_texturas, niveles_mip, datos_mip; formato de textura
+bits 0x200 mipmaps, 0x400 aditiva, 0x800 escena con z GEQUAL), `tools/vq.py` (codifica_mip, elige_mip),
+`demo/main.c` (compila_cab). Verificacion y coste: ver Ultimo cambio verificado y DREAMCAST.md (Suelos).
 
 ## Fisica: auditoria (2026-11-08)
 
@@ -412,6 +490,61 @@ PROVISIONAL: solo la caja 0 (camiones con remolque 39..43 no estan en la demo); 
 +329 > 10 de la pasada (constantes sin localizar en PS2); la profundidad de camara de 4F67A0 se mide desde el jugador;
 lane_range (46D0C0) con la calzada por carriles 0..2 / 3..5; el rumbo del pose anterior del trafico es el de su
 avance (sin +2E8 ni cabeceo/balanceo).
+
+### Golpeados: parpadeo y cierre (2026-11-09)
+
+Queja del probador: al chocar, el coche "parece sentir el choque, difuminarse y desaparecer". En el original no hay
+alfa: es un parpadeo a 30 Hz y despues el coche se cierra (la plaza queda libre). Codigo: demo/main.c (traf_golpeado,
+traf_paso, traf_libera, traf_parpadea y el bucle del trafico en el dibujo).
+
+| Paso | Original (PC / PS2) | Antes en la demo | Ahora |
+|---|---|---|---|
+| golpe | 476040 (PS2 0x1ec620): +B64 = 120 (0x1ec914) y +C5C bit 0 (0x1ec930..0x1ec940, `sd` de +C58 bit 32) salvo en las variantes 3/4 (red), en los coches de carreras con 80FB14 o con 45C440 = 0xE | +B64 = 120 (solo fuera de la pasada de choques) | igual: tambien la marca de cierre |
+| aparicion | 4704A0 (PS2 0x1ec44c..0x1ec46c): +B62 = 60 (0 en la variante 4) | - | igual |
+| cuentas | 47E780 al final del control: +B62 y +B64 bajan 1 por cuadro; con el suceso suspendido (440A50 bit 0x10 / PS2 0x19d398, la pausa) los baja 4AE5F0 | +B64 en el control | igual |
+| dibujo | 4AE5F0 (PS2 0x1d786c..0x1d791c, base +AF0): si +B62 > 0, o +B64 > 0 y no (+B6C y +2F0 & 2 y +2F4 < 30), +B53 ^= 1 (con el modo != 0x12) y con +B53 = 1 no se dibuja; antes de la prueba de distancia (a todo coche vivo, se vea o no) | siempre entero | igual: un cuadro si y otro no; entero los 30 primeros cuadros de la animacion del golpe (+2F4, cuadros de 4A2400) |
+| cierre | 478340 (PS2 0x1da828..0x1da858; 479080 lo llama tras 477F60 y antes de abrir): +C5C bit 0 y +B64 <= 0 -> 4401D0 (cierra el suceso) | el golpeado seguia en la carretera tras la recuperacion | igual (traf_libera al principio de traf_aparece): a los 120 cuadros del golpe desaparece y su plaza se puede volver a abrir |
+| choques | +B64 > 0 lo saca de la pasada (4F9450) | igual | igual (no choca mientras parpadea) |
+| alfa | 4AE0F0: alfa +B68 solo con +4 0x40 (fantasmas de contrarreloj); +4 bit 2 = 0,5 si la camara esta dentro de una caja del coche (470570, solo +320 != 3: autobus y camiones) | - | sin alfa (no hace falta lista TR). PENDIENTE: el 0,5 de 470570 (la camara de carrera no entra en el autobus) |
+| sombra | 4ADAC0 no mira +B53 | - | el trafico de la demo no tiene sombra |
+| jugador | el coche del jugador no usa +B62/+B64/+B53 (su dibujo es otro): no parpadea ni se vuelve invulnerable; tras el estado 7 solo el roce de 120 cuadros con el mismo coche (+DA0/+DA4, ver arriba) | - | igual |
+
+Coche golpeado (state 16..19): 30 cuadros entero (dando vueltas), 90 parpadeando, cerrado en el cuadro 120 (2 s); la
+animacion de 3 s no llega a acabar. Los que aparecen parpadean sus 60 primeros cuadros (normalmente fuera de la vista).
+
+### Vibracion del mando (2026-11-09)
+
+Original (SLES-53998; el PC no la tiene): 0x1d0420 (la llama el control del jugador 0x17c228 cada cuadro; suspendido,
+0x17c284 pone los motores a 0) con el registro 0x36b4a8 (+4 escala = opcion/10 de 0x588668+0xCC, +8 motor grande, +0xC
+cuadros que se sostiene, +0x10 pequeno, +0x14 cuadros casi parado) y 0x1023a0 (DualShock: grande = min(255, x 255),
+pequeno con PWM de 8 cuadros: bit (cuenta & 7) de (int)(x 24)) -> 0x16def8 -> scePadSetActDirect (0x2ba948 desde
+0x16d44c). Las banderas: +4 0x10000 separado de otro coche en 4F9450 (el otro en +DD4), +4 0x20000 CbwColiWall en el
+cuadro (PC 0x504e3b); +8 0x800/0x1000 las mismas del cuadro anterior (4A8330); +1D0 = +1C4 - +178.
+
+| Causa | Grande | Cuadros | Pequeno |
+|---|---|---|---|
+| aterriza (+2DC a 0, o su velocidad de < 0 a >= 0) | + 0,75 | 15 | - |
+| muro, primer cuadro | + 0,75 | abs(+1D0) x 10 (tope 20) | - |
+| muro, siguientes | - | - | + v |
+| coche, primer cuadro | + 0,75 si hay cuadros | abs(v otro - v) x 25 (tope 20) | - |
+| coche, siguientes | - | - | + v x 0,5 |
+| cambio de marcha | + 0,5 | 4 | - |
+| tirones (+1D0 cambia de signo, abs > 0,0018) / frenada (< -0,002) | + v x 0,4 (v x 0,3 con freno y < -0,004) | 4 | - |
+| arranque (v < 0,33, +1D0 > 0,001) | + 0,3 | 10 | - |
+
+Tope 0,75 los dos (el pequeno antes a 0,5); el grande se sostiene sus cuadros (tope 25) y solo lo cambia uno mayor;
+debajo de 0,001 m/cuadro, o 600 cuadros debajo de 0,01, todo a 0. Demo: vib_paso (al final de traf_paso) y vib_cuadro
+(cada cuadro dibujado). Dreamcast: un motor (Puru Puru en el puerto del mando, MAPLE_FUNC_PURUPURU): nivel 1..7 = el
+grande en 7 escalones, 1 si solo va el pequeno; se manda al cambiar, continuo, frecuencia 26 (SUPUESTO); a 0 si el
+control no corre 3 cuadros (pausa, menus). SUPUESTO: escala 1,0 (la opcion de CONFIGURACION no esta en la demo; su
+valor por defecto sin localizar). PENDIENTE: lo de la superficie (0x1d0138: intensidad por material de cada rueda
++24C..+258, bordes +264/+268, rebote +8 0x100, banderas +8 0x40/0x80/0x2000).
+
+Otras reacciones al choque: la camara (vistas de choque 0x1B/0x1C, la animacion +2D8.. del cuerpo) ya esta en
+demo/camara.c; no se ha encontrado una sacudida de camara propia del golpe al trafico (CalcVibrateMatrix 4A2D70 es la
+vibracion del cuerpo con +1C8, no del choque). Humo del golpe: 41C570 / 41C940 (OcTireSmokeReq) echan humo de las ruedas traseras en los estados 2, 5,
+12, 13, 15, 17, 18 y 19 (smoke_event), del jugador y del trafico: PENDIENTE (efectos de suelo, ver Sombras y marcas).
+Verificacion: ver Ultimo cambio verificado.
 
 ## Checkpoint
 
@@ -794,6 +927,20 @@ que la Dreamcast espera de un juego: todo sale de graficos del disco (`tools/con
   eyecatch. Previas en el scratchpad (vmu/). Pendiente: R (VMU real en GDEMU).
 
 ## Ultimo cambio verificado
+
+Golpeados y vibracion (2026-11-09, ver Choques entre coches: Golpeados y Vibracion): el coche golpeado (476040) se
+ve entero 30 cuadros, parpadea a 30 Hz (4AE5F0, +B53) y a los 120 cuadros se cierra (478340) y libera la plaza; los que
+aparecen parpadean 60 cuadros (+B62 de 4704A0); vibracion del mando de SLES-53998 (0x1d0420 / 0x1023a0) en el Puru Puru.
+Ademas el trafico ya no se recorta por la vista con un margen fijo de 4 m (el autobus asomaba y desaparecia en el borde):
+el margen es medio coche + 1,5 m (el original no recorta por la vista). Verificado en Flycast (capturas en el scratchpad
+fade/): `-DPRUEBA_JUGADOR -DPRUEBA_TRAFICO -DDIAG_CHOQUE -DPRUEBA_FADE=60` (golpe 17 a un coche a 14 m, el jugador
+parado): DIAGFADE entero de b64 120 a 90, parpadeo (oculto 1/0 alterno) de 89 a 2, cerrado en el cuadro 120;
+capturas: trompo entero a +10 cuadros, oculto/visible alternos y ausente a +124 (parpadeo_trompo.png).
+`-DPRUEBA_GUION -DPRUEBA_EMBISTE` con `-DEMB_DESDE=2500 -DEMB_CONG=...` (congela tras el golpe al autobus, estado 19):
+el autobus se ve entero en las congelaciones de +1..+15 sin desaparecer en el borde. Vibracion con el Puru Puru de
+Flycast (`device1.2 = 3`): DIAGVIB golpe a otro coche grande 0,75 durante 5..12 cuadros (diferencia de velocidades x 25),
+aterrizaje del estado 7 0,75 / 15 cuadros, cambio de marcha 0,5 / 4, arranque 0,3 / 10; se manda nivel 5 / 3 / 2 y 0 al
+acabar o en la congelacion. Compila sin avisos.
 
 Choques entre coches (2026-11-08): auditoria completa (ver Choques entre coches): cajas 520950, esquinas contra bordes,
 reparto con la clase 5 del jugador, roces, estado 7 solo con cierre > 80 (o pesados), lado del original, choques

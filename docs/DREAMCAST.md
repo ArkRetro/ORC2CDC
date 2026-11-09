@@ -288,6 +288,29 @@ bit de modificador; el coche del jugador no) que queda dentro se multiplica por 
   Si hace falta sitio: la sombra plana es negra con 16 niveles de alfa (cabria en 4 bits con paleta: 2 KB en vez de
   8) y lo mismo las marcas.
 
+### Suelos: listas del estado del GS, mezcla aditiva y mipmaps (2026-11-09)
+
+Ver PARIDAD.md, Suelos. Coste medido (Flycast, `DIAG_VTX`, datos regenerados con `tools/conv_union.py`):
+
+- VRAM: los mipmaps de las texturas cuadradas del suelo (6-27 por etapa) suman un tercio de los indices de su VQ (el
+  libro no crece) o de sus texeles si son de menos de 32x32; si la VQ con niveles pasa del error RMS 9 la textura va
+  sin mipmaps. Texturas por fichero: SEG00 492 -> 519 KB, SEG03 556 -> 469 (la calzada y lo que era 4444 por error
+  pasa a VQ 565), SEG05 623 -> 634, SEG06 726 -> 753, SEG10 665 -> 700, SEG13 775 -> 505, SEG16 880 -> 893, BK09 213
+  -> 215, BK13 214 -> 217. Peor caso medido (COCHE06, `-DPRUEBA_FICHA=6`): IMPE + su meta BK13 (`-DPRUEBA_NODO=13
+  -DPRUEBA_FIN=400`) **51 KB libres** (antes 67 KB), BK09 + IMPE (`-DPRUEBA_NODO=9 -DPRUEBA_RAMA=0 -DPRUEBA_FIN=400`)
+  **53 KB** (antes 69 KB). Si hace falta sitio, lo primero: quitar los mipmaps de IMPE (13 KB) o las ideas de la
+  sombra plana (arriba).
+- TA y OPB: los mismos vertices y casi las mismas cabeceras (3 texturas de PALM llevan una entrada por lista). Pasan
+  de la lista transparente a la de recorte o a la opaca miles de tiras (mallas transparentes de los ficheros: PALM 6925
+  -> 295, METR 5933 -> 4546, CAPE 601 -> 84) y al reves las que el original mezcla (ALPI 992 -> 1793, INDU 269 ->
+  1042). Los translucidos ordenados (autosort) son los caros para la PowerVR; los de recorte tienen 16 palabras por
+  tesela en el OPB (los translucidos 8).
+- CPU: nada (las listas, la mezcla y los mipmaps van en los ficheros y en las cabeceras).
+- Mipmaps de la PowerVR: solo texturas cuadradas twiddled o VQ; datos de 16 bits con 6 bytes de relleno y los niveles
+  de 1x1 a la base (el de lado 2^k en 0x6, 0x8, 0x10, 0x30, 0xB0...); VQ con el libro y los indices de los niveles
+  seguidos (0x0, 0x1, 0x2, 0x6, 0x16, 0x56... tras el libro; el de 1x1 un bloque de 2x2 de su color). La direccion de
+  la textura es la de siempre (con el libro reducido, 2048 - 8 N bytes antes).
+
 ## 3. Otros riesgos de la consola real
 
 | Riesgo | Estado |

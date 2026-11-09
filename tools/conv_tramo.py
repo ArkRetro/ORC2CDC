@@ -13,7 +13,7 @@ import os, struct, sys
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ps2 import iso as isomod, stage, tex, vif
-import modelo
+import modelo, pvs
 
 def recorrido(seg):
     """camino de la camara: el diametro del grafo de puntos de la calzada (tiras casi horizontales del registro 0),
@@ -454,7 +454,8 @@ def lee_visibilidad(d):
     cada parte; en cada parte un u32 por seccion (desde la parte) a su lista: u16 n y n pares (byte, mascara), los nodos
     8 byte + bit. En el PC la lista son u16 terminados en 0xFFFF y el formato de PS2 es otro: las listas de PS2 no son
     el conjunto visible desde la seccion (los nodos de la calzada bajo el coche no estan en la de su seccion; ni el
-    complemento ni diferencias acumuladas cuadran; ver docs/PARIDAD.md), asi que de momento solo se usa para saber que
+    complemento ni diferencias acumuladas cuadran; comparadas con la visibilidad precalculada de tools/pvs.py: casi todo
+    lo que nombran se ve, pero son pocos nodos en rachas cortas; ver docs/PARIDAD.md), asi que solo se usa para saber que
     registros no dibuja nunca la etapa (sin ningun nodo en ninguna seccion). Devuelve [parte][seccion] -> conjunto de
     nodos, o None si no es una tabla"""
     if len(d) < 16 or d[:8] != b'\0' * 8: return None
@@ -558,6 +559,7 @@ def convierte(seg, n, sal, mundo=None, cielo=True, luz=None):
     mod.recorta_texturas()                                     # solo las texturas que se usan (memoria de video)
     if mundo is not None: transforma(mod, mundo)
     ini = mod.escribe(sal)
+    pvs.anade(sal)                                             # visibilidad precalculada por secciones (tools/pvs.py)
     print('triangulos de las tiras del VU1: %d, sin dibujar por la bandera ADC: %d' % (mod.tri_total, mod.tri_adc))
     print('segmento %d: %d tiras (%d opacas, %d recorte, %d transparentes, %d cielo), %d vertices, %d triangulos, '
           '%d texturas (%d KB), ruta %d puntos (%.0f m), %d KB'

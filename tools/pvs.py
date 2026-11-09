@@ -17,19 +17,29 @@ Secciones: SEC_PUNTOS puntos de la ruta (8 m). La muestra va a la seccion del pu
 cercano a ella y a las dos vecinas (la demo elige la seccion por el punto mas cercano al ojo). Las SEC_LLENAS primeras y
 ultimas secciones llevan todos los nodos (el ojo puede estar fuera de la ruta, en la etapa de antes o la de despues).
 
-Formato (ORD7 ampliado): nsecciones con el bit 31 = listas XOR: la lista de cada seccion son los nodos que cambian
-respecto a la anterior (la primera: los visibles de la seccion 0); la demo lleva la mascara de la seccion en la que esta
-y la mueve aplicando las listas (adelante o atras: XOR). Mismo sitio y forma que la tabla de nodos por secciones de
-antes (inicio de cada lista, listas u16, seccion de cada punto de la ruta u16)."""
+Va por malla (cada tira del fichero de un nodo del original; el cielo y lo que no es de un nodo se dibuja siempre): un
+nodo grande se ve casi siempre por algun sitio, sus mallas no. Los huecos de HUECO secciones o menos en los que una
+malla no se ve se rellenan (se queda visible: menos listas y nunca quita nada).
+
+Formato (ORD7 ampliado, compatible: sin el bit, la tabla de antes): nsecciones con el bit 31 = PVS. Mismo sitio: inicio
+de cada lista (nsecciones + 1 u32, en bytes), las listas, relleno a 2 y la seccion de cada punto de la ruta (u16). La
+lista de cada seccion son las mallas que cambian respecto a la anterior (XOR; la primera: las visibles de la seccion 0),
+en orden, cada una como la diferencia con la anterior en un byte (255 y 16 bits si no cabe). La demo lleva la mascara
+de la seccion aplicada y la mueve aplicando las listas, hacia delante o hacia atras (pvs_paso en demo/main.c).
+
+Las listas por seccion del original (cs_CS_<zona>_bin, conv_tramo.lee_visibilidad) no son esto: comparadas con este PVS
+en PALM (nodos), el 98 % de los que nombra una seccion se ven desde ella, pero son unos 68 de 2511 por seccion, en
+rachas de 1,4 secciones, y ni ellas ni su XOR acumulado (947 de media) cubren lo que se ve delante (43 %)."""
 import ctypes, os, struct, subprocess, sys, time
 import numpy as np
 
 SEC_PUNTOS = 2                                                  # puntos de la ruta por seccion (4 m cada uno)
+HUECO = int(os.environ.get("PVS_HUECO", "8"))                   # huecos de invisibilidad que se rellenan (secciones)
 SEC_LLENAS = 2                                                  # secciones de cada punta con todos los nodos
 LADO_EXTRA = 3.0                                                # metros fuera del limite transitable
 PASO_LADO = 4.0
 ALTURAS = (0.6, 3.3, 6.0)                                       # sobre el suelo del perfil (la demo: ALTO_PVS)
-EPS = float(os.environ.get("PVS_EPS", "3.2"))                   # >= distancia de cualquier punto a su muestra (m)
+EPS = float(os.environ.get("PVS_EPS", "0"))                     # erosion por distancia al borde (m); 0: solo un pixel
 K = float(os.environ.get("PVS_K", "128"))                       # pixeles por unidad de tangente
 FOV_MAX = np.radians(100.0)                                     # fov horizontal mas abierta para el LOD de los oclusores
 LEJOS = 4000.0
@@ -65,7 +75,8 @@ def lee(fn):
     d['nodos'] = toma(32 * nn); d['carteles'] = toma(64 * nc)
     if ns:
         ini = np.frombuffer(b, '<u4', ns + 1, p); p += 4 * (ns + 1)
-        p += 2 * int(ini[-1]) + 2 * nr
+        if h[12] & XOR: p += int(ini[-1]); p += p % 2; p += 2 * nr
+        else: p += 2 * int(ini[-1]) + 2 * nr
     p += -p % 4; p += -p % 32
     d['blob'] = b[p:]
     d['M'] = np.frombuffer(d['mallas'], MALLA); d['V'] = np.frombuffer(d['verts'], VERT)
@@ -80,7 +91,7 @@ def escribe(d, fn, ini, listas, mapa):
         f.write(b'ORD7' + struct.pack('<13I', *h))
         for k in ('texs', 'mallas', 'verts', 'ruta', 'nodos', 'carteles'): f.write(d[k])
         if len(ini) > 1:
-            f.write(np.asarray(ini, '<u4').tobytes()); f.write(np.asarray(listas, '<u2').tobytes())
+            f.write(np.asarray(ini, '<u4').tobytes()); f.write(bytes(listas)); f.write(b'\0' * (-f.tell() % 2))
             f.write(np.asarray(mapa, '<u2').tobytes())
         f.write(b'\0' * (-f.tell() % 4)); f.write(b'\0' * (-f.tell() % 32)); f.write(d['blob'])
 
@@ -114,6 +125,22 @@ def muestras(R):
             for hh in ALTURAS:
                 out.append((a[0] + x * der[0], g + hh, a[2] + x * der[2]))
     return np.array(out, np.float32)
+
+def rellena(sec, g):
+    """los huecos de g secciones o menos entre dos en las que la malla se ve: visible (menos listas; nunca quita nada)"""
+    if g <= 0: return sec
+    n = len(sec); idx = np.arange(n)[:, None]
+    ult = np.maximum.accumulate(np.where(sec, idx, -1), axis=0)                 # ultima visible <= s
+    sig = np.minimum.accumulate(np.where(sec, idx, n + g + 1)[::-1], axis=0)[::-1]   # siguiente visible >= s
+    return sec | ((ult >= 0) & (sig < n) & (sig - ult - 1 <= g))
+
+def codifica(x):
+    """indices crecientes -> bytes: diferencia con el anterior (el primero desde -1); 255 y 16 bits si no cabe"""
+    out = bytearray(); a = -1
+    for i in x:
+        dd = int(i) - a; a = int(i)
+        out += bytes([dd]) if dd < 255 else bytes([255, dd & 255, dd >> 8])
+    return out
 
 def calcula(d, extras=(), hilos=os.cpu_count() or 4, informe=True):
     """las listas XOR por seccion del modelo d (lee), por malla (cada tira del fichero; las de los nodos del original).
@@ -154,6 +181,7 @@ def calcula(d, extras=(), hilos=os.cpu_count() or 4, informe=True):
     L.pvs(c(T), O.ctypes.data, t0n.ctypes.data, nm, c(esf), fl.ctypes.data, c(occ), c(pos), len(pos), K, EPS, hilos,
           sal.ctypes.data)
     vis = np.unpackbits(sal.view(np.uint8), axis=1, bitorder='little')[:, :nm].astype(bool)
+    if os.environ.get('PVS_DEPURA'): return vis, pos, util, fl, occ
     # la seccion de cada muestra: la del punto de la ruta mas cercano (como la demo con el ojo) y sus vecinas
     from scipy.spatial import cKDTree
     nsec = (len(R) + SEC_PUNTOS - 1) // SEC_PUNTOS
@@ -161,28 +189,31 @@ def calcula(d, extras=(), hilos=os.cpu_count() or 4, informe=True):
     sec = np.zeros((nsec, nm), bool)
     for s, v in zip(kp // SEC_PUNTOS, vis):
         sec[max(s - 1, 0):s + 2] |= v
+    sec = rellena(sec, HUECO)
     sec[:SEC_LLENAS] = util; sec[-SEC_LLENAS:] = util
     sec &= util
-    prev = np.zeros(nm, bool); ini = [0]; listas = []
+    prev = np.zeros(nm, bool); ini = [0]; listas = bytearray(); nxor = 0
     for s in range(nsec):
-        x = np.nonzero(sec[s] ^ prev)[0]; listas += x.tolist(); ini.append(len(listas)); prev = sec[s]
+        x = np.nonzero(sec[s] ^ prev)[0]; nxor += len(x); listas += codifica(x); ini.append(len(listas)); prev = sec[s]
     mapa = np.arange(len(R)) // SEC_PUNTOS
     vn = np.where(util, n, 0).astype(float)
     mid = sec[SEC_LLENAS:-SEC_LLENAS] if nsec > 2 * SEC_LLENAS else sec
-    est = dict(sec=sec, vn=vn, util=util, muestras=len(pos), mallas=int(util.sum()), secciones=nsec, xor=len(listas),
+    est = dict(sec=sec, vn=vn, util=util, muestras=len(pos), mallas=int(util.sum()), secciones=nsec, xor=nxor,
                seg=time.time() - t0, frac_mallas=float(mid.sum(1).mean() / max(1, util.sum())),
                frac_vtx=float((mid @ vn).mean() / max(1, vn.sum())))
     if informe:
         print('PVS %s: %d muestras, %d mallas de nodos, %d secciones, %d entradas XOR (%d KB); quedan de media %.0f %% '
               'de las mallas y %.0f %% de los vertices; %.0f s' % (os.path.basename(d['fn']), est['muestras'],
-              est['mallas'], nsec, len(listas), (4 * (nsec + 1) + 2 * len(listas) + 2 * len(R)) >> 10,
+              est['mallas'], nsec, nxor, (4 * (nsec + 1) + len(listas) + 2 * len(R)) >> 10,
               100 * est['frac_mallas'], 100 * est['frac_vtx'], est['seg']))
     return ini, listas, mapa, est
 
 def anade(fn, extras=()):
-    """calcula el PVS del fichero fn y lo reescribe con el. extras: ficheros ORD7 con rutas de mas (BKD.DAT)"""
+    """calcula el PVS del fichero fn y lo reescribe con el. extras: rutas de mas (arrays como la del modelo, o ficheros
+    ORD7 con ellas: BKD.DAT). PVS=0 en el entorno: no se calcula (el fichero queda sin secciones)"""
+    if os.environ.get('PVS', '1') == '0': return None
     d = lee(fn)
-    ex = [lee(x)['R'] for x in extras]
+    ex = [lee(x)['R'] if isinstance(x, str) else np.asarray(x, np.float32) for x in extras]
     ini, listas, mapa, est = calcula(d, ex)
     escribe(d, fn, ini, listas, mapa)
     return est

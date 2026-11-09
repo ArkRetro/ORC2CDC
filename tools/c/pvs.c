@@ -162,13 +162,13 @@ static void erosiona(buf_t *b, float K, float eps)
         const float *L = b->niv[k - 1]; float *T = b->tmp, *O = b->niv[k]; int s = h + 1;
         for (y = 0; y < H; y++) for (x = 0; x < W; x++) {
             float m = L[y * W + x];
-            float l = x - s >= 0 ? L[y * W + x - s] : 0, r = x + s < W ? L[y * W + x + s] : 0;
+            float l = L[y * W + (x - s >= 0 ? x - s : 0)], r = L[y * W + (x + s < W ? x + s : W - 1)];
             if (l < m) m = l; if (r < m) m = r;
             T[y * W + x] = m;
         }
         for (y = 0; y < H; y++) for (x = 0; x < W; x++) {
             float m = T[y * W + x];
-            float u = y - s >= 0 ? T[(y - s) * W + x] : 0, d = y + s < H ? T[(y + s) * W + x] : 0;
+            float u = T[(y - s >= 0 ? y - s : 0) * W + x], d = T[(y + s < H ? y + s : H - 1) * W + x];
             if (u < m) m = u; if (d < m) m = d;
             O[y * W + x] = m;
         }
@@ -180,12 +180,13 @@ static void erosiona(buf_t *b, float K, float eps)
             float u = (x + 0.5f) / K - 1.0f, iz = b->niv[0][y * W + x], r;
             if (iz <= 0) { b->E[y * W + x] = 0; continue; }
             r = eps * K * (1.0f + u * u + v * v) * iz + 1.0f;
-            for (k = 1; k < NIV && medio[k] < r; k++) ;
-            b->E[y * W + x] = k < NIV ? b->niv[k][y * W + x] : 0;
+            for (k = 1; k < NIV - 1 && medio[k] < r; k++) ;
+            b->E[y * W + x] = b->niv[k][y * W + x];
         }
     }
 }
 
+float *pvs_volcado;                                              /* depuracion: z-buffer y erosion de la posicion 0 */
 static void una_posicion(trabajo_t *T, buf_t *b, int ip, unsigned *vis)
 {
     const float *o = T->pos + 3 * ip; int f, i, j, nn = T->nn;
@@ -210,6 +211,10 @@ static void una_posicion(trabajo_t *T, buf_t *b, int ip, unsigned *vis)
         }
         /* 2) erosion */
         erosiona(b, T->K, T->eps);
+        if (pvs_volcado && ip == 0) {
+            memcpy(pvs_volcado + (size_t)(2 * f) * b->W * b->H, b->niv[0], sizeof(float) * b->W * b->H);
+            memcpy(pvs_volcado + (size_t)(2 * f + 1) * b->W * b->H, b->E, sizeof(float) * b->W * b->H);
+        }
         /* 3) candidatos */
         for (i = 0; i < nn; i++) {
             const float *e = T->esf + 4 * i; int x0, x1, y0, y1, x, y, ve = 0;

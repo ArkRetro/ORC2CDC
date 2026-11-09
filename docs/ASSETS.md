@@ -97,7 +97,8 @@ orden alfabetico en mayusculas; STAGE.PS2 no sigue ese orden dentro de cada zona
 Tabla 0 nodos de 56 bytes (el PmtNode del PC: banderas, esfera, sesgo de LOD, animacion, matriz de la tabla 6, hijo,
 hermano, malla de cada LOD), 1 mallas de nodo de 16 bytes (n opacas, n de mezcla, primera opaca, primera de mezcla en
 la tabla 3), 3 tiras de 24 bytes (palabras 0 y 1 = clave del microcodigo del VU1; tercera = paquete DMA en A), 4 de 36
-bytes, 6 matrices 4x4 de vectores fila. Mallas: GIFtag (NLOOP = vertices), posiciones V3-32, normales V3-16
+bytes (capas de cada malla: material, textura y estado), 5 materiales de 64, 6 matrices 4x4 de vectores fila, 7
+estados del GS de 48 bytes (ver Estados del GS). Mallas: GIFtag (NLOOP = vertices), posiciones V3-32, normales V3-16
 (/32768), UV V4-16 (/4096) o V2-32, STCYCL 1/3, lotes de hasta 59 vertices con varias tiras: el bit 1 de la y de cada
 posicion es la bandera de no dibujar el triangulo que cierra (ADC; `vif.no_dibuja`, microcodigo en PARIDAD.md,
 Graficos). STROW/STMOD (las UV pueden ir en diferencias). Por etapa, `cs_CS_<zona>_bin` y `cs_ENV_<zona>_bin`: listas
@@ -194,8 +195,10 @@ coches del original, 40D840; ver PARIDAD.md Entorno) a registros de 0xb0 bytes t
 posicion de carretera es la seccion 5 de la colision: una cada ~7,9 m.
 
 **Materiales** (tabla 5 de cada registro de modelo, 64 bytes): difuso r, g, b, a en unidades del GS (128 = 1),
-ambiente, especular, potencia, emision. El primer campo de la entrada de la tabla 4 (36 bytes) es el material y el
-cuarto la textura. `modelo.material_de`.
+ambiente, especular, potencia, emision. La entrada de la tabla 4 (36 bytes): material, dos campos sin descifrar,
+textura y estado de la capa 1, textura y estado de la capa 2 (-1 sin ella), un par sin descifrar. `modelo.material_de`.
+**Estados del GS** (tabla 7, 48 bytes): GIFtag con PRE y PRIM (bit 6 ABE mezcla, bit 4 TME), el registro ALPHA en
++08, TEST en +10, CLAMP en +18 y TEX1 en +20 (MXL = niveles de mip - 1). `modelo.estado_gs`; PARIDAD.md, Suelos.
 
 **Carteles de bifurcacion**: `COMMON obj_course_obj_bk_<zona>` (en el disco solo el de PALM) son los porticos; sus
 texturas 0-3 son huecos de 8x8 que se llenan con las de `obj_OBJ_<ZONA>_BUNKI_TX` de cada destino (icono, nombre con

@@ -36,6 +36,10 @@ typedef struct {
     nodo_t *nodos; float (*carteles)[4][4];                      /* ORD7: nodos y matrices de los carteles (filas) */
     uint32_t nnodos, ncarteles, nsec;                             /* secciones de la tabla de visibilidad del original */
     const uint32_t *sec_ini; const uint16_t *sec_lista, *sec_mapa;   /* lista de nodos por seccion; seccion por punto */
+    /* visibilidad precalculada (tools/pvs.py; nsec con el bit 31): por seccion, las mallas que cambian respecto a la
+       anterior (XOR), en bytes; la mascara de la seccion aplicada y lo que queda visible de cada nodo (pvs_paso) */
+    const uint8_t *pvs_l; uint32_t *pvs_m, *pvs_teo;              /* pvs_teo: por nodo, bytes teoricos y vertices */
+    int32_t pvs_s; uint32_t pvs_i; int pvs_on;                    /* seccion aplicada, punto del ojo, en uso este cuadro */
     uint32_t *vis;                                                /* nodos visibles en el cuadro (bits; nodos_visibles) */
     uint32_t ruta_i;                                              /* punto de la ruta mas cercano al coche (ultimo) */
     uint8_t *datos, *blob; pvr_poly_hdr_t *cabs[2];               /* [0] con niebla, [1] sin niebla (cielo) */
@@ -75,7 +79,7 @@ static int lee_modelo_en(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t
     memset(h, 0, sizeof h); memcpy(h, b + 4, (v7 ? 13 : 10) * 4);
     m->nmallas = h[0]; m->nvert = h[1]; m->nruta = h[2]; m->paso_ruta = h[3]; m->ntex = h[4];
     for (i = 0; i < 5; i++) m->inicio[i] = h[5 + i];
-    m->nnodos = h[10]; m->ncarteles = h[11]; m->nsec = h[12];
+    m->nnodos = h[10]; m->ncarteles = h[11]; m->nsec = h[12] & 0x7FFFFFFFu;
     p = b + (v7 ? 56 : 44);
     m->texs = (tex_t *)p; p += m->ntex * sizeof(tex_t);
     m->mallas = (malla_t *)p; p += m->nmallas * sizeof(malla_t);
@@ -84,7 +88,10 @@ static int lee_modelo_en(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t
     m->nodos = (nodo_t *)p; p += m->nnodos * sizeof(nodo_t);
     m->carteles = (float (*)[4][4])p; p += m->ncarteles * 64;
     m->sec_ini = m->nsec ? (const uint32_t *)p : NULL; p += m->nsec ? (m->nsec + 1) * 4 : 0;
-    m->sec_lista = m->nsec ? (const uint16_t *)p : NULL; p += m->nsec ? m->sec_ini[m->nsec] * 2 : 0;
+    m->pvs_l = NULL; m->pvs_m = m->pvs_teo = NULL; m->pvs_s = -1; m->pvs_i = 0; m->pvs_on = 0;
+    if (m->nsec && (h[12] >> 31)) {                               /* PVS: listas XOR en bytes (pvs_aplica) */
+        m->pvs_l = p; m->sec_lista = NULL; p += m->sec_ini[m->nsec]; p = b + ((p - b + 1) & ~1);
+    } else { m->sec_lista = m->nsec ? (const uint16_t *)p : NULL; p += m->nsec ? m->sec_ini[m->nsec] * 2 : 0; }
     m->sec_mapa = m->nsec ? (const uint16_t *)p : NULL; p += m->nsec ? m->nruta * 2 : 0;
     p = b + ((p - b + 3) & ~3);
     if (!v7) for (i = 0; i < m->nmallas; i++) m->mallas[i].nodo = -1;   /* ORD5/6: distancia maxima, sin nodos */
@@ -97,6 +104,10 @@ static int lee_modelo_en(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t
             m->nodos[m->mallas[i].nodo].relleno[0] += ta_teo(n, 0); m->nodos[m->mallas[i].nodo].relleno[1] += n << 12;
         }
     m->vis = m->nnodos ? calloc((m->nnodos + 31) / 32, 4) : NULL; m->ruta_i = 0;
+    if (m->pvs_l) {                                               /* sin seccion aplicada: nada visible hasta pvs_paso */
+        m->pvs_m = calloc((m->nmallas + 31) / 32, 4); m->pvs_teo = calloc(2 * m->nnodos + 1, 4);
+        if (!m->pvs_m || !m->pvs_teo) { free(m->pvs_m); free(m->pvs_teo); m->pvs_m = m->pvs_teo = NULL; m->pvs_l = NULL; }
+    }
     m->blob = b + ((p - b + 31) & ~31); m->datos = b;
     return 0;
 }
@@ -125,6 +136,13 @@ static void compila_cab(modelo_t *m, uint32_t i, int especular)   /* especular: 
         /* sombra del coche (sombra_dibuja): la recibe lo opaco y lo recortado de la escena y del trafico; el coche del
            jugador no (el original lo dibuja despues de oscurecer) */
         if (m != &coche && t->lista != 2) { cx.fmt.modifier = true; cx.gen.modifier_mode = false; }   /* cheap shadow */
+        /* escena (etapas y uniones): el estado del GS de su capa 1 (tools/modelo.py estado_gs, docs/PARIDAD.md Suelos):
+           0x800 z con GEQUAL (ZTST del GS: lo coplanario dibujado despues gana, como en la PS2) y alfa = textura x
+           vertice (TFX MODULATE del GS); 0x400 mezcla aditiva (ALPHA 0x48: Cs As + Cd); 0x200 con mipmaps (TEX1 MXL;
+           bilineal en el nivel mas cercano, como MMIN 4 del GS) */
+        if (t->fmt & 0x800) { cx.depth.comparison = PVR_DEPTHCMP_GEQUAL; if (t->lista == 2) cx.txr.env = PVR_TXRENV_MODULATEALPHA; }
+        if ((t->fmt & 0x400) && t->lista == 2) { cx.blend.src = PVR_BLEND_SRCALPHA; cx.blend.dst = PVR_BLEND_ONE; }
+        if (t->fmt & 0x200) cx.txr.mipmap = true;
         pvr_poly_compile(&m->cabs[f][i], &cx);
     }
 }
@@ -167,7 +185,7 @@ static void libera_modelo(modelo_t *m)
 {
     uint32_t i;
     for (i = 0; i < m->ntex; i++) if (m->tv && m->tv[i]) pvr_mem_free(m->tv[i]);
-    free(m->tv); free(m->cabs[0]); free(m->cabs[1]); free(m->ofs); free(m->vis);
+    free(m->tv); free(m->cabs[0]); free(m->cabs[1]); free(m->ofs); free(m->vis); free(m->pvs_m); free(m->pvs_teo);
     if (m->datos != hueco_etapa && m->datos != hueco_union) free(m->datos);
     memset(m, 0, sizeof *m);
 }
@@ -185,7 +203,9 @@ static void compacta_modelo(modelo_t *m)
         m->verts = (vert_t *)((uintptr_t)m->verts + k); m->ruta = (float *)((uintptr_t)m->ruta + k);
         m->nodos = (nodo_t *)((uintptr_t)m->nodos + k); m->carteles = (float (*)[4][4])((uintptr_t)m->carteles + k);
         if (m->nsec) {
-            m->sec_ini = (const uint32_t *)((uintptr_t)m->sec_ini + k); m->sec_lista = (const uint16_t *)((uintptr_t)m->sec_lista + k);
+            m->sec_ini = (const uint32_t *)((uintptr_t)m->sec_ini + k);
+            if (m->sec_lista) m->sec_lista = (const uint16_t *)((uintptr_t)m->sec_lista + k);
+            if (m->pvs_l) m->pvs_l = (const uint8_t *)((uintptr_t)m->pvs_l + k);
             m->sec_mapa = (const uint16_t *)((uintptr_t)m->sec_mapa + k);
         }
         m->datos = d;
@@ -458,6 +478,7 @@ static void dibuja_rango(const modelo_t *mo, int l, uint32_t k0, uint32_t k1, in
         if (recorta) {
             float dx, dy, dz, zv, xv, yv;
             if (mo->vis && m->nodo >= 0 && !(mo->vis[m->nodo >> 5] & (1u << (m->nodo & 31)))) continue;
+            if (mo->pvs_on && m->nodo >= 0 && !(mo->pvs_m[k >> 5] & (1u << (k & 31)))) continue;   /* PVS: no se ve */
 #ifndef DIAG_SIN_TOPE
             if (vtx_et + (vtx_env - vtx_et0) > VTX_ETAPA_MAX) { ta_corto = 1; ta_et_corto = 1; continue; }
 #endif
@@ -848,7 +869,10 @@ static int guion_i; static uint64_t guion_hasta;
 /* prueba de choques (con PRUEBA_TRAFICO y DIAG_CHOQUE): gas a fondo hacia el coche de trafico mas cercano por delante;
    tras el primer golpe la imagen se congela 3 s en el cuadro siguiente y 15, 40, 90 y 150 despues */
 static int emb_golpe = -100000;
-static const int emb_cong[] = { 1, 15, 40, 90, 150 };
+#ifndef EMB_CONG
+#define EMB_CONG 1, 15, 40, 90, 150
+#endif
+static const int emb_cong[] = { EMB_CONG };
 #endif
 #endif
 /* "Posicion de carretera" del original (car+0x64): la seccion 5 de la colision COLI0200 del poligono bajo el coche
@@ -981,11 +1005,13 @@ static void coche_coloca(coche_t *c)
 #define NTRAF 16
 /* Campos del original (car work del PC): b08 desplazamiento lateral respecto al centro del carril (m del original:
    4 m = un carril, + hacia el carril siguiente), b14/b18 cuadros que faltan / totales del cambio de carril, dir su
-   sentido, b58 deriva tras el golpe (0xB / 0xC), b60 cuadros de recuperacion, b64 cuadros sin choques, b6c golpeado */
+   sentido, b58 deriva tras el golpe (0xB / 0xC), b60 cuadros de recuperacion, b64 cuadros sin choques, b6c golpeado;
+   b62 cuadros de parpadeo al aparecer, b53 el cuadro de parpadeo (1 = no se dibuja), c5c1 el bit 0 de +C5C (cerrar el
+   coche cuando b64 llegue a 0: 478340), n2f4 cuadros del estado de choque (+2F4) */
 typedef struct { coche_t c; int carril, modelo, destino; float v_des;
                  int golpe, lado; float t_golpe, vlat;          /* golpe: estado de choque (16..19) o -1 */
                  float t_recup, wa[3]; int d22;                 /* +2F8, pose del cuadro anterior (mundo de or2), +D22 */
-                 float b08; int b14, b18, dir, b58, b60, b64, b6c;
+                 float b08; int b14, b18, dir, b58, b60, b64, b6c, b62, b53, c5c1, n2f4;
                  int pt_marca, b72, color; } trafico_t;               /* puntuacion: +C5C (PT_*) y +B72 (rebufo reciente) */
 static trafico_t traf[NTRAF];
 /* +C5C del coche para la puntuacion (4F2860): 0x40 ya adelantado, 0x400000 tocado (puntos a la mitad), 0x800000
@@ -1164,6 +1190,7 @@ static void traf_nace(trafico_t *t, float s)
     t->c.s = s; t->c.a = 0;
     t->golpe = -1; t->t_golpe = 0; t->vlat = 0; t->t_recup = 0; t->d22 = 0; memset(t->c.pose_t, 0, 12); memset(t->c.pose_r, 0, 12);
     t->b08 = 0; t->b14 = t->b18 = 0; t->dir = 0; t->b58 = t->b60 = t->b64 = t->b6c = 0;   /* 4704A0 */
+    t->b62 = 60; t->b53 = 0; t->c5c1 = 0; t->n2f4 = 0;          /* 4704A0 (PS2 0x1ec44c): +B62 = 60 salvo variante 4 */
     t->pt_marca = 0; t->b72 = 0;
     t->c.x = carril_x(s, t->carril); coche_coloca(&t->c);
     traf_pose_ant(t);
@@ -1347,6 +1374,7 @@ static void traf_azar(int en_union, int nodo, int pos, const uint8_t *rec)
 static void traf_aparca(trafico_t *t)
 {
     t->carril = t->destino = -1; t->c.s = -1.0e6f; t->c.v = 0; t->golpe = -1; t->b72 = 0; t->b6c = 0; t->b14 = 0;
+    t->c5c1 = 0; t->b64 = 0; t->b62 = 0; t->b53 = 0;
 }
 static float traf_ult_s;                                        /* sin tablas: s del jugador en la ultima aparicion */
 static void traf_inicia(float s0)
@@ -1362,9 +1390,23 @@ static void traf_inicia(float s0)
 #endif
 }
 /* 479080: aparicion de este cuadro */
+/* 478340 (PS2 0x1da828..0x1da858): cierra los coches marcados (+C5C bit 0) cuyo +B64 ha llegado a 0; la plaza queda
+   libre. 479080 lo llama cada cuadro despues de 477F60 (los lejanos) y antes de abrir */
+static void traf_libera(void)
+{
+    int i;
+    for (i = 0; i < NTRAF; i++)
+        if (traf[i].carril >= 0 && traf[i].c5c1 && traf[i].b64 <= 0) {
+#ifdef DIAG_CHOQUE
+            dbglog(DBG_INFO, "DIAGFADE coche %d cerrado (478340)\n", i);
+#endif
+            traf_aparca(traf + i);
+        }
+}
 static void traf_aparece(void)
 {
     int nodo, pos, u;
+    traf_libera();
     if (!ntap) {                                                /* sin tablas: la aparicion de antes (separacion 3) */
         int i;
         if (yo.s - traf_ult_s >= TR_APARECE_CADA * m_pos && yo.s + TR_APARECE * m_pos < longitud - 20.0f) {
@@ -1387,6 +1429,7 @@ static void traf_aparece(void)
    - el original solo hace reaccionar e intercambiar velocidad al ultimo coche tocado de cada uno (la separacion es con
      todos); los golpeados (+B64 > 0, 120 cuadros) no entran en la pasada: ni con el jugador ni con el resto del trafico. */
 static float yo_wa[3]; static int yo_wa_ok;                     /* pose del jugador en el cuadro anterior */
+static int vib_toca, vib_otro = -1;                             /* +4 0x10000 del jugador en este cuadro y +DD4 */
 #ifdef DIAG_CHOQUE
 static int diag_cuadro;                                         /* prueba: cuadros de la pasada de choques */
 #endif
@@ -1433,14 +1476,16 @@ static void suena_golpe(const or2_otro_t *o)
 /* 476040 en el coche golpeado: deriva hacia el lado contrario al del jugador en la carretera (+B58 0xB si +26C del
    jugador > 0), 120 cuadros de recuperacion (+B60) y otros tantos fuera de la pasada de choques (+B64), la velocidad a
    1,5 veces la del jugador (5B005C; la clase 6 no) y el estado de choque k con la animacion sin reflejar (4A6EA0 con
-   lado 0) y su efecto (0x1ec7xx: 16 -> 0x4F, 17 -> 0x5E, 18 -> 0x864, 19 -> 0x65) */
+   lado 0) y su efecto (0x1ec7xx: 16 -> 0x4F, 17 -> 0x5E, 18 -> 0x864, 19 -> 0x65). Ademas marca el coche para
+   cerrarlo (+C5C bit 0; en la variante 1 siempre: solo las 3/4 de red no lo marcan): mientras +B64 > 0 parpadea
+   (traf_parpadea, 4AE5F0) y al llegar a 0 lo cierra 478340 (traf_libera) y la plaza queda libre */
 static void traf_golpeado(trafico_t *t, int k, float v_jug)
 {
     t->b58 = fis.ofs > 0.0f ? 0xB : 0xC;
     t->b6c = 1;
     if (trc[t->modelo].clase != 6) { t->c.v = v_jug * 1.5f; t->b60 = 120; }
-    t->golpe = k; t->t_golpe = 0; t->lado = 0; t->t_recup = 0;
-    t->b64 = 120;
+    t->golpe = k; t->t_golpe = 0; t->lado = 0; t->t_recup = 0; t->n2f4 = 0;
+    t->b64 = 120; t->c5c1 = 1;                                  /* PS2 0x1ec914 / 0x1ec940: +B64 = 120, +C5C |= 1 */
     if (sfx_ok) sfx_menu(k == 16 ? 0x4f : k == 17 ? 0x5e : k == 18 ? 0x64 : 0x65);
 }
 /* reaccion e intercambio del jugador con el ultimo coche tocado (4F6FE0, 4F76E0, 4F7BF0) */
@@ -1468,7 +1513,10 @@ static void traf_choca(trafico_t *t, int id, const or2_contacto_t *k, float ox, 
     yo.choque = 2;
     suena_golpe(&o);
 #if defined(PRUEBA_EMBISTE) && defined(PRUEBA_GUION) && defined(DIAG_CHOQUE)
-    if ((o.golpe >= 0 || o.reaccion) && emb_golpe < 0) emb_golpe = diag_cuadro;
+#ifndef EMB_DESDE
+#define EMB_DESDE 0
+#endif
+    if ((o.golpe >= 0 || o.reaccion) && emb_golpe < 0 && diag_cuadro >= EMB_DESDE) emb_golpe = diag_cuadro;
 #endif
 #ifdef DIAG_CHOQUE
     dbglog(DBG_INFO, "DIAGCHOQUE t %d modelo %d bordes %d%d%d%d/%d%d%d%d jugador %.0f -> %.0f km/h estado %d lado %d otro -> %.0f "
@@ -1503,7 +1551,7 @@ static void traf_choques(void)
             t->c.s += (1.0f - rp) * sl; coche_coloca(&t->c);
             k_ult = k; ult = i;
         }
-        if (ult >= 0) { traf_choca(traf + ult, ult, &k_ult, ox, oy, th); coche_coloca(&yo); }
+        if (ult >= 0) { traf_choca(traf + ult, ult, &k_ult, ox, oy, th); coche_coloca(&yo); vib_toca = 1; vib_otro = ult; }
     }
     for (i = 0; i < NTRAF; i++) {                               /* el trafico entre si */
         trafico_t *a = traf + i; or2_otro_t oa, ob;
@@ -1544,6 +1592,121 @@ static void traf_choques(void)
         if (traf[ult].c.s - yo.s <= 100.0f) suena_golpe(&ob);
     }
     yo_pose_ant();
+}
+
+/* --- Vibracion del mando del original: PS2 0x1d0420 (la llama el control del coche del jugador 0x17c228 en cada
+   cuadro de logica; con el suceso suspendido, la pausa, 0x17c284 pone los motores a 0) sobre el registro 0x36b4a8
+   (+4 escala = opcion de vibracion / 10, +8 motor grande, +0xC cuadros que se sostiene, +0x10 motor pequeno, +0x14
+   cuadros casi parado) y al final del control 0x1023a0 (motores del DualShock: grande = min(255, +8 x 255); pequeno
+   encendido si el bit (cuenta & 7) de (int)(+0x10 x 24) esta a 1, cuenta +1 por llamada). Con m/cuadro (+1C4):
+   - salto/aterrizaje (+2DC de la animacion de choque pasa a 0, o su velocidad de < 0 a >= 0): grande + 0,75, 15 cuadros;
+   - muro (+4 0x20000: CbwColiWall en este cuadro): el primero grande + 0,75 y |+1D0| x 10 cuadros (tope 20); los
+     siguientes (+8 0x800) pequeno + v;
+   - coche (+4 0x10000: 4F9450 le ha separado de otro, +DD4): el primero |v del otro - v| x 25 cuadros (tope 20) y, si
+     no son 0, grande + 0,75; los siguientes (+8 0x1000) pequeno + v x 0,5;
+   - si no: cambio de marcha (+208 != +1D8) grande + 0,5, 4 cuadros; tirones de la velocidad (+1D0 cambia de signo con
+     |+1D0| > 0,0018: grande + v x 0,4; arrancando, v < 0,33 y +1D0 > 0,001: + 0,3, 10 cuadros; frenando, +1D0 <
+     -0,002: + v x 0,4, o v x 0,3 si hay freno +38 y +1D0 < -0,004; 4 cuadros);
+   - pequeno = min(min(sum, 0,5), 0,75) x escala; grande: si aun se sostiene (+0xC > 0, se descuenta) solo lo cambia uno
+     mayor; si no, min(sum, 0,75) x escala y +0xC = min(cuadros, 25); por debajo de 0,001 m/cuadro, o 600 cuadros por
+     debajo de 0,01, los dos a 0.
+   PENDIENTE: lo de la superficie de las ruedas (0x1d0138 por +24C..+258 con las intensidades por material, el borde
+   +264/+268, el rebote del muro +8 0x100 y las banderas +8 0x40/0x80/0x2000), que necesita los materiales del original
+   por rueda. La escala: la opcion de CONFIGURACION (0..10, 0x588668 + 0xCC) no esta en la demo: 10 (SUPUESTO).
+   Dreamcast: un solo motor (Puru Puru, MAPLE_FUNC_PURUPURU en el puerto del mando): intensidad = el motor grande en 7
+   escalones (1..7) o 1 si solo va el pequeno; se manda solo al cambiar, continua (cont) a VIB_FREC (SUPUESTO). */
+#define VIB_ESCALA 1.0f
+#define VIB_FREC 26                                             /* frecuencia del Puru Puru (4..59) */
+static struct { float grande, peque; int espera, quieto, cuenta, vivo, pwm; } vib;
+static int vib_toca_ant, vib_muro_ant, vib_marcha_ant = -1;
+static float vib_v[2], vib_f1d4, vib_h[3];                      /* +1C4 de los dos cuadros anteriores, +1D4, +2DC */
+static void vib_motores(float grande, float peque)             /* 0x1023a0 */
+{
+    int g = (int)(grande * 255.0f) & 0xffff;
+    if (g >= 0x100) g = 0xff;
+    vib.cuenta++;
+    vib.pwm = (((int)(peque * 24.0f) & 0xff) >> (vib.cuenta & 7)) & 1;
+    vib.vivo = g ? 1 + (g * 6) / 255 : ((int)(peque * 24.0f) & 0xff) ? 1 : 0;   /* nivel del Puru Puru (0..7) */
+    if (!vib.vivo) vib.vivo = -1;                               /* -1: control hecho, motor parado */
+}
+static void vib_paso(int marcha, int freno, float h2dc, int muro)
+{
+    float v = sqrtf(fis.vx * fis.vx + fis.vy * fis.vy) * 0.0166112948f;   /* +1C4 */
+    float f23 = vib_v[0] - vib_v[1], f25 = fabsf(f23);         /* +1D0: lo que cambio en el cuadro anterior */
+    float f21 = 0.0f, f22 = 0.0f, f24, f1;
+    unsigned s2 = 0;
+    int toca = vib_toca, toca_ant = vib_toca_ant, muro_ant = vib_muro_ant;
+    float h1dc = vib_h[0], e0 = vib_h[0] - vib_h[1], e4 = vib_h[1] - vib_h[2];   /* +1DC, +1E0, +1E4 */
+    vib_toca_ant = toca; vib_toca = 0; vib_muro_ant = muro;
+    vib_v[1] = vib_v[0]; vib_v[0] = v;
+    vib_h[2] = vib_h[1]; vib_h[1] = vib_h[0]; vib_h[0] = h2dc;
+    if (vib_marcha_ant < 0) vib_marcha_ant = marcha;
+    if ((h1dc != 0.0f && h2dc == 0.0f) || (e4 < 0.0f && e0 >= 0.0f)) {   /* 0x1d08c8: aterriza */
+        f21 += 0.75f; vib.espera = 0; s2 += 15;
+    } else if (muro) {                                          /* 0x1d0938 */
+        if (muro_ant) f22 += v;
+        else {
+            f21 += 0.75f; s2 += (unsigned)(f25 * 10.0f); if (s2 > 20) s2 = 20; vib.espera = 0;
+        }
+    } else if (toca) {                                          /* 0x1d0998 */
+        if (toca_ant) f22 += v * 0.5f;
+        else if (vib_otro >= 0 && traf[vib_otro].carril >= 0) {
+            s2 += (unsigned)fabsf((traf[vib_otro].c.v * 0.0166112948f - v) * 25.0f);
+            if (s2 > 20) s2 = 20;
+            if (s2) { f21 += 0.75f; vib.espera = 0; }
+        }
+    } else if (marcha != vib_marcha_ant) { f21 += 0.5f; s2 = 4; }   /* 0x1d0a64 */
+    else {                                                      /* 0x1d0a84 */
+        if (f25 > 0.0018f && ((0.0f <= f23 && vib_f1d4 < 0.0f) || (f23 < 0.0f && 0.0f <= vib_f1d4))) { s2 = 4; f21 += v * 0.4f; }
+        else if (f23 > 0.0f) { if (v < 0.33f && f23 > 0.001f) { f21 += 0.3f; s2 = 10; } }
+        else if (f23 < -0.002f) {
+            s2 = 4;
+            if (f23 < -0.004f && freno > 0) f21 += v * 0.3f; else f21 += v * 0.4f;
+        }
+    }
+    vib_marcha_ant = marcha; vib_f1d4 = f23;
+    if (v < 0.01f) {                                            /* 0x1d0be8 */
+        if (v < 0.001f || ++vib.quieto >= 601) { vib.grande = vib.peque = 0; vib_motores(0, 0); return; }
+    } else vib.quieto = 0;
+    if (f22 > 0.5f) f22 = 0.5f;
+    f1 = f22 > 0.75f ? 0.75f : f22;
+    vib.peque = f1 * VIB_ESCALA;
+    f24 = f21 > 0.75f ? 0.75f : f21;
+    if (vib.espera) { vib.espera--; if (!(vib.grande < f24)) { vib_motores(vib.grande, vib.peque); return; } }
+    vib.grande = f24 * VIB_ESCALA; vib.espera = s2 < 26 ? (int)s2 : 25;
+#ifdef DIAG_CHOQUE
+    if (f21 > 0.0f) dbglog(DBG_INFO, "DIAGVIB grande %.2f %d cuadros pequeno %.2f (muro %d coche %d v %.3f)\n", (double)vib.grande, vib.espera,
+                           (double)vib.peque, muro, toca, (double)v);
+#endif
+    vib_motores(vib.grande, vib.peque);
+}
+/* una vez por cuadro dibujado: manda al Puru Puru lo que dejo el ultimo control; si el control del jugador no ha
+   corrido en 3 cuadros seguidos (pausa, menus, fin) los motores a 0, como 0x17c284 con el suceso suspendido (un cuadro
+   sin paso de logica, por el reloj de 59,94 Hz, no lo para) */
+static void vib_cuadro(void)
+{
+    static maple_device_t *dev; static int enviado, sin_control;
+    maple_device_t *d = NULL, *mc = maple_enum_type(0, MAPLE_FUNC_CONTROLLER);
+    int u, nivel;
+    if (vib.vivo) { sin_control = 0; nivel = vib.vivo > 0 ? vib.vivo : 0; }
+    else if (++sin_control >= 3) { vib.grande = vib.peque = 0; vib.espera = 0; nivel = 0; }
+    else nivel = enviado;
+    vib.vivo = 0;
+    for (u = 1; mc && u < MAPLE_UNIT_COUNT && !d; u++) {
+        maple_device_t *x = maple_enum_dev(mc->port, u);
+        if (x && (x->info.functions & MAPLE_FUNC_PURUPURU)) d = x;
+    }
+    if (d != dev) { dev = d; enviado = 0; }
+    if (!d || nivel == enviado) return;
+    {
+        purupuru_effect_t e;
+        e.raw = 0; e.motor = 1;
+        if (nivel) { e.cont = true; e.fpow = (uint32_t)nivel; e.freq = VIB_FREC; }
+        if (purupuru_rumble(d, &e) == MAPLE_EOK) enviado = nivel;
+#ifdef DIAG_CHOQUE
+        dbglog(DBG_INFO, "DIAGVIB puru nivel %d (%s)\n", nivel, enviado == nivel ? "enviado" : "ocupado");
+#endif
+    }
 }
 
 /* --- IA del trafico del original (47E4A0 drive -> 472450 velocidad, 473F30 recuperacion, 47E110 carriles).
@@ -1748,7 +1911,8 @@ static void traf_paso(float dt)
         if (t->carril < 0) continue;                            /* plaza libre */
         traf_lejos_v = traf_lejos(t->c.s);
         traf_pose_ant(t);                                       /* 4755C0 */
-        if (t->b64 > 0) t->b64--;
+        if (t->b64 > 0) t->b64--;                               /* 47E780 (al final de su control): +B62 y +B64 */
+        if (t->b62 > 0) t->b62--;
         if (t->d22 > 0) t->d22--;
         for (j = 0; j < NTRAF; j++) {                           /* el de delante en mi carril (o en el que voy) */
             const trafico_t *o = traf + j; float dd = o->c.s - t->c.s;
@@ -1790,7 +1954,7 @@ static void traf_paso(float dt)
             }
         }
         if (t->golpe >= 0) {                                    /* 4A2400: la animacion del golpe (16..19) y luego +2F8 */
-            t->t_golpe += 0.0166112948f;
+            t->t_golpe += 0.0166112948f; t->n2f4++;             /* +2F4: cuadros del estado (4A2400) */
             if (!or2_pose(&choq, t->golpe, t->t_golpe, t->lado, t->c.pose_t, t->c.pose_r)) {
                 t->t_recup = choq.recup[t->golpe]; t->golpe = -1;
             }
@@ -1806,6 +1970,22 @@ static void traf_paso(float dt)
         coche_coloca(&t->c);
     }
     traf_choques();                                             /* 4F9450 (47EBA0: despues de mover a todos) */
+#ifdef PRUEBA_FADE
+    {   /* prueba (con PRUEBA_TRAFICO y el jugador parado): cada 240 pasos (desde PRUEBA_FADE) un coche de trafico
+           a 14 m por delante recibe el golpe 17 (trompo) de 476040: se ve el parpadeo y el cierre */
+        static int n_fade; int i, m = -1; float d = 1e9f;
+        if (++n_fade % 240 == PRUEBA_FADE) {                    /* el de delante mas cerca del carril del jugador */
+            for (i = 0; i < NTRAF; i++)
+                if (traf[i].carril >= 0 && traf[i].c.s > yo.s + 8.0f && fabsf(traf[i].c.x - yo.x) < d) { d = fabsf(traf[i].c.x - yo.x); m = i; }
+            if (m >= 0) {                                       /* a 14 m por delante en el carril del jugador */
+                traf[m].c.s = yo.s + 14.0f; traf[m].carril = traf[m].destino = carril_cerca(traf[m].c.s, yo.x); traf[m].b08 = 0;
+                traf[m].c.x = carril_x(traf[m].c.s, traf[m].carril); coche_coloca(&traf[m].c); traf_pose_ant(traf + m);
+                traf_golpeado(traf + m, 17, 0.0f);
+            }
+        }
+    }
+#endif
+    if (fis_ok) vib_paso(fis.marcha, fis.freno_op, fis.pose_t[1], yo.choque == 1);   /* 0x1d0420 (muro: CbwColiWall) */
 }
 
 /* Conduccion, siguiendo el modelo del original (SlipAngleCtrl / RearGripCtrl / CorneringCtrl de la decompilacion de
@@ -2591,7 +2771,8 @@ static int piloto_rama(float s) { return cur_rama < 0 && s_decide >= 0 && s > s_
    race_area_display_44f120; 7 con la bandera 0x40 del nodo), es decir, se dibuja si z <= r 2^(umbral - 1) /
    tan(fov vertical / 2). De las ramas de la union, solo la del coche una vez elegida (race_area_stage_draw_44e290:
    obj | 1 o | 2). La lista de nodos por seccion de la etapa (cs_CS_<zona>_bin) solo se usaria si el fichero la trae
-   (nsec): el formato de PS2 de esas listas esta sin descifrar (tools/conv_tramo.py lee_visibilidad). */
+   (sec_lista): el formato de PS2 de esas listas esta sin descifrar (tools/conv_tramo.py lee_visibilidad); en su lugar
+   va la visibilidad precalculada (pvs_paso, mas abajo). */
 static float dist2_ruta(const modelo_t *m, uint32_t i, const float *p)
 {
     const float *a = m->ruta + m->paso_ruta * i;
@@ -2622,11 +2803,65 @@ static float niebla_d; static int niebla_modo;                   /* la niebla de
 #ifdef DIAG_VTX
 static float diag_quitado_z, diag_quitado_r;                     /* el nodo quitado mas cercano (z - r) y su radio */
 static uint32_t diag_orig_vtx, diag_quitado_n;                    /* vertices de lo que dibujaria el original; nodos quitados */
+static uint32_t diag_pvs_v;                                       /* vertices de nodos en la vista que quita el PVS */
 #endif
 static inline int log2x(float x, int k)                         /* k log2(x) por los bits del float (x > 0), k = 4 u 8 */
 {
     union { float f; int32_t i; } q; q.f = x;
     return (q.i - (127 << 23)) >> (k == 8 ? 20 : 21);
+}
+/* ---------------------------------------------------------------- visibilidad precalculada (PVS)
+   tools/pvs.py: desde muestras del ojo por toda la zona por la que puede ir la camara (cada punto de la ruta, a lo ancho
+   del limite transitable mas PVS_LADO y hasta PVS_ALTO sobre el suelo, todos los rumbos) se dibujo por software lo
+   opaco con z-buffer; las mallas que no aportan ningun pixel desde ninguna muestra de la seccion (y sus vecinas) no
+   estan en su mascara. Por seccion el fichero trae las mallas que cambian respecto a la anterior (XOR): la mascara se
+   mueve de una seccion a otra aplicando las listas, hacia delante o hacia atras. La seccion es la del punto de la ruta
+   del modelo mas cercano al ojo; si el ojo esta fuera de lo muestreado (otra etapa, la otra rama, muy alto) no se usa
+   (pvs_on = 0: todo como antes). Lo que se quita no se ve: no cambia la imagen; el reparto (nodos_visibles_todos) se
+   hace despues con el coste de lo que queda de cada nodo (pvs_teo). -DSIN_PVS lo desactiva (para comparar). */
+#define PVS_LADO 3.0f                                           /* tools/pvs.py LADO_EXTRA */
+#define PVS_ALTO 6.0f                                           /* la muestra mas alta (ALTURAS) */
+static void pvs_aplica(modelo_t *mo, int s)                     /* XOR de la lista de la seccion s */
+{
+    const uint8_t *p = mo->pvs_l + mo->sec_ini[s], *f = mo->pvs_l + mo->sec_ini[s + 1];
+    int32_t i = -1;
+    while (p < f) {
+        uint32_t d = *p++, n, w; const malla_t *ma;
+        if (d == 255) { d = p[0] | (uint32_t)p[1] << 8; p += 2; }   /* diferencias de 255 o mas: en 16 bits */
+        i += d;
+        if ((uint32_t)i >= mo->nmallas) break;
+        ma = mo->mallas + i;
+        if (ma->nodo < 0 || (uint32_t)ma->nodo >= mo->nnodos || ma->n < 3) continue;
+        n = ma->n > 256 ? 256 : ma->n; w = 1u << (i & 31);
+        mo->pvs_m[i >> 5] ^= w;
+        if (mo->pvs_m[i >> 5] & w) { mo->pvs_teo[2 * ma->nodo] += ta_teo(n, 0); mo->pvs_teo[2 * ma->nodo + 1] += n; }
+        else { mo->pvs_teo[2 * ma->nodo] -= ta_teo(n, 0); mo->pvs_teo[2 * ma->nodo + 1] -= n; }
+    }
+}
+static void pvs_paso(modelo_t *mo)
+{
+    uint32_t k, a, b, i, s; float d, e, t[2], l, x, li, ld; const float *r, *r0, *r1;
+    mo->pvs_on = 0;
+#ifdef SIN_PVS
+    return;
+#endif
+    if (!mo->pvs_l || mo->nruta < 2 || mo->paso_ruta != ruta_pr) return;
+    k = mo->pvs_i < mo->nruta ? mo->pvs_i : 0; a = k > 25 ? k - 25 : 0; b = k + 25 < mo->nruta ? k + 25 : mo->nruta - 1;
+    d = dist2_ruta(mo, k, ojo);
+    for (i = a; i <= b; i++) if ((e = dist2_ruta(mo, i, ojo)) < d) { d = e; k = i; }
+    if (d > 50.0f * 50.0f) for (i = 0; i < mo->nruta; i++) if ((e = dist2_ruta(mo, i, ojo)) < d) { d = e; k = i; }
+    mo->pvs_i = k;
+    r = mo->ruta + mo->paso_ruta * k;                           /* el ojo dentro de lo muestreado */
+    r0 = mo->ruta + mo->paso_ruta * (k ? k - 1 : 0); r1 = mo->ruta + mo->paso_ruta * (k + 1 < mo->nruta ? k + 1 : k);
+    t[0] = r1[0] - r0[0]; t[1] = r1[2] - r0[2]; l = sqrtf(t[0] * t[0] + t[1] * t[1]);
+    if (l < 1e-3f) return;
+    x = ((ojo[0] - r[0]) * -t[1] + (ojo[2] - r[2]) * t[0]) / l;   /* desvio a la derecha (-t.z, t.x) */
+    li = CON_SUP ? r[C_LIM] : r[3]; ld = CON_SUP ? r[C_LIM + 1] : r[4];
+    if (x < -li - PVS_LADO || x > ld + PVS_LADO || ojo[1] > altura_punto(r, x) + PVS_ALTO) return;
+    s = mo->sec_mapa[k] < mo->nsec ? mo->sec_mapa[k] : mo->nsec - 1;
+    while (mo->pvs_s < (int32_t)s) pvs_aplica(mo, ++mo->pvs_s);
+    while (mo->pvs_s > (int32_t)s) pvs_aplica(mo, mo->pvs_s--);
+    mo->pvs_on = 1;
 }
 static void nodos_visibles(modelo_t *mo)
 {
@@ -2635,7 +2870,8 @@ static void nodos_visibles(modelo_t *mo)
     uint32_t j, n; const uint16_t *L = NULL;
     if (!mo->vis) return;
     memset(mo->vis, 0, (mo->nnodos + 31) / 32 * 4);
-    if (mo->nsec && mo->nruta) {                                /* la seccion del coche: la del punto mas cercano */
+    pvs_paso(mo);
+    if (mo->sec_lista && mo->nruta) {                                /* la seccion del coche: la del punto mas cercano */
         uint32_t k = mo->ruta_i < mo->nruta ? mo->ruta_i : 0, a = k > 25 ? k - 25 : 0, b = k + 25 < mo->nruta ? k + 25 : mo->nruta - 1, i, s;
         float d = dist2_ruta(mo, k, yo.pos), e;
         for (i = a; i <= b; i++) if ((e = dist2_ruta(mo, i, yo.pos)) < d) { d = e; k = i; }
@@ -2644,7 +2880,7 @@ static void nodos_visibles(modelo_t *mo)
         L = mo->sec_lista + mo->sec_ini[s]; n = mo->sec_ini[s + 1] - mo->sec_ini[s];
     } else n = mo->nnodos;
     for (j = 0; j < n; j++) {
-        uint32_t i = L ? L[j] : j, rama, u; nodo_t *d; float dx, dy, dz, zv, xv, yv, lim; int cp, cd;
+        uint32_t i = L ? L[j] : j, rama, u, c_teo, c_v; nodo_t *d; float dx, dy, dz, zv, xv, yv, lim; int cp, cd;
         if (i >= mo->nnodos) continue;
         d = mo->nodos + i;
         dx = d->cx - ojo[0]; dy = d->cy - ojo[1]; dz = d->cz - ojo[2];
@@ -2657,13 +2893,20 @@ static void nodos_visibles(modelo_t *mo)
         if (u && zv > 0 && zv > lim) continue;                  /* LOD */
         rama = (d->fl >> 8) & 3;
         if (rama && cur_rama >= 0 && (int)rama - 1 != cur_rama) continue;   /* la otra rama de la union */
+        if (mo->pvs_on) {                                       /* PVS: lo que queda visible del nodo desde aqui */
+            c_teo = mo->pvs_teo[2 * i]; c_v = mo->pvs_teo[2 * i + 1];
+#ifdef DIAG_VTX
+            diag_pvs_v += (d->relleno[1] >> 12) - c_v;
+#endif
+            if (!c_teo) continue;
+        } else { c_teo = d->relleno[0]; c_v = d->relleno[1] >> 12; }
         mo->vis[i >> 5] |= 1u << (i & 31);
         cd = zv - d->r > 1.0f ? log2x(zv - d->r, 4) : 0; cd = cd > ND_PRIO - 1 ? ND_PRIO - 1 : cd;
         if (zv - d->r > z_tapa) cp = NB_PRIO - 1;               /* tapado por la niebla */
         else if (zv <= 0 || lim <= 0) cp = 0;
         else { cp = 40 + log2x(zv / lim, 8); cp = cp < 0 ? 0 : cp > NB_PRIO - 1 ? NB_PRIO - 1 : cp; }
         d->relleno[1] = (d->relleno[1] & ~4095u) | (uint32_t)(cd << 6 | cp);
-        prio_coste[cd][cp] += d->relleno[0]; prio_vtx[cd][cp] += d->relleno[1] >> 12;
+        prio_coste[cd][cp] += c_teo; prio_vtx[cd][cp] += c_v;
     }
 }
 /* quita de mo->vis los nodos de las clases que no caben */
@@ -2702,6 +2945,9 @@ static void nodos_visibles_todos(void)
     uint32_t i, tope = ta_tope_etapa / 100 * 95, acum, v, cerca_c, cerca_v, vmax = (uint32_t)(VTX_ETAPA_MAX / prio_alfa); int c, d, cabe;
     float k = (float)ta_f / 256.0f * prio_alfa;                 /* bytes enviados por byte teorico de los nodos */
     memset(prio_coste, 0, sizeof prio_coste); memset(prio_vtx, 0, sizeof prio_vtx);
+#ifdef DIAG_VTX
+    diag_pvs_v = 0;
+#endif
     for (i = 0; i < 3; i++) if (tramos[i]->tv) nodos_visibles(tramos[i]);
     for (d = 0; d < ND_PRIO; d++) for (fila_c[d] = fila_v[d] = 0, c = 0; c < NB_PRIO; c++) { fila_c[d] += prio_coste[d][c]; fila_v[d] += prio_vtx[d][c]; }
     /* lo cercano: hasta 3/4 del tope (todo si cabe todo) */
@@ -3601,6 +3847,35 @@ static void traf_dibuja(int i, int l, matrix_t *mt)
     }
 }
 
+/* 4AE5F0 (PS2 0x1d786c..0x1d791c), una vez por cuadro dibujado y por coche vivo, antes de la prueba de distancia: el
+   parpadeo del original. Mientras +B62 > 0 (60 cuadros al aparecer, 4704A0) o +B64 > 0 (120 tras el golpe de 476040)
+   el bit +B53 cambia cada cuadro y el coche no se dibuja en los cuadros con +B53 = 1 (a 30 Hz: un cuadro si y otro no).
+   Durante los 30 primeros cuadros del estado de choque (+B6C, +2F0 & 2 y +2F4 < 30) no parpadea: se ve entero dando
+   vueltas; despues parpadea hasta que 478340 (traf_libera) lo cierra. Con el suceso suspendido (440A50 / PS2 0x19d398;
+   en la demo, cuando no corre traf_paso: la pausa, la cuenta atras y el final) es aqui donde se descuentan +B62 y +B64. Sin alfa: el +B68 de 4AE0F0 es de los fantasmas (+4 0x40) y
+   el 0,5 de +4 bit 2 es la camara dentro de la caja de un pesado (470570); la sombra (4ADAC0) no mira +B53 */
+static uint8_t traf_oculto[NTRAF];
+static void traf_parpadea(int suspendido)
+{
+    int i;
+    for (i = 0; i < NTRAF; i++) {
+        trafico_t *t = traf + i; int cambia = 1;
+        traf_oculto[i] = 0;
+        if (t->carril < 0) continue;
+        if (t->b62) { if (suspendido) t->b62--; }
+        else if (t->b64) {
+            if (!t->b6c || t->golpe < 0 || t->n2f4 > 29) { if (suspendido) t->b64--; }
+            else cambia = 0;
+        } else cambia = 0;
+        if (cambia) { t->b53 ^= 1; traf_oculto[i] = (uint8_t)t->b53; }   /* xor con (modo != 0x12) */
+#ifdef DIAG_CHOQUE
+        if (t->b6c || t->c5c1) dbglog(DBG_INFO, "DIAGFADE coche %d b62 %d b64 %d b6c %d golpe %d 2f4 %d parpadea %d oculto %d ds %.1f x %.1f pose %.1f %.1f %.1f\n", i, t->b62,
+                                      t->b64, t->b6c, t->golpe, t->n2f4, cambia, traf_oculto[i], (double)(t->c.s - yo.s), (double)t->c.x,
+                                      (double)t->c.pose_t[0], (double)t->c.pose_t[1], (double)t->c.pose_t[2]);
+#endif
+    }
+}
+
 /* Sombra del coche del jugador como el original: volumenes de sombra (+08 y +10 de la disposicion, bloque SVL1)
    extruidos por la luz del sol. SLES-53998 0x1893f8 dibuja en carrera (vm = 1) los dos volumenes con 0x1138b8
    (silueta 0x113bf8: aristas de 0x24 bytes, cuadrilateros extruidos por la luz en el marco del coche) en una
@@ -4143,6 +4418,8 @@ int main(int argc, char **argv)
         if (cex_n) coche_luz(mod_coche, estado != TITULO);     /* la luz del entorno 2 en la pintura */
         tri_enviados = 0; vtx_ult = vtx_env; vtx_env = 0; ta_inicia_cuadro(); vtx_et_ult = vtx_et; vtx_et = 0;
         if (estado != TITULO) nodos_visibles_todos();          /* los del original que caben en el TA */
+        if (estado != TITULO) traf_parpadea(pausa || estado != CARRERA);   /* 4AE5F0 (sin traf_paso: suspendido) */
+        vib_cuadro();                                           /* el Puru Puru (vib_paso lo dejo en el control) */
         for (l = 0; l < 3; l++) {
             pvr_list_begin(LISTA[l]);
             if (estado != TITULO) {                             /* en el menu no se ve la etapa */
@@ -4165,7 +4442,10 @@ int main(int argc, char **argv)
                 static matrix_t mt __attribute__((aligned(32)));
                 trafico_t *t = traf + i; float dx = t->c.pos[0] - ojo[0], dy = t->c.pos[1] - ojo[1], dz = t->c.pos[2] - ojo[2];
                 float zv = dx * ade[0] + dy * ade[1] + dz * ade[2], xv = dx * der[0] + dy * der[1] + dz * der[2];
-                if (estado == TITULO || t->carril < 0 || zv < -3.0f || zv > 450.0f || fabsf(xv) > zv * (320.0f / fx) + 4.0f) continue;
+                /* el original no recorta por la vista (4AE5F0: solo la distancia en posiciones); aqui el centro con el
+                   margen de medio coche (un autobus de 12 m asomaba y desaparecia con el margen fijo de 4 m) */
+                if (estado == TITULO || t->carril < 0 || traf_oculto[i] || zv < -3.0f || zv > 450.0f ||
+                    fabsf(xv) > zv * (320.0f / fx) + fmaxf(4.0f, largo_traf[t->modelo] + 1.5f)) continue;
 #ifdef DIAG_TRAF
                 if (l == 0) traf_vistos++;
 #endif
@@ -4220,12 +4500,13 @@ int main(int argc, char **argv)
             }
         }
 #ifdef DIAG_VTX
-        if (cuadro % 60 == 0) dbglog(DBG_INFO, "DIAG est%d s %.0f/%.0f ram %uK/%uK v%u (etapa %u) tri %u ms %.1f+%.1f lejos %d (%.2f) vram %u ta %uK etapa %uK/%uK 2d %u f %u real %uK opb %uK tiras %u teo %uK orig %u cerca %d m clase %d alfa %.2f quitados %u desde %d m (r %.1f) niebla %.5f sombra %u tri %uK%s%s\n", estado,
+        if (cuadro % 60 == 0) dbglog(DBG_INFO, "DIAG est%d s %.0f/%.0f ram %uK/%uK v%u (etapa %u) tri %u ms %.1f+%.1f lejos %d (%.2f) vram %u ta %uK etapa %uK/%uK 2d %u f %u real %uK opb %uK tiras %u teo %uK orig %u cerca %d m clase %d alfa %.2f quitados %u desde %d m (r %.1f) niebla %.5f sombra %u tri %uK pvs %d%d%d -%u%s%s\n", estado,
                                      (double)yo.s, (double)longitud, (unsigned)(mallinfo().uordblks >> 10), (unsigned)(mallinfo().fordblks >> 10),
                                      (unsigned)vtx_env, (unsigned)vtx_et, (unsigned)tri_enviados, (double)ms_log, (double)ms, (int)lejos, (double)(lejos / LEJOS_PS2), (unsigned)pvr_mem_available(), (unsigned)(ta_vb >> 10),
                                      (unsigned)(ta_et >> 10), (unsigned)(ta_tope_etapa >> 10), (unsigned)ta_v2d, (unsigned)ta_f, (unsigned)(ta_real_ult >> 10), (unsigned)(ta_opb_ult >> 10),
                                      (unsigned)ta_tiras, (unsigned)(ta_teo_3d >> 10), (unsigned)diag_orig_vtx, (int)(prio_d >= ND_PRIO - 1 ? lejos : powf(2.0f, (prio_d + 1) / 4.0f)), prio_p, (double)prio_alfa, (unsigned)diag_quitado_n,
-                                     (int)(diag_quitado_n ? diag_quitado_z : lejos), (double)diag_quitado_r, (double)niebla_d, (unsigned)sombra_tri, (unsigned)(sombra_teo >> 10), ta_et_corto ? " CORTO" : "", ta_corto ? " TOPE" : "");
+                                     (int)(diag_quitado_n ? diag_quitado_z : lejos), (double)diag_quitado_r, (double)niebla_d, (unsigned)sombra_tri, (unsigned)(sombra_teo >> 10),
+                                     etapa.pvs_on, uni.pvs_on, sig.pvs_on, (unsigned)diag_pvs_v, ta_et_corto ? " CORTO" : "", ta_corto ? " TOPE" : "");
 #endif
         if (estado != TITULO) prio_ajusta(ta_et_corto, ta_et);
         ta_et_corto = 0;

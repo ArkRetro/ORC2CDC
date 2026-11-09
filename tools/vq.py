@@ -73,12 +73,29 @@ def kmeans(X, w, k, iters=24, tiempo=4.0, semilla=1):
     return C
 
 
-def codifica(a, fmt, n=256, tiempo=4.0):
-    """RGBA (alto x ancho x 4, uint8) -> (datos: libro de n entradas + indices, error RMS en 0-255 frente al formato
-    sin comprimir). Las entradas usadas son las n ultimas del libro (indices 256-n..255)"""
+def _twiddled(a):
+    """texeles RGBA (float) en el orden twiddled de la PowerVR"""
     from modelo import twiddle
     h, w = a.shape[:2]
     P = np.zeros((w * h, 4)); P[twiddle(w, h).ravel()] = a.reshape(-1, 4)
+    return P
+
+
+def codifica(a, fmt, n=256, tiempo=4.0):
+    """RGBA (alto x ancho x 4, uint8) -> (datos: libro de n entradas + indices, error RMS en 0-255 frente al formato
+    sin comprimir). Las entradas usadas son las n ultimas del libro (indices 256-n..255)"""
+    return _codifica_P(_twiddled(a), fmt, n, tiempo)
+
+
+def codifica_mip(niveles, fmt, n=256, tiempo=4.0):
+    """VQ con mipmaps (niveles de 1x1 a la base, cuadrados): un libro para todos y los indices de cada nivel seguidos
+    de menor a mayor, como los lee la PowerVR (el nivel de lado 2^k en 0x0, 0x1, 0x2, 0x6, 0x16, 0x56... tras el
+    libro); el de 1x1 es un bloque de 2x2 de su color"""
+    P = [_twiddled(np.repeat(np.repeat(x, 2, 0), 2, 1) if x.shape[0] == 1 else x) for x in niveles]
+    return _codifica_P(np.concatenate(P, 0), fmt, n, tiempo)
+
+
+def _codifica_P(P, fmt, n, tiempo):
     canales = 3 if fmt == 1 else 4
     pes = np.tile(np.sqrt(PESO[:canales]), 4)
     V = P.reshape(-1, 4, 4)[:, :, :canales].reshape(-1, 4 * canales)
@@ -128,6 +145,16 @@ def elige(a, fmt):
     n = 256 if bloques >= 1024 else max(16, (bloques // 4 + 3) & ~3)
     datos, err = codifica(a, fmt, n)
     if err > UMBRAL or len(datos) >= w * h * 2: return None
+    return datos, n, err
+
+
+def elige_mip(niveles, fmt):
+    """como elige, para una textura con mipmaps (codifica_mip; niveles de 1x1 a la base)"""
+    w = niveles[-1].shape[1]; h = niveles[-1].shape[0]; bloques = sum(max(1, x.shape[0] * x.shape[1] // 4) for x in niveles)
+    if w * h < 32 * 32 or min(w, h) < 8: return None
+    n = 256 if bloques >= 1024 else max(16, (bloques // 4 + 3) & ~3)
+    datos, err = codifica_mip(niveles, fmt, n)
+    if err > UMBRAL or len(datos) >= 6 + sum(x.shape[0] * x.shape[1] * 2 for x in niveles): return None
     return datos, n, err
 
 

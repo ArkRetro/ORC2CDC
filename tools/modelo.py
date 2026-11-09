@@ -2,7 +2,9 @@
  'ORD7', nmallas, nvert, nruta, floats por punto de ruta, ntex, inicio de cada lista (opaca, recorte, transparente,
  cielo, fin), nnodos, ncarteles, nsecciones;
  texturas (ancho, alto, formato, lista, desplazamiento, tamano: 24 bytes); formato: bits 0-7 0 ARGB1555 / 1 RGB565 /
- 2 ARGB4444, bit 8 comprimida VQ (vq.py: libro de N entradas de 8 bytes y un byte por bloque de 2x2), bits 16-23 N - 1;
+ 2 ARGB4444, bit 8 comprimida VQ (vq.py: libro de N entradas de 8 bytes y un byte por bloque de 2x2), bit 9 con mipmaps
+ (datos_mip / vq.codifica_mip), bit 10 mezcla aditiva, bit 11 malla de la escena con el estado del GS (z GEQUAL, alfa
+ de textura x vertice), bits 16-23 N - 1;
  mallas ordenadas por lista y textura (cx, cy, cz, radio float, primer vertice, cuenta, textura o -1, nodo o -1: 32
  bytes);
  vertices (x, y, z, u, v float, color ARGB: 24 bytes); ruta (x, y, z, ancho izquierdo, ancho derecho y el perfil
@@ -11,7 +13,8 @@
  cartel o -1, 2 de relleno: 32 bytes); carteles orientados a la camara (matriz 4x4 de vectores fila del nodo; en la
  columna 3 el eje z del padre: 64 bytes; las tiras de esos nodos van en el marco del nodo);
  si hay secciones: inicio de la lista de cada seccion (nsecciones + 1 u32), las listas (u16, nodos visibles en la
- seccion: la tabla de visibilidad del original) y la seccion de cada punto de la ruta (u16), relleno a 4;
+ seccion: la tabla de visibilidad del original) y la seccion de cada punto de la ruta (u16), relleno a 4; con el bit 31
+ de nsecciones es la visibilidad precalculada por mallas de tools/pvs.py (listas XOR en bytes; ver alli);
  relleno a 32; texeles twiddled de 16 bits o VQ, cada textura alineada a 32.
 (ORD6 era lo mismo sin nodos ni secciones y con una distancia maxima en lugar del nodo; ORD5, ademas sin VQ.)
 Cada malla es una tira de triangulos que dibuja el GS: una tira del VU1 (un UNPACK de posiciones) partida por las
@@ -34,19 +37,68 @@ def twiddle(w, h):
     blo = (x // s) if w > h else (y // s)
     return blo * s * s + esp(y % s) | (esp(x % s) << 1)
 
+def codifica16(a, fmt, umbral=128):
+    """RGBA -> texeles twiddled de 16 bits del formato (0 ARGB1555 con el alfa >= umbral, 1 RGB565, 2 ARGB4444)"""
+    al = a[..., 3].astype(np.uint32); h, w = al.shape
+    r, g, b = (a[..., k].astype(np.uint32) for k in range(3))
+    if fmt == 1: v = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
+    elif fmt == 0: v = ((al >= umbral).astype(np.uint32) << 15) | ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3)
+    else: v = ((al >> 4) << 12) | ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4)
+    out = np.zeros(w * h, np.uint16); out[twiddle(w, h).ravel()] = v.ravel()
+    return out.tobytes()
+
 def textura_dc(a):
-    """RGBA -> (formato, lista, datos twiddled de 16 bits). Lista 0 opaca, 1 recorte (alfa de 1 bit), 2 transparente"""
+    """RGBA -> (formato, lista, datos twiddled de 16 bits). Lista 0 opaca, 1 recorte (alfa de 1 bit), 2 transparente.
+    Por el contenido de la textura; las mallas de las etapas y uniones deciden la lista por el estado del GS
+    (estado_gs, lista_gs)"""
     al = a[..., 3].astype(int); h, w = al.shape
     if (al >= 240).all() or al.max() - al.min() < 64: lista, fmt = 0, 1   # RGB565 (alfa casi constante: no es
                                                                  # transparencia, lo usa el juego para otra cosa)
     elif ((al < 16) | (al >= 240)).mean() > 0.97: lista, fmt = 1, 0   # ARGB1555
     else: lista, fmt = 2, 2                                      # ARGB4444
-    r, g, b = (a[..., k].astype(np.uint32) for k in range(3))
-    if fmt == 1: v = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
-    elif fmt == 0: v = ((al >= 128).astype(np.uint32) << 15) | ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3)
-    else: v = ((al.astype(np.uint32) >> 4) << 12) | ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4)
-    out = np.zeros(w * h, np.uint16); out[twiddle(w, h).ravel()] = v.ravel()
-    return fmt, lista, out.tobytes()
+    return fmt, lista, codifica16(a, fmt)
+
+def niveles_mip(a):
+    """niveles de mip de una textura cuadrada, de 1x1 a la base (promedio de 2x2; la PS2 trae los suyos en el disco,
+    hechos de la base del mismo modo)"""
+    L = [a.astype(float)]
+    while L[-1].shape[0] > 1 and L[-1].shape[1] > 1:
+        x = L[-1]; L.append((x[0::2, 0::2] + x[1::2, 0::2] + x[0::2, 1::2] + x[1::2, 1::2]) / 4)
+    return [np.clip(np.rint(x), 0, 255).astype(np.uint8) for x in L[::-1]]
+
+def datos_mip(a, fmt, umbral=128):
+    """textura de 16 bits con mipmaps de la PowerVR: 6 bytes de relleno y los niveles de 1x1 a la base, cada uno
+    twiddled (el nivel de lado 2^k empieza en 0x6, 0x8, 0x10, 0x30, 0xB0, 0x2B0...: la tabla de desplazamientos de
+    la PowerVR para las texturas de 16 bits)"""
+    return b'\0' * 6 + b''.join(codifica16(x, fmt, umbral) for x in niveles_mip(a))
+
+def estado_gs(blq, reg, k, capa=0):
+    """estado del GS de una capa de la entrada k de la tabla 4 del registro (SLES-53998; ver docs/PARIDAD.md, Suelos).
+    Tabla 4 (36 bytes): material, dos campos sin descifrar, y (textura, estado) de la capa 1 (+0C, +10), de la capa 2
+    (+14, +18; -1 sin ella) y un ultimo par sin descifrar. Tabla 7 (48 bytes por estado): la plantilla del paquete
+    del GS que manda el microcodigo del VU1: GIFtag (PRIM en los bits 47-57: bit 4 TME textura, bit 6 ABE mezcla), en
+    +08 el registro ALPHA (0x44 (Cs - Cd) As + Cd, la normal; 0x48 Cs As + Cd, la aditiva; 0x58 Cs Ad + Cd y 0x89
+    Cd As en las capas 2), +10 TEST (ATE, ATST, AREF con 0x80 = 1, AFAIL, ZTE y ZTST: GEQUAL en todos), +18 CLAMP y
+    +20 TEX1 (MXL = niveles de mip - 1, MMAG, MMIN). None si no lo hay"""
+    m, A = blq.m, blq.A; n4, o4 = reg[4]; n7, o7 = reg[7]
+    if not 0 <= k < n4: return None
+    x = struct.unpack('<9i', m[A + o4 + 36 * k:A + o4 + 36 * k + 36])
+    ti, j = x[3 + 2 * capa], x[4 + 2 * capa]
+    if not 0 <= j < n7: return None
+    q = bytes(m[A + o7 + 48 * j:A + o7 + 48 * j + 48])
+    prim = (struct.unpack('<Q', q[:8])[0] >> 47) & 0x7ff
+    test = struct.unpack('<I', q[16:20])[0]; tex1 = struct.unpack('<Q', q[32:40])[0]
+    return dict(textura=ti, prim=prim, abe=bool(prim & 0x40), alpha=q[8], ate=bool(test & 1), atst=(test >> 1) & 7,
+                aref=(test >> 4) & 0xff, afail=(test >> 12) & 3, ztst=(test >> 17) & 3, mxl=int((tex1 >> 2) & 7))
+
+def lista_gs(g, a=None):
+    """lista de la PowerVR que corresponde al estado del GS g: con mezcla (ABE) la transparente; sin mezcla, con la
+    prueba de alfa (ATE con GEQUAL o GREATER) y algun texel por debajo de AREF (a: RGBA 0-255, el alfa del GS 0x80 =
+    255), la de recorte; si no, la opaca: sin mezcla ni prueba de alfa el GS escribe el texel entero y el alfa de la
+    textura no tapa nada (en las calzadas es la mascara del brillo de la capa 2)"""
+    if g['abe']: return 2
+    if g['ate'] and g['atst'] in (5, 6) and a is not None and (a[..., 3] < min(255, 2 * g['aref'])).any(): return 1
+    return 0
 
 NODO = 56                                                       # registro de nodo de la tabla 0 (PmtNode del PC)
 UMBRAL_CURSO = 6                                                # 4044E0(6): umbral de LOD de la etapa (race_area_display_44f120)
@@ -164,6 +216,48 @@ class Modelo:
         # luz del entorno del original (luz_entorno) para las mallas sin color de vertice (etapas, uniones y cielo);
         # None: la luz de siempre (LUZ, coches y trafico)
         self.luz = None
+        # estado del GS de las mallas de la escena (bloque con objetos=True: etapas y uniones; estado_gs): la lista, la
+        # mezcla y los mipmaps salen de el. tvar: textura -> {(lista, aditiva): entrada de self.texs}; tdec: entrada ->
+        # lo que necesita (lista, aditiva, umbral del recorte, niveles de mip, en el suelo)
+        self.tvar = {}; self.tdec = {}; self._gs = None
+
+    def _variante(self, ti, li, aditiva, umbral, mxl, suelo):
+        """la entrada de textura de ti para una malla de la lista li con esa mezcla: la propia la primera vez; si la
+        misma textura se usa en otra lista (tres en PALM), una copia (cada cabecera de la PowerVR es de una lista)"""
+        v = self.tvar.setdefault(ti, {}); clave = (li, aditiva)
+        if clave not in v:
+            if not v: j = ti
+            else:
+                w, h, fmt, _, off, tam = self.texs[ti]; j = len(self.texs)
+                self.texs.append((w, h, fmt, li, len(self.blob), tam)); self.blob += self.blob[off:off + tam]
+                self.rgba.append(self.rgba[ti])
+            v[clave] = j; self.tdec[j] = dict(li=li, aditiva=aditiva, umbral=umbral, mxl=mxl, suelo=0, total=0)
+        d = self.tdec[v[clave]]
+        d['umbral'] = max(d['umbral'], umbral); d['mxl'] = max(d['mxl'], mxl); d['suelo'] += suelo[0]; d['total'] += suelo[1]
+        return v[clave]
+
+    def ajusta_texturas(self):
+        """formato de cada textura usada por las mallas con estado del GS (una vez, antes de recortar y comprimir): en
+        la lista opaca RGB565 (el alfa no se usa), en la de recorte ARGB1555 con el umbral de AREF, en la transparente
+        el de su contenido; bits del formato: 0x200 con mipmaps (las cuadradas del suelo cuyo estado del GS lleva
+        niveles: TEX1 MXL > 0; la PowerVR solo los admite en las cuadradas), 0x400 mezcla aditiva (ALPHA 0x48), 0x800
+        z con GEQUAL (ZTST del GS)"""
+        if getattr(self, '_ajustadas', False): return
+        self._ajustadas = True
+        if not self.tdec: return
+        blob = b''; texs = []
+        for j, (w, h, fmt, li, off, tam) in enumerate(self.texs):
+            d = self.tdec.get(j)
+            if d is None:
+                texs.append((w, h, fmt, li, len(blob), tam)); blob += self.blob[off:off + tam]; continue
+            a = self.rgba[j]; li = d['li']
+            fmt = 1 if li == 0 else (0 if li == 1 else textura_dc(a)[0])
+            mip = w == h and w >= 8 and d['mxl'] > 0 and 2 * d['suelo'] >= d['total'] > 0
+            datos = datos_mip(a, fmt, d['umbral']) if mip else codifica16(a, fmt, d['umbral'])
+            datos += b'\0' * (-len(datos) % 32)
+            fmt |= (0x200 if mip else 0) | (0x400 if d['aditiva'] else 0) | 0x800
+            texs.append((w, h, fmt, li, len(blob), len(datos))); blob += datos
+        self.texs, self.blob = texs, blob
 
     def bloque(self, blq, registros=None, lista=None, objetos=False, sin_textura=int(os.environ.get("SINTEX", "0x60202020"), 16),
                copias=None, vis=None, umbral=UMBRAL_CURSO, rama=None, nodo_fijo=None):
@@ -194,6 +288,8 @@ class Modelo:
                 self._mat = material_de(blq, reg, k) if sin_textura == 'material' and ti < 0 else None
                 self._matc = material_completo(blq, reg, k) if self.luz is not None else None
                 self._origen = (r, i, k, e[0])                   # registro, malla, entrada de la tabla 4 y banderas
+                # estado del GS de la capa 1 (tabla 7): manda la lista, la mezcla y los mipmaps (escena: objetos)
+                self._gs = estado_gs(blq, reg, k) if objetos and lista is None else None
                 return e, ti
             if not objetos:
                 self._nodo = -1 if nodo_fijo is None else nodo_fijo
@@ -266,9 +362,20 @@ class Modelo:
                 luz = 0.7 + 0.3 * np.clip(np.abs(N @ LUZ), 0, 1)
                 col = np.clip(np.array(mat[:3])[None, :] * luz[:, None], 0, 255)
             li = 0 if mat[3] >= 127 else 2
+            g = self._gs if lista is None else None
+            if g is not None: li = 2 if g['abe'] and mat[3] < 127 else 0   # sin mezcla del GS: opaca
         elif ti < 0 and sin_textura is None: li = 0             # sin textura y sin color dado: blanco con luz
         col = col.astype(np.uint32)
         argb = (0xFF << 24) | (col[:, 0] << 16) | (col[:, 1] << 8) | col[:, 2]
+        g = self._gs if lista is None else None
+        if g is not None and ti >= 0:                           # escena: la lista y la mezcla del estado del GS
+            li = lista_gs(g, self.rgba[ti])
+            if g['abe'] and 0x6e in tr and len(tr[0x6e]) == nn:   # con mezcla, el alfa del vertice (GS: 0x80 = 1)
+                al = np.clip(tr[0x6e][:, 3].astype(np.int64) * 2, 0, 255).astype(np.uint32)
+                argb = (al << 24) | (argb & 0xFFFFFF)
+            suelo = (int((np.abs(N[:, 1]) > 0.7).sum()), nn)    # vertices de suelo (para los mipmaps)
+            ti = self._variante(ti, li, g['abe'] and g['alpha'] == 0x48, min(255, 2 * g['aref']) if li == 1 else 128,
+                                g['mxl'], suelo)
         if ti < 0 and isinstance(sin_textura, str) and li == 2:
             argb = (np.uint32(min(255, int(mat[3] * 2))) << 24) | (argb & 0xFFFFFF)
         elif ti < 0 and sin_textura is not None and not isinstance(sin_textura, str): argb[:] = sin_textura
@@ -283,6 +390,7 @@ class Modelo:
 
     def recorta_texturas(self):
         """deja solo las texturas que usan las mallas (y reordena el blob)"""
+        self.ajusta_texturas()
         usadas = sorted({x[1] for x in self.mallas if x[1] >= 0}); nuevo = {}; blob = b''; texs = []
         for ti in usadas:
             w, h, fmt, li, off, tam = self.texs[ti]
@@ -301,10 +409,16 @@ class Modelo:
             d = self.blob[off:off + tam]
             if ti in usadas and ti < len(self.rgba):
                 antes += tam
-                r = vq.elige(self.rgba[ti], fmt)
+                r = None
+                if fmt & 0x200:                                 # con mipmaps
+                    r = vq.elige_mip(niveles_mip(self.rgba[ti]), fmt & 0xff)
+                    if r is None and w * h >= 32 * 32:          # sin VQ costarian 2,7 veces mas: sin mipmaps
+                        fmt &= ~0x200; d = codifica16(self.rgba[ti], fmt & 0xff)
+                if not fmt & 0x200: r = vq.elige(self.rgba[ti], fmt & 0xff)
                 if r is not None:
                     d, n, err = r; fmt = fmt | 0x100 | (n - 1) << 16; errs.append(err)
-                    if dpng: vq.compara(self.rgba[ti], d, fmt, os.path.join(dpng, 'tex%03d_%dx%d.png' % (ti, w, h)))
+                    if dpng and not fmt & 0x200:
+                        vq.compara(self.rgba[ti], d, fmt, os.path.join(dpng, 'tex%03d_%dx%d.png' % (ti, w, h)))
                 ahora += len(d)
             d += b'\0' * (-len(d) % 32)
             texs.append((w, h, fmt, li, len(blob), len(d))); blob += d
@@ -313,6 +427,7 @@ class Modelo:
                        % (len(errs), len(usadas), antes >> 10, ahora >> 10, np.mean(errs), max(errs), time.time() - t0))
 
     def escribe(self, sal):
+        self.ajusta_texturas()
         if self.vq and not getattr(self, '_comprimido', False): self.comprime(); self._comprimido = True
         self.mallas.sort(key=lambda x: (x[0], x[1]))
         inicio = [sum(1 for x in self.mallas if x[0] < l) for l in range(5)]
