@@ -76,7 +76,14 @@ def objetos_etapa(A, d0):
     if v == 0xffffffff: return []
     ruta = E.cadena(u32(E, conv_coche.recursos(A) + 4 * (v >> 16)))
     ruta = ruta[len('\\Stage'):] if ruta.lower().startswith('\\stage\\') else ruta
-    return [(A.bloque(A.entrada('STAGE.PS2', ruta)), {v & 0xffff})]
+    regs = {v & 0xffff}
+    # descriptor +0x5C: otro registro del mismo recurso (LAKE 0x590003, zonas 5, 9, 10, 11 y 14; las demas 0xFFFFFFFF):
+    # en LAKE es el plano del agua (122 vertices a y = -99, 3,8 x 3,3 km, bajo las mallas del lago a -95..-98); sin el,
+    # lo que no cubren esas mallas dejaba ver el color de fondo. PROBABLE: el codigo del PS2 que lo lee no se ha
+    # localizado (docs/PARIDAD.md, Agua)
+    v5 = u32(E, d0 + 0x5c)
+    if v5 != 0xffffffff and v5 >> 16 == v >> 16: regs.add(v5 & 0xffff)
+    return [(A.bloque(A.entrada('STAGE.PS2', ruta)), regs)]
 
 def arbol(A, prim_zona0, fich='csc_data_2.bin'):
     """registros del arbol del curso: [(clave, tramo, union, clave izquierda, clave derecha)]"""

@@ -533,6 +533,15 @@ static void pon_vista(const float *o, const float *mira, float bal)
 }
 
 typedef struct { float x, y, w, u, v; uint32_t c, o; } pt_t;   /* o: color de desplazamiento */
+#ifdef DIAG_MS
+static uint64_t prf_t; static unsigned prf_us[10], prf_v[10], prf_v0;   /* medida: us y vertices por parte del cuadro */
+#define PRF(i) do { uint64_t t_ = timer_us_gettime64(); prf_us[i] += (unsigned)(t_ - prf_t); prf_t = t_; prf_v[i] += vtx_env - prf_v0; prf_v0 = vtx_env; } while (0)
+#else
+#define PRF(i) do { } while (0)
+#endif
+#ifdef DIAG_MS
+static unsigned dg_mallas, dg_dir, dg_mal, dg_vdir, dg_vmal;    /* medida: mallas recorridas y enviadas */
+#endif
 static uint32_t vtx_env, vtx_ult;                        /* vertices enviados en el cuadro (y en el anterior) */
 static uint32_t vtx_et, vtx_et_ult;                      /* los de la etapa */
 /* ---------------------------------------------------------------- presupuesto del TA (docs/DREAMCAST.md)
@@ -616,10 +625,12 @@ int ta_prim(const void *d, size_t sz)
 }
 #define pvr_prim ta_prim
 
+static inline float inv_w(float w);
 static inline void envia(const pt_t *p, int fin)
 {
     pvr_vertex_t *v = pvr_dr_target(); vtx_env++;
-    float iw = 1.0f / p->w;
+    float iw = inv_w(p->w);                              /* la misma 1/w que dibuja_malla_directa: lo coplanario de
+                                                            dos mallas da la misma z por los dos caminos (GEQUAL) */
     v->flags = fin ? PVR_CMD_VERTEX_EOL : PVR_CMD_VERTEX;
     v->x = p->x * iw; v->y = p->y * iw; v->z = iw; v->u = p->u; v->v = p->v; v->argb = p->c; v->oargb = p->o;
     pvr_dr_commit(v);
@@ -649,7 +660,8 @@ static inline float inv_w(float w) { float r = w * w; __asm__("fsrra %0" : "+f"(
 /* malla entera delante del plano cercano: cada vertice se transforma y va directo a la PowerVR */
 static void dibuja_malla_directa(const modelo_t *mo, const malla_t *m)
 {
-    const vert_t *v = mo->verts + m->v0; uint32_t i, n = m->n;
+    const vert_t *v = mo->verts + m->v0; uint32_t i, n = m->n, cf = color_fijo;
+    const uint32_t *ofs = mo->ofs ? mo->ofs + m->v0 : NULL;
     if (!ta_cabe(n)) return;
     for (i = 0; i < n; i++, v++) {
         float x = v->x, y = v->y, z = v->z, w, iw; pvr_vertex_t *d;
@@ -658,7 +670,7 @@ static void dibuja_malla_directa(const modelo_t *mo, const malla_t *m)
         d = pvr_dr_target();
         d->flags = i == n - 1 ? PVR_CMD_VERTEX_EOL : PVR_CMD_VERTEX;
         d->x = x * iw; d->y = y * iw; d->z = iw; d->u = v->u; d->v = v->v;
-        d->argb = color_fijo ? color_fijo : v->c; d->oargb = mo->ofs ? mo->ofs[m->v0 + i] : 0;
+        d->argb = cf ? cf : v->c; d->oargb = ofs ? ofs[i] : 0;
         pvr_dr_commit(d);
     }
     tri_enviados += n - 2; vtx_env += n;
@@ -674,15 +686,17 @@ static inline uint32_t mul_argb(uint32_t c, uint32_t k)
 static void dibuja_malla(const modelo_t *mo, const malla_t *m)
 {
     const vert_t *v = mo->verts + m->v0; uint32_t i, n = m->n; int detras = 0;
+    const uint32_t *ofs = mo->ofs ? mo->ofs + m->v0 : NULL; const float cer = cerca;
     if (n > 256) n = 256;
     for (i = 0; i < n; i++) {
         float x = v[i].x, y = v[i].y, z = v[i].z, w;
         mat_trans_single3_nodivw(x, y, z, w);
-        pw[i].x = x; pw[i].y = y; pw[i].w = w; pw[i].u = v[i].u; pw[i].v = v[i].v;
-        pw[i].c = color_fijo ? color_fijo : color_mul ? mul_argb(v[i].c, color_mul) : v[i].c;
-        pw[i].o = mo->ofs ? mo->ofs[m->v0 + i] : 0;
-        detras |= w < cerca;
+        pw[i].x = x; pw[i].y = y; pw[i].w = w; pw[i].u = v[i].u; pw[i].v = v[i].v; pw[i].c = v[i].c;
+        pw[i].o = ofs ? ofs[i] : 0;
+        detras |= w < cer;
     }
+    if (color_fijo) for (i = 0; i < n; i++) pw[i].c = color_fijo;
+    else if (color_mul) for (i = 0; i < n; i++) pw[i].c = mul_argb(pw[i].c, color_mul);
     if (!detras) {
         if (!ta_cabe(n)) return;
         for (i = 0; i < n; i++) envia(pw + i, i == n - 1);
@@ -727,10 +741,16 @@ static void dibuja_rango(const modelo_t *mo, int l, uint32_t k0, uint32_t k1, in
 {
     float tanh = 320.0f / fx, tanv = 240.0f / fx, kh = sqrtf(1 + tanh * tanh), kv = sqrtf(1 + tanv * tanv);
     uint32_t k, vtx_et0 = vtx_env; int ult = -2, seguro = 0, cartel;
+    const uint32_t *vis = recorta ? mo->vis : NULL;               /* nodos visibles (nodos_visibles) */
     ta_ofs = mo->ofs != NULL;
     for (k = k0; k < k1; k++) {
         const malla_t *m = mo->mallas + k;
+        __builtin_prefetch(m + 6);                              /* la mayoria se salta: que la siguiente ya este en cache */
+        if (vis && m->nodo >= 0 && !(vis[m->nodo >> 5] & (1u << (m->nodo & 31)))) continue;   /* (la prueba de abajo, antes) */
         if (m->n < 3) continue;                                 /* apagada (luces del coche: coche_luces) */
+#ifdef DIAG_MS
+        dg_mallas++;
+#endif
         if (solo_lod >= 0 && !((m->nodo >> solo_lod) & 1)) continue;   /* de otro LOD del coche de trafico */
         if (solo_lista && (m->tex < 0 || (int)mo->texs[m->tex].lista != l)) continue;
         cartel = 0;
@@ -766,6 +786,9 @@ static void dibuja_rango(const modelo_t *mo, int l, uint32_t k0, uint32_t k1, in
         }
         if (sol_rayo_on && !sol_rayo_res && recorta && l < 2 && (mo == &etapa || mo == &uni || mo == &sig))
             sol_rayo_res = sol_rayo_malla(mo, m, cartel);       /* lo que tapa el sol (sol_prepara) */
+#ifdef DIAG_MS
+        if (recorta && seguro) { dg_dir++; dg_vdir += m->n; } else if (recorta) { dg_mal++; dg_vmal += m->n; }
+#endif
         if (cartel) {                                           /* en el marco de su nodo, girado hacia la camara */
             carga_cartel((const float (*)[4])mo->carteles[mo->nodos[m->nodo].cartel]);
             dibuja_malla(mo, m);
@@ -779,9 +802,29 @@ static void dibuja_rango(const modelo_t *mo, int l, uint32_t k0, uint32_t k1, in
 }
 /* las mallas idx[0..n) del modelo (las de una pieza animada en una lista: coche_dibuja, traf_dibuja), sin recorte, con
    la matriz ya cargada; respeta solo_lod y las apagadas como dibuja_rango */
+static int indices_delante;                                     /* el modelo entero delante del plano cercano */
+/* radio del modelo alrededor de su origen (esferas de sus mallas), para indices_delante; con cache */
+static float modelo_radio(const modelo_t *mo)
+{
+    static const void *cl[16]; static float cr[16]; static int cn; int i; uint32_t k; float r = 0;
+    for (i = 0; i < cn; i++) if (cl[i] == mo->mallas) return cr[i];
+    for (k = 0; k < mo->nmallas; k++) {
+        const malla_t *m = mo->mallas + k; float d = sqrtf(m->cx * m->cx + m->cy * m->cy + m->cz * m->cz) + m->r;
+        if (d > r) r = d;
+    }
+    i = cn < 16 ? cn++ : 15; cl[i] = mo->mallas; cr[i] = r;
+    return r;
+}
+/* un modelo de matriz rigida M (vectores fila, traslacion en la fila 3) con todas sus mallas delante del plano
+   cercano (margen de 2 m para las piezas animadas): sus tiras van directas, sin pasar por el recorte (misma imagen) */
+static int modelo_delante(const modelo_t *mo, const float (*M)[4])
+{
+    float dx = M[3][0] - ojo[0], dy = M[3][1] - ojo[1], dz = M[3][2] - ojo[2];
+    return dx * ade[0] + dy * ade[1] + dz * ade[2] - modelo_radio(mo) - 2.0f > cerca * 1.5f;
+}
 static void dibuja_indices(const modelo_t *mo, int l, const uint16_t *idx, uint32_t n)
 {
-    uint32_t j; int ult = -2;
+    uint32_t j; int ult = -2, dir = indices_delante && !color_mul;
     ta_ofs = mo->ofs != NULL;
     for (j = 0; j < n; j++) {
         const malla_t *m = mo->mallas + idx[j];
@@ -792,7 +835,8 @@ static void dibuja_indices(const modelo_t *mo, int l, const uint16_t *idx, uint3
             if (m->tex >= 0) pvr_prim(&mo->cabs[0][mo->remap ? mo->remap[m->tex] : m->tex], sizeof(pvr_poly_hdr_t));
             else pvr_prim(&cab_col[0][l], sizeof(pvr_poly_hdr_t));
         }
-        dibuja_malla(mo, m);
+        if (dir && m->n <= 256) dibuja_malla_directa(mo, m);
+        else dibuja_malla(mo, m);
     }
     ta_ofs = 0;
 }
@@ -3603,6 +3647,13 @@ static int curso_lee(void)
     memcpy(&n, b + 4, 4); memcpy(&r, b + 8, 4);
     if (r != sizeof(etapa_t) || n > CURSO_MAX || sz < 12 + n * r) { free(b); return -2; }
     memcpy(curso, b + 12, n * r); ncurso = n; free(b);
+#ifdef DIAG_MS
+    {   uint32_t k, j;                                          /* medida: la niebla de cada etapa */
+        for (k = 0; k < n; k++) for (j = 0; j < curso[k].nniebla && j < NIEBLA_MAX; j++)
+            printf("NIEBLA: %.4s %u pos %u-%u modo %u d %.6f-%.6f c %06x-%06x\n", curso[k].zona, (unsigned)j, curso[k].niebla[j].p0, curso[k].niebla[j].p1,
+                   curso[k].niebla[j].modo, (double)curso[k].niebla[j].d0, (double)curso[k].niebla[j].d1, (unsigned)(curso[k].niebla[j].c0 & 0xffffff), (unsigned)(curso[k].niebla[j].c1 & 0xffffff));
+    }
+#endif
     return 0;
 }
 /* M1 * M2 (primero M2, en el marco de M1; como compone de tools/conv_union.py) */
@@ -4572,6 +4623,33 @@ static const pvr_poly_hdr_t *cielo_cab(const modelo_t *mo, int i, int niebla, in
     cie_clave[k] = clave;
     return cie_cab + k;
 }
+/* orden del cielo en la lista transparente: el original lo dibuja sin z y en orden (4521C0: el nuevo, el viejo; dentro
+   de cada objeto, sus tiras en orden), y la PowerVR ordena la lista transparente por la z de cada triangulo: los
+   triangulos grandes del cielo se cruzaban entre si (el fundido de la union: trozos rectangulares de un cielo encima
+   del otro, y nubes delante o detras del fondo segun el triangulo). Sin niebla en el cielo cada malla va con una z
+   fija y creciente en el orden de dibujo, mas lejos que toda la escena (1e-5 = 100 km; la escena acaba en lejos):
+   la PowerVR las mezcla en el orden del original. Con niebla (CLOU) la z manda en la tabla de niebla y se deja. */
+static int cie_seq;                                             /* mallas del cielo enviadas a la lista 2 (cuadro) */
+static void cielo_malla_orden(const modelo_t *mo, const malla_t *m)
+{
+    const vert_t *v = mo->verts + m->v0; uint32_t i, n = m->n > 256 ? 256 : m->n, cm = color_mul;
+    float z = 1.0e-5f * (1.0f + (float)cie_seq++ * (1.0f / 1024.0f));
+    for (i = 0; i < n; i++) {
+        float x = v[i].x, y = v[i].y, zz = v[i].z, w;
+        mat_trans_single3_nodivw(x, y, zz, w);
+        if (w < cerca) { dibuja_malla(mo, m); return; }        /* (no pasa: el cielo esta lejos) */
+        pw[i].x = x; pw[i].y = y; pw[i].w = w; pw[i].u = v[i].u; pw[i].v = v[i].v;
+        pw[i].c = cm ? mul_argb(v[i].c, cm) : v[i].c; pw[i].o = mo->ofs ? mo->ofs[m->v0 + i] : 0;
+    }
+    if (!ta_cabe(n)) return;
+    for (i = 0; i < n; i++) {
+        pvr_vertex_t *d = pvr_dr_target(); float iw = inv_w(pw[i].w);
+        d->flags = i == n - 1 ? PVR_CMD_VERTEX_EOL : PVR_CMD_VERTEX;
+        d->x = pw[i].x * iw; d->y = pw[i].y * iw; d->z = z; d->u = pw[i].u; d->v = pw[i].v; d->argb = pw[i].c; d->oargb = pw[i].o;
+        pvr_dr_commit(d);
+    }
+    tri_enviados += n - 2; vtx_env += n;
+}
 /* el grupo g del cielo de mo en la lista l con alfa a */
 static void cielo_grupo(const modelo_t *mo, int g, int l, float a, int niebla)
 {
@@ -4584,7 +4662,8 @@ static void cielo_grupo(const modelo_t *mo, int g, int l, float a, int niebla)
         if (m->n < 3 || gm != g || (a >= 0.9f && lm != l)) continue;
         if (m->tex >= 0) pvr_prim(cielo_cab(mo, m->tex, niebla, a >= 0.9f ? lm : 2), sizeof(pvr_poly_hdr_t));
         else pvr_prim(&cab_col[!niebla][a >= 0.9f ? l : 2], sizeof(pvr_poly_hdr_t));
-        dibuja_malla(mo, m);
+        if (l == 2 && !niebla) cielo_malla_orden(mo, m);
+        else dibuja_malla(mo, m);
     }
     color_mul = 0;
 }
@@ -4592,6 +4671,7 @@ static void cielo_grupo(const modelo_t *mo, int g, int l, float a, int niebla)
 static void cielo_dibuja(int l)
 {
     int niebla = niebla_cielo_d > 0;                           /* la lista 0 de la niebla (solo CLOU la tiene) */
+    if (l == 0) cie_seq = 0;
     const modelo_t *nuevo = sig.tv ? &sig : NULL;
     mat_load(&vista_cielo);
     if (ent_fase == 0) cielo_grupo(cielo, 0, l, 1, niebla);
@@ -5333,12 +5413,14 @@ static void coche_dibuja(int l, matrix_t *mc)
 {
     int p;
     if (!ani.ok) { mat_load(&vista); mat_apply(mc); dibuja_rango(&coche, l, coche.inicio[l], coche.inicio[l + 1], 0, 0, 0); return; }
+    indices_delante = modelo_delante(&coche, (const float (*)[4])*mc);
     for (p = 0; p < NPZ; p++) {
         uint32_t a = ani.ini[l][p], b = ani.ini[l][p + 1];
         if (b <= a) continue;
         mat_load(&vista); mat_apply(mc); mat_apply(&ani_m[p]);
         dibuja_indices(&coche, l, ani.idx + a, b - a);
     }
+    indices_delante = 0;
 }
 /* ---------------------------------------------------------------- el piloto y la acompanante (comun/robot.c)
    CHR.DAT (tools/conv_chr.py): texturas y mallas en la postura de enlace (el campo del nodo = su malla en el bloque
@@ -5516,6 +5598,7 @@ static void traf_dibuja(int i, int l, matrix_t *mt)
     const trafico_t *t = traf + i; const tani_t *a = tani + t->modelo; modelo_t *mo = &mtraf[t->modelo]; int p;
     static matrix_t W __attribute__((aligned(32)));
     if (!a->ok) { mat_load(&vista); mat_apply(mt); dibuja_rango(mo, l, mo->inicio[l], mo->inicio[l + 1], 0, 0, 0); return; }
+    indices_delante = modelo_delante(mo, (const float (*)[4])*mt);
     for (p = 0; p <= NTRUEDA; p++) {
         uint32_t k0 = a->ini[l][p], k1 = a->ini[l][p + 1];
         if (k1 <= k0) continue;
@@ -5529,6 +5612,7 @@ static void traf_dibuja(int i, int l, matrix_t *mt)
         }
         dibuja_indices(mo, l, a->idx + k0, k1 - k0);
     }
+    indices_delante = 0;
 }
 
 /* 4AE5F0 (PS2 0x1d786c..0x1d791c), una vez por cuadro dibujado y por coche vivo, antes de la prueba de distancia: el
@@ -6194,8 +6278,15 @@ int main(int argc, char **argv)
         t_log += timer_us_gettime64() - c_log;
         if (pvr_wait_ready() < 0) { if (++pvr_fallos >= 5) pvr_colgado(estado); } else pvr_fallos = 0;
         c0 = timer_us_gettime64();
+#ifdef DIAG_MS
+        prf_t = timer_us_gettime64();
+#endif
         if (estado == TITULO) pvr_set_bg_color(54 / 255.0f, 62 / 255.0f, 74 / 255.0f);   /* fondo gris del frontal */
+#ifdef DIAG_FONDO
+        else pvr_set_bg_color(1.0f, 0.0f, 1.0f);                /* prueba: los huecos en magenta */
+#else
         else pvr_set_bg_color(0.45f, 0.65f, 0.95f);
+#endif
         ta_fin_cuadro();                                        /* el TA ya termino el cuadro anterior: lo que gasto */
         niebla_pon();                                           /* niebla de la etapa y distancia de dibujo */
         pvr_scene_begin();
@@ -6216,7 +6307,12 @@ int main(int argc, char **argv)
             uint64_t t0r = timer_us_gettime64(); robot_matrices(&mod_coche); chr_us += (uint32_t)(timer_us_gettime64() - t0r);
         }
         tri_enviados = 0; vtx_ult = vtx_env; vtx_env = 0; ta_inicia_cuadro(); vtx_et_ult = vtx_et; vtx_et = 0;
+#ifdef DIAG_MS
+        prf_v0 = 0;
+#endif
+        PRF(0);
         if (estado != TITULO) nodos_visibles_todos();          /* los del original que caben en el TA */
+        PRF(1);
         if (estado != TITULO) sol_prepara();                    /* el rayo hacia el sol de este cuadro */
         if (estado != TITULO) traf_parpadea(pausa || estado != CARRERA);   /* 4AE5F0 (sin traf_paso: suspendido) */
         vib_cuadro();                                           /* el Puru Puru (vib_paso lo dejo en el control) */
@@ -6224,7 +6320,9 @@ int main(int argc, char **argv)
             pvr_list_begin(LISTA[l]);
             if (estado != TITULO) {                             /* en el menu no se ve la etapa */
                 ta_en_etapa = 1;
+                PRF(0);
                 cielo_dibuja(l);                                /* el cielo (y su fundido en la union) */
+                PRF(2);
                 mat_load(&vista);
 #ifdef DEP_LISTA
                 color_fijo = l == DEP_LISTA ? 0xFFFF00FF : 0;
@@ -6232,13 +6330,17 @@ int main(int argc, char **argv)
                 for (i = 0; i < 3; i++)                         /* etapa, union y etapa siguiente: las que esten subidas */
                     if (tramos[i]->tv) dibuja_rango(tramos[i], l, tramos[i]->inicio[l], tramos[i]->inicio[l + 1], 1, 0, 0);
                 color_fijo = 0; ta_en_etapa = 0;
+                PRF(3);
                 bo_dibuja(l);                                   /* pajaros y demas de la union (4A9DF0) */
             }
+            PRF(4);
             if ((estado != TITULO && (!cam_ok || cam_coche_visible(&cam))) || (estado == TITULO && menu_coche3d()))
 #ifndef DIAG_SIN_COCHE
                 coche_dibuja(l, &mod_coche);
 #endif
+            PRF(5);
             if (estado != TITULO) { uint64_t t0r = timer_us_gettime64(); robot_dibuja(l); chr_us += (uint32_t)(timer_us_gettime64() - t0r); }   /* 4879B0 */
+            PRF(6);
 #ifdef DIAG_TRAF
             if (l == 0) traf_vistos = 0;
 #endif
@@ -6260,6 +6362,7 @@ int main(int argc, char **argv)
                 traf_dibuja(i, l, &mt);                         /* carroceria y ruedas girando (4AD530) */
                 mtraf[t->modelo].remap = NULL; solo_lod = -1;
             }
+            PRF(7);
             if (l == 2 && estado != TITULO) { mat_load(&vista); efectos_dibuja(); }
             if (l == 2 && estado != TITULO) sol_dibuja();       /* el sol y su destello (40CBC0) */
             if (l == 2) {
@@ -6317,6 +6420,7 @@ int main(int argc, char **argv)
                 }
                 if (estado != TITULO && (!hud_ok ? (estado != CARRERA || t_estado < 50 || auto_ || aviso_rama) : (estado == CARRERA && auto_ && t_estado >= 50))) rect_txr(txt_cen, 256, 32, 64, 180, 512, 64, PVR_LIST_TR_POLY);
             }
+            PRF(8);
             pvr_list_finish();
             if (l == 0) {                                       /* volumenes de sombra (afectan a lo opaco y recortado) */
                 pvr_list_begin(PVR_LIST_OP_MOD);
@@ -6334,6 +6438,7 @@ int main(int argc, char **argv)
                                      (int)(diag_quitado_n ? diag_quitado_z : lejos), (double)diag_quitado_r, (double)niebla_d, (unsigned)sombra_tri, (unsigned)(sombra_teo >> 10),
                                      etapa.pvs_on, uni.pvs_on, sig.pvs_on, (unsigned)diag_pvs_v, (unsigned)chr_vtx_ult, (unsigned)chr_us_ult, ta_et_corto ? " CORTO" : "", ta_corto ? " TOPE" : "");
 #endif
+        PRF(9);
         if (estado != TITULO) prio_ajusta(ta_et_corto, ta_et);
         ta_et_corto = 0;
         pvr_scene_finish();
@@ -6347,6 +6452,21 @@ int main(int argc, char **argv)
         if (++cuadro % 30 == 0) {
             uint64_t t1 = timer_ms_gettime64();
             fps = 30000.0f / (float)(t1 - t0); ms = tcpu / 30000.0f; ms_log = t_log / 30000.0f; t0 = t1; tcpu = 0; t_log = 0;
+#ifdef DIAG_MS
+            if (estado != TITULO && cur_nodo >= 0) {        /* medida: tiempos medios de los ultimos 30 cuadros */
+                pvr_stats_t ps; pvr_get_stats(&ps);
+                printf("MS: %.4s s %.0f fps %.1f dib %.2f log %.2f pvr %.2f tri %u vtx %u\n", curso[cur_nodo].zona, (double)yo.s,
+                       (double)fps, (double)ms, (double)ms_log, (double)(ps.rnd_last_time / 1000000.0), (unsigned)tri_enviados, (unsigned)vtx_ult);
+                {   static const char *const N[10] = { "ini", "vis", "cielo", "etapa", "bo", "coche", "robot", "traf", "l2", "fin" };
+                    char t[200]; int n = 0, j;
+                    for (j = 0; j < 10; j++) n += sprintf(t + n, " %s %u/%u", N[j], prf_us[j] / 30, prf_v[j] / 30);
+                    printf("PRF:%s\n", t);
+                    printf("MAL: recorridas %u directas %u/%u v, recortables %u/%u v\n", dg_mallas / 30, dg_dir / 30, dg_vdir / 30, dg_mal / 30, dg_vmal / 30);
+                    dg_mallas = dg_dir = dg_vdir = dg_mal = dg_vmal = 0;
+                }
+            }
+            memset(prf_us, 0, sizeof prf_us); memset(prf_v, 0, sizeof prf_v);
+#endif
             /* distancia adaptativa: si la geometria no cabe en el cuadro, se acorta (minimo 600 m) y vuelve a crecer */
             /* ta_corto: algun cuadro se quedo sin presupuesto (de vertices de la etapa o del TA) y se saltaron mallas;
                se acorta la distancia para que lo que falte sea lo de lejos (antes contaba el coche y el trafico en el

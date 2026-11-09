@@ -56,12 +56,12 @@ El curso entero (15 etapas, 10 bifurcaciones y 5 metas, `CURSO.DAT`) se lee mien
 `demo/main.c`): un hilo lee el fichero del GD y lo coloca en el marco de la carrera (`modelo_coloca`) y el bucle sube
 las texturas al terminar. Nunca hay mas de dos a la vez: etapa + union hasta UNION_LIBERA (300 m) dentro de la union
 (y con la rama elegida), y union + etapa siguiente despues. Las etapas van siempre en el mismo hueco fijo de RAM (el
-tamano del mayor SEGnn.DAT: 7832 KB, SEG13, desde la PVS) y la union en otro (el mayor BKkk.DAT: 1480 KB),
+tamano del mayor SEGnn.DAT: 7842 KB, SEG13, desde la PVS y el plano del agua) y la union en otro (el mayor BKkk.DAT: 1480 KB),
 reservados al arrancar. Fuera de la carrera el hueco de la union se presta (ver RAM del arranque y del menu, abajo).
 La ruta es una ventana: al soltar una etapa se quitan sus puntos (`ruta_recorta`) y el marco se recentra en el
 principio de la union (`curso_recentra`), asi que ni la RAM de la ruta ni las coordenadas crecen de etapa en etapa.
 La colision del suelo (COLnn.DAT, PARIDAD.md Suelo del original) va en el hueco de la etapa detras de su SEGnn.DAT,
-en lo que le sobra (el hueco no crece: 7832 KB); la de METR (COL13, 208 KB), que no cabe detras de SEG13, y la de la
+en lo que le sobra (el hueco no crece: 7842 KB); la de METR (COL13, 208 KB), que no cabe detras de SEG13, y la de la
 union (el mayor COLBK*, 184 KB) van en dos huecos que solo existen en la carrera (`col_reserva` en `curso_reinicia`,
 `col_suelta` en `curso_al_menu`): reservarlos al arrancar dejaba sin RAM las tablas de MENU.DAT (~1 MB, "Out of
 memory" y menus en gris). Medido (Flycast, menu real): al arrancar 823 KB libres como antes; al empezar la carrera, con

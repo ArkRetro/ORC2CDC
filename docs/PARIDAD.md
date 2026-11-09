@@ -473,8 +473,8 @@ Efectos del suelo del original y su estado:
   ELF de PS2 pero no en el disco (OBJ.PS2 tiene 11 entradas, todas con nombre; el hash del nombre no esta en ningun
   paquete: CONFIRMADO). En la PS2 las sombras pintadas son tiras de mezcla de las propias etapas (PALM registro 0,
   textura 0 de 64x8; LAKE textura 30), que ya se dibujaban y ahora van con su alfa de vertice.
-- Agua: el mar de PALM es opaco con su brillo aditivo (arriba); el lago de LAKE es una malla opaca con su textura
-  (registro 8, textura 12, 370 m a 95 m bajo la salida), sin capa 2 ni mezcla. Sin animacion de textura en sus nodos
+- Agua: el mar de PALM es opaco con su brillo aditivo (arriba); el lago de LAKE son mallas opacas del registro 0
+  (textura 55, a 95-98 m bajo la salida), sin capa 2 ni mezcla, y debajo el plano del agua (abajo, 2026-11-09). Sin animacion de textura en sus nodos
   (sin la bandera 0x20 de 404D10).
 - Capas 2 (PENDIENTE, sin portar): la mayoria de las tiras de la escena llevan una segunda capa (tabla 4 +14/+18) y su
   programa del VU1 la dibuja en una segunda pasada: guarda dos ST por vertice y manda el mismo bufer dos veces
@@ -1601,3 +1601,39 @@ cierre del trafico del original. Verificado: compila sin avisos, banco de fisica
 ## Proxima tarea
 
 Camara de carrera del original (sistema visible en todo momento y hoy escrito a mano).
+
+## Graficos: agua, cielo de la union, z y tiempos (2026-11-09)
+
+Probado con el piloto automatico (`PRUEBA_AUTO`, `PRUEBA_NODO`, `PRUEBA_SIN_TIEMPO`) y `DIAG_FONDO` (fondo magenta:
+los huecos de la escena se ven):
+
+- Agua: en LAKE (y en CLOU, DESE, TULI, METR, IMPE) se veia el color de fondo en el lago (bajo el puente y a la
+  izquierda de la salida). Causa: faltaba el plano del agua. El descriptor de etapa del PS2 lleva en +0x5C un objeto
+  del mismo recurso obj_course_obj_cs_<zona> que el de la pancarta (+0 de la tabla 0x3f9b90): LAKE 0x590003 (122
+  vertices a y = -99, 3,8 x 3,3 km), CLOU 0x5d0003, DESE 0x610005, TULI 0x620006, METR 0x630007, IMPE 0x660005, las
+  demas 0xFFFFFFFF; todos son planos a la altura del agua. `conv_union.objetos_etapa` lo anade a la etapa (SEG03, 07,
+  11, 12, 13 y 16 reconvertidos; SEG13 +10 KB: hueco de etapa 7842 KB). Comprobado: sin pixeles de fondo en las
+  seis. PROBABLE: el codigo del PS2 que lee +0x5C no se ha localizado (en 0x172780 solo esta la tabla 0x3f9b90; la
+  0x3f9c98 es el reflejo). No era la PVS, ni la tabla de secciones, ni el recorte por nodos, ni el tope del TA
+  (probado quitando cada uno), ni los registros 8 y 9 de cs_CS_LAKE que no se dibujan.
+- Cielo en el fundido de la union: la lista transparente de la PowerVR ordena por la z de cada triangulo y los
+  triangulos grandes de los dos cielos (y las nubes) se cruzaban: trozos rectangulares de un cielo sobre el otro. El
+  original los dibuja sin z y en orden (4521C0). Ahora cada malla del cielo en la lista 2 va con una z fija creciente
+  en el orden de dibujo, detras de toda la escena (`cielo_malla_orden`); con niebla en el cielo (CLOU) se deja la z
+  (manda en la tabla de niebla).
+- z de lo coplanario (edificios, marcas de la calzada): 1/w salia de FSRRA en las tiras enteras delante del plano
+  cercano (`dibuja_malla_directa`) y de una division en las demas (`envia`); con GEQUAL una calcomania y su pared o su
+  asfalto por caminos distintos daban z distintas en el ultimo bit y parpadeaban. Ahora las dos con FSRRA.
+- Niebla para cortar lo lejano: la niebla ya es la del original (scn_env_fog por etapa, mezclada en la union). Con sus
+  densidades llega a 255/256 a: PALM 6,0-11,8 km, LAKE 5,9-7,8, ALPI 2,6-3,9, DESE 2,0, CLOU 1,1-5,5, INDU
+  1,3-2,2, SNOW/TULI 3,7-6,7, GHOS 1,5, METR 4,7, RUIN 7,9-12, IMPE 2,1-6,6, CAPE 17 (exp2: x = 2,355 / d; exp: 5,545 / d); CAST y FORE no tienen. El
+  cielo va sin niebla salvo en CLOU, asi que lo que queda entero en la niebla se ve como silueta del color de la
+  niebla contra el cielo: quitarlo cambiaria la imagen. En CLOU el cielo (a ~1100 m de z en la esquina) no llega a
+  255/256 antes que la escena. Sin corte por la niebla (probado: no cortaba nada).
+- Tiempos (`DIAG_MS`: cada 30 cuadros MS, PRF por partes y MAL): coche y trafico enteros delante del plano cercano
+  (esfera del modelo) van por `dibuja_malla_directa`; el recorrido de las mallas salta antes las de nodos no visibles
+  (con prefetch); sin recargar globales por vertice. Misma imagen. Flycast (CPU de dibujo, media de 45 s desde la
+  salida, `DIAG_SIN_CPU`): PALM 28,7 -> 25,8 ms, LAKE 25,7 -> 23,2, INDU 29,4 -> 26,9, METR 33,5 -> 30,7, CAPE
+  25,4 -> 23,1 (solo indicativo: Flycast no cuenta la cache). Lo que queda: el coche (10 440 vertices, ~5,7 ms), la
+  etapa (~11-13 k vertices, ~13 ms), el piloto (2,6 ms).
+
