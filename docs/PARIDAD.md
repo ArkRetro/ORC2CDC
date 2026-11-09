@@ -1352,6 +1352,44 @@ peticion 14 (escoltas 45B5B0, +324 = 6: carrera contra ellos), que no esta en la
     (p6 = 9) golpeada (+3F8, +3FC == 8) menos las de la clase 6; 19 (461940): cajas 0x12 que caen. Alturas y matrices
     sobre la carretera: 45DB70 (clases 0xA / 0x22 / 0x39 a la altura del suelo + [5B0084]; 5..9, 0xB, 0xE, 0x16 con la
     orientacion de la carretera 45D950). Sprites 2C0000 / 2C0002 / 2C0006 (banco SPRANI 0x2C) y efecto 0xD6 al tocar.
+  - Comprobado en el codigo de PS2 (2026-11-09, para portar los objetos; nada de esto esta aun en la demo):
+    - Numeracion de las funciones de suceso CONFIRMADA (ya no PROBABLE): el abridor de objetos (4F0D10, PS2 0x1d76e4..
+      0x1d7724) lee el tipo +0x1C de cada registro, toma la funcion de 0x40a918 (0x3d, 0x3f, 0x5d, 0x40, 0x41, 0x42,
+      0x5f, 0x60, 0x61, 0x3e, 0x63, 0x64, 0x4f, 0x65, 0x66) y abre el suceso (0x19c870). Tabla de funciones de PS2 en
+      0x3ee7a0, 20 bytes por funcion {inicio, control, 0x1d0e00 dibujo, 0x1d1e70, 0x1d0f38}: 0x5d 0x1d1ac8 / 0x1d1af0
+      (cuerpo rigido, PC 4ABA80 / 4ACD50), 0x5e 0x1d1a98 / 0x1d1af0, 0x5f 0x1d3c68 / 0x1d3d48 (corazon: radio 3,0 en la
+      clase 10, efecto 0xD6, 2C0000; = PC 4AA560 / 4ABF20), 0x60 0x1d41d0 / 0x1d42f0 (puerta: postes en x = +-3,0,
+      2C0002; = PC 4AA7D0 / 4AC200), 0x61 0x1d4b60 / 0x1d4d80 (aro, PC 0x60; lo usan las cajas clase 18 tipo 8),
+      0x62 0x1d4b30 / 0x1d4d80, 0x63 0x1d52b8 / 0x1d5368, 0x64 0x1d55b8 / 0x1d56d8. O sea: PS2 = PC + 1 en 0x5C..
+    - Dibujo 0x1d0e00: modelo +0x64 (el de la clase) con la matriz del trabajo; la clase 56 siempre; las demas con +54
+      bit 0 (visible) y sin el bit 1 (parpadeo); 0x1105e0(9) para 0x57001c y 0x1105e0(8) para el resto (SIN
+      DESCIFRAR que es). Toque 0x1d3720 (= 4AA140): radio previo 3,0 (0x1ee0004: 20), medias cajas x 0,5; solo el
+      jugador para 0x57001c..1f, 0x570025..27, 0x57002b, 0x570030, 0x1ee0004, 0x1ee000d (los demas, los 24 coches).
+    - Corazon 0x1d3d48: altura 1,2 (clase 57: 1,0), giro +0,05 por paso; al tocarlo escala 0,3; luego 0x1d3fc8 (solo
+      con la peticion 15): t += 1/60, y = coche + 25 t - 39,2 t^2, desde t > 0,319 la escala baja 0,015 por paso, giro
+      +20; si hay otro subiendo y 0x1d77c8 < 6 desaparece. Puerta 0x1d42f0: cruce del segmento del coche (+16C/+174 ->
+      +14/+1C) con el de los postes y y + 3,0 x escala > y del coche -> +7C 3 (peticion 25: 1 sin 0x1b3b10); si no,
+      cada poste (y + 0,3, radio 0,3 x escala, efecto 0xCD) -> 1 / 2; despues 0x1d4508: giro -0,2 / +0,2 (1 / 2),
+      t += 1/60, se cierra en t = 3,0 y parpadea ((int)(resto x 60) & 1) con resto <= 1,0.
+    - Control de las peticiones (tabla 0x3ef9c0): 7 / 24 0x1a9290, 8 / 23 0x1a9af8, 9 0x1a9f68, 11 0x1aa3e8, 14
+      0x1ab6a0, 15 0x1b0260, 16 / 25 0x1b0570, 17 0x1b0c58, 18 0x1b1948, 19 0x1b11c8, 20 0x1b1f18, 21 0x1b24e0. Peticion 15
+      (0x1b0260, puntos 0x3f07c0): recorre 276 objetos, resultado = cogidos x (800000 / p8) - bono; evaluacion
+      0x1b03e0: nota 7 -> 700000 si se cogieron todos los de clase 10 del tramo, si no en proporcion, + (cogidos - p8)
+      x 0,5 x 10000; corazones del resultado con min(h, 80) x 10000; medidor h x 20 / 7.
+    - Alturas y matrices 45DB70 = PS2 0x1b3458 (en el stage clear): clases 10 / 0x22 / 0x39 a la altura del suelo bajo
+      (x, 9999,9, z); por la tabla 0x3f08c0, clases 5..9 con el marco de la carretera (0x1b3240) y el desplazamiento
+      (0, 0,65, 0) de 0x3f08a8; 11, 14 y 22 con el marco de la carretera. Anchos de las puertas (accion -11 con 16,
+      PS2 0x1afa48): tabla 0x3f7218 + tab x 16 {inicio, medio, final, reparto} x carriles de la seccion; media anchura
+      3,0 x escala, minimo 2,5 (si no, escala 2/3); cuenta 0x1b00d0(desde, hasta, 11), bifurcacion 0x176e20.
+    - Fichero por mision (0x1af428): mision >= 15 tabla 0x3f05c0; si no, tabla 0x3f06a0 por 0x176700(clave) - 15.
+    - Modelos (banco 0x57): conos 0x19 / 0x1e / 0x1f (39 vertices, una malla), corazones 0x1c / 0x1d (69), caja 0x30
+      (60), puerta 0x2b: malla 1 (250 vertices, transparente) en 4 nodos con banderas 0x860 (cara a la camara y
+      animacion de vertices 8) y malla 2 (50 vertices).
+    - BLOQUEADO para portarlo sin aproximar (falta portar del original, no se ha inventado nada): la consulta de suelo
+      43EB60 / GetYPositionProg (rejilla de 24 m de la COLI y get_road_cond, driving/pc_course_query.cpp) que dan la
+      altura de los corazones, la seccion de cada objeto (43F370) y la cuenta 45C8E0; el marco de la carretera 0x1b3240
+      (43E570, el tramo de la seccion) y los carriles 43E790; los sprites 2C0000 / 2C0002 / 2C0006 del banco SPRANI
+      0x2C (no convertidos); el modo de dibujo 0x1105e0; el cuerpo rigido 516E10 de los conos.
 - Coches de la mision: parados (+1C4 = 0) y sin control (47E6C0: +C5C 0x40000 y 45D820 = 7F250C = 0) desde la
   accion -14 hasta la -17 (45D830: la velocidad de la carretera). SIMPLIFICADO: despues van a la velocidad de la
   carretera sin el camino Lead de 472450 (que en la DC los ponia a ~290 km/h por delante del jugador y no se podian
