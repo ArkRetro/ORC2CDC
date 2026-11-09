@@ -56,7 +56,8 @@ El curso entero (15 etapas, 10 bifurcaciones y 5 metas, `CURSO.DAT`) se lee mien
 `demo/main.c`): un hilo lee el fichero del GD y lo coloca en el marco de la carrera (`modelo_coloca`) y el bucle sube
 las texturas al terminar. Nunca hay mas de dos a la vez: etapa + union hasta UNION_LIBERA (300 m) dentro de la union
 (y con la rama elegida), y union + etapa siguiente despues. Las etapas van siempre en el mismo hueco fijo de RAM (el
-tamano del mayor SEGnn.DAT: 6090 KB, METR) y la union en otro (el mayor BKkk.DAT: 1568 KB), reservados al arrancar.
+tamano del mayor SEGnn.DAT: 6090 KB, METR) y la union en otro (el mayor BKkk.DAT: 1568 KB), reservados al arrancar;
+las texturas de la union van tambien en un hueco fijo de VRAM (mas abajo).
 La ruta es una ventana: al soltar una etapa se quitan sus puntos (`ruta_recorta`) y el marco se recentra en el
 principio de la union (`curso_recentra`), asi que ni la RAM de la ruta ni las coordenadas crecen de etapa en etapa.
 
@@ -91,6 +92,41 @@ sobre los 180 de COCHE04) y el trafico 297 KB (+32): en ese peor caso quedan uno
 Medido el 2026-11-08 con el trafico con sus 5 LOD (328 KB) y COCHE06 (Flycast, `-DPRUEBA_FICHA=6 -DPRUEBA_NODO=9
 -DPRUEBA_RAMA=0 -DPRUEBA_FIN=400`): BK09 + GHOS 220 KB libres, BK09 + IMPE (SEG16) **88 KB**, IMPE + su meta BK13
 **79 KB** (el peor). No hay sitio para agrandar el bufer de parametros (cada 64 KB mas son 128 KB).
+
+### Hueco fijo de VRAM para las uniones (2026-11-09)
+
+La cuenta de las mediciones de "Piloto y acompanante" (seccion 2) dice que no faltaba VRAM sino un bloque seguido:
+empezando en IMPE quedan 51 KB libres con IMPE + BK13, y por GHOS 53 KB con BK09 + IMPE, asi que las texturas de BK13
+son unos 2 KB mas que las de BK09 y al soltar BK09 habia ~51 KB de sobra en total. Pero cada textura se pide aparte
+(`pvr_mem_malloc` en `sube_modelo`): IMPE rellena el agujero de GHOS y sigue por encima de BK09, al soltar BK09 queda
+en medio de IMPE un agujero 2 KB menor que BK13, y las texturas de BK13 que no caben ahi ya no encuentran sitio
+seguido en lo poco que queda.
+
+Ahora (`demo/main.c`, `vram_union`):
+
+- Nunca hay mas de una union subida (la siguiente se pide cuando la anterior ya se solto), asi que las uniones van en
+  un hueco fijo de VRAM, del tamano de las texturas de la mayor BKkk.DAT. `curso_huecos` lo mide al arrancar leyendo
+  solo la cabecera y la tabla de texturas de cada BKkk.DAT (1-2 sectores cada una); `curso_vram_union` lo reserva
+  justo tras `pvr_init`, antes que cualquier otra textura (abajo del todo, para siempre). Las texturas de la union van
+  seguidas desde el principio del hueco y no se liberan una a una (`libera_modelo` se salta las del hueco).
+- Para no perder lo que deja libre una union menor que la mayor: la etapa k pone sus primeras texturas en la cola del
+  hueco, por encima de la union subida (la k - 1) y de la suya (BKk, la siguiente en subir: `tex_bk[k]`; `ini_etapa`).
+  Cuando llega BKk la etapa k - 1 ya se solto, asi que esa parte del hueco esta libre. Lo que no cabe en la cola va a
+  `pvr_mem_malloc` como antes. Si no se pudo medir una BKkk.DAT, su etapa no usa la cola.
+- Fuera del hueco, entre etapas solo se piden y sueltan texturas de etapas: lo que deja una etapa lo ocupa la siguiente
+  y no queda ningun agujero de union en medio.
+- Coste: la VRAM del hueco no la puede usar la cache de pantallas del menu (`comun/menu.c`), que echa pantallas viejas
+  cuando falta. En carrera el total libre es el mismo que antes, salvo lo que queda sin usar en la cola del hueco (lo
+  que no encaja de las ultimas texturas de la etapa, menos que la textura mayor).
+- Registro: al arrancar "CURSO: ... VRAM de la union NK" y "CURSO: hueco de VRAM de la union NK en ..., VRAM libre NK";
+  en cada carga, "VRAM libre NK (hueco de la union usado/totalK)". `pvr_mem_available` ya no cuenta el hueco: la VRAM
+  libre de verdad es esa mas lo que falta para llenar el hueco.
+
+Pendiente de medir (Flycast, `DIAG_VTX`, `-DPRUEBA_AUTO -DPRUEBA_FICHA=6 -DPRUEBA_NODO=9 -DPRUEBA_RAMA=0
+-DPRUEBA_FIN=400` y `-DPRUEBA_NODO=13 -DPRUEBA_FIN=300`): que BK13 suba por GHOS -> IMPE, y la VRAM libre de BK09 +
+IMPE y de IMPE + BK13 frente a los 53 / 30 KB y 51 / 29 KB (sin / con personajes) de antes. Si la mayor BKkk.DAT es
+otra y la cola no da para toda la diferencia, se puede bajar mas compartiendo las texturas de cs_BK_PALM repetidas en
+cada BKkk.DAT (`tools/conv_union.py`).
 
 ### Entorno (cielo, sol, luz; 2026-11-08)
 
@@ -413,8 +449,9 @@ VRAM del peor caso (mismas pruebas): IMPE + su meta BK13 51 KB sin personajes, 2
 (`-DPRUEBA_NODO=13 -DPRUEBA_FIN=300`); GHOS -> IMPE: SEG16 subida con BK09 aun en VRAM 53 / 30 KB. OJO, de antes y sin
 relacion con los personajes (pasa igual sin CHR.DAT): en esa misma prueba (`-DPRUEBA_NODO=9`), al pedir despues la meta
 BK13 sale "Sin memoria de video para la etapa" (la VRAM queda troceada al soltar BK09; empezando en IMPE, BK13 sube
-con 51 KB libres). PENDIENTE: compartir las texturas repetidas de cs_BK_PALM o subir las uniones en un hueco fijo de
-VRAM.
+con 51 KB libres). Arreglo (2026-11-09): hueco fijo de VRAM para las uniones (ver "Hueco fijo de VRAM para las
+uniones" en la seccion 1). PENDIENTE de medir con `DIAG_VTX` en Flycast la ruta GHOS -> IMPE -> BK13 (no habia
+toolchain ni datos en la sesion en que se hizo).
 
 ## 3. Otros riesgos de la consola real
 

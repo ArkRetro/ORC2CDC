@@ -71,6 +71,19 @@ static inline uint32_t ta_teo(uint32_t n, int o)
    medio) y siempre quepa una etapa entera (curso_huecos) */
 static uint8_t *hueco_etapa, *hueco_union;
 static uint32_t cap_etapa, cap_union;
+/* Hueco fijo de VRAM para las texturas de la union (BKkk.DAT): nunca hay mas de una subida (la siguiente se pide
+   cuando la anterior ya se solto, curso_paso), asi que van una detras de otra desde el principio del hueco y no se
+   liberan una a una. Se reserva al arrancar (justo tras pvr_init, abajo del todo), del tamano de las texturas de la
+   mayor BKkk.DAT (curso_huecos lee solo sus cabeceras). Sin el, al soltar la union entre etapas sus texturas dejaban
+   un agujero en medio de las de la etapa siguiente y la meta ya no cabia aunque sobrara VRAM en total (GHOS -> IMPE
+   -> BK13, docs/DREAMCAST.md). Para no perder lo que una union menor deja sin usar, la etapa k pone sus primeras
+   texturas en la cola del hueco, por encima de la union subida y de la suya (BKk, tex_bk[k]), que es la siguiente en
+   subir: cuando llega, esa parte esta libre (sube_etapa) */
+static pvr_ptr_t vram_union; static uint32_t cap_vram_union, uso_vram_union;
+static inline int en_vram_union(pvr_ptr_t p)
+{
+    return vram_union && (uintptr_t)p >= (uintptr_t)vram_union && (uintptr_t)p < (uintptr_t)vram_union + cap_vram_union;
+}
 /* lee un modelo en buf (cap bytes) o, con buf NULL, en memoria nueva */
 static int lee_modelo_en(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t cap)
 {
@@ -148,22 +161,28 @@ static void compila_cab(modelo_t *m, uint32_t i, int especular)   /* especular: 
         pvr_poly_compile(&m->cabs[f][i], &cx);
     }
 }
-static int sube_modelo(modelo_t *m)
+/* ini: las texturas que quepan, seguidas desde ese desplazamiento del hueco fijo de la union (vram_union); las demas
+   (o todas, con ini >= cap_vram_union) a pvr_mem_malloc. Devuelve en *fin hasta donde llega lo puesto en el hueco */
+static int sube_modelo_en(modelo_t *m, uint32_t ini, uint32_t *fin)
 {
-    uint32_t i, f;
+    uint32_t i, f, usado = ini;
     for (f = 0; f < 2; f++) m->cabs[f] = memalign(32, (m->ntex + 1) * sizeof(pvr_poly_hdr_t));
     m->tv = calloc(m->ntex + 1, sizeof(pvr_ptr_t));
     for (i = 0; i < m->ntex; i++) {
-        tex_t *t = m->texs + i; pvr_ptr_t v = pvr_mem_malloc(t->tam);
+        tex_t *t = m->texs + i; pvr_ptr_t v;
         uint32_t fb = t->fmt & 0xff;
-        if (!v) return -3;
         if (fb > 2 || (t->tam & 31)) return -4;
+        if (vram_union && usado < cap_vram_union && t->tam <= cap_vram_union - usado) { v = (pvr_ptr_t)((uintptr_t)vram_union + usado); usado += t->tam; }
+        else v = pvr_mem_malloc(t->tam);
+        if (!v) return -3;
         m->tv[i] = v;
         pvr_txr_load(m->blob + t->off, v, t->tam);
         compila_cab(m, i, 0);
     }
+    if (fin) *fin = usado;
     return 0;
 }
+static int sube_modelo(modelo_t *m) { return sube_modelo_en(m, UINT32_MAX, NULL); }
 
 /* vertices del modelo (lod < 0: todas las mallas; si no, las de ese LOD: el trafico lleva en el campo del nodo la
    mascara de los LOD que dibujan la malla, tools/conv_trafico.py) y bytes teoricos del TA (ta_teo; o: con color de
@@ -186,7 +205,8 @@ static uint32_t modelo_teo(const modelo_t *m, int lod, int o)
 static void libera_modelo(modelo_t *m)
 {
     uint32_t i;
-    for (i = 0; i < m->ntex; i++) if (m->tv && m->tv[i]) pvr_mem_free(m->tv[i]);
+    for (i = 0; i < m->ntex; i++)
+        if (m->tv && m->tv[i] && !en_vram_union(m->tv[i])) pvr_mem_free(m->tv[i]);   /* las del hueco fijo no */
     free(m->tv); free(m->cabs[0]); free(m->cabs[1]); free(m->ofs); free(m->vis); free(m->pvs_m); free(m->pvs_teo);
     if (m->datos != hueco_etapa && m->datos != hueco_union) free(m->datos);
     memset(m, 0, sizeof *m);
@@ -2605,9 +2625,19 @@ static void ram_kb(unsigned *uso, unsigned *libre)
     *libre = (unsigned)((mi.fordblks + (0x8d000000u - 0x10000u - tope)) >> 10);
 }
 static void curso_error(const char *s) { dbglog(DBG_ERROR, "CURSO: %s\n", s); vid_set_mode(modo_video, PM_RGB565); aviso(s); for (;;) thd_sleep(1000); }
-static void sube_etapa(modelo_t *m)
+static uint32_t tex_bk[CURSO_MAX];                              /* bytes de texturas de cada BKkk.DAT (curso_huecos;
+                                                                   UINT32_MAX sin medir) */
+/* donde empieza en el hueco de la union la etapa de la clave k: encima de la union subida y de la suya */
+static uint32_t ini_etapa(int k)
 {
-    if (sube_modelo(m)) curso_error("Sin memoria de video para la etapa");
+    uint32_t b = k >= 0 && k < ncurso ? tex_bk[k] : cap_vram_union;
+    return b > uso_vram_union ? b : uso_vram_union;
+}
+static void sube_etapa(modelo_t *m, int k)                     /* k: la clave de la etapa (-1: la union) */
+{
+    uint32_t fin;
+    if (sube_modelo_en(m, k < 0 ? 0 : ini_etapa(k), &fin)) curso_error("Sin memoria de video para la etapa");
+    if (k < 0) uso_vram_union = fin;
 }
 /* el arbol (CURSO.DAT); 0 bien */
 static int curso_lee(void)
@@ -2625,19 +2655,48 @@ static void marco_compone(const float *m1, const float *m2, float *o)
     float c = cosf(m1[3]), sn = sinf(m1[3]), x = m2[0], z = m2[2];
     o[0] = m1[0] + x * c + z * sn; o[1] = m1[1] + m2[1]; o[2] = m1[2] - x * sn + z * c; o[3] = m1[3] + m2[3];
 }
-/* reserva los huecos de RAM de las etapas y de la union (el tamano del mayor fichero de cada uno, en el GD) */
+/* bytes de texturas de un modelo en el GD (lba, tam bytes), leyendo solo su cabecera y su tabla de texturas (b: 32
+   sectores alineados a 32); 0 si no se puede o no tiene */
+static uint32_t curso_tex_bytes(uint32_t lba, uint32_t tam, uint8_t *b)
+{
+    uint32_t nt, i, s = 0, ns, cab; tex_t t;
+    if (gd_lee(lba, 1, b)) return 0;
+    if (!memcmp(b, "ORD7", 4)) cab = 56; else if (!memcmp(b, "ORD5", 4) || !memcmp(b, "ORD6", 4)) cab = 44; else return 0;
+    memcpy(&nt, b + 20, 4);                                       /* ntex: quinta palabra tras la marca */
+    ns = (cab + nt * sizeof(tex_t) + 2047) / 2048;
+    if (ns > 32 || ns * 2048 > (tam + 2047) / 2048 * 2048) return 0;
+    if (ns > 1 && gd_lee(lba, ns, b)) return 0;
+    for (i = 0; i < nt; i++) { memcpy(&t, b + cab + i * sizeof(tex_t), sizeof t); s += (t.tam + 31) & ~31u; }
+    return s;
+}
+/* reserva los huecos de RAM de las etapas y de la union (el tamano del mayor fichero de cada uno, en el GD) y mide el
+   hueco de VRAM de la union (las texturas de la mayor BKkk.DAT; se reserva tras pvr_init, curso_vram_union) */
 static int curso_huecos(void)
 {
-    uint32_t lba, t; int i; char n[16];
+    uint32_t lba, t; int i; char n[16]; uint8_t *b = memalign(32, 32 * 2048);
     for (i = 0; i < ncurso; i++) {
         sprintf(n, "SEG%02d.DAT", curso[i].seg);
         if (!gd_busca(n, &lba, &t) && (t + 2047) / 2048 * 2048 > cap_etapa) cap_etapa = (t + 2047) / 2048 * 2048;
-        sprintf(n, "BK%02d.DAT", i);
-        if (!gd_busca(n, &lba, &t) && (t + 2047) / 2048 * 2048 > cap_union) cap_union = (t + 2047) / 2048 * 2048;
+        sprintf(n, "BK%02d.DAT", i); tex_bk[i] = UINT32_MAX;        /* sin medir: su etapa no usa la cola del hueco */
+        if (!gd_busca(n, &lba, &t)) {
+            if ((t + 2047) / 2048 * 2048 > cap_union) cap_union = (t + 2047) / 2048 * 2048;
+            uint32_t v = b ? curso_tex_bytes(lba, t, b) : 0;
+            if (v) tex_bk[i] = v;
+            if (v > cap_vram_union) cap_vram_union = v;
+        }
     }
+    free(b);                                                      /* antes de los huecos: no queda en medio */
     hueco_etapa = memalign(32, cap_etapa); hueco_union = cap_union ? memalign(32, cap_union) : NULL;
-    dbglog(DBG_INFO, "CURSO: %d etapas, huecos etapa %uK union %uK\n", ncurso, (unsigned)(cap_etapa >> 10), (unsigned)(cap_union >> 10));
+    dbglog(DBG_INFO, "CURSO: %d etapas, huecos etapa %uK union %uK, VRAM de la union %uK\n", ncurso, (unsigned)(cap_etapa >> 10),
+           (unsigned)(cap_union >> 10), (unsigned)(cap_vram_union >> 10));
     return !hueco_etapa || (cap_union && !hueco_union);
+}
+/* tras pvr_init, antes de cualquier otra textura: el hueco de VRAM de la union, abajo y para siempre */
+static void curso_vram_union(void)
+{
+    if (cap_vram_union && !(vram_union = pvr_mem_malloc(cap_vram_union))) cap_vram_union = 0;   /* sin el: como antes */
+    dbglog(DBG_INFO, "CURSO: hueco de VRAM de la union %uK en %p, VRAM libre %uK\n", (unsigned)(cap_vram_union >> 10), vram_union,
+           (unsigned)(pvr_mem_available() >> 10));
 }
 /* lee la etapa de la clave k en el hueco (la de salida); 0 bien */
 static int curso_lee_etapa(int k)
@@ -2653,7 +2712,7 @@ static void curso_reinicia(void)
 {
     int k = PRUEBA_NODO < ncurso ? PRUEBA_NODO : 0;
     carga_espera(); carga.estado = 0;
-    libera_modelo(&uni); libera_modelo(&uni_der); libera_modelo(&sig);
+    libera_modelo(&uni); libera_modelo(&uni_der); libera_modelo(&sig); uso_vram_union = 0;
     if (!etapa.tv || etapa_nodo != k) {
         int r;
         libera_modelo(&etapa);
@@ -2661,7 +2720,7 @@ static void curso_reinicia(void)
         r = curso_lee_etapa(k);
         musica_pausa_lectura(0);
         if (r) curso_error("No se pudo leer la etapa de salida");
-        sube_etapa(&etapa);
+        sube_etapa(&etapa, k);
     }
     if (ruta_pon(&etapa)) curso_error("Sin memoria para la ruta");
     cielo = &etapa; cur_nodo = k; cur_sig = -1; etapa_n = curso[k].nivel; cur_rama = -1; cur_en_union = 0;
@@ -2721,7 +2780,7 @@ static int curso_paso(void)
         if (carga.r) curso_error("No se pudo leer la etapa siguiente");
         t_carga_ult = (timer_ms_gettime64() - carga.t0) / 1000.0f;
         if (m == &uni) {
-            sube_etapa(m);
+            sube_etapa(m, -1);
             if ((int)(i_union = ruta_anade(m)) < 0) curso_error("Sin memoria para la ruta");
             j_union = ruta_salto; s_union = s_base + i_union * PASO;
             if (e->izq >= 0) carga_pide(&uni_der, "BKD.DAT", NULL, 0, marco_un);
@@ -2732,14 +2791,15 @@ static int curso_paso(void)
             s_decide = s_union + (k - j_union) * PASO;
         } else if (m == &sig) {
             int i;
-            sube_etapa(m);
+            sube_etapa(m, cur_sig);
             if ((i = ruta_anade(m)) < 0) curso_error("Sin memoria para la ruta");
             s_sig = s_base + i * PASO;
         }
         {
             unsigned u, l; ram_kb(&u, &l);
-            dbglog(DBG_INFO, "CURSO: %s en %.2f s (s %.0f), RAM en uso %uK libre %uK, VRAM libre %uK\n", m == &uni ? fich_union : m == &uni_der ? "BKD.DAT" : fich_sig,
-                   (double)t_carga_ult, (double)yo.s, u, l, (unsigned)(pvr_mem_available() >> 10));
+            dbglog(DBG_INFO, "CURSO: %s en %.2f s (s %.0f), RAM en uso %uK libre %uK, VRAM libre %uK (hueco de la union %u/%uK)\n",
+                   m == &uni ? fich_union : m == &uni_der ? "BKD.DAT" : fich_sig, (double)t_carga_ult, (double)yo.s, u, l,
+                   (unsigned)(pvr_mem_available() >> 10), (unsigned)(uso_vram_union >> 10), (unsigned)(cap_vram_union >> 10));
         }
     }
     if (s_union < 0 && !uni.datos && etapa.datos && carga.estado == 0 && yo.s > longitud - UNION_ANTES) {
@@ -2780,7 +2840,7 @@ static int curso_paso(void)
         s_union = s_decide = s_sig = -1; cur_rama = -1; cur_en_union = 0;
         ev |= CUR_SIGUIENTE;
     }
-    if (s_suelta >= 0 && uni.datos && yo.s > s_suelta) { libera_modelo(&uni); s_suelta = -1; }
+    if (s_suelta >= 0 && uni.datos && yo.s > s_suelta) { libera_modelo(&uni); uso_vram_union = 0; s_suelta = -1; }
     return ev;
 }
 #ifdef PRUEBA_RAMA
@@ -4220,11 +4280,12 @@ int main(int argc, char **argv)
     fisica_carga();
     /* 2: PowerVR, texturas a la memoria de video y cabeceras */
     pvr_init(&pp);
+    curso_vram_union();                                         /* lo primero: abajo del todo, no trocea nada */
     pvr_set_shadow_scale(true, SOMBRA_ESCALA);                  /* lo que queda dentro de la sombra del coche */
     pvr_set_bg_color(0.45f, 0.65f, 0.95f);
     txt_arr = pvr_mem_malloc(sizeof buf_arr); txt_cen = pvr_mem_malloc(sizeof buf_cen);
     for (i = 0, r = 0; i < NMODTRAF; i++) { r |= sube_modelo(&mtraf[i]); if (!r) compacta_modelo(&mtraf[i]); }   /* texeles fuera de la RAM */
-    if (r || sube_modelo(&etapa)) {
+    if (r || sube_modelo_en(&etapa, ini_etapa(etapa_nodo), NULL)) {   /* la de salida, en la cola del hueco de la union */
         vid_set_mode(modo_video, PM_RGB565); aviso("Sin memoria de video para las texturas"); for (;;) thd_sleep(1000);
     }
     sol_carga();                                                /* el sol y el destello (SOL.DAT, siempre en VRAM) */
