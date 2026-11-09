@@ -1301,7 +1301,8 @@ peticion 14 (escoltas 45B5B0, +324 = 6: carrera contra ellos), que no esta en la
   el original la etapa llega a 615 posiciones (m_pos de CURSO.DAT).
 
 **CONTRARRELOJ** verificado en E: `MODO: variante 7, dificultad 0, fila de tiempos 2`, sin un solo coche de trafico,
-union y ruta leidas como en el OutRun. SIN PORTAR: la eleccion de etapa / curso por codigo (48B550: una etapa con su meta GOAL_*_TA o el
+union y ruta leidas como en el OutRun. GOAL (menu real con el piloto y `-DPRUEBA_SIN_TIEMPO`, 2026-11-09): PALM -> ALPI
+(+3000 cuadros) -> FORE (+3060) -> SNOW (+3270) -> IMPE (+3240) -> GOAL, sin trafico en todo el curso. SIN PORTAR: la eleccion de etapa / curso por codigo (48B550: una etapa con su meta GOAL_*_TA o el
 curso entero), el fantasma (GHOST.PS2 gc_default_*, formato QHOT/NHOT, modulo 465F30..4687C0) y su record y la
 pantalla de resultado 0x50 del modo 25.
 
