@@ -56,7 +56,7 @@ Estado: OK (conectado y verificado al nivel indicado), PARCIAL, PROVISIONAL (apr
 | Coches del jugador | CARS.PS2 1-32 / 33-63, disposicion 0x3d3ff0; materiales tabla 4/5 del bloque; colores 0x35ad48 (PC 64D120/408C80); mapa de entorno del bloque | PARCIAL | 15 coches montados como 46A560 (port comprobado), con interior, 9320-11195 vertices dibujados; pintura, 8 colores (Y en la seleccion), reflejo y luces (+7C/+80/+84/+60, CEX2) del original; piezas animadas (ruedas, volante, aleron, faros, disco caliente, car+F0 y el cuerpo de la fisica; ANI1) | UV de entorno con la formula esferica clasica (la del microcodigo VU1 sin leer); sin bits de noche/tunel | ver secciones Coches | E |
 | Escenarios, texturas, materiales | STAGE.PS2, VQ, scn_env_fog_<zona> | PARCIAL | 15 tramos + 15 uniones; mallas con su material (tabla 5) y la luz del entorno 1 de la zona; niebla, cielo y sol del original (ver Entorno); tiras (ADC), nodos, LOD y planos del original | objetos de tramo: el registro de obj_course_obj_cs_<zona> que dibuja la etapa (pancarta CHECK POINT y carteles, ver Checkpoint: la pancarta); objetos animados de las uniones (ver Objetos animados de las uniones); cs_ENV_* no es de la escena (es del reflejo del coche); destello sin consulta de oclusion; luces locales (maya_spl) sin portar | — | E |
 | HUD, menus, transiciones | SPRANI/XST, TEXT.PS2 (espanol: SPANISH.bin y XST _sxst) | PARCIAL | HUD.DAT, MENU.DAT; todas las pantallas del menu principal y de un jugador, licencia con VMU (icono, eyecatch y LCD: VMU.DAT, ver VMU), seleccion de coche del original, menu de pausa con AUDIO (ver Menus y Pausa y mezcla) | titulo es un cuadro del video (la pelicula de titulo en bucle detras del rotulo, sin hacer); textos bfont antiguos en la demo automatica y el aviso de rama; rotulos de las filas de opciones (sprites sin localizar) | quitar textos bfont | E |
-| Musica y efectos | MUSIC.PS2, SOUND.PS2 ICS/MENU/FE; volumenes 0x11ae38 / 0x100210 / 0x11b600, SOUNDCD.IRX 0x2118 | PARCIAL | musica.c, sfx.c; mezcla del original (ver Pausa y mezcla) | 48 kHz supuesto; sin sonido por superficie ni del choque fuerte | — | E |
+| Musica y efectos | MUSIC.PS2, SOUND.PS2 ICS/MENU/FE; volumenes 0x11ae38 / 0x100210 / 0x11b600, SOUNDCD.IRX 0x2118 | PARCIAL | musica.c, sfx.c; los 28 temas, sus 28 avances y la del menu (ver Seleccion de musica); mezcla del original (ver Pausa y mezcla) | 48 kHz supuesto; sin sonido por superficie ni del choque fuerte | — | E |
 | Voces (acompanante y locutor) | SOUND.PS2 `\SPANISH\ORC.PAK`, `PERO.pak`; race_robots 489A90/488D80 = PS2 0x202e60..0x205cac; 4B93E0, 4B9CD0, 49C9C0, 499020, GAME 0x1b83e8 | OK | VOCES.DAT (conv_sonido.py), voces.c; verificado en Flycast (ver Voces y video) | una voz nueva corta la anterior (SUPUESTO); "choque con otro coche" = +4 0x4000000 del jugador (4F7BF0 le ha cambiado la velocidad) en un choque; sin voces de asustada/trompo (solo Coast 2 Coast) | — | E |
 | Peliculas (titulo y atraccion) | MV.PS2 ts50/attr50.pss; 0x12d480, ADVERTISE 0x25e1d8 | OK | MVTS.VQV / MVATTR.VQV (conv_video.py), video.c | VQ de la PowerVR a 256x256 estirado a 640x480 y audio a 32 kHz (el original: MPEG-2 640x480, PCM a 48 kHz) para caber en ~440 KB/s del GD; al arrancar y por inactividad del titulo, en vez de la demo de carrera | — | E |
 | Cargas y estabilidad | — | PARCIAL | carga en segundo plano, mutex del GD | — | medir en GDEMU | E |
@@ -166,7 +166,8 @@ consola, el port lo fija al convertir). Hoja de capturas de Flycast: scratchpad 
   Los movimientos del carrusel guardan un cuadro de cada dos (RAM).
 - Ganchos: `menu_gancho(pantalla, evento, valor)` (comun/menu.h) al entrar en cada pantalla y al elegir; `video_titulo()`
   (simbolo debil en demo/main.c) antes del primer titulo.
-- VRAM por pantalla (MENU.DAT): COMUN 170 KB, MENU 290, MODO 68, COCHE 512, CAMBIO 256, MUSICA 802, LICENCIA 546,
+- VRAM por pantalla (MENU.DAT): COMUN 170 KB, MENU 290, MODO 68, COCHE 512, CAMBIO 256, MUSICA 274 + la lista que se ve
+  (MUSICA0 546, MUSICA1 546, MUSICA2 808; ver Seleccion de musica), LICENCIA 546,
   RANKING 52, MULTI 34, OPCIONES 34, TITULO 38, PAUSA 18 (se sube al pulsar START en carrera). TA: el 2D del menu son
   menos de 300 cuadrilateros por cuadro.
 - Pantalla de musica en blanco (queja del probador, 2026-11-08; reproducido en Flycast: solo el fondo y la barra, y
@@ -183,6 +184,45 @@ consola, el port lo fija al convertir). Hoja de capturas de Flycast: scratchpad 
 - Verificado en E (Flycast): todas las pantallas y transiciones, crear y editar licencia, guardar y leer la VMU entre
   arranques, coche bloqueado, variante, color, cambio, musica y salida a carrera con el Dino; demo y vuelta al titulo.
   No probado en R.
+
+## Seleccion de musica (2026-11-09)
+
+Queja: "faltan musicas en el selector" (solo estaban la lista 0 y 3 temas de carrera: MUS0-2, los avances 33-35 y la
+del menu 30). Ahora como el original (4C9790 / 4C9C20 del PC, frontend_music.cpp; tablas del PS2):
+- **Listas** (PS2 0x375DA8 = 68F36C: 9 / 7 / 12): carruseles 0x4400C6 / 0x4400C7 / 0x440033 y titulos 0x440030 /
+  0x44002F / 0x44002E (tabla 0x419298, 0x4195D0, 0x419628), nombre de la lista 0x4400C8 (cuadros 1, 2, 0 = 5C9F18). Tema
+  plano k = cursor de la lista mas los temas de las anteriores (4C9750), cursor propio por lista (84B0EC) que se guarda
+  entre carreras. Pista de carrera de cada tema: PS2 0x375DB0 = 68F370, la identidad (tema k = `\k.ps2` de MUSIC.PS2 =
+  MUSk.ADP); avance = k + 0x21 (MUS33..MUS60); menu = 0x1E (MUS30). conv_menu.py comprueba las tres tablas en el ELF.
+  Orden (cartas del propio MENU.DAT): lista 0 (OutRun 2) SPLASH WAVE, MAGICAL SOUND SHOWER, PASSING BREEZE, RISKY RIDE,
+  SHINY WORLD, NIGHT FLIGHT, LIFE WAS A BORE, RADIATION, NIGHTBIRD; lista 1 (OutRun 1986 / Turbo OutRun 1989) SPLASH
+  WAVE, MAGICAL SOUND SHOWER, PASSING BREEZE (1986), SHAKE THE STREET, RUSH A DIFFICULTY, WHO ARE YOU, KEEP YOUR HEART
+  (1989); lista 2 (remezclas de OutRun 2) SPLASH WAVE, MAGICAL SOUND SHOWER, PASSING BREEZE (EURO REMIX), RISKY RIDE
+  (GUITAR MIX), SHAKE THE STREET, WHO ARE YOU, RUSH A DIFFICULTY, KEEP YOUR HEART, SHINY WORLD y NIGHT FLIGHT
+  (PROTOTYPE), LIFE WAS A BORE y NIGHT FLIGHT (INSTRUMENTAL).
+- **Desbloqueo** (PS2 0x4191E8 = 5C9AB0): temas 0..6 siempre; 7..27 con los bits 172, 173, 174..192 de la licencia (+0x28).
+  Con una licencia nueva (4471A0) solo los 7 primeros, como el original: los demas con candado 0x440066 cuadro 5 ("NO
+  DISPONIBLE") y A da el sonido 3; ENTIRETY (447360) los abre todos. El avance suena aunque este bloqueado (como el PC).
+- **Botones**: izquierda / derecha sin dar la vuelta; X = lista siguiente (0 -> 1 -> 2 -> 0; en el PC el bit 0x2000 del
+  mando, el mismo boton SUPUESTO que la variante del coche) sin sonido; Y = ALEATORIO (0x10 del PS2): `(rand & 0x1F) *
+  27 >> 5` (0..26: el tema 27 nunca sale, como el original) hasta uno desbloqueado (100 intentos, si no el 0) y sale a la
+  carrera sin el sonido de aceptar y sin mover el cursor; A con desbloqueado: sonido 0x40 y carrera; B vuelve al cambio
+  con la musica de menu.
+- **VRAM**: una pantalla por lista (MUSICA0/1/2) ademas de la comun (MUSICA: cabecera, radio, ayuda, nombre, candado);
+  `mascara()` de menu.c pide la de la lista que se ve y, al cambiar de lista, espera a subirla (sin carrusel mientras;
+  el resto de la pantalla sigue). Las tres juntas eran 1,9 MB.
+- **Audio** (`tools/c/musica.c`, desplazamiento 0 e intercalado 0x2000; reproduce bit a bit los MUS0-2/30/33-35 de
+  antes): ADPCM de Yamaha estereo a 48 kHz, el mismo formato que ya sonaba en GDEMU (48 KB/s). Sin desviacion: 28 temas
+  422 MB (de 9,1 a 19,4 MB; 2 h 26 min) + 28 avances 49 MB + menu 1 MB = 471 MB (antes 50 MB). Datos de la pista 3 sin el
+  relleno: unos 622 MB de los ~1008 MB del area de alta densidad (mkgdi.py rellena hasta el final: la pista 3 mide siempre
+  1008 MB); las peliculas siguen al final (MVATTR.VQV en el LBA 532853, MVTS.VQV en 545018, 1ST_READ.BIN en 548896).
+  Mono o menos frecuencia no hacen falta.
+- Verificado en E (Flycast, arranque real con la pelicula de inicio leida del final del disco): las 3 listas con los
+  28 titulos, carteles y cintas, su avance (MUS33..MUS60 en el registro), candados de una licencia nueva, A en uno
+  bloqueado (se queda), lista que da la vuelta, y carrera con SHINY WORLD (MUS4.ADP, nuevo): la grabacion del audio de
+  Flycast correlaciona con MUS4 (0,13 frente a 0,03 de MUS3/MUS5) desde el segundo ~12 del tema. ALEATORIO (Y) salio directo a la
+  carrera con NIGHT FLIGHT (MUS5; correlacion 0,4-0,75 en ventanas de 4 s); en la pausa, AUDIO con la musica a 0 la
+  quita (0,03; el flujo sigue avanzando) y a 10 vuelve (0,4-0,5), guardado en la VMU. No probado en R (GDEMU): solo cambia el tamano del disco y el numero de ficheros.
 
 ## Pausa y mezcla de audio (2026-11-08)
 

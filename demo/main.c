@@ -2793,7 +2793,7 @@ static void aviso(const char *s)
 extern void video_titulo(void) __attribute__((weak));
 extern int video_atraccion(void) __attribute__((weak));        /* comun/video.c */
 enum { TITULO, CUENTA, CARRERA, META, AGOTADO };
-#define NPISTAS 3
+#define NPISTAS 28                                  /* temas de carrera en el GD: MUS0..27.ADP (menu.c) */
 /* camara de la seleccion de coche: distancia, altura y punto de mira sobre el coche (m) */
 #define MENU_CAM_D 6.0f
 #define MENU_CAM_Y 1.4f

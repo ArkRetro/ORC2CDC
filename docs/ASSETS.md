@@ -256,8 +256,9 @@ Falta, por orden aproximado de necesidad para un juego completo:
 4. **Modos**: reglas de Coast 2 Coast/misiones (`Races`, `RaceAttack`, `OutrunMiles`, metas), records por defecto,
    fantasmas para contrarreloj.
 5. **Sonido**: bancos SE (interfaz, resultados, finales, objetos del fondo), voces de los otros modos (Heart Attack,
-   Coast 2 Coast, misiones; las de la carrera del modo OutRun ya estan); el resto de pistas de musica (solo hace falta
-   pasar cada `\NN.ps2` por `musica.c`).
+   Coast 2 Coast, misiones; las de la carrera del modo OutRun ya estan). La musica ya esta entera: `\00`-`\27` (temas de
+   carrera), `\30` (menu) y `\33`-`\60` (avances) por `musica.c` con desplazamiento 0 e intercalado 0x2000 (ver
+   PARIDAD.md, Seleccion de musica).
 6. **Finales y personajes**: OBJ (`obj_end_*`), AS, los personajes de los finales (`MAL`/`FAL`/`GAL`: cara con morfos y
    pelo osage) y los `obj_driver_*` de DRIVER.PS2, BK (fondos). El piloto y la acompanante de la
    carrera ya estan (`conv_chr.py`).

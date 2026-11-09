@@ -23,6 +23,8 @@
    Sonido (como el original): efectos del frontal con sfx_menu (cursor, aceptar, bloqueado, cancelar); el titulo va
    sin musica (en el original suena la pelicula), al salir de el arranca la musica de menu (pista 30 de MUSIC.PS2,
    MUS30.ADP); en la musica cada tema suena con su avance (pista 33 + tema) y al confirmar empieza el tema elegido.
+   Musica: las 3 listas del original (9 / 7 / 12 temas, 28 en total; X pasa a la siguiente, como el bit 0x2000 del
+   PC), candado y sonido 3 en los temas sin su bit de la licencia, RANDOM (Y) elige uno desbloqueado y sale a correr.
    VRAM: en la RAM solo las tablas de MENU.DAT; las texturas de cada pantalla se leen del GD al entrar y se quedan
    mientras quepan (se echa la pantalla usada hace mas tiempo). hud.c libera la VRAM unos cuadros despues de su ultimo
    uso (la PowerVR aun dibuja el cuadro anterior): una pantalla que no cabe espera a que se libere (sin dibujarse a
@@ -46,9 +48,10 @@ typedef struct { char nombre[16]; uint16_t uso, ini, fin, modo; uint32_t _r[2]; 
 
 /* pantallas de VRAM (las de conv_menu.py) */
 enum { V_TITULO, V_COMUN, V_MENU, V_MODO, V_COCHE, V_CAMBIO, V_MUSICA, V_LICENCIA, V_RANKING, V_MULTI, V_OPCIONES, V_PAUSA,
-       NV };
+       V_MUS0, V_MUS1, V_MUS2, NV };                        /* V_MUSn: carrusel y titulos de la lista n de la musica */
 static const char *const VNOM[NV] = { "TITULO", "COMUN", "MENU", "MODO", "COCHE", "CAMBIO", "MUSICA", "LICENCIA",
-                                      "RANKING", "MULTI", "OPCIONES", "PAUSA" };
+                                      "RANKING", "MULTI", "OPCIONES", "PAUSA", "MUSICA0", "MUSICA1",
+                                      "MUSICA2" };
 /* pantallas del menu (las de menu.h, MP_*) y la VRAM que necesita cada una */
 enum { P_TITULO, P_MENU, P_MODO, P_COCHE, P_CAMBIO, P_MUSICA, P_LICENCIA, P_EDITOR, P_OPCIONES, P_RANKING, P_MULTI, NP };
 #define VB(v) (1 << (v))
@@ -62,7 +65,7 @@ enum { U_TFONDO, U_TLOGO, U_TSTART, U_FONDO, U_CABMENU, U_PRINC, U_CABMODO, U_UN
        U_BARRA_MENU, U_BARRA_MODO, U_BARRA_COCHE, U_BARRA_CAMBIO, U_BARRA_MUSICA, U_BARRA_LIC, U_BARRA_OPC, U_FUENTE,
        U_CABLIC, U_TARJ, U_FL_D, U_FL_I, U_EDITOR, U_TARJ_E, U_REJ_FOTO, U_REJ_BAND, U_REJ_SIGNO, U_HECHO, U_FOTO,
        U_BAND, U_SIGNO, U_LIC_BARRA, U_CABRANK, U_RANK, U_CABMULTI, U_MULTI, U_CABOPC, U_OPC_BARRA,
-       U_P_FILA, U_P_BARRA, U_P_OPC, U_P_VOL, U_P_FUENTE, NU };
+       U_P_FILA, U_P_BARRA, U_P_OPC, U_P_VOL, U_P_FUENTE, U_L1, U_L2, U_T1, U_T2, NU };
 static const char *const UNOM[NU] = { "TITULO_FONDO", "TITULO_LOGO", "TITULO_START", "FONDO", "CABECERA_MENU",
     "MODO_PRINCIPAL", "CABECERA_MODO", "MODO_UN_JUGADOR", "CABECERA_COCHE", "COCHE_INFO", "COCHE_INFO_T",
     "COCHE_CANDADO", "CAMBIO", "MUSICA_RADIO", "MUSICA_AYUDA", "MUSICA_L0", "MUSICA_T0", "MUSICA_LISTA",
@@ -71,11 +74,19 @@ static const char *const UNOM[NU] = { "TITULO_FONDO", "TITULO_LOGO", "TITULO_STA
     "FUENTE", "CABECERA_LICENCI", "LIC_TARJETA", "LIC_FLECHA_D", "LIC_FLECHA_I", "LIC_EDITOR", "LIC_TARJETA_E",
     "LIC_REJ_FOTO", "LIC_REJ_BANDERA", "LIC_REJ_SIGNO", "LIC_HECHO", "LIC_FOTO", "LIC_BANDERA", "LIC_SIGNO",
     "LIC_BARRA", "CABECERA_RANKING", "MODO_RANKING", "CABECERA_MULTI", "MODO_MULTI", "CABECERA_OPCIONE", "OPC_BARRA",
-    "PAUSA_FILA", "PAUSA_BARRA", "PAUSA_OPC", "PAUSA_VOL", "FUENTE_PAUSA" };
+    "PAUSA_FILA", "PAUSA_BARRA", "PAUSA_OPC", "PAUSA_VOL", "FUENTE_PAUSA", "MUSICA_L1", "MUSICA_L2", "MUSICA_T1",
+    "MUSICA_T2" };
 
 #define N_OPC 5                                             /* opciones del menu principal y de un jugador */
 #define N_COCHES 15
-#define N_TEMAS 9                                           /* lista 0 */
+/* musica (4C9790 / 4C9C20 del PC; tablas del PS2 0x375DA8 y 0x4191E8): 3 listas de 9 / 7 / 12 temas (68F36C), el
+   tema k (0..27, 4C9750: lista 0, luego la 1 y la 2) es la pista k de MUSIC.PS2 (68F370: la misma) y su avance la
+   k + 0x21; los temas 0..6 siempre estan y los demas con su bit de la licencia (5C9AB0) */
+#define N_LISTAS 3
+#define N_TEMAS 28
+static const int8_t TEMAS_LISTA[N_LISTAS] = { 9, 7, 12 };
+static const uint8_t DESBLOQ_TEMA[N_TEMAS] = { 174, 174, 174, 174, 174, 174, 174, 172, 173, 174, 175, 176, 177, 178,
+                                               179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192 };
 #define T_DEMO (8 * 60)                                     /* inactividad en el titulo hasta la demo */
 #define T_FUNDIDO 12
 #define T_CARGA_MAX 90                                      /* cuadros que se espera a la VRAM de una pantalla */
@@ -246,7 +257,8 @@ typedef struct { int u; float c; int ini, fin, modo; } anim_t;
 enum { F_ENTRA, F_QUIETO, F_SALE };
 static anim_t a_cab, a_sel, a_aux, a_radio, a_ayuda, a_tarj, a_fl_d, a_fl_i, a_ed, a_ed_t, a_barra;
 static int pant = -1, fase, t, sig, inact, t_bloq, entra_atras, barra_ant = -1, cargando, t_carga;
-static int c_menu, c_modo, c_rank, c_multi, manual, tema, n_ok, pista_sonando, sale_ok;
+static int c_menu, c_modo, c_rank, c_multi, manual, n_ok, pista_sonando, sale_ok;
+static int lista, curs[N_LISTAS], elegido;                  /* 84B0F4, 84B0EC y 830364 del PC */
 
 static int tramo(int u, const char *n, int *ini, int *fin, int *modo)
 {
@@ -288,6 +300,8 @@ static void an_dibuja(const anim_t *a, float dx, float alfa, float z, int fondo)
 }
 
 /* ---------------------------------------------------------------- VRAM */
+/* la de la musica, con la lista que se ve */
+static int mascara(int p) { return MASCARA[p] | (p == P_MUSICA ? VB(V_MUS0 + lista) : 0); }
 static int sube_err;                                        /* lo ultimo de hudd_sube: -2 VRAM, -3 RAM, -4 GD */
 static int sube_p(int p)
 {
@@ -336,7 +350,7 @@ void menu_sale(void) { int p; for (p = 0; p < NV; p++) baja_p(p); hudd_vacia(); 
 void menu_libera_vram(void)
 {
     int p;
-    for (p = 0; p < NV; p++) if (pant < 0 || !(MASCARA[pant] & (1 << p))) baja_p(p);
+    for (p = 0; p < NV; p++) if (pant < 0 || !(mascara(pant) & (1 << p))) baja_p(p);
     hudd_vacia();
 }
 
@@ -459,11 +473,21 @@ static int pon_pista(int n)
 }
 static void pon_musica(int k)
 {
-    if (k < n_ok && pista_sonando != PISTA_AVANCE + k && pista_sonando != k && pon_pista(PISTA_AVANCE + k)) pon_pista(k);
+    if (pista_sonando != PISTA_AVANCE + k && pista_sonando != k && pon_pista(PISTA_AVANCE + k) && k < n_ok) pon_pista(k);
 }
 static void musica_menu(void)
 {
-    if (pon_pista(PISTA_MENU) && pista_sonando < 0) pon_pista(tema < n_ok ? tema : 0);
+    if (pon_pista(PISTA_MENU) && pista_sonando < 0) pon_pista(menu_pista());
+}
+/* 4C9750: tema de la lista y el cursor actuales */
+static int tema_actual(void) { int k = curs[lista], l; for (l = 0; l < lista; l++) k += TEMAS_LISTA[l]; return k; }
+static int lic_bit(int b);
+static int tema_libre(int k) { return k <= 6 || lic_bit(DESBLOQ_TEMA[k]); }   /* 4474E0 solo por encima del 6 */
+static void musica_lista(void)                              /* carrusel y titulo de la lista actual en su tema */
+{
+    static const int UL[N_LISTAS] = { U_L0, U_L1, U_L2 }, UT[N_LISTAS] = { U_T0, U_T1, U_T2 };
+    a_sel.u = us[UL[lista]]; an_tramo_n(&a_sel, "TEMA%d", curs[lista]);
+    a_aux.u = us[UT[lista]]; an_tramo_n(&a_aux, "TEMA%d", curs[lista]);
 }
 
 /* ---- licencia: eleccion (4E2970) y editor (4DE2B0) */
@@ -488,7 +512,7 @@ static void l_lista_hace(void)
 static void entra(int p, int atras)
 {
     int cab = cabecera(p);
-    cargando = !asegura(MASCARA[p]); t_carga = 0;
+    cargando = !asegura(mascara(p)); t_carga = 0;
     barra_ant = pant >= 0 ? barra(pant) : -1;
     pant = p; fase = F_ENTRA; t = 0; entra_atras = atras; t_bloq = 0;
     if (cab < 0) a_cab.u = -1;
@@ -512,9 +536,8 @@ static void entra(int p, int atras)
     case P_MUSICA:
         a_radio.u = us[U_RADIO]; an_tramo(&a_radio, "ENTRA");
         a_ayuda.u = us[U_AYUDA]; an_tramo(&a_ayuda, "ENTRA");
-        a_sel.u = us[U_L0]; if (tema) an_tramo_n(&a_sel, "TEMA%d", tema); else an_tramo(&a_sel, "ENTRA");
-        a_aux.u = us[U_T0]; an_tramo_n(&a_aux, "TEMA%d", tema);
-        pon_musica(tema);
+        musica_lista(); if (!curs[lista]) an_tramo(&a_sel, "ENTRA");
+        pon_musica(tema_actual());
         break;
     case P_LICENCIA:
         l_lista_hace(); l_ctx = 0; l_borra = 0; l_desliza = 0;
@@ -535,13 +558,14 @@ static void entra(int p, int atras)
 
 void menu_entra(int man, int pista, int npistas)
 {
-    manual = man; tema = pista; pista_sonando = -2; n_ok = npistas < N_TEMAS ? npistas : N_TEMAS;
+    manual = man; pista_sonando = -2; n_ok = npistas < N_TEMAS ? npistas : N_TEMAS;
+    elegido = pista >= 0 && pista < N_TEMAS ? pista : 0;   /* las listas y sus cursores siguen como estaban */
     inact = 0; a_cab.u = -1; pant = -1;
     if (md) entra(P_TITULO, 0);
 }
 
 int menu_manual(void) { return manual; }
-int menu_pista(void) { return tema < n_ok ? tema : 0; }
+int menu_pista(void) { return elegido < n_ok ? elegido : 0; }
 int menu_coche3d(void)
 {
     return md && pant == P_COCHE && ficha_de(c_modelo(c_indice())) >= 0 && fase != F_SALE && !cargando && an_hecho(&a_sel);
@@ -731,16 +755,24 @@ static void control(unsigned n)
         break;
     case P_MUSICA:
         if (!an_hecho(&a_sel)) break;
-        if ((izq && tema > 0) || (der && tema < N_TEMAS - 1)) {
-            int k = tema + (der ? 1 : -1);
-            an_mueve(&a_sel, tema, k); tema = k; an_tramo_n(&a_aux, "TEMA%d", tema); sfx_menu(SFX_CURSOR);
-        } else if (n & CONT_Y) {                            /* tema al azar (de los que hay) */
-            int k = n_ok > 1 ? (tema + 1 + rand() % (n_ok - 1)) % n_ok : 0;
-            if (tema >= n_ok) k = rand() % n_ok;
-            tema = k; an_tramo_n(&a_sel, "TEMA%d", tema); an_tramo_n(&a_aux, "TEMA%d", tema); pon_musica(tema);
-            sfx_menu(SFX_CURSOR);
-        } else if (n & CONT_X) bloqueado();                 /* otras listas: no estan en la demo */
-        else if (ok) { if (tema < n_ok) { an_va(&a_radio, 25, 0, 0); sale(-1, 1); } else bloqueado(); }
+        if (n & CONT_Y) {                                   /* RANDOM (0x10 del PS2): un tema desbloqueado y a correr */
+            int k = 0, i;                                   /* (rand & 0x1F) * 27 >> 5: 0..26, 100 intentos o el 0 */
+            for (i = 1; i < 100; i++) { k = ((rand() & 0x1f) * 0x1b) >> 5; if (tema_libre(k)) break; }
+            if (i == 100) k = 0;
+            elegido = k; an_va(&a_radio, 25, 0, 0);
+            fase = F_SALE; t = 0; sig = -1; sale_ok = 1;     /* sin el sonido de aceptar (como el original) */
+        } else if (n & CONT_X) {                            /* lista siguiente (bit 0x2000 del PC; X como la variante
+                                                               del coche) con su cursor, titulo y avance */
+            lista = (lista + 1) % N_LISTAS;
+            cargando = !asegura(mascara(P_MUSICA)); t_carga = 0;
+            musica_lista(); pon_musica(tema_actual());
+        } else if ((izq && curs[lista] > 0) || (der && curs[lista] < TEMAS_LISTA[lista] - 1)) {
+            int k = curs[lista] + (der ? 1 : -1);
+            an_mueve(&a_sel, curs[lista], k); curs[lista] = k; an_tramo_n(&a_aux, "TEMA%d", k); sfx_menu(SFX_CURSOR);
+        } else if (ok) {                                    /* bloqueado: sonido 3 */
+            if (tema_libre(tema_actual())) { elegido = tema_actual(); an_va(&a_radio, 25, 0, 0); sale(-1, 1); }
+            else bloqueado();
+        }
         else if (atras) { an_va(&a_radio, 25, 0, 0); sale(P_CAMBIO, 0); musica_menu(); }
         break;
     case P_LICENCIA: lic_control(n); break;
@@ -758,7 +790,7 @@ int menu_paso(unsigned n)
     giro += 100.0f * 2.0f * (float)M_PI / 65536.0f;         /* 4A5B20: +100 por paso */
     if (giro > 2.0f * (float)M_PI) giro -= 2.0f * (float)M_PI;
     if (cargando) {                                         /* la VRAM de la pantalla aun no esta: se espera */
-        if (asegura(MASCARA[pant])) {
+        if (asegura(mascara(pant))) {
             cargando = 0;
             if (t_carga > 2) dbglog(DBG_INFO, "menu: pantalla %d lista tras %d cuadros\n", pant, t_carga);
         }
@@ -785,7 +817,7 @@ int menu_paso(unsigned n)
             if (pant == P_MENU || pant == P_MODO) an_tramo_n(&a_sel, "SEL%d", pant == P_MENU ? c_menu : c_modo);
             else if (pant == P_RANKING || pant == P_MULTI) an_tramo_n(&a_sel, "SEL%d", pant == P_RANKING ? c_rank : c_multi);
             else if (pant == P_COCHE) an_tramo_n(&a_sel, "COCHE%d", c_cursor);
-            else if (pant == P_MUSICA) { an_tramo_n(&a_sel, "TEMA%d", tema); pon_musica(tema); }
+            else if (pant == P_MUSICA) { an_tramo_n(&a_sel, "TEMA%d", curs[lista]); pon_musica(tema_actual()); }
             else if (pant == P_CAMBIO) an_tramo(&a_sel, manual ? "MT" : "AT");
             else if (pant == P_EDITOR) { an_tramo_n(&a_ed, "OPC%d", e_item); an_tramo_n(&a_ed_t, "OPC%d", e_item); a_sel = a_ed; }
         }
@@ -799,8 +831,8 @@ int menu_paso(unsigned n)
     /* precarga de la pantalla siguiente cuando sobra VRAM */
     if (fase == F_QUIETO && t == 40 && pant >= 0 && pant <= P_CAMBIO) {
         int p, sigp = pant == P_TITULO ? P_MENU : pant + 1, falta = 0;
-        for (p = 0; p < NV; p++) if ((MASCARA[sigp] & (1 << p)) && pidx[p] >= 0 && !cargada[p]) falta += pan[pidx[p]].vram;
-        if (falta && pvr_mem_available() > (size_t)(falta + PRECARGA_MARGEN)) asegura(MASCARA[sigp] | MASCARA[pant]);
+        for (p = 0; p < NV; p++) if ((mascara(sigp) & (1 << p)) && pidx[p] >= 0 && !cargada[p]) falta += pan[pidx[p]].vram;
+        if (falta && pvr_mem_available() > (size_t)(falta + PRECARGA_MARGEN)) asegura(mascara(sigp) | mascara(pant));
     }
     if (fase == F_QUIETO) control(n);
     else if (fase == F_SALE) {
@@ -868,10 +900,12 @@ void menu_dibuja(void)
     case P_MUSICA:
         an_dibuja(&a_radio, 0, 1, 4, 0);
         an_dibuja(&a_ayuda, 0, a_sal, 4.5f, 0);
-        an_dibuja(&a_sel, sacude, a_sal, 3, 0);
-        an_dibuja(&a_aux, 0, a_sal, 5, 0);
-        hudd_dibuja(md, us[U_LISTA], 0, 0, 0, a_sal, 5.5f, 0);
-        if (tema >= n_ok && an_hecho(&a_sel)) hudd_dibuja(md, us[U_MCAND], 0, sacude, 0, a_sal, 6, 0);
+        if (!cargando) {                                    /* (la lista nueva aun sin VRAM: sin carrusel) */
+            an_dibuja(&a_sel, sacude, a_sal, 3, 0);
+            an_dibuja(&a_aux, 0, a_sal, 5, 0);
+            if (!tema_libre(tema_actual()) && an_hecho(&a_sel)) hudd_dibuja(md, us[U_MCAND], 0, sacude, 0, a_sal, 6, 0);
+        }
+        hudd_dibuja(md, us[U_LISTA], lista, 0, 0, a_sal, 5.5f, 0);   /* nombre de la lista (5C9F18) */
         break;
     case P_LICENCIA: {
         float al = a_ent * a_sal, dx = 0; int s = l_idx < l_n ? l_lista[l_idx] : -1;

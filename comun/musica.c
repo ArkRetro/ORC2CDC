@@ -82,6 +82,7 @@ int musica_pon(int n)
         sprintf(nom, "MUS%d.PCM", n); adpcm = 0;
         if (gd_busca(nom, &lba0, &tam)) return -1;
     }
+    dbglog(DBG_INFO, "musica: %s (%u KB)\n", nom, (unsigned)(tam >> 10));
     pos = 0; escrito = leido = 0; arranca = 1; t_arranca = 0; activa = 1;
     /* empieza a sonar en musica_poll cuando el lector tiene colchon: antes se esperaba aqui hasta 3 s y el menu se
        quedaba sin dibujar (pantalla de musica en blanco al cambiar de tema) */

@@ -59,7 +59,7 @@ from conv_hud import Disco, Ani, Atlas, Hud, texturas, escena, hornea, imagen_xs
 
 B = 0x44                                # SUMO_FE_CVT
 LETRA = ['s']                           # XST del idioma (OR2_IDIOMA=es por defecto: los _sxst y SPANISH.bin)
-MAX_CUADROS, MAX_PIEZAS = 1000, 40000   # limites por grupo (evitan conversiones desbocadas)
+MAX_CUADROS, MAX_PIEZAS = 1400, 40000   # limites por grupo (evitan conversiones desbocadas)
 
 def banco_menu(D, b):
     """(Ani, texturas, xst) del banco b con el indice de SPRITE.PS2 corregido (ver docstring)"""
@@ -89,6 +89,9 @@ def carrusel(D, va, n):
         if a == b and (not paradas or paradas[-1] != a) and b >= ini[1]: paradas.append(a)
     return t[0][0], ini, paradas
 
+# listas de musica: (carrusel, titulos, temas) del PS2 (0x419298, 0x4195D0, 0x419628; 68F36C del PC: 9 / 7 / 12)
+MUSICA_LISTAS = [(0x4400c6, 0x440030, 9), (0x4400c7, 0x44002f, 7), (0x440033, 0x44002e, 12)]
+
 def comprueba_tablas(D):
     """los tokens y cuadros usados salen de estas tablas: si el ejecutable no es el esperado, se para"""
     assert tabla(D, 0x418ca8, 2) == [(0x440000, 0, 20), (0x440000, 20, 20)], 'tabla del menu principal'
@@ -98,6 +101,10 @@ def comprueba_tablas(D):
     w = D.elf32(0x419298, 9)
     assert w[0] == 0x4400a6 and w[4] == 0x4400a7 and w[7] == 0x440066 and w[8] == 5, 'tabla de la musica'
     assert tabla(D, 0x4195d0, 1)[0] == (0x44002f, 0, 110) and tabla(D, 0x419628, 1)[0] == (0x44002e, 0, 110)
+    # temas por lista (68F36C del PC), pista de MUSIC.PS2 de cada tema (68F370: la misma) y bit de desbloqueo de cada
+    # tema en la licencia (5C9AB0; menu.c lleva la misma tabla: DESBLOQ_TEMA)
+    assert D.elf32(0x375da8)[0] & 0xffffff == 0x0c0709 and D.elf32(0x375db0, 28) == tuple(range(28)), 'temas de musica'
+    assert D.elf32(0x4191e8, 28) == (174,) * 7 + (172, 173) + tuple(range(174, 193)), 'desbloqueo de los temas'
     # seleccion de coche (0x2445D8, el 4C9010 del PC): ori t0,t0,0xE5 / ori a3,a3,0xE6 (normales y "_t") y la tabla de
     # modelos por ficha (el 68EA10 del PC)
     assert D.elf32(0x244640)[0] == 0x350800e5 and D.elf32(0x244644)[0] == 0x34e700e6, 'seleccion de coche'
@@ -487,18 +494,22 @@ def convierte(iso, salida, previas):
     gc = next(i for i, x in enumerate(m.grp) if x['nombre'] == 'CAMBIO')
     for n in ('CAMBIO_AT', 'CAMBIO_MT'):
         m.uso(n, gc, 0, 0, capa=11); m.pant[-1]['nu'] += 1
-    # MUSICA: radio, ayuda, lista 0 completa (la demo tiene sus temas), listas 1 y 2 solo quietas; titulos de la lista 0
+    # MUSICA (4C9790 / 4C9C20 del PC = tabla del PS2 0x419298): lo comun (cabecera, radio, ayuda, nombre de la lista y
+    # candado) y una pantalla por lista (MUSICA0/1/2: carrusel y titulos), para que en la VRAM solo este la lista que
+    # se ve (las tres juntas pasan de 1,8 MB). Listas 0x4400C6 / 0x4400C7 / 0x440033 (9 / 7 / 12 temas: entra 0-20,
+    # tema k quieto en 20+40k, MUEVEij entre ellos) y titulos 0x440030 / 0x44002F / 0x44002E (110 cuadros por tema, en
+    # bucle); nombre de la lista 0x4400C8 (cuadro del grupo = lista: 1, 2, 0 del original, 5C9F18 del PC)
     tr_lista = lambda n: [('ENTRA', 0, 20, U)] + [('TEMA%d' % k, 20 + 40 * k, 20 + 40 * k, Q) for k in range(n)] + \
         [('MUEVE%d%d' % (k, k + 1), 20 + 40 * k, 60 + 40 * k, U) for k in range(n - 1)]
     pantalla('MUSICA', [cab('CABECERA_MUSICA', 0x44006e),          # "music select" (0x23D4B8: clave 4 -> 0x44006E)
                         ('MUSICA_RADIO', 0x4400a7, R(0, 25), 5, (0, 0), [('ENTRA', 0, 25, U), ('SALE', 25, 0, U)], False),
                         ('MUSICA_AYUDA', 0x4400a6, R(0, 35), 6, (0, 0), [('ENTRA', 0, 35, U)], False),
-                        ('MUSICA_L0', 0x4400c6, R(0, 340), 3, (0, 0), tr_lista(9), False),
-                        ('MUSICA_T0', 0x440030, R(0, 989), 6, (0, 0),
-                         [('TEMA%d' % k, 110 * k, 110 * k + 109, BU) for k in range(9)], False),
                         ('MUSICA_LISTA', 0x4400c8, [1, 2, 0], 6, (0, 0), [], False),
                         ('MUSICA_CANDADO', 0x440066, [5], 6, (0, 0), [], False)])
-    # listas 1 y 2 (temas 1986/1989 y remezclas; en la demo, bloqueadas): aparte para no pasar de ~1,2 MB de VRAM
+    for l, (tl, tt, nt) in enumerate(MUSICA_LISTAS):
+        pantalla('MUSICA%d' % l, [('MUSICA_L%d' % l, tl, R(0, 20 + 40 * (nt - 1)), 3, (0, 0), tr_lista(nt), False),
+                                  ('MUSICA_T%d' % l, tt, R(0, 110 * nt - 1), 6, (0, 0),
+                                   [('TEMA%d' % k, 110 * k, 110 * k + 109, BU) for k in range(nt)], False)])
     # LICENCIA (elegir, 0x4E2970 del PC con la tabla 0x41F8E0; editar, 4DD7C0 con 0x416EA8): cabecera "license
     # select", tarjeta 0x440088 (entra 0-12, quieta hasta 24), flechas 0x44008D / 0x44008E (1 quieta, 2-22 al pulsar)
     # a +-200; editor: rayas y rotulos 0x440087 (entra 0-51, opcion i en 51+i, sale 51-0), tarjeta 0x44009F (igual, en
@@ -533,10 +544,6 @@ def convierte(iso, salida, previas):
     pantalla('MULTI', [cab('CABECERA_MULTI', 0x44006f), carr('MODO_MULTI', 0x41c260, 5)])
     pantalla('OPCIONES', [cab('CABECERA_OPCIONES', 0x44006d),
                           ('OPC_BARRA', 0x44000b, R(0, 11), 4, (0, 0), [('ENTRA', 0, 11, U)], False)])
-    pantalla('MUSICA_EXTRA', [('MUSICA_L1', 0x4400c7, [20 + 40 * k for k in range(7)], 3, (0, 0), [], False),
-                              ('MUSICA_L2', 0x440033, [20 + 40 * k for k in range(12)], 3, (0, 0), [], False),
-                              ('MUSICA_T1', 0x44002f, [110 * k + 55 for k in range(7)], 6, (0, 0), [], False),
-                              ('MUSICA_T2', 0x44002e, [110 * k + 55 for k in range(12)], 6, (0, 0), [], False)])
     # PAUSA (menu de pausa de la carrera, el 4D5E40 / 4D7300 del PC con la raiz 3 = PS2 0x247b40 con la raiz 16): banco
     # 0x2C (ETC_CVT, XST en espanol) con la tabla de filas del ELF 0x4187F8 (PC 0x5CBF10): {token, primero, ultimo}.
     # Filas de la pausa 8, 7, 6, 10, 11, 14 (VOLVER A LA PARTIDA, REINTENTAR, ABANDONAR, CONFIGURACION, CONTROLES,
