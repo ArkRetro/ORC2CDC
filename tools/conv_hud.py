@@ -342,7 +342,7 @@ class Atlas:
         s.texs = [(W, H) for W, H, _ in pl]; s.bytes = s.bytes_plan(pl)
         for i, (W, H, pos) in enumerate(pl):
             img = np.zeros((H, W, 4), np.uint8)
-            ti = hud.textura(('atlas', i), img)
+            ti = hud.textura((getattr(s, 'prefijo', 'atlas'), i), img)
             for k, (x, y) in pos.items():
                 a, (L, T, R, B) = s.reg[k]; img[y:y + B - T, x:x + R - L] = a[T:B, L:R]; s.donde[k] = (ti, x - L, y - T)
     def busca(s, banco, p):

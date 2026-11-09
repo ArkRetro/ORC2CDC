@@ -1222,15 +1222,28 @@ peticion 14 (escoltas 45B5B0, +324 = 6: carrera contra ellos), que no esta en la
   centro (176, -96)) con 2B0015 / 2B000E / 2B000F del banco 0x2B y el efecto 0xD7 al aparecer uno: es lo que se ve al
   adelantar en la peticion de adelantar (cada adelantamiento: 800000 / p6 de resultado, efecto 0x50, voz de
   animo 0xC6..0xCA y el contador de efectos 0xD5).
+- Rotulos (2026-11-09, 460970 / 460AD0 / 462D80 = PS2 0x1ad998): marco de 0x3f0b40 (2B001E..20) y texto de 0x3f0aa8
+  (37 tokens de 2B0021..3D) del banco 0x2B, los originales en espanol (p. ej. "Sigue adelantando a los coches"), en
+  (176, 78): la accion -3 (si la peticion que viene se porta) abre el generico 2B003D y a los 30 cuadros pasa al de la
+  peticion hasta su fin; la nota abre su texto (5..0xB, marco 0 o 1) 120 cuadros. HAHUD.DAT: un atlas VQ por rotulo
+  (error RMS 0..8,7) que se sube solo mientras se ve; las capas con el bit 4 de +0x48 (resplandores de fondo negro) se
+  dibujan sumadas. SIN la deformacion de entrada/salida ni el vaiven (7F8BB4).
+- Bono de nivel 45D360 (PS2 0x1b2978) con las estadisticas de 4628D0 en la union (posiciones con +D36 > 0 y con
+  ruedas en (+24C.. >> 8) & 0x3B sin derrapar; 0,8 / 0,7 x t / 5, tope 5, x 10; 0 si una peticion del nivel saco nota
+  <= 5). SIN la parte de la velocidad media de la etapa ([7D3838 + nivel * 4] x el parametro +2438 del coche > 250).
+  Medido: nivel 2 y 3: +20 corazones cada uno.
+- Modelo 0x2B (clase <= 1 de las tablas de coches): solo lo piden las tablas 20 (1 coche, mision base 4), 21 (17,
+  mision especial 24) y 22 (4, especial 20); la DC no lo tiene (trafico 30..38): se gasta sin coche (PENDIENTE).
 - Voces: el juego de voces del modo se cambia en el AICA (VOCESH.DAT 740 KB por VOCES.DAT 207 KB) al empezar la
   carrera, leido en el hueco de la union; banco HAM de la etapa por clave (4 distintos: grupos 0,0,0,1,1,1,2,2,2,1,0,3,
   0,0,3; PROBABLE que el juego lo elija por la clave). La acompanante es el personaje 6 (487F50), sin comentarios de
   zona ni de derrapes (solo variante 1 / 1, 3, 4).
-- SIN PORTAR (PENDIENTE): tipos 7, 8, 11, 15, 16, 17, 19, 20, 21, 23, 24, 25 (objetos OSO HAM_OSOnn: conos, monedas,
-  arcos, cajas, lineas del carril; no empiezan, sin anuncio ni nota), 14 / 18 (escoltas), el bono de nivel 45D360, la
-  hoja de resultados de la etapa 4603F0, los rotulos de las peticiones (460970 / 460AD0, tokens 0x5a93f0) y la cara de
-  la acompanante (45BDF0), las reacciones del robot a las peticiones (487D60 / 487D90) y las listas de aterrizaje /
-  salto del modo (PC 5C0FB0 / 5C0FD0). El texto de la carrera (CORAZONES, PETICION, NOTA) es bfont (PROVISIONAL).
+- SIN PORTAR (PENDIENTE): tipos 7, 8, 11, 15, 16, 17, 19, 20, 21, 23, 24, 25 (objetos OSO de la mision: conos,
+  monedas, arcos, cajas, lineas del carril; los objetos son los sucesos 32..307 con sus controles de
+  race_traffic_objects.inc 4AA560.. y sus posiciones de las tablas de la etapa; no empiezan, sin anuncio ni nota), 14 /
+  18 (escoltas), la hoja de resultados de la etapa 4603F0, la cara de la acompanante (45BDF0), las reacciones del robot
+  a las peticiones (487D60 / 487D90) y las listas de aterrizaje / salto del modo (PC 5C0FB0 / 5C0FD0). La cuenta de
+  corazones y la nota en la carrera son texto bfont (PROVISIONAL: el contador del original es 45FB80 con 5A9468).
 
 - Coches de la mision: parados (+1C4 = 0) y sin control (47E6C0: +C5C 0x40000 y 45D820 = 7F250C = 0) desde la
   accion -14 hasta la -17 (45D830: la velocidad de la carretera). SIMPLIFICADO: despues van a la velocidad de la
@@ -1242,6 +1255,13 @@ peticion 14 (escoltas 45B5B0, +324 = 6: carrera contra ellos), que no esta en la
   posiciones antes (clase 3 modelos 33, 34, 30, 32...; clase 2 modelo 31), adelantamientos con 0x50 + animo + 0xD5,
   fin con resultado 102 corazones, nota 7, +187; peticion tipo 0 (535..570) nota 1; etapa terminada: 187 corazones,
   nota media 4; CHECKPOINT y etapa 2. El anillo del medidor sale lleno (19) con el resultado de la peticion.
+
+- GOAL verificado en E (2026-11-09, menu real con `-DPRUEBA_PILOTO_MENU -DPRUEBA_SIN_TIEMPO`: conduce el piloto y el
+  tiempo no se acaba; solo para llegar a la meta): PALM 237 corazones (nota media 5) -> ALPI 0 -> FORE +20 de bono ->
+  SNOW 872 -> IMPE, `INFARTO: GOAL con 1129 corazones`. Observado: la peticion tipo 0 de FORE (mision 8, 575..615) no
+  acaba en su etapa (la union empieza antes de la posicion 615 en la DC) y sigue en la siguiente, como haria el codigo
+  del original (464350 no la cierra al cambiar de etapa), donde acumula 281 corazones de resultado: SIN COMPROBAR si en
+  el original la etapa llega a 615 posiciones (m_pos de CURSO.DAT).
 
 **CONTRARRELOJ** verificado en E: `MODO: variante 7, dificultad 0, fila de tiempos 2`, sin un solo coche de trafico,
 union y ruta leidas como en el OutRun. SIN PORTAR: la eleccion de etapa / curso por codigo (48B550: una etapa con su meta GOAL_*_TA o el

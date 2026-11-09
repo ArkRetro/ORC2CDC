@@ -1159,7 +1159,17 @@ static float grua_s, grua_x; static int grua_on;
    dificultad de la licencia activa (opcion +E0, menu_dificultad; difficulty_of de 44DC70: [7C24C0] salvo en el juego
    de OUTRUN2SP, 43F860). La ampliacion del checkpoint (450CC0) pasa la variante 7 como 0: la misma fila 2. */
 static int variante = 1;
-static hud_dat_t *ha_hud;                                       /* HAHUD.DAT en el modo INFARTO */                                        /* [780258] (PS2 0x443508) de la carrera */
+static hud_dat_t *ha_hud;                                       /* HAHUD.DAT en el modo INFARTO */
+/* rotulo del INFARTO: sube las texturas del uso al verse y baja las del anterior (VRAM fuera de la zona: ~75 KB) */
+static void ha_rotulo_uso(int *actual, const char *nombre)
+{
+    int u = ha_hud ? hudd_uso(ha_hud, nombre) : -1, t0, n;
+    if (u == *actual) return;
+    if (*actual >= 0 && (n = hudd_tex_uso(ha_hud, *actual, &t0))) hudd_baja(ha_hud, t0, n);
+    *actual = u;
+    if (u >= 0 && (n = hudd_tex_uso(ha_hud, u, &t0)) && hudd_sube(ha_hud, t0, n)) dbglog(DBG_ERROR, "HAHUD: sin VRAM para %s\n", nombre);
+}
+static int ha_u_txt = -1, ha_u_mar = -1;                                        /* [780258] (PS2 0x443508) de la carrera */
 #define TIM_PRESET 0
 #define TIM_FILA (variante == 1 ? 0 : variante == 2 || variante == 5 ? 1 : variante == 0 || variante == 7 ? 2 : 0)
 static int tim_dif;                                             /* [7C24C0]: licencia +E0 */
@@ -5177,7 +5187,7 @@ int main(int argc, char **argv)
         if (estado == TITULO) {
             int rm;
             if (!reintenta) curso_al_menu();                    /* la VRAM del curso, para el menu */
-            if (ha_hud && !reintenta) { hudd_cierra(ha_hud); ha_hud = NULL; }   /* los corazones del INFARTO */
+            if (ha_hud && !reintenta) { hudd_cierra(ha_hud); ha_hud = NULL; ha_u_txt = ha_u_mar = -1; }   /* INFARTO */
             presta_union(1);                                    /* (en cuanto el curso suelta la union) */
             rm = reintenta ? MENU_CARRERA : menu_paso(nuevo);   /* titulo, modos, coche, cambio y musica */
             ttit += 1.0f / 60;
@@ -5240,7 +5250,11 @@ int main(int argc, char **argv)
                     /* los corazones del medidor (HAHUD.DAT: solo sus tablas en la RAM; la textura VQ, 10 KB, se lee
                        del GD al subirla, ya con la zona del curso reservada) */
                     if (!ha_hud) ha_hud = hudd_abre("HAHUD.DAT", 0, 1);
-                    if (ha_hud && hudd_sube(ha_hud, 0, -1)) dbglog(DBG_ERROR, "HAHUD: sin VRAM para los corazones\n");
+                    if (ha_hud) {                               /* los corazones siempre; los rotulos al verse */
+                        static const char *const C[3] = { "HA_CORAZON", "HA_ROTO", "HA_CENTRO" };
+                        for (i = 0; i < 3; i++) { int t0, n = hudd_tex_uso(ha_hud, hudd_uso(ha_hud, C[i]), &t0);
+                            if (n && hudd_sube(ha_hud, t0, n)) dbglog(DBG_ERROR, "HAHUD: sin VRAM para %s\n", C[i]); }
+                    }
                 }
                 if (cam_ok) { cam_inicia(&cam, &cam_tab); cam_t_choque = 0; }   /* 484EE0 */
                 if (chr_ok == 1) robot_carrera(modelo_jug);          /* 4884D0 / 4885A0 */
@@ -5271,6 +5285,9 @@ int main(int argc, char **argv)
                 }
 #endif
                 if (auto_) piloto(&yo, &giro, &gas, &freno);
+#ifdef PRUEBA_PILOTO_MENU
+                else piloto(&yo, &giro, &gas, &freno);          /* prueba: conduce el piloto en la carrera del menu */
+#endif
 #if defined(PRUEBA_GUION) && defined(PRUEBA_EMBISTE)
                 {   /* prueba: a por el coche de trafico mas cercano por delante (a menos de 80 m) */
                     int i; float xt = yo.x, dm = 80.0f, g = fmaxf(0.05f, fminf(yo.v / 8.0f, 1.0f) * (1.0f - 0.45f * yo.v / VMAX));
@@ -5335,7 +5352,7 @@ int main(int argc, char **argv)
                         hc.choque_ini = fis_ok && fis.t_choque > 0.0f && t_choque_ant <= 0.0f; t_choque_ant = fis_ok ? fis.t_choque : 0;
                         hc.impulso = ha_impulso; hc.impulso_rapido = ha_rapido; hc.roce = (toca & 2) != 0;
                         hc.muro = yo.choque == 1; memcpy(hc.sup, sup_rueda, sizeof hc.sup);
-                        hc.d36 = fis_ok ? fis.d36 : 0; hc.kmh = fis_ok ? fis.velocidad_hud : yo.v * 3.6f; hc.vel_mf = fis_ok ? fis.vel_mf : 0;
+                        hc.d36 = fis_ok ? fis.d36 : 0; hc.seccion_union = cur_en_union ? (int)floorf((yo.s - s_union) / m_pos) : 0; hc.derrapa = yo.t_derrape != 0; hc.kmh = fis_ok ? fis.velocidad_hud : yo.v * 3.6f; hc.vel_mf = fis_ok ? fis.vel_mf : 0;
                         infarto_paso(&hc);
 #ifdef DIAG_HA
                         if (crono % 60 == 0) { int q;
@@ -5469,8 +5486,7 @@ int main(int argc, char **argv)
                 static const char *const NOMBRE[26] = { "DERRAPA", 0, "ADELANTA", 0, 0, 0, "SIN INCIDENTES", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
                                                         "ADELANTA", 0, 0, 0 };
                 sprintf(s1, "CORAZONES %d", h->corazones);
-                if (h->tipo != 3 && h->tipo >= 0 && h->tipo < 26 && NOMBRE[h->tipo]) sprintf(s2, "PETICION: %s  %d", NOMBRE[h->tipo], h->resultado);
-                else s2[0] = 0;
+                s2[0] = 0; (void)NOMBRE;                     /* la peticion la dice su rotulo (HAHUD.DAT) */
                 if (h->t_nota < 240) sprintf(s3, "NOTA %d", h->nota);
                 else if (h->t_etapa < 400) sprintf(s3, "NOTA DE LA ETAPA %d", h->nota_etapa);
                 else s3[0] = 0;
@@ -5572,6 +5588,14 @@ int main(int argc, char **argv)
                     if (he.rev_on) hud_aviso("CAMBIA", cuadro % 30, 1);
                     if (variante == 2 && (estado == CARRERA || estado == META)) {   /* INFARTO: el medidor (45FB80) */
                         float rx[19], ry[19], rc[19], cc; const infarto_corazon_t *an = infarto_anillo(rx, ry, rc, &cc);
+                        int rt, rm, rcu;
+                        if (ha_hud && infarto_rotulo(&rt, &rm, &rcu)) {   /* 460970 / 460AD0: marco y texto en (176, 78) */
+                            char n1[16], n2[16];
+                            sprintf(n1, "HA_M%d", rm); sprintf(n2, "HA_T%02d", rt);
+                            ha_rotulo_uso(&ha_u_mar, n1); ha_rotulo_uso(&ha_u_txt, n2);
+                            hudd_dibuja(ha_hud, ha_u_mar, rcu, 176, 78, 1, 118, 0);
+                            hudd_dibuja(ha_hud, ha_u_txt, rcu, 176, 78, 1, 119, 0);
+                        }
                         if (ha_hud) {
                             int uc = hudd_uso(ha_hud, "HA_CORAZON"), ur = hudd_uso(ha_hud, "HA_ROTO"), ue = hudd_uso(ha_hud, "HA_CENTRO");
                             if (cc >= 0) hudd_dibuja(ha_hud, ue, (int)cc - 0x1f, 234, 108, 1, 120, 0);

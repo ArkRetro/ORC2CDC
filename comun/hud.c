@@ -22,7 +22,7 @@ struct hud_dat {
     h_tex_t *tex; h_spr_t *spr; h_grp_t *grp; h_pc_t *pie; h_uso_t *uso;
     uint32_t n_tex, n_grp, n_uso;
     pvr_ptr_t *vtex; uint8_t *usada; uint32_t *dibujada;      /* dibujada: ultimo cuadro en que se uso la textura */
-    pvr_poly_hdr_t *cab, *cabf;                             /* por textura: encima de todo / detras de la escena 3D */
+    pvr_poly_hdr_t *cab, *cabf, *caba;                      /* por textura: encima de todo / detras de la escena 3D / aditiva */
     int taco, g_fuera, off_taco;                            /* g_fuera: DIG_PUNTOS_FUERA (estilo 0xD, sin uso propio) */
     int16_t *pal;                                           /* por textura: paleta (pal_reparte) o -1; NULL sin paletas */
     uint8_t *con_pal;                                       /* por textura: subida con su paleta (cabeceras) */
@@ -163,6 +163,7 @@ hud_dat_t *hudd_abre(const char *fich, int modelo, int parcial)
     for (i = 0, h->g_fuera = -1; i < h->n_grp; i++) if (!strncmp(h->grp[i].nombre, "DIG_PUNTOS_FUERA", 16)) h->g_fuera = i;
     h->vtex = calloc(h->n_tex, sizeof *h->vtex); h->usada = calloc(h->n_tex, 1); h->dibujada = calloc(h->n_tex, 4);
     h->cab = memalign(32, h->n_tex * sizeof *h->cab); h->cabf = memalign(32, h->n_tex * sizeof *h->cabf);
+    h->caba = memalign(32, h->n_tex * sizeof *h->caba);
     for (i = 0; i < h->n_grp; i++)
         if (grupo_util(i)) for (j = h->grp[i].pri; j < (uint32_t)h->grp[i].pri + h->grp[i].np; j++) h->usada[h->spr[h->pie[j].spr].tex] = 1;
     return h;
@@ -308,6 +309,9 @@ static void cabeceras(hud_dat_t *h, int i)
     cx.txr.env = PVR_TXRENV_MODULATEALPHA; cx.depth.write = PVR_DEPTHWRITE_DISABLE;
     cx.depth.comparison = PVR_DEPTHCMP_GREATER; pvr_poly_compile(h->cabf + i, &cx);
     cx.depth.comparison = PVR_DEPTHCMP_ALWAYS; pvr_poly_compile(h->cab + i, &cx);
+    /* capas con el bit 4 de las banderas de la capa SPRANI (+0x48: los resplandores de fondo negro de GAME_CVT; la pieza
+       lo lleva en flags & 4): se suman a lo de detras */
+    cx.blend.src = PVR_BLEND_SRCALPHA; cx.blend.dst = PVR_BLEND_ONE; pvr_poly_compile(h->caba + i, &cx);
 }
 
 int hudd_sube(hud_dat_t *h, int t0, int nt)
@@ -352,7 +356,7 @@ void hudd_cierra(hud_dat_t *h)
     if (!h || h == hud_principal) return;
     hudd_baja(h, 0, -1); hudd_vacia();
     if (H == h) H = NULL;
-    free(h->dat); free(h->vtex); free(h->usada); free(h->dibujada); free(h->cab); free(h->cabf);
+    free(h->dat); free(h->vtex); free(h->usada); free(h->dibujada); free(h->cab); free(h->cabf); free(h->caba);
     free(h->pal); free(h->con_pal); free(h->falta); free(h);
 }
 
@@ -400,7 +404,11 @@ static void pieza(const h_pc_t *p, const h_grp_t *g, int cuadro, float X, float 
         qx *= sx; qy *= sy;
         px[k] = qx * c - qy * si + x0 + X; py[k] = qx * si + qy * c + y0 + Y;
     }
-    if (s->tex != ult_tex) { pvr_prim((modo_fondo ? H->cabf : H->cab) + s->tex, sizeof(pvr_poly_hdr_t)); ult_tex = s->tex; }
+    {   int clave = s->tex | ((p->flags & 4) << 14);
+        if (clave != ult_tex) {
+            pvr_prim(((p->flags & 4) ? H->caba : modo_fondo ? H->cabf : H->cab) + s->tex, sizeof(pvr_poly_hdr_t)); ult_tex = clave;
+        }
+    }
     H->dibujada[s->tex] = cuadro_hud;
     if (a > 1) a = 1;
     v.argb = ((uint32_t)(a * 255) << 24) | tinte; v.oargb = 0; v.z = zcapa; zcapa += zpaso;
@@ -461,6 +469,16 @@ int hudd_uso(const hud_dat_t *h, const char *nombre)
     return -1;
 }
 int hudd_cuadros(const hud_dat_t *h, int u) { return h && u >= 0 ? h->grp[h->uso[u].grp].n : 0; }
+/* texturas que usa el grupo de un uso: primera y cuantas (las de un atlas propio van seguidas) */
+int hudd_tex_uso(const hud_dat_t *h, int u, int *t0)
+{
+    int j, lo = 1 << 30, hi = -1; const h_grp_t *g;
+    if (!h || u < 0 || u >= (int)h->n_uso) return 0;
+    g = h->grp + h->uso[u].grp;
+    for (j = g->pri; j < g->pri + g->np; j++) { int t = h->spr[h->pie[j].spr].tex; if (t < lo) lo = t; if (t > hi) hi = t; }
+    if (hi < 0) return 0;
+    *t0 = lo; return hi - lo + 1;
+}
 const uint8_t *hudd_extra(const hud_dat_t *h) { return h ? h->dat + h->off_taco + 16 : NULL; }
 
 void hudd_dibuja(hud_dat_t *h, int u, int cuadro, float dx, float dy, float alfa, float z, int fondo)

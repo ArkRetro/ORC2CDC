@@ -153,27 +153,51 @@ def main():
     # HAHUD.DAT
     import numpy as np, conv_hud as ch
     D = ch.Disco(sys.argv[1]); ag, Tg, _ = D.banco(0x2b)
-    hud = ch.Hud(); hud.taco = [0xff] * 16; at = ch.Atlas(); grupos = []; claves = []
-    for nombre, k, fotos in (('HA_CORAZON', 0x15, range(0, 0x6a)), ('HA_ROTO', 0x0e, range(60)), ('HA_CENTRO', 0x0f, range(0x1f, 0x3d))):
-        lst = [(i, ch.escena(ag, k, float(f))) for i, f in enumerate(fotos)]
+    hud = ch.Hud(); hud.taco = [0xff] * 16; grupos = []
+    # rotulos de 460970 / 460AD0 (PS2 0x1ad998): textos de la tabla 0x3f0aa8 (37 tokens; el 12, 0x2B003D, es el de modo 0)
+    # y marcos de 0x3f0b40 (3), cada uno con su escena entera (solo los cuadros donde cambia: racha en flags >> 4)
+    tt = par(0x1ad9fc, 0x1ada10); assert tt == 0x3f0aa8
+    tf = par(0x1ad99c, 0x1ad9a4); assert tf == 0x3f0b40
+    rot = [('HA_T%02d' % i, struct.unpack_from('<I', elf, V(tt + 4 * i))[0]) for i in range(37)]
+    rot += [('HA_M%d' % i, struct.unpack_from('<I', elf, V(tf + 4 * i))[0]) for i in range(3)]
+    escenas = [('HA_CORAZON', 0x15, range(0, 0x6a)), ('HA_ROTO', 0x0e, range(60)), ('HA_CENTRO', 0x0f, range(0x1f, 0x3d))]
+    for nombre, tok in rot:
+        if tok >> 16 != 0x2b: continue
+        k = tok & 0xffff; sc = ag.escenas[k]; nc, pc = struct.unpack_from('<2I', ag.a, sc); raiz = pc + (nc - 1) * 0x24
+        escenas.append((nombre, k, range(int(struct.unpack_from('<f', ag.a, raiz + 8)[0]))))
+    for nombre, k, fotos in escenas:
+        lst = []; ant = None
+        for i, f in enumerate(fotos):
+            ps = ch.escena(ag, k, float(f))
+            firma = [(p['tex'], tuple(np.round(p['M'].ravel(), 3)), round(p['alfa'], 3), tuple(p['src'])) for p in ps]
+            if firma != ant: lst.append([i, ps, 1]); ant = firma
+            else: lst[-1][2] += 1
         grupos.append((nombre, len(fotos), lst))
-        for _, ps in lst:
-            for p in ps:
-                if p['alfa'] >= 0.004 and abs(np.linalg.det(p['M'][:2, :2])) >= 1e-6:
-                    at.registra(0x2b, Tg, p); claves.append(at._clave(0x2b, p))
-    at.empaqueta(hud, at.plan(claves))
+    # un atlas por grupo (sus texturas se suben solo mientras se ve: la VRAM fuera de la zona del curso es ~75 KB), VQ
     def vq_ha(i, a, fmt, lista):
         import vq
         datos, err = vq.codifica(a, fmt, 256)
-        print('  HAHUD: textura %d %dx%d VQ error %.1f' % (i, a.shape[1], a.shape[0], err))
-        return datos if err <= 9 else None
+        print('  HAHUD: textura %d %dx%d VQ error %.1f %s' % (i, a.shape[1], a.shape[0], err, 'si' if err <= 16 else 'no'))
+        return datos if err <= 16 else None
     hud.vq = vq_ha
     for nombre, nf, lst in grupos:
+        at = ch.Atlas(); at.prefijo = 'ha_' + nombre; cl = []
+        for _, ps, _ in lst:
+            for p in ps:
+                if p['alfa'] >= 0.004 and abs(np.linalg.det(p['M'][:2, :2])) >= 1e-6:
+                    at.registra(0x2b, Tg, p); cl.append(at._clave(0x2b, p))
+        at.empaqueta(hud, at.plan(cl))
         g = hud.grupo(nombre, nf)
-        for c, ps in lst: hud.piezas_escena(g, c, 0x2b, Tg, ps, atlas=at)
+        for c, ps, n in lst:
+            k0 = len(hud.pie); hud.piezas_escena(g, c, 0x2b, Tg, ps, atlas=at)
+            vis = [p for p in ps if p['alfa'] >= 0.004 and abs(np.linalg.det(p['M'][:2, :2])) >= 1e-6]
+            assert len(vis) == len(hud.pie) - k0
+            for j, p in zip(range(k0, len(hud.pie)), vis):  # la pieza vale n cuadros (hud.c: flags >> 4); bit 2: la capa
+                q = list(hud.pie[j])                        # SPRANI lleva el 4 en +0x48 (resplandor que se suma)
+                q[3] = (q[3] & 11) | (4 if ag.a[p['L'] + 0x48] & 4 else 0) | (min(n, 4095) << 4); hud.pie[j] = tuple(q)
         hud.uso(nombre, g, 0, 0, capa=4)
     hud.escribe(os.path.join(sal, 'HAHUD.DAT'))
-    print('HAHUD.DAT: %d bytes, texturas %s' % (os.path.getsize(os.path.join(sal, 'HAHUD.DAT')), at.texs))
+    print('HAHUD.DAT: %d bytes, %d texturas' % (os.path.getsize(os.path.join(sal, 'HAHUD.DAT')), len(hud.tex)))
 
     # VOCESH.DAT
     irx = cs.fichero_paquete(iso, 'SYSTEM.PS2', '\\IRX\\SOUNDCD.IRX')

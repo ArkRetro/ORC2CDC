@@ -17,6 +17,8 @@ typedef struct {
     int   muro;             /* +4 & 0x20000                                                                     */
     uint32_t sup[4];        /* superficie de cada rueda (+24C..+258)                                            */
     int   d36;              /* car+0xD36: temporizador del inicio de derrape                                    */
+    int   seccion_union;    /* car+0x260 en la union (posicion de carretera desde su principio)                  */
+    int   derrapa;          /* car+0x2A8 & 0x10F407C (derrape)                                                  */
     float kmh;              /* car+0x1F8 (km/h del velocimetro)                                                 */
     float vel_mf;           /* car+0x1C4 (m por cuadro)                                                         */
 } infarto_coche_t;
@@ -42,6 +44,8 @@ int  infarto_sueltas(void);                 /* cuenta de 45D8E0: si cambia, los 
    cuadros desde que se puso; nota media de la ultima etapa */
 typedef struct { int tipo, resultado, nota, t_nota, corazones, total, nota_etapa, t_etapa, anuncio, t_anuncio; } infarto_hud_t;
 const infarto_hud_t *infarto_hud(void);
+/* rotulo visible: texto (HA_Tnn de HAHUD.DAT), marco (HA_Mn) y cuadro de su escena; 0 sin rotulo */
+int infarto_rotulo(int *texto, int *marco, int *cuadro);
 /* los corazones del medidor (45FB80): 19 del anillo {cuadro de HA_CORAZON (-1 ninguno), x, y desde el centro de la
    pantalla de 640x480}; rotos: x, y, cuadro de HA_ROTO (-1 ninguno); centro: cuadro de HA_CENTRO (-1 sin medidor) */
 typedef struct { int cuadro; float x, y; } infarto_corazon_t;

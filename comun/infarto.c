@@ -75,6 +75,78 @@ static infarto_hud_t hud;
    la proyeccion del ancla 5E0AC8, PROBABLE para la vista por defecto) */
 static infarto_corazon_t anillo[19];
 static float roto_x[19], roto_y[19], roto_c[19];
+/* rotulo de la peticion (460970 / 460AD0 / 45BEC0 = PS2 0x1ad998..): texto (tabla 0x3f0aa8: modo 0 empieza con el
+   12, 0x2B003D, y a los `abre` cuadros pasa al de la peticion) y marco (0x3f0b40); `cierra` cuadros despues de entrar
+   (o nunca, -1) se quita. En (176, 78). SIN la deformacion de entrada / salida ni el vaiven (7F8BB4) */
+static int ban_on, ban_m4c, ban_txt, ban_mar, ban_n, ban_abre, ban_cierra, ban_ver;
+static void rotulo_abre(int modo, int texto, int marco, int abre, int cierra)
+{
+    if (!texto) return;
+    ban_on = 1; ban_m4c = modo; ban_txt = texto; ban_mar = marco; ban_n = 0; ban_abre = abre; ban_cierra = cierra;
+    ban_ver = modo ? texto : 12;
+}
+static void rotulo_cierra(void) { ban_on = 0; }
+static void rotulo_paso(void)
+{
+    if (!ban_on) return;
+    if (ban_n <= 10) ban_n++;
+    else if (!ban_m4c) {
+        if (ban_abre < 0 || ban_n - 20 < ban_abre) ban_n++;
+        else { ban_ver = ban_txt; ban_m4c = 1; ban_n = 0; }
+    } else if (ban_cierra < 0 || ban_n - 10 < ban_cierra) ban_n++;
+    else ban_on = 0;
+}
+int infarto_rotulo(int *texto, int *marco, int *cuadro)
+{
+    if (!ban_on) return 0;
+    *texto = ban_ver; *marco = ban_mar; *cuadro = ban_n;
+    return 1;
+}
+/* 462D80: el rotulo de la nota */
+static void rotulo_nota(int r)
+{
+    static const int T[8] = { 0xb, 0xb, 0xa, 9, 8, 7, 6, 5 }, M[8] = { 1, 1, 1, 0, 0, 0, 0, 0 };
+    if (r < 0) r = 0;
+    if (r > 7) r = 7;
+    rotulo_abre(1, T[r], M[r], -1, 0x78);
+}
+/* 4628D0 / 45D360 (PS2 0x1b2978): estadisticas de la union para el bono de nivel. En la union (+5C == 1): 7F1C5A la
+   posicion (+260) al entrar, 7F1C5C posiciones con el temporizador de derrape (+D36 > 0), 7F1C60 posiciones con alguna
+   rueda en las superficies (+24C.. >> 8) & 0x3B sin derrapar (+2A8 & 0x10F407C) */
+static int16_t st_5a = -1, st_5c, st_5e = -1, st_60, st_62 = -1; static int32_t st_54;
+static void estadisticas(const infarto_coche_t *c)
+{
+    uint32_t mm;
+    if (!c->en_union) return;
+    if (st_5a < 0) st_5a = (int16_t)c->seccion_union;
+    if (c->d36 > 0) {
+        if (st_5e > 0) { if (c->seccion_union > st_5e) { st_5c += c->seccion_union - st_5e; st_5e = (int16_t)c->seccion_union; } }
+        else st_5e = (int16_t)c->seccion_union;
+    } else st_5e = -1;
+    if (!c->choque_ini) {
+        mm = c->sup[0] | c->sup[1] | c->sup[2] | c->sup[3];
+        if (((mm >> 8) & 0x3bu) && !c->derrapa) {
+            if (st_62 > 0) { if (c->seccion_union > st_62) { st_60 += c->seccion_union - st_62; st_62 = (int16_t)c->seccion_union; } }
+            else st_62 = (int16_t)c->seccion_union;
+        } else st_62 = -1;
+    }
+}
+/* 45D360 (PS2 0x1b2978): bono del nivel l (0 si alguna peticion suya saco nota 0..5): min(5, derrape / (t x 0,8 / 5))
+   o min(5, firme / (t x 0,7 / 5)), el mayor, x 10, con t las posiciones en la union. SIN la parte de la velocidad media
+   de la etapa x el parametro +2438 del coche por encima de 250 (PENDIENTE: [7D3838 + nivel * 4] no esta en el port) */
+static int bono_nivel(int l, int sec_union)
+{
+    int k, a, b; float t;
+    for (k = 0; k < 6; k++) if (lv[l][0x38 + k]) return 0;
+    t = (float)(sec_union - st_5a);
+    if (st_5a < 0 || t <= 0) return st_54;
+    a = (int)((float)st_5c / (t * 0.8f / 5.0f)); if (a > 5) a = 5;
+    b = (int)((float)st_60 / (t * 0.7f / 5.0f)); if (b > 5) b = 5;
+    if (a > b) b = a;
+    st_54 += b * 10;
+    return st_54;
+}
+static int sec_union_ult;
 static int medidor;                                 /* 7F19F8: 1 con una peticion en curso */
 static float centro_c;
 static void medidor_paso(void);
@@ -227,7 +299,9 @@ static void fin_peticion(int r, int h)              /* 462F10 (PS2 0x1b3a78) + 4
 {
     int nt = r > 7 ? 7 : r < 0 ? 0 : r, t = res[q < 26 ? q : 0];
     int tab = t == 0xff ? rd32(res + 28 + 5 * 32) : t;
+    rotulo_cierra();
     voz(rd32(res + 28 + tab * 32 + nt * 4), 0x3c, 9);   /* 45DDC0 (PS2 0x1b3880) */
+    rotulo_nota(nt);
     lv[nivel_act][0x38 + nt]++;
     if (n_req < 5) LV_U32(nivel_act, 8 + 4 * n_req) = nt;
     LV_U32(nivel_act, 0x1c) += nt;
@@ -403,7 +477,13 @@ static int previa(const uint8_t *r, int sec)
         ct_v = w4; ct_i = 0; ct_n = 0; ct_sec = sec; mueven = 0;   /* 45D710: 7F250C = 0 */
         if (w4 & 0x80) ct_pend = 0;                 /* toda la tabla de una vez */
         break;
-    default: break;                                 /* objetos, escoltas, rotulos: SIN PORTAR */
+    case 16: {                                      /* -3: 460970(0, w4, 2, 30, -1), si la peticion que viene se porta */
+        const uint8_t *x = r + 10;
+        while (rd16(x) && rd16(x + 2) < 0) x += 10;
+        if (rd16(x) && portado(rd16(x + 4))) rotulo_abre(0, w4, 2, 0x1e, -1);
+        break; }
+    case 15: rotulo_abre(1, w4, 2, -1, 0x78); break;   /* -4: 460970(1, w4, 2, -1, 120) */
+    default: break;                                 /* objetos, escoltas: SIN PORTAR */
     }
     return 1;
 }
@@ -437,7 +517,7 @@ void infarto_carrera(int clave, int nivel)          /* 45E0F0 */
     int l;
     score = disp = 0; memset(vcola, 0, sizeof vcola); vc_cab = vc_fin = 0; voz_ult = 0; reloj = 0x10000;
     contador = 0; dx23dc = 0; medidor = 0; { int i; for (i = 0; i < 19; i++) { anillo[i].cuadro = -1; roto_c[i] = -1; } }
-    result = 0; bonus = 0; meta_hecha = 0; trafico = 1; ct_base = NULL;
+    result = 0; bonus = 0; meta_hecha = 0; trafico = 1; ct_base = NULL; ct_pend = -1; mueven = 1; ban_on = 0;
     for (l = 0; l < NIV; l++) { memset(lv[l], 0, 0x44); LV_SEL(l) = -1; LV_U32(l, 4) = 0x29;
         LV_U32(l, 8) = LV_U32(l, 12) = LV_U32(l, 16) = LV_U32(l, 20) = LV_U32(l, 24) = -1; }
     memset(&hud, 0, sizeof hud); hud.nota = -1; hud.nota_etapa = -1; hud.anuncio = -1; hud.t_nota = hud.t_etapa = hud.t_anuncio = 9999;
@@ -448,7 +528,13 @@ void infarto_carrera(int clave, int nivel)          /* 45E0F0 */
 void infarto_etapa(int clave, int nivel)            /* 464350, stage clear */
 {
     int prev = nivel_act, i; int32_t edi;
-    edi = score / 10000 - h_nivel;                   /* el bono de nivel (45D360) no esta portado: 0 */
+    edi = score / 10000 - h_nivel;
+    {   int b = bono_nivel(prev, sec_union_ult);     /* 45D360 del nivel anterior */
+        if (b > 0) { edi += b; score += b * 10000; }
+        dbglog(DBG_INFO, "INFARTO: bono del nivel %d: %d (derrape %d, firme %d, en %d posiciones)\n", prev, b, st_5c, st_60,
+               sec_union_ult - st_5a);
+    }
+    st_54 = 0; st_5c = 0; st_60 = 0; st_5a = -1; st_5e = st_62 = -1;
     LV_U32(prev, 0x34) = edi;
     for (i = 0; i < (int8_t)lv[prev][0x40] && i < 5; i++) LV_U32(prev, 0x34) -= LV_U32(prev, 0x20 + 4 * i);
     if ((int8_t)lv[prev][0x40] > 0) { hud.nota_etapa = LV_U32(prev, 0x1c) / (int8_t)lv[prev][0x40]; hud.t_etapa = 0; }
@@ -464,6 +550,9 @@ void infarto_meta(void)                             /* 464350 con 44FF10 */
     int i; int32_t esi;
     if (meta_hecha) return;
     esi = score / 10000 - h_nivel;
+    {   int b = bono_nivel(nivel_act, sec_union_ult);
+        if (b > 0) { esi += b; score += b * 10000; }
+    }
     disp = score; LV_U32(nivel_act, 0x34) = esi;
     for (i = 0; i < (int8_t)lv[nivel_act][0x40] && i < 5; i++) LV_U32(nivel_act, 0x34) -= LV_U32(nivel_act, 0x20 + 4 * i);
     if ((int8_t)lv[nivel_act][0x40] > 0) { hud.nota_etapa = LV_U32(nivel_act, 0x1c) / (int8_t)lv[nivel_act][0x40]; hud.t_etapa = 0; }
@@ -480,7 +569,10 @@ void infarto_paso(const infarto_coche_t *c)         /* 464D20 */
     if ((d < 0 ? -d : d) * 32 < 20000) disp = score; else disp += d;
     if (disp < 0) { score = disp = 0; }
     voz_bomba();
+    if (c->en_union) sec_union_ult = c->seccion_union;
+    estadisticas(c);
     medidor_paso();
+    rotulo_paso();
     if (contador > 0) { if (contador % 10 == 0) sfx_voz_se(0xd5); contador--; }
     gestor(c);
     if (q != 3) { v_n++; v_acu += c->kmh; v_med = v_acu / v_n; if (v_min > c->kmh) v_min = c->kmh; }
