@@ -5799,7 +5799,7 @@ int main(int argc, char **argv)
                 coche_paso(&yo, 0, 0, 0, 0); traf_inicia(SALIDA); efectos_borra();
                 if (fis_ok) { float p[3], th; ruta_en(yo.s, p, &th, NULL, NULL); or2_coloca(&fis, &fpar, th, 0); }
                 lejos = LEJOS_PS2; entorno_reinicia(); niebla_paso(); niebla_pon();   /* la distancia del original */
-                tim_cuadros = tim_zona(cur_nodo, etapa_n); tiempo = tim_cuadros / TIM_HZ; estado = CUENTA; t_estado = 0; t_cuenta = 0; pausa = 0; crono = 0; vmax = 0; pt_inicia();
+                tim_cuadros = tim_zona(cur_nodo, etapa_n); tiempo = tim_cuadros / TIM_HZ; estado = CUENTA; t_estado = 0; t_cuenta = -60; pausa = 0; crono = 0; vmax = 0; pt_inicia();
                 reintenta = 0;
                 if (voz_ok) voces_carrera();
                 if (variante == 2) {
@@ -5817,10 +5817,13 @@ int main(int argc, char **argv)
                 if (chr_ok == 1) robot_carrera(modelo_jug);          /* 4884D0 / 4885A0 */
             }
         } else if (estado == CUENTA) {
-            int n = 3 - (int)(t_estado / 60);
-            sprintf(s1, n > 0 ? "%d" : "GO!", n);
+            /* temporizador de salida del original (8367BC): 360 al entrar en GAME (485250 pone la vista en 0x167),
+               camara de salida mientras > 180 (485FE0), el coche sale cuando baja de 60 (4A8100 / 450AC0): 300
+               cuadros. La escena 2C000A (GO en su cuadro 240) empieza a los 60 de GAME, asi su GO cae en el 60. */
+            int n = 3 - (int)((t_estado - 60) / 60);
+            sprintf(s1, t_estado < 60 ? "" : n > 0 ? "%d" : "GO!", n);
             if (strcmp(s1, msg)) { strcpy(msg, s1); texto_centro(msg); }
-            if (t_estado >= 240) { estado = CARRERA; t_estado = 0; if (voz_ok) voces_salida(); }   /* GO! a los 4 s; modo GAME */
+            if (t_estado >= 300) { estado = CARRERA; t_estado = 0; if (voz_ok) voces_salida(); }   /* GO!: temporizador 60 */
             curso_paso();                                       /* la union ya se puede ir leyendo */
             if (auto_ && (nuevo & CONT_START)) { estado = TITULO; auto_ = 0; nuevo = 0; texto_centro(""); hud_baja_tex(); menu_entra(manual_, pista, NPISTAS); }
             coche_paso(&yo, 0, 0, 0, 1.0f / 60);
@@ -5976,9 +5979,9 @@ int main(int argc, char **argv)
             }
         }
         /* camara del original: un paso por paso de logica; la de la salida (485250) mientras el temporizador del
-           original pasa de 180 (SUPUESTO: los 60 primeros cuadros de la cuenta atras, GO! a los 240) */
+           original (8367BC = 360 - t_estado) pasa de 180 (485FE0): los 180 primeros cuadros de la cuenta */
         if (cam_ok && estado != TITULO && !pausa)
-            camara_paso((nuevo & CONT_Y) != 0, estado == CUENTA && t_estado < 60);
+            camara_paso((nuevo & CONT_Y) != 0, estado == CUENTA && t_estado < 180);
         if (!pausa) coche_anima_paso(estado == TITULO);                       /* ruedas, volante, faros, carroceria (46AE70) */
         if (!pausa && chr_ok == 1 && estado != TITULO) {             /* el piloto y la acompanante (488DD0 / 489A90) */
             robot_coche_t rc;
@@ -6135,7 +6138,7 @@ int main(int argc, char **argv)
                     hud_dibuja(&he);
                     for (i = 0; i < PT_MSGS; i++)               /* mensajes de puntos (4BD480) */
                         if (pt_msg[i].edad > 0) hud_puntos_msg(pt_msg[i].pts, pt_msg[i].estilo, (float)pt_msg[i].y, pt_msg[i].alfa);
-                    if (t_cuenta < 300) {                       /* 3, 2, 1, GO! (la escena dura 5 s; GO a los 4) */
+                    if (t_cuenta >= 0 && t_cuenta < 300) {                       /* 3, 2, 1, GO! (la escena dura 5 s; GO a los 4) */
                         static const char *const CU[5] = { "CUENTA_PRE", "CUENTA_3", "CUENTA_2", "CUENTA_1", "CUENTA_GO" };
                         hud_aviso(CU[t_cuenta / 60], t_cuenta % 60, 1);
                     }
