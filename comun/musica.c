@@ -1,5 +1,5 @@
-/* Musica por streaming desde el GD: ficheros MUSn.ADP (ADPCM de Yamaha estereo intercalado por nibbles, 48 kHz) o
-   MUSn.PCM (16 bits estereo intercalado a 44,1 kHz; tools/c/musica.c con PCM=1). Un hilo lee del GD por DMA en trozos de 32 KB a un anillo de 1 MB (unos 21 s de ADPCM a 48 KB/s; 6 s de PCM);
+/* Musica por streaming desde el GD: ficheros MUSn.ADP (ADPCM de Yamaha estereo intercalado por nibbles, 44,1 kHz) o
+   MUSn.PCM (16 bits estereo intercalado a 44,1 kHz; tools/c/musica.c con PCM=1). Un hilo lee del GD por DMA en trozos de 32 KB a un anillo de 1 MB (unos 24 s de ADPCM a 44 KB/s; 6 s de PCM);
    snd_stream de KallistiOS lo vacia desde musica_poll (una vez por cuadro). La pista vuelve a empezar al acabar. */
 #include <kos.h>
 #include <dc/sound/stream.h>
@@ -25,7 +25,7 @@ static void *lector(void *arg)
     (void)arg;
     gd_hilo_fondo();
     while (!fin_hilo) {
-        /* el anillo tiene ~21 s de ADPCM (48 KB/s): durante una carga (pausa_lectura o lecturas de otro hilo hace
+        /* el anillo tiene ~24 s de ADPCM (44 KB/s): durante una carga (pausa_lectura o lecturas de otro hilo hace
            menos de 300 ms) no se lee; con el anillo casi vacio se lee igualmente */
         int vacio = escrito - leido < 128 * 1024;
         if (activa && !arranca && pausa_lectura) {              /* carga larga: el bucle no llama a musica_poll */
@@ -77,7 +77,7 @@ int musica_pon(int n)
     char nom[16];
     musica_para();
     thd_sleep(30);
-    sprintf(nom, "MUS%d.ADP", n); adpcm = 1;                     /* ADPCM de Yamaha a 48 kHz o, si no, PCM */
+    sprintf(nom, "MUS%d.ADP", n); adpcm = 1;                     /* ADPCM de Yamaha a 44,1 kHz o, si no, PCM */
     if (gd_busca(nom, &lba0, &tam)) {
         sprintf(nom, "MUS%d.PCM", n); adpcm = 0;
         if (gd_busca(nom, &lba0, &tam)) return -1;
@@ -91,7 +91,9 @@ int musica_pon(int n)
 
 static void empieza(void)
 {
-    if (adpcm) snd_stream_start_adpcm(hs, 48000, 1);
+    /* 44,1 kHz como el original: SOUNDCD.IRX (0x1640..0x1650) pone el pitch 0xEB3 (44100 / 48000 x 0x1000) a las
+       dos voces del flujo de musica; a 48 kHz sonaba un 8,8 % acelerada */
+    if (adpcm) snd_stream_start_adpcm(hs, 44100, 1);
     else snd_stream_start(hs, 44100, 1);
     snd_stream_volume(hs, volumen);
     arranca = 0;
