@@ -168,7 +168,7 @@ def calcula(d, extras=(), hilos=os.cpu_count() or 4, informe=True):
     for m in M:
         g = int(m['nodo'])
         if 0 <= g < nn and m['n'] >= 3: vn[g] += int(m['n'])
-    est = dict(muestras=len(pos), nodos=nn, secciones=nsec, xor=len(listas), seg=time.time() - t0,
+    est = dict(sec=sec, vn=vn, muestras=len(pos), nodos=nn, secciones=nsec, xor=len(listas), seg=time.time() - t0,
                frac_nodos=float(sec[SEC_LLENAS:-SEC_LLENAS].sum(1).mean() / max(1, con_mallas.sum())) if nsec > 2 * SEC_LLENAS else 1.0,
                frac_vtx=float((sec[SEC_LLENAS:-SEC_LLENAS] @ vn).mean() / max(1, vn.sum())) if nsec > 2 * SEC_LLENAS else 1.0)
     if informe:
