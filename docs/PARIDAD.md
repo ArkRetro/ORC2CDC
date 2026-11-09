@@ -118,6 +118,24 @@ START las salta. Las pruebas con PRUEBA_AUTO / PRUEBA_JUGADOR no las pasan. Si u
 1 s) escribe un diagnostico sobre la imagen y sigue al titulo. Verificado en Flycast el 2026-11-09: las dos enteras
 con audio y sin faltas (tambien con el lector limitado a 470 KB/s).
 
+## Arranque: modo de video 50 / 60 Hz y pantalla de carga (2026-11-09)
+
+- La pantalla del original PAL para elegir el modo (estado 4-5 del arranque 0x23B190, descriptor 0x3BF8C8: init
+  0x104E40, paso 0x105110, dibujo 0x105390) en lugar del texto bfont: ventana 0x271800 / 0x271CA8 con las piezas de
+  spr_etc_xst (banco 3), titulo 0x32E, boton 0x294 con su icono (escena 0x480009 cuadro 25, A del port), lista
+  0x26A940 (50Hz / 60Hz - Prueba, resalte 0xFFFFCE0A / 0xFF8B9091), ayuda por fila (0x441 / 0x333), y la prueba de
+  60 Hz con "No" / "Si" y cuenta atras de 15 s (0x335, t > 900 pasos vuelve a 50 Hz; 30 pasos sin aceptar tras cada
+  cambio). Fuente 14 y textos de TEXT.PS2 en el idioma del port (es). tools/conv_modo_video.py -> MODOV.DAT;
+  comun/modo_video.c lo dibuja en el framebuffer (aun sin PowerVR). Igual que antes: solo en consola PAL sin VGA;
+  60 Hz = NTSC entrelazado (DM_640x480), 50 Hz = PAL.
+- Diferencias: no se ofrece "60Hz Progressive (480P) - Test" (sin VGA la Dreamcast no saca 480p); la ventana conserva
+  el alto del original (calculado con los textos de las tres filas), la tercera fila queda vacia. Efectos SE 1 / 0x40
+  con sfx_menu (sfx_inicia se adelanta a esta pantalla). El fondo es negro (nada mas se dibuja en ese estado).
+- Pantalla de carga: el texto "OutRun 2006 C2C - demo Dreamcast. Cargando la etapa..." y el "DEMO" de la demo
+  automatica se quitan; la carga queda en negro (el original pasa de esta pantalla a los logos de SPLASH_CVT sin
+  rotulo de carga). Pendiente: lo que pinte el original durante la demo automatica (sin investigar; hay un banco 0x45
+  DEMOSPLASH_CVT).
+
 ## Menus (2026-11-08)
 
 Todo de SUMO_FE_CVT (banco 0x44) y de tablas del ELF localizadas por su codigo (comprobadas en conv_menu.comprueba_tablas);

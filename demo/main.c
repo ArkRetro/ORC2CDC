@@ -23,6 +23,7 @@
 #include "../comun/infarto.h"
 #include "../comun/vmu.h"
 #include "../comun/robot.h"
+#include "../comun/modo_video.h"
 #include "camara.h"
 #include "coli.h"
 
@@ -3490,34 +3491,15 @@ static void caja(float x, float y, float W, float H, uint32_t argb)
 }
 
 /* Modo de video: con cable VGA, VGA a 60 Hz; si no, el generico de KallistiOS (NTSC entrelazado a 60 Hz, que casi
-   todas las teles PAL por euroconector aceptan). En una consola PAL (region de la flash Europa) sin VGA se pregunta,
-   a 50 Hz (lo que ve cualquier tele PAL): A = 60 Hz, B o nada en 10 s = 50 Hz. La logica va a 59,94 pasos por segundo
+   todas las teles PAL por euroconector aceptan). En una consola PAL (region de la flash Europa) sin VGA, la pantalla
+   del original PAL para elegir 50 / 60 Hz (comun/modo_video.c, MODOV.DAT). La logica va a 59,94 pasos por segundo
    con el reloj (salto de cuadros, PERIODO_60), como el original en sus modos de 50 y 60 Hz (0x1078c8): a 50 Hz el
    juego va a la misma velocidad. */
 static int modo_video = DM_640x480;
 static void elige_video(void)
 {
-    int t;
     if (vid_check_cable() == CT_VGA || flashrom_get_region() != FLASHROM_REGION_EUROPE) return;
-    modo_video = DM_640x480_PAL_IL;
-    vid_set_mode(modo_video, PM_RGB565); vid_clear(0, 0, 0);
-    bfont_draw_str(vram_s + 200 * 640 + 120, 640, 1, "Consola PAL: A = 60 Hz   B = 50 Hz");
-    for (t = 0; t < 1000; t++) {                                /* 10 s */
-        maple_device_t *mc = maple_enum_type(0, MAPLE_FUNC_CONTROLLER);
-        cont_state_t *st = mc ? (cont_state_t *)maple_dev_status(mc) : NULL;
-        if (st && (st->buttons & CONT_A)) { modo_video = DM_640x480; break; }
-        if (st && (st->buttons & CONT_B)) break;
-        thd_sleep(10);
-    }
-    if (modo_video == DM_640x480) {                             /* NTSC entrelazado a 60 Hz (o el que diga el cable) */
-        vid_set_mode(modo_video, PM_RGB565);
-        while (1) {                                             /* que suelte A */
-            maple_device_t *mc = maple_enum_type(0, MAPLE_FUNC_CONTROLLER);
-            cont_state_t *st = mc ? (cont_state_t *)maple_dev_status(mc) : NULL;
-            if (!st || !(st->buttons & CONT_A)) break;
-            thd_sleep(10);
-        }
-    }
+    modo_video = modo_video_pantalla() ? DM_640x480 : DM_640x480_PAL_IL;
 }
 
 static void aviso(const char *s)
@@ -5809,7 +5791,7 @@ int main(int argc, char **argv)
     /* 1: datos del disco a la RAM (la pantalla de texto aun sin PowerVR) */
     elige_video();
     vid_set_mode(modo_video, PM_RGB565);
-    aviso("OutRun 2006 C2C - demo Dreamcast. Cargando la etapa...");
+    vid_clear(0, 0, 0);                                         /* negro mientras carga, sin texto */
     robot_lee();                                                /* CHR.DAT: antes que los huecos y la ruta (RAM) */
     if ((r = curso_lee() ? -8 : curso_huecos() ? -9 : curso_lee_etapa(0))) {   /* el arbol y la primera etapa */
         sprintf(s1, "No se pudieron leer los datos (%d)", r); aviso(s1); for (;;) thd_sleep(1000);
@@ -6048,7 +6030,7 @@ int main(int argc, char **argv)
             if (auto_ && (nuevo & CONT_START)) { estado = TITULO; auto_ = 0; nuevo = 0; texto_centro(""); hud_baja_tex(); menu_entra(manual_, pista, NPISTAS); }
             coche_paso(&yo, 0, 0, 0, 1.0f / 60);
         } else if (estado == CARRERA) {
-            if (t_estado == 50 && !aviso_rama) texto_centro(auto_ ? "DEMO" : "");
+            if (t_estado == 50 && !aviso_rama) texto_centro("");
             if (auto_ && (nuevo & CONT_START)) { estado = TITULO; nuevo = 0; auto_ = 0; texto_centro(""); hud_baja_tex(); menu_entra(manual_, pista, NPISTAS); }
             else if (!pausa && (nuevo & CONT_START)) { pausa = 1; menu_pausa_entra(); nuevo = 0; }   /* START: pausa */
             if (!pausa) {
