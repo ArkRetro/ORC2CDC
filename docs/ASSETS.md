@@ -76,7 +76,7 @@ orden alfabetico en mayusculas; STAGE.PS2 no sigue ese orden dentro de cada zona
 | Escenarios | BK.PS2 | uniones entre tramos y metas: la bifurcacion (`coli_BK_PALM`, `coli_LBK/RBK/LRBK_PALM`: las dos ramas, una sola o la variante de mision; modelo `cs_BK_PALM_pmt`, el mismo para todas las bifurcaciones), las metas de los tramos finales (`coli_BK_<zona>`, `cs_BK_<zona>[_R]_pmt`) y los finales (`ENDA`-`ENDE`, `SUMOEND`); entorno `ENV\cs_ENVBK_*`, objetos animados del fondo (aviones, pajaros, barcos...: `ANIMS`), tablas SO; una colision `COLI0105` | COLI, modelo, SO, oso | `conv_union.py` (todo el arbol: bifurcaciones con sus carteles, metas, CURSO.DAT) |
 | Escenarios | OSO.PS2 | `oso_qt_*` y `oso_dyn_*`: colocaciones/trayectorias (probable) | oso (sin estudiar) | no |
 | Coches | CARS.PS2 | coches del jugador (`obj_plcar_*`, con variante `_t`), rivales (`obj_rc_*`, `obj_rc_all`) y trafico (`obj_othcar`) | modelo (zlib) | `conv_coche.py` (COCHEnn.DAT por ficha del menu y COCHES.DAT; montaje con la tabla de disposiciones del ELF), `conv_trafico.py` (TRAFn.DAT, TRAFC.DAT), `conv_param.py` (PARAM.DAT, del ELF) |
-| Personajes | DRIVER.PS2, CHR.PS2, ANIMS.PS2 | pilotos y acompanantes (modelos), datos de personaje `CHR_*.bin`, movimientos `mot_*` (celebraciones, finales, salida) | modelo, binario, movimiento | no |
+| Personajes | DRIVER.PS2, CHR.PS2, ANIMS.PS2, COMMON.PS2 (`bone.bin`, `motdata_table.bin`) | pilotos y acompanantes (modelos `obj_chr_*_pmt`), datos de personaje `CHR_*.bin`, esqueletos, movimientos `mot_*` (conducir, reacciones, celebraciones, finales, salida); DRIVER.PS2: `obj_driver_*` (otros pilotos, sin estudiar) | modelo, binario, movimiento | `conv_chr.py` (el piloto `CHR_DR_M00` y la acompanante `CHR_DR_L00` de la carrera -> CHR.DAT; `comun/robot.c`) |
 | Finales | OBJ.PS2, AS.PS2 | escenas de final (`obj_end_*`) y guiones de escena (`as_e_NN`, `as_SPE_*`) | modelo, binario | no |
 | Fantasmas | GHOST.PS2, GHOSTS.PS2 | repeticiones grabadas (`gc_default_*`, `gc_RACE_*`) para contrarreloj, rivales y demo | `QHOT`/`NHOT` (zlib del paquete) | no |
 | Reglas | SCRIPTS.PS2 | tablas de carreras y misiones (`Races`, `RaceAttack`, `OutrunMiles`, `Req_*` por zona y modo, metas, `csc_data_*` de cursos, camaras) | binarios (zlib del paquete) | parcialmente leidos desde el ELF por `conv_param.py`/`conv_trafico.py`; los .bin no |
@@ -168,6 +168,30 @@ PC: `race_ghosts.cpp` (465F30..4687C0), `pc_car_services_ghost.cpp`.
 
 **object_db** (COMMON): nombres de objeto a manejadores `recurso << 16 | objeto`. PC: `object_db.cpp` (448B90).
 
+**Personajes** (CHR.PS2, `tools/conv_chr.py`). Tabla de ficheros en el ELF (0x36f7d8, registros `{ruta, 0, recurso,
+0}` hasta ruta 0; PC 654860 / 488B80): el indice es el personaje (work+8 del suceso): 0-4 `AUT*`, 5-12 `DR_G00`..
+`DR_MH00`, 13 `FAL`, 14 `GAL`, 15 `GAL_USA`, 16 `MAL`, 17-19 `DR_W00`/`DR_S00`/`DR_H00`; el recurso es el del pmt del
+personaje (`obj_chr_<nombre>_pmt.sz`). En carrera (modo OutRun) van el 11 (`DR_M00`, el piloto) y el 9 (`DR_L00`, la
+chica rubia); `MAL`/`FAL`/`GAL` llevan cara con morfos y cadenas de pelo (finales).
+- `CHR_*.bin`: `u16 0, n rigidas, n con pesos, n ids`, `u32` desplazamientos a las rigidas (8 bytes `{u32 hueso,
+  u32 objeto}`), a las de pesos (0x14 bytes: `+02 n`, `+04` hasta 6 huesos u16, `+10 objeto`), a los ids (u16; bit 15:
+  matriz de una cadena osage), +14 (0), a las inversas de enlace (64 bytes por id) y +1C a las cadenas osage (0 en los
+  `DR_*`). Objeto = `recurso << 16 | registro del pmt`. PC 487E10 / 514280.
+- Mallas con pesos: la palabra 0 de la entrada de la tabla 3 dice cuantas matrices (0x200 una; 0x202 dos, UNPACK V2-16
+  `w0` tras las normales; 0x203 tres, V2-16 `w0 w1`; 0x204 cuatro, V3-16 `w0 w1 w2`; el ultimo peso es el resto;
+  /32767); despues las UV. Las manos son registros aparte (puno y abierta) en un hueso.
+- `bone.bin`: entradas de 16 bytes `{1, n huesos, 0xffff, 0, u32 registros, u32}`; registro de hueso de 0x38 bytes:
+  +00 nombre, +04 tipo (0/1 claves, 2 raiz de cadena con IK, 3 matriz fija, 4 giro), +06 IK (2 dos huesos, 1
+  apuntar), +07 giro unidad, +0C..+2C reposo (traslacion, giro, escala), +30 n hijos, +34 lista de hijos (u16). El
+  esqueleto lo elige el personaje (PS2 0x205038, tabla de saltos 0x40e3f0): `DR_M00` el 3 (53 huesos), `DR_L00` el 2.
+- `motdata_table.bin`: entradas de 16 bytes `{nombre, lista de nombres, n, 0}`; grupo = indice = el de ANIMS.PS2; id de
+  movimiento = `grupo << 16 | n`. `mot_*_bin`: `u32 tamano` y desde +4 entradas de 0x18 bytes `{u16 esqueleto, u16
+  banderas (bit 1: tabla de canales de 16 bits; bit 0: objetivos de IK en el marco local), u16 cuadros, 0, u32 bytes de
+  la tabla de canales, u32 tabla de canales, u32, u32 claves}` (desplazamientos desde +4). Tabla de canales: pares
+  `(hueso, mascara de 9 bits: t x y z, r x y z, s x y z)`; claves de cada canal seguidas: `u16 {tiempo 13 bits en 1/60
+  s, bit 13 constante, tipo 14-15}` y 0..3 valores en coma flotante de 16 bits (522AA0). Interpolacion de Hermite;
+  motor completo en `comun/robot.c` (portado de rob_motion_engine.cpp y comprobado contra el de `conv_chr.py`).
+
 **Icono de tarjeta PS2** (`\VIEW.ICO` de SYSTEM.PS2): `u32 0x10000`, `u32` formas, `u32` tipo de textura (15 =
 comprimida), `f32`, `u32` n vertices; 24 bytes por vertice (con una forma: posicion, normal, uv, color), animacion
 (20 bytes de cabecera y los cuadros) y la textura: `u32` tamano y RLE de `u16` (codigo `>= 0xFF00`: 0x10000 - codigo
@@ -214,7 +238,7 @@ conversores: parametros de coches (`conv_param.py`), trafico (`conv_trafico.py`)
 Hecho: un tramo jugable con geometria, texturas, ruta y colision del original (`conv_tramo.py`), coche del
 jugador y trafico (`conv_coche.py`, `conv_trafico.py`), fisica y choques con las tablas del ELF (`conv_param.py`),
 HUD de carrera y rotulos (`conv_hud.py`), efectos ICS y voces de la carrera (`conv_sonido.py`), musica por streaming (`musica.c`), peliculas
-(`conv_video.py`), icono, eyecatch y LCD de la VMU (`conv_vmu.py`); el
+(`conv_video.py`), icono, eyecatch y LCD de la VMU (`conv_vmu.py`), el piloto y la acompanante animados en el coche (`conv_chr.py`); el
 arbol entero del modo OutRun (15 etapas, 10 bifurcaciones con sus carteles, 5 metas, niebla de cada etapa) encadenado
 mientras se conduce (`conv_union.py`, `CURSO.DAT`).
 
@@ -234,10 +258,10 @@ Falta, por orden aproximado de necesidad para un juego completo:
 5. **Sonido**: bancos SE (interfaz, resultados, finales, objetos del fondo), voces de los otros modos (Heart Attack,
    Coast 2 Coast, misiones; las de la carrera del modo OutRun ya estan); el resto de pistas de musica (solo hace falta
    pasar cada `\NN.ps2` por `musica.c`).
-6. **Finales y personajes**: OBJ (`obj_end_*`), AS, DRIVER/CHR/ANIMS (modelos con huesos y movimientos), BK
-   (fondos y objetos animados).
+6. **Finales y personajes**: OBJ (`obj_end_*`), AS, los personajes de los finales (`MAL`/`FAL`/`GAL`: cara con morfos y
+   pelo osage) y los `obj_driver_*` de DRIVER.PS2, BK (fondos y objetos animados). El piloto y la acompanante de la
+   carrera ya estan (`conv_chr.py`).
 7. **Videos**: hechos (`conv_video.py`); falta la pelicula de titulo en bucle detras del rotulo del titulo.
 
 Sin identificar (nombre): las tablas SO de STAGE/BK, cinco fantasmas de GHOSTS, dos coches de CARS, un piloto de
-DRIVER, dos scripts, una entrada de COMMON y otra de SOUND. Sin estudiar (formato): SO, oso, AS, movimientos,
-`CHR_*.bin`, COLI0105, fantasmas, scripts, segunda parte y tabla final de los bancos SE.
+DRIVER, dos scripts, una entrada de COMMON y otra de SOUND. Sin estudiar (formato): SO, oso, AS, las cadenas osage de `CHR_*.bin`, COLI0105, fantasmas, scripts, segunda parte y tabla final de los bancos SE.

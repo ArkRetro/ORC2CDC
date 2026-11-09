@@ -20,6 +20,7 @@
 #include "../comun/voces.h"
 #include "../comun/menu.h"
 #include "../comun/vmu.h"
+#include "../comun/robot.h"
 #include "camara.h"
 
 /* ---------------------------------------------------------------- modelos */
@@ -49,6 +50,7 @@ typedef struct {
 } modelo_t;
 
 static modelo_t coche;                                         /* el del jugador (abajo): no recibe su sombra */
+static modelo_t chr;                                           /* el piloto y la acompanante (CHR.DAT): tampoco */
 static const uint32_t FMT[3] = { PVR_TXRFMT_ARGB1555, PVR_TXRFMT_RGB565, PVR_TXRFMT_ARGB4444 };
 static const int LISTA[3] = { PVR_LIST_OP_POLY, PVR_LIST_PT_POLY, PVR_LIST_TR_POLY };
 static pvr_poly_hdr_t cab_col[2][3];                            /* sin textura: [niebla][lista] */
@@ -135,7 +137,7 @@ static void compila_cab(modelo_t *m, uint32_t i, int especular)   /* especular: 
         if (especular & 2) { cx.blend.src = PVR_BLEND_ONE; cx.blend.dst = PVR_BLEND_ONE; }   /* sumada a lo de detras */
         /* sombra del coche (sombra_dibuja): la recibe lo opaco y lo recortado de la escena y del trafico; el coche del
            jugador no (el original lo dibuja despues de oscurecer) */
-        if (m != &coche && t->lista != 2) { cx.fmt.modifier = true; cx.gen.modifier_mode = false; }   /* cheap shadow */
+        if (m != &coche && m != &chr && t->lista != 2) { cx.fmt.modifier = true; cx.gen.modifier_mode = false; }   /* cheap shadow */
         /* escena (etapas y uniones): el estado del GS de su capa 1 (tools/modelo.py estado_gs, docs/PARIDAD.md Suelos):
            0x800 z con GEQUAL (ZTST del GS: lo coplanario dibujado despues gana, como en la PS2) y alfa = textura x
            vertice (TFX MODULATE del GS); 0x400 mezcla aditiva (ALPHA 0x48: Cs As + Cd); 0x200 con mipmaps (TEX1 MXL;
@@ -711,11 +713,21 @@ static void ruta_recentra(float *a, float o, float rx, float rz)
         for (k = 0; k < NBANDA; k++) a[C_BANDA + 2 * k] -= o;
     }
 }
+static void ram_kb(unsigned *uso, unsigned *libre);
+#define RUTA_HOLGURA 300                                        /* puntos de mas en la primera reserva (ruta_pon) */
 static int ruta_reserva(uint32_t n)
 {
     float *q;
     if (n <= ruta_cap) return 0;
-    if (!(q = realloc(ruta_p, n * PR * sizeof(float)))) return -1;
+    if (!(q = realloc(ruta_p, n * PR * sizeof(float)))) {
+        unsigned u, l; ram_kb(&u, &l);
+        dbglog(DBG_ERROR, "RUTA: sin %u KB contiguos (RAM libre %u KB)\n", (unsigned)((n * PR * sizeof(float)) >> 10), l);
+#ifdef DIAG_RUTA
+        dbglog(DBG_ERROR, "RUTA: tope %p etapa %p union %p chr %p coche %p\n", sbrk(0), hueco_etapa, hueco_union, chr.datos, coche.datos);
+        malloc_stats();
+#endif
+        return -1;
+    }
     ruta_p = q; ruta_cap = n;
     return 0;
 }
@@ -723,7 +735,15 @@ static int ruta_reserva(uint32_t n)
 static int ruta_pon(const modelo_t *m)
 {
     ruta_n = 0; ruta_pr = m->paso_ruta; s_base = 0; rumbo_ini = 0;
-    if (ruta_reserva(m->nruta + 2000)) return -1;
+    /* la ruta anterior no se conserva: si no cabe, se suelta antes de pedir la nueva (realloc la copiaria y necesitaria
+       los dos bloques a la vez). La primera vez se pide con RUTA_HOLGURA puntos de mas: las etapas tienen 1156-1375
+       puntos y la de salida de cada carrera cabe en el mismo bloque, sin buscar ~700 KB seguidos con la RAM ya troceada
+       (con CHR.DAT al fondo del monton la cima no llegaba: docs/DREAMCAST.md, RAM) */
+    if (m->nruta + 2000 > ruta_cap) { free(ruta_p); ruta_p = NULL; ruta_cap = 0; }
+#ifdef DIAG_RUTA
+    { unsigned u, l; ram_kb(&u, &l); dbglog(DBG_INFO, "RUTA: pide %u KB, libre %u KB, tope %p\n", (unsigned)(((m->nruta + 2000) * PR * 4) >> 10), l, sbrk(0)); }
+#endif
+    if (ruta_reserva(m->nruta + 2000 + (ruta_cap ? 0 : RUTA_HOLGURA))) return -1;
     memcpy(ruta_p, m->ruta, m->nruta * PR * sizeof(float)); ruta_n = m->nruta;
     ruta_prepara();
     return 0;
@@ -1021,6 +1041,7 @@ static trafico_t traf[NTRAF];
 #define PT_SIN    0x800000
 static int pt_toca;                                             /* contacto con el trafico en este cuadro: 1, 3 golpe */
 static uint32_t sup_jug = 2u;                                   /* +244 del jugador: OR de las superficies de las ruedas */
+static uint32_t sup_cen = 2u;                                   /* +248 del jugador: la superficie bajo el centro */
 static uint32_t sup_rueda[4];                                   /* superficie bajo cada rueda (marcas: efectos_paso) */
 #define NMODTRAF 9                                              /* coches de calle (TRAFn.DAT) */
 static modelo_t mtraf[NMODTRAF];
@@ -2025,6 +2046,7 @@ static void coche_paso(coche_t *c, float giro, float gas, float freno, float dt)
             e.sup_centro = superficie(c->s, c->x);
             memcpy(sup_rueda, e.sup, sizeof sup_rueda);         /* para las marcas (efectos_paso) */
             sup_jug = CON_SUP ? e.sup[0] | e.sup[1] | e.sup[2] | e.sup[3] : 2u;   /* +244 (sin franjas: asfalto) */
+            sup_cen = CON_SUP ? e.sup_centro : 2u;
         }
         if (fis.grua > 0) {                                     /* grua del choque fuerte (PlWrecker) */
             float g[3], tg, gx, gz;
@@ -3795,6 +3817,145 @@ static void coche_dibuja(int l, matrix_t *mc)
         dibuja_indices(&coche, l, ani.idx + a, b - a);
     }
 }
+/* ---------------------------------------------------------------- el piloto y la acompanante (comun/robot.c)
+   CHR.DAT (tools/conv_chr.py): texturas y mallas en la postura de enlace (el campo del nodo = su malla en el bloque
+   RBT1, con la pieza y el material; por vertice la normal y los pesos). Como 487880 / 514280 (PS2 0x201948 /
+   0x2076b8): el personaje va en work+10 = T(asiento +108 / +118) car+F0 car+B0 (aqui ani_m[0] y mod_coche); cada pieza
+   con su paleta (rigida: M(hueso); con pesos: inv(enlace) M(hueso), hasta 4; las manos en su hueso, el puno o la
+   abierta). La CPU mezcla las posiciones ya proyectadas (lineales en x, y, w: una pasada de ftrv por matriz) y la luz
+   de los coches (entorno 2, 40D840(2)) por vertice: n.l mezclado igual y una tabla de color por material y cuadro
+   (tools/modelo.py luz_vertices, 33 valores de n.l). Se dibuja donde el coche (vistas exteriores: el dibujo del
+   original mira car+4 & 0xC000 == 0x4000), en todos los coches; en la seleccion de coche no (4A5B20 dibuja solo el
+   coche). El fichero se lee al arrancar, antes que la ruta y los huecos de las etapas, para no trocear la RAM. */
+static int chr_ok;
+/* tablas fijas (nada de memoria nueva despues de la ruta: la ruta crece por arriba del monton) */
+#define CHR_PZ 96                                               /* piezas (CHR.DAT de SLES-53998: 70) */
+#define CHR_MT 192                                              /* matrices de las piezas (146) */
+#define CHR_MAT 16                                              /* materiales distintos (3) */
+static matrix_t chr_S[CHR_MT] __attribute__((aligned(32)));    /* por pieza y matriz: vista x coche x asiento x paleta */
+static int32_t chr_L[CHR_MT][3];                                /* la luz en el marco de cada una (x 256) */
+static uint16_t chr_m0[CHR_PZ];                                 /* primera matriz de cada pieza */
+static uint32_t chr_lut[CHR_MAT][33];                           /* por material: color para n.l = -1 + k / 16 */
+static int chr_npz, chr_nm;
+static float chr_w8[256];                                       /* peso u8 -> float */
+static int chr_listo_cuadro;
+static uint32_t chr_vtx, chr_us, chr_vtx_ult, chr_us_ult;      /* vertices del cuadro y tiempo de CPU (us; y del anterior) */
+static void m_por(matrix_t o, const float (*a)[4], const float (*b)[4])   /* o = a b (filas) */
+{
+    int i, j;
+    for (i = 0; i < 4; i++) for (j = 0; j < 4; j++) o[i][j] = a[i][0] * b[0][j] + a[i][1] * b[1][j] + a[i][2] * b[2][j] + a[i][3] * b[3][j];
+}
+/* CHR.DAT a la RAM (al arrancar, antes de la PowerVR) y luego (robot_sube) las texturas */
+static void robot_lee(void)
+{
+    chr_ok = 0;
+    if (lee_modelo(&chr, "CHR.DAT")) { memset(&chr, 0, sizeof chr); return; }
+    if (chr.paso_ruta != 1 || (int)chr.nmallas <= 0) { libera_modelo(&chr); return; }
+    chr_ok = -1;
+}
+static void robot_sube(void)
+{
+    int k, n = 0;
+    if (chr_ok != -1) return;
+    chr_ok = 0;
+    if (sube_modelo(&chr)) { libera_modelo(&chr); return; }
+    compacta_modelo(&chr);                                      /* (puede mover el bloque: robot_inicia despues) */
+    if (robot_inicia(chr.ruta, chr.nruta * 4)) { libera_modelo(&chr); return; }
+    chr_npz = robot_npiezas(); chr_nm = robot_nmat();
+    if (chr_npz > CHR_PZ || chr_nm > CHR_MAT) { libera_modelo(&chr); return; }
+    for (k = 0; k < chr_npz; k++) { chr_m0[k] = (uint16_t)n; n += robot_pieza(k)->n; }
+    if (n > CHR_MT) { libera_modelo(&chr); return; }
+    for (k = 0; k < 256; k++) chr_w8[k] = k * (1.0f / 255.0f);
+    chr_ok = 1;
+    dbglog(DBG_INFO, "CHR: %u mallas, %u vertices, %u texturas, %d piezas, %d matrices, %d materiales\n", (unsigned)chr.nmallas,
+           (unsigned)chr.nvert, (unsigned)chr.ntex, chr_npz, n, chr_nm);
+}
+/* matrices de cada pieza y tablas de color del cuadro (una vez, antes de las listas) */
+static void robot_matrices(matrix_t *mc)
+{
+    static matrix_t base[2] __attribute__((aligned(32))), P __attribute__((aligned(32)));
+    float d[3], R[2][3][3], v[16]; int p, k, j, a, b, q;
+    for (p = 0; p < 2; p++) {                                   /* T(asiento) car+F0 car+B0 */
+        const float *s = robot_asiento(modelo_jug, p); matrix_t W;
+        if (ani.ok) memcpy(W, ani_m[0], sizeof W); else m_id(W);
+        m_tras(W, s[0], s[1], s[2]);
+        m_por(base[p], (const float (*)[4])W, (const float (*)[4])*mc);
+        for (a = 0; a < 3; a++) for (b = 0; b < 3; b++) R[p][a][b] = base[p][a][b];
+    }
+    luz_actual(2, v, d);                                        /* la luz de los coches: tools/modelo.py luz_vertices */
+    for (k = 0; k < chr_nm; k++) {
+        const float *mt = robot_material(k);
+        for (q = 0; q <= 32; q++) {
+            float nl = -1.0f + q * (1.0f / 16.0f), c[3];
+            for (j = 0; j < 3; j++) {
+                c[j] = mt[j] * v[j] * (nl > 0 ? nl : 0) + mt[3 + j] * (v[9 + j] + (v[6 + j] - v[9 + j]) * (1 + nl) * 0.5f) + mt[6 + j];
+                c[j] = c[j] < 0 ? 0 : c[j] > 1 ? 1 : c[j];
+            }
+            chr_lut[k][q] = 0xFF000000u | (uint32_t)(c[0] * 255) << 16 | (uint32_t)(c[1] * 255) << 8 | (uint32_t)(c[2] * 255);
+        }
+    }
+    for (k = 0; k < chr_npz; k++) {
+        const rpieza_t *pz = robot_pieza(k); const float (*M)[4][4] = robot_huesos(pz->per);
+        for (j = 0; j < pz->n; j++) {
+            int s = chr_m0[k] + j; float t[3][3];
+            if (pz->tipo == RP_PESOS && pz->inv[j] != 0xffff) m_por(P, robot_inversa(pz->per, pz->inv[j]), M[pz->hueso[j]]);
+            else memcpy(P, M[pz->hueso[j]], sizeof P);
+            for (a = 0; a < 3; a++) for (b = 0; b < 3; b++) t[a][b] = P[a][0] * R[pz->per][0][b] + P[a][1] * R[pz->per][1][b] + P[a][2] * R[pz->per][2][b];
+            for (a = 0; a < 3; a++) chr_L[s][a] = (int32_t)((t[a][0] * d[0] + t[a][1] * d[1] + t[a][2] * d[2]) * 256.0f);   /* n.l en su marco */
+            mat_load(&vista); mat_apply(&base[pz->per]); mat_apply(&P); mat_store(&chr_S[s]);
+        }
+    }
+    chr_listo_cuadro = 1;
+}
+static void robot_dibuja(int l)
+{
+    static float acc[256][4]; int ult = -2; uint32_t k, i;
+    if (chr_ok != 1 || !chr_listo_cuadro) return;
+    for (k = chr.inicio[l]; k < chr.inicio[l + 1]; k++) {
+        const malla_t *m = chr.mallas + k; const rmalla_t *rm; const rpieza_t *pz; const rvert_t *rv; const vert_t *vv;
+        const uint32_t *lut; uint32_t n = m->n; int j, detras = 0, s;
+        if (n < 3 || m->nodo < 0) continue;
+        rm = robot_malla(m->nodo); pz = robot_pieza(rm->pieza); rv = robot_vert(m->v0); vv = chr.verts + m->v0;
+        if ((pz->tipo == RP_MANO_GU && !robot_mano_gu(pz->per)) || (pz->tipo == RP_MANO_PA && robot_mano_gu(pz->per))) continue;
+        lut = chr_lut[rm->mat < chr_nm ? rm->mat : 0]; s = chr_m0[rm->pieza];
+        if (n > 256) n = 256;
+        for (j = 0; j < pz->n; j++) {
+            const int32_t *L = chr_L[s + j];
+            mat_load(&chr_S[s + j]);
+            for (i = 0; i < n; i++) {
+                float x = vv[i].x, y = vv[i].y, z = vv[i].z, w, p, nl;
+                if (pz->n == 1) p = 1.0f;
+                else if (!rv[i].w[j]) { if (!j) acc[i][0] = acc[i][1] = acc[i][2] = acc[i][3] = 0; continue; }
+                else p = chr_w8[rv[i].w[j]];
+                mat_trans_single3_nodivw(x, y, z, w);
+                nl = (float)(rv[i].nx * L[0] + rv[i].ny * L[1] + rv[i].nz * L[2]) * (1.0f / (127.0f * 256.0f));
+                if (!j) { acc[i][0] = p * x; acc[i][1] = p * y; acc[i][2] = p * w; acc[i][3] = p * nl; }
+                else { acc[i][0] += p * x; acc[i][1] += p * y; acc[i][2] += p * w; acc[i][3] += p * nl; }
+            }
+        }
+        for (i = 0; i < n; i++) {
+            int q = (int)((acc[i][3] + 1.0f) * 16.0f + 0.5f);
+            pw[i].x = acc[i][0]; pw[i].y = acc[i][1]; pw[i].w = acc[i][2]; pw[i].u = vv[i].u; pw[i].v = vv[i].v; pw[i].o = 0;
+            pw[i].c = lut[q < 0 ? 0 : q > 32 ? 32 : q];
+            detras |= pw[i].w < cerca;
+        }
+        if (m->tex != ult) {
+            ult = m->tex;
+            if (m->tex >= 0) pvr_prim(&chr.cabs[0][m->tex], sizeof(pvr_poly_hdr_t));
+            else pvr_prim(&cab_col[0][l], sizeof(pvr_poly_hdr_t));
+        }
+        chr_vtx += n;
+        if (!detras) {
+            if (!ta_cabe(n)) continue;
+            for (i = 0; i < n; i++) envia(pw + i, i == n - 1);
+            tri_enviados += n - 2;
+        } else for (i = 0; i + 2 < n; i++) {
+            if (pw[i].w < cerca && pw[i + 1].w < cerca && pw[i + 2].w < cerca) continue;
+            tri_recortado(pw + i);
+        }
+    }
+}
+
 /* Ruedas del trafico cerca (LOD 0 y 1) como 4AD530: T(posicion del descriptor) Ry(car+32 = 0; + pi las del otro lado)
    Rx(-car+40 delante, -car+44 detras; con el signo cambiado las del otro lado). 47E780 suma a car+40 y +44 cada cuadro
    +1C4 / radio (+08 de 4866C0) en unidades de 65536 por vuelta: las dos igual. car+32 del trafico no se ha localizado
@@ -4036,6 +4197,7 @@ int main(int argc, char **argv)
     elige_video();
     vid_set_mode(modo_video, PM_RGB565);
     aviso("OutRun 2006 C2C - demo Dreamcast. Cargando la etapa...");
+    robot_lee();                                                /* CHR.DAT: antes que los huecos y la ruta (RAM) */
     if ((r = curso_lee() ? -8 : curso_huecos() ? -9 : curso_lee_etapa(0))) {   /* el arbol y la primera etapa */
         sprintf(s1, "No se pudieron leer los datos (%d)", r); aviso(s1); for (;;) thd_sleep(1000);
     }
@@ -4066,6 +4228,7 @@ int main(int argc, char **argv)
         vid_set_mode(modo_video, PM_RGB565); aviso("Sin memoria de video para las texturas"); for (;;) thd_sleep(1000);
     }
     sol_carga();                                                /* el sol y el destello (SOL.DAT, siempre en VRAM) */
+    robot_sube();                                               /* el piloto y la acompanante (CHR.DAT, siempre en VRAM) */
     if ((r = coche_carga(ficha_ini))) {
         vid_set_mode(modo_video, PM_RGB565); sprintf(s1, "No se pudo cargar el coche (%d)", r); aviso(s1); for (;;) thd_sleep(1000);
     }
@@ -4076,7 +4239,7 @@ int main(int argc, char **argv)
         for (i = 0; i < NMODTRAF; i++) {
             if ((c = modelo_teo(&mtraf[i], traf_con_lod[i] ? 0 : -1, 0)) > ct) { ct = c; cv = modelo_vtx(&mtraf[i], traf_con_lod[i] ? 0 : -1); }
         }
-        ta_min_otros_teo = modelo_teo(&coche, -1, 1) + 3 * ct; ta_traf_teo = ct;
+        ta_min_otros_teo = modelo_teo(&coche, -1, 1) + 3 * ct + (chr_ok == 1 ? modelo_teo(&chr, -1, 0) : 0); ta_traf_teo = ct;
         dbglog(DBG_INFO, "TA: bufer %uK, coche %u vertices, trafico hasta %u (LOD 0), minimo reservado %uK\n", TA_VB_BYTES >> 10,
                (unsigned)modelo_vtx(&coche, -1), (unsigned)cv, (unsigned)((ta_min_otros_teo * ta_f >> 8) >> 10));
     }
@@ -4196,7 +4359,9 @@ int main(int argc, char **argv)
                 auto_ = rm == MENU_DEMO;
                 if (!auto_) { manual_ = menu_manual(); pista = menu_pista(); }
                 menu_sale();                                    /* la VRAM del menu vuelve al HUD */
+#ifndef PRUEBA_FICHA                                            /* prueba: el coche de PRUEBA_FICHA, no el del menu */
                 if (!auto_ && menu_coche() >= 0 && menu_coche() != coche_ficha && coche_carga(menu_coche())) coche_carga(9);
+#endif
                 if (coche_ficha < 0) coche_carga(9);            /* el menu lo solto (VRAM) */
                 fisica_modelo(modelo_jug);                      /* peso, agarre, motor y marchas de ese coche */
                 if (hud_ok) hud_pon_modelo(modelo_jug);         /* y su tacometro */
@@ -4216,6 +4381,7 @@ int main(int argc, char **argv)
                 reintenta = 0;
                 if (voz_ok) voces_carrera();
                 if (cam_ok) { cam_inicia(&cam, &cam_tab); cam_t_choque = 0; }   /* 484EE0 */
+                if (chr_ok == 1) robot_carrera(modelo_jug);          /* 4884D0 / 4885A0 */
             }
         } else if (estado == CUENTA) {
             int n = 3 - (int)(t_estado / 60);
@@ -4342,6 +4508,13 @@ int main(int argc, char **argv)
         if (cam_ok && estado != TITULO && !pausa)
             camara_paso((nuevo & CONT_Y) != 0, estado == CUENTA && t_estado < 60);
         if (!pausa) coche_anima_paso(estado == TITULO);                       /* ruedas, volante, faros, carroceria (46AE70) */
+        if (!pausa && chr_ok == 1 && estado != TITULO) {             /* el piloto y la acompanante (488DD0 / 489A90) */
+            robot_coche_t rc;
+            rc.modelo = modelo_jug; rc.s204 = ani.s204; rc.fase = estado == CUENTA ? 0 : estado == CARRERA ? 1 : estado == META ? 2 : 3;
+            rc.choque = fis_ok ? fis.choque : 0; rc.t_choque = fis_ok ? fis.t_choque : 0; rc.t_recup = fis_ok ? fis.t_recup : 0;
+            rc.sup = sup_cen; rc.kmh = fis_ok ? fis.kmh : (int)(yo.v * 3.6f); rc.s4e = fis_ok ? fis.s4e : 0;
+            { uint64_t t0r = timer_us_gettime64(); robot_paso(&rc); chr_us += (uint32_t)(timer_us_gettime64() - t0r); }
+        }
         }
 
         /* camara: en el menu gira alrededor del coche (seleccion de coche); en carrera, la del original (camara.c) */
@@ -4416,6 +4589,10 @@ int main(int argc, char **argv)
         if (cex_n) coche_luces(ani.ban, estado != TITULO && yo.freno_ant > 0.0f, estado != TITULO && ani.caliente);
         if (cex_n) coche_entorno(mod_coche);
         if (cex_n) coche_luz(mod_coche, estado != TITULO);     /* la luz del entorno 2 en la pintura */
+        chr_listo_cuadro = 0; chr_vtx_ult = chr_vtx; chr_us_ult = chr_us; chr_vtx = chr_us = 0;
+        if (chr_ok == 1 && estado != TITULO && (!cam_ok || cam_coche_visible(&cam))) {
+            uint64_t t0r = timer_us_gettime64(); robot_matrices(&mod_coche); chr_us += (uint32_t)(timer_us_gettime64() - t0r);
+        }
         tri_enviados = 0; vtx_ult = vtx_env; vtx_env = 0; ta_inicia_cuadro(); vtx_et_ult = vtx_et; vtx_et = 0;
         if (estado != TITULO) nodos_visibles_todos();          /* los del original que caben en el TA */
         if (estado != TITULO) traf_parpadea(pausa || estado != CARRERA);   /* 4AE5F0 (sin traf_paso: suspendido) */
@@ -4434,7 +4611,10 @@ int main(int argc, char **argv)
                 color_fijo = 0; ta_en_etapa = 0;
             }
             if ((estado != TITULO && (!cam_ok || cam_coche_visible(&cam))) || (estado == TITULO && menu_coche3d()))
+#ifndef DIAG_SIN_COCHE
                 coche_dibuja(l, &mod_coche);
+#endif
+            if (estado != TITULO) { uint64_t t0r = timer_us_gettime64(); robot_dibuja(l); chr_us += (uint32_t)(timer_us_gettime64() - t0r); }   /* 4879B0 */
 #ifdef DIAG_TRAF
             if (l == 0) traf_vistos = 0;
 #endif
@@ -4500,13 +4680,13 @@ int main(int argc, char **argv)
             }
         }
 #ifdef DIAG_VTX
-        if (cuadro % 60 == 0) dbglog(DBG_INFO, "DIAG est%d s %.0f/%.0f ram %uK/%uK v%u (etapa %u) tri %u ms %.1f+%.1f lejos %d (%.2f) vram %u ta %uK etapa %uK/%uK 2d %u f %u real %uK opb %uK tiras %u teo %uK orig %u cerca %d m clase %d alfa %.2f quitados %u desde %d m (r %.1f) niebla %.5f sombra %u tri %uK pvs %d%d%d -%u%s%s\n", estado,
+        if (cuadro % 60 == 0) dbglog(DBG_INFO, "DIAG est%d s %.0f/%.0f ram %uK/%uK v%u (etapa %u) tri %u ms %.1f+%.1f lejos %d (%.2f) vram %u ta %uK etapa %uK/%uK 2d %u f %u real %uK opb %uK tiras %u teo %uK orig %u cerca %d m clase %d alfa %.2f quitados %u desde %d m (r %.1f) niebla %.5f sombra %u tri %uK pvs %d%d%d -%u rob %u v %u us%s%s\n", estado,
                                      (double)yo.s, (double)longitud, (unsigned)(mallinfo().uordblks >> 10), (unsigned)(mallinfo().fordblks >> 10),
                                      (unsigned)vtx_env, (unsigned)vtx_et, (unsigned)tri_enviados, (double)ms_log, (double)ms, (int)lejos, (double)(lejos / LEJOS_PS2), (unsigned)pvr_mem_available(), (unsigned)(ta_vb >> 10),
                                      (unsigned)(ta_et >> 10), (unsigned)(ta_tope_etapa >> 10), (unsigned)ta_v2d, (unsigned)ta_f, (unsigned)(ta_real_ult >> 10), (unsigned)(ta_opb_ult >> 10),
                                      (unsigned)ta_tiras, (unsigned)(ta_teo_3d >> 10), (unsigned)diag_orig_vtx, (int)(prio_d >= ND_PRIO - 1 ? lejos : powf(2.0f, (prio_d + 1) / 4.0f)), prio_p, (double)prio_alfa, (unsigned)diag_quitado_n,
                                      (int)(diag_quitado_n ? diag_quitado_z : lejos), (double)diag_quitado_r, (double)niebla_d, (unsigned)sombra_tri, (unsigned)(sombra_teo >> 10),
-                                     etapa.pvs_on, uni.pvs_on, sig.pvs_on, (unsigned)diag_pvs_v, ta_et_corto ? " CORTO" : "", ta_corto ? " TOPE" : "");
+                                     etapa.pvs_on, uni.pvs_on, sig.pvs_on, (unsigned)diag_pvs_v, (unsigned)chr_vtx_ult, (unsigned)chr_us_ult, ta_et_corto ? " CORTO" : "", ta_corto ? " TOPE" : "");
 #endif
         if (estado != TITULO) prio_ajusta(ta_et_corto, ta_et);
         ta_et_corto = 0;

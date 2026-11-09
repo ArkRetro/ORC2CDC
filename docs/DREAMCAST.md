@@ -382,6 +382,40 @@ Ver PARIDAD.md, Suelos. Coste medido (Flycast, `DIAG_VTX`, datos regenerados con
   seguidos (0x0, 0x1, 0x2, 0x6, 0x16, 0x56... tras el libro; el de 1x1 un bloque de 2x2 de su color). La direccion de
   la textura es la de siempre (con el libro reducido, 2048 - 8 N bytes antes).
 
+### Piloto y acompanante (CHR.DAT, 2026-11-09)
+
+Ver PARIDAD.md (Coches: el piloto y la acompanante). Medido en Flycast (`DIAG_VTX`, que ahora da `rob` = vertices de
+los personajes y us de CPU del cuadro anterior):
+
+| | Valor |
+|---|---|
+| Vertices dibujados | 2698 por cuadro (piloto 1238, acompanante 1460; 325 tiras de 8,3 de media; una de las dos manos) |
+| TA | 80 KB teoricos (`ta_teo`), 139 KB contados (x 1,75); van en lo "que no es la etapa": el reparto de `ta_cabe` quita de la etapa lo que no cabe (PALM con el 360 Spider: 16800-17040 vertices de etapa sin ellos, 12630-13640 con ellos; total del cuadro igual, 26300-27600; sin `TOPE` ni `CORTO`) |
+| VRAM | 22 KB (7 texturas, 5 en VQ; de 106 KB en 16 bits), siempre subidas |
+| RAM | CHR.DAT 177 KB en el monton (199 KB menos los texeles) + ~76 KB de tablas fijas (motor: 2 x 31 KB; matrices de las piezas 9 KB) |
+| CPU (Flycast) | 3,2 ms por cuadro: 0,76 la logica y el motor (dos esqueletos de 53 y 50 huesos con IK), 2,45 la mezcla y la luz por vertice (una pasada de ftrv por matriz; color por tabla de 33 valores de n.l por material) |
+
+RAM: CHR.DAT se lee al arrancar, antes que los huecos y la ruta (lo que se pide despues troceaba el monton), y nada mas
+se pide luego (tablas fijas). Aun asi la ruta de la carrera, que se pedia otra vez (`realloc`, ~700 KB seguidos) al
+salir de una etapa con mas puntos que la anterior, ya no cabia: la cima del monton quedaba 177 KB mas arriba y el
+hueco era de 664 KB (prueba GHOS: "RUTA: sin 704 KB contiguos (RAM libre 904 KB)"). Ahora `ruta_pon` suelta la ruta
+vieja antes de pedir la nueva y la primera vez la pide con 300 puntos de mas (`RUTA_HOLGURA`, 66 KB; las etapas
+tienen 1156-1375 puntos): la de salida de cualquier carrera cabe en el mismo bloque. RAM libre medida (Flycast,
+`-DPRUEBA_AUTO -DPRUEBA_FICHA=6 -DPRUEBA_RAMA=0 -DPRUEBA_FIN=400`):
+
+| Momento | Sin personajes | Con personajes |
+|---|---|---|
+| INDU: BK07 + BKD (el peor) | 882 KB | 709 KB |
+| METR (SEG13) y su meta BK11 | 979-982 KB | 806-809 KB |
+| GHOS: BK09 + BKD | 901 KB | 721 KB |
+
+VRAM del peor caso (mismas pruebas): IMPE + su meta BK13 51 KB sin personajes, 29 KB con ellos
+(`-DPRUEBA_NODO=13 -DPRUEBA_FIN=300`); GHOS -> IMPE: SEG16 subida con BK09 aun en VRAM 53 / 30 KB. OJO, de antes y sin
+relacion con los personajes (pasa igual sin CHR.DAT): en esa misma prueba (`-DPRUEBA_NODO=9`), al pedir despues la meta
+BK13 sale "Sin memoria de video para la etapa" (la VRAM queda troceada al soltar BK09; empezando en IMPE, BK13 sube
+con 51 KB libres). PENDIENTE: compartir las texturas repetidas de cs_BK_PALM o subir las uniones en un hueco fijo de
+VRAM.
+
 ## 3. Otros riesgos de la consola real
 
 | Riesgo | Estado |
@@ -443,5 +477,6 @@ llega).
   `ta_f`), las tiras aceptadas y su cuenta teorica (`tiras`, `teo`), lo que dibujaria el original de la etapa (`orig`,
   vertices de los nodos visibles), los cortes del reparto (`cerca`, `clase`, `alfa`), el nodo quitado mas cercano
   (`desde`, su radio) y la niebla; en la consola, lo que gasto de verdad el TA (`real`, `opb`). `-DDIAG_SIN_CPU` deja
-  `lejos` fijo (para medir en Flycast, que no da el tiempo del SH4).
+  `lejos` fijo (para medir en Flycast, que no da el tiempo del SH4). `-DDIAG_SIN_COCHE` no dibuja el coche del jugador
+  (para ver al piloto y a la acompanante); `-DDIAG_RUTA` cuenta las reservas de la ruta y el monton si una falla.
 - En la consola: si se cuelga, foto del texto de `pvr_colgado`; con `DIAG_VTX` y un cable serie, las lineas `DIAG`.

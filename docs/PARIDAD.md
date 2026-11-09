@@ -29,7 +29,7 @@ fps la demo se ralentizaba y el original no).
 ## Como compilar y probar
 
 - `cd demo && make` (KallistiOS en /opt/toolchains/dc/kos). Defines de prueba: `PRUEBA_JUGADOR`, `PRUEBA_AUTO`,
-  `PRUEBA_TRAFICO`, `PRUEBA_CHOQUE`, `PRUEBA_RAMA=0/1` (rama que toma el piloto), `PRUEBA_NODO=k` (etapa de salida, clave del arbol), `PRUEBA_V`, `PRUEBA_FISICA` (resumen de la fisica cada segundo), `PRUEBA_VMU` (guarda la licencia al arrancar y la vuelve a leer), `SALIDA`, `VER=1`, `DIAG_VTX`.
+  `PRUEBA_TRAFICO`, `PRUEBA_CHOQUE`, `PRUEBA_RAMA=0/1` (rama que toma el piloto), `PRUEBA_FICHA=k` (sale con el coche de la ficha k, no con el que deja elegido el menu), `PRUEBA_NODO=k` (etapa de salida, clave del arbol), `PRUEBA_V`, `PRUEBA_FISICA` (resumen de la fisica cada segundo), `PRUEBA_VMU` (guarda la licencia al arrancar y la vuelve a leer), `SALIDA`, `VER=1`, `DIAG_VTX`.
 - Datos: conversores de tools/ (ver ASSETS.md) a un dir de datos; `tools/mkgdi.py demo/demo.elf dir --datos datos`.
 - Niveles de verificacion usados abajo: **C** compila, **H** verificado en host (tools/c/prueba_fisica.c),
   **E** verificado en emulador (Flycast), **R** verificado en Dreamcast real (GDEMU del probador).
@@ -46,6 +46,7 @@ Estado: OK (conectado y verificado al nivel indicado), PARCIAL, PROVISIONAL (apr
 | Choques coche-coche y muro, choque fuerte, grua | 4F9450/4F9000/4F8490/4F6FE0/4F76E0/4F7BF0/476040/473F30 (ver Choques entre coches), cbw_coli_wall, 5038D0, PlWrecker | PARCIAL | CHQ1/POS1 de PARAM.DAT, CJM1/SEC1 de TRAFC.DAT, efectos de IGC.PAK en SFX.DAT | coche-coche: ver Choques entre coches (PROVISIONALES alli; golpeados: parpadeo y cierre del original); vibracion del mando de PS2 (0x1d0420) salvo la de la superficie; grua recoloca en el carril mas cercano (no en la fila de poligonos); avance 10 posiciones x m_pos (CONFIRMADO, antes 25 m supuestos) | — | H, E |
 | Camara de carrera | evento CAMERA 385: 4858D0, 484810, 483110, 4A1680 SetCarCamera, 485590/483CE0/4834A0/483600, 4832F0/484A40, 483C10/484BD0 (PS2 0x178500..0x17b540, 0x1817c0) | PARCIAL | demo/camara.c con las tablas CAM1 de PARAM.DAT (vistas 0x2ccd88, por vista y modelo 0x2cd3d8, por modelo 0x2d2838 del fichero SLES) | vista 1 sin interior (no se dibuja el coche); camara de salida en los 60 primeros cuadros de la cuenta (SUPUESTO); sin vista 0x1D (780258 = 0) ni camaras de meta/fin | ver seccion Camara de carrera | E |
 | Trafico (clases, IA, reaccion) | 472090, 472450, 472A50, 47DC10, 4736D0, hit_476040; aparicion 479080 (PS2 0x1dcdd0): 478B90 (0x1dbba0), 4787E0 (0x1db6d0), 4EFB90 (0x1f3818), 4F0030 (0x1f1a88), 46CE30, 478430, 46CC10; cierre 477F60 | PARCIAL | TRAFC.DAT (TRC1, ACL1 y TAP1: tablas de aparicion, velocidad y puntos fijos por etapa); colores (tabla 0x36bc18, modelos 30..43) y materiales en TRAFn.DAT (TCX1) | camino "Lead" de 472450 (velocidad segun el jugador) sin portar: todos a la velocidad del registro; 478640/46CDA0 en la union simplificados; puntos fijos de coches de carreras y de los modelos 39..43 sin coche | ver Trafico: densidad del original | E |
+| Piloto y acompanante | ROB01 / ROB02: PS2 0x201b10 / 0x201c40 / 0x202bf0 y 0x202c58 / 0x202de0; CHR.PS2 (CHR_DR_M00, CHR_DR_L00), bone.bin, ANIMS.PS2 | PARCIAL | CHR.DAT (conv_chr.py), comun/robot.c: motor de movimientos, conducir con el volante, codo en la puerta, choque, fuera del asfalto, aburrida, META y TIME OVER (ver Coches: el piloto y la acompanante) | sin la secuencia de meta del piloto, cambio de area, asustada, trompo ni poses pedidas | - | H, E |
 | Rivales | — | FALTA | — | no hay rivales | — | — |
 | Carretera, pendientes, bifurcacion | STAGE.PS2, BK.PS2 cs_BK_PALM, COMMON obj_course_obj_bk_palm + obj_OBJ_<ZONA>_BUNKI_TX, descriptores 0xb0, csc_data_2 | OK | conv_tramo/conv_union, CURSO.DAT | arbol entero (15 etapas, 10 bifurcaciones con sus carteles, 5 metas); cielo, niebla, luz y sol de la union como el original (ver Entorno); bifurcaciones = las de PALM (las demas no estan en el disco) | objetos animados de BK (ANIMS) | E |
 | Temporizador (inicial y ampliacion) | 44DC70 = PS2 0x176730, 450CC0 = PS2 0x1cee40, 450AC0 = PS2 0x1ce1f8 (-1 por paso en 0x5c5f44, crono +1 en 0x5c5f48); cuenta atras t / 60,2 + 0,34 (4BDA30 = PS2 0x1bfff8); crono con CalcFrame2Time (449B30 = PS2 0x1f6d70: t / 60,2, milesimas truncadas); paso real 59,94 Hz: HUD 0,43 % mas lento que el reloj, como el original; tabla 7D2E98 = PS2 0x3cb708 copiada por 0x176040; k636904 = PS2 0x35a938 | OK | TIM1 y KTE1 de PARAM.DAT | formula y tablas CONFIRMADAS en el ELF; variante 1 (fila 0), preset 0 y dificultad 0 PROBABLES (frontal del PC) | trazar el frontal de PS2 | E |
@@ -758,6 +759,64 @@ y la demo le pone cada cuadro la matriz del original:
   de pixeles distintos en el Testarossa y el GTO, 1,5 % en el Enzo desde camaras bajas fuera del vaciado) y Flycast
   con PRUEBA_GUION (hoja en el scratchpad, ruedas/hoja.png).
 
+## Coches: el piloto y la acompanante (2026-11-09)
+
+Peticion del probador: "anadir en los coches descapotables los disenos del conductor y la chica rubia". Antes el coche
+iba vacio. Ahora (`tools/conv_chr.py` -> CHR.DAT, `comun/robot.c`, `demo/main.c` robot_*) van los dos personajes de la
+carrera, animados con la logica del original. Todo sale de SLES-53998 (direcciones abajo) contrastado con la
+decompilacion del PC (race_robots.cpp, rob_disp.cpp, rob_motion*.cpp).
+
+- Quienes: sucesos ROB01 / ROB02 (tabla de 0x14 bytes en 0x3eebe4: piloto init 0x201b10, control 0x201c40, dibujo
+  0x202bf0; acompanante 0x202c58 / 0x202de0 / 0x204618; PC 4884D0 / 488DD0 / 4879B0 y 4885A0 / 489A90). Personaje
+  (PS2 0x205518 = PC 487EE0 y 0x2055b8 = 487F50) = indice de la tabla de ficheros 0x36f7d8: fuera de la partida en red
+  (bandera 0x59acac) el piloto es el 11, `CHR_DR_M00` (pelo castano, camisa naranja: Alberto), y en las variantes 1, 3,
+  4 y 5 (modo OutRun y Coast 2 Coast) la acompanante el 9, `CHR_DR_L00` (la chica rubia: Jennifer). Son los modelos
+  ligeros de carrera (1426 y 1886 vertices con las cuatro manos); `MAL`/`FAL`/`GAL` (con cara y pelo) son los de los
+  finales. CONFIRMADO.
+- Esqueleto y malla: bone.bin 3 (53 huesos) y 2 (50); piezas rigidas en su hueso y piezas con pesos de hasta 4
+  matrices `inv(enlace) M(hueso)` (514280 / PS2 0x2076b8); los pesos van en la UNPACK que sigue a las normales segun la
+  clave de la malla (ver ASSETS.md, Personajes); manos: puno o abierta (513A30 / 513BA0 = PS2 0x206758 / 0x2068d8) en
+  los huesos de rob_disp_init (PS2 0x206390: piloto 0x15 / 0x20, acompanante 0x2D / 0x1D), el puno si el movimiento
+  esta en la lista de 34 de PS2 0x36f658 (487940). Sin cadenas osage en estos dos (+1C = 0): el pelo no tiene fisica.
+  CONFIRMADO (render de referencia).
+- Colocacion: work+10 = T(asiento) car+F0 car+B0 (PS2 0x204f30 / 0x189f58 = PC 488AF0 / 46BC10), asiento = +108 (piloto)
+  y +118 (acompanante) de la disposicion del modelo (la de conv_coche.py; p. ej. el 360: (-0,39, 0,64, 0,27) y (0,38,
+  0,64, 0,27)). Solo en red se sube y por car+D18. Escala 1, sin LOD (el original no tiene otro modelo ni distancia).
+- Cuando se dibujan: el dibujo (0x202bf0 / 0x204618) solo con car+4 & 0xC000 == 0x4000, las vistas exteriores de la
+  camara (4A2BA0: 0x8000 la interior); no mira el modelo: van en todos los coches, tambien en los cerrados (se ven por
+  los cristales; en el F40 apenas). En la seleccion de coche no (4A5B20 dibuja solo el coche): la demo tampoco.
+- Motor (comun/robot.c, comprobado contra el de conv_chr.py: error < 1e-5 en las matrices): claves de Hermite por canal,
+  IK de dos huesos y de apuntar (brazos, piernas, pecho y cabeza son cadenas), mezcla de 10 cuadros al cambiar de
+  movimiento (SetMotionConnect) con la postura guardada (las variables 85B2xx valen 0: el hueso 0 mezcla su y dos
+  veces, como el original).
+- Logica (solo la variante 1, el modo OutRun):
+  - Piloto: conduce con el movimiento de su modelo (tabla 0x40e638; p. ej. 0x6001d HANDOL_360) con el cuadro sacado del
+    volante, (car+204 + 0x7FFF) / 65535 x 168 (PS2 0x201d00; el PC usa otras constantes); en los coches con tabla de
+    mirar (0x40e728: los abiertos) tras 121 cuadros con el cuadro entre 83 y 87 (volante centrado) apoya el codo en la
+    puerta (ida, mano en la puerta guiada por el volante, vuelta: HIZIOKI_*). Tras un choque, al recuperarse (car+2F8),
+    uno de 0x40e938 / 0x40e918 segun el estado del choque (tabla 0x40e230) y las cuentas que avanza la acompanante;
+    TIME OVER 0x60000. CONFIRMADO.
+  - Acompanante: empieza con 0x25000c en bucle; quieta, a los 181 cuadros una de la lista de aburrida (maquillarse,
+    el pelo, ...); en el choque 0x6005f y al recuperarse una de aterrizar o de salto; fuera del asfalto (car+248 &
+    0x10F407C, la superficie bajo el centro) 0x220007 / 0x230003; giro brusco a mas de 100 km/h (|car+4E| entre 0x2000
+    y 0x4000) solo en los abiertos; GOAL 0x60049 (cerrados 0x25000c) y TIME OVER 0x60036; al acabar cada reaccion
+    vuelve a 0x6004b (sentada). Listas 0x40eb28 / 0x40eb68 segun 45B380 (PS2 0x1aa3a0: 1 en GTO, 512 BB, Enzo, F40,
+    250 GTO y el modelo 12; el PC lo llama "convertible" pero son los de techo). CONFIRMADO.
+  - PROBABLE: el estado 8 del piloto dura la cuenta atras (el original espera a que el temporizador de salida 49B2D0
+    baje de 120); Calc avanza 1 cuadro por paso de logica.
+  - PENDIENTE (sin dato en la demo): la secuencia de la meta del piloto (estado 9: tablas 0x40e958..0x40e998 segun
+    44DC50 de la clave del curso; en la meta el piloto sigue conduciendo), el cambio de area 44BCE0 (car+184 y el
+    suceso 0x549068 = 0x14; en el modo OutRun las tablas del piloto, 0x36f620, valen -1), asustada y trompo (car+4 &
+    0x1000 / 0x2000, car+0xC), el choque de car+4 & 0x30000, las poses pedidas (+68 / +70), el peso de pelo de
+    4F1E80 y la escala de la luz car+0x58 de 487880. En el checkpoint del modo OutRun el original no hace nada
+    especial con los personajes (las tablas del cambio de area del piloto son -1).
+- Luz: la de los coches (entorno 2, 40D840(2) en 487880) con el material de cada malla, como luz_vertices de
+  tools/modelo.py (tabla de 33 valores de n.l por material y cuadro).
+- Verificado en Flycast (hoja en el scratchpad, chr/hoja.png): 360 Spider conduciendo, codo en la puerta y
+  maquillaje, derrape, choque contra el muro y la reaccion despues, META (la acompanante 0x60049), F40 (cerrado); y
+  sin el coche (`-DDIAG_SIN_COCHE`) para ver las posturas, iguales al render de referencia de conv_chr.py. Coste en
+  DREAMCAST.md.
+
 ## Graficos: tiras, nodos, recorte y distancia (como el original)
 
 Queja del probador: poligonos estirados que tapan la carretera, estructuras que se cruzan y distancia de dibujo
@@ -941,6 +1000,12 @@ que la Dreamcast espera de un juego: todo sale de graficos del disco (`tools/con
   eyecatch. Previas en el scratchpad (vmu/). Pendiente: R (VMU real en GDEMU).
 
 ## Ultimo cambio verificado
+
+Piloto y acompanante (2026-11-09, ver Coches: el piloto y la acompanante): CHR_DR_M00 y CHR_DR_L00 con su esqueleto,
+pesos y movimientos del original en el coche del jugador (todos los coches, vistas exteriores). Verificado en H (motor
+en C contra el de Python: error < 1e-5) y en E (Flycast: 360 Spider, F40, derrape, choque, META; posturas iguales al
+render de referencia; hoja en el scratchpad, chr/hoja.png); compila sin avisos; coste medido en DREAMCAST.md. CHR.DAT
+regenerado en el dir de datos.
 
 Suelos (2026-11-09, ver Suelos): lista, mezcla y z de cada malla de la escena por el estado del GS (tabla 7), mezcla
 aditiva y alfa de vertice en lo que mezcla, mipmaps de las texturas cuadradas del suelo. Verificado en E (Flycast,
