@@ -302,7 +302,8 @@ estaba y se dice lo que falta). Estado: CORREGIDO, SE QUEDA (ya era del original
 | Caja de choque con el jugador: medio largo + 2,3 m, ancho + 1 m | cajas del descriptor 520950 de los dos modelos, esquinas contra bordes (4F9000) | CJM1/TRC1 | CONFIRMADO | CORREGIDO (2026-11-08) |
 | Golpe al trafico: deriva segun la posicion lateral relativa, animacion reflejada segun el lado, fuerza del sonido por diferencia de velocidad | 476040: +B58 por +26C del jugador, 4A6EA0 con lado 0, efectos por tabla | — | CONFIRMADO | CORREGIDO (2026-11-08) |
 | Muro a 1 m del limite | CbwColiWall con los puntos de la carroceria | — | PROVISIONAL | SE QUEDA |
-| Altura y orientacion del coche: 4 muestras a 1,6/0,8 m | suspension y contactos de las ruedas | — | PROVISIONAL (solo dibujo; encima van la altura, el cabeceo y el balanceo de la fisica y car+F0: Coches: piezas animadas) | SE QUEDA |
+| Altura del suelo: perfil a lo ancho de la ruta (mediana de las tiras de dibujo casi horizontales mas cercanas, tools/conv_tramo.py) | GetYPositionProg 43EB60 / GetRoadCond / CalcYPosSpl sobre la colision COLI0200 de la etapa (raiz 0) y de la union (raiz 1) | en TULI (SEG12, s 440-530) el perfil cogia la carretera de debajo del puente: hasta 5,7 m bajo la calzada (el coche pasaba por debajo) | CONFIRMADO | CORREGIDO (2026-11-09: Suelo del original) |
+| Orientacion del coche: 4 muestras a 1,6/0,8 m | suspension y contactos de las ruedas (calc_ground_coli_face) | — | PROVISIONAL (solo dibujo; las alturas ya son las de 43EB60; encima van la altura, el cabeceo y el balanceo de la fisica y car+F0: Coches: piezas animadas) | SE QUEDA |
 | Escala de puntos por avance (x10, x110) | PS2 0x28F984 / 4F2DF0 (K628244, K5C68E0) | igual | CONFIRMADO | SE QUEDA (ahora con m_pos) |
 | Piloto automatico de la demo (DEMO del titulo) | el original pasa la pelicula de MV.PS2 (ahora tambien la demo: video.c) | — | invento propio (solo si faltan las peliculas, o pruebas) | SE QUEDA |
 | META/AGOTADO: freno 0,6 y vuelta al titulo a los 600 cuadros | el original conduce solo hasta el final (camaras 4853D0..) | — | PROVISIONAL | SE QUEDA |
@@ -316,6 +317,39 @@ estaba y se dice lo que falta). Estado: CORREGIDO, SE QUEDA (ya era del original
 | Salto de cuadros (paso de 16683,33 us, hasta 600 por cuadro) | 0x1078c8: pasos = campos de video, 59,94 por segundo a 50 y 60 Hz, sin tope hasta 600 (CONFIRMADO) | antes hasta 3 pasos (por debajo de 20 fps iba lento); TIEMPO TOTAL de resultados dividia por 60 | CONFIRMADO | CORREGIDO (2026-11-09) |
 | camara.c: la carrera siguiente empieza con la vista elegida | — | — | PROVISIONAL | SE QUEDA |
 | Voz y sonido de EXTEND TIME | 4B93E0 del PC (race_hud_navi.cpp timer_4b93e0) = PS2 0x1be78c: efecto 0x4d (0x84d) y voz 0x16c (0x96c) | — | CONFIRMADO | SE QUEDA (voces.c) |
+
+## Suelo del original: colision COLI0200 (2026-11-09)
+
+Antes la altura del coche (y del trafico y de la camara) salia de un perfil inventado en la ruta (tools/conv_tramo.py
+recorrido_soo: mediana de la altura de las tiras de dibujo casi horizontales mas cercanas, ajusta_al_asfalto...). Donde
+dos carreteras se cruzan a distinta altura cogia la de debajo: en TULI (SEG12) la ruta bajaba a -2,9 m mientras la
+calzada sube por el puente hasta +5 m (el coche "pasaba por debajo de la carretera"). Ahora es la consulta del original:
+
+- `tools/conv_coli.py` (tambien lo llama `conv_union.py`): COLnn.DAT por etapa (\Stage\ZONA\coli_CS_*), COLBK.DAT
+  (\BK\coli_BK_PALM_bin, la bifurcacion entera) y COLBKkk.DAT (la meta de la etapa kk). Formato COL1: los valores del
+  COLI0200 tal cual (floats), sin repetir vertices; la rejilla de 24 m recortada a las celdas con lista; las listas;
+  tipo y banderas por poligono; los vecinos de ColiGetForward/Back/Left/RightPolygonNumber calculados en el conversor
+  (son funcion fija de las tablas: posicion de carretera, tramos de 43D4D0 y la distancia de 0,5 m entre esquinas; en
+  la raiz 1 no hay) y las normales de las esquinas solo de los poligonos que las usan (CalcHermiteTangent, cuando falta
+  el vecino de delante o el de detras). 146-314 KB por etapa, 183 KB la bifurcacion, 25 KB las metas.
+- `demo/coli.c`: port de pc_course_world.cpp (get_y_position_prog: raiz predicha primero, la otra despues; tabla
+  EasyLct de 16; -0,1 y clase 1 sin suelo; get_y_position_spl_chk con sus cuatro intentos de +0,001), pc_course_query.cpp
+  (get_road_cond: poligonos de la lista de la celda que contienen el punto en xz, plano 0x100 o Hermite 0x400, gana el
+  de altura mas cercana a la de referencia salvo bandera 4), pc_course_spline.cpp (CalcYPosSpl, CalcHermite2,
+  tangentes con vecinos o con normales, SolveHermite) y pc_collision.cpp (CalcCollisionArea, planos 43CC90). Tuning
+  lateral / longitudinal 1,0 (PC 0x67D94C / 0x67D950). En float (el PC hace parte en x87).
+- Marcos: raiz 0 la etapa cargada (la de salida en el origen, la siguiente en marco_sig), raiz 1 la union (marco_un),
+  como 7D2DA0 / 7D3190; `curso_recentra` los mueve con todo lo demas.
+- Uso: el coche del jugador con 0x400 + reintentos (el de calc_ground_coli_face), el trafico con 0x100 (43F2F0) y la
+  camara con 0x100 (43EB60 del suelo de la camara), con la referencia en la altura del propio coche (`y_ok`; recien
+  colocado, la de la ruta). La superficie de las ruedas y del centro (wheel+0x14 / +0x248) es la clase del poligono
+  de la misma consulta. La ruta queda para el avance, los carriles, los limites y muros (CbwColiWall sigue en la ruta).
+- Sin suelo bajo una muestra (fuera de la colision) esa muestra se queda a la altura del coche (el original dejaria
+  caer el coche: la demo no tiene salto); sin ficheros COL (datos antiguos), el perfil de antes. `-DSIN_COLI` fuerza
+  el perfil (para comparar) y `-DDIAG_SUELO` imprime la altura de la colision frente al perfil.
+- Comprobado en host (todas las etapas y uniones): en el centro de cada poligono de calzada el plano y el Hermite
+  difieren de media 0,5-1,3 cm (max 17 cm, curvatura); el perfil de la ruta difiere de la colision mas de 0,5 m solo
+  en TULI (22 puntos, puente) e IMPE (5 puntos, 0,72 m). Flycast: ver Ultimo cambio verificado.
 
 ## Sombras y marcas (2026-11-08)
 
@@ -1418,6 +1452,14 @@ curso entero), el fantasma (GHOST.PS2 gc_default_*, formato QHOT/NHOT, modulo 46
 pantalla de resultado 0x50 del modo 25.
 
 ## Ultimo cambio verificado
+
+Suelo del original (2026-11-09, ver Suelo del original: colision COLI0200): la altura del coche, del trafico y de la
+camara sale de 43EB60 sobre la colision de la etapa y de la union (tools/conv_coli.py, demo/coli.c) en vez del perfil
+de la ruta. Flycast: TULI (`-DPRUEBA_NODO=10 -DPRUEBA_FIN=4800`, s 440-530) antes el coche iba por debajo del puente
+empedrado (perfil -2,3 m, calzada +1,8 m), ahora va por encima (capturas iguales con `-DSIN_COLI` salvo ahi); GHOS ->
+BK09 -> IMPE -> meta BK13 y otra carrera (`-DPRUEBA_NODO=9 -DPRUEBA_RAMA=0 -DPRUEBA_FIN=400 -DPRUEBA_SIN_TIEMPO`): las
+dos raices, el recentrado y la meta dan la altura de la calzada (diferencia con el perfil < 1 cm salvo donde el perfil
+falla), RAM libre en carrera >= 1131 KB; el arranque y el titulo sin cambios.
 
 Memoria de video del curso (2026-11-09, ver DREAMCAST.md, Memoria de video del curso y del HUD): la meta BK13 no
 cabia tras GHOS -> IMPE (VRAM troceada por `pvr_mem`: 253 KB libres en huecos, BK13 219 KB) y la carrera se paraba.

@@ -24,6 +24,7 @@
 #include "../comun/vmu.h"
 #include "../comun/robot.h"
 #include "camara.h"
+#include "coli.h"
 
 /* ---------------------------------------------------------------- modelos */
 typedef struct { uint32_t w, h, fmt, lista, off, tam; } tex_t;
@@ -80,6 +81,13 @@ static inline uint32_t ta_teo(uint32_t n, int o)
    medio) y siempre quepa una etapa entera (curso_huecos) */
 static uint8_t *hueco_etapa, *hueco_union;
 static uint32_t cap_etapa, cap_union;
+/* Colision del suelo del original (demo/coli.c, tools/conv_coli.py): raiz 0 la etapa (COLnn.DAT, en el hueco de la
+   etapa detras de su SEGnn.DAT: col_en_hueco) y raiz 1 la union (COLBK.DAT la bifurcacion, COLBKkk.DAT la meta, en
+   su hueco hueco_col); la tabla de prediccion de 43EB60 es una para todas las consultas, como en el original */
+static coli_t col_et, col_un;
+static coli_pred_t col_pred;
+static uint8_t *hueco_col; static uint32_t cap_col;
+#define TAM_SECT(t) (((t) + 2047) / 2048 * 2048)
 /* lee un modelo en buf (cap bytes) o, con buf NULL, en memoria nueva */
 static int lee_modelo_en(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t cap)
 {
@@ -230,6 +238,7 @@ static void tex_suelta(modelo_t *m)
 static void libera_modelo(modelo_t *m)
 {
     tex_suelta(m);
+    if (m->datos && m->datos == hueco_etapa) col_et.ok = 0;      /* su colision va detras en el hueco */
     free(m->ofs); free(m->vis); free(m->pvs_m); free(m->pvs_teo);
     if (m->datos != hueco_etapa && !(hueco_union && m->datos >= hueco_union && m->datos < hueco_union + cap_union))
         free(m->datos);                                           /* (los objetos de la union van dentro del hueco) */
@@ -444,14 +453,27 @@ static void sube_tramo(modelo_t *m, int lado, const modelo_t *comp)
    Las lecturas de este hilo son de primer plano para gd.c: el lector de la musica espera mientras tanto y la musica
    sigue del anillo (~21 s). Una carga a la vez; estado 0 libre, 1 leyendo, 2 leido (r: resultado de lee_modelo). */
 typedef struct { modelo_t *m; const char *nombre; uint8_t *buf; uint32_t cap; volatile int estado; int r; uint64_t t0;
-                 int con_marco; float marco[4]; } carga_t;
+                 int con_marco; float marco[4];
+                 char col_nombre[16]; uint8_t *col_buf; uint32_t col_cap; coli_t col; } carga_t;
 static carga_t carga;
+static char carga_col_nombre[16]; static uint8_t *carga_col_buf; static uint32_t carga_col_cap;
+/* la proxima carga_pide lee tambien la colision nombre: en buf (cap) o, con buf NULL, detras del modelo en su hueco */
+static void carga_col(const char *nombre, uint8_t *buf, uint32_t cap)
+{
+    snprintf(carga_col_nombre, sizeof carga_col_nombre, "%s", nombre); carga_col_buf = buf; carga_col_cap = cap;
+}
 static void modelo_coloca(modelo_t *m, const float *M);
 static void *carga_hilo(void *p)
 {
     carga_t *c = p;
     c->r = lee_modelo_en(c->m, c->nombre, c->buf, c->cap);
     if (!c->r && c->con_marco) modelo_coloca(c->m, c->marco);   /* en su sitio del marco de la carrera */
+    memset(&c->col, 0, sizeof c->col);
+    if (!c->r && c->col_nombre[0]) {                            /* su colision: detras del modelo en su hueco o en col_buf */
+        uint8_t *b = c->col_buf; uint32_t cap = c->col_cap, t;
+        if (!b && c->buf && TAM_SECT(c->m->tam) <= c->cap) { b = c->buf + TAM_SECT(c->m->tam); cap = c->cap - TAM_SECT(c->m->tam); }
+        if (b && !gd_carga_en(c->col_nombre, b, cap, &t)) coli_abre(&c->col, b, t, c->con_marco ? c->marco : NULL);
+    }
     c->estado = 2;
     return NULL;
 }
@@ -460,6 +482,9 @@ static void carga_pide(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t c
 {
     carga.m = m; carga.nombre = nombre; carga.buf = buf; carga.cap = cap; carga.r = 0; carga.estado = 1; carga.t0 = timer_ms_gettime64();
     carga.con_marco = marco != NULL; if (marco) memcpy(carga.marco, marco, sizeof carga.marco);
+    /* la colision que va con este modelo (carga_col, justo antes) o ninguna */
+    memcpy(carga.col_nombre, carga_col_nombre, sizeof carga.col_nombre); carga.col_buf = carga_col_buf; carga.col_cap = carga_col_cap;
+    carga_col_nombre[0] = 0; carga_col_buf = NULL; carga_col_cap = 0;
     if (!thd_create(1, carga_hilo, &carga)) carga_hilo(&carga);   /* sin hilo: aqui mismo */
 }
 static void carga_espera(void) { while (carga.estado == 1) thd_sleep(5); }
@@ -885,6 +910,33 @@ static float altura(float s, float x)
     f = (s - s_base) / PASO; i = (int)f; f -= i; a = ruta_p + PR * i;
     return altura_punto(a, x) + f * (altura_punto(a + PR, x) - altura_punto(a, x));
 }
+/* El suelo del original (43EB60 GetYPositionProg sobre la colision de la etapa y de la union, demo/coli.c) en el
+   punto del mundo (x, z): *y entra con la altura de referencia (el poligono que gana es el mas cercano a ella: puentes
+   y pasos elevados) y sale con la del suelo; spl: modo 0x400 con reintentos (GetYPositionSplChk, el del coche del
+   jugador en calc_ground_coli_face), si no 0x100 (el plano: el trafico, 43F2F0, y la camara). Devuelve el poligono o
+   -1 (sin suelo: *y = -0,1 como el original); -2 sin colision cargada (ficheros antiguos) */
+#ifdef SIN_COLI
+static int col_hay(void) { return 0; }                          /* prueba: el perfil de la ruta de antes */
+#else
+static int col_hay(void) { return col_et.ok || col_un.ok; }
+#endif
+static int suelo_mundo(float x, float z, float *y, int spl, uint32_t *clase)
+{
+    coli_t *r[2]; int pol; uint32_t k;
+    if (!col_hay()) return -2;
+    r[0] = col_et.ok ? &col_et : NULL; r[1] = col_un.ok ? &col_un : NULL;
+    if (spl) coli_altura_spl(r, &col_pred, x, y, z, &pol, &k); else coli_altura(r, &col_pred, 0x100, x, y, z, &pol, &k);
+    if (clase) *clase = k;
+    return pol;
+}
+/* lo mismo en la distancia s y el desvio x de la ruta (la ruta solo da el sitio) */
+static int suelo_ruta(float s, float x, float *y, int spl, uint32_t *clase)
+{
+    float p[3], th;
+    if (!col_hay()) return -2;
+    ruta_en(s, p, &th, NULL, NULL);
+    return suelo_mundo(p[0] + x * cosf(th), p[2] + x * sinf(th), y, spl, clase);
+}
 /* limites transitables (positivos) en s: los de la colision, o sin ella los bordes del asfalto */
 static void limites(float s, float *li, float *ld)
 {
@@ -905,9 +957,11 @@ static const float *franjas(float s)
 }
 /* bandera de superficie (1 << material de la COLI) en (s, x), como wheel+0x14 del original; 0 sin datos. Fuera de
    los limites, vacio (1) */
+static float sup_yref;                                          /* altura de referencia (la del coche) */
 static uint32_t superficie(float s, float x)
 {
-    const float *b; float li, ld; int k;
+    const float *b; float li, ld, y = sup_yref; int k; uint32_t cl;
+    if (suelo_ruta(s, x, &y, 1, &cl) != -2) return cl;         /* la clase de GetYPositionSplChk (1 sin suelo) */
     if (!CON_SUP) return 0;
     limites(s, &li, &ld);
     if (x < -li || x > ld) return 1;
@@ -1071,7 +1125,7 @@ static void modelo_coloca(modelo_t *m, const float *M)
 
 /* ---------------------------------------------------------------- coche */
 typedef struct { float s, x, a, v; float pos[3], fw[3], up[3]; int choque, derrape, t_derrape, t_muro; float deriva, freno_ant, gas_ant;
-                 float pose_t[3], pose_r[3]; } coche_t;   /* pose: animacion de choque del original (solo al dibujar) */
+                 float pose_t[3], pose_r[3]; int y_ok; } coche_t;   /* y_ok: pos[1] es su suelo (referencia de 43EB60) */   /* pose: animacion de choque del original (solo al dibujar) */
 static coche_t yo;
 /* fisica del original para el coche del jugador (comun/or2_fisica.c) con la tabla de PARAM.DAT */
 #ifndef MODELO
@@ -1255,9 +1309,25 @@ static void coche_coloca(coche_t *c)
     t[0] = sinf(th); t[1] = 0; t[2] = -cosf(th); r[0] = cosf(th); r[1] = 0; r[2] = sinf(th);
     c->pos[0] = p[0] + c->x * r[0]; c->pos[2] = p[2] + c->x * r[2];
     c->fw[0] = cv * t[0] + sv * r[0]; c->fw[2] = cv * t[2] + sv * r[2];
-    hd = altura(c->s + 1.6f * ca, c->x + 1.6f * sa); ht = altura(c->s - 1.6f * ca, c->x - 1.6f * sa);
-    hi = altura(c->s, c->x - 0.8f); hr = altura(c->s, c->x + 0.8f);
-    c->pos[1] = 0.25f * (hd + ht + hi + hr);
+    {   /* las alturas de la colision del original (43EB60), con la referencia en el suelo del coche: el poligono del
+           nivel por el que va (en los puentes hay dos); recien colocado, la de la ruta. Sin suelo bajo un punto (fuera de la
+           colision) ese punto se queda a la altura del coche; sin colision cargada, el perfil de la ruta */
+        float yr = c->y_ok ? c->pos[1] : p[1], h[4], s4[4], x4[4]; int i, spl = c == &yo;
+        s4[0] = c->s + 1.6f * ca; x4[0] = c->x + 1.6f * sa; s4[1] = c->s - 1.6f * ca; x4[1] = c->x - 1.6f * sa;
+        s4[2] = s4[3] = c->s; x4[2] = c->x - 0.8f; x4[3] = c->x + 0.8f;
+        for (i = 0; i < 4; i++) {
+            int r; h[i] = yr; r = suelo_ruta(s4[i], x4[i], h + i, spl, NULL);
+            if (r == -2) h[i] = altura(s4[i], x4[i]); else if (r < 0) h[i] = yr;
+        }
+        hd = h[0]; ht = h[1]; hi = h[2]; hr = h[3];
+    }
+    c->pos[1] = 0.25f * (hd + ht + hi + hr); c->y_ok = 1;
+#ifdef DIAG_SUELO
+    if (c == &yo) {                                             /* el suelo de la colision frente al perfil de la ruta */
+        static int n; if (++n % 30 == 0) dbglog(DBG_INFO, "SUELO s %.0f x %.1f y %.2f perfil %.2f raices %d%d\n",
+            (double)c->s, (double)c->x, (double)c->pos[1], (double)altura(c->s, c->x), col_et.ok, col_un.ok);
+    }
+#endif
     c->fw[1] = (hd - ht) / 3.2f; norm(c->fw);
     rr[0] = -c->fw[2]; rr[1] = (hr - hi) / 1.6f; rr[2] = c->fw[0]; norm(rr);
     c->up[0] = rr[1] * c->fw[2] - rr[2] * c->fw[1]; c->up[1] = rr[2] * c->fw[0] - rr[0] * c->fw[2];
@@ -1463,7 +1533,7 @@ static void traf_nace(trafico_t *t, float s)
         t->carril = t->destino = k;
         t->v_des = t->c.v = 36.0f + azar() * 14.0f;
     }                                                           /* con tablas: modelo, color, carril y velocidad ya puestos */
-    t->c.s = s; t->c.a = 0;
+    t->c.s = s; t->c.a = 0; t->c.y_ok = 0;
     t->golpe = -1; t->t_golpe = 0; t->vlat = 0; t->t_recup = 0; t->d22 = 0; memset(t->c.pose_t, 0, 12); memset(t->c.pose_r, 0, 12);
     t->b08 = 0; t->b14 = t->b18 = 0; t->dir = 0; t->b58 = t->b60 = t->b64 = t->b6c = 0;   /* 4704A0 */
     t->b62 = 60; t->b53 = 0; t->c5c1 = 0; t->n2f4 = 0;          /* 4704A0 (PS2 0x1ec44c): +B62 = 60 salvo variante 4 */
@@ -2928,14 +2998,15 @@ static void coche_paso(coche_t *c, float giro, float gas, float freno, float dt)
                franjas de la COLI; la rueda i en (cg_del | -cg_tras, +-via/2) del cuerpo, que va a a + deriva de la
                carretera */
             float h = c->a + c->deriva, ch = cosf(h), sh = sinf(h); int i;
+            sup_yref = c->pos[1];                               /* (la referencia: el suelo del coche) */
             for (i = 0; i < 4; i++) {
                 float fx = i < 2 ? fpar.cg_del : -fpar.cg_tras, ly = fpar.via[i >> 1] * ((i & 1) ? -0.5f : 0.5f);
                 e.sup[i] = superficie(c->s + fx * ch + ly * sh, c->x + fx * sh - ly * ch);
             }
             e.sup_centro = superficie(c->s, c->x);
             memcpy(sup_rueda, e.sup, sizeof sup_rueda);         /* para las marcas (efectos_paso) */
-            sup_jug = CON_SUP ? e.sup[0] | e.sup[1] | e.sup[2] | e.sup[3] : 2u;   /* +244 (sin franjas: asfalto) */
-            sup_cen = CON_SUP ? e.sup_centro : 2u;
+            sup_jug = CON_SUP || col_hay() ? e.sup[0] | e.sup[1] | e.sup[2] | e.sup[3] : 2u;   /* +244 (sin franjas: asfalto) */
+            sup_cen = CON_SUP || col_hay() ? e.sup_centro : 2u;
         }
         if (fis.grua > 0) {                                     /* grua del choque fuerte (PlWrecker) */
             float g[3], tg, gx, gz;
@@ -2986,7 +3057,7 @@ static void coche_paso(coche_t *c, float giro, float gas, float freno, float dt)
         c->s += c->v * cosf(c->a) * dt;
         c->x += c->v * sinf(c->a) * dt + fis.corr_lat;         /* + la correccion lateral del rebote */
         fis.corr_lat = 0;
-        if (fis.recolocar) { fis.recolocar = 0; grua_on = 0; c->s = grua_s; c->x = grua_x; }   /* fin de la grua */
+        if (fis.recolocar) { fis.recolocar = 0; grua_on = 0; c->s = grua_s; c->x = grua_x; c->y_ok = 0; }   /* fin de la grua */
         ruta_en(c->s, p, &th1, &iz, &de);
         c->a = dif_ang(c->a - (th1 - th0));
         {   /* muros: CbwColiWall del original (roce o rebote) con la normal hacia la calzada. El limite es el de la
@@ -3126,7 +3197,8 @@ static void pon_coche(const coche_t *c, matrix_t mod_coche)
 /* 43EB60: altura del suelo bajo un punto cercano al coche (con el marco de la carretera en el coche) */
 static float cam_suelo(const float *p)
 {
-    float q[3], th, dx = p[0] - yo.pos[0], dz = p[2] - yo.pos[2];
+    float q[3], th, dx = p[0] - yo.pos[0], dz = p[2] - yo.pos[2], y = p[1];
+    if (suelo_mundo(p[0], p[2], &y, 0, NULL) != -2) return y;   /* 43EB60 modo 0x100 en el punto */
     ruta_en(yo.s, q, &th, NULL, NULL);
     return altura(yo.s + dx * sinf(th) - dz * cosf(th), yo.x + dx * cosf(th) + dz * sinf(th));
 }
@@ -3534,19 +3606,42 @@ static void marco_compone(const float *m1, const float *m2, float *o)
     float c = cosf(m1[3]), sn = sinf(m1[3]), x = m2[0], z = m2[2];
     o[0] = m1[0] + x * c + z * sn; o[1] = m1[1] + m2[1]; o[2] = m1[2] - x * sn + z * c; o[3] = m1[3] + m2[3];
 }
-/* reserva los huecos de RAM de las etapas y de la union (el tamano del mayor fichero de cada uno, en el GD) */
+/* colision de la union de la etapa k: la bifurcacion (la misma en todas) o su meta */
+static void col_nombre_union(char *n, int k)
+{
+    if (curso[k].izq >= 0) strcpy(n, "COLBK.DAT"); else sprintf(n, "COLBK%02d.DAT", k);
+}
+/* colision de la etapa recien leida en el hueco (detras de su SEGnn.DAT), en el marco M; sin el fichero, ninguna */
+static void col_en_hueco(int k, const float *M)
+{
+    char n[16]; uint32_t t, o = TAM_SECT(etapa.tam);
+    memset(&col_et, 0, sizeof col_et);
+    sprintf(n, "COL%02d.DAT", curso[k].seg);
+    if (etapa.datos == hueco_etapa && o <= cap_etapa && !gd_carga_en(n, hueco_etapa + o, cap_etapa - o, &t))
+        coli_abre(&col_et, hueco_etapa + o, t, M);
+    if (!col_et.ok) dbglog(DBG_ERROR, "COLI: sin %s (altura del perfil de la ruta)\n", n);
+}
+/* reserva los huecos de RAM de las etapas (con su colision) y de la union (el tamano del mayor fichero de cada uno,
+   en el GD) y el de la colision de la union */
 static int curso_huecos(void)
 {
-    uint32_t lba, t; int i; char n[16];
-    for (i = 0; i < ncurso; i++) {
+    uint32_t lba, t, tc; int i; char n[16];
+    for (i = 0; i < ncurso; i++) {                              /* la etapa y detras su colision (COLnn.DAT) */
         sprintf(n, "SEG%02d.DAT", curso[i].seg);
-        if (!gd_busca(n, &lba, &t) && (t + 2047) / 2048 * 2048 > cap_etapa) cap_etapa = (t + 2047) / 2048 * 2048;
+        if (!gd_busca(n, &lba, &t)) {
+            sprintf(n, "COL%02d.DAT", curso[i].seg);
+            if (gd_busca(n, &lba, &tc)) tc = 0;
+            if (TAM_SECT(t) + TAM_SECT(tc) > cap_etapa) cap_etapa = TAM_SECT(t) + TAM_SECT(tc);
+        }
         sprintf(n, "BK%02d.DAT", i);
-        if (!gd_busca(n, &lba, &t) && (t + 2047) / 2048 * 2048 > cap_union) cap_union = (t + 2047) / 2048 * 2048;
+        if (!gd_busca(n, &lba, &t) && TAM_SECT(t) > cap_union) cap_union = TAM_SECT(t);
+        col_nombre_union(n, i);
+        if (!gd_busca(n, &lba, &t) && TAM_SECT(t) > cap_col) cap_col = TAM_SECT(t);
     }
     hueco_etapa = memalign(32, cap_etapa); hueco_union = cap_union ? memalign(32, cap_union) : NULL;
-    dbglog(DBG_INFO, "CURSO: %d etapas, huecos etapa %uK union %uK\n", ncurso, (unsigned)(cap_etapa >> 10), (unsigned)(cap_union >> 10));
-    return !hueco_etapa || (cap_union && !hueco_union);
+    hueco_col = cap_col ? memalign(32, cap_col) : NULL;
+    dbglog(DBG_INFO, "CURSO: %d etapas, huecos etapa %uK union %uK colision de la union %uK\n", ncurso, (unsigned)(cap_etapa >> 10), (unsigned)(cap_union >> 10), (unsigned)(cap_col >> 10));
+    return !hueco_etapa || (cap_union && !hueco_union) || (cap_col && !hueco_col);
 }
 /* lee la etapa de la clave k en el hueco (la de salida); 0 bien */
 static int curso_lee_etapa(int k)
@@ -3555,6 +3650,7 @@ static int curso_lee_etapa(int k)
     sprintf(n, "SEG%02d.DAT", curso[k].seg);
     r = lee_modelo_en(&etapa, n, hueco_etapa, cap_etapa);
     etapa_nodo = r ? -1 : k;
+    if (!r) { static const float M0[4]; col_en_hueco(k, M0); }   /* la de salida: en el origen */
     return r;
 }
 /* al empezar una carrera: la etapa de salida (leida otra vez si ya se habia liberado o era otra) y nada mas */
@@ -3579,6 +3675,7 @@ static void curso_reinicia(void)
     if (curso[k].m_pos > 1.0f) m_pos = curso[k].m_pos;
     s_union = s_decide = s_sig = s_meta = s_suelta = -1; s_etapa = 0;
     marco_et[0] = marco_et[1] = marco_et[2] = marco_et[3] = 0;
+    memset(&col_pred, 0, sizeof col_pred); col_un.ok = 0;
 }
 /* posicion del centro de la ruta del fichero m en su punto i (m->ruta) */
 static float dist_centro(const modelo_t *m, uint32_t i, const float *p)
@@ -3619,6 +3716,7 @@ static void curso_recentra(float dx, float dz)
         rmarca[k].ant[0] -= dx; rmarca[k].ant[2] -= dz;
     }
     cam_traslada(&cam, dx, 0, dz);                              /* camara.c: solo el ojo y la mira van en el mundo */
+    col_et.marco[0] -= dx; col_et.marco[2] -= dz; col_un.marco[0] -= dx; col_un.marco[2] -= dz;   /* 7D2DA0 / 7D3190 */
     ojo[0] -= dx; ojo[2] -= dz;
 }
 /* una vez por paso de logica en carrera: cargas, eleccion de rama, liberaciones y cambio de etapa; devuelve los
@@ -3638,6 +3736,8 @@ static int curso_paso(void)
         if (carga.r) curso_error("No se pudo leer la etapa siguiente");
         t_carga_ult = (timer_ms_gettime64() - carga.t0) / 1000.0f;
         if (m == &uni) {
+            col_un = carga.col;                                 /* raiz 1 (7D3190: el marco de la union) */
+            if (!col_un.ok) dbglog(DBG_ERROR, "COLI: sin la colision de %s\n", fich_union);
             sube_tramo(m, 2, e->izq < 0 && etapa.tv ? &etapa : NULL);   /* la meta comparte lo que tenga igual la etapa */
             if ((int)(i_union = ruta_anade(m)) < 0) curso_error("Sin memoria para la ruta");
             j_union = ruta_salto; s_union = s_base + i_union * PASO;
@@ -3651,6 +3751,8 @@ static int curso_paso(void)
             bo_subido();
         } else if (m == &sig) {
             int i;
+            col_et = carga.col;                                 /* raiz 0: la etapa siguiente en su marco */
+            if (!col_et.ok) dbglog(DBG_ERROR, "COLI: sin la colision de %s\n", fich_sig);
             sube_tramo(m, 1, NULL);
             if ((i = ruta_anade(m)) < 0) curso_error("Sin memoria para la ruta");
             s_sig = s_base + i * PASO;
@@ -3662,7 +3764,9 @@ static int curso_paso(void)
         }
     }
     if (s_union < 0 && !uni.datos && etapa.datos && carga.estado == 0 && yo.s > longitud - UNION_ANTES) {
+        char cn[16];
         marco_compone(marco_et, e->bk, marco_un); sprintf(fich_union, "BK%02d.DAT", cur_nodo);
+        col_nombre_union(cn, cur_nodo); carga_col(cn, hueco_col, cap_col);
         carga_pide(&uni, fich_union, hueco_union, cap_union, marco_un);
     }
     if (s_union >= 0 && !cur_en_union && yo.s >= s_union) { cur_en_union = 1; ev |= CUR_UNION; }
@@ -3692,7 +3796,11 @@ static int curso_paso(void)
         marco_compone(marco_un, e->rama[cur_rama], marco_sig); sprintf(fich_sig, "SEG%02d.DAT", curso[cur_sig].seg);
         ram_kb(&u, &l); dbglog(DBG_INFO, "CURSO: etapa %d liberada (s %.0f), recentrado, RAM libre %uK, VRAM libre %uK (zona %uK)\n", cur_nodo, (double)yo.s, l, (unsigned)(vram_libre() >> 10), (unsigned)(ar_libre() >> 10));
     }
-    if (cur_rama >= 0 && !etapa.datos && !sig.datos && s_sig < 0 && carga.estado == 0) carga_pide(&sig, fich_sig, hueco_etapa, cap_etapa, marco_sig);
+    if (cur_rama >= 0 && !etapa.datos && !sig.datos && s_sig < 0 && carga.estado == 0) {
+        char cn[16]; sprintf(cn, "COL%02d.DAT", curso[cur_sig].seg);
+        carga_col(cn, NULL, 0);                                 /* detras de la etapa, en su hueco */
+        carga_pide(&sig, fich_sig, hueco_etapa, cap_etapa, marco_sig);
+    }
     if (s_sig >= 0 && yo.s >= s_sig) {                         /* la etapa siguiente pasa a ser la actual */
         etapa = sig; memset(&sig, 0, sizeof sig); etapa_nodo = cur_sig; cielo = &etapa;
         cur_nodo = cur_sig; cur_sig = -1; memcpy(marco_et, marco_sig, sizeof marco_et);
@@ -3701,7 +3809,7 @@ static int curso_paso(void)
         s_union = s_decide = s_sig = -1; cur_rama = -1; cur_en_union = 0;
         ev |= CUR_SIGUIENTE;
     }
-    if (s_suelta >= 0 && uni.datos && yo.s > s_suelta) { libera_modelo(&uni); s_suelta = -1; }
+    if (s_suelta >= 0 && uni.datos && yo.s > s_suelta) { libera_modelo(&uni); col_un.ok = 0; s_suelta = -1; }
     return ev;
 }
 /* de vuelta al menu: fuera de la VRAM la union, la etapa siguiente y las texturas de la etapa (el menu no las dibuja;
@@ -3714,7 +3822,7 @@ static void curso_al_menu(void)
     if (!t0) { t0 = timer_ms_gettime64(); return; }
     if (timer_ms_gettime64() - t0 < 60 || carga.estado == 1) return;   /* (una lectura en curso: al acabar) */
     t0 = 0; carga.estado = 0;
-    libera_modelo(&uni); libera_modelo(&uni_der); libera_modelo(&sig);
+    libera_modelo(&uni); libera_modelo(&uni_der); libera_modelo(&sig); col_un.ok = 0;
     bo_quita();                                                 /* objetos de la union: su RAM y su VRAM */
     tex_suelta(&etapa); ar_suelta();
     dbglog(DBG_INFO, "VRAM: el curso fuera (menu), libre %uK\n", (unsigned)(pvr_mem_available() >> 10));
@@ -5995,7 +6103,7 @@ int main(int argc, char **argv)
         /* camara: en el menu gira alrededor del coche (seleccion de coche); en carrera, la del original (camara.c) */
         if (estado == TITULO) {
             float a = menu_giro();                              /* el coche gira +100/65536 de vuelta por paso (4A5B20) */
-            yo.s = SALIDA; yo.x = SALIDA_X; yo.v = 0; coche_paso(&yo, 0, 0, 0, 0); cam_y = yo.pos[1];
+            yo.s = SALIDA; yo.x = SALIDA_X; yo.v = 0; yo.y_ok = 0; coche_paso(&yo, 0, 0, 0, 0); cam_y = yo.pos[1];
             ojo_[0] = yo.pos[0] + MENU_CAM_D * sinf(a); ojo_[1] = yo.pos[1] + MENU_CAM_Y; ojo_[2] = yo.pos[2] + MENU_CAM_D * cosf(a);
             mira[0] = yo.pos[0]; mira[1] = yo.pos[1] + MENU_CAM_MIRA; mira[2] = yo.pos[2];
         } else if (cam_ok) {

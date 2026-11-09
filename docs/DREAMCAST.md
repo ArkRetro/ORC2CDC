@@ -60,6 +60,9 @@ tamano del mayor SEGnn.DAT: 7832 KB, SEG13, desde la PVS) y la union en otro (el
 reservados al arrancar. Fuera de la carrera el hueco de la union se presta (ver RAM del arranque y del menu, abajo).
 La ruta es una ventana: al soltar una etapa se quitan sus puntos (`ruta_recorta`) y el marco se recentra en el
 principio de la union (`curso_recentra`), asi que ni la RAM de la ruta ni las coordenadas crecen de etapa en etapa.
+La colision del suelo (COLnn.DAT, PARIDAD.md Suelo del original) va en el hueco de la etapa detras de su SEGnn.DAT
+(el hueco pasa a ser el mayor SEG + COL: 8040 KB, +207 KB por COL13 detras de SEG13; las demas caben en lo que les
+sobra) y la de la union en un hueco propio del mayor COLBK* (184 KB): +391 KB de RAM en total.
 
 Medido en Flycast (`DIAG_VTX`, pruebas encadenadas por las dos rutas y por IMPE, 2026-11-08):
 

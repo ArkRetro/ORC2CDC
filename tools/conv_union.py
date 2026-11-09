@@ -23,6 +23,7 @@ Salida (formato ORD7 de modelo.py, cada fichero en su propio marco; la demo los 
            es del reflejo del coche; los porticos de COMMON obj_course_obj_bk_palm con los carteles obj_OBJ_<ZONA>_BUNKI_TX de sus dos destinos, el cielo de la
            etapa y la ruta de la rama izquierda) o meta (cs_BK_<zona> con su colision, el cielo de la etapa y su ruta)
  BKD.DAT   solo la ruta de la rama derecha de la bifurcacion (la misma en todas)
+ COLnn.DAT, COLBK.DAT, COLBKkk.DAT la colision del suelo del original (tools/conv_coli.py)
  CURSO.DAT el arbol: zona, SEGnn, nivel, hijos, colocaciones, metros por posicion de carretera, meta, niebla y entorno
            (banderas de efectos, transicion de la union, las tres luces, niebla del cielo)
  SOL.DAT   el sol y el destello (banco 0x57: sol_dat)
@@ -462,6 +463,7 @@ def curso(A, dsal, con_tramos=True, solo_curso=False):
                  len(mod.mallas), len(mod.texs), len(mod.blob) >> 10, os.path.getsize(f) >> 10, r['m_pos'], len(r['niebla'])))
     escribe_curso(os.path.join(dsal, 'CURSO.DAT'), sal)
     sol_dat(A, os.path.join(dsal, 'SOL.DAT'))
+    import conv_coli; conv_coli.curso(A, dsal)             # la colision del suelo (COLnn.DAT, COLBK*.DAT)
     if con_tramos and not solo_curso:
         for r in sal:
             cb, sol3 = cielos[r['seg']]
