@@ -928,6 +928,13 @@ que la Dreamcast espera de un juego: todo sale de graficos del disco (`tools/con
 
 ## Ultimo cambio verificado
 
+Suelos (2026-11-09, ver Suelos): lista, mezcla y z de cada malla de la escena por el estado del GS (tabla 7), mezcla
+aditiva y alfa de vertice en lo que mezcla, mipmaps de las texturas cuadradas del suelo. Verificado en E (Flycast,
+PRUEBA_AUTO, PALM, LAKE, ALPI, CAST, DESE, SNOW, METR y la union de PALM; hoja antes/despues en el scratchpad,
+suelo/hoja.png): calzada de METR opaca (antes translucida y azulada, ahora recibe la sombra del coche), suelo lejano de
+PALM sin centelleo de las rayas, arboles de PALM en la lista de recorte; compila sin avisos; VRAM del peor caso medida
+(DREAMCAST.md, Suelos). Datos regenerados con conv_union.py.
+
 Golpeados y vibracion (2026-11-09, ver Choques entre coches: Golpeados y Vibracion): el coche golpeado (476040) se
 ve entero 30 cuadros, parpadea a 30 Hz (4AE5F0, +B53) y a los 120 cuadros se cierra (478340) y libera la plaza; los que
 aparecen parpadean 60 cuadros (+B62 de 4704A0); vibracion del mando de SLES-53998 (0x1d0420 / 0x1023a0) en el Puru Puru.
