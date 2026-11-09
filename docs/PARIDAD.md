@@ -22,7 +22,7 @@ paso por 16683 us (59,94 Hz).
 ## Como compilar y probar
 
 - `cd demo && make` (KallistiOS en /opt/toolchains/dc/kos). Defines de prueba: `PRUEBA_JUGADOR`, `PRUEBA_AUTO`,
-  `PRUEBA_TRAFICO`, `PRUEBA_CHOQUE`, `PRUEBA_RAMA=0/1` (rama que toma el piloto), `PRUEBA_NODO=k` (etapa de salida, clave del arbol), `PRUEBA_V`, `PRUEBA_FISICA` (resumen de la fisica cada segundo), `SALIDA`, `VER=1`, `DIAG_VTX`.
+  `PRUEBA_TRAFICO`, `PRUEBA_CHOQUE`, `PRUEBA_RAMA=0/1` (rama que toma el piloto), `PRUEBA_NODO=k` (etapa de salida, clave del arbol), `PRUEBA_V`, `PRUEBA_FISICA` (resumen de la fisica cada segundo), `PRUEBA_VMU` (guarda la licencia al arrancar y la vuelve a leer), `SALIDA`, `VER=1`, `DIAG_VTX`.
 - Datos: conversores de tools/ (ver ASSETS.md) a un dir de datos; `tools/mkgdi.py demo/demo.elf dir --datos datos`.
 - Niveles de verificacion usados abajo: **C** compila, **H** verificado en host (tools/c/prueba_fisica.c),
   **E** verificado en emulador (Flycast), **R** verificado en Dreamcast real (GDEMU del probador).
@@ -47,7 +47,7 @@ Estado: OK (conectado y verificado al nivel indicado), PARCIAL, PROVISIONAL (apr
 | Eventos, scripts, progresion, misiones | SCRIPTS.PS2 (Races, RaceAttack, OutrunMiles, Req_*) | FALTA | — | — | — | — |
 | Coches del jugador | CARS.PS2 1-32 / 33-63, disposicion 0x3d3ff0; materiales tabla 4/5 del bloque; colores 0x35ad48 (PC 64D120/408C80); mapa de entorno del bloque | PARCIAL | 15 coches montados como 46A560 (port comprobado), con interior, 9320-11195 vertices dibujados; pintura, 8 colores (Y en la seleccion), reflejo y luces (+7C/+80/+84/+60, CEX2) del original; piezas animadas (ruedas, volante, aleron, faros, disco caliente, car+F0 y el cuerpo de la fisica; ANI1) | UV de entorno con la formula esferica clasica (la del microcodigo VU1 sin leer); sin bits de noche/tunel | ver secciones Coches | E |
 | Escenarios, texturas, materiales | STAGE.PS2, VQ, scn_env_fog_<zona> | PARCIAL | 15 tramos + 15 uniones; mallas con su material (tabla 5) y la luz del entorno 1 de la zona; niebla, cielo y sol del original (ver Entorno); tiras (ADC), nodos, LOD y planos del original | sin objetos de tramo (obj_course_obj_cs_*); cs_ENV_* no es de la escena (es del reflejo del coche); destello sin consulta de oclusion; luces locales (maya_spl) sin portar | — | E |
-| HUD, menus, transiciones | SPRANI/XST, TEXT.PS2 (espanol: SPANISH.bin y XST _sxst) | PARCIAL | HUD.DAT, MENU.DAT; todas las pantallas del menu principal y de un jugador, licencia con VMU, seleccion de coche del original, menu de pausa con AUDIO (ver Menus y Pausa y mezcla) | titulo es un cuadro del video (la pelicula de titulo en bucle detras del rotulo, sin hacer); textos bfont antiguos en la demo automatica y el aviso de rama; rotulos de las filas de opciones (sprites sin localizar) | quitar textos bfont | E |
+| HUD, menus, transiciones | SPRANI/XST, TEXT.PS2 (espanol: SPANISH.bin y XST _sxst) | PARCIAL | HUD.DAT, MENU.DAT; todas las pantallas del menu principal y de un jugador, licencia con VMU (icono, eyecatch y LCD: VMU.DAT, ver VMU), seleccion de coche del original, menu de pausa con AUDIO (ver Menus y Pausa y mezcla) | titulo es un cuadro del video (la pelicula de titulo en bucle detras del rotulo, sin hacer); textos bfont antiguos en la demo automatica y el aviso de rama; rotulos de las filas de opciones (sprites sin localizar) | quitar textos bfont | E |
 | Musica y efectos | MUSIC.PS2, SOUND.PS2 ICS/MENU/FE; volumenes 0x11ae38 / 0x100210 / 0x11b600, SOUNDCD.IRX 0x2118 | PARCIAL | musica.c, sfx.c; mezcla del original (ver Pausa y mezcla) | 48 kHz supuesto; sin sonido por superficie ni del choque fuerte | — | E |
 | Voces (acompanante y locutor) | SOUND.PS2 `\SPANISH\ORC.PAK`, `PERO.pak`; race_robots 489A90/488D80 = PS2 0x202e60..0x205cac; 4B93E0, 4B9CD0, 49C9C0, 499020, GAME 0x1b83e8 | OK | VOCES.DAT (conv_sonido.py), voces.c; verificado en Flycast (ver Voces y video) | una voz nueva corta la anterior (SUPUESTO); "choque con otro coche" = +4 0x4000000 del jugador (4F7BF0 le ha cambiado la velocidad) en un choque; sin voces de asustada/trompo (solo Coast 2 Coast) | — | E |
 | Peliculas (titulo y atraccion) | MV.PS2 ts50/attr50.pss; 0x12d480, ADVERTISE 0x25e1d8 | OK | MVTS.VQV / MVATTR.VQV (conv_video.py), video.c | VQ de la PowerVR a 512x256 estirado a 640x480 (el original: MPEG-2 640x480); al arrancar y por inactividad del titulo, en vez de la demo de carrera | — | E |
@@ -135,7 +135,8 @@ consola, el port lo fija al convertir). Hoja de capturas de Flycast: scratchpad 
   0x440090 en (-84, 110); desde el nombre se baja a la nacionalidad (la foto no se alcanza: igual en PS2 y PC); B deshace
   nombre, bandera y signo; los nombres ENTIRETY (todo desbloqueado, 447360) y MILESANDMILES se aplican al salir con B,
   como el original. Registro de 0x40C bytes con la disposicion del original y los valores nuevos de 4471A0; hasta 4.
-  Guardado: VMU A1, fichero OR2C2C (vmu_pkg con un icono liso), al elegir, al acabar el editor y al salir de opciones.
+  Guardado: VMU A1, fichero OR2C2C (cabecera VMS con icono animado y eyecatch del logo, ver VMU), al elegir, al acabar
+  el editor y al salir de opciones.
   El teclado del nombre (468D40: 1-0, A-Z, espacio y borrar; START acepta) no tiene sprites en el disco del PS2: se
   escribe con la fuente 14 en 6 columnas donde van las rejillas (PROVISIONAL). Textos de la tarjeta con la fuente 14
   y el color de sus rotulos (medido en la textura); sin cifras de COMPLETADO / RANKING / T.CONDUC. (la demo no las lleva).
@@ -760,6 +761,25 @@ main.c "entorno del original", cielo_dibuja, sol_dibuja, coche_luz).
   no se dibujan (cubo por cuadro: TA y VRAM que no hay).
 - Verificado (E, Flycast, PRUEBA_AUTO): PALM, LAKE, ALPI, SNOW, DESE, METR y la union PALM -> LAKE con la mezcla a medias
   (hoja en el scratchpad: cielo/hoja.png); sol con PRUEBA_SOL (sol delante, solo prueba).
+
+## VMU: icono, eyecatch y pantalla LCD (2026-11-09)
+
+No es paridad con el PS2 (la tarjeta de memoria del PS2 lleva un icono 3D del coche, `SYSTEM.PS2 \VIEW.ICO`) sino lo
+que la Dreamcast espera de un juego: todo sale de graficos del disco (`tools/conv_vmu.py` -> VMU.DAT, `comun/vmu.c`).
+- Fichero OR2C2C: cabecera VMS de vmu_pkg con "OUTRUN 2006 C2C" / "Licencia OutRun", app id OR2C2C, icono de 32x32 y
+  16 colores en 2 cuadros ("OutRun" con las palmeras y "2006", recortes del logo del titulo, k-medias con la paleta a
+  ARGB4444; velocidad 30) y eyecatch de 72x56 a 256 colores (el logo entero). 9852 bytes = 20 bloques (antes 10).
+  Se escribe y se lee en bruto (O_META) y se comprueba con vmu_pkg_parse; si la cabecera no vale (ficheros viejos) los
+  datos se buscan por la marca 'OR2L' como antes.
+- LCD (48x32) de todas las VMU con pantalla (MAPLE_FUNC_LCD): en el titulo y los menus el logo ("OutRun" y "2006",
+  2,5 s cada uno); en carrera la velocidad "%03d" con las cifras del velocimetro del HUD reducidas a 18 pixeles y la
+  caja de cambios (cifras de CAJA6 a 9 pixeles, 5 o 6 casillas) con un marco en la marcha actual. vmu_draw_lcd encola
+  sin esperar (si la unidad esta ocupada se reintenta); se compone como mucho cada 250 ms y solo se envia a las unidades
+  cuya ultima imagen es distinta. La imagen se gira 180 grados (la VMU va al reves en el mando).
+- Verificado (E, Flycast con rend.FloatVMUs): `PRUEBA_VMU` lee la licencia del formato anterior (vmu_pkg_parse la
+  acepta), guarda con la cabecera nueva y la relee ("cabecera VMS bien (2 iconos, eyecatch 2)"); LCD del logo en A1 y
+  A2 en el titulo y velocidad / marcha en carrera (`PRUEBA_AUTO`); gestor de memoria de la BIOS con el icono y el
+  eyecatch. Previas en el scratchpad (vmu/). Pendiente: R (VMU real en GDEMU).
 
 ## Ultimo cambio verificado
 

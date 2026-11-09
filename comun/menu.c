@@ -19,7 +19,7 @@
    paso (4A5B20).
    Licencia: hasta 4 (como el original), registro de 0x40C bytes con la disposicion del original (nombre +0, signo +0x18,
    bandera +0x1C, foto +0x20, desbloqueos +0x28, opciones +0xD8.., en uso +0x3F4 bit 0), nueva con los valores de
-   4471A0 y el nombre 0x219; en la VMU A1 (fichero OR2C2C, vmu_pkg).
+   4471A0 y el nombre 0x219; en la VMU A1 (fichero OR2C2C, vmu_pkg con el icono y el eyecatch de VMU.DAT).
    Sonido (como el original): efectos del frontal con sfx_menu (cursor, aceptar, bloqueado, cancelar); el titulo va
    sin musica (en el original suena la pelicula), al salir de el arranca la musica de menu (pista 30 de MUSIC.PS2,
    MUS30.ADP); en la musica cada tema suena con su avance (pista 33 + tema) y al confirmar empieza el tema elegido.
@@ -35,6 +35,7 @@
 #include "musica.h"
 #include "sfx.h"
 #include "menu.h"
+#include "vmu.h"
 
 void (*menu_gancho)(int pantalla, int evento, int valor);
 void (*menu_suelta_coche)(void);
@@ -187,46 +188,54 @@ static void lic_desbloquea(uint8_t *p)
     memset(p + 0x1dd, 6, 0x190); memset(p + 0x1c9, 0, 20); memset(p + 0x36e, 0x66, 0x84);
 }
 
-/* VMU: fichero OR2C2C en A1 (vmu_pkg): 'OR2L', u32 version, i32 licencia activa, 4 registros de 0x40C */
+/* VMU: fichero OR2C2C en A1. Contenido: 'OR2L', u32 version, i32 licencia activa, 4 registros de 0x40C, detras de la
+   cabecera VMS (vmu_pkg: descripciones, icono animado y eyecatch de VMU.DAT, comun/vmu.c). Se lee y se escribe en
+   bruto (O_META): fs_vmu no toca la cabecera y vmu_pkg_parse la comprueba (CRC incluido). Los ficheros del formato
+   anterior (icono liso, sin eyecatch; algunos con una cabecera que vmu_pkg_parse no acepta) se siguen leyendo: si la
+   cabecera no vale, los datos se buscan por la marca 'OR2L' */
 #define VMU_FICH "/vmu/a1/OR2C2C"
 static void vmu_lee(void)
 {
     file_t f; uint8_t *b; int sz;
-    f = fs_open(VMU_FICH, O_RDONLY);
+    f = fs_open(VMU_FICH, O_RDONLY | O_META);
     if (f < 0) { dbglog(DBG_INFO, "menu: sin %s\n", VMU_FICH); return; }
     sz = fs_total(f); b = malloc(sz > 0 ? sz : 1);
-    /* datos detras de la cabecera de 128 bytes y el icono (vmu_pkg_parse no se usa: rechaza el CRC 0 que deja el
-       vmu_pkg_build de esta version de KOS) */
     if (b && fs_read(f, b, sz) == sz) {
-        int o; for (o = 0; o + 12 + (int)sizeof lic <= sz && memcmp(b + o, "OR2L", 4); o += 4) ;
-        if (o + 12 + (int)sizeof lic > sz) o = -1;
-        dbglog(DBG_INFO, "menu: datos de la VMU en +%d\n", o);
+        vmu_pkg_t pk; int o = -1;
+        if (!vmu_pkg_parse(b, sz, &pk) && pk.data_len >= 12 + (int)sizeof lic && !memcmp(pk.data, "OR2L", 4)) {
+            o = pk.data - b;
+            dbglog(DBG_INFO, "menu: cabecera VMS bien (%d iconos, eyecatch %d), datos en +%d\n", pk.icon_cnt, pk.eyecatch_type, o);
+        } else {                                            /* formato anterior: busca la marca */
+            for (o = 0; o + 12 + (int)sizeof lic <= sz && memcmp(b + o, "OR2L", 4); o += 4) ;
+            if (o + 12 + (int)sizeof lic > sz) o = -1;
+            dbglog(DBG_INFO, "menu: cabecera VMS no valida; datos por la marca en +%d\n", o);
+        }
         if (o >= 0) {
-        const uint8_t *d = b + o;
-        memcpy(&lic_sel, d + 8, 4);
-        memcpy(lic, d + 12, sizeof lic);
-        if (lic_sel < -1 || lic_sel >= N_LIC || (lic_sel >= 0 && !lic_usada(lic_sel))) lic_sel = -1;
-        vmu_ok = 1;
-    } }
+            const uint8_t *d = b + o;
+            memcpy(&lic_sel, d + 8, 4);
+            memcpy(lic, d + 12, sizeof lic);
+            if (lic_sel < -1 || lic_sel >= N_LIC || (lic_sel >= 0 && !lic_usada(lic_sel))) lic_sel = -1;
+            vmu_ok = 1;
+        }
+    }
     dbglog(DBG_INFO, "menu: %s %d bytes, licencia %d%s\n", VMU_FICH, sz, lic_sel, vmu_ok ? "" : " (no vale)");
     free(b); fs_close(f);
 }
 static void vmu_guarda(void)
 {
-    static uint8_t icono[512]; vmu_pkg_t pkg; uint8_t *d, *out = NULL; int n, v = 1, i; file_t f;
+    vmu_pkg_t pkg; uint8_t *d, *out = NULL; int n, v = 1, i; file_t f;
     d = malloc(12 + sizeof lic); if (!d) return;
     memcpy(d, "OR2L", 4); memcpy(d + 4, &v, 4); memcpy(d + 8, &lic_sel, 4); memcpy(d + 12, lic, sizeof lic);
     for (i = 0; i < N_LIC; i++) lic[i][0x3f4] &= ~2;        /* +3F4 bit 1: cambios sin guardar */
     memset(&pkg, 0, sizeof pkg);
-    strcpy(pkg.desc_short, "OUTRUN 2006 C2C"); strcpy(pkg.desc_long, "OutRun License"); strcpy(pkg.app_id, "OR2C2C");
-    pkg.icon_cnt = 1; pkg.icon_anim_speed = 0; pkg.icon_pal[0] = 0xf000; pkg.icon_pal[1] = 0xfc00;
-    memset(icono, 0x11, sizeof icono); pkg.icon_data = icono;
+    vmu_cabecera(&pkg);                                     /* descripciones, icono y eyecatch (comun/vmu.c) */
     pkg.data_len = 12 + sizeof lic; pkg.data = d;
     if (!vmu_pkg_build(&pkg, &out, &n)) {
         musica_pausa_lectura(1);
         fs_unlink(VMU_FICH);
-        if ((f = fs_open(VMU_FICH, O_WRONLY)) >= 0) { if (fs_write(f, out, n) == n) vmu_ok = 1; fs_close(f); }
-        dbglog(DBG_INFO, "menu: guardado %s (%d bytes): %s\n", VMU_FICH, n, f >= 0 ? "bien" : "no se pudo abrir");
+        if ((f = fs_open(VMU_FICH, O_WRONLY | O_TRUNC | O_META)) >= 0) { if (fs_write(f, out, n) == n) vmu_ok = 1; fs_close(f); }
+        dbglog(DBG_INFO, "menu: guardado %s (%d bytes, %d bloques): %s\n", VMU_FICH, n, (n + 511) / 512,
+               f >= 0 ? "bien" : "no se pudo abrir");
         musica_pausa_lectura(0);
     }
     free(out); free(d);
@@ -334,6 +343,10 @@ int menu_inicia(void)
 {
     const uint8_t *x; int i, p; uint32_t o2;
     vmu_lee();
+#ifdef PRUEBA_VMU
+    /* prueba: guarda al arrancar con la cabecera nueva y vuelve a leer (dbglog de los dos pasos) */
+    vmu_guarda(); vmu_ok = 0; vmu_lee();
+#endif
     if (!(md = hudd_abre("MENU.DAT", 0, 1))) return -1;
     x = hudd_extra(md);
     if (memcmp(x, "MNU1", 4)) { md = NULL; return -2; }

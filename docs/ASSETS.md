@@ -86,7 +86,8 @@ orden alfabetico en mayusculas; STAGE.PS2 no sigue ese orden dentro de cada zona
 | Sonido | SOUND.PS2 | bancos `.PAK`: efectos del coche (ICS), interfaz, resultados, finales, objetos del fondo; voces por idioma (`\IDIOMA\...`: locutor, misiones, ranking...) | banco ICS, banco SE | `conv_sonido.py` (ICS: motor, derrape, golpe; SE: efectos de menu de MENU.pak y Fe.pak -> SFX.DAT; voces de la carrera de `\<IDIOMA>\ORC.PAK` y `PERO.pak` y los efectos 0x4d / 0x18d de IGC.PAK -> VOCES.DAT) |
 | Musica | MUSIC.PS2 | una pista por fichero `\NN.ps2` | PS-ADPCM estereo | `tools/c/musica.c` (a ADPCM de Yamaha) |
 | Video | MV.PS2 | `\ts50.pss`, `\ts60.pss` (pantalla de titulo) y `\attr50.pss`, `\attr60.pss` (atraccion), de 50 y 60 Hz | PSS (MPEG-2 + PCM) | `conv_video.py` (las de 50 Hz -> MVTS.VQV, MVATTR.VQV) |
-| Sistema | SYSTEM.PS2 | modulos del IOP (`\IRX\*`), iconos de tarjeta, DNAS | IRX, icono | `conv_sonido.py` lee la tabla de muestras de `\IRX\SOUNDCD.IRX` |
+| Sistema | SYSTEM.PS2 | modulos del IOP (`\IRX\*`), iconos de tarjeta (`VIEW.ICO`, `COPY.ICO`, `DEL.ICO`: el mismo modelo 3D del coche rojo), DNAS | IRX, icono | `conv_sonido.py` lee la tabla de muestras de `\IRX\SOUNDCD.IRX` |
+| VMU (DC) | MV.PS2 (logo del titulo), SPRANI/SPRITE banco 0x2C (cifras del velocimetro y caja de cambios del HUD) | icono y eyecatch del fichero de guardado, imagenes de la LCD de la VMU | - | `conv_vmu.py` (VMU.DAT; formato en su cabecera; `comun/vmu.c`) |
 
 ## Formatos
 
@@ -166,6 +167,12 @@ PC: `race_ghosts.cpp` (465F30..4687C0), `pc_car_services_ghost.cpp`.
 
 **object_db** (COMMON): nombres de objeto a manejadores `recurso << 16 | objeto`. PC: `object_db.cpp` (448B90).
 
+**Icono de tarjeta PS2** (`\VIEW.ICO` de SYSTEM.PS2): `u32 0x10000`, `u32` formas, `u32` tipo de textura (15 =
+comprimida), `f32`, `u32` n vertices; 24 bytes por vertice (con una forma: posicion, normal, uv, color), animacion
+(20 bytes de cabecera y los cuadros) y la textura: `u32` tamano y RLE de `u16` (codigo `>= 0xFF00`: 0x10000 - codigo
+literales; si no, repite el siguiente `u16` codigo veces), 128x128 A1B5G5R5. Es un modelo 3D del coche (el plano de su
+textura no es un icono): el icono de la VMU sale del logo (`conv_vmu.py`).
+
 **IRX**: ELF del IOP (`e_type` 0xFF80); nombre del modulo en `.iopmod` + 0x1A (`Elf.modulo()`).
 
 **Descriptores de tramo y de union** (ejecutable; el PC hace lo mismo en `runtime_apply_course_data_44d720`): una
@@ -204,7 +211,7 @@ conversores: parametros de coches (`conv_param.py`), trafico (`conv_trafico.py`)
 Hecho: un tramo jugable con geometria, texturas, ruta y colision del original (`conv_tramo.py`), coche del
 jugador y trafico (`conv_coche.py`, `conv_trafico.py`), fisica y choques con las tablas del ELF (`conv_param.py`),
 HUD de carrera y rotulos (`conv_hud.py`), efectos ICS y voces de la carrera (`conv_sonido.py`), musica por streaming (`musica.c`), peliculas
-(`conv_video.py`); la
+(`conv_video.py`), icono, eyecatch y LCD de la VMU (`conv_vmu.py`); el
 arbol entero del modo OutRun (15 etapas, 10 bifurcaciones con sus carteles, 5 metas, niebla de cada etapa) encadenado
 mientras se conduce (`conv_union.py`, `CURSO.DAT`).
 

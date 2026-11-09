@@ -19,6 +19,7 @@
 #include "../comun/sfx.h"
 #include "../comun/voces.h"
 #include "../comun/menu.h"
+#include "../comun/vmu.h"
 #include "camara.h"
 
 /* ---------------------------------------------------------------- modelos */
@@ -3797,6 +3798,8 @@ int main(int argc, char **argv)
     sfx_ok = !sfx_inicia();
     voz_ok = sfx_ok && !voces_inicia();                         /* VOCES.DAT: voces de la carrera */
     texto_arriba("", NULL, NULL); texto_centro("");
+    /* VMU: icono del fichero de guardado y LCD de los mandos (VMU.DAT); el logo en la LCD desde ya (pelicula y titulo) */
+    if (!vmu_inicia()) { vmu_lcd_logo(); vmu_lcd_paso(); }
     /* menus del original (MENU.DAT): usan la VRAM del HUD de carrera, que se baja mientras tanto */
     if (menu_inicia()) { sprintf(s1, "Sin MENU.DAT"); texto_centro(s1); musica_pon(pista); }
     if (hud_ok) hud_baja_tex();
@@ -4188,6 +4191,11 @@ int main(int argc, char **argv)
         ta_et_corto = 0;
         pvr_scene_finish();
         hudd_fin_cuadro();                                      /* VRAM del HUD y los menus que ya no lee la PowerVR */
+        /* LCD de las VMU: logo en el titulo y los menus; en carrera la velocidad y la marcha del HUD (se envia como mucho
+           4 veces por segundo y solo si cambia: comun/vmu.c) */
+        if (estado == TITULO) vmu_lcd_logo();
+        else vmu_lcd_carrera(fis_ok ? (int)fis.velocidad_hud : (int)(yo.v * 3.6f), fis_ok ? fis.marcha : 1, fis_ok ? fpar.marchas : 6);
+        vmu_lcd_paso();
         tcpu += timer_us_gettime64() - c0;
         if (++cuadro % 30 == 0) {
             uint64_t t1 = timer_ms_gettime64();
