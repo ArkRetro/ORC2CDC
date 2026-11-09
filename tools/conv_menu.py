@@ -353,7 +353,7 @@ class Menu(Hud):
         Hud.__init__(s); s.taco = [0xff] * 16; s.pant = []; s.tramos = []; s.grupos_ini = {}; s.vq = vq_menu
 
 def convierte(iso, salida, previas):
-    D = Disco(iso); comprueba_tablas(D)
+    D = Disco(iso); D.ruta = iso; comprueba_tablas(D)
     idioma = os.environ.get('OR2_IDIOMA', 'es'); LETRA[0] = IDIOMAS[idioma][1]
     a, T, xst = banco_menu(D, B)
     F = Fuente(D, FUENTE_AYUDA, fuentes_xst(D)); cad = textos(D, idioma); iconos = iconos_dc(D, F)
@@ -380,10 +380,11 @@ def convierte(iso, salida, previas):
         while len(lst) > 1 and firma(lst[-1]) == firma(lst[-2]): lst.pop(); frames = frames[:len(lst)]
         return lst, frames
 
-    def pantalla(nombre, elems, extra=None):
+    def pantalla(nombre, elems, extra=None, texto=False):
         """elems: (grupo, token, cuadros, capa, (x, y), [(tramo, ini, fin, modo)], recortar) para una escena del banco
         B, o dict(g=grupo, lst=[piezas de cada cuadro], capa, xy, tr) para piezas hechas aqui (textos, botones), que
-        llevan su banco y sus texturas en 'bk' y 'tx'. Crea el atlas y los grupos"""
+        llevan su banco y sus texturas en 'bk' y 'tx'. Crea el atlas y los grupos. texto: las piezas hechas aqui
+        (glifos de la fuente 14, textos e iconos de la barra de ayuda) van en texturas propias sin VQ (SIN_VQ)"""
         at = Atlas(); datos = []
         for e in elems:
             if isinstance(e, dict):
@@ -403,7 +404,12 @@ def convierte(iso, salida, previas):
             datos.append((g, k, frames, capa, xy, tr, lst))
         if extra: extra(at, datos)
         claves = [at._clave(p.get('bk', B), p) for d in datos for ps in d[6] for p in ps]
-        t0_ = time.time(); pl = at.plan(claves)
+        t0_ = time.time()
+        if texto:                                               # las de los textos aparte (en 16 bits, sin VQ)
+            hechas = set(at._clave(p['bk'], p) for d in datos if not d[1] for ps in d[6] for p in ps)
+            pl_t = at.plan([k for k in claves if k in hechas]); pl = at.plan([k for k in claves if k not in hechas])
+            SIN_VQ.update(range(len(m.tex) + len(pl), len(m.tex) + len(pl) + len(pl_t))); pl = pl + pl_t
+        else: pl = at.plan(claves)
         print('  %s: atlas %d rect. -> %s (%.1f s)' % (nombre, len(set(claves)), [(W, H) for W, H, _ in pl], time.time() - t0_),
               flush=True)
         t0 = len(m.tex); g0 = len(m.grp); u0 = len(m.lay)
@@ -456,11 +462,11 @@ def convierte(iso, salida, previas):
               for n, h in AYUDA.items()]
     # fuente 14 para los textos que se escriben en la consola (nombre de la licencia, opciones...): un cuadro por
     # caracter (codigo - primero) con el glifo ya desplazado -metrica[0]; metricas e interletraje van en MNU2
-    usados = set(TECLADO.encode())
+    usados = set(TECLADO.encode()) | set(TARJETA.encode())
     for i in TEXTOS: usados |= set(cad[i])
     glifos = [F.piezas(bytes([F.pri + k]), 0, 0, 1) if (F.pri + k) in usados else [] for k in range(F.n)]
     ayudas.append(dict(g='FUENTE', lst=glifos, capa=9, xy=(0, 0), tr=[]))
-    pantalla('COMUN', [('FONDO', 0x4400ab, [0], 0, (0, 0), [], False)] + ayudas)
+    pantalla('COMUN', [('FONDO', 0x4400ab, [0], 0, (0, 0), [], False)] + ayudas, texto=True)
     m.mnu2 = mnu2(D, F, cad)
 
     def cab(nombre, tok):
@@ -563,7 +569,7 @@ def convierte(iso, salida, previas):
                        ('PAUSA_BARRA', 0x2c00ed, [10, 12], 9, (-13, -72), [], False),
                        ('PAUSA_OPC', 0x2c00fb, [12, 13], 10, (-13, -72), [], False),
                        ('PAUSA_VOL', 0x2c00ef, R(0, 10), 10, (-13, -72), [], False),
-                       dict(g='FUENTE_PAUSA', lst=glifos_p, capa=11, xy=(0, 0), tr=[])])
+                       dict(g='FUENTE_PAUSA', lst=glifos_p, capa=11, xy=(0, 0), tr=[])], texto=True)
     os.makedirs(salida, exist_ok=True)
     texs = escribe(m, os.path.join(salida, 'MENU.DAT'))
     maquetas(m, previas, hojas)
@@ -577,10 +583,12 @@ TEXTOS = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 0x2a, 0x2b, 0x218, 0x219, 0x233, 0x23
 TEXTOS_PAUSA = [0x3a6, 0x294, 0x295]   # pausa: "Estas seguro?" (PS2 0x249d40, sin partida en red) y ELEGIR / ATRAS
 TEXTOS += TEXTOS_PAUSA
 TECLADO = '1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ:%<>-'   # teclado de 468D40 (mayusculas) y signos de las cifras
+TARJETA = "0123456789.%?()'+-ABCDEF "  # datos de la tarjeta (PS2 0x275080): "%5.2f%%", rango "%s (%d)", "%2d''%02d'%02d"
 
 def mnu2(D, F, cad):
     """bloque MNU2: textos, metricas de la fuente y tablas de la seleccion de coche (todo del disco)
-      'MNU2', u32 n textos, u32 desp. textos, u32 desp. fuente, u32 desp. coches, u32 color de la tarjeta (RGB), 2 x 0
+      'MNU2', u32 n textos, u32 desp. textos, u32 desp. fuente, u32 desp. coches, u32 color de la tarjeta (RGB),
+      u32 desp. del progreso (bloque PRG1, ver progreso), 0
       textos: n x {u16 id, u16 largo, u32 desp. desde MNU2} y las cadenas (codigos de la fuente)
       fuente: u16 ancho, alto, primer caracter, n; i16 espaciado, u16 hay interletraje; i8 metricas[2n]; i8 inter[n*n]
       coches: u8 modelo[30], i16 desbloqueo[30], i16 colores[30][8], i8 color inicial[30]"""
@@ -601,6 +609,55 @@ def mnu2(D, F, cad):
     out += struct.pack('<30b', *rd(COCHE_COLOR_INI, 'b', 30)); out += bytes((-len(out)) % 4)
     struct.pack_into('<4sIII', out, 0, b'MNU2', len(TEXTOS), 32, o_f); struct.pack_into('<I', out, 16, o_c)
     struct.pack_into('<I', out, 20, color_tarjeta(D))
+    struct.pack_into('<I', out, 24, len(out)); out += progreso(D)
+    return bytes(out)
+
+# ---------------------------------------------------------------- progreso de la licencia (tarjeta, PS2 0x275080)
+PESOS = 0x35c8d8        # f32[8] {10, 20, 30, 40, 60, 80, 100, 0}: peso de la nota de cada grupo (0x1a17e8 = 447400)
+CARRERAS_N = 0x4172cc   # i32[15] {1,1,1,2,2,2,3,3,3,3,4,4,4,4,4}: notas de cada carrera de campeonato (0x240848)
+RANGOS = 0x3781d8       # 24 punteros a los nombres de rango "F".."AAA++" (0x28e908, licencia +0x118)
+CURSOS_REQ = ['Request_Course_SP', 'Request_Course_OR2', 'Req_Course_MIX_PS2']   # 0x375398: grupos 4, 5 y 6
+
+def _r077(d, nombre):
+    """(n, desplazamiento) de la categoria de un .bin de SCRIPTS (indice ordenado por el hash 4F1260 / 0x2340f8)"""
+    h = 0
+    for c in nombre.upper().encode(): h = (h * 0x83 + (c - 256 if c > 127 else c)) & 0xffffffff
+    nc, nr = struct.unpack_from('<2I', d, 0); io = 8 + 8 * nr
+    for i in range(nc):
+        k, n, o = struct.unpack_from('<3I', d, io + 12 * i)
+        if k == h: return n, o
+    raise SystemExit('SCRIPTS: categoria %s no encontrada' % nombre)
+
+def progreso(D):
+    """bloque 'PRG1' (desp. en MNU2 +24): lo que necesita el porcentaje de la licencia (PS2 0x1a17e8: suma de PESOS
+    [nota de los grupos 0-6 (0x2420a0)] / 7):
+      u8 notas por categoria[40] (0x1f7fe0: carreras de Races.bin con la clave de RaceAssignment.bin, de 0x44 bytes),
+      u8 tipo de las 15 carreras de cada campeonato[3][15] (+0x1c de los registros de 0x78 de Request_Course_SP /
+      Request_Course_OR2 / Req_Course_MIX_PS2, 0x241fd8), u8 0[3], i32 CARRERAS_N[15], f32 PESOS[8], char rango[24][8]"""
+    from ps2.assets import Assets
+    A = Assets(D.ruta)
+    datos = lambda f: A.datos([x for x in A.busca('*' + f + '.bin') if x.paquete.startswith('SCRIPTS')][0])
+    r = datos('Races'); a = datos('RaceAssignment')
+    nr, orr = _r077(r, 'Races'); na, oa = _r077(a, 'RACE_MAPPING_ARRAY')
+    assert nr == 94 and na == 40, 'Races / RaceAssignment'
+    claves = [struct.unpack_from('<2I', a, oa + 8 * i) for i in range(na)]
+    assert all(k and t == 1 for k, t in claves), 'RACE_MAPPING_ARRAY'
+    rk = [struct.unpack_from('<I', r, orr + 0x44 * i)[0] for i in range(nr)]
+    cuenta = [sum(1 for x in rk if x == k) for k, _ in claves]
+    assert max(cuenta) <= 5 and sum(cuenta) == nr, 'notas por categoria'
+    out = bytearray(b'PRG1') + bytes(cuenta)
+    for f in CURSOS_REQ:
+        d = datos(f); n, o = _r077(d, f); assert n >= 15, f
+        t = [struct.unpack_from('<I', d, o + 0x78 * i + 0x1c)[0] for i in range(15)]; assert max(t) < 66, f
+        out += bytes(t)
+    out += bytes(3)
+    rd = lambda va, fmt, n: struct.unpack_from('<%d%s' % (n, fmt), D.elf, va - 0x100000 + 0x80)
+    cn = rd(CARRERAS_N, 'i', 15); assert cn == (1, 1, 1, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 4), 'notas de campeonato'
+    pe = rd(PESOS, 'f', 8); assert pe == (10, 20, 30, 40, 60, 80, 100, 0), 'pesos del progreso'
+    out += struct.pack('<15i', *cn) + struct.pack('<8f', *pe)
+    for va in rd(RANGOS, 'I', 24):
+        t = bytes(D.elf[va - 0x100000 + 0x80:][:8]).split(b'\0')[0]; assert 0 < len(t) < 8; out += t.ljust(8, b'\0')
+    print('  progreso: notas por categoria %s' % cuenta)
     return bytes(out)
 
 def color_tarjeta(D):
@@ -616,10 +673,14 @@ def color_tarjeta(D):
 VQ_MIN = 128 * 128          # texturas menores: sin VQ (el libro de 2 KB pesa demasiado)
 VQ_UMBRAL = (9.0, 6.5)      # error RMS maximo (0-255) para aceptar la VQ: opacas, con transparencia
 
+SIN_VQ = set()              # texturas de los textos de la consola (glifos de la fuente 14, barra de ayuda): sin VQ
+
 def vq_menu(i, a, fmt, lista):
     """datos VQ de la textura (libro de 256 entradas) o None si no conviene. Usa tools/vq.py (el codificador del
-    port); sin el o con VQ=0 en el entorno todo va en 16 bits"""
-    if os.environ.get('VQ', '1') == '0' or a.shape[0] * a.shape[1] < VQ_MIN: return None
+    port); sin el o con VQ=0 en el entorno todo va en 16 bits. Nunca en las de SIN_VQ: la VQ (bloques de 2x2 con un
+    libro de 256 para toda la textura) se comia el borde de los glifos de 17 px de la fuente 14 (queja: letras que
+    no se leen); en 16 bits salen texel a texel como en el original"""
+    if os.environ.get('VQ', '1') == '0' or a.shape[0] * a.shape[1] < VQ_MIN or i in SIN_VQ: return None
     try: import vq
     except ImportError: return None
     datos, err = vq.codifica(a, fmt, 256)

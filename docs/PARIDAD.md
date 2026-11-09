@@ -187,6 +187,44 @@ consola, el port lo fija al convertir). Hoja de capturas de Flycast: scratchpad 
   arranques, coche bloqueado, variante, color, cambio, musica y salida a carrera con el Dino; demo y vuelta al titulo.
   No probado en R.
 
+## Menus: fuente, progreso y R1 (2026-11-09)
+
+Quejas (DC real, RGB): letras del menu que no se leen; la tarjeta no muestra el progreso (con ENTIRETY deberia dar
+100%); R1 no hace nada en la musica.
+- **R1**: el mando del PS2 se traduce en 0x101e90 (libpad -> bits del juego): R1 (0x800) y R2 (0x200) dan 0x2000, L1 /
+  L2 0x1000, cruz 2, circulo 4, cuadrado 8, triangulo 0x10. La musica (0x24e748, = 4C9C20 del PC) y el coche (0x244c44,
+  variante normal / "_t", = 4C9290) miran 0x2000 en lo pulsado del cuadro (+8, 0x101bd4). En la DC era X (supuesto):
+  ahora el gatillo R (menu.c lee_r1; analogico, pulsado desde 128, el cuadro en que pasa). La propia pantalla lleva el
+  icono "R1" junto al nombre de la lista. Listas: 0 OutRun 2, 1 OutRun 1986 / Turbo OutRun, 2 remezclas (9 + 7 + 12 =
+  los 28 temas; verificado en E: avances MUS33, MUS42, MUS49 al pasar 0 -> 1 -> 2).
+- **Fuente**: los glifos de la fuente 14 (17 px) y los textos e iconos de la barra de ayuda compartian textura con el
+  fondo y salian en VQ (bloques de 2x2, libro de 256 para toda la textura): bordes comidos. Ahora conv_menu.py los
+  empaqueta aparte (pantalla(texto=True) en COMUN y PAUSA) y nunca los comprime (SIN_VQ): 16 bits, texel a texel
+  (COMUN 170 -> 234 KB, PAUSA 18 -> 26 KB). Sin mipmaps (nunca los hubo) y filtro bilineal a escala 1. PENDIENTE: el
+  arte del frontal con letras dentro (rotulos de los menus, descripciones, titulos de la musica) sigue en VQ cuando el
+  error es pequeno; sin ella, p. ej. COMUN pasaria de 234 a 1344 KB y MUSICA2 de 808 a 1056 KB (no probado en R).
+- **Tarjeta de la licencia** (elegir licencia; PS2 0x275080 rellena, 0x275f80 coloca = 4E2150 / 4E2640 del PC): fuente
+  14 sin alinear, nombre blanco en (202, 167) (editor: 126, 168, PS2 0x23f30c); porcentaje "%5.2f%%" en (354, 209)
+  (359 en la nueva), rango "%s (%d)" (nombres 0x3781d8 con +0x118, puntos +0x110) en (359, 232), proporcion
+  +0x104 / +0x108 x 100 en (359, 255) ("?" los dos si +0x108 <= 0), tiempo "%2d''%02d'%02d" de +0x10C (0x1f6d70:
+  cuadros / 60,2) en (359, 278), millas "%.0f" de +0x24 en (210, 311); la nueva: "0.00%", "?", "?", "0", "0". Antes
+  el nombre iba en (172, 175) centrado en vertical (medido). Color: el de los rotulos (col_tarjeta, medido); el PS2
+  pasa 0xFF3F474A (PENDIENTE: como lo modula el GS).
+- **Porcentaje** (0x1a17e8 = 447400): suma de pesos {10, 20, 30, 40, 60, 80, 100; 0 sin nota} (0x35c8d8) de las notas
+  de los 7 grupos (0x2420a0) / 7. Grupos 0-3: categorias 0-4, 5-13, 14-24, 25-39 (0x241ed0: media de las notas de
+  licencia +0x1DD + 5c, tantas como carreras de Races.bin con la clave de la categoria en RaceAssignment.bin; 7 si
+  falta una) -> suma(nota + 1) / n - 1. Grupos 4-6: campeonatos Request_Course_SP / Request_Course_OR2 /
+  Req_Course_MIX_PS2 (0x375398; 15 carreras, tipo en +0x1C de sus registros de 0x78), notas en los cuartetos de
+  +0x36E + 2 tipo (1,1,1,2,2,2,3,3,3,3,4,4,4,4,4 por carrera, 0x4172cc) -> suma / 41 - 1. Las tablas van en MENU.DAT
+  (bloque PRG1 de MNU2, de SCRIPTS.PS2 y del ELF, con comprobaciones). Una licencia nueva da 0.00% y ENTIRETY
+  (447360: notas 6, cuartetos 0x66) 100.00% (todos los grupos nota 6).
+- **Falta** (inventario del frontal del PC frente al port): las carreras del port no escriben aun notas, millas ni
+  tiempo en la licencia (misiones de C2C, SCRIPTS: FALTA), asi que una licencia normal se queda en 0.00% / 0 millas;
+  sin pantalla de misiones (frontend_missions / categories), rankings (frontend_rankings, records), showroom,
+  OUTRUN2SP, multijugador ni red (sus pantallas estan con la accion bloqueada). En la tarjeta, los iconos pequenos
+  siguen siendo los del editor desplazados (el PC usa 0x44006A / 0x440077 / 0x440078 en (-120,-8), (-137,44),
+  (-103,44)).
+
 ## Seleccion de musica (2026-11-09)
 
 Queja: "faltan musicas en el selector" (solo estaban la lista 0 y 3 temas de carrera: MUS0-2, los avances 33-35 y la
@@ -205,8 +243,8 @@ del menu 30). Ahora como el original (4C9790 / 4C9C20 del PC, frontend_music.cpp
 - **Desbloqueo** (PS2 0x4191E8 = 5C9AB0): temas 0..6 siempre; 7..27 con los bits 172, 173, 174..192 de la licencia (+0x28).
   Con una licencia nueva (4471A0) solo los 7 primeros, como el original: los demas con candado 0x440066 cuadro 5 ("NO
   DISPONIBLE") y A da el sonido 3; ENTIRETY (447360) los abre todos. El avance suena aunque este bloqueado (como el PC).
-- **Botones**: izquierda / derecha sin dar la vuelta; X = lista siguiente (0 -> 1 -> 2 -> 0; en el PC el bit 0x2000 del
-  mando, el mismo boton SUPUESTO que la variante del coche) sin sonido; Y = ALEATORIO (0x10 del PS2): `(rand & 0x1F) *
+- **Botones**: izquierda / derecha sin dar la vuelta; gatillo R = lista siguiente (0 -> 1 -> 2 -> 0; bit 0x2000 del
+  frontal = R1 / R2 del PS2, ver "Menus: fuente, progreso y R1") sin sonido; Y = ALEATORIO (0x10 del PS2): `(rand & 0x1F) *
   27 >> 5` (0..26: el tema 27 nunca sale, como el original) hasta uno desbloqueado (100 intentos, si no el 0) y sale a la
   carrera sin el sonido de aceptar y sin mover el cursor; A con desbloqueado: sonido 0x40 y carrera; B vuelve al cambio
   con la musica de menu.

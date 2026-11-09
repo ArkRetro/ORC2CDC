@@ -15,7 +15,7 @@
    Seleccion de coche (4C9010 / 4C9290 del PC = 0x2445D8 del PS2): carrusel 0x4400E5 (15 normales) o 0x4400E6 (15
    "_t"), ficha = cursor + 15 * variante, modelo de la tabla del ELF; desbloqueo por los bits de la licencia (+0x28;
    las 2 primeras siempre), colores con su bit (-1 siempre, -2 nunca) y el siguiente desbloqueado con Y; candado en
-   las bloqueadas; X cambia de variante (en el PC, el bit 0x2000 del mando: boton de la DC SUPUESTO). Las "_t" no
+   las bloqueadas; el gatillo R cambia de variante (bit 0x2000 del frontal: R1 / R2 del PS2, ver lee_r1). Las "_t" no
    estan convertidas: se ve y se corre con el modelo normal (PROVISIONAL). El coche gira +100/65536 de vuelta por
    paso (4A5B20).
    Licencia: hasta 4 (como el original), registro de 0x40C bytes con la disposicion del original (nombre +0, signo +0x18,
@@ -24,13 +24,14 @@
    Sonido (como el original): efectos del frontal con sfx_menu (cursor, aceptar, bloqueado, cancelar); el titulo va
    sin musica (en el original suena la pelicula), al salir de el arranca la musica de menu (pista 30 de MUSIC.PS2,
    MUS30.ADP); en la musica cada tema suena con su avance (pista 33 + tema) y al confirmar empieza el tema elegido.
-   Musica: las 3 listas del original (9 / 7 / 12 temas, 28 en total; X pasa a la siguiente, como el bit 0x2000 del
-   PC), candado y sonido 3 en los temas sin su bit de la licencia, RANDOM (Y) elige uno desbloqueado y sale a correr.
+   Musica: las 3 listas del original (9 / 7 / 12 temas, 28 en total; el gatillo R pasa a la siguiente: el bit 0x2000,
+   R1 / R2 del PS2), candado y sonido 3 en los temas sin su bit de la licencia, RANDOM (Y) elige uno desbloqueado y sale a correr.
    VRAM: en la RAM solo las tablas de MENU.DAT; las texturas de cada pantalla se leen del GD al entrar y se quedan
    mientras quepan (se echa la pantalla usada hace mas tiempo). hud.c libera la VRAM unos cuadros despues de su ultimo
    uso (la PowerVR aun dibuja el cuadro anterior): una pantalla que no cabe espera a que se libere (sin dibujarse a
    medias). menu_sale() lo libera todo antes de la carrera. */
 #include <kos.h>
+#include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <math.h>
@@ -107,6 +108,7 @@ static const uint8_t *mnu2; static int n_txt;
 static int f_w, f_h, f_pri, f_n, f_esp, f_ker; static const int8_t *f_met, *f_inter;
 static const uint8_t *t_modelo; static const int16_t *t_desbloq, *t_colbit; static const int8_t *t_colini;
 static uint32_t col_tarjeta = 0x2c3650;
+static const uint8_t *prg;                                  /* bloque PRG1 de MNU2 (conv_menu.py progreso) */
 
 static const uint8_t *txt(int id, int *n)
 {
@@ -390,6 +392,7 @@ int menu_inicia(void)
         t_modelo = mnu2 + h[4]; t_desbloq = (const int16_t *)(t_modelo + 32);
         t_colbit = t_desbloq + 30; t_colini = (const int8_t *)(t_colbit + 240);
         if (h[5]) col_tarjeta = h[5];
+        if (h[6] && !memcmp(mnu2 + h[6], "PRG1", 4)) prg = mnu2 + h[6] + 4;
     }
     return 0;
 }
@@ -709,10 +712,24 @@ static void opc_control(unsigned n)
     }
 }
 
+/* Bit 0x2000 del mando del frontal (PS2 0x101e90: R1 0x800 y R2 0x200 del libpad dan 0x2000; L1 / L2, 0x1000): lo
+   miran la seleccion de musica (lista siguiente, 0x24e748 = 4C9C20 del PC) y la de coche (variante, 0x244c44 =
+   4C9290), sobre lo pulsado en este cuadro (+8 del mando, 0x101bd4). En la DC: el gatillo R, que es analogico (0..255);
+   cuenta como pulsado desde la mitad del recorrido (128) y vale el cuadro en que pasa a pulsado. */
+static int r1_nuevo, r1_ant;
+static void lee_r1(void)
+{
+    maple_device_t *d = maple_enum_type(0, MAPLE_FUNC_CONTROLLER);
+    cont_state_t *st = d ? (cont_state_t *)maple_dev_status(d) : NULL;
+    int on = st && st->rtrig >= 128;
+    r1_nuevo = on && !r1_ant; r1_ant = on;
+}
+
 /* entrada en las pantallas en reposo */
 static void control(unsigned n)
 {
     int ok = n & (CONT_A | CONT_START), atras = n & CONT_B, izq = n & CONT_DPAD_LEFT, der = n & CONT_DPAD_RIGHT;
+    int r1 = r1_nuevo;
     switch (pant) {
     case P_TITULO:
         if (ok) { if (lic_sel < 0) a_licencia(P_MENU); else sale(P_MENU, 1); musica_menu(); }
@@ -745,7 +762,7 @@ static void control(unsigned n)
         if (izq && c_cursor > 0) { an_mueve(&a_sel, c_cursor, c_cursor - 1); c_cursor--; c_arregla_color(); sfx_menu(SFX_CURSOR); }
         else if (der && c_cursor < N_COCHES - 1) { an_mueve(&a_sel, c_cursor, c_cursor + 1); c_cursor++; c_arregla_color(); sfx_menu(SFX_CURSOR); }
         else if (ok) { if (c_desbloqueado(i)) { GANCHO(P_COCHE, 1, c_modelo(i)); sale(P_CAMBIO, 1); } else sfx_menu(SFX_BLOQUEADO); }
-        else if (n & CONT_X) {                              /* variante normal / "_t" (bit 0x2000 del PC) */
+        else if (r1) {                                      /* variante normal / "_t" (bit 0x2000: R1 / R2 del PS2) */
             c_var ^= 1; a_sel.u = us[c_var ? U_INFO_T : U_INFO]; an_tramo_n(&a_sel, "COCHE%d", c_cursor);
             c_arregla_color(); sfx_menu(SFX_CURSOR);
         } else if (n & CONT_Y) {                            /* COLOR: el siguiente desbloqueado de los 8 */
@@ -766,8 +783,8 @@ static void control(unsigned n)
             if (i == 100) k = 0;
             elegido = k; an_va(&a_radio, 25, 0, 0);
             fase = F_SALE; t = 0; sig = -1; sale_ok = 1;     /* sin el sonido de aceptar (como el original) */
-        } else if (n & CONT_X) {                            /* lista siguiente (bit 0x2000 del PC; X como la variante
-                                                               del coche) con su cursor, titulo y avance */
+        } else if (r1) {                                    /* lista siguiente (bit 0x2000: R1 / R2 del PS2; gatillo
+                                                               R de la DC) con su cursor, titulo y avance */
             lista = (lista + 1) % N_LISTAS;
             cargando = !asegura(mascara(P_MUSICA)); t_carga = 0;
             musica_lista(); pon_musica(tema_actual());
@@ -789,7 +806,8 @@ static void control(unsigned n)
 static void aplica_audio(void);
 int menu_paso(unsigned n)
 {
-    if (n) inact = 0; else inact++;
+    lee_r1();
+    if (n || r1_nuevo) inact = 0; else inact++;
     if (!md) return (n & CONT_START) ? MENU_CARRERA : inact > T_DEMO ? MENU_DEMO : MENU_SIGUE;
     aplica_audio();                                         /* volumen de la licencia activa (cambia al elegirla) */
     giro += 100.0f * 2.0f * (float)M_PI / 65536.0f;         /* 4A5B20: +100 por paso */
@@ -855,9 +873,84 @@ int menu_paso(unsigned n)
 /* ---------------------------------------------------------------- dibujo */
 /* datos de la tarjeta (0x440088 / 0x44009F; medidas en la escena: franja del nombre y = 175, cajas de foto, bandera y
    signo; los iconos pequenos estan colocados para la tarjeta en -8) */
-static void tarjeta(const uint8_t *p, const uint8_t *nombre, int n, float dx, float alfa, float z)
+/* ---- progreso de la licencia (PS2 0x1a17e8 = 447400 del PC; tablas del bloque PRG1 de MNU2, del disco) */
+#define PRG_TIPOS (prg + 40)                                /* u8 [3][15]: tipo de cada carrera de los campeonatos */
+static int prg_i32(int o) { int v; memcpy(&v, prg + o, 4); return v; }
+static float prg_f32(int o) { float v; memcpy(&v, prg + o, 4); return v; }
+/* 0x241ed0: nota de la categoria c (0..39): media de sus notas (licencia +0x1DD + 5 c), 7 si falta alguna o no tiene */
+static int nota_cat(const uint8_t *p, int c)
 {
-    if (nombre) texto(nombre, n, 95 + dx, 175, 9, alfa, z, 0xFFFFFF);
+    int n = prg[c], i, s = 0;
+    for (i = 0; i < n; i++) { int g = p[0x1dd + 5 * c + i]; if (g == 7) return 7; s += g; }
+    return n ? s / n : 7;
+}
+/* 0x2420a0: nota del grupo g (0..6): 0-3 categorias 0-4, 5-13, 14-24, 25-39 (/5, /9, /11, /15); 4-6 los campeonatos
+   (0x241fd8: 15 carreras de su curso, CARRERAS_N notas cada una en los cuartetos de licencia +0x36E + 2 tipo; / 41) */
+static int nota_grupo(const uint8_t *p, int g)
+{
+    static const int LIM[5] = { 0, 5, 14, 25, 40 };
+    int s = 0, d, i, k;
+    if (g < 4) {
+        for (i = LIM[g]; i < LIM[g + 1]; i++) { int v = nota_cat(p, i); if (v != 7) s += v + 1; }
+        d = LIM[g + 1] - LIM[g];
+    } else {
+        for (i = 0; i < 15; i++) {
+            int t = PRG_TIPOS[15 * (g - 4) + i], w = p[0x36e + 2 * t] | p[0x36f + 2 * t] << 8;
+            for (k = 0; k < prg_i32(88 + 4 * i); k++) { int v = k < 3 ? (w >> 4 * k) & 15 : w >> 12; if (v != 7) s += v + 1; }
+        }
+        d = 41;
+    }
+    s = s / d - 1;
+    return s > -1 ? s : 7;
+}
+/* 0x1a17e8: porcentaje = suma de los pesos (10, 20, 30, 40, 60, 80, 100; 0 sin nota) de los 7 grupos / 7 */
+static float progreso(const uint8_t *p)
+{
+    float t = 0; int g;
+    if (!prg) return 0;
+    for (g = 0; g < 7; g++) t += prg_f32(148 + 4 * nota_grupo(p, g));
+    return t / 7.0f;
+}
+/* 0x1f6d70: tiempo de juego (licencia +0x10C, cuadros) en horas, minutos y segundos: s = cuadros / 60,2 */
+static void tiempo_lic(uint32_t cuadros, int *h, int *m, int *sg)
+{
+    float f = (float)cuadros / 60.2f, r; unsigned s = (uint16_t)(int)f, ms;
+    r = (f - (float)s) * 1000.0f;
+    if (r < 0) { r += 1000.0f; s = (uint16_t)(s - 1); }
+    ms = (uint16_t)(int)r;
+    if (ms >= 1000) s = (uint16_t)(s + 1);
+    *m = s / 60; *sg = s % 60; *h = *m / 60; *m %= 60;
+}
+/* datos de la tarjeta de la licencia elegida (PS2 0x275080 / 0x275f80 = 4E2150 / 4E2640 del PC): fuente 14 sin
+   alinear (flags 1, la esquina de arriba), color 0xFF3F474A del PS2 (aqui el de los rotulos, col_tarjeta). Nueva
+   (p NULL): "0.00%", "?", "?", "0", "0". Porcentaje en (354, 209) (359 en la nueva), rango (359, 232), proporcion
+   (359, 255), tiempo (359, 278), millas (210, 311); dx: el deslizamiento de la tarjeta */
+static void tarjeta_datos(const uint8_t *p, float dx, float alfa, float z)
+{
+    char v[5][32]; int i, h, m, sg;
+    static const float X[5] = { 354, 359, 359, 359, 210 }, Y[5] = { 209, 232, 255, 278, 311 };
+    if (!p) { strcpy(v[0], "0.00%"); strcpy(v[1], "?"); strcpy(v[2], "?"); strcpy(v[3], "0"); strcpy(v[4], "0"); }
+    else {
+        float f8, f10, f24; uint32_t rango;
+        memcpy(&f8, p + 0x108, 4); memcpy(&f10, p + 0x110, 4); memcpy(&f24, p + 0x24, 4); memcpy(&rango, p + 0x118, 4);
+        snprintf(v[0], 32, "%5.2f%%", (double)progreso(p));
+        if (f8 <= 0 || !prg || rango >= 24) { strcpy(v[1], "?"); strcpy(v[2], "?"); }
+        else {
+            float f4; memcpy(&f4, p + 0x104, 4);
+            snprintf(v[1], 32, "%s (%d)", (const char *)prg + 180 + 8 * rango, (int)f10);
+            snprintf(v[2], 32, "%5.2f%%", (double)(f4 / f8 * 100.0f));
+        }
+        tiempo_lic((uint32_t)l32(p, 0x10c), &h, &m, &sg);
+        snprintf(v[3], 32, "%2d''%02d'%02d", h, m, sg);
+        snprintf(v[4], 32, "%.0f", (double)f24);
+    }
+    for (i = 0; i < 5; i++) texto_c(v[i], (i == 0 && !p ? 359 : X[i]) + dx, Y[i], 1, alfa, z, col_tarjeta);
+}
+
+/* nombre en (xn, yn) con la fuente 14 sin alinear (la tarjeta de elegir: 202, 167; la del editor: 126, 168) */
+static void tarjeta(const uint8_t *p, const uint8_t *nombre, int n, float xn, float yn, float dx, float alfa, float z)
+{
+    if (nombre) texto(nombre, n, xn, yn, 1, alfa, z, 0xFFFFFF);
     if (p) {
         int f = l32(p, 0x20), b = l32(p, 0x1c), s = l32(p, 0x18);
         hudd_dibuja(md, us[U_FOTO], f < 0 || f > 5 ? 0 : f, dx + 8, 0, alfa, z, 0);
@@ -917,8 +1010,11 @@ void menu_dibuja(void)
         if (l_desliza) { int k = l_desliza <= 10 ? l_desliza : l_desliza - 21; dx = -l_dir * 48.0f * k; }
         an_dibuja(&a_tarj, dx + sacude, al, 3, 0);
         if (an_hecho(&a_tarj) && s >= 0) {
-            if (l_idx == l_nueva) texto_id(0x218, 95 + 77 + dx, 175, 9, al, 4, 0xFFFFFF);
-            else tarjeta(lic[s], lic[s], strnlen((char *)lic[s], 16), 77 + dx, al, 4);
+            if (l_idx == l_nueva) { texto_id(0x218, 202 + dx, 167, 1, al, 4, 0xFFFFFF); tarjeta_datos(NULL, dx, al, 4); }
+            else {
+                tarjeta(lic[s], lic[s], strnlen((char *)lic[s], 16), 202 + dx, 167, 77 + dx, al, 4);
+                tarjeta_datos(lic[s], dx, al, 4);
+            }
         }
         if (l_idx > 0) an_dibuja(&a_fl_i, 0, al, 5, 0);
         if (l_idx < l_n - 1) an_dibuja(&a_fl_d, 0, al, 5, 0);
@@ -938,7 +1034,7 @@ void menu_dibuja(void)
         an_dibuja(&a_ed_t, 0, al, 3, 0);
         an_dibuja(&a_ed, 0, al, 4, 0);
         if (an_hecho(&a_ed_t)) {
-            tarjeta(e_estado == E_REJILLA ? NULL : p, p, strnlen((char *)p, 16), -8, al, 5);
+            tarjeta(e_estado == E_REJILLA ? NULL : p, p, strnlen((char *)p, 16), 126, 168, -8, al, 5);
             if (e_estado == E_REJILLA) {                    /* el pequeno de la rejilla muestra el que se esta eligiendo */
                 static const int U_P[3] = { U_FOTO, U_BAND, U_SIGNO }, U_R[3] = { U_REJ_FOTO, U_REJ_BAND, U_REJ_SIGNO };
                 int i;
