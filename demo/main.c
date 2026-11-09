@@ -5937,6 +5937,8 @@ int main(int argc, char **argv)
             int rp = menu_pausa_paso(nuevo);
             nuevo = 0;
             if (rp != PAUSA_SIGUE) { pausa = 0; menu_pausa_sale(); }
+            if ((rp == PAUSA_REINTENTA || rp == PAUSA_ABANDONA) && !auto_)
+                menu_suma_tiempo(crono);                        /* tiempo de juego (PS2 0x249c5c / 0x24a110) */
             if (rp == PAUSA_REINTENTA) { estado = TITULO; reintenta = 1; }   /* abajo: la salida con lo elegido */
             else if (rp == PAUSA_ABANDONA) {                    /* al frontal */
                 estado = TITULO; auto_ = 0; texto_centro(""); hud_baja_tex(); menu_entra(manual_, pista, NPISTAS);
@@ -6082,7 +6084,8 @@ int main(int argc, char **argv)
                     voces_paso(&vc); voces_tiempo(tim_cuadros);
                 }
                 voz_contacto = 0;
-                crono++; if (fis_ok && fis.velocidad_hud > vmax) vmax = fis.velocidad_hud;
+                if (crono < 0x57e3f) crono++; else crono = 0x57e3f;   /* 7D39DC: tope 0x57E3F (race_manager 4508xx) */
+                if (fis_ok && fis.velocidad_hud > vmax) vmax = fis.velocidad_hud;
 #ifdef PRUEBA_CRONO
                 {   /* crono del HUD frente al reloj de la consola, cada 600 pasos (unos 10 s) */
                     static uint64_t t_c0;
@@ -6177,6 +6180,7 @@ int main(int argc, char **argv)
             coche_paso(&yo, 0, 0, 0.6f, 1.0f / 60);
             pt_msg_paso();
             if ((nuevo & CONT_START) || t_estado > 600) {
+                if (!auto_) menu_suma_tiempo(crono);            /* salida de la meta / del fin del tiempo (PS2 0x1b96bc / 0x1b9b58) */
                 estado = TITULO; auto_ = 0; nuevo = 0; texto_centro(""); hud_baja_tex(); menu_entra(manual_, pista, NPISTAS);
             }
         }

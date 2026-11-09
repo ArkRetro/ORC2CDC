@@ -1342,7 +1342,7 @@ Races.bin, variante 5 C2C o 6) y el preset del curso [78024C] (4EEA70). En SLES-
 | OUTRUN (variante 1) | fila 0 de los tiempos (44DC70), trafico, puntos 4F2DF0, voces ORC/PERO | OK (lo que ya habia) | E |
 | INFARTO (variante 2) | gestor de peticiones 464350/464D20 (PS2 0x1ae440 / 0x1a7f28), misiones 5A94D8 (PS2 0x3f0b98, 41 x 0x140), fila 1 de los tiempos, voces HC/PERH + HAM\<etapa> | PARCIAL: ver abajo | E |
 | CONTRARRELOJ (variante 7) | fila 2 de los tiempos (44DC70: 0 y 7 -> 2; 450CC0 pasa el 7 como 0), sin trafico (479080 y 47EC00 vuelven con la variante 0, 7 u 8), gestor 0x193 / funcion 0x22 (48B8F0..: curso por codigo [656234], fantasma 465F30..4687C0, GHOST.PS2) | PARCIAL: reglas de tiempo y sin trafico; corre el curso entero con eleccion de rama como el OutRun | E |
-| COAST 2 COAST (variante 5/6) | misiones de Races.bin / RaceAssignment.bin / Req_*.bin (gestor 7F9460, evento 0x190), rivales (47CF40) | FALTA: corre como OutRun (como antes) | - |
+| COAST 2 COAST (variante 6 misiones, 5 campeonatos) | variante 6: misiones de Races.bin / RaceAssignment.bin (gestor 0x20, evento 0x191: 495B90 / 496A30); variante 5: campeonatos Request_Course_SP / OR2 / MIX con peticiones Req_*.bin (gestor 7F9460, evento 0x190); rivales (47CF40) | FALTA: corre como OutRun (como antes); estudio en COAST 2 COAST abajo | - |
 | SALON (showroom) | frontal 4D4230.. | FALTA (accion bloqueada, como antes) | - |
 | Dificultad (opcion de la licencia +E0) | difficulty_of de 44DC70: [7C24C0] (licencia activa) salvo en el juego de OUTRUN2SP (43F860) | OK: `tim_dif = menu_dificultad()` en la fila de tiempos | C (log `MODO:`) |
 | Multijugador | red / LAN (variantes 3, 4) | no se hace (orden del usuario): la pantalla queda como estaba, con la accion bloqueada | - |
@@ -1503,6 +1503,35 @@ peticion 14 (escoltas 45B5B0, +324 = 6: carrera contra ellos), que no esta en la
   lee 43F370 para car+0x64) llega como mucho a 610 (PALM 590, LAKE 676, ALPI 655, SNOW 680), asi que en el original
   esa peticion tampoco puede acabar en FORE y sigue en la etapa siguiente igual que en la DC.
 
+**COAST 2 COAST** (estudio 2026-11-09; nada de las misiones esta aun en la demo):
+- Flujo (PC 4EEC80 / 4EEB50, palabra empaquetada +0x208 del frontal): UN JUGADOR -> COAST 2 COAST -> pantalla de
+  categorias (frontend_categories 4E8130..4E8C60: 7 grupos; 0-3 son misiones, 4-6 los campeonatos) -> grupos 0-3: mapa
+  de misiones (frontend_missions 4E9160..4E9BB0: 5 / 9 / 11 / 15 categorias, nodo desbloqueado si un vecino tiene nota
+  4..6; en el detalle hasta 5 carreras, la i+1 solo si la i tiene nota 4..6) -> coche -> carrera con la variante 6 y el
+  par (clave, subclave) de Races.bin (4EEB50 selector 0..3, 4958A0); grupos 4-6: frontend_requests y la variante 5
+  (selector 4..6: [7F94C4..] = {1,..,1} SP, preset 1 OR2, {3,..,2} MIX).
+- PS2 (SLES-53998): las tablas de posiciones del mapa son las del PC (0x375430 resaltes, 0x375570 nodos, 0x3752e8 /
+  0x3753e0 carreras y notas, vecinos 0x3756b0 / 0x375700, de las categorias 0x417a88, cuentas {5,9,11,15} y
+  desplazamientos {0,5,14,25} 0x417df8); los tokens del banco 0x44 son OTROS que en el PC (tablas 0x417bc4..0x417df0):
+  fondos 0x4400dd / ca / d9 / db, capas 0x4400de / cb / da / dc, tipos 0x4400d3 (cuadros 0,3,2,5,6,4,4), textos
+  0x34e..0x352, botones 0x4400d5, pies 0x4400f0 (4..7), nodos 0x4400df, paneles 0x4400d2, carrera elegida 0x4400d4
+  (30 cuadros por carrera), notas 0x4400e0 (6..0); categorias: seleccion 0x4400d0 (30 cuadros por grupo, 0x417a28),
+  posiciones de los botones 0x417b04 (87/149/212/274, 303 / 365). Codigo: categorias 0x242340 (seleccion) ..
+  0x242ac0 (dibujo), misiones 0x243000..0x2443xx. SIN LEER aun el dibujo del PS2 (que token lleva cada boton).
+- Races.bin (94 registros de 0x44): +0 clave (categoria 1..40 de RACE_MAPPING_ARRAY), +4 subclave, +0x14 = 3 (4 seria
+  sin trafico ni 47CF40), +0x18 curso (registros de 0x78 como csc_data: clave, descriptor de tramo +0x1C, de union
+  +0x20, hijo izquierdo / derecho +0x2C / +0x30 con -1 en la rama que no se toma), +0x1C los rivales (47CF40), +0x20
+  tipo, +0x28 segundos (tipos 1 y 6), +0x34 / +0x38 / +0x3C umbrales de nota. Tipos (496A30 / 495C20): 0 carrera
+  (nota 6 - puesto, 0 si ultimo; 76 de los 94), 1 eliminacion por tiempo (3), 2 derrape contra el rival (7), 3
+  conduccion limpia y rapida (5), 6 pillar a los rivales (3). Nota en la licencia +0x1D7 + 5 clave + subclave si
+  mejora (495A20). Recompensa del grupo 499730 (+0x11C).
+- BLOQUEADO para correr las misiones: 76 de los 94 cursos usan etapas que la demo no tiene: las 15 de OutRun 2 SP
+  (BEAC, SANF, YOSE, NIAG, SEQU, GRAN, MACH, LASV, ALAS, AMAZ, EAST, MAYA, PRIN, FLOR, NEWY), las etapas al reves
+  (*_R) o las variantes PALM_T / BEAC_T, y 68 usan la union 76 (meta en una etapa que no es final, sin convertir). Solo con etapas de
+  OutRun 2 hacia delante hay 18 (2-1, 6-1 tipo 6, 8-1, 10-2, 15-1 tipo 2, 19-2, 20-2, 26-2, 26-4, 28-2, 29-1..5, 31-1,
+  31-3, 38-2 las 15) y de ellas 6 piden la union 76 (2-1, 8-1, 15-1, 20-2, 29-1..3). Ademas faltan los rivales (47CF40 y los coches de carreras del modulo del trafico) y el arbol de curso por
+  mision (main.c solo conoce el de csc_data_2).
+
 **CONTRARRELOJ** verificado en E: `MODO: variante 7, dificultad 0, fila de tiempos 2`, sin un solo coche de trafico,
 union y ruta leidas como en el OutRun. GOAL (menu real con el piloto y `-DPRUEBA_SIN_TIEMPO`, 2026-11-09): PALM -> ALPI
 (+3000 cuadros) -> FORE (+3060) -> SNOW (+3270) -> IMPE (+3240) -> GOAL, sin trafico en todo el curso. SIN PORTAR: la eleccion de etapa / curso por codigo (48B550: una etapa con su meta GOAL_*_TA o el
@@ -1510,6 +1539,15 @@ curso entero), el fantasma (GHOST.PS2 gc_default_*, formato QHOT/NHOT, modulo 46
 pantalla de resultado 0x50 del modo 25.
 
 ## Ultimo cambio verificado
+
+Tiempo de juego de la licencia (2026-11-09): la licencia activa suma +0x10C += el crono total de la carrera (4505D0 =
+[7D39DC]; SLES-53998 0x1cfdc0 = [0x5c5f48], licencia en 0x588668) al salir de la meta (modo 19, PS2 0x1b96bc), del
+fin del tiempo (modo 20, 0x1b9b58) y al confirmar REINTENTAR / ABANDONAR en la pausa (0x249c5c / 0x24a110), con +3F4
+|= 2; al volver a los menus se guarda en la VMU si hay cambios (4457B7 -> 416420). El crono total ya tiene el tope del
+original (0x57E3F). No se suma en la demo de atraccion. Verificado en E (Flycast, menu real, OutRun, pausa ->
+ABANDONAR -> si): `LICENCIA: tiempo de juego +863 cuadros` (el HUD marcaba 0'14"335 = 863 / 60,2), guardado en A1;
+en el siguiente arranque otra carrera +259 = 1122 y la tarjeta muestra T.CONDUC. 0''00'18. Las millas OutRun (+0x24,
+4EF280 / 4EF550 / 4EF510 con OutrunMiles.bin y la pantalla del modo 34) siguen SIN PORTAR.
 
 Suelo del original (2026-11-09, ver Suelo del original: colision COLI0200): la altura del coche, del trafico y de la
 camara sale de 43EB60 sobre la colision de la etapa y de la union (tools/conv_coli.py, demo/coli.c) en vez del perfil

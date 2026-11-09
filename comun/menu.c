@@ -566,7 +566,22 @@ void menu_entra(int man, int pista, int npistas)
     manual = man; pista_sonando = -2; n_ok = npistas < N_TEMAS ? npistas : N_TEMAS;
     elegido = pista >= 0 && pista < N_TEMAS ? pista : 0;   /* las listas y sus cursores siguen como estaban */
     inact = 0; a_cab.u = -1; pant = -1;
+    /* vuelta a los menus: 4457B7 del PC guarda (416420) si la licencia activa tiene cambios (+3F4 bit 1), p. ej. el
+       tiempo de juego que suma la carrera (menu_suma_tiempo) */
+    if (activa() && (activa()[0x3f4] & 2)) vmu_guarda();
     if (md) entra(P_TITULO, 0);
+}
+
+/* tiempo de juego de la licencia activa (+0x10C): al salir de la meta (modo 19) o del fin del tiempo (modo 20) y al
+   confirmar REINTENTAR / ABANDONAR en la pausa, el original suma el crono total de la carrera (4505D0 = [7D39DC];
+   SLES-53998 0x1cfdc0 = [0x5c5f48], sumado en 0x1b96bc / 0x1b9b58 / 0x249c5c / 0x24a110 a la licencia 0x588668) y
+   marca +3F4 |= 2 (cambios sin guardar) */
+void menu_suma_tiempo(int cuadros)
+{
+    uint8_t *p = activa();
+    if (!p || cuadros <= 0) return;
+    p32(p, 0x10c, l32(p, 0x10c) + cuadros); p[0x3f4] |= 2;
+    dbglog(DBG_INFO, "LICENCIA: tiempo de juego +%d cuadros = %d\n", cuadros, l32(p, 0x10c));
 }
 
 /* variante de [780258] (PS2 0x443508) del modo elegido, como 4EEAD0 del PC (runtime_route_mode: 1 OutRun, 2 Heart
