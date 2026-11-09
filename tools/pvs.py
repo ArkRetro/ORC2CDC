@@ -116,66 +116,67 @@ def muestras(R):
     return np.array(out, np.float32)
 
 def calcula(d, extras=(), hilos=os.cpu_count() or 4, informe=True):
-    """las listas XOR por seccion del modelo d (lee). extras: rutas (arrays) de mas por las que puede ir el ojo (la
-    rama derecha de la bifurcacion). Devuelve (ini, listas, mapa, estadisticas)"""
+    """las listas XOR por seccion del modelo d (lee), por malla (cada tira del fichero; las de los nodos del original).
+    extras: rutas (arrays) de mas por las que puede ir el ojo (la rama derecha de la bifurcacion). Devuelve (ini,
+    listas, mapa, estadisticas)"""
     t0 = time.time()
-    M, V, N, R = d['M'], d['V'], d['N'], d['R']; h = d['h']; nn = len(N); ini_l = h[5:10]
-    if nn == 0 or len(R) < 2 * SEC_PUNTOS: return [0], [], [], None
+    M, V, N, R = d['M'], d['V'], d['N'], d['R']; h = d['h']; nn = len(N); nm = len(M); ini_l = h[5:10]
+    if nn == 0 or nm == 0 or len(R) < 2 * SEC_PUNTOS: return [0], [], [], None
+    assert nm < 65536
     P = np.stack([V['x'], V['y'], V['z']], 1).astype(np.float32)
-    cartel = N['cartel'] >= 0; rama = (N['fl'] >> 8) & 3
-    tris = [[] for _ in range(nn)]; opa = [[] for _ in range(nn)]; con_mallas = np.zeros(nn, bool); opaco = np.zeros(nn, bool)
-    for k, m in enumerate(M):
-        g = int(m['nodo'])
-        if not 0 <= g < nn or m['n'] < 3: continue
-        con_mallas[g] = True
-        if cartel[g]: continue                                    # se prueba por su esfera
-        i = int(m['v0']) + np.arange(int(m['n']) - 2)
-        tris[g].append(np.stack([P[i], P[i + 1], P[i + 2]], 1).reshape(-1, 9))
-        o = ini_l[0] <= k < ini_l[1]
-        opa[g].append(np.full(len(i), o, np.uint8)); opaco[g] |= o
-    t0n = np.zeros(nn + 1, np.int32)
-    for g in range(nn): t0n[g + 1] = t0n[g] + sum(len(x) for x in tris[g])
-    T = np.ascontiguousarray(np.concatenate([x for L in tris for x in L]) if t0n[-1] else np.zeros((1, 9), np.float32), np.float32)
-    O = np.ascontiguousarray(np.concatenate([x for L in opa for x in L]) if t0n[-1] else np.zeros(1, np.uint8))
-    esf = np.ascontiguousarray(np.concatenate([N['c'], N['r'][:, None]], 1), np.float32)
-    fl = (cartel.astype(np.uint8) | ((opaco & ~cartel & (rama == 0)).astype(np.uint8) << 1) | ((~con_mallas).astype(np.uint8) << 2))
+    g = M['nodo'].astype(int); n = M['n'].astype(int)
+    util = (g >= 0) & (g < nn) & (n >= 3)                         # mallas de nodos (las demas: cielo, se dibujan)
+    gg = np.where(util, g, 0)
+    cartel = util & (N['cartel'][gg] >= 0); rama = np.where(util, (N['fl'][gg] >> 8) & 3, 0)
+    opaco = (np.arange(nm) >= ini_l[0]) & (np.arange(nm) < ini_l[1])
+    # triangulos de cada malla (tira: v, v + 1, v + 2), las de los carteles sin triangulos (se prueban por la esfera)
+    nt = np.where(util & ~cartel, n - 2, 0); t0n = np.concatenate([[0], np.cumsum(nt)]).astype(np.int32)
+    mi = np.repeat(np.arange(nm), nt); i = M['v0'].astype(np.int64)[mi] + (np.arange(t0n[-1]) - t0n[:-1][mi])
+    T = np.ascontiguousarray(np.stack([P[i], P[i + 1], P[i + 2]], 1).reshape(-1, 9) if len(i) else np.zeros((1, 9)), np.float32)
+    O = np.ascontiguousarray(opaco[mi].astype(np.uint8) if len(i) else np.zeros(1, np.uint8))
+    esf = np.concatenate([M['c'], M['r'][:, None]], 1).astype(np.float32)
+    esf[cartel] = np.concatenate([N['c'], N['r'][:, None]], 1)[gg[cartel]]   # sus vertices van en el marco del nodo
+    esf = np.ascontiguousarray(esf)
+    fl = np.ascontiguousarray((cartel.astype(np.uint8) | ((opaco & util & ~cartel & (rama == 0)).astype(np.uint8) << 1)
+                               | ((~util).astype(np.uint8) << 2)))
     u = (N['fl'] & 15).astype(int); lod = (320.0 / np.tan(FOV_MAX / 2)) / 240.0
-    occ = np.where(u > 0, N['r'] * lod * np.exp2(np.maximum(u, 1) - 1), LEJOS)
-    occ = np.ascontiguousarray(np.minimum(occ, LEJOS - N['r']).clip(0), np.float32)
+    occ_n = np.where(u > 0, N['r'] * lod * np.exp2(np.maximum(u, 1) - 1), LEJOS)
+    occ_n = np.minimum(occ_n, LEJOS - N['r']).clip(0)              # distancia al centro del nodo
+    # la malla tapa si su nodo se dibuja seguro: distancia al centro de la malla + la de los centros
+    dcn = np.linalg.norm(esf[:, :3] - N['c'][gg], axis=1)
+    occ = np.ascontiguousarray(np.where(util, (occ_n[gg] - dcn).clip(0), 0), np.float32)
     pos = [muestras(R)] + [muestras(x) for x in extras]; pos = np.ascontiguousarray(np.concatenate(pos), np.float32)
-    nw = (nn + 31) // 32; sal = np.zeros((len(pos), nw), np.uint32)
+    nw = (nm + 31) // 32; sal = np.zeros((len(pos), nw), np.uint32)
     L = lib(); fp = ctypes.POINTER(ctypes.c_float)
     L.pvs.argtypes = [fp, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, fp, ctypes.c_void_p, fp, fp, ctypes.c_int,
                       ctypes.c_float, ctypes.c_float, ctypes.c_int, ctypes.c_void_p]
     c = lambda a: a.ctypes.data_as(fp)
-    L.pvs(c(T), O.ctypes.data, t0n.ctypes.data, nn, c(esf), fl.ctypes.data, c(occ), c(pos), len(pos), K, EPS, hilos,
+    L.pvs(c(T), O.ctypes.data, t0n.ctypes.data, nm, c(esf), fl.ctypes.data, c(occ), c(pos), len(pos), K, EPS, hilos,
           sal.ctypes.data)
-    vis = np.unpackbits(sal.view(np.uint8), axis=1, bitorder='little')[:, :nn].astype(bool)
+    vis = np.unpackbits(sal.view(np.uint8), axis=1, bitorder='little')[:, :nm].astype(bool)
     # la seccion de cada muestra: la del punto de la ruta mas cercano (como la demo con el ojo) y sus vecinas
     from scipy.spatial import cKDTree
     nsec = (len(R) + SEC_PUNTOS - 1) // SEC_PUNTOS
     _, kp = cKDTree(R[:, :3].astype(float)).query(pos.astype(float))
-    sec = np.zeros((nsec, nn), bool)
+    sec = np.zeros((nsec, nm), bool)
     for s, v in zip(kp // SEC_PUNTOS, vis):
         sec[max(s - 1, 0):s + 2] |= v
-    sec[:SEC_LLENAS] = con_mallas; sec[-SEC_LLENAS:] = con_mallas
-    prev = np.zeros(nn, bool); ini = [0]; listas = []
+    sec[:SEC_LLENAS] = util; sec[-SEC_LLENAS:] = util
+    sec &= util
+    prev = np.zeros(nm, bool); ini = [0]; listas = []
     for s in range(nsec):
         x = np.nonzero(sec[s] ^ prev)[0]; listas += x.tolist(); ini.append(len(listas)); prev = sec[s]
     mapa = np.arange(len(R)) // SEC_PUNTOS
-    # estadistica: vertices de los nodos que quedan por seccion frente a todos
-    vn = np.zeros(nn)
-    for m in M:
-        g = int(m['nodo'])
-        if 0 <= g < nn and m['n'] >= 3: vn[g] += int(m['n'])
-    est = dict(sec=sec, vn=vn, muestras=len(pos), nodos=nn, secciones=nsec, xor=len(listas), seg=time.time() - t0,
-               frac_nodos=float(sec[SEC_LLENAS:-SEC_LLENAS].sum(1).mean() / max(1, con_mallas.sum())) if nsec > 2 * SEC_LLENAS else 1.0,
-               frac_vtx=float((sec[SEC_LLENAS:-SEC_LLENAS] @ vn).mean() / max(1, vn.sum())) if nsec > 2 * SEC_LLENAS else 1.0)
+    vn = np.where(util, n, 0).astype(float)
+    mid = sec[SEC_LLENAS:-SEC_LLENAS] if nsec > 2 * SEC_LLENAS else sec
+    est = dict(sec=sec, vn=vn, util=util, muestras=len(pos), mallas=int(util.sum()), secciones=nsec, xor=len(listas),
+               seg=time.time() - t0, frac_mallas=float(mid.sum(1).mean() / max(1, util.sum())),
+               frac_vtx=float((mid @ vn).mean() / max(1, vn.sum())))
     if informe:
-        print('PVS %s: %d muestras, %d nodos, %d secciones, %d entradas XOR (%d KB); quedan de media %.0f %% de los '
-              'nodos y %.0f %% de los vertices; %.0f s' % (os.path.basename(d['fn']), est['muestras'], nn, nsec,
-              len(listas), (4 * (nsec + 1) + 2 * len(listas) + 2 * len(R)) >> 10, 100 * est['frac_nodos'],
-              100 * est['frac_vtx'], est['seg']))
+        print('PVS %s: %d muestras, %d mallas de nodos, %d secciones, %d entradas XOR (%d KB); quedan de media %.0f %% '
+              'de las mallas y %.0f %% de los vertices; %.0f s' % (os.path.basename(d['fn']), est['muestras'],
+              est['mallas'], nsec, len(listas), (4 * (nsec + 1) + 2 * len(listas) + 2 * len(R)) >> 10,
+              100 * est['frac_mallas'], 100 * est['frac_vtx'], est['seg']))
     return ini, listas, mapa, est
 
 def anade(fn, extras=()):
