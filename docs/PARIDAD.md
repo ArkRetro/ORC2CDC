@@ -1524,7 +1524,8 @@ peticion 14 (escoltas 45B5B0, +324 = 6: carrera contra ellos), que no esta en la
   tipo, +0x28 segundos (tipos 1 y 6), +0x34 / +0x38 / +0x3C umbrales de nota. Tipos (496A30 / 495C20): 0 carrera
   (nota 6 - puesto, 0 si ultimo; 76 de los 94), 1 eliminacion por tiempo (3), 2 derrape contra el rival (7), 3
   conduccion limpia y rapida (5), 6 pillar a los rivales (3). Nota en la licencia +0x1D7 + 5 clave + subclave si
-  mejora (495A20). Recompensa del grupo 499730 (+0x11C).
+  mejora (495A20 = PS2 0x1f81cc: licencia 0x588668 + 477 + 5 (clave - 1) + subclave - 1, si la nueva es mayor o la
+  guardada es 7; +3F4 |= 2). Recompensa del grupo 499730 (= PS2 0x1a0f18..0x1a0f7c: bit de +0x11C, +3F4 |= 2).
 - BLOQUEADO para correr las misiones: 76 de los 94 cursos usan etapas que la demo no tiene: las 15 de OutRun 2 SP
   (BEAC, SANF, YOSE, NIAG, SEQU, GRAN, MACH, LASV, ALAS, AMAZ, EAST, MAYA, PRIN, FLOR, NEWY), las etapas al reves
   (*_R) o las variantes PALM_T / BEAC_T, y 68 usan la union 76 (meta en una etapa que no es final, sin convertir). Solo con etapas de
@@ -1547,7 +1548,10 @@ fin del tiempo (modo 20, 0x1b9b58) y al confirmar REINTENTAR / ABANDONAR en la p
 original (0x57E3F). No se suma en la demo de atraccion. Verificado en E (Flycast, menu real, OutRun, pausa ->
 ABANDONAR -> si): `LICENCIA: tiempo de juego +863 cuadros` (el HUD marcaba 0'14"335 = 863 / 60,2), guardado en A1;
 en el siguiente arranque otra carrera +259 = 1122 y la tarjeta muestra T.CONDUC. 0''00'18. Las millas OutRun (+0x24,
-4EF280 / 4EF550 / 4EF510 con OutrunMiles.bin y la pantalla del modo 34) siguen SIN PORTAR.
+4EF280 / 4EF550 / 4EF510 con OutrunMiles.bin y la pantalla del modo 34) siguen SIN PORTAR: dependen de la
+puntuacion (4B99D0 = [8447DC + coche x 4]), de 84BCF8 (4EF460 / 4EF440 desde race_traffic_score), de la bandera 84BCFC
+(4EF430) y del contador car+0xE78; su codigo del PS2 no esta localizado (0x1a38f0 es el reinicio de la licencia y
+0x1a41b4.. otra copia de +0x24, no la suma).
 
 Suelo del original (2026-11-09, ver Suelo del original: colision COLI0200): la altura del coche, del trafico y de la
 camara sale de 43EB60 sobre la colision de la etapa y de la union (tools/conv_coli.py, demo/coli.c) en vez del perfil
