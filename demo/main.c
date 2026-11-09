@@ -1618,8 +1618,9 @@ static void traf_abre(trafico_t *t, float s, int carril, int m, int color, int p
     if (!u) traf_hist[carril]++;                                /* 803718: aperturas por carril fuera de la union */
     traf_ult_pos = pos_jug;
 #ifdef DIAG_TRAF
-    dbglog(DBG_INFO, "DIAGTRAF abre s %.0f nodo %d pos %d union %d carril %d modelo %d color %d v %.1f\n", (double)s, nd, ps, u, carril,
-           trc_ok ? trc[m].modelo : m, t->color, (double)t->c.v);
+    dbglog(DBG_INFO, "DIAGTRAF abre s %.0f nodo %d pos %d union %d carril %d modelo %d color %d v %.1f (jugador s %.0f x %.1f carril %d)\n",
+           (double)s, nd, ps, u, carril, trc_ok ? trc[m].modelo : m, t->color, (double)t->c.v, (double)yo.s, (double)yo.x,
+           carril_cerca(yo.s, yo.x));
 #endif
 }
 /* 478B90: el punto fijo de la posicion del jugador; 1 si ha abierto (o gastado) uno */
@@ -4829,15 +4830,29 @@ static void resultados(int meta)
 #ifndef VER
 #define VER 0
 #endif
+/* Salida del jugador: 4A6ED0 (GamePlCar_Init) pone el coche en 5C2560 = (0, 0, -16) del marco de la etapa en el modo de
+   un jugador (5C24D0 por puesto con rivales; 4A7270, el coche del menu, el mismo sitio), mirando a -z (+2C/+2E/+30 =
+   0). Aqui: el punto de la ruta cuya perpendicular pasa por (0, -16) de la etapa de salida (su marco es el del mundo al
+   empezar, curso_reinicia) y el desvio hasta el. En PALM cae en el carril 3 del trafico del original (los 6 carriles
+   de la etapa 0 van al principio por esa calzada). Antes: 100 m y 11,5 m a la derecha, la otra calzada (inventado) */
+static float salida_s_, salida_x_;
+static void salida_calcula(void)
+{
+    float s, p[3], th, a0 = 0, a, ss = 0;
+    for (s = s_base; s < s_base + 400.0f && s < longitud; s += 0.25f) {
+        ruta_en(s, p, &th, NULL, NULL);
+        a = (0.0f - p[0]) * sinf(th) + (-16.0f - p[2]) * -cosf(th);   /* por delante del punto de la ruta */
+        if (s > s_base && a0 > 0 && a <= 0) { ss = s; break; }
+        a0 = a;
+    }
+    ruta_en(ss, p, &th, NULL, NULL);
+    salida_s_ = ss; salida_x_ = (0.0f - p[0]) * cosf(th) + (-16.0f - p[2]) * sinf(th);
+}
 #ifndef SALIDA
-#define SALIDA 100.0f                                           /* metros desde el principio de la ruta */
+#define SALIDA salida_s_
 #endif
 #ifndef SALIDA_X
-/* desvio de salida del jugador: 5 m dentro del borde derecho del asfalto (lo que daba el carril 4 de los carriles
-   repartidos por el asfalto que habia antes en la ruta; SUPUESTO: el sitio de salida del original no se ha localizado;
-   ahora los carriles de la ruta son los del trafico del original y en la primera etapa van todos por la otra calzada) */
-static float salida_x(float s) { float p[3], th, iz, de; ruta_en(s, p, &th, &iz, &de); return de - 5.0f; }
-#define SALIDA_X salida_x(SALIDA)
+#define SALIDA_X salida_x_
 #endif
 
 /* La PowerVR no termina el cuadro (en la consola real, por un bufer lleno o un parametro ilegal): se escribe el
@@ -5596,6 +5611,7 @@ int main(int argc, char **argv)
     traf_tablas();                                              /* clases y cajas del trafico (TRAFC.DAT) */
     bo_carga_datos();                                           /* objetos animados de las uniones (BO.DAT) */
     if (ruta_pon(&etapa)) { aviso("Sin memoria para la ruta"); for (;;) thd_sleep(1000); }
+    salida_calcula();                                           /* 5C2560 en la ruta (coche del menu y salida) */
     fisica_carga();
     presta_union(1);                                            /* aun sin carrera: el coche, el HUD y la pelicula */
     /* 2: PowerVR, texturas a la memoria de video y cabeceras */
@@ -5772,6 +5788,7 @@ int main(int argc, char **argv)
                 presta_union(0);                                /* el hueco de la union vuelve a la carrera */
                 curso_reinicia();                               /* la etapa de salida (otra vez, si hacia falta) */
                 bo_inicia();                                    /* sin objetos de union y las cuentas a cero */
+                salida_calcula();
                 memset(&yo, 0, sizeof yo); yo.s = SALIDA; yo.x = SALIDA_X;
 #ifdef PRUEBA_FIN
                 yo.s = longitud - PRUEBA_FIN; yo.x = carril_x(yo.s, 4);   /* prueba: a PRUEBA_FIN m del final */
