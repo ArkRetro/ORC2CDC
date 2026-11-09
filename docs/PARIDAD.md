@@ -16,8 +16,15 @@ demo se extrae del ELF de PS2 en la conversion (tools/conv_*.py) y se localiza p
 
 Tick de la logica del original: `dt = 0.016611295 s` (1/60,2), presente 1 vez en el ELF de PS2 (bytes
 `6914883c`) y igual que `fixed_dt` del PC (pc_chassis.cpp, 0x7162C4); 60.2 aparece 22 veces. CONFIRMADO que la
-fisica usa ese paso. PENDIENTE: a cuantos pasos por segundo real corre la version PAL (50 Hz o PAL60); la demo da un
-paso por 16683 us (59,94 Hz).
+fisica usa ese paso. Cadencia real (CONFIRMADO en SLES-53998): el bucle principal 0x1078c8 da en cada cuadro tantos
+pasos (0x107958..0x1079a8, 7 llamadas como 417C7B del PC) como campos de video han pasado (0x107b50 en cada vblank,
+cuenta 0x448b28; mas de 600 -> 1; 0 -> 0). Modos del disco (TEXT.PS2: "50Hz", "60Hz - Test", "60Hz Progressive (480P)",
+0x1070f8 / 0x166638): a 60 Hz y 480p, 1 paso por campo (59,94 Hz); a 50 Hz ([0x328a8c] == 1) 1 paso extra cada 5
+campos salvo uno de cada 1000 (cuenta s4): 50 x 6/5 x 1000/1001 = 59,94 pasos por segundo, con mezcla de dibujo
+(s3 mod 5) x 0,2 en 0x36f334. O sea: 60000/1001 pasos por segundo real en todos los modos, sin tope de pasos por
+cuadro (si los fps bajan el juego no se ralentiza). El PC (417890 / 417C7B) da 60 por segundo con su reloj. La demo:
+PERIODO_60 (1001000 us/60 = 16683,33 us) con el reloj de KOS, hasta 600 pasos por cuadro (antes 3: por debajo de 20
+fps la demo se ralentizaba y el original no).
 
 ## Como compilar y probar
 
@@ -41,7 +48,7 @@ Estado: OK (conectado y verificado al nivel indicado), PARCIAL, PROVISIONAL (apr
 | Trafico (clases, IA, reaccion) | 472090, 472450, 472A50, 47DC10, 4736D0, hit_476040; aparicion 479080 (PS2 0x1dcdd0): 478B90 (0x1dbba0), 4787E0 (0x1db6d0), 4EFB90 (0x1f3818), 4F0030 (0x1f1a88), 46CE30, 478430, 46CC10; cierre 477F60 | PARCIAL | TRAFC.DAT (TRC1, ACL1 y TAP1: tablas de aparicion, velocidad y puntos fijos por etapa); colores (tabla 0x36bc18, modelos 30..43) y materiales en TRAFn.DAT (TCX1) | camino "Lead" de 472450 (velocidad segun el jugador) sin portar: todos a la velocidad del registro; 478640/46CDA0 en la union simplificados; puntos fijos de coches de carreras y de los modelos 39..43 sin coche | ver Trafico: densidad del original | E |
 | Rivales | — | FALTA | — | no hay rivales | — | — |
 | Carretera, pendientes, bifurcacion | STAGE.PS2, BK.PS2 cs_BK_PALM, COMMON obj_course_obj_bk_palm + obj_OBJ_<ZONA>_BUNKI_TX, descriptores 0xb0, csc_data_2 | OK | conv_tramo/conv_union, CURSO.DAT | arbol entero (15 etapas, 10 bifurcaciones con sus carteles, 5 metas); cielo, niebla, luz y sol de la union como el original (ver Entorno); bifurcaciones = las de PALM (las demas no estan en el disco) | objetos animados de BK (ANIMS) | E |
-| Temporizador (inicial y ampliacion) | 44DC70 = PS2 0x176730, 450CC0 = PS2 0x1cee40, 450AC0; tabla 7D2E98 = PS2 0x3cb708 copiada por 0x176040; k636904 = PS2 0x35a938 | OK | TIM1 y KTE1 de PARAM.DAT | formula y tablas CONFIRMADAS en el ELF; variante 1 (fila 0), preset 0 y dificultad 0 PROBABLES (frontal del PC) | trazar el frontal de PS2 | E |
+| Temporizador (inicial y ampliacion) | 44DC70 = PS2 0x176730, 450CC0 = PS2 0x1cee40, 450AC0 = PS2 0x1ce1f8 (-1 por paso en 0x5c5f44, crono +1 en 0x5c5f48); cuenta atras t / 60,2 + 0,34 (4BDA30 = PS2 0x1bfff8); crono con CalcFrame2Time (449B30 = PS2 0x1f6d70: t / 60,2, milesimas truncadas); paso real 59,94 Hz: HUD 0,43 % mas lento que el reloj, como el original; tabla 7D2E98 = PS2 0x3cb708 copiada por 0x176040; k636904 = PS2 0x35a938 | OK | TIM1 y KTE1 de PARAM.DAT | formula y tablas CONFIRMADAS en el ELF; variante 1 (fila 0), preset 0 y dificultad 0 PROBABLES (frontal del PC) | trazar el frontal de PS2 | E |
 | Checkpoints, meta, resultados | 44FF20 / 4515B0 (branch_state 7D38E8) con las banderas +0x3C de COLI0200; 4513C0 meta | OK | ampliacion al pasar la pancarta CHECK POINT del principio de la etapa siguiente (ver Checkpoint); meta del original en las 5 etapas finales (z = 0 de la union); voz y efecto de EXTEND TIME, GOAL y TIME OVER (voces.c) | sin pantalla de resultados ni final del original; sin la voz de GAME OVER (0x154: no hay pantalla de GAME OVER) | — | E |
 | Puntuacion modo OutRun | 4F2DF0, 4F2660, 4F2B20, 4B9770 | PARCIAL | main.c pt_* | posicion de carretera = m_pos de CURSO.DAT (CONFIRMADO; antes 2,5 m supuestos, 3,2 veces los puntos por avance); bonus de etapa en el checkpoint | el salto de +64 al cambiar de curso (PENDIENTE) | E |
 | Eventos, scripts, progresion, misiones | SCRIPTS.PS2 (Races, RaceAttack, OutrunMiles, Req_*) | FALTA | — | — | — | — |
@@ -50,7 +57,7 @@ Estado: OK (conectado y verificado al nivel indicado), PARCIAL, PROVISIONAL (apr
 | HUD, menus, transiciones | SPRANI/XST, TEXT.PS2 (espanol: SPANISH.bin y XST _sxst) | PARCIAL | HUD.DAT, MENU.DAT; todas las pantallas del menu principal y de un jugador, licencia con VMU (icono, eyecatch y LCD: VMU.DAT, ver VMU), seleccion de coche del original, menu de pausa con AUDIO (ver Menus y Pausa y mezcla) | titulo es un cuadro del video (la pelicula de titulo en bucle detras del rotulo, sin hacer); textos bfont antiguos en la demo automatica y el aviso de rama; rotulos de las filas de opciones (sprites sin localizar) | quitar textos bfont | E |
 | Musica y efectos | MUSIC.PS2, SOUND.PS2 ICS/MENU/FE; volumenes 0x11ae38 / 0x100210 / 0x11b600, SOUNDCD.IRX 0x2118 | PARCIAL | musica.c, sfx.c; mezcla del original (ver Pausa y mezcla) | 48 kHz supuesto; sin sonido por superficie ni del choque fuerte | — | E |
 | Voces (acompanante y locutor) | SOUND.PS2 `\SPANISH\ORC.PAK`, `PERO.pak`; race_robots 489A90/488D80 = PS2 0x202e60..0x205cac; 4B93E0, 4B9CD0, 49C9C0, 499020, GAME 0x1b83e8 | OK | VOCES.DAT (conv_sonido.py), voces.c; verificado en Flycast (ver Voces y video) | una voz nueva corta la anterior (SUPUESTO); "choque con otro coche" = +4 0x4000000 del jugador (4F7BF0 le ha cambiado la velocidad) en un choque; sin voces de asustada/trompo (solo Coast 2 Coast) | — | E |
-| Peliculas (titulo y atraccion) | MV.PS2 ts50/attr50.pss; 0x12d480, ADVERTISE 0x25e1d8 | OK | MVTS.VQV / MVATTR.VQV (conv_video.py), video.c | VQ de la PowerVR a 512x256 estirado a 640x480 (el original: MPEG-2 640x480); al arrancar y por inactividad del titulo, en vez de la demo de carrera | — | E |
+| Peliculas (titulo y atraccion) | MV.PS2 ts50/attr50.pss; 0x12d480, ADVERTISE 0x25e1d8 | OK | MVTS.VQV / MVATTR.VQV (conv_video.py), video.c | VQ de la PowerVR a 256x256 estirado a 640x480 y audio a 32 kHz (el original: MPEG-2 640x480, PCM a 48 kHz) para caber en ~440 KB/s del GD; al arrancar y por inactividad del titulo, en vez de la demo de carrera | — | E |
 | Cargas y estabilidad | — | PARCIAL | carga en segundo plano, mutex del GD | — | medir en GDEMU | E |
 | Rendimiento / TA en consola real | — | PARCIAL | tope global del TA (DREAMCAST.md) | primer cuelgue medido en la consola (VB lleno a 24656 vtx) | esperar prueba R de la demo 14+ | E (R pendiente) |
 
@@ -98,11 +105,16 @@ voces sale de la tabla SE (0x3fff) por el general como en el IRX (ver Pausa y me
 idiomas ni subtitulos). 0x12d480 elige la de 50 o 60 Hz (0x328a8c) y la de titulo (1) o atraccion (0); el modo
 ADVERTISE (0x25e1d8) pone primero la de titulo y luego la de atraccion, alternando, hasta START. La Dreamcast no puede
 con MPEG-2 a 640x480 (ni KallistiOS trae RoQ ni MPEG en esta version, sin kos-ports): `conv_video.py` las pasa a
-texturas VQ de la PowerVR (512x256 RGB565, libro de 256 entradas por cuadro, 34 KB por cuadro que descomprime el
-chip) con el audio en ADPCM de Yamaha a 48 kHz, cuadros de 36 KB alineados a sector (0,9 MB/s a 25 fps). Se usan las
-de 50 Hz (la demo sale en PAL 50 Hz). MVTS.VQV 16 MB, MVATTR.VQV 50 MB. video.c las pasa al arrancar (gancho
+texturas VQ de la PowerVR (256x256 RGB565 estiradas a 640x480; libro de 256 entradas por grupo de hasta 12 cuadros y
+en cada corte de plano; 16 KB de indices por cuadro que descomprime el chip) con el audio en ADPCM de Yamaha a 32 kHz
+(un flujo por canal), ~440 KB/s a 25 fps (antes 512x256 con libro por cuadro y 48 kHz: 0,9 MB/s, demasiado para
+asegurar el GD real; ver docs/DREAMCAST.md, Peliculas, con la causa del fallo en la consola: los canales 33 y 34 del
+flujo de audio no se encendian). Se usan las de 50 Hz (la demo sale en PAL 50 Hz). MVTS.VQV 7,9 MB, MVATTR.VQV
+24,9 MB, al final del disco (`mkgdi.py`). video.c las pasa al arrancar (gancho
 `video_titulo` antes del primer titulo) y por inactividad en el titulo (MENU_DEMO, en vez de la demo de carrera);
-START las salta. Las pruebas con PRUEBA_AUTO / PRUEBA_JUGADOR no las pasan.
+START las salta. Las pruebas con PRUEBA_AUTO / PRUEBA_JUGADOR no las pasan. Si una se atasca (sin cuadros nuevos en
+1 s) escribe un diagnostico sobre la imagen y sigue al titulo. Verificado en Flycast el 2026-11-09: las dos enteras
+con audio y sin faltas (tambien con el lector limitado a 470 KB/s).
 
 ## Menus (2026-11-08)
 
@@ -258,7 +270,7 @@ estaba y se dice lo que falta). Estado: CORREGIDO, SE QUEDA (ya era del original
 | Sonido: `ESCALA 3` de los efectos frente a la musica | balance 4279C0 (624238 / 624258) | — | PROVISIONAL (mezcla del AICA) | SE QUEDA |
 | Sonido del derrape: deslizamiento / 30 grados | 4260E0 PlaySkid: maximo del deslizamiento de las 4 ruedas (+60/+64.. del cuerpo) | — | PROVISIONAL | SE QUEDA |
 | Golpe: fuerza 0,4 + dv/25 y v/40, 20 cuadros entre golpes | 4264C0 PlayWall, 4F65D0 (una vez cada 60 cuadros) | — | PROVISIONAL | SE QUEDA |
-| Salto de cuadros (paso de 16683 us, hasta 3) | tick 1/60,2 s (CONFIRMADO); pasos por segundo de la version PAL | — | PROVISIONAL (tecnico) | SE QUEDA |
+| Salto de cuadros (paso de 16683,33 us, hasta 600 por cuadro) | 0x1078c8: pasos = campos de video, 59,94 por segundo a 50 y 60 Hz, sin tope hasta 600 (CONFIRMADO) | antes hasta 3 pasos (por debajo de 20 fps iba lento); TIEMPO TOTAL de resultados dividia por 60 | CONFIRMADO | CORREGIDO (2026-11-09) |
 | camara.c: la carrera siguiente empieza con la vista elegida | — | — | PROVISIONAL | SE QUEDA |
 | Voz y sonido de EXTEND TIME | 4B93E0 del PC (race_hud_navi.cpp timer_4b93e0) = PS2 0x1be78c: efecto 0x4d (0x84d) y voz 0x16c (0x96c) | — | CONFIRMADO | SE QUEDA (voces.c) |
 

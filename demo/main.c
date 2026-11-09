@@ -863,7 +863,11 @@ static float m_pos = 7.95f;
 #define ADELANTE_POS 16.0f
 static float grua_s, grua_x; static int grua_on;
 /* Tiempo de la carrera como el original (race_manager 7D394C): un contador de cuadros de la logica que baja 1 por
-   cuadro (450AC0) y se muestra como cuadros / 60,2 + 0,34. Inicial (450790) y ampliaciones (450CC0) con
+   cuadro (450AC0 / SLES-53998 0x1ce1f8, contador 0x5c5f44) y se muestra como cuadros / 60,2 + 0,34 truncado
+   (4BDA30 / PS2 0x1bfff8). El crono total (7D39DC / PS2 0x5c5f48, +1 por paso hasta 359999) se muestra con
+   CalcFrame2Time (449B30 / PS2 0x1f6d70): segundos = cuadros / 60,2 truncado, milesimas = resto x 1000 truncado.
+   Como el paso real es de 1001/60 ms (59,94 Hz, ver PERIODO_60), en el original el crono y la cuenta atras van un
+   0,43 % mas lentos que el tiempo real (60 s reales = 59,74 s en el HUD). Inicial (450790) y ampliaciones (450CC0) con
    GetExtendedTime (44DC70 / SLES-53998 0x176730, mismo codigo instruccion a instruccion):
      t = tabla[fila][nivel][dificultad] + k636904[clave] (si 43F960 == 0 y 456D60 <= 1) + 60 (si 48B1A0 != 1 y nivel > 0)
    con la tabla TIM1 de PARAM.DAT (la que 44C020 / 0x176040 copia a 7D2E98 segun el preset [78024C]) y la correccion
@@ -885,6 +889,14 @@ static float grua_s, grua_x; static int grua_on;
 static const int16_t *tim_tab;                                  /* 4 x 3 x 15 x 5 cuadros, NULL sin TIM1 */
 static const int16_t *tim_kte;                                  /* 15 cuadros por clave de etapa, NULL sin KTE1 */
 static int tim_cuadros;                                         /* 7D394C */
+/* CalcFrame2Time (PS2 0x1f6d70) en milesimas: s = f / 60,2 (div.s, truncado), ms = (s - ent(s)) x 1000 truncado */
+static int cuadros_ms(int f)
+{
+    float x = (float)f / TIM_HZ; int se = (int)x, ms = (int)((x - (float)se) * 1000.0f);
+    if (ms < 0) { se--; ms += 1000; }
+    if (ms >= 1000) { ms -= 1000; se++; }
+    return se * 1000 + ms;
+}
 /* 44DC70 para la etapa de clave k y nivel (profundidad en el arbol, 44C850) nivel */
 static int tim_zona(int k, int nivel)
 {
@@ -2262,8 +2274,9 @@ static void caja(float x, float y, float W, float H, uint32_t argb)
 
 /* Modo de video: con cable VGA, VGA a 60 Hz; si no, el generico de KallistiOS (NTSC entrelazado a 60 Hz, que casi
    todas las teles PAL por euroconector aceptan). En una consola PAL (region de la flash Europa) sin VGA se pregunta,
-   a 50 Hz (lo que ve cualquier tele PAL): A = 60 Hz, B o nada en 10 s = 50 Hz. La logica va a 60 pasos por segundo con
-   el reloj (salto de cuadros), asi que a 50 Hz el juego va a la misma velocidad. */
+   a 50 Hz (lo que ve cualquier tele PAL): A = 60 Hz, B o nada en 10 s = 50 Hz. La logica va a 59,94 pasos por segundo
+   con el reloj (salto de cuadros, PERIODO_60), como el original en sus modos de 50 y 60 Hz (0x1078c8): a 50 Hz el
+   juego va a la misma velocidad. */
 static int modo_video = DM_640x480;
 static void elige_video(void)
 {
@@ -2306,7 +2319,17 @@ enum { TITULO, CUENTA, CARRERA, META, AGOTADO };
 #define MENU_CAM_D 6.0f
 #define MENU_CAM_Y 1.4f
 #define MENU_CAM_MIRA 0.2f
-#define PERIODO 16683                                           /* us por paso de logica (59,94 Hz) */
+/* Cadencia de la logica del original (SLES-53998, bucle principal 0x1078c8): cada cuadro dibujado da tantos pasos
+   (0x107958..0x1079a8) como campos de video (vblank) han pasado desde el anterior (0x107b50, llamado en cada vblank
+   por 0x1669e8, cuenta en 0x448b28; 0x107a1c lo lee y lo pone a 0); mas de 600 campos -> 1 paso; 0 campos -> 0 pasos.
+   - 60 Hz (NTSC 480i y 480p): 1 paso por campo = 59,94 pasos por segundo.
+   - 50 Hz (PAL, [0x328a8c] == 1, 0x1070f8): ademas 1 paso extra cada 5 campos (acumulador s3), salvo cuando la cuenta
+     de pasos s4 pasa de 1000 (entonces s4 -= 1000 y no hay extra): 50 x 6/5 x 1000/1001 = 59,94 pasos por segundo.
+     La fraccion (s3 mod 5) x 0,2 va a 0x36f334 (0x1f65b8): mezcla de dibujo entre los dos ultimos pasos.
+   Asi que el juego va a 60000/1001 pasos por segundo real en los tres modos, y la fisica avanza 1/60,2 s por paso.
+   La demo lo hace con el reloj (timer_us): PERIODO_60 es el paso en us x 60 (1001000 / 60 = 16683,33 us). */
+#define PERIODO_60 1001000LL                                    /* us x 60 por paso de logica (59,94 Hz) */
+#define PASOS_MAX 600                                           /* 0x107a30: mas campos que esto -> 1 paso */
 static int t_cuenta = 9999, t_ext = 9999, t_bif;
 static int etapa_n, hud_ok, crono, puntos; static float vmax;
 
@@ -3163,7 +3186,7 @@ static void texto_arriba(const char *l1, const char *l2, const char *l3);
 /* panel de resultados al terminar (meta o tiempo agotado) */
 static void resultados(int meta)
 {
-    char a[64], b[64], c[64]; int ms = (int)(crono * 1000.0f / 60.0f);
+    char a[64], b[64], c[64]; int ms = cuadros_ms(crono);                 /* CalcFrame2Time (449B30 / PS2 0x1f6d70) */
     sprintf(a, meta ? "   GOAL!   %s" : "   TIEMPO AGOTADO", meta ? zona_nombre(cur_nodo) : "");
     sprintf(b, "   TIEMPO TOTAL %d'%02d\"%03d", ms / 60000, (ms / 1000) % 60, ms % 1000);
     sprintf(c, "   PUNTOS %07d   MAX %d km/h", puntos, (int)vmax);
@@ -3425,7 +3448,8 @@ static void coche_ani_lee(void)
 /* rand() de la CRT de Microsoft (el 580F40 del PC): 15 bits */
 static int ani_rand(void) { ani.azar = ani.azar * 214013u + 2531011u; return (ani.azar >> 16) & 0x7FFF; }
 static void traf_anima_paso(float dt);
-/* un paso de logica (1/60 s) en carrera: el estado de las piezas como lo dejan los pasos del original */
+/* un paso de logica (1001/60 ms reales, 1/60,2 s de fisica) en carrera: el estado de las piezas como lo dejan los
+   pasos del original */
 static void coche_anima_paso(int titulo)
 {
     float dt = 1.0f / 60, vmf, x; int k, kmh, smp, sum;
@@ -3729,7 +3753,7 @@ int main(int argc, char **argv)
     uint32_t cuadro = 0, bot_ant = 0, t_estado = 0; uint64_t t0, tcpu = 0, c0;
     float cam_y = 0, tiempo = TIEMPO_ETAPA, fps = 0, ms = 0, cam_fw[3] = { 0, 0, -1 }, ttit = 0;
     char s1[96], s2[96], s3[96], msg[32] = ""; int aviso_rama = 0, pista = 0, pasos = 1, paso, saltos = 0, saltos_ver = 0;
-    uint64_t reloj = 0; float lejos_obj = lejos;
+    int64_t reloj = 0; uint32_t nuevo_pend = 0; float lejos_obj = lejos;
     uint64_t c_log = 0, t_log = 0, t_ini = timer_ms_gettime64(); float ms_log = 0, t_carga = 0;
     (void)argc; (void)argv;
 
@@ -3818,13 +3842,18 @@ int main(int argc, char **argv)
         uint32_t b = st ? st->buttons : 0, nuevo = b & ~bot_ant;
         float giro = 0, gas = 0, freno = 0, ojo_[3], mira[3];
         bot_ant = b; auto_piloto = auto_; t_estado++; c_log = timer_us_gettime64();
-        {   /* salto de cuadros: tantos pasos de logica (60 Hz) como haya pasado de tiempo real, hasta 3 */
-            uint64_t ahora = timer_us_gettime64();
+        {   /* salto de cuadros como el original (0x1078c8, ver PERIODO_60): tantos pasos de logica (59,94 Hz) como
+               periodos de tiempo real hayan pasado (redondeado: con la pantalla a 59,94 Hz sale 1 por cuadro, a 50 Hz
+               1,1,1,1,2 como los 6 por 5 campos del original), sin tope hasta PASOS_MAX; aunque los fps bajen de 20 el
+               juego no se ralentiza (cada cuadro hace mas pasos). Un cuadro sin pasos (0) es posible, como en el
+               original; lo pulsado en el se guarda para el siguiente. */
+            int64_t ahora = (int64_t)timer_us_gettime64() * 60, d;
             if (!reloj) reloj = ahora;
-            pasos = (int)((ahora - reloj + PERIODO / 2) / PERIODO);
-            if (pasos < 1) pasos = 1;
-            if (pasos > 3) { pasos = 3; reloj = ahora - 3 * PERIODO; }
-            reloj += (uint64_t)pasos * PERIODO; saltos += pasos - 1;
+            d = ahora - reloj;
+            pasos = d > 0 ? (int)((d + PERIODO_60 / 2) / PERIODO_60) : 0;
+            if (pasos > PASOS_MAX) { pasos = 1; reloj = ahora - PERIODO_60; }
+            reloj += pasos * PERIODO_60; if (pasos > 1) saltos += pasos - 1;
+            if (!pasos) { nuevo_pend |= nuevo; nuevo = 0; } else { nuevo |= nuevo_pend; nuevo_pend = 0; }
 #ifdef PRUEBA_GUION
             if (guion_hasta && timer_ms_gettime64() < guion_hasta) pasos = 0;   /* congelado para la captura */
             else guion_hasta = 0;
@@ -3972,6 +4001,17 @@ int main(int argc, char **argv)
                 }
                 voz_contacto = 0;
                 crono++; if (fis_ok && fis.velocidad_hud > vmax) vmax = fis.velocidad_hud;
+#ifdef PRUEBA_CRONO
+                {   /* crono del HUD frente al reloj de la consola, cada 600 pasos (unos 10 s) */
+                    static uint64_t t_c0;
+                    if (crono == 1) t_c0 = timer_us_gettime64();
+                    else if (crono % 600 == 1) {
+                        int cm = cuadros_ms(crono - 1);
+                        printf("CRONO: pasos %d hud %d.%03d s real %.3f s cuenta %d\n", crono - 1, cm / 1000, cm % 1000,
+                               (double)((timer_us_gettime64() - t_c0) / 1e6), (int)(tim_cuadros / TIM_HZ + 0.34f));
+                    }
+                }
+#endif
 #if defined(PRUEBA_GUION) && defined(PRUEBA_EMBISTE) && defined(DIAG_CHOQUE)
                 if (guion_i < (int)(sizeof emb_cong / sizeof emb_cong[0]) && emb_golpe >= 0 && diag_cuadro == emb_golpe + emb_cong[guion_i]) {
                     guion_hasta = timer_ms_gettime64() + 3000; guion_i++; pasos = paso + 1;
@@ -4143,7 +4183,7 @@ int main(int argc, char **argv)
                 if (estado == TITULO) menu_dibuja();
                 if (hud_ok && estado != TITULO) {
                     hud_estado_t he;
-                    he.tiempo = (int)(tim_cuadros / TIM_HZ + 0.34f); he.crono_ms = (int)(crono * 1000.0f / TIM_HZ); he.puntos = pt_visible(); he.puntos_estilo = pt_estilo;
+                    he.tiempo = (int)(tim_cuadros / TIM_HZ + 0.34f); he.crono_ms = cuadros_ms(crono); he.puntos = pt_visible(); he.puntos_estilo = pt_estilo;
                     he.kmh = fis_ok ? (int)fis.velocidad_hud : (int)(yo.v * 3.6f); he.marcha = fis_ok ? fis.marcha : 1;
                     he.etapa = etapa_n; he.cuadro = cuadro; he.rpm = fis_ok ? (float)fis.rpm_suave : 0;
                     he.rebufo = fis_ok && fis.rebufo > 0.18f; he.derrape = yo.t_derrape != 0; he.manual = manual_ && !auto_; he.rev_on = he.manual && fis_ok && fis.rpm_i > 7900 && fis.marcha < fpar.marchas; he.seis = fis_ok && fpar.marchas >= 6;

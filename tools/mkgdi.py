@@ -37,11 +37,15 @@ def main():
             pr = os.path.join(raiz, '0.0')
             if os.path.exists(pr): os.remove(pr)
             if relleno: open(pr, 'wb').truncate(relleno * 2048)
-            with open(orden, 'w') as f:            # mas peso, antes: los datos (3), el relleno (2) y el ejecutable (1)
+            # mas peso, antes: los datos (4), el relleno (3), las peliculas (2) y el ejecutable (1). El GD-ROM gira a
+            # velocidad angular constante: hacia fuera (LBA alto) pasan mas sectores por vuelta y se lee mas deprisa
+            # que junto al LBA 45000; las .VQV, que se leen sin parar a ~450 KB/s, van fuera
+            with open(orden, 'w') as f:
                 for dp, _, fs in os.walk(raiz):
                     for x in fs:
                         r = os.path.relpath(os.path.join(dp, x), raiz)
-                        f.write('%s %d\n' % (os.path.join(dp, x), 1 if r == '1ST_READ.BIN' else 2 if r == '0.0' else 3))
+                        f.write('%s %d\n' % (os.path.join(dp, x), 1 if r == '1ST_READ.BIN' else 3 if r == '0.0' else
+                                              2 if r.upper().endswith('.VQV') else 4))
             sh('genisoimage', '-quiet', '-C', '0,45000', '-V', 'OUTRUN_DC', '-G', ip, '-l', '-no-pad', '-sort', orden, '-o', t3, raiz)
             return os.path.getsize(t3) // 2048
         n3 = iso(0)

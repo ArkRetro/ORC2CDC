@@ -297,11 +297,50 @@ bit de modificador; el coche del jugador no) que queda dentro se multiplica por 
 | Tiras sin fin (EOL) | los efectos saltaban vertices sueltos detras del plano cercano y la tira se quedaba abierta antes de la siguiente cabecera (parametro ilegal para el TA real). Ahora cada cuadrilatero va entero o no va (`pt_cuad`). |
 | Cache y DMA del GD | `cdrom_read_sectors_ex` invalida la cache sobre el destino; todos los destinos van alineados a 32 y en multiplos de 2048 (`gd_carga`, `hud.c`, el lector de musica). Sin DMA hacia memoria que la CPU toque a la vez. |
 | `snd_sh4_to_aica` | en esta version de KallistiOS no espera al ARM; `sfx.c` solo manda cambios (frecuencia > 0,2 % o volumen), unas pocas ordenes por cuadro. |
+| Flujos de audio en canales >= 32 | KallistiOS arranca los dos canales de un `snd_stream` estereo con un mapa de 32 bits (`aica_cmd_t.cmd_id`, `aica_sync_play` del ARM): con canales >= 32 nunca suenan. La musica pide su flujo antes que `sfx.c` (canales 0 y 1); la pelicula recibe el 33 y el 34 y `video.c` los enciende a mano (ver Peliculas). Cualquier flujo nuevo pedido despues de `sfx_inicia` tiene el mismo problema. |
 | Musica a 48 kHz | el AICA reproduce cada canal con su paso (OCT/FNS); 48 kHz es un paso algo mayor que 1 sobre la salida de 44,1 kHz: valido. |
 | Alineaciones | blob de texturas a 32 (cada textura en multiplos de 32, `pvr_txr_load` copia de 32 en 32), vertices de 24 bytes (floats a 4), texturas VQ en direcciones multiplo de 8. |
 | CPU | Flycast no reproduce el tiempo del SH4; el acortado de seguridad de `lejos` usa el reloj real (`ms + ms_log`), asi que se ajusta solo en la consola. |
 | Video | VGA: 640x480 a 60 Hz. Sin VGA: NTSC entrelazado a 60 Hz (el generico de KallistiOS). En una consola PAL (flash: Europa) sin VGA se pregunta a 50 Hz: A = 60 Hz, B o nada en 10 s = 50 Hz (`elige_video`). La logica va a 60 pasos por segundo con el reloj (salto de cuadros), asi que a 50 Hz va a la misma velocidad. Probado en Flycast con region Europa y emision PAL. |
 | Arranque desde GDEMU | `tools/mkgdi.py`: IP.BIN de `makeip` con areas JUE (sin region), soporte VGA (perifericos E000F10), 1ST_READ.BIN sin desordenar (GD, no CD-R) al final de la pista 3 (LBA 45000). |
+
+### Peliculas (comun/video.c, 2026-11-09)
+
+Fallo en la consola (GDEMU, PAL, RGB): "muestra el nombre del titulo, se congela y no hay audio"; se daba por bueno en
+Flycast. **Causa, reproducida en Flycast con el video.c y los .VQV de antes y los datos actuales:** el flujo de audio
+de la pelicula recibia los canales 33 y 34 del AICA (sfx.c ya habia reservado del 2 al 32) y KallistiOS no los
+enciende (ver la tabla de arriba: KEYONB a 0 en el registro del canal, posicion 0, snd_stream no pide datos nunca).
+El anillo de audio (128 KB, 2,7 s a 48 kHz) se llenaba, el lector del GD se paraba esperando sitio y el video se
+quedaba en el cuadro 76 (~3 s: con la pelicula de titulo primero, justo cuando aparece el rotulo) sin sonido. Las
+demas hipotesis no hacian falta para explicarlo, pero se han cubierto igual:
+
+| Hipotesis | Comprobado / hecho |
+|---|---|
+| (a) caudal | Antes 0,9 MB/s (512x256, libro por cuadro, audio a 48 kHz, cuadros alineados a sector). Ahora ~440 KB/s (256x256, libro por grupo de hasta 12 cuadros y en cada corte de plano, audio a 32 kHz, registros de tamano variable): MVATTR 441 KB/s, MVTS 436 KB/s. Calidad (PSNR contra el MPEG a 640x480, cuadros de 8, 20 y 38 s de attr50): 35,4 dB antes, 33,7 ahora; rotulo de ts50: 31,1 y 27,1 dB (mas blando, legible). Las .VQV van al final del disco (`mkgdi.py`, peso 2: LBA ~533000-549000), la zona mas rapida en un GD de velocidad angular constante. |
+| (b) lector | Lecturas de 64 sectores (128 KB) seguidas, por DMA a destinos alineados a 32 que nunca dan la vuelta al anillo; `gd.c` cuenta los fallos (`gd_errores`) y con ERR_DISC_CHG / ERR_NO_DISC reinicia la unidad antes de repetir. El lector va con prioridad 9 (el bucle 10). |
+| (c) dos snd_stream | El flujo de la pelicula usa la llamada directa (`snd_stream_set_callback_direct`: el SH4 copia el audio a la RAM del AICA con `spu_memload_sq`), sin el DMA del G2 ni el semaforo `stream_sem` que comparte con la musica, y nunca devuelve 0 (con 0 snd_stream rellena por DMA): si falta audio rellena con silencio (0x80). Si el AICA no pide datos en 2,5 s el audio se tira y el video sigue. |
+| (d) CPU | El bucle se para en `pvr_wait_ready` cada cuadro; el lector duerme cuando el anillo esta lleno. Musica parada y sin leer (`musica_para`, `musica_pausa_lectura(1)`) durante la pelicula. |
+| (e) primer cuadro | Precarga de 1,5 s (o el anillo lleno) pintando en negro; con tope de 10 s. |
+
+RAM: al arrancar la demo solo quedan ~1,1 MB libres (los huecos de etapa y union ya estan reservados): anillo de
+video de 512 KB (lo que quepa dejando 192 KB libres, hasta 1 MB) + 2 x 64 KB de audio. VRAM: 2 texturas de 18 KB.
+
+Diagnostico para el probador (como `pvr_colgado`): si no llega un cuadro nuevo en 1 s, o la PowerVR no termina 20
+cuadros seguidos, la pelicula se para, escribe sobre la imagen (cuadros leidos/vistos/reloj, KB/s del GD leyendo y de
+media, peor lectura, errores del GD y del lector, estado del lector, audio y sus canales, faltas de audio) y a los
+12 s (o con START) sigue al titulo. Un hilo vigilante (prioridad 8) escribe lo mismo con el paso en que esta
+("COLGADO en 'snd_stream_poll'", etc.) si el bucle no da senales en 1,5 s: el hilo principal bloqueado dentro de
+KallistiOS. La letra es la de la BIOS copiada al empezar (bfont espera a que el GD quede libre: con el GD colgado se
+bloquearia). En Flycast el texto sale sobre negro (Flycast no copia a la VRAM lo que dibuja la PowerVR); en la
+consola sale sobre el ultimo cuadro. Ademas cada pelicula deja en la consola serie la precarga, los canales del audio
+y un resumen con el caudal medido.
+
+Medido en Flycast (2026-11-09, las dos peliculas enteras con audio, sin faltas): lectura 1860 KB/s (64 sectores en
+69-72 ms), media 438 KB/s. Lector limitado con `-DPRUEBA_VIDEO_KBS=470`: igual, sin faltas de audio; a 300 KB/s la
+imagen va a saltos (siempre el ultimo cuadro leido) pero no se para; a 20 KB/s: diagnostico "sin cuadros nuevos en
+1 s" y al titulo. `-DPRUEBA_VIDEO_COLGADO=100` duerme el bucle en el cuadro 100: el vigilante escribe el diagnostico.
+SIN VERIFICAR en la consola: el caudal real del GDEMU/GD con la pelicula fuera del disco (el diagnostico lo dira si no
+llega).
 
 ## 4. Pruebas
 
