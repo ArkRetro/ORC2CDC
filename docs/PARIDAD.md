@@ -338,6 +338,8 @@ calzada sube por el puente hasta +5 m (el coche "pasaba por debajo de la carrete
   de altura mas cercana a la de referencia salvo bandera 4), pc_course_spline.cpp (CalcYPosSpl, CalcHermite2,
   tangentes con vecinos o con normales, SolveHermite) y pc_collision.cpp (CalcCollisionArea, planos 43CC90). Tuning
   lateral / longitudinal 1,0 (PC 0x67D94C / 0x67D950). En float (el PC hace parte en x87).
+- RAM: COLnn.DAT detras de su SEGnn.DAT en el hueco de la etapa; COL13 y la de la union en huecos solo de carrera
+  (DREAMCAST.md, RAM y cargas durante la carrera).
 - Marcos: raiz 0 la etapa cargada (la de salida en el origen, la siguiente en marco_sig), raiz 1 la union (marco_un),
   como 7D2DA0 / 7D3190; `curso_recentra` los mueve con todo lo demas.
 - Uso: el coche del jugador con 0x400 + reintentos (el de calc_ground_coli_face), el trafico con 0x100 (43F2F0) y la
@@ -1459,7 +1461,8 @@ de la ruta. Flycast: TULI (`-DPRUEBA_NODO=10 -DPRUEBA_FIN=4800`, s 440-530) ante
 empedrado (perfil -2,3 m, calzada +1,8 m), ahora va por encima (capturas iguales con `-DSIN_COLI` salvo ahi); GHOS ->
 BK09 -> IMPE -> meta BK13 y otra carrera (`-DPRUEBA_NODO=9 -DPRUEBA_RAMA=0 -DPRUEBA_FIN=400 -DPRUEBA_SIN_TIEMPO`): las
 dos raices, el recentrado y la meta dan la altura de la calzada (diferencia con el perfil < 1 cm salvo donde el perfil
-falla), RAM libre en carrera >= 1131 KB; el arranque y el titulo sin cambios.
+falla). Con el menu real (nav.sh): titulo, menus y carrera bien; al empezar la carrera 450 KB libres con las
+colisiones (sus huecos solo existen en la carrera: reservados al arrancar dejaban sin RAM a MENU.DAT).
 
 Memoria de video del curso (2026-11-09, ver DREAMCAST.md, Memoria de video del curso y del HUD): la meta BK13 no
 cabia tras GHOS -> IMPE (VRAM troceada por `pvr_mem`: 253 KB libres en huecos, BK13 219 KB) y la carrera se paraba.

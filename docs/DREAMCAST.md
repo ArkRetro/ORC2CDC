@@ -60,9 +60,12 @@ tamano del mayor SEGnn.DAT: 7832 KB, SEG13, desde la PVS) y la union en otro (el
 reservados al arrancar. Fuera de la carrera el hueco de la union se presta (ver RAM del arranque y del menu, abajo).
 La ruta es una ventana: al soltar una etapa se quitan sus puntos (`ruta_recorta`) y el marco se recentra en el
 principio de la union (`curso_recentra`), asi que ni la RAM de la ruta ni las coordenadas crecen de etapa en etapa.
-La colision del suelo (COLnn.DAT, PARIDAD.md Suelo del original) va en el hueco de la etapa detras de su SEGnn.DAT
-(el hueco pasa a ser el mayor SEG + COL: 8040 KB, +207 KB por COL13 detras de SEG13; las demas caben en lo que les
-sobra) y la de la union en un hueco propio del mayor COLBK* (184 KB): +391 KB de RAM en total.
+La colision del suelo (COLnn.DAT, PARIDAD.md Suelo del original) va en el hueco de la etapa detras de su SEGnn.DAT,
+en lo que le sobra (el hueco no crece: 7832 KB); la de METR (COL13, 208 KB), que no cabe detras de SEG13, y la de la
+union (el mayor COLBK*, 184 KB) van en dos huecos que solo existen en la carrera (`col_reserva` en `curso_reinicia`,
+`col_suelta` en `curso_al_menu`): reservarlos al arrancar dejaba sin RAM las tablas de MENU.DAT (~1 MB, "Out of
+memory" y menus en gris). Medido (Flycast, menu real): al arrancar 823 KB libres como antes; al empezar la carrera, con
+los dos huecos, 450 KB libres.
 
 Medido en Flycast (`DIAG_VTX`, pruebas encadenadas por las dos rutas y por IMPE, 2026-11-08):
 

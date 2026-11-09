@@ -82,11 +82,13 @@ static inline uint32_t ta_teo(uint32_t n, int o)
 static uint8_t *hueco_etapa, *hueco_union;
 static uint32_t cap_etapa, cap_union;
 /* Colision del suelo del original (demo/coli.c, tools/conv_coli.py): raiz 0 la etapa (COLnn.DAT, en el hueco de la
-   etapa detras de su SEGnn.DAT: col_en_hueco) y raiz 1 la union (COLBK.DAT la bifurcacion, COLBKkk.DAT la meta, en
-   su hueco hueco_col); la tabla de prediccion de 43EB60 es una para todas las consultas, como en el original */
+   etapa detras de su SEGnn.DAT si cabe en lo que le sobra del hueco; si no, la de METR, en hueco_col_e) y raiz 1 la
+   union (COLBK.DAT la bifurcacion, COLBKkk.DAT la meta, en hueco_col). hueco_col y hueco_col_e solo existen en la
+   carrera (col_reserva / col_suelta): el menu tiene sus tablas de MENU.DAT (~1 MB) y no queda RAM al arrancar para
+   ellos (docs/DREAMCAST.md). La tabla de prediccion de 43EB60 es una para todas las consultas, como en el original */
 static coli_t col_et, col_un;
 static coli_pred_t col_pred;
-static uint8_t *hueco_col; static uint32_t cap_col;
+static uint8_t *hueco_col, *hueco_col_e; static uint32_t cap_col, cap_col_e;
 #define TAM_SECT(t) (((t) + 2047) / 2048 * 2048)
 /* lee un modelo en buf (cap bytes) o, con buf NULL, en memoria nueva */
 static int lee_modelo_en(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t cap)
@@ -471,7 +473,10 @@ static void *carga_hilo(void *p)
     memset(&c->col, 0, sizeof c->col);
     if (!c->r && c->col_nombre[0]) {                            /* su colision: detras del modelo en su hueco o en col_buf */
         uint8_t *b = c->col_buf; uint32_t cap = c->col_cap, t;
-        if (!b && c->buf && TAM_SECT(c->m->tam) <= c->cap) { b = c->buf + TAM_SECT(c->m->tam); cap = c->cap - TAM_SECT(c->m->tam); }
+        uint32_t lba;                                          /* detras del modelo si cabe; si no, en col_buf */
+        if (c->buf && !gd_busca(c->col_nombre, &lba, &t) && TAM_SECT(c->m->tam) + TAM_SECT(t) <= c->cap) {
+            b = c->buf + TAM_SECT(c->m->tam); cap = c->cap - TAM_SECT(c->m->tam);
+        }
         if (b && !gd_carga_en(c->col_nombre, b, cap, &t)) coli_abre(&c->col, b, t, c->con_marco ? c->marco : NULL);
     }
     c->estado = 2;
@@ -3614,11 +3619,13 @@ static void col_nombre_union(char *n, int k)
 /* colision de la etapa recien leida en el hueco (detras de su SEGnn.DAT), en el marco M; sin el fichero, ninguna */
 static void col_en_hueco(int k, const float *M)
 {
-    char n[16]; uint32_t t, o = TAM_SECT(etapa.tam);
+    char n[16]; uint32_t t, lba, o = TAM_SECT(etapa.tam); uint8_t *b = NULL; uint32_t cap = 0;
     memset(&col_et, 0, sizeof col_et);
     sprintf(n, "COL%02d.DAT", curso[k].seg);
-    if (etapa.datos == hueco_etapa && o <= cap_etapa && !gd_carga_en(n, hueco_etapa + o, cap_etapa - o, &t))
-        coli_abre(&col_et, hueco_etapa + o, t, M);
+    if (etapa.datos != hueco_etapa || gd_busca(n, &lba, &t)) t = 0;
+    else if (o + TAM_SECT(t) <= cap_etapa) { b = hueco_etapa + o; cap = cap_etapa - o; }
+    else { b = hueco_col_e; cap = cap_col_e; }                  /* (METR: su SEG13 llena el hueco) */
+    if (b && !gd_carga_en(n, b, cap, &t)) coli_abre(&col_et, b, t, M);
     if (!col_et.ok) dbglog(DBG_ERROR, "COLI: sin %s (altura del perfil de la ruta)\n", n);
 }
 /* reserva los huecos de RAM de las etapas (con su colision) y de la union (el tamano del mayor fichero de cada uno,
@@ -3626,22 +3633,40 @@ static void col_en_hueco(int k, const float *M)
 static int curso_huecos(void)
 {
     uint32_t lba, t, tc; int i; char n[16];
-    for (i = 0; i < ncurso; i++) {                              /* la etapa y detras su colision (COLnn.DAT) */
+    for (i = 0; i < ncurso; i++) {
         sprintf(n, "SEG%02d.DAT", curso[i].seg);
-        if (!gd_busca(n, &lba, &t)) {
-            sprintf(n, "COL%02d.DAT", curso[i].seg);
-            if (gd_busca(n, &lba, &tc)) tc = 0;
-            if (TAM_SECT(t) + TAM_SECT(tc) > cap_etapa) cap_etapa = TAM_SECT(t) + TAM_SECT(tc);
-        }
+        if (!gd_busca(n, &lba, &t) && TAM_SECT(t) > cap_etapa) cap_etapa = TAM_SECT(t);
         sprintf(n, "BK%02d.DAT", i);
         if (!gd_busca(n, &lba, &t) && TAM_SECT(t) > cap_union) cap_union = TAM_SECT(t);
         col_nombre_union(n, i);
         if (!gd_busca(n, &lba, &t) && TAM_SECT(t) > cap_col) cap_col = TAM_SECT(t);
     }
+    for (i = 0; i < ncurso; i++) {                              /* colisiones de etapa que no caben detras de su SEG */
+        sprintf(n, "SEG%02d.DAT", curso[i].seg);
+        if (gd_busca(n, &lba, &t)) continue;
+        sprintf(n, "COL%02d.DAT", curso[i].seg);
+        if (!gd_busca(n, &lba, &tc) && TAM_SECT(t) + TAM_SECT(tc) > cap_etapa && TAM_SECT(tc) > cap_col_e) cap_col_e = TAM_SECT(tc);
+    }
     hueco_etapa = memalign(32, cap_etapa); hueco_union = cap_union ? memalign(32, cap_union) : NULL;
-    hueco_col = cap_col ? memalign(32, cap_col) : NULL;
-    dbglog(DBG_INFO, "CURSO: %d etapas, huecos etapa %uK union %uK colision de la union %uK\n", ncurso, (unsigned)(cap_etapa >> 10), (unsigned)(cap_union >> 10), (unsigned)(cap_col >> 10));
-    return !hueco_etapa || (cap_union && !hueco_union) || (cap_col && !hueco_col);
+    dbglog(DBG_INFO, "CURSO: %d etapas, huecos etapa %uK union %uK; colisiones en carrera %uK + %uK\n", ncurso, (unsigned)(cap_etapa >> 10), (unsigned)(cap_union >> 10), (unsigned)(cap_col >> 10), (unsigned)(cap_col_e >> 10));
+    return !hueco_etapa || (cap_union && !hueco_union);
+}
+/* los huecos de las colisiones, solo en la carrera (al empezarla; col_suelta al volver al menu) */
+static void col_reserva(void)
+{
+    unsigned u, l;
+    if (!hueco_col && cap_col) hueco_col = memalign(32, cap_col);
+    if (!hueco_col_e && cap_col_e) hueco_col_e = memalign(32, cap_col_e);
+    ram_kb(&u, &l);
+    if ((cap_col && !hueco_col) || (cap_col_e && !hueco_col_e))
+        dbglog(DBG_ERROR, "COLI: sin RAM para las colisiones (%p %p, libre %uK)\n", hueco_col, hueco_col_e, l);
+    else dbglog(DBG_INFO, "COLI: huecos %uK + %uK, RAM libre %uK\n", (unsigned)(cap_col >> 10), (unsigned)(cap_col_e >> 10), l);
+}
+static void col_suelta(void)
+{
+    if (col_et.ok && hueco_col_e && (const uint8_t *)col_et.v >= hueco_col_e && (const uint8_t *)col_et.v < hueco_col_e + cap_col_e) col_et.ok = 0;
+    col_un.ok = 0;
+    free(hueco_col); free(hueco_col_e); hueco_col = hueco_col_e = NULL;
 }
 /* lee la etapa de la clave k en el hueco (la de salida); 0 bien */
 static int curso_lee_etapa(int k)
@@ -3658,6 +3683,7 @@ static void curso_reinicia(void)
 {
     int k = PRUEBA_NODO < ncurso ? PRUEBA_NODO : 0;
     carga_espera(); carga.estado = 0;
+    col_reserva();
     libera_modelo(&uni); libera_modelo(&uni_der); libera_modelo(&sig);
     if (!etapa.datos || etapa_nodo != k) {
         int r;
@@ -3676,6 +3702,7 @@ static void curso_reinicia(void)
     s_union = s_decide = s_sig = s_meta = s_suelta = -1; s_etapa = 0;
     marco_et[0] = marco_et[1] = marco_et[2] = marco_et[3] = 0;
     memset(&col_pred, 0, sizeof col_pred); col_un.ok = 0;
+    if (!col_et.ok && etapa.datos) { static const float M0[4]; col_en_hueco(k, M0); }   /* (la de METR se solto en el menu) */
 }
 /* posicion del centro de la ruta del fichero m en su punto i (m->ruta) */
 static float dist_centro(const modelo_t *m, uint32_t i, const float *p)
@@ -3798,7 +3825,7 @@ static int curso_paso(void)
     }
     if (cur_rama >= 0 && !etapa.datos && !sig.datos && s_sig < 0 && carga.estado == 0) {
         char cn[16]; sprintf(cn, "COL%02d.DAT", curso[cur_sig].seg);
-        carga_col(cn, NULL, 0);                                 /* detras de la etapa, en su hueco */
+        carga_col(cn, hueco_col_e, cap_col_e);                  /* detras de la etapa en su hueco, o en hueco_col_e */
         carga_pide(&sig, fich_sig, hueco_etapa, cap_etapa, marco_sig);
     }
     if (s_sig >= 0 && yo.s >= s_sig) {                         /* la etapa siguiente pasa a ser la actual */
@@ -3822,7 +3849,8 @@ static void curso_al_menu(void)
     if (!t0) { t0 = timer_ms_gettime64(); return; }
     if (timer_ms_gettime64() - t0 < 60 || carga.estado == 1) return;   /* (una lectura en curso: al acabar) */
     t0 = 0; carga.estado = 0;
-    libera_modelo(&uni); libera_modelo(&uni_der); libera_modelo(&sig); col_un.ok = 0;
+    libera_modelo(&uni); libera_modelo(&uni_der); libera_modelo(&sig);
+    col_suelta();                                               /* sus huecos, para el menu */
     bo_quita();                                                 /* objetos de la union: su RAM y su VRAM */
     tex_suelta(&etapa); ar_suelta();
     dbglog(DBG_INFO, "VRAM: el curso fuera (menu), libre %uK\n", (unsigned)(pvr_mem_available() >> 10));
