@@ -613,6 +613,30 @@ monton como antes. El monton no cambia (medido en la carrera desde el menu: "BO1
 frente a 279K antes de leerlo), y fuera de la carrera (pelicula, menus) no se usa: el prestamo del hueco de la union
 (presta_union) no se toca. libera_modelo no libera un modelo que este dentro del hueco de la union.
 
+### Piezas del HUD y de los menus a 24 bytes (2026-11-09)
+
+**Que crecio.** La RAM libre al arrancar paso de 699 KB (4f60223) a 367-391 KB: casi todo de c5790a9 (seleccion de
+musica completa), que llevo las tablas de MENU.DAT (en la RAM siempre, tambien en la carrera) de 974 a 1270 KB (30895
+piezas de 40 bytes: 1207 KB). El resto de commits (pajaros, dragon, modos) suman unos 30 KB. Medido en Flycast con el
+recorrido real del menu: c5790a9 391 KB al arrancar y 359 / 286 KB libres al leer BK00 / BKD; 53fbf08 367 KB y 327 /
+253 KB.
+
+**Arreglo** (comun/hud.c `hudd_abre`, sin cambiar los ficheros): cada pieza se guarda en la RAM en 24 bytes (x, y, ax,
+ay en 1/8 de pixel, angulo en 1/64 de grado, escalas en 1/512, alfa en 1/255) en vez de los 40 del fichero; en un
+fichero parcial (MENU.DAT, HAHUD.DAT) lo de detras de las piezas (usos, tacometros, MNU1 / MNU2) se baja y el bloque se
+encoge (realloc). Error maximo medido sobre todas las piezas de MENU.DAT y HUD.DAT: 0,06 px, 0,007 grados, 0,0005 de
+escala, 0,002 de alfa: no se ve a 640x480. Ahorro: 483 KB (MENU.DAT) + 16 KB (HUD.DAT, sin reclamar: va dentro del
+fichero entero).
+
+| Medido (Flycast, menu real, OutRun) | antes (53fbf08) | despues |
+|---|---|---|
+| RAM libre al arrancar | 367 KB (235 en huecos) | 843 KB (239 en huecos) |
+| leyendo BK00 / BKD / BO01 | 327 / 253 / 253 KB | 811 / 738 / 737 KB |
+| despues de soltar la etapa y leer SEG05 | 364 KB | 849 KB |
+
+Las pantallas del menu (titulo, principal, modo, coche, cambio, musica) se ven igual (capturas en el scratchpad
+`modos/p_hoja.png`).
+
 ### Modos INFARTO y CONTRARRELOJ (2026-11-09)
 
 - RAM: el modo OutRun queda igual salvo ~17 KB (codigo de comun/infarto.c, la cola de voces mas larga y un bufer de 4 KB

@@ -9,13 +9,17 @@
 typedef struct { uint16_t w, h, fmt, lista; uint32_t off, tam; } h_tex_t;
 typedef struct { uint16_t tex, w, h, _r; float u0, v0, u1, v1; } h_spr_t;
 typedef struct { char nombre[16]; uint16_t n, pri, np, _r; float paso; uint32_t _r2; } h_grp_t;
-typedef struct { uint16_t grp, cuadro, spr, flags; float x, y, ax, ay, ang, sx, sy, alfa; } h_pie_t;
+typedef struct { uint16_t grp, cuadro, spr, flags; float x, y, ax, ay, ang, sx, sy, alfa; } h_pie_t;   /* el del fichero */
+/* la pieza en la RAM (24 bytes en vez de 40; hudd_abre la convierte): x, y, ax, ay en 1/8 de pixel, angulo en 1/64 de
+   grado, escalas en 1/512 y alfa en 1/255. Error medido sobre MENU.DAT y HUD.DAT: 0,06 px, 0,007 grados, 0,001 de escala
+   y alfa (menos de lo que se ve a 640x480). MENU.DAT: 30895 piezas, de 1207 a 724 KB de RAM (docs/DREAMCAST.md) */
+typedef struct { uint16_t grp, cuadro, spr, flags; int16_t x, y, ax, ay, ang; uint16_t sx, sy; uint8_t alfa, _r; } h_pc_t;
 typedef struct { char nombre[16]; uint16_t grp, alt; int16_t x, y, avance, capa; uint16_t nchar, _r; } h_uso_t;
 
 /* un fichero con formato HUD1 (HUD.DAT, MENU.DAT) */
 struct hud_dat {
     uint8_t *dat; uint32_t meta, lba;                       /* meta: bytes en la RAM (parcial) o 0 (fichero entero) */
-    h_tex_t *tex; h_spr_t *spr; h_grp_t *grp; h_pie_t *pie; h_uso_t *uso;
+    h_tex_t *tex; h_spr_t *spr; h_grp_t *grp; h_pc_t *pie; h_uso_t *uso;
     uint32_t n_tex, n_grp, n_uso;
     pvr_ptr_t *vtex; uint8_t *usada; uint32_t *dibujada;      /* dibujada: ultimo cuadro en que se uso la textura */
     pvr_poly_hdr_t *cab, *cabf;                             /* por textura: encima de todo / detras de la escena 3D */
@@ -130,7 +134,30 @@ hud_dat_t *hudd_abre(const char *fich, int modelo, int parcial)
     c = (uint32_t *)h->dat;
     h->n_tex = c[1]; h->n_grp = c[3]; h->n_uso = c[5];
     h->tex = (h_tex_t *)(h->dat + c[6]); h->spr = (h_spr_t *)(h->dat + c[7]); h->grp = (h_grp_t *)(h->dat + c[8]);
-    h->pie = (h_pie_t *)(h->dat + c[9]); h->uso = (h_uso_t *)(h->dat + c[10]); h->off_taco = c[11];
+    {   /* piezas a 24 bytes en su sitio; en un fichero parcial (solo tablas en la RAM) lo de detras se baja y el bloque
+           se encoge */
+        const h_pie_t *f = (const h_pie_t *)(h->dat + c[9]); h_pc_t *o = (h_pc_t *)(h->dat + c[9]);
+        uint32_t np = c[4], ahorro = np * (sizeof(h_pie_t) - sizeof(h_pc_t));
+#define Q16(v, k) ((int16_t)lrintf((v) * (k)))
+        for (i = 0; i < np; i++) {
+            h_pie_t q = f[i]; h_pc_t r;
+            r.grp = q.grp; r.cuadro = q.cuadro; r.spr = q.spr; r.flags = q.flags;
+            r.x = Q16(q.x, 8); r.y = Q16(q.y, 8); r.ax = Q16(q.ax, 8); r.ay = Q16(q.ay, 8); r.ang = Q16(q.ang, 64);
+            r.sx = (uint16_t)lrintf(q.sx * 512); r.sy = (uint16_t)lrintf(q.sy * 512);
+            r.alfa = (uint8_t)lrintf((q.alfa < 0 ? 0 : q.alfa > 1 ? 1 : q.alfa) * 255); r._r = 0;
+            o[i] = r;                                       /* o[i] no pisa f[i + 1] (24 < 40) */
+        }
+#undef Q16
+        if (h->meta && ahorro && c[10] > c[9]) {
+            uint32_t ini = c[9] + np * sizeof(h_pie_t), fin = h->meta, k; uint8_t *nd;
+            memmove(h->dat + ini - ahorro, h->dat + ini, fin - ini);
+            for (k = 10; k <= 11; k++) c[k] -= ahorro;
+            h->meta -= ahorro;
+            if ((nd = realloc(h->dat, h->meta))) { h->dat = nd; c = (uint32_t *)h->dat; }
+            h->tex = (h_tex_t *)(h->dat + c[6]); h->spr = (h_spr_t *)(h->dat + c[7]); h->grp = (h_grp_t *)(h->dat + c[8]);
+        }
+    }
+    h->pie = (h_pc_t *)(h->dat + c[9]); h->uso = (h_uso_t *)(h->dat + c[10]); h->off_taco = c[11];
     h->taco = h->dat[c[11] + (modelo & 15)]; if (h->taco == 0xff) h->taco = -1;
     H = h;
     for (i = 0, h->g_fuera = -1; i < h->n_grp; i++) if (!strncmp(h->grp[i].nombre, "DIG_PUNTOS_FUERA", 16)) h->g_fuera = i;
@@ -359,18 +386,19 @@ void hud_pon_modelo(int modelo)
 }
 int hud_sube_tex(void) { return hud_principal ? hudd_sube(hud_principal, 0, -1) : -1; }
 
-static void pieza(const h_pie_t *p, const h_grp_t *g, int cuadro, float X, float Y, float alfa)
+static void pieza(const h_pc_t *p, const h_grp_t *g, int cuadro, float X, float Y, float alfa)
 {
     const h_spr_t *s = H->spr + p->spr;
-    float ang = p->ang, c, si, px[4], py[4], a = p->alfa * alfa; int k; pvr_vertex_t v;
+    float ang = p->ang * (1.0f / 64), c, si, px[4], py[4], a = p->alfa * (1.0f / 255) * alfa; int k; pvr_vertex_t v;
+    const float sx = p->sx * (1.0f / 512), sy = p->sy * (1.0f / 512), x0 = p->x * 0.125f, y0 = p->y * 0.125f;
     if (a <= 0.004f) return;
     if (!H->vtex[s->tex]) { if (H->falta && H->usada[s->tex]) H->falta[s->tex] = 1; return; }   /* hud_suelta_quietas */
     if (p->flags & 1) ang += g->paso * cuadro;
     ang *= (float)M_PI / 180.0f; c = cosf(ang); si = sinf(ang);
     for (k = 0; k < 4; k++) {
-        float qx = ((k & 1) ? s->w : 0) - p->ax, qy = ((k & 2) ? s->h : 0) - p->ay;
-        qx *= p->sx; qy *= p->sy;
-        px[k] = qx * c - qy * si + p->x + X; py[k] = qx * si + qy * c + p->y + Y;
+        float qx = ((k & 1) ? s->w : 0) - p->ax * 0.125f, qy = ((k & 2) ? s->h : 0) - p->ay * 0.125f;
+        qx *= sx; qy *= sy;
+        px[k] = qx * c - qy * si + x0 + X; py[k] = qx * si + qy * c + y0 + Y;
     }
     if (s->tex != ult_tex) { pvr_prim((modo_fondo ? H->cabf : H->cab) + s->tex, sizeof(pvr_poly_hdr_t)); ult_tex = s->tex; }
     H->dibujada[s->tex] = cuadro_hud;
