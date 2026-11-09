@@ -215,6 +215,7 @@ typedef struct {
     int   reaccion;         /* 1 si el jugador ha entrado en el estado 7 (salto y derrape)           */
     int   impulso;          /* 1 si se ha cambiado la velocidad del jugador (+4 0x4000000)           */
     int   roce;             /* 1 si el otro se ha quedado en roce (+4 0x400000: sin cambio de velocidad) */
+    int   roce_a;           /* 1 si el jugador se ha quedado en roce (su +4 0x400000; cuentas de 44EDE0) */
     int   se_n, se_id[3];   /* efectos que suenan (ids de SE con las banderas de 424940)              */
 } or2_otro_t;
 
@@ -422,6 +423,7 @@ void or2_rebufo(or2_coche_t *c, const or2_otro_t *otros, int n);
 /* Estado de choque de otro coche (el trafico): avanza su animacion. t = tiempo transcurrido del estado.
    Devuelve 0 cuando ha acabado; tr y gr = desplazamiento y giro (rad) del cuerpo. lado refleja la animacion. */
 int  or2_pose(const or2_choques_t *q, int estado, float t, int lado, float tr[3], float gr[3]);
+float or2_canal(const float *k, int n, float t);   /* 513650: Hermite sobre n claves {t, valor, tangentes} */
 
 #ifdef __cplusplus
 }

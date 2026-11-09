@@ -260,7 +260,8 @@ class Modelo:
         self.texs, self.blob = texs, blob
 
     def bloque(self, blq, registros=None, lista=None, objetos=False, sin_textura=int(os.environ.get("SINTEX", "0x60202020"), 16),
-               copias=None, vis=None, umbral=UMBRAL_CURSO, rama=None, nodo_fijo=None):
+               copias=None, vis=None, umbral=UMBRAL_CURSO, rama=None, nodo_fijo=None, tiras=None, cuadro=0,
+               base_tex=None, con_gs=False):
         """anade los registros de un bloque (todos si registros es None). lista: fuerza la lista de sus mallas.
         sin_textura: color ARGB de las mallas sin textura, o None para iluminarlas en blanco por la normal, o
         'material' para darles el color de su material del original (material_de).
@@ -269,13 +270,21 @@ class Modelo:
         no son de ningun nodo no se dibujan. vis: {registro: conjunto de nodos} (los que nombra la tabla de visibilidad
         por secciones de la etapa, lee_visibilidad): los demas no se dibujan nunca. umbral: el de LOD del original (6 la
         etapa; la bandera 0x40 del nodo lo sube a 7). rama: {registro: 1 izquierda / 2 derecha} (uniones).
-        nodo_fijo: valor del campo del nodo de todas sus mallas (sin objetos; el cielo: su grupo)."""
-        m, A = blq.m, blq.A; base = len(self.texs)
-        for h in tex.cabeceras(blq):
-            a = tex.imagen(blq, h); fmt, li, d = textura_dc(a)
-            self.texs.append((a.shape[1], a.shape[0], fmt, li, len(self.blob), len(d))); self.blob += d
-            self.rgba.append(a)
-        ntb = len(self.texs) - base
+        nodo_fijo: valor del campo del nodo de todas sus mallas (sin objetos; el cielo: su grupo).
+        Sin objetos, para los objetos animados del fondo (tools/conv_bo.py): tiras = solo esas de la tabla 3; cuadro = el
+        de la animacion de vertices (las tiras con la bandera 0x800 traen 4 paquetes, uno por cuadro, en las palabras 2..5
+        de su entrada; las demas solo el primero); base_tex = las texturas de este bloque ya estan en self.texs desde ese
+        indice (no se repiten); con_gs = la lista y la mezcla del estado del GS como en las escenas"""
+        m, A = blq.m, blq.A
+        if base_tex is None:
+            base = len(self.texs)
+            for h in tex.cabeceras(blq):
+                a = tex.imagen(blq, h); fmt, li, d = textura_dc(a)
+                self.texs.append((a.shape[1], a.shape[0], fmt, li, len(self.blob), len(d))); self.blob += d
+                self.rgba.append(a)
+            ntb = len(self.texs) - base
+        else: base = base_tex; ntb = len(tex.cabeceras(blq))
+        self.base_tex = base
         for r, reg in enumerate(blq.registros()):
             if registros is not None and r not in registros: continue
             c, o = reg[3]; t2 = reg[2][1]
@@ -289,13 +298,15 @@ class Modelo:
                 self._matc = material_completo(blq, reg, k) if self.luz is not None else None
                 self._origen = (r, i, k, e[0])                   # registro, malla, entrada de la tabla 4 y banderas
                 # estado del GS de la capa 1 (tabla 7): manda la lista, la mezcla y los mipmaps (escena: objetos)
-                self._gs = estado_gs(blq, reg, k) if objetos and lista is None else None
+                self._gs = estado_gs(blq, reg, k) if (objetos or con_gs) and lista is None else None
                 return e, ti
             if not objetos:
                 self._nodo = -1 if nodo_fijo is None else nodo_fijo
                 for i in range(c):
+                    if tiras is not None and i not in tiras: continue
                     e, ti = tira_de(i)
-                    for pk in vif.datos(m, A + e[2], A + blq.w[2]):
+                    pq = e[2 + cuadro] if cuadro and 0 < cuadro < 4 and e[2 + cuadro] else e[2]
+                    for pk in vif.datos(m, A + pq, A + blq.w[2]):
                         for tr in vif.tiras(pk):
                             for dx in (copias or {}).get(r, [(0, 0, 0)]):
                                 self._tira(tr, None, ti, lista, sin_textura, np.array(dx, np.float32), blq)
@@ -440,7 +451,7 @@ class Modelo:
                 f.write(struct.pack('<4f2Iii', *cc, rad, i0, cnt, ti, nodo if isinstance(nodo, (int, np.integer)) else -1))
             for v in self.verts: f.write(v.tobytes())
             f.write(self.ruta.astype('<f4').tobytes())
-            for cc, rad, u, ib in self.nodos: f.write(struct.pack('<4fIi2I', *cc, rad, u, ib, 0, 0))
+            for nd in self.nodos: f.write(struct.pack('<4fIi2I', *nd[0], nd[1], nd[2], nd[3], nd[4] if len(nd) > 4 else 0, 0))
             for W in self.carteles:
                 f.write(W.astype('<f4').tobytes())
             if nsec:

@@ -57,6 +57,25 @@ def tablas(A, zona0='PALM'):
 
 def cadena(E, va): return E.cadena(u32(E, va))
 
+def objetos_etapa(A, d0):
+    """[(bloque, {registro})]: lo que la geometria de la etapa del descriptor d0 dibuja de mas en su marco. PC
+    race_area_geometry_44de10: p.obj([5D4DC8 + [desc] * 4]) sin condiciones (la decompilacion lo llama "sky"); PS2
+    0x172780: la tabla 0x3f9b90 (lui/addiu fp, -0x6470), un id por descriptor: recurso << 16 | registro, -1 sin el.
+    El recurso es el obj_course_obj_cs_<zona> de la zona (tabla de recursos 0x58 + zona): su registro 1 lleva la pancarta
+    CHECK POINT del principio de la etapa (z = 0, 9 m de alto) con sus postes, los carteles SLOW DOWN y las flechas de
+    las curvas. La tabla se localiza por su contenido (0x580001, 0x590001, 0x5a0001: PALM, LAKE, INDU). Los otros
+    registros no son de la escena: el de la tabla 0x3f9c98 (PC 5D4ED0) solo va en el cubo del reflejo (44CD30), el 0
+    (0x3fa1d0 + id * 0x14, PC 5D5408) es el cartel de los destinos del final con las texturas de los BUNKI (PENDIENTE)"""
+    import conv_coche
+    E = A.elf
+    t = E.busca(struct.pack('<3I', 0x580001, 0x590001, 0x5a0001))
+    if not t: raise SystemExit('no se encuentra la tabla de objetos de etapa (0x3f9b90)')
+    v = u32(E, t[0] + 4 * u32(E, d0))
+    if v == 0xffffffff: return []
+    ruta = E.cadena(u32(E, conv_coche.recursos(A) + 4 * (v >> 16)))
+    ruta = ruta[len('\\Stage'):] if ruta.lower().startswith('\\stage\\') else ruta
+    return [(A.bloque(A.entrada('STAGE.PS2', ruta)), {v & 0xffff})]
+
 def arbol(A, prim_zona0, fich='csc_data_2.bin'):
     """registros del arbol del curso: [(clave, tramo, union, clave izquierda, clave derecha)]"""
     e = [x for x in A.busca('*' + fich) if x.paquete.startswith('SCRIPTS')][0]; d = A.datos(e)
@@ -399,6 +418,7 @@ def curso(A, dsal, con_tramos=True, solo_curso=False):
         print('triangulos de las tiras del VU1: %d, sin dibujar por la bandera ADC: %d' % (mod.tri_total, mod.tri_adc))
         r = dict(zona=z, seg=n, nivel=nivel[clave], izq=hi, der=hd, bk=(tx, ty, tz, ry), ramas=ramas,
                  m_pos=m_por_posicion(segs[n]), meta=meta, niebla=niebla(A, z), sol=sol(A, z), **ent)
+        r['_obj'] = objetos_etapa(A, d0)
         sal.append(r)
         print('etapa %2d %s SEG%02d nivel %d hijos %2d %2d union %s (%.1f, %.1f, %.1f, %.3f) %s/%s %s: %d mallas, '
               '%d texturas (%d KB), %d KB; %.2f m/pos, %d tramos de niebla'
@@ -410,7 +430,7 @@ def curso(A, dsal, con_tramos=True, solo_curso=False):
         for r in sal:
             cb, sol3 = cielos[r['seg']]
             conv_tramo.convierte(segs[r['seg']], r['seg'], os.path.join(dsal, 'SEG%02d.DAT' % r['seg']), cielo=cb,
-                                 luz=luces(sol3))
+                                 luz=luces(sol3), objetos=r['_obj'])
 
 def main():
     """conv_union.py tu.iso salida/ [--sin-tramos] [--solo-curso]: todo el arbol del curso (curso); --sin-tramos: sin

@@ -1245,6 +1245,7 @@ typedef struct { coche_t c; int carril, modelo, destino; float v_des;
                  float b08; int b14, b18, dir, b58, b60, b64, b6c, b62, b53, c5c1, n2f4;
                  int pt_marca, b72, color; } trafico_t;               /* puntuacion: +C5C (PT_*) y +B72 (rebufo reciente) */
 static trafico_t traf[NTRAF];
+static int bo_toca_coche, bo_roce;                              /* +4 0x10000 / 0x400000 del jugador en el paso (44EDE0) */
 /* +C5C del coche para la puntuacion (4F2860): 0x40 ya adelantado, 0x400000 tocado (puntos a la mitad), 0x800000
    chocado (sin puntos) */
 #define PT_PASADO 0x40
@@ -1736,6 +1737,7 @@ static void traf_choca(trafico_t *t, int id, const or2_contacto_t *k, float ox, 
        0x4000000), si no a la mitad; la voz de choque de voces.c lee el mismo bit */
     if (!(t->pt_marca & PT_PASADO)) t->pt_marca |= o.impulso ? PT_SIN : PT_MITAD;
     if (o.impulso) voz_contacto = 1;
+    if (o.roce_a) bo_roce = 1;                                  /* +4 0x400000 del jugador (cuentas de 44EDE0) */
     pt_toca |= o.golpe >= 0 ? 3 : 1;
     if (o.impulso) {
         float h = atan2f(fis.vx, fis.vy);
@@ -1783,7 +1785,7 @@ static void traf_choques(void)
             t->c.s += (1.0f - rp) * sl; coche_coloca(&t->c);
             k_ult = k; ult = i;
         }
-        if (ult >= 0) { traf_choca(traf + ult, ult, &k_ult, ox, oy, th); coche_coloca(&yo); vib_toca = 1; vib_otro = ult; }
+        if (ult >= 0) { traf_choca(traf + ult, ult, &k_ult, ox, oy, th); coche_coloca(&yo); vib_toca = 1; vib_otro = ult; bo_toca_coche = 1; }
     }
     for (i = 0; i < NTRAF; i++) {                               /* el trafico entre si */
         trafico_t *a = traf + i; or2_otro_t oa, ob;
@@ -2128,6 +2130,76 @@ static void traf_diag(void)                                     /* prueba: coche
                (double)(yo.v * 3.6f), n, traf_vistos, traf_act_max, traf_vistos_max, (double)(traf_act_sum / diag_n), (double)(traf_vistos_sum / diag_n));
 }
 #endif
+/* 472450 (camino de cada coche de trafico; PC race_traffic.cpp traffic_472450): el objetivo de velocidad (+10DC) y su
+   ritmo (+10E0) con el registro de velocidad del sitio tal como lo deja 4F0030 (PS2 0x1f1a88..0x1f20c4): +0xE.. minima
+   por clase 250, 250, 250, 290, 290, 310; +0x1C.. maxima 270,9 / 309,6 / 309,6 / 387 / 408,5 / 473 (floats de
+   0x1f1f78.., x 1 fuera de la red); +0x2A.. / +0x38.. porcentajes de la velocidad del jugador 35, 40, 35, 50, 60, 94 /
+   70, 75, 75, 93, 95, 97; +6 = 1; [80434C] = 50 (47DAC0, K5B4358). Todo en km/h del modelo (x K5B43A4).
+   - camino "Plain" (+0xC del registro, 100): el coche de detras del jugador (+318) y los que van por detras (d < 0;
+     "Racer" sin rivales es Plain) y los que van a su altura a mas de un carril (d < +6 y apart_x > 1).
+   - camino "Lead", los de delante: con el jugador chocando (+2F0 & 2) la maxima de su clase; a menos de +4 posiciones
+     (7 o 10) max(+0xC, 470B30): 470B30 = min(sp, max(r, minima)) con sp de la minima (lejos) a la maxima + 50 t (cerca:
+     t = (+4 - max(d - +0xA, 0)) / (+4 - +0xA)) y r = del % +0x2A al +0x38 de la velocidad del jugador segun (1,1 -
+     |desvio| / 12) t; mas alla, 471E70: los +2 primeros de la cola de delante del jugador (803750, a +6 o mas) con el
+     jugador por encima de la minima van a +4 x minima / d (no menos de +0xC), el resto a la minima.
+   SIN portar (PENDIENTE): 472320 (seguir al de delante con 470CB0 / 470ED0 / 4718D0 y sus adelantamientos 471680) y
+   471F90 (seguir al jugador): en el original solo suben el objetivo por encima de 470B30 o cambian de carril; el seguir
+   al de delante lo hace aqui 472A50 como antes. PROBABLE: K6281C0 = 0,01 (porcentaje) y K5B43B0 sin usar.
+   Ritmo (PS2 = PC): lejos (d > +4) o parado, 1; d en 0..3 acelerando, (0,2 d / +4 + 0,8)(1,1 - |desvio| / 12); si
+   queda por debajo de 0,25 y no esta lejos: (v / minima)^2 si acelera por debajo de la minima, si no 1, por (0,75 d / +4
+   + 0,25); con el jugador justo detras en su carril y mas rapido que el objetivo, 0,05 sin frenada fuerte. */
+static const float TR_MIN[7] = { 250, 250, 250, 290, 290, 310, 0 }, TR_MAX[7] = { 270.9f, 309.6f, 309.6f, 387.0f, 408.5f, 473.0f, 0 };
+static const float TR_PA[7] = { 35, 40, 35, 50, 60, 94, 0 }, TR_PB[7] = { 70, 75, 75, 93, 95, 97, 0 };
+static float traf_objetivo(const trafico_t *t, int d, int aparte, int *f0, int *f1, float *rate)
+{
+    int cls = trc_ok ? trc[t->modelo].clase : 3, far = TR_LEJOS, nodo, pos, lead, parado = 0, i, cnt;
+    float obj = t->v_des, v = t->c.v, mn, lat = fabsf(traf_pos(t) - yo_pos(t->c.s)) * 4.0f, vj = yo.v, r;
+    const uint8_t *rv = ntap ? traf_reg_velocidad(traf_lugar(t->c.s, &nodo, &pos), nodo, pos) : NULL;
+    if (cls < 0 || cls > 6) cls = 3;
+    mn = TR_MIN[cls] * TR_KMH;
+    *f0 = 0; *f1 = 0;
+    lead = d >= 0 && !(d < TR_CERCA && aparte > 1);
+    if (t->b6c && t->b60 <= 0 && cls > 2) { obj = 0; parado = 1; *f1 = 1; }   /* 0x10d9 = 1, +10DC = 0 */
+    else if (lead && cls < 6) {
+        if (fis_ok && fis.t_choque > 0.0f) obj = TR_MAX[cls] * TR_KMH;   /* +2F0 & 2 */
+        else if (d < far) {                                     /* 470B30 con el jugador */
+            int dd = d - 6 > 0 ? d - 6 : 0, span = far - 6; float tt, base, sp, f, a, b;
+            tt = span > 0 ? (float)(span - dd) / (float)span : 1.0f;
+            if (tt < 0) tt = 0;
+            base = TR_MAX[cls] + (cls > 2 ? 50.0f * tt : 0.0f);
+            sp = (base * TR_KMH - mn) * tt + mn;
+            f = (1.1f - lat * 0.0833333f) * tt; if (f < 0) f = 0; if (f > 1.0f) f = 1.0f;
+            a = TR_PA[cls] * vj * 0.01f; b = TR_PB[cls] * vj * 0.01f;
+            r = (b - a) * f + a; if (mn > r) r = mn;
+            obj = fmaxf(t->v_des, sp > r ? r : sp);
+            *f1 = 1; *f0 = 0;
+        } else {                                                /* 471E70: la cola de delante del jugador */
+            for (i = cnt = 0; i < NTRAF; i++) {
+                const trafico_t *o = traf + i;
+                if (o == t || o->carril < 0 || o->c.s <= yo.s || o->c.s >= t->c.s) continue;
+                if ((int)floorf((o->c.s - yo.s) / TR_POS) >= TR_CERCA) cnt++;
+            }
+            if (rv && cnt < (int8_t)rv[2] && vj > mn) {
+                obj = (float)far * mn / (float)d; if (t->v_des > obj) obj = t->v_des;
+                if (obj > v) *f0 = 1; else *f1 = 1;
+            } else { obj = mn; *f1 = 1; }
+        }
+    }
+    /* ritmo */
+    *rate = 0;
+    if (d > far || parado) *rate = 1.0f;
+    else if (d >= 0 && d <= 3 && obj > v) {
+        *rate = (d * 0.2f / far + 0.8f) * (1.1f - lat * 0.0833333f);
+        if (*rate < 0) *rate = 0;
+        if (*rate > 1.0f) *rate = 1.0f;
+    } else if (d < TR_CERCA && d > 0 && v > obj) *rate = 1.0f;
+    if (!(d > far) && 0.25f > *rate) {
+        float q = (mn > v && obj > v) ? (v / mn) * (v / mn) : 1.0f;
+        *rate = q * ((d < 0 ? 0 : d) * 0.75f / far + 0.25f);   /* 6282A0 = 0,75 */
+    }
+    if (aparte < 1 && v > obj && d >= 0 && d <= 3) { *f0 = 0; *f1 = 1; *rate = 0.05f; }
+    return obj;
+}
 static void traf_paso(float dt)
 {
     int i, j;
@@ -2156,22 +2228,11 @@ static void traf_paso(float dt)
             if (dd < hueco) { hueco = dd; del = o; }
         }
         jug_del = yo.s > t->c.s && yo.s - t->c.s < dsig;            /* el siguiente de la lista es el jugador */
-        /* 472450: objetivo y ritmo segun la distancia al jugador (en posiciones de la carretera) */
-        obj = t->v_des;
-        if (del && hueco < TR_HUECO && t->c.v > del->c.v) obj = fminf(obj, del->c.v);   /* 472A50 */
+        /* 472450: objetivo y ritmo segun la distancia al jugador (en posiciones de la carretera; ver traf_objetivo) */
         d = (int)floorf((t->c.s - yo.s) / TR_POS);
         aparte = (int)(fabsf(traf_pos(t) - yo_pos(t->c.s)));
-        if (d > TR_LEJOS) rate = 1.0f;
-        else {
-            rate = 0;
-            if (d >= 0 && d <= 3 && obj > t->c.v) {
-                rate = (d * 0.2f / TR_LEJOS + 0.8f) * (1.1f - aparte * 0.0833333f);
-                if (rate < 0) rate = 0;
-                if (rate > 1.0f) rate = 1.0f;
-            } else if (d < TR_CERCA && d > 0 && t->c.v > obj) rate = 1.0f;
-            if (0.25f > rate) rate = 1.0f * ((d < 0 ? 0 : d) * 0.75f / TR_LEJOS + 0.25f);   /* 6282A0 = 0,75 */
-        }
-        if (aparte < 1 && t->c.v > obj && d >= 0 && d <= 3) { f0 = 0; f1 = 1; rate = 0.05f; }
+        obj = traf_objetivo(t, d, aparte, &f0, &f1, &rate);
+        if (del && hueco < TR_HUECO && t->c.v > del->c.v) obj = fminf(obj, del->c.v);   /* 472A50 */
         traf_acelera(t, rate, obj, f0, f1);
         /* 47E4A0: golpeado, recuperacion; si no, carriles (47E110) */
         b0 = t->b08;
@@ -2786,6 +2847,8 @@ static etapa_t curso[CURSO_MAX]; static int ncurso;
 #define PRUEBA_NODO 0                                           /* prueba: etapa de salida (clave del arbol) */
 #endif
 static modelo_t uni, uni_der, sig;                             /* union, ruta de su rama derecha, etapa siguiente */
+static modelo_t bo_mod; static char bo_fich[16];                /* objetos animados de la union (mas abajo) */
+static void bo_subido(void);
 static modelo_t *const tramos[3] = { &etapa, &uni, &sig };     /* lo que se dibuja (lo que este subido) */
 static const modelo_t *cielo;                                   /* el cielo que se dibuja */
 static int cur_nodo = -1, cur_sig = -1, cur_rama, cur_en_union, etapa_nodo = -1;   /* etapa actual, siguiente, rama */
@@ -2939,6 +3002,8 @@ static int curso_paso(void)
             uint32_t k = j_union;                              /* la separacion: donde los centros se apartan */
             while (k + 1 < uni.nruta && k + 1 < uni_der.nruta && dist_centro(&uni, k, uni_der.ruta + uni_der.paso_ruta * k) < RAMA_SEPARA) k++;
             s_decide = s_union + (k - j_union) * PASO;
+        } else if (m == &bo_mod) {
+            bo_subido();
         } else if (m == &sig) {
             int i;
             sube_tramo(m, 1, NULL);
@@ -2947,7 +3012,7 @@ static int curso_paso(void)
         }
         {
             unsigned u, l; ram_kb(&u, &l);
-            dbglog(DBG_INFO, "CURSO: %s en %.2f s (s %.0f), RAM en uso %uK libre %uK, VRAM libre %uK (zona %uK)\n", m == &uni ? fich_union : m == &uni_der ? "BKD.DAT" : fich_sig,
+            dbglog(DBG_INFO, "CURSO: %s en %.2f s (s %.0f), RAM en uso %uK libre %uK, VRAM libre %uK (zona %uK)\n", m == &uni ? fich_union : m == &uni_der ? "BKD.DAT" : m == &bo_mod ? bo_fich : fich_sig,
                    (double)t_carga_ult, (double)yo.s, u, l, (unsigned)(vram_libre() >> 10), (unsigned)(ar_libre() >> 10));
         }
     }
@@ -3009,6 +3074,248 @@ static void curso_al_menu(void)
 #ifdef PRUEBA_RAMA
 static int piloto_rama(float s) { return cur_rama < 0 && s_decide >= 0 && s > s_decide - 400.0f; }
 #endif
+/* ---------------------------------------------------------------- objetos animados de las uniones
+   Pajaros, halcones, flamencos, el dirigible... que cruzan el cielo en cada bifurcacion (tools/conv_bo.py: BO.DAT y
+   BOnn.DAT). Como el original (PC race_area_objects_44f190 / race_area_ending_44d410 / 44EDE0 y race_traffic_objects
+   4A9BD0 / 4A9C80 / 4A9DF0; SLES-53998 0x174328 / 0x174a48):
+   - cuentas de la etapa (44EDE0, solo fuera de la union, a cero al empezar cada etapa): cuadros en los choques fuertes
+     1 (7D3074) y 2, 5, 6, 12, 13 (7D3078), contra el muro (7D307C, +4 0x20000), separado de otro coche (7D3080, +4
+     0x10000), en roce con otro (7D3084, +4 0x400000) y fuera del asfalto avanzando sin derrapar (7D3088, +244 & 0x9C;
+     derrape = 100 km/h del modelo o mas con |+4E| entre 0x1800 y 0x4000); 7D3094 = posiciones de la etapa.
+   - al entrar en una union que no es la meta (car+0x5C de 0 a 1) se elige el conjunto (0x174a48, variante 1: fila 1 de
+     0x35a738): choque fuerte -> 2 (pajaros sueltos); muro o fuera del asfalto >= 10 % -> 1 (bandada); fuera del asfalto
+     -> 13 (halcones); contra otro coche -> 12 (flamencos); si no 11 (dirigible: 7D30A4 < 600 o el nivel del registro
+     del arbol, +8, que vale 0 en todo csc_data_2; el pegaso y el tanque no salen en el modo OutRun).
+   - su modelo se lee en segundo plano (carga) y salen al pasar la posicion de carretera +0x10 de la union (100; 60 el
+     globo, el barco y el ovni) con su trayectoria (6 canales de 513650 desde 0, t += 0,0166 por paso, en bucle con la
+     bandera 8 o quietos al final), retrasados +0x2C s, en el marco de la union movido en x con el coche (bandera 1: su
+     x en la union al salir y luego + su velocidad lateral; bandera 4: a +0x14 m/cuadro hacia el lado si va mas despacio)
+     y z = -690 con la bandera 2; en la rama derecha reflejados en x. Se quitan al llegar a la etapa siguiente.
+   - animacion de vertices de los nodos con la bandera 0x20 (alas): cuadro = valores[(base + reloj) % m] de la tabla de
+     0x328aa8 (reloj +1 por cuadro dibujado, 0x1030d0). SIN la mezcla de dos cuadros del PC (40ECC0): el cuadro entero.
+   PENDIENTE: sus sonidos (las funciones +0x18 / +0x1C: 0x83..0x91 de los bancos 0x30a..0x316) y que la acompanante los
+   senale (race_robots_runtime). */
+#define BO_N 14
+typedef struct { int16_t pos; uint8_t n, res; float lim; struct { uint8_t reg, tray, fl, r_; float toff; } o[4]; uint32_t tra;
+                 uint8_t relleno[64 - 8 - 32 - 4]; } bo_conj_t;   /* 64 bytes (conv_bo.py) */
+typedef struct { uint16_t idx, base, m, r_; const float *v; } bo_mor_t;
+static uint8_t *bo_dat; static const bo_conj_t *bo_conj; static uint32_t bo_var[7];
+static bo_mor_t bo_mor[192]; static int bo_nmor;
+static uint16_t *bo_idx, *bo_ini; static int bo_ncod;           /* mallas por (malla del original, cuadro) */
+static uint32_t bo_reloj;                                       /* 0x448850: +1 por cuadro dibujado */
+static int bo_c74, bo_c78, bo_c7c, bo_c80, bo_c84, bo_c88, bo_pos_ant;   /* cuentas de 44EDE0 */
+static int bo_sel = -1, bo_estado;                              /* 0 nada, 1 por leer, 2 leyendo, 3 subido, 4 fuera */
+static struct { float x, t, dur; int ini, loop; const uint8_t *tray; matrix_t M __attribute__((aligned(32))); } bo_obj[4];
+static void bo_carga_datos(void)
+{
+    uint32_t sz, n, i, o; uint8_t *d = gd_carga("BO.DAT", &sz);
+    if (!d || sz < 8 + BO_N * 64 + 8 + 28 + 8 || memcmp(d, "BOT1", 4)) { free(d); return; }
+    o = 8 + BO_N * 64;
+    if (memcmp(d + o, "VAR1", 4) || memcmp(d + o + 32, "MOR1", 4)) { free(d); return; }
+    memcpy(bo_var, d + o + 4, sizeof bo_var);
+    o += 36; memcpy(&n, d + o, 4); o += 4;
+    for (i = 0; i < n && o + 12 <= sz; i++) {                   /* 0x103120: k entradas desde el indice, base j m / k */
+        uint32_t idx, k, m, j; memcpy(&idx, d + o, 4); memcpy(&k, d + o + 4, 4); memcpy(&m, d + o + 8, 4);
+        for (j = 0; j < k && bo_nmor < (int)(sizeof bo_mor / sizeof bo_mor[0]); j++) {
+            bo_mor[bo_nmor].idx = (uint16_t)(idx + j); bo_mor[bo_nmor].base = (uint16_t)(j * (m / k));
+            bo_mor[bo_nmor].m = (uint16_t)m; bo_mor[bo_nmor].v = (const float *)(const void *)(d + o + 12); bo_nmor++;
+        }
+        o += 12 + 4 * m;
+    }
+    bo_dat = d; bo_conj = (const bo_conj_t *)(const void *)(d + 8);
+}
+/* la entrada e de la trayectoria del conjunto c (u32 n; por entrada f32 duracion y 6 canales u32 n + n x 4 floats) */
+static const uint8_t *bo_tray(int c, int e)
+{
+    const uint8_t *p; uint32_t n, i, k, m;
+    if (!bo_dat || bo_conj[c].tra == 0xffffffffu) return NULL;
+    p = bo_dat + bo_conj[c].tra; memcpy(&n, p, 4); p += 4;
+    if (e >= (int)n) return NULL;
+    for (i = 0; i < (uint32_t)e; i++) { p += 4; for (k = 0; k < 6; k++) { memcpy(&m, p, 4); p += 4 + 16 * m; } }
+    return p;
+}
+/* 5136C0: posicion y giros de la trayectoria en t */
+static void bo_muestra(const uint8_t *e, float t, float *pos, float *ang)
+{
+    const uint8_t *p = e + 4; uint32_t k, m;
+    for (k = 0; k < 6; k++) {
+        float v; memcpy(&m, p, 4); p += 4;
+        v = m ? or2_canal((const float *)(const void *)p, (int)m, t) : 0.0f;
+        if (k < 3) pos[k] = v; else ang[k - 3] = v;
+        p += 16 * m;
+    }
+}
+static void bo_cuentas_cero(void) { bo_c74 = bo_c78 = bo_c7c = bo_c80 = bo_c84 = bo_c88 = 0; bo_pos_ant = 0; }
+/* 44EDE0 en cada paso de logica (con choque contra otro coche: traf_choques) */
+static void bo_cuenta(void)
+{
+    int pos, sl;
+    if (!fis_ok || cur_en_union) { bo_toca_coche = bo_roce = 0; return; }
+    if (fis.t_choque > 0.0f) {                                  /* +4 0x80000 o +2F0 & 1: k = estado - 1 */
+        int k = fis.choque - 1;
+        if (k == 0) bo_c74++;
+        else if (k == 1 || k == 4 || k == 5 || k == 11 || k == 12) bo_c78++;
+    }
+    if (bo_toca_coche) bo_c80++;                                /* +4 0x10000 (car+6 & 1) */
+    if (yo.choque == 1) bo_c7c++;                               /* +4 0x20000: CbwColiWall */
+    if (bo_roce) bo_c84++;                                      /* +4 0x400000 */
+    bo_toca_coche = bo_roce = 0;
+    pos = (int)((yo.s - s_etapa) / m_pos);
+    { int a4e = fis.s4e < 0 ? -fis.s4e : fis.s4e; sl = fis.kmh >= 100 && a4e > 0x1800 && a4e < 0x4000; }
+    if (!(cur_nodo == PRUEBA_NODO && pos < 0xa0) && !sl && (sup_jug & 0x9cu) && pos > bo_pos_ant) bo_c88++;
+    bo_pos_ant = pos;
+}
+/* 0x174a48 (variante 1, la del modo OutRun) */
+static int bo_elige(void)
+{
+    float x, sec;
+    if (bo_c74 || bo_c78) return (int)bo_var[0];
+    if (bo_c7c) return (int)bo_var[1];
+    sec = (s_union - s_etapa) / m_pos;                          /* 7D3094: posiciones de la etapa */
+    if (cur_nodo == PRUEBA_NODO) sec -= 0xa0;
+    x = sec > 0 ? (float)bo_c88 / sec : 0.0f;
+    if (0.1f <= x) return (int)bo_var[1];
+    if (x != 0.0f) return (int)bo_var[2];
+    if (bo_c80 || bo_c84) return (int)bo_var[3];
+    return (int)bo_var[4];                                      /* 7D30A4 < 600 o el nivel del registro (0): el dirigible */
+}
+static void bo_quita(void)
+{
+    if (bo_estado == 2) carga_espera();
+    if (carga.m == &bo_mod) carga.estado = 0;
+    libera_modelo(&bo_mod); free(bo_idx); bo_idx = NULL; bo_ini = NULL; bo_estado = 0; bo_sel = -1;
+}
+/* subido: las mallas por (malla del original, cuadro) para dibujar cada nodo con su cuadro */
+static void bo_subido(void)
+{
+    uint32_t k, n = bo_mod.nmallas; int c, j;
+    sube_tramo(&bo_mod, 0, NULL);                               /* fuera de la zona del curso (pvr_mem, apuro, rebaja) */
+    bo_ncod = 0;
+    for (k = 0; k < n; k++) if ((bo_mod.mallas[k].nodo & 0xff) + 1 > bo_ncod) bo_ncod = (bo_mod.mallas[k].nodo & 0xff) + 1;
+    bo_idx = malloc((n + 4 * bo_ncod + 1) * sizeof(uint16_t));
+    if (!bo_idx) { libera_modelo(&bo_mod); bo_estado = 4; return; }
+    bo_ini = bo_idx + n; j = 0;
+    for (c = 0; c < 4 * bo_ncod; c++) {
+        bo_ini[c] = (uint16_t)j;
+        for (k = 0; k < n; k++) { int cod = bo_mod.mallas[k].nodo; if ((cod & 0xff) * 4 + ((cod >> 8) & 3) == c) bo_idx[j++] = (uint16_t)k; }
+    }
+    bo_ini[4 * bo_ncod] = (uint16_t)j;
+    bo_estado = 3;
+}
+/* al empezar la carrera */
+static void bo_inicia(void) { bo_quita(); bo_cuentas_cero(); memset(bo_obj, 0, sizeof bo_obj); }
+/* el marco de la union (marco_un: x, y, z, giro y, como modelo_coloca) */
+static void bo_marco_union(matrix_t M) { m_id(M); m_tras(M, marco_un[0], marco_un[1], marco_un[2]); m_ry(M, marco_un[3]); }
+/* un paso de logica, despues de curso_paso */
+static void bo_paso(int ev)
+{
+    int i, lado; const bo_conj_t *c;
+    if (!bo_dat) return;
+    if (ev & CUR_SIGUIENTE) { bo_quita(); bo_cuentas_cero(); return; }   /* fuera de la union: 4F0600 / 4F11B0 */
+    if ((ev & CUR_UNION) && curso[cur_nodo].izq >= 0 && bo_estado == 0) {   /* car+0x184 = 0 y car+0x5C != 0 */
+        bo_sel = bo_elige(); bo_estado = 1; memset(bo_obj, 0, sizeof bo_obj);
+#ifdef PRUEBA_BO
+        bo_sel = PRUEBA_BO;                                     /* prueba: el conjunto pedido */
+#endif
+        dbglog(DBG_INFO, "BO: conjunto %d (choques %d/%d muro %d coche %d/%d fuera %d de %.0f)\n", bo_sel, bo_c74, bo_c78, bo_c7c,
+               bo_c80, bo_c84, bo_c88, (double)((s_union - s_etapa) / m_pos));
+    }
+    if (bo_estado == 1 && carga.estado == 0 && bo_sel >= 0 && bo_sel < BO_N) {
+        sprintf(bo_fich, "BO%02d.DAT", bo_sel); carga_pide(&bo_mod, bo_fich, NULL, 0, NULL); bo_estado = 2;
+    }
+    if (bo_estado != 3 || bo_sel < 0) return;
+    c = bo_conj + bo_sel;
+    if (cur_rama < 0) return;                                   /* 451350 = 2: sin rama aun */
+    if (!bo_obj[0].tray && !bo_obj[0].ini) {                    /* 4F0CB0 al pasar la posicion +0x10 de la union */
+        if ((int)floorf((yo.s - s_union) / m_pos) <= c->pos) return;
+        for (i = 0; i < c->n && i < 4; i++) {
+            bo_obj[i].tray = bo_tray(bo_sel, c->o[i].tray); bo_obj[i].t = 0; bo_obj[i].ini = 0;
+            bo_obj[i].dur = bo_obj[i].tray ? *(const float *)(const void *)bo_obj[i].tray : 0.0f;
+        }
+        bo_obj[0].ini |= 2;                                     /* ya han salido */
+        dbglog(DBG_INFO, "BO: salen %d objetos del conjunto %d en s %.0f\n", c->n, bo_sel, (double)yo.s);
+    }
+    lado = cur_rama;                                            /* 1 derecha: reflejado en x (local[0] = -1) */
+    {
+        float dx = yo.pos[0] - marco_un[0], dz = yo.pos[2] - marco_un[2], cs = cosf(marco_un[3]), sn = sinf(marco_un[3]);
+        float ux = dx * cs - dz * sn;                           /* el coche en el marco de la union (inverso de 7D3190) */
+        float vx = fis.vx * 0.0166112948f, vz = -fis.vy * 0.0166112948f;   /* +20 (m/cuadro) x +DBC (1) */
+        float vux = vx * cs - vz * sn;
+        for (i = 0; i < c->n && i < 4; i++) {
+            matrix_t B; float p[3] = { 0, 0, 0 }, a[3] = { 0, 0, 0 }, tt;
+            int fl = c->o[i].fl;
+            if (!(bo_obj[i].ini & 1)) bo_obj[i].x = ux;         /* inst+0x30 == 0: el sitio del coche */
+            else if (c->lim > fabsf(vux) && (fl & 4)) bo_obj[i].x -= c->lim * (lado ? -1.0f : 1.0f);
+            else bo_obj[i].x += vux;
+            bo_obj[i].loop = (fl >> 3) & 1;
+            if (!(bo_obj[i].ini & 1)) { bo_obj[i].t -= c->o[i].toff; bo_obj[i].ini |= 1; }
+            /* 4A9C80: trayectoria en t (desde 0), t += 0,0166; en bucle o quieto al final */
+            tt = bo_obj[i].t < 0 ? 0 : bo_obj[i].t;
+            if (bo_obj[i].tray) bo_muestra(bo_obj[i].tray, tt, p, a);
+            bo_obj[i].t += 0.0166112948f;
+            if (bo_obj[i].t > bo_obj[i].dur) bo_obj[i].t = bo_obj[i].loop ? 0.0f : bo_obj[i].dur;
+            bo_marco_union(B);
+            m_tras(B, (fl & 1) ? bo_obj[i].x : 0.0f, 0.0f, (fl & 2) ? -690.0f : 0.0f);   /* [636BC0] = PS2 0x35a924 */
+            if (lado) { int j; for (j = 0; j < 4; j++) B[0][j] = -B[0][j]; }
+            m_tras(B, p[0], p[1], p[2]); m_rz(B, a[2]); m_ry(B, a[1]); m_rx(B, a[0]);
+            memcpy(bo_obj[i].M, B, sizeof B);
+#ifdef DIAG_BO
+            if (i == 0 && (crono % 30) == 0)
+                dbglog(DBG_INFO, "DIAGBO t %.2f obj (%.1f %.1f %.1f) coche (%.1f %.1f %.1f) ux %.1f vux %.2f\n", (double)bo_obj[i].t, (double)B[3][0],
+                       (double)B[3][1], (double)B[3][2], (double)yo.pos[0], (double)yo.pos[1], (double)yo.pos[2], (double)ux, (double)vux);
+#endif
+        }
+    }
+}
+/* cuadro de la animacion de vertices del indice a (40ECC0 / PS2 0x1031c8): entero de valores[(base + reloj) % m] */
+static int bo_cuadro(int a)
+{
+    int i;
+    for (i = 0; i < bo_nmor; i++)
+        if (bo_mor[i].idx == a) { float f = bo_mor[i].v[(bo_mor[i].base + bo_reloj) % bo_mor[i].m]; return ((int)f) & 3; }
+    return 0;
+}
+/* 4A9DF0: cada nodo de los registros de cada objeto con su matriz (umbral de LOD 8 de 4044E0, 7 con la bandera 0x40) */
+static void bo_dibuja(int l)
+{
+    static matrix_t W __attribute__((aligned(32)));
+    const bo_conj_t *c; int i; uint32_t k;
+    if (bo_estado != 3 || !(bo_obj[0].ini & 2) || bo_sel < 0) return;
+    c = bo_conj + bo_sel;
+    for (i = 0; i < c->n && i < 4; i++) {
+        const float (*M)[4] = (const float (*)[4])bo_obj[i].M;
+        for (k = 0; k < bo_mod.nnodos; k++) {
+            const nodo_t *nd = bo_mod.nodos + k;
+            int g = nd->relleno[0] & 0xffff, an = nd->relleno[0] >> 16, fl = nd->fl >> 16, q, j, ult = -2;
+            float wx, wy, wz, dx, dy, dz, zv, xv, yv;
+            if ((int)(nd->fl & 0xffff) != c->o[i].reg || g >= bo_ncod) continue;
+            wx = nd->cx * M[0][0] + nd->cy * M[1][0] + nd->cz * M[2][0] + M[3][0];
+            wy = nd->cx * M[0][1] + nd->cy * M[1][1] + nd->cz * M[2][1] + M[3][1];
+            wz = nd->cx * M[0][2] + nd->cy * M[1][2] + nd->cz * M[2][2] + M[3][2];
+            dx = wx - ojo[0]; dy = wy - ojo[1]; dz = wz - ojo[2];
+            zv = dx * ade[0] + dy * ade[1] + dz * ade[2];
+            if (zv + nd->r < cerca || zv - nd->r > lejos) continue;
+            xv = dx * der[0] + dy * der[1] + dz * der[2]; yv = dx * arr[0] + dy * arr[1] + dz * arr[2];
+            if (fabsf(xv) - zv * (320.0f / fx) > nd->r * 2.0f || fabsf(yv) - zv * (240.0f / fx) > nd->r * 2.0f) continue;
+            if (zv > nd->r * (float)(1 << ((fl & 0x40) ? 6 : 7)) * fx / 240.0f) continue;   /* LOD: muy pequeno */
+            q = g * 4 + ((fl & 0x20) && an != 0xffff ? bo_cuadro(an) : 0);
+            if (bo_ini[q] == bo_ini[q + 1]) q = g * 4;          /* sin ese cuadro: el primero */
+            memcpy(W, bo_mod.carteles[nd->cartel], sizeof W);
+            mat_load(&vista); mat_apply(&bo_obj[i].M); mat_apply(&W);
+            for (j = bo_ini[q]; j < bo_ini[q + 1]; j++) {
+                const malla_t *m = bo_mod.mallas + bo_idx[j]; uint32_t mk = bo_idx[j];
+                if (m->n < 3 || mk < bo_mod.inicio[l] || mk >= bo_mod.inicio[l + 1]) continue;
+                if (m->tex != ult) {
+                    ult = m->tex;
+                    if (m->tex >= 0) pvr_prim(&bo_mod.cabs[0][m->tex], sizeof(pvr_poly_hdr_t));
+                    else pvr_prim(&cab_col[0][l], sizeof(pvr_poly_hdr_t));
+                }
+                dibuja_malla(&bo_mod, m);
+            }
+        }
+    }
+    mat_load(&vista);
+}
 /* ---------------------------------------------------------------- nodos visibles (como el original)
    Lo que dibuja el original de la etapa en cada cuadro (decompilacion del PC): de cada nodo (tools/modelo.py nodos),
    404B00: esfera contra el plano cercano, los cuatro laterales y el lejano, y el LOD por tamano en pantalla:
@@ -4439,6 +4746,7 @@ int main(int argc, char **argv)
     }
     traf_medidas();
     traf_tablas();                                              /* clases y cajas del trafico (TRAFC.DAT) */
+    bo_carga_datos();                                           /* objetos animados de las uniones (BO.DAT) */
     if (ruta_pon(&etapa)) { aviso("Sin memoria para la ruta"); for (;;) thd_sleep(1000); }
     fisica_carga();
     /* 2: PowerVR, texturas a la memoria de video y cabeceras */
@@ -4594,6 +4902,7 @@ int main(int argc, char **argv)
                 if (hud_ok) hud_pon_modelo(modelo_jug);         /* y su tacometro */
                 if (hud_ok && hud_sube_tex()) hud_ok = 0;
                 curso_reinicia();                               /* la etapa de salida (otra vez, si hacia falta) */
+                bo_inicia();                                    /* sin objetos de union y las cuentas a cero */
                 memset(&yo, 0, sizeof yo); yo.s = SALIDA; yo.x = carril_x(SALIDA, 4);
 #ifdef PRUEBA_FIN
                 yo.s = longitud - PRUEBA_FIN; yo.x = carril_x(yo.s, 4);   /* prueba: a PRUEBA_FIN m del final */
@@ -4693,6 +5002,7 @@ int main(int argc, char **argv)
                 pt_paso(); pt_msg_paso();                       /* puntuacion del original */
                 {   /* el curso: union, bifurcacion y etapa siguiente sin parar (curso_paso) */
                     int ev = curso_paso();
+                    bo_cuenta(); bo_paso(ev);                   /* objetos animados de la union (44EDE0 / 44F190) */
                     if (cur_rama < 0 && s_decide >= 0 && yo.s >= s_decide - 450.0f && t_estado % 30 == 0) {
                         char b[64]; const char *zi = zona_nombre(curso[cur_nodo].izq), *zd = zona_nombre(curso[cur_nodo].der);
                         if (strlen(zi) + strlen(zd) > 14) sprintf(b, "< %.4s  %.4s >", curso[curso[cur_nodo].izq].zona, curso[curso[cur_nodo].der].zona);   /* cabe en el rotulo */
@@ -4833,6 +5143,7 @@ int main(int argc, char **argv)
         tri_enviados = 0; vtx_ult = vtx_env; vtx_env = 0; ta_inicia_cuadro(); vtx_et_ult = vtx_et; vtx_et = 0;
         if (estado != TITULO) nodos_visibles_todos();          /* los del original que caben en el TA */
         if (estado != TITULO) traf_parpadea(pausa || estado != CARRERA);   /* 4AE5F0 (sin traf_paso: suspendido) */
+        if (estado == CARRERA && !pausa) bo_reloj++;            /* 0x1030d0: reloj de la animacion de vertices */
         vib_cuadro();                                           /* el Puru Puru (vib_paso lo dejo en el control) */
         for (l = 0; l < 3; l++) {
             pvr_list_begin(LISTA[l]);
@@ -4846,6 +5157,7 @@ int main(int argc, char **argv)
                 for (i = 0; i < 3; i++)                         /* etapa, union y etapa siguiente: las que esten subidas */
                     if (tramos[i]->tv) dibuja_rango(tramos[i], l, tramos[i]->inicio[l], tramos[i]->inicio[l + 1], 1, 0, 0);
                 color_fijo = 0; ta_en_etapa = 0;
+                bo_dibuja(l);                                   /* pajaros y demas de la union (4A9DF0) */
             }
             if ((estado != TITULO && (!cam_ok || cam_coche_visible(&cam))) || (estado == TITULO && menu_coche3d()))
 #ifndef DIAG_SIN_COCHE

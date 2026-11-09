@@ -1578,6 +1578,14 @@ static float muestra_canal(const or2_canal_t *ch, float t)
            (3.0f * s * s - 2.0f * s * s * s) * b[1] + d * s * (s - 1.0f) * b[2];
 }
 
+/* 513650 sobre claves sueltas (las trayectorias de los objetos de las uniones, BO.DAT): n claves de 4 floats */
+float or2_canal(const float *k, int n, float t)
+{
+    or2_canal_t ch;
+    ch.k = k; ch.n = n;
+    return muestra_canal(&ch, t);
+}
+
 int or2_pose(const or2_choques_t *q, int estado, float t, int lado, float tr3[3], float gr[3])
 {
     int i;
@@ -1892,7 +1900,7 @@ void or2_choque_coche(or2_coche_t *c, const or2_param_t *p, const or2_choques_t 
     float sa, sb, a2c8, b2c8, flag = 0.0f, lj, e;
     int clase, j, roce_a = 0, roce_b = 0, e7 = 0;
     (void)p;
-    o->golpe = -1; o->cambia_vel = 0; o->reaccion = 0; o->impulso = 0; o->roce = 0; o->se_n = 0;
+    o->golpe = -1; o->cambia_vel = 0; o->reaccion = 0; o->impulso = 0; o->roce = 0; o->roce_a = 0; o->se_n = 0;
     o->reparto = 1.0f;
     if (!q || !q->ok || !k || !k->toca) return;
     choques_act = q;
@@ -1990,7 +1998,7 @@ void or2_choque_coche(or2_coche_t *c, const or2_param_t *p, const or2_choques_t 
             }
         }
     }
-    o->roce = roce_b;
+    o->roce = roce_b; o->roce_a = roce_a;
 }
 
 void or2_choque_trafico(const or2_choques_t *q, or2_otro_t *a, or2_otro_t *b)

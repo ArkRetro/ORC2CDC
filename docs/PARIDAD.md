@@ -45,7 +45,7 @@ Estado: OK (conectado y verificado al nivel indicado), PARCIAL, PROVISIONAL (apr
 | Adherencia por superficie | get_road_mu 500B30, running_resistance 502120, COLI0200 | OK | coli por rueda | ninguna conocida | — | H, E |
 | Choques coche-coche y muro, choque fuerte, grua | 4F9450/4F9000/4F8490/4F6FE0/4F76E0/4F7BF0/476040/473F30 (ver Choques entre coches), cbw_coli_wall, 5038D0, PlWrecker | PARCIAL | CHQ1/POS1 de PARAM.DAT, CJM1/SEC1 de TRAFC.DAT, efectos de IGC.PAK en SFX.DAT | coche-coche: ver Choques entre coches (PROVISIONALES alli; golpeados: parpadeo y cierre del original); vibracion del mando de PS2 (0x1d0420) salvo la de la superficie; grua recoloca en el carril mas cercano (no en la fila de poligonos); avance 10 posiciones x m_pos (CONFIRMADO, antes 25 m supuestos) | — | H, E |
 | Camara de carrera | evento CAMERA 385: 4858D0, 484810, 483110, 4A1680 SetCarCamera, 485590/483CE0/4834A0/483600, 4832F0/484A40, 483C10/484BD0 (PS2 0x178500..0x17b540, 0x1817c0) | PARCIAL | demo/camara.c con las tablas CAM1 de PARAM.DAT (vistas 0x2ccd88, por vista y modelo 0x2cd3d8, por modelo 0x2d2838 del fichero SLES) | vista 1 sin interior (no se dibuja el coche); camara de salida en los 60 primeros cuadros de la cuenta (SUPUESTO); sin vista 0x1D (780258 = 0) ni camaras de meta/fin | ver seccion Camara de carrera | E |
-| Trafico (clases, IA, reaccion) | 472090, 472450, 472A50, 47DC10, 4736D0, hit_476040; aparicion 479080 (PS2 0x1dcdd0): 478B90 (0x1dbba0), 4787E0 (0x1db6d0), 4EFB90 (0x1f3818), 4F0030 (0x1f1a88), 46CE30, 478430, 46CC10; cierre 477F60 | PARCIAL | TRAFC.DAT (TRC1, ACL1 y TAP1: tablas de aparicion, velocidad y puntos fijos por etapa); colores (tabla 0x36bc18, modelos 30..43) y materiales en TRAFn.DAT (TCX1) | camino "Lead" de 472450 (velocidad segun el jugador) sin portar: todos a la velocidad del registro; 478640/46CDA0 en la union simplificados; puntos fijos de coches de carreras y de los modelos 39..43 sin coche | ver Trafico: densidad del original | E |
+| Trafico (clases, IA, reaccion) | 472090, 472450, 472A50, 47DC10, 4736D0, hit_476040; aparicion 479080 (PS2 0x1dcdd0): 478B90 (0x1dbba0), 4787E0 (0x1db6d0), 4EFB90 (0x1f3818), 4F0030 (0x1f1a88), 46CE30, 478430, 46CC10; cierre 477F60 | PARCIAL | TRAFC.DAT (TRC1, ACL1 y TAP1: tablas de aparicion, velocidad y puntos fijos por etapa); colores (tabla 0x36bc18, modelos 30..43) y materiales en TRAFn.DAT (TCX1) | camino "Lead" de 472450 portado (velocidad por clase y del jugador, ver Choques entre coches: velocidad del trafico de delante) salvo 472320 / 471F90; 478640/46CDA0 en la union simplificados; puntos fijos de coches de carreras y de los modelos 39..43 sin coche | ver Trafico: densidad del original | E |
 | Piloto y acompanante | ROB01 / ROB02: PS2 0x201b10 / 0x201c40 / 0x202bf0 y 0x202c58 / 0x202de0; CHR.PS2 (CHR_DR_M00, CHR_DR_L00), bone.bin, ANIMS.PS2 | PARCIAL | CHR.DAT (conv_chr.py), comun/robot.c: motor de movimientos, conducir con el volante, codo en la puerta, choque, fuera del asfalto, aburrida, META y TIME OVER (ver Coches: el piloto y la acompanante) | sin la secuencia de meta del piloto, cambio de area, asustada, trompo ni poses pedidas | - | H, E |
 | Rivales | — | FALTA | — | no hay rivales | — | — |
 | Carretera, pendientes, bifurcacion | STAGE.PS2, BK.PS2 cs_BK_PALM, COMMON obj_course_obj_bk_palm + obj_OBJ_<ZONA>_BUNKI_TX, descriptores 0xb0, csc_data_2 | OK | conv_tramo/conv_union, CURSO.DAT | arbol entero (15 etapas, 10 bifurcaciones con sus carteles, 5 metas); cielo, niebla, luz y sol de la union como el original (ver Entorno); bifurcaciones = las de PALM (las demas no estan en el disco) | objetos animados de BK (ANIMS) | E |
@@ -54,7 +54,7 @@ Estado: OK (conectado y verificado al nivel indicado), PARCIAL, PROVISIONAL (apr
 | Puntuacion modo OutRun | 4F2DF0, 4F2660, 4F2B20, 4B9770 | PARCIAL | main.c pt_* | posicion de carretera = m_pos de CURSO.DAT (CONFIRMADO; antes 2,5 m supuestos, 3,2 veces los puntos por avance); bonus de etapa en el checkpoint | el salto de +64 al cambiar de curso (PENDIENTE) | E |
 | Eventos, scripts, progresion, misiones | SCRIPTS.PS2 (Races, RaceAttack, OutrunMiles, Req_*) | FALTA | — | — | — | — |
 | Coches del jugador | CARS.PS2 1-32 / 33-63, disposicion 0x3d3ff0; materiales tabla 4/5 del bloque; colores 0x35ad48 (PC 64D120/408C80); mapa de entorno del bloque | PARCIAL | 15 coches montados como 46A560 (port comprobado), con interior, 9320-11195 vertices dibujados; pintura, 8 colores (Y en la seleccion), reflejo y luces (+7C/+80/+84/+60, CEX2) del original; piezas animadas (ruedas, volante, aleron, faros, disco caliente, car+F0 y el cuerpo de la fisica; ANI1) | UV de entorno con la formula esferica clasica (la del microcodigo VU1 sin leer); sin bits de noche/tunel | ver secciones Coches | E |
-| Escenarios, texturas, materiales | STAGE.PS2, VQ, scn_env_fog_<zona> | PARCIAL | 15 tramos + 15 uniones; mallas con su material (tabla 5) y la luz del entorno 1 de la zona; niebla, cielo y sol del original (ver Entorno); tiras (ADC), nodos, LOD y planos del original | sin objetos de tramo (obj_course_obj_cs_*); cs_ENV_* no es de la escena (es del reflejo del coche); destello sin consulta de oclusion; luces locales (maya_spl) sin portar | — | E |
+| Escenarios, texturas, materiales | STAGE.PS2, VQ, scn_env_fog_<zona> | PARCIAL | 15 tramos + 15 uniones; mallas con su material (tabla 5) y la luz del entorno 1 de la zona; niebla, cielo y sol del original (ver Entorno); tiras (ADC), nodos, LOD y planos del original | objetos de tramo: el registro de obj_course_obj_cs_<zona> que dibuja la etapa (pancarta CHECK POINT y carteles, ver Checkpoint: la pancarta); objetos animados de las uniones (ver Objetos animados de las uniones); cs_ENV_* no es de la escena (es del reflejo del coche); destello sin consulta de oclusion; luces locales (maya_spl) sin portar | — | E |
 | HUD, menus, transiciones | SPRANI/XST, TEXT.PS2 (espanol: SPANISH.bin y XST _sxst) | PARCIAL | HUD.DAT, MENU.DAT; todas las pantallas del menu principal y de un jugador, licencia con VMU (icono, eyecatch y LCD: VMU.DAT, ver VMU), seleccion de coche del original, menu de pausa con AUDIO (ver Menus y Pausa y mezcla) | titulo es un cuadro del video (la pelicula de titulo en bucle detras del rotulo, sin hacer); textos bfont antiguos en la demo automatica y el aviso de rama; rotulos de las filas de opciones (sprites sin localizar) | quitar textos bfont | E |
 | Musica y efectos | MUSIC.PS2, SOUND.PS2 ICS/MENU/FE; volumenes 0x11ae38 / 0x100210 / 0x11b600, SOUNDCD.IRX 0x2118 | PARCIAL | musica.c, sfx.c; mezcla del original (ver Pausa y mezcla) | 48 kHz supuesto; sin sonido por superficie ni del choque fuerte | — | E |
 | Voces (acompanante y locutor) | SOUND.PS2 `\SPANISH\ORC.PAK`, `PERO.pak`; race_robots 489A90/488D80 = PS2 0x202e60..0x205cac; 4B93E0, 4B9CD0, 49C9C0, 499020, GAME 0x1b83e8 | OK | VOCES.DAT (conv_sonido.py), voces.c; verificado en Flycast (ver Voces y video) | una voz nueva corta la anterior (SUPUESTO); "choque con otro coche" = +4 0x4000000 del jugador (4F7BF0 le ha cambiado la velocidad) en un choque; sin voces de asustada/trompo (solo Coast 2 Coast) | — | E |
@@ -492,6 +492,32 @@ PROVISIONAL: solo la caja 0 (camiones con remolque 39..43 no estan en la demo); 
 lane_range (46D0C0) con la calzada por carriles 0..2 / 3..5; el rumbo del pose anterior del trafico es el de su
 avance (sin +2E8 ni cabeceo/balanceo).
 
+### Velocidad del trafico de delante: el camino "Lead" de 472450 (2026-11-09)
+
+Queja del probador: "en ocasiones frenan demasiado al ferrari". Auditoria otra vez de la reaccion y el intercambio
+contra SLES-53998 instruccion a instruccion: 4F6FE0 (0x1942d8: roce por esquinas y bordes, umbral 0,05 en 0x1944cc,
+estado 7 con el cierre > 80 km/h del modelo 0x3ebcffe8 o +320 != 3 e ir a 80; golpe con 30 km/h 0x3e0dbfee), 4F7BF0
+(0x195708: con cierre <= 80, += unidad(vO - vS) x min(v, 80); si no, += (vO - vS) x masa x e), su tope 4F6820
+(0x1960e8, 1,38427508 m/cuadro solo en el estado 7), las tablas (0x35b9d0: 80 / 280, e 1 / 0,9 / 0,8, masa 1 / 0,7 /
+0,1 en 0x35ba20, reparto 0x35ba30) y su uso (0x191d20): IGUALES a lo de la demo; el reparto, una sola vez por cuadro
+con el ultimo coche tocado, tambien. No es la respuesta al choque.
+Lo que divergia es la velocidad del coche contra el que se choca: el factor del velocimetro de todos los coches es
+0,628 (P(0x2438)): el trafico a 100 km/h del modelo (+0xC del registro de velocidad, el unico camino portado, "Plain")
+va a 63 km/h del marcador, y el jugador a 230-290 del marcador (370-460 del modelo) llegaba con un cierre de 270-360:
+estado 7 y el intercambio con e = 0,9 le dejaba a 0,1 v + 0,9 vO (~ 70-80 km/h del marcador). En el original todos
+los coches de delante del jugador van por el camino "Lead" de 472450 (PC race_traffic.cpp traffic_472450; registro de
+4F0030 = PS2 0x1f1a88..0x1f20c4: minimas por clase 250 / 290 / 310 y maximas 270,9..473 km/h del modelo): unos
+180-275 del marcador; solo el de detras del jugador y los de atras van a +0xC. Ahora `traf_objetivo` (demo/main.c)
+porta el camino (con el jugador chocando la maxima; a menos de +4 posiciones 470B30 con la velocidad del jugador; mas
+alla la cola de 471E70) y el ritmo entero de 472450 (incluido el (v / minima)^2 que faltaba). PENDIENTE: 472320 (seguir
+al de delante y adelantarle: 470CB0, 470ED0, 4718D0, 471680) y 471F90; PROBABLE: K6281C0 = 0,01 (el porcentaje).
+Medido en Flycast (`-DPRUEBA_GUION -DPRUEBA_EMBISTE -DPRUEBA_TRAFICO -DDIAG_CHOQUE`, el piloto de prueba va a por el
+coche de delante): antes, golpes por detras 200 -> 76, 187 -> 75, 156 -> 72, 154 -> 72, 147 -> 71, 142 -> 71 km/h del
+marcador (el trafico a 60-65; pierde el 50-62 %); ahora 245 -> 195 (sin estado 7, el otro a 264), 231 -> 162, 224 ->
+172, 227 -> 163, 229 -> 152, 229 -> 144, 244 -> 165, 212 -> 153 (el trafico a 150-200; pierde el 20-37 %). Los roces
+siguen sin cambio de velocidad. Valores esperados del original con 4F7BF0: cierre <= 80 del modelo: -80 del modelo
+(-50 del marcador); estado 7: 0,1 v + 0,9 vO.
+
 ### Golpeados: parpadeo y cierre (2026-11-09)
 
 Queja del probador: al chocar, el coche "parece sentir el choque, difuminarse y desaparecer". En el original no hay
@@ -549,6 +575,29 @@ Verificacion: ver Ultimo cambio verificado.
 
 ## Checkpoint
 
+### La pancarta CHECK POINT (2026-11-09)
+
+Queja del probador: "falta el panel que pone checkpoint en carretera". La pancarta no es de la geometria de la etapa
+(cs_CS_<zona>) sino del banco de objetos de la etapa `\Stage\<ZONA>\obj_course_obj_cs_<zona>_pmt` (recursos 0x58..0x66
+de la tabla de recursos de PS2, `conv_coche.recursos`), que la demo no convertia (se creia que solo era del reflejo).
+- Quien la dibuja: PC race_area_geometry_44de10 `p.obj([5D4DC8 + [desc] * 4])` sin condiciones, en el marco de la etapa
+  (la decompilacion lo llama "sky"); en SLES-53998 0x172780: `addiu v1, fp, -0x6470` = tabla 0x3f9b90, un id por
+  descriptor de tramo (recurso << 16 | registro: 0x580001 PALM, 0x590001 LAKE... 0x630002 METR), dibujado con
+  0x1118b8 tras las mallas de la etapa. CONFIRMADO.
+- Que lleva (LAKE, registro 1): la pancarta CHECK POINT (textura de 128x32) a 9,2 m sobre z = 0 (el principio de la
+  etapa, donde estan las banderas 0x10/0x100 del checkpoint) con sus postes a x +-16..22, y a lo largo de la etapa los
+  carteles SLOW DOWN (64x16) y las flechas de las curvas (32x32). 434 vertices en LAKE.
+- Los otros registros no son de la escena: el de la tabla 0x3f9c98 (PC 5D4ED0, PS2 0x173100) solo lo dibuja el cubo
+  del reflejo del coche (race_env_model_44cd30); el 0 (0x3fa1d0 + id * 0x14, PC 5D5408) es el cartel de los destinos
+  del final de la etapa con las texturas de los BUNKI cambiadas (listas 63687C), a partir de la posicion +0x74 del
+  descriptor de PS2 (+0x5E del PC): PENDIENTE.
+- Ahora: `tools/conv_union.py objetos_etapa` (tabla localizada por su contenido) y `conv_tramo.convierte(objetos=...)`
+  anaden ese registro a SEGnn.DAT como nodos de la etapa (estado del GS, visibilidad precalculada de pvs.py, el tope del
+  TA de la etapa). Coste: SEG03 +30 KB de fichero; VRAM de la zona del curso +17..+41 KB por etapa (tools/vram.py
+  --zona 1344: la peor combinacion sigue siendo BK09 + IMPE, 1127 KB, quedan 217 KB; antes 1109 y 235). Verificado en E (PALM -> LAKE): la pancarta sobre la carretera al llegar al checkpoint (captura
+  scratchpad efectos/checkpoint_lake.png).
+
+
 - Donde: al principio de cada etapa (la de la rama elegida), en los primeros ~8 m de su colision. Ahi esta la
   pancarta CHECK POINT de la propia etapa (vista en Flycast al pasar de PALM a LAKE: la pancarta y en el cuadro
   siguiente EXTEND TIME). Antes la demo ampliaba al entrar en la union (unos 1000 m antes).
@@ -568,6 +617,43 @@ Verificacion: ver Ultimo cambio verificado.
   2610). Inicial 5999 (nivel 0, sin +60).
 - Comprobado en E: `-DPRUEBA_AUTO -DPRUEBA_NODO=0 -DPRUEBA_FIN=500 -DPRUEBA_V=280`: "CHECKPOINT: etapa 1 (LAKE) nivel
   1, +3480"; `-DPRUEBA_NODO=2 -DPRUEBA_RAMA=1`: "etapa 5 (DESE) nivel 2, +3450". Capturas fuera del repositorio.
+
+## Objetos animados de las uniones (2026-11-09)
+
+Queja del probador: "hay algunos efectos cuando se cambian de etapa que faltan, como pajaros volando". Son los objetos
+del fondo de BK.PS2 `\ANIMS\obj_bo_*_pmt.sz` (recursos 0x136..0x143) con sus trayectorias `oso_dyn_bo_*_bin.sz`.
+Codigo del original: PC race_area_objects_44f190 (PS2 0x174328), race_area_ending_44d410 (0x174a48), 44EDE0 (las
+cuentas), 4F0CB0 (0x1d75c0), 4A9BD0 / 4A9C80 / 4A9DF0 (race_traffic_objects.inc). Conversor `tools/conv_bo.py` (BO.DAT
+y BOnn.DAT); demo/main.c bo_*.
+- Conjuntos: 14 registros de 0x24 bytes en 0x35a540 (modelo, trayectoria, objetos, posicion de la union a la que
+  salen: 100 o 60, velocidad lateral 1,48 / 0,74 m/cuadro, objetos de 0x40 bytes con su clase, trayectoria, banderas y
+  retraso); clase -> modelo en 0x40a958 (8 bytes por clase). Variante 1 (fila 1 de 0x35a738): 2 pajaros sueltos, 1
+  bandada, 13 halcones, 12 flamencos, 11 dirigible, 7 pegaso, 6 tanque. CONFIRMADO.
+- Eleccion al entrar en la union (no en las metas), por lo hecho en la etapa (44EDE0, solo fuera de la union): choque
+  fuerte 1 / 2, 5, 6, 12, 13 -> pajaros sueltos; muro o fuera del asfalto >= 10 % de la etapa -> bandada; fuera del
+  asfalto -> halcones; contacto con otro coche (+4 0x10000 o 0x400000) -> flamencos; si no, dirigible (7D30A4 o el
+  nivel del registro del arbol, 0 en csc_data_2: el pegaso y el tanque no salen en el modo OutRun). CONFIRMADO en
+  0x174b9c..0x174c74. 7D3094 (posiciones de la etapa) se toma de la ruta (s de la union - s de la etapa) / m_pos:
+  PROBABLE (el original lee +0x7C del descriptor).
+- Salen al pasar la posicion de la union (rama elegida; 451350 = 2 no los mueve) con su trayectoria de 6 canales
+  (513650, t += 0,0166 por paso, en bucle con la bandera 8 o quietos al final), en el marco de la union movido a la x
+  del coche (bandera 1, luego + su velocidad lateral; bandera 4: a 1,48 m/cuadro), z = -690 con la bandera 2 (PS2
+  0x35a924), reflejados en la rama derecha. En la rama izquierda los pajaros cruzan la carretera por delante del coche
+  en el tramo transversal de la union (z ~ -685). Se quitan al llegar a la etapa siguiente (car+0x5C a 0).
+- Alas: los nodos con la bandera 0x20 tienen animacion de vertices (las tiras con 0x800 en la tabla 3 traen 4 paquetes,
+  uno por cuadro); el cuadro sale de la tabla de 0x328aa8 (la morph_var.dat del PC dentro del ELF: 23 grupos {indice,
+  k, m, m floats}; 0x103120) con el reloj de 0x448850 (+1 por cuadro dibujado, 0x1030d0 desde 0x20d7f8). La demo usa
+  el cuadro entero (sin la mezcla de dos cuadros de 40ECC0 / vsc 7): DIFERENCIA menor.
+- Memoria: cada malla del original una vez por cuadro y los nodos con su matriz (la bandada: 13 pajaros con la misma
+  malla): BO01 18 KB, BO02 15 KB, BO12 37 KB, BO13 122 KB, BO11 276 KB de RAM (fichero) mientras se esta en la union;
+  VRAM 1-32 KB por conjunto (fuera de la zona del curso: pvr_mem con el apuro y la rebaja de sube_tramo); BO.DAT 74 KB
+  en RAM siempre (tablas, morph y las 7 trayectorias de la variante 1). TA: dibuja_malla con ta_cabe (la bandada ~70
+  vertices por pajaro, el dirigible ~2300 por cuadro).
+- PENDIENTE: los sonidos (+0x18 / +0x1C: efectos 0x83..0x91 de los bancos 0x30a..0x316), la acompanante senalandolos
+  (race_robots_runtime) y el filtro de visibilidad 4F0E40 (aqui: esfera contra la vista y el LOD por tamano, umbral 8).
+- Verificado en E (`-DPRUEBA_AUTO -DPRUEBA_NODO=0 -DPRUEBA_FIN=500 -DPRUEBA_V=280 -DPRUEBA_RAMA=0`; la eleccion natural
+  fue la bandada por un roce con el muro; `-DPRUEBA_BO=n` fuerza un conjunto): la bandada cruza por delante (capturas
+  scratchpad efectos/pajaros_bandada_*.png).
 
 ## Camara de carrera
 

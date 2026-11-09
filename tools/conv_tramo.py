@@ -505,10 +505,12 @@ def pon_cielo(mod, cielo, luz=None):
         if regs: mod.bloque(blq, registros=set(regs), lista=3, sin_textura='material', nodo_fijo=-256 - g)
     mod.luz = None
 
-def convierte(seg, n, sal, mundo=None, cielo=True, luz=None):
+def convierte(seg, n, sal, mundo=None, cielo=True, luz=None, objetos=None):
     """el segmento seg (numero n) a sal; mundo: transformacion al marco del curso (transforma). cielo: True (el bloque
     que parece cielo, entero), False (sin cielo) o (bloque, grupo 0, grupo 1) del descriptor (pon_cielo). luz: (luz
-    del entorno 1, la de la etapa; luz del entorno 0, la del cielo) del original (modelo.luz_entorno) o None"""
+    del entorno 1, la de la etapa; luz del entorno 0, la del cielo) del original (modelo.luz_entorno) o None.
+    objetos: [(bloque, {registro})] de mas que la geometria de la etapa dibuja en su marco (conv_union.objetos_etapa:
+    el registro de obj_course_obj_cs_<zona> con la pancarta CHECK POINT del principio y los carteles de las curvas)"""
     mod = modelo.Modelo()
     if isinstance(cielo, tuple): pon_cielo(mod, cielo, luz[1] if luz else None)
     for blq in seg.bloques:
@@ -526,8 +528,13 @@ def convierte(seg, n, sal, mundo=None, cielo=True, luz=None):
         elif es_cielo(blq):
             if cielo is True: mod.bloque(blq, lista=3, sin_textura='material')   # alrededor de la camara, sin niebla
         # los otros no son de la escena: cs_ENV_<zona> (con su tabla cs_ENV_<zona>_bin) solo lo dibuja el cubo del reflejo
-        # del coche (race_env_model_44cd30, desde cube_scene / 414340 en la decompilacion del PC); obj_course_obj_cs_<zona>
-        # tampoco lo dibuja la geometria de la etapa (race_area_geometry_44de10)
+        # del coche (race_env_model_44cd30, desde cube_scene / 414340 en la decompilacion del PC); de
+        # obj_course_obj_cs_<zona> la geometria de la etapa (race_area_geometry_44de10 / PS2 0x172780) solo dibuja el
+        # registro de la tabla por descriptor (objetos)
+    for blq, regs in (objetos or []):
+        mod.luz = luz[0] if luz else None
+        mod.bloque(blq, registros=regs, objetos=True, sin_textura='material')
+        mod.luz = None
     try: cam = recorrido_soo(seg)
     except ValueError: cam = None                              # SOO sin puntos utiles
     if cam is None: cam = recorrido(seg)
