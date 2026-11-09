@@ -256,6 +256,77 @@ original. `lejos` solo baja (50 m cada 30 cuadros, minimo `LEJOS_MIN` 600 m) si 
 24-29 ms por cuadro en carrera (antes y despues) y sin `-DDIAG_SIN_CPU` `lejos` acaba en 600 m; si la consola tarda lo
 mismo, eso corta antes que el TA (no medido en la consola).
 
+### Visibilidad precalculada (PVS, 2026-11-09)
+
+Mucho de lo que el original dibuja de la etapa no se ve (arboles y casas detras de montes, murallas y edificios): se
+dibujaba y gastaba TA y CPU. Ahora la conversion calcula que mallas se pueden ver desde cada seccion de la ruta
+(`tools/pvs.py` + `tools/c/pvs.c`, llamado desde `conv_tramo.py` y `conv_union.py` al escribir cada SEGnn.DAT /
+BKkk.DAT) y la demo no envia las demas (`pvs_paso` en `demo/main.c`); el reparto (`nodos_visibles_todos`) se hace
+despues con el coste de lo que queda de cada nodo, asi que lo que sobra va a la distancia.
+
+- Muestras del ojo: cada punto de la ruta (4 m), a lo ancho del limite transitable mas 3 m a cada lado (cada 4 m como
+  mucho) y a 0,6, 3,3 y 6 m sobre el suelo del perfil; en la bifurcacion tambien por la rama derecha (BKD.DAT). Desde
+  cada una se dibujan por software cuatro caras alrededor (todos los rumbos: vale para el derrape, los trompos y las
+  vistas; cabeceo de -45 a +60 grados), 256 x 350 pixeles por cara de 90 grados.
+- Tapan solo los triangulos opacos (lista 0) de nodos que el LOD de 404B00 dibuja seguro desde ahi (con la fov mas
+  abierta, 100 grados) y que no son de una rama de la union ni carteles; el follaje (recorte) y lo transparente no
+  tapan. El z-buffer se erosiona un pixel. Cada malla (cada tira de un nodo) se ve si algun pixel que toca (rasterizado
+  conservador, con la 1/z mas cercana del triangulo en el pixel) no queda detras; los carteles por su esfera. Se
+  recorta contra el plano cercano.
+- Secciones de 8 m (2 puntos); a cada una van las muestras cuyo punto de la ruta mas cercano es suyo o de una vecina.
+  Los huecos de 8 secciones o menos en los que una malla no se ve se rellenan (visible). Las 2 primeras y 2 ultimas
+  secciones llevan todo (el ojo puede estar en la etapa de antes o en la de despues).
+- Fichero (ORD7 compatible): nsecciones con el bit 31; por seccion las mallas que cambian respecto a la anterior (XOR),
+  en bytes (diferencias). La demo lleva la mascara de la seccion del punto de la ruta mas cercano al ojo y la mueve
+  aplicando listas (adelante o atras) y lleva por nodo los bytes teoricos y vertices de lo visible. Si el ojo esta
+  fuera de lo muestreado (mas de 3 m fuera del limite, mas de 6 m sobre el suelo, otra rama u otra etapa), ese modelo
+  se dibuja entero como antes. `-DSIN_PVS` lo desactiva (para comparar); `DIAG_VTX` imprime `pvs` (en uso en etapa,
+  union, siguiente) y `-N` (vertices de nodos en la vista que quita).
+- RAM: cada SEGnn.DAT crece lo que su PVS, con un tope de 300 KB (`MAX_KB`: si no cabe se rellenan huecos mayores;
+  METR, SEG13, el mayor, queda en 235 KB con huecos de 128 secciones y le quedan 70 % de las mallas en vez de 41 %;
+  SEG04 258 KB con 64); las uniones 1-12 KB. El hueco de la etapa es el del SEGnn.DAT mayor (seccion 1): 7796 KB con
+  este juego de datos (el anterior, sin PVS, ya tenia un SEG13 de 7829 KB); en carrera, con la union de METR leida,
+  1156 KB libres (Flycast, `DIAG_VTX`). Mas la mascara (1 bit por malla, <= 6 KB) y 8 bytes por nodo. CPU: aplicar una
+  lista por seccion (unos 400 bytes) y una prueba de bit por malla.
+- Conversion: 2-9 min por etapa y 15-50 s por union con 4 nucleos (la de todo el curso, ~1 h 30 min).
+
+Medido en Flycast (`DIAG_VTX`, `-DDIAG_SIN_CPU`, PRUEBA_AUTO a 100 km/h, congelado en el paso 300 del crono para que
+las dos versiones esten en el mismo sitio; misma posicion con y sin `-DSIN_PVS`):
+
+| Prueba (s) | vertices de la etapa enviados sin / con PVS | TA de la etapa sin / con (KB) | nodos en vista y LOD (lo que dibujaria el original), vertices sin / con PVS | distancia efectiva sin / con | pixeles distintos sin tope / con tope (fuera del coche) |
+|---|---|---|---|---|---|
+| PALM (1656 m) | 16422 / 11676 | 808 / 586 | 20238 / 15216 | 4000 / 4000 (sin el, recorte de la clase de LOD 62) | 0 / 0 |
+| LAKE (2838 m) | 9309 / 7994 | 453 / 391 | 12259 / 9622 | 4000 / 4000 | 0 / 0 |
+| ALPI (2504 m) | 14437 / 7083 | 706 / 360 | 17497 / 8238 | 4000 / 4000 | 0 / 0 |
+| CAST (2462 m) | 15790 / 8840 | 781 / 443 | 88518 / 12469 | **192 / 4000** | 0 / 469 (la muralla del fondo que sin PVS se recortaba) |
+| FORE (2187 m) | 16499 / 8504 | 810 / 430 | 20681 / 10972 | 4000 / 4000 | 0 / 0 |
+| union de PALM (262 m dentro) | 9946 / 9946 | 486 / 486 | 14938 / 14938 | 4000 / 4000 | 0 / 0 |
+
+En la union (bifurcacion, abierta) no se quita nada: desde alguna muestra se ve todo (BKkk.DAT de bifurcacion: 100 %
+de las mallas; las metas 47-98 %). Media de las mallas que quedan por seccion (conversion): PALM 74 %, LAKE 60 %, ALPI
+35 %, CAST 23 %, FORE 45 %, DESE 31 %, CLOU 35 % (de todas las del fichero; de lo que esta en la vista desde el
+centro de la ruta: PALM 82 %, LAKE 78 %, ALPI 56 %, CAST 37 %, FORE 49 % de los vertices).
+
+En marcha (sin congelar, 2 min desde PRUEBA_FIN; las dos versiones no pasan exactamente por los mismos sitios):
+
+| Prueba | vertices de la etapa enviados (media) sin / con | lo que dibujaria el original sin / con PVS (media) | distancia efectiva min / mediana sin -> con (m) | cuadros sin ningun corte sin / con |
+|---|---|---|---|---|
+| PALM | 13781 / 13605 | 35359 / 30751 | 128 / 443 -> 161 / 527 | 28 / 35 % |
+| LAKE | 14111 / 13934 | 32971 / 26539 | 173 / 671 -> 206 / 926 | 37 / 45 % |
+| ALPI | 13116 / 11223 | 29159 / 18072 | 193 / 450 -> 192 / 4000 | 38 / 62 % |
+| CAST | 15535 / 14343 | 62104 / 25118 | 131 / 257 -> 160 / 550 | 10 / 38 % |
+| FORE | 12785 / 10099 | 28364 / 17495 | 225 / 641 -> 321 / 4000 | 49 / 70 % |
+| final de PALM y su union | 12937 / 11314 | 30787 / 22022 | 128 / 647 -> 160 / 4000 | 43 / 60 % |
+
+(distancia efectiva: la del nodo quitado mas cercano por el reparto, 4000 si no se quita nada). Donde el tope ya
+cortaba, lo ganado va a la distancia (mismos vertices, mas lejos); donde no, se envian menos vertices.
+
+Imagen: capturas congeladas (5 por prueba) con y sin PVS, en dos modos: con el reparto normal y sin tope ni reparto
+(`-DDIAG_SIN_TOPE` y los cortes de `nodos_quita` quitados en la copia de prueba), comparadas pixel a pixel fuera del
+coche del jugador (su luz y el piloto del cartel cambian solos aun congelado): 0 pixeles distintos en las seis pruebas
+sin tope y en cinco con tope; en CAST con tope, lo distinto es lo que el PVS deja meter (una muralla del castillo al
+fondo). Capturas en el scratchpad (`pvs/*_tope.png`, `pvs/*_todo.png`).
+
 El diagnostico `pvr_colgado()` (si `pvr_wait_ready` falla 5 veces seguidas escribe en la imagen el estado, los
 vertices, el registro de errores y el uso de VB y OPB) se queda: es lo que permite medir en la consola.
 

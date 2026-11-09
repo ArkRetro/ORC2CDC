@@ -793,6 +793,20 @@ inventada. Causas y arreglo:
   race_area_geometry_44de10 recorre cada registro con la lista de la seccion del coche). Las listas por seccion en si
   NO cuadran como conjunto visible (los nodos de la calzada bajo el coche no estan en la lista de su seccion; ni el
   complemento ni diferencias acumuladas ni con la seccion 0 cuadran): formato de PS2 sin descifrar, no se usan.
+  Comparadas (2026-11-09) con la visibilidad precalculada de tools/pvs.py en PALM (secciones de 8,16 m, 591; nodos de
+  la tabla llevados a los del fichero, mismos centros): el 98 % de los nodos que nombra una seccion se ven desde ella
+  segun el PVS (frente al 76 % de todos), pero son unos 68 de 2511 por seccion, en rachas de 1,4 secciones (cada nodo
+  aparece en ~11 rachas), con la mitad detras de la camara; su XOR acumulado (947 nodos de media) deja fuera el 57 % de
+  lo que se ve delante. No son el conjunto visible ni sus diferencias: SUPUESTO que sean otra cosa (p.ej. lo que hay
+  que dibujar ademas de lejos, o los nodos con algun efecto); no se usan para la visibilidad.
+- Visibilidad precalculada (2026-11-09, DIFERENCIA solo de coste, no de imagen): el original dibuja todo lo que pasa
+  el LOD y el recorte de 404B00, se vea o no; la demo no envia las mallas que no se ven desde ningun punto de la
+  seccion (tools/pvs.py, z-buffer por software desde muestras del ojo en toda la zona transitable y todos los rumbos;
+  DREAMCAST.md seccion 2, Visibilidad precalculada). Capturas congeladas con y sin (PALM, LAKE, ALPI, CAST, FORE y la
+  union de PALM, sin tope): 0 pixeles distintos. Vertices de la etapa en la misma posicion: -29 % PALM, -14 % LAKE,
+  -51 % ALPI, -44 % CAST, -48 % FORE, 0 en la union; en CAST lo que dibujaria el original pasa de 88518 a 12469
+  vertices y la distancia efectiva de 192 m a 4000. En marcha (mediana de la distancia del nodo quitado mas cercano):
+  PALM 443 -> 527 m, LAKE 671 -> 926, ALPI 450 -> 4000 (nada quitado), CAST 257 -> 550, FORE 641 -> 4000.
 - Entorno cs_ENV_<zona> y cs_ENVBK_PALM: en el PC solo los dibuja race_env_model_44cd30, llamado desde cube_scene
   (cubo del reflejo del coche, 414340), nunca en la escena. Antes se anadia cs_ENVBK_PALM a la union y su calzada
   repetia la de cs_BK_PALM a la misma altura (616 de sus 1162 triangulos a menos de 15 cm: el parpadeo de las rayas).
@@ -821,8 +835,8 @@ inventada. Causas y arreglo:
   antes/despues en el scratchpad (graf/hoja.png): sin las placas y arcos translucidos de la salida de PALM ni los
   carteles retorcidos de ALPI, calzada completa; con `-DDIAG_SIN_TOPE` la vista entera del original (playa con
   windsurfistas y ciudad al fondo en PALM).
-- PENDIENTE: descifrar las listas por seccion de cs_CS_<zona>_bin (en la PS2; el PC usa otro formato) para no tener
-  que recortar; medir en la consola real lo que gasta el TA por tira (`ta_f`) y el tiempo de CPU del cuadro; banderas
+- PENDIENTE: saber que son las listas por seccion de cs_CS_<zona>_bin (en la PS2; el PC usa otro formato; no son la
+  visibilidad, que ya se calcula en la conversion); medir en la consola real lo que gasta el TA por tira (`ta_f`) y el tiempo de CPU del cuadro; banderas
   0x4/0x8 de los nodos (sin uso conocido); 451350 (rama antes de elegir).
 - Coordenadas (comprobado, sin cambios): posiciones V3-32 float sin STMOD; normales V3-16 /32768; UV V4-16 con STROW y
   STMOD 2 (sumas acumuladas) /4096; STCYCL 1/3 (paso de 3 qwords); W de la posicion sin escribir (el microcodigo no la

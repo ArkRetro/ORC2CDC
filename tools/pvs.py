@@ -19,7 +19,8 @@ ultimas secciones llevan todos los nodos (el ojo puede estar fuera de la ruta, e
 
 Va por malla (cada tira del fichero de un nodo del original; el cielo y lo que no es de un nodo se dibuja siempre): un
 nodo grande se ve casi siempre por algun sitio, sus mallas no. Los huecos de HUECO secciones o menos en los que una
-malla no se ve se rellenan (se queda visible: menos listas y nunca quita nada).
+malla no se ve se rellenan (se queda visible: menos listas y nunca quita nada); si aun asi las listas pasan de MAX_KB
+(la RAM: la etapa mayor fija el hueco de todas), se dobla el hueco hasta que caben.
 
 Formato (ORD7 ampliado, compatible: sin el bit, la tabla de antes): nsecciones con el bit 31 = PVS. Mismo sitio: inicio
 de cada lista (nsecciones + 1 u32, en bytes), las listas, relleno a 2 y la seccion de cada punto de la ruta (u16). La
@@ -35,6 +36,7 @@ import numpy as np
 
 SEC_PUNTOS = 2                                                  # puntos de la ruta por seccion (4 m cada uno)
 HUECO = int(os.environ.get("PVS_HUECO", "8"))                   # huecos de invisibilidad que se rellenan (secciones)
+MAX_KB = int(os.environ.get("PVS_MAX_KB", "300"))               # tope de las listas (RAM: el hueco de la etapa mayor)
 SEC_LLENAS = 2                                                  # secciones de cada punta con todos los nodos
 LADO_EXTRA = 3.0                                                # metros fuera del limite transitable
 PASO_LADO = 4.0
@@ -189,12 +191,16 @@ def calcula(d, extras=(), hilos=os.cpu_count() or 4, informe=True):
     sec = np.zeros((nsec, nm), bool)
     for s, v in zip(kp // SEC_PUNTOS, vis):
         sec[max(s - 1, 0):s + 2] |= v
-    sec = rellena(sec, HUECO)
-    sec[:SEC_LLENAS] = util; sec[-SEC_LLENAS:] = util
-    sec &= util
-    prev = np.zeros(nm, bool); ini = [0]; listas = bytearray(); nxor = 0
-    for s in range(nsec):
-        x = np.nonzero(sec[s] ^ prev)[0]; nxor += len(x); listas += codifica(x); ini.append(len(listas)); prev = sec[s]
+    sec0 = sec; g = HUECO
+    while True:                                                 # si las listas no caben en MAX_KB, huecos mayores
+        sec = rellena(sec0, g)
+        sec[:SEC_LLENAS] = util; sec[-SEC_LLENAS:] = util
+        sec &= util
+        prev = np.zeros(nm, bool); ini = [0]; listas = bytearray(); nxor = 0
+        for s in range(nsec):
+            x = np.nonzero(sec[s] ^ prev)[0]; nxor += len(x); listas += codifica(x); ini.append(len(listas)); prev = sec[s]
+        if len(listas) <= MAX_KB * 1024 or g >= nsec: break
+        g *= 2
     mapa = np.arange(len(R)) // SEC_PUNTOS
     vn = np.where(util, n, 0).astype(float)
     mid = sec[SEC_LLENAS:-SEC_LLENAS] if nsec > 2 * SEC_LLENAS else sec
@@ -202,9 +208,9 @@ def calcula(d, extras=(), hilos=os.cpu_count() or 4, informe=True):
                seg=time.time() - t0, frac_mallas=float(mid.sum(1).mean() / max(1, util.sum())),
                frac_vtx=float((mid @ vn).mean() / max(1, vn.sum())))
     if informe:
-        print('PVS %s: %d muestras, %d mallas de nodos, %d secciones, %d entradas XOR (%d KB); quedan de media %.0f %% '
+        print('PVS %s: %d muestras, %d mallas de nodos, %d secciones, huecos de %d, %d entradas XOR (%d KB); quedan de media %.0f %% '
               'de las mallas y %.0f %% de los vertices; %.0f s' % (os.path.basename(d['fn']), est['muestras'],
-              est['mallas'], nsec, nxor, (4 * (nsec + 1) + len(listas) + 2 * len(R)) >> 10,
+              est['mallas'], nsec, g, nxor, (4 * (nsec + 1) + len(listas) + 2 * len(R)) >> 10,
               100 * est['frac_mallas'], 100 * est['frac_vtx'], est['seg']))
     return ini, listas, mapa, est
 
