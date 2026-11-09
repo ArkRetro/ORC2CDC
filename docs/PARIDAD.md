@@ -1532,6 +1532,31 @@ peticion 14 (escoltas 45B5B0, +324 = 6: carrera contra ellos), que no esta en la
   OutRun 2 hacia delante hay 18 (2-1, 6-1 tipo 6, 8-1, 10-2, 15-1 tipo 2, 19-2, 20-2, 26-2, 26-4, 28-2, 29-1..5, 31-1,
   31-3, 38-2 las 15) y de ellas 6 piden la union 76 (2-1, 8-1, 15-1, 20-2, 29-1..3). Ademas faltan los rivales (47CF40 y los coches de carreras del modulo del trafico) y el arbol de curso por
   mision (main.c solo conoce el de csc_data_2).
+- Etapas y cursos de C2C (2026-11-09, `tools/conv_union.py cursos`, `--arboles=`):
+  - Las etapas al reves (*_R), PALM_T / BEAC_T (y PALM_BT / BEAC_BT / PALM_BR / BEAC_BR) son etapas propias de STAGE.PS2
+    (segmentos 34..65, 1 / 2 / 18 / 19), con su colision, geometria, niebla, sol, SO y descriptor de tramo (+0 = su
+    tipo 30..65, +0x98 su union); los 66 descriptores apuntan a ellas (indice 30 PALM_R ... 59 EAST_R, 60 PALM_T, 61
+    BEAC_T, 62/63 *_BT, 64/65 *_BR). No es la misma etapa conducida al reves. Los descriptores de union de las etapas
+    _R son los mismos que los de la etapa hacia delante (tabla 0x3693b0: union 30 = 0, 40 = 10...).
+  - csc_data_cvt.bin = el arbol de OUTRUN2SP (15 etapas de OutRun 2 SP: BEAC u65, SANF, YOSE, NIAG, SEQU, GRAN, MACH,
+    LASV, ALAS, AMAZ; metas EAST, MAYA, PRIN, FLOR, NEWY). csc_data_easy es otro (mezcla, uniones 60..75).
+  - Union de las misiones (PC race_area_stage_44cf00, estados 7 y 8; special() = modos 3/4, 4957F0, 48B310 o
+    495490): con algun hijo, el modelo del +0x10 del descriptor de union (cs_LRBK_PALM, recursos 0x47..0x55) y la
+    colision LRBK_PALM (0x5A42F4); sin hijos, el modelo +4 y la colision +0xC. LRBK es la bifurcacion con la franja
+    central cambiada (material 5 -> 10, z -290..-440, +2 poligonos): las dos ramas siguen abiertas. Union 76 (la
+    ultima de 68 cursos): modelo 0x1E9 cs_BK_SUMOEND (el tronco de la bifurcacion, z 0..-703, con la meta) y colision
+    coli_BK_PALM. Rama sin hijo (-1): next_area (44E590) deja el mismo registro (se vuelve a cargar la etapa).
+  - Carteles de destino (PS2 0x3f9da0 = PC 5D4FD8, 16 bytes por tipo: recurso BUNKI, nombre izquierda, nombre
+    derecha, icono; stage_tables_44ca00): por el +0 del descriptor del hijo (las _R y _T dan el BUNKI de su zona
+    hacia delante); hijo -1 = tipo 0x42 = obj_OBJ_BLNK_BUNKI_TX textura 0. CONFIRMADO en el ELF.
+  - CURSO.DAT: detras del arbol del modo OutRun (igual que antes) 'CURS' con mas arboles (1 OUTRUN2SP, 100 + i el
+    curso del registro i de Races.bin); cada registro lleva su BKnn.DAT (f_bk; las 15 del OutRun conservan su clave,
+    las nuevas desde 15) y su colision de union (f_col: COLBK, COLLR, COLBKnn). Hijos como indices del arbol (las
+    claves de Races.bin no son consecutivas: 0,1,3,6,10). La demo: `curso_lee_id`, `curso_pedido` (PRUEBA_CURSO).
+  - Coste en el GD: 262 uniones distintas (20 BIF, 194 LRBK, 48 metas) en todos los cursos de las misiones a ~1,4 MB
+    = ~350 MB: no caben (ver DREAMCAST / informe); se convierten solo las de los arboles pedidos.
+  - SIN PORTAR: los campos +0x60..+0x68 del descriptor de BEAC (0x1170003..5, objetos del cielo de mas?), el letrero
+    de destinos del final de etapa (0x3fa1d0), los nombres largos de las zonas de SP en los avisos (sale el codigo).
 
 **CONTRARRELOJ** verificado en E: `MODO: variante 7, dificultad 0, fila de tiempos 2`, sin un solo coche de trafico,
 union y ruta leidas como en el OutRun. GOAL (menu real con el piloto y `-DPRUEBA_SIN_TIEMPO`, 2026-11-09): PALM -> ALPI

@@ -204,7 +204,7 @@ def compone(M1, M2):
 UMBRAL_META = 24.0                                  # error RMS de la VQ aceptado en las uniones de meta
 NIEBLA_MAX = 8                                      # tramos de niebla por etapa en CURSO.DAT
 # bytes de un registro de CURSO.DAT: el de antes (con el sol de la sombra) y el entorno (escribe_curso)
-REG = 4 + 4 + 16 + 32 + 8 + 4 + 24 * NIEBLA_MAX + 8 + 4 + 4 + 4 + 3 * 64 + 4 + 24 * NIEBLA_MAX
+REG = 4 + 4 + 16 + 32 + 8 + 4 + 24 * NIEBLA_MAX + 8 + 4 + 4 + 4 + 3 * 64 + 4 + 24 * NIEBLA_MAX + 4
 
 def zona_de(ruta):
     """codigo de zona de una ruta del ejecutable (\\Stage\\ZONA\\...)"""
@@ -358,23 +358,34 @@ def carteles(A, mod, izq, der):
     ti, td = tx(izq), tx(der)
     cambia_texturas(mod, base, {0: td[0], 1: ti[0], 2: ti[1], 3: td[2]})
 
-def escribe_curso(sal, regs):
+def escribe_curso(sal, regs, extras=()):
+    """CURSO.DAT: 'CUR1', n, REG y los n registros del arbol del modo OutRun (csc_data_2); detras, si hay mas arboles
+    (cursos): 'CURS', m y m x (id, desplazamiento, n) y sus registros (id 1 OUTRUN2SP csc_data_cvt, 100 + i el curso
+    del registro i de Races.bin)"""
+    def reg(r):
+        b = r['zona'].encode()[:4].ljust(4, b'\0')
+        b += struct.pack('<BBbb', r['seg'], r['nivel'], r['izq'], r['der'])
+        b += struct.pack('<4f', *r['bk']) + struct.pack('<8f', *r['ramas'][0], *r['ramas'][1])
+        b += struct.pack('<2f', r['m_pos'], r['meta']) + struct.pack('<I', len(r['niebla']))
+        for p0, p1, modo, d0, d1, c0, c1 in r['niebla']: b += struct.pack('<2HB3x2f2I', p0, p1, modo, d0, d1, c0, c1)
+        b += b'\0' * (4 + 4 + 16 + 32 + 8 + 4 + 24 * NIEBLA_MAX - len(b)) + struct.pack('<2f', *r['sol'])
+        # entorno: banderas de efectos, transicion (posicion y segundos), metros de la union hasta ella, las tres
+        # luces (soles) y la niebla del cielo (lista 0)
+        b += struct.pack('<IHbxf', r['clima'], r['trans'][0], r['trans'][1], r['trans_m'])
+        for v in r['soles']: b += struct.pack('<16f', *v)
+        b += struct.pack('<I', len(r['niebla0']))
+        for p0, p1, modo, d0, d1, c0, c1 in r['niebla0']: b += struct.pack('<2HB3x2f2I', p0, p1, modo, d0, d1, c0, c1)
+        b += b'\0' * (REG - 4 - len(b))
+        # fichero de la union (BKnn.DAT, nn = f_bk) y su colision (-1 COLBK.DAT, -2 COLLR.DAT, si no COLBKnn.DAT)
+        b += struct.pack('<hbx', r.get('f_bk', -1), r.get('f_col', -1))
+        assert len(b) == REG; return b
     with open(sal, 'wb') as f:
-        f.write(b'CUR1' + struct.pack('<2I', len(regs), REG))
-        for r in regs:
-            b = r['zona'].encode()[:4].ljust(4, b'\0')
-            b += struct.pack('<BBbb', r['seg'], r['nivel'], r['izq'], r['der'])
-            b += struct.pack('<4f', *r['bk']) + struct.pack('<8f', *r['ramas'][0], *r['ramas'][1])
-            b += struct.pack('<2f', r['m_pos'], r['meta']) + struct.pack('<I', len(r['niebla']))
-            for p0, p1, modo, d0, d1, c0, c1 in r['niebla']: b += struct.pack('<2HB3x2f2I', p0, p1, modo, d0, d1, c0, c1)
-            b += b'\0' * (4 + 4 + 16 + 32 + 8 + 4 + 24 * NIEBLA_MAX - len(b)) + struct.pack('<2f', *r['sol'])
-            # entorno: banderas de efectos, transicion (posicion y segundos), metros de la union hasta ella, las tres
-            # luces (soles) y la niebla del cielo (lista 0)
-            b += struct.pack('<IHbxf', r['clima'], r['trans'][0], r['trans'][1], r['trans_m'])
-            for v in r['soles']: b += struct.pack('<16f', *v)
-            b += struct.pack('<I', len(r['niebla0']))
-            for p0, p1, modo, d0, d1, c0, c1 in r['niebla0']: b += struct.pack('<2HB3x2f2I', p0, p1, modo, d0, d1, c0, c1)
-            b += b'\0' * (REG - len(b)); assert len(b) == REG; f.write(b)
+        f.write(b'CUR1' + struct.pack('<2I', len(regs), REG) + b''.join(reg(r) for r in regs))
+        if extras:
+            o = 12 + REG * len(regs) + 8 + 12 * len(extras); dirs = b''; cuerpo = b''
+            for ident, rs in extras:
+                dirs += struct.pack('<3I', ident, o + len(cuerpo), len(rs)); cuerpo += b''.join(reg(r) for r in rs)
+            f.write(b'CURS' + struct.pack('<I', len(extras)) + dirs + cuerpo)
 
 def curso(A, dsal, con_tramos=True, solo_curso=False):
     """todo el arbol del modo (csc_data_2: 15 etapas en 5 niveles): SEGnn.DAT de cada etapa en su marco (empieza en
@@ -417,7 +428,7 @@ def curso(A, dsal, con_tramos=True, solo_curso=False):
         if solo_curso:                                # solo CURSO.DAT (las uniones ya estan)
             meta = -1.0 if hi >= 0 else 0.0
             r = dict(zona=z, seg=n, nivel=nivel[clave], izq=hi, der=hd, bk=(tx, ty, tz, ry), ramas=ramas,
-                     m_pos=m_por_posicion(segs[n]), meta=meta, niebla=niebla(A, z), sol=sol(A, z), **ent)
+                     m_pos=m_por_posicion(segs[n]), meta=meta, niebla=niebla(A, z), sol=sol(A, z), **ent, f_bk=clave, f_col=-1 if hi >= 0 else clave)
             sal.append(r); print('etapa %2d %s sol %.1f %.1f clima %x transicion %d (%.0f m) %d s'
                                  % (clave, z, *r['sol'], clima, *r['trans'][:1], r['trans_m'], r['trans'][1])); continue
         if hi >= 0:                                   # bifurcacion: la de PALM (las demas no estan en el disco)
@@ -461,7 +472,8 @@ def curso(A, dsal, con_tramos=True, solo_curso=False):
         pvs.anade(f, [rd] if hi >= 0 else [])
         print('triangulos de las tiras del VU1: %d, sin dibujar por la bandera ADC: %d' % (mod.tri_total, mod.tri_adc))
         r = dict(zona=z, seg=n, nivel=nivel[clave], izq=hi, der=hd, bk=(tx, ty, tz, ry), ramas=ramas,
-                 m_pos=m_por_posicion(segs[n]), meta=meta, niebla=niebla(A, z), sol=sol(A, z), **ent)
+                 m_pos=m_por_posicion(segs[n]), meta=meta, niebla=niebla(A, z), sol=sol(A, z), f_bk=clave,
+                 f_col=-1 if hi >= 0 else clave, **ent)
         r['_obj'] = objetos_etapa(A, d0)
         sal.append(r)
         print('etapa %2d %s SEG%02d nivel %d hijos %2d %2d union %s (%.1f, %.1f, %.1f, %.3f) %s/%s %s: %d mallas, '
@@ -476,6 +488,7 @@ def curso(A, dsal, con_tramos=True, solo_curso=False):
             cb, sol3 = cielos[r['seg']]
             conv_tramo.convierte(segs[r['seg']], r['seg'], os.path.join(dsal, 'SEG%02d.DAT' % r['seg']), cielo=cb,
                                  luz=luces(sol3), objetos=r['_obj'])
+    return sal
 
 def solo_carriles(A, dsal):
     """cambia en su sitio las columnas de carriles de la ruta de BKnn.DAT y BKD.DAT ya convertidos (formato ORD7 de
@@ -501,12 +514,182 @@ def solo_carriles(A, dsal):
             print('%s: %d puntos, %s; carriles cambiados (max %.1f m)' % (f, nr, 'etapa' if etapa else 'bifurcacion' if g is so.get(242) else 'meta',
                                                                        float(np.abs(antes - car).max())))
 
+# ---------------------------------------------------------------- los demas cursos (OUTRUN2SP y las misiones de C2C)
+def arbol_mision(A, i):
+    """curso del registro i de Races.bin (+0x18: registros de 0x78 como los de csc_data; mission_manager.cpp:136):
+    [(clave, tramo, union, clave izquierda, clave derecha)]"""
+    import conv_menu
+    e = [x for x in A.busca('*Races.bin') if x.paquete.startswith('SCRIPTS')][0]; d = A.datos(e)
+    n, o = conv_menu._r077(d, 'Races')
+    nc, nrel = struct.unpack_from('<2I', d, 0)
+    rel = {struct.unpack_from('<I', d, 8 + 8 * k)[0]: struct.unpack_from('<I', d, 12 + 8 * k)[0] for k in range(nrel)}
+    cats = {struct.unpack_from('<I', d, 8 + 8 * nrel + 12 * k + 8)[0]: struct.unpack_from('<I', d, 8 + 8 * nrel + 12 * k + 4)[0]
+            for k in range(nc)}
+    assert 0 <= i < n
+    t = rel[o + 0x44 * i + 0x18]
+    return [(q[1], q[7], q[8], q[11], q[12]) for q in (struct.unpack_from('<30i', d, t + 0x78 * k) for k in range(cats[t]))]
+
+def tabla_bunki(A):
+    """tabla de los carteles de destino por tipo de registro (PS2 0x3f9da0, PC 5D4FD8: 16 bytes por tipo = el +0 del
+    descriptor de tramo del destino; el tipo 0x42 es el de un hijo -1, p.kind de race_area.cpp): recurso
+    obj_OBJ_<ZONA>_BUNKI_TX y tres ids recurso << 16 | textura: +4 nombre con flecha izquierda (hijo izquierdo), +8 con
+    flecha derecha (hijo derecho), +0xC icono (stage_tables_44ca00: 636860/636868 del izquierdo, 636870/636878 del
+    derecho). Localizada por su primera entrada (PALM); en el tipo 0x42 esta la de BLNK con la textura 0 en las tres"""
+    E = A.elf; t = E.busca(struct.pack('<4I', 0x1f6, 0x1f60001, 0x1f60002, 0x1f60000))
+    if not t: raise SystemExit('no se encuentra la tabla de carteles (0x3f9da0)')
+    t = min(t); assert u32(E, t + 0x42 * 16) == 0x214, 'tipo 0x42 sin BLNK'
+    return t
+
+def carteles_tipo(A, mod, ki, kd):
+    """carteles (como carteles) de los destinos de tipo ki / kd (+0 del descriptor; 0x42 sin hijo) por tabla_bunki"""
+    from ps2 import tex
+    import conv_coche
+    E = A.elf; t = tabla_bunki(A); R = conv_coche.recursos(A)
+    def ent(k):
+        w = struct.unpack('<4I', E.lee(t + 16 * k, 16))
+        nm = E.cadena(u32(E, R + 4 * w[0])).split('\\')[-1]
+        b = A.bloque(A.entrada('COMMON.PS2', nm)); im = [tex.imagen(b, h) for h in tex.cabeceras(b)]
+        return [im[x & 0xffff] for x in w[1:]]                     # nombre izquierda, nombre derecha, icono
+    e = A.entrada('COMMON.PS2', 'obj_course_obj_bk_palm_pmt.sz'); base = len(mod.texs)
+    mod.bloque(A.bloque(e), objetos=True, sin_textura='material')
+    i, d = ent(ki), ent(kd)
+    cambia_texturas(mod, base, {0: d[2], 1: i[2], 2: i[0], 3: d[1]})
+
+def nombre_recurso(A, idr):
+    import conv_coche
+    return A.elf.cadena(u32(A.elf, conv_coche.recursos(A) + 4 * idr)).split('\\')[-1]
+
+def modelo_recurso(A, nm):
+    return A.bloque(A.entrada('BK.PS2', nm if isinstance(nm, str) else nombre_recurso(A, nm)))
+
+def union_fichero(A, combo, f, d0, ri, rd, so):
+    """BKnn.DAT de una union: combo ('BIF' o 'LRBK', tramo, tipo izquierdo, tipo derecho, recurso del modelo) o
+    ('META', tramo, union).
+    Como race_area_stage_44cf00 del PC (estados 7 y 8): fuera de las misiones el modelo es el +4 del descriptor de
+    union y su colision la +0xC; en las misiones (special: 4957F0 ...) una union con algun hijo usa el modelo +0x10
+    (cs_LRBK_PALM) y la colision LRBK_PALM (0x5A42F4); sin hijos, el +4 y el +0xC (union 76: cs_BK_SUMOEND con
+    coli_BK_PALM)"""
+    E = A.elf; base, nprim, base2 = tablas(A)
+    tx, ty, tz, rx, ry, rz = f32(E, d0 + 0x98, 6); z = zona_de(cadena(E, d0 + 0x0c)); sol3 = soles(A, z)
+    mod = modelo.Modelo(); mod.luz = luces(sol3, ry)[0]
+    if combo[0] != 'META':
+        mod.bloque(modelo_recurso(A, combo[4]), objetos=True, sin_textura='material', rama={1: 1, 2: 2})
+        mod.luz = None; carteles_tipo(A, mod, combo[2], combo[3]); mod.ruta = ri.copy()
+    else:
+        dbk = u32(E, base2 + 4 * combo[2]); c_todo = cadena(E, dbk + 0x0c)
+        mod.bloque(modelo_recurso(A, u32(E, dbk + 4)), objetos=True, sin_textura='material'); mod.luz = None
+        if c_todo.endswith('coli_BK_PALM_bin'): mod.ruta = ri.copy()     # union 76: la colision de la bifurcacion
+        else: dm = coli_bytes(A, c_todo); mod.ruta, _ = ruta_rama(dm, dm, so.get(86))
+    k0 = len(mod.mallas); conv_tramo.pon_cielo(mod, cielo_de(A, E, d0), luces(sol3)[1])
+    c_, s_ = np.cos(ry), -np.sin(ry)
+    for x, v in zip(mod.mallas[k0:], mod.verts[k0:]):
+        vx, vz = v['x'].astype(float), v['z'].astype(float)
+        v['x'] = vx * c_ + vz * s_; v['z'] = -vx * s_ + vz * c_
+        x[2] = np.array([x[2][0] * c_ + x[2][2] * s_, x[2][1], -x[2][0] * s_ + x[2][2] * c_])
+    mod.recorta_texturas()
+    import vq; umbral = vq.UMBRAL
+    if combo[0] == 'META': vq.UMBRAL = max(umbral, UMBRAL_META)
+    try: mod.escribe(f)
+    finally: vq.UMBRAL = umbral
+    pvs.anade(f, [rd] if combo[0] != 'META' else [])
+    print('%s %s: %d mallas, %d texturas, %d KB' % (os.path.basename(f), combo, len(mod.mallas), len(mod.texs), os.path.getsize(f) >> 10))
+
+def etapa_ficheros(A, ti, dsal):
+    """SEGnn.DAT y COLnn.DAT de la etapa del descriptor ti (como curso)"""
+    import conv_coli
+    E = A.elf; base, nprim, base2 = tablas(A); d0 = u32(E, base + 4 * ti)
+    ruta_c = cadena(E, d0 + 0x0c); z = zona_de(ruta_c); n = segmento_de(A, ruta_c); seg = A.segmentos()[n]
+    conv_tramo.convierte(seg, n, os.path.join(dsal, 'SEG%02d.DAT' % n), cielo=cielo_de(A, E, d0), luz=luces(soles(A, z)),
+                         objetos=objetos_etapa(A, d0))
+    for h, o, s in seg.ent:
+        d = bytes(seg.m[o:o + s])
+        if d[:8] == b'COLI0200': conv_coli.escribe(d, os.path.join(dsal, 'COL%02d.DAT' % n), 0); break
+
+def cursos(A, dsal, ids, con_uniones=True, con_tramos=False):
+    """CURSO.DAT con el arbol del modo OutRun y los de ids (1: OUTRUN2SP, csc_data_cvt; 100 + i: el curso del
+    registro i de Races.bin), y las uniones que les faltan (BKnn.DAT desde 15; las 15 del modo OutRun conservan su
+    clave). Los hijos van como indices del arbol (runtime_apply_course_data_44d720 los busca por clave, +0x24 / +0x28)
+    y el nivel es la profundidad. En las misiones (variante 6) las uniones con hijos son las LRBK (union_fichero)"""
+    E = A.elf; base, nprim, base2 = tablas(A)
+    descs = [u32(E, base + 4 * i) for i in range(nprim)]
+    segs = A.segmentos(); so = tablas_so(A)
+    d_todo, d_izq, d_der = (coli_bytes(A, '\\BK\\coli_%s_PALM_bin' % x) for x in ('BK', 'LBK', 'RBK'))
+    ri, _ = ruta_rama(d_izq, d_todo, so.get(242)); rd, _ = ruta_rama(d_der, d_todo, so.get(242))
+    ramas = []
+    for dr in (d_izq, d_der):
+        p, a = fin_rama(dr); ramas.append((float(p[0]), float(p[1]), float(p[2]), a))
+    tipo = lambda ti: u32(E, descs[ti])
+    def combo(regs, k, especial):
+        porclave = {r[0]: r for r in regs}; _, ti, ui, hi, hd = porclave[k]
+        if hi < 0 and hd < 0: return ('META', ti, ui)
+        kt = lambda h: tipo(porclave[h][1]) if h >= 0 else 0x42
+        idr = u32(E, u32(E, base2 + 4 * ui) + (0x10 if especial else 4))
+        return ('LRBK' if especial else 'BIF', ti, kt(hi), kt(hd), nombre_recurso(A, idr))
+    fich = {}; colmeta = {}
+    o2 = arbol(A, 0)
+    for k, ti, ui, hi, hd in o2:                       # las del modo OutRun: BKkk / COLBKkk con kk = clave
+        fich[combo(o2, k, False)] = k
+        if hi < 0: colmeta[cadena(E, u32(E, base2 + 4 * ui) + 0x0c)] = k
+    sig = [max(fich.values()) + 1]
+    def registros(regs, especial):
+        porclave = {r[0]: r for r in regs}; idx = {r[0]: i for i, r in enumerate(regs)}
+        nivel = {regs[0][0]: 0}; cola = [regs[0][0]]
+        while cola:
+            k = cola.pop(0)
+            for h in porclave[k][3:5]:
+                if h >= 0 and h not in nivel: nivel[h] = nivel[k] + 1; cola.append(h)
+        sal = []
+        for clave, ti, ui, hi, hd in regs:
+            d0 = descs[ti]; ruta_c = cadena(E, d0 + 0x0c); z = zona_de(ruta_c); n = segmento_de(A, ruta_c)
+            tpos, tseg, clima = transicion(A, E, d0)
+            h1 = hi if hi >= 0 else hd
+            th = transicion(A, E, descs[porclave[h1][1]]) if h1 >= 0 else None
+            tx, ty, tz, rx, ry, rz = f32(E, d0 + 0x98, 6)
+            assert abs(rx) < 1e-4 and abs(rz) < 1e-4, 'union con giro en x o z: no soportado'
+            c = combo(regs, clave, especial)
+            if c not in fich: fich[c] = sig[0]; sig[0] += 1
+            if c[0] == 'META':
+                ct = cadena(E, u32(E, base2 + 4 * ui) + 0x0c)
+                fc = -1 if ct.endswith('coli_BK_PALM_bin') else colmeta.setdefault(ct, fich[c])
+            else: fc = -2 if c[0] == 'LRBK' else -1
+            sal.append(dict(zona=z, seg=n, nivel=nivel.get(clave, 0), izq=idx[hi] if hi >= 0 else -1,
+                            der=idx[hd] if hd >= 0 else -1, bk=(tx, ty, tz, ry), ramas=ramas,
+                            m_pos=m_por_posicion(segs[n]), meta=0.0 if c[0] == 'META' else -1.0, niebla=niebla(A, z),
+                            sol=sol(A, z), clima=clima, soles=soles(A, z), niebla0=niebla(A, z, 0),
+                            trans=(th[0], th[1]) if th else (tpos, tseg),
+                            trans_m=metros_a_posicion(d_izq, th[0]) if th else -1.0, f_bk=fich[c], f_col=fc, _c=c, _ti=ti))
+        return sal
+    o2r = registros(o2, False)
+    extras = []
+    for i in ids:
+        rs = registros(arbol(A, 0, 'csc_data_cvt.bin') if i == 1 else arbol_mision(A, i - 100), i >= 100)
+        extras.append((i, rs))
+        print('arbol %d: %s' % (i, ' '.join('%s/BK%02d' % (r['zona'], r['f_bk']) for r in rs)))
+    escribe_curso(os.path.join(dsal, 'CURSO.DAT'), o2r, extras)
+    import conv_coli
+    hechos = set()
+    for i, rs in extras:
+        for r in rs:
+            if con_tramos and not os.path.exists(os.path.join(dsal, 'SEG%02d.DAT' % r['seg'])): etapa_ficheros(A, r['_ti'], dsal)
+            f = os.path.join(dsal, 'BK%02d.DAT' % r['f_bk'])
+            if con_uniones and r['f_bk'] >= 15 and r['f_bk'] not in hechos:
+                union_fichero(A, r['_c'], f, descs[r['_ti']], ri, rd, so); hechos.add(r['f_bk'])
+            if r['f_col'] == -2 and not os.path.exists(os.path.join(dsal, 'COLLR.DAT')):
+                conv_coli.escribe(coli_bytes(A, '\\BK\\coli_LRBK_PALM_bin'), os.path.join(dsal, 'COLLR.DAT'), 1)
+            if r['f_col'] >= 15 and not os.path.exists(os.path.join(dsal, 'COLBK%02d.DAT' % r['f_col'])):
+                ct = cadena(E, u32(E, base2 + 4 * r['_c'][2]) + 0x0c)
+                conv_coli.escribe(coli_bytes(A, ct), os.path.join(dsal, 'COLBK%02d.DAT' % r['f_col']), 1)
+
 def main():
     """conv_union.py tu.iso salida/ [--sin-tramos] [--solo-curso] [--solo-carriles]: todo el arbol del curso (curso);
     --sin-tramos: sin convertir las etapas (SEGnn.DAT, con conv_tramo.py aparte); --solo-curso: solo CURSO.DAT;
     --solo-carriles: solo los carriles de las rutas de las uniones ya convertidas (solo_carriles)"""
     arg = [a for a in sys.argv[1:] if not a.startswith('--')]
     if '--solo-carriles' in sys.argv: solo_carriles(Assets(arg[0]), arg[1]); return
+    ar = [a for a in sys.argv if a.startswith('--arboles=')]
+    if ar:                                            # --arboles=1,100,188: CURSO.DAT con esos arboles y sus uniones
+        cursos(Assets(arg[0]), arg[1], [int(x) for x in ar[0].split('=')[1].split(',')], '--sin-uniones' not in sys.argv,
+               '--con-tramos' in sys.argv); return
     curso(Assets(arg[0]), arg[1], '--sin-tramos' not in sys.argv, '--solo-curso' in sys.argv)
 
 if __name__ == '__main__':

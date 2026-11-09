@@ -3566,8 +3566,16 @@ typedef struct {
     uint32_t clima; uint16_t trans_pos; int8_t trans_seg; uint8_t r_; float trans_m;
     float luz[3][16];
     uint32_t nniebla0; niebla_t niebla0[NIEBLA_MAX];
+    int16_t f_bk; int8_t f_col; uint8_t r2_;                    /* BKnn.DAT de su union; colision: -1 COLBK.DAT,
+                                                                   -2 COLLR.DAT (LRBK de las misiones), si no COLBKnn */
 } etapa_t;
 static etapa_t curso[CURSO_MAX]; static int ncurso;
+/* arbol cargado (CURSO.DAT): 0 el del modo OutRun (csc_data_2), 1 OUTRUN2SP (csc_data_cvt), 100 + i el curso del
+   registro i de Races.bin (C2C); detras del primero, 'CURS' con el directorio de los demas (conv_union.py cursos) */
+static int curso_id = -1;
+#ifndef PRUEBA_CURSO
+#define PRUEBA_CURSO 0                                          /* prueba: arbol de la carrera (id de CURSO.DAT) */
+#endif
 #ifndef PRUEBA_NODO
 #define PRUEBA_NODO 0                                           /* prueba: etapa de salida (clave del arbol) */
 #endif
@@ -3621,14 +3629,35 @@ static void ram_kb(unsigned *uso, unsigned *libre)
     *libre = (unsigned)((mi.fordblks + (0x8d000000u - 0x10000u - tope)) >> 10);
 }
 static void curso_error(const char *s) { dbglog(DBG_ERROR, "CURSO: %s\n", s); vid_set_mode(modo_video, PM_RGB565); aviso(s); for (;;) thd_sleep(1000); }
-/* el arbol (CURSO.DAT); 0 bien */
+/* los registros del arbol id de CURSO.DAT (en b, sz bytes): su desplazamiento y cuenta; 0 bien */
+static int curso_busca(const uint8_t *b, uint32_t sz, int id, uint32_t *o, uint32_t *n)
+{
+    uint32_t r, n0, m, i, e[3];
+    if (sz < 12 || memcmp(b, "CUR1", 4)) return -1;
+    memcpy(&n0, b + 4, 4); memcpy(&r, b + 8, 4);
+    if (r != sizeof(etapa_t) || n0 > CURSO_MAX || sz < 12 + n0 * r) return -2;
+    if (id == 0) { *o = 12; *n = n0; return 0; }
+    i = 12 + n0 * r;
+    if (sz < i + 8 || memcmp(b + i, "CURS", 4)) return -3;
+    memcpy(&m, b + i + 4, 4);
+    for (i += 8; m-- && i + 12 <= sz; i += 12) {
+        memcpy(e, b + i, 12);
+        if ((int)e[0] == id) { if (e[2] > CURSO_MAX || e[1] + e[2] * r > sz) return -2; *o = e[1]; *n = e[2]; return 0; }
+    }
+    return -3;
+}
+/* el arbol id (CURSO.DAT) en curso[]; 0 bien */
+static int curso_lee_id(int id)
+{
+    uint32_t sz, o, n; int r; uint8_t *b = gd_carga("CURSO.DAT", &sz);
+    if (!b) return -1;
+    if ((r = curso_busca(b, sz, id, &o, &n))) { free(b); return r; }
+    memcpy(curso, b + o, n * sizeof(etapa_t)); ncurso = n; curso_id = id; free(b);
+    return 0;
+}
 static int curso_lee(void)
 {
-    uint32_t sz, n, r; uint8_t *b = gd_carga("CURSO.DAT", &sz);
-    if (!b || sz < 12 || memcmp(b, "CUR1", 4)) { free(b); return -1; }
-    memcpy(&n, b + 4, 4); memcpy(&r, b + 8, 4);
-    if (r != sizeof(etapa_t) || n > CURSO_MAX || sz < 12 + n * r) { free(b); return -2; }
-    memcpy(curso, b + 12, n * r); ncurso = n; free(b);
+    if (curso_lee_id(0)) return -1;
 #ifdef DIAG_MS
     {   uint32_t k, j;                                          /* medida: la niebla de cada etapa */
         for (k = 0; k < n; k++) for (j = 0; j < curso[k].nniebla && j < NIEBLA_MAX; j++)
@@ -3647,7 +3676,8 @@ static void marco_compone(const float *m1, const float *m2, float *o)
 /* colision de la union de la etapa k: la bifurcacion (la misma en todas) o su meta */
 static void col_nombre_union(char *n, int k)
 {
-    if (curso[k].izq >= 0) strcpy(n, "COLBK.DAT"); else sprintf(n, "COLBK%02d.DAT", k);
+    if (curso[k].f_col == -1) strcpy(n, "COLBK.DAT"); else if (curso[k].f_col == -2) strcpy(n, "COLLR.DAT");
+    else sprintf(n, "COLBK%02d.DAT", curso[k].f_col);
 }
 /* colision de la etapa recien leida en el hueco (detras de su SEGnn.DAT), en el marco M; sin el fichero, ninguna */
 static void col_en_hueco(int k, const float *M)
@@ -3665,21 +3695,34 @@ static void col_en_hueco(int k, const float *M)
    en el GD) y el de la colision de la union */
 static int curso_huecos(void)
 {
-    uint32_t lba, t, tc; int i; char n[16];
-    for (i = 0; i < ncurso; i++) {
+    uint32_t lba, t, tc, sz, o, m, a; int i; char n[16]; uint8_t *b = gd_carga("CURSO.DAT", &sz);
+    /* los huecos valen para todos los arboles: el mayor fichero de cualquiera (curso_pon cambia de arbol sin
+       volver a reservarlos) */
+    for (a = 0; b && a < 1000; a++) {
+      if (a > 1 && a < 100) continue;
+      if (curso_busca(b, sz, (int)a, &o, &m)) continue;
+      memcpy(curso, b + o, m * sizeof(etapa_t)); ncurso = m;
+      for (i = 0; i < ncurso; i++) {
         sprintf(n, "SEG%02d.DAT", curso[i].seg);
         if (!gd_busca(n, &lba, &t) && TAM_SECT(t) > cap_etapa) cap_etapa = TAM_SECT(t);
-        sprintf(n, "BK%02d.DAT", i);
+        sprintf(n, "BK%02d.DAT", curso[i].f_bk);
         if (!gd_busca(n, &lba, &t) && TAM_SECT(t) > cap_union) cap_union = TAM_SECT(t);
         col_nombre_union(n, i);
         if (!gd_busca(n, &lba, &t) && TAM_SECT(t) > cap_col) cap_col = TAM_SECT(t);
+      }
     }
-    for (i = 0; i < ncurso; i++) {                              /* colisiones de etapa que no caben detras de su SEG */
+    for (a = 0; b && a < 1000; a++) {                           /* colisiones de etapa que no caben detras de su SEG */
+      if (a > 1 && a < 100) continue;
+      if (curso_busca(b, sz, (int)a, &o, &m)) continue;
+      memcpy(curso, b + o, m * sizeof(etapa_t)); ncurso = m;
+      for (i = 0; i < ncurso; i++) {
         sprintf(n, "SEG%02d.DAT", curso[i].seg);
         if (gd_busca(n, &lba, &t)) continue;
         sprintf(n, "COL%02d.DAT", curso[i].seg);
         if (!gd_busca(n, &lba, &tc) && TAM_SECT(t) + TAM_SECT(tc) > cap_etapa && TAM_SECT(tc) > cap_col_e) cap_col_e = TAM_SECT(tc);
+      }
     }
+    if (b) { free(b); if (curso_lee_id(0)) return 1; }          /* de vuelta el del modo OutRun */
     hueco_etapa = memalign(32, cap_etapa); hueco_union = cap_union ? memalign(32, cap_union) : NULL;
     dbglog(DBG_INFO, "CURSO: %d etapas, huecos etapa %uK union %uK; colisiones en carrera %uK + %uK\n", ncurso, (unsigned)(cap_etapa >> 10), (unsigned)(cap_union >> 10), (unsigned)(cap_col >> 10), (unsigned)(cap_col_e >> 10));
     return !hueco_etapa || (cap_union && !hueco_union);
@@ -3712,9 +3755,16 @@ static int curso_lee_etapa(int k)
     return r;
 }
 /* al empezar una carrera: la etapa de salida (leida otra vez si ya se habia liberado o era otra) y nada mas */
+static int curso_pedido = PRUEBA_CURSO;                         /* arbol de la carrera siguiente (curso_id) */
 static void curso_reinicia(void)
 {
-    int k = PRUEBA_NODO < ncurso ? PRUEBA_NODO : 0;
+    int k;
+    if (curso_pedido != curso_id) {                             /* otro arbol: sus indices son otros */
+        if (curso_lee_id(curso_pedido)) { dbglog(DBG_ERROR, "CURSO: sin el arbol %d\n", curso_pedido); curso_pedido = 0; if (curso_lee_id(0)) curso_error("No se pudo leer el curso"); }
+        etapa_nodo = -1;
+        dbglog(DBG_INFO, "CURSO: arbol %d, %d etapas, salida %.4s\n", curso_id, ncurso, curso[0].zona);
+    }
+    k = PRUEBA_NODO < ncurso ? PRUEBA_NODO : 0;
     carga_espera(); carga.estado = 0;
     col_reserva();
     libera_modelo(&uni); libera_modelo(&uni_der); libera_modelo(&sig);
@@ -3781,7 +3831,8 @@ static void curso_recentra(float dx, float dz)
 }
 /* una vez por paso de logica en carrera: cargas, eleccion de rama, liberaciones y cambio de etapa; devuelve los
    sucesos CUR_* */
-static int tr_bifurca(void) { return cur_nodo >= 0 && curso[cur_nodo].izq >= 0; }   /* la union es una bifurcacion */
+static int tiene_hijos(const etapa_t *e) { return e->izq >= 0 || e->der >= 0; }   /* no es la meta */
+static int tr_bifurca(void) { return cur_nodo >= 0 && tiene_hijos(curso + cur_nodo); }   /* la union es una bifurcacion */
 static int curso_paso(void)
 {
     int ev = 0; const etapa_t *e = curso + cur_nodo;
@@ -3798,10 +3849,10 @@ static int curso_paso(void)
         if (m == &uni) {
             col_un = carga.col;                                 /* raiz 1 (7D3190: el marco de la union) */
             if (!col_un.ok) dbglog(DBG_ERROR, "COLI: sin la colision de %s\n", fich_union);
-            sube_tramo(m, 2, e->izq < 0 && etapa.tv ? &etapa : NULL);   /* la meta comparte lo que tenga igual la etapa */
+            sube_tramo(m, 2, !tiene_hijos(e) && etapa.tv ? &etapa : NULL);   /* la meta comparte lo que tenga igual la etapa */
             if ((int)(i_union = ruta_anade(m)) < 0) curso_error("Sin memoria para la ruta");
             j_union = ruta_salto; s_union = s_base + i_union * PASO;
-            if (e->izq >= 0) carga_pide(&uni_der, "BKD.DAT", NULL, 0, marco_un);
+            if (tiene_hijos(e)) carga_pide(&uni_der, "BKD.DAT", NULL, 0, marco_un);
             else s_meta = s_union + e->meta;                   /* la meta: la pancarta GOAL */
         } else if (m == &uni_der) {
             uint32_t k = j_union;                              /* la separacion: donde los centros se apartan */
@@ -3825,7 +3876,7 @@ static int curso_paso(void)
     }
     if (s_union < 0 && !uni.datos && etapa.datos && carga.estado == 0 && yo.s > longitud - UNION_ANTES) {
         char cn[16];
-        marco_compone(marco_et, e->bk, marco_un); sprintf(fich_union, "BK%02d.DAT", cur_nodo);
+        marco_compone(marco_et, e->bk, marco_un); sprintf(fich_union, "BK%02d.DAT", e->f_bk);
         col_nombre_union(cn, cur_nodo); carga_col(cn, hueco_col, cap_col);
         carga_pide(&uni, fich_union, hueco_union, cap_union, marco_un);
     }
@@ -3845,6 +3896,9 @@ static int curso_paso(void)
         }
         libera_modelo(&uni_der);
         cur_sig = cur_rama ? e->der : e->izq;
+        /* rama sin hijo (-1, en las misiones): el registro no cambia (next_area de race_area_control_44e590: si
+           [rec + rama * 4 + 0x24] es -1 se queda el mismo) y se vuelve a cargar su etapa */
+        if (cur_sig < 0) cur_sig = cur_nodo;
         ev |= CUR_RAMA;
     }
     if (etapa.datos && cur_en_union && cur_rama >= 0 && yo.s > s_union + UNION_LIBERA) {
@@ -4049,7 +4103,7 @@ static void bo_paso(int ev)
     int i, lado; const bo_conj_t *c;
     if (!bo_dat) return;
     if (ev & CUR_SIGUIENTE) { bo_quita(); bo_cuentas_cero(); return; }   /* fuera de la union: 4F0600 / 4F11B0 */
-    if ((ev & CUR_UNION) && curso[cur_nodo].izq >= 0 && bo_estado == 0) {   /* car+0x184 = 0 y car+0x5C != 0 */
+    if ((ev & CUR_UNION) && tiene_hijos(curso + cur_nodo) && bo_estado == 0) {   /* car+0x184 = 0 y car+0x5C != 0 */
         bo_sel = bo_elige(); bo_estado = 1; memset(bo_obj, 0, sizeof bo_obj);
 #ifdef PRUEBA_BO
         bo_sel = PRUEBA_BO;                                     /* prueba: el conjunto pedido */
@@ -6135,7 +6189,8 @@ int main(int argc, char **argv)
                     bo_reloj++;                                 /* 0x1030d0: +1 por cuadro del original (60 por s) */
                     if (cur_rama < 0 && s_decide >= 0 && yo.s >= s_decide - 450.0f && t_estado % 30 == 0) {
                         char b[64]; const char *zi = zona_nombre(curso[cur_nodo].izq), *zd = zona_nombre(curso[cur_nodo].der);
-                        if (strlen(zi) + strlen(zd) > 14) sprintf(b, "< %.4s  %.4s >", curso[curso[cur_nodo].izq].zona, curso[curso[cur_nodo].der].zona);   /* cabe en el rotulo */
+                        if (curso[cur_nodo].izq < 0 || curso[cur_nodo].der < 0) sprintf(b, "< %s  %s >", zi, zd);
+                        else if (strlen(zi) + strlen(zd) > 14) sprintf(b, "< %.4s  %.4s >", curso[curso[cur_nodo].izq].zona, curso[curso[cur_nodo].der].zona);   /* cabe en el rotulo */
                         else sprintf(b, "< %s  %s >", zi, zd);
                         texto_centro(b); aviso_rama = 1;
                     }
