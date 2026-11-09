@@ -54,7 +54,7 @@ Estado: OK (conectado y verificado al nivel indicado), PARCIAL, PROVISIONAL (apr
 | Puntuacion modo OutRun | 4F2DF0, 4F2660, 4F2B20, 4B9770 | PARCIAL | main.c pt_* | posicion de carretera = m_pos de CURSO.DAT (CONFIRMADO; antes 2,5 m supuestos, 3,2 veces los puntos por avance); bonus de etapa en el checkpoint | el salto de +64 al cambiar de curso (PENDIENTE) | E |
 | Eventos, scripts, progresion, misiones | SCRIPTS.PS2 (Races, RaceAttack, OutrunMiles, Req_*) | FALTA | — | — | — | — |
 | Coches del jugador | CARS.PS2 1-32 / 33-63, disposicion 0x3d3ff0; materiales tabla 4/5 del bloque; colores 0x35ad48 (PC 64D120/408C80); mapa de entorno del bloque | PARCIAL | 15 coches montados como 46A560 (port comprobado), con interior, 9320-11195 vertices dibujados; pintura, 8 colores (Y en la seleccion), reflejo y luces (+7C/+80/+84/+60, CEX2) del original; piezas animadas (ruedas, volante, aleron, faros, disco caliente, car+F0 y el cuerpo de la fisica; ANI1) | UV de entorno con la formula esferica clasica (la del microcodigo VU1 sin leer); sin bits de noche/tunel | ver secciones Coches | E |
-| Escenarios, texturas, materiales | STAGE.PS2, VQ, scn_env_fog_<zona> | PARCIAL | 15 tramos + 15 uniones; mallas con su material (tabla 5) y la luz del entorno 1 de la zona; niebla, cielo y sol del original (ver Entorno); tiras (ADC), nodos, LOD y planos del original | objetos de tramo: el registro de obj_course_obj_cs_<zona> que dibuja la etapa (pancarta CHECK POINT y carteles, ver Checkpoint: la pancarta); objetos animados de las uniones (ver Objetos animados de las uniones); cs_ENV_* no es de la escena (es del reflejo del coche); destello sin consulta de oclusion; luces locales (maya_spl) sin portar | — | E |
+| Escenarios, texturas, materiales | STAGE.PS2, VQ, scn_env_fog_<zona> | PARCIAL | 15 tramos + 15 uniones; mallas con su material (tabla 5) y la luz del entorno 1 de la zona; niebla, cielo y sol del original (ver Entorno); tiras (ADC), nodos, LOD y planos del original | objetos de tramo: el registro de obj_course_obj_cs_<zona> que dibuja la etapa (pancarta CHECK POINT y carteles, ver Checkpoint: la pancarta); objetos animados de las uniones (ver Objetos animados de las uniones); cs_ENV_* no es de la escena (es del reflejo del coche); destello con oclusion aproximada por rayos (ver Entorno); luces locales (maya_spl) sin portar | — | E |
 | HUD, menus, transiciones | SPRANI/XST, TEXT.PS2 (espanol: SPANISH.bin y XST _sxst) | PARCIAL | HUD.DAT, MENU.DAT; todas las pantallas del menu principal y de un jugador, licencia con VMU (icono, eyecatch y LCD: VMU.DAT, ver VMU), seleccion de coche del original, menu de pausa con AUDIO (ver Menus y Pausa y mezcla) | titulo es un cuadro del video (la pelicula de titulo en bucle detras del rotulo, sin hacer); textos bfont antiguos en la demo automatica y el aviso de rama; rotulos de las filas de opciones (sprites sin localizar) | quitar textos bfont | E |
 | Musica y efectos | MUSIC.PS2, SOUND.PS2 ICS/MENU/FE; volumenes 0x11ae38 / 0x100210 / 0x11b600, SOUNDCD.IRX 0x2118 | PARCIAL | musica.c, sfx.c; los 28 temas, sus 28 avances y la del menu (ver Seleccion de musica); mezcla del original (ver Pausa y mezcla) | 48 kHz supuesto; sin sonido por superficie ni del choque fuerte | — | E |
 | Voces (acompanante y locutor) | SOUND.PS2 `\SPANISH\ORC.PAK`, `PERO.pak`; race_robots 489A90/488D80 = PS2 0x202e60..0x205cac; 4B93E0, 4B9CD0, 49C9C0, 499020, GAME 0x1b83e8 | OK | VOCES.DAT (conv_sonido.py), voces.c; verificado en Flycast (ver Voces y video) | una voz nueva corta la anterior (SUPUESTO); "choque con otro coche" = +4 0x4000000 del jugador (4F7BF0 le ha cambiado la velocidad) en un choque; sin voces de asustada/trompo (solo Coast 2 Coast) | — | E |
@@ -668,10 +668,10 @@ y BOnn.DAT); demo/main.c bo_*.
 - Conjuntos: 14 registros de 0x24 bytes en 0x35a540 (modelo, trayectoria, objetos, posicion de la union a la que
   salen: 100 o 60, velocidad lateral 1,48 / 0,74 m/cuadro, objetos de 0x40 bytes con su clase, trayectoria, banderas y
   retraso); clase -> modelo en 0x40a958 (8 bytes por clase). Variante 1 (fila 1 de 0x35a738): 2 pajaros sueltos, 1
-  bandada, 13 halcones, 12 flamencos, 11 dirigible, 7 pegaso, 6 tanque. CONFIRMADO.
+  bandada, 13 halcones, 12 flamencos, 11 dragon (obj_bo_waib; antes se decia dirigible), 7 pegaso, 6 tanque. CONFIRMADO.
 - Eleccion al entrar en la union (no en las metas), por lo hecho en la etapa (44EDE0, solo fuera de la union): choque
   fuerte 1 / 2, 5, 6, 12, 13 -> pajaros sueltos; muro o fuera del asfalto >= 10 % de la etapa -> bandada; fuera del
-  asfalto -> halcones; contacto con otro coche (+4 0x10000 o 0x400000) -> flamencos; si no, dirigible (7D30A4 o el
+  asfalto -> halcones; contacto con otro coche (+4 0x10000 o 0x400000) -> flamencos; si no, el dragon (7D30A4 o el
   nivel del registro del arbol, 0 en csc_data_2: el pegaso y el tanque no salen en el modo OutRun). CONFIRMADO en
   0x174b9c..0x174c74. 7D3094 (posiciones de la etapa) se toma de la ruta (s de la union - s de la etapa) / m_pos:
   PROBABLE (el original lee +0x7C del descriptor).
@@ -696,16 +696,23 @@ y BOnn.DAT); demo/main.c bo_*.
   posiciones y los colores de las dos mallas (bo_dibuja_malla; las mallas de los 4 cuadros casan una a una en n y
   textura en los 5 conjuntos del modo OutRun, comprobado en bo_subido). CONFIRMADO en el PC; PROBABLE en el PS2 (la
   fraccion llega a la cola; no se ha seguido el microcodigo del VU1). Coste: CPU ~1800 vertices interpolados la
-  bandada, ~2400 los halcones; el TA no cambia.
+  bandada, ~2400 los halcones, ~2300 el dragon; el TA no cambia.
 - Memoria: cada malla del original una vez por cuadro y los nodos con su matriz (la bandada: 13 pajaros con la misma
   malla): BO01 18 KB, BO02 15 KB, BO12 37 KB, BO13 122 KB, BO11 276 KB de RAM (fichero) mientras se esta en la union;
   VRAM 1-32 KB por conjunto (fuera de la zona del curso: pvr_mem con el apuro y la rebaja de sube_tramo); BO.DAT 74 KB
   en RAM siempre (tablas, morph y las 7 trayectorias de la variante 1). TA: dibuja_malla con ta_cabe (la bandada ~70
-  vertices por pajaro, el dirigible ~2300 por cuadro).
-- Dirigible (conjunto 11, el que sale si no pasa nada en la etapa): BO11.DAT (276 KB) NO cabe en la RAM con las dos
-  ramas de la union leidas (medido en Flycast, COCHE09 de PRUEBA_AUTO: 288 KB libres, 394-409 KB despues pero
-  troceados: malloc de 283 KB falla) y ese conjunto no sale. PENDIENTE (reducir el fichero: los cuadros 1..3 como
-  posiciones de 16 bits, o leerlo en otro hueco); su movimiento no se ha podido verificar.
+  vertices por pajaro, el dragon ~2300 por cuadro).
+- Dragon (conjunto 11, el que sale si la etapa va limpia: el caso mas comun; 2026-11-09): no salia. BO11.DAT (276 KB)
+  no cabia en el monton con las dos ramas de la union leidas (288 KB libres pero troceados: la cima del monton tenia
+  ~135 KB). Arreglo doble, sin cambio de imagen: (1) conv_bo.py compacta_cuadros deja en el ORD7 solo las mallas del
+  cuadro 0 y pone los cuadros 1..3 en una cola BOF1 (posiciones int16 con una escala por fichero, 0,27 mm en BO11, y
+  el color de cada vertice; las UV no cambian entre cuadros): BO11 167 KB, BO13 84, BO12 25, BO01 13; (2) el BOnn.DAT
+  se lee en la cola del hueco de la union, donde empiezan los texeles del BKnn.DAT: estos (155-249 KB) ya estan en la
+  VRAM y nadie los vuelve a leer (comp de sube_tramo solo es la etapa, para la meta, y en las metas no hay objetos);
+  quedan 217-230 KB en las 15 uniones. Ya no usa el monton (si no cabe en la cola, se intenta en el monton como
+  antes). Verificado en Flycast en una carrera desde el menu real (pelicula, menus, Dino 246, acelerador a fondo,
+  `-DPRUEBA_BO=11` solo para forzar el conjunto: la eleccion natural fue la bandada por el muro): "CURSO: BO11.DAT en
+  0.15 s ... RAM libre 278K" (igual que antes de leerlo), el dragon cruza con sus alas (capturas aves/bo11_*.png).
 - PENDIENTE: los sonidos (+0x18 / +0x1C: efectos 0x83..0x91 de los bancos 0x30a..0x316), la acompanante senalandolos
   (race_robots_runtime) y el filtro de visibilidad 4F0E40 (aqui: esfera contra la vista y el LOD por tamano, umbral 8).
 - Verificado en E (`-DPRUEBA_AUTO -DPRUEBA_NODO=0 -DPRUEBA_FIN=500 -DPRUEBA_V=280 -DPRUEBA_RAMA=0`; la eleccion natural
@@ -1115,14 +1122,24 @@ main.c "entorno del original", cielo_dibuja, sol_dibuja, coche_luz).
   PS2 distintas del PC: bordes 360 / 280 con (360 - |x|) / 160 y (280 - |y|) / 180 desde 100; brillo 6 con escala
   fov x 0,1; destellos y brillo de cara al sol con alfa x 0,75 (0x10fee0) y este de tamano 2,5 (PC 1,5); lejos a 1500
   m (aqui 1000); sin las excepciones de etapa del anillo. Parte visible: el PS2 la mide con la media del alfa de 8 x 8
-  pixeles (0x1036c0..0x103af4, guardada en 0x448864 y leida por 0x103b38) x 0,5 / 255 sin tope: aqui fija en 0,251
-  (alfa 0x80 = opaco del GS; PROBABLE). Verificado en Flycast con `-DPRUEBA_SOL -DPRUEBA_SOL_X/Y` (capturas
-  aves/sol_*.png del scratchpad). DIFERENCIA que queda: sin oclusion.
+  pixeles (0x1036c0..0x103af4, guardada en 0x448864 y leida por 0x103b38) x 0,5 / 255 sin tope: 0,251 con el sol
+  entero (alfa 0x80 = opaco del GS; PROBABLE). Verificado en Flycast con `-DPRUEBA_SOL -DPRUEBA_SOL_X/Y` (capturas
+  aves/sol_*.png del scratchpad).
+- Oclusion del destello (DIFERENCIA aproximada, 2026-11-09): la PowerVR no deja leer la z ni tiene consultas. Cada
+  cuadro, si el sol se va a dibujar, sol_prepara pone UN rayo desde el ojo hacia uno de 16 puntos (4 x 4) del disco
+  que cubre el objeto de prueba del PS2 (0x10 a 1/4: radio angular 2,96 x 0,25 x spread); dibuja_rango lo prueba
+  contra cada malla opaca o de recorte de la etapa, la union y la etapa siguiente que dibuja de verdad en ese cuadro
+  (esfera y despues los triangulos de la tira; carteles girados como carga_cartel), y la parte visible es 0,251 x la
+  fraccion de los ultimos 16 rayos que no chocan (el PS2 usa el cuadro anterior: aqui 16 cuadros, ~0,27 s, de
+  suavizado). No tapan los coches, el piloto ni lo transparente; los arboles de recorte tapan con el rectangulo entero
+  (el PS2 mira el alfa por pixel). Medido en Flycast (PALM, sol detras de un edificio: 16/16 tapados, destello fuera;
+  en el cielo abierto 0-3/16): por cuadro ~2000 esferas probadas (las mallas que ya se dibujan), ~25 tocadas, 400-800
+  triangulos; coste calculado en el SH4 < 0,5 ms (solo con el sol en pantalla). `-DSOL_SIN_OCLUSION` lo quita.
 - Sol y destello (CONFIRMADO salvo lo dicho): bandera 2 de +0x3C (todas menos CLOU, GHOS y METR); intensidad que sube o
   baja en 120 cuadros en la union (4AFCC0); direccion -luz 1 con la inclinacion x cam+358; objetos 2, 3..0x10 del banco
   0x57 (SOL.DAT) en el espacio de la camara como 40CBC0 (disco, lejanos, brillo, 11 destellos y brillo de cara al
   sol), tenidos con el ambiente del entorno 0. DIFERENCIAS: sin consulta de oclusion (la PowerVR no la tiene): la parte
-  visible va fija (0,251, ver arriba; el PC topa en 0,22), asi que el destello no se apaga detras de lo que tapa el sol; los
+  visible sale de rayos contra la escena (ver arriba, Oclusion del destello; el PC topa en 0,22); los
   lejanos a 1000 m en vez de 1500 (PS2; PC 2500) (el cielo esta en la escena); mezcla aditiva (PROBABLE: texturas de fondo negro).
 - Niebla en la PowerVR: una tabla para todo: la de la escena (lista 1); los coches no llevan la suya (lista 2: casi igual
   salvo ALPI, 0,0003 frente a 0,0009, y CAPE/RUIN; DIFERENCIA); el cielo lleva la tabla solo si su lista 0 tiene

@@ -1,4 +1,4 @@
-"""conv_bo.py tu.iso salida/: los objetos animados del fondo de las uniones (pajaros, halcon, flamencos, dirigible...)
+"""conv_bo.py tu.iso salida/: los objetos animados del fondo de las uniones (pajaros, halcon, flamencos, el dragon...)
 para la demo: BO.DAT (tablas y trayectorias) y BOnn.DAT (el modelo del conjunto nn, formato ORD7 de modelo.py).
 Sale de tu disco: no se distribuye.
 
@@ -7,7 +7,7 @@ race_traffic_objects.inc 4A9BD0 / 4A9C80 / 4A9DF0; SLES-53998 0x174328 / 0x174a4
 instruccion):
  - al entrar el coche en una union que no es la meta (car+0x5C pasa a 1) 0x174a48 elige un conjunto con las cuentas de
    la etapa que se deja (44EDE0): fila de la variante (0x443508) de la tabla 0x35a738 (7 x u32 por variante): en la
-   variante 1 (OutRun) [2 pajaros sueltos, 1 bandada, 13 halcones, 12 flamencos, 11 dirigible, 7 pegaso, 6 tanque].
+   variante 1 (OutRun) [2 pajaros sueltos, 1 bandada, 13 halcones, 12 flamencos, 11 dragon (obj_bo_waib), 7 pegaso, 6 tanque].
  - conjuntos: 14 registros de 0x24 bytes en 0x35a540 (PC 6369C0): +0 recurso del modelo (0x136.. = BK\\ANIMS\\obj_bo_*),
    +4 colocacion (0: ninguna), +8 ruta de la trayectoria (BK\\ANIMS\\oso_dyn_bo_*_bin.sz), +0xC objetos, +0x10 posicion
    de carretera de la union a la que salen (i16), +0x12 banco de sonido, +0x14 velocidad lateral (m/cuadro), +0x18 /
@@ -25,8 +25,8 @@ BO.DAT: 'BOT1' u32 n, por conjunto 64 bytes: u16 posicion, u8 objetos, u8 recurs
   4 x {u8 registro del modelo, u8 trayectoria, u8 banderas, u8 0, f32 retraso}, u32 desplazamiento de su trayectoria
   en el fichero (0 sin ella), relleno; 'VAR1' 7 u32 la fila de la variante 1; 'MOR1' u32 grupos y los grupos tal cual
   (u32 indice, k, m, m f32). Trayectoria: u32 n entradas, por entrada f32 duracion y 6 canales (u32 n claves, n x 4 f32).
-BOnn.DAT: ORD7 sin ruta: mallas de cada (malla del original g, cuadro f) en el marco de su malla, campo del nodo de la
-  malla = g | f << 8; nodos = los nodos de los registros que usa el conjunto (esfera, banderas del original << 16 |
+BOnn.DAT: ORD7 sin ruta: mallas del cuadro 0 de cada malla del original g en el marco de su malla, campo del nodo
+  de la malla = g (los cuadros 1..3 en la cola BOF1, compacta_cuadros); nodos = los nodos de los registros que usa el conjunto (esfera, banderas del original << 16 |
   registro, cartel = su matriz en carteles (vectores fila, con las de los padres), relleno = g | indice de animacion
   << 16 (0xFFFF sin animacion))."""
 import os, struct, sys
@@ -156,7 +156,59 @@ def modelo_conjunto(A, blq, registros, sal):
                               hechas[(r, g)] | ((anim if fl & 0x20 and anim >= 0 else 0xffff) << 16)])
     mod.recorta_texturas()
     mod.escribe(sal)
+    compacta_cuadros(sal)
     return mod
+
+def compacta_cuadros(sal):
+    """deja en el ORD7 solo las mallas del cuadro 0 y pone los cuadros 1..3 al final (BOF1): por vertice de las mallas
+    del cuadro 0 de cada malla del original g (en el orden del fichero) su posicion en int16 x escala y su color. Las
+    mallas de cada cuadro casan una a una (en el orden del fichero) en vertices y textura con las del cuadro 0; las UV
+    son las mismas. El dragon (BO11) pasa de 276 a 167 KB (no cabia en la RAM en la union).
+    Cola: 'BOF1' u32 grupos, f32 escala; por grupo u32 g, cuadros, vertices del cuadro 0 y, por cuadro 1..cuadros-1,
+    vertices x (3 int16 + 2 de relleno) y vertices x u32 color; al final u32 desplazamiento de 'BOF1' y 'BOFT'."""
+    d = open(sal, 'rb').read()
+    h = list(struct.unpack_from('<13I', d, 4))
+    nm, nv, nr, pr, nt = h[:5]; nn, nc, ns = h[10:13]
+    assert nr == 0 and ns == 0
+    o = 56 + 24 * nt; texs = d[56:o]
+    M = [list(struct.unpack_from('<4f2Iii', d, o + 32 * i)) for i in range(nm)]; o += 32 * nm
+    V = np.frombuffer(d, dtype=[('x', '<f4'), ('y', '<f4'), ('z', '<f4'), ('u', '<f4'), ('v', '<f4'), ('c', '<u4')],
+                      count=nv, offset=o); o += 24 * nv
+    resto = d[o:o + 32 * nn + 64 * nc]; o += 32 * nn + 64 * nc
+    o = (o + 31) & ~31; blob = d[o:]
+    grupos = {}
+    for i, m in enumerate(M): grupos.setdefault(m[7] & 0xff, {}).setdefault((m[7] >> 8) & 3, []).append(i)
+    if all(len(fs) == 1 for fs in grupos.values()): return
+    mx = max(float(np.abs(np.stack([V['x'], V['y'], V['z']])).max()), 1e-6); esc = mx / 32767.0
+    cola = b'BOF1' + struct.pack('<If', len(grupos), esc)
+    for g in sorted(grupos):
+        fs = grupos[g]; nf = len(fs); m0 = fs[0]
+        assert sorted(fs) == list(range(nf))
+        n0 = sum(M[i][5] for i in m0)
+        cola += struct.pack('<3I', g, nf, n0)
+        for f in range(1, nf):
+            assert [(M[i][5], M[i][6]) for i in fs[f]] == [(M[i][5], M[i][6]) for i in m0], 'cuadro %d de %d no casa' % (f, g)
+            v = np.concatenate([V[M[i][4]:M[i][4] + M[i][5]] for i in fs[f]])
+            q = np.zeros((n0, 4), '<i2')
+            for k, c in enumerate('xyz'): q[:, k] = np.clip(np.round(v[c] / esc), -32767, 32767)
+            cola += q.tobytes() + v['c'].astype('<u4').tobytes()
+    # el ORD7 con las mallas del cuadro 0 (en su orden) y sus vertices
+    nuevas, verts, nv2 = [], [], 0
+    for i, m in enumerate(M):
+        if (m[7] >> 8) & 3: continue
+        verts.append(V[m[4]:m[4] + m[5]]); m = list(m); m[4] = nv2; nv2 += m[5]; nuevas.append(m)
+    inicio = []
+    # las listas: los inicios se cuentan otra vez (las mallas siguen ordenadas por lista)
+    lis = [h[5 + l] for l in range(5)]
+    for l in range(5): inicio.append(sum(1 for i in range(nm) if i < lis[l] and not (M[i][7] >> 8) & 3))
+    h[0], h[1] = len(nuevas), nv2; h[5:10] = inicio
+    out = bytearray(b'ORD7' + struct.pack('<13I', *h) + texs)
+    for m in nuevas: out += struct.pack('<4f2Iii', *m)
+    for v in verts: out += v.tobytes()
+    out += resto; out += b'\0' * (-len(out) % 32); out += blob
+    out += b'\0' * (-len(out) % 4)
+    pos = len(out); out += cola; out += b'\0' * (-len(out) % 4); out += struct.pack('<I', pos) + b'BOFT'
+    with open(sal, 'wb') as fh: fh.write(out)
 
 def main():
     arg = [a for a in sys.argv[1:] if not a.startswith('--')]

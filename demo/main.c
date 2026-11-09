@@ -51,6 +51,7 @@ typedef struct {
     int lado;                                                     /* zona del curso que usa: 0 ninguna, 1 abajo, 2 arriba */
     uint32_t *ofs;                                                /* color de desplazamiento por vertice o NULL (coche) */
     const int32_t *remap;                                         /* textura -> la del color elegido, o NULL (trafico) */
+    uint32_t tam;                                                 /* bytes del fichero leido */
     int relleno_propio;                                           /* lo pone quien pide la lectura: relleno[0] de los
                                                                      nodos trae datos del conversor (conv_bo.py) y no se
                                                                      usa para el presupuesto del TA */
@@ -119,7 +120,7 @@ static int lee_modelo_en(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t
         m->pvs_m = calloc((m->nmallas + 31) / 32, 4); m->pvs_teo = calloc(2 * m->nnodos + 1, 4);
         if (!m->pvs_m || !m->pvs_teo) { free(m->pvs_m); free(m->pvs_teo); m->pvs_m = m->pvs_teo = NULL; m->pvs_l = NULL; }
     }
-    m->blob = b + ((p - b + 31) & ~31); m->datos = b;
+    m->blob = b + ((p - b + 31) & ~31); m->datos = b; m->tam = sz;
     return 0;
 }
 static int lee_modelo(modelo_t *m, const char *nombre) { return lee_modelo_en(m, nombre, NULL, 0); }
@@ -229,7 +230,8 @@ static void libera_modelo(modelo_t *m)
 {
     tex_suelta(m);
     free(m->ofs); free(m->vis); free(m->pvs_m); free(m->pvs_teo);
-    if (m->datos != hueco_etapa && m->datos != hueco_union) free(m->datos);
+    if (m->datos != hueco_etapa && !(hueco_union && m->datos >= hueco_union && m->datos < hueco_union + cap_union))
+        free(m->datos);                                           /* (los objetos de la union van dentro del hueco) */
     memset(m, 0, sizeof *m);
 }
 
@@ -687,6 +689,9 @@ static void carga_cartel(const float (*W)[4])
    mo->vis (nodos_visibles: visibilidad por secciones, LOD y recorte del original) no se dibujan, y las demas se
    recortan por su esfera contra la piramide de la vista */
 static int solo_lod = -1;                                       /* trafico: solo las mallas de este LOD (traf_lod) */
+static modelo_t etapa, uni, sig;                                /* (mas abajo) */
+static float sol_rd[3]; static int sol_rayo_on, sol_rayo_res;   /* el rayo hacia el sol del cuadro (sol_prepara) */
+static int sol_rayo_malla(const modelo_t *mo, const malla_t *m, int cart);
 static void dibuja_rango(const modelo_t *mo, int l, uint32_t k0, uint32_t k1, int recorta, int sin_niebla, int solo_lista)
 {
     float tanh = 320.0f / fx, tanv = 240.0f / fx, kh = sqrtf(1 + tanh * tanh), kv = sqrtf(1 + tanv * tanv);
@@ -728,6 +733,8 @@ static void dibuja_rango(const modelo_t *mo, int l, uint32_t k0, uint32_t k1, in
             if (m->tex >= 0) pvr_prim(&mo->cabs[sin_niebla][mo->remap ? mo->remap[m->tex] : m->tex], sizeof(pvr_poly_hdr_t));
             else pvr_prim(&cab_col[sin_niebla][l], sizeof(pvr_poly_hdr_t));
         }
+        if (sol_rayo_on && !sol_rayo_res && recorta && l < 2 && (mo == &etapa || mo == &uni || mo == &sig))
+            sol_rayo_res = sol_rayo_malla(mo, m, cartel);       /* lo que tapa el sol (sol_prepara) */
         if (cartel) {                                           /* en el marco de su nodo, girado hacia la camara */
             carga_cartel((const float (*)[4])mo->carteles[mo->nodos[m->nodo].cartel]);
             dibuja_malla(mo, m);
@@ -3108,7 +3115,7 @@ static void curso_al_menu(void)
 static int piloto_rama(float s) { return cur_rama < 0 && s_decide >= 0 && s > s_decide - 400.0f; }
 #endif
 /* ---------------------------------------------------------------- objetos animados de las uniones
-   Pajaros, halcones, flamencos, el dirigible... que cruzan el cielo en cada bifurcacion (tools/conv_bo.py: BO.DAT y
+   Pajaros, halcones, flamencos, el dragon... que cruzan el cielo en cada bifurcacion (tools/conv_bo.py: BO.DAT y
    BOnn.DAT). Como el original (PC race_area_objects_44f190 / race_area_ending_44d410 / 44EDE0 y race_traffic_objects
    4A9BD0 / 4A9C80 / 4A9DF0; SLES-53998 0x174328 / 0x174a48):
    - cuentas de la etapa (44EDE0, solo fuera de la union, a cero al empezar cada etapa): cuadros en los choques fuertes
@@ -3117,7 +3124,7 @@ static int piloto_rama(float s) { return cur_rama < 0 && s_decide >= 0 && s > s_
      derrape = 100 km/h del modelo o mas con |+4E| entre 0x1800 y 0x4000); 7D3094 = posiciones de la etapa.
    - al entrar en una union que no es la meta (car+0x5C de 0 a 1) se elige el conjunto (0x174a48, variante 1: fila 1 de
      0x35a738): choque fuerte -> 2 (pajaros sueltos); muro o fuera del asfalto >= 10 % -> 1 (bandada); fuera del asfalto
-     -> 13 (halcones); contra otro coche -> 12 (flamencos); si no 11 (dirigible: 7D30A4 < 600 o el nivel del registro
+     -> 13 (halcones); contra otro coche -> 12 (flamencos); si no 11 (el dragon obj_bo_waib: 7D30A4 < 600 o el nivel del registro
      del arbol, +8, que vale 0 en todo csc_data_2; el pegaso y el tanque no salen en el modo OutRun).
    - su modelo se lee en segundo plano (carga) y salen al pasar la posicion de carretera +0x10 de la union (100; 60 el
      globo, el barco y el ovni) con su trayectoria (6 canales de 513650 desde 0, t += 0,0166 por paso, en bucle con la
@@ -3140,7 +3147,9 @@ static uint8_t *bo_dat; static const bo_conj_t *bo_conj; static uint32_t bo_var[
 static bo_mor_t bo_mor[192]; static int bo_nmor;
 static uint16_t *bo_idx, *bo_ini; static int bo_ncod;           /* mallas por (malla del original, cuadro) */
 static uint32_t bo_reloj;                                       /* 0x448850: +1 por cuadro (60 por segundo) */
-static uint8_t bo_nf[64], bo_mezcla[64];                        /* por malla del original: cuadros y si se pueden mezclar */
+static uint8_t bo_nf[64];                                       /* por malla del original: cuadros */
+static const uint8_t *bo_cola[64]; static uint32_t bo_n0[64];   /* cuadros 1..3 (cola BOF1 de conv_bo.py) y vertices */
+static float bo_esc;                                            /* escala de las posiciones int16 de la cola */
 static int bo_c74, bo_c78, bo_c7c, bo_c80, bo_c84, bo_c88, bo_pos_ant;   /* cuentas de 44EDE0 */
 static int bo_sel = -1, bo_estado;                              /* 0 nada, 1 por leer, 2 leyendo, 3 subido, 4 fuera */
 static struct { float x, t, dur; int ini, loop; const uint8_t *tray; matrix_t M __attribute__((aligned(32))); } bo_obj[4];
@@ -3215,7 +3224,7 @@ static int bo_elige(void)
     if (0.1f <= x) return (int)bo_var[1];
     if (x != 0.0f) return (int)bo_var[2];
     if (bo_c80 || bo_c84) return (int)bo_var[3];
-    return (int)bo_var[4];                                      /* 7D30A4 < 600 o el nivel del registro (0): el dirigible */
+    return (int)bo_var[4];                                      /* 7D30A4 < 600 o el nivel del registro (0): el dragon */
 }
 static void bo_quita(void)
 {
@@ -3238,18 +3247,18 @@ static void bo_subido(void)
         for (k = 0; k < n; k++) { int cod = bo_mod.mallas[k].nodo; if ((cod & 0xff) * 4 + ((cod >> 8) & 3) == c) bo_idx[j++] = (uint16_t)k; }
     }
     bo_ini[4 * bo_ncod] = (uint16_t)j;
-    for (c = 0; c < bo_ncod && c < 64; c++) {                   /* cuadros seguidos desde el 0; mezcla si casan malla a malla */
-        int f, nf = 1, ok = 1;
-        while (nf < 4 && bo_ini[c * 4 + nf + 1] > bo_ini[c * 4 + nf]) nf++;
-        for (f = 1; f < nf && ok; f++) {
-            int a0 = bo_ini[c * 4], a1 = bo_ini[c * 4 + 1], b0 = bo_ini[c * 4 + f], b1 = bo_ini[c * 4 + f + 1], i;
-            if (a1 - a0 != b1 - b0) { ok = 0; break; }
-            for (i = 0; i < a1 - a0; i++) {
-                const malla_t *ma = bo_mod.mallas + bo_idx[a0 + i], *mb = bo_mod.mallas + bo_idx[b0 + i];
-                if (ma->n != mb->n || ma->tex != mb->tex || ma->n > 256) { ok = 0; break; }
+    memset(bo_nf, 1, sizeof bo_nf); memset(bo_cola, 0, sizeof bo_cola); bo_esc = 0;
+    if (bo_mod.tam >= 8 && !memcmp(bo_mod.datos + bo_mod.tam - 4, "BOFT", 4)) {   /* cola de los cuadros 1..3 */
+        uint32_t pos, ng, g, nf, n0, i; const uint8_t *q;
+        memcpy(&pos, bo_mod.datos + bo_mod.tam - 8, 4); q = bo_mod.datos + pos;
+        if (pos + 12 <= bo_mod.tam && !memcmp(q, "BOF1", 4)) {
+            memcpy(&ng, q + 4, 4); memcpy(&bo_esc, q + 8, 4); q += 12;
+            for (i = 0; i < ng; i++) {
+                memcpy(&g, q, 4); memcpy(&nf, q + 4, 4); memcpy(&n0, q + 8, 4); q += 12;
+                if (g < 64 && nf >= 1 && nf <= 4) { bo_nf[g] = (uint8_t)nf; bo_n0[g] = n0; bo_cola[g] = q; }
+                q += (nf - 1) * n0 * 12;
             }
         }
-        bo_nf[c] = (uint8_t)nf; bo_mezcla[c] = (uint8_t)ok;
     }
     bo_estado = 3;
 }
@@ -3273,7 +3282,16 @@ static void bo_paso(int ev)
     }
     if (bo_estado == 1 && carga.estado == 0 && bo_sel >= 0 && bo_sel < BO_N) {
         sprintf(bo_fich, "BO%02d.DAT", bo_sel); bo_mod.relleno_propio = 1;   /* malla y animacion de cada nodo */
-        carga_pide(&bo_mod, bo_fich, NULL, 0, NULL); bo_estado = 2;
+        {   /* en la cola del hueco de la union: sus texeles ya estan en la VRAM (sube_tramo) y nadie los vuelve a leer
+               (comp solo es la etapa, para la meta, y aqui no hay meta); 217-230 KB en las 15 uniones. En el monton no
+               habia 167 KB seguidos con las dos ramas leidas (el dragon no salia) */
+            uint8_t *b = NULL; uint32_t cap = 0, lba, t;
+            if (uni.datos == hueco_union && uni.tv && uni.blob && !gd_busca(bo_fich, &lba, &t)) {
+                b = (uint8_t *)(((uintptr_t)uni.blob + 31) & ~(uintptr_t)31); cap = (uint32_t)(hueco_union + cap_union - b) & ~2047u;
+                if ((t + 2047) / 2048 * 2048 > cap) b = NULL, cap = 0;
+            }
+            carga_pide(&bo_mod, bo_fich, b, cap, NULL); bo_estado = 2;
+        }
     }
     if (bo_estado != 3 || bo_sel < 0) return;
     c = bo_conj + bo_sel;
@@ -3327,21 +3345,33 @@ static float bo_valor(int a)
         if (bo_mor[i].idx == a) return bo_mor[i].v[(bo_mor[i].base + bo_reloj) % bo_mor[i].m];
     return -1.0f;
 }
-/* la malla ma del cuadro k mezclada con mb (la misma del cuadro k + 1) con peso w / 256 de mb (404700: los dos
-   cuadros con 1 - fraccion y fraccion): posiciones y colores de los vertices (la luz va en el color) */
-static void bo_dibuja_malla(const malla_t *ma, const malla_t *mb, int w)
+/* la malla ma (cuadro 0 de la malla del original g, vertices desde off en el grupo) en la mezcla de los cuadros k0 y
+   k1 con peso w / 256 de k1 (404700: 1 - fraccion y fraccion): posiciones y colores (la luz va en el color). Los
+   cuadros 1..3 vienen de la cola BOF1 (int16 x bo_esc y color); las UV son las del cuadro 0 */
+static void bo_vertice(const malla_t *ma, int g, uint32_t off, int f, uint32_t i, float *x, uint32_t *c)
+{
+    if (f == 0 || !bo_cola[g]) { const vert_t *v = bo_mod.verts + ma->v0 + i; x[0] = v->x; x[1] = v->y; x[2] = v->z; *c = v->c; return; }
+    {   const uint8_t *b = bo_cola[g] + (uint32_t)(f - 1) * bo_n0[g] * 12; const int16_t *q = (const int16_t *)(const void *)b + 4 * (off + i);
+        x[0] = q[0] * bo_esc; x[1] = q[1] * bo_esc; x[2] = q[2] * bo_esc;
+        *c = ((const uint32_t *)(const void *)(b + bo_n0[g] * 8))[off + i]; }
+}
+static void bo_dibuja_malla(const malla_t *ma, int g, uint32_t off, int k0, int k1, int w)
 {
     static vert_t t[256] __attribute__((aligned(32)));
     static modelo_t mt; malla_t m = *ma;
-    const vert_t *a = bo_mod.verts + ma->v0, *b = bo_mod.verts + mb->v0;
-    float fb = (float)w * (1.0f / 256.0f), fa = 1.0f - fb; uint32_t i, n = ma->n > 256 ? 256 : ma->n, wa = 256 - (uint32_t)w;
-    if (w <= 0) { dibuja_malla(&bo_mod, ma); return; }
+    const vert_t *a = bo_mod.verts + ma->v0;
+    float fb = (float)w * (1.0f / 256.0f), fa = 1.0f - fb, pa[3], pb[3]; uint32_t i, n = ma->n > 256 ? 256 : ma->n, wa = 256 - (uint32_t)w, ca, cb;
+    if (k0 == 0 && w <= 0) { dibuja_malla(&bo_mod, ma); return; }
+    if (off + n > bo_n0[g] && bo_cola[g]) return;
     for (i = 0; i < n; i++) {
-        uint32_t ca = a[i].c, cb = b[i].c;
-        t[i].x = a[i].x * fa + b[i].x * fb; t[i].y = a[i].y * fa + b[i].y * fb; t[i].z = a[i].z * fa + b[i].z * fb;
+        bo_vertice(ma, g, off, k0, i, pa, &ca);
+        if (w > 0) {
+            bo_vertice(ma, g, off, k1, i, pb, &cb);
+            t[i].x = pa[0] * fa + pb[0] * fb; t[i].y = pa[1] * fa + pb[1] * fb; t[i].z = pa[2] * fa + pb[2] * fb;
+            t[i].c = (((ca & 0xff00ffu) * wa + (cb & 0xff00ffu) * (uint32_t)w) >> 8 & 0xff00ffu) |
+                     ((((ca >> 8) & 0xff00ffu) * wa + ((cb >> 8) & 0xff00ffu) * (uint32_t)w) & 0xff00ff00u);
+        } else { t[i].x = pa[0]; t[i].y = pa[1]; t[i].z = pa[2]; t[i].c = ca; }
         t[i].u = a[i].u; t[i].v = a[i].v;
-        t[i].c = (((ca & 0xff00ffu) * wa + (cb & 0xff00ffu) * (uint32_t)w) >> 8 & 0xff00ffu) |
-                 ((((ca >> 8) & 0xff00ffu) * wa + ((cb >> 8) & 0xff00ffu) * (uint32_t)w) & 0xff00ff00u);
     }
     mt.verts = t; mt.ofs = NULL; m.v0 = 0; m.n = n;
     dibuja_malla(&mt, &m);
@@ -3357,7 +3387,8 @@ static void bo_dibuja(int l)
         const float (*M)[4] = (const float (*)[4])bo_obj[i].M;
         for (k = 0; k < bo_mod.nnodos; k++) {
             const nodo_t *nd = bo_mod.nodos + k;
-            int g = nd->relleno[0] & 0xffff, an = nd->relleno[0] >> 16, fl = nd->fl >> 16, q, q1, j, ult = -2, k0, k1, w;
+            int g = nd->relleno[0] & 0xffff, an = nd->relleno[0] >> 16, fl = nd->fl >> 16, q, j, ult = -2, k0, k1, w;
+            uint32_t off = 0;
             float wx, wy, wz, dx, dy, dz, zv, xv, yv;
             if ((int)(nd->fl & 0xffff) != c->o[i].reg || g >= bo_ncod) continue;
             wx = nd->cx * M[0][0] + nd->cy * M[1][0] + nd->cz * M[2][0] + M[3][0];
@@ -3374,23 +3405,23 @@ static void bo_dibuja(int l)
                 float f = bo_valor(an); int nf = g < 64 ? bo_nf[g] : 1, e;
                 if (f >= 0.0f) {
                     e = (int)f; k0 = e % nf; k1 = k0 + 1 >= nf ? 0 : k0 + 1;
-                    if (g < 64 && bo_mezcla[g]) w = (int)((f - (float)e) * 256.0f);
+                    if (g < 64 && bo_cola[g]) w = (int)((f - (float)e) * 256.0f);
                 }
             }
-            q = g * 4 + k0; q1 = g * 4 + k1;
-            if (bo_ini[q] == bo_ini[q + 1]) { q = g * 4; w = 0; }   /* sin ese cuadro: el primero */
+            if (g >= 64 || !bo_cola[g]) k0 = k1 = w = 0;         /* sin la cola: el cuadro 0 */
+            q = g * 4;
             memcpy(W, bo_mod.carteles[nd->cartel], sizeof W);
             mat_load(&vista); mat_apply(&bo_obj[i].M); mat_apply(&W);
             for (j = bo_ini[q]; j < bo_ini[q + 1]; j++) {
-                const malla_t *m = bo_mod.mallas + bo_idx[j]; uint32_t mk = bo_idx[j];
+                const malla_t *m = bo_mod.mallas + bo_idx[j]; uint32_t mk = bo_idx[j], o = off;
+                off += m->n;                                    /* vertices del grupo antes de la siguiente malla */
                 if (m->n < 3 || mk < bo_mod.inicio[l] || mk >= bo_mod.inicio[l + 1]) continue;
                 if (m->tex != ult) {
                     ult = m->tex;
                     if (m->tex >= 0) pvr_prim(&bo_mod.cabs[0][m->tex], sizeof(pvr_poly_hdr_t));
                     else pvr_prim(&cab_col[0][l], sizeof(pvr_poly_hdr_t));
                 }
-                if (w > 0) bo_dibuja_malla(m, bo_mod.mallas + bo_idx[j - bo_ini[q] + bo_ini[q1]], w);
-                else dibuja_malla(&bo_mod, m);
+                bo_dibuja_malla(m, g, o, k0, k1, w);
             }
         }
     }
@@ -3887,13 +3918,94 @@ static void sol_objeto(int r, const float *p, float sx, float sy, float sz, floa
     }
     color_fijo = 0;
 }
-/* 0x10f190 / 40CBC0 (en la lista transparente, al final de la escena) */
+/* Parte visible del sol. El PS2 (0x1036c0..0x103af4) dibuja el objeto 0x10 a 1/4 de escala en el sol de lejos con
+   la prueba de z, reduce esa zona de la imagen a 8 x 8 pixeles y hace la media de su alfa (0x448864, el cuadro
+   siguiente: 0x103b38); visible = media x 0,5 / 255 (0x10f7d0), 0,251 con el sol entero (alfa 0x80 = opaco del GS).
+   La PowerVR no deja leer la z ni tiene consultas de oclusion: aqui se tira cada cuadro UN rayo desde el ojo hacia uno
+   de 16 puntos (4 x 4) del disco que cubre ese objeto (radio angular 2,96 x 0,25 x spread) contra las mallas opacas y
+   de recorte de la etapa, la union y la etapa siguiente (esfera de cada malla y despues sus triangulos; los carteles
+   girados como en carga_cartel), y lo visible es la fraccion de los ultimos 16 rayos que no chocan. DIFERENCIA: no
+   tapan los coches, el piloto ni lo transparente; los arboles de recorte tapan con su rectangulo entero (no por texel). */
 #define SOL_VIS (128.0f * 0.5f / 255.0f)                        /* alfa 0x80 de los 64 pixeles x 0,5 / 255 */
-static void sol_dibuja(void)
+static uint16_t sol_ocl_bits;                                   /* los ultimos 16 rayos: 1 = tapado */
+static uint32_t sol_ocl_i, sol_n_mallas, sol_n_esf, sol_n_tri;
+/* el rayo o + t d (d unitario, t en (0, tmax)) contra el triangulo a b c (Moller-Trumbore, por las dos caras) */
+static int rayo_tri(const float *o, const float *d, const float *a, const float *b, const float *c, float tmax)
 {
-    float v[16], d[3], P[3], sx, sy, ax[3], fov, size, spread, bright, edge, flare, ring, facing, vis = SOL_VIS, p0, y0, q[3];
-    float wv[3], lw, g0[3] = { 0, 0, -0.2f }, far = 1000.0f; uint32_t tinte; int k;
-    if (!sol_ok || sol_int <= 0) return;
+    float e1[3] = { b[0] - a[0], b[1] - a[1], b[2] - a[2] }, e2[3] = { c[0] - a[0], c[1] - a[1], c[2] - a[2] };
+    float pv[3] = { d[1] * e2[2] - d[2] * e2[1], d[2] * e2[0] - d[0] * e2[2], d[0] * e2[1] - d[1] * e2[0] };
+    float det = e1[0] * pv[0] + e1[1] * pv[1] + e1[2] * pv[2], inv, tv[3], u, v, qv[3], t;
+    if (fabsf(det) < 1e-9f) return 0;
+    inv = 1.0f / det;
+    tv[0] = o[0] - a[0]; tv[1] = o[1] - a[1]; tv[2] = o[2] - a[2];
+    u = (tv[0] * pv[0] + tv[1] * pv[1] + tv[2] * pv[2]) * inv;
+    if (u < 0.0f || u > 1.0f) return 0;
+    qv[0] = tv[1] * e1[2] - tv[2] * e1[1]; qv[1] = tv[2] * e1[0] - tv[0] * e1[2]; qv[2] = tv[0] * e1[1] - tv[1] * e1[0];
+    v = (d[0] * qv[0] + d[1] * qv[1] + d[2] * qv[2]) * inv;
+    if (v < 0.0f || u + v > 1.0f) return 0;
+    t = (e2[0] * qv[0] + e2[1] * qv[1] + e2[2] * qv[2]) * inv;
+    return t > 0.05f && t < tmax;
+}
+/* matriz del mundo de un cartel (la R W de carga_cartel, sin la vista) */
+static void cartel_mundo(const float (*W)[4], float (*RW)[4])
+{
+    float to_x = -ade[0], to_z = -ade[2], l = sqrtf(to_x * to_x + to_z * to_z), dx = W[0][3], dz = W[2][3], cs, sn; int j;
+    if (l > 0.0001f) { to_x /= l; to_z /= l; }
+    sn = dz * to_x - to_z * dx; cs = to_z * dz + to_x * dx;
+    if (fabsf(sn) < 1.1920929e-7f) { sn = 0; cs = cs < 0 ? -1.0f : 1.0f; }
+    for (j = 0; j < 4; j++) {
+        RW[0][j] = cs * W[0][j] - sn * W[2][j]; RW[1][j] = W[1][j]; RW[2][j] = sn * W[0][j] + cs * W[2][j]; RW[3][j] = W[3][j];
+    }
+}
+/* la malla m de mo (una que se dibuja en este cuadro: la llama dibuja_rango) contra el rayo del sol del cuadro
+   (esfera y despues sus triangulos); 1 si choca antes de lejos */
+static int sol_rayo_malla(const modelo_t *mo, const malla_t *m, int cart)
+{
+    const vert_t *v = mo->verts + m->v0; const float *d = sol_rd; float tmax = lejos;
+    float c[3], RW[4][4], p[3][3], t, e2; uint32_t j;
+    sol_n_mallas++;
+    if (cart) {                                                 /* el centro de un cartel esta en el marco de su nodo */
+        const nodo_t *nd = mo->nodos + m->nodo;
+        c[0] = nd->cx - ojo[0]; c[1] = nd->cy - ojo[1]; c[2] = nd->cz - ojo[2]; e2 = nd->r;
+    } else { c[0] = m->cx - ojo[0]; c[1] = m->cy - ojo[1]; c[2] = m->cz - ojo[2]; e2 = m->r; }
+    t = c[0] * d[0] + c[1] * d[1] + c[2] * d[2];
+    if (t + e2 < 0.0f || t - e2 > tmax) return 0;
+    if (c[0] * c[0] + c[1] * c[1] + c[2] * c[2] - t * t > e2 * e2) return 0;   /* la esfera no toca el rayo */
+    sol_n_esf++; sol_n_tri += m->n - 2;
+    if (cart) cartel_mundo((const float (*)[4])mo->carteles[mo->nodos[m->nodo].cartel], RW);
+    for (j = 0; j < m->n; j++) {
+        float *q = p[j % 3];
+        if (cart) {
+            q[0] = v[j].x * RW[0][0] + v[j].y * RW[1][0] + v[j].z * RW[2][0] + RW[3][0];
+            q[1] = v[j].x * RW[0][1] + v[j].y * RW[1][1] + v[j].z * RW[2][1] + RW[3][1];
+            q[2] = v[j].x * RW[0][2] + v[j].y * RW[1][2] + v[j].z * RW[2][2] + RW[3][2];
+        } else { q[0] = v[j].x; q[1] = v[j].y; q[2] = v[j].z; }
+        if (j >= 2 && rayo_tri(ojo, d, p[0], p[1], p[2], tmax)) return 1;
+    }
+    return 0;
+}
+/* el rayo de este cuadro hacia uno de los 16 puntos (4 x 4) del disco del objeto 0x10 a 1/4 (q: hacia el sol) */
+static void sol_rayo_pon(const float *q, float spread)
+{
+    static const int8_t PX[16] = { -3, 1, -1, 3, -3, 1, -1, 3, -3, 1, -1, 3, -3, 1, -1, 3 };
+    static const int8_t PY[16] = { -3, -3, -3, -3, -1, -1, -1, -1, 1, 1, 1, 1, 3, 3, 3, 3 };
+    float lq = sqrtf(q[0] * q[0] + q[1] * q[1] + q[2] * q[2]), rho = 2.96f * 0.25f * spread / 4.0f; uint32_t k = sol_ocl_i & 15; int j;
+    for (j = 0; j < 3; j++) sol_rd[j] = q[j] / (lq > 0 ? lq : 1) + (PX[k] * der[j] + PY[k] * arr[j]) * rho;
+    lq = sqrtf(sol_rd[0] * sol_rd[0] + sol_rd[1] * sol_rd[1] + sol_rd[2] * sol_rd[2]); for (j = 0; j < 3; j++) sol_rd[j] /= lq;
+    sol_rayo_on = 1; sol_rayo_res = 0;
+}
+/* el resultado del rayo del cuadro (lo dibujado en las listas 0 y 1) y la parte visible 0..0,251 */
+static float sol_visible(void)
+{
+    uint32_t k = sol_ocl_i++ & 15;
+    if (sol_rayo_res) sol_ocl_bits |= (uint16_t)(1u << k); else sol_ocl_bits &= (uint16_t)~(1u << k);
+    return SOL_VIS * (float)(16 - __builtin_popcount(sol_ocl_bits)) / 16.0f;
+}
+/* direccion del sol (q, del ojo hacia el), en la camara del original (P) y en la pantalla de 640 x 480; 1 si se dibuja */
+static int sol_pantalla(float *q, float *P, float *sx, float *sy)
+{
+    float v[16], d[3], p0, y0; int k;
+    if (!sol_ok || sol_int <= 0) return 0;
     luz_actual(1, v, d);
     luz_angulos(d, &p0, &y0);                                   /* 44A480 y la inclinacion por cam+358 (etapa < 15) */
     if (cam_ok) p0 *= cam.f358;
@@ -3911,19 +4023,38 @@ static void sol_dibuja(void)
     P[0] = q[0] * der[0] + q[1] * der[1] + q[2] * der[2];        /* en la camara del original */
     P[1] = q[0] * arr[0] + q[1] * arr[1] + q[2] * arr[2];
     P[2] = -(q[0] * ade[0] + q[1] * ade[1] + q[2] * ade[2]);
-    if (P[2] >= 0) return;
-    sx = fx * P[0] / -P[2]; sy = fx * P[1] / -P[2];              /* 0x1f6b70: en la pantalla de 640 x 480 */
-#if defined(DIAG_VTX) || defined(DIAG_SOL)
-    {   static int c; if (++c % 60 == 0) dbglog(DBG_INFO, "DIAG sol %.0f %.0f int %.2f f358 %.3f fx %.0f p0 %.1f\n", (double)sx, (double)sy, (double)sol_int,
-                                     (double)(cam_ok ? cam.f358 : -1), (double)fx, (double)(p0 * 57.29578f)); }
+    if (P[2] >= 0) return 0;
+    *sx = fx * P[0] / -P[2]; *sy = fx * P[1] / -P[2];            /* 0x1f6b70: en la pantalla de 640 x 480 */
+    return *sx > -360 && *sx < 360 && *sy > -280 && *sy < 280;  /* 0x10f4f0..0x10f56c */
+}
+/* antes de las listas: el rayo del cuadro si el sol se va a dibujar (lo prueban las mallas de dibuja_rango) */
+static void sol_prepara(void)
+{
+    float q[3], P[3], sx, sy;
+    sol_rayo_on = 0;
+#ifndef SOL_SIN_OCLUSION
+    if (sol_pantalla(q, P, &sx, &sy)) sol_rayo_pon(q, 2 * atanf(240.0f / fx) * 57.29578f * 0.01f * 0.13f);
 #endif
-    if (!(sx > -360 && sx < 360 && sy > -280 && sy < 280)) return;   /* 0x10f4f0..0x10f56c */
+}
+static void sol_dibuja(void)
+{
+    float P[3], sx, sy, ax[3], fov, size, spread, bright, edge, flare, ring, facing, vis = SOL_VIS, q[3];
+    float wv[3], lw, g0[3] = { 0, 0, -0.2f }, far = 1000.0f; uint32_t tinte; int k, en = sol_pantalla(q, P, &sx, &sy);
+#if defined(DIAG_VTX) || defined(DIAG_SOL)
+    if (en) { static int c; if (++c % 60 == 0) dbglog(DBG_INFO, "DIAG sol %.0f %.0f int %.2f tapados %d/16 (60 cuadros: mallas %u esferas %u tri %u)\n",
+                                                      (double)sx, (double)sy, (double)sol_int, __builtin_popcount(sol_ocl_bits),
+                                                      (unsigned)sol_n_mallas, (unsigned)sol_n_esf, (unsigned)sol_n_tri);
+              if (c % 60 == 0) sol_n_mallas = sol_n_esf = sol_n_tri = 0; }
+#endif
+    if (!en) { sol_rayo_on = 0; return; }
     fov = 2 * atanf(240.0f / fx) * 57.29578f * 0.01f;           /* cam+A0 en grados / 100 */
     size = fov; spread = fov * 0.13f;
     bright = 0.99f;                                             /* se apaga hacia los bordes (0x10f654..0x10f720) */
     if (sx < -100) bright = (sx + 360) * 0.00625f; else if (sx > 100) bright = (360 - sx) * 0.00625f;
     if (sy < -100) bright *= (sy + 280) * 0.00555556f; else if (sy > 100) bright *= (280 - sy) * 0.00555556f;
     edge = bright; flare = bright * 0.65f;
+    if (sol_rayo_on) vis = sol_visible();                       /* (sin el rayo: el sol entero) */
+    sol_rayo_on = 0;
     {   float lq = sqrtf(q[0] * q[0] + q[1] * q[1] + q[2] * q[2]);
         facing = (ade[0] * q[0] + ade[1] * q[1] + ade[2] * q[2]) / (lq > 0 ? lq : 1); }
     ax[0] = P[0] / -P[2]; ax[1] = P[1] / -P[2]; ax[2] = -1;    /* el sol en el plano z = -1 */
@@ -5252,6 +5383,7 @@ int main(int argc, char **argv)
         }
         tri_enviados = 0; vtx_ult = vtx_env; vtx_env = 0; ta_inicia_cuadro(); vtx_et_ult = vtx_et; vtx_et = 0;
         if (estado != TITULO) nodos_visibles_todos();          /* los del original que caben en el TA */
+        if (estado != TITULO) sol_prepara();                    /* el rayo hacia el sol de este cuadro */
         if (estado != TITULO) traf_parpadea(pausa || estado != CARRERA);   /* 4AE5F0 (sin traf_paso: suspendido) */
         vib_cuadro();                                           /* el Puru Puru (vib_paso lo dejo en el control) */
         for (l = 0; l < 3; l++) {

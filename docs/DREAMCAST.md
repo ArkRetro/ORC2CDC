@@ -603,6 +603,16 @@ texturas por etapa; `tools/vram.py`, COCHE06): peor BK08 / BK09 + IMPE 1127 KB e
 libres (185 en la zona + 87; antes 290), IMPE + BK13 **366 KB** (279 + 87; antes 382), 0 texturas rebajadas,
 ninguna fuera de la zona salvo la del objeto de la union.
 
+### Objetos animados de las uniones en la cola del hueco de la union (2026-11-09)
+
+Fallo (Flycast, PRUEBA_AUTO con COCHE09): el dragon (BO11.DAT, conjunto 11, el de la etapa limpia) no se leia:
+"Out of memory ... diff 282624" con 288 KB libres en total pero la cima del monton en ~135 KB (lo demas, troceado).
+Ahora: BOnn.DAT compacto (cuadros 1..3 en int16, BO11 167 KB) y leido en la cola del hueco de la union, donde empiezan
+los texeles del BKnn.DAT (ya estan en la VRAM): 217-230 KB libres ahi en las 15 uniones; si no cabe, al
+monton como antes. El monton no cambia (medido en la carrera desde el menu: "BO11.DAT en 0.15 s ... RAM libre 278K"
+frente a 279K antes de leerlo), y fuera de la carrera (pelicula, menus) no se usa: el prestamo del hueco de la union
+(presta_union) no se toca. libera_modelo no libera un modelo que este dentro del hueco de la union.
+
 ## 3. Otros riesgos de la consola real
 
 | Riesgo | Estado |
