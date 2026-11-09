@@ -296,7 +296,7 @@ estaba y se dice lo que falta). Estado: CORREGIDO, SE QUEDA (ya era del original
 | Trafico: 11 coches al salir en s0 + 130 + i 121 + azar 66 m | 4787E0: sin coches al salir (salvo puntos fijos 478B90); aparecen de uno en uno | ninguno al salir | CONFIRMADO (logica) | CORREGIDO |
 | Trafico: reaparece a 550..1100 m si queda 150 m detras | 477F60 cierra con distancia < -2 o > 60 posiciones; 4787E0 abre a 50 posiciones (0x32; 35 en la union pasada la 120) cada max(3, registro +5) posiciones | -2 / +60 / +50 (35) posiciones, separacion del registro (12..20 en el curso) | CONFIRMADO | CORREGIDO (2026-11-08: separacion del registro de aparicion y caso de la union) |
 | `NTRAF 11` (todas las plazas llenas) | tope 20 (0x14) x densidad 46CD60 (1 fuera de la red) x registro +4 de 4EFB90 (por tramo), mas los puntos fijos de 478B90 | registro +4: 0..12 en el curso (PALM 5/5/3/0/4, LAKE 12/7/5/2/3) | CONFIRMADO (tablas TAP1) | CORREGIDO (NTRAF 16 = plazas; cuantos abre lo dice el registro) |
-| Velocidad del trafico 36-50 m/s al azar | 4F0030 (PS2 0x1f1a88): registro de 0x46 bytes del sitio del coche (+0xC i16 x K5B43A4 = 0,0046142, PS2 0x1dba94), tabla 84BF60 copiada por 4EFAF0 del descriptor +0x84 (PS2) | 100 km/h del modelo (27,7 m/s) en todo el curso | CONFIRMADO | CORREGIDO (la velocidad por clase y el camino "Lead" de 472450 siguen sin portar) |
+| Velocidad del trafico 36-50 m/s al azar | 4F0030 (PS2 0x1f1a88): registro de 0x46 bytes del sitio del coche (+0xC i16 x K5B43A4 = 0,0046142, PS2 0x1dba94), tabla 84BF60 copiada por 4EFAF0 del descriptor +0x84 (PS2) | 100 km/h del modelo (27,7 m/s) en todo el curso | CONFIRMADO | CORREGIDO (el camino "Lead" de 472450 y 472320 portados: Velocidad del trafico de delante y Cambios de carril del trafico) |
 | Trafico: frenar a 0,9 del de delante a < 10 m y carril libre 15/30 m al cambiar | el original tiene choques entre coches de trafico (4F9450) | ahora portados | CONFIRMADO | CORREGIDO (2026-11-08: quitados; 25 m al nacer = 43EB60, se queda) |
 | Trafico: vuelta al centro del carril 0,02 m/cuadro | 6280EC = 0,02 es un tope (B08 no se acerca a 0 mas de eso); lo que lo devuelve es 473D10 (x 0,995 o 0,05 apartandose del jugador) y los cambios de carril | 473D10 portado (PS2 0x1e77e0) | CONFIRMADO | CORREGIDO (2026-11-08) |
 | Caja de choque con el jugador: medio largo + 2,3 m, ancho + 1 m | cajas del descriptor 520950 de los dos modelos, esquinas contra bordes (4F9000) | CJM1/TRC1 | CONFIRMADO | CORREGIDO (2026-11-08) |
@@ -551,14 +551,51 @@ los coches de delante del jugador van por el camino "Lead" de 472450 (PC race_tr
 4F0030 = PS2 0x1f1a88..0x1f20c4: minimas por clase 250 / 290 / 310 y maximas 270,9..473 km/h del modelo): unos
 180-275 del marcador; solo el de detras del jugador y los de atras van a +0xC. Ahora `traf_objetivo` (demo/main.c)
 porta el camino (con el jugador chocando la maxima; a menos de +4 posiciones 470B30 con la velocidad del jugador; mas
-alla la cola de 471E70) y el ritmo entero de 472450 (incluido el (v / minima)^2 que faltaba). PENDIENTE: 472320 (seguir
-al de delante y adelantarle: 470CB0, 470ED0, 4718D0, 471680) y 471F90; PROBABLE: K6281C0 = 0,01 (el porcentaje).
+alla la cola de 471E70) y el ritmo entero de 472450 (incluido el (v / minima)^2 que faltaba). 472320 y 471F90: ver
+"Cambios de carril del trafico" (abajo); K6281C0 = 0,01 CONFIRMADO (PS2 0x1e2680 divide por 100).
 Medido en Flycast (`-DPRUEBA_GUION -DPRUEBA_EMBISTE -DPRUEBA_TRAFICO -DDIAG_CHOQUE`, el piloto de prueba va a por el
 coche de delante): antes, golpes por detras 200 -> 76, 187 -> 75, 156 -> 72, 154 -> 72, 147 -> 71, 142 -> 71 km/h del
 marcador (el trafico a 60-65; pierde el 50-62 %); ahora 245 -> 195 (sin estado 7, el otro a 264), 231 -> 162, 224 ->
 172, 227 -> 163, 229 -> 152, 229 -> 144, 244 -> 165, 212 -> 153 (el trafico a 150-200; pierde el 20-37 %). Los roces
 siguen sin cambio de velocidad. Valores esperados del original con 4F7BF0: cierre <= 80 del modelo: -80 del modelo
 (-50 del marcador); estado 7: 0,1 v + 0,9 vO.
+
+### Cambios de carril del trafico (2026-11-09)
+
+Queja del probador: "el trafico a veces hace cambios de carril subitos y erraticos". Auditoria de toda la parte lateral
+de la IA (PC race_traffic.cpp, contrastada con SLES-53998 donde habia duda) y de la de velocidad que la dispara. Codigo:
+demo/main.c (tr_*, traf_cambio, traf_decide, traf_seguro, traf_aparta, traf_esquiva, traf_recupera, traf_carriles,
+traf_470b30 / traf_470cb0 / traf_470ed0 / traf_alcanza / traf_aparta_de / traf_detras / traf_cola, traf_objetivo,
+traf_guia, traf_paso).
+
+| Pieza | Original | Antes en la demo | Ahora | Certeza |
+|---|---|---|---|---|
+| Vecinos | 479420: lista por avance, el de delante primero; +314 = el de delante, +318 = el de detras; el jugador esta en la lista (comparador 479360 y 46E250(a, b) = lo que b va por delante de a) | "delante" = el mas cercano por delante, "detras" = por detras, al reves de como los usa el original | lista ordenada con el jugador (tr_enlaza) | CONFIRMADO (comparador; PS2 1e68a0 / 1e2d30 usan +318 igual) |
+| Movimiento | 47BC00: el coche conduce hacia un punto de mira (47B600: la muestra del carril +66 tres filas mas alla, desplazada B08 m, 474E70) avanzando +1C4 hacia el (475040); la carroceria +2E gira hacia la muestra siguiente con tope 4 grados x 0,8 por cuadro; en las 10 primeras / 5 ultimas filas del tramo pesa la velocidad anterior (k = 0,02 con la direccion alineada, 628218 = 0,04) | c.x = centro del carril + B08 en el mismo cuadro: cualquier salto del objetivo o de los carriles de la ruta salia entero | traf_guia: el coche sigue al punto de mira (de media 2,5 filas, SIMPLIFICADO), giro de +2E limitado, zona de giro | CONFIRMADO (PS2 0x1eab70.. con 0,02 / 0,04 / 0,0698 / 0,8) |
+| B08 | m del original (474E70 lo usa como distancia) | cuartos de la separacion entre carriles de la ruta (con centros repetidos donde hay menos de 6 carriles, tools/conv_tramo.py, el coche se iba 4 m al terminar un cambio) | m; +268 / +264 en m desde los centros de los carriles de la ruta | CONFIRMADO |
+| Cambio en curso (4736D0, PS2 0x1e6f60) | B08 = (1 - t) B08 +- 4,5 t^2 cada cuadro; si el jugador tapa (471380) +B14 + 1 pero B08 sigue; se anula con el destino prohibido, tocado por el lado al que va o en las 10 primeras filas de la etapa / 5 ultimas de la union; al acabar (o anulado) B08 = desvio real, entre -4 y 4 | con el jugador tapando se congelaba (al soltar, B08 saltaba hasta 0,1 m del original por cuadro); sin anulaciones; B08 -= 4 | igual que el original | CONFIRMADO |
+| Arranque (470A30 / 470AB0, PS2 0x1e2520 / 0x1e25b0) | a la izquierda solo con B08 < 1 y a la derecha con B08 > -1 (o el carril actual prohibido); 804350 = 0 | sin la condicion | igual | CONFIRMADO |
+| Decision (47DC10, PS2 0x1e68a0) | carril prohibido (+0xB del registro de aparicion) -> 471590; union: pesados del carril del medio a la derecha si el de detras (+318) es el jugador o mas lento; etapa: autobus 473540; clases 3 y 4 con el de detras el jugador o mas lento, fila > 15 y 804350 > 60, hacia el lado de menos peso (4734C0 con los pesos 5B3DE4 de los coches de la etapa); solo si \|lane_pos - cl x 4\| > 4 (a la derecha solo desviado > 2 m a la izquierda o dos carriles), 471010 y sin uno mas lento delante (+314) a menos de 50 m | solo la regla de las clases 3 y 4, con el de delante en vez del de detras, sin la condicion de 4 m (un carril a la derecha siempre), cuentas sin pesos | igual (autobus: sin el radio +B54, PENDIENTE) | CONFIRMADO |
+| Seguro (471010, PS2 0x1e2d30) | detras (+318, hasta el jugador): uno mas rapido en el destino que el cambio acerca (solo el jugador, o cualquiera para la clase 0); delante (+314, hasta 50 m): uno mas lento en el destino; con el mas cercano entre 4 y 50 m, no | el jugador por delante y los de detras mas lentos | igual | CONFIRMADO (comparaciones de +1C4 en PS2) |
+| Apartarse (473B90, PS2 0x1e75e0) | del de delante o detras de la lista (46DD00 / 46E250 por debajo de 30 m) a menos de 4 m y 2 m de lado | del mas cercano en s de todos | igual | CONFIRMADO |
+| Esquivar (473D10) | 46E250(jugador, coche) - 50: empuje maximo entre 0 y 50 m por delante del jugador y nada a mas de 250 | (s jugador - s coche) - 50: siempre el maximo por delante | igual | CONFIRMADO |
+| El de detras le alcanza (472320 / 470CB0 / 470ED0 / 4718D0 / 471680, PS2 0x1e46a0 / 0x1e28c8 / 0x1e2ba0 / 0x1e3800 / 0x1e3520) | los de delante del jugador miran al de detras (+318, sin pasar del jugador): si viene mas rapido en su carril a 4..50 m acelera hacia 1,05 x su velocidad (en hueco / diferencia cuadros, tope 480 km/h del modelo) y se aparta un carril (4714D0: lejos de el o del jugador; 471010) o anula el cambio hacia su lado; si no, objetivo 1,05 x (o min(470B30, 1,05 x) en otro carril). Lejos (d >= +4) ese es el objetivo; cerca, max(objetivo, +0xC, 470B30) (PS2 0x1e4300) | 472A50 (de los autobuses y rivales): no ir mas rapido que el de delante a menos de 50 m | igual; 471F90 no se porta (min(1,05 v, 470B30) no pasa de 470B30, el max de despues lo borra) | CONFIRMADO (5B43B0 = 1,05, 5B43AC = 2,2148, 5C403C = 0,7, 6282A4 = 3 en PS2) |
+
+SIMPLIFICADO / PENDIENTE: 803714 (anchura minima de delante del jugador) = 24 / 12, asi que 470CB0 mira un carril (dos la
+clase 0); 44F0F0 (calzada partida en la etapa, solo una etapa del original) por la colision con muro entre los carriles 2
+y 3 (SUPUESTO); peso del jugador en 46E250 = 1 (SUPUESTO); 44C940 = no ser la primera etapa (SUPUESTO); el autobus lejos
+del jugador (473540 con +B54) y 472FE0 sin portar. Los carriles de la ruta de la demo cerca del final de la union (filas
+fin-10..fin) se mueven varios metros en pocas filas (carriles repartidos por la anchura del asfalto, conv_union.py): los
+coches los siguen (ya sin saltos); PENDIENTE suavizarlos en el conversor.
+Medido en Flycast (`-DPRUEBA_AUTO -DDIAG_LAT`, el mismo recorrido del piloto, ~85 s de carrera; `LAT` por coche y cuadro):
+cambios de la velocidad lateral de un cuadro al siguiente de mas de 0,03 m: 547 antes, 32 ahora (los que quedan: el
+final de cada cambio, donde B08 pasa a ser el desvio real, y los carriles de la ruta al final de la union); antes, la
+x del coche era una linea quebrada (esquinas al empezar, al esperar al jugador y al acabar) y con carriles repetidos el
+coche cruzaba de lado varios metros en pocos cuadros; ahora la curva del cambio es la del original, sin esquinas (grafica
+`lat_antes_ahora.png` del informe). Cambios encadenados (uno al acabar otro, 1 -> 0 -> 1): 2 de 16 antes, 2 de 10
+ahora; el original tambien los hace (el de detras le alcanza y 471680 le aparta). Los que empiezan y se anulan al cuadro
+siguiente (471680 hacia un lado y 4718D0 lo anula si es el del que le alcanza) no mueven el coche (t = 0). Arranque real
+con el menu (nav.sh): video, menus y carrera con trafico, sin cambios.
 
 ### Golpeados: parpadeo y cierre (2026-11-09)
 

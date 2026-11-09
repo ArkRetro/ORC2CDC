@@ -1269,6 +1269,7 @@ static void coche_coloca(coche_t *c)
 /* plazas de trafico: el original abre hasta [registro de aparicion +4] coches (2..12 en el curso; tope 20 = 0x14 de
    4787E0) mas los de los puntos fijos (478B90), en 24 sucesos; 16 plazas cubren el curso (el TA lo reparte ta_cabe) */
 #define NTRAF 16
+#define TR_JUG NTRAF                                            /* el jugador en la lista de coches de la IA */
 /* Campos del original (car work del PC): b08 desplazamiento lateral respecto al centro del carril (m del original:
    4 m = un carril, + hacia el carril siguiente), b14/b18 cuadros que faltan / totales del cambio de carril, dir su
    sentido, b58 deriva tras el golpe (0xB / 0xC), b60 cuadros de recuperacion, b64 cuadros sin choques, b6c golpeado;
@@ -1278,7 +1279,8 @@ typedef struct { coche_t c; int carril, modelo, destino; float v_des;
                  int golpe, lado; float t_golpe, vlat;          /* golpe: estado de choque (16..19) o -1 */
                  float t_recup, wa[3]; int d22;                 /* +2F8, pose del cuadro anterior (mundo de or2), +D22 */
                  float b08; int b14, b18, dir, b58, b60, b64, b6c, b62, b53, c5c1, n2f4;
-                 int pt_marca, b72, color, ha; } trafico_t;               /* puntuacion: +C5C (PT_*) y +B72 (rebufo reciente) */
+                 int pt_marca, b72, color, ha;                  /* puntuacion: +C5C (PT_*) y +B72 (rebufo reciente); ha: INFARTO */
+                 int toca; float gv[2]; } trafico_t;             /* toca: +4 0x10000 / +DD4 (el que le toco, TR_JUG el jugador); gv: +20 */
 static trafico_t traf[NTRAF];
 static int bo_toca_coche, bo_roce;                              /* +4 0x10000 / 0x400000 del jugador en el paso (44EDE0) */
 /* +C5C del coche para la puntuacion (4F2860): 0x40 ya adelantado, 0x400000 tocado (puntos a la mitad), 0x800000
@@ -1409,18 +1411,6 @@ static int carril_cerca(float s, float x)
     for (k = 0; k < NCARRIL; k++) { float e = fabsf(carril_x(s, k) - x); if (e < d) { d = e; m = k; } }
     return m;
 }
-/* separacion (con signo) entre el carril k y el siguiente: lo que en el original son 4 m */
-static float carril_paso(float s, int k)
-{
-    return k < NCARRIL - 1 ? carril_x(s, k + 1) - carril_x(s, k) : carril_x(s, k) - carril_x(s, k - 1);
-}
-/* posicion lateral en carriles (carril + b08 / 4): la +268 del original, en unidades de carril */
-static float traf_pos(const trafico_t *t) { return t->carril + t->b08 * 0.25f; }
-static float yo_pos(float s)
-{
-    int k = carril_cerca(s, yo.x);
-    return k + (yo.x - carril_x(s, k)) / carril_paso(s, k);
-}
 /* el carril k esta libre entre s-atras y s+delante (sin contar al propio coche) */
 static int carril_libre(const trafico_t *yo_t, int k, float s, float atras, float delante)
 {
@@ -1462,7 +1452,7 @@ static void traf_nace(trafico_t *t, float s)
     t->golpe = -1; t->t_golpe = 0; t->vlat = 0; t->t_recup = 0; t->d22 = 0; memset(t->c.pose_t, 0, 12); memset(t->c.pose_r, 0, 12);
     t->b08 = 0; t->b14 = t->b18 = 0; t->dir = 0; t->b58 = t->b60 = t->b64 = t->b6c = 0;   /* 4704A0 */
     t->b62 = 60; t->b53 = 0; t->c5c1 = 0; t->n2f4 = 0;          /* 4704A0 (PS2 0x1ec44c): +B62 = 60 salvo variante 4 */
-    t->pt_marca = 0; t->b72 = 0;
+    t->pt_marca = 0; t->b72 = 0; t->toca = -1; t->gv[0] = t->c.v / 60.0f; t->gv[1] = 0;
     t->c.x = carril_x(s, t->carril); coche_coloca(&t->c);
     traf_pose_ant(t);
 }
@@ -1848,6 +1838,7 @@ static void traf_choques(void)
 #ifdef DIAG_CHOQUE
     diag_cuadro++;
 #endif
+    for (i = 0; i < NTRAF; i++) traf[i].toca = -1;              /* +4 0x10000: lo pone 4F9450 en cada pasada */
     if (!fis_ok || !choq.ok || !trc_ok || !cjm_ok) return;      /* sin las cajas del original: sin choques */
     if (fpar.modelo >= 0 && fpar.modelo < 30) {                 /* el jugador contra el trafico */
         mundo_de(yo.s, yo.x, &ox, &oy, &th);
@@ -1865,6 +1856,7 @@ static void traf_choques(void)
             yo.s -= rp * sl; yo.x -= rp * (k.sep[0] * r[0] + k.sep[1] * r[1]);
             fa.x -= rp * k.sep[0]; fa.y -= rp * k.sep[1];
             t->c.s += (1.0f - rp) * sl; coche_coloca(&t->c);
+            t->toca = TR_JUG;                                   /* +DD4 */
             k_ult = k; ult = i;
         }
         if (ult >= 0) { traf_choca(traf + ult, ult, &k_ult, ox, oy, th); coche_coloca(&yo); vib_toca = 1; vib_otro = ult; bo_toca_coche = 1; }
@@ -1886,6 +1878,7 @@ static void traf_choques(void)
             a->c.s -= rp * sl; b->c.s += (1.0f - rp) * sl;
             fa.y -= rp * sl * f[1]; fa.x -= rp * sl * f[0];
             coche_coloca(&a->c); coche_coloca(&b->c);
+            a->toca = j; b->toca = i;                           /* +DD4 */
             k_ult = k; ult = j;
         }
         if (ult < 0) continue;
@@ -2025,13 +2018,12 @@ static void vib_cuadro(void)
     }
 }
 
-/* --- IA del trafico del original (47E4A0 drive -> 472450 velocidad, 473F30 recuperacion, 47E110 carriles).
+/* --- IA del trafico del original (47E780 control -> 47E4A0 drive: 472450 velocidad (con 472320 / 4718D0 / 471680),
+   473F30 recuperacion, 47E110 carriles; 47BC00 movimiento: 47B600 punto de mira y 475040 direccion).
    Registro de velocidad del sitio (0x46 bytes, 4F0030; TAP1 de TRAFC.DAT): en el curso, seguimiento +8 = 50 m, +6 = 1
    y +4 = 7 o 10 posiciones (traf_lejos); 4F0030 pisa con constantes las velocidades por clase (+0xE.., +0x1C..) y los
    porcentajes (+0x2A..); la del coche nuevo (+0xC, 100 km/h del modelo en todo el curso) es v_des y el objetivo del
-   camino "Plain" de 472450 (el coche de detras y el siguiente al jugador). PENDIENTE: el camino "Lead" (los demas por
-   delante: 470B30, 471E70, 471F90, 472320, que van segun la velocidad del jugador) no se porta: todos van a v_des.
-   Unidades del original: m/cuadro (60 por segundo). */
+   camino "Plain" de 472450. Unidades del original: m/cuadro (60 por segundo); aqui las velocidades en m/s. */
 #define TR_HUECO 50.0f                                          /* rec2+8: distancia de seguimiento (m) */
 #define TR_LEJOS traf_lejos_v                                   /* rec2+4 (posiciones): 4F0030, 7 o 10 */
 #define TR_CERCA 1                                              /* rec2+6 */
@@ -2053,141 +2045,347 @@ static void traf_acelera(trafico_t *t, float rate, float obj, int f0, int f1)
     }
     t->c.v = s * 60.0f;
 }
-/* coches por carril (800D2C) y 4734C0: -1 si los carriles a la derecha de k llevan mas trafico que los de la izquierda */
+/* --- Vecinos, distancias y posicion lateral como las lee la IA del original. Indices: 0..NTRAF-1 el trafico,
+   TR_JUG el jugador (esta en la lista de coches como uno mas).
+   - 479420 (PS2: la misma lista): los coches ordenados por avance (46F990 y, en la misma posicion, 46E250), el de
+     delante primero; +314 = el de delante, +318 = el de detras (comparador 479360: d < 0 -> va despues).
+   - 46DD00: distancia XZ entre dos coches (802AF0); 46E250 (PS2 0x1ddc28): lo que b va por delante de a a lo largo
+     de b, menos (peso de la clase de b - 1) x 20 m (pesos 5B3DE4 = PS2 0x40b9c8: 4,2,3,1,1,1,1); por debajo de 0,1 m
+     la distancia sin proyectar. El peso del jugador: 1 (SUPUESTO).
+   - +268 / +264 (4A4010): distancia al borde izquierdo (> 0 dentro) y al derecho (< 0 dentro) en m del original
+     (4 m por carril): en la etapa la carretera entera (6 carriles, 24 m; 803714 = 24); en la union cada calzada (3
+     carriles, 12 m; +60 = 0x64 / 0x65). La "posicion de carril" (lane_pos de 47DC10) suma 12 en la calzada derecha
+     de la union. Se toma de la posicion real del coche (c.x), no del objetivo. */
+static int tr_del[NTRAF + 1], tr_det[NTRAF + 1];                /* +314 / +318 (-1: ninguno) */
+static float tr_s(int e) { return e == TR_JUG ? yo.s : traf[e].c.s; }
+static float tr_x(int e) { return e == TR_JUG ? yo.x : traf[e].c.x; }
+static float tr_v(int e) { return e == TR_JUG ? yo.v : traf[e].c.v; }   /* +1C4 (aqui en m/s) */
+static int tr_carril(int e) { return e == TR_JUG ? carril_cerca(yo.s, yo.x) : traf[e].carril; }   /* +66 */
+static int tr_cls(int e) { int c = e == TR_JUG || !trc_ok ? 3 : trc[traf[e].modelo].clase; return c < 0 || c > 6 ? 3 : c; }   /* +324 */
+static int tr_en_union(float s) { int nodo, pos; return traf_lugar(s, &nodo, &pos); }
+/* sentido de los carriles en x (+1: el carril siguiente a la derecha) */
+static float tr_sg(float s) { return carril_x(s, NCARRIL - 1) >= carril_x(s, 0) ? 1.0f : -1.0f; }
+static int tr_base(int e) { return tr_en_union(tr_s(e)) && tr_carril(e) >= 3 ? 3 : 0; }   /* primer carril de su calzada */
+/* +268 en m: desde el borde izquierdo de su calzada (2 m a la izquierda del centro de su primer carril). En m reales
+   y no en carriles: en la ruta de la demo los carriles no siempre estan a 4 m (con menos de 6 carriles de verdad hay
+   centros repetidos, tools/conv_tramo.py) y el original mide y desplaza en m (B08, 474E70) */
+static float tr_268(int e) { float s = tr_s(e); return (tr_x(e) - carril_x(s, tr_base(e))) * tr_sg(s) + 2.0f; }
+static float tr_264(int e)                                      /* +264: hasta el borde derecho (< 0 dentro) */
+{
+    float s = tr_s(e); int b = tr_base(e), h = tr_en_union(s) ? b + 2 : NCARRIL - 1;
+    return tr_268(e) - ((carril_x(s, h) - carril_x(s, b)) * tr_sg(s) + 4.0f);
+}
+/* lane x 4 (6280C0) en las coordenadas de +268 del coche e (borde izquierdo del carril k; -12 en la calzada derecha
+   de la union, 471010 / 471680 / 47DC10) */
+static float tr_borde_carril(int e, int k) { float s = tr_s(e); return (carril_x(s, k) - carril_x(s, tr_base(e))) * tr_sg(s); }
+static int tr_peso(int e)
+{
+    int c = tr_cls(e), w = e == TR_JUG || !ntap ? 1 : tap_peso[c];
+    return w > 0 ? w : 1;
+}
+static float tr_dist(int a, int b) { float ds = tr_s(a) - tr_s(b), dx = tr_x(a) - tr_x(b); return sqrtf(ds * ds + dx * dx); }
+static float tr_delante(int a, int b)                           /* 46E250(a, b) */
+{
+    float d = tr_dist(a, b), dd = d - (tr_peso(b) - 1) * 20.0f;
+    if (dd < 0.1f) return dd;
+    return d > 1e-4f ? dd * (tr_s(b) - tr_s(a)) / d : dd;
+}
+static int tr_aparte(int a, int b) { return (int)(fabsf(tr_268(a) - tr_268(b)) * 0.25f); }   /* apart_x */
+static int tr_tercio(int e) { return tr_carril(e) * 2 / 6; }
+static int tr_cierra(int e) { return e != TR_JUG && traf[e].c5c1; }   /* +C5C bit 0 */
+/* fila del sitio (car+0x64) y filas del tramo (43D470; 30000 si aun no se sabe), u = 1 en la union */
+static int tr_fila(float s, int *fin, int *u)
+{
+    int nodo, pos;
+    *u = traf_lugar(s, &nodo, &pos);
+    if (*u) *fin = s_sig >= 0 ? (int)((s_sig - s_union) / m_pos) : 30000;
+    else if (s_sig >= 0 && s >= s_sig) *fin = 30000;
+    else *fin = s_union >= 0 ? (int)((s_union - s_etapa) / m_pos) : 30000;
+    return pos;
+}
+/* carriles a los que puede ir (lo..hi, como 47DC10 / 471680 / 473F30): en la union los de su calzada; en la etapa
+   todos salvo donde la calzada esta partida (44F0F0: en el original solo en una etapa, filas 0x60..0x23E; aqui donde la
+   colision tiene un muro entre los carriles 2 y 3, SUPUESTO) */
+static void tr_calzada(int e, int *lo, int *hi)
+{
+    float s = tr_s(e), xa, xb;
+    if (tr_en_union(s) || muro_interior(s, 0.5f * (carril_x(s, 2) + carril_x(s, 3)), 0.5f, &xa, &xb)) {
+        *lo = tr_carril(e) < 3 ? 0 : 3; *hi = *lo + 2;
+    } else { *lo = 0; *hi = NCARRIL - 1; }
+}
+/* registro de aparicion del sitio del coche (4EFB90(car+5C)) y su +0xB: carriles prohibidos */
+static const uint8_t *tr_rec(const trafico_t *t)
+{
+    int nodo, pos, u = traf_lugar(t->c.s, &nodo, &pos);
+    return ntap ? traf_reg_aparicion(u, nodo, pos) : NULL;
+}
+static int tr_bloq(const uint8_t *rec, int k) { return rec && k >= 0 && k < 8 && ((rec[0xb] >> k) & 1); }
+/* 479420: la lista ordenada (una vez por cuadro) */
+static void tr_enlaza(void)
+{
+    int o[NTRAF + 1], n = 0, i, j;
+    for (i = 0; i <= NTRAF; i++) { tr_del[i] = tr_det[i] = -1; if (i == TR_JUG || traf[i].carril >= 0) o[n++] = i; }
+    for (i = 1; i < n; i++) {                                   /* el de delante primero */
+        int e = o[i]; float s = tr_s(e);
+        for (j = i; j > 0 && tr_s(o[j - 1]) < s; j--) o[j] = o[j - 1];
+        o[j] = e;
+    }
+    for (i = 0; i < n; i++) { tr_del[o[i]] = i > 0 ? o[i - 1] : -1; tr_det[o[i]] = i < n - 1 ? o[i + 1] : -1; }
+}
+/* 473620: desvio real del coche respecto al centro de su carril +66 (m del original) */
+static float tr_desvio(const trafico_t *t) { return (t->c.x - carril_x(t->c.s, t->carril)) * tr_sg(t->c.s); }
+#ifdef DIAG_LAT
+static int lat_linea;                                           /* prueba: linea del que empieza o anula un cambio */
+#define LAT_MOTIVO(f) (lat_linea = __LINE__, f)
+#else
+#define LAT_MOTIVO(f) f
+#endif
+static void tr_limpia_(trafico_t *t)                            /* +B14 = 0, +C5C &= ~0x600 */
+{
+#ifdef DIAG_LAT
+    if (t->b14 > 0 && t->dir) dbglog(DBG_INFO, "LATEV anula %d b14 %d linea %d\n", (int)(t - traf), t->b14, lat_linea);
+#endif
+    t->b14 = 0; t->dir = 0; t->destino = t->carril;
+}
+#define tr_limpia(t) LAT_MOTIVO(tr_limpia_(t))
+/* 470A30 / 470AB0 (PS2 0x1e2520 / 0x1e25b0): empieza un cambio a la izquierda (B08 < 1) o a la derecha (B08 > -1),
+   o con el carril actual prohibido; 804350 = 0 */
+static void tr_izquierda_(trafico_t *t, const uint8_t *rec)
+{
+    if (!(1.0f > t->b08) && !tr_bloq(rec, t->carril)) return;
+    t->dir = -1; t->destino = t->carril > 0 ? t->carril - 1 : 0; t->b14 = t->b18 = TR_CAMBIO; cambio_cd = 0;
+#ifdef DIAG_LAT
+    dbglog(DBG_INFO, "LATEV izq %d carril %d linea %d\n", (int)(t - traf), t->carril, lat_linea);
+#endif
+}
+static void tr_derecha_(trafico_t *t, const uint8_t *rec)
+{
+    if (!(t->b08 > -1.0f) && !tr_bloq(rec, t->carril)) return;
+    t->dir = 1; t->destino = t->carril < NCARRIL - 1 ? t->carril + 1 : NCARRIL - 1; t->b14 = t->b18 = TR_CAMBIO; cambio_cd = 0;
+#ifdef DIAG_LAT
+    dbglog(DBG_INFO, "LATEV der %d carril %d linea %d\n", (int)(t - traf), t->carril, lat_linea);
+#endif
+}
+#define tr_izquierda(t, rec) LAT_MOTIVO(tr_izquierda_(t, rec))
+#define tr_derecha(t, rec) LAT_MOTIVO(tr_derecha_(t, rec))
+/* 471380 (PS2 0x1e3128): 0 si el jugador tapa el cambio al carril k (viene detras a 4..50 m, a no mas de un carril del
+   destino, y el cambio le acerca) */
+static int traf_jugador_deja(int e, int k)
+{
+    float l = tr_borde_carril(e, k), pj = tr_268(TR_JUG), d;
+    if ((int)(fabsf(l - pj) * 0.25f) > 1) return 1;
+    if (!(fabsf(tr_268(e) - pj) > fabsf(l - pj))) return 1;
+    d = tr_delante(TR_JUG, e);
+    return !(d > 4.0f && TR_HUECO > d);
+}
+/* 4736D0 (PS2 0x1e6f60): un cuadro del cambio de carril. B08 = (1 - t) B08 +- 4,5 t^2 (t = cuadros pasados / 180);
+   se suspende (+B14 + 1, B08 sigue) mientras el jugador lo tapa; se anula si el carril destino esta prohibido, si le
+   ha tocado un coche del lado al que va (+4 0x10000, +DD4) o en las 10 primeras filas de la etapa / 5 ultimas de la
+   union; al acabar (o anulado) pasa al carril nuevo con B08 = el desvio real (473620), entre -4 y 4 */
+static void traf_cambio(trafico_t *t, int e, const uint8_t *rec)
+{
+    float f = (float)(t->b18 - t->b14) / (float)t->b18; int bl = t->carril, fila, fin, u;
+    t->b14--;
+    if (t->dir > 0) { bl++; t->b08 = (1.0f - f) * t->b08 + 4.5f * f * f; if (bl >= NCARRIL) bl = NCARRIL - 1; }   /* 5B43CC = 4,5 */
+    else if (t->dir < 0) { bl--; t->b08 = (1.0f - f) * t->b08 - 4.5f * f * f; if (bl < 0) bl = 0; }
+    if (tr_bloq(rec, bl)) tr_limpia(t);
+    else if (!tr_bloq(rec, t->carril)) {
+        if (!traf_jugador_deja(e, bl)) t->b14++;
+        else if (t->toca >= 0) {
+            int o = t->toca;
+            if ((t->dir < 0 && tr_268(e) > tr_268(o)) || (t->dir > 0 && tr_268(o) > tr_268(e))) tr_limpia(t);
+        } else {
+            fila = tr_fila(t->c.s, &fin, &u);
+            if ((!u && fila < 10) || (u && fila >= fin - 5)) tr_limpia(t);
+        }
+    }
+    if (t->b14 > 0) return;
+    if (t->dir) t->carril = bl;
+    tr_limpia(t);
+    t->b08 = tr_desvio(t);
+    if (t->b08 > 4.0f) t->b08 = 4.0f;
+    if (t->b08 < -4.0f) t->b08 = -4.0f;
+}
+/* 4734C0 con 46CC10: -1 si los carriles a la derecha de k llevan mas peso de trafico (5B3DE4 por clase, solo los
+   coches de la etapa) que los de la izquierda, si no 1 */
 static int traf_lado_libre(int k)
 {
-    int n[NCARRIL] = { 0 }, i; float a = 0, b = 0;
-    for (i = 0; i < NTRAF; i++) if (traf[i].carril >= 0) n[traf[i].carril]++;
+    float n[NCARRIL] = { 0 }, a = 0, b = 0; int i;
+    for (i = 0; i < NTRAF; i++) if (traf[i].carril >= 0 && !tr_en_union(traf[i].c.s)) n[traf[i].carril] += tr_peso(i);
     for (i = k; i < NCARRIL; i++) a += n[i];
     for (i = 0; i <= k; i++) b += n[i];
     return a / (NCARRIL - k) > b / (k + 1) ? -1 : 1;
 }
-/* 471010: el carril k es seguro (el jugador por delante en ese carril, o uno por detras al que adelanto, a menos de la
-   distancia de seguimiento y a mas de 4 m: no) */
-static int traf_seguro(const trafico_t *t, int k)
+/* 471010 (PS2 0x1e2d30): 1 si el cambio al carril k es seguro. Con el carril actual prohibido: hay alguno libre hacia
+   donde va. Si no: no con k prohibido; por detras (+318), un coche mas rapido en el carril destino (solo cuenta el
+   jugador o, para la clase 0, cualquiera a menos de un carril del borde del destino) que el cambio acerca; por delante
+   (+314, hasta 50 m), uno mas lento en el destino; con el mas cercano de esos entre 4 y 50 m, no */
+static int traf_seguro(int e, int k, const uint8_t *rec)
 {
-    int i; float g = 1000.0f, d, py = yo_pos(t->c.s), pt = traf_pos(t);
-    d = yo.s - t->c.s;
-    if (d > 0 && fabsf(k - py) <= 1.0f && fabsf(pt - py) > fabsf(k - py) && yo.v > t->c.v) g = d;
-    for (i = 0; i < NTRAF; i++) {
-        const trafico_t *o = traf + i;
-        if (o == t || (int)(fabsf(k - traf_pos(o))) != 0) continue;
-        d = t->c.s - o->c.s;
-        if (d <= 0 || d > TR_HUECO) continue;
-        if (g > d && t->c.v > o->c.v) g = d;
+    const trafico_t *t = traf + e; float l0 = tr_borde_carril(e, k), g = 1000.0f, a, b, d; int n, lo, hi, c, u, fin, fila;
+    if (tr_bloq(rec, t->carril)) {
+        tr_calzada(e, &lo, &hi);
+        if (l0 > tr_268(e)) { for (c = t->carril + 1; c <= hi; c++) if (!tr_bloq(rec, c)) return 1; return 0; }
+        for (c = t->carril - 1; c >= lo; c--) if (!tr_bloq(rec, c)) return 1;
+        return 0;
+    }
+    if (tr_bloq(rec, k)) return 0;
+    fila = tr_fila(t->c.s, &fin, &u);
+    for (n = tr_det[e]; n >= 0; n = tr_det[n]) {
+        int flag = n == TR_JUG || tr_cls(e) == 0;
+        if (u && tr_tercio(n) != tr_tercio(e) && fila < fin - 15) continue;
+        a = fabsf(l0 - tr_268(n));
+        if (flag * 4.0f >= a) {
+            b = fabsf(tr_268(e) - tr_268(n));
+            if (b > a) { d = tr_delante(n, e); if (g > d && tr_v(n) > t->c.v) g = d; }
+        }
+        if (n == TR_JUG) break;
+    }
+    for (n = tr_del[e]; n >= 0; n = tr_del[n]) {
+        if ((int)(fabsf(l0 - tr_268(n)) * 0.25f) != 0) continue;
+        d = tr_delante(e, n);
+        if (d > TR_HUECO) break;
+        if (g > d && t->c.v > tr_v(n)) g = d;
     }
     return !(g > 4.0f && TR_HUECO > g);
 }
-/* 471380: 0 si el jugador tapa el cambio al carril k (le tengo delante a 4..50 m, al lado del carril destino) */
-static int traf_jugador_deja(const trafico_t *t, int k)
+/* 471590: el carril abierto (no prohibido) mas cercano a cada lado; con los dos, el del lado contrario al jugador */
+static int traf_abierto(int e, const uint8_t *rec, int lo, int hi)
 {
-    float py = yo_pos(t->c.s), d = yo.s - t->c.s;
-    if ((int)fabsf(k - py) > 1) return 1;
-    if (!(fabsf(traf_pos(t) - py) > fabsf(k - py))) return 1;
-    return !(d > 4.0f && d < TR_HUECO);
-}
-/* 4736D0: el cambio de carril en curso (b08 hacia 4,5 m con t^2; al acabar, pasa al carril nuevo) */
-static void traf_cambio(trafico_t *t)
-{
-    float f = (float)(t->b18 - t->b14) / (float)t->b18;
-    if (!traf_jugador_deja(t, t->destino)) return;              /* espera (+B14 + 1) */
-    t->b14--;
-    t->b08 = (1.0f - f) * t->b08 + t->dir * 4.5f * f * f;       /* 5B43CC = 4,5 */
-    if (t->b14 > 0) return;
-    t->carril = t->destino; t->b14 = 0;
-    t->b08 -= t->dir * 4.0f;                                    /* lo que queda respecto al carril nuevo (473620) */
-    if (t->b08 > 4.0f) t->b08 = 4.0f;
-    if (t->b08 < -4.0f) t->b08 = -4.0f;
-}
-static void traf_empieza_cambio(trafico_t *t, int k)
-{
-    t->destino = k; t->dir = k > t->carril ? 1 : -1; t->b14 = t->b18 = TR_CAMBIO; cambio_cd = 0;
-}
-/* 47DC10: decide un cambio de carril (clases 3 y 4, mas rapido que el de delante, uno por segundo en total); delante y
-   detras: los vecinos de la lista ordenada por distancia (+318 / +314), de cualquier carril */
-static void traf_decide(trafico_t *t, const trafico_t *delante, int jugador_delante, const trafico_t *detras)
-{
-    int cl = t->carril, lo = t->carril < 3 ? 0 : 3, hi = lo + 2, cls = trc[t->modelo].clase;
-    float e18 = 1000.0f;
-    if ((delante || jugador_delante) && (jugador_delante || t->c.v > delante->c.v) && (cls == 3 || cls == 4)
-        && cambio_cd > 60) {
-        int r = traf_lado_libre(t->carril);
-        if (r > 0) { if (t->carril < hi) cl = t->carril + 1; }
-        else if (t->carril > lo) cl = t->carril - 1;
+    int cl = traf[e].carril, dl = lo, bl = hi, a = -1, al = -1, g;
+    if (cl > lo) dl = cl - 1;
+    if (cl < hi) { cl = cl + 1; bl = cl; }
+    for (g = 0; g < 16; g++) {
+        if (dl < lo && bl > hi) { cl = a; break; }
+        if (!tr_bloq(rec, dl)) al = dl;
+        if (tr_bloq(rec, bl)) cl = a; else { cl = bl; a = cl; }
+        if (al >= 0 || cl >= 0) break;
+        if (dl > lo) dl--;
+        if (bl < hi) bl++;
     }
-    if (cl == t->carril) return;
-    if (!traf_seguro(t, cl)) return;
-    if (detras && (int)fabsf(cl - traf_pos(detras)) == 0 && t->c.v > detras->c.v) e18 = t->c.s - detras->c.s;
-    if (!(e18 > TR_HUECO)) return;
-    traf_empieza_cambio(t, cl);
-}
-/* 473B90: se aparta del vecino (delante o detras, a menos de 4 m a lo largo y 2 m de lado) 0,05 m por cuadro */
-static int traf_aparta(trafico_t *t)
-{
-    int i; const trafico_t *c = NULL; float dm = 100.0f;
-    for (i = 0; i < NTRAF; i++) {
-        const trafico_t *o = traf + i; float d = fabsf(o->c.s - t->c.s);
-        if (o == t || d >= dm) continue;
-        dm = d; c = o;
+    if (al >= 0) {
+        if (cl < 0) return al;
+        if (tr_268(TR_JUG) > tr_268(e)) return al;
+        return cl;
     }
-    if (!c || !(4.0f > dm) || !(2.0f > fabsf(traf_pos(t) - traf_pos(c)) * 4.0f)) return 0;
-    if (traf_pos(t) > traf_pos(c)) { if (1.0f > t->b08) t->b08 += 0.05f; }
+    return cl >= 0 ? cl : dl;
+}
+/* 473540: el autobus (clase 6): lejos (mas de rec2+6 posiciones por delante del jugador) se pasa al carril de fuera en
+   las curvas (+B54 = radio, PENDIENTE: aqui no se mide, no cambia); cerca, se aparta del lado del jugador */
+static int traf_autobus(int e, int d, int lo, int hi)
+{
+    trafico_t *t = traf + e; int cl = t->carril;
+    if (d > TR_CERCA) return cl;
+    if (tr_268(e) > tr_268(TR_JUG)) {
+        if (d >= 0 && t->toca < 0) return cl + 1;
+        t->carril = t->carril < hi ? t->carril + 1 : t->carril - 1; return t->carril;
+    }
+    if (d >= 0 && t->toca < 0) return cl - 1;
+    t->carril = t->carril > lo ? t->carril - 1 : t->carril + 1; return t->carril;
+}
+/* 47DC10 (PS2 0x1e68a0): decide un cambio de carril.
+   - con su carril prohibido (+0xB del registro de aparicion): hacia el abierto de 471590;
+   - en la union, los pesados (clases 0..2) del carril del medio de su calzada pasan al de la derecha si el de detras
+     (+318) es el jugador o va mas lento (filas 16..fin-16);
+   - en la etapa, el autobus (473540); las clases 3 y 4, con el de detras el jugador o mas lento, pasada la fila 15 y
+     con 804350 > 60, un carril hacia el lado de menos trafico (4734C0);
+   - el carril elegido (lo..hi) debe estar a mas de 4 m de su posicion (|lane_pos - cl x 4| > 4: hacia la derecha solo
+     con dos carriles o desviado mas de 2 m a la izquierda, como en el original), ser seguro (471010) y sin un coche mas
+     lento delante (+314) en ese carril a menos de 50 m; a la derecha si queda sitio (+264 < -4), a la izquierda si
+     +268 > 4 */
+static void traf_decide(int e, const uint8_t *rec)
+{
+    trafico_t *t = traf + e; int lo, hi, cl, cls = tr_cls(e), nx = tr_det[e], pv = tr_del[e], d, fila, fin, u, r;
+    float e18 = 1000.0f, pos, tgt;
+    d = (int)floorf((t->c.s - yo.s) / TR_POS);
+    tr_calzada(e, &lo, &hi);
+    if (tr_bloq(rec, t->carril)) {
+        int al = traf_abierto(e, rec, lo, hi);
+        if (t->carril < al) tr_derecha(t, rec); else tr_izquierda(t, rec);
+        return;
+    }
+    cl = t->carril;
+    fila = tr_fila(t->c.s, &fin, &u);
+    if (u) {
+        if (fila > 15 && fila < fin - 15 && cls <= 2 && cl % 3 == 1 && nx >= 0 && (nx == TR_JUG || t->c.v > tr_v(nx)))
+            cl = lo == 0 ? 2 : 5;
+    } else if (cls == 6) cl = traf_autobus(e, d, lo, hi);
+    else if (nx >= 0 && fila > 15 && (nx == TR_JUG || t->c.v > tr_v(nx)) && (cls == 3 || cls == 4) && cambio_cd > 60) {
+        int k = traf_lado_libre(t->carril);
+        if (k > 0) { if (t->carril < hi) cl = t->carril + 1; }
+        else if (t->carril > 0) cl = t->carril - 1;
+    }
+    if (cl < lo) cl = lo; else if (cl > hi) cl = hi;
+    pos = tr_268(e); tgt = tr_borde_carril(e, cl);
+    if (!(fabsf(pos - tgt) > 4.0f)) return;
+    r = traf_seguro(e, cl, rec);
+    if (pv >= 0 && (int)(fabsf(tgt - tr_268(pv)) * 0.25f) == 0 && t->c.v > tr_v(pv)) e18 = tr_dist(e, pv);
+    if (!(e18 > TR_HUECO) || r != 1) return;
+    if (tgt > pos) { if (-4.0f > tr_264(e)) tr_derecha(t, rec); return; }
+    if (pos > tgt && tr_268(e) > 4.0f) tr_izquierda(t, rec);
+}
+/* 473B90 (PS2 0x1e75e0): se aparta del vecino de la lista (+314 delante o +318 detras; la distancia de 46DD00 o, por
+   debajo de 30 m, la de 46E250 en valor absoluto) si esta a menos de 4 m y a menos de 2 m de lado: 0,05 por cuadro
+   (B08 entre -1 y 1) */
+static int traf_aparta(int e)
+{
+    trafico_t *t = traf + e; int near = -1, p = tr_del[e], n = tr_det[e]; float f = 100.0f, d = 100.0f;
+    if (p >= 0) {
+        d = tr_dist(p, e);
+        if (30.0f > d) d = tr_delante(e, p);
+        if (0.0f > d) d = -d;
+        near = p; f = d;
+    }
+    if (n >= 0) {
+        d = tr_dist(n, e);
+        if (30.0f > d) d = tr_delante(n, e);
+        if (0.0f > d) d = -d;
+        if (f > d) near = n;
+    }
+    if (near < 0 || !(4.0f > d) || !(2.0f > fabsf(tr_268(e) - tr_268(near)))) return 0;
+    if (tr_268(e) > tr_268(near)) { if (1.0f > t->b08) t->b08 += 0.05f; }
     else if (t->b08 > -1.0f) t->b08 -= 0.05f;
     return 1;
 }
-/* +268 / +264 del coche (4A4010): distancia al borde izquierdo (> 0 dentro) y al derecho (< 0 dentro); en la union
-   los de su calzada (carriles 0..2 o 3..5), en la etapa los de la carretera */
-static void traf_bordes(const trafico_t *t, float *b268, float *b264)
-{
-    int nodo, pos; float p[3], th, iz, de;
-    if (traf_lugar(t->c.s, &nodo, &pos)) {
-        int lo = t->carril < 3 ? 0 : 3; float w = fabsf(carril_paso(t->c.s, lo)) * 0.5f;
-        float x0 = carril_x(t->c.s, lo), x2 = carril_x(t->c.s, lo + 2);
-        *b268 = t->c.x - (fminf(x0, x2) - w); *b264 = t->c.x - (fmaxf(x0, x2) + w);
-        return;
-    }
-    ruta_en(t->c.s, p, &th, &iz, &de);
-    *b268 = t->c.x + iz; *b264 = t->c.x - de;
-}
 /* 473F30 (PS2 0x1e7ef0): tras el golpe, 120 cuadros derivando 0,2 m del original por cuadro hacia +B58 (0xB a la
    izquierda mientras +268 > 0 y B08 > -12; 0xC a la derecha mientras +264 < 0 y B08 < 12); al acabar, los pesados
-   (clases 0..2) pasan al carril que les toca por B08 (+66 += B08 / 4, dentro de su calzada) con el desplazamiento que
-   les queda (473620); los coches de calle con un jugador (800D4D <= 1) siguen en su carril con su B08 (lo devuelven
-   473D10 y los cambios de carril) */
-static void traf_recupera(trafico_t *t)
+   (clases 0..2) pasan al carril que les toca por B08 (+66 += B08 / 4, dentro de su calzada) con el desvio real que
+   les queda (473620); los coches de calle con un jugador (800D4D <= 1) siguen en su carril con su B08 */
+static void traf_recupera(trafico_t *t, int e)
 {
-    float p = traf_pos(t), b268, b264; int lo = t->carril < 3 ? 0 : 3;
-    traf_bordes(t, &b268, &b264);
-    if (t->b58 == 0xB) { if (b268 > 0.0f && t->b08 > -12.0f) t->b08 -= 0.2f; }
-    else if (t->b58 == 0xC) { if (0.0f > b264 && 12.0f > t->b08) t->b08 += 0.2f; }
+    int lo, hi;
+    if (t->b58 == 0xB) { if (tr_268(e) > 0.0f && t->b08 > -12.0f) t->b08 -= 0.2f; }
+    else if (t->b58 == 0xC) { if (0.0f > tr_264(e) && 12.0f > t->b08) t->b08 += 0.2f; }
     if (--t->b60 > 0) return;
     t->b60 = 0; t->b58 = 0; t->b6c = 0;
-    if (trc[t->modelo].clase > 2) return;
+    if (tr_cls(e) > 2) return;
+    tr_calzada(e, &lo, &hi);
     {
         int k = t->carril + (int)(t->b08 * 0.25f);
         if (k < lo) k = lo;
-        if (k > lo + 2) k = lo + 2;
-        t->b08 = (p - k) * 4.0f; t->carril = t->destino = k;
+        if (k > hi) k = hi;
+        t->carril = t->destino = k; t->b08 = tr_desvio(t);
     }
 }
-/* 473D10 (PS2 0x1e77e0): con el jugador cerca (el coche a menos de rec2+4 posiciones por delante de el y el jugador a
-   menos de 50 + 200 m por delante del coche) se aparta de su lado 0,05 por cuadro hasta el empuje
+/* 473D10 (PS2 0x1e77e0): con el coche a menos de rec2+4 posiciones por delante del jugador y entre 50 y 250 m por
+   delante de el (46E250(jugador, coche) - 50, de 0 a 200) se aparta de su lado 0,05 por cuadro hasta el empuje
    (200 - d) / 200 x min(1, separacion lateral en m del original), o B08 x 0,995; cerca del final de la etapa o del
-   principio de la union, solo x 0,995 */
-static void traf_esquiva(trafico_t *t)
+   principio de la union, o fuera de la carretera, solo x 0,995 */
+static void traf_esquiva(int e)
 {
-    float d, push, ap, b, pt = traf_pos(t) * 4.0f, pj = yo_pos(t->c.s) * 4.0f;
-    int lo = t->carril < 3 ? 0 : 3, hi = lo + 2, nodo, pos, u, lento = 0, mas = 0;
+    trafico_t *t = traf + e; float d, push, ap, b, pt = tr_268(e), pj = tr_268(TR_JUG);
+    int lo, hi, fila, fin, u, lento = 0, mas = 0;
     if (!((int)floorf((t->c.s - yo.s) / TR_POS) < TR_LEJOS)) return;
-    d = (yo.s - t->c.s) - TR_HUECO;
+    d = tr_delante(TR_JUG, e) - TR_HUECO;
     if (d < 0.0f) d = 0.0f;
     else if (d > 200.0f) return;
     ap = fabsf(pt - pj); if (ap > 1.0f) ap = 1.0f;
     push = (200.0f - d) * 0.005f * ap;
-    u = traf_lugar(t->c.s, &nodo, &pos);
-    if (u) lento = !(pos > 15);
-    else if (s_union >= 0 && pos >= (int)((s_union - s_etapa) / m_pos) - 15) lento = 1;
+    fila = tr_fila(t->c.s, &fin, &u);
+    if (u) lento = !(fila > 15);
+    else lento = fila >= fin - 15;
     if (lento) { t->b08 *= 0.995f; return; }
+    tr_calzada(e, &lo, &hi);
     if (pt > pj) {                                              /* el coche a la derecha del jugador */
         b = t->b08;
         if (b > -0.05f) { if (t->carril < hi && push > b) mas = 1; else if (push * 0.5f > b) mas = 1; }
@@ -2197,6 +2395,17 @@ static void traf_esquiva(trafico_t *t)
     b = t->b08; mas = 0;
     if (0.05f > b) { if (t->carril > lo && b > -push) mas = 1; else if (b > push * -0.5f) mas = 1; }
     t->b08 = mas ? b - 0.05f : b * 0.995f;
+}
+/* 47E110: los carriles de un coche de trafico (con el cambio en curso: 4736D0 y 473B90; si no: 47DC10 y 473B90 o
+   473D10) y el tope de 6280EC: B08 no se acerca a 0 mas de 0,02 por cuadro (si no ha cambiado de carril) */
+static void traf_carriles(int e)
+{
+    trafico_t *t = traf + e; float b0 = t->b08; int l0 = t->carril; const uint8_t *rec = tr_rec(t);
+    if (t->b14 > 0) { traf_cambio(t, e, rec); traf_aparta(e); }
+    else { traf_decide(e, rec); if (!traf_aparta(e)) traf_esquiva(e); }
+    if (l0 != t->carril) return;
+    if (b0 > 0) { float v = b0 - 0.02f; if (v > t->b08) t->b08 = v; }
+    if (0 > b0) { float v = b0 + 0.02f; if (t->b08 > v) t->b08 = v; }
 }
 #ifdef DIAG_TRAF
 static int traf_vistos, traf_vistos_max, traf_act_max, diag_n; static float traf_vistos_sum, traf_act_sum;
@@ -2212,129 +2421,327 @@ static void traf_diag(void)                                     /* prueba: coche
                (double)(yo.v * 3.6f), n, traf_vistos, traf_act_max, traf_vistos_max, (double)(traf_act_sum / diag_n), (double)(traf_vistos_sum / diag_n));
 }
 #endif
-/* 472450 (camino de cada coche de trafico; PC race_traffic.cpp traffic_472450): el objetivo de velocidad (+10DC) y su
-   ritmo (+10E0) con el registro de velocidad del sitio tal como lo deja 4F0030 (PS2 0x1f1a88..0x1f20c4): +0xE.. minima
-   por clase 250, 250, 250, 290, 290, 310; +0x1C.. maxima 270,9 / 309,6 / 309,6 / 387 / 408,5 / 473 (floats de
-   0x1f1f78.., x 1 fuera de la red); +0x2A.. / +0x38.. porcentajes de la velocidad del jugador 35, 40, 35, 50, 60, 94 /
-   70, 75, 75, 93, 95, 97; +6 = 1; [80434C] = 50 (47DAC0, K5B4358). Todo en km/h del modelo (x K5B43A4).
-   - camino "Plain" (+0xC del registro, 100): el coche de detras del jugador (+318) y los que van por detras (d < 0;
-     "Racer" sin rivales es Plain) y los que van a su altura a mas de un carril (d < +6 y apart_x > 1).
+/* 472450 (camino de cada coche de trafico; PC race_traffic.cpp traffic_472450, PS2 0x1e4870): el objetivo de
+   velocidad (+10DC) y su ritmo (+10E0) con el registro de velocidad del sitio tal como lo deja 4F0030 (PS2
+   0x1f1a88..0x1f20c4): +0xE.. minima por clase 250, 250, 250, 290, 290, 310; +0x1C.. maxima 270,9 / 309,6 / 309,6 /
+   387 / 408,5 / 473 (floats de 0x1f1f78.., x 1 fuera de la red); +0x2A.. / +0x38.. porcentajes de la velocidad del
+   jugador 35, 40, 35, 50, 60, 94 / 70, 75, 75, 93, 95, 97; +6 = 1; [80434C] = 50 (47DAC0, K5B4358). Todo en km/h del
+   modelo (x K5B43A4 = 0,00461425, PS2 0x3b973320).
+   - camino "Plain" (+0xC del registro, 100): el coche de detras del jugador (+318 del jugador) y los que van por
+     detras (d < 0; "Racer" sin rivales es Plain) y los que van a su altura a mas de un carril (d < +6 y apart_x > 1).
    - camino "Lead", los de delante: con el jugador chocando (+2F0 & 2) la maxima de su clase; a menos de +4 posiciones
-     (7 o 10) max(+0xC, 470B30): 470B30 = min(sp, max(r, minima)) con sp de la minima (lejos) a la maxima + 50 t (cerca:
-     t = (+4 - max(d - +0xA, 0)) / (+4 - +0xA)) y r = del % +0x2A al +0x38 de la velocidad del jugador segun (1,1 -
-     |desvio| / 12) t; mas alla, 471E70: los +2 primeros de la cola de delante del jugador (803750, a +6 o mas) con el
-     jugador por encima de la minima van a +4 x minima / d (no menos de +0xC), el resto a la minima.
-   SIN portar (PENDIENTE): 472320 (seguir al de delante con 470CB0 / 470ED0 / 4718D0 y sus adelantamientos 471680) y
-   471F90 (seguir al jugador): en el original solo suben el objetivo por encima de 470B30 o cambian de carril; el seguir
-   al de delante lo hace aqui 472A50 como antes. PROBABLE: K6281C0 = 0,01 (porcentaje) y K5B43B0 sin usar.
+     (7 o 10): 472320 (el de detras que le alcanza; ver traf_detras) y si no 471F90; despues (PS2 0x1e4300)
+     max(objetivo, +0xC, 470B30): 470B30 = min(sp, max(r, minima)) con sp de la minima (lejos) a la maxima + 50 t
+     (cerca: t = (+4 - max(d - +0xA, 0)) / (+4 - +0xA)) y r = del % +0x2A al +0x38 de la velocidad del jugador segun
+     (1,1 - |desvio| / 12) t; mas alla, 472320 y si no 471E70: los +2 primeros de la cola de delante del jugador
+     (803750, a +6 o mas) con el jugador por encima de la minima van a +4 x minima / d (no menos de +0xC), el resto a
+     la minima.
    Ritmo (PS2 = PC): lejos (d > +4) o parado, 1; d en 0..3 acelerando, (0,2 d / +4 + 0,8)(1,1 - |desvio| / 12); si
    queda por debajo de 0,25 y no esta lejos: (v / minima)^2 si acelera por debajo de la minima, si no 1, por (0,75 d / +4
    + 0,25); con el jugador justo detras en su carril y mas rapido que el objetivo, 0,05 sin frenada fuerte. */
 static const float TR_MIN[7] = { 250, 250, 250, 290, 290, 310, 0 }, TR_MAX[7] = { 270.9f, 309.6f, 309.6f, 387.0f, 408.5f, 473.0f, 0 };
 static const float TR_PA[7] = { 35, 40, 35, 50, 60, 94, 0 }, TR_PB[7] = { 70, 75, 75, 93, 95, 97, 0 };
-static float traf_objetivo(const trafico_t *t, int d, int aparte, int *f0, int *f1, float *rate)
+typedef struct { int f0, f1; float v; } tr_obj_t;              /* +10D8, +10D9, +10DC */
+static const uint8_t *tr_rv;                                    /* registro de velocidad del coche en curso */
+/* 470B30 (PS2 0x1e2680) con el jugador */
+static float traf_470b30(int e, int d)
 {
-    int cls = trc_ok ? trc[t->modelo].clase : 3, far = TR_LEJOS, nodo, pos, lead, parado = 0, i, cnt;
-    float obj = t->v_des, v = t->c.v, mn, lat = fabsf(traf_pos(t) - yo_pos(t->c.s)) * 4.0f, vj = yo.v, r;
-    const uint8_t *rv = ntap ? traf_reg_velocidad(traf_lugar(t->c.s, &nodo, &pos), nodo, pos) : NULL;
-    if (cls < 0 || cls > 6) cls = 3;
-    mn = TR_MIN[cls] * TR_KMH;
-    *f0 = 0; *f1 = 0;
-    lead = d >= 0 && !(d < TR_CERCA && aparte > 1);
-    if (t->b6c && t->b60 <= 0 && cls > 2) { obj = 0; parado = 1; *f1 = 1; }   /* 0x10d9 = 1, +10DC = 0 */
-    else if (lead && cls < 6) {
-        if (fis_ok && fis.t_choque > 0.0f) obj = TR_MAX[cls] * TR_KMH;   /* +2F0 & 2 */
-        else if (d < far) {                                     /* 470B30 con el jugador */
-            int dd = d - 6 > 0 ? d - 6 : 0, span = far - 6; float tt, base, sp, f, a, b;
-            tt = span > 0 ? (float)(span - dd) / (float)span : 1.0f;
-            if (tt < 0) tt = 0;
-            base = TR_MAX[cls] + (cls > 2 ? 50.0f * tt : 0.0f);
-            sp = (base * TR_KMH - mn) * tt + mn;
-            f = (1.1f - lat * 0.0833333f) * tt; if (f < 0) f = 0; if (f > 1.0f) f = 1.0f;
-            a = TR_PA[cls] * vj * 0.01f; b = TR_PB[cls] * vj * 0.01f;
-            r = (b - a) * f + a; if (mn > r) r = mn;
-            obj = fmaxf(t->v_des, sp > r ? r : sp);
-            *f1 = 1; *f0 = 0;
-        } else {                                                /* 471E70: la cola de delante del jugador */
-            for (i = cnt = 0; i < NTRAF; i++) {
-                const trafico_t *o = traf + i;
-                if (o == t || o->carril < 0 || o->c.s <= yo.s || o->c.s >= t->c.s) continue;
-                if ((int)floorf((o->c.s - yo.s) / TR_POS) >= TR_CERCA) cnt++;
-            }
-            if (rv && cnt < (int8_t)rv[2] && vj > mn) {
-                obj = (float)far * mn / (float)d; if (t->v_des > obj) obj = t->v_des;
-                if (obj > v) *f0 = 1; else *f1 = 1;
-            } else { obj = mn; *f1 = 1; }
+    int cls = tr_cls(e), dd = d - 6 > 0 ? d - 6 : 0, span = TR_LEJOS - 6; float tt, base, sp, f, a, b, r, mn = TR_MIN[cls] * TR_KMH;
+    tt = span > 0 ? (float)(span - dd) / (float)span : 1.0f;
+    if (tt < 0) tt = 0;
+    base = TR_MAX[cls] + (cls > 2 ? 50.0f * tt : 0.0f);
+    sp = (base * TR_KMH - mn) * tt + mn;
+    f = (1.1f - fabsf(tr_268(e) - tr_268(TR_JUG)) * (1.0f / 12.0f)) * tt;   /* 6281DC = 1,1; / 12 */
+    if (f < 0) f = 0;
+    if (f > 1.0f) f = 1.0f;
+    a = TR_PA[cls] * yo.v * 0.01f; b = TR_PB[cls] * yo.v * 0.01f;
+    r = (b - a) * f + a; if (mn > r) r = mn;
+    return sp > r ? r : sp;
+}
+/* 470CB0 (PS2 0x1e28c8): el primero de los de detras (+318, sin pasar del jugador) en su carril (o a un carril; dos
+   para la clase 0: (803714 + 0,5) / 4 > 3, con 803714 = 24 / 12 siempre 1, SIMPLIFICADO) mas rapido que el, o con el
+   por encima de 0,7 x 470B30, a menos de (d / 50 + 1) x 50 m (y a mas de 4 m si no esta en su carril) */
+static int traf_470cb0(int e, int d)
+{
+    int n = tr_cls(e) == 0 ? 2 : 1, lane, nb, a, fila, fin, u; float sp = traf_470b30(e, d), dist, lim;
+    fila = tr_fila(traf[e].c.s, &fin, &u);
+    for (lane = 0; lane <= n; lane++)
+        for (nb = tr_det[e]; nb >= 0; nb = tr_det[nb]) {
+            if (tr_cierra(nb)) continue;
+            if (nb == TR_JUG) break;
+            if (u && tr_tercio(nb) != tr_tercio(e) && fila < fin - 15) continue;
+            a = tr_aparte(e, nb);
+            if (a > lane) continue;
+            if (!(tr_v(nb) > traf[e].c.v) && !(traf[e].c.v > sp * 0.7f)) continue;   /* 5C403C = 0,7 */
+            dist = tr_dist(nb, e);
+            if (30.0f > dist) dist = tr_delante(nb, e);
+            if (a != 0 && !(dist > 4.0f)) continue;
+            lim = (float)(d / 50 + 1) * TR_HUECO;
+            if (lim > dist) return nb;
+        }
+    return -1;
+}
+/* 470ED0 (PS2 0x1e2ba0): con d < +4, el primero de detras a mas de 4 m y a no mas de 2 posiciones */
+static int traf_470ed0(int e, int d)
+{
+    int nb, fila, fin, u; float dist;
+    if (d >= TR_LEJOS) return -1;
+    fila = tr_fila(traf[e].c.s, &fin, &u);
+    for (nb = tr_det[e]; nb >= 0; nb = tr_det[nb]) {
+        if (tr_cierra(nb)) continue;
+        if (nb == TR_JUG) return -1;
+        if (u && tr_tercio(nb) != tr_tercio(e) && fila < fin - 15) continue;
+        dist = tr_dist(nb, e);
+        if (30.0f > dist) dist = tr_delante(nb, e);
+        if (dist > 4.0f && (int)floorf((traf[e].c.s - tr_s(nb)) / TR_POS) <= 2) return nb;
+    }
+    return -1;
+}
+/* 4714D0: el carril de al lado para apartarse de o (si va en su carril: del jugador, o hacia el medio) */
+static int traf_paso_lado(int e, int o, int lo, int hi)
+{
+    int bl = traf[e].carril;
+    if (tr_aparte(e, o) == 0) {
+        if (tr_aparte(e, TR_JUG) == 0) return bl > (lo + hi) / 2 ? bl - 1 : bl + 1;
+        if (tr_268(e) > tr_268(TR_JUG)) return bl >= hi ? bl - 1 : bl + 1;
+        return bl > lo ? bl - 1 : bl + 1;
+    }
+    if (tr_268(e) > tr_268(o)) return bl >= hi ? bl : bl + 1;
+    return bl <= lo ? bl : bl - 1;
+}
+static int traf_ve(trafico_t *t, int e, float p, const uint8_t *rec)   /* 471680: el cambio hacia p */
+{
+    if (p > tr_268(e) && -4.0f > tr_264(e)) { tr_derecha(t, rec); return 1; }
+    if (tr_268(e) > p && tr_268(e) > 4.0f) { tr_izquierda(t, rec); return 1; }
+    return 0;
+}
+/* 471680 (PS2 0x1e3520): se aparta de nb (el que le alcanza por detras): al carril de 4714D0 si es seguro; si no, al
+   del otro lado si le separa mas de nb y es seguro. 1 si ha empezado un cambio */
+static int traf_aparta_de(int e, int nb, const uint8_t *rec)
+{
+    trafico_t *t = traf + e; int lo, hi, bl; float p, a, b;
+    tr_calzada(e, &lo, &hi);
+    bl = traf_paso_lado(e, nb, lo, hi);
+    p = tr_borde_carril(e, bl);
+    if (traf_seguro(e, bl, rec) == 1 && traf_ve(t, e, p, rec)) return 1;
+    if (p > tr_268(e) && t->carril > lo) bl = t->carril - 1;
+    else if (tr_268(e) > p && t->carril < hi) bl = t->carril + 1;
+    p = tr_borde_carril(e, bl);
+    a = fabsf(tr_268(e) - tr_268(nb)); b = fabsf(p - tr_268(nb));
+    if (!(b > a)) return 0;
+    if (traf_seguro(e, bl, rec) != 1) return 0;
+    return traf_ve(t, e, p, rec);
+}
+/* 4718D0 (PS2 0x1e3800): el de detras nb le alcanza.
+   - nb mas rapido en su carril a 4..50 m: acelera hacia 1,05 x nb en los cuadros que tardaria en cerrar el hueco
+     (471480: hueco / (vnb - v), al menos 1; tope 50 x K + 2,2148 m/cuadro = 480 km/h del modelo); si va a mas de 0,7 x
+     470B30 y nb no esta cambiando de carril, se aparta (471680) o, si ya cambia, anula el cambio hacia el lado de nb;
+   - si no: objetivo 1,05 x max(vnb, minima); si nb va mas rapido o el objetivo pasa de 0,7 x 470B30: en su carril (o
+     convergiendo, a menos de un carril, dos para la clase 0) se aparta y si no puede va a 1,05 x vnb; en otro carril
+     va a min(470B30, 1,05 x vnb) */
+static void traf_alcanza(int e, int nb, int d, float sp, tr_obj_t *o, const uint8_t *rec)
+{
+    trafico_t *t = traf + e; const trafico_t *n = nb == TR_JUG ? NULL : traf + nb;
+    float mn = TR_MIN[tr_cls(e)] * TR_KMH, lim = TR_HUECO, dist, vnb = tr_v(nb), gap;
+    int nb14 = n ? n->b14 : 0, ndir = n ? n->dir : 0, go, close;
+    o->v = vnb; if (mn > vnb) o->v = mn;
+    dist = tr_dist(nb, e);
+    if (lim > dist) dist = tr_delante(nb, e);
+    if (!(sp >= 0.0f)) sp = traf_470b30(e, d);
+    if (dist > 4.0f && lim > dist && vnb > t->c.v && tr_aparte(e, nb) == 0) {
+        float dv = vnb - t->c.v; int tt = dv * (1.0f / 60.0f) < 1.19209e-07f ? 0x7fff : (int)(dist / (dv * (1.0f / 60.0f)));
+        float cap = (50.0f * 0.00461425f + 2.21484f) * 60.0f;  /* [80434C] x K + 5B43AC */
+        if (tt < 1) tt = 1;
+        t->c.v += (vnb * 1.05f - t->c.v) / (float)tt;          /* 5B43B0 = 1,05 */
+        if (t->c.v > cap) t->c.v = cap;
+        if (!(t->c.v > sp * 0.7f)) return;
+        if (nb14) return;
+        if (!t->b14) { traf_aparta_de(e, nb, rec); return; }
+        if ((tr_268(e) > tr_268(nb) && t->dir < 0) || (tr_268(nb) > tr_268(e) && t->dir > 0))
+            if (!tr_bloq(rec, t->carril)) tr_limpia(t);
+        return;
+    }
+    o->v *= 1.05f;
+    gap = (tr_cls(e) == 0 ? 2 : 1) * 4.0f;
+    go = vnb > o->v || o->v > sp * 0.7f;
+    if (go) {
+        close = 1;
+        if (tr_aparte(e, nb) != 0) {
+            close = 0;
+            if (tr_268(e) > tr_268(nb) && !(tr_268(e) > gap + tr_268(nb)) && (t->dir < 0 || ndir > 0)) close = 1;
+            else if (tr_268(nb) > tr_268(e) && !(tr_268(nb) - gap > tr_268(e)) && (t->dir > 0 || ndir < 0)) close = 1;
+            if (!close) { o->v = sp; if (sp > vnb * 1.05f) o->v = vnb * 1.05f; o->f0 = 1; }
+        }
+        if (close && !nb14) {
+            if (!t->b14) { if (traf_aparta_de(e, nb, rec) != 1) o->v = vnb * 1.05f; }
+            else if ((tr_268(e) > tr_268(nb) && t->dir < 0) || (tr_268(nb) > tr_268(e) && t->dir > 0))
+                if (!tr_bloq(rec, t->carril)) tr_limpia(t);
         }
     }
+    if (o->v > t->c.v) o->f0 = 1;
+}
+/* 472320 (PS2 0x1e46a0): 1 si un coche de detras (470CB0, o 470ED0 en su carril / mas rapido) marca la velocidad */
+static int traf_detras(int e, int d, tr_obj_t *o, const uint8_t *rec)
+{
+    float sp = -1.0f, dist; int nb = traf_470cb0(e, d);
+    if (nb < 0) {
+        int l2 = tr_cls(e) == 0 ? 1 : 0;
+        nb = traf_470ed0(e, d);
+        if (nb < 0) return 0;
+        dist = tr_dist(nb, e);
+        if (30.0f > dist) dist = tr_delante(nb, e);
+        sp = traf_470b30(e, d);
+        if (4.0f > dist) return 0;
+        if (tr_aparte(e, nb) > l2) {
+            if (tr_v(nb) > traf[e].c.v) return 0;
+            if (traf[e].c.v > sp * 0.7f) return 0;
+        }
+    }
+    traf_alcanza(e, nb, d, sp, o, rec);
+    return 1;
+}
+/* 471E70: la cola de delante del jugador (803750: la lista +314 desde el jugador) */
+static void traf_cola(int e, int d, tr_obj_t *o)
+{
+    int i, cnt = 0, n = tr_rv ? (int8_t)tr_rv[2] : 0; float mn = TR_MIN[tr_cls(e)] * TR_KMH;
+    if (n > 0 && d >= TR_CERCA)
+        for (i = tr_del[TR_JUG]; i >= 0 && cnt < n && i != e; i = tr_del[i]) cnt++;
+    if (tr_rv && cnt < n && yo.v > mn) {
+        o->v = (float)TR_LEJOS * mn / (float)d;
+        if (traf[e].v_des > o->v) o->v = traf[e].v_des;
+        if (o->v > traf[e].c.v) { o->f0 = 1; o->f1 = 0; } else { o->f0 = 0; o->f1 = 1; }
+    } else { o->v = mn; o->f1 = 1; }
+    if (tr_cls(e) == 5 && traf[e].c.v > o->v) o->v = traf[e].c.v;
+}
+static float traf_objetivo(int e, int d, int *f0, int *f1, float *rate)
+{
+    trafico_t *t = traf + e; int cls = tr_cls(e), far = TR_LEJOS, nodo, pos, lead, parado = 0, aparte = tr_aparte(e, TR_JUG);
+    float v = t->c.v, mn, lat = fabsf(tr_268(e) - tr_268(TR_JUG)); tr_obj_t o; const uint8_t *rec = tr_rec(t);
+    tr_rv = ntap ? traf_reg_velocidad(traf_lugar(t->c.s, &nodo, &pos), nodo, pos) : NULL;
+    mn = TR_MIN[cls] * TR_KMH;
+    o.f0 = 0; o.f1 = 0; o.v = v;                                /* +10DC = +1C4 */
+    lead = !(e == tr_det[TR_JUG] || d < 0 || (d < TR_CERCA && aparte > 1));
+    if (t->b6c && t->b60 <= 0 && cls > 2) { o.v = 0; parado = 1; o.f1 = 1; }   /* 0x10d9 = 1, +10DC = 0 */
+    else if (!lead || cls >= 6) o.v = t->v_des;                 /* Plain: +0xC */
+    else if (fis_ok && fis.t_choque > 0.0f) o.v = TR_MAX[cls] * TR_KMH;   /* +2F0 & 2 */
+    else if (d < far) {
+        float s;
+        if (!traf_detras(e, d, &o, rec)) o.v = 0;               /* 471F90: min(1,05 v, 470B30): no pasa de 470B30 */
+        s = traf_470b30(e, d);
+        o.f1 = 1; o.f0 = 0;
+        if (t->v_des > o.v) o.v = t->v_des;
+        if (s > o.v) o.v = s;
+    } else if (!traf_detras(e, d, &o, rec)) traf_cola(e, d, &o);
+    v = t->c.v;                                                 /* 4718D0 puede haberla cambiado */
     /* ritmo */
     *rate = 0;
     if (d > far || parado) *rate = 1.0f;
-    else if (d >= 0 && d <= 3 && obj > v) {
+    else if (d >= 0 && d <= 3 && o.v > v) {
         *rate = (d * 0.2f / far + 0.8f) * (1.1f - lat * 0.0833333f);
         if (*rate < 0) *rate = 0;
         if (*rate > 1.0f) *rate = 1.0f;
-    } else if (d < TR_CERCA && d > 0 && v > obj) *rate = 1.0f;
+    } else if (d < TR_CERCA && d > 0 && v > o.v) *rate = 1.0f;
     if (!(d > far) && 0.25f > *rate) {
-        float q = (mn > v && obj > v) ? (v / mn) * (v / mn) : 1.0f;
+        float q = (mn > v && o.v > v) ? (v / mn) * (v / mn) : 1.0f;
         *rate = q * ((d < 0 ? 0 : d) * 0.75f / far + 0.25f);   /* 6282A0 = 0,75 */
     }
-    if (aparte < 1 && v > obj && d >= 0 && d <= 3) { *f0 = 0; *f1 = 1; *rate = 0.05f; }
-    return obj;
+    if (aparte < 1 && v > o.v && d >= 0 && d <= 3) { o.f0 = 0; o.f1 = 1; *rate = 0.05f; }
+    *f0 = o.f0; *f1 = o.f1;
+    return o.v;
 }
+/* 47B600 + 475040 (PS2 0x1eab70..): el coche no se pone en su carril, conduce hacia el. Punto de mira: la muestra del
+   carril +66 tres filas por delante de la suya (sitio + 2, muestra + 2 - 1; la primera que este a mas de lo que avanza
+   en un cuadro), desplazado B08 de lado (474E70). SIMPLIFICADO: aqui a 2,5 filas fijas (la media; en el original salta
+   de 2 a 3 filas al cambiar de fila, y con los carriles de la ruta de la demo, menos suaves, eso da tirones); avanza +1C4 hacia el (con lo que el desvio lateral se recupera en
+   v / distancia por cuadro). En las 10 primeras filas del tramo (pasada la primera etapa, 44C940) y en las 5 ultimas
+   (las muestras saltan entre la etapa y la union): la direccion nueva pesa k = (1 - c)|o| v 0,04 + 0,02 c (c = raiz
+   del coseno entre la nueva y la del cuadro anterior; o = desvio real - B08, tope 4) y el resto la velocidad del cuadro
+   anterior, y sin cambio en curso B08 += 0,02 o. SIMPLIFICADO: en el marco de la ruta, sin el giro limitado de la
+   carroceria (+2E: aqui el rumbo es el de la velocidad) */
+static void traf_guia(trafico_t *t, float dt)
+{
+    float s0 = t->c.s, x0 = t->c.x, v = t->c.v * dt, sT, xT, ds, dx, D, vs, vx, kg = 1.0f;
+    int fila, fin, u, giro;
+    fila = tr_fila(s0, &fin, &u);
+    sT = s0 + 2.5f * m_pos;                                     /* (3 - fraccion de su fila) filas: de media 2,5 */
+    if (sT > longitud - 0.02f) sT = longitud - 0.02f;
+    xT = carril_x(sT, t->carril) + t->b08 * tr_sg(sT);         /* 474E70: B08 en m */
+    ds = sT - s0; dx = xT - x0; D = sqrtf(ds * ds + dx * dx);
+    if (D > 1e-4f) { vs = v * ds / D; vx = v * dx / D; } else { vs = v; vx = 0; }
+    giro = (fila < 10 && (u || s_etapa > 0.0f || (s_sig >= 0 && s0 >= s_sig))) || fila >= fin - 5;
+    if (giro && v > 1e-5f) {
+        float o = tr_desvio(t) - t->b08, c, k, w = sqrtf(t->gv[0] * t->gv[0] + t->gv[1] * t->gv[1]), l;
+        if (!t->b14 && t->b6c == 0) {                           /* +268 > 0 y +264 < 0: en la carretera */
+            t->b08 += o * 0.02f;
+            if (t->b08 > 4.0f) t->b08 = 4.0f;
+            if (t->b08 < -4.0f) t->b08 = -4.0f;
+        }
+        o = fabsf(o); if (o > 4.0f) o = 4.0f;
+        c = w > 0.01f ? (vs * t->gv[0] + vx * t->gv[1]) / (v * w) : 0.0f;   /* 46E380: 0 con vectores cortos */
+        c = c > 0.0f ? sqrtf(c) : 0.0f;
+        k = (1.0f - c) * o * v * 0.04f + c * 0.02f;             /* 628218 = 0,04; 6280EC = 0,02 */
+        if (k > 1.0f) k = 1.0f;
+        kg = k;
+        vs = vs * k + t->gv[0] * (1.0f - k); vx = vx * k + t->gv[1] * (1.0f - k);
+        l = sqrtf(vs * vs + vx * vx);
+        if (l > 1.19209e-07f) { vs *= v / l; vx *= v / l; }
+    }
+    t->gv[0] = vs; t->gv[1] = vx;
+    t->c.s = s0 + vs; t->c.x = x0 + vx;
+    t->vlat = vx / dt;
+    {   /* +2E (la carroceria): hacia la muestra siguiente (B, ~1,5 filas mas alla del punto de mira) en lo que tarde en
+           llegar a ella (distancia / +1C4, al menos 1 cuadro), tope 0,0698 rad (4 grados) y x 0,8 por cuadro */
+        float sB = s0 + 4.0f * m_pos, xB, dB, a, n;
+        if (sB > longitud - 0.02f) sB = longitud - 0.02f;
+        xB = carril_x(sB, t->carril) + t->b08 * tr_sg(sB);
+        dB = sqrtf((sB - t->c.s) * (sB - t->c.s) + (xB - t->c.x) * (xB - t->c.x));
+        a = dif_ang(atan2f(xB - t->c.x, sB - t->c.s) - t->c.a);
+        a *= kg;                                                /* E8: el k del giro (1 fuera de el) */
+        n = v > 1e-5f ? dB / v : 1.0f;
+        if (n > 1.0f) a /= n;
+        if (a > 0.0698132f) a = 0.0698132f;
+        if (a < -0.0698132f) a = -0.0698132f;
+        t->c.a = dif_ang(t->c.a + a * 0.8f);
+    }
+}
+#ifdef DIAG_LAT
+static int cambio_n;                                            /* prueba: cuadros de la IA del trafico */
+#endif
 static void traf_paso(float dt)
 {
-    int i, j;
+    int i;
     cambio_cd++;
+#ifdef DIAG_LAT
+    cambio_n++;
+    dbglog(DBG_INFO, "LATJ %d %.3f %d %.1f\n", cambio_n, (double)yo.x, carril_cerca(yo.s, yo.x), (double)(yo.v * 3.6f));
+#endif
 #ifdef DIAG_TRAF
     traf_diag();
 #endif
     traf_aparece();
+    tr_enlaza();                                                /* 479420 */
     for (i = 0; i < NTRAF; i++) {
-        trafico_t *t = traf + i; const trafico_t *del = NULL, *sig = NULL, *ant = NULL;
-        float x0 = t->c.x, hueco = 1e9f, obj, rate, b0, dsig = 1e9f, dant = 1e9f;
-        int d, aparte, f0 = 0, f1 = 0, jug_del;
+        trafico_t *t = traf + i; float obj, rate; int d, f0 = 0, f1 = 0;
         if (t->carril < 0) continue;                            /* plaza libre */
         traf_lejos_v = traf_lejos(t->c.s);
         traf_pose_ant(t);                                       /* 4755C0 */
         if (t->b64 > 0) t->b64--;                               /* 47E780 (al final de su control): +B62 y +B64 */
         if (t->b62 > 0) t->b62--;
         if (t->d22 > 0) t->d22--;
-        for (j = 0; j < NTRAF; j++) {                           /* el de delante en mi carril (o en el que voy) */
-            const trafico_t *o = traf + j; float dd = o->c.s - t->c.s;
-            if (o == t) continue;
-            if (dd > 0 && dd < dsig) { dsig = dd; sig = o; }
-            if (dd <= 0 && -dd < dant) { dant = -dd; ant = o; }
-            if (dd <= 0 || dd > 60.0f) continue;
-            if (o->carril != t->carril && o->carril != t->destino && o->destino != t->carril) continue;
-            if (dd < hueco) { hueco = dd; del = o; }
-        }
-        jug_del = yo.s > t->c.s && yo.s - t->c.s < dsig;            /* el siguiente de la lista es el jugador */
         if (t->ha && variante == 2 && !infarto_mueven()) {         /* 47E6C0: los de la mision (+C5C 0x40000) sin
                                                                        control hasta 45D820 (7F250C): parados */
             t->c.v = 0;
             goto coloca;
         }
-        /* 472450: objetivo y ritmo segun la distancia al jugador (en posiciones de la carretera; ver traf_objetivo) */
+        /* 47E4A0: 472450 (objetivo, ritmo y 472320 / 4718D0, que pueden tocar la velocidad y empezar un cambio de
+           carril), 472090; golpeado: 473F30; si no, carriles (47E110) */
         d = (int)floorf((t->c.s - yo.s) / TR_POS);
-        aparte = (int)(fabsf(traf_pos(t) - yo_pos(t->c.s)));
-        obj = traf_objetivo(t, d, aparte, &f0, &f1, &rate);
+        obj = traf_objetivo(i, d, &f0, &f1, &rate);
         if (t->ha) { obj = t->v_des; f0 = 0; f1 = 1; rate = 0.05f; }   /* INFARTO: la velocidad de la carretera (45D830);
                                                                         SIMPLIFICADO: sin el camino Lead de 472450 */
-        if (del && hueco < TR_HUECO && t->c.v > del->c.v) obj = fminf(obj, del->c.v);   /* 472A50 */
         traf_acelera(t, rate, obj, f0, f1);
-        /* 47E4A0: golpeado, recuperacion; si no, carriles (47E110) */
-        b0 = t->b08;
-        if (t->b6c) traf_recupera(t);
-        else {
-            int l0 = t->carril;
-            if (t->b14 > 0) { traf_cambio(t); traf_aparta(t); }
-            else { traf_decide(t, jug_del ? NULL : sig, jug_del, ant); if (!traf_aparta(t)) traf_esquiva(t); }
-            if (l0 == t->carril) {                              /* 47E110 / 6280EC: B08 no se acerca a 0 mas de 0,02 por cuadro */
-                if (b0 > 0) t->b08 = fmaxf(t->b08, b0 - 0.02f);
-                if (b0 < 0) t->b08 = fminf(t->b08, b0 + 0.02f);
-            }
-        }
+        if (t->b6c) traf_recupera(t, i);
+        else traf_carriles(i);
         if (t->golpe >= 0) {                                    /* 4A2400: la animacion del golpe (16..19) y luego +2F8 */
             t->t_golpe += 0.0166112948f; t->n2f4++;             /* +2F4: cuadros del estado (4A2400) */
             if (!or2_pose(&choq, t->golpe, t->t_golpe, t->lado, t->c.pose_t, t->c.pose_r)) {
@@ -2342,16 +2749,20 @@ static void traf_paso(float dt)
             }
         } else if (t->t_recup > 0.0f) t->t_recup -= 0.0166112948f;
     coloca:
-        t->c.s += t->c.v * dt;
+        traf_guia(t, dt);                                       /* 47BC00 */
         if (t->c.s < yo.s - TR_CIERRA_ATRAS * m_pos || (!t->ha && t->c.s > yo.s + TR_CIERRA_DELANTE * m_pos) ||
             t->c.s > longitud - 20.0f) {                        /* los de la mision (+C5C 0x40000): por delante 0x270F */
             traf_aparca(t); continue;                           /* 477F60: cerrado */
         }
-        if (t->c.s > longitud - 20.0f) t->c.s = longitud - 20.0f;
-        t->c.x = carril_x(t->c.s, t->carril) + t->b08 * 0.25f * carril_paso(t->c.s, t->carril);
-        t->vlat = (t->c.x - x0) / dt;
-        t->c.a = atan2f(t->c.x - x0, t->c.v * dt + 1e-4f);
         coche_coloca(&t->c);
+#ifdef DIAG_LAT
+        {   /* prueba: desplazamiento lateral de cada coche cercano por cuadro (x en m, carril, b08, cuadros del cambio) */
+            int fin_, u_, fila_ = tr_fila(t->c.s, &fin_, &u_);
+            if (fabsf(t->c.s - yo.s) < 150.0f)
+                dbglog(DBG_INFO, "LAT %d %d %.1f %.3f %d %.3f %d %.1f %d %d %d %d %.2f\n", cambio_n, i, (double)(t->c.s - yo.s), (double)t->c.x,
+                       t->carril, (double)t->b08, t->b14, (double)(t->c.v * 3.6f), t->dir, u_, fila_, fin_, (double)carril_x(t->c.s, t->carril));
+        }
+#endif
     }
     traf_choques();                                             /* 4F9450 (47EBA0: despues de mover a todos) */
 #ifdef PRUEBA_FADE
