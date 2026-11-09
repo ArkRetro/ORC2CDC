@@ -552,12 +552,12 @@ int video_atraccion(void)
     return r < 0 && s < 0 ? -1 : 0;
 }
 
-/* al arrancar: la pelicula de atraccion (los coches; MV.PS2 attr50) y despues la del titulo (el logo, ts50); START
-   (o un atasco, tras el diagnostico) pasa al titulo. Por inactividad en el titulo, video_atraccion: titulo y
-   atraccion, como el modo de atraccion del original. */
+/* al arrancar: primero la animacion del titulo (el logo, MV.PS2 ts50) y despues la pelicula de atraccion (los
+   coches, attr50), el mismo orden que video_atraccion; START (o un atasco, tras el diagnostico) pasa al titulo. Por
+   inactividad en el titulo, video_atraccion repite titulo y atraccion, como el modo de atraccion del original. */
 void video_titulo(void)
 {
-    int r = video_reproduce("MVATTR.VQV");
+    int r = video_reproduce("MVTS.VQV");
     if (r == 1 || r == 2) return;
-    video_reproduce("MVTS.VQV");
+    video_reproduce("MVATTR.VQV");
 }
