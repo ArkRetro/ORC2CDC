@@ -2094,7 +2094,7 @@ static void traf_acelera(trafico_t *t, float rate, float obj, int f0, int f1)
      delante primero; +314 = el de delante, +318 = el de detras (comparador 479360: d < 0 -> va despues).
    - 46DD00: distancia XZ entre dos coches (802AF0); 46E250 (PS2 0x1ddc28): lo que b va por delante de a a lo largo
      de b, menos (peso de la clase de b - 1) x 20 m (pesos 5B3DE4 = PS2 0x40b9c8: 4,2,3,1,1,1,1); por debajo de 0,1 m
-     la distancia sin proyectar. El peso del jugador: 1 (SUPUESTO).
+     la distancia sin proyectar. El jugador es de la clase 5 (PS2 0x17e288): peso 1 de la tabla.
    - +268 / +264 (4A4010): distancia al borde izquierdo (> 0 dentro) y al derecho (< 0 dentro) en m del original
      (4 m por carril): en la etapa la carretera entera (6 carriles, 24 m; 803714 = 24); en la union cada calzada (3
      carriles, 12 m; +60 = 0x64 / 0x65). La "posicion de carril" (lane_pos de 47DC10) suma 12 en la calzada derecha
@@ -2155,12 +2155,12 @@ static int tr_fila(float s, int *fin, int *u)
     return pos;
 }
 /* carriles a los que puede ir (lo..hi, como 47DC10 / 471680 / 473F30): en la union los de su calzada; en la etapa
-   todos salvo donde la calzada esta partida (44F0F0: en el original solo en una etapa, filas 0x60..0x23E; aqui donde la
-   colision tiene un muro entre los carriles 2 y 3, SUPUESTO) */
+   todos (44F0F0 parte la calzada solo en etapas con descriptor 0x1C o 0x3A; ningun registro de etapa de este curso
+   los tiene, asi que en la etapa nunca se aplica) */
 static void tr_calzada(int e, int *lo, int *hi)
 {
-    float s = tr_s(e), xa, xb;
-    if (tr_en_union(s) || muro_interior(s, 0.5f * (tr_cx(s, 2) + tr_cx(s, 3)), 0.5f, &xa, &xb)) {
+    float s = tr_s(e);
+    if (tr_en_union(s)) {
         *lo = tr_carril(e) < 3 ? 0 : 3; *hi = *lo + 2;
     } else { *lo = 0; *hi = NCARRIL - 1; }
 }
