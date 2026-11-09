@@ -1,28 +1,39 @@
 #!/usr/bin/env python3
-"""conv_video.py <iso> <dir_salida> [--hz 50|60] [--segundos S] [--solo ts|attr]: las peliculas de MV.PS2 -> MVTS.VQV
-(pantalla de titulo, \\ts50.pss) y MVATTR.VQV (atraccion, \\attr50.pss) para comun/video.c.
+"""conv_video.py <iso> <dir_salida> [--hz 50|60] [--segundos S] [--solo ts|attr] [--ancho W --alto H] [--frec F]
+[--gop G]: las peliculas de MV.PS2 -> MVTS.VQV (pantalla de titulo, \\ts50.pss) y MVATTR.VQV (atraccion, \\attr50.pss)
+para comun/video.c.
 
 Origen (todo se lee de tu ISO): MV.PS2 lleva \\ts50.pss, \\attr50.pss, \\ts60.pss y \\attr60.pss (rutas \\mv\\...pss en el
 ELF, 0x352bb8; 0x12d480 elige la de 50 o 60 Hz y la de atraccion o la de titulo). PSS = MPEG-PS de Sony: video
 MPEG-2 640x480 (25 fps las de 50 Hz, 29,97 las de 60) y audio en paquetes privados 0xBD (4 bytes de subcabecera
 "ff a0 00 00"; al principio 'SShd' {tipo 1 = PCM de 16 bits, 48000 Hz, 2 canales, intercalado de 0x200 bytes} y 'SSbd'
 {tamano}). Sin pistas de idioma ni subtitulos: el audio es musica y efectos.
-La Dreamcast no tiene decodificador de MPEG; el video se guarda como texturas VQ de la PowerVR (la descomprime el propio
-chip al dibujar: el SH4 solo copia 34 KB por cuadro a la memoria de video). Cada cuadro se escala a 512x256 (una
-textura VQ rectangular RGB565: libro de 256 entradas de 2x2 texeles + un byte por bloque de 2x2, en orden twiddled,
-tools/vq.py) y se dibuja estirado a 640x480. El libro se calcula por cuadro con k-means arrancando del libro del cuadro
-anterior. El audio va a ADPCM de Yamaha estereo a 48 kHz intercalado por nibbles (como la musica, tools/c/musica.c), con
-1 s de adelanto respecto al video para que el lector del GD vaya siempre por delante de lo que suena.
 
-Fichero .VQV (little endian, todo alineado a sectores de 2048 bytes):
-  cabecera (sector 0): 'OVQ1', u32 1, u16 ancho, u16 alto (textura), u32 fps*1000, u32 n_cuadros, u32 frecuencia,
-                       u32 bytes de audio por cuadro, u32 cuadros de adelanto L, u32 tamano de un cuadro (bytes),
-                       u32 desplazamiento del audio previo, u32 bytes del audio previo, u32 desplazamiento del cuadro 0
-  audio previo:        el audio de los L primeros cuadros
-  cuadro k:            VQ (2048 + ancho*alto/4 bytes) y el audio del cuadro k + L (ceros al final)"""
+La Dreamcast no tiene decodificador de MPEG; el video se guarda como texturas VQ de la PowerVR (la descomprime el propio
+chip al dibujar: el SH4 solo copia los indices a la memoria de video). Cada cuadro se escala a ANCHO x ALTO (por
+defecto 256x256: textura VQ RGB565, un byte por bloque de 2x2 texeles en orden twiddled, tools/vq.py) y se dibuja
+estirado a 640x480. El libro (256 entradas, 2 KB) es comun a un grupo de cuadros (GOP: hasta G cuadros, y uno nuevo en
+cada corte de plano): k-means sobre todos los bloques del grupo arrancando del libro del grupo anterior. El audio va a
+ADPCM de Yamaha a FREC Hz (32 kHz por defecto), un flujo mono por canal (como los separa snd_adpcm_split: primera
+muestra en el nibble bajo), con 1 s de adelanto respecto al video para que el lector del GD vaya siempre por delante
+de lo que suena.
+
+Caudal (2026-11-08): la version 1 (512x256, libro por cuadro, 48 kHz, cuadros de 36 KB alineados a sector) pedia
+0,9 MB/s al GD; esta (256x256, libro por GOP de 12, 32 kHz) ~446 KB/s, que cabe holgado en la zona interior del GD.
+
+Fichero .VQV version 2 (little endian):
+  cabecera (sector 0): 'OVQ2', u32 2, u16 ancho, u16 alto, u32 fps*1000, u32 n_cuadros, u32 frecuencia,
+                       u32 bytes de audio por cuadro y canal, u32 cuadros de adelanto L, u32 desplazamiento del audio
+                       previo, u32 bytes del audio previo por canal, u32 desplazamiento de los registros (sector),
+                       u32 bytes de los registros, u32 tamano del mayor registro
+  audio previo:        el audio de los L primeros cuadros: canal izquierdo y luego el derecho
+  registros (seguidos, cada uno de tamano multiplo de 32): cabecera de 32 bytes {u32 tamano, u32 banderas (bit 0:
+                       lleva libro), u32 bytes de audio por canal, u32 numero de cuadro, 16 de ceros}, [libro de 2048
+                       bytes], indices (ancho*alto/4), audio izquierdo y derecho del cuadro k + L, ceros hasta 32"""
 import os, struct, subprocess, sys, tempfile
 from multiprocessing import Pool
 import numpy as np
+from scipy.signal import resample_poly
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ps2.iso import Iso
@@ -30,9 +41,13 @@ from conv_sonido import fichero_paquete
 import vq
 from modelo import twiddle
 
-ANCHO, ALTO = 512, 256
+ANCHO, ALTO = 256, 256
+FREC = 32000
+GOP = 12
 ADELANTO_S = 1.0
 ITER = 6
+CORTE = 28.0          # diferencia media (0-255, gris 64x64) entre dos cuadros seguidos que se toma por corte de plano
+SILENCIO = 0x80       # ADPCM de Yamaha: +1 y -1 paso (los ceros suben la senal poco a poco)
 
 
 def demux_pss(d):
@@ -64,7 +79,7 @@ ESC = (0x0e6, 0x0e6, 0x0e6, 0x0e6, 0x133, 0x199, 0x200, 0x266)
 
 
 def yamaha(x):
-    """como yam_cod de tools/c/musica.c"""
+    """como yam_cod de tools/c/musica.c: un nibble por muestra"""
     senal, paso = 0, 0x7f; out = bytearray(len(x))
     for i, v in enumerate(x.tolist()):
         dd = (v - senal) * 8
@@ -78,25 +93,34 @@ def yamaha(x):
     return out
 
 
-def audio_adpcm(pcm):
-    l = yamaha(pcm[:, 0]); r = yamaha(pcm[:, 1])
-    return bytes(a | (b << 4) for a, b in zip(r, l))   # nibble bajo: derecho; alto: izquierdo
+def adpcm_mono(x):
+    """un canal -> bytes ADPCM (dos muestras por byte, la primera en el nibble bajo)"""
+    if len(x) & 1: x = np.concatenate([x, x[-1:]])
+    n = np.frombuffer(bytes(yamaha(x)), np.uint8)
+    return (n[0::2] | (n[1::2] << 4)).astype(np.uint8).tobytes()
 
 
 TW = None
 
 
+def _bloques(a, pes):
+    P = np.zeros((ANCHO * ALTO, 3)); P[TW] = a.reshape(-1, 3)
+    return P.reshape(-1, 12) * pes
+
+
 def codifica_trozo(args):
-    """[cuadros RGB uint8 (ALTO x ANCHO x 3)] -> [bytes VQ]; k-means con arranque en el libro anterior"""
+    """(cuadros RGB uint8 (ALTO x ANCHO x 3), grupos [(inicio, fin)] relativos, semilla) -> [(libro o None, indices)]"""
     global TW
-    cuadros, semilla = args
+    cuadros, grupos, semilla = args
     if TW is None: TW = twiddle(ANCHO, ALTO).ravel()
     pes = np.tile(np.sqrt(vq.PESO[:3]), 4); C = None; r = []
-    for a in cuadros:
-        P = np.zeros((ANCHO * ALTO, 3)); P[TW] = a.reshape(-1, 3)
-        X = P.reshape(-1, 12) * pes
-        if C is None:
-            U = np.unique(X, axis=0)
+    for g0, g1, corte in grupos:
+        Xs = [_bloques(a, pes) for a in cuadros[g0:g1]]
+        X = np.concatenate(Xs)
+        if C is None or corte:                               # al principio y en cada corte de plano: libro nuevo
+            rng = np.random.default_rng(semilla + g0)
+            S = X[rng.choice(len(X), min(len(X), 50000), replace=False)]
+            U = np.unique(S, axis=0)
             C = vq.kmeans(U, np.ones(len(U)), 256, iters=12, tiempo=10.0, semilla=semilla)
             if len(C) < 256: C = np.concatenate([C, np.repeat(C[:1], 256 - len(C), 0)])
         for _ in range(ITER):
@@ -107,8 +131,10 @@ def codifica_trozo(args):
             if len(vac): C[vac] = X[np.argsort(-d)[:len(vac)]]
         C4 = np.full((256, 4, 4), 255.0); C4[:, :, :3] = (C / pes).reshape(256, 4, 3)
         pal, dec = vq._cuantifica(C4, 1)
-        idx, _ = vq._asigna(X, dec[:, :, :3].reshape(256, 12) * pes)
-        r.append(pal.astype('<u2').tobytes() + idx.astype(np.uint8).tobytes())
+        D = dec[:, :, :3].reshape(256, 12) * pes
+        for k, Xk in enumerate(Xs):
+            idx, _ = vq._asigna(Xk, D)
+            r.append((pal.astype('<u2').tobytes() if k == 0 else None, idx.astype(np.uint8).tobytes()))
     return r
 
 
@@ -124,9 +150,21 @@ def cuadros_rgb(ruta, n_max):
     return r
 
 
+def grupos(frames):
+    """[(inicio, fin, corte)]: hasta GOP cuadros, cortando en los cambios de plano"""
+    g = [f[::ALTO // 64, ::ANCHO // 64].astype(float).mean(2) for f in frames]
+    cortes = {0} | {i for i in range(1, len(g)) if np.abs(g[i] - g[i - 1]).mean() > CORTE}
+    r = []; i = 0
+    while i < len(frames):
+        j = i + 1
+        while j < len(frames) and j - i < GOP and j not in cortes: j += 1
+        r.append((i, j, i in cortes)); i = j
+    return r
+
+
 def convierte(iso, nombre_pss, salida, segundos):
     d = fichero_paquete(iso, 'MV.PS2', '\\' + nombre_pss)
-    pcm, frec = demux_pss(d)
+    pcm, frec0 = demux_pss(d)
     tmp = tempfile.NamedTemporaryFile(suffix='.pss', dir='/dev/shm' if os.path.isdir('/dev/shm') else None, delete=False)
     tmp.write(d); tmp.close()
     try:
@@ -138,36 +176,57 @@ def convierte(iso, nombre_pss, salida, segundos):
     finally:
         os.unlink(tmp.name)
     n = len(frames)
-    por = frec / fps; assert abs(por - round(por)) < 1e-6, 'audio por cuadro no entero'
-    por = int(round(por)); L = int(round(ADELANTO_S * fps))
-    pcm = pcm[:n * por]
-    pcm = np.concatenate([pcm, np.zeros((n * por - len(pcm), 2), pcm.dtype)]) if len(pcm) < n * por else pcm
-    adp = audio_adpcm(pcm.astype(np.int64))                     # 1 byte por muestra estereo
-    trozos = [(frames[i:i + 24], i) for i in range(0, n, 24)]
+    por = FREC / fps; assert abs(por - round(por)) < 1e-6 and round(por) % 64 == 0, 'audio por cuadro no valido'
+    por = int(round(por)); L = int(round(ADELANTO_S * fps)); pb = por // 2      # pb: bytes por cuadro y canal
+    # audio: 48 kHz -> FREC (filtro polifasico), un flujo ADPCM por canal
+    from math import gcd
+    g = gcd(FREC, frec0)
+    x = resample_poly(pcm.astype(np.float64), FREC // g, frec0 // g, axis=0)
+    x = np.clip(np.rint(x), -32768, 32767).astype(np.int64)
+    x = x[:n * por]
+    if len(x) < n * por: x = np.concatenate([x, np.zeros((n * por - len(x), 2), np.int64)])
+    canal = [adpcm_mono(x[:, 0]), adpcm_mono(x[:, 1])]
+    def audio(k):                       # bytes del cuadro k (izquierdo, derecho); silencio pasado el final
+        return [c[k * pb:(k + 1) * pb].ljust(pb, bytes([SILENCIO])) for c in canal]
+    # video: grupos por trozos de unos 96 cuadros (un trozo por proceso; el libro arranca del grupo anterior)
+    gs = grupos(frames); trozos = []; cur = []
+    for gi in gs:
+        cur.append(gi)
+        if sum(b - a for a, b, _ in cur) >= 96: trozos.append(cur); cur = []
+    if cur: trozos.append(cur)
+    tareas = [(frames[t[0][0]:t[-1][1]], [(a - t[0][0], b - t[0][0], c) for a, b, c in t], t[0][0]) for t in trozos]
     with Pool(min(4, os.cpu_count() or 1)) as pool:
-        vqs = [v for r in pool.map(codifica_trozo, trozos) for v in r]
-    t_vq = 2048 + ANCHO * ALTO // 4
-    t_cuadro = (t_vq + por + 2047) & ~2047
-    previo = adp[:L * por]; t_prev = (len(previo) + 2047) & ~2047
-    cab = b'OVQ1' + struct.pack('<IHHIIIIIIIII', 1, ANCHO, ALTO, int(round(fps * 1000)), n, frec, por, L, t_cuadro,
-                                2048, len(previo), 2048 + t_prev)
+        vqs = [v for r in pool.map(codifica_trozo, tareas) for v in r]
+    assert len(vqs) == n and vqs[0][0] is not None
+    regs = []
+    for k in range(n):
+        libro, idx = vqs[k]
+        cuerpo = (libro or b'') + idx + b''.join(audio(k + L))
+        tam = (32 + len(cuerpo) + 31) & ~31
+        regs.append((struct.pack('<IIII', tam, 1 if libro else 0, pb, k).ljust(32, b'\0') + cuerpo).ljust(tam, b'\0'))
+    datos = b''.join(regs)
+    previo = b''.join(audio(k)[0] for k in range(L)) + b''.join(audio(k)[1] for k in range(L))
+    t_prev = (len(previo) + 2047) & ~2047
+    cab = b'OVQ2' + struct.pack('<IHHIIIIIIIIII', 2, ANCHO, ALTO, int(round(fps * 1000)), n, FREC, pb, L, 2048,
+                                L * pb, 2048 + t_prev, len(datos), max(len(r) for r in regs))
     with open(salida, 'wb') as f:
         f.write(cab.ljust(2048, b'\0'))
         f.write(previo.ljust(t_prev, b'\0'))
-        for k in range(n):
-            a = adp[(k + L) * por:(k + L + 1) * por].ljust(por, b'\0')
-            f.write((vqs[k] + a).ljust(t_cuadro, b'\0'))
+        f.write(datos.ljust((len(datos) + 2047) & ~2047, b'\0'))
     tam = os.path.getsize(salida)
-    print('%s: %s, %d cuadros %dx%d a %.3f fps (%.1f s), audio %d Hz ADPCM, %.1f MB, %.0f KB/s' % (
-        os.path.basename(salida), nombre_pss, n, ANCHO, ALTO, fps, n / fps, frec, tam / 1e6, t_cuadro * fps / 1024))
+    print('%s: %s, %d cuadros %dx%d a %.3f fps (%.1f s), %d grupos, audio %d Hz ADPCM, %.1f MB, %.0f KB/s' % (
+        os.path.basename(salida), nombre_pss, n, ANCHO, ALTO, fps, n / fps, len(gs), FREC, tam / 1e6,
+        len(datos) / (n / fps) / 1024))
 
 
 def main():
+    global ANCHO, ALTO, FREC, GOP
     if len(sys.argv) < 3: raise SystemExit(__doc__.split('\n')[0])
-    iso = Iso(sys.argv[1]); sal = sys.argv[2]; os.makedirs(sal, exist_ok=True)
-    hz = sys.argv[sys.argv.index('--hz') + 1] if '--hz' in sys.argv else '50'
-    seg = float(sys.argv[sys.argv.index('--segundos') + 1]) if '--segundos' in sys.argv else 0
-    solo = sys.argv[sys.argv.index('--solo') + 1] if '--solo' in sys.argv else None
+    a = sys.argv
+    def opc(k, d): return type(d)(a[a.index(k) + 1]) if k in a else d
+    iso = Iso(a[1]); sal = a[2]; os.makedirs(sal, exist_ok=True)
+    hz = opc('--hz', '50'); seg = opc('--segundos', 0.0); solo = opc('--solo', '')
+    ANCHO = opc('--ancho', ANCHO); ALTO = opc('--alto', ALTO); FREC = opc('--frec', FREC); GOP = opc('--gop', GOP)
     for clave, fich in (('ts', 'MVTS.VQV'), ('attr', 'MVATTR.VQV')):
         if solo and solo != clave: continue
         convierte(iso, '%s%s.pss' % (clave, hz), os.path.join(sal, fich), seg)

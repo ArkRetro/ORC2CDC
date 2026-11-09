@@ -10,4 +10,6 @@ int gd_lee(uint32_t lba, int n, void *dst);           /* sectores de 2048 desde 
    que la cabeza del lector no salte entre dos ficheros en cada trozo (en un GD real cada salto cuesta ~100-200 ms) */
 void gd_hilo_fondo(void);
 int gd_ocupado(uint32_t ms);
+/* intentos de lectura fallidos desde el arranque y el codigo del ultimo (ERR_* de cdrom.h) */
+void gd_errores(uint32_t *n, int *ult);
 #endif

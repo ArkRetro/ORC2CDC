@@ -19,7 +19,12 @@ int gd_ocupado(uint32_t ms) { return ult_primer_plano && timer_ms_gettime64() - 
 /* Dos hilos pueden leer a la vez (la musica y la carga de etapa en segundo plano, demo/main.c): con las ordenes de
    KallistiOS solapadas el GD devuelve a veces ERR_SYS (visto en Flycast). Cada lectura va entera bajo un mutex propio
    y, si falla, se repite (hasta 4 veces). gd_busca tambien lo toma (su sector es comun): recursivo */
+/* Cada intento fallido se cuenta (gd_errores: lo ensena el diagnostico del video); con ERR_DISC_CHG (la unidad avisa de
+   un cambio de disco, p.ej. tras un fallo de lectura en la consola real) se reinicia la unidad antes de repetir, como
+   hace fs_iso9660 de KallistiOS. */
 static mutex_t m_gd = RECURSIVE_MUTEX_INITIALIZER;
+static volatile uint32_t n_err; static volatile int ult_err;
+void gd_errores(uint32_t *n, int *ult) { *n = n_err; *ult = ult_err; }
 static int lee(uint32_t lba, int n, void *dst)
 {
     int r, pp = thd_get_current() != fondo, k;
@@ -27,6 +32,8 @@ static int lee(uint32_t lba, int n, void *dst)
     if (pp) ult_primer_plano = timer_ms_gettime64();
     for (k = 0; k < 4; k++) {
         if (!(r = cdrom_read_sectors_ex(dst, lba + 150, n, ((uintptr_t)dst & 31) == 0))) break;
+        n_err++; ult_err = r;
+        if (r == ERR_DISC_CHG || r == ERR_NO_DISC) cdrom_reinit();
         thd_sleep(20);
     }
     if (pp) ult_primer_plano = timer_ms_gettime64();
