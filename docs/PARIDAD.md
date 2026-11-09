@@ -1267,10 +1267,17 @@ peticion 14 (escoltas 45B5B0, +324 = 6: carrera contra ellos), que no esta en la
   dibujan sumadas. SIN la deformacion de entrada/salida ni el vaiven (7F8BB4).
 - Bono de nivel 45D360 (PS2 0x1b2978) con las estadisticas de 4628D0 en la union (posiciones con +D36 > 0 y con
   ruedas en (+24C.. >> 8) & 0x3B sin derrapar; 0,8 / 0,7 x t / 5, tope 5, x 10; 0 si una peticion del nivel saco nota
-  <= 5). SIN la parte de la velocidad media de la etapa ([7D3838 + nivel * 4] x el parametro +2438 del coche > 250).
-  Medido: nivel 2 y 3: +20 corazones cada uno.
+  <= 5). Mas la parte de la velocidad (2026-11-09): v = [7D3838 + nivel * 4] (4505F0 = PS2 0x1cfdf0: media de +1C4 x
+  216,72 desde la ultima etapa terminada, la guardan 44FF20 al terminar la etapa y 4513C0 en la meta; tope 0x57E3F
+  pasos) x el parametro +2438 del coche; si v > 250 (PS2 0x1b2ab0, 0x437a0000) suma (int)(v - 250) x 2. Medido en E
+  (piloto de prueba): media 250,8 / 238,5 / 246,8 / 277,9 x 0,6276 = 157..174, sin bono de velocidad (hace falta una
+  media de mas de ~398, o sea ~250 km/h en el velocimetro); niveles 2 y 3: +20 corazones cada uno (por la union).
 - Modelo 0x2B (clase <= 1 de las tablas de coches): solo lo piden las tablas 20 (1 coche, mision base 4), 21 (17,
   mision especial 24) y 22 (4, especial 20); la DC no lo tiene (trafico 30..38): se gasta sin coche (PENDIENTE).
+- Listas de aterrizaje / salto de la acompanante del modo (PC 5C0FB0 / 5C0FD0 = PS2 0x40ea30 / 0x40ea40): iguales que
+  las del OutRun (0x40eb10 / 0x40eb20) y con las mismas cuentas: CONFIRMADO (comun/voces.c). Sus listas de movimientos
+  (PS2 0x40ea48 cerrado / 0x40ea88 descapotable, PC 5C0FD8 / 5C1018) SI son otras (0x6003d, 0x60025, 0x240000/1,
+  0x60022, 0x6006d, 0x230001...) y CHR.DAT no lleva 0x6003d, 0x6006d ni 0x230001: PENDIENTE (con las reacciones).
 - Voces: el juego de voces del modo se cambia en el AICA (VOCESH.DAT 740 KB por VOCES.DAT 207 KB) al empezar la
   carrera, leido en el hueco de la union; banco HAM de la etapa por clave (4 distintos: grupos 0,0,0,1,1,1,2,2,2,1,0,3,
   0,0,3; PROBABLE que el juego lo elija por la clave). La acompanante es el personaje 6 (487F50), sin comentarios de
@@ -1278,8 +1285,8 @@ peticion 14 (escoltas 45B5B0, +324 = 6: carrera contra ellos), que no esta en la
 - SIN PORTAR (PENDIENTE): tipos 7, 8, 11, 15, 16, 17, 19, 20, 21, 23, 24, 25 (objetos OSO de la mision: conos,
   monedas, arcos, cajas, lineas del carril; los objetos son los sucesos 32..307 con sus controles de
   race_traffic_objects.inc 4AA560.. y sus posiciones de las tablas de la etapa; no empiezan, sin anuncio ni nota), 14 /
-  18 (escoltas), la hoja de resultados de la etapa 4603F0, la cara de la acompanante (45BDF0), las reacciones del robot
-  a las peticiones (487D60 / 487D90) y las listas de aterrizaje / salto del modo (PC 5C0FB0 / 5C0FD0). La cuenta de
+  18 (escoltas), la hoja de resultados de la etapa 4603F0, la cara de la acompanante (45BDF0) y las reacciones del robot
+  a las peticiones (487D60 / 487D90). La cuenta de
   corazones y la nota en la carrera son texto bfont (PROVISIONAL: el contador del original es 45FB80 con 5A9468).
 
 - Coches de la mision: parados (+1C4 = 0) y sin control (47E6C0: +C5C 0x40000 y 45D820 = 7F250C = 0) desde la

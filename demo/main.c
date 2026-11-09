@@ -5764,6 +5764,7 @@ int main(int argc, char **argv)
                         hc.impulso = ha_impulso; hc.impulso_rapido = ha_rapido; hc.roce = (toca & 2) != 0;
                         hc.muro = yo.choque == 1; memcpy(hc.sup, sup_rueda, sizeof hc.sup);
                         hc.d36 = fis_ok ? fis.d36 : 0; hc.seccion_union = cur_en_union ? (int)floorf((yo.s - s_union) / m_pos) : 0; hc.derrapa = yo.t_derrape != 0; hc.kmh = fis_ok ? fis.velocidad_hud : yo.v * 3.6f; hc.vel_mf = fis_ok ? fis.vel_mf : 0;
+                        hc.hud = fis_ok ? fpar.hud : 0;
                         infarto_paso(&hc);
 #ifdef DIAG_HA
                         if (crono % 60 == 0) { int q;

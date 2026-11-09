@@ -29,7 +29,7 @@
      coches se abren cuando el jugador esta entre 30 y 50 posiciones antes de su seccion (o todos a la vez con el bit
      0x80); acciones -1 / -2 (46E4A0): sin trafico normal / con el (el gestor de main.c cierra el de la etapa).
    - Voces: cola de 8 (45BD30 / 45BCD0 = PS2 0x1ac3d8) con el reloj de cuadros; las del banco HAM de la etapa.
-   SIN PORTAR (PENDIENTE): el bono de nivel (45D360: sus estadisticas 4628D0), la hoja de resultados de la etapa
+   SIN PORTAR (PENDIENTE): la hoja de resultados de la etapa
    (4603F0) y los rotulos y el contador animado del HUD (45FB80 / 460AD0: banco SPRANI 0x2B), las reacciones de la
    acompanante a las peticiones (487D60 / 487D90). */
 #include <kos.h>
@@ -132,18 +132,29 @@ static void estadisticas(const infarto_coche_t *c)
     }
 }
 /* 45D360 (PS2 0x1b2978): bono del nivel l (0 si alguna peticion suya saco nota 0..5): min(5, derrape / (t x 0,8 / 5))
-   o min(5, firme / (t x 0,7 / 5)), el mayor, x 10, con t las posiciones en la union. SIN la parte de la velocidad media
-   de la etapa x el parametro +2438 del coche por encima de 250 (PENDIENTE: [7D3838 + nivel * 4] no esta en el port) */
+   o min(5, firme / (t x 0,7 / 5)), el mayor, x 10, con t las posiciones en la union; mas (v - 250) x 2 con v la
+   velocidad media del nivel x el parametro +2438 del coche si pasa de 250 */
+/* 4513C0 / 44FF20 (race_manager.cpp: 7D3938 / 7D3930 / 7D3888): la suma de +1C4 del jugador en cada paso de logica
+   desde la ultima etapa terminada (tope 0x57E3F pasos); la media x 216,72 se guarda en el nivel al terminar la etapa
+   (44FF20, antes de poner la suma a 0) y en la meta (4513C0) */
+static float vs_suma, vel_nivel[NIV], hud_coche; static int vs_n;
+static float vel_media(void) { return vs_n ? vs_suma / (float)vs_n * 216.720001f : 0.0f; }
 static int bono_nivel(int l, int sec_union)
 {
     int k, a, b; float t;
     for (k = 0; k < 6; k++) if (lv[l][0x38 + k]) return 0;
     t = (float)(sec_union - st_5a);
-    if (st_5a < 0 || t <= 0) return st_54;
-    a = (int)((float)st_5c / (t * 0.8f / 5.0f)); if (a > 5) a = 5;
-    b = (int)((float)st_60 / (t * 0.7f / 5.0f)); if (b > 5) b = 5;
-    if (a > b) b = a;
-    st_54 += b * 10;
+    if (st_5a >= 0 && t > 0) {
+        a = (int)((float)st_5c / (t * 0.8f / 5.0f)); if (a > 5) a = 5;
+        b = (int)((float)st_60 / (t * 0.7f / 5.0f)); if (b > 5) b = 5;
+        if (a > b) b = a;
+        st_54 += b * 10;
+    }
+    /* velocidad media del nivel (4505F0: [7D3838 + nivel * 4]) x el factor del velocimetro del coche (+2B4 -> +2438):
+       por encima de 250 (PS2 0x1b2ab0, 0x437a0000) suma (v - 250) x 2 */
+    {   float v = vel_nivel[l] * hud_coche;
+        if (v > 250.0f) st_54 += (int)(v - 250.0f) * 2;
+    }
     return st_54;
 }
 static int sec_union_ult;
@@ -517,7 +528,7 @@ void infarto_carrera(int clave, int nivel)          /* 45E0F0 */
     int l;
     score = disp = 0; memset(vcola, 0, sizeof vcola); vc_cab = vc_fin = 0; voz_ult = 0; reloj = 0x10000;
     contador = 0; dx23dc = 0; medidor = 0; { int i; for (i = 0; i < 19; i++) { anillo[i].cuadro = -1; roto_c[i] = -1; } }
-    result = 0; bonus = 0; meta_hecha = 0; trafico = 1; ct_base = NULL; ct_pend = -1; mueven = 1; ban_on = 0;
+    result = 0; bonus = 0; meta_hecha = 0; vs_suma = 0; vs_n = 0; memset(vel_nivel, 0, sizeof vel_nivel); trafico = 1; ct_base = NULL; ct_pend = -1; mueven = 1; ban_on = 0;
     for (l = 0; l < NIV; l++) { memset(lv[l], 0, 0x44); LV_SEL(l) = -1; LV_U32(l, 4) = 0x29;
         LV_U32(l, 8) = LV_U32(l, 12) = LV_U32(l, 16) = LV_U32(l, 20) = LV_U32(l, 24) = -1; }
     memset(&hud, 0, sizeof hud); hud.nota = -1; hud.nota_etapa = -1; hud.anuncio = -1; hud.t_nota = hud.t_etapa = hud.t_anuncio = 9999;
@@ -529,10 +540,12 @@ void infarto_etapa(int clave, int nivel)            /* 464350, stage clear */
 {
     int prev = nivel_act, i; int32_t edi;
     edi = score / 10000 - h_nivel;
+    if (prev >= 0 && prev < NIV) vel_nivel[prev] = vel_media();   /* 44FF20 */
+    vs_suma = 0; vs_n = 0;
     {   int b = bono_nivel(prev, sec_union_ult);     /* 45D360 del nivel anterior */
         if (b > 0) { edi += b; score += b * 10000; }
-        dbglog(DBG_INFO, "INFARTO: bono del nivel %d: %d (derrape %d, firme %d, en %d posiciones)\n", prev, b, st_5c, st_60,
-               sec_union_ult - st_5a);
+        dbglog(DBG_INFO, "INFARTO: bono del nivel %d: %d (derrape %d, firme %d, en %d posiciones; velocidad media %.1f x %.4f)\n", prev, b,
+               st_5c, st_60, sec_union_ult - st_5a, (double)vel_nivel[prev], (double)hud_coche);
     }
     st_54 = 0; st_5c = 0; st_60 = 0; st_5a = -1; st_5e = st_62 = -1;
     LV_U32(prev, 0x34) = edi;
@@ -550,6 +563,7 @@ void infarto_meta(void)                             /* 464350 con 44FF10 */
     int i; int32_t esi;
     if (meta_hecha) return;
     esi = score / 10000 - h_nivel;
+    if (nivel_act >= 0 && nivel_act < NIV) vel_nivel[nivel_act] = vel_media();   /* 4513C0 */
     {   int b = bono_nivel(nivel_act, sec_union_ult);
         if (b > 0) { esi += b; score += b * 10000; }
     }
@@ -564,6 +578,8 @@ void infarto_paso(const infarto_coche_t *c)         /* 464D20 */
     int32_t d;
     reloj++;
     if (!dat) return;
+    if (vs_n < 0x57e3f) { vs_suma += c->vel_mf; vs_n++; }
+    hud_coche = c->hud;
     control(c);
     d = (score - disp) / 32;                         /* el contador alcanza a los corazones */
     if ((d < 0 ? -d : d) * 32 < 20000) disp = score; else disp += d;

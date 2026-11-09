@@ -20,8 +20,10 @@
      Las de asustada y trompo solo las dice en Coast 2 Coast (variantes 3 y 4): aqui no.
    - INFARTO (variante 2, voces_modo(1)): la acompanante es el personaje 6 (487F50: 9 solo en las variantes 1, 3, 4 y
      5), asi que "aire" es la lista 0x40ebb8; sin los comentarios de zona (488BD0 solo OutRun) ni de derrapes (488C90
-     solo 1, 3, 4); las listas de aterrizaje / salto del INFARTO (PC 5C0FB0 / 5C0FD0) no estan localizadas en el ELF
-     de PS2: se usan las del OutRun (PROVISIONAL). Sus voces son las de VOCESH.DAT (comun/infarto.c).
+     solo 1, 3, 4); las listas de aterrizaje / salto del INFARTO (PC 5C0FB0 / 5C0FD0 = PS2 0x40ea30 / 0x40ea40, delante
+     de sus listas de movimientos 0x40ea48 / 0x40ea88 como las del OutRun 0x40eb10 / 0x40eb20 / 0x40eb28) son
+     iguales que las del OutRun (0x969, 0x962, 0x15f, 0x160 / 0x967, 0x967) y con las mismas cuentas (2 / 2 en
+     +0x34 / +0x3c de las dos listas de movimientos): CONFIRMADO, se usan las mismas. Sus voces son las de VOCESH.DAT (comun/infarto.c).
    - Locutor: al empezar el modo GAME (0x1b83e8: cuando no viene de RESTART) la voz 0x82; con el EXTEND TIME el efecto
      0x4d y la voz 0x16c (4B93E0 / 0x1be78c); GOAL 0x16b (49C9C0) y TIME OVER 0x155 (499020); el aviso de poco tiempo
      (4B9CD0 / 0x1c00d8) es el efecto 0x18d cuando quedan 600 cuadros o menos, cada 16, 8 o 4 cuadros (por debajo de

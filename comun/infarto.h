@@ -21,6 +21,7 @@ typedef struct {
     int   derrapa;          /* car+0x2A8 & 0x10F407C (derrape)                                                  */
     float kmh;              /* car+0x1F8 (km/h del velocimetro)                                                 */
     float vel_mf;           /* car+0x1C4 (m por cuadro)                                                         */
+    float hud;              /* parametro +0x2438 del coche (+0x2B4): factor del velocimetro                     */
 } infarto_coche_t;
 
 /* coche que pide abrir el gestor (45D470): clase (+324), seccion de la etapa, carril, modelo del juego */
