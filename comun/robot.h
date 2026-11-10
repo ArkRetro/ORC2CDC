@@ -6,7 +6,7 @@
    de la logica del ELF de PS2. Ver robot.c. */
 #include <stdint.h>
 
-#define ROBOT_N 3                 /* 0 el piloto, 1 la acompanante, 2 el banderero de la salida (si CHR.DAT lo trae) */
+#define ROBOT_N 2                 /* 0 el piloto, 1 la acompanante */
 #define ROBOT_HUESOS 56                /* el esqueleto mayor (bone.bin 3) tiene 53 */
 
 /* pieza del personaje (CHR_*.bin): rigida (un hueso), con pesos (hasta 4 matrices inv(enlace) M(hueso)) o una mano
@@ -45,16 +45,27 @@ const float *robot_material(int i);                        /* difuso, ambiente y
 uint32_t robot_movimiento(int p);                          /* id del movimiento puesto (diagnostico) */
 float robot_cuadro(int p);
 int   robot_estado(int p);
-/* el banderero de la salida (ROB03): personaje 2 de CHR.DAT; el mundo es el de la demo */
+/* el banderero de la salida (ROB03): BAND.DAT (su propio RBT1, un personaje), leido por quien llama en el hueco de la
+   union; el mundo es el de la demo */
 typedef struct {
     float ojo[3], mira[3];        /* camara +F8 / +104 (las del paso anterior: el suceso va antes de la camara) */
     float coche[3];               /* car+14 del jugador */
     float B0[4][4];               /* car+B0 (filas: derecha, arriba, atras; traslacion) */
     int   t8367bc;                /* temporizador de la salida */
 } robot_band_t;
-int  robot_band_hay(void);                                 /* CHR.DAT lo trae */
+int  robot_band_hay(void);                                 /* BAND.DAT cargado */
+uint32_t robot_band_motor_tam(void);                       /* RAM de su motor (va delante de BAND.DAT en el hueco) */
+int  robot_band_carga(void *mem, const void *rbt, uint32_t bytes);   /* 0 = bien */
+void robot_band_suelta(void);                              /* deja de usar el hueco */
+int  robot_b_npiezas(void);
+const rpieza_t *robot_b_pieza(int i);
+const rmalla_t *robot_b_malla(int i);
+const rvert_t  *robot_b_vert(int i);
+int  robot_b_nmat(void);
+const float *robot_b_material(int i);
+const float (*robot_b_huesos(void))[4][4];
+const float (*robot_b_inversa(int i))[4];
 void robot_band_inicia(int preset, const float *marco);    /* 0x2046f0; marco de la etapa de salida {x, y, z, giro} */
-void robot_band_quita(void);
 void robot_band_paso(const robot_band_t *e);               /* 0x204888 */
 int  robot_band_activo(void);
 int  robot_band_visible(void);                             /* work+4 & 0x8000: la tela se dibuja */

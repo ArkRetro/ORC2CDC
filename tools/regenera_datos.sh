@@ -48,6 +48,7 @@ EOF
     modov)    python3 "$TOOLS/conv_modo_video.py" "$ISO" "$t" "$W/previas/modov"; mueve "$t/MODOV.DAT" ;;
     efectos)  python3 "$TOOLS/conv_efectos.py" "$ISO" "$t/EFECTOS.DAT"; mueve "$t/EFECTOS.DAT" ;;
     chr)      python3 "$TOOLS/conv_chr.py" "$ISO" "$t/CHR.DAT"; mueve "$t/CHR.DAT" ;;
+    band)     python3 "$TOOLS/conv_chr.py" "$ISO" "$t/BAND.DAT" --banderero; mueve "$t/BAND.DAT" ;;
     param)    python3 "$TOOLS/conv_param.py" "$ISO" "$t/PARAM.DAT"; mueve "$t/PARAM.DAT" ;;
     meta)     python3 "$TOOLS/conv_meta.py" "$ISO" "$t"; mueve "$t/META.DAT" ;;
     salida)   python3 "$TOOLS/conv_salida.py" "$ISO" "$t"; mueve "$t/SALIDA.DAT" ;;
@@ -112,7 +113,7 @@ for i in range(94): ts |= {r[1] for r in U.arbol_mision(A, i)}
 for ti in sorted(ts): print('%d:%d' % (ti, U.segmento_de(A, U.cadena(E, U.u32(E, base + 4 * ti) + 0x0c))))
 EOF
 ); do n=${ti#*:}; hay $(printf 'SEG%02d.DAT COL%02d.DAT' $n $n) || falta+=(seg${ti%:*}); done
-hay EFECTOS.DAT || falta+=(efectos); hay CHR.DAT || falta+=(chr); hay PARAM.DAT || falta+=(param)
+hay EFECTOS.DAT || falta+=(efectos); hay CHR.DAT || falta+=(chr); hay BAND.DAT || falta+=(band); hay PARAM.DAT || falta+=(param)
 hay META.DAT || falta+=(meta); hay SALIDA.DAT || falta+=(salida); hay INFARTO.DAT HAHUD.DAT VOCESH.DAT || falta+=(infarto)
 hay BO.DAT || falta+=(bo); hay TRAFC.DAT TRAF0.DAT || falta+=(trafico)
 for v in ts attr; do f=MVTS.VQV; [ $v = attr ] && f=MVATTR.VQV; hay $f || falta+=(video_$v); done

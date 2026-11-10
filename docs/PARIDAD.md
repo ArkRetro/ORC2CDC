@@ -866,30 +866,25 @@ del original, con el mismo motor que la de la meta (demo/meta.c, 486730 / 486EF0
   segundo se arranca a su hora desde la CPU (puede repetir hasta un cuadro de sonido): limite del hardware.
 - RAM: el guion (16 KB) solo durante la escena; al arrancar 36 KB prestados para subir los efectos. La RAM libre al
   arrancar baja 9 KB (674 -> 665 KB: codigo y huecos).
-- Banderero (ROB03): PORTADO pero APAGADO por la RAM (2026-11-10). Codigo: comun/robot.c (robot_band_*: init PS2
-  0x2046f0, control 0x204888, huida 0x204ca0, la tela 0x100a68 / 0x100d20 / 0x100d40) y demo/main.c (dibujo 0x204c28:
-  el cuerpo con las piezas del personaje 2 de CHR.DAT en work+10, la tela de 5 x 7 como tiras con la luz del entorno 2
-  y el material 0xFFC0C0C0 de 401B80). Datos (tools/conv_chr.py con CHR_BANDERERO=todo): personaje 4 =
-  CHR_AUT04_CVT (recurso 0x12B, su textura 1 es la de la tela), esqueleto 4 de bone.bin (0x205038 / 0x40e3f0, 39
-  huesos), tabla BAND por preset: inicial 0x36f778, huida 0x36f790 (si sigue en el inicial) / 0x36f7a4, lista de 6
-  0x36f700, posicion 0x40ef88, la de los siguientes 0x40efc8, giro 0x40f008; distancias 0x36f7c4 (40: dibujo y
+- Banderero (ROB03, 2026-11-10): comun/robot.c (robot_band_*: init PS2 0x2046f0, control 0x204888, huida 0x204ca0,
+  la tela 0x100a68 / 0x100d20 / 0x100d40) y demo/main.c (dibujo 0x204c28: el cuerpo con las piezas de BAND.DAT en
+  work+10, la tela de 5 x 7 como tiras con la luz del entorno 2 y el material 0xFFC0C0C0 de 401B80).
+  Datos: BAND.DAT (tools/conv_chr.py --banderero; CHR.DAT no cambia): personaje 4 = CHR_AUT04_CVT (recurso 0x12B,
+  su textura 1 es la de la tela), esqueleto 4 de bone.bin (0x205038 / 0x40e3f0, 39 huesos), 7 movimientos (88 KB),
+  tabla BAND por preset: inicial 0x36f778, huida 0x36f790 (si sigue en el inicial) / 0x36f7a4, lista de 6 0x36f700,
+  posicion 0x40ef88, la de los siguientes 0x40efc8, giro 0x40f008; distancias 0x36f7c4 (40: dibujo de la bandera y
   control), 0x36f7c8 (13: huida), 0x36f7cc (1,2: minima), eje 0x40e3c8 (0, 0, -1) y punto 0x40e3d8 (0, 0, 3).
-  CONFIRMADO en el MIPS: SetFrame(0) mientras 8367BC >= 0x78, el siguiente de la lista al acabar (mezcla 0, o 20
+  CONFIRMADO en el MIPS: SetFrame(0) mientras 8367BC >= 0x78, el siguiente de la lista al acabar (mezcla 0 o 20
   cuadros), la huida con 8367BC < 1 (mezcla 4), sin control (ni Calc ni tela) a mas de 40 m o detras de la camara.
   Tela: las constantes de PS2 0x328700..0x32872c son las del PC (gravedad 0,0027222, asta (0,146, 0,18, 0,007) ->
-  (0,175, 0,68, 0,015)); el viento (+CAC, 95AEB8, 95AEAC) nadie lo escribe (0). La posicion se toma en el marco de la
-  etapa de salida (col_et.marco): PROBABLE. Prueba de imagen (Flycast, CHR_BANDERERO=salida): sale junto a la
-  pancarta START a la derecha, quieto hasta el cuadro 180 y luego agitando la bandera de cuadros, que ondea.
-  Por que esta apagado (numeros de Flycast, NTSC): CHR.DAT entero en la RAM desde el arranque: con el banderero
-  completo (81 movimientos, RBT1 131 -> 233 KB, 3102 -> 4430 vertices, 7 -> 12 texturas: +13 KB de VRAM) la RAM
-  libre al arrancar baja de 665 a 492 KB, y con solo sus movimientos de salida y huida (77, RBT1 166 KB) a 558 KB; en
-  los dos casos los huecos de colision de la carrera (186 + 208 KB) ya no caben ("COLI: sin RAM para las
-  colisiones", Out of memory). Sus 7 movimientos son 88 KB (0x210000 31 KB, 0x210004 21 KB, 0x210006 13 KB,
-  0x210005 11 KB, 0x210002 6 KB, 0x210003 4 KB, 0x210001 3 KB); el motor de su esqueleto 31 KB (se reserva solo si
-  CHR.DAT lo trae). Sin CHR_BANDERERO, CHR.DAT sale igual byte a byte que antes y la demo no reserva nada (RAM libre
-  al arrancar 660 KB). Opciones (sin hacer): guardar sus movimientos en la RAM de sonido (856 KB libres) y copiar a
-  la RAM solo el que corre (31 KB como mucho), o leerlo con su modelo en un fichero aparte en un hueco que la
-  carrera no use en la salida.
+  (0,175, 0,68, 0,015)); el viento (+CAC, 95AEB8, 95AEAC) nadie lo escribe (0). La posicion va en el marco de la
+  etapa de salida (col_et.marco): PROBABLE.
+  RAM: en CHR.DAT no cabe (la RAM libre al arrancar bajaba de 665 a 492 KB y los huecos de colision ya no entraban).
+  BAND.DAT (151 KB) y su motor (31 KB) se leen al empezar la carrera en el hueco de la union (1480 KB), libre en la
+  salida (la union se pide a UNION_ANTES = 2500 m del final de la etapa), sin memoria del monton (sus 5 texturas, 13
+  KB, en pvr_mem). Se suelta antes de pedir la union (la union no espera), al volver al menu y, en carrera, en cuanto
+  la camara esta a mas de sus 40 m (el original deja de moverlo y de dibujar la bandera; el cuerpo lo seguiria
+  dibujando, pero de lejos y detras). Diferencia: si se vuelve marcha atras a la salida ya no esta.
 - Prueba: tools/prueba/salida.sh (hoja de contactos de la salida, NTSC y PAL).
 
 ## Escena de la meta (2026-11-10)

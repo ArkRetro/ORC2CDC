@@ -3868,8 +3868,10 @@ static int union_prestable(void)
 {
     return hueco_union && uni.datos != hueco_union && !(carga.estado && carga.buf == hueco_union);
 }
+static void band_suelta(void);
 static void presta_union(int si)
 {
+    if (si) band_suelta();                                      /* fuera de la carrera el hueco no es del banderero */
     uint8_t *p = si && union_prestable() ? hueco_union : NULL;
     hudd_bufer(p, p ? cap_union : 0);
     if (video_bufer) video_bufer(p, p ? cap_union : 0);
@@ -4189,6 +4191,7 @@ static int curso_paso(void)
         char cn[16];
         marco_compone(marco_et, e->bk, marco_un); sprintf(fich_union, "BK%02d.DAT", e->f_bk);
         col_nombre_union(cn, cur_nodo); carga_col(cn, hueco_col, cap_col);
+        band_suelta();                                          /* el banderero deja el hueco antes: la union no espera */
         carga_pide(&uni, fich_union, hueco_union, cap_union, marco_un);
     }
     if (s_union >= 0 && !cur_en_union && yo.s >= s_union) { cur_en_union = 1; ev |= CUR_UNION; }
@@ -5921,8 +5924,8 @@ static void coche_dibuja(int l, matrix_t *mc)
    coche). El fichero se lee al arrancar, antes que la ruta y los huecos de las etapas, para no trocear la RAM. */
 static int chr_ok;
 /* tablas fijas (nada de memoria nueva despues de la ruta: la ruta crece por arriba del monton) */
-#define CHR_PZ 112                                              /* piezas (CHR.DAT de SLES-53998: 103 con el banderero) */
-#define CHR_MT 208                                              /* matrices de las piezas (199 con el banderero) */
+#define CHR_PZ 96                                               /* piezas (CHR.DAT de SLES-53998: 70) */
+#define CHR_MT 192                                              /* matrices de las piezas (146) */
 #define CHR_MAT 16                                              /* materiales distintos (3) */
 static matrix_t chr_S[CHR_MT] __attribute__((aligned(32)));    /* por pieza y matriz: vista x coche x asiento x paleta */
 static int32_t chr_L[CHR_MT][3];                                /* la luz en el marco de cada una (x 256) */
@@ -5930,7 +5933,22 @@ static uint16_t chr_m0[CHR_PZ];                                 /* primera matri
 static uint32_t chr_lut[CHR_MAT][33];                           /* por material: color para n.l = -1 + k / 16 */
 static int chr_npz, chr_nm;
 static float chr_w8[256];                                       /* peso u8 -> float */
-static int chr_listo_cuadro, chr_per[ROBOT_N];                 /* las matrices del cuadro, por personaje */
+/* lo que se dibuja con robot_matrices / robot_dibuja: CHR.DAT (el piloto y la acompanante) o BAND.DAT (el banderero) */
+typedef struct {
+    modelo_t *m; matrix_t *S; int32_t (*L)[3]; uint16_t *m0; uint32_t (*lut)[33];
+    int fuente, ok, npz, nm, listo, per[3];                    /* per: matrices del cuadro (0, 1 CHR.DAT; 2 BAND.DAT) */
+} robot_ctx_t;
+#define PER(pz) (rx->fuente ? 2 : (pz)->per)
+#define PZA(i) (rx->fuente ? robot_b_pieza(i) : robot_pieza(i))
+#define MLA(i) (rx->fuente ? robot_b_malla(i) : robot_malla(i))
+#define VRT(i) (rx->fuente ? robot_b_vert(i) : robot_vert(i))
+#define MAT(i) (rx->fuente ? robot_b_material(i) : robot_material(i))
+static modelo_t band;                                           /* BAND.DAT en el hueco de la union */
+#define BAND_PZ 40                                              /* piezas del banderero (33) */
+#define BAND_MT 64                                              /* sus matrices (53) */
+static matrix_t band_S[BAND_MT] __attribute__((aligned(32)));
+static int32_t band_L[BAND_MT][3]; static uint16_t band_m0[BAND_PZ]; static uint32_t band_mlut[CHR_MAT][33];
+static robot_ctx_t rc_chr = { &chr, chr_S, chr_L, chr_m0, chr_lut, 0 }, rc_band = { &band, band_S, band_L, band_m0, band_mlut, 1 };
 static float band_pos[35][3], band_nor[35][3]; static uint32_t band_lut[33], band_col[35]; static int band_tela;   /* la bandera */
 static uint32_t chr_vtx, chr_us, chr_vtx_ult, chr_us_ult;      /* vertices del cuadro y tiempo de CPU (us; y del anterior) */
 static void m_por(matrix_t o, const float (*a)[4], const float (*b)[4])   /* o = a b (filas) */
@@ -5959,28 +5977,31 @@ static void robot_sube(void)
     for (k = 0; k < chr_npz; k++) { chr_m0[k] = (uint16_t)n; n += robot_pieza(k)->n; }
     if (n > CHR_MT) { dbglog(DBG_ERROR, "CHR: %d matrices: no caben\n", n); libera_modelo(&chr); return; }
     for (k = 0; k < 256; k++) chr_w8[k] = k * (1.0f / 255.0f);
-    chr_ok = 1;
+    chr_ok = 1; rc_chr.ok = 1; rc_chr.npz = chr_npz; rc_chr.nm = chr_nm;
     dbglog(DBG_INFO, "CHR: %u mallas, %u vertices, %u texturas, %d piezas, %d matrices, %d materiales\n", (unsigned)chr.nmallas,
            (unsigned)chr.nvert, (unsigned)chr.ntex, chr_npz, n, chr_nm);
 }
 /* matrices de cada pieza y tablas de color del cuadro (una vez, antes de las listas) */
-static void robot_matrices(matrix_t *mc, int coche_vis)
+static void robot_matrices(robot_ctx_t *rx, matrix_t *mc, int coche_vis)
 {
-    static matrix_t base[ROBOT_N] __attribute__((aligned(32))), P __attribute__((aligned(32)));
-    float d[3], R[ROBOT_N][3][3], v[16]; int p, k, j, a, b, q;
-    memset(chr_per, 0, sizeof chr_per); band_tela = 0;
-    if (robot_band_activo()) {                                  /* el banderero: work+10 (en el mundo) */
+    static matrix_t base[3] __attribute__((aligned(32))), P __attribute__((aligned(32)));
+    float d[3], R[3][3][3], v[16]; int p, k, j, a, b, q;
+    memset(rx->per, 0, sizeof rx->per); rx->listo = 0;
+    if (rx->fuente) {                                           /* el banderero: work+10 (en el mundo) */
         const float (*W)[4] = robot_band_mundo();
         float dx = W[3][0] - cam.ojo[0], dy = W[3][1] - cam.ojo[1], dz = W[3][2] - cam.ojo[2];
+        band_tela = 0;
+        if (!robot_band_activo()) return;
         memcpy(base[2], W, sizeof(matrix_t));
         for (a = 0; a < 3; a++) for (b = 0; b < 3; b++) R[2][a][b] = W[a][b];
         /* 0x204c28 lo dibuja siempre: aqui solo si puede verse (delante de la camara y antes del plano lejano) */
-        chr_per[2] = dx * dx + dy * dy + dz * dz < lejos * lejos &&
+        rx->per[2] = dx * dx + dy * dy + dz * dz < lejos * lejos &&
                      dx * (cam.mira[0] - cam.ojo[0]) + dy * (cam.mira[1] - cam.ojo[1]) + dz * (cam.mira[2] - cam.ojo[2]) > -8.0f;
-        band_tela = chr_per[2] && robot_band_visible() && robot_band_textura() < chr.ntex;   /* work+4 & 0x8000 */
+        if (!rx->per[2]) return;
+        band_tela = robot_band_visible() && robot_band_textura() < rx->m->ntex;   /* work+4 & 0x8000 */
     }
-    for (p = 0; p < 2 && coche_vis; p++) {                      /* T(asiento) car+F0 car+B0 */
-        chr_per[p] = 1;
+    for (p = 0; p < 2 && coche_vis && !rx->fuente; p++) {      /* T(asiento) car+F0 car+B0 */
+        rx->per[p] = 1;
         const float *s = robot_asiento(modelo_jug, p); matrix_t W;
         if (ani.ok) memcpy(W, ani_m[0], sizeof W); else m_id(W);
         m_tras(W, s[0], s[1], s[2]);
@@ -5988,7 +6009,7 @@ static void robot_matrices(matrix_t *mc, int coche_vis)
         for (a = 0; a < 3; a++) for (b = 0; b < 3; b++) R[p][a][b] = base[p][a][b];
     }
     luz_actual(2, v, d);                                        /* la luz de los coches: tools/modelo.py luz_vertices */
-    if (band_tela) {                                            /* 401B80: material 0xFFC0C0C0 (difuso = ambiente = emision) */
+    if (rx->fuente && band_tela) {                                            /* 401B80: material 0xFFC0C0C0 (difuso = ambiente = emision) */
         const float mt = 192.0f / 255.0f; float c[3];
         robot_band_tela(band_pos, band_nor);
         for (q = 0; q <= 32; q++) {
@@ -6005,48 +6026,48 @@ static void robot_matrices(matrix_t *mc, int coche_vis)
             band_col[k] = band_lut[qq < 0 ? 0 : qq > 32 ? 32 : qq];
         }
     }
-    for (k = 0; k < chr_nm; k++) {
-        const float *mt = robot_material(k);
+    for (k = 0; k < rx->nm; k++) {
+        const float *mt = MAT(k);
         for (q = 0; q <= 32; q++) {
             float nl = -1.0f + q * (1.0f / 16.0f), c[3];
             for (j = 0; j < 3; j++) {
                 c[j] = mt[j] * v[j] * (nl > 0 ? nl : 0) + mt[3 + j] * (v[9 + j] + (v[6 + j] - v[9 + j]) * (1 + nl) * 0.5f) + mt[6 + j];
                 c[j] = c[j] < 0 ? 0 : c[j] > 1 ? 1 : c[j];
             }
-            chr_lut[k][q] = 0xFF000000u | (uint32_t)(c[0] * 255) << 16 | (uint32_t)(c[1] * 255) << 8 | (uint32_t)(c[2] * 255);
+            rx->lut[k][q] = 0xFF000000u | (uint32_t)(c[0] * 255) << 16 | (uint32_t)(c[1] * 255) << 8 | (uint32_t)(c[2] * 255);
         }
     }
-    for (k = 0; k < chr_npz; k++) {
-        const rpieza_t *pz = robot_pieza(k); const float (*M)[4][4] = robot_huesos(pz->per);
-        if (pz->per >= ROBOT_N || !chr_per[pz->per]) continue;
+    for (k = 0; k < rx->npz; k++) {
+        const rpieza_t *pz = PZA(k); const float (*M)[4][4] = (rx->fuente ? robot_b_huesos() : robot_huesos(pz->per));
+        if (!rx->per[PER(pz)]) continue;
         for (j = 0; j < pz->n; j++) {
-            int s = chr_m0[k] + j; float t[3][3];
-            if (pz->tipo == RP_PESOS && pz->inv[j] != 0xffff) m_por(P, robot_inversa(pz->per, pz->inv[j]), M[pz->hueso[j]]);
+            int s = rx->m0[k] + j; float t[3][3];
+            if (pz->tipo == RP_PESOS && pz->inv[j] != 0xffff) m_por(P, (rx->fuente ? robot_b_inversa(pz->inv[j]) : robot_inversa(pz->per, pz->inv[j])), M[pz->hueso[j]]);
             else memcpy(P, M[pz->hueso[j]], sizeof P);
-            for (a = 0; a < 3; a++) for (b = 0; b < 3; b++) t[a][b] = P[a][0] * R[pz->per][0][b] + P[a][1] * R[pz->per][1][b] + P[a][2] * R[pz->per][2][b];
-            for (a = 0; a < 3; a++) chr_L[s][a] = (int32_t)((t[a][0] * d[0] + t[a][1] * d[1] + t[a][2] * d[2]) * 256.0f);   /* n.l en su marco */
-            mat_load(&vista); mat_apply(&base[pz->per]); mat_apply(&P); mat_store(&chr_S[s]);
+            for (a = 0; a < 3; a++) for (b = 0; b < 3; b++) t[a][b] = P[a][0] * R[PER(pz)][0][b] + P[a][1] * R[PER(pz)][1][b] + P[a][2] * R[PER(pz)][2][b];
+            for (a = 0; a < 3; a++) rx->L[s][a] = (int32_t)((t[a][0] * d[0] + t[a][1] * d[1] + t[a][2] * d[2]) * 256.0f);   /* n.l en su marco */
+            mat_load(&vista); mat_apply(&base[PER(pz)]); mat_apply(&P); mat_store(&rx->S[s]);
         }
     }
-    chr_listo_cuadro = 1;
+    rx->listo = 1;
 }
-static void robot_dibuja(int l)
+static void robot_dibuja(robot_ctx_t *rx, int l)
 {
     static float acc[256][4]; int ult = -2; uint32_t k, i;
-    if (chr_ok != 1 || !chr_listo_cuadro) return;
-    for (k = chr.inicio[l]; k < chr.inicio[l + 1]; k++) {
-        const malla_t *m = chr.mallas + k; const rmalla_t *rm; const rpieza_t *pz; const rvert_t *rv; const vert_t *vv;
+    if (!rx->ok || !rx->listo) return;
+    for (k = rx->m->inicio[l]; k < rx->m->inicio[l + 1]; k++) {
+        const malla_t *m = rx->m->mallas + k; const rmalla_t *rm; const rpieza_t *pz; const rvert_t *rv; const vert_t *vv;
         const uint32_t *lut; uint32_t n = m->n; int j, detras = 0, s;
         if (n < 3 || m->nodo < 0) continue;
-        rm = robot_malla(m->nodo); pz = robot_pieza(rm->pieza); rv = robot_vert(m->v0); vv = chr.verts + m->v0;
-        if (pz->per >= ROBOT_N || !chr_per[pz->per]) continue;
+        rm = MLA(m->nodo); pz = PZA(rm->pieza); rv = VRT(m->v0); vv = rx->m->verts + m->v0;
+        if (!rx->per[PER(pz)]) continue;
         if ((pz->tipo == RP_MANO_GU && !robot_mano_gu(pz->per)) || (pz->tipo == RP_MANO_PA && robot_mano_gu(pz->per))) continue;
-        lut = chr_lut[rm->mat < chr_nm ? rm->mat : 0]; s = chr_m0[rm->pieza];
+        lut = rx->lut[rm->mat < rx->nm ? rm->mat : 0]; s = rx->m0[rm->pieza];
         if (n > 256) n = 256;
         if (pz->n == 1) {                                       /* pieza rigida (peso 1): sin acumular, igual resultado */
-            const int32_t L0 = chr_L[s][0], L1 = chr_L[s][1], L2 = chr_L[s][2];   /* (locales: pw las obligaba a releer) */
+            const int32_t L0 = rx->L[s][0], L1 = rx->L[s][1], L2 = rx->L[s][2];   /* (locales: pw las obligaba a releer) */
             const float cer = cerca; pt_t *o = pw;
-            mat_load(&chr_S[s]);
+            mat_load(&rx->S[s]);
             for (i = 0; i < n; i++, o++) {
                 float x = vv[i].x, y = vv[i].y, z = vv[i].z, u = vv[i].u, vt = vv[i].v, w, nl; int q;
                 mat_trans_single3_nodivw(x, y, z, w);
@@ -6058,8 +6079,8 @@ static void robot_dibuja(int l)
             }
         } else {
         for (j = 0; j < pz->n; j++) {
-            const int32_t *L = chr_L[s + j];
-            mat_load(&chr_S[s + j]);
+            const int32_t *L = rx->L[s + j];
+            mat_load(&rx->S[s + j]);
             for (i = 0; i < n; i++) {
                 float x = vv[i].x, y = vv[i].y, z = vv[i].z, w, p, nl;
                 if (pz->n == 1) p = 1.0f;
@@ -6080,7 +6101,7 @@ static void robot_dibuja(int l)
         }
         if (m->tex != ult) {
             ult = m->tex;
-            if (m->tex >= 0) pvr_prim(&chr.cabs[0][m->tex], sizeof(pvr_poly_hdr_t));
+            if (m->tex >= 0) pvr_prim(&rx->m->cabs[0][m->tex], sizeof(pvr_poly_hdr_t));
             else pvr_prim(&cab_col[0][l], sizeof(pvr_poly_hdr_t));
         }
         chr_vtx += n;
@@ -6093,10 +6114,10 @@ static void robot_dibuja(int l)
             tri_recortado(pw + i);
         }
     }
-    if (band_tela && (uint32_t)l == chr.texs[robot_band_textura()].lista) {   /* 0x100d40 (402170): la bandera */
+    if (rx->fuente && band_tela && (uint32_t)l == rx->m->texs[robot_band_textura()].lista) {   /* 0x100d40 (402170): la bandera */
         /* tiras de 401830 (arriba, abajo por columna), uv de 401830 (u = fila / 6, v = columna / 4), sin recorte de caras */
         int r, c, h;
-        pvr_prim(&chr.cabs[0][robot_band_textura()], sizeof(pvr_poly_hdr_t));
+        pvr_prim(&rx->m->cabs[0][robot_band_textura()], sizeof(pvr_poly_hdr_t));
         mat_load(&vista);
         for (r = 0; r + 1 < 7; r++) {
             pt_t *o = pw; int detras = 0;
@@ -6433,6 +6454,45 @@ static void meta_juego_paso(void)
     traf_paso(1.0f / 60);                                       /* los sucesos de la carrera siguen (49C9C0 no los para) */
     efectos_paso(&yo, 1.0f / 60);
 }
+/* BAND.DAT (el banderero, tools/conv_chr.py --banderero: 151 KB y su motor, 31 KB) en el hueco de la union, que en la
+   salida no se usa (la union se pide a UNION_ANTES m del final de la etapa): sin memoria del monton (las texturas, 13 KB,
+   a pvr_mem). Se suelta antes de pedir la union, al volver al menu y, ya en carrera, en cuanto queda a mas de sus 40 m
+   (0x36f7c4: el original deja de moverlo y de dibujar su bandera) */
+#define BAND_TEX 8
+static pvr_poly_hdr_t band_cab[2][BAND_TEX + 1] __attribute__((aligned(32))); static pvr_ptr_t band_tv[BAND_TEX + 1];
+static void band_suelta(void)
+{
+    uint32_t i;
+    if (!band.datos) return;
+    robot_band_suelta(); rc_band.ok = 0;
+    for (i = 0; i < band.ntex && i < BAND_TEX; i++) if (band_tv[i]) { pvr_mem_free(band_tv[i]); band_tv[i] = NULL; }
+    memset(&band, 0, sizeof band);
+    dbglog(DBG_INFO, "BAND: suelto el hueco de la union\n");
+}
+static int band_carga(void)
+{
+    uint32_t mt = robot_band_motor_tam(), i, n = 0; int k;
+    band_suelta();
+    if (!hueco_union || !union_prestable() || cap_union < mt + 64 * 1024) return -1;
+    if (lee_modelo_en(&band, "BAND.DAT", hueco_union + mt, cap_union - mt)) { memset(&band, 0, sizeof band); return -2; }
+    if (band.paso_ruta != 1 || !band.nmallas || band.ntex > BAND_TEX) { memset(&band, 0, sizeof band); return -3; }
+    band.cabs[0] = band_cab[0]; band.cabs[1] = band_cab[1]; band.tv = band_tv;
+    for (i = 0; i < band.ntex; i++) {
+        tex_t *t = band.texs + i;
+        if (!(band_tv[i] = pvr_mem_malloc(t->tam)) || (t->fmt & 0xff) > 2 || (t->tam & 31)) { band_suelta(); return -4; }
+        pvr_txr_load(band.blob + t->off, band_tv[i], t->tam);
+        compila_cab(&band, i, 0);
+    }
+    if (robot_band_carga(hueco_union, band.ruta, band.nruta * 4)) { band_suelta(); return -5; }
+    rc_band.npz = robot_b_npiezas(); rc_band.nm = robot_b_nmat();
+    if (rc_band.npz > BAND_PZ || rc_band.nm > CHR_MAT) { band_suelta(); return -6; }
+    for (k = 0; k < rc_band.npz; k++) { band_m0[k] = (uint16_t)n; n += robot_b_pieza(k)->n; }
+    if (n > BAND_MT) { band_suelta(); return -7; }
+    rc_band.ok = 1;
+    dbglog(DBG_INFO, "BAND: %u KB en el hueco de la union (%u KB), %u vertices, %u texturas, %d piezas, %u matrices\n",
+           (unsigned)((mt + band.tam) >> 10), (unsigned)(cap_union >> 10), (unsigned)band.nvert, (unsigned)band.ntex, rc_band.npz, (unsigned)n);
+    return 0;
+}
 /* START (49DD40): la escena de la salida de este coche (4871A0), si esta SALIDA.DAT */
 static void salida_entra(void)
 {
@@ -6441,7 +6501,10 @@ static void salida_entra(void)
     salida_sfx_calla();
     /* el banderero (0x2046f0, preset [gp-0x7b64]); su posicion es del marco de la etapa de salida (PROBABLE: el mundo
        del original en la salida es el de la etapa 0) */
-    if (chr_ok == 1) robot_band_inicia(TIM_PRESET, col_et.marco);
+    if (chr_ok == 1) {
+        int r = band_carga();
+        if (r) dbglog(DBG_ERROR, "BAND: sin el banderero (%d)\n", r); else robot_band_inicia(TIM_PRESET, col_et.marco);
+    }
     /* 456D60: un jugador; 44C2D0 (la palabra 0 del descriptor de la etapa): la clave de la etapa de salida (PROBABLE) */
     e = salida_escena(1, modelo_jug, cur_nodo);
     if (e < 0 || salida_empieza(&meta, e, variante)) { salida_suelta(); return; }
@@ -6942,6 +7005,7 @@ int main(int argc, char **argv)
             be.t8367bc = estado == CUENTA ? (sal_on ? (sal_f < 120 ? 360 - sal_f : 300 - sal_f) : 360 - t_estado)
                        : estado == CARRERA ? (t_estado < 60 ? 60 - t_estado : 0) : 0;
             robot_band_paso(&be);
+            if (estado != CUENTA && !robot_band_visible()) band_suelta();   /* a mas de 40 m: ya no se mueve */
         }
         if (cam_ok && estado != TITULO && !pausa) {
             if (estado == META && meta_cam) meta_camara();      /* 4853D0 (modo 19) */
@@ -7038,9 +7102,11 @@ int main(int argc, char **argv)
         if (cex_n) coche_luces(ani.ban, estado != TITULO && (meta_pas ? meta.freno != 0 : yo.freno_ant > 0.0f), estado != TITULO && ani.caliente);
         if (cex_n) coche_entorno(mod_coche);
         if (cex_n) coche_luz(mod_coche, estado != TITULO);     /* la luz del entorno 2 en la pintura */
-        chr_listo_cuadro = 0; chr_vtx_ult = chr_vtx; chr_us_ult = chr_us; chr_vtx = chr_us = 0;
+        rc_chr.listo = rc_band.listo = 0; chr_vtx_ult = chr_vtx; chr_us_ult = chr_us; chr_vtx = chr_us = 0;
         if (chr_ok == 1 && estado != TITULO) {
-            uint64_t t0r = timer_us_gettime64(); robot_matrices(&mod_coche, !cam_ok || cam_coche_visible(&cam)); chr_us += (uint32_t)(timer_us_gettime64() - t0r);
+            uint64_t t0r = timer_us_gettime64(); robot_matrices(&rc_chr, &mod_coche, !cam_ok || cam_coche_visible(&cam));
+            if (rc_band.ok) robot_matrices(&rc_band, &mod_coche, 0);
+            chr_us += (uint32_t)(timer_us_gettime64() - t0r);
         }
         tri_enviados = 0; vtx_ult = vtx_env; vtx_env = 0; ta_inicia_cuadro(); vtx_et_ult = vtx_et; vtx_et = 0;
 #ifdef DIAG_MS
@@ -7080,7 +7146,7 @@ int main(int argc, char **argv)
                 coche_dibuja(l, &mod_coche);
 #endif
             PRF(5);
-            if (estado != TITULO) { uint64_t t0r = timer_us_gettime64(); robot_dibuja(l); chr_us += (uint32_t)(timer_us_gettime64() - t0r); }   /* 4879B0 */
+            if (estado != TITULO) { uint64_t t0r = timer_us_gettime64(); robot_dibuja(&rc_chr, l); robot_dibuja(&rc_band, l); chr_us += (uint32_t)(timer_us_gettime64() - t0r); }   /* 4879B0 */
             PRF(6);
 #ifdef DIAG_TRAF
             if (l == 0) traf_vistos = 0;

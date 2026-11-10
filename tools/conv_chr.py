@@ -6,6 +6,7 @@ demo/robot.c).
 
 Uso:
   conv_chr.py <iso> <salida CHR.DAT>      convierte
+  conv_chr.py <iso> <BAND.DAT> --banderero  el banderero de la salida (ROB03) solo, en su fichero
   conv_chr.py <iso> --info                los movimientos de conducir y de mirar de cada modelo y la lista de agarre
 
 Formato de RBT1 (todo u32 / float salvo lo dicho; desplazamientos desde el principio del bloque):
@@ -443,12 +444,11 @@ def ids_movimientos(t):
     """movimientos que usa la logica (los de las tablas y las constantes de 488DD0 / 489A90, comprobadas en el codigo
     de PS2: 0x60000 0x201e5c, 0x25000c 0x202d04, 0x6004b 0x202cd4, 0x6005f 0x203224, 0x250003 0x20346c, 0x220007 /
     0x230003 0x203510.., 0x60036 0x203088, 0x60049 / 0x25000c 0x204128 / 0x2040e8, 0x60055 0x203df8)"""
+    if BANDERERO:                                   # BAND.DAT: los del banderero (personaje 4, grupo 0x21)
+        return sorted(set(x for p in (0, 2, 4) for x in t['BAND'][18 * p:18 * p + 9] if x))
     s = set(x for x in t['MODC'] + t['MIRA'] + t['CHQ7'] + t['CHQ6'] if x != 0xffffffff)
     s |= {0x60000, 0x25000c, 0x6004b, 0x6005f, 0x250003, 0x220007, 0x230003, 0x60036, 0x60049}
     s |= set(x for x in t['METE'] if x not in (0xffffffff, 0xfffffffe))      # meta del piloto (estado 9)
-    if BANDERERO:
-        for p in (0, 2, 4):                         # el banderero con el personaje 4 (grupo 0x21 de ANIMS.PS2)
-            s |= set(x for x in t['BAND'][18 * p:18 * p + (3 if BANDERERO == 'salida' else 9)] if x)
     for c in ('LISA', 'LISC'):
         v = t[c]
         for k in range(8): s |= set(x for x in v[5 * k + 1:5 * k + 5] if x != 0xffffffff)
@@ -478,11 +478,10 @@ def datos_movimiento(g, k):
     return e['cuadros'], e['banderas'], bytes(g.d[g.base + c:g.base + c + e['ncan']]), bytes(g.d[g.base + e['claves']:g.base + fin])
 
 # ------------------------------------------------------------------ conversion
-# BANDERERO (variable de entorno CHR_BANDERERO): sin ella CHR.DAT no lo lleva (no cabe en la RAM: ver
-# docs/PARIDAD.md, Escena de la salida); "todo" lo mete entero; "salida" solo con sus movimientos de la salida y de la
-# huida (prueba: sin los 6 de la lista, que solo suenan si el coche se queda parado ~12 s tras el GO)
-BANDERERO = os.environ.get('CHR_BANDERERO', '')
-PERSONAJES = ((11, 3, 0), (9, 2, 1)) + (((4, 4, 0xff),) if BANDERERO else ())
+# --banderero: BAND.DAT, el mismo formato con solo el banderero de la salida (en CHR.DAT no cabe en la RAM: la demo lo
+# lee al empezar la carrera en el hueco de la union; ver docs/PARIDAD.md, Escena de la salida)
+BANDERERO = '--banderero' in sys.argv
+PERSONAJES = ((4, 4, 0xff),) if BANDERERO else ((11, 3, 0), (9, 2, 1))
 # (personaje, esqueleto de bone.bin, asiento): el piloto, la acompanante y el banderero de la salida (ROB03: PS2
 # 0x2046f0 = PC 488710 pone el personaje 4 = CHR_AUT04_CVT con el preset 0, 2 y 4; 0x205038 le da la entrada 4 de
 # bone.bin por la tabla de saltos 0x40e3f0; sin asiento: va en el mundo)
@@ -599,6 +598,7 @@ def convierte(A, sal, vista=None):
             blob += struct.pack('<3bx4B', *n8[i], *w8[i])
     # tablas
     al(4); otb = len(blob)
+    if BANDERERO: t = {k: t[k] for k in ('BAND', 'BTEX', 'MATE')}
     for k, v in t.items():
         blob += k.encode() + struct.pack('<I', len(v)) + struct.pack('<%dI' % len(v), *[x & 0xffffffff for x in v])
     blob += b'FIN ' + struct.pack('<I', 0)
