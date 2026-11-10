@@ -26,6 +26,9 @@
 #include "../comun/modo_video.h"
 #include "camara.h"
 #include "coli.h"
+#ifdef DIAG_PERFIL
+#include "perfil.h"
+#endif
 
 /* ---------------------------------------------------------------- modelos */
 typedef struct { uint32_t w, h, fmt, lista, off, tam; } tex_t;
@@ -46,6 +49,10 @@ typedef struct {
     const uint8_t *pvs_l; uint32_t *pvs_m, *pvs_teo;              /* pvs_teo: por nodo, bytes teoricos y vertices */
     int32_t pvs_s; uint32_t pvs_i; int pvs_on;                    /* seccion aplicada, punto del ojo, en uso este cuadro */
     uint32_t *vis;                                                /* nodos visibles en el cuadro (bits; nodos_visibles) */
+    /* tramos de mallas seguidas del mismo nodo, por lista (las mallas van por textura y dentro por nodo: ~8 por tramo):
+       dibuja_rango salta de una vez los de nodos no visibles. tr[i] = fin del tramo (16 bits) | (nodo + 1) << 16;
+       los de la lista l son tr[tr_ini[l]..tr_ini[l + 1]). NULL: sin tabla (sin RAM o sin nodos), malla a malla */
+    uint32_t *tr, tr_ini[4];
     uint32_t ruta_i;                                              /* punto de la ruta mas cercano al coche (ultimo) */
     uint8_t *datos, *blob; pvr_poly_hdr_t *cabs[2];               /* [0] con niebla, [1] sin niebla (cielo) */
     pvr_ptr_t *tv;                                                /* texturas en la memoria de video */
@@ -92,6 +99,26 @@ static coli_pred_t col_pred;
 static uint8_t *hueco_col, *hueco_col_e; static uint32_t cap_col, cap_col_e;
 #define TAM_SECT(t) (((t) + 2047) / 2048 * 2048)
 /* lee un modelo en buf (cap bytes) o, con buf NULL, en memoria nueva */
+/* la tabla de tramos del modelo (modelo_t.tr); sin ella (mas de 65535 mallas o nodos, o sin RAM) se recorre malla a malla */
+static void tramos_nodo(modelo_t *m)
+{
+    uint32_t k, n = 0, l, i = 0;
+    m->tr = NULL;
+    if (!m->nnodos || m->nmallas > 65535 || m->nnodos > 65534 || m->inicio[3] > m->nmallas) return;
+    for (l = 0; l < 3; l++)
+        for (k = m->inicio[l]; k < m->inicio[l + 1]; k++) if (k == m->inicio[l] || m->mallas[k].nodo != m->mallas[k - 1].nodo) n++;
+    if (!(m->tr = malloc((n ? n : 1) * 4))) return;
+    for (l = 0; l < 3; l++) {
+        m->tr_ini[l] = i;
+        for (k = m->inicio[l]; k < m->inicio[l + 1]; k++) {
+            int32_t nd = m->mallas[k].nodo;
+            if (k == m->inicio[l] || nd != m->mallas[k - 1].nodo)
+                m->tr[i++] = (uint32_t)(nd >= 0 && (uint32_t)nd < m->nnodos ? nd + 1 : 0) << 16;
+            m->tr[i - 1] = (m->tr[i - 1] & 0xFFFF0000u) | (k + 1);
+        }
+    }
+    m->tr_ini[3] = i;
+}
 static int lee_modelo_en(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t cap)
 {
     uint32_t sz, h[13], i, v7; uint8_t *b = buf ? (gd_carga_en(nombre, buf, cap, &sz) ? NULL : buf) : gd_carga(nombre, &sz), *p;
@@ -128,6 +155,7 @@ static int lee_modelo_en(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t
             m->nodos[m->mallas[i].nodo].relleno[0] += ta_teo(n, 0); m->nodos[m->mallas[i].nodo].relleno[1] += n << 12;
         }
     m->vis = m->nnodos ? calloc((m->nnodos + 31) / 32, 4) : NULL; m->ruta_i = 0;
+    tramos_nodo(m);
     if (m->pvs_l) {                                               /* sin seccion aplicada: nada visible hasta pvs_paso */
         m->pvs_m = calloc((m->nmallas + 31) / 32, 4); m->pvs_teo = calloc(2 * m->nnodos + 1, 4);
         if (!m->pvs_m || !m->pvs_teo) { free(m->pvs_m); free(m->pvs_teo); m->pvs_m = m->pvs_teo = NULL; m->pvs_l = NULL; }
@@ -242,7 +270,7 @@ static void libera_modelo(modelo_t *m)
 {
     tex_suelta(m);
     if (m->datos && m->datos == hueco_etapa) col_et.ok = 0;      /* su colision va detras en el hueco */
-    free(m->ofs); free(m->vis); free(m->pvs_m); free(m->pvs_teo);
+    free(m->ofs); free(m->vis); free(m->pvs_m); free(m->pvs_teo); free(m->tr);
     if (m->datos != hueco_etapa && !(hueco_union && m->datos >= hueco_union && m->datos < hueco_union + cap_union))
         free(m->datos);                                           /* (los objetos de la union van dentro del hueco) */
     memset(m, 0, sizeof *m);
@@ -658,21 +686,89 @@ static pt_t pw[256];                                     /* depuracion: si no es
 /* 1/w con FSRRA (1/raiz de w*w; w > 0): mucho mas rapida que la division */
 static inline float inv_w(float w) { float r = w * w; __asm__("fsrra %0" : "+f"(r)); return r; }
 
-/* malla entera delante del plano cercano: cada vertice se transforma y va directo a la PowerVR */
+/* malla entera delante del plano cercano: cada vertice se transforma y va directo a la PowerVR. Bucle en ensamblador
+   (antes ~50 instrucciones por vertice, ahora 27): xyz con fmov.s @Rn+ y ftrv (la matriz ya cargada), u, v y color
+   copiados como palabras, 1/w con FSRRA (la misma inv_w: mismos valores en la PowerVR), y el vertice escrito en la
+   Store Queue de atras adelante (mov.l / fmov.s @-Rn: la SH4 no tiene desplazamiento en fmov) con la direccion de la
+   SQ en un registro; el ultimo (fin de tira) va aparte. Con ofs: color de desplazamiento por vertice; sin el, 0.
+   Lee un poco por delante (pref de la cache, para la consola). n >= 1. Devuelve la direccion de la SQ actual. */
+#define SQ_VTX_CUERPO(OFS_LEE)                                                                                         \
+        "1:\n\t"                                                                                                       \
+        "fmov.s @%0+,fr0\n\t" "fmov.s @%0+,fr1\n\t" "fmov.s @%0+,fr2\n\t" "fldi1 fr3\n\t"                              \
+        "ftrv xmtrx,fv0\n\t"                                                                                           \
+        "mov %0,r0\n\t" "add #72,r0\n\t" "pref @r0\n\t"                                                                \
+        "mov.l @%0+,r1\n\t" "mov.l @%0+,r2\n\t" "mov.l @%0+,r3\n\t" OFS_LEE                                             \
+        "fmul fr3,fr3\n\t" "xor %5,%2\n\t" "fsrra fr3\n\t"                                                            \
+        "mov %2,r0\n\t" "add #32,r0\n\t"                                                                               \
+        "mov.l r7,@-r0\n\t" "mov.l r3,@-r0\n\t" "mov.l r2,@-r0\n\t" "mov.l r1,@-r0\n\t"                                \
+        "fmul fr3,fr1\n\t" "fmov.s fr3,@-r0\n\t" "fmul fr3,fr0\n\t" "fmov.s fr1,@-r0\n\t" "fmov.s fr0,@-r0\n\t"           \
+        "mov.l %4,@-r0\n\t" "pref @r0\n\t"                                                                             \
+        "dt %1\n\t" "bf 1b\n\t"
+static inline uintptr_t sq_vtx(const vert_t **pv, uint32_t cnt, uintptr_t a, uint32_t cmd)
+{
+    const vert_t *v = *pv; const uint32_t *o = NULL;
+    __asm__ __volatile__("mov #0,r7\n\t" SQ_VTX_CUERPO("")
+                         : "+r"(v), "+r"(cnt), "+r"(a), "+r"(o) : "r"(cmd), "r"(32u)
+                         : "r0", "r1", "r2", "r3", "r7", "fr0", "fr1", "fr2", "fr3", "t", "memory");
+    *pv = v; return a;
+}
+static inline uintptr_t sq_vtx_ofs(const vert_t **pv, const uint32_t **po, uint32_t cnt, uintptr_t a, uint32_t cmd)
+{
+    const vert_t *v = *pv; const uint32_t *o = *po;
+    __asm__ __volatile__(SQ_VTX_CUERPO("mov.l @%3+,r7\n\t")
+                         : "+r"(v), "+r"(cnt), "+r"(a), "+r"(o) : "r"(cmd), "r"(32u)
+                         : "r0", "r1", "r2", "r3", "r7", "fr0", "fr1", "fr2", "fr3", "t", "memory");
+    *pv = v; *po = o; return a;
+}
+/* lo mismo desde puntos ya transformados (pt_t: x, y, w, u, v, color, desplazamiento): 1/w, x/w, y/w y a la SQ */
+static inline uintptr_t sq_pt(const pt_t *p, uint32_t cnt, uintptr_t a, uint32_t cmd)
+{
+    __asm__ __volatile__("1:\n\t"
+                         "fmov.s @%0+,fr0\n\t" "fmov.s @%0+,fr1\n\t" "fmov.s @%0+,fr3\n\t"
+                         "mov.l @%0+,r1\n\t" "mov.l @%0+,r2\n\t" "mov.l @%0+,r3\n\t" "mov.l @%0+,r7\n\t"
+                         "fmul fr3,fr3\n\t" "xor %4,%2\n\t" "fsrra fr3\n\t"
+                         "mov %2,r0\n\t" "add #32,r0\n\t"
+                         "mov.l r7,@-r0\n\t" "mov.l r3,@-r0\n\t" "mov.l r2,@-r0\n\t" "mov.l r1,@-r0\n\t"
+                         "fmul fr3,fr1\n\t" "fmov.s fr3,@-r0\n\t" "fmul fr3,fr0\n\t" "fmov.s fr1,@-r0\n\t" "fmov.s fr0,@-r0\n\t"
+                         "mov.l %3,@-r0\n\t" "pref @r0\n\t"
+                         "dt %1\n\t" "bf 1b\n\t"
+                         : "+r"(p), "+r"(cnt), "+r"(a) : "r"(cmd), "r"(32u)
+                         : "r0", "r1", "r2", "r3", "r7", "fr0", "fr1", "fr3", "t", "memory");
+    return a;
+}
+/* una tira de n >= 1 puntos (pw) entera a la PowerVR, sin recorte (como envia uno a uno) */
+static inline void envia_tira(const pt_t *p, uint32_t n)
+{
+    uintptr_t a = pvr_dr_addr;
+    if (n > 1) a = sq_pt(p, n - 1, a, PVR_CMD_VERTEX);
+    pvr_dr_addr = sq_pt(p + n - 1, 1, a, PVR_CMD_VERTEX_EOL);
+    vtx_env += n;
+}
 static void dibuja_malla_directa(const modelo_t *mo, const malla_t *m)
 {
-    const vert_t *v = mo->verts + m->v0; uint32_t i, n = m->n, cf = color_fijo;
+    const vert_t *v = mo->verts + m->v0; uint32_t n = m->n, cf = color_fijo;
     const uint32_t *ofs = mo->ofs ? mo->ofs + m->v0 : NULL;
     if (!ta_cabe(n)) return;
-    for (i = 0; i < n; i++, v++) {
-        float x = v->x, y = v->y, z = v->z, w, iw; pvr_vertex_t *d;
-        mat_trans_single3_nodivw(x, y, z, w);
-        iw = inv_w(w);
-        d = pvr_dr_target();
-        d->flags = i == n - 1 ? PVR_CMD_VERTEX_EOL : PVR_CMD_VERTEX;
-        d->x = x * iw; d->y = y * iw; d->z = iw; d->u = v->u; d->v = v->v;
-        d->argb = cf ? cf : v->c; d->oargb = ofs ? ofs[i] : 0;
-        pvr_dr_commit(d);
+    if (cf) {                                                   /* (depuracion: color fijo) */
+        uint32_t i;
+        for (i = 0; i < n; i++, v++) {
+            float x = v->x, y = v->y, z = v->z, w, iw; pvr_vertex_t *d;
+            mat_trans_single3_nodivw(x, y, z, w);
+            iw = inv_w(w); d = pvr_dr_target();
+            d->flags = i == n - 1 ? PVR_CMD_VERTEX_EOL : PVR_CMD_VERTEX;
+            d->x = x * iw; d->y = y * iw; d->z = iw; d->u = v->u; d->v = v->v; d->argb = cf; d->oargb = ofs ? ofs[i] : 0;
+            pvr_dr_commit(d);
+        }
+    } else {
+        uintptr_t a = pvr_dr_addr;
+        if (ofs) {
+            if (n > 1) a = sq_vtx_ofs(&v, &ofs, n - 1, a, PVR_CMD_VERTEX);
+            a = sq_vtx_ofs(&v, &ofs, 1, a, PVR_CMD_VERTEX_EOL);
+        } else {
+            if (n > 1) a = sq_vtx(&v, n - 1, a, PVR_CMD_VERTEX);
+            a = sq_vtx(&v, 1, a, PVR_CMD_VERTEX_EOL);
+        }
+        pvr_dr_addr = a;
     }
     tri_enviados += n - 2; vtx_env += n;
 }
@@ -700,7 +796,7 @@ static void dibuja_malla(const modelo_t *mo, const malla_t *m)
     else if (color_mul) for (i = 0; i < n; i++) pw[i].c = mul_argb(pw[i].c, color_mul);
     if (!detras) {
         if (!ta_cabe(n)) return;
-        for (i = 0; i < n; i++) envia(pw + i, i == n - 1);
+        envia_tira(pw, n);
         tri_enviados += n - 2;
         return;
     }
@@ -743,8 +839,19 @@ static void dibuja_rango(const modelo_t *mo, int l, uint32_t k0, uint32_t k1, in
     float tanh = 320.0f / fx, tanv = 240.0f / fx, kh = sqrtf(1 + tanh * tanh), kv = sqrtf(1 + tanv * tanv);
     uint32_t k, vtx_et0 = vtx_env; int ult = -2, seguro = 0, cartel;
     const uint32_t *vis = recorta ? mo->vis : NULL;               /* nodos visibles (nodos_visibles) */
+    /* por tramos de un nodo (modelo_t.tr) si es una lista entera: los de nodos no visibles se saltan enteros (antes se
+       miraban las ~30000 mallas una a una para dibujar ~3000); mismo orden y mismas mallas */
+    const uint32_t *tr = vis && mo->tr && l >= 0 && l < 3 && k0 == mo->inicio[l] && k1 == mo->inicio[l + 1] ? mo->tr : NULL;
+    uint32_t it = tr ? mo->tr_ini[l] : 0, it1 = tr ? mo->tr_ini[l + 1] : 1, ka = k0, kb = k1;
     ta_ofs = mo->ofs != NULL;
-    for (k = k0; k < k1; k++) {
+    for (; it < it1; it++) {
+    if (tr) {
+        uint32_t t = tr[it], nd = t >> 16;
+        ka = kb = it > mo->tr_ini[l] ? tr[it - 1] & 0xFFFF : k0; kb = t & 0xFFFF;
+        if (nd && !(vis[(nd - 1) >> 5] & (1u << ((nd - 1) & 31)))) continue;
+        __builtin_prefetch(mo->mallas + ka);
+    }
+    for (k = ka; k < kb; k++) {
         const malla_t *m = mo->mallas + k;
         __builtin_prefetch(m + 6);                              /* la mayoria se salta: que la siguiente ya este en cache */
         if (vis && m->nodo >= 0 && !(vis[m->nodo >> 5] & (1u << (m->nodo & 31)))) continue;   /* (la prueba de abajo, antes) */
@@ -798,6 +905,7 @@ static void dibuja_rango(const modelo_t *mo, int l, uint32_t k0, uint32_t k1, in
         else if (recorta && seguro) dibuja_malla_directa(mo, m);
         else dibuja_malla(mo, m);
     }
+    }
     if (ta_en_etapa) vtx_et += vtx_env - vtx_et0;
     ta_ofs = 0;
 }
@@ -825,8 +933,21 @@ static int modelo_delante(const modelo_t *mo, const float (*M)[4])
 }
 static void dibuja_indices(const modelo_t *mo, int l, const uint16_t *idx, uint32_t n)
 {
-    uint32_t j; int ult = -2, dir = indices_delante && !color_mul;
+    uint32_t j; int ult = -2, dir = indices_delante && !color_mul, prueba = !indices_delante && !color_mul;
+    float s = 0, lim = cerca * 1.5f;
     ta_ofs = mo->ofs != NULL;
+    if (prueba) {
+        /* el modelo entero no esta delante: se mira cada malla por su esfera (contiene sus vertices: tools/conv_*):
+           w (distancia por delante del ojo) del centro con la matriz cargada y s = lo que mas cambia w por metro (1 si
+           la matriz es rigida); si w - s r pasa de 1,5 x cerca ningun vertice queda detras del plano cercano y la tira
+           va directa, como en dibuja_malla sin recorte (misma imagen) */
+        float x = 0, y = 0, z = 0, w0, wx, wy, wz;
+        mat_trans_single3_nodivw(x, y, z, w0);
+        x = 1; y = 0; z = 0; mat_trans_single3_nodivw(x, y, z, wx);
+        x = 0; y = 1; z = 0; mat_trans_single3_nodivw(x, y, z, wy);
+        x = 0; y = 0; z = 1; mat_trans_single3_nodivw(x, y, z, wz);
+        wx -= w0; wy -= w0; wz -= w0; s = sqrtf(wx * wx + wy * wy + wz * wz) * 1.001f + 1e-4f;
+    }
     for (j = 0; j < n; j++) {
         const malla_t *m = mo->mallas + idx[j];
         if (m->n < 3) continue;
@@ -836,7 +957,9 @@ static void dibuja_indices(const modelo_t *mo, int l, const uint16_t *idx, uint3
             if (m->tex >= 0) pvr_prim(&mo->cabs[0][mo->remap ? mo->remap[m->tex] : m->tex], sizeof(pvr_poly_hdr_t));
             else pvr_prim(&cab_col[0][l], sizeof(pvr_poly_hdr_t));
         }
-        if (dir && m->n <= 256) dibuja_malla_directa(mo, m);
+        if (m->n <= 256 && (dir || (prueba && ({ float x = m->cx, y = m->cy, z = m->cz, w;
+                                                   mat_trans_single3_nodivw(x, y, z, w); w - s * m->r > lim; }))))
+            dibuja_malla_directa(mo, m);
         else dibuja_malla(mo, m);
     }
     ta_ofs = 0;
@@ -1206,6 +1329,11 @@ static const float *par_manual;                                 /* bloque PAR2 d
 #define CAM_BYTES (0x64c + 0x5460 + 0x438)
 static cam_tablas_t cam_tab; static int cam_ok; static cam_t cam = { .elegida = 2 };
 static float cam_t_choque;                                      /* +2C8 del paso anterior (para ver la entrada) */
+#ifdef DIAG_CONGELA
+static int diag_congelado;                                      /* medida: desde el paso DIAG_CONGELA la logica se para
+                                                                   y se dibuja siempre el mismo cuadro (tiempos estables
+                                                                   y capturas para comparar pixel a pixel) */
+#endif
 #ifdef PRUEBA_GUION
 /* prueba de la camara: conduce el piloto, toque de freno en GUION_DERRAPE, Y (vista) en los cuadros 700 y 760, y la
    imagen se congela 3 s en estos cuadros de carrera para capturas comparables */
@@ -4427,6 +4555,9 @@ static void nodos_quita(modelo_t *mo)
 /* corte con histeresis: baja ya; sube una clase cada 4 cuadros si el objetivo esta al menos 2 por encima */
 static int prio_sube(int actual, int objetivo, int *espera, int max)
 {
+#ifdef DIAG_CONGELA
+    if (diag_congelado) return objetivo;                /* medida: sin histeresis, el mismo corte que pide el cuadro */
+#endif
     if (objetivo < actual) { *espera = 0; return objetivo; }
     if (objetivo >= actual + 2 && actual < max) { if (++*espera >= 4) { *espera = 0; return actual + 1; } }
     else *espera = 0;
@@ -5353,7 +5484,13 @@ static void coche_ani_lee(void)
     ani.azar = 1; coche_anima_reposo(); ani.ok = 1;
 }
 /* rand() de la CRT de Microsoft (el 580F40 del PC): 15 bits */
-static int ani_rand(void) { ani.azar = ani.azar * 214013u + 2531011u; return (ani.azar >> 16) & 0x7FFF; }
+static int ani_rand(void)
+{
+#ifdef DIAG_CONGELA
+    return 0x4000;                                      /* medida: sin temblor (capturas iguales con DIAG_CONGELA) */
+#endif
+    ani.azar = ani.azar * 214013u + 2531011u; return (ani.azar >> 16) & 0x7FFF;
+}
 static void traf_anima_paso(float dt);
 /* un paso de logica (1001/60 ms reales, 1/60,2 s de fisica) en carrera: el estado de las piezas como lo dejan los
    pasos del original */
@@ -5560,6 +5697,19 @@ static void robot_dibuja(int l)
         if ((pz->tipo == RP_MANO_GU && !robot_mano_gu(pz->per)) || (pz->tipo == RP_MANO_PA && robot_mano_gu(pz->per))) continue;
         lut = chr_lut[rm->mat < chr_nm ? rm->mat : 0]; s = chr_m0[rm->pieza];
         if (n > 256) n = 256;
+        if (pz->n == 1) {                                       /* pieza rigida (peso 1): sin acumular, igual resultado */
+            const int32_t *L = chr_L[s];
+            mat_load(&chr_S[s]);
+            for (i = 0; i < n; i++) {
+                float x = vv[i].x, y = vv[i].y, z = vv[i].z, w, nl; int q;
+                mat_trans_single3_nodivw(x, y, z, w);
+                nl = (float)(rv[i].nx * L[0] + rv[i].ny * L[1] + rv[i].nz * L[2]) * (1.0f / (127.0f * 256.0f));
+                q = (int)((nl + 1.0f) * 16.0f + 0.5f);
+                pw[i].x = x; pw[i].y = y; pw[i].w = w; pw[i].u = vv[i].u; pw[i].v = vv[i].v; pw[i].o = 0;
+                pw[i].c = lut[q < 0 ? 0 : q > 32 ? 32 : q];
+                detras |= w < cerca;
+            }
+        } else {
         for (j = 0; j < pz->n; j++) {
             const int32_t *L = chr_L[s + j];
             mat_load(&chr_S[s + j]);
@@ -5580,6 +5730,7 @@ static void robot_dibuja(int l)
             pw[i].c = lut[q < 0 ? 0 : q > 32 ? 32 : q];
             detras |= pw[i].w < cerca;
         }
+        }
         if (m->tex != ult) {
             ult = m->tex;
             if (m->tex >= 0) pvr_prim(&chr.cabs[0][m->tex], sizeof(pvr_poly_hdr_t));
@@ -5588,7 +5739,7 @@ static void robot_dibuja(int l)
         chr_vtx += n;
         if (!detras) {
             if (!ta_cabe(n)) continue;
-            for (i = 0; i < n; i++) envia(pw + i, i == n - 1);
+            envia_tira(pw, n);
             tri_enviados += n - 2;
         } else for (i = 0; i + 2 < n; i++) {
             if (pw[i].w < cerca && pw[i + 1].w < cerca && pw[i + 2].w < cerca) continue;
@@ -5950,6 +6101,10 @@ int main(int argc, char **argv)
             if (pasos > PASOS_MAX) { pasos = 1; reloj = ahora - PERIODO_60; }
             reloj += pasos * PERIODO_60; if (pasos > 1) saltos += pasos - 1;
             if (!pasos) { nuevo_pend |= nuevo; nuevo = 0; } else { nuevo |= nuevo_pend; nuevo_pend = 0; }
+#ifdef DIAG_CONGELA
+            pasos = !diag_congelado;                            /* medida: un paso por cuadro (el estado no depende de los
+                                                                   fps) y luego el mismo cuadro para siempre */
+#endif
 #ifdef PRUEBA_GUION
             if (guion_hasta && timer_ms_gettime64() < guion_hasta) pasos = 0;   /* congelado para la captura */
             else guion_hasta = 0;
@@ -6140,6 +6295,9 @@ int main(int argc, char **argv)
                 voz_contacto = 0;
                 if (crono < 0x57e3f) crono++; else crono = 0x57e3f;   /* 7D39DC: tope 0x57E3F (race_manager 4508xx) */
                 if (fis_ok && fis.velocidad_hud > vmax) vmax = fis.velocidad_hud;
+#ifdef DIAG_CONGELA
+                if (crono == DIAG_CONGELA) { diag_congelado = 1; pasos = paso + 1; printf("CONGELA: crono %d\n", crono); }
+#endif
 #ifdef PRUEBA_CRONO
                 {   /* crono del HUD frente al reloj de la consola, cada 600 pasos (unos 10 s) */
                     static uint64_t t_c0;
@@ -6480,6 +6638,9 @@ int main(int argc, char **argv)
                                      etapa.pvs_on, uni.pvs_on, sig.pvs_on, (unsigned)diag_pvs_v, (unsigned)chr_vtx_ult, (unsigned)chr_us_ult, ta_et_corto ? " CORTO" : "", ta_corto ? " TOPE" : "");
 #endif
         PRF(9);
+#ifdef DIAG_RETARDO
+        { uint64_t t_ = timer_us_gettime64(); while (timer_us_gettime64() - t_ < DIAG_RETARDO) ; }   /* medida: cuadro mas lento */
+#endif
         if (estado != TITULO) prio_ajusta(ta_et_corto, ta_et);
         ta_et_corto = 0;
         pvr_scene_finish();
@@ -6490,6 +6651,14 @@ int main(int argc, char **argv)
         else vmu_lcd_carrera(fis_ok ? (int)fis.velocidad_hud : (int)(yo.v * 3.6f), fis_ok ? fis.marcha : 1, fis_ok ? fpar.marchas : 6);
         vmu_lcd_paso();
         tcpu += timer_us_gettime64() - c0;
+#ifdef DIAG_PERFIL
+        {   static int pf_ini;                              /* medida: perfil del SH4 en carrera (perfil.c) */
+            if (!pf_ini) { perfil_inicia(); pf_ini = 1; }
+            static int pf_n;                                /* con DIAG_CONGELA: el cuadro congelado, 300 veces */
+            perfil_activa(diag_congelado && pf_n < 300);
+            if (diag_congelado && ++pf_n == 300) perfil_vuelca();
+        }
+#endif
         if (++cuadro % 30 == 0) {
             uint64_t t1 = timer_ms_gettime64();
             fps = 30000.0f / (float)(t1 - t0); ms = tcpu / 30000.0f; ms_log = t_log / 30000.0f; t0 = t1; tcpu = 0; t_log = 0;

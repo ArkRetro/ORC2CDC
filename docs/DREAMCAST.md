@@ -659,6 +659,43 @@ Las pantallas del menu (titulo, principal, modo, coche, cambio, musica) se ven i
   de la zona). Dentro de HUD.DAT partia la zona del curso (1344 -> 832 KB): no se hace.
 - TA: el CONTRARRELOJ no abre trafico (menos vertices y CPU que el OutRun).
 
+### CPU de dibujo (2026-11-10)
+
+Medido con un cuadro congelado (`-DDIAG_CONGELA=600`: un paso de logica por cuadro hasta el paso 600, asi el estado no
+depende de los fps, y despues siempre el mismo cuadro; sin temblor de la carroceria ni histeresis del corte del TA) con
+`-DDIAG_MS -DDIAG_SIN_CPU`, y perfil por muestreo del SH4 (`-DDIAG_PERFIL`, `demo/perfil.c`: el TMU1 a 20 kHz cuenta el
+PC en cubos de 16 bytes; con DIAG_CONGELA vuelca los 400 mas llenos a los 300 cuadros congelados, para `addr2line`). Las
+capturas del cuadro congelado se comparan pixel a pixel antes / despues: solo cambian el punto que parpadea del mapa
+del HUD y la linea del mar en el horizonte de PALM (cambian igual entre dos capturas del mismo binario).
+
+Lo que costaba (PALM, 25,3 ms): el recorrido de las mallas de la etapa (31 %: ~30000 mallas por cuadro para dibujar
+~3000), el bucle de vertices (28 %, ~50 instrucciones por vertice: GCC no usa fmov con predecremento y recargaba la
+direccion de la Store Queue de `pvr_dr_addr` en cada vertice), el piloto (7 %) y `nodos_visibles` (4 %).
+
+- Tramos de nodo (`modelo_t.tr`, `tramos_nodo`): las mallas van por textura y dentro por nodo (unas 8 seguidas del mismo
+  nodo); al leer el modelo se guarda por lista el fin y el nodo de cada tramo (4 bytes por tramo: 15 KB en SEG00, 18 KB
+  en SEG13, del monton) y `dibuja_rango` salta de una vez los tramos de nodos no visibles. Mismas mallas en el mismo
+  orden (dentro del tramo se sigue mirando malla a malla). Sin RAM para la tabla, como antes.
+- Bucle de vertices en ensamblador (`sq_vtx`, `sq_vtx_ofs`, `sq_pt`): 27 instrucciones por vertice (xyz con `fmov.s
+  @Rn+` y `ftrv`, u / v / color copiados como palabras, 1/w con FSRRA como `inv_w`, el vertice escrito en la SQ de atras
+  adelante con `mov.l` / `fmov.s @-Rn` y la direccion de la SQ en un registro; `pref` 72 bytes por delante del vertice
+  para la cache de la consola). Los mismos valores llegan a la PowerVR.
+- Coche y trafico: si el modelo entero no esta delante del plano cercano, cada malla se mira por su esfera (contiene
+  sus vertices en los 15 coches, los 9 de trafico y CHR.DAT): w del centro con la matriz cargada menos r por lo que
+  mas cambia w por metro; si pasa de 1,5 x cerca, directa. Piloto: las piezas rigidas (un hueso) sin acumular pesos, y
+  las tiras sin recorte por `sq_pt` (tambien `dibuja_malla`).
+
+| Cuadro congelado (paso 600), Flycast | antes (ms) | despues (ms) |
+|---|---|---|
+| PALM | 25,4 | 17,2 |
+| LAKE | 23,0 | 15,1 |
+| INDU | 29,9 | 19,2 |
+| METR | 33,9 | 21,7 |
+| CAPE | 23,8 | 14,7 |
+
+Flycast no cuenta la cache ni las esperas de la memoria: en la consola el recorrido de las mallas de antes leia ~950 KB
+de `malla_t` por cuadro, asi que lo ganado alli deberia ser al menos lo mismo.
+
 ## 3. Otros riesgos de la consola real
 
 | Riesgo | Estado |
