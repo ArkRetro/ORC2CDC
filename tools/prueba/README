@@ -19,3 +19,5 @@ carrera) y no a tiempos fijos: con todos los arboles el arranque tarda varios mi
 Unos 10 min por prueba; las tres a la vez en displays distintos tambien.
 Teclado de Flycast: X = A, C = B, Return = START, flechas = cruceta, F / V = gatillos.
 Borrar los GDI despues (/dev/shm/dcr): llevan los datos de tu disco.
+  conduce.sh  como nav.sh y despues conduce (A pisado, la cruceta a ratos) [segundos, 180]: una captura cada 5 s
+           (c_000..) y "CONGELADO" con error si dos seguidas son iguales (el cronometro del HUD no cambia).

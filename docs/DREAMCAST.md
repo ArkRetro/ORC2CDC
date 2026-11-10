@@ -66,6 +66,12 @@ union (el mayor COLBK*, 184 KB) van en dos huecos que solo existen en la carrera
 `col_suelta` en `curso_al_menu`): reservarlos al arrancar dejaba sin RAM las tablas de MENU.DAT (~1 MB, "Out of
 memory" y menus en gris). Medido (Flycast, menu real): al arrancar 823 KB libres como antes; al empezar la carrera, con
 los dos huecos, 450 KB libres.
+BKD.DAT (la ruta de la rama derecha de cada bifurcacion, 105 KB) va en lo que sobra del hueco de la etapa detras de
+su SEGnn.DAT y su COLnn.DAT (`der_sitio`; cabe en todas las etapas con bifurcacion, la de mas: SEG48 deja 644 KB):
+del monton, con ~250 KB libres pero troceados, no habia 108 KB seguidos y la carrera se paraba al final de PALM (s
+~2410, ~27 s desde la salida: "Out of memory" al leer BKD.DAT tras BK00.DAT y "No se pudo leer la etapa siguiente";
+reproducido en Flycast con el Dino 246 por `tools/prueba/conduce.sh`, 2026-11-10). La etapa se suelta despues de la
+decision de la rama, cuando BKD.DAT ya esta suelto.
 
 Medido en Flycast (`DIAG_VTX`, pruebas encadenadas por las dos rutas y por IMPE, 2026-11-08):
 

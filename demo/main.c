@@ -272,8 +272,10 @@ static void libera_modelo(modelo_t *m)
     tex_suelta(m);
     if (m->datos && m->datos == hueco_etapa) col_et.ok = 0;      /* su colision va detras en el hueco */
     free(m->ofs); free(m->vis); free(m->pvs_m); free(m->pvs_teo); free(m->tr);
-    if (m->datos != hueco_etapa && !(hueco_union && m->datos >= hueco_union && m->datos < hueco_union + cap_union))
-        free(m->datos);                                           /* (los objetos de la union van dentro del hueco) */
+    if (!(hueco_etapa && m->datos >= hueco_etapa && m->datos < hueco_etapa + cap_etapa) &&
+        !(hueco_union && m->datos >= hueco_union && m->datos < hueco_union + cap_union))
+        free(m->datos);                                           /* (los objetos de la union van dentro del hueco de la
+                                                                     union y BKD.DAT detras de la etapa: der_sitio) */
     memset(m, 0, sizeof *m);
 }
 
@@ -4063,6 +4065,21 @@ static void curso_recentra(float dx, float dz)
    sucesos CUR_* */
 static int tiene_hijos(const etapa_t *e) { return e->izq >= 0 || e->der >= 0; }   /* no es la meta */
 static int tr_bifurca(void) { return cur_nodo >= 0 && tiene_hijos(curso + cur_nodo); }   /* la union es una bifurcacion */
+/* sitio de BKD.DAT (la ruta de la rama derecha, 105 KB): lo que sobra del hueco de la etapa detras de su SEGnn.DAT y
+   de su COLnn.DAT (la misma cuenta que col_en_hueco y carga_hilo). Del monton no: en la carrera quedan ~250 KB libres
+   pero troceados y no habia 108 KB seguidos ("Out of memory" al acabar de leer BK00.DAT, "No se pudo leer la etapa
+   siguiente" y la carrera parada a los ~27 s de PALM). La etapa no se suelta hasta despues de la decision de la rama,
+   cuando BKD.DAT ya se ha soltado (libera_modelo(&uni_der)). Cabe en todas las etapas con bifurcacion; si no, NULL (del
+   monton, como antes) */
+static uint8_t *der_sitio(uint32_t *cap)
+{
+    char n[16]; uint32_t o = TAM_SECT(etapa.tam), t, lba;
+    if (etapa.datos != hueco_etapa || etapa_nodo < 0) return NULL;
+    sprintf(n, "COL%02d.DAT", curso[etapa_nodo].seg);
+    if (!gd_busca(n, &lba, &t) && o + TAM_SECT(t) <= cap_etapa) o += TAM_SECT(t);
+    if (gd_busca("BKD.DAT", &lba, &t) || o + TAM_SECT(t) > cap_etapa) return NULL;
+    *cap = cap_etapa - o; return hueco_etapa + o;
+}
 static int curso_paso(void)
 {
     int ev = 0; const etapa_t *e = curso + cur_nodo;
@@ -4082,7 +4099,7 @@ static int curso_paso(void)
             sube_tramo(m, 2, !tiene_hijos(e) && etapa.tv ? &etapa : NULL);   /* la meta comparte lo que tenga igual la etapa */
             if ((int)(i_union = ruta_anade(m)) < 0) curso_error("Sin memoria para la ruta");
             j_union = ruta_salto; s_union = s_base + i_union * PASO;
-            if (tiene_hijos(e)) carga_pide(&uni_der, "BKD.DAT", NULL, 0, marco_un);
+            if (tiene_hijos(e)) { uint32_t c = 0; uint8_t *b = der_sitio(&c); carga_pide(&uni_der, "BKD.DAT", b, c, marco_un); }
             else {
                 s_meta = s_union + e->meta;                     /* la meta: la pancarta GOAL */
                 if (!meta_lista()) {                            /* su escena (META.DAT, 113 KB): ya sin la etapa */
