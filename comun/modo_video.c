@@ -86,13 +86,16 @@ int modo_video_pantalla(void)
     int estado = 0, t = 0, cursor = 0, ayuda = G_AYUDA, m60 = 0, fin = 0, ver = -1, seg;
     uint64_t t0;
     double pend = 0;
+    /* los efectos del frontal antes que MODOV.DAT y el bufer: sus datos se quedan en el monton y, pedidos despues,
+       dejaban debajo el hueco de lo que se suelta al salir; MENU.DAT (~1 MB seguido) ya no cabia y el menu no salia
+       en las consolas PAL (main lo vuelve a pedir: no hace nada) */
+    sfx_inicia();
     dat = gd_carga("MODOV.DAT", &tam);
     if (!dat || tam < 32 || memcmp(dat, "MDV1", 4)) { dbglog(DBG_ERROR, "modo_video: sin MODOV.DAT\n"); free(dat); return 0; }
     bx = u16(dat + 4); by = u16(dat + 6); bw = u16(dat + 8); bh = u16(dat + 10);
     base = (uint16_t *)(dat + u32(dat + 12)); n_fu = u32(dat + 16); n_gr = u32(dat + 24);
     buf = malloc(bw * bh * 2);
     if (!buf) { free(dat); return 0; }
-    sfx_inicia();                                       /* los efectos del frontal (main lo vuelve a pedir: no hace nada) */
     pon_modo(0);
     t0 = timer_us_gettime64();
     while (!fin) {
