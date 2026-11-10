@@ -744,22 +744,30 @@ static inline void envia_tira(const pt_t *p, uint32_t n)
     pvr_dr_addr = sq_pt(p + n - 1, 1, a, PVR_CMD_VERTEX_EOL);
     vtx_env += n;
 }
-static void dibuja_malla_directa(const modelo_t *mo, const malla_t *m)
+/* (depuracion: color fijo en todos los vertices) */
+static void __attribute__((noinline)) malla_directa_fija(const vert_t *v, uint32_t n, const uint32_t *ofs, uint32_t cf)
+{
+    uint32_t i;
+    for (i = 0; i < n; i++, v++) {
+        float x = v->x, y = v->y, z = v->z, w, iw; pvr_vertex_t *d;
+        mat_trans_single3_nodivw(x, y, z, w);
+        iw = inv_w(w); d = pvr_dr_target();
+        d->flags = i == n - 1 ? PVR_CMD_VERTEX_EOL : PVR_CMD_VERTEX;
+        d->x = x * iw; d->y = y * iw; d->z = iw; d->u = v->u; d->v = v->v; d->argb = cf; d->oargb = ofs ? ofs[i] : 0;
+        pvr_dr_commit(d);
+    }
+}
+/* (en linea en los recorridos: una llamada por malla costaba tanto como sus vertices) */
+static inline __attribute__((always_inline)) void dibuja_malla_directa(const modelo_t *mo, const malla_t *m)
 {
     const vert_t *v = mo->verts + m->v0; uint32_t n = m->n, cf = color_fijo;
     const uint32_t *ofs = mo->ofs ? mo->ofs + m->v0 : NULL;
     if (!ta_cabe(n)) return;
-    if (cf) {                                                   /* (depuracion: color fijo) */
-        uint32_t i;
-        for (i = 0; i < n; i++, v++) {
-            float x = v->x, y = v->y, z = v->z, w, iw; pvr_vertex_t *d;
-            mat_trans_single3_nodivw(x, y, z, w);
-            iw = inv_w(w); d = pvr_dr_target();
-            d->flags = i == n - 1 ? PVR_CMD_VERTEX_EOL : PVR_CMD_VERTEX;
-            d->x = x * iw; d->y = y * iw; d->z = iw; d->u = v->u; d->v = v->v; d->argb = cf; d->oargb = ofs ? ofs[i] : 0;
-            pvr_dr_commit(d);
-        }
-    } else {
+#ifdef DIAG_NO_ENVIA
+    if (ta_en_etapa) { vtx_env += n; return; }
+#endif
+    if (cf) malla_directa_fija(v, n, ofs, cf);
+    else {
         uintptr_t a = pvr_dr_addr;
         if (ofs) {
             if (n > 1) a = sq_vtx_ofs(&v, &ofs, n - 1, a, PVR_CMD_VERTEX);
@@ -905,6 +913,70 @@ static void dibuja_rango(const modelo_t *mo, int l, uint32_t k0, uint32_t k1, in
         else if (recorta && seguro) dibuja_malla_directa(mo, m);
         else dibuja_malla(mo, m);
     }
+    }
+    if (ta_en_etapa) vtx_et += vtx_env - vtx_et0;
+    ta_ofs = 0;
+}
+/* lo mismo que dibuja_rango(mo, l, inicio[l], inicio[l + 1], 1, 0, 0) para las etapas y uniones con tabla de tramos
+   (mo->tr): las mismas mallas en el mismo orden con las mismas pruebas, pero el ojo y los ejes en variables locales,
+   el cartel una vez por tramo (es del nodo) y sin las pruebas que aqui no hacen falta (solo_lod, solo_lista, la
+   visibilidad del nodo otra vez). La matriz cargada es la vista */
+static void dibuja_etapa(const modelo_t *mo, int l)
+{
+    const float tanh = 320.0f / fx, tanv = 240.0f / fx, kh = sqrtf(1 + tanh * tanh), kv = sqrtf(1 + tanv * tanv);
+    const float o0 = ojo[0], o1 = ojo[1], o2 = ojo[2], e0 = ade[0], e1 = ade[1], e2 = ade[2];
+    const float d0 = der[0], d1 = der[1], d2 = der[2], a0 = arr[0], a1 = arr[1], a2 = arr[2];
+    const float cer = cerca, lej = lejos, cer15 = cerca * 1.5f;
+    const uint32_t *tr = mo->tr, *vis = mo->vis, *pvs = mo->pvs_on ? mo->pvs_m : NULL;
+    const malla_t *M = mo->mallas; const nodo_t *N = mo->nodos;
+    uint32_t it, it0 = mo->tr_ini[l], it1 = mo->tr_ini[l + 1], vtx_et0 = vtx_env;
+    int ult = -2, sol = l < 2 && (mo == &etapa || mo == &uni || mo == &sig);
+    ta_ofs = mo->ofs != NULL;
+    for (it = it0; it < it1; it++) {
+        uint32_t t = tr[it], nd = t >> 16, ka = it > it0 ? tr[it - 1] & 0xFFFF : mo->inicio[l], kb = t & 0xFFFF, k; int cart = 0;
+        if (nd) {
+            if (!(vis[(nd - 1) >> 5] & (1u << ((nd - 1) & 31)))) continue;
+            cart = N[nd - 1].cartel >= 0;                       /* (malla_de_cartel: nodo valido con cartel) */
+        }
+        __builtin_prefetch(M + ka);
+        for (k = ka; k < kb; k++) {
+            const malla_t *m = M + k; int seguro = 0;
+            __builtin_prefetch(m + 2);
+            if (!nd && m->nodo >= 0 && !(vis[m->nodo >> 5] & (1u << (m->nodo & 31)))) continue;
+            if (m->n < 3) continue;
+#ifdef DIAG_MS
+            dg_mallas++;
+#endif
+            if (pvs && m->nodo >= 0 && !(pvs[k >> 5] & (1u << (k & 31)))) continue;   /* PVS: no se ve */
+#ifndef DIAG_SIN_TOPE
+            if (vtx_et + (vtx_env - vtx_et0) > VTX_ETAPA_MAX) { ta_corto = 1; ta_et_corto = 1; continue; }
+#endif
+            if (!cart) {
+                float dx = m->cx - o0, dy = m->cy - o1, dz = m->cz - o2, zv, xv, yv;
+                zv = dx * e0 + dy * e1 + dz * e2;
+                if (zv + m->r < cer || zv - m->r > lej) continue;
+                xv = dx * d0 + dy * d1 + dz * d2;
+                yv = dx * a0 + dy * a1 + dz * a2;
+                if (fabsf(xv) - zv * tanh > m->r * kh || fabsf(yv) - zv * tanv > m->r * kv) continue;
+                seguro = zv - m->r > cer15 && m->n <= 256;
+            }
+            if (m->tex != ult) {
+                ult = m->tex;
+                if (m->tex >= 0) pvr_prim(&mo->cabs[0][mo->remap ? mo->remap[m->tex] : m->tex], sizeof(pvr_poly_hdr_t));
+                else pvr_prim(&cab_col[0][l], sizeof(pvr_poly_hdr_t));
+            }
+            if (sol && sol_rayo_on && !sol_rayo_res) sol_rayo_res = sol_rayo_malla(mo, m, cart);   /* (sol_prepara) */
+#ifdef DIAG_MS
+            if (seguro) { dg_dir++; dg_vdir += m->n; } else { dg_mal++; dg_vmal += m->n; }
+#endif
+            if (cart) {
+                carga_cartel((const float (*)[4])mo->carteles[N[m->nodo].cartel]);
+                dibuja_malla(mo, m);
+                mat_load(&vista);
+            }
+            else if (seguro) dibuja_malla_directa(mo, m);
+            else dibuja_malla(mo, m);
+        }
     }
     if (ta_en_etapa) vtx_et += vtx_env - vtx_et0;
     ta_ofs = 0;
@@ -6527,7 +6599,12 @@ int main(int argc, char **argv)
                 color_fijo = l == DEP_LISTA ? 0xFFFF00FF : 0;
 #endif
                 for (i = 0; i < 3; i++)                         /* etapa, union y etapa siguiente: las que esten subidas */
-                    if (tramos[i]->tv) dibuja_rango(tramos[i], l, tramos[i]->inicio[l], tramos[i]->inicio[l + 1], 1, 0, 0);
+                    if (tramos[i]->tv) {
+#ifndef DEP_TEX
+                        if (tramos[i]->tr && tramos[i]->vis) dibuja_etapa(tramos[i], l); else
+#endif
+                        dibuja_rango(tramos[i], l, tramos[i]->inicio[l], tramos[i]->inicio[l + 1], 1, 0, 0);
+                    }
                 color_fijo = 0; ta_en_etapa = 0;
                 PRF(3);
                 bo_dibuja(l);                                   /* pajaros y demas de la union (4A9DF0) */
