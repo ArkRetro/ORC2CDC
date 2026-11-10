@@ -3788,7 +3788,7 @@ static int curso_lee(void)
     if (curso_lee_id(0)) return -1;
 #ifdef DIAG_MS
     {   uint32_t k, j;                                          /* medida: la niebla de cada etapa */
-        for (k = 0; k < n; k++) for (j = 0; j < curso[k].nniebla && j < NIEBLA_MAX; j++)
+        for (k = 0; k < (uint32_t)ncurso; k++) for (j = 0; j < curso[k].nniebla && j < NIEBLA_MAX; j++)
             printf("NIEBLA: %.4s %u pos %u-%u modo %u d %.6f-%.6f c %06x-%06x\n", curso[k].zona, (unsigned)j, curso[k].niebla[j].p0, curso[k].niebla[j].p1,
                    curso[k].niebla[j].modo, (double)curso[k].niebla[j].d0, (double)curso[k].niebla[j].d1, (unsigned)(curso[k].niebla[j].c0 & 0xffffff), (unsigned)(curso[k].niebla[j].c1 & 0xffffff));
     }
