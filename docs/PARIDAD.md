@@ -845,16 +845,30 @@ del original, con el mismo motor que la de la meta (demo/meta.c, 486730 / 486EF0
   segundo se arranca a su hora desde la CPU (puede repetir hasta un cuadro de sonido): limite del hardware.
 - RAM: el guion (16 KB) solo durante la escena; al arrancar 36 KB prestados para subir los efectos. La RAM libre al
   arrancar baja 9 KB (674 -> 665 KB: codigo y huecos).
-- PENDIENTE: el banderero (ROB03, PC 488710 / 488820 / 487A30 y la bandera de tela 402100..4021A0): no esta portado.
-  Datos ya localizados en SLES-53998 para portarlo: init PC 488710 = PS2 0x2046f0 (preset [gp-0x7b64]: personaje 3
-  con el preset 1 o 3, si no 4 = \chr\CHR_AUT04_CVT.bin, recurso 0x12B de CHR.PS2, que es tambien la textura de la
-  bandera (rob_flag_texture_resource); esqueleto por 0x205038 / tabla 0x40e3f0); lista de 6 movimientos 0x36f700 +
-  preset x 0x18 (preset 0: 0x210001, 0x210004, 0x210001, 0x210006, 0x210001, 0x210000), movimiento inicial
-  0x36f778[preset] (0x210005), huida 0x36f790 / 0x36f7a4 [preset] (0x210003 / 0x210002: por el patron de las tablas,
-  PROBABLE hasta leer el control de PS2), posicion 0x40ef88 + 12 x preset (4,776, 0, -20,584 en el marco de la etapa),
-  la de cada movimiento siguiente 0x40efc8 (4,5, 0, -21), giro 0x40f008 (0, 0, 0). Falta: el control de PS2 (PC
-  488820: distancias 654850 / 654858 del PC sin su direccion de PS2), la tela (5 x 7 nodos, rob_flag.cpp), el
-  personaje en CHR.DAT (tools/conv_chr.py: PERSONAJES) y su dibujo, con el presupuesto de RAM y VRAM.
+- Banderero (ROB03): PORTADO pero APAGADO por la RAM (2026-11-10). Codigo: comun/robot.c (robot_band_*: init PS2
+  0x2046f0, control 0x204888, huida 0x204ca0, la tela 0x100a68 / 0x100d20 / 0x100d40) y demo/main.c (dibujo 0x204c28:
+  el cuerpo con las piezas del personaje 2 de CHR.DAT en work+10, la tela de 5 x 7 como tiras con la luz del entorno 2
+  y el material 0xFFC0C0C0 de 401B80). Datos (tools/conv_chr.py con CHR_BANDERERO=todo): personaje 4 =
+  CHR_AUT04_CVT (recurso 0x12B, su textura 1 es la de la tela), esqueleto 4 de bone.bin (0x205038 / 0x40e3f0, 39
+  huesos), tabla BAND por preset: inicial 0x36f778, huida 0x36f790 (si sigue en el inicial) / 0x36f7a4, lista de 6
+  0x36f700, posicion 0x40ef88, la de los siguientes 0x40efc8, giro 0x40f008; distancias 0x36f7c4 (40: dibujo y
+  control), 0x36f7c8 (13: huida), 0x36f7cc (1,2: minima), eje 0x40e3c8 (0, 0, -1) y punto 0x40e3d8 (0, 0, 3).
+  CONFIRMADO en el MIPS: SetFrame(0) mientras 8367BC >= 0x78, el siguiente de la lista al acabar (mezcla 0, o 20
+  cuadros), la huida con 8367BC < 1 (mezcla 4), sin control (ni Calc ni tela) a mas de 40 m o detras de la camara.
+  Tela: las constantes de PS2 0x328700..0x32872c son las del PC (gravedad 0,0027222, asta (0,146, 0,18, 0,007) ->
+  (0,175, 0,68, 0,015)); el viento (+CAC, 95AEB8, 95AEAC) nadie lo escribe (0). La posicion se toma en el marco de la
+  etapa de salida (col_et.marco): PROBABLE. Prueba de imagen (Flycast, CHR_BANDERERO=salida): sale junto a la
+  pancarta START a la derecha, quieto hasta el cuadro 180 y luego agitando la bandera de cuadros, que ondea.
+  Por que esta apagado (numeros de Flycast, NTSC): CHR.DAT entero en la RAM desde el arranque: con el banderero
+  completo (81 movimientos, RBT1 131 -> 233 KB, 3102 -> 4430 vertices, 7 -> 12 texturas: +13 KB de VRAM) la RAM
+  libre al arrancar baja de 665 a 492 KB, y con solo sus movimientos de salida y huida (77, RBT1 166 KB) a 558 KB; en
+  los dos casos los huecos de colision de la carrera (186 + 208 KB) ya no caben ("COLI: sin RAM para las
+  colisiones", Out of memory). Sus 7 movimientos son 88 KB (0x210000 31 KB, 0x210004 21 KB, 0x210006 13 KB,
+  0x210005 11 KB, 0x210002 6 KB, 0x210003 4 KB, 0x210001 3 KB); el motor de su esqueleto 31 KB (se reserva solo si
+  CHR.DAT lo trae). Sin CHR_BANDERERO, CHR.DAT sale igual byte a byte que antes y la demo no reserva nada (RAM libre
+  al arrancar 660 KB). Opciones (sin hacer): guardar sus movimientos en la RAM de sonido (856 KB libres) y copiar a
+  la RAM solo el que corre (31 KB como mucho), o leerlo con su modelo en un fichero aparte en un hueco que la
+  carrera no use en la salida.
 - Prueba: tools/prueba/salida.sh (hoja de contactos de la salida, NTSC y PAL).
 
 ## Escena de la meta (2026-11-10)

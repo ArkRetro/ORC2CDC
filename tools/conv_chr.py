@@ -373,6 +373,7 @@ def manos(A, kind):
     rob_disp_init (PS2 0x206390, tabla de saltos 0x40f130) y 513A30 / 513BA0 (PS2 0x206758 / 0x2068d8, tablas
     0x40f360 / 0x40f3a0); objeto = recurso << 16 | registro"""
     E = A.elf
+    if kind < 5: return 0xffff, 0xffff, (), ()     # 0x206390: sin manos fuera de los personajes 5.. (el banderero)
     h = _bloque_mips(E, E.u32(0x40f130 + 4 * (kind - 5)))
     g = _bloque_mips(E, E.u32(0x40f360 + 4 * (kind - 5)))
     p = _bloque_mips(E, E.u32(0x40f3a0 + 4 * (kind - 5)))
@@ -425,6 +426,17 @@ def tablas_logica(A):
             r = E.u32(base + 4 * k)
             v += [0xfffffffe] * 3 if r == 0 else [x & 0xffffffff for x in E.u32(r, 3)]
     t['METE'] = v
+    # banderero (ROB03; PS2 init 0x2046f0, control 0x204888, huida 0x204ca0, dibujo 0x204c28; preset [gp-0x7b64]):
+    # por preset 0..4 {movimiento inicial 0x36f778, huida 0x36f790 (si sigue en el inicial) / 0x36f7a4, lista de 6
+    # 0x36f700 + 0x18 p, posicion 0x40ef88 + 12 p, la de los siguientes 0x40efc8 + 12 p, giro 0x40f008 + 12 p (x, y,
+    # z: se aplica z, y, x)}; y {distancia de dibujo 0x36f7c4, de huida 0x36f7c8, minima 0x36f7cc, eje 0x40e3c8 (3),
+    # punto 0x40e3d8 (3)} (floats como u32)
+    v = []
+    for p in range(5):
+        v += [E.u32(0x36f778 + 4 * p), E.u32(0x36f790 + 4 * p), E.u32(0x36f7a4 + 4 * p)] + list(E.u32(0x36f700 + 0x18 * p, 6))
+        v += list(E.u32(0x40ef88 + 12 * p, 3)) + list(E.u32(0x40efc8 + 12 * p, 3)) + list(E.u32(0x40f008 + 12 * p, 3))
+    v += list(E.u32(0x36f7c4, 3)) + list(E.u32(0x40e3c8, 3)) + list(E.u32(0x40e3d8, 3))
+    if BANDERERO: t['BAND'] = [x & 0xffffffff for x in v]
     return t
 
 def ids_movimientos(t):
@@ -434,6 +446,9 @@ def ids_movimientos(t):
     s = set(x for x in t['MODC'] + t['MIRA'] + t['CHQ7'] + t['CHQ6'] if x != 0xffffffff)
     s |= {0x60000, 0x25000c, 0x6004b, 0x6005f, 0x250003, 0x220007, 0x230003, 0x60036, 0x60049}
     s |= set(x for x in t['METE'] if x not in (0xffffffff, 0xfffffffe))      # meta del piloto (estado 9)
+    if BANDERERO:
+        for p in (0, 2, 4):                         # el banderero con el personaje 4 (grupo 0x21 de ANIMS.PS2)
+            s |= set(x for x in t['BAND'][18 * p:18 * p + (3 if BANDERERO == 'salida' else 9)] if x)
     for c in ('LISA', 'LISC'):
         v = t[c]
         for k in range(8): s |= set(x for x in v[5 * k + 1:5 * k + 5] if x != 0xffffffff)
@@ -463,7 +478,14 @@ def datos_movimiento(g, k):
     return e['cuadros'], e['banderas'], bytes(g.d[g.base + c:g.base + c + e['ncan']]), bytes(g.d[g.base + e['claves']:g.base + fin])
 
 # ------------------------------------------------------------------ conversion
-PERSONAJES = ((11, 3, 0), (9, 2, 1))   # (personaje, esqueleto de bone.bin, asiento): el piloto y la acompanante
+# BANDERERO (variable de entorno CHR_BANDERERO): sin ella CHR.DAT no lo lleva (no cabe en la RAM: ver
+# docs/PARIDAD.md, Escena de la salida); "todo" lo mete entero; "salida" solo con sus movimientos de la salida y de la
+# huida (prueba: sin los 6 de la lista, que solo suenan si el coche se queda parado ~12 s tras el GO)
+BANDERERO = os.environ.get('CHR_BANDERERO', '')
+PERSONAJES = ((11, 3, 0), (9, 2, 1)) + (((4, 4, 0xff),) if BANDERERO else ())
+# (personaje, esqueleto de bone.bin, asiento): el piloto, la acompanante y el banderero de la salida (ROB03: PS2
+# 0x2046f0 = PC 488710 pone el personaje 4 = CHR_AUT04_CVT con el preset 0, 2 y 4; 0x205038 le da la entrada 4 de
+# bone.bin por la tabla de saltos 0x40e3f0; sin asiento: va en el mundo)
 
 def convierte(A, sal, vista=None):
     elf(A)
@@ -488,6 +510,9 @@ def convierte(A, sal, vista=None):
             a = tex.imagen(blq, h); fmt, li, d = modelo.textura_dc(a)
             mod.texs.append((a.shape[1], a.shape[0], fmt, li, len(mod.blob), len(d))); mod.blob += d; mod.rgba.append(a)
         ntb = len(mod.texs) - base
+        if kind == 4:                             # la tela de la bandera: textura 1 del recurso (401B80 / 448810:
+            if ntb < 2: raise SystemExit('%s sin la textura de la bandera' % P.nombre)    # [[r+24]][1])
+            mod.mallas.append([mod.texs[base + 1][3], base + 1, np.zeros(3), 0.0, mod.nv, 0, blq, -1])
         R = blq.registros()
         lista_p = []                              # (registro, tipo, huesos, inversas)
         for b, obj in P.rigidas:
@@ -522,6 +547,7 @@ def convierte(A, sal, vista=None):
                     mvert.append((ip, q, N[sl], W[sl], mat))
     # texturas: solo las usadas, en VQ si cabe (como los coches)
     mod.recorta_texturas()
+    if BANDERERO: t['BTEX'] = [x[1] for x in mod.mallas if x[5] == 0 and x[7] == -1][:1]   # la tela (tras recortar)
     mod.mallas.sort(key=lambda x: (x[0], x[1]))
     # bloque RBT1
     blob = bytearray()

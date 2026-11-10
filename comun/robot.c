@@ -67,13 +67,15 @@ typedef struct {
 static const uint8_t *B; static uint32_t Bn;
 static const rper_t *per; static const rmov_t *movs; static uint32_t nper, nmov, npz, nml;
 static const rpieza_t *pz; static const rmalla_t *ml; static const rvert_t *vt;
-static motor_t mot[ROBOT_N];
+static motor_t mot_c[2], *mot_b;                 /* el piloto y la acompanante; el banderero (31 KB) solo si CHR.DAT lo trae */
+#define MOT(p) ((p) < 2 ? mot_c + (p) : mot_b)
 static int listo;
 
 /* tablas de la logica (bloque TAB de RBT1) */
 static const uint32_t *t_modc, *t_mira, *t_agar, *t_chqe, *t_chq7, *t_chq6, *t_cerr, *t_lisa, *t_lisc, *t_asnt, *t_mate;
 static const uint32_t *t_metr, *t_mete; static uint32_t n_metr, n_mete;   /* meta del piloto (estado 9) */
 static uint32_t n_agar, n_chqe, n_mate;
+static const uint32_t *t_band, *t_btex;                                   /* el banderero (BAND, BTEX) */
 
 /* ---------------------------------------------------------------- matrices de fila: M = op M (pila del PC) */
 static void m_mul(mat_t o, const mat_t a, const mat_t b)       /* o = a b */
@@ -433,7 +435,7 @@ int robot_inicia(const void *rbt, uint32_t bytes)
     if (!rbt || bytes < 48 || memcmp(w, "RBT1", 4)) return -1;
     B = rbt; Bn = bytes;
     nper = w[1]; nmov = w[2]; npz = w[3]; nml = w[4];
-    if (nper != ROBOT_N) return -2;
+    if (nper < 2 || nper > ROBOT_N) return -2;            /* 2: CHR.DAT sin el banderero */
     per = (const rper_t *)(w + 9); movs = (const rmov_t *)(per + nper);
     pz = (const rpieza_t *)(B + w[5]); ml = (const rmalla_t *)(B + w[6]); vt = (const rvert_t *)(B + w[7]);
     for (i = 0; i < nper; i++) if (per[i].nh > ROBOT_HUESOS) return -3;
@@ -447,8 +449,11 @@ int robot_inicia(const void *rbt, uint32_t bytes)
     t_metr = tabla("METR", &n_metr); t_mete = tabla("METE", &n_mete);
     if (n_metr < 30 || n_mete < 3 * 8 * 3) t_metr = t_mete = NULL;
     if (!t_mate || !t_agar || !t_chqe || !t_chq7 || !t_chq6 || !t_lisa || !t_lisc || !t_asnt || n < 30 * 6) return -4;
-    for (i = 0; i < ROBOT_N; i++) {
-        motor_t *m = mot + i; int j, k;
+    t_band = tabla("BAND", &n); if (nper < 3 || n < 5 * 18 + 9) t_band = NULL;
+    t_btex = tabla("BTEX", &n); if (!n) t_btex = NULL;
+    if (nper >= 3 && !mot_b && !(mot_b = malloc(sizeof *mot_b))) return -5;
+    for (i = 0; i < nper; i++) {
+        motor_t *m = MOT(i); int j, k;
         memset(m, 0, sizeof *m);
         m->h = (const rhueso_t *)(B + per[i].oh); m->n = per[i].nh; m->inv = (const mat_t *)(B + per[i].oinv); m->vel = 1;
         for (j = 0; j < m->n; j++) {
@@ -484,7 +489,7 @@ static void avanza(int8_t *pick, int off) { int n; lista(off, &n); (*pick)++; if
 
 void robot_carrera(int modelo)
 {
-    motor_t *d = mot, *a = mot + 1;
+    motor_t *d = MOT(0), *a = MOT(1);
     if (!listo) return;
     if (modelo < 0 || modelo >= 30) modelo = 6;
     memset(&lg, 0, sizeof lg);
@@ -534,7 +539,7 @@ static void meta_piloto(motor_t *m, const robot_coche_t *c)
 }
 static void piloto(const robot_coche_t *c)          /* 488DD0 (variante 1) */
 {
-    motor_t *m = mot; const uint32_t *mira = t_mira + 4 * lg.modelo;
+    motor_t *m = MOT(0); const uint32_t *mira = t_mira + 4 * lg.modelo;
     float fr = (float)(c->s204 + 0x7fff) / 65535.0f * 168.0f;
     int k;
     if (lg.d_est == 8) { if (c->fase != 0) lg.d_est = 1; }
@@ -571,7 +576,7 @@ static void a_reposo(motor_t *m)                    /* 4886B0 */
 }
 static void acompanante(const robot_coche_t *c)     /* 489A90 (variante 1) */
 {
-    motor_t *m = mot + 1; uint32_t slide = c->sup & 0x10f407cu; int st = lg.a_est, k, a;
+    motor_t *m = MOT(1); uint32_t slide = c->sup & 0x10f407cu; int st = lg.a_est, k, a;
     static const uint8_t GRANDE[7] = { 0, 1, 0, 0, 1, 0, 0 };
     /* reacciones */
     do {
@@ -645,9 +650,9 @@ void robot_paso(const robot_coche_t *c)
     acompanante(c);
 }
 
-const float (*robot_huesos(int p))[4][4] { return (const float (*)[4][4])mot[p].M; }
-const float (*robot_inversa(int p, int i))[4] { return mot[p].inv[i]; }
-int robot_mano_gu(int p) { return mot[p].gu; }
+const float (*robot_huesos(int p))[4][4] { return (const float (*)[4][4])MOT(p)->M; }
+const float (*robot_inversa(int p, int i))[4] { return MOT(p)->inv[i]; }
+int robot_mano_gu(int p) { return MOT(p)->gu; }
 const float *robot_asiento(int modelo, int p)
 {
     if (modelo < 0 || modelo >= 30) modelo = 6;
@@ -659,6 +664,184 @@ const rmalla_t *robot_malla(int i) { return ml + i; }
 const rvert_t *robot_vert(int i) { return vt + i; }
 int robot_nmat(void) { return (int)n_mate; }
 const float *robot_material(int i) { return (const float *)(t_mate + 9 * i); }
-uint32_t robot_movimiento(int p) { return mot[p].id; }
-float robot_cuadro(int p) { return mot[p].f0c; }
+uint32_t robot_movimiento(int p) { return MOT(p)->id; }
+float robot_cuadro(int p) { return MOT(p)->f0c; }
 int robot_estado(int p) { return p ? lg.a_est : lg.d_est; }
+
+/* ---------------------------------------------------------------- el banderero de la salida (ROB03)
+   PS2 (SLES-53998): init 0x2046f0 (PC 488710), control 0x204888 (PC 488820), huida 0x204ca0 (PC 487A30), dibujo
+   0x204c28 (PC 4879D0); la tela de la bandera 0x100a68 / 0x100d20 / 0x100d40 / 0x101070 (PC 402100 / 402140 / 402170 /
+   4021A0), con las mismas constantes que el PC (0x328700..0x32872c: 1, 0,0027222, 0xFFC0C0C0, los puntos de la asta
+   (0,146, 0,18, 0,007) y (0,175, 0,68, 0,015)). Tablas BAND de CHR.DAT (tools/conv_chr.py). El mundo de la demo:
+   la posicion del original (marco de la etapa de salida) pasa por el marco de la etapa (como la escena de la meta). */
+#define TELA_C 5
+#define TELA_F 7
+typedef struct {                                   /* nodo de la tela (0x5C del PC: 95B27C + (f x 5 + c) x 0x5C) */
+    uint32_t bordes; float pos[3], vel[3], rep[3], prev[3], viento[3], l_arr, l_aba, l_izq, l_der;
+} nodo_t;
+static struct {
+    int hay, vis, huida, sig, preset;              /* work+4 & 0x8000, 82F5E4 (5DB544..), 82F5E8 */
+    float pos[3], rot[3], marco[4];                /* 5DB558 / 5DB568 */
+    mat_t W;                                       /* work+10 */
+    float w40[3];                                  /* work+40 (la traslacion de W del paso anterior) */
+    nodo_t n[TELA_F][TELA_C];
+    float escala;                                  /* +CAC: nadie la escribe (0) */
+} bd;
+static const uint32_t *bd_fila(void) { return t_band + 18 * bd.preset; }
+static float f32u(uint32_t u) { float f; memcpy(&f, &u, 4); return f; }
+
+/* 401080: la tela de c x f nodos entre a y b (espacio de la mano) */
+static void tela_inicia(const float *a, const float *b)
+{
+    float d[3] = { b[0] - a[0], b[1] - a[1], b[2] - a[2] }, len, seg, s[3], l2, p[3];
+    int r, c;
+    len = sqrtf(d[2] * d[2] + d[0] * d[0] + d[1] * d[1]);
+    seg = len / (float)(TELA_C - 1);
+    memcpy(s, d, 12);
+    l2 = sqrtf(d[2] * d[2] + d[1] * d[1] + d[0] * d[0]);
+    if (l2 > 0.0001f) { float k = seg / l2; s[0] = d[0] * k; s[1] = d[1] * k; s[2] = d[2] * k; }
+    for (r = 0; r < TELA_F; r++)
+        for (c = 0; c < TELA_C; c++) {
+            nodo_t *n = &bd.n[r][c];
+            memset(n, 0, sizeof *n);
+            n->bordes = (r ? 1u : 0u) | (r != TELA_F - 1 ? 2u : 0u) | (c ? 4u : 0u) | (c != TELA_C - 1 ? 8u : 0u);
+            memcpy(n->pos, a, 12); memcpy(n->rep, a, 12);
+            n->l_arr = n->l_aba = n->l_izq = n->l_der = seg;
+        }
+    memcpy(p, a, 12);
+    for (c = 0; c < TELA_C; c++) {
+        memcpy(bd.n[0][c].pos, p, 12); memcpy(bd.n[0][c].rep, p, 12);
+        p[0] += s[0]; p[1] += s[1]; p[2] += s[2];
+    }
+}
+static void limita(float *a, const float *b, float largo)      /* 401790 */
+{
+    float dx = a[0] - b[0], dy = a[1] - b[1], dz = a[2] - b[2], d2 = dz * dz + dy * dy + dx * dx, k;
+    if (!(d2 > largo * largo)) return;
+    k = largo / sqrtf(d2);
+    a[0] = k * dx + b[0]; a[1] = dy * k + b[1]; a[2] = k * dz + b[2];
+}
+static void muelle(float *p, const float *q, const float *l, float largo)   /* 401720 */
+{
+    float dx = q[0] - l[0], dy = q[1] - l[1], dz = q[2] - l[2], k = -((0.0027222000062465668f / largo) * dy);
+    p[0] += dx * k; p[1] += dy * k; p[2] += dz * k;
+    limita(p, q, largo);
+}
+/* 402140: M = el hueso de la mano por work+10 (vectores fila) */
+static void tela_paso(const mat_t M)
+{
+    int r, c;
+    for (c = 0; c < TELA_C; c++) punto(M, bd.n[0][c].rep, bd.n[0][c].pos);   /* 401490 */
+    for (r = 1; r < TELA_F; r++)
+        for (c = 0; c < TELA_C; c++) {
+            nodo_t *n = &bd.n[r][c]; float o[3], t[3], P[3]; int k;
+            memcpy(n->prev, n->pos, 12); memcpy(o, n->pos, 12);
+            for (k = 0; k < 3; k++) t[k] = n->viento[0] * M[0][k] + n->viento[1] * M[1][k] + n->viento[2] * M[2][k];   /* normal */
+            for (k = 0; k < 3; k++) P[k] = t[k] * bd.escala + o[k] + n->vel[k];   /* + 95AEB8 (0) */
+            if (n->bordes & 2) muelle(P, bd.n[r + 1][c].pos, o, n->l_aba);
+            if (n->bordes & 4) muelle(P, bd.n[r][c - 1].pos, o, n->l_izq);    /* + 95AEAC (0) */
+            if (n->bordes & 8) muelle(P, bd.n[r][c + 1].pos, o, n->l_der);
+            muelle(P, bd.n[r - 1][c].pos, o, n->l_arr);
+            n->vel[0] = (P[0] - o[0]) * 1.0f;
+            memcpy(n->pos, P, 12);
+            n->vel[1] = (P[1] - o[1]) * 1.0f - 1.0f * 0.0027222000062465668f;
+            n->vel[2] = (P[2] - o[2]) * 1.0f;
+        }
+}
+static void bd_matriz(void)                        /* push unit, T(pos), Rz, Ry, Rx; y el marco de la etapa */
+{
+    mat_t A, Mk; float c = cosf(bd.marco[3]), sn = sinf(bd.marco[3]);
+    m_id(A); op_tras(A, bd.pos); op_zyx(A, bd.rot);
+    m_id(Mk); Mk[0][0] = c; Mk[0][2] = -sn; Mk[2][0] = sn; Mk[2][2] = c;
+    Mk[3][0] = bd.marco[0]; Mk[3][1] = bd.marco[1]; Mk[3][2] = bd.marco[2];
+    m_mul(bd.W, A, Mk);
+}
+int robot_band_hay(void) { return listo && t_band != NULL && nper >= 3; }
+void robot_band_inicia(int preset, const float *marco)  /* 0x2046f0 */
+{
+    static const float A[3] = { 0.14599999785f, 0.18000000715f, 0.00700000022f }, Bp[3] = { 0.17499999702f, 0.68000000715f, 0.01499999966f };
+    motor_t *m = MOT(2); const uint32_t *f; int k;
+    bd.hay = 0;
+    if (!robot_band_hay() || preset < 0 || preset > 4) return;
+    bd.preset = preset; f = bd_fila();
+    memcpy(bd.marco, marco, sizeof bd.marco);
+    for (k = 0; k < 3; k++) { bd.pos[k] = f32u(f[9 + k]); bd.rot[k] = f32u(f[15 + k]); }
+    bd.huida = bd.sig = 0; bd.vis = 0; bd.escala = 0;
+    m->fl = 0; m->mov = NULL;
+    if (!pon_mov(m, f[0])) return;                 /* SetMotion(0x36f778[preset]) */
+    m->bucles = 0;                                 /* SetLoop(0) */
+    bd_matriz(); memcpy(bd.w40, bd.W[3], 12);
+    tela_inicia(A, Bp);                            /* 0x100a68 (402100) */
+    bd.hay = 1;
+}
+void robot_band_quita(void) { bd.hay = 0; bd.vis = 0; }
+static float dist3(const float *a, const float *b) { float x = a[0] - b[0], y = a[1] - b[1], z = a[2] - b[2]; return sqrtf(x * x + y * y + z * z); }
+static int huye(const robot_band_t *e)            /* 0x204ca0 (487A30): solo el coche del jugador (CAR01) */
+{
+    const uint32_t *T = t_band + 90;               /* distancias {dibujo, huida, minima}, eje, punto */
+    float lim = f32u(T[2]), lejos = f32u(T[1]), d, eje[3], pt[3], dir[3], l, cs, ratio; int k;
+    float pp[3] = { f32u(T[6]), f32u(T[7]), f32u(T[8]) }, ax[3] = { f32u(T[3]), f32u(T[4]), f32u(T[5]) }, fp[3];
+    {   float c = cosf(bd.marco[3]), sn = sinf(bd.marco[3]);   /* 5DB558 en el mundo de la demo */
+        fp[0] = bd.pos[0] * c + bd.pos[2] * sn + bd.marco[0]; fp[1] = bd.pos[1] + bd.marco[1]; fp[2] = -bd.pos[0] * sn + bd.pos[2] * c + bd.marco[2]; }
+    d = dist3(e->coche, fp);
+    if (!(d > lim)) return 0;
+    for (k = 0; k < 3; k++) eje[k] = ax[0] * e->B0[0][k] + ax[1] * e->B0[1][k] + ax[2] * e->B0[2][k];   /* 40A820 */
+    for (k = 0; k < 3; k++) pt[k] = pp[0] * e->B0[0][k] + pp[1] * e->B0[1][k] + pp[2] * e->B0[2][k] + e->B0[3][k];   /* 40A7D0 */
+    for (k = 0; k < 3; k++) dir[k] = fp[k] - pt[k];
+    l = sqrtf(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
+    if (l > 0) for (k = 0; k < 3; k++) dir[k] /= l;
+    cs = dir[0] * eje[0] + dir[1] * eje[1] + dir[2] * eje[2];
+    ratio = sqrtf(d * d - lim * lim) / d;
+    return cs > ratio && lejos > d;
+}
+void robot_band_paso(const robot_band_t *e)       /* 0x204888 (488820) */
+{
+    const uint32_t *f, *T; motor_t *m = MOT(2); float v[3], to[3]; int k, misma;
+    if (!bd.hay) return;
+    f = bd_fila(); T = t_band + 90;
+    if (dist3(e->ojo, bd.w40) > f32u(T[0])) { bd.vis = 0; return; }
+    bd.vis = 1;
+    for (k = 0; k < 3; k++) { v[k] = e->mira[k] - e->ojo[k]; to[k] = bd.w40[k] - e->ojo[k]; }
+    if (v[0] * to[0] + v[1] * to[1] + v[2] * to[2] < 0.0f) return;
+    if (e->t8367bc >= 0x78) pon_cuadro(m, 0.0f);   /* SetFrame(0) */
+    misma = m->id == f[0];                          /* el nombre del movimiento puesto = el del inicial */
+    if (fin_mov(m) && !bd.huida) {
+        int i = bd.sig;
+        conecta(m, f[3 + i], 0.0f, i == 0 && misma ? 0.0f : 20.0f);
+        m->bucles = 0;
+        for (k = 0; k < 3; k++) bd.pos[k] = f32u(f[12 + k]);   /* 0x40efc8 */
+        if (++bd.sig >= 6) bd.sig = 0;
+    }
+    if (!bd.huida && e->t8367bc < 1 && huye(e)) {
+        conecta(m, misma ? f[1] : f[2], 0.0f, 4.0f);
+        bd.huida = 1;
+    }
+    bd_matriz();
+    calc(m);                                       /* 0x201868 (488450): Calc */
+    memcpy(bd.w40, bd.W[3], 12);                   /* work+40 (de work+10) */
+    {   mat_t H; int b = bd.preset == 1 || bd.preset == 3 ? 0x11 : 0x1a;   /* 0x208470: la matriz del hueso */
+        if (b < m->n) { m_mul(H, m->M[b], bd.W); tela_paso(H); } }
+}
+int robot_band_visible(void) { return bd.hay && bd.vis; }
+int robot_band_activo(void) { return bd.hay; }
+const float (*robot_band_mundo(void))[4] { return (const float (*)[4])bd.W; }
+uint32_t robot_band_textura(void) { return t_btex ? t_btex[0] : 0xffffffffu; }
+/* 401990: posiciones y normales de los 35 vertices (fila x 5 + columna) */
+void robot_band_tela(float (*pos)[3], float (*nor)[3])
+{
+    int r, c, k;
+    for (r = 0; r < TELA_F; r++) for (c = 0; c < TELA_C; c++) memcpy(pos[r * TELA_C + c], bd.n[r][c].pos, 12);
+    for (r = 0; r + 1 < TELA_F; r++) {
+        for (c = 0; c + 1 < TELA_C; c++) {          /* 40F2C0(p0, p1, p2): (p0 - p1) x (p2 - p0) normalizado */
+            const float *p0 = pos[r * TELA_C + c], *p1 = pos[r * TELA_C + c + 1], *p2 = pos[(r + 1) * TELA_C + c];
+            float a[3] = { p0[0] - p1[0], p0[1] - p1[1], p0[2] - p1[2] }, b[3] = { p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2] };
+            float *o = nor[r * TELA_C + c], l2;
+            o[0] = b[2] * a[1] - b[1] * a[2]; o[1] = b[0] * a[2] - b[2] * a[0]; o[2] = b[1] * a[0] - b[0] * a[1];
+            l2 = o[0] * o[0] + o[1] * o[1] + o[2] * o[2];
+            if (l2 != 0.0f) { float kk = 1.0f / sqrtf(l2); for (k = 0; k < 3; k++) o[k] *= kk; }
+        }
+        memcpy(nor[r * TELA_C + TELA_C - 1], nor[r * TELA_C + TELA_C - 2], 12);
+    }
+    for (c = 0; c + 1 < TELA_C; c++) memcpy(nor[(TELA_F - 1) * TELA_C + c], nor[(TELA_F - 2) * TELA_C + c], 12);
+    memcpy(nor[TELA_F * TELA_C - 1], nor[TELA_F * TELA_C - 2], 12);
+}
