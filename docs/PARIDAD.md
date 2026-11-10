@@ -846,6 +846,15 @@ del original, con el mismo motor que la de la meta (demo/meta.c, 486730 / 486EF0
 - RAM: el guion (16 KB) solo durante la escena; al arrancar 36 KB prestados para subir los efectos. La RAM libre al
   arrancar baja 9 KB (674 -> 665 KB: codigo y huecos).
 - PENDIENTE: el banderero (ROB03, PC 488710 / 488820 / 487A30 y la bandera de tela 402100..4021A0): no esta portado.
+  Datos ya localizados en SLES-53998 para portarlo: init PC 488710 = PS2 0x2046f0 (preset [gp-0x7b64]: personaje 3
+  con el preset 1 o 3, si no 4 = \chr\CHR_AUT04_CVT.bin, recurso 0x12B de CHR.PS2, que es tambien la textura de la
+  bandera (rob_flag_texture_resource); esqueleto por 0x205038 / tabla 0x40e3f0); lista de 6 movimientos 0x36f700 +
+  preset x 0x18 (preset 0: 0x210001, 0x210004, 0x210001, 0x210006, 0x210001, 0x210000), movimiento inicial
+  0x36f778[preset] (0x210005), huida 0x36f790 / 0x36f7a4 [preset] (0x210003 / 0x210002: por el patron de las tablas,
+  PROBABLE hasta leer el control de PS2), posicion 0x40ef88 + 12 x preset (4,776, 0, -20,584 en el marco de la etapa),
+  la de cada movimiento siguiente 0x40efc8 (4,5, 0, -21), giro 0x40f008 (0, 0, 0). Falta: el control de PS2 (PC
+  488820: distancias 654850 / 654858 del PC sin su direccion de PS2), la tela (5 x 7 nodos, rob_flag.cpp), el
+  personaje en CHR.DAT (tools/conv_chr.py: PERSONAJES) y su dibujo, con el presupuesto de RAM y VRAM.
 - Prueba: tools/prueba/salida.sh (hoja de contactos de la salida, NTSC y PAL).
 
 ## Escena de la meta (2026-11-10)
