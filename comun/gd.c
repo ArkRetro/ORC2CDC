@@ -49,25 +49,43 @@ int gd_busca(const char *nombre, uint32_t *lba, uint32_t *tam)
     mutex_lock(&m_gd); r = busca(nombre, lba, tam); mutex_unlock(&m_gd);
     return r;
 }
+/* El directorio raiz se lee del GD una vez y se guarda aqui: con todos los arboles de CURSO.DAT, curso_huecos
+   pregunta por miles de ficheros y releer el directorio (PVD + ~13 sectores con 513 ficheros) en cada busqueda
+   dejaba el arranque en 3-7 minutos. Si no cabe, se lee del disco como antes. */
+#define DIR_MAX (48 * 1024)
+static uint8_t dir_c[DIR_MAX] __attribute__((aligned(32)));
+static uint32_t dir_tam;                                    /* 0: sin leer o no cabe */
+static int entrada(const uint8_t *blk, const char *nombre, size_t ln, uint32_t *lba, uint32_t *tam)
+{
+    int i = 0;
+    while (i < 2048 && blk[i]) {
+        const uint8_t *r = blk + i; int nl = r[32];
+        if ((size_t)nl >= ln && !memcmp(r + 33, nombre, ln) && (nl == (int)ln || r[33 + ln] == ';')) {
+            *lba = r[2] | r[3] << 8 | r[4] << 16 | (uint32_t)r[5] << 24;
+            *tam = r[10] | r[11] << 8 | r[12] << 16 | (uint32_t)r[13] << 24;
+            return 1;
+        }
+        i += r[0];
+    }
+    return 0;
+}
 static int busca(const char *nombre, uint32_t *lba, uint32_t *tam)
 {
     uint32_t rl, rs, o; size_t ln = strlen(nombre);
-    if (lee(45016, 1, sec) || memcmp(sec + 1, "CD001", 5)) return -1;
-    rl = sec[158] | sec[159] << 8 | sec[160] << 16 | (uint32_t)sec[161] << 24;
-    rs = sec[166] | sec[167] << 8 | sec[168] << 16 | (uint32_t)sec[169] << 24;
-    for (o = 0; o < rs; o += 2048) {
-        int i = 0;
-        if (lee(rl + o / 2048, 1, sec)) return -2;
-        while (i < 2048 && sec[i]) {
-            uint8_t *r = sec + i; int nl = r[32];
-            if ((size_t)nl >= ln && !memcmp(r + 33, nombre, ln) && (nl == (int)ln || r[33 + ln] == ';')) {
-                *lba = r[2] | r[3] << 8 | r[4] << 16 | (uint32_t)r[5] << 24;
-                *tam = r[10] | r[11] << 8 | r[12] << 16 | (uint32_t)r[13] << 24;
-                return 0;
+    if (!dir_tam) {
+        if (lee(45016, 1, sec) || memcmp(sec + 1, "CD001", 5)) return -1;
+        rl = sec[158] | sec[159] << 8 | sec[160] << 16 | (uint32_t)sec[161] << 24;
+        rs = sec[166] | sec[167] << 8 | sec[168] << 16 | (uint32_t)sec[169] << 24;
+        if (rs <= DIR_MAX && !(rs & 2047) && !lee(rl, rs / 2048, dir_c)) dir_tam = rs;
+        else {                                              /* no cabe: sector a sector, como antes */
+            for (o = 0; o < rs; o += 2048) {
+                if (lee(rl + o / 2048, 1, sec)) return -2;
+                if (entrada(sec, nombre, ln, lba, tam)) return 0;
             }
-            i += r[0];
+            return -3;
         }
     }
+    for (o = 0; o < dir_tam; o += 2048) if (entrada(dir_c + o, nombre, ln, lba, tam)) return 0;
     return -3;
 }
 
