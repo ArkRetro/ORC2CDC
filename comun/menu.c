@@ -359,6 +359,11 @@ void menu_libera_vram(void)
 }
 
 /* ---------------------------------------------------------------- carga */
+/* las tablas de MENU.DAT (~1,3 MB seguidos al leerlas) lo primero al arrancar: se quedan en la RAM siempre y, leidas
+   despues de los sonidos, el coche, el HUD y la VMU, los huecos del monton no dejaban el bloque seguido (en la consola
+   real no salia el menu y START iba a la carrera) */
+int menu_precarga(void) { return md || (md = hudd_abre("MENU.DAT", 0, 1)) ? 0 : -1; }
+
 int menu_inicia(void)
 {
     const uint8_t *x; int i, p; uint32_t o2;
@@ -367,7 +372,7 @@ int menu_inicia(void)
     /* prueba: guarda al arrancar con la cabecera nueva y vuelve a leer (dbglog de los dos pasos) */
     vmu_guarda(); vmu_ok = 0; vmu_lee();
 #endif
-    if (!(md = hudd_abre("MENU.DAT", 0, 1))) return -1;
+    if (!md && !(md = hudd_abre("MENU.DAT", 0, 1))) return -1;
     x = hudd_extra(md);
     if (memcmp(x, "MNU1", 4)) { md = NULL; return -2; }
     n_pan = ((const uint32_t *)x)[1]; n_tra = ((const uint32_t *)x)[2]; o2 = ((const uint32_t *)x)[3];

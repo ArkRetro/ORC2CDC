@@ -6199,6 +6199,7 @@ int main(int argc, char **argv)
     ta_teo_tab_pon();
 
     /* 1: datos del disco a la RAM (la pantalla de texto aun sin PowerVR) */
+    menu_precarga();                                            /* las tablas de MENU.DAT antes que nada (huecos) */
     elige_video();
     vid_set_mode(modo_video, PM_RGB565);
     vid_clear(0, 0, 0);                                         /* negro mientras carga, sin texto */

@@ -6,6 +6,7 @@
      carrera; menu principal -> multijugador, rankings, opciones; LICENSE (X) desde los menus.
    Se dibuja en la lista TR a 640x480. Las licencias y opciones se guardan en la VMU (A1). */
 enum { MENU_SIGUE, MENU_CARRERA, MENU_DEMO };
+int menu_precarga(void);                                 /* las tablas de MENU.DAT, lo primero al arrancar */
 int menu_inicia(void);                      /* abre MENU.DAT (solo tablas en la RAM) y lee la VMU; 0 bien */
 /* entra en el titulo: texturas a la VRAM bajo demanda (antes hay que dejar el hueco: hud_baja_tex) */
 void menu_entra(int manual, int pista, int npistas);
