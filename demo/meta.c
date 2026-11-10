@@ -66,6 +66,7 @@ int meta_carga(void)
     return 0;
 }
 int meta_lista(void) { return D != NULL; }
+void meta_suelta(void) { free(D); D = NULL; esc = NULL; tab = NULL; nesc = 0; escena = -1; }
 
 int meta_escena(int variante, int preset, int meta)
 {

@@ -26,6 +26,7 @@ typedef struct {
 
 int  meta_carga(void);                              /* lee META.DAT; 0 = bien */
 int  meta_lista(void);
+void meta_suelta(void);                             /* libera META.DAT (fuera de la carrera) */
 int  meta_escena(int variante, int preset, int meta);   /* 49C9C0: la escena (meta = 450380(8) - 0xA) */
 int  meta_pista(int variante, int meta);            /* 49C9C0: pista de MUSIC.PS2 de la meta (-1: ninguna) */
 void meta_empieza(meta_t *m, int escena);           /* 4871A0 */

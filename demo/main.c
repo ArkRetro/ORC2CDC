@@ -4070,7 +4070,15 @@ static int curso_paso(void)
             if ((int)(i_union = ruta_anade(m)) < 0) curso_error("Sin memoria para la ruta");
             j_union = ruta_salto; s_union = s_base + i_union * PASO;
             if (tiene_hijos(e)) carga_pide(&uni_der, "BKD.DAT", NULL, 0, marco_un);
-            else s_meta = s_union + e->meta;                   /* la meta: la pancarta GOAL */
+            else {
+                s_meta = s_union + e->meta;                     /* la meta: la pancarta GOAL */
+                if (!meta_lista()) {                            /* su escena (META.DAT, 113 KB): ya sin la etapa */
+                    unsigned u, l; musica_pausa_lectura(1);     /* anterior ni la siguiente; se suelta en el menu */
+                    if (meta_carga()) dbglog(DBG_ERROR, "META: sin META.DAT (la meta sin su escena)\n");
+                    musica_pausa_lectura(0); ram_kb(&u, &l);
+                    dbglog(DBG_INFO, "META: META.DAT leido con la union de la meta, RAM libre %uK\n", l);
+                }
+            }
         } else if (m == &uni_der) {
             uint32_t k = j_union;                              /* la separacion: donde los centros se apartan */
             while (k + 1 < uni.nruta && k + 1 < uni_der.nruta && dist_centro(&uni, k, uni_der.ruta + uni_der.paso_ruta * k) < RAMA_SEPARA) k++;
@@ -4157,6 +4165,7 @@ static void curso_al_menu(void)
     col_suelta();                                               /* sus huecos, para el menu */
     bo_quita();                                                 /* objetos de la union: su RAM y su VRAM */
     tex_suelta(&etapa); ar_suelta();
+    meta_suelta();                                              /* META.DAT: su RAM, para el menu */
     dbglog(DBG_INFO, "VRAM: el curso fuera (menu), libre %uK\n", (unsigned)(pvr_mem_available() >> 10));
 }
 #ifdef PRUEBA_RAMA
@@ -6260,7 +6269,9 @@ int main(int argc, char **argv)
     musica_inicia();                                            /* la musica la pone el menu (sin MENU.DAT, aqui) */
     sfx_ok = !sfx_inicia();
     voz_ok = sfx_ok && !voces_inicia();                         /* VOCES.DAT: voces de la carrera */
-    if (meta_carga()) dbglog(DBG_ERROR, "META: sin META.DAT (la meta sin su escena)\n");   /* 113 KB */
+    /* META.DAT (113 KB) no se lee aqui: en el menu las tablas de MENU.DAT (~1,2 MB seguidos) no cabian con el en el
+       monton ("Out of memory" al arrancar) y al empezar la carrera tampoco hay 113 KB seguidos; se lee al subir la
+       union de la meta (curso_paso) y se suelta de vuelta al menu (curso_al_menu) */
     texto_arriba("", NULL, NULL); texto_centro("");
     /* VMU: icono del fichero de guardado y LCD de los mandos (VMU.DAT); el logo en la LCD desde ya (pelicula y titulo) */
     if (!vmu_inicia()) { vmu_lcd_logo(); vmu_lcd_paso(); }
