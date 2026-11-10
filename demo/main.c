@@ -931,6 +931,13 @@ static void dibuja_rango(const modelo_t *mo, int l, uint32_t k0, uint32_t k1, in
    (mo->tr): las mismas mallas en el mismo orden con las mismas pruebas, pero el ojo y los ejes en variables locales,
    el cartel una vez por tramo (es del nodo) y sin las pruebas que aqui no hacen falta (solo_lod, solo_lista, la
    visibilidad del nodo otra vez). La matriz cargada es la vista */
+/* lo que queda del presupuesto del TA en este cuadro (con signo: ta_cabe dice que no si ta_vb + c > ta_lim o, en la
+   etapa, ta_et + c > ta_tope_etapa; c > resto es lo mismo) */
+static inline int32_t ta_resto(void)
+{
+    int32_t a = (int32_t)ta_lim - (int32_t)ta_vb, b = (int32_t)ta_tope_etapa - (int32_t)ta_et;
+    return ta_en_etapa && b < a ? b : a;
+}
 static void dibuja_etapa(const modelo_t *mo, int l)
 {
     const float tanh = 320.0f / fx, tanv = 240.0f / fx, kh = sqrtf(1 + tanh * tanh), kv = sqrtf(1 + tanv * tanv);
@@ -941,9 +948,21 @@ static void dibuja_etapa(const modelo_t *mo, int l)
     const malla_t *M = mo->mallas; const nodo_t *N = mo->nodos;
     uint32_t it, it0 = mo->tr_ini[l], it1 = mo->tr_ini[l + 1], vtx_et0 = vtx_env;
     int ult = -2, sol = l < 2 && (mo == &etapa || mo == &uni || mo == &sig);
+    /* las cuentas del TA y de los vertices de las mallas directas (dibuja_malla_directa con ta_cabe) en variables
+       locales: lo mismo que antes (mismas pruebas, mismos resultados), sin leer y escribir ~10 globales por malla. Se
+       vuelcan antes de lo que las usa (dibuja_malla) y al final */
+    const uint32_t *teo = ta_teo_tab[mo->ofs != NULL], tf = ta_f, cf = color_fijo;
+    const vert_t *VV = mo->verts; const uint32_t *OF = mo->ofs;
+    uint32_t dvb = 0, dt = 0, dn = 0, dtri = 0, ve = vtx_env; int32_t r = ta_resto();
+    const int32_t vres = (int32_t)VTX_ETAPA_MAX - (int32_t)vtx_et;   /* vtx_et + (vtx_env - vtx_et0) > VTX_ETAPA_MAX */
+#define ET_VUELCA() do { ta_vb += dvb; if (ta_en_etapa) ta_et += dvb; ta_teo_3d += dt; ta_tiras += dn; tri_enviados += dtri; \
+                         vtx_env = ve; dvb = dt = dn = dtri = 0; } while (0)
+#define ET_RECARGA() do { ve = vtx_env; r = ta_resto(); } while (0)
+    uint32_t kb = mo->inicio[l];                                /* fin del tramo anterior = principio del siguiente */
     ta_ofs = mo->ofs != NULL;
     for (it = it0; it < it1; it++) {
-        uint32_t t = tr[it], nd = t >> 16, ka = it > it0 ? tr[it - 1] & 0xFFFF : mo->inicio[l], kb = t & 0xFFFF, k; int cart = 0;
+        uint32_t t = tr[it], nd = t >> 16, ka = kb, k; int cart = 0;
+        kb = t & 0xFFFF;
         if (nd) {
             if (!(vis[(nd - 1) >> 5] & (1u << ((nd - 1) & 31)))) continue;
             cart = N[nd - 1].cartel >= 0;                       /* (malla_de_cartel: nodo valido con cartel) */
@@ -959,7 +978,7 @@ static void dibuja_etapa(const modelo_t *mo, int l)
 #endif
             if (pvs && m->nodo >= 0 && !(pvs[k >> 5] & (1u << (k & 31)))) continue;   /* PVS: no se ve */
 #ifndef DIAG_SIN_TOPE
-            if (vtx_et + (vtx_env - vtx_et0) > VTX_ETAPA_MAX) { ta_corto = 1; ta_et_corto = 1; continue; }
+            if ((int32_t)(ve - vtx_et0) > vres) { ta_corto = 1; ta_et_corto = 1; continue; }
 #endif
             if (!cart) {
                 float dx = m->cx - o0, dy = m->cy - o1, dz = m->cz - o2, zv, xv, yv;
@@ -980,14 +999,44 @@ static void dibuja_etapa(const modelo_t *mo, int l)
             if (seguro) { dg_dir++; dg_vdir += m->n; } else { dg_mal++; dg_vmal += m->n; }
 #endif
             if (cart) {
+                ET_VUELCA();
                 carga_cartel((const float (*)[4])mo->carteles[N[m->nodo].cartel]);
                 dibuja_malla(mo, m);
                 mat_load(&vista);
+                ET_RECARGA();
             }
-            else if (seguro) dibuja_malla_directa(mo, m);
-            else dibuja_malla(mo, m);
+            else if (seguro) {                                  /* dibuja_malla_directa con las cuentas locales */
+                uint32_t n = m->n, tt = teo[n], c = tt * tf >> 8;
+#ifndef DIAG_SIN_TOPE
+                if ((int32_t)c > r) { ta_corto = 1; ta_et_corto |= ta_en_etapa; continue; }
+#endif
+                r -= c; dvb += c; dt += tt; dn++;
+#ifdef DIAG_NO_ENVIA
+                if (ta_en_etapa) { ve += n; continue; }
+#endif
+                {
+                    const vert_t *v = VV + m->v0; const uint32_t *ofs = OF ? OF + m->v0 : NULL;
+                    if (cf) malla_directa_fija(v, n, ofs, cf);
+                    else {
+                        uintptr_t a = pvr_dr_addr;
+                        if (ofs) {
+                            if (n > 1) a = sq_vtx_ofs(&v, &ofs, n - 1, a, PVR_CMD_VERTEX);
+                            a = sq_vtx_ofs(&v, &ofs, 1, a, PVR_CMD_VERTEX_EOL);
+                        } else {
+                            if (n > 1) a = sq_vtx(&v, n - 1, a, PVR_CMD_VERTEX);
+                            a = sq_vtx(&v, 1, a, PVR_CMD_VERTEX_EOL);
+                        }
+                        pvr_dr_addr = a;
+                    }
+                }
+                dtri += n - 2; ve += n;
+            }
+            else { ET_VUELCA(); dibuja_malla(mo, m); ET_RECARGA(); }
         }
     }
+    ET_VUELCA();
+#undef ET_VUELCA
+#undef ET_RECARGA
     if (ta_en_etapa) vtx_et += vtx_env - vtx_et0;
     ta_ofs = 0;
 }
@@ -4618,6 +4667,10 @@ static void nodos_visibles(modelo_t *mo)
     float tanh = 320.0f / fx, tanv = 240.0f / fx, kh = sqrtf(1 + tanh * tanh), kv = sqrtf(1 + tanv * tanv), lod = fx / 240.0f;
     float z_tapa = niebla_d > 0 ? (niebla_modo == 2 ? 2.04f : 4.16f) / niebla_d : 1e30f;   /* 1 - e^-x >= 63/64 */
     uint32_t j, n; const uint16_t *L = NULL;
+    /* (el ojo, los ejes y los planos en variables locales: las escrituras de abajo obligaban a releerlos en cada nodo;
+       mismas cuentas) */
+    float o0, o1, o2, e0, e1, e2, d0, d1, d2, a0, a1, a2, cer, lej; int pvs_on_; nodo_t *ND = mo->nodos;
+    uint32_t *VIS = mo->vis; const uint32_t nnod = mo->nnodos; const int rama_c = cur_rama;
     if (!mo->vis) return;
     memset(mo->vis, 0, (mo->nnodos + 31) / 32 * 4);
     pvs_paso(mo);
@@ -4629,28 +4682,31 @@ static void nodos_visibles(modelo_t *mo)
         mo->ruta_i = k; s = mo->sec_mapa[k] < mo->nsec ? mo->sec_mapa[k] : mo->nsec - 1;
         L = mo->sec_lista + mo->sec_ini[s]; n = mo->sec_ini[s + 1] - mo->sec_ini[s];
     } else n = mo->nnodos;
+    o0 = ojo[0]; o1 = ojo[1]; o2 = ojo[2]; e0 = ade[0]; e1 = ade[1]; e2 = ade[2];
+    d0 = der[0]; d1 = der[1]; d2 = der[2]; a0 = arr[0]; a1 = arr[1]; a2 = arr[2]; cer = cerca; lej = lejos;
+    pvs_on_ = mo->pvs_on;                                       /* (despues de pvs_paso) */
     for (j = 0; j < n; j++) {
         uint32_t i = L ? L[j] : j, rama, u, c_teo, c_v; nodo_t *d; float dx, dy, dz, zv, xv, yv, lim; int cp, cd;
-        if (i >= mo->nnodos) continue;
-        d = mo->nodos + i;
-        dx = d->cx - ojo[0]; dy = d->cy - ojo[1]; dz = d->cz - ojo[2];
-        zv = dx * ade[0] + dy * ade[1] + dz * ade[2];
-        if (zv + d->r < cerca || zv - d->r > lejos) continue;
-        xv = dx * der[0] + dy * der[1] + dz * der[2]; yv = dx * arr[0] + dy * arr[1] + dz * arr[2];
+        if (i >= nnod) continue;
+        d = ND + i;
+        dx = d->cx - o0; dy = d->cy - o1; dz = d->cz - o2;
+        zv = dx * e0 + dy * e1 + dz * e2;
+        if (zv + d->r < cer || zv - d->r > lej) continue;
+        xv = dx * d0 + dy * d1 + dz * d2; yv = dx * a0 + dy * a1 + dz * a2;
         if (fabsf(xv) - zv * tanh > d->r * kh || fabsf(yv) - zv * tanv > d->r * kv) continue;
         u = d->fl & 15;
         lim = d->r * lod * (float)(1u << ((u ? u : 6) - 1));
         if (u && zv > 0 && zv > lim) continue;                  /* LOD */
         rama = (d->fl >> 8) & 3;
-        if (rama && cur_rama >= 0 && (int)rama - 1 != cur_rama) continue;   /* la otra rama de la union */
-        if (mo->pvs_on) {                                       /* PVS: lo que queda visible del nodo desde aqui */
+        if (rama && rama_c >= 0 && (int)rama - 1 != rama_c) continue;   /* la otra rama de la union */
+        if (pvs_on_) {                                       /* PVS: lo que queda visible del nodo desde aqui */
             c_teo = mo->pvs_teo[2 * i]; c_v = mo->pvs_teo[2 * i + 1];
 #ifdef DIAG_VTX
             diag_pvs_v += (d->relleno[1] >> 12) - c_v;
 #endif
             if (!c_teo) continue;
         } else { c_teo = d->relleno[0]; c_v = d->relleno[1] >> 12; }
-        mo->vis[i >> 5] |= 1u << (i & 31);
+        VIS[i >> 5] |= 1u << (i & 31);
         cd = zv - d->r > 1.0f ? log2x(zv - d->r, 4) : 0; cd = cd > ND_PRIO - 1 ? ND_PRIO - 1 : cd;
         if (zv - d->r > z_tapa) cp = NB_PRIO - 1;               /* tapado por la niebla */
         else if (zv <= 0 || lim <= 0) cp = 0;
@@ -5578,10 +5634,13 @@ static void coche_entorno(matrix_t mc)
         if (e->tipo < 2) continue;
         p = m->nodo < 0 ? 0 : (m->nodo >> 8) & 0xFF; if (p >= NPZ) p = 0;
         a = A[p]; b = B[p];
-        for (i = 0; i < m->n; i++) {
-            float x = (int8_t)q[i], y = (int8_t)(q[i] >> 8), z = (int8_t)(q[i] >> 16);
-            v[i].u = 0.5f + x * a[0] + y * a[1] + z * a[2];
-            v[i].v = 0.5f + x * b[0] + y * b[1] + z * b[2];
+        {   /* (en variables locales: escribir v[i] obligaba a releer a y b en cada vertice; mismas cuentas) */
+            const float a0 = a[0], a1 = a[1], a2 = a[2], b0 = b[0], b1 = b[1], b2 = b[2]; const uint32_t nv = m->n;
+            for (i = 0; i < nv; i++) {
+                uint32_t w = q[i]; float x = (int8_t)w, y = (int8_t)(w >> 8), z = (int8_t)(w >> 16);
+                v[i].u = 0.5f + x * a0 + y * a1 + z * a2;
+                v[i].v = 0.5f + x * b0 + y * b1 + z * b2;
+            }
         }
     }
 }
@@ -5828,16 +5887,17 @@ static void robot_dibuja(int l)
         lut = chr_lut[rm->mat < chr_nm ? rm->mat : 0]; s = chr_m0[rm->pieza];
         if (n > 256) n = 256;
         if (pz->n == 1) {                                       /* pieza rigida (peso 1): sin acumular, igual resultado */
-            const int32_t *L = chr_L[s];
+            const int32_t L0 = chr_L[s][0], L1 = chr_L[s][1], L2 = chr_L[s][2];   /* (locales: pw las obligaba a releer) */
+            const float cer = cerca; pt_t *o = pw;
             mat_load(&chr_S[s]);
-            for (i = 0; i < n; i++) {
-                float x = vv[i].x, y = vv[i].y, z = vv[i].z, w, nl; int q;
+            for (i = 0; i < n; i++, o++) {
+                float x = vv[i].x, y = vv[i].y, z = vv[i].z, u = vv[i].u, vt = vv[i].v, w, nl; int q;
                 mat_trans_single3_nodivw(x, y, z, w);
-                nl = (float)(rv[i].nx * L[0] + rv[i].ny * L[1] + rv[i].nz * L[2]) * (1.0f / (127.0f * 256.0f));
+                nl = (float)(rv[i].nx * L0 + rv[i].ny * L1 + rv[i].nz * L2) * (1.0f / (127.0f * 256.0f));
                 q = (int)((nl + 1.0f) * 16.0f + 0.5f);
-                pw[i].x = x; pw[i].y = y; pw[i].w = w; pw[i].u = vv[i].u; pw[i].v = vv[i].v; pw[i].o = 0;
-                pw[i].c = lut[q < 0 ? 0 : q > 32 ? 32 : q];
-                detras |= w < cerca;
+                o->x = x; o->y = y; o->w = w; o->u = u; o->v = vt; o->o = 0;
+                o->c = lut[q < 0 ? 0 : q > 32 ? 32 : q];
+                detras |= w < cer;
             }
         } else {
         for (j = 0; j < pz->n; j++) {

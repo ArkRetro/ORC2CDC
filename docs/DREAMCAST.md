@@ -713,6 +713,33 @@ distancia por CPU (`ms + ms_log > 15`) se activara menos: mas cerca de la distan
 Flycast no cuenta la cache ni las esperas de la memoria: en la consola el recorrido de las mallas de antes leia ~950 KB
 de `malla_t` por cuadro, asi que lo ganado alli deberia ser al menos lo mismo.
 
+Segunda pasada (2026-11-10; perfil del cuadro congelado de PALM: el recorrido de la etapa 21 %, los bucles de vertices
+20 %, `ta_cabe` en linea 8 %, el piloto 9 %, `nodos_visibles` 6 %, `coche_entorno` 3,7 %; ademas ~25 % es la consola
+serie de la propia medida). Lo que se hizo, con las mismas cuentas en el mismo orden (imagen igual):
+- `dibuja_etapa`: las cuentas del TA (`ta_cabe`: `ta_vb`, `ta_et`, `ta_teo_3d`, `ta_tiras`) y de los vertices
+  (`vtx_env`, `tri_enviados`, el tope `VTX_ETAPA_MAX`) en variables locales para las mallas directas, con una sola
+  comparacion contra lo que queda (`ta_resto`: c > resto es lo mismo que ta_vb + c > ta_lim o ta_et + c >
+  ta_tope_etapa); se vuelcan antes de `dibuja_malla` (las recortables y los carteles) y al final. El principio de cada
+  tramo es el fin del anterior (sin releer la tabla).
+- `nodos_visibles`, el piloto rigido (`robot_dibuja`) y `coche_entorno`: el ojo, los ejes, la luz y los coeficientes en
+  variables locales (las escrituras en `pw`, `vis` o los vertices obligaban a releerlos en cada vuelta).
+- `DIAG_PERFIL`: los cubos fijos de 16 bits (con calloc en carrera ya no habia RAM).
+
+| Flycast, cuadro congelado (ms) | dib antes | dib despues | etapa antes / despues | nodos_visibles antes / despues |
+|---|---|---|---|---|
+| PALM | 15,54 | 14,99 | 6,55 / 6,06 | 1,54 / 1,46 |
+| LAKE | 13,36 | 12,99 | 5,12 / 4,78 | 0,58 / 0,55 |
+| INDU | 17,36 | 16,69 | 8,28 / 7,68 | 1,62 / 1,53 |
+| METR | 18,85 | 18,05 | 9,10 / 8,43 | 1,93 / 1,82 |
+| CAPE | 13,30 | 12,91 | 5,03 / 4,68 | 0,95 / 0,90 |
+
+(`-DPRUEBA_AUTO -DDIAG_CONGELA=600 -DDIAG_MS -DDIAG_SIN_CPU -DDIAG_PERFIL -DPRUEBA_NODO=0/1/7/11/14`, media de las
+lineas MS/PRF del cuadro congelado.) Capturas del cuadro congelado antes / despues iguales pixel a pixel en las cinco
+(lo unico distinto, el punto que parpadea en el mapa, cambia igual entre dos capturas del mismo binario). Lo que queda:
+el bucle de vertices (27 instrucciones por vertice), el piloto (2,1 ms: la mezcla de pesos y la tabla de color por
+vertice), el coche (2,7 ms) y el principio del cuadro (1,6 ms: `coche_entorno` ~0,6 ms, una normal int8 a float por
+vertice).
+
 ## 3. Otros riesgos de la consola real
 
 | Riesgo | Estado |
@@ -804,6 +831,9 @@ sube entonces fuera de la zona o rebaja). En las metas de las misiones META.DAT 
 tambien con las uniones sueltas. PENDIENTE todo eso.
 Al convertir mas uniones: `conv_union.py iso dir/ --arboles=1,100,...,193 [--parte=k/n]` sobre los ORD7 sueltos y despues
 `pak_union.py dir/ salida/` con todas (el paquete se rehace entero).
+
+Ficheros enteros iguales (2026-11-10, tools/mkgdi.py): se enlazan y genisoimage los escribe una vez (las entradas del
+directorio apuntan al mismo LBA): 9 COLBKnn.DAT de las misiones y 3 descriptores de union, 214 KB.
 
 Etapas empaquetadas (2026-11-10, `pak_union.py --pak=SEGS.PAK --prefijo=SEG --tope=7842`): lo mismo con las SEGnn.DAT
 (las 62 etapas de todos los arboles; las de las misiones repiten modelo, texturas y geometria de su zona con otra luz).

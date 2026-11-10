@@ -5,7 +5,7 @@ Disposicion de un GD-ROM: zona de densidad simple con una pista de datos (track0
 silencio, 4 s), y la de alta densidad desde el LBA 45000 (track03): IP.BIN en los 16 primeros sectores y un ISO 9660
 con el 1ST_READ.BIN (en GD-ROM sin desordenar: eso solo hace falta en CD-R) y los ficheros de --datos.
 Herramientas: sh-elf-objcopy, makeip de KallistiOS y genisoimage."""
-import argparse, os, shutil, struct, subprocess, sys, tempfile
+import hashlib, argparse, os, shutil, struct, subprocess, sys, tempfile
 
 KOS = os.environ.get('KOS_BASE', '/opt/toolchains/dc/kos')
 CC = os.environ.get('KOS_CC_BASE', '/opt/toolchains/dc/sh-elf')
@@ -24,6 +24,18 @@ def main():
     try:
         raiz = os.path.join(t, 'raiz'); os.makedirs(raiz)
         if a.datos: shutil.copytree(a.datos, raiz, dirs_exist_ok=True)
+        # ficheros iguales byte a byte (9 COLBKnn.DAT de las misiones, descriptores de uniones repetidas): enlaces duros, y
+        # genisoimage (-cache-inodes, lo normal en Unix) los escribe una vez; las entradas del directorio apuntan al
+        # mismo LBA
+        vistos = {}; ahorro = 0
+        for x in sorted(os.listdir(raiz)):
+            f = os.path.join(raiz, x)
+            if not os.path.isfile(f): continue
+            h = hashlib.sha1(open(f, 'rb').read()).digest()
+            if h in vistos:
+                os.remove(f); os.link(vistos[h], f); ahorro += -(-os.path.getsize(f) // 2048) * 2048
+            else: vistos[h] = f
+        if ahorro: print('ficheros repetidos: %d KB una sola vez' % (ahorro >> 10))
         sh(os.path.join(CC, 'bin', 'sh-elf-objcopy'), '-R', '.stack', '-O', 'binary', a.elf, os.path.join(raiz, '1ST_READ.BIN'))
         ip = os.path.join(t, 'IP.BIN')
         sh(os.path.join(KOS, 'utils', 'makeip', 'makeip'), '-g', a.nombre[:128], '-c', 'HOMEBREW', '-f', ip)
