@@ -772,6 +772,33 @@ arbol de OUTRUN2SP (10 bifurcaciones de ~1,4 MiB y 5 metas de 0,3..0,8 MiB) 18 M
 (~280 MiB: cada union lleva la luz de su etapa cocida en los vertices, el cielo de la etapa y los carteles de sus
 destinos). PALM_BT / BEAC_BT / PALM_BR / BEAC_BR no se convierten (ningun curso de Races.bin ni csc_data los usa).
 
+Uniones empaquetadas (2026-11-10, tools/pak_union.py, comun/gd.c): las 262 uniones de todos los arboles (BK00..BK261:
+modo OutRun, OUTRUN2SP y las 94 misiones de Races.bin) ocupaban 334,5 MiB como ORD7 sueltos; casi todo se repite entre
+ellas (las 194 LRBK son el mismo cs_LRBK_PALM con la luz de la zona cocida en el color de los vertices, los mismos
+porticos con dos carteles de destino y el cielo de su etapa). UNIONES.PAK guarda una vez cada trozo distinto (corte por
+contenido, ~1,3 KB de media; los vertices en dos flujos, x y z u v y color, porque la luz solo cambia el color) y cada
+BKnn.DAT queda en un descriptor de < 4 KB con las operaciones que recomponen el ORD7 de antes byte a byte (pak_union.py
+lo comprueba al escribir; gd_carga_en lo hace en la consola, gd_tam da el tamano recompuesto para el hueco de la
+union). 334,5 MiB -> 21,6 MiB (paquete 21,1 MiB). Datos: 887 MiB con 47 uniones -> 854 MiB con las 262 (130 MiB
+libres). Lectura: las operaciones van por orden de origen en el paquete con una ventana de 64 KB (memoria temporal; 16
+KB o un sector si no hay), asi que la cabeza solo avanza; como mucho 13 saltos de mas de 64 KB por union (~1,3..2,6 s
+mas en un GD real, a 100-200 ms por salto; la union se pide 2500 m antes del final de la etapa, mas de 25 s antes).
+En Flycast BK30: 0,95 s suelta, 1,46 s empaquetada; BK100 0,96 / 1,56 s. Sin memoria del monton: la ventana es lo que
+sobra del hueco de la union detras del fichero (o el sector de gd.c) y el descriptor un sector fijo (2 KB de RAM): con
+una ventana pedida a malloc el hueco que dejaba hacia fallar BKD.DAT detras de BK135 (misma RAM libre, otro reparto).
+Comprobado: `-DDIAG_PAK` imprime la huella del ORD7 recompuesto en la consola (`pak_union.py --huella` la del suelto):
+BK100 1aa403be y BK101 8593a659 iguales; cuadro congelado (DIAG_CONGELA) de BK30 igual pixel a pixel; en BK100 76
+pixeles distintos, todos del tiempo de carga (el punto que parpadea en el mapa del curso, un coche del trafico y una
+farola a lo lejos), no de la union.
+RAM: con todos los arboles en CURSO.DAT los huecos crecerian a 8224 KB (SEG46, arboles 125, 177, 187, 192) y 1730 KB
+(las 7 uniones con el cielo de FLOR_R: BK145, 161, 166, 219, 225, 241, 253): "Out of memory" al arrancar. curso_huecos
+los deja en 7842 / 1480 KB (HUECO_*_MAX, los de antes) y avisa de los 14 ficheros que no caben; esas carreras se paran
+con su error. VRAM (tools/vram.py --zona 1344, todos los arboles): BK241 + LASV -254 KB y BK135 + LASV -19 KB (la demo
+sube entonces fuera de la zona o rebaja). En las metas de las misiones META.DAT no cabe (8 KB: "META: sin META.DAT")
+tambien con las uniones sueltas. PENDIENTE todo eso.
+Al convertir mas uniones: `conv_union.py iso dir/ --arboles=1,100,...,193 [--parte=k/n]` sobre los ORD7 sueltos y despues
+`pak_union.py dir/ salida/` con todas (el paquete se rehace entero).
+
 ## 4. Pruebas
 
 - `cd demo && make` sin avisos; `make CPPFLAGS=-DDIAG_VTX` imprime por la consola serie cada 60 cuadros los

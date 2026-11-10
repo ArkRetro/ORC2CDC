@@ -3910,8 +3910,15 @@ static void col_en_hueco(int k, const float *M)
 }
 /* reserva los huecos de RAM de las etapas (con su colision) y de la union (el tamano del mayor fichero de cada uno,
    en el GD) y el de la colision de la union */
+/* Tope de los huecos: con todos los arboles de las misiones en CURSO.DAT el mayor fichero seria SEG46 (8222 KB) y
+   las uniones con el cielo de FLOR_R (1728 KB): 632 KB mas de RAM reservada al arrancar y "Out of memory" antes del
+   menu. Los huecos se quedan como con los arboles 0, 1 y 100..107 (lo que cabe en la RAM, medido); un fichero mayor no
+   se puede leer (la carrera de ese arbol se para con su error). PENDIENTE: RAM para esos 4 arboles y 7 uniones. */
+#define HUECO_ETAPA_MAX (7842u << 10)
+#define HUECO_UNION_MAX (1480u << 10)
 static int curso_huecos(void)
 {
+    int n_grandes = 0;
     uint32_t lba, t, tc, sz, o, m, a; int i; char n[16]; uint8_t *b = gd_carga("CURSO.DAT", &sz);
     /* los huecos valen para todos los arboles: el mayor fichero de cualquiera (curso_pon cambia de arbol sin
        volver a reservarlos) */
@@ -3921,9 +3928,13 @@ static int curso_huecos(void)
       memcpy(curso, b + o, m * sizeof(etapa_t)); ncurso = m;
       for (i = 0; i < ncurso; i++) {
         sprintf(n, "SEG%02d.DAT", curso[i].seg);
-        if (!gd_busca(n, &lba, &t) && TAM_SECT(t) > cap_etapa) cap_etapa = TAM_SECT(t);
+        if (!gd_busca(n, &lba, &t) && TAM_SECT(t) > cap_etapa) {
+            if (TAM_SECT(t) <= HUECO_ETAPA_MAX) cap_etapa = TAM_SECT(t); else n_grandes++;
+        }
         sprintf(n, "BK%02d.DAT", curso[i].f_bk);                  /* (empaquetada: el tamano recompuesto) */
-        if (!gd_tam(n, &t) && TAM_SECT(t) > cap_union) cap_union = TAM_SECT(t);
+        if (!gd_tam(n, &t) && TAM_SECT(t) > cap_union) {
+            if (TAM_SECT(t) <= HUECO_UNION_MAX) cap_union = TAM_SECT(t); else n_grandes++;
+        }
         col_nombre_union(n, i);
         if (!gd_busca(n, &lba, &t) && TAM_SECT(t) > cap_col) cap_col = TAM_SECT(t);
       }
@@ -3934,7 +3945,7 @@ static int curso_huecos(void)
       memcpy(curso, b + o, m * sizeof(etapa_t)); ncurso = m;
       for (i = 0; i < ncurso; i++) {
         sprintf(n, "SEG%02d.DAT", curso[i].seg);
-        if (gd_busca(n, &lba, &t)) continue;
+        if (gd_busca(n, &lba, &t) || TAM_SECT(t) > HUECO_ETAPA_MAX) continue;   /* (la que no cabe no se lee) */
         sprintf(n, "COL%02d.DAT", curso[i].seg);
         if (!gd_busca(n, &lba, &tc) && TAM_SECT(t) + TAM_SECT(tc) > cap_etapa && TAM_SECT(tc) > cap_col_e) cap_col_e = TAM_SECT(tc);
       }
@@ -3942,6 +3953,8 @@ static int curso_huecos(void)
     if (b) { free(b); if (curso_lee_id(0)) return 1; }          /* de vuelta el del modo OutRun */
     hueco_etapa = memalign(32, cap_etapa); hueco_union = cap_union ? memalign(32, cap_union) : NULL;
     dbglog(DBG_INFO, "CURSO: %d etapas, huecos etapa %uK union %uK; colisiones en carrera %uK + %uK\n", ncurso, (unsigned)(cap_etapa >> 10), (unsigned)(cap_union >> 10), (unsigned)(cap_col >> 10), (unsigned)(cap_col_e >> 10));
+    if (n_grandes) dbglog(DBG_ERROR, "CURSO: %d etapas o uniones de los arboles no caben en los huecos (topes %uK / %uK)\n", n_grandes,
+                          HUECO_ETAPA_MAX >> 10, HUECO_UNION_MAX >> 10);
     return !hueco_etapa || (cap_union && !hueco_union);
 }
 /* los huecos de las colisiones, solo en la carrera (al empezarla; col_suelta al volver al menu) */

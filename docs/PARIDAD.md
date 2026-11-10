@@ -1609,10 +1609,15 @@ peticion 14 (escoltas 45B5B0, +324 = 6: carrera contra ellos), que no esta en la
     las nuevas desde 15) y su colision de union (f_col: COLBK, COLLR, COLBKnn). Hijos como indices del arbol (las
     claves de Races.bin no son consecutivas: 0,1,3,6,10). La demo: `curso_lee_id`, `curso_pedido` (PRUEBA_CURSO).
   - Coste en el GD: 262 uniones distintas (20 BIF, 194 LRBK, 48 metas) en todos los cursos de las misiones a ~1,4 MB
-    = ~350 MB: no caben (ver DREAMCAST / informe); se convierten solo las de los arboles pedidos.
+    = 334,5 MiB sueltas; empaquetadas (2026-11-10, tools/pak_union.py: UNIONES.PAK con los trozos distintos y un
+    descriptor por BKnn.DAT, recompuesto byte a byte por comun/gd.c) 21,6 MiB. Todas en el disco: datos 854 MiB de 984.
+    CURSO.DAT con los arboles 1 y 100..193. Verificado en E (PRUEBA_AUTO hasta GOAL): 144 (INDU_R -> BK135 -> LASV_R),
+    128 (MACH -> BK100 -> CLOU) y 142 (GHOS_R -> BK132 -> AMAZ_R); menu real NTSC y PAL hasta la carrera. NO corren
+    (RAM, ver DREAMCAST Espacio del GD-ROM): los arboles con SEG46 (125, 177, 187, 192) o con una union con el cielo de
+    FLOR_R (BK145, 161, 166, 219, 225, 241, 253).
   - Datos en el disco (2026-11-10): las 47 etapas que faltaban (SEG/COL de los descriptores 15..61), las uniones de
     OUTRUN2SP (BK15..29) y de las misiones 0..7 (BK30..46, COLLR, COLBK25..29); CURSO.DAT con los arboles 1 y 100..107.
-    Datos 887 MiB de 984. VRAM (tools/vram.py --zona 1344, todos los arboles): peor LASV + BK22 1286 KB, libres 58 KB.
+    Datos 887 MiB de 984 (despues, con las uniones empaquetadas: todas las misiones, 854 MiB). VRAM (tools/vram.py --zona 1344, todos los arboles): peor LASV + BK22 1286 KB, libres 58 KB.
   - Verificado en E con `-DPRUEBA_AUTO -DPRUEBA_SIN_TIEMPO -DPRUEBA_FIN=900`: arbol 1 (BEAC -> BK15 -> SANF -> BK16),
     100 (BEAC -> LRBK con BLNK a la derecha -> PALM_T -> SUMOEND, GOAL), 105 (PALM_R -> BEAC_R, GOAL) y 107 (ALPI_R ->
     YOSE_R, GOAL). El modo OutRun desde el menu real (variante 1, BK00) antes del cambio de main; tras el reinicio del

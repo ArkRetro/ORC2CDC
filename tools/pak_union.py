@@ -1,4 +1,4 @@
-"""pak_union.py entrada/ salida/ [BKnn.DAT ...]: las uniones (BKnn.DAT, ORD7 de conv_union.py) sin repetir lo que
+"""pak_union.py entrada/ salida/ [BKnn.DAT ...] | --huella ficheros: las uniones (BKnn.DAT, ORD7 de conv_union.py) sin repetir lo que
 tienen igual, para que quepan todas las de las misiones en el GD-ROM. Lo que se ve no cambia: la demo recompone
 cada fichero byte a byte (comun/gd.c, gd_carga_en) y se comprueba aqui mismo.
 
@@ -60,8 +60,17 @@ def recompone(desc, pak):
     sal[pv:pv + 24 * nv] = V.tobytes()
     return bytes(sal)
 
+def huella(b):
+    """la de comun/gd.c con DIAG_PAK: h = h * 31 + byte (32 bits)"""
+    h = 0
+    for x in b: h = (h * 31 + x) & 0xFFFFFFFF
+    return h
+
 def main():
     a = [x for x in sys.argv[1:] if not x.startswith('--')]
+    if '--huella' in sys.argv:                           # --huella f...: la huella de cada ORD7 suelto
+        for f in a: b = open(f, 'rb').read(); print('%s %u bytes, huella %08x' % (f, len(b), huella(b)))
+        return
     ent, sal = a[0], a[1]
     nombres = a[2:] or sorted(f for f in os.listdir(ent) if f.startswith('BK') and f[2:3].isdigit() and f.endswith('.DAT'))
     os.makedirs(sal, exist_ok=True)
@@ -83,6 +92,7 @@ def main():
             else: un.append(o)
         d = b'PAKD' + struct.pack('<4I', len(b), len(un), pv, nv) + PAK.encode().ljust(16, b'\0')
         d += b''.join(struct.pack('<3I', s, l, q | t << 30) for s, l, q, t in un)
+        assert len(d) <= 2048, '%s: descriptor de mas de un sector (comun/gd.c lee uno)' % nm
         descs[nm] = d
         saltos = sum(1 for i in range(1, len(un)) if un[i][0] - (un[i - 1][0] + un[i - 1][1]) > 65536)
         saltos_max = max(saltos_max, saltos)
