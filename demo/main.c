@@ -610,10 +610,17 @@ static int ta_freno;                                     /* 0..3: OPB muy lleno,
 static int ta_en_etapa;                                  /* lo que se envia ahora es de la etapa (su tope) */
 static int ta_et_corto;                                  /* en este cuadro no cupo alguna tira de la etapa */
 static int ta_ofs;                                       /* las tiras que se envian llevan color de desplazamiento */
+/* ta_teo(n, o) para n <= 256 (ta_teo_tab_pon, al arrancar): sin la division por 6 en cada tira */
+static uint32_t ta_teo_tab[2][257];
+static void ta_teo_tab_pon(void)
+{
+    uint32_t n; int o;
+    for (o = 0; o < 2; o++) for (n = 0; n < 257; n++) ta_teo_tab[o][n] = n >= 3 ? ta_teo(n, o) : ta_teo(3, o);
+}
 /* reserva una tira de n vertices; 0 si no cabe (y no se envia) */
 static inline int ta_cabe(uint32_t n)
 {
-    uint32_t t = ta_teo(n, ta_ofs), c = t * ta_f >> 8;
+    uint32_t t = n >= 3 && n <= 256 ? ta_teo_tab[ta_ofs != 0][n] : ta_teo(n, ta_ofs), c = t * ta_f >> 8;
 #ifndef DIAG_SIN_TOPE                                    /* medida en Flycast: sin tope (en la consola se colgaria) */
     if (ta_vb + c > ta_lim || (ta_en_etapa && ta_et + c > ta_tope_etapa)) { ta_corto = 1; ta_et_corto |= ta_en_etapa; return 0; }
 #endif
@@ -6180,6 +6187,7 @@ int main(int argc, char **argv)
     int64_t reloj = 0; uint32_t nuevo_pend = 0; float lejos_obj = lejos;
     uint64_t c_log = 0, t_log = 0, t_ini = timer_ms_gettime64(); float ms_log = 0, t_carga = 0;
     (void)argc; (void)argv;
+    ta_teo_tab_pon();
 
     /* 1: datos del disco a la RAM (la pantalla de texto aun sin PowerVR) */
     elige_video();
@@ -6862,9 +6870,15 @@ int main(int argc, char **argv)
 #ifdef DIAG_PERFIL
         {   static int pf_ini;                              /* medida: perfil del SH4 en carrera (perfil.c) */
             if (!pf_ini) { perfil_inicia(); pf_ini = 1; }
-            static int pf_n;                                /* con DIAG_CONGELA: el cuadro congelado, 300 veces */
+            static int pf_n;                                /* con DIAG_CONGELA: el cuadro congelado, 300 veces; sin el,
+                                                               900 cuadros de carrera */
+#ifdef DIAG_CONGELA
             perfil_activa(diag_congelado && pf_n < 300);
             if (diag_congelado && ++pf_n == 300) perfil_vuelca();
+#else
+            perfil_activa(estado == CARRERA && pf_n < 900);
+            if (estado == CARRERA && ++pf_n == 900) perfil_vuelca();
+#endif
         }
 #endif
         if (++cuadro % 30 == 0) {
