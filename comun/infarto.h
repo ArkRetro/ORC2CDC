@@ -47,8 +47,12 @@ typedef struct { int tipo, resultado, nota, t_nota, corazones, total, nota_etapa
 const infarto_hud_t *infarto_hud(void);
 /* rotulo visible: texto (HA_Tnn de HAHUD.DAT), marco (HA_Mn) y cuadro de su escena; 0 sin rotulo */
 int infarto_rotulo(int *texto, int *marco, int *cuadro);
-/* los corazones del medidor (45FB80): 19 del anillo {cuadro de HA_CORAZON (-1 ninguno), x, y desde el centro de la
-   pantalla de 640x480}; rotos: x, y, cuadro de HA_ROTO (-1 ninguno); centro: cuadro de HA_CENTRO (-1 sin medidor) */
-typedef struct { int cuadro; float x, y; } infarto_corazon_t;
-const infarto_corazon_t *infarto_anillo(float *roto_x, float *roto_y, float *roto_c, float *centro);
+/* el medidor (45FB80) y sus efectos (45B950): sprites de HAHUD.DAT a dibujar en este cuadro, {grupo (0..5 HA_C0..HA_C5 =
+   2B000F..2B0014, 6 HA_CORAZON = 2B0015, 7 HA_ROTO = 2B000E), cuadro de su escena, x, y desde el centro de la pantalla
+   de 640x480}; devuelve cuantos. infarto_tinte: color ABGR del marco del rotulo (7F8B68: rojizo con resultado < 0) */
+typedef struct { int g, cuadro; float x, y; } infarto_spr_t;
+int infarto_medidor(infarto_spr_t *v, int max);
+uint32_t infarto_tinte(void);
+/* 4BCD50: filas de los niveles terminados (7F244C, hasta 4) y la de la etapa (7F2464) en v[n]; devuelve n */
+int infarto_filas(int32_t *v);
 #endif

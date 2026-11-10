@@ -6,10 +6,13 @@ typedef struct {
     float rpm;
     int rebufo, derrape, manual, seis, rev_on;
     int puntos_estilo;      /* cifras de la puntuacion (4BD480): 0 normal (estilo 1), 1 rebufo (0xC), 2 fuera (0xD) */
+    int infarto;            /* NAVI_PUB 0x1bd544 (variante 2): sin los paneles 2C0028 / 2C0029 ni la puntuacion (1bf3e8) */
 } hud_estado_t;
 int hud_carga(const char *fich, int modelo);            /* 0 bien; modelo = indice de tacometro (6 = Testarossa) */
 void hud_dibuja(const hud_estado_t *e);                  /* dentro de la lista TR */
 void hud_aviso(const char *nombre, int cuadro, float alfa);   /* despues de hud_dibuja */
+/* cifras de la fuente de un uso (p. ej. "CRONO" = estilo 0xA) en (x, y) de la pantalla de 640x480, con el color rgb */
+void hud_cifras(const char *uso, const char *txt, float x, float y, uint32_t rgb);
 /* mensaje de puntos de la cola de 4B9770 ("%7d" bajo la puntuacion, 4BD480): estilo como puntos_estilo, dy pixeles
    por debajo de la puntuacion; despues de hud_dibuja */
 void hud_puntos_msg(int puntos, int estilo, float dy, float alfa);

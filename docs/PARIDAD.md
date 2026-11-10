@@ -177,7 +177,8 @@ consola, el port lo fija al convertir). Hoja de capturas de Flycast: scratchpad 
   ficha k quieta en 20(k+1) (antes 0x44007E, que es otro carrusel con otro orden: el fallo de "coches no correctos");
   orden = tabla 0x375968 (Dino 246, 365 GTS/4, F50, 360 Spider, F355 Spider, Superamerica, Testarossa, GTO, 328 GTS,
   250 GTO, 512 BB, F40, 550 Barchetta, F430, Enzo); desbloqueo 0x3759E0 (las 2 primeras siempre, el resto por bit de la
-  licencia +0x28: con una licencia nueva solo Dino y 365, como el original), colores 0x375A1C (-1 siempre, -2 nunca) y
+  licencia +0x28: con una licencia nueva solo Dino y 365, como el original), colores 0x375A20 (-1 siempre, -2 nunca; ver
+  Colores de los coches 2026-11-10) y
   color inicial 0x375C00; Y = siguiente color desbloqueado (sin sonido, como el PC), A en una bloqueada = sonido 3,
   candado 0x440066 cuadro 5 en (-275, -24). Variante "_t" con X (en el original el bit 0x2000 del mando: boton de la DC
   SUPUESTO); los modelos "_t" no estan convertidos y se ven y corren con el normal (PROVISIONAL). La ficha del coche lleva
@@ -204,6 +205,26 @@ consola, el port lo fija al convertir). Hoja de capturas de Flycast: scratchpad 
 - Verificado en E (Flycast): todas las pantallas y transiciones, crear y editar licencia, guardar y leer la VMU entre
   arranques, coche bloqueado, variante, color, cambio, musica y salida a carrera con el Dino; demo y vuelta al titulo.
   No probado en R.
+
+## Colores de los coches (2026-11-10)
+
+Queja: "algunos coches no dejan elegir el color rojo". Causa: conv_menu.py leia la tabla de bits de los colores en
+0x375A1C, 4 bytes antes de la buena: el codigo que la usa (4C8FC0 = PS2 0x245038: `lui v0,0x37; addiu v0,v0,0x5a20`,
+indice ficha x 16 + color x 2) lee 0x375A20 (30 x 8 i16, acaba en 0x375C00 donde empieza el color inicial). Con la
+tabla corrida dos colores, cada ficha tenia los bits de otros colores (p. ej. el Dino: el color 1, rojo y por defecto,
+pedia el bit 0 y salia otro color; ahora es -1, siempre). conv_menu comprueba el par lui/addiu. MENU.DAT regenerado
+(solo cambian esos 480 bytes). Verificado en E (menu real NTSC y PAL): el Dino sale rojo por defecto (antes negro).
+
+## La chica en los menus (estudio 2026-11-10)
+
+Queja: "falta la imagen de la chica en el menu". Donde sale una chica en el frontal del PS2 (SUMO_FE 0x44, escenas
+recorridas cuadro a cuadro buscando sus texturas): 0x4400F0 cuadros 0..3 (las chicas; 5..7 los chicos) con la tabla
+0x417480, que dibuja 0x241228 (pantalla de C2C de campeonatos / peticiones, vtable 0x417094; palabra +0x208 del
+frontal); 0x4400F1 (tabla 0x417998, mapa de misiones de C2C); 0x4400D1 caras (C2C); 0x440086 la foto de la licencia
+(cuadro +0x20; 3 = chica); en carrera, la silueta 2C0067 del HUD del INFARTO (ver arriba). Las pantallas de COAST 2
+COAST (categorias, mapa de misiones, campeonatos) no estan en la demo (C2C corre como OutRun: ver Modos de un jugador),
+por eso no sale; el menu principal, UN JUGADOR, coche, cambio y musica del original no llevan chica. PENDIENTE: saber
+cual de estas pantallas es la de la queja (la foto de la licencia sale si +0x20 la elige).
 
 ## Menus: fuente, progreso y R1 (2026-11-09)
 
@@ -1522,7 +1543,36 @@ peticion 14 (escoltas 45B5B0, +324 = 6: carrera contra ellos), que no esta en la
 - SIN PORTAR (PENDIENTE): tipos 7, 8, 11, 15, 16, 17, 19, 20, 21, 23, 24, 25 (no empiezan, sin anuncio ni nota), 14 /
   18 (escoltas), la hoja de resultados de la etapa 4603F0, la cara de la acompanante (45BDF0) y las reacciones del robot
   a las peticiones (487D60 / 487D90). La cuenta de
-  corazones y la nota en la carrera son texto bfont (PROVISIONAL: el contador del original es 45FB80 con 5A9468).
+  corazones y la nota ya no son texto bfont: ver INFARTO: medidor, efectos y contador (2026-11-10).
+
+**INFARTO: medidor, efectos y contador (2026-11-10)** (queja: "no aparece la animacion de los corazones"):
+- Causa de que no se viera nada: HAHUD.DAT se abre al empezar la carrera y hud.c pedia sus tablas en un bloque (208 KB
+  con las piezas de 40 bytes) que no habia: "Out of memory" y `ha_hud` NULL (sin medidor ni rotulos). Ahora
+  (hud.c lee_tablas) las tablas de un fichero parcial se leen a trozos de 16 KB, con las piezas ya a 24 bytes y cada
+  grupo en su bloque: se pide lo justo y sin huecos grandes (HAHUD ~150 KB en bloques de 23 KB como mucho; MENU.DAT
+  tambien). Verificado en E: sin "Out of memory" (RAM libre 66 KB tras BK00).
+- Medidor 45FB80 = PS2 0x1ac580 entero: corazon del centro con el color de 0x3f0b20[corazones % 7] (2B000F..2B0015,
+  bucle 0x1F..0x3C), rotura 2B000E del centro al perder (uno cada 20 pasos) y cambio de color; al ganar (salvo tipos
+  0, 6, 8, 23 con 7F2510 > 0, 0x1ac944) efecto 0x52 y un corazon que vuela del centro al anillo (45B860 = PS2 0x1abde8:
+  tipo 0x3f0b91 = 2, 0x3f0b20[5], velocidad 1); al cerrar la peticion (7F19F8 = 2, 0x1ace3c) con 7 o mas a la vista
+  cada corazon vuela a (280, 200) (0x3efdd8) con el movimiento 0x3f0b90[k % 3] y velocidad (20 - k) x 0,3 + 0,5 (antes
+  se rompian todos: inventado). Efectos 45B950 = PS2 0x1abee0 (16 x 0x38, tabla de estados 0x3efde0): espera, abre
+  0x4C..0x5A moviendose (k1 = 1/15, k2 = 0,335; movimientos 0..3), abre 0x5B..0x69 y se cierra. Tinte del marco del
+  rotulo con resultado negativo (0x1ac718: 280000 -> rojo). El anillo, como estaba (con el primer cuadro de cada
+  corazon nuevo con la y al reves, como 0x1acdd0 / 0x1acd34).
+- HUD del modo (NAVI_PUB 0x1bd440, variante 2 en 0x1bd544): panel 2C002A (Tiempo total / Tiempo / Corazones) en lugar
+  de 2C0028 / 2C0029 y sin la puntuacion (1bf3e8) ni sus mensajes; 4BCD50 = PS2 0x1bda80: filas 2C0037 + i (cuadro 1
+  en (60, 0); tabla 0x404418) de los niveles terminados y de la etapa con "%3d" en (0x21D, 0x53 + 21 i) (estilo 0xA,
+  rojo si es negativo), contador "%4d" de 7F1C80 / 10000 en (0x206, 0x1B2), aviso 2B000E en (166, 182) mientras baja
+  (efecto 0xD4). Las filas se acercan de 3 en 3 (final de 464350): 7F244C -> 7F2438 (empieza sin el bono del nivel),
+  7F2464 -> 7F2460. HAHUD.DAT: un atlas para todos los corazones y la rotura (18 KB VQ: solo cambia el icono de 30x30),
+  HA_C0..HA_C5 (desde el cuadro 0x1F), HA_PANEL y HA_FILA0..4; VRAM fuera de la zona: 75 -> 18 KB con todo subido.
+- SIN PORTAR: el signo "-" de las filas negativas (fuente de texto 42CCE0, no esta en la DC: sale la cifra en rojo sin
+  el signo); la silueta 2C0067 que se llena (cuadro corazones / 37, tope 99): es una pieza con mascara (bandera 8) de
+  un degradado blanco -> amarillo -> rojo que sube; la DC solo hornea mascaras de alfa (hornea) y aqui cuenta el COLOR
+  de la mascara (sin descifrar como lo combina el GS del PS2) y 100 cuadros horneados no caben en los 18 KB de VRAM
+  que quedan: BLOQUEADO. Tampoco la proyeccion del ancla del centro con la camara +34A > 1 (5E0AC8) ni el vaiven del
+  rotulo (7F8BB4), que mueve el centro del anillo.
 
 - Objetos de las peticiones (estudio 2026-11-09, para portarlos; nada de esto esta aun en la demo):
   - Uso real en las 41 misiones (INFARTO.DAT): tipo 15 x16 (misiones base 1, 3, 4, 6, 7, 8...), 16 x15 (2, 3, 7, 8, 9,

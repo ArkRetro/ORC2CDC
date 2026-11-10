@@ -6620,12 +6620,12 @@ int main(int argc, char **argv)
                 if (voz_ok) voces_carrera();
                 if (variante == 2) {
                     infarto_carrera(cur_nodo, curso[cur_nodo].nivel);   /* 45E0F0 */
-                    /* los corazones del medidor (HAHUD.DAT: solo sus tablas en la RAM; la textura VQ, 10 KB, se lee
-                       del GD al subirla, ya con la zona del curso reservada) */
-                    if (!ha_hud) ha_hud = hudd_abre("HAHUD.DAT", 0, 1);
+                    /* el medidor, el panel y las filas (HAHUD.DAT: solo sus tablas en la RAM, ~150 KB; las texturas VQ,
+                       40 KB, se leen del GD al subirlas, ya con la zona del curso reservada) */
+                    if (!ha_hud && !(ha_hud = hudd_abre("HAHUD.DAT", 0, 1))) dbglog(DBG_ERROR, "HAHUD: no se pudo abrir\n");
                     if (ha_hud) {                               /* los corazones siempre; los rotulos al verse */
-                        static const char *const C[3] = { "HA_CORAZON", "HA_ROTO", "HA_CENTRO" };
-                        for (i = 0; i < 3; i++) { int t0, n = hudd_tex_uso(ha_hud, hudd_uso(ha_hud, C[i]), &t0);
+                        static const char *const C[8] = { "HA_CORAZON", "HA_ROTO", "HA_PANEL", "HA_FILA0", "HA_FILA1", "HA_FILA2", "HA_FILA3", "HA_FILA4" };
+                        for (i = 0; i < 8; i++) { int t0, n = hudd_tex_uso(ha_hud, hudd_uso(ha_hud, C[i]), &t0);
                             if (n && hudd_sube(ha_hud, t0, n)) dbglog(DBG_ERROR, "HAHUD: sin VRAM para %s\n", C[i]); }
                     }
                 }
@@ -6890,18 +6890,8 @@ int main(int argc, char **argv)
                         (unsigned)(mi.uordblks >> 10), (unsigned)(pvr_mem_available() >> 10), (double)t_carga,
                         (double)yo.x, (double)fis.r[0].mu, (double)fis.r[2].mu);   /* desvio y mu delante/detras izq. */
             }
-            if (variante == 2 && !ver && estado != TITULO) {   /* INFARTO: corazones y peticion (PROVISIONAL: texto, no los
-                                                           rotulos SPRANI del banco 0x2B) */
-                const infarto_hud_t *h = infarto_hud();
-                static const char *const NOMBRE[26] = { "DERRAPA", 0, "ADELANTA", 0, 0, 0, "SIN INCIDENTES", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                                                        "ADELANTA", 0, 0, 0 };
-                sprintf(s1, "CORAZONES %d", h->corazones);
-                s2[0] = 0; (void)NOMBRE;                     /* la peticion la dice su rotulo (HAHUD.DAT) */
-                if (h->t_nota < 240) sprintf(s3, "NOTA %d", h->nota);
-                else if (h->t_etapa < 400) sprintf(s3, "NOTA DE LA ETAPA %d", h->nota_etapa);
-                else s3[0] = 0;
-                texto_arriba(s1, s2, s3);
-            } else texto_arriba(s1, ver ? s2 : NULL, ver ? s3 : NULL);
+            /* INFARTO: los corazones, las filas y la nota los dibuja el HUD (4BCD50 y los rotulos de HAHUD.DAT) */
+            texto_arriba(s1, ver ? s2 : NULL, ver ? s3 : NULL);
         }
 
         t_log += timer_us_gettime64() - c_log;
@@ -7000,7 +6990,7 @@ int main(int argc, char **argv)
             if (l == 2 && estado != TITULO) { mat_load(&vista); efectos_dibuja(); }
             if (l == 2 && estado != TITULO) sol_dibuja();       /* el sol y su destello (40CBC0) */
             if (l == 2) {
-                int texto = ver || (!hud_ok && estado != TITULO) || (variante == 2 && estado == CARRERA);
+                int texto = ver || (!hud_ok && estado != TITULO);
                 if (estado == TITULO) menu_dibuja();
                 if (hud_ok && estado != TITULO) {
                     hud_estado_t he;
@@ -7008,9 +6998,22 @@ int main(int argc, char **argv)
                     he.kmh = fis_ok ? (int)fis.velocidad_hud : (int)(yo.v * 3.6f); he.marcha = fis_ok ? fis.marcha : 1;
                     he.etapa = etapa_n; he.cuadro = cuadro; he.rpm = fis_ok ? (float)fis.rpm_suave : 0;
                     he.rebufo = fis_ok && fis.rebufo > 0.18f; he.derrape = yo.t_derrape != 0; he.manual = manual_ && !auto_; he.rev_on = he.manual && fis_ok && fis.rpm_i > 7900 && fis.marcha < fpar.marchas; he.seis = fis_ok && fpar.marchas >= 6;
+                    he.infarto = variante == 2;
                     hud_dibuja(&he);
-                    for (i = 0; i < PT_MSGS; i++)               /* mensajes de puntos (4BD480) */
-                        if (pt_msg[i].edad > 0) hud_puntos_msg(pt_msg[i].pts, pt_msg[i].estilo, (float)pt_msg[i].y, pt_msg[i].alfa);
+                    if (variante != 2) {
+                        for (i = 0; i < PT_MSGS; i++)           /* mensajes de puntos (4BD480) */
+                            if (pt_msg[i].edad > 0) hud_puntos_msg(pt_msg[i].pts, pt_msg[i].estilo, (float)pt_msg[i].y, pt_msg[i].alfa);
+                    } else if (ha_hud) {                        /* NAVI_PUB 0x1bd544: panel 2C002A y 4BCD50 (PS2 0x1bda80) */
+                        int32_t fv[5]; int nf = infarto_filas(fv), k; char b[16];
+                        hudd_dibuja(ha_hud, hudd_uso(ha_hud, "HA_PANEL"), 0, 0, 0, 1, 30, 0);
+                        for (k = 0; k <= nf; k++) {             /* 0x1bd920: fila 2C0037 + k (cuadro 1) en (60, 0) y "%3d" */
+                            char n[16]; int32_t a = fv[k] < 0 ? -fv[k] : fv[k];
+                            sprintf(n, "HA_FILA%d", k); hudd_dibuja(ha_hud, hudd_uso(ha_hud, n), 1, 60, 0, 1, 30.5f, 0);
+                            sprintf(b, "%3d", (int)a);
+                            hud_cifras("CRONO", b, 0x21d, k * 0x15 + 0x53, fv[k] < 0 ? 0xFF0000 : 0xFFFFFF);
+                        }
+                        sprintf(b, "%4d", infarto_corazones()); hud_cifras("CRONO", b, 0x206, 0x1b2, 0xFFFFFF);
+                    }
                     if (t_cuenta >= 0 && t_cuenta < 300) {                       /* 3, 2, 1, GO! (la escena dura 5 s; GO a los 4) */
                         static const char *const CU[5] = { "CUENTA_PRE", "CUENTA_3", "CUENTA_2", "CUENTA_1", "CUENTA_GO" };
                         hud_aviso(CU[t_cuenta / 60], t_cuenta % 60, 1);
@@ -7021,22 +7024,21 @@ int main(int argc, char **argv)
                     if (estado == AGOTADO) hud_aviso("FIN_TIEMPO", t_estado < 40 ? t_estado : 40 + (t_estado - 40) % 8, 1);
                     if (he.rev_on) hud_aviso("CAMBIA", cuadro % 30, 1);
                     if (variante == 2 && (estado == CARRERA || estado == META)) {   /* INFARTO: el medidor (45FB80) */
-                        float rx[19], ry[19], rc[19], cc; const infarto_corazon_t *an = infarto_anillo(rx, ry, rc, &cc);
                         int rt, rm, rcu;
                         if (ha_hud && infarto_rotulo(&rt, &rm, &rcu)) {   /* 460970 / 460AD0: marco y texto en (176, 78) */
-                            char n1[16], n2[16];
+                            char n1[16], n2[16]; uint32_t ti = infarto_tinte();   /* 7F8B68: el marco, rojizo si se pierden */
                             sprintf(n1, "HA_M%d", rm); sprintf(n2, "HA_T%02d", rt);
                             ha_rotulo_uso(&ha_u_mar, n1); ha_rotulo_uso(&ha_u_txt, n2);
+                            hudd_color((ti & 0xff) << 16 | (ti & 0xff00) | (ti >> 16 & 0xff));
                             hudd_dibuja(ha_hud, ha_u_mar, rcu, 176, 78, 1, 118, 0);
+                            hudd_color(0xFFFFFF);
                             hudd_dibuja(ha_hud, ha_u_txt, rcu, 176, 78, 1, 119, 0);
                         }
-                        if (ha_hud) {
-                            int uc = hudd_uso(ha_hud, "HA_CORAZON"), ur = hudd_uso(ha_hud, "HA_ROTO"), ue = hudd_uso(ha_hud, "HA_CENTRO");
-                            if (cc >= 0) hudd_dibuja(ha_hud, ue, (int)cc - 0x1f, 234, 108, 1, 120, 0);
-                            for (i = 0; i < 19; i++) {
-                                if (an[i].cuadro >= 0) hudd_dibuja(ha_hud, uc, an[i].cuadro, an[i].x, an[i].y, 1, 121, 0);
-                                if (rc[i] >= 0) hudd_dibuja(ha_hud, ur, (int)rc[i], rx[i], ry[i], 1, 121, 0);
-                            }
+                        if (ha_hud) {                   /* 45FB80 / 45B950: corazones, roturas y efectos */
+                            static const char *const G[8] = { "HA_C0", "HA_C1", "HA_C2", "HA_C3", "HA_C4", "HA_C5", "HA_CORAZON", "HA_ROTO" };
+                            infarto_spr_t sv[64]; int ns = infarto_medidor(sv, 64);
+                            for (i = 0; i < ns; i++)        /* HA_C0..HA_C5 empiezan en el cuadro 0x1F */
+                                hudd_dibuja(ha_hud, hudd_uso(ha_hud, G[sv[i].g & 7]), sv[i].cuadro - (sv[i].g < 6 ? 0x1f : 0), sv[i].x, sv[i].y, 1, 120 + 0.01f * i, 0);
                         }
                     }
                 }

@@ -20,6 +20,7 @@ typedef struct { char nombre[16]; uint16_t grp, alt; int16_t x, y, avance, capa;
 struct hud_dat {
     uint8_t *dat; uint32_t meta, lba;                       /* meta: bytes en la RAM (parcial) o 0 (fichero entero) */
     h_tex_t *tex; h_spr_t *spr; h_grp_t *grp; h_pc_t *pie; h_uso_t *uso;
+    h_pc_t **gp;                                            /* parcial: las piezas de cada grupo en su bloque (o NULL) */
     uint32_t n_tex, n_grp, n_uso;
     pvr_ptr_t *vtex; uint8_t *usada; uint32_t *dibujada;      /* dibujada: ultimo cuadro en que se uso la textura */
     pvr_poly_hdr_t *cab, *cabf, *caba;                      /* por textura: encima de todo / detras de la escena 3D / aditiva */
@@ -89,6 +90,9 @@ void hudd_vacia(void)
 void hudd_color(uint32_t rgb) { tinte = rgb & 0xFFFFFF; }
 static float zcapa, zpaso = 0.001f;
 
+/* piezas del grupo g (en un fichero parcial cada grupo va en su bloque: lee_tablas) */
+static const h_pc_t *pz(const hud_dat_t *h, int g) { return h->gp ? h->gp[g] : h->pie + h->grp[g].pri; }
+
 static int busca_uso(const char *n)
 {
     uint32_t i;
@@ -112,6 +116,61 @@ static int lee_sect(uint32_t lba, uint32_t n, uint8_t *b)
     }
     return 0;
 }
+/* pieza del fichero (40 bytes) -> la de la RAM (24) */
+static void pieza_compacta(const h_pie_t *q, h_pc_t *r)
+{
+#define Q16(v, k) ((int16_t)lrintf((v) * (k)))
+    r->grp = q->grp; r->cuadro = q->cuadro; r->spr = q->spr; r->flags = q->flags;
+    r->x = Q16(q->x, 8); r->y = Q16(q->y, 8); r->ax = Q16(q->ax, 8); r->ay = Q16(q->ay, 8); r->ang = Q16(q->ang, 64);
+    r->sx = (uint16_t)lrintf(q->sx * 512); r->sy = (uint16_t)lrintf(q->sy * 512);
+    r->alfa = (uint8_t)lrintf((q->alfa < 0 ? 0 : q->alfa > 1 ? 1 : q->alfa) * 255); r->_r = 0;
+#undef Q16
+}
+/* tablas de un fichero parcial (los *meta primeros bytes) leidas a trozos de 16 KB y con las piezas ya a 24 bytes: la
+   RAM que piden es la del resultado (antes un bloque con las piezas de 40 bytes y luego se encogia: HAHUD.DAT pedia
+   208 KB seguidos al empezar la carrera y no los habia, "Out of memory" y el modo sin medidor ni rotulos) */
+static uint8_t *lee_tablas(uint32_t lba, uint32_t *meta, h_pc_t ***gp)
+{
+    enum { TROZO = 8 };
+    uint8_t *t = memalign(32, TROZO * 2048), *d = NULL, pz_[sizeof(h_pie_t)];
+    uint32_t c[12], pos = 0, n = *meta, np, ini, finp, quita, sec = 0, k, j, npz = 0, ip = 0, g = 0, ng;
+    h_pc_t **G = NULL; const h_grp_t *gr = NULL;
+    *gp = NULL;
+    if (!t || lee_sect(lba, 1, t)) { free(t); return NULL; }
+    memcpy(c, t, sizeof c); np = c[4]; ini = c[9]; finp = ini + np * sizeof(h_pie_t); ng = c[3];
+    quita = np * sizeof(h_pie_t);
+    if (c[10] < finp || n < finp || c[8] + ng * sizeof(h_grp_t) > ini) quita = 0;   /* otra disposicion: tal cual */
+    if (!(d = memalign(32, n - quita)) || (quita && !(G = calloc(ng, sizeof *G)))) { free(t); free(d); return NULL; }
+    while (pos < n) {
+        k = (n - pos + 2047) / 2048; if (k > TROZO) k = TROZO;
+        if (lee_sect(lba + sec, k, t)) goto mal;
+        for (j = 0; j < k * 2048 && pos < n; j++, pos++) {
+            uint8_t b = t[j];
+            if (!quita || pos < ini) d[pos] = b;
+            else if (pos < finp) {
+                pz_[npz++] = b;
+                if (npz == sizeof(h_pie_t)) {           /* pieza ip: a su grupo (los grupos van en orden de pri) */
+                    h_pie_t q; memcpy(&q, pz_, sizeof q); npz = 0;
+                    if (!gr) gr = (const h_grp_t *)(d + c[8]);
+                    while (g < ng && ip >= (uint32_t)gr[g].pri + gr[g].np) g++;
+                    if (g < ng && ip >= gr[g].pri) {
+                        if (!G[g] && !(G[g] = malloc(gr[g].np * sizeof(h_pc_t)))) goto mal;
+                        pieza_compacta(&q, G[g] + (ip - gr[g].pri));
+                    }
+                    ip++;
+                }
+            } else d[pos - quita] = b;
+        }
+        sec += k;
+    }
+    free(t);
+    if (quita) { uint32_t *cc = (uint32_t *)d; cc[10] -= quita; cc[11] -= quita; }
+    *meta = n - quita; *gp = G;
+    return d;
+mal:
+    if (G) { for (k = 0; k < ng; k++) free(G[k]); free(G); }
+    free(t); free(d); return NULL;
+}
 
 hud_dat_t *hudd_abre(const char *fich, int modelo, int parcial)
 {
@@ -127,37 +186,20 @@ hud_dat_t *hudd_abre(const char *fich, int modelo, int parcial)
         c = (uint32_t *)b;
         for (i = 0; i < c[1]; i++) { h_tex_t *t = (h_tex_t *)(b + c[6]) + i; if (t->off < m) m = t->off; }
         free(b);
-        h->meta = m; ns = (m + 2047) / 2048;
-        if (!(h->dat = memalign(32, ns * 2048)) || lee_sect(h->lba, ns, h->dat)) { free(h->dat); free(h); return NULL; }
+        h->meta = m;
+        if (!(h->dat = lee_tablas(h->lba, &h->meta, &h->gp))) { free(h); return NULL; }
     }
-    if (memcmp(h->dat, "HUD1", 4)) { free(h->dat); free(h); return NULL; }
+    if (memcmp(h->dat, "HUD1", 4)) { if (h->gp) { for (i = 0; i < ((uint32_t *)h->dat)[3]; i++) free(h->gp[i]); free(h->gp); } free(h->dat); free(h); return NULL; }
     c = (uint32_t *)h->dat;
     h->n_tex = c[1]; h->n_grp = c[3]; h->n_uso = c[5];
     h->tex = (h_tex_t *)(h->dat + c[6]); h->spr = (h_spr_t *)(h->dat + c[7]); h->grp = (h_grp_t *)(h->dat + c[8]);
     {   /* piezas a 24 bytes en su sitio; en un fichero parcial (solo tablas en la RAM) lo de detras se baja y el bloque
            se encoge */
         const h_pie_t *f = (const h_pie_t *)(h->dat + c[9]); h_pc_t *o = (h_pc_t *)(h->dat + c[9]);
-        uint32_t np = c[4], ahorro = np * (sizeof(h_pie_t) - sizeof(h_pc_t));
-#define Q16(v, k) ((int16_t)lrintf((v) * (k)))
-        for (i = 0; i < np; i++) {
-            h_pie_t q = f[i]; h_pc_t r;
-            r.grp = q.grp; r.cuadro = q.cuadro; r.spr = q.spr; r.flags = q.flags;
-            r.x = Q16(q.x, 8); r.y = Q16(q.y, 8); r.ax = Q16(q.ax, 8); r.ay = Q16(q.ay, 8); r.ang = Q16(q.ang, 64);
-            r.sx = (uint16_t)lrintf(q.sx * 512); r.sy = (uint16_t)lrintf(q.sy * 512);
-            r.alfa = (uint8_t)lrintf((q.alfa < 0 ? 0 : q.alfa > 1 ? 1 : q.alfa) * 255); r._r = 0;
-            o[i] = r;                                       /* o[i] no pisa f[i + 1] (24 < 40) */
-        }
-#undef Q16
-        if (h->meta && ahorro && c[10] > c[9]) {
-            uint32_t ini = c[9] + np * sizeof(h_pie_t), fin = h->meta, k; uint8_t *nd;
-            memmove(h->dat + ini - ahorro, h->dat + ini, fin - ini);
-            for (k = 10; k <= 11; k++) c[k] -= ahorro;
-            h->meta -= ahorro;
-            if ((nd = realloc(h->dat, h->meta))) { h->dat = nd; c = (uint32_t *)h->dat; }
-            h->tex = (h_tex_t *)(h->dat + c[6]); h->spr = (h_spr_t *)(h->dat + c[7]); h->grp = (h_grp_t *)(h->dat + c[8]);
-        }
+        uint32_t np = c[4];
+        if (!h->gp) for (i = 0; i < np; i++) { h_pie_t q = f[i]; pieza_compacta(&q, o + i); }   /* o[i] no pisa f[i + 1] */
     }
-    h->pie = (h_pc_t *)(h->dat + c[9]); h->uso = (h_uso_t *)(h->dat + c[10]); h->off_taco = c[11];
+    h->pie = h->gp ? NULL : (h_pc_t *)(h->dat + c[9]); h->uso = (h_uso_t *)(h->dat + c[10]); h->off_taco = c[11];
     h->taco = h->dat[c[11] + (modelo & 15)]; if (h->taco == 0xff) h->taco = -1;
     H = h;
     for (i = 0, h->g_fuera = -1; i < h->n_grp; i++) if (!strncmp(h->grp[i].nombre, "DIG_PUNTOS_FUERA", 16)) h->g_fuera = i;
@@ -165,7 +207,7 @@ hud_dat_t *hudd_abre(const char *fich, int modelo, int parcial)
     h->cab = memalign(32, h->n_tex * sizeof *h->cab); h->cabf = memalign(32, h->n_tex * sizeof *h->cabf);
     h->caba = memalign(32, h->n_tex * sizeof *h->caba);
     for (i = 0; i < h->n_grp; i++)
-        if (grupo_util(i)) for (j = h->grp[i].pri; j < (uint32_t)h->grp[i].pri + h->grp[i].np; j++) h->usada[h->spr[h->pie[j].spr].tex] = 1;
+        if (grupo_util(i)) for (j = 0; j < h->grp[i].np; j++) h->usada[h->spr[pz(h, i)[j].spr].tex] = 1;
     return h;
 }
 
@@ -356,6 +398,7 @@ void hudd_cierra(hud_dat_t *h)
     if (!h || h == hud_principal) return;
     hudd_baja(h, 0, -1); hudd_vacia();
     if (H == h) H = NULL;
+    if (h->gp) { uint32_t k; for (k = 0; k < h->n_grp; k++) free(h->gp[k]); free(h->gp); }
     free(h->dat); free(h->vtex); free(h->usada); free(h->dibujada); free(h->cab); free(h->cabf); free(h->caba);
     free(h->pal); free(h->con_pal); free(h->falta); free(h);
 }
@@ -386,7 +429,7 @@ void hud_pon_modelo(int modelo)
     H = h; h->taco = h->dat[h->off_taco + (modelo & 15)]; if (h->taco == 0xff) h->taco = -1;
     memset(h->usada, 0, h->n_tex);                          /* texturas que se suben: las del tacometro nuevo */
     for (i = 0; i < h->n_grp; i++)
-        if (grupo_util(i)) for (j = h->grp[i].pri; j < (uint32_t)h->grp[i].pri + h->grp[i].np; j++) h->usada[h->spr[h->pie[j].spr].tex] = 1;
+        if (grupo_util(i)) for (j = 0; j < h->grp[i].np; j++) h->usada[h->spr[pz(h, i)[j].spr].tex] = 1;
 }
 int hud_sube_tex(void) { return hud_principal ? hudd_sube(hud_principal, 0, -1) : -1; }
 
@@ -421,11 +464,11 @@ static void pieza(const h_pc_t *p, const h_grp_t *g, int cuadro, float X, float 
 
 static void grupo(int g, int cuadro, float X, float Y, float alfa)
 {
-    const h_grp_t *G = H->grp + g; int j;
-    for (j = G->pri; j < G->pri + G->np; j++)
-        if (G->n <= 1 || H->pie[j].cuadro == cuadro ||
-            (cuadro > H->pie[j].cuadro && cuadro < H->pie[j].cuadro + (H->pie[j].flags >> 4)))   /* MENU.DAT: vale */
-            pieza(H->pie + j, G, cuadro, X, Y, alfa);                                          /* flags >> 4 cuadros */
+    const h_grp_t *G = H->grp + g; const h_pc_t *P = pz(H, g); int j;
+    for (j = 0; j < G->np; j++)
+        if (G->n <= 1 || P[j].cuadro == cuadro ||
+            (cuadro > P[j].cuadro && cuadro < P[j].cuadro + (P[j].flags >> 4)))   /* MENU.DAT: vale flags >> 4 cuadros */
+            pieza(P + j, G, cuadro, X, Y, alfa);
 }
 
 static void dibuja(const char *nombre, int alt, int cuadro, float alfa)
@@ -475,7 +518,7 @@ int hudd_tex_uso(const hud_dat_t *h, int u, int *t0)
     int j, lo = 1 << 30, hi = -1; const h_grp_t *g;
     if (!h || u < 0 || u >= (int)h->n_uso) return 0;
     g = h->grp + h->uso[u].grp;
-    for (j = g->pri; j < g->pri + g->np; j++) { int t = h->spr[h->pie[j].spr].tex; if (t < lo) lo = t; if (t > hi) hi = t; }
+    for (j = 0; j < g->np; j++) { int t = h->spr[pz(h, h->uso[u].grp)[j].spr].tex; if (t < lo) lo = t; if (t > hi) hi = t; }
     if (hi < 0) return 0;
     *t0 = lo; return hi - lo + 1;
 }
@@ -508,7 +551,7 @@ void hud_dibuja(const hud_estado_t *e)
     }
     zcapa = 30.0f;
     /* capa 3: paneles y etapas */
-    dibuja("PANEL_TIEMPO", 0, 0, 1); dibuja("PANEL_PUNTOS", 0, 0, 1);
+    if (!e->infarto) { dibuja("PANEL_TIEMPO", 0, 0, 1); dibuja("PANEL_PUNTOS", 0, 0, 1); }
     for (t = 0; t < e->etapa; t++) dibuja("RUTA5_HECHA", 0, t, 1);
     dibuja("RUTA5_ACTUAL", 0, e->etapa, (e->cuadro & 32) ? 1.0f : 0.4f);
     zcapa = 40.0f;
@@ -529,7 +572,7 @@ void hud_dibuja(const hud_estado_t *e)
     else { sprintf(b, "%02d", t); numero("TIEMPO", 0, b, -9999); }
     cs = e->crono_ms; if (cs > 99 * 60000 + 59999) cs = 99 * 60000 + 59999;
     sprintf(b, "%2d %02d %03d", cs / 60000, (cs / 1000) % 60, cs % 1000); numero("CRONO", 0, b, -9999);
-    t = busca_uso("PUNTOS");                                    /* 4BD480: "%07d", 9999999 como mucho */
+    t = e->infarto ? -1 : busca_uso("PUNTOS");                  /* 4BD480: "%07d", 9999999 como mucho */
     if (t >= 0) { sprintf(b, "%07d", e->puntos > 9999999 ? 9999999 : e->puntos < 0 ? 0 : e->puntos);
                   cifras(t, grupo_puntos(t, e->puntos_estilo), b, H->uso[t].x, H->uso[t].y, 1); }
     t = e->kmh < 0 ? 0 : e->kmh > 999 ? 999 : e->kmh;
@@ -544,6 +587,19 @@ void hud_aviso(const char *nombre, int cuadro, float alfa)
     if (zcapa < 100.0f) zcapa = 100.0f;
     ult_tex = -1;
     dibuja(nombre, 0, cuadro, alfa);
+}
+
+/* 4BA9D0: cifras del estilo del uso en (x, y), avance del uso por caracter (los que no son cifras no se dibujan) */
+void hud_cifras(const char *uso, const char *txt, float x, float y, uint32_t rgb)
+{
+    int u;
+    if (!hud_principal) return;
+    H = hud_principal;
+    if ((u = busca_uso(uso)) < 0) return;
+    if (zcapa < 100.0f) zcapa = 100.0f;
+    ult_tex = -1; hudd_color(rgb);
+    cifras(u, H->uso[u].grp, txt, x, y, 1);
+    hudd_color(0xFFFFFF);
 }
 
 /* 4BD480: cada mensaje de la cola en (0x1E0, y + 0x49) con "%7d" */

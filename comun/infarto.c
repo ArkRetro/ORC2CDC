@@ -67,14 +67,32 @@ static int k6_a, k6_b, k6_max;                      /* 7F23BC, 7F23BE, 7F23C0 */
 /* coches de la mision */
 static const uint8_t *ct_base; static int ct_v, ct_i, ct_n, ct_pend = -1, ct_sec;  /* 7F24B8, 7F24C0, 7F24BC, 7F24C4 */
 static infarto_hud_t hud;
-/* 45FB80 (PS2 0x1ac580): los corazones de la peticion en curso en un anillo de 19 (0x13) de radio 64 alrededor del
-   rotulo (176, -96), a 0,33 rad cada uno (PS2 0x1acb84..0x1acc0c); cuantos: los corazones del resultado + 1 por 0,25
-   (0x1acaac), con tope (6 o 7 - 2 golpe - 3 adelantado - 4 choque) x 2,7031 si ha habido sucesos (0x1acaf4..0x1acb60).
-   Uno nuevo aparece (2B0015 cuadros 0x3D..0x69, luego late en 1..0x3B) con el efecto 0xD7; uno que sobra se rompe
-   (2B000E a 2,5 cuadros por paso). El del centro (2B000F, bucle 0x1F..0x3C) en (234, 108) (0x1ac670: la vista sin
-   la proyeccion del ancla 5E0AC8, PROBABLE para la vista por defecto) */
-static infarto_corazon_t anillo[19];
-static float roto_x[19], roto_y[19], roto_c[19];
+/* 45FB80 (PS2 0x1ac580): el medidor de la peticion en curso. Registros de 0x1C desde 7F1A08 (PS2 0x58a580): el 0 es el
+   corazon del centro (ancla 7F19FC = (234, 108) con la vista por defecto; la proyeccion del ancla 5E0AC8 con la camara
+   +34A > 1 no esta portada), del color de 0x3f0b20[corazones % 7] (2B000F..2B0015) en bucle 0x1F..0x3C; 1..19 el anillo
+   de radio 64 alrededor del centro del rotulo (176, -96), a 0,33 rad cada uno (0x1acb84..0x1acc0c). Cuantos: los
+   corazones del resultado + 1 por 0,25 (0x1acaac), con tope (7 o 6 - 2 golpe - 3 adelantado - 4 choque) x 2,7031 si ha
+   habido sucesos (0x1acaf4..0x1acb60). Uno nuevo aparece (2B0015 0x3D..0x69, luego late en 1..0x3B) con el efecto 0xD7
+   (el primer cuadro con la y al reves: 0x1acdd0 la guarda como -cy - a y 0x1acd34 como a - cy, igual en el PC); uno que
+   sobra se rompe (2B000E a 2,5 cuadros por paso). Al ganar corazones (0x1ac91c): el del centro cambia de color y, si no
+   es una peticion de los tipos 0, 6, 8 o 23 con 7F2510 > 0, sale un corazon (efecto 0x52, uno cada 10 pasos como mucho)
+   que vuela del centro al anillo (45B860 = PS2 0x1abde8, tipo 2, 0x3f0b20[5]); al perderlos (0x1ac85c) el centro se
+   rompe (2B000E, uno cada 20 pasos) y cambia de color. Al cerrar la peticion (7F19F8 = 2, 0x1ace3c), si se veian 7 o mas,
+   cada corazon (el del centro el primero) vuela a (280, 200) (0x3efdd8) con el movimiento 1, 2, 3 (0x3f0b90[k % 3]) y
+   velocidad (20 - k) x 0,3 + 0,5. Efectos (45B950 = PS2 0x1abee0, 16 de 0x38): esperan, abren 0x4C..0x5A moviendose
+   (1/15 x velocidad x pasos del recorrido; 0: parabola x = (y - 100)^2 x 0,008 + 200; 1 y 3: un eje lineal y el otro
+   acercandose 0,335 x velocidad por paso; 2: lineal), abren 0x5B..0x69 donde quedan y se cierran */
+typedef struct { int usado, g, ini, fin, modo; float c, vel, x, y; int volteado; } spr_t;   /* modo 0 bucle, 1 una vez */
+static spr_t m_rec[20];                            /* 7F1A08 + k * 0x1C: centro y anillo */
+static int16_t m_f18[20];                          /* +0x18: color del centro / 7 en el anillo */
+static spr_t m_roto[24];                           /* 2B000E sueltos (roturas) */
+static spr_t m_alerta;                             /* [688B34]: 2B000E en (166, 182) mientras baja el contador (4BCD50) */
+typedef struct { int usado, est, n, tipo, f, vida; float x0, y0, x1, y1, x, y, vel; spr_t s; } efe_t;
+static efe_t m_efe[16]; static int m_efe_n, m_efe_i;   /* 7F2038 (16 x 0x38), 7F8B20, 7F8B24 */
+static int32_t m_prev;                              /* 7F1C3C */
+static int m_t8c74, m_t8c78, m_t2510, m_visto;      /* 7F8C74, 7F8C78, 7F2510, 7F1CA8 */
+static uint32_t m_tinte = 0xffffffff;               /* 7F8B68: color del marco del rotulo */
+static float m_rx[19], m_ry[19]; static int m_tab;  /* 7F8BCC.. (cos x 64, sin x -64) */
 /* rotulo de la peticion (460970 / 460AD0 / 45BEC0 = PS2 0x1ad998..): texto (tabla 0x3f0aa8: modo 0 empieza con el
    12, 0x2B003D, y a los `abre` cuadros pasa al de la peticion) y marco (0x3f0b40); `cierra` cuadros despues de entrar
    (o nunca, -1) se quita. En (176, 78). SIN la deformacion de entrada / salida ni el vaiven (7F8BB4) */
@@ -158,9 +176,37 @@ static int bono_nivel(int l, int sec_union)
     return st_54;
 }
 static int sec_union_ult;
-static int medidor;                                 /* 7F19F8: 1 con una peticion en curso */
-static float centro_c;
+/* filas de 4BCD50 (PS2 0x1bda80): corazones de cada nivel terminado 7F2438 (con el bono) y lo que ensena 7F244C (empieza
+   sin el bono), los de la etapa en curso 7F2460 y lo que ensena 7F2464; se acercan de 3 en 3 al final de 464350 */
+static int32_t niv_tot[NIV], niv_ver[NIV], tot_obj, tot_ver; static int alerta;   /* + 7F1CAC */
+static void filas_paso(void)
+{
+    int i;
+    tot_obj = disp / 10000 - h_nivel;
+    if (tot_obj != tot_ver) {
+        int32_t v = tot_ver + (tot_obj >= 0 ? 1 : -1) * 3;
+        tot_ver = (v < 0 ? -v : v) > (tot_obj < 0 ? -tot_obj : tot_obj) ? tot_obj : v;
+    }
+    for (i = 0; i < nivel_act && i < NIV; i++) {
+        int32_t c = niv_tot[i], v;
+        if (!c || niv_ver[i] == c) continue;
+        v = niv_ver[i] + (c >= 0 ? 1 : -1) * 3;
+        niv_ver[i] = (v < 0 ? -v : v) > (c < 0 ? -c : c) ? c : v;
+    }
+}
+int infarto_filas(int32_t *v)
+{
+    int i, n = nivel_act < 0 ? 0 : nivel_act > 4 ? 4 : nivel_act;
+    for (i = 0; i < n; i++) v[i] = niv_ver[i];
+    v[n] = tot_ver;
+    return n;
+}
+int infarto_alerta(void) { return alerta; }
+static int medidor;                                 /* 7F19F8: 1 con una peticion en curso, 2 se cierra */
 static void medidor_paso(void);
+static void efectos_paso(void);
+static void spr_abre(spr_t *s, int g, int ini, int fin, int modo, float x, float y);
+static int spr_acabado(const spr_t *s);
 
 static int16_t rd16(const uint8_t *p) { return (int16_t)(p[0] | p[1] << 8); }
 static int32_t rd32(const uint8_t *p) { return (int32_t)(p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24); }
@@ -321,7 +367,7 @@ static void fin_peticion(int r, int h)              /* 462F10 (PS2 0x1b3a78) + 4
     hud.nota = nt; hud.t_nota = 0;
     dbglog(DBG_INFO, "INFARTO: fin de la peticion tipo %d: resultado %d, nota %d, +%d corazones, total %d\n", q,
            (int)(result / 10000), nt, h, (int)(score / 10000));
-    medidor = 0;                                    /* 7F19F8 = 2: se cierra */
+    medidor = 2;                                    /* 7F19F8 = 2: se cierra (45FB80) */
     empieza(req_ini, 3);
 }
 static void cierra(int nt, int32_t edi, int hs)    /* cola comun de las evaluaciones */
@@ -368,7 +414,7 @@ static void puesta(const uint8_t *r, const infarto_coche_t *c)
         k2_c = w6; k2_d = w8; k2_ini = k2_ult = c->pasados; reinicia_res(); break;
     case 6: k6_a = w0; k6_b = w2; k6_max = 0; reinicia_res(); break;
     }
-    medidor = 1; centro_c = 0x1f;                    /* 7F19F8 = 1 */
+    medidor = 1;                                    /* 7F19F8 = 1 */
 }
 static void control(const infarto_coche_t *c)
 {
@@ -499,7 +545,7 @@ static int previa(const uint8_t *r, int sec)
     return 1;
 }
 
-static void gestor(const infarto_coche_t *c)        /* 464350 (PS2 0x1ae440) */
+static void gestor_(const infarto_coche_t *c)       /* 464350 (PS2 0x1ae440) */
 {
     if (!c->en_union) {
         int m = mision(clave_act, nivel_act);
@@ -522,12 +568,15 @@ static void gestor(const infarto_coche_t *c)        /* 464350 (PS2 0x1ae440) */
     suelta_coches();
     evalua(c);
 }
+static void gestor(const infarto_coche_t *c) { gestor_(c); filas_paso(); }   /* las filas al final de 464350 */
 
 void infarto_carrera(int clave, int nivel)          /* 45E0F0 */
 {
     int l;
     score = disp = 0; memset(vcola, 0, sizeof vcola); vc_cab = vc_fin = 0; voz_ult = 0; reloj = 0x10000;
-    contador = 0; dx23dc = 0; medidor = 0; { int i; for (i = 0; i < 19; i++) { anillo[i].cuadro = -1; roto_c[i] = -1; } }
+    contador = 0; dx23dc = 0; medidor = 0; memset(&m_alerta, 0, sizeof m_alerta); memset(m_rec, 0, sizeof m_rec); memset(m_roto, 0, sizeof m_roto); memset(m_efe, 0, sizeof m_efe);
+    memset(niv_tot, 0, sizeof niv_tot); memset(niv_ver, 0, sizeof niv_ver); tot_obj = tot_ver = 0; alerta = 0;
+    m_efe_n = m_efe_i = 0; m_prev = 0; m_t8c74 = m_t8c78 = m_t2510 = m_visto = 0; m_tinte = 0xffffffff;
     result = 0; bonus = 0; meta_hecha = 0; vs_suma = 0; vs_n = 0; memset(vel_nivel, 0, sizeof vel_nivel); trafico = 1; ct_base = NULL; ct_pend = -1; mueven = 1; ban_on = 0;
     for (l = 0; l < NIV; l++) { memset(lv[l], 0, 0x44); LV_SEL(l) = -1; LV_U32(l, 4) = 0x29;
         LV_U32(l, 8) = LV_U32(l, 12) = LV_U32(l, 16) = LV_U32(l, 20) = LV_U32(l, 24) = -1; }
@@ -540,7 +589,7 @@ void infarto_etapa(int clave, int nivel)            /* 464350, stage clear */
 {
     int prev = nivel_act, i; int32_t edi;
     edi = score / 10000 - h_nivel;
-    if (prev >= 0 && prev < NIV) vel_nivel[prev] = vel_media();   /* 44FF20 */
+    if (prev >= 0 && prev < NIV) { vel_nivel[prev] = vel_media(); niv_ver[prev] = edi; }   /* 44FF20; 7F2448 + nivel x 4 */
     vs_suma = 0; vs_n = 0;
     {   int b = bono_nivel(prev, sec_union_ult);     /* 45D360 del nivel anterior */
         if (b > 0) { edi += b; score += b * 10000; }
@@ -548,12 +597,13 @@ void infarto_etapa(int clave, int nivel)            /* 464350, stage clear */
                st_5c, st_60, sec_union_ult - st_5a, (double)vel_nivel[prev], (double)hud_coche);
     }
     st_54 = 0; st_5c = 0; st_60 = 0; st_5a = -1; st_5e = st_62 = -1;
+    if (prev >= 0 && prev < NIV) niv_tot[prev] = edi;  /* 7F2434 + nivel x 4 */
     LV_U32(prev, 0x34) = edi;
     for (i = 0; i < (int8_t)lv[prev][0x40] && i < 5; i++) LV_U32(prev, 0x34) -= LV_U32(prev, 0x20 + 4 * i);
     if ((int8_t)lv[prev][0x40] > 0) { hud.nota_etapa = LV_U32(prev, 0x1c) / (int8_t)lv[prev][0x40]; hud.t_etapa = 0; }
     dbglog(DBG_INFO, "INFARTO: etapa %d terminada: %d corazones en ella, nota media %d, total %d\n", clave_act, (int)edi,
            hud.nota_etapa, (int)(score / 10000));
-    disp = score; h_nivel = score / 10000;
+    disp = score; h_nivel = score / 10000; tot_ver = 0;   /* 7F2468, 7F2464 */
     clave_act = clave; nivel_act = nivel; n_req = 0; rec_i = 0; trafico = 1;
     cuenta_peticiones(mision(clave, nivel));
     sfx_voz_grupo(grp[clave >= 0 && clave < 15 ? clave : 0]);
@@ -567,7 +617,7 @@ void infarto_meta(void)                             /* 464350 con 44FF10 */
     {   int b = bono_nivel(nivel_act, sec_union_ult);
         if (b > 0) { esi += b; score += b * 10000; }
     }
-    disp = score; LV_U32(nivel_act, 0x34) = esi;
+    disp = score; LV_U32(nivel_act, 0x34) = esi; tot_ver = esi;   /* 7F2464 */
     for (i = 0; i < (int8_t)lv[nivel_act][0x40] && i < 5; i++) LV_U32(nivel_act, 0x34) -= LV_U32(nivel_act, 0x20 + 4 * i);
     if ((int8_t)lv[nivel_act][0x40] > 0) { hud.nota_etapa = LV_U32(nivel_act, 0x1c) / (int8_t)lv[nivel_act][0x40]; hud.t_etapa = 0; }
     meta_hecha = 1;
@@ -581,6 +631,7 @@ void infarto_paso(const infarto_coche_t *c)         /* 464D20 */
     if (vs_n < 0x57e3f) { vs_suma += c->vel_mf; vs_n++; }
     hud_coche = c->hud;
     control(c);
+    alerta = score == disp ? 0 : score > disp ? 1 : -1;   /* 7F1CAC */
     d = (score - disp) / 32;                         /* el contador alcanza a los corazones */
     if ((d < 0 ? -d : d) * 32 < 20000) disp = score; else disp += d;
     if (disp < 0) { score = disp = 0; }
@@ -588,9 +639,14 @@ void infarto_paso(const infarto_coche_t *c)         /* 464D20 */
     if (c->en_union) sec_union_ult = c->seccion_union;
     estadisticas(c);
     medidor_paso();
+    efectos_paso();
     rotulo_paso();
     if (contador > 0) { if (contador % 10 == 0) sfx_voz_se(0xd5); contador--; }
     gestor(c);
+    /* 4BCD50 (PS2 0x1bdb70..0x1bdc4c): el aviso 2B000E (capa 6, una vez) mientras el contador baja, otra vez al acabar,
+       con el efecto 0xD4 */
+    if (alerta != -1) m_alerta.usado = 0;
+    else if (!m_alerta.usado || spr_acabado(&m_alerta)) { spr_abre(&m_alerta, 7, 0, 59, 1, 166.0f, 182.0f); sfx_voz_se(0xd4); }
     if (q != 3) { v_n++; v_acu += c->kmh; v_med = v_acu / v_n; if (v_min > c->kmh) v_min = c->kmh; }
     /* 45D7A0: los coches de la tabla, de 30 a 50 posiciones por delante */
     while (ct_base && ct_pend < 0 && !(ct_v & 0x80) && ct_i < 0x64) {
@@ -627,42 +683,163 @@ void infarto_coche_abierto(int ok)
     if (ct_v & 0x80) { ct_pend = ct_i < 0x64 ? ct_i : -1; } else ct_pend = -1;
 }
 void infarto_libera(void) { free(dat); dat = NULL; }
-static void medidor_paso(void)
+/* sprites de la animacion (428460: cuadros ini..fin, modo 0 en bucle, 1 una vez; estado 3 = acabado) */
+static void spr_abre(spr_t *s, int g, int ini, int fin, int modo, float x, float y)
 {
-    int i, h, lim, a, nuevo = 0;
-    for (i = 0; i < 19; i++) if (roto_c[i] >= 0) { roto_c[i] += 2.5f; if (roto_c[i] >= 60) roto_c[i] = -1; }
-    if (!medidor) { for (i = 0; i < 19; i++) if (anillo[i].cuadro >= 0) { roto_x[i] = anillo[i].x; roto_y[i] = anillo[i].y; roto_c[i] = 0; anillo[i].cuadro = -1; } return; }
-    centro_c += 1; if (centro_c > 0x3c) centro_c = 0x1f;
-    h = result / 10000 + 1; if (h < 0) h = 0;
-    lim = (int)((float)h * 0.25f); if (lim > 0x13) lim = 0x13;
-    if (c_ev > 0) {
-        a = 7;                                      /* 6 con 7F24F0 (no lo cuenta ningun tipo portado) */
-        if (c_golpe) a -= 2;
-        if (c_adel) a -= 3;
-        if (c_choque) a -= 4;
-        if (a < 0) a = 0;
-        a = (int)((float)a * 2.70312f);
-        if (lim > a) lim = a;
-        if (lim > 0x13) lim = 0x13;
-    }
-    for (i = 0; i < 19; i++) {
-        infarto_corazon_t *c = anillo + i;
-        float t = (float)i * 0.330078f;
-        c->x = 176.0f + cosf(t) * 64.0f; c->y = sinf(t) * -64.0f - 96.0f;
-        if (c->cuadro >= 0) {
-            if (i + 1 > lim) { roto_x[i] = c->x; roto_y[i] = c->y; roto_c[i] = 0; c->cuadro = -1; }
-            else { c->cuadro++; if (c->cuadro > 0x69 || c->cuadro == 0x3c) c->cuadro = 1; }   /* 0x3D..0x69, luego 1..0x3B */
-        } else if (i + 1 <= lim) { c->cuadro = 0x3d; nuevo = 1; }
-    }
-    if (nuevo) sfx_voz_se(0xd7);
+    s->usado = 1; s->g = g; s->ini = ini; s->fin = fin; s->modo = modo; s->c = (float)ini; s->vel = 1.0f; s->x = x; s->y = y;
+    s->volteado = 0;
 }
-const infarto_corazon_t *infarto_anillo(float *rx, float *ry, float *rc, float *centro)
+static int spr_acabado(const spr_t *s) { return s->modo && s->c > (float)s->fin; }   /* 428880 == 3 */
+static void spr_avanza(spr_t *s)
+{
+    if (!s->usado) return;
+    s->c += s->vel;
+    if (!s->modo && s->c > (float)s->fin + 0.999f) s->c = (float)s->ini;
+}
+static void roto_abre(float x, float y)             /* 2B000E (modo 3, una vez) a 2,5 cuadros por paso */
 {
     int i;
-    for (i = 0; i < 19; i++) { rx[i] = roto_x[i]; ry[i] = roto_y[i]; rc[i] = roto_c[i]; }
-    *centro = medidor ? centro_c : -1;
-    return anillo;
+    for (i = 0; i < 24 && m_roto[i].usado; i++) ;
+    if (i == 24) return;
+    spr_abre(m_roto + i, 7, 0, 59, 1, x, y); m_roto[i].vel = 2.5f;
 }
+/* 45B860 (PS2 0x1abde8): un efecto desde (x0, y0) hacia (x1, y1); tipo 0 empieza en (280, 0) */
+static void efecto(float x0, float y0, float x1, float y1, int tipo, int f, float vel, int vida)
+{
+    int n, c = m_efe_i;
+    for (n = 0; n < 16; n++) {
+        efe_t *e = m_efe + c;
+        if (++c == 16) c = 0;
+        if (e->usado) continue;
+        m_efe_i = c; m_efe_n++;
+        memset(e, 0, sizeof *e); e->usado = 1; e->x0 = x0; e->y0 = y0;
+        if (!tipo) { e->x = 280.0f; e->y = 0.0f; } else { e->x = x0; e->y = y0; }
+        e->x1 = x1; e->y1 = y1; e->tipo = tipo; e->vel = vel; e->f = f < 7 ? f : 6; e->vida = vida;
+        return;
+    }
+    m_efe_i = c;
+}
+static void efectos_paso(void)                     /* 45B950 (PS2 0x1abee0) */
+{
+    int k, hechos = 0;
+    for (k = 0; k < 16 && hechos < m_efe_n; k++) {
+        efe_t *e = m_efe + k; float sv;
+        if (!e->usado) continue;
+        hechos++;
+        switch (e->est) {
+        case 0: if (--e->vida < 0) e->est++; break;
+        case 1: e->est++; break;
+        case 2: spr_abre(&e->s, e->f, 0x4c, 0x5a, 1, e->x, e->y); e->s.vel = e->vel; e->est++; break;
+        case 3:
+            if (spr_acabado(&e->s)) { e->est++; spr_abre(&e->s, e->f, 0x5b, 0x69, 1, e->x, e->y); e->s.vel = e->vel; e->est++; break; }
+            sv = e->vel * 0.0666667f * (float)e->n;
+            switch (e->tipo) {
+            case 0: e->y = (float)(int)((e->y1 - e->y0) * sv) + e->y0;
+                    e->x = (e->y - 100.0f) * 0.008f * (e->y - 100.0f) + 200.0f; break;
+            case 1: e->x = (float)(int)((e->x1 - e->x0) * sv) + e->x0; e->y += (e->y1 - e->y) * (e->vel * 0.335f); break;
+            case 2: e->x = (float)(int)((e->x1 - e->x0) * sv) + e->x0; e->y = (float)(int)((e->y1 - e->y0) * sv) + e->y0; break;
+            case 3: e->x += (e->x1 - e->x) * (e->vel * 0.335f); e->y = (float)(int)((e->y1 - e->y0) * sv) + e->y0; break;
+            }
+            e->s.x = e->x; e->s.y = e->y; e->n++;
+            break;
+        case 4: spr_abre(&e->s, e->f, 0x5b, 0x69, 1, e->x, e->y); e->s.vel = e->vel; e->est++; break;
+        case 5: if (spr_acabado(&e->s)) { m_efe_i = k; e->s.usado = 0; e->usado = 0; m_efe_n--; } break;
+        }
+    }
+}
+static int tipo_sin_vuelo(int t) { return t == 0 || t == 6 || t == 8 || t == 23; }   /* 0x1ac944..0x1ac98c */
+static void medidor_paso(void)
+{
+    int i, k, h, lim, a, nuevo = 0, ganan, delta, mostrados;
+    const float ax = 234.0f, ay = 108.0f, cx = 176.0f, cy = 96.0f;   /* ancla y centro del rotulo (7F8BBC / 7F8BC0) */
+    for (i = 0; i < 24; i++) { spr_avanza(m_roto + i); if (m_roto[i].usado && spr_acabado(m_roto + i)) m_roto[i].usado = 0; }
+    for (i = 0; i < 20; i++) { spr_avanza(m_rec + i); m_rec[i].volteado = 0; }
+    for (i = 0; i < 16; i++) if (m_efe[i].usado) spr_avanza(&m_efe[i].s);
+    spr_avanza(&m_alerta);
+    if (medidor == 2) {                             /* 0x1ace3c: se cierra; vuelan si se veian 7 o mas */
+        for (k = 0; k < 20; k++) {
+            spr_t *r = m_rec + k;
+            if (!r->usado) continue;
+            r->usado = 0;
+            if (m_visto >= 7) efecto(r->x, r->y, 280.0f, 200.0f, 1 + k % 3, m_f18[k], (20.0f - (float)k) * 0.3f + 0.5f, 0);
+            m_f18[k] = -1;
+        }
+        m_prev = 0; m_visto = 0; medidor = 0;
+    } else if (medidor != 1) {
+        m_visto = 0; m_prev = 0; m_t8c78 = 0;
+    } else {
+        m_t8c74--;
+        if (m_t2510 > 0) m_t2510--;
+        h = result / 10000 + 1; delta = result - m_prev; ganan = h - m_prev / 10000 - 1;
+        if (result < 0) {                           /* 0x1ac718: el marco del rotulo hacia el rojo (28 corazones: rojo) */
+            float t = -(float)result, f = 280000.0f <= t ? 0.0f : 1.0f - t / 280000.0f; int b = (int)(f * 255.0f) & 0xff;
+            m_tinte = 0xff0000ffu | (uint32_t)b << 8 | (uint32_t)b << 16;   /* ABGR del GS */
+        } else m_tinte = 0xffffffff;
+        m_prev = result;
+        if (!m_rec[0].usado) { spr_abre(m_rec, 0, 0x1f, 0x3c, 0, ax, ay); m_f18[0] = 0; }
+        m_rec[0].x = ax; m_rec[0].y = ay;
+        if (ganan < 0 || delta < 0) {               /* 0x1ac85c */
+            if (!m_t8c78) { roto_abre(ax, ay); m_t8c78 = 0x14; }
+            m_f18[0] = (h < 0 ? 0 : h) % 7;
+            spr_abre(m_rec, m_f18[0], 0x1f, 0x3c, 0, ax, ay);
+        } else if (ganan > 0) {                     /* 0x1ac91c */
+            m_f18[0] = (h < 0 ? 0 : h) % 7;
+            if (!(tipo_sin_vuelo(q) && m_t2510 > 0)) {
+                m_t2510 = 0x14;
+                spr_abre(m_rec, m_f18[0], 0x1f, 0x3c, 0, ax, ay);
+                if (m_t8c74 <= 0) { sfx_voz_se(0x52); m_t8c74 = 10; efecto(ax, ay, cx, -cy, 2, h < 0 ? 1 : 5, 1.0f, 0); }
+            }
+        }
+        mostrados = h < 0 ? 0 : h;
+        lim = (int)((float)mostrados * 0.25f); if (lim > 0x13) lim = 0x13;
+        if (c_ev > 0) {
+            a = 7;                                      /* 6 con 7F24F0 (no lo cuenta ningun tipo portado) */
+            if (c_golpe) a -= 2;
+            if (c_adel) a -= 3;
+            if (c_choque) a -= 4;
+            if (a < 0) a = 0;
+            a = (int)((float)a * 2.70312f);
+            if (lim > a) lim = a;
+            if (lim > 0x13) lim = 0x13;
+        }
+        if (!m_tab) {
+            for (i = 0; i < 19; i++) { float t = (float)i * 0.330078f; m_rx[i] = cosf(t) * 64.0f; m_ry[i] = sinf(t) * -64.0f; }
+            m_tab = 1;
+        }
+        for (k = 1; k < 20; k++) {
+            spr_t *r = m_rec + k;
+            if (r->usado) {
+                if (k > lim) { r->usado = 0; roto_abre(m_rx[k - 1] + cx, -(cy - m_ry[k - 1])); }
+                else {
+                    if (spr_acabado(r)) spr_abre(r, 6, 1, 0x3b, 0, r->x, r->y);
+                    r->x = m_rx[k - 1] + cx; r->y = m_ry[k - 1] - cy;
+                }
+            } else {
+                if (k > lim) break;
+                m_f18[k] = 7;
+                spr_abre(r, 6, 0x3d, 0x69, 1, m_rx[k - 1] + cx, -cy - m_ry[k - 1]); r->volteado = 1;
+                nuevo = 1;
+            }
+        }
+        if (nuevo) sfx_voz_se(0xd7);
+        m_visto = mostrados;
+    }
+    if (m_t8c78 > 0) m_t8c78--;
+}
+/* lo que hay que dibujar del medidor: corazones del centro y del anillo, roturas y efectos */
+int infarto_medidor(infarto_spr_t *v, int max)
+{
+    int i, n = 0;
+#define PON(s) do { if ((s)->usado && n < max) { v[n].g = (s)->g; v[n].cuadro = (int)((s)->c > (float)(s)->fin ? (s)->fin : (s)->c); \
+                     v[n].x = (s)->x; v[n].y = (s)->y; n++; } } while (0)
+    for (i = 0; i < 20; i++) PON(m_rec + i);
+    for (i = 0; i < 24; i++) PON(m_roto + i);
+    for (i = 0; i < 16; i++) if (m_efe[i].usado) PON(&m_efe[i].s);
+    PON(&m_alerta);
+#undef PON
+    return n;
+}
+uint32_t infarto_tinte(void) { return m_tinte; }
 int infarto_corazones(void) { return disp / 10000; }
 int infarto_total(void) { return score / 10000; }
 int infarto_trafico(void) { return trafico; }

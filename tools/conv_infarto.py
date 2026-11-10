@@ -35,7 +35,7 @@ INFARTO.DAT (little endian):
   modelos: 7 u32 modelo de la clase 3 / 4 por id del suceso % 7 (0x3f0850, PC 5E0C34) y 7 del tramo 0x1a (0x3f0870).
 HAHUD.DAT (formato de HUD.DAT, tools/conv_hud.py; se abre aparte solo en el modo, con solo las tablas en la RAM): los
   corazones del medidor de 45FB80 (PS2 0x1ac580) del banco SPRANI 0x2B (GAME_CVT): HA_CORAZON (escena 0x15, cuadros
-  0..0x69: aparece en 0x3D..0x69 y late en 1..0x3B), HA_ROTO (0x0E, 0..59) y HA_CENTRO (0x0F, 0x1F..0x3C), en un
+  0..0x69: aparece en 0x3D..0x69 y late en 1..0x3B), HA_ROTO (0x0E, 0..59) y HA_C0..HA_C5 (0x0F..0x14, 0..0x69: el centro y los efectos de 45B950), en un
   atlas recortado al alfa y comprimido en VQ (error RMS <= 9).
 VOCESH.DAT: el formato VOZ1 de VOCES.DAT (tools/conv_sonido.py, sin tablas de cuando habla) con las muestras de
   \\SPANISH\\HC.PAK y PERH.pak (HEC.PAK no lo pide la carrera del modo) (id tal cual) y las de los bancos HAM (id + 0x200 x (grupo + 1)): pitch y
@@ -160,19 +160,33 @@ def main():
     tf = par(0x1ad99c, 0x1ad9a4); assert tf == 0x3f0b40
     rot = [('HA_T%02d' % i, struct.unpack_from('<I', elf, V(tt + 4 * i))[0]) for i in range(37)]
     rot += [('HA_M%d' % i, struct.unpack_from('<I', elf, V(tf + 4 * i))[0]) for i in range(3)]
-    escenas = [('HA_CORAZON', 0x15, range(0, 0x6a)), ('HA_ROTO', 0x0e, range(60)), ('HA_CENTRO', 0x0f, range(0x1f, 0x3d))]
+    # corazones de 0x3f0b20 (2B000F..2B0015, el del centro por corazones % 7 y los efectos de 45B950: cuadros 0x1F..0x3C,
+    # 0x4C..0x5A y 0x5B..0x69) y la rotura 2B000E (0..59)
+    tc = par(0x1ac8d8, 0x1ac8dc); assert tc == 0x3f0b20
+    tcor = struct.unpack_from('<7I', elf, V(tc)); assert tcor == tuple(range(0x2b000f, 0x2b0016)), 'corazones de 0x3f0b20'
+    escenas = [('HA_CORAZON', 0x15, range(0, 0x6a)), ('HA_ROTO', 0x0e, range(60))]
+    escenas += [('HA_C%d' % i, tcor[i] & 0xffff, range(0x1f, 0x6a)) for i in range(6)]   # (cuadro - 0x1F)
     for nombre, tok in rot:
         if tok >> 16 != 0x2b: continue
         k = tok & 0xffff; sc = ag.escenas[k]; nc, pc = struct.unpack_from('<2I', ag.a, sc); raiz = pc + (nc - 1) * 0x24
         escenas.append((nombre, k, range(int(struct.unpack_from('<f', ag.a, raiz + 8)[0]))))
-    for nombre, k, fotos in escenas:
+    # panel 2C002A (NAVI_PUB 0x1bd544, variante 2: en lugar de 2C0028 / 2C0029) y las filas 2C0037..2C003B (4BB9E0 =
+    # PS2 0x1bd920, tabla 0x404418) del banco 0x2C, cuadros 0 y 1
+    assert u32(0x1bd55c) == 0x3c04002c and u32(0x1bd570) == 0x3484002a, 'panel 2C002A'
+    tfil = par(0x1bd924, 0x1bd944); assert tfil == 0x404418
+    fil = struct.unpack_from('<5I', elf, V(tfil)); assert fil == tuple(range(0x2c0037, 0x2c003c)), 'filas 2C0037..'
+    a2c, T2c, _ = D.banco(0x2c)
+    escenas = [(n, k, f, 0x2b) for n, k, f in escenas] + [('HA_PANEL', 0x2a, range(1), 0x2c)]
+    escenas += [('HA_FILA%d' % i, fil[i] & 0xffff, range(2), 0x2c) for i in range(5)]
+    for nombre, k, fotos, bk in escenas:
+        am = ag if bk == 0x2b else a2c
         lst = []; ant = None
         for i, f in enumerate(fotos):
-            ps = ch.escena(ag, k, float(f))
+            ps = ch.escena(am, k, float(f))
             firma = [(p['tex'], tuple(np.round(p['M'].ravel(), 3)), round(p['alfa'], 3), tuple(p['src'])) for p in ps]
             if firma != ant: lst.append([i, ps, 1]); ant = firma
             else: lst[-1][2] += 1
-        grupos.append((nombre, len(fotos), lst))
+        grupos.append((nombre, len(fotos), lst, bk))
     # un atlas por grupo (sus texturas se suben solo mientras se ve: la VRAM fuera de la zona del curso es ~75 KB), VQ
     def vq_ha(i, a, fmt, lista):
         import vq
@@ -180,21 +194,34 @@ def main():
         print('  HAHUD: textura %d %dx%d VQ error %.1f %s' % (i, a.shape[1], a.shape[0], err, 'si' if err <= 16 else 'no'))
         return datos if err <= 16 else None
     hud.vq = vq_ha
-    for nombre, nf, lst in grupos:
-        at = ch.Atlas(); at.prefijo = 'ha_' + nombre; cl = []
-        for _, ps, _ in lst:
-            for p in ps:
-                if p['alfa'] >= 0.004 and abs(np.linalg.det(p['M'][:2, :2])) >= 1e-6:
-                    at.registra(0x2b, Tg, p); cl.append(at._clave(0x2b, p))
-        at.empaqueta(hud, at.plan(cl))
+    # los corazones y la rotura comparten casi todo (resplandores 2B:0..3 y 92; cada color solo su icono de 30x30): un
+    # atlas para todos (se suben juntos al empezar la carrera; VRAM fuera de la zona del curso)
+    COR = ('HA_CORAZON', 'HA_ROTO') + tuple('HA_C%d' % i for i in range(6))
+    at_cor = None
+    for nombre, nf, lst, bk in grupos:
+        am, Tm = (ag, Tg) if bk == 0x2b else (a2c, T2c)
+        if nombre in COR and at_cor is not None:
+            at = at_cor
+        else:
+            at = ch.Atlas(); at.prefijo = 'ha_' + nombre; cl = []
+            for n2, _, l2, b2 in (grupos if nombre in COR else [(nombre, nf, lst, bk)]):
+                if n2 not in COR and nombre in COR: continue
+                for _, ps, _ in l2:
+                    for p in ps:
+                        if p['alfa'] >= 0.004 and abs(np.linalg.det(p['M'][:2, :2])) >= 1e-6:
+                            at.registra(b2, Tm, p); cl.append(at._clave(b2, p))
+            t0 = len(hud.tex); pl = at.plan(cl); at.empaqueta(hud, pl)
+            print('  HAHUD: %s texturas %d..%d, %d KB sin VQ' % ('corazones' if nombre in COR else nombre, t0, len(hud.tex) - 1,
+                                                               at.bytes_plan(pl) >> 10))
+            if nombre in COR: at_cor = at
         g = hud.grupo(nombre, nf)
         for c, ps, n in lst:
-            k0 = len(hud.pie); hud.piezas_escena(g, c, 0x2b, Tg, ps, atlas=at)
+            k0 = len(hud.pie); hud.piezas_escena(g, c, bk, Tm, ps, atlas=at)
             vis = [p for p in ps if p['alfa'] >= 0.004 and abs(np.linalg.det(p['M'][:2, :2])) >= 1e-6]
             assert len(vis) == len(hud.pie) - k0
             for j, p in zip(range(k0, len(hud.pie)), vis):  # la pieza vale n cuadros (hud.c: flags >> 4); bit 2: la capa
                 q = list(hud.pie[j])                        # SPRANI lleva el 4 en +0x48 (resplandor que se suma)
-                q[3] = (q[3] & 11) | (4 if ag.a[p['L'] + 0x48] & 4 else 0) | (min(n, 4095) << 4); hud.pie[j] = tuple(q)
+                q[3] = (q[3] & 11) | (4 if am.a[p['L'] + 0x48] & 4 else 0) | (min(n, 4095) << 4); hud.pie[j] = tuple(q)
         hud.uso(nombre, g, 0, 0, capa=4)
     hud.escribe(os.path.join(sal, 'HAHUD.DAT'))
     print('HAHUD.DAT: %d bytes, %d texturas' % (os.path.getsize(os.path.join(sal, 'HAHUD.DAT')), len(hud.tex)))
