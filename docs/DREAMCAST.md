@@ -801,6 +801,15 @@ Al convertir mas uniones: `conv_union.py iso dir/ --arboles=1,100,...,193 [--par
 
 ## 4. Pruebas
 
+- Entorno y datos desde cero (contenedor nuevo): `tools/instala_entorno.sh` (KallistiOS d81aa3f con kos-chain stable,
+  GCC 15.2; Flycast Release sin Vulkan; paquetes de apt y pip) y `tools/regenera_datos.sh <iso> <datos/>` (todos los
+  conversores, 4 pasos a la vez con un hilo cada uno, intermedios en /dev/shm; idempotente). Regenerado el 2026-11-10:
+  513 ficheros, 852,7 MiB (62 SEG + 62 COL, 262 descriptores BKnn + UNIONES.PAK de 20,1 MiB, 62 MUS); huellas de
+  BK100 / BK101 sueltas 1aa403be / 8593a659, las de arriba; ~2 h 40 min en 4 nucleos. Pruebas en Flycast:
+  `tools/prueba/` (nav.sh, nav3.sh, pal.sh; ver su README). Con todos los arboles el arranque tarda minutos en
+  Flycast antes de la pelicula: curso_huecos hace miles de gd_busca y cada una relee el directorio del GD (PENDIENTE:
+  guardarlo una vez).
+
 - `cd demo && make` sin avisos; `make CPPFLAGS=-DDIAG_VTX` imprime por la consola serie cada 60 cuadros los
   vertices (total y etapa), la CPU, la distancia, la VRAM libre, el presupuesto del TA (3D, etapa y su tope, 2D,
   `ta_f`), las tiras aceptadas y su cuenta teorica (`tiras`, `teo`), lo que dibujaria el original de la etapa (`orig`,
