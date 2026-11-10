@@ -44,7 +44,7 @@ Estado: OK (conectado y verificado al nivel indicado), PARCIAL, PROVISIONAL (apr
 | Direccion, derrape (inicio/mantenimiento/salida) | SlipAngleCtrl / RearGripCtrl / CorneringCtrl; temporizador 40 cuadros | OK | decompilacion + banco | ninguna conocida | trazas de entrada comparables con PS2 | H, E |
 | Adherencia por superficie | get_road_mu 500B30, running_resistance 502120, COLI0200 | OK | coli por rueda | ninguna conocida | — | H, E |
 | Choques coche-coche y muro, choque fuerte, grua | 4F9450/4F9000/4F8490/4F6FE0/4F76E0/4F7BF0/476040/473F30 (ver Choques entre coches), cbw_coli_wall, 5038D0, PlWrecker | PARCIAL | CHQ1/POS1 de PARAM.DAT, CJM1/SEC1 de TRAFC.DAT, efectos de IGC.PAK en SFX.DAT | coche-coche: ver Choques entre coches (PROVISIONALES alli; golpeados: parpadeo y cierre del original); vibracion del mando de PS2 (0x1d0420) salvo la de la superficie; grua recoloca en el carril mas cercano (no en la fila de poligonos); avance 10 posiciones x m_pos (CONFIRMADO, antes 25 m supuestos) | — | H, E |
-| Camara de carrera | evento CAMERA 385: 4858D0, 484810, 483110, 4A1680 SetCarCamera, 485590/483CE0/4834A0/483600, 4832F0/484A40, 483C10/484BD0 (PS2 0x178500..0x17b540, 0x1817c0) | PARCIAL | demo/camara.c con las tablas CAM1 de PARAM.DAT (vistas 0x2ccd88, por vista y modelo 0x2cd3d8, por modelo 0x2d2838 del fichero SLES) | vista 1 sin interior (no se dibuja el coche); camara de salida en los 60 primeros cuadros de la cuenta (SUPUESTO); sin vista 0x1D (780258 = 0) ni camara de fin (485830); la de la meta (4853D0) en demo/meta.c (ver Escena de la meta) | ver seccion Camara de carrera | E |
+| Camara de carrera | evento CAMERA 385: 4858D0, 484810, 483110, 4A1680 SetCarCamera, 485590/483CE0/4834A0/483600, 4832F0/484A40, 483C10/484BD0 (PS2 0x178500..0x17b540, 0x1817c0) | PARCIAL | demo/camara.c con las tablas CAM1 de PARAM.DAT (vistas 0x2ccd88, por vista y modelo 0x2cd3d8, por modelo 0x2d2838 del fichero SLES) | vista 1 sin interior (no se dibuja el coche); camara de salida (485250) con el ojo y la mira de la escena de la salida los 120 cuadros de START (ver Escena de la salida); sin vista 0x1D (780258 = 0) ni camara de fin (485830); la de la meta (4853D0) en demo/meta.c (ver Escena de la meta) | ver seccion Camara de carrera | E |
 | Trafico (clases, IA, reaccion) | 472090, 472450, 472A50, 47DC10, 4736D0, hit_476040; aparicion 479080 (PS2 0x1dcdd0): 478B90 (0x1dbba0), 4787E0 (0x1db6d0), 4EFB90 (0x1f3818), 4F0030 (0x1f1a88), 46CE30, 478430, 46CC10; cierre 477F60 | PARCIAL | TRAFC.DAT (TRC1, ACL1 y TAP1: tablas de aparicion, velocidad y puntos fijos por etapa); colores (tabla 0x36bc18, modelos 30..43) y materiales en TRAFn.DAT (TCX1) | camino "Lead" de 472450 portado (velocidad por clase y del jugador, ver Choques entre coches: velocidad del trafico de delante) salvo 472320 / 471F90; 478640/46CDA0 en la union simplificados; puntos fijos de coches de carreras y de los modelos 39..43 sin coche | ver Trafico: densidad del original | E |
 | Piloto y acompanante | ROB01 / ROB02: PS2 0x201b10 / 0x201c40 / 0x202bf0 y 0x202c58 / 0x202de0; CHR.PS2 (CHR_DR_M00, CHR_DR_L00), bone.bin, ANIMS.PS2 | PARCIAL | CHR.DAT (conv_chr.py), comun/robot.c: motor de movimientos, conducir con el volante, codo en la puerta, choque, fuera del asfalto, aburrida, META y TIME OVER (ver Coches: el piloto y la acompanante) | cambio de area, asustada, trompo ni poses pedidas (la meta del piloto, estado 9, hecha: ver Escena de la meta) | - | H, E |
 | Rivales | — | FALTA | — | no hay rivales | — | — |
@@ -347,8 +347,8 @@ estaba y se dice lo que falta). Estado: CORREGIDO, SE QUEDA (ya era del original
 | `TIM_DIF 0` | [7C24C0] = licencia +E0; 4471A0 la pone a 0 | 0 | PROBABLE | SE QUEDA |
 | Sin el +60 ni k636904 | 44DC70 = PS2 0x176730: + k636904[clave] si 43F960 == 0 y 456D60 <= 1; + 60 si 48B1A0 != 1 y nivel > 0 | k636904 = {0,0,-60,0,-60,-90,0,-60,-90,-120,0,-60,-90,-120,-150} (PS2 0x35a938, KTE1); +60 con coche de serie | CONFIRMADO (formula y tabla); PROBABLE (coche de serie = 48B1A0 != 1) | CORREGIDO (Flycast: LAKE +3480 = 3420 + 0 + 60; DESE +3450 = 3480 - 90 + 60) |
 | Bonus de etapa (4F2B20) al entrar en la union | 450CC0 lo da tras la ampliacion con 7D3948 (cuadros de la etapa, union incluida); 4F2DF0 en la meta (modo 0x13) | en el checkpoint y en la meta | CONFIRMADO | CORREGIDO |
-| Cuenta atras: GO a los 240 cuadros de la escena | 8367BC = 180 al entrar en GAME; coche, trafico y tiempo quietos mientras > 60 (4A8100, 450AC0) | 120 cuadros de GAME; GO de la escena 2C000A en el 240 | PROBABLE (no se ha trazado cuando empieza la escena respecto a GAME) | SE QUEDA |
-| Camara de salida los 60 primeros cuadros | 485250 mientras 8367BC > 180 (durante START) | duracion de START | PROVISIONAL | SE QUEDA (falta medir START) |
+| Cuenta atras: GO a los 240 cuadros de la escena | 8367BC = 180 al entrar en GAME; coche, trafico y tiempo quietos mientras > 60 (4A8100, 450AC0) | la escena de la salida empieza en START (4871A0), START pide GAME a los 120 pasos (43FA90, 780250 = 0x78) y el coche sale 120 despues: cuadro 240, el GO (0x9b) del guion | CONFIRMADO (codigo); PROBABLE el desfase de la etapa 64 (0 cuadros) | CORREGIDO (2026-11-10, ver Escena de la salida) |
+| Camara de salida los 60 primeros cuadros | 485250 mientras 8367BC > 180 (durante START) | los 120 cuadros de START, con el ojo y la mira del movimiento de la escena (486EF0, op 14(0) en el 120) | CONFIRMADO | CORREGIDO (2026-11-10) |
 | Trafico: 11 coches al salir en s0 + 130 + i 121 + azar 66 m | 4787E0: sin coches al salir (salvo puntos fijos 478B90); aparecen de uno en uno | ninguno al salir | CONFIRMADO (logica) | CORREGIDO |
 | Trafico: reaparece a 550..1100 m si queda 150 m detras | 477F60 cierra con distancia < -2 o > 60 posiciones; 4787E0 abre a 50 posiciones (0x32; 35 en la union pasada la 120) cada max(3, registro +5) posiciones | -2 / +60 / +50 (35) posiciones, separacion del registro (12..20 en el curso) | CONFIRMADO | CORREGIDO (2026-11-08: separacion del registro de aparicion y caso de la union) |
 | `NTRAF 11` (todas las plazas llenas) | tope 20 (0x14) x densidad 46CD60 (1 fuera de la red) x registro +4 de 4EFB90 (por tramo), mas los puntos fijos de 478B90 | registro +4: 0..12 en el curso (PALM 5/5/3/0/4, LAKE 12/7/5/2/3) | CONFIRMADO (tablas TAP1) | CORREGIDO (NTRAF 16 = plazas; cuantos abre lo dice el registro) |
@@ -814,6 +814,39 @@ de la tabla de recursos de PS2, `conv_coche.recursos`), que la demo no convertia
   2610). Inicial 5999 (nivel 0, sin +60).
 - Comprobado en E: `-DPRUEBA_AUTO -DPRUEBA_NODO=0 -DPRUEBA_FIN=500 -DPRUEBA_V=280`: "CHECKPOINT: etapa 1 (LAKE) nivel
   1, +3480"; `-DPRUEBA_NODO=2 -DPRUEBA_RAMA=1`: "etapa 5 (DESE) nivel 2, +3450". Capturas fuera del repositorio.
+
+## Escena de la salida (2026-11-10)
+
+El coche que entra derrapando, la camara que lo sigue, los pitidos 3, 2, 1, GO y la cuenta atras: la escena de la salida
+del original, con el mismo motor que la de la meta (demo/meta.c, 486730 / 486EF0) y SALIDA.DAT (tools/conv_salida.py).
+- Que escena: START etapa 60 (PC 49DD40, PS2 0x1b6824..0x1b69ac): con un jugador el byte de 0x3f9338[eleccion de coche
+  0x369268] (30 palabras: 11, 12, 14, 11, 13, 14, 13, 12, 11, 11, 11, 12, 11, 11, 11 dos veces); 12 / 13 solo si la
+  palabra 0 del descriptor de la etapa (0x1766f0) es 0 o 15 (si no 11); con mas jugadores 0x3f9328 (0, 10, 10, 10).
+  CONFIRMADO. La palabra 0 del descriptor se toma como la clave de la etapa (cur_nodo): PROBABLE.
+- Tiempos: 4871A0 en la etapa 60; START cuenta 120 pasos (43FA90 con 780250 = 0x78, variantes 3 y 4: 0xB4) y pide GAME
+  (8367BC = 180); el coche sale con 8367BC <= 60 (4A8100): cuadro 240 de la escena, el mismo del GO del guion. El
+  desfase de la etapa 64 (la espera 45A920) se toma como 0: PROBABLE. La voz 0x82 del init de GAME (PC 499E0D, PS2
+  0x1b83e8) va en el cuadro 120 (antes la demo la decia en el GO).
+- Guion de las escenas 11..14 (el mismo, 0x36d2f0; la 10, de varios jugadores, otro): 0 op 11(0) (car+38 = 0, car+1F4
+  = 0), op 6(1) PasPlCar (475720: con las escenas 8..14 llama a GamePlCar 4A8330, el coche sigue con su fisica), op
+  12, op 3(3) y op 4(0) (la musica; la pone main.c), op 15(0); 1 op 0(2C000A, 4, 3) la cuenta atras del HUD, op 5 0x97,
+  0x98 y 0x16A, op 18(1) (RET); 11 op 5 0x9C y op 8(2) (humo y marcas de las ruedas 2 y 3); 60, 120, 180 op 5 0x9A (3,
+  2, 1); 80 0x9D; 81 0x99; 120 op 14(0) (la camara vuelve a la de carrera) y op 18(0); 150 op 8(0); 240 op 5 0x9B (GO)
+  y op 6(0); 300 op 30. CONFIRMADO (ELF).
+- Movimiento (4 s): canales 0 / 2 (car+2D8 / +2E0: el coche llega 3,5 m de lado), 3 (+2E8: la guinada de 90 grados a 0),
+  4 / 5 (+2E4 / +2EC), 6 / 7 (la direccion de las ruedas delanteras), 8..11 (el giro de las ruedas: las traseras
+  patinan 54 rad), 12..19 la camara (ojo y mira en el marco del coche para 485250, +130, focal). El coche se dibuja
+  con +2D8..+2EC como la animacion del choque (pon_coche) y el humo y las marcas salen de las ruedas del coche dibujado.
+  Las ruedas y la direccion las pone la escena (como en la meta): PROBABLE que GamePlCar no las cambie en la espera.
+- Efectos: banco \PAS1.PAK parte A, tono y volumen de la tabla SE de SOUNDCD.IRX (30 kHz; 0x16A 12 kHz); 0x16A (el
+  locutor en ingles) solo con el idioma 0 ([0x5d7220], 0x1f6548; 0x1071d8 lo pone a 0 con el ingles): con las voces en
+  espanol no suena, como en el original. Se suben al AICA al arrancar (206 KB; queda 856 KB libre) y suenan por 6
+  canales propios en turno. 0x99 y 0x9C pasan de 65535 muestras (el limite del LEA del AICA): van en dos trozos y el
+  segundo se arranca a su hora desde la CPU (puede repetir hasta un cuadro de sonido): limite del hardware.
+- RAM: el guion (16 KB) solo durante la escena; al arrancar 36 KB prestados para subir los efectos. La RAM libre al
+  arrancar baja 9 KB (674 -> 665 KB: codigo y huecos).
+- PENDIENTE: el banderero (ROB03, PC 488710 / 488820 / 487A30 y la bandera de tela 402100..4021A0): no esta portado.
+- Prueba: tools/prueba/salida.sh (hoja de contactos de la salida, NTSC y PAL).
 
 ## Escena de la meta (2026-11-10)
 

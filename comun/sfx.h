@@ -34,5 +34,9 @@ void sfx_voz_se(int id);                   /* un efecto del banco de voces por e
 uint32_t sfx_muestra_sube(const void *adpcm, uint32_t bytes);   /* direccion en el AICA o 0 */
 void sfx_muestra_baja(uint32_t a);
 void sfx_muestra_toca(uint32_t a, uint32_t muestras, uint32_t hz, int vol_irx);
+/* lo mismo por un canal propio (la escena de la salida: varios efectos a la vez) */
+int  sfx_canal_nuevo(void);                /* -1 si no quedan */
+void sfx_muestra_toca_en(int canal, uint32_t a, uint32_t muestras, uint32_t hz, int vol_irx);
+void sfx_canal_calla(int canal);
 
 #endif

@@ -1434,6 +1434,9 @@ static coche_t yo;
 /* la escena de la meta del original (demo/meta.c): con meta_pas el coche va por el guion (PasPlCar_Ctrl 475720, sin
    fisica) y la camara por su movimiento (4853D0) */
 static meta_t meta; static int meta_pas, meta_cam;
+/* la escena de la salida (demo/meta.c, SALIDA.DAT): corre con meta_paso sobre el mismo meta_t (nunca a la vez que la
+   meta). sal_f: su cuadro (82E7C4 del paso); sal_rue: 486EF0 ha escrito las ruedas y la carroceria (+2D8..+2EC) */
+static int sal_on, sal_f, sal_rue; static float sal_cam[8];
 static float meta_rueda_y[4];                                  /* 475720: rueda +134 por el suelo bajo cada rueda */
 static uint32_t efe_mascara;                                   /* 95AFAC del guion (82E7C8): humo y marcas por rueda */
 static float lejos_guion = LEJOS_PS2;                           /* el lejano del original (op 20 de la meta: 1900) */
@@ -3538,6 +3541,10 @@ static void camara_paso(int boton, int salida)
     }
     memcpy(e.pose_t, yo.pose_t, 12); memcpy(e.pose_r, yo.pose_r, 12);
     e.boton_vista = boton; e.salida = salida; e.suelo = cam_suelo;
+    if (salida && sal_on && meta.cam && meta.mueve) {           /* 486EF0 con 82E7D0 == 1 */
+        memcpy(sal_cam, meta.ojo, 12); memcpy(sal_cam + 3, meta.mira, 12); sal_cam[6] = meta.balanceo; sal_cam[7] = meta.fov;
+        e.guion = sal_cam;
+    }
     cam_paso(&cam, &cam_tab, &e);
 #ifdef DIAG_CAM
     {   static int n;
@@ -5688,14 +5695,15 @@ static void coche_anima_paso(int titulo)
     if (!ani.ok) return;
     if (titulo) { coche_anima_reposo(); return; }
     vmf = fis_ok ? fis.vel_mf : yo.v / 60.2f;                   /* car+1C4 (m por cuadro) */
-    kmh = meta_pas ? meta.kmh : fis_ok ? fis.kmh : (int)(yo.v * 3.6f);   /* car+1F4 (op 11 de la meta) */
-    for (k = 0; k < 4 && meta_pas; k++) ani.giro[k] = (float)meta.giro[k] * 9.58738019e-05f;   /* 486EF0: rueda +30 */
-    for (k = 0; k < 4 && !meta_pas; k++) {                      /* giro: rueda +30 -= omega (rad/s) por el tiempo */
+    int gm = meta_pas || sal_rue;                               /* 486EF0 escribe las ruedas (meta y salida) */
+    kmh = gm ? meta.kmh : fis_ok ? fis.kmh : (int)(yo.v * 3.6f);   /* car+1F4 (op 11 de la meta / salida) */
+    for (k = 0; k < 4 && gm; k++) ani.giro[k] = (float)meta.giro[k] * 9.58738019e-05f;   /* 486EF0: rueda +30 */
+    for (k = 0; k < 4 && !gm; k++) {                      /* giro: rueda +30 -= omega (rad/s) por el tiempo */
         float om = fis_ok ? fis.r[k].omega : yo.v / ani.radio;
         ani.giro[k] -= om * dt;
         if (ani.giro[k] > (float)M_PI) ani.giro[k] -= 2 * (float)M_PI; else if (ani.giro[k] < -(float)M_PI) ani.giro[k] += 2 * (float)M_PI;
     }
-    smp = meta_pas ? -meta.s32 : fis_ok ? -fis.s32 : 0;         /* 4A4710: -car+32 acotado a +-5461, x 6 */
+    smp = gm ? -meta.s32 : fis_ok ? -fis.s32 : 0;         /* 4A4710: -car+32 acotado a +-5461, x 6 */
     if (smp < -5461) smp = -5461; else if (smp > 5461) smp = 5461;
     ani.h204[ani.i204] = (int16_t)(smp * 6); ani.i204 = (ani.i204 + 1) % 30;
     for (k = 0, sum = 0; k < 30; k++) sum += ani.h204[k];
@@ -5719,7 +5727,7 @@ static void coche_anima_paso(int titulo)
         float a = kmh * 0.00999999978f - 1.0f; if (a > 4.0f) a = 4.0f;
         ani.fase += a; if (ani.fase > 255.0f) ani.fase = 0;
     }
-    ani.caliente = (meta_pas ? meta.freno : fis_ok ? fis.freno_op : 0) > 200 && kmh != 0;   /* disco +94 (46AE70) */
+    ani.caliente = (gm ? meta.freno : fis_ok ? fis.freno_op : 0) > 200 && kmh != 0;   /* disco +94 (46AE70) */
 }
 /* matrices de las piezas para el cuadro (46AE70 / 469600 con el estado de coche_anima_paso) */
 static void coche_anima_matrices(int titulo)
@@ -5761,7 +5769,7 @@ static void coche_anima_matrices(int titulo)
     for (k = 0; k < 4; k++) {                                   /* ruedas: fuera de car+F0 */
         const float *p = ani.pz[PZ_RUEDA + k];
         float y = meta_pas && !titulo ? meta_rueda_y[k] : fis_ok && !titulo ? fis.rueda_y[k] : p[1];   /* car+134 */
-        float dir = meta_pas && !titulo && k < 2 ? (float)(k ? meta.dir1 : meta.s32) * U : fis_ok && !titulo ? (float)fis.r[k].ang * U : 0;
+        float dir = (meta_pas || sal_rue) && !titulo && k < 2 ? (float)(k ? meta.dir1 : meta.s32) * U : fis_ok && !titulo ? (float)fis.r[k].ang * U : 0;
         matrix_t *P = &ani_m[PZ_PINZA + k], *R = &ani_m[PZ_RUEDA + k];
         memcpy(*P, cuerpo, sizeof(matrix_t)); m_tras(*P, p[0], y, p[2]);
         if (p[3] != 0) m_rz(*P, p[3]);
@@ -6255,6 +6263,44 @@ static void meta_juego_paso(void)
     traf_paso(1.0f / 60);                                       /* los sucesos de la carrera siguen (49C9C0 no los para) */
     efectos_paso(&yo, 1.0f / 60);
 }
+/* START (49DD40): la escena de la salida de este coche (4871A0), si esta SALIDA.DAT */
+static void salida_entra(void)
+{
+    int e;
+    sal_on = sal_rue = sal_f = 0; efe_mascara = 0;
+    salida_sfx_calla();
+    /* 456D60: un jugador; 44C2D0 (la palabra 0 del descriptor de la etapa): la clave de la etapa de salida (PROBABLE) */
+    e = salida_escena(1, modelo_jug, cur_nodo);
+    if (e < 0 || salida_empieza(&meta, e, variante)) { salida_suelta(); return; }
+    sal_on = 1; t_cuenta = 9999;                                /* la cuenta (2C000A) la pone el guion (op 0) */
+    dbglog(DBG_INFO, "SALIDA: escena %d (modelo %d)\n", e, modelo_jug);
+}
+/* un paso de logica de la escena de la salida (suceso 7, 4874A0, antes del coche y de la camara); su cuadro */
+static int salida_juego_paso(void)
+{
+    int f;
+    meta_paso(&meta);
+    f = sal_f = meta.cuadro - 1;
+    if (meta.sprite == 0x2c000a) t_cuenta = 0;                  /* 428320(0x2C000A, 4, 3): la cuenta atras */
+    if (f == 120) salida_modo_juego(1);                         /* START pide GAME (43FA90: 120 pasos) */
+    efe_mascara = (meta.humo & 1 ? 3u : 0u) | (meta.humo & 2 ? 0xCu : 0u);   /* op 8: 82E7C8 */
+    sal_rue = meta.mueve;
+    if (meta.mueve) {                                           /* car+2D8 / +2DC / +2E0, +2E4 / +2E8 / +2EC */
+        float r[3] = { meta.r[0], meta.r[1], meta.r[2] };
+        memcpy(yo.pose_t, meta.t, 12); memcpy(yo.pose_r, r, 12);
+        if (fis_ok) { memcpy(fis.pose_t, meta.t, 12); memcpy(fis.pose_r, r, 12); }
+    }
+    if (!meta.activa) { salida_suelta(); sal_on = sal_rue = 0; efe_mascara = 0; }   /* op 30 */
+    return f;
+}
+/* efectos_paso con el coche dibujado (car+B0: con la animacion del guion) */
+static void efectos_posado(void)
+{
+    coche_t c = yo; matrix_t m; int k;
+    pon_coche(&yo, m);
+    for (k = 0; k < 3; k++) { c.pos[k] = m[3][k]; c.up[k] = m[1][k]; c.fw[k] = -m[2][k]; }
+    efectos_paso(&c, 1.0f / 60);
+}
 /* 4853D0: la camara de la meta (ojo y mira del movimiento en el marco del coche colocado) */
 static void meta_camara(void)
 {
@@ -6361,6 +6407,7 @@ int main(int argc, char **argv)
     musica_inicia();                                            /* la musica la pone el menu (sin MENU.DAT, aqui) */
     sfx_ok = !sfx_inicia();
     voz_ok = sfx_ok && !voces_inicia();                         /* VOCES.DAT: voces de la carrera */
+    if (sfx_ok && salida_carga()) dbglog(DBG_ERROR, "SALIDA: sin SALIDA.DAT (la salida sin su escena)\n");
     /* META.DAT (113 KB) no se lee aqui: en el menu las tablas de MENU.DAT (~1,2 MB seguidos) no cabian con el en el
        monton ("Out of memory" al arrancar) y al empezar la carrera tampoco hay 113 KB seguidos; se lee al subir la
        union de la meta (curso_paso) y se suelta de vuelta al menu (curso_al_menu) */
@@ -6410,7 +6457,7 @@ int main(int argc, char **argv)
             else guion_hasta = 0;
 #endif
         }
-        musica_poll();
+        musica_poll(); salida_sfx_paso();                       /* segundos trozos de los efectos largos de la salida */
         /* en carrera Y cambia la vista (camara del original); en pausa, o sin las tablas, ensena las cifras; en el
            menu, Y es el tema al azar */
         if (estado != TITULO && (nuevo & CONT_Y) && (!cam_ok || pausa)) ver ^= 1;
@@ -6512,7 +6559,7 @@ int main(int argc, char **argv)
                 coche_paso(&yo, 0, 0, 0, 0); traf_inicia(SALIDA); efectos_borra();
                 if (fis_ok) { float p[3], th; ruta_en(yo.s, p, &th, NULL, NULL); or2_coloca(&fis, &fpar, th, 0); }
                 lejos = LEJOS_PS2; entorno_reinicia(); niebla_paso(); niebla_pon();   /* la distancia del original */
-                tim_cuadros = tim_zona(cur_nodo, etapa_n); tiempo = tim_cuadros / TIM_HZ; estado = CUENTA; t_estado = 0; t_cuenta = -60; pausa = 0; crono = 0; vmax = 0; pt_inicia();
+                tim_cuadros = tim_zona(cur_nodo, etapa_n); tiempo = tim_cuadros / TIM_HZ; estado = CUENTA; t_estado = 0; t_cuenta = -60; salida_entra(); pausa = 0; crono = 0; vmax = 0; pt_inicia();
                 reintenta = 0;
                 if (voz_ok) voces_carrera();
                 if (variante == 2) {
@@ -6533,14 +6580,22 @@ int main(int argc, char **argv)
             /* temporizador de salida del original (8367BC): 360 al entrar en GAME (485250 pone la vista en 0x167),
                camara de salida mientras > 180 (485FE0), el coche sale cuando baja de 60 (4A8100 / 450AC0): 300
                cuadros. La escena 2C000A (GO en su cuadro 240) empieza a los 60 de GAME, asi su GO cae en el 60. */
-            int n = 3 - (int)((t_estado - 60) / 60);
-            sprintf(s1, t_estado < 60 ? "" : n > 0 ? "%d" : "GO!", n);
-            if (strcmp(s1, msg)) { strcpy(msg, s1); texto_centro(msg); }
-            if (t_estado >= 300) { estado = CARRERA; t_estado = 0; if (voz_ok) voces_salida(); }   /* GO!: temporizador 60 */
+            if (sal_on) {                                       /* la escena de la salida (SALIDA.DAT) */
+                int f = salida_juego_paso();
+                if (f == 120 && voz_ok) voces_salida();         /* GAME (temporizador 180): su init dice 0x82 */
+                if (f >= 240) { estado = CARRERA; t_estado = 0; }   /* temporizador 60: el coche sale */
+            } else {
+                int n = 3 - (int)((t_estado - 60) / 60);
+                sprintf(s1, t_estado < 60 ? "" : n > 0 ? "%d" : "GO!", n);
+                if (strcmp(s1, msg)) { strcpy(msg, s1); texto_centro(msg); }
+                if (t_estado >= 300) { estado = CARRERA; t_estado = 0; if (voz_ok) voces_salida(); }   /* GO!: temporizador 60 */
+            }
             curso_paso();                                       /* la union ya se puede ir leyendo */
             if (auto_ && (nuevo & CONT_START)) { estado = TITULO; auto_ = 0; nuevo = 0; texto_centro(""); hud_baja_tex(); menu_entra(manual_, pista, NPISTAS); }
             coche_paso(&yo, 0, 0, 0, 1.0f / 60);
+            if (sal_on) efectos_posado();                       /* humo y marcas del guion (op 8) */
         } else if (estado == CARRERA) {
+            if (sal_on) salida_juego_paso();                    /* la escena acaba en su cuadro 300 (op 30) */
             if (t_estado == 50 && !aviso_rama) texto_centro("");
             if (auto_ && (nuevo & CONT_START)) { estado = TITULO; nuevo = 0; auto_ = 0; texto_centro(""); hud_baja_tex(); menu_entra(manual_, pista, NPISTAS); }
             else if (!pausa && (nuevo & CONT_START)) { pausa = 1; menu_pausa_entra(); nuevo = 0; }   /* START: pausa */
@@ -6708,7 +6763,7 @@ int main(int argc, char **argv)
            original (8367BC = 360 - t_estado) pasa de 180 (485FE0): los 180 primeros cuadros de la cuenta */
         if (cam_ok && estado != TITULO && !pausa) {
             if (estado == META && meta_cam) meta_camara();      /* 4853D0 (modo 19) */
-            else camara_paso((nuevo & CONT_Y) != 0, estado == CUENTA && t_estado < 180);
+            else camara_paso((nuevo & CONT_Y) != 0, estado == CUENTA && (sal_on ? sal_f < 120 : t_estado < 180));
         }
         if (!pausa) coche_anima_paso(estado == TITULO);                       /* ruedas, volante, faros, carroceria (46AE70) */
         if (!pausa && chr_ok == 1 && estado != TITULO) {             /* el piloto y la acompanante (488DD0 / 489A90) */

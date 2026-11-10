@@ -12,4 +12,4 @@ tecla x; espera 5; foto ${P}_5                                       # un jugado
 tecla x; espera 6; foto ${P}_6                                       # coche
 tecla x; espera 5; foto ${P}_7                                       # cambio
 tecla x; espera 6; foto ${P}_8                                       # musica
-tecla x; espera_log 'VRAM: zona del curso' 90; espera 15     # carga y salida de la carrera
+tecla x; espera_log 'VRAM: zona del curso' 90; espera ${ESPERA_CARRERA:-15}    # carga y salida de la carrera

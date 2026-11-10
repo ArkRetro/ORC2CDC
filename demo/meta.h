@@ -22,6 +22,7 @@ typedef struct {
     float    ojo[3], mira[3];   /* camara +E0 / +EC en el marco del coche (4853D0: por car+280)                  */
     float    balanceo, fov;     /* +130 y +A4 = +AC                                                             */
     int      cuadro;            /* 82E7C4 */
+    uint32_t sprite;            /* op 0 de este paso: la animacion de sprites que empieza (428320), 0 = ninguna   */
 } meta_t;
 
 int  meta_carga(void);                              /* lee META.DAT; 0 = bien */
@@ -32,4 +33,14 @@ int  meta_pista(int variante, int meta);            /* 49C9C0: pista de MUSIC.PS
 void meta_empieza(meta_t *m, int escena);           /* 4871A0 */
 void meta_paso(meta_t *m);                          /* 4874A0: un paso de logica */
 void meta_termina(void);                            /* libera el efecto del AICA */
+/* la escena de la salida (modo 13 START, SALIDA.DAT de tools/conv_salida.py; ver meta.c): el mismo guion y
+   movimiento, con meta_paso */
+int  salida_carga(void);                            /* al arrancar: efectos al AICA; 0 = bien */
+int  salida_escena(int jugadores, int modelo, int clave);   /* 49DD40: la escena (10..14) o -1 */
+int  salida_empieza(meta_t *m, int escena, int variante);   /* 4871A0; lee el guion; 0 = bien */
+void salida_modo_juego(int si);                     /* el modo pasa a GAME (0x10): canal 1 del movimiento */
+int  salida_activa(void);
+void salida_suelta(void);                           /* fin de la escena: suelta el guion */
+void salida_sfx_paso(void);                         /* cada cuadro (segundos trozos de los efectos largos) */
+void salida_sfx_calla(void);
 #endif

@@ -145,11 +145,14 @@ void cam_paso(cam_t *c, const cam_tablas_t *t, const cam_entrada_t *in)
 
     /* camara de la salida (485250): matriz de la carroceria, vista 0x1E, FOV de 484EE0 */
     if (in->salida) {
+        if (in->guion) {                                     /* 486EF0 (suceso 7, antes de la camara): +E0..+F4, +130, +A4 = +AC */
+            memcpy(c->e0, in->guion, 12); memcpy(c->ec, in->guion + 3, 12);
+            c->rol130 = in->guion[6]; c->fov_a4 = in->guion[7];
+        }
         mat_ang(&m280, gyb, gxb, gzb, in->pos);
         c->vista = 30; c->mat34c = 1;
         mat_punto(&m280, c->e0, c->ojo); mat_punto(&m280, c->ec, c->mira);
-        c->fov = c->fov_a4; c->balanceo = 0; c->despl[0] = c->dx_c4; c->despl[1] = c->dy_c8;
-        c->rol130 = 0;
+        c->fov = c->fov_a4; c->balanceo = c->rol130; c->despl[0] = c->dx_c4; c->despl[1] = c->dy_c8;
         return;
     }
     if (c->vista == 30) { c->vista = c->elegida; guarda(c, 0); }      /* temporizador 0x12B: la vista elegida; 0xB5: 4833E0(0) */

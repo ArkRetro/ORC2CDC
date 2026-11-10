@@ -442,7 +442,10 @@ uint32_t sfx_muestra_sube(const void *adpcm, uint32_t bytes)
     return a;
 }
 void sfx_muestra_baja(uint32_t a) { if (a) { if (canal_voz_se >= 0) snd_sfx_stop(canal_voz_se); snd_mem_free(a); } }
-void sfx_muestra_toca(uint32_t a, uint32_t muestras, uint32_t hz, int vol_irx)
+void sfx_muestra_toca(uint32_t a, uint32_t muestras, uint32_t hz, int vol_irx) { sfx_muestra_toca_en(canal_voz_se, a, muestras, hz, vol_irx); }
+int  sfx_canal_nuevo(void) { return listo ? snd_sfx_chn_alloc() : -1; }
+void sfx_canal_calla(int canal) { if (canal >= 0) snd_sfx_stop(canal); }
+void sfx_muestra_toca_en(int canal_voz_se, uint32_t a, uint32_t muestras, uint32_t hz, int vol_irx)
 {
     muestra_dat_t m; int vol;
     if (!listo || !a || canal_voz_se < 0) return;
