@@ -5,15 +5,17 @@ Preparar el disco (los datos salen de tu ISO con tools/regenera_datos.sh <iso> <
   TMPDIR=/dev/shm python3 tools/mkgdi.py demo/demo.elf /dev/shm/dcr --nombre "OUTRUN DC DEMO" --datos <datos/>
 
 Scripts (todos: <disc.gdi> [pantalla de Xvfb, por defecto 91] [carpeta de salida]):
-  nav.sh   consola NTSC: pelicula, titulo (START), menu principal y A en cada pantalla (un jugador, modo, coche,
-           cambio, musica) hasta la carrera. Capturas nv_1..nv_8 y nv_fin.
+  nav.sh   consola NTSC, VMU vacia: pelicula (START), titulo (START), licencia nueva (A y LISTO), menu principal y A
+           en cada pantalla (un jugador, COAST 2 COAST, coche, cambio, musica) hasta la carrera (menu.sh). Capturas
+           nv_1..nv_8 y nv_fin.
   nav3.sh  lo mismo y despues el acelerador pisado unos 40 s (el coche anda). nv_1..nv_9 y nv_fin.
-  pal.sh   consola PAL (-config config:Dreamcast.Region=2,Broadcast=1,Cable=2: sin VGA la demo pregunta 50 / 60 Hz),
-           elige 50 Hz (B) y llega al menu y a la carrera. pal_1..pal_8 y pal_fin.
+  pal.sh   consola PAL (-config config:Dreamcast.Region=2,Broadcast=1,Cable=2: sin VGA sale la eleccion del modo de
+           pantalla de MODOV.DAT), elige 50Hz (A) y hace el mismo recorrido. pal_0 (la eleccion), pal_1..pal_8, pal_fin.
 Cada uno arranca su Xvfb si el display no existe (se pueden correr a la vez con displays distintos), usa una
 configuracion y una VMU nuevas (en la carpeta de salida) y deja alli flycast.txt con la consola serie de la demo
 (dbglog: RAM, VRAM, musica, cargas). Sale con error si Flycast se para antes de tiempo o si el registro dice
-"Out of memory". Los tiempos de espera son los medidos en Flycast con los datos completos; si el menu cambia, se
-ajustan en el script (las capturas dicen donde se quedo).
+"Out of memory". Los pasos esperan a lineas de la consola serie (pelicula, titulo, musica del menu, VRAM de la
+carrera) y no a tiempos fijos: con todos los arboles el arranque tarda varios minutos en Flycast (curso_huecos).
+Unos 10 min por prueba; las tres a la vez en displays distintos tambien.
 Teclado de Flycast: X = A, C = B, Return = START, flechas = cruceta, F / V = gatillos.
 Borrar los GDI despues (/dev/shm/dcr): llevan los datos de tu disco.
