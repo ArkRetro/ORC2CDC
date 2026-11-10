@@ -216,20 +216,23 @@ static int sube_modelo(modelo_t *m)
     return 0;
 }
 
+/* trafico: grupo de pilotos que no se dibuja (bits 24..25 del campo del nodo, tools/conv_trafico.py: 1 los normales
+   +C, 3 los del freno +14). 4AD4D0: con car+38 > 0 los del freno en lugar de los normales */
+#define TRAF_GRUPO(nodo) (((nodo) >> 24) & 3)
 /* vertices del modelo (lod < 0: todas las mallas; si no, las de ese LOD: el trafico lleva en el campo del nodo la
    mascara de los LOD que dibujan la malla, tools/conv_trafico.py) y bytes teoricos del TA (ta_teo; o: con color de
    desplazamiento) */
 static uint32_t modelo_vtx(const modelo_t *m, int lod)
 {
     uint32_t i, c = 0;
-    for (i = 0; i < m->nmallas; i++) if (m->mallas[i].n >= 3 && (lod < 0 || ((m->mallas[i].nodo >> lod) & 1))) c += m->mallas[i].n > 256 ? 256 : m->mallas[i].n;
+    for (i = 0; i < m->nmallas; i++) if (m->mallas[i].n >= 3 && (lod < 0 || (((m->mallas[i].nodo >> lod) & 1) && TRAF_GRUPO(m->mallas[i].nodo) != 3))) c += m->mallas[i].n > 256 ? 256 : m->mallas[i].n;
     return c;
 }
 static uint32_t modelo_teo(const modelo_t *m, int lod, int o)
 {
     uint32_t i, c = 0;
     for (i = 0; i < m->nmallas; i++)
-        if (m->mallas[i].n >= 3 && (lod < 0 || ((m->mallas[i].nodo >> lod) & 1))) c += ta_teo(m->mallas[i].n > 256 ? 256 : m->mallas[i].n, o);
+        if (m->mallas[i].n >= 3 && (lod < 0 || (((m->mallas[i].nodo >> lod) & 1) && TRAF_GRUPO(m->mallas[i].nodo) != 3))) c += ta_teo(m->mallas[i].n > 256 ? 256 : m->mallas[i].n, o);
     return c;
 }
 
@@ -849,6 +852,7 @@ static void carga_cartel(const float (*W)[4])
    mo->vis (nodos_visibles: visibilidad por secciones, LOD y recorte del original) no se dibujan, y las demas se
    recortan por su esfera contra la piramide de la vista */
 static int solo_lod = -1;                                       /* trafico: solo las mallas de este LOD (traf_lod) */
+static int traf_apagado = 3;
 static modelo_t etapa, uni, sig;                                /* (mas abajo) */
 static float sol_rd[3]; static int sol_rayo_on, sol_rayo_res;   /* el rayo hacia el sol del cuadro (sol_prepara) */
 static int sol_rayo_malla(const modelo_t *mo, const malla_t *m, int cart);
@@ -877,7 +881,7 @@ static void dibuja_rango(const modelo_t *mo, int l, uint32_t k0, uint32_t k1, in
 #ifdef DIAG_MS
         dg_mallas++;
 #endif
-        if (solo_lod >= 0 && !((m->nodo >> solo_lod) & 1)) continue;   /* de otro LOD del coche de trafico */
+        if (solo_lod >= 0 && (!((m->nodo >> solo_lod) & 1) || TRAF_GRUPO(m->nodo) == traf_apagado)) continue;   /* de otro LOD del coche de trafico, o los pilotos que no tocan */
         if (solo_lista && (m->tex < 0 || (int)mo->texs[m->tex].lista != l)) continue;
         cartel = 0;
         if (recorta) {
@@ -1082,7 +1086,7 @@ static void dibuja_indices(const modelo_t *mo, int l, const uint16_t *idx, uint3
     for (j = 0; j < n; j++) {
         const malla_t *m = mo->mallas + idx[j];
         if (m->n < 3) continue;
-        if (solo_lod >= 0 && !((m->nodo >> solo_lod) & 1)) continue;
+        if (solo_lod >= 0 && (!((m->nodo >> solo_lod) & 1) || TRAF_GRUPO(m->nodo) == traf_apagado)) continue;
         if (m->tex != ult) {
             ult = m->tex;
             if (m->tex >= 0) pvr_prim(&mo->cabs[0][mo->remap ? mo->remap[m->tex] : m->tex], sizeof(pvr_poly_hdr_t));
@@ -1669,7 +1673,7 @@ typedef struct { coche_t c; int carril, modelo, destino; float v_des;
                  float t_recup, wa[3]; int d22;                 /* +2F8, pose del cuadro anterior (mundo de or2), +D22 */
                  float b08; int b14, b18, dir, b58, b60, b64, b6c, b62, b53, c5c1, n2f4;
                  int pt_marca, b72, color, ha;                  /* puntuacion: +C5C (PT_*) y +B72 (rebufo reciente); ha: INFARTO */
-                 int toca; float gv[2], gth; } trafico_t;             /* toca: +4 0x10000 / +DD4 (el que le toco, TR_JUG el jugador); gv: +20 en el marco de la ruta en gth */
+                 int toca, freno; float gv[2], gth; } trafico_t;             /* toca: +4 0x10000 / +DD4 (el que le toco, TR_JUG el jugador); gv: +20 en el marco de la ruta en gth */
 static trafico_t traf[NTRAF];
 static int bo_toca_coche, bo_roce;                              /* +4 0x10000 / 0x400000 del jugador en el paso (44EDE0) */
 /* +C5C del coche para la puntuacion (4F2860): 0x40 ya adelantado, 0x400000 tocado (puntos a la mitad), 0x800000
@@ -1855,7 +1859,7 @@ static void traf_nace(trafico_t *t, float s)
     t->golpe = -1; t->t_golpe = 0; t->vlat = 0; t->t_recup = 0; t->d22 = 0; memset(t->c.pose_t, 0, 12); memset(t->c.pose_r, 0, 12);
     t->b08 = 0; t->b14 = t->b18 = 0; t->dir = 0; t->b58 = t->b60 = t->b64 = t->b6c = 0;   /* 4704A0 */
     t->b62 = 60; t->b53 = 0; t->c5c1 = 0; t->n2f4 = 0;          /* 4704A0 (PS2 0x1ec44c): +B62 = 60 salvo variante 4 */
-    t->pt_marca = 0; t->b72 = 0; t->toca = -1; t->gv[0] = t->c.v / 60.0f; t->gv[1] = 0; t->gth = 1e9f;
+    t->pt_marca = 0; t->b72 = 0; t->toca = -1; t->freno = 0; t->gv[0] = t->c.v / 60.0f; t->gv[1] = 0; t->gth = 1e9f;
     t->c.x = carril_x(s, t->carril); coche_coloca(&t->c);
     traf_pose_ant(t);
 }
@@ -3017,6 +3021,7 @@ static void traf_alcanza(int e, int nb, int d, float sp, tr_obj_t *o, const uint
                 if (!tr_bloq(rec, t->carril)) tr_limpia(t);
         }
     }
+    if (t->toca >= 0) t->freno = 1;                             /* 471E3E: +38 = 1 con +4 0x40000 (46DD00: el 0x10000 / 0x20000 del ultimo 4F9450; el 0x20000, el muro del trafico 504E70, sin portar) */
     if (o->v > t->c.v) o->f0 = 1;
 }
 /* 472320 (PS2 0x1e46a0): 1 si un coche de detras (470CB0, o 470ED0 en su carril / mas rapido) marca la velocidad */
@@ -3059,6 +3064,7 @@ static float traf_objetivo(int e, int d, int *f0, int *f1, float *rate)
     tr_rv = ntap ? traf_reg_velocidad(traf_lugar(t->c.s, &nodo, &pos), nodo, pos) : NULL;
     mn = TR_MIN[cls] * TR_KMH;
     o.f0 = 0; o.f1 = 0; o.v = v;                                /* +10DC = +1C4 */
+    t->freno = 0;                                               /* 472450: +38 = 0 (pilotos del freno, 4AD4D0) */
     lead = !(e == tr_det[TR_JUG] || d < 0 || (d < TR_CERCA && aparte > 1));
     if (t->b6c && t->b60 <= 0 && cls > 2) { o.v = 0; parado = 1; o.f1 = 1; }   /* 0x10d9 = 1, +10DC = 0 */
     else if (!lead || cls >= 6) o.v = t->v_des;                 /* Plain: +0xC */
@@ -7099,7 +7105,7 @@ int main(int argc, char **argv)
         if (cex_n && menu_color() != cex_color) coche_color(menu_color());   /* color elegido (boton Y del menu) */
         /* luces: sin SCN_EFC (bits de noche y tunel de 4A25F0) en la demo, banderas 0; freno = pedal pisado */
         coche_anima_matrices(estado == TITULO);                 /* piezas animadas (46AE70) */
-        if (cex_n) coche_luces(ani.ban, estado != TITULO && (meta_pas ? meta.freno != 0 : yo.freno_ant > 0.0f), estado != TITULO && ani.caliente);
+        if (cex_n) coche_luces(ani.ban, estado != TITULO && (meta_pas ? meta.freno != 0 : fis_ok ? fis.freno_op != 0 : yo.freno_ant > 0.0f), estado != TITULO && ani.caliente);   /* car+38 != 0 (con la fisica del original coche_paso no toca freno_ant: los pilotos del freno no se encendian nunca) */
         if (cex_n) coche_entorno(mod_coche);
         if (cex_n) coche_luz(mod_coche, estado != TITULO);     /* la luz del entorno 2 en la pintura */
         rc_chr.listo = rc_band.listo = 0; chr_vtx_ult = chr_vtx; chr_us_ult = chr_us; chr_vtx = chr_us = 0;
@@ -7166,6 +7172,7 @@ int main(int argc, char **argv)
                 mat_load(&vista); mat_apply(&mt);
                 mtraf[t->modelo].remap = t->color > 0 && t->color < traf_ncol[t->modelo] ? traf_remap[t->modelo][t->color] : NULL;
                 solo_lod = traf_con_lod[t->modelo] ? traf_lod(t->modelo, zv) : -1;
+                traf_apagado = t->freno > 0 ? 1 : 3;            /* pilotos: los del freno con +38 > 0 (4AD4D0) */
                 traf_dibuja(i, l, &mt);                         /* carroceria y ruedas girando (4AD530) */
                 mtraf[t->modelo].remap = NULL; solo_lod = -1;
             }

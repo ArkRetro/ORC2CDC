@@ -13,6 +13,8 @@ Scripts (todos: <disc.gdi> [pantalla de Xvfb, por defecto 91] [carpeta de salida
            pantalla de MODOV.DAT), elige 50Hz (A) y hace el mismo recorrido. pal_0 (la eleccion), pal_1..pal_8, pal_fin.
   salida.sh  nav.sh (o pal.sh con "pal" de cuarto argumento) hasta la carrera y una captura cada 0,25 s desde que
            empieza la escena de la salida (s_00..s_27) con la hoja de contactos hoja.png.
+  frena.sh  nav.sh hasta la carrera, 12 s de gas y despues el freno (F): fr_gas, fr_freno_0..2, fr_suelto (los
+           pilotos del freno del coche encendidos solo en fr_freno_*).
 Cada uno arranca su Xvfb si el display no existe (se pueden correr a la vez con displays distintos), usa una
 configuracion y una VMU nuevas (en la carpeta de salida) y deja alli flycast.txt con la consola serie de la demo
 (dbglog: RAM, VRAM, musica, cargas). Sale con error si Flycast se para antes de tiempo o si el registro dice

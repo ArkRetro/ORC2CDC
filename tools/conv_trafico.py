@@ -115,6 +115,7 @@ def llamadas(E, tm, m, lod=0):
     s.push()                                                    # car+F0
     dib(u(0), 'carroceria')
     dib(u(0xc), 'pilotos')
+    dib(u(0x14), 'freno')                                       # 4AD4D0: en lugar de +C con car+38 > 0 (grupo G_FRENO)
     p = u(0x9c) if cerca else 0
     if p and E.u32(p) != NINGUNO:
         e = 0
@@ -366,6 +367,7 @@ def main():
                 if nom == 'carroceria' and lod == 0: cuerpo = ident & 0xFFFF; medidas.append(caja(b, cuerpo)); lo, hi = medidas[-1]
                 if id(b) not in vistos: vistos[id(b)] = b
                 cc.pieza(mod, b, ident, R=M[:3, :3], t=M[3, :3], nombre=nom,
+                         grupo=cc.G_PILOTOS if nom == 'pilotos' else cc.G_FRENO if nom == 'freno' else cc.NADA,
                          pieza_id=int(nom[5:]) if nom.startswith('rueda') else 0)
             for x in mod.mallas[m0:]: x[7] = lod               # el LOD en el campo del nodo (la pieza, abajo)
             if lod == 0: piezas0 = piezas
@@ -390,6 +392,10 @@ def main():
                 v['x'], v['y'], v['z'] = P[:, 0], P[:, 1], P[:, 2]
                 x[2] = P.mean(0); x[3] = float(np.sqrt(((P - x[2]) ** 2).sum(1).max()))
                 x[7] = x[7] | x[9]['pieza'] << 8
+        # pilotos: el grupo (G_PILOTOS = 1 los normales +C, G_FRENO = 3 los del freno +14) en los bits 24..25 del
+        # campo del nodo; la demo dibuja unos u otros (traf_dibuja: car+38 > 0 del trafico, 4AD4D0)
+        for x in mod.mallas:
+            if len(x) > 9 and isinstance(x[9], dict) and x[9].get('grupo'): x[7] = x[7] | x[9]['grupo'] << 24
         # colores del original: las texturas alternativas, que recorta_texturas conserva con mallas de mentira (la
         # clave y sus dos colores; recorta les pone el indice nuevo)
         m = MODELOS[n]; pares = []

@@ -1136,7 +1136,17 @@ Diferencias encontradas y su causa:
   del tope de 46E110), innecesario con el tope del TA. Verificado en E (hoja en el scratchpad, dist/hoja.png).
 - Coche del jugador: el original no tiene LOD (46AE70 dibuja su disposicion entera; los LOD de 4866C0 de los modelos
   0..29 solo los usa 4AE0F0, el dibujo de los otros coches). Se queda entero.
-- PENDIENTE: luces del trafico (+10/+14: noche y freno); los bits de noche y tunel (SCN_EFC) para +80 y +60 (y
+- Luces de freno (2026-11-10). Jugador: 46A560 dibuja +84 en lugar de +7C con car+38 != 0 (el freno de
+  OperationInput); la demo miraba yo.freno_ant, que con la fisica del original (fis_ok) coche_paso no toca: no se
+  encendian nunca. Ahora fis.freno_op != 0 (event+0x38). El original no tiene luces de marcha atras: la disposicion
+  del coche solo trae +7C / +80 / +84 / +60 (y la del aleron del Enzo); no hay pieza ni rama para la marcha R.
+  Trafico: 4AD4D0 dibuja los pilotos +14 del descriptor en lugar de +C con car+38 > 0, y a car+38 del trafico solo
+  lo toca su IA: 472450 lo pone a 0 cada cuadro y 4718D0 (471E3E) a 1 si +4 & 0x40000, que 46DD00 copia de 0x10000 |
+  0x20000 tras 4F9450 (tocado por otro coche / contra el muro en ese cuadro): los pilotos del trafico se encienden
+  mientras lo empujan por detras, no al frenar por su cuenta. TRAFn.DAT lleva los +14 (grupo en los bits 24..25 del
+  campo del nodo, conv_trafico.py) y traf_dibuja elige; el 0x20000 del trafico (su choque con el muro, 504E70) no
+  esta portado. CONFIRMADO (captura frenando: tools/prueba/frena.sh).
+- PENDIENTE: luces de noche del trafico (+8 / +10); los bits de noche y tunel (SCN_EFC) para +80 y +60 (y
   para abrir los faros escamoteables: coche_ban en demo/main.c se queda a 0); direccion de las ruedas del trafico
   (car+32 del trafico sin localizar) y su car+F0 (4A2910 con car+D34).
 
