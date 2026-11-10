@@ -685,13 +685,24 @@ direccion de la Store Queue de `pvr_dr_addr` en cada vertice), el piloto (7 %) y
   mas cambia w por metro; si pasa de 1,5 x cerca, directa. Piloto: las piezas rigidas (un hueso) sin acumular pesos, y
   las tiras sin recorte por `sq_pt` (tambien `dibuja_malla`).
 
-| Cuadro congelado (paso 600), Flycast | antes (ms) | despues (ms) |
-|---|---|---|
-| PALM | 25,4 | 17,2 |
-| LAKE | 23,0 | 15,1 |
-| INDU | 29,9 | 19,2 |
-| METR | 33,9 | 21,7 |
-| CAPE | 23,8 | 14,7 |
+- `dibuja_etapa`: el recorrido de las etapas y uniones con tabla de tramos (lo mismo que `dibuja_rango` con recorte:
+  mismas mallas, mismo orden, mismas pruebas) con el ojo y los ejes en variables locales, el cartel una vez por tramo
+  y `dibuja_malla_directa` en linea (una llamada por malla costaba tanto como sus vertices).
+- `ta_teo_tab`: el coste teorico del TA de cada tira (`ta_teo`) por tabla para n <= 256.
+
+| Flycast, CPU de dibujo (ms) | congelado antes | congelado despues | carrera antes: dib + log, fps | carrera despues: dib + log, fps |
+|---|---|---|---|---|
+| PALM | 25,4 | 15,5 | 26,3 + 2,9, 33 | 15,9 + 1,9, 53 |
+| LAKE | 23,0 | 13,5 | 23,6 + 3,8, 36 | 14,4 + 2,5, 55 |
+| INDU | 29,9 | 17,6 | 27,1 + 3,2, 32 | 15,6 + 2,0, 53 |
+| METR | 33,9 | 18,9 | 30,6 + 3,1, 29 | 17,5 + 2,0, 49 |
+| CAPE | 23,8 | 13,4 | 23,0 + 2,7, 38 | 14,4 + 1,8, 57 |
+
+Carrera: el piloto 45 s desde la salida (`-DPRUEBA_AUTO -DDIAG_MS -DDIAG_SIN_CPU`, media de los MS); "log" baja porque
+con mas fps hay menos pasos de logica por cuadro. Los vertices y el presupuesto del TA no cambian (mismas tiras, misma
+cuenta `ta_cabe`). Lo que queda (PALM congelado): la etapa 6,5 ms (2 de vertices), el coche 2,7, el piloto 2,2,
+`nodos_visibles` 1,5 y el principio del cuadro 1,6 (`coche_entorno`, matrices). En la consola el recorte de la
+distancia por CPU (`ms + ms_log > 15`) se activara menos: mas cerca de la distancia del original.
 
 Flycast no cuenta la cache ni las esperas de la memoria: en la consola el recorrido de las mallas de antes leia ~950 KB
 de `malla_t` por cuadro, asi que lo ganado alli deberia ser al menos lo mismo.
