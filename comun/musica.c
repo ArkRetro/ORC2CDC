@@ -12,7 +12,7 @@ static uint8_t anillo[ANILLO] __attribute__((aligned(32)));
 static uint8_t salida[2 * TROZO] __attribute__((aligned(32)));
 static uint8_t lectura[TROZO] __attribute__((aligned(32)));
 static volatile uint32_t escrito, leido;                     /* bytes totales escritos y leidos del anillo */
-static volatile int activa, pausa_lectura, fin_hilo, arranca;   /* arranca: sonara cuando haya colchon */
+static volatile int activa, pausa_lectura, fin_hilo, arranca, una, leida;   /* una: sin bucle (leida: ya esta entera en el anillo) */   /* arranca: sonara cuando haya colchon */
 static int t_arranca;
 static uint32_t lba0, tam, pos;
 static snd_stream_hnd_t hs = SND_STREAM_INVALID;
@@ -31,7 +31,7 @@ static void *lector(void *arg)
         if (activa && !arranca && pausa_lectura) {              /* carga larga: el bucle no llama a musica_poll */
             mutex_lock(&m_poll); if (activa && !arranca) snd_stream_poll(hs); mutex_unlock(&m_poll);
         }
-        if (!activa || ANILLO - (escrito - leido) < TROZO || (!vacio && (pausa_lectura || gd_ocupado(300)))) { thd_sleep(10); continue; }
+        if (!activa || leida || ANILLO - (escrito - leido) < TROZO || (!vacio && (pausa_lectura || gd_ocupado(300)))) { thd_sleep(10); continue; }
         {
             uint32_t n = TROZO, i, w;
             if (pos + n > tam) n = (tam - pos + 2047) & ~2047u;
@@ -43,7 +43,7 @@ static void *lector(void *arg)
                 memcpy(anillo + o, lectura + i, k); i += k;
             }
             w = escrito + n; escrito = w;
-            pos += n; if (pos >= tam) pos = 0;
+            pos += n; if (pos >= tam) { pos = 0; if (una) leida = 1; }
         }
     }
     return NULL;
@@ -72,10 +72,18 @@ void musica_inicia(void)
     hilo = thd_create(0, lector, NULL);
 }
 
+/* una vez, sin volver a empezar (401000(0, pista, 0): la musica de la meta) */
+int musica_pon_una(int n)
+{
+    int r = musica_pon(n);
+    una = 1;
+    return r;
+}
 int musica_pon(int n)
 {
     char nom[16];
     musica_para();
+    una = 0; leida = 0;
     thd_sleep(30);
     sprintf(nom, "MUS%d.ADP", n); adpcm = 1;                     /* ADPCM de Yamaha a 44,1 kHz o, si no, PCM */
     if (gd_busca(nom, &lba0, &tam)) {

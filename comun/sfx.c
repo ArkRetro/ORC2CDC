@@ -431,6 +431,30 @@ static void toca_voz(int id, int canal)
 void sfx_voz(int id) { if (n_voz) toca_voz(id, (id & 0x1ff) == 0x4d || (id & 0x1ff) == 0x18d ? canal_voz_se : canal_voz); }
 void sfx_voz_se(int id) { if (n_voz) toca_voz(id, canal_voz_se); }   /* efectos de los bancos de voz (424940 directo) */
 
+/* una muestra suelta (ADPCM de Yamaha) por el canal de efectos de las voces: el efecto 0x96 de la escena de la meta
+   (demo/meta.c). sfx_muestra_sube la deja en el AICA (0 si no cabe); vol: el de la tabla SE del IRX */
+uint32_t sfx_muestra_sube(const void *adpcm, uint32_t bytes)
+{
+    uint32_t a;
+    if (!listo || !bytes) return 0;
+    if (!(a = snd_mem_malloc((bytes + 31) & ~31u))) return 0;
+    spu_memload(a, (void *)adpcm, (bytes + 3) & ~3u);
+    return a;
+}
+void sfx_muestra_baja(uint32_t a) { if (a) { if (canal_voz_se >= 0) snd_sfx_stop(canal_voz_se); snd_mem_free(a); } }
+void sfx_muestra_toca(uint32_t a, uint32_t muestras, uint32_t hz, int vol_irx)
+{
+    muestra_dat_t m; int vol;
+    if (!listo || !a || canal_voz_se < 0) return;
+    vol = (int)(vol_se(vol_irx) * vol_general + 0.5f);
+    if (vol > 255) vol = 255;
+    if (vol <= 0) return;
+    memset(&m, 0, sizeof m);
+    m.formato = 2; m.bucle = 0; m.ini = 0; m.fin = muestras;
+    snd_sfx_stop(canal_voz_se);
+    manda(canal_voz_se, AICA_CH_CMD_START, &m, a, hz, vol, 128);
+}
+
 void sfx_voz_calla(void)
 {
     if (canal_voz >= 0) snd_sfx_stop(canal_voz);

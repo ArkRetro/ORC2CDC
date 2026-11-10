@@ -44,13 +44,13 @@ Estado: OK (conectado y verificado al nivel indicado), PARCIAL, PROVISIONAL (apr
 | Direccion, derrape (inicio/mantenimiento/salida) | SlipAngleCtrl / RearGripCtrl / CorneringCtrl; temporizador 40 cuadros | OK | decompilacion + banco | ninguna conocida | trazas de entrada comparables con PS2 | H, E |
 | Adherencia por superficie | get_road_mu 500B30, running_resistance 502120, COLI0200 | OK | coli por rueda | ninguna conocida | — | H, E |
 | Choques coche-coche y muro, choque fuerte, grua | 4F9450/4F9000/4F8490/4F6FE0/4F76E0/4F7BF0/476040/473F30 (ver Choques entre coches), cbw_coli_wall, 5038D0, PlWrecker | PARCIAL | CHQ1/POS1 de PARAM.DAT, CJM1/SEC1 de TRAFC.DAT, efectos de IGC.PAK en SFX.DAT | coche-coche: ver Choques entre coches (PROVISIONALES alli; golpeados: parpadeo y cierre del original); vibracion del mando de PS2 (0x1d0420) salvo la de la superficie; grua recoloca en el carril mas cercano (no en la fila de poligonos); avance 10 posiciones x m_pos (CONFIRMADO, antes 25 m supuestos) | — | H, E |
-| Camara de carrera | evento CAMERA 385: 4858D0, 484810, 483110, 4A1680 SetCarCamera, 485590/483CE0/4834A0/483600, 4832F0/484A40, 483C10/484BD0 (PS2 0x178500..0x17b540, 0x1817c0) | PARCIAL | demo/camara.c con las tablas CAM1 de PARAM.DAT (vistas 0x2ccd88, por vista y modelo 0x2cd3d8, por modelo 0x2d2838 del fichero SLES) | vista 1 sin interior (no se dibuja el coche); camara de salida en los 60 primeros cuadros de la cuenta (SUPUESTO); sin vista 0x1D (780258 = 0) ni camaras de meta/fin | ver seccion Camara de carrera | E |
+| Camara de carrera | evento CAMERA 385: 4858D0, 484810, 483110, 4A1680 SetCarCamera, 485590/483CE0/4834A0/483600, 4832F0/484A40, 483C10/484BD0 (PS2 0x178500..0x17b540, 0x1817c0) | PARCIAL | demo/camara.c con las tablas CAM1 de PARAM.DAT (vistas 0x2ccd88, por vista y modelo 0x2cd3d8, por modelo 0x2d2838 del fichero SLES) | vista 1 sin interior (no se dibuja el coche); camara de salida en los 60 primeros cuadros de la cuenta (SUPUESTO); sin vista 0x1D (780258 = 0) ni camara de fin (485830); la de la meta (4853D0) en demo/meta.c (ver Escena de la meta) | ver seccion Camara de carrera | E |
 | Trafico (clases, IA, reaccion) | 472090, 472450, 472A50, 47DC10, 4736D0, hit_476040; aparicion 479080 (PS2 0x1dcdd0): 478B90 (0x1dbba0), 4787E0 (0x1db6d0), 4EFB90 (0x1f3818), 4F0030 (0x1f1a88), 46CE30, 478430, 46CC10; cierre 477F60 | PARCIAL | TRAFC.DAT (TRC1, ACL1 y TAP1: tablas de aparicion, velocidad y puntos fijos por etapa); colores (tabla 0x36bc18, modelos 30..43) y materiales en TRAFn.DAT (TCX1) | camino "Lead" de 472450 portado (velocidad por clase y del jugador, ver Choques entre coches: velocidad del trafico de delante) salvo 472320 / 471F90; 478640/46CDA0 en la union simplificados; puntos fijos de coches de carreras y de los modelos 39..43 sin coche | ver Trafico: densidad del original | E |
-| Piloto y acompanante | ROB01 / ROB02: PS2 0x201b10 / 0x201c40 / 0x202bf0 y 0x202c58 / 0x202de0; CHR.PS2 (CHR_DR_M00, CHR_DR_L00), bone.bin, ANIMS.PS2 | PARCIAL | CHR.DAT (conv_chr.py), comun/robot.c: motor de movimientos, conducir con el volante, codo en la puerta, choque, fuera del asfalto, aburrida, META y TIME OVER (ver Coches: el piloto y la acompanante) | sin la secuencia de meta del piloto, cambio de area, asustada, trompo ni poses pedidas | - | H, E |
+| Piloto y acompanante | ROB01 / ROB02: PS2 0x201b10 / 0x201c40 / 0x202bf0 y 0x202c58 / 0x202de0; CHR.PS2 (CHR_DR_M00, CHR_DR_L00), bone.bin, ANIMS.PS2 | PARCIAL | CHR.DAT (conv_chr.py), comun/robot.c: motor de movimientos, conducir con el volante, codo en la puerta, choque, fuera del asfalto, aburrida, META y TIME OVER (ver Coches: el piloto y la acompanante) | cambio de area, asustada, trompo ni poses pedidas (la meta del piloto, estado 9, hecha: ver Escena de la meta) | - | H, E |
 | Rivales | — | FALTA | — | no hay rivales | — | — |
 | Carretera, pendientes, bifurcacion | STAGE.PS2, BK.PS2 cs_BK_PALM, COMMON obj_course_obj_bk_palm + obj_OBJ_<ZONA>_BUNKI_TX, descriptores 0xb0, csc_data_2 | OK | conv_tramo/conv_union, CURSO.DAT | arbol entero (15 etapas, 10 bifurcaciones con sus carteles, 5 metas); cielo, niebla, luz y sol de la union como el original (ver Entorno); bifurcaciones = las de PALM (las demas no estan en el disco) | objetos animados de BK (ANIMS) | E |
 | Temporizador (inicial y ampliacion) | 44DC70 = PS2 0x176730, 450CC0 = PS2 0x1cee40, 450AC0 = PS2 0x1ce1f8 (-1 por paso en 0x5c5f44, crono +1 en 0x5c5f48); cuenta atras t / 60,2 + 0,34 (4BDA30 = PS2 0x1bfff8); crono con CalcFrame2Time (449B30 = PS2 0x1f6d70: t / 60,2, milesimas truncadas); paso real 59,94 Hz: HUD 0,43 % mas lento que el reloj, como el original; tabla 7D2E98 = PS2 0x3cb708 copiada por 0x176040; k636904 = PS2 0x35a938 | OK | TIM1 y KTE1 de PARAM.DAT | formula y tablas CONFIRMADAS en el ELF; variante 1 (fila 0), preset 0 y dificultad 0 PROBABLES (frontal del PC) | trazar el frontal de PS2 | E |
-| Checkpoints, meta, resultados | 44FF20 / 4515B0 (branch_state 7D38E8) con las banderas +0x3C de COLI0200; 4513C0 meta | OK | ampliacion al pasar la pancarta CHECK POINT del principio de la etapa siguiente (ver Checkpoint); meta del original en las 5 etapas finales (z = 0 de la union); voz y efecto de EXTEND TIME, GOAL y TIME OVER (voces.c) | sin pantalla de resultados ni final del original; sin la voz de GAME OVER (0x154: no hay pantalla de GAME OVER) | — | E |
+| Checkpoints, meta, resultados | 44FF20 / 4515B0 (branch_state 7D38E8) con las banderas +0x3C de COLI0200; 4513C0 meta | OK | ampliacion al pasar la pancarta CHECK POINT del principio de la etapa siguiente (ver Checkpoint); meta del original en las 5 etapas finales (z = 0 de la union); voz y efecto de EXTEND TIME, GOAL y TIME OVER (voces.c) | escena de la meta del original (modo 19: guion, camara, coche, piloto, efecto y musica; ver Escena de la meta); sin la tabla de tiempos de 498670, el ranking ni las millas (modos 33 / 34: texto propio y vuelta al menu); sin la voz de GAME OVER (0x154: no hay pantalla de GAME OVER) | — | E |
 | Puntuacion modo OutRun | 4F2DF0, 4F2660, 4F2B20, 4B9770 | PARCIAL | main.c pt_* | posicion de carretera = m_pos de CURSO.DAT (CONFIRMADO; antes 2,5 m supuestos, 3,2 veces los puntos por avance); bonus de etapa en el checkpoint | el salto de +64 al cambiar de curso (PENDIENTE) | E |
 | Eventos, scripts, progresion, misiones | SCRIPTS.PS2 (Races, RaceAttack, OutrunMiles, Req_*) | FALTA | — | — | — | — |
 | Modos de un jugador (INFARTO, CONTRARRELOJ) | 464350 / 464D20 (PS2 0x1ae440 / 0x1a7f28), 44DC70, 479080 | PARCIAL | ver Modos de un jugador | tipos de peticion con objetos, fantasma | — | E |
@@ -362,7 +362,7 @@ estaba y se dice lo que falta). Estado: CORREGIDO, SE QUEDA (ya era del original
 | Orientacion del coche: 4 muestras a 1,6/0,8 m | suspension y contactos de las ruedas (calc_ground_coli_face) | — | PROVISIONAL (solo dibujo; las alturas ya son las de 43EB60; encima van la altura, el cabeceo y el balanceo de la fisica y car+F0: Coches: piezas animadas) | SE QUEDA |
 | Escala de puntos por avance (x10, x110) | PS2 0x28F984 / 4F2DF0 (K628244, K5C68E0) | igual | CONFIRMADO | SE QUEDA (ahora con m_pos) |
 | Piloto automatico de la demo (DEMO del titulo) | el original pasa la pelicula de MV.PS2 (ahora tambien la demo: video.c) | — | invento propio (solo si faltan las peliculas, o pruebas) | SE QUEDA |
-| META/AGOTADO: freno 0,6 y vuelta al titulo a los 600 cuadros | el original conduce solo hasta el final (camaras 4853D0..) | — | PROVISIONAL | SE QUEDA |
+| META/AGOTADO: freno 0,6 y vuelta al titulo a los 600 cuadros | modo 19: la escena de la meta (4871A0 / 486730 / 486EF0, PasPlCar 475720, camara 4853D0) durante 0x4B0 cuadros | — | CONFIRMADO | CORREGIDO en la meta (2026-11-10: Escena de la meta); AGOTADO sigue igual (PROVISIONAL) |
 | Aviso de bifurcacion a 450 m de la separacion | 4BB890: BIFURCA con el avance car+0x102C entre 0,65 y 0,72 / 0,70 y 0,75 | — | PROVISIONAL | SE QUEDA |
 | Marcas de las ruedas: 4 ruedas, media anchura del neumatico (filas 40/41 de la tabla de parametros), 0,2 m entre tramos, alfa 0,5, +0,05 m, v = longitud x 0,5, anillos 256/64/64, texturas 0x570000..2 (EFECTOS.DAT), clase por la superficie (0xC02 asfalto, 0x8004 tierra/arena, 0x18 hierba) | tire_mark_req 41FB50 / 41FDD0 / 4862C0 del PC; SLES-53998 0x10dcd0 / 0x10df38 / 0x1198f0, tabla 0x344d90, constantes 0x32b390..98 | igual | CONFIRMADO | CORREGIDO (2026-11-08) |
 | Marcas en asfalto: las traseras mientras dura el derrape | el original usa la mascara 95AFA8 de PcTireSmokeReq 41C570 (deslizamiento +E0 y agarre +E4 de cada rueda contra 74FF5C) | — | PROVISIONAL (la fisica de la demo no da +E0) | SE QUEDA |
@@ -815,6 +815,61 @@ de la tabla de recursos de PS2, `conv_coche.recursos`), que la demo no convertia
 - Comprobado en E: `-DPRUEBA_AUTO -DPRUEBA_NODO=0 -DPRUEBA_FIN=500 -DPRUEBA_V=280`: "CHECKPOINT: etapa 1 (LAKE) nivel
   1, +3480"; `-DPRUEBA_NODO=2 -DPRUEBA_RAMA=1`: "etapa 5 (DESE) nivel 2, +3450". Capturas fuera del repositorio.
 
+## Escena de la meta (2026-11-10)
+
+Queja: "agrega la animacion de llegar a la final de etapa que tambien falta" (en META el coche frenaba solo con el
+cartel y volvia al menu). Lo que hace el original (PC: race_end_modes.cpp, race_goal_camera.cpp, race_robots.cpp,
+race_ending.cpp; SLES-53998 contrastado):
+- **Flujo**: 4513C0 (GOAL al entrar en la union de meta) -> modo 19 GOAL (49C9C0 / 49CC50 / 49CFD0; PS2 init
+  0x1b8e98). Con [780260] = 1 (SUMO_FE: la consola, 43F860) el modo 19 sigue con 33 (ranking, sin red: directo) y 34
+  (OutRun Miles) y 35 (continuar). El final de los recreativos (modo 24: AUTOSCENE 4B5F60 con \AS\as_E_xx, 485470,
+  fondo END_*_STAGE, 4527F0) solo se pide desde el 33 sin 43F860 (`43F8C0(43F860 ? 0x22 : 0x18)`): **la consola no
+  tiene escenas de final por meta** (AS.PS2 esta en el disco pero no se usa en este flujo). No hay pelicula de final
+  en MV.PS2 para las metas.
+- **49C9C0**: temporizador del modo 0x4B0 (0x258 en la variante 2); escena 3, o (variantes != 4, 5, 6, 7 y [0x359d98]
+  == 0x42) el byte 0x3f99b0 + (meta + preset x 5) x 4 con meta = 450380(8) - 0xA: preset 0 (el curso de OutRun 2 de
+  la demo) metas A..E -> escenas 3, 33, 3, 35, 34; preset 1 -> 1..5. 4871A0(escena). Musica 401000(0, pista, 0)
+  (sin bucle): variante 1 0x3f9a18 = {0x42, 0x3e, 0x3d, 0x41, 0x3f}, variante 2 0x3f9a30 = {0x3e, 0x3d, 0x42, 0x41,
+  0x3f} (MUSIC.PS2 `\61`..`\66`). La voz GOAL 0x16b de 49C9C0 no suena con 43F860 (la que suena es la de voces.c).
+- **4871A0 / 4874A0 / 486730 / 486EF0** (PS2 0x1f4ef0, 0x1f43a0, 0x1f43d0, 0x1f4c08): guion 0x36f2a0[escena]
+  (registros de 0x2C hasta op 0x1F; las 8 escenas usan el mismo 0x36d8a0) y movimiento 0x4229d0[escena] (20
+  canales de claves Hermite, 10 s). Guion: op 11(0) car+38 = car+1F4 = 0; op 6(1) PasPlCar_Ctrl 475720 (sin fisica);
+  op 7(1) el coche al origen del marco de la union (7D3190) con sus angulos; op 12 / 15 / 18 (seccion de curso de la
+  camara, estilo del humo, 2057C0 = RET); op 19 / 20 cercano 0,5 / lejano 1900; cuadro 60 efecto 0x96 (\PAS3.PAK,
+  cargado durante la carrera: 427700(0x206)); 120..220 82E7C8 = 3 (humo y marcas de las ruedas 0 y 1, 41C570);
+  599 cercano 0,1 / lejano 4000; 600 op 30 (fin; el coche y la camara se quedan). Movimiento: car+2D8 / +2E0
+  (desplazamiento: el coche entra desde z = -4 y se para en z = -120 de la union), +2E4 / +2E8 / +2EC (giros: trompo
+  de 2,17 rad), direccion de las ruedas delanteras y car+32 (c6 / c7), giro de las 4 ruedas (c8..c11), ojo / mira
+  de la camara en el marco del coche (c12..c17), balanceo (c18) y focal en mm (c19: FOV = 2 atan(0,70865 / (f x
+  0,03937))). La camara del modo 19 es 4853D0 (car+280 = T(car+14) Ry(car+2E) Rx(car+2C)).
+- **Coche** (475720 y 4A2650 con car+4 & 0x800000): car+B0 = T(car+14) Ry Rx Rz T(+2D8) Ry(+2E8) Rz(+2EC) Rx(+2E4),
+  car+F0 = identidad, cada rueda sobre el suelo (43EB60 0x400: +134 += reposo + suelo - y), 4A4710 (volante por
+  car+32). Los sucesos de la carrera siguen (trafico).
+- **Piloto** (488DD0 estado 9 con 44FF10; PS2 0x20250c): fila del modelo 0x40e9b8 y tabla por 44DC50 de la clave
+  (0x1B 0x40e978, 0x1A / 0x1C 0x40e998, si no 0x40e958); dos registros {id, bucle, fin} (0x36f500..: 0x60057 /
+  0x200016, {0x200000, 0x200010, 0x20001b}, ...); de cada uno el id, el bucle hasta 0xF0 / 0x168 cuadros y el de fin.
+  La acompanante: 0x60049 (ya estaba).
+- **GAD 498670**: el cartel GOAL (0x2c0009, ya estaba) y, cuando el temporizador baja de 0x3FC, la tabla de tiempos
+  por etapa (4979E0) y la voz 49A190: sin portar (la demo pone su texto de resultados en ese momento).
+- **Checkpoint** (fin de cada etapa intermedia): en el modo OutRun no hay escena: EXTEND TIME (2C00AC + 0x4d / 0x16c),
+  el bonus de etapa, los objetos de la union (BO) y, para el piloto, el cambio de area 44BCE0 con tablas -1 (nada).
+  Todo eso ya estaba (ver Checkpoint y Objetos animados de las uniones).
+
+En la demo: `tools/conv_meta.py` -> META.DAT (escenas 1..5, 33..35 con su guion y movimiento, tablas de escena y de
+musica, el efecto 0x96 en ADPCM de Yamaha; 110 KB de RAM desde el arranque); `demo/meta.c` (49C9C0 / 4871A0 /
+4874A0 / 486730 / 486EF0); demo/main.c `meta_*` (475720, 4853D0, planos, humo y marcas por la mascara, 0x4B0 cuadros);
+comun/robot.c `meta_piloto` (tablas METR / METE de CHR.DAT, conv_chr.py: 20 movimientos mas, +42 KB);
+comun/musica.c `musica_pon_una` (MUS61..MUS66.ADP sin MUS64, con tools/c/musica.c como las demas); comun/sfx.c
+`sfx_muestra_*` (30 KB del AICA durante la meta). Op del guion sin portar: 12 (la demo elige lo que dibuja a su manera)
+y 15 (el humo de la demo es el PROVISIONAL de siempre). PENDIENTE: la tabla de 498670, los modos 33 / 34 / 35 (millas,
+continuar) y la musica de la meta de la variante 0 (Time Attack del PC).
+
+Verificado en E (Flycast, `-DPRUEBA_AUTO -DPRUEBA_NODO=13 -DPRUEBA_FIN=400 -DPRUEBA_SIN_TIEMPO` y `PRUEBA_NODO=11`;
+`-DDIAG_META` registra camara y coche cada 60 cuadros, `-DDIAG_META_CUADRO=n` congela la escena): meta D (IMPE,
+escena 35, MUS65) y B (METR, escena 33, MUS62): el coche entra, derrapa con humo de las ruedas delanteras y se para
+cruzado delante del publico; piloto y acompanante con los brazos arriba; teleobjetivo de la escena 33; vuelta al
+menu a los 1200 cuadros; arranque normal (peliculas y menu) igual.
+
 ## Objetos animados de las uniones (2026-11-09)
 
 Queja del probador: "hay algunos efectos cuando se cambian de etapa que faltan, como pajaros volando". Son los objetos
@@ -914,7 +969,7 @@ cuadro de logica; tablas 'CAM1' de PARAM.DAT, `tools/conv_param.py`, localizadas
   segundo 14,5: persecucion con derrape) encuadra el coche como la vista 2 nueva (coche ~1/3 del ancho, horizonte a
   media pantalla).
 - PENDIENTE: interior del coche para la vista 1; camara de salida con el temporizador real (8367BC) y camaras de
-  meta/fin (4853D0, 485470, 485830); desplazamiento del centro de proyeccion +C4/+C8 (cero en las vistas usadas).
+  fin (485830; 485470 es la del final de los recreativos, modo 24, que la consola no usa: ver Escena de la meta); desplazamiento del centro de proyeccion +C4/+C8 (cero en las vistas usadas).
   Hecho: planos cercano 0,1 y lejano 4000 del original (seccion Graficos).
 
 ## Coches: materiales, colores y reflejo
@@ -1111,8 +1166,8 @@ decompilacion del PC (race_robots.cpp, rob_disp.cpp, rob_motion*.cpp).
     250 GTO y el modelo 12; el PC lo llama "convertible" pero son los de techo). CONFIRMADO.
   - PROBABLE: el estado 8 del piloto dura la cuenta atras (el original espera a que el temporizador de salida 49B2D0
     baje de 120); Calc avanza 1 cuadro por paso de logica.
-  - PENDIENTE (sin dato en la demo): la secuencia de la meta del piloto (estado 9: tablas 0x40e958..0x40e998 segun
-    44DC50 de la clave del curso; en la meta el piloto sigue conduciendo), el cambio de area 44BCE0 (car+184 y el
+  - Meta del piloto (estado 9): hecha (2026-11-10, ver Escena de la meta).
+  - PENDIENTE (sin dato en la demo): el cambio de area 44BCE0 (car+184 y el
     suceso 0x549068 = 0x14; en el modo OutRun las tablas del piloto, 0x36f620, valen -1), asustada y trompo (car+4 &
     0x1000 / 0x2000, car+0xC), el choque de car+4 & 0x30000, las poses pedidas (+68 / +70), el peso de pelo de
     4F1E80 y la escala de la luz car+0x58 de 487880. En el checkpoint del modo OutRun el original no hace nada

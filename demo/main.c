@@ -29,6 +29,7 @@
 #ifdef DIAG_PERFIL
 #include "perfil.h"
 #endif
+#include "meta.h"
 
 /* ---------------------------------------------------------------- modelos */
 typedef struct { uint32_t w, h, fmt, lista, off, tam; } tex_t;
@@ -1372,6 +1373,12 @@ static void modelo_coloca(modelo_t *m, const float *M)
 typedef struct { float s, x, a, v; float pos[3], fw[3], up[3]; int choque, derrape, t_derrape, t_muro; float deriva, freno_ant, gas_ant;
                  float pose_t[3], pose_r[3]; int y_ok; } coche_t;   /* y_ok: pos[1] es su suelo (referencia de 43EB60) */   /* pose: animacion de choque del original (solo al dibujar) */
 static coche_t yo;
+/* la escena de la meta del original (demo/meta.c): con meta_pas el coche va por el guion (PasPlCar_Ctrl 475720, sin
+   fisica) y la camara por su movimiento (4853D0) */
+static meta_t meta; static int meta_pas, meta_cam;
+static float meta_rueda_y[4];                                  /* 475720: rueda +134 por el suelo bajo cada rueda */
+static uint32_t efe_mascara;                                   /* 95AFAC del guion (82E7C8): humo y marcas por rueda */
+static float lejos_guion = LEJOS_PS2;                           /* el lejano del original (op 20 de la meta: 1900) */
 /* fisica del original para el coche del jugador (comun/or2_fisica.c) con la tabla de PARAM.DAT */
 #ifndef MODELO
 #define MODELO 6                                                /* modelo del coche (car+0x11): 6 = Testarossa */
@@ -3580,7 +3587,7 @@ static void efectos_paso(const coche_t *c, float dt)
         for (k = 0; k < 3; k++) { L[k] = q[k] + a[k]; R[k] = q[k] - a[k]; }
         mov = sqrtf((mk->izq[0] - q[0]) * (mk->izq[0] - q[0]) + (mk->izq[1] - q[1]) * (mk->izq[1] - q[1]) + (mk->izq[2] - q[2]) * (mk->izq[2] - q[2]));
         if (mov <= MARCA_MIN) continue;
-        if (f & 0xC02u) pone = c->derrape && i >= 2;             /* asfalto: PROVISIONAL (ver arriba) */
+        if (f & 0xC02u) pone = (c->derrape && i >= 2) || ((efe_mascara >> i) & 1);   /* asfalto: PROVISIONAL (ver arriba); la mascara del guion de la meta */
         else if (f & 0x8004u) { pone = 1; clase = 1; }
         else if (f & 0x18u) { pone = 1; clase = 2; }
         if (pone && clase == mk->clase && clase < marca_tex_ok) {
@@ -3592,11 +3599,14 @@ static void efectos_paso(const coche_t *c, float dt)
         }
         memcpy(mk->izq, L, 12); memcpy(mk->der, R, 12); mk->clase = clase;
     }
-    if (c->derrape) {                                           /* humo: el de antes (PROVISIONAL), de las traseras */
+    if (c->derrape || efe_mascara) {                            /* humo: el de antes (PROVISIONAL), de las traseras o de
+                                                                   las ruedas de la mascara de la meta (82E7C8) */
         static int alterna;
         if (++alterna & 1) {
             humo_t *h = humos + humo_sig; int w = 2 + ((alterna >> 1) & 1);
-            float fx = -fpar.cg_tras, ly = fpar.via[1] * ((w & 1) ? -0.5f : 0.5f);
+            float fx, ly;
+            if (!c->derrape && !(efe_mascara & 0xC)) w -= 2;
+            fx = w < 2 ? fpar.cg_del : -fpar.cg_tras; ly = fpar.via[w >> 1] * ((w & 1) ? -0.5f : 0.5f);
             for (k = 0; k < 3; k++) h->p[k] = c->pos[k] + c->fw[k] * fx + r[k] * ly;
             h->edad = 0.01f; humo_sig = (humo_sig + 1) % NHUMO;
         }
@@ -4832,7 +4842,7 @@ static void niebla_pon(void)
     for (i = 0; i < 129; i++) {
         float t = i ? (float)(1 << (i >> 4)) * (16 + (i & 15)) / 16.0f : 1.0f, z = lejos / t, f, g;
         f = (z - lejos * 0.55f) / (lejos * 0.45f); f = f < 0 ? 0 : f > 1 ? 1 : f;
-        if (lejos >= LEJOS_PS2) f = 0;                          /* la del original: sin fundido (no lo tiene) */
+        if (lejos >= LEJOS_PS2 || lejos >= lejos_guion) f = 0;  /* la del original: sin fundido (no lo tiene) */
         g = niebla_d * z; g = niebla_d <= 0 ? 0 : niebla_modo == 2 ? 1 - expf(-g * g) : 1 - expf(-g);
         tab[i] = 1 - (1 - f) * (1 - g);
     }
@@ -5573,13 +5583,14 @@ static void coche_anima_paso(int titulo)
     if (!ani.ok) return;
     if (titulo) { coche_anima_reposo(); return; }
     vmf = fis_ok ? fis.vel_mf : yo.v / 60.2f;                   /* car+1C4 (m por cuadro) */
-    kmh = fis_ok ? fis.kmh : (int)(yo.v * 3.6f);                /* car+1F4 */
-    for (k = 0; k < 4; k++) {                                   /* giro: rueda +30 -= omega (rad/s) por el tiempo */
+    kmh = meta_pas ? meta.kmh : fis_ok ? fis.kmh : (int)(yo.v * 3.6f);   /* car+1F4 (op 11 de la meta) */
+    for (k = 0; k < 4 && meta_pas; k++) ani.giro[k] = (float)meta.giro[k] * 9.58738019e-05f;   /* 486EF0: rueda +30 */
+    for (k = 0; k < 4 && !meta_pas; k++) {                      /* giro: rueda +30 -= omega (rad/s) por el tiempo */
         float om = fis_ok ? fis.r[k].omega : yo.v / ani.radio;
         ani.giro[k] -= om * dt;
         if (ani.giro[k] > (float)M_PI) ani.giro[k] -= 2 * (float)M_PI; else if (ani.giro[k] < -(float)M_PI) ani.giro[k] += 2 * (float)M_PI;
     }
-    smp = fis_ok ? -fis.s32 : 0;                                /* 4A4710: -car+32 acotado a +-5461, x 6 */
+    smp = meta_pas ? -meta.s32 : fis_ok ? -fis.s32 : 0;         /* 4A4710: -car+32 acotado a +-5461, x 6 */
     if (smp < -5461) smp = -5461; else if (smp > 5461) smp = 5461;
     ani.h204[ani.i204] = (int16_t)(smp * 6); ani.i204 = (ani.i204 + 1) % 30;
     for (k = 0, sum = 0; k < 30; k++) sum += ani.h204[k];
@@ -5603,7 +5614,7 @@ static void coche_anima_paso(int titulo)
         float a = kmh * 0.00999999978f - 1.0f; if (a > 4.0f) a = 4.0f;
         ani.fase += a; if (ani.fase > 255.0f) ani.fase = 0;
     }
-    ani.caliente = (fis_ok ? fis.freno_op : 0) > 200 && kmh != 0;   /* disco +94 (46AE70) */
+    ani.caliente = (meta_pas ? meta.freno : fis_ok ? fis.freno_op : 0) > 200 && kmh != 0;   /* disco +94 (46AE70) */
 }
 /* matrices de las piezas para el cuadro (46AE70 / 469600 con el estado de coche_anima_paso) */
 static void coche_anima_matrices(int titulo)
@@ -5627,7 +5638,8 @@ static void coche_anima_matrices(int titulo)
        car+14 = CG - R (0, +224, 0) (CopyCarWork 4A1140) con la R del cuerpo: aqui la altura del CG sobre la calzada
        (fis.alt), el cabeceo y el balanceo de la suspension (ActionForce2) alrededor del CG, menos alt_cg (+224) */
     m_id(ani_m[0]);
-    if (fis_ok && !titulo) {
+    if (meta_pas && !titulo) ty = v = 0;                       /* 475720: car+F0 = identidad (sin 4A2910 ni fisica) */
+    else if (fis_ok && !titulo) {
         m_tras(ani_m[0], 0, fis.alt, 0); m_rx(ani_m[0], fis.cabeceo); m_rz(ani_m[0], fis.balanceo);
         m_tras(ani_m[0], 0, -fpar.alt_cg, 0);
     }
@@ -5643,8 +5655,8 @@ static void coche_anima_matrices(int titulo)
     m_tras(ani_m[PZ_FAROS], ani.pz[PZ_FAROS][0], ani.pz[PZ_FAROS][1], ani.pz[PZ_FAROS][2]); m_rx(ani_m[PZ_FAROS], ani.roof);
     for (k = 0; k < 4; k++) {                                   /* ruedas: fuera de car+F0 */
         const float *p = ani.pz[PZ_RUEDA + k];
-        float y = fis_ok && !titulo ? fis.rueda_y[k] : p[1];   /* car+134 */
-        float dir = fis_ok && !titulo ? (float)fis.r[k].ang * U : 0;
+        float y = meta_pas && !titulo ? meta_rueda_y[k] : fis_ok && !titulo ? fis.rueda_y[k] : p[1];   /* car+134 */
+        float dir = meta_pas && !titulo && k < 2 ? (float)(k ? meta.dir1 : meta.s32) * U : fis_ok && !titulo ? (float)fis.r[k].ang * U : 0;
         matrix_t *P = &ani_m[PZ_PINZA + k], *R = &ani_m[PZ_RUEDA + k];
         memcpy(*P, cuerpo, sizeof(matrix_t)); m_tras(*P, p[0], y, p[2]);
         if (p[3] != 0) m_rz(*P, p[3]);
@@ -6047,6 +6059,108 @@ static int coche_carga(int k)
     return 0;
 }
 
+/* ---------------------------------------------------------------- la escena de la meta (demo/meta.c)
+   Al entrar en la union de meta (4513C0) el original pasa al modo 19 (49C9C0): la escena de la meta (4871A0) y su
+   musica; el suceso 7 (4874A0) lleva el guion y el movimiento, el coche pasa a PasPlCar_Ctrl (475720: sin fisica, en
+   el origen del marco de la union con el desplazamiento y los giros del movimiento, car+2D8.. / +2E4.., 4A2650) y la
+   camara es la de la meta (4853D0: ojo y mira del movimiento en el marco car+280 = T(car+14) Ry(car+2E) Rx(car+2C)).
+   El modo dura su temporizador (0x4B0 cuadros) y despues el original sigue con el ranking y las millas (modos 33 /
+   34, sin portar): aqui se vuelve al menu como antes. */
+#define META_CUADROS 0x4b0                                      /* 49C9C0: 43F900(0x4B0) */
+static const float *meta_marco;                                 /* op 7: col_un.marco (7D3190) o col_et.marco (7D2DA0) */
+static int meta_g;                                              /* 450380(8) - 0xA */
+static void meta_mundo(const float *l, float *w)               /* car+280 (y la parte del marco de car+B0) */
+{
+    float c = cosf(meta_marco[3]), sn = sinf(meta_marco[3]);
+    w[0] = l[0] * c + l[2] * sn + meta_marco[0]; w[1] = l[1] + meta_marco[1]; w[2] = -l[0] * sn + l[2] * c + meta_marco[2];
+}
+static void meta_gira(float *v, int eje, float a)               /* D3DXMatrixRotation{X,Y,Z} con vector fila */
+{
+    float c = cosf(a), sn = sinf(a), x = v[0], y = v[1], z = v[2];
+    if (eje == 0) { v[1] = y * c - z * sn; v[2] = y * sn + z * c; }
+    else if (eje == 1) { v[0] = x * c + z * sn; v[2] = -x * sn + z * c; }
+    else { v[0] = x * c - y * sn; v[1] = x * sn + y * c; }
+}
+static void meta_cuerpo(const float *p, float *w)              /* car+B0 (4A2650 con car+4 & 0x800000): Rx Rz Ry, + t */
+{
+    float q[3] = { p[0], p[1], p[2] };
+    meta_gira(q, 0, meta.r[0]); meta_gira(q, 2, meta.r[2]); meta_gira(q, 1, meta.r[1]);
+    q[0] += meta.t[0]; q[1] += meta.t[1]; q[2] += meta.t[2];
+    meta_mundo(q, w);
+}
+static void meta_entra(void)                                    /* 49C9C0 */
+{
+    int e, pista;
+    meta_pas = meta_cam = 0; efe_mascara = 0; meta_marco = col_un.marco;
+    if (!meta_lista()) return;
+    meta_g = cur_nodo >= 10 && cur_nodo <= 14 ? cur_nodo - 10 : 0;
+    e = meta_escena(variante, TIM_PRESET, meta_g);
+    meta_empieza(&meta, e);
+    memcpy(meta_rueda_y, fis.rueda_y, sizeof meta_rueda_y);
+    pista = meta_pista(variante, meta_g);
+    if (pista >= 0 && musica_pon_una(pista)) dbglog(DBG_ERROR, "META: sin MUS%d.ADP\n", pista);
+    meta_cam = cam_ok;
+    dbglog(DBG_INFO, "META: meta %c (etapa %d), escena %d, musica %d\n", 'A' + meta_g, cur_nodo, e, pista);
+}
+static void meta_sale(void)
+{
+    meta_termina(); meta_pas = meta_cam = 0; efe_mascara = 0; meta.activa = 0;
+    cerca = CERCA_PS2; lejos_guion = LEJOS_PS2;
+}
+/* un paso de logica del modo 19: suceso 7 (4874A0), el coche (475720) y sus efectos */
+static void meta_juego_paso(void)
+{
+    int k; float o[3] = { 0, 0, 0 }, x[3] = { 1, 0, 0 }, y[3] = { 0, 1, 0 }, z[3] = { 0, 0, 1 }, w[3];
+    meta_paso(&meta);
+    if (meta.coloca >= 0) meta_marco = meta.coloca ? col_un.marco : col_et.marco;   /* op 7: el coche al origen */
+    if (meta.cerca > 0) cerca = meta.cerca;                     /* op 19 / 20: camara +BC / +C0 */
+    if (meta.lejos > 0) lejos_guion = meta.lejos;
+    efe_mascara = (meta.humo & 1 ? 3u : 0u) | (meta.humo & 2 ? 0xCu : 0u);
+    meta_pas = meta.pasplcar;
+    if (!meta_pas) { coche_paso(&yo, 0, 0, 0.6f, 1.0f / 60); return; }
+    /* 4A2650: car+B0; en la demo el coche (pos, adelante = -z, arriba) y sin la pose de choque */
+    meta_cuerpo(o, yo.pos);
+    meta_cuerpo(x, w); for (k = 0; k < 3; k++) x[k] = w[k] - yo.pos[k];
+    meta_cuerpo(y, w); for (k = 0; k < 3; k++) yo.up[k] = w[k] - yo.pos[k];
+    meta_cuerpo(z, w); for (k = 0; k < 3; k++) yo.fw[k] = yo.pos[k] - w[k];
+    memset(yo.pose_t, 0, sizeof yo.pose_t); memset(yo.pose_r, 0, sizeof yo.pose_r);
+    yo.y_ok = 1; yo.derrape = 0; yo.t_derrape = 0; yo.choque = 0;
+    (void)x;
+    /* 475720: cada rueda sobre el suelo (43EB60 0x400 en car+130 por car+B0): +134 += +98+4 (reposo) + suelo - y */
+    if (ani.ok)
+        for (k = 0; k < 4; k++) {
+            const float *pz = ani.pz[PZ_RUEDA + k]; float q[3] = { pz[0], meta_rueda_y[k], pz[2] }, gy;
+            meta_cuerpo(q, w); gy = w[1];
+            if (suelo_mundo(w[0], w[2], &gy, 1, NULL) < 0) continue;   /* modo 0x400; sin suelo (tipo 1): sigue */
+            meta_rueda_y[k] += pz[1] + gy - w[1];
+        }
+    {   /* la posicion en la ruta de la demo (solo para lo que la usa: cargas, trafico, suelo de reserva) */
+        float p[3], th, dx, dz; int it;
+        for (it = 0; it < 2; it++) {
+            ruta_en(yo.s, p, &th, NULL, NULL); dx = yo.pos[0] - p[0]; dz = yo.pos[2] - p[2];
+            yo.s += dx * sinf(th) - dz * cosf(th);
+            if (yo.s > longitud - 1.0f) yo.s = longitud - 1.0f;
+        }
+        ruta_en(yo.s, p, &th, NULL, NULL);
+        yo.x = (yo.pos[0] - p[0]) * cosf(th) + (yo.pos[2] - p[2]) * sinf(th);
+    }
+    traf_paso(1.0f / 60);                                       /* los sucesos de la carrera siguen (49C9C0 no los para) */
+    efectos_paso(&yo, 1.0f / 60);
+}
+/* 4853D0: la camara de la meta (ojo y mira del movimiento en el marco del coche colocado) */
+static void meta_camara(void)
+{
+    meta_mundo(meta.ojo, cam.ojo); meta_mundo(meta.mira, cam.mira);
+    cam.balanceo = meta.balanceo; cam.fov = meta.fov; cam.despl[0] = cam.despl[1] = 0;
+#ifdef DIAG_META
+    if (meta.cuadro % 60 == 1)
+        dbglog(DBG_INFO, "DIAGMETA %d marco %.1f %.1f %.1f %.2f ojo %.1f %.1f %.1f mira %.1f %.1f %.1f fov %.2f bal %.2f coche %.1f %.1f %.1f t %.1f %.1f r %.2f\n",
+               meta.cuadro, (double)meta_marco[0], (double)meta_marco[1], (double)meta_marco[2], (double)meta_marco[3],
+               (double)cam.ojo[0], (double)cam.ojo[1], (double)cam.ojo[2], (double)cam.mira[0], (double)cam.mira[1], (double)cam.mira[2],
+               (double)cam.fov, (double)cam.balanceo, (double)yo.pos[0], (double)yo.pos[1], (double)yo.pos[2], (double)meta.t[0], (double)meta.t[2], (double)meta.r[1]);
+#endif
+}
+
 int main(int argc, char **argv)
 {
     /* bufer de parametros de TA_VB_BYTES (x2); opacos con bloques de 32 (el suelo cercano toca muchas teselas) y 4
@@ -6136,6 +6250,7 @@ int main(int argc, char **argv)
     musica_inicia();                                            /* la musica la pone el menu (sin MENU.DAT, aqui) */
     sfx_ok = !sfx_inicia();
     voz_ok = sfx_ok && !voces_inicia();                         /* VOCES.DAT: voces de la carrera */
+    if (meta_carga()) dbglog(DBG_ERROR, "META: sin META.DAT (la meta sin su escena)\n");   /* 113 KB */
     texto_arriba("", NULL, NULL); texto_centro("");
     /* VMU: icono del fichero de guardado y LCD de los mandos (VMU.DAT); el logo en la LCD desde ya (pelicula y titulo) */
     if (!vmu_inicia()) { vmu_lcd_logo(); vmu_lcd_paso(); }
@@ -6449,6 +6564,7 @@ int main(int argc, char **argv)
                         estado = META; t_estado = 0; pt_bonus_etapa(); texto_centro("GOAL!");
                         if (variante == 2) infarto_meta();      /* 44FF10 */
                         resultados(1); if (voz_ok) voces_meta();
+                        meta_entra();                           /* modo 19: la escena de la meta (demo/meta.c) */
                         dbglog(DBG_INFO, "CURSO: GOAL en %.4s (s %.0f), VRAM libre %uK (zona %uK), %u texturas rebajadas\n", curso[cur_nodo].zona,
                                (double)yo.s, (unsigned)(vram_libre() >> 10), (unsigned)(ar_libre() >> 10), (unsigned)vram_rebajadas);
                     }
@@ -6462,23 +6578,32 @@ int main(int argc, char **argv)
                 }
             }
         } else {                                                /* META o AGOTADO: el coche se para solo */
-            coche_paso(&yo, 0, 0, 0.6f, 1.0f / 60);
+            if (estado == META && meta_lista()) {               /* modo 19 (49CC50): suceso 7 y el coche del guion */
+                meta_juego_paso();
+                if (lejos_obj > lejos_guion) lejos_obj = lejos_guion;
+                else if (lejos_guion >= LEJOS_PS2 && lejos_obj < LEJOS_PS2) lejos_obj = lejos = LEJOS_PS2;
+                if (lejos > lejos_obj) lejos = lejos_obj;
+            } else coche_paso(&yo, 0, 0, 0.6f, 1.0f / 60);
             pt_msg_paso();
-            if ((nuevo & CONT_START) || t_estado > 600) {
+            if ((nuevo & CONT_START) || t_estado > (estado == META && meta_lista() ? META_CUADROS : 600)) {
+                meta_sale(); lejos_obj = lejos = LEJOS_PS2;
                 if (!auto_) menu_suma_tiempo(crono);            /* salida de la meta / del fin del tiempo (PS2 0x1b96bc / 0x1b9b58) */
                 estado = TITULO; auto_ = 0; nuevo = 0; texto_centro(""); hud_baja_tex(); menu_entra(manual_, pista, NPISTAS);
             }
         }
         /* camara del original: un paso por paso de logica; la de la salida (485250) mientras el temporizador del
            original (8367BC = 360 - t_estado) pasa de 180 (485FE0): los 180 primeros cuadros de la cuenta */
-        if (cam_ok && estado != TITULO && !pausa)
-            camara_paso((nuevo & CONT_Y) != 0, estado == CUENTA && t_estado < 180);
+        if (cam_ok && estado != TITULO && !pausa) {
+            if (estado == META && meta_cam) meta_camara();      /* 4853D0 (modo 19) */
+            else camara_paso((nuevo & CONT_Y) != 0, estado == CUENTA && t_estado < 180);
+        }
         if (!pausa) coche_anima_paso(estado == TITULO);                       /* ruedas, volante, faros, carroceria (46AE70) */
         if (!pausa && chr_ok == 1 && estado != TITULO) {             /* el piloto y la acompanante (488DD0 / 489A90) */
             robot_coche_t rc;
             rc.modelo = modelo_jug; rc.s204 = ani.s204; rc.fase = estado == CUENTA ? 0 : estado == CARRERA ? 1 : estado == META ? 2 : 3;
             rc.choque = fis_ok ? fis.choque : 0; rc.t_choque = fis_ok ? fis.t_choque : 0; rc.t_recup = fis_ok ? fis.t_recup : 0;
-            rc.sup = sup_cen; rc.kmh = fis_ok ? fis.kmh : (int)(yo.v * 3.6f); rc.s4e = fis_ok ? fis.s4e : 0;
+            rc.sup = sup_cen; rc.kmh = meta_pas ? meta.kmh : fis_ok ? fis.kmh : (int)(yo.v * 3.6f); rc.s4e = fis_ok ? fis.s4e : 0;
+            rc.clase_meta = -1;                                 /* 44DC50 de la clave: en el curso de OutRun 0..14 */
             { uint64_t t0r = timer_us_gettime64(); robot_paso(&rc); chr_us += (uint32_t)(timer_us_gettime64() - t0r); }
         }
         }
@@ -6570,7 +6695,7 @@ int main(int argc, char **argv)
         if (cex_n && menu_color() != cex_color) coche_color(menu_color());   /* color elegido (boton Y del menu) */
         /* luces: sin SCN_EFC (bits de noche y tunel de 4A25F0) en la demo, banderas 0; freno = pedal pisado */
         coche_anima_matrices(estado == TITULO);                 /* piezas animadas (46AE70) */
-        if (cex_n) coche_luces(ani.ban, estado != TITULO && yo.freno_ant > 0.0f, estado != TITULO && ani.caliente);
+        if (cex_n) coche_luces(ani.ban, estado != TITULO && (meta_pas ? meta.freno != 0 : yo.freno_ant > 0.0f), estado != TITULO && ani.caliente);
         if (cex_n) coche_entorno(mod_coche);
         if (cex_n) coche_luz(mod_coche, estado != TITULO);     /* la luz del entorno 2 en la pintura */
         chr_listo_cuadro = 0; chr_vtx_ult = chr_vtx; chr_us_ult = chr_us; chr_vtx = chr_us = 0;
@@ -6683,9 +6808,13 @@ int main(int argc, char **argv)
                     }
                 }
                 if (estado == META || estado == AGOTADO) {      /* resultados y fundido a negro al final */
-                    caja(64, 150, 512, 110, 0xA0000000);
-                    rect_txr(txt_arr, 512, 128, 68, 156, 512, 128, PVR_LIST_TR_POLY);
-                    if (t_estado > 540) caja(0, 0, 640, 480, (uint32_t)(fminf((t_estado - 540) / 60.0f, 1.0f) * 255) << 24);
+                    int fin = estado == META && meta_lista() ? META_CUADROS : 600;
+                    /* en la meta, la tabla del original (498670) sale cuando el temporizador baja de 0x3FC (180 cuadros) */
+                    if (!(estado == META && meta_lista() && t_estado < META_CUADROS - 0x3fc)) {
+                        caja(64, 150, 512, 110, 0xA0000000);
+                        rect_txr(txt_arr, 512, 128, 68, 156, 512, 128, PVR_LIST_TR_POLY);
+                    }
+                    if ((int)t_estado > fin - 60) caja(0, 0, 640, 480, (uint32_t)(fminf((t_estado - (fin - 60)) / 60.0f, 1.0f) * 255) << 24);
                     texto = 0;
                 }
                 if (pausa && estado == CARRERA) menu_pausa_dibuja();   /* menu de pausa encima de todo */

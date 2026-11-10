@@ -30,5 +30,9 @@ const char *sfx_voces_idioma(void);
 int  sfx_voces_juego(const char *fich, void *buf, uint32_t cap);
 void sfx_voz_grupo(int g);                 /* banco HAM de la etapa (-1: ninguno) */
 void sfx_voz_se(int id);                   /* un efecto del banco de voces por el canal de efectos */
+/* una muestra suelta (ADPCM de Yamaha) por el canal de efectos de las voces (la escena de la meta, demo/meta.c) */
+uint32_t sfx_muestra_sube(const void *adpcm, uint32_t bytes);   /* direccion en el AICA o 0 */
+void sfx_muestra_baja(uint32_t a);
+void sfx_muestra_toca(uint32_t a, uint32_t muestras, uint32_t hz, int vol_irx);
 
 #endif

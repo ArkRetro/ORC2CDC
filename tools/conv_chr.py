@@ -17,7 +17,7 @@ Formato de RBT1 (todo u32 / float salvo lo dicho; desplazamientos desde el princ
   puno, 3 mano abierta), n matrices, 0, u16 hueso[4], u16 inversa[4]}; por malla (el campo del nodo de cada malla del
   modelo) {u16 pieza, u16 material}; por vertice del modelo {s8 normal x 127 [3], 0, u8 peso x 255 [4]}; tablas
   {4 letras, n, n u32} hasta 'FIN ' (ver tablas_logica: MODC, MIRA, AGAR, CHQE, CHQ7, CHQ6, CERR, LISA, LISC, ASNT,
-  MATE: difuso, ambiente y emision / 128 de cada material distinto).
+  METR, METE (la meta del piloto), MATE: difuso, ambiente y emision / 128 de cada material distinto).
 
 Todo sale del disco al convertir (aqui no hay datos del juego). Origen de cada cosa (SLES-53998, contrastado con la
 decompilacion del PC, platform/race_robots.cpp, rob_disp.cpp, rob_motion*.cpp):
@@ -415,6 +415,16 @@ def tablas_logica(A):
     import conv_coche
     t['ASNT'] = [struct.unpack('<I', struct.pack('<f', float(x)))[0]
                  for m in range(30) for a in conv_coche.disposicion(A, m)[0]['asientos'] for x in a]
+    # meta del piloto (estado 9 de 488DD0; PS2 0x20250c..0x2027cc): fila del modelo (lb car+0x11, 0x40e9b8) y por
+    # clase de curso (44DC50 = 0x176700 de la clave: 0x1b -> 0x40e978, 0x1a / 0x1c -> 0x40e998, si no 0x40e958) 4 filas
+    # de 2 registros {id, bucle, fin} (puntero 0: sin registro -> 0xFFFFFFFE en los tres)
+    t['METR'] = list(E.u32(0x40e9b8, 30))
+    v = []
+    for base in (0x40e958, 0x40e978, 0x40e998):
+        for k in range(8):
+            r = E.u32(base + 4 * k)
+            v += [0xfffffffe] * 3 if r == 0 else [x & 0xffffffff for x in E.u32(r, 3)]
+    t['METE'] = v
     return t
 
 def ids_movimientos(t):
@@ -423,6 +433,7 @@ def ids_movimientos(t):
     0x230003 0x203510.., 0x60036 0x203088, 0x60049 / 0x25000c 0x204128 / 0x2040e8, 0x60055 0x203df8)"""
     s = set(x for x in t['MODC'] + t['MIRA'] + t['CHQ7'] + t['CHQ6'] if x != 0xffffffff)
     s |= {0x60000, 0x25000c, 0x6004b, 0x6005f, 0x250003, 0x220007, 0x230003, 0x60036, 0x60049}
+    s |= set(x for x in t['METE'] if x not in (0xffffffff, 0xfffffffe))      # meta del piloto (estado 9)
     for c in ('LISA', 'LISC'):
         v = t[c]
         for k in range(8): s |= set(x for x in v[5 * k + 1:5 * k + 5] if x != 0xffffffff)

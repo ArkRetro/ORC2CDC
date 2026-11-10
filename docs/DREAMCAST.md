@@ -399,7 +399,7 @@ los personajes y us de CPU del cuadro anterior):
 | Vertices dibujados | 2698 por cuadro (piloto 1238, acompanante 1460; 325 tiras de 8,3 de media; una de las dos manos) |
 | TA | 80 KB teoricos (`ta_teo`), 139 KB contados (x 1,75); van en lo "que no es la etapa": el reparto de `ta_cabe` quita de la etapa lo que no cabe (PALM con el 360 Spider: 16800-17040 vertices de etapa sin ellos, 12630-13640 con ellos; total del cuadro igual, 26300-27600; sin `TOPE` ni `CORTO`) |
 | VRAM | 22 KB (7 texturas, 5 en VQ; de 106 KB en 16 bits), siempre subidas |
-| RAM | CHR.DAT 177 KB en el monton (199 KB menos los texeles) + ~76 KB de tablas fijas (motor: 2 x 31 KB; matrices de las piezas 9 KB) |
+| RAM | CHR.DAT 177 KB en el monton (199 KB menos los texeles; 2026-11-10: 219 KB con los 20 movimientos de la meta del piloto) + ~76 KB de tablas fijas (motor: 2 x 31 KB; matrices de las piezas 9 KB); META.DAT 110 KB desde el arranque (escena de la meta, demo/meta.c) y 30 KB del AICA (efecto 0x96) solo durante la meta |
 | CPU (Flycast) | 3,2 ms por cuadro: 0,76 la logica y el motor (dos esqueletos de 53 y 50 huesos con IK), 2,45 la mezcla y la luz por vertice (una pasada de ftrv por matriz; color por tabla de 33 valores de n.l por material) |
 
 RAM: CHR.DAT se lee al arrancar, antes que los huecos y la ruta (lo que se pide despues troceaba el monton), y nada mas

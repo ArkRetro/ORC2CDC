@@ -29,8 +29,12 @@
      abiertos; GOAL 0x60049 (cerrados 0x25000c) y TIME OVER 0x60036 en bucle; al acabar cada reaccion vuelve a
      0x6004b (sentada) en bucle. Listas LISA / LISC (PS2 0x40eb28 / 0x40eb68 segun CERR, 45B380 = PS2 0x1aa3a0).
    - Manos (487940 / 5148D0 / 5148F0): el puno si el movimiento esta en la lista AGAR (PS2 0x36f658), si no la abierta.
-   No portado (PENDIENTE, sin dato en la demo): la secuencia de la meta del piloto (estado 9: tablas 0x40e958..
-   0x40e998 segun 44DC50 de la clave del curso), el cambio de area (44BCE0: en el modo OutRun las tablas del piloto
+   - Meta del piloto (estado 9 con 44FF10; PS2 0x20250c..0x2027cc, PC 488DD0 caso 2): fila del modelo (METR =
+     0x40e9b8) y tabla segun 44DC50 de la clave (0x1B 0x40e978, 0x1A / 0x1C 0x40e998, si no 0x40e958): dos registros
+     {id, bucle, fin} (METE); de cada uno: id una vez (o nada si es -1), al acabar (o 0xF0 / 0x168 cuadros) el de bucle
+     en bucle, y a los 0xF0 / 0x168 cuadros el de fin (si no es -1); tras el primero espera 0x78 cuadros o su fin.
+     Sin METR / METE (CHR.DAT antiguo) sigue como antes (sin secuencia).
+   No portado (PENDIENTE, sin dato en la demo): el cambio de area (44BCE0: en el modo OutRun las tablas del piloto
    valen -1), asustada y trompo (car+4 & 0x1000 / 0x2000, car+0xC), choque de car+4 & 0x30000, el pelo de 4F1E80 y la
    escala de la luz car+0x58 (487880). */
 #include <math.h>
@@ -68,6 +72,7 @@ static int listo;
 
 /* tablas de la logica (bloque TAB de RBT1) */
 static const uint32_t *t_modc, *t_mira, *t_agar, *t_chqe, *t_chq7, *t_chq6, *t_cerr, *t_lisa, *t_lisc, *t_asnt, *t_mate;
+static const uint32_t *t_metr, *t_mete; static uint32_t n_metr, n_mete;   /* meta del piloto (estado 9) */
 static uint32_t n_agar, n_chqe, n_mate;
 
 /* ---------------------------------------------------------------- matrices de fila: M = op M (pila del PC) */
@@ -439,6 +444,8 @@ int robot_inicia(const void *rbt, uint32_t bytes)
     t_cerr = tabla("CERR", &n); if (n < 30) return -4;
     t_mate = tabla("MATE", &n_mate); n_mate /= 9;
     t_lisa = tabla("LISA", NULL); t_lisc = tabla("LISC", NULL); t_asnt = tabla("ASNT", &n);
+    t_metr = tabla("METR", &n_metr); t_mete = tabla("METE", &n_mete);
+    if (n_metr < 30 || n_mete < 3 * 8 * 3) t_metr = t_mete = NULL;
     if (!t_mate || !t_agar || !t_chqe || !t_chq7 || !t_chq6 || !t_lisa || !t_lisc || !t_asnt || n < 30 * 6) return -4;
     for (i = 0; i < ROBOT_N; i++) {
         motor_t *m = mot + i; int j, k;
@@ -461,6 +468,7 @@ enum { R_IDLE, R_BORED, R_SCARED, R_SPIN, R_CRASH, R_TURN, R_LAND, R_JUMP, R_AIR
 static struct {
     int modelo, cerr;
     int d_est, d_cuenta;                            /* 82F588, 82F58C */
+    int m_sub, m_t; const uint32_t *m_ent;          /* 82F590, 82F594, 82F598 (la meta del piloto) */
     int a_est, a_tiempo, a_fin;                     /* 82F5A4, 82F5A8, 82F5B0 */
     int8_t pick_idle, pick_turn, pick_jump, pick_land;   /* 82F5AA.., 82F2F8 / 82F2F9 */
 } lg;
@@ -493,6 +501,37 @@ void robot_carrera(int modelo)
     a->gu = agarre(a->id);
 }
 
+/* 488DD0 estado 9 (PS2 0x20250c): la secuencia de la meta; registros de 3 (0xFFFFFFFE: no hay registro) */
+static void meta_piloto(motor_t *m, const robot_coche_t *c)
+{
+    const uint32_t *r;
+    int s = lg.m_sub, b = s >= 5;                   /* 1..4 el primer registro, 5..8 el segundo */
+    switch (s) {
+    case 0: {
+        int fila = (int)t_metr[lg.modelo], tb = c->clase_meta == 0x1b ? 1 : c->clase_meta == 0x1a || c->clase_meta == 0x1c ? 2 : 0;
+        lg.m_ent = t_mete + (tb * 8 + (fila & 3) * 2) * 3; lg.m_sub = 1;
+        break; }
+    case 1: case 5:
+        r = lg.m_ent + 3 * b; lg.m_t = b ? 0x168 : 0xf0;
+        if (r[0] == 0xfffffffeu) { lg.m_sub = b ? 8 : 4; break; }
+        if ((int32_t)r[0] < 0) { lg.m_t = -1; lg.m_sub = b ? 6 : 2; break; }
+        pon_mezcla(m, r[0], 0); lg.m_sub = b ? 6 : 2;
+        break;
+    case 2: case 6:
+        r = lg.m_ent + 3 * b;
+        if (!fin_mov(m) && lg.m_t >= 0) {
+            if (lg.m_t != 0) { lg.m_t--; break; }
+            lg.m_sub = (b ? 7 : 3) + ((int32_t)r[2] < 0 ? 1 : 0);
+            break;
+        }
+        pon_mezcla(m, r[1], -1); lg.m_t = b ? 0x168 : 0xf0;
+        break;
+    case 3: pon_mezcla(m, lg.m_ent[2], 0); lg.m_sub = 4; lg.m_t = 0x78; break;
+    case 4: { int t = lg.m_t; lg.m_t = t - 1; if (t >= 0 && !fin_mov(m)) break; lg.m_sub = 5; break; }
+    case 7: pon_mezcla(m, lg.m_ent[3 + 2], 0); lg.m_sub = 8; break;
+    default: break;
+    }
+}
 static void piloto(const robot_coche_t *c)          /* 488DD0 (variante 1) */
 {
     motor_t *m = mot; const uint32_t *mira = t_mira + 4 * lg.modelo;
@@ -500,7 +539,7 @@ static void piloto(const robot_coche_t *c)          /* 488DD0 (variante 1) */
     int k;
     if (lg.d_est == 8) { if (c->fase != 0) lg.d_est = 1; }
     else if (c->fase == 3) { if (lg.d_est != 0xa) { pon_mezcla(m, 0x60000, -1); lg.d_est = 0xa; } }
-    else if (c->fase == 2) { /* meta: secuencia del estado 9 sin portar (PENDIENTE) */ }
+    else if (c->fase == 2) { if (t_metr && lg.d_est != 9) { lg.d_est = 9; lg.m_sub = 0; } }   /* 44FF10 */
     else if (c->t_recup > 0.0f) {
         if (lg.d_est != 6 && lg.d_est != 7) {
             k = c->choque - 1;
@@ -520,6 +559,7 @@ static void piloto(const robot_coche_t *c)          /* 488DD0 (variante 1) */
         if (fin_mov(m)) { lg.d_est = 1; conecta(m, t_modc[lg.modelo], fr, 10.0f); m->bucles = 0; }
     }
     if (lg.d_est == 1 || lg.d_est == 4 || lg.d_est == 8) pon_cuadro(m, fr);
+    if (lg.d_est == 9) meta_piloto(m, c);
     manos(m);
     calc(m);
 }

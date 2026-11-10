@@ -25,6 +25,7 @@ typedef struct {
     uint32_t sup;                 /* car+0x248: banderas del material bajo el coche (fis.sup_centro) */
     int   kmh;                    /* car+1F4 */
     int   s4e;                    /* car+0x4E (deriva) */
+    int   clase_meta;             /* 44DC50 de la clave de la etapa (450380(8)): 0x1B, 0x1A / 0x1C eligen otra tabla de meta */
 } robot_coche_t;
 
 int   robot_inicia(const void *rbt, uint32_t bytes);       /* 0 = bien */
