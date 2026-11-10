@@ -2,7 +2,7 @@
 # regenera_datos.sh <iso> <datos/> [trabajo/]: rehace desde tu ISO (OutRun 2006 C2C, PS2 PAL SLES-53998 v1.02) la carpeta
 # de datos entera de la demo (la que se pasa a mkgdi.py --datos) con los conversores del repositorio:
 #   etapas SEGnn/COLnn de todos los arboles (modo OutRun, OUTRUN2SP y las 94 misiones de Races.bin), uniones BKnn
-#   empaquetadas (UNIONES.PAK + descriptores, pak_union.py), BKD, CURSO, SOL, COLBK*, COLLR, musica MUSn.ADP (28 temas,
+#   empaquetadas (UNIONES.PAK + descriptores, pak_union.py; las etapas en SEGS.PAK igual), BKD, CURSO, SOL, COLBK*, COLLR, musica MUSn.ADP (28 temas,
 #   28 avances, menu y metas), peliculas MVTS/MVATTR, sonido SFX/VOCES (espanol), menus, HUD, VMU, efectos, personajes,
 #   meta, modo de video, INFARTO/HAHUD/VOCESH, objetos de las uniones BO, trafico, coches COCHE00-14 + COCHES y PARAM.
 # Lo que sale del disco no va al repositorio. Idempotente: lo que ya esta en datos/ (o en trabajo/) no se rehace; si se
@@ -128,6 +128,14 @@ if ! hay $UNIONES; then
     cp -f "$W"/u0/COLBK*.DAT "$W"/u/COLBK*.DAT "$W/u/COLLR.DAT" "$D/"
     mv -f "$W"/pak/* "$D/"; cp -f "$W/u0/BKD.DAT" "$W/u0/SOL.DAT" "$W/u/CURSO.DAT" "$D/"   # (CURSO.DAT: el de todos los arboles)
 fi
+echo "== etapas: SEGS.PAK y descriptores (pak_union.py --prefijo=SEG; tope = HUECO_ETAPA_MAX de demo/main.c)"
+if ! hay SEGS.PAK; then
+    rm -rf "$W/seg" "$W/segpak"; mkdir -p "$W/seg" "$W/segpak"
+    ln -f "$D"/SEG[0-9]*.DAT "$W/seg/"
+    python3 "$TOOLS/pak_union.py" "$W/seg" "$W/segpak" --pak=SEGS.PAK --prefijo=SEG --tope=7842 > "$W/registro/segpak.txt" 2>&1 || { echo "FALLO pak_union de las etapas (ver $W/registro/segpak.txt)" >&2; exit 1; }
+    tail -1 "$W/registro/segpak.txt"
+    mv -f "$W"/segpak/* "$D/"
+fi
 if ! hay COCHES.DAT; then
     mv -f "$W"/coche/COCHE[0-9]*.DAT "$D/" 2>/dev/null || true
     python3 "$TOOLS/conv_coche.py" "$ISO" --todos "$D" --fichas 99 > "$W/registro/coches.txt" 2>&1   # solo COCHES.DAT
@@ -137,7 +145,7 @@ fi
 echo "== comprobacion de $D"
 mal=0
 nec="BKD.DAT BO.DAT CHR.DAT COCHES.DAT COLBK.DAT COLLR.DAT CURSO.DAT EFECTOS.DAT HAHUD.DAT HUD.DAT INFARTO.DAT MENU.DAT
-     META.DAT MODOV.DAT MVATTR.VQV MVTS.VQV PARAM.DAT SFX.DAT SOL.DAT TRAFC.DAT UNIONES.PAK VMU.DAT VOCES.DAT VOCESH.DAT"
+     META.DAT MODOV.DAT MVATTR.VQV MVTS.VQV PARAM.DAT SFX.DAT SEGS.PAK SOL.DAT TRAFC.DAT UNIONES.PAK VMU.DAT VOCES.DAT VOCESH.DAT"
 for k in $(seq 0 14); do nec+=" $(printf COCHE%02d.DAT $k)"; done
 for k in $MUSICA; do nec+=" MUS$k.ADP"; done
 for f in $nec; do [ -s "$D/$f" ] || { echo "FALTA $f" >&2; mal=1; }; done

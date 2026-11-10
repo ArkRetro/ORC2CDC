@@ -96,17 +96,34 @@ static int busca(const char *nombre, uint32_t *lba, uint32_t *tam)
    paquete guarda lo de cada union seguido). La ventana es lo que sobra del hueco detras del fichero (hasta 64 KB) o,
    si sobran menos de 8 KB, el sector de gd.c (de uno en uno): nada del monton ni de RAM fija (una ventana pedida y soltada mientras el bucle pide
    memoria dejaba un hueco y BKD.DAT ya no cabia: "Out of memory" tras BK135). El descriptor cabe en un sector. */
-static int es_union(const char *n) { return n[0] == 'B' && n[1] == 'K' && n[2] >= '0' && n[2] <= '9'; }
+/* Las etapas tambien (SEGS.PAK, tools/pak_union.py --prefijo=SEG): su descriptor ocupa varios sectores y se lee al final
+   del hueco de destino; la ventana es lo que queda entre el fichero y el descriptor (el empaquetador solo empaqueta
+   la etapa que deja 64 KB de ventana en el hueco de la etapa). */
+static int es_union(const char *n)
+{
+    return (n[0] == 'B' && n[1] == 'K' && n[2] >= '0' && n[2] <= '9') || (n[0] == 'S' && n[1] == 'E' && n[2] == 'G' && n[3] >= '0' && n[3] <= '9');
+}
 static uint8_t desc[2048] __attribute__((aligned(32)));
 static char pak_nom[17]; static uint32_t pak_lba, pak_tam;
 /* tamano del fichero recompuesto (el del descriptor) o el del fichero; 0 bien */
+/* (los tamanos recompuestos se guardan: curso_huecos pregunta por miles de etapas y uniones de los arboles y cada
+   pregunta leeria un sector) */
+#define TAM_CACHE 512
+static uint32_t tc_lba[TAM_CACHE], tc_tam[TAM_CACHE], tc_n;
 int gd_tam(const char *nombre, uint32_t *tam)
 {
-    uint32_t lba; int r = -1;
+    uint32_t lba, i; int r = -1;
     mutex_lock(&m_gd);
     if (!busca(nombre, &lba, tam)) {
         r = 0;
-        if (es_union(nombre) && !lee(lba, 1, sec) && !memcmp(sec, "PAKD", 4)) memcpy(tam, sec + 4, 4);
+        if (es_union(nombre)) {
+            for (i = 0; i < tc_n && tc_lba[i] != lba; i++) ;
+            if (i < tc_n) *tam = tc_tam[i];
+            else {
+                if (!lee(lba, 1, sec) && !memcmp(sec, "PAKD", 4)) memcpy(tam, sec + 4, 4);
+                if (tc_n < TAM_CACHE) { tc_lba[tc_n] = lba; tc_tam[tc_n++] = *tam; }
+            }
+        }
     }
     mutex_unlock(&m_gd);
     return r;
@@ -122,19 +139,26 @@ static void pak_copia(uint8_t *dst, uint32_t pv, uint32_t t, uint32_t q, const u
 }
 static int pak_lee(uint32_t lba, uint32_t tdesc, uint8_t *dst, uint32_t cap)
 {
-    uint32_t tam, nops, pv, nv, k, w0 = 0, w1 = 0, vt, ts; uint8_t *d = desc, *v; int r = 0;
+    uint32_t tam, nops, pv, nv, k, w0 = 0, w1 = 0, vt, ts, sd = (tdesc + 2047) / 2048 * 2048, fv = cap;
+    uint8_t *d = desc, *v; int r = 0;
     const uint32_t *op;
     mutex_lock(&m_gd);                                      /* (desc es uno: una lectura de union a la vez) */
-    if (tdesc > 2048 || lee(lba, 1, d)) { mutex_unlock(&m_gd); return -3; }
-    memcpy(&tam, d + 4, 4); memcpy(&nops, d + 8, 4); memcpy(&pv, d + 12, 4); memcpy(&nv, d + 16, 4);
+    if (sd > cap || lee(lba, 1, sec)) { mutex_unlock(&m_gd); return -3; }
+    memcpy(&tam, sec + 4, 4);
     ts = (tam + 2047) / 2048 * 2048;
-    if (ts > cap || 36 + 12 * nops > tdesc || pv + 24 * nv > tam) { mutex_unlock(&m_gd); return -2; }
+    if (sd > 2048) {                                        /* varios sectores: al final del hueco */
+        if (ts + sd + 8192 > cap) { mutex_unlock(&m_gd); return -2; }
+        fv = cap - sd; d = (uint8_t *)dst + fv;
+        if (lee(lba, sd / 2048, d)) { mutex_unlock(&m_gd); return -3; }
+    } else memcpy(d, sec, 2048);
+    memcpy(&nops, d + 8, 4); memcpy(&pv, d + 12, 4); memcpy(&nv, d + 16, 4);
+    if (ts > fv || 36 + 12 * nops > tdesc || pv + 24 * nv > tam) { mutex_unlock(&m_gd); return -2; }
     if (strncmp(pak_nom, (char *)d + 20, 16)) {             /* el paquete (se recuerda donde esta) */
         memcpy(pak_nom, d + 20, 16); pak_nom[16] = 0;
         if (busca(pak_nom, &pak_lba, &pak_tam)) pak_nom[0] = 0;
     }
     if (!pak_nom[0]) { mutex_unlock(&m_gd); return -1; }
-    vt = (cap - ts) & ~2047u; if (vt > 65536) vt = 65536;
+    vt = (fv - ts) & ~2047u; if (vt > (sd > 2048 ? 131072u : 65536u)) vt = sd > 2048 ? 131072u : 65536u;   /* (etapas: 128 KB) */
     if (vt >= 8192) v = dst + ts; else { vt = 2048; v = sec; }   /* (sec: el mutex es nuestro hasta el final) */
     op = (const uint32_t *)(d + 36);
     for (k = 0; k < nops && !r; k++, op += 3) {

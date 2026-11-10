@@ -805,12 +805,27 @@ tambien con las uniones sueltas. PENDIENTE todo eso.
 Al convertir mas uniones: `conv_union.py iso dir/ --arboles=1,100,...,193 [--parte=k/n]` sobre los ORD7 sueltos y despues
 `pak_union.py dir/ salida/` con todas (el paquete se rehace entero).
 
+Etapas empaquetadas (2026-11-10, `pak_union.py --pak=SEGS.PAK --prefijo=SEG --tope=7842`): lo mismo con las SEGnn.DAT
+(las 62 etapas de todos los arboles; las de las misiones repiten modelo, texturas y geometria de su zona con otra luz).
+Byte a byte se repetian 29 MiB entre etapas (corte por contenido; alineado a sectores solo 2,3 MiB) y apenas nada en
+lo demas (musica 3 MiB en sectores de silencio, coches 0,7, voces 0,3, colisiones 0,3; ficheros enteros iguales: 9
+COLBK de 16 KB y 3 descriptores de union). 60 etapas: 289,1 -> 262,1 MiB (SEGS.PAK 262,0 MiB); SEG13 y SEG46 van
+sueltas (no dejan sitio en el hueco a la ventana y al descriptor). Datos: 852,7 -> 825,6 MiB (**27,1 MiB menos**).
+El descriptor de una etapa ocupa varios sectores (hasta 1007 operaciones, 12 KB): `pak_lee` lo lee al final del hueco
+de la etapa y usa de ventana (hasta 128 KB) lo que queda entre el fichero y el descriptor; despues la colision va detras
+del fichero como antes. `gd_tam` da el tamano recompuesto (curso_huecos) y guarda los tamanos (512 ficheros) para no
+leer un sector por pregunta. Comprobado con `-DDIAG_PAK` y `pak_union.py --huella` de los sueltos: SEG00 850e04b1,
+SEG03 032199a3, SEG08 b1637383 iguales (y el empaquetador recompone y compara las 60). Lectura en Flycast: hasta 14
+saltos de mas de 64 KB por etapa; SEG03 2,68 -> 3,82 s y SEG08 3,80 -> 5,47 s con la ventana de 64 KB (varios Flycast
+a la vez), SEG03 3,52 s con la de 128 KB; en un GD real ~1,4..2,8 s mas por los saltos; la etapa se pide al soltar la anterior, ~1000 m (~12 s a 300 km/h) antes de necesitarla.
+
 ## 4. Pruebas
 
 - Entorno y datos desde cero (contenedor nuevo): `tools/instala_entorno.sh` (KallistiOS d81aa3f con kos-chain stable,
   GCC 15.2; Flycast Release sin Vulkan; paquetes de apt y pip) y `tools/regenera_datos.sh <iso> <datos/>` (todos los
   conversores, 4 pasos a la vez con un hilo cada uno, intermedios en /dev/shm; idempotente). Regenerado el 2026-11-10:
-  513 ficheros, 852,7 MiB (62 SEG + 62 COL, 262 descriptores BKnn + UNIONES.PAK de 20,1 MiB, 62 MUS); huellas de
+  513 ficheros, 852,7 MiB (62 SEG + 62 COL, 262 descriptores BKnn + UNIONES.PAK de 20,1 MiB, 62 MUS; con SEGS.PAK desde
+  el 2026-11-10: 514, 825,6 MiB); huellas de
   BK100 / BK101 sueltas 1aa403be / 8593a659, las de arriba; ~2 h 40 min en 4 nucleos. Pruebas en Flycast:
   `tools/prueba/` (nav.sh, nav3.sh, pal.sh; ver su README). Con todos los arboles el arranque tarda minutos en
   Flycast antes de la pelicula: curso_huecos hace miles de gd_busca y cada una relee el directorio del GD (PENDIENTE:

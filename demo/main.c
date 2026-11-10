@@ -3929,8 +3929,8 @@ static int curso_huecos(void)
       if (curso_busca(b, sz, (int)a, &o, &m)) continue;
       memcpy(curso, b + o, m * sizeof(etapa_t)); ncurso = m;
       for (i = 0; i < ncurso; i++) {
-        sprintf(n, "SEG%02d.DAT", curso[i].seg);
-        if (!gd_busca(n, &lba, &t) && TAM_SECT(t) > cap_etapa) {
+        sprintf(n, "SEG%02d.DAT", curso[i].seg);                 /* (empaquetada: el tamano recompuesto) */
+        if (!gd_tam(n, &t) && TAM_SECT(t) > cap_etapa) {
             if (TAM_SECT(t) <= HUECO_ETAPA_MAX) cap_etapa = TAM_SECT(t); else n_grandes++;
         }
         sprintf(n, "BK%02d.DAT", curso[i].f_bk);                  /* (empaquetada: el tamano recompuesto) */
@@ -3947,7 +3947,7 @@ static int curso_huecos(void)
       memcpy(curso, b + o, m * sizeof(etapa_t)); ncurso = m;
       for (i = 0; i < ncurso; i++) {
         sprintf(n, "SEG%02d.DAT", curso[i].seg);
-        if (gd_busca(n, &lba, &t) || TAM_SECT(t) > HUECO_ETAPA_MAX) continue;   /* (la que no cabe no se lee) */
+        if (gd_tam(n, &t) || TAM_SECT(t) > HUECO_ETAPA_MAX) continue;   /* (la que no cabe no se lee) */
         sprintf(n, "COL%02d.DAT", curso[i].seg);
         if (!gd_busca(n, &lba, &tc) && TAM_SECT(t) + TAM_SECT(tc) > cap_etapa && TAM_SECT(tc) > cap_col_e) cap_col_e = TAM_SECT(tc);
       }

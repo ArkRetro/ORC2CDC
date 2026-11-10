@@ -13,20 +13,25 @@
 #define PERFIL_HZ 20000
 #endif
 #define _start (&_executable_start)                     /* _executable_start y _etext: arch.h */
-static uint32_t *cubos, ncubos, total; static volatile int activo;
+#ifndef PERFIL_CUBOS
+#define PERFIL_CUBOS 32768                              /* 512 KB de codigo */
+#endif
+/* fijos y de 16 bits (saturan): pedidos al monton en carrera (115 KB en 32 bits) ya no cabian */
+static uint16_t cubos_f[PERFIL_CUBOS], *cubos; static uint32_t ncubos, total; static volatile int activo;
 static void muestra(irq_t src, irq_context_t *c, void *d)
 {
     uint32_t i; (void)src; (void)d;
     timer_clear(TMU1);
     if (!activo) return;
     i = (c->pc - (uint32_t)_start) >> 4;
-    if (i < ncubos) cubos[i]++;
+    if (i < ncubos && cubos[i] < 65535) cubos[i]++;
     total++;
 }
 void perfil_inicia(void)
 {
     ncubos = ((uint32_t)&_etext - (uint32_t)_start + 15) >> 4;
-    if (!(cubos = calloc(ncubos, 4))) return;
+    if (ncubos > PERFIL_CUBOS) ncubos = PERFIL_CUBOS;
+    cubos = cubos_f;
     irq_set_handler(EXC_TMU1_TUNI1, muestra, NULL);
     timer_prime(TMU1, PERFIL_HZ, 1);
     timer_start(TMU1);
@@ -44,6 +49,6 @@ void perfil_vuelca(void)
         printf("PERFIL: %08x %u %.2f%%\n", (unsigned)((uint32_t)_start + im * 16), (unsigned)mx, (double)(mx * 100.0f / total));
         cubos[im] = 0;
     }
-    memset(cubos, 0, ncubos * 4); total = 0;
+    memset(cubos, 0, ncubos * 2); total = 0;
 }
 #endif

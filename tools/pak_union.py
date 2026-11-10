@@ -1,4 +1,4 @@
-"""pak_union.py entrada/ salida/ [BKnn.DAT ...] | --huella ficheros: las uniones (BKnn.DAT, ORD7 de conv_union.py) sin repetir lo que
+"""pak_union.py entrada/ salida/ [BKnn.DAT ...] [--pak=SEGS.PAK --prefijo=SEG --tope=KB] | --huella ficheros: las uniones (BKnn.DAT, ORD7 de conv_union.py) sin repetir lo que
 tienen igual, para que quepan todas las de las misiones en el GD-ROM. Lo que se ve no cambia: la demo recompone
 cada fichero byte a byte (comun/gd.c, gd_carga_en) y se comprueba aqui mismo.
 
@@ -16,11 +16,17 @@ Salida:
               flujo del color de los vertices (4 bytes por vertice)
 Los vertices se separan en esos dos flujos porque la luz solo cambia el color: la posicion y las coordenadas de
 textura se comparten entre zonas. Los trozos se cortan por contenido (huella movil de 32 bytes, corte cuando sus
-bits bajos son 0; entre MIN y MAX bytes) para que lo igual se encuentre aunque este en otro sitio del fichero."""
+bits bajos son 0; entre MIN y MAX bytes) para que lo igual se encuentre aunque este en otro sitio del fichero.
+
+Etapas (--pak=SEGS.PAK --prefijo=SEG --tope=7842): lo mismo con las SEGnn.DAT (las de las misiones repiten modelo,
+texturas y geometria con otra luz). Su descriptor ocupa varios sectores: comun/gd.c lo lee al final del hueco de la
+etapa y usa de ventana lo que queda entre el fichero y el descriptor, asi que solo se empaqueta la etapa con tamano
+(en sectores) + descriptor + 64 KB <= tope (HUECO_ETAPA_MAX de demo/main.c); las demas se copian sueltas."""
 import os, struct, sys, hashlib
 import numpy as np
 
 PAK = 'UNIONES.PAK'
+SECT = lambda n: -(-n // 2048) * 2048
 MIN, MAX, MASCARA, VENT = 256, 16384, (1 << 10) - 1, 32      # trozos de ~1,3 KB de media
 
 _G = np.random.RandomState(0x0c2c).randint(0, 1 << 32, 256, dtype=np.uint64).astype(np.uint32)
@@ -71,8 +77,17 @@ def main():
     if '--huella' in sys.argv:                           # --huella f...: la huella de cada ORD7 suelto
         for f in a: b = open(f, 'rb').read(); print('%s %u bytes, huella %08x' % (f, len(b), huella(b)))
         return
+    global PAK
+    op = dict(x[2:].split('=', 1) for x in sys.argv[1:] if x.startswith('--') and '=' in x)
+    PAK = op.get('pak', PAK); pre = op.get('prefijo', 'BK'); tope = int(op.get('tope', 0)) << 10
     ent, sal = a[0], a[1]
-    nombres = a[2:] or sorted(f for f in os.listdir(ent) if f.startswith('BK') and f[2:3].isdigit() and f.endswith('.DAT'))
+    nombres = a[2:] or sorted(f for f in os.listdir(ent) if f.startswith(pre) and f[len(pre):len(pre) + 1].isdigit() and f.endswith('.DAT'))
+    if tope:                                                 # las que no dejan sitio a la ventana y al descriptor: sueltas
+        sueltas = [nm for nm in nombres if SECT(os.path.getsize(os.path.join(ent, nm))) + 65536 + 131072 > tope]
+        os.makedirs(sal, exist_ok=True)
+        for nm in sueltas:
+            open(os.path.join(sal, nm), 'wb').write(open(os.path.join(ent, nm), 'rb').read()); print('%s: suelta' % nm)
+        nombres = [nm for nm in nombres if nm not in sueltas]
     os.makedirs(sal, exist_ok=True)
     trozos = {}; pak = bytearray(); antes = 0; descs = {}; saltos_max = 0
     for nm in nombres:
@@ -92,7 +107,8 @@ def main():
             else: un.append(o)
         d = b'PAKD' + struct.pack('<4I', len(b), len(un), pv, nv) + PAK.encode().ljust(16, b'\0')
         d += b''.join(struct.pack('<3I', s, l, q | t << 30) for s, l, q, t in un)
-        assert len(d) <= 2048, '%s: descriptor de mas de un sector (comun/gd.c lee uno)' % nm
+        if tope: assert len(d) <= 131072, '%s: descriptor de mas de 128 KB' % nm
+        else: assert len(d) <= 2048, '%s: descriptor de mas de un sector (comun/gd.c lee uno)' % nm
         descs[nm] = d
         saltos = sum(1 for i in range(1, len(un)) if un[i][0] - (un[i - 1][0] + un[i - 1][1]) > 65536)
         saltos_max = max(saltos_max, saltos)
@@ -102,7 +118,7 @@ def main():
         open(os.path.join(sal, nm), 'wb').write(d)
     open(os.path.join(sal, PAK), 'wb').write(pak)
     despues = len(pak) + sum(-(-len(d) // 2048) * 2048 for d in descs.values())
-    print('%d uniones: %.1f MiB -> %.1f MiB (paquete %.1f MiB); saltos maximos %d; recompuestas iguales' %
+    print('%d ficheros: %.1f MiB -> %.1f MiB (paquete %.1f MiB); saltos maximos %d; recompuestas iguales' %
           (len(descs), antes / 2**20, despues / 2**20, len(pak) / 2**20, saltos_max))
 
 if __name__ == '__main__':
