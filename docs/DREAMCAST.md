@@ -734,7 +734,8 @@ serie de la propia medida). Lo que se hizo, con las mismas cuentas en el mismo o
 | CAPE | 13,30 | 12,91 | 5,03 / 4,68 | 0,95 / 0,90 |
 
 (`-DPRUEBA_AUTO -DDIAG_CONGELA=600 -DDIAG_MS -DDIAG_SIN_CPU -DDIAG_PERFIL -DPRUEBA_NODO=0/1/7/11/14`, media de las
-lineas MS/PRF del cuadro congelado.) Capturas del cuadro congelado antes / despues iguales pixel a pixel en las cinco
+lineas MS/PRF del cuadro congelado.) En carrera (PALM, el piloto ~70 s desde la salida, `-DPRUEBA_AUTO -DDIAG_MS
+-DDIAG_SIN_CPU`, media de 43 lineas MS): dib 15,71 -> 15,08 ms, 53,4 -> 55,6 fps. Capturas del cuadro congelado antes / despues iguales pixel a pixel en las cinco
 (lo unico distinto, el punto que parpadea en el mapa, cambia igual entre dos capturas del mismo binario). Lo que queda:
 el bucle de vertices (27 instrucciones por vertice), el piloto (2,1 ms: la mezcla de pesos y la tabla de color por
 vertice), el coche (2,7 ms) y el principio del cuadro (1,6 ms: `coche_entorno` ~0,6 ms, una normal int8 a float por
