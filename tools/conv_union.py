@@ -672,7 +672,7 @@ def cursos(A, dsal, ids, con_uniones=True, con_tramos=False):
         for r in rs:
             if con_tramos and not os.path.exists(os.path.join(dsal, 'SEG%02d.DAT' % r['seg'])): etapa_ficheros(A, r['_ti'], dsal)
             f = os.path.join(dsal, 'BK%02d.DAT' % r['f_bk'])
-            if con_uniones and r['f_bk'] >= 15 and r['f_bk'] not in hechos:
+            if con_uniones and r['f_bk'] >= 15 and r['f_bk'] not in hechos and not os.path.exists(f):   # (las ya hechas se quedan)
                 union_fichero(A, r['_c'], f, descs[r['_ti']], ri, rd, so); hechos.add(r['f_bk'])
             if r['f_col'] == -2 and not os.path.exists(os.path.join(dsal, 'COLLR.DAT')):
                 conv_coli.escribe(coli_bytes(A, '\\BK\\coli_LRBK_PALM_bin'), os.path.join(dsal, 'COLLR.DAT'), 1)

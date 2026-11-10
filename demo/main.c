@@ -6093,7 +6093,9 @@ static void meta_entra(void)                                    /* 49C9C0 */
     int e, pista;
     meta_pas = meta_cam = 0; efe_mascara = 0; meta_marco = col_un.marco;
     if (!meta_lista()) return;
-    meta_g = cur_nodo >= 10 && cur_nodo <= 14 ? cur_nodo - 10 : 0;
+    /* las metas A..E son las claves 10..14 del arbol del modo OutRun; en los demas arboles (OUTRUN2SP, misiones) la
+       eleccion del original no esta trazada: PENDIENTE (se usa la 0) */
+    meta_g = curso_id == 0 && cur_nodo >= 10 && cur_nodo <= 14 ? cur_nodo - 10 : 0;
     e = meta_escena(variante, TIM_PRESET, meta_g);
     meta_empieza(&meta, e);
     memcpy(meta_rueda_y, fis.rueda_y, sizeof meta_rueda_y);
