@@ -762,6 +762,16 @@ imagen va a saltos (siempre el ultimo cuadro leido) pero no se para; a 20 KB/s: 
 SIN VERIFICAR en la consola: el caudal real del GDEMU/GD con la pelicula fuera del disco (el diagnostico lo dira si no
 llega).
 
+## Espacio del GD-ROM (2026-11-10)
+
+mkgdi.py: track03 desde el LBA 45000 hasta 549150 - 32: (549118 - 45000) x 2048 = 1 032 433 664 bytes (984 MiB). Los
+datos de antes de C2C ocupaban 599 MiB (musica 450 MiB, etapas del modo OutRun 78 MiB). Las 47 etapas que faltaban
+(15 de OutRun 2 SP, 30 al reves, PALM_T, BEAC_T; conv_union.py etapa_ficheros: SEGnn + COLnn) son unos 250 MiB; el
+arbol de OUTRUN2SP (10 bifurcaciones de ~1,4 MiB y 5 metas de 0,3..0,8 MiB) 18 MiB; las misiones 0..7 de Races.bin
+(15 uniones LRBK / SUMOEND) ~16 MiB. Quedan ~100 MiB: no caben las 230 uniones que faltan para todas las misiones
+(~280 MiB: cada union lleva la luz de su etapa cocida en los vertices, el cielo de la etapa y los carteles de sus
+destinos). PALM_BT / BEAC_BT / PALM_BR / BEAC_BR no se convierten (ningun curso de Races.bin ni csc_data los usa).
+
 ## 4. Pruebas
 
 - `cd demo && make` sin avisos; `make CPPFLAGS=-DDIAG_VTX` imprime por la consola serie cada 60 cuadros los
