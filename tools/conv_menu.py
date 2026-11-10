@@ -78,7 +78,7 @@ def tabla(D, va, n):
 
 COCHE_MODELOS = 0x375968   # 30 u32: modelo (car+0x11) de cada ficha (15 normales y 15 "_t")
 COCHE_DESBLOQUEO = 0x3759e0  # 30 i16: bit de la licencia (+0x28) que desbloquea la ficha (las 2 primeras, siempre)
-COCHE_COLORES = 0x375a1c   # 30 x 8 i16: bit de cada color (-1 siempre, -2 nunca)
+COCHE_COLORES = 0x375a20   # 30 x 8 i16: bit de cada color (-1 siempre, -2 nunca); lo lee 4C8FC0 = PS2 0x245038 (lui 0x37 + 0x5a20)
 COCHE_COLOR_INI = 0x375c00  # 30 i8: color por defecto de cada ficha
 
 def carrusel(D, va, n):
@@ -109,6 +109,8 @@ def comprueba_tablas(D):
     # modelos por ficha (el 68EA10 del PC)
     assert D.elf32(0x244640)[0] == 0x350800e5 and D.elf32(0x244644)[0] == 0x34e700e6, 'seleccion de coche'
     assert D.elf32(COCHE_MODELOS, 3) == (1, 4, 0), 'tabla de modelos por ficha'
+    # colores (4C8FC0 = PS2 0x245038): lui v0,0x37 / addiu v0,v0,0x5a20 (antes se leia en 0x375a1c: 2 colores corridos)
+    assert D.elf32(0x245044, 4)[0] == 0x3c020037 and D.elf32(0x245050)[0] == 0x24425a20, 'tabla de colores'
     t = tabla(D, 0x416ea8, 23)                                  # editor de licencia (el 4DD7C0 del PC)
     assert t[0] == (0x440086, 0, 0) and t[1] == (0x44008b, 0, 0) and t[2] == (0x44008a, 0, 0), 'tabla del editor'
     assert t[3] == (0x440087, 0, 0x33) and t[10] == (0x440091, 1, 1) and t[11] == (0x44008c, 1, 1), 'tabla del editor'
