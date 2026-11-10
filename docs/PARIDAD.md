@@ -1880,7 +1880,10 @@ los huecos de la escena se ven):
   triangulos grandes de los dos cielos (y las nubes) se cruzaban: trozos rectangulares de un cielo sobre el otro. El
   original los dibuja sin z y en orden (4521C0). Ahora cada malla del cielo en la lista 2 va con una z fija creciente
   en el orden de dibujo, detras de toda la escena (`cielo_malla_orden`); con niebla en el cielo (CLOU) se deja la z
-  (manda en la tabla de niebla).
+  (manda en la tabla de niebla). En la consola real esa z (1e-5, 100 km) quedaba detras del plano de fondo
+  (ISP_BACKGND_D = 1e-4 de KallistiOS, `pvr_set_zclip`) y la PowerVR no dibujaba esas mallas: el cielo que se funde
+  desaparecia a tercios (Flycast no recorta por el plano de fondo y no se veia). Ahora 1,2e-4 x (1 + i / 1024): entre el
+  plano de fondo y la escena (lejos <= 4000 m: 1/w >= 2,5e-4) (2026-11-10, ver abajo Cielo en la consola real).
 - z de lo coplanario (edificios, marcas de la calzada): 1/w salia de FSRRA en las tiras enteras delante del plano
   cercano (`dibuja_malla_directa`) y de una division en las demas (`envia`); con GEQUAL una calcomania y su pared o su
   asfalto por caminos distintos daban z distintas en el ultimo bit y parpadeaban. Ahora las dos con FSRRA.
@@ -1896,4 +1899,40 @@ los huecos de la escena se ven):
   salida, `DIAG_SIN_CPU`): PALM 28,7 -> 25,8 ms, LAKE 25,7 -> 23,2, INDU 29,4 -> 26,9, METR 33,5 -> 30,7, CAPE
   25,4 -> 23,1 (solo indicativo: Flycast no cuenta la cache). Lo que queda: el coche (10 440 vertices, ~5,7 ms), la
   etapa (~11-13 k vertices, ~13 ms), el piloto (2,6 ms).
+
+## Cielo en la consola real y niebla del limite de dibujado (2026-11-10)
+
+Queja del probador (demo 30, consola real): "sigue habiendo glitches en el cielo y en algunas texturas, y me gustaria
+que aplicaras en el limite de dibujado tenue niebla para que no se aprecie tanto el popping".
+
+- Cielo del fundido de la union (consola real; ver arriba Cielo en el fundido de la union): las mallas del cielo que
+  van a la lista transparente (el grupo que se funde en cada tercio de 40 cuadros) llevaban z fija 1e-5, detras del
+  plano de fondo de KallistiOS (1e-4): la PowerVR no dibuja lo que tiene 1/w menor y en la consola ese cielo
+  desaparecia. Ahora 1,2e-4.. (8,3 km), entre el plano de fondo y la escena. Flycast no recorta por el plano de fondo
+  (por eso se vio bien al verificarlo).
+- Cielo en carrera (consola real): el cielo rodea la camara (707-1938 m del ojo en las 15 etapas y sus uniones) y
+  sus triangulos que pasan por detras se recortaban en el plano cercano de la escena (0,1 m): vertices a millones de
+  pixeles (1500 m / 0,1 m x 426). La PowerVR calcula en coma flotante los planos de z, color y UV de cada triangulo
+  desde sus vertices y con esas cifras pierde la precision (bandas, texturas del cielo rotas); Flycast rasteriza con
+  la GPU del PC y no lo muestra. Ahora el cielo se recorta en w = 50 m (`CIELO_CERCA`, `cielo_malla`): lo que se ve del
+  cielo esta a w >= ~700 m, asi que no cambia la imagen (Flycast: PALM congelado igual salvo 5 pixeles) y los
+  vertices quedan por debajo de ~16000 pixeles. La escena sigue con 0,1 m (sus triangulos son de pocos metros).
+- Texturas: sin rebajas ni grises en el arbol del modo OutRun (el unico que se juega: `curso_pedido` solo cambia con
+  PRUEBA_CURSO): `tools/vram.py` con el coche de mas texturas (COCHE06, zona 1312 KB) deja >= 185 KB libres en todas
+  las combinaciones (peor BK08 / BK09 + IMPE) y las cargas de Flycast dicen 0 rebajadas; la VRAM es la misma en la
+  consola. PENDIENTE (no se juegan aun): 14 combinaciones de los arboles de las misiones pasan de la zona (peor BK241
+  + LASV, 1598 KB: 286 KB de mas, mas que los 87 KB de fuera de la zona: iria con texturas rebajadas); entre -3 y -51
+  KB caben fuera de la zona. Las texturas de las etapas: mipmaps todos cuadrados, UV pequenas (|u|, |v| <= 8), VQ
+  con libro reducido en direcciones multiplo de 8: nada que la consola trate distinto de Flycast.
+- Niebla del limite de dibujado: DESVIACION pedida por el usuario (no esta en el original). Ademas de la niebla del
+  original (scn_env_fog, sin cambios), un velo tenue en el ultimo tramo de la distancia de dibujo de la demo, en la
+  misma tabla de niebla de la PowerVR (`niebla_pon`): de 0 a NLIM_A = 0,3 (suave) entre 0,65 x nlim_d y nlim_d, donde
+  nlim_d sigue (`nlim_paso`, ~0,3 s) a la distancia desde la que el reparto del TA quita nodos (prio_d: ahi aparece
+  lo que salta al acercarse) o a lejos (4000 m) si cabe todo. Delante de 0,65 x nlim_d la tabla es la de antes: lo
+  cercano y lo medio no cambian. Color: el de la niebla de la etapa; en CAST y FORE (niebla del original negra y sin
+  densidad) el del horizonte de su cielo (`horizonte_mira`: media de color del vertice x texel de los vertices del
+  grupo 0 entre -5 y 14 grados; tambien es el color al que va la niebla del original en el fundido de la union hacia
+  esas etapas, antes hacia el negro). Fuerza x luminancia del horizonte / luminancia de la niebla (hasta 1): en las
+  etapas de noche (METR, GHOS: niebla clara, cielo oscuro) casi no hay velo (aclaraba los edificios contra el cielo
+  negro). `-DSIN_NIEBLA_LIMITE` lo quita (para comparar).
 

@@ -4849,9 +4849,62 @@ static void niebla_de_lista(const niebla_t *lst, uint32_t nl, float pos, float *
         *c = col;
     }
 }
+/* color del horizonte del cielo de una zona (para la niebla del limite de dibujado, ver niebla_pon, en las etapas
+   cuya niebla del original es negra y sin densidad, CAST y FORE, y para su fuerza): media de los vertices del grupo 0
+   del cielo entre -5 y 14 grados de elevacion, color del vertice x texel de la textura en su UV (nivel mayor). Se calcula una vez por
+   zona con el modelo que lleva ese cielo (sus texeles en la RAM: el hueco de la etapa o de la union) */
+static struct { char z[4]; uint32_t c; } horiz_tab[24]; static int horiz_n;
+static uint32_t horizonte_de(const char *zona)
+{
+    int i;
+    for (i = 0; i < horiz_n; i++) if (!memcmp(horiz_tab[i].z, zona, 4)) return horiz_tab[i].c;
+    return 0;
+}
+static uint32_t tw_bits(uint32_t v) { uint32_t r = 0, b; for (b = 0; b < 11; b++) r |= ((v >> b) & 1) << (2 * b); return r; }
+static void horizonte_mira(int k, const modelo_t *mo)
+{
+    static const uint8_t CAN[3][3][2] = { { { 10, 5 }, { 5, 5 }, { 0, 5 } }, { { 11, 5 }, { 5, 6 }, { 0, 5 } },
+                                          { { 8, 4 }, { 4, 4 }, { 0, 4 } } };
+    float sum[3] = { 0, 0, 0 }; uint32_t j, i, n = 0;
+    if (k < 0 || !mo || !mo->blob || horiz_n >= 24 || horizonte_de(curso[k].zona)) return;
+    for (j = mo->inicio[3]; j < mo->inicio[4]; j++) {
+        const malla_t *m = mo->mallas + j; const tex_t *t = m->tex >= 0 ? mo->texs + m->tex : NULL;
+        if (m->nodo > -256 || -256 - m->nodo != 0) continue;
+        for (i = 0; i < m->n; i++) {
+            const vert_t *v = mo->verts + m->v0 + i; float r = sqrtf(v->x * v->x + v->y * v->y + v->z * v->z), e, cc[3];
+            int c;
+            if (r < 1) continue;
+            e = v->y / r;
+            if (e < -0.08f || e > 0.25f) continue;
+            for (c = 0; c < 3; c++) cc[c] = ((v->c >> (16 - 8 * c)) & 255) / 255.0f;
+            if (t && (t->fmt & 0xff) <= 2 && t->w >= 8 && t->h >= 8) {
+                uint32_t fb = t->fmt & 0xff, w = t->w, h = t->h, s = w < h ? w : h, x, y, kk; uint16_t tx;
+                float u = v->u - floorf(v->u), vv = v->v - floorf(v->v);
+                x = (uint32_t)(u * w) & (w - 1); y = (uint32_t)(vv * h) & (h - 1);
+                kk = (w > h ? x / s : y / s) * s * s + (tw_bits(y % s) | tw_bits(x % s) << 1);
+                tx = texel_de(mo, t, kk);
+                for (c = 0; c < 3; c++) {
+                    uint32_t mx = (1u << CAN[fb][c][1]) - 1;
+                    cc[c] *= (float)((tx >> CAN[fb][c][0]) & mx) / (float)mx;
+                }
+            }
+            for (c = 0; c < 3; c++) sum[c] += cc[c];
+            n++;
+        }
+    }
+    if (!n) return;
+    memcpy(horiz_tab[horiz_n].z, curso[k].zona, 4);
+    horiz_tab[horiz_n].c = 0xFF000000u;
+    for (i = 0; i < 3; i++) { float x = sum[i] / n; horiz_tab[horiz_n].c |= (uint32_t)(x > 1 ? 255 : x * 255) << (16 - 8 * i); }
+    dbglog(DBG_INFO, "NIEBLA: horizonte de %.4s %06x (%u vertices)\n", curso[k].zona, (unsigned)(horiz_tab[horiz_n].c & 0xFFFFFF), (unsigned)n);
+    horiz_n++;
+}
 static void niebla_de(const etapa_t *e, float pos, float *d, int *modo, uint32_t *c)
 {
     niebla_de_lista(e->niebla, e->nniebla, pos, d, modo, c);
+    /* niebla negra sin densidad (CAST, FORE): el color del horizonte, para la niebla del limite de dibujado (y el
+       fundido de la union hacia esas etapas, que el original hace hacia el negro mientras la densidad baja a 0) */
+    if (!(*c & 0xFFFFFF) && horizonte_de(e->zona)) *c = horizonte_de(e->zona);
 }
 /* estado de la transicion de entorno en la union */
 static int ent_fase;                                            /* 0 en la etapa, 1 mezclando, 2 ya la nueva */
@@ -4871,6 +4924,7 @@ static void niebla_paso(void)
 {
     float d0, d1, t, d; int m0, m1, k; uint32_t c0, c1;
     if (cur_nodo < 0) return;
+    horizonte_mira(cur_nodo, cielo); if (cur_sig >= 0 && sig.tv) horizonte_mira(cur_sig, &sig);
     if (cur_nodo != ent_nodo) { ent_nodo = cur_nodo; ent_fase = 0; }   /* ya en la etapa nueva */
     if (ent_fase == 0 && cur_sig >= 0 && s_union >= 0 && curso[cur_nodo].trans_m >= 0 && sig.tv &&
         yo.s >= s_union + curso[cur_nodo].trans_m) {           /* 44A000 fase 1 -> 2 y 451E90 estado 0 -> 1 */
@@ -4940,20 +4994,51 @@ static void luz_actual(int e, float *v, float *d)
     }
 }
 /* tabla de niebla de la PowerVR (129 entradas, la 0 la mas lejana; la entrada i esta a lejos / t(i), con
-   t(i) = 2^(i >> 4) (16 + (i & 15)) / 16, la escala de pvr_fog_table_linear de KallistiOS) */
+   t(i) = 2^(i >> 4) (16 + (i & 15)) / 16, la escala de pvr_fog_table_linear de KallistiOS)
+   Niebla del limite de dibujado (DESVIACION pedida por el usuario, demo 30: "tenue niebla en el limite de dibujado
+   para que no se aprecie tanto el popping"; docs/PARIDAD.md): ademas de la del original, un velo tenue (como mucho
+   NLIM_A) del color de la niebla de la etapa (o del horizonte del cielo si es negra) solo en el ultimo tramo de la
+   distancia de dibujo de la demo: de NLIM_INI x nlim_d a nlim_d, donde nlim_d sigue suavizada (nlim_paso) a la
+   distancia desde la que el reparto del TA quita nodos (prio_d: lo de mas alla aparece al acercarse) o a lejos si
+   cabe todo. Delante de NLIM_INI x nlim_d la tabla es la de antes (imagen igual). -DSIN_NIEBLA_LIMITE la quita. */
+#define NLIM_A 0.3f
+#define NLIM_INI 0.65f
+static float nlim_d = LEJOS_PS2, nlim_hecho = -1;
+static void nlim_paso(void)                                     /* cada cuadro, tras el reparto */
+{
+    float obj = prio_d < ND_PRIO - 1 ? powf(2.0f, (prio_d + 1) * 0.25f) : lejos;
+    if (obj > lejos) obj = lejos;
+    nlim_d += (obj - nlim_d) * 0.06f;                           /* ~0,3 s: sin saltos al cambiar el corte */
+}
 static void niebla_pon(void)
 {
-    static float tab[129]; int i;
-    if (niebla_d == niebla_d_hecha && niebla_modo == niebla_modo_hecho && niebla_c == niebla_c_hecho && lejos == niebla_lejos_hecho) return;
-    niebla_d_hecha = niebla_d; niebla_modo_hecho = niebla_modo; niebla_c_hecho = niebla_c; niebla_lejos_hecho = lejos;
-    if (niebla_d > 0) pvr_fog_table_color(1.0f, ((niebla_c >> 16) & 0xff) / 255.0f, ((niebla_c >> 8) & 0xff) / 255.0f, (niebla_c & 0xff) / 255.0f);
-    else pvr_fog_table_color(1.0f, 0.55f, 0.70f, 0.92f);
+    static float tab[129], a_hecho = -1; int i; uint32_t c = niebla_c; float a;
+    float nd = nlim_d, nl = fabsf(nd - nlim_hecho) > nlim_hecho * 0.01f ? nd : nlim_hecho;
+#ifdef SIN_NIEBLA_LIMITE
+    nl = 1e9f;
+#endif
+    if (!(c & 0xFFFFFF) && niebla_d <= 0) c = 0xFF8CB3EBu;      /* sin niebla ni horizonte: el azul de antes */
+    {   /* el velo no aclara lo lejano contra un cielo mas oscuro que la niebla (la noche de METR y GHOS: niebla clara,
+           cielo casi negro): su fuerza x luminancia del horizonte / luminancia de la niebla (hasta 1) */
+        int k = ent_fase && ent_nuevo >= 0 ? ent_nuevo : cur_nodo; uint32_t hz = k >= 0 ? horizonte_de(curso[k].zona) : 0;
+        float lc = 0.3f * ((c >> 16) & 255) + 0.59f * ((c >> 8) & 255) + 0.11f * (c & 255), lh;
+        lh = 0.3f * ((hz >> 16) & 255) + 0.59f * ((hz >> 8) & 255) + 0.11f * (hz & 255);
+        a = hz && lc > 1 && lh < lc ? NLIM_A * lh / lc : NLIM_A;
+        a = (float)(int)(a * 64.0f) / 64.0f;                     /* (escalones: la tabla no se rehace por nada) */
+    }
+    if (niebla_d == niebla_d_hecha && niebla_modo == niebla_modo_hecho && niebla_c == niebla_c_hecho && lejos == niebla_lejos_hecho &&
+        nl == nlim_hecho && a == a_hecho) return;
+    niebla_d_hecha = niebla_d; niebla_modo_hecho = niebla_modo; niebla_c_hecho = niebla_c; niebla_lejos_hecho = lejos; nlim_hecho = nl;
+    a_hecho = a;
+    pvr_fog_table_color(1.0f, ((c >> 16) & 0xff) / 255.0f, ((c >> 8) & 0xff) / 255.0f, (c & 0xff) / 255.0f);
     for (i = 0; i < 129; i++) {
-        float t = i ? (float)(1 << (i >> 4)) * (16 + (i & 15)) / 16.0f : 1.0f, z = lejos / t, f, g;
+        float t = i ? (float)(1 << (i >> 4)) * (16 + (i & 15)) / 16.0f : 1.0f, z = lejos / t, f, g, h;
         f = (z - lejos * 0.55f) / (lejos * 0.45f); f = f < 0 ? 0 : f > 1 ? 1 : f;
         if (lejos >= LEJOS_PS2 || lejos >= lejos_guion) f = 0;  /* la del original: sin fundido (no lo tiene) */
         g = niebla_d * z; g = niebla_d <= 0 ? 0 : niebla_modo == 2 ? 1 - expf(-g * g) : 1 - expf(-g);
-        tab[i] = 1 - (1 - f) * (1 - g);
+        h = (z - NLIM_INI * nl) / ((1 - NLIM_INI) * nl); h = h < 0 ? 0 : h > 1 ? 1 : h;
+        h = a * h * h * (3 - 2 * h);                            /* suave (smoothstep) */
+        tab[i] = 1 - (1 - f) * (1 - g) * (1 - h);
     }
     pvr_fog_far_depth(lejos);
     pvr_fog_table_custom(tab);
@@ -4985,28 +5070,61 @@ static const pvr_poly_hdr_t *cielo_cab(const modelo_t *mo, int i, int niebla, in
    de cada objeto, sus tiras en orden), y la PowerVR ordena la lista transparente por la z de cada triangulo: los
    triangulos grandes del cielo se cruzaban entre si (el fundido de la union: trozos rectangulares de un cielo encima
    del otro, y nubes delante o detras del fondo segun el triangulo). Sin niebla en el cielo cada malla va con una z
-   fija y creciente en el orden de dibujo, mas lejos que toda la escena (1e-5 = 100 km; la escena acaba en lejos):
-   la PowerVR las mezcla en el orden del original. Con niebla (CLOU) la z manda en la tabla de niebla y se deja. */
+   fija y creciente en el orden de dibujo, mas lejos que toda la escena: la PowerVR las mezcla en el orden del
+   original. Con niebla (CLOU) la z manda en la tabla de niebla y se deja.
+   La z fija va entre el plano de fondo y la escena: 1,2e-4 (8,3 km) .. ~1,3e-4. Antes era 1e-5 (100 km), detras del
+   plano de fondo (KallistiOS: ISP_BACKGND_D = pvr_set_zclip, 1e-4): en la consola real la PowerVR no dibuja lo que
+   tiene 1/w menor (el cielo que se fundia en la union desaparecia); Flycast no lo recorta y no se veia. La escena
+   acaba en lejos <= 4000 m (1/w >= 2,5e-4).
+   Recorte del cielo: en el plano w = CIELO_CERCA (50 m) y no en el cercano de la escena (0,1 m). El cielo rodea la
+   camara (707-1938 m del ojo) y sus triangulos que pasan por detras, recortados a 0,1 m, tenian vertices a millones
+   de pixeles (1500 m / 0,1 m x 426): la PowerVR calcula los planos de z, color y UV del triangulo en coma flotante
+   desde sus vertices y con esas cifras pierde la precision (bandas y texturas rotas en el cielo en la consola real;
+   Flycast rasteriza con la GPU del PC y no lo muestra). Lo que se ve del cielo esta a w >= ~700 m: el recorte a 50 m
+   no quita nada de la pantalla y deja los vertices por debajo de ~16000 pixeles. */
+#define CIELO_CERCA 50.0f
 static int cie_seq;                                             /* mallas del cielo enviadas a la lista 2 (cuadro) */
-static void cielo_malla_orden(const modelo_t *mo, const malla_t *m)
+static inline void cielo_envia(const pt_t *p, int fin, float z)  /* z = 0: la 1/w del vertice */
 {
-    const vert_t *v = mo->verts + m->v0; uint32_t i, n = m->n > 256 ? 256 : m->n, cm = color_mul;
-    float z = 1.0e-5f * (1.0f + (float)cie_seq++ * (1.0f / 1024.0f));
+    pvr_vertex_t *d = pvr_dr_target(); float iw = inv_w(p->w);
+    d->flags = fin ? PVR_CMD_VERTEX_EOL : PVR_CMD_VERTEX;
+    d->x = p->x * iw; d->y = p->y * iw; d->z = z > 0 ? z : iw; d->u = p->u; d->v = p->v; d->argb = p->c; d->oargb = p->o;
+    pvr_dr_commit(d); vtx_env++;
+}
+/* una malla del cielo (pw ya transformada, n puntos) recortada en w = CIELO_CERCA */
+static void cielo_malla(const modelo_t *mo, const malla_t *m, float z)
+{
+    const vert_t *v = mo->verts + m->v0; uint32_t i, n = m->n > 256 ? 256 : m->n, cm = color_mul; int detras = 0;
     for (i = 0; i < n; i++) {
         float x = v[i].x, y = v[i].y, zz = v[i].z, w;
         mat_trans_single3_nodivw(x, y, zz, w);
-        if (w < cerca) { dibuja_malla(mo, m); return; }        /* (no pasa: el cielo esta lejos) */
         pw[i].x = x; pw[i].y = y; pw[i].w = w; pw[i].u = v[i].u; pw[i].v = v[i].v;
         pw[i].c = cm ? mul_argb(v[i].c, cm) : v[i].c; pw[i].o = mo->ofs ? mo->ofs[m->v0 + i] : 0;
+        detras |= w < CIELO_CERCA;
     }
-    if (!ta_cabe(n)) return;
-    for (i = 0; i < n; i++) {
-        pvr_vertex_t *d = pvr_dr_target(); float iw = inv_w(pw[i].w);
-        d->flags = i == n - 1 ? PVR_CMD_VERTEX_EOL : PVR_CMD_VERTEX;
-        d->x = pw[i].x * iw; d->y = pw[i].y * iw; d->z = z; d->u = pw[i].u; d->v = pw[i].v; d->argb = pw[i].c; d->oargb = pw[i].o;
-        pvr_dr_commit(d);
+    if (!detras) {
+        if (!ta_cabe(n)) return;
+        for (i = 0; i < n; i++) cielo_envia(pw + i, i == n - 1, z);
+        tri_enviados += n - 2;
+        return;
     }
-    tri_enviados += n - 2; vtx_env += n;
+    for (i = 0; i + 2 < n; i++) {                               /* como tri_recortado, en CIELO_CERCA */
+        const pt_t *p = pw + i; pt_t o[4]; int k, c = 0;
+        if (p[0].w < CIELO_CERCA && p[1].w < CIELO_CERCA && p[2].w < CIELO_CERCA) continue;
+        for (k = 0; k < 3; k++) {
+            const pt_t *a = p + k, *b = p + (k + 1) % 3;
+            int da = a->w >= CIELO_CERCA, db = b->w >= CIELO_CERCA;
+            if (da) o[c++] = *a;
+            if (da != db) {
+                float t = (CIELO_CERCA - a->w) / (b->w - a->w);
+                o[c].x = a->x + t * (b->x - a->x); o[c].y = a->y + t * (b->y - a->y); o[c].w = CIELO_CERCA;
+                o[c].u = a->u + t * (b->u - a->u); o[c].v = a->v + t * (b->v - a->v); o[c].c = a->c; o[c].o = a->o; c++;
+            }
+        }
+        if (c < 3 || !ta_cabe(c)) continue;
+        if (c == 3) { cielo_envia(o, 0, z); cielo_envia(o + 1, 0, z); cielo_envia(o + 2, 1, z); tri_enviados++; }
+        else { cielo_envia(o, 0, z); cielo_envia(o + 1, 0, z); cielo_envia(o + 3, 0, z); cielo_envia(o + 2, 1, z); tri_enviados += 2; }
+    }
 }
 /* el grupo g del cielo de mo en la lista l con alfa a */
 static void cielo_grupo(const modelo_t *mo, int g, int l, float a, int niebla)
@@ -5020,8 +5138,7 @@ static void cielo_grupo(const modelo_t *mo, int g, int l, float a, int niebla)
         if (m->n < 3 || gm != g || (a >= 0.9f && lm != l)) continue;
         if (m->tex >= 0) pvr_prim(cielo_cab(mo, m->tex, niebla, a >= 0.9f ? lm : 2), sizeof(pvr_poly_hdr_t));
         else pvr_prim(&cab_col[!niebla][a >= 0.9f ? l : 2], sizeof(pvr_poly_hdr_t));
-        if (l == 2 && !niebla) cielo_malla_orden(mo, m);
-        else dibuja_malla(mo, m);
+        cielo_malla(mo, m, l == 2 && !niebla ? 1.2e-4f * (1.0f + (float)cie_seq++ * (1.0f / 1024.0f)) : 0);
     }
     color_mul = 0;
 }
@@ -6930,7 +7047,7 @@ int main(int argc, char **argv)
         prf_v0 = 0;
 #endif
         PRF(0);
-        if (estado != TITULO) nodos_visibles_todos();          /* los del original que caben en el TA */
+        if (estado != TITULO) { nodos_visibles_todos(); nlim_paso(); }   /* los del original que caben en el TA */
         PRF(1);
         if (estado != TITULO) sol_prepara();                    /* el rayo hacia el sol de este cuadro */
         if (estado != TITULO) traf_parpadea(pausa || estado != CARRERA);   /* 4AE5F0 (sin traf_paso: suspendido) */

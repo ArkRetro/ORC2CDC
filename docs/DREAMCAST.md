@@ -755,6 +755,8 @@ vertice).
 | Alineaciones | blob de texturas a 32 (cada textura en multiplos de 32, `pvr_txr_load` copia de 32 en 32), vertices de 24 bytes (floats a 4), texturas VQ en direcciones multiplo de 8. |
 | CPU | Flycast no reproduce el tiempo del SH4; el acortado de seguridad de `lejos` usa el reloj real (`ms + ms_log`), asi que se ajusta solo en la consola. |
 | Video | VGA: 640x480 a 60 Hz. Sin VGA: NTSC entrelazado a 60 Hz (el generico de KallistiOS). En una consola PAL (flash: Europa) sin VGA se pregunta a 50 Hz: A = 60 Hz, B o nada en 10 s = 50 Hz (`elige_video`). La logica va a 60 pasos por segundo con el reloj (salto de cuadros), asi que a 50 Hz va a la misma velocidad. Probado en Flycast con region Europa y emision PAL. |
+| Plano de fondo (z de recorte) | KallistiOS pone ISP_BACKGND_D = 1e-4 (`pvr_set_zclip`): en la consola real no se dibuja nada con 1/w menor (mas alla de 10 km). El cielo del fundido de la union iba a z fija 1e-5 y desaparecia en la consola (Flycast no lo recorta); ahora 1,2e-4.. (ver PARIDAD.md, Cielo de la union en la consola real). |
+| Vertices enormes | la PowerVR calcula los planos de z, color y UV de cada triangulo en coma flotante desde sus vertices: con vertices a millones de pixeles (el cielo, que rodea la camara, recortado en el plano cercano de 0,1 m) pierde la precision (bandas y texturas rotas; Flycast usa la GPU y no lo muestra). El cielo se recorta en w = 50 m (`CIELO_CERCA`). |
 | Arranque desde GDEMU | `tools/mkgdi.py`: IP.BIN de `makeip` con areas JUE (sin region), soporte VGA (perifericos E000F10), 1ST_READ.BIN sin desordenar (GD, no CD-R) al final de la pista 3 (LBA 45000). |
 
 ### Peliculas (comun/video.c, 2026-11-09)
