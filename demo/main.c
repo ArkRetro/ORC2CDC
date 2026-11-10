@@ -3922,8 +3922,8 @@ static int curso_huecos(void)
       for (i = 0; i < ncurso; i++) {
         sprintf(n, "SEG%02d.DAT", curso[i].seg);
         if (!gd_busca(n, &lba, &t) && TAM_SECT(t) > cap_etapa) cap_etapa = TAM_SECT(t);
-        sprintf(n, "BK%02d.DAT", curso[i].f_bk);
-        if (!gd_busca(n, &lba, &t) && TAM_SECT(t) > cap_union) cap_union = TAM_SECT(t);
+        sprintf(n, "BK%02d.DAT", curso[i].f_bk);                  /* (empaquetada: el tamano recompuesto) */
+        if (!gd_tam(n, &t) && TAM_SECT(t) > cap_union) cap_union = TAM_SECT(t);
         col_nombre_union(n, i);
         if (!gd_busca(n, &lba, &t) && TAM_SECT(t) > cap_col) cap_col = TAM_SECT(t);
       }

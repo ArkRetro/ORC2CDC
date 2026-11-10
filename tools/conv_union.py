@@ -605,7 +605,7 @@ def etapa_ficheros(A, ti, dsal):
         d = bytes(seg.m[o:o + s])
         if d[:8] == b'COLI0200': conv_coli.escribe(d, os.path.join(dsal, 'COL%02d.DAT' % n), 0); break
 
-def cursos(A, dsal, ids, con_uniones=True, con_tramos=False):
+def cursos(A, dsal, ids, con_uniones=True, con_tramos=False, parte=(0, 1)):
     """CURSO.DAT con el arbol del modo OutRun y los de ids (1: OUTRUN2SP, csc_data_cvt; 100 + i: el curso del
     registro i de Races.bin), y las uniones que les faltan (BKnn.DAT desde 15; las 15 del modo OutRun conservan su
     clave). Los hijos van como indices del arbol (runtime_apply_course_data_44d720 los busca por clave, +0x24 / +0x28)
@@ -665,18 +665,19 @@ def cursos(A, dsal, ids, con_uniones=True, con_tramos=False):
         rs = registros(arbol(A, 0, 'csc_data_cvt.bin') if i == 1 else arbol_mision(A, i - 100), i >= 100)
         extras.append((i, rs))
         print('arbol %d: %s' % (i, ' '.join('%s/BK%02d' % (r['zona'], r['f_bk']) for r in rs)))
-    escribe_curso(os.path.join(dsal, 'CURSO.DAT'), o2r, extras)
+    if parte[0] == 0: escribe_curso(os.path.join(dsal, 'CURSO.DAT'), o2r, extras)
     import conv_coli
     hechos = set()
     for i, rs in extras:
         for r in rs:
             if con_tramos and not os.path.exists(os.path.join(dsal, 'SEG%02d.DAT' % r['seg'])): etapa_ficheros(A, r['_ti'], dsal)
             f = os.path.join(dsal, 'BK%02d.DAT' % r['f_bk'])
-            if con_uniones and r['f_bk'] >= 15 and r['f_bk'] not in hechos and not os.path.exists(f):   # (las ya hechas se quedan)
-                union_fichero(A, r['_c'], f, descs[r['_ti']], ri, rd, so); hechos.add(r['f_bk'])
-            if r['f_col'] == -2 and not os.path.exists(os.path.join(dsal, 'COLLR.DAT')):
+            if con_uniones and r['f_bk'] >= 15 and r['f_bk'] not in hechos and not os.path.exists(f) and r['f_bk'] % parte[1] == parte[0]:   # (las ya hechas se quedan)
+                union_fichero(A, r['_c'], f + '.tmp', descs[r['_ti']], ri, rd, so); hechos.add(r['f_bk'])
+                os.replace(f + '.tmp', f)                 # (entero o nada: se puede cortar y seguir)
+            if r['f_col'] == -2 and parte[0] == 0 and not os.path.exists(os.path.join(dsal, 'COLLR.DAT')):
                 conv_coli.escribe(coli_bytes(A, '\\BK\\coli_LRBK_PALM_bin'), os.path.join(dsal, 'COLLR.DAT'), 1)
-            if r['f_col'] >= 15 and not os.path.exists(os.path.join(dsal, 'COLBK%02d.DAT' % r['f_col'])):
+            if r['f_col'] >= 15 and r['f_col'] % parte[1] == parte[0] and not os.path.exists(os.path.join(dsal, 'COLBK%02d.DAT' % r['f_col'])):
                 ct = cadena(E, u32(E, base2 + 4 * r['_c'][2]) + 0x0c)
                 conv_coli.escribe(coli_bytes(A, ct), os.path.join(dsal, 'COLBK%02d.DAT' % r['f_col']), 1)
 
@@ -687,9 +688,11 @@ def main():
     arg = [a for a in sys.argv[1:] if not a.startswith('--')]
     if '--solo-carriles' in sys.argv: solo_carriles(Assets(arg[0]), arg[1]); return
     ar = [a for a in sys.argv if a.startswith('--arboles=')]
+    pa = [tuple(int(x) for x in a.split('=')[1].split('/')) for a in sys.argv if a.startswith('--parte=')]
+    parte = pa[0] if pa else (0, 1)                   # --parte=k/n: solo las uniones con f_bk % n == k (en paralelo)
     if ar:                                            # --arboles=1,100,188: CURSO.DAT con esos arboles y sus uniones
         cursos(Assets(arg[0]), arg[1], [int(x) for x in ar[0].split('=')[1].split(',')], '--sin-uniones' not in sys.argv,
-               '--con-tramos' in sys.argv); return
+               '--con-tramos' in sys.argv, parte); return
     curso(Assets(arg[0]), arg[1], '--sin-tramos' not in sys.argv, '--solo-curso' in sys.argv)
 
 if __name__ == '__main__':
