@@ -7568,6 +7568,13 @@ int main(int argc, char **argv)
        en la consola real un bufer u OPB lleno cuelga el TA. Modificadores opacos (la sombra del coche, sombra_dibuja)
        con bloques de 8 y translucidos de 16 a 8: el OPB ocupa lo mismo que antes (64 palabras por tesela). Cuentas en
        docs/DREAMCAST.md */
+    /* la prueba de alfa de la lista de recorte, como la del original: el TEST_1 del GS de los materiales con prueba de
+       alfa (los 888 de PALM, LAKE, INDU, SNOW, METR y BEAC: ATST GEQUAL, AREF 0x40 con 0x80 = 1) deja pasar el alfa
+       filtrado >= 0,5. La PowerVR arranca con PT_ALPHA_REF = 0xFF (KallistiOS no lo cambia): solo pasaba el alfa 1 tras
+       el filtro bilineal y el borde de las texturas de 1 bit (tools/modelo.py: el umbral de AREF ya va en el texel)
+       salia en escalones de un texel, medio texel hacia dentro (los montes de fondo de LAKE junto a la bifurcacion:
+       una franja a escalones sobre el horizonte; las hojas de los arboles) */
+    PVR_SET(PVR_PT_ALPHA_REF, 0x80);
     pvr_init_params_t pp = { { PVR_BINSIZE_32, PVR_BINSIZE_8, PVR_BINSIZE_8, 0, PVR_BINSIZE_16 }, TA_VB_BYTES, 0, 0, 0, 4 };
     int estado = TITULO, auto_ = 0, ver = VER, pausa = 0, l, i, r;
     int reintenta = 0;                                          /* REINTENTAR del menu de pausa: salida otra vez */

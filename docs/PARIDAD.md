@@ -2547,3 +2547,29 @@ Arreglo (tools/conv_union.py `agua_de` / `agua_campos`, tools/conv_tramo.py `pon
   son la misma imagen con la V algo desplazada).
 - Datos: los 38 SEGnn.DAT con agua y CURSO.DAT regenerados; las uniones no cambian (el agua es del descriptor de
   etapa).
+
+## Bifurcaciones: franja a escalones sobre el horizonte (2026-11-11)
+
+Queja del usuario (demo 35, consola real): "en el cielo de algunas bifurcaciones hay texturas que se mezclan y no se
+ven bien" (foto: en una union, a la izquierda, una franja azul morada oscura a escalones encima de los montes, con el
+resto del cielo claro). Reproducido en Flycast al final de LAKE (`-DPRUEBA_AUTO -DPRUEBA_NODO=1 -DPRUEBA_FIN=900`,
+hacia la union de CAST / FORE).
+- Que es: no es el cielo (el de LAKE y el de su union BK01 son la misma cupula de nubes de 128 x 128 y el gradiente de
+  32 x 32 del fundido, sin montes) ni el fundido entre cielos (en ese tramo aun no ha empezado), sino los montes de
+  fondo de LAKE: 3 tiras del nodo 230 (registro 1, nodo 11 del original: esfera de 906 m) con la textura de 256 x 32
+  de la cordillera (roca gris azulada con nieve; el cielo lila de abajo es alfa 0), a 0,5-1,4 km de la carretera. Es
+  de la lista de recorte en el original: TEST_1 del GS con ATE, ATST GEQUAL y AREF 0x40 (0x80 = 1), sin mezcla; la
+  conversion la lleva igual (ARGB1555 VQ, el alfa de 1 bit identico texel a texel al del original).
+- Por que se veia a escalones: la PowerVR compara el alfa filtrado con PT_ALPHA_REF y KallistiOS no lo pone (queda el
+  de arranque, 0xFF; Flycast igual): solo pasaba el alfa 1 despues del filtro bilineal, asi que el borde de cualquier
+  textura de 1 bit seguia la rejilla de texeles (escalones de un texel, medio texel hacia dentro) en lugar del contorno
+  suave que da el GS con el alfa filtrado >= 0,5. En la cordillera, estirada 1,4 km en 256 texeles, eran escalones de
+  varios pixeles: la franja a bloques.
+- Arreglo (demo/main.c, tras `pvr_init`): PT_ALPHA_REF = 0x80 (0,5), el AREF 0x40 del original. Todos los materiales
+  con prueba de alfa de las etapas tienen ese mismo estado (888 en PALM, LAKE, INDU, SNOW, METR y BEAC: GEQUAL 0x40),
+  asi que vale para toda la lista de recorte (hojas de los arboles, vallas, carteles). Flycast: la cordillera junto a
+  la bifurcacion de LAKE con su silueta de montes (antes una franja a escalones) y las hojas de los arboles sin bloques.
+- Lo que no cambia: la cordillera se sigue viendo alli (azul gris y oscura por la luz de la etapa, 0xC2D2F4 en sus
+  vertices), como en el original si la dibuja en ese tramo. PENDIENTE: la lista de nodos por seccion del PS2
+  (cs_CS_LAKE_bin) nombra ese nodo en 28 secciones sueltas (74..519 de 677) y su formato sigue sin descifrar (la demo
+  usa la visibilidad precalculada propia, que no quita lo que se ve).
