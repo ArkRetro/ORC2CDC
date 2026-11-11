@@ -15,7 +15,9 @@ typedef struct {
     int32_t corazones;      /* 45B820: [7F1C80] del INFARTO (10000 por corazon) */
 } fin_carrera_t;
 
-void fin_carrera_empieza(void);                     /* coche nuevo: car+E78 = 0 (constructor, PS2 0x239e84) */
+/* START: coche nuevo, car+E78 = 0 (constructor, PS2 0x239e84); con la consola (1b4878 != 0) tambien las millas y las
+   de las etapas (0x1b6154 -> 0x1f3e68: 0x36d2e0 / 0x36d2e4 a 0) */
+void fin_carrera_empieza(int consola);
 void fin_rebufo(int n);                             /* car+E78 += n (CheckSlipStream, PS2 0x186494) */
 void fin_etapa(const int limpio[6], int segundos);  /* 4EF460 / 4EF440 (PS2 0x1f4118 / 0x1f40f8) desde 4F2B20 */
 void fin_entra(int como, const fin_carrera_t *c);   /* 49B470 (modo 34) */

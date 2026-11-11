@@ -1767,6 +1767,8 @@ static int ha_u_txt = -1, ha_u_mar = -1;                                        
    OutRun 2 SP (csc_data_cvt, arbol 1 de CURSO.DAT), 2 / 3 los de 15 niveles; lo pone la lista de juego / curso del
    frontal de OUTRUN2SP (4C3DC0: +27 por el lado elegido) y 43F950 (PS2 0x1b4a88). */
 static int juego_sp;                                            /* 1: [780260] = 0 (OUTRUN2SP) */
+static int pide_fsp;                                            /* modo 28 -> 10 pedido: el frontal de recreativa en
+                                                                   cuanto el hueco de la union queda libre */
 static int preset_curso;                                        /* [78024C] */
 #define TIM_PRESET preset_curso                                 /* 0x176018: preset 0 / 1 / 2 / 3 -> fila 0 / 1 / 5 / 6 (TIM1 0..3) */
 #define TIM_FILA (variante == 1 ? 0 : variante == 2 || variante == 5 ? 1 : variante == 0 || variante == 7 ? 2 : 0)
@@ -1990,8 +1992,9 @@ static void traf_tap_arbol(const uint8_t *seg, int n)
     memcpy(&nseg, sec + 4, 4);
     for (k = 0; k < n && k < TAP_ETAPAS; k++) {
         uint32_t o = 8 + (uint32_t)seg[k] * sizeof(tap_etapa_t), s0 = o / 2048;
-        if (seg[k] >= nseg || o + sizeof(tap_etapa_t) > tam) { dbglog(DBG_ERROR, "TAPD: sin el segmento %d\n", seg[k]); continue; }
-        if (gd_lee(lba + s0, (o + sizeof(tap_etapa_t) - 1) / 2048 - s0 + 1, sec)) { dbglog(DBG_ERROR, "TAPD: error de lectura\n"); return; }
+        /* sin el segmento o sin leerlo: la etapa sin tablas (no las del arbol anterior) */
+        if (seg[k] >= nseg || o + sizeof(tap_etapa_t) > tam) { dbglog(DBG_ERROR, "TAPD: sin el segmento %d\n", seg[k]); memset(&tap[k], 0, sizeof tap[k]); continue; }
+        if (gd_lee(lba + s0, (o + sizeof(tap_etapa_t) - 1) / 2048 - s0 + 1, sec)) { dbglog(DBG_ERROR, "TAPD: error de lectura\n"); memset(&tap[k], 0, sizeof tap[k]); continue; }
         memcpy(&tap[k], sec + o - s0 * 2048, sizeof(tap_etapa_t));
     }
     ntap = n < TAP_ETAPAS ? n : TAP_ETAPAS;
@@ -7620,8 +7623,11 @@ int main(int argc, char **argv)
             if (!reintenta) curso_al_menu();                    /* la VRAM del curso, para el menu */
             if (ha_hud && !reintenta) { hudd_cierra(ha_hud); ha_hud = NULL; ha_u_txt = ha_u_mar = -1; }   /* INFARTO */
             presta_union(1);                                    /* (en cuanto el curso suelta la union) */
+            /* el frontal de recreativa pone sus tablas (~850 KB) en el final del hueco de la union: tras la meta la union
+               de la meta sigue alli hasta que curso_al_menu la suelta (unos cuadros); nunca en el monton */
+            if (pide_fsp && union_prestable()) { pide_fsp = 0; menu_entra_sp(); }
             if (!reintenta && menu_tablas(1)) dbglog(DBG_ERROR, "MENU: no se pudieron leer las piezas de MENU.DAT\n");
-            rm = reintenta ? MENU_CARRERA : menu_paso(nuevo);   /* titulo, modos, coche, cambio y musica */
+            rm = reintenta ? MENU_CARRERA : pide_fsp ? MENU_SIGUE : menu_paso(nuevo);   /* titulo, modos, coche, cambio y musica */
             ttit += 1.0f / 60;
             if (menu_coche3d() && menu_coche() >= 0 && menu_coche() != coche_ficha && menu_coche() != coche_malo &&
                 coche_carga(menu_coche())) coche_malo = menu_coche();                              /* (sin reintentos) */
@@ -7661,7 +7667,7 @@ int main(int argc, char **argv)
                 /* voces del modo (bancos HC/PERH/HAM del INFARTO o ORC/PERO): se leen en el hueco de la union, aun
                    prestado (el AICA guarda uno de los dos juegos) */
                 if (voz_ok && union_prestable())
-                    sfx_voces_juego(variante == 2 ? "VOCESH.DAT" : "VOCES.DAT", hueco_union, cap_union);
+                    sfx_voces_juego(variante == 2 ? "VOCESH.DAT" : "VOCES.DAT", hueco_union, cap_union - union_fsp);   /* (sin el final del frontal) */
                 if (variante == 2) { if (infarto_inicia()) { dbglog(DBG_ERROR, "MODO: sin INFARTO.DAT\n"); variante = 1; } }
                 else infarto_libera();                          /* 64 KB de tablas: solo en su modo */
                 if (voz_ok) { voces_modo(variante == 2); if (variante != 2) sfx_voz_grupo(-1); }
@@ -7691,8 +7697,9 @@ int main(int argc, char **argv)
                 if (hud_ok && hud_sube_tex()) hud_ok = 0;
                 /* OUTRUN2SP: la pantalla de carga del preset (0x1b8228; sus texturas detras de las del HUD y fuera antes
                    de reservar la zona del curso, demo/sp.c) */
-                if (juego_sp) sp_carga_entra(variante, preset_curso);
                 presta_union(0);                                /* el hueco de la union vuelve a la carrera */
+                /* (sus tablas en el hueco de la union, que curso_reinicia no usa: nada en el monton antes de col_reserva) */
+                if (juego_sp) sp_carga_entra(variante, preset_curso, hueco_union, cap_union);
                 curso_reinicia();                               /* la etapa de salida (otra vez, si hacia falta) */
                 bo_inicia();                                    /* sin objetos de union y las cuentas a cero */
                 salida_calcula();
@@ -7707,7 +7714,7 @@ int main(int argc, char **argv)
                 coche_paso(&yo, 0, 0, 0, 0); traf_inicia(SALIDA); efectos_borra();
                 if (fis_ok) { float p[3], th; ruta_en(yo.s, p, &th, NULL, NULL); or2_coloca(&fis, &fpar, th + yo.a, 0); }
                 lejos = LEJOS_PS2; entorno_reinicia(); niebla_paso(); niebla_pon();   /* la distancia del original */
-                tim_cuadros = tim_zona(cur_nodo, etapa_n); tiempo = tim_cuadros / TIM_HZ; estado = CUENTA; t_estado = 0; t_cuenta = -60; salida_entra(); pausa = 0; crono = 0; pt_inicia(); fin_carrera_empieza();
+                tim_cuadros = tim_zona(cur_nodo, etapa_n); tiempo = tim_cuadros / TIM_HZ; estado = CUENTA; t_estado = 0; t_cuenta = -60; salida_entra(); pausa = 0; crono = 0; pt_inicia(); fin_carrera_empieza(!juego_sp);
                 reintenta = 0;
                 if (voz_ok) voces_carrera();
                 if (variante == 2) {
@@ -7975,7 +7982,7 @@ int main(int argc, char **argv)
                 else if (rf == FIN_MENU) {                      /* 28 */
                     estado = TITULO; hud_baja_tex(); menu_entra(manual_, pista, NPISTAS);
                     /* 49AF90 estado 3: sin la consola (43F860 = 0) y sin [65994C] vuelve al frontal de recreativa (modo 10) */
-                    if (juego_sp && !auto_) menu_entra_sp();
+                    if (juego_sp && !auto_) pide_fsp = 1;      /* (en TITULO, con el hueco de la union libre) */
                     auto_ = 0;
                 }
             }
@@ -8030,7 +8037,9 @@ int main(int argc, char **argv)
 
         /* efectos de sonido del coche (una vez por cuadro) */
         if (sfx_ok) {
-            if (estado == TITULO || pausa || !fis_ok || estado == FIN) sfx_para();   /* FIN: 49A130 (PS2 0x1b8d80) */
+            /* FIN, META y AGOTADO: 49A130 (PS2 0x1b8d80, 4278C0 de los bancos de efectos 0x300 / 0x400 / 0x100 / 0) en la
+               entrada de los modos 19 (0x1b8f00) y 20 (0x1b99e8), y la pausa */
+            if (estado == TITULO || pausa || !fis_ok || estado == FIN || estado == META || estado == AGOTADO) sfx_para();
             else {
                 sfx_motor((float)fis.rpm_i, fis.ac_motor / 256.0f, fis.marcha);
                 sfx_derrape(yo.t_derrape ? fminf(fabsf(fis.desliz_grados) / 30.0f, 1.0f) : 0.0f);
@@ -8184,7 +8193,7 @@ int main(int argc, char **argv)
             if (l == 2 && estado != TITULO) sol_dibuja();       /* el sol y su destello (40CBC0) */
             if (l == 2) {
                 int texto = ver || (!hud_ok && estado != TITULO), navi;
-                if (estado == TITULO) menu_dibuja();
+                if (estado == TITULO && !pide_fsp) menu_dibuja();
                 if (hud_ok && estado != TITULO && !fin_on) {       /* en los modos 34 / 35 / 27 nada (428600) */
                     hud_estado_t he;
                     he.tiempo = (int)(tim_cuadros / TIM_HZ + 0.34f); he.crono_ms = cuadros_ms(crono); he.puntos = pt_visible(); he.puntos_estilo = pt_estilo;

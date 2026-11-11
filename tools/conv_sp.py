@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """conv_sp.py <iso> <dir_salida> [dir_previas]: graficos del juego de OUTRUN2SP ([0x59acac] = 0) fuera del frontal de
-recreativa -> CARGASP.DAT (pantalla de carga) para demo/sp.c y GOVSP.DAT (GAME OVER) para demo/fin.c; y SPFE.DAT, el
+recreativa -> CARGASP0..3.DAT (pantalla de carga, una por preset) para demo/sp.c y GOVSP.DAT (GAME OVER) para demo/fin.c; y SPFE.DAT, el
 frontal de recreativa (banco 0x2E SELECTOR_CVT entero para comun/sprani.c, ver conv_sprani.py, y las tablas de
 arcade_attract.cpp en el bloque FSP1, ver tablas_fe) para comun/fsp.c.
 
@@ -13,7 +13,8 @@ Origen (SLES-53998):
    (0x1b4878 = 0) y de las variantes 3..5 (tabla de saltos 0x3f9720), 114d00(token, 2, 0, 0, 0x77): la escena del
    preset (gp-0x7b64 = 78024C) del banco 0x2F (LOADING_CVT, leido en 0x1b645c): preset 0 -> 2F0002, 1 -> 2F0003,
    2 -> 2F0000, 3 -> 2F0001 (los lui / ori / movz de 0x1b827c..0x1b82b4), capa 2, modo 0 (en bucle), cuadros 0..0x77
-   -> grupos CARGA_P0..CARGA_P3 (120 cuadros), usos con el mismo nombre en (0, 0).
+   -> grupo CARGA_Pn (120 cuadros) con un uso del mismo nombre en (0, 0), en CARGASPn.DAT (un fichero por preset: en la
+   RAM solo las piezas del que se ve).
  - GAME OVER (modo 27, 0x1bafc8): el GAD (0x1a04f0) crea con 1b4878 = 0 y 450240 != 7 la escena 34001F (lui / ori de
    0x1a0520 / 0x1a052c; banco 0x34 ROUTE_CVT, leido por el modo 25: PC 49A790 42DEB0(0x34, 9)) en la capa 0, modo 1 (se
    queda en el ultimo cuadro); el modo dura 0xF0 pasos (0x1bafe0: 1b4a10(0xF0)) -> grupo GAME_OVER_SP (cuadros 0..0xEF),
@@ -85,13 +86,15 @@ def carga(D, sal):
     w = cf.u32(elf, 0x1b82c4); assert w >> 26 == 9 and w & 0xffff == 0x77, hex(w)   # addiu t0, zero, 0x77
     toks = [t2, t3, t0, t1]
     A, T, _ = D.banco(0x2f)
-    hud = hud_nuevo()
+    huds = []
     for p, t in enumerate(toks):
         assert t >> 16 == 0x2f
+        hud = hud_nuevo()
         grupo_escena(hud, 'CARGA_P%d' % p, A, T, 0x2f, t & 0xffff, n=0x78)
-    f = os.path.join(sal, 'CARGASP.DAT'); hud.escribe(f)
-    print('CARGASP.DAT: %d bytes, %d texturas, %d piezas' % (os.path.getsize(f), len(hud.tex), len(hud.pie)))
-    return hud
+        f = os.path.join(sal, 'CARGASP%d.DAT' % p); hud.escribe(f)
+        print('CARGASP%d.DAT: %d bytes, %d texturas, %d piezas' % (p, os.path.getsize(f), len(hud.tex), len(hud.pie)))
+        huds.append(hud)
+    return huds
 
 def game_over(D, sal):
     elf = D.elf
@@ -198,10 +201,10 @@ def tablas_ruta(D):
 def rutas(D, sal):
     cs.escribe(D, 0x34, os.path.join(sal, 'RUTASP.DAT'), GRUPOS_RUTA, tablas_ruta(D), vq=vq_sp)
 
-def maquetas(hud, d):
+def maquetas(huds, d):
     from PIL import Image
     os.makedirs(d, exist_ok=True)
-    for p in range(4):
+    for p, hud in enumerate(huds):
         img = Image.new('RGBA', (640, 480), (0, 0, 0, 255))
         u = next(u for u in hud.lay if u[0] == 'CARGA_P%d' % p); ch.dibuja_grupo(img, hud, u[1], 60, u[3], u[4])
         img.save(os.path.join(d, 'carga_p%d.png' % p))

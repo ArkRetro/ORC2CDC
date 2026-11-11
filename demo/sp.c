@@ -7,7 +7,9 @@
      el mismo paso): la escena se dibuja entre los pasos de la carga con el cuadro del reloj de la logica (60000 / 1001
      por segundo, como el bucle 0x1078c8) y la pantalla se queda con el ultimo cuadro mientras dura cada paso. Sus
      texturas salen de la VRAM antes de reservar la zona del curso.
-   Graficos: CARGASP.DAT (tools/conv_sp.py), abierto parcial (solo las tablas en la RAM) y cerrado al acabar. */
+   Graficos: CARGASPn.DAT, uno por preset (tools/conv_sp.py), abierto parcial (solo las tablas en la RAM) y cerrado al
+   acabar; sus tablas y los sectores de la lectura de sus texturas en la RAM prestada (el hueco de la union) para no dejar
+   nada en el monton bajo lo que START reserva despues (solo las piezas compactas de su grupo, ~8 KB). */
 #include <kos.h>
 #include <stdio.h>
 #include "sp.h"
@@ -18,25 +20,34 @@ static hud_dat_t *cd;                                   /* CARGASP.DAT mientras 
 static int u_carga = -1;
 static uint64_t t0_carga;
 
-void sp_carga_entra(int variante, int preset)
+#define SP_TABLAS (128 * 1024)                          /* para las tablas; el resto, sectores de la lectura */
+void sp_carga_entra(int variante, int preset, void *ram, uint32_t cap)
 {
-    char n[16]; int t0, nt;
+    char n[16], f[16]; int t0, nt, r = 0;
     sp_carga_sale();
     if (variante >= 3 && variante <= 5) return;         /* 0x3f9720: sin pantalla en la red */
     if (preset < 0 || preset > 3) return;
+    if (cap < SP_TABLAS + 64 * 1024) ram = NULL;
+    sprintf(f, "CARGASP%d.DAT", preset);
     musica_pausa_lectura(1);
-    cd = hudd_abre("CARGASP.DAT", 0, 1);
+    if (ram) hudd_tablas_en(ram, SP_TABLAS);
+    cd = hudd_abre(f, 0, 1);
+    hudd_tablas_en(NULL, 0);
     musica_pausa_lectura(0);
-    if (!cd) { dbglog(DBG_ERROR, "CARGA: no se pudo abrir CARGASP.DAT\n"); return; }
+    if (!cd) { dbglog(DBG_ERROR, "CARGA: no se pudo abrir %s\n", f); return; }
     sprintf(n, "CARGA_P%d", preset);
     u_carga = hudd_uso(cd, n);
     nt = u_carga >= 0 ? hudd_tex_uso(cd, u_carga, &t0) : 0;
-    if (u_carga < 0 || (nt && hudd_sube(cd, t0, nt))) {
+    if (ram) hudd_bufer((uint8_t *)ram + SP_TABLAS, cap - SP_TABLAS);
+    if (u_carga >= 0 && nt) r = hudd_sube(cd, t0, nt);
+    if (ram) hudd_bufer(NULL, 0);
+    if (u_carga < 0 || r) {
         dbglog(DBG_ERROR, "CARGA: sin %s o sin VRAM\n", n);
         sp_carga_sale(); return;
     }
     t0_carga = timer_us_gettime64();
-    dbglog(DBG_INFO, "CARGA: escena del preset %d (CARGASP.DAT), VRAM libre %uK\n", preset, (unsigned)(pvr_mem_available() >> 10));
+    dbglog(DBG_INFO, "CARGA: escena del preset %d (%s, tablas %s), VRAM libre %uK\n", preset, f, ram ? "prestadas" : "en el monton",
+           (unsigned)(pvr_mem_available() >> 10));
     sp_carga_cuadro();
 }
 

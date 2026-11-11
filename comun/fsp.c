@@ -1439,11 +1439,16 @@ int fsp_entra(void)
 {
     uint32_t tam; void *ram;
     fsp_sale();
+    /* nunca en el monton (~850 KB seguidos que el menu no tiene): sin el hueco, no se entra */
     ram = fsp_hueco ? fsp_hueco(HUECO_FSP) : NULL;
-    if (!(bk = spr_abre_en("SPFE.DAT", ram, ram ? HUECO_FSP : 0))) {
-        dbglog(DBG_ERROR, "FSP: no se pudo abrir SPFE.DAT\n"); if (fsp_hueco) fsp_hueco(0); return -1;
+    if (!ram) { dbglog(DBG_ERROR, "FSP: sin el hueco para SPFE.DAT\n"); return -1; }
+    if (!(bk = spr_abre_en("SPFE.DAT", ram, HUECO_FSP))) {
+        dbglog(DBG_ERROR, "FSP: no se pudo abrir SPFE.DAT\n"); fsp_hueco(0); return -1;
     }
     T = (const tab_t *)spr_extra(bk, &tam);
+    if ((const uint8_t *)T < (const uint8_t *)ram || (const uint8_t *)T >= (const uint8_t *)ram + HUECO_FSP) {
+        dbglog(DBG_ERROR, "FSP: las tablas de SPFE.DAT no caben en el hueco\n"); spr_cierra(bk); bk = NULL; fsp_hueco(0); return -1;
+    }
     if (!T || tam < sizeof(tab_t) || memcmp(T->m, "FSP1", 4)) {
         dbglog(DBG_ERROR, "FSP: SPFE.DAT sin tablas\n"); spr_cierra(bk); bk = NULL; if (fsp_hueco) fsp_hueco(0); return -1;
     }

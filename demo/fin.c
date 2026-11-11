@@ -58,7 +58,7 @@ static hud_dat_t *fd;                                   /* FIN.DAT o GOVER.DAT *
 static int u_millas = -1, u_cifra[8], u_preg = -1, u_elige = -1, u_go = -1;
 static int n_millas, n_preg, n_elige, n_go;             /* cuadros de cada escena */
 
-void fin_carrera_empieza(void) { rebufo_e78 = 0; }
+void fin_carrera_empieza(int consola) { rebufo_e78 = 0; if (consola) millas = m_etapa = 0; }
 void fin_rebufo(int n) { rebufo_e78 += (uint32_t)n; }
 
 /* 4EF460 (limpio: +84DF28, +84DF1C, +84DF20, +84DF24, +84DF2C, +84DF30 a cero) y 4EF440(max(60 - segundos, 0)); fuera

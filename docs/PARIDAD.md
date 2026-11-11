@@ -1925,8 +1925,18 @@ su caja y el fundido a negro, y la salida al menu con START o a los 600 cuadros,
   TIME OVER) y de la muestra 0x1a1 (modo 34 desde la pausa): sin consulta de "sonando" en comun/sfx.c; el bloqueo de
   botones del modo 35 (+0x5E0 del objeto 0x375068, PC +0x518 de 4035F0: sin localizar quien lo pone); la suspension de
   los sucesos en el fin del tiempo (modo 20, 440A10: el coche de la demo sigue frenando solo, como antes); la pantalla
-  de carga del modo 30 / 28 (0x480000) y 1001d8(0, 0xF0, 0) del modo 27 (sin identificar); START en los modos 19 / 20
+  de carga del modo 30 / 28 (0x480000); START en los modos 19 / 20
   (43F980 -> 43F990(0x1D): sin localizar la peticion; antes la demo volvia al menu con START, inventado).
+- 1001d8(0, 0xF0, 0.0) del modo 27 (0x1baff0; PC 42E020, el volumen de la musica): en el PS2 solo llama a 0x100110(0)
+  (1 si suena el canal 0: [0x443b84] != 0) y devuelve eso; no cambia el volumen. Igual en sus otras 15 llamadas (el
+  frontal de recreativa 0x2189a4.., 0x1b5c8c, 0x249698...): no hay fundido que portar. La salida del modo 27 (49AED0)
+  para la musica: 401030(0) y (1) (fin_sale de demo/fin.c).
+- Efectos del coche: 49A130 (PS2 0x1b8d80: 4278C0 de 0x300, 0x400, 0x100 y 0; 0x800 / 0x700 / 0x600 en las variantes
+  4..6) en la entrada de los modos 19 (0x1b8f00) y 20 (0x1b99e8): la Dreamcast calla el motor, el derrape y el golpe
+  (sfx_para) en META, AGOTADO y FIN (antes solo en FIN: en la meta y el fin del tiempo seguian sonando).
+- Millas: START (0x1b6130) con la consola (1b4878 != 0) pone a 0 las millas y las de las etapas (0x1f3e68: 0x36d2e0 /
+  0x36d2e4); fin_carrera_empieza(consola). Antes solo se ponian a 0 al sumarlas a la licencia: las de la demo de
+  atraccion y las de OUTRUN2SP se sumaban en la siguiente carrera de la consola.
 - Verificado en E (Flycast): fin del tiempo en PALM -> millas (0: 1740 puntos) -> continuar -> B -> titulo; pausa ->
   ABANDONAR -> millas -> GAME OVER -> titulo; INFARTO, pausa -> REINTENTAR -> millas -> salida otra vez con el HUD;
   `-DPRUEBA_AUTO -DPRUEBA_MILLAS -DPRUEBA_NODO=13 -DPRUEBA_FIN=400 -DPRUEBA_SIN_TIEMPO`: GOAL en IMPE -> 1991 millas
@@ -1950,7 +1960,8 @@ arcade_attract.cpp):
 - Carga: en el juego de OUTRUN2SP (0x1b8228, solo con [0x59acac] = 0, variantes 0..2 y 6..9: tabla 0x3f9720) la
   pantalla "Cargando" del banco 0x2F (LOADING_CVT) con el logo y el mapa del curso del preset: preset 0 -> 2F0002, 1 ->
   2F0003, 2 -> 2F0000, 3 -> 2F0001, capa 2, modo 0 (en bucle), cuadros 0..0x77, creada al acabar de leer el curso en
-  START (0x1b64ac). HECHA (2026-11-11): tools/conv_sp.py -> CARGASP.DAT (grupos CARGA_P0..3), demo/sp.c. La demo carga
+  START (0x1b64ac). HECHA (2026-11-11): tools/conv_sp.py -> CARGASP0..3.DAT (uno por preset, grupo CARGA_Pn; sus
+  tablas en el hueco de la union, que START no usa hasta la primera union), demo/sp.c. La demo carga
   de un tiron: la escena se dibuja al empezar la carga y entre sus pasos con el cuadro del reloj de la logica (60000 /
   1001 por segundo) y la pantalla se queda con el ultimo cuadro mientras dura cada paso; sus texturas (VQ, detras de las
   del HUD) salen antes de reservar la zona del curso. Se quita al empezar la escena de la salida (el original la
@@ -2116,11 +2127,16 @@ memory", RAM del menu igual que antes (939 KB libres).
   suavizado de la palanca) = 0; el orden entre las escenas del grupo y las inmediatas (429530) de una misma capa; la
   lista (4C0EB0) es la del PC: la del PS2 (0x2113a0) difiere en detalles (pone 3 en 84A28F / 84A290 en los saltos de
   borde) y no esta comprobada linea a linea.
+- El fundido de volumen de la musica (4BF970 -> 42E020) es en el PS2 0x1001d8, que no cambia el volumen (ver Fin de
+  la carrera): nada que portar.
+- Vuelta desde el GAME OVER (modo 28 -> 10): el frontal se abre en cuanto el hueco de la union queda libre (tras la meta
+  la union de la meta sigue alli unos cuadros, hasta curso_al_menu); fsp_entra no usa nunca el monton (las tablas de
+  SPFE.DAT, ~850 KB, solo en el final del hueco de la union; sin el, no se entra). Las voces del modo (VOCES.DAT /
+  VOCESH.DAT) se leen en el hueco sin ese final.
 - SIN PORTAR: 453320 ([0x54c108], quien lo escribe sin localizar): se toma 0 (3 filas; las de 15 recorridos
   continuos, presets 2 / 3, no salen); el mundo y la camara del coche (4BF2E0 / 4BF340, suceso 0x181 funcion 0xD; la
   Dreamcast usa la camara que gira del menu de la consola, PROVISIONAL); los textos de ayuda (84A320, 446D90); las
-  voces 6..0x3F (4BEE60: solo con el idioma 0; en la PAL espanola no suenan); el fundido de volumen de la musica
-  (42E020); la configuracion del coche de la Contrarreloj (+23) y el balance (+21) en la carrera; 689C68 ([7C24BC]);
+  voces 6..0x3F (4BEE60: solo con el idioma 0; en la PAL espanola no suenan); la configuracion del coche de la Contrarreloj (+23) y el balance (+21) en la carrera; 689C68 ([7C24BC]);
   red, varios jugadores y la pagina 84A218.
 
 ## Ultimo cambio verificado
