@@ -33,7 +33,7 @@ en las cargas del curso (sin huecos fijos) y 5 combinaciones "union + LASV" que 
    desde la pausa; PARIDAD.md, Fin de la carrera); faltan la tabla de tiempos, los records (bandera de las millas) y
    la voz de la meta.
 2. OUTRUN2SP elegible en el menu (HECHO 2026-11-11: [780260] = 0 y sus reglas; el frontal de recreativa
-   SELECTOR_CVT HECHO 2026-11-11 (comun/fsp.c, PARIDAD.md); el final, la entrada de nombre y los rankings de OUTRUN2SP siguen
+   SELECTOR_CVT HECHO 2026-11-11 (comun/fsp.c, PARIDAD.md) y la vuelta a el tras el GAME OVER; el final, la entrada de nombre y los rankings de OUTRUN2SP siguen
    SIN PORTAR: PARIDAD.md, OUTRUN2SP; la pantalla de carga, el GAME OVER (27) de la pausa, la meta y el fin del
    tiempo, la salida en (0, -16) con el banderero visible y el trafico de las etapas al reves, HECHOS). Vista interior. Saltos. Bonus de puntuacion que faltan.
 

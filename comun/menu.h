@@ -18,6 +18,7 @@ void menu_dibuja(void);                     /* dentro de la lista TR */
 void menu_sale(void);                       /* libera toda la VRAM del menu */
 int menu_modo(void);                        /* variante del modo: 1 OutRun, 2 Heart Attack (INFARTO), 7 Time Attack */
 int menu_sp(void);                          /* 1: OUTRUN2SP del menu principal ([780260] = 0, frontal de recreativa) */
+void menu_entra_sp(void);                   /* OUTRUN2SP tras la carrera: el frontal de recreativa (49AF90: modo 10) */
 int menu_preset(void);                      /* OUTRUN2SP: preset del curso (43F950: 0 OutRun 2, 1 OutRun 2 SP) */
 int menu_manual(void);                      /* cambio elegido: 0 AT, 1 MT */
 int menu_pista(void);                       /* musica elegida */

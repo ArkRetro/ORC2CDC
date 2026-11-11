@@ -624,6 +624,11 @@ void menu_suma_millas(uint32_t millas)
    Attack, 7 Time Attack); COAST 2 COAST (las misiones de Races.bin, variante 5) no esta: corre como OutRun */
 int menu_modo(void) { return sp_sel ? fsp_variante() : modo_sel == 2 ? 2 : modo_sel == 3 ? 7 : 1; }
 int menu_sp(void) { return sp_sel; }
+void menu_entra_sp(void)
+{
+    sp_sel = 1; menu_libera_todo();
+    if (fsp_entra()) { sp_sel = 0; dbglog(DBG_ERROR, "menu: sin el frontal de recreativa, al titulo\n"); }
+}
 int menu_preset(void) { return sp_sel ? fsp_preset() : 0; }
 int menu_manual(void) { return sp_sel ? fsp_manual() : manual; }
 int menu_pista(void) { return sp_sel ? fsp_musica() : elegido < n_ok ? elegido : 0; }

@@ -1950,9 +1950,15 @@ etapas, salida BEAC`, BAND1.DAT en el hueco de la union; RAM libre 1419..1490 KB
 - Frontal de recreativa (SELECTOR_CVT), HECHO 2026-11-11 (comun/fsp.c, comun/sprani.c, tools/conv_sprani.py,
   conv_sp.py tablas_fe -> SPFE.DAT): ver "Frontal de recreativa de OUTRUN2SP" abajo. Sustituye a las pantallas de
   coche, cambio y musica de la consola que se usaban (PROVISIONAL) en este juego.
-- SIN PORTAR: el final de recreativa (modo 24, AS.PS2), la entrada de nombre (modo 26), los resultados (modo 25) y los
-  rankings de OUTRUN2SP; la vuelta al frontal de recreativa (modo 10) en vez de al menu de la consola despues de la
-  carrera.
+- Vuelta al frontal de recreativa, HECHA 2026-11-11: el modo 28 (49AF90 estado 3) sin la consola (43F860 = 0) y sin
+  [65994C] pide el modo 10: tras el GAME OVER (meta, fin del tiempo y ABANDONAR de la pausa) la Dreamcast vuelve al
+  frontal (menu_entra_sp) en vez de al titulo de la consola.
+- SIN PORTAR: el final de recreativa (modo 24: AUTOSCENE \AS\as_E_xx, 485470, escenas 3D con los fondos END_*_STAGE),
+  los resultados (modo 25: suceso 0x188 funcion 0x15, el mapa de la ruta 4AE750 / 4AE960 del banco 0x34 ROUTE_CVT, y la
+  0x50 de la Contrarreloj 4AED50; en el PS2 el inicio del mapa es 0x209208, con las tablas de la ruta en 0x40fc10..
+  0x40fd78 y los tokens del coche en 0x40fe68: sin comprobar campo a campo), la entrada de nombre (modo 26,
+  race_name_entry.cpp, bancos 0x3D / 0x36 / 0x37..0x3B) y los rankings de OUTRUN2SP (sp_rankings.cpp,
+  frontend_rankings.cpp) con su guardado. Hasta portarlos la meta y el fin del tiempo pasan directos al GAME OVER (27).
 - Etapas al reves (descriptores 30..59; SEG34..SEG65), HECHO 2026-11-11: sus tablas de aparicion y de velocidad (+0x80
   / +0x84) estan en el ELF; lo que el ELF deja en la BSS son sus listas de puntos fijos (4EF880: 0x5d6028..), y por eso
   conv_trafico.py daba el registro entero vacio (sin trafico). Las rellena la rutina 0x1f2110 (la llama la puesta a cero
@@ -1963,7 +1969,8 @@ etapas, salida BEAC`, BAND1.DAT en el hueco de la union; RAM libre 1419..1490 KB
   puntos fijos conservan la etapa de ida (0..29) en el campo +0: 478B90 solo toma los de la etapa actual (44DC50, el
   descriptor) salvo con la red o los rivales (F12), asi que sin red no salen (0 en TAPD: PROBABLE que 44DC50 de 30..59
   en esas etapas, como da ti en las de ida).
-- Camiones (modelos 39..43, clases 0..2): SIN PORTAR. Su registro de 4866C0 trae un segundo descriptor (el remolque)
+- Camiones (modelos 39..43, clases 0..2): SIN PORTAR (2026-11-11: la matriz del remolque, car+C90, la calcula 470360
+  de race_traffic.cpp con el enganche +C70 / +C7C de cada paso: hace falta portar ese seguimiento, no solo el dibujo). Su registro de 4866C0 trae un segundo descriptor (el remolque)
   en cada LOD, que 4AE0F0 / 4ADBC0 (race_ghost_car.cpp, d.model) dibuja con su propia matriz articulada: conv_trafico.py
   para en "remolque (segundo descriptor) sin portar". Hasta portarlo esos coches se gastan sin coche (como antes).
 - Encontrado de paso (juego de la consola): 487EE0 / 487F50 con 43F860 != 0 eligen el piloto y la acompanante por la

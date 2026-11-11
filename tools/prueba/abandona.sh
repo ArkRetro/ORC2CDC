@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # abandona.sh <disc.gdi> [pantalla] [salida/]: nav.sh hasta la carrera, 8 s de gas, pausa (START; ab_1), ABANDONAR (dos
 # abajo y A; ab_2 la confirmacion, A) y de vuelta al menu (ab_3: las piezas de MENU.DAT se vuelven a leer del GD,
-# menu_tablas), A en cada pantalla hasta la segunda carrera (ab_4..; ab_fin) y la pausa otra vez (ab_pausa).
+# menu_tablas), A en cada pantalla hasta la segunda carrera (ab_4..; ab_fin) y la pausa otra vez (ab_pausa). Con MENU_SP=1
+# (OUTRUN2SP) despues del GAME OVER se vuelve al frontal de recreativa (modo 10).
 D=$(cd "$(dirname "$0")" && pwd); . "$D/comun.sh"
 GDI=${1:-}; PANTALLA=${2:-91}; SAL=${3:-/dev/shm/prueba_abandona}
 arranca ${FLYCAST_OPC:-}; marca

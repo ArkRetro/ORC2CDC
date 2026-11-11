@@ -7879,7 +7879,12 @@ int main(int argc, char **argv)
                 nuevo = 0;
                 if (rf != FIN_SIGUE) { fin_on = 0; meta_sale(); lejos_obj = lejos = LEJOS_PS2; texto_centro(""); }
                 if (rf == FIN_REINTENTA) { estado = TITULO; reintenta = 1; meta_suelta(); }   /* modo 30: la salida con lo elegido */
-                else if (rf == FIN_MENU) { estado = TITULO; auto_ = 0; hud_baja_tex(); menu_entra(manual_, pista, NPISTAS); }   /* 28 */
+                else if (rf == FIN_MENU) {                      /* 28 */
+                    estado = TITULO; hud_baja_tex(); menu_entra(manual_, pista, NPISTAS);
+                    /* 49AF90 estado 3: sin la consola (43F860 = 0) y sin [65994C] vuelve al frontal de recreativa (modo 10) */
+                    if (juego_sp && !auto_) menu_entra_sp();
+                    auto_ = 0;
+                }
             }
         }
         /* camara del original: un paso por paso de logica; la de la salida (485250) mientras el temporizador del
