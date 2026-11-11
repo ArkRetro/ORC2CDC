@@ -164,6 +164,40 @@ def frontal(D, sal):
     ruta = os.path.join(sal, 'SPFE.DAT')
     cs.escribe(D, 0x2e, ruta, GRUPOS_FE, tablas_fe(D), vq=vq_sp)
 
+# ---------------------------------------------------------------- resultados (modo 25: mapa de la ruta, ROUTE_CVT)
+# Grupos de atlas del banco 0x34: el mapa del preset 0 / 2 (34000E / 3401A) y el del 1 / 3 (34000D / 340019), el rotulo
+# (34001D), el tramo y la marca (34001B / 34001C), los coches del mapa (34000F..340018 y 340017, el de por defecto); las
+# escenas de la Contrarreloj de presets 2 / 3 (340000..34000C, funcion 0x50) y el GAME OVER (34001F, GOVSP.DAT) van en
+# RESTO (los presets 2 / 3 no salen: ver PARIDAD, [0x54c108])
+GRUPOS_RUTA = [('MAPA_SP', [0x0e, 0x1a]), ('MAPA_OR2', [0x0d, 0x19]), ('RUTA', [0x1d, 0x1b, 0x1c]),
+               ('COCHES', list(range(0x0f, 0x19)))]
+
+def tablas_ruta(D):
+    """tablas del mapa de la ruta (PC 4AE750 / 4AE960 de race_end_modes.cpp = PS2 0x209208 / 0x209518, funcion 0x15 del
+    suceso 0x188; fila 0x14 de la tabla de funciones 0x3ee7b4) en el ELF de SLES-53998; bloque 'RSP1' que lee
+    demo/finsp.c"""
+    elf = D.elf; u = lambda a: cf.u32(elf, a); f = lambda a: cf.f32(elf, a)
+    fn = 0x3ee7b4 + 0x14 * 0x14
+    assert (u(fn), u(fn + 4), u(fn + 0x10)) == (0x209208, 0x209518, 0x2099f8), [hex(u(fn + 4 * k)) for k in range(5)]
+    # 0x209280..0x2092ac: fila = [0x40fc10 + coche x 4] (lui 0x41 / addiu -0x3f0), token = [0x40fe68 + (fila - 1) x 0x78 +
+    # coche x 4] (addiu -0x198, mult 0x78); sin coche (o 1bcfd0 = 0) [0x40fe68] = 340017
+    assert u(0x209284) & 0xffff == 0xfc10 and u(0x209298) & 0xffff == 0xfe68 and u(0x209288) & 0xffff == 0x78
+    out = bytearray(b'RSP1'); W = lambda *v: out.extend(struct.pack('<%dI' % len(v), *v))
+    fila = [u(0x40fc10 + 4 * k) for k in range(30)]
+    assert 1 <= min(fila) and max(fila) <= 3 and u(0x40fe68) == 0x340017
+    W(*fila)
+    W(*[u(0x40fe68 + 4 * k) for k in range(90)])                       # 3 filas de 30 tokens
+    # nodos {de, a, siguiente 0, siguiente 1} (0x40fc88 / 8c / 90 / 94: s4 = 0x41 - 0x378...) y puntos (0x40fd70, x, y)
+    assert u(0x209318) & 0xffff == (-0x378) & 0xffff and u(0x20934c) & 0xffff == (-8) & 0xffff
+    W(*[u(0x40fc88 + 4 * k) for k in range(60)])                       # 15 nodos
+    out.extend(struct.pack('<62f', *[f(0x40fd70 + 4 * k) for k in range(62)]))   # 31 puntos
+    # constantes en el codigo: -10000 (0x2092c4: lui 0xc61c, ori 0x4000) y -9000 (0x209554: lui 0xc60c, ori 0xa000)
+    assert cf.lui_ori(elf, 0x2092c4, 0x2092c8) == 0xc61c4000 and cf.lui_ori(elf, 0x209554, 0x209558) == 0xc60ca000
+    return bytes(out)
+
+def rutas(D, sal):
+    cs.escribe(D, 0x34, os.path.join(sal, 'RUTASP.DAT'), GRUPOS_RUTA, tablas_ruta(D), vq=vq_sp)
+
 def maquetas(hud, d):
     from PIL import Image
     os.makedirs(d, exist_ok=True)
@@ -179,3 +213,4 @@ if __name__ == '__main__':
     if len(sys.argv) > 3: maquetas(h, sys.argv[3])
     game_over(D, sys.argv[2])
     frontal(D, sys.argv[2])
+    rutas(D, sys.argv[2])

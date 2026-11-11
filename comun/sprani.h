@@ -18,6 +18,7 @@ int spr_crea(uint32_t token, int capa, int modo, int primero, int ultimo);   /* 
 int spr_crea_entera(uint32_t token, int capa, int modo);                     /* 428320 */
 void spr_suelta(int h);                                 /* 4285A0 (h < 0: nada) */
 void spr_velocidad(int h, float v);                     /* 428800 */
+void spr_modo(int h, int modo);                         /* 428770: el modo de la instancia (2: quieta) */
 void spr_pon_cuadro(int h, int cuadro);                 /* 4288C0 */
 void spr_traslada(int h, float x, float y);             /* 4287B0 con D3DXMatrixTranslation(x, y, 0) */
 int spr_estado(int h);                                  /* 428880: 1 en curso, 2 dio la vuelta, 3 / 4 acabada (0 si h < 0) */

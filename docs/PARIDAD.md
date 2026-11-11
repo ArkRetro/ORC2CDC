@@ -1998,7 +1998,8 @@ etapas, salida BEAC`, BAND1.DAT en el hueco de la union; RAM libre 1419..1490 KB
   "Fin de la partida" sobre las palmeras, capa 0, modo 1; tools/conv_sp.py -> GOVSP.DAT, 240 cuadros = los 0xF0 pasos
   del modo), la voz 0x954 una vez y al acabar el modo 28 -> el menu. El original pasa antes por el final de recreativa
   (24, solo tras la meta), los resultados (25: suceso 0x188, funcion 0x15 / 0x50, banco 0x34) y la entrada de nombre
-  (26, solo con 450240 = 1: el fin del tiempo): SIN PORTAR, se salta directo al 27; en la pausa
+  (26, solo con 450240 = 1: el fin del tiempo): el 25 HECHO (ver abajo), el 24 y el 26 SIN PORTAR (la meta pasa
+  directa al 25 y el 25 al 27); en la pausa
   REINTENTAR es el modo 30 (la salida otra vez) y ABANDONAR el modo 27 GAME OVER (HECHO 2026-11-11, fin_game_over de
   demo/fin.c: la carrera suspendida y, con 450240 = 7, la escena 2C000B de la consola, 0x1a051c; 0xF0 pasos y la voz
   0x954) y despues al menu (el frontal de recreativa, modo 10, SIN PORTAR).
@@ -2015,12 +2016,45 @@ etapas, salida BEAC`, BAND1.DAT en el hueco de la union; RAM libre 1419..1490 KB
 - Vuelta al frontal de recreativa, HECHA 2026-11-11: el modo 28 (49AF90 estado 3) sin la consola (43F860 = 0) y sin
   [65994C] pide el modo 10: tras el GAME OVER (meta, fin del tiempo y ABANDONAR de la pausa) la Dreamcast vuelve al
   frontal (menu_entra_sp) en vez de al titulo de la consola.
-- SIN PORTAR: el final de recreativa (modo 24: AUTOSCENE \AS\as_E_xx, 485470, escenas 3D con los fondos END_*_STAGE),
-  los resultados (modo 25: suceso 0x188 funcion 0x15, el mapa de la ruta 4AE750 / 4AE960 del banco 0x34 ROUTE_CVT, y la
-  0x50 de la Contrarreloj 4AED50; en el PS2 el inicio del mapa es 0x209208, con las tablas de la ruta en 0x40fc10..
-  0x40fd78 y los tokens del coche en 0x40fe68: sin comprobar campo a campo), la entrada de nombre (modo 26,
-  race_name_entry.cpp, bancos 0x3D / 0x36 / 0x37..0x3B) y los rankings de OUTRUN2SP (sp_rankings.cpp,
-  frontend_rankings.cpp) con su guardado. Hasta portarlos la meta y el fin del tiempo pasan directos al GAME OVER (27).
+- Resultados (modo 25), HECHO 2026-11-11 (demo/fin.c fin_sp_resultados; tools/conv_sp.py rutas -> RUTASP.DAT: el
+  banco 0x34 ROUTE_CVT entero para comun/sprani.c y el bloque RSP1 con las tablas del mapa; MUS28.ADP). Tabla de modos
+  del PS2 0x3f8e50 (16 bytes por modo: 24 = 0x1ba4d8 / 0x1ba5f0 / 0x1ba6a0, 25 = 0x1ba6c0 / 0x1ba748 / 0x1ba910, 26 =
+  0x1ba968 / 0x1baaf8 / 0x1babe8), comprobado instruccion a instruccion con race_end_modes.cpp:
+  - 25: temporizador 0xB4, banco 0x34, musica 100050(0, 0x1C, 1) = sprintf("\music\%02d.ps2", 0x1C) en bucle (MUS28),
+    en la variante 0 0x5a2030 = 1a7180(preset); con el banco el suceso 0x188 con la funcion 0x15 (1b4a90 = preset 2 / 3
+    -> la 0x50, resultado de la Contrarreloj de 15 etapas: esos presets no salen, SIN PORTAR); A o START (210c58:
+    210988(1) / (4)) o el mapa acabado ([0x370dc8]) y despues el temporizador o A / START: 26 con 450240 = 1 o en la
+    variante 0 con el record ([0x5a2030]), si no 27 (las variantes 3 / 4 piden antes el 27). Sin el 26: al 27. La
+    animacion de carga del banco 0x33 (288d20(1) mientras se lee el banco) no sale: la Dreamcast lo lee de un tiron.
+  - Mapa (tabla de funciones 0x3ee7b4, fila 0x14: 0x209208 / 0x209518 / 0x2099f0 / 0x2099f8 = PC 4AE750 / 4AE960 /
+    4AED20; trabajo 0x5df960 = PC 842048): coche del mapa = [0x40fe68 + ([0x40fc10 + modelo x 4] - 1) x 0x78 + modelo x
+    4] (modelo 0x1bcfb0 = 48B140, color 0x1bcfd0 = 48B160; sin color 340017); 12 puntos a -10000, el primero y el
+    segundo de 0x40fd78 / 0x40fd88, y por cada nivel 0..3 con rama (451350: 1 -> siguiente 1 del nodo y tramo 2, 0 ->
+    siguiente 0 y tramo 1, si no -1 y se acaba) los puntos de y a del nodo (nodos 0x40fc88 de 16 bytes, puntos 0x40fd70
+    de 8); escenas 34000E / 34001A (presets 0 / 2) o 34000D / 340019 en las capas 1 y 5 (modo 0), 34001D en la 6 (modo
+    1) y el coche en la 4 (modo 0, cuadros 0x5B..0x96). Cada paso: si el punto siguiente esta a menos de -9000, el
+    mapa acaba (el ultimo tramo 34001B queda quieto, 115020(h, 2)); con el nivel de 4AEEF0 se para en su razon; 14
+    pasos antes del final de un tramo el coche gira hacia el siguiente (cuadros 0x3D..0x4B / 0x97..0xA5, velocidad +-1);
+    el coche en x, -y del punto interpolado (0x28 pasos por tramo); al empezar cada tramo (de los 9 primeros) 34001B en la
+    capa 2 (modo 1: 1..0x28 etapa, 0x29..0x50 izquierda, 0x51..0x78 derecha) y en los de etapa salvo el primero la marca
+    34001C (capa 3); al acabar el tramo el siguiente (cuadros 0x5B..0x95 / 1..0x3C / 0xB5..0xF0). -10000 y -9000 en el
+    codigo (lui / ori de 0x2092c4 y 0x209554).
+  - En la Dreamcast la rama de cada nivel se guarda al decidirse (rama_nivel de demo/main.c: 451350) y 4AEEF0 al
+    acabarse el tiempo: nivel de la etapa, 0 / 1 en la etapa / union (car+5C) y la razon fila / filas del tramo (tr_fila:
+    las filas de la union o de la etapa son las de la ruta de la Dreamcast, s_union - s_etapa entre m_pos; 30000 si aun
+    no se sabe: PROBABLE igual a 43D470).
+  - Verificado en E (Flycast, tools/prueba/resultados.sh): OUTRUN2SP preset 1, fin del tiempo en SANF (etapa 2, rama
+    izquierda): `FIN: modo 25 (450240 = 1), ... ramas 0 2 2 2, nivel 1 lado 0 razon 0.848`, el mapa del recorrido con el
+    coche por INICIO -> izquierda y parado en la segunda etapa, el GAME OVER y la vuelta al frontal; 0 "Out of memory".
+    VRAM libre al entrar 613 KB (el banco 0x34 sube solo las texturas de las escenas creadas).
+- SIN PORTAR: el final de recreativa (modo 24: AUTOSCENE \AS\as_E_xx, 485470, escenas 3D con los fondos END_*_STAGE:
+  modelo de la etapa del final, el coche, el piloto y la acompanante con movimientos del guion, camara y luces de
+  5A6AB8, escena 2D de 638DF0 en la capa 7; race_ending.cpp y race_autoscene.cpp; no cabe junto a lo demas sin portar
+  antes los guiones AS.PS2), la entrada de nombre (modo 26: bancos 0x3D RANKING_CVT, 0x36 NAME_CMN, 0x37..0x3B
+  NAME5A..E por la meta, los de sprites 0x12 / 0x14 / 0x15 y los textos de las fuentes 2 / 3; PS2 0x1fc560 / 0x1fcd30 /
+  0x1fd1e8 / 0x1fd528 = fila 0x15: el nombre es el de la licencia, como el PC, sin teclado de letras) y los rankings de
+  OUTRUN2SP (sp_rankings.cpp, frontend_rankings.cpp) con su guardado (PS2 0x106288 / 0x1063d8 en el estado 5.. de la
+  entrada de nombre). La meta pasa directa al 25 y el 25 al GAME OVER (27).
 - Etapas al reves (descriptores 30..59; SEG34..SEG65), HECHO 2026-11-11: sus tablas de aparicion y de velocidad (+0x80
   / +0x84) estan en el ELF; lo que el ELF deja en la BSS son sus listas de puntos fijos (4EF880: 0x5d6028..), y por eso
   conv_trafico.py daba el registro entero vacio (sin trafico). Las rellena la rutina 0x1f2110 (la llama la puesta a cero

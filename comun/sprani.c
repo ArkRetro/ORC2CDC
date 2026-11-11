@@ -142,6 +142,7 @@ void spr_suelta(int h)
     cursor[capa] = h % HUECOS;
 }
 void spr_velocidad(int h, float v) { if (h >= 0 && h < SPR_CAPAS * HUECOS) ins[h].vel = v; }
+void spr_modo(int h, int modo) { if (h >= 0 && h < SPR_CAPAS * HUECOS) ins[h].modo = (uint8_t)modo; }
 void spr_pon_cuadro(int h, int c) { if (h >= 0 && h < SPR_CAPAS * HUECOS) ins[h].cuadro = c; }
 void spr_traslada(int h, float x, float y) { if (h >= 0 && h < SPR_CAPAS * HUECOS) { ins[h].tx = x; ins[h].ty = y; } }
 int spr_estado(int h) { return h >= 0 && h < SPR_CAPAS * HUECOS ? ins[h].estado : 0; }
