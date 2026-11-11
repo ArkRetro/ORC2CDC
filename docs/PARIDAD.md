@@ -2403,8 +2403,28 @@ que aplicaras en el limite de dibujado tenue niebla para que no se aprecie tanto
 ## Fundido de entrada de lo que aparece (2026-11-11)
 
 DESVIACION pedida por el usuario (no esta en el original): "para evitar el popping quiero probar una cosa: aplicar un
-sombreado a la textura que va a cargar para que no aparezca de golpe, como una transicion". EXPERIMENTAL; activo por
-defecto, `-DSIN_FUNDIDO_ENTRADA` lo quita (demo/main.c `fe_paso`, `fe_pon`, `fe_cab`).
+sombreado a la textura que va a cargar para que no aparezca de golpe, como una transicion". QUITADO por defecto
+(2026-11-11, el usuario tras probar la demo 35 en la consola: no le gusta, "hasta el popping se veia mejor"): el codigo
+sigue, solo con `-DCON_FUNDIDO_ENTRADA` (demo/main.c `fe_paso`, `fe_pon`, `fe_cab`); sin el, la imagen y el TA son los
+de antes del fundido (sin la cabecera con especular ni sus 4 bytes por vertice, sin los 1,375 bytes por nodo).
+
+De donde sale el popping (2026-11-11, medido en Flycast, PALM con el piloto desde la salida, `-DDIAG_MS -DDIAG_VTX`,
+70 lineas de 30 cuadros; el tiempo de Flycast no es el de la consola, pero si la cuenta del TA y de los vertices):
+- El limite de dibujo `lejos` (el lejano del original, 4000 m) lo acortaba el recorte de seguridad por CPU: 50 m cada
+  30 cuadros si dibujo + logica pasan de 15 ms. PALM gasta 15,5 + 2,1 ms (mediana; 55,5 cuadros por segundo), asi que
+  bajaba solo: mediana 2200 m, 1100 m a los 30 s. Lo de mas alla aparecia de golpe al acercarse (con la niebla del
+  limite tapandolo a medias). Es lo que el usuario ve como poca distancia de dibujo.
+- El reparto del TA (`nodos_visibles_todos`): la etapa tiene 630-710 KB de los 1728 del bufer de parametros (el coche
+  ~600 KB, el trafico, lo 2D); se dibuja entero hasta `prio_d` (mediana 181 m) y mas alla por la clase de LOD del
+  original (lo pequeno y lejano se quita antes). Es el tope: la etapa queda en 13000-14000 vertices (VTX_ETAPA_MAX
+  20000 no llega a cortar). Subirlo pide VRAM: el bufer va doble (2 x 1792 KB) y la zona del curso ya va justa (peor
+  BK08 / BK09 + IMPE: 185 KB libres en el modo OutRun, 19 en el INFARTO); no se toca.
+- El LOD de 404B00 y la visibilidad precalculada son los del original / no cambian la imagen.
+Cambio: el recorte por CPU acorta por encima de 22 ms (unos 45 cuadros por segundo, lo que pide el usuario: 40-50 en la
+consola) y alarga por debajo de 18 (`CPU_MS_CORTA` / `CPU_MS_ALARGA`, antes 15 / 11,5). Flycast, PALM, misma prueba:
+`lejos` 4000 m todo el rato (antes mediana 2200), 27100 vertices por cuadro (igual: los limita el TA), 56 cuadros por
+segundo (antes 55,5), dibujo 15,5 ms (igual). En la consola, si el cuadro pasa de 22 ms la distancia baja como antes.
+El fundido de entrada costaba ~410 ns por vertice que se fundia y 4 bytes mas por vertice en el TA.
 
 - Que se funde: los nodos de la etapa, la union y la etapa siguiente que pasan de no dibujarse a dibujarse dentro de la
   pantalla: los que el reparto del TA vuelve a poner al acercarse (`prio_d` / `prio_p` de `nodos_visibles_todos`), el

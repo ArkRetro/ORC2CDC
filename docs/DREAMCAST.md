@@ -265,9 +265,10 @@ quitado mas cercano, por la parte mas cercana de su esfera; antes `corte_d`):
 | union de PALM | 85 / 291 | 193 / 655 | 5198 / 13234 |
 
 Mas alla de esa distancia ya no falta todo, como antes, sino solo lo pequeno: los nodos grandes siguen hasta su LOD del
-original. `lejos` solo baja (50 m cada 30 cuadros, minimo `LEJOS_MIN` 600 m) si la CPU pasa de 15 ms. Ojo: Flycast da
-24-29 ms por cuadro en carrera (antes y despues) y sin `-DDIAG_SIN_CPU` `lejos` acaba en 600 m; si la consola tarda lo
-mismo, eso corta antes que el TA (no medido en la consola).
+original. `lejos` solo baja (50 m cada 30 cuadros, minimo `LEJOS_MIN` 600 m) si la CPU pasa de `CPU_MS_CORTA` (22 ms
+desde el 2026-11-11, antes 15) y vuelve a subir por debajo de `CPU_MS_ALARGA` (18, antes 11,5). Con 15 ms, en Flycast
+(PALM, 15,5 + 2,1 ms por cuadro) bajaba a 1100-2200 m en 30 s; con 22 se queda en los 4000 m del original con los
+mismos vertices (los limita el TA) y los mismos cuadros por segundo (55,5 / 56). Ver PARIDAD.md, Fundido de entrada.
 
 ### Visibilidad precalculada (PVS, 2026-11-09)
 
@@ -826,7 +827,7 @@ Carrera: el piloto 45 s desde la salida (`-DPRUEBA_AUTO -DDIAG_MS -DDIAG_SIN_CPU
 con mas fps hay menos pasos de logica por cuadro. Los vertices y el presupuesto del TA no cambian (mismas tiras, misma
 cuenta `ta_cabe`). Lo que queda (PALM congelado): la etapa 6,5 ms (2 de vertices), el coche 2,7, el piloto 2,2,
 `nodos_visibles` 1,5 y el principio del cuadro 1,6 (`coche_entorno`, matrices). En la consola el recorte de la
-distancia por CPU (`ms + ms_log > 15`) se activara menos: mas cerca de la distancia del original.
+distancia por CPU (`ms + ms_log > CPU_MS_CORTA`, entonces 15) se activara menos: mas cerca de la distancia del original.
 
 Flycast no cuenta la cache ni las esperas de la memoria: en la consola el recorrido de las mallas de antes leia ~950 KB
 de `malla_t` por cuadro, asi que lo ganado alli deberia ser al menos lo mismo.

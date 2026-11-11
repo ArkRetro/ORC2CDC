@@ -165,7 +165,7 @@ static int lee_modelo_en(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t
         }
     m->vis = m->nnodos ? calloc((m->nnodos + 31) / 32, 4) : NULL; m->ruta_i = 0;
     m->fe_v = NULL; m->fe_p = m->fe_f = m->fe_m = NULL; m->fe_hist = m->fe_n = 0;
-#ifndef SIN_FUNDIDO_ENTRADA
+#ifdef CON_FUNDIDO_ENTRADA
     if (m->vis && !m->relleno_propio) {                           /* (un bloque: las tres mascaras y los bytes) */
         uint32_t w = (m->nnodos + 31) / 32;
         if ((m->fe_p = calloc(w * 44, 1))) { m->fe_f = m->fe_p + w; m->fe_m = m->fe_f + w; m->fe_v = (uint8_t *)(m->fe_m + w); }   /* fe_v: 32 por palabra */
@@ -742,9 +742,21 @@ static uint32_t vtx_et, vtx_et_ult;                      /* los de la etapa */
 #define TA_BPV_MIN 56                                    /* bytes por vertice 2D (1,3 x 42,5 medidos en la consola) */
 #define TA_F_MIN 448                                     /* coste 3D = ta_teo x ta_f / 256 (1,75: ver arriba) */
 /* tope de vertices de la etapa por cuadro (tiempo de CPU: transformar y enviar) y distancia de dibujo minima del
-   recorte de seguridad por CPU: la distancia es la del original (LEJOS_PS2) y solo se acorta si la CPU pasa de 15 ms */
+   recorte de seguridad por CPU: la distancia es la del original (LEJOS_PS2) y solo se acorta (50 m cada 30 cuadros)
+   si la CPU pasa de CPU_MS_CORTA ms por cuadro, y vuelve a crecer por debajo de CPU_MS_ALARGA. Antes 15 / 11,5 ms (60
+   cuadros por segundo): en Flycast el cuadro de PALM ya gasta 15,5 + 2,1 ms y la distancia bajaba sola a 1100-2200 m
+   en 30 s (lo de mas alla, que el original dibuja, aparecia de golpe al acercarse). 22 / 18 ms: unos 45 cuadros por
+   segundo, lo que pide el usuario para la consola (40-50); la geometria la limita el TA (nodos_visibles_todos), asi que
+   con la distancia del original no se envian mas vertices (Flycast, PALM: 27100 vertices y 55,5 -> 56 cuadros por
+   segundo; docs/PARIDAD.md, Fundido de entrada) */
 #define VTX_ETAPA_MAX 20000
 #define LEJOS_MIN 600.0f
+#ifndef CPU_MS_CORTA                                     /* ms de CPU por cuadro (dibujo + logica) que acortan / alargan */
+#define CPU_MS_CORTA 22.0f
+#endif
+#ifndef CPU_MS_ALARGA
+#define CPU_MS_ALARGA 18.0f
+#endif
 static uint32_t ta_bpv = TA_BPV_MIN, ta_f = TA_F_MIN, ta_vb, ta_et, ta_lim, ta_tope_etapa, ta_corto, ta_v2d, ta_v2d_ult;
 static uint32_t ta_otros_ult, ta_min_otros_teo, ta_traf_teo;   /* bytes de lo que no es la etapa (cuadro anterior; minimo
                                                             teorico) y teoricos del coche de trafico mayor con LOD 0 */
@@ -1028,7 +1040,7 @@ static modelo_t etapa, uni, sig;                                /* (mas abajo) *
 static float sol_rd[3]; static int sol_rayo_on, sol_rayo_res;   /* el rayo hacia el sol del cuadro (sol_prepara) */
 static int sol_rayo_malla(const modelo_t *mo, const malla_t *m, int cart);
 /* fundido de entrada (fe_paso): color del que sale lo que aparece (niebla_pon) y cabecera de lo que se funde */
-#ifndef SIN_FUNDIDO_ENTRADA
+#ifdef CON_FUNDIDO_ENTRADA
 static uint32_t fe_col = 0x8CB3EB;
 static pvr_poly_hdr_t fe_h;
 /* la cabecera de la textura t de mo (la de siempre, con la niebla de la tabla) con el color de desplazamiento
@@ -1101,7 +1113,7 @@ static void dibuja_rango(const modelo_t *mo, int l, uint32_t k0, uint32_t k1, in
             dibuja_malla(mo, m); color_fijo = 0; continue;
         }
 #endif
-#ifndef SIN_FUNDIDO_ENTRADA
+#ifdef CON_FUNDIDO_ENTRADA
         if (recorta && !sin_niebla && mo->fe_n && m->tex >= 0 && m->nodo >= 0 && (uint32_t)m->nodo < mo->nnodos) fv = mo->fe_v[m->nodo];
         if (m->tex + (fv ? 0x10000 : 0) != ult) {
             ult = m->tex + (fv ? 0x10000 : 0);
@@ -1118,7 +1130,7 @@ static void dibuja_rango(const modelo_t *mo, int l, uint32_t k0, uint32_t k1, in
 #ifdef DIAG_MS
         if (recorta && seguro) { dg_dir++; dg_vdir += m->n; } else if (recorta) { dg_mal++; dg_vmal += m->n; }
 #endif
-#ifndef SIN_FUNDIDO_ENTRADA
+#ifdef CON_FUNDIDO_ENTRADA
         if (fv) { fe_pon(mo, m->tex, fv); ta_ofs = 1; }       /* (color y desplazamiento de las dos dibuja_malla) */
 #endif
         if (cartel) {                                           /* en el marco de su nodo, girado hacia la camara */
@@ -1173,7 +1185,7 @@ static void dibuja_etapa(const modelo_t *mo, int l)
         if (nd) {
             if (!(vis[(nd - 1) >> 5] & (1u << ((nd - 1) & 31)))) continue;
             cart = N[nd - 1].cartel >= 0;                       /* (malla_de_cartel: nodo valido con cartel) */
-#ifndef SIN_FUNDIDO_ENTRADA
+#ifdef CON_FUNDIDO_ENTRADA
             if (mo->fe_n) fv = mo->fe_v[nd - 1];                /* el nodo se esta fundiendo (fe_paso) */
 #endif
         }
@@ -1202,7 +1214,7 @@ static void dibuja_etapa(const modelo_t *mo, int l)
             f = m->tex >= 0 ? fv : 0;                           /* (lo que no tiene textura no se funde) */
             if (m->tex + (f ? 0x10000 : 0) != ult) {
                 ult = m->tex + (f ? 0x10000 : 0);
-#ifndef SIN_FUNDIDO_ENTRADA
+#ifdef CON_FUNDIDO_ENTRADA
                 if (f) fe_cab(mo, m->tex); else
 #endif
                 if (m->tex >= 0) pvr_prim(&mo->cabs[0][mo->remap ? mo->remap[m->tex] : m->tex], sizeof(pvr_poly_hdr_t));
@@ -1212,7 +1224,7 @@ static void dibuja_etapa(const modelo_t *mo, int l)
 #ifdef DIAG_MS
             if (seguro) { dg_dir++; dg_vdir += m->n; } else { dg_mal++; dg_vmal += m->n; }
 #endif
-#ifndef SIN_FUNDIDO_ENTRADA
+#ifdef CON_FUNDIDO_ENTRADA
             if (f && (cart || !seguro || cf)) {                 /* fundiendose fuera de la directa: por dibuja_malla */
                 ET_VUELCA(); fe_pon(mo, m->tex, f); ta_ofs = 1;
                 if (cart) carga_cartel((const float (*)[4])mo->carteles[N[m->nodo].cartel]);
@@ -1242,7 +1254,7 @@ static void dibuja_etapa(const modelo_t *mo, int l)
                 {
                     const vert_t *v = VV + m->v0; const uint32_t *ofs = OF ? OF + m->v0 : NULL;
                     if (cf) malla_directa_fija(v, n, ofs, cf);
-#ifndef SIN_FUNDIDO_ENTRADA
+#ifdef CON_FUNDIDO_ENTRADA
                     else if (f) { fe_pon(mo, m->tex, f); malla_sq(v, NULL, n, fe_s, fe_o); fe_s = 0; }
 #endif
                     else malla_sq(v, ofs, n, 0, 0);
@@ -5331,7 +5343,7 @@ static void nodos_visibles(modelo_t *mo)
        mismas cuentas) */
     float o0, o1, o2, e0, e1, e2, d0, d1, d2, a0, a1, a2, cer, lej; int pvs_on_; nodo_t *ND = mo->nodos;
     uint32_t *VIS = mo->vis; const uint32_t nnod = mo->nnodos; const int rama_c = cur_rama;
-#ifndef SIN_FUNDIDO_ENTRADA
+#ifdef CON_FUNDIDO_ENTRADA
     uint32_t *FF = mo->fe_f;                                    /* fuera de la vista (fe_paso) */
 #else
     uint32_t *const FF = NULL;
@@ -5435,8 +5447,9 @@ static int prio_sube(int actual, int objetivo, int *espera, int max)
    ya se dibujara) y los cortes de camara (mas de 1/4 de lo visible de los modelos que ya se dibujaban es nuevo).
    Coste: las mallas que se funden van por la directa con el color en el ensamblador (sq_vtx_fe; las de carteles y las
    que cruzan el plano cercano por dibuja_malla, como las demas) y con 4 bytes mas por vertice en el TA (ta_cabe y
-   ta_teo_tab[1] lo cuentan); 1,375 bytes de RAM por nodo. -DSIN_FUNDIDO_ENTRADA lo quita. */
-#ifndef SIN_FUNDIDO_ENTRADA
+   ta_teo_tab[1] lo cuentan); 1,375 bytes de RAM por nodo. Quitado por defecto (2026-11-11, el usuario tras la demo 35:
+   "hasta el popping se veia mejor"): solo con -DCON_FUNDIDO_ENTRADA. */
+#ifdef CON_FUNDIDO_ENTRADA
 #ifndef FE_US
 #define FE_US 400000u
 #endif
@@ -5526,7 +5539,7 @@ static void nodos_visibles_todos(void)
     for (diag_orig_vtx = 0, d = 0; d < ND_PRIO; d++) diag_orig_vtx += fila_v[d];
 #endif
     if (prio_d < ND_PRIO - 1) for (i = 0; i < 3; i++) if (tramos[i]->tv) nodos_quita(tramos[i]);
-#ifndef SIN_FUNDIDO_ENTRADA
+#ifdef CON_FUNDIDO_ENTRADA
     fe_paso();                                                  /* lo que aparece en este cuadro */
 #endif
 }
@@ -5774,7 +5787,7 @@ static void niebla_pon(void)
         float lc = 0.3f * ((c >> 16) & 255) + 0.59f * ((c >> 8) & 255) + 0.11f * (c & 255), lh;
         lh = 0.3f * ((hz >> 16) & 255) + 0.59f * ((hz >> 8) & 255) + 0.11f * (hz & 255);
         a = hz && lc > 1 && lh < lc ? NLIM_A * lh / lc : NLIM_A;
-#ifndef SIN_FUNDIDO_ENTRADA
+#ifdef CON_FUNDIDO_ENTRADA
         fe_col = (hz && lc > 1 && lh < lc ? hz : c) & 0xFFFFFFu;   /* de donde sale lo que aparece (fe_paso) */
 #ifdef DIAG_FUNDIDO
         fe_col = 0xFF00FF;                                      /* prueba: del magenta, para verlo en las capturas */
@@ -8532,9 +8545,9 @@ int main(int argc, char **argv)
             /* el presupuesto del TA ya lo reparte nodos_visibles_todos: aqui solo la CPU (DIAG_SIN_CPU: para medir en
                Flycast, que no da el tiempo del SH4 de la consola, sin este recorte) */
 #ifndef DIAG_SIN_CPU
-            if (ms + ms_log > 15.0f) {                      /* acorta (seguridad: la CPU no llega al cuadro) */
+            if (ms + ms_log > CPU_MS_CORTA) {               /* acorta (seguridad: la CPU no llega al cuadro) */
                 if (lejos > LEJOS_MIN) lejos -= 50.0f;
-            } else if (ms + ms_log < 11.5f) {
+            } else if (ms + ms_log < CPU_MS_ALARGA) {
                 if (lejos < lejos_obj) lejos += 50.0f;         /* vuelve a la del original */
             }
 #endif
