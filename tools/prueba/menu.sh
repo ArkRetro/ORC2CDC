@@ -9,6 +9,7 @@ tecla x; espera 5                                                    # editor de
 tecla Down; espera 1; tecla Down; espera 1; tecla Down; espera 1    # LISTO
 tecla x; espera 6; foto ${P}_4                                       # menu principal
 tecla x; espera 5; foto ${P}_5                                       # un jugador
+for _m in $(seq 1 ${MODO_JUEGO:-0}); do tecla Right; espera 1; done # MODO_JUEGO=n: n modos a la derecha (1 OUTRUN, 2 INFARTO, 3 CONTRARRELOJ)
 tecla x; espera 6; foto ${P}_6                                       # coche
 tecla x; espera 5; foto ${P}_7                                       # cambio
 tecla x; espera 6; foto ${P}_8                                       # musica

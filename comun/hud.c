@@ -19,6 +19,7 @@ typedef struct { char nombre[16]; uint16_t grp, alt; int16_t x, y, avance, capa;
 /* un fichero con formato HUD1 (HUD.DAT, MENU.DAT) */
 struct hud_dat {
     uint8_t *dat; uint32_t meta, lba;                       /* meta: bytes en la RAM (parcial) o 0 (fichero entero) */
+    uint8_t *tx; uint32_t tam;                              /* parcial: el fichero entero en un bufer temporal (hud_carga) o NULL; bytes del fichero */
     h_tex_t *tex; h_spr_t *spr; h_grp_t *grp; h_pc_t *pie; h_uso_t *uso;
     h_pc_t **gp;                                            /* parcial: las piezas de cada grupo en su bloque (o NULL) */
     uint32_t n_tex, n_grp, n_uso;
@@ -181,6 +182,7 @@ hud_dat_t *hudd_abre(const char *fich, int modelo, int parcial)
     } else {                                                /* cabecera y tabla de texturas; luego hasta la 1a textura */
         uint8_t *b = memalign(32, 2048); uint32_t fin, ns, m = 0xffffffffu;
         if (!b || gd_busca(fich, &h->lba, &sz) || lee_sect(h->lba, 1, b)) { free(b); free(h); return NULL; }
+        h->tam = sz;
         c = (uint32_t *)b; fin = c[6] + 16 * c[1]; ns = (fin + 2047) / 2048;
         if (ns > 1) { free(b); b = memalign(32, ns * 2048); if (!b || lee_sect(h->lba, ns, b)) { free(b); free(h); return NULL; } }
         c = (uint32_t *)b;
@@ -232,7 +234,7 @@ static uint8_t pal_n4[64];                                  /* entradas usadas d
 static int pal_colores(const hud_dat_t *h, int i, uint16_t *c)
 {
     static uint32_t visto[2048];                            /* 65536 bits */
-    const uint16_t *t = (const uint16_t *)(h->dat + h->tex[i].off); uint32_t k, n = 0, m = h->tex[i].w * h->tex[i].h;
+    const uint16_t *t = (const uint16_t *)((h->meta ? h->tx : h->dat) + h->tex[i].off); uint32_t k, n = 0, m = h->tex[i].w * h->tex[i].h;
     for (k = 0; k < m && n <= 256; k++) {
         uint16_t v = t[k];
         if (!(visto[v >> 5] & (1u << (v & 31)))) { visto[v >> 5] |= 1u << (v & 31); if (n < 256) c[n] = v; n++; }
@@ -323,16 +325,18 @@ static uint32_t tam_vram(const hud_dat_t *h, int i)
     if (!h->pal || h->pal[i] < 0) return h->tex[i].tam;
     return ((h->tex[i].w * h->tex[i].h >> ((h->pal[i] & PAL_4) ? 1 : 0)) + 31) & ~31u;
 }
-/* sube la textura i (los texeles en d) a v: con su paleta si la tiene y hay RAM para los indices; 1 con paleta */
-static int sube_tex(hud_dat_t *h, int i, const uint8_t *d, pvr_ptr_t v)
+/* sube la textura i (los texeles en d) a v: con su paleta si la tiene y hay RAM para los indices; 1 con paleta.
+   temporal: d es un bufer que se tira despues (los sectores leidos del GD): los indices se escriben encima de los
+   texeles (1 byte o medio por cada 2 leidos, hacia delante) y no piden RAM */
+static int sube_tex(hud_dat_t *h, int i, uint8_t *d, pvr_ptr_t v, int temporal)
 {
     int16_t p = h->pal ? h->pal[i] : -1; uint32_t k, m = h->tex[i].w * h->tex[i].h, tam = tam_vram(h, i); uint8_t *o;
     const uint16_t *t = (const uint16_t *)d;
-    if (p < 0 || !(o = toma(tam))) { pvr_txr_load(d, v, h->tex[i].tam); return 0; }
+    if (p < 0 || !(o = temporal ? d : toma(tam))) { pvr_txr_load(d, v, h->tex[i].tam); return 0; }
     if (p & PAL_4) for (k = 0; k < m; k += 2) o[k >> 1] = pal_idx(p, t[k]) | pal_idx(p, t[k + 1]) << 4;   /* par: bajo */
     else for (k = 0; k < m; k++) o[k] = pal_idx(p, t[k]);  /* (twiddled: el mismo orden de texeles que la de 16 bits) */
     pvr_txr_load(o, v, tam);
-    deja(o);
+    if (!temporal) deja(o);
     return 1;
 }
 
@@ -367,7 +371,7 @@ int hudd_sube(hud_dat_t *h, int t0, int nt)
         if (h->tex[i].off + h->tex[i].tam > hi) hi = h->tex[i].off + h->tex[i].tam;
     }
     if (hi <= lo) return 0;
-    if (h->meta) {                                          /* del GD: los sectores que cubren esas texturas */
+    if (h->meta && !h->tx) {                                /* del GD: los sectores que cubren esas texturas */
         s0 = lo / 2048; ns = (hi + 2047) / 2048 - s0;
         if (!(b = toma(ns * 2048))) return -3;
         if (lee_sect(h->lba + s0, ns, b)) { deja(b); return -4; }
@@ -375,8 +379,10 @@ int hudd_sube(hud_dat_t *h, int t0, int nt)
     for (i = t0; i < fin; i++) {
         if (!h->usada[i] || h->vtex[i]) continue;
         if (!(h->vtex[i] = pvr_mem_malloc(tam_vram(h, i)))) { deja(b); hudd_baja(h, t0, nt); return -2; }
-        if (h->con_pal) h->con_pal[i] = sube_tex(h, i, h->meta ? b + (h->tex[i].off - s0 * 2048) : h->dat + h->tex[i].off, h->vtex[i]);
-        else pvr_txr_load(h->meta ? b + (h->tex[i].off - s0 * 2048) : h->dat + h->tex[i].off, h->vtex[i], h->tex[i].tam);
+        {   uint8_t *d = h->tx ? h->tx + h->tex[i].off : h->meta ? b + (h->tex[i].off - s0 * 2048) : h->dat + h->tex[i].off;
+            if (h->con_pal) h->con_pal[i] = sube_tex(h, i, d, h->vtex[i], h->meta != 0);
+            else pvr_txr_load(d, h->vtex[i], h->tex[i].tam);
+        }
         cabeceras(h, i);
     }
     deja(b);
@@ -392,6 +398,64 @@ void hudd_baja(hud_dat_t *h, int t0, int nt)
     for (i = t0; i < fin; i++) if (h->vtex[i]) { libera_vram(h->vtex[i], h->dibujada[i]); h->vtex[i] = NULL; }
 }
 
+/* Piezas por grupo de un fichero parcial (MENU.DAT: 724 KB en 57 bloques). hudd_grupos_suelta libera las de los grupos
+   que no dibujan ninguna textura de [t0, t0 + nt) (en la carrera el menu solo dibuja la pausa: su pantalla) y
+   devuelve los bytes; hudd_grupos_carga vuelve a leer del GD las que faltan (al volver al menu; 0 bien y sin leer
+   nada si no falta ninguna). Un grupo sin sus piezas no se dibuja (hudd_dibuja) */
+uint32_t hudd_grupos_suelta(hud_dat_t *h, int t0, int nt)
+{
+    uint32_t g, j, b = 0;
+    if (!h || !h->gp) return 0;
+    for (g = 0; g < h->n_grp; g++) {
+        int vale = 0;
+        if (!h->gp[g]) continue;
+        for (j = 0; j < h->grp[g].np && !vale; j++) { int t = h->spr[h->gp[g][j].spr].tex; vale = t >= t0 && t < t0 + nt; }
+        if (!vale) { free(h->gp[g]); h->gp[g] = NULL; b += h->grp[g].np * sizeof(h_pc_t); }
+    }
+    return b;
+}
+int hudd_grupos_carga(hud_dat_t *h)
+{
+    enum { TROZO = 8 };
+    uint32_t ini, fin, pos, sec, k, j, g = 0, ip = 0, npz = 0, falta = 0; uint8_t *t, *nuevo, pz_[sizeof(h_pie_t)];
+    if (!h || !h->gp) return 0;
+    for (k = 0; k < h->n_grp; k++) if (!h->gp[k] && h->grp[k].np) falta++;
+    if (!falta) return 0;
+    if (!(nuevo = calloc(h->n_grp, 1))) return -1;
+    for (k = 0; k < h->n_grp; k++)
+        if (!h->gp[k] && h->grp[k].np) {
+            if (!(h->gp[k] = malloc(h->grp[k].np * sizeof(h_pc_t)))) {
+                for (j = 0; j < k; j++) if (nuevo[j]) { free(h->gp[j]); h->gp[j] = NULL; }
+                free(nuevo); return -1;
+            }
+            nuevo[k] = 1;
+        }
+    ini = ((const uint32_t *)h->dat)[9]; fin = ini + ((const uint32_t *)h->dat)[4] * sizeof(h_pie_t);
+    sec = ini / 2048; pos = sec * 2048;
+    if (!(t = memalign(32, TROZO * 2048))) goto mal;
+    while (pos < fin) {
+        k = (fin - pos + 2047) / 2048; if (k > TROZO) k = TROZO;
+        if (lee_sect(h->lba + sec, k, t)) { free(t); goto mal; }
+        for (j = 0; j < k * 2048 && pos < fin; j++, pos++) {
+            if (pos < ini) continue;
+            pz_[npz++] = t[j];
+            if (npz == sizeof(h_pie_t)) {                   /* pieza ip: a su grupo (en orden de pri, como lee_tablas) */
+                h_pie_t q; memcpy(&q, pz_, sizeof q); npz = 0;
+                while (g < h->n_grp && ip >= (uint32_t)h->grp[g].pri + h->grp[g].np) g++;
+                if (g < h->n_grp && ip >= h->grp[g].pri && nuevo[g]) pieza_compacta(&q, h->gp[g] + (ip - h->grp[g].pri));
+                ip++;
+            }
+        }
+        sec += k;
+    }
+    free(t); free(nuevo);
+    return 0;
+mal:
+    for (k = 0; k < h->n_grp; k++) if (nuevo[k]) { free(h->gp[k]); h->gp[k] = NULL; }
+    free(nuevo);
+    return -2;
+}
+
 /* cierra un fichero de hudd_abre: su VRAM (con la espera de hudd_baja) y su RAM */
 void hudd_cierra(hud_dat_t *h)
 {
@@ -405,10 +469,19 @@ void hudd_cierra(hud_dat_t *h)
 
 int hud_carga(const char *fich, int modelo)
 {
-    if (!(hud_principal = hudd_abre(fich, modelo, 0))) return -1;
-    pal_reparte(hud_principal);                             /* el fichero entero esta en la RAM */
-    hud_principal->falta = calloc(hud_principal->n_tex, 1);
-    return hudd_sube(hud_principal, 0, -1) ? -2 : 0;
+    /* En la RAM solo las tablas (48 KB de los 1182 de HUD.DAT): los texeles se leen del GD al subirlos (hudd_sube).
+       Aqui, una vez, el fichero entero en el bufer prestado (hudd_bufer; si no, del monton y se libera) para contar
+       los colores de cada textura (pal_reparte) y subirlas */
+    hud_dat_t *h; uint32_t ns; int r;
+    if (!(h = hud_principal = hudd_abre(fich, modelo, 1))) return -1;
+    ns = (h->tam + 2047) / 2048;
+    if (!(h->tx = toma(ns * 2048))) return -1;
+    if (lee_sect(h->lba, ns, h->tx)) { deja(h->tx); h->tx = NULL; return -1; }
+    pal_reparte(h);
+    h->falta = calloc(h->n_tex, 1);
+    r = hudd_sube(h, 0, -1);
+    deja(h->tx); h->tx = NULL;
+    return r ? -2 : 0;
 }
 void hud_baja_tex(void) { hudd_baja(hud_principal, 0, -1); }
 /* en un apuro de VRAM (demo/main.c vram_apuro): echa ya las texturas del HUD de carrera que no se han dibujado en los
@@ -465,6 +538,7 @@ static void pieza(const h_pc_t *p, const h_grp_t *g, int cuadro, float X, float 
 static void grupo(int g, int cuadro, float X, float Y, float alfa)
 {
     const h_grp_t *G = H->grp + g; const h_pc_t *P = pz(H, g); int j;
+    if (!P) return;                                         /* sus piezas, sueltas (hudd_grupos_suelta) */
     for (j = 0; j < G->np; j++)
         if (G->n <= 1 || P[j].cuadro == cuadro ||
             (cuadro > P[j].cuadro && cuadro < P[j].cuadro + (P[j].flags >> 4)))   /* MENU.DAT: vale flags >> 4 cuadros */
@@ -518,6 +592,7 @@ int hudd_tex_uso(const hud_dat_t *h, int u, int *t0)
     int j, lo = 1 << 30, hi = -1; const h_grp_t *g;
     if (!h || u < 0 || u >= (int)h->n_uso) return 0;
     g = h->grp + h->uso[u].grp;
+    if (!pz(h, h->uso[u].grp)) return 0;
     for (j = 0; j < g->np; j++) { int t = h->spr[pz(h, h->uso[u].grp)[j].spr].tex; if (t < lo) lo = t; if (t > hi) hi = t; }
     if (hi < 0) return 0;
     *t0 = lo; return hi - lo + 1;

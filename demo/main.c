@@ -485,6 +485,58 @@ static void sube_tramo(modelo_t *m, int lado, const modelo_t *comp)
            (unsigned)(pvr_mem_available() >> 10), (unsigned)vram_fuera);
 }
 
+/* La union comparte con su etapa las texturas iguales (sube_tramo con comp), tambien en las bifurcaciones, donde la
+   etapa se suelta antes que la union: justo antes de soltarla (curso_paso) las compartidas se mudan al lado de la
+   union, de VRAM a VRAM (sus texeles de la RAM ya no estan: en la cola del hueco de la union van los objetos BOnn).
+   Primero las que caben en lo libre de la zona (o en pvr_mem): la copia no pisa nada y el cuadro que la PowerVR aun
+   dibuja sigue leyendo las de la etapa. Si alguna no cabe (la combinacion solo cabia por compartir) se espera a que la
+   PowerVR acabe ese cuadro (40 ms, como hudd_vacia), se da por suelto el lado de la etapa y se mudan de la direccion
+   mas alta a la mas baja, cada una a trozos de arriba abajo: el destino esta siempre por encima del origen y de las
+   que faltan (las k mas altas ocupan al menos su suma por debajo del final de la etapa), asi que nunca se pisa lo
+   que queda por leer. Sin esto 9 combinaciones de las misiones (LASV + su union, FLOR + la suya) no cabian en la
+   zona (tools/vram.py) */
+static void tex_muda(modelo_t *m, const modelo_t *de)
+{
+    static uint8_t tmp[4096] __attribute__((aligned(32)));
+    uint32_t i, j, n = 0, b = 0, faltan = 0;
+    if (!m->tv || !m->tfl || !de->tv) return;
+    for (i = 0; i < m->ntex; i++) {
+        pvr_ptr_t v; uint8_t fl = 0;
+        if ((m->tfl[i] & (TF_AJENA | TF_REBAJADA)) != TF_AJENA) continue;
+        for (j = 0; j < de->ntex && de->tv[j] != m->tv[i]; j++) ;
+        if (j == de->ntex) continue;                              /* (no es de esa etapa) */
+        if (!(v = vram_pide(m->texs[i].tam, 2, &fl))) { faltan++; continue; }
+        pvr_txr_load(m->tv[i], v, m->texs[i].tam);
+        m->tv[i] = v; m->tfl[i] = fl; compila_cab(m, i, 0); n++; b += m->texs[i].tam;
+    }
+    if (faltan) {
+        thd_sleep(40);                                            /* la PowerVR acaba el cuadro que lee las de la etapa */
+        ar_abajo = ar_ini;                                        /* (libera_modelo de la etapa viene ahora) */
+        for (;;) {
+            int k = -1; uint32_t tam, o; pvr_ptr_t v; uint8_t fl = 0; const uint8_t *src;
+            for (i = 0; i < m->ntex; i++) {                       /* la compartida de direccion mas alta */
+                if ((m->tfl[i] & (TF_AJENA | TF_REBAJADA)) != TF_AJENA) continue;
+                for (j = 0; j < de->ntex && de->tv[j] != m->tv[i]; j++) ;
+                if (j < de->ntex && (k < 0 || (uintptr_t)m->tv[i] > (uintptr_t)m->tv[k])) k = (int)i;
+            }
+            if (k < 0) break;
+            tam = m->texs[k].tam; src = (const uint8_t *)m->tv[k];
+            if (!(v = vram_pide(tam, 2, &fl))) {                  /* (no pasa: la union entera cabe en la zona vacia) */
+                dbglog(DBG_ERROR, "VRAM: textura %d de la union sin sitio al soltar la etapa: gris\n", k);
+                if (!tex_guarda(m)) { tex_t *t = m->texs + k; t->w = t->h = 8; t->fmt = 2 | (t->fmt & 0xC00); t->tam = 128; }
+                m->tv[k] = tex_gris; m->tfl[k] = TF_AJENA | TF_REBAJADA; compila_cab(m, k, 0); continue;
+            }
+            for (o = tam; o > 0; ) {                              /* de arriba abajo, 4 KB cada vez por la RAM */
+                uint32_t c = o > sizeof tmp ? sizeof tmp : o; o -= c;
+                memcpy(tmp, src + o, c); pvr_txr_load(tmp, (pvr_ptr_t)((uint8_t *)v + o), c);
+            }
+            m->tv[k] = v; m->tfl[k] = fl; compila_cab(m, k, 0); n++; b += tam;
+        }
+    }
+    if (n) dbglog(DBG_INFO, "VRAM: %u texturas compartidas (%uK) mudadas a la union%s; zona libre %uK\n", (unsigned)n, (unsigned)(b >> 10),
+                  faltan ? " (con espera: no cabian en lo libre)" : "", (unsigned)(ar_libre() >> 10));
+}
+
 /* Carga en segundo plano: un hilo lee del GD el fichero de un modelo (lee_modelo) mientras el bucle sigue dibujando;
    las texturas las sube luego el bucle (sube_modelo: la memoria de video y las Store Queues son del hilo principal).
    Las lecturas de este hilo son de primer plano para gd.c: el lector de la musica espera mientras tanto y la musica
@@ -3911,6 +3963,15 @@ static void ram_kb(unsigned *uso, unsigned *libre)
     *uso = mi.uordblks >> 10;
     *libre = (unsigned)((mi.fordblks + (0x8d000000u - 0x10000u - tope)) >> 10);
 }
+/* Mapa de la RAM en la consola serie (docs/DREAMCAST.md, Mapa de la RAM): en uso, libre y lo libre SEGUIDO en la cima
+   del monton (el trozo de arriba del monton, keepcost de mallinfo, mas lo que queda hasta el final de la RAM): es lo
+   que puede pedir un bloque grande; el resto de lo libre son huecos entre bloques */
+static void ram_mapa(const char *donde)
+{
+    struct mallinfo mi = mallinfo(); uintptr_t tope = (uintptr_t)sbrk(0); unsigned cima = (unsigned)(mi.keepcost + (0x8d000000u - 0x10000u - tope));
+    dbglog(DBG_INFO, "RAMMAPA %s: en uso %uK, libre %uK (seguido en la cima %uK, en huecos %uK)\n", donde, (unsigned)(mi.uordblks >> 10),
+           (unsigned)((mi.fordblks + (0x8d000000u - 0x10000u - tope)) >> 10), cima >> 10, (unsigned)((mi.fordblks - mi.keepcost) >> 10));
+}
 static void curso_error(const char *s) { dbglog(DBG_ERROR, "CURSO: %s\n", s); vid_set_mode(modo_video, PM_RGB565); aviso(s); for (;;) thd_sleep(1000); }
 /* los registros del arbol id de CURSO.DAT (en b, sz bytes): su desplazamiento y cuenta; 0 bien */
 static int curso_busca(const uint8_t *b, uint32_t sz, int id, uint32_t *o, uint32_t *n)
@@ -3976,12 +4037,13 @@ static void col_en_hueco(int k, const float *M)
 }
 /* reserva los huecos de RAM de las etapas (con su colision) y de la union (el tamano del mayor fichero de cada uno,
    en el GD) y el de la colision de la union */
-/* Tope de los huecos: con todos los arboles de las misiones en CURSO.DAT el mayor fichero seria SEG46 (8222 KB) y
-   las uniones con el cielo de FLOR_R (1728 KB): 632 KB mas de RAM reservada al arrancar y "Out of memory" antes del
-   menu. Los huecos se quedan como con los arboles 0, 1 y 100..107 (lo que cabe en la RAM, medido); un fichero mayor no
-   se puede leer (la carrera de ese arbol se para con su error). PENDIENTE: RAM para esos 4 arboles y 7 uniones. */
-#define HUECO_ETAPA_MAX (7842u << 10)
-#define HUECO_UNION_MAX (1480u << 10)
+/* Tope de los huecos: con todos los arboles de las misiones en CURSO.DAT el mayor fichero es SEG46 (8222 KB) y las
+   uniones con el cielo de FLOR_R (1728 KB). Caben desde que HUD.DAT solo deja sus tablas en la RAM (comun/hud.c
+   hud_carga: 1130 KB menos) y las piezas de MENU.DAT se sueltan en la carrera (menu_tablas); el tope queda solo de
+   guarda (un fichero mayor no se lee y la carrera de ese arbol se para con su error). docs/DREAMCAST.md, Mapa de la
+   RAM */
+#define HUECO_ETAPA_MAX (8400u << 10)
+#define HUECO_UNION_MAX (1800u << 10)
 static int curso_huecos(void)
 {
     int n_grandes = 0;
@@ -4160,7 +4222,8 @@ static int curso_paso(void)
         if (m == &uni) {
             col_un = carga.col;                                 /* raiz 1 (7D3190: el marco de la union) */
             if (!col_un.ok) dbglog(DBG_ERROR, "COLI: sin la colision de %s\n", fich_union);
-            sube_tramo(m, 2, !tiene_hijos(e) && etapa.tv ? &etapa : NULL);   /* la meta comparte lo que tenga igual la etapa */
+            sube_tramo(m, 2, etapa.tv ? &etapa : NULL);          /* la union comparte lo que tenga igual su etapa (la meta
+                                                                   hasta el final; la bifurcacion hasta soltarla: tex_muda) */
             if ((int)(i_union = ruta_anade(m)) < 0) curso_error("Sin memoria para la ruta");
             j_union = ruta_salto; s_union = s_base + i_union * PASO;
             if (tiene_hijos(e)) { uint32_t c = 0; uint8_t *b = der_sitio(&c); carga_pide(&uni_der, "BKD.DAT", b, c, marco_un); }
@@ -4191,6 +4254,7 @@ static int curso_paso(void)
             unsigned u, l; ram_kb(&u, &l);
             dbglog(DBG_INFO, "CURSO: %s en %.2f s (s %.0f), RAM en uso %uK libre %uK, VRAM libre %uK (zona %uK)\n", m == &uni ? fich_union : m == &uni_der ? "BKD.DAT" : m == &bo_mod ? bo_fich : fich_sig,
                    (double)t_carga_ult, (double)yo.s, u, l, (unsigned)(vram_libre() >> 10), (unsigned)(ar_libre() >> 10));
+            ram_mapa("tras la lectura");
         }
     }
     if (s_union < 0 && !uni.datos && etapa.datos && carga.estado == 0 && yo.s > longitud - UNION_ANTES) {
@@ -4223,6 +4287,7 @@ static int curso_paso(void)
     }
     if (etapa.datos && cur_en_union && cur_rama >= 0 && yo.s > s_union + UNION_LIBERA) {
         unsigned u, l;
+        tex_muda(&uni, &etapa);                                 /* lo que la union comparte con ella, a su lado */
         libera_modelo(&etapa); etapa_nodo = -1; cielo = &uni;
         ruta_recorta(i_union); i_union = 0;                     /* fuera los puntos de la etapa que se deja */
         curso_recentra(marco_un[0], marco_un[2]);               /* el marco, al principio de la union */
@@ -6665,6 +6730,7 @@ int main(int argc, char **argv)
     {   unsigned u, l; struct mallinfo mi = mallinfo(); ram_kb(&u, &l);
         dbglog(DBG_INFO, "RAM: al arrancar en uso %uK, libre %uK (%uK en huecos del monton); hueco de la union %s\n", u, l,
                (unsigned)(mi.fordblks >> 10), union_prestable() ? "prestado" : "ocupado");
+        ram_mapa("arranque");
     }
 #if !defined(PRUEBA_AUTO) && !defined(PRUEBA_JUGADOR)              /* las pruebas automaticas van directas */
     if (video_titulo) video_titulo();                           /* gancho: pelicula de inicio antes del titulo */
@@ -6747,6 +6813,7 @@ int main(int argc, char **argv)
             if (!reintenta) curso_al_menu();                    /* la VRAM del curso, para el menu */
             if (ha_hud && !reintenta) { hudd_cierra(ha_hud); ha_hud = NULL; ha_u_txt = ha_u_mar = -1; }   /* INFARTO */
             presta_union(1);                                    /* (en cuanto el curso suelta la union) */
+            if (!reintenta && menu_tablas(1)) dbglog(DBG_ERROR, "MENU: no se pudieron leer las piezas de MENU.DAT\n");
             rm = reintenta ? MENU_CARRERA : menu_paso(nuevo);   /* titulo, modos, coche, cambio y musica */
             ttit += 1.0f / 60;
             if (menu_coche3d() && menu_coche() >= 0 && menu_coche() != coche_ficha && menu_coche() != coche_malo &&
@@ -6783,6 +6850,9 @@ int main(int argc, char **argv)
 #ifndef PRUEBA_FICHA                                            /* prueba: el coche de PRUEBA_FICHA, no el del menu */
                 if (!auto_ && menu_coche() >= 0 && menu_coche() != coche_ficha && coche_carga(menu_coche())) coche_carga(9);
 #endif
+                ram_mapa("menu");
+                {   int b = menu_tablas(0);                     /* MENU.DAT: en la carrera solo las piezas de la pausa */
+                    if (b) dbglog(DBG_INFO, "MENU: %dK de piezas sueltas para la carrera\n", b >> 10); }
                 if (coche_ficha < 0) coche_carga(9);            /* el menu lo solto (VRAM) */
                 fisica_modelo(modelo_jug);                      /* peso, agarre, motor y marchas de ese coche */
                 if (hud_ok) hud_pon_modelo(modelo_jug);         /* y su tacometro */
@@ -6817,6 +6887,7 @@ int main(int argc, char **argv)
                 }
                 if (cam_ok) { cam_inicia(&cam, &cam_tab); cam_t_choque = 0; }   /* 484EE0 */
                 if (chr_ok == 1) robot_carrera(modelo_jug);          /* 4884D0 / 4885A0 */
+                ram_mapa(variante == 2 ? "carrera INFARTO" : variante == 0 || variante == 7 ? "carrera CONTRARRELOJ" : "carrera OutRun");
             }
         } else if (estado == CUENTA) {
             /* temporizador de salida del original (8367BC): 360 al entrar en GAME (485250 pone la vista en 0x167),

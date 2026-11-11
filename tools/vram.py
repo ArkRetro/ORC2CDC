@@ -1,7 +1,7 @@
 """vram.py datos/ [--coche COCHEnn.DAT] [--fijo KB] [--zona KB]: memoria de video de cada combinacion del curso con el
 mismo calculo que la demo. Antes (un pvr_mem_malloc por textura; el dlmalloc de la VRAM de KallistiOS,
 pvr_mem_core.c, gasta por bloque el tamano + 4 redondeado a 32: request2size) y ahora (demo/main.c sube_tramo: la zona
-del curso, texturas alineadas a 32 y la meta comparte con su etapa las texturas iguales). --zona: el tamano de la zona
+del curso, texturas alineadas a 32 y cada union comparte con su etapa las texturas iguales: sube_tramo / tex_muda). --zona: el tamano de la zona
 del curso medido en Flycast ("VRAM: zona del curso"), para dar lo libre de cada combinacion.
 
 Combinaciones (curso_paso): etapa + su union (BKkk.DAT) y union + etapa de cada rama. BKD.DAT no sube texturas.
@@ -16,9 +16,16 @@ def bloque(tam):
     """bytes que gasta pvr_mem_malloc(tam) (request2size de pvr_mem_core.c: SIZE_SZ 4, alineacion 32)"""
     return max(32, (tam + 4 + 31) & ~31)
 
+_paks = {}
 def lee_dat(ruta):
     """texturas de un modelo ORD5/6/7 (como lee_modelo_en): [(w, h, fmt, lista, off, tam, sha1 de los texeles)]"""
     b = open(ruta, 'rb').read()
+    if b[:4] == b'PAKD':                                        # empaquetada (tools/pak_union.py): recompuesta
+        import pak_union, numpy as np
+        pak = os.path.join(os.path.dirname(ruta), b[20:36].rstrip(b'\0').decode())
+        if pak not in _paks:
+            import mmap; _f = open(pak, "rb"); _paks[pak] = (mmap.mmap(_f.fileno(), 0, access=mmap.ACCESS_READ), _f)
+        b = pak_union.recompone(b, _paks[pak][0])
     v7 = b[:4] == b'ORD7'
     if not v7 and b[:4] not in (b'ORD5', b'ORD6'): raise SystemExit('%s: no es un modelo' % ruta)
     h = list(struct.unpack_from('<%dI' % (13 if v7 else 10), b, 4)) + [0] * 3
@@ -79,12 +86,13 @@ def main():
       seg = {k: L('SEG%02d.DAT' % c[1]) for k, c in enumerate(curs)}
       for k, c in enumerate(curs):
         hijos = [h for h in (c[3], c[4]) if h >= 0]; bk[c[5]] = L('BK%02d.DAT' % c[5]); cur[c[5]] = c
-        for nombre, e, u, meta in [('%s + BK%02d' % (c[0], c[5]), seg[k], bk[c[5]], not hijos)] + \
-                                  [('BK%02d + %s' % (c[5], curs[h][0]), seg[h], bk[c[5]], False) for h in hijos]:
-            he = {t[6] for t in e}; rep = [t for t in u if t[6] in he] if meta else []
+        for nombre, e, u, meta in [('%s/%02d + BK%02d' % (c[0], c[1], c[5]), seg[k], bk[c[5]], True)] + \
+                                  [('BK%02d + %s/%02d' % (c[5], curs[h][0], curs[h][1]), seg[h], bk[c[5]], False) for h in hijos]:
+            he = {t[6] for t in e}; rep = [t for t in u if t[6] in he] if meta else []   # (meta: etapa + su union)
             des = kb_zona(e) + kb_zona(u) - kb_zona(rep)
             if nombre not in [f[1] for f in filas]: filas.append((des, nombre, kb(e), kb(u), kb(e) + kb(u), kb_zona(rep)))
     for des, nombre, e, u, antes, r in filas:
+        if zona and '--solo-mal' in arg and des <= zona: continue
         print('%-16s %6.0f %6.0f %7.0f %7.0f %7.0f%s' % (nombre, e, u, antes, r, des, '%8.0f' % (zona - des) if zona else ''))
     t0 = {t[6]: t for k in bk for t in bk[k]}
     comun = None

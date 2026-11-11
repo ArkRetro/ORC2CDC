@@ -362,6 +362,15 @@ void menu_libera_vram(void)
 /* las tablas de MENU.DAT (~1,3 MB seguidos al leerlas) lo primero al arrancar: se quedan en la RAM siempre y, leidas
    despues de los sonidos, el coche, el HUD y la VMU, los huecos del monton no dejaban el bloque seguido (en la consola
    real no salia el menu y START iba a la carrera) */
+/* Tablas de MENU.DAT en la carrera: solo los grupos de la pantalla de pausa (lo unico del menu que se dibuja); las
+   piezas de los demas (casi todas: ~700 KB) se sueltan al empezar la carrera (en = 0) y se vuelven a leer del GD al
+   volver al menu (en = 1; sin leer nada si estan). Devuelve los bytes sueltos, o 0 / < 0 al volver */
+int menu_tablas(int en)
+{
+    if (!md) return 0;
+    if (en) return hudd_grupos_carga(md);
+    return (int)(pidx[V_PAUSA] >= 0 ? hudd_grupos_suelta(md, pan[pidx[V_PAUSA]].t0, pan[pidx[V_PAUSA]].nt) : hudd_grupos_suelta(md, 0, 0));
+}
 int menu_precarga(void) { return md || (md = hudd_abre("MENU.DAT", 0, 1)) ? 0 : -1; }
 
 int menu_inicia(void)

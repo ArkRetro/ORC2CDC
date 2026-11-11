@@ -665,6 +665,73 @@ Las pantallas del menu (titulo, principal, modo, coche, cambio, musica) se ven i
   de la zona). Dentro de HUD.DAT partia la zona del curso (1344 -> 832 KB): no se hace.
 - TA: el CONTRARRELOJ no abre trafico (menos vertices y CPU que el OutRun).
 
+### Mapa de la RAM y datos repetidos (Fase 1 del plan, 2026-11-10)
+
+**Como se mide.** `ram_mapa` (demo/main.c) escribe en la consola serie lineas `RAMMAPA <donde>`: en uso, libre, lo
+libre SEGUIDO en la cima del monton (el trozo de arriba del monton, `keepcost` de `mallinfo`, mas lo que queda hasta
+el final de la RAM: lo que puede pedir un bloque grande) y lo que hay en huecos entre bloques. Sale al arrancar, en el
+menu (al salir hacia la carrera), al empezar la carrera (con el modo) y tras cada lectura del curso (union, BKD,
+objetos, etapa siguiente). `tools/prueba/menu.sh` elige el modo con `MODO_JUEGO=n` (n veces a la derecha en ELEGIR
+MODO: 2 INFARTO, 3 CONTRARRELOJ).
+
+**Que ocupaba que** (16 MB; el programa con su BSS, 2,2 MB, lleva el anillo de la musica de 1 MB):
+
+| Bloque | Antes (KB) | Ahora (KB) |
+|---|---|---|
+| hueco de la etapa (el mayor SEGnn.DAT de todos los arboles) | 7842 (4 etapas de las misiones no cabian) | 8224 (caben todas: SEG46) |
+| hueco de la union (prestado fuera de la carrera) | 1480 (7 uniones no cabian) | 1730 (caben todas: las del cielo de FLOR_R) |
+| HUD.DAT | 1183 (el fichero entero: sus texturas estaban en la RAM y en la VRAM) | 48 (solo las tablas) |
+| MENU.DAT, tablas | 775 siempre | 775 en el menu, 53 en la carrera (solo las piezas de la pausa) |
+| trafico (9 modelos sin texeles), ruta, coche, CHR, BO, audio | ~2100 | igual (+14 de los pilotos del freno del trafico) |
+| colisiones (solo en la carrera) | 186 + 208 | 186 + 220 (con las etapas nuevas) |
+
+**Datos repetidos encontrados y lo que se hizo.**
+
+1. HUD.DAT estaba dos veces: sus 41 texturas (1135 KB) en la RAM todo el tiempo y ademas en la VRAM durante la
+   carrera. Ahora `hud_carga` (comun/hud.c) abre el fichero como parcial (las tablas, con las piezas por grupo) y lee el
+   fichero entero una sola vez al arrancar en el hueco de la union prestado, para contar los colores de las paletas
+   (`pal_reparte`) y subir las texturas; despues `hudd_sube` las lee del GD (al empezar cada carrera, en el hueco
+   prestado: 1,2 MB, ~1 s de GD; en un apuro de VRAM en carrera, la textura suelta, del monton). Los indices de las
+   texturas con paleta se escriben encima de los texeles leidos (`sube_tex`, temporal): ya no piden RAM.
+2. Las tablas de MENU.DAT se quedaban enteras en la carrera, donde el menu solo dibuja la pausa. `menu_tablas(0)` al
+   empezar la carrera suelta las piezas de los grupos que no usan ninguna textura de la pantalla de pausa
+   (`hudd_grupos_suelta`: 722 KB) y `menu_tablas(1)` las vuelve a leer del GD al volver al menu
+   (`hudd_grupos_carga`: la region de piezas, 1,2 MB a trozos de 16 KB; no con REINTENTAR). Un grupo sin piezas no
+   se dibuja.
+3. VRAM, texturas iguales entre una union y su etapa (el cielo de la etapa y parte de cs_BK_<zona>): antes solo las
+   compartia la meta. Ahora todas las uniones (`sube_tramo` con la etapa de comparacion) y, como en una bifurcacion la
+   etapa se suelta antes que la union, `tex_muda` pasa las compartidas al lado de la union justo antes de soltarla
+   (copia de VRAM a VRAM; si no caben en lo libre, espera 40 ms a la PowerVR y las muda de arriba abajo sin pisar lo
+   que falta por leer). De las 14 combinaciones de las misiones que no cabian en la zona (1312 KB, `tools/vram.py
+   datos/ --zona 1312 --solo-mal`, que ahora lee tambien los ficheros empaquetados) quedan 5, todas "union + LASV"
+   (SEG54, 1160 KB de texturas; la union no tiene ninguna textura igual a la etapa siguiente): BK87, BK129 y BK138
+   (3-4 KB), BK135 (51 KB) y BK241 (286 KB: la union con el cielo de FLOR). En esas `sube_tramo` rebaja las que no
+   caben, como antes. PENDIENTE: no tienen arreglo compartiendo; hace falta VRAM de otro sitio (p. ej. no cargar el
+   trafico en los modos sin trafico: 328 KB).
+4. Lo demas mirado y sin duplicados que quitar: los modelos (coche, trafico, CHR, BO, sol) ya no guardan texeles en
+   la RAM tras subirlos (`compacta_modelo`); la etapa de salida se queda entera en su hueco (se vuelve a subir sin leer
+   el GD); el coche del menu y el de la carrera son el mismo modelo.
+
+**Medido** (Flycast, recorrido real del menu; antes = 408d978 con los datos de todos los arboles):
+
+| KB | antes: libre (seguido en la cima) | ahora: libre (seguido en la cima) |
+|---|---|---|
+| al arrancar | 632 (172) | 1153 (934) |
+| menu | ~650 | 1172 (934) |
+| carrera OutRun, al empezar | sin RAM para las colisiones ("Out of memory", 465 libres en trozos) | 1462 (934) |
+| carrera OutRun, peor tras una lectura | - | 1436 (934) |
+| carrera INFARTO, al empezar / peor | 66 tras BK00 | 1293 / 1268 (934) |
+| carrera CONTRARRELOJ | como OutRun | 1462 (934) |
+
+El objetivo (300 KB seguidos en carrera en todos los modos) se cumple con 934 KB. En la carrera las colisiones y las
+tablas de HAHUD.DAT caen en los huecos que dejan las piezas de MENU.DAT (la cima no baja). Cuadro congelado
+(`-DPRUEBA_AUTO -DDIAG_CONGELA=600`, mismo display de Xvfb): identico pixel a pixel antes / despues, y el estado
+(s, x, v, camara) igual hasta el ultimo decimal.
+
+PENDIENTE (del punto 3 del plan): las cargas del curso aun piden bloques pequenos al monton en la carrera (cabeceras
+y tablas por textura de `sube_tramo`, `vis` / PVS / `tr` de cada modelo, la ruta); con ~900 KB seguidos de sobra no
+fragmentan nada que haga falta, pero no van en huecos fijos.
+
 ### CPU de dibujo (2026-11-10)
 
 Medido con un cuadro congelado (`-DDIAG_CONGELA=600`: un paso de logica por cuadro hasta el paso 600, asi el estado no

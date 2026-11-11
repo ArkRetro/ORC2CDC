@@ -15,9 +15,15 @@ al optimizar (cuadro congelado identico), cada fase se prueba en Flycast NTSC y 
    uniones de las misiones que no caben.
 5. VRAM: texturas iguales compartidas tambien en los arboles de las misiones (14 combinaciones se pasan de la zona).
 
+Estado (2026-11-10): hecho 1, 2 (HUD.DAT y MENU.DAT; union y etapa comparten texturas), 4 (934 KB seguidos en carrera
+en los tres modos; caben todas las etapas y uniones) y parte de 3 y 5: quedan las asignaciones pequenas del monton
+en las cargas del curso (sin huecos fijos) y 5 combinaciones "union + LASV" que se pasan de la zona de VRAM
+(docs/DREAMCAST.md, Mapa de la RAM y datos repetidos).
+
 ## Fase 2. Glitches
 1. Confirmar en la consola real el cielo (demo 31) y lo que diga el probador: etapa y objeto de cada fallo.
-2. Luces de freno del coche del jugador (y de marcha atras) y luces del trafico al frenar, como el original.
+2. Luces de freno del coche del jugador (y de marcha atras) y luces del trafico al frenar, como el original. HECHO
+   (2026-11-10; el original no tiene luces de marcha atras: PARIDAD.md, Luces de freno).
 3. Repaso por etapas con el piloto automatico en los 15 tramos + SP: hoja de capturas y lista de defectos.
 4. Humo / efectos provisionales por los del original; cartel de destino al final de etapa.
 
