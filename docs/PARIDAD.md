@@ -2009,8 +2009,8 @@ etapas, salida BEAC`, BAND1.DAT en el hueco de la union; RAM libre 1419..1490 KB
   "Fin de la partida" sobre las palmeras, capa 0, modo 1; tools/conv_sp.py -> GOVSP.DAT, 240 cuadros = los 0xF0 pasos
   del modo), la voz 0x954 una vez y al acabar el modo 28 -> el menu. El original pasa antes por el final de recreativa
   (24, solo tras la meta), los resultados (25: suceso 0x188, funcion 0x15 / 0x50, banco 0x34) y la entrada de nombre
-  (26, solo con 450240 = 1: el fin del tiempo): el 25 HECHO (ver abajo), el 24 y el 26 SIN PORTAR (la meta pasa
-  directa al 25 y el 25 al 27); en la pausa
+  (26, solo con 450240 = 1: el fin del tiempo): el 25 y el 26 HECHOS (ver abajo), el 24 SIN PORTAR (la meta pasa
+  directa al 25); en la pausa
   REINTENTAR es el modo 30 (la salida otra vez) y ABANDONAR el modo 27 GAME OVER (HECHO 2026-11-11, fin_game_over de
   demo/fin.c: la carrera suspendida y, con 450240 = 7, la escena 2C000B de la consola, 0x1a051c; 0xF0 pasos y la voz
   0x954) y despues al menu (el frontal de recreativa, modo 10, SIN PORTAR).
@@ -2058,14 +2058,45 @@ etapas, salida BEAC`, BAND1.DAT en el hueco de la union; RAM libre 1419..1490 KB
     izquierda): `FIN: modo 25 (450240 = 1), ... ramas 0 2 2 2, nivel 1 lado 0 razon 0.848`, el mapa del recorrido con el
     coche por INICIO -> izquierda y parado en la segunda etapa, el GAME OVER y la vuelta al frontal; 0 "Out of memory".
     VRAM libre al entrar 613 KB (el banco 0x34 sube solo las texturas de las escenas creadas).
+- Entrada de nombre (modo 26) y rankings de OUTRUN2SP, HECHO 2026-11-11 (demo/nombre.c, comun/rksp.c; tools/conv_sp.py
+  nombre -> RANKSP.DAT: el banco 0x3D RANKING_CVT entero para comun/sprani.c y el bloque NOM1 con las tablas; NOM5A..E.DAT:
+  los bancos 0x37..0x3B NAME5A..E, el fondo 0xC / 0xD; NOMTX.DAT: los glifos de las fuentes 3 y 4 del PS2 (= 2 / 3 del
+  PC) y la banda 0x150010 de spr_ranking_xst). Tras los resultados (25) con 450240 = 1 (fin del tiempo); tras la meta el
+  original no la ensena (0x1ba810: 26 solo con 450240 = 1 o en la variante 0 con un record [0x5a2030]).
+  - PS2 (comprobado instruccion a instruccion con race_name_entry.cpp): modo 26 = 0x1ba968 / 0x1baaf8 / 0x1babe8; suceso
+    0x189 funcion 0x16 = fila 0x15 de 0x3ee7b4: 0x1fc560 / 0x1fcd30 / 0x1fd1e8 (tablero 0x200398) / 0x1fd528. Modulo en
+    0x5da108 (PC 8423C0, el mismo orden). Tablas del ELF: fondo por descriptor 0x40d248 (= el banco de la tabla de saltos
+    0x3f9800 del modo), tabla y titulo 0x40daa0 por [0x40e040 + (cambio + config x 2 + variante x 4) x 4] + preset x 6,
+    filas 0x40da88, coches 0x40da10, configuracion 0x40cfc8, filas 3D0016 0x40e028, posiciones 0x40dc80 / 0x40ddb0,
+    estilos de cifras 0x40cfd8, nombre 0x40c838, conjuntos 0x40c840 / 0x40c848, "----" 0x40c860, palabras 0x36f4b8,
+    textos 0x443..0x445 (en el PC 0x444..0x446), fuentes 3 / 4 (0x117320; el PC 2 / 3). 0x1ff740 (4B1680), 0x2002b8 (el
+    filtro de 4B1F40) y los registros por defecto (0x1fa3b0) se ejecutan en la conversion con tools/ps2/mips.py (ampliado
+    con mult / div / madd / desplazamientos de 64 bits / lb / lh...).
+  - Rankings: 0x5d7548..0x5da108 (0x2BC0 bytes; v1 presets 0 / 1, v2, v0 presets 0 / 1, v1 presets 2 / 3, v0 presets 2 / 3;
+    PC 84DF40.. en otro orden), registros de 16 bytes con el nombre en +0xB (el PC en +0xC); insercion 0x1fae90 (4F3010),
+    accesos 0x1fb970 / 0x1fb9f0 / 0x1fbad0, guardado del registro 0x1fbb20 / 0x1fbbf0 / 0x1fbd18 (coche de la licencia
+    +0x1C en los bits 12..16). Por defecto: AM2 / OR2 / R&D, 100000 puntos, 4'50"000 / 14'40"000.
+  - VMU: el PS2 guarda los rankings con los ajustes (0x106288: 0x2D20 bytes de [0x35a9e8]) y despues la licencia
+    (0x1a67e0 / 0x1a6840 si [0x443508] = 0) en los estados 7..0xB del control; la Dreamcast los guarda en el fichero de
+    las licencias (comun/menu.c, version 2: 'OR2L' 2, la licencia activa, las 4 licencias, 'RKSP' y las tablas; los de la
+    version 1 se leen igual y los rankings quedan por defecto).
+  - Textos: 0x1175a8 -> 0x116fa0 / 0x116e10 (sin metricas: la celda entera, avance = ancho + espaciado; espacio = ancho;
+    >= 0x80 no se dibuja: "PUNTUACI N" como en el PS2) en la capa 4 (0x117558(4) -> 0x117708). La banda 0x150010 (117d28:
+    la escala que se le pasa es la capa, 1).
+  - PROBABLE: el color 0xFFFFFF00 de los nombres como ARGB (amarillo, el del PC); el orden dentro de una capa (escenas y
+    despues textos / banda); 451180(0) = 0 tras el fin del tiempo ([0x5c60f0] = -1 sin acabar); sin llegar al nivel 4,
+    44DC50(-1) da el descriptor de [0x548f6c] (BSS, sin localizar): el del primer registro (mismo fondo NAME5A).
+  - SIN PORTAR: el deslizamiento de las filas (0x1fe780 / 4B0970: no se ve sin el teclado), el banco 0x36 y los de
+    sprites 0x12 / 0x14 (solo el teclado de letras, que la entrada de nombre no ensena: [0x424] = 0), los records de la
+    Contrarreloj de cada etapa (47EE70 / 0x1a65c8 y 47EF30: el 26 en la variante 0 con record y la lista de etapas), la
+    consulta de rankings fuera de la carrera (0x1ff950 = tablero con [0x424] = 1; la llama 0x287a60, funcion 0x13 del
+    suceso del modo de atraccion con el banco 0x32 ADV_CVT, sin portar) y el frontal de rankings del PC
+    (frontend_rankings.cpp: el menu de la consola del PC, distinto del PS2). DESVIACION: fuera del ranking el original
+    guarda el nombre en el registro de antes de la tabla (0x1fb970 con el puesto -1); la Dreamcast no.
 - SIN PORTAR: el final de recreativa (modo 24: AUTOSCENE \AS\as_E_xx, 485470, escenas 3D con los fondos END_*_STAGE:
   modelo de la etapa del final, el coche, el piloto y la acompanante con movimientos del guion, camara y luces de
   5A6AB8, escena 2D de 638DF0 en la capa 7; race_ending.cpp y race_autoscene.cpp; no cabe junto a lo demas sin portar
-  antes los guiones AS.PS2), la entrada de nombre (modo 26: bancos 0x3D RANKING_CVT, 0x36 NAME_CMN, 0x37..0x3B
-  NAME5A..E por la meta, los de sprites 0x12 / 0x14 / 0x15 y los textos de las fuentes 2 / 3; PS2 0x1fc560 / 0x1fcd30 /
-  0x1fd1e8 / 0x1fd528 = fila 0x15: el nombre es el de la licencia, como el PC, sin teclado de letras) y los rankings de
-  OUTRUN2SP (sp_rankings.cpp, frontend_rankings.cpp) con su guardado (PS2 0x106288 / 0x1063d8 en el estado 5.. de la
-  entrada de nombre). La meta pasa directa al 25 y el 25 al GAME OVER (27).
+  antes los guiones AS.PS2). La meta pasa directa al 25.
 - Etapas al reves (descriptores 30..59; SEG34..SEG65), HECHO 2026-11-11: sus tablas de aparicion y de velocidad (+0x80
   / +0x84) estan en el ELF; lo que el ELF deja en la BSS son sus listas de puntos fijos (4EF880: 0x5d6028..), y por eso
   conv_trafico.py daba el registro entero vacio (sin trafico). Las rellena la rutina 0x1f2110 (la llama la puesta a cero

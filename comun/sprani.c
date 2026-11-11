@@ -66,7 +66,7 @@ typedef struct {
 static inst_t ins[SPR_CAPAS * HUECOS];
 static uint8_t usadas[SPR_CAPAS], cursor[SPR_CAPAS];
 typedef struct { spr_banco_t *b; int esc, capa, cuadro; float x, y; } inm_t;
-#define N_INM 96
+#define N_INM 160                                       /* (la entrada de nombre: hasta ~110 por cuadro) */
 static inm_t inm[N_INM]; static int n_inm;
 
 static spr_banco_t *banco_de(uint32_t tok, int *esc)

@@ -162,6 +162,128 @@ def tablas_ruta(D):
 def rutas(D, sal):
     cs.escribe(D, 0x34, os.path.join(sal, 'RUTASP.DAT'), GRUPOS_RUTA, tablas_ruta(D), vq=ch.vq_pequeno)
 
+# ---------------------------------------------------------------- entrada de nombre (modo 26) y rankings de OUTRUN2SP
+# PS2 (SLES-53998): modo 26 = 0x1ba968 / 0x1baaf8 / 0x1babe8 (tabla de modos 0x3f8e50); suceso 0x189 funcion 0x16 = fila
+# 0x15 de la tabla 0x3ee7b4: 0x1fc560 init / 0x1fcd30 control / 0x1fd1e8 dibujo / 0x1fd528 fin (PC 4B2370 / 4B29E0 /
+# 4B4F20 / 4B0950 de race_name_entry.cpp); el tablero 0x200398 (PC 4B46F0). Modulo en 0x5da108.. (PC 8423C0..), tablas de
+# rankings 0x5d7548..0x5da108 (0x2BC0 bytes, PC 84DF40..850B00 en otro orden): variante 1 presets 0 / 1 0x5d7548, variante 2
+# 0x5d7b88, variante 0 presets 0 / 1 0x5d81c8, variante 1 presets 2 / 3 0x5d9ac8, variante 0 presets 2 / 3 0x5d9c08;
+# registros de 16 bytes {+0 puntos 24 | ruta << 24 | coche << 28, +4 tiempo, +8 cuenta 12 | coche de la licencia << 12 |
+# cambio << 17 | color << 18 (24 bits), +0xB nombre (4)}.
+GRUPOS_RANK = [('TABLA', [0x15, 0x16, 0x1c, 0x1d, 0x1e, 0x1f, 0x20, 0x21, 0x22, 0x23] + list(range(0x02, 0x0c))),
+               ('FILAS', list(range(0x0c, 0x11)) + [0x11, 0x14, 0x1a, 0x24, 0x25, 0x26, 0x27, 0x28])]
+NOM_TEXTOS = (0x443, 0x444, 0x445)          # 0x239cd8 (465EB0): TIEMPO / PUNTUACION / CORAZONES (0x200ddc..0x200e10)
+NOM_FUENTES = (3, 4)                        # 0x117320(3) nombres y cifras, (4) el rotulo de fuera del ranking
+
+def tablas_nombre(D, A):
+    """bloque 'NOM1' (comun/rksp.c y demo/nombre.c): las tablas de la entrada de nombre del ELF, los registros por defecto
+    de los rankings (la rutina del PS2 0x1fa3b0 ejecutada con ps2/mips.py), las de 0x1ff740 / 0x2002b8 evaluadas y los
+    descriptores (44DC50) de las claves de los arboles 0 y 1"""
+    from ps2.mips import Mips
+    import conv_union, conv_menu
+    elf = D.elf; u = lambda a: cf.u32(elf, a); f = lambda a: cf.f32(elf, a)
+    E = A.elf
+    cad = lambda a: elf[a - 0xfff80:elf.index(b'\0', a - 0xfff80)]
+    # comprobaciones de las direcciones en el codigo (lui 0x41 / addiu)
+    lo = lambda a: u(a) & 0xffff
+    assert lo(0x1fc5cc) == (0x40d248 - 0x410000) & 0xffff and lo(0x1fca6c) == (0x40d338 - 0x410000) & 0xffff
+    assert lo(0x1fc830) == (0x40e040 - 0x410000) & 0xffff and lo(0x2003bc) == (0x40daa0 - 0x410000) & 0xffff
+    assert lo(0x2008a8) == (0x40da88 - 0x410000) & 0xffff and lo(0x200b10) == (0x40da10 - 0x410000) & 0xffff
+    assert lo(0x200c5c) == (0x40cfc8 - 0x410000) & 0xffff and lo(0x200810) == (0x40e028 - 0x410000) & 0xffff
+    assert lo(0x200930) == (0x40dc80 - 0x410000) & 0xffff and lo(0x20093c) == (0x40ddb0 - 0x410000) & 0xffff
+    assert lo(0x2016d8) == (0x40cfd8 - 0x410000) & 0xffff and lo(0x1fcb28) == (0x40c838 - 0x410000) & 0xffff
+    assert lo(0x1fce10) == (0x40c840 - 0x410000) & 0xffff and lo(0x1fce1c) == (0x40c848 - 0x410000) & 0xffff
+    assert lo(0x1fced0) == (0x40c860 - 0x410000) & 0xffff and lo(0x1fce44) == (0x36f4b8 - 0x370000) & 0xffff
+    assert u(0x1fd0b0) == 0x240300f0                                   # 0x8426e4 = 0xF0 (estado 5)
+    assert cad(0x40c8f0) == b'%2d' and cad(0x40c8b0) == b'%02d' and cad(0x40c8f8) == b'%03d'
+    assert cad(0x40c900) == b'%7d' and cad(0x40c908) == b'9999999' and cad(0x40cfd0) == b'%s'
+    assert u(0x200d44) == 0x24060193 and u(0x200da4) == 0x24050144 and u(0x200da8) == 0x24040032 and u(0x200db0) == 0x240501a3 and u(0x200d80) == 0x240601a3   # (0, 0x193), (0x144 / 0x32, 0x1a3)
+    out = bytearray(b'NOM1'); W = lambda *v: out.extend(struct.pack('<%dI' % len(v), *v))
+    F = lambda *v: out.extend(struct.pack('<%df' % len(v), *v))
+    # registros por defecto: 0x1fa3b0 sin la lectura del libro (0x1fc080) ni su comprobacion (0x1b4640): tablas a cero
+    m = Mips(E); stub = struct.pack('<2I', 0x03e00008, 0x24020000)
+    m.escribe(0x1fc080, stub); m.escribe(0x1b4640, stub); m.llama(0x1fa3b0)
+    defe = m.lee(0x5d7548, 0x2bc0)
+    assert defe[11:15] == b'AM2\0' and struct.unpack_from('<I', defe, 4)[0] == 290000, defe[:16]
+    out += defe
+    # 0x1ff740(ruta, nivel) (PC 4B1680) para ruta 0..15, nivel 0..4; 0x2002b8(c) (el filtro de 4B1F40) para c 0..255
+    for r in range(16):
+        out += bytes(m.llama(0x1ff740, r, n) & 0xff for n in range(5))
+    out += bytes(m.llama(0x2002b8, c - 256 if c >= 128 else c) & 0xff for c in range(256))
+    W(*[u(0x40d248 + 4 * k) for k in range(60)])                       # fondo por descriptor (428320, capa 0)
+    W(*[u(0x40e040 + 4 * k) for k in range(12)])                       # 0x34c = [0x40e040 + (cambio + color x 2 + variante x 4) x 4]
+    for k in range(24):                                                # t = 0x40daa0 + (0x34c + preset x 6) x 16
+        w = [u(0x40daa0 + 16 * k + 4 * q) for q in range(4)]
+        W(w[0], w[1], *[u(w[3] + 4 * q) for q in range(7)])            # fondo, titulo y las lineas (+0xC)
+    W(*[u(0x40da88 + 4 * k) for k in range(5)])                        # escena de la fila del puesto (puesto % 5)
+    W(*[u(0x40da10 + 4 * k) for k in range(10)])                       # cuadro de 3D0024 por el coche (+0x1a)
+    W(u(0x40cfc8), u(0x40cfcc))                                        # cuadro de 3D0028 por el color (+0x1c)
+    F(*[f(0x40e028 + 4 * k) for k in range(5)])                        # y de las 5 3D0016
+    for b in (0x40dc80, 0x40ddb0):                                     # filas: 5 x 0x3c bytes
+        W(*[u(b + 4 * k) for k in range(75)])
+    W(*[u(0x40cfd8 + 4 * k) for k in range(10)])                       # estilos de cifras {escena, paso}
+    out += elf[0x40c838 - 0xfff80:0x40c838 - 0xfff80 + 8]              # nombre de la fila del jugador (lw + lh: 6 bytes)
+    for a in (0x40c840, 0x40c848, 0x40c860):                           # quitar, recortar, sustituto
+        s_ = cad(a); assert len(s_) < 32; out += s_ + bytes(32 - len(s_))
+    pal = []; k = 0
+    while u(0x36f4b8 + 4 * k): pal.append(cad(u(0x36f4b8 + 4 * k))); k += 1
+    blq = b''.join(x + b'\0' for x in pal); blq += bytes((-len(blq)) % 4)
+    W(len(pal), len(blq)); out += blq
+    txt = conv_menu.textos(D, os.environ.get('OR2_IDIOMA', 'es'))
+    for i in NOM_TEXTOS:
+        s_ = txt[i]; assert len(s_) < 32; out += s_ + bytes(32 - len(s_))
+    # fuentes: {id, ancho, alto, primer caracter, n, espaciado x, y} (0x117320: +0xc / +0xe / +0x1c / +0x14 / +0x18)
+    for fid in NOM_FUENTES:
+        reg = next(q for q in D.elf32(conv_menu.FUENTES, 15) if q and D.elf32(q)[0] == fid)
+        w = D.elf32(reg, 8); i32 = lambda v: v - (1 << 32) if v >> 31 else v
+        W(fid, w[3] & 0xffff, w[3] >> 16, w[4] & 0xffff, w[7] & 0xffff, i32(w[5]) & 0xffffffff, i32(w[6]) & 0xffffffff)
+    # 44DC50 de cada registro (el +0 del descriptor = su indice; registro +0x1c) de los arboles 0 (csc_data_2) y 1
+    # (csc_data_cvt), en el orden de los registros (el de CURSO.DAT, conv_union.cursos)
+    base, nprim, _ = conv_union.tablas(A)
+    for fich in ('csc_data_2.bin', 'csc_data_cvt.bin'):
+        regs = conv_union.arbol(A, 0, fich); d = [0xffffffff] * 16
+        for i, (k, ti, ui, hi, hd) in enumerate(regs):
+            assert i < 16 and cf.u32(elf, cf.u32(elf, base + 4 * ti)) == ti; d[i] = ti
+        print('  %s: %s' % (fich, d[:len(regs)]))
+        W(*d)
+    print('NOM1: %d bytes, %d palabras' % (len(out), len(pal)))
+    return bytes(out)
+
+def nombre(D, sal):
+    from ps2.assets import Assets
+    import conv_menu
+    A = Assets(sys.argv[1])
+    cs.escribe(D, 0x3d, os.path.join(sal, 'RANKSP.DAT'), GRUPOS_RANK, tablas_nombre(D, A), vq=ch.vq_pequeno)
+    for b, l in zip(range(0x37, 0x3c), 'ABCDE'):                        # NAME5A..E: el fondo (escenas 0xC / 0xD)
+        cs.escribe(D, b, os.path.join(sal, 'NOM5%s.DAT' % l), [('FONDO', [0x0c, 0x0d])], vq=ch.vq_pequeno)
+    # NOMTX.DAT: los glifos de las fuentes 3 y 4 (un cuadro por caracter, la celda entera en (0, 0): el printf de la
+    # entrada de nombre, 0x1175a8 -> 0x116fa0, no usa las metricas) y la imagen compuesta 0x150010 (spr_ranking_xst,
+    # 117d48: sus partes {imagen, dx, dy})
+    hud = hud_nuevo(); T = conv_menu.fuentes_xst(D)
+    txt = conv_menu.textos(D, os.environ.get('OR2_IDIOMA', 'es'))
+    for fid in NOM_FUENTES:
+        reg = next(q for q in D.elf32(conv_menu.FUENTES, 15) if q and D.elf32(q)[0] == fid)
+        w = D.elf32(reg, 8); cw, chh, pri, n = w[3] & 0xffff, w[3] >> 16, w[4] & 0xffff, w[7] & 0xffff
+        usados = set(range(0x20, 0x80)) if fid == 3 else set(c for i in NOM_TEXTOS for c in txt[i])
+        g = hud.grupo('F%d' % fid, n)
+        for k in range(n):
+            c = pri + k
+            if c not in usados or c == 0x20 or c >= 0x80: continue      # 0x116fa0: signo (>= 0x80 no se dibuja), espacio
+            l, tp = (k & 15) * cw, (k >> 4) * chh
+            p = dict(tex=fid, src=(l, tp, l + cw, tp + chh), w=cw, h=chh, M=ch._t(0, 0), alfa=1.0, anc=(0.0, 0.0), gira=False)
+            hud.piezas_escena(g, k, 'FUENTE', T, [p])
+        hud.uso('F%d' % fid, g, 0, 0)
+    ix = D.n_spr.index('spr_ranking_xst.sz'); xst = D._ent(D.p_spr, ix); TX = ch.texturas(xst); H = xst[4:]
+    nc, tab = struct.unpack_from('<2I', H, 0x10); assert nc > 0x10
+    c, pp = struct.unpack_from('<2I', H, tab + 8 * 0x10)
+    g = hud.grupo('BANDA', 1)
+    for j in range(c):
+        im, dx, dy = struct.unpack_from('<I2h', H, pp + 16 * j)
+        hud.piezas_imagen(g, 'RANKX', TX, xst, im, dx, dy)
+    hud.uso('BANDA', g, 0, 0)
+    fn = os.path.join(sal, 'NOMTX.DAT'); hud.escribe(fn)
+    print('NOMTX.DAT: %d bytes, %d texturas, %d piezas' % (os.path.getsize(fn), len(hud.tex), len(hud.pie)))
+
 def maquetas(huds, d):
     from PIL import Image
     os.makedirs(d, exist_ok=True)
@@ -178,3 +300,4 @@ if __name__ == '__main__':
     game_over(D, sys.argv[2])
     frontal(D, sys.argv[2])
     rutas(D, sys.argv[2])
+    nombre(D, sys.argv[2])

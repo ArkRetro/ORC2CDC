@@ -24,14 +24,17 @@ void fin_entra(int como, const fin_carrera_t *c);   /* 49B470 (modo 34) */
 int  fin_paso(uint32_t nuevo);                      /* un paso de logica (botones nuevos de CONT_*); FIN_* */
 void fin_dibuja(void);                              /* dentro de la lista TR, encima de todo */
 void fin_game_over(int como);                        /* OUTRUN2SP: modo 27 (como: FIN_*) */
-/* OUTRUN2SP tras la meta o el fin del tiempo: modo 25 (resultados: el mapa de la ruta, 49A790 / 49A800) y despues
-   (sin el 26) el 27 */
+/* OUTRUN2SP tras la meta o el fin del tiempo: modo 25 (resultados: el mapa de la ruta, 49A790 / 49A800), despues el 26
+   (entrada de nombre, tras el fin del tiempo: demo/nombre.c) y el 27 */
 typedef struct {
     int preset;             /* [78024C] */
     int modelo, color;      /* 48B140 / 48B160: modelo del coche (car+0x11) y color (0: ninguno) del frontal */
     int rama[4];            /* 451350(nivel 0..3): 0 izquierda, 1 derecha, 2 sin llegar */
     int nivel, lado;        /* 4AEEF0 al acabarse el tiempo: nivel de la etapa (car+0x68) y 0 etapa / 1 union (car+5C); */
     float razon;            /* posicion / filas del tramo (450AC0); -1, -1, -1 tras la meta (sin llamar) */
+    /* para la entrada de nombre (modo 26, demo/nombre.c) */
+    int variante, puntos, corazones, manual, config;   /* [780258], 4B99D0, 45B830 / 45B840, 48B180, 48B1A0 */
+    int registro4;          /* 450560(4): registro del arbol de la etapa del nivel 4 (-1 sin llegar) */
 } fin_sp_t;
 void fin_sp_resultados(int como, const fin_sp_t *d);
 void fin_sale(void);                                /* suelta FIN.DAT / GOVER.DAT (y su VRAM) */

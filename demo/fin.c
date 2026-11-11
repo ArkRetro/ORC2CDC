@@ -26,8 +26,8 @@
      encontro un coche mejor, CheckSlipStream) y car+E78 = 0.
    - OUTRUN2SP (1b4878 = 0): el modo 27 (fin_game_over) desde ABANDONAR de la pausa con la misma escena 2C000B y tras la
      meta (19 -> 33 -> 24 -> 25 -> 27) o el fin del tiempo (20 -> 25 -> 26 -> 27) con la escena 34001F (GOVSP.DAT); los
-     resultados (25, el mapa de la ruta) mas abajo; el final de recreativa (24) y la entrada de nombre (26) estan SIN
-     PORTAR (la meta pasa directa al 25 y el 25 al 27).
+     resultados (25, el mapa de la ruta) mas abajo y la entrada de nombre (26) en demo/nombre.c; el final de recreativa
+     (24) esta SIN PORTAR (la meta pasa directa al 25).
    SIN PORTAR: la bandera 84BCFC y su suma (las tablas de records no estan en el port: nunca se pone), las variantes 4
    (red) y 6 (misiones de C2C: 4EF550 con 496510 / 495890, otros tokens en el modo 35), la espera de la muestra 0x1a1 de
    los modos 34 (pausa) y el bloqueo de botones del modo 35 (+0x5E0 del objeto 0x375068, PC +0x518 de 4035F0: sin
@@ -42,6 +42,7 @@
 #include "../comun/menu.h"
 #include "../comun/musica.h"
 #include "../comun/sprani.h"
+#include "nombre.h"
 
 #define M34_CUADROS 0xf0                                /* 0x1bc288: 1b4a10(0xF0) */
 #define M27_CUADROS 0xf0                                /* 0x1bafe0: 1b4a10(0xF0) */
@@ -173,7 +174,6 @@ void fin_game_over(int c)
    34001B (capa 2, modo 1) al empezar cada uno y la marca 34001C (capa 3) en los de etapa; con el nivel de 4AEEF0 (fin
    del tiempo) se para en la razon de la posicion del coche en su etapa o union. */
 #define M25_CUADROS 0xb4                                /* 0x1ba6c4: 1b4a10(0xB4) */
-#define M26_PASA 0                                      /* el modo 26 (entrada de nombre) SIN PORTAR: directo al 27 */
 typedef struct {
     char id[4];
     uint32_t fila[30];                                  /* 0x40fc10: fila de cada modelo (1..3) */
@@ -275,10 +275,18 @@ static void ruta_suelta(void)                           /* 0x2099f8 */
 static void a_game_over(void);
 static void sp_siguiente(void)                          /* 1ba7f0..1ba848 (PC result_next) */
 {
-    /* 450240 = 1 o (variante 0 y record) -> 26; si no 27 */
-    if (como == FIN_TIEMPO && M26_PASA) return;
     ruta_suelta();                                      /* salida del modo 25 (0x1ba910): fin del suceso 0x188 */
     if (rb) { pvr_wait_ready(); spr_cierra(rb); rb = NULL; R = NULL; }
+    /* 450240 = 1 o (variante 0 y record [0x5a2030]: 47EF30, los records de la Contrarreloj, SIN PORTAR) -> 26; si no 27 */
+    if (como == FIN_TIEMPO) {
+        nombre_t n;
+        n.variante = sp_d.variante; n.preset = sp_d.preset; n.puntos = sp_d.puntos; n.corazones = sp_d.corazones;
+        n.tiempo = 0;                                   /* 451180(0): [0x5c60f0], -1 sin acabar -> 0 (PROBABLE) */
+        n.modelo = sp_d.modelo; n.manual = sp_d.manual; n.config = sp_d.config; n.registro4 = sp_d.registro4;
+        n.ruta = 0;                                     /* 450320: bit n = derecha en el nivel n */
+        { int k; for (k = 0; k < 4; k++) if (sp_d.rama[k] == 1) n.ruta |= 1 << k; }
+        if (!nombre_entra(&n)) { fase = 26; t_fase = 0; return; }
+    }
     go_sp = 1; a_game_over(); go_sp = 0;
 }
 void fin_sp_resultados(int c, const fin_sp_t *d)
@@ -349,6 +357,8 @@ int fin_paso(uint32_t nuevo)
             if (fase == 25) ruta_control();             /* el suceso 0x188 (tras el modo) */
         }
         if (fase == 25) spr_paso();
+    } else if (fase == 26) {                            /* 0x1baaf8 / 49AA60 */
+        if (nombre_paso(nuevo)) { nombre_sale(); go_sp = 1; a_game_over(); go_sp = 0; }   /* 0x1babe8 -> 27 */
     }
     /* el reloj de las escenas (427F70: un cuadro por paso; modo 5 / 1: se quedan en el ultimo) */
     if (t_panel >= 0) t_panel++;
@@ -382,12 +392,14 @@ void fin_dibuja(void)
 static void dibuja25(void)
 {
     if (fase == 25 && rb) spr_dibuja(0, SPR_CAPAS, 120.0f, 0);
+    if (fase == 26) nombre_dibuja(120.0f);
 }
 
 void fin_sale(void)
 {
     if (fase == 27) musica_para();                      /* salida del modo 27 (49AED0): 401030(0) y (1) */
     if (rb) { ruta_suelta(); pvr_wait_ready(); spr_cierra(rb); rb = NULL; R = NULL; }
+    nombre_sale();
     if (fd) { hudd_cierra(fd); fd = NULL; }
     fase = -1; t_panel = t_preg = t_elige = t_go = -1;
 }

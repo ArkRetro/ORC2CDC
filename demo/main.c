@@ -7976,8 +7976,8 @@ int main(int argc, char **argv)
             } else if (!fin_on && juego_sp && t_estado > (uint32_t)fin_t) {
                 /* el juego de OUTRUN2SP: sin millas ni continuar (49CFD0 y 49D850 con 1b4878 = 0): meta 19 -> 33 -> 24
                    (final de recreativa, AS.PS2) -> 25 (resultados) -> 27; tiempo agotado 20 -> 25 -> 26 (nombre) -> 27;
-                   GAME OVER 27 con la escena 34001F, luego 28 -> el frontal de recreativa (10). 25 en demo/fin.c
-                   (fin_sp_resultados); 24 y 26 SIN PORTAR: la meta pasa directa al 25 y el 25 al 27 */
+                   GAME OVER 27 con la escena 34001F, luego 28 -> el frontal de recreativa (10). 25 y 26 en demo/fin.c
+                   (fin_sp_resultados) y demo/nombre.c; 24 SIN PORTAR: la meta pasa directa al 25 */
                 menu_suma_tiempo(crono);                        /* (PS2 0x1b96bc / 0x1b9b58: tambien en este juego) */
                 {   /* el final de recreativa (24) SIN PORTAR: de la meta directo a los resultados (25) */
                     fin_sp_t d; int k;
@@ -7985,6 +7985,9 @@ int main(int argc, char **argv)
                     for (k = 0; k < 4; k++) d.rama[k] = rama_nivel[k];
                     d.nivel = estado == META ? -1 : fin_nivel; d.lado = estado == META ? -1 : fin_lado;
                     d.razon = estado == META ? -1.0f : fin_razon;
+                    d.variante = variante; d.puntos = puntos; d.corazones = variante == 2 ? infarto_total() : 0;
+                    d.manual = fsp_manual(); d.config = fsp_config();
+                    d.registro4 = etapa_n == 4 ? cur_nodo : -1;   /* 450560(4): la clave del nivel 4 al entrar en su etapa */
                     fin_sp_resultados(estado == META ? FIN_META : FIN_TIEMPO, &d); fin_on = 1;
                 }
             } else if (!fin_on && t_estado > (uint32_t)fin_t) {

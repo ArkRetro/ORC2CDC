@@ -40,6 +40,7 @@
 #include "musica.h"
 #include "sfx.h"
 #include "menu.h"
+#include "rksp.h"
 #include "vmu.h"
 #include "fsp.h"
 
@@ -204,7 +205,9 @@ static void lic_desbloquea(uint8_t *p)
     memset(p + 0x1dd, 6, 0x190); memset(p + 0x1c9, 0, 20); memset(p + 0x36e, 0x66, 0x84);
 }
 
-/* VMU: fichero OR2C2C en A1. Contenido: 'OR2L', u32 version, i32 licencia activa, 4 registros de 0x40C, detras de la
+/* VMU: fichero OR2C2C en A1. Contenido: 'OR2L', u32 version, i32 licencia activa, 4 registros de 0x40C (version 2: y
+   detras 'RKSP' y las tablas de los rankings de OUTRUN2SP, comun/rksp.c: los datos del sistema que la consola guarda con
+   las licencias; los ficheros de la version 1 se siguen leyendo y los rankings quedan por defecto), detras de la
    cabecera VMS (vmu_pkg: descripciones, icono animado y eyecatch de VMU.DAT, comun/vmu.c). Se lee y se escribe en
    bruto (O_META): fs_vmu no toca la cabecera y vmu_pkg_parse la comprueba (CRC incluido). Los ficheros del formato
    anterior (icono liso, sin eyecatch; algunos con una cabecera que vmu_pkg_parse no acepta) se siguen leyendo: si la
@@ -227,9 +230,12 @@ static void vmu_lee(void)
             dbglog(DBG_INFO, "menu: cabecera VMS no valida; datos por la marca en +%d\n", o);
         }
         if (o >= 0) {
-            const uint8_t *d = b + o;
+            const uint8_t *d = b + o; int ver;
+            memcpy(&ver, d + 4, 4);
             memcpy(&lic_sel, d + 8, 4);
             memcpy(lic, d + 12, sizeof lic);
+            if (ver >= 2 && o + 12 + (int)sizeof lic + 4 + RKSP_TAM <= sz && !memcmp(d + 12 + sizeof lic, "RKSP", 4))
+                rksp_pon(d + 12 + sizeof lic + 4);              /* version 2: los rankings de OUTRUN2SP */
             if (lic_sel < -1 || lic_sel >= N_LIC || (lic_sel >= 0 && !lic_usada(lic_sel))) lic_sel = -1;
             vmu_ok = 1;
         }
@@ -239,13 +245,15 @@ static void vmu_lee(void)
 }
 static void vmu_guarda(void)
 {
-    vmu_pkg_t pkg; uint8_t *d, *out = NULL; int n, v = 1, i; file_t f;
-    d = malloc(12 + sizeof lic); if (!d) return;
+    vmu_pkg_t pkg; uint8_t *d, *out = NULL; int n, v = rksp_hay() ? 2 : 1, i; file_t f;
+    uint32_t tam = 12 + sizeof lic + (v == 2 ? 4 + RKSP_TAM : 0);
+    d = malloc(tam); if (!d) return;
     memcpy(d, "OR2L", 4); memcpy(d + 4, &v, 4); memcpy(d + 8, &lic_sel, 4); memcpy(d + 12, lic, sizeof lic);
+    if (v == 2) { memcpy(d + 12 + sizeof lic, "RKSP", 4); memcpy(d + 16 + sizeof lic, rksp_tablas(), RKSP_TAM); }
     for (i = 0; i < N_LIC; i++) lic[i][0x3f4] &= ~2;        /* +3F4 bit 1: cambios sin guardar */
     memset(&pkg, 0, sizeof pkg);
     vmu_cabecera(&pkg);                                     /* descripciones, icono y eyecatch (comun/vmu.c) */
-    pkg.data_len = 12 + sizeof lic; pkg.data = d;
+    pkg.data_len = tam; pkg.data = d;
     if (!vmu_pkg_build(&pkg, &out, &n)) {
         musica_pausa_lectura(1);
         fs_unlink(VMU_FICH);
@@ -256,6 +264,11 @@ static void vmu_guarda(void)
     }
     free(out); free(d);
 }
+
+/* la entrada de nombre de OUTRUN2SP (demo/nombre.c): la licencia activa (el nombre +0, el coche +0x1C) y el guardado
+   (estados 7..0xB: los rankings 0x106288 / 0x1063d8 y la licencia 0x1a67e0 / 0x1a6840, aqui un solo fichero) */
+const uint8_t *menu_licencia(void) { return activa(); }
+void menu_guarda_vmu(void) { vmu_guarda(); }
 
 /* ---------------------------------------------------------------- tramos */
 typedef struct { int u; float c; int ini, fin, modo; } anim_t;
