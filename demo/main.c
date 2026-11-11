@@ -3446,25 +3446,27 @@ static void traf_paso(float dt)
    los puntos de la forma). La demo lleva el coche como un punto a 1 m del limite: la clase se mira en la COLI pasado
    el limite (MURO_SONDA m: no es del original) y los puntos de la forma son las ruedas (PROVISIONAL: la forma +690 no
    esta en la demo); entran las que quedan a menos de la penetracion del cuadro de la mas metida. */
+static int atrapa_de(float s);
 #define MURO_SONDA 0.25f
 #define CLASE_MURO 0x010f0020u
-static void muro_chispas(const coche_t *c, int lado, float pen, float xm)
+static uint32_t muro_chispas(const coche_t *c, int lado, float pen, float xm)
 {
-    float g = c->a + c->deriva, cg = cosf(g), sg = sinf(g), d[4], dm = -1e9f; int i; uint32_t cl;
-    if (c != &yo || !lado) return;
+    float g = c->a + c->deriva, cg = cosf(g), sg = sinf(g), d[4], dm = -1e9f; int i; uint32_t cl = 0;
+    if (c != &yo || !lado) return 0;
     {   float y = c->pos[1];                                    /* el plano (modo 0x100), no el del coche (0x400) */
-        if (suelo_ruta(c->s, xm, &y, 0, &cl) == -2) return;
+        if (suelo_ruta(c->s, xm, &y, 0, &cl) == -2) return 0;
     }
 #ifdef DIAG_CHISPA
     {   static int n; if (n++ % 4 == 0) dbglog(DBG_INFO, "MURO s %.0f x %.2f lado %d pen %.3f clase %08x (sonda x %.2f)\n",
             (double)c->s, (double)c->x, lado, (double)pen, (unsigned)cl, (double)xm); }
 #endif
-    if (!(cl & CLASE_MURO)) return;
+    if (!(cl & CLASE_MURO)) return cl;
     for (i = 0; i < 4; i++) {
         float fx = i < 2 ? fpar.cg_del : -fpar.cg_tras, ly = fpar.via[i >> 1] * ((i & 1) ? -0.5f : 0.5f);
         d[i] = lado * (ly * cg + fx * sg); if (d[i] > dm) dm = d[i];
     }
     for (i = 0; i < 4; i++) if (d[i] >= dm - pen) chispa_muro |= 1u << i;
+    return cl;
 }
 #define DERIVA_MAX 1.276f                                       /* 0x3400 = 73 grados */
 static void coche_paso(coche_t *c, float giro, float gas, float freno, float dt)
@@ -3565,10 +3567,24 @@ static void coche_paso(coche_t *c, float giro, float gas, float freno, float dt)
                 xm = (xa + xb) * 0.5f;
             }
             if (nx != 0 || ny != 0) {
-                int golpe = or2_choque_muro(&fis, &fpar, nx, ny, pen);   /* 2 = choque fuerte (estados 1, 2, 5) */
-                muro_chispas(c, lado_m, pen, xm);
+                int golpe;
+                fis.muro_clase = muro_chispas(c, lado_m, pen, xm); fis.atrapa = atrapa_de(c->s);
+                fis.golpe_sonido = 0;
+                golpe = or2_choque_muro(&fis, &fpar, nx, ny, pen);   /* 2 = choque fuerte (estados 1, 2, 5) */
                 c->choque = 1; c->t_muro = 30;
-                if (golpe && sfx_ok && !golpe_cd) { golpe_cd = 20; sfx_golpe(fminf(c->v / 40.0f, 1.0f)); }
+#ifdef DIAG_CHISPA
+                if (golpe) dbglog(DBG_INFO, "GOLPE %d clase %08x atrapa %d kmh %d estado %d c282 %d\n", golpe, (unsigned)fis.muro_clase, fis.atrapa, fis.kmh, fis.t_choque > 0 ? fis.choque : 0, fis.c282);
+#endif
+                if (sfx_ok) {
+                    /* CwCrushStatus (PS2 0x199d08: tabla 0x3dedf8 por estado: 1 y 5 el SE 0x43, 2 el 0x42) y el rebote
+                       (cw_rebound_status 0x199f4c: SE 0x4b cada 60 cuadros, +D23). Con un SFX.DAT sin ellos, el golpe
+                       de antes. PENDIENTE: el SE por material del choque fuerte (0x19a4c0, tabla 0x3dee18) */
+                    if (golpe == 2 && fis.t_choque > 0 && sfx_hay(fis.choque == 2 ? 0x42 : 0x43)) sfx_menu(fis.choque == 2 ? 0x42 : 0x43);
+                    if (fis.golpe_sonido && !golpe_cd) {
+                        if (sfx_hay(0x4b)) { golpe_cd = 60; sfx_menu(0x4b); }
+                        else { golpe_cd = 20; sfx_golpe(fminf(c->v / 40.0f, 1.0f)); }
+                    }
+                }
                 h = atan2f(fis.vx, fis.vy);                     /* rumbo de la velocidad (+ derecha) */
                 c->v = sqrtf(fis.vx * fis.vx + fis.vy * fis.vy);
                 c->a = dif_ang(h - th1); c->deriva = dif_ang(-fis.psi - h);
@@ -3787,6 +3803,12 @@ static pvr_ptr_t tex_humo; static pvr_poly_hdr_t cab_humo;
    1, 1). Dibujo (0x109010, sprites de punto): tamano = alto de la textura x 0,6 x 0,5 x proyeccion / distancia,
    entre 2,5 y 32 puntos de pantalla (PROBABLE: el microprograma de la VU1 no esta leido; en el PC, 41A6F0, es el
    tamano de punto de D3D con escala 1 / distancia y los mismos topes). Sin el destello 0x2C0001 (PENDIENTE). */
+/* Tramos de la etapa del choque contra el muro (bloque 'ATR1' de EFECTOS.DAT, tools/conv_efectos.py): por SEGnn, las
+   filas de 16 parejas de posiciones de carretera (+64; -1 cierra) de atrapamiento del choque (SLES-53998 0x3dee58:
+   check_crush_entrapment_length 0x19a6c0), del roce (0x3dfed8: 0x19a768) y de desvio del estado 1 al 5 (0x3d2f38:
+   resolve_entry 0x182d6c) */
+#define ATR_SEG 66
+static int16_t atr_tab[ATR_SEG][3][32]; static int atr_ok;
 #define NCHISPA 500
 typedef struct { float p[3], v[3]; int vida; } chispa_t;
 static chispa_t chispas[NCHISPA]; static int chispa_n;          /* chispa_n: las vivas van por delante */
@@ -3890,7 +3912,7 @@ static uint16_t buf_arr[512 * 128] __attribute__((aligned(32)));
 static void efectos_inicia(void)
 {
     uint16_t *t = buf_arr; int x, y; pvr_poly_cxt_t cx; uint32_t sz;
-    uint8_t *e = gd_carga("EFECTOS.DAT", &sz);
+    uint8_t *e = gd_carga("EFECTOS.DAT", &sz); uint32_t o = 8;
     for (y = 0; y < 32; y++) for (x = 0; x < 32; x++) {           /* mancha redonda y suave (ARGB4444, lineal) */
         float d = sqrtf((x - 15.5f) * (x - 15.5f) + (y - 15.5f) * (y - 15.5f)) / 15.5f, a = fmaxf(0, 1 - d);
         t[y * 32 + x] = ((int)(a * a * 15) << 12) | 0x0EEE;
@@ -3899,7 +3921,7 @@ static void efectos_inicia(void)
     pvr_poly_cxt_txr(&cx, PVR_LIST_TR_POLY, PVR_TXRFMT_ARGB4444 | PVR_TXRFMT_NONTWIDDLED, 32, 32, tex_humo, PVR_FILTER_BILINEAR);
     cx.gen.fog_type = PVR_FOG_TABLE; cx.txr.env = PVR_TXRENV_MODULATEALPHA; pvr_poly_compile(&cab_humo, &cx);
     if (e && sz >= 8 && !memcmp(e, "EFE1", 4)) {                /* texturas de las marcas (tools/conv_efectos.py) */
-        uint32_t n, k, o = 8, h[4];
+        uint32_t n, k, h[4];
         memcpy(&n, e + 4, 4);
         for (k = 0; k < n && k < NMARCA_CLASES && o + 16 <= sz; k++) {
             pvr_ptr_t v;
@@ -3922,6 +3944,10 @@ static void efectos_inicia(void)
             pvr_poly_compile(&cab_chispa[k], &cx);
             chispa_tex_ok = k == 1;
         }
+    }
+    if (e && chispa_tex_ok && o + 8 <= sz && !memcmp(e + o, "ATR1", 4)) {
+        uint32_t n; memcpy(&n, e + o + 4, 4);
+        if (n == ATR_SEG && o + 8 + sizeof atr_tab <= sz) { memcpy(atr_tab, e + o + 8, sizeof atr_tab); atr_ok = 1; }
     }
     free(e);
 }
@@ -4197,6 +4223,24 @@ typedef struct {
                                                                    -2 COLLR.DAT (LRBK de las misiones), si no COLBKnn */
 } etapa_t;
 static etapa_t curso[CURSO_MAX]; static int ncurso;
+/* tramos de la etapa en el sitio s (or2_coche_t.atrapa): 0 en la union (+5C != 0) o sin la tabla */
+static int atr_en(const int16_t *f, int pos)
+{
+    int k;
+    for (k = 0; k < 16 && f[2 * k] >= 0; k++) if (pos >= f[2 * k] && pos <= f[2 * k + 1]) return 1;
+    return 0;
+}
+static int atrapa_de(float s)
+{
+    int nodo, pos, seg;
+    if (!atr_ok || traf_lugar(s, &nodo, &pos) || nodo < 0 || nodo >= ncurso) return 0;
+    seg = curso[nodo].seg; if (seg >= ATR_SEG) return 0;
+#ifdef DIAG_CHISPA
+    {   static int n; if (n++ % 8 == 0) dbglog(DBG_INFO, "ATRAPA nodo %d seg %d pos %d: %d%d%d\n", nodo, seg, pos,
+            atr_en(atr_tab[seg][0], pos), atr_en(atr_tab[seg][1], pos), atr_en(atr_tab[seg][2], pos)); }
+#endif
+    return atr_en(atr_tab[seg][0], pos) | atr_en(atr_tab[seg][1], pos) << 1 | atr_en(atr_tab[seg][2], pos) << 2;
+}
 /* arbol cargado (CURSO.DAT): 0 el del modo OutRun (csc_data_2), 1 OUTRUN2SP (csc_data_cvt), 100 + i el curso del
    registro i de Races.bin (C2C); detras del primero, 'CURS' con el directorio de los demas (conv_union.py cursos) */
 static int curso_id = -1;
@@ -7331,6 +7375,9 @@ int main(int argc, char **argv)
                 }
 #endif
 #ifdef PRUEBA_CHOQUE
+#ifdef CHOQUE_POS
+                if (t_estado == 58) { yo.s = s_etapa + (CHOQUE_POS) * m_pos; yo.y_ok = 0; }   /* prueba: desde esa posicion de carretera */
+#endif
                 if (t_estado == 60 && fis_ok) {                 /* prueba: a ~280 km/h y 50 grados contra el muro derecho */
                     float p[3], th; ruta_en(yo.s, p, &th, NULL, NULL);
                     or2_coloca(&fis, &fpar, th + (yo.x < 0 ? -(CHOQUE_ANG) : CHOQUE_ANG), CHOQUE_V / (fpar.hud * 3.6f));   /* al muro mas cercano */

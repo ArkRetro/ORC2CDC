@@ -360,6 +360,10 @@ typedef struct {
                             /* lo pone en el punto de la grua (lo borra quien lo lee)                 */
     float corr_lat;         /* RebPlBody_Sub2 4A0320: desplazamiento lateral pedido durante el rebote */
                             /* (m, + derecha de la carretera); lo suma y lo borra el juego            */
+    /* las pone quien llama antes de or2_choque_muro */
+    uint32_t muro_clase;    /* +2A8: clases de la COLI que pisa la forma del coche contra el muro (0 = no se sabe) */
+    int   atrapa;           /* sitio (+64) dentro de un tramo de la etapa: 1 atrapamiento del choque (PS2 0x3dee58),
+                               2 del roce (0x3dfed8), 4 desvio del estado 1 al 5 (0x3d2f38); 0 en la union (+5C)  */
     int   nivel_etapa;      /* nivel de la etapa del ultimo paso (crush_threshold de CbwColiWall, PS2 0x1994c4)  */
 } or2_coche_t;
 

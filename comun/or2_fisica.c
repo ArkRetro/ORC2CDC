@@ -2039,6 +2039,8 @@ void or2_choque_trafico(const or2_choques_t *q, or2_otro_t *a, or2_otro_t *b)
    check_crush_entrapment_length) ni el desvio del estado 1 al 5 (resolve_entry): son posiciones de la malla de
    la carretera del original, que la demo no tiene. Velocidades en km/h del modelo (+1F4); n = punta al corte:
    n - 70 o menos, nada (solo el temporizador de colision); por encima de n - 20 el estado 1 (vuelta de campana);
+   dentro de un tramo de atrapamiento de la etapa (c->atrapa & 1) los limites son 180 y 350; en uno de desvio
+   (c->atrapa & 4) el estado 1 pasa al 5;
    si no, 5 (a 10 grados o mas) o 2. Entra con StartCrash (4A2270) y la grua (PlWrecker fase > 1: cuadros =
    duracion * 60.2 + 1). lado: +670 & 0xA0000000 (puntos 0 y 2 de la forma del coche contra el muro), aqui el
    costado izquierdo del coche (supuesto: los puntos pares son los del lado izquierdo). */
@@ -2050,8 +2052,10 @@ static int aplasta(or2_coche_t *c, const or2_param_t *p, float imp, int lado)
     if (c->t_choque > 0.0f || c->t_recup > 0.0f || c->grua > 0) return 0;
     n = tr(p->v_tope * 216.720001f);
     bajo = n - 70; alto = n - 20;
+    if (c->atrapa & 1) { bajo = 180; alto = 350; }      /* check_crush_entrapment_length (PS2 0x199c04..0x199c48) */
     if (c->kmh <= bajo) return 0;
     estado = c->kmh > alto ? 1 : (imp >= 0.174532920f ? 5 : 2);
+    if (estado == 1 && (c->atrapa & 4)) estado = 5;     /* resolve_entry (PS2 0x182d6c..0x182dc4) */
     entra_choque(c, estado, lado);
     fase = tr(q->dur[estado] * 60.2000008f);
     if (fase > 1) { c->grua = fase + 1; c->grua_ini = fase + 1; }
@@ -2072,7 +2076,7 @@ int or2_choque_muro(or2_coche_t *c, const or2_param_t *p, float nx, float ny, fl
     v2 v = mk(c->vx, c->vy), n = mk(nx, ny), f;
     float sp = lon2(v), vn, imp, lim;
     int16_t dl;
-    int lado, fuerte = 0;
+    int lado, fuerte = 0, muro;
     float ANG_APLASTA;
     if (sp < 0.0001f) return 0;
     vn = v.x * n.x + v.y * n.y;
@@ -2090,9 +2094,12 @@ int or2_choque_muro(or2_coche_t *c, const or2_param_t *p, float nx, float ny, fl
         v2 izq = mk(-cosf(c->psi), -sinf(c->psi));
         lado = (n.x * izq.x + n.y * izq.y) < 0.0f ? 1 : 0;
     }
+    /* sin clase de muro bajo la forma (+2A8 & 0x10F0020 = 0: los limites 0x4000 y 0x40) solo hay roce (PS2 0x199430
+       .., PC pc_wall_controller.cpp 150) */
+    muro = c->muro_clase == 0 || (c->muro_clase & 0x010f0020u) != 0;
     /* impacto entre el aplastamiento y el rebote: solo si se acepta el choque fuerte hay rebote */
-    if (vn < 0.0f && !(imp >= lim) && imp >= ANG_APLASTA) fuerte = aplasta(c, p, imp, lado);
-    if (vn < 0.0f && (imp >= lim || fuerte)) {
+    if (muro && vn < 0.0f && !(imp >= lim) && imp >= ANG_APLASTA) fuerte = aplasta(c, p, imp, lado);
+    if (muro && vn < 0.0f && (imp >= lim || fuerte)) {
         /* cw_rebound_status: rumbo del muro (el sentido de la carretera) y rumbo de rebote */
         int16_t muro = s16(tr(atan2f(ny, nx) * R2U)), dif;
         if (iabs(s16((int32_t)muro - c->d4c)) >= 0x4000) muro = s16((int32_t)muro - 0x8000);
@@ -2120,8 +2127,15 @@ int or2_choque_muro(or2_coche_t *c, const or2_param_t *p, float nx, float ny, fl
     /* calc_friction_status: frenada de kmh >> 7 cuadros, el cuerpo gira hacia el muro 2608 unidades por metro
        de penetracion y la velocidad sigue el muro sin perder modulo */
     {
-        int b = (c->kmh >> 7) & 255;
+        /* PS2 0x19a200..0x19a308: cuadros de frenada por la velocidad; mas en los tramos de atrapamiento del choque
+           (kmh >> 6, o >> 3 si ademas lo es del roce) y del roce (>> 6); sin clase de muro, un escalon menos (sin
+           tramos, kmh >> 8). Sin handicap (+DB4 = 0) ni asistencia (+DF8) */
+        int ba, bb, b;
         float giro = pen * 2608.0f * U2R, a;
+        if (c->atrapa & 1) { ba = (c->kmh >> ((c->atrapa & 2) ? 3 : 6)) & 255; bb = (c->kmh >> 7) & 255; }
+        else if (c->atrapa & 2) { ba = (c->kmh >> 6) & 255; bb = (c->kmh >> 7) & 255; }
+        else { ba = (c->kmh >> 7) & 255; bb = (c->kmh >> 8) & 255; }
+        b = muro ? ba : bb;
         v2 t;
         if (c->c282 < b) c->c282 = b;
         c->roce = 2;

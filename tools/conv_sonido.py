@@ -173,6 +173,11 @@ def efectos_menu(iso, irx, tb, td):
 
 
 GOLPE_SE = (0x4f, 0x5e, 0x64, 0x65)     # 476040 (PS2 0x1ec620): golpe al trafico, estados 16..19 (li a0 del codigo)
+# choque contra el muro: rebote (cw_rebound_status, PS2 0x199f50: li a0, 0x4b) y choque fuerte (CwCrushStatus, tabla
+# 0x3dedf8 por estado: 0x43 los estados 1 y 5, 0x42 el 2)
+# El 0x43 no va: su pitch en la tabla SE del IRX es 0 (0x4b98 + 12 * 0x43) y no se sabe como lo toca el IRX
+# (PENDIENTE: leer SOUNDCD.IRX)
+MURO_SE = (0x42, 0x4b)
 
 
 def efectos_golpe(iso, irx, tb, td, elf):
@@ -180,7 +185,7 @@ def efectos_golpe(iso, irx, tb, td, elf):
     4F65D0 / 4F67A0 (tipos 0 roce y 3 golpe, familias 0..2; conv_trafico.tabla_se_golpe) y los de 476040"""
     import conv_trafico
     t = conv_trafico.tabla_se_golpe(elf, conv_trafico.tabla_cajas(elf))
-    ids = sorted(set([t[k * 4 + f] & 0x1ff for k in (0, 3) for f in range(3)] + list(GOLPE_SE)))
+    ids = sorted(set([t[k * 4 + f] & 0x1ff for k in (0, 3) for f in range(3)] + list(GOLPE_SE) + list(MURO_SE)))
     A, B, tablas = banco_tablas(fichero_paquete(iso, 'SOUND.PS2', '\\IGC.PAK'))
     r = []
     for i in ids:

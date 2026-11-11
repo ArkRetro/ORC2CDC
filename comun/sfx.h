@@ -18,6 +18,7 @@ void sfx_para(void);                       /* calla todo (pausa, fin de carrera)
    propios (sfx_para no los calla): */
 enum { SFX_CANCELA = 0x00, SFX_CURSOR = 0x01, SFX_BLOQUEADO = 0x03, SFX_ACEPTA = 0x40 };
 void sfx_menu(int id);
+int  sfx_hay(int id);                      /* 1 si SFX.DAT trae la muestra "se%03x" del id */
 /* voces (VOCES.DAT, despues de sfx_inicia): sfx_voz(id) toca la voz del id del original (los 9 bits bajos; tambien los
    efectos de carrera 0x4d y 0x18d, por otro canal); sfx_voz_calla las corta. Las tablas de cuando habla (voces.c) y el
    idioma del banco vienen en el mismo fichero. */

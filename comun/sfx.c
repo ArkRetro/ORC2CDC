@@ -333,6 +333,14 @@ void sfx_para(void)
     golpe_x = -1.0f;
 }
 
+int sfx_hay(int id)
+{
+    char nm[12]; int i;
+    if (!listo) return 0;
+    sprintf(nm, "se%03x", id & 0xfff);
+    for (i = 0; i < n_mues && strncmp(mues[i].nombre, nm, 12); i++) ;
+    return i < n_mues;
+}
 void sfx_menu(int id)
 {
     char nm[12];
