@@ -556,16 +556,17 @@ def pon_cielo(mod, cielo, luz=None):
         if regs: mod.bloque(blq, registros=set(regs), lista=3, sin_textura='material', nodo_fijo=-256 - g)
     mod.luz = None
 
-def pon_agua(mod, agua, luz=None):
-    """el reflejo del agua de la etapa (conv_union.agua_de: bloque del cielo, registro de la primera capa, alfa +0x6C,
-    posiciones): sus mallas van en la lista 3 con el grupo 2 (-258 en el campo del nodo), la luz del entorno 0 como el
-    cielo (PROBABLE) y en el alfa del vertice el de 0x119fb8: (+0x6C >> 1) / 255 (As de ALPHA 9 = Cs + Cd x As). Solo la
-    primera capa (+0x60): las tres son la misma media esfera con la V desplazada (0,06 y 0,09) y el original ensena en
-    cada pixel una de ellas segun la mascara animada del alfa de destino, que la PowerVR no tiene (docs/PARIDAD.md, Agua)"""
-    blq, r, alfa = agua[:3]; mod.luz = luz; k0 = len(mod.mallas)
+def pon_agua(mod, agua):
+    """el agua de la etapa (conv_union.agua_de: bloque y registro del plano del descriptor +0x5C, alfa +0x6C,
+    posiciones): sus mallas van en la lista 3 con el grupo 2 (-258 en el campo del nodo) pero en el marco de la etapa
+    (no alrededor de la camara como el cielo: demo/main.c modelo_coloca), sin textura y en blanco: la Dreamcast pinta el
+    plano de un color con la niebla (agua_dibuja). En el original el plano solo escribe el alfa de la pantalla y el agua
+    que se ve es el reflejo pintado donde el plano lo deja (conv_union.agua_de); el color plano en su lugar es una
+    DESVIACION pedida por el usuario (docs/PARIDAD.md, Agua: el reflejo del original)"""
+    blq, r = agua[:2]; k0 = len(mod.mallas); v0 = len(mod.verts)
     mod.bloque(blq, registros={r}, lista=3, sin_textura='material', nodo_fijo=-258)
-    mod.luz = None
-    for v in mod.verts[k0:]: v['c'] = (np.uint32(alfa >> 1) << 24) | (v['c'] & 0xFFFFFF)
+    for x in mod.mallas[k0:]: x[1] = -1
+    for v in mod.verts[v0:]: v['c'] = 0xFFFFFFFF
 
 def convierte(seg, n, sal, mundo=None, cielo=True, luz=None, objetos=None, agua=None):
     """el segmento seg (numero n) a sal; mundo: transformacion al marco del curso (transforma). cielo: True (el bloque
@@ -573,10 +574,10 @@ def convierte(seg, n, sal, mundo=None, cielo=True, luz=None, objetos=None, agua=
     del entorno 1, la de la etapa; luz del entorno 0, la del cielo) del original (modelo.luz_entorno) o None.
     objetos: [(bloque, {registro})] de mas que la geometria de la etapa dibuja en su marco (conv_union.objetos_etapa:
     el registro de obj_course_obj_cs_<zona> con la pancarta CHECK POINT del principio y los carteles de las curvas).
-    agua: el reflejo del agua (conv_union.agua_de, pon_agua) o None"""
+    agua: el plano del agua (conv_union.agua_de, pon_agua) o None"""
     mod = modelo.Modelo()
     if isinstance(cielo, tuple): pon_cielo(mod, cielo, luz[1] if luz else None)
-    if agua is not None: pon_agua(mod, agua, luz[1] if luz else None)
+    if agua is not None: pon_agua(mod, agua)
     for blq in seg.bloques:
         if blq.o == seg.o:
             # el bloque principal (cs_CS_<zona>), con la tabla de nodos por secciones de la etapa

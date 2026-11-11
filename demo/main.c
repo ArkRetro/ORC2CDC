@@ -38,6 +38,7 @@
 /* ---------------------------------------------------------------- modelos */
 typedef struct { uint32_t w, h, fmt, lista, off, tam; } tex_t;
 typedef struct { float cx, cy, cz, r; uint32_t v0, n; int32_t tex; int32_t nodo; } malla_t;   /* nodo del original o -1 */
+#define AGUA_NODO (-258)                                         /* lista 3, grupo 2: el plano del agua (agua_dibuja) */
 typedef struct { float x, y, z, u, v; uint32_t c; } vert_t;
 /* nodo del original (tools/modelo.py): esfera, banderas (bits 0-3 umbral de LOD, bit 4 orientado a la camara, bits 8-9
    rama de la union: 1 izquierda, 2 derecha) y su cartel (matriz del nodo) o -1 */
@@ -269,7 +270,6 @@ static pvr_ptr_t ar_bloque; static uintptr_t ar_ini, ar_fin, ar_abajo, ar_arriba
 static uint32_t ar_max_abajo, ar_min_arriba;                     /* lo mas alto/bajo que ha llegado cada lado */
 static uint32_t vram_rebajadas, vram_fuera;                       /* texturas rebajadas y fuera de la zona (carrera) */
 static int cie_n;                                                 /* cabeceras del cielo guardadas (cielo_cab) */
-static int agua_n;                                                /* y las del reflejo del agua (agua_cabecera) */
 #ifdef DIAG_TRANS                                                 /* medida: camara lenta (DIAG_TRANS ms por cuadro) en los */
 static int dt_n, dt_pre; static const char *dt_que = "";          /* cuadros de alrededor de cada suceso del cambio de etapa */
 #define DT(q) do { if (dt_n < 6) { dt_n = 6; dt_que = q; printf("TR: suceso %s\n", q); } } while (0)
@@ -310,7 +310,7 @@ static void tex_suelta(modelo_t *m)
     if (m->tex0) { memcpy(m->texs, m->tex0, m->ntex * sizeof(tex_t)); free(m->tex0); }
     free(m->tv); free(m->tfl); free(m->cabs[0]); free(m->cabs[1]);
     m->tv = NULL; m->tfl = NULL; m->tex0 = NULL; m->cabs[0] = m->cabs[1] = NULL; m->lado = 0;
-    cie_n = agua_n = 0;                                           /* las direcciones se reutilizan: fuera las del cielo */
+    cie_n = 0;                                                    /* las direcciones se reutilizan: fuera las del cielo */
 }
 /* libera un modelo: texturas de la memoria de video, cabeceras y datos */
 static void libera_modelo(modelo_t *m)
@@ -1626,14 +1626,14 @@ static void ruta_recorta(uint32_t q)
 }
 /* coloca un modelo recien leido en el marco de la carrera: M = (x, y, z, giro y), como transforma de
    tools/conv_tramo.py (x' = x cos + z sen + x0, z' = -x sen + z cos + z0, y' = y + y0); el cielo (lista 3, alrededor
-   de la camara) solo gira. En la ruta: posicion, perfil y alturas exteriores (el resto son desvios). Lo hace el hilo
+   de la camara) solo gira; el plano del agua (lista 3, grupo 2: agua_dibuja) va en el marco de la etapa. En la ruta: posicion, perfil y alturas exteriores (el resto son desvios). Lo hace el hilo
    de carga, antes de dar el modelo por leido */
 static void modelo_coloca(modelo_t *m, const float *M)
 {
     float c = cosf(M[3]), sn = sinf(M[3]), x; uint32_t k, i, j, hechos = 0;
     for (k = 0; k < m->nmallas; k++) {
         malla_t *ma = m->mallas + k; vert_t *v = m->verts + ma->v0;
-        int cl = k >= m->inicio[3] && k < m->inicio[4];
+        int cl = k >= m->inicio[3] && k < m->inicio[4] && ma->nodo != AGUA_NODO;   /* el cielo; el agua no */
         float tx = cl ? 0 : M[0], ty = cl ? 0 : M[1], tz = cl ? 0 : M[2];
         if (malla_de_cartel(m, ma)) continue;                   /* en el marco de su nodo: se coloca su matriz */
         for (i = 0; i < ma->n; i++, v++) { x = v->x; v->x = x * c + v->z * sn + tx; v->z = -x * sn + v->z * c + tz; v->y += ty; }
@@ -4707,13 +4707,14 @@ static float dist_centro(const modelo_t *m, uint32_t i, const float *p)
     const float *a = m->ruta + m->paso_ruta * (i < m->nruta ? i : m->nruta - 1);
     return sqrtf((a[0] - p[0]) * (a[0] - p[0]) + (a[2] - p[2]) * (a[2] - p[2]));
 }
-/* mueve un modelo ya colocado (dx, dz) hacia atras: vertices y centros (salvo el cielo, que va con la camara) y ruta */
+/* mueve un modelo ya colocado (dx, dz) hacia atras: vertices y centros (salvo el cielo, que va con la camara; el agua
+   si) y ruta */
 static void modelo_desplaza(modelo_t *m, float dx, float dz)
 {
     uint32_t k, i;
     for (k = 0; k < m->nmallas; k++) {
         malla_t *ma = m->mallas + k; vert_t *v = m->verts + ma->v0;
-        if (k >= m->inicio[3] && k < m->inicio[4]) continue;
+        if (k >= m->inicio[3] && k < m->inicio[4] && ma->nodo != AGUA_NODO) continue;
         if (malla_de_cartel(m, ma)) continue;                   /* en el marco de su nodo */
         for (i = 0; i < ma->n; i++, v++) { v->x -= dx; v->z -= dz; }
         ma->cx -= dx; ma->cz -= dz;
@@ -5936,7 +5937,6 @@ static void cielo_grupo(const modelo_t *mo, int g, int l, float a, int niebla, i
     }
     color_mul = 0; cie_lleno = 0;
 }
-static void agua_dibuja(void);
 /* el cielo del cuadro en la lista l (como 4521C0: primero el nuevo, grupo 0 y 1; luego el viejo, grupo 1 y 0) */
 static void cielo_dibuja(int l)
 {
@@ -5955,82 +5955,21 @@ static void cielo_dibuja(int l)
             lx = cielo_lmax(mo, G[k], cie_a[Q[k]], lmin); if (lx > lmin) lmin = lx;
         }
     }
-    if (l == 2) agua_dibuja();                                  /* el reflejo del agua, encima del cielo */
 }
 
-/* ---------------------------------------------------------------- agua (docs/PARIDAD.md, Agua)
+/* ---------------------------------------------------------------- agua (docs/PARIDAD.md, Agua: el reflejo del original)
    El agua de SLES-53998 (0x11a2e8, llamada al final de la geometria de la etapa, 0x172b68): el plano del descriptor
-   +0x5C solo escribe el alfa de la pantalla (una mascara de ondas que se mueve) y las capas del reflejo (+0x60.., la
-   media esfera de abajo del banco del cielo con el paisaje reflejado, alrededor de la camara como el cielo) se pintan
-   encima sin z donde esa mascara lo deja, con ALPHA 9: Cs + Cd x As (As = (+0x6C >> 1) / 255, en el alfa de sus
-   vertices: tools/conv_tramo.py pon_agua). Se dibuja en la etapa con la posicion de carretera entre +0x6E y +0x70, y en
-   la union (car+5C != 0) pasada la posicion 0xC7 si +0x6E <= 0 (0x172b40 / 0x11a32c).
-   DESVIACION: la PowerVR a 16 bits no guarda el alfa de destino. El plano no se dibuja (en el original no pone color:
-   antes salia negro, su textura de 32x32 casi negra que el original cambia por la procedural) y de las capas se dibuja
-   la primera detras de toda la escena, como el cielo (lista transparente, z fija tras la del cielo, ONE / SRCALPHA),
-   recortada en el horizonte (y <= 0 en el marco del cielo: el plano esta siempre por debajo del ojo). Se ve donde no
-   hay nada delante: el agua que el plano cubria y lo de debajo del horizonte que no tapa la escena. */
-static pvr_poly_hdr_t agua_cab[8]; static uintptr_t agua_clave[8];   /* (agua_n: arriba) */
-static const pvr_poly_hdr_t *agua_cabecera(const modelo_t *mo, int i)
-{
-    pvr_poly_cxt_t cx; const tex_t *t = mo->texs + i; int k;
-    uint32_t fb = t->fmt & 0xff, vq = t->fmt & 0x100, n = ((t->fmt >> 16) & 0xff) + 1;
-    pvr_ptr_t dir = vq ? (pvr_ptr_t)((uintptr_t)mo->tv[i] - (2048 - 8 * n)) : mo->tv[i];
-    for (k = 0; k < agua_n; k++) if (agua_clave[k] == (uintptr_t)dir) return agua_cab + k;
-    if (agua_n == 8) agua_n = 0;
-    k = agua_n++;
-    pvr_poly_cxt_txr(&cx, PVR_LIST_TR_POLY, FMT[fb] | PVR_TXRFMT_TWIDDLED | (vq ? PVR_TXRFMT_VQ_ENABLE : 0), t->w, t->h, dir,
-                     PVR_FILTER_BILINEAR);
-    cx.gen.fog_type = PVR_FOG_DISABLE; cx.gen.culling = PVR_CULLING_NONE;
-    cx.blend.src = PVR_BLEND_ONE; cx.blend.dst = PVR_BLEND_SRCALPHA;   /* Cs + Cd x As */
-    cx.txr.env = PVR_TXRENV_MODULATEALPHA; cx.depth.write = PVR_DEPTHWRITE_DISABLE;
-    pvr_poly_compile(agua_cab + k, &cx);
-    agua_clave[k] = (uintptr_t)dir;
-    return agua_cab + k;
-}
-/* un poligono convexo (n <= 6 puntos) como tira: 0, 1, n-1, 2, n-2... */
-static void agua_poligono(const pt_t *o, int n, float z)
-{
-    int i, a = 1, b = n - 1;
-    if (n < 3 || !ta_cabe(n)) return;
-    cielo_envia(o, 0, z);
-    for (i = 1; i < n; i++) { cielo_envia(i & 1 ? o + a++ : o + b--, i == n - 1, z); }
-    tri_enviados += n - 2;
-}
-/* corta el poligono p (n <= 5 puntos) por d >= 0 (d de cada punto en dd); los puntos que quedan en o */
-static int agua_corta(const pt_t *p, const float *dd, int n, pt_t *o)
-{
-    int k, c = 0;
-    for (k = 0; k < n; k++) {
-        int j = (k + 1) % n, da = dd[k] >= 0, db = dd[j] >= 0;
-        if (da) o[c++] = p[k];
-        if (da != db) {
-            float t = dd[k] / (dd[k] - dd[j]);
-            o[c].x = p[k].x + t * (p[j].x - p[k].x); o[c].y = p[k].y + t * (p[j].y - p[k].y); o[c].w = p[k].w + t * (p[j].w - p[k].w);
-            o[c].u = p[k].u + t * (p[j].u - p[k].u); o[c].v = p[k].v + t * (p[j].v - p[k].v); o[c].c = p[k].c; o[c].o = 0; c++;
-        }
-    }
-    return c;
-}
-/* una malla del reflejo: cada triangulo recortado en y <= 0 (marco del cielo) y en w >= CIELO_CERCA */
-static void agua_malla(const modelo_t *mo, const malla_t *m, float z)
-{
-    const vert_t *v = mo->verts + m->v0; uint32_t i, n = m->n > 256 ? 256 : m->n; float ym[256];
-    for (i = 0; i < n; i++) {
-        float x = v[i].x, y = v[i].y, zz = v[i].z, w;
-        ym[i] = -y;                                             /* >= 0: por debajo del horizonte */
-        mat_trans_single3_nodivw(x, y, zz, w);
-        pw[i].x = x; pw[i].y = y; pw[i].w = w; pw[i].u = v[i].u; pw[i].v = v[i].v; pw[i].c = v[i].c; pw[i].o = 0;
-    }
-    for (i = 0; i + 2 < n; i++) {
-        pt_t a[4], b[6]; float dw[4]; int k, c;
-        if (ym[i] < 0 && ym[i + 1] < 0 && ym[i + 2] < 0) continue;
-        c = agua_corta(pw + i, ym + i, 3, a);
-        for (k = 0; k < c; k++) dw[k] = a[k].w - CIELO_CERCA;
-        agua_poligono(b, agua_corta(a, dw, c, b), z);
-    }
-}
-/* el reflejo del cuadro (lista transparente, tras el cielo: cielo_dibuja) */
+   +0x5C, en el marco de la etapa, solo escribe el alfa de la pantalla donde se ve (una mascara de ondas que se mueve) y
+   las capas del reflejo (+0x60.., la media esfera de abajo del banco del cielo con el paisaje reflejado) se pintan alli
+   (prueba del alfa de destino). Se dibuja en la etapa con la posicion de carretera entre +0x6E y +0x70, y en la union
+   (car+5C != 0) pasada la posicion 0xC7 si +0x6E <= 0 (0x172b40 / 0x11a32c).
+   DESVIACION pedida por el usuario (el reflejo sin la mascara del alfa de destino, que la PowerVR no tiene, "no queda
+   logrado"; prefiere una capa azul como el mar de BEAC): el plano (grupo 2 de la lista 3 en SEGnn.DAT, en el marco de la
+   etapa: tools/conv_tramo.py pon_agua) se pinta opaco y sin textura de AGUA_COLOR, con la z y la niebla de la tabla
+   como el resto de la escena. Ocupa lo que ocupa el agua en el original: lo que se ve del plano. El original no tiene
+   un color del agua (el plano no pone color y el reflejo es una imagen): AGUA_COLOR es el del mar de BEAC con el
+   reflejo de la demo 35, el que el usuario dio por bueno. */
+#define AGUA_COLOR 0xFF4064A3u
 static void agua_dibuja(void)
 {
     int nodo, pos, u, k; const modelo_t *mo = NULL; const etapa_t *e;
@@ -6043,12 +5982,13 @@ static void agua_dibuja(void)
     if (etapa.tv && etapa_nodo == nodo) mo = &etapa;
     else if (sig.tv && cur_sig == nodo) mo = &sig;
     if (!mo) return;
+    mat_load(&vista); color_fijo = AGUA_COLOR;
+    pvr_prim(&cab_col[0][0], sizeof(pvr_poly_hdr_t));          /* (sin textura, con la niebla de la tabla) */
     for (k = mo->inicio[3]; k < mo->inicio[4]; k++) {
         const malla_t *m = mo->mallas + k;
-        if (m->n < 3 || m->nodo != -258 || m->tex < 0) continue;
-        pvr_prim(agua_cabecera(mo, m->tex), sizeof(pvr_poly_hdr_t));
-        agua_malla(mo, m, 1.2e-4f * (1.0f + (float)cie_seq++ * (1.0f / 1024.0f)));
+        if (m->n >= 3 && m->nodo == AGUA_NODO) dibuja_malla(mo, m);
     }
+    color_fijo = 0;
 }
 
 /* Sol y destello: el de SLES-53998 (0x10f190, el 40CBC0 del PC con otras constantes), con SCN_EFC +0 & 2 y su
@@ -7581,13 +7521,6 @@ int main(int argc, char **argv)
        en la consola real un bufer u OPB lleno cuelga el TA. Modificadores opacos (la sombra del coche, sombra_dibuja)
        con bloques de 8 y translucidos de 16 a 8: el OPB ocupa lo mismo que antes (64 palabras por tesela). Cuentas en
        docs/DREAMCAST.md */
-    /* la prueba de alfa de la lista de recorte, como la del original: el TEST_1 del GS de los materiales con prueba de
-       alfa (los 888 de PALM, LAKE, INDU, SNOW, METR y BEAC: ATST GEQUAL, AREF 0x40 con 0x80 = 1) deja pasar el alfa
-       filtrado >= 0,5. La PowerVR arranca con PT_ALPHA_REF = 0xFF (KallistiOS no lo cambia): solo pasaba el alfa 1 tras
-       el filtro bilineal y el borde de las texturas de 1 bit (tools/modelo.py: el umbral de AREF ya va en el texel)
-       salia en escalones de un texel, medio texel hacia dentro (los montes de fondo de LAKE junto a la bifurcacion:
-       una franja a escalones sobre el horizonte; las hojas de los arboles) */
-    PVR_SET(PVR_PT_ALPHA_REF, 0x80);
     pvr_init_params_t pp = { { PVR_BINSIZE_32, PVR_BINSIZE_8, PVR_BINSIZE_8, 0, PVR_BINSIZE_16 }, TA_VB_BYTES, 0, 0, 0, 4 };
     int estado = TITULO, auto_ = 0, ver = VER, pausa = 0, l, i, r;
     int reintenta = 0;                                          /* REINTENTAR del menu de pausa: salida otra vez */
@@ -7634,6 +7567,13 @@ int main(int argc, char **argv)
     fsp_hueco = hueco_fsp;
     /* 2: PowerVR, texturas a la memoria de video y cabeceras */
     pvr_init(&pp);
+    /* la prueba de alfa de la lista de recorte, como la del original: el TEST_1 del GS de los materiales con prueba de
+       alfa (los 888 de PALM, LAKE, INDU, SNOW, METR y BEAC: ATST GEQUAL, AREF 0x40 con 0x80 = 1) deja pasar el alfa
+       filtrado >= 0,5. La PowerVR arranca con PT_ALPHA_REF = 0xFF (KallistiOS no lo cambia): solo pasaba el alfa 1 tras
+       el filtro bilineal y el borde de las texturas de 1 bit (tools/modelo.py: el umbral de AREF ya va en el texel)
+       salia en escalones de un texel, medio texel hacia dentro (los montes de fondo de LAKE junto a la bifurcacion:
+       una franja a escalones sobre el horizonte; las hojas de los arboles) */
+    PVR_SET(PVR_PT_ALPHA_REF, 0x80);
     pvr_set_shadow_scale(true, SOMBRA_ESCALA);                  /* lo que queda dentro de la sombra del coche */
     pvr_set_bg_color(0.45f, 0.65f, 0.95f);
     txt_arr = pvr_mem_malloc(sizeof buf_arr); txt_cen = pvr_mem_malloc(TAM_CEN);
@@ -8355,6 +8295,7 @@ int main(int argc, char **argv)
                         dibuja_rango(tramos[i], l, tramos[i]->inicio[l], tramos[i]->inicio[l + 1], 1, 0, 0);
                     }
                 color_fijo = 0; ta_en_etapa = 0;
+                if (l == 0) agua_dibuja();                      /* el plano del agua (0x11a2e8, tras la etapa) */
                 PRF(3);
                 bo_dibuja(l);                                   /* pajaros y demas de la union (4A9DF0) */
             }

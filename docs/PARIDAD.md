@@ -2568,6 +2568,28 @@ Arreglo (tools/conv_union.py `agua_de` / `agua_campos`, tools/conv_tramo.py `pon
 - Datos: los 38 SEGnn.DAT con agua y CURSO.DAT regenerados; las uniones no cambian (el agua es del descriptor de
   etapa).
 
+Cambio (2026-11-11, tras la demo 35 en la consola real): DESVIACION pedida por el usuario. El reflejo sin la mascara
+"no queda logrado" (el paisaje reflejado entero, sin ondas, encima de lo que deja ver la escena); prefiere "una capa
+azul como el mar" (el de BEAC, que dio por bueno). Ahora:
+- En lugar del reflejo va el plano del agua del descriptor +0x5C (el registro de obj_course_obj_cs_<zona>, en el
+  marco de la etapa: LAKE 122 vertices a y = -99, BEAC 368 a y = -51, SANF 214...) como grupo 2 de la lista 3 de
+  SEGnn.DAT, sin textura (tools/conv_union.py `agua_de`, tools/conv_tramo.py `pon_agua`). demo/main.c lo coloca y lo
+  mueve con la etapa (`modelo_coloca` / `modelo_desplaza`: el resto de la lista 3, el cielo, sigue alrededor de la
+  camara) y `agua_dibuja` lo pinta en la lista opaca tras la geometria de la etapa (como 0x172b68 -> 0x11a2e8), con la
+  z, la niebla de la tabla y la sombra del coche como el resto de la escena, en las mismas posiciones de carretera que
+  el original (+0x6E / +0x70; en la union pasada la 0xC7 si +0x6E <= 0).
+- Se ve justo donde se ve el agua del original: lo que el plano deja ver de la escena (en el original esos pixeles
+  llevan el reflejo; lo que tapa el plano, las orillas hundidas, tampoco se ve alli). Lo que queda delante (las
+  mallas del lago de LAKE, a -95..-98) se ve como siempre.
+- Color: el original no tiene un color del agua (el plano no pinta color, FBMSK 0x00FFFFFF, y el reflejo es una
+  imagen distinta por zona: por ejemplo noche en METR, desierto en DESE). AGUA_COLOR (demo/main.c) = 0x4064A3, el
+  azul del mar de BEAC con el reflejo en la demo 35 (mediana de su superficie en la captura de Flycast: 64, 100,
+  163), el que el usuario aprobo; la niebla de la etapa lo aclara con la distancia como a lo demas.
+- Datos: los 38 SEGnn.DAT con agua (el plano en lugar de la capa del reflejo; sin la textura de esta) y SEGS.PAK;
+  CURSO.DAT no cambia. SEG03 regenerada con estas herramientas: igual que la anterior salvo el grupo 2 (31 tiras, 122
+  vertices, sin textura) y 4 texturas menos (las del reflejo); misma ruta, nodos, carteles y visibilidad. Flycast: el
+  lago de LAKE a la izquierda de la salida y bajo el puente, azul y sin negro, 0 Out of memory.
+
 ## Bifurcaciones: franja a escalones sobre el horizonte (2026-11-11)
 
 Queja del usuario (demo 35, consola real): "en el cielo de algunas bifurcaciones hay texturas que se mezclan y no se

@@ -82,23 +82,25 @@ def objetos_etapa(A, d0):
 
 def agua_de(A, d0):
     """el agua de la etapa del descriptor d0 (solo SLES-53998; el PC no tiene estos campos: su descriptor sigue en
-    +0x5C con lo que en el PS2 va en +0x72): +0x5C el plano del agua (obj_course_obj_cs_<zona>), +0x60 / +0x64 / +0x68
-    las tres capas del reflejo (registros 3, 4 y 5 de obj_course_obj_sky_<zona>, la media esfera de abajo con el
-    paisaje reflejado), byte +0x6C el alfa de las capas y +0x6E / +0x70 (s16) las posiciones de carretera en las que se
-    dibuja. Codigo: 0x11a1a8 al cargar la etapa (0x119ea8 cambia el material del plano: textura de agua procedural, ALPHA
-    Cs, sin mip; 0x119fb8 el de las capas: alfa (+0x6C >> 1) / 255, ALPHA 9 = Cs + Cd x As, TEST con DATE) y 0x11a2e8
-    cada cuadro desde la geometria de la etapa (0x172b68): el plano escribe solo el alfa de la pantalla (FBMSK
-    0x00FFFFFF, tabla 0x32b3b0[8]) y cada capa del reflejo se dibuja sin z donde ese alfa tiene el bit 7 (DATE / DATM 1),
-    solo RGB (FBMSK 0xFF000000); entre capa y capa 0x11a800 rota el alfa (0x80 -> 0x20 -> 0x40) con la paleta de la
-    textura +0x10. Devuelve None sin agua o (bloque del cielo, registro de la primera capa, alfa +0x6C, p0, p1)
-    (docs/PARIDAD.md, Agua: la Dreamcast dibuja solo la primera capa, ver alli)"""
+    +0x5C con lo que en el PS2 va en +0x72): +0x5C el plano del agua (registro de obj_course_obj_cs_<zona>, en el marco
+    de la etapa), +0x60 / +0x64 / +0x68 las tres capas del reflejo (registros 3, 4 y 5 de obj_course_obj_sky_<zona>, la
+    media esfera de abajo con el paisaje reflejado), byte +0x6C el alfa de las capas y +0x6E / +0x70 (s16) las
+    posiciones de carretera en las que se dibuja. Codigo: 0x11a1a8 al cargar la etapa (0x119ea8 cambia el material del
+    plano: textura de agua procedural, ALPHA Cs, sin mip; 0x119fb8 el de las capas: alfa (+0x6C >> 1) / 255, ALPHA 9 =
+    Cs + Cd x As, TEST con DATE) y 0x11a2e8 cada cuadro desde la geometria de la etapa (0x172b68): el plano escribe solo
+    el alfa de la pantalla (FBMSK 0x00FFFFFF, tabla 0x32b3b0[8]: su color no llega a la pantalla) y cada capa del
+    reflejo se dibuja sin z donde ese alfa tiene el bit 7 (DATE / DATM 1), solo RGB (FBMSK 0xFF000000); entre capa y
+    capa 0x11a800 rota el alfa (0x80 -> 0x20 -> 0x40) con la paleta de la textura +0x10. El agua del original es lo que
+    el plano deja ver de la escena, pintado con el reflejo. Devuelve None sin agua o (bloque del plano, su registro,
+    alfa +0x6C, p0, p1): la Dreamcast dibuja el plano de un color (DESVIACION pedida por el usuario, docs/PARIDAD.md,
+    Agua: el reflejo del original)"""
     import conv_coche
     E = A.elf; c = agua_campos(A, d0)
     if c is None: return None
-    v6 = u32(E, d0 + 0x60)
-    ruta = E.cadena(u32(E, conv_coche.recursos(A) + 4 * (v6 >> 16)))
+    v5 = u32(E, d0 + 0x5c)
+    ruta = E.cadena(u32(E, conv_coche.recursos(A) + 4 * (v5 >> 16)))
     ruta = ruta[len('\\Stage'):] if ruta.lower().startswith('\\stage\\') else ruta
-    return (A.bloque(A.entrada('STAGE.PS2', ruta)), v6 & 0xffff) + c
+    return (A.bloque(A.entrada('STAGE.PS2', ruta)), v5 & 0xffff) + c
 
 def agua_campos(A, d0):
     """(alfa +0x6C, p0 +0x6E, p1 +0x70) del agua de la etapa del descriptor d0 (agua_de), None sin agua"""
