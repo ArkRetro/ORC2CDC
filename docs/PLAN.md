@@ -34,7 +34,8 @@ en las cargas del curso (sin huecos fijos) y 5 combinaciones "union + LASV" que 
    la voz de la meta.
 2. OUTRUN2SP elegible en el menu (HECHO 2026-11-11: arbol 1, preset 1, [780260] = 0 y sus reglas; el frontal de
    recreativa SELECTOR_CVT, el final, la entrada de nombre y los rankings de OUTRUN2SP siguen
-   SIN PORTAR: PARIDAD.md, OUTRUN2SP; la pantalla de carga y el GAME OVER de ABANDONAR, HECHOS). Vista interior. Saltos. Bonus de puntuacion que faltan.
+   SIN PORTAR: PARIDAD.md, OUTRUN2SP; la pantalla de carga, el GAME OVER (27) de la pausa, la meta y el fin del
+   tiempo, la salida en (0, -16) con el banderero visible y el trafico de las etapas al reves, HECHOS). Vista interior. Saltos. Bonus de puntuacion que faltan.
 
 ## Fase 4. COAST 2 COAST
 1. Menu de categorias y mapa de misiones (con la chica). 2. Misiones de carrera con rivales (IA, choques).
