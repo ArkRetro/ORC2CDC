@@ -6257,18 +6257,31 @@ static int pt_visible(void)
    0). Aqui: el punto de la ruta cuya perpendicular pasa por (0, -16) de la etapa de salida (su marco es el del mundo al
    empezar, curso_reinicia) y el desvio hasta el. En PALM cae en el carril 3 del trafico del original (los 6 carriles
    de la etapa 0 van al principio por esa calzada). Antes: 100 m y 11,5 m a la derecha, la otra calzada (inventado) */
-static float salida_s_, salida_x_;
+/* El punto de cruce se afina entre los dos pasos de 0,25 m y el coche mira a -z (rumbo 0 en el mundo; salida_a_ es su
+   giro respecto de la ruta): en PALM la ruta va recta por -z y no cambia nada; en BEAC (arbol 1) la ruta llega en curva
+   a la salida y el coche quedaba 8 m mas alla de (0, -16) y torcido 14 grados, con el banderero de OUTRUN2SP (5 m por
+   delante, 0x40ef88) detras de el */
+static float salida_s_, salida_x_, salida_a_;
+static float salida_delante(float s)                            /* (0, -16) por delante del punto s de la ruta */
+{
+    float p[3], th; ruta_en(s, p, &th, NULL, NULL);
+    return (0.0f - p[0]) * sinf(th) + (-16.0f - p[2]) * -cosf(th);
+}
 static void salida_calcula(void)
 {
-    float s, p[3], th, a0 = 0, a, ss = 0;
+    float s, p[3], th, a0 = 0, a, ss = 0, lo, hi; int k;
     for (s = s_base; s < s_base + 400.0f && s < longitud; s += 0.25f) {
-        ruta_en(s, p, &th, NULL, NULL);
-        a = (0.0f - p[0]) * sinf(th) + (-16.0f - p[2]) * -cosf(th);   /* por delante del punto de la ruta */
+        a = salida_delante(s);
         if (s > s_base && a0 > 0 && a <= 0) { ss = s; break; }
         a0 = a;
     }
+    if (ss > s_base) for (lo = ss - 0.25f, hi = ss, k = 0; k < 24; k++) {
+        float m = 0.5f * (lo + hi);
+        if (salida_delante(m) > 0) lo = m; else hi = m;
+        ss = hi;
+    }
     ruta_en(ss, p, &th, NULL, NULL);
-    salida_s_ = ss; salida_x_ = (0.0f - p[0]) * cosf(th) + (-16.0f - p[2]) * sinf(th);
+    salida_s_ = ss; salida_x_ = (0.0f - p[0]) * cosf(th) + (-16.0f - p[2]) * sinf(th); salida_a_ = dif_ang(0.0f - th);
 }
 #ifndef SALIDA
 #define SALIDA salida_s_
@@ -7506,7 +7519,7 @@ int main(int argc, char **argv)
                    -> 28 -> el frontal de recreativa (10; SIN PORTAR: vuelve al menu) */
                 menu_suma_tiempo(crono);                        /* tiempo de juego (PS2 0x249c5c / 0x24a110) */
                 if (rp == PAUSA_REINTENTA) { estado = TITULO; reintenta = 1; }
-                else { fin_game_over(); fin_on = 1; estado = FIN; t_estado = 0; }
+                else { fin_game_over(FIN_PAUSA_ABANDONA); fin_on = 1; estado = FIN; t_estado = 0; }
             } else if ((rp == PAUSA_REINTENTA || rp == PAUSA_ABANDONA) && !auto_) {
                 menu_suma_tiempo(crono);                        /* tiempo de juego (PS2 0x249c5c / 0x24a110) */
                 /* con la consola (1b4878 = 43F860) los dos piden el modo 0x22 (OutRun Miles) con 450230(6) / (7) y la
@@ -7593,8 +7606,9 @@ int main(int argc, char **argv)
 #ifdef PRUEBA_X
                 yo.x = PRUEBA_X;                                /* prueba: salida en otro desvio (p.ej. la hierba) */
 #endif
+                yo.a = salida_a_;                               /* mirando a -z (4A6ED0: +2C/+2E/+30 = 0) */
                 coche_paso(&yo, 0, 0, 0, 0); traf_inicia(SALIDA); efectos_borra();
-                if (fis_ok) { float p[3], th; ruta_en(yo.s, p, &th, NULL, NULL); or2_coloca(&fis, &fpar, th, 0); }
+                if (fis_ok) { float p[3], th; ruta_en(yo.s, p, &th, NULL, NULL); or2_coloca(&fis, &fpar, th + yo.a, 0); }
                 lejos = LEJOS_PS2; entorno_reinicia(); niebla_paso(); niebla_pon();   /* la distancia del original */
                 tim_cuadros = tim_zona(cur_nodo, etapa_n); tiempo = tim_cuadros / TIM_HZ; estado = CUENTA; t_estado = 0; t_cuenta = -60; salida_entra(); pausa = 0; crono = 0; pt_inicia(); fin_carrera_empieza();
                 reintenta = 0;
@@ -7836,11 +7850,11 @@ int main(int argc, char **argv)
                 estado = TITULO; auto_ = 0; nuevo = 0; texto_centro(""); hud_baja_tex(); menu_entra(manual_, pista, NPISTAS);
             } else if (!fin_on && juego_sp && t_estado > (uint32_t)fin_t) {
                 /* el juego de OUTRUN2SP: sin millas ni continuar (49CFD0 y 49D850 con 1b4878 = 0): meta 19 -> 33 -> 24
-                   (final de recreativa, AS.PS2) -> nombre (26) y rankings; tiempo agotado 20 -> 0x19; luego 28 -> el
-                   frontal de recreativa (10). SIN PORTAR: de aqui al menu */
+                   (final de recreativa, AS.PS2) -> 25 (resultados) -> 27; tiempo agotado 20 -> 25 -> 26 (nombre) -> 27;
+                   GAME OVER 27 con la escena 34001F, luego 28 -> el frontal de recreativa (10). 24, 25 y 26 SIN PORTAR:
+                   directo al 27; del 28 al menu */
                 menu_suma_tiempo(crono);                        /* (PS2 0x1b96bc / 0x1b9b58: tambien en este juego) */
-                meta_sale(); lejos_obj = lejos = LEJOS_PS2;
-                estado = TITULO; nuevo = 0; texto_centro(""); hud_baja_tex(); menu_entra(manual_, pista, NPISTAS);
+                fin_game_over(estado == META ? FIN_META : FIN_TIEMPO); fin_on = 1;
             } else if (!fin_on && t_estado > (uint32_t)fin_t) {
                 menu_suma_tiempo(crono);                        /* salida de la meta / del fin del tiempo (PS2 0x1b96bc / 0x1b9b58) */
                 fin_empieza(estado == META ? FIN_META : FIN_TIEMPO); fin_on = 1;   /* 33 (sin red) -> 34 / 20 -> 34 */

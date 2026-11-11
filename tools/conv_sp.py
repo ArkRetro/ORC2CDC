@@ -46,8 +46,12 @@ def grupo_escena(hud, nombre, A, T, bk, k, n=None, x=0, y=0, capa=1):
         else: lst[-1][2] += 1
     at = ch.Atlas(); at.prefijo = 'sp_' + nombre; cl = []
     vis = lambda ps: [p for p in ps if p['alfa'] >= 0.004 and abs(np.linalg.det(p['M'][:2, :2])) >= 1e-6]
+    def grande(p):                                              # no cabe en una textura del atlas (512x256 / 256x512):
+        l, t, r, b = p['src']; w, h = r - l, b - t              # va con su textura de origen entera (fondos)
+        return not ((w <= 510 and h <= 254) or (w <= 254 and h <= 510))
     for _, ps, _ in lst:
         for p in vis(ps):
+            if grande(p): continue
             b2, T2 = (p['bk'], p['tx']) if 'bk' in p else (bk, T)
             at.registra(b2, T2, p); cl.append(at._clave(b2, p))
     t0 = len(hud.tex); pl = at.plan(cl); at.empaqueta(hud, pl)
@@ -56,9 +60,9 @@ def grupo_escena(hud, nombre, A, T, bk, k, n=None, x=0, y=0, capa=1):
     g = hud.grupo(nombre, n)
     for c, ps, nf in lst:
         k0 = len(hud.pie)
-        for p in ps:
+        for p in vis(ps):
             b2, T2 = (p['bk'], p['tx']) if 'bk' in p else (bk, T)
-            hud.piezas_escena(g, c, b2, T2, [p], atlas=at)
+            hud.piezas_escena(g, c, b2, T2, [p], atlas=None if grande(p) else at)
         v = vis(ps)
         assert len(v) == len(hud.pie) - k0
         for j, p in zip(range(k0, len(hud.pie)), v):            # cuadros que abarca y capa aditiva

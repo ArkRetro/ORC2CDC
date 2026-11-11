@@ -24,7 +24,9 @@
      10; m += 84BCF8 (por etapa: 4EF460 +25 / +10 / +10 / +25 / +15 / +15 por cada estadistica limpia y 4EF440 40 por
      segundo por debajo de 60, desde 4F2B20); fuera de red m += (car+E78 / 60) x 5 (car+E78: veces que el rebufo
      encontro un coche mejor, CheckSlipStream) y car+E78 = 0.
-   - OUTRUN2SP (1b4878 = 0): ABANDONAR de la pausa va directo al modo 27 (fin_game_over) con la misma escena 2C000B.
+   - OUTRUN2SP (1b4878 = 0): el modo 27 (fin_game_over) desde ABANDONAR de la pausa con la misma escena 2C000B y tras la
+     meta (19 -> 33 -> 24 -> 25 -> 27) o el fin del tiempo (20 -> 25 -> 26 -> 27) con la escena 34001F (GOVSP.DAT); el
+     final de recreativa (24), los resultados (25) y la entrada de nombre (26) estan SIN PORTAR (se pasa directo al 27).
    SIN PORTAR: la bandera 84BCFC y su suma (las tablas de records no estan en el port: nunca se pone), las variantes 4
    (red) y 6 (misiones de C2C: 4EF550 con 496510 / 495890, otros tokens en el modo 35), la espera de la muestra 0x1a1 de
    los modos 34 (pausa) y el bloqueo de botones del modo 35 (+0x5E0 del objeto 0x375068, PC +0x518 de 4035F0: sin
@@ -132,29 +134,32 @@ static void a_continuar(void)                           /* 0x1bc650 */
     if (fd) sube(u_preg);
     t_preg = 0;
 }
+static int go_sp;                                       /* 0x1a0508..0x1a052c: 1b4878 = 0 y 450240 != 7 -> 34001F */
 static void a_game_over(void)                           /* 0x1bafc8 */
 {
     baja(u_millas); baja(u_cifra[0]); t_panel = -1;
     fase = 27; t_fase = 0; t_temp = M27_CUADROS; voz_go = 1;
     dbglog(DBG_INFO, "FIN: modo 27 (GAME OVER)\n");
-    abre("GOVER.DAT");
-    u_go = fd ? hudd_uso(fd, "GAME_OVER") : -1;
+    abre(go_sp ? "GOVSP.DAT" : "GOVER.DAT");
+    u_go = fd ? hudd_uso(fd, go_sp ? "GAME_OVER_SP" : "GAME_OVER") : -1;
     n_go = fd && u_go >= 0 ? hudd_cuadros(fd, u_go) : 1;
     if (fd) sube(u_go);
     t_go = 0;                                           /* 0x1a04f0: el GAD crea la escena y dice la voz una vez */
     if (voz_go) { voz_go = 0; sfx_voz(0x954); }
 }
 
-/* OUTRUN2SP (1b4878 = 0): ABANDONAR de la pausa pide el modo 27 directamente (0x24a150, 450230(7)); con 450240 = 7 el GAD
-   crea la misma escena 2C000B que la consola (0x1a051c; 34001F es la de los demas finales de este juego) */
-void fin_game_over(void)
+/* OUTRUN2SP (1b4878 = 0): el modo 27 desde ABANDONAR de la pausa (0x24a150, 450230(7): con 450240 = 7 el GAD crea la
+   misma escena 2C000B que la consola, 0x1a051c) o tras la meta / el fin del tiempo (450240 = 2 / 1: la escena 34001F
+   del banco 0x34, GOVSP.DAT) */
+void fin_game_over(int c)
 {
     int i;
     hud_baja_tex(); hudd_vacia();
     u_millas = u_preg = u_elige = -1;
     for (i = 0; i < 8; i++) u_cifra[i] = -1;
-    como = FIN_PAUSA_ABANDONA;
+    como = c; go_sp = c != FIN_PAUSA_ABANDONA;
     a_game_over();
+    go_sp = 0;
 }
 
 int fin_paso(uint32_t nuevo)

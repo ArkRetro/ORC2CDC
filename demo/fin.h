@@ -21,7 +21,7 @@ void fin_etapa(const int limpio[6], int segundos);  /* 4EF460 / 4EF440 (PS2 0x1f
 void fin_entra(int como, const fin_carrera_t *c);   /* 49B470 (modo 34) */
 int  fin_paso(uint32_t nuevo);                      /* un paso de logica (botones nuevos de CONT_*); FIN_* */
 void fin_dibuja(void);                              /* dentro de la lista TR, encima de todo */
-void fin_game_over(void);                           /* OUTRUN2SP: ABANDONAR de la pausa -> modo 27 */
+void fin_game_over(int como);                        /* OUTRUN2SP: modo 27 (como: FIN_*) */
 void fin_sale(void);                                /* suelta FIN.DAT / GOVER.DAT (y su VRAM) */
 int  fin_activo(void);
 #endif

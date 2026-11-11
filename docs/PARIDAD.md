@@ -1931,25 +1931,52 @@ etapas, salida BEAC`, BAND1.DAT en el hueco de la union; RAM libre 1419..1490 KB
 - HECHO: la entrada del menu principal, el arbol 1, preset 1 y [780260] = 0 con todas las reglas de la tabla de
   arriba. Fin: sin millas ni continuar (los de la consola, demo/fin.c, no son de este juego: 49CFD0 / 49D850 con
   43F860 = 0); tras la escena de la meta (EAST: escena 1 del preset 1, musica 66, verificado con el piloto desde el
-  menu real) o el fin del tiempo vuelve al titulo sumando el crono a la licencia (0x1b96bc / 0x1b9b58); en la pausa
+  menu real) o el fin del tiempo suma el crono a la licencia (0x1b96bc / 0x1b9b58) y pasa al GAME OVER del modo 27
+  (HECHO 2026-11-11): el GAD (0x1a04f0) con 1b4878 = 0 y 450240 != 7 crea la escena 34001F (banco 0x34 ROUTE_CVT,
+  "Fin de la partida" sobre las palmeras, capa 0, modo 1; tools/conv_sp.py -> GOVSP.DAT, 240 cuadros = los 0xF0 pasos
+  del modo), la voz 0x954 una vez y al acabar el modo 28 -> el menu. El original pasa antes por el final de recreativa
+  (24, solo tras la meta), los resultados (25: suceso 0x188, funcion 0x15 / 0x50, banco 0x34) y la entrada de nombre
+  (26, solo con 450240 = 1: el fin del tiempo): SIN PORTAR, se salta directo al 27; en la pausa
   REINTENTAR es el modo 30 (la salida otra vez) y ABANDONAR el modo 27 GAME OVER (HECHO 2026-11-11, fin_game_over de
   demo/fin.c: la carrera suspendida y, con 450240 = 7, la escena 2C000B de la consola, 0x1a051c; 0xF0 pasos y la voz
   0x954) y despues al menu (el frontal de recreativa, modo 10, SIN PORTAR).
-- PENDIENTE de comprobar a ojo: el banderero del preset 1 (BAND1.DAT, "BAND: preset 1, en su sitio": (-4,5, 0, -21)
-  girado 180 grados, movimiento 0x170004) no se distingue en las capturas de la salida de BEAC (tampoco con el modelo
-  de BAND.DAT en esa posicion; con el preset 0 en PALM si se ve): por investigar si es la posicion en el marco de la
-  etapa (PROBABLE) o el dibujo.
+- Banderero del preset 1 (BAND1.DAT: (-4,5, 0, -21) girado 180 grados, movimiento 0x170004) que no se veia en la
+  salida de BEAC: CORREGIDO 2026-11-11, era la salida del coche. 0x2046f0 lo pone en el mundo sin marco (T(0x40ef88 +
+  preset x 12), Rz Ry Rx de 0x40f008), 5 m por delante del coche, que 4A6ED0 pone en (0, 0, -16) mirando a -z. La demo
+  tomaba el paso de 0,25 m de la ruta donde (0, -16) queda de lado y el rumbo de la ruta alli: en PALM la ruta va recta
+  por -z (igual), pero en BEAC llega en curva y el coche quedaba en (1,9, -23,8) torcido 14 grados, ya pasado el
+  banderero. Ahora el cruce se afina entre los dos pasos (biseccion) y el coche sale mirando a -z (yo.a = -rumbo de la
+  ruta, or2_coloca con rumbo 0 en el mundo; salida_calcula / salida_a_ en demo/main.c).
 - PROVISIONAL: el frontal de recreativa de OUTRUN2SP (SELECTOR_CVT) no esta portado; en su lugar se pasa por las
   pantallas de coche, cambio y musica del menu de la consola y se corre la eleccion OUTRUN con los cursos de OutRun 2
   SP (una de las del frontal). B en el coche vuelve al menu principal.
-- SIN PORTAR: el frontal de recreativa (las 12 funciones del suceso 4 de arcade_attract.cpp con sus tablas del ELF
-  de PS2 por localizar: 5C8BE0 secuencia, 689DA8 filas del tipo de juego, 5C8D00 musica, 5C9204 rutas, y la
-  conversion de SELECTOR_CVT), y con el los modos INFARTO / CONTRARRELOJ y los cursos OutRun 2 / de 15 niveles de
-  OUTRUN2SP; el final de recreativa (modo 24, AS.PS2), la entrada de
-  nombre (modo 26) y los rankings de OUTRUN2SP; el GAME OVER del modo 27 al abandonar; la vuelta al frontal de
-  recreativa (modo 10) en vez de al menu de la consola; las tablas de aparicion de las etapas al reves (SEG35, 51, 64,
-  65 y las de los descriptores 30..59: el ELF las deja fuera del fichero, las rellena el juego al correr) quedan sin
-  trafico en TAPD.DAT.
+- SIN PORTAR: el frontal de recreativa (las 12 funciones del suceso 4 de arcade_attract.cpp y la conversion de
+  SELECTOR_CVT: 96 escenas, 238 texturas, con el coche 3D de la eleccion), y con el los modos INFARTO / CONTRARRELOJ y
+  los cursos OutRun 2 / de 15 niveles de OUTRUN2SP. Localizado en SLES-53998 (2026-11-11): la tabla de funciones del
+  suceso 4 (PC 59BE78) en 0x3ee7b4, 12 registros de 5 palabras {init, control, dibujo, 0, fin}: 1 = 0x213c20 /
+  0x213d30 / 0x213d60 / 0x213d68, 2 = 0x213db8.., 3 = 0x214760.., 4 = 0x214d10.., 5 = 0x214f50 / 0x215228 / 0x216048 /
+  0x216070, 6 = 0x211fb8 / 0x213138 / 0x213510 / 0x2135d8, 7 = 0x213680.., 8 = 0x2160b8.., 9 = 0x2164c0.., 10 =
+  0x2170e0.., 11 = 0x2176d0 / 0x217cc0 / 0x217cd0 / 0x217cd8, 12 = 0x210ee0 / 0x210f30 / 0x211090 / 0x2110b8 (la
+  0x210f30 es 4C2B70 linea a linea: escena 2E004E, 0x79 cuadros); la secuencia (PC 5C8BE0) en 0x4126a0 = {0xB, 5, 6,
+  -1, 4, 2, 8, 9, 0xA, 0, ...}; las filas {token, primero, ultimo} (PC 5C7170) desde 0x410c30; 16 punteros de la musica
+  (PC 5C8D00) en 0x4127c0 y los registros de la eleccion (PC 5C91DC..) desde 0x412800. El banco 0x2E y su XST
+  (spr_sprani_selector_cvt_sxst, una entrada mas alla en SPRITE.PS2: conv_hud.Disco.banco ya lo tiene en cuenta) se
+  leen bien; el final de recreativa (modo 24, AS.PS2), la entrada de
+  nombre (modo 26), los resultados (modo 25) y los rankings de OUTRUN2SP; la vuelta al frontal de recreativa (modo 10)
+  en vez de al menu de la consola.
+- Etapas al reves (descriptores 30..59; SEG34..SEG65), HECHO 2026-11-11: sus tablas de aparicion y de velocidad (+0x80
+  / +0x84) estan en el ELF; lo que el ELF deja en la BSS son sus listas de puntos fijos (4EF880: 0x5d6028..), y por eso
+  conv_trafico.py daba el registro entero vacio (sin trafico). Las rellena la rutina 0x1f2110 (la llama la puesta a cero
+  del trafico, 46C950 = PS2 0x1d9e30): copia las listas de .data (0x36c020..) a la BSS y despues, para cada etapa s de 0
+  a 0x41, pone a 0 el usado (+0x14) y, si 30 <= s < 60, da la vuelta a sus puntos: posicion = 1 + [descriptor + 0x96]
+  (1772E8 = 0x1772e8) - posicion, carril = 5 - carril. conv_trafico.py la localiza (la funcion que llama a 4EF880) y la
+  ejecuta con tools/ps2/mips.py (interprete minimo del R5900): TAPD.DAT con las tablas de las 32 etapas al reves. Sus
+  puntos fijos conservan la etapa de ida (0..29) en el campo +0: 478B90 solo toma los de la etapa actual (44DC50, el
+  descriptor) salvo con la red o los rivales (F12), asi que sin red no salen (0 en TAPD: PROBABLE que 44DC50 de 30..59
+  en esas etapas, como da ti en las de ida).
+- Camiones (modelos 39..43, clases 0..2): SIN PORTAR. Su registro de 4866C0 trae un segundo descriptor (el remolque)
+  en cada LOD, que 4AE0F0 / 4ADBC0 (race_ghost_car.cpp, d.model) dibuja con su propia matriz articulada: conv_trafico.py
+  para en "remolque (segundo descriptor) sin portar". Hasta portarlo esos coches se gastan sin coche (como antes).
 - Encontrado de paso (juego de la consola, sin corregir aqui): 487EE0 / 487F50 con 43F860 != 0 eligen el piloto y la
   acompanante por la licencia (+0x20, tablas 6549B0 / 6AF268 / 6549C8); la demo usa siempre los de OUTRUN2SP (0xB y 9)
   tambien en los modos de la consola (conv_chr.py decia que 0x59acac era la bandera de la red: es la de la consola).

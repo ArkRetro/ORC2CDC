@@ -30,7 +30,9 @@ Ademas TRAFC.DAT con lo que el juego sabe de cada modelo de trafico, sacado del 
   'CJM1' + u32 30 + por modelo del jugador 0..29 el mismo registro que TRC1 (clase 5, radio y caja de 520950).
   'SEC1' + 16 u32: efectos del golpe entre coches de 4F65D0 / 4F67A0 ([tipo * 4 + familia], ver tabla_se_golpe).
 TAPD.DAT: 'TAPD', u32 n segmentos de STAGE.PS2 (SEGnn.DAT) y por segmento el registro de etapa de 'TAP1' (644 bytes: aparicion,
-velocidad, puntos fijos), para los arboles que no son el del modo OutRun (la demo copia los de su arbol al leerlo).
+velocidad, puntos fijos), para los arboles que no son el del modo OutRun (la demo copia los de su arbol al leerlo). Las
+listas de puntos fijos de las etapas al reves estan en la BSS: se leen tras ejecutar la rutina que las rellena (ver
+aparicion, paso 5; tools/ps2/mips.py).
 Con --solo-tablas solo se escriben TRAFC.DAT y TAPD.DAT. Sale de tu disco: no se distribuye."""
 import os, struct, sys, zlib
 import numpy as np
@@ -289,6 +291,24 @@ def aparicion(iso):
         if E.off(fijos) is not None and E.off(E.u32(fijos)) is not None and E.u32(E.u32(fijos)) == 0: break
         fijos = None
     if fijos is None: sys.exit('no encuentro la tabla de puntos fijos de 4EF880')
+    # 5) las listas de puntos fijos de las etapas al reves (descriptores 30..59) estan en la BSS: las rellena al empezar
+    #    el trafico (46C950 = PS2 0x1d9e30) una rutina que copia las listas de .data y despues, para cada etapa s de 0 a
+    #    0x41, pone a 0 el usado (+0x14) de sus puntos y, si 30 <= s < 60, los da la vuelta: posicion = 1 + la de la
+    #    etapa (+0x96 del descriptor, 1772E8) - posicion, carril = 5 - carril (PS2 0x1f2110..0x1f372c). Se localiza como
+    #    la funcion que llama a 4EF880 (desde el jr ra de la anterior) y se ejecuta con ps2/mips.py; las listas se leen de esa memoria
+    from ps2.mips import Mips
+    f4 = E.va(int(i) * 4); mem = None
+    for j in np.where(u == (0x0c000000 | (f4 >> 2)))[0]:
+        k = int(j)
+        while k > j - 4000 and int(u[k]) != 0x03e00008: k -= 1   # el jr ra de la funcion anterior
+        k += 2                                                  # (y su hueco)
+        while int(u[k]) == 0: k += 1
+        try:
+            m = Mips(E); m.llama(E.va(k * 4))
+            if struct.unpack('<I', m.lee(E.u32(fijos + 4 * 30), 4))[0] < 0x42: mem = m; print('puntos fijos: rutina 0x%x (%d pasos)' % (E.va(k * 4), m.pasos)); break
+        except (RuntimeError, ValueError):
+            continue
+    if mem is None: sys.exit('no encuentro la rutina que rellena los puntos fijos de las etapas al reves')
     base, nprim, _ = conv_union.tablas(A)
     regs = conv_union.arbol(A, 0)
     def registro(ti):
@@ -298,8 +318,8 @@ def aparicion(iso):
         assert 0xffff in r and all(r[k] < r[k + 1] for k in range(r.index(0xffff))), 'tabla de aparicion rara'
         e = E.u32(fijos + 4 * ti); fl = []
         while True:
-            st, tipo, pos, carril = struct.unpack('<IIHb', E.lee(e, 11)); mod, = struct.unpack('<I', E.lee(e + 12, 4))
-            col, = struct.unpack('<b', E.lee(e + 16, 1))
+            st, tipo, pos, carril = struct.unpack('<IIHb', mem.lee(e, 11)); mod, = struct.unpack('<I', mem.lee(e + 12, 4))
+            col, = struct.unpack('<b', mem.lee(e + 16, 1))
             if st == 0x42 or st > ti: break
             if st == ti: fl.append((pos, carril, mod, col, tipo))
             e += 0x18
