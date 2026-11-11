@@ -78,7 +78,8 @@ ELF_RPM = 0x3c13b0
 IRX_TABLA = 0x66a0
 GRUPOS = [('motor_acel', 18), ('motor_suelta', 19), ('derrape', 0), ('golpe', 3)]
 IRX_SE = 0x4b98         # tabla de efectos SE del IRX: 12 bytes por id
-MENU_SE = [('\\MENU.pak', (0x00, 0x01, 0x40)), ('\\Fe.pak', (0x03,))]   # cancelar, cursor, aceptar, bloqueado
+MENU_SE = [('\\MENU.pak', (0x00, 0x01, 0x40)), ('\\Fe.pak', (0x03,)),   # cancelar, cursor, aceptar, bloqueado
+           ('\\MILES.pak', (0x217,))]          # fin de la cuenta de las millas OutRun (modo 34, PS2 0x1bc4ec: 11c090(0x217))
 K_PREVIO = 256          # muestras de calentamiento del ADPCM antes del bucle
 
 

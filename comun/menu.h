@@ -12,6 +12,7 @@ int menu_inicia(void);                      /* abre MENU.DAT (solo tablas en la 
 /* entra en el titulo: texturas a la VRAM bajo demanda (antes hay que dejar el hueco: hud_baja_tex) */
 void menu_entra(int manual, int pista, int npistas);
 void menu_suma_tiempo(int cuadros);           /* licencia +0x10C += crono total de la carrera (4505D0) */
+void menu_suma_millas(uint32_t millas);       /* licencia +0x24 += millas OutRun de la carrera (4EF510) */
 int menu_paso(unsigned botones_nuevos);     /* una vez por paso de logica (60 Hz); MENU_CARRERA / MENU_DEMO al acabar */
 void menu_dibuja(void);                     /* dentro de la lista TR */
 void menu_sale(void);                       /* libera toda la VRAM del menu */

@@ -7,6 +7,7 @@ typedef struct {
     int rebufo, derrape, manual, seis, rev_on;
     int puntos_estilo;      /* cifras de la puntuacion (4BD480): 0 normal (estilo 1), 1 rebufo (0xC), 2 fuera (0xD) */
     int infarto;            /* NAVI_PUB 0x1bd544 (variante 2): sin los paneles 2C0028 / 2C0029 ni la puntuacion (1bf3e8) */
+    int solo_puntos;        /* NAVI_PUB fuera del modo 16 (PS2 0x1bd4ac): solo el panel 2C0029 y la puntuacion */
 } hud_estado_t;
 int hud_carga(const char *fich, int modelo);            /* 0 bien; modelo = indice de tacometro (6 = Testarossa) */
 void hud_dibuja(const hud_estado_t *e);                  /* dentro de la lista TR */

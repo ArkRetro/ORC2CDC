@@ -50,7 +50,7 @@ Estado: OK (conectado y verificado al nivel indicado), PARCIAL, PROVISIONAL (apr
 | Rivales | — | FALTA | — | no hay rivales | — | — |
 | Carretera, pendientes, bifurcacion | STAGE.PS2, BK.PS2 cs_BK_PALM, COMMON obj_course_obj_bk_palm + obj_OBJ_<ZONA>_BUNKI_TX, descriptores 0xb0, csc_data_2 | OK | conv_tramo/conv_union, CURSO.DAT | arbol entero (15 etapas, 10 bifurcaciones con sus carteles, 5 metas); cielo, niebla, luz y sol de la union como el original (ver Entorno); bifurcaciones = las de PALM (las demas no estan en el disco) | objetos animados de BK (ANIMS) | E |
 | Temporizador (inicial y ampliacion) | 44DC70 = PS2 0x176730, 450CC0 = PS2 0x1cee40, 450AC0 = PS2 0x1ce1f8 (-1 por paso en 0x5c5f44, crono +1 en 0x5c5f48); cuenta atras t / 60,2 + 0,34 (4BDA30 = PS2 0x1bfff8); crono con CalcFrame2Time (449B30 = PS2 0x1f6d70: t / 60,2, milesimas truncadas); paso real 59,94 Hz: HUD 0,43 % mas lento que el reloj, como el original; tabla 7D2E98 = PS2 0x3cb708 copiada por 0x176040; k636904 = PS2 0x35a938 | OK | TIM1 y KTE1 de PARAM.DAT | formula y tablas CONFIRMADAS en el ELF; variante 1 (fila 0), preset 0 y dificultad 0 PROBABLES (frontal del PC) | trazar el frontal de PS2 | E |
-| Checkpoints, meta, resultados | 44FF20 / 4515B0 (branch_state 7D38E8) con las banderas +0x3C de COLI0200; 4513C0 meta | OK | ampliacion al pasar la pancarta CHECK POINT del principio de la etapa siguiente (ver Checkpoint); meta del original en las 5 etapas finales (z = 0 de la union); voz y efecto de EXTEND TIME, GOAL y TIME OVER (voces.c) | escena de la meta del original (modo 19: guion, camara, coche, piloto, efecto y musica; ver Escena de la meta); sin la tabla de tiempos de 498670, el ranking ni las millas (modos 33 / 34: texto propio y vuelta al menu); sin la voz de GAME OVER (0x154: no hay pantalla de GAME OVER) | — | E |
+| Checkpoints, meta, resultados | 44FF20 / 4515B0 (branch_state 7D38E8) con las banderas +0x3C de COLI0200; 4513C0 meta | OK | ampliacion al pasar la pancarta CHECK POINT del principio de la etapa siguiente (ver Checkpoint); meta del original en las 5 etapas finales (z = 0 de la union); voz y efecto de EXTEND TIME, GOAL y TIME OVER (voces.c) | escena de la meta del original (modo 19: guion, camara, coche, piloto, efecto y musica; ver Escena de la meta); millas OutRun, continuar (REINTENTAR / ABANDONAR) y GAME OVER del original (modos 34 / 35 / 27, ver Fin de la carrera); sin la tabla de tiempos de 498670 ni el ranking | — | E |
 | Puntuacion modo OutRun | 4F2DF0, 4F2660, 4F2B20, 4B9770 | PARCIAL | main.c pt_* | posicion de carretera = m_pos de CURSO.DAT (CONFIRMADO; antes 2,5 m supuestos, 3,2 veces los puntos por avance); bonus de etapa en el checkpoint | el salto de +64 al cambiar de curso (PENDIENTE) | E |
 | Eventos, scripts, progresion, misiones | SCRIPTS.PS2 (Races, RaceAttack, OutrunMiles, Req_*) | FALTA | — | — | — | — |
 | Modos de un jugador (INFARTO, CONTRARRELOJ) | 464350 / 464D20 (PS2 0x1ae440 / 0x1a7f28), 44DC70, 479080 | PARCIAL | ver Modos de un jugador | tipos de peticion con objetos, fantasma | — | E |
@@ -1000,7 +1000,7 @@ race_ending.cpp; SLES-53998 contrastado):
   0x200016, {0x200000, 0x200010, 0x20001b}, ...); de cada uno el id, el bucle hasta 0xF0 / 0x168 cuadros y el de fin.
   La acompanante: 0x60049 (ya estaba).
 - **GAD 498670**: el cartel GOAL (0x2c0009, ya estaba) y, cuando el temporizador baja de 0x3FC, la tabla de tiempos
-  por etapa (4979E0) y la voz 49A190: sin portar (la demo pone su texto de resultados en ese momento).
+  por etapa (4979E0) y la voz 49A190: sin portar (ver Fin de la carrera).
 - **Checkpoint** (fin de cada etapa intermedia): en el modo OutRun no hay escena: EXTEND TIME (2C00AC + 0x4d / 0x16c),
   el bonus de etapa, los objetos de la union (BO) y, para el piloto, el cambio de area 44BCE0 con tablas -1 (nada).
   Todo eso ya estaba (ver Checkpoint y Objetos animados de las uniones).
@@ -1011,8 +1011,8 @@ musica, el efecto 0x96 en ADPCM de Yamaha; 110 KB de RAM desde el arranque); `de
 comun/robot.c `meta_piloto` (tablas METR / METE de CHR.DAT, conv_chr.py: 20 movimientos mas, +42 KB);
 comun/musica.c `musica_pon_una` (MUS61..MUS66.ADP sin MUS64, con tools/c/musica.c como las demas); comun/sfx.c
 `sfx_muestra_*` (30 KB del AICA durante la meta). Op del guion sin portar: 12 (la demo elige lo que dibuja a su manera)
-y 15 (el humo de la demo es el PROVISIONAL de siempre). PENDIENTE: la tabla de 498670, los modos 33 / 34 / 35 (millas,
-continuar) y la musica de la meta de la variante 0 (Time Attack del PC).
+y 15 (el humo de la demo es el PROVISIONAL de siempre). PENDIENTE: la tabla de 498670 (los modos 33 / 34 / 35:
+ver Fin de la carrera) y la musica de la meta de la variante 0 (Time Attack del PC).
 
 Verificado en E (Flycast, `-DPRUEBA_AUTO -DPRUEBA_NODO=13 -DPRUEBA_FIN=400 -DPRUEBA_SIN_TIEMPO` y `PRUEBA_NODO=11`;
 `-DDIAG_META` registra camara y coche cada 60 cuadros, `-DDIAG_META_CUADRO=n` congela la escena): meta D (IMPE,
@@ -1822,6 +1822,55 @@ union y ruta leidas como en el OutRun. GOAL (menu real con el piloto y `-DPRUEBA
 curso entero), el fantasma (GHOST.PS2 gc_default_*, formato QHOT/NHOT, modulo 465F30..4687C0) y su record y la
 pantalla de resultado 0x50 del modo 25.
 
+## Fin de la carrera: millas OutRun, continuar y GAME OVER (2026-11-11)
+
+Se quita el panel de texto provisional (resultados(): "GOAL! / TIEMPO AGOTADO / TIEMPO TOTAL / PUNTOS / MAX km/h", con
+su caja y el fundido a negro, y la salida al menu con START o a los 600 cuadros, inventados). Ahora, con la consola
+(43F860 = 1), como el original (PC race_end_modes.cpp, SLES-53998; tabla de modos 0x3f8e50, {init, control, salida}):
+- **Rutas**: meta -> modo 19 (0x4B0 cuadros, la escena de la meta) -> 33 (sin red: directo) -> 34; fin del tiempo ->
+  modo 20 (0x1b9990: 0xF0 cuadros, 0x258 en las variantes 2 y 5; 0x1b9aa0: 43F860 -> 0x22) -> 34; REINTENTAR /
+  ABANDONAR de la pausa (0x249c98 / 0x24a140) -> 34 con 450230(6) / (7) y la carrera suspendida (estado FIN de la
+  demo: sin coche, trafico ni efectos del motor, 49A130). La licencia suma el crono al salir de 19 / 20 (como antes).
+- **Modo 34, OutRun Miles** (0x1bc270 / 0x1bc3d8 / 0x1bc618 = 49B470 / 49B570 / 49B7C0): millas de 4EF550 (PS2
+  0x1f3e90): variante 1 / 9 puntos / 3000, 2 [7F1C80] / 10000 / 10 (float); + 84BCF8 (0x36d2e4: por etapa 4EF460 +25 /
+  +10 / +10 / +25 / +15 / +15 por cada estadistica limpia y 4EF440 40 por segundo por debajo de 60, desde 4F2B20 =
+  PS2 0x290568 / 0x290584); + (car+E78 / 60) x 5 (car+E78: cada vez que CheckSlipStream encuentra un coche mejor por
+  encima de 0,18 y |+162| < 1500, PS2 0x186494 = las marcas +B72 = 180 de la demo; el constructor lo pone a 0,
+  0x239e84) y car+E78 = 0. Escena 2B004C (panel "MILLAS OUTRUN:", modo 5) y, cuando acaba, las 8 cifras cuentan a la
+  vez hasta digito x 6 (cuadro de la escena 2B004B, 6 por digito), dibujadas por el GAD (0x1a0c98 = 497FA0) en
+  (540 - 320 - i x 32, 210 - 240) (floats 0x35c8b8..c0); al pararse, el efecto 0x217 (muestra de \MILES.pak, ahora en
+  SFX.DAT). Sale al acabar su temporizador (0xF0) o con A / B (1b4548 bits 4 / 8: cruz / circulo): 450240 = 6 ->
+  modo 30 (REINTENTAR), 2 -> 35, 7 -> 27, 1 -> 35 (sin red y sin el Time Attack de una etapa: el port corre el curso
+  entero). Al salir, 4EF510 (0x1f41d8): licencia +0x24 (float) += millas, +3F4 |= 2; se guarda en la VMU al volver a
+  los menus (menu_suma_millas, comun/menu.c).
+- **Modo 35, continuar** (0x1bc650 / 0x1bc700 / 0x1bc8c8 = 49B7E0 / 49D9C0 / 49DAE0): 2B004D ("VOLVER A
+  INTENTARLO?", modo 5); al acabar, 2B004A (REINTENTAR / ABANDONAR); al acabar esta, A -> modo 30 (la misma carrera
+  con el mismo coche y lo elegido, desde la salida: reintenta de demo/main.c, el de la pausa) y B -> modo 28 (al
+  frontal), los dos con el efecto 0x40. Los iconos de los botones del PS2 de 2B004A se cambian por A / B como en la
+  barra de ayuda de los menus.
+- **Modo 27, GAME OVER** (0x1bafc8 / 0x1bb120): 0xF0 cuadros con 2C000B ("Fin de la partida", modo 1) y la voz 0x954
+  (0x154 de PERO / PERH), despues al frontal.
+- **HUD** (NAVI_PUB 4BEB00 = PS2 0x1bd4ac): fuera del modo 16 solo el panel 2C0029 y la puntuacion en la meta de la
+  variante 1 hasta que el temporizador baja de 0x3FC (4B8E30(0) de 498670); en la meta de las demas variantes y en el
+  fin del tiempo, nada (4B8E20); en los modos 34 / 35 / 27, nada (428600 borra los sprites, tambien GOAL / TIME OVER).
+- Datos: tools/conv_fin.py -> FIN.DAT (millas y continuar: 4 texturas VQ, 529 piezas, 67 KB) y GOVER.DAT (GAME OVER:
+  4029 piezas; aparte para no tener ~97 KB de tablas en la RAM fuera de ese modo); se abren al entrar (solo tablas) y
+  se sueltan al salir. demo/fin.c. Prueba: -DPRUEBA_MILLAS (la demo automatica tambien acaba en las millas).
+- **SIN PORTAR**: la bandera 84BCFC (primer puesto en una tabla de records: 4EF430) y su suma (OutrunMiles.bin +
+  puntos / 1000, corazones / 10000 / 2,5): las tablas de records no estan en el port; la tabla de tiempos por etapa y
+  la voz de 498670 (como antes); las variantes 4 (red) y 6 (misiones de C2C: otra suma en 4EF550, tokens 2B0066..69 /
+  2B004F en el modo 35); la espera de la voz (427700 / 49A190: el temporizador del modo 20 se rearma mientras suena
+  TIME OVER) y de la muestra 0x1a1 (modo 34 desde la pausa): sin consulta de "sonando" en comun/sfx.c; el bloqueo de
+  botones del modo 35 (+0x5E0 del objeto 0x375068, PC +0x518 de 4035F0: sin localizar quien lo pone); la suspension de
+  los sucesos en el fin del tiempo (modo 20, 440A10: el coche de la demo sigue frenando solo, como antes); la pantalla
+  de carga del modo 30 / 28 (0x480000) y 1001d8(0, 0xF0, 0) del modo 27 (sin identificar); START en los modos 19 / 20
+  (43F980 -> 43F990(0x1D): sin localizar la peticion; antes la demo volvia al menu con START, inventado).
+- Verificado en E (Flycast): fin del tiempo en PALM -> millas (0: 1740 puntos) -> continuar -> B -> titulo; pausa ->
+  ABANDONAR -> millas -> GAME OVER -> titulo; INFARTO, pausa -> REINTENTAR -> millas -> salida otra vez con el HUD;
+  `-DPRUEBA_AUTO -DPRUEBA_MILLAS -DPRUEBA_NODO=13 -DPRUEBA_FIN=400 -DPRUEBA_SIN_TIEMPO`: GOAL en IMPE -> 1991 millas
+  (65990 / 3000 + 1970 de las etapas) contando cifra a cifra -> continuar -> A -> la misma carrera desde la salida ->
+  GOAL otra vez. Sin "Out of memory"; VRAM libre al entrar 50-70 K (536 K en el INFARTO, con el HUD fuera).
+
 ## Ultimo cambio verificado
 
 Tiempo de juego de la licencia (2026-11-09): la licencia activa suma +0x10C += el crono total de la carrera (4505D0 =
@@ -1831,10 +1880,10 @@ fin del tiempo (modo 20, 0x1b9b58) y al confirmar REINTENTAR / ABANDONAR en la p
 original (0x57E3F). No se suma en la demo de atraccion. Verificado en E (Flycast, menu real, OutRun, pausa ->
 ABANDONAR -> si): `LICENCIA: tiempo de juego +863 cuadros` (el HUD marcaba 0'14"335 = 863 / 60,2), guardado en A1;
 en el siguiente arranque otra carrera +259 = 1122 y la tarjeta muestra T.CONDUC. 0''00'18. Las millas OutRun (+0x24,
-4EF280 / 4EF550 / 4EF510 con OutrunMiles.bin y la pantalla del modo 34) siguen SIN PORTAR: dependen de la
+4EF550 / 4EF510 y la pantalla del modo 34) ya estan: ver Fin de la carrera (antes: SIN PORTAR; dependen de la
 puntuacion (4B99D0 = [8447DC + coche x 4]), de 84BCF8 (4EF460 / 4EF440 desde race_traffic_score), de la bandera 84BCFC
 (4EF430) y del contador car+0xE78; su codigo del PS2 no esta localizado (0x1a38f0 es el reinicio de la licencia y
-0x1a41b4.. otra copia de +0x24, no la suma).
+0x1a41b4.. otra copia de +0x24, no la suma; la suma es 0x1f41d8).
 
 Suelo del original (2026-11-09, ver Suelo del original: colision COLI0200): la altura del coche, del trafico y de la
 camara sale de 43EB60 sobre la colision de la etapa y de la union (tools/conv_coli.py, demo/coli.c) en vez del perfil

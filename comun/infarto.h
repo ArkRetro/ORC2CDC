@@ -35,6 +35,7 @@ void infarto_meta(void);                    /* 44FF10: GOAL */
 void infarto_paso(const infarto_coche_t *c);   /* 464D20, un paso de logica (modo 16) */
 int  infarto_corazones(void);               /* los que ensena el contador (7F1C80 / 10000) */
 int  infarto_total(void);                   /* 7F23C4 / 10000 */
+int32_t infarto_disp(void);                /* 7F1C80 (45B820): 10000 por corazon */
 int  infarto_grupo_voz(int clave);          /* banco HAM de la clave (sfx_voz_grupo) */
 int  infarto_mueven(void);                  /* 45D820 (7F250C): los coches de la mision ya se mueven */
 int  infarto_trafico(void);                 /* 64E08C: 0 = sin trafico normal (lo cierra y no abre) */

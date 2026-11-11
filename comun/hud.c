@@ -618,6 +618,13 @@ void hud_dibuja(const hud_estado_t *e)
     char b[16]; int t, cs, m, cuadro;
     if (!hud_principal) return;
     H = hud_principal; ult_tex = -1; zcapa = 20.0f;
+    if (e->solo_puntos) {                                       /* 0x1bd4ac: 2C0029 (capa 3) y 1bf3e8 */
+        zcapa = 30.0f; dibuja("PANEL_PUNTOS", 0, 0, 1);
+        t = busca_uso("PUNTOS");
+        if (t >= 0) { sprintf(b, "%07d", e->puntos > 9999999 ? 9999999 : e->puntos < 0 ? 0 : e->puntos);
+                      zcapa = 90.0f; cifras(t, grupo_puntos(t, e->puntos_estilo), b, H->uso[t].x, H->uso[t].y, 1); }
+        return;
+    }
     /* capa 2: mapa de ruta y tacometro */
     dibuja("RUTA5_FONDO", 0, 0, 1);
     if (H->taco >= 0) {

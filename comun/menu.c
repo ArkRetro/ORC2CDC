@@ -598,6 +598,17 @@ void menu_suma_tiempo(int cuadros)
     dbglog(DBG_INFO, "LICENCIA: tiempo de juego +%d cuadros = %d\n", cuadros, l32(p, 0x10c));
 }
 
+/* millas OutRun de la licencia activa (+0x24, float): 4EF510 (PS2 0x1f41d8) al salir del modo 34 suma las de la carrera
+   (entero sin signo pasado a float, suma en float) y marca +3F4 |= 2 */
+void menu_suma_millas(uint32_t millas)
+{
+    uint8_t *p = activa(); float m, s;
+    if (!p) return;
+    s = millas >> 31 ? (float)((millas >> 1) | (millas & 1)) * 2.0f : (float)(int32_t)millas;
+    memcpy(&m, p + 0x24, 4); m += s; memcpy(p + 0x24, &m, 4); p[0x3f4] |= 2;
+    dbglog(DBG_INFO, "LICENCIA: millas +%u = %.0f\n", (unsigned)millas, (double)m);
+}
+
 /* variante de [780258] (PS2 0x443508) del modo elegido, como 4EEAD0 del PC (runtime_route_mode: 1 OutRun, 2 Heart
    Attack, 7 Time Attack); COAST 2 COAST (las misiones de Races.bin, variante 5) no esta: corre como OutRun */
 int menu_modo(void) { return modo_sel == 2 ? 2 : modo_sel == 3 ? 7 : 1; }

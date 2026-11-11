@@ -29,6 +29,9 @@ en las cargas del curso (sin huecos fijos) y 5 combinaciones "union + LASV" que 
 
 ## Fase 3. Cerrar el modo OutRun
 1. Tras la meta: tabla de tiempos por etapa, clasificacion con iniciales, millas OutRun, continuar; voz de la meta.
+   Millas OutRun, continuar (REINTENTAR / ABANDONAR) y GAME OVER HECHOS (2026-11-11, tambien en el fin del tiempo y
+   desde la pausa; PARIDAD.md, Fin de la carrera); faltan la tabla de tiempos, los records (bandera de las millas) y
+   la voz de la meta.
 2. OUTRUN2SP elegible en el menu. Vista interior. Saltos. Bonus de puntuacion que faltan.
 
 ## Fase 4. COAST 2 COAST

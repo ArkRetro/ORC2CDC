@@ -842,6 +842,7 @@ int infarto_medidor(infarto_spr_t *v, int max)
 uint32_t infarto_tinte(void) { return m_tinte; }
 int infarto_corazones(void) { return disp / 10000; }
 int infarto_total(void) { return score / 10000; }
+int32_t infarto_disp(void) { return disp; }
 int infarto_trafico(void) { return trafico; }
 int infarto_mueven(void) { return mueven; }
 int infarto_grupo_voz(int k) { return dat && k >= 0 && k < 15 ? grp[k] : -1; }
