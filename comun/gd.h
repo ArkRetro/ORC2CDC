@@ -11,6 +11,11 @@ int gd_lee(uint32_t lba, int n, void *dst);           /* sectores de 2048 desde 
    que la cabeza del lector no salte entre dos ficheros en cada trozo (en un GD real cada salto cuesta ~100-200 ms) */
 void gd_hilo_fondo(void);
 int gd_ocupado(uint32_t ms);
+/* El hilo del juego se declara con gd_hilo_juego(): gd_us_juego() son los us que lleva parado leyendo del GD (el reloj
+   de la logica no los cuenta: una carga no es tiempo de juego) y gd_n_juego() cuantas lecturas ha hecho */
+void gd_hilo_juego(void);
+uint64_t gd_us_juego(void);
+uint32_t gd_n_juego(void);
 /* intentos de lectura fallidos desde el arranque y el codigo del ultimo (ERR_* de cdrom.h) */
 void gd_errores(uint32_t *n, int *ult);
 #endif

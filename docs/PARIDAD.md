@@ -368,7 +368,7 @@ estaba y se dice lo que falta). Estado: CORREGIDO, SE QUEDA (ya era del original
 | `TIM_DIF 0` | [7C24C0] = licencia +E0; 4471A0 la pone a 0 | 0 | PROBABLE | SE QUEDA |
 | Sin el +60 ni k636904 | 44DC70 = PS2 0x176730: + k636904[clave] si 43F960 == 0 y 456D60 <= 1; + 60 si 48B1A0 != 1 y nivel > 0 | k636904 = {0,0,-60,0,-60,-90,0,-60,-90,-120,0,-60,-90,-120,-150} (PS2 0x35a938, KTE1); +60 con coche de serie | CONFIRMADO (formula y tabla); PROBABLE (coche de serie = 48B1A0 != 1) | CORREGIDO (Flycast: LAKE +3480 = 3420 + 0 + 60; DESE +3450 = 3480 - 90 + 60) |
 | Bonus de etapa (4F2B20) al entrar en la union | 450CC0 lo da tras la ampliacion con 7D3948 (cuadros de la etapa, union incluida); 4F2DF0 en la meta (modo 0x13) | en el checkpoint y en la meta | CONFIRMADO | CORREGIDO |
-| Cuenta atras: GO a los 240 cuadros de la escena | 8367BC = 180 al entrar en GAME; coche, trafico y tiempo quietos mientras > 60 (4A8100, 450AC0) | la escena de la salida empieza en START (4871A0), START pide GAME a los 120 pasos (43FA90, 780250 = 0x78) y el coche sale 120 despues: cuadro 240, el GO (0x9b) del guion | CONFIRMADO (codigo); PROBABLE el desfase de la etapa 64 (0 cuadros) | CORREGIDO (2026-11-10, ver Escena de la salida) |
+| Cuenta atras: GO a los 240 cuadros de la escena | 8367BC = 180 al entrar en GAME; coche, trafico y tiempo quietos mientras > 60 (4A8100, 450AC0) | la escena de la salida empieza en START (4871A0), START pide GAME a los 120 pasos (43FA90, 780250 = 0x78) y el coche sale 120 despues: cuadro 240, el GO (0x9b) del guion | CONFIRMADO (codigo; el desfase de la etapa 64 es de 0 cuadros: 0x1c67d8 devuelve 1 sin red) | CORREGIDO (2026-11-10, ver Escena de la salida) |
 | Camara de salida los 60 primeros cuadros | 485250 mientras 8367BC > 180 (durante START) | los 120 cuadros de START, con el ojo y la mira del movimiento de la escena (486EF0, op 14(0) en el 120) | CONFIRMADO | CORREGIDO (2026-11-10) |
 | Trafico: 11 coches al salir en s0 + 130 + i 121 + azar 66 m | 4787E0: sin coches al salir (salvo puntos fijos 478B90); aparecen de uno en uno | ninguno al salir | CONFIRMADO (logica) | CORREGIDO |
 | Trafico: reaparece a 550..1100 m si queda 150 m detras | 477F60 cierra con distancia < -2 o > 60 posiciones; 4787E0 abre a 50 posiciones (0x32; 35 en la union pasada la 120) cada max(3, registro +5) posiciones | -2 / +60 / +50 (35) posiciones, separacion del registro (12..20 en el curso) | CONFIRMADO | CORREGIDO (2026-11-08: separacion del registro de aparicion y caso de la union) |
@@ -387,7 +387,7 @@ estaba y se dice lo que falta). Estado: CORREGIDO, SE QUEDA (ya era del original
 | Aviso de bifurcacion a 450 m de la separacion | 4BB890: BIFURCA con el avance car+0x102C entre 0,65 y 0,72 / 0,70 y 0,75 | — | PROVISIONAL | SE QUEDA |
 | Marcas de las ruedas: 4 ruedas, media anchura del neumatico (filas 40/41 de la tabla de parametros), 0,2 m entre tramos, alfa 0,5, +0,05 m, v = longitud x 0,5, anillos 256/64/64, texturas 0x570000..2 (EFECTOS.DAT), clase por la superficie (0xC02 asfalto, 0x8004 tierra/arena, 0x18 hierba) | tire_mark_req 41FB50 / 41FDD0 / 4862C0 del PC; SLES-53998 0x10dcd0 / 0x10df38 / 0x1198f0, tabla 0x344d90, constantes 0x32b390..98 | igual | CONFIRMADO | CORREGIDO (2026-11-08) |
 | Marcas en asfalto: las traseras mientras dura el derrape | el original usa la mascara 95AFA8 de PcTireSmokeReq 41C570 (deslizamiento +E0 y agarre +E4 de cada rueda contra 74FF5C) | — | PROVISIONAL (la fisica de la demo no da +E0) | SE QUEDA |
-| Humo del derrape (32, vida 1 s, tamano 0,6 + 2,6 t), ahora desde las ruedas traseras de la fisica | PcTireSmoke 41C420 / 41C570 / 41CB30 / 41D1E0 / 41D330 (fuente 4: 512 particulas, textura 0x19 del PC = 0x2e de obj_course_obj_common en PS2) | — | PROVISIONAL | SE QUEDA (pendiente: portar 41C570..41D5C0 y polvo / chispas 41D6B0..41F4B0) |
+| Humo del derrape (32, vida 1 s, tamano 0,6 + 2,6 t), ahora desde las ruedas traseras de la fisica; tope de 2 pantallas de area por cuadro (limite de la PowerVR, ver Escena de la salida) | PcTireSmoke 41C420 / 41C570 / 41CB30 / 41D1E0 / 41D330 (fuente 4: 512 particulas, textura 0x19 del PC = 0x2e de obj_course_obj_common en PS2) | — | PROVISIONAL | SE QUEDA (pendiente: portar 41C570..41D5C0 y polvo / chispas 41D6B0..41F4B0) |
 | Sonido: `ESCALA 3` de los efectos frente a la musica | balance 4279C0 (624238 / 624258) | — | PROVISIONAL (mezcla del AICA) | SE QUEDA |
 | Sonido del derrape: deslizamiento / 30 grados | 4260E0 PlaySkid: maximo del deslizamiento de las 4 ruedas (+60/+64.. del cuerpo) | — | PROVISIONAL | SE QUEDA |
 | Golpe: fuerza 0,4 + dv/25 y v/40, 20 cuadros entre golpes | 4264C0 PlayWall, 4F65D0 (una vez cada 60 cuadros) | — | PROVISIONAL | SE QUEDA |
@@ -844,10 +844,45 @@ del original, con el mismo motor que la de la meta (demo/meta.c, 486730 / 486EF0
   0x369268] (30 palabras: 11, 12, 14, 11, 13, 14, 13, 12, 11, 11, 11, 12, 11, 11, 11 dos veces); 12 / 13 solo si la
   palabra 0 del descriptor de la etapa (0x1766f0) es 0 o 15 (si no 11); con mas jugadores 0x3f9328 (0, 10, 10, 10).
   CONFIRMADO. La palabra 0 del descriptor se toma como la clave de la etapa (cur_nodo): PROBABLE.
-- Tiempos: 4871A0 en la etapa 60; START cuenta 120 pasos (43FA90 con 780250 = 0x78, variantes 3 y 4: 0xB4) y pide GAME
-  (8367BC = 180); el coche sale con 8367BC <= 60 (4A8100): cuadro 240 de la escena, el mismo del GO del guion. El
-  desfase de la etapa 64 (la espera 45A920) se toma como 0: PROBABLE. La voz 0x82 del init de GAME (PC 499E0D, PS2
-  0x1b83e8) va en el cuadro 120 (antes la demo la decia en el GO).
+- Tiempos (CONFIRMADO en el MIPS, 2026-11-11; antes PROBABLE): el control de START es 0x1b6360 (etapa en 0x5a1f50,
+  tabla de saltos 0x3f93b0). La etapa 60 (0x1b66ac) abre los sucesos de la carrera, llama a 0x1f4ef0 (4871A0) con la
+  escena y sale (0x1b69b4 -> 0x1b6a68) con la etapa 64. Al cuadro siguiente la 64 (0x1b69bc) pregunta a 0x1c67d8
+  (45A920), que sin red ([0x5b0a80] == 0) devuelve 1 en el acto: **la espera es de 0 cuadros**; en ese mismo cuadro
+  suelta la pantalla de carga (0x1b6040: el icono 0x480000; 0x114f38 borra los sprites; 0x118510 / 0x115ec0 sueltan
+  los recursos 0x15, 0x2f y 0x49 del rotulo 490001 de 499A30) y cae en la 65 (0x1b6a04), la unica que llama a
+  0x1b4a48 (43FA90: el temporizador del modo, 0x78, solo baja cuando se le llama) y a 0x1bb7e8(1) (8367BC, 0x168 del
+  init, -1). A los 120 cuadros pide GAME (0x1b49b8(0x10)) y pone 8367BC = 0xB4 (0x1bb7d8); el coche sale con 8367BC
+  <= 60: cuadro 240 de la escena, el del GO del guion. No hay fundido: la escena se ve desde su cuadro 1 (el 0 aun
+  lleva la pantalla de carga encima). La camara de la escena (485250 con +E0..+F4 de 486EF0) dura esos 120 cuadros
+  (8367BC > 180 solo en START, y op 14(0) en el 120): 1 s de primer plano con teleobjetivo (136,7 mm, 15 grados) del
+  coche parado de traves con las ruedas traseras patinando, 1 s desde arriba (43,5 mm) mientras entra derrapando y,
+  ya en GAME, la camara de carrera con el coche acabando de colocarse (el movimiento dura 2,5 s) y la cuenta 3, 2,
+  1. La voz 0x82 del init de GAME (PC 499E0D, PS2 0x1b83e8) va en el cuadro 120.
+- Queja de la demo 31 ("apenas se ve; lo que se ve va lento"), tres causas (2026-11-11):
+  1. **El coche no estaba donde mira la camara**: pon_coche aplicaba el desplazamiento +2D8 con los ejes ya girados
+     por +2E4..+2EC; el original lo aplica antes de los giros (PC 484810: T(+2D8) Rz Ry Rx; PS2 0x183384: 0x1646fc
+     y despues los giros). Con la guinada de 90 grados y 3,5 m de lado del guion el coche salia 3,5 m por delante:
+     el primer plano ensenaba un edificio y en el plano de arriba asomaba por el borde. Tambien corrige el
+     desplazamiento de las animaciones de choque. (El orden de los giros de pon_coche, y - x - z, no se ha tocado:
+     PENDIENTE de contrastar con 0x1833d0.)
+  2. **La carga se comia la escena**: la carga de la carrera (coche, VRAM de la etapa, HUD, BAND.DAT, guion) va en un
+     solo cuadro y el reloj de la logica seguia contando: el cuadro siguiente daba tantos pasos como tiempo habia
+     durado (hasta 600; con el GD de Flycast, instantaneo, no se notaba). Medido con el GD frenado (`-DDIAG_GD_LENTO
+     =1200`: KB/s y 120 ms por salto): 1,56 s de carga -> 93 + 10 pasos de golpe, primer cuadro dibujado el 102 de
+     120 de la camara de la escena. Ahora el reloj no cuenta lo que el hilo del juego pasa leyendo del GD
+     (comun/gd.c gd_us_juego) y se pone a cero al acabar la carga de la carrera: la escena empieza en su cuadro 0.
+     Durante la escena no se lee del GD (medido: 0 lecturas del hilo del juego; la union no se pide hasta
+     UNION_ANTES y BAND.DAT, el guion y los efectos se leen antes).
+  3. **El humo**: en la lista translucida ordenada el coste de la PowerVR crece con el cuadrado de las capas; el humo
+     del derrape sumaba 3,5-8,5 pantallas de carteles superpuestos (primer plano y camara de carrera, cuadros 60 a
+     207). Tope de HUMO_PANTALLAS (2) pantallas por cuadro, del mas nuevo al mas viejo: LIMITE DEL HARDWARE (valor
+     PROVISIONAL hasta medirlo en la consola; el humo sigue siendo el PROVISIONAL de la demo). El humo del original
+     (41CB30 / 41D1E0 / 41D330 = PS2 0x10a708 / 0x10aee0 / 0x10b050, constantes 0x32b17c..: tamano 0,5 + 0,05 por
+     cuadro, vida 5 + azar x 85 cuadros, una o mas particulas por rueda y cuadro) suma un area parecida.
+  Medida (`-DDIAG_SALIDA`, Flycast, por cuadro dibujado): primer plano 1,5 ms de logica y 13,5 de dibujo (15,7-23 mil
+  vertices), plano de arriba 1,5 y 11,6 (15,7 mil), camara de carrera 1,5-2,3 y 16,4 (28,6 mil: lo mismo que la
+  carrera en ese sitio). `-DDIAG_SALIDA` guarda cuadro, pasos, dt, logica, dibujo, vertices, humo y lecturas del GD
+  de cada cuadro de la escena y los vuelca al acabar ("SAL:").
 - Guion de las escenas 11..14 (el mismo, 0x36d2f0; la 10, de varios jugadores, otro): 0 op 11(0) (car+38 = 0, car+1F4
   = 0), op 6(1) PasPlCar (475720: con las escenas 8..14 llama a GamePlCar 4A8330, el coche sigue con su fisica), op
   12, op 3(3) y op 4(0) (la musica; la pone main.c), op 15(0); 1 op 0(2C000A, 4, 3) la cuenta atras del HUD, op 5 0x97,

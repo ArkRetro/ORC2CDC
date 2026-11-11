@@ -3550,9 +3550,13 @@ static void piloto(const coche_t *c, float *giro, float *gas, float *freno)
 /* matriz del coche: x del modelo a la derecha, y arriba, el morro (-z) hacia delante */
 static void pon_coche(const coche_t *c, matrix_t mod_coche)
 {
-    float r[3], fw[3], up[3], r2[3], k, sn; int i;               /* derecha = adelante x arriba */
+    float r[3], fw[3], up[3], r2[3], k, sn, tr[3]; int i;       /* derecha = adelante x arriba */
     memcpy(fw, c->fw, 12); memcpy(up, c->up, 12);
     r[0] = fw[1] * up[2] - fw[2] * up[1]; r[1] = fw[2] * up[0] - fw[0] * up[2]; r[2] = fw[0] * up[1] - fw[1] * up[0];
+    /* el desplazamiento +2D8 va en el marco de la carroceria SIN los giros +2E4..+2EC: T(+2D8) Rz Ry Rx (PC 484810,
+       PS2 0x183384: 0x1646fc antes de los giros). Antes se aplicaba con los ejes ya girados: en la escena de la salida
+       (guinada de 90 grados y 3,5 m de lado) el coche salia 3,5 m por delante, fuera del plano de la camara del guion */
+    for (i = 0; i < 3; i++) tr[i] = c->pos[i] + r[i] * c->pose_t[0] + up[i] * c->pose_t[1] - fw[i] * c->pose_t[2];
     /* animacion de choque (pc_sample_crash_pose): giro y (+ izquierda), x (morro arriba), z, y desplazamiento */
     if (c->pose_r[1] != 0) { k = cosf(c->pose_r[1]); sn = sinf(c->pose_r[1]);
         for (i = 0; i < 3; i++) { r2[i] = r[i] * k + fw[i] * sn; fw[i] = fw[i] * k - r[i] * sn; r[i] = r2[i]; } }
@@ -3564,8 +3568,7 @@ static void pon_coche(const coche_t *c, matrix_t mod_coche)
     mod_coche[0][0] = r[0]; mod_coche[0][1] = r[1]; mod_coche[0][2] = r[2];
     mod_coche[1][0] = up[0]; mod_coche[1][1] = up[1]; mod_coche[1][2] = up[2];
     mod_coche[2][0] = -fw[0]; mod_coche[2][1] = -fw[1]; mod_coche[2][2] = -fw[2];
-    for (i = 0; i < 3; i++)
-        mod_coche[3][i] = c->pos[i] + r[i] * c->pose_t[0] + up[i] * c->pose_t[1] - fw[i] * c->pose_t[2];
+    for (i = 0; i < 3; i++) mod_coche[3][i] = tr[i];
     mod_coche[3][3] = 1.0f;
 }
 
@@ -3604,6 +3607,12 @@ static void camara_paso(int boton, int salida)
         e.guion = sal_cam;
     }
     cam_paso(&cam, &cam_tab, &e);
+#ifdef DIAG_SALIDA
+    if (sal_on && (sal_f < 3 || sal_f % 20 == 0) && sal_f <= 125)
+        printf("SALCAM: %d sal %d guion %d pos %.2f %.2f %.2f fw %.2f %.2f %.2f pose %.2f %.2f %.2f r %.2f %.2f %.2f ojo %.2f %.2f %.2f mira %.2f %.2f %.2f fov %.3f vista %d\n", sal_f, salida, e.guion != NULL,
+               (double)yo.pos[0], (double)yo.pos[1], (double)yo.pos[2], (double)yo.fw[0], (double)yo.fw[1], (double)yo.fw[2], (double)yo.pose_t[0], (double)yo.pose_t[1], (double)yo.pose_t[2],
+               (double)yo.pose_r[0], (double)yo.pose_r[1], (double)yo.pose_r[2], (double)cam.ojo[0], (double)cam.ojo[1], (double)cam.ojo[2], (double)cam.mira[0], (double)cam.mira[1], (double)cam.mira[2], (double)cam.fov, cam.vista);
+#endif
 #ifdef DIAG_CAM
     {   static int n;
         float dy = cam.ojo[1] - yo.pos[1];
@@ -3615,6 +3624,10 @@ static void camara_paso(int boton, int salida)
 }
 
 /* ---------------------------------------------------------------- marcas de las ruedas y humo del derrape */
+#ifdef DIAG_SALIDA                                              /* medida de la escena de la salida: us de logica y de dibujo
+                                                                   del cuadro y pantallas (x 100) que tapa el humo */
+static uint32_t diag_log_us, diag_dib_us, diag_humo_pct;
+#endif
 /* Marcas como el original (tire_mark_req 41FB50 / 41FDD0 / 4862C0 del PC; en SLES-53998 0x10dcd0 / 0x10df38 /
    0x1198f0, tabla 0x344d90): por rueda (las 4), el borde nuevo es el punto de contacto +- media anchura del neumatico
    (fila 40 delante / 41 detras de la tabla de parametros, car+2B4) de traves al avance (avance x normal del suelo);
@@ -3750,7 +3763,40 @@ static void pt_cuad2(const float p[4][3], const float *uv, uint32_t c0, uint32_t
     if (!ta_cabe(4)) return;
     for (k = 0; k < 4; k++) envia(t + k, k == 3);
 }
-static void pt_cuad(const float p[4][3], const float *uv, uint32_t c) { pt_cuad2(p, uv, c, c); }
+/* Humo: tope de la PowerVR. Los carteles del humo se tapan unos a otros (en la escena de la salida, con el coche
+   llenando la pantalla, sumaban hasta 8,5 pantallas: medido con DIAG_SALIDA) y en la lista translucida ordenada
+   (autosort) el coste por tesela crece con el cuadrado de las capas (una pasada del ISP por capa, cada una con todos los
+   poligonos de la tesela): la consola tarda varios cuadros en pintar cada uno (queja de la demo 31: "lo que se ve va
+   lento"). La PS2 no tiene ese limite. Aqui se dibujan del mas nuevo (el mas pequeno y opaco) al mas viejo hasta sumar
+   HUMO_PANTALLAS pantallas (area recortada a la pantalla); los mas viejos (grandes y casi transparentes) se quedan
+   sin dibujar ese cuadro. LIMITE DEL HARDWARE; el valor (2) es PROVISIONAL hasta medirlo en la consola. */
+#ifndef HUMO_PANTALLAS
+#define HUMO_PANTALLAS 2.0f
+#endif
+static float humo_px;                                           /* pixeles de humo de este cuadro */
+static int pt_cuad_humo(const float p[4][3], const float *uv, uint32_t c)
+{
+    static const int O[4] = { 0, 1, 3, 2 };
+    pt_t t[4]; float X_[4], Y_[4], a = 0; int k;
+    for (k = 0; k < 4; k++) {
+        float x = p[k][0], y = p[k][1], z = p[k][2], w;
+        mat_trans_single3_nodivw(x, y, z, w);
+        if (w < cerca) return 0;
+        t[k].x = x; t[k].y = y; t[k].w = w; t[k].u = uv[2 * k]; t[k].v = uv[2 * k + 1]; t[k].c = c; t[k].o = 0;
+    }
+    for (k = 0; k < 4; k++) {                                   /* area en pantalla (carteles alineados a ella) */
+        float x = t[O[k]].x / t[O[k]].w, y = t[O[k]].y / t[O[k]].w;
+        X_[k] = x < 0 ? 0 : x > 640 ? 640 : x; Y_[k] = y < 0 ? 0 : y > 480 ? 480 : y;
+    }
+    for (k = 0; k < 4; k++) a += X_[k] * Y_[(k + 1) & 3] - X_[(k + 1) & 3] * Y_[k];
+    a = fabsf(a) * 0.5f;
+    if (a <= 0) return 0;                                       /* fuera de la pantalla */
+    if (humo_px + a > HUMO_PANTALLAS * 640.0f * 480.0f) return -1;
+    if (!ta_cabe(4)) return -1;
+    humo_px += a;
+    for (k = 0; k < 4; k++) envia(t + k, k == 3);
+    return 0;
+}
 /* en la lista translucida, con la matriz de vista cargada */
 static void efectos_dibuja(void)
 {
@@ -3767,8 +3813,9 @@ static void efectos_dibuja(void)
         }
     }
     pvr_prim(&cab_humo, sizeof cab_humo);
-    for (i = 0; i < NHUMO; i++) {
-        const humo_t *h = humos + i; float t = h->edad, tam, p[4][3]; int k; uint32_t col;
+    humo_px = 0;
+    for (i = 0; i < NHUMO; i++) {                               /* del mas nuevo al mas viejo (tope HUMO_PANTALLAS) */
+        const humo_t *h = humos + (humo_sig + NHUMO - 1 - i) % NHUMO; float t = h->edad, tam, p[4][3]; int k; uint32_t col;
         if (t <= 0) continue;
         tam = 0.6f + 2.6f * t; col = ((uint32_t)((1 - t) * 140) << 24) | 0xE0E0E0;
         for (k = 0; k < 4; k++) {
@@ -3776,8 +3823,11 @@ static void efectos_dibuja(void)
             p[k][0] = h->p[0] + sx * der[0] + sy * arr[0]; p[k][1] = h->p[1] + sx * der[1] + sy * arr[1] + tam * 0.5f;
             p[k][2] = h->p[2] + sx * der[2] + sy * arr[2];
         }
-        pt_cuad((const float (*)[3])p, UV1, col);
+        if (pt_cuad_humo((const float (*)[3])p, UV1, col)) break;
     }
+#ifdef DIAG_SALIDA
+    diag_humo_pct = (uint32_t)(humo_px * 100.0f / (640.0f * 480.0f));
+#endif
 }
 
 /* ---------------------------------------------------------------- textos */
@@ -6636,7 +6686,7 @@ int main(int argc, char **argv)
     uint32_t cuadro = 0, bot_ant = 0, t_estado = 0; uint64_t t0, tcpu = 0, c0;
     float cam_y = 0, tiempo = TIEMPO_ETAPA, fps = 0, ms = 0, cam_fw[3] = { 0, 0, -1 }, ttit = 0;
     char s1[96], s2[96], s3[96], msg[32] = ""; int aviso_rama = 0, pista = 0, pasos = 1, paso, saltos = 0, saltos_ver = 0;
-    int64_t reloj = 0; uint32_t nuevo_pend = 0; float lejos_obj = lejos;
+    int64_t reloj = 0; uint64_t gd_us_ant = 0; int tras_carga = 0; uint32_t nuevo_pend = 0; float lejos_obj = lejos;
     uint64_t c_log = 0, t_log = 0, t_ini = timer_ms_gettime64(); float ms_log = 0, t_carga = 0;
     (void)argc; (void)argv;
     ta_teo_tab_pon();
@@ -6735,7 +6785,11 @@ int main(int argc, char **argv)
 #if !defined(PRUEBA_AUTO) && !defined(PRUEBA_JUGADOR)              /* las pruebas automaticas van directas */
     if (video_titulo) video_titulo();                           /* gancho: pelicula de inicio antes del titulo */
 #endif
+    gd_hilo_juego();
     menu_entra(manual_, pista, NPISTAS);
+#ifdef DIAG_GD_LENTO
+    { extern int gd_diag_lento; gd_diag_lento = 1; }            /* medida: el GD lento desde aqui (no en el arranque) */
+#endif
     t0 = timer_ms_gettime64();
 
     for (;;) {
@@ -6750,12 +6804,31 @@ int main(int argc, char **argv)
                juego no se ralentiza (cada cuadro hace mas pasos). Un cuadro sin pasos (0) es posible, como en el
                original; lo pulsado en el se guarda para el siguiente. */
             int64_t ahora = (int64_t)timer_us_gettime64() * 60, d;
-            if (!reloj) reloj = ahora;
+            /* lo que el hilo del juego ha estado parado leyendo del GD no es tiempo de juego (en el original las cargas
+               van con su pantalla y la logica del modo espera): sin esto, tras una carga de N s el cuadro siguiente
+               daba N x 60 pasos de golpe (la escena de la salida pasaba sin verse en la consola) */
+            { uint64_t g = gd_us_juego(); if (reloj) reloj += (int64_t)(g - gd_us_ant) * 60; gd_us_ant = g; }
+            if (!reloj || reloj > ahora) reloj = ahora;
+            if (tras_carga) { tras_carga--; reloj = ahora - PERIODO_60; }   /* recien cargada la carrera: un paso */
             d = ahora - reloj;
             pasos = d > 0 ? (int)((d + PERIODO_60 / 2) / PERIODO_60) : 0;
             if (pasos > PASOS_MAX) { pasos = 1; reloj = ahora - PERIODO_60; }
             reloj += pasos * PERIODO_60; if (pasos > 1) saltos += pasos - 1;
             if (!pasos) { nuevo_pend |= nuevo; nuevo = 0; } else { nuevo |= nuevo_pend; nuevo_pend = 0; }
+#ifdef DIAG_SALIDA                                              /* medida: cada cuadro dibujado de la escena de la salida */
+            {   /* se guarda en RAM y se vuelca al acabar la escena (el printf por el puerto serie cuesta ms) */
+                static int64_t ant; static int n_, v_; static uint32_t gn; static uint16_t r_[420][8];
+                if (estado == CUENTA || sal_on) {
+                    if (n_ < 420) { uint16_t *q = r_[n_++]; q[0] = (uint16_t)sal_f; q[1] = (uint16_t)pasos; q[2] = (uint16_t)((ahora - ant) / 6000);
+                        q[3] = (uint16_t)(diag_log_us / 10); q[4] = (uint16_t)(diag_dib_us / 10); q[5] = (uint16_t)vtx_ult; q[6] = (uint16_t)diag_humo_pct; q[7] = (uint16_t)(gd_n_juego() - gn); }
+                    v_ = 0;
+                } else if (n_ && ++v_ > 120) {                  /* cuadro, pasos, dt, logica y dibujo (0,01 ms), vertices, humo (%), GD */
+                    int k_; for (k_ = 0; k_ < n_; k_++) printf("SAL: %u %u %u %u %u %u %u %u\n", r_[k_][0], r_[k_][1], r_[k_][2], r_[k_][3], r_[k_][4], r_[k_][5], r_[k_][6], r_[k_][7]);
+                    n_ = 0;
+                }
+                ant = ahora; gn = gd_n_juego();
+            }
+#endif
 #ifdef DIAG_CONGELA
             pasos = !diag_congelado;                            /* medida: un paso por cuadro (el estado no depende de los
                                                                    fps) y luego el mismo cuadro para siempre */
@@ -6888,6 +6961,13 @@ int main(int argc, char **argv)
                 if (cam_ok) { cam_inicia(&cam, &cam_tab); cam_t_choque = 0; }   /* 484EE0 */
                 if (chr_ok == 1) robot_carrera(modelo_jug);          /* 4884D0 / 4885A0 */
                 ram_mapa(variante == 2 ? "carrera INFARTO" : variante == 0 || variante == 7 ? "carrera CONTRARRELOJ" : "carrera OutRun");
+                /* todo lo de arriba es la carga (GD, VRAM, AICA): la escena de la salida empieza a contar aqui, en su
+                   cuadro 0, como START del original (4871A0 en la etapa 60, con la carga ya hecha). Este mismo cuadro
+                   da un paso mas (el cuadro 0 de la escena: el coche y la camara del guion ya puestos; sin el se veia
+                   un cuadro con el coche en la linea y la camara de carrera) y los dos siguientes van a un paso cada
+                   uno, tarden lo que tarden (el primer dibujo y el relleno de la musica tras la carga no son tiempo
+                   de la escena: en el original su cuadro 0 va debajo de la pantalla de carga) */
+                reloj = (int64_t)timer_us_gettime64() * 60; pasos = paso + 2; tras_carga = 2;
             }
         } else if (estado == CUENTA) {
             /* temporizador de salida del original (8367BC): 360 al entrar en GAME (485250 pone la vista en 0x167),
@@ -7152,6 +7232,9 @@ int main(int argc, char **argv)
             texto_arriba(s1, ver ? s2 : NULL, ver ? s3 : NULL);
         }
 
+#ifdef DIAG_SALIDA
+        diag_log_us = (uint32_t)(timer_us_gettime64() - c_log);
+#endif
         t_log += timer_us_gettime64() - c_log;
         if (pvr_wait_ready() < 0) { if (++pvr_fallos >= 5) pvr_colgado(estado); } else pvr_fallos = 0;
         c0 = timer_us_gettime64();
@@ -7173,6 +7256,14 @@ int main(int argc, char **argv)
         else fx = 320.0f / (0.75f + 0.07f * fminf(yo.v / 85.0f, 1.0f));
         pon_vista(ojo_, mira, estado != TITULO && cam_ok ? cam.balanceo : 0.0f);
         pon_coche(&yo, mod_coche);
+#ifdef DIAG_SALIDA
+        if (sal_on && (sal_f < 3 || sal_f % 20 < 2) && sal_f <= 125) {
+            float q[4]; int j_;
+            for (j_ = 0; j_ < 4; j_++) q[j_] = mod_coche[3][0] * vista[0][j_] + mod_coche[3][1] * vista[1][j_] + mod_coche[3][2] * vista[2][j_] + vista[3][j_];
+            printf("SALDIB: %d coche %.2f %.2f %.2f pantalla %.0f %.0f w %.2f ojo %.2f %.2f %.2f mira %.2f %.2f %.2f fx %.0f pose %.2f\n", sal_f, (double)mod_coche[3][0], (double)mod_coche[3][1], (double)mod_coche[3][2],
+                   (double)(q[0] / q[3]), (double)(q[1] / q[3]), (double)q[3], (double)ojo_[0], (double)ojo_[1], (double)ojo_[2], (double)mira[0], (double)mira[1], (double)mira[2], (double)fx, (double)yo.pose_t[0]);
+        }
+#endif
         if (cex_n && menu_color() != cex_color) coche_color(menu_color());   /* color elegido (boton Y del menu) */
         /* luces: sin SCN_EFC (bits de noche y tunel de 4A25F0) en la demo, banderas 0; freno = pedal pisado */
         coche_anima_matrices(estado == TITULO);                 /* piezas animadas (46AE70) */
@@ -7352,6 +7443,9 @@ int main(int argc, char **argv)
         if (estado == TITULO) vmu_lcd_logo();
         else vmu_lcd_carrera(fis_ok ? (int)fis.velocidad_hud : (int)(yo.v * 3.6f), fis_ok ? fis.marcha : 1, fis_ok ? fpar.marchas : 6);
         vmu_lcd_paso();
+#ifdef DIAG_SALIDA
+        diag_dib_us = (uint32_t)(timer_us_gettime64() - c0);
+#endif
         tcpu += timer_us_gettime64() - c0;
 #ifdef DIAG_PERFIL
         {   static int pf_ini;                              /* medida: perfil del SH4 en carrera (perfil.c) */

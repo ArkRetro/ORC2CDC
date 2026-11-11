@@ -28,3 +28,8 @@ Teclado de Flycast: X = A, C = B, Return = START, flechas = cruceta, F / V = gat
 Borrar los GDI despues (/dev/shm/dcr): llevan los datos de tu disco.
   conduce.sh  como nav.sh y despues conduce (A pisado, la cruceta a ratos) [segundos, 180]: una captura cada 5 s
            (c_000..) y "CONGELADO" con error si dos seguidas son iguales (el cronometro del HUD no cambia).
+Medidas de la escena de la salida (make -C demo CPPFLAGS="..."): -DDIAG_SALIDA guarda de cada cuadro dibujado de la
+escena su cuadro, pasos, dt, us de logica y de dibujo, vertices, pantallas de humo (%) y lecturas del GD del hilo del
+juego, y lo vuelca al acabar (lineas "SAL:"; "SALCAM:" / "SALDIB:" la camara y donde cae el coche en pantalla);
+-DDIAG_GD_LENTO=<KB/s> frena las lecturas del GD pasado el arranque (120 ms por salto), como la consola: en Flycast
+son instantaneas y las cargas que se comen cuadros no se ven. Con -DPRUEBA_JUGADOR va directo a la carrera.

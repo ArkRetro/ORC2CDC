@@ -10,6 +10,12 @@ static uint8_t sec[2048] __attribute__((aligned(32)));
 static kthread_t *fondo;                                /* hilo de la musica */
 static volatile uint64_t ult_primer_plano;              /* ms de la ultima lectura de otro hilo */
 void gd_hilo_fondo(void) { fondo = thd_get_current(); }
+/* el hilo del juego (gd_hilo_juego) y el tiempo que lleva parado en lecturas del GD (gd_us_juego): mientras lee no hay
+   cuadros, y el reloj de la logica no debe contarlo (demo/main.c) */
+static kthread_t *juego; static volatile uint64_t us_juego; static volatile uint32_t n_juego;
+void gd_hilo_juego(void) { juego = thd_get_current(); }
+uint64_t gd_us_juego(void) { return us_juego; }
+uint32_t gd_n_juego(void) { return n_juego; }
 int gd_ocupado(uint32_t ms) { return ult_primer_plano && timer_ms_gettime64() - ult_primer_plano < ms; }
 
 /* por DMA si el destino esta alineado a 32 (la CPU queda libre mientras llegan los datos); si no, PIO. KallistiOS
@@ -25,11 +31,20 @@ int gd_ocupado(uint32_t ms) { return ult_primer_plano && timer_ms_gettime64() - 
 static mutex_t m_gd = RECURSIVE_MUTEX_INITIALIZER;
 static volatile uint32_t n_err; static volatile int ult_err;
 void gd_errores(uint32_t *n, int *ult) { *n = n_err; *ult = ult_err; }
+#ifdef DIAG_GD_LENTO
+int gd_diag_lento;                                      /* lo enciende main.c pasado el arranque */
+#endif
 static int lee(uint32_t lba, int n, void *dst)
 {
-    int r, pp = thd_get_current() != fondo, k;
+    int r, pp = thd_get_current() != fondo, k, jg = thd_get_current() == juego;
+    uint64_t t0 = jg ? timer_us_gettime64() : 0;
     mutex_lock(&m_gd);
     if (pp) ult_primer_plano = timer_ms_gettime64();
+#ifdef DIAG_GD_LENTO                                    /* medida: en Flycast el GD lee al instante; aqui cada lectura
+                                                           tarda como en la consola (DIAG_GD_LENTO KB/s y 120 ms de
+                                                           salto si no sigue a la anterior) */
+    {   static uint32_t sig; if (gd_diag_lento) thd_sleep((lba != sig ? 120 : 0) + n * 2048 / (DIAG_GD_LENTO)); sig = lba + n; }
+#endif
     for (k = 0; k < 4; k++) {
         if (!(r = cdrom_read_sectors_ex(dst, lba + 150, n, ((uintptr_t)dst & 31) == 0))) break;
         n_err++; ult_err = r;
@@ -38,6 +53,7 @@ static int lee(uint32_t lba, int n, void *dst)
     }
     if (pp) ult_primer_plano = timer_ms_gettime64();
     mutex_unlock(&m_gd);
+    if (jg) { us_juego += timer_us_gettime64() - t0; n_juego++; }
     return r;
 }
 int gd_lee(uint32_t lba, int n, void *dst) { return lee(lba, n, dst); }
