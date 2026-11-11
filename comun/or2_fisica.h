@@ -137,6 +137,8 @@ typedef struct {
     /* --- derivados --- */
     float dir_g;           /* angulo geometrico de direccion (unid. 16 bit) */
     float cg_del, cg_tras; /* distancia CG-eje m                            */
+    float forma[4][3];     /* work+690: esquinas de la carroceria contra los muros (marco del PC: */
+                           /* x derecha, y arriba, z atras, desde el CG; 4A1FC0)                  */
     float carga_est[2];    /* carga estatica por rueda kgf                  */
     float sube[8], baja[8], baja_fr[8]; /* umbrales m/cuadro               */
     float v_tope;          /* e+0xE64: punta al corte (0x1644) con la fila  */
@@ -252,6 +254,10 @@ typedef struct {
     /* stick * 127                                                                                     */
     int   volumen, volumen_ok;
     int   nivel;            /* nivel de la etapa (0..4): CheckWanderer acepta el material 7 en el 0  */
+    /* suelo bajo cada rueda (calc_ground_coli_face: wheel+3C) respecto al plano del suelo del coche (m, +   */
+    /* arriba); suelo_ok = 0: el plano en las cuatro (car_sus_coli_check sobre un suelo plano)            */
+    float suelo_rueda[4];
+    int   suelo_ok;
     int   sin_ayuda_tierra; /* 1 = sin CheckWanderer (la variante de juego 0)                        */
 } or2_entrada_t;
 
@@ -369,6 +375,8 @@ typedef struct {
     int   atrapa;           /* sitio (+64) dentro de un tramo de la etapa: 1 atrapamiento del choque (PS2 0x3dee58),
                                2 del roce (0x3dfed8), 4 desvio del estado 1 al 5 (0x3d2f38); 0 en la union (+5C)  */
     int   nivel_etapa;      /* nivel de la etapa del ultimo paso (crush_threshold de CbwColiWall, PS2 0x1994c4)  */
+    uint32_t muro_mascara;  /* work+670 de CbwColiWall (bit 31 - k: el punto k de la forma ha entrado en el muro);    */
+                            /* 0 = no se sabe (el lado del choque fuerte sale entonces de la normal)                   */
 } or2_coche_t;
 
 /* Copia los campos de una columna. tabla = floats LE tal cual (filas*19).
@@ -427,6 +435,11 @@ void or2_choque_trafico(const or2_choques_t *q, or2_otro_t *a, or2_otro_t *b);
    or2_paso. Devuelve 1 si ha sido un golpe (rebote), 0 si un roce y 2 si ademas es un choque fuerte (estados 1,
    2 o 5: animacion, perdida de velocidad y grua; ver c->grua y or2_entrada_t.grua_*). */
 int  or2_choque_muro(or2_coche_t *c, const or2_param_t *p, float nx, float ny, float pen);
+
+/* PlWrecker inmediato (504900 fase 1): ningun punto de la forma de la carroceria pisa suelo. Quien llama pone el
+   coche en el centro de la carretera; esto deja la velocidad (0, o reducida en los estados 2 y 5 del choque) por el
+   rumbo de la carretera alli (rad, + derecha) y sin giro */
+void or2_grua_inmediata(or2_coche_t *c, const or2_param_t *p, float rumbo);
 
 /* Rebufo (CheckSlipStream 4A4D20): los n coches cercanos (dx, dy, vx, vy de or2_otro_t). Llamar una vez por
    cuadro antes de or2_paso. Quita resistencia del aire y sube el corte en la ultima marcha. */

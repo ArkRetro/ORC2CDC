@@ -31,6 +31,11 @@ carrera) y no a tiempos fijos: con todos los arboles el arranque tarda varios mi
 Unos 10 min por prueba; las tres a la vez en displays distintos tambien.
 Teclado de Flycast: X = A, C = B, Return = START, flechas = cruceta, F / V = gatillos.
 Borrar los GDI despues (/dev/shm/dcr): llevan los datos de tu disco.
+  muro.sh  los muros y el suelo de la carroceria (GDI con -DPRUEBA_AUTO -DPRUEBA_MURO -DPRUEBA_SIN_TIEMPO y PRUEBA_CURSO /
+           PRUEBA_NODO / PRUEBA_RAMA / PRUEBA_FIN; -DMURO_ANTES compara con los de antes) [segundos, 240]: el piloto va
+           contra los muros cada 8 s y la demo mide cada cuadro la carroceria dentro de un muro, las ruedas del jugador
+           y del trafico bajo el suelo y los saltos de la camara; cuentas al final, error si la carroceria entra en un
+           muro o sale de la colision.
   conduce.sh  como nav.sh y despues conduce (A pisado, la cruceta a ratos) [segundos, 180]: una captura cada 5 s
            (c_000..) y "CONGELADO" con error si dos seguidas son iguales (el cronometro del HUD no cambia).
 Medidas de la escena de la salida (make -C demo CPPFLAGS="..."): -DDIAG_SALIDA guarda de cada cuadro dibujado de la

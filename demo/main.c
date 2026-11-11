@@ -1881,6 +1881,83 @@ static int fisica_modelo(int m)
 }
 static float dif_ang(float a) { while (a > M_PI) a -= 2 * M_PI; while (a < -M_PI) a += 2 * M_PI; return a; }
 #define VMAX 100.0f                                          /* techo teorico; punta real unos 300 km/h */
+/* El cuerpo de la fisica (work+10) en el mundo, con las filas del PC (ejes x a la derecha, y arriba y z atras, y
+   el centro de gravedad): el marco de la calzada del coche (pos en el suelo, fw, up) con el cabeceo y el balanceo de
+   la suspension y el CG a fis.alt sobre pos, como lo dibuja coche_anima_matrices (T(0, alt) Rx(cabeceo) Rz(balanceo)
+   desde el CG) */
+static void cuerpo_matriz(const float *pos, const float *fw, const float *up, float M[4][3])
+{
+    float r[3], cb = 1, sb = 0, cc = 1, sc = 0, alt = 0, F[3][3]; int k;
+    r[0] = fw[1] * up[2] - fw[2] * up[1]; r[1] = fw[2] * up[0] - fw[0] * up[2]; r[2] = fw[0] * up[1] - fw[1] * up[0];
+    if (fis_ok) { cb = cosf(fis.balanceo); sb = sinf(fis.balanceo); cc = cosf(fis.cabeceo); sc = sinf(fis.cabeceo); alt = fis.alt; }
+    F[0][0] = cb; F[0][1] = sb * cc; F[0][2] = sb * sc;         /* los ejes del cuerpo en el marco (x, y, z atras) */
+    F[1][0] = -sb; F[1][1] = cb * cc; F[1][2] = cb * sc;
+    F[2][0] = 0; F[2][1] = -sc; F[2][2] = cc;
+    for (k = 0; k < 3; k++) {
+        int j;
+        for (j = 0; j < 3; j++) M[k][j] = r[j] * F[k][0] + up[j] * F[k][1] - fw[j] * F[k][2];
+        M[3][k] = pos[k] + up[k] * alt;
+    }
+}
+static void m3_punto(const float M[4][3], const float *q, float *o)
+{
+    int k;
+    for (k = 0; k < 3; k++) o[k] = q[0] * M[0][k] + q[1] * M[1][k] + q[2] * M[2][k] + M[3][k];
+}
+/* suelo bajo las ruedas del jugador de la ultima calc_ground_coli_face (coche_coloca) para el paso siguiente de la
+   fisica: lo que queda cada una sobre el plano del coche (or2_entrada_t.suelo_rueda) y las clases (wheel+14 y
+   event+248: superficie de las ruedas y del centro) */
+static float suelo_g[4]; static uint32_t suelo_cl[4], suelo_cl_cen; static int suelo_g_ok;
+/* los muros y el suelo del jugador son los del original con la colision cargada (muro_original, suelo_jugador) */
+#ifdef MURO_ANTES
+#define COL_CUERPO 0                                            /* prueba: los muros y el suelo de antes (para comparar) */
+#else
+#define COL_CUERPO col_hay()
+#endif
+/* calc_ground_coli_face (PC 519500, PS2 0x1913e8) para el jugador: el centro del cuerpo (work+40) y el punto de
+   cada rueda (x de +04, y = +28 - el radio de su eje (filas 0x26 / 0x27: 0xB48 / 0xB94), z de +0C) con la matriz
+   del cuerpo, cada uno con GetYPositionSplChk (modo 0x400 con reintentos, referencia su propia altura); el suelo del
+   coche es el del centro (work+640) y su normal la de los cuatro contactos, (c1 - c2) x (c0 - c3) (work+628). Sin
+   suelo bajo el centro el original deja el punto del cuerpo; bajo una rueda, -0,1: aqui se queda a la altura del
+   coche (la demo no deja caer el coche) */
+static void suelo_jugador(coche_t *c, const float *pc, float g)
+{
+    float M[4][3], fw0[3], up0[3], cen[3], ct[4][3], n[3], a[3], b[3], d; int i, pol;
+    up0[0] = c->up[0]; up0[1] = c->up[1]; up0[2] = c->up[2];
+    if (!c->y_ok || !(up0[1] > 0.1f)) { up0[0] = up0[2] = 0; up0[1] = 1; }
+    fw0[0] = sinf(g); fw0[1] = 0; fw0[2] = -cosf(g);
+    d = fw0[0] * up0[0] + fw0[2] * up0[2];
+    for (i = 0; i < 3; i++) fw0[i] -= up0[i] * d;
+    norm(fw0);
+    cuerpo_matriz(pc, fw0, up0, M);
+    cen[0] = M[3][0]; cen[1] = M[3][1]; cen[2] = M[3][2];
+    {   float y = cen[1]; uint32_t cl;
+        if (suelo_mundo(cen[0], cen[2], &y, 1, &cl) >= 0 && cl != 1) { cen[1] = y; suelo_cl_cen = cl; } else { cen[1] = pc[1]; suelo_cl_cen = 1; }
+    }
+    for (i = 0; i < 4; i++) {
+        float q[3], y; uint32_t cl;
+        q[0] = fpar.via[i >> 1] * ((i & 1) ? 0.5f : -0.5f);     /* vehicle_wheel_positions 4A1E80 (rueda_pc) */
+        q[1] = (fis_ok ? fis.r[i].y28 : fpar.sus_anclaje[i >> 1] - fpar.alt_cg) - fpar.radio[i >> 1];
+        q[2] = i < 2 ? -fpar.cg_del : fpar.cg_tras;
+        m3_punto(M, q, ct[i]); y = ct[i][1];
+        pol = suelo_mundo(ct[i][0], ct[i][2], &y, 1, &cl);
+        ct[i][1] = pol >= 0 ? y : cen[1]; suelo_cl[i] = pol >= 0 ? cl : 1;
+    }
+    for (i = 0; i < 3; i++) { a[i] = ct[1][i] - ct[2][i]; b[i] = ct[0][i] - ct[3][i]; }
+    n[0] = a[1] * b[2] - a[2] * b[1]; n[1] = a[2] * b[0] - a[0] * b[2]; n[2] = a[0] * b[1] - a[1] * b[0];
+    norm(n);
+    if (!(n[1] > 0.1f)) { n[0] = n[2] = 0; n[1] = 1; }
+    c->pos[0] = cen[0]; c->pos[1] = cen[1]; c->pos[2] = cen[2]; c->y_ok = 1;
+    memcpy(c->up, n, 12);
+    fw0[0] = sinf(g); fw0[1] = 0; fw0[2] = -cosf(g);
+    d = fw0[0] * n[0] + fw0[2] * n[2];
+    for (i = 0; i < 3; i++) c->fw[i] = fw0[i] - n[i] * d;
+    norm(c->fw);
+    for (i = 0; i < 4; i++)                                     /* el suelo de cada rueda sobre el plano (pos, n) */
+        suelo_g[i] = ct[i][1] - (cen[1] - (n[0] * (ct[i][0] - cen[0]) + n[2] * (ct[i][2] - cen[2])) / n[1]);
+    suelo_g_ok = 1;
+}
+static int traf_asienta(coche_t *c, float yref, float g);
 /* posicion y orientacion en el mundo a partir de (s, x, a), apoyado en la calzada (altura, cabeceo, balanceo) */
 static void coche_coloca(coche_t *c)
 {
@@ -1890,6 +1967,13 @@ static void coche_coloca(coche_t *c)
     t[0] = sinf(th); t[1] = 0; t[2] = -cosf(th); r[0] = cosf(th); r[1] = 0; r[2] = sinf(th);
     c->pos[0] = p[0] + c->x * r[0]; c->pos[2] = p[2] + c->x * r[2];
     c->fw[0] = cv * t[0] + sv * r[0]; c->fw[2] = cv * t[2] + sv * r[2];
+    if (c == &yo && fis_ok && COL_CUERPO) {                    /* el jugador: calc_ground_coli_face del original */
+        float pc[3];
+        pc[0] = c->pos[0]; pc[1] = c->y_ok ? c->pos[1] : p[1]; pc[2] = c->pos[2];
+        suelo_jugador(c, pc, th + c->a + c->deriva);
+        return;
+    }
+    if (c != &yo && COL_CUERPO && traf_asienta(c, c->y_ok ? c->pos[1] : p[1], th + c->a + c->deriva)) return;   /* el trafico */
     {   /* las alturas de la colision del original (43EB60), con la referencia en el suelo del coche: el poligono del
            nivel por el que va (en los puentes hay dos); recien colocado, la de la ruta. Sin suelo bajo un punto (fuera de la
            colision) ese punto se queda a la altura del coche; sin colision cargada, el perfil de la ruta */
@@ -3656,6 +3740,56 @@ static uint32_t muro_chispas(const coche_t *c, int lado, float pen, float xm)
     for (i = 0; i < 4; i++) if (d[i] >= dm - pen) chispa_muro |= 1u << i;
     return cl;
 }
+/* Los muros del original para el jugador (con la colision cargada): CarBodyWallColiCheck (PC 504CE0, PS2
+   0x1987e8) con la forma de la carroceria (fpar.forma, 4A1FC0) y la matriz del cuerpo en el sitio nuevo (demo/coli.c
+   coli_muro). El coche sale lo que empuja el muro (work+40, en s y x de la ruta), pide las chispas de 41D810 (PS2
+   0x10b698: la rueda n si ha entrado el punto n, +670 bit 31 - n, y la forma pisa la clase 0x10F0020 en +2A8) y deja
+   en fis +2A8 y +670. Devuelve 1 con la normal de la primera cara (en el plano de la fisica: x, -z) y la mayor salida
+   para la respuesta (or2_choque_muro: calc_friction_status / cw_rebound_status / CwCrushStatus); 0 sin respuesta
+   (sin muro, o ColiSetObsolete sin punto de contacto) */
+static int muro_cbw_n;                                          /* contactos con el muro (PRUEBA_MURO) */
+static int muro_original(coche_t *c, float th, float *nx, float *ny, float *pen)
+{
+    float p[3], th2, pos[3], fw0[3], up0[3], M[4][3], d, l; coli_t *r[2]; coli_muro_t m; int k;
+    ruta_en(c->s, p, &th2, NULL, NULL);
+    pos[0] = p[0] + c->x * cosf(th2); pos[2] = p[2] + c->x * sinf(th2); pos[1] = c->y_ok ? c->pos[1] : p[1];
+    up0[0] = c->up[0]; up0[1] = c->up[1]; up0[2] = c->up[2];
+    if (!c->y_ok || !(up0[1] > 0.1f)) { up0[0] = up0[2] = 0; up0[1] = 1; }
+    d = th2 + c->a + c->deriva; fw0[0] = sinf(d); fw0[1] = 0; fw0[2] = -cosf(d);
+    d = fw0[0] * up0[0] + fw0[2] * up0[2];
+    for (k = 0; k < 3; k++) fw0[k] -= up0[k] * d;
+    norm(fw0);
+    cuerpo_matriz(pos, fw0, up0, M);
+    r[0] = col_et.ok ? &col_et : NULL; r[1] = col_un.ok ? &col_un : NULL;
+    coli_muro(r, &col_pred, M, (const float (*)[3])fpar.forma, 4, up0, &m);
+    fis.muro_clase = m.agregado; fis.muro_mascara = m.mascara;  /* +2A8 / +670 */
+    if (m.accion == 2) {                                        /* PlWrecker(1): fuera de la colision */
+        /* el centro de la fila de poligonos de su posicion de carretera (GetCsRoadInfoByCsLen 43E3B0), que es el centro
+           de la ruta (tools/conv_tramo.py recorrido_filas; en las uniones el de la fila de su rama, conv_union.ruta_rama) */
+        c->x = 0; c->y_ok = 0; suelo_g_ok = 0;
+        or2_grua_inmediata(&fis, &fpar, th);
+        c->v = sqrtf(fis.vx * fis.vx + fis.vy * fis.vy); c->a = 0; c->deriva = 0;
+        dbglog(DBG_INFO, "MURO: PlWrecker(1) en s %.0f (ningun punto de la forma pisa suelo)\n", (double)c->s);
+        return 0;
+    }
+    if (m.accion != 1) return 0;
+    muro_cbw_n++;
+    c->choque = 1; c->t_muro = 30;                              /* event+4 |= 0x20000 */
+    c->x += m.empuje[0] * cosf(th) + m.empuje[2] * sinf(th);   /* work+40 en la ruta */
+    c->s += m.empuje[0] * sinf(th) - m.empuje[2] * cosf(th);
+    if (m.agregado & CLASE_MURO)
+        for (k = 0; k < 4; k++) if (m.mascara & (0x80000000u >> k)) chispa_muro |= 1u << (k ^ 1);
+#ifdef DIAG_MURO
+    {   static int n_m; if (n_m++ % 8 == 0) dbglog(DBG_INFO, "MURO s %.1f x %.2f empuje %.3f %.3f dist %.3f clase %08x mascara %08x contacto %d cuad %d kmh %d\n",
+            (double)c->s, (double)c->x, (double)m.empuje[0], (double)m.empuje[2], (double)m.dist, (unsigned)m.agregado, (unsigned)m.mascara,
+            m.contacto, m.cuadrante, fis.kmh); }
+#endif
+    if (!m.contacto) return 0;
+    l = sqrtf(m.normal[0] * m.normal[0] + m.normal[2] * m.normal[2]);
+    if (!(l > 1e-6f)) return 0;
+    *nx = m.normal[0] / l; *ny = -m.normal[2] / l; *pen = m.dist;
+    return 1;
+}
 #define DERIVA_MAX 1.276f                                       /* 0x3400 = 73 grados */
 static void coche_paso(coche_t *c, float giro, float gas, float freno, float dt)
 {
@@ -3674,9 +3808,13 @@ static void coche_paso(coche_t *c, float giro, float gas, float freno, float dt)
         if (mando.usa) {                                        /* el mando como el original (zona muerta, filtro) */
             e.volumen = or2_volante(&fis, mando.eje, mando.izq, mando.der, VEL_DIRECCION, 1, 0); e.volumen_ok = 1;
         }
-        {   /* superficie bajo cada rueda y bajo el centro (calc_ground_coli_face: wheel+0x14 y event+0x248): de las
-               franjas de la COLI; la rueda i en (cg_del | -cg_tras, +-via/2) del cuerpo, que va a a + deriva de la
-               carretera */
+        if (suelo_g_ok && COL_CUERPO) {                         /* calc_ground_coli_face del ultimo coche_coloca */
+            memcpy(e.sup, suelo_cl, sizeof e.sup); e.sup_centro = suelo_cl_cen;   /* wheel+0x14 y event+0x248 */
+            memcpy(e.suelo_rueda, suelo_g, sizeof e.suelo_rueda); e.suelo_ok = 1;   /* el suelo de cada rueda (wheel+3C) */
+            memcpy(sup_rueda, e.sup, sizeof sup_rueda);         /* para las marcas (efectos_paso) */
+            sup_jug = e.sup[0] | e.sup[1] | e.sup[2] | e.sup[3]; sup_cen = e.sup_centro;   /* +244 / +248 */
+        } else {   /* sin la colision del original: las franjas de la ruta; la rueda i en (cg_del | -cg_tras, +-via/2) del
+               cuerpo, que va a a + deriva de la carretera */
             float h = c->a + c->deriva, ch = cosf(h), sh = sinf(h); int i;
             sup_yref = c->pos[1];                               /* (la referencia: el suelo del coche) */
             for (i = 0; i < 4; i++) {
@@ -3692,13 +3830,9 @@ static void coche_paso(coche_t *c, float giro, float gas, float freno, float dt)
             float g[3], tg, gx, gz;
             if (!grua_on) {                                     /* el punto: 10 posiciones de carretera por delante */
                 grua_s = fminf(c->s + GRUA_AVANCE, longitud - 50.0f); if (grua_s < c->s) grua_s = c->s;
-                /* el original toma el centro de la fila de poligonos de la carretera (GetCsRoadInfoByCsLen); aqui
-                   la ruta abarca las dos calzadas y la mediana, asi que el centro del carril del asfalto mas cercano */
-                {
-                    float xs[NASF]; int n = asfalto_carriles(grua_s, xs), k;
-                    grua_x = xs[0];
-                    for (k = 1; k < n; k++) if (fabsf(xs[k] - c->x) < fabsf(grua_x - c->x)) grua_x = xs[k];
-                }
+                /* el centro de la fila de poligonos de la carretera alli (pc_pl_wrecker_delayed: GetCsRoadInfoByCsLen
+                   43E3B0 de la posicion de carretera + 10): el centro de la ruta (tools/conv_tramo.py recorrido_filas) */
+                grua_x = 0;
                 grua_on = 1;
             }
             ruta_en(grua_s, g, &tg, NULL, NULL);
@@ -3721,6 +3855,16 @@ static void coche_paso(coche_t *c, float giro, float gas, float freno, float dt)
         }
         x0 = c->x;
         or2_paso(&fis, &fpar, &e, 0.0f);
+#ifdef DIAG_SUELO_RUEDAS
+        {   static int n_d; float sp = sqrtf(fis.vx * fis.vx + fis.vy * fis.vy);
+            if (fis.kmh > 400 || fabsf(e.suelo_rueda[0]) + fabsf(e.suelo_rueda[1]) + fabsf(e.suelo_rueda[2]) + fabsf(e.suelo_rueda[3]) > 0.4f || n_d % 30 == 0)
+                dbglog(DBG_INFO, "RUEDAS s %.1f x %.2f kmh %d v %.1f g %.2f %.2f %.2f %.2f carga %.0f %.0f %.0f %.0f alt %.2f c283 %d dist %.1f %.1f corr %.2f grua %d e88 %d\n",
+                       (double)c->s, (double)c->x, fis.kmh, (double)sp, (double)e.suelo_rueda[0], (double)e.suelo_rueda[1], (double)e.suelo_rueda[2], (double)e.suelo_rueda[3],
+                       (double)fis.r[0].carga, (double)fis.r[1].carga, (double)fis.r[2].carga, (double)fis.r[3].carga, (double)fis.alt, fis.c283, (double)e.dist_izq, (double)e.dist_der,
+                       (double)fis.corr_lat, fis.grua, fis.e88);
+            n_d++;
+        }
+#endif
 #ifdef PRUEBA_FISICA
         {   /* prueba: un resumen de la fisica cada segundo */
             static int n_fis;
@@ -3737,29 +3881,34 @@ static void coche_paso(coche_t *c, float giro, float gas, float freno, float dt)
         c->s += c->v * cosf(c->a) * dt;
         c->x += c->v * sinf(c->a) * dt + fis.corr_lat;         /* + la correccion lateral del rebote */
         fis.corr_lat = 0;
-        if (fis.recolocar) { fis.recolocar = 0; grua_on = 0; c->s = grua_s; c->x = grua_x; c->y_ok = 0; }   /* fin de la grua */
+        if (fis.recolocar) { fis.recolocar = 0; grua_on = 0; c->s = grua_s; c->x = grua_x; c->y_ok = 0; suelo_g_ok = 0; }   /* fin de la grua */
         ruta_en(c->s, p, &th1, &iz, &de);
         c->a = dif_ang(c->a - (th1 - th0));
-        {   /* muros: CbwColiWall del original (roce o rebote) con la normal hacia la calzada. El limite es el de la
-               colision del original (franjas de muro o el vacio pasado el arcen, la hierba o la arena); sin esos datos,
-               el borde del asfalto */
-            float nx = 0, ny = 0, pen = 0, h, li, ld, xa, xb, xm = 0; int lado_m = 0; c->choque = 0; if (c->t_muro > 0) c->t_muro--;
-            limites(c->s, &li, &ld);
-            lim = li - 1.0f;
-            if (c->x < -lim) { pen = -lim - c->x; c->x = -lim; nx = cosf(th1); ny = -sinf(th1); lado_m = -1; xm = -li - MURO_SONDA; }
-            lim = ld - 1.0f;
-            if (c->x > lim) { pen = c->x - lim; c->x = lim; nx = -cosf(th1); ny = sinf(th1); lado_m = 1; xm = ld + MURO_SONDA; }
-            if (muro_interior(c->s, c->x, 1.0f, &xa, &xb)) {     /* un muro entre las calzadas */
-                if (x0 < (xa + xb) * 0.5f) { pen = c->x + 1.0f - xa; c->x = xa - 1.0f; nx = -cosf(th1); ny = sinf(th1); lado_m = 1; }
-                else { pen = xb - (c->x - 1.0f); c->x = xb + 1.0f; nx = cosf(th1); ny = -sinf(th1); lado_m = -1; }
-                xm = (xa + xb) * 0.5f;
+        {   /* muros: con la colision del original, CarBodyWallColiCheck con la forma de la carroceria (muro_original);
+               sin ella (ficheros antiguos), el limite de la ruta (franjas de muro o el vacio pasado el arcen, la hierba o
+               la arena de tools/conv_tramo.py; sin esos datos, el borde del asfalto) con el coche como un punto a 1 m
+               (PROVISIONAL). La respuesta es la de CbwColiWall (or2_choque_muro) con la normal hacia la calzada */
+            float nx = 0, ny = 0, pen = 0, h, li, ld, xa, xb, xm = 0; int lado_m = 0, resp = 0; c->choque = 0; if (c->t_muro > 0) c->t_muro--;
+            if (COL_CUERPO) resp = muro_original(c, th1, &nx, &ny, &pen);
+            else {
+                fis.muro_mascara = 0;
+                limites(c->s, &li, &ld);
+                lim = li - 1.0f;
+                if (c->x < -lim) { pen = -lim - c->x; c->x = -lim; nx = cosf(th1); ny = -sinf(th1); lado_m = -1; xm = -li - MURO_SONDA; }
+                lim = ld - 1.0f;
+                if (c->x > lim) { pen = c->x - lim; c->x = lim; nx = -cosf(th1); ny = sinf(th1); lado_m = 1; xm = ld + MURO_SONDA; }
+                if (muro_interior(c->s, c->x, 1.0f, &xa, &xb)) {     /* un muro entre las calzadas */
+                    if (x0 < (xa + xb) * 0.5f) { pen = c->x + 1.0f - xa; c->x = xa - 1.0f; nx = -cosf(th1); ny = sinf(th1); lado_m = 1; }
+                    else { pen = xb - (c->x - 1.0f); c->x = xb + 1.0f; nx = cosf(th1); ny = -sinf(th1); lado_m = -1; }
+                    xm = (xa + xb) * 0.5f;
+                }
+                if (nx != 0 || ny != 0) { fis.muro_clase = muro_chispas(c, lado_m, pen, xm); c->choque = 1; c->t_muro = 30; resp = 1; }
             }
-            if (nx != 0 || ny != 0) {
+            if (resp) {
                 int golpe;
-                fis.muro_clase = muro_chispas(c, lado_m, pen, xm); fis.atrapa = atrapa_de(c->s);
+                fis.atrapa = atrapa_de(c->s);
                 fis.golpe_sonido = 0;
                 golpe = or2_choque_muro(&fis, &fpar, nx, ny, pen);   /* 2 = choque fuerte (estados 1, 2, 5) */
-                c->choque = 1; c->t_muro = 30;
 #ifdef DIAG_CHISPA
                 if (golpe) dbglog(DBG_INFO, "GOLPE %d clase %08x atrapa %d kmh %d estado %d c282 %d\n", golpe, (unsigned)fis.muro_clase, fis.atrapa, fis.kmh, fis.t_choque > 0 ? fis.choque : 0, fis.c282);
 #endif
@@ -7062,6 +7211,134 @@ static void traf_ani_lee(int m)
     if (!piezas_indices(&mtraf[m], NTRUEDA + 1, &a->idx, a->ini)) return;
     a->ok = 1;
 }
+/* El trafico en el suelo como el original cada cuadro (PS2 0x1eb0c0; PC tras 504E70 en el paso del trafico): el
+   suelo 0x100 bajo su centro (car+14 / +18; sin suelo se queda) y, en la etapa (+5C = 0) a menos de 100 m de la camara
+   (car+300, la z de la camara, >= -100: 0xC2C80000) o en los pesados (+320 0 o 1), 46E4B0 (PS2 0x1de4b8): tres puntos
+   del descriptor del LOD 0 (md = [[[4866C0]]]: +3C con x = 0, +5C y +6C, las filas 0, 2 y 4 de TAN1) girados con el
+   rumbo del coche, cada uno con 43EB60 (0x400 en el LOD 0, si no 0x100; si alguno no tiene suelo, nada); la altura
+   ((p1 + p2) / 2 + p0) / 2 y los ejes x = p2 - p1, z = (p1 + p2) / 2 - p0, y = z x x. Devuelve 0 si no lo asienta:
+   lejos o en la union el original usa la normal del poligono bajo el centro (46E740 = PS2 0x1de740, con las normales
+   de las esquinas de todos los poligonos, que COL1 no lleva: SIN PORTAR) y la demo sigue con sus 4 muestras */
+static uint8_t traf_asentado[NTRAF];                            /* (PRUEBA_MURO) 1: 46E4B0 con 0x400, 2: con 0x100 */
+static int traf_asienta(coche_t *c, float yref, float g)
+{
+    const trafico_t *t = (const trafico_t *)c;                  /* (c es el primer campo de trafico_t) */
+    int i = (int)(t - traf), m, raiz, pol, k, lod, pesado; float y = yref, zv = 0, q[3][3], v[3], d1[3], n[3], rt[3], at[3];
+    uint32_t cl; coli_t *r[2];
+    if (i < 0 || i >= NTRAF) return 0;
+    traf_asentado[i] = 0;
+    m = t->modelo;
+    if (!tani[m].ok) return 0;
+    r[0] = col_et.ok ? &col_et : NULL; r[1] = col_un.ok ? &col_un : NULL;
+    raiz = coli_altura(r, &col_pred, 0x100, c->pos[0], &y, c->pos[2], &pol, &cl);
+    if (pol >= 0 && cl != 1) c->pos[1] = y;
+    else if (!c->y_ok) c->pos[1] = yref;
+    if (pol < 0 || raiz != 0) return 0;                         /* en la union: 46E740 */
+    if (cam_ok) {
+        float f[3] = { cam.mira[0] - cam.ojo[0], cam.mira[1] - cam.ojo[1], cam.mira[2] - cam.ojo[2] };
+        norm(f); zv = (c->pos[0] - cam.ojo[0]) * f[0] + (c->pos[1] - cam.ojo[1]) * f[1] + (c->pos[2] - cam.ojo[2]) * f[2];
+    }
+    pesado = trc_ok && (trc[m].k320 == 0 || trc[m].k320 == 1);
+    if (!(-zv >= -100.0f) && !pesado) return 0;                 /* lejos: 46E740 */
+    lod = traf_lod(m, zv);
+    rt[0] = cosf(g); rt[1] = 0; rt[2] = sinf(g); at[0] = -sinf(g); at[1] = 0; at[2] = cosf(g);   /* x y z (atras) del coche */
+    for (k = 0; k < 3; k++) {
+        const float *w = tani[m].r[k * 2]; float lx = k ? w[0] : 0.0f, h; int j;
+        for (j = 0; j < 3; j++) q[k][j] = c->pos[j] + rt[j] * lx + at[j] * w[2];
+        q[k][1] += w[1]; h = q[k][1];
+        coli_altura(r, &col_pred, lod == 0 ? 0x400 : 0x100, q[k][0], &h, q[k][2], &pol, &cl);
+        if (cl == 1) return 0;
+        q[k][1] = h;
+    }
+    c->pos[1] = ((q[2][1] + q[1][1]) * 0.5f + q[0][1]) * 0.5f;
+    for (k = 0; k < 3; k++) { d1[k] = q[2][k] - q[1][k]; v[k] = (q[1][k] + q[2][k]) * 0.5f - q[0][k]; }
+    norm(d1); norm(v);
+    n[0] = v[1] * d1[2] - v[2] * d1[1]; n[1] = v[2] * d1[0] - v[0] * d1[2]; n[2] = v[0] * d1[1] - v[1] * d1[0];
+    norm(n);
+    memcpy(c->up, n, 12);
+    for (k = 0; k < 3; k++) c->fw[k] = -v[k];
+    c->y_ok = 1; traf_asentado[i] = lod == 0 ? 1 : 2;
+    return 1;
+}
+#ifdef PRUEBA_MURO
+/* prueba: medidas de lo que se dibuja, cada cuadro (main, tras coche_anima_matrices): (1) cuanto ha entrado la
+   carroceria en un muro de la colision (la forma del original, fpar.forma, con el marco del coche dibujado, contra la
+   COLI con coli_muro: la mayor salida de una cara; MURO_DENTRO si pasa de 0,25 m) y si el centro del coche pisa un
+   muro o nada; (2) lo que queda cada rueda dibujada (el centro del buje menos el radio del modelo) sobre el suelo de
+   la COLI en su punto (RUEDA_HUNDIDA si se hunde mas de 5 cm); (3) lo mismo con el trafico: su plano de dibujo
+   (pos, up) en el sitio de sus ruedas (TAN1) contra el suelo con el que traf_asienta lo pone (0x400 en el LOD 0, si no
+   0x100; TRAF_HUNDIDO), y cuantas ruedas van sin asentar (46E740); (4) el ojo de la camara
+   respecto al coche (CAMARA_SALTO si se mueve mas de 0,6 m en un cuadro o queda a mas de 4 m sobre el). Resumen cada
+   2 s (MIDE) */
+static int pm_n, pm_dentro, pm_hundida, pm_thund, pm_cam, pm_h2, pm_tmed, pm_tlejos; static float pm_max, pm_min_rueda = 1e9f, pm_min_traf = 1e9f;
+static void prueba_mide(void)
+{
+    const char *z = cur_nodo >= 0 && cur_nodo < ncurso ? curso[cur_nodo].zona : "????";
+    float r[3], M[4][3]; int k, i; coli_t *rz[2]; coli_pred_t pr = col_pred; coli_muro_t m;
+    if (!col_hay() || !fis_ok) return;
+    r[0] = yo.fw[1] * yo.up[2] - yo.fw[2] * yo.up[1]; r[1] = yo.fw[2] * yo.up[0] - yo.fw[0] * yo.up[2]; r[2] = yo.fw[0] * yo.up[1] - yo.fw[1] * yo.up[0];
+    cuerpo_matriz(yo.pos, yo.fw, yo.up, M);
+    rz[0] = col_et.ok ? &col_et : NULL; rz[1] = col_un.ok ? &col_un : NULL;
+    coli_muro(rz, &pr, M, (const float (*)[3])fpar.forma, 4, yo.up, &m);
+    if (m.accion == 1 && m.dist > pm_max) pm_max = m.dist;
+    if (m.accion == 1 && m.dist > 0.25f) {
+        pm_dentro++;
+        if (pm_dentro % 4 == 1) dbglog(DBG_INFO, "MURO_DENTRO %.4s s %.1f x %.2f dist %.2f clase %08x mascara %08x kmh %d pos %.1f %.1f %.1f\n", z,
+            (double)yo.s, (double)yo.x, (double)m.dist, (unsigned)m.agregado, (unsigned)m.mascara, fis.kmh, (double)yo.pos[0], (double)yo.pos[1], (double)yo.pos[2]);
+    }
+    if (m.accion == 2) dbglog(DBG_INFO, "MURO_FUERA %.4s s %.1f x %.2f: ninguna esquina pisa suelo\n", z, (double)yo.s, (double)yo.x);
+    {   float y = yo.pos[1] + 0.3f; uint32_t cl; pr = col_pred;
+        int pol; coli_altura(rz, &pr, 0, yo.pos[0], &y, yo.pos[2], &pol, &cl);
+        if (pol < 0 || (cl & 0x010f4061u)) { static int n_c; if (n_c++ % 8 == 0) dbglog(DBG_INFO, "CENTRO_EN_MURO %.4s s %.1f x %.2f clase %08x\n", z, (double)yo.s, (double)yo.x, (unsigned)cl); }
+    }
+    for (k = 0; k < 4; k++) {
+        const float *h = ani_m[PZ_PINZA + k][3]; float w[3], y; uint32_t cl; int j;
+        for (j = 0; j < 3; j++) w[j] = yo.pos[j] + r[j] * h[0] + yo.up[j] * h[1] - yo.fw[j] * h[2] - yo.up[j] * ani.radio;
+        y = w[1];
+        if (suelo_mundo(w[0], w[2], &y, 1, &cl) < 0) continue;
+        if (w[1] - y < pm_min_rueda) pm_min_rueda = w[1] - y;
+        if (w[1] - y < -0.05f) { pm_hundida++; if (pm_hundida % 8 == 1) dbglog(DBG_INFO, "RUEDA_HUNDIDA %.4s s %.1f x %.2f rueda %d %.3f m (suelo %.2f clase %08x) kmh %d deriva %.1f g %.3f %.3f %.3f %.3f y28 %.3f aire %d cab %.2f bal %.2f alt %.3f\n", z,
+            (double)yo.s, (double)yo.x, k, (double)(w[1] - y), (double)y, (unsigned)cl, fis.kmh, (double)(yo.deriva * 57.3f), (double)suelo_g[0], (double)suelo_g[1], (double)suelo_g[2], (double)suelo_g[3],
+            (double)fis.r[k].y28, fis.r[k].aire, (double)(fis.cabeceo * 57.3f), (double)(fis.balanceo * 57.3f), (double)fis.alt); }
+        if (w[1] - y < -0.02f) pm_h2++;
+    }
+    for (i = 0; i < NTRAF; i++) {
+        const coche_t *c = &traf[i].c; float rt[3], lg; int a2;
+        if (traf[i].carril < 0 || fabsf(c->s - yo.s) > 120.0f) continue;
+        lg = largo_traf[traf[i].modelo] * 0.6f;
+        rt[0] = c->fw[1] * c->up[2] - c->fw[2] * c->up[1]; rt[1] = c->fw[2] * c->up[0] - c->fw[0] * c->up[2]; rt[2] = c->fw[0] * c->up[1] - c->fw[1] * c->up[0];
+        for (a2 = 0; a2 < 4; a2++) {                            /* las ruedas de TAN1 (0, 1, 2 y 4) en el plano de dibujo */
+            const tani_t *ta = tani + traf[i].modelo; const float *wr = ta->r[a2 < 3 ? a2 : 4];
+            float w[3], y; uint32_t cl; int j; float fx = (a2 < 2 ? lg : -lg), lx = (a2 & 1) ? 0.8f : -0.8f;
+            if (ta->ok) { fx = -wr[2]; lx = wr[0]; }
+            for (j = 0; j < 3; j++) w[j] = c->pos[j] + c->fw[j] * fx + rt[j] * lx;
+            y = w[1];
+            if (!traf_asentado[i]) { pm_tlejos++; continue; }  /* 46E740 (lejos o en la union): SIN PORTAR */
+            /* contra el suelo con el que traf_asienta lo pone, el del original: 0x400 en el LOD 0, si no 0x100 */
+            if (suelo_mundo(w[0], w[2], &y, traf_asentado[i] == 1, &cl) < 0) continue;
+            pm_tmed++;
+            if (w[1] - y < pm_min_traf) pm_min_traf = w[1] - y;
+            if (w[1] - y < -0.05f) { pm_thund++; if (pm_thund % 16 == 1) dbglog(DBG_INFO, "TRAF_HUNDIDO %.4s coche %d (%s) s %.1f x %.2f %.3f m golpe %d a %.1f deriva %.1f\n", z, i,
+                traf_asentado[i] == 1 ? "0x400" : "0x100", (double)c->s, (double)c->x, (double)(w[1] - y),
+                traf[i].golpe, (double)(c->a * 57.3f), (double)(c->deriva * 57.3f)); }
+        }
+    }
+    if (cam_ok) {                                               /* (4) la camara: salto del ojo respecto al coche */
+        static float rel_ant[3]; static int hay; float rel[3], d = 0, ys = cam.ojo[1]; int j, pol; uint32_t cl;
+        for (j = 0; j < 3; j++) { rel[j] = cam.ojo[j] - yo.pos[j]; d += (rel[j] - rel_ant[j]) * (rel[j] - rel_ant[j]); }
+        d = sqrtf(d); pol = suelo_mundo(cam.ojo[0], cam.ojo[2], &ys, 0, &cl);
+        if (hay && (d > 0.6f || rel[1] > 4.0f)) { pm_cam++; if (pm_cam % 4 == 1) dbglog(DBG_INFO, "CAMARA_SALTO %.4s s %.1f x %.2f salto %.2f alto %.2f vista %d suelo ojo %.2f (pol %d clase %08x)\n", z,
+            (double)yo.s, (double)yo.x, (double)d, (double)rel[1], cam.vista, (double)ys, pol, (unsigned)cl); }
+        memcpy(rel_ant, rel, sizeof rel); hay = 1;
+    }
+    if (++pm_n % 120 == 0) {
+        dbglog(DBG_INFO, "MIDE %.4s s %.0f x %.2f kmh %d: muro max %.2f (dentro %d) rueda min %.3f (hundidas %d, >2 cm %d) trafico min %.3f (%d de %d ruedas, sin asentar %d) choques %d camara %d\n", z,
+               (double)yo.s, (double)yo.x, fis.kmh, (double)pm_max, pm_dentro, (double)pm_min_rueda, pm_hundida, pm_h2, (double)pm_min_traf, pm_thund, pm_tmed, pm_tlejos,
+               muro_cbw_n, pm_cam);
+        pm_max = 0; pm_min_rueda = pm_min_traf = 1e9f;
+    }
+}
+#endif
 static void traf_anima_paso(float dt)
 {
     int i;
@@ -7925,6 +8202,13 @@ int main(int argc, char **argv)
                            (double)fis.pose_t[0], (double)fis.pose_t[1], (double)fis.pose_t[2], (double)fis.pose_r[0], (double)fis.pose_r[1], (double)fis.pose_r[2], (double)yo.x);
 #endif
                 if (auto_) piloto(&yo, &giro, &gas, &freno);
+#ifdef PRUEBA_MURO
+                {   /* prueba: contra los muros cada 8 s, por turnos: volante a fondo a la izquierda y a la derecha 1 s
+                       (golpe) y al 30 % 3,3 s (roce), con el gas pisado; el resto, el piloto */
+                    int t = crono % 480, k = (crono / 480) & 3;
+                    if (t >= 240 && t < 240 + (k < 2 ? 60 : 200)) { giro = (k & 1 ? 1.0f : -1.0f) * (k < 2 ? 1.0f : 0.3f); gas = 1; freno = 0; }
+                }
+#endif
 #ifdef PRUEBA_PILOTO_MENU
                 else piloto(&yo, &giro, &gas, &freno);          /* prueba: conduce el piloto en la carrera del menu */
 #endif
@@ -8271,6 +8555,9 @@ int main(int argc, char **argv)
         if (cex_n && menu_color() != cex_color) coche_color(menu_color());   /* color elegido (boton Y del menu) */
         /* luces: sin SCN_EFC (bits de noche y tunel de 4A25F0) en la demo, banderas 0; freno = pedal pisado */
         coche_anima_matrices(estado == TITULO);                 /* piezas animadas (46AE70) */
+#ifdef PRUEBA_MURO
+        if (estado == CARRERA) prueba_mide();
+#endif
         if (cex_n) coche_luces(ani.ban, estado != TITULO && (meta_pas ? meta.freno != 0 : fis_ok ? fis.freno_op != 0 : yo.freno_ant > 0.0f), estado != TITULO && ani.caliente);   /* car+38 != 0 (con la fisica del original coche_paso no toca freno_ant: los pilotos del freno no se encendian nunca) */
         if (cex_n) coche_entorno(mod_coche);
         if (cex_n) coche_luz(mod_coche, estado != TITULO);     /* la luz del entorno 2 en la pintura */

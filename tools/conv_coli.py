@@ -9,7 +9,8 @@ Del COLI0200 (cabecera de 64 bytes, rejilla de 256 x 256 celdas de 24 m desde -3
 celda, 1 tipo por poligono, 2 poligonos de 0x40, 3 normales de 0x30, 5 posicion de carretera por poligono) se guarda
 lo que lee la consulta, sin cambiar ningun valor (floats tal cual):
  - los vertices de los poligonos sin repetir (los cuadrilateros vecinos comparten esquinas) y sus indices;
- - el tipo (byte & 31: la clase 1 << tipo) y las banderas (+0x3C; la consulta usa los bits 1, 2 y 4);
+ - el tipo (byte & 31: la clase 1 << tipo) y las banderas (+0x3C; la consulta usa los bits 1, 2 y 4), con el codigo de
+   superficie (seccion 4, la tabla que CbwColiWall lee por 0x556e40 del PS2 / 780170 del PC: & 15) en los bits 4-7;
  - los vecinos que da ColiGetForward / Back / Left / RightPolygonNumber (pc_course_query.cpp) para la raiz del fichero:
    son funcion fija de las tablas (posicion de carretera, tramos de 43D4D0, tipo y la distancia de 0,5 entre esquinas),
    asi que se calculan aqui y la demo no necesita la seccion 5 ni los tramos; en la raiz 1 no hay (devuelven 0);
@@ -20,7 +21,8 @@ lo que lee la consulta, sin cambiar ningun valor (floats tal cual):
 
 Formato COL1 (little endian; cada seccion alineada a 4):
  'COL1', n poligonos, nv vertices, nn normales, nr registros de normales, x0, z0, ancho, alto de la rejilla,
- palabras de las listas, raiz (load_type), 0
+ palabras de las listas, raiz (load_type), 0, 1 (los bits 4-7 de las banderas son el codigo de superficie; 0 en los
+ ficheros de antes)
  vertices nv x 3 f32 | normales nn x 3 f32 | poligonos n x {u16 v[4]; u8 tipo; u8 banderas; u16 vecinos; u16 normal}
  | registros de normales nr x u16[4] | rejilla ancho x alto u16 | listas u16
  vecinos: bits 0-5 paso hacia delante (0 sin vecino; destino i + paso), 6-11 paso hacia atras (i - paso), bit 12
@@ -40,7 +42,8 @@ def _tablas(d):
     L = np.frombuffer(d[sec[5]:sec[5] + 2 * n], '<u2').astype(int)
     g = np.frombuffer(d[64:64 + 131072], '<u2').reshape(256, 256)          # [z][x]
     li = np.frombuffer(d[sec[0]:sec[1]], '<u2')
-    return n, nprim, V, fl, N, kd, L, g, li
+    sup = np.frombuffer(d[sec[4]:sec[4] + n], np.uint8).astype(int)      # codigo de superficie (cabecera + [+24])
+    return n, nprim, V, fl, N, kd, L, g, li, sup
 
 def _rangos(L, nprim):
     """PC 0x43DCD2..0x43DD78 (pc_coli0200.cpp): {primero, ultimo} por posicion de carretera"""
@@ -56,7 +59,7 @@ def _s16(v): v &= 0xffff; return v - 0x10000 if v & 0x8000 else v
 
 class _Raiz:
     def __init__(self, d, tipo):
-        (self.n, self.nprim, self.V, self.fl, self.N, self.kd, self.L, self.g, self.li) = _tablas(d)
+        (self.n, self.nprim, self.V, self.fl, self.N, self.kd, self.L, self.g, self.li, self.sup) = _tablas(d)
         self.tipo = tipo; self.rangos = _rangos(self.L, self.nprim) if self.nprim else []
         self.total = len(self.rangos)
     def bit(self, i): return 1 << (self.kd[i] & 31)
@@ -140,7 +143,7 @@ def escribe(d, fn, tipo):
         else: rec = len(recs); recs.append(i)
         assert rec < 0xffff or (f and a)
         v = vi.ravel()[4 * i:4 * i + 4]
-        polys += struct.pack('<4HBBHH', *[int(x) for x in v], r.kd[i] & 31, r.fl[i] & 0xff, nb, rec)
+        polys += struct.pack('<4HBBHH', *[int(x) for x in v], r.kd[i] & 31, (r.fl[i] & 0x0f) | (r.sup[i] & 0x0f) << 4, nb, rec)
     if recs:
         nu, ni = np.unique(r.N[recs].reshape(-1, 3).view('<u4'), axis=0, return_inverse=True)
     else:
@@ -149,7 +152,7 @@ def escribe(d, fn, tipo):
     z, x = np.nonzero(r.g)
     x0, z0, x1, z1 = int(x.min()), int(z.min()), int(x.max()), int(z.max())
     rej = np.ascontiguousarray(r.g[z0:z1 + 1, x0:x1 + 1]).astype('<u2')
-    cab = b'COL1' + struct.pack('<12I', n, len(vu), len(nu), len(recs), x0, z0, x1 - x0 + 1, z1 - z0 + 1, len(r.li), tipo, 0, 0)
+    cab = b'COL1' + struct.pack('<12I', n, len(vu), len(nu), len(recs), x0, z0, x1 - x0 + 1, z1 - z0 + 1, len(r.li), tipo, 0, 1)
     out = cab + vu.astype('<u4').tobytes() + nu.astype('<u4').tobytes() + _al4(bytes(polys)) \
         + _al4(np.asarray(ni, '<u2').tobytes()) + _al4(rej.tobytes()) + _al4(r.li.astype('<u2').tobytes())
     with open(fn, 'wb') as fh: fh.write(out)

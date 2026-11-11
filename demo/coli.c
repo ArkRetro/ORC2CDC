@@ -26,6 +26,7 @@ int coli_abre(coli_t *c, const uint8_t *d, uint32_t tam, const float *marco)
     c->li = (const uint16_t *)(d + o); o += (nl * 2 + 3) & ~3u;
     if (sizeof(coli_pol_t) != 14 || o > tam) return -2;
     if (marco) memcpy(c->marco, marco, sizeof c->marco);
+    c->mat = h[11] & 1;                                         /* (tools/conv_coli.py: los ficheros de antes no lo traen) */
     c->ok = 1;
     return 0;
 }
@@ -256,4 +257,151 @@ int coli_altura_spl(coli_t *const raices[2], coli_pred_t *pr, float x, float *y,
     }
     *y = h;
     return t;
+}
+
+/* ---- Muros de la carroceria: CarBodyWallColiCheck / CbwColiWall (ver coli.h) */
+#define MURO_CLASES 0x010f4060u
+/* modo de la cara por el codigo de superficie & 15 (PS2 0x3dede8, la de PC 0x5E0DE0): bits 0-3 = 2 cara especial
+   del triangulo, 4-7 los vertices que la forman */
+static const uint8_t MODO_CARA[16] = { 0x00, 0x01, 0x01, 0xc2, 0x00, 0x01, 0x01, 0xc2, 0x01, 0x42, 0x02, 0x03, 0x01, 0x42, 0x02, 0x03 };
+static void punto_m(const float M[4][3], const float *p, v3 o)   /* mxCalcPoint: p * M (vectores fila) */
+{
+    int k;
+    for (k = 0; k < 3; k++) o[k] = p[0] * M[0][k] + p[1] * M[1][k] + p[2] * M[2][k] + M[3][k];
+}
+/* CopColiPoint 43D1D0: los cuatro vertices del poligono en el marco de la carrera (el de su raiz) */
+static void vertices_mundo(const coli_t *c, int i, quad q)
+{
+    float cs = cosf(c->marco[3]), sn = sinf(c->marco[3]); int k;
+    for (k = 0; k < 4; k++) {
+        const float *v = vert(c, i, k);
+        q[k][0] = v[0] * cs + v[2] * sn + c->marco[0];
+        q[k][1] = v[1] + c->marco[1];
+        q[k][2] = -v[0] * sn + v[2] * cs + c->marco[2];
+    }
+}
+/* pc_direction_xz (pc_wall_rebound.cpp, PC 487790): (a - b) unitario en xz; con longitud 0, z = 1 */
+static void dir_xz(float ax, float az, float bx, float bz, float *ox, float *oz)
+{
+    float x = ax - bx, z = az - bz, l = sqrtf(x * x + z * z);
+    if (l > 1.0e-4f) { x = x / l; z = z / l; }
+    if (l == 0.0f) z = 1.0f;
+    *ox = x; *oz = z;
+}
+/* regular_special_face: normal en p0 (de p1 - p0, las salidas cruzadas: x -> p0.z, z -> p0.x), borde p1 y la
+   cara desplazada 0,01 (0x3C23D70A) en p3 */
+static void cara_especial(quad p)
+{
+    float ox, oz;
+    dir_xz(p[1][0], p[1][2], p[0][0], p[0][2], &ox, &oz);
+    p[0][2] = ox; p[0][0] = oz;
+    p[0][1] = 0.0f; p[0][2] = 0.0f - p[0][2];
+    p[3][0] = p[0][0] * 0.01f + p[1][0]; p[3][1] = p[1][1]; p[3][2] = p[0][2] * 0.01f + p[1][2];
+}
+/* alternate_special_face (codigos 8 | 2 | 1): la salida z va a p1.z y p0.x se queda con el vertice (como el PC) */
+static void cara_especial_alt(quad p)
+{
+    float ox, oz; v3 v2;
+    dir_xz(p[0][0], p[0][2], p[1][0], p[1][2], &ox, &oz);
+    p[0][2] = ox; p[1][2] = oz;
+    memcpy(v2, p[2], 12);
+    p[0][1] = 0.0f; p[0][2] = 0.0f - p[0][2];
+    p[3][0] = p[0][0] * 0.01f + v2[0]; p[3][1] = v2[1]; p[3][2] = p[0][2] * 0.01f + v2[2];
+    memcpy(p[1], v2, 12);
+}
+/* CalcColiWallFace 502E20 con a = p1, b = p0, c = p3, d = p2 (el orden en que CbwColiWall los pasa): el lado del
+   centro del coche (x, z) respecto a la linea entre los centros de las aristas a-b y c-d elige la arista a-d o c-b;
+   b sale con la normal (en xz), c con la cara desplazada 0,01 (y = 0, como el PC) y a con el borde */
+static void cara_muro(float x, float z, quad p)
+{
+    float *a = p[1], *b = p[0], *c = p[3], *d = p[2], bz, bx, az, ax, t0, t1, cr, lado, dx, dy, dz, l, inv;
+    bz = c[2] + d[2]; bx = c[0] + d[0]; az = a[2] + b[2]; ax = a[0] + b[0];
+    t0 = (bz - az) * x; t1 = (bx - ax) * z;
+    cr = bz * ax; cr = cr - az * bx; cr = cr * 0.5f;
+    lado = t1 - t0; lado = lado + cr;
+    if (lado >= 0.0f) { memcpy(d, b, 12); memcpy(a, c, 12); }
+    b[0] = a[0] - d[0];
+    dy = a[1] - d[1]; dx = b[0]; b[1] = dy;
+    dz = a[2] - d[2]; b[2] = dz;
+    l = sqrtf(dz * dz + dx * dx); inv = 1.0f / l;
+    b[2] = b[0] * inv; b[1] = 0.0f; b[0] = 0.0f - inv * dz;
+    c[0] = b[0] * 0.01f + a[0]; c[1] = b[1]; c[2] = b[2] * 0.01f + a[2];
+}
+void coli_muro(coli_t *const raices[2], coli_pred_t *pr, const float M[4][3], const float (*forma)[3], int n,
+               const float suelo_n[3], coli_muro_t *o)
+{
+    int k, j, pol[8], raiz[8], primero = 0; uint32_t cl[8], agg = 0, inter = 0xffffffffu, sel = 0, todo = 0;
+    v3 w[8], pos, cara0[3]; float maxd = 0.0f;
+    memset(o, 0, sizeof *o); memset(cara0, 0, sizeof cara0);
+    if (n > 8) n = 8;                                           /* (8 registros CBW_GETY_WORK en la pila del PC) */
+    for (k = 0; k < n; k++) {
+        float y;
+        punto_m(M, forma[k], w[k]); y = w[k][1];
+        raiz[k] = coli_altura(raices, pr, 0, w[k][0], &y, w[k][2], &pol[k], &cl[k]);
+        agg |= cl[k]; inter &= cl[k];
+    }
+    o->agregado = agg;
+    if (inter & 1u) { o->accion = 2; return; }                  /* ningun punto pisa suelo: PlWrecker(1) */
+    if ((inter & 2u) || !(agg & MURO_CLASES)) return;           /* work+670 = 0 */
+    o->accion = 1;
+    memcpy(pos, M[3], 12);                                      /* work+40 */
+    for (k = 0; k < n; k++) {
+        const coli_t *c; quad p; int mat, esp = 0; uint32_t masc = 0; float mn = 0.0f, dist;
+        if (!(cl[k] & MURO_CLASES)) continue;
+        c = raices[raiz[k]];
+        vertices_mundo(c, pol[k], p);
+        mat = c->mat ? (c->p[pol[k]].banderas >> 4) & 15 : 0;   /* 0x556e40[tipo][poligono] & 15 */
+        if (p[3][0] == p[2][0] && p[3][2] == p[2][2]) {
+            int modo = MODO_CARA[mat];
+            if ((modo & 15) == 2) {
+                v3 a, b; int alto = modo & 0xf0;
+                if (alto == 0x40) { memcpy(a, p[0], 12); memcpy(b, p[3], 12); memcpy(p[1], a, 12); memcpy(p[0], b, 12); }
+                else if (alto == 0x80) { memcpy(a, p[3], 12); memcpy(b, p[2], 12); memcpy(p[1], a, 12); memcpy(p[0], b, 12); }
+                else if (alto == 0xc0) { memcpy(a, p[1], 12); memcpy(b, p[2], 12); memcpy(p[0], a, 12); memcpy(p[1], b, 12); }
+                cara_especial(p); esp = 1;
+            } else if ((mat & 10) == 10) {
+                if (mat & 1) cara_especial_alt(p); else cara_especial(p);
+                esp = 1;
+            }
+        }
+        if (!esp) cara_muro(pos[0], pos[2], p);
+        /* la cara: normal p0, desplazada p3, borde p1. PushOutPosMatObsolete: los puntos con la matriz sin mover */
+        for (j = 0; j < n; j++) {
+            float in = (w[j][0] - p[3][0]) * p[0][0] + (w[j][1] - p[3][1]) * p[0][1] + (w[j][2] - p[3][2]) * p[0][2];
+            float fu = (w[j][0] - p[1][0]) * p[0][0] + (w[j][1] - p[1][1]) * p[0][1] + (w[j][2] - p[1][2]) * p[0][2];
+            if (in < 0.0f) masc |= 0x80000000u >> j;
+            if (mn > fu) mn = fu;
+        }
+        dist = fabsf(mn);
+        pos[0] += p[0][0] * dist; pos[1] += p[0][1] * dist; pos[2] += p[0][2] * dist;
+        if (dist > maxd) maxd = dist;
+        todo |= masc;
+        if (!primero) { memcpy(cara0[0], p[0], 12); memcpy(cara0[1], p[3], 12); memcpy(cara0[2], p[1], 12); sel = masc; primero = 1; }
+    }
+    o->mascara = todo; o->dist = maxd;
+    o->empuje[0] = pos[0] - M[3][0]; o->empuje[1] = pos[1] - M[3][1]; o->empuje[2] = pos[2] - M[3][2];
+    {   /* ColiSetObsolete con la primera cara: la normal en el marco del cuerpo y la media de los puntos entrados que
+           quedan detras de ella, pesada por su proyeccion */
+        float nl[3], suma = 0.0f, c3[3] = { 0, 0, 0 }; int usados = 0;
+        for (k = 0; k < 3; k++) nl[k] = cara0[0][0] * M[k][0] + cara0[0][1] * M[k][1] + cara0[0][2] * M[k][2];
+        for (j = 0; j < n; j++) {
+            float d;
+            if (!(sel & (0x80000000u >> j))) continue;
+            d = nl[0] * forma[j][0] + nl[1] * forma[j][1] + nl[2] * forma[j][2];
+            if (d < 0.0f) {
+                suma = d + suma; usados++;
+                for (k = 0; k < 3; k++) c3[k] = forma[j][k] * d + c3[k];
+            }
+        }
+        if (!usados) return;                                    /* sin contacto: CbwColiWall acaba aqui */
+        for (k = 0; k < 3; k++) c3[k] = c3[k] * (1.0f / suma);
+        o->contacto = 1;
+        o->cuadrante = c3[0] > 0.0f ? (c3[2] > 0.0f ? 2 : 3) : (c3[2] > 0.0f ? 1 : 0);
+    }
+    {   /* work+64C = (n.z, n.y, -n.x) x work+628 */
+        float a[3] = { cara0[0][2], cara0[0][1], 0.0f - cara0[0][0] };
+        o->normal[0] = a[1] * suelo_n[2] - a[2] * suelo_n[1];
+        o->normal[1] = a[2] * suelo_n[0] - a[0] * suelo_n[2];
+        o->normal[2] = a[0] * suelo_n[1] - a[1] * suelo_n[0];
+    }
 }

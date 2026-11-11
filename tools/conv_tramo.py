@@ -180,6 +180,32 @@ def recorrido_coli(seg):
         return np.stack([np.convolve(np.pad(q[:, j], 2, mode='edge'), k, 'valid') for j in range(3)], 1)
     return None
 
+def recorrido_filas(seg):
+    """ruta = centro de la carretera del original: por cada posicion de carretera (seccion 5 de COLI0200) el de la fila
+    de poligonos principales, como GetCsRoadInfoByCsLen (PC 43E3B0, decompilacion pc_wrecker.cpp): media de las
+    esquinas de la envolvente (v0 y v3 del primero de la fila, v1 y v2 del ultimo; la fila la da find_primary_course_run,
+    conv_coli._rangos); cada 4 m y suavizada como recorrido_coli. None sin colision o sin poligonos principales.
+    Antes la ruta salia de los carriles (SOO) o de la calzada dibujada recentrada en el asfalto (ajusta_al_asfalto), y
+    otro asfalto cerca (la calle que cruza, un ensanche) la sacaba de la carretera: ALPI s 2544-3964 hasta 15 m (los
+    limites dejaban al coche dentro de la roca), INDU 22 m, METR 19 m, RUIN 31 m, IMPE 37 m (s 4905: el coche fuera de la
+    colision y la camara subia de golpe). Con los muros de la colision en la demo (CarBodyWallColiCheck) el coche va por
+    la carretera y lo que la fisica toma de la ruta (rumbo, bordes, desvio +26C) tiene que ser de ella, como en el
+    original (GetRoadOfs 4A4010 con la fila de 43E3B0)"""
+    import conv_coli
+    for h, o, s in seg.ent:
+        d = bytes(seg.m[o:o + s])
+        if d[:8] != b'COLI0200': continue
+        r = conv_coli._Raiz(d, 0)
+        if not r.nprim: return None
+        c = np.array([(r.V[a, 0] + r.V[b, 1] + r.V[b, 2] + r.V[a, 3]) / 4 for a, b in r.rangos], float)
+        if c[0, 2] < c[-1, 2]: c = c[::-1]
+        Ls = np.concatenate([[0], np.cumsum(np.linalg.norm(np.diff(c, axis=0), axis=1))])
+        sm = np.arange(0, Ls[-1], 4.0)
+        q = np.stack([np.interp(sm, Ls, c[:, k]) for k in range(3)], 1)
+        k = np.ones(5) / 5
+        return np.stack([np.convolve(np.pad(q[:, j], 2, mode='edge'), k, 'valid') for j in range(3)], 1)
+    return None
+
 def alarga_a_la_colision(seg, cam):
     """la ruta de los carriles (SOO) o del asfalto se queda hasta 20 m antes de los extremos del tramo, que son el
     principio (origen) y el final (donde se coloca la union) de su colision: se alarga en recto, cada 4 m, hasta el
@@ -260,13 +286,13 @@ class Rejilla:
             if abs(h - y) < dy: return h
         return None
 
-def ajusta_al_asfalto(seg, cam):
-    """recentra la ruta en el asfalto (triangulos con la textura de carretera) y da sus bordes y los carriles: en cada
-    punto se prueba cada metro a lo ancho (-40 a 40) si cae en el asfalto"""
+def ajusta_al_asfalto(seg, cam, recentra=True):
+    """recentra la ruta en el asfalto (triangulos con la textura de carretera; recentra=False: la ruta no se mueve) y da
+    sus bordes y los carriles: en cada punto se prueba cada metro a lo ancho (-40 a 40) si cae en el asfalto"""
     tiras = puntos_asfalto(seg)
     if tiras is None: return cam, None, None
     rej = Rejilla(triangulos(tiras)); xs = np.arange(-40, 41, 1.0)
-    for vuelta in range(2):
+    for vuelta in range(2 if recentra else 1):
         t = np.gradient(cam, axis=0); t[:, 1] = 0; t /= np.linalg.norm(t, axis=1, keepdims=True) + 1e-9
         der = np.stack([-t[:, 2], np.zeros(len(t)), t[:, 0]], 1)
         occ = np.zeros((len(cam), len(xs)), bool)
@@ -280,7 +306,7 @@ def ajusta_al_asfalto(seg, cam):
         lo = np.interp(idx, idx[ok], lo[ok]); hi = np.interp(idx, idx[ok], hi[ok])
         k = np.ones(9) / 9
         lo = np.convolve(np.pad(lo, 4, mode='edge'), k, 'valid'); hi = np.convolve(np.pad(hi, 4, mode='edge'), k, 'valid')
-        if vuelta == 0: cam = cam + ((lo + hi) / 2)[:, None] * der
+        if vuelta == 0 and recentra: cam = cam + ((lo + hi) / 2)[:, None] * der
     # carriles: en los tramos ocupados (sin la mediana), unos 3,7 m cada uno; NCARRIL repartidos entre ellos
     car = np.zeros((len(cam), NCARRIL)); ant = [0.0]
     for i in range(len(cam)):
@@ -371,10 +397,11 @@ MURO = 0x010f4060                       # materiales de muro (CbwColiWall: conta
 def es_muro(m):
     return m <= 0 or bool((1 << m) & MURO)
 
-def superficies(seg, cam, an):
+def superficies(seg, cam, an, solo_colision=False):
     """de la colision del original: en cada punto de la ruta se recorre la perpendicular cada 0,5 m (-60 a 60) desde el
     centro hacia fuera, tomando el poligono de colision mas cercano en altura al anterior; el limite transitable es el
-    primer muro o vacio pasado el borde del asfalto. Devuelve (limites (n, 2), alturas exteriores (n, 2 * NEXT),
+    primer muro o vacio pasado el borde del asfalto, y nunca por dentro de ese borde salvo con solo_colision (las
+    etapas: ver abajo). Devuelve (limites (n, 2), alturas exteriores (n, 2 * NEXT),
     franjas (n, 2 * NBANDA), alturas de la colision en las x del perfil (n, NPERF), NaN donde no hay); None si la
     etapa no tiene colision"""
     c = stage.coli(seg)
@@ -425,11 +452,20 @@ def superficies(seg, cam, an):
         def borde(x0, sg):
             j = int(np.clip(round((x0 + 60) / 0.5), 0, len(xs) - 1))
             while es_muro(m[j]) and j != j0: j -= sg                          # hacia el centro hasta pisar algo
-            if es_muro(m[j]): return x0
+            if es_muro(m[j]): return None
             while 0 <= j + sg < len(xs) and not es_muro(m[j + sg]): j += sg
             return xs[j] + 0.25 * sg
-        # nunca por dentro del borde del asfalto (puntos sin colision bajo la ruta, como la salida de algunas etapas)
-        li = max(-borde(-an[i, 0] + 1.0, -1), an[i, 0]); ld = max(borde(an[i, 1] - 1.0, 1), an[i, 1])
+        # solo_colision (las etapas): el limite es el de la colision, como CarBodyWallColiCheck (pc_body_wall.cpp: muro
+        # con la clase 0x010f4060 bajo un contacto, sin suelo bajo todos la grua) aunque el asfalto dibujado siga (la
+        # calle que cruza o un ensanche: el maximo con el borde del asfalto dejaba el limite hasta 5 m pasado el muro,
+        # ALAS s 508-840); el borde del asfalto solo donde la colision no tiene nada bajo la ruta (la salida de algunas
+        # etapas). En la demo los muros ya son los de la colision; el limite queda para el PVS (tools/pvs.py), el
+        # trafico y los ficheros sin colision. Sin el (las uniones, conv_union.ruta_rama, con los bordes de su fila de
+        # poligonos): nunca por dentro del borde del asfalto (en la bifurcacion deja hasta 3,5 m de la cuna de muro,
+        # clase 5, entre las ramas dentro del limite)
+        bi, bd = borde(-an[i, 0] + 1.0, -1), borde(an[i, 1] - 1.0, 1)
+        if solo_colision: li = -bi if bi is not None else an[i, 0]; ld = bd if bd is not None else an[i, 1]
+        else: li = max(-bi if bi is not None else an[i, 0], an[i, 0]); ld = max(bd if bd is not None else an[i, 1], an[i, 1])
         lim[i] = (li, ld)
         # alturas exteriores: de -izq-2 (fin del perfil) al limite, y de der+2 al limite
         for lado, (x0, x1) in enumerate(((-an[i, 0] - 2, -li), (an[i, 1] + 2, ld))):
@@ -600,20 +636,19 @@ def convierte(seg, n, sal, mundo=None, cielo=True, luz=None, objetos=None, agua=
         mod.luz = luz[0] if luz else None
         mod.bloque(blq, registros=regs, objetos=True, sin_textura='material')
         mod.luz = None
-    try: cam = recorrido_soo(seg)
-    except ValueError: cam = None                              # SOO sin puntos utiles
-    if cam is None: cam = recorrido(seg)
-    cc = recorrido_coli(seg)
-    if cc is not None and longitud(cam) < 0.8 * longitud(cc):  # no cubre la carretera: la de la colision
-        print('ruta del SOO o del asfalto %.0f m, la de la colision %.0f m: se usa la de la colision' % (longitud(cam), longitud(cc)))
-        cam = cc
+    cam = recorrido_filas(seg)                                 # el centro de la carretera del original (43E3B0)
+    filas = cam is not None
+    if not filas:                                              # sin colision: los carriles (SOO) o la calzada dibujada
+        try: cam = recorrido_soo(seg)
+        except ValueError: cam = None                          # SOO sin puntos utiles
+        if cam is None: cam = recorrido(seg)
     if np.linalg.norm(cam[-1, [0, 2]]) < np.linalg.norm(cam[0, [0, 2]]): cam = cam[::-1].copy()   # empieza en el origen
     cam = alarga_a_la_colision(seg, cam)
-    cam, an, car = ajusta_al_asfalto(seg, cam)                 # centro, bordes y carriles: los del asfalto
+    cam, an, car = ajusta_al_asfalto(seg, cam, recentra=not filas)   # bordes del asfalto (y centro, sin colision)
     if an is None: an = anchos(seg, cam); car = np.zeros((len(cam), NCARRIL))
     ls = tablas_carriles(seg)                                  # los del original; si no, repartidos por el asfalto
     car = carriles_originales(ls, cam) if ls is not None else carriles_uniformes(an, car)
-    sup = superficies(seg, cam, an)
+    sup = superficies(seg, cam, an, solo_colision=filas)
     if sup is None:                                            # sin colision: el limite es el borde del asfalto
         ban = np.zeros((len(cam), NBANDA, 2)); ban[:, :, 0] = an[:, 1:2]; ban[:, :, 1] = 1; ban[:, 0, 0] = -an[:, 0]
         sup = (an.copy(), np.zeros((len(cam), 2 * NEXT)), ban.reshape(len(cam), -1))

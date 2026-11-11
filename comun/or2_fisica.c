@@ -125,6 +125,20 @@ int or2_carga_param(const float *t, int filas, int col, or2_param_t *p)
     p->v_tope = P(0x1300);                  /* aqui solo la relacion; se completa abajo */
     /* multiplicador de empuje por marcha: fila (marcha+0x7b) */
     for (g = 0; g <= 6; ++g) p->empuje[g] = P((g + 0x7b) * 0x4c);
+    /* forma de la carroceria contra los muros (vehicle_body_parameters 4A6840 = PS2 0x182298: work+674 / +678 =
+       -/+|0x1ab8|, +67C..+688 = 0x1b04, 0x1b50, 0x1b9c, 0x1be8; vehicle_body_corners 4A1FC0 = PS2 0x182718: cuatro
+       puntos x = +674 / +678, y = +67C, z = +684 / +688, menos el centro +220 / +224 / +228). +220 = 0, +224 = 0x260 y
+       +228 = L / (1 + d) - L / 2 + 0,09 (PS2 0x1822f8: la media de las z de las ruedas de 0x3d2ec8, 0,09; PC
+       0x3DB851E8) */
+    {
+        float r = fabsf(P(0x1ab8)), y = P(0x1b04) - P(0x0260);
+        float z228 = P(0x0130) / (P(0x0214) + 1.0f) - P(0x0130) * 0.5f + 0.09f;
+        for (g = 0; g < 4; ++g) {
+            p->forma[g][0] = (g & 1) ? r : -r;
+            p->forma[g][1] = y;
+            p->forma[g][2] = ((g >> 1) ? P(0x1be8) : P(0x1b9c)) - z228;
+        }
+    }
 #undef P
     if (p->masa <= 0.0f || p->batalla <= 0.0f || p->radio[1] <= 0.0f) return -3;
 
@@ -943,10 +957,13 @@ static void asiste_tierra(or2_coche_t *c, v2 *vel)
     }
 }
 
-/* ColiCar (car_sus_coli_check + car_sus_bump_push, sobre un suelo plano a la altura 0), CalcSuspensionForce
-   (4A1B70) y CalcTireLoad (4A1A90 con assSpecificAmountOfTireLoad 518120 y assDiagonalTireLoad 518240).
-   Alturas en el suelo con angulos pequenos: h + y - z * cabeceo + x * balanceo. */
-static void suspension(or2_coche_t *c, const or2_param_t *p, int suelo)
+/* ColiCar (car_sus_coli_check + car_sus_bump_push), CalcSuspensionForce (4A1B70) y CalcTireLoad (4A1A90 con
+   assSpecificAmountOfTireLoad 518120 y assDiagonalTireLoad 518240). Alturas sobre el plano del suelo (el que
+   pasa por el suelo bajo el centro con la normal de los cuatro contactos de calc_ground_coli_face: work+640 /
+   +628) con angulos pequenos: h + y - z * cabeceo + x * balanceo. car_sus_coli_check compara cada rueda con el
+   suelo bajo ella (wheel+3C): g[i], lo que queda por encima (+) o por debajo de ese plano (NULL: plano); el empuje
+   de car_sus_bump_push es contra el plano. */
+static void suspension(or2_coche_t *c, const or2_param_t *p, int suelo, const float *g)
 {
     const float apr = SUS_APRIETE + 1.0f;
     float push = 0.0f, real = 0.0f, ref = 0.0f, inv, dif, izq, der;
@@ -958,7 +975,7 @@ static void suspension(or2_coche_t *c, const or2_param_t *p, int suelo)
         rueda_pc(p, i, &x, &y, &z);
         /* CommonPlCar: +28 = +08 - extension maxima; la rueda baja hasta el suelo */
         q->y28 = y - p->sus_sup[ax];
-        hc = c->alt + (q->y28 - p->radio[ax]) - z * c->cabeceo + x * c->balanceo;
+        hc = c->alt + (q->y28 - p->radio[ax]) - z * c->cabeceo + x * c->balanceo - (g ? g[i] : 0.0f);
         if (suelo && 0.0f >= hc) { q->y28 += -hc; q->aire = 0; }
         else q->aire = 1;
         /* car_sus_bump_push: con la suspension a tope la carroceria sube lo que haga falta */
@@ -1488,7 +1505,7 @@ static void tick(or2_coche_t *c, const or2_param_t *p, const or2_entrada_t *e)
     } else if (c->c284 > 0) c->c284--;
 
     /* --- ColiCar (ruedas contra un suelo plano), CalcSuspensionForce y CalcTireLoad --- */
-    suspension(c, p, e->en_suelo);
+    suspension(c, p, e->en_suelo, e->suelo_ok ? e->suelo_rueda : NULL);
 
     /* --- CopyCarWork --- */
     {
@@ -2109,9 +2126,13 @@ int or2_choque_muro(or2_coche_t *c, const or2_param_t *p, float nx, float ny, fl
         v2 izq = mk(-cosf(c->psi), -sinf(c->psi));
         lado = (n.x * izq.x + n.y * izq.y) < 0.0f ? 1 : 0;
     }
+    /* CwCrushStatus: reverse = work+670 & 0xA0000000 (ha entrado el punto 0 o el 2 de la forma, los de x < 0) */
+    if (c->muro_mascara) lado = (c->muro_mascara & 0xa0000000u) ? 1 : 0;
     /* sin clase de muro bajo la forma (+2A8 & 0x10F0020 = 0: los limites 0x4000 y 0x40, las otras clases que acepta
        CbwColiWall, 0x10F4060) solo hay roce (PS2 0x199430.., PC pc_wall_controller.cpp 150) */
-    muro = !(c->muro_clase & 0x4040u) || (c->muro_clase & 0x010f0020u) != 0;   /* otras clases (sonda de la demo): como antes */
+    /* (con la forma del original CbwColiWall solo actua si +2A8 lleva 0x10F0020 o 0x4040: es la condicion del original;
+       la sonda de la demo sin la colision cargada puede dar otras clases: entonces como antes) */
+    muro = !(c->muro_clase & 0x4040u) || (c->muro_clase & 0x010f0020u) != 0;
     /* impacto entre el aplastamiento y el rebote: solo si se acepta el choque fuerte hay rebote */
     if (muro && vn < 0.0f && !(imp >= lim) && imp >= ANG_APLASTA) fuerte = aplasta(c, p, imp, lado);
     if (muro && vn < 0.0f && (imp >= lim || fuerte)) {
@@ -2168,6 +2189,27 @@ int or2_choque_muro(or2_coche_t *c, const or2_param_t *p, float nx, float ny, fl
     }
     (void)p;
     return 0;
+}
+
+/* PlWrecker inmediato (504900 con fase 1: pc_pl_wrecker_immediate; PS2 0x19a810): lo pide CarBodyWallColiCheck
+   cuando ningun punto de la forma pisa suelo. +1C4 = 0, o x 0,67 (0x3F2B851F) con tope 0,73828 m/cuadro
+   (0x3F3CFFE8) en los estados de choque 2 y 5 (+2F0 >> 2 & 31); el handicap +DB4 de la mezcla es 0 en la demo.
+   El cuerpo mira como la carretera (+2E = +160 = el rumbo de la fila de GetCsRoadInfoByCsLen), la velocidad por
+   ese rumbo y work+50 / +C0 / +CC a 0 (sin giro). Las ruedas con la velocidad nueva (+D4, +D8). SIN PORTAR: el
+   cambio de signo del cabeceo y el balanceo (+2C / +30) y ReconstructPostureMatrixAndFaceWork (la postura y la
+   suspension en reposo): el cuerpo de la demo es el del suelo con el cabeceo y el balanceo de la suspension */
+void or2_grua_inmediata(or2_coche_t *c, const or2_param_t *p, float rumbo)
+{
+    float v = c->vel_mf; int i;
+    if (c->t_choque > 0.0f && (c->choque == 2 || c->choque == 5)) { v *= 0.670000017f; if (v > 0.738279819f) v = 0.738279819f; }
+    else v = 0.0f;
+    c->vel_mf = v; v *= HZ;
+    c->psi = -rumbo;
+    c->vx = -sinf(c->psi) * v; c->vy = cosf(c->psi) * v;
+    c->w = 0.0f;
+    c->rumbo_v16 = s16(tr(c->psi * R2U));
+    c->kmh = tr(c->vel_mf * 216.720001f);
+    for (i = 0; i < 4; ++i) { c->r[i].vel = v; c->r[i].omega = v / p->radio[i >> 1]; }
 }
 
 /* CheckSlipStream (4A4D20) */

@@ -43,7 +43,7 @@ Estado: OK (conectado y verificado al nivel indicado), PARCIAL, PROVISIONAL (apr
 | Aceleracion, motor, cambio auto/manual | tabla de parametros 0x2dbc30 (19 col.), par 162 f x 2 (automatico y manual, PAR2), freno 256 f; cambio PS2 0x18d530 | OK | or2_fisica.c clonado; columna por modelo MAP1 | ninguna conocida (`ACEL` = 1 por defecto; `-DACEL=1.35f` da la aceleracion de mas que se pidio antes, no es del juego) | — | H, E |
 | Direccion, derrape (inicio/mantenimiento/salida) | SlipAngleCtrl / RearGripCtrl / CorneringCtrl; temporizador 40 cuadros | OK | decompilacion + banco | ninguna conocida | trazas de entrada comparables con PS2 | H, E |
 | Adherencia por superficie | get_road_mu 500B30, running_resistance 502120, COLI0200 | OK | coli por rueda | ninguna conocida | — | H, E |
-| Choques coche-coche y muro, choque fuerte, grua | 4F9450/4F9000/4F8490/4F6FE0/4F76E0/4F7BF0/476040/473F30 (ver Choques entre coches), cbw_coli_wall, 5038D0, PlWrecker | PARCIAL | CHQ1/POS1 de PARAM.DAT, CJM1/SEC1 de TRAFC.DAT, efectos de IGC.PAK en SFX.DAT | coche-coche: ver Choques entre coches (PROVISIONALES alli; golpeados: parpadeo y cierre del original); vibracion del mando de PS2 (0x1d0420) salvo la de la superficie; grua recoloca en el carril mas cercano (no en la fila de poligonos); avance 10 posiciones x m_pos (CONFIRMADO, antes 25 m supuestos); angulo del choque fuerte por nivel de etapa (CORREGIDO 2026-11-11: 45 grados solo en la primera, 25 / 18 en las demas, PS2 0x1994c4: antes siempre 45 y el vuelco casi no salia); tramos de atrapamiento y de desvio 1 -> 5 por etapa HECHOS (2026-11-11, ver Choque fuerte contra el muro); sin el SE 0x43 de los estados 1 y 5 ni el SE por material (pc_collision_material_sound), sin el handicap +DB4; chispas del muro y de los coches hechas (ver Sombras y marcas) | — | H, E |
+| Choques coche-coche y muro, choque fuerte, grua | 4F9450/4F9000/4F8490/4F6FE0/4F76E0/4F7BF0/476040/473F30 (ver Choques entre coches), CarBodyWallColiCheck 504CE0 y cbw_coli_wall (la forma de la carroceria contra la COLI: ver Muros y suelo de la carroceria del original), 5038D0, PlWrecker | PARCIAL | CHQ1/POS1 de PARAM.DAT, CJM1/SEC1 de TRAFC.DAT, efectos de IGC.PAK en SFX.DAT | coche-coche: ver Choques entre coches (PROVISIONALES alli; golpeados: parpadeo y cierre del original); vibracion del mando de PS2 (0x1d0420) salvo la de la superficie; grua recoloca en el centro de la fila de poligonos de la carretera (CORREGIDO 2026-11-11: la ruta es ese centro, ver Muros y suelo de la carroceria del original; antes el carril del asfalto mas cercano); avance 10 posiciones x m_pos (CONFIRMADO, antes 25 m supuestos); angulo del choque fuerte por nivel de etapa (CORREGIDO 2026-11-11: 45 grados solo en la primera, 25 / 18 en las demas, PS2 0x1994c4: antes siempre 45 y el vuelco casi no salia); tramos de atrapamiento y de desvio 1 -> 5 por etapa HECHOS (2026-11-11, ver Choque fuerte contra el muro); sin el SE 0x43 de los estados 1 y 5 ni el SE por material (pc_collision_material_sound), sin el handicap +DB4; chispas del muro y de los coches hechas (ver Sombras y marcas) | — | H, E |
 | Camara de carrera | evento CAMERA 385: 4858D0, 484810, 483110, 4A1680 SetCarCamera, 485590/483CE0/4834A0/483600, 4832F0/484A40, 483C10/484BD0 (PS2 0x178500..0x17b540, 0x1817c0) | PARCIAL | demo/camara.c con las tablas CAM1 de PARAM.DAT (vistas 0x2ccd88, por vista y modelo 0x2cd3d8, por modelo 0x2d2838 del fichero SLES) | vista 1 sin interior (no se dibuja el coche); camara de salida (485250) con el ojo y la mira de la escena de la salida los 120 cuadros de START (ver Escena de la salida); sin vista 0x1D (780258 = 0) ni camara de fin (485830); la de la meta (4853D0) en demo/meta.c (ver Escena de la meta) | ver seccion Camara de carrera | E |
 | Trafico (clases, IA, reaccion) | 472090, 472450, 472A50, 47DC10, 4736D0, hit_476040; aparicion 479080 (PS2 0x1dcdd0): 478B90 (0x1dbba0), 4787E0 (0x1db6d0), 4EFB90 (0x1f3818), 4F0030 (0x1f1a88), 46CE30, 478430, 46CC10; cierre 477F60 | PARCIAL | TRAFC.DAT (TRC1, ACL1 y TAP1: tablas de aparicion, velocidad y puntos fijos por etapa); colores (tabla 0x36bc18, modelos 30..43) y materiales en TRAFn.DAT (TCX1) | camino "Lead" de 472450 portado (velocidad por clase y del jugador, ver Choques entre coches: velocidad del trafico de delante) salvo 472320 / 471F90; 478640/46CDA0 en la union simplificados; puntos fijos de coches de carreras y de los modelos 39..43 sin coche | ver Trafico: densidad del original | E |
 | Piloto y acompanante | ROB01 / ROB02: PS2 0x201b10 / 0x201c40 / 0x202bf0 y 0x202c58 / 0x202de0; pareja 0x205518 / 0x2055b8; CHR.PS2 (CHR_DR_M00 / S00 / W00 / L00 / G00 / H00, G00_USA), bone.bin, ANIMS.PS2 | PARCIAL | CHRPAR.DAT y CHRppaa.DAT (conv_chr.py --pares), comun/robot.c (con el osage de G00): motor de movimientos, conducir con el volante, codo en la puerta, choque, fuera del asfalto, aburrida, META y TIME OVER (ver Coches: el piloto y la acompanante) | cambio de area, asustada, trompo ni poses pedidas (la meta del piloto, estado 9, hecha: ver Escena de la meta) | - | H, E |
@@ -378,9 +378,9 @@ estaba y se dice lo que falta). Estado: CORREGIDO, SE QUEDA (ya era del original
 | Trafico: vuelta al centro del carril 0,02 m/cuadro | 6280EC = 0,02 es un tope (B08 no se acerca a 0 mas de eso); lo que lo devuelve es 473D10 (x 0,995 o 0,05 apartandose del jugador) y los cambios de carril | 473D10 portado (PS2 0x1e77e0) | CONFIRMADO | CORREGIDO (2026-11-08) |
 | Caja de choque con el jugador: medio largo + 2,3 m, ancho + 1 m | cajas del descriptor 520950 de los dos modelos, esquinas contra bordes (4F9000) | CJM1/TRC1 | CONFIRMADO | CORREGIDO (2026-11-08) |
 | Golpe al trafico: deriva segun la posicion lateral relativa, animacion reflejada segun el lado, fuerza del sonido por diferencia de velocidad | 476040: +B58 por +26C del jugador, 4A6EA0 con lado 0, efectos por tabla | — | CONFIRMADO | CORREGIDO (2026-11-08) |
-| Muro a 1 m del limite | CbwColiWall con los puntos de la carroceria | — | PROVISIONAL | SE QUEDA |
+| Muro a 1 m del limite de la ruta | CarBodyWallColiCheck 504CE0 (PS2 0x1987e8) con las cuatro esquinas de la carroceria contra la COLI y CbwColiWall 5041B0 (PS2 0x198e98) | ALPI s 3526-3948: la ruta 10-15 m fuera de la carretera y el coche metido en el muro hasta 4,5 m (la foto de la demo 35); ALAS s 508-840: el limite en el borde del asfalto, hasta 5 m pasado el muro; contra el muro en angulo el morro entraba hasta 1 m | CONFIRMADO | CORREGIDO (2026-11-11: Muros y suelo de la carroceria del original) |
 | Altura del suelo: perfil a lo ancho de la ruta (mediana de las tiras de dibujo casi horizontales mas cercanas, tools/conv_tramo.py) | GetYPositionProg 43EB60 / GetRoadCond / CalcYPosSpl sobre la colision COLI0200 de la etapa (raiz 0) y de la union (raiz 1) | en TULI (SEG12, s 440-530) el perfil cogia la carretera de debajo del puente: hasta 5,7 m bajo la calzada (el coche pasaba por debajo) | CONFIRMADO | CORREGIDO (2026-11-09: Suelo del original) |
-| Orientacion del coche: 4 muestras a 1,6/0,8 m | suspension y contactos de las ruedas (calc_ground_coli_face) | — | PROVISIONAL (solo dibujo; las alturas ya son las de 43EB60; encima van la altura, el cabeceo y el balanceo de la fisica y car+F0: Coches: piezas animadas) | SE QUEDA |
+| Orientacion del coche: 4 muestras a 1,6/0,8 m | calc_ground_coli_face 519500 (PS2 0x1913e8): el centro y las cuatro ruedas con 43EB60 0x400, normal (c1 - c2) x (c0 - c3); car_sus_coli_check con el suelo de cada rueda | las muestras iban por el rumbo de la velocidad y la carroceria va cruzada: derrapando una rueda hasta 30 cm bajo la calzada (ALPI) | CONFIRMADO | CORREGIDO (2026-11-11: Muros y suelo de la carroceria del original) |
 | Escala de puntos por avance (x10, x110) | PS2 0x28F984 / 4F2DF0 (K628244, K5C68E0) | igual | CONFIRMADO | SE QUEDA (ahora con m_pos) |
 | Piloto automatico de la demo (DEMO del titulo) | el original pasa la pelicula de MV.PS2 (ahora tambien la demo: video.c) | — | invento propio (solo si faltan las peliculas, o pruebas) | SE QUEDA |
 | META/AGOTADO: freno 0,6 y vuelta al titulo a los 600 cuadros | modo 19: la escena de la meta (4871A0 / 486730 / 486EF0, PasPlCar 475720, camara 4853D0) durante 0x4B0 cuadros | — | CONFIRMADO | CORREGIDO en la meta (2026-11-10: Escena de la meta); AGOTADO sigue igual (PROVISIONAL) |
@@ -422,7 +422,8 @@ calzada sube por el puente hasta +5 m (el coche "pasaba por debajo de la carrete
 - Uso: el coche del jugador con 0x400 + reintentos (el de calc_ground_coli_face), el trafico con 0x100 (43F2F0) y la
   camara con 0x100 (43EB60 del suelo de la camara), con la referencia en la altura del propio coche (`y_ok`; recien
   colocado, la de la ruta). La superficie de las ruedas y del centro (wheel+0x14 / +0x248) es la clase del poligono
-  de la misma consulta. La ruta queda para el avance, los carriles, los limites y muros (CbwColiWall sigue en la ruta).
+  de la misma consulta. La ruta queda para el avance y los carriles; los muros y el suelo de las ruedas del jugador son
+  los del original desde 2026-11-11 (ver Muros y suelo de la carroceria del original).
 - Sin suelo bajo una muestra (fuera de la colision) esa muestra se queda a la altura del coche (el original dejaria
   caer el coche: la demo no tiene salto); sin ficheros COL (datos antiguos), el perfil de antes. `-DSIN_COLI` fuerza
   el perfil (para comparar) y `-DDIAG_SUELO` imprime la altura de la colision frente al perfil.
@@ -466,9 +467,10 @@ Peticion del probador: efectos de sombras. Lo que hace el original y como va en 
   gravedad 0x3B315723. Texturas 0x570029 / 0x570028 (16x16, suma) alternadas con la paridad de la vida: van detras de
   las marcas en EFECTOS.DAT (conv_efectos.py; un EFECTOS.DAT antiguo sigue valiendo, sin chispas). Dibujo: sprites
   de punto (0x109010, tipo 5; PC 41A6F0): 16 x 0,6 x 0,5 x proyeccion / distancia, entre 2,5 y 32 puntos (PROBABLE:
-  microprograma de la VU1 sin leer). En la demo (demo/main.c chispas_paso / chispas_dibuja / muro_chispas): la clase
-  del muro se mira en la COLI 0,25 m pasado el limite (la demo lleva el coche como un punto a 1 m del limite) y los
-  puntos de la forma son las ruedas (PROVISIONAL: la forma +690 no esta en la demo). RAM: las 500 particulas (14 KB)
+  microprograma de la VU1 sin leer). En la demo (demo/main.c chispas_paso / chispas_dibuja / muro_original): +670 y
+  +2A8 son los de CarBodyWallColiCheck con la forma del original (2026-11-11, Muros y suelo de la carroceria del
+  original; sin la colision cargada, muro_chispas: la clase 0,25 m pasado el limite de la ruta y las ruedas en lugar de
+  los puntos de la forma, PROVISIONAL). RAM: las 500 particulas (14 KB)
   ocupan lo que dejan el bufer del texto del centro y el de la mancha del humo, que ahora pasan por buf_arr.
   PENDIENTE: el destello 0x2C0001 (SPRANI 428320(0x2C0001, 5, 1) en la rueda, solo con cam+34A == 2).
   Verificado en Flycast (scratchpad chq/roce, chq/embiste, chq/vuelco1: `-DPRUEBA_AUTO -DPRUEBA_GUION -DPRUEBA_CHOQUE
@@ -591,7 +593,7 @@ m/cuadro, +1F4 = +1C4 x 216,72 (km/h del modelo), angulos de 16 bits (65536 = 2 
 | fuerzas al cuerpo | copy_physical_work 502270 + make_force_work_tire 4A0000 | CORREGIDO: sin fuerza de las ruedas en el aire ni de las delanteras con una trasera en el aire; preparados en la ultima marcha con limitador < 0,975: sin empuje por marcha; pares de cabeceo y balanceo de +7C/+88 en el punto de contacto | pc_chassis.cpp |
 | aire, frenada tras golpe | calc_game_resist, force_work_49fed0 | igual | |
 | gravedad, apriete, pendiente | make_force_work (gravedad, assPressDown 5 g, assCancelInclineResistance) | igual en lo que importa: la pendiente no frena ni acelera (se anula); el apriete esta en la suspension | pc_chassis.cpp |
-| suspension (nueva) | ColiCar 519830 (car_sus_coli_check, car_sus_bump_push), CalcSuspensionForce 4A1B70, CalcTireLoad 4A1A90, assSpecificAmountOfTireLoad, assDiagonalTireLoad | NUEVO (antes cargas estaticas): muelle 0x688 x 6 del apriete, topes 0x4C0/0x558, estabilizadora 0x720, amortiguador (constantes 0x5c36b4..0x5c36c0); la carga es la fuerza / 6, normalizada a la total y sin diferencia entre diagonales. El cuerpo se reduce a altura, cabeceo y balanceo (angulos pequenos, inercias masa x 0x4c / 0x0e4) sobre un suelo plano; por el / 6 la transferencia es la sexta parte de la fisica real (frenando a 3,3 g: +40 kgf por rueda delantera) | pc_suspension.cpp, pc_collision.cpp |
+| suspension (nueva) | ColiCar 519830 (car_sus_coli_check, car_sus_bump_push), CalcSuspensionForce 4A1B70, CalcTireLoad 4A1A90, assSpecificAmountOfTireLoad, assDiagonalTireLoad | NUEVO (antes cargas estaticas): muelle 0x688 x 6 del apriete, topes 0x4C0/0x558, estabilizadora 0x720, amortiguador (constantes 0x5c36b4..0x5c36c0); la carga es la fuerza / 6, normalizada a la total y sin diferencia entre diagonales. El cuerpo se reduce a altura, cabeceo y balanceo (angulos pequenos, inercias masa x 0x4c / 0x0e4) sobre el plano del suelo del coche (centro y normal de calc_ground_coli_face) con el suelo de cada rueda en car_sus_coli_check (2026-11-11); por el / 6 la transferencia es la sexta parte de la fisica real (frenando a 3,3 g: +40 kgf por rueda delantera) | pc_suspension.cpp, pc_collision.cpp |
 | ActionForce2 | 517410 | simplificado: 2D + los 3 grados de la suspension; MaximumVelocityCheck (166,7 m/s, 60,2 rad/s) igual, sin la inclinacion maxima 0x900 | |
 | ctrl_agarre_trasero | RearGripCtrl 4A2FA0 | CORREGIDO: +D94/+D98/+D9C bajan en manual; contacto con el muro (work+244 bit 3): agarre >= 0,75 + 0,25 abs(sin +4E) | pc_common_control.cpp 75 |
 | curva_agarre | 4A3260 | CORREGIDO: t = +D94 x 0,1107 (antes 0 fijo) | |
@@ -638,7 +640,7 @@ Ya estaban: estados 1 (vuelta de campana), 2 y 5, sus poses (+2D8..+2EC), la gru
 | angulo del choque fuerte | 0x1994c4: 45 grados si 44C940 (0x177270, nivel de la etapa) es 0; si no 25 (curva que viene <= 20 grados) o 18 | siempre 45: el vuelco casi no salia | igual (nivel = profundidad en el arbol, PROBABLE: ver ASSETS, el +8 del registro vale 0 en el fichero) |
 | limites de velocidad (+1F4, km/h del modelo) | 0x199c04: punta - 70 / punta - 20; dentro de un tramo de atrapamiento de la etapa (tabla 0x3dee58 por descriptor de tramo, 16 parejas de posiciones +64, fuera de la union) 180 / 350 | solo punta - 70 / - 20 | igual (bloque ATR1 de EFECTOS.DAT por SEGnn; or2_coche_t.atrapa) |
 | desvio del estado 1 al 5 | 0x182d6c: tabla 0x3d2f38 (tramos donde no hay sitio para la vuelta de campana) | no | igual |
-| limites sin clase de muro | +2A8 & 0x10F0020 = 0 (clases 0x4000 y 0x40): solo roce, sin rebote ni choque fuerte | rebote y choque en cualquier limite | igual si la COLI da la clase 0x4000 o 0x40 (0,25 m pasado el limite); con otra clase o sin poligono (clase 1, vacio) sigue como antes (PROVISIONAL: en el original ahi actua PlWrecker fase 1) |
+| limites sin clase de muro | +2A8 & 0x10F0020 = 0 (clases 0x4000 y 0x40): solo roce, sin rebote ni choque fuerte | rebote y choque en cualquier limite | igual: +2A8 es el OR de las clases bajo las cuatro esquinas de la forma y sin suelo bajo las cuatro actua PlWrecker(1) (2026-11-11, Muros y suelo de la carroceria del original; sin la colision cargada, la sonda de antes a 0,25 m del limite de la ruta) |
 | frenada del roce (+282) | 0x19a200: kmh >> 7; >> 6 en tramo de atrapamiento del choque o del roce (0x3dfed8), >> 3 en los dos; un escalon menos sin clase de muro (>> 8 sin tramos) | kmh >> 7 | igual |
 | sonido | rebote: SE 0x4b cada 60 cuadros (+D23); choque fuerte: tabla 0x3dedf8 por estado (0x43 los estados 1 y 5, 0x42 el 2) y despues el SE por material (0x19a4c0, tabla 0x3dee18) | golpe ICS con fuerza inventada | 0x4b y 0x42 (SFX.DAT, conv_sonido.py MURO_SE); PENDIENTE el 0x43 (pitch 0 en la tabla SE de SOUNDCD.IRX: no se sabe como lo toca) y el SE por material |
 
@@ -648,6 +650,157 @@ Sin hacer: handicap +DB4 y asistencia +DF8 (0 en la demo), temporizador de colis
 nivel 1 a 34 grados y 462 / 468 km/h del modelo: estado 1 (2,5 s, grua 151 cuadros, +2DC hasta 5,1 m, giros hasta
 -2 pi); PALM posicion 208 (tramo de desvio) a 50 grados: estado 5 en vez de 1; etapa SEG10 a 249 km/h del modelo:
 fuera de tramo (posicion 302) solo rebote, dentro (542) estado 5.
+
+## Muros y suelo de la carroceria del original (2026-11-11)
+
+Queja de la demo 35 (consola PAL, fotos): "quitamiedos que se traspasan" (el coche a 225 km/h medio metido en la roca
+de una carretera de montana con quitamiedos; en otra, pasado el muro, dentro de la roca junto a la nieve, con la
+camara dentro) y "ruedas que se hunden bajo la carretera".
+
+Causas (medidas en el host con tools de scratchpad sobre SEGnn.DAT / COLnn.DAT de todas las etapas y en Flycast con
+`-DPRUEBA_MURO`):
+- La demo no tenia los muros del original: el coche era un punto que no podia pasar de 1 m del limite de la ruta
+  (tools/conv_tramo.py superficies: el primer muro o vacio de la colision por la perpendicular, pero nunca por dentro
+  del borde del asfalto dibujado, y medido desde el centro de la ruta). Donde la ruta se va de la carretera (el centro
+  y los bordes salen de los carriles SOO y del asfalto dibujado: ALPI s 2544-3964 hasta 15 m, INDU hasta 22 m, RUIN
+  31 m, METR 19 m, IMPE 37 m) los limites caen en la franja de muro: en ALPI s 3680-3932 los dos limites quedaban a
+  3 m de un centro que esta encima del muro y el coche iba por dentro de la roca (la segunda foto: ALPI es la de la
+  nieve y los quitamiedos). Donde el asfalto dibujado pasa del muro de la colision el limite era el borde del asfalto
+  (ALAS s 508-840: 7,5 m con el muro a 2,4-7 m). Puntos de la ruta con el limite mas de 0,5 m pasado el primer muro:
+  ALPI 238, INDU 311, METR 479, RUIN 66, IMPE 103, TULI 123, GHOS 35, LAKE 42, ALAS 100, MAYA 333, BEAC 18, YOSE 12,
+  SANF 5 (y en las calzadas partidas LASV, FLOR y NEWY la mediana, que si cubrian las franjas). Ademas, con un punto
+  a 1 m del limite, contra el muro en angulo el morro entraba: 0,4 m a 10 grados, 0,8 a 20, 1,1 a 30. Esto no viene
+  de af3448d, 83a83d3 ni 27e4ea3 (solo cambian la respuesta en el limite) ni de 02cce07 (ruta_punto da lo mismo que
+  el codigo de antes en ruta_en, altura, limites y carril_x).
+- El suelo del coche: la altura y la inclinacion salian de 4 muestras a +-1,6 m por el rumbo de la velocidad y +-0,8
+  m por el x de la ruta, y las ruedas iban sobre ese plano; derrapando la carroceria va cruzada (hasta 80 grados) y
+  el plano no es el de las ruedas: en ALPI una rueda hasta 0,30 m bajo la calzada.
+
+Ahora (demo/coli.c coli_muro, demo/main.c muro_original / suelo_jugador, comun/or2_fisica.c):
+- Forma de la carroceria: vehicle_body_parameters 4A6840 (PS2 0x182298: work+674 / +678 = -/+|P 0x1ab8|, +67C..+688
+  = P 0x1b04, 0x1b50, 0x1b9c, 0x1be8) y vehicle_body_corners 4A1FC0 (PS2 0x182718): cuatro puntos (+674 / +678,
+  +67C, +684 / +688) menos +220 / +224 / +228 (0, P 0x260, L / (1 + d) - L / 2 + 0,09; PS2 0x1822f8 con la media de
+  las z de las ruedas de 0x3d2ec8). En las 19 columnas de PARAM.DAT: +-0,95 m, 0,078 m del suelo, 2,55 m delante
+  y 1,93 m detras del CG. fpar.forma.
+- CarBodyWallColiCheck 504CE0 (PS2 0x1987e8, igual que el PC): cada punto con la matriz del cuerpo (la del suelo del
+  coche con el cabeceo y el balanceo de la suspension y el CG a fis.alt) contra la COLI con GetYPositionProg modo 0
+  (el poligono que lo contiene en xz y el de altura mas cercana; actualiza EasyLct como el original); event+2A8 = OR
+  de las clases; si los cuatro estan sin suelo, PlWrecker(1); si no estan todos en la clase 2 y alguno pisa un muro
+  (0x010F4060), CbwColiWall; si no, work+670 = 0.
+- CbwColiWall 5041B0 (PS2 0x198e98), la geometria: por cada punto sobre un muro, CopColiPoint 43D1D0 (los vertices en
+  el marco de su raiz), las caras especiales de los triangulos (p3 = p2 en xz) por el codigo de superficie (seccion 4
+  de la COLI, & 15: PS2 0x556e40[tipo], PC 780170) y la tabla de modos PS2 0x3dede8 (= PC 5E0DE0: 00 01 01 C2 00 01
+  01 C2 01 42 02 03 01 42 02 03), o CalcColiWallFace 502E20 con el centro del coche (work+40 / +48, que ya va movido
+  por las caras anteriores); PushOutPosMatObsolete 502F80 (normal, cara a 0,01 y borde: el coche sale lo que haya
+  entrado el punto mas metido; las caras se suman, la matriz no se mueve) y ColiSetObsolete 5030F0 con la primera
+  (punto de contacto en el marco del cuerpo: event+281; sin el, CbwColiWall acaba sin respuesta). La normal de
+  work+64C = (n.z, n.y, -n.x) x work+628. Lo empujado se pasa a s y x de la ruta. La respuesta (calc_friction_status
+  / cw_rebound_status / CwCrushStatus) sigue en or2_choque_muro con esa normal, max_distance, +2A8 y +670 (el lado
+  del choque fuerte es reverse = +670 & 0xA0000000, como CwCrushStatus). Las chispas (41D810) piden la rueda n con
+  +670 bit 31 - n y +2A8 & 0x10F0020.
+- PlWrecker(1) (504900 fase 1, PS2 0x19a810): +1C4 = 0 (estados 2 y 5: x 0,67, tope 0x3F3CFFE8 = 0,738 m/cuadro), el
+  rumbo y la velocidad por la carretera, sin giro (or2_grua_inmediata). El sitio: el centro de la fila de poligonos de
+  la posicion de carretera (GetCsRoadInfoByCsLen 43E3B0), que es el centro de la ruta (ver abajo); la grua del choque
+  fuerte, igual 10 posiciones mas alla (antes el carril del asfalto mas cercano). SIN PORTAR: el cambio de signo de
+  +2C / +30 y ReconstructPostureMatrixAndFaceWork. Con la colision cargada casi no se da: por la perpendicular a la
+  ruta lo primero que no se pisa es un muro salvo en 0-7 puntos de los extremos de las etapas y en los huecos de SEG49
+  (abajo).
+- calc_ground_coli_face 519500 (PS2 0x1913e8): el suelo bajo el centro del cuerpo (work+40) y bajo el punto de cada
+  rueda (x de +04, y = +28 - el radio de su eje, z de +0C, con la matriz del cuerpo) con GetYPositionSplChk; el coche
+  va en el suelo del centro con la normal (c1 - c2) x (c0 - c3) (work+640 / +628) y la carroceria por el rumbo del
+  cuerpo; la clase de cada consulta es la superficie de cada rueda y del centro (wheel+14, event+248; antes salian de
+  otra consulta en el sitio aproximado de cada rueda). car_sus_coli_check compara cada rueda con su suelo (wheel+3C):
+  or2_entrada_t.suelo_rueda, lo que cada una queda sobre el plano del coche; car_sus_bump_push contra el plano.
+  DESVIACION: sin suelo bajo una rueda el original da -0,1 (la rueda cae); en la demo esa rueda se queda en el suelo
+  del centro (la demo no deja caer el coche). PROBABLE: la fisica de la demo es 2D con la altura, el cabeceo y el
+  balanceo de la suspension; la matriz del cuerpo se arma con ellos sobre el plano del suelo (no es el cuerpo 3D de
+  ActionForce2) y las consultas van con el sitio del paso anterior (el original las hace tras integrar).
+- Sin la colision cargada (ficheros antiguos) todo sigue como antes (limites de la ruta, muro_interior, superficie,
+  4 muestras). `-DMURO_ANTES` lo fuerza para comparar.
+- COL1: los bits 4-7 de las banderas llevan el codigo de superficie (tools/conv_coli.py; palabra 11 de la cabecera =
+  1). Regenerados los 74 COL*.DAT (iguales salvo esos bits y la palabra; ficheros sin ella: material 0, sin caras
+  especiales). Solo 5 triangulos de muro de PALM (y 3 en las SEG01 / SEG02 de las misiones) son de cara especial.
+
+- La ruta (tools/conv_tramo.py recorrido_filas, del parche sin terminar del barrido de la camara, revisado): el centro
+  de la carretera del original, el de la fila de poligonos principales de cada posicion de carretera
+  (GetCsRoadInfoByCsLen 43E3B0: v0 y v3 del primero y v1 y v2 del ultimo), cada 4 m; los bordes del asfalto dibujado
+  sin recentrar y el limite el de la colision aunque el asfalto siga (solo_colision; en las uniones como antes). Antes
+  el centro salia de los carriles SOO y del asfalto dibujado y otro asfalto cercano lo sacaba de la carretera; con el
+  coche libre por la carretera lo que la demo toma de la ruta (rumbo +D4C, bordes +264 / +268 y desvio +26C de la
+  fisica, que el original saca de esa fila en GetRoadOfs 4A4010; el sitio de la grua) quedaba fuera de ella (ver INDU
+  y RUIN en los resultados). Regeneradas las 62 SEGnn.DAT y SEGS.PAK (con el agua de 6c8658f). La grua del choque y
+  PlWrecker(1) dejan el coche en x = 0 de la ruta, el centro de esa fila (antes el carril del asfalto mas cercano).
+- El trafico: el original lo asienta cada cuadro (PS2 0x1eb0c0, tras su muro 0x198a20) con el suelo 0x100 bajo su
+  centro y, en la etapa (+5C = 0) a menos de 100 m de la camara (car+300 >= -100: 0xC2C80000) o en los pesados (+320 0
+  o 1), con 46E4B0 (PS2 0x1de4b8): tres puntos del descriptor del LOD 0 (md = [[[4866C0]]]: +3C con x = 0, +5C y +6C;
+  son las ruedas que ya lleva TAN1, filas 0, 2 y 4) girados con el rumbo, cada uno con 43EB60 (0x400 en el LOD 0, si
+  no 0x100); la altura ((p1 + p2) / 2 + p0) / 2 y los ejes de esos tres (demo/main.c traf_asienta). SIN PORTAR: lejos
+  o en la union el original usa la normal del poligono bajo el centro (46E740 = PS2 0x1de740: la suma de las normales
+  de sus esquinas, que COL1 solo lleva de algunos poligonos); alli la demo sigue con sus 4 muestras.
+
+Prueba (tools/prueba/muro.sh; `-DPRUEBA_AUTO -DPRUEBA_MURO -DPRUEBA_SIN_TIEMPO` con PRUEBA_CURSO / PRUEBA_NODO /
+PRUEBA_RAMA / PRUEBA_FIN; demo/main.c prueba_mide): el piloto va contra los muros cada 8 s (volante a fondo 1 s o al
+30 % 3,3 s) y la demo mide cada cuadro la carroceria contra la COLI (coli_muro con la forma y el marco dibujado), las
+ruedas dibujadas contra el suelo, el trafico y la camara. Resultados:
+- Host (las 30 etapas de los arboles 0 y 1, el coche a 1 m del limite de la ruta recto y a 10 / 20 / 30 grados hacia
+  el muro): con coli_muro el empuje saca la forma en un paso salvo en esquinas del muro (se termina en los pasos
+  siguientes) y sin ningun caso de "sin contacto" ni de PlWrecker. Ruedas: con la carroceria a 30 / 60 grados de la
+  velocidad, el plano de las 4 muestras dejaba una rueda bajo el suelo hasta 0,47 / 0,85 m (GRAN; mas de 5 cm en
+  miles de puntos de cada etapa); con calc_ground_coli_face el plano es el de las ruedas y lo que cada una se aparta
+  de el (0,01-0,17 m, NEWY 0,26 en bordillos) lo recoge su suspension. Trafico (un coche de TRAF0 en x = -6..6 de
+  cada punto, sus cuatro ruedas contra el suelo 0x400 de los contactos): con las 4 muestras de antes hasta 0,19-0,21 m
+  bajo el suelo (BEAC, ALAS; 179-1153 puntos de mas de 5 cm por etapa), con 46E4B0 como mucho 0,07 m (0-8 puntos).
+- Flycast, ALPI desde la salida 240 s (r_alpi_a / r_alpi_d) y los tramos malos con PRUEBA_FIN (ALPI s 3450.., ALAS
+  s 300.., IMPE s 4650.., INDU s 3500.., RUIN s 100.., METR s 450..), 200 s cada uno:
+  con los datos de antes (la ruta de los carriles) y `-DMURO_ANTES` / el codigo nuevo (cuadros con la carroceria mas
+  de 0,25 m dentro de un muro, la mayor; cuadros con una rueda mas de 5 cm bajo el suelo, la peor):
+
+| tramo | antes | ahora |
+|---|---|---|
+| ALPI desde la salida | 255 (4,51 m, s 3526-3948), 333 (-0,37 m derrapando) | 0, 1 (-0,07) |
+| ALPI s 3450.. | (la de arriba) | 0, 0; roza el quitamiedos de la galeria con chispas |
+| ALAS s 300.. | 371 (4,50 m), 207 (-0,18) | 0, 0; contra el muro en x = -4,7 (antes hasta -6,5) |
+| IMPE s 4650.. | 132 (4,30 m); el coche fuera de la colision 364 cuadros y la camara 20,65 m sobre el (s 4881-4896: el salto de la camara en ROMA) | 0, 0; camara a 2,8 m como mucho |
+| INDU s 3500.. | 268 (6,02 m), 16 (-0,13) | 3 (0,45); ver abajo |
+| RUIN s 100.., METR s 450.. | — | 0, 0 (RUIN s 4540-4576: ver abajo) |
+  En INDU s 3667-3741 y RUIN s 4540-4576 (la ruta 22 / 35 m fuera de la carretera) la grua del choque llevaba el
+  coche al carril del asfalto de esa ruta, al otro lado del muro: el muro lo frenaba, WrecPlBody (4A0C70: lo que falta
+  entre los cuadros que quedan) subia la velocidad hasta el tope (600 km/h) y el coche acababa fuera de la colision,
+  con PlWrecker(1) cada cuadro (el carril tampoco tenia suelo) y la camara a 47 m. Por eso la ruta y el sitio de la
+  grua son ahora los del original (arriba).
+- Con las SEGnn.DAT nuevas, en el host (lim / vacio de scratchpad sobre las 62): ningun punto de la ruta con el centro
+  fuera de lo que se pisa (antes ALPI 68, INDU 42, METR 31, RUIN 27, IMPE 43, LASV 332, NEWY 186, FLOR SEG64 467 y
+  otras) y con el limite mas de 0,5 m pasado del primer muro solo las medianas de las calzadas partidas (LASV SEG22 /
+  SEG54 264 / 256 puntos, antes 986 en SEG22; NEWY SEG30 / SEG62 90 / 90, antes 654; FLOR SEG32 / SEG64 868 / 889,
+  antes 1286 en SEG64: el limite abarca las dos calzadas, como antes, y el muro de la mediana lo para coli_muro), 168
+  de SEG49 (IMPE de la otra serie: lo primero es un hueco de la colision a 10 m, clase 1 sin suelo, en el que la forma
+  no choca, como en el original) y 4 de la salida de BEAC (s 24-68, antes 18). En Flycast con los datos nuevos
+  (cuadros con la carroceria mas de 0,25 m dentro de un muro; cuadros con una rueda mas de 5 cm bajo el suelo, la
+  peor; la camara, lo mas que queda sobre el coche; ALPI y BEAC con el juego de datos completo, las demas con las
+  etapas que pisan ya regeneradas):
+
+| tramo | muro | ruedas | camara y otros |
+|---|---|---|---|
+| ALPI s 3450.. hasta DESE, 200 s | 0 | 8 (-0,06 derrapando a 41 grados) | 4,0 m (DESE s 10115); 415 km/h como mucho |
+| INDU s 3500.. hasta METR | 0 | 0 | 2,3 m; sin PlWrecker ni grua fuera de la carretera; 382 km/h |
+| IMPE s 4650.. y la meta | 0 | 0 | 1,9 m (antes 20,65) |
+| ALAS s 300.. | 0 | 0 | 2,4 m |
+| RUIN s 4300.. y la meta | 0 | 4 (-0,10, en el aire, s 4535-4561) | 4,1 m |
+| arbol 0 rama 1 desde PALM, 480 s (hasta CAST) | 0 | 3 (-0,05) | 3,1 m |
+| arbol 1 rama 1 desde SANF, 420 s (hasta NIAG) | 0 | 0 | 2,1 m |
+| arbol 1 rama 0 desde BEAC, 300 s (hasta NIAG) | 0 | 0 | 3,5 m; 405 km/h |
+  En ninguno PlWrecker, coche fuera de la colision ni velocidad pasada del tope del modelo; la camara solo se mueve de
+  golpe (1-4 m en un cuadro) al chocar con el muro (el coche se para y la camara sigue). El trafico, sus ruedas (TAN1)
+  contra el suelo con el que traf_asienta lo pone (ruedas-cuadro a menos de 120 m del jugador): ALAS 27 de 7408 mas de
+  5 cm bajo el suelo (-0,09 como mucho), arbol 0 1009 de 65560 (-0,06 en el LOD 0, -0,19 a 40-100 m con 0x100 en
+  LAKE), arbol 1 3320 de 44072 (-0,09 en el LOD 0, -0,16 con 0x100) y 1137 de 57972 (-0,12); es el plano de los tres
+  puntos de 46E4B0 (el delantero en x = 0) sobre un suelo que no es plano: las ruedas delanteras quedan fuera de el.
+  Con las 4 muestras de antes (contra el suelo 0x400) ALAS 94 (-0,13). PROBABLE: el original da lo mismo (es su
+  calculo; el PC usa siempre 0x400, el PS2 0x100 si car+0x328 no es 0: PS2 0x1de594). Las ruedas que no se asientan
+  (46E740, lejos o en la union) no se miden.
+- La segunda carrera tras la meta con PRUEBA_FIN (IMPE, RUIN) da "Out of memory" (sbrk de 928 KB al entrar) y
+  pvr_mem sin VRAM: igual con origin/main 23f5c9b sin estos cambios (no viene de aqui y queda como estaba).
+
 
 ## Choques entre coches (2026-11-08)
 
