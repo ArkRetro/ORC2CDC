@@ -74,8 +74,11 @@ def main():
         if f not in lee: lee[f] = lee_dat(os.path.join(d, f))
         return lee[f]
     fijo = {}
-    for f in [coche] + ['TRAF%d.DAT' % i for i in range(9)] + ['CHR.DAT', 'SOL.DAT']:
+    for f in [coche] + ['TRAF%d.DAT' % i for i in range(9)] + ['SOL.DAT']:
         if os.path.exists(os.path.join(d, f)): fijo[f] = kb(lee_dat(os.path.join(d, f)))
+    pares = [f for f in os.listdir(d) if len(f) == 11 and f.startswith('CHR') and f[3:7].isdigit()]
+    if pares:                                     # el piloto y la acompanante: la pareja de la carrera, la peor
+        f = max(pares, key=lambda f: kb(lee_dat(os.path.join(d, f)))); fijo[f] = kb(lee_dat(os.path.join(d, f)))
     tot_fijo = sum(fijo.values()) + fijo_ext
     print('fijo (%s): %.0f KB  [%s]' % (coche, tot_fijo, ', '.join('%s %.0f' % kv for kv in fijo.items())))
     # antes: un pvr_mem_malloc por textura (bloque) y nada compartido; despues: zona del curso (sin cabecera de

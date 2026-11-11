@@ -3,7 +3,7 @@
 # de datos entera de la demo (la que se pasa a mkgdi.py --datos) con los conversores del repositorio:
 #   etapas SEGnn/COLnn de todos los arboles (modo OutRun, OUTRUN2SP y las 94 misiones de Races.bin), uniones BKnn
 #   empaquetadas (UNIONES.PAK + descriptores, pak_union.py; las etapas en SEGS.PAK igual), BKD, CURSO, SOL, COLBK*, COLLR, musica MUSn.ADP (28 temas,
-#   28 avances, menu y metas), peliculas MVTS/MVATTR, sonido SFX/VOCES (espanol), menus, HUD, VMU, efectos, personajes,
+#   28 avances, menu y metas), peliculas MVTS/MVATTR, sonido SFX/VOCES (espanol), menus, HUD, VMU, efectos, personajes (CHRPAR y una CHRppaa por pareja),
 #   meta, salida, fin de carrera FIN/GOVER, OUTRUN2SP CARGASP/GOVSP/SPFE, modo de video, INFARTO/HAHUD/VOCESH, objetos de las uniones BO, trafico, coches COCHE00-14 + COCHES y PARAM.
 # Lo que sale del disco no va al repositorio. Idempotente: lo que ya esta en datos/ (o en trabajo/) no se rehace; si se
 # corta, se vuelve a llamar y sigue. En paralelo (JOBS, por defecto nproc). Sale con error si falla cualquier paso.
@@ -47,7 +47,7 @@ EOF
     vmu)      python3 "$TOOLS/conv_vmu.py" "$ISO" "$t" "$W/previas/vmu"; mueve "$t/VMU.DAT" ;;
     modov)    python3 "$TOOLS/conv_modo_video.py" "$ISO" "$t" "$W/previas/modov"; mueve "$t/MODOV.DAT" ;;
     efectos)  python3 "$TOOLS/conv_efectos.py" "$ISO" "$t/EFECTOS.DAT"; mueve "$t/EFECTOS.DAT" ;;
-    chr)      python3 "$TOOLS/conv_chr.py" "$ISO" "$t/CHR.DAT"; mueve "$t/CHR.DAT" ;;
+    chr)      python3 "$TOOLS/conv_chr.py" "$ISO" "$t" --pares; mueve "$t"/CHR*.DAT ;;   # CHRPAR y una CHRppaa por pareja
     band)     python3 "$TOOLS/conv_chr.py" "$ISO" "$t/BAND.DAT" --banderero; mueve "$t/BAND.DAT"
               python3 "$TOOLS/conv_chr.py" "$ISO" "$t/BAND1.DAT" --banderero-sp; mueve "$t/BAND1.DAT" ;;
     param)    python3 "$TOOLS/conv_param.py" "$ISO" "$t/PARAM.DAT"; mueve "$t/PARAM.DAT" ;;
@@ -116,7 +116,8 @@ for i in range(94): ts |= {r[1] for r in U.arbol_mision(A, i)}
 for ti in sorted(ts): print('%d:%d' % (ti, U.segmento_de(A, U.cadena(E, U.u32(E, base + 4 * ti) + 0x0c))))
 EOF
 ); do n=${ti#*:}; hay $(printf 'SEG%02d.DAT COL%02d.DAT' $n $n) || falta+=(seg${ti%:*}); done
-hay EFECTOS.DAT || falta+=(efectos); hay CHR.DAT || falta+=(chr); hay BAND.DAT BAND1.DAT || falta+=(band); hay PARAM.DAT || falta+=(param)
+CHRS=$(python3 "$TOOLS/conv_chr.py" "$ISO" --lista)        # CHRPAR.DAT y las parejas del piloto y la acompanante
+hay EFECTOS.DAT || falta+=(efectos); hay $CHRS || falta+=(chr); hay BAND.DAT BAND1.DAT || falta+=(band); hay PARAM.DAT || falta+=(param)
 hay META.DAT || falta+=(meta); hay FIN.DAT GOVER.DAT || falta+=(fin); hay CARGASP.DAT GOVSP.DAT SPFE.DAT || falta+=(sp); hay SALIDA.DAT || falta+=(salida); hay INFARTO.DAT HAHUD.DAT VOCESH.DAT || falta+=(infarto)
 hay BO.DAT || falta+=(bo); hay TRAFC.DAT TAPD.DAT TRAF0.DAT || falta+=(trafico)
 for v in ts attr; do f=MVTS.VQV; [ $v = attr ] && f=MVATTR.VQV; hay $f || falta+=(video_$v); done
@@ -149,7 +150,7 @@ fi
 # ---------------------------------------------------------------- comprobacion
 echo "== comprobacion de $D"
 mal=0
-nec="BAND.DAT BAND1.DAT BKD.DAT BO.DAT CHR.DAT COCHES.DAT COLBK.DAT COLLR.DAT CURSO.DAT EFECTOS.DAT FIN.DAT GOVER.DAT HAHUD.DAT HUD.DAT INFARTO.DAT MENU.DAT
+nec="BAND.DAT BAND1.DAT BKD.DAT BO.DAT $CHRS COCHES.DAT COLBK.DAT COLLR.DAT CURSO.DAT EFECTOS.DAT FIN.DAT GOVER.DAT HAHUD.DAT HUD.DAT INFARTO.DAT MENU.DAT
      META.DAT MODOV.DAT MVATTR.VQV MVTS.VQV PARAM.DAT SFX.DAT SEGS.PAK SOL.DAT TAPD.DAT TRAFC.DAT UNIONES.PAK VMU.DAT VOCES.DAT VOCESH.DAT"
 for k in $(seq 0 14); do nec+=" $(printf COCHE%02d.DAT $k)"; done
 for k in $MUSICA; do nec+=" MUS$k.ADP"; done

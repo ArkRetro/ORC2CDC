@@ -29,6 +29,8 @@
      abiertos; GOAL 0x60049 (cerrados 0x25000c) y TIME OVER 0x60036 en bucle; al acabar cada reaccion vuelve a
      0x6004b (sentada) en bucle. Listas LISA / LISC (PS2 0x40eb28 / 0x40eb68 segun CERR, 45B380 = PS2 0x1aa3a0).
    - Manos (487940 / 5148D0 / 5148F0): el puno si el movimiento esta en la lista AGAR (PS2 0x36f658), si no la abierta.
+   - Personajes: los de la pareja de la carrera (CHRppaa.DAT, elegida en demo/main.c robot_pareja como 487EE0 /
+     487F50); su esqueleto, manos y osage (el pelo de CHR_DR_G00, mas abajo) vienen en el RBT1.
    - Meta del piloto (estado 9 con 44FF10; PS2 0x20250c..0x2027cc, PC 488DD0 caso 2): fila del modelo (METR =
      0x40e9b8) y tabla segun 44DC50 de la clave (0x1B 0x40e978, 0x1A / 0x1C 0x40e998, si no 0x40e958): dos registros
      {id, bucle, fin} (METE); de cada uno: id una vez (o nada si es -1), al acabar (o 0xF0 / 0x168 cuadros) el de bucle
@@ -431,6 +433,7 @@ static const uint32_t *tabla_de(const uint8_t *B, uint32_t Bn, const char *k, ui
     return NULL;
 }
 static const uint32_t *tabla(const char *k, uint32_t *n) { return tabla_de(B, Bn, k, n); }
+static int osage_lee(int p, const uint32_t *w, uint32_t n);
 int robot_inicia(const void *rbt, uint32_t bytes)
 {
     const uint32_t *w = rbt; uint32_t i, n;
@@ -452,6 +455,8 @@ int robot_inicia(const void *rbt, uint32_t bytes)
     t_metr = tabla("METR", &n_metr); t_mete = tabla("METE", &n_mete);
     if (n_metr < 30 || n_mete < 3 * 8 * 3) t_metr = t_mete = NULL;
     if (!t_mate || !t_agar || !t_chqe || !t_chq7 || !t_chq6 || !t_lisa || !t_lisc || !t_asnt || n < 30 * 6) return -4;
+    {   const uint32_t *o0 = tabla("OSG0", &n); if (osage_lee(0, o0, n)) return -5;
+        o0 = tabla("OSG1", &n); if (osage_lee(1, o0, n)) return -5; }
     for (i = 0; i < nper; i++) {
         motor_t *m = MOT(i); int j, k;
         memset(m, 0, sizeof *m);
@@ -467,6 +472,170 @@ int robot_inicia(const void *rbt, uint32_t bytes)
     return 0;
 }
 int robot_listo(void) { return listo; }
+
+/* ---------------------------------------------------------------- osage (el pelo con fisica)
+   rob_osage del original: init 514F60 (PS2 0x208b58), control 515040 (0x208ca8, cada paso tras Calc: 488450 con
+   [85A714] = PS2 [0x36fb10] = 0), cadena 5229A0 (0x290890), colocar 522810 (0x290a60), paso 522620 (0x290c28),
+   matrices 522450 (0x290e60), esferas 514EC0 (0x209078), choque con esferas 522560 (0x291328), largo 401790
+   (0x100968). Bloque OSGp de RBT1 (tools/conv_chr.py osage_tablas, constantes del ELF). Todo en el marco del
+   personaje (la pila del original lleva la matriz del hueso: M de motor_t), vectores fila. Las matrices de los nodos
+   (el "pool" 858710 + n x 0x40 del original, huesos 0x8000 | i de las piezas) van en M[n huesos + i] */
+#define OSG_CAD 4
+#define OSG_NOD 8
+typedef struct { float pos[3], vel[3], k24, largo; } onodo_t;   /* nodo de 0x2C del original: +04, +10, +24, +00 */
+typedef struct { uint32_t hueso, n, primero; float pos[3], giro[3]; } ocad_t;
+typedef struct { int32_t hueso; uint32_t tipo; float r, c[3]; } oesf_t;
+static struct {
+    int ok, nc, nn, calienta, marca;                 /* marca: el bit de 85A710 (colocar en el siguiente control) */
+    float g, amort, eje[3], viento[3];
+    ocad_t c[OSG_CAD]; onodo_t n0[OSG_CAD], n[OSG_NOD];
+    uint32_t ne[OSG_NOD]; const oesf_t *e[OSG_NOD];  /* definiciones de las esferas de cada nodo (514EC0) */
+    float esf[OSG_NOD][3][5];                        /* las del paso: tipo, centro, radio (0x1C del original) */
+    uint32_t nesf[OSG_NOD];
+} osg[2];
+static float f_de(uint32_t u) { float f; memcpy(&f, &u, 4); return f; }
+static int osage_lee(int p, const uint32_t *w, uint32_t n)
+{
+    uint32_t i, k, o;
+    memset(&osg[p], 0, sizeof osg[p]);
+    if (!w) return 0;
+    if (n < 11) return -1;
+    osg[p].nc = (int)w[0]; osg[p].nn = (int)w[1]; osg[p].calienta = (int)w[2]; osg[p].g = f_de(w[3]); osg[p].amort = f_de(w[4]);
+    for (k = 0; k < 3; k++) { osg[p].eje[k] = f_de(w[5 + k]); osg[p].viento[k] = f_de(w[8 + k]); }
+    if (osg[p].nc > OSG_CAD || osg[p].nn > OSG_NOD || n < 11 + 9 * (uint32_t)osg[p].nc + 20 * (uint32_t)osg[p].nn) return -2;
+    if (per[p].nh + (uint32_t)osg[p].nn > ROBOT_HUESOS) return -3;
+    for (i = 0, o = 11; i < (uint32_t)osg[p].nc; i++, o += 9) {
+        ocad_t *c = &osg[p].c[i];
+        c->hueso = w[o]; c->n = w[o + 1]; c->primero = w[o + 8];
+        for (k = 0; k < 3; k++) { c->pos[k] = f_de(w[o + 2 + k]); c->giro[k] = f_de(w[o + 5 + k]); }
+        if (c->primero + c->n > (uint32_t)osg[p].nn) return -4;
+    }
+    for (i = 0; i < (uint32_t)osg[p].nn; i++, o += 20) {
+        osg[p].n[i].largo = f_de(w[o]); osg[p].ne[i] = w[o + 1] > 3 ? 3 : w[o + 1];
+        osg[p].e[i] = (const oesf_t *)(w + o + 2);
+    }
+    osg[p].ok = 1;
+    return 0;
+}
+static void v_resta(const float *a, const float *b, float *o) { o[0] = a[0] - b[0]; o[1] = a[1] - b[1]; o[2] = a[2] - b[2]; }
+static void vector(const mat_t m, const float *v, float *o)    /* 40F2F0 / PS2 0x1649ac: sin la traslacion */
+{
+    float x = v[0], y = v[1], z = v[2]; int j;
+    for (j = 0; j < 3; j++) o[j] = x * m[0][j] + y * m[1][j] + z * m[2][j];
+}
+static void cuelga(int p, const float *a, const float *b, float *o)   /* 5223B0 / PS2 0x2910b8 */
+{
+    float t[3], l, s, g = osg[p].g;
+    v_resta(a, b, t); l = 1.0f / sqrtf(t[0] * t[0] + t[1] * t[1] + t[2] * t[2]);   /* 0x164ca0 (sin guarda) */
+    t[0] *= l; t[1] *= l; t[2] *= l; s = t[1] * g;
+    o[0] = 0.0f - t[0] * s; o[1] = (0.0f - g) - t[1] * s; o[2] = 0.0f - t[2] * s;
+}
+static void choca(int p, int k, float *pos)                     /* 522560 / PS2 0x291388: esferas de tipo 1 */
+{
+    uint32_t i;
+    for (i = 0; i < osg[p].nesf[k]; i++) {
+        const float *e = osg[p].esf[k][i]; float d[3], d2, r = e[4], q;
+        if (e[0] != 1.0f) continue;
+        v_resta(pos, e + 1, d); d2 = d[2] * d[2] + d[1] * d[1] + d[0] * d[0];
+        if (!(r * r > d2)) continue;
+        q = r / sqrtf(d2);
+        pos[0] = d[0] * q + e[1]; pos[1] = d[1] * q + e[2]; pos[2] = d[2] * q + e[3];
+    }
+}
+static void o_limita(float *a, const float *b, float largo)    /* 401790 / PS2 0x100968 */
+{
+    float d[3], d2, q;
+    v_resta(a, b, d); d2 = d[2] * d[2] + d[1] * d[1] + d[0] * d[0];
+    if (!(d2 > largo * largo)) return;
+    q = largo / sqrtf(d2);
+    a[0] = q * d[0] + b[0]; a[1] = q * d[1] + b[1]; a[2] = q * d[2] + b[2];
+}
+static onodo_t *nodo(int p, int ci, uint32_t k) { return k ? &osg[p].n[osg[p].c[ci].primero + k - 1] : &osg[p].n0[ci]; }
+static void o_matrices(int p, motor_t *m, int ci, const mat_t S)   /* 522450 / PS2 0x290e60 */
+{
+    const ocad_t *c = &osg[p].c[ci]; mat_t M, I; float v[3], z, r, y, t[3]; uint32_t k;
+    memcpy(M, S, sizeof M); op_tras(M, c->pos); op_zyx(M, c->giro);
+    for (k = 1; k <= c->n; k++) {
+        onodo_t *n = nodo(p, ci, k);
+        m_inv(I, M); punto(I, n->pos, v);
+        z = atan2f(v[1], v[0]); r = sqrtf(v[1] * v[1] + v[0] * v[0]); y = atan2f(0.0f - v[2], r);
+        op_rot(M, 0, 1, z); op_rot(M, 2, 0, y);
+        memcpy(m->M[m->n + c->primero + k - 1], M, sizeof M);
+        t[0] = n->largo; t[1] = t[2] = 0; op_tras(M, t);
+    }
+}
+static void o_paso(int p, motor_t *m, int ci, const mat_t S)     /* 522620 / PS2 0x290c28 */
+{
+    const ocad_t *c = &osg[p].c[ci]; mat_t R; float x1[3], f[3], g[3], old[3]; uint32_t k; int j;
+    punto(S, c->pos, osg[p].n0[ci].pos);
+    memcpy(R, S, sizeof R); op_zyx(R, c->giro); vector(R, osg[p].eje, x1);
+    for (k = 1; k <= c->n; k++) {
+        onodo_t *n = nodo(p, ci, k), *a = nodo(p, ci, k - 1);
+        memcpy(old, n->pos, sizeof old); f[0] = f[1] = f[2] = 0;
+        if (k != c->n) cuelga(p, n->pos, nodo(p, ci, k + 1)->pos, f);
+        cuelga(p, n->pos, a->pos, g);
+        for (j = 0; j < 3; j++) {
+            f[j] += g[j]; f[j] += osg[p].viento[j];        /* chain+14 (522340: 0x36fb20) */
+            n->vel[j] += f[j]; n->vel[j] += x1[j] * n->k24; n->pos[j] += n->vel[j];
+        }
+        choca(p, (int)(c->primero + k - 1), n->pos);
+        o_limita(n->pos, a->pos, n->largo);
+        v_resta(n->pos, old, n->vel);
+    }
+    o_matrices(p, m, ci, S);
+}
+static void o_coloca(int p, motor_t *m, int ci, const mat_t S)   /* 522810 / PS2 0x290a60 */
+{
+    const ocad_t *c = &osg[p].c[ci]; mat_t R; float q[3], d[3], s[3] = { 0, 0, 0 }, l; uint32_t k; int i;
+    punto(S, c->pos, q); memcpy(osg[p].n0[ci].pos, q, sizeof q); memset(osg[p].n0[ci].vel, 0, 12);
+    memcpy(R, S, sizeof R); op_zyx(R, c->giro); vector(R, osg[p].eje, d);
+    d[1] = d[1] - osg[p].g;
+    for (k = 1; k <= c->n; k++) {
+        onodo_t *n = nodo(p, ci, k);
+        l = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+        if (l > 0.0f) { float u = n->largo / l; s[0] = d[0] * u; s[1] = d[1] * u; s[2] = d[2] * u; }   /* 0x164ee0 */
+        q[0] += s[0]; q[1] += s[1]; q[2] += s[2];
+        memcpy(n->pos, q, sizeof q); memset(n->vel, 0, 12);
+    }
+    for (i = 0; i < osg[p].calienta; i++) o_paso(p, m, ci, S);   /* [0x378368] pasos */
+}
+static int o_hueso(const motor_t *m, uint32_t id) { return !(id & 0x8000u) && (int)(id & 0x7fffu) < m->n; }   /* 4F1EC0 */
+static void osage_inicia(int p, motor_t *m)                     /* 514F60 / PS2 0x208b58 */
+{
+    int ci; uint32_t k; mat_t S;
+    if (!osg[p].ok) return;
+    for (ci = 0; ci < osg[p].nc; ci++) {
+        if (o_hueso(m, osg[p].c[ci].hueso)) memcpy(S, m->M[osg[p].c[ci].hueso], sizeof S); else m_id(S);
+        for (k = 1; k <= osg[p].c[ci].n; k++) nodo(p, ci, k)->k24 = osg[p].amort;   /* 5222B0 (0x290f98) */
+        o_coloca(p, m, ci, S);       /* (5229A0 coloca con el +24 de la plantilla, basura de la pila: el primer control
+                                        vuelve a colocar con la marca, asi que no queda nada de esto) */
+    }
+    osg[p].marca = 1;                                           /* 85A710 |= 1 << n */
+}
+static void osage_control(int p, motor_t *m)                    /* 515040 / PS2 0x208ca8 (personajes 5..8: esferas
+                                                                   0x40f6b0, sin lista de amortiguacion) */
+{
+    int ci; uint32_t k, i;
+    if (!osg[p].ok) return;
+    for (ci = 0; ci < osg[p].nc; ci++) {
+        const ocad_t *c = &osg[p].c[ci];
+        if (!o_hueso(m, c->hueso)) continue;
+        for (k = 0; k < c->n; k++) {                            /* 514EC0: las esferas de cada nodo al marco */
+            uint32_t s = c->primero + k, ne = 0;
+            for (i = 0; i < osg[p].ne[s]; i++) {
+                const oesf_t *e = osg[p].e[s] + i; float *o = osg[p].esf[s][ne];
+                if (e->hueso == -1) memcpy(o + 1, e->c, 12);
+                else if (o_hueso(m, (uint32_t)e->hueso)) punto(m->M[e->hueso], e->c, o + 1);
+                else break;
+                o[0] = (float)e->tipo; o[4] = e->r; ne++;
+            }
+            osg[p].nesf[s] = ne;
+        }
+        if (osg[p].marca) o_coloca(p, m, ci, m->M[c->hueso]);
+        o_paso(p, m, ci, m->M[c->hueso]);
+    }
+    osg[p].marca = 0;
+}
 
 /* ---------------------------------------------------------------- logica */
 enum { R_IDLE, R_BORED, R_SCARED, R_SPIN, R_CRASH, R_TURN, R_LAND, R_JUMP, R_AIR, R_POSE, R_START, R_GOAL, R_OVER,
@@ -500,11 +669,13 @@ void robot_carrera(int modelo)
     pon_mov(d, t_modc[modelo]); pon_cuadro(d, 0); calc(d); pon_cuadro(d, 85.0f); d->bucles = 0;
     lg.d_est = 8; lg.d_cuenta = 0; lg.pick_jump = lg.pick_land = 0;
     d->gu = agarre(d->id);
+    osage_inicia(0, d);                                          /* 487C30 -> 514F60 */
     /* 4885A0 (variante 1: 0x25000c) */
     a->fl = 0; a->mov = NULL;
     pon_mov(a, 0x25000c); pon_cuadro(a, 0); calc(a); pon_cuadro(a, 0); a->bucles = -1;
     lg.a_est = R_START; lg.a_tiempo = 0; lg.pick_idle = lg.pick_turn = 0;
     a->gu = agarre(a->id);
+    osage_inicia(1, a);
 }
 
 /* 488DD0 estado 9 (PS2 0x20250c): la secuencia de la meta; registros de 3 (0xFFFFFFFE: no hay registro) */
@@ -568,6 +739,7 @@ static void piloto(const robot_coche_t *c)          /* 488DD0 (variante 1) */
     if (lg.d_est == 9) meta_piloto(m, c);
     manos(m);
     calc(m);
+    osage_control(0, m);                                        /* 488450: Calc y luego 515040 */
 }
 
 static void a_reposo(motor_t *m)                    /* 4886B0 */
@@ -641,6 +813,7 @@ static void acompanante(const robot_coche_t *c)     /* 489A90 (variante 1) */
     }
     manos(m);
     calc(m);
+    osage_control(1, m);
 }
 
 void robot_paso(const robot_coche_t *c)
@@ -666,6 +839,7 @@ const rvert_t *robot_vert(int i) { return vt + i; }
 int robot_nmat(void) { return (int)n_mate; }
 const float *robot_material(int i) { return (const float *)(t_mate + 9 * i); }
 uint32_t robot_movimiento(int p) { return MOT(p)->id; }
+int robot_personaje(int p) { return listo && p >= 0 && p < (int)nper ? (int)per[p].kind : -1; }
 float robot_cuadro(int p) { return MOT(p)->f0c; }
 int robot_estado(int p) { return p ? lg.a_est : lg.d_est; }
 

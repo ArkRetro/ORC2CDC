@@ -2,12 +2,12 @@
 #define ROBOT_H
 /* El piloto y la acompanante en el coche del jugador (los "robots" ROB01 / ROB02 del original: sucesos 362 y 363 de
    la carrera, PS2 0x201b10 / 0x201c40 y 0x202c58 / 0x202de0; PC race_robots.cpp 4884D0 / 488DD0 y 4885A0 / 489A90).
-   Datos: el bloque RBT1 de CHR.DAT (tools/conv_chr.py): esqueletos, movimientos, piezas con sus pesos y las tablas
+   Datos: el bloque RBT1 de la CHRppaa.DAT de la pareja (tools/conv_chr.py): esqueletos, movimientos, piezas con sus pesos y las tablas
    de la logica del ELF de PS2. Ver robot.c. */
 #include <stdint.h>
 
 #define ROBOT_N 2                 /* 0 el piloto, 1 la acompanante */
-#define ROBOT_HUESOS 56                /* el esqueleto mayor (bone.bin 3) tiene 53 */
+#define ROBOT_HUESOS 56                /* el esqueleto mayor (bone.bin 3) tiene 53; detras, los nodos del osage (G00: 50 + 4) */
 
 /* pieza del personaje (CHR_*.bin): rigida (un hueso), con pesos (hasta 4 matrices inv(enlace) M(hueso)) o una mano
    (puno o abierta, en su hueso) */
@@ -43,6 +43,7 @@ const rvert_t  *robot_vert(int i);                         /* por vertice del mo
 int   robot_nmat(void);
 const float *robot_material(int i);                        /* difuso, ambiente y emision (9 floats, 1 = el 128 del GS) */
 uint32_t robot_movimiento(int p);                          /* id del movimiento puesto (diagnostico) */
+int   robot_personaje(int p);                              /* indice de la tabla de personajes (work+8) o -1 */
 float robot_cuadro(int p);
 int   robot_estado(int p);
 /* el banderero de la salida (ROB03): BAND.DAT (su propio RBT1, un personaje), leido por quien llama en el hueco de la

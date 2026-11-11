@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """conv_chr.py: el piloto y la acompanante de la carrera (DRIVER/CHR.PS2, COMMON.PS2 bone.bin y motdata_table.bin,
-ANIMS.PS2 mot_*) al formato de la Dreamcast: CHR.DAT (modelo ORD7 de tools/modelo.py con las texturas y las mallas en
+ANIMS.PS2 mot_*) al formato de la Dreamcast: CHRppaa.DAT, una por pareja (modelo ORD7 de tools/modelo.py con las texturas y las mallas en
 la postura de enlace, y el bloque RBT1 en la parte de la ruta con esqueletos, pesos, movimientos y tablas; lo lee
 demo/robot.c).
 
 Uso:
-  conv_chr.py <iso> <salida CHR.DAT>      convierte
+  conv_chr.py <iso> <dir> --pares         una CHRppaa.DAT por pareja que puede ir en la carrera (pares(): piloto pp y
+                                          acompanante aa, indices de la tabla de personajes en decimal) y CHRPAR.DAT
+                                          (las tablas que eligen la pareja: tabla_pares)
+  conv_chr.py <iso> --lista               los nombres de esos ficheros
+  conv_chr.py <iso> <salida> [--par p,a]  una pareja (por defecto 11,9: la de OUTRUN2SP)
   conv_chr.py <iso> <BAND.DAT> --banderero  el banderero de la salida (ROB03) solo, en su fichero
   conv_chr.py <iso> --info                los movimientos de conducir y de mirar de cada modelo y la lista de agarre
 
@@ -18,7 +22,9 @@ Formato de RBT1 (todo u32 / float salvo lo dicho; desplazamientos desde el princ
   puno, 3 mano abierta), n matrices, 0, u16 hueso[4], u16 inversa[4]}; por malla (el campo del nodo de cada malla del
   modelo) {u16 pieza, u16 material}; por vertice del modelo {s8 normal x 127 [3], 0, u8 peso x 255 [4]}; tablas
   {4 letras, n, n u32} hasta 'FIN ' (ver tablas_logica: MODC, MIRA, AGAR, CHQE, CHQ7, CHQ6, CERR, LISA, LISC, ASNT,
-  METR, METE (la meta del piloto), MATE: difuso, ambiente y emision / 128 de cada material distinto).
+  METR, METE (la meta del piloto), MATE: difuso, ambiente y emision / 128 de cada material distinto, OSG0 / OSG1:
+  el osage del personaje 0 / 1 si lo tiene, ver osage_tablas). Los huesos 0x8000 | i de las piezas (nodos del osage)
+  se guardan como n huesos + i (robot.c deja ahi sus matrices).
 
 Todo sale del disco al convertir (aqui no hay datos del juego). Origen de cada cosa (SLES-53998, contrastado con la
 decompilacion del PC, platform/race_robots.cpp, rob_disp.cpp, rob_motion*.cpp):
@@ -28,11 +34,11 @@ decompilacion del PC, platform/race_robots.cpp, rob_disp.cpp, rob_motion*.cpp):
    exteriores de la camara (PC 4A2BA0: 0x8000 la interior); no mira el modelo: va en todos los coches, abiertos y
    cerrados (se ven por los cristales). Nada mas: no hay LOD ni distancia (el original no tiene otro modelo).
  - Personaje (work+8): indice de la tabla de ficheros \\chr\\CHR_*.bin del ELF (registros de 16 bytes {ruta, 0,
-   recurso, 0} en 0x36f7d8; el cargador 0x205370 = PC 488B80). El piloto (PS2 0x205518 = PC 487EE0): 0xC en el modo 3,
-   si no (sin la bandera de 0x59acac = PC [780260]: el juego de OUTRUN2SP; con ella, el de la consola, la licencia
-   elige: tablas 6549B0 / 6549C8, SIN PORTAR) 0xB = CHR_DR_M00 (el piloto de pelo castano). La
-   acompanante (PS2 0x2055b8 = PC 487F50): en la variante 1 (OutRun) y 3, 4, 5 el 9 = CHR_DR_L00 (la chica rubia).
-   Sus modelos: el recurso del registro (0xBE y 0xBF: obj_chr_dr_m00_pmt / obj_chr_dr_l00_pmt de CHR.PS2).
+   recurso, 0} en 0x36f7d8; el cargador 0x205370 = PC 488B80). Quienes: pares() (PS2 0x205518 = PC 487EE0 y
+   0x2055b8 = 487F50): en OUTRUN2SP 0xB = CHR_DR_M00 y 9 = CHR_DR_L00 (6 = CHR_DR_G00_USA en las variantes 2, 6..);
+   en el juego de la consola la licencia (+0x20) elige entre CHR_DR_M00 / S00 / W00 / L00 / G00 / H00 (11, 18, 17,
+   9, 5, 19). Sus modelos: el recurso del registro (p. ej. 0xBE y 0xBF: obj_chr_dr_m00_pmt / obj_chr_dr_l00_pmt de
+   CHR.PS2; los de S00 y W00 con registros de 64 bytes, Pmt64). G00 y G00_USA llevan osage (dos cadenas de pelo).
  - Esqueleto (PS2 0x205038 = PC 487C30): la entrada (tabla de saltos 0x40e3f0 por personaje - 3) de \\COMMON\\bone.bin:
    el piloto la 3 (53 huesos), la acompanante la 2 (50). Registros de hueso de 0x38 bytes: +04 tipo (0/1 claves, 2
    cadena con IK, 3 matriz fija, 4 claves de giro), +06 IK (2 de dos huesos, 1 apuntar), +07 giro unidad, +0C..+2C
@@ -291,16 +297,26 @@ class Motor:
 def mallas_registro(blq, r):
     """tiras del registro r: [(clave, P, N, pesos (n, 4), UV, k de la tabla 4)]"""
     m, A = blq.m, blq.A; reg = blq.registros()[r]; c, o = reg[3]; t2 = reg[2][1]; res = []
+    z2 = 12 if getattr(blq, 'zancada64', False) else 16          # registros de la tabla 2 (Pmt64.material)
     for i in range(c):
         e = struct.unpack('<6I', m[A + o + 24 * i:A + o + 24 * i + 24])
-        k = struct.unpack('<i', m[A + t2 + 16 * i:A + t2 + 16 * i + 4])[0]
-        clave = e[0] & 0xff
+        k = struct.unpack('<i', m[A + t2 + z2 * i:A + t2 + z2 * i + 4])[0]
+        clave = e[0] & 0xff; color = False
+        if clave & 0xf0 in (0x20, 0x60) and clave & 0xf in (0, 2, 3, 4, 8, 0xa, 0xb, 0xc):
+            # 0x22n / 0x26n (S00, W00): las mismas UNPACK que 0x20n; con 8 (0x228, 0x22a..0x22c) ademas un V4-8 detras
+            # de las posiciones (0x6e) y n = 8 una matriz. Otro microcodigo (tabla 0x3592b0: 0x202 -> 0x31edb0, 0x262 y
+            # 0x228 -> 0x315760; 0x203 / 0x223 / 0x243 el mismo 0x313db0): lo que cambie de la luz, SIN PORTAR
+            color = (clave & 8) != 0; clave = {0: 0, 2: 2, 3: 3, 4: 4, 8: 0, 0xa: 2, 0xb: 3, 0xc: 4}[clave & 0xf]
         for pk in vif.datos(m, A + e[2], A + blq.w[2]):
             lista = pk.get('orden', []); j = 0
             while j < len(lista):
                 if lista[j][0] != 0x6c: j += 1; continue
                 nxt = next((q for q in range(j + 1, len(lista)) if lista[q][0] == 0x6c), len(lista))
                 tira = lista[j + 1:nxt]; j = nxt
+                if color:                         # el V4-8 de 0x22[8a-c]: en SLES-53998 siempre (0, 0, 0, 127); si no,
+                    if tira[1][0] != 0x6e or (tira[1][1] != (0, 0, 0, 127)).any():   # sin estudiar
+                        raise SystemExit('registro %d: color por vertice distinto de (0, 0, 0, 127): sin portar' % r)
+                    tira = tira[:1] + tira[2:]    # PROBABLE: sin efecto (el mismo en todos los vertices)
                 P = tira[0][1].astype(np.float32); N = tira[1][1].astype(float) / 32768.0
                 n = len(P); W = np.zeros((n, 4)); resto = tira[2:]
                 if clave == 0: W[:, 0] = 1
@@ -315,6 +331,67 @@ def mallas_registro(blq, r):
                 uv = resto[0][1][:, :2].astype(float) / 4096.0 if resto else np.zeros((n, 2))
                 res.append((clave, P, N, np.clip(W, 0, 1), uv, k, e[0]))
     return res
+
+class Pmt64:
+    """bloque con registros de 64 bytes (8 tablas, sin las 2 palabras de detras): obj_chr_dr_s00_pmt y
+    obj_chr_dr_w00_pmt de CHR.PS2. Se reconoce por la tabla de texturas: su primer desplazamiento es el de la cabecera
+    que va justo detras (zancada x n registros + 4 x n texturas; con 72 bytes en el resto). PROBABLE: el cargador
+    que se ha mirado (0x118aa0) recoloca siempre de 0x48 en 0x48; con esa zancada estos dos no tienen sentido (tablas
+    cruzadas) y con 64 todo cuadra (mallas, texturas, piezas del CHR_*.bin)"""
+    @staticmethod
+    def zancada(b):
+        n, nt = b.w[0], b.w[1]
+        ok = [z for z in (72, 64) if struct.unpack_from('<I', b.m, b.A + z * n)[0] == z * n + 4 * nt]
+        if len(ok) != 1: raise SystemExit('bloque de personaje sin zancada clara de registros: %s' % ok)
+        return ok[0]
+    @classmethod
+    def de(cls, b):
+        if cls.zancada(b) == 72: return b
+        b.registros = lambda: [[struct.unpack_from('<2I', b.m, b.A + 64 * i + 8 * k) for k in range(8)] for i in range(b.w[0])]
+        b.zancada64 = True
+        return b
+    @staticmethod
+    def material(b, reg, k, base, ntb):
+        """(tl, ti, material) de la entrada k de la tabla 4 de un Pmt64. Tablas de S00 y W00 (las mismas parejas
+        cuenta / desplazamiento): 2 con registros de 12 bytes (palabra 0: la entrada de la tabla 4, como la de 16 de
+        los otros), 4 de 32 bytes {material, 0x5401 / 0x5407, 0x3040200, 1, 0x5040000, -0x10000, 0x6040000, -0x10000}
+        y 5 de 72 bytes {difuso 4, ambiente 4, especular 4, emision 4, potencia, 0} en unidades de 1 (los de 72 bytes
+        de registro: 64 en unidades del GS, la potencia en la palabra 11). x 128 queda como los otros (el de M00 es el
+        de S00 x 128: difuso 1 -> 128, ambiente 1,3 -> 166,4, especular 0,1 -> 12,8, emision 0,2 -> 25,6; potencia 20
+        los dos). Textura: una sola en los dos ficheros y la palabra 3 de la tabla 4 a 1 en todas: PROBABLE que sea
+        "con textura" (la unica)"""
+        n4, o4 = reg[4]; n5, o5 = reg[5]
+        if not 0 <= k < n4: return -1, -1, None
+        e = struct.unpack_from('<8I', b.m, b.A + o4 + 32 * k)
+        if e[3] != 1 or ntb != 1 or not 0 <= e[0] < n5: raise SystemExit('Pmt64: entrada de la tabla 4 sin estudiar %s' % [hex(x) for x in e])
+        v = np.array(struct.unpack_from('<18f', b.m, b.A + o5 + 72 * e[0]), float)
+        mat = np.r_[v[0:11], v[16], v[12:16]] * 128.0; mat[11] = v[16]
+        return 0, base, mat
+
+def cabeceras(blq):
+    """tex.cabeceras con la zancada del bloque (Pmt64)"""
+    if not getattr(blq, 'zancada64', False): return tex.cabeceras(blq)
+    m, A = blq.m, blq.A; base = A + 64 * blq.w[0]; res = []
+    for o in struct.unpack('<%dI' % blq.w[1], m[base:base + 4 * blq.w[1]]):
+        if o >= blq.w[2] or o < 64 * blq.w[0]: break
+        res.append(struct.unpack('<14I', m[A + o:A + o + 56]))
+    return res
+
+def osage(d, o):
+    """cadenas osage (el pelo con fisica) de un CHR_*.bin: cabecera en +1C (PC 514F60 / 515040, PS2 0x208b58 /
+    0x208ca8) {n cadenas, ?, registros, parametros, indices}; registro de 0x24 {hueso, indice, n nodos, posicion,
+    giro x y z}; parametros {id | 0x8000, largo} por nodo (5229A0 = PS2 0x290890: el nodo k de cada cadena toma el
+    largo k desde el principio, todas las cadenas desde el mismo); indices: u32 por nodo hacia la tabla de esferas
+    del personaje (515040)"""
+    n, _, orr, opa, oix = struct.unpack_from('<5I', d, o)
+    cad = []
+    for i in range(n):
+        r = struct.unpack_from('<3I6f', d, orr + 0x24 * i)
+        cad.append(dict(hueso=r[0], indice=r[1], n=r[2], pos=list(r[3:6]), giro=list(r[6:9])))
+    largo = lambda k: struct.unpack_from('<f', d, opa + 4 + 8 * k)[0]
+    nidx = max(c['indice'] + c['n'] for c in cad) if cad else 0
+    return dict(cadenas=cad, largos=[[largo(k) for k in range(c['n'])] for c in cad],
+                indices=list(struct.unpack_from('<%dI' % nidx, d, oix)), nodos=sum(c['n'] for c in cad))
 
 class Personaje:
     """CHR_*.bin + su pmt: piezas (rigidas y con pesos) y manos"""
@@ -331,9 +408,9 @@ class Personaje:
         s.pesos = []
         for i in range(h[2]):
             x = struct.unpack_from('<HH6HI', d, h[5] + 0x14 * i); s.pesos.append((list(x[2:2 + x[1]]), x[8]))
-        if h[9]: raise SystemExit('%s tiene cadenas osage (pelo): sin portar' % s.nombre)
+        s.osage = osage(d, h[9]) if h[9] else None
         s.pmt = 'obj_' + s.nombre[:-4].lower() + '_pmt.sz'
-        s.blq = A.bloque(A.entrada('CHR.PS2', s.pmt)); s.esq = esq
+        s.blq = Pmt64.de(A.bloque(A.entrada('CHR.PS2', s.pmt))); s.esq = esq
     def idx_id(s, b):
         return s.ids.index(b)
 
@@ -369,6 +446,62 @@ def _bloque_mips(E, va, n=12):
         elif op in (0x02, 0x03) or w == 0x03e00008: break
         pc = salta if salta is not None else pc + 4                                     # el hueco ya se ejecuto
     return out
+
+def esqueleto_de(E, kind):
+    """entrada de bone.bin del personaje: 487C30 = PS2 0x205038 salta por 0x40e3f0[kind - 3] (17 casos; fuera, el
+    0x2050e8) a un trozo que deja la entrada en $v1 (addiu $v1, $zero, n o move $v1, $zero en el hueco del b)"""
+    va = E.u32(0x40e3f0 + 4 * (kind - 3)) if 0 <= kind - 3 < 17 else 0x2050e8
+    for k in range(4):
+        w = E.u32(va + 4 * k); op = w >> 26; rs = (w >> 21) & 31; rt = (w >> 16) & 31; rd = (w >> 11) & 31
+        if op == 0x09 and rs == 0 and rt == 3: return w & 0xffff
+        if op == 0 and (w & 0x3f) in (0x21, 0x25, 0x2d) and rd == 3 and rs == 0 and rt == 0: return 0
+    raise SystemExit('0x205038: no se encuentra la entrada de bone.bin del personaje %d' % kind)
+
+# osage (pelo con fisica: rob_osage, PS2 0x208b58 init / 0x208ca8 control / 0x290890 cadena / 0x290a60 colocar /
+# 0x290c28 paso / 0x290e60 matrices; PC 514F60 / 515040 / 5229A0 / 522810 / 522620 / 522450): constantes del ELF
+OSG_GRAVEDAD = 0x328708      # lwc1 -0x78f8(0x330000) en 0x290b38 (colocar) y 0x2910ec (5223B0 = PS2 0x2910b8)
+OSG_AMORTIGUA = 0x36fb08     # lwc1 -0x4f8(0x370000) en 0x208c48 (init: +24 de los nodos 1.., 5222B0 = 0x290f98)
+OSG_CALIENTA = 0x378368      # lw -0x7c98(0x380000) en 0x290bcc: pasos tras colocar (PC 722D40)
+OSG_EJE = 0x422990           # 0x290a90 / 0x290c5c: el vector que gira el registro (1, 0, 0)
+OSG_VIENTO = 0x36fb20        # addiu en 0x208f58 -> 0x291038: chain+14 (nadie lo escribe en el ELF)
+OSG_UNICO = 0x36fb10         # lw en 0x208d78 / 0x2018d8 (PC 85A714; nadie lo escribe: 0)
+OSG_SALTOS = 0x40f680        # 0x208d1c: tabla de saltos por personaje - 5 (11 casos)
+OSG_GUARDA = 0x36fc30        # 0x208eb0: punteros a las esferas de cada hueco (0x291058: nodos 1.. +28)
+def osage_tablas(E, kind, osg):
+    """bloque OSG de RBT1 para el personaje (u32): {n cadenas, n nodos, pasos de calentar, gravedad, amortiguacion,
+    eje (3), viento (3)}; por cadena {hueso, n, posicion (3), giro (3), primer nodo}; por nodo {largo, n esferas,
+    3 x {hueso, tipo, radio, centro (3)}} (514EC0 = PS2 0x209078: hueso -1 = centro en el marco del personaje)"""
+    f = lambda va: E.u32(va)
+    if E.u32(OSG_UNICO): raise SystemExit('osage: 0x36fb10 != 0 en el ELF (lista unica de esferas): sin portar')
+    defs = None
+    if 0 <= kind - 5 < 11:
+        caso = E.u32(OSG_SALTOS + 4 * (kind - 5))
+        if caso == 0x208d38: defs = 0x40f6b0          # lui 0x41 / addiu -0x950: esferas, sin lista de amortiguacion
+        elif caso != 0x208d74:                         # (0x208d74: sin esferas)
+            raise SystemExit('osage: personaje %d con lista de amortiguacion (0x208d48 / 0x208d5c): sin portar' % kind)
+    g0 = E.u32(OSG_GUARDA)
+    v = [len(osg['cadenas']), osg['nodos'], E.u32(OSG_CALIENTA), f(OSG_GRAVEDAD), f(OSG_AMORTIGUA)]
+    v += list(E.u32(OSG_EJE, 3)) + list(E.u32(OSG_VIENTO, 3))
+    if [struct.unpack('<f', struct.pack('<I', x))[0] for x in E.u32(OSG_EJE, 3)] != [1.0, 0.0, 0.0]:
+        raise SystemExit('osage: el eje de 0x422990 no es (1, 0, 0)')
+    primero = 0
+    for c in osg['cadenas']:
+        v += [c['hueso'], c['n']] + [struct.unpack('<I', struct.pack('<f', x))[0] for x in c['pos'] + c['giro']] + [primero]
+        primero += c['n']
+    hueco = 0
+    for ci, c in enumerate(osg['cadenas']):
+        for k in range(c['n']):
+            if E.u32(OSG_GUARDA + 4 * hueco) != g0 + 0x70 * hueco: raise SystemExit('osage: 0x36fc30 no va de 0x70 en 0x70')
+            esf = []
+            if defs:
+                p = E.u32(defs + 4 * osg['indices'][c['indice'] + k])
+                while p and E.u32(p + 4):
+                    b, tipo = E.u32(p, 2); esf.append([b, tipo, E.u32(p + 8)] + list(E.u32(p + 0xc, 3))); p += 0x20
+            if len(esf) > 3: raise SystemExit('osage: mas de 3 esferas en un hueco de 0x70')
+            v += [struct.unpack('<I', struct.pack('<f', osg['largos'][ci][k]))[0], len(esf)]
+            for e in esf + [[0] * 6] * (3 - len(esf)): v += e
+            hueco += 1
+    return v
 
 def manos(A, kind):
     """(hueso izquierdo, hueso derecho, objetos del puno (gu), objetos de la mano abierta (pa)) del personaje kind:
@@ -491,28 +624,72 @@ BAND_PRESETS = (1, 3) if BAND_SP else (0, 2, 4)
 PERSONAJES = ((BAND_PERS, 4, 0xff),) if BANDERERO else ((11, 3, 0), (9, 2, 1))
 # (personaje, esqueleto de bone.bin, asiento): el piloto, la acompanante y el banderero de la salida (ROB03: PS2
 # 0x2046f0 = PC 488710 pone el personaje 4 = CHR_AUT04_CVT con el preset 0, 2 y 4; 0x205038 le da la entrada 4 de
-# bone.bin por la tabla de saltos 0x40e3f0; sin asiento: va en el mundo)
+# bone.bin por la tabla de saltos 0x40e3f0; sin asiento: va en el mundo). Sin --banderero el par lo da pares()
 
-def convierte(A, sal, vista=None):
+# ------------------------------------------------------------------ que pareja va en la carrera
+# Piloto 487EE0 = PS2 0x205518 y acompanante 487F50 = PS2 0x2055b8 (personaje = indice de TABLA_CHR):
+#  - [0x443510] (PC 78026C) == 3: el piloto 0xC y la acompanante 8 (sin la bandera de la consola): ese modo (rondas de
+#    la demo, 49EED0) no esta en la demo de la Dreamcast: no se convierte (SIN PORTAR).
+#  - sin 43F860 (= PS2 0x1b4878, [0x59acac] = PC [780260]: el juego de OUTRUN2SP): piloto 0xB; acompanante 9 en las
+#    variantes 1, 3, 4 y 5 (tabla de saltos 0x40e620), si no 6.
+#  - con 43F860 (el juego de la consola): la licencia activa +0x20 (PS2 [0x588688] = PC [7C2400], la foto) pasa por
+#    la lista de la pila {0, 1, 2, 4, 3, 5} (copiada de 0x40e210: lui 0x41 / addiu -0x1df0 en 0x205550 / 0x2055d8) a k;
+#    piloto = 0x36f928[k] (lui 0x37 / addiu -0x6d8 en 0x205590); acompanante = 0x36f940[j] (addiu -0x6c0 en 0x2056d4)
+#    con j = 505340(k, n) = 0x378190[3 k + n] (PS2 0x28e888: lui 0x38 / addiu -0x7e70) y n = 1 en la variante 2, 2 en
+#    la 9 y 0 en el resto; en la variante 5 j = 3 + 46C520 (PS2 0x22e048: [0x6162ac]) si vale 0..2, si no 6.
+LISTA_LIC, PILOTOS, ACOMP, TABLA_505340 = 0x40e210, 0x36f928, 0x36f940, 0x378190
+def pares(A):
+    """[(piloto, acompanante)] de todas las parejas que pueden salir (la primera, la de OUTRUN2SP en la variante 1 y
+    del juego de la consola con la licencia 0); los indices 6 de 0x36f940 (variante 5 con 46C520 fuera de 0..2: lee
+    detras de la tabla, 0x879) no son personajes: no se convierten"""
+    E = elf(A)
+    lista = list(E.u32(LISTA_LIC, 6)); pil = list(E.u32(PILOTOS, 6)); aco = list(E.u32(ACOMP, 6)); t = list(E.u32(TABLA_505340, 18))
+    if sorted(lista) != list(range(6)): raise SystemExit('0x40e210 no es la lista de la licencia')
+    res = [(0xB, 9), (0xB, 6)]                     # OUTRUN2SP: variantes 1, 3, 4, 5 y las demas
+    for slot in range(6):
+        k = lista[slot]
+        for j in [t[3 * k + n] for n in range(3)] + [3, 4, 5]:
+            if (pil[k], aco[j]) not in res: res.append((pil[k], aco[j]))
+    n = 0
+    while E.u32(TABLA_CHR + 16 * n): n += 1
+    if any(not (0 <= x < n) for p in res for x in p): raise SystemExit('pareja fuera de la tabla de personajes')
+    return res
+def nombre_par(p): return 'CHR%02d%02d.DAT' % p
+def tabla_pares(A):
+    """CHRPAR.DAT (lo lee demo/main.c para elegir el CHRppaa.DAT de la carrera; little endian, u32): 'CPR1', piloto
+    de OUTRUN2SP (0x205548: addiu $v0, $zero, 0xb), acompanante de OUTRUN2SP por variante 0..9 (0x205700: tabla de
+    saltos 0x40e620 [variante - 1] para 1..5: 0x205728 = 9, 0x205730 = 5 -> 6; fuera, 5 -> 6), lista de la licencia
+    (6), pilotos 0x36f928 (6), acompanantes 0x36f940 (6), 505340 0x378190 (18)"""
+    E = elf(A); jt = E.u32(0x40e620, 5); val = {0x205728: 9, 0x205730: 6}
+    if any(x not in val for x in jt): raise SystemExit('0x40e620: destino sin estudiar')
+    sp = [val[jt[v - 1]] if 1 <= v <= 5 else 6 for v in range(10)]
+    v = [0xB] + sp + list(E.u32(LISTA_LIC, 6)) + list(E.u32(PILOTOS, 6)) + list(E.u32(ACOMP, 6)) + list(E.u32(TABLA_505340, 18))
+    return b'CPR1' + struct.pack('<%dI' % len(v), *v)
+
+_TL = {}
+def convierte(A, sal, vista=None, personajes=None):
     elf(A)
     bone = A.datos(A.entrada('COMMON.PS2', 'bone.bin'))
     grupos = {}
     def grupo(k):
         if k not in grupos: grupos[k] = Grupo(A.datos(A.paquete('ANIMS.PS2')[k]))
         return grupos[k]
-    t = tablas_logica(A)
+    if 't' not in _TL: _TL['t'] = tablas_logica(A)
+    t = dict(_TL['t'])
+    if personajes is None: personajes = PERSONAJES
     mod = modelo.Modelo(); mod.vq = True
     piezas = []; mvert = []                       # piezas; por malla: (pieza, P, N, W, material)
     texbase = {}
     pers = []
-    for kind, ek, asiento in PERSONAJES:
+    for kind, ek, asiento in personajes:
         esq = Esqueleto(bone, ek); P = Personaje(A, kind, esq)
+        if P.osage: t['OSG%d' % len(pers)] = osage_tablas(A.elf, kind, P.osage)
         hl, hr, gu, pa = manos(A, kind)
         for o in gu + pa:
             if o >> 16 != P.recurso: raise SystemExit('mano de otro recurso: %x' % o)
         pers.append((kind, esq, P, hl, hr, gu, pa, asiento))
         blq = P.blq; base = len(mod.texs)
-        for h in tex.cabeceras(blq):
+        for h in cabeceras(blq):
             a = tex.imagen(blq, h); fmt, li, d = modelo.textura_dc(a)
             mod.texs.append((a.shape[1], a.shape[0], fmt, li, len(mod.blob), len(d))); mod.blob += d; mod.rgba.append(a)
         ntb = len(mod.texs) - base
@@ -521,11 +698,16 @@ def convierte(A, sal, vista=None):
             mod.mallas.append([mod.texs[base + 1][3], base + 1, np.zeros(3), 0.0, mod.nv, 0, blq, -1])
         R = blq.registros()
         lista_p = []                              # (registro, tipo, huesos, inversas)
+        nh = len(esq.huesos); no = P.osage['nodos'] if P.osage else 0
+        if nh + no > 56: raise SystemExit('%s: %d huesos y %d nodos de osage (ROBOT_HUESOS de comun/robot.h: 56)' % (P.nombre, nh, no))
+        def hueso(b):                             # 514280: id | 0x8000 = la matriz del nodo id del osage (pool + id x 0x40)
+            if not b & 0x8000: return b
+            if (b & 0x7fff) >= no: raise SystemExit('%s: hueso de osage 0x%x sin nodo' % (P.nombre, b))
+            return nh + (b & 0x7fff)              # (robot.c las deja detras de las del esqueleto)
         for b, obj in P.rigidas:
-            if b & 0x8000: raise SystemExit('hueso de cadena osage en %s' % P.nombre)
-            lista_p.append((obj & 0xffff, 0, [b], [0xffff]))
+            lista_p.append((obj & 0xffff, 0, [hueso(b)], [0xffff]))
         for bs, obj in P.pesos:
-            lista_p.append((obj & 0xffff, 1, bs, [P.idx_id(b) for b in bs]))
+            lista_p.append((obj & 0xffff, 1, [hueso(b) for b in bs], [P.idx_id(b) for b in bs]))
         for j, o in enumerate(gu): lista_p.append((o & 0xffff, 2, [(hl, hr)[j]], [0xffff]))
         for j, o in enumerate(pa): lista_p.append((o & 0xffff, 3, [(hl, hr)[j]], [0xffff]))
         for r, tipo, bs, inv in lista_p:
@@ -537,6 +719,8 @@ def convierte(A, sal, vista=None):
                     if 0 <= k < reg[4][0] else -1
                 ti = base + tl if 0 <= tl < ntb else -1
                 mat = modelo.material_completo(blq, reg, k)
+                if getattr(blq, 'zancada64', False):       # Pmt64: otras tablas 4 y 5, materiales en unidades de 1
+                    tl, ti, mat = Pmt64.material(blq, reg, k, base, ntb)
                 li = mod.texs[ti][3] if ti >= 0 else 0      # la lista de la textura (como los coches: modelo._trozo)
                 dib = vif.triangulos_dibujados(Pp); j = 0; n = len(dib)
                 while j < n:                       # tiras que dibuja de verdad el GS (bandera ADC, tools/modelo.py)
@@ -651,4 +835,14 @@ if __name__ == '__main__':
     if not a: print(__doc__); sys.exit(1)
     A = Assets(a[0])
     if '--info' in a: info(A); sys.exit(0)
-    convierte(A, a[1])
+    if BANDERERO: convierte(A, a[1]); sys.exit(0)
+    E = elf(A)
+    def par(d, c): return ((d, esqueleto_de(E, d), 0), (c, esqueleto_de(E, c), 1))
+    if '--lista' in a: print(' '.join(['CHRPAR.DAT'] + [nombre_par(p) for p in pares(A)])); sys.exit(0)
+    if '--pares' in a:
+        os.makedirs(a[1], exist_ok=True)
+        for p in pares(A): convierte(A, os.path.join(a[1], nombre_par(p)), personajes=par(*p))
+        open(os.path.join(a[1], 'CHRPAR.DAT'), 'wb').write(tabla_pares(A))
+        sys.exit(0)
+    d, c = (int(x, 0) for x in a[a.index('--par') + 1].split(',')) if '--par' in a else (0xB, 9)
+    convierte(A, a[1], personajes=par(d, c))

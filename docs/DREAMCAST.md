@@ -408,7 +408,14 @@ los personajes y us de CPU del cuadro anterior):
 | RAM | CHR.DAT 177 KB en el monton (199 KB menos los texeles; 2026-11-10: 219 KB con los 20 movimientos de la meta del piloto) + ~76 KB de tablas fijas (motor: 2 x 31 KB; matrices de las piezas 9 KB); META.DAT 110 KB desde el arranque (escena de la meta, demo/meta.c) y 30 KB del AICA (efecto 0x96) solo durante la meta |
 | CPU (Flycast) | 3,2 ms por cuadro: 0,76 la logica y el motor (dos esqueletos de 53 y 50 huesos con IK), 2,45 la mezcla y la luz por vertice (una pasada de ftrv por matriz; color por tabla de 33 valores de n.l por material) |
 
-RAM: CHR.DAT se lee al arrancar, antes que los huecos y la ruta (lo que se pide despues troceaba el monton), y nada mas
+2026-11-11 (la pareja de la carrera, PARIDAD.md Coches: la pareja de la carrera): ya no hay CHR.DAT sino CHRPAR.DAT y
+una CHRppaa.DAT por pareja (28). En la RAM un bloque fijo de 272 KB desde el arranque (la mayor sin texeles, CHR1919:
+269 KB; la de OUTRUN2SP 214 KB: 58 KB menos de RAM libre que antes con cualquier pareja; medido en Flycast al arrancar:
+en uso 13006 KB, libre 938 KB, 742 KB seguidos en la cima, ya con el frontal de recreativa). La pareja se lee en el hueco de la union al empezar la
+carrera si cambia; VRAM de 7 KB (CHR1809 / 0918) a 85 KB (CHR0505) segun la pareja, en pvr_mem, entre carreras.
+Vertices de 2063 (CHR1809) a 4614 (CHR1919) frente a 3102 de la de OUTRUN2SP; 194 matrices como mucho (CHR_MT 200).
+
+RAM (antes de 2026-11-11): CHR.DAT se lee al arrancar, antes que los huecos y la ruta (lo que se pide despues troceaba el monton), y nada mas
 se pide luego (tablas fijas). Aun asi la ruta de la carrera, que se pedia otra vez (`realloc`, ~700 KB seguidos) al
 salir de una etapa con mas puntos que la anterior, ya no cabia: la cima del monton quedaba 177 KB mas arriba y el
 hueco era de 664 KB (prueba GHOS: "RUTA: sin 704 KB contiguos (RAM libre 904 KB)"). Ahora `ruta_pon` suelta la ruta

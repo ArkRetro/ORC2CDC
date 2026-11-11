@@ -46,7 +46,7 @@ Estado: OK (conectado y verificado al nivel indicado), PARCIAL, PROVISIONAL (apr
 | Choques coche-coche y muro, choque fuerte, grua | 4F9450/4F9000/4F8490/4F6FE0/4F76E0/4F7BF0/476040/473F30 (ver Choques entre coches), cbw_coli_wall, 5038D0, PlWrecker | PARCIAL | CHQ1/POS1 de PARAM.DAT, CJM1/SEC1 de TRAFC.DAT, efectos de IGC.PAK en SFX.DAT | coche-coche: ver Choques entre coches (PROVISIONALES alli; golpeados: parpadeo y cierre del original); vibracion del mando de PS2 (0x1d0420) salvo la de la superficie; grua recoloca en el carril mas cercano (no en la fila de poligonos); avance 10 posiciones x m_pos (CONFIRMADO, antes 25 m supuestos); angulo del choque fuerte por nivel de etapa (CORREGIDO 2026-11-11: 45 grados solo en la primera, 25 / 18 en las demas, PS2 0x1994c4: antes siempre 45 y el vuelco casi no salia); tramos de atrapamiento y de desvio 1 -> 5 por etapa HECHOS (2026-11-11, ver Choque fuerte contra el muro); sin el SE 0x43 de los estados 1 y 5 ni el SE por material (pc_collision_material_sound), sin el handicap +DB4; chispas del muro y de los coches hechas (ver Sombras y marcas) | — | H, E |
 | Camara de carrera | evento CAMERA 385: 4858D0, 484810, 483110, 4A1680 SetCarCamera, 485590/483CE0/4834A0/483600, 4832F0/484A40, 483C10/484BD0 (PS2 0x178500..0x17b540, 0x1817c0) | PARCIAL | demo/camara.c con las tablas CAM1 de PARAM.DAT (vistas 0x2ccd88, por vista y modelo 0x2cd3d8, por modelo 0x2d2838 del fichero SLES) | vista 1 sin interior (no se dibuja el coche); camara de salida (485250) con el ojo y la mira de la escena de la salida los 120 cuadros de START (ver Escena de la salida); sin vista 0x1D (780258 = 0) ni camara de fin (485830); la de la meta (4853D0) en demo/meta.c (ver Escena de la meta) | ver seccion Camara de carrera | E |
 | Trafico (clases, IA, reaccion) | 472090, 472450, 472A50, 47DC10, 4736D0, hit_476040; aparicion 479080 (PS2 0x1dcdd0): 478B90 (0x1dbba0), 4787E0 (0x1db6d0), 4EFB90 (0x1f3818), 4F0030 (0x1f1a88), 46CE30, 478430, 46CC10; cierre 477F60 | PARCIAL | TRAFC.DAT (TRC1, ACL1 y TAP1: tablas de aparicion, velocidad y puntos fijos por etapa); colores (tabla 0x36bc18, modelos 30..43) y materiales en TRAFn.DAT (TCX1) | camino "Lead" de 472450 portado (velocidad por clase y del jugador, ver Choques entre coches: velocidad del trafico de delante) salvo 472320 / 471F90; 478640/46CDA0 en la union simplificados; puntos fijos de coches de carreras y de los modelos 39..43 sin coche | ver Trafico: densidad del original | E |
-| Piloto y acompanante | ROB01 / ROB02: PS2 0x201b10 / 0x201c40 / 0x202bf0 y 0x202c58 / 0x202de0; CHR.PS2 (CHR_DR_M00, CHR_DR_L00), bone.bin, ANIMS.PS2 | PARCIAL | CHR.DAT (conv_chr.py), comun/robot.c: motor de movimientos, conducir con el volante, codo en la puerta, choque, fuera del asfalto, aburrida, META y TIME OVER (ver Coches: el piloto y la acompanante) | cambio de area, asustada, trompo ni poses pedidas (la meta del piloto, estado 9, hecha: ver Escena de la meta) | - | H, E |
+| Piloto y acompanante | ROB01 / ROB02: PS2 0x201b10 / 0x201c40 / 0x202bf0 y 0x202c58 / 0x202de0; pareja 0x205518 / 0x2055b8; CHR.PS2 (CHR_DR_M00 / S00 / W00 / L00 / G00 / H00, G00_USA), bone.bin, ANIMS.PS2 | PARCIAL | CHRPAR.DAT y CHRppaa.DAT (conv_chr.py --pares), comun/robot.c (con el osage de G00): motor de movimientos, conducir con el volante, codo en la puerta, choque, fuera del asfalto, aburrida, META y TIME OVER (ver Coches: el piloto y la acompanante) | cambio de area, asustada, trompo ni poses pedidas (la meta del piloto, estado 9, hecha: ver Escena de la meta) | - | H, E |
 | Rivales | — | FALTA | — | no hay rivales | — | — |
 | Carretera, pendientes, bifurcacion | STAGE.PS2, BK.PS2 cs_BK_PALM, COMMON obj_course_obj_bk_palm + obj_OBJ_<ZONA>_BUNKI_TX, descriptores 0xb0, csc_data_2 | OK | conv_tramo/conv_union, CURSO.DAT | arbol entero (15 etapas, 10 bifurcaciones con sus carteles, 5 metas); cielo, niebla, luz y sol de la union como el original (ver Entorno); bifurcaciones = las de PALM (las demas no estan en el disco) | objetos animados de BK (ANIMS) | E |
 | Temporizador (inicial y ampliacion) | 44DC70 = PS2 0x176730, 450CC0 = PS2 0x1cee40, 450AC0 = PS2 0x1ce1f8 (-1 por paso en 0x5c5f44, crono +1 en 0x5c5f48); cuenta atras t / 60,2 + 0,34 (4BDA30 = PS2 0x1bfff8); crono con CalcFrame2Time (449B30 = PS2 0x1f6d70: t / 60,2, milesimas truncadas); paso real 59,94 Hz: HUD 0,43 % mas lento que el reloj, como el original; tabla 7D2E98 = PS2 0x3cb708 copiada por 0x176040; k636904 = PS2 0x35a938 | OK | TIM1 y KTE1 de PARAM.DAT | formula y tablas CONFIRMADAS en el ELF; variante 1 (fila 0), preset 0 y dificultad 0 PROBABLES (frontal del PC) | trazar el frontal de PS2 | E |
@@ -1339,6 +1339,68 @@ decompilacion del PC (race_robots.cpp, rob_disp.cpp, rob_motion*.cpp).
   sin el coche (`-DDIAG_SIN_COCHE`) para ver las posturas, iguales al render de referencia de conv_chr.py. Coste en
   DREAMCAST.md.
 
+## Coches: la pareja de la carrera (2026-11-11)
+
+Antes la demo llevaba siempre la pareja de OUTRUN2SP (CHR_DR_M00 y CHR_DR_L00) tambien en el juego de la consola.
+Ahora como el original (SLES-53998; PC race_robots.cpp 487EE0 / 487F50, native_runtime.cpp 488090):
+- Quienes (PS2 0x205518 / 0x2055b8; indices de la tabla de ficheros 0x36f7d8): con [0x443510] (PC [78026C]) = 3 el
+  piloto 0xC y, sin la consola, la acompanante 8: ese modo (las rondas de la demo de 49EED0) no esta en la demo de la
+  Dreamcast (SIN PORTAR; no se convierten CHR_DR_MH00 ni CHR_DR_GH00_USA). Sin 43F860 (PS2 0x1b4878 = [0x59acac],
+  OUTRUN2SP) el piloto 0xB y la acompanante 9 en las variantes 1, 3, 4 y 5 (tabla de saltos 0x40e620) y 6 en el resto.
+  Con 43F860 (el juego de la consola) la licencia activa +0x20 (PS2 [0x588688] = PC [7C2400], la foto) pasa por la
+  lista {0, 1, 2, 4, 3, 5} (0x40e210, copiada a la pila) a k; piloto = 0x36f928[k] = {11, 18, 17, 9, 5, 19}[k]
+  (M00, S00, W00, L00, G00, H00); acompanante = 0x36f940[0x378190[3 k + n]] (505340 = PS2 0x28e888; la tabla
+  0x36f940 tiene los mismos 6), n = 1 en la variante 2, 2 en la 9 y 0 en el resto: con piloto hombre (k 0..2) una de
+  L00 / G00 / H00, con piloto mujer uno de M00 / S00 / W00. CONFIRMADO en el MIPS. La variante 5 (3 + 46C520 =
+  [0x6162ac], PC [7F94D4]; con otro valor lee el indice 6, detras de la tabla: 0x879) no esta en la demo: SIN PORTAR
+  (`robot_pareja` devuelve -3 y la carrera va sin personajes). Sin licencia activa: foto 0 (la de una nueva, 4471A0).
+- Datos: `conv_chr.py --pares` hace una CHRppaa.DAT por pareja posible (28: la de OUTRUN2SP 11 / 9 y 11 / 6, y las de
+  las 6 fotos con n = 0..2 y la variante 5) y CHRPAR.DAT con las tablas de arriba (`tabla_pares`); CHR1109.DAT es
+  igual byte a byte que el CHR.DAT de antes. Esqueleto por personaje de la tabla de saltos 0x40e3f0 (0x205038): 5, 9,
+  19 -> 2 (50 huesos), 11, 17, 18 -> 3 (53); manos de rob_disp_init 0x206390 (5, 9, 19: 0x2D / 0x1D; 11, 17, 18:
+  0x15 / 0x20).
+- obj_chr_dr_s00_pmt y obj_chr_dr_w00_pmt tienen registros de 64 bytes (8 tablas; el resto 72): con 72 las tablas de
+  esos dos se cruzan y con 64 cuadra todo (la tabla de texturas apunta a la cabecera de justo detras). PROBABLE: el
+  cargador mirado (0x118aa0) recoloca de 0x48 en 0x48; no se ha encontrado como los lee el original. Sus tablas 2, 4
+  y 5 tambien son otras (12, 32 y 72 bytes por registro; los materiales en unidades de 1 y la potencia en +64: x 128
+  quedan como los de los otros, el de S00 es el de M00 / 128) y tienen una sola textura (palabra 3 de la tabla 4 a 1
+  en todas: PROBABLE "con textura", la unica): tools/conv_chr.py Pmt64. Sus mallas
+  llevan claves 0x22n / 0x26n con las mismas UNPACK que 0x20n (n matrices) y 0x228 / 0x22a..0x22c con un V4-8 (0x6e)
+  detras de las posiciones, (0, 0, 0, 127) en todos los vertices: se ignora (PROBABLE sin efecto). Su microcodigo es
+  otro (tabla 0x3592b0: 0x202 -> 0x31edb0, 0x262 y 0x228 -> 0x315760; 0x203 / 0x223 / 0x243 el mismo 0x313db0): lo
+  que cambie en la luz, SIN PORTAR (la demo los ilumina como los demas).
+- Osage (pelo con fisica) de CHR_DR_G00 (y G00_USA): dos cadenas en el hueso 0x22 (3 y 1 nodos; huesos 0x8000..3 de
+  las piezas). Portado en comun/robot.c de rob_osage (PC 514F60 / 515040 / 5229A0 / 522810 / 522620 / 522450 /
+  514EC0 / 522560 / 401790 = PS2 0x208b58 / 0x208ca8 / 0x290890 / 0x290a60 / 0x290c28 / 0x290e60 / 0x209078 /
+  0x291388 / 0x100968, mismo algoritmo comprobado instruccion a instruccion en lo que se uso), constantes del ELF:
+  gravedad 0x328708 (0,0027222), +24 de los nodos 0x36fb08 (0,002), 20 pasos de colocar ([0x378368]), eje 0x422990
+  (1, 0, 0), viento 0x36fb20 (0: nadie lo escribe), [0x36fb10] = 0; esferas de los personajes 5..8 (tabla de saltos
+  0x40f680 -> 0x40f6b0: hueso 0x22 radio 0,15 (0,2 el ultimo nodo) en (0,02, 0, 0,08) y otra fija de 0,25 en (0,
+  0,26, 0,37)). Cada paso, tras Calc (488450 con [0x36fb10] = 0); la primera vez coloca y da 20 pasos. Las matrices
+  de los nodos van en M[n huesos + i]. El init (514F60) tambien coloca con el +24 de la plantilla (basura de la pila):
+  el primer control lo vuelve a colocar, no queda nada.
+- Carga: CHRPAR.DAT y un bloque fijo de 272 KB al arrancar (antes que los huecos: la mayor pareja sin texeles,
+  CHR1919.DAT, 269 KB; antes CHR.DAT 219 KB: +53 KB de RAM fija); la pareja se lee en el hueco de la union, aun
+  prestado, al empezar la carrera (`robot_carga`, solo si cambia); sus texturas a pvr_mem (de 7 KB a 85 KB segun la
+  pareja; la de antes 22 KB) y se quedan entre carreras. CHR_MT 200 (CHR0517.DAT: 194 matrices).
+- Voces: la lista de "aire" es la de los personajes 9 y 10 (489A90) si la acompanante es uno de ellos (voces.c
+  `voces_acompanante`). El juego de voces (0x11f048) va por la variante, no por el personaje; con el idioma espanol
+  todos los juegos de 0x3527a0 dan SPANISH: las voces son las mismas con cualquier acompanante. CONFIRMADO.
+- Seleccion de coche y licencia: en la seleccion (4A5B20) el original solo dibuja el coche; la licencia muestra la foto
+  (2D, U_FOTO de MENU.DAT, ya portada): ninguna de las dos usa estos modelos. Lo demas que mira el personaje: el
+  esqueleto, las manos y el osage (hechos) y la lista de "aire" (hecha). El objeto de 514B60 del PC en el hueso 0x22
+  de los personajes 9 / 10 no esta en el dibujo de PS2 (0x206d80 llama al cuerpo 0x2076b8, la cara 0x206e88 y las
+  manos 0x206ff8): no se porta. La cara (0x206e88) no la ponen los personajes de carrera (rob_disp_init no la llena).
+- PENDIENTE de comprobar en el original: con las fotos 3, 4 y 5 el piloto es una mujer (L00 / G00 / H00, esqueleto 2
+  de bone.bin) y el acompanante un hombre (esqueleto 3), pero los movimientos son los mismos del puesto (conducir
+  ORT_MAN_*: esqueleto 3 en la entrada del movimiento; acompanante ORT_WMN_*: esqueleto 2) y no se ha encontrado
+  ninguna conversion: SetMotion (PS2 0x207fa8, PC 4F2280 / 520750) y los canales (522F70) van por el indice del hueso
+  del esqueleto del personaje, SetBone (0x207e60 / 4F1CF0) toma el del personaje (487C30) y 0x40e638 (el de
+  conducir) solo mira el modelo del coche. La demo hace lo mismo y con esas fotos los dos salen deformados (brazos
+  y piernas estirados). Las fotos 0, 1 y 2 (piloto hombre, acompanante mujer) salen bien (Flycast: 11 / 9, 18 / 5,
+  17 / 19 con -DDIAG_SIN_COCHE). Una licencia nueva tiene la foto 0.
+- Prueba: `-DPRUEBA_FOTO=n` fuerza la foto de la licencia.
+
 ## Graficos: tiras, nodos, recorte y distancia (como el original)
 
 Queja del probador: poligonos estirados que tapan la carretera, estructuras que se cruzan y distancia de dibujo
@@ -1911,7 +1973,7 @@ Diferencias de reglas del juego de OUTRUN2SP / preset 1 (todas CONFIRMADAS en el
 | Choques entre coches | 0x191d20 / 0x191d70: con preset 1 / 3 umbrales 0x35b9d8 (80, 280: iguales) y restitucion 0x35b9f0 = 1,0 / 0,9 / 0,7 (normal 0x35b9e0: 1,0 / 0,9 / 0,8) | bloque CHA1 de PARAM.DAT, `or2_choques_preset` |
 | Banderero de la salida | 0x2046f0: personaje 3 = CHR_AUT04 (recurso 0xC3, tela del recurso 0xC3: 0x100d40) con preset 1 / 3, si no 4 = CHR_AUT04_CVT; hueso de la tela 0x11; movimientos y posiciones de la fila del preset | BAND1.DAT (`conv_chr.py --banderero-sp`), el resto ya iba por preset en robot.c |
 | Escena de la meta | 0x3f99b0 + (meta + preset x 5) x 4: preset 1 -> escenas 1..5 | `meta_escena(variante, preset_curso, meta)`, metas A..E = claves 10..14 del arbol 1 |
-| Piloto / acompanante | 487EE0 / 487F50 sin 43F860: 0xB (CHR_DR_M00) y 9 (CHR_DR_L00) en la variante 1 | los de CHR.DAT (los mismos) |
+| Piloto / acompanante | 487EE0 / 487F50 sin 43F860: 0xB (CHR_DR_M00) y 9 (CHR_DR_L00) en las variantes 1, 3, 4, 5; 6 (CHR_DR_G00_USA) en el resto | CHR1109.DAT / CHR1106.DAT (`robot_pareja`, ver Coches: la pareja de la carrera) |
 | Voces | 427DB0: juego 4 (SPRACE); con el idioma espanol el directorio es SPANISH en todos los juegos | sin cambio |
 | Mapa de ruta del HUD | 0x1be288 / 0x1bfc68 / 0x1c38a0: presets 0 y 1 igual (5 niveles) | sin cambio |
 

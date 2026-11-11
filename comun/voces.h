@@ -22,6 +22,7 @@ void voces_tiempo(int cuadros);     /* un paso de logica: aviso de poco tiempo (
 void voces_meta(void);              /* GOAL */
 void voces_tiempo_fuera(void);      /* TIME OVER */
 void voces_para(void);
+void voces_acompanante(int k);      /* personaje de la acompanante (robot_personaje(1)): la lista de "aire" */
 void voces_modo(int infarto);       /* 1: carrera del INFARTO (variante 2), 0: OutRun */              /* calla las voces (fin de carrera, menu) */
 
 #endif

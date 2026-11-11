@@ -16,10 +16,13 @@
      la recuperacion, una de "aterriza" (estados 2 y 5: choque grande) o de "salto" (el resto), cada lista por turno; y
      al terminar un choque del estado 7, una de "salto". Si ademas en ese cuadro choca con otro coche estando en un
      choque (car+4 & 0x4000000 y +2F0 & 2), una de las 5 de "choque" al azar con una espera de 90 cuadros. La lista de
-     "aire" es la de los personajes 9 y 10: en el modo OutRun la acompanante es el 9 (487F50 sin licencia).
+     "aire" es 0x40eba8 con los personajes 9 y 10 (work+8 de la acompanante en 489A90) y si no 0x40ebb8; la
+     acompanante es la de la pareja de la carrera (487F50, voces_acompanante: en el juego de la consola la elige la
+     licencia; en OUTRUN2SP el 9 en las variantes 1, 3, 4 y 5 y el 6 en el resto). Las voces son las mismas para
+     todas (SPANISH: 0x11f048 elige el juego de voces por la variante, no por el personaje, y en espanol todos los
+     juegos de 0x3527a0 dan SPANISH).
      Las de asustada y trompo solo las dice en Coast 2 Coast (variantes 3 y 4): aqui no.
-   - INFARTO (variante 2, voces_modo(1)): la acompanante es el personaje 6 (487F50: 9 solo en las variantes 1, 3, 4 y
-     5), asi que "aire" es la lista 0x40ebb8; sin los comentarios de zona (488BD0 solo OutRun) ni de derrapes (488C90
+   - INFARTO (variante 2, voces_modo(1)): sin los comentarios de zona (488BD0 solo OutRun) ni de derrapes (488C90
      solo 1, 3, 4); las listas de aterrizaje / salto del INFARTO (PC 5C0FB0 / 5C0FD0 = PS2 0x40ea30 / 0x40ea40, delante
      de sus listas de movimientos 0x40ea48 / 0x40ea88 como las del OutRun 0x40eb10 / 0x40eb20 / 0x40eb28) son
      iguales que las del OutRun (0x969, 0x962, 0x15f, 0x160 / 0x967, 0x967) y con las mismas cuentas (2 / 2 en
@@ -51,7 +54,9 @@ static int zona_arma, zona_pend, checkpoint;
 static int vueltas, derr_cuadros, derr_visto, derrapando, com_vuelta, com_l1, com_l2;
 static int reaccion, espera, turno_salto, turno_aterriza, listo;
 static int infarto;                                     /* variante 2: sin comentarios del modo OutRun */
+static int acomp = 9;                                   /* la acompanante (work+8 de 489A90): elige la lista de "aire" */
 void voces_modo(int ha) { infarto = ha; }
+void voces_acompanante(int k) { acomp = k; }
 
 int voces_inicia(void)
 {
@@ -135,7 +140,7 @@ static void reacciona(const voces_coche_t *c)
     int k = c->choque - 1;
     if (c->t_choque > 0.0f) {                                   /* choque en curso */
         if (reaccion != R_AIRE) {
-            if (k == 0 || k == 1 || k == 4) { reaccion = R_AIRE; sfx_voz((infarto ? T->aire : T->aire9)[k == 0 ? 0 : k == 1 ? 1 : 2]); }
+            if (k == 0 || k == 1 || k == 4) { reaccion = R_AIRE; sfx_voz((acomp == 9 || acomp == 10 ? T->aire9 : T->aire)[k == 0 ? 0 : k == 1 ? 1 : 2]); }
             else if (k == 6) reaccion = R_AIRE;
         }
     } else if (c->t_recup > 0.0f) {                             /* recuperacion */

@@ -328,6 +328,7 @@ static void libera_modelo(modelo_t *m)
    prestado: el modelo se leyo en el hueco de la union prestado (coche_carga, fuera de la carrera): se copia sin los
    texeles a un bloque nuevo del monton y el hueco vuelve a quedar libre (sin RAM se queda en el hueco: lo mira quien
    llama) */
+static void modelo_mueve(modelo_t *m, uint8_t *d);
 static void compacta_modelo_de(modelo_t *m, int prestado)
 {
     uint8_t *d;
@@ -335,22 +336,25 @@ static void compacta_modelo_de(modelo_t *m, int prestado)
     if (prestado) { if ((d = memalign(32, m->blob - m->datos))) memcpy(d, m->datos, m->blob - m->datos); }
     else d = realloc(m->datos, m->blob - m->datos);
     if (!d) return;
-    if (d != m->datos) {                                          /* se ha movido: los punteros, al bloque nuevo */
-        uintptr_t k = (uintptr_t)d - (uintptr_t)m->datos;
-        m->texs = (tex_t *)((uintptr_t)m->texs + k); m->mallas = (malla_t *)((uintptr_t)m->mallas + k);
-        m->verts = (vert_t *)((uintptr_t)m->verts + k); m->ruta = (float *)((uintptr_t)m->ruta + k);
-        m->nodos = (nodo_t *)((uintptr_t)m->nodos + k); m->carteles = (float (*)[4][4])((uintptr_t)m->carteles + k);
-        if (m->nsec) {
-            m->sec_ini = (const uint32_t *)((uintptr_t)m->sec_ini + k);
-            if (m->sec_lista) m->sec_lista = (const uint16_t *)((uintptr_t)m->sec_lista + k);
-            if (m->pvs_l) m->pvs_l = (const uint8_t *)((uintptr_t)m->pvs_l + k);
-            m->sec_mapa = (const uint16_t *)((uintptr_t)m->sec_mapa + k);
-        }
-        m->datos = d;
-    }
+    if (d != m->datos) modelo_mueve(m, d);                        /* se ha movido: los punteros, al bloque nuevo */
     m->blob = NULL;
 }
 static void compacta_modelo(modelo_t *m) { compacta_modelo_de(m, 0); }
+/* los punteros del modelo a una copia de sus datos en d (sin los texeles) */
+static void modelo_mueve(modelo_t *m, uint8_t *d)
+{
+    uintptr_t k = (uintptr_t)d - (uintptr_t)m->datos;
+    m->texs = (tex_t *)((uintptr_t)m->texs + k); m->mallas = (malla_t *)((uintptr_t)m->mallas + k);
+    m->verts = (vert_t *)((uintptr_t)m->verts + k); m->ruta = (float *)((uintptr_t)m->ruta + k);
+    m->nodos = (nodo_t *)((uintptr_t)m->nodos + k); m->carteles = (float (*)[4][4])((uintptr_t)m->carteles + k);
+    if (m->nsec) {
+        m->sec_ini = (const uint32_t *)((uintptr_t)m->sec_ini + k);
+        if (m->sec_lista) m->sec_lista = (const uint16_t *)((uintptr_t)m->sec_lista + k);
+        if (m->pvs_l) m->pvs_l = (const uint8_t *)((uintptr_t)m->pvs_l + k);
+        m->sec_mapa = (const uint16_t *)((uintptr_t)m->sec_mapa + k);
+    }
+    m->datos = d;
+}
 
 /* ---- subida de las etapas y uniones a la VRAM (ver "memoria de video del curso", arriba) */
 static void curso_error(const char *s);
@@ -4440,6 +4444,8 @@ static void *hueco_fsp(uint32_t tam)
 static modelo_t *const tramos[3] = { &etapa, &uni, &sig };     /* lo que se dibuja (lo que este subido) */
 static const modelo_t *cielo;                                   /* el cielo que se dibuja */
 static int cur_nodo = -1, cur_sig = -1, cur_rama, cur_en_union, etapa_nodo = -1;   /* etapa actual, siguiente, rama */
+static int8_t rama_nivel[5];                                    /* 451350(nivel): la rama tomada (2: sin llegar) */
+static int fin_nivel = -1, fin_lado = -1; static float fin_razon = -1;   /* 4AEEF0 al acabarse el tiempo */
 static float s_union, s_decide, s_sig, s_meta, s_suelta, s_etapa, t_carga_ult;     /* sucesos en s */
 static uint32_t i_union, j_union;                               /* primer punto de la union en la ruta y en su fichero */
 static float marco_et[4], marco_un[4], marco_sig[4];            /* colocacion de la etapa actual, su union, la siguiente */
@@ -4658,6 +4664,7 @@ static void curso_reinicia(void)
     if (ruta_pon(&etapa)) curso_error("Sin memoria para la ruta");
     cielo = &etapa; cur_nodo = k; cur_sig = -1; etapa_n = curso[k].nivel; cur_rama = -1; cur_en_union = 0;
     if (curso[k].m_pos > 1.0f) m_pos = curso[k].m_pos;
+    memset(rama_nivel, 2, sizeof rama_nivel); fin_nivel = fin_lado = -1; fin_razon = -1;
     s_union = s_decide = s_sig = s_meta = s_suelta = -1; s_etapa = 0;
     marco_et[0] = marco_et[1] = marco_et[2] = marco_et[3] = 0;
     memset(&col_pred, 0, sizeof col_pred); col_un.ok = 0;
@@ -4824,6 +4831,7 @@ static int curso_paso(void)
            [rec + rama * 4 + 0x24] es -1 se queda el mismo) y se vuelve a cargar su etapa */
         if (cur_sig < 0) cur_sig = cur_nodo;
         ev |= CUR_RAMA;
+        if (etapa_n >= 0 && etapa_n < 5) rama_nivel[etapa_n] = (int8_t)cur_rama;
     }
     PK("rama");
     if (etapa.datos && cur_en_union && cur_rama >= 0 && yo.s > s_union + UNION_LIBERA) {
@@ -6666,7 +6674,7 @@ static void coche_dibuja(int l, matrix_t *mc)
     indices_delante = 0;
 }
 /* ---------------------------------------------------------------- el piloto y la acompanante (comun/robot.c)
-   CHR.DAT (tools/conv_chr.py): texturas y mallas en la postura de enlace (el campo del nodo = su malla en el bloque
+   CHRppaa.DAT (tools/conv_chr.py): texturas y mallas en la postura de enlace (el campo del nodo = su malla en el bloque
    RBT1, con la pieza y el material; por vertice la normal y los pesos). Como 487880 / 514280 (PS2 0x201948 /
    0x2076b8): el personaje va en work+10 = T(asiento +108 / +118) car+F0 car+B0 (aqui ani_m[0] y mod_coche); cada pieza
    con su paleta (rigida: M(hueso); con pesos: inv(enlace) M(hueso), hasta 4; las manos en su hueso, el puno o la
@@ -6674,11 +6682,11 @@ static void coche_dibuja(int l, matrix_t *mc)
    de los coches (entorno 2, 40D840(2)) por vertice: n.l mezclado igual y una tabla de color por material y cuadro
    (tools/modelo.py luz_vertices, 33 valores de n.l). Se dibuja donde el coche (vistas exteriores: el dibujo del
    original mira car+4 & 0xC000 == 0x4000), en todos los coches; en la seleccion de coche no (4A5B20 dibuja solo el
-   coche). El fichero se lee al arrancar, antes que la ruta y los huecos de las etapas, para no trocear la RAM. */
+   coche). La pareja (CHRppaa.DAT) la elige y la carga robot_carga al empezar cada carrera (mas abajo). */
 static int chr_ok;
 /* tablas fijas (nada de memoria nueva despues de la ruta: la ruta crece por arriba del monton) */
-#define CHR_PZ 96                                               /* piezas (CHR.DAT de SLES-53998: 70) */
-#define CHR_MT 192                                              /* matrices de las piezas (146) */
+#define CHR_PZ 96                                               /* piezas (CHR0505.DAT de SLES-53998: 96) */
+#define CHR_MT 200                                              /* matrices de las piezas (CHR0517.DAT: 194) */
 #define CHR_MAT 16                                              /* materiales distintos (3) */
 static matrix_t chr_S[CHR_MT] __attribute__((aligned(32)));    /* por pieza y matriz: vista x coche x asiento x paleta */
 static int32_t chr_L[CHR_MT][3];                                /* la luz en el marco de cada una (x 256) */
@@ -6709,30 +6717,92 @@ static void m_por(matrix_t o, const float (*a)[4], const float (*b)[4])   /* o =
     int i, j;
     for (i = 0; i < 4; i++) for (j = 0; j < 4; j++) o[i][j] = a[i][0] * b[0][j] + a[i][1] * b[1][j] + a[i][2] * b[2][j] + a[i][3] * b[3][j];
 }
-/* CHR.DAT a la RAM (al arrancar, antes de la PowerVR) y luego (robot_sube) las texturas */
+/* La pareja de la carrera (487EE0 / 487F50, PS2 0x205518 / 0x2055b8): CHRPAR.DAT (tools/conv_chr.py tabla_pares) da
+   las tablas del original y CHRppaa.DAT (piloto pp, acompanante aa, indices de la tabla de personajes 0x36f7d8) la
+   pareja. RAM: un bloque fijo pedido al arrancar, antes que los huecos y la ruta (como antes CHR.DAT: nada nuevo del
+   monton despues), del tamano de la mayor pareja sin sus texeles; cada CHRppaa.DAT se lee en el hueco de la union aun
+   prestado (fuera de la carrera, como coche_carga), sus texturas van a pvr_mem y el resto se copia al bloque. Se
+   cambia solo si la carrera pide otra pareja (al arrancar se sube la de OUTRUN2SP y del juego de la consola con la
+   licencia 0, la 11 / 9, en el mismo sitio que antes CHR.DAT); las texturas se quedan en la VRAM entre carreras */
+#define CHR_RAM (272u << 10)                                    /* la mayor (CHR1919.DAT de SLES-53998: 269 KB) */
+#define CHR_TEX 16                                              /* texturas de una pareja (CHR1919.DAT: 16) */
+static uint8_t *chr_bloque;
+static int chr_par = -1;                                        /* pp x 100 + aa de la cargada */
+static pvr_poly_hdr_t chr_cab[2][CHR_TEX + 1] __attribute__((aligned(32))); static pvr_ptr_t chr_tv[CHR_TEX + 1];
+#define CHRPAR_N 47                                             /* CPR1: 1 + 10 + 6 + 6 + 6 + 18 */
+static uint32_t chr_tab[CHRPAR_N]; static int chr_tab_ok;
+/* 487EE0 / 487F50 (sin el modo 3 de [78026C]: las rondas de la demo 49EED0 no estan en la demo de la Dreamcast).
+   sp: sin 43F860 ([780260] = 0, el juego de OUTRUN2SP); foto: licencia activa +0x20 ([7C2400]). 0 bien */
+static int robot_pareja(int sp, int var, int foto, int *pil, int *aco)
+{
+    const uint32_t *lista = chr_tab + 11, *P = chr_tab + 17, *A = chr_tab + 23, *T = chr_tab + 29; uint32_t k, n;
+    if (!chr_tab_ok) return -1;
+    if (sp) { *pil = (int)chr_tab[0]; *aco = (int)(var >= 0 && var < 10 ? chr_tab[1 + var] : 6); return 0; }
+    if (foto < 0 || foto > 5) return -2;                        /* (el PC: fuera de su lista de 6) */
+    if (var == 5) return -3;                                    /* 46C520 ([7F94D4], la red): SIN PORTAR */
+    k = lista[foto]; n = var == 2 ? 1 : var == 9 ? 2 : 0;      /* 505340(k, n) */
+    if (k > 5 || T[3 * k + n] > 5) return -4;
+    *pil = (int)P[k]; *aco = (int)A[T[3 * k + n]];
+    return 0;
+}
+/* el bloque y CHRPAR.DAT al arrancar (antes de la PowerVR, los huecos y la ruta) */
 static void robot_lee(void)
 {
+    uint32_t sz; uint8_t *b = gd_carga("CHRPAR.DAT", &sz);
     chr_ok = 0;
-    if (lee_modelo(&chr, "CHR.DAT")) { memset(&chr, 0, sizeof chr); return; }
-    if (chr.paso_ruta != 1 || (int)chr.nmallas <= 0) { libera_modelo(&chr); return; }
-    chr_ok = -1;
+    chr_tab_ok = b && sz >= 4 + 4 * CHRPAR_N && !memcmp(b, "CPR1", 4);
+    if (chr_tab_ok) memcpy(chr_tab, b + 4, sizeof chr_tab);
+    free(b);
+    if (!chr_tab_ok) { dbglog(DBG_ERROR, "CHR: sin CHRPAR.DAT\n"); return; }
+    if (!(chr_bloque = memalign(32, CHR_RAM))) { dbglog(DBG_ERROR, "CHR: sin %uK para el bloque\n", CHR_RAM >> 10); return; }
+    chr_ok = -1;                                                /* sin pareja aun */
 }
-static void robot_sube(void)
+static void robot_suelta(void)                                  /* la pareja fuera (el bloque se queda) */
 {
-    int k, n = 0;
-    if (chr_ok != -1) return;
-    chr_ok = 0;
-    if (sube_modelo(&chr)) { libera_modelo(&chr); return; }
-    compacta_modelo(&chr);                                      /* (puede mover el bloque: robot_inicia despues) */
-    if (robot_inicia(chr.ruta, chr.nruta * 4)) { libera_modelo(&chr); return; }
+    uint32_t i;
+    for (i = 0; i <= CHR_TEX; i++) if (chr_tv[i]) { pvr_mem_free(chr_tv[i]); chr_tv[i] = NULL; }
+    memset(&chr, 0, sizeof chr); rc_chr.ok = 0; chr_par = -1;
+    if (chr_ok) chr_ok = -1;
+}
+static int robot_carga(int pil, int aco)
+{
+    char nom[16]; int k, n = 0, r; uint32_t i, t;
+    if (chr_ok == 1 && chr_par == pil * 100 + aco) return 0;
+    if (!chr_ok) return -1;
+    robot_suelta();
+    if (!union_prestable()) return -2;
+    sprintf(nom, "CHR%02d%02d.DAT", pil, aco);
+    musica_pausa_lectura(1);
+    r = lee_modelo_en(&chr, nom, hueco_union, cap_union - union_fsp);   /* (el final, del frontal de recreativa) */
+    musica_pausa_lectura(0);
+    if (r) { memset(&chr, 0, sizeof chr); dbglog(DBG_ERROR, "CHR: no se pudo leer %s (%d)\n", nom, r); return -3; }
+    t = (uint32_t)(chr.blob - chr.datos);
+    if (chr.paso_ruta != 1 || (int)chr.nmallas <= 0 || chr.ntex > CHR_TEX || chr.nnodos || t > CHR_RAM) {
+        dbglog(DBG_ERROR, "CHR: %s no cabe (%u texturas, %uK de %uK)\n", nom, (unsigned)chr.ntex, (unsigned)(t >> 10), CHR_RAM >> 10);
+        memset(&chr, 0, sizeof chr); return -4;
+    }
+    chr.cabs[0] = chr_cab[0]; chr.cabs[1] = chr_cab[1]; chr.tv = chr_tv;
+    for (i = 0; i < chr.ntex; i++) {
+        tex_t *x = chr.texs + i;
+        if ((x->fmt & 0xff) > 2 || (x->tam & 31) || !(chr_tv[i] = pvr_mem_malloc(x->tam))) {
+            dbglog(DBG_ERROR, "CHR: sin VRAM para %s\n", nom); robot_suelta(); return -5;
+        }
+        pvr_txr_load(chr.blob + x->off, chr_tv[i], x->tam);
+        compila_cab(&chr, i, 0);
+    }
+    memcpy(chr_bloque, chr.datos, t);                           /* sin los texeles, al bloque (compacta_modelo_de) */
+    modelo_mueve(&chr, chr_bloque); chr.blob = NULL;
+    if ((r = robot_inicia(chr.ruta, chr.nruta * 4))) { dbglog(DBG_ERROR, "CHR: %s: RBT1 (%d)\n", nom, r); robot_suelta(); return -6; }
     chr_npz = robot_npiezas(); chr_nm = robot_nmat();
-    if (chr_npz > CHR_PZ || chr_nm > CHR_MAT) { dbglog(DBG_ERROR, "CHR: %d piezas, %d materiales: no caben\n", chr_npz, chr_nm); libera_modelo(&chr); return; }
+    if (chr_npz > CHR_PZ || chr_nm > CHR_MAT) { dbglog(DBG_ERROR, "CHR: %d piezas, %d materiales: no caben\n", chr_npz, chr_nm); robot_suelta(); return -7; }
     for (k = 0; k < chr_npz; k++) { chr_m0[k] = (uint16_t)n; n += robot_pieza(k)->n; }
-    if (n > CHR_MT) { dbglog(DBG_ERROR, "CHR: %d matrices: no caben\n", n); libera_modelo(&chr); return; }
+    if (n > CHR_MT) { dbglog(DBG_ERROR, "CHR: %d matrices: no caben\n", n); robot_suelta(); return -8; }
     for (k = 0; k < 256; k++) chr_w8[k] = k * (1.0f / 255.0f);
-    chr_ok = 1; rc_chr.ok = 1; rc_chr.npz = chr_npz; rc_chr.nm = chr_nm;
-    dbglog(DBG_INFO, "CHR: %u mallas, %u vertices, %u texturas, %d piezas, %d matrices, %d materiales\n", (unsigned)chr.nmallas,
-           (unsigned)chr.nvert, (unsigned)chr.ntex, chr_npz, n, chr_nm);
+    chr_ok = 1; rc_chr.ok = 1; rc_chr.npz = chr_npz; rc_chr.nm = chr_nm; chr_par = pil * 100 + aco;
+    dbglog(DBG_INFO, "CHR: %s (%uK en RAM), %u mallas, %u vertices, %u texturas, %d piezas, %d matrices, %d materiales, VRAM libre %uK\n",
+           nom, (unsigned)(t >> 10), (unsigned)chr.nmallas, (unsigned)chr.nvert, (unsigned)chr.ntex, chr_npz, n, chr_nm,
+           (unsigned)(pvr_mem_available() >> 10));
+    return 0;
 }
 /* matrices de cada pieza y tablas de color del cuadro (una vez, antes de las listas) */
 static void robot_matrices(robot_ctx_t *rx, matrix_t *mc, int coche_vis)
@@ -7345,7 +7415,7 @@ int main(int argc, char **argv)
     elige_video();
     vid_set_mode(modo_video, PM_RGB565);
     vid_clear(0, 0, 0);                                         /* negro mientras carga, sin texto */
-    robot_lee();                                                /* CHR.DAT: antes que los huecos y la ruta (RAM) */
+    robot_lee();                                                /* CHRPAR.DAT y el bloque de la pareja: antes que los huecos y la ruta (RAM) */
     if ((r = curso_lee() ? -8 : curso_huecos() ? -9 : curso_lee_etapa(0))) {   /* el arbol y la primera etapa */
         sprintf(s1, "No se pudieron leer los datos (%d)", r); aviso(s1); for (;;) thd_sleep(1000);
     }
@@ -7382,7 +7452,8 @@ int main(int argc, char **argv)
         vid_set_mode(modo_video, PM_RGB565); aviso("Sin memoria de video para las texturas"); for (;;) thd_sleep(1000);
     }
     sol_carga();                                                /* el sol y el destello (SOL.DAT, siempre en VRAM) */
-    robot_sube();                                               /* el piloto y la acompanante (CHR.DAT, siempre en VRAM) */
+    {   int pp, aa;                                             /* la pareja de OUTRUN2SP y de la licencia 0 (11 / 9) */
+        if (!robot_pareja(1, 1, 0, &pp, &aa)) robot_carga(pp, aa); }
     if ((r = coche_carga(ficha_ini))) {
         vid_set_mode(modo_video, PM_RGB565); sprintf(s1, "No se pudo cargar el coche (%d)", r); aviso(s1); for (;;) thd_sleep(1000);
     }
@@ -7600,6 +7671,17 @@ int main(int argc, char **argv)
 #ifndef PRUEBA_FICHA                                            /* prueba: el coche de PRUEBA_FICHA, no el del menu */
                 if (!auto_ && menu_coche() >= 0 && menu_coche() != coche_ficha && coche_carga(menu_coche())) coche_carga(9);
 #endif
+                {   /* el piloto y la acompanante de esta carrera (487EE0 / 487F50): la licencia en el juego de la
+                       consola, 0xB / 9 (o 6) en OUTRUN2SP; su CHRppaa.DAT en el hueco de la union, aun prestado */
+                    int pp = -1, aa = 9, foto = menu_foto(), r2;
+#ifdef PRUEBA_FOTO
+                    foto = PRUEBA_FOTO;                         /* prueba: la licencia con esa foto (0..5) */
+#endif
+                    r2 = robot_pareja(juego_sp, variante, foto, &pp, &aa);
+                    if (r2) { dbglog(DBG_ERROR, "CHR: sin pareja (%d: juego %s, variante %d, foto %d)\n", r2, juego_sp ? "OUTRUN2SP" : "consola", variante, foto); robot_suelta(); }
+                    else if ((r2 = robot_carga(pp, aa))) dbglog(DBG_ERROR, "CHR: sin la pareja %d / %d (%d)\n", pp, aa, r2);
+                    if (voz_ok) voces_acompanante(aa);               /* 489A90: la lista de "aire" (9 y 10) */
+                }
                 ram_mapa("menu");
                 {   int b = menu_tablas(0);                     /* MENU.DAT: en la carrera solo las piezas de la pausa */
                     if (b) dbglog(DBG_INFO, "MENU: %dK de piezas sueltas para la carrera\n", b >> 10); }
@@ -7847,6 +7929,10 @@ int main(int argc, char **argv)
 #endif
                 if (estado != META && tim_cuadros <= 0) {
                     tiempo = 0; estado = AGOTADO; t_estado = 0; texto_centro("TIEMPO AGOTADO"); if (voz_ok) voces_tiempo_fuera();
+                    {   /* 450CC0 al acabarse: 4AEEF0(car+5C, nivel de car+68, car+64 / 43D470) para el mapa de la ruta */
+                        int fin_f, u_, pos_ = tr_fila(yo.s, &fin_f, &u_);
+                        fin_nivel = etapa_n; fin_lado = u_; fin_razon = fin_f ? (float)pos_ / (float)fin_f : -1.0f;
+                    }
                     dbglog(DBG_INFO, "CURSO: tiempo agotado en %.4s (s %.0f)\n", curso[cur_nodo].zona, (double)yo.s);
                 }
             }
@@ -7866,10 +7952,17 @@ int main(int argc, char **argv)
             } else if (!fin_on && juego_sp && t_estado > (uint32_t)fin_t) {
                 /* el juego de OUTRUN2SP: sin millas ni continuar (49CFD0 y 49D850 con 1b4878 = 0): meta 19 -> 33 -> 24
                    (final de recreativa, AS.PS2) -> 25 (resultados) -> 27; tiempo agotado 20 -> 25 -> 26 (nombre) -> 27;
-                   GAME OVER 27 con la escena 34001F, luego 28 -> el frontal de recreativa (10). 24, 25 y 26 SIN PORTAR:
-                   directo al 27; del 28 al menu */
+                   GAME OVER 27 con la escena 34001F, luego 28 -> el frontal de recreativa (10). 25 en demo/fin.c
+                   (fin_sp_resultados); 24 y 26 SIN PORTAR: la meta pasa directa al 25 y el 25 al 27 */
                 menu_suma_tiempo(crono);                        /* (PS2 0x1b96bc / 0x1b9b58: tambien en este juego) */
-                fin_game_over(estado == META ? FIN_META : FIN_TIEMPO); fin_on = 1;
+                {   /* el final de recreativa (24) SIN PORTAR: de la meta directo a los resultados (25) */
+                    fin_sp_t d; int k;
+                    d.preset = preset_curso; d.modelo = fsp_modelo(); d.color = fsp_color();
+                    for (k = 0; k < 4; k++) d.rama[k] = rama_nivel[k];
+                    d.nivel = estado == META ? -1 : fin_nivel; d.lado = estado == META ? -1 : fin_lado;
+                    d.razon = estado == META ? -1.0f : fin_razon;
+                    fin_sp_resultados(estado == META ? FIN_META : FIN_TIEMPO, &d); fin_on = 1;
+                }
             } else if (!fin_on && t_estado > (uint32_t)fin_t) {
                 menu_suma_tiempo(crono);                        /* salida de la meta / del fin del tiempo (PS2 0x1b96bc / 0x1b9b58) */
                 fin_empieza(estado == META ? FIN_META : FIN_TIEMPO); fin_on = 1;   /* 33 (sin red) -> 34 / 20 -> 34 */
