@@ -1379,13 +1379,19 @@ static void ruta_prepara(void)
     }
     longitud = s_base + (n - 1) * PASO;
 }
+/* el punto de la ruta de antes de la distancia s (llevada a [s_base, longitud - 0,01]): su indice en *i y en *f lo que
+   va de el al siguiente (0..1) */
+static inline const float *ruta_punto(float s, int *i, float *f)
+{
+    if (s < s_base) s = s_base;
+    if (s > longitud - 0.01f) s = longitud - 0.01f;
+    *f = (s - s_base) / PASO; *i = (int)*f; *f -= *i;
+    return ruta_p + PR * *i;
+}
 /* en la distancia s: posicion del centro, rumbo y anchos (izquierdo, derecho) */
 static void ruta_en(float s, float *p, float *th, float *iz, float *de)
 {
-    int i; float f; const float *a, *b;
-    if (s < s_base) s = s_base;
-    if (s > longitud - 0.01f) s = longitud - 0.01f;
-    f = (s - s_base) / PASO; i = (int)f; f -= i; a = ruta_p + PR * i; b = a + PR;
+    int i; float f; const float *a = ruta_punto(s, &i, &f), *b = a + PR;
     p[0] = a[0] + f * (b[0] - a[0]); p[1] = a[1] + f * (b[1] - a[1]); p[2] = a[2] + f * (b[2] - a[2]);
     *th = rumbo[i] + f * (rumbo[i + 1] - rumbo[i]);
     if (iz) *iz = a[3] + f * (b[3] - a[3]);
@@ -1425,10 +1431,7 @@ static float altura_punto(const float *a, float x)
 /* altura de la calzada en la distancia s y el desvio lateral x (perfil a lo ancho de cada punto de la ruta) */
 static float altura(float s, float x)
 {
-    int i; float f; const float *a;
-    if (s < s_base) s = s_base;
-    if (s > longitud - 0.01f) s = longitud - 0.01f;
-    f = (s - s_base) / PASO; i = (int)f; f -= i; a = ruta_p + PR * i;
+    int i; float f; const float *a = ruta_punto(s, &i, &f);
     return altura_punto(a, x) + f * (altura_punto(a + PR, x) - altura_punto(a, x));
 }
 /* El suelo del original (43EB60 GetYPositionProg sobre la colision de la etapa y de la union, demo/coli.c) en el
@@ -1461,10 +1464,7 @@ static int suelo_ruta(float s, float x, float *y, int spl, uint32_t *clase)
 /* limites transitables (positivos) en s: los de la colision, o sin ella los bordes del asfalto */
 static void limites(float s, float *li, float *ld)
 {
-    int i, c = CON_SUP ? C_LIM : 3; float f; const float *a;
-    if (s < s_base) s = s_base;
-    if (s > longitud - 0.01f) s = longitud - 0.01f;
-    f = (s - s_base) / PASO; i = (int)f; f -= i; a = ruta_p + PR * i;
+    int i, c = CON_SUP ? C_LIM : 3; float f; const float *a = ruta_punto(s, &i, &f);
     *li = a[c] + f * (a[PR + c] - a[c]); *ld = a[c + 1] + f * (a[PR + c + 1] - a[c + 1]);
 }
 /* franjas del punto de la ruta mas cercano a s */
@@ -1771,11 +1771,11 @@ static hud_dat_t *ha_hud;                                       /* HAHUD.DAT en 
 /* rotulo del INFARTO: sube las texturas del uso al verse y baja las del anterior (VRAM fuera de la zona: ~75 KB) */
 static void ha_rotulo_uso(int *actual, const char *nombre)
 {
-    int u = ha_hud ? hudd_uso(ha_hud, nombre) : -1, t0, n;
+    int u = ha_hud ? hudd_uso(ha_hud, nombre) : -1;
     if (u == *actual) return;
-    if (*actual >= 0 && (n = hudd_tex_uso(ha_hud, *actual, &t0))) hudd_baja(ha_hud, t0, n);
+    hudd_baja_uso(ha_hud, *actual);
     *actual = u;
-    if (u >= 0 && (n = hudd_tex_uso(ha_hud, u, &t0)) && hudd_sube(ha_hud, t0, n)) dbglog(DBG_ERROR, "HAHUD: sin VRAM para %s\n", nombre);
+    if (hudd_sube_uso(ha_hud, u)) dbglog(DBG_ERROR, "HAHUD: sin VRAM para %s\n", nombre);
 }
 static int ha_u_txt = -1, ha_u_mar = -1;                                        /* [780258] (PS2 0x443508) de la carrera */
 /* Juego de la carrera (PS2 [0x59acac] = PC [780260], 0x1b4878 = 43F860): 1 el de la consola (SUMO_FE: el menu lo pone
@@ -2055,10 +2055,7 @@ static uint32_t semilla = 12345;
 static float azar(void) { semilla = semilla * 1103515245u + 12345u; return ((semilla >> 8) & 0xFFFF) / 65536.0f; }
 static float carril_x(float s, int k)
 {
-    int i; float f; const float *a;
-    if (s < s_base) s = s_base;
-    if (s > longitud - 0.01f) s = longitud - 0.01f;
-    f = (s - s_base) / PASO; i = (int)f; f -= i; a = ruta_p + PR * i;
+    int i; float f; const float *a = ruta_punto(s, &i, &f);
     return a[5 + NPERF + k] + f * (a[PR + 5 + NPERF + k] - a[5 + NPERF + k]);
 }
 /* carril mas cercano a x en s */
@@ -7744,8 +7741,8 @@ int main(int argc, char **argv)
                     if (!ha_hud && !(ha_hud = hudd_abre("HAHUD.DAT", 0, 1))) dbglog(DBG_ERROR, "HAHUD: no se pudo abrir\n");
                     if (ha_hud) {                               /* los corazones siempre; los rotulos al verse */
                         static const char *const C[8] = { "HA_CORAZON", "HA_ROTO", "HA_PANEL", "HA_FILA0", "HA_FILA1", "HA_FILA2", "HA_FILA3", "HA_FILA4" };
-                        for (i = 0; i < 8; i++) { int t0, n = hudd_tex_uso(ha_hud, hudd_uso(ha_hud, C[i]), &t0);
-                            if (n && hudd_sube(ha_hud, t0, n)) dbglog(DBG_ERROR, "HAHUD: sin VRAM para %s\n", C[i]); }
+                        for (i = 0; i < 8; i++)
+                            if (hudd_sube_uso(ha_hud, hudd_uso(ha_hud, C[i]))) dbglog(DBG_ERROR, "HAHUD: sin VRAM para %s\n", C[i]);
                     }
                 }
                 if (cam_ok) { cam_inicia(&cam, &cam_tab); cam_t_choque = 0; }   /* 484EE0 */

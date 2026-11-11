@@ -84,58 +84,23 @@ def convierte(iso, sal, previas=None):
     grupos = [('MILLAS', ag, Tg, 0x2b, t_millas & 0xffff), ('MILLAS_CIFRA', ag, Tg, 0x2b, t_cifra & 0xffff),
               ('CONT_PREG', ag, Tg, 0x2b, t_preg & 0xffff), ('CONT_ELIGE', ag, Tg, 0x2b, t_elige & 0xffff),
               ('GAME_OVER', ac, Tc, 0x2c, t_over & 0xffff)]
-    def vq_fin(i, a, fmt, lista):                               # VQ si el error es pequeno (como HAHUD.DAT)
-        import vq
-        datos, err = vq.codifica(a, fmt, 256)
-        print('  textura %d %dx%d VQ error %.1f %s' % (i, a.shape[1], a.shape[0], err, 'si' if err <= 16 else 'no'))
-        return datos if err <= 16 else None
-    cambiados = 0; huds = {}
+    cambiados = [0]; huds = {}
+    def boton(p):                                               # icono del boton de la Dreamcast (A / B) de CONT_ELIGE
+        bt = boton_de(p, Tg, ps2) if 'bk' not in p else None
+        if bt is None: return p
+        img, _ = dc[bt]; cambiados[0] += 1
+        q = dict(p); q.update(tex=('BOTON', bt), src=(0, 0, img.shape[1], img.shape[0]), bk='BOTON', tx={('BOTON', bt): img})
+        return q
     for nombre, A, T, bk, k in grupos:
         fich = 'GOVER.DAT' if nombre == 'GAME_OVER' else 'FIN.DAT'
         if fich not in huds:
-            huds[fich] = hud = ch.Hud(); hud.taco = [0xff] * 16; hud.vq = vq_fin
+            huds[fich] = hud = ch.Hud(); hud.taco = [0xff] * 16; hud.vq = ch.vq_pequeno
         hud = huds[fich]
-        n = duracion(A, k); lst = []; ant = None
-        for f in range(n):
-            ps = []
-            for p in ch.escena(A, k, float(f)):
-                if 'mascara' in p: p = ch.hornea(p, T)
-                if nombre == 'CONT_ELIGE':
-                    bt = boton_de(p, T, ps2) if 'bk' not in p else None
-                    if bt is not None:                          # icono del boton de la Dreamcast (A / B)
-                        img, _ = dc[bt]; cambiados += 1
-                        q = dict(p); l, t, r, b = p['src']
-                        q.update(tex=('BOTON', bt), src=(0, 0, img.shape[1], img.shape[0]), bk='BOTON', tx={('BOTON', bt): img})
-                        p = q
-                ps.append(p)
-            firma = [(str(p['tex']), tuple(np.round(p['M'].ravel(), 3)), round(p['alfa'], 3), tuple(p['src'])) for p in ps]
-            if firma != ant: lst.append([f, ps, 1]); ant = firma
-            else: lst[-1][2] += 1
-        at = ch.Atlas(); at.prefijo = 'fin_' + nombre; cl = []
-        for _, ps, _ in lst:
-            for p in ps:
-                if p['alfa'] >= 0.004 and abs(np.linalg.det(p['M'][:2, :2])) >= 1e-6:
-                    b2, T2 = (p['bk'], p['tx']) if 'bk' in p else (bk, T)
-                    at.registra(b2, T2, p); cl.append(at._clave(b2, p))
-        t0 = len(hud.tex); pl = at.plan(cl); at.empaqueta(hud, pl)
-        print('  %s: escena %X:%04X, %d cuadros (%d distintos), texturas %d..%d, %d KB' % (
-            nombre, bk, k, n, len(lst), t0, len(hud.tex) - 1, at.bytes_plan(pl) >> 10))
-        g = hud.grupo(nombre, n)
-        for c, ps, nf in lst:
-            k0 = len(hud.pie)
-            for p in ps:
-                b2, T2 = (p['bk'], p['tx']) if 'bk' in p else (bk, T)
-                hud.piezas_escena(g, c, b2, T2, [p], atlas=at)
-            vis = [p for p in ps if p['alfa'] >= 0.004 and abs(np.linalg.det(p['M'][:2, :2])) >= 1e-6]
-            assert len(vis) == len(hud.pie) - k0
-            for j, p in zip(range(k0, len(hud.pie)), vis):     # cuadros que abarca y capa aditiva
-                q = list(hud.pie[j]); L = p.get('L')
-                adi = 4 if L is not None and A.a[L + 0x48] & 4 else 0
-                q[3] = (q[3] & 11) | adi | (min(nf, 4095) << 4); hud.pie[j] = tuple(q)
+        g = ch.grupo_escena(hud, nombre, A, T, bk, k, duracion(A, k), 'fin_', boton if nombre == 'CONT_ELIGE' else None)
         if nombre == 'MILLAS_CIFRA':
             for i in range(8): hud.uso('MILLAS_C%d' % i, g, int(X - 320 - i * PASO), int(Y - 240), capa=5)
         else: hud.uso(nombre, g, 0, 0, capa=1)
-    assert cambiados > 0, 'no se encontraron los iconos de los botones en 2B004A'
+    assert cambiados[0] > 0, 'no se encontraron los iconos de los botones en 2B004A'
     for fich, hud in huds.items():
         hud.escribe(os.path.join(sal, fich))
         print('%s: %d bytes, %d texturas, %d piezas' % (fich, os.path.getsize(os.path.join(sal, fich)), len(hud.tex), len(hud.pie)))

@@ -74,22 +74,14 @@ void fin_etapa(const int limpio[6], int segundos)
 
 static int sube(int u)
 {
-    int t0, n = hudd_tex_uso(fd, u, &t0);
-    if (n && hudd_sube(fd, t0, n)) { dbglog(DBG_ERROR, "FIN: sin VRAM para el uso %d\n", u); return -1; }
+    if (hudd_sube_uso(fd, u)) { dbglog(DBG_ERROR, "FIN: sin VRAM para el uso %d\n", u); return -1; }
     return 0;
 }
-static void baja(int u)
-{
-    int t0, n;
-    if (fd && u >= 0 && (n = hudd_tex_uso(fd, u, &t0))) hudd_baja(fd, t0, n);
-}
+static void baja(int u) { hudd_baja_uso(fd, u); }
 static void abre(const char *f)
 {
     if (fd) hudd_cierra(fd);
-    musica_pausa_lectura(1);                            /* el GD para el fichero (la musica tira del anillo) */
-    fd = hudd_abre(f, 0, 1);
-    musica_pausa_lectura(0);
-    if (!fd) dbglog(DBG_ERROR, "FIN: no se pudo abrir %s\n", f);
+    if (!(fd = hudd_abre_gd(f))) dbglog(DBG_ERROR, "FIN: no se pudo abrir %s\n", f);
 }
 
 void fin_entra(int c, const fin_carrera_t *k)

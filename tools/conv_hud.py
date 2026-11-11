@@ -572,6 +572,56 @@ def convierte(iso, salida, previas, previas_av=None):
           at.texs, sum(len(t[4]) for t in texs[nt0:])))
     return hud, texs
 
+# ---------------------------------------------------------------- escenas enteras (FIN.DAT, CARGASPn.DAT, GOVSP.DAT...)
+def grande(src):
+    """el rectangulo src no cabe en una textura del atlas (512x256 / 256x512): va con su textura de origen entera"""
+    l, t, r, b = src; w, h = r - l, b - t
+    return not ((w <= 510 and h <= 254) or (w <= 254 and h <= 510))
+
+def vq_pequeno(i, a, fmt, lista, pre=''):
+    """Hud.vq de los ficheros de escenas: VQ (tools/vq.py, libro de 256) si el error es pequeno"""
+    import vq
+    datos, err = vq.codifica(a, fmt, 256)
+    print('  %stextura %d %dx%d VQ error %.1f %s' % (pre, i, a.shape[1], a.shape[0], err, 'si' if err <= 16 else 'no'))
+    return datos if err <= 16 else None
+
+def visibles(ps): return [p for p in ps if p['alfa'] >= 0.004 and abs(np.linalg.det(p['M'][:2, :2])) >= 1e-6]
+
+def grupo_escena(hud, nombre, A, T, bk, k, n, prefijo='', cambia=None):
+    """hornea los cuadros 0..n-1 de la escena k del banco bk (A, T de Disco.banco) en el grupo nombre de hud, con su
+    atlas (las texturas del grupo se suben solo mientras se ve; las piezas grandes con su textura de origen entera:
+    fondos), y devuelve el grupo (los usos los pone quien llama). Solo se escriben los cuadros donde algo cambia: cada
+    pieza guarda en flags >> 4 los cuadros que abarca y en el bit 2 la capa aditiva (+0x48 & 4). cambia(p): la pieza
+    que va en lugar de p (los iconos de los botones de conv_fin) o p"""
+    lst = []; ant = None
+    for f in range(n):
+        ps = [hornea(p, T) if 'mascara' in p else p for p in escena(A, k, float(f))]
+        if cambia: ps = [cambia(p) for p in ps]
+        firma = [(str(p['tex']), tuple(np.round(p['M'].ravel(), 3)), round(p['alfa'], 3), tuple(p['src'])) for p in ps]
+        if firma != ant: lst.append([f, ps, 1]); ant = firma
+        else: lst[-1][2] += 1
+    at = Atlas(); at.prefijo = prefijo + nombre; cl = []
+    for _, ps, _ in lst:
+        for p in visibles(ps):
+            if grande(p['src']): continue
+            b2, T2 = (p['bk'], p['tx']) if 'bk' in p else (bk, T)
+            at.registra(b2, T2, p); cl.append(at._clave(b2, p))
+    t0 = len(hud.tex); pl = at.plan(cl); at.empaqueta(hud, pl)
+    print('  %s: escena %X:%04X, %d cuadros (%d distintos), texturas %d..%d, %d KB' % (
+        nombre, bk, k, n, len(lst), t0, len(hud.tex) - 1, at.bytes_plan(pl) >> 10))
+    g = hud.grupo(nombre, n)
+    for c, ps, nf in lst:
+        k0 = len(hud.pie); v = visibles(ps)
+        for p in v:
+            b2, T2 = (p['bk'], p['tx']) if 'bk' in p else (bk, T)
+            hud.piezas_escena(g, c, b2, T2, [p], atlas=None if grande(p['src']) else at)
+        assert len(v) == len(hud.pie) - k0
+        for j, p in zip(range(k0, len(hud.pie)), v):            # cuadros que abarca y capa aditiva
+            q = list(hud.pie[j]); L = p.get('L')
+            adi = 4 if L is not None and A.a[L + 0x48] & 4 else 0
+            q[3] = (q[3] & 11) | adi | (min(nf, 4095) << 4); hud.pie[j] = tuple(q)
+    return g
+
 # ---------------------------------------------------------------- previas
 def dibuja_grupo(img, hud, g, cuadro, X, Y):
     from PIL import Image

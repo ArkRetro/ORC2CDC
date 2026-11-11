@@ -188,12 +188,7 @@ def main():
             else: lst[-1][2] += 1
         grupos.append((nombre, len(fotos), lst, bk))
     # un atlas por grupo (sus texturas se suben solo mientras se ve: la VRAM fuera de la zona del curso es ~75 KB), VQ
-    def vq_ha(i, a, fmt, lista):
-        import vq
-        datos, err = vq.codifica(a, fmt, 256)
-        print('  HAHUD: textura %d %dx%d VQ error %.1f %s' % (i, a.shape[1], a.shape[0], err, 'si' if err <= 16 else 'no'))
-        return datos if err <= 16 else None
-    hud.vq = vq_ha
+    hud.vq = lambda i, a, fmt, lista: ch.vq_pequeno(i, a, fmt, lista, 'HAHUD: ')
     # los corazones y la rotura comparten casi todo (resplandores 2B:0..3 y 92; cada color solo su icono de 30x30): un
     # atlas para todos (se suben juntos al empezar la carrera; VRAM fuera de la zona del curso)
     COR = ('HA_CORAZON', 'HA_ROTO') + tuple('HA_C%d' % i for i in range(6))

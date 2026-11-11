@@ -5,6 +5,7 @@
 #include <malloc.h>
 #include "gd.h"
 #include "hud.h"
+#include "musica.h"
 
 typedef struct { uint16_t w, h, fmt, lista; uint32_t off, tam; } h_tex_t;
 typedef struct { uint16_t tex, w, h, _r; float u0, v0, u1, v1; } h_spr_t;
@@ -218,6 +219,15 @@ hud_dat_t *hudd_abre(const char *fich, int modelo, int parcial)
     for (i = 0; i < h->n_grp; i++)
         if (grupo_util(i)) for (j = 0; j < h->grp[i].np; j++) h->usada[h->spr[pz(h, i)[j].spr].tex] = 1;
     if (!h->n_grp) memset(h->usada, 1, h->n_tex);           /* sin grupos (bancos SPRANI): todas se pueden subir */
+    return h;
+}
+/* parcial, con el GD para el fichero mientras se leen las tablas (la musica tira del anillo) */
+hud_dat_t *hudd_abre_gd(const char *fich)
+{
+    hud_dat_t *h;
+    musica_pausa_lectura(1);
+    h = hudd_abre(fich, 0, 1);
+    musica_pausa_lectura(0);
     return h;
 }
 
@@ -606,6 +616,8 @@ int hudd_tex_uso(const hud_dat_t *h, int u, int *t0)
     if (hi < 0) return 0;
     *t0 = lo; return hi - lo + 1;
 }
+int hudd_sube_uso(hud_dat_t *h, int u) { int t0, n = hudd_tex_uso(h, u, &t0); return n ? hudd_sube(h, t0, n) : 0; }
+void hudd_baja_uso(hud_dat_t *h, int u) { int t0, n = hudd_tex_uso(h, u, &t0); if (n) hudd_baja(h, t0, n); }
 const uint8_t *hudd_extra(const hud_dat_t *h) { return h ? h->dat + h->off_taco + 16 : NULL; }
 
 void hudd_dibuja(hud_dat_t *h, int u, int cuadro, float dx, float dy, float alfa, float z, int fondo)

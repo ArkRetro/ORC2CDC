@@ -66,11 +66,6 @@ def footage(A, L):
     return res
 
 
-def grande(src):
-    l, t, r, b = src; w, h = r - l, b - t
-    return not ((w <= 510 and h <= 254) or (w <= 254 and h <= 510))
-
-
 def escribe(D, bk, ruta, grupos, extra=b'', vq=None, log=print):
     """grupos: [(nombre, [escenas])] en el orden de carga; las escenas que no esten en ninguno van en un grupo 'RESTO'"""
     A, T, _ = D.banco(bk)
@@ -107,7 +102,7 @@ def escribe(D, bk, ruta, grupos, extra=b'', vq=None, log=print):
                         usos.append((k, (f, p['L']), clave, q, 'HORNO', ch.HORNO))
         for k, o, clave, p, b2, T2 in usos:
             if clave in sprite_de: continue
-            if grande(p['src']): grandes.append((clave, p, b2, T2))
+            if ch.grande(p['src']): grandes.append((clave, p, b2, T2))
             else:
                 at.registra(b2, T2, p); nuevas.append(clave)
             sprite_de[clave] = None

@@ -27,6 +27,7 @@ uint32_t hud_suelta_quietas(uint32_t cuadros);           /* apuro de VRAM: echa 
 typedef struct hud_dat hud_dat_t;
 /* parcial = 1: en la RAM solo las tablas; las texturas se leen del GD al subirlas (ficheros grandes) */
 hud_dat_t *hudd_abre(const char *fich, int modelo, int parcial);
+hud_dat_t *hudd_abre_gd(const char *fich);               /* hudd_abre parcial con el GD para el (musica_pausa_lectura) */
 int hudd_sube(hud_dat_t *h, int t0, int nt);             /* texturas [t0, t0+nt) a la VRAM (nt < 0: todas); 0 bien
                                                             (-2 sin VRAM, -3 sin RAM, -4 fallo del GD) */
 /* bufer de RAM (alineado a 32) para lo temporal de hudd_sube (sectores leidos de un fichero parcial, indices de las
@@ -45,7 +46,9 @@ int hudd_cuadros(const hud_dat_t *h, int uso);           /* cuadros del grupo de
    fondo = 1: z baja y comparacion de profundidad normal, queda detras de la escena 3D); dentro de la lista TR */
 void hudd_dibuja(hud_dat_t *h, int uso, int cuadro, float dx, float dy, float alfa, float z, int fondo);
 const uint8_t *hudd_extra(const hud_dat_t *h);
-int hudd_tex_uso(const hud_dat_t *h, int uso, int *t0);   /* texturas del grupo del uso: primera (t0) y cuantas */           /* lo que va detras de los 16 bytes de tacometros */
+int hudd_tex_uso(const hud_dat_t *h, int uso, int *t0);   /* texturas del grupo del uso: primera (t0) y cuantas */
+int hudd_sube_uso(hud_dat_t *h, int uso);                /* las de hudd_tex_uso a la VRAM: 0 bien o nada, si no hudd_sube */
+void hudd_baja_uso(hud_dat_t *h, int uso);               /* y fuera (hudd_baja) */           /* lo que va detras de los 16 bytes de tacometros */
 /* una vez por cuadro (despues de dibujar): libera la VRAM que se pidio liberar cuando ya no la lee la PowerVR (las
    texturas de hudd_baja / hud_baja_tex se liberan HUDD_ESPERA cuadros despues de su ultimo uso) */
 void hudd_fin_cuadro(void);

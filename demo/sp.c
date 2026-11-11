@@ -14,7 +14,6 @@
 #include <stdio.h>
 #include "sp.h"
 #include "../comun/hud.h"
-#include "../comun/musica.h"
 
 static hud_dat_t *cd;                                   /* CARGASP.DAT mientras se carga */
 static int u_carga = -1;
@@ -23,23 +22,20 @@ static uint64_t t0_carga;
 #define SP_TABLAS (128 * 1024)                          /* para las tablas; el resto, sectores de la lectura */
 void sp_carga_entra(int variante, int preset, void *ram, uint32_t cap)
 {
-    char n[16], f[16]; int t0, nt, r = 0;
+    char n[16], f[16]; int r;
     sp_carga_sale();
     if (variante >= 3 && variante <= 5) return;         /* 0x3f9720: sin pantalla en la red */
     if (preset < 0 || preset > 3) return;
     if (cap < SP_TABLAS + 64 * 1024) ram = NULL;
     sprintf(f, "CARGASP%d.DAT", preset);
-    musica_pausa_lectura(1);
     if (ram) hudd_tablas_en(ram, SP_TABLAS);
-    cd = hudd_abre(f, 0, 1);
+    cd = hudd_abre_gd(f);
     hudd_tablas_en(NULL, 0);
-    musica_pausa_lectura(0);
     if (!cd) { dbglog(DBG_ERROR, "CARGA: no se pudo abrir %s\n", f); return; }
     sprintf(n, "CARGA_P%d", preset);
     u_carga = hudd_uso(cd, n);
-    nt = u_carga >= 0 ? hudd_tex_uso(cd, u_carga, &t0) : 0;
     if (ram) hudd_bufer((uint8_t *)ram + SP_TABLAS, cap - SP_TABLAS);
-    if (u_carga >= 0 && nt) r = hudd_sube(cd, t0, nt);
+    r = hudd_sube_uso(cd, u_carga);
     if (ram) hudd_bufer(NULL, 0);
     if (u_carga < 0 || r) {
         dbglog(DBG_ERROR, "CARGA: sin %s o sin VRAM\n", n);

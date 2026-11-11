@@ -22,57 +22,18 @@ Origen (SLES-53998):
 Las escenas y las texturas son las del banco del idioma (OR2_IDIOMA, espanol por defecto: XST _sxst).
 """
 import os, struct, sys
-import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import conv_hud as ch
 import conv_fin as cf
 import conv_sprani as cs
 
-def vq_sp(i, a, fmt, lista):                                    # VQ si el error es pequeno (como FIN.DAT)
-    import vq
-    datos, err = vq.codifica(a, fmt, 256)
-    print('  textura %d %dx%d VQ error %.1f %s' % (i, a.shape[1], a.shape[0], err, 'si' if err <= 16 else 'no'))
-    return datos if err <= 16 else None
-
 def hud_nuevo():
-    hud = ch.Hud(); hud.taco = [0xff] * 16; hud.vq = vq_sp
+    hud = ch.Hud(); hud.taco = [0xff] * 16; hud.vq = ch.vq_pequeno
     return hud
 
 def grupo_escena(hud, nombre, A, T, bk, k, n=None, x=0, y=0, capa=1):
-    """hornea la escena k del banco bk (cuadros 0..n-1, todos los de la escena por defecto) en el grupo nombre con
-    su atlas y un uso del mismo nombre en (x, y)"""
-    if n is None: n = cf.duracion(A, k)
-    lst = []; ant = None
-    for f in range(n):
-        ps = [ch.hornea(p, T) if 'mascara' in p else p for p in ch.escena(A, k, float(f))]
-        firma = [(str(p['tex']), tuple(np.round(p['M'].ravel(), 3)), round(p['alfa'], 3), tuple(p['src'])) for p in ps]
-        if firma != ant: lst.append([f, ps, 1]); ant = firma
-        else: lst[-1][2] += 1
-    at = ch.Atlas(); at.prefijo = 'sp_' + nombre; cl = []
-    vis = lambda ps: [p for p in ps if p['alfa'] >= 0.004 and abs(np.linalg.det(p['M'][:2, :2])) >= 1e-6]
-    def grande(p):                                              # no cabe en una textura del atlas (512x256 / 256x512):
-        l, t, r, b = p['src']; w, h = r - l, b - t              # va con su textura de origen entera (fondos)
-        return not ((w <= 510 and h <= 254) or (w <= 254 and h <= 510))
-    for _, ps, _ in lst:
-        for p in vis(ps):
-            if grande(p): continue
-            b2, T2 = (p['bk'], p['tx']) if 'bk' in p else (bk, T)
-            at.registra(b2, T2, p); cl.append(at._clave(b2, p))
-    t0 = len(hud.tex); pl = at.plan(cl); at.empaqueta(hud, pl)
-    print('  %s: escena %X:%04X, %d cuadros (%d distintos), texturas %d..%d, %d KB' % (
-        nombre, bk, k, n, len(lst), t0, len(hud.tex) - 1, at.bytes_plan(pl) >> 10))
-    g = hud.grupo(nombre, n)
-    for c, ps, nf in lst:
-        k0 = len(hud.pie)
-        for p in vis(ps):
-            b2, T2 = (p['bk'], p['tx']) if 'bk' in p else (bk, T)
-            hud.piezas_escena(g, c, b2, T2, [p], atlas=None if grande(p) else at)
-        v = vis(ps)
-        assert len(v) == len(hud.pie) - k0
-        for j, p in zip(range(k0, len(hud.pie)), v):            # cuadros que abarca y capa aditiva
-            q = list(hud.pie[j]); L = p.get('L')
-            adi = 4 if L is not None and A.a[L + 0x48] & 4 else 0
-            q[3] = (q[3] & 11) | adi | (min(nf, 4095) << 4); hud.pie[j] = tuple(q)
+    """ch.grupo_escena (cuadros 0..n-1, todos los de la escena por defecto) con un uso del mismo nombre en (x, y)"""
+    g = ch.grupo_escena(hud, nombre, A, T, bk, k, cf.duracion(A, k) if n is None else n, 'sp_')
     hud.uso(nombre, g, x, y, capa=capa)
     return g
 
@@ -165,7 +126,7 @@ def tablas_fe(D):
 
 def frontal(D, sal):
     ruta = os.path.join(sal, 'SPFE.DAT')
-    cs.escribe(D, 0x2e, ruta, GRUPOS_FE, tablas_fe(D), vq=vq_sp)
+    cs.escribe(D, 0x2e, ruta, GRUPOS_FE, tablas_fe(D), vq=ch.vq_pequeno)
 
 # ---------------------------------------------------------------- resultados (modo 25: mapa de la ruta, ROUTE_CVT)
 # Grupos de atlas del banco 0x34: el mapa del preset 0 / 2 (34000E / 3401A) y el del 1 / 3 (34000D / 340019), el rotulo
@@ -199,7 +160,7 @@ def tablas_ruta(D):
     return bytes(out)
 
 def rutas(D, sal):
-    cs.escribe(D, 0x34, os.path.join(sal, 'RUTASP.DAT'), GRUPOS_RUTA, tablas_ruta(D), vq=vq_sp)
+    cs.escribe(D, 0x34, os.path.join(sal, 'RUTASP.DAT'), GRUPOS_RUTA, tablas_ruta(D), vq=ch.vq_pequeno)
 
 def maquetas(huds, d):
     from PIL import Image
