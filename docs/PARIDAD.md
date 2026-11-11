@@ -2174,6 +2174,20 @@ memory", RAM del menu igual que antes (939 KB libres).
   se copia a 0x531890: +0x18 x 127 a los comandos 0xA004 / 0xA010 del IOP (0x11f3e0), +4..+0x14 escalan el volumen por
   la clase del sonido (0x11f438, tabla de saltos 0x3c1270, 10 clases), +0 en 0x11f4f4. SIN PORTAR: falta saber que
   clase de 0x3c1270 es cada sonido de la Dreamcast (motor, derrape, voces, musica) para aplicarlo en sfx.c / musica.c.
+  Localizado (2026-11-11): la clase es el grupo de canales del primer argumento de 0x11be88(grupo, parametro, valor)
+  (con parametro 0, el volumen, pasa por 0x11f438): grupos 0 / 1 -> +4, 3 -> +8, 8 / 9 -> +0xC, 6 -> +0x10, 2 / 4 / 5 /
+  7 -> +0x14 (tabla 0x3c1270); el frontal (0x11f570 desde 0x216fec / 0x217010) copia el registro del balance y pone
+  los grupos 0 / 1 (parametro 2 = 0x73, volumen 0x13: el motor de muestra) y la musica con +0 (0x11f4d0, mas el ajuste
+  por tema de 0x3c1628). Falta seguir que sonidos de la carrera piden cada grupo (71 llamadas a 0x11be88 desde
+  0x11c8d0 / 0x11cc70 / 0x11d3a8 / 0x11d870 / 0x11dd40 / 0x11e338 / 0x11e994 / 0x11ebc8) y que hace +0x18 en los
+  comandos 0xA004 / 0xA010 del IOP: SIN PORTAR.
+- Textos de ayuda: en el PS2 son la barra de botones del objeto 0x5e08f8 (0x238f28 = 446D90 del PC) con sus pares
+  {boton, texto}: 0x212048 (4 0x294, 8 0x295, 0x10 0x32C), 0x2165f4 (4 0x294, 8 0x295, 0x10 0x32D, 0x20 0x422) y 0x213604
+  / 0x215068 / 0x21608c; sus metodos de aparecer / quitarse (PC 447000 / 447090 / 4470F0 / 446CF0 / 446A50) sin
+  localizar en el PS2: SIN PORTAR.
+- Cruceta: 0x210988 y 0x210a00 (los filtros de botones del frontal) devuelven 0 para 0x40 / 0x80 (CONFIRMADO); que la
+  cruceta mueva la palanca (0x210a78 -> 0x1b4578: el eje del mando, [0x58a7d0 + mando x 0x70 + eje x 16 + 4]) depende de
+  quien escribe ese eje (sin localizar): sigue PROBABLE.
 - El fundido de volumen de la musica (4BF970 -> 42E020) es en el PS2 0x1001d8, que no cambia el volumen (ver Fin de
   la carrera): nada que portar.
 - Vuelta desde el GAME OVER (modo 28 -> 10): el frontal se abre en cuanto el hueco de la union queda libre (tras la meta
