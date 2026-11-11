@@ -29,7 +29,8 @@ decompilacion del PC, platform/race_robots.cpp, rob_disp.cpp, rob_motion*.cpp):
    cerrados (se ven por los cristales). Nada mas: no hay LOD ni distancia (el original no tiene otro modelo).
  - Personaje (work+8): indice de la tabla de ficheros \\chr\\CHR_*.bin del ELF (registros de 16 bytes {ruta, 0,
    recurso, 0} en 0x36f7d8; el cargador 0x205370 = PC 488B80). El piloto (PS2 0x205518 = PC 487EE0): 0xC en el modo 3,
-   si no (sin la bandera de 0x59acac, la de la partida en red) 0xB = CHR_DR_M00 (el piloto de pelo castano). La
+   si no (sin la bandera de 0x59acac = PC [780260]: el juego de OUTRUN2SP; con ella, el de la consola, la licencia
+   elige: tablas 6549B0 / 6549C8, SIN PORTAR) 0xB = CHR_DR_M00 (el piloto de pelo castano). La
    acompanante (PS2 0x2055b8 = PC 487F50): en la variante 1 (OutRun) y 3, 4, 5 el 9 = CHR_DR_L00 (la chica rubia).
    Sus modelos: el recurso del registro (0xBE y 0xBF: obj_chr_dr_m00_pmt / obj_chr_dr_l00_pmt de CHR.PS2).
  - Esqueleto (PS2 0x205038 = PC 487C30): la entrada (tabla de saltos 0x40e3f0 por personaje - 3) de \\COMMON\\bone.bin:
@@ -444,8 +445,8 @@ def ids_movimientos(t):
     """movimientos que usa la logica (los de las tablas y las constantes de 488DD0 / 489A90, comprobadas en el codigo
     de PS2: 0x60000 0x201e5c, 0x25000c 0x202d04, 0x6004b 0x202cd4, 0x6005f 0x203224, 0x250003 0x20346c, 0x220007 /
     0x230003 0x203510.., 0x60036 0x203088, 0x60049 / 0x25000c 0x204128 / 0x2040e8, 0x60055 0x203df8)"""
-    if BANDERERO:                                   # BAND.DAT: los del banderero (personaje 4, grupo 0x21)
-        return sorted(set(x for p in (0, 2, 4) for x in t['BAND'][18 * p:18 * p + 9] if x))
+    if BANDERERO:                                   # BAND.DAT / BAND1.DAT: los del banderero de esos presets
+        return sorted(set(x for p in BAND_PRESETS for x in t['BAND'][18 * p:18 * p + 9] if x))
     s = set(x for x in t['MODC'] + t['MIRA'] + t['CHQ7'] + t['CHQ6'] if x != 0xffffffff)
     s |= {0x60000, 0x25000c, 0x6004b, 0x6005f, 0x250003, 0x220007, 0x230003, 0x60036, 0x60049}
     s |= set(x for x in t['METE'] if x not in (0xffffffff, 0xfffffffe))      # meta del piloto (estado 9)
@@ -480,8 +481,14 @@ def datos_movimiento(g, k):
 # ------------------------------------------------------------------ conversion
 # --banderero: BAND.DAT, el mismo formato con solo el banderero de la salida (en CHR.DAT no cabe en la RAM: la demo lo
 # lee al empezar la carrera en el hueco de la union; ver docs/PARIDAD.md, Escena de la salida)
-BANDERERO = '--banderero' in sys.argv
-PERSONAJES = ((4, 4, 0xff),) if BANDERERO else ((11, 3, 0), (9, 2, 1))
+BANDERERO = '--banderero' in sys.argv or '--banderero-sp' in sys.argv
+# --banderero-sp: BAND1.DAT, el de los presets 1 y 3 (cursos de OutRun 2 SP): 0x2046f0 (PS2) / 488710 (PC) pone el
+# personaje 3 = CHR_AUT04 (recurso 0xC3, el de la tela que pide 0x100d40 con el preset 1 o 3) y 0x205038 le da la
+# misma entrada 4 de bone.bin (tabla de saltos 0x40e3f0: personajes 3 y 4 -> 0x2050d8); su tela cuelga del hueso 0x11
+BAND_SP = '--banderero-sp' in sys.argv
+BAND_PERS = 3 if BAND_SP else 4
+BAND_PRESETS = (1, 3) if BAND_SP else (0, 2, 4)
+PERSONAJES = ((BAND_PERS, 4, 0xff),) if BANDERERO else ((11, 3, 0), (9, 2, 1))
 # (personaje, esqueleto de bone.bin, asiento): el piloto, la acompanante y el banderero de la salida (ROB03: PS2
 # 0x2046f0 = PC 488710 pone el personaje 4 = CHR_AUT04_CVT con el preset 0, 2 y 4; 0x205038 le da la entrada 4 de
 # bone.bin por la tabla de saltos 0x40e3f0; sin asiento: va en el mundo)
@@ -509,7 +516,7 @@ def convierte(A, sal, vista=None):
             a = tex.imagen(blq, h); fmt, li, d = modelo.textura_dc(a)
             mod.texs.append((a.shape[1], a.shape[0], fmt, li, len(mod.blob), len(d))); mod.blob += d; mod.rgba.append(a)
         ntb = len(mod.texs) - base
-        if kind == 4:                             # la tela de la bandera: textura 1 del recurso (401B80 / 448810:
+        if kind == BAND_PERS and BANDERERO:       # la tela de la bandera: textura 1 del recurso (401B80 / 448810:
             if ntb < 2: raise SystemExit('%s sin la textura de la bandera' % P.nombre)    # [[r+24]][1])
             mod.mallas.append([mod.texs[base + 1][3], base + 1, np.zeros(3), 0.0, mod.nv, 0, blq, -1])
         R = blq.registros()

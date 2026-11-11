@@ -1661,15 +1661,19 @@ static float grua_s, grua_x; static int grua_on;
      2/3 para los de 15); con 0 o 1, 43F960 (preset 2 o 3) da 0.
    - fila 0: la variante del modo OutRun es 1 (4C3DC0: fila 0 de la lista -> +1F = 1; 2 Heart Attack, 0 Time
      Attack) y 44DC70 da fila 0 a la variante 1 (2 y 5 -> 1; 0 y 7 -> 2).
-   - dificultad 0: [7C24C0] = licencia +E0, que 4471A0 (licencia nueva) pone a 0; 0 tambien si 43F860.
+   - dificultad 0: 43F860 != 0 en el juego de la consola (ver abajo); en OUTRUN2SP [7C24C0] = licencia +E0.
    - 456D60 <= 1 (un jugador): se suma k636904 de la clave de la etapa.
    - 48B1A0 (83036D) != 1 con el coche de serie (1 = preparado, 5051D0): +60 cuadros en los niveles 1..4.
-   CONFIRMADO en el ELF: la formula (0x176730), la tabla k636904 y su uso. PROBABLE: preset 0 (del frontal del PC,
-   sin trazar en el de PS2).
+   CONFIRMADO en el ELF: la formula (0x176730), la tabla k636904 y su uso; el preset por el juego (0 la consola, 1
+   OUTRUN2SP con los cursos de OutRun 2 SP: ver juego_sp).
    Modos (2026-11-09): la fila sale de la variante del modo elegido (menu_modo: 4EEAD0 del PC, 1 OutRun, 2 Heart
-   Attack, 7 Time Attack) como en 44DC70 (race_extended_time_44dc70: 1 -> 0, 2 y 5 -> 1, 0 y 7 -> 2), y la
-   dificultad de la licencia activa (opcion +E0, menu_dificultad; difficulty_of de 44DC70: [7C24C0] salvo en el juego
-   de OUTRUN2SP, 43F860). La ampliacion del checkpoint (450CC0) pasa la variante 7 como 0: la misma fila 2. */
+   Attack, 7 Time Attack) como en 44DC70 (race_extended_time_44dc70: 1 -> 0, 2 y 5 -> 1, 0 y 7 -> 2). La ampliacion
+   del checkpoint (450CC0) pasa la variante 7 como 0: la misma fila 2.
+   OUTRUN2SP (2026-11-11): preset 1 (fila 1 de la tabla base, 0x176018) y dificultad. CORREGIDO con el ELF: el que
+   llama a 0x176730 (0x1cdc98 = 44DC70 del PC) pasa dificultad 0 si 0x1b4878 ([0x59acac] = [780260]) no es 0, y ese
+   1 lo pone el menu de la consola al entrar (0x237e28); el juego de OUTRUN2SP lo pone a 0 (0x23aba0). Asi la
+   dificultad de la licencia (+E0, 0x1201d0 -> 0x588668 + 0xE0) solo cuenta en OUTRUN2SP (2 en la variante 4); en los
+   modos del menu de la consola (OutRun, INFARTO, CONTRARRELOJ) es 0 (antes la demo leia la licencia en estos). */
 static int variante = 1;
 static hud_dat_t *ha_hud;                                       /* HAHUD.DAT en el modo INFARTO */
 /* rotulo del INFARTO: sube las texturas del uso al verse y baja las del anterior (VRAM fuera de la zona: ~75 KB) */
@@ -1682,7 +1686,14 @@ static void ha_rotulo_uso(int *actual, const char *nombre)
     if (u >= 0 && (n = hudd_tex_uso(ha_hud, u, &t0)) && hudd_sube(ha_hud, t0, n)) dbglog(DBG_ERROR, "HAHUD: sin VRAM para %s\n", nombre);
 }
 static int ha_u_txt = -1, ha_u_mar = -1;                                        /* [780258] (PS2 0x443508) de la carrera */
-#define TIM_PRESET 0
+/* Juego de la carrera (PS2 [0x59acac] = PC [780260], 0x1b4878 = 43F860): 1 el de la consola (SUMO_FE: el menu lo pone
+   al entrar, 0x237e28), 0 el de OUTRUN2SP (el menu principal lo pone a 0 al elegirlo: 0x23aba0, opcion 2, y +21C = 7).
+   Preset del curso (PS2 [0x44350c] = [gp-0x7b64] = PC [78024C]): 0 el curso de OutRun 2 (csc_data_2), 1 el de
+   OutRun 2 SP (csc_data_cvt, arbol 1 de CURSO.DAT), 2 / 3 los de 15 niveles; lo pone la lista de juego / curso del
+   frontal de OUTRUN2SP (4C3DC0: +27 por el lado elegido) y 43F950 (PS2 0x1b4a88). */
+static int juego_sp;                                            /* 1: [780260] = 0 (OUTRUN2SP) */
+static int preset_curso;                                        /* [78024C] */
+#define TIM_PRESET preset_curso                                 /* 0x176018: preset 0 / 1 / 2 / 3 -> fila 0 / 1 / 5 / 6 (TIM1 0..3) */
 #define TIM_FILA (variante == 1 ? 0 : variante == 2 || variante == 5 ? 1 : variante == 0 || variante == 7 ? 2 : 0)
 static int tim_dif;                                             /* [7C24C0]: licencia +E0 */
 #define TIM_DIF tim_dif
@@ -1712,11 +1723,15 @@ static int tim_zona(int k, int nivel)
     if (TIM_SERIE && nivel != 0) t += 60;
     return t;
 }
+static uint8_t cha_bloque[24];                                  /* 'CHA1' de PARAM.DAT (o 0) */
 static int fisica_carga(void)
 {
     uint32_t sz; float *t = gd_carga("PARAM.DAT", &sz);
     if (!t || sz < (200 * 19 + 162 + 256) * 4) return -1;
     par_manual = NULL;
+    {   const uint8_t *cha = sz >= 24 && !memcmp((const uint8_t *)t + sz - 24, "CHA1", 4) ? (const uint8_t *)t + sz - 24 : NULL;
+        if (cha) sz -= 24;                                      /* choques entre coches del preset 1 / 3, al final */
+        if (cha) memcpy(cha_bloque, cha, 24); else cha_bloque[0] = 0; }
     if (sz >= 652 + 36 && !memcmp((const uint8_t *)t + sz - 652, "PAR2", 4)) {   /* curva de par del manual, al final */
         par_manual = (const float *)(const void *)((const uint8_t *)t + sz - 648);
         sz -= 652;
@@ -1735,6 +1750,7 @@ static int fisica_carga(void)
     }
 #endif
     or2_carga_choques(t, sz, &choq);
+    if (cha_bloque[0] && or2_carga_choques_sp(cha_bloque, 24, &choq)) dbglog(DBG_ERROR, "PARAM: CHA1 dudoso\n");
     if (cjm_ok) { memcpy(choq.se, sec_tab, sizeof choq.se); choq.se_ok = 1; }   /* SEC1 de TRAFC.DAT */
     param_dat = t;
     return fisica_modelo(modelo_jug);
@@ -1889,6 +1905,23 @@ static void traf_tablas_aparicion(const uint8_t *d, uint32_t sz)
     memcpy(tap, d + 44, n * sizeof(tap_etapa_t));
     ntap = (int)n;
 }
+/* TAPD.DAT (tools/conv_trafico.py): el registro de etapa de TAP1 por segmento de STAGE.PS2; al leer un arbol se copian
+   a tap[] los de sus etapas (curso[k].seg), sin memoria del monton (sectores sueltos en un bufer de la pila). Sin
+   TAPD.DAT se quedan los de TAP1 (los del arbol del modo OutRun). */
+static void traf_tap_arbol(const uint8_t *seg, int n)
+{
+    uint32_t lba, tam, nseg; int k; uint8_t sec[2 * 2048] __attribute__((aligned(32)));
+    if (gd_busca("TAPD.DAT", &lba, &tam) || tam < 8 || gd_lee(lba, 1, sec) || memcmp(sec, "TAPD", 4)) return;
+    memcpy(&nseg, sec + 4, 4);
+    for (k = 0; k < n && k < TAP_ETAPAS; k++) {
+        uint32_t o = 8 + (uint32_t)seg[k] * sizeof(tap_etapa_t), s0 = o / 2048;
+        if (seg[k] >= nseg || o + sizeof(tap_etapa_t) > tam) { dbglog(DBG_ERROR, "TAPD: sin el segmento %d\n", seg[k]); continue; }
+        if (gd_lee(lba + s0, (o + sizeof(tap_etapa_t) - 1) / 2048 - s0 + 1, sec)) { dbglog(DBG_ERROR, "TAPD: error de lectura\n"); return; }
+        memcpy(&tap[k], sec + o - s0 * 2048, sizeof(tap_etapa_t));
+    }
+    ntap = n < TAP_ETAPAS ? n : TAP_ETAPAS;
+    memset(tap_usado, 0, sizeof tap_usado);
+}
 static void traf_tablas(void)
 {
     uint32_t sz, n, m; const uint8_t *d = gd_carga("TRAFC.DAT", &sz);
@@ -2026,7 +2059,9 @@ static void traf_nace(trafico_t *t, float s)
 #define TR_KMH (0.00461420696f * 60.0f)                         /* km/h del modelo -> m/s de la demo (K5B43A4 x 60) */
 static float s_union, s_sig, s_etapa;                           /* del curso (definidos mas abajo) */
 static int cur_nodo, cur_sig, cur_en_union;
-static int traf_ult_pos, traf_lugar_ult = -1, traf_mcnt, traf_hist[NCARRIL];   /* 800D50, +0x184, 800D3C+4, 803718 */
+static int traf_ult_pos, traf_lugar_ult = -1, traf_hist[NCARRIL];   /* 800D50, +0x184, 803718 */
+static void traf_clase_cero(void);
+static void traf_clase_sig(void);
 static int traf_lejos_v = 10;                                   /* rec2 +4 del coche (4F0030: 7 con 10 o mas coches) */
 /* el sitio de carretera de s: 1 si es la union; nodo del curso y posicion (car+0x64) */
 static int traf_lugar(float s, int *nodo, int *pos)
@@ -2082,7 +2117,7 @@ static int traf_lejos(float s)
 static void traf_cuentas_cero(void)
 {
     int k;
-    traf_ult_pos = 0; traf_mcnt = 0;
+    traf_ult_pos = 0; traf_clase_cero();                       /* 46C950 */
     memset(traf_cuenta, 0, sizeof traf_cuenta);
     for (k = 0; k < NCARRIL; k++) traf_hist[k] = 0;
 }
@@ -2169,10 +2204,54 @@ static int traf_fijo(int en_union, int nodo, int pos)
         for (i = 0; i < NTRAF && traf[i].carril >= 0; i++) ;
         if (i >= NTRAF) return 0;                               /* sin suceso libre */
         if (!carril_libre(NULL, l, s, 25.0f, 25.0f)) return 0;  /* 43EB60 */
-        traf_abre(traf + i, s, l, m, f->color, pos);
+        traf_abre(traf + i, s, l, m, f->color, pos); traf_clase_sig();   /* (final comun de 478B90 / 4787E0) */
     } else traf_ult_pos = pos;                                  /* coche de carreras o modelo que no hay: gastado */
     tap_usado[nodo][k] = 1;
     return 1;
+}
+/* 46CE30 (PC race_traffic.cpp pick_model_46ce30; SLES-53998 0x1db2a0): el modelo del coche nuevo con el registro de
+   aparicion rec. Clase: la primera con peso (+6..+0xA); sin ninguna, la 4; si no, desde la de 800D9C (PS2 0x5c7740)
+   se tira el dado de la clase (80A668 + c, PS2 0x5c7738: b = b x 5 + 1, b x 100 / 255) hasta que sale por debajo de
+   su peso, pasando a la siguiente (0..4) cada vez. Cuenta de la clase 800D3C + c (PS2 0x5c7718) + 1. Modelo: clase 0
+   0x29 / 0x27 (preset 1 o 3) o 0x29 / 0x2B (cuenta >= 2 vuelve a 0), 1 y 2 0x28 (1 / 3) o 0x2B, 3 0x1F; clase 4 con
+   el preset 1 o 3 (sin red ni rivales: 80FB14 = PS2 [0x443514] = 0) 0x1E, 0x20, 0x21, 0x22, 0x23, 0x24 y desde 6
+   vuelve a 0 (0x1db49c..0x1db578), si no la lista de 7 en orden. En el INFARTO (variante 2) el original cambia la
+   clase 0 por la 4 salvo en el tipo de mision 0x16 (45C440): aqui se queda la clase 4 de siempre (SIMPLIFICADO). Los
+   valores iniciales del dado y las cuentas a 0 son los de 46C950 (PS2 0x1d9c40: 0x78, 0x67, 0x69, 0x5E, 0xD4). */
+static int traf_clase;                                          /* 800D9C */
+static uint8_t traf_cnt[5], traf_dado[5];                       /* 800D3C.., 80A668.. */
+static void traf_clase_cero(void)
+{
+    static const uint8_t D[5] = { 0x78, 0x67, 0x69, 0x5e, 0xd4 };
+    traf_clase = 0; memset(traf_cnt, 0, sizeof traf_cnt); memcpy(traf_dado, D, sizeof traf_dado);
+}
+static void traf_clase_sig(void) { if (++traf_clase >= 5) traf_clase = 0; }   /* 478B90 / 4787E0 al abrir el coche */
+static int traf_dado_tira(int c) { traf_dado[c] = (uint8_t)(traf_dado[c] * 5 + 1); return traf_dado[c] * 100 / 255; }
+static int traf_modelo_46ce30(const uint8_t *rec)
+{
+    int k = 0, c;
+    while (k < 5 && !rec[6 + k]) k++;
+    if (k == 5 || variante == 2) traf_clase = c = 4;
+    else {
+        c = traf_clase;
+        while (!(traf_dado_tira(c) < (int8_t)rec[6 + c])) if (++c >= 5) c = 0;
+        traf_clase = c;
+    }
+    traf_cnt[c]++;
+    switch (c) {
+    case 0:
+        if ((int8_t)traf_cnt[0] >= 2) traf_cnt[0] = 0;
+        return preset_curso == 1 || preset_curso == 3 ? (traf_cnt[0] ? 0x29 : 0x27) : (traf_cnt[0] ? 0x29 : 0x2b);
+    case 1: case 2: traf_cnt[c] = 0; return preset_curso == 1 || preset_curso == 3 ? 0x28 : 0x2b;
+    case 3: traf_cnt[3] = 0; return 0x1f;
+    }
+    if (preset_curso == 1 || preset_curso == 3) {
+        static const uint8_t SP[6] = { 0x1e, 0x20, 0x21, 0x22, 0x23, 0x24 };
+        if ((int8_t)traf_cnt[4] >= 6) traf_cnt[4] = 0;
+        return SP[traf_cnt[4]];
+    }
+    traf_cnt[4] = (uint8_t)((int8_t)traf_cnt[4] % 7);
+    return tap_modelos[traf_cnt[4]];
 }
 /* 4787E0: un coche al azar delante del jugador */
 static void traf_azar(int en_union, int nodo, int pos, const uint8_t *rec)
@@ -2194,12 +2273,12 @@ static void traf_azar(int en_union, int nodo, int pos, const uint8_t *rec)
         if ((l = traf_lugar(s, &nd, &ps) ? traf_carril_478640(rec) : traf_carril_478430(rec)) < 0) return;
     }
     if (!carril_libre(NULL, l, s, 25.0f, 25.0f)) return;        /* 43EB60 */
-    traf_mcnt = (traf_mcnt + 1) % 7;                            /* 46CE30: clase 4, la lista de 7 en orden */
-    if ((m = traf_modelo_de(tap_modelos[traf_mcnt])) < 0) m = 0;
+    m = traf_modelo_de(traf_modelo_46ce30(rec));
+    if (m < 0) { traf_clase_sig(); traf_ult_pos = pos; return; }   /* 39..43 (camiones; sin TRAFn.DAT): gastado */
     {
         int c = traf_cuenta[m] >= traf_ncol[m] ? 0 : traf_cuenta[m];   /* el siguiente color del modelo (804358) */
         traf_cuenta[m] = c + 1;
-        traf_abre(traf + i, s, l, m, c, pos);
+        traf_abre(traf + i, s, l, m, c, pos); traf_clase_sig();
     }
     (void)nodo;
 }
@@ -4336,6 +4415,9 @@ static int curso_lee_id(int id)
     if (!b) return -1;
     if ((r = curso_busca(b, sz, id, &o, &n))) { free(b); return r; }
     memcpy(curso, b + o, n * sizeof(etapa_t)); ncurso = n; curso_id = id; free(b);
+    {   uint8_t seg[CURSO_MAX]; int k;                          /* las tablas de aparicion del trafico de sus etapas */
+        for (k = 0; k < ncurso && k < CURSO_MAX; k++) seg[k] = curso[k].seg;
+        traf_tap_arbol(seg, ncurso); }
     return 0;
 }
 static int curso_lee(void)
@@ -6886,7 +6968,7 @@ static void meta_entra(void)                                    /* 49C9C0 */
     if (!meta_lista()) return;
     /* las metas A..E son las claves 10..14 del arbol del modo OutRun; en los demas arboles (OUTRUN2SP, misiones) la
        eleccion del original no esta trazada: PENDIENTE (se usa la 0) */
-    meta_g = curso_id == 0 && cur_nodo >= 10 && cur_nodo <= 14 ? cur_nodo - 10 : 0;
+    meta_g = (curso_id == 0 || curso_id == 1) && cur_nodo >= 10 && cur_nodo <= 14 ? cur_nodo - 10 : 0;   /* claves 10..14 (csc_data_2 y csc_data_cvt) */
     e = meta_escena(variante, TIM_PRESET, meta_g);
     meta_empieza(&meta, e);
     memcpy(meta_rueda_y, fis.rueda_y, sizeof meta_rueda_y);
@@ -6974,7 +7056,8 @@ static int band_carga(void)
     uint32_t mt = robot_band_motor_tam(), i, n = 0; int k;
     band_suelta();
     if (!hueco_union || !union_prestable() || cap_union < mt + 64 * 1024) return -1;
-    if (lee_modelo_en(&band, "BAND.DAT", hueco_union + mt, cap_union - mt)) { memset(&band, 0, sizeof band); return -2; }
+    /* 0x2046f0: el personaje 3 (CHR_AUT04, BAND1.DAT) con el preset 1 o 3, si no el 4 (CHR_AUT04_CVT, BAND.DAT) */
+    if (lee_modelo_en(&band, preset_curso == 1 || preset_curso == 3 ? "BAND1.DAT" : "BAND.DAT", hueco_union + mt, cap_union - mt)) { memset(&band, 0, sizeof band); return -2; }
     if (band.paso_ruta != 1 || !band.nmallas || band.ntex > BAND_TEX) { memset(&band, 0, sizeof band); return -3; }
     band.cabs[0] = band_cab[0]; band.cabs[1] = band_cab[1]; band.tv = band_tv;
     for (i = 0; i < band.ntex; i++) {
@@ -7003,7 +7086,7 @@ static void salida_entra(void)
        del original en la salida es el de la etapa 0) */
     if (chr_ok == 1) {
         int r = band_carga();
-        if (r) dbglog(DBG_ERROR, "BAND: sin el banderero (%d)\n", r); else robot_band_inicia(TIM_PRESET, col_et.marco);
+        if (r) dbglog(DBG_ERROR, "BAND: sin el banderero (%d)\n", r); else { robot_band_inicia(TIM_PRESET, col_et.marco); dbglog(DBG_INFO, "BAND: preset %d, %s\n", TIM_PRESET, robot_band_activo() ? "en su sitio" : "sin su movimiento"); }
     }
     /* 456D60: un jugador; 44C2D0 (la palabra 0 del descriptor de la etapa): la clave de la etapa de salida (PROBABLE) */
     e = salida_escena(1, modelo_jug, cur_nodo);
@@ -7257,7 +7340,14 @@ int main(int argc, char **argv)
             int rp = menu_pausa_paso(nuevo);
             nuevo = 0;
             if (rp != PAUSA_SIGUE) { pausa = 0; menu_pausa_sale(); }
-            if ((rp == PAUSA_REINTENTA || rp == PAUSA_ABANDONA) && !auto_) {
+            if ((rp == PAUSA_REINTENTA || rp == PAUSA_ABANDONA) && !auto_ && juego_sp) {
+                /* el juego de OUTRUN2SP (1b4878 = 0): REINTENTAR pide el modo 30 (0x249ca8: la salida otra vez) y
+                   ABANDONAR el 27 GAME OVER (0x24a150; banderin 0x34001F) -> 28 -> el frontal de recreativa (10). Sin
+                   ese frontal ni el banderin (SIN PORTAR) ABANDONAR vuelve al menu */
+                menu_suma_tiempo(crono);                        /* tiempo de juego (PS2 0x249c5c / 0x24a110) */
+                if (rp == PAUSA_REINTENTA) { estado = TITULO; reintenta = 1; }
+                else { estado = TITULO; texto_centro(""); hud_baja_tex(); menu_entra(manual_, pista, NPISTAS); }
+            } else if ((rp == PAUSA_REINTENTA || rp == PAUSA_ABANDONA) && !auto_) {
                 menu_suma_tiempo(crono);                        /* tiempo de juego (PS2 0x249c5c / 0x24a110) */
                 /* con la consola (1b4878 = 43F860) los dos piden el modo 0x22 (OutRun Miles) con 450230(6) / (7) y la
                    carrera queda suspendida (PS2 0x249c98 / 0x24a140, modo 34 0x1bc2ac) */
@@ -7297,7 +7387,18 @@ int main(int argc, char **argv)
 #ifdef PRUEBA_VARIANTE
                 variante = PRUEBA_VARIANTE;                     /* prueba: 2 INFARTO, 7 Time Attack */
 #endif
-                tim_dif = auto_ ? 0 : menu_dificultad();
+                /* OUTRUN2SP (menu_sp): [780260] = 0 y la eleccion OUTRUN / cursos de OutRun 2 SP del frontal (preset 1,
+                   43F950; 44DA00(1, 0) lee csc_data_cvt: el arbol 1 de CURSO.DAT). El juego de la consola: preset 0 */
+                juego_sp = !auto_ && menu_sp();
+#ifdef PRUEBA_SP
+                juego_sp = 1;                                   /* prueba: el juego de OUTRUN2SP (tambien con el piloto) */
+#endif
+                preset_curso = juego_sp ? 1 : 0;
+                curso_pedido = juego_sp ? 1 : PRUEBA_CURSO;
+                or2_choques_preset(&choq, preset_curso);        /* 0x191d20 / 0x191d70 */
+                /* difficulty_of de 44DC70 (PS2 0x1cdc98..0x1cdcbc): 0 en el juego de la consola (43F860 != 0); en el
+                   de OUTRUN2SP 2 en la variante 4 y si no la de la licencia activa (+E0) */
+                tim_dif = auto_ || !juego_sp ? 0 : variante == 4 ? 2 : menu_dificultad();
                 /* voces del modo (bancos HC/PERH/HAM del INFARTO o ORC/PERO): se leen en el hueco de la union, aun
                    prestado (el AICA guarda uno de los dos juegos) */
                 if (voz_ok && union_prestable())
@@ -7305,7 +7406,8 @@ int main(int argc, char **argv)
                 if (variante == 2) { if (infarto_inicia()) { dbglog(DBG_ERROR, "MODO: sin INFARTO.DAT\n"); variante = 1; } }
                 else infarto_libera();                          /* 64 KB de tablas: solo en su modo */
                 if (voz_ok) { voces_modo(variante == 2); if (variante != 2) sfx_voz_grupo(-1); }
-                dbglog(DBG_INFO, "MODO: variante %d, dificultad %d, fila de tiempos %d\n", variante, tim_dif, TIM_FILA);
+                dbglog(DBG_INFO, "MODO: variante %d, dificultad %d, fila de tiempos %d, juego %s, preset %d\n", variante, tim_dif, TIM_FILA,
+                       juego_sp ? "OUTRUN2SP" : "consola", preset_curso);
                 menu_sale();                                    /* la VRAM del menu vuelve al HUD */
 #ifndef PRUEBA_FICHA                                            /* prueba: el coche de PRUEBA_FICHA, no el del menu */
                 if (!auto_ && menu_coche() >= 0 && menu_coche() != coche_ficha && coche_carga(menu_coche())) coche_carga(9);
@@ -7569,6 +7671,13 @@ int main(int argc, char **argv)
             if (!fin_on && FIN_ATRACCION && ((nuevo & CONT_START) || t_estado > (uint32_t)fin_t)) {   /* demo de atraccion: al menu */
                 meta_sale(); lejos_obj = lejos = LEJOS_PS2;
                 estado = TITULO; auto_ = 0; nuevo = 0; texto_centro(""); hud_baja_tex(); menu_entra(manual_, pista, NPISTAS);
+            } else if (!fin_on && juego_sp && t_estado > (uint32_t)fin_t) {
+                /* el juego de OUTRUN2SP: sin millas ni continuar (49CFD0 y 49D850 con 1b4878 = 0): meta 19 -> 33 -> 24
+                   (final de recreativa, AS.PS2) -> nombre (26) y rankings; tiempo agotado 20 -> 0x19; luego 28 -> el
+                   frontal de recreativa (10). SIN PORTAR: de aqui al menu */
+                menu_suma_tiempo(crono);                        /* (PS2 0x1b96bc / 0x1b9b58: tambien en este juego) */
+                meta_sale(); lejos_obj = lejos = LEJOS_PS2;
+                estado = TITULO; nuevo = 0; texto_centro(""); hud_baja_tex(); menu_entra(manual_, pista, NPISTAS);
             } else if (!fin_on && t_estado > (uint32_t)fin_t) {
                 menu_suma_tiempo(crono);                        /* salida de la meta / del fin del tiempo (PS2 0x1b96bc / 0x1b9b58) */
                 fin_empieza(estado == META ? FIN_META : FIN_TIEMPO); fin_on = 1;   /* 33 (sin red) -> 34 / 20 -> 34 */

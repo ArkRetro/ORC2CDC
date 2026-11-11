@@ -153,6 +153,10 @@ typedef struct {
     uint32_t mapa[4][16];        /* columna de la tabla por modelo (5051D0); [1] = el normal                */
     float    umbral[2];          /* velocidad de cierre (m/cuadro): 80 y 280 km/h del modelo / 216.72        */
     float    rest[3];            /* restitucion por banda de cierre (bajo, medio, alto)                      */
+    /* la otra tabla del preset [78024C] 1 o 3 (cursos de OutRun 2 SP; PC 6AC8A0 / 6AC8B4, PS2 0x35b9d8 / 0x35b9f0
+       por 0x191d20 / 0x191d70); la elige or2_choques_preset. Sin el bloque CHA1: la misma */
+    float    umbral_sp[2], rest_sp[3];
+    int      sp;                 /* 1: preset 1 o 3 */
     uint32_t estado_traf[8];     /* estados de choque del trafico (4F76E0)                                   */
     float    masa[3];            /* factor de masa: jugador, coche, pesado (clases 0..2)                     */
     float    reparto[OR2_CLASES * OR2_CLASES];  /* minimo del reparto de la separacion [clase A * 7 + B] */
@@ -394,6 +398,9 @@ float or2_mu_superficie(uint32_t sup);
 /* Bloques de choques detras de las curvas en PARAM.DAT (datos = todo el fichero). 0 si va bien. Los punteros
    de las animaciones apuntan dentro de datos, que debe seguir vivo. */
 int  or2_carga_choques(const void *datos, uint32_t tam, or2_choques_t *q);
+/* 'CHA1' al final de PARAM.DAT (conv_param.py): la tabla del preset 1 / 3 (0 bien); y la eleccion por el preset */
+int  or2_carga_choques_sp(const void *bloque, uint32_t tam, or2_choques_t *q);
+void or2_choques_preset(or2_choques_t *q, int preset);
 /* Columna de la tabla de un modelo (byte car+0x11) en la partida normal; -1 si no hay datos. */
 int  or2_columna_modelo(const or2_choques_t *q, int modelo);
 

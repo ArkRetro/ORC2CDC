@@ -8,8 +8,12 @@ tecla Return; espera_log 'musica: MUS30' 30; espera 5; foto ${P}_3    # licencia
 tecla x; espera 5                                                    # editor de la licencia: nombre de fabrica
 tecla Down; espera 1; tecla Down; espera 1; tecla Down; espera 1    # LISTO
 tecla x; espera 6; foto ${P}_4                                       # menu principal
+if [ -n "${MENU_SP:-}" ]; then                                       # MENU_SP=1: OUTRUN2SP (dos a la derecha) y al coche
+    tecla Right; espera 2; tecla Right; espera 3; foto ${P}_5
+else
 tecla x; espera 5; foto ${P}_5                                       # un jugador
 for _m in $(seq 1 ${MODO_JUEGO:-0}); do tecla Right; espera 1; done # MODO_JUEGO=n: n modos a la derecha (1 OUTRUN, 2 INFARTO, 3 CONTRARRELOJ)
+fi
 tecla x; espera 6; foto ${P}_6                                       # coche
 tecla x; espera 5; foto ${P}_7                                       # cambio
 tecla x; espera 6; foto ${P}_8                                       # musica

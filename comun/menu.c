@@ -6,8 +6,9 @@
      RANKINGS, OPTIONS) -> un jugador (COAST 2 COAST, OUTRUN, HEART ATTACK, TIME ATTACK, SHOWROOM) -> coche -> cambio
      AT/MT -> musica -> carrera; B vuelve atras. LICENSE (X en el menu principal y en un jugador) abre la eleccion de
      licencia. HEART ATTACK (INFARTO) y TIME ATTACK (CONTRARRELOJ) llevan a la carrera con su variante (menu_modo);
-     lo que necesita modos que la demo no tiene (multijugador, OUTRUN2SP, rankings, SHOWROOM) tiene su pantalla y la
-     accion bloqueada (sacudida y sonido 3, como un coche sin desbloquear).
+     lo que necesita modos que la demo no tiene (multijugador, rankings, SHOWROOM) tiene su pantalla y la accion
+     bloqueada (sacudida y sonido 3, como un coche sin desbloquear). OUTRUN2SP lleva a la carrera del juego de OUTRUN2SP
+     (menu_sp; su frontal de recreativa esta SIN PORTAR, ver sp_sel).
    Cursores con los tramos MUEVEij (20 cuadros por paso; 40 en la musica), entradas ENTRA, cambio con AT/MT en bucle y
    AT_OK/MT_OK o AT_ATRAS/MT_ATRAS al confirmar o volver, radio de la musica ENTRA/SALE. Cabeceras: ENTRA y luego
    BRILLO (destello del rotulo en bucle). Barra de ayuda de cada pantalla (AYUDA_*: botones y textos del original,
@@ -261,6 +262,13 @@ enum { F_ENTRA, F_QUIETO, F_SALE };
 static anim_t a_cab, a_sel, a_aux, a_radio, a_ayuda, a_tarj, a_fl_d, a_fl_i, a_ed, a_ed_t, a_barra;
 static int pant = -1, fase, t, sig, inact, t_bloq, entra_atras, barra_ant = -1, cargando, t_carga;
 static int modo_sel = 1;                                    /* opcion de un jugador elegida */
+/* OUTRUN2SP del menu principal. En el original (SLES-53998 0x23aba0 = PC 4E2970, opcion 2) pone [0x59acac] = 0 (el
+   juego de OUTRUN2SP en vez del de la consola), +21C = 7 y el modo 32 pasa al 7 -> 9 -> 10: el frontal de recreativa
+   de OUTRUN2SP (PC 4BEE60..4C4880, banco SPRANI 0x2E = SELECTOR_CVT: tipo de juego y curso OutRun 2 / OutRun 2 SP,
+   coche, cambio, musica...). Ese frontal esta SIN PORTAR: aqui se pasa por las pantallas de coche, cambio y musica
+   del menu de la consola (PROVISIONAL, en su lugar) y se corre la eleccion OUTRUN con los cursos de OutRun 2 SP de la
+   lista del frontal (4C3DC0: fila 0 -> variante 1, lado 1 -> preset 1). B en el coche vuelve al menu principal. */
+static int sp_sel;
 static int c_menu, c_modo, c_rank, c_multi, manual, n_ok, pista_sonando, sale_ok;
 static int lista, curs[N_LISTAS], elegido;                  /* 84B0F4, 84B0EC y 830364 del PC */
 
@@ -611,7 +619,8 @@ void menu_suma_millas(uint32_t millas)
 
 /* variante de [780258] (PS2 0x443508) del modo elegido, como 4EEAD0 del PC (runtime_route_mode: 1 OutRun, 2 Heart
    Attack, 7 Time Attack); COAST 2 COAST (las misiones de Races.bin, variante 5) no esta: corre como OutRun */
-int menu_modo(void) { return modo_sel == 2 ? 2 : modo_sel == 3 ? 7 : 1; }
+int menu_modo(void) { return sp_sel ? 1 : modo_sel == 2 ? 2 : modo_sel == 3 ? 7 : 1; }
+int menu_sp(void) { return sp_sel; }
 int menu_manual(void) { return manual; }
 int menu_pista(void) { return elegido < n_ok ? elegido : 0; }
 int menu_coche3d(void)
@@ -782,8 +791,9 @@ static void control(unsigned n)
             int c = pant == P_MENU ? c_menu : c_modo;
             GANCHO(pant, 1, c);
             if (pant == P_MENU) {                           /* SINGLE PLAYER, MULTIPLAYER, OUTRUN2SP, RANKINGS, OPTIONS */
-                if (c == 0) sale(P_MODO, 1); else if (c == 1) sale(P_MULTI, 1); else if (c == 3) sale(P_RANKING, 1);
-                else if (c == 4) sale(P_OPCIONES, 1); else bloqueado();
+                if (c == 0) { sp_sel = 0; sale(P_MODO, 1); } else if (c == 1) sale(P_MULTI, 1); else if (c == 3) sale(P_RANKING, 1);
+                else if (c == 4) sale(P_OPCIONES, 1);
+                else { sp_sel = 1; sale(P_COCHE, 1); }      /* OUTRUN2SP (0x23aba0): ver sp_sel */
             } else if (c <= 3) { modo_sel = c; sale(P_COCHE, 1); } else bloqueado();   /* C2C, OUTRUN, HEART ATTACK, TIME ATTACK */
         } else if (n & CONT_X) a_licencia(pant);            /* LICENSE */
         else if (n & CONT_Y) bloqueado();                   /* FRIENDS: en linea */
@@ -807,7 +817,7 @@ static void control(unsigned n)
             c_arregla_color(); sfx_menu(SFX_CURSOR);
         } else if (n & CONT_Y) {                            /* COLOR: el siguiente desbloqueado de los 8 */
             if (c_desbloqueado(i)) { int o = colores[i], c = o; do c = (c + 1) & 7; while (c != o && !c_color_ok(i, c)); colores[i] = c; }
-        } else if (atras) sale(P_MODO, 0);
+        } else if (atras) sale(sp_sel ? P_MENU : P_MODO, 0);
         break; }
     case P_CAMBIO:
         if (izq && manual) { manual = 0; an_tramo(&a_sel, "AT"); sfx_menu(SFX_CURSOR); }

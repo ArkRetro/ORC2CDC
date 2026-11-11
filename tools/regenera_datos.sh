@@ -48,14 +48,15 @@ EOF
     modov)    python3 "$TOOLS/conv_modo_video.py" "$ISO" "$t" "$W/previas/modov"; mueve "$t/MODOV.DAT" ;;
     efectos)  python3 "$TOOLS/conv_efectos.py" "$ISO" "$t/EFECTOS.DAT"; mueve "$t/EFECTOS.DAT" ;;
     chr)      python3 "$TOOLS/conv_chr.py" "$ISO" "$t/CHR.DAT"; mueve "$t/CHR.DAT" ;;
-    band)     python3 "$TOOLS/conv_chr.py" "$ISO" "$t/BAND.DAT" --banderero; mueve "$t/BAND.DAT" ;;
+    band)     python3 "$TOOLS/conv_chr.py" "$ISO" "$t/BAND.DAT" --banderero; mueve "$t/BAND.DAT"
+              python3 "$TOOLS/conv_chr.py" "$ISO" "$t/BAND1.DAT" --banderero-sp; mueve "$t/BAND1.DAT" ;;
     param)    python3 "$TOOLS/conv_param.py" "$ISO" "$t/PARAM.DAT"; mueve "$t/PARAM.DAT" ;;
     meta)     python3 "$TOOLS/conv_meta.py" "$ISO" "$t"; mueve "$t/META.DAT" ;;
     salida)   python3 "$TOOLS/conv_salida.py" "$ISO" "$t"; mueve "$t/SALIDA.DAT" ;;
     infarto)  python3 "$TOOLS/conv_infarto.py" "$ISO" "$t"; mueve "$t/INFARTO.DAT" "$t/HAHUD.DAT" "$t/VOCESH.DAT" ;;
     fin)      python3 "$TOOLS/conv_fin.py" "$ISO" "$t" "$W/previas/fin"; mueve "$t/FIN.DAT" "$t/GOVER.DAT" ;;
     bo)       python3 "$TOOLS/conv_bo.py" "$ISO" "$t"; mueve "$t"/BO*.DAT ;;
-    trafico)  python3 "$TOOLS/conv_trafico.py" "$ISO" "$t"; mueve "$t"/TRAF*.DAT ;;
+    trafico)  python3 "$TOOLS/conv_trafico.py" "$ISO" "$t"; mueve "$t"/TRAF*.DAT "$t"/TAPD.DAT ;;
     coche*)   python3 "$TOOLS/conv_coche.py" "$ISO" --todos "$t" --fichas ${n#coche}
               mkdir -p "$W/coche"; mv -f "$t"/COCHE[0-9]*.DAT "$W/coche/" ;;
     *)        echo "paso desconocido: $n" >&2; return 1 ;;
@@ -114,9 +115,9 @@ for i in range(94): ts |= {r[1] for r in U.arbol_mision(A, i)}
 for ti in sorted(ts): print('%d:%d' % (ti, U.segmento_de(A, U.cadena(E, U.u32(E, base + 4 * ti) + 0x0c))))
 EOF
 ); do n=${ti#*:}; hay $(printf 'SEG%02d.DAT COL%02d.DAT' $n $n) || falta+=(seg${ti%:*}); done
-hay EFECTOS.DAT || falta+=(efectos); hay CHR.DAT || falta+=(chr); hay BAND.DAT || falta+=(band); hay PARAM.DAT || falta+=(param)
+hay EFECTOS.DAT || falta+=(efectos); hay CHR.DAT || falta+=(chr); hay BAND.DAT BAND1.DAT || falta+=(band); hay PARAM.DAT || falta+=(param)
 hay META.DAT || falta+=(meta); hay FIN.DAT GOVER.DAT || falta+=(fin); hay SALIDA.DAT || falta+=(salida); hay INFARTO.DAT HAHUD.DAT VOCESH.DAT || falta+=(infarto)
-hay BO.DAT || falta+=(bo); hay TRAFC.DAT TRAF0.DAT || falta+=(trafico)
+hay BO.DAT || falta+=(bo); hay TRAFC.DAT TAPD.DAT TRAF0.DAT || falta+=(trafico)
 for v in ts attr; do f=MVTS.VQV; [ $v = attr ] && f=MVATTR.VQV; hay $f || falta+=(video_$v); done
 
 echo "== ${#falta[@]} pasos en $JOBS a la vez (registros en $W/registro)"
@@ -147,8 +148,8 @@ fi
 # ---------------------------------------------------------------- comprobacion
 echo "== comprobacion de $D"
 mal=0
-nec="BKD.DAT BO.DAT CHR.DAT COCHES.DAT COLBK.DAT COLLR.DAT CURSO.DAT EFECTOS.DAT FIN.DAT GOVER.DAT HAHUD.DAT HUD.DAT INFARTO.DAT MENU.DAT
-     META.DAT MODOV.DAT MVATTR.VQV MVTS.VQV PARAM.DAT SFX.DAT SEGS.PAK SOL.DAT TRAFC.DAT UNIONES.PAK VMU.DAT VOCES.DAT VOCESH.DAT"
+nec="BAND.DAT BAND1.DAT BKD.DAT BO.DAT CHR.DAT COCHES.DAT COLBK.DAT COLLR.DAT CURSO.DAT EFECTOS.DAT FIN.DAT GOVER.DAT HAHUD.DAT HUD.DAT INFARTO.DAT MENU.DAT
+     META.DAT MODOV.DAT MVATTR.VQV MVTS.VQV PARAM.DAT SFX.DAT SEGS.PAK SOL.DAT TAPD.DAT TRAFC.DAT UNIONES.PAK VMU.DAT VOCES.DAT VOCESH.DAT"
 for k in $(seq 0 14); do nec+=" $(printf COCHE%02d.DAT $k)"; done
 for k in $MUSICA; do nec+=" MUS$k.ADP"; done
 for f in $nec; do [ -s "$D/$f" ] || { echo "FALTA $f" >&2; mal=1; }; done

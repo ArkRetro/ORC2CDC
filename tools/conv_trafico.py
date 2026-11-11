@@ -29,7 +29,9 @@ Ademas TRAFC.DAT con lo que el juego sabe de cada modelo de trafico, sacado del 
   'TAP1' (ver aparicion), y detras:
   'CJM1' + u32 30 + por modelo del jugador 0..29 el mismo registro que TRC1 (clase 5, radio y caja de 520950).
   'SEC1' + 16 u32: efectos del golpe entre coches de 4F65D0 / 4F67A0 ([tipo * 4 + familia], ver tabla_se_golpe).
-Con --solo-tablas solo se escribe TRAFC.DAT. Sale de tu disco: no se distribuye."""
+TAPD.DAT: 'TAPD', u32 n segmentos de STAGE.PS2 (SEGnn.DAT) y por segmento el registro de etapa de 'TAP1' (644 bytes: aparicion,
+velocidad, puntos fijos), para los arboles que no son el del modo OutRun (la demo copia los de su arbol al leerlo).
+Con --solo-tablas solo se escriben TRAFC.DAT y TAPD.DAT. Sale de tu disco: no se distribuye."""
 import os, struct, sys, zlib
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -207,6 +209,7 @@ def tabla_clases(d):
 
 # ---------------------------------------------------------------- aparicion del trafico por etapa (bloque 'TAP1')
 NFIJO = 24                                          # puntos fijos por etapa como mucho (en el curso hay hasta 18)
+TAPD = None                                         # TAPD.DAT (aparicion): registro por descriptor de tramo
 
 def _lui_addiu(u, i, n):
     """direcciones (lui rX, hi + addiu rY, rX, lo en las n instrucciones siguientes) desde la instruccion i"""
@@ -288,9 +291,8 @@ def aparicion(iso):
     if fijos is None: sys.exit('no encuentro la tabla de puntos fijos de 4EF880')
     base, nprim, _ = conv_union.tablas(A)
     regs = conv_union.arbol(A, 0)
-    b = bytearray(b'TAP1' + struct.pack('<I', len(regs)) + defecto + struct.pack('<8H', *pesos, 0) +
-                  bytes(lista) + b'\0')
-    for clave, ti, ui, hi, hd in regs:
+    def registro(ti):
+        """el registro de la etapa del descriptor ti (tabla de aparicion, de velocidad y puntos fijos)"""
         de = E.u32(base + 4 * ti); ap = E.lee(E.u32(de + o80), 0x60); ve = E.lee(E.u32(de + o84), 0x15e)
         r = [struct.unpack_from('<H', ap, 12 * k)[0] for k in range(8)]
         assert 0xffff in r and all(r[k] < r[k + 1] for k in range(r.index(0xffff))), 'tabla de aparicion rara'
@@ -302,15 +304,36 @@ def aparicion(iso):
             if st == ti: fl.append((pos, carril, mod, col, tipo))
             e += 0x18
         assert len(fl) <= NFIJO
-        b += ap + ve + b'\0\0' + struct.pack('<I', len(fl))
+        b = ap + ve + b'\0\0' + struct.pack('<I', len(fl))
         for k in range(NFIJO):
             pos, carril, mod, col, tipo = fl[k] if k < len(fl) else (0, 0, 0, 0, 0)
             b += struct.pack('<HbBbBH', pos, carril, mod, col, tipo, 0)
-        print('aparicion etapa %2d (descriptor %2d): %s; puntos fijos %d' %
-              (clave, ti, ' '.join('%d:%d/%d/%02x' % (r[k], ap[12 * k + 4], ap[12 * k + 5], ap[12 * k + 11])
-                                   for k in range(r.index(0xffff))), len(fl)))
-    print('aparicion: union por defecto %s, pesos por clase %s, modelos %s, puntos fijos en 0x%x'
-          % (list(defecto), list(pesos), list(lista), fijos))
+        txt = ' '.join('%d:%d/%d/%02x' % (r[k], ap[12 * k + 4], ap[12 * k + 5], ap[12 * k + 11])
+                       for k in range(r.index(0xffff)))
+        return b, txt, len(fl)
+    b = bytearray(b'TAP1' + struct.pack('<I', len(regs)) + defecto + struct.pack('<8H', *pesos, 0) +
+                  bytes(lista) + b'\0')
+    for clave, ti, ui, hi, hd in regs:
+        r, txt, nf = registro(ti); b += r
+        print('aparicion etapa %2d (descriptor %2d): %s; puntos fijos %d' % (clave, ti, txt, nf))
+    # TAPD.DAT: el mismo registro por segmento de STAGE.PS2 (el SEGnn.DAT de la etapa, curso[k].seg de la demo; el
+    # descriptor de tramo ti lleva en +0x0c la ruta de su colision, que da su segmento: conv_union.segmento_de) para
+    # los demas arboles (OUTRUN2SP, misiones): la demo copia a su tabla por etapa los de su arbol al leerlo
+    global TAPD
+    vacio = b'\xff' * 0x60 + b'\0' * (0x160 + 4 + NFIJO * 8)
+    porseg = {}
+    for ti in range(nprim):
+        seg = conv_union.segmento_de(A, conv_union.cadena(E, E.u32(base + 4 * ti) + 0x0c))
+        try: r, txt, nf = registro(ti)
+        except ValueError as ex:                     # tablas fuera del ELF (las rellena el juego al correr): sin
+            print('TAPD: descriptor %d (SEG%02d) sin tablas en el ejecutable (%s)' % (ti, seg, ex)); r = vacio
+        if seg in porseg and porseg[seg] != r: sys.exit('TAPD: el segmento %d con dos tablas distintas' % seg)
+        porseg.setdefault(seg, r)
+    nseg = max(porseg) + 1
+    TAPD = bytearray(b'TAPD' + struct.pack('<I', nseg))
+    for k in range(nseg): TAPD += porseg.get(k, vacio)
+    print('aparicion: union por defecto %s, pesos por clase %s, modelos %s, puntos fijos en 0x%x; TAPD %d segmentos'
+          % (list(defecto), list(pesos), list(lista), fijos, len(TAPD) // 644))
     return bytes(b)
 
 def tablas(iso, dest, cajas_malla=None):
@@ -342,6 +365,7 @@ def tablas(iso, dest, cajas_malla=None):
     sec = tabla_se_golpe(d, tc)
     b += b'SEC1' + struct.pack('<16I', *sec)
     open(os.path.join(dest, 'TRAFC.DAT'), 'wb').write(b)
+    open(os.path.join(dest, 'TAPD.DAT'), 'wb').write(TAPD)
     print('TRAFC.DAT: modelos en 0x%x, cajas en 0x%x, tabla por clase en 0x%x' % (tm, tc, tk))
 
 def main():

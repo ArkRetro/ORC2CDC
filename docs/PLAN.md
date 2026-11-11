@@ -32,7 +32,9 @@ en las cargas del curso (sin huecos fijos) y 5 combinaciones "union + LASV" que 
    Millas OutRun, continuar (REINTENTAR / ABANDONAR) y GAME OVER HECHOS (2026-11-11, tambien en el fin del tiempo y
    desde la pausa; PARIDAD.md, Fin de la carrera); faltan la tabla de tiempos, los records (bandera de las millas) y
    la voz de la meta.
-2. OUTRUN2SP elegible en el menu. Vista interior. Saltos. Bonus de puntuacion que faltan.
+2. OUTRUN2SP elegible en el menu (HECHO 2026-11-11: arbol 1, preset 1, [780260] = 0 y sus reglas; el frontal de
+   recreativa SELECTOR_CVT, la pantalla de carga, el final, la entrada de nombre y los rankings de OUTRUN2SP siguen
+   SIN PORTAR: PARIDAD.md, OUTRUN2SP). Vista interior. Saltos. Bonus de puntuacion que faltan.
 
 ## Fase 4. COAST 2 COAST
 1. Menu de categorias y mapa de misiones (con la chica). 2. Misiones de carrera con rivales (IA, choques).

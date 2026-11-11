@@ -1639,6 +1639,18 @@ static void avanza_choque(or2_coche_t *c)
 
 static uint32_t lee32(const uint8_t *b) { uint32_t v; memcpy(&v, b, 4); return v; }
 
+/* 'CHA1', u32 umbral[2] (km/h del modelo), f32 restitucion[3]: los de 6AC8A0 / 6AC8B4 (preset 1 o 3) */
+int or2_carga_choques_sp(const void *bloque, uint32_t tam, or2_choques_t *q)
+{
+    const uint8_t *d = (const uint8_t *)bloque;
+    if (!q || !d || tam < 24 || memcmp(d, "CHA1", 4)) return -1;
+    q->umbral_sp[0] = (float)lee32(d + 4) * 0.00461420696f;
+    q->umbral_sp[1] = (float)lee32(d + 8) * 0.00461420696f;
+    memcpy(q->rest_sp, d + 12, 12);
+    return 0;
+}
+void or2_choques_preset(or2_choques_t *q, int preset) { if (q) q->sp = preset == 1 || preset == 3; }
+
 int or2_carga_choques(const void *datos, uint32_t tam, or2_choques_t *q)
 {
     const uint8_t *d = (const uint8_t *)datos;
@@ -1653,6 +1665,7 @@ int or2_carga_choques(const void *datos, uint32_t tam, or2_choques_t *q)
     q->umbral[0] = (float)lee32(d + o) * 0.00461420696f;      /* km/h del modelo -> m/cuadro (1/216.72) */
     q->umbral[1] = (float)lee32(d + o + 4) * 0.00461420696f;
     memcpy(q->rest, d + o + 8, 12);
+    memcpy(q->umbral_sp, q->umbral, sizeof q->umbral); memcpy(q->rest_sp, q->rest, sizeof q->rest); q->sp = 0;
     memcpy(q->estado_traf, d + o + 20, 32);
     memcpy(q->masa, d + o + 52, 12);
     memcpy(q->reparto, d + o + 64, sizeof q->reparto);
@@ -1690,6 +1703,7 @@ int or2_columna_modelo(const or2_choques_t *q, int modelo)
 /* ---------------------------------------------- choques entre coches (4F9450, modulo 4F65A0..4F9E94 del PC; SLES-53998
    0x191fa0 (pasada), 0x196850 (4F9000), 0x196c40 (4F8E70), 0x196e00 (4F86C0), 0x1942d8 (4F6FE0), 0x194f48 (4F76E0),
    0x195708 (4F7BF0), 0x1960e8 (4F6820), 0x194cf8 / 0x195628 (4F65D0 / 4F67A0), 0x1ec540 / 0x1ec620 (475F70 / 476040)) */
+#define UMBRAL0(q) ((q)->sp ? (q)->umbral_sp[0] : (q)->umbral[0])   /* 6AC898 / 6AC8A0 (4F7BF0) */
 #define EPS_CHOQUE 9.99999975e-05f   /* 5A29E0 (PS2 0x38d1b717): "esta en choque" (+2C8 / +2F8 > esto) */
 #define EPS_CAMBIO 1.1920929e-07f    /* 6281F0 (PS2 0x34000000): +2C8 del jugador para el intercambio */
 #define CIERRE_7   0.369139910f      /* 5B440C (PS2 0x3ebcffe8): 80 km/h del modelo, umbral del estado 7 */
@@ -1860,7 +1874,8 @@ static v2 empuja(v2 sv, v2 ov, float s_vel, float lj, float lo, float m, float e
 }
 static float restitucion(const or2_choques_t *q, float lj)
 {
-    return lj > q->umbral[1] ? q->rest[2] : (lj > q->umbral[0] ? q->rest[1] : q->rest[0]);
+    const float *u = q->sp ? q->umbral_sp : q->umbral, *r = q->sp ? q->rest_sp : q->rest;   /* 4F7BF0: 6AC898 / 6AC8A0 */
+    return lj > u[1] ? r[2] : (lj > u[0] ? r[1] : r[0]);
 }
 static float masa_clase(const or2_choques_t *q, int clase) { return q->masa[clase <= 2 ? 2 : 1]; }
 static float reparto_de(const or2_choques_t *q, int ca, int cb, float sa, float sb)
@@ -1981,7 +1996,7 @@ void or2_choque_coche(or2_coche_t *c, const or2_param_t *p, const or2_choques_t 
             lj = cierre(a0, b0, dp);
             e = restitucion(q, lj);
             if (!roce_a) {
-                va = empuja(a0, b0, sa, lj, q->umbral[0], q->masa[0], e);
+                va = empuja(a0, b0, sa, lj, UMBRAL0(q), q->masa[0], e);
                 o->impulso = 1;
                 /* 4F6820: en el estado 7 no pasa de 300 km/h del modelo */
                 if (c->t_choque > 0.0f && c->choque == 7) {
@@ -1993,7 +2008,7 @@ void or2_choque_coche(or2_coche_t *c, const or2_param_t *p, const or2_choques_t 
                 c->kmh = tr(c->vel_mf * 216.720001f);
             }
             if (!roce_b) {
-                vb = empuja(b0, a0, sb, lj, q->umbral[0], masa_clase(q, clase), e);
+                vb = empuja(b0, a0, sb, lj, UMBRAL0(q), masa_clase(q, clase), e);
                 o->vx = vb.x * HZ; o->vy = vb.y * HZ;
                 o->cambia_vel = 1;
             }
@@ -2025,11 +2040,11 @@ void or2_choque_trafico(const or2_choques_t *q, or2_otro_t *a, or2_otro_t *b)
     lj = cierre(a0, b0, dp);
     e = restitucion(q, lj);
     if (!ra) {
-        va = empuja(a0, b0, sa, lj, q->umbral[0], masa_clase(q, recorta_clase(a->clase)), e);
+        va = empuja(a0, b0, sa, lj, UMBRAL0(q), masa_clase(q, recorta_clase(a->clase)), e);
         a->vx = va.x * HZ; a->vy = va.y * HZ; a->cambia_vel = 1;
     }
     if (!rb) {
-        vb = empuja(b0, a0, sb, lj, q->umbral[0], masa_clase(q, recorta_clase(b->clase)), e);
+        vb = empuja(b0, a0, sb, lj, UMBRAL0(q), masa_clase(q, recorta_clase(b->clase)), e);
         b->vx = vb.x * HZ; b->vy = vb.y * HZ; b->cambia_vel = 1;
     }
 }

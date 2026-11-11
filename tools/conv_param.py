@@ -26,6 +26,9 @@ con etiqueta para los choques y la eleccion de columna:
          SLES-53998) que GetExtendedTime (44DC70 / PS2 0x176730) suma en una partida de un jugador del curso de 5
          niveles. Se localiza por el codigo de esa funcion: 'addiu a0, zero, 0xa' y 'addiu a1, zero, 0x96' (indice
          nivel x 10 + fila x 150 de la tabla de tiempos) y, detras, el lui/addiu de la tabla que se suma con 'lh'.
+  'CHA1' + 2 u32 + 3 f32 (al final, detras de PAR2): umbrales y restitucion de los choques entre coches con el
+         preset 1 o 3 (cursos de OutRun 2 SP; PC 6AC8A0 / 6AC8B4, en SLES-53998 0x35b9d8 / 0x35b9f0, los que eligen
+         0x191d20 / 0x191d70 con [0x44350c]). En la demo los lee or2_carga_choques_sp.
   'PAR2' + 162 f32: la segunda curva de par motor (la del cambio manual: torque_table con event+0x13 = 1). Va justo
          detras de la primera (0x288 bytes) y las dos estan en la tabla de punteros que lee 0x18d760 de SLES-53998
          ([automatico, manual]); se localiza por esa tabla. Va al final del fichero para no mover los demas bloques.
@@ -61,6 +64,7 @@ def va_off(segs, va):
         if v <= va < v + s: return va - v + o
     return None
 
+CHA = b''
 def busca_choques(d):
     """bloque de 6AC898: u32 a, b, a, b (umbrales normal y alterno), 4+4 f32 restitucion, 8 u32 estados, 4 f32 masa,
     49 f32 reparto"""
@@ -72,6 +76,10 @@ def busca_choques(d):
         e = f[i + 4:i + 7]; st = u[i + 12:i + 20]; m = f[i + 20:i + 23]; t = f[i + 24:i + 73]
         if not (np.all((e > 0.3) & (e <= 1.0)) and np.all(st < 32) and np.all((m > 0) & (m <= 1.0))): continue
         if not np.all((t >= 0) & (t <= 1.0)): continue
+        # la tabla del preset 1 / 3 (cursos de OutRun 2 SP): umbrales u[i + 2:i + 4] (PC 6AC8A0) y restitucion
+        # f[i + 8:i + 11] (PC 6AC8B4); en SLES-53998 0x191d20 / 0x191d70 eligen +8 / +0x20 del bloque con el preset
+        global CHA
+        CHA = b'CHA1' + struct.pack('<2I', *u[i + 2:i + 4]) + f[i + 8:i + 11].astype('<f4').tobytes()
         return (struct.pack('<2I', *u[i:i + 2]) + e.astype('<f4').tobytes() + st.astype('<u4').tobytes() +
                 m.astype('<f4').tobytes() + t.astype('<f4').tobytes())
     return None
@@ -224,7 +232,7 @@ def main():
     if par2 is None: sys.exit('no encuentro la curva de par del cambio manual')
     open(sys.argv[2], 'wb').write(d[b:b + 0x4c * FILAS] + par + fre + b'MAP1' + mapas.tobytes() +
                                   b'CHQ1' + chq + b'POS1' + pos + b'CAM1' + cam + b'TIM1' + tim + b'KTE1' + kte +
-                                  b'PAR2' + par2)
+                                  b'PAR2' + par2 + CHA)
     print('tablas de tiempo en 0x%x, correccion por etapa en 0x%x, de la camara en 0x%x' % (tva, kva, cva))
     print('tabla de %s en 0x%x: %d filas de %d coches, curvas de par y freno, mapas, choques y %d animaciones' %
           (nombre, b, FILAS, C, struct.unpack('<I', pos[:4])[0]))
