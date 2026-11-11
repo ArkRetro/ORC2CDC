@@ -53,6 +53,10 @@ typedef struct {
     const uint8_t *pvs_l; uint32_t *pvs_m, *pvs_teo;              /* pvs_teo: por nodo, bytes teoricos y vertices */
     int32_t pvs_s; uint32_t pvs_i; int pvs_on;                    /* seccion aplicada, punto del ojo, en uso este cuadro */
     uint32_t *vis;                                                /* nodos visibles en el cuadro (bits; nodos_visibles) */
+    /* fundido de entrada (fe_paso; NULL sin el): por nodo lo que le queda (255 recien aparecido .. 0 entero) y dos
+       mascaras de bits (fe_p: el nodo estaba en el cuadro anterior, dibujado o fuera de la vista; fe_f: fuera de la
+       vista en este cuadro); fe_hist: el modelo ya ha pasado por un cuadro */
+    uint8_t *fe_v; uint32_t *fe_p, *fe_f; int fe_hist, fe_n;
     /* tramos de mallas seguidas del mismo nodo, por lista (las mallas van por textura y dentro por nodo: ~8 por tramo):
        dibuja_rango salta de una vez los de nodos no visibles. tr[i] = fin del tramo (16 bits) | (nodo + 1) << 16;
        los de la lista l son tr[tr_ini[l]..tr_ini[l + 1]). NULL: sin tabla (sin RAM o sin nodos), malla a malla */
@@ -159,6 +163,13 @@ static int lee_modelo_en(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t
             m->nodos[m->mallas[i].nodo].relleno[0] += ta_teo(n, 0); m->nodos[m->mallas[i].nodo].relleno[1] += n << 12;
         }
     m->vis = m->nnodos ? calloc((m->nnodos + 31) / 32, 4) : NULL; m->ruta_i = 0;
+    m->fe_v = NULL; m->fe_p = m->fe_f = NULL; m->fe_hist = m->fe_n = 0;
+#ifndef SIN_FUNDIDO_ENTRADA
+    if (m->vis && !m->relleno_propio) {                           /* (un bloque: las dos mascaras y los bytes) */
+        uint32_t w = (m->nnodos + 31) / 32;
+        if ((m->fe_p = calloc(w * 40, 1))) { m->fe_f = m->fe_p + w; m->fe_v = (uint8_t *)(m->fe_f + w); }   /* fe_v: 32 por palabra */
+    }
+#endif
     tramos_nodo(m);
     if (m->pvs_l) {                                               /* sin seccion aplicada: nada visible hasta pvs_paso */
         m->pvs_m = calloc((m->nmallas + 31) / 32, 4); m->pvs_teo = calloc(2 * m->nnodos + 1, 4);
@@ -304,7 +315,7 @@ static void libera_modelo(modelo_t *m)
 {
     tex_suelta(m);
     if (m->datos && m->datos == hueco_etapa) col_et.ok = 0;      /* su colision va detras en el hueco */
-    free(m->ofs); free(m->vis); free(m->pvs_m); free(m->pvs_teo); free(m->tr);
+    free(m->ofs); free(m->vis); free(m->pvs_m); free(m->pvs_teo); free(m->tr); free(m->fe_p);
     if (!(hueco_etapa && m->datos >= hueco_etapa && m->datos < hueco_etapa + cap_etapa) &&
         !(hueco_union && m->datos >= hueco_union && m->datos < hueco_union + cap_union))
         free(m->datos);                                           /* (los objetos de la union van dentro del hueco de la
@@ -923,6 +934,14 @@ static inline uint32_t mul_argb(uint32_t c, uint32_t k)
     return (((c >> 24) * (k >> 24) / 255) << 24) | ((((c >> 16) & 255) * ((k >> 16) & 255) / 255) << 16) |
            ((((c >> 8) & 255) * ((k >> 8) & 255) / 255) << 8) | ((c & 255) * (k & 255) / 255);
 }
+/* fundido de entrada (fe_paso, mas abajo): con fe_s != 0 dibuja_malla pone en cada vertice el color x fe_s / 256
+   (el alfa igual) y el de desplazamiento fe_o (fe_col x lo que queda del fundido; cabecera con especular, fe_cab):
+   textura x color x (1 - k) + fe_col x k, y encima la niebla de la tabla como siempre */
+static uint32_t fe_s, fe_o;
+static inline uint32_t fe_escala(uint32_t c, uint32_t k)
+{
+    return (c & 0xFF000000u) | ((((c & 0xFF00FFu) * k) >> 8) & 0xFF00FFu) | ((((c & 0xFF00u) * k) >> 8) & 0xFF00u);
+}
 static void dibuja_malla(const modelo_t *mo, const malla_t *m)
 {
     const vert_t *v = mo->verts + m->v0; uint32_t i, n = m->n; int detras = 0;
@@ -937,6 +956,7 @@ static void dibuja_malla(const modelo_t *mo, const malla_t *m)
     }
     if (color_fijo) for (i = 0; i < n; i++) pw[i].c = color_fijo;
     else if (color_mul) for (i = 0; i < n; i++) pw[i].c = mul_argb(pw[i].c, color_mul);
+    if (fe_s) for (i = 0; i < n; i++) { pw[i].c = fe_escala(pw[i].c, fe_s); pw[i].o = fe_o; }
     if (!detras) {
         if (!ta_cabe(n)) return;
         envia_tira(pw, n);
@@ -978,6 +998,27 @@ static int traf_apagado = 3;
 static modelo_t etapa, uni, sig;                                /* (mas abajo) */
 static float sol_rd[3]; static int sol_rayo_on, sol_rayo_res;   /* el rayo hacia el sol del cuadro (sol_prepara) */
 static int sol_rayo_malla(const modelo_t *mo, const malla_t *m, int cart);
+/* fundido de entrada (fe_paso): color del que sale lo que aparece (niebla_pon) y cabecera de lo que se funde */
+#ifndef SIN_FUNDIDO_ENTRADA
+static uint32_t fe_col = 0x8CB3EB;
+static pvr_poly_hdr_t fe_h;
+/* la cabecera de la textura t de mo (la de siempre, con la niebla de la tabla) con el color de desplazamiento
+   (especular: el TA guarda 4 bytes mas por vertice; quien dibuja pone ta_ofs) */
+static inline void fe_cab(const modelo_t *mo, int t)
+{
+    fe_h = mo->cabs[0][mo->remap ? mo->remap[t] : t]; fe_h.cmd |= PVR_TA_CMD_SPECULAR;
+    pvr_prim(&fe_h, sizeof fe_h);
+}
+/* lo que queda v (1..255) del fundido de una malla con la textura t: color y desplazamiento de dibuja_malla. Lo
+   aditivo (0x400 en la lista transparente, compila_cab) sale del negro: sumar el color de la niebla lo aclararia */
+static inline void fe_pon(const modelo_t *mo, int t, uint32_t v)
+{
+    const tex_t *x = mo->texs + t; uint32_t k = v + (v >> 7), c = fe_col;
+    fe_s = 256 - v;
+    fe_o = (x->fmt & 0x400) && x->lista == 2 ? 0 :
+           (((c >> 16 & 255) * k >> 8) << 16) | (((c >> 8 & 255) * k >> 8) << 8) | ((c & 255) * k >> 8);
+}
+#endif
 static void dibuja_rango(const modelo_t *mo, int l, uint32_t k0, uint32_t k1, int recorta, int sin_niebla, int solo_lista)
 {
     float tanh = 320.0f / fx, tanv = 240.0f / fx, kh = sqrtf(1 + tanh * tanh), kv = sqrtf(1 + tanv * tanv);
@@ -996,7 +1037,7 @@ static void dibuja_rango(const modelo_t *mo, int l, uint32_t k0, uint32_t k1, in
         __builtin_prefetch(mo->mallas + ka);
     }
     for (k = ka; k < kb; k++) {
-        const malla_t *m = mo->mallas + k;
+        const malla_t *m = mo->mallas + k; uint32_t fv = 0;
         __builtin_prefetch(m + 6);                              /* la mayoria se salta: que la siguiente ya este en cache */
         if (vis && m->nodo >= 0 && !(vis[m->nodo >> 5] & (1u << (m->nodo & 31)))) continue;   /* (la prueba de abajo, antes) */
         if (m->n < 3) continue;                                 /* apagada (luces del coche: coche_luces) */
@@ -1031,8 +1072,15 @@ static void dibuja_rango(const modelo_t *mo, int l, uint32_t k0, uint32_t k1, in
             dibuja_malla(mo, m); color_fijo = 0; continue;
         }
 #endif
+#ifndef SIN_FUNDIDO_ENTRADA
+        if (recorta && !sin_niebla && mo->fe_n && m->tex >= 0 && m->nodo >= 0 && (uint32_t)m->nodo < mo->nnodos) fv = mo->fe_v[m->nodo];
+        if (m->tex + (fv ? 0x10000 : 0) != ult) {
+            ult = m->tex + (fv ? 0x10000 : 0);
+            if (fv) fe_cab(mo, m->tex); else
+#else
         if (m->tex != ult) {
             ult = m->tex;
+#endif
             if (m->tex >= 0) pvr_prim(&mo->cabs[sin_niebla][mo->remap ? mo->remap[m->tex] : m->tex], sizeof(pvr_poly_hdr_t));
             else pvr_prim(&cab_col[sin_niebla][l], sizeof(pvr_poly_hdr_t));
         }
@@ -1041,13 +1089,17 @@ static void dibuja_rango(const modelo_t *mo, int l, uint32_t k0, uint32_t k1, in
 #ifdef DIAG_MS
         if (recorta && seguro) { dg_dir++; dg_vdir += m->n; } else if (recorta) { dg_mal++; dg_vmal += m->n; }
 #endif
+#ifndef SIN_FUNDIDO_ENTRADA
+        if (fv) { fe_pon(mo, m->tex, fv); ta_ofs = 1; }       /* (por dibuja_malla: color y desplazamiento) */
+#endif
         if (cartel) {                                           /* en el marco de su nodo, girado hacia la camara */
             carga_cartel((const float (*)[4])mo->carteles[mo->nodos[m->nodo].cartel]);
             dibuja_malla(mo, m);
             mat_load(&vista);
         }
-        else if (recorta && seguro) dibuja_malla_directa(mo, m);
+        else if (recorta && seguro && !fv) dibuja_malla_directa(mo, m);
         else dibuja_malla(mo, m);
+        if (fv) { fe_s = 0; ta_ofs = mo->ofs != NULL; }
     }
     }
     if (ta_en_etapa) vtx_et += vtx_env - vtx_et0;
@@ -1087,15 +1139,18 @@ static void dibuja_etapa(const modelo_t *mo, int l)
     uint32_t kb = mo->inicio[l];                                /* fin del tramo anterior = principio del siguiente */
     ta_ofs = mo->ofs != NULL;
     for (it = it0; it < it1; it++) {
-        uint32_t t = tr[it], nd = t >> 16, ka = kb, k; int cart = 0;
+        uint32_t t = tr[it], nd = t >> 16, ka = kb, k, fv = 0; int cart = 0;
         kb = t & 0xFFFF;
         if (nd) {
             if (!(vis[(nd - 1) >> 5] & (1u << ((nd - 1) & 31)))) continue;
             cart = N[nd - 1].cartel >= 0;                       /* (malla_de_cartel: nodo valido con cartel) */
+#ifndef SIN_FUNDIDO_ENTRADA
+            if (mo->fe_n) fv = mo->fe_v[nd - 1];                /* el nodo se esta fundiendo (fe_paso) */
+#endif
         }
         __builtin_prefetch(M + ka);
         for (k = ka; k < kb; k++) {
-            const malla_t *m = M + k; int seguro = 0;
+            const malla_t *m = M + k; int seguro = 0; uint32_t f;
             __builtin_prefetch(m + 2);
             if (!nd && m->nodo >= 0 && !(vis[m->nodo >> 5] & (1u << (m->nodo & 31)))) continue;
             if (m->n < 3) continue;
@@ -1115,14 +1170,28 @@ static void dibuja_etapa(const modelo_t *mo, int l)
                 if (fabsf(xv) - zv * tanh > m->r * kh || fabsf(yv) - zv * tanv > m->r * kv) continue;
                 seguro = zv - m->r > cer15 && m->n <= 256;
             }
-            if (m->tex != ult) {
-                ult = m->tex;
+            f = m->tex >= 0 ? fv : 0;                           /* (lo que no tiene textura no se funde) */
+            if (m->tex + (f ? 0x10000 : 0) != ult) {
+                ult = m->tex + (f ? 0x10000 : 0);
+#ifndef SIN_FUNDIDO_ENTRADA
+                if (f) fe_cab(mo, m->tex); else
+#endif
                 if (m->tex >= 0) pvr_prim(&mo->cabs[0][mo->remap ? mo->remap[m->tex] : m->tex], sizeof(pvr_poly_hdr_t));
                 else pvr_prim(&cab_col[0][l], sizeof(pvr_poly_hdr_t));
             }
             if (sol && sol_rayo_on && !sol_rayo_res) sol_rayo_res = sol_rayo_malla(mo, m, cart);   /* (sol_prepara) */
 #ifdef DIAG_MS
             if (seguro) { dg_dir++; dg_vdir += m->n; } else { dg_mal++; dg_vmal += m->n; }
+#endif
+#ifndef SIN_FUNDIDO_ENTRADA
+            if (f) {                                            /* fundiendose: por dibuja_malla, con desplazamiento */
+                ET_VUELCA(); fe_pon(mo, m->tex, f); ta_ofs = 1;
+                if (cart) carga_cartel((const float (*)[4])mo->carteles[N[m->nodo].cartel]);
+                dibuja_malla(mo, m);
+                if (cart) mat_load(&vista);
+                fe_s = 0; ta_ofs = mo->ofs != NULL; ET_RECARGA();
+            }
+            else
 #endif
             if (cart) {
                 ET_VUELCA();
@@ -5219,8 +5288,14 @@ static void nodos_visibles(modelo_t *mo)
        mismas cuentas) */
     float o0, o1, o2, e0, e1, e2, d0, d1, d2, a0, a1, a2, cer, lej; int pvs_on_; nodo_t *ND = mo->nodos;
     uint32_t *VIS = mo->vis; const uint32_t nnod = mo->nnodos; const int rama_c = cur_rama;
+#ifndef SIN_FUNDIDO_ENTRADA
+    uint32_t *FF = mo->fe_f;                                    /* fuera de la vista (fe_paso) */
+#else
+    uint32_t *const FF = NULL;
+#endif
     if (!mo->vis) return;
     memset(mo->vis, 0, (mo->nnodos + 31) / 32 * 4);
+    if (FF) memset(FF, 0, (mo->nnodos + 31) / 32 * 4);
     pvs_paso(mo);
     if (mo->sec_lista && mo->nruta) {                                /* la seccion del coche: la del punto mas cercano */
         uint32_t k = mo->ruta_i < mo->nruta ? mo->ruta_i : 0, a = k > 25 ? k - 25 : 0, b = k + 25 < mo->nruta ? k + 25 : mo->nruta - 1, i, s;
@@ -5239,9 +5314,12 @@ static void nodos_visibles(modelo_t *mo)
         d = ND + i;
         dx = d->cx - o0; dy = d->cy - o1; dz = d->cz - o2;
         zv = dx * e0 + dy * e1 + dz * e2;
-        if (zv + d->r < cer || zv - d->r > lej) continue;
+        if (zv - d->r > lej) continue;
+        /* detras del plano cercano o fuera de los laterales: fuera de la vista; lo que entra luego por el borde de la
+           pantalla no se funde (fe_paso) */
+        if (zv + d->r < cer) { if (FF) FF[i >> 5] |= 1u << (i & 31); continue; }
         xv = dx * d0 + dy * d1 + dz * d2; yv = dx * a0 + dy * a1 + dz * a2;
-        if (fabsf(xv) - zv * tanh > d->r * kh || fabsf(yv) - zv * tanv > d->r * kv) continue;
+        if (fabsf(xv) - zv * tanh > d->r * kh || fabsf(yv) - zv * tanv > d->r * kv) { if (FF) FF[i >> 5] |= 1u << (i & 31); continue; }
         u = d->fl & 15;
         lim = d->r * lod * (float)(1u << ((u ? u : 6) - 1));
         if (u && zv > 0 && zv > lim) continue;                  /* LOD */
@@ -5295,6 +5373,73 @@ static int prio_sube(int actual, int objetivo, int *espera, int max)
     else *espera = 0;
     return actual;
 }
+/* ---------------------------------------------------------------- fundido de entrada
+   DESVIACION pedida por el usuario (no esta en el original; docs/PARIDAD.md Fundido de entrada): "para evitar el
+   popping, aplicar un sombreado a la textura que va a cargar para que no aparezca de golpe, como una transicion". Lo
+   que aparece de un cuadro a otro dentro de la pantalla (los nodos que el reparto del TA vuelve a poner al acercarse,
+   prio_d y prio_p; el LOD de 404B00; el limite de dibujo; la visibilidad precalculada al cambiar de seccion, pvs_paso;
+   una etapa o una union recien subida) sale del color de la niebla en FE_US (0,4 s) en vez de aparecer de golpe: sus
+   mallas llevan el color del vertice x (1 - k) y el de desplazamiento fe_col x k (cabecera con especular, fe_cab), con
+   k de 1 a 0 lineal en el tiempo (fe_v, por nodo). Es opaco: sin la lista transparente (nada que ordenar, no se ve a
+   traves) y la niebla de la tabla sigue encima pixel a pixel como siempre, asi que lo lejano lleva la suya; con k = 0
+   la imagen es exactamente la de antes. 0,4 s: a 200 km/h son ~22 m (lo que aparece a 100 m o mas acaba de fundirse
+   mucho antes de llegar) y bastante mas que un parpadeo (en menos de ~0,25 s se ve como un salto); es lo que tarda
+   nlim_paso en seguir al corte del reparto. Color (niebla_pon): el de la niebla de la etapa, o el del horizonte del
+   cielo si es mas oscuro (noche de METR y GHOS: lo nuevo no sale claro contra el cielo negro); lo aditivo sale del
+   negro (fe_pon). No se funde: lo que entra por el borde de la pantalla (estaba fuera de la vista: fe_f), lo que
+   aparece a menos de FE_CERCA (la carretera de delante del coche), ni lo que aparece todo a la vez con la pantalla
+   tapada o cambiada: el primer cuadro tras el menu o una carga (mas de FE_HUECO_US sin cuadros, o ningun modelo que
+   ya se dibujara) y los cortes de camara (mas de 1/4 de lo visible de los modelos que ya se dibujaban es nuevo).
+   Coste: las mallas que se funden van por dibuja_malla (C) en vez de la directa y con 4 bytes mas por vertice en el
+   TA (ta_cabe lo cuenta); 1,25 bytes de RAM por nodo. -DSIN_FUNDIDO_ENTRADA lo quita. */
+#ifndef SIN_FUNDIDO_ENTRADA
+#ifndef FE_US
+#define FE_US 400000u
+#endif
+#define FE_HUECO_US 100000u
+#define FE_CERCA 12.0f
+static uint64_t fe_t_ant; static uint32_t fe_resto;
+static void fe_paso(void)
+{
+    uint64_t ahora = timer_us_gettime64();
+    uint32_t dt = fe_t_ant && ahora - fe_t_ant < FE_HUECO_US ? (uint32_t)(ahora - fe_t_ant) : 0, paso, i, w, j, nuevos = 0, vistos = 0;
+    int sin = !dt;
+    fe_t_ant = ahora;
+    paso = (dt * 255u + fe_resto) / FE_US; fe_resto = (dt * 255u + fe_resto) % FE_US;   /* (de 255 en FE_US) */
+    for (i = 0; i < 3; i++) {                                   /* corte de camara: mucho nuevo de golpe */
+        const modelo_t *mo = tramos[i];
+        if (!mo->tv || !mo->fe_p || !mo->fe_hist) continue;
+        for (w = 0; w < (mo->nnodos + 31) / 32; w++) {
+            vistos += __builtin_popcount(mo->vis[w]); nuevos += __builtin_popcount(mo->vis[w] & ~mo->fe_p[w]);
+        }
+    }
+    if (!vistos || nuevos * 4 > vistos) sin = 1;
+    for (i = 0; i < 3; i++) {
+        modelo_t *mo = tramos[i]; uint32_t n = 0;
+        if (!mo->tv || !mo->fe_p) continue;
+        for (w = 0; w < (mo->nnodos + 31) / 32; w++) {
+            uint32_t b = mo->vis[w], nv = b & ~mo->fe_p[w], hay = 0; uint8_t *V = mo->fe_v + w * 32;
+            mo->fe_p[w] = b | mo->fe_f[w];
+            if (mo->fe_n) for (j = 0; j < 8; j++) hay |= ((const uint32_t *)V)[j];
+            if (!hay && !nv) continue;
+            for (j = 0; j < 32; j++) {
+                if (!((b >> j) & 1)) V[j] = 0;                  /* no se dibuja: sin fundido a medias al volver */
+                else if ((nv >> j) & 1) {                       /* nuevo en mitad de la pantalla */
+                    const nodo_t *d = mo->nodos + w * 32 + j;
+                    float z = (d->cx - ojo[0]) * ade[0] + (d->cy - ojo[1]) * ade[1] + (d->cz - ojo[2]) * ade[2] - d->r;
+                    V[j] = sin || z < FE_CERCA ? 0 : 255;
+                } else if (V[j]) V[j] = V[j] > paso ? V[j] - paso : 0;
+                n += V[j] != 0;
+            }
+        }
+        mo->fe_n = n; mo->fe_hist = 1;
+    }
+#ifdef DIAG_FUNDIDO                                             /* medida: lo que se funde, cada segundo */
+    {   static uint32_t c, nn, nf; c++; nn += sin ? 0 : nuevos; nf += tramos[0]->fe_n + tramos[1]->fe_n + tramos[2]->fe_n;
+        if (c >= 60) { printf("FE: %u nodos nuevos, %u fundiendose (media) en 60 cuadros\n", (unsigned)nn, (unsigned)(nf / 60)); c = nn = nf = 0; } }
+#endif
+}
+#endif
 static uint32_t prio_est;                                       /* coste estimado de lo que se dibuja (bytes) */
 static void nodos_visibles_todos(void)
 {
@@ -5335,6 +5480,9 @@ static void nodos_visibles_todos(void)
     for (diag_orig_vtx = 0, d = 0; d < ND_PRIO; d++) diag_orig_vtx += fila_v[d];
 #endif
     if (prio_d < ND_PRIO - 1) for (i = 0; i < 3; i++) if (tramos[i]->tv) nodos_quita(tramos[i]);
+#ifndef SIN_FUNDIDO_ENTRADA
+    fe_paso();                                                  /* lo que aparece en este cuadro */
+#endif
 }
 /* tras el cuadro: lo que de verdad costo la etapa frente a lo estimado; si alguna tira no cupo, mas prudencia */
 static void prio_ajusta(int corto, uint32_t usado)
@@ -5580,6 +5728,12 @@ static void niebla_pon(void)
         float lc = 0.3f * ((c >> 16) & 255) + 0.59f * ((c >> 8) & 255) + 0.11f * (c & 255), lh;
         lh = 0.3f * ((hz >> 16) & 255) + 0.59f * ((hz >> 8) & 255) + 0.11f * (hz & 255);
         a = hz && lc > 1 && lh < lc ? NLIM_A * lh / lc : NLIM_A;
+#ifndef SIN_FUNDIDO_ENTRADA
+        fe_col = (hz && lc > 1 && lh < lc ? hz : c) & 0xFFFFFFu;   /* de donde sale lo que aparece (fe_paso) */
+#ifdef DIAG_FUNDIDO
+        fe_col = 0xFF00FF;                                      /* prueba: del magenta, para verlo en las capturas */
+#endif
+#endif
         a = (float)(int)(a * 64.0f) / 64.0f;                     /* (escalones: la tabla no se rehace por nada) */
     }
     if (niebla_d == niebla_d_hecha && niebla_modo == niebla_modo_hecho && niebla_c == niebla_c_hecho && lejos == niebla_lejos_hecho &&

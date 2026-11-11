@@ -2151,6 +2151,45 @@ que aplicaras en el limite de dibujado tenue niebla para que no se aprecie tanto
   etapas de noche (METR, GHOS: niebla clara, cielo oscuro) casi no hay velo (aclaraba los edificios contra el cielo
   negro). `-DSIN_NIEBLA_LIMITE` lo quita (para comparar).
 
+## Fundido de entrada de lo que aparece (2026-11-11)
+
+DESVIACION pedida por el usuario (no esta en el original): "para evitar el popping quiero probar una cosa: aplicar un
+sombreado a la textura que va a cargar para que no aparezca de golpe, como una transicion". EXPERIMENTAL; activo por
+defecto, `-DSIN_FUNDIDO_ENTRADA` lo quita (demo/main.c `fe_paso`, `fe_pon`, `fe_cab`).
+
+- Que se funde: los nodos de la etapa, la union y la etapa siguiente que pasan de no dibujarse a dibujarse dentro de la
+  pantalla: los que el reparto del TA vuelve a poner al acercarse (`prio_d` / `prio_p` de `nodos_visibles_todos`), el
+  LOD del original (404B00), el limite de dibujo (`lejos`), la visibilidad precalculada al cambiar de seccion
+  (`pvs_paso`) y los de una etapa o union recien subida en carrera. Por nodo (`fe_v`, 255 al aparecer, baja con el
+  tiempo real: 0,4 s, `FE_US`, igual a 30 que a 60 cuadros por segundo).
+- No se funde: lo que entra por el borde de la pantalla al girar (estaba fuera de la vista, `fe_f`: no salta), lo que
+  aparece a menos de 12 m (`FE_CERCA`: la carretera de delante del coche), y lo que aparece todo a la vez: el primer
+  cuadro tras el menu, la carga o REINTENTAR (mas de 0,1 s sin cuadros o ningun modelo que ya se dibujara) y los
+  cortes de camara de la salida o del cambio de vista (mas de 1/4 de lo visible es nuevo). Ni las mallas sueltas de un
+  nodo ya visible (el plano lejano de cada malla, la mascara de mallas del PVS: lo que quita no se ve), ni los objetos
+  de la union (pajaros), el trafico o el cielo.
+- Tecnica: desde el color de la niebla, no con transparencia (sin ordenar en la lista transparente ni ver a traves):
+  las mallas del nodo van por `dibuja_malla` con el color del vertice x (1 - k) y el color de desplazamiento
+  (especular de la PowerVR, la cabecera de su textura con el bit del especular) = color de la niebla x k:
+  textura x color x (1 - k) + niebla x k; la niebla de la tabla sigue encima pixel a pixel, asi que lo lejano lleva la
+  suya y con k = 0 la imagen es la de siempre (sin salto al acabar). Se descarto la niebla por vertice (PVR_FOG_VERTEX):
+  sustituye a la de la tabla (habria que calcularla por vertice y en los triangulos grandes no es la misma) y al acabar
+  el fundido se veria el cambio. Color: el de la niebla de la etapa, o el del horizonte del cielo si es mas oscuro
+  (noche de METR y GHOS); lo aditivo de la lista transparente sale del negro.
+- Por que 0,4 s: a 200 km/h son ~22 m; lo que aparece a cien metros o mas ha acabado mucho antes de llegar, y por
+  debajo de ~0,25 s se ve como un parpadeo y no como una transicion. Es tambien lo que tarda la niebla del limite en
+  seguir al corte del reparto.
+- Coste (estimado del codigo; la medida en la consola real la hace el usuario): las mallas que se funden van por
+  `dibuja_malla` (transformacion en C y a la Store Queue por `envia_tira`) en vez del bucle en ensamblador, unas 2 veces
+  mas CPU por vertice, y con 28 bytes por vertice en el TA en vez de 24 (`ta_cabe` lo cuenta con `ta_ofs`: el
+  presupuesto se respeta). Solo afecta a lo que aparece en los ultimos 0,4 s, una parte pequena de la etapa. Por cuadro:
+  recorrer las mascaras de nodos (unos 100 palabras por modelo). RAM: 1,25 bytes por nodo (~4 KB por etapa, 3094 nodos
+  en la mayor). VRAM: nada (la cabecera se copia al enviarla).
+- Prueba: `-DDIAG_FUNDIDO` (con `-DFE_US=2000000u` para verlo mejor) funde desde el magenta y escribe cada segundo
+  "FE: <nuevos> nodos nuevos, <n> fundiendose": Flycast, PALM conduciendo 60 s (tools/prueba/conduce.sh): 30-135 nodos
+  nuevos por segundo en marcha; en las capturas lo que aparece
+  a lo lejos (edificios, palmeras, carteles, gradas) sale del magenta y la carretera de delante no. Sin "Out of memory".
+
 
 ## Cambios de etapa: cielo del fundido (2026-11-11)
 
