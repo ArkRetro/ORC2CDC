@@ -888,7 +888,10 @@ int menu_paso(unsigned n)
         giro += 100.0f * 2.0f * (float)M_PI / 65536.0f;     /* 475670: +0x64 por paso */
         if (giro > 2.0f * (float)M_PI) giro -= 2.0f * (float)M_PI;
         r = fsp_paso(n);
-        if (r == FSP_CARRERA) return MENU_CARRERA;
+        if (r == FSP_CARRERA) {                         /* el tema elegido (48B1D0: [830364], el mismo que la eleccion de
+                                                           la consola) suena al empezar la carrera, como al salir del menu */
+            pista_sonando = -2; pon_pista(menu_pista()); return MENU_CARRERA;
+        }
         if (r == FSP_MENU) { fsp_sale(); sp_sel = 0; entra(P_MENU, 1); musica_menu(); }
         return MENU_SIGUE;
     }
