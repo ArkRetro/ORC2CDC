@@ -739,6 +739,50 @@ PENDIENTE (del punto 3 del plan): las cargas del curso aun piden bloques pequeno
 y tablas por textura de `sube_tramo`, `vis` / PVS / `tr` de cada modelo, la ruta); con ~900 KB seguidos de sobra no
 fragmentan nada que haga falta, pero no van en huecos fijos.
 
+### Resultados, entrada de nombre y GAME OVER de OUTRUN2SP sin el monton (2026-11-11)
+
+Tras la carrera de OUTRUN2SP los modos 25 (RUTASP.DAT), 26 (RANKSP.DAT, NOM5x.DAT, NOMTX.DAT) y 27 (GOVSP.DAT) abrian
+sus bancos como parciales con las tablas en el monton, entre la carrera y la vuelta al frontal (MENU.DAT y SPFE.DAT
+necesitan sus bloques seguidos). Medido sobre los ficheros (tablas: lo que deja en la RAM un hudd_abre parcial):
+
+| Fichero | Disco (KB) | Tablas en la RAM (bytes) | Textura mayor (KB) |
+|---|---|---|---|
+| RUTASP.DAT | 878 | 103232 | 66 |
+| RANKSP.DAT | 326 | 88448 | 66 |
+| NOM5A..E.DAT | 702-878 | 113120-115520 | 130 |
+| NOMTX.DAT | 125 | 2928 + 2832 de piezas | 66 |
+| GOVSP.DAT | 242 | 256 + 102432 de piezas (un grupo) | 66 |
+
+Ahora van en RAM fija (`hueco_fin` en demo/main.c, `fin_sp_t.ram` / `nombre_t.ram`): el mayor de lo libre del hueco
+de la union (entero sin union subida; con ella, detras de sus texeles, de BOnn.DAT y del banderero: 459-473 KB en las
+uniones de bifurcacion menos hasta 220 KB de objetos, 1,1-1,5 MB en las de la meta) y de la cola del hueco de la etapa
+(detras de la etapa o la siguiente, su colision y BKD.DAT: 1,4-5 MB en el arbol 1, 174 KB con SEG13 en el 0). Ya no
+corre curso_paso y de esos huecos solo se lee lo que se dibuja detras de las pantallas (opacas) y la colision de la
+etapa; un hueco con una lectura en marcha no se usa. Cada modo pone sus tablas desde el principio (el anterior ya esta
+cerrado: RUTASP.DAT se cierra antes de abrir los del 26, y estos antes de GOVSP.DAT), una detras de otra
+(`hudd_tablas_fijas` / `spr_abre_en`: tablas y piezas de los grupos, nunca del monton; si no caben, el hudd_abre falla)
+y presta lo que sobra a hud.c para los sectores de las subidas de texturas (`hudd_bufer`). Sin la RAM o si no cabe, el
+modo se salta al siguiente con su linea de error. El guardado de la VMU del final del 26 (`vmu_guarda`: ~15 KB de
+datos, el paquete de 21 KB y el bufer de fs_vmu) se pide y se suelta en la misma llamada: el monton queda igual
+(medido con mallinfo antes y despues: en uso, libre y cima identicos).
+
+Ademas `curso_al_menu` suelta los huecos de las colisiones (186 + 220 KB) en el primer cuadro del menu, antes de que
+`menu_tablas(1)` vuelva a leer las piezas de MENU.DAT en ese mismo cuadro; antes las piezas se iban a la cima y tras el
+fin del tiempo la cima seguida bajaba de 719 a 453 KB en el frontal (tambien sin este cambio: era el orden de la vuelta,
+no las tablas de los modos 25..27).
+
+Medido (Flycast, `resultados.sh` y `MENU_SP=1 abandona.sh`; lineas `RAMMAPA resultados` y `RAMMAPA vuelta al
+frontal` / `vuelta al menu` nuevas):
+
+| KB: libre (seguido en la cima) | antes | ahora |
+|---|---|---|
+| menu, antes de la carrera (-8 KB en todo: el programa) | 916 (719) | 907 (711) |
+| al pasar al modo 25 | 1230 (719) | 1222 (711), RAM fija 1756 en la cola de la etapa (la de la union: 469) |
+| en uso de mas durante los modos 25 / 26 / 27 | 101 / 210 / 100 (sus tablas) | 2 / 3 / 1 (lo pequeno de cada banco) |
+| vuelta al frontal tras el fin del tiempo | 1296 (453) | 1288 (711) |
+| vuelta al frontal tras ABANDONAR (OUTRUN2SP) | - | 1289 (711) |
+| vuelta al menu tras ABANDONAR (consola; el menu antes: 926 (711)) | - | 926 (711) |
+
 ### CPU de dibujo (2026-11-10)
 
 Medido con un cuadro congelado (`-DDIAG_CONGELA=600`: un paso de logica por cuadro hasta el paso 600, asi el estado no

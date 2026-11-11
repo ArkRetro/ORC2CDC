@@ -79,15 +79,28 @@ static int sube(int u)
     return 0;
 }
 static void baja(int u) { hudd_baja_uso(fd, u); }
+/* OUTRUN2SP tras la carrera (fin_sp_t: ram): la RAM fija de las tablas de RUTASP.DAT (25) y GOVSP.DAT (27) aqui y de
+   las de la entrada de nombre (26, demo/nombre.c), cada modo desde el principio (el anterior ya esta cerrado); lo que
+   sobra detras de las tablas abiertas, prestado a hud.c para los sectores de las subidas de texturas (hudd_bufer).
+   Sin ella (el juego de la consola, ABANDONAR) todo como antes, del monton */
+static uint8_t *f_ram; static uint32_t f_cap;
+static void presta_resto(int si)
+{
+    uint32_t o = (hudd_tablas_ocupa() + 31) & ~31u;
+    if (si && o < f_cap) hudd_bufer(f_ram + o, f_cap - o); else hudd_bufer(NULL, 0);
+}
 static void abre(const char *f)
 {
     if (fd) hudd_cierra(fd);
-    if (!(fd = hudd_abre_gd(f))) dbglog(DBG_ERROR, "FIN: no se pudo abrir %s\n", f);
+    if (f_ram) { presta_resto(0); hudd_tablas_fijas(f_ram, f_cap); }
+    if (!(fd = hudd_abre_gd(f))) dbglog(DBG_ERROR, "FIN: no se pudo abrir %s%s\n", f, f_ram ? " en la RAM fija" : "");
+    else if (f_ram) presta_resto(1);
 }
 
 void fin_entra(int c, const fin_carrera_t *k)
 {
     int i; char n[16];
+    f_ram = NULL; f_cap = 0;
     /* 4EF550 (PS2 0x1f3e90) con la variante */
     millas = 0;
     if (k->variante == 1 || k->variante == 9) millas += (uint32_t)(k->puntos / 3000);   /* 0x1f4018: div 0xBB8 */
@@ -149,6 +162,7 @@ static void a_game_over(void)                           /* 0x1bafc8 */
 void fin_game_over(int c)
 {
     int i;
+    f_ram = NULL; f_cap = 0;
     hud_baja_tex(); hudd_vacia();
     u_millas = u_preg = u_elige = -1;
     for (i = 0; i < 8; i++) u_cifra[i] = -1;
@@ -277,12 +291,14 @@ static void sp_siguiente(void)                          /* 1ba7f0..1ba848 (PC re
 {
     ruta_suelta();                                      /* salida del modo 25 (0x1ba910): fin del suceso 0x188 */
     if (rb) { pvr_wait_ready(); spr_cierra(rb); rb = NULL; R = NULL; }
+    if (f_ram) presta_resto(0);                         /* (RUTASP.DAT cerrado: la RAM fija, para el modo siguiente) */
     /* 450240 = 1 o (variante 0 y record [0x5a2030]: 47EF30, los records de la Contrarreloj, SIN PORTAR) -> 26; si no 27 */
     if (como == FIN_TIEMPO) {
         nombre_t n;
         n.variante = sp_d.variante; n.preset = sp_d.preset; n.puntos = sp_d.puntos; n.corazones = sp_d.corazones;
         n.tiempo = 0;                                   /* 451180(0): [0x5c60f0], -1 sin acabar -> 0 (PROBABLE) */
         n.modelo = sp_d.modelo; n.manual = sp_d.manual; n.config = sp_d.config; n.registro4 = sp_d.registro4;
+        n.ram = f_ram; n.ram_cap = f_cap;
         n.ruta = 0;                                     /* 450320: bit n = derecha en el nivel n */
         { int k; for (k = 0; k < 4; k++) if (sp_d.rama[k] == 1) n.ruta |= 1 << k; }
         if (!nombre_entra(&n)) { fase = 26; t_fase = 0; return; }
@@ -299,16 +315,22 @@ void fin_sp_resultados(int c, const fin_sp_t *d)
     ru_nivel = d->nivel; ru_lado = d->lado; ru_razon = d->razon;
     fase = 25; t_fase = 0; t_temp = M25_CUADROS; s25 = 0;
     musica_pon(0x1c);                                   /* 100050(0, 0x1C, 1) */
+    f_ram = d->ram; f_cap = f_ram ? d->ram_cap : 0;     /* las tablas, nunca en el monton (main.c hueco_fin) */
     musica_pausa_lectura(1);
-    rb = spr_abre("RUTASP.DAT");
+    rb = f_ram ? spr_abre_en("RUTASP.DAT", f_ram, f_cap) : NULL;
     musica_pausa_lectura(0);
     R = rb ? (const rsp_t *)spr_extra(rb, &tam) : NULL;
     if (R && (tam < sizeof *R || memcmp(R->id, "RSP1", 4))) R = NULL;
-    if (!R) { dbglog(DBG_ERROR, "FIN: sin RUTASP.DAT\n"); if (rb) spr_cierra(rb); rb = NULL; go_sp = 1; a_game_over(); go_sp = 0; return; }
+    if (!R) {                                           /* sin el modo 25: el siguiente (26 o 27) */
+        dbglog(DBG_ERROR, "FIN: sin RUTASP.DAT (RAM fija %uK): sin el modo 25\n", (unsigned)(f_cap >> 10));
+        if (rb) spr_cierra(rb);
+        rb = NULL; sp_siguiente(); return;
+    }
+    presta_resto(1);
     spr_suelta_todas();
-    dbglog(DBG_INFO, "FIN: modo 25 (450240 = %d), preset %d, modelo %d color %d, ramas %d %d %d %d, nivel %d lado %d razon %.3f, VRAM libre %uK\n",
-           c, d->preset, d->modelo, d->color, d->rama[0], d->rama[1], d->rama[2], d->rama[3], d->nivel, d->lado, (double)d->razon,
-           (unsigned)(pvr_mem_available() >> 10));
+    dbglog(DBG_INFO, "FIN: modo 25 (450240 = %d), preset %d, modelo %d color %d, ramas %d %d %d %d, nivel %d lado %d razon %.3f, VRAM libre %uK"
+           ", tablas %u bytes en la RAM fija (%uK)\n", c, d->preset, d->modelo, d->color, d->rama[0], d->rama[1], d->rama[2], d->rama[3],
+           d->nivel, d->lado, (double)d->razon, (unsigned)(pvr_mem_available() >> 10), (unsigned)hudd_tablas_ocupa(), (unsigned)(f_cap >> 10));
 }
 
 int fin_paso(uint32_t nuevo)
@@ -401,6 +423,7 @@ void fin_sale(void)
     if (rb) { ruta_suelta(); pvr_wait_ready(); spr_cierra(rb); rb = NULL; R = NULL; }
     nombre_sale();
     if (fd) { hudd_cierra(fd); fd = NULL; }
+    if (f_ram) { hudd_bufer(NULL, 0); f_ram = NULL; f_cap = 0; }   /* la RAM fija vuelve a demo/main.c */
     fase = -1; t_panel = t_preg = t_elige = t_go = -1;
 }
 

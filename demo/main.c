@@ -4890,6 +4890,10 @@ static int curso_paso(void)
 static void curso_al_menu(void)
 {
     static uint64_t t0;
+    /* los huecos de las colisiones (186 + 220 KB del monton; solo RAM, sin VRAM que esperar) ya en el primer cuadro del
+       menu: antes de que menu_tablas(1) vuelva a leer las piezas de MENU.DAT en este mismo cuadro, que si no se iban
+       a la cima del monton (tras el fin del tiempo de OUTRUN2SP la cima seguida bajaba de 711 a 445 KB en el frontal) */
+    if (hueco_col && carga.estado != 1) col_suelta();
     if (!ar_bloque && !etapa.tv && !uni.tv && !sig.tv) return;
     if (!t0) { t0 = timer_ms_gettime64(); return; }
     if (timer_ms_gettime64() - t0 < 60 || carga.estado == 1 || meta_hilo) return;   /* (una lectura en curso: al acabar) */
@@ -7255,6 +7259,7 @@ static void meta_entra(void)                                    /* 49C9C0 */
 /* fin de la carrera en la consola (demo/fin.c): de la meta (modo 19 -> 33 -> 34), del fin del tiempo (20 -> 34) o de
    REINTENTAR / ABANDONAR de la pausa (-> 34) */
 static int fin_on;
+static int ram_vuelta;                                          /* falta el RAMMAPA de vuelta de la carrera */
 #ifdef PRUEBA_MILLAS
 #define FIN_ATRACCION 0                                         /* prueba: la demo automatica tambien acaba en las millas */
 #else
@@ -7350,6 +7355,56 @@ static int band_carga(void)
     dbglog(DBG_INFO, "BAND: %u KB en el hueco de la union (%u KB), %u vertices, %u texturas, %d piezas, %u matrices\n",
            (unsigned)((mt + band.tam) >> 10), (unsigned)(cap_union >> 10), (unsigned)band.nvert, (unsigned)band.ntex, rc_band.npz, (unsigned)n);
     return 0;
+}
+/* OUTRUN2SP: RAM fija para los modos 25 / 26 / 27 tras la carrera (demo/fin.c y demo/nombre.c): las tablas de
+   RUTASP.DAT (101 KB), RANKSP.DAT + NOM5x.DAT + NOMTX.DAT (86 + 110..113 + 6 KB) y GOVSP.DAT (sus piezas, 100 KB) y lo
+   que sobre para los sectores de las subidas de sus texturas (hudd_bufer, hasta 130 KB). En el monton no: quedarian
+   bloques de 100-200 KB entre la carrera y la vuelta al frontal, el troceo que dejaba el menu sin sus 722 KB seguidos
+   (MENU.DAT) o el frontal sin los ~850 KB de SPFE.DAT (docs/DREAMCAST.md, RAM del menu).
+   Tras el fin del tiempo o la meta curso_paso ya no corre (la carrera no sigue: de 25..27 se va al 28 y al menu, donde
+   curso_al_menu suelta la union, la etapa siguiente y BKD.DAT antes de que nadie mas use los huecos) y de los huecos
+   solo se lee lo que se dibuja detras de esas pantallas (opacas, de 640x480) y la colision de la etapa (coche_paso):
+   - el de la union (a): entero sin union subida (sin union, o leida y sin subir: no se dibuja ni se subira ya); con
+     ella subida, lo de detras de sus texeles (ya en la VRAM, como hace bo_*: 459-473 KB en las uniones de bifurcacion,
+     1,1-1,5 MB en las de la meta) y de los objetos de la union (BOnn.DAT, hasta 220 KB) y del banderero si siguen alli;
+   - el de la etapa (b): lo de detras de la etapa que este en el (actual o siguiente), de su colision si va detras y de
+     BKD.DAT (1,4-5 MB en el arbol 1; 174 KB con SEG13 en el 0).
+   Un hueco con una lectura en marcha (el hilo de carga) no se usa (sin esperar: la otra lectura no puede estar a la
+   vez). El mayor de los dos; NULL sin ninguno (el modo que no quepa se salta) */
+static uint8_t *hueco_fin(uint32_t *cap)
+{
+#define A32(q) ((uint8_t *)(((uintptr_t)(q) + 31) & ~(uintptr_t)31))
+    uint8_t *a = NULL, *b = NULL, *fa = NULL, *fb = NULL, *q; uint32_t t, lba; char n[16]; int k;
+    const modelo_t *const M[2] = { &etapa, &sig };
+    if (hueco_union && !(carga.estado == 1 && carga.buf >= hueco_union && carga.buf < hueco_union + cap_union)) {
+        a = hueco_union; fa = hueco_union + cap_union - union_fsp;
+        if (uni.datos == hueco_union && uni.tv) a = uni.blob ? A32(uni.blob) : fa;   /* (se dibuja: sus texeles no) */
+        if (bo_mod.datos >= hueco_union && bo_mod.datos < fa && A32(bo_mod.datos + TAM_SECT(bo_mod.tam)) > a)
+            a = A32(bo_mod.datos + TAM_SECT(bo_mod.tam));
+        if (band.datos && A32(band.datos + TAM_SECT(band.tam)) > a) a = A32(band.datos + TAM_SECT(band.tam));
+        if (a >= fa) a = NULL;
+    }
+    if (hueco_etapa && !(carga.estado == 1 && carga.buf >= hueco_etapa && carga.buf < hueco_etapa + cap_etapa)) {
+        b = hueco_etapa; fb = hueco_etapa + cap_etapa;
+        for (k = 0; k < 2; k++) {                               /* la etapa (o la siguiente) y su colision detras */
+            int nodo = k ? cur_sig : etapa_nodo;
+            if (M[k]->datos != hueco_etapa) continue;
+            q = hueco_etapa + TAM_SECT(M[k]->tam);
+            if (nodo < 0 || nodo >= ncurso) { b = fb; break; }   /* (sin saber su colision: nada) */
+            sprintf(n, "COL%02d.DAT", curso[nodo].seg);
+            if (!gd_busca(n, &lba, &t) && TAM_SECT(M[k]->tam) + TAM_SECT(t) <= cap_etapa) q += TAM_SECT(t);
+            if (A32(q) > b) b = A32(q);
+        }
+        if (uni_der.datos >= hueco_etapa && uni_der.datos < fb && A32(uni_der.datos + TAM_SECT(uni_der.tam)) > b)
+            b = A32(uni_der.datos + TAM_SECT(uni_der.tam));
+        if (b >= fb) b = NULL;
+    }
+    dbglog(DBG_INFO, "FIN: RAM fija para los modos 25..27: hueco de la union %uK, de la etapa %uK\n",
+           a ? (unsigned)((fa - a) >> 10) : 0, b ? (unsigned)((fb - b) >> 10) : 0);
+    if (a && (!b || fa - a >= fb - b)) { *cap = (uint32_t)(fa - a) & ~31u; return a; }
+    if (b) { *cap = (uint32_t)(fb - b) & ~31u; return b; }
+    *cap = 0; return NULL;
+#undef A32
 }
 /* START (49DD40): la escena de la salida de este coche (4871A0), si esta SALIDA.DAT */
 static void salida_entra(void)
@@ -7644,6 +7699,11 @@ int main(int argc, char **argv)
                de la meta sigue alli hasta que curso_al_menu la suelta (unos cuadros); nunca en el monton */
             if (pide_fsp && union_prestable()) { pide_fsp = 0; menu_entra_sp(); }
             if (!reintenta && menu_tablas(1)) dbglog(DBG_ERROR, "MENU: no se pudieron leer las piezas de MENU.DAT\n");
+            /* el mapa de la RAM de vuelta de la carrera, con el curso ya fuera (curso_al_menu) y el menu (o el frontal)
+               ya puesto: para compararlo con el de "menu" antes de la carrera */
+            if (ram_vuelta && !reintenta && !pide_fsp && !ar_bloque && !etapa.tv && !uni.tv && !sig.tv) {
+                ram_vuelta = 0; ram_mapa(menu_sp() ? "vuelta al frontal" : "vuelta al menu");
+            }
             rm = reintenta ? MENU_CARRERA : pide_fsp ? MENU_SIGUE : menu_paso(nuevo);   /* titulo, modos, coche, cambio y musica */
             ttit += 1.0f / 60;
             if (menu_coche3d() && menu_coche() >= 0 && menu_coche() != coche_ficha && menu_coche() != coche_malo &&
@@ -7748,6 +7808,7 @@ int main(int argc, char **argv)
                 if (cam_ok) { cam_inicia(&cam, &cam_tab); cam_t_choque = 0; }   /* 484EE0 */
                 if (chr_ok == 1) robot_carrera(modelo_jug);          /* 4884D0 / 4885A0 */
                 ram_mapa(variante == 2 ? "carrera INFARTO" : variante == 0 || variante == 7 ? "carrera CONTRARRELOJ" : "carrera OutRun");
+                ram_vuelta = 1;
                 /* todo lo de arriba es la carga (GD, VRAM, AICA): la escena de la salida empieza a contar aqui, en su
                    cuadro 0, como START del original (4871A0 en la etapa 60, con la carga ya hecha). Este mismo cuadro
                    da un paso mas (el cuadro 0 de la escena: el coche y la camara del guion ya puestos; sin el se veia
@@ -7988,6 +8049,8 @@ int main(int argc, char **argv)
                     d.variante = variante; d.puntos = puntos; d.corazones = variante == 2 ? infarto_total() : 0;
                     d.manual = fsp_manual(); d.config = fsp_config();
                     d.registro4 = etapa_n == 4 ? cur_nodo : -1;   /* 450560(4): la clave del nivel 4 al entrar en su etapa */
+                    d.ram = hueco_fin(&d.ram_cap);              /* sus tablas, fuera del monton */
+                    ram_mapa("resultados");
                     fin_sp_resultados(estado == META ? FIN_META : FIN_TIEMPO, &d); fin_on = 1;
                 }
             } else if (!fin_on && t_estado > (uint32_t)fin_t) {

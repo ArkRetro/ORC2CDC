@@ -63,7 +63,7 @@ static fuente_t fu[2];
 
 static spr_banco_t *rb, *fb;
 static hud_dat_t *tx; static int u_f[2] = { -1, -1 }, u_banda = -1;
-static int activo;
+static int activo, presto;
 
 /* ---- el modulo (PS2 0x5da108.., PC 8423C0..) */
 typedef struct {
@@ -112,13 +112,24 @@ static void filas(uint32_t t, int tipo)
     }
 }
 
+/* la siguiente parte de la RAM fija (nombre_t: ram) tras la ultima apertura en ella (hudd_tablas_ocupa) */
+static uint8_t *r_ram; static uint32_t r_cap, r_o;
+static void avanza(void) { r_o += (hudd_tablas_ocupa() + 31) & ~31u; if (r_o > r_cap) r_o = r_cap; }
+
 int nombre_entra(const nombre_t *d)
 {
     uint32_t tam, curso, t; const uint8_t *x; uint8_t rec[16]; char n[16]; int ruta, sel_t; fila_t *e;
     nombre_sale();
-    rb = spr_abre("RANKSP.DAT");
+    /* las tablas de los tres bancos, una detras de otra en la RAM fija (nunca en el monton: 86 + 110..113 + 6 KB, que
+       quedarian bajo lo que se pida hasta volver al frontal); lo que sobra, para los sectores de las subidas de texturas */
+    r_ram = d->ram; r_cap = d->ram ? d->ram_cap : 0; r_o = 0;
+    rb = r_ram ? spr_abre_en("RANKSP.DAT", r_ram, r_cap) : NULL;
+    if (rb) avanza();
     x = rb ? spr_extra(rb, &tam) : NULL;
-    if (!x || lee_nom1(x, tam)) { dbglog(DBG_ERROR, "NOMBRE: sin RANKSP.DAT\n"); nombre_sale(); return -1; }
+    if (!x || lee_nom1(x, tam)) {
+        dbglog(DBG_ERROR, "NOMBRE: sin RANKSP.DAT (RAM fija %uK): sin el modo 26\n", (unsigned)(r_cap >> 10));
+        nombre_sale(); return -1;
+    }
     rksp_defecto(defe);                                 /* 0x1fa3b0: sin datos guardados, las de por defecto */
     variante = d->variante; preset = d->preset & 3;
     ruta = d->ruta; if (!(ruta < 0x10) || ruta < 0) ruta = 0;
@@ -128,9 +139,13 @@ int nombre_entra(const nombre_t *d)
     curso = desc[preset & 1][d->registro4 >= 0 && d->registro4 < 16 ? d->registro4 : 0];
     if (curso >= 60) curso = 0;
     sprintf(n, "NOM5%c.DAT", 'A' + (int)((fondo[curso] >> 16) - 0x37));
-    fb = spr_abre(n);
-    tx = hudd_abre_gd("NOMTX.DAT");
-    if (!fb || !tx) { dbglog(DBG_ERROR, "NOMBRE: sin %s o NOMTX.DAT\n", n); nombre_sale(); return -1; }
+    if ((fb = spr_abre_en(n, r_ram + r_o, r_cap - r_o))) avanza();
+    if (fb) { hudd_tablas_fijas(r_ram + r_o, r_cap - r_o); if ((tx = hudd_abre_gd("NOMTX.DAT"))) avanza(); }
+    if (!fb || !tx) {
+        dbglog(DBG_ERROR, "NOMBRE: sin %s o NOMTX.DAT (RAM fija %uK, %u bytes usados): sin el modo 26\n", n, (unsigned)(r_cap >> 10), (unsigned)r_o);
+        nombre_sale(); return -1;
+    }
+    if (r_o < r_cap) { hudd_bufer(r_ram + r_o, r_cap - r_o); presto = 1; }
     u_f[0] = hudd_uso(tx, "F3"); u_f[1] = hudd_uso(tx, "F4"); u_banda = hudd_uso(tx, "BANDA");
     hudd_sube_uso(tx, u_f[0]); hudd_sube_uso(tx, u_f[1]); hudd_sube_uso(tx, u_banda);
     spr_suelta_todas();
@@ -160,8 +175,9 @@ int nombre_entra(const nombre_t *d)
     h_tit = h_tab = h_puesto = -1;
     primero = 1; est = 0; hecho = 0; voz = 1;
     sel_t = k34c + preset * 6;
-    dbglog(DBG_INFO, "NOMBRE: modo 26, variante %d preset %d meta %d ruta %d, puesto %d (fondo %06x, tabla %d), VRAM libre %uK\n",
-           variante, preset, cuenta, ruta, puesto, (unsigned)fondo[curso], sel_t, (unsigned)(pvr_mem_available() >> 10));
+    dbglog(DBG_INFO, "NOMBRE: modo 26, variante %d preset %d meta %d ruta %d, puesto %d (fondo %06x, tabla %d), VRAM libre %uK, "
+           "tablas %u bytes en la RAM fija (%uK)\n", variante, preset, cuenta, ruta, puesto, (unsigned)fondo[curso], sel_t,
+           (unsigned)(pvr_mem_available() >> 10), (unsigned)r_o, (unsigned)(r_cap >> 10));
     activo = 1;
     return 0;
 }
@@ -370,5 +386,6 @@ void nombre_sale(void)                                  /* 0x1fd528 (4B0950: 428
     if (fb) { spr_cierra(fb); fb = NULL; }
     if (rb) { spr_cierra(rb); rb = NULL; }
     if (tx) { hudd_cierra(tx); tx = NULL; }
+    if (presto) { hudd_bufer(NULL, 0); presto = 0; }    /* (la RAM fija, para el modo siguiente) */
     activo = 0;
 }

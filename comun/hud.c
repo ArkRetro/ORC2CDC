@@ -31,6 +31,7 @@ struct hud_dat {
     uint8_t *con_pal;                                       /* por textura: subida con su paleta (cabeceras) */
     uint8_t *falta;                                         /* por textura: echada por hud_suelta_quietas y pedida */
     int prestado;                                           /* dat en la RAM de otro (hudd_tablas_en): no se libera */
+    int gp_fijo;                                            /* las piezas de los grupos tambien (hudd_tablas_fijas) */
 };
 
 static hud_dat_t *H, *hud_principal;                       /* H: el fichero que se esta dibujando */
@@ -132,23 +133,28 @@ static void pieza_compacta(const h_pie_t *q, h_pc_t *r)
 /* tablas de un fichero parcial (los *meta primeros bytes) leidas a trozos de 16 KB y con las piezas ya a 24 bytes: la
    RAM que piden es la del resultado (antes un bloque con las piezas de 40 bytes y luego se encogia: HAHUD.DAT pedia
    208 KB seguidos al empezar la carrera y no los habia, "Out of memory" y el modo sin medidor ni rotulos) */
-static uint8_t *tab_en; static uint32_t tab_cap; static int tab_usado;   /* hudd_tablas_en */
-void hudd_tablas_en(void *p, uint32_t cap) { tab_en = p; tab_cap = p ? cap : 0; tab_usado = 0; }
+/* hudd_tablas_fijas: lo mismo sin el monton (ni para las tablas ni para las piezas de los grupos, que van detras de
+   ellas en la misma RAM): si no cabe, el hudd_abre falla. tab_ocupa: los bytes que uso de esa RAM el ultimo */
+static uint8_t *tab_en; static uint32_t tab_cap, tab_ocupa; static int tab_usado, tab_fijo;
+void hudd_tablas_en(void *p, uint32_t cap) { tab_en = p; tab_cap = p ? cap : 0; tab_usado = tab_fijo = 0; }
+void hudd_tablas_fijas(void *p, uint32_t cap) { hudd_tablas_en(p, cap); tab_fijo = p != NULL; }
+uint32_t hudd_tablas_ocupa(void) { return tab_ocupa; }
 static uint8_t *lee_tablas(uint32_t lba, uint32_t *meta, h_pc_t ***gp)
 {
     enum { TROZO = 8 };
-    uint8_t *t = memalign(32, TROZO * 2048), *d = NULL, pz_[sizeof(h_pie_t)];
-    uint32_t c[12], pos = 0, n = *meta, np, ini, finp, quita, sec = 0, k, j, npz = 0, ip = 0, g = 0, ng;
-    h_pc_t **G = NULL; const h_grp_t *gr = NULL;
-    *gp = NULL;
-    if (!t || lee_sect(lba, 1, t)) { free(t); return NULL; }
+    uint8_t *t, *d = NULL, pz_[sizeof(h_pie_t)];
+    uint32_t c[12], pos = 0, n = *meta, np, ini, finp, quita, sec = 0, k, j, npz = 0, ip = 0, g = 0, ng, cap = tab_cap, o;
+    h_pc_t **G = NULL; const h_grp_t *gr = NULL; int fijo = tab_fijo, usado = 0;
+    *gp = NULL; tab_usado = 0; tab_ocupa = 0;
+    if (!(t = memalign(32, TROZO * 2048)) || lee_sect(lba, 1, t)) { free(t); tab_en = NULL; tab_cap = 0; tab_fijo = 0; return NULL; }
     memcpy(c, t, sizeof c); np = c[4]; ini = c[9]; finp = ini + np * sizeof(h_pie_t); ng = c[3];
     quita = np * sizeof(h_pie_t);
     if (c[10] < finp || n < finp || c[8] + ng * sizeof(h_grp_t) > ini) quita = 0;   /* otra disposicion: tal cual */
-    if (tab_en && n - quita <= tab_cap) { d = tab_en; tab_usado = 1; }
-    else d = memalign(32, n - quita);
-    tab_en = NULL; tab_cap = 0;
-    if (!d || (quita && !(G = calloc(ng, sizeof *G)))) { free(t); if (!tab_usado) free(d); return NULL; }
+    if (tab_en && n - quita <= cap) { d = tab_en; usado = 1; }
+    else if (!fijo) d = memalign(32, n - quita);
+    tab_en = NULL; tab_cap = 0; tab_fijo = 0;
+    fijo = fijo && usado; o = (n - quita + 3) & ~3u;     /* (fijo: las piezas de los grupos desde o) */
+    if (!d || (quita && !(G = calloc(ng, sizeof *G)))) { free(t); if (!usado) free(d); return NULL; }
     while (pos < n) {
         k = (n - pos + 2047) / 2048; if (k > TROZO) k = TROZO;
         if (lee_sect(lba + sec, k, t)) goto mal;
@@ -162,7 +168,10 @@ static uint8_t *lee_tablas(uint32_t lba, uint32_t *meta, h_pc_t ***gp)
                     if (!gr) gr = (const h_grp_t *)(d + c[8]);
                     while (g < ng && ip >= (uint32_t)gr[g].pri + gr[g].np) g++;
                     if (g < ng && ip >= gr[g].pri) {
-                        if (!G[g] && !(G[g] = malloc(gr[g].np * sizeof(h_pc_t)))) goto mal;
+                        if (!G[g] && fijo) {
+                            if (o + gr[g].np * sizeof(h_pc_t) > cap) goto mal;
+                            G[g] = (h_pc_t *)(d + o); o += (gr[g].np * sizeof(h_pc_t) + 3) & ~3u;
+                        } else if (!G[g] && !(G[g] = malloc(gr[g].np * sizeof(h_pc_t)))) goto mal;
                         pieza_compacta(&q, G[g] + (ip - gr[g].pri));
                     }
                     ip++;
@@ -174,32 +183,42 @@ static uint8_t *lee_tablas(uint32_t lba, uint32_t *meta, h_pc_t ***gp)
     free(t);
     if (quita) { uint32_t *cc = (uint32_t *)d; cc[10] -= quita; cc[11] -= quita; }
     *meta = n - quita; *gp = G;
+    tab_usado = usado; tab_fijo = fijo; tab_ocupa = usado ? (fijo ? o : n - quita) : 0;
     return d;
 mal:
-    if (G) { for (k = 0; k < ng; k++) free(G[k]); free(G); }
-    free(t); free(d); return NULL;
+    if (G) { if (!fijo) for (k = 0; k < ng; k++) free(G[k]); free(G); }
+    free(t); if (!usado) free(d);
+    return NULL;
 }
 
 hud_dat_t *hudd_abre(const char *fich, int modelo, int parcial)
 {
     uint32_t sz, *c, i, j; hud_dat_t *h = calloc(1, sizeof *h);
+    if (!h || !parcial) hudd_tablas_en(NULL, 0);            /* (la RAM de hudd_tablas_en solo vale para este) */
     if (!h) return NULL;
     if (!parcial) {
         if (!(h->dat = gd_carga(fich, &sz))) { free(h); return NULL; }
     } else {                                                /* cabecera y tabla de texturas; luego hasta la 1a textura */
         uint8_t *b = memalign(32, 2048); uint32_t fin, ns, m = 0xffffffffu;
-        if (!b || gd_busca(fich, &h->lba, &sz) || lee_sect(h->lba, 1, b)) { free(b); free(h); return NULL; }
+        if (!b || gd_busca(fich, &h->lba, &sz) || lee_sect(h->lba, 1, b)) { free(b); free(h); hudd_tablas_en(NULL, 0); return NULL; }
         h->tam = sz;
         c = (uint32_t *)b; fin = c[6] + 16 * c[1]; ns = (fin + 2047) / 2048;
-        if (ns > 1) { free(b); b = memalign(32, ns * 2048); if (!b || lee_sect(h->lba, ns, b)) { free(b); free(h); return NULL; } }
+        if (ns > 1) {
+            free(b); b = memalign(32, ns * 2048);
+            if (!b || lee_sect(h->lba, ns, b)) { free(b); free(h); hudd_tablas_en(NULL, 0); return NULL; }
+        }
         c = (uint32_t *)b;
         for (i = 0; i < c[1]; i++) { h_tex_t *t = (h_tex_t *)(b + c[6]) + i; if (t->off < m) m = t->off; }
         free(b);
         h->meta = m;
         if (!(h->dat = lee_tablas(h->lba, &h->meta, &h->gp))) { free(h); return NULL; }
-        h->prestado = tab_usado; tab_usado = 0;
+        h->prestado = tab_usado; h->gp_fijo = tab_fijo; tab_usado = tab_fijo = 0;
     }
-    if (memcmp(h->dat, "HUD1", 4)) { if (h->gp) { for (i = 0; i < ((uint32_t *)h->dat)[3]; i++) free(h->gp[i]); free(h->gp); } if (!h->prestado) free(h->dat); free(h); return NULL; }
+    if (memcmp(h->dat, "HUD1", 4)) {
+        if (h->gp) { if (!h->gp_fijo) for (i = 0; i < ((uint32_t *)h->dat)[3]; i++) free(h->gp[i]); free(h->gp); }
+        if (!h->prestado) free(h->dat);
+        free(h); return NULL;
+    }
     c = (uint32_t *)h->dat;
     h->n_tex = c[1]; h->n_grp = c[3]; h->n_uso = c[5];
     h->tex = (h_tex_t *)(h->dat + c[6]); h->spr = (h_spr_t *)(h->dat + c[7]); h->grp = (h_grp_t *)(h->dat + c[8]);
@@ -423,7 +442,7 @@ void hudd_baja(hud_dat_t *h, int t0, int nt)
 uint32_t hudd_grupos_suelta(hud_dat_t *h, int t0, int nt)
 {
     uint32_t g, j, b = 0;
-    if (!h || !h->gp) return 0;
+    if (!h || !h->gp || h->gp_fijo) return 0;               /* (las de hudd_tablas_fijas no son del monton) */
     for (g = 0; g < h->n_grp; g++) {
         int vale = 0;
         if (!h->gp[g]) continue;
@@ -480,7 +499,7 @@ void hudd_cierra(hud_dat_t *h)
     if (!h || h == hud_principal) return;
     hudd_baja(h, 0, -1); hudd_vacia();
     if (H == h) H = NULL;
-    if (h->gp) { uint32_t k; for (k = 0; k < h->n_grp; k++) free(h->gp[k]); free(h->gp); }
+    if (h->gp) { uint32_t k; if (!h->gp_fijo) for (k = 0; k < h->n_grp; k++) free(h->gp[k]); free(h->gp); }
     if (!h->prestado) free(h->dat);
     free(h->vtex); free(h->usada); free(h->dibujada); free(h->cab); free(h->cabf); free(h->caba);
     free(h->pal); free(h->con_pal); free(h->falta); free(h);

@@ -7,7 +7,8 @@
    comun/sprani.c. Los tokens son los del original: banco << 16 | escena. */
 typedef struct spr_banco spr_banco_t;
 spr_banco_t *spr_abre(const char *fich);                /* abre un banco (solo tablas en la RAM); NULL si falla */
-spr_banco_t *spr_abre_en(const char *fich, void *ram, uint32_t cap);   /* sus tablas en ram (cap bytes) si caben */
+/* sus tablas en ram (cap bytes; hudd_tablas_ocupa: los que usa); si no caben, NULL (nunca del monton) */
+spr_banco_t *spr_abre_en(const char *fich, void *ram, uint32_t cap);
 void spr_cierra(spr_banco_t *b);                        /* suelta sus instancias, su VRAM y su RAM */
 const uint8_t *spr_extra(const spr_banco_t *b, uint32_t *tam);   /* tablas del conversor que lo uso (o NULL) */
 int spr_sube_escena(uint32_t token);                    /* texturas de la escena a la VRAM; 0 bien */

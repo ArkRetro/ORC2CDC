@@ -35,6 +35,9 @@ typedef struct {
     /* para la entrada de nombre (modo 26, demo/nombre.c) */
     int variante, puntos, corazones, manual, config;   /* [780258], 4B99D0, 45B830 / 45B840, 48B180, 48B1A0 */
     int registro4;          /* 450560(4): registro del arbol de la etapa del nivel 4 (-1 sin llegar) */
+    /* RAM fija (de los huecos de demo/main.c, hueco_fin) para las tablas de los modos 25..27 y los sectores de las
+       subidas de sus texturas: nunca del monton (sin ella o si no caben, ese modo se salta) */
+    uint8_t *ram; uint32_t ram_cap;
 } fin_sp_t;
 void fin_sp_resultados(int como, const fin_sp_t *d);
 void fin_sale(void);                                /* suelta FIN.DAT / GOVER.DAT (y su VRAM) */

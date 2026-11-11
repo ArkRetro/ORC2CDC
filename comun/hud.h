@@ -35,6 +35,9 @@ int hudd_sube(hud_dat_t *h, int t0, int nt);             /* texturas [t0, t0+nt)
 void hudd_bufer(void *p, uint32_t tam);
 /* las tablas del siguiente hudd_abre parcial en p (cap bytes) si caben, en vez del monton (no se liberan al cerrar) */
 void hudd_tablas_en(void *p, uint32_t cap);
+/* lo mismo sin el monton: las tablas y las piezas de sus grupos en p o el hudd_abre falla (no se liberan al cerrar) */
+void hudd_tablas_fijas(void *p, uint32_t cap);
+uint32_t hudd_tablas_ocupa(void);                        /* bytes de esa RAM que ocupo el ultimo hudd_abre (0: ninguno) */
 void hudd_baja(hud_dat_t *h, int t0, int nt);
 void hudd_cierra(hud_dat_t *h);                          /* libera su VRAM y su RAM */
 /* fichero parcial: suelta las piezas de los grupos que no usan las texturas [t0, t0 + nt) (bytes) / las vuelve a leer */

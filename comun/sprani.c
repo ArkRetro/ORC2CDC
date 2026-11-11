@@ -41,8 +41,8 @@ spr_banco_t *spr_abre_en(const char *fich, void *ram, uint32_t cap)
 {
     spr_banco_t *b = calloc(1, sizeof *b); const uint8_t *x; uint32_t c[12];
     if (!b) return NULL;
-    hudd_tablas_en(ram, cap);
-    if (!(b->h = hudd_abre(fich, 0, 1))) { hudd_tablas_en(NULL, 0); free(b); return NULL; }
+    hudd_tablas_fijas(ram, cap);                        /* (con ram, nunca en el monton: si no caben, NULL) */
+    if (!(b->h = hudd_abre(fich, 0, 1))) { free(b); return NULL; }
     x = hudd_extra(b->h);
     if (memcmp(x, "SPR1", 4)) { hudd_cierra(b->h); free(b); return NULL; }
     memcpy(c, x + 4, sizeof c - 4);

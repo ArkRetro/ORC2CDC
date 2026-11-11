@@ -11,6 +11,7 @@ typedef struct {
     int modelo, manual, config;   /* 48B140 / 48B180 / 48B1A0 (0x1bcfb0 / 0x1bcff0 / 0x1bd010) */
     int ruta;               /* 450320 (0x1ff718): bit n = derecha en el nivel n */
     int registro4;          /* indice del registro del arbol de la etapa del nivel 4 (450560(4)); -1 sin llegar */
+    uint8_t *ram; uint32_t ram_cap;   /* RAM fija para las tablas de sus bancos (fin_sp_t): sin ella no se entra */
 } nombre_t;
 int  nombre_entra(const nombre_t *d);       /* 49A960 + 0x1fc560; 0 bien */
 int  nombre_paso(uint32_t nuevo);           /* 49AA60 + 0x1fcd30 (botones nuevos CONT_*); 1: pide el modo 27 */
