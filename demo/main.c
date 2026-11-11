@@ -1495,6 +1495,9 @@ static meta_t meta; static int meta_pas, meta_cam;
 static int sal_on, sal_f, sal_rue; static float sal_cam[8];
 static float meta_rueda_y[4];                                  /* 475720: rueda +134 por el suelo bajo cada rueda */
 static uint32_t efe_mascara;                                   /* 95AFAC del guion (82E7C8): humo y marcas por rueda */
+/* chispas (41D810 = PS2 0x10b698): las piden el choque con el muro y con otro coche en cada paso, por rueda de la
+   demo (0 del. der., 1 del. izq., 2 tras. der., 3 tras. izq.: la rueda n del original es la n ^ 1) */
+static unsigned chispa_muro, chispa_coche;
 static float lejos_guion = LEJOS_PS2;                           /* el lejano del original (op 20 de la meta: 1900) */
 /* fisica del original para el coche del jugador (comun/or2_fisica.c) con la tabla de PARAM.DAT */
 #ifndef MODELO
@@ -1537,7 +1540,18 @@ static int diag_congelado;                                      /* medida: desde
 #define GUION_DERRAPE 560
 #endif
 #ifdef PRUEBA_CHOQUE
-static const int guion_cong[] = { 75, 90, 120, 200, 260 };     /* el choque contra el muro (cuadro 60) */
+/* el choque contra el muro (cuadro 60): CHOQUE_ANG rad contra el muro derecho a CHOQUE_V km/h; imagen congelada en
+   los cuadros CHOQUE_CONG (con -DCHOQUE_ANG=0.05f -DCHOQUE_V=200 roza: chispas) */
+#ifndef CHOQUE_ANG
+#define CHOQUE_ANG 0.87f
+#endif
+#ifndef CHOQUE_V
+#define CHOQUE_V 280.0f
+#endif
+#ifndef CHOQUE_CONG
+#define CHOQUE_CONG 75, 90, 120, 200, 260
+#endif
+static const int guion_cong[] = { CHOQUE_CONG };
 #else
 static const int guion_cong[] = { 300, GUION_DERRAPE + 30, GUION_DERRAPE + 60, GUION_DERRAPE + 100, 740, 800 };
 #endif
@@ -2344,6 +2358,11 @@ static void traf_choques(void)
             fa.x -= rp * k.sep[0]; fa.y -= rp * k.sep[1];
             t->c.s += (1.0f - rp) * sl; coche_coloca(&t->c);
             t->toca = TR_JUG;                                   /* +DD4 */
+            {   /* +514 + esquina x 4 = 1 (4F9000, PC 4F9422): la tabla de 41D810 (PS2 0x32b280: 2, 1, 3, 0) da la
+                   esquina de cada rueda: del. izq. la 2, del. der. la 1, tras. izq. la 3 y tras. der. la 0 */
+                static const uint8_t ESQ[4] = { 1, 2, 0, 3 }; int w;
+                for (w = 0; w < 4; w++) if (k.esq_a[ESQ[w]]) chispa_coche |= 1u << w;
+            }
             k_ult = k; ult = i;
         }
         if (ult >= 0) { traf_choca(traf + ult, ult, &k_ult, ox, oy, th); coche_coloca(&yo); vib_toca = 1; vib_otro = ult; bo_toca_coche = 1; }
@@ -3352,6 +3371,32 @@ static void traf_paso(float dt)
      curva que viene (la curva marca el angulo de equilibrio); contravolante la reduce; tope 73 grados.
    - el derrape casi no quita velocidad; una ayuda lleva el avance hacia la carretera en proporcion a |sin deriva|.
    - sin derrape la deriva vuelve deprisa a una pequena (giro x 0,05). */
+/* Chispas del roce con el muro: 41D810 (PS2 0x10b698) las pide en la rueda n si el punto n de la forma del coche ha
+   entrado en la cara del muro (+670 bit 31 - n, la mascara de push_outpos_mat de CbwColiWall: 82EE60 del PC) y algun
+   punto de la carroceria pisa un poligono de clase muro (+2A8 & 0x10F0020, las clases de los poligonos de la COLI bajo
+   los puntos de la forma). La demo lleva el coche como un punto a 1 m del limite: la clase se mira en la COLI pasado
+   el limite (MURO_SONDA m: no es del original) y los puntos de la forma son las ruedas (PROVISIONAL: la forma +690 no
+   esta en la demo); entran las que quedan a menos de la penetracion del cuadro de la mas metida. */
+#define MURO_SONDA 0.25f
+#define CLASE_MURO 0x010f0020u
+static void muro_chispas(const coche_t *c, int lado, float pen, float xm)
+{
+    float g = c->a + c->deriva, cg = cosf(g), sg = sinf(g), d[4], dm = -1e9f; int i; uint32_t cl;
+    if (c != &yo || !lado) return;
+    {   float y = c->pos[1];                                    /* el plano (modo 0x100), no el del coche (0x400) */
+        if (suelo_ruta(c->s, xm, &y, 0, &cl) == -2) return;
+    }
+#ifdef DIAG_CHISPA
+    {   static int n; if (n++ % 4 == 0) dbglog(DBG_INFO, "MURO s %.0f x %.2f lado %d pen %.3f clase %08x (sonda x %.2f)\n",
+            (double)c->s, (double)c->x, lado, (double)pen, (unsigned)cl, (double)xm); }
+#endif
+    if (!(cl & CLASE_MURO)) return;
+    for (i = 0; i < 4; i++) {
+        float fx = i < 2 ? fpar.cg_del : -fpar.cg_tras, ly = fpar.via[i >> 1] * ((i & 1) ? -0.5f : 0.5f);
+        d[i] = lado * (ly * cg + fx * sg); if (d[i] > dm) dm = d[i];
+    }
+    for (i = 0; i < 4; i++) if (d[i] >= dm - pen) chispa_muro |= 1u << i;
+}
 #define DERIVA_MAX 1.276f                                       /* 0x3400 = 73 grados */
 static void coche_paso(coche_t *c, float giro, float gas, float freno, float dt)
 {
@@ -3439,18 +3484,20 @@ static void coche_paso(coche_t *c, float giro, float gas, float freno, float dt)
         {   /* muros: CbwColiWall del original (roce o rebote) con la normal hacia la calzada. El limite es el de la
                colision del original (franjas de muro o el vacio pasado el arcen, la hierba o la arena); sin esos datos,
                el borde del asfalto */
-            float nx = 0, ny = 0, pen = 0, h, li, ld, xa, xb; c->choque = 0; if (c->t_muro > 0) c->t_muro--;
+            float nx = 0, ny = 0, pen = 0, h, li, ld, xa, xb, xm = 0; int lado_m = 0; c->choque = 0; if (c->t_muro > 0) c->t_muro--;
             limites(c->s, &li, &ld);
             lim = li - 1.0f;
-            if (c->x < -lim) { pen = -lim - c->x; c->x = -lim; nx = cosf(th1); ny = -sinf(th1); }
+            if (c->x < -lim) { pen = -lim - c->x; c->x = -lim; nx = cosf(th1); ny = -sinf(th1); lado_m = -1; xm = -li - MURO_SONDA; }
             lim = ld - 1.0f;
-            if (c->x > lim) { pen = c->x - lim; c->x = lim; nx = -cosf(th1); ny = sinf(th1); }
+            if (c->x > lim) { pen = c->x - lim; c->x = lim; nx = -cosf(th1); ny = sinf(th1); lado_m = 1; xm = ld + MURO_SONDA; }
             if (muro_interior(c->s, c->x, 1.0f, &xa, &xb)) {     /* un muro entre las calzadas */
-                if (x0 < (xa + xb) * 0.5f) { pen = c->x + 1.0f - xa; c->x = xa - 1.0f; nx = -cosf(th1); ny = sinf(th1); }
-                else { pen = xb - (c->x - 1.0f); c->x = xb + 1.0f; nx = cosf(th1); ny = -sinf(th1); }
+                if (x0 < (xa + xb) * 0.5f) { pen = c->x + 1.0f - xa; c->x = xa - 1.0f; nx = -cosf(th1); ny = sinf(th1); lado_m = 1; }
+                else { pen = xb - (c->x - 1.0f); c->x = xb + 1.0f; nx = cosf(th1); ny = -sinf(th1); lado_m = -1; }
+                xm = (xa + xb) * 0.5f;
             }
             if (nx != 0 || ny != 0) {
                 int golpe = or2_choque_muro(&fis, &fpar, nx, ny, pen);   /* 2 = choque fuerte (estados 1, 2, 5) */
+                muro_chispas(c, lado_m, pen, xm);
                 c->choque = 1; c->t_muro = 30;
                 if (golpe && sfx_ok && !golpe_cd) { golpe_cd = 20; sfx_golpe(fminf(c->v / 40.0f, 1.0f)); }
                 h = atan2f(fis.vx, fis.vy);                     /* rumbo de la velocidad (+ derecha) */
@@ -3657,15 +3704,129 @@ typedef struct { float p[3], edad; } humo_t;
 static humo_t humos[NHUMO]; static int humo_sig;
 static pvr_ptr_t tex_humo; static pvr_poly_hdr_t cab_humo;
 
+/* Chispas (fuente 3 de las particulas: PtclSparkInit 41D6B0 / 41D810 / 41DC60 / 41DCC0 del PC; en SLES-53998 0x10b588,
+   0x10b698, 0x10bb20 y 0x10bba0, constantes en 0x32b26c..0x32b294). 500 particulas (0x1F4). Peticion por rueda: con el
+   muro (ver muro_chispas) dispersion de velocidad (0,02; 0,06; 0,02) y con otro coche (esquina de la rueda dentro de
+   su caja, +514) (0,06; 0,02; 0,06) m/cuadro (0x32b270 = 0,02 y su triple); las dos ponen el contador de la rueda a
+   15 cuadros (0x32b278). Con el contador vivo y si el contacto de la rueda se ha movido 0,01 m o mas en el cuadro,
+   30 chispas (0x32b274) repartidas del contacto anterior al de ahora, 0,7 m por encima, con +-0,01 m de dispersion;
+   velocidad = 0,9 (0x32b26c) x la del coche por cuadro + 0,03 hacia arriba (0x32b290) + la dispersion. Los azares son
+   los del generador de las particulas (0x32b0d8: x 1103515245, suma de seis trozos de 15 bits x 0x37FFFFFC - 3: de -3
+   a 3 en campana). Vida 10 + rand x 50 cuadros (0x10bb54..0x10bb90). Cada cuadro (0x10bba0): posicion += velocidad,
+   x y z x 0,99 (0x32b294), rebote entero en el plano del suelo de la rueda 0 si queda por debajo, y -= 0x3B315723.
+   Textura 0x570029 / 0x570028 de obj_course_obj_common segun la paridad de la vida de la ultima (16x16, suma: mezcla
+   1, 1). Dibujo (0x109010, sprites de punto): tamano = alto de la textura x 0,6 x 0,5 x proyeccion / distancia,
+   entre 2,5 y 32 puntos de pantalla (PROBABLE: el microprograma de la VU1 no esta leido; en el PC, 41A6F0, es el
+   tamano de punto de D3D con escala 1 / distancia y los mismos topes). Sin el destello 0x2C0001 (PENDIENTE). */
+#define NCHISPA 500
+typedef struct { float p[3], v[3]; int vida; } chispa_t;
+static chispa_t chispas[NCHISPA]; static int chispa_n;          /* chispa_n: las vivas van por delante */
+static int chispa_cnt[4], chispa_hay, chispa_par; static float chispa_disp[4][3], chispa_ant[4][3], chispa_coche_ant[3];
+static uint32_t chispa_gen = 1;
+static pvr_poly_hdr_t cab_chispa[2]; static int chispa_tex_ok;
+static float chispa_azar(void)
+{
+    uint32_t v = chispa_gen * 1103515245u, a = v, sum = ((uint32_t)((int32_t)v >> 16)) & 0x7fffu; int k;
+    chispa_gen = v;
+    for (k = 0; k < 5; k++) { a = (a >> 1) & 0x7fffffffu; sum += a & 0x7fffu; }
+    return (float)(int32_t)sum * 3.05175709e-05f - 3.0f;
+}
+static void chispas_paso(const coche_t *c, const float *r)
+{
+    int i, k, n; float q[4][3], mov[4], vc[3];
+    for (i = 0; i < 4; i++) {
+        float fx = i < 2 ? fpar.cg_del : -fpar.cg_tras, ly = fpar.via[i >> 1] * ((i & 1) ? -0.5f : 0.5f), d2 = 0;
+        for (k = 0; k < 3; k++) { q[i][k] = c->pos[k] + c->fw[k] * fx + r[k] * ly; d2 += (q[i][k] - chispa_ant[i][k]) * (q[i][k] - chispa_ant[i][k]); }
+        mov[i] = sqrtf(d2);
+    }
+    for (k = 0; k < 3; k++) vc[k] = c->pos[k] - chispa_coche_ant[k];
+    if (!chispa_hay || vc[0] * vc[0] + vc[1] * vc[1] + vc[2] * vc[2] > 25.0f) {   /* recien colocado (salida, grua): sin rastro */
+        chispa_hay = 1; memset(chispa_cnt, 0, sizeof chispa_cnt); chispa_muro = chispa_coche = 0;
+        for (i = 0; i < 4; i++) mov[i] = 0;
+        vc[0] = vc[1] = vc[2] = 0;
+    }
+    for (i = 0; i < 4; i++) {                                   /* peticiones (0x10b740..0x10b7e8) */
+        float e = 0.0199999996f;                                /* 0x32b270 */
+        if (chispa_muro >> i & 1) { chispa_disp[i][0] = e; chispa_disp[i][1] = e * 3.0f; chispa_disp[i][2] = e; chispa_cnt[i] = 15; }
+        else if (chispa_coche >> i & 1) { chispa_disp[i][0] = e * 3.0f; chispa_disp[i][1] = e; chispa_disp[i][2] = e * 3.0f; chispa_cnt[i] = 15; }
+    }
+#ifdef DIAG_CHISPA
+    if (chispa_muro | chispa_coche) { static int m; if (m++ % 10 == 0) dbglog(DBG_INFO, "CHISPA muro %x coche %x mov %.3f %.3f %.3f %.3f vivas %d\n",
+        chispa_muro, chispa_coche, (double)mov[0], (double)mov[1], (double)mov[2], (double)mov[3], chispa_n); }
+#endif
+    chispa_muro = chispa_coche = 0;
+    for (n = 0; n < 4; n++) {                                   /* nacen (0x10b970..): en el orden de las ruedas del original */
+        float a[3], paso[3], base[3]; int j, lleno = 0;
+        i = n ^ 1;
+        if (chispa_cnt[i] <= 0) continue;
+        chispa_cnt[i]--;
+        if (mov[i] < 0.00999999978f) continue;                  /* 0x3C23D70A */
+        for (k = 0; k < 3; k++) { base[k] = vc[k] * 0.899999976f; paso[k] = (q[i][k] - chispa_ant[i][k]) * (1.0f / 30.0f); a[k] = chispa_ant[i][k]; }
+        base[1] += 0.0299999993f; a[1] += 0.699999988f;
+        for (j = 0; j < 30; j++) {
+            chispa_t *h;
+            if (chispa_n >= NCHISPA) { lleno = 1; break; }      /* sin sitio: 0x10ba9c sale de la funcion */
+            h = chispas + chispa_n++;
+            (void)(chispa_gen *= 1103515245u);                  /* la prueba de nacer (0x1085e0) gasta un paso */
+            for (k = 0; k < 3; k++) h->p[k] = chispa_azar() * 0.00999999978f + a[k];
+            for (k = 0; k < 3; k++) h->v[k] = chispa_azar() * chispa_disp[i][k] + base[k];
+            h->vida = (int)((float)(rand() & 0x7fffffff) * 50.0f * 4.65661287e-10f) + 10;
+            for (k = 0; k < 3; k++) a[k] += paso[k];
+        }
+        if (lleno) break;
+    }
+    {   /* 0x10bba0 con el plano de la rueda 0 del original (del. izq.: su contacto y la normal del suelo) */
+        const float *o = q[1], *nr = c->up;
+        for (i = 0; i < chispa_n; ) {
+            chispa_t *h = chispas + i; float d, m;
+            for (k = 0; k < 3; k++) h->p[k] += h->v[k];
+            h->v[0] *= 0.99000001f; h->v[2] *= 0.99000001f;
+            d = (h->p[0] - o[0]) * nr[0] + (h->p[1] - o[1]) * nr[1] + (h->p[2] - o[2]) * nr[2];
+            if (d < 0.0f) {
+                m = -(h->v[0] * nr[0] + h->v[1] * nr[1] + h->v[2] * nr[2]); m += m;
+                for (k = 0; k < 3; k++) h->v[k] += m * nr[k];
+            }
+            h->vida--; h->v[1] -= 0.00270600803f;               /* 0x3B315723 */
+            chispa_par = h->vida & 1;
+            if (h->vida <= 0) *h = chispas[--chispa_n]; else i++;
+        }
+    }
+    memcpy(chispa_ant, q, sizeof chispa_ant); memcpy(chispa_coche_ant, c->pos, 12);
+}
+static void chispas_dibuja(void)
+{
+    int i, k; pt_t t[4];
+    if (!chispa_n || !chispa_tex_ok) return;
+    pvr_prim(&cab_chispa[chispa_par ? 1 : 0], sizeof(pvr_poly_hdr_t));   /* vida impar: 0x570028; par: 0x570029 */
+    for (i = 0; i < chispa_n; i++) {
+        float x = chispas[i].p[0], y = chispas[i].p[1], z = chispas[i].p[2], w, m;
+        mat_trans_single3_nodivw(x, y, z, w);
+        if (w < cerca) continue;
+        m = 4.80000019f * fx * (1.0f / 320.0f);                 /* 16 x 0,6 x 0,5 x proyeccion; / w al dividir */
+        if (m < 2.5f * w) m = 2.5f * w; else if (m > 32.0f * w) m = 32.0f * w;
+        m *= 0.5f;
+        if (!ta_cabe(4)) return;
+        for (k = 0; k < 4; k++) {
+            t[k].x = x + ((k & 1) ? m : -m); t[k].y = y + ((k & 2) ? m : -m); t[k].w = w;
+            t[k].u = (float)(k & 1); t[k].v = (float)(k >> 1); t[k].c = 0xFFFFFFFF; t[k].o = 0;
+            envia(t + k, k == 3);
+        }
+    }
+}
+
+/* buf_arr: bufer de paso de los textos y de la mancha del humo (se suben a la VRAM al momento); el texto del centro usa
+   su principio (antes tenia el suyo, y la mancha otro: 18 KB de RAM que ahora ocupan las chispas) */
+#define TAM_CEN (256 * 32 * 2)
+static uint16_t buf_arr[512 * 128] __attribute__((aligned(32)));
 static void efectos_inicia(void)
 {
-    static uint16_t t[32 * 32] __attribute__((aligned(32))); int x, y; pvr_poly_cxt_t cx; uint32_t sz;
+    uint16_t *t = buf_arr; int x, y; pvr_poly_cxt_t cx; uint32_t sz;
     uint8_t *e = gd_carga("EFECTOS.DAT", &sz);
     for (y = 0; y < 32; y++) for (x = 0; x < 32; x++) {           /* mancha redonda y suave (ARGB4444, lineal) */
         float d = sqrtf((x - 15.5f) * (x - 15.5f) + (y - 15.5f) * (y - 15.5f)) / 15.5f, a = fmaxf(0, 1 - d);
         t[y * 32 + x] = ((int)(a * a * 15) << 12) | 0x0EEE;
     }
-    tex_humo = pvr_mem_malloc(sizeof t); pvr_txr_load(t, tex_humo, sizeof t);
+    tex_humo = pvr_mem_malloc(32 * 32 * 2); pvr_txr_load(t, tex_humo, 32 * 32 * 2);
     pvr_poly_cxt_txr(&cx, PVR_LIST_TR_POLY, PVR_TXRFMT_ARGB4444 | PVR_TXRFMT_NONTWIDDLED, 32, 32, tex_humo, PVR_FILTER_BILINEAR);
     cx.gen.fog_type = PVR_FOG_TABLE; cx.txr.env = PVR_TXRENV_MODULATEALPHA; pvr_poly_compile(&cab_humo, &cx);
     if (e && sz >= 8 && !memcmp(e, "EFE1", 4)) {                /* texturas de las marcas (tools/conv_efectos.py) */
@@ -3681,6 +3842,17 @@ static void efectos_inicia(void)
             pvr_poly_compile(&cab_marca[k], &cx);
             marca_tex_ok = k + 1;
         }
+        for (k = 0; k < 2 && n >= NMARCA_CLASES + 2 && marca_tex_ok == NMARCA_CLASES && o + 16 <= sz; k++) {   /* chispas: 0x570028 y 0x570029 */
+            pvr_ptr_t v;
+            memcpy(h, e + o, 16); o += 16;
+            if (h[2] > 2 || o + h[3] > sz || !(v = pvr_mem_malloc(h[3]))) break;
+            pvr_txr_load(e + o, v, h[3]); o += h[3];
+            pvr_poly_cxt_txr(&cx, PVR_LIST_TR_POLY, FMT[h[2]] | PVR_TXRFMT_TWIDDLED, h[0], h[1], v, PVR_FILTER_BILINEAR);
+            cx.blend.src = PVR_BLEND_ONE; cx.blend.dst = PVR_BLEND_ONE; cx.gen.culling = PVR_CULLING_NONE;
+            cx.depth.write = PVR_DEPTHWRITE_DISABLE; cx.txr.env = PVR_TXRENV_MODULATE;
+            pvr_poly_compile(&cab_chispa[k], &cx);
+            chispa_tex_ok = k == 1;
+        }
     }
     free(e);
 }
@@ -3688,6 +3860,7 @@ static void efectos_borra(void)
 {
     memset(marca_n, 0, sizeof marca_n); memset(marca_sig, 0, sizeof marca_sig); memset(rmarca, 0, sizeof rmarca);
     memset(humos, 0, sizeof humos);
+    chispa_n = 0; chispa_hay = 0; chispa_muro = chispa_coche = 0;
 }
 /* 41FDD0: un tramo de la marca de la rueda r (borde nuevo L, R) en el anillo de su clase; devuelve la fraccion de v */
 static float marca_tramo(rueda_marca_t *r, const float *L, const float *R, float a_nuevo, float a_viejo, int clase)
@@ -3707,6 +3880,7 @@ static void efectos_paso(const coche_t *c, float dt)
     int i, k; float r[3], q[3], up[3];
     memcpy(up, c->up, 12);
     r[0] = c->fw[1] * up[2] - c->fw[2] * up[1]; r[1] = c->fw[2] * up[0] - c->fw[0] * up[2]; r[2] = c->fw[0] * up[1] - c->fw[1] * up[0];
+    chispas_paso(c, r);
     for (i = 0; i < NHUMO; i++) if (humos[i].edad > 0) { humos[i].edad += dt; humos[i].p[1] += 0.8f * dt; if (humos[i].edad > 1.0f) humos[i].edad = 0; }
     for (i = 0; i < 4; i++) {
         rueda_marca_t *mk = rmarca + i;
@@ -3828,11 +4002,12 @@ static void efectos_dibuja(void)
 #ifdef DIAG_SALIDA
     diag_humo_pct = (uint32_t)(humo_px * 100.0f / (640.0f * 480.0f));
 #endif
+    chispas_dibuja();
 }
 
 /* ---------------------------------------------------------------- textos */
 static pvr_ptr_t txt_arr, txt_cen;
-static uint16_t buf_arr[512 * 128] __attribute__((aligned(32))), buf_cen[256 * 32] __attribute__((aligned(32)));
+
 static void texto_arriba(const char *l1, const char *l2, const char *l3)
 {
     memset(buf_arr, 0, sizeof buf_arr);
@@ -3844,9 +4019,9 @@ static void texto_arriba(const char *l1, const char *l2, const char *l3)
 static void texto_centro(const char *s)
 {
     int n = strlen(s);
-    memset(buf_cen, 0, sizeof buf_cen);
-    bfont_draw_str(buf_cen + 4 * 256 + (256 - 12 * n) / 2, 256, 1, s);
-    pvr_txr_load(buf_cen, txt_cen, sizeof buf_cen);
+    memset(buf_arr, 0, TAM_CEN);
+    bfont_draw_str(buf_arr + 4 * 256 + (256 - 12 * n) / 2, 256, 1, s);
+    pvr_txr_load(buf_arr, txt_cen, TAM_CEN);
 }
 static void rect_txr(pvr_ptr_t t, int w, int h, float x, float y, float W, float H, int lista)
 {
@@ -6725,7 +6900,7 @@ int main(int argc, char **argv)
     pvr_init(&pp);
     pvr_set_shadow_scale(true, SOMBRA_ESCALA);                  /* lo que queda dentro de la sombra del coche */
     pvr_set_bg_color(0.45f, 0.65f, 0.95f);
-    txt_arr = pvr_mem_malloc(sizeof buf_arr); txt_cen = pvr_mem_malloc(sizeof buf_cen);
+    txt_arr = pvr_mem_malloc(sizeof buf_arr); txt_cen = pvr_mem_malloc(TAM_CEN);
     if ((tex_gris = pvr_mem_malloc(128))) { uint16_t g[64]; for (i = 0; i < 64; i++) g[i] = 0xF888; pvr_txr_load(g, tex_gris, 128); }
     for (i = 0, r = 0; i < NMODTRAF; i++) { r |= sube_modelo(&mtraf[i]); if (!r) compacta_modelo(&mtraf[i]); }   /* texeles fuera de la RAM */
     /* (la etapa de salida no: su VRAM la da curso_reinicia, en la zona del curso, al empezar la carrera) */
@@ -7002,8 +7177,12 @@ int main(int argc, char **argv)
 #ifdef PRUEBA_CHOQUE
                 if (t_estado == 60 && fis_ok) {                 /* prueba: a ~280 km/h y 50 grados contra el muro derecho */
                     float p[3], th; ruta_en(yo.s, p, &th, NULL, NULL);
-                    or2_coloca(&fis, &fpar, th + 0.87f, 280.0f / (fpar.hud * 3.6f));
+                    or2_coloca(&fis, &fpar, th + (yo.x < 0 ? -(CHOQUE_ANG) : CHOQUE_ANG), CHOQUE_V / (fpar.hud * 3.6f));   /* al muro mas cercano */
                 }
+                if (t_estado >= 60 && fis_ok && (fis.t_choque > 0 || fis.grua > 0 || t_estado % 10 == 0))
+                    dbglog(DBG_INFO, "VUELCO t %d kmh %d/%d nivel %d estado %d t_choque %.3f t_recup %.3f grua %d pose_t %.2f %.2f %.2f pose_r %.2f %.2f %.2f x %.2f\n",
+                           t_estado, fis.kmh, (int)(fpar.v_tope * 216.720001f), fis.nivel_etapa, fis.choque, (double)fis.t_choque, (double)fis.t_recup, fis.grua,
+                           (double)fis.pose_t[0], (double)fis.pose_t[1], (double)fis.pose_t[2], (double)fis.pose_r[0], (double)fis.pose_r[1], (double)fis.pose_r[2], (double)yo.x);
 #endif
                 if (auto_) piloto(&yo, &giro, &gas, &freno);
 #ifdef PRUEBA_PILOTO_MENU
@@ -7023,6 +7202,9 @@ int main(int argc, char **argv)
                 piloto(&yo, &giro, &gas, &freno);               /* prueba: el piloto, un toque de freno y la vista */
                 if (crono >= GUION_DERRAPE && crono < GUION_DERRAPE + 12) { freno = 1; gas = 0; giro = giro < 0 ? -1 : 1; }
                 if (crono == 700 || crono == 760) nuevo |= CONT_Y;
+#endif
+#if defined(PRUEBA_CHOQUE) && defined(CHOQUE_GIRO)
+                if (t_estado >= 60) { giro = yo.x < 0 ? -(CHOQUE_GIRO) : CHOQUE_GIRO; gas = 1; freno = 0; }   /* prueba: roza el muro */
 #endif
                 mando.usa = st && !auto_;
 #ifdef PRUEBA_GUION
@@ -7065,6 +7247,7 @@ int main(int argc, char **argv)
 #elif defined(PRUEBA_GUION)
                 if (guion_i < (int)(sizeof guion_cong / sizeof guion_cong[0]) && crono == guion_cong[guion_i]) {
                     guion_hasta = timer_ms_gettime64() + 3000; guion_i++; pasos = paso + 1;
+                    dbglog(DBG_INFO, "GUION congelado %d (cuadro %d)\n", guion_i, crono);
                 }
 #endif
                 {   int toca = pt_toca;

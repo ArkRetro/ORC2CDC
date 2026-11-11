@@ -1532,6 +1532,7 @@ static void salidas(or2_coche_t *c, const or2_param_t *p)
 void or2_paso(or2_coche_t *c, const or2_param_t *p, const or2_entrada_t *e, float dt)
 {
     int n = 0;
+    c->nivel_etapa = e->nivel;
 #if defined(__sh__)
     /* la FPU del EE de la PS2 redondea hacia cero (no es IEEE): la SH4 hace lo mismo con FPSCR.RM = 1 mientras
        dura el paso (en el banco, REDONDEO=cero); el resto del programa sigue con el redondeo al mas cercano */
@@ -2058,18 +2059,27 @@ static int aplasta(or2_coche_t *c, const or2_param_t *p, float imp, int lado)
 }
 
 /* CbwColiWall (5041B0) para el jugador: roce, rebote y choque fuerte (CwCrushStatus) */
-#define ANG_APLASTA 0.785398185f   /* crush_threshold: 45 grados (propiedad de la etapa 0; si no, 25 o 18) */
+/* crush_threshold (PC pc_wall_controller.cpp, PS2 0x1994c4..0x19954c): 45 grados en la etapa de nivel 0 (44C940 =
+   PS2 0x177270 da 0); en las demas 25 grados si la curva que viene (+D4E - +D4C, x 2 pi / 65536) no pasa de 20
+   grados y 18 si pasa */
+static float ang_aplasta(const or2_coche_t *c, int16_t dl)
+{
+    if (c->nivel_etapa == 0) return 0.785398185f;                       /* 3F490FDB */
+    return (float)iabs(dl) * 9.58738019e-05f <= 0.349065840f ? 0.436332315f : 0.314159274f;   /* 38C90FDB, 3EB2B8C2, 3EDF66F3, 3EA0D97C */
+}
 int or2_choque_muro(or2_coche_t *c, const or2_param_t *p, float nx, float ny, float pen)
 {
     v2 v = mk(c->vx, c->vy), n = mk(nx, ny), f;
     float sp = lon2(v), vn, imp, lim;
     int16_t dl;
     int lado, fuerte = 0;
+    float ANG_APLASTA;
     if (sp < 0.0001f) return 0;
     vn = v.x * n.x + v.y * n.y;
     /* calc_wall_impact_angle: 90 grados - acos(|v . n|) */
     imp = 1.57079637f - acosf(clampf(fabsf(vn) / sp, 0.0f, 1.0f));
     dl = s16((int32_t)c->d4e - c->d4c);
+    ANG_APLASTA = ang_aplasta(c, dl);
     /* rebound_threshold: 5 grados (10 si la curva va hacia el otro lado), 25 rozando o tras un golpe */
     if (c->kmh >= 50 && c->roce == 0 && c->c282 == 0) {
         lim = 0.0872664601f;

@@ -360,6 +360,7 @@ typedef struct {
                             /* lo pone en el punto de la grua (lo borra quien lo lee)                 */
     float corr_lat;         /* RebPlBody_Sub2 4A0320: desplazamiento lateral pedido durante el rebote */
                             /* (m, + derecha de la carretera); lo suma y lo borra el juego            */
+    int   nivel_etapa;      /* nivel de la etapa del ultimo paso (crush_threshold de CbwColiWall, PS2 0x1994c4)  */
 } or2_coche_t;
 
 /* Copia los campos de una columna. tabla = floats LE tal cual (filas*19).
