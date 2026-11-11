@@ -69,9 +69,20 @@ def triangulos_dibujados(P):
     return ~no_dibuja(P)[2:]
 
 def tiras(pk):
-    """tiras de un paquete: cada una empieza por su GIFtag (UNPACK 0x6c); dict tipo -> array"""
+    """tiras de un paquete: cada una empieza por su GIFtag (UNPACK 0x6c); dict tipo -> array.
+    Un flujo de una tira puede venir en varios UNPACK seguidos del mismo tipo (las UV en diferencias de 16 bits, STMOD
+    2: cuando la diferencia no cabe hay un STROW nuevo y otro UNPACK que sigue en la direccion siguiente; p. ej. la
+    cupula del fundido del cielo de PALM: 16 + 1 + 62 UV para sus 79 vertices). Se juntan mientras no pasen de los
+    vertices de la tira; antes solo se guardaba el primero, la cuenta no cuadraba con la de vertices y la tira salia
+    con UV 0 (un color liso: el texel de la esquina). Un segundo flujo entero del mismo tipo no se junta (se queda el
+    primero, como antes)."""
+    import numpy as np
     res=[]
     for t,a in pk.get('orden',[]):
         if t==0x6c or not res: res.append({})
-        res[-1].setdefault(t,a)
+        r=res[-1]
+        if t in r and t not in (0x6c,0x68) and a is not None and r[t] is not None and 0x68 in r \
+           and a.ndim==r[t].ndim==2 and a.shape[1]==r[t].shape[1] and len(r[t])<len(r[0x68]) and len(r[t])+len(a)<=len(r[0x68]):
+            r[t]=np.concatenate([r[t],a])
+        else: r.setdefault(t,a)
     return [r for r in res if 0x68 in r]
