@@ -27,6 +27,7 @@
 #include "../comun/modo_video.h"
 #include "camara.h"
 #include "fin.h"
+#include "sp.h"
 #include "coli.h"
 #ifdef DIAG_PERFIL
 #include "perfil.h"
@@ -2215,8 +2216,8 @@ static int traf_fijo(int en_union, int nodo, int pos)
    su peso, pasando a la siguiente (0..4) cada vez. Cuenta de la clase 800D3C + c (PS2 0x5c7718) + 1. Modelo: clase 0
    0x29 / 0x27 (preset 1 o 3) o 0x29 / 0x2B (cuenta >= 2 vuelve a 0), 1 y 2 0x28 (1 / 3) o 0x2B, 3 0x1F; clase 4 con
    el preset 1 o 3 (sin red ni rivales: 80FB14 = PS2 [0x443514] = 0) 0x1E, 0x20, 0x21, 0x22, 0x23, 0x24 y desde 6
-   vuelve a 0 (0x1db49c..0x1db578), si no la lista de 7 en orden. En el INFARTO (variante 2) el original cambia la
-   clase 0 por la 4 salvo en el tipo de mision 0x16 (45C440): aqui se queda la clase 4 de siempre (SIMPLIFICADO). Los
+   vuelve a 0 (0x1db49c..0x1db578), si no la lista de 7 en orden. En el INFARTO (variante 2) la clase 0 pasa a la 4
+   salvo en el tipo de peticion 0x16 (45C440 = PS2 0x1af3f8, 0x1db3c0), con la cuenta de la clase que salio. Los
    valores iniciales del dado y las cuentas a 0 son los de 46C950 (PS2 0x1d9c40: 0x78, 0x67, 0x69, 0x5E, 0xD4). */
 static int traf_clase;                                          /* 800D9C */
 static uint8_t traf_cnt[5], traf_dado[5];                       /* 800D3C.., 80A668.. */
@@ -2229,29 +2230,32 @@ static void traf_clase_sig(void) { if (++traf_clase >= 5) traf_clase = 0; }   /*
 static int traf_dado_tira(int c) { traf_dado[c] = (uint8_t)(traf_dado[c] * 5 + 1); return traf_dado[c] * 100 / 255; }
 static int traf_modelo_46ce30(const uint8_t *rec)
 {
-    int k = 0, c;
+    int k = 0, c; uint8_t *n;
     while (k < 5 && !rec[6 + k]) k++;
-    if (k == 5 || variante == 2) traf_clase = c = 4;
+    if (k == 5) traf_clase = c = 4;
     else {
         c = traf_clase;
         while (!(traf_dado_tira(c) < (int8_t)rec[6 + c])) if (++c >= 5) c = 0;
         traf_clase = c;
     }
-    traf_cnt[c]++;
+    n = &traf_cnt[c]; (*n)++;                                   /* la cuenta de la clase que salio (0x1db37c: s0) */
+    /* INFARTO (0x1db3c0..0x1db3ec): fuera del tipo de peticion 0x16 (45C440 = 0x1af3f8) la clase 0 pasa a la 4 (con la
+       cuenta de la 0) */
+    if (variante == 2 && infarto_hud()->tipo != 0x16 && c == 0) traf_clase = c = 4;
     switch (c) {
     case 0:
-        if ((int8_t)traf_cnt[0] >= 2) traf_cnt[0] = 0;
-        return preset_curso == 1 || preset_curso == 3 ? (traf_cnt[0] ? 0x29 : 0x27) : (traf_cnt[0] ? 0x29 : 0x2b);
-    case 1: case 2: traf_cnt[c] = 0; return preset_curso == 1 || preset_curso == 3 ? 0x28 : 0x2b;
-    case 3: traf_cnt[3] = 0; return 0x1f;
+        if ((int8_t)*n >= 2) *n = 0;
+        return preset_curso == 1 || preset_curso == 3 ? (*n ? 0x29 : 0x27) : (*n ? 0x29 : 0x2b);
+    case 1: case 2: *n = 0; return preset_curso == 1 || preset_curso == 3 ? 0x28 : 0x2b;
+    case 3: *n = 0; return 0x1f;
     }
     if (preset_curso == 1 || preset_curso == 3) {
         static const uint8_t SP[6] = { 0x1e, 0x20, 0x21, 0x22, 0x23, 0x24 };
-        if ((int8_t)traf_cnt[4] >= 6) traf_cnt[4] = 0;
-        return SP[traf_cnt[4]];
+        if ((int8_t)*n >= 6) *n = 0;
+        return SP[*n];
     }
-    traf_cnt[4] = (uint8_t)((int8_t)traf_cnt[4] % 7);
-    return tap_modelos[traf_cnt[4]];
+    *n = (uint8_t)((int8_t)*n % 7);
+    return tap_modelos[*n];
 }
 /* 4787E0: un coche al azar delante del jugador */
 static void traf_azar(int en_union, int nodo, int pos, const uint8_t *rec)
@@ -4560,11 +4564,13 @@ static void curso_reinicia(void)
     if (!etapa.datos || etapa_nodo != k) {
         int r;
         libera_modelo(&etapa);
+        sp_carga_cuadro();                                      /* (OUTRUN2SP: la pantalla de carga) */
         musica_pausa_lectura(1);                                /* el GD para la etapa (la musica tira del anillo) */
         r = curso_lee_etapa(k);
         musica_pausa_lectura(0);
-        if (r) curso_error("No se pudo leer la etapa de salida");
+        if (r) { char nn_[16]; sprintf(nn_, "SEG%02d.DAT", curso[k].seg); dbglog(DBG_ERROR, "CURSO: %s da %d\n", nn_, r); curso_error("No se pudo leer la etapa de salida"); }
     } else tex_suelta(&etapa);                                  /* la misma: sus texeles siguen en el hueco de la RAM */
+    sp_carga_cuadro(); sp_carga_sale();                         /* la VRAM de la pantalla de carga, antes de la zona */
     if (ar_bloque) { ar_suelta(); thd_sleep(40); }              /* (la PowerVR puede estar leyendo el cuadro anterior) */
     ar_reserva();                                               /* la zona del curso: lo libre tras el HUD y el coche */
     sube_tramo(&etapa, 1, NULL);
@@ -7342,11 +7348,11 @@ int main(int argc, char **argv)
             if (rp != PAUSA_SIGUE) { pausa = 0; menu_pausa_sale(); }
             if ((rp == PAUSA_REINTENTA || rp == PAUSA_ABANDONA) && !auto_ && juego_sp) {
                 /* el juego de OUTRUN2SP (1b4878 = 0): REINTENTAR pide el modo 30 (0x249ca8: la salida otra vez) y
-                   ABANDONAR el 27 GAME OVER (0x24a150; banderin 0x34001F) -> 28 -> el frontal de recreativa (10). Sin
-                   ese frontal ni el banderin (SIN PORTAR) ABANDONAR vuelve al menu */
+                   ABANDONAR el 27 GAME OVER (0x24a150, 450230(7): la carrera suspendida y la escena 2C000B, 0x1a051c)
+                   -> 28 -> el frontal de recreativa (10; SIN PORTAR: vuelve al menu) */
                 menu_suma_tiempo(crono);                        /* tiempo de juego (PS2 0x249c5c / 0x24a110) */
                 if (rp == PAUSA_REINTENTA) { estado = TITULO; reintenta = 1; }
-                else { estado = TITULO; texto_centro(""); hud_baja_tex(); menu_entra(manual_, pista, NPISTAS); }
+                else { fin_game_over(); fin_on = 1; estado = FIN; t_estado = 0; }
             } else if ((rp == PAUSA_REINTENTA || rp == PAUSA_ABANDONA) && !auto_) {
                 menu_suma_tiempo(crono);                        /* tiempo de juego (PS2 0x249c5c / 0x24a110) */
                 /* con la consola (1b4878 = 43F860) los dos piden el modo 0x22 (OutRun Miles) con 450230(6) / (7) y la
@@ -7419,6 +7425,9 @@ int main(int argc, char **argv)
                 fisica_modelo(modelo_jug);                      /* peso, agarre, motor y marchas de ese coche */
                 if (hud_ok) hud_pon_modelo(modelo_jug);         /* y su tacometro */
                 if (hud_ok && hud_sube_tex()) hud_ok = 0;
+                /* OUTRUN2SP: la pantalla de carga del preset (0x1b8228; sus texturas detras de las del HUD y fuera antes
+                   de reservar la zona del curso, demo/sp.c) */
+                if (juego_sp) sp_carga_entra(variante, preset_curso);
                 presta_union(0);                                /* el hueco de la union vuelve a la carrera */
                 curso_reinicia();                               /* la etapa de salida (otra vez, si hacia falta) */
                 bo_inicia();                                    /* sin objetos de union y las cuentas a cero */

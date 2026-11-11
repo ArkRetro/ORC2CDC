@@ -93,8 +93,8 @@ class Disco:
         self.n_spr = [n for n in nombres(rb'(?i)\\sprite\\spr_[A-Za-z0-9_]+\.sz') if not n.lower().endswith('_jxst.sz')]
         self.p_ani = self.iso.paquete('SPRANI.PS2'); self.p_spr = self.iso.paquete('SPRITE.PS2')
         assert len(self.p_ani) == len(self.n_ani), 'SPRANI.PS2 no cuadra con los nombres del ejecutable'
-        # SPRITE.PS2 tiene una entrada mas (sin nombre en el ejecutable) detras de ranking_cvt: los bancos del HUD
-        # estan antes y no se ven afectados (se comprueba en banco())
+
+
         assert len(self.p_spr) in (len(self.n_spr), len(self.n_spr) + 1), 'SPRITE.PS2 no cuadra'
 
     def _ent(self, p, k):
@@ -111,7 +111,12 @@ class Disco:
         cand = ['spr_sprani_%s_%sxst.sz' % (clave, letra), 'spr_sprani_%s_exst.sz' % clave, 'spr_sprani_%s_xst.sz' % clave]
         lo = self.n_spr
         ix = next(lo.index(c) for c in cand if c in lo)
-        assert ix < lo.index('spr_sprani_ranking_cvt_exst.sz') or len(self.p_spr) == len(lo), 'indice de XST dudoso'
+        # la entrada sin nombre de SPRITE.PS2 es spr_sprani_ranking_cvt_xst (en orden, detras de la _sxst: mismo tamano
+        # que la _exst): los XST de despues (route_cvt, selector_cvt...) van una entrada mas alla
+        if len(self.p_spr) == len(lo) + 1 and ix > lo.index('spr_sprani_ranking_cvt_sxst.sz'):
+            r = lo.index('spr_sprani_ranking_cvt_exst.sz')
+            assert self.p_spr[lo.index('spr_sprani_ranking_cvt_sxst.sz') + 1][2] == self.p_spr[r][2], 'XST sin nombre?'
+            ix += 1
         xst = self._ent(self.p_spr, ix)
         return Ani(self._ent(self.p_ani, ia)), texturas(xst), xst
 

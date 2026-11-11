@@ -24,6 +24,7 @@
      10; m += 84BCF8 (por etapa: 4EF460 +25 / +10 / +10 / +25 / +15 / +15 por cada estadistica limpia y 4EF440 40 por
      segundo por debajo de 60, desde 4F2B20); fuera de red m += (car+E78 / 60) x 5 (car+E78: veces que el rebufo
      encontro un coche mejor, CheckSlipStream) y car+E78 = 0.
+   - OUTRUN2SP (1b4878 = 0): ABANDONAR de la pausa va directo al modo 27 (fin_game_over) con la misma escena 2C000B.
    SIN PORTAR: la bandera 84BCFC y su suma (las tablas de records no estan en el port: nunca se pone), las variantes 4
    (red) y 6 (misiones de C2C: 4EF550 con 496510 / 495890, otros tokens en el modo 35), la espera de la muestra 0x1a1 de
    los modos 34 (pausa) y el bloqueo de botones del modo 35 (+0x5E0 del objeto 0x375068, PC +0x518 de 4035F0: sin
@@ -142,6 +143,18 @@ static void a_game_over(void)                           /* 0x1bafc8 */
     if (fd) sube(u_go);
     t_go = 0;                                           /* 0x1a04f0: el GAD crea la escena y dice la voz una vez */
     if (voz_go) { voz_go = 0; sfx_voz(0x954); }
+}
+
+/* OUTRUN2SP (1b4878 = 0): ABANDONAR de la pausa pide el modo 27 directamente (0x24a150, 450230(7)); con 450240 = 7 el GAD
+   crea la misma escena 2C000B que la consola (0x1a051c; 34001F es la de los demas finales de este juego) */
+void fin_game_over(void)
+{
+    int i;
+    hud_baja_tex(); hudd_vacia();
+    u_millas = u_preg = u_elige = -1;
+    for (i = 0; i < 8; i++) u_cifra[i] = -1;
+    como = FIN_PAUSA_ABANDONA;
+    a_game_over();
 }
 
 int fin_paso(uint32_t nuevo)

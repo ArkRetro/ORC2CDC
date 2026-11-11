@@ -1885,8 +1885,14 @@ arcade_attract.cpp):
   -> preset 0 / 1, filas 3 / 4 -> preset 2 / 3; 43F940 / 43F950 y 44DA00(0 / 1 / 5 / 6)), "Elige coche" (con el coche
   3D, 4A7080 / 475670), cambio, "Elige la musica" (5C8D00), "Shortcut Features" (SI / NO), "Modo controvertido" (coche
   preparado), carrera (funcion 0xB 4C05F0 -> START).
-- Carga: en el juego de OUTRUN2SP (0x1b8228, solo con [0x59acac] = 0, variantes 0..2) la pantalla "Cargando" del banco
-  0x2F (LOADING_CVT) con el logo y el mapa del curso del preset (tokens 0x2F0000..3).
+- Carga: en el juego de OUTRUN2SP (0x1b8228, solo con [0x59acac] = 0, variantes 0..2 y 6..9: tabla 0x3f9720) la
+  pantalla "Cargando" del banco 0x2F (LOADING_CVT) con el logo y el mapa del curso del preset: preset 0 -> 2F0002, 1 ->
+  2F0003, 2 -> 2F0000, 3 -> 2F0001, capa 2, modo 0 (en bucle), cuadros 0..0x77, creada al acabar de leer el curso en
+  START (0x1b64ac). HECHA (2026-11-11): tools/conv_sp.py -> CARGASP.DAT (grupos CARGA_P0..3), demo/sp.c. La demo carga
+  de un tiron: la escena se dibuja al empezar la carga y entre sus pasos con el cuadro del reloj de la logica (60000 /
+  1001 por segundo) y la pantalla se queda con el ultimo cuadro mientras dura cada paso; sus texturas (VQ, detras de las
+  del HUD) salen antes de reservar la zona del curso. Se quita al empezar la escena de la salida (el original la
+  deja hasta que START la borra: sin localizar en que estado; PROBABLE el mismo momento).
 - Fin: GOAL (modo 19) -> 33 -> 24 (final de recreativa AUTOSCENE \AS\as_E_xx, 485470, fondos END_*_STAGE) -> entrada
   de nombre (modo 26, race_name_entry.cpp, bancos NAME_CMN / NAME5A..E) y rankings de OUTRUN2SP (sp_rankings.cpp);
   sin licencia ni Miles (49CFD0 solo registra con 43F860 != 0). Tiempo agotado: modo 20 -> 0x19 (no 0x22). Pausa:
@@ -1915,8 +1921,8 @@ la de 800D9C (PS2 0x5c7740) se tira el dado de la clase (80A668 + c = PS2 0x5c77
 hasta que sale por debajo de su peso, pasando a la siguiente; 800D9C + 1 al abrir el coche (0..4). Valores iniciales
 46C950 (PS2 0x1d9c40): 0x78, 0x67, 0x69, 0x5E, 0xD4 y cuentas a 0. En el arbol 0 todos los registros son 0,0,0,0,100
 (sale la 4 como antes); en OUTRUN2SP SANF (0,0,0,3,97), YOSE (0,0,0,5,95)... dan la clase 3 (0x1F, el autobus).
-SIMPLIFICADO: en el INFARTO la clase sigue siendo 4 (el original cambia la 0 por la 4 salvo en el tipo de mision
-0x16, 45C440). Los modelos 39..43 (clases 0..2: camiones) no estan convertidos: se gastan sin coche, como los puntos
+En el INFARTO (variante 2) la clase 0 pasa a la 4 salvo en el tipo de peticion 0x16 (45C440 = PS2 0x1af3f8: [0x589b08],
+el tipo de infarto.c; 0x1db3c0..0x1db3ec), con la cuenta de la clase que salio (CORREGIDO 2026-11-11: antes siempre 4). Los modelos 39..43 (clases 0..2: camiones) no estan convertidos: se gastan sin coche, como los puntos
 fijos de esos modelos.
 
 Estado en la DC (verificado en E, tools/prueba/sp.sh: OUTRUN2SP desde el menu, coche, cambio, musica y 90 s de
@@ -1926,8 +1932,9 @@ etapas, salida BEAC`, BAND1.DAT en el hueco de la union; RAM libre 1419..1490 KB
   arriba. Fin: sin millas ni continuar (los de la consola, demo/fin.c, no son de este juego: 49CFD0 / 49D850 con
   43F860 = 0); tras la escena de la meta (EAST: escena 1 del preset 1, musica 66, verificado con el piloto desde el
   menu real) o el fin del tiempo vuelve al titulo sumando el crono a la licencia (0x1b96bc / 0x1b9b58); en la pausa
-  REINTENTAR es el modo 30 (la salida otra vez) y ABANDONAR vuelve al menu (el GAME OVER 27 de este juego, banderin
-  0x34001F, SIN PORTAR).
+  REINTENTAR es el modo 30 (la salida otra vez) y ABANDONAR el modo 27 GAME OVER (HECHO 2026-11-11, fin_game_over de
+  demo/fin.c: la carrera suspendida y, con 450240 = 7, la escena 2C000B de la consola, 0x1a051c; 0xF0 pasos y la voz
+  0x954) y despues al menu (el frontal de recreativa, modo 10, SIN PORTAR).
 - PENDIENTE de comprobar a ojo: el banderero del preset 1 (BAND1.DAT, "BAND: preset 1, en su sitio": (-4,5, 0, -21)
   girado 180 grados, movimiento 0x170004) no se distingue en las capturas de la salida de BEAC (tampoco con el modelo
   de BAND.DAT en esa posicion; con el preset 0 en PALM si se ve): por investigar si es la posicion en el marco de la
@@ -1938,7 +1945,7 @@ etapas, salida BEAC`, BAND1.DAT en el hueco de la union; RAM libre 1419..1490 KB
 - SIN PORTAR: el frontal de recreativa (las 12 funciones del suceso 4 de arcade_attract.cpp con sus tablas del ELF
   de PS2 por localizar: 5C8BE0 secuencia, 689DA8 filas del tipo de juego, 5C8D00 musica, 5C9204 rutas, y la
   conversion de SELECTOR_CVT), y con el los modos INFARTO / CONTRARRELOJ y los cursos OutRun 2 / de 15 niveles de
-  OUTRUN2SP; la pantalla de carga del banco 0x2F (0x1b8228); el final de recreativa (modo 24, AS.PS2), la entrada de
+  OUTRUN2SP; el final de recreativa (modo 24, AS.PS2), la entrada de
   nombre (modo 26) y los rankings de OUTRUN2SP; el GAME OVER del modo 27 al abandonar; la vuelta al frontal de
   recreativa (modo 10) en vez de al menu de la consola; las tablas de aparicion de las etapas al reves (SEG35, 51, 64,
   65 y las de los descriptores 30..59: el ELF las deja fuera del fichero, las rellena el juego al correr) quedan sin
