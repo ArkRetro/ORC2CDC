@@ -384,7 +384,7 @@ estaba y se dice lo que falta). Estado: CORREGIDO, SE QUEDA (ya era del original
 | Escala de puntos por avance (x10, x110) | PS2 0x28F984 / 4F2DF0 (K628244, K5C68E0) | igual | CONFIRMADO | SE QUEDA (ahora con m_pos) |
 | Piloto automatico de la demo (DEMO del titulo) | el original pasa la pelicula de MV.PS2 (ahora tambien la demo: video.c) | — | invento propio (solo si faltan las peliculas, o pruebas) | SE QUEDA |
 | META/AGOTADO: freno 0,6 y vuelta al titulo a los 600 cuadros | modo 19: la escena de la meta (4871A0 / 486730 / 486EF0, PasPlCar 475720, camara 4853D0) durante 0x4B0 cuadros | — | CONFIRMADO | CORREGIDO en la meta (2026-11-10: Escena de la meta); AGOTADO sigue igual (PROVISIONAL) |
-| Aviso de bifurcacion a 450 m de la separacion | 4BB890: BIFURCA con el avance car+0x102C entre 0,65 y 0,72 / 0,70 y 0,75 | — | PROVISIONAL | SE QUEDA |
+| Aviso de bifurcacion a 450 m de la separacion | 4BB890 (PS2 0x1c50c0, desde NAVI_PUB 0x1bd534: variante 1, modo 16): 2B0000 "<- FACIL" con el avance car+0x102C entre 0,65 y 0,72 (nivel 0) / 0,70 y 0,75 (nivel 1), presets 0, 1 y 4 | — | CONFIRMADO | CORREGIDO (2026-11-11, ver Bifurcacion: el rotulo <- FACIL) |
 | Marcas de las ruedas: 4 ruedas, media anchura del neumatico (filas 40/41 de la tabla de parametros), 0,2 m entre tramos, alfa 0,5, +0,05 m, v = longitud x 0,5, anillos 256/64/64, texturas 0x570000..2 (EFECTOS.DAT), clase por la superficie (0xC02 asfalto, 0x8004 tierra/arena, 0x18 hierba) | tire_mark_req 41FB50 / 41FDD0 / 4862C0 del PC; SLES-53998 0x10dcd0 / 0x10df38 / 0x1198f0, tabla 0x344d90, constantes 0x32b390..98 | igual | CONFIRMADO | CORREGIDO (2026-11-08) |
 | Marcas en asfalto: las traseras mientras dura el derrape | el original usa la mascara 95AFA8 de PcTireSmokeReq 41C570 (deslizamiento +E0 y agarre +E4 de cada rueda contra 74FF5C) | — | PROVISIONAL (la fisica de la demo no da +E0) | SE QUEDA |
 | Humo del derrape (32, vida 1 s, tamano 0,6 + 2,6 t), ahora desde las ruedas traseras de la fisica; tope de 2 pantallas de area por cuadro (limite de la PowerVR, ver Escena de la salida) | PcTireSmoke 41C420 / 41C570 / 41CB30 / 41D1E0 / 41D330 (fuente 4: 512 particulas, textura 0x19 del PC = 0x2e de obj_course_obj_common en PS2) | — | PROVISIONAL | SE QUEDA (pendiente: portar 41C570..41D5C0 y polvo 41DE20..41F4B0; chispas hechas, ver Sombras y marcas) |
@@ -2615,3 +2615,20 @@ hacia la union de CAST / FORE).
   vertices), como en el original si la dibuja en ese tramo. PENDIENTE: la lista de nodos por seccion del PS2
   (cs_CS_LAKE_bin) nombra ese nodo en 28 secciones sueltas (74..519 de 677) y su formato sigue sin descifrar (la demo
   usa la visibilidad precalculada propia, que no quita lo que se ve).
+
+## Bifurcacion: el rotulo <- FACIL (2026-11-11)
+
+Queja del usuario (demo 35): "falta el letrero de dificil al elegir ruta". Buscado en SLES-53998:
+- El unico rotulo de la bifurcacion es la escena 2B0000 del banco 0x2B (GAME_CVT): una sola capa de footage (textura
+  93 de 256 x 64 con "<- FACIL" en espanol, "<- EASY" en el XST ingles) con su eco que se desvanece, bucle de 60
+  cuadros. No hay otra: ni en las 124 texturas del banco 0x2B ni en las 135 del 0x2C (ETC_CVT) hay un "DIFICIL" /
+  "HARD"; las otras escenas del banco 0x2B que crea el ELF (jal 0x114b68: 2B000E, 2B0040/41/45/4A/4C/4D/50/5C) no son
+  de la bifurcacion; los textos de TEXT.PS2 con DIFICIL / HARD son los de la dificultad de las opciones (11, 12). Los porticos de la union llevan los nombres e iconos de los destinos (BUNKI), sin facil / dificil.
+- Cuando sale: 4BB890 (PC) = PS2 0x1c50c0, llamada solo desde NAVI_PUB en la variante 1 (OutRun) y el modo 16
+  (0x1bd534): con el preset [0x44350c] 0, 1 o 4; en el nivel 0 (car+0x68) se crea al llegar car+0x102C a 0,65 y se
+  suelta en 0,72; en el nivel 1, 0,70 y 0,75 (constantes 0x3f266666 / 0x3f3851ec / 0x3f333333 / 0x3f400000, c.ole.s);
+  ni en los niveles 2..4 ni en el INFARTO o la Contrarreloj. car+0x102C la pone 4A8330: fila / (filas del tramo de
+  43D470 + 1 + 0xF2) en la etapa y (filas + 1 + fila de la union) / lo mismo en la union.
+- La Dreamcast lo sacaba en todas las variantes y bifurcaciones desde 450 m antes de la separacion hasta elegir rama
+  (PROVISIONAL). Ahora como el original (demo/main.c `fac_on`, con `tr_fila` para la fila y las filas del tramo). No
+  se anade un "DIFICIL" que el original no tiene.

@@ -4371,6 +4371,13 @@ enum { TITULO, CUENTA, CARRERA, META, AGOTADO, FIN };   /* FIN: carrera suspendi
 #define PERIODO_60 1001000LL                                    /* us x 60 por paso de logica (59,94 Hz) */
 #define PASOS_MAX 600                                           /* 0x107a30: mas campos que esto -> 1 paso */
 static int t_cuenta = 9999, t_ext = 9999, t_bif;
+/* "<- FACIL" (2B0000, el unico rotulo de la bifurcacion del original: el banco 0x2B no tiene otro, ni "DIFICIL" en
+   espanol ni "HARD" en ingles) como 4BB890 (PS2 0x1c50c0, llamada desde NAVI_PUB 0x1bd534 solo con la variante 1 en
+   el modo 16): con el preset 0, 1 o 4 ([0x44350c]), en el nivel 0 (car+0x68) aparece al llegar car+0x102C a 0,65 y
+   se quita en 0,72; en el nivel 1, 0,70 y 0,75; en bucle (modo 0) desde el cuadro 0. car+0x102C (game_pl_car_ctrl
+   4A8330 del PC: fila / (filas del tramo de 43D470 + 1 + 0xF2); en la union (filas + 1 + fila) / lo mismo) es la parte
+   hecha de la etapa y su union. Antes salia en todas las variantes y bifurcaciones desde 450 m antes de elegir rama */
+static int fac_on, fac_base = 30001;
 static int etapa_n, hud_ok, crono, puntos;
 
 /* ---------------------------------------------------------------- el curso: el arbol del modo
@@ -7848,7 +7855,7 @@ int main(int argc, char **argv)
                 coche_paso(&yo, 0, 0, 0, 0); traf_inicia(SALIDA); efectos_borra();
                 if (fis_ok) { float p[3], th; ruta_en(yo.s, p, &th, NULL, NULL); or2_coloca(&fis, &fpar, th + yo.a, 0); }
                 lejos = LEJOS_PS2; entorno_reinicia(); niebla_paso(); niebla_pon();   /* la distancia del original */
-                tim_cuadros = tim_zona(cur_nodo, etapa_n); tiempo = tim_cuadros / TIM_HZ; estado = CUENTA; t_estado = 0; t_cuenta = -60; salida_entra(); pausa = 0; crono = 0; pt_inicia(); fin_carrera_empieza(!juego_sp);
+                tim_cuadros = tim_zona(cur_nodo, etapa_n); tiempo = tim_cuadros / TIM_HZ; estado = CUENTA; t_estado = 0; t_cuenta = -60; fac_on = 0; fac_base = 30001; salida_entra(); pausa = 0; crono = 0; pt_inicia(); fin_carrera_empieza(!juego_sp);
                 reintenta = 0;
                 if (voz_ok) voces_carrera();
                 if (variante == 2) {
@@ -8023,6 +8030,13 @@ int main(int argc, char **argv)
                         texto_centro(b); aviso_rama = 1;
                     }
                     if (ev & CUR_RAMA) { texto_centro(zona_nombre(cur_sig)); aviso_rama = 0; t_estado = 0; }
+                    if (variante == 1 && (preset_curso <= 1 || preset_curso == 4) && (etapa_n == 0 || etapa_n == 1)) {   /* 4BB890 */
+                        int fin_f, u_, pos_ = tr_fila(yo.s, &fin_f, &u_); float f;
+                        if (!u_) fac_base = fin_f + 1;
+                        f = (float)(u_ ? fac_base + pos_ : pos_) / (float)(fac_base + 0xF2);
+                        if (f >= (etapa_n ? 0.7f : 0.65f) && !fac_on) { fac_on = 1; t_bif = 0; }
+                        if (f >= (etapa_n ? 0.75f : 0.72f) && fac_on) fac_on = 0;
+                    } else fac_on = 0;
                     /* El checkpoint del original: el principio de la etapa siguiente (no la entrada de la union).
                        race_manager_control 4515B0: branch_state 7D38E8 = 4 al empezar; pasa a 8 al avanzar en la etapa,
                        a 1 al pisar en la union las banderas de colision 0x400/0x800 (poligonos de la posicion 8 de
@@ -8366,7 +8380,7 @@ int main(int argc, char **argv)
                         static const char *const CU[5] = { "CUENTA_PRE", "CUENTA_3", "CUENTA_2", "CUENTA_1", "CUENTA_GO" };
                         hud_aviso(CU[t_cuenta / 60], t_cuenta % 60, 1);
                     }
-                    if (estado == CARRERA && aviso_rama) hud_aviso("BIFURCA", t_bif % 60, 1);
+                    if (estado == CARRERA && fac_on) hud_aviso("BIFURCA", t_bif % 60, 1);   /* 2B0000 (4BB890) */
                     if (t_ext < 240) hud_aviso("TIEMPO_EXT", t_ext / 5, 1);
                     if (estado == META) hud_aviso("META", t_estado < 59 ? t_estado : 59, 1);
                     if (estado == AGOTADO) hud_aviso("FIN_TIEMPO", t_estado < 40 ? t_estado : 40 + (t_estado - 40) % 8, 1);
