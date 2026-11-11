@@ -32,6 +32,8 @@ int hudd_sube(hud_dat_t *h, int t0, int nt);             /* texturas [t0, t0+nt)
 /* bufer de RAM (alineado a 32) para lo temporal de hudd_sube (sectores leidos de un fichero parcial, indices de las
    paletas) o NULL; quien lo presta no lo toca mientras este puesto */
 void hudd_bufer(void *p, uint32_t tam);
+/* las tablas del siguiente hudd_abre parcial en p (cap bytes) si caben, en vez del monton (no se liberan al cerrar) */
+void hudd_tablas_en(void *p, uint32_t cap);
 void hudd_baja(hud_dat_t *h, int t0, int nt);
 void hudd_cierra(hud_dat_t *h);                          /* libera su VRAM y su RAM */
 /* fichero parcial: suelta las piezas de los grupos que no usan las texturas [t0, t0 + nt) (bytes) / las vuelve a leer */
@@ -49,5 +51,11 @@ int hudd_tex_uso(const hud_dat_t *h, int uso, int *t0);   /* texturas del grupo 
 void hudd_fin_cuadro(void);
 int hudd_pendiente(void);                                /* liberaciones aun pendientes */
 void hudd_vacia(void);                                   /* las libera ya (espera 40 ms): antes de una carga */
-void hudd_color(uint32_t rgb);                           /* color de las piezas que se dibujen despues (0xFFFFFF) */
+void hudd_color(uint32_t rgb);
+/* sprites sueltos (comun/sprani.c): ver hud.c */
+void hudd_capa(hud_dat_t *h, float z, int fondo);
+void hudd_sprite(int s, const float *m, const float *q, float alfa, int aditiva);
+int hudd_sprite_tex(const hud_dat_t *h, int s);
+float hudd_z(void);                                      /* z de la siguiente pieza */
+int hudd_residente(const hud_dat_t *h, int t);                           /* color de las piezas que se dibujen despues (0xFFFFFF) */
 #endif

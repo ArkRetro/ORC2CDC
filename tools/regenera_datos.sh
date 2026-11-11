@@ -4,7 +4,7 @@
 #   etapas SEGnn/COLnn de todos los arboles (modo OutRun, OUTRUN2SP y las 94 misiones de Races.bin), uniones BKnn
 #   empaquetadas (UNIONES.PAK + descriptores, pak_union.py; las etapas en SEGS.PAK igual), BKD, CURSO, SOL, COLBK*, COLLR, musica MUSn.ADP (28 temas,
 #   28 avances, menu y metas), peliculas MVTS/MVATTR, sonido SFX/VOCES (espanol), menus, HUD, VMU, efectos, personajes,
-#   meta, salida, fin de carrera FIN/GOVER, OUTRUN2SP CARGASP/GOVSP, modo de video, INFARTO/HAHUD/VOCESH, objetos de las uniones BO, trafico, coches COCHE00-14 + COCHES y PARAM.
+#   meta, salida, fin de carrera FIN/GOVER, OUTRUN2SP CARGASP/GOVSP/SPFE, modo de video, INFARTO/HAHUD/VOCESH, objetos de las uniones BO, trafico, coches COCHE00-14 + COCHES y PARAM.
 # Lo que sale del disco no va al repositorio. Idempotente: lo que ya esta en datos/ (o en trabajo/) no se rehace; si se
 # corta, se vuelve a llamar y sigue. En paralelo (JOBS, por defecto nproc). Sale con error si falla cualquier paso.
 # trabajo/ (por defecto /dev/shm/or2_regenera): intermedios (uniones sueltas, ~350 MB) y registros de cada paso.
@@ -55,7 +55,7 @@ EOF
     salida)   python3 "$TOOLS/conv_salida.py" "$ISO" "$t"; mueve "$t/SALIDA.DAT" ;;
     infarto)  python3 "$TOOLS/conv_infarto.py" "$ISO" "$t"; mueve "$t/INFARTO.DAT" "$t/HAHUD.DAT" "$t/VOCESH.DAT" ;;
     fin)      python3 "$TOOLS/conv_fin.py" "$ISO" "$t" "$W/previas/fin"; mueve "$t/FIN.DAT" "$t/GOVER.DAT" ;;
-    sp)       python3 "$TOOLS/conv_sp.py" "$ISO" "$t" "$W/previas/sp"; mueve "$t/CARGASP.DAT" "$t/GOVSP.DAT" ;;
+    sp)       python3 "$TOOLS/conv_sp.py" "$ISO" "$t" "$W/previas/sp"; mueve "$t/CARGASP.DAT" "$t/GOVSP.DAT" "$t/SPFE.DAT" ;;
     bo)       python3 "$TOOLS/conv_bo.py" "$ISO" "$t"; mueve "$t"/BO*.DAT ;;
     trafico)  python3 "$TOOLS/conv_trafico.py" "$ISO" "$t"; mueve "$t"/TRAF*.DAT "$t"/TAPD.DAT ;;
     coche*)   python3 "$TOOLS/conv_coche.py" "$ISO" --todos "$t" --fichas ${n#coche}
@@ -117,7 +117,7 @@ for ti in sorted(ts): print('%d:%d' % (ti, U.segmento_de(A, U.cadena(E, U.u32(E,
 EOF
 ); do n=${ti#*:}; hay $(printf 'SEG%02d.DAT COL%02d.DAT' $n $n) || falta+=(seg${ti%:*}); done
 hay EFECTOS.DAT || falta+=(efectos); hay CHR.DAT || falta+=(chr); hay BAND.DAT BAND1.DAT || falta+=(band); hay PARAM.DAT || falta+=(param)
-hay META.DAT || falta+=(meta); hay FIN.DAT GOVER.DAT || falta+=(fin); hay CARGASP.DAT GOVSP.DAT || falta+=(sp); hay SALIDA.DAT || falta+=(salida); hay INFARTO.DAT HAHUD.DAT VOCESH.DAT || falta+=(infarto)
+hay META.DAT || falta+=(meta); hay FIN.DAT GOVER.DAT || falta+=(fin); hay CARGASP.DAT GOVSP.DAT SPFE.DAT || falta+=(sp); hay SALIDA.DAT || falta+=(salida); hay INFARTO.DAT HAHUD.DAT VOCESH.DAT || falta+=(infarto)
 hay BO.DAT || falta+=(bo); hay TRAFC.DAT TAPD.DAT TRAF0.DAT || falta+=(trafico)
 for v in ts attr; do f=MVTS.VQV; [ $v = attr ] && f=MVATTR.VQV; hay $f || falta+=(video_$v); done
 

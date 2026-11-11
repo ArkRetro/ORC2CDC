@@ -21,6 +21,7 @@
 #include "../comun/sfx.h"
 #include "../comun/voces.h"
 #include "../comun/menu.h"
+#include "../comun/fsp.h"
 #include "../comun/infarto.h"
 #include "../comun/vmu.h"
 #include "../comun/robot.h"
@@ -4418,12 +4419,23 @@ static int union_prestable(void)
     return hueco_union && uni.datos != hueco_union && !(carga.estado && carga.buf == hueco_union);
 }
 static void band_suelta(void);
+static uint32_t union_fsp;                                      /* final del hueco prestado al frontal de recreativa */
 static void presta_union(int si)
 {
     if (si) band_suelta();                                      /* fuera de la carrera el hueco no es del banderero */
     uint8_t *p = si && union_prestable() ? hueco_union : NULL;
-    hudd_bufer(p, p ? cap_union : 0);
-    if (video_bufer) video_bufer(p, p ? cap_union : 0);
+    hudd_bufer(p, p ? cap_union - union_fsp : 0);
+    if (video_bufer) video_bufer(p, p ? cap_union - union_fsp : 0);
+}
+/* el frontal de recreativa de OUTRUN2SP (comun/fsp.c): sus tablas (la animacion del banco 0x2E) en el final del hueco
+   de la union mientras dura (el monton del menu no tiene ~800 KB seguidos); lo demas sigue prestado como antes */
+static void *hueco_fsp(uint32_t tam)
+{
+    if (!tam) { union_fsp = 0; if (union_prestable()) presta_union(1); return NULL; }
+    if (!hueco_union || !union_prestable() || tam + 600 * 1024 > cap_union) return NULL;
+    union_fsp = (tam + 31) & ~31u;
+    presta_union(1);
+    return hueco_union + cap_union - union_fsp;
 }
 static modelo_t *const tramos[3] = { &etapa, &uni, &sig };     /* lo que se dibuja (lo que este subido) */
 static const modelo_t *cielo;                                   /* el cielo que se dibuja */
@@ -7081,7 +7093,7 @@ static int coche_carga(int k)
     libera_modelo(&coche); coche_ficha = -1; cex_n = 0; nsvol = 0; ani.ok = 0;
     if (ficha_modelo[k] < 30) sprintf(nom, "COCHE%02d.DAT", k); else strcpy(nom, "COCHE.DAT");
     musica_pausa_lectura(1);                                    /* el GD para el coche (la musica tira del anillo) */
-    r = prest ? lee_modelo_en(&coche, nom, hueco_union, cap_union) : lee_modelo(&coche, nom);
+    r = prest ? lee_modelo_en(&coche, nom, hueco_union, cap_union - union_fsp) : lee_modelo(&coche, nom);
     musica_pausa_lectura(0);
     if (r) { dbglog(DBG_ERROR, "coche: no se pudo leer %s (%d)\n", nom, r); return r; }
     if ((r = sube_modelo(&coche))) {                            /* sin VRAM: fuera la cache del menu y otra vez */
@@ -7357,6 +7369,7 @@ int main(int argc, char **argv)
     salida_calcula();                                           /* 5C2560 en la ruta (coche del menu y salida) */
     fisica_carga();
     presta_union(1);                                            /* aun sin carrera: el coche, el HUD y la pelicula */
+    fsp_hueco = hueco_fsp;
     /* 2: PowerVR, texturas a la memoria de video y cabeceras */
     pvr_init(&pp);
     pvr_set_shadow_scale(true, SOMBRA_ESCALA);                  /* lo que queda dentro de la sombra del coche */
@@ -7566,8 +7579,10 @@ int main(int argc, char **argv)
 #ifdef PRUEBA_SP
                 juego_sp = 1;                                   /* prueba: el juego de OUTRUN2SP (tambien con el piloto) */
 #endif
-                preset_curso = juego_sp ? 1 : 0;
-                curso_pedido = juego_sp ? 1 : PRUEBA_CURSO;
+                /* el frontal de recreativa (comun/fsp.c, 4C3DC0): 43F950(+27) y 44DA00(0 / 1): preset 0 -> arbol 0
+                   (OutRun 2), 1 -> arbol 1 (OutRun 2 SP) */
+                preset_curso = juego_sp ? (auto_ ? 1 : menu_preset()) : 0;
+                curso_pedido = juego_sp ? preset_curso : PRUEBA_CURSO;
                 or2_choques_preset(&choq, preset_curso);        /* 0x191d20 / 0x191d70 */
                 /* difficulty_of de 44DC70 (PS2 0x1cdc98..0x1cdcbc): 0 en el juego de la consola (43F860 != 0); en el
                    de OUTRUN2SP 2 en la variante 4 y si no la de la licencia activa (+E0) */
@@ -7966,7 +7981,8 @@ int main(int argc, char **argv)
             dg_ant = c0; dg_dib = (unsigned)dg_ult_dib; dg_n++;
         }
 #endif
-        if (estado == TITULO) pvr_set_bg_color(54 / 255.0f, 62 / 255.0f, 74 / 255.0f);   /* fondo gris del frontal */
+        if (estado == TITULO && menu_sp()) pvr_set_bg_color(0, 0, 0);   /* frontal de recreativa: 40EC60(0) */
+        else if (estado == TITULO) pvr_set_bg_color(54 / 255.0f, 62 / 255.0f, 74 / 255.0f);   /* fondo gris del frontal */
 #ifdef DIAG_FONDO
         else pvr_set_bg_color(1.0f, 0.0f, 1.0f);                /* prueba: los huecos en magenta */
 #else

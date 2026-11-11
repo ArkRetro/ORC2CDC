@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """conv_sp.py <iso> <dir_salida> [dir_previas]: graficos del juego de OUTRUN2SP ([0x59acac] = 0) fuera del frontal de
-recreativa -> CARGASP.DAT (pantalla de carga) para demo/sp.c y GOVSP.DAT (GAME OVER) para demo/fin.c.
+recreativa -> CARGASP.DAT (pantalla de carga) para demo/sp.c y GOVSP.DAT (GAME OVER) para demo/fin.c; y SPFE.DAT, el
+frontal de recreativa (banco 0x2E SELECTOR_CVT entero para comun/sprani.c, ver conv_sprani.py, y las tablas de
+arcade_attract.cpp en el bloque FSP1, ver tablas_fe) para comun/fsp.c.
 
 Formato: el de HUD.DAT (tools/conv_hud.py; comun/hud.c lo abre con hudd_abre, parcial: en la RAM solo las tablas), como
 FIN.DAT de conv_fin.py: un atlas por grupo (sus texturas se suben solo mientras se ven) y cada pieza guarda en
@@ -23,6 +25,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import conv_hud as ch
 import conv_fin as cf
+import conv_sprani as cs
 
 def vq_sp(i, a, fmt, lista):                                    # VQ si el error es pequeno (como FIN.DAT)
     import vq
@@ -102,6 +105,65 @@ def game_over(D, sal):
     print('GOVSP.DAT: %d bytes, %d texturas, %d piezas' % (os.path.getsize(f), len(hud.tex), len(hud.pie)))
     return hud
 
+# ---------------------------------------------------------------- frontal de recreativa (SELECTOR_CVT)
+# Grupos de atlas del banco 0x2E: lo que se ve junto (conv_sprani: un rectangulo va en el del primer grupo que lo usa)
+GRUPOS_FE = [('FONDO', [0x45, 0x46, 0x4e]), ('PANEL', [0x00, 0x05, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16]),
+             ('COCHE', [0x17, 0x18, 0x19, 0x1a, 0x41, 0x42, 0x43, 0x44]), ('CAMBIO', [0x4f]),
+             ('MODO', [0x1c, 0x1d, 0x1e, 0x1f, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26]),
+             ('CONFIG', list(range(0x2b, 0x41))), ('MUSICA', [0x27, 0x28, 0x29, 0x2a, 0x50])]
+
+def tablas_fe(D):
+    """tablas del frontal de recreativa (arcade_attract.cpp) en el ELF de SLES-53998, con la direccion del PC al lado;
+    bloque 'FSP1' que lee comun/fsp.c (todo u32 salvo los float marcados)"""
+    elf = D.elf; u = lambda a: cf.u32(elf, a); f = lambda a: cf.f32(elf, a)
+    out = bytearray(b'FSP1')
+    W = lambda *v: out.extend(struct.pack('<%dI' % len(v), *v))
+    F = lambda *v: out.extend(struct.pack('<%df' % len(v), *v))
+    # 5C7170: 564 filas {token, primero, ultimo} (la secuencia 5C8BE0 va justo detras)
+    assert (u(0x410c30), u(0x410c34), u(0x410c38)) == (0x2e0042, 1, 30)
+    for i in range(564): W(u(0x410c30 + 12 * i), u(0x410c34 + 12 * i), u(0x410c38 + 12 * i))
+    # 5C8BE0: la secuencia {0xB, 5, 6, -1, 4, 2, 8, 9, 0xA, 0}
+    sec = [u(0x4126a0 + 4 * i) for i in range(10)]; assert sec[:4] == [0xb, 5, 6, 0xffffffff], sec; W(*sec)
+    # [6898D8]: la tabla de sonidos (PS2 [0x373654] = 0x4126c8), 64 entradas
+    ps = u(0x373654); assert ps == 0x4126c8; W(*[u(ps + 4 * i) for i in range(64)])
+    # 5C8D00: 16 registros de la musica {id, pista del avance, filas +8 / +C / +10 / +14}
+    for i in range(16):
+        p = u(0x4127c0 + 4 * i); W(*[u(p + 4 * k) for k in range(6)])
+    # 5C91DC: 10 coches {modelo, 9 filas}; 5C9204: sus colores (hasta 15 {argb, nombre, indice}, fin en argb 0)
+    for i in range(10):
+        p = u(0x412800 + 4 * i); W(*[u(p + 4 * k) for k in range(10)])
+    for i in range(10):
+        p = u(0x412828 + 4 * i); n = 0; idx = []
+        while u(p + 12 * n): idx.append(u(p + 12 * n + 8)); n += 1
+        assert 0 < n <= 15; W(n, *(idx + [0] * (15 - n)))
+    W(*[u(0x412850 + 4 * i) for i in range(10)])          # 5C922C: rotulo de cada coche (2E000A..)
+    W(*[u(0x410b68 + 4 * i) for i in range(10)])          # 5C70A8: color de partida (pagina 0)
+    W(*[u(0x410950 + 4 * i) for i in range(10)])          # 5C9408: entrada de la tabla de sonidos del coche
+    for b in (0x373938, 0x373a78):                        # 689B28 / 689C68: configuracion del coche (CONTRARRELOJ)
+        assert u(b) == 0x1a4 or b != 0x373938
+        W(*[u(b + 4 * k) for k in range(80)])
+    assert u(0x373bb8) == 0x109 and u(0x373c60) == 0x2e001c
+    W(*[u(0x373bb8 + 4 * k) for k in range(42)])           # 689DA8: modo de juego, 2 lados x 0x54
+    W(*[u(0x373c60 + 4 * k) for k in range(8)])            # 689E50 cursores, 689E58, 689E60..6C
+    F(*[f(0x373c80 + 4 * k) for k in range(4)])            # 689E70 / 74 / 78 / 7C (float)
+    W(*[u(0x373d70 + 4 * k) for k in range(13)])           # 689F58: filas del fondo 2E0045
+    assert u(0x373d70) == 0x17b
+    W(*[struct.unpack_from('<H', elf, 0x412920 - 0xfff80 + 2 * k)[0] for k in range(11)])   # 5C9334 (u16)
+    W(*[u(0x373890 + 4 * k) for k in range(8)])            # 689AAC / 689ABC
+    F(f(0x3738b0), f(0x3738b4))                            # 689ACC / 689AD0
+    W(*[u(0x3738b8 + 4 * k) for k in range(20)])           # 689AD4 modelos, 689AFC
+    F(f(0x373860), f(0x373864), f(0x373868), f(0x373874), f(0x37387c), f(0x373dbc))   # 689AA0/A4/A8, FC4, FBC, FA0
+    W(elf[0x373878 - 0xfff80], elf[0x373879 - 0xfff80], u(0x373dc4), u(0x373dd0), u(0x373dd4))  # FC0, 84A9FC, FA4, FB8, FB4
+    # barra del color (213540..213590: 429530(2E0000, f x 4,37 + 563, 406 - f x 12, 0xA, 0))
+    k = lambda a, b: struct.unpack('<f', struct.pack('<I', cf.lui_ori(elf, a, b)))[0]
+    F(k(0x213554, 0x213558), k(0x213560, 0x213564), struct.unpack('<f', struct.pack('<I', (u(0x213570) & 0xffff) << 16))[0],
+      struct.unpack('<f', struct.pack('<I', (u(0x213544) & 0xffff) << 16))[0])
+    return bytes(out)
+
+def frontal(D, sal):
+    ruta = os.path.join(sal, 'SPFE.DAT')
+    cs.escribe(D, 0x2e, ruta, GRUPOS_FE, tablas_fe(D), vq=vq_sp)
+
 def maquetas(hud, d):
     from PIL import Image
     os.makedirs(d, exist_ok=True)
@@ -116,3 +178,4 @@ if __name__ == '__main__':
     h = carga(D, sys.argv[2])
     if len(sys.argv) > 3: maquetas(h, sys.argv[3])
     game_over(D, sys.argv[2])
+    frontal(D, sys.argv[2])

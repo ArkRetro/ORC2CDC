@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # sp.sh <disc.gdi> [pantalla] [salida/] [segundos (120)]: OUTRUN2SP desde el menu principal (menu.sh con MENU_SP=1:
-# licencia nueva, dos a la derecha, coche, cambio, musica) hasta la carrera del juego de OUTRUN2SP (arbol 1, preset 1)
+# licencia nueva, dos a la derecha, el frontal de recreativa: coche, transmision, modo con el gatillo R, musica) hasta la carrera del juego de OUTRUN2SP (arbol 1, preset 1)
 # y despues conduce como conduce.sh: una captura cada 5 s (sp_c000..) y "CONGELADO" con error si dos son iguales.
 # Comprueba en la consola serie "juego OUTRUN2SP, preset 1" y "CURSO: arbol 1".
 D=$(cd "$(dirname "$0")" && pwd); . "$D/comun.sh"

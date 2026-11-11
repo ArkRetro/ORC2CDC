@@ -17,7 +17,8 @@ int menu_paso(unsigned botones_nuevos);     /* una vez por paso de logica (60 Hz
 void menu_dibuja(void);                     /* dentro de la lista TR */
 void menu_sale(void);                       /* libera toda la VRAM del menu */
 int menu_modo(void);                        /* variante del modo: 1 OutRun, 2 Heart Attack (INFARTO), 7 Time Attack */
-int menu_sp(void);                          /* 1: OUTRUN2SP del menu principal ([780260] = 0, preset 1) */
+int menu_sp(void);                          /* 1: OUTRUN2SP del menu principal ([780260] = 0, frontal de recreativa) */
+int menu_preset(void);                      /* OUTRUN2SP: preset del curso (43F950: 0 OutRun 2, 1 OutRun 2 SP) */
 int menu_manual(void);                      /* cambio elegido: 0 AT, 1 MT */
 int menu_pista(void);                       /* musica elegida */
 int menu_coche3d(void);                     /* 1 si hay que dibujar el coche 3D (seleccion de coche, ficha quieta) */
@@ -33,6 +34,7 @@ void menu_libera_vram(void);                /* echa las pantallas guardadas que 
 int menu_vista(void);                       /* 0 parachoques, 1 interior, 2 exterior */
 int menu_mph(void);                         /* 0 km/h, 1 mph */
 int menu_dificultad(void);                  /* 0 muy facil .. 4 muy dificil (licencia +E0, TIM_DIF) */
+int menu_foto(void);                        /* licencia +0x20 (la foto: PC [7C2400], el piloto y la acompanante) */
 /* ganchos para otros modulos (voces del locutor, video): se llaman al entrar en cada pantalla (evento 0) y al elegir
    una opcion (evento 1, valor = opcion); NULL = nada */
 enum { MP_TITULO, MP_MENU, MP_MODO, MP_COCHE, MP_CAMBIO, MP_MUSICA, MP_LICENCIA, MP_EDITOR, MP_OPCIONES, MP_RANKING,

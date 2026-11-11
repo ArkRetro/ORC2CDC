@@ -8,7 +8,7 @@
      licencia. HEART ATTACK (INFARTO) y TIME ATTACK (CONTRARRELOJ) llevan a la carrera con su variante (menu_modo);
      lo que necesita modos que la demo no tiene (multijugador, rankings, SHOWROOM) tiene su pantalla y la accion
      bloqueada (sacudida y sonido 3, como un coche sin desbloquear). OUTRUN2SP lleva a la carrera del juego de OUTRUN2SP
-     (menu_sp; su frontal de recreativa esta SIN PORTAR, ver sp_sel).
+     (menu_sp) por su frontal de recreativa (comun/fsp.c).
    Cursores con los tramos MUEVEij (20 cuadros por paso; 40 en la musica), entradas ENTRA, cambio con AT/MT en bucle y
    AT_OK/MT_OK o AT_ATRAS/MT_ATRAS al confirmar o volver, radio de la musica ENTRA/SALE. Cabeceras: ENTRA y luego
    BRILLO (destello del rotulo en bucle). Barra de ayuda de cada pantalla (AYUDA_*: botones y textos del original,
@@ -41,6 +41,7 @@
 #include "sfx.h"
 #include "menu.h"
 #include "vmu.h"
+#include "fsp.h"
 
 void (*menu_gancho)(int pantalla, int evento, int valor);
 void (*menu_suelta_coche)(void);
@@ -358,7 +359,9 @@ unsigned menu_vram(void)
     for (p = 0; p < NV; p++) if (cargada[p]) s += pan[pidx[p]].vram;
     return s;
 }
-void menu_sale(void) { int p; for (p = 0; p < NV; p++) baja_p(p); hudd_vacia(); }
+void menu_sale(void) { int p; for (p = 0; p < NV; p++) baja_p(p); fsp_sale(); hudd_vacia(); }
+/* antes del frontal de recreativa: la VRAM del menu fuera (sus tablas siguen en la RAM) */
+static void menu_libera_todo(void) { int p; for (p = 0; p < NV; p++) baja_p(p); if (menu_suelta_coche) menu_suelta_coche(); hudd_vacia(); }
 void menu_libera_vram(void)
 {
     int p;
@@ -619,21 +622,24 @@ void menu_suma_millas(uint32_t millas)
 
 /* variante de [780258] (PS2 0x443508) del modo elegido, como 4EEAD0 del PC (runtime_route_mode: 1 OutRun, 2 Heart
    Attack, 7 Time Attack); COAST 2 COAST (las misiones de Races.bin, variante 5) no esta: corre como OutRun */
-int menu_modo(void) { return sp_sel ? 1 : modo_sel == 2 ? 2 : modo_sel == 3 ? 7 : 1; }
+int menu_modo(void) { return sp_sel ? fsp_variante() : modo_sel == 2 ? 2 : modo_sel == 3 ? 7 : 1; }
 int menu_sp(void) { return sp_sel; }
-int menu_manual(void) { return manual; }
-int menu_pista(void) { return elegido < n_ok ? elegido : 0; }
+int menu_preset(void) { return sp_sel ? fsp_preset() : 0; }
+int menu_manual(void) { return sp_sel ? fsp_manual() : manual; }
+int menu_pista(void) { return sp_sel ? fsp_musica() : elegido < n_ok ? elegido : 0; }
 int menu_coche3d(void)
 {
+    if (sp_sel) return fsp_coche3d() && ficha_de(fsp_modelo()) >= 0;
     return md && pant == P_COCHE && ficha_de(c_modelo(c_indice())) >= 0 && fase != F_SALE && !cargando && an_hecho(&a_sel);
 }
-int menu_modelo(void) { return c_modelo(c_indice()); }
-int menu_coche(void) { return ficha_de(c_modelo(c_indice())); }
-int menu_color(void) { return colores[c_indice()] + 1; }
+int menu_modelo(void) { return sp_sel ? fsp_modelo() : c_modelo(c_indice()); }
+int menu_coche(void) { return ficha_de(menu_modelo()); }
+int menu_color(void) { return sp_sel ? fsp_color() : colores[c_indice()] + 1; }
 float menu_giro(void) { return giro; }
 int menu_vista(void) { const uint8_t *p = activa(); return p ? l32(p, 0xd8) : 2; }
 int menu_mph(void) { const uint8_t *p = activa(); return p ? l32(p, 0xdc) : 0; }
 int menu_dificultad(void) { const uint8_t *p = activa(); return p ? l32(p, 0xe0) : 0; }
+int menu_foto(void) { const uint8_t *p = activa(); return p ? l32(p, 0x20) : 0; }
 
 static void sale(int destino, int ok) { fase = F_SALE; t = 0; sig = destino; sale_ok = ok; sfx_menu(ok ? SFX_ACEPTA : SFX_CANCELA); }
 static void bloqueado(void) { t_bloq = 14; sfx_menu(SFX_BLOQUEADO); }
@@ -793,7 +799,10 @@ static void control(unsigned n)
             if (pant == P_MENU) {                           /* SINGLE PLAYER, MULTIPLAYER, OUTRUN2SP, RANKINGS, OPTIONS */
                 if (c == 0) { sp_sel = 0; sale(P_MODO, 1); } else if (c == 1) sale(P_MULTI, 1); else if (c == 3) sale(P_RANKING, 1);
                 else if (c == 4) sale(P_OPCIONES, 1);
-                else { sp_sel = 1; sale(P_COCHE, 1); }      /* OUTRUN2SP (0x23aba0): ver sp_sel */
+                else {                                      /* OUTRUN2SP (0x23aba0): el frontal de recreativa (fsp.c) */
+                    sp_sel = 1; sfx_menu(SFX_ACEPTA); menu_libera_todo();
+                    if (fsp_entra()) { sp_sel = 0; entra(P_MENU, 1); }
+                }
             } else if (c <= 3) { modo_sel = c; sale(P_COCHE, 1); } else bloqueado();   /* C2C, OUTRUN, HEART ATTACK, TIME ATTACK */
         } else if (n & CONT_X) a_licencia(pant);            /* LICENSE */
         else if (n & CONT_Y) bloqueado();                   /* FRIENDS: en linea */
@@ -856,6 +865,15 @@ static void control(unsigned n)
 static void aplica_audio(void);
 int menu_paso(unsigned n)
 {
+    if (fsp_activo()) {                                     /* frontal de recreativa de OUTRUN2SP */
+        int r;
+        giro += 100.0f * 2.0f * (float)M_PI / 65536.0f;     /* 475670: +0x64 por paso */
+        if (giro > 2.0f * (float)M_PI) giro -= 2.0f * (float)M_PI;
+        r = fsp_paso(n);
+        if (r == FSP_CARRERA) return MENU_CARRERA;
+        if (r == FSP_MENU) { fsp_sale(); sp_sel = 0; entra(P_MENU, 1); musica_menu(); }
+        return MENU_SIGUE;
+    }
     lee_r1();
     if (n || r1_nuevo) inact = 0; else inact++;
     if (!md) return (n & CONT_START) ? MENU_CARRERA : inact > T_DEMO ? MENU_DEMO : MENU_SIGUE;
@@ -1011,6 +1029,7 @@ static void tarjeta(const uint8_t *p, const uint8_t *nombre, int n, float xn, fl
 
 void menu_dibuja(void)
 {
+    if (fsp_activo()) { fsp_dibuja(menu_coche3d()); return; }
     float a_ent = fase == F_ENTRA ? fminf(t / (float)T_FUNDIDO, 1.0f) : 1.0f;
     float a_sal = fase == F_SALE ? fmaxf(1.0f - t / (float)T_FUNDIDO, 0.0f) : 1.0f;
     float sacude = t_bloq ? sinf(t_bloq * 1.6f) * t_bloq * 0.6f : 0.0f;

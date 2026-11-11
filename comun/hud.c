@@ -29,6 +29,7 @@ struct hud_dat {
     int16_t *pal;                                           /* por textura: paleta (pal_reparte) o -1; NULL sin paletas */
     uint8_t *con_pal;                                       /* por textura: subida con su paleta (cabeceras) */
     uint8_t *falta;                                         /* por textura: echada por hud_suelta_quietas y pedida */
+    int prestado;                                           /* dat en la RAM de otro (hudd_tablas_en): no se libera */
 };
 
 static hud_dat_t *H, *hud_principal;                       /* H: el fichero que se esta dibujando */
@@ -130,6 +131,8 @@ static void pieza_compacta(const h_pie_t *q, h_pc_t *r)
 /* tablas de un fichero parcial (los *meta primeros bytes) leidas a trozos de 16 KB y con las piezas ya a 24 bytes: la
    RAM que piden es la del resultado (antes un bloque con las piezas de 40 bytes y luego se encogia: HAHUD.DAT pedia
    208 KB seguidos al empezar la carrera y no los habia, "Out of memory" y el modo sin medidor ni rotulos) */
+static uint8_t *tab_en; static uint32_t tab_cap; static int tab_usado;   /* hudd_tablas_en */
+void hudd_tablas_en(void *p, uint32_t cap) { tab_en = p; tab_cap = p ? cap : 0; tab_usado = 0; }
 static uint8_t *lee_tablas(uint32_t lba, uint32_t *meta, h_pc_t ***gp)
 {
     enum { TROZO = 8 };
@@ -141,7 +144,10 @@ static uint8_t *lee_tablas(uint32_t lba, uint32_t *meta, h_pc_t ***gp)
     memcpy(c, t, sizeof c); np = c[4]; ini = c[9]; finp = ini + np * sizeof(h_pie_t); ng = c[3];
     quita = np * sizeof(h_pie_t);
     if (c[10] < finp || n < finp || c[8] + ng * sizeof(h_grp_t) > ini) quita = 0;   /* otra disposicion: tal cual */
-    if (!(d = memalign(32, n - quita)) || (quita && !(G = calloc(ng, sizeof *G)))) { free(t); free(d); return NULL; }
+    if (tab_en && n - quita <= tab_cap) { d = tab_en; tab_usado = 1; }
+    else d = memalign(32, n - quita);
+    tab_en = NULL; tab_cap = 0;
+    if (!d || (quita && !(G = calloc(ng, sizeof *G)))) { free(t); if (!tab_usado) free(d); return NULL; }
     while (pos < n) {
         k = (n - pos + 2047) / 2048; if (k > TROZO) k = TROZO;
         if (lee_sect(lba + sec, k, t)) goto mal;
@@ -190,8 +196,9 @@ hud_dat_t *hudd_abre(const char *fich, int modelo, int parcial)
         free(b);
         h->meta = m;
         if (!(h->dat = lee_tablas(h->lba, &h->meta, &h->gp))) { free(h); return NULL; }
+        h->prestado = tab_usado; tab_usado = 0;
     }
-    if (memcmp(h->dat, "HUD1", 4)) { if (h->gp) { for (i = 0; i < ((uint32_t *)h->dat)[3]; i++) free(h->gp[i]); free(h->gp); } free(h->dat); free(h); return NULL; }
+    if (memcmp(h->dat, "HUD1", 4)) { if (h->gp) { for (i = 0; i < ((uint32_t *)h->dat)[3]; i++) free(h->gp[i]); free(h->gp); } if (!h->prestado) free(h->dat); free(h); return NULL; }
     c = (uint32_t *)h->dat;
     h->n_tex = c[1]; h->n_grp = c[3]; h->n_uso = c[5];
     h->tex = (h_tex_t *)(h->dat + c[6]); h->spr = (h_spr_t *)(h->dat + c[7]); h->grp = (h_grp_t *)(h->dat + c[8]);
@@ -210,6 +217,7 @@ hud_dat_t *hudd_abre(const char *fich, int modelo, int parcial)
     h->caba = memalign(32, h->n_tex * sizeof *h->caba);
     for (i = 0; i < h->n_grp; i++)
         if (grupo_util(i)) for (j = 0; j < h->grp[i].np; j++) h->usada[h->spr[pz(h, i)[j].spr].tex] = 1;
+    if (!h->n_grp) memset(h->usada, 1, h->n_tex);           /* sin grupos (bancos SPRANI): todas se pueden subir */
     return h;
 }
 
@@ -463,7 +471,8 @@ void hudd_cierra(hud_dat_t *h)
     hudd_baja(h, 0, -1); hudd_vacia();
     if (H == h) H = NULL;
     if (h->gp) { uint32_t k; for (k = 0; k < h->n_grp; k++) free(h->gp[k]); free(h->gp); }
-    free(h->dat); free(h->vtex); free(h->usada); free(h->dibujada); free(h->cab); free(h->cabf); free(h->caba);
+    if (!h->prestado) free(h->dat);
+    free(h->vtex); free(h->usada); free(h->dibujada); free(h->cab); free(h->cabf); free(h->caba);
     free(h->pal); free(h->con_pal); free(h->falta); free(h);
 }
 
@@ -611,6 +620,39 @@ void hudd_dibuja(hud_dat_t *h, int u, int cuadro, float dx, float dy, float alfa
     grupo(h->uso[u].grp, cuadro, h->uso[u].x + dx, h->uso[u].y + dy, alfa);
     modo_fondo = 0; zpaso = 0.001f;
 }
+
+/* Sprites sueltos (comun/sprani.c): hudd_capa fija el fichero, la z de partida y el modo (fondo = 1: detras de la
+   escena 3D, como hudd_dibuja); hudd_sprite dibuja el sprite s en el rectangulo (q0, q1)-(q2, q3) de su espacio con
+   la matriz afin m (por filas: x' = x m0 + y m2 + m4, y' = x m1 + y m3 + m5), alfa y suma (aditiva) */
+void hudd_capa(hud_dat_t *h, float z, int fondo)
+{
+    H = h; ult_tex = -1; modo_fondo = fondo; zcapa = z; zpaso = fondo ? 0.000001f : 0.001f;
+}
+float hudd_z(void) { return zcapa; }
+int hudd_sprite_tex(const hud_dat_t *h, int s) { return h && s >= 0 ? h->spr[s].tex : -1; }
+void hudd_sprite(int s, const float *m, const float *q, float alfa, int aditiva)
+{
+    const h_spr_t *sp; int k; pvr_vertex_t v;
+    if (!H || alfa <= 0.004f) return;
+    sp = H->spr + s;
+    if (!H->vtex[sp->tex]) return;
+    {   int clave = sp->tex | (aditiva ? 0x10000 : 0);
+        if (clave != ult_tex) {
+            pvr_prim((aditiva ? H->caba : modo_fondo ? H->cabf : H->cab) + sp->tex, sizeof(pvr_poly_hdr_t)); ult_tex = clave;
+        }
+    }
+    H->dibujada[sp->tex] = cuadro_hud;
+    if (alfa > 1) alfa = 1;
+    v.argb = ((uint32_t)(alfa * 255) << 24) | tinte; v.oargb = 0; v.z = zcapa; zcapa += zpaso;
+    for (k = 0; k < 4; k++) {
+        float x = (k & 1) ? q[2] : q[0], y = (k & 2) ? q[3] : q[1];
+        v.flags = k == 3 ? PVR_CMD_VERTEX_EOL : PVR_CMD_VERTEX;
+        v.x = x * m[0] + y * m[2] + m[4]; v.y = x * m[1] + y * m[3] + m[5];
+        v.u = (k & 1) ? sp->u1 : sp->u0; v.v = (k & 2) ? sp->v1 : sp->v0;
+        pvr_prim(&v, sizeof v);
+    }
+}
+int hudd_residente(const hud_dat_t *h, int t) { return h && h->vtex[t] != NULL; }
 
 /* dentro de la lista TR, despues de todo lo demas (z por encima de la escena) */
 void hud_dibuja(const hud_estado_t *e)

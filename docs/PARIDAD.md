@@ -1947,23 +1947,12 @@ etapas, salida BEAC`, BAND1.DAT en el hueco de la union; RAM libre 1419..1490 KB
   por -z (igual), pero en BEAC llega en curva y el coche quedaba en (1,9, -23,8) torcido 14 grados, ya pasado el
   banderero. Ahora el cruce se afina entre los dos pasos (biseccion) y el coche sale mirando a -z (yo.a = -rumbo de la
   ruta, or2_coloca con rumbo 0 en el mundo; salida_calcula / salida_a_ en demo/main.c).
-- PROVISIONAL: el frontal de recreativa de OUTRUN2SP (SELECTOR_CVT) no esta portado; en su lugar se pasa por las
-  pantallas de coche, cambio y musica del menu de la consola y se corre la eleccion OUTRUN con los cursos de OutRun 2
-  SP (una de las del frontal). B en el coche vuelve al menu principal.
-- SIN PORTAR: el frontal de recreativa (las 12 funciones del suceso 4 de arcade_attract.cpp y la conversion de
-  SELECTOR_CVT: 96 escenas, 238 texturas, con el coche 3D de la eleccion), y con el los modos INFARTO / CONTRARRELOJ y
-  los cursos OutRun 2 / de 15 niveles de OUTRUN2SP. Localizado en SLES-53998 (2026-11-11): la tabla de funciones del
-  suceso 4 (PC 59BE78) en 0x3ee7b4, 12 registros de 5 palabras {init, control, dibujo, 0, fin}: 1 = 0x213c20 /
-  0x213d30 / 0x213d60 / 0x213d68, 2 = 0x213db8.., 3 = 0x214760.., 4 = 0x214d10.., 5 = 0x214f50 / 0x215228 / 0x216048 /
-  0x216070, 6 = 0x211fb8 / 0x213138 / 0x213510 / 0x2135d8, 7 = 0x213680.., 8 = 0x2160b8.., 9 = 0x2164c0.., 10 =
-  0x2170e0.., 11 = 0x2176d0 / 0x217cc0 / 0x217cd0 / 0x217cd8, 12 = 0x210ee0 / 0x210f30 / 0x211090 / 0x2110b8 (la
-  0x210f30 es 4C2B70 linea a linea: escena 2E004E, 0x79 cuadros); la secuencia (PC 5C8BE0) en 0x4126a0 = {0xB, 5, 6,
-  -1, 4, 2, 8, 9, 0xA, 0, ...}; las filas {token, primero, ultimo} (PC 5C7170) desde 0x410c30; 16 punteros de la musica
-  (PC 5C8D00) en 0x4127c0 y los registros de la eleccion (PC 5C91DC..) desde 0x412800. El banco 0x2E y su XST
-  (spr_sprani_selector_cvt_sxst, una entrada mas alla en SPRITE.PS2: conv_hud.Disco.banco ya lo tiene en cuenta) se
-  leen bien; el final de recreativa (modo 24, AS.PS2), la entrada de
-  nombre (modo 26), los resultados (modo 25) y los rankings de OUTRUN2SP; la vuelta al frontal de recreativa (modo 10)
-  en vez de al menu de la consola.
+- Frontal de recreativa (SELECTOR_CVT), HECHO 2026-11-11 (comun/fsp.c, comun/sprani.c, tools/conv_sprani.py,
+  conv_sp.py tablas_fe -> SPFE.DAT): ver "Frontal de recreativa de OUTRUN2SP" abajo. Sustituye a las pantallas de
+  coche, cambio y musica de la consola que se usaban (PROVISIONAL) en este juego.
+- SIN PORTAR: el final de recreativa (modo 24, AS.PS2), la entrada de nombre (modo 26), los resultados (modo 25) y los
+  rankings de OUTRUN2SP; la vuelta al frontal de recreativa (modo 10) en vez de al menu de la consola despues de la
+  carrera.
 - Etapas al reves (descriptores 30..59; SEG34..SEG65), HECHO 2026-11-11: sus tablas de aparicion y de velocidad (+0x80
   / +0x84) estan en el ELF; lo que el ELF deja en la BSS son sus listas de puntos fijos (4EF880: 0x5d6028..), y por eso
   conv_trafico.py daba el registro entero vacio (sin trafico). Las rellena la rutina 0x1f2110 (la llama la puesta a cero
@@ -1977,9 +1966,59 @@ etapas, salida BEAC`, BAND1.DAT en el hueco de la union; RAM libre 1419..1490 KB
 - Camiones (modelos 39..43, clases 0..2): SIN PORTAR. Su registro de 4866C0 trae un segundo descriptor (el remolque)
   en cada LOD, que 4AE0F0 / 4ADBC0 (race_ghost_car.cpp, d.model) dibuja con su propia matriz articulada: conv_trafico.py
   para en "remolque (segundo descriptor) sin portar". Hasta portarlo esos coches se gastan sin coche (como antes).
-- Encontrado de paso (juego de la consola, sin corregir aqui): 487EE0 / 487F50 con 43F860 != 0 eligen el piloto y la
-  acompanante por la licencia (+0x20, tablas 6549B0 / 6AF268 / 6549C8); la demo usa siempre los de OUTRUN2SP (0xB y 9)
-  tambien en los modos de la consola (conv_chr.py decia que 0x59acac era la bandera de la red: es la de la consola).
+- Encontrado de paso (juego de la consola): 487EE0 / 487F50 con 43F860 != 0 eligen el piloto y la acompanante por la
+  licencia (+0x20, tablas 6549B0 / 6AF268 / 6549C8). CORREGIDO (2026-11-11, ver Coches: la pareja de la carrera).
+
+### Frontal de recreativa de OUTRUN2SP (2026-11-11)
+
+Fuente: arcade_attract.cpp (PC 4BEE60..4C4880, suceso 4) y race_end_modes.cpp (modo 10, 48B210 / 48AE90) linea a
+linea, con las tablas del ELF (bloque FSP1 de SPFE.DAT; tools/conv_sp.py tablas_fe comprueba cada una):
+| PC | PS2 | que |
+|---|---|---|
+| 5C7170 | 0x410c30 | 564 filas {token, primero, ultimo} (todas del banco 0x2E) |
+| 5C8BE0 | 0x4126a0 | secuencia {0xB, 5, 6, -1, 4, 2, 8, 9, 0xA, 0} |
+| [6898D8] | [0x373654] = 0x4126c8 | tabla de sonidos |
+| 5C8D00 | 0x4127c0 | 16 registros de la musica {tema, pista del avance (0x21 + tema), 4 filas} |
+| 5C91DC / 5C9204 / 5C922C | 0x412800 / 0x412828 / 0x412850 | coches {modelo, filas}, sus colores {argb, nombre, indice}, rotulos |
+| 5C70A8 / 5C9408 | 0x410b68 / 0x410950 | color de partida, sonido de cada coche |
+| 689B28 / 689C68 | 0x373938 / 0x373a78 | configuracion del coche de la Contrarreloj (2E002B..2E0040) |
+| 689DA8.., 689E50.. 689E7C | 0x373bb8.., 0x373c60..0x373c8c | modo de juego (2 lados x 0x54), cursores, posiciones de las listas |
+| 689F58 | 0x373d70 | filas del fondo 2E0045 |
+| 5C9334 | 0x412920 | alturas del panel de la derecha (u16) |
+| 689AAC.. 689AFC | 0x373890..0x3738e0 | tokens de la lista de coches, posicion, modelos y ranuras |
+| 689AA0 / A4 / A8, 689FC4 / FBC / FC0, 84A9FC | 0x373860 / 64 / 68, 0x373874 / 7c / 78 / 79 | 5, 10, 100, 1, 3, 40, 0 |
+| 689FA0 / FA4 / FB8 / FB4 | 0x373dbc / c4 / d0 / d4 | palanca: 0,2, 5, -40, 40 |
+| 6898D0 | 0x37364c | velocidad 3 de los cambios de lado |
+| 5C9434 / 30 / 38, 6281E8 | 0x213540..0x213590 (inmediatos) | barra del color: x = n x 4,37 + 563, y = 406 - n x 12 |
+Constantes del PC que el ELF da en el codigo: 628064 = 0,5, 6280B0 = 2 (0x2110c0), 6280C4 = -1 (neg.s de 0x211684).
+Escenas: el banco 0x2E entero se evalua en cada cuadro (comun/sprani.c, como 429460 / 429350 / 48B970; el grupo de
+instancias de 427F70 / 4282B0 con sus modos y su estado; 4288C0 pone el cuadro: PS2 0x115290 escribe +0x50) en vez de
+hornearlo (~290000 piezas). Texturas en atlas por pantalla con VQ (1910 KB en total), mascaras horneadas (318) por
+(escena, cuadro, capa). La animacion (744 KB) va en el final del hueco de la union mientras dura el frontal.
+Recorrido con un jugador (la secuencia; el codigo c es la funcion c + 1 de la tabla 0x3ee7b4):
+"Elige coche" (funcion 6: lista de 10, Y sostenido el color con arriba / abajo, el coche 3D girando +0x64 por paso
+como 475670) -> "Elige transmision" (7, 2E004F) -> "Elige modo de juego" (5: OutRun / Infarto / Contrarreloj; el
+gatillo R cambia de lado: lado 0 rotulo "Recorrido OutRun2SP" -> preset 0, lado 1 "OutRun2" -> preset 1; variante
+fila 0 -> 1, 1 -> 2, 2 -> 0) -> solo en la Contrarreloj "Elige configuracion del coche" (3) -> "Elige la musica" (9;
+Y sostenido el balance musica / motor 2E0050) -> la carrera (11). B vuelve atras; B en el coche, al menu de la consola
+(4C2C60 -> 4BF510: modo 32). La funcion 12 ("Single Play.", 2E004E) no sale con un jugador (el paso 0xB la salta).
+La carrera usa lo elegido: coche, color, AT / MT, variante (0 = Contrarreloj), preset -> arbol de CURSO.DAT, tema.
+Verificado en Flycast (tools/prueba/sp.sh): las cinco pantallas y la carrera con preset 1 (gatillo R), 0 "Out of
+memory", RAM del menu igual que antes (939 KB libres).
+- Mandos (el PC lee 4536F0 / 4536C0; el PS2 los filtra en 0x210988 / 0x210a00): 8 = B, 1 / 4 = START / A, 0x10
+  sostenido = Y, 0x400 / 0x800 = cruceta arriba / abajo, 0x40000 = gatillo R. Eje 453720(0) = palanca X; la cruceta
+  izquierda / derecha cuenta como palanca a tope (PROBABLE: 0x210a00 devuelve 0 para 0x40 / 0x80); 453750(0) = la X del
+  paso anterior (PROBABLE).
+- PROBABLE / SUPUESTO: 5A29E0 / 5C9404 (casi cero de la velocidad de la lista) = +-1e-6; 5B4350 / 5B4354 (topes del
+  suavizado de la palanca) = 0; el orden entre las escenas del grupo y las inmediatas (429530) de una misma capa; la
+  lista (4C0EB0) es la del PC: la del PS2 (0x2113a0) difiere en detalles (pone 3 en 84A28F / 84A290 en los saltos de
+  borde) y no esta comprobada linea a linea.
+- SIN PORTAR: 453320 ([0x54c108], quien lo escribe sin localizar): se toma 0 (3 filas; las de 15 recorridos
+  continuos, presets 2 / 3, no salen); el mundo y la camara del coche (4BF2E0 / 4BF340, suceso 0x181 funcion 0xD; la
+  Dreamcast usa la camara que gira del menu de la consola, PROVISIONAL); los textos de ayuda (84A320, 446D90); las
+  voces 6..0x3F (4BEE60: solo con el idioma 0; en la PAL espanola no suenan); el fundido de volumen de la musica
+  (42E020); la configuracion del coche de la Contrarreloj (+23) y el balance (+21) en la carrera; 689C68 ([7C24BC]);
+  red, varios jugadores y la pagina 84A218.
 
 ## Ultimo cambio verificado
 
