@@ -2372,7 +2372,7 @@ defecto, `-DSIN_FUNDIDO_ENTRADA` lo quita (demo/main.c `fe_paso`, `fe_pon`, `fe_
   nodo ya visible (el plano lejano de cada malla, la mascara de mallas del PVS: lo que quita no se ve), ni los objetos
   de la union (pajaros), el trafico o el cielo.
 - Tecnica: desde el color de la niebla, no con transparencia (sin ordenar en la lista transparente ni ver a traves):
-  las mallas del nodo van por `dibuja_malla` con el color del vertice x (1 - k) y el color de desplazamiento
+  las mallas del nodo llevan el color del vertice x (1 - k) y el color de desplazamiento
   (especular de la PowerVR, la cabecera de su textura con el bit del especular) = color de la niebla x k:
   textura x color x (1 - k) + niebla x k; la niebla de la tabla sigue encima pixel a pixel, asi que lo lejano lleva la
   suya y con k = 0 la imagen es la de siempre (sin salto al acabar). Se descarto la niebla por vertice (PVR_FOG_VERTEX):
@@ -2382,12 +2382,16 @@ defecto, `-DSIN_FUNDIDO_ENTRADA` lo quita (demo/main.c `fe_paso`, `fe_pon`, `fe_
 - Por que 0,4 s: a 200 km/h son ~22 m; lo que aparece a cien metros o mas ha acabado mucho antes de llegar, y por
   debajo de ~0,25 s se ve como un parpadeo y no como una transicion. Es tambien lo que tarda la niebla del limite en
   seguir al corte del reparto.
-- Coste (estimado del codigo; la medida en la consola real la hace el usuario): las mallas que se funden van por
-  `dibuja_malla` (transformacion en C y a la Store Queue por `envia_tira`) en vez del bucle en ensamblador, unas 2 veces
-  mas CPU por vertice, y con 28 bytes por vertice en el TA en vez de 24 (`ta_cabe` lo cuenta con `ta_ofs`: el
-  presupuesto se respeta). Solo afecta a lo que aparece en los ultimos 0,4 s, una parte pequena de la etapa. Por cuadro:
-  recorrer las mascaras de nodos (unos 100 palabras por modelo). RAM: 1,25 bytes por nodo (~4 KB por etapa, 3094 nodos
-  en la mayor). VRAM: nada (la cabecera se copia al enviarla).
+- Coste: las mallas que se funden van por el mismo bucle en ensamblador que las demas (`sq_vtx_fe`: el de
+  `dibuja_malla_directa` con el color x (1 - k) y el desplazamiento puestos en cada vertice, los mismos valores que
+  `dibuja_malla`); solo las de carteles y las que cruzan el plano cercano van por `dibuja_malla`, como las que no se
+  funden. En el TA 28 bytes por vertice en vez de 24 (la cabecera con especular; `ta_cabe` / `ta_teo_tab[1]` lo cuentan:
+  el presupuesto se respeta). Por cuadro, `fe_paso` solo mira los nodos nuevos y los que se estan fundiendo (mascara
+  `fe_m`). RAM: 1,375 bytes por nodo (~4,3 KB por etapa, 3094 nodos en la mayor). VRAM: nada (la cabecera se copia al
+  enviarla). Medida en Flycast (2026-11-11, relativa: el tiempo de Flycast no es el de la consola; PALM conduciendo,
+  `-DDIAG_FUNDIDO -DDIAG_MS -DFE_US=2000000u`, el reloj en ns alrededor de cada malla que se funde en `dibuja_etapa`):
+  ~750 ns por vertice que se funde con `dibuja_malla`, ~410 con `sq_vtx_fe` (con el reloj dentro); los vertices enviados
+  son identicos bit a bit (comparados los 32 bytes de cada uno con los de `dibuja_malla` en mas de un millon).
 - Prueba: `-DDIAG_FUNDIDO` (con `-DFE_US=2000000u` para verlo mejor) funde desde el magenta y escribe cada segundo
   "FE: <nuevos> nodos nuevos, <n> fundiendose": Flycast, PALM conduciendo 60 s (tools/prueba/conduce.sh): 30-135 nodos
   nuevos por segundo en marcha; en las capturas lo que aparece

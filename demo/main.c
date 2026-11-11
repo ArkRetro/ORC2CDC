@@ -54,10 +54,10 @@ typedef struct {
     const uint8_t *pvs_l; uint32_t *pvs_m, *pvs_teo;              /* pvs_teo: por nodo, bytes teoricos y vertices */
     int32_t pvs_s; uint32_t pvs_i; int pvs_on;                    /* seccion aplicada, punto del ojo, en uso este cuadro */
     uint32_t *vis;                                                /* nodos visibles en el cuadro (bits; nodos_visibles) */
-    /* fundido de entrada (fe_paso; NULL sin el): por nodo lo que le queda (255 recien aparecido .. 0 entero) y dos
+    /* fundido de entrada (fe_paso; NULL sin el): por nodo lo que le queda (255 recien aparecido .. 0 entero) y tres
        mascaras de bits (fe_p: el nodo estaba en el cuadro anterior, dibujado o fuera de la vista; fe_f: fuera de la
-       vista en este cuadro); fe_hist: el modelo ya ha pasado por un cuadro */
-    uint8_t *fe_v; uint32_t *fe_p, *fe_f; int fe_hist, fe_n;
+       vista en este cuadro; fe_m: fe_v no es 0); fe_hist: el modelo ya ha pasado por un cuadro */
+    uint8_t *fe_v; uint32_t *fe_p, *fe_f, *fe_m; int fe_hist, fe_n;
     /* tramos de mallas seguidas del mismo nodo, por lista (las mallas van por textura y dentro por nodo: ~8 por tramo):
        dibuja_rango salta de una vez los de nodos no visibles. tr[i] = fin del tramo (16 bits) | (nodo + 1) << 16;
        los de la lista l son tr[tr_ini[l]..tr_ini[l + 1]). NULL: sin tabla (sin RAM o sin nodos), malla a malla */
@@ -164,11 +164,11 @@ static int lee_modelo_en(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t
             m->nodos[m->mallas[i].nodo].relleno[0] += ta_teo(n, 0); m->nodos[m->mallas[i].nodo].relleno[1] += n << 12;
         }
     m->vis = m->nnodos ? calloc((m->nnodos + 31) / 32, 4) : NULL; m->ruta_i = 0;
-    m->fe_v = NULL; m->fe_p = m->fe_f = NULL; m->fe_hist = m->fe_n = 0;
+    m->fe_v = NULL; m->fe_p = m->fe_f = m->fe_m = NULL; m->fe_hist = m->fe_n = 0;
 #ifndef SIN_FUNDIDO_ENTRADA
-    if (m->vis && !m->relleno_propio) {                           /* (un bloque: las dos mascaras y los bytes) */
+    if (m->vis && !m->relleno_propio) {                           /* (un bloque: las tres mascaras y los bytes) */
         uint32_t w = (m->nnodos + 31) / 32;
-        if ((m->fe_p = calloc(w * 40, 1))) { m->fe_f = m->fe_p + w; m->fe_v = (uint8_t *)(m->fe_f + w); }   /* fe_v: 32 por palabra */
+        if ((m->fe_p = calloc(w * 44, 1))) { m->fe_f = m->fe_p + w; m->fe_m = m->fe_f + w; m->fe_v = (uint8_t *)(m->fe_m + w); }   /* fe_v: 32 por palabra */
     }
 #endif
     tramos_nodo(m);
@@ -871,6 +871,38 @@ static inline uintptr_t sq_vtx_ofs(const vert_t **pv, const uint32_t **po, uint3
                          : "r0", "r1", "r2", "r3", "r7", "fr0", "fr1", "fr2", "fr3", "t", "memory");
     *pv = v; *po = o; return a;
 }
+/* lo mismo con el fundido de entrada (fe_pon): color x s / 256 (fe_escala: rojo y azul juntos con la mascara 0xFF00FF,
+   el verde aparte, el alfa igual) y el desplazamiento o en todos los vertices; los mismos valores que dibuja_malla con
+   fe_s, sin pasar por pw (s de 1 a 255). Las cuentas enteras van entre las lecturas y el ftrv */
+#define SQ_VTX_FE_ESCALA                                                                                               \
+        "mov r3,r4\n\t" "and %6,r4\n\t" "mov r3,r5\n\t" "shlr8 r5\n\t" "mul.l %3,r4\n\t" "extu.b r5,r5\n\t"            \
+        "shlr16 r3\n\t" "shlr8 r3\n\t" "sts macl,r4\n\t" "mul.l %3,r5\n\t" "shll16 r3\n\t" "shll8 r3\n\t"              \
+        "shlr8 r4\n\t" "and %6,r4\n\t" "or r4,r3\n\t" "sts macl,r5\n\t" "shlr8 r5\n\t" "shll8 r5\n\t" "or r5,r3\n\t"
+static inline uintptr_t sq_vtx_fe(const vert_t **pv, uint32_t cnt, uintptr_t a, uint32_t cmd, uint32_t s, uint32_t o)
+{
+    const vert_t *v = *pv;
+    __asm__ __volatile__("mov %7,r7\n\t" SQ_VTX_CUERPO(SQ_VTX_FE_ESCALA)
+                         : "+r"(v), "+r"(cnt), "+r"(a) : "r"(s), "r"(cmd), "r"(32u), "r"(0xFF00FFu), "r"(o)
+                         : "r0", "r1", "r2", "r3", "r4", "r5", "r7", "fr0", "fr1", "fr2", "fr3", "t", "macl", "memory");
+    *pv = v; return a;
+}
+/* una malla de n >= 1 vertices v a la PowerVR por la SQ (dibuja_malla_directa): con s (fundido de entrada, fe_pon) el
+   color x s / 256 y el desplazamiento o; si no, el de ofs (o 0 sin el) */
+static inline __attribute__((always_inline)) void malla_sq(const vert_t *v, const uint32_t *ofs, uint32_t n, uint32_t s, uint32_t o)
+{
+    uintptr_t a = pvr_dr_addr;
+    if (s) {
+        if (n > 1) a = sq_vtx_fe(&v, n - 1, a, PVR_CMD_VERTEX, s, o);
+        a = sq_vtx_fe(&v, 1, a, PVR_CMD_VERTEX_EOL, s, o);
+    } else if (ofs) {
+        if (n > 1) a = sq_vtx_ofs(&v, &ofs, n - 1, a, PVR_CMD_VERTEX);
+        a = sq_vtx_ofs(&v, &ofs, 1, a, PVR_CMD_VERTEX_EOL);
+    } else {
+        if (n > 1) a = sq_vtx(&v, n - 1, a, PVR_CMD_VERTEX);
+        a = sq_vtx(&v, 1, a, PVR_CMD_VERTEX_EOL);
+    }
+    pvr_dr_addr = a;
+}
 /* lo mismo desde puntos ya transformados (pt_t: x, y, w, u, v, color, desplazamiento): 1/w, x/w, y/w y a la SQ */
 static inline uintptr_t sq_pt(const pt_t *p, uint32_t cnt, uintptr_t a, uint32_t cmd)
 {
@@ -908,7 +940,12 @@ static void __attribute__((noinline)) malla_directa_fija(const vert_t *v, uint32
         pvr_dr_commit(d);
     }
 }
-/* (en linea en los recorridos: una llamada por malla costaba tanto como sus vertices) */
+/* fundido de entrada (fe_paso, mas abajo): con fe_s != 0 dibuja_malla y dibuja_malla_directa (sq_vtx_fe) ponen en
+   cada vertice el color x fe_s / 256 (el alfa igual) y el de desplazamiento fe_o (fe_col x lo que queda del fundido;
+   cabecera con especular, fe_cab): textura x color x (1 - k) + fe_col x k, y encima la niebla de la tabla como siempre */
+static uint32_t fe_s, fe_o;
+/* (en linea en los recorridos: una llamada por malla costaba tanto como sus vertices). Con color_fijo y fe_s (solo
+   depuracion) va por dibuja_malla quien llama */
 static inline __attribute__((always_inline)) void dibuja_malla_directa(const modelo_t *mo, const malla_t *m)
 {
     const vert_t *v = mo->verts + m->v0; uint32_t n = m->n, cf = color_fijo;
@@ -918,17 +955,7 @@ static inline __attribute__((always_inline)) void dibuja_malla_directa(const mod
     if (ta_en_etapa) { vtx_env += n; return; }
 #endif
     if (cf) malla_directa_fija(v, n, ofs, cf);
-    else {
-        uintptr_t a = pvr_dr_addr;
-        if (ofs) {
-            if (n > 1) a = sq_vtx_ofs(&v, &ofs, n - 1, a, PVR_CMD_VERTEX);
-            a = sq_vtx_ofs(&v, &ofs, 1, a, PVR_CMD_VERTEX_EOL);
-        } else {
-            if (n > 1) a = sq_vtx(&v, n - 1, a, PVR_CMD_VERTEX);
-            a = sq_vtx(&v, 1, a, PVR_CMD_VERTEX_EOL);
-        }
-        pvr_dr_addr = a;
-    }
+    else malla_sq(v, ofs, n, fe_s, fe_o);
     tri_enviados += n - 2; vtx_env += n;
 }
 
@@ -939,10 +966,6 @@ static inline uint32_t mul_argb(uint32_t c, uint32_t k)
     return (((c >> 24) * (k >> 24) / 255) << 24) | ((((c >> 16) & 255) * ((k >> 16) & 255) / 255) << 16) |
            ((((c >> 8) & 255) * ((k >> 8) & 255) / 255) << 8) | ((c & 255) * (k & 255) / 255);
 }
-/* fundido de entrada (fe_paso, mas abajo): con fe_s != 0 dibuja_malla pone en cada vertice el color x fe_s / 256
-   (el alfa igual) y el de desplazamiento fe_o (fe_col x lo que queda del fundido; cabecera con especular, fe_cab):
-   textura x color x (1 - k) + fe_col x k, y encima la niebla de la tabla como siempre */
-static uint32_t fe_s, fe_o;
 static inline uint32_t fe_escala(uint32_t c, uint32_t k)
 {
     return (c & 0xFF000000u) | ((((c & 0xFF00FFu) * k) >> 8) & 0xFF00FFu) | ((((c & 0xFF00u) * k) >> 8) & 0xFF00u);
@@ -1095,14 +1118,14 @@ static void dibuja_rango(const modelo_t *mo, int l, uint32_t k0, uint32_t k1, in
         if (recorta && seguro) { dg_dir++; dg_vdir += m->n; } else if (recorta) { dg_mal++; dg_vmal += m->n; }
 #endif
 #ifndef SIN_FUNDIDO_ENTRADA
-        if (fv) { fe_pon(mo, m->tex, fv); ta_ofs = 1; }       /* (por dibuja_malla: color y desplazamiento) */
+        if (fv) { fe_pon(mo, m->tex, fv); ta_ofs = 1; }       /* (color y desplazamiento de las dos dibuja_malla) */
 #endif
         if (cartel) {                                           /* en el marco de su nodo, girado hacia la camara */
             carga_cartel((const float (*)[4])mo->carteles[mo->nodos[m->nodo].cartel]);
             dibuja_malla(mo, m);
             mat_load(&vista);
         }
-        else if (recorta && seguro && !fv) dibuja_malla_directa(mo, m);
+        else if (recorta && seguro && !(fv && color_fijo)) dibuja_malla_directa(mo, m);   /* (fundiendose tambien: sq_vtx_fe) */
         else dibuja_malla(mo, m);
         if (fv) { fe_s = 0; ta_ofs = mo->ofs != NULL; }
     }
@@ -1189,7 +1212,7 @@ static void dibuja_etapa(const modelo_t *mo, int l)
             if (seguro) { dg_dir++; dg_vdir += m->n; } else { dg_mal++; dg_vmal += m->n; }
 #endif
 #ifndef SIN_FUNDIDO_ENTRADA
-            if (f) {                                            /* fundiendose: por dibuja_malla, con desplazamiento */
+            if (f && (cart || !seguro || cf)) {                 /* fundiendose fuera de la directa: por dibuja_malla */
                 ET_VUELCA(); fe_pon(mo, m->tex, f); ta_ofs = 1;
                 if (cart) carga_cartel((const float (*)[4])mo->carteles[N[m->nodo].cartel]);
                 dibuja_malla(mo, m);
@@ -1206,7 +1229,8 @@ static void dibuja_etapa(const modelo_t *mo, int l)
                 ET_RECARGA();
             }
             else if (seguro) {                                  /* dibuja_malla_directa con las cuentas locales */
-                uint32_t n = m->n, tt = teo[n], c = tt * tf >> 8;
+                /* (fundiendose, f: con desplazamiento en el TA, ta_teo_tab[1], y el color de fe_pon en sq_vtx_fe) */
+                uint32_t n = m->n, tt = f ? ta_teo_tab[1][n] : teo[n], c = tt * tf >> 8;
 #ifndef DIAG_SIN_TOPE
                 if ((int32_t)c > r) { ta_corto = 1; ta_et_corto |= ta_en_etapa; continue; }
 #endif
@@ -1217,17 +1241,10 @@ static void dibuja_etapa(const modelo_t *mo, int l)
                 {
                     const vert_t *v = VV + m->v0; const uint32_t *ofs = OF ? OF + m->v0 : NULL;
                     if (cf) malla_directa_fija(v, n, ofs, cf);
-                    else {
-                        uintptr_t a = pvr_dr_addr;
-                        if (ofs) {
-                            if (n > 1) a = sq_vtx_ofs(&v, &ofs, n - 1, a, PVR_CMD_VERTEX);
-                            a = sq_vtx_ofs(&v, &ofs, 1, a, PVR_CMD_VERTEX_EOL);
-                        } else {
-                            if (n > 1) a = sq_vtx(&v, n - 1, a, PVR_CMD_VERTEX);
-                            a = sq_vtx(&v, 1, a, PVR_CMD_VERTEX_EOL);
-                        }
-                        pvr_dr_addr = a;
-                    }
+#ifndef SIN_FUNDIDO_ENTRADA
+                    else if (f) { fe_pon(mo, m->tex, f); malla_sq(v, NULL, n, fe_s, fe_o); fe_s = 0; }
+#endif
+                    else malla_sq(v, ofs, n, 0, 0);
                 }
                 dtri += n - 2; ve += n;
             }
@@ -5413,8 +5430,9 @@ static int prio_sube(int actual, int objetivo, int *espera, int max)
    aparece a menos de FE_CERCA (la carretera de delante del coche), ni lo que aparece todo a la vez con la pantalla
    tapada o cambiada: el primer cuadro tras el menu o una carga (mas de FE_HUECO_US sin cuadros, o ningun modelo que
    ya se dibujara) y los cortes de camara (mas de 1/4 de lo visible de los modelos que ya se dibujaban es nuevo).
-   Coste: las mallas que se funden van por dibuja_malla (C) en vez de la directa y con 4 bytes mas por vertice en el
-   TA (ta_cabe lo cuenta); 1,25 bytes de RAM por nodo. -DSIN_FUNDIDO_ENTRADA lo quita. */
+   Coste: las mallas que se funden van por la directa con el color en el ensamblador (sq_vtx_fe; las de carteles y las
+   que cruzan el plano cercano por dibuja_malla, como las demas) y con 4 bytes mas por vertice en el TA (ta_cabe y
+   ta_teo_tab[1] lo cuentan); 1,375 bytes de RAM por nodo. -DSIN_FUNDIDO_ENTRADA lo quita. */
 #ifndef SIN_FUNDIDO_ENTRADA
 #ifndef FE_US
 #define FE_US 400000u
@@ -5441,19 +5459,21 @@ static void fe_paso(void)
         modelo_t *mo = tramos[i]; uint32_t n = 0;
         if (!mo->tv || !mo->fe_p) continue;
         for (w = 0; w < (mo->nnodos + 31) / 32; w++) {
-            uint32_t b = mo->vis[w], nv = b & ~mo->fe_p[w], hay = 0; uint8_t *V = mo->fe_v + w * 32;
+            /* solo los nodos nuevos y los que se estan fundiendo (fe_m): en los demas fe_v es 0 y se queda en 0 */
+            uint32_t b = mo->vis[w], nv = b & ~mo->fe_p[w], q = nv | mo->fe_m[w], fm = 0; uint8_t *V = mo->fe_v + w * 32;
             mo->fe_p[w] = b | mo->fe_f[w];
-            if (mo->fe_n) for (j = 0; j < 8; j++) hay |= ((const uint32_t *)V)[j];
-            if (!hay && !nv) continue;
-            for (j = 0; j < 32; j++) {
+            if (!q) continue;
+            while (q) {
+                j = __builtin_ctz(q); q &= q - 1;
                 if (!((b >> j) & 1)) V[j] = 0;                  /* no se dibuja: sin fundido a medias al volver */
                 else if ((nv >> j) & 1) {                       /* nuevo en mitad de la pantalla */
                     const nodo_t *d = mo->nodos + w * 32 + j;
                     float z = (d->cx - ojo[0]) * ade[0] + (d->cy - ojo[1]) * ade[1] + (d->cz - ojo[2]) * ade[2] - d->r;
                     V[j] = sin || z < FE_CERCA ? 0 : 255;
-                } else if (V[j]) V[j] = V[j] > paso ? V[j] - paso : 0;
-                n += V[j] != 0;
+                } else V[j] = V[j] > paso ? V[j] - paso : 0;
+                if (V[j]) fm |= 1u << j;
             }
+            mo->fe_m[w] = fm; n += __builtin_popcount(fm);
         }
         mo->fe_n = n; mo->fe_hist = 1;
     }
