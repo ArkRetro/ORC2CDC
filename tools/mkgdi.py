@@ -38,7 +38,9 @@ def main():
         if ahorro: print('ficheros repetidos: %d KB una sola vez' % (ahorro >> 10))
         sh(os.path.join(CC, 'bin', 'sh-elf-objcopy'), '-R', '.stack', '-O', 'binary', a.elf, os.path.join(raiz, '1ST_READ.BIN'))
         ip = os.path.join(t, 'IP.BIN')
-        sh(os.path.join(KOS, 'utils', 'makeip', 'makeip'), '-g', a.nombre[:128], '-c', 'HOMEBREW', '-f', ip)
+        sh(os.path.join(KOS, 'utils', 'makeip', 'makeip'), '-g', a.nombre[:128], '-c', 'HOMEBREW', '-n', 'ORC2CDC', '-f', ip)
+        # numero de producto propio (no el T-00000 de makeip, comun a todo el homebrew): openMenu de GDEMU busca la
+        # caratula del juego por el (GDMenu Card Manager la guarda con ese numero)
         # track03: ISO 9660 que empieza en el LBA 45000, con el IP.BIN en la zona de sistema. En un GD-ROM la BIOS solo
         # carga 1ST_READ.BIN si esta al final del disco (probado con Flycast y la BIOS real: con el fichero en 45 024 lee
         # el directorio y vuelve al menu; cerca de 549 150, arranca): primero los datos, luego un relleno de ceros (0.0)
