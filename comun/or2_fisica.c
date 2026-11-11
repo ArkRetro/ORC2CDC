@@ -2094,9 +2094,9 @@ int or2_choque_muro(or2_coche_t *c, const or2_param_t *p, float nx, float ny, fl
         v2 izq = mk(-cosf(c->psi), -sinf(c->psi));
         lado = (n.x * izq.x + n.y * izq.y) < 0.0f ? 1 : 0;
     }
-    /* sin clase de muro bajo la forma (+2A8 & 0x10F0020 = 0: los limites 0x4000 y 0x40) solo hay roce (PS2 0x199430
-       .., PC pc_wall_controller.cpp 150) */
-    muro = c->muro_clase == 0 || (c->muro_clase & 0x010f0020u) != 0;
+    /* sin clase de muro bajo la forma (+2A8 & 0x10F0020 = 0: los limites 0x4000 y 0x40, las otras clases que acepta
+       CbwColiWall, 0x10F4060) solo hay roce (PS2 0x199430.., PC pc_wall_controller.cpp 150) */
+    muro = !(c->muro_clase & 0x4040u) || (c->muro_clase & 0x010f0020u) != 0;   /* otras clases (sonda de la demo): como antes */
     /* impacto entre el aplastamiento y el rebote: solo si se acepta el choque fuerte hay rebote */
     if (muro && vn < 0.0f && !(imp >= lim) && imp >= ANG_APLASTA) fuerte = aplasta(c, p, imp, lado);
     if (muro && vn < 0.0f && (imp >= lim || fuerte)) {
