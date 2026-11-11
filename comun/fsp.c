@@ -153,7 +153,8 @@ static float fila_4bef90(int r)
     x0 = x0 + x1; x0 = x0 + T->aa4; x0 = x0 + T->aa0; x0 = x0 - F32(0x84a264);
     return x0;
 }
-static int casi_cero(float v) { return 1e-6f > v && v > -1e-6f; }   /* 5A29E0 > v > 5C9404 (SUPUESTO: +-1e-6) */
+/* 5A29E0 > v > 5C9404: en el PS2 (4BEFE0 = 0x211328) 1e-4 y -1e-4 (lui / ori 0x38d1b717 y 0xb8d1b717) */
+static int casi_cero(float v) { return 1e-4f > v && v > -1e-4f; }
 static void f_4befe0(float lim, float reset)
 {
     float v = F32(0x84a268), t;
@@ -427,7 +428,10 @@ static void paso11_4c0de0(void)
 }
 static void paso4_4c0110(void)
 {
-    int r = 0;                                          /* 453320 = [0x54c108] (PS2 0x178478): 0 (ver PARIDAD) */
+    /* 453320 = [0x54c108] (PS2 0x178478) = el byte +0x13 de los ajustes de 0x5493d0 (0x178108, copiado por 0x178338),
+       2 por defecto (0x177310 / 0x177440, nadie lo cambia): 5 filas con los 15 recorridos continuos (presets 2 / 3,
+       arboles csc_data_cvt_ren / csc_data_2_ren). Esos arboles no estan convertidos: DESVIACION, 0 (3 filas) */
+    int r = 0;
     P32(0x8449e0, (uint32_t)r);
     if (r == 0) P32(0x844944, 0); else if (r > 0 && r <= 2) P32(0x844944, 1);
     P32(0x84a24c, T->m60[0]); P32(0x84a23c, 0x2e0022);
@@ -494,14 +498,14 @@ static int palanca_4c0bd0(int arg)
         if (ecx0 > 0) x0 = (float)(esi - edx);
         else { float x1 = suave_84a314; x0 = (float)(esi - edx); x0 = x0 - x1; x0 = x0 * T->fa0; x0 = x0 + x1; }
         suave_84a314 = x0;
-        if (0.0f > x0) { x0 = 0.0f; suave_84a314 = x0; }          /* 5B4354 (SUPUESTO: 0) */
+        if (40.0f > x0) { x0 = 40.0f; suave_84a314 = x0; }        /* 5B4354: 40 (PS2 0x218ba0, lui 0x4220) */
     } else if (esi >= -edx) {
         x0 = 0.0f; suave_84a314 = 0.0f;
     } else {
         x0 = (float)(edx + esi);
         if (ecx0 >= 0) { float x1 = suave_84a314; x0 = x0 - x1; x0 = x0 * T->fa0; x0 = x0 + x1; }
         suave_84a314 = x0;
-        if (x0 > 0.0f) { x0 = 0.0f; suave_84a314 = x0; }          /* 5B4350 (SUPUESTO: 0) */
+        if (x0 > -40.0f) { x0 = -40.0f; suave_84a314 = x0; }      /* 5B4350: -40 (PS2 0x218c18, lui 0xc220) */
     }
     if (arg) {
         if (!(esi < 0x50) && edi > 0x28) step = 1;

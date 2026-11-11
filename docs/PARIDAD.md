@@ -2123,20 +2123,38 @@ memory", RAM del menu igual que antes (939 KB libres).
   sostenido = Y, 0x400 / 0x800 = cruceta arriba / abajo, 0x40000 = gatillo R. Eje 453720(0) = palanca X; la cruceta
   izquierda / derecha cuenta como palanca a tope (PROBABLE: 0x210a00 devuelve 0 para 0x40 / 0x80); 453750(0) = la X del
   paso anterior (PROBABLE).
-- PROBABLE / SUPUESTO: 5A29E0 / 5C9404 (casi cero de la velocidad de la lista) = +-1e-6; 5B4350 / 5B4354 (topes del
-  suavizado de la palanca) = 0; el orden entre las escenas del grupo y las inmediatas (429530) de una misma capa; la
-  lista (4C0EB0) es la del PC: la del PS2 (0x2113a0) difiere en detalles (pone 3 en 84A28F / 84A290 en los saltos de
-  borde) y no esta comprobada linea a linea.
+- Constantes del PS2 (2026-11-11, antes SUPUESTAS): 5A29E0 / 5C9404 (casi cero de la velocidad de la lista, 4BEFE0 =
+  PS2 0x211328) = 1e-4 / -1e-4 (lui / ori 0x38d1b717 / 0xb8d1b717; antes 1e-6); 5B4350 / 5B4354 (topes del suavizado de
+  la palanca, 4C0BD0 = PS2 0x218a88: el suavizado 0x218a68 con 0x373dbc = 0,2 y el valor en 0x373dc0) = -40 / 40 (lui
+  0xc220 / 0x4220 en 0x218c18 / 0x218ba0: si queda por debajo de 40, 40; antes 0). Los dos casi cero de dentro de la
+  lista (4C0EB0) usan la misma constante.
+- PROBABLE: el orden entre las escenas del grupo y las inmediatas (429530) de una misma capa; la lista (4C0EB0) es la del
+  PC: la del PS2 (0x2113a0) difiere en detalles (pone 3 en 84A28F / 84A290 en los saltos de borde) y no esta comprobada
+  linea a linea.
+- 453320 = [0x54c108] (PS2 0x178478, su unica lectura 0x214e00): lo copia 0x178338 del byte +0x13 de los ajustes de
+  [0x35a9e8] = 0x5493d0 (0x178108); 0x177310 / 0x177440 (al arrancar, 0x1077c4) lo ponen a 2 y nada mas lo escribe: en
+  el PS2 sale 2 -> 8449E0 = 2, 844944 = 1 y la lista de 5 filas con los 15 recorridos continuos (presets 2 / 3: arboles
+  csc_data_cvt_ren / csc_data_2_ren, 0x1760c0). Esos arboles, el resultado de la Contrarreloj de 15 etapas (funcion
+  0x50 del suceso 0x188, 4AED50) y sus metas no estan convertidos: DESVIACION, la Dreamcast toma 0 (3 filas) hasta
+  portarlos.
+- Balance musica / motor (+21, 48B1B0 = PS2 0x1bd020 -> 0x5a2079, leido por 0x1bd030): en las carreras (modos 13 / 0x10,
+  0x11f148 / 0x11f570) elige el registro de mezcla 0x3c15d0 + balance x 0x1C (7 floats: 1,0 0,5 0,5 0,8 1,0 0,8 0,7 /
+  0,9 0,7 0,7 0,8 1,0 0,8 0,7 / 0,8 1,5 1,0 0,8 1,0 0,8 0,7; fuera de carrera 0x3c15b0: 0,9 0,7 0,7 0,7 1,0 0,8 0,7) que
+  se copia a 0x531890: +0x18 x 127 a los comandos 0xA004 / 0xA010 del IOP (0x11f3e0), +4..+0x14 escalan el volumen por
+  la clase del sonido (0x11f438, tabla de saltos 0x3c1270, 10 clases), +0 en 0x11f4f4. SIN PORTAR: falta saber que
+  clase de 0x3c1270 es cada sonido de la Dreamcast (motor, derrape, voces, musica) para aplicarlo en sfx.c / musica.c.
 - El fundido de volumen de la musica (4BF970 -> 42E020) es en el PS2 0x1001d8, que no cambia el volumen (ver Fin de
   la carrera): nada que portar.
 - Vuelta desde el GAME OVER (modo 28 -> 10): el frontal se abre en cuanto el hueco de la union queda libre (tras la meta
   la union de la meta sigue alli unos cuadros, hasta curso_al_menu); fsp_entra no usa nunca el monton (las tablas de
   SPFE.DAT, ~850 KB, solo en el final del hueco de la union; sin el, no se entra). Las voces del modo (VOCES.DAT /
   VOCESH.DAT) se leen en el hueco sin ese final.
-- SIN PORTAR: 453320 ([0x54c108], quien lo escribe sin localizar): se toma 0 (3 filas; las de 15 recorridos
-  continuos, presets 2 / 3, no salen); el mundo y la camara del coche (4BF2E0 / 4BF340, suceso 0x181 funcion 0xD; la
+- SIN PORTAR: el mundo y la camara del coche (4BF2E0 / 4BF340, suceso 0x181 funcion 0xD; la
   Dreamcast usa la camara que gira del menu de la consola, PROVISIONAL); los textos de ayuda (84A320, 446D90); las
-  voces 6..0x3F (4BEE60: solo con el idioma 0; en la PAL espanola no suenan); la configuracion del coche de la Contrarreloj (+23) y el balance (+21) en la carrera; 689C68 ([7C24BC]);
+  voces 6..0x3F (4BEE60: solo con el idioma 0; en la PAL espanola no suenan); la configuracion del coche de la Contrarreloj en la carrera (+23, 48B190 =
+  PS2 0x1bd000 -> 0x5a2078; la leen por 0x1bd010 0x176754, 0x18d7d4, 0x19b590 / 0x19b64c, 0x1a4938, 0x1b7254 / 0x1b72bc,
+  0x1b9710, 0x1bbc40, 0x1c29c4, 0x1fc68c, 0x1fd684, 0x200174 y 0x21cc18 / 0x21ccc0: sin seguir); el balance (arriba);
+  689C68 ([7C24BC]);
   red, varios jugadores y la pagina 84A218.
 
 ## Ultimo cambio verificado
