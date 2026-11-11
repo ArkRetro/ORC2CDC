@@ -269,6 +269,7 @@ static pvr_ptr_t ar_bloque; static uintptr_t ar_ini, ar_fin, ar_abajo, ar_arriba
 static uint32_t ar_max_abajo, ar_min_arriba;                     /* lo mas alto/bajo que ha llegado cada lado */
 static uint32_t vram_rebajadas, vram_fuera;                       /* texturas rebajadas y fuera de la zona (carrera) */
 static int cie_n;                                                 /* cabeceras del cielo guardadas (cielo_cab) */
+static int agua_n;                                                /* y las del reflejo del agua (agua_cabecera) */
 #ifdef DIAG_TRANS                                                 /* medida: camara lenta (DIAG_TRANS ms por cuadro) en los */
 static int dt_n, dt_pre; static const char *dt_que = "";          /* cuadros de alrededor de cada suceso del cambio de etapa */
 #define DT(q) do { if (dt_n < 6) { dt_n = 6; dt_que = q; printf("TR: suceso %s\n", q); } } while (0)
@@ -309,7 +310,7 @@ static void tex_suelta(modelo_t *m)
     if (m->tex0) { memcpy(m->texs, m->tex0, m->ntex * sizeof(tex_t)); free(m->tex0); }
     free(m->tv); free(m->tfl); free(m->cabs[0]); free(m->cabs[1]);
     m->tv = NULL; m->tfl = NULL; m->tex0 = NULL; m->cabs[0] = m->cabs[1] = NULL; m->lado = 0;
-    cie_n = 0;                                                    /* las direcciones se reutilizan: fuera las del cielo */
+    cie_n = agua_n = 0;                                           /* las direcciones se reutilizan: fuera las del cielo */
 }
 /* libera un modelo: texturas de la memoria de video, cabeceras y datos */
 static void libera_modelo(modelo_t *m)
@@ -4394,6 +4395,7 @@ typedef struct {
     uint32_t clima; uint16_t trans_pos; int8_t trans_seg; uint8_t r_; float trans_m;
     float luz[3][16];
     uint32_t nniebla0; niebla_t niebla0[NIEBLA_MAX];
+    int16_t agua_p0, agua_p1; uint8_t agua_alfa, agua, r3_[2];   /* agua del descriptor (+0x6E / +0x70, +0x6C; agua_dibuja) */
     int16_t f_bk; int8_t f_col; uint8_t r2_;                    /* BKnn.DAT de su union; colision: -1 COLBK.DAT,
                                                                    -2 COLLR.DAT (LRBK de las misiones), si no COLBKnn */
 } etapa_t;
@@ -5921,6 +5923,7 @@ static void cielo_grupo(const modelo_t *mo, int g, int l, float a, int niebla, i
     }
     color_mul = 0; cie_lleno = 0;
 }
+static void agua_dibuja(void);
 /* el cielo del cuadro en la lista l (como 4521C0: primero el nuevo, grupo 0 y 1; luego el viejo, grupo 1 y 0) */
 static void cielo_dibuja(int l)
 {
@@ -5938,6 +5941,100 @@ static void cielo_dibuja(int l)
             cielo_grupo(mo, G[k], l, cie_a[Q[k]], niebla, lmin);
             lx = cielo_lmax(mo, G[k], cie_a[Q[k]], lmin); if (lx > lmin) lmin = lx;
         }
+    }
+    if (l == 2) agua_dibuja();                                  /* el reflejo del agua, encima del cielo */
+}
+
+/* ---------------------------------------------------------------- agua (docs/PARIDAD.md, Agua)
+   El agua de SLES-53998 (0x11a2e8, llamada al final de la geometria de la etapa, 0x172b68): el plano del descriptor
+   +0x5C solo escribe el alfa de la pantalla (una mascara de ondas que se mueve) y las capas del reflejo (+0x60.., la
+   media esfera de abajo del banco del cielo con el paisaje reflejado, alrededor de la camara como el cielo) se pintan
+   encima sin z donde esa mascara lo deja, con ALPHA 9: Cs + Cd x As (As = (+0x6C >> 1) / 255, en el alfa de sus
+   vertices: tools/conv_tramo.py pon_agua). Se dibuja en la etapa con la posicion de carretera entre +0x6E y +0x70, y en
+   la union (car+5C != 0) pasada la posicion 0xC7 si +0x6E <= 0 (0x172b40 / 0x11a32c).
+   DESVIACION: la PowerVR a 16 bits no guarda el alfa de destino. El plano no se dibuja (en el original no pone color:
+   antes salia negro, su textura de 32x32 casi negra que el original cambia por la procedural) y de las capas se dibuja
+   la primera detras de toda la escena, como el cielo (lista transparente, z fija tras la del cielo, ONE / SRCALPHA),
+   recortada en el horizonte (y <= 0 en el marco del cielo: el plano esta siempre por debajo del ojo). Se ve donde no
+   hay nada delante: el agua que el plano cubria y lo de debajo del horizonte que no tapa la escena. */
+static pvr_poly_hdr_t agua_cab[8]; static uintptr_t agua_clave[8];   /* (agua_n: arriba) */
+static const pvr_poly_hdr_t *agua_cabecera(const modelo_t *mo, int i)
+{
+    pvr_poly_cxt_t cx; const tex_t *t = mo->texs + i; int k;
+    uint32_t fb = t->fmt & 0xff, vq = t->fmt & 0x100, n = ((t->fmt >> 16) & 0xff) + 1;
+    pvr_ptr_t dir = vq ? (pvr_ptr_t)((uintptr_t)mo->tv[i] - (2048 - 8 * n)) : mo->tv[i];
+    for (k = 0; k < agua_n; k++) if (agua_clave[k] == (uintptr_t)dir) return agua_cab + k;
+    if (agua_n == 8) agua_n = 0;
+    k = agua_n++;
+    pvr_poly_cxt_txr(&cx, PVR_LIST_TR_POLY, FMT[fb] | PVR_TXRFMT_TWIDDLED | (vq ? PVR_TXRFMT_VQ_ENABLE : 0), t->w, t->h, dir,
+                     PVR_FILTER_BILINEAR);
+    cx.gen.fog_type = PVR_FOG_DISABLE; cx.gen.culling = PVR_CULLING_NONE;
+    cx.blend.src = PVR_BLEND_ONE; cx.blend.dst = PVR_BLEND_SRCALPHA;   /* Cs + Cd x As */
+    cx.txr.env = PVR_TXRENV_MODULATEALPHA; cx.depth.write = PVR_DEPTHWRITE_DISABLE;
+    pvr_poly_compile(agua_cab + k, &cx);
+    agua_clave[k] = (uintptr_t)dir;
+    return agua_cab + k;
+}
+/* un poligono convexo (n <= 6 puntos) como tira: 0, 1, n-1, 2, n-2... */
+static void agua_poligono(const pt_t *o, int n, float z)
+{
+    int i, a = 1, b = n - 1;
+    if (n < 3 || !ta_cabe(n)) return;
+    cielo_envia(o, 0, z);
+    for (i = 1; i < n; i++) { cielo_envia(i & 1 ? o + a++ : o + b--, i == n - 1, z); }
+    tri_enviados += n - 2;
+}
+/* corta el poligono p (n <= 5 puntos) por d >= 0 (d de cada punto en dd); los puntos que quedan en o */
+static int agua_corta(const pt_t *p, const float *dd, int n, pt_t *o)
+{
+    int k, c = 0;
+    for (k = 0; k < n; k++) {
+        int j = (k + 1) % n, da = dd[k] >= 0, db = dd[j] >= 0;
+        if (da) o[c++] = p[k];
+        if (da != db) {
+            float t = dd[k] / (dd[k] - dd[j]);
+            o[c].x = p[k].x + t * (p[j].x - p[k].x); o[c].y = p[k].y + t * (p[j].y - p[k].y); o[c].w = p[k].w + t * (p[j].w - p[k].w);
+            o[c].u = p[k].u + t * (p[j].u - p[k].u); o[c].v = p[k].v + t * (p[j].v - p[k].v); o[c].c = p[k].c; o[c].o = 0; c++;
+        }
+    }
+    return c;
+}
+/* una malla del reflejo: cada triangulo recortado en y <= 0 (marco del cielo) y en w >= CIELO_CERCA */
+static void agua_malla(const modelo_t *mo, const malla_t *m, float z)
+{
+    const vert_t *v = mo->verts + m->v0; uint32_t i, n = m->n > 256 ? 256 : m->n; float ym[256];
+    for (i = 0; i < n; i++) {
+        float x = v[i].x, y = v[i].y, zz = v[i].z, w;
+        ym[i] = -y;                                             /* >= 0: por debajo del horizonte */
+        mat_trans_single3_nodivw(x, y, zz, w);
+        pw[i].x = x; pw[i].y = y; pw[i].w = w; pw[i].u = v[i].u; pw[i].v = v[i].v; pw[i].c = v[i].c; pw[i].o = 0;
+    }
+    for (i = 0; i + 2 < n; i++) {
+        pt_t a[4], b[6]; float dw[4]; int k, c;
+        if (ym[i] < 0 && ym[i + 1] < 0 && ym[i + 2] < 0) continue;
+        c = agua_corta(pw + i, ym + i, 3, a);
+        for (k = 0; k < c; k++) dw[k] = a[k].w - CIELO_CERCA;
+        agua_poligono(b, agua_corta(a, dw, c, b), z);
+    }
+}
+/* el reflejo del cuadro (lista transparente, tras el cielo: cielo_dibuja) */
+static void agua_dibuja(void)
+{
+    int nodo, pos, u, k; const modelo_t *mo = NULL; const etapa_t *e;
+    if (cur_nodo < 0) return;
+    u = traf_lugar(yo.s, &nodo, &pos);
+    if (nodo < 0 || nodo >= ncurso) return;
+    e = curso + nodo;
+    if (!e->agua) return;
+    if (u ? pos <= 0xC7 || e->agua_p0 > 0 : pos < e->agua_p0 || pos > e->agua_p1) return;
+    if (etapa.tv && etapa_nodo == nodo) mo = &etapa;
+    else if (sig.tv && cur_sig == nodo) mo = &sig;
+    if (!mo) return;
+    for (k = mo->inicio[3]; k < mo->inicio[4]; k++) {
+        const malla_t *m = mo->mallas + k;
+        if (m->n < 3 || m->nodo != -258 || m->tex < 0) continue;
+        pvr_prim(agua_cabecera(mo, m->tex), sizeof(pvr_poly_hdr_t));
+        agua_malla(mo, m, 1.2e-4f * (1.0f + (float)cie_seq++ * (1.0f / 1024.0f)));
     }
 }
 

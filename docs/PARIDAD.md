@@ -534,7 +534,8 @@ Efectos del suelo del original y su estado:
   paquete: CONFIRMADO). En la PS2 las sombras pintadas son tiras de mezcla de las propias etapas (PALM registro 0,
   textura 0 de 64x8; LAKE textura 30), que ya se dibujaban y ahora van con su alfa de vertice.
 - Agua: el mar de PALM es opaco con su brillo aditivo (arriba); el lago de LAKE son mallas opacas del registro 0
-  (textura 55, a 95-98 m bajo la salida), sin capa 2 ni mezcla, y debajo el plano del agua (abajo, 2026-11-09). Sin animacion de textura en sus nodos
+  (textura 55, a 95-98 m bajo la salida), sin capa 2 ni mezcla, y debajo el agua del descriptor (+0x5C..+0x70: el
+  plano que solo escribe el alfa y el reflejo; ver Agua: el reflejo del original, 2026-11-11). Sin animacion de textura en sus nodos
   (sin la bandera 0x20 de 404D10).
 - Capas 2 (PENDIENTE, sin portar): la mayoria de las tiras de la escena llevan una segunda capa (tabla 4 +14/+18) y su
   programa del VU1 la dibuja en una segunda pasada: guarda dos ST por vertice y manda el mismo bufer dos veces
@@ -2336,8 +2337,8 @@ los huecos de la escena se ven):
   vertices a y = -99, 3,8 x 3,3 km), CLOU 0x5d0003, DESE 0x610005, TULI 0x620006, METR 0x630007, IMPE 0x660005, las
   demas 0xFFFFFFFF; todos son planos a la altura del agua. `conv_union.objetos_etapa` lo anade a la etapa (SEG03, 07,
   11, 12, 13 y 16 reconvertidos; SEG13 +10 KB: hueco de etapa 7842 KB). Comprobado: sin pixeles de fondo en las
-  seis. PROBABLE: el codigo del PS2 que lee +0x5C no se ha localizado (en 0x172780 solo esta la tabla 0x3f9b90; la
-  0x3f9c98 es el reflejo). No era la PVS, ni la tabla de secciones, ni el recorte por nodos, ni el tope del TA
+  seis. CORREGIDO (2026-11-11, ver Agua: el reflejo del original): ese plano no pinta color en el original (solo el
+  alfa) y en la Dreamcast salia negro; ya no se dibuja. No era la PVS, ni la tabla de secciones, ni el recorte por nodos, ni el tope del TA
   (probado quitando cada uno), ni los registros 8 y 9 de cs_CS_LAKE que no se dibujan.
 - Cielo en el fundido de la union: la lista transparente de la PowerVR ordena por la z de cada triangulo y los
   triangulos grandes de los dos cielos (y las nubes) se cruzaban: trozos rectangulares de un cielo sobre el otro. El
@@ -2498,3 +2499,51 @@ SOLO SOSPECHADO (sin tocar)
   se dibuja de un modelo sin tablas (`tv`), tampoco a medio subir. Las cabeceras guardadas del cielo (`cie_n`) se
   borran en cada `tex_suelta`. Color de fondo, plano lejano y tabla de niebla no cambian en el cuadro del cambio
   (la niebla de la etapa nueva en su posicion 0 es la del final del fundido).
+
+## Agua: el reflejo del original (2026-11-11)
+
+Queja del probador (consola real): "hay zonas que deberian mostrar agua y se ven negras" (lagos y agua bajo los
+puentes). Reproducido en Flycast (`-DPRUEBA_AUTO -DPRUEBA_NODO=1`): el lago de LAKE bajo el puente y a la izquierda de
+la salida, negro.
+
+Causa: el plano del agua que se anadio el 2026-11-09 (descriptor de etapa +0x5C, `conv_union.objetos_etapa`) se
+dibujaba con su textura del disco: 32 x 32, casi negra (media 12 / 255, unas rayas grises) y modulada por la luz.
+En el original esa textura no se ve nunca. El agua es un efecto propio del PS2 (el PC no tiene estos campos: su
+descriptor sigue en +0x5C con lo que en el PS2 va en +0x72), CONFIRMADO en SLES-53998:
+- Descriptor de etapa: +0x5C el plano (obj_course_obj_cs_<zona>), +0x60 / +0x64 / +0x68 las tres capas del reflejo
+  (registros 3, 4 y 5 de obj_course_obj_sky_<zona>: la media esfera de abajo, y de -1320 a +48, con el paisaje
+  reflejado; las tres iguales salvo la V, desplazada 0,06 y 0,09), byte +0x6C el alfa de las capas, +0x6E / +0x70
+  (s16) las posiciones de carretera en las que se dibuja. 38 de las 62 etapas lo tienen (las del lago, los rios y el
+  mar: LAKE, CLOU, DESE, TULI, METR, IMPE, BEAC, NIAG, ALAS, GRAN, SANF, AMAZ, YOSE, MAYA, NEWY, PRIN, FLOR, EAST y sus
+  vueltas de las misiones).
+- Al cargar la etapa (0x11a1a8): 0x119ea8 cambia el material del plano (la textura por la de agua procedural del
+  0x530780 +0xC: 64 x 64 PSMT8H con paleta, hecha cada cuadro sumando tres mascaras de ondas de 64 x 64 del ELF
+  (0x344dd0 / 0x348dd0 / 0x34cdd0, en los bits 7, 6 y 5 del alfa) que se desplazan 0,003 por cuadro (0x11a250);
+  ALPHA Cs, TEX1 0) y 0x119fb8 el de las capas (alfa del material (+0x6C >> 1) / 255, ALPHA 9 = Cs + Cd x As, TEST
+  con la prueba del alfa de destino DATE / DATM 1).
+- Cada cuadro, al final de la geometria de la etapa (0x172b68 -> 0x11a2e8): en la etapa con la posicion entre +0x6E y
+  +0x70, en la union (car+5C != 0) pasada la posicion 0xC7 si +0x6E <= 0. El plano se dibuja con FBMSK 0x00FFFFFF
+  (tabla 0x32b3b0[8], via 0x112330): solo escribe el alfa de la pantalla, la mascara de ondas (paleta: 0x80, 0x20 o
+  0x40). Despues cada capa, alrededor de la camara como el cielo, sin z (ZTST ALWAYS) y solo RGB (FBMSK 0xFF000000),
+  sale donde el alfa de destino tiene el bit 7; entre capa y capa 0x11a800 relee la pantalla como textura PSMT8H con la
+  paleta de 0x530780 +0x10 y rota ese alfa (0x80 -> 0x20, 0x20 -> 0x40, 0x40 -> 0x80; paquetes del ELF 0x3128c0 y
+  0x312990). Cada pixel del agua ensena una de las tres capas: el paisaje reflejado ondulado.
+
+Arreglo (tools/conv_union.py `agua_de` / `agua_campos`, tools/conv_tramo.py `pon_agua`, demo/main.c `agua_dibuja`):
+- El plano del +0x5C ya no se anade a la etapa (no pinta color en el original).
+- La primera capa del reflejo va en el SEGnn.DAT de la etapa como grupo 2 del cielo (-258 en el campo del nodo), con
+  la luz del entorno 0 del cielo (PROBABLE) y As = (+0x6C >> 1) / 255 en el alfa de sus vertices (PROBABLE: que el
+  material de 0x119fb8 vaya en unidades de 1 y no de 128). CURSO.DAT lleva por etapa las posiciones +0x6E / +0x70, el
+  alfa y si tiene agua (8 bytes mas por registro, antes de la union).
+- Se dibuja cuando lo dibuja el original (posiciones y union como arriba; en la union, el de la etapa que se deja
+  mientras siga cargada, PROBABLE: que el registro del curso no cambie hasta la etapa siguiente), en la lista
+  transparente tras el cielo, con su z fija detras de toda la escena, mezcla ONE / SRCALPHA (Cs + Cd x As) y sin niebla
+  (PROBABLE).
+- DESVIACION (la PowerVR a 16 bits no guarda el alfa de destino ni lo prueba): sin la mascara del plano, el reflejo se
+  ve donde no hay nada delante, recortado en el horizonte (y <= 0 en el marco del cielo; el plano siempre esta por
+  debajo del ojo): el agua que cubria el plano y, si lo hay, lo de debajo del horizonte que no tapa la escena (en el
+  original, el cielo o el fondo). Lo que hay bajo el plano del agua (orillas hundidas) se ve sin el reflejo encima
+  (en el original Cs + Cd x As sobre ello). Solo la primera capa: sin la mascara animada no hay ondas (las tres capas
+  son la misma imagen con la V algo desplazada).
+- Datos: los 38 SEGnn.DAT con agua y CURSO.DAT regenerados; las uniones no cambian (el agua es del descriptor de
+  etapa).

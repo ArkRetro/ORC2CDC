@@ -77,13 +77,34 @@ def objetos_etapa(A, d0):
     ruta = E.cadena(u32(E, conv_coche.recursos(A) + 4 * (v >> 16)))
     ruta = ruta[len('\\Stage'):] if ruta.lower().startswith('\\stage\\') else ruta
     regs = {v & 0xffff}
-    # descriptor +0x5C: otro registro del mismo recurso (LAKE 0x590003, zonas 5, 9, 10, 11 y 14; las demas 0xFFFFFFFF):
-    # en LAKE es el plano del agua (122 vertices a y = -99, 3,8 x 3,3 km, bajo las mallas del lago a -95..-98); sin el,
-    # lo que no cubren esas mallas dejaba ver el color de fondo. PROBABLE: el codigo del PS2 que lo lee no se ha
-    # localizado (docs/PARIDAD.md, Agua)
-    v5 = u32(E, d0 + 0x5c)
-    if v5 != 0xffffffff and v5 >> 16 == v >> 16: regs.add(v5 & 0xffff)
+    # el registro del descriptor +0x5C (el agua, agua_de) no es de esta lista: en el original solo escribe el alfa
     return [(A.bloque(A.entrada('STAGE.PS2', ruta)), regs)]
+
+def agua_de(A, d0):
+    """el agua de la etapa del descriptor d0 (solo SLES-53998; el PC no tiene estos campos: su descriptor sigue en
+    +0x5C con lo que en el PS2 va en +0x72): +0x5C el plano del agua (obj_course_obj_cs_<zona>), +0x60 / +0x64 / +0x68
+    las tres capas del reflejo (registros 3, 4 y 5 de obj_course_obj_sky_<zona>, la media esfera de abajo con el
+    paisaje reflejado), byte +0x6C el alfa de las capas y +0x6E / +0x70 (s16) las posiciones de carretera en las que se
+    dibuja. Codigo: 0x11a1a8 al cargar la etapa (0x119ea8 cambia el material del plano: textura de agua procedural, ALPHA
+    Cs, sin mip; 0x119fb8 el de las capas: alfa (+0x6C >> 1) / 255, ALPHA 9 = Cs + Cd x As, TEST con DATE) y 0x11a2e8
+    cada cuadro desde la geometria de la etapa (0x172b68): el plano escribe solo el alfa de la pantalla (FBMSK
+    0x00FFFFFF, tabla 0x32b3b0[8]) y cada capa del reflejo se dibuja sin z donde ese alfa tiene el bit 7 (DATE / DATM 1),
+    solo RGB (FBMSK 0xFF000000); entre capa y capa 0x11a800 rota el alfa (0x80 -> 0x20 -> 0x40) con la paleta de la
+    textura +0x10. Devuelve None sin agua o (bloque del cielo, registro de la primera capa, alfa +0x6C, p0, p1)
+    (docs/PARIDAD.md, Agua: la Dreamcast dibuja solo la primera capa, ver alli)"""
+    import conv_coche
+    E = A.elf; c = agua_campos(A, d0)
+    if c is None: return None
+    v6 = u32(E, d0 + 0x60)
+    ruta = E.cadena(u32(E, conv_coche.recursos(A) + 4 * (v6 >> 16)))
+    ruta = ruta[len('\\Stage'):] if ruta.lower().startswith('\\stage\\') else ruta
+    return (A.bloque(A.entrada('STAGE.PS2', ruta)), v6 & 0xffff) + c
+
+def agua_campos(A, d0):
+    """(alfa +0x6C, p0 +0x6E, p1 +0x70) del agua de la etapa del descriptor d0 (agua_de), None sin agua"""
+    E = A.elf
+    if u32(E, d0 + 0x5c) == 0xffffffff or u32(E, d0 + 0x60) == 0xffffffff: return None
+    return (E.lee(d0 + 0x6c, 1)[0],) + struct.unpack('<2h', E.lee(d0 + 0x6e, 4))
 
 def arbol(A, prim_zona0, fich='csc_data_2.bin'):
     """registros del arbol del curso: [(clave, tramo, union, clave izquierda, clave derecha)]"""
@@ -204,7 +225,7 @@ def compone(M1, M2):
 UMBRAL_META = 24.0                                  # error RMS de la VQ aceptado en las uniones de meta
 NIEBLA_MAX = 8                                      # tramos de niebla por etapa en CURSO.DAT
 # bytes de un registro de CURSO.DAT: el de antes (con el sol de la sombra) y el entorno (escribe_curso)
-REG = 4 + 4 + 16 + 32 + 8 + 4 + 24 * NIEBLA_MAX + 8 + 4 + 4 + 4 + 3 * 64 + 4 + 24 * NIEBLA_MAX + 4
+REG = 4 + 4 + 16 + 32 + 8 + 4 + 24 * NIEBLA_MAX + 8 + 4 + 4 + 4 + 3 * 64 + 4 + 24 * NIEBLA_MAX + 8 + 4
 
 def zona_de(ruta):
     """codigo de zona de una ruta del ejecutable (\\Stage\\ZONA\\...)"""
@@ -375,7 +396,10 @@ def escribe_curso(sal, regs, extras=()):
         for v in r['soles']: b += struct.pack('<16f', *v)
         b += struct.pack('<I', len(r['niebla0']))
         for p0, p1, modo, d0, d1, c0, c1 in r['niebla0']: b += struct.pack('<2HB3x2f2I', p0, p1, modo, d0, d1, c0, c1)
-        b += b'\0' * (REG - 4 - len(b))
+        b += b'\0' * (REG - 12 - len(b))
+        # agua (agua_de): posiciones de carretera en las que se dibuja, alfa +0x6C y 1 si la etapa la tiene
+        ag = r.get('agua')
+        b += struct.pack('<2hBB2x', *(ag[1:3] if ag else (0, 0)), ag[0] if ag else 0, 1 if ag else 0)
         # fichero de la union (BKnn.DAT, nn = f_bk) y su colision (-1 COLBK.DAT, -2 COLLR.DAT, si no COLBKnn.DAT)
         b += struct.pack('<hbx', r.get('f_bk', -1), r.get('f_col', -1))
         assert len(b) == REG; return b
@@ -428,7 +452,7 @@ def curso(A, dsal, con_tramos=True, solo_curso=False):
         if solo_curso:                                # solo CURSO.DAT (las uniones ya estan)
             meta = -1.0 if hi >= 0 else 0.0
             r = dict(zona=z, seg=n, nivel=nivel[clave], izq=hi, der=hd, bk=(tx, ty, tz, ry), ramas=ramas,
-                     m_pos=m_por_posicion(segs[n]), meta=meta, niebla=niebla(A, z), sol=sol(A, z), **ent, f_bk=clave, f_col=-1 if hi >= 0 else clave)
+                     m_pos=m_por_posicion(segs[n]), meta=meta, niebla=niebla(A, z), sol=sol(A, z), **ent, f_bk=clave, f_col=-1 if hi >= 0 else clave, agua=agua_campos(A, d0))
             sal.append(r); print('etapa %2d %s sol %.1f %.1f clima %x transicion %d (%.0f m) %d s'
                                  % (clave, z, *r['sol'], clima, *r['trans'][:1], r['trans_m'], r['trans'][1])); continue
         if hi >= 0:                                   # bifurcacion: la de PALM (las demas no estan en el disco)
@@ -473,8 +497,8 @@ def curso(A, dsal, con_tramos=True, solo_curso=False):
         print('triangulos de las tiras del VU1: %d, sin dibujar por la bandera ADC: %d' % (mod.tri_total, mod.tri_adc))
         r = dict(zona=z, seg=n, nivel=nivel[clave], izq=hi, der=hd, bk=(tx, ty, tz, ry), ramas=ramas,
                  m_pos=m_por_posicion(segs[n]), meta=meta, niebla=niebla(A, z), sol=sol(A, z), f_bk=clave,
-                 f_col=-1 if hi >= 0 else clave, **ent)
-        r['_obj'] = objetos_etapa(A, d0)
+                 f_col=-1 if hi >= 0 else clave, agua=agua_campos(A, d0), **ent)
+        r['_obj'] = objetos_etapa(A, d0); r['_agua'] = agua_de(A, d0)
         sal.append(r)
         print('etapa %2d %s SEG%02d nivel %d hijos %2d %2d union %s (%.1f, %.1f, %.1f, %.3f) %s/%s %s: %d mallas, '
               '%d texturas (%d KB), %d KB; %.2f m/pos, %d tramos de niebla'
@@ -487,7 +511,7 @@ def curso(A, dsal, con_tramos=True, solo_curso=False):
         for r in sal:
             cb, sol3 = cielos[r['seg']]
             conv_tramo.convierte(segs[r['seg']], r['seg'], os.path.join(dsal, 'SEG%02d.DAT' % r['seg']), cielo=cb,
-                                 luz=luces(sol3), objetos=r['_obj'])
+                                 luz=luces(sol3), objetos=r['_obj'], agua=r['_agua'])
     return sal
 
 def solo_carriles(A, dsal):
@@ -600,7 +624,7 @@ def etapa_ficheros(A, ti, dsal):
     E = A.elf; base, nprim, base2 = tablas(A); d0 = u32(E, base + 4 * ti)
     ruta_c = cadena(E, d0 + 0x0c); z = zona_de(ruta_c); n = segmento_de(A, ruta_c); seg = A.segmentos()[n]
     conv_tramo.convierte(seg, n, os.path.join(dsal, 'SEG%02d.DAT' % n), cielo=cielo_de(A, E, d0), luz=luces(soles(A, z)),
-                         objetos=objetos_etapa(A, d0))
+                         objetos=objetos_etapa(A, d0), agua=agua_de(A, d0))
     for h, o, s in seg.ent:
         d = bytes(seg.m[o:o + s])
         if d[:8] == b'COLI0200': conv_coli.escribe(d, os.path.join(dsal, 'COL%02d.DAT' % n), 0); break
@@ -657,7 +681,7 @@ def cursos(A, dsal, ids, con_uniones=True, con_tramos=False, parte=(0, 1)):
                             m_pos=m_por_posicion(segs[n]), meta=0.0 if c[0] == 'META' else -1.0, niebla=niebla(A, z),
                             sol=sol(A, z), clima=clima, soles=soles(A, z), niebla0=niebla(A, z, 0),
                             trans=(th[0], th[1]) if th else (tpos, tseg),
-                            trans_m=metros_a_posicion(d_izq, th[0]) if th else -1.0, f_bk=fich[c], f_col=fc, _c=c, _ti=ti))
+                            trans_m=metros_a_posicion(d_izq, th[0]) if th else -1.0, f_bk=fich[c], f_col=fc, agua=agua_campos(A, d0), _c=c, _ti=ti))
         return sal
     o2r = registros(o2, False)
     extras = []
