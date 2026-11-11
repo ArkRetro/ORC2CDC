@@ -33,3 +33,12 @@ escena su cuadro, pasos, dt, us de logica y de dibujo, vertices, pantallas de hu
 juego, y lo vuelca al acabar (lineas "SAL:"; "SALCAM:" / "SALDIB:" la camara y donde cae el coche en pantalla);
 -DDIAG_GD_LENTO=<KB/s> frena las lecturas del GD pasado el arranque (120 ms por salto), como la consola: en Flycast
 son instantaneas y las cargas que se comen cuadros no se ven. Con -DPRUEBA_JUGADOR va directo a la carrera.
+Medidas de los cambios de etapa (defines de demo/main.c y comun/gd.c; make -C demo KOS_CFLAGS="$KOS_CFLAGS -D..."):
+  PRUEBA_AUTO            directo a la carrera con el piloto automatico; PRUEBA_FIN=<m> sale a esos metros del final de la
+                         etapa (2700: justo antes de pedir la union); PRUEBA_NODO / PRUEBA_RAMA: etapa de salida y rama.
+  DIAG_PICO              "PICO: ..." por la consola serie: us de cada parte de curso_paso que pase de 0,3 ms, la subida de
+                         texturas (trozos y el mayor) y los cuadros de mas de 28 ms.
+  DIAG_GD_LENTO=<KB/s>   el GD lento de arriba (medidas de la salida): las etapas tardan lo que en la consola.
+  DIAG_TRANS=<ms>        camara lenta (un paso de logica por cuadro y esa espera) en los 6 cuadros de alrededor de cada
+                         suceso del cambio de etapa (union, rama, soltar, etapa leida, tercios del fundido del cielo,
+                         etapa nueva); "TR: cuadro ..." con el estado del fundido, para capturar cuadro a cuadro.

@@ -49,6 +49,7 @@ static int escena = -1;
 static float reloj;                        /* 82E7E0 */
 static float t_mov;                        /* 82E7E8 */
 
+static volatile int lista;                 /* META.DAT leido y comprobado (meta_carga puede ir en el hilo de carga) */
 int meta_carga(void)
 {
     uint32_t h[4], i;
@@ -65,10 +66,11 @@ int meta_carga(void)
         }
     if (ef_o + ef_b > M.Dn) ef_b = 0;
     dbglog(DBG_INFO, "META: META.DAT %u KB, %u escenas, efecto 0x%x\n", (unsigned)(M.Dn >> 10), (unsigned)M.nesc, (unsigned)ef_id);
+    lista = 1;
     return 0;
 }
-int meta_lista(void) { return M.D != NULL; }
-void meta_suelta(void) { free(M.D); M.D = NULL; M.esc = NULL; tab = NULL; M.nesc = 0; if (A == &M) escena = -1; }
+int meta_lista(void) { return lista; }
+void meta_suelta(void) { lista = 0; free(M.D); M.D = NULL; M.esc = NULL; tab = NULL; M.nesc = 0; if (A == &M) escena = -1; }
 
 int meta_escena(int variante, int preset, int meta)
 {

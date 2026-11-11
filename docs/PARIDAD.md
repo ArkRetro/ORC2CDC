@@ -1997,3 +1997,59 @@ que aplicaras en el limite de dibujado tenue niebla para que no se aprecie tanto
   etapas de noche (METR, GHOS: niebla clara, cielo oscuro) casi no hay velo (aclaraba los edificios contra el cielo
   negro). `-DSIN_NIEBLA_LIMITE` lo quita (para comparar).
 
+
+## Cambios de etapa: cielo del fundido (2026-11-11)
+
+Queja del probador (demo 31, consola real): "en algunos cambios de etapa hay glitches en el cielo y alguna
+ralentizacion". Capturas cuadro a cuadro en Flycast (`-DDIAG_TRANS`: camara lenta alrededor de cada suceso del cambio
+de etapa; tools/prueba/README) de PALM -> LAKE, con el GD normal y frenado (`-DDIAG_GD_LENTO`). Los tirones, en
+docs/DREAMCAST.md (Cambios de etapa: tirones).
+
+ENCONTRADO Y ARREGLADO EN EL CODIGO
+- El fundido se cortaba al llegar a la etapa nueva. El fundido (cielo en tres tercios, niebla, luz y sol; 44A000 /
+  451E90) no puede empezar hasta tener la etapa siguiente (su cielo y sus texturas) y en el original esta siempre.
+  Aqui se lee del GD al soltar la etapa anterior: con el tiempo de lectura que emula Flycast (~1,4 MB/s) el fundido
+  de PALM -> LAKE empieza en la posicion del original (s 5629); con un lector lento (`-DDIAG_GD_LENTO=1000` encima:
+  ~0,5 MB/s) SEG03 (LAKE) llega en s 6296-6341, y SEG08 (CAST, 6,6 MB) a 69 m del principio de la etapa: el fundido de 120
+  cuadros se quedaba en ~50 y al entrar en la etapa el cielo, la niebla y la luz saltaban de golpe a los nuevos
+  (`niebla_paso` ponia `ent_fase` a 0), y el sol se quedaba a medias toda la etapa (solo cambia en la union). Ahora
+  el fundido que no ha acabado sigue en la etapa nueva hasta su final (`ent_cruza`): el cielo viejo es el de la union
+  (no se suelta hasta 300 m despues: 2 s de fundido son 160 m a fondo), la luz vieja la de la etapa que se dejo con el
+  giro de su marco y el sol termina su cambio. DIFERENCIA que queda con un GD lento: el fundido empieza mas tarde que
+  en el original (no hay cielo nuevo que fundir hasta leer la etapa); con la etapa leida a tiempo es el de antes.
+- Orden entre capas del fundido (`cielo_grupo`, `cielo_lmax`): una malla transparente de una capa de abajo salia por
+  encima de la capa de arriba mientras esta iba entera (alfa >= 0,9) en la lista opaca de la PowerVR. Las mallas de
+  una capa suben a la lista mas alta de las capas de debajo. Solo cambia con cielos que lleven mallas transparentes:
+  de las 62 etapas, SEG32 (arboles de las misiones, aun sin jugar); en el modo OutRun todos los cielos son opacos y
+  la imagen es la misma.
+
+ENCONTRADO, ARREGLADO EN EL CONVERSOR, FALTA REGENERAR LOS DATOS
+- Franjas lisas en la cupula del fundido (lo que se ve en las capturas: rectangulos y arcos de un color en el cielo
+  intermedio de los tercios 2 y 3, en todos los cambios desde o hacia una etapa con la cupula de PALM: SEG00, 01, 03,
+  17, 18, 26...). No es del dibujo: dos de las cinco tiras de esa cupula (grupo 1 del cielo, objeto +0x54) salian del
+  conversor con UV (0, 0) en todos sus vertices. Sus UV vienen en diferencias de 16 bits (STMOD 2) y, cuando una
+  diferencia no cabe, el fichero trae un STROW nuevo y otro UNPACK del mismo tipo que sigue en la direccion siguiente
+  (la tira de 79 vertices: 16 + 1 + 62 UV). `ps2/vif.py tiras()` solo guardaba el primero, la cuenta no cuadraba con
+  la de los vertices y `modelo._trozo` dejaba la tira sin UV: un color liso (el texel de la esquina). Ahora junta los
+  UNPACK seguidos de un mismo flujo.
+- No es solo el cielo: en datos/ hay 28965 mallas con textura y todas las UV a 0 en las 62 etapas y 262 uniones (PALM
+  1372, IMPE 2686, SEG25 2794...). SEG00 regenerado con el arreglo: 846 de sus 1372 recuperan las UV (5000 vertices
+  cambian; mallas, posiciones y colores identicos; el tamano del ORD7 no cambia). Son trozos del decorado que hoy
+  salen de un color liso.
+- HAY QUE REGENERAR etapas y uniones (tools/regenera_datos.sh: pasos seg*, union*, curso y los dos paquetes; horas,
+  por la PVS) y rehacer la demo. Los huecos de RAM y la VRAM no cambian (mismos tamanos). Comprobado solo con SEG00 y
+  SEG03 sueltos (sin PVS) en una copia de datos/: la cupula del cielo nuevo (tercio 3) sale lisa y sin franjas; la del
+  cielo viejo sigue con ellas porque viene de la union (BK00, sin regenerar).
+
+SOLO SOSPECHADO (sin tocar)
+- Las mallas del cielo que van a la lista transparente llevan z fija (el orden de dibujo): la PowerVR interpola las
+  UV con esa z y la textura queda afin, no en perspectiva, mientras la capa se funde (alfa < 0,9). En PALM no se
+  aprecia salto al pasar de 0,9 (cupula fina); en cielos de triangulos grandes (LAKE: mallas de 8 vertices del
+  horizonte al cenit) puede verse la textura desplazarse unos pixeles durante el fundido. Arreglarlo exacto pide
+  z = k / w por malla con k en escalones de mas de 3x (hasta ~1e-11) y bajar el plano de fondo: sin consola para
+  probarlo no se ha tocado lo que la demo 31 dejo bien.
+- Texturas liberadas o sin subir con la PowerVR dibujando: repasado y no hay caso. La etapa se suelta 300 m dentro de
+  la union y su zona de VRAM no se vuelve a escribir hasta leer la siguiente (segundos); la union igual; el cielo no
+  se dibuja de un modelo sin tablas (`tv`), tampoco a medio subir. Las cabeceras guardadas del cielo (`cie_n`) se
+  borran en cada `tex_suelta`. Color de fondo, plano lejano y tabla de niebla no cambian en el cuadro del cambio
+  (la niebla de la etapa nueva en su posicion 0 es la del final del fundido).

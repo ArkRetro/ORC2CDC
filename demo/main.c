@@ -14,6 +14,7 @@
 #include <malloc.h>
 #include <stdlib.h>
 #include "../comun/gd.h"
+#include "../comun/registro.h"
 #include "../comun/musica.h"
 #include "../comun/or2_fisica.h"
 #include "../comun/hud.h"
@@ -254,13 +255,40 @@ static pvr_ptr_t ar_bloque; static uintptr_t ar_ini, ar_fin, ar_abajo, ar_arriba
 static uint32_t ar_max_abajo, ar_min_arriba;                     /* lo mas alto/bajo que ha llegado cada lado */
 static uint32_t vram_rebajadas, vram_fuera;                       /* texturas rebajadas y fuera de la zona (carrera) */
 static int cie_n;                                                 /* cabeceras del cielo guardadas (cielo_cab) */
+#ifdef DIAG_TRANS                                                 /* medida: camara lenta (DIAG_TRANS ms por cuadro) en los */
+static int dt_n, dt_pre; static const char *dt_que = "";          /* cuadros de alrededor de cada suceso del cambio de etapa */
+#define DT(q) do { if (dt_n < 6) { dt_n = 6; dt_que = q; printf("TR: suceso %s\n", q); } } while (0)
+#else
+#define DT(q) do { } while (0)
+#endif
 static uint32_t ar_libre(void) { return ar_bloque ? (uint32_t)(ar_arriba - ar_abajo) : 0; }
 static uint32_t vram_libre(void) { return (uint32_t)pvr_mem_available() + ar_libre(); }
 
+/* subida de texturas a trozos (sube_inicia / sube_trozo, mas abajo): el modelo que se esta subiendo y sus tablas, que
+   no se le ponen hasta acabar (m->tv NULL: nadie lo dibuja con texturas a medias) */
+static struct { modelo_t *m; const modelo_t *comp; int lado, apuro; uint16_t *ord; uint32_t k, n, hecho, b_comp, n_comp, n_reb;
+                pvr_poly_hdr_t *cabs[2]; pvr_ptr_t *tv; uint8_t *tfl; pvr_ptr_t v;
+#ifdef DIAG_PICO
+                uint32_t dg_us, dg_max, dg_b, dg_tr;
+#endif
+              } sub;
+static void sube_pon(modelo_t *m)                                /* las tablas, al modelo (para trabajar o al acabar) */
+{
+    m->cabs[0] = sub.cabs[0]; m->cabs[1] = sub.cabs[1]; m->tv = sub.tv; m->tfl = sub.tfl; m->lado = sub.lado;
+}
+static void sube_quita(modelo_t *m)                              /* y fuera otra vez hasta el trozo siguiente */
+{
+    m->cabs[0] = m->cabs[1] = NULL; m->tv = NULL; m->tfl = NULL; m->lado = 0;
+}
 /* texturas de un modelo fuera de la VRAM (los datos siguen en la RAM; las rebajadas vuelven a ser como venian) */
 static void tex_suelta(modelo_t *m)
 {
     uint32_t i;
+    if (sub.m == m) {                                             /* a medio subir: lo que lleve (y la que iba por partes) */
+        sube_pon(m);
+        if (sub.v && sub.k < sub.n) m->tv[sub.ord ? sub.ord[sub.k] : sub.k] = sub.v;
+        free(sub.ord); sub.ord = NULL; sub.m = NULL; sub.v = NULL;
+    }
     for (i = 0; i < m->ntex; i++) if (m->tv && m->tv[i] && (!m->tfl || (m->tfl[i] & TF_PROPIA))) pvr_mem_free(m->tv[i]);
     if (m->lado == 1) ar_abajo = ar_ini;                          /* su lado de la zona del curso, entero */
     if (m->lado == 2) ar_arriba = ar_fin;
@@ -450,39 +478,76 @@ static const tex_t *ord_texs;
 static int ord_tam(const void *a, const void *b) { return (int)ord_texs[*(const uint16_t *)b].tam - (int)ord_texs[*(const uint16_t *)a].tam; }
 /* texturas de una etapa (lado 1) o union (lado 2) a la VRAM y sus cabeceras; comp: modelo cuyas texturas iguales se
    usan en vez de subirlas otra vez (la etapa para su meta: las dos estan hasta el final de la carrera). Las grandes
-   primero (si alguna va a pvr_mem, se queda con los huecos grandes). Nunca falla: lo que no cabe va rebajado o gris */
-static void sube_tramo(modelo_t *m, int lado, const modelo_t *comp)
+   primero (si alguna va a pvr_mem, se queda con los huecos grandes). Nunca falla: lo que no cabe va rebajado o gris.
+   A trozos: sube_inicia prepara las tablas y sube_trozo sube hasta max bytes cada vez (una textura grande, en varias:
+   pvr_txr_load por partes); devuelve 1 al acabar, y solo entonces el modelo tiene sus tablas (m->tv) y se dibuja. En
+   carrera va un trozo por cuadro (curso_paso): subir de golpe una etapa (0,5-1,2 MB por las Store Queues) paraba el
+   bucle varios cuadros en la consola. El resultado (direcciones, cabeceras, rebajas) es el mismo que de una vez. */
+#define SUBE_BYTES 32768u                                         /* por cuadro en carrera */
+static void sube_inicia(modelo_t *m, int lado, const modelo_t *comp)
 {
-    uint32_t i, k, n = m->ntex, b_comp = 0, n_comp = 0, n_reb = 0; uint16_t *ord = malloc(n * sizeof *ord); int apuro = 0, j;
-    for (k = 0; k < 2; k++) m->cabs[k] = memalign(32, (n + 1) * sizeof(pvr_poly_hdr_t));
-    m->tv = calloc(n + 1, sizeof(pvr_ptr_t)); m->tfl = calloc(n + 1, 1); m->lado = lado;
-    if (!m->cabs[0] || !m->cabs[1] || !m->tv || !m->tfl) curso_error("Sin memoria para las cabeceras");
-    if (ord) { for (i = 0; i < n; i++) ord[i] = i; ord_texs = m->texs; qsort(ord, n, sizeof *ord, ord_tam); }
-    for (k = 0; k < n; k++) {
+    uint32_t i, k, n = m->ntex;
+    memset(&sub, 0, sizeof sub);
+    sub.ord = malloc(n * sizeof *sub.ord);
+    for (k = 0; k < 2; k++) sub.cabs[k] = memalign(32, (n + 1) * sizeof(pvr_poly_hdr_t));
+    sub.tv = calloc(n + 1, sizeof(pvr_ptr_t)); sub.tfl = calloc(n + 1, 1); sub.lado = lado;
+    if (!sub.cabs[0] || !sub.cabs[1] || !sub.tv || !sub.tfl) curso_error("Sin memoria para las cabeceras");
+    if (sub.ord) { for (i = 0; i < n; i++) sub.ord[i] = i; ord_texs = m->texs; qsort(sub.ord, n, sizeof *sub.ord, ord_tam); }
+    sub.m = m; sub.comp = comp; sub.n = n;
+}
+static int sube_trozo(uint32_t max)
+{
+    modelo_t *m = sub.m; uint32_t i, gasto = 0; int j;
+#ifdef DIAG_PICO
+    uint64_t dg_t0 = timer_us_gettime64(); uint32_t dg_d;
+#endif
+    if (!m) return 1;
+    sube_pon(m);
+    while (sub.k < sub.n && gasto < max) {
         tex_t *t; pvr_ptr_t v = NULL;
-        i = ord ? ord[k] : k; t = m->texs + i;
-        if ((t->fmt & 0xff) <= 2 && !(t->tam & 31) && t->tam && (j = tex_igual(comp, m, i)) >= 0) {
-            v = comp->tv[j]; m->tfl[i] = TF_AJENA; b_comp += t->tam; n_comp++;
+        i = sub.ord ? sub.ord[sub.k] : sub.k; t = m->texs + i;
+        if (sub.v) {                                              /* una textura grande a medias: su parte siguiente */
+            uint32_t q = t->tam - sub.hecho; if (q > max - gasto) q = (max - gasto + 31) & ~31u;
+            pvr_txr_load(m->blob + t->off + sub.hecho, (pvr_ptr_t)((uintptr_t)sub.v + sub.hecho), q);
+            sub.hecho += q; gasto += q;
+            if (sub.hecho < t->tam) break;
+            v = sub.v; sub.v = NULL; sub.hecho = 0;
+        } else if ((t->fmt & 0xff) <= 2 && !(t->tam & 31) && t->tam && (j = tex_igual(sub.comp, m, i)) >= 0) {
+            v = sub.comp->tv[j]; m->tfl[i] = TF_AJENA; sub.b_comp += t->tam; sub.n_comp++; gasto += t->tam / 4;   /* (la comparacion) */
         } else if ((t->fmt & 0xff) <= 2 && !(t->tam & 31) && t->tam) {
-            v = vram_pide(t->tam, lado, m->tfl + i);
-            if (!v && !apuro) { apuro = 1; if (vram_apuro()) v = vram_pide(t->tam, lado, m->tfl + i); }
-            if (v) pvr_txr_load(m->blob + t->off, v, t->tam);
-            else if (!tex_rebaja(m, i, lado)) { v = m->tv[i]; n_reb++; }
+            v = vram_pide(t->tam, sub.lado, m->tfl + i);
+            if (!v && !sub.apuro) { sub.apuro = 1; if (vram_apuro()) v = vram_pide(t->tam, sub.lado, m->tfl + i); }
+            if (v) { sub.v = v; sub.hecho = 0; continue; }        /* (se sube arriba, por partes) */
+            if (!tex_rebaja(m, i, sub.lado)) { v = m->tv[i]; sub.n_reb++; gasto += t->tam; }
         }
         if (!v) {                                                 /* nada cabe (o formato desconocido): la gris */
             dbglog(DBG_INFO, "VRAM: textura %u (%ux%u, %uK) sin sitio: gris\n", (unsigned)i, (unsigned)t->w, (unsigned)t->h, (unsigned)(t->tam >> 10));
             if (!tex_guarda(m)) { t->w = t->h = 8; t->fmt = 2 | (t->fmt & 0xC00); t->tam = 128; }
-            v = tex_gris; m->tfl[i] = TF_AJENA | TF_REBAJADA; n_reb++;
+            v = tex_gris; m->tfl[i] = TF_AJENA | TF_REBAJADA; sub.n_reb++;
         }
         m->tv[i] = v;
         compila_cab(m, i, 0);
+        sub.k++;
     }
-    free(ord);
-    vram_rebajadas += n_reb;
+#ifdef DIAG_PICO
+    dg_d = (uint32_t)(timer_us_gettime64() - dg_t0); sub.dg_us += dg_d; sub.dg_b += gasto; sub.dg_tr++; if (dg_d > sub.dg_max) sub.dg_max = dg_d;
+#endif
+    if (sub.k < sub.n) { sube_quita(m); return 0; }
+    free(sub.ord); sub.ord = NULL; sub.m = NULL;
+    vram_rebajadas += sub.n_reb;
+#ifdef DIAG_PICO
+    printf("PICO: sube_tramo lado %d: %u texturas, %uK en %u us, %u trozos (el mayor %u us)\n", sub.lado, (unsigned)sub.n, (unsigned)(sub.dg_b >> 10),
+           (unsigned)sub.dg_us, (unsigned)sub.dg_tr, (unsigned)sub.dg_max);
+#endif
     dbglog(DBG_INFO, "VRAM: %u texturas al lado %d, %u compartidas (%uK), %u rebajadas; zona libre %uK (abajo %uK, arriba %uK), "
-           "fuera %uK, en pvr_mem %u\n", (unsigned)n, lado, (unsigned)n_comp, (unsigned)(b_comp >> 10), (unsigned)n_reb,
+           "fuera %uK, en pvr_mem %u\n", (unsigned)sub.n, sub.lado, (unsigned)sub.n_comp, (unsigned)(sub.b_comp >> 10), (unsigned)sub.n_reb,
            (unsigned)(ar_libre() >> 10), (unsigned)((ar_abajo - ar_ini) >> 10), (unsigned)((ar_fin - ar_arriba) >> 10),
            (unsigned)(pvr_mem_available() >> 10), (unsigned)vram_fuera);
+    return 1;
+}
+static void sube_tramo(modelo_t *m, int lado, const modelo_t *comp)   /* de una vez (fuera de la carrera) */
+{
+    sube_inicia(m, lado, comp); sube_trozo(0xFFFFFFFFu);
 }
 
 /* La union comparte con su etapa las texturas iguales (sube_tramo con comp), tambien en las bifurcaciones, donde la
@@ -625,6 +690,9 @@ static uint64_t prf_t; static unsigned prf_us[10], prf_v[10], prf_v0;   /* medid
 #define PRF(i) do { uint64_t t_ = timer_us_gettime64(); prf_us[i] += (unsigned)(t_ - prf_t); prf_t = t_; prf_v[i] += vtx_env - prf_v0; prf_v0 = vtx_env; } while (0)
 #else
 #define PRF(i) do { } while (0)
+#endif
+#ifdef DIAG_PICO
+static uint64_t dg_ult_dib;                                     /* medida: us del dibujo del ultimo cuadro */
 #endif
 #ifdef DIAG_MS
 static unsigned dg_mallas, dg_dir, dg_mal, dg_vdir, dg_vmal;    /* medida: mallas recorridas y enviadas */
@@ -1456,7 +1524,7 @@ static void ruta_recorta(uint32_t q)
    de carga, antes de dar el modelo por leido */
 static void modelo_coloca(modelo_t *m, const float *M)
 {
-    float c = cosf(M[3]), sn = sinf(M[3]), x; uint32_t k, i, j;
+    float c = cosf(M[3]), sn = sinf(M[3]), x; uint32_t k, i, j, hechos = 0;
     for (k = 0; k < m->nmallas; k++) {
         malla_t *ma = m->mallas + k; vert_t *v = m->verts + ma->v0;
         int cl = k >= m->inicio[3] && k < m->inicio[4];
@@ -1464,6 +1532,7 @@ static void modelo_coloca(modelo_t *m, const float *M)
         if (malla_de_cartel(m, ma)) continue;                   /* en el marco de su nodo: se coloca su matriz */
         for (i = 0; i < ma->n; i++, v++) { x = v->x; v->x = x * c + v->z * sn + tx; v->z = -x * sn + v->z * c + tz; v->y += ty; }
         x = ma->cx; ma->cx = x * c + ma->cz * sn + tx; ma->cz = -x * sn + ma->cz * c + tz; ma->cy += ty;
+        if ((hechos += ma->n) >= 512) { hechos = 0; gd_cede(); }      /* (hilo de carga: turno al bucle, gd.c) */
     }
     for (k = 0; k < m->nnodos; k++) {
         nodo_t *n = m->nodos + k;
@@ -4339,6 +4408,15 @@ static int curso_lee_etapa(int k)
 }
 /* al empezar una carrera: la etapa de salida (leida otra vez si ya se habia liberado o era otra) y nada mas */
 static int curso_pedido = PRUEBA_CURSO;                         /* arbol de la carrera siguiente (curso_id) */
+static volatile int meta_hilo;                                  /* META.DAT leyendose (hilo) */
+static void *meta_lee(void *p)
+{
+    unsigned u, l; (void)p;
+    if (meta_carga()) dbglog(DBG_ERROR, "META: sin META.DAT (la meta sin su escena)\n");
+    ram_kb(&u, &l); dbglog(DBG_INFO, "META: META.DAT leido con la union de la meta, RAM libre %uK\n", l);
+    meta_hilo = 0;
+    return NULL;
+}
 static void curso_reinicia(void)
 {
     int k;
@@ -4349,6 +4427,7 @@ static void curso_reinicia(void)
     }
     k = PRUEBA_NODO < ncurso ? PRUEBA_NODO : 0;
     carga_espera(); carga.estado = 0;
+    while (meta_hilo) thd_sleep(5);
     col_reserva();
     libera_modelo(&uni); libera_modelo(&uni_der); libera_modelo(&sig);
     if (!etapa.datos || etapa_nodo != k) {
@@ -4431,11 +4510,33 @@ static uint8_t *der_sitio(uint32_t *cap)
     if (gd_busca("BKD.DAT", &lba, &t) || o + TAM_SECT(t) > cap_etapa) return NULL;
     *cap = cap_etapa - o; return hueco_etapa + o;
 }
+#ifdef DIAG_PICO                                                 /* medida: us de cada parte de curso_paso */
+static uint64_t pk_t;
+#define PK(n) do { uint64_t t_ = timer_us_gettime64(); if (t_ - pk_t > 300) printf("PICO: %s %u us\n", n, (unsigned)(t_ - pk_t)); pk_t = timer_us_gettime64(); } while (0)
+#else
+#define PK(n) do { } while (0)
+#endif
+static int sube_turno;                                          /* un trozo de texturas por cuadro (lo pone el bucle) */
 static int curso_paso(void)
 {
     int ev = 0; const etapa_t *e = curso + cur_nodo;
+#ifdef DIAG_PICO
+    pk_t = timer_us_gettime64();
+#endif
     if (carga.estado == 1 && yo.s > longitud - 60.0f) carga_espera();   /* GD lento: la carretera aun no esta */
-    if (carga.estado == 2) {                                    /* leido: texturas a la VRAM y ruta detras */
+    /* leido (2): las texturas de la union o de la etapa a la VRAM, un trozo por cuadro (3; de golpe si la carretera
+       se acaba), y despues (4) lo demas. Lo que no lleva texturas del curso (BKD, objetos) o no se leyo: directo */
+    if (carga.estado == 2 && !carga.r && (carga.m == &uni || carga.m == &sig)) {
+        /* la union comparte lo que tenga igual su etapa (la meta hasta el final; la bifurcacion hasta soltarla: tex_muda) */
+        sube_inicia(carga.m, carga.m == &uni ? 2 : 1, carga.m == &uni && etapa.tv ? &etapa : NULL);
+        carga.estado = 3;
+    }
+    if (carga.estado == 3) {
+        int ya = yo.s > longitud - 60.0f;
+        if (ya || sube_turno) { sube_turno = 0; if (sube_trozo(ya ? 0xFFFFFFFFu : SUBE_BYTES)) carga.estado = 4; }
+        PK("sube trozo");
+    }
+    if (carga.estado == 2 || carga.estado == 4) {               /* leido (y subido): la ruta detras */
         modelo_t *m = carga.m; carga.estado = 0;
         if (carga.r && m == &bo_mod) {                          /* los objetos de la union no paran la carrera: sin */
             unsigned u, l; ram_kb(&u, &l);                      /* RAM seguida para su BOnn.DAT, no salen */
@@ -4447,33 +4548,31 @@ static int curso_paso(void)
         if (m == &uni) {
             col_un = carga.col;                                 /* raiz 1 (7D3190: el marco de la union) */
             if (!col_un.ok) dbglog(DBG_ERROR, "COLI: sin la colision de %s\n", fich_union);
-            sube_tramo(m, 2, etapa.tv ? &etapa : NULL);          /* la union comparte lo que tenga igual su etapa (la meta
-                                                                   hasta el final; la bifurcacion hasta soltarla: tex_muda) */
             if ((int)(i_union = ruta_anade(m)) < 0) curso_error("Sin memoria para la ruta");
+            PK("ruta union");
             j_union = ruta_salto; s_union = s_base + i_union * PASO;
             if (tiene_hijos(e)) { uint32_t c = 0; uint8_t *b = der_sitio(&c); carga_pide(&uni_der, "BKD.DAT", b, c, marco_un); }
             else {
                 s_meta = s_union + e->meta;                     /* la meta: la pancarta GOAL */
-                if (!meta_lista()) {                            /* su escena (META.DAT, 113 KB): ya sin la etapa */
-                    unsigned u, l; musica_pausa_lectura(1);     /* anterior ni la siguiente; se suelta en el menu */
-                    if (meta_carga()) dbglog(DBG_ERROR, "META: sin META.DAT (la meta sin su escena)\n");
-                    musica_pausa_lectura(0); ram_kb(&u, &l);
-                    dbglog(DBG_INFO, "META: META.DAT leido con la union de la meta, RAM libre %uK\n", l);
-                }
+                /* su escena (META.DAT, 113 KB): ya sin la etapa anterior ni la siguiente; se suelta en el menu. La lee
+                   un hilo (antes el bucle: la carrera parada lo que tardase el GD, ~0,3 s en la consola) */
+                if (!meta_lista() && !meta_hilo) { meta_hilo = 1; if (!thd_create(1, meta_lee, NULL)) meta_lee(NULL); }
             }
         } else if (m == &uni_der) {
             uint32_t k = j_union;                              /* la separacion: donde los centros se apartan */
             while (k + 1 < uni.nruta && k + 1 < uni_der.nruta && dist_centro(&uni, k, uni_der.ruta + uni_der.paso_ruta * k) < RAMA_SEPARA) k++;
             s_decide = s_union + (k - j_union) * PASO;
+            PK("separacion");
         } else if (m == &bo_mod) {
             bo_subido();
+            PK("bo_subido");
         } else if (m == &sig) {
             int i;
             col_et = carga.col;                                 /* raiz 0: la etapa siguiente en su marco */
             if (!col_et.ok) dbglog(DBG_ERROR, "COLI: sin la colision de %s\n", fich_sig);
-            sube_tramo(m, 1, NULL);
             if ((i = ruta_anade(m)) < 0) curso_error("Sin memoria para la ruta");
             s_sig = s_base + i * PASO;
+            PK("ruta etapa");
         }
         {
             unsigned u, l; ram_kb(&u, &l);
@@ -4482,6 +4581,7 @@ static int curso_paso(void)
             ram_mapa("tras la lectura");
         }
     }
+    PK("cargado");
     if (s_union < 0 && !uni.datos && etapa.datos && carga.estado == 0 && yo.s > longitud - UNION_ANTES) {
         char cn[16];
         marco_compone(marco_et, e->bk, marco_un); sprintf(fich_union, "BK%02d.DAT", e->f_bk);
@@ -4489,6 +4589,7 @@ static int curso_paso(void)
         band_suelta();                                          /* el banderero deja el hueco antes: la union no espera */
         carga_pide(&uni, fich_union, hueco_union, cap_union, marco_un);
     }
+    PK("pide union");
     if (s_union >= 0 && !cur_en_union && yo.s >= s_union) { cur_en_union = 1; ev |= CUR_UNION; }
     if (s_meta >= 0 && yo.s >= s_meta) { s_meta = -1; ev |= CUR_META; }
     if (s_decide >= 0 && cur_rama < 0 && yo.s >= s_decide) {   /* la rama: el centro mas cercano al coche */
@@ -4510,21 +4611,27 @@ static int curso_paso(void)
         if (cur_sig < 0) cur_sig = cur_nodo;
         ev |= CUR_RAMA;
     }
+    PK("rama");
     if (etapa.datos && cur_en_union && cur_rama >= 0 && yo.s > s_union + UNION_LIBERA) {
         unsigned u, l;
         tex_muda(&uni, &etapa);                                 /* lo que la union comparte con ella, a su lado */
         libera_modelo(&etapa); etapa_nodo = -1; cielo = &uni;
+        PK("libera etapa");
         ruta_recorta(i_union); i_union = 0;                     /* fuera los puntos de la etapa que se deja */
+        PK("ruta_recorta");
         curso_recentra(marco_un[0], marco_un[2]);               /* el marco, al principio de la union */
+        PK("recentra");
         marco_un[0] = marco_un[2] = 0;
         marco_compone(marco_un, e->rama[cur_rama], marco_sig); sprintf(fich_sig, "SEG%02d.DAT", curso[cur_sig].seg);
         ram_kb(&u, &l); dbglog(DBG_INFO, "CURSO: etapa %d liberada (s %.0f), recentrado, RAM libre %uK, VRAM libre %uK (zona %uK)\n", cur_nodo, (double)yo.s, l, (unsigned)(vram_libre() >> 10), (unsigned)(ar_libre() >> 10));
     }
+    PK("liberada");
     if (cur_rama >= 0 && !etapa.datos && !sig.datos && s_sig < 0 && carga.estado == 0) {
         char cn[16]; sprintf(cn, "COL%02d.DAT", curso[cur_sig].seg);
         carga_col(cn, hueco_col_e, cap_col_e);                  /* detras de la etapa en su hueco, o en hueco_col_e */
         carga_pide(&sig, fich_sig, hueco_etapa, cap_etapa, marco_sig);
     }
+    PK("pide etapa");
     if (s_sig >= 0 && yo.s >= s_sig) {                         /* la etapa siguiente pasa a ser la actual */
         etapa = sig; memset(&sig, 0, sizeof sig); etapa_nodo = cur_sig; cielo = &etapa;
         cur_nodo = cur_sig; cur_sig = -1; memcpy(marco_et, marco_sig, sizeof marco_et);
@@ -4533,7 +4640,9 @@ static int curso_paso(void)
         s_union = s_decide = s_sig = -1; cur_rama = -1; cur_en_union = 0;
         ev |= CUR_SIGUIENTE;
     }
+    PK("siguiente");
     if (s_suelta >= 0 && uni.datos && yo.s > s_suelta) { libera_modelo(&uni); col_un.ok = 0; s_suelta = -1; }
+    PK("suelta union");
     return ev;
 }
 /* de vuelta al menu: fuera de la VRAM la union, la etapa siguiente y las texturas de la etapa (el menu no las dibuja;
@@ -4544,7 +4653,7 @@ static void curso_al_menu(void)
     static uint64_t t0;
     if (!ar_bloque && !etapa.tv && !uni.tv && !sig.tv) return;
     if (!t0) { t0 = timer_ms_gettime64(); return; }
-    if (timer_ms_gettime64() - t0 < 60 || carga.estado == 1) return;   /* (una lectura en curso: al acabar) */
+    if (timer_ms_gettime64() - t0 < 60 || carga.estado == 1 || meta_hilo) return;   /* (una lectura en curso: al acabar) */
     t0 = 0; carga.estado = 0;
     libera_modelo(&uni); libera_modelo(&uni_der); libera_modelo(&sig);
     col_suelta();                                               /* sus huecos, para el menu */
@@ -5208,6 +5317,11 @@ static void niebla_de(const etapa_t *e, float pos, float *d, int *modo, uint32_t
 /* estado de la transicion de entorno en la union */
 static int ent_fase;                                            /* 0 en la etapa, 1 mezclando, 2 ya la nueva */
 static int ent_nodo = -1, ent_nuevo = -1, ent_t, ent_n;         /* etapa de referencia, la nueva; cuadros que quedan */
+/* El fundido que no ha acabado al llegar a la etapa nueva (la etapa se leyo tarde: GD lento) sigue en ella hasta el
+   final (ent_cruza): el cielo viejo es el de la union, que no se suelta hasta UNION_LIBERA m despues, y la luz vieja
+   la de ent_viejo con el giro de su marco (ent_giro). Antes se cortaba al cambiar de etapa: el cielo, la niebla y la
+   luz saltaban de golpe a los de la etapa nueva. */
+static int ent_cruza, ent_viejo = -1; static float ent_giro;
 static float ent_dur;                                           /* duracion (cuadros x 60,2 / 60: 7D28D8) */
 static float ent_d0; static int ent_m0; static uint32_t ent_c0; /* niebla guardada al empezar (7D28E0) */
 static int cie_b8, cie_ba, cie_2a, cie_tercio;                  /* cuentas de los tres tercios del cielo (451E90) */
@@ -5215,7 +5329,7 @@ static float cie_a[4]; static int cie_on[4];                    /* viejo 0, viej
 static float sol_int;                                           /* intensidad del sol (SCN_EFC +9C) */
 static void entorno_reinicia(void)
 {
-    ent_fase = 0; ent_nodo = cur_nodo; ent_nuevo = -1;
+    ent_fase = 0; ent_nodo = cur_nodo; ent_nuevo = -1; ent_cruza = 0; ent_viejo = -1;
     sol_int = cur_nodo >= 0 && (curso[cur_nodo].clima & 2) ? 1.0f : 0.0f;   /* al empezar: sin fundido (4AFCC0) */
 }
 /* la niebla, la transicion de la union, el cielo y el sol (cada paso de logica) */
@@ -5223,11 +5337,16 @@ static void niebla_paso(void)
 {
     float d0, d1, t, d; int m0, m1, k; uint32_t c0, c1;
     if (cur_nodo < 0) return;
-    horizonte_mira(cur_nodo, cielo); if (cur_sig >= 0 && sig.tv) horizonte_mira(cur_sig, &sig);
-    if (cur_nodo != ent_nodo) { ent_nodo = cur_nodo; ent_fase = 0; }   /* ya en la etapa nueva */
+    if (cur_nodo != ent_nodo) {                                 /* ya en la etapa nueva */
+        ent_cruza = ent_fase == 1 && cur_nodo == ent_nuevo && ent_viejo >= 0 && uni.tv && etapa.tv;   /* a medias: sigue */
+        ent_nodo = cur_nodo; if (!ent_cruza) ent_fase = 0;
+    }
+    if (ent_cruza && (!uni.tv || ent_fase != 1)) { ent_cruza = 0; ent_fase = 0; }   /* acabado (o sin el cielo viejo) */
+    if (ent_cruza) { horizonte_mira(ent_viejo, &uni); horizonte_mira(cur_nodo, &etapa); }
+    else { horizonte_mira(cur_nodo, cielo); if (cur_sig >= 0 && sig.tv) horizonte_mira(cur_sig, &sig); }
     if (ent_fase == 0 && cur_sig >= 0 && s_union >= 0 && curso[cur_nodo].trans_m >= 0 && sig.tv &&
         yo.s >= s_union + curso[cur_nodo].trans_m) {           /* 44A000 fase 1 -> 2 y 451E90 estado 0 -> 1 */
-        ent_fase = 1; ent_nuevo = cur_sig;
+        ent_fase = 1; ent_nuevo = cur_sig; ent_viejo = cur_nodo; ent_giro = marco_et[3];
         ent_n = ent_t = curso[cur_nodo].trans_seg * 60; ent_dur = curso[cur_nodo].trans_seg * 60.2f;
         niebla_de(curso + cur_nodo, (yo.s - s_etapa) / curso[cur_nodo].m_pos, &ent_d0, &ent_m0, &ent_c0);
         cie_tercio = ent_n / 3; cie_b8 = cie_ba = cie_2a = cie_tercio;      /* 451DD0 */
@@ -5244,7 +5363,7 @@ static void niebla_paso(void)
     }
     {   /* el sol: aparece o se va en 120 cuadros, solo en la union (4AFCC0, paso 5C518C) */
         int area = ent_fase ? ent_nuevo : cur_nodo, on = area >= 0 && (curso[area].clima & 2);
-        if (s_union >= 0 && yo.s > s_union) {
+        if ((s_union >= 0 && yo.s > s_union) || ent_cruza) {
             if (on && sol_int < 1) sol_int = fminf(1.0f, sol_int + 0.00830564741f);
             if (!on && sol_int > 0) sol_int = fmaxf(0.0f, sol_int - 0.00830564741f);
         }
@@ -5258,7 +5377,7 @@ static void niebla_paso(void)
         d = ent_d0 * t + d1 * (1 - t); c0 = 0xFF000000u;
         for (k = 0; k < 24; k += 8) c0 |= (uint32_t)(((ent_c0 >> k) & 0xff) * t + ((c1 >> k) & 0xff) * (1 - t)) << k;
         d0 = d; m0 = m1;
-        if (ent_fase == 2) niebla_cielo_d = curso[ent_nuevo].nniebla0 ? curso[ent_nuevo].niebla0[0].d0 : 0;
+        if (ent_fase == 2 || ent_cruza) niebla_cielo_d = curso[ent_nuevo].nniebla0 ? curso[ent_nuevo].niebla0[0].d0 : 0;
     }
     niebla_d = d0; niebla_modo = m0; niebla_c = c0;
 }
@@ -5281,12 +5400,17 @@ static void luz_actual(int e, float *v, float *d)
 {
     int k;
     if (cur_nodo < 0) { for (k = 0; k < 16; k++) v[k] = 1; d[0] = 0; d[1] = -1; d[2] = 0; return; }
-    memcpy(v, curso[cur_nodo].luz[e], 16 * sizeof(float));
-    luz_dir(cur_nodo, e, marco_et, d);
+    if (ent_cruza) {                                            /* la vieja: la de la etapa que se dejo, en su marco */
+        float M[4] = { 0, 0, 0, ent_giro };
+        memcpy(v, curso[ent_viejo].luz[e], 16 * sizeof(float)); luz_dir(ent_viejo, e, M, d);
+    } else {
+        memcpy(v, curso[cur_nodo].luz[e], 16 * sizeof(float));
+        luz_dir(cur_nodo, e, marco_et, d);
+    }
     if (ent_fase && ent_nuevo >= 0) {
         float t = ent_fase == 1 && ent_t > 0 ? ent_t / ent_dur : 0, dn[3], p0, y0, p1, y1;
         for (k = 0; k < 16; k++) v[k] = v[k] * t + curso[ent_nuevo].luz[e][k] * (1 - t);
-        luz_dir(ent_nuevo, e, marco_sig, dn);
+        luz_dir(ent_nuevo, e, ent_cruza ? marco_et : marco_sig, dn);
         luz_angulos(d, &p0, &y0); luz_angulos(dn, &p1, &y1);
         p0 = p0 * t + p1 * (1 - t); y0 = y0 * t + y1 * (1 - t);
         d[0] = -cosf(p0) * sinf(y0); d[1] = sinf(p0); d[2] = -cosf(p0) * cosf(y0);
@@ -5382,6 +5506,7 @@ static const pvr_poly_hdr_t *cielo_cab(const modelo_t *mo, int i, int niebla, in
    Flycast rasteriza con la GPU del PC y no lo muestra). Lo que se ve del cielo esta a w >= ~700 m: el recorte a 50 m
    no quita nada de la pantalla y deja los vertices por debajo de ~16000 pixeles. */
 #define CIELO_CERCA 50.0f
+static int cie_lleno;                                           /* la malla, con el alfa del vertice a 255 (cielo_grupo) */
 static int cie_seq;                                             /* mallas del cielo enviadas a la lista 2 (cuadro) */
 static inline void cielo_envia(const pt_t *p, int fin, float z)  /* z = 0: la 1/w del vertice */
 {
@@ -5399,6 +5524,7 @@ static void cielo_malla(const modelo_t *mo, const malla_t *m, float z)
         mat_trans_single3_nodivw(x, y, zz, w);
         pw[i].x = x; pw[i].y = y; pw[i].w = w; pw[i].u = v[i].u; pw[i].v = v[i].v;
         pw[i].c = cm ? mul_argb(v[i].c, cm) : v[i].c; pw[i].o = mo->ofs ? mo->ofs[m->v0 + i] : 0;
+        if (cie_lleno) pw[i].c |= 0xFF000000u;
         detras |= w < CIELO_CERCA;
     }
     if (!detras) {
@@ -5425,36 +5551,62 @@ static void cielo_malla(const modelo_t *mo, const malla_t *m, float z)
         else { cielo_envia(o, 0, z); cielo_envia(o + 1, 0, z); cielo_envia(o + 3, 0, z); cielo_envia(o + 2, 1, z); tri_enviados += 2; }
     }
 }
-/* el grupo g del cielo de mo en la lista l con alfa a */
-static void cielo_grupo(const modelo_t *mo, int g, int l, float a, int niebla)
+/* Orden entre capas en el fundido. El original pinta las capas una encima de otra (4521C0); aqui cada malla va a la
+   lista de la PowerVR de su textura y las listas se pintan opaca, perforada y transparente: una malla transparente de
+   una capa de abajo (las nubes del cielo nuevo) salia por encima de la capa de arriba mientras esta iba entera (alfa
+   >= 0,9) en la lista opaca: unos cuadros con trozos del cielo de debajo al empezar cada tercio del fundido. Una capa
+   no puede ir en una lista anterior a la mas alta de las capas de debajo (lmin): sus mallas suben a esa lista (en la
+   transparente, con el alfa del vertice a 255: enteras, como en la opaca, y con su z fija en el orden de dibujo). La
+   capa de abajo, y el cielo de fuera del fundido, van como siempre. */
+/* lista mas alta que usa el grupo g de mo con alfa a y el minimo lmin (-1: no dibuja nada) */
+static int cielo_lmax(const modelo_t *mo, int g, float a, int lmin)
+{
+    uint32_t k; int r = -1;
+    if (!mo || !mo->tv || a <= 0.1f) return -1;
+    for (k = mo->inicio[3]; k < mo->inicio[4]; k++) {
+        const malla_t *m = mo->mallas + k; int gm = m->nodo <= -256 ? -256 - m->nodo : 0;
+        int lm = m->tex >= 0 ? (int)mo->texs[m->tex].lista : 0;
+        if (m->n < 3 || gm != g) continue;
+        if (a < 0.9f) return 2;
+        if (lm < lmin) lm = lmin;
+        if (lm > r) r = lm;
+    }
+    return r;
+}
+/* el grupo g del cielo de mo en la lista l con alfa a; lmin: la lista mas alta de las capas de debajo */
+static void cielo_grupo(const modelo_t *mo, int g, int l, float a, int niebla, int lmin)
 {
     uint32_t k;
     if (!mo || !mo->tv || a <= 0.1f || (a < 0.9f && l != 2)) return;
     if (a < 0.9f) color_mul = ((uint32_t)(a * 255) << 24) | 0xFFFFFF;
     for (k = mo->inicio[3]; k < mo->inicio[4]; k++) {
         const malla_t *m = mo->mallas + k; int gm = m->nodo <= -256 ? -256 - m->nodo : 0;
-        int lm = m->tex >= 0 ? (int)mo->texs[m->tex].lista : 0;
-        if (m->n < 3 || gm != g || (a >= 0.9f && lm != l)) continue;
-        if (m->tex >= 0) pvr_prim(cielo_cab(mo, m->tex, niebla, a >= 0.9f ? lm : 2), sizeof(pvr_poly_hdr_t));
-        else pvr_prim(&cab_col[!niebla][a >= 0.9f ? l : 2], sizeof(pvr_poly_hdr_t));
+        int lm = m->tex >= 0 ? (int)mo->texs[m->tex].lista : 0, le = lm < lmin ? lmin : lm;
+        if (m->n < 3 || gm != g || (a >= 0.9f && le != l)) continue;
+        cie_lleno = a >= 0.9f && le == 2 && lm != 2;            /* subida a la transparente: entera */
+        if (m->tex >= 0) pvr_prim(cielo_cab(mo, m->tex, niebla, a >= 0.9f ? le : 2), sizeof(pvr_poly_hdr_t));
+        else pvr_prim(&cab_col[!niebla][a >= 0.9f ? le : 2], sizeof(pvr_poly_hdr_t));
         cielo_malla(mo, m, l == 2 && !niebla ? 1.2e-4f * (1.0f + (float)cie_seq++ * (1.0f / 1024.0f)) : 0);
     }
-    color_mul = 0;
+    color_mul = 0; cie_lleno = 0;
 }
 /* el cielo del cuadro en la lista l (como 4521C0: primero el nuevo, grupo 0 y 1; luego el viejo, grupo 1 y 0) */
 static void cielo_dibuja(int l)
 {
     int niebla = niebla_cielo_d > 0;                           /* la lista 0 de la niebla (solo CLOU la tiene) */
+    const modelo_t *nuevo = ent_cruza ? &etapa : sig.tv ? &sig : NULL, *viejo = ent_cruza ? &uni : cielo;
     if (l == 0) cie_seq = 0;
-    const modelo_t *nuevo = sig.tv ? &sig : NULL;
     mat_load(&vista_cielo);
-    if (ent_fase == 0) cielo_grupo(cielo, 0, l, 1, niebla);
-    else if (ent_fase == 2) cielo_grupo(nuevo ? nuevo : cielo, 0, l, 1, niebla);
+    if (ent_fase == 0) cielo_grupo(cielo, 0, l, 1, niebla, -1);
+    else if (ent_fase == 2) cielo_grupo(nuevo ? nuevo : cielo, 0, l, 1, niebla, -1);
     else {
-        if (cie_on[2]) cielo_grupo(nuevo, 0, l, cie_a[2], niebla);
-        if (cie_on[3]) cielo_grupo(nuevo, 1, l, cie_a[3], niebla);
-        if (cie_on[1]) cielo_grupo(cielo, 1, l, cie_a[1], niebla);
-        if (cie_on[0]) cielo_grupo(cielo, 0, l, cie_a[0], niebla);
+        static const int G[4] = { 0, 1, 1, 0 }, Q[4] = { 2, 3, 1, 0 }; int k, lmin = -1, lx;
+        for (k = 0; k < 4; k++) {
+            const modelo_t *mo = k < 2 ? nuevo : viejo;
+            if (!cie_on[Q[k]]) continue;
+            cielo_grupo(mo, G[k], l, cie_a[Q[k]], niebla, lmin);
+            lx = cielo_lmax(mo, G[k], cie_a[Q[k]], lmin); if (lx > lmin) lmin = lx;
+        }
     }
 }
 
@@ -6864,6 +7016,7 @@ int main(int argc, char **argv)
     int64_t reloj = 0; uint64_t gd_us_ant = 0; int tras_carga = 0; uint32_t nuevo_pend = 0; float lejos_obj = lejos;
     uint64_t c_log = 0, t_log = 0, t_ini = timer_ms_gettime64(); float ms_log = 0, t_carga = 0;
     (void)argc; (void)argv;
+    registro_inicia();                                          /* la consola serie, sin esperas en carrera */
     ta_teo_tab_pon();
 
     /* 1: datos del disco a la RAM (la pantalla de texto aun sin PowerVR) */
@@ -7003,6 +7156,9 @@ int main(int argc, char **argv)
                 }
                 ant = ahora; gn = gd_n_juego();
             }
+#endif
+#ifdef DIAG_TRANS
+            pasos = 1; reloj = ahora;                           /* medida: un paso por cuadro (camara lenta) */
 #endif
 #ifdef DIAG_CONGELA
             pasos = !diag_congelado;                            /* medida: un paso por cuadro (el estado no depende de los
@@ -7273,7 +7429,14 @@ int main(int argc, char **argv)
                     ha_rapido = ha_impulso = 0;
                 }
                 {   /* el curso: union, bifurcacion y etapa siguiente sin parar (curso_paso) */
+#ifdef DIAG_PICO
+                    uint64_t dg_c0 = timer_us_gettime64();
+#endif
                     int ev = curso_paso();
+#ifdef DIAG_PICO
+                    {   unsigned d = (unsigned)(timer_us_gettime64() - dg_c0);
+                        if (d > 1500 || ev) printf("PICO: curso_paso %u us (ev %x, s %.0f)\n", d, ev, (double)yo.s); }
+#endif
                     bo_cuenta(); bo_paso(ev);                   /* objetos animados de la union (44EDE0 / 44F190) */
                     bo_reloj++;                                 /* 0x1030d0: +1 por cuadro del original (60 por s) */
                     if (cur_rama < 0 && s_decide >= 0 && yo.s >= s_decide - 450.0f && t_estado % 30 == 0) {
@@ -7304,6 +7467,20 @@ int main(int argc, char **argv)
                                curso[cur_nodo].zona, curso[cur_nodo].nivel, (double)yo.s, amp, tim_cuadros, (double)tiempo);
                     }
                     niebla_paso();
+#ifdef DIAG_TRANS
+                    {   static int f0 = -1; static float sx = -1; float pv = yo.s + yo.v * 0.1f; int k, f = ent_fase;
+                        static const char *const Q[5] = { "curso", "cielo", "antes de la union", "antes de liberar", "antes de la etapa" };
+                        for (k = 0; k < 4; k++) f = f * 8 + cie_on[k] + 2 * (cie_a[k] >= 0.9f) + 4 * (cie_a[k] > 0.1f);
+                        f = f * 2 + (etapa.tv != NULL); f = f * 2 + (uni.tv != NULL); f = f * 2 + (sig.tv != NULL); f = f * 2 + (cielo == &uni);
+                        if (ev) DT(Q[0]);
+                        if (f != f0) { f0 = f; DT(Q[1]); }
+                        if (s_union >= 0 && sx != s_union && pv >= s_union) { DT(Q[2]); }
+                        if (s_union >= 0 && etapa.datos && pv >= s_union + UNION_LIBERA) DT(Q[3]);
+                        if (s_sig >= 0 && pv >= s_sig) DT(Q[4]);
+                        if (s_union >= 0 && yo.s >= s_union) sx = s_union;
+                        if (s_suelta >= 0 && pv >= s_suelta) DT("antes de soltar la union");
+                    }
+#endif
                     if (ev & CUR_META) {
                         estado = META; t_estado = 0; pt_bonus_etapa(); texto_centro("GOAL!");
                         if (variante == 2) infarto_meta();      /* 44FF10 */
@@ -7419,10 +7596,20 @@ int main(int argc, char **argv)
         diag_log_us = (uint32_t)(timer_us_gettime64() - c_log);
 #endif
         t_log += timer_us_gettime64() - c_log;
+        registro_diferido(estado != TITULO);                    /* en carrera la consola serie no espera (registro.c) */
+        registro_paso();
         if (pvr_wait_ready() < 0) { if (++pvr_fallos >= 5) pvr_colgado(estado); } else pvr_fallos = 0;
         c0 = timer_us_gettime64();
 #ifdef DIAG_MS
         prf_t = timer_us_gettime64();
+#endif
+#ifdef DIAG_PICO
+        {   /* medida: cuadros largos (mas de 1,5 cuadros entre dos esperas) con su logica y su dibujo */
+            static uint64_t dg_ant; static unsigned dg_dib, dg_n;
+            unsigned tot = (unsigned)(c0 - dg_ant), lg = (unsigned)(c0 - c_log);
+            if (dg_ant && estado == CARRERA && tot > 28000) printf("PICO: cuadro %u: %u us (logica+espera %u, dibujo anterior %u), carga %d, s %.0f\n", dg_n, tot, lg, dg_dib, carga.estado, (double)yo.s);
+            dg_ant = c0; dg_dib = (unsigned)dg_ult_dib; dg_n++;
+        }
 #endif
         if (estado == TITULO) pvr_set_bg_color(54 / 255.0f, 62 / 255.0f, 74 / 255.0f);   /* fondo gris del frontal */
 #ifdef DIAG_FONDO
@@ -7432,6 +7619,8 @@ int main(int argc, char **argv)
 #endif
         ta_fin_cuadro();                                        /* el TA ya termino el cuadro anterior: lo que gasto */
         niebla_pon();                                           /* niebla de la etapa y distancia de dibujo */
+        registro_paso();
+        sube_turno = 1;
         pvr_scene_begin();
         /* proyeccion del original (483C10 / 484BD0): pantalla virtual de 640x480 en 4:3, FOV horizontal +A4 de la
            vista y pixeles cuadrados: fx = fy = 320 / tan(FOV / 2) (vertical 2 atan(0,75 tan(FOV / 2))) */
@@ -7620,6 +7809,15 @@ int main(int argc, char **argv)
         if (estado != TITULO) prio_ajusta(ta_et_corto, ta_et);
         ta_et_corto = 0;
         pvr_scene_finish();
+        registro_paso();
+#ifdef DIAG_TRANS
+        if (dt_n > 0 && estado == CARRERA) {
+            dt_n--; printf("TR: cuadro s %.1f fase %d t %d a %.2f %.2f %.2f %.2f on %d%d%d%d cielo %s sig %d capas %d (%s)\n", (double)yo.s, ent_fase, ent_t,
+                           (double)cie_a[0], (double)cie_a[1], (double)cie_a[2], (double)cie_a[3], cie_on[0], cie_on[1], cie_on[2], cie_on[3],
+                           cielo == &uni ? "union" : "etapa", sig.tv != NULL, cie_seq, dt_que);
+            thd_sleep(DIAG_TRANS);
+        }
+#endif
         hudd_fin_cuadro();                                      /* VRAM del HUD y los menus que ya no lee la PowerVR */
         /* LCD de las VMU: logo en el titulo y los menus; en carrera la velocidad y la marcha del HUD (se envia como mucho
            4 veces por segundo y solo si cambia: comun/vmu.c) */
@@ -7630,6 +7828,9 @@ int main(int argc, char **argv)
         diag_dib_us = (uint32_t)(timer_us_gettime64() - c0);
 #endif
         tcpu += timer_us_gettime64() - c0;
+#ifdef DIAG_PICO
+        dg_ult_dib = timer_us_gettime64() - c0;
+#endif
 #ifdef DIAG_PERFIL
         {   static int pf_ini;                              /* medida: perfil del SH4 en carrera (perfil.c) */
             if (!pf_ini) { perfil_inicia(); pf_ini = 1; }

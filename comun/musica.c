@@ -3,6 +3,7 @@
    snd_stream de KallistiOS lo vacia desde musica_poll (una vez por cuadro). La pista vuelve a empezar al acabar. */
 #include <kos.h>
 #include <dc/sound/stream.h>
+#include "registro.h"
 #include "gd.h"
 #include "musica.h"
 
@@ -28,6 +29,7 @@ static void *lector(void *arg)
         /* el anillo tiene ~24 s de ADPCM (44 KB/s): durante una carga (pausa_lectura o lecturas de otro hilo hace
            menos de 300 ms) no se lee; con el anillo casi vacio se lee igualmente */
         int vacio = escrito - leido < 128 * 1024;
+        registro_guarda();                                      /* la consola serie, si el bucle se ha parado */
         if (activa && !arranca && pausa_lectura) {              /* carga larga: el bucle no llama a musica_poll */
             mutex_lock(&m_poll); if (activa && !arranca) snd_stream_poll(hs); mutex_unlock(&m_poll);
         }

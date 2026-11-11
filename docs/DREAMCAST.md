@@ -808,6 +808,37 @@ el bucle de vertices (27 instrucciones por vertice), el piloto (2,1 ms: la mezcl
 vertice), el coche (2,7 ms) y el principio del cuadro (1,6 ms: `coche_entorno` ~0,6 ms, una normal int8 a float por
 vertice).
 
+### Cambios de etapa: tirones (2026-11-11)
+
+Queja del probador (demo 31, consola real): "en algunos cambios de etapa hay glitches en el cielo y alguna
+ralentizacion". Medido en Flycast con `-DPRUEBA_AUTO -DDIAG_PICO` (us de cada parte de `curso_paso`, cuadros de mas
+de 28 ms) y el GD frenado (`-DDIAG_GD_LENTO=1000`, con 150 ms por salto de la cabeza; ver abajo lo que supone), de
+PALM a LAKE y a CAST. Lo que paraba el bucle y lo hecho:
+
+| Causa | Medido / de donde sale | Arreglo |
+|---|---|---|
+| Consola serie | KallistiOS manda dbglog / printf por el SCIF a 115200 baudios con espera activa (scif_write_buffer + scif_flush), haya cable o no: ~87 us por caracter. Las lineas del cambio de etapa (VRAM 150 caracteres, CURSO 110, BO, ENTORNO, CHECKPOINT) paraban el bucle: `curso_paso` 27,8 ms al llegar la union y 23 ms con los objetos (Flycast); sin ellas 4,2 ms | `comun/registro.c`: manejador de dbgio delante del SCIF. En carrera las lineas van a un anillo de 4 KB y cada cuadro sale lo que cabe en la cola del SCIF sin esperar (3 x 8 bytes); fuera de la carrera, como antes. No se pierde nada: si el anillo se llena o el bucle se para (error) se vacia esperando |
+| Texturas a la VRAM | `sube_tramo` subia la etapa (435-526 KB en el modo OutRun, hasta 1,2 MB) o la union (155 KB) de una vez por las Store Queues | a trozos: `sube_inicia` / `sube_trozo`, 32 KB por cuadro (una textura grande, por partes); el modelo no tiene tablas (`tv`) hasta el final y nadie lo dibuja a medias. Mismas direcciones, cabeceras y rebajas que de una vez (16 trozos de menos de 0,4 ms en Flycast) |
+| Hilo de carga | recompone la etapa de SEGS.PAK (3-8 MB de copias; las de los flujos de vertices ahora por palabras, sin una llamada a memcpy por cada 20 o 4 bytes: el ORD7 recompuesto es el mismo, huella de DIAG_PAK igual en SEG00, SEG03 y BK00) y la coloca (`modelo_coloca`) con el bucle en marcha; el planificador de KallistiOS solo cambia de hilo en el tic de 10 ms (el hilo en marcha no entra en la busqueda, sea cual sea su prioridad): el bucle, despertado por el vblank, esperaba hasta 10 ms | `gd_cede` (gd.c): el hilo cede el turno (thd_pass) cuando lleva 2 ms seguidos; el bucle entra con 2 ms de retraso como mucho |
+| META.DAT | lectura sincrona en el bucle al llegar la union de la meta (113 KB: ~0,3 s en la consola) | la lee un hilo (`meta_lee`); `meta_lista` solo dice que si cuando esta entera |
+
+Lo que queda en un cuadro (Flycast, tiempos del SH4 emulado): la ruta de la union 3,5 ms y la de la etapa 6,7 ms
+(`ruta_anade` + `ruta_prepara`: atan2 de todos los puntos), soltar la etapa 4,9 ms (`ruta_recorta` 1,0 +
+`curso_recentra` 3,7: todos los vertices de la union). Caben en un cuadro; no se han repartido.
+
+Despues (Flycast, PALM -> LAKE -> union siguiente, GD sin frenar): ningun cuadro de mas de 28 ms durante las
+cargas, `curso_paso` 7,2 ms como mucho (al acabar de subir la etapa: su ruta), SEG03 leido en 4,2 s y el fundido en
+su sitio (s 5629). En la consola no se ha medido.
+
+Lo que NO se arregla con codigo: el tiempo de lectura. Una etapa son 2,8-8,2 MB (SEGnn recompuesto) y se pide al
+soltar la anterior (300 m dentro de la union). Flycast ya emula el tiempo de lectura del GD (sin el define BK00, 1,45
+MB, tarda 1,05 s y SEG03, 4,6 MB, 3,1 s: ~1,4 MB/s) y asi el fundido de PALM -> LAKE empieza en su sitio (s 5629).
+Con `-DDIAG_GD_LENTO=1000` encima (en total ~0,5 MB/s, un lector lento) SEG03 tarda 9,6 s (11 s con el hilo
+cediendo el turno: en Flycast el bucle no tiene tiempo libre y la carga se queda con menos CPU) y SEG08 (CAST, 6,6
+MB) 15,5 s: el coche llega a 60 m del final de la carretera sin la etapa y el bucle la espera (`carga_espera`: 0,68 s
+parado en LAKE -> CAST a fondo) y el fundido del entorno, que no empieza hasta tener el cielo nuevo, sale tarde (ver
+PARIDAD.md, Cambios de etapa). No hay medida de la velocidad de lectura de la consola del probador (GDEMU).
+
 ## 3. Otros riesgos de la consola real
 
 | Riesgo | Estado |

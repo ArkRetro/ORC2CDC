@@ -18,4 +18,6 @@ uint64_t gd_us_juego(void);
 uint32_t gd_n_juego(void);
 /* intentos de lectura fallidos desde el arranque y el codigo del ultimo (ERR_* de cdrom.h) */
 void gd_errores(uint32_t *n, int *ult);
+/* trabajo largo en el hilo de carga: cede el turno al bucle si lleva 2 ms seguidos (gd.c, pak_lee) */
+void gd_cede(void);
 #endif

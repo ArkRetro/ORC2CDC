@@ -150,11 +150,37 @@ static void pak_copia(uint8_t *dst, uint32_t pv, uint32_t t, uint32_t q, const u
     if (!t) { memcpy(dst + q, s, n); return; }
     while (n) {                                             /* flujo de vertices: a su sitio en los de 24 bytes */
         uint32_t r = q / el, e = q % el, m = el - e < n ? el - e : n;
+        if (!e && n >= el) {                                /* elementos enteros: por palabras, sin llamar a memcpy */
+            uint8_t *d = dst + pv + 24 * r + o; uint32_t k = n / el, w0, w1, w2, w3, w4;   /* (una llamada por cada */
+            q += k * el; n -= k * el;                       /* 20 o 4 bytes era casi todo el tiempo del hilo de carga) */
+            if (t == 1) for (; k; k--, d += 24, s += 20) {
+                __builtin_memcpy(&w0, s, 4); __builtin_memcpy(&w1, s + 4, 4); __builtin_memcpy(&w2, s + 8, 4);
+                __builtin_memcpy(&w3, s + 12, 4); __builtin_memcpy(&w4, s + 16, 4);
+                __builtin_memcpy(d, &w0, 4); __builtin_memcpy(d + 4, &w1, 4); __builtin_memcpy(d + 8, &w2, 4);
+                __builtin_memcpy(d + 12, &w3, 4); __builtin_memcpy(d + 16, &w4, 4);
+            } else for (; k; k--, d += 24, s += 4) { __builtin_memcpy(&w0, s, 4); __builtin_memcpy(d, &w0, 4); }
+            continue;
+        }
         memcpy(dst + pv + 24 * r + o + e, s, m); s += m; q += m; n -= m;
     }
 }
+/* La recomposicion es trabajo del SH4 (copias; las de los flujos de vertices, de 20 y de 4 bytes en 4): una etapa
+   son varios MB. La hace el hilo de carga con el bucle de la carrera en marcha y el planificador de KallistiOS reparte
+   por turnos de 10 ms (un hilo que no se bloquea solo deja la CPU en el tic, y el bucle, despertado por el vblank, no
+   entra hasta el tic siguiente): el bucle perdia cuadros mientras durase. gd_cede (cada PAK_TROZO bytes copiados, y
+   en modelo_coloca de demo/main.c) cede el turno (thd_pass) cuando el hilo lleva CEDE_US seguidos: si el bucle esta
+   listo entra con 2 ms de retraso como mucho, y si esta esperando al vblank, la copia sigue. Con el bucle sin
+   tiempo libre (nunca espera) la carga se queda con ~2 de cada 12 ms en vez de 10 de cada 20. */
+#define PAK_TROZO 16384u
+#define CEDE_US 2000
+void gd_cede(void)
+{
+    static uint64_t t; uint64_t a = timer_us_gettime64();
+    if (a - t >= CEDE_US) { thd_pass(); t = timer_us_gettime64(); }
+}
 static int pak_lee(uint32_t lba, uint32_t tdesc, uint8_t *dst, uint32_t cap)
 {
+    uint32_t hecho = 0;
     uint32_t tam, nops, pv, nv, k, w0 = 0, w1 = 0, vt, ts, sd = (tdesc + 2047) / 2048 * 2048, fv = cap;
     uint8_t *d = desc, *v; int r = 0;
     const uint32_t *op;
@@ -189,7 +215,9 @@ static int pak_lee(uint32_t lba, uint32_t tdesc, uint8_t *dst, uint32_t cap)
                 w1 = w0 + ns * 2048;
             }
             n = w1 - s < l ? w1 - s : l;
+            if (n > PAK_TROZO - hecho) n = PAK_TROZO - hecho;
             pak_copia(dst, pv, t, q, v + (s - w0), n); s += n; q += n; l -= n;
+            if ((hecho += n) >= PAK_TROZO) { hecho = 0; gd_cede(); }   /* (el bucle de la carrera, entre trozo y trozo) */
         }
     }
     mutex_unlock(&m_gd);
