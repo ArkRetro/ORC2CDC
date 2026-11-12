@@ -49,3 +49,108 @@ en las cargas del curso (sin huecos fijos) y 5 combinaciones "union + LASV" que 
 ## Fase 6. Fidelidad y consola real
 1. Confirmar en el ELF de PS2 los ~30 puntos PROBABLE / SUPUESTO. 2. Salon y tienda de millas. 3. Opciones completas.
 4. Medir FPS y memoria en la Dreamcast real y ajustar.
+
+## Plan de recursos (2026-11-12)
+
+Pedido del usuario: (a) la tasa fija a 45 cuadros por segundo, (b) mas distancia de dibujo, (c) texturas comprimidas
+con la VQ de la PowerVR y (d) un plan de recursos sin aproximaciones, con los valores de la ISO o del codigo
+descompilado. Regla: lo del juego (texturas, geometria, LOD, distancias, tiempos de la logica) sale de la ISO / el
+descompilado y no se toca; lo que se decide aqui es del port (formatos, presupuestos, ritmo de presentacion) y va
+dicho como tal. Todo medido, nada supuesto: Flycast (`DIAG_VTX`, `DIAG_MS`, `DIAG_PVRMEM`), `tools/vram.py` y el
+inventario de los .DAT.
+
+### 1. Inventario (antes del plan; datos de dcwork/datos2 del 2026-11-12, codigo 5e6e27a)
+
+**VRAM de la carrera, modo OutRun** (8 MB; mapa `PVRMAPA` de docs/DREAMCAST.md, Carreras seguidas, y Flycast con
+`-DDIAG_VTX`, COCHE06 de GHOS a la meta de IMPE):
+
+| Parte | KB | Que es |
+|---|---|---|
+| bufer de parametros del TA x 2 | 2 x 1792 | geometria del cuadro (doble bufer: el TA llena uno mientras se dibuja el otro) |
+| OPB x 2 | 2 x 384 | 1 + 4 juegos de reserva (en la consola se midio un cuadro: 141 KB usados) |
+| imagen 640x480x16 x 2 + teselas | 2 x 607 | |
+| texto de pruebas (`txt_arr` 512x128 + `txt_cen`) | 144 | solo se ve con Y (`ver`) o sin HUD |
+| trafico (9 modelos, 5 LOD) + sol | 347 | |
+| efectos (marcas, humo) | 15 | |
+| pareja (CHRppaa) + coche | 198 (CHR1109 + COCHE13) | coche 127-187 KB segun el modelo |
+| HUD de carrera (HUD.DAT, paletas de 4 / 8 bits) | 522 | el atlas de los avisos (cuenta, META, se acabo el tiempo) 256 KB en 16 bits: 576 colores, sin paleta |
+| zona del curso (etapa + union) | 1312 | lo que queda menos la reserva (48 KB), la pausa y el banderero |
+| libre fuera de la zona | 57-98 | |
+
+INFARTO: la zona es 92 KB menor (`HA_VRAM_RESERVA`, HAHUD.DAT fuera de la zona). OUTRUN2SP: 1344 KB.
+
+**Texturas del curso por formato** (todas las del arbol del modo OutRun; KB en VRAM, alineadas a 32):
+
+| Etapa | VQ | VQ con mipmaps | 16 bits (>= 32x32) | 16 bits (< 32x32) |
+|---|---|---|---|---|
+| PALM (SEG00) | 363 | 107 | 48 | 7 |
+| LAKE (SEG03) | 332 | 129 | 20 | 3 |
+| INDU (SEG04) | 514 | 93 | 2 | 5 |
+| ALPI (SEG05) | 406 | 68 | 160 | 15 |
+| SNOW (SEG06) | 324 | 121 | 328 | 2 |
+| CLOU (SEG07) | 309 | 72 | 216 | 0 |
+| CAST (SEG08) | 355 | 62 | 10 | 8 |
+| GHOS (SEG09) | 390 | 65 | 354 | 0 |
+| FORE (SEG10) | 423 | 166 | 146 | 6 |
+| DESE (SEG11) | 197 | 86 | 50 | 2 |
+| TULI (SEG12) | 302 | 140 | 260 | 8 |
+| METR (SEG13) | 344 | 78 | 98 | 1 |
+| RUIN (SEG14) | 329 | 31 | 96 | 0 |
+| CAPE (SEG15) | 321 | 141 | 144 | 2 |
+| IMPE (SEG16) | 684 | 79 | 144 | 2 |
+| uniones BK00-14 | 91-259 | 7-112 | 0-2 | 0-1 |
+
+En los 62 SEGnn.DAT de todos los arboles: 13360 KB en 16 bits de 32x32 o mas (529 texturas) que `tools/vq.py` dejo
+sin VQ por pasar su error RMS 9 (`VQ_UMBRAL`); en las 262 uniones 2220 KB (221); en las parejas 496 KB (53). Son
+texturas con ruido fino (rocas, montes, gente, hojas): la VQ da 9-17 de error y a la vista no se distingue (abajo).
+Coches del jugador: 26 texturas en 16 bits (322 KB en los 15; 32-40 KB en el que se usa): insignias y logotipos.
+
+**Peor caso de VRAM del curso** (`tools/vram.py`, COCHE06): BK08 / BK09 + IMPE 1127 KB en la zona -> 185 KB libres
+(medido en Flycast: "zona libre 185K"); INFARTO 92 KB menos (19-93 KB con el peor coche y la peor pareja);
+OUTRUN2SP BK19 + LASV 1286 KB (58 KB libres con una zona de 1344).
+
+**TA** (Flycast, `-DDIAG_VTX -DDIAG_SIN_CPU`, el piloto de GHOS a la meta de IMPE con COCHE06): tope de la etapa
+712-718 KB de los 1728 del cuadro (el resto: coche ~600 KB, trafico, 2D y la reserva), usados 585-595; se dibuja
+entero hasta 362 m (GHOS) / 430 m (IMPE) y lo primero que se quita esta a 400 / 484 m (medianas de `cerca` y
+`quitados desde`); 26000-27000 vertices por cuadro. Lo que limita la distancia es el bufer de parametros, no la CPU
+(docs/DREAMCAST.md, Presupuesto del TA).
+
+**CPU** (Flycast, mismas pruebas, ms por cuadro; media de las lineas `MS` / `PRF`): GHOS dibujo 14,95 + logica 4,48
+(con la carga de la union), IMPE 15,43 + 2,64; partes: principio del cuadro 2,1-2,3, visibilidad 0,9-1,1, cielo 0,4,
+etapa 4,9-5,6, coche 2,6, piloto y acompanante 2,2, trafico 0,2-0,7, 2D 0,4. 54-56 cuadros por segundo. Limites de
+Flycast: no cuenta la cache ni las esperas de la memoria del SH4 y la PowerVR emulada no tarda lo que la real
+(`pvr 7,5` es el tiempo de Flycast): las cifras sirven para comparar antes / despues, no como tiempo de la consola.
+Ademas el marcador de pruebas se rehacia cada 6 cuadros aunque no se viera (128 KB borrados, escritos y subidos y
+`mallinfo` recorriendo el monton).
+
+**RAM** (docs/DREAMCAST.md, Carreras seguidas): bloques fijos de la etapa (8200 KB), la union (1730 KB), el coche
+(424 KB) y la pareja (272 KB); al empezar la carrera 1137 KB libres (598 seguidos en la cima) en los tres modos y
+vuelve a lo mismo carrera tras carrera. No hay nada repetido en la RAM de la carrera (la meta comparte las texturas
+de su etapa, el trafico suelta sus texeles al subirlos, el coche y la pareja estan una vez).
+
+**GD en carrera**: la etapa siguiente (SEGS.PAK recompuesto, 2,8-8,2 MB) y la union (0,4-1,5 MB) mientras se conduce,
+BKD.DAT (105 KB), META.DAT (113 KB), objetos de la union (BOnn.DAT) y la musica en flujo; nada mas.
+
+**Repetido o desperdiciado**:
+- texturas en 16 bits que la VQ deja igual a la vista (arriba): 16 MB en el GD y hasta 354 KB por etapa en la VRAM;
+- el atlas de los avisos del HUD (512x256 y 256x128 en 16 bits, 288 KB) en la VRAM toda la carrera;
+- el marcador de pruebas (144 KB de VRAM y CPU cada 6 cuadros sin verse);
+- cs_BK_PALM (22 texturas, 130 KB) va en cada union, pero nunca hay dos uniones a la vez: no se repite en la VRAM
+  (en el GD lo quita UNIONES.PAK);
+- los juegos de reserva del OPB (4 x 77 KB x 2): solo se ha medido un cuadro en la consola; no se tocan.
+
+### 2. Presupuesto de 45 cuadros por segundo (decision del port)
+
+22,2 ms por cuadro (3 cuadros cada 4 campos a 60 Hz, 9 cada 10 a 50 Hz). La logica sigue el reloj del original
+(59,94 pasos por segundo, `PERIODO_60`): a 45 cuadros por segundo da 1, 1 y 2 pasos por cuadro. CPU de dibujo +
+logica por debajo de 22,2 con margen para las interrupciones y el hilo de carga: `CPU_MS_CORTA` / `CPU_MS_ALARGA`.
+
+### 3. Pasos
+
+1. VQ (decision del port por clase de textura): segunda pasada desde los 16 bits guardados con el umbral de las
+   metas (24) en etapas, uniones, trafico, personajes, banderero y objetos de las uniones; los avisos del HUD en VQ;
+   las cifras, tacometros y paneles del HUD (paletas exactas), los menus (textos) y los coches del jugador (insignias
+   de cerca) se quedan. Las de menos de 32x32 tambien (el libro pesa mas que lo que ahorran).
+2. Distancia: la VRAM ganada al bufer de parametros (`TA_VB_BYTES`; cada 64 KB cuestan 128) para que el reparto del
+   original (`nodos_visibles_todos`, LOD, PVS) llegue mas lejos, con el peor caso de cada modo dentro de la zona.
+3. 45 fijos: presentacion por campos (sin esperas por tiempo) y `CPU_MS_CORTA` / `CPU_MS_ALARGA` para 22,2 ms.
