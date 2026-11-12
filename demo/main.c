@@ -794,7 +794,8 @@ static uint32_t vtx_et, vtx_et_ult;                      /* los de la etapa */
                        coche + 3 coches de trafico con LOD 0)
    Lo que la etapa no puede gastar lo reparte nodos_visibles_todos (quita primero lo que el LOD del original quitaria
    antes); si aun asi una tira no cabe, no se envia (ta_corto). */
-#define TA_VB_BYTES (1792 * 1024)                        /* bufer de parametros por cuadro (x2: doble bufer) */
+#define TA_VB_BYTES (1920 * 1024)                        /* bufer de parametros por cuadro (x2: doble bufer; 1792 hasta
+                                                            el plan de recursos de 2026-11-12: docs/PLAN.md) */
 #define TA_MARGEN (64 * 1024)                            /* cabeceras vacias de fin de lista y prudencia */
 #define TA_RESERVA_2D (64 * 1024)                        /* minimo para lo 2D (medido: unos 450 vertices) */
 #define TA_BPV_MIN 56                                    /* bytes por vertice 2D (1,3 x 42,5 medidos en la consola) */
@@ -8694,7 +8695,9 @@ int main(int argc, char **argv)
         }
 
         /* marcador (cada 6 cuadros) */
-        if (cuadro % 6 == 0 && estado != META && estado != AGOTADO && estado != FIN) {
+        /* (solo si se va a ver: texto, abajo; sin eso cada 6 cuadros se borraban, escribian y subian 128 KB y se
+           recorria el monton con mallinfo para nada) */
+        if (cuadro % 6 == 0 && estado != META && estado != AGOTADO && estado != FIN && (ver || (!hud_ok && estado != TITULO))) {
             if (estado == TITULO) sprintf(s1, "MENU  VRAM menu %uK libre %uK", menu_vram() >> 10, (unsigned)(pvr_mem_available() >> 10));
             else sprintf(s1, "TIEMPO %3d  %3d km/h %d  %3d%%%s", (int)ceilf(tiempo), fis_ok ? (int)fis.velocidad_hud : (int)(yo.v * 3.6f), fis.marcha,
                          (int)(100 * yo.s / longitud), yo.choque ? "  !" : "");

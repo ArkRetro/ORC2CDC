@@ -12,7 +12,7 @@ dibuja el otro), cada uno con
 
 | Parte | Tamano por juego |
 |---|---|
-| bufer de parametros (vertices), `TA_VB_BYTES` | 1792 KB |
+| bufer de parametros (vertices), `TA_VB_BYTES` | 1920 KB (1792 hasta el 2026-11-12) |
 | OPB: 300 teselas x (opacos 32 + modificadores opacos 8 + translucidos 8 + recorte 16 palabras) = 76,8 KB, por 1 + 4 de reserva | 384 KB |
 | matriz de teselas | 7 KB |
 | imagen 640x480 a 16 bits | 600 KB |
@@ -201,7 +201,7 @@ cuesta `ta_bpv` = 56 bytes por vertice. En la consola, `ta_f` sube solo si el TA
 
 | Tope por cuadro | Valor |
 |---|---|
-| total | `TA_VB_BYTES - TA_MARGEN` = 1792 - 64 = 1728 KB |
+| total | `TA_VB_BYTES - TA_MARGEN` = 1920 - 64 = 1856 KB (1728 hasta el 2026-11-12) |
 | 2D (va al final, no se corta) | max(64 KB, 2 x lo 2D del cuadro anterior x ta_bpv) |
 | 3D (`ta_lim`) | total - 2D = 1664 KB |
 | etapa (`ta_tope_etapa`) | 3D - max(coche+trafico+efectos del cuadro anterior + 2 coches de trafico con LOD 0, coche + 3 coches de trafico con LOD 0) |
@@ -259,7 +259,7 @@ el cuadro que se colgo (incompleto). Si el registro `TA_OPB_POS` pasa del 70 % d
 etapa por cuartos.
 
 Bufer de parametros mas grande: cada 64 KB mas son 128 KB de VRAM (doble bufer); en el peor caso quedan 290 KB libres
-(seccion 1, desde 2026-11-09; antes 79 KB): no se ha tocado. Quitar juegos de reserva del OPB daria sitio (154 KB por juego) pero el OPB crece
+(seccion 1, desde 2026-11-09; antes 79 KB): no se toco hasta el plan de recursos (2026-11-12: 1920 KB, abajo). Quitar juegos de reserva del OPB daria sitio (154 KB por juego) pero el OPB crece
 con la geometria y en la consola solo se ha medido un cuadro: no se toca.
 
 Distancia y que se dibuja de la etapa (ver PARIDAD.md, seccion Graficos): lo del original. Planos 0,1 y 4000 (camara
@@ -311,6 +311,33 @@ original. `lejos` solo baja (50 m cada 30 cuadros, minimo `LEJOS_MIN` 600 m) si 
 desde el 2026-11-11, antes 15) y vuelve a subir por debajo de `CPU_MS_ALARGA` (18, antes 11,5). Con 15 ms, en Flycast
 (PALM, 15,5 + 2,1 ms por cuadro) bajaba a 1100-2200 m en 30 s; con 22 se queda en los 4000 m del original con los
 mismos vertices (los limita el TA) y los mismos cuadros por segundo (55,5 / 56). Ver PARIDAD.md, Fundido de entrada.
+
+### Bufer de parametros de 1920 KB: mas distancia (plan de recursos, 2026-11-12)
+
+La VRAM que deja la segunda pasada de la VQ (seccion 1) va al bufer de parametros: `TA_VB_BYTES` 1792 -> 1920 KB
+(+128 KB por cuadro, 256 KB de VRAM con el doble bufer). Lo que se dibuja sigue siendo lo del original y en su orden
+(`nodos_visibles_todos`: clases de distancia, el LOD de 404B00, la PVS, la niebla); solo hay mas sitio, asi que el
+corte llega mas lejos. El tope de la etapa y el resto de cuentas salen solos del bufer (tabla de arriba).
+
+Medido en Flycast (`-DPRUEBA_AUTO -DPRUEBA_FICHA=6 -DPRUEBA_NODO=9 -DPRUEBA_RAMA=0 -DPRUEBA_FIN=400
+-DPRUEBA_SIN_TIEMPO -DDIAG_VTX -DDIAG_MS -DDIAG_SIN_CPU`: el piloto de GHOS a la meta de IMPE con COCHE06, el peor
+coche y la peor combinacion de VRAM; medianas de las lineas DIAG; antes = 5e6e27a con los datos de antes, despues =
+los datos de la VQ y el bufer nuevo):
+
+| | GHOS antes | GHOS despues | IMPE antes | IMPE despues |
+|---|---|---|---|---|
+| tope de la etapa (KB) | 718 | 846 | 712 | 846 |
+| usado por la etapa (KB) | 585 | 582 | 595 | 670 |
+| vertices de la etapa | 11985 | 11981 | 12182 | 13731 |
+| se dibuja entero hasta (`cerca`, m) | 362 | 512 | 430 | 608 |
+| lo primero que se quita (`quitados desde`, m) | 400 | 532 | 484 | 770 |
+| zona libre con BK09 + IMPE (KB) | 185 | 266 | | |
+| fuera de la zona (KB) | 57-78 | 84-105 | | |
+
+INFARTO (lo mismo con `-DPRUEBA_VARIANTE=2`, pareja CHR1105): zona de 1184 KB, BK09 + IMPE con 170 KB libres en la
+zona y 133-154 fuera (con los 92 KB de HAHUD.DAT); IMPE se dibuja entero hasta 560 m y se quita desde 598. Con la
+pareja de mas texturas (CHR1919, 54 KB, 29 mas que CHR1105) quedarian ~141 KB: por eso no se ha subido mas (cada
+64 KB mas de bufer son 128 de VRAM). En la consola el tope real lo pone ademas la CPU (`CPU_MS_CORTA`, seccion CPU).
 
 ### Visibilidad precalculada (PVS, 2026-11-09)
 
