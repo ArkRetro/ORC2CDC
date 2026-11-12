@@ -50,6 +50,48 @@ carrera 845 KB con SEG00 y la union (BKI.DAT, 118 KB de texturas) ya subida, 134
 con la union y la etapa siguiente (SEG03 644 KB, SEG05 626 KB); en los menus la cache de pantallas
 (`comun/menu.c`) ocupa lo que haya libre y echa las pantallas viejas.
 
+### Segunda pasada de la VQ (plan de recursos, 2026-11-12)
+
+Lo que `vq.elige` dejaba en 16 bits por pasar de `VQ_UMBRAL` (9) eran sobre todo texturas con ruido fino (rocas y
+montes de SNOW / GHOS / CLOU, gente de las metas, hojas, muros): 13360 KB en los 62 SEGnn.DAT, 2220 en las uniones y
+496 en las parejas, hasta 354 KB por etapa en la VRAM. Ahora (decision del port, por clase de textura):
+
+- `vq.elige16` (tools/vq.py): si la primera pasada no la acepta, se codifica desde los propios texeles de 16 bits que
+  se iban a guardar y se acepta hasta `UMBRAL2` = 24, el de las metas desde el 2026-11-08 (`UMBRAL_META`). Medido en
+  todas las del arbol del modo OutRun: error 9-17 (128x128 y mayores 9-15). `modelo.comprime` la usa en etapas,
+  uniones, trafico, personajes, banderero y objetos de las uniones (tambien en las copias de `ajusta_texturas`, que no
+  tienen imagen de 8 bits); los coches del jugador no (`conv_coche.py`: `mod.vq2 = None`; sus 16 bits son insignias y
+  logotipos que se ven de cerca en la seleccion). Las de menos de 32x32 se quedan (el libro pesa mas que lo que
+  ahorran) y las de mipmaps no cambian (ya eran VQ).
+- Codificador determinista: semilla fija y, en la segunda pasada, sin tope de tiempo (k-means acaba por su
+  tolerancia en menos de 1 s en todas). Partir de los 16 bits guardados hace que `tools/revq.py` sobre unos datos ya
+  hechos y la conversion desde la ISO den los mismos bytes: comprobado con BAND.DAT (conv_chr.py con el modelo.py
+  nuevo = revq.py del de antes; con `VQ2=0` sale el de antes byte a byte). `regenera_datos.sh` pasa revq.py a las
+  etapas y uniones antes de empaquetarlas y a los modelos sueltos: sin nada que hacer con datos nuevos; con los de
+  antes basta borrar SEGS.PAK y UNIONES.PAK (asi se hicieron los de ahora, sin repetir la visibilidad).
+- HUD.DAT (`conv_hud.py`, `vq_avisos`): los dos atlas de los avisos (cuenta atras, META, Se acabo el tiempo, Tiempo
+  extra, <- FACIL, rebufo: 512x256 de 576 colores y 256x128 de 208, letras grandes con degradado) en VQ ARGB4444,
+  error 9,0 y 7,2: 288 -> 44 KB de VRAM toda la carrera (en todos los modos). Las cifras, tacometros, marchas,
+  paneles y el mapa se quedan con su paleta exacta (comun/hud.c): la VQ emborrona las cifras pequenas y ahorraria
+  menos de 10 KB por textura. Los menus (MENU.DAT: fuentes y textos, `SIN_VQ`) tampoco cambian; no estan en la VRAM
+  de la carrera.
+
+| | antes | ahora |
+|---|---|---|
+| texturas de 16 bits de 32x32 o mas: etapas / uniones / parejas (GD, todas) | 13360 / 2220 / 496 KB | 0 / 0 / 0 |
+| peor combinacion del modo OutRun en la zona (BK08 / BK09 + IMPE, `tools/vram.py`) | 1127 KB | 1013 KB |
+| peor de OUTRUN2SP | 1286 KB (BK19 + LASV) | 941 KB (PRIN + BK27) |
+| IMPE + su meta BK13 | 1033 KB | 921 KB |
+| HUD de carrera (con el tacometro del Testarossa) | 522 KB | 278 KB |
+| pareja CHR0505 / CHR1109 | 85 / 22 KB | 28 / 19 KB |
+| objetos de la union BO13 | 32 KB | 6 KB |
+| SEGS.PAK / UNIONES.PAK | 262,0 / 20,0 MiB | 256,4 / 19,8 MiB |
+
+Calidad: el mismo cuadro congelado de SNOW (`-DPRUEBA_AUTO -DPRUEBA_NODO=8 -DDIAG_CONGELA=600`, el mismo binario con
+los datos de antes y los de ahora) cambia en el 31 % de los pixeles (montes y nieve) con una diferencia media de 3,2
+(suma de R, G y B, 0-765); ampliado al doble no se distingue. La pancarta META y la gente de la meta de IMPE, igual a
+la vista. Las texturas sueltas antes / despues se ven con `VQ_PNG`.
+
 ### RAM y cargas durante la carrera
 
 El curso entero (15 etapas, 10 bifurcaciones y 5 metas, `CURSO.DAT`) se lee mientras se conduce (`curso_paso` en

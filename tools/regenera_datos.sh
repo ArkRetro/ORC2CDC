@@ -5,6 +5,9 @@
 #   empaquetadas (UNIONES.PAK + descriptores, pak_union.py; las etapas en SEGS.PAK igual), BKD, CURSO, SOL, COLBK*, COLLR, musica MUSn.ADP (28 temas,
 #   28 avances, menu y metas), peliculas MVTS/MVATTR, sonido SFX/VOCES (espanol), menus, HUD, VMU, efectos, personajes (CHRPAR y una CHRppaa por pareja),
 #   meta, salida, fin de carrera FIN/GOVER, OUTRUN2SP CARGASP0-3/GOVSP/SPFE/RUTASP/RANKSP/NOM5A-E/NOMTX, modo de video, INFARTO/HAHUD/VOCESH, objetos de las uniones BO, trafico, coches COCHE00-14 + COCHES y PARAM.
+# Segunda pasada de la VQ (tools/revq.py, vq.UMBRAL2) en las etapas y uniones antes de empaquetarlas y en los modelos
+# sueltos (salvo los coches): con los conversores de ahora no tiene nada que hacer; con unos datos de antes del
+# 2026-11-12 basta borrar SEGS.PAK y UNIONES.PAK con las SEGnn.DAT enteras en datos/ y las uniones sueltas en trabajo/u0, u/.
 # Lo que sale del disco no va al repositorio. Idempotente: lo que ya esta en datos/ (o en trabajo/) no se rehace; si se
 # corta, se vuelve a llamar y sigue. En paralelo (JOBS, por defecto nproc). Sale con error si falla cualquier paso.
 # trabajo/ (por defecto /dev/shm/or2_regenera): intermedios (uniones sueltas, ~350 MB) y registros de cada paso.
@@ -129,6 +132,9 @@ echo "== uniones: UNIONES.PAK y descriptores (pak_union.py)"
 if ! hay $UNIONES; then
     rm -rf "$W/bk" "$W/pak"; mkdir -p "$W/bk" "$W/pak"
     ln -f "$W"/u0/BK[0-9]*.DAT "$W"/u/BK[0-9]*.DAT "$W/bk/"
+    # segunda pasada de la VQ (tools/revq.py; sin nada que hacer si las uniones se convirtieron con el modelo.py de ahora)
+    python3 "$TOOLS/revq.py" "$W"/bk/BK[0-9]*.DAT > "$W/registro/revq_bk.txt" 2>&1 || { echo "FALLO revq de las uniones (ver $W/registro/revq_bk.txt)" >&2; exit 1; }
+    tail -1 "$W/registro/revq_bk.txt"
     PYTHON_CPU_COUNT=$JOBS python3 "$TOOLS/pak_union.py" "$W/bk" "$W/pak" > "$W/registro/pak.txt" 2>&1 || { echo "FALLO pak_union (ver $W/registro/pak.txt)" >&2; exit 1; }
     tail -3 "$W/registro/pak.txt"
     cp -f "$W"/u0/COLBK*.DAT "$W"/u/COLBK*.DAT "$W/u/COLLR.DAT" "$D/"
@@ -138,6 +144,8 @@ echo "== etapas: SEGS.PAK y descriptores (pak_union.py --prefijo=SEG; tope = HUE
 if ! hay SEGS.PAK; then
     rm -rf "$W/seg" "$W/segpak"; mkdir -p "$W/seg" "$W/segpak"
     ln -f "$D"/SEG[0-9]*.DAT "$W/seg/"
+    python3 "$TOOLS/revq.py" "$W"/seg/SEG[0-9]*.DAT > "$W/registro/revq_seg.txt" 2>&1 || { echo "FALLO revq de las etapas (ver $W/registro/revq_seg.txt)" >&2; exit 1; }
+    tail -1 "$W/registro/revq_seg.txt"
     python3 "$TOOLS/pak_union.py" "$W/seg" "$W/segpak" --pak=SEGS.PAK --prefijo=SEG --tope=7842 > "$W/registro/segpak.txt" 2>&1 || { echo "FALLO pak_union de las etapas (ver $W/registro/segpak.txt)" >&2; exit 1; }
     tail -1 "$W/registro/segpak.txt"
     mv -f "$W"/segpak/* "$D/"
@@ -146,6 +154,10 @@ if ! hay COCHES.DAT; then
     mv -f "$W"/coche/COCHE[0-9]*.DAT "$D/" 2>/dev/null || true
     python3 "$TOOLS/conv_coche.py" "$ISO" --todos "$D" --fichas 99 > "$W/registro/coches.txt" 2>&1   # solo COCHES.DAT
 fi
+
+echo "== segunda pasada de la VQ en los modelos sueltos (revq.py: trafico, personajes, banderero, objetos; no los coches)"
+python3 "$TOOLS/revq.py" "$D"/TRAF[0-9]*.DAT "$D"/CHR[0-9]*.DAT "$D"/BAND*.DAT "$D"/BO[0-9]*.DAT > "$W/registro/revq.txt" 2>&1 || { echo "FALLO revq (ver $W/registro/revq.txt)" >&2; exit 1; }
+tail -1 "$W/registro/revq.txt"
 
 # ---------------------------------------------------------------- comprobacion
 echo "== comprobacion de $D"

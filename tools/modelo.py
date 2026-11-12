@@ -58,6 +58,11 @@ def textura_dc(a):
     else: lista, fmt = 2, 2                                      # ARGB4444
     return fmt, lista, codifica16(a, fmt)
 
+def vq_umbral2():
+    """umbral de la segunda pasada de la VQ (vq.UMBRAL2); VQ2=0 en el entorno la quita (los datos de antes)"""
+    import vq
+    return None if os.environ.get("VQ2", "1") == "0" else vq.UMBRAL2
+
 def niveles_mip(a):
     """niveles de mip de una textura cuadrada, de 1x1 a la base (promedio de 2x2; la PS2 trae los suyos en el disco,
     hechos de la base del mismo modo)"""
@@ -205,6 +210,7 @@ class Modelo:
         self.texs = []; self.blob = b''; self.mallas = []; self.verts = []; self.nv = 0; self.ruta = np.zeros((0, 5))
         self.rgba = []                                          # imagen de cada textura (para la compresion VQ)
         self.vq = os.environ.get("VQ", "1") != "0"
+        self.vq2 = vq_umbral2()                                 # segunda pasada de la VQ (vq.elige16); None: sin ella
         # nodos del original (bloque con objetos=True): esfera en el marco del fichero, banderas para la demo (bits 0-3
         # umbral de LOD, bit 4 orientado a la camara, bits 8-9 rama de la union: 1 izquierda, 2 derecha) e indice en
         # self.carteles (los orientados a la camara: matriz del nodo y eje z del padre) o -1
@@ -418,17 +424,22 @@ class Modelo:
         dpng = os.environ.get("VQ_PNG"); errs = []
         for ti, (w, h, fmt, li, off, tam) in enumerate(self.texs):
             d = self.blob[off:off + tam]
-            if ti in usadas and ti < len(self.rgba):
+            if ti in usadas:
                 antes += tam
                 r = None
-                if fmt & 0x200:                                 # con mipmaps
-                    r = vq.elige_mip(niveles_mip(self.rgba[ti]), fmt & 0xff)
-                    if r is None and w * h >= 32 * 32:          # sin VQ costarian 2,7 veces mas: sin mipmaps
-                        fmt &= ~0x200; d = codifica16(self.rgba[ti], fmt & 0xff)
-                if not fmt & 0x200: r = vq.elige(self.rgba[ti], fmt & 0xff)
+                if ti < len(self.rgba):
+                    if fmt & 0x200:                             # con mipmaps
+                        r = vq.elige_mip(niveles_mip(self.rgba[ti]), fmt & 0xff)
+                        if r is None and w * h >= 32 * 32:      # sin VQ costarian 2,7 veces mas: sin mipmaps
+                            fmt &= ~0x200; d = codifica16(self.rgba[ti], fmt & 0xff)
+                    if not fmt & 0x200: r = vq.elige(self.rgba[ti], fmt & 0xff)
+                # segunda pasada desde los 16 bits guardados (vq.elige16; tambien las copias de ajusta_texturas, que
+                # no tienen imagen): lo mismo que tools/revq.py sobre un fichero ya hecho
+                if r is None and not fmt & 0x300 and self.vq2:
+                    r = vq.elige16(d, w, h, fmt & 0xff, self.vq2)
                 if r is not None:
                     d, n, err = r; fmt = fmt | 0x100 | (n - 1) << 16; errs.append(err)
-                    if dpng and not fmt & 0x200:
+                    if dpng and not fmt & 0x200 and ti < len(self.rgba):
                         vq.compara(self.rgba[ti], d, fmt, os.path.join(dpng, 'tex%03d_%dx%d.png' % (ti, w, h)))
                 ahora += len(d)
             d += b'\0' * (-len(d) % 32)

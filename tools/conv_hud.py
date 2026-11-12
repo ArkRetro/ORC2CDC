@@ -564,6 +564,7 @@ def convierte(iso, salida, previas, previas_av=None):
         hud.taco[i] = hud.taco_g[b]
     ng0 = len(hud.grp); nt0 = len(hud.tex)
     at = avisos(hud, D, a, T)
+    hud.vq = lambda i, a, fmt, lista: vq_avisos(i, a, fmt, lista, nt0)
     os.makedirs(salida, exist_ok=True)
     texs = hud.escribe(os.path.join(salida, 'HUD.DAT'))
     previews(hud, previas)
@@ -577,6 +578,20 @@ def grande(src):
     """el rectangulo src no cabe en una textura del atlas (512x256 / 256x512): va con su textura de origen entera"""
     l, t, r, b = src; w, h = r - l, b - t
     return not ((w <= 510 and h <= 254) or (w <= 254 and h <= 510))
+
+VQ_AVISOS = 12.0       # error RMS maximo (0-255) de la VQ de los atlas de los avisos (medido: 9,0 y 7,0)
+
+def vq_avisos(i, a, fmt, lista, nt0):
+    """Hud.vq de HUD.DAT (plan de recursos, 2026-11-12): solo los atlas de los avisos (texturas desde nt0: la cuenta
+    atras, META, Se acabo el tiempo, Tiempo extra, <- FACIL...), letras grandes con degradado que en 16 bits ocupaban
+    256 + 32 KB de VRAM en toda la carrera (576 y 208 colores: no caben en las paletas de comun/hud.c). Las demas
+    (cifras, tacometros, marchas, paneles y el mapa) son de 16 colores o de 256 y van con paleta exacta: se quedan
+    (la VQ emborrona las cifras pequenas y ahorraria menos de 10 KB por textura)"""
+    if i < nt0: return None
+    import vq
+    datos, err = vq.codifica(a, fmt, 256, tiempo=1e9)
+    print('  aviso: textura %d %dx%d VQ error %.1f %s' % (i, a.shape[1], a.shape[0], err, 'si' if err <= VQ_AVISOS else 'no'))
+    return datos if err <= VQ_AVISOS and len(datos) < a.shape[0] * a.shape[1] * 2 else None
 
 def vq_pequeno(i, a, fmt, lista, pre=''):
     """Hud.vq de los ficheros de escenas: VQ (tools/vq.py, libro de 256) si el error es pequeno"""

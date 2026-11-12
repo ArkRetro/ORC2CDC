@@ -158,6 +158,38 @@ def elige_mip(niveles, fmt):
     return datos, n, err
 
 
+def decodifica16(datos, w, h, fmt):
+    """texeles twiddled de 16 bits del formato (0 ARGB1555, 1 RGB565, 2 ARGB4444) -> RGBA (alto x ancho x 4)"""
+    from modelo import twiddle
+    v = np.frombuffer(datos[:w * h * 2], np.uint16).astype(np.uint32)
+    if fmt == 1: rgba = [(v >> 11) * 255 // 31, ((v >> 5) & 63) * 255 // 63, (v & 31) * 255 // 31, v * 0 + 255]
+    elif fmt == 0: rgba = [((v >> 10) & 31) * 255 // 31, ((v >> 5) & 31) * 255 // 31, (v & 31) * 255 // 31, (v >> 15) * 255]
+    else: rgba = [((v >> 8) & 15) * 17, ((v >> 4) & 15) * 17, (v & 15) * 17, (v >> 12) * 17]
+    P = np.stack(rgba, -1).astype(np.uint8)
+    return P[twiddle(w, h).ravel()].reshape(h, w, 4)
+
+
+# Segunda pasada (plan de recursos, 2026-11-12): las texturas que se quedaron en 16 bits por pasar de UMBRAL (con
+# ruido fino: rocas, montes, gente, hojas; error 9-17 medido en todo el arbol del modo OutRun y OUTRUN2SP) se
+# codifican desde sus propios texeles de 16 bits y se aceptan hasta UMBRAL2, el de las metas desde 2026-11-08
+# (conv_union.py UMBRAL_META). Partir de los 16 bits guardados (y no de la imagen de 8 bits) hace que la conversion
+# desde la ISO y tools/revq.py sobre unos datos ya hechos den los mismos bytes. El codificador es determinista
+# (semilla fija; sin tope de tiempo: kmeans acaba por su tolerancia en menos de 1 s en todas). Decision por clase:
+# etapas, uniones, trafico, personajes, banderero y objetos de las uniones si; el coche del jugador no (insignias y
+# logotipos que se ven de cerca en la seleccion: se queda con UMBRAL).
+UMBRAL2 = 24.0
+
+
+def elige16(datos, w, h, fmt, umbral=UMBRAL2):
+    """como elige, para una textura de 16 bits ya guardada (sin mipmaps): (datos VQ, n, error) o None"""
+    if w * h < 32 * 32 or min(w, h) < 8: return None
+    a = decodifica16(datos, w, h, fmt)
+    bloques = w * h // 4; n = 256 if bloques >= 1024 else max(16, (bloques // 4 + 3) & ~3)
+    vq, err = codifica(a, fmt, n, tiempo=1e9)
+    if err > umbral or len(vq) >= w * h * 2: return None
+    return vq, n, err
+
+
 def compara(a, datos, fmt, ruta):
     """PNG con la textura sin comprimir (izquierda) y en VQ (derecha)"""
     from PIL import Image

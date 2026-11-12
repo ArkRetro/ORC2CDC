@@ -243,6 +243,7 @@ def monta(A, m):
     e = A.entrada('CARS.PS2', nombre.split('\\')[-1])
     blq = A.bloque(e)
     mod = modelo.Modelo(); mod.ruta = np.zeros((0, 5)); mod.extra = []; mod._blq_coche = blq
+    mod.vq2 = None                  # sin la segunda pasada de la VQ (vq.UMBRAL2): insignias y logotipos de cerca
     for ident, M, nom, grupo, pz in llamadas(A, m):
         b = blq if ident >> 16 == recurso else _bloque_recurso(A, ident >> 16)
         pieza(mod, b, ident, R=M[:3, :3], t=M[3, :3], nombre=nom, grupo=grupo, pieza_id=pz)
