@@ -670,7 +670,9 @@ Las pantallas del menu (titulo, principal, modo, coche, cambio, musica) se ven i
 - AICA: el juego de voces del modo se cambia al empezar la carrera (sfx_voces_juego): VOCES.DAT (207 KB) o VOCESH.DAT
   (740 KB, 117 muestras); se lee entero en el hueco de la union aun prestado, asi que no pide RAM.
 - VRAM: HAHUD.DAT es una textura VQ de 128 x 512 (10 KB) que se sube despues de reservar la zona del curso (va fuera
-  de la zona). Dentro de HUD.DAT partia la zona del curso (1344 -> 832 KB): no se hace.
+  de la zona). Dentro de HUD.DAT partia la zona del curso (1344 -> 832 KB): no se hace. (2026-11-12: hoy son 46
+  texturas VQ, 41 KB siempre subidos y el rotulo de la nota; la zona deja 92 KB para ellas en el INFARTO: Carreras
+  seguidas, abajo.)
 - TA: el CONTRARRELOJ no abre trafico (menos vertices y CPU que el OutRun).
 
 ### Mapa de la RAM y datos repetidos (Fase 1 del plan, 2026-11-10)
@@ -783,6 +785,125 @@ frontal` / `vuelta al menu` nuevas):
 | vuelta al frontal tras el fin del tiempo | 1296 (453) | 1288 (711) |
 | vuelta al frontal tras ABANDONAR (OUTRUN2SP) | - | 1289 (711) |
 | vuelta al menu tras ABANDONAR (consola; el menu antes: 926 (711)) | - | 926 (711) |
+
+### Carreras seguidas: RAM y VRAM entre una carrera y la siguiente (2026-11-12)
+
+**Fallo.** Tras una meta, al empezar la segunda carrera: "Out of memory" (un malloc de 950272 bytes justo despues de
+"MENU: 722K de piezas sueltas para la carrera"), cuatro "pvr_mem: ERROR -- out of PVR memory; texture heap probably
+corrupted" y la zona del curso con 536 KB "fuera de la zona" en vez de ~80-100. Visto con `-DPRUEBA_AUTO` (meta ->
+titulo -> carrera en el mismo cuadro) y, en el recorrido real, con **meta -> millas -> continuar -> A (REINTENTAR)**
+y con REINTENTAR de la pausa: el camino de la consola real del usuario. Las carreras sueltas no lo veian.
+
+**Causas** (medidas con `-DDIAG_PVRMEM`, nuevo: envuelve pvr_mem_malloc / pvr_mem_free, que en KallistiOS son debiles,
+con quien pidio cada bloque, y cada `RAMMAPA` escribe ademas el mapa de la VRAM, lineas `PVRMAPA`, con los bloques por
+direccion, quien los pidio y los huecos; un free de un bloque no pedido sale como "PVRMEM: libera ... no pedido"):
+
+1. **La carrera empezaba con el curso de la anterior aun subido.** `curso_al_menu` suelta la union, la etapa
+   siguiente, los objetos de la union, la zona y META.DAT 60 ms despues de dejar la carrera (la PowerVR puede estar
+   dibujando el ultimo cuadro), y con REINTENTAR (modo 30) la carrera empieza en el mismo cuadro sin pasar por ella:
+   - la union (la de la meta, BK13) seguia en su hueco, que asi no se presta (`union_prestable`): el HUD, que las
+     millas habian bajado de la VRAM (`fin_entra`), se leia del GD al monton (`hudd_sube`: los sectores de sus 23
+     texturas, 928 KB seguidos, que no hay: "Out of memory") y `hud_ok = 0` dejaba **esa carrera y todas las
+     siguientes sin HUD** (en su lugar el marcador de pruebas: una caja oscura con texto arriba en el centro, en el
+     INFARTO a y = 104);
+   - la zona de la carrera anterior aun estaba pedida al reservar la nueva (`ar_reserva` en `curso_reinicia` la suelta
+     y la pide otra vez, pero con el HUD fuera quedaba un hueco de 522 KB entre lo fijo y la zona): el bloque de lo
+     libre menos la reserva no cabia ("out of PVR memory" de la busqueda a saltos de 32 KB) y la zona salia de 1408
+     KB con 524-536 KB "fuera de la zona";
+   - el `t0` de `curso_al_menu` (estatico) se quedaba puesto: en la vuelta al menu siguiente soltaba la VRAM del curso
+     en el primer cuadro, sin esperar a la PowerVR.
+   Ademas con REINTENTAR en el INFARTO las texturas de HAHUD.DAT (pedidas detras de la zona de la carrera anterior)
+   seguian subidas al reservar la zona nueva.
+2. **La VRAM de la carrera dependia de lo que se hubiera hecho antes.** `coche_carga` desde la pantalla de coche sube
+   el coche con las pantallas del menu subidas: sus 38 texturas (COCHE13) caian en los huecos entre ellas y 23 KB
+   quedaban justo debajo de los efectos, en medio del sitio del HUD. En la carrera el HUD (522 KB) ya no cabia alli: 32
+   KB de el iban detras de los efectos y quedaban huecos de 6-19 KB sueltos fuera de la zona (en el modo OutRun la zona
+   salia igual, 1312 KB, por el redondeo a 32 KB; cada cambio de coche podia trocear mas). En el INFARTO la primera
+   carrera desde el menu ya salia troceada: dos "out of PVR memory" en la busqueda de la zona, zona de 1152 KB y 223 KB
+   fuera. Los efectos (EFECTOS.DAT, 15 KB, siempre subidos) se subian al arrancar despues del HUD: partian lo libre en
+   dos.
+3. **INFARTO: el rotulo sin su texto.** HAHUD.DAT va fuera de la zona: corazones, panel y filas (41 KB) y el rotulo de
+   la nota (marco de 6 KB y texto de hasta 18 KB, el que entra y el que sale a la vez: `hudd_baja` lo suelta 3 cuadros
+   despues), mas los objetos de la union (hasta 32 KB) y el banderero (13 KB), en una reserva de 48 KB (mas el
+   redondeo de la zona). Si el texto del rotulo no subia ("HAHUD: sin VRAM para HA_Tnn") se dibujaba su marco solo,
+   con el tinte blanco: un rectangulo blanco con bandas oscuras. Y tras REINTENTAR (causa 1) el HUD de carrera entero
+   faltaba y en su lugar salia el marcador de pruebas (caja oscura y texto) arriba en el centro. Las dos cosas encajan
+   con el rectangulo que el usuario vio en la consola en una carrera del INFARTO; en Flycast no se ha visto el marco
+   solo (no se acaba la VRAM de fuera con estas rutas). La pancarta CHECK POINT es de la etapa (en la zona del curso,
+   ver abajo) y sale bien en todas las carreras medidas.
+4. **RAM: el coche cambiaba de sitio en el monton.** `coche_carga` soltaba el bloque del coche (el COCHEnn.DAT sin
+   texeles, 284-373 KB, y sus colores por vertice, hasta 47 KB) y pedia otro con memalign. La vuelta al frontal de
+   OUTRUN2SP suelta el coche (`menu_entra_sp`: su VRAM, para el frontal) y lo vuelve a leer: el bloque nuevo, del
+   mismo tamano, no cabia en el hueco del anterior (memalign pide algo mas) y las piezas de MENU.DAT leidas entre medias
+   ocupaban parte: iba a la cima. Medido (`MENU_SP=1`, tres carreras seguidas con el fin del tiempo): lo seguido en la
+   cima al empezar la carrera 696 -> 369 -> 696 KB segun la vuelta. Lo mismo al cambiar de coche en el menu.
+
+**Arreglos** (nada de lo que se ve cambia; todo es del port):
+
+1. `curso_al_menu_ya` (demo/main.c) al empezar cualquier carrera (`rm != MENU_SIGUE`): si lo de la anterior sigue
+   subido (`curso_subido`) espera a la lectura en marcha y a la PowerVR (40 ms) y lo suelta como `curso_al_menu`
+   (`curso_fuera`); despues `presta_union(1)`, asi las voces, el coche, la pareja y el HUD se leen en el hueco de la
+   union como desde el menu. Con HAHUD.DAT abierto (REINTENTAR en el INFARTO) sus texturas se bajan y vuelven a subir
+   detras de la zona nueva. `cm_t0` vuelve a 0 al soltar. Si aun asi el HUD no subiera, ya no se apaga: sus texturas
+   se suben solas al querer dibujarlas (`hudd_fin_cuadro`, como tras un apuro).
+2. `vram_ordena` al empezar cada carrera, antes del HUD: copia las texturas de la pareja y el coche al hueco de la
+   union (198 KB con CHR1109 + COCHE13), las suelta y las vuelve a pedir en orden: quedan seguidas detras de lo fijo
+   del arranque (texto, trafico, sol y efectos, que ahora se suben antes que la pareja, el coche y el HUD), con el HUD
+   detras y la zona detras del HUD. Lo libre de la carrera queda en un trozo: la zona y lo de fuera solo dependen del
+   coche, la pareja y el tacometro, no de lo que se hizo antes.
+3. INFARTO: `ar_extra` = 92 KB (`HA_VRAM_RESERVA`: de HAHUD.DAT las texturas 0 y 40..45, siempre subidas, 41 KB, y
+   dos veces el mayor marco, 37..39, y el mayor texto, 1..36: 2 x (6 + 18) KB; con la cabecera de pvr_mem) se guardan
+   fuera de la zona ademas de la reserva; el marco del rotulo solo se dibuja con su texto (`hudd_uso_residente`) y si
+   uno no subio se vuelve a intentar cada 30 cuadros. `hudd_sube` ya no lee el GD si pvr_mem no tiene la VRAM de lo
+   que falta (los reintentos no leen cada cuadro).
+4. El coche en un bloque fijo de RAM (`coche_bloque`, `COCHE_RAM` = 424 KB: el mayor, COCHE04, 373 + 47 KB), pedido una
+   vez al arrancar justo despues del de la pareja (`chr_bloque`), antes que los huecos del curso: cada coche se copia
+   ahi desde el hueco de la union y sus colores por vertice van detras; `libera_modelo` no lo suelta. Si un coche no
+   cupiera, al monton como antes (con aviso). Cuesta lo que el bloque pasa del coche del arranque (COCHE09, 369 KB con
+   sus colores): RAM al arrancar 891 KB libres (696 seguidos en la cima) -> 836 (598), con `-DDIAG_PVRMEM`; a cambio la
+   cima ya no cambia con el coche ni con las vueltas al menu o al frontal.
+
+**Medido** (Flycast, `-DDIAG_PVRMEM -DPRUEBA_PILOTO_MENU -DPRUEBA_NODO=13 -DPRUEBA_FIN=300 -DPRUEBA_SIN_TIEMPO`: el menu
+real con el piloto conduciendo, cada carrera desde IMPE a 300 m de la meta):
+
+Recorridos (todos por el menu real, uno detras de otro en la misma sesion): meta -> millas -> continuar A
+(REINTENTAR); meta -> continuar B -> titulo -> peliculas de la demo de atraccion (MVTS, MVATTR) -> menu; pausa
+ABANDONAR -> millas -> GAME OVER -> menu; pausa REINTENTAR -> millas -> modo 30; INFARTO (`MODO_JUEGO=2`, desde PALM a
+1200 m del final para ver la pancarta de ALPI) con REINTENTAR y ABANDONAR; OUTRUN2SP (`MENU_SP=1`, sin
+`PRUEBA_SIN_TIEMPO`): fin del tiempo -> resultados -> nombre -> GAME OVER -> frontal, y REINTENTAR de la pausa.
+Cifras al empezar cada carrera (KB; RAM: lo libre y lo seguido en la cima, linea `RAMMAPA carrera`; VRAM: linea
+`VRAM: zona del curso`):
+
+| Carrera | antes (f1cbd18): zona / fuera; RAM | ahora: zona / fuera; RAM |
+|---|---|---|
+| OutRun, la primera desde el menu (COCHE13 elegido en el menu) | 1312 / 98, el coche y el HUD partidos, huecos sueltos; 1211 (696) | 1312 / 98, todo seguido; 1137 (598) |
+| OutRun tras meta -> continuar A (REINTENTAR) | "Out of memory" (950272), 4 "pvr_mem: ERROR", 1408 / 524 y **sin HUD** desde ahi | 1312 / 98; 1137 (598) |
+| OutRun tras meta -> continuar B -> titulo (y las peliculas de la demo de atraccion) -> menu | (sin HUD, de la anterior) | 1312 / 98; 1137 (598) |
+| OutRun tras pausa ABANDONAR -> millas -> GAME OVER -> menu | - | 1312 / 98; 1137 (598) |
+| OutRun tras pausa REINTENTAR (millas, modo 30) | - | 1312 / 98; 1137 (598) |
+| OutRun con otro coche elegido en el menu (COCHE14), dos carreras | - | 1344 / 80 (el coche, 15 KB menos de VRAM); 1135 (598) |
+| INFARTO, la primera desde el menu (PALM) | 2 "pvr_mem: ERROR", 1152 / 223 | 1184 / 191 (los 92 KB de HAHUD.DAT incluidos) |
+| INFARTO tras REINTENTAR / ABANDONAR -> menu (PALM, 4 carreras) | 1248 / 76 (sin sitio para el rotulo: ver abajo) | 1184 / 191 en las 4 |
+| INFARTO, `seguidas.sh` con `MODO_JUEGO=2` (IMPE + BK13 hasta la meta, los mismos 7 recorridos) | - | 1184 / 191; 968 (598) en las 5 con COCHE13, 1216 / 173; 967 (598) con COCHE14; IMPE + BK13: 151 KB libres en la zona y 150 fuera, 0 rebajadas |
+| OUTRUN2SP, la primera desde el frontal (preset 1) | 1344 / 90; 1197 (696) | 1344 / 90; 1143 (598) |
+| OUTRUN2SP tras fin del tiempo -> resultados -> nombre -> GAME OVER -> frontal (preset 0), dos veces, y tras REINTENTAR de la pausa | 1344 / 90; 1182 (**369**), 1181 (696): el coche, segun la vuelta | 1344 / 90; 1127 (598) en las tres |
+
+En todas: 0 "Out of memory", 0 "pvr_mem: ERROR", 0 "PVRMEM: libera ... no pedido" (ningun free doble de VRAM), 0
+texturas rebajadas o grises, el HUD en todas (capturas). La vuelta al menu deja la RAM como antes de la primera carrera
+(846 (598) frente a 837 (598): las piezas de MENU.DAT ya leidas) y lo seguido en la cima no cambia en ninguna. Mapa de
+la VRAM al empezar cada carrera (PVRMAPA, OutRun): texto 144 KB, trafico y sol 347, efectos 15, pareja y coche 198 (183
+con COCHE14), HUD 522, zona 1312 (1344), banderero 13 y lo libre de fuera, sin un hueco entre ellos. La pancarta CHECK
+POINT de ALPI y el HUD del INFARTO (corazones, panel, filas, rotulos) salen bien en todas las carreras seguidas
+(capturas). Con el codigo de antes y la zona cogiendo todo menos la reserva (`-DPRUEBA_VRAM_KB=1100`, el caso sin
+trocear), lo libre de fuera bajaba a 22 KB al empezar ALPI en el INFARTO (los 19 KB del peor caso conocido): sin sitio
+para el texto de un rotulo nuevo (18 KB) mientras el anterior espera a soltarse; con la reserva de HAHUD.DAT quedan 92
+KB mas. En Flycast no salio el marco solo en esa prueba (el piloto no provoco un cambio de rotulo en ese momento).
+
+Coste: la zona del INFARTO es 92 KB menor que la del OutRun con el mismo coche (1184 frente a 1312 con COCHE13 y la
+pareja del INFARTO, 35 KB mayor). Con el peor coche y la peor pareja (COCHE06, CHR0505: 49 KB mas) quedaria en
+1120-1152 KB: BK08 / BK09 + IMPE (1127 KB) podria rebajar alguna textura pequena (se ve borrosa, nunca gris ni
+blanca salvo si no cabe ni a 8x8). Las cifras de RAM son con `-DDIAG_PVRMEM` (48 KB de tabla, que la demo normal no
+lleva); las de antes y despues del bloque del coche (arreglo 4) no se comparan directamente: el bloque son 55 KB fijos.
 
 ### CPU de dibujo (2026-11-10)
 

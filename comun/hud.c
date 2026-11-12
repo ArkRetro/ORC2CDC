@@ -231,6 +231,9 @@ hud_dat_t *hudd_abre(const char *fich, int modelo, int parcial)
     h->pie = h->gp ? NULL : (h_pc_t *)(h->dat + c[9]); h->uso = (h_uso_t *)(h->dat + c[10]); h->off_taco = c[11];
     h->taco = h->dat[c[11] + (modelo & 15)]; if (h->taco == 0xff) h->taco = -1;
     H = h;
+#ifdef DIAG_PVRMEM
+    dbglog(DBG_INFO, "PVRMEM: %s es %p\n", fich, (void *)h);
+#endif
     for (i = 0, h->g_fuera = -1; i < h->n_grp; i++) if (!strncmp(h->grp[i].nombre, "DIG_PUNTOS_FUERA", 16)) h->g_fuera = i;
     h->vtex = calloc(h->n_tex, sizeof *h->vtex); h->usada = calloc(h->n_tex, 1); h->dibujada = calloc(h->n_tex, 4);
     h->cab = memalign(32, h->n_tex * sizeof *h->cab); h->cabf = memalign(32, h->n_tex * sizeof *h->cabf);
@@ -408,6 +411,12 @@ int hudd_sube(hud_dat_t *h, int t0, int nt)
         if (h->tex[i].off + h->tex[i].tam > hi) hi = h->tex[i].off + h->tex[i].tam;
     }
     if (hi <= lo) return 0;
+    {   /* sin VRAM para todas (aunque estuviera troceada podria no caber): ni se lee el GD (los reintentos de
+           hudd_fin_cuadro y de los rotulos del INFARTO no leen cada cuadro para nada) */
+        uint32_t v = 0;
+        for (i = t0; i < fin; i++) if (h->usada[i] && !h->vtex[i]) v += (tam_vram(h, i) + 4 + 31) & ~31u;
+        if (v > pvr_mem_available()) return -2;
+    }
     if (h->meta && !h->tx) {                                /* del GD: los sectores que cubren esas texturas */
         s0 = lo / 2048; ns = (hi + 2047) / 2048 - s0;
         if (!(b = toma(ns * 2048))) return -3;
@@ -415,7 +424,12 @@ int hudd_sube(hud_dat_t *h, int t0, int nt)
     }
     for (i = t0; i < fin; i++) {
         if (!h->usada[i] || h->vtex[i]) continue;
+#ifdef DIAG_PVRMEM
+        { extern const void *pvrmem_dueno; pvrmem_dueno = h; h->vtex[i] = pvr_mem_malloc(tam_vram(h, i)); pvrmem_dueno = NULL; }
+        if (!h->vtex[i]) { deja(b); hudd_baja(h, t0, nt); return -2; }
+#else
         if (!(h->vtex[i] = pvr_mem_malloc(tam_vram(h, i)))) { deja(b); hudd_baja(h, t0, nt); return -2; }
+#endif
         {   uint8_t *d = h->tx ? h->tx + h->tex[i].off : h->meta ? b + (h->tex[i].off - s0 * 2048) : h->dat + h->tex[i].off;
             if (h->con_pal) h->con_pal[i] = sube_tex(h, i, d, h->vtex[i], h->meta != 0);
             else pvr_txr_load(d, h->vtex[i], h->tex[i].tam);
@@ -636,6 +650,12 @@ int hudd_tex_uso(const hud_dat_t *h, int u, int *t0)
     *t0 = lo; return hi - lo + 1;
 }
 int hudd_sube_uso(hud_dat_t *h, int u) { int t0, n = hudd_tex_uso(h, u, &t0); return n ? hudd_sube(h, t0, n) : 0; }
+int hudd_uso_residente(const hud_dat_t *h, int u)
+{
+    int t0, n = hudd_tex_uso(h, u, &t0), i;
+    for (i = 0; i < n; i++) if (h->usada[t0 + i] && !h->vtex[t0 + i]) return 0;
+    return n > 0;
+}
 void hudd_baja_uso(hud_dat_t *h, int u) { int t0, n = hudd_tex_uso(h, u, &t0); if (n) hudd_baja(h, t0, n); }
 const uint8_t *hudd_extra(const hud_dat_t *h) { return h ? h->dat + h->off_taco + 16 : NULL; }
 

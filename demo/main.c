@@ -35,6 +35,47 @@
 #endif
 #include "meta.h"
 
+#ifdef DIAG_PVRMEM
+/* Medida: los bloques de pvr_mem (pvr_mem_malloc / pvr_mem_free de KallistiOS son debiles: estos los envuelven) con
+   quien los pidio (la direccion de vuelta y pvrmem_dueno, que pone hud.c con el fichero) para el mapa de la VRAM de
+   cada RAMMAPA (pvrmem_mapa) y los free de un bloque que no esta pedido (doble free: "PVRMEM: libera ... no pedido",
+   y no se libera) */
+extern void *pvr_int_malloc(size_t bytes); extern void pvr_int_free(void *ptr);
+const void *pvrmem_dueno;
+#define PM_N 3072
+static struct { uint32_t a, tam, quien; const void *dueno; } pm_b[PM_N]; static int pm_n;
+pvr_ptr_t pvr_mem_malloc(size_t tam)
+{
+    uint32_t q = (uint32_t)__builtin_return_address(0); void *p = pvr_int_malloc(tam);
+    if (!p) { dbglog(DBG_ERROR, "PVRMEM: sin %u bytes (pide %08lx, libre %uK)\n", (unsigned)tam, (unsigned long)q, (unsigned)(pvr_mem_available() >> 10)); return NULL; }
+    if (pm_n < PM_N) { pm_b[pm_n].a = (uint32_t)p; pm_b[pm_n].tam = tam; pm_b[pm_n].quien = q; pm_b[pm_n].dueno = pvrmem_dueno; pm_n++; }
+    return p;
+}
+void pvr_mem_free(pvr_ptr_t p)
+{
+    int i; uint32_t q = (uint32_t)__builtin_return_address(0);
+    for (i = 0; i < pm_n && pm_b[i].a != (uint32_t)p; i++) ;
+    if (i == pm_n) { dbglog(DBG_ERROR, "PVRMEM: libera %08lx no pedido (desde %08lx)\n", (unsigned long)(uint32_t)p, (unsigned long)q); return; }
+    pm_b[i] = pm_b[--pm_n];
+    pvr_int_free(p);
+}
+/* el mapa: los bloques por direccion (seguidos del mismo que los pidio, juntos) y los huecos de mas de 2 KB */
+static void pvrmem_mapa(const char *donde)
+{
+    int i, j, k; uint32_t fin = 0, tot = 0;
+    for (i = 1; i < pm_n; i++) for (j = i; j > 0 && pm_b[j - 1].a > pm_b[j].a; j--) { __typeof__(pm_b[0]) t = pm_b[j]; pm_b[j] = pm_b[j - 1]; pm_b[j - 1] = t; }
+    for (i = 0; i < pm_n; i++) tot += pm_b[i].tam;
+    dbglog(DBG_INFO, "PVRMAPA %s: %d bloques, %uK pedidos, libre %uK\n", donde, pm_n, (unsigned)(tot >> 10), (unsigned)(pvr_mem_available() >> 10));
+    for (i = 0; i < pm_n; i = k) {
+        uint32_t t = 0;
+        for (k = i; k < pm_n && pm_b[k].quien == pm_b[i].quien && pm_b[k].dueno == pm_b[i].dueno; k++) t += pm_b[k].tam;
+        if (fin && pm_b[i].a > fin + 2048) dbglog(DBG_INFO, "PVRMAPA   %08lx hueco %uK\n", (unsigned long)fin, (unsigned)((pm_b[i].a - fin) >> 10));
+        dbglog(DBG_INFO, "PVRMAPA   %08lx %uK en %d (%08lx %p)\n", (unsigned long)pm_b[i].a, (unsigned)(t >> 10), k - i, (unsigned long)pm_b[i].quien, pm_b[i].dueno);
+        fin = pm_b[k - 1].a + ((pm_b[k - 1].tam + 4 + 31) & ~31u);
+    }
+}
+#endif
+
 /* ---------------------------------------------------------------- modelos */
 typedef struct { uint32_t w, h, fmt, lista, off, tam; } tex_t;
 typedef struct { float cx, cy, cz, r; uint32_t v0, n; int32_t tex; int32_t nodo; } malla_t;   /* nodo del original o -1 */
@@ -78,6 +119,14 @@ typedef struct {
 } modelo_t;
 
 static modelo_t coche;                                         /* el del jugador (abajo): no recibe su sombra */
+/* RAM del coche (el COCHEnn.DAT sin texeles y sus colores por vertice, coche.ofs) en un bloque fijo pedido una vez al
+   arrancar, junto al de la pareja (antes que los huecos del curso): el mayor es COCHE04, 373 + 47 KB. Antes cada coche nuevo pedia su bloque al monton
+   (memalign) tras soltar el anterior: el de su mismo tamano no cabia en el hueco del que se solto (memalign pide algo
+   mas) y otras cosas lo ocupaban entre medias (las piezas de MENU.DAT al volver al menu). Asi, volver al frontal de
+   OUTRUN2SP (que suelta el coche y lo vuelve a leer) bajaba lo seguido en la cima del monton de 696 a 369 KB */
+#define COCHE_RAM (424u << 10)
+static uint8_t *coche_bloque; static uint32_t coche_usado;
+static int en_coche_bloque(const void *p) { return coche_bloque && (const uint8_t *)p >= coche_bloque && (const uint8_t *)p < coche_bloque + COCHE_RAM; }
 static modelo_t chr;                                           /* el piloto y la acompanante (CHR.DAT): tampoco */
 static const uint32_t FMT[3] = { PVR_TXRFMT_ARGB1555, PVR_TXRFMT_RGB565, PVR_TXRFMT_ARGB4444 };
 static const int LISTA[3] = { PVR_LIST_OP_POLY, PVR_LIST_PT_POLY, PVR_LIST_TR_POLY };
@@ -317,9 +366,10 @@ static void libera_modelo(modelo_t *m)
 {
     tex_suelta(m);
     if (m->datos && m->datos == hueco_etapa) col_et.ok = 0;      /* su colision va detras en el hueco */
-    free(m->ofs); free(m->vis); free(m->pvs_m); free(m->pvs_teo); free(m->tr); free(m->fe_p);
+    if (!en_coche_bloque(m->ofs)) free(m->ofs);
+    free(m->vis); free(m->pvs_m); free(m->pvs_teo); free(m->tr); free(m->fe_p);
     if (!(hueco_etapa && m->datos >= hueco_etapa && m->datos < hueco_etapa + cap_etapa) &&
-        !(hueco_union && m->datos >= hueco_union && m->datos < hueco_union + cap_union))
+        !(hueco_union && m->datos >= hueco_union && m->datos < hueco_union + cap_union) && !en_coche_bloque(m->datos))
         free(m->datos);                                           /* (los objetos de la union van dentro del hueco de la
                                                                      union y BKD.DAT detras de la etapa: der_sitio) */
     memset(m, 0, sizeof *m);
@@ -362,6 +412,14 @@ static void curso_error(const char *s);
 #ifndef CURSO_VRAM_RESERVA
 #define CURSO_VRAM_RESERVA (48 * 1024)                            /* fuera de la zona, ademas de la pausa del menu */
 #endif
+/* INFARTO: HAHUD.DAT va fuera de la zona (se abre y se sube detras de ella, al empezar la carrera) y no cabia en la
+   reserva de siempre con los objetos de la union: los corazones, el panel y las filas (texturas 0 y 40..45, 41 KB) y
+   el rotulo de la nota (el mayor marco, 37..39, 6 KB, y el mayor texto, 1..36, 18 KB) dos veces, el que entra y el que
+   sale (hudd_baja lo suelta 3 cuadros despues): 91 KB con la cabecera de pvr_mem. Sin ella el texto del rotulo podia
+   no subir ("HAHUD: sin VRAM") y su marco salia solo: un rectangulo blanco con bandas oscuras.
+   ar_extra: lo que se guarda ademas de la reserva al reservar la zona (curso_reinicia) */
+#define HA_VRAM_RESERVA (92 * 1024)
+static uint32_t ar_extra;
 static pvr_ptr_t tex_gris;                                        /* 8x8 ARGB4444 gris: lo ultimo si nada cabe */
 #ifdef PRUEBA_VRAM_KB
 static pvr_ptr_t ar_lastre;                                       /* prueba: lo libre fuera de la zona, ocupado */
@@ -378,7 +436,7 @@ static void ar_suelta(void)
 /* la zona del curso: el mayor bloque de lo libre menos la reserva (pvr_mem no dice cual es el mayor hueco: se busca) */
 static void ar_reserva(void)
 {
-    uint32_t r = CURSO_VRAM_RESERVA + menu_pausa_vram(), lib = pvr_mem_available(), lo = 0, hi, k; pvr_ptr_t p;
+    uint32_t r = CURSO_VRAM_RESERVA + menu_pausa_vram() + ar_extra, lib = pvr_mem_available(), lo = 0, hi, k; pvr_ptr_t p;
     ar_suelta();
     hi = lib > r ? (lib - r) & ~32767u : 0;
 #ifdef PRUEBA_VRAM_KB
@@ -1784,8 +1842,12 @@ static hud_dat_t *ha_hud;                                       /* HAHUD.DAT en 
 /* rotulo del INFARTO: sube las texturas del uso al verse y baja las del anterior (VRAM fuera de la zona: ~75 KB) */
 static void ha_rotulo_uso(int *actual, const char *nombre)
 {
+    static uint32_t n;
     int u = ha_hud ? hudd_uso(ha_hud, nombre) : -1;
-    if (u == *actual) return;
+    if (u == *actual) {                                         /* (si no subio: otra vez cada 30 cuadros) */
+        if (u >= 0 && !hudd_uso_residente(ha_hud, u) && ++n % 30 == 0) hudd_sube_uso(ha_hud, u);
+        return;
+    }
     hudd_baja_uso(ha_hud, *actual);
     *actual = u;
     if (hudd_sube_uso(ha_hud, u)) dbglog(DBG_ERROR, "HAHUD: sin VRAM para %s\n", nombre);
@@ -4667,6 +4729,9 @@ static void ram_mapa(const char *donde)
     struct mallinfo mi = mallinfo(); uintptr_t tope = (uintptr_t)sbrk(0); unsigned cima = (unsigned)(mi.keepcost + (0x8d000000u - 0x10000u - tope));
     dbglog(DBG_INFO, "RAMMAPA %s: en uso %uK, libre %uK (seguido en la cima %uK, en huecos %uK)\n", donde, (unsigned)(mi.uordblks >> 10),
            (unsigned)((mi.fordblks + (0x8d000000u - 0x10000u - tope)) >> 10), cima >> 10, (unsigned)((mi.fordblks - mi.keepcost) >> 10));
+#ifdef DIAG_PVRMEM
+    pvrmem_mapa(donde);
+#endif
 }
 static void curso_error(const char *s) { dbglog(DBG_ERROR, "CURSO: %s\n", s); vid_set_mode(modo_video, PM_RGB565); aviso(s); for (;;) thd_sleep(1000); }
 /* los registros del arbol id de CURSO.DAT (en b, sz bytes): su desplazamiento y cuenta; 0 bien */
@@ -5058,23 +5123,43 @@ static int curso_paso(void)
 /* de vuelta al menu: fuera de la VRAM la union, la etapa siguiente y las texturas de la etapa (el menu no las dibuja;
    la etapa de salida sigue en su hueco de la RAM y curso_reinicia las vuelve a subir) y la zona del curso, para las
    pantallas del menu. Unos cuadros despues de dejar la carrera (la PowerVR puede estar dibujando el ultimo) */
-static void curso_al_menu(void)
+static uint64_t cm_t0;                                          /* curso_al_menu: el primer cuadro fuera de la carrera */
+static int curso_subido(void) { return ar_bloque || etapa.tv || uni.tv || sig.tv || uni.datos || sig.datos || bo_mod.datos; }
+static void curso_fuera(const char *por)
 {
-    static uint64_t t0;
-    /* los huecos de las colisiones (186 + 220 KB del monton; solo RAM, sin VRAM que esperar) ya en el primer cuadro del
-       menu: antes de que menu_tablas(1) vuelva a leer las piezas de MENU.DAT en este mismo cuadro, que si no se iban
-       a la cima del monton (tras el fin del tiempo de OUTRUN2SP la cima seguida bajaba de 711 a 445 KB en el frontal) */
-    if (hueco_col && carga.estado != 1) col_suelta();
-    if (!ar_bloque && !etapa.tv && !uni.tv && !sig.tv) return;
-    if (!t0) { t0 = timer_ms_gettime64(); return; }
-    if (timer_ms_gettime64() - t0 < 60 || carga.estado == 1 || meta_hilo) return;   /* (una lectura en curso: al acabar) */
-    t0 = 0; carga.estado = 0;
+    cm_t0 = 0; carga.estado = 0;
     libera_modelo(&uni); libera_modelo(&uni_der); libera_modelo(&sig);
     col_suelta();                                               /* sus huecos, para el menu */
     bo_quita();                                                 /* objetos de la union: su RAM y su VRAM */
     tex_suelta(&etapa); ar_suelta();
     meta_suelta();                                              /* META.DAT: su RAM, para el menu */
-    dbglog(DBG_INFO, "VRAM: el curso fuera (menu), libre %uK\n", (unsigned)(pvr_mem_available() >> 10));
+    dbglog(DBG_INFO, "VRAM: el curso fuera (%s), libre %uK\n", por, (unsigned)(pvr_mem_available() >> 10));
+}
+static void curso_al_menu(void)
+{
+    /* los huecos de las colisiones (186 + 220 KB del monton; solo RAM, sin VRAM que esperar) ya en el primer cuadro del
+       menu: antes de que menu_tablas(1) vuelva a leer las piezas de MENU.DAT en este mismo cuadro, que si no se iban
+       a la cima del monton (tras el fin del tiempo de OUTRUN2SP la cima seguida bajaba de 711 a 445 KB en el frontal) */
+    if (hueco_col && carga.estado != 1) col_suelta();
+    if (!curso_subido()) { cm_t0 = 0; return; }
+    if (!cm_t0) { cm_t0 = timer_ms_gettime64(); return; }
+    if (timer_ms_gettime64() - cm_t0 < 60 || carga.estado == 1 || meta_hilo) return;   /* (una lectura en curso: al acabar) */
+    curso_fuera("menu");
+}
+/* Lo mismo sin esperar a otro cuadro, al empezar una carrera con el curso de la anterior aun subido: REINTENTAR (de la
+   pausa o del modo 35: la salida en el mismo cuadro, sin pasar por el menu) o una carrera pedida antes de los 60 ms de
+   curso_al_menu. Antes la union seguia en su hueco (sin prestar: el HUD se leia del GD al monton, ~950 KB seguidos que
+   no hay, "Out of memory" y la carrera sin HUD desde entonces) y la zona del curso se reservaba con la VRAM de la
+   anterior aun pedida (la zona, los objetos de la union, HAHUD.DAT): troceada, "pvr_mem: out of PVR memory" en la
+   busqueda de ar_reserva y 524-536 KB fuera de la zona. Espera a la lectura en marcha y a que la PowerVR acabe el
+   ultimo cuadro (40 ms, como hudd_vacia) */
+static void curso_al_menu_ya(void)
+{
+    if (hueco_col && carga.estado != 1) col_suelta();
+    if (!curso_subido()) { cm_t0 = 0; return; }
+    carga_espera(); while (meta_hilo) thd_sleep(5);
+    thd_sleep(40);
+    curso_fuera("carrera nueva");
 }
 #ifdef PRUEBA_RAMA
 static int piloto_rama(float s) { return cur_rama < 0 && s_decide >= 0 && s > s_decide - 400.0f; }
@@ -6699,6 +6784,15 @@ static uint32_t coche_ban;                                      /* car+4 de 4A25
 static matrix_t ani_m[NPZ] __attribute__((aligned(32)));      /* matriz de cada pieza en el marco del coche */
 /* lee el CEX2 del coche recien cargado: desplazamiento por vertice, cabeceras con desplazamiento para el entorno y
    grupos de luces */
+/* cabeceras de las texturas de la pintura y el reflejo (con desplazamiento: especular 1, sumada 3) */
+static void coche_cab_cex(void)
+{
+    uint32_t k;
+    for (k = 0; k < cex_n; k++) {
+        int32_t t = coche.mallas[cex_m[k].malla].tex;
+        if (cex_m[k].tipo >= 2 && t >= 0) compila_cab(&coche, t, cex_m[k].tipo == 3 ? 3 : 1);
+    }
+}
 static void coche_cex(int c)
 {
     const uint32_t *w = (const uint32_t *)coche.ruta; uint32_t k;
@@ -6712,12 +6806,11 @@ static void coche_cex(int c)
     for (k = 0; k < w[5]; k++) if (cex_grp[2 * k] >= coche.nmallas) return;
     if (!(cex_n0 = malloc(coche.nmallas * sizeof(uint32_t)))) return;
     for (k = 0; k < coche.nmallas; k++) cex_n0[k] = coche.mallas[k].n;
-    if (!(coche.ofs = calloc(coche.nvert, sizeof(uint32_t)))) { free(cex_n0); cex_n0 = NULL; return; }
+    if (coche.datos == coche_bloque && coche_usado + coche.nvert * sizeof(uint32_t) <= COCHE_RAM) {   /* (en el bloque fijo) */
+        coche.ofs = (uint32_t *)(void *)(coche_bloque + coche_usado); memset(coche.ofs, 0, coche.nvert * sizeof(uint32_t));
+    } else if (!(coche.ofs = calloc(coche.nvert, sizeof(uint32_t)))) { free(cex_n0); cex_n0 = NULL; return; }
     cex_n = w[3]; cex_ngrp = w[5];
-    for (k = 0; k < cex_n; k++) {
-        int32_t t = coche.mallas[cex_m[k].malla].tex;
-        if (cex_m[k].tipo >= 2 && t >= 0) compila_cab(&coche, t, cex_m[k].tipo == 3 ? 3 : 1);
-    }
+    coche_cab_cex();
     coche_color(c);
     coche_luces(0, 0, 0);                                       /* pilotos sin luces ni freno */
     {   /* SVL1 (tools/conv_coche.py bloque_svl): partes convexas de los volumenes +08 y +10, detras de los grupos */
@@ -7530,7 +7623,17 @@ static int coche_carga(int k)
         menu_libera_vram();
         if ((r = sube_modelo(&coche))) { libera_modelo(&coche); ani.ok = 0; return r; }
     }
-    compacta_modelo_de(&coche, prest);                          /* los texeles ya estan en la VRAM */
+    {   /* los texeles ya estan en la VRAM: lo demas, al bloque fijo (si no cabe, al monton como antes) */
+        uint32_t t = (uint32_t)(coche.blob - coche.datos);
+        if (coche_bloque && t + ((coche.nvert * sizeof(uint32_t) + 31) & ~31u) <= COCHE_RAM) {
+            uint8_t *v = coche.datos;
+            memcpy(coche_bloque, v, t); modelo_mueve(&coche, coche_bloque); coche.blob = NULL; coche_usado = (t + 31) & ~31u;
+            if (!prest) free(v);                                /* (leido al monton: el hueco de la union no estaba) */
+        } else {
+            dbglog(DBG_ERROR, "coche: %s no cabe en su bloque (%uK de %uK)\n", nom, (unsigned)(t >> 10), COCHE_RAM >> 10);
+            compacta_modelo_de(&coche, prest); coche_usado = 0;
+        }
+    }
     if (coche.datos == hueco_union) {                           /* sin RAM para lo que queda: no puede quedarse ahi */
         dbglog(DBG_ERROR, "coche: sin RAM para %s (%uK)\n", nom, (unsigned)((coche.blob - coche.datos) >> 10));
         libera_modelo(&coche); ani.ok = 0; return -5;
@@ -7542,6 +7645,37 @@ static int coche_carga(int k)
     ta_min_otros_teo = modelo_teo(&coche, -1, 1) + 3 * ct; ta_traf_teo = ct;   /* lo reservado: este coche y tres de trafico (LOD 0) */
     dbglog(DBG_INFO, "coche: ficha %d %s modelo %d, %u vertices, %u texturas, VRAM libre %uK\n", k, nom, modelo_jug,
            (unsigned)modelo_vtx(&coche, -1), (unsigned)coche.ntex, (unsigned)(pvr_mem_available() >> 10));
+    return 0;
+}
+
+/* VRAM en orden al empezar cada carrera (docs/DREAMCAST.md, VRAM entre carreras). Con lo de la carrera anterior y del
+   menu ya fuera, la pareja y el coche bajan detras de lo fijo del arranque (texto, trafico, sol, efectos), en ese
+   orden, y despues suben el HUD y la zona del curso: lo libre queda en un solo trozo y la zona sale igual en cada
+   carrera con el mismo coche y la misma pareja. Sin esto el coche que se elige en el menu (coche_carga con las
+   pantallas del menu subidas) quedaba partido en los huecos entre ellas (COCHE13: 23 de sus 176 KB debajo de los
+   efectos) y el HUD ya no cabia en su sitio (32 KB de el detras de los efectos y huecos sueltos fuera de la zona, que
+   cada cambio de coche podia trocear mas). Los texeles pasan por buf (el hueco de la union, aun prestado) y vuelven en
+   el mismo orden; despues sus cabeceras. 0 bien; si no cabe en buf, nada se mueve */
+static int vram_ordena(uint8_t *buf, uint32_t cap)
+{
+    modelo_t *const M[2] = { &chr, &coche }; uint32_t o = 0, i, k, n = 0, mal = 0;
+    for (k = 0; k < 2; k++) if (M[k]->tv) for (i = 0; i < M[k]->ntex; i++) if (M[k]->tv[i]) o += (M[k]->texs[i].tam + 31) & ~31u;
+    if (!buf || o > cap) { dbglog(DBG_ERROR, "VRAM: sin RAM para ordenar la pareja y el coche (%uK)\n", (unsigned)(o >> 10)); return -1; }
+    thd_sleep(40);                                              /* (la PowerVR acaba el ultimo cuadro del menu) */
+    for (k = 0, o = 0; k < 2; k++) if (M[k]->tv) for (i = 0; i < M[k]->ntex; i++) if (M[k]->tv[i]) {
+        memcpy(buf + o, M[k]->tv[i], M[k]->texs[i].tam); o += (M[k]->texs[i].tam + 31) & ~31u;
+        pvr_mem_free(M[k]->tv[i]);
+    }
+    for (k = 0, o = 0; k < 2; k++) if (M[k]->tv) for (i = 0; i < M[k]->ntex; i++) if (M[k]->tv[i]) {
+        uint32_t t = M[k]->texs[i].tam;
+        if ((M[k]->tv[i] = pvr_mem_malloc(t))) { pvr_txr_load(buf + o, M[k]->tv[i], t); compila_cab(M[k], i, 0); n++; }
+        else mal++;                                             /* (no pasa: la misma VRAM que se acaba de soltar) */
+        o += (t + 31) & ~31u;
+    }
+    if (coche.tv) coche_cab_cex();
+    if (mal) dbglog(DBG_ERROR, "VRAM: %u texturas de la pareja y el coche sin sitio al ordenar\n", (unsigned)mal);
+    dbglog(DBG_INFO, "VRAM: pareja y coche en orden, %u texturas (%uK), libre %uK\n", (unsigned)n, (unsigned)(o >> 10),
+           (unsigned)(pvr_mem_available() >> 10));
     return 0;
 }
 
@@ -7825,6 +7959,7 @@ int main(int argc, char **argv)
     vid_set_mode(modo_video, PM_RGB565);
     vid_clear(0, 0, 0);                                         /* negro mientras carga, sin texto */
     robot_lee();                                                /* CHRPAR.DAT y el bloque de la pareja: antes que los huecos y la ruta (RAM) */
+    if (!(coche_bloque = memalign(32, COCHE_RAM))) dbglog(DBG_ERROR, "coche: sin %uK para el bloque\n", COCHE_RAM >> 10);   /* y el del coche */
     if ((r = curso_lee() ? -8 : curso_huecos() ? -9 : curso_lee_etapa(0))) {   /* el arbol y la primera etapa */
         sprintf(s1, "No se pudieron leer los datos (%d)", r); aviso(s1); for (;;) thd_sleep(1000);
     }
@@ -7868,6 +8003,9 @@ int main(int argc, char **argv)
         vid_set_mode(modo_video, PM_RGB565); aviso("Sin memoria de video para las texturas"); for (;;) thd_sleep(1000);
     }
     sol_carga();                                                /* el sol y el destello (SOL.DAT, siempre en VRAM) */
+    /* el humo, las marcas y las chispas (EFECTOS.DAT, siempre en VRAM) con lo fijo, antes de la pareja, el coche y el HUD:
+       detras del HUD partian la VRAM libre de las carreras en dos (vram_ordena) */
+    efectos_inicia();
     {   int pp, aa;                                             /* la pareja de OUTRUN2SP y de la licencia 0 (11 / 9) */
         if (!robot_pareja(1, 1, 0, &pp, &aa)) robot_carga(pp, aa); }
     if ((r = coche_carga(ficha_ini))) {
@@ -7891,7 +8029,6 @@ int main(int argc, char **argv)
         if (l != 2) { cx.fmt.modifier = true; cx.gen.modifier_mode = false; }   /* recibe la sombra del coche */
         pvr_poly_compile(&cab_col[i][l], &cx);
     }
-    efectos_inicia();
     pvr_fog_table_color(1.0f, 0.55f, 0.70f, 0.92f);
     niebla_pon();
     memset(&yo, 0, sizeof yo);
@@ -8062,6 +8199,13 @@ int main(int argc, char **argv)
             }
 #endif
             if (rm != MENU_SIGUE) {
+                /* lo de la carrera anterior que siga subido (REINTENTAR, o una carrera pedida en los primeros cuadros del
+                   titulo), fuera ya: el hueco de la union prestado para las lecturas de abajo (voces, coche, pareja, HUD)
+                   y toda la VRAM libre para la zona del curso. El INFARTO con REINTENTAR sigue con HAHUD.DAT abierto: sus
+                   texturas (fuera de la zona de la carrera anterior) se bajan y vuelven a subir despues de la zona nueva */
+                curso_al_menu_ya();
+                if (ha_hud) { hudd_baja(ha_hud, 0, -1); ha_u_txt = ha_u_mar = -1; }
+                presta_union(1);
                 auto_ = rm == MENU_DEMO;
                 if (!auto_) { manual_ = menu_manual(); pista = menu_pista(); }
                 variante = auto_ ? 1 : menu_modo();             /* la demo de atraccion es la del modo OutRun */
@@ -8112,12 +8256,16 @@ int main(int argc, char **argv)
                 if (coche_ficha < 0) coche_carga(9);            /* el menu lo solto (VRAM) */
                 fisica_modelo(modelo_jug);                      /* peso, agarre, motor y marchas de ese coche */
                 if (hud_ok) hud_pon_modelo(modelo_jug);         /* y su tacometro */
-                if (hud_ok && hud_sube_tex()) hud_ok = 0;
+                if (union_prestable()) vram_ordena(hueco_union, cap_union - union_fsp);   /* la pareja y el coche, abajo */
+                /* (si no caben, el HUD sigue: las que falten se suben solas al querer dibujarlas, hudd_fin_cuadro;
+                   antes hud_ok = 0 y la carrera y las siguientes sin HUD) */
+                if (hud_ok && hud_sube_tex()) dbglog(DBG_ERROR, "HUD: sin RAM o VRAM para sus texturas (se suben al dibujarlas)\n");
                 /* OUTRUN2SP: la pantalla de carga del preset (0x1b8228; sus texturas detras de las del HUD y fuera antes
                    de reservar la zona del curso, demo/sp.c) */
                 presta_union(0);                                /* el hueco de la union vuelve a la carrera */
                 /* (sus tablas en el hueco de la union, que curso_reinicia no usa: nada en el monton antes de col_reserva) */
                 if (juego_sp) sp_carga_entra(variante, preset_curso, hueco_union, cap_union);
+                ar_extra = variante == 2 ? HA_VRAM_RESERVA : 0;  /* (HAHUD.DAT, detras de la zona) */
                 curso_reinicia();                               /* la etapa de salida (otra vez, si hacia falta) */
                 bo_inicia();                                    /* sin objetos de union y las cuentas a cero */
                 salida_calcula();
@@ -8678,10 +8826,13 @@ int main(int argc, char **argv)
                             char n1[16], n2[16]; uint32_t ti = infarto_tinte();   /* 7F8B68: el marco, rojizo si se pierden */
                             sprintf(n1, "HA_M%d", rm); sprintf(n2, "HA_T%02d", rt);
                             ha_rotulo_uso(&ha_u_mar, n1); ha_rotulo_uso(&ha_u_txt, n2);
-                            hudd_color((ti & 0xff) << 16 | (ti & 0xff00) | (ti >> 16 & 0xff));
-                            hudd_dibuja(ha_hud, ha_u_mar, rcu, 176, 78, 1, 118, 0);
-                            hudd_color(0xFFFFFF);
-                            hudd_dibuja(ha_hud, ha_u_txt, rcu, 176, 78, 1, 119, 0);
+                            /* el marco solo con su texto: sin el (sin VRAM) salia un rectangulo blanco */
+                            if (hudd_uso_residente(ha_hud, ha_u_mar) && hudd_uso_residente(ha_hud, ha_u_txt)) {
+                                hudd_color((ti & 0xff) << 16 | (ti & 0xff00) | (ti >> 16 & 0xff));
+                                hudd_dibuja(ha_hud, ha_u_mar, rcu, 176, 78, 1, 118, 0);
+                                hudd_color(0xFFFFFF);
+                                hudd_dibuja(ha_hud, ha_u_txt, rcu, 176, 78, 1, 119, 0);
+                            }
                         }
                         if (ha_hud) {                   /* 45FB80 / 45B950: corazones, roturas y efectos */
                             static const char *const G[8] = { "HA_C0", "HA_C1", "HA_C2", "HA_C3", "HA_C4", "HA_C5", "HA_CORAZON", "HA_ROTO" };

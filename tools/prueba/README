@@ -36,6 +36,11 @@ Borrar los GDI despues (/dev/shm/dcr): llevan los datos de tu disco.
            contra los muros cada 8 s y la demo mide cada cuadro la carroceria dentro de un muro, las ruedas del jugador
            y del trafico bajo el suelo y los saltos de la camara; cuentas al final, error si la carroceria entra en un
            muro o sale de la colision.
+  seguidas.sh  carreras seguidas por el menu real (GDI con -DPRUEBA_PILOTO_MENU -DPRUEBA_NODO=13 -DPRUEBA_FIN=300
+           -DPRUEBA_SIN_TIEMPO y mejor -DDIAG_PVRMEM): meta -> millas -> continuar A (REINTENTAR), B (al menu, con la
+           pelicula de la demo de atraccion por medio), pausa ABANDONAR / REINTENTAR y otro coche en el menu; 7 carreras.
+           Las lineas RAMMAPA, "VRAM: zona del curso" y PVRMAPA (el mapa de la VRAM, -DDIAG_PVRMEM) de cada carrera
+           deben salir iguales y sin "Out of memory" ni "pvr_mem: ERROR" (docs/DREAMCAST.md, Carreras seguidas).
   conduce.sh  como nav.sh y despues conduce (A pisado, la cruceta a ratos) [segundos, 180]: una captura cada 5 s
            (c_000..) y "CONGELADO" con error si dos seguidas son iguales (el cronometro del HUD no cambia).
 Medidas de la escena de la salida (make -C demo CPPFLAGS="..."): -DDIAG_SALIDA guarda de cada cuadro dibujado de la
@@ -49,6 +54,9 @@ Medidas de los cambios de etapa (defines de demo/main.c y comun/gd.c; make -C de
   DIAG_PICO              "PICO: ..." por la consola serie: us de cada parte de curso_paso que pase de 0,3 ms, la subida de
                          texturas (trozos y el mayor) y los cuadros de mas de 28 ms.
   DIAG_GD_LENTO=<KB/s>   el GD lento de arriba (medidas de la salida): las etapas tardan lo que en la consola.
+  DIAG_PVRMEM            envuelve pvr_mem_malloc / pvr_mem_free (quien pidio cada bloque) y cada RAMMAPA escribe el mapa
+                         de la VRAM ("PVRMAPA": bloques por direccion, quien los pidio y huecos); "PVRMEM: libera ... no
+                         pedido" si se suelta un bloque que no esta pedido (no se suelta) y "PVRMEM: sin ..." si falta.
   DIAG_TRANS=<ms>        camara lenta (un paso de logica por cuadro y esa espera) en los 6 cuadros de alrededor de cada
                          suceso del cambio de etapa (union, rama, soltar, etapa leida, tercios del fundido del cielo,
                          etapa nueva); "TR: cuadro ..." con el estado del fundido, para capturar cuadro a cuadro.

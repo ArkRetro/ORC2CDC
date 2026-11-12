@@ -51,6 +51,7 @@ void hudd_dibuja(hud_dat_t *h, int uso, int cuadro, float dx, float dy, float al
 const uint8_t *hudd_extra(const hud_dat_t *h);
 int hudd_tex_uso(const hud_dat_t *h, int uso, int *t0);   /* texturas del grupo del uso: primera (t0) y cuantas */
 int hudd_sube_uso(hud_dat_t *h, int uso);                /* las de hudd_tex_uso a la VRAM: 0 bien o nada, si no hudd_sube */
+int hudd_uso_residente(const hud_dat_t *h, int uso);      /* 1 si todas las texturas del uso estan en la VRAM */
 void hudd_baja_uso(hud_dat_t *h, int uso);               /* y fuera (hudd_baja) */           /* lo que va detras de los 16 bytes de tacometros */
 /* una vez por cuadro (despues de dibujar): libera la VRAM que se pidio liberar cuando ya no la lee la PowerVR (las
    texturas de hudd_baja / hud_baja_tex se liberan HUDD_ESPERA cuadros despues de su ultimo uso) */
