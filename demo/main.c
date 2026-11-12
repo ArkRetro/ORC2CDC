@@ -5742,6 +5742,8 @@ static void fe_paso(void)
 }
 #endif
 static uint32_t prio_est;                                       /* coste estimado de lo que se dibuja (bytes) */
+static int geo_visible(const modelo_t *t);
+static void geo_reinicia(void);
 static void nodos_visibles_todos(void)
 {
     static uint32_t fila_c[ND_PRIO], fila_v[ND_PRIO], col_c[NB_PRIO], col_v[NB_PRIO];
@@ -5751,7 +5753,7 @@ static void nodos_visibles_todos(void)
 #ifdef DIAG_VTX
     diag_pvs_v = 0;
 #endif
-    for (i = 0; i < 3; i++) if (tramos[i]->tv) nodos_visibles(tramos[i]);
+    for (i = 0; i < 3; i++) if (geo_visible(tramos[i])) nodos_visibles(tramos[i]);
     for (d = 0; d < ND_PRIO; d++) for (fila_c[d] = fila_v[d] = 0, c = 0; c < NB_PRIO; c++) { fila_c[d] += prio_coste[d][c]; fila_v[d] += prio_vtx[d][c]; }
     /* lo cercano: hasta 3/4 del tope (todo si cabe todo) */
     for (acum = v = 0, cabe = -1, d = 0; d < ND_PRIO; d++) {
@@ -5780,7 +5782,7 @@ static void nodos_visibles_todos(void)
     diag_quitado_z = 1e9f; diag_quitado_r = 0; diag_quitado_n = 0;
     for (diag_orig_vtx = 0, d = 0; d < ND_PRIO; d++) diag_orig_vtx += fila_v[d];
 #endif
-    if (prio_d < ND_PRIO - 1) for (i = 0; i < 3; i++) if (tramos[i]->tv) nodos_quita(tramos[i]);
+    if (prio_d < ND_PRIO - 1) for (i = 0; i < 3; i++) if (geo_visible(tramos[i])) nodos_quita(tramos[i]);
 #ifdef CON_FUNDIDO_ENTRADA
     fe_paso();                                                  /* lo que aparece en este cuadro */
 #endif
@@ -5912,6 +5914,7 @@ static float sol_int;                                           /* intensidad de
 static void entorno_reinicia(void)
 {
     ent_fase = 0; ent_nodo = cur_nodo; ent_nuevo = -1; ent_cruza = 0; ent_viejo = -1;
+    geo_reinicia();
     sol_int = cur_nodo >= 0 && (curso[cur_nodo].clima & 2) ? 1.0f : 0.0f;   /* al empezar: sin fundido (4AFCC0) */
 }
 /* la niebla, la transicion de la union, el cielo y el sol (cada paso de logica) */
@@ -6198,6 +6201,59 @@ static void cielo_dibuja(int l)
     }
 }
 
+/* ---------------------------------------------------------------- la geometria de las etapas en la union
+   Como el original (PC 44DE10 / 44C530 / 44E590; SLES-53998 0x1725d0 / 0x176bd0 / 0x173480): se dibuja la geometria de
+   una sola etapa, la del registro 7D3188. En la union es la que se deja hasta que el coche, ya en su rama, pasa la
+   posicion 0x18 (race_manager 4515B0: bandera 0x20 con la 0x80 de la colision; 44E590 cambia de registro y pone el
+   factor 7D3184 a 0: la etapa que se deja ya no se dibuja). La siguiente, ya leida, sale con el factor de 44C530: 0
+   hasta la posicion 0x84 de la union, 1 desde la 0xF0 y entre medias (car+0x2B0 - el de cuando se paso de 0x84) /
+   0,2: crece desde el suelo de su marco (escala y de 7D2DA0) en los 200 m que recorre el coche (car+0x2B0 suma la
+   velocidad por cuadro x 0,001: km; 80 m en las variantes 3 y 4, en red, que la demo no tiene); por debajo de 0,1 no
+   se dibuja (0x172628). Fuera de la union, 1. Antes la demo dibujaba la etapa que se deja hasta soltarla (UNION_LIBERA
+   m dentro de la union) y la siguiente en cuanto estaba subida: sus montes y fondos salian de golpe en el cielo de la
+   union, a veces con el fundido del cielo a medias. La posicion de la union es la de traf_lugar (metros / m_pos). */
+static float geo_esc = 1.0f;                                    /* 7D3184 */
+static float geo_odo, geo_odo0 = -1.0f;                         /* car+0x2B0 (m) y 7D2E6C */
+static int geo_cambio;                                          /* 44E590 ya cambio al registro de la etapa siguiente */
+static void geo_reinicia(void) { geo_esc = 1.0f; geo_odo0 = -1.0f; geo_cambio = 0; }
+static void geo_paso(void)
+{
+    int nodo, pos, u = traf_lugar(yo.s, &nodo, &pos);
+    geo_odo += fabsf(yo.v) * (1.0f / 60.2f);                    /* velocidad por cuadro del original (4A1140) */
+    if (!u || !cur_en_union || cur_rama < 0) { geo_reinicia(); return; }
+    if (!geo_cambio && pos >= 0x18) { geo_cambio = 1; geo_esc = 0; geo_odo0 = -1.0f; }
+    if (!geo_cambio || !sig.tv) return;                         /* (44C530 solo con la etapa nueva leida: 0xC..0x11) */
+    if (pos >= 0xF0) { geo_esc = 1.0f; return; }
+    if (pos <= 0x84) { geo_esc = 0; geo_odo0 = -1.0f; return; }
+    if (geo_odo0 < 0) geo_odo0 = geo_odo;
+    geo_esc = (geo_odo - geo_odo0) / 200.0f;
+    if (geo_esc < 0) geo_esc = 0;
+    if (geo_esc > 1) geo_esc = 1;
+}
+/* el tramo t (etapa, union o etapa siguiente) se dibuja en este cuadro */
+static int geo_visible(const modelo_t *t)
+{
+    if (!t->tv) return 0;
+    if (t == &etapa && geo_cambio) return 0;
+    if (t == &sig && geo_cambio && geo_esc < 0.1f) return 0;
+    return 1;
+}
+/* vista de la etapa siguiente con la escala y de 44DE10 alrededor del suelo de su marco (filas: p' = p S vista) */
+static matrix_t vista_geo __attribute__((aligned(32)));
+static void geo_vista(const modelo_t *t)
+{
+    float f = geo_esc, y0 = (1.0f - f) * marco_sig[1]; int j;
+    if (t != &sig || f >= 1.0f) return;
+    memcpy(vista_geo, vista, sizeof vista_geo);
+    for (j = 0; j < 4; j++) { vista[1][j] = f * vista_geo[1][j]; vista[3][j] = vista_geo[3][j] + y0 * vista_geo[1][j]; }
+    mat_load(&vista);
+}
+static void geo_vista_fin(const modelo_t *t)
+{
+    if (t != &sig || geo_esc >= 1.0f) return;
+    memcpy(vista, vista_geo, sizeof vista); mat_load(&vista);
+}
+
 /* ---------------------------------------------------------------- agua (docs/PARIDAD.md, Agua: el reflejo del original)
    El agua de SLES-53998 (0x11a2e8, llamada al final de la geometria de la etapa, 0x172b68): el plano del descriptor
    +0x5C, en el marco de la etapa, solo escribe el alfa de la pantalla donde se ve (una mascara de ondas que se mueve) y
@@ -6222,14 +6278,14 @@ static void agua_dibuja(void)
     if (u ? pos <= 0xC7 || e->agua_p0 > 0 : pos < e->agua_p0 || pos > e->agua_p1) return;
     if (etapa.tv && etapa_nodo == nodo) mo = &etapa;
     else if (sig.tv && cur_sig == nodo) mo = &sig;
-    if (!mo) return;
-    mat_load(&vista); color_fijo = AGUA_COLOR;
+    if (!mo || !geo_visible(mo)) return;                        /* (0x11a2e8 va dentro de 0x1725d0) */
+    mat_load(&vista); geo_vista(mo); color_fijo = AGUA_COLOR;
     pvr_prim(&cab_col[0][0], sizeof(pvr_poly_hdr_t));          /* (sin textura, con la niebla de la tabla) */
     for (k = mo->inicio[3]; k < mo->inicio[4]; k++) {
         const malla_t *m = mo->mallas + k;
         if (m->n >= 3 && m->nodo == AGUA_NODO) dibuja_malla(mo, m);
     }
-    color_fijo = 0;
+    color_fijo = 0; geo_vista_fin(mo);
 }
 
 /* Sol y destello: el de SLES-53998 (0x10f190, el 40CBC0 del PC con otras constantes), con SCN_EFC +0 & 2 y su
@@ -8488,7 +8544,7 @@ int main(int argc, char **argv)
                         dbglog(DBG_INFO, "CHECKPOINT: etapa %d (%.4s) nivel %d s %.0f, +%d cuadros, quedan %d (%.1f s)\n", cur_nodo,
                                curso[cur_nodo].zona, curso[cur_nodo].nivel, (double)yo.s, amp, tim_cuadros, (double)tiempo);
                     }
-                    niebla_paso();
+                    niebla_paso(); geo_paso();
 #ifdef DIAG_TRANS
                     {   static int f0 = -1; static float sx = -1; float pv = yo.s + yo.v * 0.1f; int k, f = ent_fase;
                         static const char *const Q[5] = { "curso", "cielo", "antes de la union", "antes de liberar", "antes de la etapa" };
@@ -8737,11 +8793,13 @@ int main(int argc, char **argv)
                 color_fijo = l == DEP_LISTA ? 0xFFFF00FF : 0;
 #endif
                 for (i = 0; i < 3; i++)                         /* etapa, union y etapa siguiente: las que esten subidas */
-                    if (tramos[i]->tv) {
+                    if (geo_visible(tramos[i])) {               /* (44DE10: una sola etapa en la union) */
+                        geo_vista(tramos[i]);
 #ifndef DEP_TEX
                         if (tramos[i]->tr && tramos[i]->vis) dibuja_etapa(tramos[i], l); else
 #endif
                         dibuja_rango(tramos[i], l, tramos[i]->inicio[l], tramos[i]->inicio[l + 1], 1, 0, 0);
+                        geo_vista_fin(tramos[i]);
                     }
                 color_fijo = 0; ta_en_etapa = 0;
                 if (l == 0) agua_dibuja();                      /* el plano del agua (0x11a2e8, tras la etapa) */

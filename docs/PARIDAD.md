@@ -2800,3 +2800,32 @@ Queja del usuario (demo 35): "falta el letrero de dificil al elegir ruta". Busca
 - La Dreamcast lo sacaba en todas las variantes y bifurcaciones desde 450 m antes de la separacion hasta elegir rama
   (PROVISIONAL). Ahora como el original (demo/main.c `fac_on`, con `tr_fila` para la fila y las filas del tramo). No
   se anade un "DIFICIL" que el original no tiene.
+
+## Bifurcaciones: texturas que se cruzan en el cielo (2026-11-12)
+
+Queja del usuario (consola real): "en las bifurcaciones hay texturas en el cielo que se cruzan y no deberian" (tras
+fbfe7b6, que arreglo la cordillera de LAKE).
+- Cielo: repasado contra 4521C0 / 452080 / 451B40 / 451DD0 / 451E90 / 44C420 (PC) y los descriptores de SLES-53998.
+  En las 30 etapas de los arboles 0 y 1 el descriptor da +0x48 = registro 1 (reflejo), +0x4C = ninguno, +0x50 =
+  registro 2 (grupo 0) y +0x54 = registro 0 (grupo 1) de obj_course_obj_sky_<zona>; los registros 3..5 son la media
+  esfera de abajo (agua) y no se dibujan. Las BK00..BK29 llevan en su lista 3 el mismo cielo que su etapa (mismas
+  mallas, texturas y lista), todo opaco salvo FLOR (BK28 / SEG32: capa transparente del grupo 0). Orden de capas y
+  tercios del fundido como 4521C0 (nueva 0, nueva 1, vieja 1, vieja 0; capa 1 = registro viejo 7D31DC, capa 0 =
+  7D3188). Sin cambios.
+- Lo que no era como el original: la geometria de las etapas en la union. El original solo dibuja la de una etapa,
+  la del registro 7D3188 (44DE10 = PS2 0x1725d0), con el factor 7D3184 (44C530 = PS2 0x176bd0, mismas constantes
+  0x84 / 0xF0 / 0,2 / 0,08): al pasar el coche la posicion 0x18 de la union ya en su rama (4515B0: bandera 0x20 con la
+  0x80 de la colision; 44E590 = PS2 0x173480 cambia de registro y pone 7D3184 = 0) la etapa que se deja deja de
+  dibujarse; la siguiente, leida, sale con 0 hasta la posicion 0x84, crece desde el suelo de su marco (escala y) en
+  los 200 m siguientes (car+0x2B0: velocidad por cuadro x 0,001, km; 4A1140) y es 1 desde 0xF0; < 0,1 no se dibuja.
+  La demo dibujaba la etapa que se deja hasta soltarla (300 m dentro de la union: sus montes de fondo, la cordillera
+  de LAKE, seguian en el cielo de la union) y la siguiente en cuanto estaba subida (sus montes salian de golpe en el
+  cielo de la union, con el fundido de los cielos a medias o antes de el). Arreglo: demo/main.c `geo_paso`,
+  `geo_visible`, `geo_vista` (tambien para el plano del agua, que el original dibuja dentro de 0x1725d0).
+- Aproximacion que queda (la de siempre de la demo): la posicion de la union es (s - s_union) / m_pos (traf_lugar);
+  en la bifurcacion BK_PALM las secciones son de ~8,03 m (pos 0x18 a 199 m, 0x84 a 1063 m, 0xF0 a 1929 m de la
+  colision) y m_pos de la etapa anda por 7,9-8,1: unos metros de diferencia. car+0x2B0 se lleva con la velocidad del
+  coche (yo.v / 60,2 por paso).
+- No portado: la union (cs_BK_PALM) por registros como 44E290 (el tronco hasta 0xE4, la rama del coche desde 0x1C,
+  ninguna rama antes; al principio de la etapa siguiente solo la rama): la demo dibuja el tronco y las dos ramas hasta
+  elegir y luego el tronco y la suya. SIN PORTAR.
