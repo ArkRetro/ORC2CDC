@@ -136,6 +136,15 @@ con audio y sin faltas (tambien con el lector limitado a 470 KB/s).
   rotulo de carga). Pendiente: lo que pinte el original durante la demo automatica (sin investigar; hay un banco 0x45
   DEMOSPLASH_CVT).
 
+## Cuadros por segundo: 45 fijos en carrera (DESVIACION pedida por el usuario, 2026-11-12)
+
+El original presenta un cuadro por campo cuando el cuadro esta listo (hasta 60 / 50 por segundo) y da a cada cuadro
+tantos pasos de logica como campos han pasado (0x1078c8). A peticion del usuario la demo presenta en carrera 45
+cuadros por segundo con el ritmo del barrido (3 cada 4 campos a 60 Hz, 9 cada 10 a 50 Hz; `FPS_OBJETIVO`,
+docs/DREAMCAST.md, 45 cuadros por segundo fijos). La logica no cambia: 59,94 pasos por segundo como el original en
+los dos modos (1, 1, 2 pasos por cuadro a 60 Hz), asi que la fisica, el crono, el tiempo y las animaciones van a la
+misma velocidad; solo se ven menos cuadros. Menus, peliculas y cargas como antes.
+
 ## Menus (2026-11-08)
 
 Todo de SUMO_FE_CVT (banco 0x44) y de tablas del ELF localizadas por su codigo (comprobadas en conv_menu.comprueba_tablas);

@@ -154,3 +154,20 @@ logica por debajo de 22,2 con margen para las interrupciones y el hilo de carga:
 2. Distancia: la VRAM ganada al bufer de parametros (`TA_VB_BYTES`; cada 64 KB cuestan 128) para que el reparto del
    original (`nodos_visibles_todos`, LOD, PVS) llegue mas lejos, con el peor caso de cada modo dentro de la zona.
 3. 45 fijos: presentacion por campos (sin esperas por tiempo) y `CPU_MS_CORTA` / `CPU_MS_ALARGA` para 22,2 ms.
+
+### 4. Hecho (2026-11-12) y lo que queda
+
+| Paso | Resultado (Flycast / `tools/vram.py`) |
+|---|---|
+| VQ (8283e33) | 0 texturas de 16 bits de 32x32 o mas en etapas, uniones, trafico, parejas, banderero y objetos (antes 13360 + 2220 + 496 KB en el GD); peor combinacion de la zona: modo OutRun 1127 -> 1013 KB, OUTRUN2SP 1286 -> 941; HUD de carrera 522 -> 278 KB; cuadro congelado de SNOW: el 31 % de los pixeles cambia con diferencia media 3,2 de 765, igual a la vista |
+| Distancia (5b57a04) | `TA_VB_BYTES` 1792 -> 1920 KB: tope de la etapa 712-718 -> 846 KB; IMPE entera hasta 430 -> 608 m y recortada desde 484 -> 770 m (GHOS 362 -> 512, 400 -> 532); peor caso de VRAM BK09 + IMPE 185 -> 266 KB libres (INFARTO 170) |
+| 45 fijos | presentacion por campos (`FPS_OBJETIVO`), 44,8 cuadros por segundo a 60 Hz y 45,0 a 50 Hz, 0 tarde; logica a 59,94 pasos por segundo como el original; `CPU_MS_CORTA` / `ALARGA` 21 / 17 |
+| Carreras seguidas | 7 por el menu real: zona y RAM iguales, 0 "Out of memory", 0 "pvr_mem: ERROR", 0 rebajadas |
+
+Queda (medido, no hecho):
+- el marcador de pruebas (144 KB de VRAM, solo con Y o sin HUD): con 4 bits de paleta serian 36 KB, pero la tabla de
+  paletas la reparte entera comun/hud.c; con esos 108 KB el bufer podria crecer otros 64 KB (de 846 a 910 KB de
+  etapa) con el mismo margen;
+- los coches del jugador (32-40 KB de 16 bits, insignias) y las cifras / tacometros del HUD: se quedan por calidad;
+- los juegos de reserva del OPB (614 KB): solo con medidas de la consola real (`TA_OPB_POS`, `ta_freno`);
+- medir en la consola: `DIAG_MS` (cuadros tarde, ms de CPU) y si el recorte por CPU acorta `lejos` a 45.

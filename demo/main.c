@@ -7,6 +7,8 @@
    Mando: stick o cruceta para girar, A o gatillo derecho acelera, B, X o gatillo izquierdo frena, START empieza o
    pausa, Y cambia la vista (en pausa ensena/oculta las cifras de rendimiento), cruceta arriba/abajo distancia de dibujo. Sin tocar nada, el titulo pasa a una demostracion automatica. */
 #include <kos.h>
+#include <kos/genwait.h>
+#include "pvr_internal.h"                                       /* pvr_state (KallistiOS): la presentacion a FPS_OBJETIVO */
 #include <dc/matrix.h>
 #include <dc/biosfont.h>
 #include <dc/flashrom.h>
@@ -810,11 +812,14 @@ static uint32_t vtx_et, vtx_et_ult;                      /* los de la etapa */
    segundo; docs/PARIDAD.md, Fundido de entrada) */
 #define VTX_ETAPA_MAX 20000
 #define LEJOS_MIN 600.0f
+/* Con FPS_OBJETIVO 45 (plan de recursos, 2026-11-12) el cuadro tiene 22,2 ms: 21 / 17 ms (la medida es tiempo de
+   reloj desde que empieza la logica hasta que acaba el dibujo, sin las esperas de la PowerVR ni del campo: ya incluye
+   las interrupciones y el hilo de carga; 1,2 ms de margen y la misma histeresis de 4 ms que antes) */
 #ifndef CPU_MS_CORTA                                     /* ms de CPU por cuadro (dibujo + logica) que acortan / alargan */
-#define CPU_MS_CORTA 22.0f
+#define CPU_MS_CORTA 21.0f
 #endif
 #ifndef CPU_MS_ALARGA
-#define CPU_MS_ALARGA 18.0f
+#define CPU_MS_ALARGA 17.0f
 #endif
 static uint32_t ta_bpv = TA_BPV_MIN, ta_f = TA_F_MIN, ta_vb, ta_et, ta_lim, ta_tope_etapa, ta_corto, ta_v2d, ta_v2d_ult;
 static uint32_t ta_otros_ult, ta_min_otros_teo, ta_traf_teo;   /* bytes de lo que no es la etapa (cuadro anterior; minimo
@@ -4582,6 +4587,77 @@ enum { TITULO, CUENTA, CARRERA, META, AGOTADO, FIN };   /* FIN: carrera suspendi
    La demo lo hace con el reloj (timer_us): PERIODO_60 es el paso en us x 60 (1001000 / 60 = 16683,33 us). */
 #define PERIODO_60 1001000LL                                    /* us x 60 por paso de logica (59,94 Hz) */
 #define PASOS_MAX 600                                           /* 0x107a30: mas campos que esto -> 1 paso */
+
+/* ---------------------------------------------------------------- cuadros por segundo fijos (FPS_OBJETIVO)
+   DECISION DEL PORT (plan de recursos, docs/PLAN.md, 2026-11-12; pedido del usuario: "la tasa fija a 45"). En carrera
+   (CUENTA, CARRERA, META, AGOTADO y la pausa) la demo presenta FPS_OBJETIVO cuadros por segundo con el ritmo del
+   barrido, no con esperas: a 60 Hz 3 cuadros cada 4 campos, a 50 Hz 9 cada 10 (45 no divide ni 60 ni 50: los cuadros
+   duran 1, 1 y 2 campos (60 Hz) o 8 de 1 campo y 1 de 2 (50 Hz); el reparto desigual es inevitable y se ve como
+   un leve tiron regular, el mismo cada 4 / 10 campos, en vez de los saltos sueltos de cuando la CPU no llega).
+   - El cuadro k empieza en el campo g_k = base + techo(k x campos_por_s / FPS_OBJETIVO) (pres_espera, arriba del
+     bucle, con genwait del manejador del vblank) y se presenta PRES_LAT campos despues: vbl_antes, que va antes del
+     manejador de la PowerVR de KallistiOS (pvr_vblank_handler: cambia de imagen en el primer vblank tras acabar el
+     render), le esconde el render acabado (render_completed = 0, render_busy para que no empiece otro encima)
+     mientras no llega el campo del cuadro, y vbl_despues lo devuelve. Cada pvr_scene_finish (envuelto con
+     -Wl,--wrap) apunta el campo de su cuadro en una cola: los cuadros se presentan en orden y uno por render.
+   - Si la CPU no llega (el cuadro empieza mas de un campo tarde), la cuenta empieza de nuevo en ese campo: no se
+     encadenan cuadros seguidos para alcanzarla.
+   - La logica no cambia: sigue el reloj de 59,94 pasos por segundo del original (PERIODO_60) y cada cuadro da los
+     pasos del tiempo pasado desde el anterior, que ahora empieza siempre en su campo: a 60 Hz 1, 1, 2 (exacto: un
+     paso por campo, como 0x1078c8), a 50 Hz 1,2 pasos por campo de media (8 cuadros de 1 paso y 1 de 2 cada 10
+     campos, 59,94 por segundo como el 6 por 5 x 1000/1001 del original). Las animaciones van por pasos: igual a
+     45 que a 60.
+   - Fuera de la carrera (menus, peliculas, cargas) como antes: cada cuadro en cuanto esta (hasta 60 / 50).
+   FPS_OBJETIVO >= campos por segundo (60 o 50) lo desactiva. */
+#ifndef FPS_OBJETIVO
+#define FPS_OBJETIVO 45
+#endif
+#define PRES_LAT 2                                              /* campos de la espera de un cuadro a su presentacion */
+static volatile uint32_t vbl_n;                                 /* campos (vblank) desde pvr_init */
+static volatile uint32_t pres_cola[8], pres_ini, pres_fin;      /* campo de presentacion de cada render pendiente */
+static volatile int pres_retiene;
+static uint32_t pres_campo;                                     /* campo del cuadro que se esta dibujando (0: ya) */
+static uint32_t pres_hz = 60, lim_base, lim_k, lim_on;          /* campos por segundo, cuenta de pres_espera */
+static uint32_t pres_tarde;                                     /* medida: cuadros que empezaron tarde */
+static void vbl_antes(uint32_t code, void *data)                /* antes de pvr_vblank_handler */
+{
+    (void)code; (void)data;
+    vbl_n++;
+    if (pvr_state.render_completed) {                           /* el render mas antiguo esta acabado: su campo? */
+        if (pres_ini != pres_fin && pres_cola[pres_ini & 7] && (int32_t)(vbl_n - pres_cola[pres_ini & 7]) < 0) {
+            pvr_state.render_completed = 0; pvr_state.render_busy++; pres_retiene = 1;   /* aun no: se esconde */
+        } else if (pres_ini != pres_fin) pres_ini++;            /* se presenta en este vblank */
+    }
+    genwait_wake_all((void *)&vbl_n);
+}
+static void vbl_despues(uint32_t code, void *data)              /* despues de pvr_vblank_handler */
+{
+    (void)code; (void)data;
+    if (pres_retiene) { pvr_state.render_completed = 1; pvr_state.render_busy--; pres_retiene = 0; }
+}
+void __real_pvr_scene_finish(void);
+void __wrap_pvr_scene_finish(void)                              /* todos los cuadros (tambien video.c y sp.c) */
+{
+    int f = irq_disable();
+    if (pres_fin - pres_ini < 8) { pres_cola[pres_fin & 7] = pres_campo; pres_fin++; }
+    irq_restore(f);
+    pres_campo = 0;
+    __real_pvr_scene_finish();
+}
+/* espera el campo del cuadro siguiente (en carrera) y deja apuntado el de su presentacion */
+static void pres_espera(int carrera)
+{
+    uint32_t g; int f;
+    if (FPS_OBJETIVO >= pres_hz || !carrera) { lim_on = 0; return; }
+    if (!lim_on) { lim_on = 1; lim_base = vbl_n; lim_k = 0; }
+    g = lim_base + (lim_k * pres_hz + FPS_OBJETIVO - 1) / FPS_OBJETIVO;
+    if ((int32_t)(vbl_n - g) > 1) { lim_base = g = vbl_n; lim_k = 0; pres_tarde++; }   /* tarde: la cuenta, desde aqui */
+    f = irq_disable();
+    while ((int32_t)(vbl_n - g) < 0) genwait_wait((void *)&vbl_n, "pres_espera", 100);
+    irq_restore(f);
+    pres_campo = g + PRES_LAT;
+    if (++lim_k == FPS_OBJETIVO) { lim_base += pres_hz; lim_k = 0; }   /* FPS_OBJETIVO cuadros = pres_hz campos */
+}
 static int t_cuenta = 9999, t_ext = 9999, t_bif;
 /* "<- FACIL" (2B0000, el unico rotulo de la bifurcacion del original: el banco 0x2B no tiene otro, ni "DIFICIL" en
    espanol ni "HARD" en ingles) como 4BB890 (PS2 0x1c50c0, llamada desde NAVI_PUB 0x1bd534 solo con la variante 1 en
@@ -8042,7 +8118,10 @@ int main(int argc, char **argv)
     presta_union(1);                                            /* aun sin carrera: el coche, el HUD y la pelicula */
     fsp_hueco = hueco_fsp;
     /* 2: PowerVR, texturas a la memoria de video y cabeceras */
+    pres_hz = modo_video == DM_640x480_PAL_IL ? 50 : 60;
+    vblank_handler_add(vbl_antes, NULL);                        /* antes que el de la PowerVR (va en orden) */
     pvr_init(&pp);
+    vblank_handler_add(vbl_despues, NULL);
     /* la prueba de alfa de la lista de recorte, como la del original: el TEST_1 del GS de los materiales con prueba de
        alfa (los 888 de PALM, LAKE, INDU, SNOW, METR y BEAC: ATST GEQUAL, AREF 0x40 con 0x80 = 1) deja pasar el alfa
        filtrado >= 0,5. La PowerVR arranca con PT_ALPHA_REF = 0xFF (KallistiOS no lo cambia): solo pasaba el alfa 1 tras
@@ -8123,6 +8202,7 @@ int main(int argc, char **argv)
     t0 = timer_ms_gettime64();
 
     for (;;) {
+        pres_espera(estado != TITULO);                          /* en carrera: el campo de este cuadro (FPS_OBJETIVO) */
         maple_device_t *mc = maple_enum_type(0, MAPLE_FUNC_CONTROLLER);
         cont_state_t *st = mc ? (cont_state_t *)maple_dev_status(mc) : NULL;
         uint32_t b = st ? st->buttons : 0, nuevo = b & ~bot_ant;
@@ -8980,8 +9060,9 @@ int main(int argc, char **argv)
 #ifdef DIAG_MS
             if (estado != TITULO && cur_nodo >= 0) {        /* medida: tiempos medios de los ultimos 30 cuadros */
                 pvr_stats_t ps; pvr_get_stats(&ps);
-                printf("MS: %.4s s %.0f fps %.1f dib %.2f log %.2f pvr %.2f tri %u vtx %u\n", curso[cur_nodo].zona, (double)yo.s,
-                       (double)fps, (double)ms, (double)ms_log, (double)(ps.rnd_last_time / 1000000.0), (unsigned)tri_enviados, (unsigned)vtx_ult);
+                printf("MS: %.4s s %.0f fps %.1f dib %.2f log %.2f pvr %.2f tri %u vtx %u tarde %u\n", curso[cur_nodo].zona, (double)yo.s,
+                       (double)fps, (double)ms, (double)ms_log, (double)(ps.rnd_last_time / 1000000.0), (unsigned)tri_enviados, (unsigned)vtx_ult,
+                       (unsigned)pres_tarde);
                 {   static const char *const N[10] = { "ini", "vis", "cielo", "etapa", "bo", "coche", "robot", "traf", "l2", "fin" };
                     char t[200]; int n = 0, j;
                     for (j = 0; j < 10; j++) n += sprintf(t + n, " %s %u/%u", N[j], prf_us[j] / 30, prf_v[j] / 30);

@@ -1050,6 +1050,40 @@ el bucle de vertices (27 instrucciones por vertice), el piloto (2,1 ms: la mezcl
 vertice), el coche (2,7 ms) y el principio del cuadro (1,6 ms: `coche_entorno` ~0,6 ms, una normal int8 a float por
 vertice).
 
+### 45 cuadros por segundo fijos (plan de recursos, 2026-11-12)
+
+Pedido del usuario: la tasa fija a 45 (decision del port: el original presenta un cuadro por campo cuando llega, hasta
+60 / 50). `FPS_OBJETIVO` (demo/main.c, 45; 60 o mas lo quita) solo en carrera (cuenta, carrera, meta, fin del tiempo,
+pausa y fin de carrera); los menus, las peliculas y las cargas van como antes.
+
+- Ritmo por campos, sin esperas por tiempo: el cuadro k empieza en el campo g_k = base + techo(k x campos / 45)
+  (`pres_espera`, arriba del bucle: genwait sobre la cuenta de campos del manejador del vblank) y se presenta en
+  g_k + 2. KallistiOS cambia de imagen en el primer vblank tras acabar el render (`pvr_vblank_handler`); `vbl_antes`,
+  registrado antes que el de la PowerVR, le esconde el render acabado hasta su campo (render_completed a 0 y
+  render_busy para que no empiece otro encima) y `vbl_despues` lo devuelve. `pvr_scene_finish` va envuelto
+  (`-Wl,--wrap`, demo/Makefile) para apuntar el campo de cada cuadro en una cola (tambien los de video.c y sp.c, que
+  no esperan): los renders se presentan en orden, uno por cuadro. `pvr_state` es de pvr_internal.h de KallistiOS
+  (main.o se compila con su ruta).
+- 60 Hz: 3 cuadros cada 4 campos (duran 1, 1 y 2 campos); 50 Hz: 9 cada 10 (8 de 1 campo y 1 de 2). 45 no divide ni
+  60 ni 50: el espaciado desigual es inevitable y se repite igual cada 4 / 10 campos (un leve tiron regular) en vez de
+  los saltos sueltos de cuando la CPU no llega. Si un cuadro empieza mas de un campo tarde, la cuenta vuelve a
+  empezar en ese campo (no se encadenan cuadros para alcanzarla; `tarde` en las lineas MS de `DIAG_MS`).
+- La logica no cambia: el reloj de 59,94 pasos por segundo del original (`PERIODO_60`) da a cada cuadro los pasos del
+  tiempo pasado desde el anterior, y como cada cuadro empieza en su campo salen 1, 1, 2 a 60 Hz (un paso por campo,
+  como 0x1078c8) y a 50 Hz 1,2 de media (59,94 por segundo, como su 6 por 5 x 1000/1001). Fisica, crono, tiempo,
+  animaciones y sonido van por pasos: igual a 45 que a 60.
+- CPU: `CPU_MS_CORTA` / `CPU_MS_ALARGA` 22 / 18 -> 21 / 17 ms (el cuadro tiene 22,2; la medida ya cuenta las
+  interrupciones y el hilo de carga, no las esperas de la PowerVR ni la del campo).
+
+Medido en Flycast (`-DPRUEBA_AUTO -DDIAG_MS -DDIAG_VTX`, el piloto en PALM): a 60 Hz 44,8 cuadros por segundo en IMPE
+(GHOS 42,7 con la carga de la union), a 50 Hz (consola PAL, eleccion 50Hz) 43,5-46,9 por cada 30 cuadros (media 45,0;
+el reloj en ms de la medida), 0 cuadros tarde, `lejos` en los 4000 m del original; dibujo 15,8-17,2 + logica 1,8-2,3
+ms. Con `-DPRUEBA_CRONO` el crono del HUD frente al reloj de la consola (lineas CRONO): 600 pasos en 9,982 s reales a 50 Hz y 1800 en 30,038 s a 60 Hz (59,94 pasos por segundo: 10,010 / 30,030 s), el crono del HUD 9,966 / 29,900 s como a 60 cuadros por segundo. `seguidas.sh`
+(7 carreras seguidas por el menu real con el bufer de 1920 KB y los datos de la VQ): zona 1312 KB (1344 con COCHE14)
+y RAM iguales antes de cada una, 0 "Out of memory", 0 "pvr_mem: ERROR", 0 frees dobles, 0 texturas rebajadas.
+Flycast no mide el tiempo del SH4 de la consola: en la consola el recorte por CPU puede acortar `lejos` si el cuadro
+pasa de 21 ms.
+
 ### Cambios de etapa: tirones (2026-11-11)
 
 Queja del probador (demo 31, consola real): "en algunos cambios de etapa hay glitches en el cielo y alguna
