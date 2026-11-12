@@ -29,7 +29,7 @@ los 15 coches, en reposo, con freno y con luces.
  - Piezas animadas (animadas(), bloque ANI1 detras de SVL1): volante, aleron del modelo 5, faros escamoteables, pinzas
    y ruedas van en su marco (la inversa de su matriz de reposo) con la pieza en el campo del nodo (<< 8); la demo pone
    la matriz de cada cuadro como 46AE70 (demo/main.c coche_anima_matrices). El vaciado mira 6 posturas (poses()).
-   +0C la sombra plana: en el PC es un RET, pero SLES-53998 la dibuja (subida 1 cm, en la matriz del coche). +08/+10
+   +0C la sombra plana: en el PC es un RET, pero SLES-53998 la dibuja (0x114630: car+B0 y 5 cm arriba). +08/+10
    los volumenes de sombra: mallas cerradas que el original extruye por la luz (sombra con plantilla: 0x1138b8 de
    SLES-53998, 422550/421740 del PC); van en el bloque SVL1 (volumenes()). No se dibuja (como en el original con
    vm = 1): +04 la vista interior.
@@ -109,6 +109,7 @@ G_DISCO, G_DISCO_CAL = 5, 6     # disco de freno +90 de la rueda o el caliente +
 # piezas animadas (bloque ANI1, campo del nodo de cada malla << 8): sus vertices van en el marco de la pieza (el de la
 # ultima operacion de la pila antes del giro animado) y la demo pone la matriz de cada cuadro (coche_anima)
 P_CUERPO, P_VOLANTE, P_ALERON, P_FAROS, P_PINZA, P_RUEDA, NPIEZAS = 0, 1, 2, 3, 4, 8, 12   # pinza y rueda: + k (0..3)
+P_SOMBRA = 12   # la sombra plana +0C: pieza propia (fuera de car+F0), sin datos en ANI1 (que sigue con NPIEZAS)
 # margenes del vaciado con piezas animadas (no son datos del juego: rangos que cubren lo que se ve al moverse):
 # direccion +-30 grados (el tope de car+32 en 4A4710: 5461 = 30 grados), volante +-5461 x 6 x 0,41667 (46AE70)
 DIR_MAX = 5461 * 2 * np.pi / 65536; VOL_MAX = 5461 * 6 * 2 * np.pi / 65536 * 0.416666657; ALERON_MIN = -0.305432618
@@ -134,9 +135,14 @@ def llamadas(A, m, pose=None):
       +60 (G_FARO) si car+4 & 0x100 (noche) y 0x800 (faros abiertos del todo, o sin escamoteables);
       c38 (car+38, pedal de freno) = 0: +80 (G_NOCHE) si car+4 & 0x300 (noche o tunel; 4A25F0), si no +7C (G_PILOTOS);
       c38 != 0: +84 (G_FRENO) y, en el modelo 5, 0x4001a en +1C con el angulo del aleron (G_FRENO).
-    +0C (sombra plana bajo el coche): en el PC 49A650 es un RET, pero SLES-53998 la dibuja (0x1893f8, el dibujo en
-    carrera: 0x189904..0x189950) con la matriz del coche (car+F0) subida (0, 0,01, 0) (vector 0x3d3fe0), tras los faros
-    y antes de +60. +08/+10 (volumenes de sombra) no son piezas: van aparte (volumenes(), bloque SVL1 de CEX2).
+    +0C (sombra plana bajo el coche): en el PC 49A650 es un RET, pero SLES-53998 la dibuja. En carrera (0x1886e0, el
+    dibujo del coche del jugador, el de 469600: 0x189040..0x18920c) y en la seleccion (0x18a138: 0x18a4c4) con 0x114630:
+    matriz car+B0 del coche del jugador ([0x557108] + 0xB0: sin car+F0, ni la suspension ni la subida de 4A2910) y
+    T(0, 0,05, 0) (0x3d4ccccd), material con alfa 0,5 x f12 que 0x111998 solo usa si [0x4be37c] != 0 (nadie lo
+    escribe: alfa 1). Va como pieza P_SOMBRA en su marco (reposo T(0, 0,05, 0)): la demo le pone esa matriz sin car+F0
+    (demo/main.c coche_anima_matrices). (Antes iba con car+F0 subida 0,01 como en 0x1893f8 / 0x189904, otro dibujo que
+    no es el de carrera: con el balanceo y la subida se metia bajo la calzada.)
+    +08/+10 (volumenes de sombra) no son piezas: van aparte (volumenes(), bloque SVL1 de CEX2).
     No va (como en el original con vm = 1): +04 (vista interior, vm = 2). Discos: +90 (G_DISCO) o el caliente +94
     (G_DISCO_CAL) con c38 > 200 y car+1F4 (km/h del modelo) != 0, los dos con su grupo (la demo elige).
     Animadas (pose: dict con 'giro' y 'dir' (4 ruedas), 'volante', 'aleron', 'faros' en radianes; None = parado):
@@ -165,7 +171,7 @@ def llamadas(A, m, pose=None):
         s.pop()
     if u(0x64) != NINGUNO:
         s.push(); s.translate(g3(0x68)); s.rot_x(q.get('faros', 0.0)); dib(u(0x64), 'faros', pieza=P_FAROS); s.pop()
-    s.push(); s.translate((0.0, 0.01, 0.0)); dib(u(0xc), 'sombra'); s.pop()   # SLES-53998 0x189904: +0C subida 1 cm
+    s.push(); s.translate((0.0, 0.05, 0.0)); dib(u(0xc), 'sombra', pieza=P_SOMBRA); s.pop()   # 0x114630: +0C en car+B0 + 5 cm
     dib(u(0x60), 'faro_luz', G_FARO)
     dib(u(0x7c), 'pilotos', G_PILOTOS); dib(u(0x80), 'pilotos_noche', G_NOCHE); dib(u(0x84), 'pilotos_freno', G_FRENO)
     if m == 5:
@@ -492,14 +498,51 @@ def triangulos_n(mod):
     return sum(x[5] - 2 for x in mod.mallas)
 
 # ------------------------------------------------------------------ salida
+def rebanadas(P, tris, holgura=0.03, minimo=0.005):
+    """trozos convexos de una parte cerrada (vertices P, triangulos tris): rebanadas entre los planos z de sus vertices
+    (los coches son mallas por secciones a lo largo de z: cada rebanada es casi convexa) con los puntos donde sus
+    aristas cortan esos planos; las vecinas se juntan (la de menos volumen anadido primero) mientras la envolvente de
+    las dos no pase de su volumen en mas de holgura (3 %) o minimo (5 litros: las placas finas quedan enteras, como
+    antes). DECISION DEL PORT (la PowerVR no cuenta: docs/PARIDAD.md, Sombras y marcas). Devuelve [puntos (n, 3)]"""
+    from scipy.spatial import ConvexHull
+    def vol(V):
+        try: return ConvexHull(V).volume
+        except Exception: return 0.0
+    def corte(z):
+        Q = []
+        for t in tris:
+            for a, b in ((t[0], t[1]), (t[1], t[2]), (t[2], t[0])):
+                za, zb = P[a][2] - z, P[b][2] - z
+                if za * zb < 0: Q.append(P[a] + (P[b] - P[a]) * (za / (za - zb)))
+        return Q
+    vs = sorted(set(i for t in tris for i in t))
+    zs = sorted(set(np.round(P[vs][:, 2], 4).tolist()))
+    tr = []
+    for z0, z1 in zip(zs[:-1], zs[1:]):
+        V = np.array([P[i] for i in vs if z0 - 1e-5 <= P[i][2] <= z1 + 1e-5] + corte(z0) + corte(z1))
+        tr.append([V, vol(V)])
+    if not tr: return [P[vs]]
+    while len(tr) > 1:
+        mejor = None
+        for i in range(len(tr) - 1):
+            V = np.vstack([tr[i][0], tr[i + 1][0]]); s = tr[i][1] + tr[i + 1][1]; ex = vol(V) - s
+            if ex <= max(holgura * s, minimo) and (mejor is None or ex / max(s, 1e-9) < mejor[0]):
+                mejor = (ex / max(s, 1e-9), i, V, s)
+        if mejor is None: break
+        _, i, V, s = mejor; tr[i:i + 2] = [[V, s]]
+    return [V for V, _ in tr]
+
 def volumenes(A, m):
     """volumenes de sombra del coche (+08 y +10 de la disposicion; PC 46BA20 -> 420E50 / 4211F0, SLES-53998 0x1138b8
     -> 0x113bf8): mallas cerradas (o placas de dos caras) en el marco del coche, de los triangulos que dibuja el VU1 (sin
     la bandera ADC). El original cuenta en la plantilla (sube con las caras de delante, baja con las de detras: sombra
     si no es 0), asi que le valen mallas no convexas; la PowerVR solo sabe par / impar (una sombra donde la silueta
     extruida se dobla sobre si misma, por ejemplo entre el capo y la cabina, sale par: sin sombra). Por eso cada parte
-    conexa de cada volumen va como su envolvente convexa (scipy): la silueta extruida de un convexo no se dobla y par /
-    impar da lo mismo que la cuenta del original; la sombra en el suelo es la de la envolvente (rellena las muescas).
+    conexa de cada volumen va en trozos convexos (rebanadas()): la silueta extruida de un convexo no se dobla, par /
+    impar da lo mismo que la cuenta del original y la PowerVR junta los volumenes (sombra si esta dentro de alguno),
+    asi que la sombra es la de la union de los trozos. Antes cada parte iba entera como su envolvente convexa: en la
+    carroceria la envolvente une por debajo los bultos de las ruedas (que bajan hasta y = 0) y su cara de abajo
+    quedaba sobre la calzada: sin sombra bajo el coche y una raya punteada en el suelo por el lado del sol.
     Aristas como 4211F0 / 421680: cada triangulo con su normal de cara (hacia fuera) aporta sus 3 aristas y una arista se
     empareja con la inversa (segunda cara). Devuelve [(posiciones (n, 3), aristas [(a, b, n1, n2 o None)])]"""
     from scipy.spatial import ConvexHull
@@ -527,22 +570,23 @@ def volumenes(A, m):
             for k in t[1:]: padre[raiz(k)] = raiz(t[0])
         partes = {}
         for t in tris: partes.setdefault(raiz(t[0]), set()).update(t)
+        n0 = len(res)
         for vs in partes.values():
-            V = P[sorted(vs)]
-            if len(V) < 4: continue
-            try: H = ConvexHull(V)
-            except Exception: continue
-            usa = sorted(set(H.simplices.ravel())); nuevo = {v: i for i, v in enumerate(usa)}; aris = []
-            for t, eq in zip(H.simplices, H.equations):
-                a, c, d = (nuevo[v] for v in t); n = eq[:3]
-                if np.dot(np.cross(V[t[1]] - V[t[0]], V[t[2]] - V[t[0]]), n) < 0: c, d = d, c   # hacia fuera
-                for x, y in ((a, c), (c, d), (d, a)):
-                    for e in aris:                      # 421680: la inversa por posicion
-                        if e[0] == y and e[1] == x and e[3] is None: e[3] = n; break
-                    else: aris.append([x, y, n, None])
-            res.append((V[usa].astype(np.float32), aris))
-        print('   volumen +%02X: %d triangulos, %d partes; envolventes: %s' % (off, len(tris), len(partes),
-              ', '.join('%d vertices %d aristas' % (len(v), len(a)) for v, a in res[-len(partes):])))
+            if len(vs) < 4: continue
+            for V in rebanadas(P, [t for t in tris if t[0] in vs]):
+              try: H = ConvexHull(V)
+              except Exception: continue
+              usa = sorted(set(H.simplices.ravel())); nuevo = {v: i for i, v in enumerate(usa)}; aris = []
+              for t, eq in zip(H.simplices, H.equations):
+                  a, c, d = (nuevo[v] for v in t); n = eq[:3]
+                  if np.dot(np.cross(V[t[1]] - V[t[0]], V[t[2]] - V[t[0]]), n) < 0: c, d = d, c   # hacia fuera
+                  for x, y in ((a, c), (c, d), (d, a)):
+                      for e in aris:                      # 421680: la inversa por posicion
+                          if e[0] == y and e[1] == x and e[3] is None: e[3] = n; break
+                      else: aris.append([x, y, n, None])
+              res.append((V[usa].astype(np.float32), aris))
+        print('   volumen +%02X: %d triangulos, %d partes; trozos convexos: %s' % (off, len(tris), len(partes),
+              ', '.join('%d vertices %d aristas' % (len(v), len(a)) for v, a in res[n0:])))
     return res
 
 def bloque_svl(vols):
@@ -628,6 +672,27 @@ def extension(mod):
     b = b''.join(pal)
     return np.frombuffer(b, '<f4').reshape(-1, 1)
 
+def sombra_clamp(A, mod, m):
+    """CLAMP del GS (+18 del estado de la tabla 7) de los materiales de la sombra plana +0C: WMS / WMT = 1 (CLAMP) en
+    la textura de sus mallas -> bits 0x1000 (u) / 0x2000 (v) del formato (demo/main.c compila_cab: PVR_UVCLAMP). Sin el,
+    el borde de fuera (v = 0, alfa 0) se mezclaba con el centro (repetir: v = 1, alfa ~200): una raya oscura y
+    punteada a lo largo del coche, 1,08 m a cada lado. Solo si la textura no la usa otra pieza"""
+    L = disposiciones(A) + 0x128 * m; ident = A.elf.u32(L + 0xc)
+    if ident == NINGUNO: return
+    b = _bloque_recurso(A, ident >> 16); reg = list(b.registros())[ident & 0xFFFF]
+    (n4, o4), (n7, o7) = reg[4], reg[7]; ms = mt = True
+    for k in range(n4):
+        j = struct.unpack('<i', b.m[b.A + o4 + 36 * k + 16:b.A + o4 + 36 * k + 20])[0]
+        if not 0 <= j < n7: ms = mt = False; continue
+        c = struct.unpack('<Q', b.m[b.A + o7 + 48 * j + 24:b.A + o7 + 48 * j + 32])[0]
+        ms &= (c & 3) == 1; mt &= (c >> 2 & 3) == 1
+    bits = (0x1000 if ms else 0) | (0x2000 if mt else 0)
+    sus = {x[1] for x in mod.mallas if x[9].get('pieza') == P_SOMBRA and x[1] >= 0}
+    otras = {x[1] for x in mod.mallas if x[9].get('pieza') != P_SOMBRA}
+    for ti in sus - otras:
+        w, h, fmt, li, off, tam = mod.texs[ti]; mod.texs[ti] = (w, h, fmt | bits, li, off, tam)
+    print('   sombra plana: CLAMP %s%s (texturas %s)' % ('u' if ms else '-', 'v' if mt else '-', sorted(sus - otras)))
+
 def convierte(A, m, sal, tope=TOPE, vista=None):
     """el coche montado como el original (llamadas) y, si lo que se dibuja a la vez pasa del tope del TA, sin lo que
     no se ve desde las camaras del juego (con la vuelta baja de los choques y, si aun no cabe, sin ella). No se tapa,
@@ -645,6 +710,7 @@ def convierte(A, m, sal, tope=TOPE, vista=None):
             dibuja_vista(mod, os.path.join(vista, os.path.basename(sal).replace('.DAT', '.png')))
         except Exception as ex: print('vista:', ex)
     mod.recorta_texturas()
+    sombra_clamp(A, mod, m)
     mod._svol = volumenes(A, m)
     mod._ani = animadas(A, mod, m)                              # piezas animadas a su marco y bloque ANI1
     mod.mallas.sort(key=lambda x: (x[0], x[1]))                # el orden de escribe (estable): el de CEX2

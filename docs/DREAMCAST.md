@@ -427,11 +427,16 @@ bit de modificador; el coche del jugador no) que queda dentro se multiplica por 
 - TA: cada triangulo del volumen son 40 bytes teoricos (palabra ISP y 9 floats) x `ta_f`; el volumen va entero o no va
   (`ta_cabe` no puede cortarlo: un volumen sin su ultimo triangulo no se cierra). Medido (Flycast, `DIAG_VTX`, campo
   `sombra`): 118-186 triangulos por cuadro, 4-7 KB teoricos (7-12 KB contados). Solo los dibuja el coche del jugador
-  (el trafico lleva su sombra plana).
+  (el trafico lleva su sombra plana). Con los trozos convexos (2026-11-12): 172-186 en el F40 (9 volumenes), 324-332
+  (13 KB teoricos) en el 512 BB (20 volumenes, que antes no tenia sombra: el cargador solo admitia 8).
 - Paridad: la PowerVR decide dentro / fuera por par / impar de las caras del volumen delante de cada pixel (Flycast
   igual: plantilla con XOR), el original cuenta (+1 / -1 en la plantilla). Con las mallas tal cual, donde la silueta
-  extruida se dobla (entre el capo y la cabina) la sombra salia par (vacia); por eso cada parte conexa va como su
-  envolvente convexa (`tools/conv_coche.py volumenes`): 1-5 volumenes por coche.
+  extruida se dobla (entre el capo y la cabina) la sombra salia par (vacia); por eso cada parte conexa va en trozos
+  convexos (`tools/conv_coche.py volumenes` / `rebanadas`): 6-20 volumenes por coche (hasta SVOL_MAX = 32), y la
+  PowerVR junta los volumenes (sombra si el pixel esta dentro de alguno). Antes cada parte iba entera como su
+  envolvente: en la carroceria la envolvente unia por debajo los bultos de las ruedas y su cara de abajo quedaba en la
+  calzada. Las cuentas de la RAM: SVL1 crece 1,6-7 KB por coche; COCHE04 (el F40) queda en 423,6 KB del bloque fijo de
+  424 (antes 420,5).
 - Marcas (`efectos_paso` / `efectos_dibuja`): anillos del original de 256 + 64 + 64 cuadrilateros (4 vertices, 108
   bytes teoricos cada uno; solo los de menos de 250 m delante): 41 KB teoricos como mucho. Texturas: EFECTOS.DAT, 3 de
   64x32 ARGB4444 (12 KB de VRAM).

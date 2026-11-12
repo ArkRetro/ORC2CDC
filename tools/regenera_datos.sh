@@ -8,6 +8,8 @@
 # Segunda pasada de la VQ (tools/revq.py, vq.UMBRAL2) en las etapas y uniones antes de empaquetarlas y en los modelos
 # sueltos (salvo los coches): con los conversores de ahora no tiene nada que hacer; con unos datos de antes del
 # 2026-11-12 basta borrar SEGS.PAK y UNIONES.PAK con las SEGnn.DAT enteras en datos/ y las uniones sueltas en trabajo/u0, u/.
+# Coches de antes del 2026-11-12 por la noche (sombra plana P_SOMBRA con su CLAMP y volumenes de sombra en trozos
+# convexos, conv_coche.py): borrar COCHES.DAT y COCHE00-14.DAT de datos/ y trabajo/coche/.
 # Lo que sale del disco no va al repositorio. Idempotente: lo que ya esta en datos/ (o en trabajo/) no se rehace; si se
 # corta, se vuelve a llamar y sigue. En paralelo (JOBS, por defecto nproc). Sale con error si falla cualquier paso.
 # trabajo/ (por defecto /dev/shm/or2_regenera): intermedios (uniones sueltas, ~350 MB) y registros de cada paso.

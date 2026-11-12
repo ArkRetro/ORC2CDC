@@ -239,7 +239,8 @@ static inline int malla_de_cartel(const modelo_t *m, const malla_t *ma)
 }
 
 /* texturas a la memoria de video y cabeceras; el blob de texeles ya no hace falta en la RAM tras esto.
-   Formato de la textura (tools/modelo.py): bits 0-7 el de 16 bits, bit 8 VQ, bits 16-23 entradas del libro - 1. Una
+   Formato de la textura (tools/modelo.py): bits 0-7 el de 16 bits, bit 8 VQ, bits 12-13 CLAMP en u / v, bits 16-23
+   entradas del libro - 1. Una
    VQ con libro reducido (N < 256 entradas, las ultimas) se direcciona 2048 - 8 N bytes antes de sus datos: la PowerVR
    lee el libro en la direccion de la textura y los indices 2 KB despues, y nunca toca las entradas que faltan. */
 static void compila_cab(modelo_t *m, uint32_t i, int especular)   /* especular: 1 desplazamiento, 2 ademas sumada */
@@ -263,6 +264,8 @@ static void compila_cab(modelo_t *m, uint32_t i, int especular)   /* especular: 
         if (t->fmt & 0x800) { cx.depth.comparison = PVR_DEPTHCMP_GEQUAL; if (t->lista == 2) cx.txr.env = PVR_TXRENV_MODULATEALPHA; }
         if ((t->fmt & 0x400) && t->lista == 2) { cx.blend.src = PVR_BLEND_SRCALPHA; cx.blend.dst = PVR_BLEND_ONE; }
         if (t->fmt & 0x200) cx.txr.mipmap = true;
+        /* 0x1000 / 0x2000: CLAMP del GS en u / v (la sombra plana del coche, tools/conv_coche.py sombra_clamp) */
+        if (t->fmt & 0x3000) cx.txr.uv_clamp = ((t->fmt & 0x1000) ? PVR_UVCLAMP_U : 0) | ((t->fmt & 0x2000) ? PVR_UVCLAMP_V : 0);
         pvr_poly_compile(&m->cabs[f][i], &cx);
     }
 }
@@ -1392,7 +1395,7 @@ static void dibuja_indices(const modelo_t *mo, int l, const uint16_t *idx, uint3
 /* piezas animadas de un modelo (tools/conv_coche.py animadas, conv_trafico.py: la pieza va en el campo del nodo << 8; 0
    = la que no se mueve): idx = las mallas ordenadas por lista y pieza, ini[l][p] = la primera de la pieza p en la lista
    l. Devuelve 1 si hay alguna malla de una pieza animada (0: sin piezas, idx = NULL) */
-#define NPZ_MAX 12
+#define NPZ_MAX 13
 static int piezas_indices(const modelo_t *mo, int np, uint16_t **idx, uint16_t ini[3][NPZ_MAX + 1])
 {
     uint32_t k, n = 0; int l, p, hay = 0;
@@ -6802,7 +6805,8 @@ typedef struct { uint32_t malla, tipo; int32_t ranura; uint32_t fijo, v0; } cex_
 /* volumenes de sombra del coche (bloque SVL1; sombra_dibuja): vertices en el marco del coche y aristas de 12 bytes
    {u16 a, b; s8 normal de la primera cara x 127, u8 caras (1 o 2); s8 normal de la segunda, 0} */
 typedef struct { uint32_t nv, ne; const float *v; const uint8_t *e; } svol_t;
-static svol_t svol[8]; static int nsvol;
+#define SVOL_MAX 32                                             /* trozos convexos por coche (6-20 en los 15 coches) */
+static svol_t svol[SVOL_MAX]; static int nsvol;
 static const uint32_t *cex_col, *cex_vd, *cex_grp; static const cex_t *cex_m; static uint32_t cex_nsl, cex_n, cex_ngrp;
 static uint32_t *cex_n0; static int cex_color, cex_luces = -1;   /* cuenta de vertices de cada malla; grupos encendidos */
 static uint32_t cex_mul(uint32_t c, uint32_t luz)
@@ -6896,14 +6900,16 @@ static void coche_luces(uint32_t banderas, int freno, int caliente)
    (t = car+1F4 / 480, x = car+1CC acotado a +-pi/2, car+1CC = media de 30 cuadros de 1000 x car+1C8 (4A2D70), car+1C8
    = cambio de car+1C4 en el cuadro); balanceo 0 (solo con car+4 & 1 = 0: el jugador lo tiene). En la seleccion el
    coche esta parado: todo en reposo (4A5B20 llama a 4A2910 y 4A4710 con car+1F4 = 0). */
-#define NPZ 12
+#define NPZ 13                                                  /* piezas que se dibujan (las 12 de ANI1 y la sombra) */
+#define NPZ_ANI 12                                              /* las de ANI1 (con sus datos) */
+#define PZ_SOMBRA 12                                            /* la sombra plana +0C (tools/conv_coche.py P_SOMBRA) */
 #define PZ_VOLANTE 1
 #define PZ_ALERON 2
 #define PZ_FAROS 3
 #define PZ_PINZA 4
 #define PZ_RUEDA 8
 typedef struct {
-    int ok; uint32_t modelo; float radio, base, p20, p24, p28, p2c, pz[NPZ][5];
+    int ok; uint32_t modelo; float radio, base, p20, p24, p28, p2c, pz[NPZ_ANI][5];
     uint16_t *idx, ini[3][NPZ_MAX + 1];
     float giro[4];                                              /* rueda +30 (rad) */
     int16_t h204[30]; int i204, s204;                           /* 4A4710 */
@@ -6948,7 +6954,7 @@ static void coche_cex(int c)
     coche_luces(0, 0, 0);                                       /* pilotos sin luces ni freno */
     {   /* SVL1 (tools/conv_coche.py bloque_svl): partes convexas de los volumenes +08 y +10, detras de los grupos */
         const uint32_t *q = cex_grp + 2 * w[5], *fin = w + coche.nruta; uint32_t n, j;
-        if (q + 2 <= fin && !memcmp(q, "SVL1", 4) && (n = q[1]) <= 8) {
+        if (q + 2 <= fin && !memcmp(q, "SVL1", 4) && (n = q[1]) <= SVOL_MAX) {
             q += 2;
             for (j = 0; j < n; j++) {
                 if (q + 2 > fin || q + 2 + 3 * q[0] + 3 * q[1] > fin) { nsvol = 0; break; }
@@ -7008,7 +7014,7 @@ static void coche_ani_lee(void)
         n = q[1]; q += 2;
         for (j = 0; j < n && q + 2 <= fin; j++) q += 2 + 3 * q[0] + 3 * q[1];
     }
-    if (q + 9 + 5 * NPZ > fin || memcmp(q, "ANI1", 4) || q[1] < 9 + 5 * NPZ) return;
+    if (q + 9 + 5 * NPZ_ANI > fin || memcmp(q, "ANI1", 4) || q[1] < 9 + 5 * NPZ_ANI) return;
     ani.modelo = q[2]; memcpy(&ani.radio, q + 3, 6 * 4); memcpy(ani.pz, q + 9, sizeof ani.pz);
     if (!(ani.radio > 0.05f)) ani.radio = 0.33f;
     if (!piezas_indices(&coche, NPZ, &ani.idx, ani.ini)) return;
@@ -7114,6 +7120,10 @@ static void coche_anima_matrices(int titulo)
         memcpy(*R, *P, sizeof(matrix_t));
         if (ani.giro[k] != 0) m_rx(*R, ani.giro[k]);
     }
+    /* sombra plana +0C (0x114630, en carrera desde 0x1886e0 y en la seleccion desde 0x18a138): car+B0 del coche del
+       jugador ([0x557108] + 0xB0, aqui mod_coche) y T(0, 0,05, 0), fuera de car+F0: no sigue la suspension ni la
+       subida de 4A2910 */
+    m_id(ani_m[PZ_SOMBRA]); m_tras(ani_m[PZ_SOMBRA], 0, 0.05f, 0);
 }
 /* el coche del jugador en la lista l: cada pieza con su matriz (sin ANI1, entero con la del coche) */
 static void coche_dibuja(int l, matrix_t *mc)
@@ -7628,7 +7638,8 @@ static void traf_parpadea(int suspendido)
 }
 
 /* Sombra del coche del jugador como el original: volumenes de sombra (+08 y +10 de la disposicion, bloque SVL1)
-   extruidos por la luz del sol. SLES-53998 0x1893f8 dibuja en carrera (vm = 1) los dos volumenes con 0x1138b8
+   extruidos por la luz del sol. SLES-53998 0x1886e0 (el dibujo del coche del jugador en carrera, el 469600 del PC)
+   dibuja con vm = 1, ya en car+F0 (la matriz local: suspension y subida de 4A2910), los dos volumenes con 0x1138b8
    (silueta 0x113bf8: aristas de 0x24 bytes, cuadrilateros extruidos por la luz en el marco del coche) en una
    plantilla emulada en el GS y oscurece con 0x114150 lo que queda dentro, antes de dibujar la carroceria; el PC hace lo
    mismo con la plantilla de D3D (422550 / 421740 / 421A90 y el cuadro 0x5F000000 de 4220F0). Luz: la 1 del entorno 0
@@ -7639,7 +7650,9 @@ static void traf_parpadea(int suspendido)
    (lista OP_MOD, "cheap shadow"): lo opaco y lo recortado de la escena y del trafico que queda dentro se multiplica por
    SOMBRA_ESCALA. Sin tapas, como el original: la PowerVR cuenta las caras del volumen delante de cada pixel (par/impar)
    y la camara de carrera nunca esta dentro (en la vista interior, vm = 2, el original no las dibuja: aqui tampoco, el
-   coche no se dibuja). Si un extremo quedara detras del plano cercano, la extrusion se acorta hasta el. */
+   coche no se dibuja). Si un extremo quedara detras del plano cercano, la extrusion se acorta hasta el. Cada volumen
+   llega en trozos convexos (tools/conv_coche.py rebanadas: par / impar en un convexo es la cuenta del original) y la
+   PowerVR junta los volumenes. */
 #define SOMBRA_EXT 25.0f                                        /* 6282D0 del PC */
 #define SOMBRA_ESCALA (160.0f / 255.0f)                         /* 1 - 0x5F / 255: el cuadro de 4220F0 */
 #define SOMBRA_TRI 512                                          /* triangulos por volumen como mucho */
@@ -8998,7 +9011,15 @@ int main(int argc, char **argv)
             if (l == 0) {                                       /* volumenes de sombra (afectan a lo opaco y recortado) */
                 pvr_list_begin(PVR_LIST_OP_MOD);
                 sombra_tri = sombra_teo = 0;
-                if (estado != TITULO && (!cam_ok || cam_coche_visible(&cam))) { mat_load(&vista); mat_apply(&mod_coche); sombra_dibuja(mod_coche); }
+                if (estado != TITULO && (!cam_ok || cam_coche_visible(&cam))) {
+                    /* en car+F0 como 0x1886e0 (los volumenes van tras cargar la matriz local, como la carroceria) */
+                    static matrix_t mf __attribute__((aligned(32))); int i_, j_;
+                    for (i_ = 0; i_ < 4; i_++)
+                        for (j_ = 0; j_ < 4; j_++)
+                            mf[i_][j_] = (ani.ok ? ani_m[0][i_][0] : i_ == 0) * mod_coche[0][j_] + (ani.ok ? ani_m[0][i_][1] : i_ == 1) * mod_coche[1][j_] +
+                                         (ani.ok ? ani_m[0][i_][2] : i_ == 2) * mod_coche[2][j_] + (ani.ok ? ani_m[0][i_][3] : i_ == 3) * mod_coche[3][j_];
+                    mat_load(&vista); mat_apply(&mf); sombra_dibuja(mf);
+                }
                 pvr_list_finish();
             }
         }

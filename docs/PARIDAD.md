@@ -444,22 +444,42 @@ calzada sube por el puente hasta +5 m (el coche "pasaba por debajo de la carrete
 
 Peticion del probador: efectos de sombras. Lo que hace el original y como va en la Dreamcast:
 
-- Sombra del coche del jugador (SLES-53998 0x1893f8, el dibujo en carrera, vm = 1): (1) los volumenes de sombra +08 y
-  +10 de la disposicion (mallas cerradas en el marco del coche: la parte baja de la carroceria y las piezas altas) con
-  0x1138b8: luz en el marco del coche, silueta 0x113bf8 (aristas de 0x24 bytes con las normales de sus dos caras, como
+- Sombra del coche del jugador (SLES-53998 0x1886e0, el dibujo del coche del jugador en carrera = 469600 del PC,
+  llamado desde 0x188578 con la matriz car+B0; vm = 1): (1) los volumenes de sombra +08 y
+  +10 de la disposicion (mallas cerradas en el marco del coche: la parte baja de la carroceria con los bultos de las
+  ruedas hasta y = 0, y las piezas altas) con
+  0x1138b8, ya en car+F0 (la matriz local: suspension y subida de 4A2910): luz en el marco del coche, silueta 0x113bf8
+  (aristas de 0x24 bytes con las normales de sus dos caras, como
   4211F0 / 421680 / 421740 del PC) y cuadrilateros extruidos por la luz, dos pasadas en una plantilla emulada en el GS
   (estados 0x169ce0) y 0x114150 oscurece lo marcado leyendo el bufer de imagen como textura, antes de dibujar la
   carroceria (la carroceria no recibe su sombra); el PC hace lo mismo con la plantilla de D3D (422550 / 421A90, cuadro
-  0x5F000000 de 4220F0). (2) La sombra plana +0C (mancha negra con alfa, 128x32) en la matriz del coche subida 0,01 m
-  (0x189904, vector 0x3d3fe0); en el PC 49A650 es un RET. Luz: la 1 del entorno (4082B0(1, 0, 0) + 44): scn_env_sun
+  0x5F000000 de 4220F0). (2) La sombra plana +0C (mancha negra con alfa, 128x32) con 0x114630 (0x189040..0x18920c):
+  matriz car+B0 del coche del jugador ([0x557108] + 0xB0, sin car+F0) y T(0, 0,05, 0) (0x3d4ccccd); 0x111998 pondria
+  el alfa del material a 0,5 x f12 (f12 = 1, o 2 (0,5 - car+2DC) con car+2C8 > 0) solo si [0x4be37c] != 0, y nadie lo
+  escribe (bss): alfa 1. Su material lleva CLAMP (+18 del estado del GS) en u y v en 7 coches, solo en v en 6 y en ninguno en 2
+  (`tools/conv_coche.py sombra_clamp`). La seleccion (0x18a138 desde 0x189c3c / 0x189d20) dibuja la +0C igual y sin
+  volumenes; 0x1893f8 (+0C en car+F0 subida 0,01 con el vector 0x3d3fe0) es otro dibujo que no es el de carrera. En
+  el PC 49A650 es un RET. Luz: la 1 del entorno (4082B0(1, 0, 0) + 44): scn_env_sun
   lista 1, (0, 0, -1) girada por la inclinacion y el rumbo (44A430) en el marco de la etapa (CURSO.DAT, `sol`; PALM
   -40 / -60). CONFIRMADO (codigo de PS2 y PC). En la demo: volumen modificador OP_MOD "cheap shadow" (`sombra_dibuja`,
-  bloque SVL1 de COCHEnn.DAT) y la +0C como pieza del coche (`tools/conv_coche.py llamadas`). Diferencias: (a)
+  bloque SVL1 de COCHEnn.DAT, con mod_coche x car+F0) y la +0C como pieza propia P_SOMBRA (`tools/conv_coche.py
+  llamadas`, demo `PZ_SOMBRA`: mod_coche x T(0, 0,05, 0)). Diferencias: (a)
   oscurecimiento 1 - 0x5F / 255 (el del PC; el factor exacto de 0x114150 no se ha descifrado: PROBABLE); (b) extrusion
-  25 m (6282D0 del PC; la PS2 la lleva hasta el borde de la vista), acortada si llegara al plano cercano; (c) envolvente
-  convexa de cada parte (la PowerVR cuenta par / impar y el original suma: DREAMCAST.md); (d) recibe la sombra lo
-  opaco y lo recortado (la escena y el trafico), no lo translucido. Verificado en E (hoja en el scratchpad,
-  sombras/hoja.png). Prueba: `-DSOL_PRUEBA=grados` gira el sol para verla de lado.
+  25 m (6282D0 del PC; la PS2 la lleva hasta el borde de la vista), acortada si llegara al plano cercano; (c)
+  DESVIACION: trozos convexos de cada parte (`rebanadas`: rebanadas entre los planos z de sus vertices, juntas mientras
+  la envolvente no crezca mas de un 3 % o 5 litros; la PowerVR cuenta par / impar y el original suma: DREAMCAST.md); (d)
+  recibe la sombra lo opaco y lo recortado (la escena y el trafico), no lo translucido. Prueba: `-DSOL_PRUEBA=grados`
+  gira el sol para verla de lado.
+  CORREGIDO (2026-11-12, demo 37: "arregla las sombras de los Ferrari"), comparado con el original en Flycast
+  (PRUEBA_GUION, la escena de la salida y PRUEBA_FICHA 4 / 9 / 11; capturas en el scratchpad, som/): (1) la +0C iba
+  en car+F0 subida 0,01 m (la de 0x1893f8): con el balanceo, el cabeceo y la subida de la suspension quedaba entre -2 y
+  +4 cm sobre la calzada (medido) y casi no se veia: ningun contacto con el suelo en la salida; ahora como 0x114630.
+  (2) Sin el CLAMP del material la textura se repetia: el borde (v = 0, alfa 0) se mezclaba con el centro (v = 1) y
+  salia una raya oscura punteada en el suelo a 1,08 m del centro, a lo largo del coche. (3) La envolvente convexa de
+  la carroceria entera unia por debajo los bultos de las ruedas: su cara de abajo quedaba en y = 0 (sin sombra bajo el
+  coche entre las ruedas). (4) El cargador de SVL1 admitia 8 volumenes y el 288 GTO, el 512 BB y el Daytona (12, 18 y 9
+  partes) no tenian sombra de volumen (medido en el 512 BB: 0 triangulos; ahora 324); ahora hasta 32 (6-20 trozos por
+  coche). (5) Los volumenes iban sin car+F0 (la carroceria con su suspension y la sombra no se movian juntas).
 - Trafico: su sombra plana (obj_vshadow, subida 0,1 m en el LOD 0) ya iba (Coches: trafico).
 - Marcas de las ruedas: ver la tabla (CORREGIDO). El original tambien deja marcas de tierra y hierba (siempre, sin
   derrapar) y la demo ahora tambien (superficie de la COLI bajo cada rueda).
