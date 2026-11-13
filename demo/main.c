@@ -9011,7 +9011,7 @@ static uint8_t *hueco_fin(uint32_t *cap)
    el sitio (FINEc.DAT), los objetos (FINPROP.DAT, detras) y FINAL.DAT (el guion se usa en su sitio, detras) van en el
    hueco de la etapa; las tablas de STAFF.DAT en el hueco de la union prestado (como el resto de escenas). Nada del
    monton salvo las tablas pequenas de cada modelo (vis, tramos y cabeceras, como cualquier union) */
-static modelo_t fin_mod, fin_prop;
+static modelo_t fin_mod, fin_prop, fin_sky;
 static int fin_chr;                                             /* la pareja del final en chr (FINCHRgg.DAT) */
 /* la pareja del final en buf (el hueco de la etapa): como robot_carga sin copiar al bloque (sus texturas con sube_modelo) */
 static int final24_chr(int g, uint8_t *buf, uint32_t cap)
@@ -9049,7 +9049,7 @@ static void final24_suelta(void)
     }
     final_sale();
     if (fin_mod.datos || fin_prop.datos) pvr_wait_ready();
-    libera_modelo(&fin_mod); libera_modelo(&fin_prop);
+    libera_modelo(&fin_mod); libera_modelo(&fin_prop); libera_modelo(&fin_sky);
     fin24 = fin_rue = 0;
 }
 static int final24_entra(int como)
@@ -9068,6 +9068,13 @@ static int final24_entra(int como)
     if (r) { musica_pausa_lectura(0); dbglog(DBG_ERROR, "FINAL: %s (%d)\n", n, r); libera_modelo(&fin_mod); return -3; }
     if (fin_mod.vis) memset(fin_mod.vis, 0xff, (fin_mod.nnodos + 31) / 32 * 4);   /* todo el sitio (44B890: sin recorte) */
     o = ((uint32_t)(fin_mod.blob - hueco_etapa) + 31) & ~31u;  /* (los texeles ya estan en la VRAM) */
+    if (c >= 5) {                                               /* el fondo de los presets 0 / 2 (4522D0): FINSKYc.DAT */
+        char ns[24]; sprintf(ns, "FINSKY%d.DAT", c);
+        if (!lee_modelo_en(&fin_sky, ns, hueco_etapa + o, cap_etapa - o) && !sube_modelo(&fin_sky)) {
+            if (fin_sky.vis) memset(fin_sky.vis, 0xff, (fin_sky.nnodos + 31) / 32 * 4);
+            o = ((uint32_t)(fin_sky.blob - hueco_etapa) + 31) & ~31u;
+        } else { dbglog(DBG_ERROR, "FINAL: sin %s\n", ns); libera_modelo(&fin_sky); }
+    }
     if (!lee_modelo_en(&fin_prop, "FINPROP.DAT", hueco_etapa + o, cap_etapa - o) && !sube_modelo(&fin_prop))
         o = ((uint32_t)(fin_prop.blob - hueco_etapa) + 31) & ~31u;
     else { dbglog(DBG_ERROR, "FINAL: sin FINPROP.DAT\n"); libera_modelo(&fin_prop); }
@@ -9101,6 +9108,13 @@ static void final24_dibuja(int l)
     const final_vista_t *V = final_vista(); int i, ult; uint32_t k;
     static matrix_t M __attribute__((aligned(32)));
     if (!fin_mod.cabs[0]) return;
+    {   float f[4];                                             /* 4522D0: el fondo en T(x, y, z) (opaco: alfa >= 0,9) */
+        if (fin_sky.cabs[0] && final_fondo(f)) {
+            memset(M, 0, sizeof M); M[0][0] = M[1][1] = M[2][2] = M[3][3] = 1; M[3][0] = f[0]; M[3][1] = f[1]; M[3][2] = f[2];
+            mat_load(&vista); mat_apply(&M);
+            dibuja_rango(&fin_sky, l, fin_sky.inicio[l], fin_sky.inicio[l + 1], 0, 1, 0);
+        }
+    }
     mat_load(&vista);
     dibuja_rango(&fin_mod, l, fin_mod.inicio[l], fin_mod.inicio[l + 1], 1, 1, 0);   /* 44B890 (sin niebla: 40EC60(0)) */
     for (i = 0; i < V->nprop && fin_prop.cabs[0]; i++) {       /* 405360 de cada objeto en su matriz */

@@ -36,5 +36,6 @@ void final_dibuja2d(void);          /* la capa 7 (los creditos) en la lista TR *
 void final_sale(void);              /* 0x19ba90 (4527A0): suelta STAFF.DAT */
 int  final_activo(void);
 int  final_grupo(void);             /* el grupo de movimientos de la fila (+0x44: FINCHRgg.DAT) */
-uint32_t final_usado(void);         /* bytes de ram que ocupa FINAL.DAT (alineados a 32) */
+uint32_t final_usado(void);
+int  final_fondo(float *p);         /* 4522D0: x, y, z, alfa del fondo (columnas 5..9); 0 sin fondo */         /* bytes de ram que ocupa FINAL.DAT (alineados a 32) */
 #endif

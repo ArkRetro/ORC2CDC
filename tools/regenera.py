@@ -23,7 +23,8 @@ MUSICA = list(range(0, 29)) + [30] + list(range(33, 61)) + [61, 62, 63, 65, 66]
 PARTES = 4                                                       # conv_union.py --parte=k/n (al menos; o --jobs)
 SP = ['CARGASP%d.DAT' % k for k in range(4)] + ['GOVSP.DAT', 'SPFE.DAT', 'RUTASP.DAT', 'RANKSP.DAT', 'NOMTX.DAT'] + \
      ['NOM5%s.DAT' % x for x in 'ABCDE']                       # (los de conv_sp.py)
-FINAL = ['FINAL.DAT', 'FINPROP.DAT', 'STAFF.DAT'] + ['FINE%d.DAT' % k for k in range(10)]   # (conv_final.py)
+FINAL = ['FINAL.DAT', 'FINPROP.DAT', 'STAFF.DAT'] + ['FINE%d.DAT' % k for k in range(10)] + \
+        ['FINSKY%d.DAT' % k for k in range(5, 10)] + ['FINCHR%02X.DAT' % g for g in (0xb, 0xd, 0xe, 0xf, 0x11, 0x2a, 0x2c, 0x2d, 0x2e, 0x37)]   # (conv_final.py)
 UNIONES = ['UNIONES.PAK', 'CURSO.DAT', 'COLLR.DAT', 'COLBK.DAT', 'BKD.DAT', 'SOL.DAT']
 # segundos aproximados de cada paso en un nucleo (para el porcentaje y el tiempo que queda; medidos en Linux)
 PESO = {'union': 4500, 'curso': 650, 'seg': 450, 'video_ts': 150, 'video_attr': 450, 'mus': 20, 'coche': 15,

@@ -90,6 +90,13 @@ static void op_zyx(mat_t m, const float *r) { op_rot(m, 0, 1, r[2]); op_rot(m, 2
 int final_activo(void) { return activo; }
 int final_grupo(void) { return activo ? (int)FU(8 + 16 * id + 4) : -1; }
 uint32_t final_usado(void) { return (Fn + 31) & ~31u; }
+/* 4522D0: el fondo de las columnas 5..9 ([0x3e7820 + columna x 24]: x, y, z, alfa en FRB1 + 140); 0 si no hay */
+int final_fondo(float *p)
+{
+    if (!activo || col < 5 || !frb || frb + 140 + 16 * 5 + 4 > Fn) return 0;
+    memcpy(p, F + frb + 140 + 16 * (col - 5), 16);
+    return 1;
+}
 const final_vista_t *final_vista(void) { return &V; }
 
 int final_columna(int variante, int preset, int meta)

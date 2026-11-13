@@ -488,8 +488,8 @@ int robot_listo(void) { return listo; }
    (0x100968). Bloque OSGp de RBT1 (tools/conv_chr.py osage_tablas, constantes del ELF). Todo en el marco del
    personaje (la pila del original lleva la matriz del hueso: M de motor_t), vectores fila. Las matrices de los nodos
    (el "pool" 858710 + n x 0x40 del original, huesos 0x8000 | i de las piezas) van en M[n huesos + i] */
-#define OSG_CAD 4
-#define OSG_NOD 8
+#define OSG_CAD 8                                   /* CHR_FAL del final de recreativa: 8 cadenas, 14 nodos */
+#define OSG_NOD 16
 typedef struct { float pos[3], vel[3], k24, largo; } onodo_t;   /* nodo de 0x2C del original: +04, +10, +24, +00 */
 typedef struct { uint32_t hueso, n, primero; float pos[3], giro[3]; } ocad_t;
 typedef struct { int32_t hueso; uint32_t tipo; float r, c[3]; } oesf_t;

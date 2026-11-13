@@ -169,6 +169,7 @@ def main():
         out += struct.pack('<5I', db[E.cadena(c[1]).upper()], db[E.cadena(c[2]).upper()], db[E.cadena(c[3]).upper()],
                            db[P['hm'][0]], db[P['hm'][1]])
         out += struct.pack('<12f', *[E.f32(P['cara'] + 16 + 4 * k) for k in range(12)])
+    for c in range(5, 10): out += struct.pack('<4f', *E.f32(0x3e7820 + 24 * c + 8, 4))   # FRB1 +140: x, y, z, alfa
     out += struct.pack('<I', o_frb)
     open(os.path.join(sal, 'FINAL.DAT'), 'wb').write(out)
     print('FINAL.DAT: %d bytes' % len(out))
@@ -179,6 +180,16 @@ def main():
         mod.bloque(A.bloque(A.entrada('OBJ.PS2', nm)), objetos=True, sin_textura='material')
         mod.recorta_texturas(); f = os.path.join(sal, 'FINE%d.DAT' % c); mod.escribe(f)
         print('%s: %s, %d mallas, %d texturas, %d KB' % (os.path.basename(f), nm, len(mod.mallas), len(mod.texs), os.path.getsize(f) >> 10))
+    # fondo de las columnas 5..9 (presets 0 / 2; 4522D0 = PS2 [0x3e7820 + columna x 24]: {recurso, token, x, y, z, alfa}):
+    # el registro del token del cielo de la etapa (obj_course_obj_sky_*), en ORD7 (FINSKYc.DAT; demo/main.c lo pone en
+    # T(x, y, z))
+    for c in range(5, 10):
+        w = E.u32(0x3e7820 + 24 * c, 2); assert w[1] >> 16 == w[0], 'fondo %d' % c
+        nm = E.cadena(E.u32(R + 4 * w[0])).split('\\')[-1].replace('.sz', '')
+        mod = modelo.Modelo()
+        mod.bloque(A.bloque(A.busca('*' + nm)[0]), registros={w[1] & 0xffff}, objetos=True, sin_textura='material')
+        mod.recorta_texturas(); f = os.path.join(sal, 'FINSKY%d.DAT' % c); mod.escribe(f)
+        print('%s: %s registro %d, %d mallas, %d KB' % (os.path.basename(f), nm, w[1] & 0xffff, len(mod.mallas), os.path.getsize(f) >> 10))
     # objetos (recurso 0xD0)
     blq = A.bloque(A.entrada('OBJ.PS2', 'obj_end_property_pmt'))
     mod = modelo.Modelo(); base = None
