@@ -5614,23 +5614,36 @@ static float dist2_ruta(const modelo_t *m, uint32_t i, const float *p)
 #endif
 /* Histeresis por nodo (DECISION DEL PORT, popping 2026-11-13): un nodo que se dibujo en el cuadro anterior cuenta
    REPARTO_HIST_D clases de distancia (pasos del 19 %) y REPARTO_HIST_P clases de LOD (pasos del 9 %) mas cerca: entra
-   al cruzar el corte y solo sale si queda 1,41 veces mas alla (en distancia o en tamano en la pantalla). Sin ella, cada
+   al cruzar el corte y solo sale si queda 2 veces mas alla (en distancia o en tamano en la pantalla; con 2 / 4, 1,41
+   veces: 5,8 desapariciones de 8 px o mas por segundo en vez de 4,5). Sin ella, cada
    vez que el corte bajaba un poco (el tope del cuadro cambia con el coche y el trafico) desaparecia de la pantalla lo
    que acababa de aparecer (DIAG_POPPING: 16 por segundo en PALM) y volvia a aparecer al subir. El coste de lo que se
    queda va en la cuenta de su clase: el reparto sigue cabiendo. 0 / 0: lo de antes */
 #ifndef REPARTO_HIST_D
-#define REPARTO_HIST_D 2
+#define REPARTO_HIST_D 4
+#endif
+#ifndef REPARTO_HIST_P
+#define REPARTO_HIST_P 8
 #endif
 /* Coste en la clase de LOD (DECISION DEL PORT, popping 2026-11-13): la clase de lo de mas alla del corte de distancia
    sube REPARTO_COSTE / 4 clases por cada vez que el nodo dobla los 64 vertices (y baja si tiene menos): de lo que no
    cabe se quita primero lo que mas TA gasta por pixel de pantalla (palmeras, gente, barandillas de lejos) y se quedan
    los edificios y las siluetas, que son pocas caras grandes. 4: el area en la pantalla por vertice (la clase de LOD
-   va en pasos de 2^(1/8) de tamano, 2^(1/4) de area). 0: solo el tamano, lo de antes */
+   va en pasos de 2^(1/8) de tamano, 2^(1/4) de area). Probado y peor (DIAG_POPPING, docs/PLAN.md): sin coste para lo
+   de 60 px o mas, o con un tope de clase para lo grande y caro (mas apariciones de 32 px o mas y mas pantalla sin
+   dibujar: lo grande y caro se come el tope). 0: solo el tamano */
 #ifndef REPARTO_COSTE
 #define REPARTO_COSTE 4
 #endif
-#ifndef REPARTO_HIST_P
-#define REPARTO_HIST_P 4
+/* Mas alla del LOD del original (DECISION DEL PORT, popping 2026-11-13; la idea de DisableStageCulling de
+   OutRun2006Tweaks, que en el PC quita la prueba de 404B00): los nodos hasta 2^REPARTO_LOD_MAS veces la distancia de
+   su LOD de 404B00 (radio en la pantalla de 7,5 / 2^REPARTO_LOD_MAS px) entran en el reparto en las clases de LOD 41..
+   40 + 8 REPARTO_LOD_MAS, las ultimas: solo se dibujan si sobra TA despues de todo lo que dibuja el original (en los
+   tramos abiertos), y lo que aparece entra mas pequeno. Medido con 2 (Flycast, PALM -> LAKE): los saltos del LOD (5,7
+   por segundo, todos de menos de 8 px) pasan a saltos del tope mas pequenos (+4,1 de 2-8 px), los de 8 px o mas
+   igual, y +0,3-0,6 ms de CPU: no compensa en la consola hasta medirla alli. 0: el LOD del original */
+#ifndef REPARTO_LOD_MAS
+#define REPARTO_LOD_MAS 0
 #endif
 static uint32_t prio_coste[ND_PRIO][NB_PRIO], prio_vtx[ND_PRIO][NB_PRIO];   /* bytes teoricos y vertices por clase */
 static int prio_d = ND_PRIO - 1, prio_p = NB_PRIO - 1, prio_esp_d, prio_esp_p;
@@ -5847,7 +5860,7 @@ static void nodos_visibles(modelo_t *mo)
         if (fabsf(xv) - zv * tanh > d->r * kh || fabsf(yv) - zv * tanv > d->r * kv) { if (FF) FF[i >> 5] |= 1u << (i & 31); POPR(i, PR_LADO); continue; }
         u = d->fl & 15;
         lim = d->r * lod * (float)(1u << ((u ? u : 6) - 1));
-        if (u && zv > 0 && zv > lim) { POPR(i, PR_LOD); continue; }   /* LOD */
+        if (u && zv > 0 && zv > lim * (float)(1 << REPARTO_LOD_MAS)) { POPR(i, PR_LOD); continue; }   /* LOD (y lo de mas) */
         rama = (d->fl >> 8) & 3;
         if (!(regs >> rama & 1)) { POPR(i, PR_RAMA); continue; }   /* registro de la union que no se dibuja */
         if (pvs_on_) {                                       /* PVS: lo que queda visible del nodo desde aqui */
