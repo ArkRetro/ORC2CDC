@@ -32,8 +32,10 @@ fuera del limite, alturas QUITA_ALTURAS hasta 12 m, la ruta prolongada QUITA_FIN
 salida van a menos de 3 m del coche y 4 m del suelo; las de la meta, en las uniones, que no se tocan) los triangulos
 que no se ven desde ninguna salen del fichero: cada tira se parte en los trozos que se ven (un trozo sin ver de
 QUITA_MIN triangulos o mas en medio, cualquiera en las puntas), y las texturas que ya no usa nadie tambien. En PALM son
-122 de 109980 triangulos: lo que no se ve desde ningun sitio casi no existe en los datos del original; lo que se gana
-esta en las secciones.
+122 de 109980 triangulos (0,1 %; ninguna textura): lo que no se ve desde ningun sitio casi no existe en los datos del
+original y lo que se gana esta en las secciones. Como dobla el tiempo (las muestras del volumen ancho y la prueba de
+cada triangulo) y quita para siempre (las escenas no tienen la guarda de pvs_paso), solo con PVS_QUITA=1; sin ella la
+prueba de cada malla acaba en el primer triangulo que se ve.
 
 Culling: los materiales de PS2 (tabla 4, +04) llevan las banderas de los del PC (408F90: bit 1 dos caras; el PC pone
 CULL_CW en las demas, casi todas las de las etapas), pero el GS no recorta caras y el microcodigo del VU1 no esta visto:
@@ -256,22 +258,26 @@ def calcula(d, extras=(), hilos=os.cpu_count() or 4, informe=True, quita=False):
         pa = np.concatenate(pa); pos = np.concatenate([pos, pa]); sp = np.concatenate([sp, np.full(len(pa), nsec, np.int32)])
     pos = np.ascontiguousarray(pos, np.float32); sp = np.ascontiguousarray(sp, np.int32)
     ntw = (ntri + 31) // 32; nmw = (nm + 31) // 32
-    st = np.zeros((nsec + 1, max(ntw, 1)), np.uint32); sm = np.zeros((nsec + 1, nmw), np.uint32)
+    st = np.zeros((nsec + 1, max(ntw, 1)), np.uint32) if quita else None; sm = np.zeros((nsec + 1, nmw), np.uint32)
     L = lib(); fp = ctypes.POINTER(ctypes.c_float); vp = ctypes.c_void_p
     L.pvs.argtypes = [fp, vp, fp, vp, vp, vp, vp, vp, vp, ctypes.c_int, fp, vp, fp, fp, vp, ctypes.c_int, ctypes.c_int,
                       ctypes.c_float, ctypes.c_float, ctypes.c_int, vp, vp]
     c = lambda a: a.ctypes.data_as(fp)
     L.pvs(c(T), O.ctypes.data, c(TUV), tt.ctypes.data, mas[0].ctypes.data, mas[1].ctypes.data, mas[2].ctypes.data,
           mas[3].ctypes.data, t0n.ctypes.data, nm, c(esf), fl.ctypes.data, c(occ), c(pos), sp.ctypes.data, len(pos),
-          nsec + 1, K, EPS, hilos, st.ctypes.data, sm.ctypes.data)
+          nsec + 1, K, EPS, hilos, st.ctypes.data if quita else None, sm.ctypes.data)
     secm = np.unpackbits(sm.view(np.uint8), axis=1, bitorder='little')[:, :nm].astype(bool)
-    sect = np.unpackbits(st.view(np.uint8), axis=1, bitorder='little')[:, :ntri].astype(bool)
-    nunca = ~sect.any(0)                                        # (con la fila del volumen ancho)
-    secm = secm[:nsec]; sect = sect[:nsec]
+    if quita:
+        sect = np.unpackbits(st.view(np.uint8), axis=1, bitorder='little')[:, :ntri].astype(bool)
+        nunca = ~sect.any(0)                                    # (con la fila del volumen ancho)
+        sect = sect[:nsec]
+    else: sect = None; nunca = None
+    secm = secm[:nsec]
     # cada seccion con sus vecinas (la demo elige la seccion por el punto mas cercano al ojo)
     def vecinas(x):
         y = x.copy(); y[1:] |= x[:-1]; y[:-1] |= x[1:]; return y
-    secm = vecinas(secm); sect = vecinas(sect)
+    secm = vecinas(secm)
+    if sect is not None: sect = vecinas(sect)
     return dict(sec=secm, tri=sect, nunca=nunca, t0=t0n, util=util, cartel=cartel, muestras=len(pos), nsec=nsec,
                 seg=time.time() - t0)
 
@@ -349,9 +355,10 @@ def quita_nunca(d, r):
 def anade(fn, extras=(), quita=False):
     """calcula el PVS del fichero fn y lo reescribe con el. extras: rutas de mas (arrays como la del modelo, o ficheros
     ORD7 con ellas: BKD.DAT). quita: tambien fuera los triangulos que no se ven nunca (quita_nunca; las etapas: las
-    escenas de la meta van en las uniones). PVS=0 en el entorno: no se calcula (el fichero queda sin secciones)"""
+    escenas de la meta van en las uniones; solo con PVS_QUITA=1 en el entorno: ver arriba). PVS=0 en el entorno: no se
+    calcula (el fichero queda sin secciones)"""
     if os.environ.get('PVS', '1') == '0': return None
-    quita = quita and os.environ.get('PVS_QUITA', '1') != '0'
+    quita = quita and os.environ.get('PVS_QUITA', '0') == '1'
     d = lee(fn)
     ex = [lee(x)['R'] if isinstance(x, str) else np.asarray(x, np.float32) for x in extras]
     r = calcula(d, ex, quita=quita)

@@ -26,8 +26,9 @@
      cada malla; esfera: 4 floats por malla; fl: bit 0 cartel (por la esfera), bit 1 sus triangulos tapan, bit 2
      ignorar; occ_lim: distancia al centro hasta la que la malla tapa (0 = nunca); pos: 3 floats por posicion; sec: la
      seccion de cada posicion; K: pixeles por unidad de tangente; eps: radio de la erosion (m); sal_t: nsec x
-     techo(ntri / 32) u32 (bit del triangulo visto desde alguna muestra de la seccion); sal_m: nsec x techo(nm / 32)
-     (la malla: algun triangulo o la esfera del cartel). Las salidas se acumulan (OR atomico entre hilos). */
+     techo(ntri / 32) u32 (bit del triangulo visto desde alguna muestra de la seccion; NULL: solo por malla, que acaba
+     en el primer triangulo que se ve); sal_m: nsec x techo(nm / 32) (la malla: algun triangulo o la esfera del
+     cartel). Las salidas se acumulan (OR atomico entre hilos). */
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -254,7 +255,7 @@ float *pvs_volcado;                                              /* depuracion: 
 static void una_posicion(trabajo_t *T, buf_t *b, int ip)
 {
     const float *o = T->pos + 3 * ip; int f, i, j, nn = T->nn;
-    unsigned *st = T->sal_t + (size_t)T->sec[ip] * T->ntw, *sm = T->sal_m + (size_t)T->sec[ip] * T->nmw;
+    unsigned *st = T->sal_t ? T->sal_t + (size_t)T->sec[ip] * T->ntw : NULL, *sm = T->sal_m + (size_t)T->sec[ip] * T->nmw;
     for (f = 0; f < 4; f++) {
         float c[3];
         memset(b->niv[0], 0, sizeof(float) * b->W * b->H);
@@ -293,8 +294,8 @@ static void una_posicion(trabajo_t *T, buf_t *b, int ip)
         for (i = 0; i < nn; i++) {
             const float *e = T->esf + 4 * i; int x0, x1, y0, y1, x, y, ve = 0, todos = 1;
             if (T->fl[i] & 4) continue;
-            if ((T->fl[i] & 1) && VISTO(sm, i)) continue;
-            if (!(T->fl[i] & 1)) {
+            if ((T->fl[i] & 1 || !st) && VISTO(sm, i)) continue;
+            if (!(T->fl[i] & 1) && st) {
                 for (j = T->t0[i]; j < T->t0[i + 1] && todos; j++) if (!(T->opa[j] & 2) && !VISTO(st, j)) todos = 0;
                 if (todos) continue;                            /* ya vistos todos en la seccion */
             }
@@ -311,10 +312,14 @@ static void una_posicion(trabajo_t *T, buf_t *b, int ip)
             if (T->fl[i] & 1) { PON(sm, i); continue; }         /* cartel: por la esfera */
             for (j = T->t0[i]; j < T->t0[i + 1]; j++) {
                 float v[3][3], s[4][3]; int n, k;
-                if ((T->opa[j] & 2) || VISTO(st, j)) continue;
+                if ((T->opa[j] & 2) || (st && VISTO(st, j))) continue;
                 for (k = 0; k < 3; k++) vista(T->tri + 9 * j + 3 * k, o, f, v[k]);
                 n = recorta(v, T->K, s);
-                if ((n >= 3 && raster_ve(b, s[0], s[1], s[2])) || (n == 4 && raster_ve(b, s[0], s[2], s[3]))) { PON(st, j); PON(sm, i); }
+                if ((n >= 3 && raster_ve(b, s[0], s[1], s[2])) || (n == 4 && raster_ve(b, s[0], s[2], s[3]))) {
+                    PON(sm, i);
+                    if (!st) break;                             /* por malla: basta el primero */
+                    PON(st, j);
+                }
             }
         }
     }
