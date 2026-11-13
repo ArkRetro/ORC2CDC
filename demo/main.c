@@ -5647,6 +5647,7 @@ static float dist2_ruta(const modelo_t *m, uint32_t i, const float *p)
 #endif
 static uint32_t prio_coste[ND_PRIO][NB_PRIO], prio_vtx[ND_PRIO][NB_PRIO];   /* bytes teoricos y vertices por clase */
 static int prio_d = ND_PRIO - 1, prio_p = NB_PRIO - 1, prio_esp_d, prio_esp_p;
+static int nlim_prio = ND_PRIO - 1;                          /* corte del velo del limite (nodos_visibles_todos) */
 static float prio_alfa = 1.0f;
 static float niebla_d; static int niebla_modo;                   /* la niebla del cuadro (niebla_paso) */
 #ifdef DIAG_VTX
@@ -6063,6 +6064,14 @@ static void nodos_visibles_todos(void)
         if ((float)(acum + fila_c[d]) * k > (float)tope * REPARTO_CERCA || (float)(v + fila_v[d]) > (float)vmax * REPARTO_CERCA) break;
         acum += fila_c[d]; v += fila_v[d]; cabe = d;
     }
+    {   /* distancia del velo del limite (nlim_paso): la del reparto de la demo 38 (0,75 del tope); con REPARTO_CERCA
+           0,25 el velo se acercaba y blanqueaba media imagen (demo 39) */
+        uint32_t a2 = 0, v2 = 0;
+        for (nlim_prio = -1, d = 0; d < ND_PRIO; d++) {
+            if ((float)(a2 + fila_c[d]) * k > (float)tope * 0.75f || (float)(v2 + fila_v[d]) > (float)vmax * 0.75f) break;
+            a2 += fila_c[d]; v2 += fila_v[d]; nlim_prio = d;
+        }
+    }
     {   /* si cabe todo, todo */
         uint32_t tc = 0, tv = 0;
         for (d = 0; d < ND_PRIO; d++) { tc += fila_c[d]; tv += fila_v[d]; }
@@ -6334,7 +6343,7 @@ static void luz_actual(int e, float *v, float *d)
 static float nlim_d = LEJOS_PS2, nlim_hecho = -1;
 static void nlim_paso(void)                                     /* cada cuadro, tras el reparto */
 {
-    float obj = prio_d < ND_PRIO - 1 ? powf(2.0f, (prio_d + 1) * 0.25f) : lejos;
+    float obj = prio_d < ND_PRIO - 1 && nlim_prio < ND_PRIO - 1 ? powf(2.0f, ((nlim_prio < 0 ? 0 : nlim_prio) + 1) * 0.25f) : lejos;
     if (obj > lejos) obj = lejos;
     nlim_d += (obj - nlim_d) * 0.06f;                           /* ~0,3 s: sin saltos al cambiar el corte */
 }
