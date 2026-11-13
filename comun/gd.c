@@ -34,6 +34,7 @@ void gd_errores(uint32_t *n, int *ult) { *n = n_err; *ult = ult_err; }
 #ifdef DIAG_GD_LENTO
 int gd_diag_lento;                                      /* lo enciende main.c pasado el arranque */
 #endif
+void (*gd_latido)(void);
 static int lee(uint32_t lba, int n, void *dst)
 {
     int r, pp = thd_get_current() != fondo, k, jg = thd_get_current() == juego;
@@ -53,7 +54,7 @@ static int lee(uint32_t lba, int n, void *dst)
     }
     if (pp) ult_primer_plano = timer_ms_gettime64();
     mutex_unlock(&m_gd);
-    if (jg) { us_juego += timer_us_gettime64() - t0; n_juego++; }
+    if (jg) { us_juego += timer_us_gettime64() - t0; n_juego++; if (gd_latido) gd_latido(); }
     return r;
 }
 int gd_lee(uint32_t lba, int n, void *dst) { return lee(lba, n, dst); }
@@ -176,6 +177,7 @@ static void pak_copia(uint8_t *dst, uint32_t pv, uint32_t t, uint32_t q, const u
 void gd_cede(void)
 {
     static uint64_t t; uint64_t a = timer_us_gettime64();
+    if (gd_latido && thd_get_current() == juego) gd_latido();
     if (a - t >= CEDE_US) { thd_pass(); t = timer_us_gettime64(); }
 }
 static int pak_lee(uint32_t lba, uint32_t tdesc, uint8_t *dst, uint32_t cap)

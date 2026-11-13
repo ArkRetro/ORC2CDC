@@ -3,11 +3,19 @@
 #include <stdint.h>
 /* Menus del modo principal (MENU.DAT, tools/conv_menu.py) con el flujo del original:
      titulo -> (licencia: elegir / crear / editar) -> menu principal -> un jugador -> coche -> cambio -> musica ->
-     carrera; menu principal -> multijugador, rankings, opciones; LICENSE (X) desde los menus.
+     carrera; menu principal -> OUTRUN2SP, rankings, opciones (sin multijugador); LICENSE (X) desde los menus.
    Se dibuja en la lista TR a 640x480. Las licencias y opciones se guardan en la VMU (A1). */
 enum { MENU_SIGUE, MENU_CARRERA, MENU_DEMO };
 int menu_precarga(void);                                 /* las tablas de MENU.DAT, lo primero al arrancar */
 int menu_tablas(int en);   /* 0: al empezar la carrera suelta las piezas que no son de la pausa (bytes); 1: al volver al menu las lee */
+/* pantalla de carga propia al empezar un modo (demo/pcarga.c; ver menu.c): sube sus texturas (0 bien), la dibuja
+   (dentro de la lista TR; avance 0..1, la barra), las baja / vuelve a subir y la quita (VRAM y las piezas que
+   menu_tablas(0) le dejo) */
+int menu_carga_entra(void);
+void menu_carga_dibuja(float avance);
+void menu_carga_baja(void);
+int menu_carga_sube(void);
+void menu_carga_sale(void);
 int menu_inicia(void);                      /* abre MENU.DAT (solo tablas en la RAM) y lee la VMU; 0 bien */
 /* entra en el titulo: texturas a la VRAM bajo demanda (antes hay que dejar el hueco: hud_baja_tex) */
 void menu_entra(int manual, int pista, int npistas);

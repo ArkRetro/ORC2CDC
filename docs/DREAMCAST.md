@@ -1081,6 +1081,30 @@ libres en la zona, 0 texturas rebajadas. `resultados.sh` (fin del tiempo, modos 
 libres antes y despues de la carrera; RAM del frontal 1077 (846) antes y 1086 (846) despues; 0 "Out of memory", 0
 "pvr_mem: ERROR", 0 frees dobles.
 
+### Pantalla de carga al empezar un modo (demo 41, 2026-11-13)
+
+demo/pcarga.c (que se ve y por que: PARIDAD.md, Menu principal sin MULTIPLAYER y pantallas de carga). Sin RAM fija:
+- El mapa de OUTRUN2SP (CARGASPn.DAT): sus tablas y las piezas de su grupo (hudd_tablas_fijas, 28..45 KB) en los
+  ultimos 64 KB del hueco de la union (hueco_pcarga, como las del frontal de recreativa: union_fsp), que se presta igual
+  que antes a las lecturas de la carga (voces, coche, pareja; hasta cap_union - 64 KB) y vuelve entero a la carrera al
+  quitar la pantalla. Antes las piezas (16 KB) iban al monton.
+- La propia: lo del titulo y el medidor de la pausa de MENU.DAT, que ya esta en la RAM; menu_tablas(0) deja ademas las
+  piezas de los grupos del titulo (72 bytes) hasta que se quita la pantalla.
+- VRAM: 64 KB (titulo y pausa) o la escena del mapa (VQ, ~110 KB). Lo que se queda en la VRAM para la carrera
+  (coche, pareja, vram_ordena, HUD, camiones, coches del rival) se sube sin ella: pcarga_pausa la baja (en la pantalla
+  se queda su ultimo cuadro) y pcarga_sigue la vuelve a subir del GD con el hueco de la union aun prestado (los
+  sectores); entre medias y hasta quitarla no se pide VRAM, asi que al quitarla (antes de ar_reserva) la VRAM queda
+  como sin pantalla. Con las texturas subidas al principio y por encima de lo de la carrera (primera prueba) el
+  dlmalloc de pvr_mem ponia lo de despues en otros huecos y la zona de OUTRUN2SP bajaba de 1344 a 1312 KB (un "out of
+  PVR memory" de ar_reserva al buscarla).
+- Se dibuja desde el hilo del juego: entre los pasos de la carga, tras cada lectura del GD de ese hilo y en gd_cede
+  (gd_latido; como mucho uno cada 16 ms) y sin parar durante el minimo (3 s). Nada de otro hilo: hud.c y el TA no son
+  de dos hilos a la vez. musica_poll en cada cuadro.
+- Flycast (antes del reinicio del contenedor, sobre 3c501b8 + estos cambios; nav.sh / abandona.sh con COCHE13 y
+  CHR1109, sp.sh / resultados.sh con COCHE07): zona del curso 1312 KB (libre 1405, fuera 93) en OutRun y 1344 KB (libre
+  1430, fuera 86) en OUTRUN2SP, y RAMMAPA de la carrera (OutRun: en uso 12483 KB, libre 1420, cima 899, huecos 521)
+  iguales con y sin la pantalla; en la segunda carrera de abandona.sh tambien.
+
 ### CPU de dibujo (2026-11-10)
 
 Medido con un cuadro congelado (`-DDIAG_CONGELA=600`: un paso de logica por cuadro hasta el paso 600, asi el estado no

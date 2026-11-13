@@ -17,7 +17,7 @@ Scripts (todos: <disc.gdi> [pantalla de Xvfb, por defecto 91] [carpeta de salida
            pilotos del freno del coche encendidos solo en fr_freno_*).
   abandona.sh  nav.sh hasta la carrera, pausa, ABANDONAR, vuelta al menu (las piezas de MENU.DAT se releen) y segunda
            carrera con su pausa: ab_1..ab_fin, ab_pausa.
-  sp.sh    OUTRUN2SP: menu principal, dos a la derecha (MENU_SP=1 en menu.sh), coche, cambio, musica y la carrera del
+  sp.sh    OUTRUN2SP: menu principal, uno a la derecha (MENU_SP=1 en menu.sh), coche, cambio, musica y la carrera del
            juego de OUTRUN2SP (arbol 1, preset 1) conduciendo como conduce.sh [segundos, 120]: sp_1..sp_8, sp_salida,
            sp_c000..; error si la consola serie no dice "juego OUTRUN2SP, preset 1" y "CURSO: arbol 1".
   resultados.sh  OUTRUN2SP (como sp.sh) con el acelerador pisado hasta el fin del tiempo: el modo 25 (el mapa de la

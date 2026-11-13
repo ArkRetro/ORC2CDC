@@ -2,8 +2,8 @@
    pantallas (rango de texturas propio) y los tramos de animacion (uso, cuadro inicial, final, modo), y el MNU2 con los
    textos de TEXT.PS2 que se escriben en la consola, las metricas de la fuente 14 y las tablas de la seleccion de coche.
    Flujo del original (port de PC, 4D7300 / 4C9290 / 4E2970 / 4DE2B0, con los tokens del PS2):
-     titulo (START/A) -> sin licencia: elegir licencia (crear) -> menu principal (SINGLE PLAYER, MULTIPLAYER, OUTRUN2SP,
-     RANKINGS, OPTIONS) -> un jugador (COAST 2 COAST, OUTRUN, HEART ATTACK, TIME ATTACK, SHOWROOM) -> coche -> cambio
+     titulo (START/A) -> sin licencia: elegir licencia (crear) -> menu principal (SINGLE PLAYER, OUTRUN2SP, RANKINGS,
+     OPTIONS; MULTIPLAYER fuera, DESVIACION pedida: menu_sin_multi) -> un jugador (COAST 2 COAST, OUTRUN, HEART ATTACK, TIME ATTACK, SHOWROOM) -> coche -> cambio
      AT/MT -> musica -> carrera; B vuelve atras. LICENSE (X en el menu principal y en un jugador) abre la eleccion de
      licencia. HEART ATTACK (INFARTO) y TIME ATTACK (CONTRARRELOJ) llevan a la carrera con su variante (menu_modo);
      lo que necesita modos que la demo no tiene (multijugador, rankings, SHOWROOM) tiene su pantalla y la accion
@@ -82,7 +82,7 @@ static const char *const UNOM[NU] = { "TITULO_FONDO", "TITULO_LOGO", "TITULO_STA
     "PAUSA_FILA", "PAUSA_BARRA", "PAUSA_OPC", "PAUSA_VOL", "FUENTE_PAUSA", "MUSICA_L1", "MUSICA_L2", "MUSICA_T1",
     "MUSICA_T2" };
 
-#define N_OPC 5                                             /* opciones del menu principal y de un jugador */
+#define N_OPC 5                                             /* opciones de un jugador (y del carrusel 0x440000) */
 #define N_COCHES 15
 /* musica (4C9790 / 4C9C20 del PC; tablas del PS2 0x375DA8 y 0x4191E8): 3 listas de 9 / 7 / 12 temas (68F36C), el
    tema k (0..27, 4C9750: lista 0, luego la 1 y la 2) es la pista k de MUSIC.PS2 (68F370: la misma) y su avance la
@@ -283,6 +283,19 @@ static int modo_sel = 1;                                    /* opcion de un juga
    del menu de la consola (PROVISIONAL, en su lugar) y se corre la eleccion OUTRUN con los cursos de OutRun 2 SP de la
    lista del frontal (4C3DC0: fila 0 -> variante 1, lado 1 -> preset 1). B en el coche vuelve al menu principal. */
 static int sp_sel;
+/* MULTIPLAYER fuera del menu principal (DESVIACION pedida por el usuario, demo 41: sin multijugador; docs/PARIDAD.md,
+   Menu principal sin MULTIPLAYER). El carrusel del original (escena 0x440000, tabla 0x418CA8: 5 opciones, opcion i
+   quieta en el cuadro 20 + 20 i) es una fila de rotulos que pasa de derecha a izquierda (y = 360, el elegido en x = 62
+   y los de su derecha cada vez mas transparentes, con un punto delante de cada uno), el titulo y la descripcion de la
+   elegida (y = 166 / 211) y una fila de 5 puntos con el de la elegida resaltado (y = 391,5). Se dibuja como un carrusel
+   de 4: los sitios 0..3 de la escena con las opciones 0, 2, 3, 4 (el rotulo de la opcion en el sitio del rotulo de ese
+   sitio; titulo y descripcion en su propio sitio, son quietos) y sin lo del sitio 4 (su rotulo, su punto separador, su
+   punto de la fila). Las reglas (sprites de cada opcion, del separador y de los puntos) se sacan de las piezas de
+   MENU.DAT en los cuadros SELi (menu_sin_multi); si no salen, las 5 opciones como el original. c_menu es el sitio */
+#define OPC_QUITADA 1                                       /* MULTIPLAYER */
+static int n_menu = N_OPC;
+static hudd_regla_t r_menu[20]; static int n_r_menu;
+static int opc_menu(int c) { return n_menu < N_OPC && c >= OPC_QUITADA ? c + 1 : c; }
 static int c_menu, c_modo, c_rank, c_multi, manual, n_ok, pista_sonando, sale_ok;
 static int lista, curs[N_LISTAS], elegido;                  /* 84B0F4, 84B0EC y 830364 del PC */
 
@@ -323,6 +336,55 @@ static int an_hecho(const anim_t *a) { return a->modo == 2 || (a->modo == 0 && (
 static void an_dibuja(const anim_t *a, float dx, float alfa, float z, int fondo)
 {
     hudd_dibuja(md, a->u, (int)a->c, dx, 0, alfa, z, fondo);
+}
+
+/* el carrusel del menu principal sin MULTIPLAYER (ver sp_sel): en el cuadro SELi de la escena, el rotulo de la opcion
+   i es el mas opaco de la fila y = 360 (el elegido), su descripcion la de y = 211 y su titulo la mas opaca por encima;
+   el separador, la pieza de y = 371; en SEL0 los puntos de y = 391,5: el sprite que sale 5 veces (el resaltado, 1) y
+   el del sitio 4 el de mas a la derecha */
+static void menu_sin_multi(void)
+{
+    enum { MAXP = 128 };
+    hudd_pz_t pz[MAXP]; int lab[N_OPC], des[N_OPC], tit[N_OPC], sep = -1, pto = -1, i, j, k, n, ini, fin, modo, u = us[U_PRINC];
+    float xp = -1e9f;
+    n_menu = N_OPC; n_r_menu = 0;
+    for (i = 0; i < N_OPC; i++) {
+        char b[8]; float al[3] = { -1, -1, -1 };
+        lab[i] = des[i] = tit[i] = -1;
+        sprintf(b, "SEL%d", i);
+        if (u < 0 || !tramo(u, b, &ini, &fin, &modo)) goto mal;
+        n = hudd_piezas(md, u, ini, pz, MAXP);
+        for (j = 0; j < n; j++) {
+            float y = pz[j].y;
+            if (y > 385) {                                  /* fila de puntos */
+                int c = 0;
+                if (i) continue;
+                for (k = 0; k < n; k++) if (pz[k].spr == pz[j].spr && pz[k].y > 385) c++;
+                if (c >= N_OPC) { pto = pz[j].spr; if (pz[j].x > xp) xp = pz[j].x; }
+                continue;
+            }
+            if (y > 365) { sep = pz[j].spr; continue; }
+            k = y > 355 ? 0 : y > 205 && y < 215 ? 1 : 2;
+            if (pz[j].alfa > al[k]) { al[k] = pz[j].alfa; (k == 0 ? lab : k == 1 ? des : tit)[i] = pz[j].spr; }
+        }
+        if (lab[i] < 0 || des[i] < 0 || tit[i] < 0) goto mal;
+    }
+    if (sep < 0 || pto < 0) goto mal;
+#define R_(s_, n_, m_, si_, an_, a_, b_) do { hudd_regla_t *r_ = r_menu + n_r_menu++; r_->spr = s_; r_->nuevo = n_; \
+        r_->modo = m_; r_->sitio = si_; r_->ancla = an_; r_->x0 = a_; r_->x1 = b_; } while (0)
+    for (i = OPC_QUITADA; i < N_OPC - 1; i++) {             /* sitio i: la opcion i + 1 */
+        R_(lab[i], lab[i + 1], 0, 0, -1, 0, 0); R_(des[i], des[i + 1], 0, 1, -1, 0, 0); R_(tit[i], tit[i + 1], 0, 1, -1, 0, 0);
+    }
+    R_(lab[N_OPC - 1], -1, 0, 0, -1, 0, 0); R_(des[N_OPC - 1], -1, 0, 0, -1, 0, 0); R_(tit[N_OPC - 1], -1, 0, 0, -1, 0, 0);
+    R_(pto, -1, 1, 0, -1, xp - 2, xp + 2);                  /* el punto del sitio 4 */
+    R_(sep, -1, 2, 0, lab[N_OPC - 1], 0, 20);               /* el separador delante del rotulo del sitio 4 (7..11 px) */
+#undef R_
+    n_menu = N_OPC - 1;
+    dbglog(DBG_INFO, "menu: menu principal sin MULTIPLAYER (rotulos %d..%d, separador %d, puntos %d)\n", lab[0], lab[N_OPC - 1], sep, pto);
+    return;
+mal:
+    n_r_menu = 0; n_menu = N_OPC;
+    dbglog(DBG_ERROR, "menu: el carrusel del menu principal no es el esperado: con MULTIPLAYER\n");
 }
 
 /* ---------------------------------------------------------------- VRAM */
@@ -389,11 +451,56 @@ void menu_libera_vram(void)
 /* Tablas de MENU.DAT en la carrera: solo los grupos de la pantalla de pausa (lo unico del menu que se dibuja); las
    piezas de los demas (casi todas: ~700 KB) se sueltan al empezar la carrera (en = 0) y se vuelven a leer del GD al
    volver al menu (en = 1; sin leer nada si estan). Devuelve los bytes sueltos, o 0 / < 0 al volver */
+static int mc_on, mc_grupos;                                /* la pantalla de carga (menu_carga_entra) */
+static uint32_t grupos_carrera(void)
+{
+    int pa = pidx[V_PAUSA], ti = pidx[V_TITULO];
+    return hudd_grupos_suelta2(md, pa >= 0 ? pan[pa].t0 : 0, pa >= 0 ? pan[pa].nt : 0,
+                               mc_on && ti >= 0 ? pan[ti].t0 : 0, mc_on && ti >= 0 ? pan[ti].nt : 0);
+}
 int menu_tablas(int en)
 {
     if (!md) return 0;
     if (en) return hudd_grupos_carga(md);
-    return (int)(pidx[V_PAUSA] >= 0 ? hudd_grupos_suelta(md, pan[pidx[V_PAUSA]].t0, pan[pidx[V_PAUSA]].nt) : hudd_grupos_suelta(md, 0, 0));
+    mc_grupos = mc_on;                                      /* (con la pantalla de carga, tambien las del titulo) */
+    return (int)grupos_carrera();
+}
+
+/* Pantalla de carga propia al empezar un modo de un jugador (DESVIACION pedida por el usuario, demo 41: "una pantalla
+   de carga con estilo de outrun ... al principio del modo, no entre etapas"; demo/pcarga.c la lleva). Con lo del
+   titulo de MENU.DAT (TITULO_FONDO: el blanco, TITULO_LOGO: el logo "OutRun2006 Coast 2 Coast" de la pelicula del
+   titulo, en su sitio) y, en el sitio del START del titulo, el medidor del volumen de la pausa (0x2C00EF, cuadro 0..10)
+   como barra de lo cargado: nada que no este ya convertido, sin textos (TEXT.PS2 no tiene un "Cargando" suelto). La
+   VRAM, 64 KB (pantallas TITULO y PAUSA); en la RAM nada mas que sus piezas (72 + 528 bytes), que menu_tablas(0) deja
+   hasta que se quita la pantalla */
+int menu_carga_entra(void)
+{
+    if (!md || pidx[V_TITULO] < 0 || pidx[V_PAUSA] < 0 || us[U_TFONDO] < 0 || us[U_TLOGO] < 0 || us[U_P_VOL] < 0) return -1;
+    if (sube_p(V_TITULO) || sube_p(V_PAUSA)) { baja_p(V_TITULO); baja_p(V_PAUSA); return -2; }
+    mc_on = 1;
+    return 0;
+}
+void menu_carga_dibuja(float avance)
+{
+    int k = (int)(avance * 10.0f + 0.5f);
+    if (!mc_on) return;
+    k = k < 0 ? 0 : k > 10 ? 10 : k;
+    hudd_dibuja(md, us[U_TFONDO], 0, 0, 0, 1, 1, 0);
+    hudd_dibuja(md, us[U_TLOGO], 0, 0, 0, 1, 2, 0);
+    /* el medidor de la fila 0 del audio de la pausa va de x 321 a 321 + 0x97 en y 161 (4463A0): centrado en el sitio
+       del START del titulo (320, 400) */
+    hudd_dibuja(md, us[U_P_VOL], k, 320 - (321 + 0x97 / 2), 400 - 161 - 8, 1, 3, 0);
+}
+void menu_carga_baja(void) { if (mc_on) { baja_p(V_TITULO); baja_p(V_PAUSA); } }
+int menu_carga_sube(void) { return !mc_on ? -1 : sube_p(V_TITULO) || sube_p(V_PAUSA) ? -2 : 0; }
+void menu_carga_sale(void)
+{
+    if (!mc_on) return;
+    pvr_wait_ready();                                       /* la PowerVR ya no lee sus texturas */
+    mc_on = 0;
+    baja_p(V_TITULO); baja_p(V_PAUSA);                     /* (la pausa aun no esta abierta) */
+    hudd_vacia();
+    if (mc_grupos) { mc_grupos = 0; grupos_carrera(); }     /* las piezas del titulo, fuera (las de la pausa no) */
 }
 int menu_precarga(void) { return md || (md = hudd_abre("MENU.DAT", 0, 1)) ? 0 : -1; }
 
@@ -432,6 +539,7 @@ int menu_inicia(void)
         if (h[5]) col_tarjeta = h[5];
         if (h[6] && !memcmp(mnu2 + h[6], "PRG1", 4)) prg = mnu2 + h[6] + 4;
     }
+    menu_sin_multi();
     return 0;
 }
 
@@ -850,12 +958,12 @@ static void control(unsigned n)
             else if (atras) { mis_ventana = 0; sfx_menu(SFX_CANCELA); }
             break;
         }
-        carrusel(n, pant == P_MENU ? &c_menu : &c_modo, N_OPC, izq, der);
+        carrusel(n, pant == P_MENU ? &c_menu : &c_modo, pant == P_MENU ? n_menu : N_OPC, izq, der);
         if (izq || der) break;
         if (ok) {
-            int c = pant == P_MENU ? c_menu : c_modo;
+            int c = pant == P_MENU ? opc_menu(c_menu) : c_modo;   /* (la opcion del original) */
             GANCHO(pant, 1, c);
-            if (pant == P_MENU) {                           /* SINGLE PLAYER, MULTIPLAYER, OUTRUN2SP, RANKINGS, OPTIONS */
+            if (pant == P_MENU) {                           /* SINGLE PLAYER, (MULTIPLAYER), OUTRUN2SP, RANKINGS, OPTIONS */
                 if (c == 0) { sp_sel = 0; sale(P_MODO, 1); } else if (c == 1) sale(P_MULTI, 1); else if (c == 3) sale(P_RANKING, 1);
                 else if (c == 4) sale(P_OPCIONES, 1);
                 else {                                      /* OUTRUN2SP (0x23aba0): el frontal de recreativa (fsp.c) */
@@ -935,7 +1043,11 @@ int menu_paso(unsigned n)
                                                            la consola) suena al empezar la carrera, como al salir del menu */
             pista_sonando = -2; pon_pista(menu_pista()); return MENU_CARRERA;
         }
-        if (r == FSP_MENU) { fsp_sale(); sp_sel = 0; entra(P_MENU, 1); musica_menu(); }
+        /* 4BF510 para la musica (401030) y pide el modo 32; su init (el estado 0xC del cargador del menu, PC 4456EA:
+           con [7B17EC], la vuelta a un menu ya puesto, 445746..44574C) la vuelve a poner: 401000(0, 0x1E, 1), la de los
+           menus desde el principio. pista_sonando seguia en la 30 (la del menu antes del frontal) y pon_pista no hacia
+           nada: el menu se quedaba sin musica */
+        if (r == FSP_MENU) { fsp_sale(); sp_sel = 0; entra(P_MENU, 1); pista_sonando = -2; musica_menu(); }
         return MENU_SIGUE;
     }
     lee_r1();
@@ -1119,7 +1231,9 @@ void menu_dibuja(void)
     }
     switch (pant) {
     case P_MENU: case P_MODO: case P_RANKING: case P_MULTI:
+        if (pant == P_MENU) hudd_reglas(r_menu, n_r_menu);  /* (sin MULTIPLAYER: menu_sin_multi) */
         an_dibuja(&a_sel, sacude, (entra_atras ? a_ent : 1) * a_sal * (cargando ? 0 : 1), 3, 0);
+        hudd_reglas(NULL, 0);
         if (pant == P_MODO && mis_ventana && mis_n) mis_dibuja();
         break;
     case P_COCHE:

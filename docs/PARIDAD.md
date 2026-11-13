@@ -161,7 +161,8 @@ consola, el port lo fija al convertir). Hoja de capturas de Flycast: scratchpad 
   piezas (1,4 MB) por guardar cada pieza en cada cuadro; ahora una pieza vale para una racha de cuadros iguales
   (banderas >> 4, orden de capas de la escena, conv_menu.tramos_piezas): 23 000 piezas con el doble de pantallas, 960 KB.
 - Pantallas (flujo de 4D7300 / 4C9290 / 4E2970 / 4DE2B0 del PC con los tokens del PS2): titulo -> sin licencia, elegir
-  licencia -> menu principal (UN JUGADOR, MULTIJUGADOR, OUTRUN2SP, RANKINGS, OPCIONES) -> un jugador -> coche -> cambio ->
+  licencia -> menu principal (UN JUGADOR, MULTIJUGADOR, OUTRUN2SP, RANKINGS, OPCIONES; sin MULTIJUGADOR desde la demo 41,
+  ver Menu principal sin MULTIPLAYER) -> un jugador -> coche -> cambio ->
   musica -> carrera; LICENCIA (X) desde el menu principal y un jugador. MULTIJUGADOR (0x44002A, tabla 0x41C260: en
   linea, LAN), RANKINGS (0x4400A3, 0x41D908: un jugador, OUTRUN2SP, multijugador), OUTRUN2SP, HEART ATTACK, TIME ATTACK y
   SHOWROOM existen con la accion bloqueada (sin red, ranking ni esos modos); desde 2026-11-09 HEART ATTACK y TIME ATTACK
@@ -214,6 +215,56 @@ consola, el port lo fija al convertir). Hoja de capturas de Flycast: scratchpad 
 - Verificado en E (Flycast): todas las pantallas y transiciones, crear y editar licencia, guardar y leer la VMU entre
   arranques, coche bloqueado, variante, color, cambio, musica y salida a carrera con el Dino; demo y vuelta al titulo.
   No probado en R.
+
+## Menu principal sin MULTIPLAYER, musica al volver del frontal y pantallas de carga (demo 41, 2026-11-13)
+
+- Musica al volver de OUTRUN2SP (fallo): B en el coche del frontal de recreativa (4BF510, funcion 0xB) para la musica
+  (401030) y pide el modo 32; el init del menu (estado 0xC del cargador, PC 4456EA; con [7B17EC], la vuelta a un menu
+  ya puesto) la pone otra vez desde el principio: 401000(0, 0x1E, 1) en 445746..44574C (decompilacion:
+  object_runtime_loader_stage12_4456ea de pc_common_control.cpp). La demo no la volvia a poner: el menu creia que la
+  pista 30 seguia sonando (pista_sonando) y pon_pista no hacia nada. Ahora suena la 30 desde el principio, como el
+  original (comun/menu.c, FSP_MENU).
+- MULTIPLAYER fuera del menu principal: DESVIACION pedida por el usuario (demo 41; sin multijugador). Quedan UN JUGADOR,
+  OUTRUN2SP, RANKINGS y OPCIONES. El carrusel del original es la escena 0x440000 (tabla 0x418CA8: 5 opciones, entra
+  0-20, opcion i quieta en el cuadro 20 + 20 i): una fila de rotulos en y = 360 que pasa de derecha a izquierda (el
+  elegido en x = 62, los de su derecha cada vez mas transparentes, un punto separador delante de cada uno), el titulo y
+  la descripcion de la elegida (y = 166 / 211, quietos, se funden) y una fila de 5 puntos (y = 391,5) con el de la
+  elegida resaltado. Se dibuja como un carrusel de 4 sin hueco: los sitios 0..3 de la escena (sus cuadros SEL0..3 y
+  MUEVE01..23) con las opciones 0, 2, 3, 4: el rotulo de la opcion en el sitio del rotulo de ese sitio (con su
+  movimiento y su transparencia), el titulo y la descripcion en su propio sitio, y sin lo del sitio 4 (su rotulo, su
+  separador y su punto). Las reglas (hudd_reglas de comun/hud.c) salen de las piezas de MENU.DAT (menu_sin_multi: en
+  SELi el rotulo mas opaco de y = 360, la descripcion de y = 211, el titulo por encima; el separador de y = 371; los
+  puntos de y = 391,5); si MENU.DAT no fuera el esperado, el menu sigue con las 5 opciones. El espacio entre rotulos es
+  el de la escena para el rotulo de ese sitio (MULTIPLAYER es mas ancho que OUTRUN2SP: 29 px mas de hueco entre
+  OUTRUN2SP y RANKINGS cuando OUTRUN2SP esta en el sitio 1). MENU.DAT no cambia. La pantalla MULTIJUGADOR y la fila
+  multijugador de RANKINGS siguen en MENU.DAT sin camino que lleve a ellas (RANKINGS, bloqueado como antes).
+- Pantalla de carga de OUTRUN2SP (el mapa del preset, ver OUTRUN2SP, Carga) mas larga: DESVIACION pedida por el usuario
+  (demo 41). Se pone al salir del frontal (antes de leer voces, coche, pareja, HUD y la etapa de salida con sus
+  texturas, que antes se leian con la ultima imagen del frontal quieta) y se quita cuando la carga ha acabado y como
+  poco a los 3 s (PCARGA_MINIMO; una vuelta y media de la escena de 0x78 cuadros). En el original la escena se crea al
+  acabar de leer el curso y dura lo que tarda START en cargar del DVD; en Flycast la demo carga al instante y antes no
+  se llegaba a ver. Con REINTENTAR (modo 30 -> START) sale tambien, sin minimo.
+- Pantalla de carga propia al empezar un modo de un jugador: DESVIACION pedida por el usuario (demo 41: "una pantalla de
+  carga con estilo de outrun implementada por nosotros para precarga ... o para que funcione de buffer, al principio
+  del modo, no entre etapas"). En OutRun, Heart Attack, Time Attack y las misiones de Coast 2 Coast (variante 6, con
+  los modelos de su rival; pcarga_tipo da la propia a todo el juego de la consola), al salir de la musica del menu: el
+  blanco y el logo "OutRun2006 Coast 2 Coast" del titulo (TITULO_FONDO, TITULO_LOGO de MENU.DAT, en su sitio) y, en el
+  sitio del START del titulo (320, 400), el medidor de volumen de la pausa (0x2C00EF, cuadros 0..10) como barra de lo
+  cargado (sin pasar de la parte cumplida del minimo). Sin textos: TEXT.PS2 no tiene un "Cargando" suelto. Lo que el
+  original pone en ese momento (el icono de carga 0x480000 de los modos 28 / 30, banco 0x48 SUMO_LOADING) sigue sin
+  convertir. Debajo, toda la carga de la carrera (voces, coche, pareja, HUD y sus texturas, coches del rival, la etapa
+  de salida y sus texturas a la VRAM antes de la cuenta); como poco 3 s. No sale en REINTENTAR (no es empezar el modo;
+  las piezas del titulo ya no estan en la RAM), ni en la demo de atraccion, ni entre etapas.
+- Como se anima: la escena se dibuja entre los pasos de la carga y tras cada lectura del GD del hilo del juego (gd_latido
+  de comun/gd.c: cada 128 KB como mucho; en la consola ~15 cuadros por segundo mientras lee) y sin parar durante el
+  minimo. Mientras se sube a la VRAM lo que se queda en la carrera (coche, pareja, HUD, camiones, coches del rival: sin
+  la pantalla en la VRAM, para que la de la carrera quede igual) y despues de quitarla (la zona del curso con las
+  texturas de la etapa, el banderero y la escena de la salida) se ve su ultimo cuadro, quieto. El reloj de la logica
+  empieza al acabar (como antes).
+- Gancho para los modos nuevos: demo/pcarga.h. Un modo que empiece por la salida de demo/main.c tiene la pantalla con
+  pcarga_tipo (asi las misiones de Coast 2 Coast); uno con su propia carga pone pcarga_entra(PCARGA_PROPIA, ...),
+  pcarga_avance(0..1) entre sus pasos, pcarga_pausa / pcarga_sigue alrededor de lo que suba a la VRAM para toda la
+  carrera y pcarga_suelta() antes de reservar la zona del curso.
 
 ## Colores de los coches (2026-11-10)
 
@@ -2222,7 +2273,9 @@ arcade_attract.cpp):
   de un tiron: la escena se dibuja al empezar la carga y entre sus pasos con el cuadro del reloj de la logica (60000 /
   1001 por segundo) y la pantalla se queda con el ultimo cuadro mientras dura cada paso; sus texturas (VQ, detras de las
   del HUD) salen antes de reservar la zona del curso. Se quita al empezar la escena de la salida (el original la
-  deja hasta que START la borra: sin localizar en que estado; PROBABLE el mismo momento).
+  deja hasta que START la borra: sin localizar en que estado; PROBABLE el mismo momento). Desde la demo 41 (DESVIACION
+  pedida por el usuario: Menu principal sin MULTIPLAYER y pantallas de carga) se pone al salir del frontal, con toda la
+  carga de la carrera por debajo, y dura como poco 3 s; se quita al acabar la carga.
 - Fin: GOAL (modo 19) -> 33 -> 24 (final de recreativa AUTOSCENE \AS\as_E_xx, 485470, fondos END_*_STAGE) -> entrada
   de nombre (modo 26, race_name_entry.cpp, bancos NAME_CMN / NAME5A..E) y rankings de OUTRUN2SP (sp_rankings.cpp);
   sin licencia ni Miles (49CFD0 solo registra con 43F860 != 0). Tiempo agotado: modo 20 -> 0x19 (no 0x22). Pausa:

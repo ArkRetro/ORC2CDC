@@ -20,4 +20,7 @@ uint32_t gd_n_juego(void);
 void gd_errores(uint32_t *n, int *ult);
 /* trabajo largo en el hilo de carga: cede el turno al bucle si lleva 2 ms seguidos (gd.c, pak_lee) */
 void gd_cede(void);
+/* si no es NULL, lo llama el hilo del juego tras cada lectura y en gd_cede (demo/pcarga.c: un cuadro de la pantalla de
+   carga entre trozo y trozo de una carga larga) */
+extern void (*gd_latido)(void);
 #endif

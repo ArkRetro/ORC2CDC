@@ -453,14 +453,17 @@ void hudd_baja(hud_dat_t *h, int t0, int nt)
    que no dibujan ninguna textura de [t0, t0 + nt) (en la carrera el menu solo dibuja la pausa: su pantalla) y
    devuelve los bytes; hudd_grupos_carga vuelve a leer del GD las que faltan (al volver al menu; 0 bien y sin leer
    nada si no falta ninguna). Un grupo sin sus piezas no se dibuja (hudd_dibuja) */
-uint32_t hudd_grupos_suelta(hud_dat_t *h, int t0, int nt)
+uint32_t hudd_grupos_suelta(hud_dat_t *h, int t0, int nt) { return hudd_grupos_suelta2(h, t0, nt, 0, 0); }
+uint32_t hudd_grupos_suelta2(hud_dat_t *h, int t0, int nt, int t1, int n1)
 {
     uint32_t g, j, b = 0;
     if (!h || !h->gp || h->gp_fijo) return 0;               /* (las de hudd_tablas_fijas no son del monton) */
     for (g = 0; g < h->n_grp; g++) {
         int vale = 0;
         if (!h->gp[g]) continue;
-        for (j = 0; j < h->grp[g].np && !vale; j++) { int t = h->spr[h->gp[g][j].spr].tex; vale = t >= t0 && t < t0 + nt; }
+        for (j = 0; j < h->grp[g].np && !vale; j++) {
+            int t = h->spr[h->gp[g][j].spr].tex; vale = (t >= t0 && t < t0 + nt) || (t >= t1 && t < t1 + n1);
+        }
         if (!vale) { free(h->gp[g]); h->gp[g] = NULL; b += h->grp[g].np * sizeof(h_pc_t); }
     }
     return b;
@@ -587,14 +590,59 @@ static void pieza(const h_pc_t *p, const h_grp_t *g, int cuadro, float X, float 
     }
 }
 
+/* la pieza p del grupo vale en el cuadro (MENU.DAT: flags >> 4 cuadros desde el suyo) */
+static int en_cuadro(const h_grp_t *G, const h_pc_t *p, int cuadro)
+{
+    return G->n <= 1 || p->cuadro == cuadro || (cuadro > p->cuadro && cuadro < p->cuadro + (p->flags >> 4));
+}
+/* reglas de hudd_reglas: la primera que vale para la pieza p del cuadro (o NULL) */
+static const hudd_regla_t *rg; static int rg_n;
+void hudd_reglas(const hudd_regla_t *r, int n) { rg = n > 0 ? r : NULL; rg_n = n > 0 ? n : 0; }
+static const hudd_regla_t *regla(const h_grp_t *G, const h_pc_t *P, const h_pc_t *p, int cuadro)
+{
+    int i, j; float x = p->x * 0.125f;
+    for (i = 0; i < rg_n; i++) {
+        const hudd_regla_t *r = rg + i;
+        if (r->spr != p->spr) continue;
+        if (r->modo == 0) return r;
+        if (r->modo == 1 && x >= r->x0 && x <= r->x1) return r;
+        if (r->modo == 2)                                   /* una pieza del ancla en el cuadro a [x0, x1] a su derecha */
+            for (j = 0; j < G->np; j++)
+                if (P[j].spr == r->ancla && en_cuadro(G, P + j, cuadro) && P[j].x * 0.125f - x >= r->x0 &&
+                    P[j].x * 0.125f - x <= r->x1) return r;
+    }
+    return NULL;
+}
 static void grupo(int g, int cuadro, float X, float Y, float alfa)
 {
-    const h_grp_t *G = H->grp + g; const h_pc_t *P = pz(H, g); int j;
+    const h_grp_t *G = H->grp + g; const h_pc_t *P = pz(H, g); int j, k;
     if (!P) return;                                         /* sus piezas, sueltas (hudd_grupos_suelta) */
     for (j = 0; j < G->np; j++)
-        if (G->n <= 1 || P[j].cuadro == cuadro ||
-            (cuadro > P[j].cuadro && cuadro < P[j].cuadro + (P[j].flags >> 4)))   /* MENU.DAT: vale flags >> 4 cuadros */
-            pieza(P + j, G, cuadro, X, Y, alfa);
+        if (en_cuadro(G, P + j, cuadro)) {
+            const hudd_regla_t *r = rg ? regla(G, P, P + j, cuadro) : NULL;
+            h_pc_t q;
+            if (!r) { pieza(P + j, G, cuadro, X, Y, alfa); continue; }
+            if (r->nuevo < 0) continue;
+            q = P[j]; q.spr = r->nuevo;
+            if (r->sitio) {                                 /* en el sitio de la pieza del sprite nuevo mas opaca */
+                int m = -1;
+                for (k = 0; k < G->np; k++) if (P[k].spr == r->nuevo && (m < 0 || P[k].alfa > P[m].alfa)) m = k;
+                if (m >= 0) { q.x = P[m].x; q.y = P[m].y; q.ax = P[m].ax; q.ay = P[m].ay; }
+            }
+            pieza(&q, G, cuadro, X, Y, alfa);
+        }
+}
+int hudd_piezas(const hud_dat_t *h, int u, int cuadro, hudd_pz_t *o, int max)
+{
+    const h_grp_t *G; const h_pc_t *P; int j, n = 0;
+    if (!h || u < 0 || u >= (int)h->n_uso) return 0;
+    G = h->grp + h->uso[u].grp; P = pz(h, h->uso[u].grp);
+    if (!P) return 0;
+    for (j = 0; j < G->np && n < max; j++)
+        if (en_cuadro(G, P + j, cuadro)) {
+            o[n].spr = P[j].spr; o[n].x = P[j].x * 0.125f; o[n].y = P[j].y * 0.125f; o[n].alfa = P[j].alfa * (1.0f / 255); n++;
+        }
+    return n;
 }
 
 static void dibuja(const char *nombre, int alt, int cuadro, float alfa)

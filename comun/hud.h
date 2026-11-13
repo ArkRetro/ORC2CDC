@@ -42,7 +42,18 @@ void hudd_baja(hud_dat_t *h, int t0, int nt);
 void hudd_cierra(hud_dat_t *h);                          /* libera su VRAM y su RAM */
 /* fichero parcial: suelta las piezas de los grupos que no usan las texturas [t0, t0 + nt) (bytes) / las vuelve a leer */
 uint32_t hudd_grupos_suelta(hud_dat_t *h, int t0, int nt);
+uint32_t hudd_grupos_suelta2(hud_dat_t *h, int t0, int nt, int t1, int n1);   /* lo mismo con dos rangos */
 int hudd_grupos_carga(hud_dat_t *h);
+/* reglas al dibujar los grupos (comun/menu.c: el carrusel del menu principal sin MULTIPLAYER): una pieza del sprite spr
+   se dibuja con el sprite nuevo (-1: no se dibuja) si vale la condicion de su modo: 0 siempre; 1 con su x en [x0, x1];
+   2 si en el mismo cuadro hay una pieza del sprite ancla con x - la suya en [x0, x1]. sitio = 1: en el sitio (x, y,
+   ancla de giro) de la pieza del sprite nuevo mas opaca del grupo (rotulos quietos). Vale la primera regla que se
+   cumpla; hudd_reglas(NULL, 0) las quita */
+typedef struct { int16_t spr, nuevo, ancla; uint8_t modo, sitio; float x0, x1; } hudd_regla_t;
+void hudd_reglas(const hudd_regla_t *r, int n);
+/* piezas del cuadro de un uso (sprite, x, y, alfa del fichero; para sacar las reglas): cuantas */
+typedef struct { int spr; float x, y, alfa; } hudd_pz_t;
+int hudd_piezas(const hud_dat_t *h, int uso, int cuadro, hudd_pz_t *o, int max);
 int hudd_uso(const hud_dat_t *h, const char *nombre);    /* indice del uso o -1 */
 int hudd_cuadros(const hud_dat_t *h, int uso);           /* cuadros del grupo del uso */
 /* dibuja el cuadro dado (se recorta al ultimo) del uso desplazado (dx, dy), con la capa z (z > 1: encima de todo;

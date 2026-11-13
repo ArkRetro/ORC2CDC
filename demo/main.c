@@ -33,6 +33,7 @@
 #include "fin.h"
 #include "final.h"
 #include "sp.h"
+#include "pcarga.h"
 #include "coli.h"
 #ifdef DIAG_PERFIL
 #include "perfil.h"
@@ -4896,6 +4897,17 @@ static void *hueco_fsp(uint32_t tam)
     presta_union(1);
     return hueco_union + cap_union - union_fsp;
 }
+/* la pantalla de carga del mapa de OUTRUN2SP (demo/pcarga.c, sp.c): sus tablas en el final del hueco de la union como
+   las del frontal (lo de delante sigue prestado a las lecturas de la carga: voces, coche, pareja); 0 la devuelve (sin
+   volver a prestar: ya es de la carrera) */
+static void *hueco_pcarga(uint32_t tam)
+{
+    if (!tam) { union_fsp = 0; return NULL; }
+    if (!hueco_union || !union_prestable() || union_fsp || tam + FSP_RESTO > cap_union) return NULL;
+    union_fsp = (tam + 31) & ~31u;
+    presta_union(1);
+    return hueco_union + cap_union - union_fsp;
+}
 static modelo_t *const tramos[3] = { &etapa, &uni, &sig };     /* lo que se dibuja (lo que este subido) */
 static const modelo_t *cielo;                                   /* el cielo que se dibuja */
 static int cur_nodo = -1, cur_sig = -1, cur_rama, cur_en_union, etapa_nodo = -1;   /* etapa actual, siguiente, rama */
@@ -5114,13 +5126,15 @@ static void curso_reinicia(void)
     if (!etapa.datos || etapa_nodo != k) {
         int r;
         libera_modelo(&etapa);
-        sp_carga_cuadro();                                      /* (OUTRUN2SP: la pantalla de carga) */
+        pcarga_avance(0.7f);                                    /* (la pantalla de carga: se anima mientras lee) */
         musica_pausa_lectura(1);                                /* el GD para la etapa (la musica tira del anillo) */
         r = curso_lee_etapa(k);
         musica_pausa_lectura(0);
         if (r) { char nn_[16]; sprintf(nn_, "SEG%02d.DAT", curso[k].seg); dbglog(DBG_ERROR, "CURSO: %s da %d\n", nn_, r); curso_error("No se pudo leer la etapa de salida"); }
     } else tex_suelta(&etapa);                                  /* la misma: sus texeles siguen en el hueco de la RAM */
-    sp_carga_cuadro(); sp_carga_sale();                         /* la VRAM de la pantalla de carga, antes de la zona */
+    pcarga_suelta();                                            /* la VRAM de la pantalla de carga, antes de la zona (su
+                                                                   ultimo cuadro se queda hasta la carrera) */
+    hueco_pcarga(0);                                            /* (sus tablas ya no: el hueco entero, de la carrera) */
     if (ar_bloque) { ar_suelta(); thd_sleep(40); }              /* (la PowerVR puede estar leyendo el cuadro anterior) */
     ar_reserva();                                               /* la zona del curso: lo libre tras el HUD y el coche */
     sube_tramo(&etapa, 1, NULL);
@@ -9296,6 +9310,17 @@ int main(int argc, char **argv)
                 /* difficulty_of de 44DC70 (PS2 0x1cdc98..0x1cdcbc): 0 en el juego de la consola (43F860 != 0); en el
                    de OUTRUN2SP 2 en la variante 4 y si no la de la licencia activa (+E0) */
                 tim_dif = auto_ || !juego_sp ? 0 : variante == 4 ? 2 : menu_dificultad();
+                menu_sale();                                    /* la VRAM del menu (y el frontal: el hueco entero) */
+                /* la pantalla de carga al empezar el modo (demo/pcarga.c; DESVIACION pedida por el usuario): todo lo de
+                   abajo, hasta la etapa y sus texturas, con ella delante (las misiones de COAST 2 COAST tambien, con su
+                   rival); el minimo, solo desde el menu. REINTENTAR no es empezar el modo: el mapa de OUTRUN2SP si (el
+                   original lo pone en cada START), sin minimo; la propia no (las piezas del titulo ya se soltaron); la
+                   demo de atraccion tampoco */
+                {   int tp = auto_ || (reintenta && !juego_sp) ? PCARGA_NADA : pcarga_tipo(variante, juego_sp);
+                    void *r_ = tp == PCARGA_MAPA_SP ? hueco_pcarga(SP_TABLAS) : NULL;
+                    pcarga_entra(tp, variante, preset_curso, r_, r_ ? SP_TABLAS : 0, reintenta ? 0 : PCARGA_MINIMO);
+                    if (!pcarga_activa()) hueco_pcarga(0);
+                }
                 /* voces del modo (bancos HC/PERH/HAM del INFARTO o ORC/PERO): se leen en el hueco de la union, aun
                    prestado (el AICA guarda uno de los dos juegos) */
                 if (voz_ok && union_prestable())
@@ -9303,12 +9328,14 @@ int main(int argc, char **argv)
                 if (variante == 2) { if (infarto_inicia()) { dbglog(DBG_ERROR, "MODO: sin INFARTO.DAT\n"); variante = 1; } }
                 else infarto_libera();                          /* 64 KB de tablas: solo en su modo */
                 if (voz_ok) { voces_modo(variante == 2); if (variante != 2) sfx_voz_grupo(-1); }
+                pcarga_avance(0.15f);
+                pcarga_pausa();                                 /* (lo que se queda en la VRAM, sin la pantalla: pcarga.c) */
                 dbglog(DBG_INFO, "MODO: variante %d, dificultad %d, fila de tiempos %d, juego %s, preset %d\n", variante, tim_dif, TIM_FILA,
                        juego_sp ? "OUTRUN2SP" : "consola", preset_curso);
-                menu_sale();                                    /* la VRAM del menu vuelve al HUD */
 #ifndef PRUEBA_FICHA                                            /* prueba: el coche de PRUEBA_FICHA, no el del menu */
                 if (!auto_ && menu_coche() >= 0 && menu_coche() != coche_ficha && coche_carga(menu_coche())) coche_carga(9);
 #endif
+                pcarga_avance(0.3f);
                 {   /* el piloto y la acompanante de esta carrera (487EE0 / 487F50): la licencia en el juego de la
                        consola, 0xB / 9 (o 6) en OUTRUN2SP; su CHRppaa.DAT en el hueco de la union, aun prestado */
                     int pp = -1, aa = 9, foto = menu_foto(), r2;
@@ -9320,6 +9347,7 @@ int main(int argc, char **argv)
                     else if ((r2 = robot_carga(pp, aa))) dbglog(DBG_ERROR, "CHR: sin la pareja %d / %d (%d)\n", pp, aa, r2);
                     if (voz_ok) voces_acompanante(aa);               /* 489A90: la lista de "aire" (9 y 10) */
                 }
+                pcarga_avance(0.45f);
                 ram_mapa("menu");
                 {   int b = menu_tablas(0);                     /* MENU.DAT: en la carrera solo las piezas de la pausa */
                     if (b) dbglog(DBG_INFO, "MENU: %dK de piezas sueltas para la carrera\n", b >> 10); }
@@ -9330,17 +9358,17 @@ int main(int argc, char **argv)
                 /* (si no caben, el HUD sigue: las que falten se suben solas al querer dibujarlas, hudd_fin_cuadro;
                    antes hud_ok = 0 y la carrera y las siguientes sin HUD) */
                 if (hud_ok && hud_sube_tex()) dbglog(DBG_ERROR, "HUD: sin RAM o VRAM para sus texturas (se suben al dibujarlas)\n");
-                /* los camiones de OUTRUN2SP (TRAFKn.DAT): detras del HUD, antes de la pantalla de carga y de la zona */
+                /* los camiones de OUTRUN2SP (TRAFKn.DAT): detras del HUD, con la pantalla de carga en pausa, antes de la zona */
                 if (juego_sp && union_prestable()) camion_carga(hueco_union, cap_union - union_fsp);
-                /* OUTRUN2SP: la pantalla de carga del preset (0x1b8228; sus texturas detras de las del HUD y fuera antes
-                   de reservar la zona del curso, demo/sp.c) */
                 if (rival_mis()) {                              /* 47CF40 y los modelos de sus coches (RCmm.DAT) */
                     rival_prepara();
                     rc_modelos_carga(union_prestable() ? hueco_union : NULL, cap_union - union_fsp);
                 }
+                pcarga_avance(0.6f);
+                pcarga_sigue();                                 /* (sus texturas otra vez, con el hueco aun prestado) */
                 presta_union(0);                                /* el hueco de la union vuelve a la carrera */
-                /* (sus tablas en el hueco de la union, que curso_reinicia no usa: nada en el monton antes de col_reserva) */
-                if (juego_sp) sp_carga_entra(variante, preset_curso, hueco_union, cap_union);
+                /* (las tablas del mapa de OUTRUN2SP siguen en el final del hueco de la union, que curso_reinicia no usa;
+                   pcarga_suelta las quita antes de la zona del curso) */
                 ar_extra = variante == 2 ? HA_VRAM_RESERVA : 0;  /* (HAHUD.DAT, detras de la zona) */
                 curso_reinicia();                               /* la etapa de salida (otra vez, si hacia falta) */
                 bo_inicia();                                    /* sin objetos de union y las cuentas a cero */
