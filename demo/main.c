@@ -5652,7 +5652,6 @@ static float dist2_ruta(const modelo_t *m, uint32_t i, const float *p)
 #endif
 static uint32_t prio_coste[ND_PRIO][NB_PRIO], prio_vtx[ND_PRIO][NB_PRIO];   /* bytes teoricos y vertices por clase */
 static int prio_d = ND_PRIO - 1, prio_p = NB_PRIO - 1, prio_esp_d, prio_esp_p;
-static int nlim_prio = ND_PRIO - 1;                          /* corte del velo del limite (nodos_visibles_todos) */
 static float prio_alfa = 1.0f;
 static float niebla_d; static int niebla_modo;                   /* la niebla del cuadro (niebla_paso) */
 #ifdef DIAG_VTX
@@ -5943,9 +5942,9 @@ static int prio_sube(int actual, int objetivo, int *espera, int max)
    k de 1 a 0 lineal en el tiempo (fe_v, por nodo). Es opaco: sin la lista transparente (nada que ordenar, no se ve a
    traves) y la niebla de la tabla sigue encima pixel a pixel como siempre, asi que lo lejano lleva la suya; con k = 0
    la imagen es exactamente la de antes. 0,4 s: a 200 km/h son ~22 m (lo que aparece a 100 m o mas acaba de fundirse
-   mucho antes de llegar) y bastante mas que un parpadeo (en menos de ~0,25 s se ve como un salto); es lo que tarda
-   nlim_paso en seguir al corte del reparto. Color (niebla_pon): el de la niebla de la etapa, o el del horizonte del
-   cielo si es mas oscuro (noche de METR y GHOS: lo nuevo no sale claro contra el cielo negro); lo aditivo sale del
+   mucho antes de llegar) y bastante mas que un parpadeo (en menos de ~0,25 s se ve como un salto); es lo que tardaba
+   el velo del limite de la demo 39 (nlim_paso) en seguir al corte del reparto. Color (niebla_pon): el de la niebla
+   de la etapa, o el del horizonte del cielo si es mas oscuro (noche de METR y GHOS: lo nuevo no sale claro contra el cielo negro); lo aditivo sale del
    negro (fe_pon). No se funde: lo que entra por el borde de la pantalla (estaba fuera de la vista: fe_f), lo que
    aparece a menos de FE_CERCA (la carretera de delante del coche), ni lo que aparece todo a la vez con la pantalla
    tapada o cambiada: el primer cuadro tras el menu o una carga (mas de FE_HUECO_US sin cuadros, o ningun modelo que
@@ -6068,14 +6067,6 @@ static void nodos_visibles_todos(void)
     for (acum = v = 0, cabe = -1, d = 0; d < ND_PRIO; d++) {
         if ((float)(acum + fila_c[d]) * k > (float)tope * REPARTO_CERCA || (float)(v + fila_v[d]) > (float)vmax * REPARTO_CERCA) break;
         acum += fila_c[d]; v += fila_v[d]; cabe = d;
-    }
-    {   /* distancia del velo del limite (nlim_paso): la del reparto de la demo 38 (0,75 del tope); con REPARTO_CERCA
-           0,25 el velo se acercaba y blanqueaba media imagen (demo 39) */
-        uint32_t a2 = 0, v2 = 0;
-        for (nlim_prio = -1, d = 0; d < ND_PRIO; d++) {
-            if ((float)(a2 + fila_c[d]) * k > (float)tope * 0.75f || (float)(v2 + fila_v[d]) > (float)vmax * 0.75f) break;
-            a2 += fila_c[d]; v2 += fila_v[d]; nlim_prio = d;
-        }
     }
     {   /* si cabe todo, todo */
         uint32_t tc = 0, tv = 0;
@@ -6339,25 +6330,20 @@ static void luz_actual(int e, float *v, float *d)
    t(i) = 2^(i >> 4) (16 + (i & 15)) / 16, la escala de pvr_fog_table_linear de KallistiOS)
    Niebla del limite de dibujado (DESVIACION pedida por el usuario, demo 30: "tenue niebla en el limite de dibujado
    para que no se aprecie tanto el popping"; docs/PARIDAD.md): ademas de la del original, un velo tenue (como mucho
-   NLIM_A) del color de la niebla de la etapa (o del horizonte del cielo si es negra) solo en el ultimo tramo de la
-   distancia de dibujo de la demo: de NLIM_INI x nlim_d a nlim_d, donde nlim_d sigue suavizada (nlim_paso) a la
-   distancia desde la que el reparto del TA quita nodos (prio_d: lo de mas alla aparece al acercarse) o a lejos si
-   cabe todo. Delante de NLIM_INI x nlim_d la tabla es la de antes (imagen igual). -DSIN_NIEBLA_LIMITE la quita. */
+   NLIM_A) del color de la niebla de la etapa (o del horizonte del cielo si es negra) solo en el ultimo tramo antes
+   de la distancia de dibujo real (lejos): de NLIM_INI x lejos a lejos. Demo 40 (el usuario: "es molesto, llevalo al
+   limite de la distancia de dibujado"): antes iba de 0,65 x nlim_d a nlim_d, con nlim_d la distancia del corte del
+   reparto del TA (nlim_paso, nlim_prio), y velaba lo medio. Delante de NLIM_INI x lejos la tabla es la de la niebla
+   del original (imagen igual). -DSIN_NIEBLA_LIMITE la quita. */
 #define NLIM_A 0.3f
-#define NLIM_INI 0.65f
-static float nlim_d = LEJOS_PS2, nlim_hecho = -1;
-static void nlim_paso(void)                                     /* cada cuadro, tras el reparto */
-{
-    float obj = prio_d < ND_PRIO - 1 && nlim_prio < ND_PRIO - 1 ? powf(2.0f, ((nlim_prio < 0 ? 0 : nlim_prio) + 1) * 0.25f) : lejos;
-    if (obj > lejos) obj = lejos;
-    nlim_d += (obj - nlim_d) * 0.06f;                           /* ~0,3 s: sin saltos al cambiar el corte */
-}
+#define NLIM_INI 0.9f
 static void niebla_pon(void)
 {
     static float tab[129], a_hecho = -1; int i; uint32_t c = niebla_c; float a;
-    float nd = nlim_d, nl = fabsf(nd - nlim_hecho) > nlim_hecho * 0.01f ? nd : nlim_hecho;
 #ifdef SIN_NIEBLA_LIMITE
-    nl = 1e9f;
+    float nl = 1e9f;
+#else
+    float nl = lejos;
 #endif
     if (!(c & 0xFFFFFF) && niebla_d <= 0) c = 0xFF8CB3EBu;      /* sin niebla ni horizonte: el azul de antes */
     {   /* el velo no aclara lo lejano contra un cielo mas oscuro que la niebla (la noche de METR y GHOS: niebla clara,
@@ -6375,8 +6361,8 @@ static void niebla_pon(void)
         a = (float)(int)(a * 64.0f) / 64.0f;                     /* (escalones: la tabla no se rehace por nada) */
     }
     if (niebla_d == niebla_d_hecha && niebla_modo == niebla_modo_hecho && niebla_c == niebla_c_hecho && lejos == niebla_lejos_hecho &&
-        nl == nlim_hecho && a == a_hecho) return;
-    niebla_d_hecha = niebla_d; niebla_modo_hecho = niebla_modo; niebla_c_hecho = niebla_c; niebla_lejos_hecho = lejos; nlim_hecho = nl;
+        a == a_hecho) return;
+    niebla_d_hecha = niebla_d; niebla_modo_hecho = niebla_modo; niebla_c_hecho = niebla_c; niebla_lejos_hecho = lejos;
     a_hecho = a;
     pvr_fog_table_color(1.0f, ((c >> 16) & 0xff) / 255.0f, ((c >> 8) & 0xff) / 255.0f, (c & 0xff) / 255.0f);
     for (i = 0; i < 129; i++) {
@@ -9126,7 +9112,7 @@ int main(int argc, char **argv)
         prf_v0 = 0;
 #endif
         PRF(0);
-        if (estado != TITULO) { nodos_visibles_todos(); nlim_paso(); }   /* los del original que caben en el TA */
+        if (estado != TITULO) nodos_visibles_todos();   /* los del original que caben en el TA */
         PRF(1);
         if (estado != TITULO) sol_prepara();                    /* el rayo hacia el sol de este cuadro */
         if (estado != TITULO) traf_parpadea(pausa || estado != CARRERA);   /* 4AE5F0 (sin traf_paso: suspendido) */

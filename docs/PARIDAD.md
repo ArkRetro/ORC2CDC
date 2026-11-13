@@ -2587,10 +2587,13 @@ que aplicaras en el limite de dibujado tenue niebla para que no se aprecie tanto
   con libro reducido en direcciones multiplo de 8: nada que la consola trate distinto de Flycast.
 - Niebla del limite de dibujado: DESVIACION pedida por el usuario (no esta en el original). Ademas de la niebla del
   original (scn_env_fog, sin cambios), un velo tenue en el ultimo tramo de la distancia de dibujo de la demo, en la
-  misma tabla de niebla de la PowerVR (`niebla_pon`): de 0 a NLIM_A = 0,3 (suave) entre 0,65 x nlim_d y nlim_d, donde
-  nlim_d sigue (`nlim_paso`, ~0,3 s) a la distancia desde la que el reparto del TA quita nodos (prio_d: ahi aparece
-  lo que salta al acercarse) o a lejos (4000 m) si cabe todo. Delante de 0,65 x nlim_d la tabla es la de antes: lo
-  cercano y lo medio no cambian. Color: el de la niebla de la etapa; en CAST y FORE (niebla del original negra y sin
+  misma tabla de niebla de la PowerVR (`niebla_pon`): de 0 a NLIM_A = 0,3 (suave) entre NLIM_INI = 0,9 x lejos y
+  lejos, la distancia de dibujo real (4000 m del original, LEJOS_PS2, o la del guion de la salida y la meta). Delante
+  de 0,9 x lejos la tabla es solo la niebla del original: lo cercano y lo medio no cambian. DESVIACION actualizada en
+  la demo 40 (el usuario: el velo "es molesto", llevarlo al limite de la distancia de dibujado): hasta la demo 39 iba
+  de 0,65 x nlim_d a nlim_d, con nlim_d siguiendo (`nlim_paso`, ~0,3 s) a la distancia desde la que el reparto del TA
+  quita nodos (prio_d, en la demo 39 la del reparto a 0,75 del tope: nlim_prio), y velaba lo de media distancia;
+  `nlim_paso` y `nlim_prio` ya no estan. Color: el de la niebla de la etapa; en CAST y FORE (niebla del original negra y sin
   densidad) el del horizonte de su cielo (`horizonte_mira`: media de color del vertice x texel de los vertices del
   grupo 0 entre -5 y 14 grados; tambien es el color al que va la niebla del original en el fundido de la union hacia
   esas etapas, antes hacia el negro). Fuerza x luminancia del horizonte / luminancia de la niebla (hasta 1): en las
