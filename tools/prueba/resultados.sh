@@ -6,7 +6,7 @@
 D=$(cd "$(dirname "$0")" && pwd); . "$D/comun.sh"
 GDI=${1:-}; PANTALLA=${2:-91}; SAL=${3:-/dev/shm/prueba_resultados}
 arranca ${FLYCAST_OPC:-}; marca
-MENU_SP=1 P=re . "$D/menu.sh"
+SP_LADO=${SP_LADO:-0} MENU_SP=1 P=re . "$D/menu.sh"
 marca; xdotool keydown x
 espera_log 'FIN: modo 25' 400 || true
 xdotool keyup x

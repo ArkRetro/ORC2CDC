@@ -12,8 +12,10 @@ if [ -n "${MENU_SP:-}" ]; then                                       # MENU_SP=1
     tecla Right; espera 3; foto ${P}_5                               # MULTIPLAYER): el frontal de recreativa (fsp.c)
     tecla x; espera_log 'FSP: frontal' 30; espera 5; foto ${P}_6     # elige coche (el coche 3D)
     tecla x; espera 5; foto ${P}_7                                   # elige transmision
-    tecla x; espera 5; foto ${P}_8                                   # elige modo de juego (OutRun, lado 0: preset 0)
-    tecla v; espera 3; foto ${P}_8b                                  # gatillo R: el otro lado (preset 1, arbol 1)
+    tecla x; espera 5; foto ${P}_8                                   # elige modo de juego (OutRun, lado 0 "Recorrido
+    if [ "${SP_LADO:-1}" = 1 ]; then                                 # OutRun2SP": preset 0, arbol 1); SP_LADO=0 sin el R
+        tecla v; espera 3; foto ${P}_8b                              # gatillo R: el otro lado ("OutRun2": preset 1, arbol 0)
+    fi
     tecla x; espera 5; foto ${P}_9                                   # elige la musica
     tecla x; espera 1; foto ${P}_carga                               # la pantalla de carga (el mapa, demo/pcarga.c)
     espera_log 'VRAM: zona del curso' 90; espera ${ESPERA_CARRERA:-15}

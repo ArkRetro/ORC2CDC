@@ -46,6 +46,14 @@ static uint8_t *dat;
 static const uint8_t *mis, *pun, *anu, *res, *cor, *grp, *modelos;
 static uint8_t modelos_c[56], coches_t[4096] __attribute__((aligned(32)));   /* 2 sectores con la tabla */
 static uint32_t lba_dat, off_coches;
+/* el preset [0x44350c] de la carrera (infarto_preset; 0x1760c0: 0 OutRun 2 SP, 1 OutRun 2): INFARTO.DAT lleva las
+   tablas del preset 0, INFARTOP.DAT las del 1 (misiones 0x3f3ed8, coches 0x362718) y la mision base de las claves de
+   los dos arboles (45C160); sin INFARTOP.DAT las de INFARTO.DAT (las bases del arbol 0) */
+static int inf_preset = -1, inf_cargado = -1;
+static uint32_t lba_coches;                         /* el fichero de la tabla de coches del preset */
+static uint8_t base_k[15];                          /* 45C160: la mision base de la clave en el arbol del preset */
+static uint8_t *mis1;                               /* misiones del preset 1 (INFARTOP.DAT) */
+static int ny_tramo;                                /* 1: la etapa del jugador es la del descriptor 0x1a (NEWY) */
 static uint8_t lv[NIV][0x44];                       /* 7F2548 + nivel * 0x44 (registro del nivel) */
 #define LV_SEL(l)   (*(int8_t *)&lv[l][0])
 #define LV_U32(l, o) (*(int32_t *)&lv[l][o])
@@ -211,10 +219,43 @@ static int spr_acabado(const spr_t *s);
 static int16_t rd16(const uint8_t *p) { return (int16_t)(p[0] | p[1] << 8); }
 static int32_t rd32(const uint8_t *p) { return (int32_t)(p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24); }
 
+void infarto_preset(int preset) { inf_preset = preset; }
+void infarto_tramo_1a(int si) { ny_tramo = si; }
+/* INFARTOP.DAT (tools/conv_infarto.py): las tablas del preset 1 y las misiones base; 0 bien */
+static int lee_preset(void)
+{
+    uint32_t lba, tam, o[4]; uint8_t *b;
+    int p1 = inf_preset == 1, arb = p1 ? 0 : 1;     /* 0x1760c0: preset 1 -> csc_data_2 (arbol 0) */
+    lba_coches = lba_dat;
+    memcpy(base_k, grp + 16, 15);                   /* (las del arbol 0, en INFARTO.DAT) */
+    if (gd_busca("INFARTOP.DAT", &lba, &tam) || tam < 20) {
+        dbglog(DBG_ERROR, "INFARTO: sin INFARTOP.DAT: las tablas del preset 0 y las bases del arbol 0 (preset %d)\n", inf_preset);
+        return -1;
+    }
+    if (!(b = memalign(32, 2048))) return -1;
+    if (gd_lee(lba, 1, b) || memcmp(b, "HRP1", 4)) { free(b); return -1; }
+    memcpy(o, b + 4, sizeof o);
+    if (o[3] != tam || o[1] + 32 > o[2]) { free(b); return -1; }
+    {   uint32_t s0 = o[1] & ~2047u; uint8_t *c = memalign(32, 4096);
+        if (!c || gd_lee(lba + (s0 >> 11), 2, c)) { free(c); free(b); return -1; }
+        memcpy(base_k, c + (o[1] - s0) + 16 * arb, 15); free(c);
+    }
+    free(b);
+    if (p1) {
+        uint32_t s0 = o[0] & ~2047u, n = (o[0] + 41 * 0x140 - s0 + 2047) & ~2047u;
+        uint8_t *m = memalign(32, n);
+        if (!m || gd_lee(lba + (s0 >> 11), (int)(n >> 11), m)) { free(m); return -1; }
+        mis1 = m; mis = m + (o[0] - s0);
+        lba_coches = lba; off_coches = o[2];
+    }
+    return 0;
+}
+
 int infarto_inicia(void)
 {
     uint32_t tam, o[8];
-    if (dat) return 0;
+    if (dat && inf_cargado == inf_preset) return 0;
+    if (dat) infarto_libera();                      /* otro preset: otra vez */
     /* en la RAM todo menos las tablas de coches (51 KB: se lee del GD la de cada accion -14, 0x320 bytes) */
     if (gd_busca("INFARTO.DAT", &lba_dat, &tam)) return -1;
     if (!(dat = memalign(32, 2048))) return -1;
@@ -233,6 +274,10 @@ int infarto_inicia(void)
     n_mis = rd32(dat + 4);
     mis = dat + o[0]; pun = dat + o[1]; anu = dat + o[2]; res = dat + o[3]; cor = dat + o[4]; grp = dat + o[5];
     modelos = modelos_c;
+    lee_preset();
+    inf_cargado = inf_preset;
+    dbglog(DBG_INFO, "INFARTO: preset %d, misiones %s, coches %s, bases %d %d %d ...\n", inf_preset, mis1 ? "INFARTOP (0x3f3ed8)" : "INFARTO (0x3f0b98)",
+           lba_coches != lba_dat ? "INFARTOP (0x362718)" : "INFARTO (0x35c958)", base_k[0], base_k[1], base_k[2]);
     return 0;
 }
 
@@ -262,7 +307,7 @@ static void voz_bomba(void)
 /* ---- mision de la etapa */
 static int mis_tabla(int sel, int k)                /* 45C160 (PS2 0x1aec08) */
 {
-    int b = grp[16 + k], i;
+    int b = base_k[k >= 0 && k < 15 ? k : 0], i;
     if (sel == 1) { i = k - 3; if (i >= 0 && i <= 11) return i < 7 ? 0xf + i : 0x1a + (i - 7); }
     if (sel == 2) { i = k - 6; if (i >= 0 && i <= 8) return i < 4 ? 0x16 + i : 0x1f + (i - 4); }
     if (sel == 3) { i = k - 10; if (i >= 0 && i <= 4) return 0x24 + i; }
@@ -528,7 +573,7 @@ static int previa(const uint8_t *r, int sec)
     case 5:                                         /* -14: 45D710, tabla de coches */
         {   uint32_t o = off_coches + (w4 & 0x3f) * 0x320, s0 = o & ~2047u;
             ct_base = NULL;
-            if (gd_lee(lba_dat + (s0 >> 11), 2, coches_t)) break;
+            if (gd_lee(lba_coches + (s0 >> 11), 2, coches_t)) break;   /* (la del preset: 0x1b2e58) */
             ct_base = coches_t + (o - s0);
         }
         ct_v = w4; ct_i = 0; ct_n = 0; ct_sec = sec; mueven = 0;   /* 45D710: 7F250C = 0 */
@@ -671,7 +716,9 @@ int infarto_coche_pide(infarto_coche_nuevo_t *n)
     cl = rd32(r); n->clase = cl; n->seccion = rd16(r + 4); n->carril = (int8_t)r[6]; n->id = ct_n;
     if (cl <= 1) n->modelo = 0x2b;
     else if (cl == 2) n->modelo = 0x1f;
-    else if (cl <= 4) n->modelo = rd32(modelos + 4 * (ct_n % 7));   /* 0x3f0850 (el tramo 0x1a, 0x3f0870, no esta) */
+    /* 0x1b2ca4: en la etapa del descriptor 0x1a la lista de 0x3f0870 (% 7); si no la de 0x3f0850, % 6 con el preset
+       1 y % 7 con los demas */
+    else if (cl <= 4) n->modelo = ny_tramo ? rd32(modelos + 28 + 4 * (ct_n % 7)) : rd32(modelos + 4 * (ct_n % (inf_preset == 1 ? 6 : 7)));
     else n->modelo = -1;
     return 1;
 }
@@ -682,7 +729,7 @@ void infarto_coche_abierto(int ok)
     ct_n++; ct_i = ct_pend + 1;
     if (ct_v & 0x80) { ct_pend = ct_i < 0x64 ? ct_i : -1; } else ct_pend = -1;
 }
-void infarto_libera(void) { free(dat); dat = NULL; }
+void infarto_libera(void) { free(dat); dat = NULL; free(mis1); mis1 = NULL; inf_cargado = -1; }
 /* sprites de la animacion (428460: cuadros ini..fin, modo 0 en bucle, 1 una vez; estado 3 = acabado) */
 static void spr_abre(spr_t *s, int g, int ini, int fin, int modo, float x, float y)
 {

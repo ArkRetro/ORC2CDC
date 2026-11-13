@@ -4,8 +4,8 @@
    4874A0 / 475720), contrastado con SLES-53998: 49C9C0 = 0x1b8e98, 4871A0 = 0x1f4ef0, 486730 = 0x1f43d0 (tabla de
    saltos de los 31 op en 0x40bf70), 486EF0 = 0x1f4c08, 4874A0 = el final de 0x1f43a0..0x1f43c8.
    - 49C9C0: escena 3 o, en las variantes distintas de 4, 5, 6 y 7 con [0x359d98] == 0x42 (siempre), la del byte
-     0x3f99b0 + (meta + preset x 5) x 4; meta = 450380(8) - 0xA (la clave de la etapa de meta - 10). En el modo OutRun
-     (preset 0): metas A..E -> escenas 3, 33, 3, 35, 34; con el preset 1, 1..5. Musica 401000(0, pista, 0) (sin
+     0x3f99b0 + (meta + preset x 5) x 4; meta = 450380(8) - 0xA (la clave de la etapa de meta - 10). Preset 0 (OutRun 2
+     SP, csc_data_cvt): metas A..E -> escenas 3, 33, 3, 35, 34; preset 1 (OutRun 2, csc_data_2): 1..5. Musica 401000(0, pista, 0) (sin
      bucle): variante 1 tabla 0x3f9a18, 2 tabla 0x3f9a30; temporizador del modo 0x4B0 (1200 cuadros; 0x258 en la 2).
    - 4871A0: 82E7D4 = escena, 82E7C4 = 82E7C8 = 82E7DC = 82E7CC = 0, 82E7D8 = 1 (activa), 82E7E0 = 82E7E8 = 0,
      82E7E4 = 2, 82E7D0 = 1, 82E7C0 = 1; marca todos los registros del guion (+0x28 = 1); car+2F0 = (& ~0x46) | 0x38.

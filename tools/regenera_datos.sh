@@ -4,7 +4,7 @@
 #   etapas SEGnn/COLnn de todos los arboles (modo OutRun, OUTRUN2SP y las 94 misiones de Races.bin), uniones BKnn
 #   empaquetadas (UNIONES.PAK + descriptores, pak_union.py; las etapas en SEGS.PAK igual), BKD, CURSO, SOL, COLBK*, COLLR, musica MUSn.ADP (28 temas,
 #   28 avances, menu y metas), peliculas MVTS/MVATTR, sonido SFX/VOCES (espanol), menus, HUD, VMU, efectos, personajes (CHRPAR y una CHRppaa por pareja),
-#   meta, salida, fin de carrera FIN/GOVER, OUTRUN2SP CARGASP0-3/GOVSP/SPFE/RUTASP/RANKSP/NOM5A-E/NOMTX, el final de recreativa FINAL/FINE0-9/FINPROP/STAFF (conv_final.py), modo de video, INFARTO/HAHUD/VOCESH, objetos de las uniones BO, trafico, camiones TRAFK0-2 (OUTRUN2SP), coches COCHE00-14 + COCHES y PARAM,
+#   meta, salida, fin de carrera FIN/GOVER, OUTRUN2SP CARGASP0-3/GOVSP/SPFE/RUTASP/RANKSP/NOM5A-E/NOMTX, el final de recreativa FINAL/FINE0-9/FINPROP/STAFF (conv_final.py), modo de video, INFARTO/INFARTOP/HAHUD/VOCESH, objetos de las uniones BO, trafico, camiones TRAFK0-2 (OUTRUN2SP), coches COCHE00-14 + COCHES y PARAM,
 #   misiones de COAST 2 COAST (MISION.DAT, conv_mision.py), sus coches de carreras RC00-29 (conv_trafico.py --rivales) y
 #   sus pantallas del menu (C2C.DAT, conv_c2c.py: categorias, mapa y detalle; datos de antes sin el: solo hace ese paso).
 #   El SALON (showroom: SALON.DAT, conv_salon.py; datos de antes del 2026-11-13 sin el: solo hace ese paso).

@@ -2355,6 +2355,9 @@ int menu_ta_codigo(int *bandera)
 /* INFARTO: el juego de cursos elegido (raiz +0x208 bits 0..1): 0 OutRun 2 (csc_data_2: el arbol 0), 1 OutRun 2 SP
    (csc_data_cvt: el arbol 1); -1 fuera del INFARTO */
 int menu_ha_juego(void) { return !sp_sel && modo_sel == 2 && tb_modo() == 2 ? tb_juego() : -1; }
+/* el juego de cursos de los tableros (raiz +0x208 bits 0..1; se queda de una carrera a otra, como en el original): lo
+   lee 0x2a6758 al salir del menu en cualquier modo de la consola (0x2a6978: el preset) */
+int menu_juego_cursos(void) { return tb_juego(); }
 
 /* 0x1f6d70: tiempo de juego (licencia +0x10C, cuadros) en horas, minutos y segundos: s = cuadros / 60,2 */
 static void tiempo_lic(uint32_t cuadros, int *h, int *m, int *sg)

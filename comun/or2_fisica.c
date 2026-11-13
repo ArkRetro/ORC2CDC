@@ -1666,6 +1666,8 @@ int or2_carga_choques_sp(const void *bloque, uint32_t tam, or2_choques_t *q)
     memcpy(q->rest_sp, d + 12, 12);
     return 0;
 }
+/* 0x191d20 / 0x191d70: las tablas *_sp con el preset 1 o 3 (el nombre es historico: son las de los cursos de OutRun
+   2, csc_data_2; el 0 / 2 es el de OutRun 2 SP, ver docs/PARIDAD.md, Preset del curso) */
 void or2_choques_preset(or2_choques_t *q, int preset) { if (q) q->sp = preset == 1 || preset == 3; }
 
 int or2_carga_choques(const void *datos, uint32_t tam, or2_choques_t *q)

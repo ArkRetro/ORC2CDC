@@ -18,12 +18,12 @@ Scripts (todos: <disc.gdi> [pantalla de Xvfb, por defecto 91] [carpeta de salida
   abandona.sh  nav.sh hasta la carrera, pausa, ABANDONAR, vuelta al menu (las piezas de MENU.DAT se releen) y segunda
            carrera con su pausa: ab_1..ab_fin, ab_pausa.
   sp.sh    OUTRUN2SP: menu principal, uno a la derecha (MENU_SP=1 en menu.sh), coche, cambio, musica y la carrera del
-           juego de OUTRUN2SP (arbol 1, preset 1) conduciendo como conduce.sh [segundos, 120]: sp_1..sp_8, sp_salida,
-           sp_c000..; error si la consola serie no dice "juego OUTRUN2SP, preset 1" y "CURSO: arbol 1".
+           juego de OUTRUN2SP conduciendo como conduce.sh [segundos, 120] (SP_LADO=1 por defecto: el gatillo R, "OutRun2", preset 1 y arbol 0; SP_LADO=0 preset 0 y arbol 1): sp_1..sp_8, sp_salida,
+           sp_c000..; error si la consola serie no dice "juego OUTRUN2SP, preset <p>" y "CURSO: arbol <a>" de ese lado.
   resultados.sh  OUTRUN2SP (como sp.sh) con el acelerador pisado hasta el fin del tiempo: el modo 25 (el mapa de la
            ruta, re_0..re_7), el GAME OVER (re_go) y la vuelta al frontal de recreativa (re_fsp).
   final.sh  el final de recreativa de OUTRUN2SP (modo 24): GDI con -DPRUEBA_PILOTO_MENU -DPRUEBA_NODO=13 -DPRUEBA_FIN=300
-           -DPRUEBA_SIN_TIEMPO, OUTRUN2SP preset 1 hasta la meta D (FLOR), el final (fi_00..fi_14, FOTOS=n), los resultados
+           -DPRUEBA_SIN_TIEMPO, OUTRUN2SP preset 0 (SP_LADO=0) hasta la meta D (FLOR), el final (fi_00..fi_14, FOTOS=n), los resultados
            (fi_25), el GAME OVER (fi_go) y la vuelta al frontal (fi_fsp); error sin "FINAL: modo 24" o "FIN: modo 25".
   vmu.sh   guardado en la VMU: licencia nueva (se guarda), Y en el menu principal (GUARDAR: "Guardando datos." y
            "Exito al guardar."; vm_3a, vm_3), tools/comprueba_vmu.py sobre la VMU A1 de Flycast (lo que mira la BIOS) y

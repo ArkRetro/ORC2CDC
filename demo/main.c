@@ -1878,19 +1878,19 @@ static float grua_s, grua_x; static int grua_on;
      t = tabla[fila][nivel][dificultad] + k636904[clave] (si 43F960 == 0 y 456D60 <= 1) + 60 (si 48B1A0 != 1 y nivel > 0)
    con la tabla TIM1 de PARAM.DAT (la que 44C020 / 0x176040 copia a 7D2E98 segun el preset [78024C]) y la correccion
    por clave de etapa KTE1 (k636904 / 0x35a938). Para el modo de la demo:
-   - preset 0: el curso de OutRun 2 (csc_data_2; arcade_fn5 4C3DC0 pone +27 = 0 o 1 para los cursos de 5 niveles y
-     2/3 para los de 15); con 0 o 1, 43F960 (preset 2 o 3) da 0.
+   - preset 1: el curso de OutRun 2 (csc_data_2; 0 el de OutRun 2 SP; arcade_fn5 4C3DC0 pone +27 = 0 o 1 para los
+     cursos de 5 niveles y 2/3 para los de 15); con 0 o 1, 43F960 (preset 2 o 3) da 0.
    - fila 0: la variante del modo OutRun es 1 (4C3DC0: fila 0 de la lista -> +1F = 1; 2 Heart Attack, 0 Time
      Attack) y 44DC70 da fila 0 a la variante 1 (2 y 5 -> 1; 0 y 7 -> 2).
    - dificultad 0: 43F860 != 0 en el juego de la consola (ver abajo); en OUTRUN2SP [7C24C0] = licencia +E0.
    - 456D60 <= 1 (un jugador): se suma k636904 de la clave de la etapa.
    - 48B1A0 (83036D) != 1 con el coche de serie (1 = preparado, 5051D0): +60 cuadros en los niveles 1..4.
-   CONFIRMADO en el ELF: la formula (0x176730), la tabla k636904 y su uso; el preset por el juego (0 la consola, 1
-   OUTRUN2SP con los cursos de OutRun 2 SP: ver juego_sp).
+   CONFIRMADO en el ELF: la formula (0x176730), la tabla k636904 y su uso; el preset por el juego de cursos (ver
+   preset_curso; hasta el 2026-11-13 la DC daba el 0, la fila de OutRun 2 SP, al curso de OutRun 2 de la consola).
    Modos (2026-11-09): la fila sale de la variante del modo elegido (menu_modo: 4EEAD0 del PC, 1 OutRun, 2 Heart
    Attack, 7 Time Attack) como en 44DC70 (race_extended_time_44dc70: 1 -> 0, 2 y 5 -> 1, 0 y 7 -> 2). La ampliacion
    del checkpoint (450CC0) pasa la variante 7 como 0: la misma fila 2.
-   OUTRUN2SP (2026-11-11): preset 1 (fila 1 de la tabla base, 0x176018) y dificultad. CORREGIDO con el ELF: el que
+   OUTRUN2SP (2026-11-11): el preset del frontal (0x176018: fila 0 / 1 / 5 / 6 de la tabla base) y dificultad. CORREGIDO con el ELF: el que
    llama a 0x176730 (0x1cdc98 = 44DC70 del PC) pasa dificultad 0 si 0x1b4878 ([0x59acac] = [780260]) no es 0, y ese
    1 lo pone el menu de la consola al entrar (0x237e28); el juego de OUTRUN2SP lo pone a 0 (0x23aba0). Asi la
    dificultad de la licencia (+E0, 0x1201d0 -> 0x588668 + 0xE0) solo cuenta en OUTRUN2SP (2 en la variante 4); en los
@@ -1913,13 +1913,19 @@ static void ha_rotulo_uso(int *actual, const char *nombre)
 static int ha_u_txt = -1, ha_u_mar = -1;                                        /* [780258] (PS2 0x443508) de la carrera */
 /* Juego de la carrera (PS2 [0x59acac] = PC [780260], 0x1b4878 = 43F860): 1 el de la consola (SUMO_FE: el menu lo pone
    al entrar, 0x237e28), 0 el de OUTRUN2SP (el menu principal lo pone a 0 al elegirlo: 0x23aba0, opcion 2, y +21C = 7).
-   Preset del curso (PS2 [0x44350c] = [gp-0x7b64] = PC [78024C]): 0 el curso de OutRun 2 (csc_data_2), 1 el de
-   OutRun 2 SP (csc_data_cvt, arbol 1 de CURSO.DAT), 2 / 3 los de 15 niveles; lo pone la lista de juego / curso del
-   frontal de OUTRUN2SP (4C3DC0: +27 por el lado elegido) y 43F950 (PS2 0x1b4a88). */
+   Preset del curso (PS2 [0x44350c] = [gp-0x7b64] = PC [78024C]; gp = 0x44b070, 0x1012f8): START (0x1b63a0) lee el
+   curso con 0x1760c0 (= 44DA00 del PC, r075_course_name) del preset: 0 -> csc_data_cvt (OutRun 2 SP: BEAC.., el arbol
+   1 de CURSO.DAT), 1 -> csc_data_2 (OutRun 2: PALM.., el arbol 0), 2 -> csc_data_cvt_ren, 3 -> csc_data_2_ren (los de
+   15 niveles, sin portar). Lo ponen (0x1b4a88 = 43F950) el frontal de OUTRUN2SP (0x215fa4: +27) y, en el juego de la
+   consola, 0x2a6978 (= 4EEA70) con el juego de cursos de los tableros (raiz +0x208 bits 0..1): 0 (OutRun 2) -> 1,
+   1 (OutRun 2 SP) -> 0, 2 -> 3, 3 -> 2. Antes del 2026-11-13 la DC tenia el numero al reves (0 = OutRun 2): ver
+   docs/PARIDAD.md, Preset del curso. */
 static int juego_sp;                                            /* 1: [780260] = 0 (OUTRUN2SP) */
 static int pide_fsp;                                            /* modo 28 -> 10 pedido: el frontal de recreativa en
                                                                    cuanto el hueco de la union queda libre */
 static int preset_curso;                                        /* [78024C] */
+static int preset_de_juego(int j) { static const int8_t P[4] = { 1, 0, 3, 2 }; return P[j & 3]; }   /* 0x2a6978 */
+static int arbol_de_preset(int p) { return p == 0 || p == 2 ? 1 : 0; }   /* 0x1760c0: csc_data_cvt (1) / csc_data_2 (0) */
 #define TIM_PRESET preset_curso                                 /* 0x176018: preset 0 / 1 / 2 / 3 -> fila 0 / 1 / 5 / 6 (TIM1 0..3) */
 #define TIM_FILA (variante == 1 ? 0 : variante == 2 || variante == 5 ? 1 : variante == 0 || variante == 7 ? 2 : 0)
 static int tim_dif;                                             /* [7C24C0]: licencia +E0 */
@@ -2399,6 +2405,8 @@ static void traf_nace(trafico_t *t, float s)
 #define TR_KMH (0.00461420696f * 60.0f)                         /* km/h del modelo -> m/s de la demo (K5B43A4 x 60) */
 static float s_union, s_sig, s_etapa;                           /* del curso (definidos mas abajo) */
 static int cur_nodo, cur_sig, cur_en_union;
+static int seg_jugador(void);                                   /* SEGnn.DAT de la etapa del jugador (-1 sin ella) */
+#define SEG_NEWY 30                                             /* SEG30.DAT: NEWY, el descriptor 0x1a (conv_union) */
 static int traf_ult_pos, traf_lugar_ult = -1, traf_hist[NCARRIL];   /* 800D50, +0x184, 803718 */
 static void traf_clase_cero(void);
 static void traf_clase_sig(void);
@@ -2589,9 +2597,16 @@ static int traf_modelo_46ce30(const uint8_t *rec)
     case 3: *n = 0; return 0x1f;
     }
     if (preset_curso == 1 || preset_curso == 3) {
-        static const uint8_t SP[6] = { 0x1e, 0x20, 0x21, 0x22, 0x23, 0x24 };
+        static const uint8_t P13[6] = { 0x1e, 0x20, 0x21, 0x22, 0x23, 0x24 };   /* (los presets de OutRun 2) */
         if ((int8_t)*n >= 6) *n = 0;
-        return SP[*n];
+        return P13[*n];
+    }
+    /* 0x1db4dc: presets 0 / 2 en la etapa del descriptor 0x1a (176700 de la clave del jugador: NEWY, SEG30) la lista
+       de 9 de 0x36bf90; si no la de 7 (0x36bf70 = tap_modelos) */
+    if (seg_jugador() == SEG_NEWY) {
+        static const uint8_t NY[9] = { 0x25, 0x25, 0x21, 0x25, 0x25, 0x22, 0x25, 0x25, 0x23 };
+        *n = (uint8_t)((int8_t)*n % 9);
+        return NY[*n];
     }
     *n = (uint8_t)((int8_t)*n % 7);
     return tap_modelos[*n];
@@ -2682,6 +2697,7 @@ static void traf_infarto(void)
             for (i = 0; i < NTRAF; i++) if (traf[i].carril >= 0 && traf[i].ha) traf[i].c.v = traf[i].v_des;
         antes = ahora;
     }
+    infarto_tramo_1a(seg_jugador() == SEG_NEWY);                /* 0x1b2ca4: 176700 de la clave del jugador */
     if (!infarto_coche_pide(&n)) return;
     m = n.modelo >= 0x1e ? traf_modelo_de(n.modelo) : -1;
     s = s_etapa + n.seccion * m_pos;
@@ -4937,6 +4953,7 @@ static void *hueco_pcarga(uint32_t tam)
 static modelo_t *const tramos[3] = { &etapa, &uni, &sig };     /* lo que se dibuja (lo que este subido) */
 static const modelo_t *cielo;                                   /* el cielo que se dibuja */
 static int cur_nodo = -1, cur_sig = -1, cur_rama, cur_en_union, etapa_nodo = -1;   /* etapa actual, siguiente, rama */
+static int seg_jugador(void) { return cur_nodo >= 0 && cur_nodo < ncurso ? curso[cur_nodo].seg : -1; }
 static int8_t rama_nivel[5];                                    /* 451350(nivel): la rama tomada (2: sin llegar) */
 static int fin_nivel = -1, fin_lado = -1; static float fin_razon = -1;   /* 4AEEF0 al acabarse el tiempo */
 static float s_union, s_decide, s_sig, s_meta, s_suelta, s_etapa, t_carga_ult;     /* sucesos en s */
@@ -8656,7 +8673,7 @@ static void rc_modelos_carga(uint8_t *buf, uint32_t cap)
    'REM1' f32 enganche x, y, z (+4 del segundo descriptor: la traslacion de car+C90), u32 4, 4 x {x, y, z, del otro
    lado, 0} y f32 x 7 la segunda caja de choque (520950, la del remolque en el marco de car+C90);
    'TRK1' u32 n, n x {el registro de TRC1, u32 con remolque}: los modelos de ese fichero (TRAFK0: el 39 con remolque y
-   el 40, la misma cabeza sin el). En el juego de la consola (preset 0) siguen sin cargarse: 46CE30 y los puntos fijos
+   el 40, la misma cabeza sin el). En el juego de la consola siguen sin cargarse: 46CE30 y los puntos fijos
    de esos modelos se gastan sin coche, como antes. */
 #define NCAMF 3
 static const struct { const char *f; int m[2]; } CAMF[NCAMF] = { { "TRAFK0.DAT", { CAM_M0, CAM_M0 + 1 } }, { "TRAFK1.DAT", { CAM_M0 + 2, -1 } },
@@ -9898,16 +9915,19 @@ int main(int argc, char **argv)
 #ifdef PRUEBA_VARIANTE
                 variante = PRUEBA_VARIANTE;                     /* prueba: 2 INFARTO, 7 Time Attack */
 #endif
-                /* OUTRUN2SP (menu_sp): [780260] = 0 y la eleccion OUTRUN / cursos de OutRun 2 SP del frontal (preset 1,
-                   43F950; 44DA00(1, 0) lee csc_data_cvt: el arbol 1 de CURSO.DAT). El juego de la consola: preset 0 */
+                /* OUTRUN2SP (menu_sp): [780260] = 0 y el preset del lado elegido en el frontal */
                 juego_sp = !auto_ && menu_sp();
 #ifdef PRUEBA_SP
                 juego_sp = 1;                                   /* prueba: el juego de OUTRUN2SP (tambien con el piloto) */
 #endif
-                /* el frontal de recreativa (comun/fsp.c, 4C3DC0): 43F950(+27) y 44DA00(0 / 1): preset 0 -> arbol 0
-                   (OutRun 2), 1 -> arbol 1 (OutRun 2 SP) */
-                preset_curso = juego_sp ? (auto_ ? 1 : menu_preset()) : 0;
-                curso_pedido = juego_sp ? preset_curso : PRUEBA_CURSO;
+                /* el preset (ver preset_curso): en OUTRUN2SP el del frontal de recreativa (comun/fsp.c: 0x215fa4 =
+                   4C3DC0 del PC, +27 = 0 "Recorrido OutRun2SP" / 1 "OutRun2"); en el juego de la consola 0x2a6758
+                   (0x23ab54, al salir del menu) lo pone 0x2a6978 con el juego de cursos de los tableros (raiz +0x208
+                   bits 0..1: menu_juego_cursos). OUTRUN va directo al coche en la DC (sin el tablero 0x24): el juego 0
+                   (OutRun 2). La demo de atraccion: el curso de OutRun 2 (0x2878a8: preset 1, 0x1760c0(1)). El arbol
+                   de START (0x1b63a0 -> 0x1760c0 por el preset, arbol_de_preset) */
+                preset_curso = juego_sp ? (auto_ ? 1 : menu_preset()) : auto_ ? 1 : preset_de_juego(variante == 1 ? 0 : menu_juego_cursos());
+                curso_pedido = juego_sp ? arbol_de_preset(preset_curso) : PRUEBA_CURSO;
                 {   /* COAST 2 COAST (variante 6): la mision elegida, su curso (el arbol 100 + i de CURSO.DAT, 4965A0) y
                        sus coches de carreras (MISION.DAT) */
                     int mi_ = auto_ ? -1 : menu_mision();
@@ -9932,7 +9952,7 @@ int main(int argc, char **argv)
                     if (variante == 7 && ta_ >= 0) {
                         ta_codigo = ta_; curso_pedido = 200 + ta_;
                         if (fl_) dbglog(DBG_ERROR, "CURSO: la opcion B (PALM_BT / BEAC_BT / _BR, 0x830395) sin portar: la etapa normal\n");
-                    } else if (variante == 2 && ha_ == 1) curso_pedido = 1;
+                    } else if (variante == 2 && ha_ >= 0) curso_pedido = arbol_de_preset(preset_curso);   /* juego 1: preset 0, arbol 1 */
                     if (ta_ >= 0 || ha_ >= 0) dbglog(DBG_INFO, "CURSO: tablero, variante %d, codigo %d, juego %d -> arbol %d\n", variante, ta_, ha_, curso_pedido);
                 }
                 or2_choques_preset(&choq, preset_curso);        /* 0x191d20 / 0x191d70 */
@@ -9954,7 +9974,7 @@ int main(int argc, char **argv)
                    prestado (el AICA guarda uno de los dos juegos) */
                 if (voz_ok && union_prestable())
                     sfx_voces_juego(variante == 2 ? "VOCESH.DAT" : variante == 6 ? "VOCESC.DAT" : "VOCES.DAT", hueco_union, cap_union - union_fsp);   /* (sin el final del frontal) */
-                if (variante == 2) { if (infarto_inicia()) { dbglog(DBG_ERROR, "MODO: sin INFARTO.DAT\n"); variante = 1; } }
+                if (variante == 2) { infarto_preset(preset_curso); if (infarto_inicia()) { dbglog(DBG_ERROR, "MODO: sin INFARTO.DAT\n"); variante = 1; } }
                 else infarto_libera();                          /* 64 KB de tablas: solo en su modo */
                 if (voz_ok) { voces_modo(variante == 2); if (variante != 2) sfx_voz_grupo(-1); }
                 pcarga_avance(0.15f);

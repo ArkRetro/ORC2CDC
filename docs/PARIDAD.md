@@ -49,7 +49,7 @@ Estado: OK (conectado y verificado al nivel indicado), PARCIAL, PROVISIONAL (apr
 | Piloto y acompanante | ROB01 / ROB02: PS2 0x201b10 / 0x201c40 / 0x202bf0 y 0x202c58 / 0x202de0; pareja 0x205518 / 0x2055b8; CHR.PS2 (CHR_DR_M00 / S00 / W00 / L00 / G00 / H00, G00_USA), bone.bin, ANIMS.PS2 | PARCIAL | CHRPAR.DAT y CHRppaa.DAT (conv_chr.py --pares), comun/robot.c (con el osage de G00): motor de movimientos, conducir con el volante, codo en la puerta, choque, fuera del asfalto, aburrida, META y TIME OVER (ver Coches: el piloto y la acompanante) | cambio de area, asustada, trompo ni poses pedidas (la meta del piloto, estado 9, hecha: ver Escena de la meta) | - | H, E |
 | Rivales | 47CF40 (PS2 0x1ef900) solo desde el gestor de misiones de C2C (496A30, PS2 0x1f9e4c) y la variante 9 (4B02B0, PS2 0x1f7a50 -> 0x1f0910); coches de carreras 47C8A0 / 47BC90 / 477090 / 477510 del modulo del trafico | PARCIAL (2026-11-13): en las misiones de carrera de C2C (ver COAST 2 COAST: misiones de carrera y el rival) | MISION.DAT (conv_mision.py), RC00-29.DAT (conv_trafico.py --rivales), comun/rival.c | no hay rivales en OUTRUN, INFARTO ni CONTRARRELOJ (el original tampoco); SIN PORTAR 472E60, 474080, vaivenes 476CA0..476F40 (ninguna mision de tipo 0 los pide), variante 9 | ver la seccion | E (Flycast) |
 | Carretera, pendientes, bifurcacion | STAGE.PS2, BK.PS2 cs_BK_PALM, COMMON obj_course_obj_bk_palm + obj_OBJ_<ZONA>_BUNKI_TX, descriptores 0xb0, csc_data_2 | OK | conv_tramo/conv_union, CURSO.DAT | arbol entero (15 etapas, 10 bifurcaciones con sus carteles, 5 metas); cielo, niebla, luz y sol de la union como el original (ver Entorno); bifurcaciones = las de PALM (las demas no estan en el disco) | objetos animados de BK (ANIMS) | E |
-| Temporizador (inicial y ampliacion) | 44DC70 = PS2 0x176730, 450CC0 = PS2 0x1cee40, 450AC0 = PS2 0x1ce1f8 (-1 por paso en 0x5c5f44, crono +1 en 0x5c5f48); cuenta atras t / 60,2 + 0,34 (4BDA30 = PS2 0x1bfff8); crono con CalcFrame2Time (449B30 = PS2 0x1f6d70: t / 60,2, milesimas truncadas); paso real 59,94 Hz: HUD 0,43 % mas lento que el reloj, como el original; tabla 7D2E98 = PS2 0x3cb708 copiada por 0x176040; k636904 = PS2 0x35a938 | OK | TIM1 y KTE1 de PARAM.DAT | formula y tablas CONFIRMADAS en el ELF; variante 1 (fila 0), preset 0 y dificultad 0 PROBABLES (frontal del PC) | trazar el frontal de PS2 | E |
+| Temporizador (inicial y ampliacion) | 44DC70 = PS2 0x176730, 450CC0 = PS2 0x1cee40, 450AC0 = PS2 0x1ce1f8 (-1 por paso en 0x5c5f44, crono +1 en 0x5c5f48); cuenta atras t / 60,2 + 0,34 (4BDA30 = PS2 0x1bfff8); crono con CalcFrame2Time (449B30 = PS2 0x1f6d70: t / 60,2, milesimas truncadas); paso real 59,94 Hz: HUD 0,43 % mas lento que el reloj, como el original; tabla 7D2E98 = PS2 0x3cb708 copiada por 0x176040; k636904 = PS2 0x35a938 | OK | TIM1 y KTE1 de PARAM.DAT | formula y tablas CONFIRMADAS en el ELF; variante 1 (fila 0) y dificultad 0 PROBABLES (frontal del PC); preset CONFIRMADO (ver Preset del curso) | trazar el frontal de PS2 | E |
 | Checkpoints, meta, resultados | 44FF20 / 4515B0 (branch_state 7D38E8) con las banderas +0x3C de COLI0200; 4513C0 meta | OK | ampliacion al pasar la pancarta CHECK POINT del principio de la etapa siguiente (ver Checkpoint); meta del original en las 5 etapas finales (z = 0 de la union); voz y efecto de EXTEND TIME, GOAL y TIME OVER (voces.c) | escena de la meta del original (modo 19: guion, camara, coche, piloto, efecto y musica; ver Escena de la meta); millas OutRun, continuar (REINTENTAR / ABANDONAR) y GAME OVER del original (modos 34 / 35 / 27, ver Fin de la carrera); sin la tabla de tiempos de 498670 ni el ranking | — | E |
 | Puntuacion modo OutRun | 4F2DF0, 4F2660, 4F2B20, 4B9770 | PARCIAL | main.c pt_* | posicion de carretera = m_pos de CURSO.DAT (CONFIRMADO; antes 2,5 m supuestos, 3,2 veces los puntos por avance); bonus de etapa en el checkpoint | el salto de +64 al cambiar de curso (PENDIENTE) | E |
 | Eventos, scripts, progresion, misiones | SCRIPTS.PS2 (Races, RaceAttack, OutrunMiles, Req_*) | FALTA | — | — | — | — |
@@ -441,7 +441,7 @@ estaba y se dice lo que falta). Estado: CORREGIDO, SE QUEDA (ya era del original
 | `GRUA_AVANCE` 25 m | pc_pl_wrecker_delayed: pc_advance_on_road_place(sitio, 10) (+8 = posicion) | 10 posiciones (~79 m) | CONFIRMADO | CORREGIDO |
 | Ampliacion de tiempo al entrar en la union | 44FF20 (stage clear) con las banderas 0x10/0x100 de la posicion 0 de la etapa siguiente | principio de la etapa siguiente (pancarta CHECK POINT) | CONFIRMADO (datos de colision del disco + logica del PC; 450CC0/44DC70 iguales en PS2) | CORREGIDO, ver Checkpoint |
 | `TIM_FILA 2` (variante 0) | 44DC70: variante 1 (OutRun) -> fila 0; 4C3DC0 da +1F = 1 a la fila "OutRun" | fila 0 | PROBABLE (menu del PC) | CORREGIDO |
-| `TIM_PRESET 0` | 44C020 = PS2 0x176018 por [78024C] = PS2 [0x44350c]: preset 0 / 1 / 2 / 3 -> fila 0 / 1 / 5 / 6 de la tabla base | 0 en el juego de la consola, 1 en OUTRUN2SP (`preset_curso`) | CONFIRMADO (0x176018) | CORREGIDO (2026-11-11, ver OUTRUN2SP) |
+| `TIM_PRESET 0` | 44C020 = PS2 0x176018 por [78024C] = PS2 [0x44350c]: preset 0 / 1 / 2 / 3 -> fila 0 / 1 / 5 / 6 de la tabla base | el del juego de cursos (1 en OUTRUN de la consola, ver Preset del curso; el del frontal en OUTRUN2SP) (`preset_curso`) | CONFIRMADO (0x176018) | CORREGIDO (2026-11-11 y 2026-11-13: antes 0, la fila de OutRun 2 SP, en la consola; ver OUTRUN2SP) |
 | `TIM_DIF 0` | 0x1cdc98 (44DC70): 0 si 0x1b4878 ([0x59acac] = [780260], 1 en el juego de la consola: 0x237e28); si no 2 en la variante 4 o la licencia +E0 | 0 en la consola, licencia +E0 en OUTRUN2SP | CONFIRMADO | CORREGIDO (2026-11-11: antes la demo leia la licencia en los modos de la consola) |
 | Sin el +60 ni k636904 | 44DC70 = PS2 0x176730: + k636904[clave] si 43F960 == 0 y 456D60 <= 1; + 60 si 48B1A0 != 1 y nivel > 0 | k636904 = {0,0,-60,0,-60,-90,0,-60,-90,-120,0,-60,-90,-120,-150} (PS2 0x35a938, KTE1); +60 con coche de serie | CONFIRMADO (formula y tabla); PROBABLE (coche de serie = 48B1A0 != 1) | CORREGIDO (Flycast: LAKE +3480 = 3420 + 0 + 60; DESE +3450 = 3480 - 90 + 60) |
 | Bonus de etapa (4F2B20) al entrar en la union | 450CC0 lo da tras la ampliacion con 7D3948 (cuadros de la etapa, union incluida); 4F2DF0 en la meta (modo 0x13) | en el checkpoint y en la meta | CONFIRMADO | CORREGIDO |
@@ -1124,7 +1124,7 @@ de la tabla de recursos de PS2, `conv_coche.recursos`), que la demo no convertia
 - Que hace: la clave del coche pasa a la de la etapa nueva; 450CC0 (PS2 0x1cee40) suma 44DC70 de esa clave (PS2
   0x176730, misma formula que el PC) y da el bonus 4F2B20 con los cuadros desde el anterior; 84490C -> 4B9630: escena
   EXTEND TIME (2C00AC, 180 cuadros de temporizador). En la meta no hay ampliacion: GOAL al entrar en la union de meta.
-- Ampliacion para el modo de la demo (fila 0, preset 0, dificultad 0, un jugador, coche de serie), en cuadros de 60,2
+- Ampliacion para el modo de la demo (fila 0, preset 1 (el 0 da lo mismo: filas iguales), dificultad 0, un jugador, coche de serie), en cuadros de 60,2
   Hz: nivel 1 = 3420 + 60 + k (LAKE 3480, ALPI 3420); nivel 2 = 3480 + 60 + k (CAST 3540, FORE 3480, DESE 3450);
   nivel 3 = 3060 + 60 + k (CLOU 3120, INDU 3060, SNOW 3030, GHOS 3000); nivel 4 = 2700 + 60 + k (TULI 2760 ... CAPE
   2610). Inicial 5999 (nivel 0, sin +60).
@@ -1229,8 +1229,8 @@ race_ending.cpp; SLES-53998 contrastado):
   tiene escenas de final por meta** (AS.PS2 esta en el disco pero no se usa en este flujo). No hay pelicula de final
   en MV.PS2 para las metas.
 - **49C9C0**: temporizador del modo 0x4B0 (0x258 en la variante 2); escena 3, o (variantes != 4, 5, 6, 7 y [0x359d98]
-  == 0x42) el byte 0x3f99b0 + (meta + preset x 5) x 4 con meta = 450380(8) - 0xA: preset 0 (el curso de OutRun 2 de
-  la demo) metas A..E -> escenas 3, 33, 3, 35, 34; preset 1 -> 1..5. 4871A0(escena). Musica 401000(0, pista, 0)
+  == 0x42) el byte 0x3f99b0 + (meta + preset x 5) x 4 con meta = 450380(8) - 0xA: preset 0 (OutRun 2 SP,
+  csc_data_cvt) metas A..E -> escenas 3, 33, 3, 35, 34; preset 1 (OutRun 2, el del modo OUTRUN) -> 1..5. 4871A0(escena). Musica 401000(0, pista, 0)
   (sin bucle): variante 1 0x3f9a18 = {0x42, 0x3e, 0x3d, 0x41, 0x3f}, variante 2 0x3f9a30 = {0x3e, 0x3d, 0x42, 0x41,
   0x3f} (MUSIC.PS2 `\61`..`\66`). La voz GOAL 0x16b de 49C9C0 no suena con 43F860 (la que suena es la de voces.c).
 - **4871A0 / 4874A0 / 486730 / 486EF0** (PS2 0x1f4ef0, 0x1f43a0, 0x1f43d0, 0x1f4c08): guion 0x36f2a0[escena]
@@ -2569,6 +2569,82 @@ su caja y el fundido a negro, y la salida al menu con START o a los 600 cuadros,
   (65990 / 3000 + 1970 de las etapas) contando cifra a cifra -> continuar -> A -> la misma carrera desde la salida ->
   GOAL otra vez. Sin "Out of memory"; VRAM libre al entrar 50-70 K (536 K en el INFARTO, con el HUD fuera).
 
+## Preset del curso: OutRun 2 / OutRun 2 SP (2026-11-13)
+
+El preset [78024C] (PS2 [0x44350c] = [gp-0x7b64], gp = 0x44b070 en 0x1012f8) decide el curso y sus reglas. La DC lo
+tenia al reves (0 = OutRun 2): en el juego de la consola corria el curso de OutRun 2 con las reglas de OutRun 2 SP, y
+en OUTRUN2SP cada lado del gatillo R corria el curso del otro. CONFIRMADO en el MIPS de SLES-53998 (y en el PC:
+outrun2-decomp r075_course_name de 44DA00, el mismo reparto):
+- 0x1760c0 (= 44DA00): 1 / 4 -> "csc_data_2" (0x3cb4d8: PALM.., OutRun 2), 0 / 3 -> "csc_data_cvt" (0x3cb4e8:
+  BEAC.., OutRun 2 SP), 2 -> csc_data_easy, 5 / 7 / 8 / 10 -> csc_data_cvt_ren, 6 / 9 -> csc_data_2_ren.
+- START (0x1b63a0, variantes 0 / 1 / 2 de [0x443508]): 0x1760c0(preset 0 -> 0, 1 -> 1, 2 -> 5, 3 -> 6, segundo
+  argumento 1). El preset 0 es el de OutRun 2 SP y el 1 el de OutRun 2.
+- Quien lo escribe (0x1b4a88 = 43F950; la puesta a cero 0x1b48d8 lo deja en 0): el juego de la consola al salir del
+  menu (0x23ab54 -> 0x2a6758 para todos los modos, tambien COAST 2 COAST y antes de OUTRUN2SP): 0x2a6978 (= 4EEA70)
+  con los bits 0..1 de la raiz +0x208 (el juego de cursos de los tableros 0x24..0x27): 0 -> 1, 1 -> 0, 2 -> 3, 3 -> 2
+  (el juego 0 del tablero es "OutRun 2"); la CONTRARRELOJ de los cursos seguidos ademas 2 / 3 (0x2a6884 / 0x2a68e8).
+  Las misiones de COAST 2 COAST (0x2a6ad4: variante 6) no lo cambian: se quedan con el de esos bits (0 si nunca se
+  entro en un tablero: preset 1); los campeonatos (0x2a6b08..: variante 5) 1 o 0 por su peticion. El frontal de
+  OUTRUN2SP (0x215fa4 = el final de 4C3DC0): el +27 del lado (0 "Recorrido OutRun2SP", 1 "OutRun2"; 2 / 3 las filas de
+  15 recorridos) y 0x1760c0 del preset. La demo de atraccion (0x2878a8): preset 1 y csc_data_2. El menu de la
+  consola lee csc_data_2 al entrar (0x237de4: 0x1760c0(1)).
+- Confirmacion independiente por los nombres de los recursos: con el preset 1 / 3 el banderero es CHR_AUT04 y con el
+  0 / 2 CHR_AUT04_CVT (0x2046f0); los bancos de voz del INFARTO (0x173a6c: 0x1b3be8 / 0x1b3c70) son HAM\1A.. (entradas
+  0x43.. de 0x352840) con el preset 1 y HAM.CVT\1A.. (0x1a..) con el 0.
+
+| Juego | Antes (DC) | Ahora (DC) = original |
+|---|---|---|
+| OUTRUN de la consola | preset 0, arbol 0 (csc_data_2) | preset 1, arbol 0 (juego 0: la DC no pasa por el tablero 0x24 de OUTRUN) |
+| INFARTO, juego 0 (OutRun 2) | preset 0, arbol 0 | preset 1, arbol 0 |
+| INFARTO, juego 1 (OutRun 2 SP) | preset 0, arbol 1 | preset 0, arbol 1 (igual) |
+| CONTRARRELOJ | preset 0 (el codigo ya salia del juego: menu_ta_codigo) | 0x2a6978 del juego (1 OutRun 2, 0 SP) |
+| COAST 2 COAST (misiones) | preset 0 | el del ultimo juego de cursos de los tableros (1 sin tocarlos) |
+| OUTRUN2SP lado 0 "Recorrido OutRun2SP" | preset 0, arbol 0 (el curso de OutRun 2) | preset 0, arbol 1 (BEAC..) |
+| OUTRUN2SP lado 1 "OutRun2" (gatillo R) | preset 1, arbol 1 (el de OutRun 2 SP) | preset 1, arbol 0 (PALM..) |
+| Demo de atraccion | preset 0, arbol 0 | preset 1, arbol 0 |
+
+Lo que lee el preset (todas las lecturas de [0x44350c] del ELF revisadas) y como estaba la DC:
+- Solo numeracion (el efecto ya era el del original o no cambia nada): la fila de tiempos (0x176018: TIM1 del preset;
+  las filas 0 y 1 de la tabla base son iguales, los tiempos no cambian); el aviso "<- FACIL" (0x1c50c0: presets 0, 1 y
+  4); CARGASP0..3 (0x1b8228, por el numero de preset: cada lado ya tenia su mapa), el fondo / columna del final de
+  recreativa (0x19bae4 / 0x209428: +5 con 0 / 2), los rankings RKSP (por preset) y la escena del GAME OVER: indexadas
+  con el preset del frontal, que era el bueno; lo que cambia en OUTRUN2SP es el curso que se corre con ellos.
+- Dos errores que se compensaban: la entrada de nombre (demo/nombre.c) tomaba los descriptores del arbol 0 con el
+  preset 0 (desc[preset & 1]); con el arbol del preset (preset 1 -> desc[0] = csc_data_2) sigue dando el fondo de la
+  etapa que se ha corrido.
+- Efecto equivocado de verdad, CORREGIDO:
+  - Arbol de OUTRUN2SP (`curso_pedido = preset`): ahora `arbol_de_preset` (0x1760c0).
+  - Juego de la consola con el preset 0: ahora `preset_de_juego` (0x2a6978) del juego de cursos (`menu_juego_cursos`).
+    Para el jugador, en OUTRUN / INFARTO de OutRun 2 / COAST 2 COAST: choques entre coches con la restitucion de
+    OutRun 2 (0x191d20: 1,0 / 0,9 / 0,7 en vez de 0,8), trafico de la clase 4 en ciclo de 6 (0x1E, 0x20..0x24: sin el
+    38) y clases 0..2 0x27 / 0x29 / 0x28 (camiones: en la consola siguen sin cargarse), el banderero CHR_AUT04
+    (BAND1.DAT) en vez del de OutRun 2 SP, las escenas de la meta del preset 1 (1..5 en vez de 3, 33, 3, 35, 34).
+  - INFARTO de OutRun 2 corria las misiones y los coches del preset 0 (los de OutRun 2 SP): 0x1a7bb8 da 0x3f0b98 con el
+    preset 0 y 0x3f3ed8 con los demas; 0x1b2e58 la tabla de coches 0x362718 con el preset 1 y 0x35c958 con los demas;
+    0x1b2ca4 los modelos de la clase 3 / 4 de 0x3f0850 % 6 con el preset 1 (% 7 con los demas) y 0x3f0870 % 7 en la
+    etapa del descriptor 0x1a (NEWY). Y la mision base de cada clave (45C160 = 0x1aec08: 176700, el descriptor de la
+    clave en el arbol cargado, > 14 resta 15) salia siempre del arbol 0: mal en el INFARTO de OutRun 2 SP. Ahora
+    INFARTOP.DAT (tools/conv_infarto.py, paso `infarto` de regenera.py) lleva las misiones y los coches del preset 1 y
+    las bases de los dos arboles; comun/infarto.c los elige con infarto_preset (INFARTO.DAT no cambia).
+  - Trafico de los presets 0 / 2 en NEWY (0x1db4dc: 176700 de la clave del jugador == 0x1a, SEG30): la lista de 9 de
+    0x36bf90 (0x25 x 6, 0x21, 0x22, 0x23) en vez de la de 7. No se veia antes (el preset 0 nunca corria el arbol 1
+    salvo el INFARTO de OutRun 2 SP del 2026-11-13).
+- SIN PORTAR (lecturas del preset de partes que la DC no tiene): los bancos de voz HAM.CVT del INFARTO de OutRun 2 SP
+  (0x173a6c; VOCESH.DAT solo lleva los HAM del preset 1, PENDIENTE), los sonidos 0x841a / 0x8443 de 0x173cbc, el
+  recurso 0x12b / 0xc3 de 0x1736b0 / 0x1b7ac8 / 0x206cac / 0x287e98 (el personaje del banderero, que la DC lee con
+  BAND / BAND1), el mapa de ruta del HUD (0x1be240 / 0x1bfb60 / 0x1c36f8 / 0x1cc0d0: tablas por preset, presets 0 y 1
+  iguales), la camara de 0x17c018 / 0x17e860 (presets 0 / 2 frente a 1 / 3: sin portar), la lista de 7 de 0x22d0a0, los
+  records de la Contrarreloj (0x21cc74 / 0x21f7a0 / 0x1fe3c8 / 0x20012c) y 0x28d0c8. La clase 4 de los presets 1 / 3
+  con red o rivales ([0x443514] != 0) va por la lista de 7 / 9: la DC no lo mira.
+- PROBABLE: OUTRUN de la consola con el juego 0 (en el original lo elige el tablero 0x24 de 4 posiciones, que la DC no
+  ensena para OUTRUN); COAST 2 COAST con el juego que quedo del ultimo tablero, como los bits del original.
+- Pruebas: tools/prueba/sp.sh con SP_LADO=1 (por defecto, el gatillo R: preset 1, arbol 0) o SP_LADO=0 (preset 0, arbol
+  1); final.sh y resultados.sh usan SP_LADO=0 (las metas de OutRun 2 SP: FLOR es la clave 13 del arbol 1).
+- Verificado en Flycast (display 95): sp.sh SP_LADO=0 ("Recorrido OutRun2SP"): `juego OUTRUN2SP, preset 0`, `CURSO:
+  arbol 1, 15 etapas, salida BEAC`, CARGASP0, `BAND: preset 0` (BAND.DAT), tiempo inicial 99 (5999 cuadros); SP_LADO=1
+  (gatillo R, "OutRun2"): `preset 1`, el arbol 0 (PALM, sin leer otro), CARGASP1, `BAND: preset 1` (BAND1.DAT); sin
+  "Out of memory" ni "pvr_mem: ERROR" (RAM libre en carrera 926K / 908K).
+
 ## OUTRUN2SP (2026-11-11)
 
 Flujo del original (SLES-53998 y la decompilacion; PC native_runtime.cpp 43F870, race_end_modes.cpp "OUTRUN2SP route",
@@ -2601,17 +2677,19 @@ arcade_attract.cpp):
   frontal de recreativa (modo 10) salvo [65994C] (-> 32, el menu de la consola); el frontal vuelve al menu de la
   consola con su funcion 0xB cancelada (4BF510: modo 32).
 
-Diferencias de reglas del juego de OUTRUN2SP / preset 1 (todas CONFIRMADAS en el MIPS):
+Reglas que cambian con el preset del curso (todas CONFIRMADAS en el MIPS; preset 0 = OutRun 2 SP / csc_data_cvt, 1 =
+OutRun 2 / csc_data_2, ver Preset del curso: hasta el 2026-11-13 esta tabla decia "OUTRUN2SP / preset 1" con el arbol
+1, que era el preset equivocado para ese arbol):
 | Que | Original | DC |
 |---|---|---|
-| Arbol del curso | 44DA00(1, 0) = csc_data_cvt (0x1b6360 en START: preset 1 -> 0x1760c0(1)) | arbol 1 de CURSO.DAT (`curso_pedido`) |
-| Tabla de tiempos | 0x176018: preset 1 -> fila 1 de la tabla base (TIM1[1]); k636904 se suma (43F960 = 0) | `TIM_PRESET` = `preset_curso` |
+| Arbol del curso | 0x1b63a0 en START: 0x1760c0(preset 0 -> 0, 1 -> 1) = 44DA00: 0 csc_data_cvt, 1 csc_data_2 | `arbol_de_preset`: preset 0 -> arbol 1, 1 -> arbol 0 de CURSO.DAT (`curso_pedido`) |
+| Tabla de tiempos | 0x176018: preset 0 / 1 / 2 / 3 -> fila 0 / 1 / 5 / 6 de la tabla base (TIM1[preset]); k636904 se suma (43F960 = 0) | `TIM_PRESET` = `preset_curso` |
 | Dificultad | 0x1cdc98: licencia +E0 (2 en la variante 4); 0 en la consola | `tim_dif` |
-| Trafico: modelos | 46CE30 = 0x1db2a0: clase 4 con preset 1 / 3 -> 0x1E, 0x20..0x24 en ciclo de 6 (0x1db49c..0x1db578); clase 0 0x27 / 0x29, 1 / 2 0x28 | `traf_modelo_46ce30` (con el dado de la clase, ver abajo) |
+| Trafico: modelos | 46CE30 = 0x1db2a0: clase 4 con preset 1 / 3 -> 0x1E, 0x20..0x24 en ciclo de 6 (0x1db49c..0x1db578), con 0 / 2 la lista de 7 (0x36bf70) o, en la etapa del descriptor 0x1a (NEWY), la de 9 de 0x36bf90 (0x25 x 6, 0x21, 0x22, 0x23); clase 0 0x27 / 0x29 (1 / 3) o 0x29 / 0x2B, 1 / 2 0x28 o 0x2B | `traf_modelo_46ce30` (con el dado de la clase, ver abajo; la lista de NEWY desde el 2026-11-13) |
 | Trafico: tablas de aparicion | las del descriptor de cada etapa (+0x80 / +0x84) y sus puntos fijos (4EF880) | TAPD.DAT por segmento, copiadas al leer el arbol (antes la demo usaba las del arbol 0 por indice en todos los arboles) |
-| Choques entre coches | 0x191d20 / 0x191d70: con preset 1 / 3 umbrales 0x35b9d8 (80, 280: iguales) y restitucion 0x35b9f0 = 1,0 / 0,9 / 0,7 (normal 0x35b9e0: 1,0 / 0,9 / 0,8) | bloque CHA1 de PARAM.DAT, `or2_choques_preset` |
-| Banderero de la salida | 0x2046f0: personaje 3 = CHR_AUT04 (recurso 0xC3, tela del recurso 0xC3: 0x100d40) con preset 1 / 3, si no 4 = CHR_AUT04_CVT; hueso de la tela 0x11; movimientos y posiciones de la fila del preset | BAND1.DAT (`conv_chr.py --banderero-sp`), el resto ya iba por preset en robot.c |
-| Escena de la meta | 0x3f99b0 + (meta + preset x 5) x 4: preset 1 -> escenas 1..5 | `meta_escena(variante, preset_curso, meta)`, metas A..E = claves 10..14 del arbol 1 |
+| Choques entre coches | 0x191d20 / 0x191d70: con preset 1 / 3 (OutRun 2) umbrales 0x35b9d8 (80, 280: iguales) y restitucion 0x35b9f0 = 1,0 / 0,9 / 0,7 (normal 0x35b9e0: 1,0 / 0,9 / 0,8) | bloque CHA1 de PARAM.DAT, `or2_choques_preset` |
+| Banderero de la salida | 0x2046f0: personaje 3 = CHR_AUT04 (recurso 0xC3, tela del recurso 0xC3: 0x100d40) con preset 1 / 3 (OutRun 2), si no 4 = CHR_AUT04_CVT (OutRun 2 SP); hueso de la tela 0x11; movimientos y posiciones de la fila del preset | BAND1.DAT (`conv_chr.py --banderero-sp`), el resto ya iba por preset en robot.c |
+| Escena de la meta | 0x3f99b0 + (meta + preset x 5) x 4: preset 0 -> 3, 33, 3, 35, 34; preset 1 -> escenas 1..5 | `meta_escena(variante, preset_curso, meta)`, metas A..E = claves 10..14 del arbol |
 | Piloto / acompanante | 487EE0 / 487F50 sin 43F860: 0xB (CHR_DR_M00) y 9 (CHR_DR_L00) en las variantes 1, 3, 4, 5; 6 (CHR_DR_G00_USA) en el resto | CHR1109.DAT / CHR1106.DAT (`robot_pareja`, ver Coches: la pareja de la carrera) |
 | Voces | 427DB0: juego 4 (SPRACE); con el idioma espanol el directorio es SPANISH en todos los juegos | sin cambio |
 | Mapa de ruta del HUD | 0x1be288 / 0x1bfc68 / 0x1c38a0: presets 0 y 1 igual (5 niveles) | sin cambio |
@@ -2767,7 +2845,7 @@ etapas, salida BEAC`, BAND1.DAT en el hueco de la union; RAM libre 1419..1490 KB
   - Recursos: solo en las carreras de OUTRUN2SP (camion_carga al empezarla, con el hueco de la union aun prestado para
     leerlos: lo que no son texeles va a un bloque del monton de su tamano y las texturas detras del HUD, antes de la
     zona del curso; se sueltan al volver al menu). Ver docs/DREAMCAST.md (Camiones de OUTRUN2SP).
-  - PENDIENTE: en el juego de la consola (preset 0: puntos fijos de SEG04 / 05 / 06 / 11 y el 0x2B de 46CE30 y del
+  - PENDIENTE: en el juego de la consola (puntos fijos de SEG04 / 05 / 06 / 11, los 0x27 / 0x28 / 0x29 de 46CE30 y el 0x2B del
     INFARTO) siguen gastandose sin coche (no se cargan: decision de recursos); 470570 (la camara dentro de una caja del
     camion, alfa 0,5).
   - Verificado en Flycast (sp.sh, display 97; -DPRUEBA_CAMION: cada coche al azar es un camion, 39 / 41 / 43 / 40 por
@@ -2809,11 +2887,13 @@ hornearlo (~290000 piezas). Texturas en atlas por pantalla con VQ (1910 KB en to
 Recorrido con un jugador (la secuencia; el codigo c es la funcion c + 1 de la tabla 0x3ee7b4):
 "Elige coche" (funcion 6: lista de 10, Y sostenido el color con arriba / abajo, el coche 3D girando +0x64 por paso
 como 475670) -> "Elige transmision" (7, 2E004F) -> "Elige modo de juego" (5: OutRun / Infarto / Contrarreloj; el
-gatillo R cambia de lado: lado 0 rotulo "Recorrido OutRun2SP" -> preset 0, lado 1 "OutRun2" -> preset 1; variante
+gatillo R cambia de lado: lado 0 rotulo "Recorrido OutRun2SP" -> preset 0 (csc_data_cvt), lado 1 "OutRun2" -> preset 1
+(csc_data_2; 0x215fa4 -> 0x1760c0(preset)); variante
 fila 0 -> 1, 1 -> 2, 2 -> 0) -> solo en la Contrarreloj "Elige configuracion del coche" (3) -> "Elige la musica" (9;
 Y sostenido el balance musica / motor 2E0050) -> la carrera (11). B vuelve atras; B en el coche, al menu de la consola
 (4C2C60 -> 4BF510: modo 32). La funcion 12 ("Single Play.", 2E004E) no sale con un jugador (el paso 0xB la salta).
-La carrera usa lo elegido: coche, color, AT / MT, variante (0 = Contrarreloj), preset -> arbol de CURSO.DAT, tema.
+La carrera usa lo elegido: coche, color, AT / MT, variante (0 = Contrarreloj), preset -> arbol de CURSO.DAT (0 -> 1, 1 ->
+0 desde el 2026-11-13; antes 0 -> 0 y 1 -> 1: cada lado corria el curso del otro con sus reglas), tema.
 Verificado en Flycast (tools/prueba/sp.sh): las cinco pantallas y la carrera con preset 1 (gatillo R), 0 "Out of
 memory", RAM del menu igual que antes (939 KB libres).
 - Mandos (el PC lee 4536F0 / 4536C0; el PS2 los filtra en 0x210988 / 0x210a00): 8 = B, 1 / 4 = START / A, 0x10
@@ -3041,7 +3121,8 @@ bloque TAP1 de TRAFC.DAT), localizadas por el codigo que las usa:
 - Sin trafico en sentido contrario: todos los coches van con la orientacion de la carretera del sitio (470240);
   ninguna tabla lleva sentido. Dificultad: el trafico no lee la licencia (7C24C0) ni la dificultad; solo la variante
   780258 (3/4 red: densidad 5B3DF0 y x0,8 las velocidades; 2 Heart Attack) y el preset 78024C (modelos de 46CE30).
-  La demo es la variante 1 (OutRun), preset 0: nada que cambiar con menu_dificultad().
+  La demo es la variante 1 (OutRun), preset 1 (0 hasta el 2026-11-13, ver Preset del curso): nada que cambiar con
+  menu_dificultad().
 - TRAFC.DAT no se cargaba: la demo leia registros de 52 bytes y son de 48 (sizeof trafc_t); ahora se leen bien las
   clases, cajas, aceleraciones (ACL1) y el modelo para el LOD.
 Verificacion (Flycast, `-DPRUEBA_AUTO -DVER=1 -DDIAG_TRAF`, 80 s de carrera con el piloto, `DIAGTRAF` cada 1 s):

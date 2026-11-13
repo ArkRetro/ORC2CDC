@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # final.sh <disc.gdi> [pantalla] [salida/]: el final de recreativa de OUTRUN2SP (modo 24, demo/final.c). El GDI va
 # compilado con -DPRUEBA_PILOTO_MENU -DPRUEBA_NODO=13 -DPRUEBA_FIN=300 -DPRUEBA_SIN_TIEMPO (la carrera del menu desde la
-# clave 13 del arbol, a 300 m de la meta, con el piloto). OUTRUN2SP como resultados.sh (MENU_SP=1: preset 1, arbol 1)
+# clave 13 del arbol, a 300 m de la meta, con el piloto). OUTRUN2SP como resultados.sh (MENU_SP=1, SP_LADO=0: preset 0, arbol 1 = csc_data_cvt)
 # hasta la meta (GOAL, escena de la meta), despues el modo 24: fi_00..fi_NN (una cada 2 s), los resultados (25: fi_25),
 # el GAME OVER (fi_go) y la vuelta al frontal (fi_fsp). Error si no salen "FINAL: modo 24", "FIN: modo 25" y
 # "FSP: frontal" otra vez.
 D=$(cd "$(dirname "$0")" && pwd); . "$D/comun.sh"
 GDI=${1:-}; PANTALLA=${2:-91}; SAL=${3:-/dev/shm/prueba_final}
 arranca ${FLYCAST_OPC:-}; marca
-MENU_SP=1 P=fi . "$D/menu.sh"
+SP_LADO=${SP_LADO:-0} MENU_SP=1 P=fi . "$D/menu.sh"
 espera_log 'CURSO: GOAL' 400 || true
 for i in 0 1 2 3 4 5; do espera 3; foto fi_m$i; done                    # la escena de la meta (la pareja)
 espera_log 'FINAL: modo 24' 120 || true

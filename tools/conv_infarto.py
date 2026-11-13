@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """conv_infarto.py tu.iso salida/: datos del modo INFARTO (HEART ATTACK, variante 2 de [780258] / PS2 0x443508) de
-OutRun 2006 Coast 2 Coast (PS2, SLES-53998) -> INFARTO.DAT y VOCESH.DAT. Sale de tu disco: no se distribuye.
+OutRun 2006 Coast 2 Coast (PS2, SLES-53998) -> INFARTO.DAT, INFARTOP.DAT y VOCESH.DAT. Sale de tu disco: no se distribuye.
 
 Todo se lee del ELF de PS2 (SLES_539.98) en las direcciones de esta version; cada tabla se comprueba por el codigo que
 la usa (el par lui/addiu de la instruccion indicada) para no leer basura de otra version. Logica y nombres del port de
@@ -13,7 +13,7 @@ PC (outrun2-decomp, platform/race_traffic_heart*.inc: 45AFB0..4650E3); direccion
 INFARTO.DAT (little endian):
   'HRT1', u32 n_misiones (41), u32 desplazamientos (desde el principio) de: misiones, tablas de puntos, voces de
   anuncio, voces de resultado, tablas de corazones, grupos de voz por clave, coches, modelos; u32 tamano total.
-  misiones: 41 x 0x140 bytes (PC 5A94D8, PS2 0x3f0b98: el curso de OutRun 2, [78024C] = 0): 32 registros de 10 bytes
+  misiones: 41 x 0x140 bytes (PC 5A94D8, PS2 0x3f0b98: [78024C] = 0, el preset de OutRun 2 SP): 32 registros de 10 bytes
     {s16 seccion, s16 fin (< 0: accion previa -1..-19), s16 tipo / argumento, s16 p6, s16 p8}.
   puntos (45E2F0, tablas por tipo de peticion): 4 x 6 u32 {choque, adelantado, muro (por cuadro), golpe, rueda fuera
     del asfalto (por cuadro), trompo} de los tipos 0 (PS2 0x3efb20, PC 5B0158), 2 (0x3efd60, 5B0190), 22 (0x3efd78,
@@ -31,8 +31,14 @@ INFARTO.DAT (little endian):
     1 de relleno; y 15 u8 mision base de la clave (44DC50: indice del descriptor de tramo de la clave en el arbol
     csc_data_2.bin; > 14 resta 15, 45C160), 1 de relleno.
   coches (45D710 / 45D470, PS2 0x1b2e58 / 0x1b2b20): 64 tablas x 100 registros {u32 clase, s16 seccion, s8 carril,
-    0} del curso de OutRun 2 (PS2 0x35c958, PC 63EE68).
+    0} del preset != 1 (PS2 0x35c958, PC 63EE68; el 0 es OutRun 2 SP).
   modelos: 7 u32 modelo de la clase 3 / 4 por id del suceso % 7 (0x3f0850, PC 5E0C34) y 7 del tramo 0x1a (0x3f0870).
+  Las misiones y los coches de INFARTO.DAT son los del preset 0 (csc_data_cvt, OutRun 2 SP: 0x1760c0(0)); hasta el
+  2026-11-13 aqui ponia "del curso de OutRun 2". Los del preset 1 (OutRun 2) van en INFARTOP.DAT.
+INFARTOP.DAT: 'HRP1', u32 desplazamientos de: misiones del preset 1 (41 x 0x140, PS2 0x3f3ed8: 0x1a7bb8 con
+  [0x44350c] != 0), misiones base (15 u8 + 1 del arbol 0 csc_data_2 y 15 u8 + 1 del arbol 1 csc_data_cvt: 45C160 =
+  0x1aec08 con el descriptor de la clave en el arbol del preset), coches del preset 1 (64 x 0x320, PS2 0x362718:
+  0x1b2e58 con [0x44350c] == 1); u32 tamano total.
 HAHUD.DAT (formato de HUD.DAT, tools/conv_hud.py; se abre aparte solo en el modo, con solo las tablas en la RAM): los
   corazones del medidor de 45FB80 (PS2 0x1ac580) del banco SPRANI 0x2B (GAME_CVT): HA_CORAZON (escena 0x15, cuadros
   0..0x69: aparece en 0x3D..0x69 y late en 1..0x3B), HA_ROTO (0x0E, 0..59) y HA_C0..HA_C5 (0x0F..0x14, 0..0x69: el centro y los efectos de 45B950), en un
@@ -135,7 +141,7 @@ def main():
     grupos = bytes(grupo) + b'\0' + bytes(mis_base) + b'\0'
 
     # coches de las tablas de 45D710 / 45D470 (PS2 0x1b2e58 / 0x1b2b20): 64 tablas de 100 registros de 8 bytes
-    # {u32 clase, s16 seccion, s8 carril, 0} del curso de OutRun 2 (0x35c958; el de SP en 0x362718) y los modelos de
+    # {u32 clase, s16 seccion, s8 carril, 0} del preset != 1 (0x35c958; el del preset 1, OutRun 2, en 0x362718) y los modelos de
     # la clase 3/4 (0x3f0850: 7 por el id del suceso; 0x3f0870 en el tramo de descriptor 0x1a)
     tt = par(0x1b2eac, 0x1b2eb0); assert tt == 0x35c958
     coches = elf[V(tt):V(tt) + 64 * 0x320]
@@ -149,6 +155,33 @@ def main():
     print('INFARTO.DAT: %d bytes; anuncio %s' % (len(out), [hex(x) for x in struct.unpack('<52H', anuncio)[::2]]))
     print('  resultado por tipo %s defecto %d; suma por clave %s; grupos %s (%s); misiones base %s' % (
         list(por_tipo), defecto, suma, grupo, nombres, mis_base))
+
+    # INFARTOP.DAT: lo que cambia con el preset [0x44350c] (0x1760c0: 0 -> csc_data_cvt, OutRun 2 SP; 1 ->
+    # csc_data_2, OutRun 2): misiones de 0x1a7bb8 con el preset != 0 (0x3f3ed8), coches de 0x1b2e58 con el preset 1
+    # (0x362718) y la mision base de cada clave en los dos arboles (45C160 = 0x1aec08: 176700(clave), > 14 resta 15)
+    mis1 = par(0x1a7bc8, 0x1a7bd0); assert mis1 == 0x3f3ed8, hex(mis1)
+    m1 = elf[V(mis1):V(mis1) + 41 * 0x140]
+    for q in range(41):
+        for r in range(32):
+            s0, s1, k = struct.unpack_from('<3h', m1, q * 0x140 + r * 10)
+            if not s0: break
+            assert (s1 > s0 and 0 <= k < 26) or -19 <= s1 < 0, 'mision %d registro %d inesperado (preset 1)' % (q, r)
+    tt1 = par(0x1b2e94, 0x1b2e9c); assert tt1 == 0x362718, hex(tt1)
+    coches1 = elf[V(tt1):V(tt1) + 64 * 0x320]
+    bases = b''
+    for fich in ('csc_data_2.bin', 'csc_data_cvt.bin'):
+        arb = {r[0]: r[1] for r in conv_union.arbol(A, 'PALM', fich)}; bb = []
+        for k in range(15):
+            q = u32(u32(base + 4 * arb[k])); bb.append(q - 15 if q > 14 else q)
+        bases += bytes(bb) + b'\0'
+        print('  misiones base de %s: %s' % (fich, bb))
+    assert bases[:15] == bytes(mis_base)
+    partes = [m1, bases, coches1]
+    off = 4 + 4 * len(partes) + 4; offs = []
+    for p_ in partes: offs.append(off); off += len(p_)
+    outp = b'HRP1' + struct.pack('<%dI' % len(partes), *offs) + struct.pack('<I', off) + b''.join(partes)
+    open(os.path.join(sal, 'INFARTOP.DAT'), 'wb').write(outp)
+    print('INFARTOP.DAT: %d bytes (misiones 0x%x, coches 0x%x)' % (len(outp), mis1, tt1))
 
     # HAHUD.DAT
     import numpy as np, conv_hud as ch

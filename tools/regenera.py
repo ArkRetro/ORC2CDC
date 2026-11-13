@@ -139,7 +139,7 @@ def paso(C, n, log):
     elif n == 'meta': ej(T('conv_meta.py'), ISO, t); mueve(D, tj('META.DAT'))
     elif n == 'salida': ej(T('conv_salida.py'), ISO, t); mueve(D, tj('SALIDA.DAT'))
     elif n == 'infarto':
-        ej(T('conv_infarto.py'), ISO, t); mueve(D, tj('INFARTO.DAT'), tj('HAHUD.DAT'), tj('VOCESH.DAT'))
+        ej(T('conv_infarto.py'), ISO, t); mueve(D, tj('INFARTO.DAT'), tj('INFARTOP.DAT'), tj('HAHUD.DAT'), tj('VOCESH.DAT'))
     elif n == 'fin': ej(T('conv_fin.py'), ISO, t, prev('fin')); mueve(D, *[tj(f) for f in FIN])
     elif n == 'sp':
         ej(T('conv_sp.py'), ISO, t, prev('sp'))
@@ -235,7 +235,7 @@ def regenera(iso, D, W, jobs=4, informe=print):
     for fs, n in ((['EFECTOS.DAT'], 'efectos'), (['FAROS.DAT'], 'faros'), (chrs, 'chr'), (['BAND.DAT', 'BAND1.DAT'], 'band'), (['PARAM.DAT'], 'param'),
                   (['META.DAT'], 'meta'), (FIN, 'fin'),
                   (SP, 'sp'), (FINAL, 'final'),
-                  (['SALIDA.DAT'], 'salida'), (['INFARTO.DAT', 'HAHUD.DAT', 'VOCESH.DAT'], 'infarto'), (['BO.DAT'] + BO, 'bo'),
+                  (['SALIDA.DAT'], 'salida'), (['INFARTO.DAT', 'INFARTOP.DAT', 'HAHUD.DAT', 'VOCESH.DAT'], 'infarto'), (['BO.DAT'] + BO, 'bo'),
                   (['TRAFC.DAT', 'TAPD.DAT'] + TRAF, 'trafico'), (['TRAFK0.DAT', 'TRAFK1.DAT', 'TRAFK2.DAT'], 'camiones'),
                   (['MVTS.VQV'], 'video_ts'), (['MVATTR.VQV'], 'video_attr'),
                   (['RC%02d.DAT' % k for k in range(30)], 'rivales'), (['MISION.DAT'], 'mision'), (['C2CHUD.DAT'], 'c2chud'),

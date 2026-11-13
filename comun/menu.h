@@ -27,6 +27,7 @@ void menu_sale(void);                       /* libera toda la VRAM del menu */
 int menu_modo(void);                        /* variante del modo: 1 OutRun, 2 Heart Attack (INFARTO), 7 Time Attack */
 int menu_ta_codigo(int *bandera);            /* CONTRARRELOJ: codigo del curso [656234] (0x2a6758) o -1; bandera: +0x20c bit 0 */
 int menu_ha_juego(void);                     /* INFARTO: juego de cursos del tablero (0 OutRun 2, 1 OutRun 2 SP) o -1 */
+int menu_juego_cursos(void);                /* juego de cursos de los tableros (raiz +0x208 bits 0..1; 0x2a6978) */
 /* COAST 2 COAST (variante 6): las misiones que se pueden elegir (indice de Races.bin, clave y subclave), la elegida
    (-1: otro modo) y la nota de la mision en la licencia (495A20) */
 void menu_pon_misiones(int n, const int16_t *idx, const uint8_t *clave, const uint8_t *sub, const uint8_t *tipo,
@@ -39,7 +40,7 @@ int menu_nota_de(int clave, int sub);         /* licencia +0x1D7 + 5 clave + sub
 void menu_elige_mision(int idx);             /* 495A60: la mision siguiente para REINTENTAR */
 int menu_sp(void);                          /* 1: OUTRUN2SP del menu principal ([780260] = 0, frontal de recreativa) */
 void menu_entra_sp(void);                   /* OUTRUN2SP tras la carrera: el frontal de recreativa (49AF90: modo 10) */
-int menu_preset(void);                      /* OUTRUN2SP: preset del curso (43F950: 0 OutRun 2, 1 OutRun 2 SP) */
+int menu_preset(void);                      /* OUTRUN2SP: preset del curso (43F950: 0 OutRun 2 SP, 1 OutRun 2) */
 int menu_manual(void);                      /* cambio elegido: 0 AT, 1 MT */
 int menu_pista(void);                       /* musica elegida */
 int menu_coche3d(void);                     /* 1 si hay que dibujar el coche 3D (seleccion de coche, ficha quieta) */

@@ -136,7 +136,8 @@ int nombre_entra(const nombre_t *d)
     /* 44DC50(450560(4)): el descriptor de la etapa del nivel 4; sin llegar a ella 450560(4) = -1 y 44DC50 da el de
        [0x548f6c] (en la BSS: sin localizar quien lo pone; PROBABLE el del primer registro: el mismo fondo, 0x37000C /
        0x37000D, para cualquier etapa que no sea una meta) */
-    curso = desc[preset & 1][d->registro4 >= 0 && d->registro4 < 16 ? d->registro4 : 0];
+    /* desc[0] del arbol 0 (csc_data_2), desc[1] del 1 (csc_data_cvt): el del preset (0x1760c0: 1 -> csc_data_2) */
+    curso = desc[(preset & 1) ? 0 : 1][d->registro4 >= 0 && d->registro4 < 16 ? d->registro4 : 0];
     if (curso >= 60) curso = 0;
     sprintf(n, "NOM5%c.DAT", 'A' + (int)((fondo[curso] >> 16) - 0x37));
     if ((fb = spr_abre_en(n, r_ram + r_o, r_cap - r_o))) avanza();
