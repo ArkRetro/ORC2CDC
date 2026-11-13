@@ -2308,8 +2308,10 @@ static int tb_control(unsigned n, int atiende)
         }
         break;
     case 1:                                                 /* B: el tablero anterior (la pila de la raiz) */
+        if (tb_k == 0x24) tb_bits &= ~0x803u;               /* 0x253e80 */
+        if (tb_k == 0x25) tb_bits |= 0x800;                 /* 0x2566d8 */
         if (tb_k == 0x26) { tb_ra = 0; tb_bits &= 0xfffc0fffu; }   /* 0x250be0 */
-        if (tb_k == 0x27) { tb_opb = 0; tb_rd = 0; }
+        if (tb_k == 0x27) { tb_opb = 0; tb_rd = 0; tb_bits &= 0xfffc0fffu; }   /* 0x259834 */
         if (tb_k == 0x24) return 2;
         tb_sig = tb_k == 0x25 ? 0x24 : 0x25; return 4;
     case 3: case 5:                                         /* izquierda / derecha */
