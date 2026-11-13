@@ -25,6 +25,10 @@ Scripts (todos: <disc.gdi> [pantalla de Xvfb, por defecto 91] [carpeta de salida
   final.sh  el final de recreativa de OUTRUN2SP (modo 24): GDI con -DPRUEBA_PILOTO_MENU -DPRUEBA_NODO=13 -DPRUEBA_FIN=300
            -DPRUEBA_SIN_TIEMPO, OUTRUN2SP preset 1 hasta la meta D (FLOR), el final (fi_00..fi_14, FOTOS=n), los resultados
            (fi_25), el GAME OVER (fi_go) y la vuelta al frontal (fi_fsp); error sin "FINAL: modo 24" o "FIN: modo 25".
+  vmu.sh   guardado en la VMU: licencia nueva (se guarda), Y en el menu principal (GUARDAR: "Guardando datos." y
+           "Exito al guardar."; vm_3a, vm_3), tools/comprueba_vmu.py sobre la VMU A1 de Flycast (lo que mira la BIOS) y
+           segundo arranque con la misma VMU (CONSERVA_VMU=1 en comun.sh): tiene que leer la licencia y el titulo
+           lleva al menu principal (vm_4, vm_5). Capturas del primer arranque en arranque1/.
   MODO_JUEGO=n delante de cualquiera: n veces a la derecha en ELEGIR MODO (2 INFARTO, 3 CONTRARRELOJ).
   Con MODO_JUEGO=0 (COAST 2 COAST): categorias (nv_5b), mapa (5e), detalle (5f) y la 1-1; C2C_RECORRE=1 mueve
   ademas el cursor por las categorias (5c, 5d), el mapa y vuelve atras (5g) antes de entrar.

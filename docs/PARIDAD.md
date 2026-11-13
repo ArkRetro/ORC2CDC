@@ -250,6 +250,9 @@ consola, el port lo fija al convertir). Hoja de capturas de Flycast: scratchpad 
   botones de la Dreamcast dibujados al convertir (conv_menu.py boton_dc): circulos de los colores del mando (A rojo, B
   azul, X amarillo, Y verde) con degradado, borde mas oscuro, brillo arriba y sombra, y la letra blanca de la fuente
   14 con contorno oscuro. Mismo tamano y sitio que el icono del PS2 (la misma VRAM y la misma alineacion con el texto).
+  Los mismos en FIN.DAT / FINC2C.DAT (CONT_ELIGE, conv_fin.py) y MODOV.DAT (conv_modo_video.py), que usan
+  conv_menu.iconos_dc. En la ventana de pausa (comun/menu.c pz_boton) se dibujan igual con poligonos de color (sin
+  textura: sin VRAM) delante de ELEGIR / ATRAS en vez de la letra de color suelta.
 - Pantalla de carga de OUTRUN2SP (el mapa del preset, ver OUTRUN2SP, Carga) mas larga: DESVIACION pedida por el usuario
   (demo 41). Se pone al salir del frontal (antes de leer voces, coche, pareja, HUD y la etapa de salida con sus
   texturas, que antes se leian con la ultima imagen del frontal quieta) y se quita cuando la carga ha acabado y como

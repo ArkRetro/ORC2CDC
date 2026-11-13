@@ -21,7 +21,8 @@
 # SEGnn.DAT enteras (y a las BKkk.DAT sueltas, con --ruta BKD.DAT en las bifurcaciones) y empaquetarlas de nuevo (borrar
 # SEGS.PAK / UNIONES.PAK de datos/); con los conversores de ahora ya salen asi.
 # MENU.DAT de antes de la revision 42 (barra de ayuda con FRIENDS y los iconos grises del PS2; sin los textos de guardar
-# con Y): borrar MENU.DAT de datos/ y volver a llamarlo (solo hace ese paso, conv_menu.py, ~1 min).
+# con Y): borrar MENU.DAT de datos/ y volver a llamarlo (solo hace ese paso, conv_menu.py, ~1 min); los mismos iconos en
+# FIN.DAT, GOVER.DAT, FINC2C.DAT y MODOV.DAT: borrarlos tambien (conv_fin.py, conv_modo_video.py; mismos tamanos).
 # Ahora lo hace tools/regenera.py (Python, el mismo en Linux y en el programa de Windows de windows/: mismos pasos y
 # salidas); este script solo lo llama con los mismos argumentos (JOBS: pasos a la vez, por defecto 4).
 # Lo que sale del disco no va al repositorio. Idempotente: lo que ya esta en datos/ (o en trabajo/) no se rehace; si se
