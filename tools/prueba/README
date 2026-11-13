@@ -36,7 +36,7 @@ Scripts (todos: <disc.gdi> [pantalla de Xvfb, por defecto 91] [carpeta de salida
   1 y 2 pasa por el tablero 0x24 (TB_JUEGO=n: n a la derecha; en OUTRUN 2 / 3 los cursos seguidos de OutRun 2 / SP,
   con candado salvo con -DPRUEBA_TABLERO_TODO).
   orden.sh  el orden de las etapas en todos los modos (revision 44; cuarto argumento: la ISO): GDI con -DPRUEBA_AUTO
-           -DPRUEBA_ORDEN -DPRUEBA_SIN_TIEMPO -DPRUEBA_RAMA_FIJA=r -DPRUEBA_FIN=600 -DPRUEBA_SALTO=600; el piloto corre las
+           -DPRUEBA_ORDEN -DPRUEBA_SIN_TIEMPO -DPRUEBA_RAMA=r -DPRUEBA_RAMA_FIJA=r -DPRUEBA_FIN=600 -DPRUEBA_SALTO=600; el piloto corre las
            carreras de la lista PO de demo/main.c (OUTRUN juegos 0..3, CONTRARRELOJ de una etapa, metas y curso seguido,
            INFARTO de OutRun 2 SP, misiones) siempre por la rama r y tools/prueba/orden.py compara etapas, ramas, meta,
            nivel y casilla del mapa de ruta con la tabla del original (SCRIPTS de la ISO). Se corre con r = 0 y r = 1.

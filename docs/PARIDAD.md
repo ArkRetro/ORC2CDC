@@ -3983,7 +3983,7 @@ OR2 / SP_goals y sus _reverse, Races.bin; codigo 0x1760c0, 0x1b63a0, 0x2a6758, 0
   distinta de la del coche, el token de la tabla 0x369518 (30 escenas 0x2c0048..0x2c0065, por el tipo del descriptor
   de la etapa elegida) en la capa 5, parpadeando con el bit 0x10 hasta 0x78 cuadros y despues fijo; x -340, o
   [0x369510] - 340 en las misiones): HUD.DAT no lleva esas escenas.
-- Prueba: `tools/prueba/orden.sh` (GDI con -DPRUEBA_AUTO -DPRUEBA_ORDEN -DPRUEBA_SIN_TIEMPO -DPRUEBA_RAMA_FIJA=r
+- Prueba: `tools/prueba/orden.sh` (GDI con -DPRUEBA_AUTO -DPRUEBA_ORDEN -DPRUEBA_SIN_TIEMPO -DPRUEBA_RAMA=r -DPRUEBA_RAMA_FIJA=r
   -DPRUEBA_FIN=600 -DPRUEBA_SALTO=600): el piloto corre la lista PO de demo/main.c (OUTRUN juegos 0..3, CONTRARRELOJ
   5 / 0x3e / 0x43 / 0x46 / 0x4d / 0x50, INFARTO de OutRun 2 SP, misiones 0 y 84) siempre por la rama r, cada etapa
   desde 600 m antes de su final (PRUEBA_SALTO) y la tercera vez seguida en la misma etapa acaba la carrera;
