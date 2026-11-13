@@ -1550,8 +1550,8 @@ car+4 a 0 (coche_ban): ni pilotos de noche, ni faros escamoteables, ni luz de lo
   tabla) y sin mandar los triangulos enteros fuera de la textura o en sus filas negras de abajo (la linea de corte del
   haz: desde la fila 200 de 256 en la textura de la DC, focos_v = 0,7754, mirado al cargar). En llano el haz va de 2 m
   a ~20 m por delante del centro del coche (la fila 200 a ~25 m) y ~56 grados de ancho; detras del proyector cae en el
-  borde (negro). DIFERENCIAS: la PowerVR interpola la UV con la w de la camara y no con la zc del proyector (en los
-  triangulos grandes de la calzada el haz se deforma algo); sin pasada en lo de recorte (lista 1), lo transparente y
+  borde (negro). DIFERENCIAS: la PowerVR interpola la UV con la w de la camara y no con la zc del proyector (corregido en la
+  revision 44 dividiendo los triangulos, ver abajo); sin pasada en lo de recorte (lista 1), lo transparente y
   los carteles; ni el coche ni el trafico (capas 5 / 6 del PC = la escena: PROBABLE). Los dos focos por vertice (SPOT /
   WIDE) no se portan: ni el PS2 los usa ni la escena de la DC lleva luz por vertice.
 - Luz del suelo revisada contra el desensamblado (queja del usuario sobre faros_despues.png: "mancha blanquecina a los
@@ -1583,6 +1583,36 @@ car+4 a 0 (coche_ban): ni pilotos de noche, ni faros escamoteables, ni luz de lo
   aditivas del trafico); sin "Out of memory". Capturas: scratchpad capturas_r42/faros_antes.png y faros_despues.png.
   Datos: FAROS.DAT nuevo; TRAF0-8, TRAFK0-2 y RC00-29 hay que rehacerlos (paso trafico / camiones / rivales de
   regenera.py: borrarlos de la carpeta de datos); con los de antes la demo funciona igual que antes (sin grupos 2 y 4).
+- Revision 44 (queja del usuario, Flycast y Dreamcast: "las luces delanteras en el trafico estan bien pero en los
+  Ferrari salen raras, deformadas"). Reproducido de noche en METR (`PRUEBA_CURSO=189 PRUEBA_NODO=11`, crono 2113) y en
+  FLOR (arbol 1, nodo 13 / arbol 193, nodo 1) con el Testarossa (faros escamoteables), el F50 y el 360, camara trasera
+  y una de prueba delante del morro (`-DPRUEBA_FRENTE=5`; `-DPRUEBA_VISTA=n` elige la vista inicial). Pieza a pieza:
+  - Piezas del modelo (+60 / +80 / +64): las matrices salen de llamadas() (= 46A560 / 0x1886e0: +60 y +80 con la matriz
+    del coche, +64 en T(+68) Rx(car+2FC), los mismos que 0x188d58..0x188f20) y el estado del GS de cada malla es el de
+    su tabla 4 / 7 (ninguna de las +60 de los 15 coches es aditiva: ALPHA 0x44 con o sin ABE; las +60 son el
+    salpicadero, los pilotos encendidos, la luz de la matricula y los brillos del faro, ver tools/conv_coche.py). Se
+    ven bien de cerca (capturas con PRUEBA_FRENTE). Lo que falta es lo de siempre: la capa 2 (0x48 aditiva en los
+    cristales de los pilotos y faros, PENDIENTE en Suelos: capas 2). No es lo deformado.
+  - Luz del suelo de 0x106960 (FAROS.DAT): tiras pequenas, sin cambio.
+  - El haz proyectado del PC (focos_*): ESTO era lo deformado. La UV va proyectada por vertice (u = 0,5 + 0,5 xc / zc)
+    y la PowerVR la interpola con la w de la camara; en los triangulos grandes de la calzada (decenas de metros) el
+    haz salia como un rectangulo con alas o una cuna a un lado que cambiaba al moverse. Correccion (DIFERENCIA de la
+    tecnica, no del resultado: el PC lo hace con la etapa de textura proyectada por pixel): el error en el punto
+    medio de cada lado (la media de las UV frente a la UV del punto medio, (ub - ua) (za - zb) / (2 (za + zb)), en
+    texeles de la textura de 256) se mira sin dividir (focos_bien); si pasa de 1 texel el triangulo se recorta a la
+    piramide de lo no negro de la textura (columnas 13..242, filas 7..198: focos_a, mirado al cargar) y al plano
+    cercano y se divide en n x n con n = techo(raiz(error)) (el error cae con el cuadrado del lado), como mucho 6 por
+    lado y 300 vertices de division por cuadro (luego n = 1). La niebla de cada vertice nuevo se interpola. Borde: el
+    recorte a la piramide da el borde exacto del haz. Ademas no se ilumina la cara que ve la camara si el proyector
+    esta al otro lado de su plano (focos_cara: muros por detras, la bajada tras un cambio de rasante); sin sombra del
+    haz (lo que este tapado al proyector pero lo mire se ilumina, como en el PC).
+  - Coste (Flycast, `-DDIAG_MS -DDIAG_SIN_CPU`, cuadro congelado): METR crono 2113 Testarossa 45,4 -> 44,6 fps
+    (dib 16,30 -> 16,84 ms, focos 0,46 -> 1,00 ms, 52 -> 333 vertices); F50 / 360 44,7 -> 44,7 / 44,8 fps (focos
+    0,57 -> 1,07 ms); FLOR crono 2113 0,95 -> 2,0 ms, 44,7 -> 44,9 fps; peor caso medido, la salida de FLOR (crono
+    200, 541 mallas anotadas): 2,9 -> 5,1 ms, 44,5 -> 43,1 fps. `-DFOCOS_NMAX=1` quita la division (medida),
+    `-DFOCOS_SIN_CARA` / `-DFOCOS_SIN_ERR` las pruebas.
+  - Capturas (scratchpad capturas_r44/): luces_testa / f50 / 360 _antes / _despues.png (METR, mismo cuadro) y
+    luces_testa_flor / luces_360_flor _antes / _despues.png. Datos: ninguno nuevo.
 
 ## Coches: piezas animadas (como 46AE70 / 469600)
 

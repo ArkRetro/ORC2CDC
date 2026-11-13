@@ -1843,7 +1843,10 @@ static float *param_dat;                                        /* se queda en m
 static const float *par_manual;                                 /* bloque PAR2 de PARAM.DAT (NULL si es antiguo) */
 /* camara de carrera del original (demo/camara.c) con las tablas CAM1 de PARAM.DAT; sin ellas, la de antes */
 #define CAM_BYTES (0x64c + 0x5460 + 0x438)
-static cam_tablas_t cam_tab; static int cam_ok; static cam_t cam = { .elegida = 2 };
+#ifndef PRUEBA_VISTA
+#define PRUEBA_VISTA 2                                          /* prueba: la vista con que empieza (0..2) */
+#endif
+static cam_tablas_t cam_tab; static int cam_ok; static cam_t cam = { .elegida = PRUEBA_VISTA };
 static float cam_t_choque;                                      /* +2C8 del paso anterior (para ver la entrada) */
 #ifdef DIAG_CONGELA
 static int diag_congelado;                                      /* medida: desde el paso DIAG_CONGELA la logica se para
@@ -4340,6 +4343,17 @@ static void camara_paso(int boton, int salida, int agotado)
         e.guion = sal_cam;
     }
     cam_paso(&cam, &cam_tab, &e);
+#ifdef PRUEBA_FRENTE
+    {   /* prueba: la camara delante del coche mirando al morro (PRUEBA_FRENTE m delante, a un lado y 1,2 m arriba) */
+        int k; float d[3];
+        d[0] = yo.fw[1] * yo.up[2] - yo.fw[2] * yo.up[1]; d[1] = yo.fw[2] * yo.up[0] - yo.fw[0] * yo.up[2];
+        d[2] = yo.fw[0] * yo.up[1] - yo.fw[1] * yo.up[0];
+        for (k = 0; k < 3; k++) {
+            cam.ojo[k] = yo.pos[k] + yo.fw[k] * (float)PRUEBA_FRENTE + d[k] * (float)PRUEBA_FRENTE * 0.35f + yo.up[k] * 1.2f;
+            cam.mira[k] = yo.pos[k] + yo.up[k] * 0.5f;
+        }
+    }
+#endif
 #ifdef DIAG_SALIDA
     if (sal_on && (sal_f < 3 || sal_f % 20 == 0) && sal_f <= 125)
         printf("SALCAM: %d sal %d guion %d pos %.2f %.2f %.2f fw %.2f %.2f %.2f pose %.2f %.2f %.2f r %.2f %.2f %.2f ojo %.2f %.2f %.2f mira %.2f %.2f %.2f fov %.3f vista %d\n", sal_f, salida, e.guion != NULL,
@@ -5231,6 +5245,9 @@ static void curso_reinicia(void)
         dbglog(DBG_INFO, "CURSO: arbol %d, %d etapas, salida %.4s\n", curso_id, ncurso, curso[0].zona);
     }
     k = PRUEBA_NODO < ncurso ? PRUEBA_NODO : 0;
+#ifdef DIAG_NODOS
+    {   int i; for (i = 0; i < ncurso; i++) printf("NODO: %d %.4s clima %x\n", i, curso[i].zona, (unsigned)curso[i].clima); }   /* medida */
+#endif
     carga_espera(); carga.estado = 0;
     while (meta_hilo) thd_sleep(5);
     col_reserva();
@@ -7539,15 +7556,25 @@ static void faros_dibuja(matrix_t *mc, uint32_t ban, int choque)
    texeles del borde de la textura de la DC son negros) o en las filas negras de abajo (v > focos_v, mirado en la
    textura: la linea de corte del haz) no se mandan; los que cruzan zc = 0 se recortan en el proyector y los que
    cruzan el plano cercano en la camara.
-   DIFERENCIAS: la UV se divide por zc en cada vertice y la PowerVR interpola con la w de la camara (no con zc); el
-   proyector esta 4-6 m delante de la camara y en un triangulo grande el haz se deforma algo. Sin la pasada sobre
+   UV (revision 44, queja "la luz de los faros del Ferrari sale rara, deformada"): la UV se divide por zc en cada
+   vertice y la PowerVR la interpola con la w de la camara (no con la zc del proyector): en los triangulos grandes de
+   la calzada el haz salia torcido y estirado (una cuna a un lado, un rectangulo con alas). Ahora cada triangulo cuyo
+   error de UV en algun lado pase de FOCOS_ERR texeles (focos_bien / focos_err) se recorta a la piramide de lo no
+   negro de la textura y se divide en n x n (focos_poli; tope FOCOS_NMAX por lado y FOCOS_VSUB vertices por cuadro).
+   Tampoco se ilumina la cara que ve la camara si el proyector esta al otro lado de su plano (focos_cara: la otra
+   cara de un muro, lo que cae detras de un cambio de rasante); sin sombras: lo que tape un objeto al proyector pero
+   mire hacia el se sigue iluminando (como en el PC, que tampoco tiene sombra del haz). Sin la pasada sobre
    lo de recorte (lista 1: se iluminarian los huecos) ni lo transparente; sin carteles; el coche y el trafico tampoco
    (las capas 5 y 6 del PC son las de la escena, PROBABLE). Los dos focos de luz por vertice de 4AF630 (SPOT, entornos
    1 y 2) no se portan: en el PS2 no llegan al VU1 (0x168e80) y en la DC la luz de la escena va en los vertices. */
 static pvr_poly_hdr_t focos_cab; static int focos_ok; static float focos_v = 1.0f;
+static float focos_a[4] = { 1, 1, 1, 1 };                       /* lo no negro de la textura: u0, u1, v0 y v1 = focos_v como
+                                                                   x + a0 z >= 0, a1 z - x >= 0, y + a2 z >= 0, a3 z - y >= 0 */
 static float focos_T[4][3];                                      /* mundo -> (xc, yc, zc) del proyector (filas) */
+static float focos_e[3], focos_tx = 256.0f;                     /* el proyector en el mundo; texeles de lado de la textura */
+static uint32_t focos_vsub;                                     /* vertices de las divisiones en este cuadro (FOCOS_VSUB) */
 #ifdef DIAG_MS
-static unsigned focos_dg_m, focos_dg_v, focos_dg_us;
+static unsigned focos_dg_m, focos_dg_v, focos_dg_us, focos_dg_sub, focos_dg_cara, focos_dg_poli, focos_dg_vm;
 #endif
 /* la textura del haz en la DC (16 bits twiddled o VQ, sin mipmaps): focos_v = principio de las filas negras de abajo
    (las del corte del haz) + medio texel (el filtro lineal mezcla la fila de encima hasta ahi) */
@@ -7560,6 +7587,7 @@ static inline uint32_t twid(uint32_t x, uint32_t y)
 static void focos_carga(const tex_t *t, const uint8_t *d, pvr_ptr_t dir)
 {
     pvr_poly_cxt_t cx; uint32_t fb = t->fmt & 0xff, vq = t->fmt & 0x100, n = ((t->fmt >> 16) & 0xff) + 1, x, y, fila = 0;
+    uint32_t x0 = t->w, x1 = 0, y0 = t->h;
     const uint16_t *lib = (const uint16_t *)d; const uint8_t *idx = d + 8 * n; const uint16_t *tx = (const uint16_t *)d;
     focos_v = 1.0f;
     if (!(t->fmt & 0x200) && t->w == t->h && d) {               /* (sin mipmaps; cuadrada) */
@@ -7567,10 +7595,20 @@ static void focos_carga(const tex_t *t, const uint8_t *d, pvr_ptr_t dir)
         for (y = 0; y < t->h; y++)
             for (x = 0; x < t->w; x++) {
                 uint16_t c = vq ? lib[idx[twid(x >> 1, y >> 1)] * 4 + ((x & 1) << 1 | (y & 1))] : tx[twid(x, y)];
-                if (c & msk) fila = y + 1;                      /* ultima fila con algo + 1 */
+                if (c & msk) {                                  /* ultima fila con algo + 1; columnas y primera fila */
+                    fila = y + 1; if (x < x0) x0 = x;
+                    if (x + 1 > x1) x1 = x + 1;
+                    if (y < y0) y0 = y;
+                }
             }
         focos_v = ((float)fila + 0.5f) / (float)t->h;
+        if (x1 > x0 && fila > y0) {                             /* (medio texel de margen: el filtro lineal) */
+            focos_a[0] = 1.0f - 2.0f * (((float)x0 - 0.5f) / (float)t->w); focos_a[1] = 2.0f * (((float)x1 + 0.5f) / (float)t->w) - 1.0f;
+            focos_a[2] = 1.0f - 2.0f * (((float)y0 - 0.5f) / (float)t->h);
+        }
     }
+    focos_a[3] = 2.0f * focos_v - 1.0f;
+    focos_tx = (float)(t->w > t->h ? t->w : t->h);
     pvr_poly_cxt_txr(&cx, PVR_LIST_TR_POLY, FMT[fb] | PVR_TXRFMT_TWIDDLED | (vq ? PVR_TXRFMT_VQ_ENABLE : 0), t->w, t->h, dir,
                      PVR_FILTER_BILINEAR);
     cx.gen.fog_type = PVR_FOG_DISABLE; cx.gen.culling = PVR_CULLING_NONE; cx.txr.env = PVR_TXRENV_MODULATE;
@@ -7578,8 +7616,8 @@ static void focos_carga(const tex_t *t, const uint8_t *d, pvr_ptr_t dir)
     cx.depth.comparison = PVR_DEPTHCMP_GEQUAL; cx.txr.uv_clamp = PVR_UVCLAMP_UV;
     pvr_poly_compile(&focos_cab, &cx);
     focos_ok = 1;
-    dbglog(DBG_INFO, "FOCOS: textura %ux%u formato %x, filas negras desde v %.4f\n", (unsigned)t->w, (unsigned)t->h,
-           (unsigned)t->fmt, (double)focos_v);
+    dbglog(DBG_INFO, "FOCOS: textura %ux%u formato %x, filas negras desde v %.4f, algo en u %.4f..%.4f v %.4f..\n", (unsigned)t->w, (unsigned)t->h,
+           (unsigned)t->fmt, (double)focos_v, (double)((1.0f - focos_a[0]) * 0.5f), (double)((focos_a[1] + 1.0f) * 0.5f), (double)((1.0f - focos_a[2]) * 0.5f));
 }
 /* la matriz del proyector del cuadro y los planos de su piramide util (4AF630; mc = car+B0) */
 static void focos_prepara(const matrix_t *mc, int on)
@@ -7613,11 +7651,11 @@ static void focos_prepara(const matrix_t *mc, int on)
         focos_T[i][0] = V[i][0] * xs; focos_T[i][1] = V[i][1] * ys; focos_T[i][2] = V[i][2] * P2 + w * P3;
         for (j = 0; j < 3; j++) T[i][j] = focos_T[i][j];
     }
-    /* planos (en coordenadas del mundo, columnas de T): zc >= 0, xc + zc >= 0, zc - xc >= 0, yc + zc >= 0 y
-       (2 focos_v - 1) zc - yc >= 0 */
+    /* planos (en coordenadas del mundo, columnas de T): zc >= 0 y los de lo no negro de la textura (focos_a) */
     for (i = 0; i < 4; i++) {
-        float x = T[i][0], y = T[i][1], z = T[i][2], k = 2.0f * focos_v - 1.0f;
-        focos_pl[0][i] = z; focos_pl[1][i] = x + z; focos_pl[2][i] = z - x; focos_pl[3][i] = y + z; focos_pl[4][i] = k * z - y;
+        float x = T[i][0], y = T[i][1], z = T[i][2];
+        focos_pl[0][i] = z; focos_pl[1][i] = x + focos_a[0] * z; focos_pl[2][i] = focos_a[1] * z - x;
+        focos_pl[3][i] = y + focos_a[2] * z; focos_pl[4][i] = focos_a[3] * z - y;
     }
     for (i = 0; i < 5; i++) {
         float *pl = focos_pl[i], m = sqrtf(pl[0] * pl[0] + pl[1] * pl[1] + pl[2] * pl[2]);
@@ -7625,66 +7663,189 @@ static void focos_prepara(const matrix_t *mc, int on)
         for (j = 0; j < 4; j++) pl[j] /= m;
     }
     focos_fuera = geo_esc < 1.0f ? &sig : NULL;
+    memcpy(focos_e, e, sizeof focos_e);
+    focos_vsub = 0;
     focos_on = 1;
 }
 /* 1 - la niebla de la tabla de la PowerVR a la distancia w (niebla_pon: la entrada i a lejos / t(i)) */
 static inline float focos_niebla(float w)
 {
-    float t, f, m; int e, i;
+    union { float f; uint32_t u; } t; float f; int i;
     if (w <= 0) return 1.0f;
-    t = lejos / w;
-    if (t <= 1.0f) return 1.0f - niebla_tab[0];
-    m = frexpf(t, &e);                                          /* t = m 2^e, m en [0,5, 1) */
-    f = (float)(16 * (e - 1)) + (2.0f * m - 1.0f) * 16.0f;
+    t.f = lejos / w;
+    if (t.f <= 1.0f) return 1.0f - niebla_tab[0];
+    /* t = (1 + m) 2^e: 16 e + 16 m (lo de frexpf sin llamada: exponente y mantisa del float) */
+    f = (float)(16 * ((int)(t.u >> 23 & 0xff) - 127)) + (float)(t.u & 0x7fffff) * (16.0f / 8388608.0f);
     if (f >= 128.0f) return 1.0f - niebla_tab[128];
     i = (int)f; f -= (float)i;
     return 1.0f - (niebla_tab[i] + f * (niebla_tab[i + 1] - niebla_tab[i]));
 }
-typedef struct { float x, y, w, xc, yc, zc; } fv_t;             /* camara (sin dividir) y proyector */
+typedef struct { float x, y, w, xc, yc, zc, u, v, g; } fv_t;  /* camara (sin dividir), proyector, su UV y el gris */
 #define FOCOS_Z 1e-3f                                           /* zc minimo (el plano cercano del proyector es zc = 0) */
 #define FOCOS_K (1.0f - 1.0f / 4096.0f)                         /* x, y, w x K: misma pantalla, 1/w mayor (GEQUAL) */
+#ifndef FOCOS_ERR
+#define FOCOS_ERR 1.0f                                          /* error de la UV (texeles) que se admite sin dividir */
+#endif
+#ifndef FOCOS_NMAX
+#define FOCOS_NMAX 6                                            /* tope de divisiones por lado de un triangulo */
+#endif
+#ifndef FOCOS_VSUB
+#define FOCOS_VSUB 300                                          /* tope de vertices de las divisiones por cuadro */
+#endif
 static inline uint32_t focos_cod(const fv_t *a)
 {
-    float k = 2.0f * focos_v - 1.0f;
-    return (a->zc < FOCOS_Z) | (a->xc + a->zc < 0) << 1 | (a->zc - a->xc < 0) << 2 | (a->yc + a->zc < 0) << 3 |
-           (k * a->zc - a->yc < 0) << 4;
+    const float *k = focos_a;
+    return (a->zc < FOCOS_Z) | (a->xc + k[0] * a->zc < 0) << 1 | (k[1] * a->zc - a->xc < 0) << 2 |
+           (a->yc + k[2] * a->zc < 0) << 3 | (k[3] * a->zc - a->yc < 0) << 4;
+}
+/* la UV proyectada (u = 0,5 + 0,5 xc / zc, v = 0,5 + 0,5 yc / zc; 4AF630 / 40C550) y el gris x (1 - niebla) */
+static inline void fv_uv(fv_t *a)
+{
+    float iz = a->zc >= FOCOS_Z ? 0.5f / a->zc : 0.0f;
+    a->u = 0.5f + a->xc * iz; a->v = 0.5f + a->yc * iz;
 }
 static inline void focos_pt(pt_t *o, const fv_t *a)
 {
-    float iz = 0.5f / a->zc, g = focos_niebla(a->w); uint32_t c = (uint32_t)(128.0f * g + 0.5f);
+    uint32_t c = (uint32_t)a->g;
     o->x = a->x * FOCOS_K; o->y = a->y * FOCOS_K; o->w = a->w * FOCOS_K;
-    o->u = 0.5f + a->xc * iz; o->v = 0.5f + a->yc * iz;
+    o->u = a->u; o->v = a->v;
     o->c = 0xFF000000u | c << 16 | c << 8 | c; o->o = 0;
 }
 static inline void fv_mezcla(fv_t *o, const fv_t *a, const fv_t *b, float t)
 {
     o->x = a->x + t * (b->x - a->x); o->y = a->y + t * (b->y - a->y); o->w = a->w + t * (b->w - a->w);
     o->xc = a->xc + t * (b->xc - a->xc); o->yc = a->yc + t * (b->yc - a->yc); o->zc = a->zc + t * (b->zc - a->zc);
+    o->g = a->g + t * (b->g - a->g);
+    fv_uv(o);
 }
-/* un triangulo que cruza zc = FOCOS_Z (proyector) o el plano cercano de la camara: recortado y como abanico */
-static void focos_tri(const fv_t *a, const fv_t *b, const fv_t *c)
+/* Error de la UV en un lado: la PowerVR interpola la UV de los vertices con la w de la camara (lineal en el mundo):
+   en el punto medio del lado da la media de las dos UV; la de verdad es la del punto medio proyectado (0,5 + 0,5 (xa +
+   xb) / (za + zb)). La diferencia es (ub - ua) (za - zb) / (2 (za + zb)) (lo mismo en v); en texeles, el mayor de u y
+   v. focos_bien: si es <= FOCOS_ERR sin dividir (los dos con zc >= FOCOS_Z) */
+static inline float focos_err(const fv_t *a, const fv_t *b)
 {
-    fv_t p[5], q[6]; const fv_t *in[3] = { a, b, c }; pt_t o[6]; int n = 0, m = 0, i;
-    for (i = 0; i < 3; i++) {
-        const fv_t *u = in[i], *v = in[(i + 1) % 3]; int du = u->zc >= FOCOS_Z, dv = v->zc >= FOCOS_Z;
-        if (du) p[n++] = *u;
-        if (du != dv) fv_mezcla(p + n++, u, v, (FOCOS_Z - u->zc) / (v->zc - u->zc));
+    float k = fabsf(a->zc - b->zc) / (2.0f * (a->zc + b->zc));
+    return fmaxf(fabsf(b->u - a->u), fabsf(b->v - a->v)) * k * focos_tx;
+}
+static inline int focos_bien(const fv_t *a, const fv_t *b)
+{
+#ifdef FOCOS_SIN_ERR
+    return 1;                                                   /* medida */
+#endif
+    /* ub - ua = 0,5 (xb za - xa zb) / (za zb): sin la UV de los vertices (se hace solo para los que se mandan) */
+    float du = fabsf(b->xc * a->zc - a->xc * b->zc), dv = fabsf(b->yc * a->zc - a->yc * b->zc);
+    return (du > dv ? du : dv) * fabsf(a->zc - b->zc) * (0.5f * focos_tx) <= FOCOS_ERR * 2.0f * (a->zc + b->zc) * a->zc * b->zc;
+}
+/* la cara que ve la camara mira tambien al proyector (el proyector y la camara al mismo lado del plano del
+   triangulo; sin depender del orden de los vertices: la escena va sin descartar caras). Si no, el haz no llega a lo
+   que se ve (la otra cara de un muro, la bajada detras de un cambio de rasante): no se ilumina */
+static inline int focos_cara(const vert_t *a, const vert_t *b, const vert_t *c)
+{
+#ifdef FOCOS_SIN_CARA
+    return 1;                                                   /* medida */
+#endif
+    float ux = b->x - a->x, uy = b->y - a->y, uz = b->z - a->z, vx = c->x - a->x, vy = c->y - a->y, vz = c->z - a->z;
+    float nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    float s1 = nx * (focos_e[0] - a->x) + ny * (focos_e[1] - a->y) + nz * (focos_e[2] - a->z);
+    float s2 = nx * (ojo[0] - a->x) + ny * (ojo[1] - a->y) + nz * (ojo[2] - a->z);
+    return s1 * s2 > 0;
+}
+/* distancia con signo a los planos de la piramide util (focos_cod: bits 0..4) y al plano cercano de la camara (bit 5) */
+static inline float focos_plano(const fv_t *a, int p)
+{
+    switch (p) {
+    case 0: return a->zc - FOCOS_Z;
+    case 1: return a->xc + focos_a[0] * a->zc;
+    case 2: return focos_a[1] * a->zc - a->xc;
+    case 3: return a->yc + focos_a[2] * a->zc;
+    case 4: return focos_a[3] * a->zc - a->yc;
+    default: return a->w - cerca;
     }
-    for (i = 0; i < n; i++) {
-        const fv_t *u = p + i, *v = p + (i + 1) % n; int du = u->w >= cerca, dv = v->w >= cerca;
-        if (du) q[m++] = *u;
-        if (du != dv) fv_mezcla(q + m++, u, v, (cerca - u->w) / (v->w - u->w));
+}
+static inline void fv_bari(fv_t *o, const fv_t *a, const fv_t *b, const fv_t *c, float s, float t)
+{
+    o->x = a->x + s * (b->x - a->x) + t * (c->x - a->x); o->y = a->y + s * (b->y - a->y) + t * (c->y - a->y);
+    o->w = a->w + s * (b->w - a->w) + t * (c->w - a->w);
+    o->xc = a->xc + s * (b->xc - a->xc) + t * (c->xc - a->xc); o->yc = a->yc + s * (b->yc - a->yc) + t * (c->yc - a->yc);
+    o->zc = a->zc + s * (b->zc - a->zc) + t * (c->zc - a->zc);
+    o->g = a->g + s * (b->g - a->g) + t * (c->g - a->g);           /* (la niebla entre vertices, lineal como la de la tabla) */
+    fv_uv(o);
+}
+/* un triangulo que hay que recortar o cuya UV se aparta mas de FOCOS_ERR texeles: se recorta a la piramide util del
+   proyector (lo de fuera es el borde negro o las filas negras de la textura) y al plano cercano de la camara (co:
+   los planos que cruza) y el poligono que queda (abanico) se divide en n x n triangulos por lado con n tal que el
+   error de cada lado (cae con el cuadrado de su largo) quede por debajo de FOCOS_ERR: n = techo(raiz(error / FOCOS_ERR)),
+   el mismo n en todo el poligono (sin grietas entre sus triangulos), como mucho FOCOS_NMAX y FOCOS_VSUB vertices por
+   cuadro (despues, n = 1: el haz algo torcido, como antes) */
+static void focos_poli(const fv_t *a, const fv_t *b, const fv_t *c, uint32_t co)
+{
+    fv_t P[2][12]; pt_t o[2 * FOCOS_NMAX + 2]; int n = 3, p, i, s = 0, k, r; float e = 0, inv; uint32_t cuesta = 0;
+    P[0][0] = *a; P[0][1] = *b; P[0][2] = *c;
+    for (p = 0; p < 6 && n >= 3; p++) {
+        const fv_t *I = P[s]; fv_t *O = P[s ^ 1]; int m = 0;
+        if (!(co >> p & 1)) continue;                           /* ningun vertice fuera de este plano */
+        for (i = 0; i < n; i++) {
+            const fv_t *u = I + i, *v = I + (i + 1 == n ? 0 : i + 1); float du = focos_plano(u, p), dv = focos_plano(v, p);
+            if (du >= 0) O[m++] = *u;
+            if ((du >= 0) != (dv >= 0)) fv_mezcla(O + m++, u, v, du / (du - dv));
+        }
+        n = m; s ^= 1;
     }
-    if (m < 3 || !ta_cabe(m)) return;
-    for (i = 0; i < m; i++) focos_pt(o + i, q + (i & 1 ? (i + 1) / 2 : (m - i / 2) % m));   /* abanico como tira */
-    envia_tira(o, m); tri_enviados += m - 2;
+    if (n < 3) return;
+    {   const fv_t *Q = P[s];
+        for (i = 1; i < n; i++) {                               /* lados y diagonales del abanico */
+            float x = focos_err(Q + i - 1, Q + i), y = focos_err(Q, Q + i);
+            if (x > e) e = x;
+            if (y > e) e = y;
+        }
+        {   float x = focos_err(Q + n - 1, Q); if (x > e) e = x; }
+        k = e <= FOCOS_ERR ? 1 : (int)ceilf(sqrtf(e * (1.0f / FOCOS_ERR)));
+        if (k > FOCOS_NMAX) k = FOCOS_NMAX;
+        while (k > 1 && focos_vsub + (cuesta = (uint32_t)(n - 2) * (uint32_t)(k * k + 2 * k)) > FOCOS_VSUB) k--;
+        if (k == 1) {                                           /* el poligono como una tira */
+            pt_t t[12];
+            if (!ta_cabe(n)) return;
+            for (i = 0; i < n; i++) focos_pt(t + i, Q + (i & 1 ? (i + 1) / 2 : (n - i / 2) % n));   /* abanico como tira */
+            envia_tira(t, n); tri_enviados += n - 2;
+            return;
+        }
+        focos_vsub += cuesta; inv = 1.0f / (float)k;
+#ifdef DIAG_MS
+        focos_dg_sub += cuesta;
+#endif
+        for (i = 1; i + 1 < n; i++) {                           /* cada triangulo del abanico: k filas de una tira */
+            const fv_t *A = Q, *B = Q + i, *C = Q + i + 1; fv_t q;
+            for (r = 0; r < k; r++) {
+                int nv = 2 * (k - r) + 1, j, w = 0;
+                if (!ta_cabe(nv)) return;
+                for (j = 0; j < k - r; j++) {
+                    fv_bari(&q, A, B, C, j * inv, r * inv); focos_pt(o + w++, &q);
+                    fv_bari(&q, A, B, C, j * inv, (r + 1) * inv); focos_pt(o + w++, &q);
+                }
+                fv_bari(&q, A, B, C, (k - r) * inv, r * inv); focos_pt(o + w++, &q);
+                envia_tira(o, nv); tri_enviados += nv - 2;
+            }
+        }
+    }
 }
 static fv_t focos_fv[256];
+/* tramo de triangulos j0..j1-1 de la tira (vertices j0..j1+1) tal cual */
+static inline void focos_gris(fv_t *a) { if (a->g < 0) { a->g = 128.0f * focos_niebla(a->w) + 0.5f; fv_uv(a); } }   /* UV y gris (al usarlos) */
+static inline void focos_tramo(fv_t *f, uint32_t j0, uint32_t j1)
+{
+    uint32_t k, nv = j1 - j0 + 2; pt_t *o = pw;
+    if (j1 <= j0 || !ta_cabe(nv)) return;
+    for (k = 0; k < nv; k++) { focos_gris(f + j0 + k); focos_pt(o + k, f + j0 + k); }
+    envia_tira(o, nv); tri_enviados += nv - 2;
+}
 static void focos_malla(const modelo_t *mo, const malla_t *m)
 {
-    const vert_t *v = mo->verts + m->v0; uint32_t i, j, n = m->n, cod[256], j0; pt_t *o = pw; fv_t *f = focos_fv;
+    const vert_t *v = mo->verts + m->v0; uint32_t i, j, n = m->n, cod[256], j0; fv_t *f = focos_fv; int b01;
     const float (*T)[3] = (const float (*)[3])focos_T; const float cer = cerca;
     if (n > 256) n = 256;
+#ifdef DIAG_MS
+    focos_dg_vm += n;
+#endif
     for (i = 0; i < n; i++) {
         float x = v[i].x, y = v[i].y, z = v[i].z, w;
         f[i].xc = x * T[0][0] + y * T[1][0] + z * T[2][0] + T[3][0];
@@ -7692,25 +7853,34 @@ static void focos_malla(const modelo_t *mo, const malla_t *m)
         f[i].zc = x * T[0][2] + y * T[1][2] + z * T[2][2] + T[3][2];
         mat_trans_single3_nodivw(x, y, z, w);
         f[i].x = x; f[i].y = y; f[i].w = w;
+        f[i].g = -1.0f;                                         /* la UV y 0x80 de gris x (1 - niebla): focos_gris */
         cod[i] = focos_cod(f + i) | (w < cer) << 5;
     }
-    /* tramos de triangulos seguidos que no hay que recortar (y alguno dentro): tal cual; los demas uno a uno */
-    for (j = 0; j + 2 < n; ) {
-        uint32_t ca = cod[j] & cod[j + 1] & cod[j + 2], co = cod[j] | cod[j + 1] | cod[j + 2];
-        if (ca) { j++; continue; }                               /* entero fuera de la textura o detras */
-        if (co & 0x21) { focos_tri(f + j, f + j + 1, f + j + 2); j++; continue; }
-        j0 = j;
-        while (j + 2 < n) {
-            ca = cod[j] & cod[j + 1] & cod[j + 2]; co = cod[j] | cod[j + 1] | cod[j + 2];
-            if (ca || (co & 0x21)) break;
-            j++;
+    /* triangulo a triangulo: fuera de un plano o de espaldas (focos_cara), nada; dentro y con poco error, al tramo
+       que va tal cual; si no (recortar o dividir), focos_poli */
+    for (j0 = j = 0, b01 = -1; j + 2 < n; j++) {
+        uint32_t ca = cod[j] & cod[j + 1] & cod[j + 2], co = cod[j] | cod[j + 1] | cod[j + 2]; int b12 = -1;
+        if (!ca && !(co & 0x21)) {                              /* (el lado j + 1, j + 2 es el j, j + 1 del siguiente) */
+            if (b01 < 0) b01 = focos_bien(f + j, f + j + 1);
+            b12 = focos_bien(f + j + 1, f + j + 2);
+            if (b01 && b12 && focos_bien(f + j, f + j + 2) && focos_cara(v + j, v + j + 1, v + j + 2)) { b01 = b12; continue; }   /* al tramo */
         }
-        {   uint32_t k, nv = j - j0 + 2;                         /* triangulos j0..j-1: vertices j0..j+1 */
-            if (!ta_cabe(nv)) continue;
-            for (k = 0; k < nv; k++) focos_pt(o + k, f + j0 + k);
-            envia_tira(o, nv); tri_enviados += nv - 2;
+        b01 = b12;
+        focos_tramo(f, j0, j); j0 = j + 1;
+        if (ca) continue;
+        if (!focos_cara(v + j, v + j + 1, v + j + 2)) {
+#ifdef DIAG_MS
+            focos_dg_cara++;
+#endif
+            continue;
         }
+#ifdef DIAG_MS
+        focos_dg_poli++;
+#endif
+        focos_gris(f + j); focos_gris(f + j + 1); focos_gris(f + j + 2);
+        focos_poli(f + j, f + j + 1, f + j + 2, co);
     }
+    focos_tramo(f, j0, j);
 }
 /* la segunda pasada (lista transparente, la vista cargada) */
 static void focos_dibuja(void)
@@ -7719,6 +7889,9 @@ static void focos_dibuja(void)
 #ifdef DIAG_MS
     uint64_t t0 = timer_us_gettime64(); uint32_t v0 = vtx_env;
     focos_dg_m = focos_n;
+#endif
+#ifdef DIAG_MS
+    focos_dg_sub = focos_dg_cara = focos_dg_poli = focos_dg_vm = 0;
 #endif
     if (!focos_on || !focos_n) { focos_n = 0; return; }
     ta_ofs = 0;
@@ -10900,7 +11073,7 @@ int main(int argc, char **argv)
                 printf("MS: %.4s s %.0f fps %.1f dib %.2f log %.2f pvr %.2f tri %u vtx %u tarde %u\n", curso[cur_nodo].zona, (double)yo.s,
                        (double)fps, (double)ms, (double)ms_log, (double)(ps.rnd_last_time / 1000000.0), (unsigned)tri_enviados, (unsigned)vtx_ult,
                        (unsigned)pres_tarde);
-                printf("FOCOSMS: mallas %u vtx %u us %u\n", focos_dg_m, focos_dg_v, focos_dg_us);
+                printf("FOCOSMS: mallas %u vtx %u us %u divisiones %u vtx, de espaldas %u tri, recortados %u tri, vertices de las mallas %u\n", focos_dg_m, focos_dg_v, focos_dg_us, focos_dg_sub, focos_dg_cara, focos_dg_poli, focos_dg_vm);
                 {   static const char *const N[10] = { "ini", "vis", "cielo", "etapa", "bo", "coche", "robot", "traf", "l2", "fin" };
                     char t[200]; int n = 0, j;
                     for (j = 0; j < 10; j++) n += sprintf(t + n, " %s %u/%u", N[j], prf_us[j] / 30, prf_v[j] / 30);
