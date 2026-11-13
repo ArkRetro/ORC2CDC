@@ -2470,6 +2470,13 @@ datos: SALON.DAT (tools/conv_salon.py, paso `salon` de tools/regenera.py).
   verificacion de Colores de los coches (2026-11-10), hecha con la tabla corrida una ficha.
 - Prueba: `-DPRUEBA_MILLAS=n` (la licencia activa, si no tiene millas, con n al entrar en el salon; ademas, como antes,
   la demo de atraccion acaba en las millas) y tools/prueba/salon.sh.
+- Verificado en E (Flycast, `-DPRUEBA_MILLAS=20000`, tools/prueba/salon.sh): pagina principal con 20000M, FERRARIS
+  con el F50 3D y su precio, ventana "COMPRAR OBJETO" (sin el coche), A con SI: "comprado el objeto 0 por 7500 millas
+  (quedan 12500)", guardado en la VMU y "Ya tienes este objeto / VEND."; MUSICA DE FONDO (suena el avance 40) y compra
+  del objeto 172 (2500); fuera del salon, la seleccion de coche deja elegir el F50 (antes del arreglo de MNU2 no) y la
+  musica llega al tema 7. Segundo arranque con la misma VMU: el salon con 10000M, el F50 "Ya tienes este objeto" y
+  elegible en la seleccion de coche. VRAM libre al abrir el salon 385-419 KB y con el coche 1170 KB; sin "Out of
+  memory" ni "pvr_mem: ERROR". No probado en R.
 
 ## Fin de la carrera: millas OutRun, continuar y GAME OVER (2026-11-11)
 
