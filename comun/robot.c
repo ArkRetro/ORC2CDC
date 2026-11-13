@@ -73,6 +73,7 @@ static const rpieza_t *pz; static const rmalla_t *ml; static const rvert_t *vt;
 static motor_t mot_c[2], *mot_b;                 /* el piloto y la acompanante; el banderero en el hueco de la union */
 #define MOT(p) ((p) < 2 ? mot_c + (p) : mot_b)
 static int listo;
+static const uint32_t *osa[2]; static uint32_t n_osa[2];   /* OSA0 / OSA1: la amortiguacion por nodo (CHR_FAL...) */
 
 /* tablas de la logica (bloque TAB de RBT1) */
 static const uint32_t *t_modc, *t_mira, *t_agar, *t_chqe, *t_chq7, *t_chq6, *t_cerr, *t_lisa, *t_lisc, *t_asnt, *t_mate;
@@ -331,6 +332,11 @@ static void ik(motor_t *m, int i, float t, int fb, mat_t P)     /* 51A770 */
         apunta(M, v); escala_j(m, j0, t, M); memcpy(m->M[j0], M, sizeof M);
     }
 }
+/* hijo k del hueso (con mas de 6, la lista entera detras de los huesos: el u16 de relleno, tools/conv_chr.py) */
+static int hijo(const motor_t *m, const rhueso_t *h, int k)
+{
+    return h->nh <= 6 ? h->hijos[k] : ((const uint8_t *)m->h + (h->r[0] | h->r[1] << 8))[k];
+}
 static void hueso(motor_t *m, int i, float t, int fb, const mat_t P)
 {
     const rhueso_t *h = m->h + i; mat_t M; int k;
@@ -349,7 +355,7 @@ static void hueso(motor_t *m, int i, float t, int fb, const mat_t P)
     default: break;
     }
     memcpy(m->M[i], M, sizeof M);
-    for (k = 0; k < h->nh; k++) hueso(m, h->hijos[k], t, fb, M);
+    for (k = 0; k < h->nh; k++) hueso(m, hijo(m, h, k), t, fb, M);
 }
 static void calcula(motor_t *m, float cuadro, int mezcla, float fac)   /* 51B6D0 / 51B650 */
 {
@@ -379,7 +385,7 @@ static void guarda(motor_t *m, int i)
     case 4: memcpy(m->sR[i], m->R[i], 12); memcpy(m->sS[i], m->S[i], 12); break;
     default: break;
     }
-    for (k = 0; k < h->nh; k++) guarda(m, h->hijos[k]);
+    for (k = 0; k < h->nh; k++) guarda(m, hijo(m, h, k));
 }
 static void conecta(motor_t *m, uint32_t id, float fr, float largo)   /* 4F2320 SetMotionConnect */
 {
@@ -456,7 +462,8 @@ int robot_inicia(const void *rbt, uint32_t bytes)
     if (n_metr < 30 || n_mete < 3 * 8 * 3) t_metr = t_mete = NULL;
     if (!t_mate || !t_agar || !t_chqe || !t_chq7 || !t_chq6 || !t_lisa || !t_lisc || !t_asnt || n < 30 * 6) return -4;
     {   const uint32_t *o0 = tabla("OSG0", &n); if (osage_lee(0, o0, n)) return -5;
-        o0 = tabla("OSG1", &n); if (osage_lee(1, o0, n)) return -5; }
+        o0 = tabla("OSG1", &n); if (osage_lee(1, o0, n)) return -5;
+        osa[0] = tabla("OSA0", &n_osa[0]); osa[1] = tabla("OSA1", &n_osa[1]); }
     for (i = 0; i < nper; i++) {
         motor_t *m = MOT(i); int j, k;
         memset(m, 0, sizeof *m);
@@ -472,6 +479,7 @@ int robot_inicia(const void *rbt, uint32_t bytes)
     return 0;
 }
 int robot_listo(void) { return listo; }
+
 
 /* ---------------------------------------------------------------- osage (el pelo con fisica)
    rob_osage del original: init 514F60 (PS2 0x208b58), control 515040 (0x208ca8, cada paso tras Calc: 488450 con
@@ -607,6 +615,8 @@ static void osage_inicia(int p, motor_t *m)                     /* 514F60 / PS2 
     for (ci = 0; ci < osg[p].nc; ci++) {
         if (o_hueso(m, osg[p].c[ci].hueso)) memcpy(S, m->M[osg[p].c[ci].hueso], sizeof S); else m_id(S);
         for (k = 1; k <= osg[p].c[ci].n; k++) nodo(p, ci, k)->k24 = osg[p].amort;   /* 5222B0 (0x290f98) */
+        if (osa[p] && osg[p].c[ci].primero + osg[p].c[ci].n <= n_osa[p])  /* 0x290fd8: la lista de amortiguacion (OSAp) */
+            for (k = 1; k <= osg[p].c[ci].n; k++) memcpy(&nodo(p, ci, k)->k24, osa[p] + osg[p].c[ci].primero + k - 1, 4);
         o_coloca(p, m, ci, S);       /* (5229A0 coloca con el +24 de la plantilla, basura de la pila: el primer control
                                         vuelve a colocar con la marca, asi que no queda nada de esto) */
     }
@@ -1053,3 +1063,21 @@ void robot_band_tela(float (*pos)[3], float (*nor)[3])
     for (c = 0; c + 1 < TELA_C; c++) memcpy(nor[(TELA_F - 1) * TELA_C + c], nor[(TELA_F - 2) * TELA_C + c], 12);
     memcpy(nor[TELA_F * TELA_C - 1], nor[TELA_F * TELA_C - 2], 12);
 }
+
+/* el final de recreativa (demo/final.c): los personajes del RBT1 cargado (FINCHRgg.DAT: CHR_MAL y CHR_FAL) movidos por
+   los sucesos 1 del guion (PC 4B5C40 = PS2 0x28c... sobre el RobMotion del robot): 4F2280(id), 4F1D30(inicio), 4F2520,
+   4F1D30(inicio), 4F1E30(fin) (+1C: el fin, acotado al largo; sin pasar de 0 el largo), 4ED890(1 / velocidad) (+18) y
+   4F1E60(bucles); 1 si cambio el movimiento (48F4E0 antes / despues) */
+int robot_fin_mov(int p, uint32_t id, float ini, float fin, float vel, int32_t bucles)
+{
+    motor_t *m = MOT(p); uint32_t antes = m->id;
+    if (!listo || p < 0 || p > 1 || !pon_mov(m, id)) return -1;
+    pon_cuadro(m, ini); calc(m); pon_cuadro(m, ini);
+    if (fin > m->f14) fin = m->f14;
+    if (!(0.0f < fin)) fin = m->f14;
+    m->f1c = fin; m->vel = vel; m->bucles = bucles;
+    if (m->id != antes) osage_inicia(p, m);                 /* 514F60 */
+    return m->id != antes;
+}
+void robot_fin_calc(int p) { if (listo && p >= 0 && p < 2) { calc(MOT(p)); osage_control(p, MOT(p)); } }   /* 4F2520 y 515040 de cada paso */
+const uint32_t *robot_tabla(const char *k, uint32_t *n) { return tabla(k, n); }

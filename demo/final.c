@@ -39,6 +39,7 @@
 #include "../comun/gd.h"
 #include "../comun/sprani.h"
 #include "../comun/or2_fisica.h"
+#include "../comun/robot.h"
 
 #define N_IDS 0x26
 #define N_AS 0x38
@@ -56,6 +57,10 @@ static uint32_t nfil;                                        /* filas: una por e
 #define MAX_FIL 64
 static struct { uint32_t fl, tipo, p1, p2, suc; } fil[MAX_FIL];
 static final_vista_t V;
+static struct { int fil; int32_t d4, d8; } rb[2];             /* rob_disp +4 / +8 de cada robot y su fila */
+#define MAX_SLOT 64
+static mat_t slot[MAX_SLOT];                                  /* +88: las matrices de los nodos con ranura (+34) */
+static uint32_t frb;                                          /* bloque FRB1 de FINAL.DAT (lo de rob_disp por defecto) */
 
 static uint32_t U(uint32_t o) { uint32_t v; if (o + 4 > Gn) return 0; memcpy(&v, G + o, 4); return v; }
 static float Fl(uint32_t o) { float v; if (o + 4 > Gn) return 0; memcpy(&v, G + o, 4); return v; }
@@ -83,6 +88,8 @@ static void op_rot(mat_t m, int a, int b, float ang)
 static void op_zyx(mat_t m, const float *r) { op_rot(m, 0, 1, r[2]); op_rot(m, 2, 0, r[1]); op_rot(m, 1, 2, r[0]); }   /* 40A4E0 */
 
 int final_activo(void) { return activo; }
+int final_grupo(void) { return activo ? (int)FU(8 + 16 * id + 4) : -1; }
+uint32_t final_usado(void) { return (Fn + 31) & ~31u; }
 const final_vista_t *final_vista(void) { return &V; }
 
 int final_columna(int variante, int preset, int meta)
@@ -109,9 +116,9 @@ static void camara(void)
 }
 
 /* 4B5670: canales de los nodos (sin las ranuras de matriz: solo las piden los robots, SIN PORTAR) */
-static void nodo_cuadro(uint32_t n, int prof)
+static void nodo_cuadro(uint32_t n, int prof, const mat_t P)
 {
-    uint32_t ch = U(n + 0x38), i, nk = U(n + 0x3c), hj = U(n + 0x40); float v; int k;
+    uint32_t ch = U(n + 0x38), i, nk = U(n + 0x3c), hj = U(n + 0x40), sl; float v, t[3], r[3]; int k; mat_t M;
     if (prof > 16) return;
     if (ch) for (k = 0; k < 10; k++) {
         if (!canal(ch + 8 * k, ahora, &v)) continue;
@@ -119,7 +126,12 @@ static void nodo_cuadro(uint32_t n, int prof)
         else Pf(n + 0x10 + 4 * k, v);
     }
     if (!(U(n) & 0x100)) return;
-    for (i = 0; i < nk && i < 256; i++) nodo_cuadro(hj + 0x44 * i, prof + 1);
+    memcpy(M, P, sizeof M);
+    for (k = 0; k < 3; k++) { t[k] = Fl(n + 0x10 + 4 * k); r[k] = Fl(n + 0x1c + 4 * k); }
+    op_tras(M, t); op_zyx(M, r);
+    sl = U(n + 0x34);
+    if (sl < MAX_SLOT) memcpy(slot[sl], M, sizeof M);
+    for (i = 0; i < nk && i < 256; i++) nodo_cuadro(hj + 0x44 * i, prof + 1, (const float (*)[4])M);
 }
 
 static int16_t palabra(float v) { return (int16_t)(int32_t)(v * K_ANG); }
@@ -147,8 +159,12 @@ static void nodo_dibuja(uint32_t n, const mat_t P, int prof)
         default: break;                                      /* puertas +164 / +166, luces car+330: SIN PORTAR */
         }
         hijos = 1;
-    } else if (tok >= 0xbd001cu && tok <= 0xbd0020u) {
-        /* ojos (514880) y humo (4208A0): SIN PORTAR */
+    } else if (tok >= 0xbd001cu && tok <= 0xbd001fu) {
+        /* 514880: el giro del nodo (+1C) a los ojos de CHR_MAL (1C / 1D) o de la otra (1E / 1F); +38 / +44 */
+        int p = tok >= 0xbd001eu, w = (tok - 0xbd001cu) & 1;
+        memcpy(V.rob[p].ojo_r[w], r, 12);
+    } else if (tok == 0xbd0020u) {
+        /* humo (4208A0): SIN PORTAR */
     } else if (vis) {
         if (tok >> 16 == 0xd0 && V.nprop < FINAL_PROPS) { V.prop[V.nprop].reg = (uint16_t)(tok & 0xffff); memcpy(V.prop[V.nprop].M, M, sizeof M); V.nprop++; }
         hijos = 1;
@@ -156,17 +172,56 @@ static void nodo_dibuja(uint32_t n, const mat_t P, int prof)
     if (hijos) for (i = 0; i < nk && i < 256; i++) nodo_dibuja(hj + 0x44 * i, (const float (*)[4])M, prof + 1);
 }
 
-/* 4B5C40: los sucesos de una fila hasta el cuadro (solo el 10, quitar la fila, en las de nodos) */
+/* 514830: la cara (si es del mismo banco que la de antes: +14 = +10, +10 = la nueva, +4 = +8 = cuadros) */
+static void cara(int p, uint32_t tok, int32_t n)
+{
+    if (!((V.rob[p].cara_b ^ tok) & 0xffff0000u)) { V.rob[p].cara_b = V.rob[p].cara_a; V.rob[p].cara_a = tok; rb[p].d4 = rb[p].d8 = n; }
+}
+/* 4B5C40: los sucesos de una fila hasta el cuadro: 10 quita la fila; en las de los robots 1 el movimiento, 6 la cara
+   (514830), 7 una mano (514800: +5C con 1, si no +58) */
 static void sucesos(int f)
 {
-    uint32_t s = fil[f].suc;
+    uint32_t s = fil[f].suc, b; int p = fil[f].tipo == 2 ? (int)U(fil[f].p1 + 4) : -1;
     if (!fil[f].p2 || !s) return;
     while (s + 12 <= Gn && U(s) != 0xffffffffu && !((int32_t)U(s) > cuadro)) {
+        b = s + 0xc;
         if (U(s + 4) == 10) fil[f].fl &= ~1u;
+        if (p >= 0 && p < 2) switch (U(s + 4)) {
+        case 1: {   /* 4F2280 / 4F1D30(inicio - 1) / 4F2520 / 4F1E30(inicio + largo - 1) / 4ED890(1 / +10) / 4F1E60(+C) */
+            float vel = Fl(b + 0x10);
+            robot_fin_mov(p, U(b), (float)((int32_t)U(b + 4) - 1), (float)((int32_t)U(b + 8) + (int32_t)U(b + 4) - 1),
+                          vel != 0 ? 1.0f / vel : 1.0f, (int32_t)Fl(b + 0xc));
+            break; }
+        case 6: cara(p, U(b), (int32_t)U(b + 4)); break;
+        case 7: V.rob[p].mano[U(b + 4) ? 1 : 0] = U(b); break;
+        default: break;                                      /* 2 / 4: sonidos (4249F0) SIN PORTAR */
+        }
         if (!U(s + 8)) { s = 0; break; }
         s += U(s + 8) * 4;
     }
     fil[f].suc = s;
+}
+
+/* 4B5B20: las poses del registro del robot (+C: ranura, canales, T R) a su matriz (487D10); el canal 9 lo oculta */
+static void rob_cuadro(int f)
+{
+    uint32_t tr = fil[f].p1, d = U(tr + 0xc), ch, sl; int p = (int)U(tr + 4), k, n = 0; float v, t[3], r[3]; mat_t M;
+    if (p < 0 || p > 1) return;
+    V.rob[p].vis = 1; m_id(M);
+    for (; d && d + 0x3c <= Gn && n < 64; d = U(d + 0x38), n++) {
+        int pon = 1;
+        if ((sl = U(d + 0x2c))) { uint32_t q = U(sl + 0x34); if (q < MAX_SLOT) memcpy(M, slot[q], sizeof M); pon = 0; }
+        if ((ch = U(d + 0x30))) {
+            for (k = 0; k < 10; k++) {
+                if (!canal(ch + 8 * k, ahora, &v)) continue;
+                if (k == 9) { if (0.5f > v) V.rob[p].vis = 0; }
+                else Pf(d + 4 + 4 * k, v);
+            }
+            pon = 1;
+        }
+        if (pon) { for (k = 0; k < 3; k++) { t[k] = Fl(d + 4 + 4 * k); r[k] = Fl(d + 0x10 + 4 * k); } op_tras(M, t); op_zyx(M, r); }
+    }
+    memcpy(V.rob[p].M, M, sizeof M);
 }
 
 static void reloj(void)                                       /* 0x28baa8 (4B6BD0) */
@@ -179,7 +234,16 @@ static void reloj(void)                                       /* 0x28baa8 (4B6BD
     for (f = 0; f < nfil; f++) {
         if (!(fil[f].fl & 1)) continue;
         sucesos((int)f);
-        if (fil[f].tipo == 1) nodo_cuadro(fil[f].p1, 0);
+        if (fil[f].tipo == 1) { mat_t I; m_id(I); nodo_cuadro(fil[f].p1, 0, (const float (*)[4])I); }
+        if (fil[f].tipo == 2) rob_cuadro((int)f);
+    }
+    {   int p;                                                /* rob_disp 5147D0 (+8 - 1) y el movimiento (4F2520) */
+        for (p = 0; p < 2; p++) {
+            if (!V.rob[p].hay) continue;
+            if (rb[p].d8 > 0) rb[p].d8--;
+            V.rob[p].w = rb[p].d4 ? 1.0f - (float)rb[p].d8 / (float)rb[p].d4 : 1.0f;
+            robot_fin_calc(p);
+        }
     }
     /* dibujo (4B69C0): las filas de nodos sobre la identidad */
     {   mat_t I; m_id(I); V.nprop = 0;
@@ -199,6 +263,19 @@ static int guion_empieza(uint32_t esc)                        /* 4B6A70 / 4B66B0
         if (fil[i].tipo == 0) cam_e = fil[i].p1;
         if (fil[i].tipo == 5) tipo5 = fil[i].p1;
         if (fil[i].tipo == 6) fil[i].fl = 0x81;
+        if (fil[i].tipo == 2) {                               /* 4B65B0 y rob_disp 514BF0 (lo de FRB1) */
+            int p = (int)U(fil[i].p1 + 4), k;
+            if (p >= 0 && p < 2 && frb) {
+                const uint32_t o = frb + 4 + p * 68;
+                V.rob[p].hay = V.rob[p].vis = 1; rb[p].fil = (int)i; rb[p].d4 = rb[p].d8 = 0;
+                V.rob[p].cara_a = V.rob[p].cara_b = FU(o); V.rob[p].ojo[0] = FU(o + 4); V.rob[p].ojo[1] = FU(o + 8);
+                V.rob[p].mano[0] = FU(o + 12); V.rob[p].mano[1] = FU(o + 16); V.rob[p].w = 1;
+                for (k = 0; k < 3; k++) {
+                    memcpy(&V.rob[p].ojo_t[0][k], F + o + 20 + 4 * k, 4); memcpy(&V.rob[p].ojo_t[1][k], F + o + 32 + 4 * k, 4);
+                    memcpy(&V.rob[p].ojo_r[0][k], F + o + 44 + 4 * k, 4); memcpy(&V.rob[p].ojo_r[1][k], F + o + 56 + 4 * k, 4);
+                }
+            }
+        }
     }
     /* 4B6510: +0 |= 0x300 en todos los nodos (visibles) */
     {   uint32_t pila[512], np = 0;
@@ -227,6 +304,7 @@ int final_entra(int c, uint8_t *ram, uint32_t cap, uint8_t *staff, uint32_t scap
         dbglog(DBG_ERROR, "FINAL: sin FINAL.DAT (%uK de RAM)\n", (unsigned)(cap >> 10)); return -2;
     }
     F = ram; Fn = sz; n = FU(4);
+    frb = FU(Fn - 4); if (frb + 4 + 2 * 68 > Fn || memcmp(F + frb, "FRB1", 4)) frb = 0;
     if (n != N_IDS) return -3;
     col = c; id = (int)FU(8 + 16 * N_IDS + 4 * c);          /* [0x3e9048 + columna x 4] */
     if (id < 0 || id >= N_IDS) return -4;

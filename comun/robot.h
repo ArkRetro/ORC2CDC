@@ -7,7 +7,8 @@
 #include <stdint.h>
 
 #define ROBOT_N 2                 /* 0 el piloto, 1 la acompanante */
-#define ROBOT_HUESOS 56                /* el esqueleto mayor (bone.bin 3) tiene 53; detras, los nodos del osage (G00: 50 + 4) */
+#define ROBOT_HUESOS 128               /* el esqueleto mayor: CHR_MAL del final de recreativa (bone.bin 5: 115 + 6 del osage);
+                                          en la carrera bone.bin 3 tiene 53 (G00: 50 + 4 del osage) */
 
 /* pieza del personaje (CHR_*.bin): rigida (un hueso), con pesos (hasta 4 matrices inv(enlace) M(hueso)) o una mano
    (puno o abierta, en su hueso) */
@@ -30,6 +31,12 @@ typedef struct {
 
 int   robot_inicia(const void *rbt, uint32_t bytes);       /* 0 = bien */
 int   robot_listo(void);
+/* el final de recreativa (demo/final.c): piezas de objeto de rob_disp (tipo 4 la cara, 5 / 6 los ojos, 7 / 8 las manos;
+   el registro del objeto en inv[1]) y los movimientos de los sucesos 1 */
+enum { RP_CARA = 4, RP_OJO0, RP_OJO1, RP_MANO0, RP_MANO1 };
+int   robot_fin_mov(int p, uint32_t id, float ini, float fin, float vel, int32_t bucles);
+void  robot_fin_calc(int p);
+const uint32_t *robot_tabla(const char *k, uint32_t *n);  /* una tabla del RBT1 cargado (MORF...) */
 void  robot_carrera(int modelo);                           /* init de los dos (salida) */
 void  robot_paso(const robot_coche_t *c);                  /* un paso de logica (60 por segundo) */
 const float (*robot_huesos(int p))[4][4];                  /* matrices de hueso en el marco del personaje */

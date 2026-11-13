@@ -307,16 +307,28 @@ def mallas_registro(blq, r):
             # de las posiciones (0x6e) y n = 8 una matriz. Otro microcodigo (tabla 0x3592b0: 0x202 -> 0x31edb0, 0x262 y
             # 0x228 -> 0x315760; 0x203 / 0x223 / 0x243 el mismo 0x313db0): lo que cambie de la luz, SIN PORTAR
             color = (clave & 8) != 0; clave = {0: 0, 2: 2, 3: 3, 4: 4, 8: 0, 0xa: 2, 0xb: 3, 0xc: 4}[clave & 0xf]
+        col8 = clave == 8
+        if col8:                                  # 0x208 (el ramo de CHR_FAL del final de recreativa): rigida con el V4-8
+            color = True; clave = 0               # detras de las posiciones: color por vertice (se guarda en el vertice)
         for pk in vif.datos(m, A + e[2], A + blq.w[2]):
             lista = pk.get('orden', []); j = 0
             while j < len(lista):
                 if lista[j][0] != 0x6c: j += 1; continue
                 nxt = next((q for q in range(j + 1, len(lista)) if lista[q][0] == 0x6c), len(lista))
                 tira = lista[j + 1:nxt]; j = nxt
-                if color:                         # el V4-8 de 0x22[8a-c]: en SLES-53998 siempre (0, 0, 0, 127); si no,
+                cv = None
+                if col8 and tira[1][0] == 0x6e: cv = tira[1][1].astype(int); tira = tira[:1] + tira[2:]
+                elif color:                       # el V4-8 de 0x22[8a-c]: en SLES-53998 siempre (0, 0, 0, 127); si no,
                     if tira[1][0] != 0x6e or (tira[1][1] != (0, 0, 0, 127)).any():   # sin estudiar
                         raise SystemExit('registro %d: color por vertice distinto de (0, 0, 0, 127): sin portar' % r)
                     tira = tira[:1] + tira[2:]    # PROBABLE: sin efecto (el mismo en todos los vertices)
+                if (e[0] & 0xfff) == 0xa01 and [x[0] for x in tira[:4]] == [0x68, 0x68, 0x69, 0x69] and tira[4][0] in (0x64, 0x65):
+                    # 0xa01 (el pelo de CHR_DR_L00 / LH00, 514B60): dos posiciones y dos normales (la forma y la de la
+                    # mezcla del VU1 con el peso global de 406800, que sin cara nadie pone en la carrera: PROBABLE la
+                    # primera forma, peso 1) y las UV (V2-16 o V2-32, / 4096); rigida
+                    P = tira[0][1].astype(np.float32); N = tira[2][1].astype(float) / 32768.0; n = len(P)
+                    W = np.zeros((n, 4)); W[:, 0] = 1
+                    res.append((0, P, N, W, tira[4][1][:, :2].astype(float) / 4096.0, k, e[0])); continue
                 P = tira[0][1].astype(np.float32); N = tira[1][1].astype(float) / 32768.0
                 n = len(P); W = np.zeros((n, 4)); resto = tira[2:]
                 if clave == 0: W[:, 0] = 1
@@ -329,7 +341,7 @@ def mallas_registro(blq, r):
                     W[:, :3] = w; W[:, 3] = 1 - w.sum(1)
                 else: raise SystemExit('clave de malla 0x%x sin estudiar (registro %d)' % (e[0], r))
                 uv = resto[0][1][:, :2].astype(float) / 4096.0 if resto else np.zeros((n, 2))
-                res.append((clave, P, N, np.clip(W, 0, 1), uv, k, e[0]))
+                res.append((clave, P, N, np.clip(W, 0, 1), uv, k, e[0]) + ((cv,) if cv is not None else ()))
     return res
 
 class Pmt64:
@@ -473,12 +485,14 @@ def osage_tablas(E, kind, osg):
     3 x {hueso, tipo, radio, centro (3)}} (514EC0 = PS2 0x209078: hueso -1 = centro en el marco del personaje)"""
     f = lambda va: E.u32(va)
     if E.u32(OSG_UNICO): raise SystemExit('osage: 0x36fb10 != 0 en el ELF (lista unica de esferas): sin portar')
-    defs = None
+    defs = None; amort = None; osage_tablas.amort = None
     if 0 <= kind - 5 < 11:
         caso = E.u32(OSG_SALTOS + 4 * (kind - 5))
         if caso == 0x208d38: defs = 0x40f6b0          # lui 0x41 / addiu -0x950: esferas, sin lista de amortiguacion
+        elif caso == 0x208d48: defs, amort = 0x40f730, 0x36fb30   # (CHR_FAL y CHR_GAL del final de recreativa)
+        elif caso == 0x208d5c: defs, amort = 0x40f7b0, 0x36fbb0   # lui 0x41 / 0x37, addiu -0x850 / -0x450
         elif caso != 0x208d74:                         # (0x208d74: sin esferas)
-            raise SystemExit('osage: personaje %d con lista de amortiguacion (0x208d48 / 0x208d5c): sin portar' % kind)
+            raise SystemExit('osage: personaje %d: caso 0x%x sin estudiar' % (kind, caso))
     g0 = E.u32(OSG_GUARDA)
     v = [len(osg['cadenas']), osg['nodos'], E.u32(OSG_CALIENTA), f(OSG_GRAVEDAD), f(OSG_AMORTIGUA)]
     v += list(E.u32(OSG_EJE, 3)) + list(E.u32(OSG_VIENTO, 3))
@@ -501,7 +515,35 @@ def osage_tablas(E, kind, osg):
             v += [struct.unpack('<I', struct.pack('<f', osg['largos'][ci][k]))[0], len(esf)]
             for e in esf + [[0] * 6] * (3 - len(esf)): v += e
             hueco += 1
+    if amort:   # 0x208e00..0x208e34 -> 0x290fd8: el nodo k (1..) de cada cadena +24 = lista[indices[indice] + k - 1]
+        osage_tablas.amort = [E.u32(amort + 4 * (osg['indices'][c['indice']] + k)) for c in osg['cadenas'] for k in range(c['n'])]
     return v
+
+def pelo(A, kind):
+    """el objeto del pelo de la acompanante (rob_disp 514B60 = PS2 0x207080..0x20718c, solo sin cara): por la tabla de
+    saltos 0x40f400 [personaje - 5]: 9 (CHR_DR_L00) -> 0x2070d8: el objeto fijo de lui 0xbf / ori 0x28 (0x2070dc /
+    0x2070e8); 10 (CHR_DR_LH00) -> 0x2070ec: el de object_db_bin de la cadena 0x40f3f0 (KAM_DR_LH00, 0x1cdb68); en el
+    hueso 0x22 (0x208470 de 0x207118) con T(0x40f3e0) = (0, 0, 0) sobre work+10. Los demas, nada"""
+    E = A.elf
+    if not 0 <= kind - 5 < 15: return None
+    caso = E.u32(0x40f400 + 4 * (kind - 5))
+    assert E.u32(0x20711c) == 0x24050022, 'hueso del pelo'                  # addiu $a1, $zero, 0x22
+    if caso == 0x2070d8:
+        a, b = E.u32(0x2070dc), E.u32(0x2070e8); assert a >> 16 == 0x3c11 and b >> 16 == 0x3631, 'pelo fijo'
+        return ((a & 0xffff) << 16 | (b & 0xffff)), 0x22
+    if caso == 0x2070ec:
+        d = A.datos(A.entrada('COMMON.PS2', 'object_db_bin'))[4:]
+        nm = E.cadena(0x40f3f0).encode()
+        for g in range(0, 0xac, 4):
+            e = struct.unpack_from('<I', d, g)[0]
+            while True:
+                o, h = struct.unpack_from('<2I', d, e)
+                if h == 0xffffffff: break
+                if d[o:d.index(b'\0', o)] == nm: return h, 0x22
+                e += 8
+        raise SystemExit('pelo: %s sin object_db' % nm)
+    if caso != 0x207104: raise SystemExit('pelo: caso 0x%x sin estudiar' % caso)
+    return None
 
 def manos(A, kind):
     """(hueso izquierdo, hueso derecho, objetos del puno (gu), objetos de la mano abierta (pa)) del personaje kind:
@@ -667,7 +709,7 @@ def tabla_pares(A):
     return b'CPR1' + struct.pack('<%dI' % len(v), *v)
 
 _TL = {}
-def convierte(A, sal, vista=None, personajes=None):
+def convierte(A, sal, vista=None, personajes=None, ids=None, extras=None):
     elf(A)
     bone = A.datos(A.entrada('COMMON.PS2', 'bone.bin'))
     grupos = {}
@@ -683,10 +725,12 @@ def convierte(A, sal, vista=None, personajes=None):
     pers = []
     for kind, ek, asiento in personajes:
         esq = Esqueleto(bone, ek); P = Personaje(A, kind, esq)
-        if P.osage: t['OSG%d' % len(pers)] = osage_tablas(A.elf, kind, P.osage)
+        if P.osage:
+            t['OSG%d' % len(pers)] = osage_tablas(A.elf, kind, P.osage)
+            if osage_tablas.amort: t['OSA%d' % len(pers)] = osage_tablas.amort   # (robot.c osage_inicia)
         hl, hr, gu, pa = manos(A, kind)
-        for o in gu + pa:
-            if o >> 16 != P.recurso: raise SystemExit('mano de otro recurso: %x' % o)
+        for o in gu + pa:                         # (-1: sin ese objeto, CHR_MAL y CHR_FAL del final de recreativa)
+            if o != 0xffffffff and o >> 16 != P.recurso: raise SystemExit('mano de otro recurso: %x' % o)
         pers.append((kind, esq, P, hl, hr, gu, pa, asiento))
         blq = P.blq; base = len(mod.texs)
         for h in cabeceras(blq):
@@ -699,7 +743,7 @@ def convierte(A, sal, vista=None, personajes=None):
         R = blq.registros()
         lista_p = []                              # (registro, tipo, huesos, inversas)
         nh = len(esq.huesos); no = P.osage['nodos'] if P.osage else 0
-        if nh + no > 56: raise SystemExit('%s: %d huesos y %d nodos de osage (ROBOT_HUESOS de comun/robot.h: 56)' % (P.nombre, nh, no))
+        if nh + no > 128: raise SystemExit('%s: %d huesos y %d nodos de osage (ROBOT_HUESOS de comun/robot.h: 128)' % (P.nombre, nh, no))
         def hueso(b):                             # 514280: id | 0x8000 = la matriz del nodo id del osage (pool + id x 0x40)
             if not b & 0x8000: return b
             if (b & 0x7fff) >= no: raise SystemExit('%s: hueso de osage 0x%x sin nodo' % (P.nombre, b))
@@ -708,11 +752,22 @@ def convierte(A, sal, vista=None, personajes=None):
             lista_p.append((obj & 0xffff, 0, [hueso(b)], [0xffff]))
         for bs, obj in P.pesos:
             lista_p.append((obj & 0xffff, 1, [hueso(b) for b in bs], [P.idx_id(b) for b in bs]))
-        for j, o in enumerate(gu): lista_p.append((o & 0xffff, 2, [(hl, hr)[j]], [0xffff]))
-        for j, o in enumerate(pa): lista_p.append((o & 0xffff, 3, [(hl, hr)[j]], [0xffff]))
+        for j, o in enumerate(gu):
+            if o != 0xffffffff: lista_p.append((o & 0xffff, 2, [(hl, hr)[j]], [0xffff]))
+        for j, o in enumerate(pa):
+            if o != 0xffffffff: lista_p.append((o & 0xffff, 3, [(hl, hr)[j]], [0xffff]))
+        pl = pelo(A, kind)                        # el pelo (514B60): rigido en su hueso
+        if pl:
+            if pl[0] >> 16 != P.recurso: raise SystemExit('pelo de otro recurso: %x' % pl[0])
+            lista_p.append((pl[0] & 0xffff, 0, [pl[1]], [0xffff]))
+        # extras (conv_final.py): objetos sueltos del personaje en un hueso (tipo 4 cara, 5 / 6 ojos, 7 / 8 manos de
+        # rob_disp 514C30): (objeto, tipo, hueso); inv = [-1, registro]
+        for o, tipo, b in (extras or {}).get(len(pers) - 1, ()):
+            if o >> 16 != P.recurso: raise SystemExit('objeto %x de otro recurso' % o)
+            lista_p.append((o & 0xffff, tipo, [b], [0xffff, o & 0xffff]))
         for r, tipo, bs, inv in lista_p:
             ip = len(piezas); piezas.append((len(pers) - 1, tipo, bs, inv, r))
-            for clave, Pp, N, W, uv, k, key in mallas_registro(blq, r):
+            for clave, Pp, N, W, uv, k, key, *cvl in mallas_registro(blq, r):
                 if clave and len(bs) < clave: raise SystemExit('malla de %d huesos en una pieza de %d' % (clave, len(bs)))
                 reg = R[r]
                 tl = struct.unpack('<i', blq.m[blq.A + reg[4][1] + 36 * k + 12:blq.A + reg[4][1] + 36 * k + 16])[0] \
@@ -731,6 +786,9 @@ def convierte(A, sal, vista=None, personajes=None):
                     v = np.zeros(nn, dtype=[('x', '<f4'), ('y', '<f4'), ('z', '<f4'), ('u', '<f4'), ('v', '<f4'), ('c', '<u4')])
                     q = Pp[sl].astype(np.float32); v['x'], v['y'], v['z'] = q[:, 0], q[:, 1], q[:, 2]
                     v['u'], v['v'] = uv[sl, 0], uv[sl, 1]; v['c'] = 0xFFFFFFFF
+                    if cvl:                       # color por vertice de 0x208 (0..127 -> 0..254; demo/main.c lo multiplica)
+                        cc = np.minimum(cvl[0][sl] * 2, 255).astype(np.uint32)
+                        v['c'] = (cc[:, 3] << 24) | (cc[:, 0] << 16) | (cc[:, 1] << 8) | cc[:, 2]
                     cc = q.mean(0); rad = float(np.sqrt(((q - cc) ** 2).sum(1).max()))
                     mod.mallas.append([li, ti, cc, rad, mod.nv, nn, blq, len(mvert)])
                     mod.verts.append(v); mod.nv += nn
@@ -745,7 +803,7 @@ def convierte(A, sal, vista=None, personajes=None):
         while len(blob) % n: blob.append(0)
     secs = {}
     # movimientos
-    ids = ids_movimientos(t)
+    ids = ids_movimientos(t) if ids is None else ids     # ids: los del final de recreativa (conv_final.py)
     movs = []
     for mid in ids:
         fr, fl, can, cla = datos_movimiento(grupo(mid >> 16), mid & 0x7fff)
@@ -755,11 +813,16 @@ def convierte(A, sal, vista=None, personajes=None):
     per_hdr = []
     for kind, esq, P, hl, hr, gu, pa, asiento in pers:
         al(4); oh = len(blob)
-        hijos_all = []
+        # mas de 6 hijos (CHR_MAL del final): los 6 primeros en el registro y la lista entera detras de los huesos, en el u16
+        # de relleno (desplazamiento desde el primer hueso; comun/robot.c hijo())
+        largas = []; o_l = 48 * len(esq.huesos)
         for h in esq.huesos:
-            if len(h['hijos']) > 6: raise SystemExit('hueso con mas de 6 hijos')
-            hj = h['hijos'] + [0xff] * (6 - len(h['hijos']))
-            blob += struct.pack('<4B6B2x9f', h['tipo'], h['ik'], h['unidad'], len(h['hijos']), *hj, *h['reposo'])
+            hs = h['hijos']; ext = 0
+            if len(hs) > 255: raise SystemExit('hueso con mas de 255 hijos')
+            if len(hs) > 6: ext = o_l; largas.append(bytes(hs)); o_l += len(hs)
+            hj = (hs + [0xff] * 6)[:6]
+            blob += struct.pack('<4B6BH9f', h['tipo'], h['ik'], h['unidad'], len(hs), *hj, ext, *h['reposo'])
+        for x in largas: blob += x
         al(4); oi = len(blob)
         for M in P.inv: blob += M.astype('<f4').tobytes()
         per_hdr.append((kind, len(esq.huesos), oh, len(P.inv), oi, hl, hr, asiento))
@@ -787,6 +850,10 @@ def convierte(A, sal, vista=None, personajes=None):
         w8 = np.clip(np.round(W * 255), 0, 255).astype(np.uint8)
         for i in range(len(q)):
             blob += struct.pack('<3bx4B', *n8[i], *w8[i])
+    if extras is not None:                         # MORF: por malla (orden de creacion), su numero dentro de su pieza
+        cnt = {}; ords = []
+        for x in mvert: ords.append(cnt.get(x[0], 0)); cnt[x[0]] = ords[-1] + 1
+        t['MORF'] = ords
     # tablas
     al(4); otb = len(blob)
     if BANDERERO: t = {k: t[k] for k in ('BAND', 'BTEX', 'MATE')}

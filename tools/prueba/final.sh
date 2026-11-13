@@ -10,6 +10,7 @@ GDI=${1:-}; PANTALLA=${2:-91}; SAL=${3:-/dev/shm/prueba_final}
 arranca ${FLYCAST_OPC:-}; marca
 MENU_SP=1 P=fi . "$D/menu.sh"
 espera_log 'CURSO: GOAL' 400 || true
+for i in 0 1 2 3 4 5; do espera 3; foto fi_m$i; done                    # la escena de la meta (la pareja)
 espera_log 'FINAL: modo 24' 120 || true
 for i in $(seq -w 0 ${FOTOS:-14}); do foto fi_$i; espera 2; done
 espera_log 'FIN: modo 25' 90 || true; espera 3; foto fi_25

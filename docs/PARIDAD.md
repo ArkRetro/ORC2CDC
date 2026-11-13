@@ -1632,9 +1632,16 @@ Ahora como el original (SLES-53998; PC race_robots.cpp 487EE0 / 487F50, native_r
   todos los juegos de 0x3527a0 dan SPANISH: las voces son las mismas con cualquier acompanante. CONFIRMADO.
 - Seleccion de coche y licencia: en la seleccion (4A5B20) el original solo dibuja el coche; la licencia muestra la foto
   (2D, U_FOTO de MENU.DAT, ya portada): ninguna de las dos usa estos modelos. Lo demas que mira el personaje: el
-  esqueleto, las manos y el osage (hechos) y la lista de "aire" (hecha). El objeto de 514B60 del PC en el hueso 0x22
-  de los personajes 9 / 10 no esta en el dibujo de PS2 (0x206d80 llama al cuerpo 0x2076b8, la cara 0x206e88 y las
-  manos 0x206ff8): no se porta. La cara (0x206e88) no la ponen los personajes de carrera (rob_disp_init no la llena).
+  esqueleto, las manos y el osage (hechos) y la lista de "aire" (hecha). El pelo de la acompanante (514B60 del PC: el
+  objeto del hueso 0x22 de los personajes 9 / 10), CORREGIDO 2026-11-13 (queja del usuario: "el modelo de la chica no
+  tiene pelo"): antes se daba por no dibujado en el PS2 mirando 0x206d80, pero el dibujo de la carrera (0x202bf0 /
+  0x204618 -> 0x201948 -> 0x206110 -> 0x206a78) es la otra variante, que tras el cuerpo y las manos llama a 0x207078:
+  por la tabla de saltos 0x40f400 [personaje - 5] el 9 (CHR_DR_L00) pone el objeto fijo 0xBF0028 (lui / ori de
+  0x2070dc / 0x2070e8) y el 10 (CHR_DR_LH00) el de object_db_bin de KAM_DR_LH00 (0x40f3f0), en el hueso 0x22
+  (0x20711c) con T(0x40f3e0) = (0, 0, 0). 0x206d80 (la variante sin pelo) es la de 0x201a18. tools/conv_chr.py pelo():
+  pieza rigida mas en las parejas con el personaje 9 (CHR0509, 0905, 0909, 0911, 0917, 0918, 0919, 1109, 1709, 1809,
+  1909: +9 KB). Su malla es de la clave 0xa01 (dos posiciones, dos normales y UV V2-16 o V2-32: la forma y la de la
+  mezcla del VU1 con el peso global 406800, que en la carrera nadie pone: PROBABLE peso 1, la primera forma). La cara (0x206e88) no la ponen los personajes de carrera (rob_disp_init no la llena).
 - PENDIENTE de comprobar en el original: con las fotos 3, 4 y 5 el piloto es una mujer (L00 / G00 / H00, esqueleto 2
   de bone.bin) y el acompanante un hombre (esqueleto 3), pero los movimientos son los mismos del puesto (conducir
   ORT_MAN_*: esqueleto 3 en la entrada del movimiento; acompanante ORT_WMN_*: esqueleto 2) y no se ha encontrado
@@ -2580,13 +2587,21 @@ dibuja ni se consulta hasta volver al menu); el sitio, sus objetos y FINAL.DAT e
 de 8116 tras subir las texturas), las tablas de STAFF.DAT en el hueco de la union prestado; VRAM libre 507 KB con el
 sitio subido. Sin texeles en la RAM (van a la VRAM al leer).
 Diferencias y SIN PORTAR:
-- La pareja del final (registros de tipo 2 del guion: CHR_MAL / CHR_FAL, personajes 0x10 / 0xD de 0x36f7d8, con los
-  movimientos del grupo de la fila: mot_E05.. de ANIMS.PS2; sucesos 1 = 4F2280 / 4F1D30 / 4F1E30 / 4ED890 / 4F1E60 y
-  487D10 en la matriz de sus poses): SIN PORTAR. Hace falta ademas lo de rob_disp: la cara por objeto (514830 con la
-  mezcla 405450 de dos caras, FACE_MAL_* = 0xCC00nn de object_db_bin), las manos por objeto (514800: HAND_* con los
-  objetos que llevan en la mano: tulipanes, el ramo) y los ojos (514880 desde los nodos BD001C..F): sin ellos los
-  personajes salen sin cara ni manos. robot.c tiene el motor de movimientos; tools/conv_chr.py convierte la pareja
-  (los objetos de mano de -1 de estos personajes no los admite aun).
+- La pareja del final, HECHA 2026-11-13: FINCHRgg.DAT (gg = grupo de la fila +0x44) con CHR_MAL (0x10, bone.bin 5: 115
+  huesos + 6 nodos de osage; ROBOT_HUESOS sube a 128 y los huesos con mas de 6 hijos llevan la lista detras, hijo() de
+  comun/robot.c) y CHR_FAL (0xD, osage con la lista de amortiguacion por nodo de 0x290fd8: 0x36fb30 / 0x36fbb0 con las
+  esferas 0x40f730 / 0x40f7b0, bloque OSA0 / OSA1), los movimientos de sus sucesos 1 (mot_E05.. de ANIMS.PS2) y los
+  objetos de rob_disp: cara (tabla 0x40f478 / 0x40f4f0: hueso 0x19, FACE_*_DEFORUT_*), ojos (EYE_*_L / R con su posicion
+  y giro, los nodos BD001C..F del guion: 514880; L / R en el orden de las cadenas de 0x4225c0), manos (HAND_*_DEFORUT_L
+  / R en los huesos 0x27 / 0x28 y 0x38, y las de los sucesos 7: el tulipan, el ramo...). demo/final.c: 4B65B0 (robots),
+  4B5B20 (poses con ranuras de nodo, canal 9 los oculta), sucesos 1 (robot_fin_mov: 4F2280 / 4F1D30 / 4F2520 / 4F1E30
+  / 4ED890 / 4F1E60 y 514F60 al cambiar), 6 (514830: la cara y la de antes con sus cuadros) y 7 (514800), y cada paso
+  5147D0 y 4F2520 + 515040 (robot_fin_calc). Nombres de los sucesos 6 / 7 a tokens en la conversion (4B5AF0: la letra
+  de 0x378170 "FGG" + "AL" en +5 salvo CHR_MAL). Dibujo (demo/main.c robot_matrices / robot_dibuja con el robot en su
+  work+10): la cara con la mezcla 405450 (posicion = w a + (1 - w) b, w = 1 - (+8 / +4) del 406800; la normal la de a:
+  PROBABLE) entre las mallas del mismo numero en las dos caras (tabla MORF del RBT1); los ojos T(+20) Rz(+40) Rx(+38)
+  sobre el hueso; el ramo (clave 0x208) con su color por vertice (multiplica la luz: PROBABLE). RAM: la pareja en el
+  hueco de la etapa detras de FINAL.DAT; la de la carrera se vuelve a leer en la siguiente carrera.
 - El fondo de los presets 0 / 2 (4522D0, [0x3e7820 + columna x 24]: un objeto lejano en (0, -100, 0)) y las luces del
   final (4523E0: tres luces de 5A6AB8 por final y columna; los modelos llevan la luz de tools/modelo.py en los
   vertices): SIN PORTAR.

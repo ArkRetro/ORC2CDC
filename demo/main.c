@@ -7867,6 +7867,40 @@ static int robot_carga(int pil, int aco)
     return 0;
 }
 /* matrices de cada pieza y tablas de color del cuadro (una vez, antes de las listas) */
+/* el final de recreativa: las piezas de objeto de rob_disp (cara, ojos y manos) que lleva puestas cada robot */
+#define FIN_MORF 48
+static uint16_t fin_morf[CHR_PZ][FIN_MORF];                     /* (pieza, numero de malla en la pieza) -> malla del modelo */
+static int fin_pieza_activa(const robot_ctx_t *rx, const rpieza_t *pz)
+{
+    const final_vista_t *FV; uint32_t o;
+    if (!fin24 || rx->fuente || pz->per > 1) return 0;
+    FV = final_vista(); o = pz->inv[1];
+    switch (pz->tipo) {
+    case RP_CARA: return o == (FV->rob[pz->per].cara_a & 0xffff);
+    case RP_OJO0: return o == (FV->rob[pz->per].ojo[0] & 0xffff);
+    case RP_OJO1: return o == (FV->rob[pz->per].ojo[1] & 0xffff);
+    case RP_MANO0: return o == (FV->rob[pz->per].mano[0] & 0xffff);
+    case RP_MANO1: return o == (FV->rob[pz->per].mano[1] & 0xffff);
+    default: return 0;
+    }
+}
+/* la malla de la cara de antes (+14) que corresponde a la malla m de la actual (+10), con el mismo numero de vertices */
+static const vert_t *fin_morfo(const robot_ctx_t *rx, const malla_t *m, uint32_t n, float *w)
+{
+    const final_vista_t *FV = final_vista(); const rpieza_t *pz = PZA(MLA(m->nodo)->pieza); uint32_t b, k, ord, mo; int i;
+    const uint32_t *tm = robot_tabla("MORF", &k);
+    if (!tm || (uint32_t)m->nodo >= k) return NULL;
+    b = FV->rob[pz->per].cara_b; *w = FV->rob[pz->per].w;
+    if (*w >= 1.0f || b == FV->rob[pz->per].cara_a || ((b ^ FV->rob[pz->per].cara_a) & 0xffff0000u)) return NULL;
+    ord = tm[m->nodo];
+    for (i = 0; i < chr_npz; i++) {
+        const rpieza_t *q = PZA(i);
+        if (q->tipo != RP_CARA || q->per != pz->per || q->inv[1] != (b & 0xffff)) continue;
+        if (ord >= FIN_MORF || (mo = fin_morf[i][ord]) == 0xffff || rx->m->mallas[mo].n != m->n) return NULL;
+        (void)n; return rx->m->verts + rx->m->mallas[mo].v0;
+    }
+    return NULL;
+}
 static void robot_matrices(robot_ctx_t *rx, matrix_t *mc, int coche_vis)
 {
     static matrix_t base[3] __attribute__((aligned(32))), P __attribute__((aligned(32)));
@@ -7885,7 +7919,13 @@ static void robot_matrices(robot_ctx_t *rx, matrix_t *mc, int coche_vis)
         if (!rx->per[2]) return;
         band_tela = robot_band_visible() && robot_band_textura() < rx->m->ntex;   /* work+4 & 0x8000 */
     }
-    for (p = 0; p < 2 && coche_vis && !rx->fuente; p++) {      /* T(asiento) car+F0 car+B0 */
+    for (p = 0; p < 2 && fin24 && !rx->fuente; p++) {         /* el final: work+10 de cada robot (487D10) */
+        const final_vista_t *FV = final_vista();
+        rx->per[p] = FV->rob[p].hay && FV->rob[p].vis;
+        memcpy(base[p], FV->rob[p].M, sizeof(matrix_t));
+        for (a = 0; a < 3; a++) for (b = 0; b < 3; b++) R[p][a][b] = base[p][a][b];
+    }
+    for (p = 0; p < 2 && coche_vis && !rx->fuente && !fin24; p++) {      /* T(asiento) car+F0 car+B0 */
         rx->per[p] = 1;
         const float *s = robot_asiento(modelo_jug, p); matrix_t W;
         if (ani.ok) memcpy(W, ani_m[0], sizeof W); else m_id(W);
@@ -7925,10 +7965,21 @@ static void robot_matrices(robot_ctx_t *rx, matrix_t *mc, int coche_vis)
     for (k = 0; k < rx->npz; k++) {
         const rpieza_t *pz = PZA(k); const float (*M)[4][4] = (rx->fuente ? robot_b_huesos() : robot_huesos(pz->per));
         if (!rx->per[PER(pz)]) continue;
+        if (pz->tipo >= RP_CARA && !fin_pieza_activa(rx, pz)) continue;
         for (j = 0; j < pz->n; j++) {
             int s = rx->m0[k] + j; float t[3][3];
             if (pz->tipo == RP_PESOS && pz->inv[j] != 0xffff) m_por(P, (rx->fuente ? robot_b_inversa(pz->inv[j]) : robot_inversa(pz->per, pz->inv[j])), M[pz->hueso[j]]);
             else memcpy(P, M[pz->hueso[j]], sizeof P);
+            if (pz->tipo == RP_OJO0 || pz->tipo == RP_OJO1) {    /* rob_disp 513D10: T(+20 / +2C) Rz(+40 / +4C) Rx(+38 / +44) */
+                const final_vista_t *FV = final_vista(); int o = pz->tipo - RP_OJO0; matrix_t E2, Q;
+                const float *t = FV->rob[pz->per].ojo_t[o], *r = FV->rob[pz->per].ojo_r[o];
+                float cz = cosf(r[2]), sz = sinf(r[2]), cx = cosf(r[0]), sx = sinf(r[0]);
+                /* filas: Rx Rz T (la pila del PC: cada operacion por la izquierda) */
+                float Rz[4][4] = { { cz, sz, 0, 0 }, { -sz, cz, 0, 0 }, { 0, 0, 1, 0 }, { t[0], t[1], t[2], 1 } };
+                float Rx[4][4] = { { 1, 0, 0, 0 }, { 0, cx, sx, 0 }, { 0, -sx, cx, 0 }, { 0, 0, 0, 1 } };
+                m_por(E2, (const float (*)[4])Rx, (const float (*)[4])Rz); m_por(Q, (const float (*)[4])E2, (const float (*)[4])P);
+                memcpy(P, Q, sizeof P);
+            }
             for (a = 0; a < 3; a++) for (b = 0; b < 3; b++) t[a][b] = P[a][0] * R[PER(pz)][0][b] + P[a][1] * R[PER(pz)][1][b] + P[a][2] * R[PER(pz)][2][b];
             for (a = 0; a < 3; a++) rx->L[s][a] = (int32_t)((t[a][0] * d[0] + t[a][1] * d[1] + t[a][2] * d[2]) * 256.0f);   /* n.l en su marco */
             mat_load(&vista); mat_apply(&base[PER(pz)]); mat_apply(&P); mat_store(&rx->S[s]);
@@ -7946,20 +7997,24 @@ static void robot_dibuja(robot_ctx_t *rx, int l)
         if (n < 3 || m->nodo < 0) continue;
         rm = MLA(m->nodo); pz = PZA(rm->pieza); rv = VRT(m->v0); vv = rx->m->verts + m->v0;
         if (!rx->per[PER(pz)]) continue;
+        if (pz->tipo >= RP_CARA && !fin_pieza_activa(rx, pz)) continue;
         if ((pz->tipo == RP_MANO_GU && !robot_mano_gu(pz->per)) || (pz->tipo == RP_MANO_PA && robot_mano_gu(pz->per))) continue;
         lut = rx->lut[rm->mat < rx->nm ? rm->mat : 0]; s = rx->m0[rm->pieza];
         if (n > 256) n = 256;
         if (pz->n == 1) {                                       /* pieza rigida (peso 1): sin acumular, igual resultado */
             const int32_t L0 = rx->L[s][0], L1 = rx->L[s][1], L2 = rx->L[s][2];   /* (locales: pw las obligaba a releer) */
-            const float cer = cerca; pt_t *o = pw;
+            const float cer = cerca; pt_t *o = pw; const vert_t *vb = NULL; float fw = 1.0f;
+            if (pz->tipo == RP_CARA) vb = fin_morfo(rx, m, n, &fw);   /* 405450: la cara de antes con el peso 406800 */
             mat_load(&rx->S[s]);
             for (i = 0; i < n; i++, o++) {
                 float x = vv[i].x, y = vv[i].y, z = vv[i].z, u = vv[i].u, vt = vv[i].v, w, nl; int q;
+                if (vb) { x = x * fw + vb[i].x * (1 - fw); y = y * fw + vb[i].y * (1 - fw); z = z * fw + vb[i].z * (1 - fw); }
                 mat_trans_single3_nodivw(x, y, z, w);
                 nl = (float)(rv[i].nx * L0 + rv[i].ny * L1 + rv[i].nz * L2) * (1.0f / (127.0f * 256.0f));
                 q = (int)((nl + 1.0f) * 16.0f + 0.5f);
                 o->x = x; o->y = y; o->w = w; o->u = u; o->v = vt; o->o = 0;
                 o->c = lut[q < 0 ? 0 : q > 32 ? 32 : q];
+                if (vv[i].c != 0xFFFFFFFFu) o->c = mul_argb(o->c, vv[i].c);   /* color por vertice (0x208: el ramo) */
                 detras |= w < cer;
             }
         } else {
@@ -8865,8 +8920,41 @@ static uint8_t *hueco_fin(uint32_t *cap)
    hueco de la etapa; las tablas de STAFF.DAT en el hueco de la union prestado (como el resto de escenas). Nada del
    monton salvo las tablas pequenas de cada modelo (vis, tramos y cabeceras, como cualquier union) */
 static modelo_t fin_mod, fin_prop;
+static int fin_chr;                                             /* la pareja del final en chr (FINCHRgg.DAT) */
+/* la pareja del final en buf (el hueco de la etapa): como robot_carga sin copiar al bloque (sus texturas con sube_modelo) */
+static int final24_chr(int g, uint8_t *buf, uint32_t cap)
+{
+    char nom[20]; int k, n = 0, r; uint32_t i;
+    sprintf(nom, "FINCHR%02X.DAT", g & 0xff);
+    robot_suelta();
+    if (!chr_ok) return -1;
+    if ((r = lee_modelo_en(&chr, nom, buf, cap))) { memset(&chr, 0, sizeof chr); dbglog(DBG_ERROR, "FINAL: sin %s (%d)\n", nom, r); return -2; }
+    if (chr.paso_ruta != 1 || chr.nnodos || sube_modelo(&chr)) { dbglog(DBG_ERROR, "FINAL: %s: no se pudo subir\n", nom); tex_suelta(&chr); memset(&chr, 0, sizeof chr); return -3; }
+    fin_chr = 1;
+    if ((r = robot_inicia(chr.ruta, chr.nruta * 4))) { dbglog(DBG_ERROR, "FINAL: %s: RBT1 (%d)\n", nom, r); return -4; }
+    chr_npz = robot_npiezas(); chr_nm = robot_nmat();
+    if (chr_npz > CHR_PZ || chr_nm > CHR_MAT) { dbglog(DBG_ERROR, "FINAL: %d piezas, %d materiales: no caben\n", chr_npz, chr_nm); return -5; }
+    for (k = 0; k < chr_npz; k++) { chr_m0[k] = (uint16_t)n; n += robot_pieza(k)->n; }
+    if (n > CHR_MT) { dbglog(DBG_ERROR, "FINAL: %d matrices: no caben\n", n); return -6; }
+    memset(fin_morf, 0xff, sizeof fin_morf);
+    {   uint32_t nm; const uint32_t *tm = robot_tabla("MORF", &nm);
+        for (i = 0; tm && i < chr.nmallas; i++) {
+            int nd = chr.mallas[i].nodo;
+            if (nd >= 0 && (uint32_t)nd < nm && tm[nd] < FIN_MORF) fin_morf[robot_malla(nd)->pieza][tm[nd]] = (uint16_t)i;
+        }
+    }
+    for (k = 0; k < 256; k++) chr_w8[k] = k * (1.0f / 255.0f);
+    chr_ok = 1; rc_chr.ok = 1; rc_chr.npz = chr_npz; rc_chr.nm = chr_nm; chr_par = -2;
+    dbglog(DBG_INFO, "FINAL: %s, %u mallas, %u texturas, %d piezas, %d matrices, VRAM libre %uK\n", nom, (unsigned)chr.nmallas,
+           (unsigned)chr.ntex, chr_npz, n, (unsigned)(pvr_mem_available() >> 10));
+    return 0;
+}
 static void final24_suelta(void)
 {
+    if (fin_chr) {                                              /* la pareja del final fuera (la de la carrera se lee otra vez) */
+        pvr_wait_ready(); tex_suelta(&chr); free(chr.vis); free(chr.tr); free(chr.fe_p);
+        memset(&chr, 0, sizeof chr); rc_chr.ok = 0; chr_par = -1; if (chr_ok) chr_ok = -1; fin_chr = 0;
+    }
     final_sale();
     if (fin_mod.datos || fin_prop.datos) pvr_wait_ready();
     libera_modelo(&fin_mod); libera_modelo(&fin_prop);
@@ -8896,6 +8984,9 @@ static int final24_entra(int como)
     if (band.datos >= a && band.datos < fa) a = (uint8_t *)(((uintptr_t)(band.datos + TAM_SECT(band.tam)) + 31) & ~(uintptr_t)31);
     if (final_entra(c, hueco_etapa + o, cap_etapa - o, a < fa ? a : NULL, a < fa ? (uint32_t)(fa - a) & ~31u : 0)) {
         final24_suelta(); return -4;
+    }
+    {   uint32_t o2 = o + final_usado();                         /* la pareja, detras de FINAL.DAT */
+        if (final_grupo() >= 0 && o2 < cap_etapa) final24_chr(final_grupo(), hueco_etapa + o2, cap_etapa - o2);
     }
     fin24 = fin_rue = 1;
     dbglog(DBG_INFO, "FINAL: modo 24, %s (%u mallas, %u texturas), objetos %u mallas, hueco de la etapa %uK de %uK, VRAM libre %uK\n",
@@ -9854,6 +9945,7 @@ int main(int argc, char **argv)
         if (cex_n) coche_entorno(mod_coche);
         if (cex_n) coche_luz(mod_coche, estado != TITULO);     /* la luz del entorno 2 en la pintura */
         rc_chr.listo = rc_band.listo = 0; chr_vtx_ult = chr_vtx; chr_us_ult = chr_us; chr_vtx = chr_us = 0;
+        if (fin24 && chr_ok == 1) robot_matrices(&rc_chr, &mod_coche, 0);   /* la pareja del final */
         if (chr_ok == 1 && estado != TITULO && !mundo_fuera) {
             uint64_t t0r = timer_us_gettime64(); robot_matrices(&rc_chr, &mod_coche, !cam_ok || cam_coche_visible(&cam));
             if (rc_band.ok) robot_matrices(&rc_band, &mod_coche, 0);
@@ -9901,6 +9993,7 @@ int main(int argc, char **argv)
                 coche_dibuja(l, &mod_coche);
 #endif
             PRF(5);
+            if (fin24) robot_dibuja(&rc_chr, l);              /* 514E60 de la pareja del final */
             if (estado != TITULO && !mundo_fuera) { uint64_t t0r = timer_us_gettime64(); robot_dibuja(&rc_chr, l); robot_dibuja(&rc_band, l); chr_us += (uint32_t)(timer_us_gettime64() - t0r); }   /* 4879B0 */
             PRF(6);
 #ifdef DIAG_TRAF
