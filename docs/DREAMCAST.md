@@ -833,6 +833,13 @@ MODO: 2 INFARTO, 3 CONTRARRELOJ).
 | trafico (9 modelos sin texeles), ruta, coche, CHR, BO, audio | ~2100 | igual (+14 de los pilotos del freno del trafico) |
 | colisiones (solo en la carrera) | 186 + 208 | 186 + 220 (con las etapas nuevas) |
 
+Minimo del hueco de la union (demo 40): fuera de la carrera lleva tambien las tablas del frontal de recreativa de
+OUTRUN2SP (`hueco_fsp`: FSP_HUECO_TAM 960 KB al final y FSP_RESTO 600 KB para su coche 3D y los prestamos). Con las
+uniones por registros (una sola etapa de geometria, demo 39) el mayor BKnn bajo de 1730 a 1506 KB y `fsp_entra`
+fallaba ("FSP: sin el hueco para SPFE.DAT"): en el menu no se podia elegir OUTRUN2SP. `curso_huecos` no lo deja por
+debajo de 1560 KB (54 KB mas que el mayor BKnn; 170 KB menos que en la demo 38). Flycast: RAM al arrancar libre 1129
+KB (1183 en la demo 39), resultados.sh entra en el frontal, corre, acaba el tiempo y vuelve al frontal.
+
 **Datos repetidos encontrados y lo que se hizo.**
 
 1. HUD.DAT estaba dos veces: sus 41 texturas (1135 KB) en la RAM todo el tiempo y ademas en la VRAM durante la

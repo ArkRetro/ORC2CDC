@@ -7,6 +7,7 @@
 enum { FSP_SIGUE, FSP_CARRERA, FSP_MENU };
 /* RAM para las tablas de SPFE.DAT (la pone demo/main.c: el final del hueco de la union; tam 0 la devuelve) o NULL */
 extern void *(*fsp_hueco)(uint32_t tam);
+#define FSP_HUECO_TAM (960 * 1024)          /* lo que pide fsp_entra: tablas de SPFE.DAT (la animacion del banco 0x2E: 744 KB) */
 int fsp_entra(void);                        /* abre SPFE.DAT y empieza (48B210 / 48AE90); 0 bien */
 int fsp_paso(unsigned nuevos);              /* un paso de logica (60 Hz) */
 void fsp_dibuja(int fondo_tras_coche);      /* lista TR; 1: las capas 0..7 detras del coche 3D (448FD0(0x100)) */

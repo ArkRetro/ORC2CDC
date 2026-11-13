@@ -1438,7 +1438,7 @@ static void pon_funcion(int f) { if (fn_actual) fn_fin(fn_actual); fn_actual = f
 
 void *(*fsp_hueco)(uint32_t tam);
 static int res[8];                          /* lo elegido al salir (fsp_modelo.. despues de fsp_sale) */
-#define HUECO_FSP (960 * 1024)              /* tablas de SPFE.DAT (la animacion del banco 0x2E: 744 KB) */
+#define HUECO_FSP FSP_HUECO_TAM
 int fsp_entra(void)
 {
     uint32_t tam; void *ram;

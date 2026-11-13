@@ -4777,10 +4777,11 @@ static void presta_union(int si)
 }
 /* el frontal de recreativa de OUTRUN2SP (comun/fsp.c): sus tablas (la animacion del banco 0x2E) en el final del hueco
    de la union mientras dura (el monton del menu no tiene ~800 KB seguidos); lo demas sigue prestado como antes */
+#define FSP_RESTO (600u << 10)          /* lo que queda del hueco al frontal: su coche 3D (hasta 424 KB) y los prestamos */
 static void *hueco_fsp(uint32_t tam)
 {
     if (!tam) { union_fsp = 0; if (union_prestable()) presta_union(1); return NULL; }
-    if (!hueco_union || !union_prestable() || tam + 600 * 1024 > cap_union) return NULL;
+    if (!hueco_union || !union_prestable() || tam + FSP_RESTO > cap_union) return NULL;
     union_fsp = (tam + 31) & ~31u;
     presta_union(1);
     return hueco_union + cap_union - union_fsp;
@@ -4938,6 +4939,10 @@ static int curso_huecos(void)
       }
     }
     if (b) { free(b); if (curso_lee_id(0)) return 1; }          /* de vuelta el del modo OutRun */
+    /* el hueco de la union tambien lleva fuera de la carrera las tablas del frontal de OUTRUN2SP (hueco_fsp): nunca
+       menor que eso. Con las uniones por registros (una sola etapa de geometria, demo 39) el mayor BKnn bajo de 1730 a
+       1506 KB y el frontal ya no cabia (960 + 600 KB): no se podia elegir OUTRUN2SP en el menu */
+    if (cap_union < FSP_HUECO_TAM + FSP_RESTO) cap_union = FSP_HUECO_TAM + FSP_RESTO;
     hueco_etapa = memalign(32, cap_etapa); hueco_union = cap_union ? memalign(32, cap_union) : NULL;
     dbglog(DBG_INFO, "CURSO: %d etapas, huecos etapa %uK union %uK; colisiones en carrera %uK + %uK\n", ncurso, (unsigned)(cap_etapa >> 10), (unsigned)(cap_union >> 10), (unsigned)(cap_col >> 10), (unsigned)(cap_col_e >> 10));
     if (n_grandes) dbglog(DBG_ERROR, "CURSO: %d etapas o uniones de los arboles no caben en los huecos (topes %uK / %uK)\n", n_grandes,
