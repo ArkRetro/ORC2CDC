@@ -24,7 +24,8 @@ instruccion):
 BO.DAT: 'BOT1' u32 n, por conjunto 64 bytes: u16 posicion, u8 objetos, u8 recurso - 0x136, f32 velocidad lateral,
   4 x {u8 registro del modelo, u8 trayectoria, u8 banderas, u8 0, f32 retraso}, u32 desplazamiento de su trayectoria
   en el fichero (0 sin ella), relleno; 'VAR1' 7 u32 la fila de la variante 1; 'MOR1' u32 grupos y los grupos tal cual
-  (u32 indice, k, m, m f32). Trayectoria: u32 n entradas, por entrada f32 duracion y 6 canales (u32 n claves, n x 4 f32).
+  (u32 indice, k, m, m f32); al final del fichero 'VAR6' 7 u32 la fila de la variante 6 (misiones de C2C, 0x174cd0).
+  Trayectoria: u32 n entradas, por entrada f32 duracion y 6 canales (u32 n claves, n x 4 f32).
 BOnn.DAT: ORD7 sin ruta: mallas del cuadro 0 de cada malla del original g en el marco de su malla, campo del nodo
   de la malla = g (los cuadros 1..3 en la cola BOF1, compacta_cuadros); nodos = los nodos de los registros que usa el conjunto (esfera, banderas del original << 16 |
   registro, cartel = su matriz en carteles (vectores fila, con las de los padres), relleno = g | indice de animacion
@@ -180,14 +181,18 @@ def compacta_cuadros(sal):
     for i, m in enumerate(M): grupos.setdefault(m[7] & 0xff, {}).setdefault((m[7] >> 8) & 3, []).append(i)
     if all(len(fs) == 1 for fs in grupos.values()): return
     mx = max(float(np.abs(np.stack([V['x'], V['y'], V['z']])).max()), 1e-6); esc = mx / 32767.0
-    cola = b'BOF1' + struct.pack('<If', len(grupos), esc)
-    for g in sorted(grupos):
+    # los grupos cuyos cuadros no casan malla a malla con el 0 (obj_bo_figh, el caza de las misiones: las tiras de
+    # cada paquete salen distintas) se quedan con el cuadro 0, sin animacion de vertices (DESVIACION, docs/PARIDAD.md)
+    casan = [g for g in sorted(grupos) if sorted(grupos[g]) == list(range(len(grupos[g]))) and
+             all([(M[i][5], M[i][6]) for i in grupos[g][f]] == [(M[i][5], M[i][6]) for i in grupos[g][0]]
+                 for f in range(1, len(grupos[g])))]
+    for g in sorted(set(grupos) - set(casan)): print('  grupo %d: %d cuadros que no casan, solo el 0' % (g, len(grupos[g])))
+    cola = b'BOF1' + struct.pack('<If', len(casan), esc)
+    for g in casan:
         fs = grupos[g]; nf = len(fs); m0 = fs[0]
-        assert sorted(fs) == list(range(nf))
         n0 = sum(M[i][5] for i in m0)
         cola += struct.pack('<3I', g, nf, n0)
         for f in range(1, nf):
-            assert [(M[i][5], M[i][6]) for i in fs[f]] == [(M[i][5], M[i][6]) for i in m0], 'cuadro %d de %d no casa' % (f, g)
             v = np.concatenate([V[M[i][4]:M[i][4] + M[i][5]] for i in fs[f]])
             q = np.zeros((n0, 4), '<i2')
             for k, c in enumerate('xyz'): q[:, k] = np.clip(np.round(v[c] / esc), -32767, 32767)
@@ -216,8 +221,9 @@ def main():
     regs, var, clases = conjuntos(A)
     R = conv_coche.recursos(A)
     fila1 = [u32(E, var + 0x1c * 1 + 4 * i) for i in range(7)]   # variante 1 (OutRun)
-    print('variante 1:', fila1)
-    cab = b''; tray = b''; cab_tam = 64; usados = set(fila1)
+    fila6 = [u32(E, var + 0x1c * 6 + 4 * i) for i in range(7)]   # variante 6 (misiones de COAST 2 COAST)
+    print('variante 1:', fila1, 'variante 6:', fila6)
+    cab = b''; tray = b''; cab_tam = 64; usados = set(fila1) | set(fila6)
     for c in range(14):
         a = regs + 0x24 * c
         res, colo, ruta, n = u32(E, a), u32(E, a + 4), u32(E, a + 8), u32(E, a + 0xc)
@@ -259,6 +265,7 @@ def main():
         p = 8 + c * cab_tam + 8 + 4 * 8                  # tras u16 pos, u8 n, u8 recurso, f32 y los 4 objetos
         o, = struct.unpack_from('<I', out, p)
         if o != 0xffffffff: struct.pack_into('<I', out, p, o + base)
+    out += b'VAR6' + struct.pack('<7I', *fila6)       # (al final: la demo de antes no lo lee)
     with open(os.path.join(dsal, 'BO.DAT'), 'wb') as f: f.write(out)
     print('BO.DAT: %d bytes (trayectorias %d)' % (len(out), len(tray)))
 

@@ -30,7 +30,7 @@ UNIONES = ['UNIONES.PAK', 'CURSO.DAT', 'COLLR.DAT', 'COLBK.DAT', 'BKD.DAT', 'SOL
 # contra la carpeta de datos completa): TRAF0..8 (conv_trafico.MODELOS, 9 modelos), BOnn de los conjuntos de objetos
 # usados (conv_bo.py), COLBKkk de las uniones del modo OutRun con colision propia (conv_coli.py via conv_union.py)
 TRAF = ['TRAF%d.DAT' % n for n in range(9)]
-BO = ['BO%02d.DAT' % c for c in (1, 2, 6, 7, 11, 12, 13)]
+BO = ['BO%02d.DAT' % c for c in range(14)]   # (filas 1 y 6 de 0x35a738: OutRun y misiones de C2C, conv_bo.py)
 COLBK = ['COLBK%02d.DAT' % k for k in (10, 11, 12, 13, 14, 25, 26, 27, 28, 29)]
 FIN = ['FIN.DAT', 'GOVER.DAT', 'FINC2C.DAT']                    # (conv_fin.py; FINC2C: el modo 35 de una mision de C2C)
 # segundos aproximados de cada paso en un nucleo (para el porcentaje y el tiempo que queda; medidos en Linux)
@@ -123,6 +123,7 @@ def paso(C, n, log):
     elif n == 'vmu': ej(T('conv_vmu.py'), ISO, t, prev('vmu')); mueve(D, tj('VMU.DAT'))
     elif n == 'modov': ej(T('conv_modo_video.py'), ISO, t, prev('modov')); mueve(D, tj('MODOV.DAT'))
     elif n == 'efectos': ej(T('conv_efectos.py'), ISO, tj('EFECTOS.DAT')); mueve(D, tj('EFECTOS.DAT'))
+    elif n == 'faros': ej(T('conv_faros.py'), ISO, tj('FAROS.DAT')); mueve(D, tj('FAROS.DAT'))   # luz de los faros (0x106a98)
     elif n == 'chr': ej(T('conv_chr.py'), ISO, t, '--pares'); mueve(D, tj('CHR*.DAT'))   # CHRPAR y una CHRppaa por pareja
     elif n == 'band':
         ej(T('conv_chr.py'), ISO, tj('BAND.DAT'), '--banderero'); mueve(D, tj('BAND.DAT'))
@@ -221,7 +222,7 @@ def regenera(iso, D, W, jobs=4, informe=print):
         ti, n = l.split(':')
         if not hay(D, 'SEG%02d.DAT' % int(n), 'COL%02d.DAT' % int(n)): falta.append('seg' + ti)
     chrs = C.saca(py(os.path.join(TOOLS, 'conv_chr.py'), iso, '--lista')).split()   # CHRPAR y las parejas
-    for fs, n in ((['EFECTOS.DAT'], 'efectos'), (chrs, 'chr'), (['BAND.DAT', 'BAND1.DAT'], 'band'), (['PARAM.DAT'], 'param'),
+    for fs, n in ((['EFECTOS.DAT'], 'efectos'), (['FAROS.DAT'], 'faros'), (chrs, 'chr'), (['BAND.DAT', 'BAND1.DAT'], 'band'), (['PARAM.DAT'], 'param'),
                   (['META.DAT'], 'meta'), (FIN, 'fin'),
                   (SP, 'sp'), (FINAL, 'final'),
                   (['SALIDA.DAT'], 'salida'), (['INFARTO.DAT', 'HAHUD.DAT', 'VOCESH.DAT'], 'infarto'), (['BO.DAT'] + BO, 'bo'),
@@ -299,6 +300,8 @@ def regenera(iso, D, W, jobs=4, informe=print):
         post('revq_seg', py(os.path.join(TOOLS, 'regenera.py'), '--interno', 'revq', os.path.join(seg, 'SEG[0-9]*.DAT')))
         post('segpak', py(os.path.join(TOOLS, 'pak_union.py'), seg, segpak, '--pak=SEGS.PAK', '--prefijo=SEG', '--tope=7842'))
         for f in os.listdir(segpak): os.replace(os.path.join(segpak, f), os.path.join(D, f))
+    if not hay(D, 'VISO.DAT'):                           # nodos del original en la seccion 0 y la ultima de cada etapa
+        post('viso', py(os.path.join(TOOLS, 'conv_viso.py'), iso, D))   # (conv_viso.py: lee SEGnn.DAT y SEGS.PAK)
     if not hay(D, 'COCHES.DAT'):
         for f in glob.glob(os.path.join(W, 'coche', 'COCHE[0-9]*.DAT')): os.replace(f, os.path.join(D, os.path.basename(f)))
         post('coches', py(os.path.join(TOOLS, 'conv_coche.py'), iso, '--todos', D, '--fichas', '99'), 0)   # solo COCHES.DAT
@@ -311,9 +314,9 @@ def regenera(iso, D, W, jobs=4, informe=print):
     informe('== comprobacion de %s' % D)
     ok = True
     nec = ['BAND.DAT', 'BAND1.DAT', 'BKD.DAT', 'BO.DAT'] + chrs + \
-          'COCHES.DAT COLBK.DAT COLLR.DAT CURSO.DAT EFECTOS.DAT FIN.DAT GOVER.DAT HAHUD.DAT HUD.DAT INFARTO.DAT MENU.DAT META.DAT MODOV.DAT MVATTR.VQV MVTS.VQV PARAM.DAT SFX.DAT SEGS.PAK SOL.DAT TAPD.DAT TRAFC.DAT UNIONES.PAK VMU.DAT VOCES.DAT VOCESH.DAT VOCESC.DAT MISION.DAT C2CHUD.DAT C2C.DAT'.split() + ['RC%02d.DAT' % k for k in range(30)] + \
+          'COCHES.DAT COLBK.DAT COLLR.DAT CURSO.DAT EFECTOS.DAT FAROS.DAT FIN.DAT GOVER.DAT HAHUD.DAT HUD.DAT INFARTO.DAT MENU.DAT META.DAT MODOV.DAT MVATTR.VQV MVTS.VQV PARAM.DAT SFX.DAT SEGS.PAK SOL.DAT TAPD.DAT TRAFC.DAT UNIONES.PAK VMU.DAT VOCES.DAT VOCESH.DAT VOCESC.DAT MISION.DAT C2CHUD.DAT C2C.DAT'.split() + ['RC%02d.DAT' % k for k in range(30)] + \
           ['COCHE%02d.DAT' % k for k in range(15)] + ['MUS%d.ADP' % k for k in MUSICA] + SP + FINAL + \
-          ['TRAFK%d.DAT' % k for k in range(3)] + FIN + TRAF + BO + COLBK + ['SALIDA.DAT', 'CHRPAR.DAT']
+          ['TRAFK%d.DAT' % k for k in range(3)] + FIN + TRAF + BO + COLBK + ['SALIDA.DAT', 'CHRPAR.DAT', 'VISO.DAT']
     for f in nec:
         if not hay(D, f): informe('FALTA %s' % f); ok = False
     ls = sorted(os.listdir(D))

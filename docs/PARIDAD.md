@@ -54,7 +54,7 @@ Estado: OK (conectado y verificado al nivel indicado), PARCIAL, PROVISIONAL (apr
 | Puntuacion modo OutRun | 4F2DF0, 4F2660, 4F2B20, 4B9770 | PARCIAL | main.c pt_* | posicion de carretera = m_pos de CURSO.DAT (CONFIRMADO; antes 2,5 m supuestos, 3,2 veces los puntos por avance); bonus de etapa en el checkpoint | el salto de +64 al cambiar de curso (PENDIENTE) | E |
 | Eventos, scripts, progresion, misiones | SCRIPTS.PS2 (Races, RaceAttack, OutrunMiles, Req_*) | FALTA | — | — | — | — |
 | Modos de un jugador (INFARTO, CONTRARRELOJ) | 464350 / 464D20 (PS2 0x1ae440 / 0x1a7f28), 44DC70, 479080 | PARCIAL | ver Modos de un jugador | tipos de peticion con objetos, fantasma | — | E |
-| Coches del jugador | CARS.PS2 1-32 / 33-63, disposicion 0x3d3ff0; materiales tabla 4/5 del bloque; colores 0x35ad48 (PC 64D120/408C80); mapa de entorno del bloque | PARCIAL | 15 coches montados como 46A560 (port comprobado), con interior, 9320-11195 vertices dibujados; pintura, 8 colores (Y en la seleccion), reflejo y luces (+7C/+80/+84/+60, CEX2) del original; piezas animadas (ruedas, volante, aleron, faros, disco caliente, car+F0 y el cuerpo de la fisica; ANI1) | UV de entorno con la formula esferica clasica (la del microcodigo VU1 sin leer); sin bits de noche/tunel | ver secciones Coches | E |
+| Coches del jugador | CARS.PS2 1-32 / 33-63, disposicion 0x3d3ff0; materiales tabla 4/5 del bloque; colores 0x35ad48 (PC 64D120/408C80); mapa de entorno del bloque | PARCIAL | 15 coches montados como 46A560 (port comprobado), con interior, 9320-11195 vertices dibujados; pintura, 8 colores (Y en la seleccion), reflejo y luces (+7C/+80/+84/+60, CEX2) del original con los bits de noche / tunel de 4A25F0 y la luz de los faros en el suelo (0x188680); piezas animadas (ruedas, volante, aleron, faros, disco caliente, car+F0 y el cuerpo de la fisica; ANI1) | UV de entorno con la formula esferica clasica (la del microcodigo VU1 sin leer); focos de los faros sobre la escena (0x20e1b8 / 40C550) sin portar | ver secciones Coches | E |
 | Escenarios, texturas, materiales | STAGE.PS2, VQ, scn_env_fog_<zona> | PARCIAL | 15 tramos + 15 uniones; mallas con su material (tabla 5) y la luz del entorno 1 de la zona; niebla, cielo y sol del original (ver Entorno); tiras (ADC), nodos, LOD y planos del original | objetos de tramo: el registro de obj_course_obj_cs_<zona> que dibuja la etapa (pancarta CHECK POINT y carteles, ver Checkpoint: la pancarta); objetos animados de las uniones (ver Objetos animados de las uniones); cs_ENV_* no es de la escena (es del reflejo del coche); destello con oclusion aproximada por rayos (ver Entorno); luces locales (maya_spl) sin portar | — | E |
 | HUD, menus, transiciones | SPRANI/XST, TEXT.PS2 (espanol: SPANISH.bin y XST _sxst) | PARCIAL | HUD.DAT, MENU.DAT; todas las pantallas del menu principal y de un jugador, licencia con VMU (icono, eyecatch y LCD: VMU.DAT, ver VMU), seleccion de coche del original, menu de pausa con AUDIO (ver Menus y Pausa y mezcla) | titulo es un cuadro del video (la pelicula de titulo en bucle detras del rotulo, sin hacer); textos bfont antiguos en la demo automatica y el aviso de rama; rotulos de las filas de opciones (sprites sin localizar) | quitar textos bfont | E |
 | Musica y efectos | MUSIC.PS2, SOUND.PS2 ICS/MENU/FE; volumenes 0x11ae38 / 0x100210 / 0x11b600, SOUNDCD.IRX 0x2118 | PARCIAL | musica.c, sfx.c; los 28 temas, sus 28 avances y la del menu (ver Seleccion de musica); mezcla del original (ver Pausa y mezcla) | 48 kHz supuesto; sin sonido por superficie; del choque fuerte solo el SE 0x42 (ver Choque fuerte contra el muro) | — | E |
@@ -1483,9 +1483,56 @@ Diferencias encontradas y su causa:
   mientras lo empujan por detras, no al frenar por su cuenta. TRAFn.DAT lleva los +14 (grupo en los bits 24..25 del
   campo del nodo, conv_trafico.py) y traf_dibuja elige; el 0x20000 del trafico (su choque con el muro, 504E70) no
   esta portado. CONFIRMADO (captura frenando: tools/prueba/frena.sh).
-- PENDIENTE: luces de noche del trafico (+8 / +10); los bits de noche y tunel (SCN_EFC) para +80 y +60 (y
-  para abrir los faros escamoteables: coche_ban en demo/main.c se queda a 0); direccion de las ruedas del trafico
-  (car+32 del trafico sin localizar) y su car+F0 (4A2910 con car+D34).
+- Luces de noche (car+4 de 4A25F0, +80 / +60 del jugador, +8 / +10 del trafico): HECHO en la revision 42, ver Luces de
+  noche y faros. PENDIENTE: direccion de las ruedas del trafico (car+32 del trafico sin localizar) y su car+F0 (4A2910
+  con car+D34).
+
+## Luces de noche y faros (revision 42)
+
+Queja del usuario (Dreamcast real): "en las etapas de noche los coches no emiten luz por sus faros". La demo dejaba
+car+4 a 0 (coche_ban): ni pilotos de noche, ni faros escamoteables, ni luz de los faros, ni luces del trafico. Ahora:
+
+- Bits (CONFIRMADO, PC; PS2 igual en el dibujo): CheckNightAndTunnel 4A25F0 (cada cuadro, jugador y trafico: race_traffic
+  4A25F0) pone en car+4 0x100 con el bit 3 del trabajo de SCN_EFC (4AFB60), 0x200 con el bit 4 (4AFB90) y 0x400 con la
+  bandera 8 del +0x3C del descriptor de la etapa elegida. weather_44bd50 copia los bits 8 / 0x10 de ese +0x3C al trabajo
+  de SCN_EFC (al empezar, 44CB00, y en el estado 0xD del cambio de entorno). CURSO.DAT ya los llevaba (`clima`): 0x18 en
+  GHOS y METR, en ninguna otra. demo/main.c `noche_ban` (con la etapa del entorno como el sol: la nueva desde el
+  fundido) -> `coche_ban` cada cuadro en coche_anima_paso ("LUCES: car+4 700" por la consola serie). El "tunel" 0x200 es
+  de la etapa entera (no cambia al entrar en un tunel: el original no mira la posicion).
+- Coche del jugador (SLES-53998 0x1886e0, = 46A560 / 469600): 0x188d58 sube los faros escamoteables con car+4 & 0x500
+  (0xa000 << 27 del doble de car+0), 0x188ea8 dibuja +60 con & 0x900 (0x9000 << 28) y 0x188ef0 +80 en vez de +7C con &
+  0x300 (0xc000 << 26): lo que ya hacia coche_luces / coche_anima_paso, ahora con los bits.
+- Luz de los faros en el suelo (CONFIRMADO, PS2): 0x17c6b0 (= 49F400; banderas del suceso & 3) -> 0x188680 (= 4695C0):
+  si car+2C8 <= 0 (fuera del choque; fis.t_choque) y car+4 & 0x900 == 0x900, en car+B0 llama a 0x106960 (= 416AA0):
+  textura 0x30009 (banco 3 = spr_etc_xst, textura 9: el haz, 256x256), estados del GS por 0x169ce0: ABE, mezcla
+  (fuente 2, destino 1) de la tabla 0x3590f0 = ALPHA 0x48 (Cs As + Cd), ZTST ALWAYS, ATE 0, niebla; y el paquete fijo
+  [0x328a80] que hace 0x106a98 (= 4171F0 / 417550) al arrancar (0x106920): V2 = (-tan 0,56, 0, 0), V1 = (0, -tan 0,2618,
+  0), V3 = (0, 0, 1) girados en x por -0,24; para i = 0..7, a = i / 8 y (i + 1) / 8, P = a V1 + V2 + V3 proyectado al
+  suelo del coche (0x106eb0: P x 0,8 / P.y - (0, 0,8, 2,0)); 0x106f28: tiras de 8 vertices (x por 1, 2/3, 1/3, 0; ST =
+  ((2 - k/3) / 2, 1 - a); color (0x50, 0x50, 0x48, 0x80)) y su espejo en x: 16 tiras, de 1,3 m a 80 m por delante
+  (la ultima cruza el horizonte y acaba 39 m detras: se recorta en el plano cercano como todo; su textura ahi es casi
+  negra). Constantes del PS2 0x328a68..0x328a7c (el PC usa otras: 0,365 / 0,2418 / 0,252 / 1,2 / 4,1 y v = a x 0,85).
+  `tools/conv_faros.py` -> FAROS.DAT (16 mallas y la textura en VQ: 18 KB de VRAM, siempre cargada); demo/main.c
+  `faros_carga` / `faros_dibuja` en la lista transparente con SRCALPHA / ONE, textura x color (0xFF9F9F8F) y la niebla
+  de la tabla. DIFERENCIA: prueba de z GEQUAL con la profundidad un 1 % mas cerca (matriz x 0,99: la misma imagen) en vez
+  de ALWAYS: en el PS2 el coche, dibujado despues, la tapa; en la lista transparente de la PowerVR ALWAYS la pondria
+  encima del coche. Donde la carretera suba por delante del plano del coche mas de ese 1 %, la tapa (en el PS2 no).
+- Trafico, rivales y camiones (CONFIRMADO, PC 4AD4D0 / second() de race_ghost_car.cpp): +8 (luz de noche) con car+4 &
+  0x100; +14 (freno) con car+38 > 0, si no +10 con car+4 & 0x300, si no +C; remolque: +18 con el freno, si no +14 con &
+  0x300. `tools/conv_trafico.py` anade +8 (grupo 4), +10 (grupo 2) y +14 del remolque (grupo 2) en los bits 24..26 del
+  campo del nodo; las de mezcla aditiva en su estado del GS (tabla 4 -> 7: ABE y ALPHA 0x48; la +8 de los 9 coches de
+  trafico y la +10, la +14 de los camiones; en los rivales casi ninguna) con una copia de su textura con 0x400 | 0x800
+  (SRCALPHA / ONE, z GEQUAL; compila_cab). demo/main.c `traf_luces` (mascara de grupos) en lugar de traf_apagado. TRAFn,
+  TRAFKn y RCmm crecen 1-3 KB (+1 textura de 1 KB en VRAM por modelo con luz aditiva). Los pilotos de dia (+C / +14) se
+  quedan como estaban.
+- SIN PORTAR (bloqueado): los focos de los faros sobre la escena y los coches. El PS2 tiene lo mismo que el PC: 0x20e100
+  (= 4AF5B0: textura 0x30009, parametros de 0x410528, los del PC 5C4EA0) y 0x20e1b8 (= 4AF630: dos luces de foco en los
+  entornos 1 y 2 y la matriz de proyeccion de la textura del haz sobre la calzada, 40C550 en el PC; en el PS2 el
+  programa 0x317CF0 / clave 0x158200 del VU1, ver Suelos). Necesitan otra pasada de la calzada con la textura proyectada
+  (vertices dobles en el TA) y la luz por vertice de la escena cada cuadro (la escena va con la luz fija de tools/modelo.py).
+- Verificado en Flycast (METR, PRUEBA_AUTO PRUEBA_NODO=11): luz delante del coche, pilotos de noche del jugador y del
+  trafico; de dia (PALM) igual que antes (car+4 = 0: las mallas nuevas no se dibujan). Capturas: scratchpad
+  capturas_r42/faros_antes.png y faros_despues.png.
 
 ## Coches: piezas animadas (como 46AE70 / 469600)
 
@@ -1521,8 +1568,8 @@ y la demo le pone cada cuadro la matriz del original:
 - Aleron del modelo 5 (+18 en +1C y la luz 0x4001a): Rx(roof_angle): x = car+1C4 x 216,72 x 0,72917; hasta 300 baja
   hasta -17,5 grados, de 300 a 350 vuelve a 0. Palanca de los demas: fija (el original no la mueve). CONFIRMADO (PC).
 - Faros escamoteables (+64 en +68): Rx(car+2FC), +78 / +74 por cuadro con car+4 & 0x500 hasta +78 (entonces 0x800, que
-  enciende la luz +60). La demo no tiene los bits de noche (coche_ban = 0): se quedan cerrados como de dia. Probado
-  forzando la noche (GTO: se levantan 55 grados en 1 s).
+  enciende la luz +60). Con los bits de noche de 4A25F0 (noche_ban, revision 42) se levantan en GHOS y METR; de dia
+  cerrados (GTO: se levantan 55 grados en 1 s).
 - Disco caliente (+94 de la rueda): en vez del +90 con car+38 > 200 y car+1F4 != 0 (grupos G_DISCO / G_DISCO_CAL de
   CEX2; coche_luces). CONFIRMADO (PC). En COCHE06 anade su textura: +6 KB de VRAM.
 - Rueda "borrosa" a alta velocidad: el original no la tiene (46AE70 / 469600 no cambian de pieza ni de textura con la
@@ -1845,8 +1892,8 @@ main.c "entorno del original", cielo_dibuja, sol_dibuja, coche_luz).
   salvo ALPI, 0,0003 frente a 0,0009, y CAPE/RUIN; DIFERENCIA); el cielo lleva la tabla solo si su lista 0 tiene
   niebla (CLOU).
 - Clima (CONFIRMADO): bandera 1 (lluvia de SCN_EFC, la unica del original) en ninguna de las 15 etapas; no hay nieve ni
-  hojas como particulas (SNOW: bandera 6 como PALM). 8 / 0x10 (faros y luces del coche: noche) en GHOS y METR (no
-  portado aqui: coche_luces). Tuneles: nada del entorno los oscurece (la luz es fija en la etapa; solo la niebla cambia por posicion); las luces
+  hojas como particulas (SNOW: bandera 6 como PALM). 8 / 0x10 (faros y luces del coche: noche) en GHOS y METR
+  (portado en la revision 42: noche_ban, ver Luces de noche y faros). Tuneles: nada del entorno los oscurece (la luz es fija en la etapa; solo la niebla cambia por posicion); las luces
   locales de maya_spl_<zona> (44A1D0, puntos a menos de 500 m de la camara) no se portan (PENDIENTE).
 - cs_ENV_<zona> / cs_ENVBK: solo en el cubo del reflejo (414340 -> 44CD30); la demo usa el mapa esferico fijo del coche:
   no se dibujan (cubo por cuadro: TA y VRAM que no hay).
@@ -2272,6 +2319,56 @@ peticion 14 (escoltas 45B5B0, +324 = 6: carrera contra ellos), que no esta en la
 - SIN PORTAR: los tipos 1, 2, 3 y 6 (los de su juego) (puntos 4BD230 / 4BD340, marcas
   495E90, notas por umbrales) no estan en la lista. Tambien 472E60 / 474080 / los vaivenes, la espera de 474D30, 43EB60
   al abrir, el bit 0 de +0xF, el boton 0x10 del PS2 (la X de la Dreamcast, PROBABLE), los campeonatos y la variante 9.
+
+**COAST 2 COAST: glitches en las misiones (revision 42; queja de la revision 41: "edificios que se quedan en medio de la
+carretera, poligonos que se cruzan")**:
+- Barrido en Flycast (`-DPRUEBA_AUTO -DPRUEBA_MISION=i -DPRUEBA_SIN_TIEMPO -DDIAG_MS`, capturas cada 1-4 s con la s de la
+  ruta): misiones 0 (1-1, BEAC -> LRBK -> PALM_T -> SUMOEND), 6 (LAKE_R -> SANF_R), 64 (PALM -> LAKE -> ALPI, las
+  etapas del modo OutRun con uniones LRBK) y el arbol 1 de OUTRUN2SP (BEAC -> BK15) en el mismo sitio.
+- Causa 1 (la de la queja): con la camara en la union la demo dibujaba la etapa siguiente ENTERA (pvs_paso no usa la
+  PVS con el ojo a mas de PVS_FIN de una punta de la ruta). Las etapas que en el modo OutRun nunca van detras de una
+  union (PALM_T, BEAC_T, las de salida) traen lo que hay detras de su parrilla: en la 1-1, PALM_T sacaba sobre la
+  union de BEAC su monte y su mar (nodos de 700-800 m de radio, cruzados con los muros y la hierba de la union) y un
+  edificio de 83 m pegado al borde derecho de la rama izquierda (x -1164..-1134, z -858..-812 de la union), que con la
+  curva se ve en medio de la carretera. El original no dibuja eso: race_area_geometry_44de10 (PS2 0x172780) dibuja
+  la etapa con la lista de nodos de una seccion; con el coche en la union (car+0x5C != 0) la seccion 0 de la etapa
+  nueva si ya esta cargada ([7D3064] = 1, estado 0xB de race_area_control_44e590) y si no la ultima de la que se deja
+  (43D470(0)). Las listas (cs_CS_<zona>_bin, u16 n y n pares (byte, mascara) por seccion) estan descifradas
+  (SLES-53998 0x1112f8): mascara de nodos por recurso y registro (256 bytes en 0x4ce7a8 + registro x 0x110); para la
+  seccion s se aplican las listas 0..s en orden y cada par ESCRIBE el byte i de la mascara (sb; al volver atras empieza
+  de cero); 0x1112f8 pasa la mascara a una lista de u16 (nodo = 8 i + bit, -1 al final, en 0x70001000) que dibuja
+  0x1114e0. (Antes se leian como conjuntos de nodos por seccion o diferencias por XOR y no cuadraban: son bytes que
+  cambian.) En PALM la mascara de cada seccion lleva el 77 % de los nodos de menos de 40 m de radio que hay en los
+  120 m de delante y casi nada de lo que queda 150 m detras.
+  Arreglo: `tools/conv_viso.py` -> VISO.DAT (27 KB, las 62 etapas): por etapa la mascara de la seccion 0 y la de la
+  ultima, por nodo del ORD7 (orden de modelo.Modelo.bloque, comprobado esfera a esfera; los objetos de la etapa, que
+  el original dibuja aparte, siempre). demo/main.c `viso_lee` (las de las etapas del arbol, al leerlo) y `pvs_paso`:
+  con el ojo antes del principio de la etapa (la siguiente, en la union) o pasado su final (la que se deja) solo esos
+  nodos (`mo->viso`, en nodos_visibles); dentro de la etapa sigue la PVS. Vale para todos los modos (en el OutRun las
+  etapas siguientes casi no tienen nada detras de la salida: no cambia lo que se veia).
+  PALM_T en la seccion 0: fuera el monte y el mar de detras (ORD7 141 / 142) y el edificio 1137; quedan los dos
+  edificios de 21 y 28 m a la derecha de la carretera (175, 1115), que el original tambien dibuja.
+  Verificado en Flycast (1-1 con `-DPRUEBA_FIN=1500 -DPRUEBA_RAMA=0`, capturas en las mismas s de la ruta: 4900..6700):
+  antes, en s 6300-6500, el monte de PALM cruzado con el muro izquierdo y un edificio oscuro sobre la carretera; despues
+  la union limpia y los dos edificios a la derecha. Cuadros por segundo en la union con PALM_T ya leida: 31-33 antes
+  (dibujaba toda la etapa), 44-45 despues; sin "Out of memory".
+- Causa 2 (mision, no de la queja pero se ve en cada union): los objetos animados de la union (BO) se elegian con la
+  fila de la variante 1 y la logica del modo OutRun: en las misiones salia el dragon (conjunto 11) pasando por delante
+  de la camara (el cielo marron de las capturas). 0x174a48 con la variante 6 va por la rama de las variantes >= 5
+  (0x174cd0) con la fila 6 de 0x35a738 = {9 barco, 0 globo, 5 avion de linea, 4 alas delta, 10 ovni, 8 avioneta, 3
+  caza}: choque fuerte -> [0]; muro o fuera del asfalto >= 10 % -> [1]; fuera del asfalto -> [2]; contra otro coche ->
+  [3]; roce (7D3084) >= 0x3C -> [4]; 7D30A4 < 0x12C -> [2]; roce -> [5]; si no [6]. 7D30A4 (PC 44EDE0, al final):
+  cuadros con +E68 > 0,18 y |+162| < 0x5DC (el rebufo del HUD). demo: `bo_elige`, `bo_ca4`; conv_bo.py convierte los
+  14 conjuntos (filas 1 y 6) y deja la fila 6 al final de BO.DAT ('VAR6', la demo de antes no la lee); BO00, 03, 04,
+  05, 08, 09, 10 nuevos. DESVIACION: el caza (BO03, grupos 15 y 16) sin animacion de vertices: sus cuadros no casan
+  malla a malla con el 0 (compacta_cuadros) y se queda el cuadro 0.
+- Visto y SIN CAMBIAR (no son de las misiones): al final de BEAC (las misiones de BEAC y OUTRUN2SP igual) un edificio
+  sin la parte de abajo en el cielo, sobre la carretera, a 200 m: nodos 451 / 453 del registro 3 (y 23..109 m), que
+  la mascara del original tambien lleva en esas secciones; lo de debajo lo quitan la PVS o el reparto del TA (sin
+  medir). Tomar la rama sin hijo (-1) de una LRBK vuelve a cargar la misma etapa como el original, pero la posicion
+  del curso de la demo (rc_pos_curso) vuelve a la base de esa etapa: el puesto pasa de 1o a 6o (PENDIENTE). SIN
+  PORTAR: los objetos 0x570018 / 0x570042 de obj_course_obj_common (x +-9, z -403, en la franja central de la LRBK) que
+  0x172ba0 dibuja en las misiones segun la rama (451350).
 
 **CONTRARRELOJ** verificado en E: `MODO: variante 7, dificultad 0, fila de tiempos 2`, sin un solo coche de trafico,
 union y ruta leidas como en el OutRun. GOAL (menu real con el piloto y `-DPRUEBA_SIN_TIEMPO`, 2026-11-09): PALM -> ALPI

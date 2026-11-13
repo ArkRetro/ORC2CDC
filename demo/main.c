@@ -100,6 +100,8 @@ typedef struct {
        anterior (XOR), en bytes; la mascara de la seccion aplicada y lo que queda visible de cada nodo (pvs_paso) */
     const uint8_t *pvs_l; uint32_t *pvs_m, *pvs_teo;              /* pvs_teo: por nodo, bytes teoricos y vertices */
     int32_t pvs_s; uint32_t pvs_i; int pvs_on;                    /* seccion aplicada, punto del ojo, en uso este cuadro */
+    const uint8_t *viso;                                          /* con la camara fuera de la etapa: los nodos que dibuja
+                                                                     el original (VISO.DAT, pvs_paso) o NULL */
     uint32_t *vis;                                                /* nodos visibles en el cuadro (bits; nodos_visibles) */
     uint32_t *vis_ant;                                            /* los que se dibujaron en el anterior (detras de vis) */
     /* fundido de entrada (fe_paso; NULL sin el): por nodo lo que le queda (255 recien aparecido .. 0 entero) y tres
@@ -291,23 +293,24 @@ static int sube_modelo(modelo_t *m)
     return 0;
 }
 
-/* trafico: grupo de pilotos que no se dibuja (bits 24..25 del campo del nodo, tools/conv_trafico.py: 1 los normales
-   +C, 3 los del freno +14). 4AD4D0: con car+38 > 0 los del freno en lugar de los normales */
-#define TRAF_GRUPO(nodo) (((nodo) >> 24) & 3)
+/* trafico: grupo de luces de cada malla (bits 24..26 del campo del nodo, tools/conv_trafico.py: 1 los pilotos +C, 2
+   los de noche +10 (remolque +14), 3 los del freno +14 (remolque +18), 4 la luz de noche +8; 0 lo demas). 4AD4D0 /
+   second(): traf_luces */
+#define TRAF_GRUPO(nodo) (((nodo) >> 24) & 7)
 /* vertices del modelo (lod < 0: todas las mallas; si no, las de ese LOD: el trafico lleva en el campo del nodo la
    mascara de los LOD que dibujan la malla, tools/conv_trafico.py) y bytes teoricos del TA (ta_teo; o: con color de
    desplazamiento) */
 static uint32_t modelo_vtx(const modelo_t *m, int lod)
 {
     uint32_t i, c = 0;
-    for (i = 0; i < m->nmallas; i++) if (m->mallas[i].n >= 3 && (lod < 0 || (((m->mallas[i].nodo >> lod) & 1) && TRAF_GRUPO(m->mallas[i].nodo) != 3))) c += m->mallas[i].n > 256 ? 256 : m->mallas[i].n;
+    for (i = 0; i < m->nmallas; i++) if (m->mallas[i].n >= 3 && (lod < 0 || (((m->mallas[i].nodo >> lod) & 1) && TRAF_GRUPO(m->mallas[i].nodo) != 3 && TRAF_GRUPO(m->mallas[i].nodo) != 2))) c += m->mallas[i].n > 256 ? 256 : m->mallas[i].n;
     return c;
 }
 static uint32_t modelo_teo(const modelo_t *m, int lod, int o)
 {
     uint32_t i, c = 0;
     for (i = 0; i < m->nmallas; i++)
-        if (m->mallas[i].n >= 3 && (lod < 0 || (((m->mallas[i].nodo >> lod) & 1) && TRAF_GRUPO(m->mallas[i].nodo) != 3))) c += ta_teo(m->mallas[i].n > 256 ? 256 : m->mallas[i].n, o);
+        if (m->mallas[i].n >= 3 && (lod < 0 || (((m->mallas[i].nodo >> lod) & 1) && TRAF_GRUPO(m->mallas[i].nodo) != 3 && TRAF_GRUPO(m->mallas[i].nodo) != 2))) c += ta_teo(m->mallas[i].n > 256 ? 256 : m->mallas[i].n, o);
     return c;
 }
 
@@ -1120,7 +1123,7 @@ static void carga_cartel(const float (*W)[4])
    mo->vis (nodos_visibles: visibilidad por secciones, LOD y recorte del original) no se dibujan, y las demas se
    recortan por su esfera contra la piramide de la vista */
 static int solo_lod = -1;                                       /* trafico: solo las mallas de este LOD (traf_lod) */
-static int traf_apagado = 3;
+static uint32_t traf_luces = 3;                                 /* grupos de luces que se dibujan (bit g: TRAF_GRUPO) */
 static modelo_t etapa, uni, sig;                                /* (mas abajo) */
 static float sol_rd[3]; static int sol_rayo_on, sol_rayo_res;   /* el rayo hacia el sol del cuadro (sol_prepara) */
 static int sol_rayo_malla(const modelo_t *mo, const malla_t *m, int cart);
@@ -1170,7 +1173,7 @@ static void dibuja_rango(const modelo_t *mo, int l, uint32_t k0, uint32_t k1, in
 #ifdef DIAG_MS
         dg_mallas++;
 #endif
-        if (solo_lod >= 0 && (!((m->nodo >> solo_lod) & 1) || TRAF_GRUPO(m->nodo) == traf_apagado)) continue;   /* de otro LOD del coche de trafico, o los pilotos que no tocan */
+        if (solo_lod >= 0 && (!((m->nodo >> solo_lod) & 1) || !((traf_luces >> TRAF_GRUPO(m->nodo)) & 1))) continue;   /* de otro LOD del coche de trafico, o los pilotos que no tocan */
         if (solo_lista && (m->tex < 0 || (int)mo->texs[m->tex].lista != l)) continue;
         cartel = 0;
         if (recorta) {
@@ -1400,7 +1403,7 @@ static void dibuja_indices(const modelo_t *mo, int l, const uint16_t *idx, uint3
     for (j = 0; j < n; j++) {
         const malla_t *m = mo->mallas + idx[j];
         if (m->n < 3) continue;
-        if (solo_lod >= 0 && (!((m->nodo >> solo_lod) & 1) || TRAF_GRUPO(m->nodo) == traf_apagado)) continue;
+        if (solo_lod >= 0 && (!((m->nodo >> solo_lod) & 1) || !((traf_luces >> TRAF_GRUPO(m->nodo)) & 1))) continue;
         if (m->tex != ult) {
             ult = m->tex;
             if (m->tex >= 0) pvr_prim(&mo->cabs[0][mo->remap ? mo->remap[m->tex] : m->tex], sizeof(pvr_poly_hdr_t));
@@ -4970,6 +4973,34 @@ static int curso_busca(const uint8_t *b, uint32_t sz, int id, uint32_t *o, uint3
     }
     return -3;
 }
+/* VISO.DAT (tools/conv_viso.py): por etapa del arbol, los nodos que dibuja el original con la camara fuera de ella
+   (race_area_geometry_44de10 con car+0x5C != 0: la seccion 0 de la etapa nueva, [7D3064] = 1, o la ultima de la que se
+   deja, 43D470(0); las listas cs_CS_<zona>_bin escriben bytes de una mascara de nodos, 0x1112f8 de SLES-53998): dos
+   mascaras de bits por nodo del ORD7, seccion 0 y ultima. Solo las de las etapas del arbol cargado */
+static uint8_t *viso_dat; static const uint8_t *viso_m[CURSO_MAX]; static uint32_t viso_nn[CURSO_MAX];
+static void viso_lee(void)
+{
+    uint32_t sz, n, i, k, tot = 0, s[3]; uint8_t *b, *p;
+    free(viso_dat); viso_dat = NULL; memset(viso_m, 0, sizeof viso_m); memset(viso_nn, 0, sizeof viso_nn);
+    if (!(b = gd_carga("VISO.DAT", &sz))) { dbglog(DBG_ERROR, "VISO: sin VISO.DAT (fuera de la etapa, todos sus nodos)\n"); return; }
+    if (sz < 8 || memcmp(b, "VSO1", 4)) { free(b); return; }
+    memcpy(&n, b + 4, 4);
+    for (k = 0; k < (uint32_t)ncurso; k++) for (i = 0; i < n && 8 + 12 * i + 12 <= sz; i++) {
+        memcpy(s, b + 8 + 12 * i, 12);
+        if (s[0] == curso[k].seg && s[2] + 2 * ((s[1] + 7) / 8) <= sz) { tot += 2 * ((s[1] + 7) / 8); break; }
+    }
+    if (tot && (viso_dat = malloc(tot))) {
+        p = viso_dat;
+        for (k = 0; k < (uint32_t)ncurso; k++) for (i = 0; i < n && 8 + 12 * i + 12 <= sz; i++) {
+            uint32_t j, l; memcpy(s, b + 8 + 12 * i, 12);
+            if (s[0] != curso[k].seg || s[2] + 2 * ((s[1] + 7) / 8) > sz) continue;
+            for (j = 0; j < k; j++) if (curso[j].seg == curso[k].seg && viso_m[j]) break;   /* (la misma etapa: la misma) */
+            if (j < k) { viso_m[k] = viso_m[j]; viso_nn[k] = viso_nn[j]; break; }
+            l = 2 * ((s[1] + 7) / 8); memcpy(p, b + s[2], l); viso_m[k] = p; viso_nn[k] = s[1]; p += l; break;
+        }
+    }
+    free(b);
+}
 /* el arbol id (CURSO.DAT) en curso[]; 0 bien */
 static int curso_lee_id(int id)
 {
@@ -4980,6 +5011,7 @@ static int curso_lee_id(int id)
     {   uint8_t seg[CURSO_MAX]; int k;                          /* las tablas de aparicion del trafico de sus etapas */
         for (k = 0; k < ncurso && k < CURSO_MAX; k++) seg[k] = curso[k].seg;
         traf_tap_arbol(seg, ncurso); }
+    viso_lee();
     return 0;
 }
 static int curso_lee(void)
@@ -5731,7 +5763,7 @@ static int piloto_rama(float s) { return cur_rama < 0 && s_decide >= 0 && s > s_
 typedef struct { int16_t pos; uint8_t n, res; float lim; struct { uint8_t reg, tray, fl, r_; float toff; } o[4]; uint32_t tra;
                  uint8_t relleno[64 - 8 - 32 - 4]; } bo_conj_t;   /* 64 bytes (conv_bo.py) */
 typedef struct { uint16_t idx, base, m, r_; const float *v; } bo_mor_t;
-static uint8_t *bo_dat; static const bo_conj_t *bo_conj; static uint32_t bo_var[7];
+static uint8_t *bo_dat; static const bo_conj_t *bo_conj; static uint32_t bo_var[7], bo_var6[7]; static int bo_hay6;
 static bo_mor_t bo_mor[192]; static int bo_nmor;
 static uint16_t *bo_idx, *bo_ini; static int bo_ncod;           /* mallas por (malla del original, cuadro) */
 static uint32_t bo_reloj;                                       /* 0x448850: +1 por cuadro (60 por segundo) */
@@ -5748,6 +5780,8 @@ static void bo_carga_datos(void)
     o = 8 + BO_N * 64;
     if (memcmp(d + o, "VAR1", 4) || memcmp(d + o + 32, "MOR1", 4)) { free(d); return; }
     memcpy(bo_var, d + o + 4, sizeof bo_var);
+    bo_hay6 = sz >= 32 && !memcmp(d + sz - 32, "VAR6", 4);     /* la fila de la variante 6 (al final, conv_bo.py) */
+    if (bo_hay6) memcpy(bo_var6, d + sz - 28, sizeof bo_var6);
     o += 36; memcpy(&n, d + o, 4); o += 4;
     for (i = 0; i < n && o + 12 <= sz; i++) {                   /* 0x103120: k entradas desde el indice, base j m / k */
         uint32_t idx, k, m, j; memcpy(&idx, d + o, 4); memcpy(&k, d + o + 4, 4); memcpy(&m, d + o + 8, 4);
@@ -5780,7 +5814,8 @@ static void bo_muestra(const uint8_t *e, float t, float *pos, float *ang)
         p += 16 * m;
     }
 }
-static void bo_cuentas_cero(void) { bo_c74 = bo_c78 = bo_c7c = bo_c80 = bo_c84 = bo_c88 = 0; bo_pos_ant = 0; }
+static int bo_ca4;                                              /* 7D30A4: cuadros en rebufo (44EDE0) */
+static void bo_cuentas_cero(void) { bo_c74 = bo_c78 = bo_c7c = bo_c80 = bo_c84 = bo_c88 = bo_ca4 = 0; bo_pos_ant = 0; }
 /* 44EDE0 en cada paso de logica (con choque contra otro coche: traf_choques) */
 static void bo_cuenta(void)
 {
@@ -5799,11 +5834,25 @@ static void bo_cuenta(void)
     { int a4e = fis.s4e < 0 ? -fis.s4e : fis.s4e; sl = fis.kmh >= 100 && a4e > 0x1800 && a4e < 0x4000; }
     if (!(cur_nodo == PRUEBA_NODO && pos < 0xa0) && !sl && (sup_jug & 0x9cu) && pos > bo_pos_ant) bo_c88++;
     bo_pos_ant = pos;
+    /* 7D30A4 (PC 44EDE0 al final): +E68 > 0,18 y |+162| < 0x5DC, el rebufo que senala el HUD */
+    if (fis.rebufo > 0.180000007f && (int)(fabsf(fis.beta) * 10430.3779f) < 0x5dc) bo_ca4++;
 }
 /* 0x174a48 (variante 1, la del modo OutRun) */
 static int bo_elige(void)
 {
     float x, sec;
+    if (variante == 6 && bo_hay6) {                             /* 0x174cd0: las variantes 5.. (fila de 0x35a738) */
+        sec = (s_union - s_etapa) / m_pos;
+        if (cur_nodo == PRUEBA_NODO) sec -= 0xa0;
+        x = sec > 0 ? (float)bo_c88 / sec : 0.0f;
+        if (bo_c74 || bo_c78) return (int)bo_var6[0];
+        if (bo_c7c || 0.1f <= x) return (int)bo_var6[1];
+        if (x != 0.0f) return (int)bo_var6[2];
+        if (bo_c80) return (int)bo_var6[3];
+        if (bo_c84 >= 0x3c) return (int)bo_var6[4];
+        if (bo_ca4 < 0x12c) return (int)bo_var6[2];
+        return (int)(bo_c84 > 0 ? bo_var6[5] : bo_var6[6]);
+    }
     if (bo_c74 || bo_c78) return (int)bo_var[0];
     if (bo_c7c) return (int)bo_var[1];
     sec = (s_union - s_etapa) / m_pos;                          /* 7D3094: posiciones de la etapa */
@@ -6203,7 +6252,7 @@ static void pvs_aplica(modelo_t *mo, int s)                     /* XOR de la lis
 static void pvs_paso(modelo_t *mo)
 {
     uint32_t k, a, b, i, s; float d, e, t[2], l, x, li, ld; const float *r, *r0, *r1;
-    mo->pvs_on = 0;
+    mo->pvs_on = 0; mo->viso = NULL;
 #ifdef SIN_PVS
     return;
 #endif
@@ -6217,13 +6266,22 @@ static void pvs_paso(modelo_t *mo)
     r0 = mo->ruta + mo->paso_ruta * (k ? k - 1 : 0); r1 = mo->ruta + mo->paso_ruta * (k + 1 < mo->nruta ? k + 1 : k);
     t[0] = r1[0] - r0[0]; t[1] = r1[2] - r0[2]; l = sqrtf(t[0] * t[0] + t[1] * t[1]);
     if (l < 1e-3f) return;
+    if (k == 0 || k + 1 == mo->nruta) {                         /* mas alla de una punta: hasta PVS_FIN */
+        float y = ((ojo[0] - r[0]) * t[0] + (ojo[2] - r[2]) * t[1]) / l;
+        if ((k == 0 && y < -PVS_FIN) || (k + 1 == mo->nruta && y > PVS_FIN)) {
+            /* la camara antes del principio de la etapa (en la union, la etapa siguiente) o pasado su final (la que se
+               deja): lo que dibuja el original en su seccion 0 o en la ultima (VISO.DAT, viso_lee); antes todo, y en
+               las misiones la etapa siguiente sacaba sobre la union lo que tiene detras de su salida (PALM_T: el monte
+               y los edificios de detras de la parrilla, en la carretera de la union) */
+            int nd = mo == &etapa ? etapa_nodo : mo == &sig ? cur_sig : -1;
+            if (nd >= 0 && nd < ncurso && viso_m[nd] && viso_nn[nd] == mo->nnodos)
+                mo->viso = viso_m[nd] + (k == 0 ? 0 : (viso_nn[nd] + 7) / 8);
+            return;
+        }
+    }
     x = ((ojo[0] - r[0]) * -t[1] + (ojo[2] - r[2]) * t[0]) / l;   /* desvio a la derecha (-t.z, t.x) */
     li = CON_SUP ? r[C_LIM] : r[3]; ld = CON_SUP ? r[C_LIM + 1] : r[4];
     if (x < -li - PVS_LADO || x > ld + PVS_LADO || ojo[1] > altura_punto(r, x) + PVS_ALTO) return;
-    if (k == 0 || k + 1 == mo->nruta) {                         /* mas alla de una punta: hasta PVS_FIN */
-        float y = ((ojo[0] - r[0]) * t[0] + (ojo[2] - r[2]) * t[1]) / l;
-        if ((k == 0 && y < -PVS_FIN) || (k + 1 == mo->nruta && y > PVS_FIN)) return;
-    }
     s = mo->sec_mapa[k] < mo->nsec ? mo->sec_mapa[k] : mo->nsec - 1;
     while (mo->pvs_s < (int32_t)s) pvs_aplica(mo, ++mo->pvs_s);
     while (mo->pvs_s > (int32_t)s) pvs_aplica(mo, mo->pvs_s--);
@@ -6306,6 +6364,7 @@ static void nodos_visibles(modelo_t *mo)
         if (u && zv > 0 && zv > lim * (float)(1 << REPARTO_LOD_MAS)) { POPR(i, PR_LOD); continue; }   /* LOD (y lo de mas) */
         rama = (d->fl >> 8) & 3;
         if (!(regs >> rama & 1)) { POPR(i, PR_RAMA); continue; }   /* registro de la union que no se dibuja */
+        if (mo->viso && !(mo->viso[i >> 3] >> (i & 7) & 1)) { POPR(i, PR_PVS); continue; }   /* fuera de la etapa */
         if (pvs_on_) {                                       /* PVS: lo que queda visible del nodo desde aqui */
             c_teo = mo->pvs_teo[2 * i]; c_v = mo->pvs_teo[2 * i + 1];
 #ifdef DIAG_VTX
@@ -7222,6 +7281,43 @@ static void sol_prepara(void)
     if (sol_pantalla(q, P, &sx, &sy)) sol_rayo_pon(q, 2 * atanf(240.0f / fx) * 57.29578f * 0.01f * 0.13f);
 #endif
 }
+/* Luz de los faros en la carretera (etapas de noche): la de SLES-53998 0x188680 (PC 4695C0, desde 0x17c6b0 = 49F400):
+   con car+2C8 <= 0 (fuera del estado de choque) y car+4 & 0x900 == 0x900 (noche de 4A25F0 y faros abiertos) dibuja en
+   car+B0 el paquete fijo de 0x106a98 (16 tiras de 8 vertices en el suelo del coche, de 1,3 m a 80 m por delante; FAROS.DAT,
+   tools/conv_faros.py) con la textura 9 de spr_etc_xst, el color (0x50, 0x50, 0x48, 0x80) del GS y la mezcla aditiva
+   (ALPHA 0x48: Cs As + Cd), ZTST ALWAYS y sin escribir z (0x106960). DIFERENCIA: aqui la prueba de z es GEQUAL con la
+   profundidad un 1 % mas cerca (la matriz x 0,99: la misma imagen en pantalla): el PS2 la dibuja antes que el coche, que
+   la tapa al dibujarse despues; en la lista transparente de la PowerVR con ALWAYS saldria encima del coche. Lo que
+   suba la carretera por delante del plano del coche mas de ese 1 % la tapa (el PS2 no). Con la niebla de la tabla (el
+   original la deja encendida: 0x169ce0(0, 2, 1)) */
+static modelo_t faros_m; static pvr_poly_hdr_t faros_cab; static int faros_ok;
+static void faros_carga(void)
+{
+    pvr_poly_cxt_t cx; tex_t *t; uint32_t fb, vq, n; pvr_ptr_t dir;
+    if (lee_modelo(&faros_m, "FAROS.DAT") || faros_m.ntex < 1 || sube_modelo(&faros_m)) { libera_modelo(&faros_m); return; }
+    compacta_modelo(&faros_m);
+    t = faros_m.texs; fb = t->fmt & 0xff; vq = t->fmt & 0x100; n = ((t->fmt >> 16) & 0xff) + 1;
+    dir = vq ? (pvr_ptr_t)((uintptr_t)faros_m.tv[0] - (2048 - 8 * n)) : faros_m.tv[0];
+    pvr_poly_cxt_txr(&cx, PVR_LIST_TR_POLY, FMT[fb] | PVR_TXRFMT_TWIDDLED | (vq ? PVR_TXRFMT_VQ_ENABLE : 0), t->w, t->h, dir,
+                     PVR_FILTER_BILINEAR);
+    cx.gen.fog_type = PVR_FOG_TABLE; cx.gen.culling = PVR_CULLING_NONE; cx.txr.env = PVR_TXRENV_MODULATEALPHA;
+    cx.blend.src = PVR_BLEND_SRCALPHA; cx.blend.dst = PVR_BLEND_ONE; cx.depth.write = PVR_DEPTHWRITE_DISABLE;
+    cx.depth.comparison = PVR_DEPTHCMP_GEQUAL; cx.txr.uv_clamp = PVR_UVCLAMP_UV;
+    pvr_poly_compile(&faros_cab, &cx);
+    faros_ok = 1;
+    dbglog(DBG_INFO, "FAROS: %u tiras, textura %ux%u\n", (unsigned)faros_m.nmallas, (unsigned)t->w, (unsigned)t->h);
+}
+static void faros_dibuja(matrix_t *mc, uint32_t ban, int choque)
+{
+    static matrix_t K __attribute__((aligned(32)));
+    uint32_t i;
+    if (!faros_ok || choque || (ban & 0x900) != 0x900) return;
+    memset(K, 0, sizeof K); K[0][0] = K[1][1] = K[2][2] = K[3][3] = 0.99f;
+    mat_load(&vista); mat_apply(mc); mat_apply(&K);
+    pvr_prim(&faros_cab, sizeof faros_cab);
+    for (i = 0; i < faros_m.nmallas; i++) if (faros_m.mallas[i].n >= 3) dibuja_malla(&faros_m, faros_m.mallas + i);
+    mat_load(&vista);
+}
 static void sol_dibuja(void)
 {
     float P[3], sx, sy, ax[3], fov, size, spread, bright, edge, flare, ring, facing, vis = SOL_VIS, q[3];
@@ -7599,7 +7695,18 @@ typedef struct {
     int caliente;                                               /* disco +94 */
 } ani_t;
 static ani_t ani;
-static uint32_t coche_ban;                                      /* car+4 de 4A25F0 (0x100 noche, 0x200 tunel, 0x400): 0 */
+/* car+4 de CheckNightAndTunnel (4A25F0, cada cuadro en GamePlCar_Ctrl; el trafico igual, race_traffic 4A25F0):
+   0x100 noche = bit 3 del trabajo de SCN_EFC, 0x200 "tunel" = bit 4, 0x400 = bandera 8 del descriptor de la etapa
+   elegida (+0x3C). weather_44bd50 copia los bits 8 y 0x10 de ese +0x3C al trabajo de SCN_EFC al empezar y al cambiar
+   de entorno (estado 0xD de la union: la etapa nueva, como el sol). En las 15 etapas: METR y GHOS (0x18) */
+static uint32_t coche_ban;
+static uint32_t noche_ban(void)
+{
+    int area = ent_fase ? ent_nuevo : cur_nodo; uint32_t c;
+    if (area < 0 || area >= ncurso) return 0;
+    c = curso[area].clima;
+    return (c & 8 ? 0x500u : 0) | (c & 0x10 ? 0x200u : 0);
+}
 static matrix_t ani_m[NPZ] __attribute__((aligned(32)));      /* matriz de cada pieza en el marco del coche */
 /* lee el CEX2 del coche recien cargado: desplazamiento por vertice, cabeceras con desplazamiento para el entorno y
    grupos de luces */
@@ -7714,6 +7821,9 @@ static void traf_anima_paso(float dt);
 static void coche_anima_paso(int titulo)
 {
     float dt = 1.0f / 60, vmf, x; int k, kmh, smp, sum;
+    {   uint32_t b = titulo ? 0 : noche_ban();                  /* 4A25F0 */
+        if (b != coche_ban) dbglog(DBG_INFO, "LUCES: car+4 %x (noche y tunel de 4A25F0)\n", (unsigned)b);
+        coche_ban = b; }
     traf_anima_paso(dt);
     if (!ani.ok) return;
     if (titulo) { coche_anima_reposo(); return; }
@@ -7735,8 +7845,7 @@ static void coche_anima_paso(int titulo)
     x = vmf * 216.720001f * 0.729166687f;
     if (300.0f >= x) ani.aleron = x * 0.00333333341f * -0.305432618f;
     else { float x0 = (350.0f - x) * 0.0199999996f * -0.305432618f; ani.aleron = x0 > 0 ? 0 : x0; }
-    /* faros escamoteables (46AE70 / 469600 con car+4 & 0x500: 0x100 noche, 0x400 la bandera 8 del curso; la demo no
-       tiene SCN_EFC: coche_ban = 0, se quedan cerrados) */
+    /* faros escamoteables (46AE70 / 469600 con car+4 & 0x500: 0x100 noche, 0x400 la bandera 8 del curso: noche_ban) */
     if (ani.pz[PZ_FAROS][4] > 0) {
         float arriba = ani.pz[PZ_FAROS][3], paso = arriba / ani.pz[PZ_FAROS][4];
         ani.ban = (ani.ban & ~0x800u) | (coche_ban & 0x700u);
@@ -9283,6 +9392,7 @@ int main(int argc, char **argv)
         vid_set_mode(modo_video, PM_RGB565); aviso("Sin memoria de video para las texturas"); for (;;) thd_sleep(1000);
     }
     sol_carga();                                                /* el sol y el destello (SOL.DAT, siempre en VRAM) */
+    faros_carga();                                              /* la luz de los faros (FAROS.DAT, siempre en VRAM) */
     /* el humo, las marcas y las chispas (EFECTOS.DAT, siempre en VRAM) con lo fijo, antes de la pareja, el coche y el HUD:
        detras del HUD partian la VRAM libre de las carreras en dos (vram_ordena) */
     efectos_inicia();
@@ -10068,7 +10178,7 @@ int main(int argc, char **argv)
         }
 #endif
         if (cex_n && menu_color() != cex_color) coche_color(menu_color());   /* color elegido (boton Y del menu) */
-        /* luces: sin SCN_EFC (bits de noche y tunel de 4A25F0) en la demo, banderas 0; freno = pedal pisado */
+        /* luces: car+4 de 4A25F0 (noche_ban, en ani.ban con 0x800 de los faros abiertos); freno = pedal pisado */
         coche_anima_matrices(estado == TITULO);                 /* piezas animadas (46AE70) */
 #ifdef PRUEBA_MURO
         if (estado == CARRERA) prueba_mide();
@@ -10149,13 +10259,17 @@ int main(int argc, char **argv)
                 mtraf[t->modelo].remap = t->rc ? rc_remap_de(t) :
                                          t->color > 0 && t->color < traf_ncol[t->modelo] ? traf_remap[t->modelo][t->color] : NULL;
                 solo_lod = traf_con_lod[t->modelo] ? traf_lod(t->modelo, zv) : -1;
-                traf_apagado = t->freno > 0 ? 1 : 3;            /* pilotos: los del freno con +38 > 0 (4AD4D0) */
+                /* luces (4AD4D0 / second()): +8 con car+4 & 0x100; +14 (freno) con car+38 > 0, si no +10 con car+4 &
+                   0x300 (noche o tunel de 4A25F0), si no +C */
+                traf_luces = 1u | (t->freno > 0 ? 1u << 3 : (coche_ban & 0x300) ? 1u << 2 : 1u << 1) | ((coche_ban & 0x100) ? 1u << 4 : 0);
                 traf_dibuja(i, l, &mt);                         /* carroceria y ruedas girando (4AD530) */
                 mtraf[t->modelo].remap = NULL; solo_lod = -1;
             }
             PRF(7);
             if (l == 2 && estado != TITULO && !mundo_fuera) { mat_load(&vista); efectos_dibuja(); }
             if (l == 2 && estado != TITULO && !mundo_fuera) sol_dibuja();       /* el sol y su destello (40CBC0) */
+            if (l == 2 && estado != TITULO && !mundo_fuera && !fin24)              /* faros en el suelo (0x188680) */
+                faros_dibuja(&mod_coche, ani.ban, fis_ok && fis.t_choque > 0);
             if (l == 2) {
                 int texto = ver || (!hud_ok && estado != TITULO), navi;
                 if (estado == TITULO && !pide_fsp) menu_dibuja();
