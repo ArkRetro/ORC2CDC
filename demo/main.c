@@ -5609,11 +5609,14 @@ static inline int log2x(float x, int k)                         /* k log2(x) por
    opaco con z-buffer; las mallas que no aportan ningun pixel desde ninguna muestra de la seccion (y sus vecinas) no
    estan en su mascara. Por seccion el fichero trae las mallas que cambian respecto a la anterior (XOR): la mascara se
    mueve de una seccion a otra aplicando las listas, hacia delante o hacia atras. La seccion es la del punto de la ruta
-   del modelo mas cercano al ojo; si el ojo esta fuera de lo muestreado (otra etapa, la otra rama, muy alto) no se usa
-   (pvs_on = 0: todo como antes). Lo que se quita no se ve: no cambia la imagen; el reparto (nodos_visibles_todos) se
+   del modelo mas cercano al ojo; si el ojo esta fuera de lo muestreado (otra etapa, la otra rama, muy alto, mas de
+   PVS_FIN mas alla de una punta de la ruta) no se usa (pvs_on = 0: todo como antes). Antes las dos primeras y las dos
+   ultimas secciones llevaban todo (el ojo podia estar fuera de la ruta): en la salida de PALM (el ojo en la seccion 1)
+   la etapa entera, 71000 vertices en la vista, y el reparto quitaba casi todo lo de mas de 76 m. Lo que se quita no se ve: no cambia la imagen; el reparto (nodos_visibles_todos) se
    hace despues con el coste de lo que queda de cada nodo (pvs_teo). -DSIN_PVS lo desactiva (para comparar). */
 #define PVS_LADO 3.0f                                           /* tools/pvs.py LADO_EXTRA */
 #define PVS_ALTO 6.0f                                           /* la muestra mas alta (ALTURAS) */
+#define PVS_FIN 32.0f                                           /* la ruta prolongada por cada punta (FIN_EXTRA) */
 static void pvs_aplica(modelo_t *mo, int s)                     /* XOR de la lista de la seccion s */
 {
     const uint8_t *p = mo->pvs_l + mo->sec_ini[s], *f = mo->pvs_l + mo->sec_ini[s + 1];
@@ -5651,6 +5654,10 @@ static void pvs_paso(modelo_t *mo)
     x = ((ojo[0] - r[0]) * -t[1] + (ojo[2] - r[2]) * t[0]) / l;   /* desvio a la derecha (-t.z, t.x) */
     li = CON_SUP ? r[C_LIM] : r[3]; ld = CON_SUP ? r[C_LIM + 1] : r[4];
     if (x < -li - PVS_LADO || x > ld + PVS_LADO || ojo[1] > altura_punto(r, x) + PVS_ALTO) return;
+    if (k == 0 || k + 1 == mo->nruta) {                         /* mas alla de una punta: hasta PVS_FIN */
+        float y = ((ojo[0] - r[0]) * t[0] + (ojo[2] - r[2]) * t[1]) / l;
+        if ((k == 0 && y < -PVS_FIN) || (k + 1 == mo->nruta && y > PVS_FIN)) return;
+    }
     s = mo->sec_mapa[k] < mo->nsec ? mo->sec_mapa[k] : mo->nsec - 1;
     while (mo->pvs_s < (int32_t)s) pvs_aplica(mo, ++mo->pvs_s);
     while (mo->pvs_s > (int32_t)s) pvs_aplica(mo, mo->pvs_s--);

@@ -667,7 +667,8 @@ def convierte(seg, n, sal, mundo=None, cielo=True, luz=None, objetos=None, agua=
     mod.recorta_texturas()                                     # solo las texturas que se usan (memoria de video)
     if mundo is not None: transforma(mod, mundo)
     ini = mod.escribe(sal)
-    pvs.anade(sal)                                             # visibilidad precalculada por secciones (tools/pvs.py)
+    pvs.anade(sal, quita=True)                                 # visibilidad precalculada por secciones y fuera lo que no
+                                                               # se ve nunca (tools/pvs.py)
     print('triangulos de las tiras del VU1: %d, sin dibujar por la bandera ADC: %d' % (mod.tri_total, mod.tri_adc))
     print('segmento %d: %d tiras (%d opacas, %d recorte, %d transparentes, %d cielo), %d vertices, %d triangulos, '
           '%d texturas (%d KB), ruta %d puntos (%.0f m), %d KB'
