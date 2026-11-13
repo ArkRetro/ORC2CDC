@@ -5,7 +5,8 @@
 #   empaquetadas (UNIONES.PAK + descriptores, pak_union.py; las etapas en SEGS.PAK igual), BKD, CURSO, SOL, COLBK*, COLLR, musica MUSn.ADP (28 temas,
 #   28 avances, menu y metas), peliculas MVTS/MVATTR, sonido SFX/VOCES (espanol), menus, HUD, VMU, efectos, personajes (CHRPAR y una CHRppaa por pareja),
 #   meta, salida, fin de carrera FIN/GOVER, OUTRUN2SP CARGASP0-3/GOVSP/SPFE/RUTASP/RANKSP/NOM5A-E/NOMTX, el final de recreativa FINAL/FINE0-9/FINPROP/STAFF (conv_final.py), modo de video, INFARTO/HAHUD/VOCESH, objetos de las uniones BO, trafico, camiones TRAFK0-2 (OUTRUN2SP), coches COCHE00-14 + COCHES y PARAM,
-#   misiones de COAST 2 COAST (MISION.DAT, conv_mision.py) y sus coches de carreras RC00-29 (conv_trafico.py --rivales).
+#   misiones de COAST 2 COAST (MISION.DAT, conv_mision.py), sus coches de carreras RC00-29 (conv_trafico.py --rivales) y
+#   sus pantallas del menu (C2C.DAT, conv_c2c.py: categorias, mapa y detalle; datos de antes sin el: solo hace ese paso).
 # Datos de antes del 2026-11-13 sin MISION.DAT ni RC00-29.DAT: basta volver a llamarlo (solo hace esos pasos).
 # Datos sin TRAFK0-2.DAT (los camiones de OUTRUN2SP, conv_trafico.py --camiones): lo mismo, solo hace ese paso.
 # Segunda pasada de la VQ (tools/revq.py, vq.UMBRAL2) en las etapas y uniones antes de empaquetarlas y en los modelos

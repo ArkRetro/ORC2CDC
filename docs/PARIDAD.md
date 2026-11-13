@@ -1870,7 +1870,7 @@ Races.bin, variante 5 C2C o 6) y el preset del curso [78024C] (4EEA70). En SLES-
 | OUTRUN (variante 1) | fila 0 de los tiempos (44DC70), trafico, puntos 4F2DF0, voces ORC/PERO | OK (lo que ya habia) | E |
 | INFARTO (variante 2) | gestor de peticiones 464350/464D20 (PS2 0x1ae440 / 0x1a7f28), misiones 5A94D8 (PS2 0x3f0b98, 41 x 0x140), fila 1 de los tiempos, voces HC/PERH + HAM\<etapa> | PARCIAL: ver abajo | E |
 | CONTRARRELOJ (variante 7) | fila 2 de los tiempos (44DC70: 0 y 7 -> 2; 450CC0 pasa el 7 como 0), sin trafico (479080 y 47EC00 vuelven con la variante 0, 7 u 8), gestor 0x193 / funcion 0x22 (48B8F0..: curso por codigo [656234], fantasma 465F30..4687C0, GHOST.PS2) | PARCIAL: reglas de tiempo y sin trafico; corre el curso entero con eleccion de rama como el OutRun | E |
-| COAST 2 COAST (variante 6 misiones, 5 campeonatos) | variante 6: misiones de Races.bin / RaceAssignment.bin (gestor 0x20, evento 0x191: 495B90 / 496A30); variante 5: campeonatos Request_Course_SP / OR2 / MIX con peticiones Req_*.bin (gestor 7F9460, evento 0x190); rivales (47CF40) | PARCIAL (2026-11-13): las 76 misiones de carrera (tipo 0) con sus coches de carreras y su nota; sin el mapa de misiones ni los otros tipos ni los campeonatos (ver COAST 2 COAST: misiones de carrera y el rival) | E |
+| COAST 2 COAST (variante 6 misiones, 5 campeonatos) | variante 6: misiones de Races.bin / RaceAssignment.bin (gestor 0x20, evento 0x191: 495B90 / 496A30); variante 5: campeonatos Request_Course_SP / OR2 / MIX con peticiones Req_*.bin (gestor 7F9460, evento 0x190); rivales (47CF40) | PARCIAL (2026-11-13): categorias, mapa de misiones y detalle del original (banco 0x44, C2C.DAT); se corren las 76 misiones de carrera (tipo 0) con sus coches de carreras y su nota; sin los otros tipos ni los campeonatos (ver COAST 2 COAST: misiones de carrera y el rival) | E |
 | SALON (showroom) | frontal 4D4230.. | FALTA (accion bloqueada, como antes) | - |
 | Dificultad (opcion de la licencia +E0) | difficulty_of de 44DC70 (PS2 0x1cdc98): 0 en el juego de la consola (43F860 = [780260] = 1, lo pone SUMO_FE 0x237e28); la licencia (+E0) solo en el de OUTRUN2SP (2 en la variante 4) | OK (2026-11-11; antes al reves: la licencia en los modos de la consola) | E (log `MODO:`) |
 | Multijugador | red / LAN (variantes 3, 4) | no se hace (orden del usuario): la pantalla queda como estaba, con la accion bloqueada | - |
@@ -2147,11 +2147,48 @@ peticion 14 (escoltas 45B5B0, +324 = 6: carrera contra ellos), que no esta en la
     de destinos del final de etapa (0x3fa1d0), los nombres largos de las zonas de SP en los avisos (sale el codigo).
 
 **COAST 2 COAST: misiones de carrera y el rival** (2026-11-13):
-- Menu: UN JUGADOR -> COAST 2 COAST abre una ventana sobre ELEGIR MODO con las misiones de carrera (tipo 0 de Races.bin,
-  76 de 94, y cuyo arbol cabe en los huecos: `arbol_grande` de curso_huecos) con clave-subclave y su nota de la licencia
-  (+0x1D7 + 5 clave + subclave; 7 sin jugar); izquierda / derecha, A (coche, cambio, musica y la carrera) o B. DESVIACION:
-  la pantalla de categorias (4E8130), el mapa de misiones (4E9160) y el detalle no estan (sus graficos, banco 0x44 tokens
-  0x4400d0..0x4400f0 de SLES-53998, no estan en MENU.DAT; habria que convertir el banco y portar 0x242340..0x2443xx).
+- Menu (2026-11-13, antes una ventana provisional): UN JUGADOR -> COAST 2 COAST abre las pantallas del original con
+  los graficos del banco SPRANI 0x44 (C2C.DAT de `tools/conv_c2c.py`: las 22 escenas 0x4400ca..0x4400f1 que usan, la
+  animacion recortada a 43 KB con `conv_sprani.recorta`, 492 KB de VRAM con VQ; las tablas del ELF en el bloque C2C1;
+  los glifos de la fuente 14 de sus textos) en el reproductor comun/sprani.c (comun/menu.c, pantalla P_C2C):
+  - Categorias (suceso 0x3a; PS2 0x242340 / 0x242680 / 0x242ac0 = 4E8580 / 4E8780 / 4E8C60 del PC): los 7 botones
+    0x4400d1 (0x4177e8 abierto en la capa 2, 0x417848 cerrado en la 1, posiciones 0x417b08), el cursor 0x4400d0
+    (0x417a28: 30 cuadros por boton, capa 4), la foto 0x4400cf (0x241f60: 4 x ultimo grupo abierto + boton) o la del
+    campeonato (0x417968 / 0x4179c8: 0x4400f1), el pie 0x4400ce (0x4178a8 / 0x417908), el texto del grupo (TEXT.PS2
+    0x375358, "perfeccionado" 0x375378 con la nota 6; cerrado 0x375338) con la fuente 14 en (65, 210) y el rango
+    (0x3753b8: E..AAA) centrado en (520, 363). Abierto (0x242290): los grupos 0 y 4; 1..3 con la nota del grupo
+    anterior (0x2420a0) 4..6; 5 y 6 con la del 4 / 5. Flechas por los vecinos 0x417a88; A abierto -> sonido 0x40 y
+    al mapa; cerrado -> sonido 3; B -> ELEGIR MODO.
+  - Mapa y detalle (suceso 0x3b; PS2 0x242ff0 / 0x2431f0 / 0x243748 / 0x243b88 = 4E8F80 / 4E90E0 / 4E9360 / 4E95A0):
+    fondo y encima del grupo (0x417bc8 / 0x417bf8), los nodos de sus 5 / 9 / 11 / 15 categorias (0x417df8, base
+    0x417e08; 0x4400df en 0x375570.. por 0x375940) con su nota (0x417da0: 0x4400e0), el cursor 0x4400d8 (0..0x34) en
+    0x375430.. (por 0x375930) o en la carrera (0x3753e0) con 0x4400d4 (0x417d60) en el detalle, las carreras de la
+    categoria (hasta 5, 0x1f7fe0) con su boton (0x417ca0: 0x4400d5, cuadro 5 cerrada), tipo (0x417c28: 0x4400d3 por
+    +0x20 de Races.bin) y nota (0x375408), el nombre 0x4400d6 (categoria + 0x1e en (237, 388)), el panel (0x417d30),
+    el pie (0x417cd0) y el rotulo del tipo de la 1.a carrera (0x417c80 -> TEXT.PS2 0x34e..0x352) en el cuadro de texto
+    (300, 330, 570, 370; fuente 14, lineas de 14 px, ajuste de linea de 48EB60). Nodo abierto (0x2431f0): el 0 y los
+    que tienen un vecino (0x3756b0 / 0x375700 / 0x375790 / 0x375840 por 0x375950) con nota de categoria (0x241ed0)
+    distinta de 7, es decir con todas sus carreras jugadas: asi el PS2; el PC (4E90E0) pide ademas nota 4..6 en el
+    vecino (manda el de PS2). Carrera i + 1 abierta si la i tiene nota 4..6 (0x243a28; dibujo 0x243fa8). A: mapa ->
+    detalle -> la carrera (root+0x208: categoria << 12, carrera << 18; suceso 0xa: coche, cambio, musica y
+    MISION.DAT como antes, `-DPRUEBA_MISION=i` sigue igual); B: detalle -> mapa -> categorias; B en el coche vuelve al
+    detalle. Las notas son las de la licencia (+0x1DD + 5 categoria + carrera; la clave de la categoria c en
+    RaceAssignment.bin es c + 1: comprobado en conv_c2c.py, asi coincide con 495A20 = +0x1D7 + 5 clave + subclave).
+  - DESVIACION: solo se corren las misiones de carrera (tipo 0, 76 de 94) cuyo arbol cabe en los huecos
+    (`arbol_grande` de curso_huecos); las de los tipos 1, 2, 3 y 6 se ven en el mapa y en el detalle como en el
+    original (boton, icono del tipo, nota, rotulo) pero A en ellas da el sonido de bloqueado. Los campeonatos (botones
+    4..6, suceso 0x3c, variante 5) tampoco estan: A en ellos, bloqueado (en el original, sonido 0x40 y su pantalla).
+  - PROBABLE: el salto de linea de los textos de las categorias ('\n' en TEXT.PS2) baja el alto de la celda (17) como
+    42C610 del PC (el printf de PS2 0x117640 no se ha seguido); el orden entre el texto y las capas de sprites (el texto
+    va encima de todas). Sin el fundido de entrada / salida de los recursos (las escenas aparecen y se van de golpe).
+  - Verificado en Flycast (pantalla 98, `MODO_JUEGO=0 C2C_RECORRE=1 nav.sh`, licencia nueva): categorias con Flagman 1
+    abierto y su texto, los demas en negro, Clarissa con "???" y "Clarissa Ranking A para desbloquear!" (A: bloqueado),
+    mapa de Flagman 1 con el nodo 1 abierto y el cursor, derecha sin moverse (nodo 2 cerrado), detalle con la 1-1 y
+    la 2 y la 3 cerradas ("?"), B / B y de nuevo A / A, la 1-1 -> coche, cambio, musica -> `MODO: variante 6` y la
+    carrera con sus 5 rivales; tablas de C2C.DAT 61232 bytes en el hueco, VRAM libre al abrirlo 486 KB; sin "Out of
+    memory".
+  - RAM: las tablas de C2C.DAT (~60 KB) van en el final del hueco de la union prestado (`menu_hueco` = hueco_fsp de
+    main, como el frontal de recreativa) solo mientras se ve P_C2C; su VRAM se suelta al salir (spr_cierra).
 - Carrera: variante 6 (menu_modo), el arbol 100 + i de CURSO.DAT (4965A0), los registros de 47CF40 (PS2 0x1ef900) con
   el registro +0x1C de Races.bin y las tablas del ELF (listas de modelos 0x36be70, familias 0x40b818, clases de los
   especiales 0x40b858 con la 0x1E -> 0x1B de 0x1d9ae8, colores 0x40b618 por familia, perfil 0x36bd00, c3c 0x36bcf8;
@@ -2180,7 +2217,7 @@ peticion 14 (escoltas 45B5B0, +324 = 6: carrera contra ellos), que no esta en la
 - Verificado en Flycast (pantalla 98): `-DPRUEBA_AUTO -DPRUEBA_MISION=0 -DPRUEBA_SIN_TIEMPO -DDIAG_MS`: los 5 coches
   de la 1-1 abren en la parrilla (+3..+23 posiciones), arrancan en GO con sus marchas, el piloto los adelanta (puesto
   6/6 -> 3/6) y alguno le vuelve a pasar; 43,9-45,7 cuadros por segundo, sin "Out of memory". Menu real
-  (`-DPRUEBA_PILOTO_MENU -DPRUEBA_SIN_TIEMPO`): UN JUGADOR -> COAST 2 COAST -> ventana -> 1-1 -> coche, cambio, musica ->
+  (`-DPRUEBA_PILOTO_MENU -DPRUEBA_SIN_TIEMPO`): UN JUGADOR -> COAST 2 COAST -> ventana (hoy: categorias, mapa y detalle) -> 1-1 -> coche, cambio, musica ->
   `MODO: variante 6` -> la carrera entera hasta la META de PALM_T (media 44,7 cuadros por segundo) -> nota en la licencia
   (`LICENCIA: mision 1-1 nota ...`) -> titulo; RAM al volver 1086 KB libres (1088 al arrancar: los modelos RCmm sueltos).
 - HUD de la mision (C2CHUD.DAT de `conv_hud.py --c2c`; comprobado en el ELF): NAVI_PUB 0x1bd4ac con la variante 6
@@ -2208,10 +2245,7 @@ peticion 14 (escoltas 45B5B0, +324 = 6: carrera contra ellos), que no esta en la
   mision superada (4959E0) con A = 495A60 (la subclave siguiente si la nota llega a +0x24 = 4) y REINTENTAR, el boton
   0x10 la misma y B al menu; si no 2B004A); FINC2C.DAT (conv_fin.py). El fin del tiempo: 34 y 35 sin nota. Fuera la
   vuelta directa al menu.
-- SIN PORTAR (bloqueado por tiempo): las pantallas de COAST 2 COAST del original (categorias 0x242340 / 4E8130, mapa
-  de misiones 0x243000..0x2443xx / 4E9160, detalle): hace falta convertir el banco SPRANI 0x44 (tokens 0x4400d0..
-  0x4400f0) y portar su dibujo y navegacion con las tablas 0x375430, 0x375570, 0x3752e8 / 0x3753e0 y los vecinos
-  0x3756b0 / 0x375700; hasta entonces la ventana (DESVIACION). Los tipos 1, 2, 3 y 6 (puntos 4BD230 / 4BD340, marcas
+- SIN PORTAR: los tipos 1, 2, 3 y 6 (los de su juego) (puntos 4BD230 / 4BD340, marcas
   495E90, notas por umbrales) no estan en la lista. Tambien 472E60 / 474080 / los vaivenes, la espera de 474D30, 43EB60
   al abrir, el bit 0 de +0xF, el boton 0x10 del PS2 (la X de la Dreamcast, PROBABLE), los campeonatos y la variante 9.
 

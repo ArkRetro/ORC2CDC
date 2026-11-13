@@ -80,5 +80,6 @@ void hudd_capa(hud_dat_t *h, float z, int fondo);
 void hudd_sprite(int s, const float *m, const float *q, float alfa, int aditiva);
 int hudd_sprite_tex(const hud_dat_t *h, int s);
 float hudd_z(void);                                      /* z de la siguiente pieza */
+void hudd_todas_usables(hud_dat_t *h);                   /* todas sus texturas se pueden subir (SPRANI con usos) */
 int hudd_residente(const hud_dat_t *h, int t);                           /* color de las piezas que se dibujen despues (0xFFFFFF) */
 #endif

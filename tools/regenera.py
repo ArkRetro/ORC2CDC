@@ -138,6 +138,7 @@ def paso(C, n, log):
         ej(T('conv_trafico.py'), ISO, t, '--rivales=' + ','.join(str(k) for k in range(30))); mueve(D, tj('RC*.DAT'))
     elif n == 'mision': ej(T('conv_mision.py'), ISO, t); mueve(D, tj('MISION.DAT'))   # Races.bin y tablas de 47CF40
     elif n == 'c2chud': ej(T('conv_hud.py'), ISO, t, '--c2c'); mueve(D, tj('C2CHUD.DAT'))   # HUD de las misiones de C2C
+    elif n == 'c2c': ej(T('conv_c2c.py'), ISO, t); mueve(D, tj('C2C.DAT'))   # pantallas de C2C (banco 0x44, menu.c)
     elif n == 'camiones':                                        # los camiones con remolque de OUTRUN2SP (39/40, 41, 43)
         ej(T('conv_trafico.py'), ISO, t, '--camiones'); mueve(D, tj('TRAFK0.DAT'), tj('TRAFK1.DAT'), tj('TRAFK2.DAT'))
     elif n.startswith('coche'):
@@ -219,7 +220,8 @@ def regenera(iso, D, W, jobs=4, informe=print):
                   (['SALIDA.DAT'], 'salida'), (['INFARTO.DAT', 'HAHUD.DAT', 'VOCESH.DAT'], 'infarto'), (['BO.DAT'], 'bo'),
                   (['TRAFC.DAT', 'TAPD.DAT', 'TRAF0.DAT'], 'trafico'), (['TRAFK0.DAT', 'TRAFK1.DAT', 'TRAFK2.DAT'], 'camiones'),
                   (['MVTS.VQV'], 'video_ts'), (['MVATTR.VQV'], 'video_attr'),
-                  (['RC%02d.DAT' % k for k in range(30)], 'rivales'), (['MISION.DAT'], 'mision'), (['C2CHUD.DAT'], 'c2chud')):
+                  (['RC%02d.DAT' % k for k in range(30)], 'rivales'), (['MISION.DAT'], 'mision'), (['C2CHUD.DAT'], 'c2chud'),
+                  (['C2C.DAT'], 'c2c')):
         if not hay(D, *fs): falta.append(n)
 
     informe('== %d pasos en %d a la vez (registros en %s)' % (len(falta), jobs, os.path.join(W, 'registro')))
@@ -302,7 +304,7 @@ def regenera(iso, D, W, jobs=4, informe=print):
     informe('== comprobacion de %s' % D)
     ok = True
     nec = ['BAND.DAT', 'BAND1.DAT', 'BKD.DAT', 'BO.DAT'] + chrs + \
-          'COCHES.DAT COLBK.DAT COLLR.DAT CURSO.DAT EFECTOS.DAT FIN.DAT GOVER.DAT HAHUD.DAT HUD.DAT INFARTO.DAT MENU.DAT META.DAT MODOV.DAT MVATTR.VQV MVTS.VQV PARAM.DAT SFX.DAT SEGS.PAK SOL.DAT TAPD.DAT TRAFC.DAT UNIONES.PAK VMU.DAT VOCES.DAT VOCESH.DAT VOCESC.DAT MISION.DAT C2CHUD.DAT'.split() + ['RC%02d.DAT' % k for k in range(30)] + \
+          'COCHES.DAT COLBK.DAT COLLR.DAT CURSO.DAT EFECTOS.DAT FIN.DAT GOVER.DAT HAHUD.DAT HUD.DAT INFARTO.DAT MENU.DAT META.DAT MODOV.DAT MVATTR.VQV MVTS.VQV PARAM.DAT SFX.DAT SEGS.PAK SOL.DAT TAPD.DAT TRAFC.DAT UNIONES.PAK VMU.DAT VOCES.DAT VOCESH.DAT VOCESC.DAT MISION.DAT C2CHUD.DAT C2C.DAT'.split() + ['RC%02d.DAT' % k for k in range(30)] + \
           ['COCHE%02d.DAT' % k for k in range(15)] + ['MUS%d.ADP' % k for k in MUSICA] + SP + FINAL + \
           ['TRAFK%d.DAT' % k for k in range(3)]
     for f in nec:

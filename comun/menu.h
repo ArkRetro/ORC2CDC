@@ -27,7 +27,10 @@ void menu_sale(void);                       /* libera toda la VRAM del menu */
 int menu_modo(void);                        /* variante del modo: 1 OutRun, 2 Heart Attack (INFARTO), 7 Time Attack */
 /* COAST 2 COAST (variante 6): las misiones que se pueden elegir (indice de Races.bin, clave y subclave), la elegida
    (-1: otro modo) y la nota de la mision en la licencia (495A20) */
-void menu_pon_misiones(int n, const int16_t *idx, const uint8_t *clave, const uint8_t *sub);
+void menu_pon_misiones(int n, const int16_t *idx, const uint8_t *clave, const uint8_t *sub, const uint8_t *tipo,
+                       const uint8_t *jugable);
+/* RAM para las tablas de C2C.DAT (las pantallas de COAST 2 COAST) mientras se ven: tam bytes; 0 la devuelve */
+extern void *(*menu_hueco)(uint32_t tam);
 int menu_mision(void);
 void menu_nota_mision(int clave, int sub, int nota);
 int menu_nota_de(int clave, int sub);         /* licencia +0x1D7 + 5 clave + subclave (7 sin jugar) */
@@ -56,7 +59,7 @@ int menu_foto(void);                        /* licencia +0x20 (la foto: PC [7C24
 /* ganchos para otros modulos (voces del locutor, video): se llaman al entrar en cada pantalla (evento 0) y al elegir
    una opcion (evento 1, valor = opcion); NULL = nada */
 enum { MP_TITULO, MP_MENU, MP_MODO, MP_COCHE, MP_CAMBIO, MP_MUSICA, MP_LICENCIA, MP_EDITOR, MP_OPCIONES, MP_RANKING,
-       MP_MULTI };
+       MP_MULTI, MP_C2C };
 extern void (*menu_gancho)(int pantalla, int evento, int valor);
 /* lo pone quien dibuja el coche 3D de la seleccion: libera su VRAM (se vuelve a cargar cuando haga falta). El menu lo
    llama cuando una pantalla no cabe: las texturas del coche quedan en medio de la VRAM del menu y la parten (la

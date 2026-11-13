@@ -43,6 +43,7 @@ spr_banco_t *spr_abre_en(const char *fich, void *ram, uint32_t cap)
     if (!b) return NULL;
     hudd_tablas_fijas(ram, cap);                        /* (con ram, nunca en el monton: si no caben, NULL) */
     if (!(b->h = hudd_abre(fich, 0, 1))) { free(b); return NULL; }
+    hudd_todas_usables(b->h);                           /* (con usos propios del conversor: las de las escenas tambien) */
     x = hudd_extra(b->h);
     if (memcmp(x, "SPR1", 4)) { hudd_cierra(b->h); free(b); return NULL; }
     memcpy(c, x + 4, sizeof c - 4);
@@ -55,6 +56,7 @@ spr_banco_t *spr_abre_en(const char *fich, void *ram, uint32_t cap)
     return b;
 }
 
+struct hud_dat *spr_hud(const spr_banco_t *b) { return b ? b->h : NULL; }
 const uint8_t *spr_extra(const spr_banco_t *b, uint32_t *tam) { if (tam) *tam = b ? b->tam_extra : 0; return b ? b->extra : NULL; }
 
 /* ---- grupo de instancias ---- */

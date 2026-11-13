@@ -43,6 +43,7 @@
 #include "rksp.h"
 #include "vmu.h"
 #include "fsp.h"
+#include "sprani.h"
 
 void (*menu_gancho)(int pantalla, int evento, int valor);
 void (*menu_suelta_coche)(void);
@@ -58,12 +59,14 @@ static const char *const VNOM[NV] = { "TITULO", "COMUN", "MENU", "MODO", "COCHE"
                                       "RANKING", "MULTI", "OPCIONES", "PAUSA", "MUSICA0", "MUSICA1",
                                       "MUSICA2" };
 /* pantallas del menu (las de menu.h, MP_*) y la VRAM que necesita cada una */
-enum { P_TITULO, P_MENU, P_MODO, P_COCHE, P_CAMBIO, P_MUSICA, P_LICENCIA, P_EDITOR, P_OPCIONES, P_RANKING, P_MULTI, NP };
+enum { P_TITULO, P_MENU, P_MODO, P_COCHE, P_CAMBIO, P_MUSICA, P_LICENCIA, P_EDITOR, P_OPCIONES, P_RANKING, P_MULTI,
+       P_C2C, NP };                                         /* P_C2C: categorias y mapa de COAST 2 COAST (C2C.DAT) */
 #define VB(v) (1 << (v))
 static const int MASCARA[NP] = {
     VB(V_TITULO), VB(V_COMUN) | VB(V_MENU), VB(V_COMUN) | VB(V_MODO), VB(V_COMUN) | VB(V_COCHE),
     VB(V_COMUN) | VB(V_COCHE) | VB(V_CAMBIO), VB(V_COMUN) | VB(V_MUSICA), VB(V_COMUN) | VB(V_LICENCIA),
-    VB(V_COMUN) | VB(V_LICENCIA), VB(V_COMUN) | VB(V_OPCIONES), VB(V_COMUN) | VB(V_RANKING), VB(V_COMUN) | VB(V_MULTI) };
+    VB(V_COMUN) | VB(V_LICENCIA), VB(V_COMUN) | VB(V_OPCIONES), VB(V_COMUN) | VB(V_RANKING), VB(V_COMUN) | VB(V_MULTI),
+    VB(V_COMUN) | VB(V_MODO) };
 
 enum { U_TFONDO, U_TLOGO, U_TSTART, U_FONDO, U_CABMENU, U_PRINC, U_CABMODO, U_UNJUG, U_CABCOCHE, U_INFO, U_INFO_T,
        U_CAND, U_CAMBIO, U_RADIO, U_AYUDA, U_L0, U_T0, U_LISTA, U_MCAND, U_CABMUSICA,
@@ -387,6 +390,15 @@ mal:
     dbglog(DBG_ERROR, "menu: el carrusel del menu principal no es el esperado: con MULTIPLAYER\n");
 }
 
+/* COAST 2 COAST (mas abajo) */
+static int c2_abre(void);
+static void c2_cierra(void);
+static void c2_entra(void);
+static void c2_control(unsigned n);
+static void c2_dibuja(void);
+static int c2_activo(void);
+static void bloqueado(void);
+
 /* ---------------------------------------------------------------- VRAM */
 /* la de la musica, con la lista que se ve */
 static int mascara(int p) { return MASCARA[p] | (p == P_MUSICA ? VB(V_MUS0 + lista) : 0); }
@@ -434,7 +446,7 @@ unsigned menu_vram(void)
     for (p = 0; p < NV; p++) if (cargada[p]) s += pan[pidx[p]].vram;
     return s;
 }
-void menu_sale(void) { int p; for (p = 0; p < NV; p++) baja_p(p); fsp_sale(); hudd_vacia(); }
+void menu_sale(void) { int p; c2_cierra(); for (p = 0; p < NV; p++) baja_p(p); fsp_sale(); hudd_vacia(); }
 /* antes del frontal de recreativa: la VRAM del menu fuera (sus tablas siguen en la RAM) */
 static void menu_libera_todo(void) { int p; for (p = 0; p < NV; p++) baja_p(p); if (menu_suelta_coche) menu_suelta_coche(); hudd_vacia(); }
 void menu_libera_vram(void)
@@ -589,7 +601,7 @@ static int cabecera(int p)
 {
     switch (p) {
     case P_MENU: return U_CABMENU;
-    case P_MODO: return U_CABMODO;
+    case P_MODO: case P_C2C: return U_CABMODO;
     case P_COCHE: case P_CAMBIO: return U_CABCOCHE;
     case P_MUSICA: return U_CABMUSICA;
     case P_LICENCIA: case P_EDITOR: return U_CABLIC;
@@ -606,7 +618,7 @@ static int barra(int p)
     case P_MENU: return U_BARRA_MENU;
     case P_MODO: return U_BARRA_MODO;
     case P_COCHE: return U_BARRA_COCHE;
-    case P_CAMBIO: return U_BARRA_CAMBIO;
+    case P_CAMBIO: case P_C2C: return U_BARRA_CAMBIO;     /* (C2C: SELECT y BACK) */
     case P_MUSICA: return U_BARRA_MUSICA;
     case P_LICENCIA: case P_EDITOR: case P_RANKING: case P_MULTI: return U_BARRA_LIC;
     case P_OPCIONES: return U_BARRA_OPC;
@@ -666,11 +678,18 @@ static void entra(int p, int atras)
     cargando = !asegura(mascara(p)); t_carga = 0;
     barra_ant = pant >= 0 ? barra(pant) : -1;
     pant = p; fase = F_ENTRA; t = 0; entra_atras = atras; t_bloq = 0;
+    if (p != P_C2C) c2_cierra();                            /* (su RAM es del hueco de la union y su VRAM, propia) */
     if (cab < 0) a_cab.u = -1;
     else if (us[cab] != a_cab.u) { a_cab.u = us[cab]; an_tramo(&a_cab, "ENTRA"); }   /* cabecera nueva */
     GANCHO(p, 0, 0);
     switch (p) {
     case P_TITULO: fase = F_QUIETO; pon_pista(-1); break;
+    case P_C2C: {
+        int q;
+        for (q = 0; q < NV; q++) if (!(mascara(P_C2C) & VB(q))) baja_p(q);   /* VRAM para las escenas del banco 0x44 */
+        if (c2_abre()) { entra(P_MODO, 1); bloqueado(); return; }   /* (sin C2C.DAT o sin el hueco)  */
+        c2_entra();
+        break; }
     case P_MENU: case P_MODO: case P_RANKING: case P_MULTI: {
         static const int U_[] = { U_PRINC, U_UNJUG, U_RANK, U_MULTI };
         int k = p == P_MENU ? 0 : p == P_MODO ? 1 : p == P_RANKING ? 2 : 3;
@@ -742,25 +761,33 @@ void menu_suma_millas(uint32_t millas)
 }
 
 /* variante de [780258] (PS2 0x443508) del modo elegido, como 4EEAD0 del PC (runtime_route_mode: 1 OutRun, 2 Heart
-   Attack, 7 Time Attack); COAST 2 COAST (las misiones de Races.bin, variante 5) no esta: corre como OutRun */
+   Attack, 7 Time Attack, 6 las misiones de COAST 2 COAST) */
 static int mis_sel = -1;                                    /* COAST 2 COAST: la mision elegida (ver abajo) */
 int menu_modo(void) { return sp_sel ? fsp_variante() : modo_sel == 2 ? 2 : modo_sel == 3 ? 7 : modo_sel == 0 && mis_sel >= 0 ? 6 : 1; }
 
-/* COAST 2 COAST: misiones de carrera de Races.bin (variante 6 de 4EEAD0, selector 0). El original: pantalla de
-   categorias (4E8130), mapa de misiones (4E9160, nodos desbloqueados por las notas de los vecinos) y detalle (hasta 5
-   carreras); sus graficos (tokens 0x4400d0..0x4400f0 del banco 0x44) no estan convertidos en MENU.DAT. DESVIACION:
-   en su lugar una ventana sobre ELEGIR MODO con la lista de las misiones que la carrera corre (las de carrera, tipo 0,
-   cuyo curso cabe en los huecos de la RAM; main la da con menu_pon_misiones), su nota de la licencia y A / B */
+/* COAST 2 COAST: las misiones de Races.bin (variante 6 de 4EEAD0, selector 0). Pantallas del original (P_C2C, mas
+   abajo): categorias (suceso 0x3a), mapa de misiones y detalle de la mision (suceso 0x3b); de ahi a la seleccion de
+   coche (suceso 0xa) como los otros modos. main da la lista de Races.bin con menu_pon_misiones: indice, clave
+   (categoria + 1), subclave (carrera + 1), tipo (+0x20) y si la carrera se puede correr (tipo 0 y su curso cabe en los
+   huecos de la RAM) */
 #define MIS_MAX 94
-static int mis_n, mis_cur, mis_ventana;
-static int16_t mis_idx[MIS_MAX]; static uint8_t mis_cl[MIS_MAX], mis_sb[MIS_MAX];
-static void mis_dibuja(void);
-void menu_pon_misiones(int n, const int16_t *idx, const uint8_t *clave, const uint8_t *sub)
+static int mis_n;
+static int16_t mis_idx[MIS_MAX]; static uint8_t mis_cl[MIS_MAX], mis_sb[MIS_MAX], mis_tipo[MIS_MAX], mis_jug[MIS_MAX];
+void menu_pon_misiones(int n, const int16_t *idx, const uint8_t *clave, const uint8_t *sub, const uint8_t *tipo,
+                       const uint8_t *jugable)
 {
     int i;
     mis_n = n < 0 ? 0 : n > MIS_MAX ? MIS_MAX : n;
-    for (i = 0; i < mis_n; i++) { mis_idx[i] = idx[i]; mis_cl[i] = clave[i]; mis_sb[i] = sub[i]; }
-    if (mis_cur >= mis_n) mis_cur = 0;
+    for (i = 0; i < mis_n; i++) {
+        mis_idx[i] = idx[i]; mis_cl[i] = clave[i]; mis_sb[i] = sub[i]; mis_tipo[i] = tipo[i]; mis_jug[i] = jugable[i];
+    }
+}
+/* la mision (clave, subclave) en la lista (0x1f7f20 = 4958C0: el registro de Races.bin con esa clave y subclave) */
+static int mis_busca(int clave, int sub)
+{
+    int i;
+    for (i = 0; i < mis_n; i++) if (mis_cl[i] == clave && mis_sb[i] == sub) return i;
+    return -1;
 }
 int menu_nota_de(int clave, int sub)
 {
@@ -778,11 +805,6 @@ void menu_nota_mision(int clave, int sub, int nota)
     have = p[off];
     if (nota > have || have == 7) { p[0x3f4] |= 2; p[off] = (uint8_t)nota; }
     dbglog(DBG_INFO, "LICENCIA: mision %d-%d nota %d (guardada %d)\n", clave, sub, nota, p[off]);
-}
-static int mis_nota(int k)
-{
-    const uint8_t *p = activa(); int off = 0x1d7 + 5 * mis_cl[k] + mis_sb[k];
-    return p && off < 0x1dd + 0xc8 ? p[off] : 7;
 }
 int menu_sp(void) { return sp_sel; }
 void menu_entra_sp(void)
@@ -957,13 +979,6 @@ static void control(unsigned n)
         break;
     case P_MENU: case P_MODO:
         if (!an_hecho(&a_sel)) break;
-        if (pant == P_MODO && mis_ventana) {                /* COAST 2 COAST: elegir la mision (DESVIACION, ver arriba) */
-            if (izq) { mis_cur = (mis_cur + mis_n - 1) % mis_n; sfx_menu(SFX_CURSOR); }
-            else if (der) { mis_cur = (mis_cur + 1) % mis_n; sfx_menu(SFX_CURSOR); }
-            else if (ok) { mis_ventana = 0; modo_sel = 0; mis_sel = mis_idx[mis_cur]; GANCHO(pant, 1, 0); sale(P_COCHE, 1); }
-            else if (atras) { mis_ventana = 0; sfx_menu(SFX_CANCELA); }
-            break;
-        }
         carrusel(n, pant == P_MENU ? &c_menu : &c_modo, pant == P_MENU ? n_menu : N_OPC, izq, der);
         if (izq || der) break;
         if (ok) {
@@ -976,13 +991,14 @@ static void control(unsigned n)
                     sp_sel = 1; sfx_menu(SFX_ACEPTA); menu_libera_todo();
                     if (fsp_entra()) { sp_sel = 0; entra(P_MENU, 1); }
                 }
-            } else if (c == 0) {                            /* COAST 2 COAST: la ventana de las misiones */
-                if (mis_n) { mis_ventana = 1; sfx_menu(SFX_ACEPTA); } else bloqueado();
+            } else if (c == 0) {                            /* COAST 2 COAST: categorias (P_C2C) */
+                if (mis_n && !c2_abre()) { modo_sel = 0; sale(P_C2C, 1); } else bloqueado();
             } else if (c <= 3) { modo_sel = c; mis_sel = -1; sale(P_COCHE, 1); } else bloqueado();   /* OUTRUN, HEART ATTACK, TIME ATTACK */
         } else if (n & CONT_X) a_licencia(pant);            /* LICENSE */
         else if (n & CONT_Y) bloqueado();                   /* FRIENDS: en linea */
         else if (atras) sale(pant == P_MENU ? P_TITULO : P_MENU, 0);
         break;
+    case P_C2C: c2_control(n); break;
     case P_RANKING: case P_MULTI:
         if (!an_hecho(&a_sel)) break;
         carrusel(n, pant == P_RANKING ? &c_rank : &c_multi, pant == P_RANKING ? 3 : 2, izq, der);
@@ -1001,7 +1017,7 @@ static void control(unsigned n)
             c_arregla_color(); sfx_menu(SFX_CURSOR);
         } else if (n & CONT_Y) {                            /* COLOR: el siguiente desbloqueado de los 8 */
             if (c_desbloqueado(i)) { int o = colores[i], c = o; do c = (c + 1) & 7; while (c != o && !c_color_ok(i, c)); colores[i] = c; }
-        } else if (atras) sale(sp_sel ? P_MENU : P_MODO, 0);
+        } else if (atras) sale(sp_sel ? P_MENU : modo_sel == 0 && mis_sel >= 0 ? P_C2C : P_MODO, 0);   /* (C2C: al detalle) */
         break; }
     case P_CAMBIO:
         if (izq && manual) { manual = 0; an_tramo(&a_sel, "AT"); sfx_menu(SFX_CURSOR); }
@@ -1095,6 +1111,7 @@ int menu_paso(unsigned n)
             else if (pant == P_EDITOR) { an_tramo_n(&a_ed, "OPC%d", e_item); an_tramo_n(&a_ed_t, "OPC%d", e_item); a_sel = a_ed; }
         }
     }
+    if (pant == P_C2C && c2_activo()) spr_paso();         /* (los cursores animados de C2C.DAT) */
     if (pant == P_LICENCIA && l_desliza) {                  /* 4E2970 estados 6-9: sale 48 px por paso y entra */
         if (++l_desliza == 11) l_idx += l_dir;
         if (l_desliza >= 21) { l_desliza = 0; an_tramo(&a_fl_d, "QUIETA"); an_tramo(&a_fl_i, "QUIETA"); }
@@ -1161,6 +1178,325 @@ static float progreso(const uint8_t *p)
     for (g = 0; g < 7; g++) t += prg_f32(148 + 4 * nota_grupo(p, g));
     return t / 7.0f;
 }
+/* ---------------------------------------------------------------- COAST 2 COAST: categorias, mapa y detalle */
+/* Pantallas del original (SLES-53998; PC: outrun2-decomp platform/frontend_categories.cpp 4E8130.., frontend_missions
+   .cpp 4E9160..), con los graficos del banco SPRANI 0x44 (C2C.DAT, tools/conv_c2c.py: las 22 escenas que usan, las
+   tablas del ELF en el bloque C2C1 y los glifos de la fuente 14 de sus textos) en el reproductor comun/sprani.c.
+   Los recursos de pantalla del original (465250 / 465860 / 465970: soltar, poner {token, primero, ultimo, capa, modo 0,
+   x - 320, y - 240}, aplicar) que se vuelven a poner en cada cuadro con un cuadro fijo van como inmediatas
+   (spr_inmediata); los que se animan (los cursores) como instancias que se crean al cambiar la seleccion.
+   Categorias (suceso 0x3a; PS2 0x242340 seleccion, 0x242680 control, 0x242ac0 dibujo; 4E8580 / 4E8780 / 4E8C60):
+     7 botones (0..3 Flagman 1..3 y OutRun: grupos de misiones; 4..6 Clarissa, Jennifer y Holly: campeonatos) en
+     disponible (capa 2) o bloqueado (capa 1) segun 0x242290 (los grupos 0 y 4 siempre; 1..3 si la nota del grupo
+     anterior, 0x2420a0, es 4..6; 5 y 6 la del 4 y el 5); cursor animado 0x4400d0 (30 cuadros por boton, capa 4);
+     la foto 0x4400cf (cuadro 0x241f60: 4 x el ultimo grupo de misiones abierto + el boton) o la del campeonato; el
+     texto del grupo (fuente 14 en (65, 210), 0xFF3F474A; el de "perfeccionado" con la nota 6), su rango (E..AAA,
+     centrado en (520, 363), 0xFF4D5559) y el pie 0x4400ce, o el texto de bloqueado. Flechas: vecinos 0x417a88
+     (con sonido 1 si cambia; el cursor se vuelve a poner aunque no cambie). A: abierto -> sonido 0x40 y al mapa del
+     grupo (0..3; el 4..6 va a los campeonatos, suceso 0x3c); cerrado -> sonido 3. B: atras.
+   Mapa (suceso 0x3b; PS2 0x242ff0 seleccion, 0x2431f0 nodo abierto, 0x243748 control, 0x243b88 dibujo; 4E8F80 /
+     4E90E0 / 4E9360 / 4E95A0): fondo y encima del grupo, sus 5 / 9 / 11 / 15 categorias como nodos (abiertos: el 0 y
+     los que tienen un vecino con nota, 0x241ed0 != 7 = todas sus carreras jugadas) con su nota, el cursor 0x4400d8
+     (0..0x34) en el nodo; abajo las carreras de la categoria (0x1f7fe0: hasta 5) con su tipo (+0x20 de Races.bin) y
+     su nota (la 1.a siempre abierta; la i + 1 si la i tiene nota 4..6), el nombre 0x4400d6 (categoria + 0x1e), el
+     panel, el pie y el rotulo del tipo de la 1.a carrera en el cuadro de texto (300, 330, 570, 370; lineas de 14).
+     A: al detalle (cursor en la carrera 0; 0x4400d4 sobre ella); en el detalle, la carrera (suceso 0xa). B: del
+     detalle al mapa; del mapa a las categorias. Flechas: en el mapa, al vecino (0x375950) si esta abierto (sonido 1);
+     en el detalle, izquierda / derecha entre las carreras abiertas.
+   DESVIACION (docs/PARIDAD.md, COAST 2 COAST): solo se corren las misiones de carrera (tipo 0) cuyo curso cabe en la
+   RAM; las demas se ven como en el original pero A en su carrera da el sonido de bloqueado. Los campeonatos (botones
+   4..6) tampoco estan: A en ellos, bloqueado. */
+void *(*menu_hueco)(uint32_t tam);
+#define C2C_RAM (160u << 10)                                /* tablas de C2C.DAT (animacion 43 KB, sprites, C2C1...) */
+typedef struct { uint32_t tok, pri, ult; } c2_d_t;
+typedef struct {                                            /* bloque C2C1 (tools/conv_c2c.py) */
+    char m[4]; uint32_t o_txt;
+    c2_d_t sel[7], disp[7], bloq[7], foto_d[7], foto_b[7], pie_d[7], pie_b[7];
+    float pos[7][2]; int32_t vec[7][4]; uint32_t tok_foto;
+    uint32_t t_normal[7], t_completo[7], t_bloq[7], t_rango[8];
+    uint32_t cuenta[4], base[4];
+    c2_d_t fondo[4], encima[4], tipo[7], boton[4], pie[4], nodo[4], panel[4], elegida[5], nota[7];
+    uint32_t rotulo[7];
+    float carrera[5][2], nota_xy[5][2], resalta[4][15][2], nodo_xy[4][15][2];
+    int32_t mvec[4][15][4];
+    uint32_t tok_cursor, tok_nombre, nombre_base; float nombre_xy[2];
+} c2_t;
+static spr_banco_t *c2_bk; static const c2_t *C2; static hud_dat_t *c2_h; static int c2_uf = -1;
+static int c2_mapa;                                         /* 0 categorias (0x3a), 1 mapa (0x3b) */
+static int c2_cat;                                          /* boton de las categorias (PS2 0x375330 = 84B7F0) */
+static int c2_nodo;                                         /* nodo del mapa (PS2 0x3753d8 = 84B7F4) */
+static int c2_det, c2_cur;                                  /* detalle (+0x4c) y su carrera (+0x50) */
+static int c2_h_sel = -1, c2_h_cur = -1, c2_h_eleg = -1;    /* recursos +0x5ec (categorias), +0x194 y +0x234 (mapa) */
+static uint8_t c2_vacia[LIC_BYTES]; static int c2_vacia_ok; /* sin licencia: todas sin jugar */
+
+static int c2_activo(void) { return C2 != NULL; }
+static int c2_abre(void)
+{
+    void *ram; uint32_t tam;
+    if (C2) return 0;
+    if (!(ram = menu_hueco ? menu_hueco(C2C_RAM) : NULL)) { dbglog(DBG_ERROR, "C2C: sin el hueco para C2C.DAT\n"); return -1; }
+    spr_suelta_todas();
+    if (!(c2_bk = spr_abre_en("C2C.DAT", ram, C2C_RAM))) {
+        dbglog(DBG_ERROR, "C2C: no se pudo abrir C2C.DAT\n"); menu_hueco(0); return -1;
+    }
+    C2 = (const c2_t *)spr_extra(c2_bk, &tam);
+    if (!C2 || ((uintptr_t)C2 & 3) || tam < sizeof(c2_t) || memcmp(C2->m, "C2C1", 4) || C2->o_txt >= tam) {
+        dbglog(DBG_ERROR, "C2C: C2C.DAT sin tablas\n"); spr_cierra(c2_bk); c2_bk = NULL; C2 = NULL; menu_hueco(0); return -1;
+    }
+    c2_h = spr_hud(c2_bk); c2_uf = hudd_uso(c2_h, "F14");
+    if (c2_uf >= 0 && hudd_sube_uso(c2_h, c2_uf)) dbglog(DBG_ERROR, "C2C: sin VRAM para los glifos\n");
+    c2_h_sel = c2_h_cur = c2_h_eleg = -1;
+    dbglog(DBG_INFO, "C2C: C2C.DAT (%u bytes de tablas en el hueco), VRAM libre %uK\n", (unsigned)hudd_tablas_ocupa(),
+           (unsigned)(pvr_mem_available() >> 10));
+    return 0;
+}
+static void c2_cierra(void)
+{
+    if (!c2_bk) return;
+    spr_suelta_todas(); spr_cierra(c2_bk); c2_bk = NULL; C2 = NULL; c2_h = NULL; c2_uf = -1;
+    c2_h_sel = c2_h_cur = c2_h_eleg = -1;
+    if (menu_hueco) menu_hueco(0);
+}
+static const uint8_t *c2_lic(void)
+{
+    const uint8_t *p = activa();
+    if (p) return p;
+    if (!c2_vacia_ok) { lic_reinicia(c2_vacia); c2_vacia_ok = 1; }
+    return c2_vacia;
+}
+static const char *c2_txt(uint32_t o) { return o ? (const char *)C2 + o : NULL; }
+static void c2_inm(const c2_d_t *d, int capa, float x, float y) { if (d->tok >> 16) spr_inmediata(d->tok, x - 320, y - 240, capa, (int)d->pri); }
+static int c2_crea(const c2_d_t *d, int capa, float x, float y)
+{
+    int h = spr_crea(d->tok, capa, 0, (int)d->pri, (int)d->ult);
+    spr_traslada(h, x - 320, y - 240);
+    return h;
+}
+/* 0x242290 (4E8410): boton g abierto */
+static int c2_abierto(int g)
+{
+    int n;
+    if (g == 0 || g == 4) return 1;
+    if (g < 0 || g > 6 || !prg) return 0;
+    n = nota_grupo(c2_lic(), g - 1);                       /* (1..3: el grupo anterior; 5 y 6: el 4 y el 5) */
+    return n != 7 && n >= 4;
+}
+/* 0x241f60 (4E8B20): la foto de las categorias */
+static int c2_foto(void)
+{
+    int r = c2_abierto(3) ? 12 : c2_abierto(2) ? 8 : c2_abierto(1) ? 4 : 0;
+    return c2_cat > 3 ? r : r + c2_cat;
+}
+static int c2_grupo(void) { return c2_cat < 4 ? c2_cat : 0; }
+static int c2_categoria(void) { return (int)C2->base[c2_grupo()] + c2_nodo; }
+static int c2_carreras(int c) { return prg && c >= 0 && c < 40 ? prg[c] : 0; }   /* 0x1f7fe0 (495930) */
+/* 0x2431f0 (4E90E0): nodo abierto: el 0 y los que tienen un vecino con nota (0x241ed0 != 7). El PC (4E90E0) pide
+   ademas nota 4..6 en el vecino; manda el de PS2 */
+static int c2_nodo_abierto(int k)
+{
+    int g = c2_grupo(), q, v;
+    if (k == 0) return 1;
+    if (!prg) return 0;
+    for (q = 0; q < 4; q++)
+        if ((v = C2->mvec[g][k][q]) >= 0 && nota_cat(c2_lic(), (int)C2->base[g] + v) != 7) return 1;
+    return 0;
+}
+/* 0x242340 (4E8580): el cursor de las categorias */
+static void c2_sel_cat(void)
+{
+    spr_suelta(c2_h_sel); c2_h_sel = c2_crea(&C2->sel[c2_cat], 4, 320, 240);
+}
+/* 0x242ff0 (4E8F80): el cursor del mapa o del detalle y la carrera elegida */
+static void c2_sel_mapa(void)
+{
+    const c2_d_t cur = { C2->tok_cursor, 0, 0x34 };
+    spr_suelta(c2_h_eleg); c2_h_eleg = -1;
+    spr_suelta(c2_h_cur);
+    if (!c2_det) {
+        const float *p = C2->resalta[c2_grupo()][c2_nodo];
+        c2_h_cur = c2_crea(&cur, 4, p[0], p[1]);
+    } else {
+        c2_h_cur = spr_crea(cur.tok, 5, 0, 0, 0x34);
+        spr_traslada(c2_h_cur, C2->carrera[c2_cur][0] - 320, C2->carrera[c2_cur][1] - 240);
+        c2_h_eleg = c2_crea(&C2->elegida[c2_cur], 4, 320, 240);
+    }
+}
+static void c2_suelta_cursores(void)
+{
+    spr_suelta(c2_h_sel); spr_suelta(c2_h_cur); spr_suelta(c2_h_eleg); c2_h_sel = c2_h_cur = c2_h_eleg = -1;
+}
+static void c2_a_categorias(void)                           /* 0x242648: init de las categorias (nodo 0) */
+{
+    c2_suelta_cursores(); c2_mapa = 0; c2_nodo = 0; c2_det = 0; c2_cur = 0; c2_sel_cat();
+}
+static void c2_a_mapa(void)                                 /* 0x243698: init del mapa (sin detalle) */
+{
+    c2_suelta_cursores(); c2_mapa = 1; c2_det = 0; c2_cur = 0; c2_sel_mapa();
+}
+/* al entrar en P_C2C: desde ELEGIR MODO, las categorias; de vuelta de la seleccion de coche, el detalle donde estaba */
+static void c2_entra(void)
+{
+    if (entra_atras && c2_mapa && mis_sel >= 0) { c2_suelta_cursores(); c2_det = 1; c2_sel_mapa(); }
+    else c2_a_categorias();
+}
+
+/* texto con la fuente 14 (glifos de C2C.DAT; metricas e interletraje de MNU2): 42CDD0 con las banderas (1 sin
+   alinear, 4 centrado); '\n' vuelve a x y baja alto + espaciado y (0 en la fuente 14) como 42C610 */
+static void c2_texto(const char *s, int n, float x, float y, int flags, float z, uint32_t col)
+{
+    int i; float x0;
+    if (!s || !f_met || c2_uf < 0) return;
+    if (!(flags & 1)) x -= (flags & 4) ? f_ancho((const uint8_t *)s, n) / 2 : f_ancho((const uint8_t *)s, n);
+    x0 = x;
+    hudd_color(col);
+    for (i = 0; i < n; i++) {
+        int c = (uint8_t)s[i], sig = i + 1 < n ? (uint8_t)s[i + 1] : 0;
+        if (c == 10) { x = x0; y += f_h; continue; }
+        if (c == 32) { x += (int)(f_w * 0.3f); continue; }
+        if (c - f_pri < 0 || c - f_pri >= f_n) continue;
+        hudd_dibuja(c2_h, c2_uf, c - f_pri, x, y, 1, z, 0); z = hudd_z();
+        x = f_par(c, sig == 32 ? 0 : sig) + x + f_esp;
+    }
+    hudd_color(0xFFFFFF);
+}
+/* cuadro de texto con ajuste de linea (48EB60 del PC, el de PS2 con +0x1c en sus campos): palabras hasta un espacio,
+   '-' o '\n'; la que no cabe en el ancho pasa a la linea siguiente (sola y demasiado larga: se corta); lineas de
+   `alto` hacia abajo desde (x, y), sin alinear */
+static void c2_parrafo(const char *s, float x, float y, int ancho, int alto, float z, uint32_t col)
+{
+    char lin[16][128], pal[128]; int nl = 0, hecho = 0, usado = 0, np = 0, i, n = strlen(s), k;
+    memset(lin, 0, sizeof lin);
+#define ESCRIBE(o, d, m) do { if (nl < 16 && (o) >= 0 && (o) + (m) <= 128) memcpy(lin[nl] + (o), d, m); } while (0)
+#define FIN() do { ESCRIBE(hecho, "", 1); nl++; hecho = usado = 0; } while (0)
+    for (i = 0; i <= n && nl < 16; i++) {
+        char c = i < n ? s[i] : 0;
+        if (c != ' ' && c != '-' && c != '\n' && c && hecho + np != 127) {
+            if (np < 127) pal[np++] = c;
+            if (usado + f_ancho((const uint8_t *)pal, np) <= ancho) continue;
+            if (hecho == 0) { np--; ESCRIBE(0, pal, np); hecho = np; FIN(); np = 0; i--; }
+            else FIN();
+        } else {
+            ESCRIBE(hecho, pal, np); hecho += np;
+            if (c == '\n' || !c || hecho == 127) { FIN(); np = 0; }
+            else { pal[np++] = c; usado += f_ancho((const uint8_t *)pal, np); ESCRIBE(hecho, &c, 1); hecho++; np = 0; }
+        }
+    }
+#undef FIN
+#undef ESCRIBE
+    for (k = 0; k < nl && k < 16; k++) {
+        int m = strnlen(lin[k], 128);
+        if (m) { c2_texto(lin[k], m, x, y + k * alto, 1, z, col); z = hudd_z(); }
+    }
+}
+
+static void c2_control(unsigned n)
+{
+    int ok = n & (CONT_A | CONT_START), atras = n & CONT_B, act = -1;
+    if (!C2) return;
+    if (n & CONT_DPAD_UP) act = 2; else if (n & CONT_DPAD_LEFT) act = 3;      /* 48F5F0: 2 arriba, 3 izquierda, */
+    else if (n & CONT_DPAD_DOWN) act = 4; else if (n & CONT_DPAD_RIGHT) act = 5;   /* 4 abajo, 5 derecha */
+    if (!c2_mapa) {                                         /* 0x242680 */
+        if (ok) {
+            if (!c2_abierto(c2_cat)) { sfx_menu(SFX_BLOQUEADO); return; }
+            if (c2_cat >= 4) { bloqueado(); return; }       /* campeonatos (suceso 0x3c): no estan */
+            sfx_menu(SFX_ACEPTA); c2_a_mapa();
+        } else if (atras) { c2_suelta_cursores(); sale(P_MODO, 0); }
+        else if (act >= 2) {
+            static const int COL[4] = { 0, 3, 1, 2 };       /* tabla de saltos 0x417720 */
+            int v = C2->vec[c2_cat][COL[act - 2]];
+            if (v >= 0) { c2_cat = v; sfx_menu(SFX_CURSOR); }
+            c2_sel_cat();
+        }
+        return;
+    }
+    {   /* 0x243748 */
+        int g = c2_grupo(), c = c2_categoria();
+        const uint8_t *p = c2_lic();
+        if (ok) {
+            if (!c2_det) { c2_det = 1; c2_cur = 0; c2_sel_mapa(); return; }
+            {   int m = mis_busca(c + 1, c2_cur + 1);       /* root+0x208: categoria << 12, carrera << 18; suceso 0xa */
+                if (m < 0 || !mis_jug[m]) { bloqueado(); return; }   /* (DESVIACION: solo las de carrera que caben) */
+                modo_sel = 0; mis_sel = mis_idx[m];
+                dbglog(DBG_INFO, "C2C: mision %d-%d (Races.bin %d)\n", c + 1, c2_cur + 1, mis_sel);
+                GANCHO(P_C2C, 1, mis_sel); sale(P_COCHE, 1);
+            }
+            return;
+        }
+        if (atras) {
+            if (c2_det) { c2_det = 0; c2_cur = 0; c2_sel_mapa(); }
+            else { c2_a_categorias(); sfx_menu(SFX_CANCELA); }
+            return;
+        }
+        if (act < 2) return;
+        if (c2_det) {
+            if (act == 3) { if (!c2_cur) return; c2_cur--; }
+            else if (act == 5) {
+                int nc = c2_carreras(c), gr = p[0x1dd + 5 * c + c2_cur];
+                if (c2_cur >= nc - 1 || gr == 7 || gr < 4) return;
+                c2_cur++;
+            } else return;
+        } else {
+            static const int COL[4] = { 0, 3, 1, 2 };       /* tabla de saltos 0x417b70 */
+            int v = C2->mvec[g][c2_nodo][COL[act - 2]];
+            if (v < 0 || !c2_nodo_abierto(v)) return;
+            c2_nodo = v;
+        }
+        c2_sel_mapa(); sfx_menu(SFX_CURSOR);
+    }
+}
+
+static void c2_dibuja(void)
+{
+    const uint8_t *p = c2_lic(); float z;
+    int i;
+    if (!C2) return;
+    if (!c2_mapa) {                                         /* 0x242ac0 */
+        int ab = c2_abierto(c2_cat);
+        for (i = 0; i < 7; i++) {
+            if (c2_abierto(i)) c2_inm(&C2->disp[i], 2, C2->pos[i][0], C2->pos[i][1]);
+            else c2_inm(&C2->bloq[i], 1, C2->pos[i][0], C2->pos[i][1]);
+        }
+        if (c2_cat < 4) { c2_d_t d = { C2->tok_foto, (uint32_t)c2_foto(), 0 }; c2_inm(&d, 1, 320, 240); }
+        else c2_inm(ab ? &C2->foto_d[c2_cat] : &C2->foto_b[c2_cat], 1, 320, 240);
+        c2_inm(ab ? &C2->pie_d[c2_cat] : &C2->pie_b[c2_cat], 1, 320, 240);
+        spr_dibuja(0, SPR_CAPAS, 3, 0); z = hudd_z();
+        if (ab) {
+            int gr = prg ? nota_grupo(p, c2_cat) : 7; const char *s = c2_txt(gr == 6 ? C2->t_completo[c2_cat] : C2->t_normal[c2_cat]);
+            if (s) { c2_texto(s, strlen(s), 65, 210, 1, z, 0x3F474A); z = hudd_z(); }
+            if ((s = c2_txt(C2->t_rango[gr & 7]))) c2_texto(s, strlen(s), 520, 363, 4, z, 0x4D5559);
+        } else {
+            const char *s = c2_txt(C2->t_bloq[c2_cat]);
+            if (s) c2_texto(s, strlen(s), 65, 210, 1, z, 0x3F474A);
+        }
+        return;
+    }
+    {   /* 0x243b88 */
+        int g = c2_grupo(), c = c2_categoria(), nc = c2_carreras(c), t1 = 0, m;
+        c2_inm(&C2->fondo[g], 1, 320, 240); c2_inm(&C2->encima[g], 3, 320, 240);
+        for (i = 0; i < (int)C2->cuenta[g] && i < 15; i++) {
+            const float *q = C2->nodo_xy[g][i]; int gr;
+            if (!c2_nodo_abierto(i)) continue;
+            c2_inm(&C2->nodo[g], 2, q[0], q[1]);
+            if ((gr = nota_cat(p, (int)C2->base[g] + i)) != 7) c2_inm(&C2->nota[gr], 3, q[0], q[1]);
+        }
+        for (i = 0; i < nc && i < 5; i++) {
+            int gr = p[0x1dd + 5 * c + i], ant = i ? p[0x1dc + 5 * c + i] : 7, t;
+            const float *q = C2->carrera[i];
+            if (i && (ant == 7 || ant < 4)) { c2_d_t d = { C2->boton[g].tok, 5, 5 }; c2_inm(&d, 2, q[0], q[1]); continue; }
+            c2_inm(&C2->boton[g], 2, q[0], q[1]);
+            m = mis_busca(c + 1, i + 1); t = m >= 0 && mis_tipo[m] < 7 ? mis_tipo[m] : 0;
+            c2_inm(&C2->tipo[t], 3, q[0], q[1]);
+            if (gr < 7) c2_inm(&C2->nota[gr], 4, C2->nota_xy[i][0], C2->nota_xy[i][1]);
+        }
+        { c2_d_t d = { C2->tok_nombre, C2->nombre_base + c, 0 }; c2_inm(&d, 2, C2->nombre_xy[0] + 320, C2->nombre_xy[1] + 240); }
+        c2_inm(&C2->panel[g], 2, 320, 240); c2_inm(&C2->pie[g], 1, 320, 240);
+        spr_dibuja(0, SPR_CAPAS, 3, 0); z = hudd_z();
+        m = mis_busca(c + 1, 1); if (m >= 0 && mis_tipo[m] < 7) t1 = mis_tipo[m];
+        {   const char *s = c2_txt(C2->rotulo[t1]);      /* 0x26cd48 / 0x26bfc8: cuadro de texto, fuente 14, capa 5 */
+            if (s) c2_parrafo(s, 300, 330, 570 - 300, 14, z, 0x3F474A); }
+    }
+}
+
 /* 0x1f6d70: tiempo de juego (licencia +0x10C, cuadros) en horas, minutos y segundos: s = cuadros / 60,2 */
 static void tiempo_lic(uint32_t cuadros, int *h, int *m, int *sg)
 {
@@ -1240,8 +1576,8 @@ void menu_dibuja(void)
         if (pant == P_MENU) hudd_reglas(r_menu, n_r_menu);  /* (sin MULTIPLAYER: menu_sin_multi) */
         an_dibuja(&a_sel, sacude, (entra_atras ? a_ent : 1) * a_sal * (cargando ? 0 : 1), 3, 0);
         hudd_reglas(NULL, 0);
-        if (pant == P_MODO && mis_ventana && mis_n) mis_dibuja();
         break;
+    case P_C2C: c2_dibuja(); break;
     case P_COCHE:
         an_dibuja(&a_sel, 0, a_ent * a_sal, 4, 0);
         if (!c_desbloqueado(c_indice()) && an_hecho(&a_sel)) hudd_dibuja(md, us[U_CAND], 0, 0, 0, a_ent * a_sal, 5, 0);
@@ -1396,20 +1732,6 @@ static void pz_botones(float x, float y, float w, float h, float z, int elegir)
     }
     texto_c("B", xa - 14, y + h - 38, 1, 1, z, 0x2860E8);
     texto(t, n, xa, y + h - 38, 1, 1, z, 0xF0F0F0);
-}
-
-/* la ventana de las misiones de COAST 2 COAST (DESVIACION: sin el mapa del original) */
-static void mis_dibuja(void)
-{
-    char b[48]; int k = mis_cur, nota = mis_nota(k);
-    float x = 120, y = 150, w = 400, h = 170, z = 8;
-    pz_ventana(x, y, w, h, z);
-    texto_c("COAST 2 COAST", x + 14, y + 4, 1, 1, z + 0.01f, 0xF0F0F0);
-    sprintf(b, "<  MISION %d-%d  >", mis_cl[k], mis_sb[k]);
-    texto_c(b, x + w / 2, y + 52, 12, 1, z + 0.01f, 0x202020);
-    if (nota >= 0 && nota <= 6) sprintf(b, "NOTA %d / 6", nota); else strcpy(b, "SIN JUGAR");
-    texto_c(b, x + w / 2, y + 82, 12, 1, z + 0.01f, 0x404040);
-    pz_botones(x, y, w, h, z + 0.01f, 1);
 }
 
 int menu_pausa_entra(void)

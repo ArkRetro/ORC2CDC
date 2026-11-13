@@ -20,7 +20,21 @@ if [ -n "${MENU_SP:-}" ]; then                                       # MENU_SP=1
 else
 tecla x; espera 5; foto ${P}_5                                       # un jugador
 for _m in $(seq 1 ${MODO_JUEGO:-0}); do tecla Right; espera 1; done # MODO_JUEGO=n: n modos a la derecha (1 OUTRUN, 2 INFARTO, 3 CONTRARRELOJ)
-if [ "${MODO_JUEGO:-0}" = 0 ]; then tecla x; espera 4; foto ${P}_5b; fi   # COAST 2 COAST: la ventana de las misiones (la 1-1)
+if [ "${MODO_JUEGO:-0}" = 0 ]; then                                  # COAST 2 COAST (C2C.DAT): categorias, mapa y detalle
+    tecla x; espera_log 'C2C: C2C.DAT' 30; espera 4; foto ${P}_5b    # categorias (Flagman 1)
+    if [ -n "${C2C_RECORRE:-}" ]; then                               # C2C_RECORRE=1: tambien los otros botones
+        tecla Right; espera 2; foto ${P}_5c                          # Flagman 2 (bloqueado sin notas)
+        tecla Down; espera 2; foto ${P}_5d                           # Jennifer (campeonato)
+        tecla x; espera 2                                            # (bloqueado: no se entra)
+        tecla Up; espera 1; tecla Left; espera 2                     # de vuelta a Flagman 1
+    fi
+    tecla x; espera 3; foto ${P}_5e                                  # mapa de Flagman 1 (cursor en la 1)
+    if [ -n "${C2C_RECORRE:-}" ]; then tecla Right; espera 2; fi     # (el nodo 2 esta cerrado: no se mueve)
+    tecla x; espera 3; foto ${P}_5f                                  # detalle: la carrera 1-1
+    if [ -n "${C2C_RECORRE:-}" ]; then                               # B al mapa, B a las categorias, y otra vez
+        tecla c; espera 2; tecla c; espera 3; foto ${P}_5g; tecla x; espera 3; tecla x; espera 3
+    fi
+fi
 tecla x; espera 6; foto ${P}_6                                       # coche
 tecla x; espera 5; foto ${P}_7                                       # cambio
 tecla x; espera 6; foto ${P}_8                                       # musica

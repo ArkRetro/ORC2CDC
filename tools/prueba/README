@@ -26,6 +26,8 @@ Scripts (todos: <disc.gdi> [pantalla de Xvfb, por defecto 91] [carpeta de salida
            -DPRUEBA_SIN_TIEMPO, OUTRUN2SP preset 1 hasta la meta D (FLOR), el final (fi_00..fi_14, FOTOS=n), los resultados
            (fi_25), el GAME OVER (fi_go) y la vuelta al frontal (fi_fsp); error sin "FINAL: modo 24" o "FIN: modo 25".
   MODO_JUEGO=n delante de cualquiera: n veces a la derecha en ELEGIR MODO (2 INFARTO, 3 CONTRARRELOJ).
+  Con MODO_JUEGO=0 (COAST 2 COAST): categorias (nv_5b), mapa (5e), detalle (5f) y la 1-1; C2C_RECORRE=1 mueve
+  ademas el cursor por las categorias (5c, 5d), el mapa y vuelve atras (5g) antes de entrar.
 Cada uno arranca su Xvfb si el display no existe (se pueden correr a la vez con displays distintos), usa una
 configuracion y una VMU nuevas (en la carpeta de salida) y deja alli flycast.txt con la consola serie de la demo
 (dbglog: RAM, VRAM, musica, cargas). Sale con error si Flycast se para antes de tiempo o si el registro dice

@@ -9242,19 +9242,24 @@ int main(int argc, char **argv)
     traf_tablas();                                              /* clases y cajas del trafico (TRAFC.DAT) */
     bo_carga_datos();                                           /* objetos animados de las uniones (BO.DAT) */
     if ((r = rival_inicia())) dbglog(DBG_ERROR, "RIVAL: sin MISION.DAT (%d): COAST 2 COAST sin misiones\n", r);
-    else {   /* COAST 2 COAST: las misiones de carrera (tipo 0) cuyo curso cabe; los otros tipos piden pantallas y HUD que
-                no estan (puntos del derrape / de la conduccion limpia, eliminacion por tiempo, pillar a los rivales) */
-        static int16_t idx[RIVAL_NMIS]; static uint8_t cl[RIVAL_NMIS], sb[RIVAL_NMIS]; int n = 0, k, c_, s_, t_;
+    else {   /* COAST 2 COAST: todas las misiones al mapa; se corren las de carrera (tipo 0) cuyo curso cabe; los otros
+                tipos piden pantallas y HUD que no estan (puntos del derrape / de la conduccion limpia, eliminacion por
+                tiempo, pillar a los rivales) */
+        static int16_t idx[RIVAL_NMIS]; static uint8_t cl[RIVAL_NMIS], sb[RIVAL_NMIS], tp[RIVAL_NMIS], jg[RIVAL_NMIS];
+        int n = 0, nj = 0, k, c_, s_, t_;
         for (k = 0; k < RIVAL_NMIS; k++)
-            if (!rival_lista(k, &c_, &s_, &t_) && t_ == 0 && !arbol_grande[k]) { idx[n] = k; cl[n] = c_; sb[n] = s_; n++; }
-        menu_pon_misiones(n, idx, cl, sb);
-        dbglog(DBG_INFO, "RIVAL: %d misiones de carrera de COAST 2 COAST en el menu\n", n);
+            if (!rival_lista(k, &c_, &s_, &t_)) {
+                idx[n] = k; cl[n] = c_; sb[n] = s_; tp[n] = t_; jg[n] = t_ == 0 && !arbol_grande[k]; nj += jg[n]; n++;
+            }
+        menu_pon_misiones(n, idx, cl, sb, tp, jg);
+        dbglog(DBG_INFO, "RIVAL: %d misiones de COAST 2 COAST en el menu (%d de carrera que se corren)\n", n, nj);
     }
     if (ruta_pon(&etapa)) { aviso("Sin memoria para la ruta"); for (;;) thd_sleep(1000); }
     salida_calcula();                                           /* 5C2560 en la ruta (coche del menu y salida) */
     fisica_carga();
     presta_union(1);                                            /* aun sin carrera: el coche, el HUD y la pelicula */
     fsp_hueco = hueco_fsp;
+    menu_hueco = hueco_fsp;                                     /* (las pantallas de COAST 2 COAST: C2C.DAT) */
     /* 2: PowerVR, texturas a la memoria de video y cabeceras */
     pres_hz = modo_video == DM_640x480_PAL_IL ? 50 : 60;
     vblank_handler_add(vbl_antes, NULL);                        /* antes que el de la PowerVR (va en orden) */

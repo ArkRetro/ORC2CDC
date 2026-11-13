@@ -66,12 +66,81 @@ def footage(A, L):
     return res
 
 
-def escribe(D, bk, ruta, grupos, extra=b'', vq=None, log=print):
-    """grupos: [(nombre, [escenas])] en el orden de carga; las escenas que no esten en ninguno van en un grupo 'RESTO'"""
+class _Recorte:
+    """animacion con solo lo que alcanzan unas escenas (recorta)"""
+    def __init__(s, a, escenas): s.a = a; s.escenas = escenas
+    def u32(s, o): return struct.unpack_from('<I', s.a, o)[0]
+    def i32(s, o): return struct.unpack_from('<i', s.a, o)[0]
+
+
+def recorta(A, ks, log=print):
+    """la animacion del banco con solo lo que alcanzan las escenas ks (para un banco del que se usan unas pocas
+    escenas: el 0x44 entero son 1,1 MB). Se marcan los trozos alcanzables (escena {nc, pc}; componentes de 0x24 {..,
+    +0x1C n capas, +0x20 capas}; capas de 0x4C {+8 footage o componente, +0xC padre, +0x30..+0x44 canales}; footage
+    {+0x10 cuadros, n x 20 bytes}; canal {i16 n, .., n x 8 bytes desde +6}), se copian seguidos y se recolocan los
+    punteros. Las demas escenas apuntan a una escena vacia (1 componente sin capas): sus tokens siguen siendo validos
+    pero no dibujan nada. La tabla de escenas (con su 0 final) va delante, como en el original"""
+    a = A.a; tramos = []; ptrs = []; vistos = set()
+    def marca(o, n): tramos.append((o, o + n))
+    def capa(L):
+        if L in vistos: return
+        vistos.add(L); marca(L, 0x4c)
+        p = u32(a, L + 8)
+        if p:
+            ptrs.append(L + 8)
+            if a[L + 0x48] & 1:
+                n = max(0, i32(a, p + 12)); marca(p, 20); ptrs.append(p + 16); marca(u32(a, p + 16), 20 * n)
+            else: comp(p)
+        if u32(a, L + 0xc): ptrs.append(L + 0xc); capa(u32(a, L + 0xc))
+        for k in range(6):
+            c = u32(a, L + 0x30 + 4 * k)
+            if c: ptrs.append(L + 0x30 + 4 * k); marca(c, 6 + 8 * max(0, struct.unpack_from('<h', a, c)[0]))
+    def comp(p):
+        if ('c', p) in vistos: return
+        vistos.add(('c', p)); marca(p, 0x24)
+        pl, n = u32(a, p + 0x20), i32(a, p + 0x1c)
+        if pl: ptrs.append(p + 0x20)
+        for q in range(max(0, n)): capa(pl + q * 0x4c)
+    for k in ks:
+        sc = A.escenas[k]; nc, pc = struct.unpack_from('<2I', a, sc)
+        marca(sc, 8); ptrs.append(sc + 4); marca(pc, 0x24 * nc)
+        for j in range(nc): comp(pc + 0x24 * j)
+    tramos.sort(); unidos = []
+    for i0, i1 in tramos:
+        if unidos and i0 <= unidos[-1][1]: unidos[-1][1] = max(unidos[-1][1], i1)
+        else: unidos.append([i0, i1])
+    ne = len(A.escenas); cab = 4 * (ne + 1)
+    vacia = cab; cab += 8 + 0x24                    # escena vacia: {1, pc} y un componente sin capas
+    nuevo = {}; o = cab
+    for i0, i1 in unidos:
+        o = (o + 3) & ~3; nuevo[i0] = o; o += i1 - i0
+    import bisect
+    ini = [x[0] for x in unidos]
+    def mapa(v):
+        j = bisect.bisect_right(ini, v) - 1
+        assert j >= 0 and v < unidos[j][1] + 1, 'puntero fuera de lo alcanzable: 0x%x' % v
+        return nuevo[unidos[j][0]] + v - unidos[j][0]
+    b = bytearray(o)
+    for i0, i1 in unidos: b[nuevo[i0]:nuevo[i0] + i1 - i0] = a[i0:i1]
+    for q in ptrs: struct.pack_into('<I', b, mapa(q), mapa(u32(a, q)))
+    struct.pack_into('<2I', b, vacia, 1, vacia + 8)
+    esc = []
+    for k in range(ne):
+        e = mapa(A.escenas[k]) if k in set(ks) else vacia
+        esc.append(e); struct.pack_into('<I', b, 4 * k, e)
+    log('  recorte: %d escenas de %d, animacion %d KB (de %d KB)' % (len(set(ks)), ne, len(b) >> 10, len(a) >> 10))
+    return _Recorte(bytes(b), esc)
+
+
+def escribe(D, bk, ruta, grupos, extra=b'', vq=None, log=print, solo=False, antes=None):
+    """grupos: [(nombre, [escenas])] en el orden de carga; las escenas que no esten en ninguno van en un grupo 'RESTO'
+    (con solo=True no: la animacion se recorta a las de los grupos, ver recorta). antes(hud): lo que el conversor
+    quiera anadir al fichero (grupos y usos propios, p. ej. glifos de una fuente) antes de escribirlo"""
     A, T, _ = D.banco(bk)
     todas = set(k for _, ks in grupos for k in ks)
+    if solo: A = recorta(A, sorted(todas), log)
     resto = [k for k in range(len(A.escenas)) if k not in todas]
-    if resto: grupos = list(grupos) + [('RESTO', resto)]
+    if resto and not solo: grupos = list(grupos) + [('RESTO', resto)]
     hud = ch.Hud(); hud.taco = [0xff] * 16
     if vq: hud.vq = vq
     ani = bytearray(A.a)
@@ -149,6 +218,7 @@ def escribe(D, bk, ruta, grupos, extra=b'', vq=None, log=print):
     for f4 in frac: blq += struct.pack('<4f', *f4)
     blq += tab + listas + mtab + extra
     assert len(blq) == o_extra + len(extra)
+    if antes: antes(hud)
     texs = hud.escribe(ruta)
     # el bloque va entre los tacometros y los datos de textura (como MNU1 de conv_menu.escribe): se desplazan los datos
     d = bytearray(open(ruta, 'rb').read())
