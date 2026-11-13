@@ -347,23 +347,27 @@ dibujaba y gastaba TA y CPU. Ahora la conversion calcula que mallas se pueden ve
 BKkk.DAT) y la demo no envia las demas (`pvs_paso` en `demo/main.c`); el reparto (`nodos_visibles_todos`) se hace
 despues con el coste de lo que queda de cada nodo, asi que lo que sobra va a la distancia.
 
-- Muestras del ojo: cada punto de la ruta (4 m), a lo ancho del limite transitable mas 3 m a cada lado (cada 4 m como
-  mucho) y a 0,6, 3,3 y 6 m sobre el suelo del perfil; en la bifurcacion tambien por la rama derecha (BKD.DAT). Desde
+- Muestras del ojo: cada punto de la ruta (4 m) y la ruta prolongada 32 m en linea recta por cada punta (FIN_EXTRA,
+  desde el 2026-11-13), a lo ancho del limite transitable mas 3 m a cada lado (cada 4 m como mucho) y a 0,6, 3,3 y
+  6 m sobre el suelo del perfil; en la bifurcacion tambien por la rama derecha (BKD.DAT). Desde
   cada una se dibujan por software cuatro caras alrededor (todos los rumbos: vale para el derrape, los trompos y las
   vistas; cabeceo de -45 a +60 grados), 256 x 350 pixeles por cara de 90 grados.
-- Tapan solo los triangulos opacos (lista 0) de nodos que el LOD de 404B00 dibuja seguro desde ahi (con la fov mas
-  abierta, 100 grados) y que no son de una rama de la union ni carteles; el follaje (recorte) y lo transparente no
-  tapan. El z-buffer se erosiona un pixel. Cada malla (cada tira de un nodo) se ve si algun pixel que toca (rasterizado
+- Tapan los triangulos de nodos que el LOD de 404B00 dibuja seguro desde ahi (con la fov mas abierta, 100 grados) y
+  que no son de una rama de la union ni carteles: los opacos (lista 0) enteros y, desde el 2026-11-13, los de recorte
+  (lista 1: fachadas con ventanas, follaje) donde el texel de la UV del pixel y sus ocho vecinos son opacos (mascara
+  de la textura; la PowerVR con PT_ALPHA_REF 0x80 y el filtro bilineal no abre ahi ningun hueco); lo transparente no
+  tapa. Los triangulos de area nula no pintan. El z-buffer se erosiona un pixel. Cada malla (cada tira de un nodo) se ve si algun pixel que toca (rasterizado
   conservador, con la 1/z mas cercana del triangulo en el pixel) no queda detras; los carteles por su esfera. Se
   recorta contra el plano cercano.
-- Secciones de 8 m (2 puntos); a cada una van las muestras cuyo punto de la ruta mas cercano es suyo o de una vecina.
-  Los huecos de 8 secciones o menos en los que una malla no se ve se rellenan (visible). Las 2 primeras y 2 ultimas
-  secciones llevan todo (el ojo puede estar en la etapa de antes o en la de despues).
+- Secciones de 8 m (2 puntos); a cada una van las muestras cuyo punto de la ruta mas cercano es suyo o de una vecina
+  (las de la ruta prolongada, a la de su punta). Los huecos de 8 secciones o menos en los que una malla no se ve se
+  rellenan (visible). Hasta el 2026-11-13 las 2 primeras y 2 ultimas secciones llevaban todo (el ojo podia estar en la
+  etapa de antes o en la de despues); ahora la demo no usa la PVS con el ojo a mas de 32 m de una punta (`PVS_FIN`).
 - Fichero (ORD7 compatible): nsecciones con el bit 31; por seccion las mallas que cambian respecto a la anterior (XOR),
   en bytes (diferencias). La demo lleva la mascara de la seccion del punto de la ruta mas cercano al ojo y la mueve
   aplicando listas (adelante o atras) y lleva por nodo los bytes teoricos y vertices de lo visible. Si el ojo esta
-  fuera de lo muestreado (mas de 3 m fuera del limite, mas de 6 m sobre el suelo, otra rama u otra etapa), ese modelo
-  se dibuja entero como antes. `-DSIN_PVS` lo desactiva (para comparar); `DIAG_VTX` imprime `pvs` (en uso en etapa,
+  fuera de lo muestreado (mas de 3 m fuera del limite, mas de 6 m sobre el suelo, mas de 32 m mas alla de una punta
+  de la ruta, otra rama u otra etapa), ese modelo se dibuja entero como antes. `-DSIN_PVS` lo desactiva (para comparar); `DIAG_VTX` imprime `pvs` (en uso en etapa,
   union, siguiente) y `-N` (vertices de nodos en la vista que quita).
 - RAM: cada SEGnn.DAT crece lo que su PVS, con un tope de 300 KB (`MAX_KB`: si no cabe se rellenan huecos mayores;
   METR, SEG13, el mayor, queda en 235 KB con huecos de 128 secciones y le quedan 70 % de las mallas en vez de 41 %;
@@ -409,6 +413,34 @@ Imagen: capturas congeladas (5 por prueba) con y sin PVS, en dos modos: con el r
 coche del jugador (su luz y el piloto del cartel cambian solos aun congelado): 0 pixeles distintos en las seis pruebas
 sin tope y en cinco con tope; en CAST con tope, lo distinto es lo que el PVS deja meter (una muralla del castillo al
 fondo). Capturas en el scratchpad (`pvs/*_tope.png`, `pvs/*_todo.png`).
+
+### PVS: puntas de la ruta, recorte que tapa y lo que no se ve nunca (2026-11-13)
+
+Demo 38: en la salida de PALM los edificios de la calle de la derecha (de 80-100 m en adelante) salian palidos, azul
+y blanco. Causa: con el ojo en la seccion 1 de SEG00 (las dos primeras secciones llevaban todo) la etapa entera estaba
+en la vista: 71131 vertices desde la camara de la salida (`DIAG_VTX`: orig 78447) para un tope de la etapa de unos
+16000; el reparto (prio_d 24: entero hasta 76 m; prio_p 5) quitaba lo de mas alla que no fuera muy grande: los bajos y
+las tiendas (nodo 548, opaco) se iban y las fachadas con ventanas de la lista de recorte (nodo 550: alfa 0 en las
+ventanas, el original las dibuja asi y se ve lo de detras) se quedaban flotando, con el cielo a traves y debajo. No era
+la niebla del limite (igual con `-DSIN_NIEBLA_LIMITE`), ni la del original (densidad 0,0002 en PALM), ni la VQ, ni
+texturas rebajadas (0), ni el LOD de 404B00 (igual sin el).
+
+Cambios (`tools/pvs.py`, `tools/c/pvs.c`, `pvs_paso`):
+- Sin secciones llenas: muestras tambien en la ruta prolongada 32 m por cada punta; la demo no usa la PVS con el ojo
+  mas alla (`PVS_FIN`).
+- Los triangulos de recorte tapan donde su textura tapa seguro (mascara erosionada un texel).
+- Prueba por triangulo; los de area nula no se prueban. Con `PVS_QUITA=1` (solo etapas, `conv_tramo.py`) se calcula
+  que triangulos no se ven nunca desde un volumen ancho (8 m fuera del limite, hasta 12 m de alto, 64 m mas alla de las
+  puntas) y salen del fichero (tiras partidas, texturas sin uso fuera). En PALM son 122 de 109980 triangulos (0,1 %),
+  ninguna textura: lo que no se ve desde ningun sitio casi no existe en los datos del original y no cambia ni la RAM
+  ni la VRAM; dobla el tiempo de la conversion y no tiene la guarda de `pvs_paso` para las camaras de las escenas, asi
+  que va apagado.
+- Culling: los materiales de las etapas de PS2 (tabla 4 del registro, +04) llevan las banderas de los del PC (408F90:
+  bit 1 dos caras; el PC pone CULL_CW en el resto): en las 66 etapas 458 de 8991 materiales y 4425 de 80503 tiras son
+  de dos caras. Pero el original de PS2 no recorta caras: el GS no puede y el microcodigo del VU1 (PARIDAD.md, Tiras
+  del VU1) solo pone el ADC por el bit 1 de la y y por el recorte. La demo sigue con `PVR_CULLING_NONE` (con culling
+  se perderian caras que el original ve por detras); la PVS ya quita las caras de atras de lo cerrado, que tapan las
+  de delante. En la PowerVR el culling no ahorra TA (los vertices se envian igual), solo relleno.
 
 El diagnostico `pvr_colgado()` (si `pvr_wait_ready` falla 5 veces seguidas escribe en la imagen el estado, los
 vertices, el registro de errores y el uso de VB y OPB) se queda: es lo que permite medir en la consola.
