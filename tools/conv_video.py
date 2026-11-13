@@ -36,6 +36,7 @@ import numpy as np
 from scipy.signal import resample_poly
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import nativo
 from ps2.iso import Iso
 from conv_sonido import fichero_paquete
 import vq
@@ -139,7 +140,7 @@ def codifica_trozo(args):
 
 
 def cuadros_rgb(ruta, n_max):
-    p = subprocess.Popen(['ffmpeg', '-v', 'error', '-i', ruta, '-vf', 'scale=%d:%d:flags=lanczos' % (ANCHO, ALTO),
+    p = subprocess.Popen([nativo.ffmpeg(), '-v', 'error', '-i', ruta, '-vf', 'scale=%d:%d:flags=lanczos' % (ANCHO, ALTO),
                           '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-'], stdout=subprocess.PIPE)
     t = ANCHO * ALTO * 3; r = []
     while len(r) < n_max:
@@ -168,9 +169,7 @@ def convierte(iso, nombre_pss, salida, segundos):
     tmp = tempfile.NamedTemporaryFile(suffix='.pss', dir='/dev/shm' if os.path.isdir('/dev/shm') else None, delete=False)
     tmp.write(d); tmp.close()
     try:
-        r = subprocess.run(['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=r_frame_rate',
-                            '-of', 'default=nw=1:nk=1', tmp.name], capture_output=True, text=True).stdout.split()[0]
-        fps = float(r.split('/')[0]) / float(r.split('/')[1])
+        fps = nativo.video_info(tmp.name)[0]
         n_max = int(segundos * fps) if segundos else 1 << 30
         frames = cuadros_rgb(tmp.name, n_max)
     finally:

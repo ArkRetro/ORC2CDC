@@ -76,11 +76,8 @@ _lib = None
 def lib():
     global _lib
     if _lib is None:
-        d = os.path.dirname(os.path.abspath(__file__)); src = os.path.join(d, 'c', 'pvs.c')
-        so = os.path.join(os.environ.get('TMPDIR', '/tmp'), 'or2_pvs_%d.so' % os.getuid())
-        if not os.path.exists(so) or os.path.getmtime(so) < os.path.getmtime(src):
-            subprocess.check_call(['cc', '-O3', '-march=native', '-shared', '-fPIC', '-o', so, src, '-lpthread', '-lm'])
-        _lib = ctypes.CDLL(so)
+        import nativo                                         # (en Windows, la pvs.dll de windows/construye.sh)
+        _lib = nativo.lib('pvs', ('-O3', '-march=native', '-pthread'))
     return _lib
 
 MALLA = np.dtype([('c', '<f4', 3), ('r', '<f4'), ('v0', '<u4'), ('n', '<u4'), ('t', '<i4'), ('nodo', '<i4')])

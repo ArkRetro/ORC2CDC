@@ -55,6 +55,7 @@ escena (60 fps) como cuadro c - inicio del tramo del grupo; los usos estan en (0
 import os, struct, subprocess, sys, tempfile, time
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import nativo
 from conv_hud import Disco, Ani, Atlas, Hud, texturas, escena, hornea, imagen_xst, dibuja_grupo, _t, _s
 
 B = 0x44                                # SUMO_FE_CVT
@@ -126,15 +127,10 @@ def logo_titulo(D):
     with tempfile.TemporaryDirectory() as tmp:
         for i, (h, o, s) in enumerate(iso.paquete('MV.PS2')):
             f = os.path.join(tmp, 'mv%d.pss' % i); open(f, 'wb').write(iso.m[o:o + s])
-            r = subprocess.run(['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries',
-                                'stream=r_frame_rate:format=duration', '-of', 'csv=p=0', f], capture_output=True, text=True)
-            vals = r.stdout.replace(',', ' ').split()
-            try:
-                n_, d_ = vals[0].split('/'); fps = float(n_) / float(d_); dur = float(vals[-1])
-            except (IndexError, ValueError, ZeroDivisionError): fps = dur = 0.0
+            fps, dur = nativo.video_info(f)
             cand.append((abs(dur - 17.7) + abs(fps - 29.97), f))
         f = min(cand)[1]
-        r = subprocess.run(['ffmpeg', '-v', 'error', '-ss', '14', '-i', f, '-frames:v', '1', '-f', 'rawvideo',
+        r = subprocess.run([nativo.ffmpeg(), '-v', 'error', '-ss', '14', '-i', f, '-frames:v', '1', '-f', 'rawvideo',
                             '-pix_fmt', 'rgb24', '-'], capture_output=True)
     img = np.frombuffer(r.stdout, np.uint8)[:640 * 480 * 3].reshape(480, 640, 3)
     oscuro = img.max(axis=2) < 110                              # trazo azul marino del logo (el cielo es claro)

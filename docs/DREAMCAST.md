@@ -1314,6 +1314,21 @@ a la vez), SEG03 3,52 s con la de 128 KB; en un GD real ~1,4..2,8 s mas por los 
   Flycast antes de la pelicula: curso_huecos hace miles de gd_busca y cada una relee el directorio del GD (PENDIENTE:
   guardarlo una vez).
 
+- Programa de Windows (2026-11-13): `windows/construye.sh [salida/]` hace OutRun2DC.zip (Python 3.13 embebido,
+  numpy / scipy / Pillow / imageio-ffmpeg de PyPI, tools/c compilado con mingw-w64, el 1ST_READ.BIN de demo/ y el
+  IP.BIN de makeip; nada del disco). El usuario abre OutRun2DC.bat, elige su ISO y una carpeta, y
+  `windows/outrun2dc.py` llama a `tools/regenera.py` (el orquestador en Python que sustituye al bash de
+  regenera_datos.sh, que ahora solo lo llama) y a `tools/gdi.py` (el GD-ROM sin genisoimage ni makeip: igual byte a
+  byte que el de genisoimage salvo las fechas y el identificador de la aplicacion; mkgdi.py tambien lo usa).
+  tools/nativo.py: las partes en C (cc en Linux, las DLL / EXE del paquete en Windows con OR2_NATIVO) y ffmpeg (sin
+  ffprobe: cuadros por segundo y duracion de `ffmpeg -i`). Las DLL van sin FMA (-ffp-contract=off, cualquier x86-64);
+  en Linux pvs.c sigue con -march=native. Los pasos corren con PYTHONHASHSEED=0 (conv_sp.py cambiaba de una vez a otra:
+  NOM5*, RANKSP, RUTASP, SPFE). Probado en Linux (regenera.py contra datos de regenera_datos.sh: los mismos bytes en
+  coches, menus, HUD, musica, sonido, peliculas, SEG43 y SEGS.PAK, curso y uniones) y el paquete en wine 11.21 (todo el
+  recorrido hasta el GD-ROM): igual salvo los coches (orden de las caras de qhull en los volumenes de sombra, la misma
+  envolvente), MVTS.VQV (90 bytes de 7,9 MB: numpy / scipy de Windows) y las listas PVS de las etapas (113 -> 114 KB en
+  SEG43: el FMA de -march=native en Linux; la pvs.c de Linux sin FMA da los mismos bytes que la DLL).
+
 - `cd demo && make` sin avisos; `make CPPFLAGS=-DDIAG_VTX` imprime por la consola serie cada 60 cuadros los
   vertices (total y etapa), la CPU, la distancia, la VRAM libre, el presupuesto del TA (3D, etapa y su tope, 2D,
   `ta_f`), las tiras aceptadas y su cuenta teorica (`tiras`, `teo`), lo que dibujaria el original de la etapa (`orig`,

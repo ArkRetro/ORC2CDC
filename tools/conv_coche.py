@@ -389,12 +389,8 @@ def materiales(A, mod, m, recurso):
 
 # ------------------------------------------------------------------ vaciado
 def _lib():
-    src = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'c', 'visible.c')
-    dst = os.path.join(os.environ.get('OR2_CACHE', os.path.expanduser('~/.cache/or2_assets')), 'visible.so')
-    if not os.path.exists(dst) or os.path.getmtime(dst) < os.path.getmtime(src):
-        os.makedirs(os.path.dirname(dst), exist_ok=True)
-        subprocess.check_call(['cc', '-O2', '-shared', '-fPIC', '-o', dst, src, '-lm'])
-    return ctypes.CDLL(dst)
+    import nativo                                             # (en Windows, la visible.dll de windows/construye.sh)
+    return nativo.lib('visible')
 
 def mira(ojo, punto):
     """matriz de fila 4x4 de una camara como la de la demo (640x480, tangente del medio angulo horizontal 0,75):

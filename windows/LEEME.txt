@@ -1,0 +1,67 @@
+OutRun 2006 Coast 2 Coast para Dreamcast (orc2cdc) - programa para Windows
+=========================================================================
+
+Que hace
+--------
+Convierte TU copia del juego de PS2 en un GD-ROM de Dreamcast jugable: disc.gdi,
+track01.iso, track02.raw y track03.iso, para Flycast o para un GDEMU.
+Este paquete no lleva nada del juego: solo el programa de la Dreamcast (la demo de
+orc2cdc, programa\dc\1ST_READ.BIN), los conversores y lo que necesitan (Python,
+numpy, scipy, Pillow, ffmpeg). Todo lo del juego sale de tu ISO, en tu PC.
+No hace falta nada de la version de PC del juego (ni la decompilacion ni el recomp).
+
+Requisitos
+----------
+- Windows 10 u 11 de 64 bits. No hay que instalar nada.
+- Tu ISO de PS2: OutRun 2006 Coast 2 Coast, PAL, SLES-53998, version 1.02
+  (la imagen del DVD, unos 1,7 GB; el programa comprueba que sea esa).
+- Unos 4 GB libres en el disco de la carpeta de salida (datos convertidos ~0,9 GB,
+  intermedios ~1 GB mientras trabaja y el GD-ROM ~1 GB).
+- RAM: con 8 GB va bien; el programa decide cuantos pasos hace a la vez segun los
+  nucleos y la memoria (unos 1,5 GB por paso).
+
+Uso
+---
+1. Descomprime el zip entero en una carpeta (por ejemplo C:\OutRun2DC).
+   Si viene partido (OutRun2DC_partes.zip, .z01, .z02...), pon todas las partes
+   juntas y abre OutRun2DC_partes.zip con 7-Zip o WinRAR (el Explorador de Windows
+   no abre zip partidos).
+2. Doble clic en OutRun2DC.bat.
+   Si Windows avisa ("Windows protegio su PC"), pulsa "Mas informacion" y
+   "Ejecutar de todas formas" (el programa no esta firmado).
+3. Elige tu ISO y despues la carpeta de salida. Dentro se crea OutRun2006_DC.
+   (Tambien puedes arrastrar la ISO encima de OutRun2DC.bat, o desde una consola:
+   OutRun2DC.bat "D:\isos\outrun.iso" "D:\dreamcast" [--jobs 4] )
+4. Espera. La ventana va diciendo cada paso hecho, el porcentaje y lo que queda.
+   Al final dice LISTO y donde esta disc.gdi.
+
+Tiempo
+------
+Unas horas: de 2 a 5 segun el PC (en 4 nucleos, unas 3 horas). Lo que mas tarda es
+calcular la visibilidad (PVS) de cada etapa y de cada union de las misiones; el
+porcentaje avanza despacio al principio porque las uniones son los pasos mas largos.
+Las peliculas, la musica y el GD-ROM son minutos.
+
+Cortar y seguir
+---------------
+Se puede cerrar la ventana (o Ctrl+C) en cualquier momento. Para seguir, lanza otra
+vez OutRun2DC.bat y elige la misma ISO y la misma carpeta (o OutRun2006_DC dentro
+de ella): lo ya hecho no se repite. Un paso a medias se empieza de nuevo.
+
+Resultado
+---------
+<carpeta>\OutRun2006_DC\
+   disc.gdi, track01.iso, track02.raw, track03.iso   el GD-ROM
+   trabajo\datos\      los datos convertidos (sirven para rehacer el GD-ROM sin
+                       convertir otra vez; se pueden borrar)
+   trabajo\registro\   un registro por paso (si algo falla, ahi esta el porque)
+- Flycast: abre disc.gdi.
+- GDEMU: copia disc.gdi y las tres pistas a una carpeta numerada de la SD (o con
+  GDMenu Card Manager / openMenu).
+El GD-ROM es para uso personal: no lo compartas (lleva los datos de tu disco).
+
+Si algo falla
+-------------
+La ventana dice que paso ha fallado y su registro (trabajo\registro\<paso>.txt).
+Vuelve a lanzarlo: solo repite lo que falta. Si sigue fallando, guarda ese registro
+y trabajo\registro\programa.txt para el informe.
