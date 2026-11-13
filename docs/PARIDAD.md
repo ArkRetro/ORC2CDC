@@ -2473,8 +2473,8 @@ etapas, salida BEAC`, BAND1.DAT en el hueco de la union; RAM libre 1419..1490 KB
     suceso del modo de atraccion con el banco 0x32 ADV_CVT, sin portar) y el frontal de rankings del PC
     (frontend_rankings.cpp: el menu de la consola del PC, distinto del PS2). DESVIACION: fuera del ranking el original
     guarda el nombre en el registro de antes de la tabla (0x1fb970 con el puesto -1); la Dreamcast no.
-- Final de recreativa (modo 24): HECHO en parte (2026-11-13), ver Final de recreativa de OUTRUN2SP abajo; sin la
-  pareja del final.
+- Final de recreativa (modo 24): HECHO (2026-11-13), ver Final de recreativa de OUTRUN2SP abajo; sin las luces
+  del final ni el humo KEM.
 - Etapas al reves (descriptores 30..59; SEG34..SEG65), HECHO 2026-11-11: sus tablas de aparicion y de velocidad (+0x80
   / +0x84) estan en el ELF; lo que el ELF deja en la BSS son sus listas de puntos fijos (4EF880: 0x5d6028..), y por eso
   conv_trafico.py daba el registro entero vacio (sin trafico). Las rellena la rutina 0x1f2110 (la llama la puesta a cero
@@ -2644,6 +2644,10 @@ de San Pedro de END_5E_STAGE (columna 3, final 6, guion 0x19 = as_e_07, 1200 cua
 coche del jugador (F50) colocado por el nodo CAR1_BODY con sus ruedas, los creditos de 0x430001 (la imagen de la
 camara de video: FINE, la bateria, AUTO, los nombres) en la capa 7 y la musica de la meta (MUS65) que sigue sonando;
 al acabar los creditos el modo 25 (el mapa de la ruta), el 27 y la vuelta al frontal. 0 "Out of memory".
+  Con la pareja (2026-11-13, la misma prueba): CHR_FAL y CHR_MAL con su cara, pelo, ojos y manos, de pie junto al F50
+  con los movimientos de mot_E07 (planos de la cara de cerca, los dos andando y posando, los creditos encima); RAM al
+  arrancar 1028 KB libres (la pareja del final va entera en el hueco de la etapa: FINCHR0D.DAT, sus motores de 128
+  huesos y fin_morf); al entrar en el 24 el HUD sale de la VRAM (428600) para el sitio, la pareja y los creditos.
 RAM y VRAM: el curso sale entero al empezar el 24 (curso_fuera; la etapa tambien: mundo_fuera, nada del curso se
 dibuja ni se consulta hasta volver al menu); el sitio, sus objetos y FINAL.DAT en el hueco de la etapa (FINE3: 1003 KB
 de 8116 tras subir las texturas), las tablas de STAFF.DAT en el hueco de la union prestado; VRAM libre 507 KB con el
@@ -2664,12 +2668,18 @@ Diferencias y SIN PORTAR:
   PROBABLE) entre las mallas del mismo numero en las dos caras (tabla MORF del RBT1); los ojos T(+20) Rz(+40) Rx(+38)
   sobre el hueso; el ramo (clave 0x208) con su color por vertice (multiplica la luz: PROBABLE). RAM: la pareja en el
   hueco de la etapa detras de FINAL.DAT; la de la carrera se vuelve a leer en la siguiente carrera.
-- El fondo de los presets 0 / 2 (4522D0, [0x3e7820 + columna x 24]: un objeto lejano en (0, -100, 0)) y las luces del
-  final (4523E0: tres luces de 5A6AB8 por final y columna; los modelos llevan la luz de tools/modelo.py en los
-  vertices): SIN PORTAR.
-- El fundido del guion (canal 1 del registro de tipo 5 -> 4AF520), los sonidos de los sucesos 2 / 4 (4249F0), el humo
-  KEM (4208A0), las puertas (car+164 / +166) y las luces del coche del final (car+330), las ranuras de matriz de los
-  nodos (+34: las usan los robots) y el bloqueo 0x10000 del final 6 (cuadro 0x460): SIN PORTAR.
+- El fondo de los presets 0 / 2 (4522D0, [0x3e7820 + columna x 24]: {recurso, token, x, y, z, alfa}), HECHO
+  2026-11-13: el registro 2 del cielo de la etapa (obj_course_obj_sky_east / maya / prin / flor / newy) en FINSKY5..9.DAT
+  dibujado en T(0, -100, 0) antes del sitio (alfa 1 / 0,9: opaco en 452080, alfa >= 0,9). PROBABLE: con la prueba de z
+  (el original lo dibuja sin ella, render state 7 = 0); no visto en Flycast (la prueba usa el preset 1).
+- Del guion: el fundido / paso del tiempo (registro de tipo 5: 4AF520 pone el paso de los movimientos [842118] del
+  cuadro siguiente; no es un fundido de imagen), los sonidos (sucesos 2 / 4: 4249F0), las puertas (canales de
+  CAR*_DOOR_*) y las piezas animadas del coche: ninguno de los 10 guiones de la variante 1 (as_e_05, 07, 08, 09, 11,
+  as_SPE_S01, S03, S04, S05, M09) los trae (contado en la conversion): nada que portar con estos datos.
+- SIN PORTAR: las luces del final (4523E0: tres luces de 5A6AB8 por final y columna, 407CF0 / 407DD0 / 408390 /
+  4083C0 / 407F40 / 408030 / 407D60: la pareja y el coche usan la luz de los coches de la demo, el sitio la de
+  tools/modelo.py en los vertices), el humo KEM (4208A0, solo en as_SPE_S01: columna 5), las luces del coche del final
+  (car+330 con los bits de las piezas visibles) y el bloqueo 0x10000 del final 6 a partir del cuadro 0x460.
 - PROBABLE: las ruedas car+40 / 42 / 44 / 46 (giro x de TIRE_FL / FR / RL / RR) como el giro de las ruedas 0..3 de la
   demo y car+32 (giro y de BRCL_FL) como la direccion; K 0x6282c0 = 65536 / 2 pi. Los objetos de obj_end_property se
   convierten por registro sin la jerarquia de sus nodos (cajas, MOAI, PILLAR, OBENTO: un nodo).

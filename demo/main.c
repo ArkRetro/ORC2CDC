@@ -9069,6 +9069,7 @@ static int final24_entra(int como)
     curso_al_menu_ya();                                         /* el curso fuera (espera la lectura en marcha) */
     libera_modelo(&etapa); libera_modelo(&sig); col_et.ok = 0;  /* (sus datos se quedan en el hueco: los pisa el final) */
     mundo_fuera = 1; fin24_como = como;
+    hud_baja_tex();                                             /* (49A660 -> 428600: sin HUD; su VRAM para el final) */
     musica_pausa_lectura(1);
     r = lee_modelo_en(&fin_mod, n, hueco_etapa, cap_etapa);
     if (!r && sube_modelo(&fin_mod)) r = -10;
