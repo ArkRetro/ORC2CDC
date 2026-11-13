@@ -15,6 +15,7 @@
 #include <dc/vmu_pkg.h>
 #include "gd.h"
 #include "vmu.h"
+#include "vmuesc.h"
 
 #define LCD_W 48
 #define LCD_H 32
@@ -38,6 +39,7 @@ static uint32_t u32(const uint8_t *p) { return p[0] | p[1] << 8 | p[2] << 16 | (
 int vmu_inicia(void)
 {
     uint32_t n, i, o;
+    vmuesc_letra();                                         /* letra de la pantalla de diagnostico (vmuesc.c) */
     dat = gd_carga("VMU.DAT", &dat_tam);
     if (!dat) { dbglog(DBG_INFO, "vmu: sin VMU.DAT\n"); return -1; }
     if (dat_tam < 32 || memcmp(dat, "VMU1", 4)) { free(dat); dat = NULL; return -2; }

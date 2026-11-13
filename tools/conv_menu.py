@@ -392,6 +392,7 @@ def convierte(iso, salida, previas):
     a, T, xst = banco_menu(D, B)
     F = Fuente(D, FUENTE_AYUDA, fuentes_xst(D)); cad = textos(D, idioma); iconos = iconos_dc(D, F)
     cad[0x206] = cad[0x206].split(b'  ')[0]                     # "Guardando datos." (lo demas habla de la memory card del PS2)
+    cad[0x30d] = cad[0x30d].split(b'. ')[0] + b'.'              # "No hay espacio suficiente para guardar." (sin los KB)
     m = Menu(); hojas = {}
 
     bancos = {B: (a, T)}
@@ -616,8 +617,9 @@ def convierte(iso, salida, previas):
 TEXTOS = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 0x2a, 0x2b, 0x218, 0x219, 0x233, 0x234, 0x237, 0x213, 0x214, 0x21b, 0x21d,
           0x2b1, 0x2b2, 0x2b3, 0x2b4, 0x32a, 0x327]
 # guardar con Y (DESVIACION, revision 42): "Guardando datos." (el principio de 0x206), "Exito al guardar." (0x202) y
-# "Error al guardar!" (0x31D) de TEXT.PS2
-TEXTOS_GUARDAR = [0x206, 0x202, 0x31d]
+# "Error al guardar!" (0x31D) de TEXT.PS2; revision 44: sin sitio en la VMU, "No hay espacio suficiente para guardar."
+# (la primera frase de 0x30D, el aviso de sin sitio del PSP: los de la memory card hablan de la ranura del PS2)
+TEXTOS_GUARDAR = [0x206, 0x202, 0x31d, 0x30d]
 TEXTOS_PAUSA = [0x3a6, 0x294, 0x295]   # pausa: "Estas seguro?" (PS2 0x249d40, sin partida en red) y ELEGIR / ATRAS
 TEXTOS += TEXTOS_PAUSA + TEXTOS_GUARDAR
 TECLADO = '1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ:%<>-'   # teclado de 468D40 (mayusculas) y signos de las cifras

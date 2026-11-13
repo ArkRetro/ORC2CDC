@@ -1376,6 +1376,74 @@ la VMU real la escritura de flash tarda y puede devolver errores que el emulador
 fallar, la consola lo dice en pantalla con Y; con un cable serie (dcload / BBA) el registro da el codigo exacto. Para
 mirar una VMU real con el comprobador hace falta un volcado de sus 128 KB (p. ej. con un DreamShell / VMU tool).
 
+#### Revision 44: escritura propia, codigo de error y pantalla de diagnostico
+
+Con la revision 43 (vmufs_write + relectura) la consola PAL del usuario seguia diciendo "Error al guardar!" (VMU en A1,
+con la LCD funcionando; en Flycast guarda bien). Sin cable serie no se sabia el codigo, asi que ahora sale en pantalla.
+
+Lo mirado en KallistiOS (`/opt/toolchains/dc/kos`, HEAD d81aa3fd de 2026-10-24; upstream hasta 6b1248c4 de 2026-11-01
+no trae nada de la escritura de la VMU: solo fs_vmu y el tamano de la cabecera VMS):
+- `vmu_block_write_internal` (hardware/maple/vmu.c): 4 fases de 128 bytes (BWRITE, fase en el byte 1 del id de bloque)
+  y la confirmacion (BSYNC = "get last error", orden 13, fase 4). Se manda, pero su respuesta no se mira; si una fase
+  devuelve algo que no es OK, se apunta el error y se siguen mandando las demas y la confirmacion. Cada respuesta se
+  espera 100 ms (`genwait_wait`); las tramas solo salen en el vblank (`maple_queue_flush` desde `maple_vbl_irq_hnd`),
+  asi que cada orden cuesta un vblank (20 ms a 50 Hz) y un bloque 5. Si no vuelve, la trama se marca libre sin sacarla
+  de la cola. `vmu_block_write` repite 4 veces con 100 ms fijos. Nada relee lo escrito.
+- `MAPLE_RESPONSE_AGAIN` lo reenvia solo la interrupcion de DMA (`maple_dma_irq_hnd`); `MAPLE_RESPONSE_FILEERR` y
+  `MAPLE_RESPONSE_NONE` (una VMU ocupada grabando su flash no contesta en el tiempo del bus, 1 ms) llegan a la funcion
+  como fallo de esa fase.
+- El sondeo de enchufado (`vbl_autodetect`, un DEVINFO por vblank a un puerto y sus subunidades) usa la trama del mando
+  (unidad 0), no la de la VMU; una VMU se da por quitada tras 30 sondeos sin respuesta (`MAPLE_DEV_VALID_TIMEOUT`), y
+  la estructura del dispositivo no se libera. La LCD y la memoria usan la misma trama de la VMU (`dev->frame`):
+  `vmu_draw_lcd` la toma con trylock y la suelta la interrupcion al volver. La vibracion va en otra unidad.
+- `vmufs_write` (fs/vmufs.c): raiz, directorio y FAT leidos; si el fichero existe, se comprueba el sitio (libres + los
+  suyos) y se borra en memoria; los bloques se buscan libres de arriba abajo (no hace falta que sean seguidos en los
+  ficheros de datos; solo los juegos de VMU van seguidos desde el 0), despues la FAT y el directorio. Codigos -1 raiz /
+  directorio / FAT, -4 bloque, -5 FAT, -6 directorio, -7 sin sitio.
+- El fichero OR2C2C ocupa 20 bloques (icono de 2 cuadros, eyecatch de 72 x 56 con paleta, licencias y rankings): una
+  VMU con otras partidas puede no tener 20 libres (una VMU nueva tiene 200). Era la causa mas probable y no se veia.
+
+Arreglo (comun/vmuesc.c, comun/menu.c, comun/vmu.c):
+- Escritura propia (`vmuesc_escribe`) sobre las tramas maple: cada orden se espera hasta 1 s (en tramos de 20 ms), si
+  no vuelve se saca de la cola; se mira la respuesta de cada fase y de la confirmacion; cada bloque se relee y se
+  compara; un bloque que falla se repite hasta 6 veces con pausas de 30, 60, 120, 240 y 480 ms; las lecturas, 3 veces.
+  Los datos van a bloques libres (el fichero viejo sigue entero hasta grabar la FAT y el directorio); solo si no hay
+  sitio se reutilizan los del viejo. Al final se relee todo (FAT, directorio y el fichero por su cadena). Todo bajo el
+  mutex de vmufs y desde un hilo (nunca desde una interrupcion: `VE_IRQ`). Si falla, el guardado entero se repite una
+  vez (500 ms despues) salvo sin sitio, directorio lleno o sin formato.
+- Antes de escribir: la LCD parada (`vmu_lcd_pausa` espera a las tramas de LCD en vuelo) y 100 ms mas, la lectura de
+  la musica del GD parada.
+- Con Y el guardado va en un hilo: el menu se sigue dibujando con "Guardando datos." (en una VMU real son unos
+  segundos) y la entrada del menu esta parada hasta que acaba.
+- Si falla: "Error al guardar!" (0x31D) y debajo el codigo; sin sitio, "No hay espacio suficiente para guardar." (la
+  primera frase de TEXT.PS2 0x30D; hace falta el MENU.DAT nuevo de conv_menu.py, si no sale 0x31D) y el codigo. El
+  aviso de error dura 6 s mas que el de bien.
+- L + R + Y en el menu principal o el de un jugador: pantalla de diagnostico (letra de la BIOS sobre la imagen; A, B o
+  START para salir).
+
+Codigo del error (`vmuesc_codigo`), p. ej. `E-13 FB I2 L180 N20 U1 PA1 M-1 W0 K199 R10`:
+
+| Campo | Significado |
+|---|---|
+| E | resultado: -1 sin VMU, -2 sin memoria (consola), -3 VMU sin formato o FAT rota, -7 sin sitio, -8 directorio lleno, -10 no se lee la raiz, -11 no se lee la FAT, -12 no se lee el directorio, -13 no se puede escribir un bloque de datos, -14 no se puede escribir la FAT, -15 no se puede escribir el directorio, -20 releido distinto, -21 no se puede releer, -30 desde una interrupcion |
+| F | fase en que fallo: R raiz, T leer FAT, D leer directorio, S comprobar sitio, B bloques de datos, F grabar FAT, E grabar directorio, V relectura final (X: ninguna) |
+| I | intento del guardado entero (1 o 2) |
+| L | bloques libres en la FAT (-1: no se llego a leer) |
+| N | bloques que hacen falta (20) |
+| U | VMU enchufadas (unidades con memoria) |
+| P | unidad usada: puerto A..D y ranura 1 / 2 (PX0: ninguna) |
+| M | ultima respuesta maple mala: -1 no contesta, -2 funcion mala, -3 orden mala, -4 "otra vez", -5 error de fichero, 7 bien, 8 datos, T no volvio en 1 s, 98 leido pero distinto, 97 datos de otro bloque |
+| W | orden que fallo: 0..3 fase de escritura, 4 confirmacion, 5 lectura, 6 comparacion (-1 ninguna) |
+| K | bloque en que fallo (-1 ninguno) |
+| R | repeticiones de bloques y lecturas (tambien si al final fue bien) |
+
+Pantalla de diagnostico (`vmuesc_pantalla`): las VMU (puerto, funciones, function_data[0], `valid`), la unidad que se
+usaria, y paso a paso con el tiempo y la respuesta maple: 1 leer la raiz (formato: FAT, directorio, bloques), 2 leer la
+FAT (bloques libres), 3 leer el directorio (ficheros, huecos, OR2C2C y si caben 20 bloques), 4 en el bloque libre mas
+alto: leerlo, escribir otro contenido con la ruta propia (respuesta de las 4 fases y de la confirmacion, y sus ms),
+releer y comparar, 5 restaurarlo con `vmu_block_write` de KallistiOS (con la propia si KOS falla) y releer. Al final
+"TODO BIEN" o "HAY FALLOS". El bloque de prueba esta libre en la FAT: no se toca ningun fichero.
+
 ## 3. Otros riesgos de la consola real
 
 | Riesgo | Estado |

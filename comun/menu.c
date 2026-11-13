@@ -43,6 +43,7 @@
 #include "menu.h"
 #include "rksp.h"
 #include "vmu.h"
+#include "vmuesc.h"
 #include "fsp.h"
 #include "sprani.h"
 
@@ -231,9 +232,13 @@ static void lic_desbloquea(uint8_t *p)
    fs_close de fs_vmu: fs_vmu escribe de verdad en fs_close y antes no se miraba su resultado (el registro decia
    "bien" aunque fallara). Ahora se mira el resultado de vmufs_write, se relee el fichero (vmufs_read) y se compara
    byte a byte; si algo falla se reintenta (VMU_INTENTOS, con una pausa) y el registro lo dice. Mientras se escribe la
-   LCD de las VMU no se toca (vmu_lcd_pausa) y la lectura de la musica del GD esta parada. */
+   LCD de las VMU no se toca (vmu_lcd_pausa) y la lectura de la musica del GD esta parada.
+   Revision 44 (con la 43, en una Dreamcast PAL real seguia saliendo "Error al guardar!"): ya no se usa vmufs_write sino la
+   escritura propia de comun/vmuesc.c (tramas maple con sus respuestas miradas, cada bloque releido, reintentos con
+   pausas crecientes), en un hilo para el guardado con Y, con el codigo de diagnostico en pantalla si falla y la
+   pantalla de diagnostico con L + R + Y. */
 #define VMU_NOMBRE "OR2C2C"
-#define VMU_INTENTOS 3
+#define VMU_INTENTOS 2
 static int vmu_puerto = -1, vmu_unidad = -1;                /* unidad de la que se leyo (o en la que se guardo) */
 static maple_device_t *vmu_unidad_guardar(void)
 {
@@ -278,51 +283,77 @@ static void vmu_lee(void)
            vmu_ok ? "" : " (no vale)");
     free(v);
 }
-/* escribe y relee; 0 bien. Errores: -1 sin VMU, -2 sin memoria, -7 sin sitio (vmufs_write), -20 lo releido no coincide,
-   -21 no se puede releer, otros: los de vmufs_write (-1 raiz/directorio/FAT ilegibles, -4 bloque, -5 FAT, -6 directorio) */
+/* escribe (vmuesc_escribe, comun/vmuesc.c: ruta propia sobre las tramas maple, cada bloque releido y comparado, al final
+   el fichero entero releido); 0 bien. Si falla se repite el guardado entero (VMU_INTENTOS, 500 ms entre medias) salvo
+   sin sitio / directorio lleno / sin VMU. vmu_diag: lo del ultimo guardado (el codigo que se ensena con el error y la
+   pantalla de diagnostico, L + R + Y). Codigos: vmuesc.h y docs/DREAMCAST.md */
+static vmuesc_diag_t vmu_diag;
 static int vmu_escribe(const uint8_t *buf, int n)
 {
-    maple_device_t *dev; int r = -1, k, sz;
-    void *v; uint8_t *b;
-    int nb = (n + 511) & ~511;
-    if (!(b = calloc(1, nb))) return -2;                    /* vmufs_write escribe bloques enteros: relleno con ceros */
+    maple_device_t *dev, *v; int r = VE_SIN_VMU, k, nv;
+    uint8_t *b; int nb = (n + 511) & ~511;
+    for (nv = 0; (v = maple_enum_type(nv, MAPLE_FUNC_MEMCARD)); nv++) ;
+    memset(&vmu_diag, 0, sizeof vmu_diag);
+    vmu_diag.cod = VE_SIN_VMU; vmu_diag.fase = '-'; vmu_diag.libres = -1; vmu_diag.necesarios = nb / 512;
+    vmu_diag.puerto = vmu_diag.unidad = vmu_diag.bloque = vmu_diag.paso = -1; vmu_diag.n_vmu = nv; vmu_diag.intento = 1;
+    if (!(b = calloc(1, nb))) { vmu_diag.cod = VE_MEMORIA; return VE_MEMORIA; }   /* bloques enteros: relleno con ceros */
     memcpy(b, buf, n);
     for (k = 0; k < VMU_INTENTOS; k++) {
-        if (k) thd_sleep(250);                              /* (vmu_block_write ya reintenta cada bloque 4 veces) */
-        if (!(dev = vmu_unidad_guardar())) { r = -1; dbglog(DBG_ERROR, "menu: no hay ninguna VMU\n"); break; }
-        r = vmufs_write(dev, VMU_NOMBRE, b, nb, VMUFS_OVERWRITE);
-        if (!r) {
-            v = NULL; sz = 0;
-            if (vmufs_read(dev, VMU_NOMBRE, &v, &sz)) r = -21;
-            else if (sz != nb || memcmp(v, b, nb)) r = -20;
-            free(v);
+        if (k) thd_sleep(500);
+        if (!(dev = vmu_unidad_guardar())) { r = VE_SIN_VMU; vmu_diag.cod = r; vmu_diag.intento = k + 1;
+                                             dbglog(DBG_ERROR, "menu: no hay ninguna VMU\n"); break; }
+        r = vmuesc_escribe(dev, VMU_NOMBRE, b, nb, &vmu_diag);
+        vmu_diag.intento = k + 1; vmu_diag.n_vmu = nv;
+        {
+            char c[80]; vmuesc_codigo(&vmu_diag, c, sizeof c);
+            dbglog(r ? DBG_ERROR : DBG_INFO, "menu: guardado %s en %c%d (%d bytes, %d bloques), intento %d: %s (%d) [%s]\n",
+                   VMU_NOMBRE, 'a' + dev->port, dev->unit, n, nb / 512, k + 1, !r ? "bien, releido igual" :
+                   r == VE_SITIO ? "no hay sitio" : r == VE_DISTINTO ? "releido distinto" : r == VE_RELEE ?
+                   "no se puede releer" : "fallo", r, c);
         }
-        dbglog(r ? DBG_ERROR : DBG_INFO, "menu: guardado %s en %c%d (%d bytes, %d bloques), intento %d: %s (%d)\n", VMU_NOMBRE,
-               'a' + dev->port, dev->unit, n, nb / 512, k + 1, !r ? "bien, releido igual" : r == -7 ? "no hay sitio" :
-               r == -20 ? "releido distinto" : r == -21 ? "no se puede releer" : "vmufs_write fallo", r);
         if (!r) { vmu_puerto = dev->port; vmu_unidad = dev->unit; break; }
-        if (r == -7) break;                                 /* sin sitio: reintentar no sirve */
+        if (r == VE_SITIO || r == VE_DIR_LLENO || r == VE_FORMATO) break;   /* reintentar no sirve */
     }
     free(b);
     return r;
 }
-static int vmu_guarda(void)
+/* el fichero empaquetado (cabecera VMS + datos), malloc; NULL sin memoria */
+static uint8_t *vmu_prepara(int *n)
 {
-    vmu_pkg_t pkg; uint8_t *d, *out = NULL; int n, v = rksp_hay() ? 2 : 1, i, r = -2;
+    vmu_pkg_t pkg; uint8_t *d, *out = NULL; int v = rksp_hay() ? 2 : 1;
     uint32_t tam = 12 + sizeof lic + (v == 2 ? 4 + RKSP_TAM : 0);
-    d = malloc(tam); if (!d) return -2;
+    d = malloc(tam); if (!d) return NULL;
     memcpy(d, "OR2L", 4); memcpy(d + 4, &v, 4); memcpy(d + 8, &lic_sel, 4); memcpy(d + 12, lic, sizeof lic);
     if (v == 2) { memcpy(d + 12 + sizeof lic, "RKSP", 4); memcpy(d + 16 + sizeof lic, rksp_tablas(), RKSP_TAM); }
     memset(&pkg, 0, sizeof pkg);
     vmu_cabecera(&pkg);                                     /* descripciones, icono y eyecatch (comun/vmu.c) */
     pkg.data_len = tam; pkg.data = d;
-    if (!vmu_pkg_build(&pkg, &out, &n)) {
-        musica_pausa_lectura(1); vmu_lcd_pausa(1);
-        r = vmu_escribe(out, n);
-        vmu_lcd_pausa(0); musica_pausa_lectura(0);
-    }
+    if (vmu_pkg_build(&pkg, &out, n)) out = NULL;
+    free(d);
+    return out;
+}
+/* escritura con la LCD parada (y unos cuadros sin LCD antes: vmu_lcd_pausa espera a las tramas de LCD en vuelo, y
+   despues 100 ms mas) y la lectura de la musica del GD parada; libera out */
+static int vmu_escribe_pausado(uint8_t *out, int n)
+{
+    int r;
+    musica_pausa_lectura(1); vmu_lcd_pausa(1); thd_sleep(100);
+    r = vmu_escribe(out, n);
+    vmu_lcd_pausa(0); musica_pausa_lectura(0);
+    free(out);
+    return r;
+}
+static void vmu_acaba(int r)
+{
+    int i;
     if (!r) { vmu_ok = 1; for (i = 0; i < N_LIC; i++) lic[i][0x3f4] &= ~2; }   /* +3F4 bit 1: cambios sin guardar */
-    free(out); free(d);
+}
+static int vmu_guarda(void)
+{
+    int n, r; uint8_t *out = vmu_prepara(&n);
+    if (!out) { memset(&vmu_diag, 0, sizeof vmu_diag); vmu_diag.cod = VE_MEMORIA; return VE_MEMORIA; }
+    r = vmu_escribe_pausado(out, n);
+    vmu_acaba(r);
     return r;
 }
 
@@ -932,15 +963,47 @@ static void bloqueado(void) { t_bloq = 14; sfx_menu(SFX_BLOQUEADO); }
    paso siguiente se guarda (vmu_guarda bloquea: en una VMU real unos segundos); despues "Exito al guardar." (0x202) con
    el sonido de aceptar o "Error al guardar!" (0x31D) con el de bloqueado, G_T_MSG pasos */
 #define G_T_MSG 150
+/* revision 44: la escritura va en un hilo (g_hilo) y el menu sigue dibujandose con "Guardando datos." mientras tanto
+   (en una VMU real son unos segundos: cada bloque releido y comparado); la entrada del menu esta parada (G_PIDE).
+   Con el error se ensena tambien el codigo de vmu_diag (vmuesc_codigo) en una segunda linea, y sin sitio el principio
+   de TEXT.PS2 0x30D ("No hay espacio suficiente para guardar.") en vez de 0x31D */
+static kthread_t *g_hilo;
+static volatile int g_hilo_fin, g_hilo_r;
+static uint8_t *g_out; static int g_n;
+static void *g_hilo_fn(void *a) { (void)a; g_hilo_r = vmu_escribe_pausado(g_out, g_n); g_out = NULL; g_hilo_fin = 1; return NULL; }
 static void g_paso(void)
 {
     if (!g_est) return;
     g_t++;
-    if (g_est == G_PIDE && g_t >= 3) {
-        int r = vmu_guarda();
+    if (g_est == G_PIDE && g_t >= 3 && !g_hilo) {
+        int r;
+        g_out = vmu_prepara(&g_n); g_hilo_fin = 0;
+        if (g_out && (g_hilo = thd_create(0, g_hilo_fn, NULL))) return;
+        r = g_out ? vmu_escribe_pausado(g_out, g_n) : VE_MEMORIA;   /* (sin hilo: como antes, bloqueando) */
+        if (!g_out) { memset(&vmu_diag, 0, sizeof vmu_diag); vmu_diag.cod = VE_MEMORIA; }
+        g_out = NULL; vmu_acaba(r);
         g_est = r ? G_MAL : G_BIEN; g_t = 0;
         if (r) bloqueado(); else sfx_menu(SFX_ACEPTA);
-    } else if (g_est != G_PIDE && g_t > G_T_MSG) g_est = 0;
+    } else if (g_est == G_PIDE && g_hilo && g_hilo_fin) {
+        int r = g_hilo_r;
+        thd_join(g_hilo, NULL); g_hilo = NULL;
+        vmu_acaba(r);
+        g_est = r ? G_MAL : G_BIEN; g_t = 0;
+        if (r) bloqueado(); else sfx_menu(SFX_ACEPTA);
+    } else if (g_est != G_PIDE && g_t > G_T_MSG + (g_est == G_MAL ? 300 : 0)) g_est = 0;   /* el error, 6 s mas: para leer el codigo */
+}
+/* L + R + Y: pantalla de diagnostico de la VMU (vmuesc_pantalla, bloquea hasta A / B / START) */
+static int lr_pulsados(void)
+{
+    maple_device_t *d = maple_enum_type(0, MAPLE_FUNC_CONTROLLER);
+    cont_state_t *st = d ? (cont_state_t *)maple_dev_status(d) : NULL;
+    return st && st->ltrig >= 128 && st->rtrig >= 128;
+}
+static void vmu_diagnostico(void)
+{
+    musica_pausa_lectura(1); vmu_lcd_pausa(1); thd_sleep(100);
+    vmuesc_pantalla(vmu_unidad_guardar(), &vmu_diag);
+    vmu_lcd_pausa(0); musica_pausa_lectura(0);
 }
 static void a_licencia(int vuelta) { l_vuelta = vuelta; sale(P_LICENCIA, 1); }
 
@@ -1113,7 +1176,10 @@ static void control(unsigned n)
             else if (!sa_abre()) sale(P_SALON, 1);         /* SALON (showroom, 4D4230 = PS2 0x25b418) */
             else bloqueado();
         } else if (n & CONT_X) a_licencia(pant);            /* LICENSE */
-        else if (n & CONT_Y) { if (!g_est) { g_est = G_PIDE; g_t = 0; } }   /* GUARDAR (DESVIACION, rev. 42; el original: FRIENDS, en linea) */
+        else if (n & CONT_Y) {                              /* GUARDAR (DESVIACION, rev. 42; el original: FRIENDS, en linea) */
+            if (lr_pulsados()) { if (!g_est) vmu_diagnostico(); }   /* L + R + Y: diagnostico de la VMU (rev. 44) */
+            else if (!g_est) { g_est = G_PIDE; g_t = 0; }
+        }
         else if (atras) sale(pant == P_MENU ? P_TITULO : P_MENU, 0);
         break;
     case P_C2C: c2_control(n); break;
@@ -2521,10 +2587,18 @@ void menu_dibuja(void)
         break; }
     }
     if (g_est) {                                            /* guardar con Y: aviso en una franja en medio de la pantalla */
-        int id = g_est == G_PIDE ? 0x206 : g_est == G_BIEN ? 0x202 : 0x31d;
-        float a = g_est == G_PIDE ? 1.0f : fminf(1.0f, (G_T_MSG - g_t) / 15.0f);
-        pz_rect(160, 282, 320, 32, ((uint32_t)(0xD0 * a) << 24) | 0x202830, 8);
-        texto_id(id, 320, 298, 12, a, 8.5f, g_est == G_MAL ? 0xF04030 : 0xF0F0F0);
+        int id = g_est == G_PIDE ? 0x206 : g_est == G_BIEN ? 0x202 : 0x31d, n_sin;
+        float a = g_est == G_PIDE ? 1.0f : fminf(1.0f, (G_T_MSG + (g_est == G_MAL ? 300 : 0) - g_t) / 15.0f);
+        if (g_est == G_MAL && vmu_diag.cod == VE_SITIO && (txt(0x30d, &n_sin), n_sin)) id = 0x30d;   /* sin sitio */
+        if (g_est == G_MAL) {                               /* error: el texto y debajo el codigo (docs/DREAMCAST.md) */
+            char c[80]; vmuesc_codigo(&vmu_diag, c, sizeof c);
+            pz_rect(60, 270, 520, 58, ((uint32_t)(0xD0 * a) << 24) | 0x202830, 8);
+            texto_id(id, 320, 286, 12, a, 8.5f, 0xF04030);
+            texto_c(c, 320, 314, 12, a, 8.5f, 0xF0F0F0);
+        } else {
+            pz_rect(160, 282, 320, 32, ((uint32_t)(0xD0 * a) << 24) | 0x202830, 8);
+            texto_id(id, 320, 298, 12, a, 8.5f, 0xF0F0F0);
+        }
     }
 }
 
