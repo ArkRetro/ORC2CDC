@@ -563,6 +563,33 @@ def arbol_mision(A, i):
     t = rel[o + 0x44 * i + 0x18]
     return [(q[1], q[7], q[8], q[11], q[12]) for q in (struct.unpack_from('<30i', d, t + 0x78 * k) for k in range(cats[t]))]
 
+# CONTRARRELOJ (variante 7): el curso del codigo [656234] (PS2 0x2a6758 = 4EEC80 del PC lo calcula de la palabra del
+# frontal; 48B550 del PC lo carga): < 0x3c una etapa sola (43D950: tablas izquierda / derecha, + 0x1e la segunda mitad;
+# PALM -> PALM_T 0x3c, BEAC -> BEAC_T 0x3d), 0x3c..0x4f las metas A..E (OR2_goals, SP_goals, OR2_reverse_goals,
+# SP_reverse_goals; categorias GOAL_A, GOAL_B_TA, GOAL_C_TA, GOAL_D_TA, GOAL_E en la Contrarreloj: 43F860 y [830394]),
+# 0x50..0x53 los cursos seguidos (csc_data_2_ren / csc_data_cvt_ren, *_ren_course_TA). En CURSOTA.DAT con id 200 + codigo
+TA_IZQ = (0, 1, 3, 6, 8, 9, 5, 2, 4, 7, 0xa, 0xb, 0xc, 0xe, 0xd)
+TA_DER = (0xf, 0x15, 0x18, 0x11, 0x10, 0x14, 0x17, 0x12, 0x13, 0x16, 0x1d, 0x19, 0x1b, 0x1c, 0x1a)
+TA_METAS = ('GOAL_A', 'GOAL_B_TA', 'GOAL_C_TA', 'GOAL_D_TA', 'GOAL_E')
+
+def ta_tramo(code):
+    """descriptor de tramo de la etapa sola del codigo < 0x3c (48B55F / 43D950; sin la bandera 830395: _BT / _BR)"""
+    i = code; seg = i >= 0x1e; i -= 0x1e if seg else 0; rama = i >= 0xf; i -= 0xf if rama else 0
+    r = (TA_DER if rama else TA_IZQ)[i] + (0x1e if seg else 0)
+    return 0x3c if r == 0 else 0x3d if r == 0xf else r
+
+def arbol_ta(A, code):
+    """registros del curso del codigo (como arbol): la etapa sola es el registro de 44D720 con 635F34 (clave 0, union
+    0, hijos 0 / 0 con 7D33B0 = 0: vuelve a si misma; la carrera acaba en el fin de la etapa, 48B3A0)"""
+    import conv_menu
+    if code < 0x3c: return [(0, ta_tramo(code), 0, 0, 0)]
+    if code < 0x50: f, c = ('OR2_goals', 'SP_goals', 'OR2_reverse_goals', 'SP_reverse_goals')[(code - 0x3c) // 5], TA_METAS[(code - 0x3c) % 5]
+    else: f, c = (('csc_data_2_ren', 'csc_data_2_ren_course_TA'), ('csc_data_2_ren', 'csc_data_2_reverse_ren_course_TA'),
+                  ('csc_data_cvt_ren', 'csc_data_cvt_ren_course_TA'), ('csc_data_cvt_ren', 'csc_data_cvt_reverse_ren_course_TA'))[code - 0x50]
+    d = A.datos([x for x in A.busca('*\\' + f + '.bin') if x.paquete.startswith('SCRIPTS')][0])
+    n, o = conv_menu._r077(d, c)
+    return [(q[1], q[7], q[8], q[11], q[12]) for q in (struct.unpack_from('<30i', d, o + 0x78 * k) for k in range(n))]
+
 def tabla_bunki(A):
     """tabla de los carteles de destino por tipo de registro (PS2 0x3f9da0, PC 5D4FD8: 16 bytes por tipo = el +0 del
     descriptor de tramo del destino; el tipo 0x42 es el de un hijo -1, p.kind de race_area.cpp): recurso
@@ -639,7 +666,7 @@ def etapa_ficheros(A, ti, dsal):
         d = bytes(seg.m[o:o + s])
         if d[:8] == b'COLI0200': conv_coli.escribe(d, os.path.join(dsal, 'COL%02d.DAT' % n), 0); break
 
-def cursos(A, dsal, ids, con_uniones=True, con_tramos=False, parte=(0, 1)):
+def cursos(A, dsal, ids, con_uniones=True, con_tramos=False, parte=(0, 1), nombre='CURSO.DAT', bk_desde=0, solo_bk=None):
     """CURSO.DAT con el arbol del modo OutRun y los de ids (1: OUTRUN2SP, csc_data_cvt; 100 + i: el curso del
     registro i de Races.bin), y las uniones que les faltan (BKnn.DAT desde 15; las 15 del modo OutRun conservan su
     clave). Los hijos van como indices del arbol (runtime_apply_course_data_44d720 los busca por clave, +0x24 / +0x28)
@@ -696,22 +723,24 @@ def cursos(A, dsal, ids, con_uniones=True, con_tramos=False, parte=(0, 1)):
     o2r = registros(o2, False)
     extras = []
     for i in ids:
-        rs = registros(arbol(A, 0, 'csc_data_cvt.bin') if i == 1 else arbol_mision(A, i - 100), i >= 100)
+        rs = registros(arbol(A, 0, 'csc_data_cvt.bin') if i == 1 else arbol_ta(A, i - 200) if i >= 200 else arbol_mision(A, i - 100), 100 <= i < 200)
         extras.append((i, rs))
         print('arbol %d: %s' % (i, ' '.join('%s/BK%02d' % (r['zona'], r['f_bk']) for r in rs)))
-    if parte[0] == 0: escribe_curso(os.path.join(dsal, 'CURSO.DAT'), o2r, extras)
+    if parte[0] == 0:
+        if nombre == 'CURSO.DAT': escribe_curso(os.path.join(dsal, nombre), o2r, extras)
+        else: escribe_curso(os.path.join(dsal, nombre), [], [x for x in extras if x[0] >= 200])   # (CURSOTA.DAT)
     import conv_coli
     hechos = set()
     for i, rs in extras:
         for r in rs:
             if con_tramos and not os.path.exists(os.path.join(dsal, 'SEG%02d.DAT' % r['seg'])): etapa_ficheros(A, r['_ti'], dsal)
             f = os.path.join(dsal, 'BK%02d.DAT' % r['f_bk'])
-            if con_uniones and r['f_bk'] >= 15 and r['f_bk'] not in hechos and not os.path.exists(f) and r['f_bk'] % parte[1] == parte[0]:   # (las ya hechas se quedan)
+            if con_uniones and r['f_bk'] >= max(15, bk_desde) and (solo_bk is None or r['f_bk'] in solo_bk) and r['f_bk'] not in hechos and not os.path.exists(f) and r['f_bk'] % parte[1] == parte[0]:   # (las ya hechas se quedan)
                 union_fichero(A, r['_c'], f + '.tmp', descs[r['_ti']], ri, rd, so); hechos.add(r['f_bk'])
                 os.replace(f + '.tmp', f)                 # (entero o nada: se puede cortar y seguir)
             if r['f_col'] == -2 and parte[0] == 0 and not os.path.exists(os.path.join(dsal, 'COLLR.DAT')):
                 conv_coli.escribe(coli_bytes(A, '\\BK\\coli_LRBK_PALM_bin'), os.path.join(dsal, 'COLLR.DAT'), 1)
-            if r['f_col'] >= 15 and r['f_col'] % parte[1] == parte[0] and not os.path.exists(os.path.join(dsal, 'COLBK%02d.DAT' % r['f_col'])):
+            if r['f_col'] >= max(15, bk_desde) and r['f_col'] % parte[1] == parte[0] and not os.path.exists(os.path.join(dsal, 'COLBK%02d.DAT' % r['f_col'])):
                 ct = cadena(E, u32(E, base2 + 4 * r['_c'][2]) + 0x0c)
                 conv_coli.escribe(coli_bytes(A, ct), os.path.join(dsal, 'COLBK%02d.DAT' % r['f_col']), 1)
 
@@ -725,8 +754,11 @@ def main():
     pa = [tuple(int(x) for x in a.split('=')[1].split('/')) for a in sys.argv if a.startswith('--parte=')]
     parte = pa[0] if pa else (0, 1)                   # --parte=k/n: solo las uniones con f_bk % n == k (en paralelo)
     if ar:                                            # --arboles=1,100,188: CURSO.DAT con esos arboles y sus uniones
+        nom = [a.split('=')[1] for a in sys.argv if a.startswith('--curso=')]   # --curso=CURSOTA.DAT: solo los arboles >= 200
+        bd = [int(a.split('=')[1]) for a in sys.argv if a.startswith('--bk-desde=')]   # --bk-desde=n: solo uniones >= n
+        sb = [set(int(x) for x in a.split('=')[1].split(',')) for a in sys.argv if a.startswith('--solo-bk=')]   # esas uniones
         cursos(Assets(arg[0]), arg[1], [int(x) for x in ar[0].split('=')[1].split(',')], '--sin-uniones' not in sys.argv,
-               '--con-tramos' in sys.argv, parte); return
+               '--con-tramos' in sys.argv, parte, nom[0] if nom else 'CURSO.DAT', bd[0] if bd else 0, sb[0] if sb else None); return
     curso(Assets(arg[0]), arg[1], '--sin-tramos' not in sys.argv, '--solo-curso' in sys.argv)
 
 if __name__ == '__main__':

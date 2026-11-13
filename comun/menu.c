@@ -61,14 +61,15 @@ static const char *const VNOM[NV] = { "TITULO", "COMUN", "MENU", "MODO", "COCHE"
                                       "MUSICA2" };
 /* pantallas del menu (las de menu.h, MP_*) y la VRAM que necesita cada una */
 enum { P_TITULO, P_MENU, P_MODO, P_COCHE, P_CAMBIO, P_MUSICA, P_LICENCIA, P_EDITOR, P_OPCIONES, P_RANKING, P_MULTI,
-       P_C2C, P_SALON, NP };                                /* P_C2C: categorias y mapa de COAST 2 COAST (C2C.DAT); P_SALON:
-                                                               el salon (SALON.DAT) */
+       P_C2C, P_SALON, P_TABLERO, NP };                     /* P_C2C: categorias y mapa de COAST 2 COAST (C2C.DAT); P_SALON:
+                                                               el salon (SALON.DAT); P_TABLERO: los tableros de cursos
+                                                               de INFARTO / CONTRARRELOJ (TABLERO.DAT) */
 #define VB(v) (1 << (v))
 static const int MASCARA[NP] = {
     VB(V_TITULO), VB(V_COMUN) | VB(V_MENU), VB(V_COMUN) | VB(V_MODO), VB(V_COMUN) | VB(V_COCHE),
     VB(V_COMUN) | VB(V_COCHE) | VB(V_CAMBIO), VB(V_COMUN) | VB(V_MUSICA), VB(V_COMUN) | VB(V_LICENCIA),
     VB(V_COMUN) | VB(V_LICENCIA), VB(V_COMUN) | VB(V_OPCIONES), VB(V_COMUN) | VB(V_RANKING), VB(V_COMUN) | VB(V_MULTI),
-    VB(V_COMUN) | VB(V_MODO), VB(V_COMUN) | VB(V_MODO) };
+    VB(V_COMUN) | VB(V_MODO), VB(V_COMUN) | VB(V_MODO), VB(V_COMUN) | VB(V_MODO) };
 
 enum { U_TFONDO, U_TLOGO, U_TSTART, U_FONDO, U_CABMENU, U_PRINC, U_CABMODO, U_UNJUG, U_CABCOCHE, U_INFO, U_INFO_T,
        U_CAND, U_CAMBIO, U_RADIO, U_AYUDA, U_L0, U_T0, U_LISTA, U_MCAND, U_CABMUSICA,
@@ -465,6 +466,15 @@ static int sa_control(unsigned n, int atiende);
 static void sa_dibuja(void);
 static int sa_activo(void);
 static int sa_car_on, sa_car_reg, sa_car_col;
+/* TABLEROS de cursos (mas abajo) */
+static int tb_abre(void);
+static void tb_cierra(void);
+static void tb_entra(void);
+static int tb_control(unsigned n, int atiende);
+static void tb_dibuja(void);
+static int tb_activo(void);
+static int tb_sig;
+static uint32_t tb_bits;
 typedef struct { int desbl, modelo, bit, ficha; int8_t color, col[8]; } sa_reg_t;
 static sa_reg_t sa_reg[30];
 
@@ -515,7 +525,7 @@ unsigned menu_vram(void)
     for (p = 0; p < NV; p++) if (cargada[p]) s += pan[pidx[p]].vram;
     return s;
 }
-void menu_sale(void) { int p; c2_cierra(); sa_cierra(); for (p = 0; p < NV; p++) baja_p(p); fsp_sale(); hudd_vacia(); }
+void menu_sale(void) { int p; c2_cierra(); sa_cierra(); tb_cierra(); for (p = 0; p < NV; p++) baja_p(p); fsp_sale(); hudd_vacia(); }
 /* antes del frontal de recreativa: la VRAM del menu fuera (sus tablas siguen en la RAM) */
 static void menu_libera_todo(void) { int p; for (p = 0; p < NV; p++) baja_p(p); if (menu_suelta_coche) menu_suelta_coche(); hudd_vacia(); }
 void menu_libera_vram(void)
@@ -672,7 +682,7 @@ static int cabecera(int p)
 {
     switch (p) {
     case P_MENU: return U_CABMENU;
-    case P_MODO: case P_C2C: case P_SALON: return U_CABMODO;
+    case P_MODO: case P_C2C: case P_SALON: case P_TABLERO: return U_CABMODO;
     case P_COCHE: case P_CAMBIO: return U_CABCOCHE;
     case P_MUSICA: return U_CABMUSICA;
     case P_LICENCIA: case P_EDITOR: return U_CABLIC;
@@ -689,7 +699,7 @@ static int barra(int p)
     case P_MENU: return U_BARRA_MENU;
     case P_MODO: return U_BARRA_MODO;
     case P_COCHE: return U_BARRA_COCHE;
-    case P_CAMBIO: case P_C2C: return U_BARRA_CAMBIO;     /* (C2C: SELECT y BACK) */
+    case P_CAMBIO: case P_C2C: case P_TABLERO: return U_BARRA_CAMBIO;   /* (C2C y tableros: SELECT y BACK) */
     case P_MUSICA: return U_BARRA_MUSICA;
     case P_LICENCIA: case P_EDITOR: case P_RANKING: case P_MULTI: return U_BARRA_LIC;
     case P_OPCIONES: return U_BARRA_OPC;
@@ -752,7 +762,9 @@ static void entra(int p, int atras)
        subir el cambio y la musica tras el coche) */
     if (p != P_C2C) c2_cierra();
     if (p != P_SALON) sa_cierra();
-    if ((p == P_C2C) != (pant == P_C2C) || (p == P_SALON) != (pant == P_SALON)) menu_libera_todo();   /* (igual el salon) */
+    if (p != P_TABLERO) tb_cierra();
+    if ((p == P_C2C) != (pant == P_C2C) || (p == P_SALON) != (pant == P_SALON) || (p == P_TABLERO) != (pant == P_TABLERO))
+        menu_libera_todo();                                 /* (igual el salon y los tableros) */
     cargando = !asegura(mascara(p)); t_carga = 0;
     barra_ant = pant >= 0 ? barra(pant) : -1;
     pant = p; fase = F_ENTRA; t = 0; entra_atras = atras; t_bloq = 0;
@@ -768,6 +780,10 @@ static void entra(int p, int atras)
     case P_SALON:
         if (sa_abre()) { entra(P_MODO, 1); bloqueado(); return; }   /* (sin SALON.DAT o sin el hueco) */
         sa_entra();
+        break;
+    case P_TABLERO:
+        if (tb_abre()) { entra(P_MODO, 1); bloqueado(); return; }   /* (sin TABLERO.DAT o sin el hueco) */
+        tb_entra();
         break;
     case P_MENU: case P_MODO: case P_RANKING: case P_MULTI: {
         static const int U_[] = { U_PRINC, U_UNJUG, U_RANK, U_MULTI };
@@ -1088,7 +1104,12 @@ static void control(unsigned n)
                 }
             } else if (c == 0) {                            /* COAST 2 COAST: categorias (P_C2C) */
                 if (mis_n && !c2_abre()) { modo_sel = 0; sale(P_C2C, 1); } else bloqueado();
-            } else if (c <= 3) { modo_sel = c; mis_sel = -1; sale(P_COCHE, 1); }   /* OUTRUN, HEART ATTACK, TIME ATTACK */
+            } else if (c == 1) { modo_sel = c; mis_sel = -1; sale(P_COCHE, 1); }   /* OUTRUN */
+            else if (c <= 3) {                              /* HEART ATTACK, TIME ATTACK: el tablero 0x24 (0x25dd58: */
+                modo_sel = c; mis_sel = -1;                 /* raiz +0x208 bits 5..7 = 0x40 / 0x80, tabla 0x375f58) */
+                tb_bits = (tb_bits & ~0xe0u) | (c == 2 ? 0x40u : 0x80u); tb_sig = 0x24;
+                if (!tb_abre()) sale(P_TABLERO, 1); else bloqueado();
+            }
             else if (!sa_abre()) sale(P_SALON, 1);         /* SALON (showroom, 4D4230 = PS2 0x25b418) */
             else bloqueado();
         } else if (n & CONT_X) a_licencia(pant);            /* LICENSE */
@@ -1114,7 +1135,10 @@ static void control(unsigned n)
             c_arregla_color(); sfx_menu(SFX_CURSOR);
         } else if (n & CONT_Y) {                            /* COLOR: el siguiente desbloqueado de los 8 */
             if (c_desbloqueado(i)) { int o = colores[i], c = o; do c = (c + 1) & 7; while (c != o && !c_color_ok(i, c)); colores[i] = c; }
-        } else if (atras) sale(sp_sel ? P_MENU : modo_sel == 0 && mis_sel >= 0 ? P_C2C : P_MODO, 0);   /* (C2C: al detalle) */
+        } else if (atras) {                                 /* (C2C: al detalle; INFARTO / CONTRARRELOJ: al tablero) */
+            if (!sp_sel && (modo_sel == 2 || modo_sel == 3) && !tb_abre()) sale(P_TABLERO, 0);
+            else sale(sp_sel ? P_MENU : modo_sel == 0 && mis_sel >= 0 ? P_C2C : P_MODO, 0);
+        }
         break; }
     case P_CAMBIO:
         if (izq && manual) { manual = 0; an_tramo(&a_sel, "AT"); sfx_menu(SFX_CURSOR); }
@@ -1215,6 +1239,13 @@ int menu_paso(unsigned n)
            frontal solo la ponen el arranque de la raiz, 0x23b5b8, y la vuelta de la seleccion de musica, 0x24efec) */
         if (r == 1) sale(P_MODO, 0);
         else if (r == 2) a_licencia(P_SALON);
+    }
+    if (pant == P_TABLERO && tb_activo() && fase != F_SALE) {
+        int r = tb_control(n, fase == F_QUIETO && !cargando);
+        if (r == 1) sale(P_COCHE, 1);
+        else if (r == 2) sale(P_MODO, 0);
+        else if (r == 3) sale(P_TABLERO, 1);
+        else if (r == 4) sale(P_TABLERO, 0);
     }
     if (pant == P_LICENCIA && l_desliza) {                  /* 4E2970 estados 6-9: sale 48 px por paso y entra */
         if (++l_desliza == 11) l_idx += l_dir;
@@ -2072,6 +2103,257 @@ static void sa_dibuja(void)
     } else spr_dibuja(0xc, SPR_CAPAS, 8, 0);
 }
 
+/* ---------------------------------------------------------------- TABLEROS DE CURSOS (INFARTO / CONTRARRELOJ)
+   Los del original (TABLERO.DAT, tools/conv_tablero.py; SLES-53998, fabricas de la raiz por clave 0x239eb8): UN
+   JUGADOR (0x25dd58, tabla 0x375f58) lleva INFARTO / CONTRARRELOJ a la clave 0x24 con la palabra del frontal (raiz
+   +0x208: bits 0..1 juego, 5..7 modo 0x40 / 0x80, 11 curso / etapa, 12..17 codigo; +0x20c bit 0 la opcion B):
+     0x24 (0x2528e8, control 0x2530a0): el juego de cursos (OutRun 2 / OutRun 2 SP), carrusel 0x419f70 (0x44003b)
+          -> INFARTO: el coche (clave 0xa); CONTRARRELOJ: 0x25 con 0x800 y los bits 0..1 = indice (0x2539c4).
+     0x25 (0x2558e8, control 0x255e58): CURSO / ETAPA (0x41a280 / 0x41a2c0) -> 0x26 (+0x800) o 0x27 (0x256520).
+     0x26 (0x24f340, control 0x24f818): las metas A..E y el curso seguido; R (0x251da0) las del reves. Candados
+          0xcb..0xce (curso seguido) y 0xc1 + 2 i / 0xc2 + 2 i (metas del reves): los METAS que vende el SALON.
+     0x27 (0x257e58, control 0x258610): las 15 etapas; R (0x25a880) las del reves con los candados 0x8a + 2 i /
+          0x8b + 2 i; abajo en la etapa 0 la opcion B (0xa8..0xab): ETAPAS del SALON.
+   Sin la lista de records de cada curso (0x267210 / 0x2674d8 / 0x269880: no hay records de Contrarreloj en la DC):
+   el foco no baja a la lista (la barra de ayuda es la de sin tarjeta de memoria, 0x25303c). El curso elegido llega a
+   la carrera por menu_ta_codigo (0x2a6758 = 4EEC80 del PC) y menu_ha_arbol. */
+#define TABLERO_RAM (256u << 10)                            /* tablas de TABLERO.DAT (animacion, sprites, TAB1) */
+typedef struct { uint32_t tok, pri, ult; } tb_d_t;
+typedef struct {
+    char m[4]; uint32_t _0;
+    tb_d_t b4[8], b2[4], c0[4], c1[4], a[4][13], d[4][30];  /* carruseles (0x419fb0.. ver conv_tablero.py) */
+    tb_d_t cursor, candado, r_si, r_no, aviso, bani[4][3];  /* 0x41a078, 0x41a088, 0x419d58, 0x419d64, 0x41abd0, 0x41a6c8.. */
+    float cx, cy;                                           /* el candado en (-363, -206) */
+} tb_t;
+static spr_banco_t *tb_bk; static const tb_t *TB;
+static int tb_k = 0x24; static int tb_sig = 0x24;                      /* clave del tablero y la del siguiente */
+static uint32_t tb_bits;                                    /* raiz +0x208 (la declaracion de arriba) */
+static int tb_20c;                                          /* raiz +0x20c bit 0 (opcion B de la etapa 0) */
+static int tb_ra, tb_rd;                                    /* R de las metas (0x375e30) y de las etapas (0x375f50) */
+static int tb_opb;                                          /* +0x27e68: opcion B puesta */
+static struct { const tb_d_t *t; int max, idx; sa_r_t r; } tb_car;   /* carrusel (0x26df20 = 51B7B0 del PC) */
+static sa_r_t tb_cur, tb_cand, tb_rind, tb_bani, tb_aviso;
+static int tb_activo(void) { return TB != NULL; }
+static int tb_abre(void)
+{
+    void *ram; uint32_t tam;
+    if (TB) return 0;
+    if (!(ram = menu_hueco ? menu_hueco(TABLERO_RAM) : NULL)) { dbglog(DBG_ERROR, "TABLERO: sin el hueco para TABLERO.DAT\n"); return -1; }
+    spr_suelta_todas();
+    if (!(tb_bk = spr_abre_en("TABLERO.DAT", ram, TABLERO_RAM))) {
+        dbglog(DBG_ERROR, "TABLERO: no se pudo abrir TABLERO.DAT\n"); menu_hueco(0); return -1;
+    }
+    TB = (const tb_t *)spr_extra(tb_bk, &tam);
+    if (!TB || ((uintptr_t)TB & 3) || tam < sizeof(tb_t) || memcmp(TB->m, "TAB1", 4)) {
+        dbglog(DBG_ERROR, "TABLERO: TABLERO.DAT sin tablas\n"); spr_cierra(tb_bk); tb_bk = NULL; TB = NULL; menu_hueco(0); return -1;
+    }
+    spr_por_tramos(tb_bk, 1);
+    tb_car.r.h = tb_cur.h = tb_cand.h = tb_rind.h = tb_bani.h = tb_aviso.h = -1;
+    dbglog(DBG_INFO, "TABLERO: TABLERO.DAT (%u bytes de tablas en el hueco), VRAM libre %uK\n", (unsigned)hudd_tablas_ocupa(),
+           (unsigned)(pvr_mem_available() >> 10));
+    return 0;
+}
+static void tb_cierra(void)
+{
+    if (!tb_bk) return;
+    spr_suelta_todas(); spr_cierra(tb_bk); tb_bk = NULL; TB = NULL;
+    tb_car.r.h = tb_cur.h = tb_cand.h = tb_rind.h = tb_bani.h = tb_aviso.h = -1;
+    if (menu_hueco) menu_hueco(0);
+}
+static int tb_modo(void) { return (int)(tb_bits >> 5) & 7; }   /* 2 INFARTO, 4 CONTRARRELOJ */
+static int tb_juego(void) { return (int)(tb_bits & 3); }
+static int tb_codigo(void) { return (int)(tb_bits >> 12) & 0x3f; }
+static void tb_pon_codigo(int c) { tb_bits = (tb_bits & 0xfffc0fffu) | ((uint32_t)(c & 0x3f) << 12); }
+/* carrusel: 51B7B0 / 51BDB0 / 51BE30 / 51C0B0 del PC (0x26df20 / 0x26e6e8 / 0x26e000 / 0x26e438 y 0x26e4f0 del PS2):
+   la entrada 2 i + 1 es la quieta en i y la 2 i + 2 el paso de i a i + 1 (al reves hacia atras); n entradas */
+static void tb_car_conf(int e, int rev, int quieta)
+{
+    const tb_d_t *d = tb_car.t + e;
+    sr_pon(&tb_car.r, d->tok, (int)(rev ? d->ult : d->pri), (int)(rev ? d->pri : d->ult), 0, quieta ? 0 : 3, rev ? -1.0f : 1.0f);
+}
+static void tb_car_init(const tb_d_t *t, int n) { sr_suelta(&tb_car.r); tb_car.t = t; tb_car.max = (n - 1) / 2; tb_car.idx = 0; }
+static void tb_car_elige(int i) { if (i >= 0 && i <= tb_car.max) { tb_car.idx = i; sr_suelta(&tb_car.r); } }
+static void tb_car_paso(void) { sr_tick(&tb_car.r); if (sr_listo(&tb_car.r)) tb_car_conf(tb_car.idx * 2 + 1, 0, 1); }
+static void tb_car_mueve(int der)
+{
+    int v = tb_car.idx;
+    if (der ? v >= tb_car.max : v <= 0) return;
+    tb_car.idx = v + (der ? 1 : -1);
+    tb_car_conf(v * 2 + (der ? 2 : 0), !der, 0);
+    sfx_menu(SFX_CURSOR);                                   /* 4249F0(1) */
+}
+/* el carrusel de las metas (0x251da0 = 4CFC40 del PC) y el de las etapas (0x25a880): R cambia de tabla y se queda en
+   la misma posicion; al entrar, la posicion sale del codigo de la palabra del frontal */
+static void tb_car_metas(int r)
+{
+    int i = tb_car.idx;
+    if (r) { tb_ra = !tb_ra; }
+    tb_car_init(TB->a[tb_juego() ? 2 + tb_ra : tb_ra], 0x18);
+    if (r) tb_car_elige(i);
+    else if (tb_modo() == 4) tb_car_elige(tb_ra ? tb_codigo() - 6 : tb_codigo());
+    else tb_car_elige(tb_codigo());
+}
+static void tb_car_etapas(int r)
+{
+    int i = tb_car.idx;
+    if (r) { tb_rd = !tb_rd; }
+    tb_car_init(TB->d[tb_juego() ? 2 + tb_rd : tb_rd], 0x1e);
+    if (r) tb_car_elige(i);
+    else {
+        if (tb_rd) tb_pon_codigo(tb_codigo() - 0xf);       /* 0x258234 */
+        if (tb_codigo() < 0xf) tb_car_elige(tb_codigo());
+    }
+}
+/* candado del indice actual (0x253418 / 0x24fd28.. / 0x258b84); -1 sin candado */
+static int tb_candado(void)
+{
+    int i = tb_car.idx, j = tb_juego();
+    switch (tb_k) {
+    case 0x24: return tb_modo() == 1 && i >= 2 ? (i == 3 ? 0xcb : 0xcc) : -1;   /* (solo con OUTRUN: 4 posiciones) */
+    case 0x26:
+        if (tb_modo() == 4) {
+            if (i == 5) return j ? (tb_ra ? 0xcd : 0xcb) : (tb_ra ? 0xce : 0xcc);
+            if (i < 5 && tb_ra) return (j ? 0xc1 : 0xc2) + 2 * i;
+            return -1;
+        }
+        return tb_modo() == 5 && i < 5 && tb_ra ? (j ? 0xc1 : 0xc2) + 2 * i : -1;
+    case 0x27:
+        if ((tb_modo() != 4 && tb_modo() != 5) || !tb_rd) return -1;
+        if (tb_opb) return j ? 0xaa : 0xab;
+        return (j ? 0x8a : 0x8b) + 2 * i;
+    }
+    return -1;
+}
+static int tb_bit_b(void) { return tb_juego() == 1 ? (tb_rd ? 0xaa : 0xa8) : (tb_rd ? 0xab : 0xa9); }   /* 0x259ef8 */
+static void tb_entra(void)
+{
+    tb_k = tb_sig;
+    sr_suelta(&tb_cur); sr_suelta(&tb_cand); sr_suelta(&tb_rind); sr_suelta(&tb_bani); sr_suelta(&tb_aviso);
+    tb_opb = 0;
+#if defined(PRUEBA_TABLERO_TODO)
+    {   /* prueba (-DPRUEBA_TABLERO_TODO): la licencia activa con todas las ETAPAS y METAS del SALON (bits 0x8a..0xce)
+           al entrar en un tablero por primera vez */
+        static int dado; uint8_t *p = activa(); int b;
+        if (p && !dado) {
+            for (b = 0x8a; b <= 0xce; b++) p[0x28 + b / 8] |= (uint8_t)(1 << (b % 8));
+            p[0x3f4] |= 2; dado = 1; dbglog(DBG_INFO, "TABLERO: prueba, la licencia con las ETAPAS y METAS\n");
+        }
+    }
+#endif
+    switch (tb_k) {
+    case 0x24:                                              /* 0x252b50 */
+        if (tb_modo() == 1) tb_car_init(TB->b4, 8), tb_car_elige(tb_juego());
+        else { tb_car_init(TB->b2, 4); if (tb_juego() < 2) tb_car_elige(tb_juego()); }
+        break;
+    case 0x25:                                              /* 0x2575d0 */
+        tb_car_init(tb_juego() ? TB->c1 : TB->c0, 4); tb_car_elige(tb_bits & 0x800 ? 0 : 1);
+        break;
+    case 0x26: tb_car_metas(0); break;                      /* 0x24f490: +0x3f4 = 0x375e30 */
+    case 0x27: tb_20c = 0; tb_car_etapas(0); break;         /* 0x257fd0: +0x538 = 0x375f50 */
+    }
+    dbglog(DBG_INFO, "TABLERO: clave 0x%x, palabra %08x, posicion %d\n", tb_k, (unsigned)tb_bits, tb_car.idx);
+}
+static void tb_opcion_b(int pon)                            /* 0x259ea0 / 0x25a040: la animacion +0x348 */
+{
+    const tb_d_t *t = TB->bani[(tb_juego() == 1 ? 2 : 0) + tb_rd];
+    if (pon) { sr_pon(&tb_bani, t[1].tok, (int)t[0].pri, (int)t[1].ult, 1, 5, 1); tb_opb = 1; }
+    else { sr_pon(&tb_bani, t[2].tok, (int)t[2].pri, (int)t[2].ult, 1, 3, 1); tb_opb = 0; }
+}
+/* un paso del tablero: 0 sigue, 1 al coche (clave 0xa), 2 atras a UN JUGADOR, 3 a otro tablero (tb_sig) */
+static int tb_control(unsigned n, int atiende)
+{
+    int a, i, b;
+    if (!TB) return 2;
+    sa_ejes(); a = atiende ? sa_accion(n) : 12;
+    if (atiende && a == 12 && r1_nuevo) a = 11;               /* el gatillo R (bit 0x2000 del frontal) */
+    spr_paso();
+    tb_car_paso();
+    if (tb_cur.h < 0) sr_pon(&tb_cur, TB->cursor.tok, (int)TB->cursor.pri, (int)TB->cursor.ult, 4, 0, 1);   /* +0x2a8 */
+    b = tb_candado();
+    if (b >= 0 && !sa_tiene(b)) {
+        if (tb_cand.h < 0) { sr_pon(&tb_cand, TB->candado.tok, (int)TB->candado.pri, (int)TB->candado.ult, 4, 0, 1); spr_traslada(tb_cand.h, TB->cx, TB->cy); }
+    } else sr_suelta(&tb_cand);
+    if (tb_k == 0x26 || tb_k == 0x27) {                     /* el indicador de R (+0x488) */
+        const tb_d_t *d = (tb_k == 0x26 ? tb_ra : tb_rd) ? &TB->r_si : &TB->r_no;
+        sr_pon(&tb_rind, d->tok, (int)d->pri, (int)d->ult, 4, 0, 1);
+    }
+    if (tb_k == 0x27) {                                     /* el aviso de la opcion B en la etapa 0 (0x258d20) */
+        if (tb_car.idx == 0 && sa_tiene(tb_bit_b())) { if (tb_aviso.h < 0) sr_pon(&tb_aviso, TB->aviso.tok, (int)TB->aviso.pri, (int)TB->aviso.ult, 4, 0, 1); }
+        else sr_suelta(&tb_aviso);
+        sr_tick(&tb_bani);
+    }
+    i = tb_car.idx;
+    switch (a) {
+    case 0:                                                 /* A */
+        switch (tb_k) {
+        case 0x24:                                          /* 0x253890 / 0x2539c4 */
+            if (tb_modo() <= 3) {
+                if (b >= 0 && !sa_tiene(b)) { bloqueado(); return 0; }
+                tb_bits = (tb_bits & ~3u) | (uint32_t)(i & 3); return 1;
+            }
+            tb_bits |= 0x800; tb_bits = (tb_bits & ~3u) | (i ? 1u : 0u); tb_sig = 0x25; return 3;
+        case 0x25:                                          /* 0x256520: 0x375e48[i] */
+            if (i == 0) tb_bits |= 0x800; else tb_bits &= ~0x800u;
+            tb_sig = i == 0 ? 0x26 : 0x27; return 3;
+        case 0x26:                                          /* 0x2502cc */
+            if (b >= 0 && !sa_tiene(b)) { bloqueado(); return 0; }
+            tb_bits |= 0x800;
+            tb_pon_codigo(i + (tb_ra ? (tb_modo() == 4 ? 6 : 5) : 0));
+            return 1;
+        case 0x27:                                          /* 0x259198 */
+            tb_pon_codigo(i + (tb_rd ? 0xf : 0)); tb_20c = 0;
+            if (tb_opb) { tb_20c = 1; tb_pon_codigo(tb_rd ? 0xf : 0); return 1; }
+            if (b >= 0 && !sa_tiene(b)) { bloqueado(); return 0; }
+            return 1;
+        }
+        break;
+    case 1:                                                 /* B: el tablero anterior (la pila de la raiz) */
+        if (tb_k == 0x26) { tb_ra = 0; tb_bits &= 0xfffc0fffu; }   /* 0x250be0 */
+        if (tb_k == 0x27) { tb_opb = 0; tb_rd = 0; }
+        if (tb_k == 0x24) return 2;
+        tb_sig = tb_k == 0x25 ? 0x24 : 0x25; return 4;
+    case 3: case 5:                                         /* izquierda / derecha */
+        if (a == 5 && tb_k == 0x26 && (i == 5 || (tb_modo() != 4 && i == 4))) break;   /* 0x250d44 */
+        if (tb_k == 0x27 && tb_opb) { sr_suelta(&tb_bani); tb_opb = 0; }   /* 0x2599b8 */
+        tb_car_mueve(a == 5);
+        break;
+    case 4:                                                 /* abajo: la opcion B en la etapa 0 (0x259ea0) */
+        if (tb_k != 0x27 || i != 0) break;
+        if (tb_opb) tb_opcion_b(0);
+        else if (sa_tiene(tb_bit_b())) tb_opcion_b(1);
+        break;
+    case 11:                                                /* R: las del reves (0x250288 / 0x25914c) */
+        if (tb_k == 0x26) tb_car_metas(1);
+        else if (tb_k == 0x27) { sr_suelta(&tb_bani); tb_opb = 0; tb_car_etapas(1); }
+        break;
+    }
+    return 0;
+}
+static void tb_dibuja(void)
+{
+    if (!TB) return;
+    spr_dibuja(0, SPR_CAPAS, 3, 0);
+}
+/* CONTRARRELOJ: el codigo del curso de la carrera ([656234]; 0x2a6758 = 4EEC80 del PC) o -1. preset: 0x2a6978 (juego
+   0 -> 1, 1 -> 0) y los cursos seguidos (5 / 11: preset 2 / 3) */
+int menu_ta_codigo(int *bandera)
+{
+    int pre = tb_juego() == 0 ? 1 : tb_juego() == 1 ? 0 : tb_juego() == 2 ? 3 : 2, c = tb_codigo();
+    if (bandera) *bandera = 0;
+    if (sp_sel || modo_sel != 3 || tb_modo() != 4) return -1;
+    if (!(tb_bits & 0x800)) {                               /* 0x2a6800: una etapa */
+        if (c >= 0xf) c += 0xf;
+        if (pre == 0) c += 0xf;
+        if (bandera) *bandera = tb_20c;
+        return c;
+    }
+    if (pre == 0) return c == 5 ? 0x52 : c == 11 ? 0x53 : c + (c > 5 ? 0x45 : 0x41);
+    return c == 5 ? 0x50 : c == 11 ? 0x51 : c + (c > 5 ? 0x40 : 0x3c);
+}
+/* INFARTO: el juego de cursos elegido (raiz +0x208 bits 0..1): 0 OutRun 2 (csc_data_2: el arbol 0), 1 OutRun 2 SP
+   (csc_data_cvt: el arbol 1); -1 fuera del INFARTO */
+int menu_ha_juego(void) { return !sp_sel && modo_sel == 2 && tb_modo() == 2 ? tb_juego() : -1; }
+
 /* 0x1f6d70: tiempo de juego (licencia +0x10C, cuadros) en horas, minutos y segundos: s = cuadros / 60,2 */
 static void tiempo_lic(uint32_t cuadros, int *h, int *m, int *sg)
 {
@@ -2154,6 +2436,7 @@ void menu_dibuja(void)
         break;
     case P_C2C: c2_dibuja(); break;
     case P_SALON: sa_dibuja(); break;
+    case P_TABLERO: tb_dibuja(); break;
     case P_COCHE:
         an_dibuja(&a_sel, 0, a_ent * a_sal, 4, 0);
         if (!c_desbloqueado(c_indice()) && an_hecho(&a_sel)) hudd_dibuja(md, us[U_CAND], 0, 0, 0, a_ent * a_sal, 5, 0);

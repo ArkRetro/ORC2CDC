@@ -5023,10 +5023,11 @@ static void viso_lee(void)
     }
     free(b);
 }
-/* el arbol id (CURSO.DAT) en curso[]; 0 bien */
+/* el arbol id (CURSO.DAT; los de la Contrarreloj, 200 + codigo, en CURSOTA.DAT) en curso[]; 0 bien */
+#define CURSO_FICH(id) ((id) >= 200 ? "CURSOTA.DAT" : "CURSO.DAT")
 static int curso_lee_id(int id)
 {
-    uint32_t sz, o, n; int r; uint8_t *b = gd_carga("CURSO.DAT", &sz);
+    uint32_t sz, o, n; int r; uint8_t *b = gd_carga(CURSO_FICH(id), &sz);
     if (!b) return -1;
     if ((r = curso_busca(b, sz, id, &o, &n))) { free(b); return r; }
     memcpy(curso, b + o, n * sizeof(etapa_t)); ncurso = n; curso_id = id; free(b);
@@ -5084,11 +5085,14 @@ static void col_en_hueco(int k, const float *M)
 static uint8_t arbol_grande[RIVAL_NMIS];                        /* el arbol 100 + i tiene una etapa o union que no cabe */
 static int curso_huecos(void)
 {
-    int n_grandes = 0;
-    uint32_t lba, t, tc, sz, o, m, a; int i; char n[16]; uint8_t *b = gd_carga("CURSO.DAT", &sz);
+    int n_grandes = 0, fta;
+    uint32_t lba, t, tc, sz, o, m, a; int i; char n[16]; uint8_t *b;
+  for (fta = 0; fta < 2; fta++) {                               /* CURSO.DAT y CURSOTA.DAT (Contrarreloj) */
+    b = gd_carga(fta ? "CURSOTA.DAT" : "CURSO.DAT", &sz);
+    if (!b && fta) break;
     /* los huecos valen para todos los arboles: el mayor fichero de cualquiera (curso_pon cambia de arbol sin
        volver a reservarlos) */
-    for (a = 0; b && a < 1000; a++) {
+    for (a = fta ? 200 : 0; b && a < 1000; a++) {
       if (a > 1 && a < 100) continue;
       if (curso_busca(b, sz, (int)a, &o, &m)) continue;
       memcpy(curso, b + o, m * sizeof(etapa_t)); ncurso = m;
@@ -5105,7 +5109,7 @@ static int curso_huecos(void)
         if (!gd_busca(n, &lba, &t) && TAM_SECT(t) > cap_col) cap_col = TAM_SECT(t);
       }
     }
-    for (a = 0; b && a < 1000; a++) {                           /* colisiones de etapa que no caben detras de su SEG */
+    for (a = fta ? 200 : 0; b && a < 1000; a++) {               /* colisiones de etapa que no caben detras de su SEG */
       if (a > 1 && a < 100) continue;
       if (curso_busca(b, sz, (int)a, &o, &m)) continue;
       memcpy(curso, b + o, m * sizeof(etapa_t)); ncurso = m;
@@ -5116,7 +5120,9 @@ static int curso_huecos(void)
         if (!gd_busca(n, &lba, &tc) && TAM_SECT(t) + TAM_SECT(tc) > cap_etapa && TAM_SECT(tc) > cap_col_e) cap_col_e = TAM_SECT(tc);
       }
     }
-    if (b) { free(b); if (curso_lee_id(0)) return 1; }          /* de vuelta el del modo OutRun */
+    if (b && fta) free(b);
+    if (b && !fta) { free(b); if (curso_lee_id(0)) return 1; }  /* de vuelta el del modo OutRun */
+  }
     /* el hueco de la union tambien lleva fuera de la carrera las tablas del frontal de OUTRUN2SP (hueco_fsp): nunca
        menor que eso. Con las uniones por registros (una sola etapa de geometria, demo 39) el mayor BKnn bajo de 1730 a
        1506 KB y el frontal ya no cabia (960 + 600 KB): no se podia elegir OUTRUN2SP en el menu */
@@ -5156,6 +5162,7 @@ static int curso_lee_etapa(int k)
 }
 /* al empezar una carrera: la etapa de salida (leida otra vez si ya se habia liberado o era otra) y nada mas */
 static int curso_pedido = PRUEBA_CURSO;                         /* arbol de la carrera siguiente (curso_id) */
+static int ta_codigo = -1;                                      /* CONTRARRELOJ: [656234] (el arbol 200 + codigo) */
 static volatile int meta_hilo;                                  /* META.DAT leyendose (hilo) */
 static void *meta_lee(void *p)
 {
@@ -9229,6 +9236,7 @@ static void meta_entra(void)                                    /* 49C9C0 */
     /* las metas A..E son las claves 10..14 del arbol del modo OutRun; en los demas arboles (OUTRUN2SP, misiones) la
        eleccion del original no esta trazada: PENDIENTE (se usa la 0) */
     meta_g = (curso_id == 0 || curso_id == 1) && cur_nodo >= 10 && cur_nodo <= 14 ? cur_nodo - 10 : 0;   /* claves 10..14 (csc_data_2 y csc_data_cvt) */
+    if (curso_id >= 200 + 0x3c && curso_id < 200 + 0x50) meta_g = (curso_id - 200 - 0x3c) % 5;   /* Contrarreloj: GOAL_A..E (PROBABLE) */
     e = meta_escena(variante, TIM_PRESET, meta_g);
     meta_empieza(&meta, e);
     memcpy(meta_rueda_y, fis.rueda_y, sizeof meta_rueda_y);
@@ -9912,6 +9920,21 @@ int main(int argc, char **argv)
                     }
                     else { if (variante == 6) variante = 1; rival_fuera(); }
                 }
+                {   /* INFARTO / CONTRARRELOJ: el curso del tablero (comun/menu.c, TABLERO.DAT). CONTRARRELOJ: el codigo
+                       [656234] de 0x2a6758 -> el arbol 200 + codigo de CURSOTA.DAT (48B550: una etapa sola, las metas
+                       A..E de OR2 / SP_goals y de las del reves, los cursos seguidos csc_data_*_ren). INFARTO: el juego
+                       de cursos (raiz +0x208 bits 0..1): 1 -> csc_data_cvt, el arbol 1 */
+                    int fl_ = 0, ta_ = auto_ || juego_sp ? -1 : menu_ta_codigo(&fl_), ha_ = auto_ || juego_sp ? -1 : menu_ha_juego();
+                    ta_codigo = -1;
+#ifdef PRUEBA_TA_CODIGO
+                    ta_ = PRUEBA_TA_CODIGO;                     /* prueba: el codigo de la Contrarreloj (con el piloto) */
+#endif
+                    if (variante == 7 && ta_ >= 0) {
+                        ta_codigo = ta_; curso_pedido = 200 + ta_;
+                        if (fl_) dbglog(DBG_ERROR, "CURSO: la opcion B (PALM_BT / BEAC_BT / _BR, 0x830395) sin portar: la etapa normal\n");
+                    } else if (variante == 2 && ha_ == 1) curso_pedido = 1;
+                    if (ta_ >= 0 || ha_ >= 0) dbglog(DBG_INFO, "CURSO: tablero, variante %d, codigo %d, juego %d -> arbol %d\n", variante, ta_, ha_, curso_pedido);
+                }
                 or2_choques_preset(&choq, preset_curso);        /* 0x191d20 / 0x191d70 */
                 /* difficulty_of de 44DC70 (PS2 0x1cdc98..0x1cdcbc): 0 en el juego de la consola (43F860 != 0); en el
                    de OUTRUN2SP 2 en la variante 4 y si no la de la licencia activa (+E0) */
@@ -10208,6 +10231,12 @@ int main(int argc, char **argv)
                        44DC70 de esa clave (EXTEND TIME: 84490C -> 4B9630, escena 2C00AC) y da el bonus de etapa
                        4F2B20 con los cuadros desde el anterior (7D3948). En la meta no hay ampliacion (4513C0: GOAL al
                        entrar en la union de meta). */
+                    if ((ev & CUR_SIGUIENTE) && variante == 7 && ta_codigo >= 0 && ta_codigo < 0x3c) {
+                        /* CONTRARRELOJ de una etapa: el stage clear (44FF20) con un codigo < 0x3c es la meta (48B3A0:
+                           451350(0) == 1 -> 44FEF0(1)); el registro de 44D720 vuelve a si mismo (hijos 0 / 0) */
+                        ev = (ev & ~CUR_SIGUIENTE) | CUR_META;
+                        dbglog(DBG_INFO, "CURSO: Contrarreloj de una etapa (codigo %d): GOAL al pasar el stage clear\n", ta_codigo);
+                    }
                     if (ev & CUR_SIGUIENTE) {
                         texto_centro(zona_nombre(cur_nodo)); t_estado = 0;
                         int amp = tim_zona(cur_nodo, curso[cur_nodo].nivel);

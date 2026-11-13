@@ -25,6 +25,8 @@ int menu_paso(unsigned botones_nuevos);     /* una vez por paso de logica (60 Hz
 void menu_dibuja(void);                     /* dentro de la lista TR */
 void menu_sale(void);                       /* libera toda la VRAM del menu */
 int menu_modo(void);                        /* variante del modo: 1 OutRun, 2 Heart Attack (INFARTO), 7 Time Attack */
+int menu_ta_codigo(int *bandera);            /* CONTRARRELOJ: codigo del curso [656234] (0x2a6758) o -1; bandera: +0x20c bit 0 */
+int menu_ha_juego(void);                     /* INFARTO: juego de cursos del tablero (0 OutRun 2, 1 OutRun 2 SP) o -1 */
 /* COAST 2 COAST (variante 6): las misiones que se pueden elegir (indice de Races.bin, clave y subclave), la elegida
    (-1: otro modo) y la nota de la mision en la licencia (495A20) */
 void menu_pon_misiones(int n, const int16_t *idx, const uint8_t *clave, const uint8_t *sub, const uint8_t *tipo,

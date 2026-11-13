@@ -8,6 +8,9 @@
 #   misiones de COAST 2 COAST (MISION.DAT, conv_mision.py), sus coches de carreras RC00-29 (conv_trafico.py --rivales) y
 #   sus pantallas del menu (C2C.DAT, conv_c2c.py: categorias, mapa y detalle; datos de antes sin el: solo hace ese paso).
 #   El SALON (showroom: SALON.DAT, conv_salon.py; datos de antes del 2026-11-13 sin el: solo hace ese paso).
+#   Los tableros de cursos de INFARTO / CONTRARRELOJ (TABLERO.DAT, conv_tablero.py) y los cursos de la Contrarreloj
+#   (CURSOTA.DAT con los arboles 200 + codigo y sus uniones nuevas BK262.. en UNIONESTA.PAK, conv_union.py --curso=
+#   CURSOTA.DAT --bk-desde=262; ~2 h en un nucleo por cada 60 uniones): datos de antes sin ellos, solo hace esos pasos.
 # Datos de antes del 2026-11-13 sin MISION.DAT ni RC00-29.DAT: basta volver a llamarlo (solo hace esos pasos).
 # Datos sin TRAFK0-2.DAT (los camiones de OUTRUN2SP, conv_trafico.py --camiones): lo mismo, solo hace ese paso.
 # Segunda pasada de la VQ (tools/revq.py, vq.UMBRAL2) en las etapas y uniones antes de empaquetarlas y en los modelos
