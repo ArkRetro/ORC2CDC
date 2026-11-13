@@ -98,6 +98,7 @@ typedef struct {
     const uint8_t *pvs_l; uint32_t *pvs_m, *pvs_teo;              /* pvs_teo: por nodo, bytes teoricos y vertices */
     int32_t pvs_s; uint32_t pvs_i; int pvs_on;                    /* seccion aplicada, punto del ojo, en uso este cuadro */
     uint32_t *vis;                                                /* nodos visibles en el cuadro (bits; nodos_visibles) */
+    uint32_t *vis_ant;                                            /* los que se dibujaron en el anterior (detras de vis) */
     /* fundido de entrada (fe_paso; NULL sin el): por nodo lo que le queda (255 recien aparecido .. 0 entero) y tres
        mascaras de bits (fe_p: el nodo estaba en el cuadro anterior, dibujado o fuera de la vista; fe_f: fuera de la
        vista en este cuadro; fe_m: fe_v no es 0); fe_hist: el modelo ya ha pasado por un cuadro */
@@ -215,7 +216,8 @@ static int lee_modelo_en(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t
             uint32_t n = m->mallas[i].n > 256 ? 256 : m->mallas[i].n;
             m->nodos[m->mallas[i].nodo].relleno[0] += ta_teo(n, 0); m->nodos[m->mallas[i].nodo].relleno[1] += n << 12;
         }
-    m->vis = m->nnodos ? calloc((m->nnodos + 31) / 32, 4) : NULL; m->ruta_i = 0;
+    m->vis = m->nnodos ? calloc((m->nnodos + 31) / 32 * 2, 4) : NULL; m->ruta_i = 0;   /* vis y vis_ant */
+    m->vis_ant = m->vis ? m->vis + (m->nnodos + 31) / 32 : NULL;
     m->fe_v = NULL; m->fe_p = m->fe_f = m->fe_m = NULL; m->fe_hist = m->fe_n = 0;
 #ifdef CON_FUNDIDO_ENTRADA
     if (m->vis && !m->relleno_propio) {                           /* (un bloque: las tres mascaras y los bytes) */
@@ -840,12 +842,24 @@ static void ta_teo_tab_pon(void)
     uint32_t n; int o;
     for (o = 0; o < 2; o++) for (n = 0; n < 257; n++) ta_teo_tab[o][n] = n >= 3 ? ta_teo(n, o) : ta_teo(3, o);
 }
+#ifdef DIAG_POPPING                                     /* medida (DIAG_POPPING): mallas de la etapa que no caben */
+static uint32_t pop_mc, pop_vc;
+#define POP_MALLA(m) do { pop_mc++; pop_vc += (m)->n; } while (0)
+#else
+#define POP_MALLA(m) do { } while (0)
+#endif
 /* reserva una tira de n vertices; 0 si no cabe (y no se envia) */
 static inline int ta_cabe(uint32_t n)
 {
     uint32_t t = n >= 3 && n <= 256 ? ta_teo_tab[ta_ofs != 0][n] : ta_teo(n, ta_ofs), c = t * ta_f >> 8;
 #ifndef DIAG_SIN_TOPE                                    /* medida en Flycast: sin tope (en la consola se colgaria) */
-    if (ta_vb + c > ta_lim || (ta_en_etapa && ta_et + c > ta_tope_etapa)) { ta_corto = 1; ta_et_corto |= ta_en_etapa; return 0; }
+    if (ta_vb + c > ta_lim || (ta_en_etapa && ta_et + c > ta_tope_etapa)) {
+        ta_corto = 1; ta_et_corto |= ta_en_etapa;
+#ifdef DIAG_POPPING
+        if (ta_en_etapa) { pop_mc++; pop_vc += n; }
+#endif
+        return 0;
+    }
 #endif
     ta_vb += c; if (ta_en_etapa) ta_et += c;
     ta_teo_3d += t; ta_tiras++;
@@ -1160,7 +1174,7 @@ static void dibuja_rango(const modelo_t *mo, int l, uint32_t k0, uint32_t k1, in
             if (mo->vis && m->nodo >= 0 && !(mo->vis[m->nodo >> 5] & (1u << (m->nodo & 31)))) continue;
             if (mo->pvs_on && m->nodo >= 0 && !(mo->pvs_m[k >> 5] & (1u << (k & 31)))) continue;   /* PVS: no se ve */
 #ifndef DIAG_SIN_TOPE
-            if (vtx_et + (vtx_env - vtx_et0) > VTX_ETAPA_MAX) { ta_corto = 1; ta_et_corto = 1; continue; }
+            if (vtx_et + (vtx_env - vtx_et0) > VTX_ETAPA_MAX) { ta_corto = 1; ta_et_corto = 1; POP_MALLA(m); continue; }
 #endif
             cartel = malla_de_cartel(mo, m);
             if (!cartel) {
@@ -1267,7 +1281,7 @@ static void dibuja_etapa(const modelo_t *mo, int l)
 #endif
             if (pvs && m->nodo >= 0 && !(pvs[k >> 5] & (1u << (k & 31)))) continue;   /* PVS: no se ve */
 #ifndef DIAG_SIN_TOPE
-            if ((int32_t)(ve - vtx_et0) > vres) { ta_corto = 1; ta_et_corto = 1; continue; }
+            if ((int32_t)(ve - vtx_et0) > vres) { ta_corto = 1; ta_et_corto = 1; POP_MALLA(m); continue; }
 #endif
             if (!cart) {
                 float dx = m->cx - o0, dy = m->cy - o1, dz = m->cz - o2, zv, xv, yv;
@@ -1312,7 +1326,7 @@ static void dibuja_etapa(const modelo_t *mo, int l)
                 /* (fundiendose, f: con desplazamiento en el TA, ta_teo_tab[1], y el color de fe_pon en sq_vtx_fe) */
                 uint32_t n = m->n, tt = f ? ta_teo_tab[1][n] : teo[n], c = tt * tf >> 8;
 #ifndef DIAG_SIN_TOPE
-                if ((int32_t)c > r) { ta_corto = 1; ta_et_corto |= ta_en_etapa; continue; }
+                if ((int32_t)c > r) { ta_corto = 1; ta_et_corto |= ta_en_etapa; POP_MALLA(m); continue; }
 #endif
                 r -= c; dvb += c; dt += tt; dn++;
 #ifdef DIAG_NO_ENVIA
@@ -5589,6 +5603,35 @@ static float dist2_ruta(const modelo_t *m, uint32_t i, const float *p)
    nodo se recortan una a una contra la vista). */
 #define ND_PRIO 48
 #define NB_PRIO 64
+/* Parte del tope que se reparte por distancia (lo cercano entero) antes de repartir el resto por la clase de LOD.
+   DECISION DEL PORT (popping, 2026-11-13; docs/PLAN.md, Popping): con 0,75 lo cercano se llevaba casi todo y de lo de
+   mas alla solo quedaban las clases de LOD bajas: edificios de 40-300 px de radio aparecian y desaparecian a 90-430 m
+   (DIAG_POPPING: 19 por segundo de 8 px o mas en PALM); con menos, lo que se quita es lo que menos ocupa en la
+   pantalla (el criterio del LOD del original, 404B00) y lo que aparece entra pequeno. -DREPARTO_CERCA=0.75f: lo de
+   antes */
+#ifndef REPARTO_CERCA
+#define REPARTO_CERCA 0.25f
+#endif
+/* Histeresis por nodo (DECISION DEL PORT, popping 2026-11-13): un nodo que se dibujo en el cuadro anterior cuenta
+   REPARTO_HIST_D clases de distancia (pasos del 19 %) y REPARTO_HIST_P clases de LOD (pasos del 9 %) mas cerca: entra
+   al cruzar el corte y solo sale si queda 1,41 veces mas alla (en distancia o en tamano en la pantalla). Sin ella, cada
+   vez que el corte bajaba un poco (el tope del cuadro cambia con el coche y el trafico) desaparecia de la pantalla lo
+   que acababa de aparecer (DIAG_POPPING: 16 por segundo en PALM) y volvia a aparecer al subir. El coste de lo que se
+   queda va en la cuenta de su clase: el reparto sigue cabiendo. 0 / 0: lo de antes */
+#ifndef REPARTO_HIST_D
+#define REPARTO_HIST_D 2
+#endif
+/* Coste en la clase de LOD (DECISION DEL PORT, popping 2026-11-13): la clase de lo de mas alla del corte de distancia
+   sube REPARTO_COSTE / 4 clases por cada vez que el nodo dobla los 64 vertices (y baja si tiene menos): de lo que no
+   cabe se quita primero lo que mas TA gasta por pixel de pantalla (palmeras, gente, barandillas de lejos) y se quedan
+   los edificios y las siluetas, que son pocas caras grandes. 4: el area en la pantalla por vertice (la clase de LOD
+   va en pasos de 2^(1/8) de tamano, 2^(1/4) de area). 0: solo el tamano, lo de antes */
+#ifndef REPARTO_COSTE
+#define REPARTO_COSTE 4
+#endif
+#ifndef REPARTO_HIST_P
+#define REPARTO_HIST_P 4
+#endif
 static uint32_t prio_coste[ND_PRIO][NB_PRIO], prio_vtx[ND_PRIO][NB_PRIO];   /* bytes teoricos y vertices por clase */
 static int prio_d = ND_PRIO - 1, prio_p = NB_PRIO - 1, prio_esp_d, prio_esp_p;
 static float prio_alfa = 1.0f;
@@ -5603,6 +5646,67 @@ static inline int log2x(float x, int k)                         /* k log2(x) por
     union { float f; int32_t i; } q; q.f = x;
     return (q.i - (127 << 23)) >> (k == 8 ? 20 : 21);
 }
+/* ---------------------------------------------------------------- medida del popping (-DDIAG_POPPING)
+   Por nodo de la etapa, la union y la etapa siguiente, la razon por la que no se dibuja en este cuadro (POPR en
+   nodos_visibles y nodos_quita) y la del cuadro anterior: un nodo que aparece (o desaparece) con el centro dentro de la
+   pantalla es un salto que se ve; se cuenta por la razon que tenia antes (o que tiene ahora) y por el radio de su
+   esfera en la pantalla (pixeles de 640x480). Las mallas que la PVS enciende o apaga en un nodo que ya se dibujaba y
+   con el centro en la pantalla, y las que el tope del TA o de vertices salta al dibujar (en el orden de las listas),
+   aparte. Cada ~1 s una linea "POP:" y los saltos mayores ("POPEV:"). Las razones se guardan por fichero (datos) y no
+   por hueco: el paso de la etapa siguiente a etapa no cuenta como aparecer. Solo medida: no cambia lo que se dibuja. */
+enum { PR_DIB, PR_LEJOS, PR_DETRAS, PR_LADO, PR_LOD, PR_RAMA, PR_PVS, PR_TOPE, PR_TRAMO, PR_LISTA, PR_N };
+#ifdef DIAG_POPPING
+#define POP_MAXN 4096
+typedef struct { const void *datos; uint32_t n; uint8_t ant[POP_MAXN], cur[POP_MAXN]; } pop_slot_t;
+static pop_slot_t pop_s[4];
+static uint8_t *pop_r, *pop_ra;                                   /* razones del modelo en curso (cuadro, anterior) */
+static const char *const pop_nom[PR_N] = { "dib", "lejos", "detras", "lado", "lod", "rama", "pvs", "tope", "tramo", "lista" };
+static uint32_t pop_ap[PR_N][3], pop_de[PR_N][3];                /* apariciones / desapariciones: >= 2, >= 8, >= 32 px */
+static float pop_zmin[PR_N];
+static uint32_t pop_pvs_ap[3], pop_pvs_de[3], pop_ccorto, pop_cuadros;
+static float pop_falta;                                           /* suma de pi px^2 de lo quitado por el tope en la pantalla */
+static uint64_t pop_t0;
+typedef struct { float px, z, r; int t, nodo, razon, ap; } pop_ev_t;
+static pop_ev_t pop_ev[4];
+#define POPR(i, x) do { if (pop_r) pop_r[i] = (uint8_t)(x); } while (0)
+static pop_slot_t *pop_slot(const modelo_t *mo)
+{
+    int k, j;
+    for (k = 0; k < 4; k++) if (pop_s[k].datos == mo->datos && pop_s[k].n == mo->nnodos) return &pop_s[k];
+    if (mo->nnodos > POP_MAXN) return NULL;
+    for (k = 0; k < 4; k++) {                                     /* uno que no sea de ningun tramo subido */
+        for (j = 0; j < 3; j++) if (pop_s[k].datos && pop_s[k].datos == tramos[j]->datos) break;
+        if (j == 3) break;
+    }
+    if (k == 4) return NULL;
+    pop_s[k].datos = mo->datos; pop_s[k].n = mo->nnodos;
+    memset(pop_s[k].ant, PR_TRAMO, sizeof pop_s[k].ant);           /* recien subido: nada se dibujaba */
+    return &pop_s[k];
+}
+/* radio en pixeles y si el centro esta en la pantalla (delante del plano cercano) */
+static int pop_en_pantalla(float cx, float cy, float cz, float r, float *px, float *z)
+{
+    float dx = cx - ojo[0], dy = cy - ojo[1], dz = cz - ojo[2], zv = dx * ade[0] + dy * ade[1] + dz * ade[2], xv, yv;
+    *z = zv - r;
+    if (zv - r <= cerca * 2.0f) return 0;
+    xv = dx * der[0] + dy * der[1] + dz * der[2]; yv = dx * arr[0] + dy * arr[1] + dz * arr[2];
+    if (fabsf(xv) >= zv * 320.0f / fx || fabsf(yv) >= zv * 240.0f / fx) return 0;
+    *px = r * fx / zv;
+    return 1;
+}
+static void pop_evento(int t, int nodo, int razon, int ap, float px, float z, float r)
+{
+    int b = px >= 32.0f ? 2 : px >= 8.0f ? 1 : 0, k, m = 0;
+    if (px < 2.0f) return;
+    for (k = 0; k <= b; k++) (ap ? pop_ap : pop_de)[razon][k]++;
+    if (ap && z < pop_zmin[razon]) pop_zmin[razon] = z;
+    if (px < 8.0f) return;
+    for (k = 1; k < 4; k++) if (pop_ev[k].px < pop_ev[m].px) m = k;   /* los 4 mayores de la ventana */
+    if (px > pop_ev[m].px) { pop_ev[m].px = px; pop_ev[m].z = z; pop_ev[m].r = r; pop_ev[m].t = t; pop_ev[m].nodo = nodo; pop_ev[m].razon = razon; pop_ev[m].ap = ap; }
+}
+#else
+#define POPR(i, x) do { } while (0)
+#endif
 /* ---------------------------------------------------------------- visibilidad precalculada (PVS)
    tools/pvs.py: desde muestras del ojo por toda la zona por la que puede ir la camara (cada punto de la ruta, a lo ancho
    del limite transitable mas PVS_LADO y hasta PVS_ALTO sobre el suelo, todos los rumbos) se dibujo por software lo
@@ -5632,6 +5736,12 @@ static void pvs_aplica(modelo_t *mo, int s)                     /* XOR de la lis
         mo->pvs_m[i >> 5] ^= w;
         if (mo->pvs_m[i >> 5] & w) { mo->pvs_teo[2 * ma->nodo] += ta_teo(n, 0); mo->pvs_teo[2 * ma->nodo + 1] += n; }
         else { mo->pvs_teo[2 * ma->nodo] -= ta_teo(n, 0); mo->pvs_teo[2 * ma->nodo + 1] -= n; }
+#ifdef DIAG_POPPING
+        {   float px, z;                                        /* malla de un nodo que ya se dibujaba, en la pantalla */
+            if (pop_ra && pop_ra[ma->nodo] == PR_DIB && pop_en_pantalla(ma->cx, ma->cy, ma->cz, ma->r, &px, &z) && px >= 2.0f)
+                (mo->pvs_m[i >> 5] & w ? pop_pvs_ap : pop_pvs_de)[px >= 32.0f ? 2 : px >= 8.0f ? 1 : 0]++;
+        }
+#endif
     }
 }
 static void pvs_paso(modelo_t *mo)
@@ -5696,15 +5806,21 @@ static void nodos_visibles(modelo_t *mo)
     /* (el ojo, los ejes y los planos en variables locales: las escrituras de abajo obligaban a releerlos en cada nodo;
        mismas cuentas) */
     float o0, o1, o2, e0, e1, e2, d0, d1, d2, a0, a1, a2, cer, lej; int pvs_on_; nodo_t *ND = mo->nodos;
-    uint32_t *VIS = mo->vis; const uint32_t nnod = mo->nnodos; const int regs = mo == &uni ? uni_mascara : 7;
+    uint32_t *VIS = mo->vis; const uint32_t *VA = mo->vis_ant; const uint32_t nnod = mo->nnodos; (void)VA; const int regs = mo == &uni ? uni_mascara : 7;
 #ifdef CON_FUNDIDO_ENTRADA
     uint32_t *FF = mo->fe_f;                                    /* fuera de la vista (fe_paso) */
 #else
     uint32_t *const FF = NULL;
 #endif
     if (!mo->vis) return;
+    memcpy(mo->vis_ant, mo->vis, (mo->nnodos + 31) / 32 * 4);  /* lo dibujado en el cuadro anterior (REPARTO_HIST_*) */
     memset(mo->vis, 0, (mo->nnodos + 31) / 32 * 4);
     if (FF) memset(FF, 0, (mo->nnodos + 31) / 32 * 4);
+#ifdef DIAG_POPPING
+    {   pop_slot_t *ps = pop_slot(mo);
+        pop_r = ps ? ps->cur : NULL; pop_ra = ps ? ps->ant : NULL;
+        if (pop_r) memset(pop_r, PR_LISTA, mo->nnodos); }
+#endif
     pvs_paso(mo);
     if (mo->sec_lista && mo->nruta) {                                /* la seccion del coche: la del punto mas cercano */
         uint32_t k = mo->ruta_i < mo->nruta ? mo->ruta_i : 0, a = k > 25 ? k - 25 : 0, b = k + 25 < mo->nruta ? k + 25 : mo->nruta - 1, i, s;
@@ -5723,29 +5839,42 @@ static void nodos_visibles(modelo_t *mo)
         d = ND + i;
         dx = d->cx - o0; dy = d->cy - o1; dz = d->cz - o2;
         zv = dx * e0 + dy * e1 + dz * e2;
-        if (zv - d->r > lej) continue;
+        if (zv - d->r > lej) { POPR(i, PR_LEJOS); continue; }
         /* detras del plano cercano o fuera de los laterales: fuera de la vista; lo que entra luego por el borde de la
            pantalla no se funde (fe_paso) */
-        if (zv + d->r < cer) { if (FF) FF[i >> 5] |= 1u << (i & 31); continue; }
+        if (zv + d->r < cer) { if (FF) FF[i >> 5] |= 1u << (i & 31); POPR(i, PR_DETRAS); continue; }
         xv = dx * d0 + dy * d1 + dz * d2; yv = dx * a0 + dy * a1 + dz * a2;
-        if (fabsf(xv) - zv * tanh > d->r * kh || fabsf(yv) - zv * tanv > d->r * kv) { if (FF) FF[i >> 5] |= 1u << (i & 31); continue; }
+        if (fabsf(xv) - zv * tanh > d->r * kh || fabsf(yv) - zv * tanv > d->r * kv) { if (FF) FF[i >> 5] |= 1u << (i & 31); POPR(i, PR_LADO); continue; }
         u = d->fl & 15;
         lim = d->r * lod * (float)(1u << ((u ? u : 6) - 1));
-        if (u && zv > 0 && zv > lim) continue;                  /* LOD */
+        if (u && zv > 0 && zv > lim) { POPR(i, PR_LOD); continue; }   /* LOD */
         rama = (d->fl >> 8) & 3;
-        if (!(regs >> rama & 1)) continue;                     /* registro de la union que no se dibuja */
+        if (!(regs >> rama & 1)) { POPR(i, PR_RAMA); continue; }   /* registro de la union que no se dibuja */
         if (pvs_on_) {                                       /* PVS: lo que queda visible del nodo desde aqui */
             c_teo = mo->pvs_teo[2 * i]; c_v = mo->pvs_teo[2 * i + 1];
 #ifdef DIAG_VTX
             diag_pvs_v += (d->relleno[1] >> 12) - c_v;
 #endif
-            if (!c_teo) continue;
+            if (!c_teo) { POPR(i, PR_PVS); continue; }
         } else { c_teo = d->relleno[0]; c_v = d->relleno[1] >> 12; }
-        VIS[i >> 5] |= 1u << (i & 31);
+        VIS[i >> 5] |= 1u << (i & 31); POPR(i, PR_DIB);
         cd = zv - d->r > 1.0f ? log2x(zv - d->r, 4) : 0; cd = cd > ND_PRIO - 1 ? ND_PRIO - 1 : cd;
         if (zv - d->r > z_tapa) cp = NB_PRIO - 1;               /* tapado por la niebla */
         else if (zv <= 0 || lim <= 0) cp = 0;
-        else { cp = 40 + log2x(zv / lim, 8); cp = cp < 0 ? 0 : cp > NB_PRIO - 1 ? NB_PRIO - 1 : cp; }
+        else {
+            cp = 40 + log2x(zv / lim, 8);
+#if REPARTO_COSTE
+            if (c_v > 1) cp += (log2x((float)c_v, 4) - 24) * REPARTO_COSTE / 4;   /* lo caro por pixel, despues */
+            cp = cp > NB_PRIO - 2 ? NB_PRIO - 2 : cp;           /* (63: solo lo tapado por la niebla) */
+#endif
+            cp = cp < 0 ? 0 : cp > NB_PRIO - 1 ? NB_PRIO - 1 : cp;
+        }
+#if REPARTO_HIST_P || REPARTO_HIST_D
+        if (VA[i >> 5] & (1u << (i & 31))) {                   /* ya se dibujaba: se queda hasta pasar el corte con holgura */
+            cd = cd > REPARTO_HIST_D ? cd - REPARTO_HIST_D : 0;
+            if (cp < NB_PRIO - 1) cp = cp > REPARTO_HIST_P ? cp - REPARTO_HIST_P : 0;
+        }
+#endif
         d->relleno[1] = (d->relleno[1] & ~4095u) | (uint32_t)(cd << 6 | cp);
         prio_coste[cd][cp] += c_teo; prio_vtx[cd][cp] += c_v;
     }
@@ -5761,6 +5890,9 @@ static void nodos_quita(modelo_t *mo)
             int k = __builtin_ctz(b), cl; b &= b - 1; i = w * 32 + k; cl = mo->nodos[i].relleno[1] & 4095;
             if ((cl >> 6) <= prio_d || (cl & 63) <= prio_p) continue;
             mo->vis[w] &= ~(1u << k);
+#ifdef DIAG_POPPING
+            {   pop_slot_t *ps = pop_slot(mo); if (ps) ps->cur[i] = PR_TOPE; }
+#endif
 #ifdef DIAG_VTX
             {
                 const nodo_t *d = mo->nodos + i; float z = (d->cx - ojo[0]) * ade[0] + (d->cy - ojo[1]) * ade[1] + (d->cz - ojo[2]) * ade[2] - d->r;
@@ -5855,6 +5987,51 @@ static void fe_paso(void)
 #endif
 static uint32_t prio_est;                                       /* coste estimado de lo que se dibuja (bytes) */
 static int geo_visible(const modelo_t *t);
+#ifdef DIAG_POPPING
+/* tras el reparto: lo que aparece o desaparece en la pantalla respecto al cuadro anterior; cada ~1 s la linea POP */
+static void pop_mide(void)
+{
+    int k, t; uint32_t i;
+    for (t = 0; t < 3; t++) {
+        const modelo_t *mo = tramos[t]; pop_slot_t *ps;
+        if (!mo->datos || !mo->nodos || !mo->vis || mo->relleno_propio) continue;
+        if (!(ps = pop_slot(mo))) continue;
+        if (!geo_visible(mo)) memset(ps->cur, PR_TRAMO, mo->nnodos);
+        for (i = 0; i < mo->nnodos; i++) {
+            int a = ps->ant[i], c = ps->cur[i]; const nodo_t *d; float px, z;
+            if (c == PR_TOPE && pop_en_pantalla(mo->nodos[i].cx, mo->nodos[i].cy, mo->nodos[i].cz, mo->nodos[i].r, &px, &z))
+                pop_falta += 3.14159f * px * px;                /* lo que falta por el tope (con solapes) */
+            if ((a == PR_DIB) == (c == PR_DIB)) continue;
+            d = mo->nodos + i;
+            if (!pop_en_pantalla(d->cx, d->cy, d->cz, d->r, &px, &z)) continue;
+            if (c == PR_DIB) pop_evento(t, (int)i, a, 1, px, z, d->r);   /* aparece: la razon de antes */
+            else pop_evento(t, (int)i, c, 0, px, z, d->r);            /* desaparece: la de ahora */
+        }
+        memcpy(ps->ant, ps->cur, mo->nnodos);
+    }
+    pop_r = pop_ra = NULL;
+    pop_cuadros++;
+    if (!pop_t0) pop_t0 = timer_ms_gettime64();
+    if (timer_ms_gettime64() - pop_t0 >= 1000) {
+        char b[600]; int n = 0; uint32_t dt = (uint32_t)(timer_ms_gettime64() - pop_t0);
+        n += sprintf(b + n, "POP: %.4s s %.0f %u ms %u cuadros lejos %d corte %d m clase %d |", cur_nodo >= 0 ? curso[cur_nodo].zona : "----", (double)yo.s,
+                     (unsigned)dt, (unsigned)pop_cuadros, (int)lejos, (int)(prio_d >= ND_PRIO - 1 ? lejos : powf(2.0f, (prio_d + 1) / 4.0f)), prio_p);
+        for (k = 1; k < PR_N; k++) if (pop_ap[k][0] || pop_de[k][0])
+            n += sprintf(b + n, " %s +%u/%u/%u -%u/%u/%u z%d", pop_nom[k], (unsigned)pop_ap[k][0], (unsigned)pop_ap[k][1], (unsigned)pop_ap[k][2],
+                         (unsigned)pop_de[k][0], (unsigned)pop_de[k][1], (unsigned)pop_de[k][2], pop_zmin[k] < 1e8f ? (int)pop_zmin[k] : -1);
+        n += sprintf(b + n, " | falta %.1f%% | pvs +%u/%u/%u -%u/%u/%u | tope mallas %u v %u en %u cuadros\n", (double)(pop_falta * 100.0f / (640.0f * 480.0f) / (float)pop_cuadros), (unsigned)pop_pvs_ap[0], (unsigned)pop_pvs_ap[1], (unsigned)pop_pvs_ap[2],
+                     (unsigned)pop_pvs_de[0], (unsigned)pop_pvs_de[1], (unsigned)pop_pvs_de[2], (unsigned)pop_mc, (unsigned)pop_vc, (unsigned)pop_ccorto);
+        printf("%s", b);
+        for (k = 0; k < 4; k++) if (pop_ev[k].px > 0)
+            printf("POPEV: %s %s nodo %d %s z %.0f r %.1f px %.1f\n", pop_ev[k].t == 0 ? "etapa" : pop_ev[k].t == 1 ? "union" : "sig", pop_ev[k].ap ? "aparece" : "desaparece",
+                   pop_ev[k].nodo, pop_nom[pop_ev[k].razon], (double)pop_ev[k].z, (double)pop_ev[k].r, (double)pop_ev[k].px);
+        memset(pop_ap, 0, sizeof pop_ap); memset(pop_de, 0, sizeof pop_de); memset(pop_ev, 0, sizeof pop_ev);
+        memset(pop_pvs_ap, 0, sizeof pop_pvs_ap); memset(pop_pvs_de, 0, sizeof pop_pvs_de);
+        for (k = 0; k < PR_N; k++) pop_zmin[k] = 1e9f;
+        pop_mc = pop_vc = pop_ccorto = pop_cuadros = 0; pop_falta = 0; pop_t0 = timer_ms_gettime64();
+    }
+}
+#endif
 static void geo_reinicia(void);
 static void nodos_visibles_todos(void)
 {
@@ -5868,15 +6045,26 @@ static void nodos_visibles_todos(void)
     uni_mascara = uni_regs();                                   /* (44E290) */
     for (i = 0; i < 3; i++) if (geo_visible(tramos[i])) nodos_visibles(tramos[i]);
     for (d = 0; d < ND_PRIO; d++) for (fila_c[d] = fila_v[d] = 0, c = 0; c < NB_PRIO; c++) { fila_c[d] += prio_coste[d][c]; fila_v[d] += prio_vtx[d][c]; }
-    /* lo cercano: hasta 3/4 del tope (todo si cabe todo) */
+    /* lo cercano: hasta REPARTO_CERCA del tope (todo si cabe todo) */
     for (acum = v = 0, cabe = -1, d = 0; d < ND_PRIO; d++) {
-        if ((float)(acum + fila_c[d]) * k > (float)tope * 0.75f || v + fila_v[d] > vmax / 4 * 3) break;
+        if ((float)(acum + fila_c[d]) * k > (float)tope * REPARTO_CERCA || (float)(v + fila_v[d]) > (float)vmax * REPARTO_CERCA) break;
         acum += fila_c[d]; v += fila_v[d]; cabe = d;
     }
     {   /* si cabe todo, todo */
         uint32_t tc = 0, tv = 0;
         for (d = 0; d < ND_PRIO; d++) { tc += fila_c[d]; tv += fila_v[d]; }
         if ((float)tc * k <= (float)tope && tv <= vmax) cabe = ND_PRIO - 1;
+#ifndef SIN_REPARTO_GRANDES
+        /* lo enorme en la pantalla (clase de LOD 0: radio de 240 px o mas, montes, mar, el terreno) va antes que lo
+           cercano: si no cabe con lo de cerca, se acorta lo de cerca (antes prio_p quedaba en -1 y se quitaba todo lo
+           de mas alla, el terreno de r 1000 m incluido) */
+        else while (cabe >= 0) {
+            uint32_t c0 = 0, v0 = 0;
+            for (d = cabe + 1; d < ND_PRIO; d++) { c0 += prio_coste[d][0]; v0 += prio_vtx[d][0]; }
+            if ((float)(acum + c0) * k <= (float)tope && v + v0 <= vmax) break;
+            acum -= fila_c[cabe]; v -= fila_v[cabe]; cabe--;
+        }
+#endif
     }
     prio_d = prio_sube(prio_d, cabe < 0 ? 0 : cabe, &prio_esp_d, ND_PRIO - 1);
     for (cerca_c = cerca_v = 0, d = 0; d <= prio_d; d++) { cerca_c += fila_c[d]; cerca_v += fila_v[d]; }
@@ -5896,6 +6084,9 @@ static void nodos_visibles_todos(void)
     for (diag_orig_vtx = 0, d = 0; d < ND_PRIO; d++) diag_orig_vtx += fila_v[d];
 #endif
     if (prio_d < ND_PRIO - 1) for (i = 0; i < 3; i++) if (geo_visible(tramos[i])) nodos_quita(tramos[i]);
+#ifdef DIAG_POPPING
+    pop_mide();
+#endif
 #ifdef CON_FUNDIDO_ENTRADA
     fe_paso();                                                  /* lo que aparece en este cuadro */
 #endif
@@ -5903,6 +6094,9 @@ static void nodos_visibles_todos(void)
 /* tras el cuadro: lo que de verdad costo la etapa frente a lo estimado; si alguna tira no cupo, mas prudencia */
 static void prio_ajusta(int corto, uint32_t usado)
 {
+#ifdef DIAG_POPPING
+    if (corto) pop_ccorto++;
+#endif
     if (prio_est > 16 * 1024) {
         float a = (float)usado / (float)prio_est;
         a = a < 0.2f ? 0.2f : a > 2.0f ? 2.0f : a;
