@@ -392,7 +392,7 @@ estaba y se dice lo que falta). Estado: CORREGIDO, SE QUEDA (ya era del original
 | Orientacion del coche: 4 muestras a 1,6/0,8 m | calc_ground_coli_face 519500 (PS2 0x1913e8): el centro y las cuatro ruedas con 43EB60 0x400, normal (c1 - c2) x (c0 - c3); car_sus_coli_check con el suelo de cada rueda | las muestras iban por el rumbo de la velocidad y la carroceria va cruzada: derrapando una rueda hasta 30 cm bajo la calzada (ALPI) | CONFIRMADO | CORREGIDO (2026-11-11: Muros y suelo de la carroceria del original) |
 | Escala de puntos por avance (x10, x110) | PS2 0x28F984 / 4F2DF0 (K628244, K5C68E0) | igual | CONFIRMADO | SE QUEDA (ahora con m_pos) |
 | Piloto automatico de la demo (DEMO del titulo) | el original pasa la pelicula de MV.PS2 (ahora tambien la demo: video.c) | — | invento propio (solo si faltan las peliculas, o pruebas) | SE QUEDA |
-| META/AGOTADO: freno 0,6 y vuelta al titulo a los 600 cuadros | modo 19: la escena de la meta (4871A0 / 486730 / 486EF0, PasPlCar 475720, camara 4853D0) durante 0x4B0 cuadros | — | CONFIRMADO | CORREGIDO en la meta (2026-11-10: Escena de la meta); AGOTADO sigue igual (PROVISIONAL) |
+| META/AGOTADO: freno 0,6 y vuelta al titulo a los 600 cuadros | modo 19: la escena de la meta (4871A0 / 486730 / 486EF0, PasPlCar 475720, camara 4853D0) durante 0x4B0 cuadros | — | CONFIRMADO | CORREGIDO en la meta (2026-11-10: Escena de la meta); AGOTADO CORREGIDO (demo 40): el modo 20 (49A1E0 = PS2 0x1b9990) suspende los sucesos 8..0x1F (440A10 = PS2 0x19d318, bandera 0x10; 43FAB0 no llama a su control): el coche y el trafico quietos donde se acaba el tiempo |
 | Aviso de bifurcacion a 450 m de la separacion | 4BB890 (PS2 0x1c50c0, desde NAVI_PUB 0x1bd534: variante 1, modo 16): 2B0000 "<- FACIL" con el avance car+0x102C entre 0,65 y 0,72 (nivel 0) / 0,70 y 0,75 (nivel 1), presets 0, 1 y 4 | — | CONFIRMADO | CORREGIDO (2026-11-11, ver Bifurcacion: el rotulo <- FACIL) |
 | Marcas de las ruedas: 4 ruedas, media anchura del neumatico (filas 40/41 de la tabla de parametros), 0,2 m entre tramos, alfa 0,5, +0,05 m, v = longitud x 0,5, anillos 256/64/64, texturas 0x570000..2 (EFECTOS.DAT), clase por la superficie (0xC02 asfalto, 0x8004 tierra/arena, 0x18 hierba) | tire_mark_req 41FB50 / 41FDD0 / 4862C0 del PC; SLES-53998 0x10dcd0 / 0x10df38 / 0x1198f0, tabla 0x344d90, constantes 0x32b390..98 | igual | CONFIRMADO | CORREGIDO (2026-11-08) |
 | Marcas en asfalto: las traseras mientras dura el derrape | el original usa la mascara 95AFA8 de PcTireSmokeReq 41C570 (deslizamiento +E0 y agarre +E4 de cada rueda contra 74FF5C) | — | PROVISIONAL (la fisica de la demo no da +E0) | SE QUEDA |
@@ -2122,7 +2122,11 @@ su caja y el fundido a negro, y la salida al menu con START o a los 600 cuadros,
   2B004F en el modo 35); la espera de la voz (427700 / 49A190: el temporizador del modo 20 se rearma mientras suena
   TIME OVER) y de la muestra 0x1a1 (modo 34 desde la pausa): sin consulta de "sonando" en comun/sfx.c; el bloqueo de
   botones del modo 35 (+0x5E0 del objeto 0x375068, PC +0x518 de 4035F0: sin localizar quien lo pone); la suspension de
-  los sucesos en el fin del tiempo (modo 20, 440A10: el coche de la demo sigue frenando solo, como antes); la pantalla
+  los sucesos del fin del tiempo (modo 20, 440A10) que no son coches (0x186, 0x187, 0x20..0x119, 0x11A..0x133,
+  0x16A..0x17E: la demo no tiene esos sucesos sueltos; los coches, 8..0x1F, HECHO en la demo 40: el del jugador y el
+  trafico se quedan quietos, sin fisica ni giro de ruedas; hasta la demo 39 el coche seguia con el freno a 0,6,
+  PROVISIONAL, y seguia andando tras el fin del tiempo); la camara del fin del tiempo (485830, vistas 1A..1D:
+  la demo sigue con la de carrera); la pantalla
   de carga del modo 30 / 28 (0x480000); START en los modos 19 / 20
   (43F980 -> 43F990(0x1D): sin localizar la peticion; antes la demo volvia al menu con START, inventado).
 - 1001d8(0, 0xF0, 0.0) del modo 27 (0x1baff0; PC 42E020, el volumen de la musica): en el PS2 solo llama a 0x100110(0)

@@ -8914,15 +8914,21 @@ int main(int argc, char **argv)
                     dbglog(DBG_INFO, "CURSO: tiempo agotado en %.4s (s %.0f)\n", curso[cur_nodo].zona, (double)yo.s);
                 }
             }
-        } else {                                                /* META o AGOTADO: el coche se para solo; FIN: suspendida */
-            /* modo 19: su temporizador (0x4B0); modo 20 (0x1b9990): 0xF0, 0x258 en las variantes 2 y 5 */
+        } else {                                                /* META: el coche frena solo; AGOTADO y FIN: suspendida */
+            /* modo 19: su temporizador (0x4B0); modo 20 (0x1b9990): 0xF0, 0x258 en las variantes 2 y 5.
+               AGOTADO: el modo 20 (49A1E0 = PS2 0x1b9990) suspende los sucesos de la carrera como la pausa (440A10 =
+               PS2 0x19d318: bandera 0x10 en 8..0x1F, los coches, el del jugador el 8 y el trafico; 0x186, 0x187,
+               0x20..0x119, 0x11A..0x133 y 0x16A..0x17E con car+4 bit 31) y 43FAB0 no llama al control (ctrl) de un
+               suceso con 0x18: el coche y el trafico se quedan quietos donde estaban al acabarse el tiempo (sin
+               fisica, sin giro de las ruedas). Hasta la demo 39 el coche seguia con el freno a 0,6 (PROVISIONAL) y
+               seguia andando tras el fin del tiempo (el usuario en la demo 39) */
             int fin_t = estado == META ? (meta_lista() ? META_CUADROS : 600) : variante == 2 || variante == 5 ? 0x258 : 0xf0;
             if (estado == META && meta_lista()) {               /* modo 19 (49CC50): suceso 7 y el coche del guion */
                 meta_juego_paso();
                 if (lejos_obj > lejos_guion) lejos_obj = lejos_guion;
                 else if (lejos_guion >= LEJOS_PS2 && lejos_obj < LEJOS_PS2) lejos_obj = lejos = LEJOS_PS2;
                 if (lejos > lejos_obj) lejos = lejos_obj;
-            } else if (estado != FIN) coche_paso(&yo, 0, 0, 0.6f, 1.0f / 60);
+            } else if (estado == META) coche_paso(&yo, 0, 0, 0.6f, 1.0f / 60);
             if (estado != FIN) pt_msg_paso();
             if (!fin_on && FIN_ATRACCION && ((nuevo & CONT_START) || t_estado > (uint32_t)fin_t)) {   /* demo de atraccion: al menu */
                 meta_sale(); lejos_obj = lejos = LEJOS_PS2;
@@ -8979,7 +8985,7 @@ int main(int argc, char **argv)
             if (estado == META && meta_cam) meta_camara();      /* 4853D0 (modo 19) */
             else camara_paso((nuevo & CONT_Y) != 0, estado == CUENTA && (sal_on ? sal_f < 120 : t_estado < 180));
         }
-        if (!pausa) coche_anima_paso(estado == TITULO);                       /* ruedas, volante, faros, carroceria (46AE70) */
+        if (!pausa && estado != AGOTADO) coche_anima_paso(estado == TITULO);   /* ruedas, volante, faros, carroceria (46AE70) */
         if (!pausa && chr_ok == 1 && estado != TITULO) {             /* el piloto y la acompanante (488DD0 / 489A90) */
             robot_coche_t rc;
             rc.modelo = modelo_jug; rc.s204 = ani.s204; rc.fase = estado == CUENTA ? 0 : estado == CARRERA ? 1 : estado == META ? 2 : 3;
