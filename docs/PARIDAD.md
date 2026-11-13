@@ -1527,11 +1527,49 @@ car+4 a 0 (coche_ban): ni pilotos de noche, ni faros escamoteables, ni luz de lo
   (SRCALPHA / ONE, z GEQUAL; compila_cab). demo/main.c `traf_luces` (mascara de grupos) en lugar de traf_apagado. TRAFn,
   TRAFKn y RCmm crecen 1-3 KB (+1 textura de 1 KB en VRAM por modelo con luz aditiva). Los pilotos de dia (+C / +14) se
   quedan como estaban.
-- SIN PORTAR (bloqueado): los focos de los faros sobre la escena y los coches. El PS2 tiene lo mismo que el PC: 0x20e100
-  (= 4AF5B0: textura 0x30009, parametros de 0x410528, los del PC 5C4EA0) y 0x20e1b8 (= 4AF630: dos luces de foco en los
-  entornos 1 y 2 y la matriz de proyeccion de la textura del haz sobre la calzada, 40C550 en el PC; en el PS2 el
-  programa 0x317CF0 / clave 0x158200 del VU1, ver Suelos). Necesitan otra pasada de la calzada con la textura proyectada
-  (vertices dobles en el TA) y la luz por vertice de la escena cada cuadro (la escena va con la luz fija de tools/modelo.py).
+- Focos de los faros (revision 42b; DESVIACION respecto al PS2, del PC). En SLES-53998 0x20e100 (= 4AF5B0) y 0x20e1b8
+  (= 4AF630) calculan todo (parametros de 0x410528 = los de 5C4EA0 del PC: SPOT, WIDE y TEX POS 2 / HEIGHT 1,8 / DIR
+  -20; lejos de la proyeccion 4000, el PC 5000) pero NO se ve nada (CONFIRMADO, desensamblado): el dibujo del suceso
+  (0x20de10 -> 0x20e7b8) es un `jr ra`, igual que la lluvia 0x20e038 y la sombra 0x20e0b8; nadie lee work+0x170 / +0x1B0
+  (los unicos lectores de [0x55c9dc] son los que ponen y quitan banderas), y las dos luces de foco (tipo 1, ids 0 / 1,
+  entornos 1 y 2: 0x445360 + id x 0xD0 + entorno x 0x1A0) solo las lee 0x110100 -> 0x168e80, que descarta toda luz cuyo
+  tipo (+0x60) no sea 3 (direccional; los focos son 2): no llegan al VU1. Lo unico que ilumina el PS2 de noche es la luz
+  del suelo 0x106960 (arriba). El PC si los dibuja: 40C550 en las capas 5 y 6 (40BD80) proyecta la textura 0x30009 desde
+  work+170 (vista de 40A900 x perspectiva de 40A950) y la suma (operacion 0x0C200B01 / 0xC00 del combinador: actual x 1 +
+  textura x constante 0x80808080, decodificada con la tabla de modos de 40B800: PROBABLE) con borde negro; sin textura
+  con car+2C8 > 0. Como el usuario quiere ver la luz de los faros delante del coche, se porta ese haz del PC (demo/main.c
+  focos_prepara / focos_anota / focos_dibuja; el comentario de focos_prepara lleva el detalle): segunda pasada, en la
+  lista transparente (ONE / ONE, z GEQUAL con 1/w x (1 + 2^-12)), de las mallas opacas de la escena dibujadas en el cuadro
+  que tocan la piramide del proyector, con la UV proyectada en el SH-4 por vertice, el gris 0x80 x (1 - niebla de la
+  tabla) y sin mandar los triangulos enteros fuera de la textura o en sus filas negras de abajo (la linea de corte del
+  haz: desde la fila 200 de 256 en la textura de la DC, focos_v = 0,7754, mirado al cargar). En llano el haz va de 2 m
+  a ~20 m por delante del centro del coche (la fila 200 a ~25 m) y ~56 grados de ancho; detras del proyector cae en el
+  borde (negro). DIFERENCIAS: la PowerVR interpola la UV con la w de la camara y no con la zc del proyector (en los
+  triangulos grandes de la calzada el haz se deforma algo); sin pasada en lo de recorte (lista 1), lo transparente y
+  los carteles; ni el coche ni el trafico (capas 5 / 6 del PC = la escena: PROBABLE). Los dos focos por vertice (SPOT /
+  WIDE) no se portan: ni el PS2 los usa ni la escena de la DC lleva luz por vertice.
+- Luz del suelo revisada contra el desensamblado (queja del usuario sobre faros_despues.png: "mancha blanquecina a los
+  lados del coche"): 0x106a98 (V2 = (-tan 0,56, 0, 0), V1 = (0, -tan 0,2618, 0), V3 = [0x3bfab0] = (0, 0, 1)), el giro de
+  0x1647e4 (VCALLMS 0x4D y MULAy / MADDx / MULAy / MSUBx sobre las filas 1 y 2 de la matriz del VU0: fila1 c + fila2 s,
+  fila2 c - fila1 s = D3DXMatrixRotationX; 0x16481c da igual RotationY con la misma asignacion seno / coseno), 0x1649ac
+  (x fila0 + y fila1 + z fila2, sin traslacion), 0x106eb0 (P x 0,8 / P.y - (0, 0,8, 2,0): rayos desde los faros, 0,8 m
+  de alto y 2 m por delante del origen de car+B0, al suelo) y 0x106f28 (x s, 0, -z; S = (2 - k / 3) / 2, T = 1 - a en
+  1/4096; los dos primeros vertices de cada tira con la bandera de no dibujar) coinciden con tools/conv_faros.py; el
+  origen de car+B0 es el de mod_coche (en la calzada, z = -adelante). La zona clara de la textura (filas 100-180, alfa
+  ~0,9) cae de 3 a 9 m por delante y hasta 3-4 m a cada lado: con la camara de carrera el coche tapa el centro y se ve a
+  los lados del morro; asi lo pinta el PS2 (sin emulador de PS2 aqui no hay captura del original para comparar). Probado
+  tambien con ZTST ALWAYS como el PS2 en vez de GEQUAL: la misma imagen. La ultima tira de cada lado (cruza el
+  horizonte) usa las filas 0-32: alfa x color <= 5 / 255, no se ve. Nada que corregir; lo que faltaba delante del coche
+  es el haz de arriba.
+- Verificado (Flycast, `-DPRUEBA_AUTO -DDIAG_CONGELA=n -DDIAG_MS -DDIAG_SIN_CPU`, el mismo cuadro antes / despues):
+  METR (`PRUEBA_NODO=11`, crono 2113 = el 0'35"099 de faros_despues.png): 44,8 / 44,8 fps, dib 15,17 -> 16,45 ms, 25153
+  -> 25205 vertices (134 mallas anotadas, 52 vertices del haz: la calzada son triangulos grandes), focos_dibuja 0,46 ms;
+  GHOS (`PRUEBA_NODO=9`, crono 900): 44,8 fps, dib 15,25 -> 16,60 ms, 29482 -> 29525 vertices, 0,69 ms. VRAM igual (la
+  textura es la de FAROS.DAT). Con el proyector entero, sin el recorte de las filas negras, eran 1512 mallas, 5883
+  vertices y 9 ms (35 fps). Capturas en el scratchpad capturas_r42/: focos_antes.png / focos_despues.png (METR),
+  focos_antes_ghos.png / focos_despues_ghos.png, faros_corregido.png (= focos_despues.png, el punto de
+  faros_despues.png), focos_sin_luces.png (`-DDIAG_SIN_FAROS -DDIAG_SIN_FOCOS`) y las diferencias faros_solo_dif.png /
+  focos_solo_dif.png. Datos: ninguno nuevo.
 - Verificado en Flycast (METR, PRUEBA_AUTO PRUEBA_NODO=11): luz delante del coche, pilotos de noche del jugador y del
   trafico; de dia (PALM) igual que antes (car+4 = 0: las mallas nuevas no se dibujan; sin "LUCES:" en la consola).
   Coste (METR, `-DDIAG_MS -DDIAG_SIN_CPU`, ~55 lineas MS): 43,8 -> 43,9 fps, dib 18,52 -> 18,45 ms, 28646 -> 28726
