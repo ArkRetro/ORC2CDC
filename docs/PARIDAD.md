@@ -238,6 +238,18 @@ consola, el port lo fija al convertir). Hoja de capturas de Flycast: scratchpad 
   el de la escena para el rotulo de ese sitio (MULTIPLAYER es mas ancho que OUTRUN2SP: 29 px mas de hueco entre
   OUTRUN2SP y RANKINGS cuando OUTRUN2SP esta en el sitio 1). MENU.DAT no cambia. La pantalla MULTIJUGADOR y la fila
   multijugador de RANKINGS siguen en MENU.DAT sin camino que lleve a ellas (RANKINGS, bloqueado como antes).
+- Boton Y del menu principal y del de un jugador: GUARDAR en lugar de FRIENDS (DESVIACION pedida por el usuario,
+  revision 42; en el original es el juego en linea, 0x296 "AMIGOS", que no hay). Guarda la licencia y los rankings en
+  la VMU (comun/menu.c vmu_guarda, ver docs/DREAMCAST.md, Guardado en la VMU): primero "Guardando datos." (el principio
+  de TEXT.PS2 0x206; lo demas de ese texto habla de la memory card del PS2) en una franja en medio de la pantalla y, ya
+  guardado, "Exito al guardar." (0x202) con el sonido de aceptar o "Error al guardar!" (0x31D) en rojo con el de
+  bloqueado, unos 2,5 s. La barra de ayuda dice GUARDAR (0x42F "Guardar" en mayusculas, como los demas textos de la
+  barra). Textos y barra en MENU.DAT (conv_menu.py: AYUDA, TEXTOS_GUARDAR).
+- Iconos de los botones de la barra de ayuda: DESVIACION pedida por el usuario (revision 42). Antes eran el boton gris
+  del PS2 (banco 0x48, cuadro 25) sin su simbolo y con la letra de la Dreamcast pintada encima en su color; ahora son
+  botones de la Dreamcast dibujados al convertir (conv_menu.py boton_dc): circulos de los colores del mando (A rojo, B
+  azul, X amarillo, Y verde) con degradado, borde mas oscuro, brillo arriba y sombra, y la letra blanca de la fuente
+  14 con contorno oscuro. Mismo tamano y sitio que el icono del PS2 (la misma VRAM y la misma alineacion con el texto).
 - Pantalla de carga de OUTRUN2SP (el mapa del preset, ver OUTRUN2SP, Carga) mas larga: DESVIACION pedida por el usuario
   (demo 41). Se pone al salir del frontal (antes de leer voces, coche, pareja, HUD y la etapa de salida con sus
   texturas, que antes se leian con la ultima imagen del frontal quieta) y se quita cuando la carga ha acabado y como

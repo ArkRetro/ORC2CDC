@@ -54,7 +54,7 @@ int menu_vista(void);                       /* 0 parachoques, 1 interior, 2 exte
 int menu_mph(void);                         /* 0 km/h, 1 mph */
 int menu_dificultad(void);                  /* 0 muy facil .. 4 muy dificil (licencia +E0, TIM_DIF) */
 const uint8_t *menu_licencia(void);         /* la licencia activa (registro de 0x40C) o NULL */
-void menu_guarda_vmu(void);                 /* licencias y rankings de OUTRUN2SP a la VMU */
+int menu_guarda_vmu(void);                  /* licencias y rankings de OUTRUN2SP a la VMU; 0 bien */
 int menu_foto(void);                        /* licencia +0x20 (la foto: PC [7C2400], el piloto y la acompanante) */
 /* ganchos para otros modulos (voces del locutor, video): se llaman al entrar en cada pantalla (evento 0) y al elegir
    una opcion (evento 1, valor = opcion); NULL = nada */

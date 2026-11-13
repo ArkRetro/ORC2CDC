@@ -15,8 +15,9 @@ arranca() {   # arranca [opciones de Flycast...]: Xvfb (si no esta) y Flycast co
         Xvfb :$PANTALLA -screen 0 1024x768x24 -nolisten tcp > "$SAL/xvfb.txt" 2>&1 & XVFB=$!
         sleep 2
     fi
-    # configuracion y VMU nuevas en cada prueba (guardado vacio, como una consola recien encendida)
-    rm -rf "$SAL/cfg" "$SAL/dat"; mkdir -p "$SAL/cfg" "$SAL/dat"
+    # configuracion y VMU nuevas en cada prueba (guardado vacio, como una consola recien encendida); CONSERVA_VMU=1
+    # deja las de la prueba anterior en la misma carpeta (vmu.sh: el segundo arranque lee lo guardado en el primero)
+    if [ -z "${CONSERVA_VMU:-}" ]; then rm -rf "$SAL/cfg" "$SAL/dat"; fi; mkdir -p "$SAL/cfg" "$SAL/dat"
     XDG_CONFIG_HOME="$SAL/cfg" XDG_DATA_HOME="$SAL/dat" "$FLYCAST" -config config:Debug.SerialConsoleEnabled=yes \
         -config audio:backend=null "$@" "$GDI" > "$SAL/flycast.txt" 2>&1 & FLY=$!
     trap termina EXIT

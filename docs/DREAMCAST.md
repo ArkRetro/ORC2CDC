@@ -1246,6 +1246,64 @@ MB) 15,5 s: el coche llega a 60 m del final de la carretera sin la etapa y el bu
 parado en LAKE -> CAST a fondo) y el fundido del entorno, que no empieza hasta tener el cielo nuevo, sale tarde (ver
 PARIDAD.md, Cambios de etapa). No hay medida de la velocidad de lectura de la consola del probador (GDEMU).
 
+### Guardado en la VMU (revision 42, 2026-11-13)
+
+Fallo en una Dreamcast PAL real con la revision 41: no se guardaba nada en la VMU (el gestor de memoria de la BIOS no
+ensenaba el fichero) mientras Flycast decia "menu: guardado /vmu/a1/OR2C2C (9852 bytes, 20 bloques): bien". La VMU
+estaba en el puerto A y su LCD ensenaba el logo (la unidad se detecta y las tramas maple de la LCD llegan).
+
+Lo que se ha mirado:
+- **El "bien" era falso.** `fs_vmu` (KallistiOS, `kernel/arch/dreamcast/fs/fs_vmu.c`) guarda todo en RAM y escribe de
+  verdad en `fs_close` (`vmu_write_close` -> `vmufs_write`); `fs_write` solo copia a la RAM y el registro miraba eso.
+  Cualquier fallo de la escritura real (lectura de la raiz, bloques, FAT, directorio) pasaba sin verse y el +3F4 de las
+  licencias se borraba igual.
+- **El formato es correcto para la BIOS.** `tools/comprueba_vmu.py` lee la imagen de la VMU (la A1 de Flycast) como la
+  BIOS: raiz (0x55, FAT 254, directorio 253 x 13, 200 bloques), cadenas de la FAT del sistema y del fichero, bloques
+  libres, entrada del directorio (tipo 0x33, proteccion 0, primer bloque 199 hacia abajo, nombre, fecha BCD con el dia
+  de la semana, 20 bloques, cabecera en el bloque 0, relleno a 0) y la cabecera VMS (descripciones de 16 / 32 rellenas
+  con espacios, id de aplicacion con ceros, 2 iconos, velocidad 30, eyecatch tipo 2 de 512 + 72 x 56 bytes, reservado a
+  0, CRC-16 CCITT de la BIOS (0x1021, inicio 0, sobre cabecera + iconos + eyecatch + datos con el CRC a 0) igual al
+  guardado, longitud de datos dentro del fichero, paleta con alfa). Todo bien: lo que escribe KallistiOS es un fichero
+  que la BIOS ensena, asi que en la consola la escritura no llego a hacerse (o se corto).
+- **Maple.** La LCD y la memoria de una VMU usan la misma trama maple de la unidad (`dev->frame`). `vmu_draw_lcd`
+  (KallistiOS) la toma con `maple_frame_trylock` y vuelve sin esperar; `vmu_block_read` / `vmu_block_write` la toman con
+  `maple_frame_lock` (esperan a que quede libre), mandan una trama por cuadro (las tramas salen en el vblank: cada
+  bloque son 4 fases de 128 bytes y un BSYNC, ~5 cuadros) y esperan la respuesta como mucho 100 ms; un bloque que falla
+  se repite 4 veces con 100 ms entre medias. Todo pasa en el hilo principal (la LCD se compone en el bucle,
+  `vmu_lcd_paso`), asi que una escritura de LCD no puede colarse entre fases, pero si quedar en vuelo justo antes del
+  primer bloque. Las lecturas del GD (musica) y la PowerVR no usan el bus maple (otra DMA): no lo ocupan.
+- **Unidad.** Se fijaba /vmu/a1. Bien para el caso del usuario, pero no si la VMU esta en la segunda ranura o en otro
+  mando.
+
+Arreglo (comun/menu.c `vmu_escribe` / `vmu_guarda` / `vmu_lee`, comun/vmu.c `vmu_lcd_pausa`):
+- Se escribe con `vmufs_write` (la misma funcion que usaba `fs_close`) y se mira su resultado; despues se relee
+  (`vmufs_read`) y se compara byte a byte. Si algo falla se repite hasta 3 veces (250 ms entre medias; -7, sin sitio, no
+  se repite). El registro dice la unidad, el intento y el resultado: "menu: guardado OR2C2C en a1 (9852 bytes, 20
+  bloques), intento 1: bien, releido igual (0)" o el codigo de error (-1 raiz / directorio / FAT ilegibles o sin VMU, -4
+  un bloque, -5 la FAT, -6 el directorio, -7 sin sitio, -20 releido distinto, -21 no se puede releer). El fichero va
+  rellenado con ceros hasta el bloque (antes `vmufs_write` lo rellenaba solo desde la RAM de `fs_vmu`).
+- Las marcas de "cambios sin guardar" (+3F4 bit 1) solo se borran si el guardado fue bien: si falla, se vuelve a
+  intentar en el siguiente punto de guardado del menu.
+- Mientras se guarda la LCD no recibe nada (`vmu_lcd_pausa(1)`: ademas espera, como mucho 200 ms, a que las escrituras
+  de LCD ya encoladas tengan respuesta; al acabar se le reenvia la imagen) y la lectura de la musica del GD esta parada
+  (`musica_pausa_lectura`, como antes).
+- Unidad: adaptacion de plataforma (el PS2 tiene sus ranuras de tarjeta): al arrancar se busca el fichero en todas las
+  VMU (`maple_enum_type(n, MAPLE_FUNC_MEMCARD)`, puertos A..D, ranuras 1 y 2) y se guarda en la que lo tenia; si ninguna
+  lo tiene, en la primera VMU enchufada (A1 normalmente). Como hacen los juegos de la consola.
+- Y en el menu principal y en el de un jugador guarda a mano (DESVIACION pedida por el usuario, ver PARIDAD.md): en la
+  consola real se ve si guarda ("Exito al guardar." con el sonido de aceptar) o no ("Error al guardar!" con el de
+  bloqueado), sin registro serie.
+
+Verificado en Flycast (`tools/prueba/vmu.sh`): primer arranque con la VMU vacia, licencia nueva, guardado ("intento 1:
+bien, releido igual"), Y en el menu principal (otro guardado y el aviso), `tools/comprueba_vmu.py` sobre la VMU A1 de
+Flycast: "resultado: bien" (CRC 40f3 sobre 9852 bytes, 20 bloques desde el 199, 180 libres); segundo arranque con la
+misma VMU: "menu: OR2C2C en a1, 10240 bytes, licencia 0" y el titulo lleva al menu principal sin crear licencia.
+
+Sin hardware no se puede comprobar: por que fallaba la escritura en la consola (Flycast responde siempre a tiempo; en
+la VMU real la escritura de flash tarda y puede devolver errores que el emulador no da). Con este arreglo, si vuelve a
+fallar, la consola lo dice en pantalla con Y; con un cable serie (dcload / BBA) el registro da el codigo exacto. Para
+mirar una VMU real con el comprobador hace falta un volcado de sus 128 KB (p. ej. con un DreamShell / VMU tool).
+
 ## 3. Otros riesgos de la consola real
 
 | Riesgo | Estado |

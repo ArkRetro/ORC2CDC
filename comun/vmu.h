@@ -14,4 +14,5 @@ void vmu_lcd_carrera(int kmh, int marcha, int marchas);   /* velocidad "%03d" y 
 /* una vez por cuadro: compone la pantalla y la envia (sin esperar respuesta) a cada VMU con LCD, como mucho unas
    veces por segundo y solo a las que no la tienen ya */
 void vmu_lcd_paso(void);
+void vmu_lcd_pausa(int p);                  /* 1: nada a la LCD mientras se guarda (espera a las encoladas); 0: sigue */
 #endif

@@ -124,10 +124,30 @@ static void compone(uint64_t ahora)
     }
 }
 
+/* mientras se guarda (comun/menu.c, vmu_escribe) no se envia nada a la LCD: la trama de la LCD y las de los bloques
+   de la memoria son la misma trama maple de la unidad (dev->frame). Al pausar se espera (como mucho ~200 ms) a que
+   las escrituras de LCD ya encoladas tengan respuesta, para que la VMU no reciba la primera escritura de bloque con
+   una de LCD a medias; al seguir se reenvia la imagen a todas */
+static int pausa;
+void vmu_lcd_pausa(int p)
+{
+    maple_device_t *d; int i, t;
+    pausa = p;
+    if (p) {
+        for (t = 0; t < 20; t++) {
+            int ocupada = 0;
+            for (i = 0; (d = maple_enum_type(i, MAPLE_FUNC_LCD)); i++)
+                if (d->frame.state != MAPLE_FRAME_VACANT) ocupada = 1;
+            if (!ocupada) break;
+            thd_sleep(10);
+        }
+    } else memset(enviada, 0, sizeof enviada);
+}
+
 void vmu_lcd_paso(void)
 {
     uint64_t ahora; uint32_t suma, vistas[N_RANURAS] = { 0 }; maple_device_t *d; int i, k;
-    if (!dat || !modo) return;
+    if (!dat || !modo || pausa) return;
     ahora = timer_ms_gettime64();
     if (t_ult && ahora - t_ult < LCD_MS) return;
     t_ult = ahora;

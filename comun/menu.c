@@ -21,7 +21,7 @@
    paso (4A5B20).
    Licencia: hasta 4 (como el original), registro de 0x40C bytes con la disposicion del original (nombre +0, signo +0x18,
    bandera +0x1C, foto +0x20, desbloqueos +0x28, opciones +0xD8.., en uso +0x3F4 bit 0), nueva con los valores de
-   4471A0 y el nombre 0x219; en la VMU A1 (fichero OR2C2C, vmu_pkg con el icono y el eyecatch de VMU.DAT).
+   4471A0 y el nombre 0x219; en la VMU (la que tenga el fichero OR2C2C o la primera; vmu_pkg con el icono y el eyecatch de VMU.DAT).
    Sonido (como el original): efectos del frontal con sfx_menu (cursor, aceptar, bloqueado, cancelar); el titulo va
    sin musica (en el original suena la pelicula), al salir de el arranca la musica de menu (pista 30 de MUSIC.PS2,
    MUS30.ADP); en la musica cada tema suena con su avance (pista 33 + tema) y al confirmar empieza el tema elegido.
@@ -215,21 +215,42 @@ static void lic_desbloquea(uint8_t *p)
     memset(p + 0x1dd, 6, 0x190); memset(p + 0x1c9, 0, 20); memset(p + 0x36e, 0x66, 0x84);
 }
 
-/* VMU: fichero OR2C2C en A1. Contenido: 'OR2L', u32 version, i32 licencia activa, 4 registros de 0x40C (version 2: y
+/* VMU: fichero OR2C2C. Contenido: 'OR2L', u32 version, i32 licencia activa, 4 registros de 0x40C (version 2: y
    detras 'RKSP' y las tablas de los rankings de OUTRUN2SP, comun/rksp.c: los datos del sistema que la consola guarda con
    las licencias; los ficheros de la version 1 se siguen leyendo y los rankings quedan por defecto), detras de la
-   cabecera VMS (vmu_pkg: descripciones, icono animado y eyecatch de VMU.DAT, comun/vmu.c). Se lee y se escribe en
-   bruto (O_META): fs_vmu no toca la cabecera y vmu_pkg_parse la comprueba (CRC incluido). Los ficheros del formato
+   cabecera VMS (vmu_pkg: descripciones, icono animado y eyecatch de VMU.DAT, comun/vmu.c). Los ficheros del formato
    anterior (icono liso, sin eyecatch; algunos con una cabecera que vmu_pkg_parse no acepta) se siguen leyendo: si la
-   cabecera no vale, los datos se buscan por la marca 'OR2L' */
-#define VMU_FICH "/vmu/a1/OR2C2C"
+   cabecera no vale, los datos se buscan por la marca 'OR2L'.
+   Unidad (adaptacion de plataforma, revision 42; el PS2 tiene sus ranuras de tarjeta): la primera VMU que tenga el
+   fichero (maple_enum_type(n, MAPLE_FUNC_MEMCARD): puertos A..D, ranuras 1 y 2); si ninguna lo tiene, la primera
+   VMU enchufada. Antes se fijaba /vmu/a1.
+   Escritura (revision 42; docs/DREAMCAST.md, VMU): con vmufs_write directamente y no con fs_open / fs_write /
+   fs_close de fs_vmu: fs_vmu escribe de verdad en fs_close y antes no se miraba su resultado (el registro decia
+   "bien" aunque fallara). Ahora se mira el resultado de vmufs_write, se relee el fichero (vmufs_read) y se compara
+   byte a byte; si algo falla se reintenta (VMU_INTENTOS, con una pausa) y el registro lo dice. Mientras se escribe la
+   LCD de las VMU no se toca (vmu_lcd_pausa) y la lectura de la musica del GD esta parada. */
+#define VMU_NOMBRE "OR2C2C"
+#define VMU_INTENTOS 3
+static int vmu_puerto = -1, vmu_unidad = -1;                /* unidad de la que se leyo (o en la que se guardo) */
+static maple_device_t *vmu_unidad_guardar(void)
+{
+    maple_device_t *d;
+    if (vmu_puerto >= 0 && (d = maple_enum_dev(vmu_puerto, vmu_unidad)) && (d->info.functions & MAPLE_FUNC_MEMCARD)) return d;
+    return maple_enum_type(0, MAPLE_FUNC_MEMCARD);
+}
 static void vmu_lee(void)
 {
-    file_t f; uint8_t *b; int sz;
-    f = fs_open(VMU_FICH, O_RDONLY | O_META);
-    if (f < 0) { dbglog(DBG_INFO, "menu: sin %s\n", VMU_FICH); return; }
-    sz = fs_total(f); b = malloc(sz > 0 ? sz : 1);
-    if (b && fs_read(f, b, sz) == sz) {
+    maple_device_t *dev = NULL; void *v = NULL; uint8_t *b; int sz = 0, i, r = -1;
+    for (i = 0; (dev = maple_enum_type(i, MAPLE_FUNC_MEMCARD)); i++)
+        if (!(r = vmufs_read(dev, VMU_NOMBRE, &v, &sz))) break;
+    if (!dev || r) {
+        dev = maple_enum_type(0, MAPLE_FUNC_MEMCARD);
+        dbglog(DBG_INFO, "menu: sin %s en ninguna VMU (%d VMU; se guardara en %c%d)\n", VMU_NOMBRE, i,
+               dev ? 'a' + dev->port : '-', dev ? dev->unit : 0);
+        return;
+    }
+    vmu_puerto = dev->port; vmu_unidad = dev->unit; b = v;
+    {
         vmu_pkg_t pk; int o = -1;
         if (!vmu_pkg_parse(b, sz, &pk) && pk.data_len >= 12 + (int)sizeof lic && !memcmp(pk.data, "OR2L", 4)) {
             o = pk.data - b;
@@ -250,41 +271,70 @@ static void vmu_lee(void)
             vmu_ok = 1;
         }
     }
-    dbglog(DBG_INFO, "menu: %s %d bytes, licencia %d%s\n", VMU_FICH, sz, lic_sel, vmu_ok ? "" : " (no vale)");
-    free(b); fs_close(f);
+    dbglog(DBG_INFO, "menu: %s en %c%d, %d bytes, licencia %d%s\n", VMU_NOMBRE, 'a' + dev->port, dev->unit, sz, lic_sel,
+           vmu_ok ? "" : " (no vale)");
+    free(v);
 }
-static void vmu_guarda(void)
+/* escribe y relee; 0 bien. Errores: -1 sin VMU, -2 sin memoria, -7 sin sitio (vmufs_write), -20 lo releido no coincide,
+   -21 no se puede releer, otros: los de vmufs_write (-1 raiz/directorio/FAT ilegibles, -4 bloque, -5 FAT, -6 directorio) */
+static int vmu_escribe(const uint8_t *buf, int n)
 {
-    vmu_pkg_t pkg; uint8_t *d, *out = NULL; int n, v = rksp_hay() ? 2 : 1, i; file_t f;
+    maple_device_t *dev; int r = -1, k, sz;
+    void *v; uint8_t *b;
+    int nb = (n + 511) & ~511;
+    if (!(b = calloc(1, nb))) return -2;                    /* vmufs_write escribe bloques enteros: relleno con ceros */
+    memcpy(b, buf, n);
+    for (k = 0; k < VMU_INTENTOS; k++) {
+        if (k) thd_sleep(250);                              /* (vmu_block_write ya reintenta cada bloque 4 veces) */
+        if (!(dev = vmu_unidad_guardar())) { r = -1; dbglog(DBG_ERROR, "menu: no hay ninguna VMU\n"); break; }
+        r = vmufs_write(dev, VMU_NOMBRE, b, nb, VMUFS_OVERWRITE);
+        if (!r) {
+            v = NULL; sz = 0;
+            if (vmufs_read(dev, VMU_NOMBRE, &v, &sz)) r = -21;
+            else if (sz != nb || memcmp(v, b, nb)) r = -20;
+            free(v);
+        }
+        dbglog(r ? DBG_ERROR : DBG_INFO, "menu: guardado %s en %c%d (%d bytes, %d bloques), intento %d: %s (%d)\n", VMU_NOMBRE,
+               'a' + dev->port, dev->unit, n, nb / 512, k + 1, !r ? "bien, releido igual" : r == -7 ? "no hay sitio" :
+               r == -20 ? "releido distinto" : r == -21 ? "no se puede releer" : "vmufs_write fallo", r);
+        if (!r) { vmu_puerto = dev->port; vmu_unidad = dev->unit; break; }
+        if (r == -7) break;                                 /* sin sitio: reintentar no sirve */
+    }
+    free(b);
+    return r;
+}
+static int vmu_guarda(void)
+{
+    vmu_pkg_t pkg; uint8_t *d, *out = NULL; int n, v = rksp_hay() ? 2 : 1, i, r = -2;
     uint32_t tam = 12 + sizeof lic + (v == 2 ? 4 + RKSP_TAM : 0);
-    d = malloc(tam); if (!d) return;
+    d = malloc(tam); if (!d) return -2;
     memcpy(d, "OR2L", 4); memcpy(d + 4, &v, 4); memcpy(d + 8, &lic_sel, 4); memcpy(d + 12, lic, sizeof lic);
     if (v == 2) { memcpy(d + 12 + sizeof lic, "RKSP", 4); memcpy(d + 16 + sizeof lic, rksp_tablas(), RKSP_TAM); }
-    for (i = 0; i < N_LIC; i++) lic[i][0x3f4] &= ~2;        /* +3F4 bit 1: cambios sin guardar */
     memset(&pkg, 0, sizeof pkg);
     vmu_cabecera(&pkg);                                     /* descripciones, icono y eyecatch (comun/vmu.c) */
     pkg.data_len = tam; pkg.data = d;
     if (!vmu_pkg_build(&pkg, &out, &n)) {
-        musica_pausa_lectura(1);
-        fs_unlink(VMU_FICH);
-        if ((f = fs_open(VMU_FICH, O_WRONLY | O_TRUNC | O_META)) >= 0) { if (fs_write(f, out, n) == n) vmu_ok = 1; fs_close(f); }
-        dbglog(DBG_INFO, "menu: guardado %s (%d bytes, %d bloques): %s\n", VMU_FICH, n, (n + 511) / 512,
-               f >= 0 ? "bien" : "no se pudo abrir");
-        musica_pausa_lectura(0);
+        musica_pausa_lectura(1); vmu_lcd_pausa(1);
+        r = vmu_escribe(out, n);
+        vmu_lcd_pausa(0); musica_pausa_lectura(0);
     }
+    if (!r) { vmu_ok = 1; for (i = 0; i < N_LIC; i++) lic[i][0x3f4] &= ~2; }   /* +3F4 bit 1: cambios sin guardar */
     free(out); free(d);
+    return r;
 }
 
 /* la entrada de nombre de OUTRUN2SP (demo/nombre.c): la licencia activa (el nombre +0, el coche +0x1C) y el guardado
    (estados 7..0xB: los rankings 0x106288 / 0x1063d8 y la licencia 0x1a67e0 / 0x1a6840, aqui un solo fichero) */
 const uint8_t *menu_licencia(void) { return activa(); }
-void menu_guarda_vmu(void) { vmu_guarda(); }
+int menu_guarda_vmu(void) { return vmu_guarda(); }
 
 /* ---------------------------------------------------------------- tramos */
 typedef struct { int u; float c; int ini, fin, modo; } anim_t;
 enum { F_ENTRA, F_QUIETO, F_SALE };
 static anim_t a_cab, a_sel, a_aux, a_radio, a_ayuda, a_tarj, a_fl_d, a_fl_i, a_ed, a_ed_t, a_barra;
 static int pant = -1, fase, t, sig, inact, t_bloq, entra_atras, barra_ant = -1, cargando, t_carga;
+enum { G_NADA, G_PIDE, G_BIEN, G_MAL };
+static int g_est, g_t;                                      /* guardar con Y (g_paso) */
 static int modo_sel = 1;                                    /* opcion de un jugador elegida */
 /* OUTRUN2SP del menu principal. En el original (SLES-53998 0x23aba0 = PC 4E2970, opcion 2) pone [0x59acac] = 0 (el
    juego de OUTRUN2SP en vez del de la consola), +21C = 7 y el modo 32 pasa al 7 -> 9 -> 10: el frontal de recreativa
@@ -841,6 +891,21 @@ int menu_foto(void) { const uint8_t *p = activa(); return p ? l32(p, 0x20) : 0; 
 
 static void sale(int destino, int ok) { fase = F_SALE; t = 0; sig = destino; sale_ok = ok; sfx_menu(ok ? SFX_ACEPTA : SFX_CANCELA); }
 static void bloqueado(void) { t_bloq = 14; sfx_menu(SFX_BLOQUEADO); }
+/* GUARDAR con Y en el menu principal y en el de un jugador (DESVIACION pedida por el usuario, revision 42: en el
+   original Y es FRIENDS, juego en linea). Primero se dibuja "Guardando datos." (TEXT.PS2 0x206, su principio) y en el
+   paso siguiente se guarda (vmu_guarda bloquea: en una VMU real unos segundos); despues "Exito al guardar." (0x202) con
+   el sonido de aceptar o "Error al guardar!" (0x31D) con el de bloqueado, G_T_MSG pasos */
+#define G_T_MSG 150
+static void g_paso(void)
+{
+    if (!g_est) return;
+    g_t++;
+    if (g_est == G_PIDE && g_t >= 3) {
+        int r = vmu_guarda();
+        g_est = r ? G_MAL : G_BIEN; g_t = 0;
+        if (r) bloqueado(); else sfx_menu(SFX_ACEPTA);
+    } else if (g_est != G_PIDE && g_t > G_T_MSG) g_est = 0;
+}
 static void a_licencia(int vuelta) { l_vuelta = vuelta; sale(P_LICENCIA, 1); }
 
 /* carrusel de opciones (menu principal, un jugador, rankings, multijugador) */
@@ -1005,7 +1070,7 @@ static void control(unsigned n)
                 if (mis_n && !c2_abre()) { modo_sel = 0; sale(P_C2C, 1); } else bloqueado();
             } else if (c <= 3) { modo_sel = c; mis_sel = -1; sale(P_COCHE, 1); } else bloqueado();   /* OUTRUN, HEART ATTACK, TIME ATTACK */
         } else if (n & CONT_X) a_licencia(pant);            /* LICENSE */
-        else if (n & CONT_Y) bloqueado();                   /* FRIENDS: en linea */
+        else if (n & CONT_Y) { if (!g_est) { g_est = G_PIDE; g_t = 0; } }   /* GUARDAR (DESVIACION, rev. 42; el original: FRIENDS, en linea) */
         else if (atras) sale(pant == P_MENU ? P_TITULO : P_MENU, 0);
         break;
     case P_C2C: c2_control(n); break;
@@ -1134,7 +1199,8 @@ int menu_paso(unsigned n)
         for (p = 0; p < NV; p++) if ((mascara(sigp) & (1 << p)) && pidx[p] >= 0 && !cargada[p]) falta += pan[pidx[p]].vram;
         if (falta && pvr_mem_available() > (size_t)(falta + PRECARGA_MARGEN)) asegura(mascara(sigp) | mascara(pant));
     }
-    if (fase == F_QUIETO) control(n);
+    g_paso();
+    if (fase == F_QUIETO && g_est != G_PIDE) control(n);
     else if (fase == F_SALE) {
         int fin = t >= (pant == P_TITULO ? 30 : T_FUNDIDO);
         if (pant == P_CAMBIO || pant == P_MUSICA) fin = fin && an_hecho(pant == P_CAMBIO ? &a_sel : &a_radio);
@@ -1148,6 +1214,7 @@ int menu_paso(unsigned n)
 }
 
 /* ---------------------------------------------------------------- dibujo */
+static void pz_rect(float x, float y, float w, float h, uint32_t argb, float z);
 /* datos de la tarjeta (0x440088 / 0x44009F; medidas en la escena: franja del nombre y = 175, cajas de foto, bandera y
    signo; los iconos pequenos estan colocados para la tarjeta en -8) */
 /* ---- progreso de la licencia (PS2 0x1a17e8 = 447400 del PC; tablas del bloque PRG1 de MNU2, del disco) */
@@ -1666,6 +1733,12 @@ void menu_dibuja(void)
         }
         break; }
     }
+    if (g_est) {                                            /* guardar con Y: aviso en una franja en medio de la pantalla */
+        int id = g_est == G_PIDE ? 0x206 : g_est == G_BIEN ? 0x202 : 0x31d;
+        float a = g_est == G_PIDE ? 1.0f : fminf(1.0f, (G_T_MSG - g_t) / 15.0f);
+        pz_rect(160, 282, 320, 32, ((uint32_t)(0xD0 * a) << 24) | 0x202830, 8);
+        texto_id(id, 320, 298, 12, a, 8.5f, g_est == G_MAL ? 0xF04030 : 0xF0F0F0);
+    }
 }
 
 /* ---------------------------------------------------------------- volumen (licencia +D4 efectos, +D0 musica) */
@@ -1705,15 +1778,19 @@ static const int PZ_FILA[6] = { 9, 8, 7, 0, 1, 4 };          /* cuadro de 0x2C00
 static pvr_poly_hdr_t pz_cab;
 static int pz_cab_ok;
 
-static void pz_rect(float x, float y, float w, float h, uint32_t argb, float z)
+static void pz_cab_pon(void)                                /* cabecera de color sin textura (lista TR) */
 {
-    pvr_vertex_t v; int k;
     if (!pz_cab_ok) {
         pvr_poly_cxt_t cx; pvr_poly_cxt_col(&cx, PVR_LIST_TR_POLY);
         cx.depth.comparison = PVR_DEPTHCMP_ALWAYS; cx.depth.write = PVR_DEPTHWRITE_DISABLE; cx.gen.culling = PVR_CULLING_NONE;
         pvr_poly_compile(&pz_cab, &cx); pz_cab_ok = 1;
     }
     pvr_prim(&pz_cab, sizeof pz_cab);
+}
+static void pz_rect(float x, float y, float w, float h, uint32_t argb, float z)
+{
+    pvr_vertex_t v; int k;
+    pz_cab_pon();
     v.argb = argb; v.oargb = 0; v.u = v.v = 0; v.z = z;
     for (k = 0; k < 4; k++) {
         v.flags = k == 3 ? PVR_CMD_VERTEX_EOL : PVR_CMD_VERTEX;
@@ -1731,16 +1808,56 @@ static void pz_ventana(float x, float y, float w, float h, float z)
     pz_rect(x + 3, y + h - 46, w - 9, 30, 0xE0505860, z + 0.001f);
 }
 
-/* botones de la ventana (48C5F0: ELEGIR 0x294 en (x + 45, y + h - 38), ATRAS 0x295 acabando en x + w - 45) con la letra
-   del boton de la Dreamcast delante (los iconos del original son imagenes del XST sin localizar) */
+/* disco (elipse rx x ry) en una tira de PZ_FILAS filas, color de arriba ca a abajo cb (ARGB) */
+#define PZ_FILAS 10
+static void pz_disco(float cx, float cy, float rx, float ry, uint32_t ca, uint32_t cb, float z)
+{
+    pvr_vertex_t v; int i, k, j;
+    pz_cab_pon();
+    v.oargb = 0; v.u = v.v = 0; v.z = z;
+    for (i = 0; i <= PZ_FILAS; i++) {
+        float t = (float)i / PZ_FILAS, e = 2 * t - 1, w = rx * sqrtf(fmaxf(0.0f, 1 - e * e)); uint32_t c = 0;
+        for (j = 0; j < 32; j += 8) c |= (uint32_t)((((ca >> j) & 255) * (1 - t) + ((cb >> j) & 255) * t) + 0.5f) << j;
+        v.argb = c; v.y = cy - ry + 2 * ry * t;
+        for (k = 0; k < 2; k++) {
+            v.x = cx + (k ? w : -w);
+            v.flags = i == PZ_FILAS && k ? PVR_CMD_VERTEX_EOL : PVR_CMD_VERTEX;
+            pvr_prim(&v, sizeof v);
+        }
+    }
+}
+static uint32_t pz_mezcla(uint32_t c, int a, float f)       /* c (RGB) hacia el blanco (f > 0) o el negro (f < 0) */
+{
+    uint32_t r = (uint32_t)a << 24; int j;
+    for (j = 0; j < 24; j += 8) {
+        float x = (c >> j) & 255; x = f > 0 ? x + (255 - x) * f : x * (1 + f);
+        r |= (uint32_t)(x + 0.5f) << j;
+    }
+    return r;
+}
+/* boton de la Dreamcast (DESVIACION, revision 42, como los de la barra de ayuda de MENU.DAT, conv_menu.py boton_dc):
+   circulo del color del mando con sombra, borde oscuro, degradado y brillo, y la letra blanca con contorno oscuro */
+static void pz_boton(const char *letra, float cx, float cy, uint32_t col, float z)
+{
+    float r = 9.5f; int k;
+    pz_disco(cx + 1, cy + 1, r, r, 0x70000000, 0x70000000, z);
+    pz_disco(cx, cy, r, r, pz_mezcla(col, 255, -0.5f), pz_mezcla(col, 255, -0.5f), z + 0.001f);
+    pz_disco(cx, cy, r - 1.5f, r - 1.5f, pz_mezcla(col, 255, 0.38f), pz_mezcla(col, 255, -0.22f), z + 0.002f);
+    pz_disco(cx, cy - r * 0.42f, r * 0.62f, r * 0.36f, 0x60FFFFFF, 0x00FFFFFF, z + 0.003f);
+    for (k = 0; k < 4; k++)
+        texto_c(letra, cx + (k & 1 ? 1 : -1), cy + 1 + (k & 2 ? 1 : -1), 12, 0.8f, z + 0.004f, pz_mezcla(col, 0, -0.65f) & 0xFFFFFF);
+    texto_c(letra, cx, cy + 1, 12, 1, z + 0.005f, 0xFFFFFF);
+}
+/* botones de la ventana (48C5F0: ELEGIR 0x294 en (x + 45, y + h - 38), ATRAS 0x295 acabando en x + w - 45) con el
+   boton de la Dreamcast delante (los iconos del original son imagenes del XST sin localizar) */
 static void pz_botones(float x, float y, float w, float h, float z, int elegir)
 {
-    int n; const uint8_t *t = txt(0x295, &n); float xa = x + w - 45 - f_ancho(t, n);
+    int n; const uint8_t *t = txt(0x295, &n); float xa = x + w - 45 - f_ancho(t, n), cy = y + h - 38 + f_h * 0.5f;
     if (elegir) {
-        texto_c("A", x + 45 - 14, y + h - 38, 1, 1, z, 0xE83428);
+        pz_boton("A", x + 45 - 13, cy, 0xE22E28, z);
         texto_id(0x294, x + 45, y + h - 38, 1, 1, z, 0xF0F0F0);
     }
-    texto_c("B", xa - 14, y + h - 38, 1, 1, z, 0x2860E8);
+    pz_boton("B", xa - 13, cy, 0x2662DC, z);
     texto(t, n, xa, y + h - 38, 1, 1, z, 0xF0F0F0);
 }
 

@@ -215,23 +215,72 @@ def fuentes_xst(D):
 # clave 0x10 (SELECT, BACK); musica: 0x24E434 (SELECT, RANDOM, BACK). Botones: 4 cruz, 8 circulo, 0x10 triangulo,
 # 0x4000 cuadrado, 0x8000 (L1/R1, icono del triangulo). Textos: 0x294 SELECT, 0x295 BACK, 0x296 FRIENDS,
 # 0x299 LICENSE, 0x29A COLOR, 0x29B RANDOM.
+# DESVIACION (revision 42, pedida por el usuario): en el menu principal y en el de un jugador el boton Y ya no es
+# FRIENDS (0x296, juego en linea: no hay) sino GUARDAR (guarda la licencia en la VMU, comun/menu.c): el texto 0x42F
+# "Guardar" de TEXT.PS2 en mayusculas como los demas de la barra
+GUARDAR = 0x42f
 AYUDA = {
-    'MENU':   [(4, 0x294), (0x8000, 0x296), (0x4000, 0x299), (8, 0x295)],
-    'MODO':   [(4, 0x294), (0x8000, 0x296), (0x4000, 0x299), (8, 0x295)],
+    'MENU':   [(4, 0x294), (0x8000, GUARDAR), (0x4000, 0x299), (8, 0x295)],
+    'MODO':   [(4, 0x294), (0x8000, GUARDAR), (0x4000, 0x299), (8, 0x295)],
     'COCHE':  [(4, 0x294), (0x10, 0x29a), None, (8, 0x295)],
     'CAMBIO': [(4, 0x294), None, None, (8, 0x295)],
     'MUSICA': [(4, 0x294), (0x10, 0x29b), None, (8, 0x295)],
     'LICENCIA': [(4, 0x294), None, None, (8, 0x295)],        # 4E19E0: {4, SELECT, 8, BACK}
     'OPCIONES': [(4, 0x294), None, None, (8, 0x295)],
 }
-# en la Dreamcast: cruz -> A, circulo -> B, triangulo -> Y, cuadrado -> X (colores del mando: A rojo, B azul,
-# X amarillo, Y verde). El icono del PS2 se reutiliza (boton redondo) borrando su simbolo y poniendo la letra
-BOTON_DC = {4: ('A', (232, 52, 40)), 8: ('B', (40, 96, 232)), 0x10: ('Y', (60, 190, 60)), 0x8000: ('Y', (60, 190, 60)),
-            0x4000: ('X', (240, 200, 30)), 0x20: ('X', (240, 200, 30))}
+# en la Dreamcast: cruz -> A, circulo -> B, triangulo -> Y, cuadrado -> X. DESVIACION (revision 42, pedida por el
+# usuario): los iconos ya no son el boton gris del PS2 con la letra pintada encima sino botones de la Dreamcast:
+# circulos de los colores del mando (A rojo, B azul, X amarillo, Y verde) con relieve (degradado, borde mas oscuro,
+# brillo arriba y sombra abajo a la derecha) y la letra en blanco con la fuente del juego (contorno oscuro de 1 pixel
+# para que se lea en el amarillo). Mismo tamano y posicion que el icono del PS2 (escena del banco 0x48, cuadro 25):
+# la misma VRAM y la misma alineacion con los textos (0x2394E0).
+BOTON_DC = {4: ('A', (226, 46, 40)), 8: ('B', (38, 98, 220)), 0x10: ('Y', (40, 170, 70)), 0x8000: ('Y', (40, 170, 70)),
+            0x4000: ('X', (242, 192, 24)), 0x20: ('X', (242, 192, 24))}
+
+def boton_dc(h, w, col, F, letra):
+    """RGBA h x w: boton redondo de la Dreamcast de color col con la letra (fuente F) en blanco"""
+    k = 4; H, W = h * k, w * k
+    yy, xx = np.mgrid[0:H, 0:W].astype(float) + 0.5
+    cx, cy = W / 2 - 0.5 * k, H / 2 - 0.5 * k; r = (min(h, w) / 2 - 1.5) * k
+    d = np.hypot(xx - cx, yy - cy); ds = np.hypot(xx - cx - k, yy - cy - k)
+    c = np.array(col, float)
+    out = np.zeros((H, W, 4))
+    sombra = (ds <= r).astype(float) * 0.45                  # sombra abajo a la derecha
+    out[..., 3] = sombra
+    t = np.clip((yy - (cy - r)) / (2 * r), 0, 1)[..., None]  # 0 arriba, 1 abajo
+    claro, oscuro = c + (255 - c) * 0.38, c * 0.78
+    cuerpo = claro * (1 - t) + oscuro * t
+    borde = (d > r - 1.6 * k)[..., None]
+    cuerpo = np.where(borde, c * 0.5, cuerpo)
+    g = np.clip(1 - np.hypot((xx - cx) / (r * 0.62), (yy - (cy - r * 0.42)) / (r * 0.36)), 0, 1)[..., None]
+    cuerpo = cuerpo + (255 - cuerpo) * g * 0.45              # brillo arriba
+    dentro = (d <= r).astype(float)
+    out[..., :3] = np.where(dentro[..., None] > 0, cuerpo, 0)
+    out[..., 3] = np.maximum(dentro, sombra)
+    a = out.reshape(h, k, w, k, 4)
+    al = a[..., 3].mean((1, 3)); rgb = (a[..., :3] * a[..., 3:4]).sum((1, 3)) / np.maximum(a[..., 3].sum((1, 3)), 1e-6)[..., None]
+    res = np.dstack([rgb, al * 255])
+    # letra: glifo de la fuente centrado (por su caja de pixeles), contorno oscuro y blanco encima
+    gl = F.T[F.id]; q = ord(letra) - F.pri
+    gl = gl[(q >> 4) * F.h:(q >> 4) * F.h + F.h, (q & 15) * F.w:(q & 15) * F.w + F.w, 3].astype(float) / 255
+    ys, xs = np.nonzero(gl > 0.16); gy, gx = (ys.min() + ys.max()) / 2, (xs.min() + xs.max()) / 2
+    oy, ox = int(round((h - 1) / 2 - gy - 0.5)), int(round((w - 1) / 2 - gx - 0.5))
+    lm = np.zeros((h, w)); 
+    for y in range(F.h):
+        for x in range(F.w):
+            if 0 <= y + oy < h and 0 <= x + ox < w: lm[y + oy, x + ox] = gl[y, x]
+    cont = np.zeros_like(lm)
+    for dy in (-1, 0, 1):
+        for dx in (-1, 0, 1):
+            cont = np.maximum(cont, np.roll(np.roll(lm, dy, 0), dx, 1))
+    oscuro_l = c * 0.35
+    res[..., :3] = res[..., :3] * (1 - cont[..., None] * 0.8) + oscuro_l * cont[..., None] * 0.8
+    res[..., :3] = res[..., :3] * (1 - lm[..., None]) + 255 * lm[..., None]
+    return np.clip(res, 0, 255).astype(np.uint8)
 
 def iconos_dc(D, F):
-    """{boton: RGBA del icono} (29x29 aprox.): base redonda del icono del PS2 (escena del banco 0x48, cuadro 25) sin
-    el simbolo de color y con la letra del boton de la Dreamcast en la fuente del juego"""
+    """{boton: (RGBA del icono, pieza)}: boton de la Dreamcast (boton_dc) del tamano y en el sitio del icono del PS2
+    (escena del banco 0x48, cuadro 25)"""
     ab, Tb, _ = banco_menu(D, 0x48)
     w = D.elf32(AYUDA_ICONO, 16); mapa = {w[2 * i]: w[2 * i + 1] for i in range(8)}
     res = {}
@@ -239,21 +288,7 @@ def iconos_dc(D, F):
         ps = [q for q in escena(ab, mapa[bt] & 0xffff, 25.0) if q['alfa'] >= 0.004]
         assert len(ps) == 1, 'icono del boton %x' % bt
         p = ps[0]; l, t, r, b = (int(round(v)) for v in p['src'])
-        a = Tb[p['tex']][t:b, l:r].astype(float)
-        sat = a[..., :3].max(-1) - a[..., :3].min(-1)            # el simbolo es de color; la base, gris
-        gris = np.median(a[..., :3][(sat < 30) & (a[..., 3] > 200)], axis=0)
-        k = np.clip((sat - 30) / 60.0, 0, 1)[..., None]
-        a[..., :3] = a[..., :3] * (1 - k) + gris * k
-        g = F.T[F.id]; c = ord(letra) - F.pri; gl = g[(c >> 4) * F.h:(c >> 4) * F.h + F.h, (c & 15) * F.w:(c & 15) * F.w + F.w]
-        al = gl[..., 3:4].astype(float) / 255
-        ys, xs = np.nonzero(gl[..., 3] > 40); cy, cx = (ys.min() + ys.max()) / 2, (xs.min() + xs.max()) / 2
-        oy, ox = int(round(a.shape[0] / 2 - cy)), int(round(a.shape[1] / 2 - cx))
-        for y in range(F.h):
-            for x in range(F.w):
-                Y, X = y + oy, x + ox
-                if 0 <= Y < a.shape[0] and 0 <= X < a.shape[1] and al[y, x, 0] > 0:
-                    a[Y, X, :3] = a[Y, X, :3] * (1 - al[y, x, 0]) + np.array(col) * al[y, x, 0]
-        res[bt] = (np.clip(a, 0, 255).astype(np.uint8), p)
+        res[bt] = (boton_dc(b - t, r - l, col, F, letra), p)
     return res
 
 def barra_ayuda(D, F, cad, iconos, huecos):
@@ -269,7 +304,8 @@ def barra_ayuda(D, F, cad, iconos, huecos):
         q = dict(p, tex=('BOTON', bt), src=(0, 0, img.shape[1], img.shape[0]), M=M, bk='BOTON', tx={('BOTON', bt): img})
         ps.append(q)
         tx = int(x) + 17 if i < 2 else int(x) - 20
-        ps += F.piezas(cad[ti], tx - dx[i] + 320, int(y) + 240, 9 if i < 2 else 10)
+        t = cad[ti].upper() if ti == GUARDAR else cad[ti]
+        ps += F.piezas(t, tx - dx[i] + 320, int(y) + 240, 9 if i < 2 else 10)
     return ps
 
 # ---------------------------------------------------------------- conversion
@@ -355,6 +391,7 @@ def convierte(iso, salida, previas):
     idioma = os.environ.get('OR2_IDIOMA', 'es'); LETRA[0] = IDIOMAS[idioma][1]
     a, T, xst = banco_menu(D, B)
     F = Fuente(D, FUENTE_AYUDA, fuentes_xst(D)); cad = textos(D, idioma); iconos = iconos_dc(D, F)
+    cad[0x206] = cad[0x206].split(b'  ')[0]                     # "Guardando datos." (lo demas habla de la memory card del PS2)
     m = Menu(); hojas = {}
 
     bancos = {B: (a, T)}
@@ -578,8 +615,11 @@ def convierte(iso, salida, previas):
 # datos de la tarjeta, si / no, NORMAL / TUNED AT / MT y el aviso de coche no disponible
 TEXTOS = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 0x2a, 0x2b, 0x218, 0x219, 0x233, 0x234, 0x237, 0x213, 0x214, 0x21b, 0x21d,
           0x2b1, 0x2b2, 0x2b3, 0x2b4, 0x32a, 0x327]
+# guardar con Y (DESVIACION, revision 42): "Guardando datos." (el principio de 0x206), "Exito al guardar." (0x202) y
+# "Error al guardar!" (0x31D) de TEXT.PS2
+TEXTOS_GUARDAR = [0x206, 0x202, 0x31d]
 TEXTOS_PAUSA = [0x3a6, 0x294, 0x295]   # pausa: "Estas seguro?" (PS2 0x249d40, sin partida en red) y ELEGIR / ATRAS
-TEXTOS += TEXTOS_PAUSA
+TEXTOS += TEXTOS_PAUSA + TEXTOS_GUARDAR
 TECLADO = '1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ:%<>-'   # teclado de 468D40 (mayusculas) y signos de las cifras
 TARJETA = "0123456789.%?()'+-ABCDEF "  # datos de la tarjeta (PS2 0x275080): "%5.2f%%", rango "%s (%d)", "%2d''%02d'%02d"
 
