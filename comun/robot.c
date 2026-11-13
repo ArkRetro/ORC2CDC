@@ -54,10 +54,9 @@ typedef struct { uint32_t kind, nh, oh, ninv, oinv, mano_i, mano_d, asiento; } r
 typedef struct { float k0[4], k1[4]; uint16_t keys, left, stream, cursor; float rest; } canal_t;   /* 44 bytes */
 typedef struct {
     const rhueso_t *h; int n; const mat_t *inv;
-    canal_t can[ROBOT_HUESOS][9];
-    mat_t M[ROBOT_HUESOS];
-    float T[ROBOT_HUESOS][3], R[ROBOT_HUESOS][3], S[ROBOT_HUESOS][3], ikt[ROBOT_HUESOS][3];
-    float sT[ROBOT_HUESOS][3], sR[ROBOT_HUESOS][3], sS[ROBOT_HUESOS][3], sik[ROBOT_HUESOS][3];
+    /* por hueso (en mem: cap huesos; ROBOT_HUESOS los estaticos, ROBOT_HUESOS_FIN los del final en su RAM) */
+    canal_t (*can)[9]; mat_t *M; float (*T)[3], (*R)[3], (*S)[3], (*ikt)[3], (*sT)[3], (*sR)[3], (*sS)[3], (*sik)[3];
+    uint8_t *mem; int cap;
     /* objeto RobMotion (82F5F0 + n x 0xA4): +04 id, +08 banderas, +0C, +10 cuadro, +14 fin, +1C, +18 velocidad,
        +20 / +24 ids de la mezcla, +28 / +2C tiempo, +30 cuadro, +38 largo, +9C bucles */
     const rmov_t *mov; const uint8_t *cla; uint32_t id, fl, c_ant, c_id; int32_t bucles; uint16_t bflags;
@@ -67,6 +66,25 @@ typedef struct {
     const uint8_t *B; const rmov_t *mv; uint32_t nmv;   /* su bloque RBT1 (CHR.DAT o BAND.DAT) y sus movimientos */
 } motor_t;
 
+#define MOTOR_HB (9 * (uint32_t)sizeof(canal_t) + 64 + 8 * 12)   /* bytes por hueso */
+static void motor_enlaza(motor_t *m, uint8_t *p, int cap)      /* los punteros por hueso a p (cap huesos), a cero */
+{
+    memset(p, 0, MOTOR_HB * (uint32_t)cap);
+    m->mem = p; m->cap = cap;
+    m->M = (mat_t *)p; p += 64 * cap;                           /* (alineada a 32 si p lo esta) */
+    m->can = (canal_t (*)[9])p; p += 9 * sizeof(canal_t) * cap;
+    m->T = (float (*)[3])p; p += 12 * cap; m->R = (float (*)[3])p; p += 12 * cap; m->S = (float (*)[3])p; p += 12 * cap;
+    m->ikt = (float (*)[3])p; p += 12 * cap; m->sT = (float (*)[3])p; p += 12 * cap; m->sR = (float (*)[3])p; p += 12 * cap;
+    m->sS = (float (*)[3])p; p += 12 * cap; m->sik = (float (*)[3])p;
+}
+static void motor_cero(motor_t *m)                              /* memset del motor sin perder su RAM */
+{
+    uint8_t *p = m->mem; int c = m->cap;
+    memset(m, 0, sizeof *m);
+    if (p) motor_enlaza(m, p, c);
+}
+static uint8_t mem_c[2][MOTOR_HB * ROBOT_HUESOS] __attribute__((aligned(32)));
+static uint8_t *fin_ram;                                        /* robot_fin_ram: la de la pareja del final */
 static const uint8_t *B; static uint32_t Bn;
 static const rper_t *per; static const rmov_t *movs; static uint32_t nper, nmov, npz, nml;
 static const rpieza_t *pz; static const rmalla_t *ml; static const rvert_t *vt;
@@ -450,7 +468,12 @@ int robot_inicia(const void *rbt, uint32_t bytes)
     if (nper != 2) return -2;
     per = (const rper_t *)(w + 9); movs = (const rmov_t *)(per + nper);
     pz = (const rpieza_t *)(B + w[5]); ml = (const rmalla_t *)(B + w[6]); vt = (const rvert_t *)(B + w[7]);
-    for (i = 0; i < nper; i++) if (per[i].nh > ROBOT_HUESOS) return -3;
+    for (i = 0; i < nper; i++) {                                /* la RAM por hueso de cada motor */
+        motor_t *m = MOT(i);
+        if (fin_ram) { if (m->mem != fin_ram + i * MOTOR_HB * ROBOT_HUESOS_FIN) motor_enlaza(m, fin_ram + i * MOTOR_HB * ROBOT_HUESOS_FIN, ROBOT_HUESOS_FIN); }
+        else if (m->mem != mem_c[i]) motor_enlaza(m, mem_c[i], ROBOT_HUESOS);
+        if ((int)per[i].nh > m->cap) return -3;
+    }
     t_modc = tabla("MODC", &n); if (n < 30) return -4;
     t_mira = tabla("MIRA", &n); if (n < 120) return -4;
     t_agar = tabla("AGAR", &n_agar);
@@ -466,7 +489,7 @@ int robot_inicia(const void *rbt, uint32_t bytes)
         osa[0] = tabla("OSA0", &n_osa[0]); osa[1] = tabla("OSA1", &n_osa[1]); }
     for (i = 0; i < nper; i++) {
         motor_t *m = MOT(i); int j, k;
-        memset(m, 0, sizeof *m);
+        motor_cero(m);
         m->h = (const rhueso_t *)(B + per[i].oh); m->n = per[i].nh; m->inv = (const mat_t *)(B + per[i].oinv); m->vel = 1;
         m->B = B; m->mv = movs; m->nmv = nmov;
         for (j = 0; j < m->n; j++) {
@@ -511,7 +534,7 @@ static int osage_lee(int p, const uint32_t *w, uint32_t n)
     osg[p].nc = (int)w[0]; osg[p].nn = (int)w[1]; osg[p].calienta = (int)w[2]; osg[p].g = f_de(w[3]); osg[p].amort = f_de(w[4]);
     for (k = 0; k < 3; k++) { osg[p].eje[k] = f_de(w[5 + k]); osg[p].viento[k] = f_de(w[8 + k]); }
     if (osg[p].nc > OSG_CAD || osg[p].nn > OSG_NOD || n < 11 + 9 * (uint32_t)osg[p].nc + 20 * (uint32_t)osg[p].nn) return -2;
-    if (per[p].nh + (uint32_t)osg[p].nn > ROBOT_HUESOS) return -3;
+    if (per[p].nh + (uint32_t)osg[p].nn > (uint32_t)MOT(p)->cap) return -3;
     for (i = 0, o = 11; i < (uint32_t)osg[p].nc; i++, o += 9) {
         ocad_t *c = &osg[p].c[i];
         c->hueso = w[o]; c->n = w[o + 1]; c->primero = w[o + 8];
@@ -942,7 +965,7 @@ static void bd_matriz(void)                        /* push unit, T(pos), Rz, Ry,
     m_mul(bd.W, A, Mk);
 }
 int robot_band_hay(void) { return mot_b != NULL && t_band != NULL; }
-uint32_t robot_band_motor_tam(void) { return (sizeof(motor_t) + 31) & ~31u; }
+uint32_t robot_band_motor_tam(void) { return ((sizeof(motor_t) + 31) & ~31u) + MOTOR_HB * ROBOT_HUESOS; }
 /* BAND.DAT (su RBT1: un personaje, el 4); mem: robot_band_motor_tam() bytes para su motor (el hueco de la union) */
 int robot_band_carga(void *mem, const void *rbt, uint32_t bytes)
 {
@@ -955,7 +978,7 @@ int robot_band_carga(void *mem, const void *rbt, uint32_t bytes)
     t_band = tabla_de(b, bytes, "BAND", &n); if (n < 5 * 18 + 9) return -3;
     t_btex = tabla_de(b, bytes, "BTEX", &n); if (!n) t_btex = NULL;
     t_bmate = tabla_de(b, bytes, "MATE", &n_bmate); n_bmate /= 9;
-    memset(m, 0, sizeof *m);
+    memset(m, 0, sizeof *m); motor_enlaza(m, (uint8_t *)mem + ((sizeof(motor_t) + 31) & ~31u), ROBOT_HUESOS);
     m->h = (const rhueso_t *)(b + bp->oh); m->n = bp->nh; m->inv = (const mat_t *)(b + bp->oinv); m->vel = 1;
     m->B = b; m->mv = (const rmov_t *)(bp + 1); m->nmv = w[2];
     for (j = 0; j < m->n; j++) {
@@ -1081,3 +1104,7 @@ int robot_fin_mov(int p, uint32_t id, float ini, float fin, float vel, int32_t b
 }
 void robot_fin_calc(int p) { if (listo && p >= 0 && p < 2) { calc(MOT(p)); osage_control(p, MOT(p)); } }   /* 4F2520 y 515040 de cada paso */
 const uint32_t *robot_tabla(const char *k, uint32_t *n) { return tabla(k, n); }
+/* la RAM por hueso de los dos motores para la pareja del final (robot_fin_bytes(), alineada a 32; NULL: la estatica de la
+   carrera). Vale desde el siguiente robot_inicia */
+uint32_t robot_fin_bytes(void) { return 2 * MOTOR_HB * ROBOT_HUESOS_FIN; }
+void robot_fin_ram(void *ram) { fin_ram = ram; listo = 0; }

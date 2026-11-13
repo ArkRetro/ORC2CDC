@@ -7953,7 +7953,8 @@ static int robot_carga(int pil, int aco)
 /* matrices de cada pieza y tablas de color del cuadro (una vez, antes de las listas) */
 /* el final de recreativa: las piezas de objeto de rob_disp (cara, ojos y manos) que lleva puestas cada robot */
 #define FIN_MORF 48
-static uint16_t fin_morf[CHR_PZ][FIN_MORF];                     /* (pieza, numero de malla en la pieza) -> malla del modelo */
+static uint16_t (*fin_morf)[FIN_MORF];                          /* (pieza, numero de malla en la pieza) -> malla del modelo (en
+                                                                   el hueco de la etapa, con la pareja del final) */
 static int fin_pieza_activa(const robot_ctx_t *rx, const rpieza_t *pz)
 {
     const final_vista_t *FV; uint32_t o;
@@ -7980,7 +7981,7 @@ static const vert_t *fin_morfo(const robot_ctx_t *rx, const malla_t *m, uint32_t
     for (i = 0; i < chr_npz; i++) {
         const rpieza_t *q = PZA(i);
         if (q->tipo != RP_CARA || q->per != pz->per || q->inv[1] != (b & 0xffff)) continue;
-        if (ord >= FIN_MORF || (mo = fin_morf[i][ord]) == 0xffff || rx->m->mallas[mo].n != m->n) return NULL;
+        if (!fin_morf || ord >= FIN_MORF || (mo = fin_morf[i][ord]) == 0xffff || rx->m->mallas[mo].n != m->n) return NULL;
         (void)n; return rx->m->verts + rx->m->mallas[mo].v0;
     }
     return NULL;
@@ -9023,12 +9024,17 @@ static int final24_chr(int g, uint8_t *buf, uint32_t cap)
     if ((r = lee_modelo_en(&chr, nom, buf, cap))) { memset(&chr, 0, sizeof chr); dbglog(DBG_ERROR, "FINAL: sin %s (%d)\n", nom, r); return -2; }
     if (chr.paso_ruta != 1 || chr.nnodos || sube_modelo(&chr)) { dbglog(DBG_ERROR, "FINAL: %s: no se pudo subir\n", nom); tex_suelta(&chr); memset(&chr, 0, sizeof chr); return -3; }
     fin_chr = 1;
+    {   uint8_t *q = (uint8_t *)(((uintptr_t)chr.blob + 31) & ~(uintptr_t)31);   /* detras: los motores y fin_morf */
+        uint32_t nb = robot_fin_bytes() + sizeof(uint16_t) * FIN_MORF * CHR_PZ;
+        if (q + nb > buf + cap) { dbglog(DBG_ERROR, "FINAL: %s: sin RAM para los motores\n", nom); return -7; }
+        robot_fin_ram(q); fin_morf = (uint16_t (*)[FIN_MORF])(q + robot_fin_bytes());
+    }
     if ((r = robot_inicia(chr.ruta, chr.nruta * 4))) { dbglog(DBG_ERROR, "FINAL: %s: RBT1 (%d)\n", nom, r); return -4; }
     chr_npz = robot_npiezas(); chr_nm = robot_nmat();
     if (chr_npz > CHR_PZ || chr_nm > CHR_MAT) { dbglog(DBG_ERROR, "FINAL: %d piezas, %d materiales: no caben\n", chr_npz, chr_nm); return -5; }
     for (k = 0; k < chr_npz; k++) { chr_m0[k] = (uint16_t)n; n += robot_pieza(k)->n; }
     if (n > CHR_MT) { dbglog(DBG_ERROR, "FINAL: %d matrices: no caben\n", n); return -6; }
-    memset(fin_morf, 0xff, sizeof fin_morf);
+    memset(fin_morf, 0xff, sizeof(uint16_t) * FIN_MORF * CHR_PZ);
     {   uint32_t nm; const uint32_t *tm = robot_tabla("MORF", &nm);
         for (i = 0; tm && i < chr.nmallas; i++) {
             int nd = chr.mallas[i].nodo;
@@ -9046,6 +9052,7 @@ static void final24_suelta(void)
     if (fin_chr) {                                              /* la pareja del final fuera (la de la carrera se lee otra vez) */
         pvr_wait_ready(); tex_suelta(&chr); free(chr.vis); free(chr.tr); free(chr.fe_p);
         memset(&chr, 0, sizeof chr); rc_chr.ok = 0; chr_par = -1; if (chr_ok) chr_ok = -1; fin_chr = 0;
+        robot_fin_ram(NULL); fin_morf = NULL;                   /* (los motores vuelven a su RAM estatica) */
     }
     final_sale();
     if (fin_mod.datos || fin_prop.datos) pvr_wait_ready();
