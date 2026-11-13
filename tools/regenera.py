@@ -26,6 +26,13 @@ SP = ['CARGASP%d.DAT' % k for k in range(4)] + ['GOVSP.DAT', 'SPFE.DAT', 'RUTASP
 FINAL = ['FINAL.DAT', 'FINPROP.DAT', 'STAFF.DAT'] + ['FINE%d.DAT' % k for k in range(10)] + \
         ['FINSKY%d.DAT' % k for k in range(5, 10)] + ['FINCHR%02X.DAT' % g for g in (0xb, 0xd, 0xe, 0xf, 0x11, 0x2a, 0x2c, 0x2d, 0x2e, 0x37)]   # (conv_final.py)
 UNIONES = ['UNIONES.PAK', 'CURSO.DAT', 'COLLR.DAT', 'COLBK.DAT', 'BKD.DAT', 'SOL.DAT']
+# los demas ficheros con numero que salen de la ISO PAL v1.02 (para la comprobacion final; auditoria de la revision 42
+# contra la carpeta de datos completa): TRAF0..8 (conv_trafico.MODELOS, 9 modelos), BOnn de los conjuntos de objetos
+# usados (conv_bo.py), COLBKkk de las uniones del modo OutRun con colision propia (conv_coli.py via conv_union.py)
+TRAF = ['TRAF%d.DAT' % n for n in range(9)]
+BO = ['BO%02d.DAT' % c for c in (1, 2, 6, 7, 11, 12, 13)]
+COLBK = ['COLBK%02d.DAT' % k for k in (10, 11, 12, 13, 14, 25, 26, 27, 28, 29)]
+FIN = ['FIN.DAT', 'GOVER.DAT', 'FINC2C.DAT']                    # (conv_fin.py; FINC2C: el modo 35 de una mision de C2C)
 # segundos aproximados de cada paso en un nucleo (para el porcentaje y el tiempo que queda; medidos en Linux)
 PESO = {'union': 4500, 'curso': 650, 'seg': 450, 'video_ts': 150, 'video_attr': 450, 'mus': 20, 'coche': 15,
         'menu': 40, 'trafico': 30, 'camiones': 25}
@@ -125,7 +132,7 @@ def paso(C, n, log):
     elif n == 'salida': ej(T('conv_salida.py'), ISO, t); mueve(D, tj('SALIDA.DAT'))
     elif n == 'infarto':
         ej(T('conv_infarto.py'), ISO, t); mueve(D, tj('INFARTO.DAT'), tj('HAHUD.DAT'), tj('VOCESH.DAT'))
-    elif n == 'fin': ej(T('conv_fin.py'), ISO, t, prev('fin')); mueve(D, tj('FIN.DAT'), tj('GOVER.DAT'))
+    elif n == 'fin': ej(T('conv_fin.py'), ISO, t, prev('fin')); mueve(D, *[tj(f) for f in FIN])
     elif n == 'sp':
         ej(T('conv_sp.py'), ISO, t, prev('sp'))
         mueve(D, tj('CARGASP?.DAT'), tj('GOVSP.DAT'), tj('SPFE.DAT'), tj('RUTASP.DAT'), tj('RANKSP.DAT'), tj('NOM5?.DAT'),
@@ -215,10 +222,10 @@ def regenera(iso, D, W, jobs=4, informe=print):
         if not hay(D, 'SEG%02d.DAT' % int(n), 'COL%02d.DAT' % int(n)): falta.append('seg' + ti)
     chrs = C.saca(py(os.path.join(TOOLS, 'conv_chr.py'), iso, '--lista')).split()   # CHRPAR y las parejas
     for fs, n in ((['EFECTOS.DAT'], 'efectos'), (chrs, 'chr'), (['BAND.DAT', 'BAND1.DAT'], 'band'), (['PARAM.DAT'], 'param'),
-                  (['META.DAT'], 'meta'), (['FIN.DAT', 'GOVER.DAT'], 'fin'),
+                  (['META.DAT'], 'meta'), (FIN, 'fin'),
                   (SP, 'sp'), (FINAL, 'final'),
-                  (['SALIDA.DAT'], 'salida'), (['INFARTO.DAT', 'HAHUD.DAT', 'VOCESH.DAT'], 'infarto'), (['BO.DAT'], 'bo'),
-                  (['TRAFC.DAT', 'TAPD.DAT', 'TRAF0.DAT'], 'trafico'), (['TRAFK0.DAT', 'TRAFK1.DAT', 'TRAFK2.DAT'], 'camiones'),
+                  (['SALIDA.DAT'], 'salida'), (['INFARTO.DAT', 'HAHUD.DAT', 'VOCESH.DAT'], 'infarto'), (['BO.DAT'] + BO, 'bo'),
+                  (['TRAFC.DAT', 'TAPD.DAT'] + TRAF, 'trafico'), (['TRAFK0.DAT', 'TRAFK1.DAT', 'TRAFK2.DAT'], 'camiones'),
                   (['MVTS.VQV'], 'video_ts'), (['MVATTR.VQV'], 'video_attr'),
                   (['RC%02d.DAT' % k for k in range(30)], 'rivales'), (['MISION.DAT'], 'mision'), (['C2CHUD.DAT'], 'c2chud'),
                   (['C2C.DAT'], 'c2c')):
@@ -306,7 +313,7 @@ def regenera(iso, D, W, jobs=4, informe=print):
     nec = ['BAND.DAT', 'BAND1.DAT', 'BKD.DAT', 'BO.DAT'] + chrs + \
           'COCHES.DAT COLBK.DAT COLLR.DAT CURSO.DAT EFECTOS.DAT FIN.DAT GOVER.DAT HAHUD.DAT HUD.DAT INFARTO.DAT MENU.DAT META.DAT MODOV.DAT MVATTR.VQV MVTS.VQV PARAM.DAT SFX.DAT SEGS.PAK SOL.DAT TAPD.DAT TRAFC.DAT UNIONES.PAK VMU.DAT VOCES.DAT VOCESH.DAT VOCESC.DAT MISION.DAT C2CHUD.DAT C2C.DAT'.split() + ['RC%02d.DAT' % k for k in range(30)] + \
           ['COCHE%02d.DAT' % k for k in range(15)] + ['MUS%d.ADP' % k for k in MUSICA] + SP + FINAL + \
-          ['TRAFK%d.DAT' % k for k in range(3)]
+          ['TRAFK%d.DAT' % k for k in range(3)] + FIN + TRAF + BO + COLBK + ['SALIDA.DAT', 'CHRPAR.DAT']
     for f in nec:
         if not hay(D, f): informe('FALTA %s' % f); ok = False
     ls = sorted(os.listdir(D))
