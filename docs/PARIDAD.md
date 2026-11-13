@@ -2892,3 +2892,19 @@ car+0x5C, como en el PC). Lo que dibuja de la union (registro [7D2E78] << 16 = P
   de MAYA (nodos 194 / 195 de cs_CS_MAYA, radios de 1013 y 2436 m) desde la de LASV; sigue igual en la etapa y con la
   PVS de la seccion 0 de la etapa siguiente desde la union (como la lista de nodos de la seccion 0 que usa 44DE10 en la
   union, probado y quitado: no cambia nada).
+
+## Edificios palidos en la salida de PALM (2026-11-13)
+
+Demo 38 (Flycast Android, salida de PALM): los edificios de la derecha calle abajo, de unos 100 m en adelante, salian
+palidos, azul y blanco, como sin textura. No era la niebla: ni el velo del limite de dibujado (igual con
+`-DSIN_NIEBLA_LIMITE`) ni la del original (scn_env_fog de PALM: densidad 0,0002, nada a 130 m); ni la VQ (8283e33), ni
+texturas rebajadas o grises (0), ni el LOD de 404B00 (igual sin el), ni un LOD del original con otras texturas (las
+tiras de PS2 solo traen el LOD 0). Eran huecos: con el ojo en la seccion 1 de la PVS de SEG00, que como las dos
+primeras y las dos ultimas de cada fichero llevaba todas las mallas, la etapa entera estaba en la vista (71131 vertices
+para ~16000 del tope de la etapa) y el reparto del TA (DREAMCAST.md, Presupuesto) quitaba lo de mas de 76 m que no
+fuera grande: los bajos y las tiendas de esos edificios (nodo 548, opaco). Sus fachadas con ventanas (nodo 550, lista
+de recorte: las ventanas llevan alfa 0 y el original las dibuja asi, se ve lo de detras) se quedaban flotando con el
+cielo a traves y por debajo. Arreglo (tools/pvs.py y pvs_paso, DREAMCAST.md, PVS: puntas de la ruta): sin secciones
+llenas (la ruta prolongada 32 m por cada punta) y las fachadas de recorte tapan donde su textura tapa; la salida queda
+en 56506 vertices en la vista y los edificios salen enteros como en el original. Sigue siendo mas de lo que cabe:
+alli el reparto aun quita (lo pequeno y lejano primero).
