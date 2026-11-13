@@ -60,6 +60,7 @@ def main():
         if m: c['rec'].append((int(m[1]), int(m[2]), int(m[3]))); continue
         m = re.search(r'MAPA: arbol \d+ nodo (\d+) \w+ nivel (-?\d+) casilla (-?\d+) mapa (\d)', l)
         if m: c['mapa'].append(tuple(int(x) for x in m.groups())); continue
+        if 'ORDEN: atascado' in l: c['atascado'] = True; continue
         m = re.search(r'CURSO: GOAL en (\w+)', l)
         if m: c['meta'] = m[1]
     carreras = [c for c in carreras if c['arbol'] is not None]
@@ -71,6 +72,7 @@ def main():
         hecho = c['etapas']; n = min(len(exp), len(hecho))
         prob = []
         if c['rama'] < 0: prob.append('sin PRUEBA_RAMA_FIJA')
+        if c.get('atascado'): prob.append('atascado (5 min sin checkpoint)')
         if hecho[:n] != exp[:n]: prob.append('etapas %s, tabla %s' % (hecho, exp))
         acabada = c['meta'] is not None
         if acabada and len(hecho) != len(exp): prob.append('GOAL tras %d etapas, la tabla %d' % (len(hecho), len(exp)))

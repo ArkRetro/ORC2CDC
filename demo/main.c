@@ -5686,7 +5686,7 @@ static const int16_t PO[][4] = {
     { 1, 0, -1, -1 }, { 1, 1, -1, -1 }, { 1, 2, -1, -1 }, { 1, 3, -1, -1 },   /* OUTRUN: arboles 0, 1, 290, 291 */
     { 7, 0, 5, -1 }, { 7, 0, 0x3e, -1 }, { 7, 1, 0x43, -1 }, { 7, 0, 0x46, -1 }, { 7, 1, 0x4d, -1 }, { 7, 0, 0x50, -1 },
     { 2, 1, -1, -1 }, { 6, 0, -1, 0 }, { 6, 0, -1, 84 } };
-static int po_k = -1, po_rep, po_fin, po_ult = -1;
+static int po_k = -1, po_rep, po_fin, po_ult = -1, po_t;   /* po_t: crono de la ultima etapa */
 #endif
 static int ta_codigo = -1;                                      /* CONTRARRELOJ: [656234] (el arbol 200 + codigo) */
 static volatile int meta_hilo;                                  /* META.DAT leyendose (hilo) */
@@ -10681,7 +10681,7 @@ int main(int argc, char **argv)
                 variante = PRUEBA_VARIANTE;                     /* prueba: 2 INFARTO, 7 Time Attack */
 #endif
 #ifdef PRUEBA_ORDEN
-                po_k = (po_k + 1) % (int)(sizeof PO / sizeof PO[0]); variante = PO[po_k][0]; po_rep = po_fin = 0; po_ult = -1;
+                po_k = (po_k + 1) % (int)(sizeof PO / sizeof PO[0]); variante = PO[po_k][0]; po_rep = po_fin = po_t = 0; po_ult = -1;
 #endif
                 /* OUTRUN2SP (menu_sp): [780260] = 0 y el preset del lado elegido en el frontal */
                 juego_sp = !auto_ && menu_sp();
@@ -11084,7 +11084,7 @@ int main(int argc, char **argv)
 #endif
 #ifdef PRUEBA_ORDEN
                         if (cur_nodo == po_ult) { if (++po_rep >= 2) po_fin = 1; } else po_rep = 0;
-                        po_ult = cur_nodo;
+                        po_ult = cur_nodo; po_t = crono;
 #endif
                     }
                     niebla_paso(); geo_paso();
@@ -11114,7 +11114,8 @@ int main(int argc, char **argv)
 #ifdef PRUEBA_SIN_TIEMPO
                 if (tim_cuadros < 600) tim_cuadros = 600;        /* prueba: el tiempo no se acaba (rutas enteras hasta GOAL) */
 #ifdef PRUEBA_ORDEN
-                if (po_fin) tim_cuadros = 0;                    /* prueba: tres veces seguidas la misma etapa: la siguiente */
+                if (!po_fin && crono - po_t > 60 * 300) { po_fin = 1; dbglog(DBG_INFO, "ORDEN: atascado en la etapa %d (5 min sin checkpoint)\n", cur_nodo); }
+                if (po_fin) tim_cuadros = 0;                    /* prueba: tres veces seguidas la misma etapa (o atascado): la siguiente */
 #endif
 #endif
                 if (estado != META && tim_cuadros <= 0) {
