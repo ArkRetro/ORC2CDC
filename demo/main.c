@@ -4271,6 +4271,9 @@ static void piloto(const coche_t *c, float *giro, float *gas, float *freno)
 #ifdef PRUEBA_RAMA
         if (piloto_rama(c->s)) xc = PRUEBA_RAMA ? 9.0f : -9.0f;   /* prueba: hacia el lado de esa rama */
 #endif
+#ifdef PRUEBA_ARENA
+        xc = PRUEBA_ARENA;                                      /* prueba: por ese desvio (la arena, la hierba) */
+#endif
     }
     ad = fmaxf(-0.25f, fminf(0.25f, 0.06f * (xc - c->x)));
     g = fmaxf(0.05f, fminf(c->v / 8.0f, 1.0f) * (1.0f - 0.45f * c->v / VMAX));
@@ -4399,10 +4402,11 @@ static int marca_n[NMARCA_CLASES], marca_sig[NMARCA_CLASES];
 typedef struct { float izq[3], der[3], largo, alfa, ant[3]; int activa, clase, hay; } rueda_marca_t;   /* TireMark */
 static rueda_marca_t rmarca[4];
 static pvr_poly_hdr_t cab_marca[NMARCA_CLASES]; static int marca_tex_ok;
-#define NHUMO 32
-typedef struct { float p[3], edad; } humo_t;
-static humo_t humos[NHUMO]; static int humo_sig;
-static pvr_ptr_t tex_humo; static pvr_poly_hdr_t cab_humo;
+#if defined(PRUEBA_ARENA) || defined(PRUEBA_PARTICULAS)
+#define PRUEBA_ARENA_ON 1                                       /* prueba: las particulas tambien con el piloto */
+#else
+#define PRUEBA_ARENA_ON 0
+#endif
 
 /* Chispas (fuente 3 de las particulas: PtclSparkInit 41D6B0 / 41D810 / 41DC60 / 41DCC0 del PC; en SLES-53998 0x10b588,
    0x10b698, 0x10bb20 y 0x10bba0, constantes en 0x32b26c..0x32b294). 500 particulas (0x1F4). Peticion por rueda: con el
@@ -4520,21 +4524,352 @@ static void chispas_dibuja(void)
     }
 }
 
+/* ---------------------------------------------------------------- particulas de race_particles: grava, hierba y humo
+   (PART_EFC del PC 41BBF0 / 41BC60 / 41BD10; en SLES-53998 la inicializacion 0x109610, el control 0x1096a8 y el dibujo
+   0x108910). Los registros de las ruedas del jugador (MakePlcarParam 41BD50 = 0x109830; 0x48e420 + n x 0x5C, n la rueda
+   del original: 0 del. izq., 1 del. der., 2 tras. izq., 3 tras. der.) con lo que leen las peticiones: +00 lo que se ha
+   movido el contacto en el cuadro, +04 el contacto (car+130 + n x 0xC por car+B0; y = la del suelo, rueda +3C), +10 la
+   normal del suelo (rueda +70), +1C el contacto del cuadro anterior, +28 la direccion de la rueda (rueda +40: adelante
+   girado por el angulo de la rueda, unitaria; tire_direction 500700), +40 la superficie (car+24C + n x 4: la clase
+   1 << tipo del poligono de la COLI bajo la rueda, sup_rueda), +50 el termino de suelo (0x109ae8: (0, 0, -1) girado en
+   y por car+162 (rumbo de la velocidad - el del cuerpo) . la diagonal n de 0x3bff00), +54 / +58 la clase del humo y su
+   tabla de colores. En la demo el contacto es el punto de la rueda sobre el plano del coche (como las marcas) y la
+   direccion de la rueda la del coche girada por angulo_rueda en las delanteras.
+   El modo 0x13 del original (la demo de atraccion; aqui el piloto automatico) pone las cuatro en asfalto (+40 = 2):
+   sin grava, hierba ni polvo, como el original. */
+typedef struct { float mov, p[3], n[3], ant[3], ade[3], suelo; uint32_t sup; int clase, hay; } neum_t;
+static neum_t neum[4];
+static uint32_t part_cuadro;                                    /* 95AF0C (0x107bc0): cuadros de las particulas */
+static float part_coche_ant[3]; static int part_coche_hay;      /* car+20: el paso del coche en el cuadro */
+static int8_t dsc_seg[ATR_SEG]; static int dsc_ok;              /* descriptor de tramo de cada SEGnn (EFECTOS.DAT 'DSC1') */
+static void luz_actual(int e, float *v, float *d);
+static int part_z(int *en_union, int *pos);
+static void neum_paso(const coche_t *c, const float *r)
+{
+    static const float DIAG[4][3] = {                           /* 0x3bff00 (PC 623894) */
+        { -0.707106769f, 0, -0.707106769f }, { 0.707106769f, 0, -0.707106769f },
+        { -0.707106769f, 0, 0.707106769f }, { 0.707106769f, 0, 0.707106769f } };
+    float a = 0, o[3], ca, sa; int n, k;
+    if (fis_ok) a = (float)(int16_t)((int32_t)fis.rumbo_v16 - (int32_t)(fis.psi * 10430.3779f)) * 9.58738019e-05f;   /* car+162 x 0x38c90fdb */
+    o[0] = -sinf(a); o[1] = 0; o[2] = -cosf(a);                 /* (0, 0, -1) girado en y */
+    ca = fis_ok ? cosf(fis.angulo_rueda) : 1; sa = fis_ok ? sinf(fis.angulo_rueda) : 0;
+    for (n = 0; n < 4; n++) {
+        neum_t *t = neum + n;
+        float fx = n < 2 ? fpar.cg_del : -fpar.cg_tras, lx = fpar.via[n >> 1] * ((n & 1) ? 0.5f : -0.5f), d2 = 0;
+        memcpy(t->ant, t->p, 12);
+        for (k = 0; k < 3; k++) t->p[k] = c->pos[k] + c->fw[k] * fx + r[k] * lx;
+        if (!t->hay) { memcpy(t->ant, t->p, 12); t->hay = 1; }
+        for (k = 0; k < 3; k++) d2 += (t->ant[k] - t->p[k]) * (t->ant[k] - t->p[k]);
+        t->mov = sqrtf(d2);
+        memcpy(t->n, c->up, 12);
+        for (k = 0; k < 3; k++) t->ade[k] = n < 2 ? c->fw[k] * ca + r[k] * sa : c->fw[k];
+        t->sup = auto_piloto && !PRUEBA_ARENA_ON ? 2u : sup_rueda[n];   /* modo 0x13: asfalto */
+        t->suelo = o[0] * DIAG[n][0] + o[1] * DIAG[n][1] + o[2] * DIAG[n][2];
+    }
+}
+/* generador de las particulas (0x32b0d8, el de las chispas) y el nacimiento (0x1086f8 = 418350 del PC): un paso para la
+   prueba del limite (0x7FFF en estas fuentes: siempre pasa) y la posicion y la velocidad base + azar x dispersion */
+static void part_nace(float *p, float *v, const float *bp, const float *ep, const float *bv, const float *ev)
+{
+    int k;
+    (void)(chispa_gen *= 1103515245u);
+    for (k = 0; k < 3; k++) p[k] = chispa_azar() * ep[k] + bp[k];
+    for (k = 0; k < 3; k++) v[k] = chispa_azar() * ev[k] + bv[k];
+}
+static float part_rand(void) { return (float)(rand() & 0x7fffffff) * 4.65661287e-10f; }   /* 0x2a9fa8 x 0x30000000 */
+/* rebote en el plano del registro (+04 punto, +10 normal): v += 2 (-v . n) n */
+static void part_rebota(float *v, const neum_t *t)
+{
+    float m = -(v[0] * t->n[0] + v[1] * t->n[1] + v[2] * t->n[2]); int k;
+    m += m; for (k = 0; k < 3; k++) v[k] += m * t->n[k];
+}
+static float part_plano(const float *p, const neum_t *t)
+{
+    return (p[0] - t->p[0]) * t->n[0] + (p[1] - t->p[1]) * t->n[1] + (p[2] - t->p[2]) * t->n[2];
+}
+static float dist3(const float *a, const float *b)
+{
+    float dx = a[0] - b[0], dy = a[1] - b[1], dz = a[2] - b[2]; return sqrtf(dx * dx + dy * dy + dz * dz);
+}
+/* Grava (fuente 1: 41DE20 / 41DF00 / 41E190 / 41E230 del PC = SLES-53998 0x10bd18 / 0x10bdd0 / 0x10c088 / 0x10c178) e
+   hierba (fuente 2: 41E360 / 41E440 / 41E780 / 41E820 = 0x10c2a8 / 0x10c360 / 0x10c670 / 0x10c758): 256 trozos de 0x50
+   cada una, textura 0x57002a / 0x57002b (64x64, cuatro por cuatro trozos: cada trozo uno al azar), tamano 0,05 / 0,075,
+   color de la fuente (+0x50) y mezcla de alfa (tipo de dibujo 2: 418CF0, cuadrados de cara a la pantalla de medio lado
+   tamano x proyeccion / w). Constantes del PS2 0x32b298..0x32b2d0 (= 74FF90..74FFC8 del PC):
+   - grava: por las ruedas traseras sobre +40 & 0x200010 (tipos 4 y 21 de la COLI), 1 vez (0x32b2b0) por cuadro y
+     rueda con el contacto movido 0,01 m o mas: nace 0,5 m detras del contacto (- 0,5 x direccion de la rueda) y 0,1 m
+     arriba, +- (0,15; 0,01; 0,15) (0x3bfe90); velocidad = lo movido x (0,92 - 0,13 x mov) +- (direccion x mov x 0,5 x
+     0,03; mov x 0,04 + 0,03) (x y z de la direccion). Vida 60 + 30 + azar x 30 cuadros; cada cuadro avanza, rebota en
+     el plano de la ultima rueda que la pidio, y -= 0x3B315723; muere al acabar o a mas de 15 m del coche (car+14).
+   - hierba: las cuatro ruedas sobre +40 & 4 (tipo 2), 4 veces (0x32b2cc) por cuadro: nace (mov + 0,5) m detras y 0,1 m
+     arriba, +- (0,03; 0; 0,03) (0x3bfea0); velocidad = lo movido x 0,97 y en y + 0,13 si el coche esta en un choque de
+     los de humo (car+2F0 & 2 y su estado en 2, 5, 12, 13, 15, 17, 18, 19: 0x10ae78) o + mov x 0,12 + 0,015; dispersion
+     (mov x 0,11; vy x 0,11; mov x 0,11). Vida 90 + azar x 30; cada cuadro avanza, y -= gravedad y las tres x 0,95; por
+     debajo de car+18 vy = |vy| - gravedad; muere bajo el plano de la rueda o a mas de 10 m del coche.
+   El color de la fuente 2 (la hierba) es el difuso de la luz 1 (la de la escena) con cada canal hasta 1 por
+   0xFFFFFFFF; las dos peticiones (0x10be58 y 0x10c430) lo escriben en la fuente 2 (tambien la de la grava, PC 8A8E6C
+   en 41DF00): la grava se queda blanca (0xFFFFFFFF de 0x10bd78), como el original. */
+#define NTROZO 256
+typedef struct { float p[3], v[3]; int vida; uint32_t col; float uv[4]; } trozo_t;   /* uv: +40 +44 +48 +4C */
+static trozo_t gravas[NTROZO], hierbas[NTROZO]; static int grava_n, hierba_n, grava_pl, hierba_pl;
+static uint32_t col_hierba = 0xFFFFFFFFu;
+static pvr_poly_hdr_t cab_part[3]; static int part_tex_ok;      /* grava, hierba, humo */
+static void trozo_celda(trozo_t *h)                             /* un trozo de los 4 x 4 de la textura (0x10c114..) */
+{
+    h->uv[2] = (float)((rand() >> 13) & 3) * 0.25f; h->uv[3] = (float)((rand() >> 13) & 3) * 0.25f;
+    h->uv[0] = h->uv[2] + 0.25f; h->uv[1] = h->uv[3] + 0.25f;
+}
+static uint32_t col_escala(uint32_t c, float a, float r, float g, float b)   /* 0x10e0f8 (PC 41FF70): ARGB por canal */
+{
+    return ((uint32_t)(int)((float)(c >> 24) * a) & 0xff) << 24 | ((uint32_t)(int)((float)(c >> 16 & 0xff) * r) & 0xff) << 16 |
+           ((uint32_t)(int)((float)(c >> 8 & 0xff) * g) & 0xff) << 8 | ((uint32_t)(int)((float)(c & 0xff) * b) & 0xff);
+}
+static void trozos_pide(const coche_t *c)
+{
+    float L[16], d[3], bp[3], ep[3], bv[3], ev[3]; int n, k, j, especial;
+    luz_actual(1, L, d);                                        /* 0x102c10(1): difuso de la luz de la escena */
+    col_hierba = col_escala(0xFFFFFFFFu, 1.0f, fminf(L[0], 1), fminf(L[1], 1), fminf(L[2], 1));
+    for (j = 0; j < 1; j++)                                     /* grava: 0x32b2b0 = 1 */
+        for (n = 2; n < 4; n++) {
+            const neum_t *t = neum + n; trozo_t *h; float K, w;
+            if (!(t->sup & 0x200010u)) continue;
+            if (grava_n >= NTROZO) goto hierba;                 /* 0x108850 sin sitio: sale */
+            if (t->mov < 0.00999999978f) continue;
+            for (k = 0; k < 3; k++) bp[k] = t->p[k] - 0.5f * t->ade[k];
+            bp[1] += 0.100000001f;
+            ep[0] = 0.150000006f; ep[1] = 0.00999999978f; ep[2] = 0.150000006f;
+            K = 0.920000017f - t->mov * 0.129999995f;
+            for (k = 0; k < 3; k++) bv[k] = (t->p[k] - t->ant[k]) * K;
+            w = t->mov * 0.5f * 0.0299999993f;
+            ev[0] = t->ade[0] * w; ev[2] = t->ade[2] * w; ev[1] = t->mov * 0.0399999991f + 0.0299999993f;
+            grava_pl = n;
+            h = gravas + grava_n++;
+            part_nace(h->p, h->v, bp, ep, bv, ev);
+            h->col = 0xFFFFFFFFu;                               /* 0x10c088: el color de la fuente 1 */
+            h->vida = 60 + (int)(part_rand() * 30.0f) + 30;
+            trozo_celda(h);
+        }
+hierba:
+    especial = fis_ok && fis.t_choque > 0.0f && (fis.choque == 2 || fis.choque == 5 || fis.choque == 15 || fis.choque == 12 ||
+               fis.choque == 17 || fis.choque == 18 || fis.choque == 19 || fis.choque == 13);
+    for (j = 0; j < 4; j++)                                     /* 0x32b2cc = 4 */
+        for (n = 0; n < 4; n++) {
+            const neum_t *t = neum + n; trozo_t *h; float m;
+            if (t->mov < 0.00999999978f || !(t->sup & 4u)) continue;
+            if (hierba_n >= NTROZO) return;
+            m = -(t->mov + 0.5f);
+            for (k = 0; k < 3; k++) bp[k] = t->p[k] + m * t->ade[k];
+            bp[1] += 0.100000001f;
+            ep[0] = 0.0299999993f; ep[1] = 0; ep[2] = 0.0299999993f;
+            for (k = 0; k < 3; k++) bv[k] = (t->p[k] - t->ant[k]) * 0.970000029f;
+            bv[1] += especial ? 0.129999995f : t->mov * 0.119999997f + 0.0149999997f;
+            ev[0] = ev[2] = t->mov * 0.109999999f; ev[1] = bv[1] * 0.109999999f;
+            hierba_pl = n;
+            h = hierbas + hierba_n++;
+            part_nace(h->p, h->v, bp, ep, bv, ev);
+            h->col = col_hierba;                                /* 0x10c670: el color de la fuente 2 */
+            h->vida = 90 + (int)(part_rand() * 30.0f);
+            trozo_celda(h);
+        }
+}
+static void trozos_paso(const coche_t *c)
+{
+    int i, k;
+    for (i = 0; i < grava_n; ) {                                /* 0x10c178 */
+        trozo_t *h = gravas + i;
+        for (k = 0; k < 3; k++) h->p[k] += h->v[k];
+        if (part_plano(h->p, neum + grava_pl) < 0) part_rebota(h->v, neum + grava_pl);
+        h->v[1] -= 0.00270600803f;
+        if (--h->vida <= 0 || dist3(c->pos, h->p) > 15.0f) *h = gravas[--grava_n]; else i++;
+    }
+    for (i = 0; i < hierba_n; ) {                               /* 0x10c758 */
+        trozo_t *h = hierbas + i; float vy;
+        for (k = 0; k < 3; k++) h->p[k] += h->v[k];
+        vy = (h->v[1] - 0.00270600803f) * 0.949999988f;
+        h->v[0] *= 0.949999988f; h->v[1] = vy; h->v[2] *= 0.949999988f;
+        if (h->p[1] < c->pos[1]) h->v[1] = fabsf(vy) - 0.00270600803f;
+        if (part_plano(h->p, neum + hierba_pl) < 0 || dist3(c->pos, h->p) > 10.0f) *h = hierbas[--hierba_n]; else i++;
+    }
+}
+static void trozos_dibuja(const trozo_t *b, int n, float tam)  /* 418CF0 */
+{
+    int i, k; pt_t t[4];
+    for (i = 0; i < n; i++) {
+        float x = b[i].p[0], y = b[i].p[1], z = b[i].p[2], w, s = tam * fx;   /* tamano x proyeccion: / w al dividir */
+        mat_trans_single3_nodivw(x, y, z, w);
+        if (w < cerca) continue;
+        if (!ta_cabe(4)) return;
+        for (k = 0; k < 4; k++) {                               /* (x0,y0) (+40,+44), (x1,y0) (+40,+4C), (x0,y1) (+48,+44),
+                                                                   (x1,y1) (+48,+4C), como 418CF0 */
+            t[k].x = x + ((k & 1) ? s : -s); t[k].y = y + ((k & 2) ? s : -s); t[k].w = w;
+            t[k].u = b[i].uv[(k & 2) ? 2 : 0]; t[k].v = b[i].uv[(k & 1) ? 3 : 1]; t[k].c = b[i].col; t[k].o = 0;
+            envia(t + k, k == 3);
+        }
+    }
+}
+/* Humo y polvo de las ruedas del jugador (fuente 4: PcTireSmokeInit 41C420 / PcTireSmokeReq 41C570 / 41CB30 / 41D1E0 /
+   41D330 / la prueba 41D180 del PC = SLES-53998 0x109eb0 / 0x10a0d8 / 0x10a708 / 0x10af70 / 0x10b178 / 0x10ad98).
+   En el PS2 64 humos de 0x60 (0x109ed8; el PC tiene 512), textura 0x57002d (la nube; el PC la 0x19 de su banco),
+   mezcla de alfa, tipo de dibujo 3 (0x108d30: carteles de cara a la camara de medio lado tamano x 0,5).
+   Por rueda (0x10a1b8), con la clase del humo de la superficie (+54; se queda la de la rueda anterior si no se pone):
+   - con el coche en un choque de humo (car+2F0 & 2 y estado 2, 5, 12, 13, 15, 17, 18, 19), todas;
+   - asfalto (+40 & 0xD02, tipos 1, 8, 10, 11): si la prueba del derrape (0x10ad98: deslizamiento +38 y agarre +3C de
+     la rueda contra 0x32b1e8) pasa, clase 0, en los cuadros impares esa rueda y en los pares la otra del mismo eje;
+     si no, fuera de la union (car+5C = 0) en DESE y RUIN (descriptor 9 y 0xC), clase 3 en los cuadros impares con la
+     rueda movida mas de 0,15 m;
+   - +40 & 0x800000 (tipo 23): clase 5 (0 si pasa la prueba), cuadros impares y mas de 0,15 m;
+   - +40 & 0x2000000 (tipo 25): clase 4, mas de 0,15 m;
+   - +40 & 0x10 (tipo 4): clase 1, mas de 0,15 m;
+   - +40 & 8 (tipo 3, la arena): clase 2, mas de 0,15 m; en BEAC (descriptor 0xF) entre las posiciones 0xE7 y 0x176 de
+     car+64 solo en los cuadros impares.
+   La mascara de ruedas (0x32b174 = 95AFA8 del PC) no se borra nunca en carrera (solo al iniciar las particulas): cada
+   rueda nueva se le anade y la del cuadro (0x32b178) es esa mascara entera. Las ruedas con el termino de suelo (+50) por
+   encima de 0,7071 se quitan. Cada rueda que queda echa (0x10a708) n = mov / 0,7 humos (1 hasta 0,7 m; como mucho 15)
+   del contacto anterior al de ahora (y la del suelo de ahora), +- 0,01 x (mov / 0,7) (0,01 hasta 0,7 m), con velocidad
+   (0, 0, 1) del coche x 0,09 + (la del coche, x 0,7 en las clases 0, 3 y 5) + 0,02 arriba, +- 0,02 (0x32b18c..0x32b1c0);
+   colores: los cuatro de la tabla de la clase (0x32b250: 0 blanco; 1 0x80AA9B7C / 0x80221F18; 2 0x80ECDFCB, el polvo de la
+   arena; 3 0x7FECDFCB / 0xFFECDFCB; 4 0x80FFFFFF; 5 0x6FFFFFFF / 0xFFFFFFFF) por el difuso de la luz 2 (la de los coches)
+   x s + su color del lado de la luz (+6C), cada canal hasta 1, con s = a + (1 - a) / 2 y a = car+58 (la luz del carril,
+   CalcOfsLeftLane 4A45F0: 1 sin tabla; en la demo 1, PROVISIONAL). Nace (0x10af70) con tamano 0,5, vida 5 + azar x 85
+   cuadros y el alfa de su primer color. Cada cuadro (0x10b178): avanza, x y z por 0,96 (clase de la rueda 0 en 0, 3 o 5)
+   o 0,995, tamano + 0,05, alfa = alfa inicial x vida / vida inicial, muere al acabar, detras de la camara o a mas de 30 m
+   de ella, y si su borde de abajo (y - tamano x 0,5) queda bajo el plano de la rueda 0 sube hasta el.
+   PROVISIONAL: la prueba del derrape usa deslizamiento y agarre de la rueda, que la fisica de la demo no da: aqui pasa
+   en las traseras mientras dura el derrape (como las marcas). La meta (guion op 8, 82E7C8) pide las ruedas de su mascara
+   (0x10aee0) y con el estilo 82E7C0 el original echa el humo de los rivales (41CED0 / 41D270 / 41D5C0 = 0x10aad0):
+   aqui el del jugador, PROVISIONAL. Colores en ARGB (0x10e0f8 escala los bytes 3, 2, 1, 0 como alfa, rojo, verde y
+   azul); el alfa 0x80 como 128 / 255 (PROBABLE: el microprograma de la VU1 del dibujo no esta leido). */
+#define NHUMO 64
+typedef struct { float p[3], v[3], tam; uint32_t col[4]; int vida, vida0, alfa; } humo_t;
+static humo_t humos[NHUMO]; static int humo_n;
+static uint32_t humo_m1, humo_m2;                               /* 0x32b174 (95AFA8) y 0x32b178 (95AFAC) */
+static const uint32_t HUMO_COL[6][4] = {                        /* 0x32b1f0.. por las punteros de 0x32b250 */
+    { 0xffffffffu, 0xffffffffu, 0xffffffffu, 0xffffffffu }, { 0x80aa9b7cu, 0x80aa9b7cu, 0x80221f18u, 0x80221f18u },
+    { 0x80ecdfcbu, 0x80ecdfcbu, 0x80ecdfcbu, 0x80ecdfcbu }, { 0x7fecdfcbu, 0xffecdfcbu, 0xffecdfcbu, 0xffecdfcbu },
+    { 0x80ffffffu, 0x80ffffffu, 0x80ffffffu, 0x80ffffffu }, { 0x6fffffffu, 0xffffffffu, 0xffffffffu, 0xffffffffu } };
+static int humo_evento(void)                                    /* 0x10ae78 con car+2F0 & 2 */
+{
+    int e = fis.choque;
+    return fis_ok && fis.t_choque > 0.0f && (e == 2 || e == 5 || e == 15 || e == 12 || e == 17 || e == 18 || e == 19 || e == 13);
+}
+static void humo_echa(const coche_t *c, const neum_t *t, const float *vc)   /* 0x10a708 */
+{
+    float L[16], d[3], s = 1.0f, cr, cg, cb, ep[3], bv[3], ev[3], paso[3], a[3], q; uint32_t col[4]; int n, k, j;
+    luz_actual(2, L, d);                                        /* 0x102c10(2): la luz de los coches */
+    cr = fminf(L[0] * s + L[6], 1); cg = fminf(L[1] * s + L[7], 1); cb = fminf(L[2] * s + L[8], 1);
+    for (k = 0; k < 4; k++) col[k] = col_escala(HUMO_COL[t->clase][k], 1.0f, cr, cg, cb);
+    q = t->mov / 0.699999988f;
+    ep[0] = ep[1] = ep[2] = 0.00999999978f;
+    if (t->mov > 0.699999988f) { n = (int)q; for (k = 0; k < 3; k++) ep[k] *= q * 1.0f; } else n = 1;
+    if (n >= 16) n = 15;
+    for (k = 0; k < 3; k++) { paso[k] = (t->ant[k] - t->p[k]) * (1.0f / (float)n); a[k] = t->ant[k]; }
+    a[1] = t->p[1];                                             /* (y del suelo de ahora: +08) */
+    for (k = 0; k < 3; k++) bv[k] = -c->fw[k] * 0.0900000036f;  /* (0, 0, 1) del coche x 0,09 */
+    if (t->clase == 0 || t->clase == 3 || t->clase == 5) { for (k = 0; k < 3; k++) bv[k] += vc[k] * 0.699999988f; }
+    else for (k = 0; k < 3; k++) bv[k] += vc[k];
+    bv[1] += 0.0199999996f;
+    ev[0] = ev[1] = ev[2] = 0.0199999996f;
+    for (j = 0; j < n; j++) {
+        humo_t *h;
+        if (humo_n >= NHUMO) break;                             /* 0x108850 sin sitio */
+        h = humos + humo_n++;
+        part_nace(h->p, h->v, a, ep, bv, ev);
+        h->tam = 0.5f;                                          /* 0x10af70 */
+        h->vida = h->vida0 = (int)(part_rand() * 85.0f) + 5;
+        h->alfa = (int)(col[0] >> 24);
+        memcpy(h->col, col, sizeof col);
+        for (k = 0; k < 3; k++) a[k] += paso[k];
+    }
+}
+static void humo_pide(const coche_t *c, const float *vc)       /* 0x10a0d8 */
+{
+    int n, impar = part_cuadro & 1, clase = 0, en_union, pos, z = part_z(&en_union, &pos), ev = humo_evento();
+    if (efe_mascara) { humo_m1 |= efe_mascara; humo_m2 = humo_m1; ev = 0; }   /* 0x1f5108 / 0x10aee0: la mascara del guion */
+    for (n = 0; n < 4; n++) {
+        neum_t *t = neum + n; uint32_t f = t->sup; int prueba, caliente = t->mov > 0.150000006f, pon = 0;
+        prueba = c->derrape && n >= 2;                          /* 0x10ad98: PROVISIONAL (ver arriba) */
+        if (fis_ok && fis.t_choque > 0.0f) pon = ev;
+        else if (f & 0xd02u) {
+            if (prueba) { clase = 0; if (impar) pon = 1; else { humo_m1 |= 1u << ((1 - (n & 1)) | (n & 2)); humo_m2 = humo_m1; } }
+            else if (!en_union && (z == 9 || z == 0xc)) { clase = 3; pon = impar && caliente; }
+        } else if (f & 0x800000u) { clase = prueba ? 0 : 5; pon = impar && caliente; }
+        else if (f & 0x2000000u) { clase = 4; pon = caliente; }
+        else if (f & 0x10u) { clase = 1; pon = caliente; }
+        else if (f & 8u) { clase = 2; pon = (z != 0xf || pos <= 0xe6 || pos >= 0x177 || impar) && caliente; }
+        if (pon) { humo_m1 |= 1u << n; humo_m2 = humo_m1; }
+        t->clase = clase;
+    }
+    for (n = 0; n < 4; n++) {
+        if (neum[n].suelo > 0.707106769f) humo_m2 &= ~(1u << n);
+        if (humo_m2 >> n & 1) humo_echa(c, neum + n, vc);
+    }
+    humo_m2 = 0;
+}
+static void humo_paso(void)                                     /* 0x10b178 */
+{
+    const neum_t *t = neum;                                     /* el plano de la fuente: el registro de la rueda 0 */
+    float k = t->clase == 0 || t->clase == 3 || t->clase == 5 ? 0.959999979f : 0.995000005f, mira[3]; int i, j;
+    for (j = 0; j < 3; j++) mira[j] = ade[j];
+    for (i = 0; i < humo_n; ) {
+        humo_t *h = humos + i; float b[3], d; int muere = 0;
+        for (j = 0; j < 3; j++) h->p[j] += h->v[j];
+        h->v[0] *= k; h->v[2] *= k;
+        h->tam += 0.0500000007f;
+        if (--h->vida == 0) muere = 1;
+        if ((h->p[0] - ojo[0]) * mira[0] + (h->p[1] - ojo[1]) * mira[1] + (h->p[2] - ojo[2]) * mira[2] < 0) muere = 1;
+        if (dist3(ojo, h->p) > 30.0f) muere = 1;
+        b[0] = h->p[0]; b[1] = h->p[1] - h->tam * 0.5f; b[2] = h->p[2];
+        d = part_plano(b, t);
+        if (d < 0) {                                            /* el borde de abajo sobre el plano */
+            float l = sqrtf(t->n[0] * t->n[0] + t->n[1] * t->n[1] + t->n[2] * t->n[2]), e = fabsf(d) / (l > 0 ? l : 1);
+            for (j = 0; j < 3; j++) h->p[j] += e * t->n[j];
+        }
+        if (muere) *h = humos[--humo_n]; else i++;
+    }
+}
+/* un paso de las particulas (41BC60: las peticiones y despues cada fuente; el coche ya movido) */
+static void part_paso(const coche_t *c, const float *r)
+{
+    float vc[3]; int k;
+    part_cuadro++;
+    for (k = 0; k < 3; k++) vc[k] = part_coche_hay ? c->pos[k] - part_coche_ant[k] : 0;
+    if (vc[0] * vc[0] + vc[1] * vc[1] + vc[2] * vc[2] > 25.0f) vc[0] = vc[1] = vc[2] = 0;   /* recolocado (grua, salida) */
+    memcpy(part_coche_ant, c->pos, 12); part_coche_hay = 1;
+    neum_paso(c, r);
+    if (part_tex_ok) { trozos_pide(c); humo_pide(c, vc); }
+    trozos_paso(c);
+    humo_paso();
+#ifdef DIAG_PARTICULAS
+    {   static int m; if (m++ % DIAG_PARTICULAS == 0) dbglog(DBG_INFO, "PART s %.2f x %.2f v %.4f kmh %d sup %x %x %x %x cen %x mu %.2f %.2f %.2f %.2f rt %.2f %.2f %.2f %.2f mov %.3f %.3f clase %d %d %d %d mascara %x grava %d hierba %d humo %d z %d masa %.0f\n",
+            (double)c->s, (double)c->x, (double)(fis_ok ? fis.velocidad : 0), fis_ok ? fis.kmh : 0, (unsigned)neum[0].sup, (unsigned)neum[1].sup, (unsigned)neum[2].sup, (unsigned)neum[3].sup,
+            (unsigned)sup_cen, (double)fis.r[0].mu, (double)fis.r[1].mu, (double)fis.r[2].mu, (double)fis.r[3].mu,
+            (double)fis.r[0].r_tierra, (double)fis.r[1].r_tierra, (double)fis.r[2].r_tierra, (double)fis.r[3].r_tierra,
+            (double)neum[2].mov, (double)neum[3].mov, neum[0].clase, neum[1].clase, neum[2].clase, neum[3].clase, (unsigned)humo_m1, grava_n, hierba_n, humo_n,
+            part_z(&k, &k), (double)fpar.masa); }
+#endif
+}
+static void part_borra(void)
+{
+    memset(neum, 0, sizeof neum); grava_n = hierba_n = humo_n = 0; humo_m1 = humo_m2 = 0; part_coche_hay = 0;
+}
+static void part_recentra(float dx, float dz)
+{
+    int k;
+    for (k = 0; k < 4; k++) { neum[k].p[0] -= dx; neum[k].p[2] -= dz; neum[k].ant[0] -= dx; neum[k].ant[2] -= dz; }
+    for (k = 0; k < grava_n; k++) { gravas[k].p[0] -= dx; gravas[k].p[2] -= dz; }
+    for (k = 0; k < hierba_n; k++) { hierbas[k].p[0] -= dx; hierbas[k].p[2] -= dz; }
+    for (k = 0; k < humo_n; k++) { humos[k].p[0] -= dx; humos[k].p[2] -= dz; }
+    part_coche_ant[0] -= dx; part_coche_ant[2] -= dz;
+}
+
 /* buf_arr: bufer de paso de los textos y de la mancha del humo (se suben a la VRAM al momento); el texto del centro usa
    su principio (antes tenia el suyo, y la mancha otro: 18 KB de RAM que ahora ocupan las chispas) */
 #define TAM_CEN (256 * 32 * 2)
 static uint16_t buf_arr[512 * 128] __attribute__((aligned(32)));
 static void efectos_inicia(void)
 {
-    uint16_t *t = buf_arr; int x, y; pvr_poly_cxt_t cx; uint32_t sz;
+    pvr_poly_cxt_t cx; uint32_t sz;
     uint8_t *e = gd_carga("EFECTOS.DAT", &sz); uint32_t o = 8;
-    for (y = 0; y < 32; y++) for (x = 0; x < 32; x++) {           /* mancha redonda y suave (ARGB4444, lineal) */
-        float d = sqrtf((x - 15.5f) * (x - 15.5f) + (y - 15.5f) * (y - 15.5f)) / 15.5f, a = fmaxf(0, 1 - d);
-        t[y * 32 + x] = ((int)(a * a * 15) << 12) | 0x0EEE;
-    }
-    tex_humo = pvr_mem_malloc(32 * 32 * 2); pvr_txr_load(t, tex_humo, 32 * 32 * 2);
-    pvr_poly_cxt_txr(&cx, PVR_LIST_TR_POLY, PVR_TXRFMT_ARGB4444 | PVR_TXRFMT_NONTWIDDLED, 32, 32, tex_humo, PVR_FILTER_BILINEAR);
-    cx.gen.fog_type = PVR_FOG_TABLE; cx.txr.env = PVR_TXRENV_MODULATEALPHA; pvr_poly_compile(&cab_humo, &cx);
     if (e && sz >= 8 && !memcmp(e, "EFE1", 4)) {                /* texturas de las marcas (tools/conv_efectos.py) */
         uint32_t n, k, h[4];
         memcpy(&n, e + 4, 4);
@@ -4562,14 +4897,34 @@ static void efectos_inicia(void)
     }
     if (e && chispa_tex_ok && o + 8 <= sz && !memcmp(e + o, "ATR1", 4)) {
         uint32_t n; memcpy(&n, e + o + 4, 4);
-        if (n == ATR_SEG && o + 8 + sizeof atr_tab <= sz) { memcpy(atr_tab, e + o + 8, sizeof atr_tab); atr_ok = 1; }
+        if (n == ATR_SEG && o + 8 + sizeof atr_tab <= sz) { memcpy(atr_tab, e + o + 8, sizeof atr_tab); atr_ok = 1; o += 8 + sizeof atr_tab; }
     }
+    if (e && atr_ok && o + 8 <= sz && !memcmp(e + o, "PAR1", 4)) {   /* grava, hierba y humo (0x57002a / 2b / 2d) */
+        uint32_t n, k, h[4];
+        memcpy(&n, e + o + 4, 4); o += 8;
+        for (k = 0; k < n && k < 3 && o + 16 <= sz; k++) {
+            pvr_ptr_t v;
+            memcpy(h, e + o, 16); o += 16;
+            if (h[2] > 2 || o + h[3] > sz || !(v = pvr_mem_malloc(h[3]))) break;
+            pvr_txr_load(e + o, v, h[3]); o += h[3];
+            pvr_poly_cxt_txr(&cx, PVR_LIST_TR_POLY, FMT[h[2]] | PVR_TXRFMT_TWIDDLED, h[0], h[1], v, PVR_FILTER_BILINEAR);
+            cx.gen.fog_type = PVR_FOG_TABLE; cx.gen.culling = PVR_CULLING_NONE; cx.txr.env = PVR_TXRENV_MODULATEALPHA;
+            cx.depth.write = PVR_DEPTHWRITE_DISABLE;
+            pvr_poly_compile(&cab_part[k], &cx);
+            part_tex_ok = k + 1 == 3;
+        }
+        if (part_tex_ok && o + 8 <= sz && !memcmp(e + o, "DSC1", 4)) {
+            memcpy(&n, e + o + 4, 4);
+            if (n == ATR_SEG && o + 8 + ATR_SEG <= sz) { memcpy(dsc_seg, e + o + 8, ATR_SEG); dsc_ok = 1; }
+        }
+    }
+    dbglog(DBG_INFO, "EFECTOS: marcas %d chispas %d tramos %d particulas %d descriptores %d\n", marca_tex_ok, chispa_tex_ok, atr_ok, part_tex_ok, dsc_ok);
     free(e);
 }
 static void efectos_borra(void)
 {
     memset(marca_n, 0, sizeof marca_n); memset(marca_sig, 0, sizeof marca_sig); memset(rmarca, 0, sizeof rmarca);
-    memset(humos, 0, sizeof humos);
+    part_borra();
     chispa_n = 0; chispa_hay = 0; chispa_muro = chispa_coche = 0;
 }
 /* 41FDD0: un tramo de la marca de la rueda r (borde nuevo L, R) en el anillo de su clase; devuelve la fraccion de v */
@@ -4591,12 +4946,12 @@ static void efectos_paso(const coche_t *c, float dt)
     memcpy(up, c->up, 12);
     r[0] = c->fw[1] * up[2] - c->fw[2] * up[1]; r[1] = c->fw[2] * up[0] - c->fw[0] * up[2]; r[2] = c->fw[0] * up[1] - c->fw[1] * up[0];
     chispas_paso(c, r);
-    for (i = 0; i < NHUMO; i++) if (humos[i].edad > 0) { humos[i].edad += dt; humos[i].p[1] += 0.8f * dt; if (humos[i].edad > 1.0f) humos[i].edad = 0; }
+    part_paso(c, r);
     for (i = 0; i < 4; i++) {
         rueda_marca_t *mk = rmarca + i;
         float fx = i < 2 ? fpar.cg_del : -fpar.cg_tras, ly = fpar.via[i >> 1] * ((i & 1) ? -0.5f : 0.5f);
         float b[3], a[3], L[3], R[3], la, mov, ancho = param_dat ? param_dat[(40 + (i >> 1)) * 19 + columna] : 0.245f;
-        uint32_t f = sup_rueda[i]; int pone = 0, clase = 0;
+        uint32_t f = sup_rueda[i ^ 1]; int pone = 0, clase = 0;   /* (sup_rueda va en el orden del original) */
         for (k = 0; k < 3; k++) q[k] = c->pos[k] + c->fw[k] * fx + r[k] * ly;   /* contacto (car+130 en el mundo) */
         if (!mk->hay) { memcpy(mk->ant, q, 12); memcpy(mk->izq, q, 12); memcpy(mk->der, q, 12); mk->hay = 1; continue; }
         for (k = 0; k < 3; k++) b[k] = q[k] - mk->ant[k];
@@ -4619,18 +4974,7 @@ static void efectos_paso(const coche_t *c, float dt)
         }
         memcpy(mk->izq, L, 12); memcpy(mk->der, R, 12); mk->clase = clase;
     }
-    if (c->derrape || efe_mascara) {                            /* humo: el de antes (PROVISIONAL), de las traseras o de
-                                                                   las ruedas de la mascara de la meta (82E7C8) */
-        static int alterna;
-        if (++alterna & 1) {
-            humo_t *h = humos + humo_sig; int w = 2 + ((alterna >> 1) & 1);
-            float fx, ly;
-            if (!c->derrape && !(efe_mascara & 0xC)) w -= 2;
-            fx = w < 2 ? fpar.cg_del : -fpar.cg_tras; ly = fpar.via[w >> 1] * ((w & 1) ? -0.5f : 0.5f);
-            for (k = 0; k < 3; k++) h->p[k] = c->pos[k] + c->fw[k] * fx + r[k] * ly;
-            h->edad = 0.01f; humo_sig = (humo_sig + 1) % NHUMO;
-        }
-    }
+    (void)dt;
 }
 
 /* un cuadrilatero (tira de 4: p0 p1 p2 p3) entero o nada: si se saltara un vertice la tira quedaria sin su fin de
@@ -4658,7 +5002,7 @@ static void pt_cuad2(const float p[4][3], const float *uv, uint32_t c0, uint32_t
 #define HUMO_PANTALLAS 2.0f
 #endif
 static float humo_px;                                           /* pixeles de humo de este cuadro */
-static int pt_cuad_humo(const float p[4][3], const float *uv, uint32_t c)
+static int pt_cuad_humo(const float p[4][3], const float *uv, const uint32_t *c)
 {
     static const int O[4] = { 0, 1, 3, 2 };
     pt_t t[4]; float X_[4], Y_[4], a = 0; int k;
@@ -4666,7 +5010,7 @@ static int pt_cuad_humo(const float p[4][3], const float *uv, uint32_t c)
         float x = p[k][0], y = p[k][1], z = p[k][2], w;
         mat_trans_single3_nodivw(x, y, z, w);
         if (w < cerca) return 0;
-        t[k].x = x; t[k].y = y; t[k].w = w; t[k].u = uv[2 * k]; t[k].v = uv[2 * k + 1]; t[k].c = c; t[k].o = 0;
+        t[k].x = x; t[k].y = y; t[k].w = w; t[k].u = uv[2 * k]; t[k].v = uv[2 * k + 1]; t[k].c = c[k]; t[k].o = 0;
     }
     for (k = 0; k < 4; k++) {                                   /* area en pantalla (carteles alineados a ella) */
         float x = t[O[k]].x / t[O[k]].w, y = t[O[k]].y / t[O[k]].w;
@@ -4696,18 +5040,30 @@ static void efectos_dibuja(void)
             pt_cuad2(h->p, uv, ((uint32_t)h->a0 << 24) | 0xFFFFFF, ((uint32_t)h->a1 << 24) | 0xFFFFFF);
         }
     }
-    pvr_prim(&cab_humo, sizeof cab_humo);
-    humo_px = 0;
-    for (i = 0; i < NHUMO; i++) {                               /* del mas nuevo al mas viejo (tope HUMO_PANTALLAS) */
-        const humo_t *h = humos + (humo_sig + NHUMO - 1 - i) % NHUMO; float t = h->edad, tam, p[4][3]; int k; uint32_t col;
-        if (t <= 0) continue;
-        tam = 0.6f + 2.6f * t; col = ((uint32_t)((1 - t) * 140) << 24) | 0xE0E0E0;
-        for (k = 0; k < 4; k++) {
-            float sx = (k & 1) ? tam : -tam, sy = (k & 2) ? -tam : tam;
-            p[k][0] = h->p[0] + sx * der[0] + sy * arr[0]; p[k][1] = h->p[1] + sx * der[1] + sy * arr[1] + tam * 0.5f;
-            p[k][2] = h->p[2] + sx * der[2] + sy * arr[2];
+    (void)UV1;
+    if (part_tex_ok) {
+        static const float UVH[8] = { 1, 0, 0, 0, 1, 1, 0, 1 }; /* 419DC0: u = 1 a la izquierda, v = 1 abajo */
+        uint8_t ord[NHUMO]; int j;
+        if (grava_n) { pvr_prim(&cab_part[0], sizeof(pvr_poly_hdr_t)); trozos_dibuja(gravas, grava_n, 0.0500000007f); }
+        if (hierba_n) { pvr_prim(&cab_part[1], sizeof(pvr_poly_hdr_t)); trozos_dibuja(hierbas, hierba_n, 0.0750000030f); }
+        for (i = 0; i < humo_n; i++) {                          /* del mas pequeno (el mas nuevo) al mas grande */
+            for (j = i; j > 0 && humos[ord[j - 1]].tam > humos[i].tam; j--) ord[j] = ord[j - 1];
+            ord[j] = (uint8_t)i;
         }
-        if (pt_cuad_humo((const float (*)[3])p, UV1, col)) break;
+        pvr_prim(&cab_part[2], sizeof(pvr_poly_hdr_t));
+        humo_px = 0;
+        for (i = 0; i < humo_n; i++) {                          /* (tope HUMO_PANTALLAS) */
+            const humo_t *h = humos + ord[i]; float m = h->tam * 0.5f, p[4][3]; uint32_t a, c[4]; int k;
+            a = (uint32_t)(h->alfa * h->vida / (h->vida0 > 0 ? h->vida0 : 1)) << 24;
+            for (k = 0; k < 4; k++) {                           /* tira: (-der, +arr) (+der, +arr) (-der, -arr) (+der, -arr) */
+                float sx = (k & 1) ? m : -m, sy = (k & 2) ? -m : m;
+                p[k][0] = h->p[0] + sx * der[0] + sy * arr[0]; p[k][1] = h->p[1] + sx * der[1] + sy * arr[1];
+                p[k][2] = h->p[2] + sx * der[2] + sy * arr[2];
+            }
+            c[0] = (h->col[1] & 0xffffff) | a; c[1] = (h->col[3] & 0xffffff) | a;   /* colores de las esquinas como 419DC0 */
+            c[2] = (h->col[0] & 0xffffff) | a; c[3] = (h->col[2] & 0xffffff) | a;
+            if (pt_cuad_humo((const float (*)[3])p, UVH, c)) break;
+        }
     }
 #ifdef DIAG_SALIDA
     diag_humo_pct = (uint32_t)(humo_px * 100.0f / (640.0f * 480.0f));
@@ -4935,6 +5291,15 @@ static int atrapa_de(float s)
             atr_en(atr_tab[seg][0], pos), atr_en(atr_tab[seg][1], pos), atr_en(atr_tab[seg][2], pos)); }
 #endif
     return atr_en(atr_tab[seg][0], pos) | atr_en(atr_tab[seg][1], pos) << 1 | atr_en(atr_tab[seg][2], pos) << 2;
+}
+/* la "z" de PcTireSmokeReq (0x10a0d8: [[44C8D0(curso)+14]], el +0x00 del descriptor de tramo de la etapa: 9 DESE, 0xC
+   RUIN, 0xF BEAC) de la etapa del jugador, si esta en la union (car+5C) y su posicion de carretera (car+64) */
+static int part_z(int *en_union, int *pos)
+{
+    int nodo;
+    *en_union = traf_lugar(yo.s, &nodo, pos);
+    if (!dsc_ok || nodo < 0 || nodo >= ncurso || curso[nodo].seg >= ATR_SEG) return -1;
+    return dsc_seg[curso[nodo].seg];
 }
 /* arbol cargado (CURSO.DAT): 0 el del modo OutRun (csc_data_2), 1 OUTRUN2SP (csc_data_cvt), 100 + i el curso del
    registro i de Races.bin (C2C); detras del primero, 'CURS' con el directorio de los demas (conv_union.py cursos) */
@@ -5314,7 +5679,7 @@ static void curso_recentra(float dx, float dz)
     if (uni_der.datos) modelo_desplaza(&uni_der, dx, dz);
     yo.pos[0] -= dx; yo.pos[2] -= dz;
     for (k = 0; k < NTRAF; k++) { traf[k].c.pos[0] -= dx; traf[k].c.pos[2] -= dz; traf[k].rh[0] -= dx; traf[k].rh[2] -= dz; }
-    for (k = 0; k < NHUMO; k++) { humos[k].p[0] -= dx; humos[k].p[2] -= dz; }
+    part_recentra(dx, dz);
     for (j = 0; j < NMARCA_CLASES; j++)
         for (k = 0; k < marca_n[j]; k++) for (i = 0; i < 4; i++) { marcas[j][k].p[i][0] -= dx; marcas[j][k].p[i][2] -= dz; }
     for (k = 0; k < 4; k++) {
@@ -10422,6 +10787,12 @@ int main(int argc, char **argv)
                            (double)fis.pose_t[0], (double)fis.pose_t[1], (double)fis.pose_t[2], (double)fis.pose_r[0], (double)fis.pose_r[1], (double)fis.pose_r[2], (double)yo.x);
 #endif
                 if (auto_) piloto(&yo, &giro, &gas, &freno);
+#if defined(PRUEBA_ARENA) && defined(PRUEBA_ARENA_GAS)
+                {   /* prueba: gas a fondo PRUEBA_ARENA_GAS pasos de la carrera y despues suelto (ni gas ni freno) */
+                    static int n_ar;
+                    if (auto_ && t_estado > 1 && ++n_ar > PRUEBA_ARENA_GAS) { gas = 0; freno = 0; }
+                }
+#endif
 #ifdef PRUEBA_MURO
                 {   /* prueba: contra los muros cada 8 s, por turnos: volante a fondo a la izquierda y a la derecha 1 s
                        (golpe) y al 30 % 3,3 s (roce), con el gas pisado; el resto, el piloto */

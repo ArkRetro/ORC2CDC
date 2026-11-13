@@ -40,6 +40,17 @@ def main():
         filas[seg] = b''.join(E.lee(t + 64 * ti, 64) for t in (0x3dee58, 0x3dfed8, 0x3d2f38))
     sal.append(b'ATR1' + struct.pack('<I', n) + b''.join(filas))
     print('tramos de choque: %d etapas, %d con atrapamiento' % (n, sum(f[:2] != b'\xff\xff' for f in filas)))
+    sal.append(b'PAR1' + struct.pack('<I', 3))
+    for k in (0x2a, 0x2b, 0x2d):                          # grava, hierba, humo (race_particles: fuentes 1, 2 y 4)
+        a = tex.imagen(b, hs[k]); fmt, lista, d = modelo.textura_dc(a)
+        sal.append(struct.pack('<4I', a.shape[1], a.shape[0], fmt, len(d)) + d)
+        print('particula %#x: %dx%d formato %d lista %d, %d bytes' % (k, a.shape[1], a.shape[0], fmt, lista, len(d)))
+    dsc = bytearray(b'\xff' * n)                          # descriptor de tramo de cada SEGnn (su +0x00)
+    for ti in range(n):
+        d0 = cu.u32(E, base + 4 * ti)
+        dsc[cu.segmento_de(A, cu.cadena(E, d0 + 0x0c))] = cu.u32(E, d0) & 0xff
+    sal.append(b'DSC1' + struct.pack('<I', n) + bytes(dsc) + b'\0' * (-n & 3))
+    print('descriptores por segmento: %s' % ' '.join('%d' % x for x in dsc))
     open(sys.argv[2], 'wb').write(b''.join(sal))
 
 if __name__ == '__main__':
