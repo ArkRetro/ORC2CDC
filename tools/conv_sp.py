@@ -268,7 +268,7 @@ def nombre(D, sal):
         g = hud.grupo('F%d' % fid, n)
         for k in range(n):
             c = pri + k
-            if c not in usados or c == 0x20 or c >= 0x80: continue      # 0x116fa0: signo (>= 0x80 no se dibuja), espacio
+            if c not in usados or c == 0x20: continue      # espacio; >= 0x80 tambien (DESVIACION: 0x116fa0 no los dibuja)
             l, tp = (k & 15) * cw, (k >> 4) * chh
             p = dict(tex=fid, src=(l, tp, l + cw, tp + chh), w=cw, h=chh, M=ch._t(0, 0), alfa=1.0, anc=(0.0, 0.0), gira=False)
             hud.piezas_escena(g, k, 'FUENTE', T, [p])

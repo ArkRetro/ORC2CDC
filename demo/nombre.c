@@ -33,8 +33,8 @@
      el resultado en (0x144, 0x1a3) y el rotulo 0x443..0x445 (TEXT.PS2: "TIEMPO" / "PUNTUACI\xb1N" / "CORAZONES") en la
      fuente 4 en (0x32, 0x1a3).
    - Textos (0x1175a8 -> 0x116fa0 / 0x116e10): la celda entera del glifo en (x, y), avance = ancho + espaciado, espacio =
-     ancho; los caracteres >= 0x80 no se dibujan (0x116fa0 los toma con signo: la O acentuada de PUNTUACION queda en
-     blanco, como en el PS2); van en la capa 4 de los sprites (0x117558(4) -> 0x117708). PROBABLE: el color como ARGB
+     ancho; en el PS2 los caracteres >= 0x80 no se dibujan (0x116fa0 los toma con signo: la O acentuada de PUNTUACION
+     queda en blanco); DESVIACION pedida por el usuario: la Dreamcast los dibuja con su glifo de la fuente; van en la capa 4 de los sprites (0x117558(4) -> 0x117708). PROBABLE: el color como ARGB
      (el del PC, 42CCA0) y el orden dentro de la capa (los sprites de las escenas antes que los textos).
    SIN PORTAR: el deslizamiento de las filas (0x1fe780 = 4B0970: solo mueve +0x24.. de las filas, que el tablero no lee
    sin el teclado); el banco 0x36 NAME_CMN y los de sprites 0x12 / 0x14 (solo los usa el teclado de letras, que la
@@ -358,8 +358,10 @@ static void escribe(const txt_t *q, float z)            /* 0x1175a8: 0x116fa0 / 
     const fuente_t *f = fu + q->f; float x = q->x; const char *s;
     hudd_color(q->col);
     for (s = q->s; *s; s++) {
-        int c = (int8_t)*s;
-        if (c >= 0 && c != ' ' && c != 9 && c != 10 && c >= (int)f->pri && c < (int)(f->pri + f->n))
+        int c = (uint8_t)*s;                            /* DESVIACION (el usuario, revision 41: "PUNTUACI N"): 0x116fa0
+                                                           toma el caracter con signo y no dibuja los >= 0x80; aqui sin
+                                                           signo, con el glifo de la fuente (la 4 trae 0x20..0xDF: Ó = 0xB1) */
+        if (c != ' ' && c != 9 && c != 10 && c >= (int)f->pri && c < (int)(f->pri + f->n))
             { hudd_dibuja(tx, u_f[q->f], c - (int)f->pri, x, q->y, 1, z, 0); z = hudd_z(); }
         x += *s == ' ' ? (int)f->w : (int)f->w + f->esp;
     }

@@ -2461,7 +2461,8 @@ etapas, salida BEAC`, BAND1.DAT en el hueco de la union; RAM libre 1419..1490 KB
     las licencias (comun/menu.c, version 2: 'OR2L' 2, la licencia activa, las 4 licencias, 'RKSP' y las tablas; los de la
     version 1 se leen igual y los rankings quedan por defecto).
   - Textos: 0x1175a8 -> 0x116fa0 / 0x116e10 (sin metricas: la celda entera, avance = ancho + espaciado; espacio = ancho;
-    >= 0x80 no se dibuja: "PUNTUACI N" como en el PS2) en la capa 4 (0x117558(4) -> 0x117708). La banda 0x150010 (117d28:
+    >= 0x80 no se dibuja en el PS2: "PUNTUACI N"; DESVIACION pedida por el usuario en la revision 41: la Dreamcast dibuja
+    el glifo 0xB1 de la fuente 4, que si esta (Ó), y sale "PUNTUACIÓN"; NOMTX.DAT lleva los glifos >= 0x80 de esos textos) en la capa 4 (0x117558(4) -> 0x117708). La banda 0x150010 (117d28:
     la escala que se le pasa es la capa, 1).
   - PROBABLE: el color 0xFFFFFF00 de los nombres como ARGB (amarillo, el del PC); el orden dentro de una capa (escenas y
     despues textos / banda); 451180(0) = 0 tras el fin del tiempo ([0x5c60f0] = -1 sin acabar); sin llegar al nivel 4,
