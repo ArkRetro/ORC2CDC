@@ -167,7 +167,8 @@ consola, el port lo fija al convertir). Hoja de capturas de Flycast: scratchpad 
   linea, LAN), RANKINGS (0x4400A3, 0x41D908: un jugador, OUTRUN2SP, multijugador), OUTRUN2SP, HEART ATTACK, TIME ATTACK y
   SHOWROOM existian con la accion bloqueada (sin red, ranking ni esos modos); desde 2026-11-09 HEART ATTACK y TIME ATTACK
   y desde 2026-11-13 SALON (ver SALON) llevan a lo suyo; HEART ATTACK y TIME ATTACK
-  llevan a su carrera (ver Modos de un jugador). OPCIONES (cabecera 0x44006D, barra
+  llevan a su carrera (ver Modos de un jugador) por los tableros de cursos del original (desde 2026-11-13, ver Tableros
+  de cursos de INFARTO y CONTRARRELOJ). OPCIONES (cabecera 0x44006D, barra
   0x44000B): vista (+D8, textos 3-5), unidades (+DC, 6-7) y dificultad (+E0, 8-0xC) de la licencia, sin dar la vuelta,
   se guardan al salir (4D76F0); los rotulos de fila del original son sprites no localizados: se escriben "Ver config." y
   "Config. juego" (0x2B, 0x2A) (PROVISIONAL). menu_vista/menu_mph/menu_dificultad las exportan (la carrera aun no las
@@ -1974,8 +1975,8 @@ Races.bin, variante 5 C2C o 6) y el preset del curso [78024C] (4EEA70). En SLES-
 | Modo / opcion | Original (evidencia) | Estado en la DC | Verificacion |
 |---|---|---|---|
 | OUTRUN (variante 1) | fila 0 de los tiempos (44DC70), trafico, puntos 4F2DF0, voces ORC/PERO | OK (lo que ya habia) | E |
-| INFARTO (variante 2) | gestor de peticiones 464350/464D20 (PS2 0x1ae440 / 0x1a7f28), misiones 5A94D8 (PS2 0x3f0b98, 41 x 0x140), fila 1 de los tiempos, voces HC/PERH + HAM\<etapa> | PARCIAL: ver abajo | E |
-| CONTRARRELOJ (variante 7) | fila 2 de los tiempos (44DC70: 0 y 7 -> 2; 450CC0 pasa el 7 como 0), sin trafico (479080 y 47EC00 vuelven con la variante 0, 7 u 8), gestor 0x193 / funcion 0x22 (48B8F0..: curso por codigo [656234], fantasma 465F30..4687C0, GHOST.PS2) | PARCIAL: reglas de tiempo y sin trafico; corre el curso entero con eleccion de rama como el OutRun | E |
+| INFARTO (variante 2) | gestor de peticiones 464350/464D20 (PS2 0x1ae440 / 0x1a7f28), misiones 5A94D8 (PS2 0x3f0b98, 41 x 0x140), fila 1 de los tiempos, voces HC/PERH + HAM\<etapa> | PARCIAL: ver abajo; el juego de cursos del tablero 0x24 desde 2026-11-13 (ver Tableros de cursos) | E |
+| CONTRARRELOJ (variante 7) | fila 2 de los tiempos (44DC70: 0 y 7 -> 2; 450CC0 pasa el 7 como 0), sin trafico (479080 y 47EC00 vuelven con la variante 0, 7 u 8), gestor 0x193 / funcion 0x22 (48B8F0..: curso por codigo [656234], fantasma 465F30..4687C0, GHOST.PS2) | PARCIAL: reglas de tiempo y sin trafico; desde 2026-11-13 el curso de los tableros (ver Tableros de cursos): una etapa, las metas A..E (y del reves) o los cursos seguidos | E |
 | COAST 2 COAST (variante 6 misiones, 5 campeonatos) | variante 6: misiones de Races.bin / RaceAssignment.bin (gestor 0x20, evento 0x191: 495B90 / 496A30); variante 5: campeonatos Request_Course_SP / OR2 / MIX con peticiones Req_*.bin (gestor 7F9460, evento 0x190); rivales (47CF40) | PARCIAL (2026-11-13): categorias, mapa de misiones y detalle del original (banco 0x44, C2C.DAT); se corren las 76 misiones de carrera (tipo 0) con sus coches de carreras y su nota; sin los otros tipos ni los campeonatos (ver COAST 2 COAST: misiones de carrera y el rival) | E |
 | SALON (showroom) | frontal 4D4230.. (PS2 0x25b338..0x25db20) | OK (2026-11-13): ver SALON | E |
 | Dificultad (opcion de la licencia +E0) | difficulty_of de 44DC70 (PS2 0x1cdc98): 0 en el juego de la consola (43F860 = [780260] = 1, lo pone SUMO_FE 0x237e28); la licencia (+E0) solo en el de OUTRUN2SP (2 en la variante 4) | OK (2026-11-11; antes al reves: la licencia en los modos de la consola) | E (log `MODO:`) |
@@ -2478,12 +2479,8 @@ datos: SALON.DAT (tools/conv_salon.py, paso `salon` de tools/regenera.py).
     bloqueado), que pone el bit 0x40 en las banderas del coche (0x4081 | 0x40). Solo afecta al primer registro al
     entrar en la pagina (28e788 pasa siempre 1 al moverse). Que hace ese bit al dibujar no esta seguido: el coche sale
     normal.
-  - ETAPAS (bits 0x8a..0xab) y METAS (0xc1..0xce): los leen los tableros de cursos de los modos INFARTO / CONTRARRELOJ
-    (PS2 0x258bdc: bit 0x8b + 2 x curso, 0x258c48 / 0x258d94 / 0x259f04 / 0x259f80: 0xa8..0xab; 0x24fda4 / 0x250384 /
-    0x253444 / 0x2538bc / 0x2607f8 / 0x260d9c: 0xcb..0xce; PC frontend_rankings.cpp course_lock_bit 4D05E0: 0xc1 + 2 x
-    curso, 0xcb..0xce las metas "OUTRUN2 GOAL A..E", "(R)" y las de OUTRUN2SP). El port no tiene esos tableros (INFARTO y
-    CONTRARRELOJ corren el curso entero, ver Modos de un jugador): los bits se guardan y no desbloquean nada hasta
-    portarlos.
+  - ETAPAS (bits 0x8a..0xab) y METAS (0xc1..0xce): los leen los tableros de cursos de la CONTRARRELOJ (y el 0x24 de
+    OUTRUN, 0xcb / 0xcc): portados el 2026-11-13, ver Tableros de cursos. Lo comprado en el salon ya se puede elegir.
   - COLORES (bits 0x1c..0x89): los lee la seleccion de coche (0x245038, tabla 0x375A20, 110 colores): Y pasa por los
     colores con su bit; ya funciona con el arreglo de MNU2 de abajo.
 - PROVISIONAL: la barra de ayuda (0x23bd70: ELEGIR, LICENCIA, ATRAS) con los botones de la Dreamcast compuesta en
@@ -2506,6 +2503,85 @@ datos: SALON.DAT (tools/conv_salon.py, paso `salon` de tools/regenera.py).
   Segunda pasada (ventana con las imagenes 0x3004x, X, musica, `-DPRUEBA_SALON_MILLAS=20000`): la ventana de la compra
   con su cabecera roja, X en el salon abre ELEGIR CARNET y B vuelve a la pagina principal del salon; los mismos
   desbloqueos tras reiniciar; sin "Out of memory" ni "pvr_mem: ERROR".
+
+## Tableros de cursos de INFARTO y CONTRARRELOJ (2026-11-13)
+
+UN JUGADOR -> INFARTO / CONTRARRELOJ ya no van directos al coche: pasan por los tableros de cursos del original, que
+leen los desbloqueos ETAPAS y METAS del SALON. Codigo: comun/menu.c (pantalla P_TABLERO, `tb_*`; menu_ta_codigo,
+menu_ha_juego), demo/main.c (el arbol de la carrera); datos: TABLERO.DAT (tools/conv_tablero.py, paso `tablero` de
+tools/regenera.py), CURSOTA.DAT y las uniones BK262..BK469 en UNIONESTA.PAK (conv_union.py --curso=CURSOTA.DAT
+--bk-desde=262, pasos `unionta*`).
+- Original (SLES-53998): la seleccion de un jugador (0x25dd58) escribe el modo en los bits 5..7 de la palabra del
+  frontal (raiz +0x208: C2C 0, OUTRUN 0x20, INFARTO 0x40, CONTRARRELOJ 0x80, SALON 0xc0) y va a la clave de la tabla
+  0x375f58 (0x3a, 0x24, 0x24, 0x24, 0x2b). Fabricas de la raiz por clave (0x239eb8): 0x24 = 0x2528e8 (vtable 0x419f3c),
+  0x25 = 0x2558e8 (0x41a24c), 0x26 = 0x24f340 (0x419a3c), 0x27 = 0x257e58 (0x41a51c); son la familia de 4D05E0 del PC
+  (platform/frontend_rankings.cpp: claves 36..38), con otros desplazamientos y la clave 0x27 (las etapas) que el PC no
+  tiene. Botones (0x2848f0 = 48F5F0): 0 A, 1 B, 3 / 5 izquierda / derecha, 4 abajo, 11 el gatillo R (bit 0x2000).
+- 0x24, juego de cursos (init 0x252b50, control 0x2530a0): carrusel 0x419f70 (0x44003b, 2 posiciones: OutRun 2 /
+  OutRun 2 SP; OUTRUN 0x419fb0 = 0x4400a5 con 4, los cursos seguidos con los bits 0xcc / 0xcb), posicion = bits 0..1.
+  A: INFARTO -> el coche (clave 0xa) con los bits 0..1 = posicion; CONTRARRELOJ -> 0x25 con +0x208 |= 0x800 (0x2539c4).
+- 0x25, CURSO / ETAPA (0x255e58): carrusel 0x41a280 (0x44003c) o 0x41a2c0 (0x4400a2) por el juego; A: 0x375e48[i]
+  (0x26 con 0x800, 0x27 sin el; 0x256520).
+- 0x26, metas (0x24f818): carrusel 0x251da0 por juego y R (+0x3f4 = 0x375e30): 0x419a70 / 0x419b10 (0x44003d /
+  0x4400bf) o 0x419bb0 / 0x419c50 (0x440043 / 0x4400be); 6 posiciones: META A..E y "15 ETAPAS SEGUIDAS" (la derecha se
+  para en la 5, 0x250d44). A (0x2502cc): bits 12..17 = posicion (+6 con R) y 0x800; candado (sonido 3): la 5 con 0xcc /
+  0xce (juego 0, R) o 0xcb / 0xcd; las del reves 0xc2 + 2 i (juego 0) o 0xc1 + 2 i. R (0x250288) cambia de tabla en la
+  misma posicion. B: 0x375e30 = 0 y los bits 12..17 a 0.
+- 0x27, etapas (0x258610): carrusel 0x2581a0 por juego y R (+0x538 = 0x375f50): 0x41a550 / 0x41a718 (0x440036 /
+  0x4400bd) o 0x41a8e0 / 0x41aa58 (0x440042 / 0x4400bc); 15 posiciones. A (0x259198): bits 12..17 = posicion (+15 con
+  R; se escriben antes del candado, como el original), +0x20c bit 0 = opcion B; candado solo con R: 0x8b + 2 i (juego
+  0) o 0x8a + 2 i, sonido 3. Abajo en la etapa 0 (0x259ea0): la opcion B (PALM_BT / BEAC_BT, del reves _BR) si esta el
+  bit 0xa9 / 0xab (juego 0, R) o 0xa8 / 0xaa: animacion +0x348 (0x41a6c8 / 0x41a6f0 / 0x41a890 / 0x41a8b8: 0..0xf modo
+  5 al ponerla, 0xf..0x1e modo 3 al quitarla, capa 1) y aviso 0x4400e4 (0x41abd0) cuando se puede.
+- Comunes: cursor 0x4400f2 cuadro 1 (capa 4), candado 0x440066 cuadro 5 en (-363, -206) ("NO DISPONIBLE"), indicador
+  0x4400f3 cuadro 0 / 1 ("AL CONTRARIO" / "NORMAL" con el icono R1 del disco, tal cual) en las metas y las etapas;
+  barra de ayuda {4, 0x294}, {8, 0x295} (la de sin tarjeta de memoria, 0x25303c; la de MENU.DAT 'CAMBIO'); cabecera de
+  UN JUGADOR. Sonidos 0x40 al elegir, 3 en un candado, 1 al mover (4249F0).
+- Juego de cursos y codigo (0x2a6758 = 4EEC80 del PC, el mismo): preset 0x2a6978: juego 0 -> 1, 1 -> 0, 2 -> 3, 3 -> 2
+  (1760c0 del PS2: preset 1 = csc_data_2 = OutRun 2, 0 = csc_data_cvt = OutRun 2 SP). CONTRARRELOJ: sin 0x800, una
+  etapa: codigo (+15 si >= 15, +15 con preset 0); con 0x800: preset 0: 5 / 11 -> 0x52 / 0x53, si no + 0x41 (+0x45 > 5);
+  preset 1: 5 / 11 -> 0x50 / 0x51, si no + 0x3c (+0x40 > 5). El codigo [656234] lo carga 48B550 del PC (PS2: nombres
+  de 0x21cf40): < 0x3c una etapa (43D950: tablas izquierda / derecha, +0x1e la segunda mitad; PALM -> PALM_T 0x3c,
+  BEAC -> BEAC_T 0x3d), 0x3c.. OR2_goals, 0x41.. SP_goals, 0x46.. OR2_reverse_goals, 0x4b.. SP_reverse_goals (GOAL_A,
+  GOAL_B_TA, GOAL_C_TA, GOAL_D_TA, GOAL_E en la Contrarreloj), 0x50..0x53 csc_data_2_ren / csc_data_cvt_ren
+  (*_ren_course_TA). En la DC: el arbol 200 + codigo de CURSOTA.DAT (conv_union.arbol_ta, de esos .bin de SCRIPTS).
+- Etapa sola: el registro de 44D720 con 635F34 (clave 0, union 0 = la bifurcacion, hijos 0 / 0: vuelve a si misma); la
+  meta es el stage clear (44FF20 -> 48B3A0: codigo < 0x3c y 451350(0) == 1 -> 44FEF0(1)): en la DC el checkpoint del
+  principio de la etapa siguiente se convierte en GOAL (demo/main.c, CUR_SIGUIENTE -> CUR_META).
+- INFARTO: el juego 1 (OutRun 2 SP) corre el arbol 1 (csc_data_cvt); el 0 el de antes (arbol 0, csc_data_2).
+- Uniones nuevas (208: las etapas solas con su bifurcacion y las de los arboles de las metas con un lado -1, cartel
+  BLNK; conv_union.py las numera detras de las 262 de antes, que no cambian): ~1,4 MB sueltas cada una, empaquetadas
+  en UNIONESTA.PAK (pak_union.py --pak=UNIONESTA.PAK; comun/gd.c lee el paquete que nombra cada descriptor).
+- Prueba: `-DPRUEBA_TABLERO_TODO` (la licencia activa con todos los bits 0x8a..0xce al entrar en un tablero) y
+  `-DPRUEBA_TA_CODIGO=n` (con -DPRUEBA_AUTO -DPRUEBA_VARIANTE=7: la Contrarreloj del codigo n con el piloto);
+  tools/prueba/tablero.sh.
+- Verificado en E (Flycast, tools/prueba/tablero.sh con -DPRUEBA_SALON_MILLAS=20000): CONTRARRELOJ -> el juego de
+  cursos (OutRun 2 / OutRun 2 SP), CURSO / ETAPA, las metas (META A..E, "15 ETAPAS SEGUIDAS" con "NO DISPONIBLE" y A
+  bloqueado: sonido 3), R: las del reves con candado; ETAPA: las 15 etapas, R: PALM BEACH del reves con candado y A
+  bloqueado. En el SALON, ETAPAS: compra del objeto 139 (0x8b, 3500 millas): de vuelta, PALM BEACH del reves sin
+  candado y su carrera (codigo 30 -> arbol 230, PALM_R). Segundo arranque con la misma VMU: sigue sin candado; INFARTO
+  con OutRun 2 SP: el coche y la carrera del arbol 1 (BEAC, HUD de corazones). Con el piloto
+  (-DPRUEBA_AUTO -DPRUEBA_VARIANTE=7 -DPRUEBA_SIN_TIEMPO): codigo 0 (PALM_T sola) -> GOAL en el stage clear y la escena
+  de la meta; codigo 0x46 (OR2_reverse_goals GOAL_A: TULI_R, CLOU_R, CAST_R, LAKE_R, PALM_R) -> 4 checkpoints y GOAL
+  en PALM_R. Sin "Out of memory" ni "pvr_mem: ERROR"; TABLERO.DAT 124 KB de tablas en el hueco, VRAM libre al abrir el
+  tablero 481..516 KB (1009 KB de vuelta del salon). No probado en R.
+- SIN PORTAR / BLOQUEADO:
+  - La lista de records de cada curso (0x267210 / 0x2674d8 / 0x269880, el foco hacia abajo, los textos de (60, 342) /
+    (60, 82) y el titulo de filtro 0x4400b6 / 0x4400de): la DC no guarda records de la Contrarreloj (48B3D0, la tabla
+    de 7B17F8). La barra de ayuda es la de sin lista.
+  - La opcion B de la etapa 0 (PALM_BT, BEAC_BT, PALM_BR, BEAC_BR: descriptores 0x3e..0x41, bandera 830395 = +0x20c
+    bit 0): el tablero la deja poner (con su bit), pero sus etapas no estan convertidas (SEG de los descriptores
+    62..65): la carrera corre la etapa normal (aviso en la consola serie). PENDIENTE.
+  - OUTRUN sigue yendo directo al coche (no pedido): el original tambien pasa por la clave 0x24 (4 posiciones, los
+    cursos seguidos con 0xcc / 0xcb) y su juego elige el preset (0x2a6978). El preset de los juegos de la consola en la
+    DC sigue siendo 0 con el arbol 0 (csc_data_2); en el original OutRun 2 es el preset 1 (1760c0(1) = csc_data_2): la
+    fila de tiempos (0x176018), los modelos del trafico (46CE30) y lo demas que lee el preset quedan como antes
+    (PENDIENTE de revisar con el dueno de esas partes; tambien el arbol del frontal de OUTRUN2SP: 44DA00(1) es
+    csc_data_2 en el MIPS).
+  - INFARTO en OutRun 2 SP: corre el arbol 1 con el gestor de peticiones de siempre (comun/infarto.c); que misiones y
+    objetos (OSO, 45C470 con [78024C]) usa el original en ese curso no esta revisado: PENDIENTE (el preset sigue a 0).
+  - La escena de la meta de los arboles de la Contrarreloj: la letra sale del codigo (GOAL_A..E; PROBABLE: 450380(8)
+    lee la clave del registro, que en los del reves no es 10..14); la etapa sola usa la de la meta A.
 
 ## Fin de la carrera: millas OutRun, continuar y GAME OVER (2026-11-11)
 

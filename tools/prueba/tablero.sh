@@ -10,10 +10,11 @@
 D=$(cd "$(dirname "$0")" && pwd); . "$D/comun.sh"
 GDI=${1:-}; PANTALLA=${2:-91}; SAL=${3:-/dev/shm/prueba_tablero}
 al_menu() {                                                              # pelicula y titulo hasta la musica del menu
-    espera_log 'VIDEO MVTS.VQV: precarga' 900; espera 3
-    for _i in $(seq 1 30); do tecla Return; espera_log 'musica: MUS30' 8 && return 0; done
-    return 1
+    espera_log 'VIDEO MVTS.VQV: precarga' 900; espera 3                 # (START cada 3 s: salta la pelicula y, en el
+    for _i in $(seq 1 40); do tecla Return; espera_log 'musica: MUS30' 3 2> /dev/null && return 0; done   # titulo, entra
+    return 1                                                             # antes de los 8 s de la demo de atraccion)
 }
+if [ -z "${SOLO2:-}" ]; then                                             # SOLO2=1: solo el segundo arranque
 arranca; marca
 al_menu; espera 5
 tecla x; espera 5
@@ -48,6 +49,7 @@ grep -a -q 'SALON: comprado' "$SAL/flycast.txt" || { echo "no se ha comprado la 
 grep -a -q 'arbol 230' "$SAL/flycast.txt" || { echo "la carrera no es la del arbol 230" >&2; ERROR=1; }
 kill $FLY; wait $FLY 2> /dev/null || true
 cp "$SAL/flycast.txt" "$SAL/flycast_1.txt"; mkdir -p "$SAL/arranque1"; mv "$SAL"/tb_*.png "$SAL/arranque1/"
+fi
 CONSERVA_VMU=1 arranca; marca
 espera_log 'menu: OR2C2C en' 900
 al_menu; espera 6                                                        # menu principal (licencia leida)
