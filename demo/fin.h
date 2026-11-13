@@ -7,12 +7,15 @@
 /* 450240 (7D38F0, PS2 0x1cf198): como acabo la carrera */
 enum { FIN_TIEMPO = 1, FIN_META = 2, FIN_PAUSA_REINTENTA = 6, FIN_PAUSA_ABANDONA = 7 };
 /* lo que pide fin_paso */
-enum { FIN_SIGUE = 0, FIN_REINTENTA, FIN_MENU };
+enum { FIN_SIGUE = 0, FIN_REINTENTA, FIN_MENU, FIN_SIGUIENTE };   /* FIN_SIGUIENTE: 495A60 (la mision siguiente) y 30 */
 
 typedef struct {
     int variante;           /* [780258] */
     int puntos;             /* 4B99D0: la puntuacion del coche ([8447DC + id x 4]) */
     int32_t corazones;      /* 45B820: [7F1C80] del INFARTO (10000 por corazon) */
+    /* COAST 2 COAST (variante 6): 44FF10 (meta), tipo (495B20), nota (496510), la de antes (495890), millas de las
+       dos (84B900 + 4 nota) y 4959E0 (la licencia ya la tiene superada: nota 4..6) */
+    int mis_meta, mis_tipo, mis_nota, mis_ant, mis_millas_nota, mis_millas_ant, mis_superada;
 } fin_carrera_t;
 
 /* START: coche nuevo, car+E78 = 0 (constructor, PS2 0x239e84); con la consola (1b4878 != 0) tambien las millas y las

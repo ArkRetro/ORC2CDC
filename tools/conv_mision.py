@@ -35,7 +35,8 @@ MISION.DAT (little endian):
     u8 colores[30][8] (por familia = modelo 0..29, PS2 0x40b618)
     f32 acel[5] (tabla de 472090 del coche de carreras, PS2 0x40bc98: referencia, aceleracion, frenada, fuerte, fuerte)
     f32 curva[12] (pares {radio, km/h del modelo} de 47A7C0, PS2 0x40bb68)
-    f32 marcha[6] (aceleracion por marcha +208 de 472090 con los coches de carreras, x 0,002; PS2 0x40bcb0)"""
+    f32 marcha[6] (aceleracion por marcha +208 de 472090 con los coches de carreras, x 0,002; PS2 0x40bcb0)
+    i32 millas[8] por nota 0..7 (OutrunMiles.bin SETUP como lo pone 4EF280: 84B900 + 4 nota; 4EF550 con la variante 6)"""
 import os, struct, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ps2.assets import Assets
@@ -122,6 +123,10 @@ def main():
         tab += struct.pack('<I', cnt) + lee(p, cnt) + b'\0' * (12 - cnt)
     tab += lee(fam, 64) + lee(cla, 64) + lee(col, 240)
     tab += struct.pack('<5f', *fl(acel, 5)) + struct.pack('<12f', *fl(curva, 12)) + struct.pack('<6f', *fl(marcha, 6))
+    # millas por nota (4EF280: 84B918..84B900 = SETUP[0..6] de \Scripts\bin\OutrunMiles.bin, nota 6..0; 84B91C = 0 la 7)
+    em = [x for x in A.busca('*OutrunMiles.bin') if x.paquete.startswith('SCRIPTS')][0]; dm = bytes(A.datos(em))
+    ns, os_ = conv_menu._r077(dm, 'SETUP'); setup = struct.unpack_from('<7i', dm, os_)
+    tab += struct.pack('<8i', *[setup[6 - g] for g in range(7)], 0)
     cab = 16; sal_b = b'MIS1' + struct.pack('<3I', n, tam, cab + n * tam) + b''.join(regs) + tab
     f = os.path.join(sal, 'MISION.DAT'); open(f, 'wb').write(sal_b)
     print('%s: %d misiones de %d bytes, %d bytes' % (f, n, tam, len(sal_b)))

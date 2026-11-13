@@ -58,6 +58,8 @@ static int t_panel = -1, t_preg = -1, t_elige = -1, t_go = -1;   /* cuadros desd
 static hud_dat_t *fd;                                   /* FIN.DAT o GOVER.DAT */
 static int u_millas = -1, u_cifra[8], u_preg = -1, u_elige = -1, u_go = -1;
 static int n_millas, n_preg, n_elige, n_go;             /* cuadros de cada escena */
+static hud_dat_t *fm;                                   /* FINC2C.DAT con una mision de COAST 2 COAST */
+static int mis_on, mis_seg;                             /* variante 6; 4959E0 (2B004F) */
 
 void fin_carrera_empieza(int consola) { rebufo_e78 = 0; if (consola) millas = m_etapa = 0; }
 void fin_rebufo(int n) { rebufo_e78 += (uint32_t)n; }
@@ -105,6 +107,8 @@ void fin_entra(int c, const fin_carrera_t *k)
     millas = 0;
     if (k->variante == 1 || k->variante == 9) millas += (uint32_t)(k->puntos / 3000);   /* 0x1f4018: div 0xBB8 */
     else if (k->variante == 2) millas += (uint32_t)(int32_t)((float)k->corazones / 10000.0f / 10.0f);   /* 0x1f4034 */
+    else if (k->variante == 6 && k->mis_meta) {          /* 4EF550 con 44FF10: 84B900[496510] - 84B900[495890], >= 0 */
+        int d = k->mis_millas_nota - k->mis_millas_ant; if (d > 0) millas += (uint32_t)d; }
     millas += m_etapa;
     millas += rebufo_e78 / 60 * 5;                      /* 0x1f40b0 (fuera de red) */
     rebufo_e78 = 0;
@@ -123,6 +127,13 @@ void fin_entra(int c, const fin_carrera_t *k)
     if (fd) { sube(u_millas); sube(u_cifra[0]); }
     dbglog(DBG_INFO, "FIN: FIN.DAT %s, VRAM libre %uK\n", fd ? "abierto" : "sin abrir", (unsigned)(pvr_mem_available() >> 10));
     t_panel = 0; t_preg = t_elige = t_go = -1;
+    mis_on = k->variante == 6; mis_seg = mis_on && k->mis_superada;
+    if (fm) { hudd_cierra(fm); fm = NULL; }
+    if (mis_on && (fm = hudd_abre_gd("FINC2C.DAT"))) {     /* modo 35 (0x1bc650): 2B0068 / 2B0069 y 2B004F / 2B004A */
+        int m2 = (k->mis_tipo == 1 || k->mis_meta) && k->mis_nota >= 4 && k->mis_nota != 7;   /* (495B20 == 1 || 495B80) */
+        u_preg = hudd_uso(fm, m2 ? "CONT_PREG_M2" : "CONT_PREG_M1"); n_preg = u_preg >= 0 ? hudd_cuadros(fm, u_preg) : 1;
+        if (mis_seg) { u_elige = hudd_uso(fm, "CONT_ELIGE_M"); n_elige = u_elige >= 0 ? hudd_cuadros(fm, u_elige) : 1; }
+    } else if (mis_on) dbglog(DBG_ERROR, "FIN: sin FINC2C.DAT\n");
     dbglog(DBG_INFO, "FIN: modo 34 (450240 = %d), millas %u (puntos %d, etapas %u, variante %d)\n", c, (unsigned)millas,
            k->puntos, (unsigned)m_etapa, k->variante);
 }
@@ -139,7 +150,7 @@ static void a_continuar(void)                           /* 0x1bc650 */
     baja(u_millas); baja(u_cifra[0]); t_panel = -1;
     fase = 35; t_fase = 0;
     dbglog(DBG_INFO, "FIN: modo 35 (continuar), VRAM libre %uK\n", (unsigned)(pvr_mem_available() >> 10));
-    if (fd) sube(u_preg);
+    if (mis_on && fm) hudd_sube_uso(fm, u_preg); else if (fd) sube(u_preg);
     t_preg = 0;
 }
 static int go_sp;                                       /* 0x1a0508..0x1a052c: 1b4878 = 0 y 450240 != 7 -> 34001F */
@@ -358,9 +369,12 @@ int fin_paso(uint32_t nuevo)
         }
     } else if (fase == 35) {                            /* 0x1bc700 */
         if (t_elige < 0) {
-            if (t_preg > n_preg - 1) { if (fd) sube(u_elige); t_elige = 0; }
+            if (t_preg > n_preg - 1) { if (mis_seg && fm) hudd_sube_uso(fm, u_elige); else if (fd) sube(u_elige); t_elige = 0; }
         } else if (t_elige > n_elige - 1) {
-            if (nuevo & BOTON_A) { sfx_menu(SFX_ACEPTA); r = FIN_REINTENTA; }   /* 1b49b8(0x1e), 11b2b0(0x40) */
+            if (mis_seg) {                              /* 4959E0: A 495A60 (la siguiente) y 30, 0x10 la misma */
+                if (nuevo & BOTON_A) { sfx_menu(SFX_ACEPTA); r = FIN_SIGUIENTE; }
+                else if (nuevo & CONT_X) { sfx_menu(SFX_ACEPTA); r = FIN_REINTENTA; }
+            } else if (nuevo & BOTON_A) { sfx_menu(SFX_ACEPTA); r = FIN_REINTENTA; }   /* 1b49b8(0x1e), 11b2b0(0x40) */
             if (nuevo & BOTON_B) { sfx_menu(SFX_ACEPTA); r = FIN_MENU; }        /* 1b49b8(0x1c) */
         }
     } else if (fase == 27) {                            /* 0x1bb120 */
@@ -405,8 +419,8 @@ void fin_dibuja(void)
         if (t_panel >= 0) hudd_dibuja(fd, u_millas, t_panel, 0, 0, 1, 130, 0);          /* 2B004C, capa 1 */
         for (i = 0; i < 8; i++) hudd_dibuja(fd, u_cifra[i], cifra[i], 0, 0, 1, 135, 0);  /* 2B004B, capa 5 */
     } else if (fase == 35) {
-        if (t_preg >= 0) hudd_dibuja(fd, u_preg, t_preg, 0, 0, 1, 130, 0);
-        if (t_elige >= 0) hudd_dibuja(fd, u_elige, t_elige, 0, 0, 1, 131, 0);
+        if (t_preg >= 0) hudd_dibuja(mis_on && fm ? fm : fd, u_preg, t_preg, 0, 0, 1, 130, 0);
+        if (t_elige >= 0) hudd_dibuja(mis_seg && fm ? fm : fd, u_elige, t_elige, 0, 0, 1, 131, 0);
     } else if (fase == 27) {
         hudd_dibuja(fd, u_go, t_go, 0, 0, 1, 125, 0);   /* 2C000B, capa 0 */
     }
@@ -423,6 +437,8 @@ void fin_sale(void)
     if (rb) { ruta_suelta(); pvr_wait_ready(); spr_cierra(rb); rb = NULL; R = NULL; }
     nombre_sale();
     if (fd) { hudd_cierra(fd); fd = NULL; }
+    if (fm) { hudd_cierra(fm); fm = NULL; }
+    mis_on = mis_seg = 0;
     if (f_ram) { hudd_bufer(NULL, 0); f_ram = NULL; f_cap = 0; }   /* la RAM fija vuelve a demo/main.c */
     fase = -1; t_panel = t_preg = t_elige = t_go = -1;
 }

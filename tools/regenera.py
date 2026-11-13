@@ -109,7 +109,7 @@ def paso(C, n, log):
     elif n.startswith('video_'):
         ej(T('conv_video.py'), ISO, t, '--hz', '50', '--solo', n[6:]); mueve(D, tj('*.VQV'))
     elif n == 'sonido':
-        ej(T('conv_sonido.py'), ISO, t, '--idioma', 'SPANISH'); mueve(D, tj('SFX.DAT'), tj('VOCES.DAT'))
+        ej(T('conv_sonido.py'), ISO, t, '--idioma', 'SPANISH'); mueve(D, tj('SFX.DAT'), tj('VOCES.DAT'), tj('VOCESC.DAT'))
     elif n == 'menu': ej(T('conv_menu.py'), ISO, t, prev('menu')); mueve(D, tj('MENU.DAT'))
     elif n == 'hud': ej(T('conv_hud.py'), ISO, t, prev('hud'), prev('hud')); mueve(D, tj('HUD.DAT'))
     elif n == 'vmu': ej(T('conv_vmu.py'), ISO, t, prev('vmu')); mueve(D, tj('VMU.DAT'))
@@ -136,6 +136,7 @@ def paso(C, n, log):
     elif n == 'rivales':                                 # COAST 2 COAST: los coches de carreras (obj_rc, modelos 0..29)
         ej(T('conv_trafico.py'), ISO, t, '--rivales=' + ','.join(str(k) for k in range(30))); mueve(D, tj('RC*.DAT'))
     elif n == 'mision': ej(T('conv_mision.py'), ISO, t); mueve(D, tj('MISION.DAT'))   # Races.bin y tablas de 47CF40
+    elif n == 'c2chud': ej(T('conv_hud.py'), ISO, t, '--c2c'); mueve(D, tj('C2CHUD.DAT'))   # HUD de las misiones de C2C
     elif n == 'camiones':                                        # los camiones con remolque de OUTRUN2SP (39/40, 41, 43)
         ej(T('conv_trafico.py'), ISO, t, '--camiones'); mueve(D, tj('TRAFK0.DAT'), tj('TRAFK1.DAT'), tj('TRAFK2.DAT'))
     elif n.startswith('coche'):
@@ -205,7 +206,7 @@ def regenera(iso, D, W, jobs=4, informe=print):
         if not hay(D, 'COCHES.DAT') and not hay(os.path.join(W, 'coche'), 'COCHE%02d.DAT' % k): falta.append('coche%d' % k)
     for f, n in (('MENU.DAT', 'menu'), ('HUD.DAT', 'hud'), ('VMU.DAT', 'vmu'), ('MODOV.DAT', 'modov')):
         if not hay(D, f): falta.append(n)
-    if not hay(D, 'SFX.DAT', 'VOCES.DAT'): falta.append('sonido')
+    if not hay(D, 'SFX.DAT', 'VOCES.DAT', 'VOCESC.DAT'): falta.append('sonido')
     falta += ['mus%d' % k for k in MUSICA if not hay(D, 'MUS%d.ADP' % k)]
     for l in C.saca(py(os.path.join(TOOLS, 'regenera.py'), '--interno', 'segs', iso)).split():
         ti, n = l.split(':')
@@ -217,7 +218,7 @@ def regenera(iso, D, W, jobs=4, informe=print):
                   (['SALIDA.DAT'], 'salida'), (['INFARTO.DAT', 'HAHUD.DAT', 'VOCESH.DAT'], 'infarto'), (['BO.DAT'], 'bo'),
                   (['TRAFC.DAT', 'TAPD.DAT', 'TRAF0.DAT'], 'trafico'), (['TRAFK0.DAT', 'TRAFK1.DAT', 'TRAFK2.DAT'], 'camiones'),
                   (['MVTS.VQV'], 'video_ts'), (['MVATTR.VQV'], 'video_attr'),
-                  (['RC%02d.DAT' % k for k in range(30)], 'rivales'), (['MISION.DAT'], 'mision')):
+                  (['RC%02d.DAT' % k for k in range(30)], 'rivales'), (['MISION.DAT'], 'mision'), (['C2CHUD.DAT'], 'c2chud')):
         if not hay(D, *fs): falta.append(n)
 
     informe('== %d pasos en %d a la vez (registros en %s)' % (len(falta), jobs, os.path.join(W, 'registro')))
@@ -300,7 +301,7 @@ def regenera(iso, D, W, jobs=4, informe=print):
     informe('== comprobacion de %s' % D)
     ok = True
     nec = ['BAND.DAT', 'BAND1.DAT', 'BKD.DAT', 'BO.DAT'] + chrs + \
-          'COCHES.DAT COLBK.DAT COLLR.DAT CURSO.DAT EFECTOS.DAT FIN.DAT GOVER.DAT HAHUD.DAT HUD.DAT INFARTO.DAT MENU.DAT META.DAT MODOV.DAT MVATTR.VQV MVTS.VQV PARAM.DAT SFX.DAT SEGS.PAK SOL.DAT TAPD.DAT TRAFC.DAT UNIONES.PAK VMU.DAT VOCES.DAT VOCESH.DAT MISION.DAT'.split() + ['RC%02d.DAT' % k for k in range(30)] + \
+          'COCHES.DAT COLBK.DAT COLLR.DAT CURSO.DAT EFECTOS.DAT FIN.DAT GOVER.DAT HAHUD.DAT HUD.DAT INFARTO.DAT MENU.DAT META.DAT MODOV.DAT MVATTR.VQV MVTS.VQV PARAM.DAT SFX.DAT SEGS.PAK SOL.DAT TAPD.DAT TRAFC.DAT UNIONES.PAK VMU.DAT VOCES.DAT VOCESH.DAT VOCESC.DAT MISION.DAT C2CHUD.DAT'.split() + ['RC%02d.DAT' % k for k in range(30)] + \
           ['COCHE%02d.DAT' % k for k in range(15)] + ['MUS%d.ADP' % k for k in MUSICA] + SP + FINAL + \
           ['TRAFK%d.DAT' % k for k in range(3)]
     for f in nec:

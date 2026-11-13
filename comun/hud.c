@@ -561,6 +561,8 @@ void hud_pon_modelo(int modelo)
 }
 int hud_sube_tex(void) { return hud_principal ? hudd_sube(hud_principal, 0, -1) : -1; }
 
+static float esc_x = 1.0f, esc_y = 1.0f;
+void hudd_escala(float sx, float sy) { esc_x = sx; esc_y = sy; }
 static void pieza(const h_pc_t *p, const h_grp_t *g, int cuadro, float X, float Y, float alfa)
 {
     const h_spr_t *s = H->spr + p->spr;
@@ -573,7 +575,7 @@ static void pieza(const h_pc_t *p, const h_grp_t *g, int cuadro, float X, float 
     for (k = 0; k < 4; k++) {
         float qx = ((k & 1) ? s->w : 0) - p->ax * 0.125f, qy = ((k & 2) ? s->h : 0) - p->ay * 0.125f;
         qx *= sx; qy *= sy;
-        px[k] = qx * c - qy * si + x0 + X; py[k] = qx * si + qy * c + y0 + Y;
+        px[k] = (qx * c - qy * si + x0 - 320.0f) * esc_x + 320.0f + X; py[k] = (qx * si + qy * c + y0 - 240.0f) * esc_y + 240.0f + Y;
     }
     {   int clave = s->tex | ((p->flags & 4) << 14);
         if (clave != ult_tex) {
@@ -774,7 +776,7 @@ void hud_dibuja(const hud_estado_t *e)
     }
     zcapa = 30.0f;
     /* capa 3: paneles y etapas */
-    if (!e->infarto) { dibuja("PANEL_TIEMPO", 0, 0, 1); dibuja("PANEL_PUNTOS", 0, 0, 1); }
+    if (!e->infarto && !e->mision) { dibuja("PANEL_TIEMPO", 0, 0, 1); dibuja("PANEL_PUNTOS", 0, 0, 1); }
     for (t = 0; t < e->etapa; t++) dibuja("RUTA5_HECHA", 0, t, 1);
     dibuja("RUTA5_ACTUAL", 0, e->etapa, (e->cuadro & 32) ? 1.0f : 0.4f);
     zcapa = 40.0f;
@@ -794,8 +796,8 @@ void hud_dibuja(const hud_estado_t *e)
     if (t >= 100) { sprintf(b, "%03d", t); numero("TIEMPO", 0, b, 276); }
     else { sprintf(b, "%02d", t); numero("TIEMPO", 0, b, -9999); }
     cs = e->crono_ms; if (cs > 99 * 60000 + 59999) cs = 99 * 60000 + 59999;
-    sprintf(b, "%2d %02d %03d", cs / 60000, (cs / 1000) % 60, cs % 1000); numero("CRONO", 0, b, -9999);
-    t = e->infarto ? -1 : busca_uso("PUNTOS");                  /* 4BD480: "%07d", 9999999 como mucho */
+    if (!e->mision) { sprintf(b, "%2d %02d %03d", cs / 60000, (cs / 1000) % 60, cs % 1000); numero("CRONO", 0, b, -9999); }
+    t = e->infarto || e->mision ? -1 : busca_uso("PUNTOS");                  /* 4BD480: "%07d", 9999999 como mucho */
     if (t >= 0) { sprintf(b, "%07d", e->puntos > 9999999 ? 9999999 : e->puntos < 0 ? 0 : e->puntos);
                   cifras(t, grupo_puntos(t, e->puntos_estilo), b, H->uso[t].x, H->uso[t].y, 1); }
     t = e->kmh < 0 ? 0 : e->kmh > 999 ? 999 : e->kmh;

@@ -276,10 +276,16 @@ def main():
     idioma = sys.argv[sys.argv.index('--idioma') + 1].upper() if '--idioma' in sys.argv else 'SPANISH'
     assert idioma in IDIOMAS, 'idioma: ' + ', '.join(IDIOMAS)
     voces(iso, irx, tb, td, elf, V, idioma, sal)
+    voces(iso, irx, tb, td, elf, V, idioma, sal, VOZ_BANCOS + VOZ_C2C, 'VOCESC.DAT')
 
 
 # ---------------------------------------------------------------- voces (VOCES.DAT)
 VOZ_BANCOS = ('ORC.PAK', 'PERO.pak')
+# VOCESC.DAT (COAST 2 COAST, variante 6): ademas las voces de las misiones que pide 496A30 / 495C20: las del principio de
+# la mision por tipo (tabla 0x40c6b8: 0x1E7, 0x219, 0x1E8, 0x1EA, 0x218; en TRS.PAK) y las de la eliminacion por tiempo y
+# los trompos (0x1EF..0x1F2, 0x15F, 0x160; en TRC.PAK). PROBABLE: los bancos por los ids (la carga del juego por variante
+# no esta trazada)
+VOZ_C2C = ('TRS.PAK', 'TRC.PAK')
 VOZ_SE = (('\\IGC.PAK', 1, 0x4d), ('\\IGC.PAK', 0, 0x18d))      # (banco, parte, id)
 VOZ_AREA, VOZ_VUELTA, VOZ_DERRAPE = 0x36f958, 0x36f9a8, 0x36fa80
 VOZ_LISTAS = ((0x40ef60, 2), (0x40ef68, 2), (0x40ef70, 5), (0x40eba8, 3), (0x40ebb8, 3), (0x40eb10, 4), (0x40eb20, 2))
@@ -303,10 +309,10 @@ def muestra_banco(datos, desp):
     return dec_psx(datos[desp:fin + 16])
 
 
-def voces(iso, irx, tb, td, elf, V, idioma, sal):
+def voces(iso, irx, tb, td, elf, V, idioma, sal, bancos=VOZ_BANCOS, nombre='VOCES.DAT'):
     se = lambda i: struct.unpack_from('<HH', irx, td + IRX_SE - tb + 12 * i)
     muestras = {}
-    for nb in VOZ_BANCOS:
+    for nb in bancos:
         A, B, (ta, tbb) = banco_tablas(fichero_paquete(iso, 'SOUND.PS2', '\\%s\\%s' % (idioma, nb)))
         for datos, t in ((A, ta), (B, tbb)):
             for i, o in t.items():
@@ -362,9 +368,9 @@ def voces(iso, irx, tb, td, elf, V, idioma, sal):
                     idioma.encode()[:8].ljust(8, b'\0'))
     out += b''.join(filas) + tablas
     out += bytes(off_d - len(out)) + blob
-    with open(os.path.join(sal, 'VOCES.DAT'), 'wb') as fh:
+    with open(os.path.join(sal, nombre), 'wb') as fh:
         fh.write(out)
-    print('VOCES.DAT (%s): %d bytes, %d muestras, %.1f s' % (idioma, len(out), len(filas),
+    print(nombre + ' (%s): %d bytes, %d muestras, %.1f s' % (idioma, len(out), len(filas),
           sum(len(m[0]) / m[1] for m in muestras.values())))
 
 

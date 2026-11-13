@@ -58,7 +58,11 @@ void rival_sigue(int i, float pos, int pos_i);  /* 477090: la posicion del coche
 void rival_suelta(int i, int jug_pos);          /* 4763D0: su coche se cierra */
 int  rival_puesto(void);                        /* car+0xC36 del jugador (0 el primero) */
 int  rival_total(void);                         /* 80FB2C: en la clasificacion (con el jugador) */
-int  rival_nota(void);                          /* 495C20 (tipo 0): 6 - puesto, 0 el ultimo */
+int  rival_47da80(void);                        /* el de referencia del HUD (lider o segundo); -1 sin coches */
+int  rival_largo(void);                         /* 803710: largo del curso en posiciones */
+int  rival_nota(void);
+int  rival_millas(int nota);                    /* 84B900 + 4 nota (OutrunMiles.bin SETUP; 0 la 7) */
+int  rival_siguiente(int i);                    /* 495A60: el registro de la subclave siguiente o -1 */                          /* 495C20 (tipo 0): 6 - puesto, 0 el ultimo */
 /* la carrera (demo/main.c) abre el coche del registro i a ebx posiciones del jugador (delante: ebx > 0; parrilla:
    fuera del modo 16, al montar: en el carril 2 o 3 por +77 & 1). Devuelve la plaza del trafico o -1 si no puede (y el
    registro sigue sin coche: 476480 / 4764D0) */

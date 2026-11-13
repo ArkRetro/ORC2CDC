@@ -2183,12 +2183,36 @@ peticion 14 (escoltas 45B5B0, +324 = 6: carrera contra ellos), que no esta en la
   (`-DPRUEBA_PILOTO_MENU -DPRUEBA_SIN_TIEMPO`): UN JUGADOR -> COAST 2 COAST -> ventana -> 1-1 -> coche, cambio, musica ->
   `MODO: variante 6` -> la carrera entera hasta la META de PALM_T (media 44,7 cuadros por segundo) -> nota en la licencia
   (`LICENCIA: mision 1-1 nota ...`) -> titulo; RAM al volver 1086 KB libres (1088 al arrancar: los modelos RCmm sueltos).
-- SIN PORTAR: los tipos 1, 2, 3 y 6 (eliminacion por tiempo, derrape y conduccion limpia contra el rival, pillar a los
-  rivales: piden su HUD de puntos y sus rotulos), el rotulo y la voz del principio de la mision (496A30: 0x2b0020 /
-  0x2b003e, voz 0x1e7), el HUD del puesto (DESVIACION: "PUESTO n/N" en texto), la pantalla del resultado y el mapa
-  (de la meta se vuelve al menu), 472E60 / 474080 / los vaivenes, la espera de 474D30 (+C26), 43EB60 al abrir, el bit
-  0 de +0xF, los campeonatos (variante 5) y la variante 9. La puntuacion de OutRun sigue contando (sin comprobar que
-  4F2DF0 corra en la variante 6).
+- HUD de la mision (C2CHUD.DAT de `conv_hud.py --c2c`; comprobado en el ELF): NAVI_PUB 0x1bd4ac con la variante 6
+  (0x1bd6f4, el 4BED13 del PC) dibuja en el modo 16 el panel 2C0046 en lugar de 2C0028 / 2C0029 (sin el crono 0x1bfa58
+  ni la puntuacion), el avance 0x1bfd78 (icono del curso 2C0104 / 2C0105 / 2C0106 / 2D0001 / 2D0002 por la
+  profundidad del arbol, tabla de saltos 0x404580; marcas 2C0107 del coche de 47DA80 y 2C0108 del jugador, cuadro =
+  posicion / largo x 180, tabla 0x404578) y en los tipos 0 y 1 el puesto 0x1c02d8 (escena 2B0061 y las imagenes de
+  42D280: cifras 0x404b30 del banco 0x2B, sufijo 0x404b58 (idioma 4: 0 el primero, 3 los demas, y 0x38), total
+  0x404b08 de spr_etc y la barra 3000F; desplazamientos 0x369888 / 0x369878). demo: hud.c con `mision` y c2c_dibuja.
+  Fuera el texto "PUESTO n/N". Flycast: "Posicion 6o/6" .. "3o/6", las marcas TU / rival en la barra Inicio-Meta.
+- La puntuacion de OutRun no cuenta en las misiones: 4F2DF0 (PS2 0x28f8c8) sale si 0x1f7d80 (4957F0: mision elegida)
+  y 4F2B20 no da el bonus de etapa (demo: pt_paso / pt_bonus_etapa con la variante 6).
+- Rotulos del principio (496A30, PS2 0x1f8d0c, modo 16): con la cuenta 0x168 los elementos 2B0020 (capa 9) y 2B003D
+  (capa 10), modo 3, en (170, 20) con escala (1, 4) hacia (170, -80) y (1, 1) en 0,2 s (465310 / 4653C0, paso de
+  449E30: 12 cuadros; matriz de 4656B0 = hudd_escala); en 0xB4 la voz del tipo (0x40c6b8: 0x1E7, 0x219, 0x1E8,
+  0x1EA, 0x218) y 2B0020 en modo 5 con el rotulo del tipo (0x36f3f8: 2B0065, 2C00FD, 2B0067, 2B0066, 2C00FC); la
+  cuenta baja 2 por cuadro. Flycast: el bocadillo "Objetivo: Compite con tus rivales!" al GO. Voces: VOCESC.DAT
+  (conv_sonido.py) = ORC + PERO + TRS.PAK + TRC.PAK: los ids que piden 496A30 / 495C20 solo estan en esos dos bancos
+  (PROBABLE: la carga de bancos por variante del PS2 no esta trazada); la cola de 45BD30 se toma inmediata.
+- Resultado de la mision (como el original: no hay otra pantalla): la meta (19) guarda la nota (495A20) y pasa al
+  modo 34 (OutRun Miles; 4EF550 con la variante 6 y 44FF10: millas = 84B900[nota] - 84B900[nota de antes] >= 0, con
+  84B900 = SETUP de OutrunMiles.bin: 100, 200, 400, 600, 800, 900, 1000, 0 para las notas 0..7) y al 35 con los tokens
+  de la mision (0x1bc650: 2B0068, o 2B0069 si (tipo 1 o 495B80) y nota 4..6; despues 2B004F si la licencia ya tiene la
+  mision superada (4959E0) con A = 495A60 (la subclave siguiente si la nota llega a +0x24 = 4) y REINTENTAR, el boton
+  0x10 la misma y B al menu; si no 2B004A); FINC2C.DAT (conv_fin.py). El fin del tiempo: 34 y 35 sin nota. Fuera la
+  vuelta directa al menu.
+- SIN PORTAR (bloqueado por tiempo): las pantallas de COAST 2 COAST del original (categorias 0x242340 / 4E8130, mapa
+  de misiones 0x243000..0x2443xx / 4E9160, detalle): hace falta convertir el banco SPRANI 0x44 (tokens 0x4400d0..
+  0x4400f0) y portar su dibujo y navegacion con las tablas 0x375430, 0x375570, 0x3752e8 / 0x3753e0 y los vecinos
+  0x3756b0 / 0x375700; hasta entonces la ventana (DESVIACION). Los tipos 1, 2, 3 y 6 (puntos 4BD230 / 4BD340, marcas
+  495E90, notas por umbrales) no estan en la lista. Tambien 472E60 / 474080 / los vaivenes, la espera de 474D30, 43EB60
+  al abrir, el bit 0 de +0xF, el boton 0x10 del PS2 (la X de la Dreamcast, PROBABLE), los campeonatos y la variante 9.
 
 **CONTRARRELOJ** verificado en E: `MODO: variante 7, dificultad 0, fila de tiempos 2`, sin un solo coche de trafico,
 union y ruta leidas como en el OutRun. GOAL (menu real con el piloto y `-DPRUEBA_SIN_TIEMPO`, 2026-11-09): PALM -> ALPI

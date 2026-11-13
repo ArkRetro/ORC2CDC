@@ -101,6 +101,17 @@ def convierte(iso, sal, previas=None):
             for i in range(8): hud.uso('MILLAS_C%d' % i, g, int(X - 320 - i * PASO), int(Y - 240), capa=5)
         else: hud.uso(nombre, g, 0, 0, capa=1)
     assert cambiados[0] > 0, 'no se encontraron los iconos de los botones en 2B004A'
+    # FINC2C.DAT: el modo 35 con una mision de COAST 2 COAST (0x1bc650 / 0x1bc700, PC 49B7E0 / 49D9C0): la pregunta
+    # 2B0068 (2B0069 si (tipo 1 o 495B80) y la nota 496510 >= 4 y != 7) y, cuando acaba, 2B004F si la mision ya esta
+    # superada en la licencia (4959E0: nota >= 4 y != 7) o si no 2B004A (el CONT_ELIGE de FIN.DAT)
+    m1, m2 = lui_ori(elf, 0x1bc6bc, 0x1bc6c8), lui_ori(elf, 0x1bc6a4, 0x1bc6b8)
+    m_el = lui_ori(elf, 0x1bc774, 0x1bc784)
+    assert (m1, m2, m_el) == (0x2b0068, 0x2b0069, 0x2b004f), [hex(x) for x in (m1, m2, m_el)]
+    hud = huds['FINC2C.DAT'] = ch.Hud(); hud.taco = [0xff] * 16; hud.vq = ch.vq_pequeno
+    for nombre, k in (('CONT_PREG_M1', m1), ('CONT_PREG_M2', m2), ('CONT_ELIGE_M', m_el)):
+        g = ch.grupo_escena(hud, nombre, ag, Tg, 0x2b, k & 0xffff, duracion(ag, k & 0xffff), 'fin_',
+                            boton if nombre == 'CONT_ELIGE_M' else None)
+        hud.uso(nombre, g, 0, 0, capa=1)
     for fich, hud in huds.items():
         hud.escribe(os.path.join(sal, fich))
         print('%s: %d bytes, %d texturas, %d piezas' % (fich, os.path.getsize(os.path.join(sal, fich)), len(hud.tex), len(hud.pie)))

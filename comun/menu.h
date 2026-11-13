@@ -30,6 +30,8 @@ int menu_modo(void);                        /* variante del modo: 1 OutRun, 2 He
 void menu_pon_misiones(int n, const int16_t *idx, const uint8_t *clave, const uint8_t *sub);
 int menu_mision(void);
 void menu_nota_mision(int clave, int sub, int nota);
+int menu_nota_de(int clave, int sub);         /* licencia +0x1D7 + 5 clave + subclave (7 sin jugar) */
+void menu_elige_mision(int idx);             /* 495A60: la mision siguiente para REINTENTAR */
 int menu_sp(void);                          /* 1: OUTRUN2SP del menu principal ([780260] = 0, frontal de recreativa) */
 void menu_entra_sp(void);                   /* OUTRUN2SP tras la carrera: el frontal de recreativa (49AF90: modo 10) */
 int menu_preset(void);                      /* OUTRUN2SP: preset del curso (43F950: 0 OutRun 2, 1 OutRun 2 SP) */

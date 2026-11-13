@@ -27,7 +27,7 @@ static uint8_t lista_cl[RIVAL_NMIS], lista_sub[RIVAL_NMIS], lista_tipo[RIVAL_NMI
 static int lista_ok;
 /* tablas del ELF (detras de los registros) */
 static uint8_t t_listas[8][16], t_fam[64], t_cla[64], t_col[240];
-static float t_acel[5], t_curva[12], t_marcha[6];
+static float t_acel[5], t_curva[12], t_marcha[6]; static int32_t t_millas[8];
 static int tab_ok;
 
 static rival_mision_t mis; static int mis_ok;
@@ -58,7 +58,8 @@ int rival_inicia(void)
     {   const uint8_t *t = b + ot; int k;
         for (k = 0; k < 8; k++) memcpy(t_listas[k], t + 16 * k, 16);
         t += 128; memcpy(t_fam, t, 64); t += 64; memcpy(t_cla, t, 64); t += 64; memcpy(t_col, t, 240); t += 240;
-        memcpy(t_acel, t, 20); t += 20; memcpy(t_curva, t, 48); t += 48; memcpy(t_marcha, t, 24);
+        memcpy(t_acel, t, 20); t += 20; memcpy(t_curva, t, 48); t += 48; memcpy(t_marcha, t, 24); t += 24;
+        if ((uint32_t)(t - b) + 32 <= sz) memcpy(t_millas, t, 32);
     }
     lista_ok = tab_ok = 1;
     free(b);
@@ -401,4 +402,22 @@ int rival_nota(void)
     if (v <= 0) v = 0;
     if (jug_puesto == clas_n - 1) v = 0;
     return v;
+}
+
+/* 47DA80 (PS2 0x1f0c60): el coche de carreras de referencia del HUD: el lider ([64E190]) o, si lidera el jugador, el
+   segundo de la clasificacion; -1 sin coches */
+int rival_47da80(void)
+{
+    if (!nrc || clas_n <= 1) return -1;
+    return lider >= 0 ? lider : clas[1].idx;
+}
+int rival_largo(void) { return largo; }
+int rival_millas(int nota) { return nota >= 0 && nota < 8 ? (int)t_millas[nota] : 0; }
+/* 495A60: la carrera siguiente de la clave (subclave + 1) si la hay; -1 si no */
+int rival_siguiente(int i)
+{
+    int k;
+    if (!lista_ok || i < 0 || i >= RIVAL_NMIS) return -1;
+    for (k = 0; k < RIVAL_NMIS; k++) if (lista_cl[k] == lista_cl[i] && lista_sub[k] == lista_sub[i] + 1) return k;
+    return -1;
 }

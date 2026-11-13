@@ -7,6 +7,8 @@ typedef struct {
     int rebufo, derrape, manual, seis, rev_on;
     int puntos_estilo;      /* cifras de la puntuacion (4BD480): 0 normal (estilo 1), 1 rebufo (0xC), 2 fuera (0xD) */
     int infarto;            /* NAVI_PUB 0x1bd544 (variante 2): sin los paneles 2C0028 / 2C0029 ni la puntuacion (1bf3e8) */
+    int mision;             /* NAVI_PUB 0x1bd6f4 (variante 6): sin 2C0028 / 2C0029, el crono ni la puntuacion (C2CHUD.DAT
+                               los pone la carrera) */
     int solo_puntos;        /* NAVI_PUB fuera del modo 16 (PS2 0x1bd4ac): solo el panel 2C0029 y la puntuacion */
 } hud_estado_t;
 int hud_carga(const char *fich, int modelo);            /* 0 bien; modelo = indice de tacometro (6 = Testarossa) */
@@ -70,6 +72,9 @@ void hudd_fin_cuadro(void);
 int hudd_pendiente(void);                                /* liberaciones aun pendientes */
 void hudd_vacia(void);                                   /* las libera ya (espera 40 ms): antes de una carga */
 void hudd_color(uint32_t rgb);
+/* escala (sx, sy) alrededor del centro de la pantalla de lo que dibuje hudd_dibuja despues (4656B0: la matriz del
+   elemento de 465860, diag(sx, sy) y su traslacion; 1, 1 sin escala) */
+void hudd_escala(float sx, float sy);
 /* sprites sueltos (comun/sprani.c): ver hud.c */
 void hudd_capa(hud_dat_t *h, float z, int fondo);
 void hudd_sprite(int s, const float *m, const float *q, float alfa, int aditiva);

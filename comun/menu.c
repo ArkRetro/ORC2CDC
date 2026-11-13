@@ -762,6 +762,12 @@ void menu_pon_misiones(int n, const int16_t *idx, const uint8_t *clave, const ui
     for (i = 0; i < mis_n; i++) { mis_idx[i] = idx[i]; mis_cl[i] = clave[i]; mis_sb[i] = sub[i]; }
     if (mis_cur >= mis_n) mis_cur = 0;
 }
+int menu_nota_de(int clave, int sub)
+{
+    const uint8_t *p = activa(); int off = 0x1d7 + 5 * clave + sub;
+    return p && off >= 0x1d7 && off < 0x1dd + 0xc8 ? p[off] : 7;
+}
+void menu_elige_mision(int idx) { mis_sel = idx; }
 int menu_mision(void) { return modo_sel == 0 && !sp_sel ? mis_sel : -1; }
 /* 495A20 (PS2 0x1f81cc): nota de la mision en la licencia +0x1D7 + 5 clave + subclave si mejora o la guardada es 7
    (sin jugar); +3F4 |= 2. Se guarda en la VMU al volver al menu (menu_entra) */

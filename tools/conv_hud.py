@@ -711,6 +711,85 @@ def previas_avisos(hud, g0, d):
             a = hud.tex[ti]; im = Image.new('RGBA', (a.shape[1], a.shape[0]), (48, 48, 64, 255))
             im.alpha_composite(Image.fromarray(a)); im.save(os.path.join(d, 'atlas_%02d.png' % ti))
 
+# ---------------------------------------------------------------- COAST 2 COAST (C2CHUD.DAT)
+def c2c(iso, salida):
+    """HUD de las misiones de COAST 2 COAST (NAVI_PUB 0x1bd4ac de SLES-53998, variante 6 = 0x1bd6f4: el 4BED13 del PC)
+    -> C2CHUD.DAT (formato de HUD.DAT; se abre aparte solo en el modo). Tokens y tablas del ELF, comprobados por el
+    codigo que los usa:
+      C2C_PANEL   2C0046 (capa 3; en lugar de 2C0028 / 2C0029 del modo OutRun)
+      C2C_ICONO   el icono del curso por su profundidad [0x359eec] - 1 (0x1bfd78, tabla de saltos 0x404580): 2C0104,
+                  2C0105, 2C0106, 2D0001 (4 niveles) y 2D0002 (14), cuadros 0..4
+      C2C_MARCA_J / C2C_MARCA_R  las marcas de avance del jugador ([0x404578] = 2C0108) y del rival ([0x40457c] =
+                  2C0107), cuadro = posicion / largo x 180 (0..180)
+      C2C_PUESTO  2B0061 (0x1c02d8, capa 1) y las cifras de 42D280 (imagenes): C2C_DPOS (0x404b30: 10 del banco 0x2B),
+                  C2C_SUF (0x404b58: 4 sufijos), C2C_DN (0x404b08: 10 de spr_etc, banco 3) y C2C_BARRA (3000F)
+      C2C_B20 / C2C_B3D y C2C_T0..T6: los rotulos del principio de la mision de 496A30 (0x1f8d0c: 2B0020 y 2B003D;
+                  a los 0xB4 cuadros 2B0020 y el del tipo de la tabla 0x36f3f8 (tipo 0: 2B0065)), todos sus cuadros"""
+    D = Disco(iso); hud = Hud(); hud.taco = [0xff] * 16
+    elf = D.elf
+    w32 = lambda va: struct.unpack_from('<I', elf, va - 0x100000 + 0x80)[0]
+    def par(lui, add):
+        a, b = w32(lui), w32(add)
+        assert a >> 26 == 15 and b >> 26 == 9, 'codigo inesperado en 0x%x / 0x%x' % (lui, add)
+        return ((a & 0xffff) << 16) + (b & 0xffff) - (0x10000 if b & 0x8000 else 0)
+    def ori(lui, o):
+        a, b = w32(lui), w32(o); assert a >> 26 == 15 and b >> 26 == 13; return ((a & 0xffff) << 16) | (b & 0xffff)
+    assert ori(0x1bd70c, 0x1bd714) == 0x2c0046, 'panel 2C0046'
+    assert ori(0x1c031c, 0x1c0320) == 0x2b0061, 'puesto 2B0061'
+    assert ori(0x1f8d20, 0x1f8d58) == 0x2b0020 and ori(0x1f8dbc, 0x1f8dc8) == 0x2b003d, 'rotulos 2B0020 / 2B003D'
+    tmar = par(0x1bfeb4, 0x1bfec0); assert tmar == 0x404578
+    marcas = D.elf32(tmar, 2)                                   # jugador, rival
+    tdp = par(0x1c04e8, 0x1c04ec); tsu = par(0x1c05c4, 0x1c05cc); tdn = par(0x1c0634, 0x1c063c)
+    assert (tdp, tsu, tdn) == (0x404b30, 0x404b58, 0x404b08)
+    dpos, suf, dn = D.elf32(tdp, 10), D.elf32(tsu, 4), D.elf32(tdn, 10)
+    ttag = par(0x1f8f14, 0x1f8f1c); assert ttag == 0x36f3f8
+    tags = D.elf32(ttag, 7)
+    iconos = (0x2c0104, 0x2c0105, 0x2c0106, 0x2d0001, 0x2d0002)
+    bancos = {}
+    def bk(b):
+        if b not in bancos: bancos[b] = D.banco(b)
+        return bancos[b]
+    def esc(nombre, toks, fotos=None):
+        """grupo con los cuadros: un token por cuadro (fotos None) o los cuadros 'fotos' del unico token"""
+        lst = [(t, 0.0) for t in toks] if fotos is None else [(toks[0], float(f)) for f in fotos]
+        g = hud.grupo(nombre, len(lst))
+        for c, (t, f) in enumerate(lst):
+            if t == 0xffffffff or t == 0: continue
+            a, T, _ = bk(t >> 16); hud.piezas_escena(g, c, t >> 16, T, escena(a, t & 0xffff, f))
+        hud.uso(nombre, g, 0, 0, capa=3); return g
+    def largo(t):
+        a, _, _ = bk(t >> 16); sc = a.escenas[t & 0xffff]; nc, pc = struct.unpack_from('<2I', a.a, sc)
+        return int(struct.unpack_from('<f', a.a, pc + (nc - 1) * 0x24 + 8)[0])
+    def imagenes(nombre, toks):
+        g = hud.grupo(nombre, len(toks))
+        for c, t in enumerate(toks):
+            b = t >> 16
+            if b == 3:
+                xs = D._ent(D.p_spr, D.n_spr.index('spr_etc_xst.sz')); T = texturas(xs)
+            else: _, T, xs = bk(b)
+            ti, l, tp, r, bb = imagen_xst(xs, t & 0xffff)
+            si = hud.sprite(hud.textura((b, ti), T[ti]), (l, tp, r, bb), r - l, bb - tp)
+            hud.pie.append((g, c, si, 0, 0.0, 0.0, 0, 0, 0.0, 1.0, 1.0, 1.0))
+        hud.uso(nombre, g, 0, 0, capa=9); return g
+    esc('C2C_PANEL', [0x2c0046])
+    esc('C2C_ICONO', list(iconos))
+    esc('C2C_MARCA_J', [marcas[0]], range(181)); esc('C2C_MARCA_R', [marcas[1]], range(181))
+    esc('C2C_PUESTO', [0x2b0061])
+    imagenes('C2C_DPOS', dpos); imagenes('C2C_SUF', suf); imagenes('C2C_DN', dn); imagenes('C2C_BARRA', [0x3000f])
+    esc('C2C_B20', [0x2b0020], range(largo(0x2b0020))); esc('C2C_B3D', [0x2b003d], range(largo(0x2b003d)))
+    for k, t in enumerate(tags):
+        if t not in (0, 0xffffffff): esc('C2C_T%d' % k, [t], range(largo(t)))
+    hud.vq = lambda i, a, fmt, lista: vq_pequeno(i, a, fmt, lista, 'C2CHUD: ')
+    os.makedirs(salida, exist_ok=True)
+    texs = hud.escribe(os.path.join(salida, 'C2CHUD.DAT'))
+    print('C2CHUD.DAT: %d texturas (%d bytes), %d grupos, %d piezas; marcas %s, cifras %s, sufijos %s, tags %s' % (
+        len(texs), sum(len(t[4]) for t in texs), len(hud.grp), len(hud.pie), [hex(x) for x in marcas],
+        [hex(x) for x in dpos], [hex(x) for x in suf], [hex(x) for x in tags]))
+    return hud
+
+if __name__ == '__main__' and '--c2c' in sys.argv:
+    c2c(sys.argv[1], sys.argv[2]); sys.exit(0)
+
 if __name__ == '__main__':
     if len(sys.argv) < 3: sys.exit(__doc__)
     hud, texs = convierte(sys.argv[1], sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else sys.argv[2],
