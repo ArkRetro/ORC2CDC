@@ -29,7 +29,7 @@ if [ "${MODO_JUEGO:-0}" = 0 ]; then                                  # COAST 2 C
         tecla Up; espera 1; tecla Left; espera 2                     # de vuelta a Flagman 1
     fi
     tecla x; espera 3; foto ${P}_5e                                  # mapa de Flagman 1 (cursor en la 1)
-    if [ -n "${C2C_RECORRE:-}" ]; then tecla Right; espera 2; fi     # (el nodo 2 esta cerrado: no se mueve)
+    if [ -n "${C2C_RECORRE:-}" ]; then tecla Right; espera 2; foto ${P}_5e2; fi   # al nodo 2 si esta abierto (si no, quieto)
     tecla x; espera 3; foto ${P}_5f                                  # detalle: la carrera 1-1
     if [ -n "${C2C_RECORRE:-}" ]; then                               # B al mapa, B a las categorias, y otra vez
         tecla c; espera 2; tecla c; espera 3; foto ${P}_5g; tecla x; espera 3; tecla x; espera 3

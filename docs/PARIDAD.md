@@ -2187,6 +2187,9 @@ peticion 14 (escoltas 45B5B0, +324 = 6: carrera contra ellos), que no esta en la
     la 2 y la 3 cerradas ("?"), B / B y de nuevo A / A, la 1-1 -> coche, cambio, musica -> `MODO: variante 6` y la
     carrera con sus 5 rivales; tablas de C2C.DAT 61232 bytes en el hueco, VRAM libre al abrirlo 486 KB; sin "Out of
     memory".
+    Con notas (`-DPRUEBA_NOTAS_C2C`: notas en las categorias 0..4 de la licencia nueva): rango A de Flagman 1 en
+    POSICION MEDIA, Flagman 2 abierto y la foto 4 (la del mapa de Flagman 2), los 5 nodos abiertos con su nota (AAA, A,
+    B, A, A), derecha al nodo 2 y su detalle con las dos carreras (la 2.a abierta por el 4 de la 1.a; A y AA).
   - RAM: las tablas de C2C.DAT (~60 KB) van en el final del hueco de la union prestado (`menu_hueco` = hueco_fsp de
     main, como el frontal de recreativa) solo mientras se ve P_C2C; su VRAM se suelta al salir (spr_cierra).
 - Carrera: variante 6 (menu_modo), el arbol 100 + i de CURSO.DAT (4965A0), los registros de 47CF40 (PS2 0x1ef900) con

@@ -200,6 +200,13 @@ static void lic_reinicia(uint8_t *p)
     memset(p + 0x1dd, 7, 0xc8); memset(p + 0x2a5, 0, 0xc8); memset(p + 0x1c9, 0, 20); memset(p + 0x36e, 0x77, 0x84);
     p[0x3f4] = (p[0x3f4] & 0xfc) | 2;
     memcpy(p + 0x3fc, "051013153129", 12); p32(p, 0x408, rand());
+#ifdef PRUEBA_NOTAS_C2C
+    {   /* prueba de las pantallas de COAST 2 COAST: notas en las categorias 0..5 (Flagman 1 entero y el principio de
+           Flagman 2): la 0 con 6 en todas, la 1 con 4 / 5, la 2 con 3 en la 1.a (la 2.a cerrada), las demas sin jugar */
+        int c, i;
+        for (c = 0; c < 6; c++) for (i = 0; i < 5; i++) p[0x1dd + 5 * c + i] = c == 0 ? 6 : c == 2 ? (i ? 7 : 3) : c == 5 ? 7 : 4 + (i & 1);
+    }
+#endif
 }
 /* 447360: todo desbloqueado (nombre ENTIRETY en el editor) */
 static void lic_desbloquea(uint8_t *p)
