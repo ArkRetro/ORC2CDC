@@ -30,6 +30,7 @@
 #include "../comun/modo_video.h"
 #include "camara.h"
 #include "fin.h"
+#include "final.h"
 #include "sp.h"
 #include "coli.h"
 #ifdef DIAG_PERFIL
@@ -1746,6 +1747,9 @@ static coche_t yo;
 /* la escena de la meta del original (demo/meta.c): con meta_pas el coche va por el guion (PasPlCar_Ctrl 475720, sin
    fisica) y la camara por su movimiento (4853D0) */
 static meta_t meta; static int meta_pas, meta_cam;
+/* el final de recreativa de OUTRUN2SP (modo 24, demo/final.c): fin24 mientras dura; mundo_fuera: el curso ya no se
+   dibuja ni se consulta (su RAM es la del final) hasta volver al menu; fin_rue: las ruedas y el volante del guion */
+static int fin24, mundo_fuera, fin_rue, fin24_como;
 /* la escena de la salida (demo/meta.c, SALIDA.DAT): corre con meta_paso sobre el mismo meta_t (nunca a la vez que la
    meta). sal_f: su cuadro (82E7C4 del paso); sal_rue: 486EF0 ha escrito las ruedas y la carroceria (+2D8..+2EC) */
 static int sal_on, sal_f, sal_rue; static float sal_cam[8];
@@ -4135,8 +4139,9 @@ static float cam_suelo(const float *p)
     ruta_en(yo.s, q, &th, NULL, NULL);
     return altura(yo.s + dx * sinf(th) - dz * cosf(th), yo.x + dx * cosf(th) + dz * sinf(th));
 }
-/* un paso de logica de la camara (4858D0) con el coche del jugador; boton = cambio de vista (entrada 0x40000) */
-static void camara_paso(int boton, int salida)
+/* un paso de logica de la camara (4858D0) con el coche del jugador; boton = cambio de vista (entrada 0x40000);
+   agotado = la del fin del tiempo (485830) */
+static void camara_paso(int boton, int salida, int agotado)
 {
     cam_entrada_t e; float th, q[3], h, v;
     memset(&e, 0, sizeof e);
@@ -4156,6 +4161,7 @@ static void camara_paso(int boton, int salida)
     }
     memcpy(e.pose_t, yo.pose_t, 12); memcpy(e.pose_r, yo.pose_r, 12);
     e.boton_vista = boton; e.salida = salida; e.suelo = cam_suelo;
+    e.agotado = agotado;                                        /* modo 20: 485830 (PS2 0x178e58) */
     if (salida && sal_on && meta.cam && meta.mueve) {           /* 486EF0 con 82E7D0 == 1 */
         memcpy(sal_cam, meta.ojo, 12); memcpy(sal_cam + 3, meta.mira, 12); sal_cam[6] = meta.balanceo; sal_cam[7] = meta.fov;
         e.guion = sal_cam;
@@ -7278,7 +7284,7 @@ static void coche_anima_paso(int titulo)
     if (!ani.ok) return;
     if (titulo) { coche_anima_reposo(); return; }
     vmf = fis_ok ? fis.vel_mf : yo.v / 60.2f;                   /* car+1C4 (m por cuadro) */
-    int gm = meta_pas || sal_rue;                               /* 486EF0 escribe las ruedas (meta y salida) */
+    int gm = meta_pas || sal_rue || fin_rue;                    /* 486EF0 escribe las ruedas (meta y salida; el final: el guion) */
     kmh = gm ? meta.kmh : fis_ok ? fis.kmh : (int)(yo.v * 3.6f);   /* car+1F4 (op 11 de la meta / salida) */
     for (k = 0; k < 4 && gm; k++) ani.giro[k] = (float)meta.giro[k] * 9.58738019e-05f;   /* 486EF0: rueda +30 */
     for (k = 0; k < 4 && !gm; k++) {                      /* giro: rueda +30 -= omega (rad/s) por el tiempo */
@@ -7334,7 +7340,7 @@ static void coche_anima_matrices(int titulo)
        car+14 = CG - R (0, +224, 0) (CopyCarWork 4A1140) con la R del cuerpo: aqui la altura del CG sobre la calzada
        (fis.alt), el cabeceo y el balanceo de la suspension (ActionForce2) alrededor del CG, menos alt_cg (+224) */
     m_id(ani_m[0]);
-    if (meta_pas && !titulo) ty = v = 0;                       /* 475720: car+F0 = identidad (sin 4A2910 ni fisica) */
+    if ((meta_pas || fin_rue) && !titulo) ty = v = 0;          /* 475720: car+F0 = identidad (sin 4A2910 ni fisica) */
     else if (fis_ok && !titulo) {
         m_tras(ani_m[0], 0, fis.alt, 0); m_rx(ani_m[0], fis.cabeceo); m_rz(ani_m[0], fis.balanceo);
         m_tras(ani_m[0], 0, -fpar.alt_cg, 0);
@@ -8260,6 +8266,81 @@ static uint8_t *hueco_fin(uint32_t *cap)
     *cap = 0; return NULL;
 #undef A32
 }
+/* ---------------------------------------------------------------- el final de recreativa de OUTRUN2SP (modo 24)
+   demo/final.c con los datos de tools/conv_final.py. RAM: el original deja el curso al empezar el modo 24 (4489C0 /
+   44C3D0 / 44A1A0 de 49A660) y dibuja solo el sitio del final; aqui el curso sale entero (curso_fuera, la etapa
+   tambien: su hueco es del final y desde ahi no se dibuja ni se consulta nada del curso, mundo_fuera, hasta el menu) y
+   el sitio (FINEc.DAT), los objetos (FINPROP.DAT, detras) y FINAL.DAT (el guion se usa en su sitio, detras) van en el
+   hueco de la etapa; las tablas de STAFF.DAT en el hueco de la union prestado (como el resto de escenas). Nada del
+   monton salvo las tablas pequenas de cada modelo (vis, tramos y cabeceras, como cualquier union) */
+static modelo_t fin_mod, fin_prop;
+static void final24_suelta(void)
+{
+    final_sale();
+    if (fin_mod.datos || fin_prop.datos) pvr_wait_ready();
+    libera_modelo(&fin_mod); libera_modelo(&fin_prop);
+    fin24 = fin_rue = 0;
+}
+static int final24_entra(int como)
+{
+    int c = final_columna(variante, preset_curso, meta_g), r; char n[24]; uint32_t lba, t, o;
+    uint8_t *a, *fa;
+    if (c < 0 || !hueco_etapa || !hueco_union) return -1;
+    sprintf(n, "FINE%d.DAT", c);
+    if (gd_busca(n, &lba, &t) || gd_busca("FINAL.DAT", &lba, &t)) { dbglog(DBG_ERROR, "FINAL: sin %s o FINAL.DAT\n", n); return -2; }
+    curso_al_menu_ya();                                         /* el curso fuera (espera la lectura en marcha) */
+    libera_modelo(&etapa); libera_modelo(&sig); col_et.ok = 0;  /* (sus datos se quedan en el hueco: los pisa el final) */
+    mundo_fuera = 1; fin24_como = como;
+    musica_pausa_lectura(1);
+    r = lee_modelo_en(&fin_mod, n, hueco_etapa, cap_etapa);
+    if (!r && sube_modelo(&fin_mod)) r = -10;
+    if (r) { musica_pausa_lectura(0); dbglog(DBG_ERROR, "FINAL: %s (%d)\n", n, r); libera_modelo(&fin_mod); return -3; }
+    if (fin_mod.vis) memset(fin_mod.vis, 0xff, (fin_mod.nnodos + 31) / 32 * 4);   /* todo el sitio (44B890: sin recorte) */
+    o = ((uint32_t)(fin_mod.blob - hueco_etapa) + 31) & ~31u;  /* (los texeles ya estan en la VRAM) */
+    if (!lee_modelo_en(&fin_prop, "FINPROP.DAT", hueco_etapa + o, cap_etapa - o) && !sube_modelo(&fin_prop))
+        o = ((uint32_t)(fin_prop.blob - hueco_etapa) + 31) & ~31u;
+    else { dbglog(DBG_ERROR, "FINAL: sin FINPROP.DAT\n"); libera_modelo(&fin_prop); }
+    musica_pausa_lectura(0);
+    a = hueco_union; fa = hueco_union + cap_union - union_fsp;
+    if (band.datos >= a && band.datos < fa) a = (uint8_t *)(((uintptr_t)(band.datos + TAM_SECT(band.tam)) + 31) & ~(uintptr_t)31);
+    if (final_entra(c, hueco_etapa + o, cap_etapa - o, a < fa ? a : NULL, a < fa ? (uint32_t)(fa - a) & ~31u : 0)) {
+        final24_suelta(); return -4;
+    }
+    fin24 = fin_rue = 1;
+    dbglog(DBG_INFO, "FINAL: modo 24, %s (%u mallas, %u texturas), objetos %u mallas, hueco de la etapa %uK de %uK, VRAM libre %uK\n",
+           n, (unsigned)fin_mod.nmallas, (unsigned)fin_mod.ntex, (unsigned)fin_prop.nmallas, (unsigned)(o >> 10),
+           (unsigned)(cap_etapa >> 10), (unsigned)(pvr_mem_available() >> 10));
+    ram_mapa("final");
+    return 0;
+}
+/* un paso del modo 24; 0 = acabado. El coche: car+B0 del guion (49F410: sin fisica ni pose; ruedas y volante del guion) */
+static int final24_paso(uint32_t nuevo)
+{
+    int r = final_paso(nuevo), k; const final_vista_t *V = final_vista();
+    for (k = 0; k < 3; k++) { yo.pos[k] = V->B0[3][k]; yo.up[k] = V->B0[1][k]; yo.fw[k] = -V->B0[2][k]; }
+    memset(yo.pose_t, 0, sizeof yo.pose_t); memset(yo.pose_r, 0, sizeof yo.pose_r);
+    meta.s32 = V->s32; for (k = 0; k < 4; k++) meta.giro[k] = V->giro[k];
+    return r;
+}
+static void final24_dibuja(int l)
+{
+    const final_vista_t *V = final_vista(); int i, ult; uint32_t k;
+    static matrix_t M __attribute__((aligned(32)));
+    if (!fin_mod.cabs[0]) return;
+    mat_load(&vista);
+    dibuja_rango(&fin_mod, l, fin_mod.inicio[l], fin_mod.inicio[l + 1], 1, 1, 0);   /* 44B890 (sin niebla: 40EC60(0)) */
+    for (i = 0; i < V->nprop && fin_prop.cabs[0]; i++) {       /* 405360 de cada objeto en su matriz */
+        memcpy(M, V->prop[i].M, sizeof M);
+        mat_load(&vista); mat_apply(&M); ult = -2;
+        for (k = fin_prop.inicio[l]; k < fin_prop.inicio[l + 1]; k++) {
+            const malla_t *m = fin_prop.mallas + k;
+            if (m->nodo != (int32_t)V->prop[i].reg || m->n < 3) continue;
+            if (m->tex != ult) { ult = m->tex; pvr_prim(m->tex >= 0 ? &fin_prop.cabs[1][m->tex] : &cab_col[1][l], sizeof(pvr_poly_hdr_t)); }
+            dibuja_malla(&fin_prop, m);
+        }
+    }
+    mat_load(&vista);
+}
 /* START (49DD40): la escena de la salida de este coche (4871A0), si esta SALIDA.DAT */
 static void salida_entra(void)
 {
@@ -8933,24 +9014,33 @@ int main(int argc, char **argv)
             if (!fin_on && FIN_ATRACCION && ((nuevo & CONT_START) || t_estado > (uint32_t)fin_t)) {   /* demo de atraccion: al menu */
                 meta_sale(); lejos_obj = lejos = LEJOS_PS2;
                 estado = TITULO; auto_ = 0; nuevo = 0; texto_centro(""); hud_baja_tex(); menu_entra(manual_, pista, NPISTAS);
-            } else if (!fin_on && juego_sp && t_estado > (uint32_t)fin_t) {
+            } else if (!fin_on && juego_sp && (fin24 || t_estado > (uint32_t)fin_t)) {
+                int a25 = 1, como = fin24 ? fin24_como : estado == META ? FIN_META : FIN_TIEMPO;
+                if (fin24) {                                    /* modo 24 (demo/final.c) */
+                    a25 = !final24_paso(nuevo); nuevo = 0;
+                    if (a25) { final24_suelta(); musica_para(); }   /* 0x19ba90: 0x100138(0) */
+                }
                 /* el juego de OUTRUN2SP: sin millas ni continuar (49CFD0 y 49D850 con 1b4878 = 0): meta 19 -> 33 -> 24
                    (final de recreativa, AS.PS2) -> 25 (resultados) -> 27; tiempo agotado 20 -> 25 -> 26 (nombre) -> 27;
                    GAME OVER 27 con la escena 34001F, luego 28 -> el frontal de recreativa (10). 25 y 26 en demo/fin.c
-                   (fin_sp_resultados) y demo/nombre.c; 24 SIN PORTAR: la meta pasa directa al 25 */
-                menu_suma_tiempo(crono);                        /* (PS2 0x1b96bc / 0x1b9b58: tambien en este juego) */
-                {   /* el final de recreativa (24) SIN PORTAR: de la meta directo a los resultados (25) */
+                   (fin_sp_resultados) y demo/nombre.c; 24 en demo/final.c (final24_*) */
+                else {
+                    menu_suma_tiempo(crono);                    /* (PS2 0x1b96bc / 0x1b9b58: tambien en este juego) */
+                    /* modo 33 sin red -> 24 tras la meta (43F8C0(0x18)); sin sus datos, directo al 25 */
+                    if (estado == META && !final24_entra(FIN_META)) { a25 = 0; meta_sale(); estado = FIN; t_estado = 0; }
+                }
+                if (a25) {   /* modo 25 */
                     fin_sp_t d; int k;
                     d.preset = preset_curso; d.modelo = fsp_modelo(); d.color = fsp_color();
                     for (k = 0; k < 4; k++) d.rama[k] = rama_nivel[k];
-                    d.nivel = estado == META ? -1 : fin_nivel; d.lado = estado == META ? -1 : fin_lado;
-                    d.razon = estado == META ? -1.0f : fin_razon;
+                    d.nivel = como == FIN_META ? -1 : fin_nivel; d.lado = como == FIN_META ? -1 : fin_lado;
+                    d.razon = como == FIN_META ? -1.0f : fin_razon;
                     d.variante = variante; d.puntos = puntos; d.corazones = variante == 2 ? infarto_total() : 0;
                     d.manual = fsp_manual(); d.config = fsp_config();
                     d.registro4 = etapa_n == 4 ? cur_nodo : -1;   /* 450560(4): la clave del nivel 4 al entrar en su etapa */
                     d.ram = hueco_fin(&d.ram_cap);              /* sus tablas, fuera del monton */
                     ram_mapa("resultados");
-                    fin_sp_resultados(estado == META ? FIN_META : FIN_TIEMPO, &d); fin_on = 1;
+                    fin_sp_resultados(como, &d); fin_on = 1;
                 }
             } else if (!fin_on && t_estado > (uint32_t)fin_t) {
                 menu_suma_tiempo(crono);                        /* salida de la meta / del fin del tiempo (PS2 0x1b96bc / 0x1b9b58) */
@@ -8960,9 +9050,9 @@ int main(int argc, char **argv)
                 int rf = fin_paso(nuevo);
                 nuevo = 0;
                 if (rf != FIN_SIGUE) { fin_on = 0; meta_sale(); lejos_obj = lejos = LEJOS_PS2; texto_centro(""); }
-                if (rf == FIN_REINTENTA) { estado = TITULO; reintenta = 1; meta_suelta(); }   /* modo 30: la salida con lo elegido */
+                if (rf == FIN_REINTENTA) { estado = TITULO; mundo_fuera = 0; reintenta = 1; meta_suelta(); }   /* modo 30: la salida con lo elegido */
                 else if (rf == FIN_MENU) {                      /* 28 */
-                    estado = TITULO; hud_baja_tex(); menu_entra(manual_, pista, NPISTAS);
+                    estado = TITULO; mundo_fuera = 0; hud_baja_tex(); menu_entra(manual_, pista, NPISTAS);
                     /* 49AF90 estado 3: sin la consola (43F860 = 0) y sin [65994C] vuelve al frontal de recreativa (modo 10) */
                     if (juego_sp && !auto_) pide_fsp = 1;      /* (en TITULO, con el hueco de la union libre) */
                     auto_ = 0;
@@ -8981,12 +9071,12 @@ int main(int argc, char **argv)
             robot_band_paso(&be);
             if (estado != CUENTA && !robot_band_visible()) band_suelta();   /* a mas de 40 m: ya no se mueve */
         }
-        if (cam_ok && estado != TITULO && !pausa) {
+        if (cam_ok && estado != TITULO && !pausa && !mundo_fuera) {
             if (estado == META && meta_cam) meta_camara();      /* 4853D0 (modo 19) */
-            else camara_paso((nuevo & CONT_Y) != 0, estado == CUENTA && (sal_on ? sal_f < 120 : t_estado < 180));
+            else camara_paso((nuevo & CONT_Y) != 0, estado == CUENTA && (sal_on ? sal_f < 120 : t_estado < 180), estado == AGOTADO);
         }
         if (!pausa && estado != AGOTADO) coche_anima_paso(estado == TITULO);   /* ruedas, volante, faros, carroceria (46AE70) */
-        if (!pausa && chr_ok == 1 && estado != TITULO) {             /* el piloto y la acompanante (488DD0 / 489A90) */
+        if (!pausa && chr_ok == 1 && estado != TITULO && !mundo_fuera) {   /* el piloto y la acompanante (488DD0 / 489A90) */
             robot_coche_t rc;
             rc.modelo = modelo_jug; rc.s204 = ani.s204; rc.fase = estado == CUENTA ? 0 : estado == CARRERA ? 1 : estado == META ? 2 : 3;
             rc.choque = fis_ok ? fis.choque : 0; rc.t_choque = fis_ok ? fis.t_choque : 0; rc.t_recup = fis_ok ? fis.t_recup : 0;
@@ -9074,6 +9164,7 @@ int main(int argc, char **argv)
 #endif
         if (estado == TITULO && menu_sp()) pvr_set_bg_color(0, 0, 0);   /* frontal de recreativa: 40EC60(0) */
         else if (estado == TITULO) pvr_set_bg_color(54 / 255.0f, 62 / 255.0f, 74 / 255.0f);   /* fondo gris del frontal */
+        else if (mundo_fuera) pvr_set_bg_color(0, 0, 0);       /* el final de recreativa: 452B10 -> 40EC60(0) */
 #ifdef DIAG_FONDO
         else pvr_set_bg_color(1.0f, 0.0f, 1.0f);                /* prueba: los huecos en magenta */
 #else
@@ -9086,9 +9177,11 @@ int main(int argc, char **argv)
         pvr_scene_begin();
         /* proyeccion del original (483C10 / 484BD0): pantalla virtual de 640x480 en 4:3, FOV horizontal +A4 de la
            vista y pixeles cuadrados: fx = fy = 320 / tan(FOV / 2) (vertical 2 atan(0,75 tan(FOV / 2))) */
-        if (estado != TITULO && cam_ok) fx = 320.0f / tanf(cam.fov * 0.5f);
+        if (fin24) fx = 320.0f / tanf(final_vista()->fov * 0.5f);   /* 485470: la camara del guion (+A4) */
+        else if (estado != TITULO && cam_ok) fx = 320.0f / tanf(cam.fov * 0.5f);
         else fx = 320.0f / (0.75f + 0.07f * fminf(yo.v / 85.0f, 1.0f));
-        pon_vista(ojo_, mira, estado != TITULO && cam_ok ? cam.balanceo : 0.0f);
+        if (fin24) pon_vista(final_vista()->ojo, final_vista()->mira, final_vista()->balanceo);
+        else pon_vista(ojo_, mira, estado != TITULO && cam_ok ? cam.balanceo : 0.0f);
         pon_coche(&yo, mod_coche);
 #ifdef DIAG_SALIDA
         if (sal_on && (sal_f < 3 || sal_f % 20 < 2) && sal_f <= 125) {
@@ -9108,7 +9201,7 @@ int main(int argc, char **argv)
         if (cex_n) coche_entorno(mod_coche);
         if (cex_n) coche_luz(mod_coche, estado != TITULO);     /* la luz del entorno 2 en la pintura */
         rc_chr.listo = rc_band.listo = 0; chr_vtx_ult = chr_vtx; chr_us_ult = chr_us; chr_vtx = chr_us = 0;
-        if (chr_ok == 1 && estado != TITULO) {
+        if (chr_ok == 1 && estado != TITULO && !mundo_fuera) {
             uint64_t t0r = timer_us_gettime64(); robot_matrices(&rc_chr, &mod_coche, !cam_ok || cam_coche_visible(&cam));
             if (rc_band.ok) robot_matrices(&rc_band, &mod_coche, 0);
             chr_us += (uint32_t)(timer_us_gettime64() - t0r);
@@ -9118,14 +9211,15 @@ int main(int argc, char **argv)
         prf_v0 = 0;
 #endif
         PRF(0);
-        if (estado != TITULO) nodos_visibles_todos();   /* los del original que caben en el TA */
+        if (estado != TITULO && !mundo_fuera) nodos_visibles_todos();   /* los del original que caben en el TA */
         PRF(1);
-        if (estado != TITULO) sol_prepara();                    /* el rayo hacia el sol de este cuadro */
-        if (estado != TITULO) traf_parpadea(pausa || estado != CARRERA);   /* 4AE5F0 (sin traf_paso: suspendido) */
+        if (estado != TITULO && !mundo_fuera) sol_prepara();                    /* el rayo hacia el sol de este cuadro */
+        if (estado != TITULO && !mundo_fuera) traf_parpadea(pausa || estado != CARRERA);   /* 4AE5F0 (sin traf_paso: suspendido) */
         vib_cuadro();                                           /* el Puru Puru (vib_paso lo dejo en el control) */
         for (l = 0; l < 3; l++) {
             pvr_list_begin(LISTA[l]);
-            if (estado != TITULO) {                             /* en el menu no se ve la etapa */
+            if (fin24) final24_dibuja(l);                       /* el sitio del final y sus objetos (44B890 / 4B5750) */
+            if (estado != TITULO && !mundo_fuera) {             /* en el menu no se ve la etapa */
                 ta_en_etapa = 1;
                 PRF(0);
                 cielo_dibuja(l);                                /* el cielo (y su fundido en la union) */
@@ -9149,12 +9243,12 @@ int main(int argc, char **argv)
                 bo_dibuja(l);                                   /* pajaros y demas de la union (4A9DF0) */
             }
             PRF(4);
-            if ((estado != TITULO && (!cam_ok || cam_coche_visible(&cam))) || (estado == TITULO && menu_coche3d()))
+            if ((estado != TITULO && !mundo_fuera && (!cam_ok || cam_coche_visible(&cam))) || (estado == TITULO && menu_coche3d()) || (fin24 && final_vista()->coche))
 #ifndef DIAG_SIN_COCHE
                 coche_dibuja(l, &mod_coche);
 #endif
             PRF(5);
-            if (estado != TITULO) { uint64_t t0r = timer_us_gettime64(); robot_dibuja(&rc_chr, l); robot_dibuja(&rc_band, l); chr_us += (uint32_t)(timer_us_gettime64() - t0r); }   /* 4879B0 */
+            if (estado != TITULO && !mundo_fuera) { uint64_t t0r = timer_us_gettime64(); robot_dibuja(&rc_chr, l); robot_dibuja(&rc_band, l); chr_us += (uint32_t)(timer_us_gettime64() - t0r); }   /* 4879B0 */
             PRF(6);
 #ifdef DIAG_TRAF
             if (l == 0) traf_vistos = 0;
@@ -9165,7 +9259,7 @@ int main(int argc, char **argv)
                 float zv = dx * ade[0] + dy * ade[1] + dz * ade[2], xv = dx * der[0] + dy * der[1] + dz * der[2];
                 /* el original no recorta por la vista (4AE5F0: solo la distancia en posiciones); aqui el centro con el
                    margen de medio coche (un autobus de 12 m asomaba y desaparecia con el margen fijo de 4 m) */
-                if (estado == TITULO || t->carril < 0 || traf_oculto[i] || zv < -3.0f || zv > 450.0f ||
+                if (estado == TITULO || mundo_fuera || t->carril < 0 || traf_oculto[i] || zv < -3.0f || zv > 450.0f ||
                     fabsf(xv) > zv * (320.0f / fx) + fmaxf(4.0f, largo_traf[t->modelo] + 1.5f)) continue;
 #ifdef DIAG_TRAF
                 if (l == 0) traf_vistos++;
@@ -9179,12 +9273,12 @@ int main(int argc, char **argv)
                 mtraf[t->modelo].remap = NULL; solo_lod = -1;
             }
             PRF(7);
-            if (l == 2 && estado != TITULO) { mat_load(&vista); efectos_dibuja(); }
-            if (l == 2 && estado != TITULO) sol_dibuja();       /* el sol y su destello (40CBC0) */
+            if (l == 2 && estado != TITULO && !mundo_fuera) { mat_load(&vista); efectos_dibuja(); }
+            if (l == 2 && estado != TITULO && !mundo_fuera) sol_dibuja();       /* el sol y su destello (40CBC0) */
             if (l == 2) {
                 int texto = ver || (!hud_ok && estado != TITULO), navi;
                 if (estado == TITULO && !pide_fsp) menu_dibuja();
-                if (hud_ok && estado != TITULO && !fin_on) {       /* en los modos 34 / 35 / 27 nada (428600) */
+                if (hud_ok && estado != TITULO && !fin_on && !mundo_fuera) {       /* en los modos 34 / 35 / 27 nada (428600) */
                     hud_estado_t he;
                     he.tiempo = (int)(tim_cuadros / TIM_HZ + 0.34f); he.crono_ms = cuadros_ms(crono); he.puntos = pt_visible(); he.puntos_estilo = pt_estilo;
                     he.kmh = fis_ok ? (int)fis.velocidad_hud : (int)(yo.v * 3.6f); he.marcha = fis_ok ? fis.marcha : 1;
@@ -9243,6 +9337,7 @@ int main(int argc, char **argv)
                     }
                 }
                 if (estado == META || estado == AGOTADO || estado == FIN) texto = 0;
+                if (fin24) final_dibuja2d();                    /* los creditos del final (capa 7) */
                 fin_dibuja();                                   /* millas, continuar y GAME OVER (demo/fin.c) */
                 if (pausa && estado == CARRERA) menu_pausa_dibuja();   /* menu de pausa encima de todo */
                 {   float ty = variante == 2 && !ver && estado == CARRERA && !pausa ? 104.0f : 18.0f;   /* INFARTO: bajo el marcador */
@@ -9257,7 +9352,7 @@ int main(int argc, char **argv)
             if (l == 0) {                                       /* volumenes de sombra (afectan a lo opaco y recortado) */
                 pvr_list_begin(PVR_LIST_OP_MOD);
                 sombra_tri = sombra_teo = 0;
-                if (estado != TITULO && (!cam_ok || cam_coche_visible(&cam))) {
+                if ((estado != TITULO && !mundo_fuera && (!cam_ok || cam_coche_visible(&cam))) || (fin24 && final_vista()->coche)) {
                     /* en car+F0 como 0x1886e0 (los volumenes van tras cargar la matriz local, como la carroceria) */
                     static matrix_t mf __attribute__((aligned(32))); int i_, j_;
                     for (i_ = 0; i_ < 4; i_++)

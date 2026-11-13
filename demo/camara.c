@@ -155,7 +155,7 @@ void cam_paso(cam_t *c, const cam_tablas_t *t, const cam_entrada_t *in)
         c->fov = c->fov_a4; c->balanceo = c->rol130; c->despl[0] = c->dx_c4; c->despl[1] = c->dy_c8;
         return;
     }
-    if (c->vista == 30) { c->vista = c->elegida; guarda(c, 0); }      /* temporizador 0x12B: la vista elegida; 0xB5: 4833E0(0) */
+    if (c->vista == 30 && !in->agotado) { c->vista = c->elegida; guarda(c, 0); }   /* temporizador 0x12B: la vista elegida; 0xB5: 4833E0(0) */
 
     /* 483110: giro de la vista */
     {   float va = gyc, gd = envuelve(gyb - gyc);
@@ -187,6 +187,13 @@ void cam_paso(cam_t *c, const cam_tablas_t *t, const cam_entrada_t *in)
     }
     mat_ang(&m240, giro, gxb, rolc, piv);
 
+    /* 485830 (PS2 0x178e58, modos 20..22: fin del tiempo): tras 484810, sin 4832F0 ni 484A40 (ni el boton de la vista ni
+       la cuenta +346); fuera de las vistas 0x1A..0x1D guarda la actual (4833E0 con 0x1E cuadros) y toma la 0x1A (luego
+       2057C0(0x16A, 1) y (0x16B, 1): RET en el PS2); despues 485590 con 0x1E cuadros como la de carrera */
+    if (in->agotado) {
+        if (c->vista < 26 || c->vista > 29) { guarda(c, 30); c->vista = 26; }
+        goto ojo_mira;
+    }
     /* 4832F0: temporizadores de las vistas de choque */
     if (c->n340 == 0 && in->choque_nuevo) {
         int16_t n = cuadros(in->choque_dur);
@@ -222,6 +229,7 @@ void cam_paso(cam_t *c, const cam_tablas_t *t, const cam_entrada_t *in)
     if (c->n346 > 0) c->n346--;
 
     /* 485590: ojo y mira locales de la vista */
+ojo_mira:
     v = VISTA(t, c->vista);
     memcpy(ent, v, sizeof ent);
     if (c->vista == 1) {

@@ -1301,8 +1301,17 @@ cuadro de logica; tablas 'CAM1' de PARAM.DAT, `tools/conv_param.py`, localizadas
   da la camara de antes con el mismo guion). Referencia visual: la pelicula de atraccion de MV.PS2 (entrada 1,
   segundo 14,5: persecucion con derrape) encuadra el coche como la vista 2 nueva (coche ~1/3 del ancho, horizonte a
   media pantalla).
+- Camara del fin del tiempo (modos 20..22: 485830 = PS2 0x178e58, desde la tabla de 0x178b28; HECHA 2026-11-13,
+  `cam_entrada_t.agotado` de demo/camara.c): el coche y 484810 como la de carrera, sin 4832F0 ni 484A40 (sin el boton
+  de la vista, sin las vistas del choque y sin descontar +346); fuera de las vistas 0x1A..0x1D guarda la actual
+  (4833E0 con 0x1E cuadros, 0x17a338) y toma la 0x1A (ojo (0; 1,6; 3,9), mira (0; 1,1; 0), FOV 60 grados, con la
+  carroceria: CAM1 de PARAM.DAT); despues 2057C0(0x16A, 1) y (0x16B, 1) (RET en el PS2) y 485590 con 0x1E cuadros
+  (0x17a3d0): la mezcla de 30 cuadros de la vista de carrera a la 0x1A. Antes la demo seguia con la de carrera.
+  Flycast (resultados.sh, OUTRUN2SP preset 1, fin del tiempo en SANF): capturas cada 0,5 s desde el fin del tiempo: de
+  la vista 2 (ojo 6,5 m detras) a la 0x1A (mas cerca y mas baja) en medio segundo y quieta despues; 25, 26, 27 y el
+  frontal como antes, 0 "Out of memory".
 - PENDIENTE: interior del coche para la vista 1; camara de salida con el temporizador real (8367BC) y camaras de
-  fin (485830; 485470 es la del final de los recreativos, modo 24, que la consola no usa: ver Escena de la meta); desplazamiento del centro de proyeccion +C4/+C8 (cero en las vistas usadas).
+  fin (485470 es la del final de los recreativos, modo 24, que la consola no usa: ver Escena de la meta); desplazamiento del centro de proyeccion +C4/+C8 (cero en las vistas usadas).
   Hecho: planos cercano 0,1 y lejano 4000 del original (seccion Graficos).
 
 ## Coches: materiales, colores y reflejo
@@ -2125,8 +2134,7 @@ su caja y el fundido a negro, y la salida al menu con START o a los 600 cuadros,
   los sucesos del fin del tiempo (modo 20, 440A10) que no son coches (0x186, 0x187, 0x20..0x119, 0x11A..0x133,
   0x16A..0x17E: la demo no tiene esos sucesos sueltos; los coches, 8..0x1F, HECHO en la demo 40: el del jugador y el
   trafico se quedan quietos, sin fisica ni giro de ruedas; hasta la demo 39 el coche seguia con el freno a 0,6,
-  PROVISIONAL, y seguia andando tras el fin del tiempo); la camara del fin del tiempo (485830, vistas 1A..1D:
-  la demo sigue con la de carrera); la pantalla
+  PROVISIONAL, y seguia andando tras el fin del tiempo); la pantalla
   de carga del modo 30 / 28 (0x480000); START en los modos 19 / 20
   (43F980 -> 43F990(0x1D): sin localizar la peticion; antes la demo volvia al menu con START, inventado).
 - 1001d8(0, 0xF0, 0.0) del modo 27 (0x1baff0; PC 42E020, el volumen de la musica): en el PS2 solo llama a 0x100110(0)
@@ -2211,8 +2219,8 @@ etapas, salida BEAC`, BAND1.DAT en el hueco de la union; RAM libre 1419..1490 KB
   "Fin de la partida" sobre las palmeras, capa 0, modo 1; tools/conv_sp.py -> GOVSP.DAT, 240 cuadros = los 0xF0 pasos
   del modo), la voz 0x954 una vez y al acabar el modo 28 -> el menu. El original pasa antes por el final de recreativa
   (24, solo tras la meta), los resultados (25: suceso 0x188, funcion 0x15 / 0x50, banco 0x34) y la entrada de nombre
-  (26, solo con 450240 = 1: el fin del tiempo): el 25 y el 26 HECHOS (ver abajo), el 24 SIN PORTAR (la meta pasa
-  directa al 25); en la pausa
+  (26, solo con 450240 = 1: el fin del tiempo): el 25 y el 26 HECHOS (ver abajo), el 24 HECHO en parte (2026-11-13,
+  ver Final de recreativa de OUTRUN2SP abajo); en la pausa
   REINTENTAR es el modo 30 (la salida otra vez) y ABANDONAR el modo 27 GAME OVER (HECHO 2026-11-11, fin_game_over de
   demo/fin.c: la carrera suspendida y, con 450240 = 7, la escena 2C000B de la consola, 0x1a051c; 0xF0 pasos y la voz
   0x954) y despues al menu (el frontal de recreativa, modo 10, SIN PORTAR).
@@ -2295,10 +2303,8 @@ etapas, salida BEAC`, BAND1.DAT en el hueco de la union; RAM libre 1419..1490 KB
     suceso del modo de atraccion con el banco 0x32 ADV_CVT, sin portar) y el frontal de rankings del PC
     (frontend_rankings.cpp: el menu de la consola del PC, distinto del PS2). DESVIACION: fuera del ranking el original
     guarda el nombre en el registro de antes de la tabla (0x1fb970 con el puesto -1); la Dreamcast no.
-- SIN PORTAR: el final de recreativa (modo 24: AUTOSCENE \AS\as_E_xx, 485470, escenas 3D con los fondos END_*_STAGE:
-  modelo de la etapa del final, el coche, el piloto y la acompanante con movimientos del guion, camara y luces de
-  5A6AB8, escena 2D de 638DF0 en la capa 7; race_ending.cpp y race_autoscene.cpp; no cabe junto a lo demas sin portar
-  antes los guiones AS.PS2). La meta pasa directa al 25.
+- Final de recreativa (modo 24): HECHO en parte (2026-11-13), ver Final de recreativa de OUTRUN2SP abajo; sin la
+  pareja del final.
 - Etapas al reves (descriptores 30..59; SEG34..SEG65), HECHO 2026-11-11: sus tablas de aparicion y de velocidad (+0x80
   / +0x84) estan en el ELF; lo que el ELF deja en la BSS son sus listas de puntos fijos (4EF880: 0x5d6028..), y por eso
   conv_trafico.py daba el registro entero vacio (sin trafico). Las rellena la rutina 0x1f2110 (la llama la puesta a cero
@@ -2403,6 +2409,57 @@ memory", RAM del menu igual que antes (939 KB libres).
   0x1b9710, 0x1bbc40, 0x1c29c4, 0x1fc68c, 0x1fd684, 0x200174 y 0x21cc18 / 0x21ccc0: sin seguir); el balance (arriba);
   689C68 ([7C24BC]);
   red, varios jugadores y la pagina 84A218.
+
+### Final de recreativa de OUTRUN2SP (modo 24, 2026-11-13)
+
+Tras la meta del juego OutRun de OUTRUN2SP (19 -> 33 -> 24 -> 25): demo/final.c (logica y guion) y final24_* de
+demo/main.c (RAM, modelos y dibujo); datos de tools/conv_final.py: FINAL.DAT, FINE0..9.DAT, FINPROP.DAT y STAFF.DAT
+(nombres nuevos; regenera.py paso `final`). Fuente: race_ending.cpp / race_autoscene.cpp linea a linea, contrastados
+en SLES-53998:
+| PC | PS2 | que |
+|---|---|---|
+| 49A660 / 49A710 / 4527A0 | 0x1ba4d8 / 0x1ba5f0 / 0x1ba6a0 (tabla de modos 0x3f8e50) | init, control y salida del modo 24 |
+| 452B10 | 0x19b6d0 | temporizador [0x5a2020] = 8 |
+| 4527F0 | 0x19bae0 | columna = (450380(8) - 0xA) % 5, + 5 con los presets 0 / 2; variante 1: id = [0x3e9048 + columna x 4], juego de movimientos 1 |
+| 5A4830 + id x 0x4C | 0x3e7910 + id x 0x4C | +0 escena AUTOSCENE, +8 15 recursos, +0x44 grupo de movimientos (4F2020), +0x48 coche |
+| 638DF0 | 0x35c5c8 | escena 2D de cada final (banco 0x43 STAFFROLL_CVT: los creditos), capa 7, modo 1 (0x114b68) |
+| 5A46A0 | 0x3e7780 + columna x 16 | el sitio: recurso y nombre (END_5A_STAGE.. de object_db_bin) |
+| 4524E0 | 0x19b740 ([0x556f18], tabla de saltos 0x3e76a0) | estados 0..6 (ver demo/final.c) |
+| 717D68 + escena x 12 | 0x3b5680 + escena x 12 | filas AUTOSCENE {1, ruta, 0} (\AS\as_e_05..as_e_11, as_SPE_*) |
+| 4B6BD0 | 0x28baa8 | reloj del guion (1 / 60 = 0x3c888889; fin en cuadros / ritmo de la cabecera) |
+| 4B5180 / 483E10 | 0x28bce0 / 0x17b540 | camara del guion: ojo, mira, balanceo, FOV = 2 atan(([pista] x 0,5) / (focal x 0,03937)) a +E0 / +EC / +130 / +A4 |
+| 4B5670 / 4B5750 | 0x28c198.. | canales de los nodos (9 valores y la visibilidad) y su dibujo T(+10) Rz Ry Rx(+1C) |
+| 4B5FF0 / 4B6320 / 448CD0 | 0x422438.. / object_db_bin | tokens de los nodos: piezas del coche BD0000.., ojos BD001C.., KEM BD0020, objetos (0xD0nnnn: obj_end_property) |
+Lo que se ve (Flycast, tools/prueba/final.sh con un GDI de -DPRUEBA_PILOTO_MENU -DPRUEBA_NODO=13 -DPRUEBA_FIN=300
+-DPRUEBA_SIN_TIEMPO; OUTRUN2SP preset 1, meta D en FLOR): GOAL y la escena de la meta (19) como antes, despues la plaza
+de San Pedro de END_5E_STAGE (columna 3, final 6, guion 0x19 = as_e_07, 1200 cuadros) con la camara del guion, el
+coche del jugador (F50) colocado por el nodo CAR1_BODY con sus ruedas, los creditos de 0x430001 (la imagen de la
+camara de video: FINE, la bateria, AUTO, los nombres) en la capa 7 y la musica de la meta (MUS65) que sigue sonando;
+al acabar los creditos el modo 25 (el mapa de la ruta), el 27 y la vuelta al frontal. 0 "Out of memory".
+RAM y VRAM: el curso sale entero al empezar el 24 (curso_fuera; la etapa tambien: mundo_fuera, nada del curso se
+dibuja ni se consulta hasta volver al menu); el sitio, sus objetos y FINAL.DAT en el hueco de la etapa (FINE3: 1003 KB
+de 8116 tras subir las texturas), las tablas de STAFF.DAT en el hueco de la union prestado; VRAM libre 507 KB con el
+sitio subido. Sin texeles en la RAM (van a la VRAM al leer).
+Diferencias y SIN PORTAR:
+- La pareja del final (registros de tipo 2 del guion: CHR_MAL / CHR_FAL, personajes 0x10 / 0xD de 0x36f7d8, con los
+  movimientos del grupo de la fila: mot_E05.. de ANIMS.PS2; sucesos 1 = 4F2280 / 4F1D30 / 4F1E30 / 4ED890 / 4F1E60 y
+  487D10 en la matriz de sus poses): SIN PORTAR. Hace falta ademas lo de rob_disp: la cara por objeto (514830 con la
+  mezcla 405450 de dos caras, FACE_MAL_* = 0xCC00nn de object_db_bin), las manos por objeto (514800: HAND_* con los
+  objetos que llevan en la mano: tulipanes, el ramo) y los ojos (514880 desde los nodos BD001C..F): sin ellos los
+  personajes salen sin cara ni manos. robot.c tiene el motor de movimientos; tools/conv_chr.py convierte la pareja
+  (los objetos de mano de -1 de estos personajes no los admite aun).
+- El fondo de los presets 0 / 2 (4522D0, [0x3e7820 + columna x 24]: un objeto lejano en (0, -100, 0)) y las luces del
+  final (4523E0: tres luces de 5A6AB8 por final y columna; los modelos llevan la luz de tools/modelo.py en los
+  vertices): SIN PORTAR.
+- El fundido del guion (canal 1 del registro de tipo 5 -> 4AF520), los sonidos de los sucesos 2 / 4 (4249F0), el humo
+  KEM (4208A0), las puertas (car+164 / +166) y las luces del coche del final (car+330), las ranuras de matriz de los
+  nodos (+34: las usan los robots) y el bloqueo 0x10000 del final 6 (cuadro 0x460): SIN PORTAR.
+- PROBABLE: las ruedas car+40 / 42 / 44 / 46 (giro x de TIRE_FL / FR / RL / RR) como el giro de las ruedas 0..3 de la
+  demo y car+32 (giro y de BRCL_FL) como la direccion; K 0x6282c0 = 65536 / 2 pi. Los objetos de obj_end_property se
+  convierten por registro sin la jerarquia de sus nodos (cajas, MOAI, PILLAR, OBENTO: un nodo).
+- Las variantes 0 y 2 (Contrarreloj e INFARTO: 0x3e9070 / 0x3e9098 y 45BF30) no salen: con ellas la meta pasa directa
+  al 25 como antes (final_columna).
+- Los estados 0 / 1 (object_db y las cargas) se cumplen en el mismo cuadro: la Dreamcast lee de un tiron al entrar.
 
 ## Ultimo cambio verificado
 

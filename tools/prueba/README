@@ -22,6 +22,9 @@ Scripts (todos: <disc.gdi> [pantalla de Xvfb, por defecto 91] [carpeta de salida
            sp_c000..; error si la consola serie no dice "juego OUTRUN2SP, preset 1" y "CURSO: arbol 1".
   resultados.sh  OUTRUN2SP (como sp.sh) con el acelerador pisado hasta el fin del tiempo: el modo 25 (el mapa de la
            ruta, re_0..re_7), el GAME OVER (re_go) y la vuelta al frontal de recreativa (re_fsp).
+  final.sh  el final de recreativa de OUTRUN2SP (modo 24): GDI con -DPRUEBA_PILOTO_MENU -DPRUEBA_NODO=13 -DPRUEBA_FIN=300
+           -DPRUEBA_SIN_TIEMPO, OUTRUN2SP preset 1 hasta la meta D (FLOR), el final (fi_00..fi_14, FOTOS=n), los resultados
+           (fi_25), el GAME OVER (fi_go) y la vuelta al frontal (fi_fsp); error sin "FINAL: modo 24" o "FIN: modo 25".
   MODO_JUEGO=n delante de cualquiera: n veces a la derecha en ELEGIR MODO (2 INFARTO, 3 CONTRARRELOJ).
 Cada uno arranca su Xvfb si el display no existe (se pueden correr a la vez con displays distintos), usa una
 configuracion y una VMU nuevas (en la carpeta de salida) y deja alli flycast.txt con la consola serie de la demo

@@ -23,6 +23,7 @@ MUSICA = list(range(0, 29)) + [30] + list(range(33, 61)) + [61, 62, 63, 65, 66]
 PARTES = 4                                                       # conv_union.py --parte=k/n (al menos; o --jobs)
 SP = ['CARGASP%d.DAT' % k for k in range(4)] + ['GOVSP.DAT', 'SPFE.DAT', 'RUTASP.DAT', 'RANKSP.DAT', 'NOMTX.DAT'] + \
      ['NOM5%s.DAT' % x for x in 'ABCDE']                       # (los de conv_sp.py)
+FINAL = ['FINAL.DAT', 'FINPROP.DAT', 'STAFF.DAT'] + ['FINE%d.DAT' % k for k in range(10)]   # (conv_final.py)
 UNIONES = ['UNIONES.PAK', 'CURSO.DAT', 'COLLR.DAT', 'COLBK.DAT', 'BKD.DAT', 'SOL.DAT']
 # segundos aproximados de cada paso en un nucleo (para el porcentaje y el tiempo que queda; medidos en Linux)
 PESO = {'union': 4500, 'curso': 650, 'seg': 450, 'video_ts': 150, 'video_attr': 450, 'mus': 20, 'coche': 15,
@@ -128,6 +129,8 @@ def paso(C, n, log):
         ej(T('conv_sp.py'), ISO, t, prev('sp'))
         mueve(D, tj('CARGASP?.DAT'), tj('GOVSP.DAT'), tj('SPFE.DAT'), tj('RUTASP.DAT'), tj('RANKSP.DAT'), tj('NOM5?.DAT'),
               tj('NOMTX.DAT'))
+    elif n == 'final':                                   # el final de recreativa de OUTRUN2SP (modo 24, demo/final.c)
+        ej(T('conv_final.py'), ISO, t); mueve(D, *[tj(f) for f in FINAL])
     elif n == 'bo': ej(T('conv_bo.py'), ISO, t); mueve(D, tj('BO*.DAT'))
     elif n == 'trafico': ej(T('conv_trafico.py'), ISO, t); mueve(D, tj('TRAF*.DAT'), tj('TAPD.DAT'))
     elif n.startswith('coche'):
@@ -205,7 +208,7 @@ def regenera(iso, D, W, jobs=4, informe=print):
     chrs = C.saca(py(os.path.join(TOOLS, 'conv_chr.py'), iso, '--lista')).split()   # CHRPAR y las parejas
     for fs, n in ((['EFECTOS.DAT'], 'efectos'), (chrs, 'chr'), (['BAND.DAT', 'BAND1.DAT'], 'band'), (['PARAM.DAT'], 'param'),
                   (['META.DAT'], 'meta'), (['FIN.DAT', 'GOVER.DAT'], 'fin'),
-                  (SP, 'sp'),
+                  (SP, 'sp'), (FINAL, 'final'),
                   (['SALIDA.DAT'], 'salida'), (['INFARTO.DAT', 'HAHUD.DAT', 'VOCESH.DAT'], 'infarto'), (['BO.DAT'], 'bo'),
                   (['TRAFC.DAT', 'TAPD.DAT', 'TRAF0.DAT'], 'trafico'), (['MVTS.VQV'], 'video_ts'), (['MVATTR.VQV'], 'video_attr')):
         if not hay(D, *fs): falta.append(n)
@@ -291,7 +294,7 @@ def regenera(iso, D, W, jobs=4, informe=print):
     ok = True
     nec = ['BAND.DAT', 'BAND1.DAT', 'BKD.DAT', 'BO.DAT'] + chrs + \
           'COCHES.DAT COLBK.DAT COLLR.DAT CURSO.DAT EFECTOS.DAT FIN.DAT GOVER.DAT HAHUD.DAT HUD.DAT INFARTO.DAT MENU.DAT META.DAT MODOV.DAT MVATTR.VQV MVTS.VQV PARAM.DAT SFX.DAT SEGS.PAK SOL.DAT TAPD.DAT TRAFC.DAT UNIONES.PAK VMU.DAT VOCES.DAT VOCESH.DAT'.split() + \
-          ['COCHE%02d.DAT' % k for k in range(15)] + ['MUS%d.ADP' % k for k in MUSICA] + SP
+          ['COCHE%02d.DAT' % k for k in range(15)] + ['MUS%d.ADP' % k for k in MUSICA] + SP + FINAL
     for f in nec:
         if not hay(D, f): informe('FALTA %s' % f); ok = False
     ls = sorted(os.listdir(D))

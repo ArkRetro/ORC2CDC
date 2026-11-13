@@ -28,6 +28,7 @@ typedef struct {
     int   grua;              /* car+D68 cuadros de grua                                             */
     int   boton_vista;       /* entrada 0x40000 (cambio de vista) pulsada en este paso              */
     int   salida;            /* 1 = camara de la salida (485250: temporizador > 180)                */
+    int   agotado;           /* 1 = camara del fin del tiempo (modos 20..22: 485830 = PS2 0x178e58)   */
     const float *guion;      /* 486EF0 de la escena (82E7D0 == 1): ojo, mira (marco del coche), +130 y +A4; o NULL */
     float (*suelo)(const float *p);  /* 43EB60: altura del suelo bajo el punto p (mundo)            */
 } cam_entrada_t;
