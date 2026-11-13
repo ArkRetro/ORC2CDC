@@ -112,13 +112,15 @@ def lee(fn):
 def escribe(d, fn, ini, listas, mapa):
     """reescribe el ORD7 con la tabla de secciones XOR"""
     h = list(d['h']); h[12] = (len(ini) - 1) | XOR if len(ini) > 1 else 0
-    with open(fn, 'wb') as f:
+    tmp = fn + '.tmp'                                           # (cortado a medias, el fichero de antes sigue entero)
+    with open(tmp, 'wb') as f:
         f.write(b'ORD7' + struct.pack('<13I', *h))
         for k in ('texs', 'mallas', 'verts', 'ruta', 'nodos', 'carteles'): f.write(d[k])
         if len(ini) > 1:
             f.write(np.asarray(ini, '<u4').tobytes()); f.write(bytes(listas)); f.write(b'\0' * (-f.tell() % 2))
             f.write(np.asarray(mapa, '<u2').tobytes())
         f.write(b'\0' * (-f.tell() % 4)); f.write(b'\0' * (-f.tell() % 32)); f.write(d['blob'])
+    os.replace(tmp, fn)
 
 def altura_punto(a, x):
     """como altura_punto de demo/main.c: el perfil de -izq-2 a der+2 y fuera las alturas exteriores hasta el limite"""
