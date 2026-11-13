@@ -7831,8 +7831,8 @@ static void coche_dibuja(int l, matrix_t *mc)
    coche). La pareja (CHRppaa.DAT) la elige y la carga robot_carga al empezar cada carrera (mas abajo). */
 static int chr_ok;
 /* tablas fijas (nada de memoria nueva despues de la ruta: la ruta crece por arriba del monton) */
-#define CHR_PZ 96                                               /* piezas (CHR0505.DAT de SLES-53998: 96) */
-#define CHR_MT 200                                              /* matrices de las piezas (CHR0517.DAT: 194) */
+#define CHR_PZ 192                                              /* piezas (CHR0505.DAT: 96; FINCHR2C.DAT del final: 177) */
+#define CHR_MT 320                                              /* matrices de las piezas (CHR0517.DAT: 194; FINCHR2C.DAT: 307) */
 #define CHR_MAT 16                                              /* materiales distintos (3) */
 static matrix_t chr_S[CHR_MT] __attribute__((aligned(32)));    /* por pieza y matriz: vista x coche x asiento x paleta */
 static int32_t chr_L[CHR_MT][3];                                /* la luz en el marco de cada una (x 256) */
