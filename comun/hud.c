@@ -772,8 +772,8 @@ void hud_dibuja(const hud_estado_t *e)
                       zcapa = 90.0f; cifras(t, grupo_puntos(t, e->puntos_estilo), b, H->uso[t].x, H->uso[t].y, 1); }
         return;
     }
-    /* capa 2: mapa de ruta y tacometro */
-    dibuja("RUTA5_FONDO", 0, 0, 1);
+    /* capa 2: mapa de ruta (0x1be240: el fondo en la capa 2) y tacometro */
+    if (e->ruta) dibuja(e->ruta == 2 ? "RUTA15_FONDO" : "RUTA5_FONDO", 0, 0, 1);
     if (H->taco >= 0) {
         cuadro = (int)(e->rpm * 180.0f / 10000.0f); if (cuadro < 0) cuadro = 0; if (cuadro > 179) cuadro = 179;
         grupo(H->taco, cuadro, -219, 127, 1);
@@ -781,8 +781,19 @@ void hud_dibuja(const hud_estado_t *e)
     zcapa = 30.0f;
     /* capa 3: paneles y etapas */
     if (!e->infarto && !e->mision) { dibuja("PANEL_TIEMPO", 0, 0, 1); dibuja("PANEL_PUNTOS", 0, 0, 1); }
-    for (t = 0; t < e->etapa; t++) dibuja("RUTA5_HECHA", 0, t, 1);
-    dibuja("RUTA5_ACTUAL", 0, e->etapa, (e->cuadro & 32) ? 1.0f : 0.4f);
+    /* 0x1be240: la casilla actual (2C0070 / 2C006D en la capa 3, su cuadro = la casilla) y las de los niveles
+       anteriores (2C006F / 2C006C) hasta la primera sin llegar o la actual; el ultimo nivel, 0x1bd098: 4 o 14 (presets
+       2 / 3). Sin parpadeo (antes la DC hacia parpadear la actual y ponia la casilla del nivel, no la de la etapa) */
+    if (e->ruta) {
+        const char *ac = e->ruta == 2 ? "RUTA15_ACTUAL" : "RUTA5_ACTUAL", *he = e->ruta == 2 ? "RUTA15_HECHA" : "RUTA5_HECHA";
+        int ult = e->ruta == 2 ? 14 : 4;
+        if (e->casilla >= 0) dibuja(ac, 0, e->casilla, 1);
+        for (t = 0; t <= ult; t++) {
+            int v = e->casillas[t];
+            if (v < 0 || v == e->casilla) break;
+            dibuja(he, 0, v, 1);
+        }
+    }
     zcapa = 40.0f;
     /* capa 4: REV (solo con cambio manual) */
     if (e->manual) { dibuja("REV_TEXTO", 0, 0, 1); dibuja("REV_LUZ", 0, 0, 1); if (e->rev_on && (e->cuadro & 8)) dibuja("REV_ON", 0, 0, 1); }

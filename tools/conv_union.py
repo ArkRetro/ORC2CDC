@@ -400,7 +400,7 @@ def escribe_curso(sal, regs, extras=()):
         b += b'\0' * (4 + 4 + 16 + 32 + 8 + 4 + 24 * NIEBLA_MAX - len(b)) + struct.pack('<2f', *r['sol'])
         # entorno: banderas de efectos, transicion (posicion y segundos), metros de la union hasta ella, las tres
         # luces (soles) y la niebla del cielo (lista 0)
-        b += struct.pack('<IHbxf', r['clima'], r['trans'][0], r['trans'][1], r['trans_m'])
+        b += struct.pack('<IHbBf', r['clima'], r['trans'][0], r['trans'][1], r.get('m74', 0), r['trans_m'])
         for v in r['soles']: b += struct.pack('<16f', *v)
         b += struct.pack('<I', len(r['niebla0']))
         for p0, p1, modo, d0, d1, c0, c1 in r['niebla0']: b += struct.pack('<2HB3x2f2I', p0, p1, modo, d0, d1, c0, c1)
@@ -591,6 +591,41 @@ def arbol_ta(A, code):
     n, o = conv_menu._r077(d, c)
     return [(q[1], q[7], q[8], q[11], q[12]) for q in (struct.unpack_from('<30i', d, o + 0x78 * k) for k in range(n))]
 
+# OUTRUN de la consola con los cursos seguidos (tablero 0x24, juegos 2 / 3 -> preset 3 / 2 de 0x2a6978): START
+# (0x1b63a0) llama a 0x1760c0 con 6 / 5 y este lee la categoria "%s_course" (0x3cb528) de csc_data_2_ren /
+# csc_data_cvt_ren: las de sin _TA, con los dos hijos iguales (la rama que se tome lleva a la etapa siguiente). En
+# CURSOTA.DAT con id 290 (preset 3, OutRun 2) y 291 (preset 2, OutRun 2 SP)
+ARBOLES_REN = {290: ('csc_data_2_ren', 'csc_data_2_ren_course'), 291: ('csc_data_cvt_ren', 'csc_data_cvt_ren_course')}
+
+def crudos(A, i):
+    """los registros de 0x78 bytes (30 enteros) del arbol i tal cual estan en SCRIPTS (None en la etapa sola de la
+    Contrarreloj, que no tiene registros en el disco: 44D720 con 635F34)"""
+    import conv_menu
+    def cat(f, c):
+        d = A.datos([x for x in A.busca('*\\' + f + '.bin') if x.paquete.startswith('SCRIPTS')][0])
+        n, o = conv_menu._r077(d, c)
+        return [struct.unpack_from('<30i', d, o + 0x78 * k) for k in range(n)]
+    if i == 0: return cat('csc_data_2', 'csc_data_2_course')
+    if i == 1: return cat('csc_data_cvt', 'csc_data_cvt_course')
+    if i in ARBOLES_REN: return cat(*ARBOLES_REN[i])
+    if 100 <= i < 200:
+        e = [x for x in A.busca('*Races.bin') if x.paquete.startswith('SCRIPTS')][0]; d = A.datos(e)
+        n, o = conv_menu._r077(d, 'Races'); nc, nrel = struct.unpack_from('<2I', d, 0)
+        rel = {struct.unpack_from('<I', d, 8 + 8 * k)[0]: struct.unpack_from('<I', d, 12 + 8 * k)[0] for k in range(nrel)}
+        cats = {struct.unpack_from('<I', d, 8 + 8 * nrel + 12 * k + 8)[0]: struct.unpack_from('<I', d, 8 + 8 * nrel + 12 * k + 4)[0]
+                for k in range(nc)}
+        t = rel[o + 0x44 * (i - 100) + 0x18]
+        return [struct.unpack_from('<30i', d, t + 0x78 * k) for k in range(cats[t])]
+    code = i - 200
+    if code < 0x3c: return None
+    if code < 0x50: return cat(('OR2_goals', 'SP_goals', 'OR2_reverse_goals', 'SP_reverse_goals')[(code - 0x3c) // 5], TA_METAS[(code - 0x3c) % 5])
+    return cat(*(('csc_data_2_ren', 'csc_data_2_ren_course_TA'), ('csc_data_2_ren', 'csc_data_2_reverse_ren_course_TA'),
+                 ('csc_data_cvt_ren', 'csc_data_cvt_ren_course_TA'), ('csc_data_cvt_ren', 'csc_data_cvt_reverse_ren_course_TA'))[code - 0x50])
+
+def arbol_ren(A, i):
+    """registros (como arbol) del curso seguido del OUTRUN de la consola (ARBOLES_REN)"""
+    return [(q[1], q[7], q[8], q[11], q[12]) for q in crudos(A, i)]
+
 def tabla_bunki(A):
     """tabla de los carteles de destino por tipo de registro (PS2 0x3f9da0, PC 5D4FD8: 16 bytes por tipo = el +0 del
     descriptor de tramo del destino; el tipo 0x42 es el de un hijo -1, p.kind de race_area.cpp): recurso
@@ -667,7 +702,7 @@ def etapa_ficheros(A, ti, dsal):
         d = bytes(seg.m[o:o + s])
         if d[:8] == b'COLI0200': conv_coli.escribe(d, os.path.join(dsal, 'COL%02d.DAT' % n), 0); break
 
-def cursos(A, dsal, ids, con_uniones=True, con_tramos=False, parte=(0, 1), nombre='CURSO.DAT', bk_desde=0, solo_bk=None):
+def cursos(A, dsal, ids, con_uniones=True, con_tramos=False, parte=(0, 1), nombre='CURSO.DAT', bk_desde=0, solo_bk=None, bk_hasta=1 << 30):
     """CURSO.DAT con el arbol del modo OutRun y los de ids (1: OUTRUN2SP, csc_data_cvt; 100 + i: el curso del
     registro i de Races.bin), y las uniones que les faltan (BKnn.DAT desde 15; las 15 del modo OutRun conservan su
     clave). Los hijos van como indices del arbol (runtime_apply_course_data_44d720 los busca por clave, +0x24 / +0x28)
@@ -724,7 +759,11 @@ def cursos(A, dsal, ids, con_uniones=True, con_tramos=False, parte=(0, 1), nombr
     o2r = registros(o2, False)
     extras = []
     for i in ids:
-        rs = registros(arbol(A, 0, 'csc_data_cvt.bin') if i == 1 else arbol_ta(A, i - 200) if i >= 200 else arbol_mision(A, i - 100), 100 <= i < 200)
+        rs = registros(arbol(A, 0, 'csc_data_cvt.bin') if i == 1 else arbol_ren(A, i) if i in ARBOLES_REN else
+                       arbol_ta(A, i - 200) if i >= 200 else arbol_mision(A, i - 100), 100 <= i < 200)
+        # +0x74 del registro: la casilla del mapa de ruta del HUD es +0x74 - 1 si no es 0 y si no la clave (0x1bd2a8;
+        # solo las metas del reves de la Contrarreloj lo llevan)
+        for r, q in zip(rs, crudos(A, i) or ()): r['m74'] = q[29]
         extras.append((i, rs))
         print('arbol %d: %s' % (i, ' '.join('%s/BK%02d' % (r['zona'], r['f_bk']) for r in rs)))
     if parte[0] == 0:
@@ -736,12 +775,12 @@ def cursos(A, dsal, ids, con_uniones=True, con_tramos=False, parte=(0, 1), nombr
         for r in rs:
             if con_tramos and not os.path.exists(os.path.join(dsal, 'SEG%02d.DAT' % r['seg'])): etapa_ficheros(A, r['_ti'], dsal)
             f = os.path.join(dsal, 'BK%02d.DAT' % r['f_bk'])
-            if con_uniones and r['f_bk'] >= max(15, bk_desde) and (solo_bk is None or r['f_bk'] in solo_bk) and r['f_bk'] not in hechos and not os.path.exists(f) and r['f_bk'] % parte[1] == parte[0]:   # (las ya hechas se quedan)
+            if con_uniones and max(15, bk_desde) <= r['f_bk'] < bk_hasta and (solo_bk is None or r['f_bk'] in solo_bk) and r['f_bk'] not in hechos and not os.path.exists(f) and r['f_bk'] % parte[1] == parte[0]:   # (las ya hechas se quedan)
                 union_fichero(A, r['_c'], f + '.tmp', descs[r['_ti']], ri, rd, so); hechos.add(r['f_bk'])
                 os.replace(f + '.tmp', f)                 # (entero o nada: se puede cortar y seguir)
             if r['f_col'] == -2 and parte[0] == 0 and not os.path.exists(os.path.join(dsal, 'COLLR.DAT')):
                 conv_coli.escribe(coli_bytes(A, '\\BK\\coli_LRBK_PALM_bin'), os.path.join(dsal, 'COLLR.DAT'), 1)
-            if r['f_col'] >= max(15, bk_desde) and r['f_col'] % parte[1] == parte[0] and not os.path.exists(os.path.join(dsal, 'COLBK%02d.DAT' % r['f_col'])):
+            if max(15, bk_desde) <= r['f_col'] < bk_hasta and r['f_col'] % parte[1] == parte[0] and not os.path.exists(os.path.join(dsal, 'COLBK%02d.DAT' % r['f_col'])):
                 ct = cadena(E, u32(E, base2 + 4 * r['_c'][2]) + 0x0c)
                 conv_coli.escribe(coli_bytes(A, ct), os.path.join(dsal, 'COLBK%02d.DAT' % r['f_col']), 1)
 
@@ -758,8 +797,10 @@ def main():
         nom = [a.split('=')[1] for a in sys.argv if a.startswith('--curso=')]   # --curso=CURSOTA.DAT: solo los arboles >= 200
         bd = [int(a.split('=')[1]) for a in sys.argv if a.startswith('--bk-desde=')]   # --bk-desde=n: solo uniones >= n
         sb = [set(int(x) for x in a.split('=')[1].split(',')) for a in sys.argv if a.startswith('--solo-bk=')]   # esas uniones
+        bh = [int(a.split('=')[1]) for a in sys.argv if a.startswith('--bk-hasta=')]   # --bk-hasta=n: solo uniones < n
         cursos(Assets(arg[0]), arg[1], [int(x) for x in ar[0].split('=')[1].split(',')], '--sin-uniones' not in sys.argv,
-               '--con-tramos' in sys.argv, parte, nom[0] if nom else 'CURSO.DAT', bd[0] if bd else 0, sb[0] if sb else None); return
+               '--con-tramos' in sys.argv, parte, nom[0] if nom else 'CURSO.DAT', bd[0] if bd else 0, sb[0] if sb else None,
+               bh[0] if bh else 1 << 30); return
     curso(Assets(arg[0]), arg[1], '--sin-tramos' not in sys.argv, '--solo-curso' in sys.argv)
 
 if __name__ == '__main__':

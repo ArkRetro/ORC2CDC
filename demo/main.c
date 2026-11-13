@@ -1954,7 +1954,10 @@ static int pide_fsp;                                            /* modo 28 -> 10
                                                                    cuanto el hueco de la union queda libre */
 static int preset_curso;                                        /* [78024C] */
 static int preset_de_juego(int j) { static const int8_t P[4] = { 1, 0, 3, 2 }; return P[j & 3]; }   /* 0x2a6978 */
-static int arbol_de_preset(int p) { return p == 0 || p == 2 ? 1 : 0; }   /* 0x1760c0: csc_data_cvt (1) / csc_data_2 (0) */
+/* el arbol de START (0x1b63a0: preset 0 / 1 / 2 / 3 -> 0x1760c0(0 / 1 / 5 / 6), categoria "%s_course" de 0x3cb528):
+   csc_data_cvt (arbol 1), csc_data_2 (0), csc_data_cvt_ren_course (291) y csc_data_2_ren_course (290), los cursos
+   seguidos del OUTRUN de la consola (tablero 0x24, juegos 3 / 2; conv_union.ARBOLES_REN, en CURSOTA.DAT) */
+static int arbol_de_preset(int p) { return p == 0 ? 1 : p == 2 ? 291 : p == 3 ? 290 : 0; }
 #define TIM_PRESET preset_curso                                 /* 0x176018: preset 0 / 1 / 2 / 3 -> fila 0 / 1 / 5 / 6 (TIM1 0..3) */
 #define TIM_FILA (variante == 1 ? 0 : variante == 2 || variante == 5 ? 1 : variante == 0 || variante == 7 ? 2 : 0)
 static int tim_dif;                                             /* [7C24C0]: licencia +E0 */
@@ -5333,7 +5336,7 @@ typedef struct {
     /* entorno (ver "entorno del original"): banderas de efectos (+0x3C del descriptor), transicion al entrar en la
        etapa siguiente (posicion de la union, segundos; metros de la union hasta ella, -1 sin etapa siguiente), las
        tres luces (scn_env_sun listas 0 cielo, 1 escena, 2 coches: 16 floats) y la niebla del cielo (lista 0) */
-    uint32_t clima; uint16_t trans_pos; int8_t trans_seg; uint8_t r_; float trans_m;
+    uint32_t clima; uint16_t trans_pos; int8_t trans_seg; uint8_t m74; float trans_m;   /* m74: +0x74 del registro (mapa) */
     float luz[3][16];
     uint32_t nniebla0; niebla_t niebla0[NIEBLA_MAX];
     int16_t agua_p0, agua_p1; uint8_t agua_alfa, agua, r3_[2];   /* agua del descriptor (+0x6E / +0x70, +0x6C; agua_dibuja) */
@@ -5431,6 +5434,22 @@ static int cur_nodo = -1, cur_sig = -1, cur_rama, cur_en_union, etapa_nodo = -1;
 static int etapa_movida;
 static int seg_jugador(void) { return cur_nodo >= 0 && cur_nodo < ncurso ? curso[cur_nodo].seg : -1; }
 static int8_t rama_nivel[5];                                    /* 451350(nivel): la rama tomada (2: sin llegar) */
+/* mapa de ruta del HUD (NAVI_PUB, PS2 0x1bd2a8 = 4BCC40 del PC): al cambiar la clave de la etapa del coche (car+0x68,
+   0x1cf9a8) la casilla de su nivel (44C940 = 0x177270: +8 del registro, la profundidad de 44C850) pasa a ser la clave
+   o, si el registro lleva +0x74, +0x74 - 1 (las metas del reves de la Contrarreloj: la casilla del mapa del derecho);
+   la actual es esa. La init de NAVI_PUB (4BC9E0) las pone a -1. Antes la DC dibujaba la casilla = el nivel (en PALM ->
+   ALPI se encendia LAKE, en CAST la de ALPI...) */
+static int8_t mapa_casillas[15], mapa_casilla = -1; static int mapa_clave = -1;
+static void mapa_inicia(void) { memset(mapa_casillas, -1, sizeof mapa_casillas); mapa_casilla = -1; mapa_clave = -1; }
+static void mapa_paso(int nodo, int ruta)
+{
+    int nv, c;
+    if (nodo < 0 || nodo >= ncurso || nodo == mapa_clave) return;
+    nv = curso[nodo].nivel; c = curso[nodo].m74 ? curso[nodo].m74 - 1 : nodo;   /* (la clave: el indice en estos arboles) */
+    if (nv >= 0 && nv < 15) { mapa_casillas[nv] = (int8_t)c; mapa_casilla = (int8_t)c; }
+    mapa_clave = nodo;
+    dbglog(DBG_INFO, "MAPA: arbol %d nodo %d %.4s nivel %d casilla %d mapa %d\n", curso_id, nodo, curso[nodo].zona, nv, c, ruta);
+}
 static int fin_nivel = -1, fin_lado = -1; static float fin_razon = -1;   /* 4AEEF0 al acabarse el tiempo */
 static float s_union, s_decide, s_sig, s_meta, s_suelta, s_etapa, t_carga_ult;     /* sucesos en s */
 static uint32_t i_union, j_union;                               /* primer punto de la union en la ruta y en su fichero */
@@ -5659,6 +5678,16 @@ static int curso_lee_etapa(int k)
 }
 /* al empezar una carrera: la etapa de salida (leida otra vez si ya se habia liberado o era otra) y nada mas */
 static int curso_pedido = PRUEBA_CURSO;                         /* arbol de la carrera siguiente (curso_id) */
+#ifdef PRUEBA_ORDEN
+/* prueba (tools/prueba/orden.sh, con -DPRUEBA_AUTO -DPRUEBA_SIN_TIEMPO -DPRUEBA_RAMA_FIJA=r -DPRUEBA_FIN -DPRUEBA_SALTO):
+   cada carrera del piloto con el siguiente de la lista {variante, juego de cursos (0..3), codigo de la Contrarreloj,
+   mision}; la tercera vez seguida en la misma etapa (una rama sin hijo con la rama fija) acaba la carrera */
+static const int16_t PO[][4] = {
+    { 1, 0, -1, -1 }, { 1, 1, -1, -1 }, { 1, 2, -1, -1 }, { 1, 3, -1, -1 },   /* OUTRUN: arboles 0, 1, 290, 291 */
+    { 7, 0, 5, -1 }, { 7, 0, 0x3e, -1 }, { 7, 1, 0x43, -1 }, { 7, 0, 0x46, -1 }, { 7, 1, 0x4d, -1 }, { 7, 0, 0x50, -1 },
+    { 2, 1, -1, -1 }, { 6, 0, -1, 0 }, { 6, 0, -1, 84 } };
+static int po_k = -1, po_rep, po_fin, po_ult = -1;
+#endif
 static int ta_codigo = -1;                                      /* CONTRARRELOJ: [656234] (el arbol 200 + codigo) */
 static volatile int meta_hilo;                                  /* META.DAT leyendose (hilo) */
 static void *meta_lee(void *p)
@@ -5709,6 +5738,7 @@ static void curso_reinicia(void)
     cielo = &etapa; cur_nodo = k; cur_sig = -1; etapa_n = curso[k].nivel; cur_rama = -1; cur_en_union = 0;
     if (curso[k].m_pos > 1.0f) m_pos = curso[k].m_pos;
     memset(rama_nivel, 2, sizeof rama_nivel); fin_nivel = fin_lado = -1; fin_razon = -1;
+    mapa_inicia();
     s_union = s_decide = s_sig = s_meta = s_suelta = -1; s_etapa = 0;
     marco_et[0] = marco_et[1] = marco_et[2] = marco_et[3] = 0;
     memset(&col_pred, 0, sizeof col_pred); col_un.ok = 0;
@@ -9987,7 +10017,7 @@ static void meta_entra(void)                                    /* 49C9C0 */
     if (!meta_lista()) return;
     /* las metas A..E son las claves 10..14 del arbol del modo OutRun; en los demas arboles (OUTRUN2SP, misiones) la
        eleccion del original no esta trazada: PENDIENTE (se usa la 0) */
-    meta_g = (curso_id == 0 || curso_id == 1) && cur_nodo >= 10 && cur_nodo <= 14 ? cur_nodo - 10 : 0;   /* claves 10..14 (csc_data_2 y csc_data_cvt) */
+    meta_g = (curso_id == 0 || curso_id == 1 || curso_id == 290 || curso_id == 291) && cur_nodo >= 10 && cur_nodo <= 14 ? cur_nodo - 10 : 0;   /* claves 10..14 (csc_data_2, csc_data_cvt y sus _ren_course: la meta, la 14) */
     if (curso_id >= 200 + 0x3c && curso_id < 200 + 0x50) meta_g = (curso_id - 200 - 0x3c) % 5;   /* Contrarreloj: GOAL_A..E (PROBABLE) */
     e = meta_escena(variante, TIM_PRESET, meta_g);
     meta_empieza(&meta, e);
@@ -10650,6 +10680,9 @@ int main(int argc, char **argv)
 #ifdef PRUEBA_VARIANTE
                 variante = PRUEBA_VARIANTE;                     /* prueba: 2 INFARTO, 7 Time Attack */
 #endif
+#ifdef PRUEBA_ORDEN
+                po_k = (po_k + 1) % (int)(sizeof PO / sizeof PO[0]); variante = PO[po_k][0]; po_rep = po_fin = 0; po_ult = -1;
+#endif
                 /* OUTRUN2SP (menu_sp): [780260] = 0 y el preset del lado elegido en el frontal */
                 juego_sp = !auto_ && menu_sp();
 #ifdef PRUEBA_SP
@@ -10658,16 +10691,29 @@ int main(int argc, char **argv)
                 /* el preset (ver preset_curso): en OUTRUN2SP el del frontal de recreativa (comun/fsp.c: 0x215fa4 =
                    4C3DC0 del PC, +27 = 0 "Recorrido OutRun2SP" / 1 "OutRun2"); en el juego de la consola 0x2a6758
                    (0x23ab54, al salir del menu) lo pone 0x2a6978 con el juego de cursos de los tableros (raiz +0x208
-                   bits 0..1: menu_juego_cursos). OUTRUN va directo al coche en la DC (sin el tablero 0x24): el juego 0
-                   (OutRun 2). La demo de atraccion: el curso de OutRun 2 (0x2878a8: preset 1, 0x1760c0(1)). El arbol
-                   de START (0x1b63a0 -> 0x1760c0 por el preset, arbol_de_preset) */
-                preset_curso = juego_sp ? (auto_ ? 1 : menu_preset()) : auto_ ? 1 : preset_de_juego(variante == 1 ? 0 : menu_juego_cursos());
-                curso_pedido = juego_sp ? arbol_de_preset(preset_curso) : PRUEBA_CURSO;
+                   bits 0..1: menu_juego_cursos; 0x2a6770 lo llama en todos los modos, tambien COAST 2 COAST). OUTRUN
+                   pasa por el tablero 0x24 de 4 posiciones como INFARTO / CONTRARRELOJ (tabla 0x375f58; revision 44: antes
+                   iba directo al coche con el juego 0). La demo de atraccion: el curso de OutRun 2 (0x2878a8: preset 1,
+                   0x1760c0(1)). El arbol de START (0x1b63a0 -> 0x1760c0 por el preset, arbol_de_preset) */
+                preset_curso = juego_sp ? (auto_ ? 1 : menu_preset()) : auto_ ? 1 : preset_de_juego(menu_juego_cursos());
+#ifdef PRUEBA_JUEGO
+                if (auto_ && !juego_sp) preset_curso = preset_de_juego(PRUEBA_JUEGO);   /* prueba: el juego de cursos (0..3) con el piloto */
+#endif
+                curso_pedido = juego_sp || !auto_ ? arbol_de_preset(preset_curso) : PRUEBA_CURSO;
+#ifdef PRUEBA_JUEGO
+                if (auto_ && !juego_sp) curso_pedido = arbol_de_preset(preset_curso);
+#endif
+#ifdef PRUEBA_ORDEN
+                preset_curso = preset_de_juego(PO[po_k][1]); curso_pedido = arbol_de_preset(preset_curso);
+#endif
                 {   /* COAST 2 COAST (variante 6): la mision elegida, su curso (el arbol 100 + i de CURSO.DAT, 4965A0) y
                        sus coches de carreras (MISION.DAT) */
                     int mi_ = auto_ ? -1 : menu_mision();
 #ifdef PRUEBA_MISION
                     mi_ = PRUEBA_MISION; variante = 6;          /* prueba: la mision i de Races.bin (con el piloto) */
+#endif
+#ifdef PRUEBA_ORDEN
+                    if (PO[po_k][3] >= 0) { mi_ = PO[po_k][3]; variante = 6; }
 #endif
                     if (variante == 6 && mi_ >= 0 && !rival_carrera(mi_)) {
                         curso_pedido = 100 + mi_;
@@ -10684,8 +10730,22 @@ int main(int argc, char **argv)
 #ifdef PRUEBA_TA_CODIGO
                     ta_ = PRUEBA_TA_CODIGO;                     /* prueba: el codigo de la Contrarreloj (con el piloto) */
 #endif
+#ifdef PRUEBA_ORDEN
+                    ta_ = PO[po_k][2];
+                    dbglog(DBG_INFO, "ORDEN: carrera %d variante %d juego %d codigo %d mision %d rama %d\n", po_k, variante, PO[po_k][1], ta_, PO[po_k][3],
+#ifdef PRUEBA_RAMA_FIJA
+                           PRUEBA_RAMA_FIJA
+#else
+                           -1
+#endif
+                           );
+#endif
                     if (variante == 7 && ta_ >= 0) {
                         ta_codigo = ta_; curso_pedido = 200 + ta_;
+                        /* los cursos seguidos (0x2a6884 / 0x2a68e8): 0x52 / 0x53 con 0x1b4a88(2), 0x50 / 0x51 con (3); hasta la
+                           revision 44 la DC les dejaba el preset del juego (1 / 0): el mapa de 5 casillas, la fila de
+                           tiempos y el banderero de esos presets */
+                        if (ta_ >= 0x50 && ta_ <= 0x53) preset_curso = ta_ >= 0x52 ? 2 : 3;
                         if (fl_) dbglog(DBG_ERROR, "CURSO: la opcion B (PALM_BT / BEAC_BT / _BR, 0x830395) sin portar: la etapa normal\n");
                     } else if (variante == 2 && ha_ >= 0) curso_pedido = arbol_de_preset(preset_curso);   /* juego 1: preset 0, arbol 1 */
                     if (ta_ >= 0 || ha_ >= 0) dbglog(DBG_INFO, "CURSO: tablero, variante %d, codigo %d, juego %d -> arbol %d\n", variante, ta_, ha_, curso_pedido);
@@ -10977,7 +11037,11 @@ int main(int argc, char **argv)
                         else sprintf(b, "< %s  %s >", zi, zd);
                         texto_centro(b); aviso_rama = 1;
                     }
-                    if (ev & CUR_RAMA) { texto_centro(zona_nombre(cur_sig)); aviso_rama = 0; t_estado = 0; }
+                    if (ev & CUR_RAMA) {
+                        texto_centro(zona_nombre(cur_sig)); aviso_rama = 0; t_estado = 0;
+                        dbglog(DBG_INFO, "RECORRIDO: arbol %d nodo %d %.4s rama %d -> nodo %d %.4s%s\n", curso_id, cur_nodo, curso[cur_nodo].zona,
+                               cur_rama, cur_sig, curso[cur_sig].zona, (cur_rama ? curso[cur_nodo].der : curso[cur_nodo].izq) < 0 ? " (sin hijo: la misma)" : "");
+                    }
                     if (variante == 1 && (preset_curso <= 1 || preset_curso == 4) && (etapa_n == 0 || etapa_n == 1)) {   /* 4BB890 */
                         int fin_f, u_, pos_ = tr_fila(yo.s, &fin_f, &u_); float f;
                         if (!u_) fac_base = fin_f + 1;
@@ -11009,6 +11073,19 @@ int main(int argc, char **argv)
                         if (variante == 2) infarto_etapa(cur_nodo, curso[cur_nodo].nivel);   /* stage clear */
                         dbglog(DBG_INFO, "CHECKPOINT: etapa %d (%.4s) nivel %d s %.0f, +%d cuadros, quedan %d (%.1f s)\n", cur_nodo,
                                curso[cur_nodo].zona, curso[cur_nodo].nivel, (double)yo.s, amp, tim_cuadros, (double)tiempo);
+#ifdef PRUEBA_SALTO
+                        {   /* prueba: a PRUEBA_SALTO m del final de la etapa nueva (recorre el arbol deprisa, tools/prueba/orden.sh) */
+                            float p_[3], th_;
+                            yo.s = longitud - PRUEBA_SALTO; yo.x = carril_x(yo.s, 4); coche_paso(&yo, 0, 0, 0, 0);
+                            if (fis_ok) { ruta_en(yo.s, p_, &th_, NULL, NULL); or2_coloca(&fis, &fpar, th_ + yo.a, 0); }
+                            traf_inicia(yo.s);
+                            dbglog(DBG_INFO, "SALTO: etapa %d a s %.0f (%d m del final)\n", cur_nodo, (double)yo.s, PRUEBA_SALTO);
+                        }
+#endif
+#ifdef PRUEBA_ORDEN
+                        if (cur_nodo == po_ult) { if (++po_rep >= 2) po_fin = 1; } else po_rep = 0;
+                        po_ult = cur_nodo;
+#endif
                     }
                     niebla_paso(); geo_paso();
 #ifdef DIAG_TRANS
@@ -11036,6 +11113,9 @@ int main(int argc, char **argv)
                 }
 #ifdef PRUEBA_SIN_TIEMPO
                 if (tim_cuadros < 600) tim_cuadros = 600;        /* prueba: el tiempo no se acaba (rutas enteras hasta GOAL) */
+#ifdef PRUEBA_ORDEN
+                if (po_fin) tim_cuadros = 0;                    /* prueba: tres veces seguidas la misma etapa: la siguiente */
+#endif
 #endif
                 if (estado != META && tim_cuadros <= 0) {
                     tiempo = 0; estado = AGOTADO; t_estado = 0; texto_centro("TIEMPO AGOTADO"); if (voz_ok) voces_tiempo_fuera();
@@ -11366,6 +11446,12 @@ int main(int argc, char **argv)
                     he.etapa = etapa_n; he.cuadro = cuadro; he.rpm = fis_ok ? (float)fis.rpm_suave : 0;
                     he.rebufo = fis_ok && fis.rebufo > 0.18f; he.derrape = yo.t_derrape != 0; he.manual = manual_ && !auto_; he.rev_on = he.manual && fis_ok && fis.rpm_i > 7900 && fis.marcha < fpar.marchas; he.seis = fis_ok && fpar.marchas >= 6;
                     he.infarto = variante == 2; he.mision = variante == 6;
+                    /* 0x1be240: sin mapa con la Contrarreloj de una etapa ([0x373e50] y codigo < 0x3c) y en las misiones
+                       ([0x36f3a4] sin la variante 4); el de 15 casillas con los presets 2 / 3, nada pasado el 4 */
+                    he.ruta = (variante == 7 && ta_codigo >= 0 && ta_codigo < 0x3c) || variante == 6 || preset_curso > 4 ? 0 :
+                              preset_curso == 2 || preset_curso == 3 ? 2 : 1;
+                    mapa_paso(cur_nodo, he.ruta);
+                    he.casilla = mapa_casilla; memcpy(he.casillas, mapa_casillas, sizeof he.casillas);
                     /* NAVI_PUB (4BEB00 / PS2 0x1bd4ac): fuera del modo 16 solo el panel 2C0029 con la puntuacion de la
                        variante 1 mientras 8446EC (lo quita 4B8E30(0) del GAD de la meta, 498670, cuando el temporizador
                        baja de 0x3FC); en la meta de las otras variantes y en el fin del tiempo, nada (4B8E20) */

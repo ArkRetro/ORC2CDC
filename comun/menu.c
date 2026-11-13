@@ -1167,10 +1167,11 @@ static void control(unsigned n)
                 }
             } else if (c == 0) {                            /* COAST 2 COAST: categorias (P_C2C) */
                 if (mis_n && !c2_abre()) { modo_sel = 0; sale(P_C2C, 1); } else bloqueado();
-            } else if (c == 1) { modo_sel = c; mis_sel = -1; sale(P_COCHE, 1); }   /* OUTRUN */
-            else if (c <= 3) {                              /* HEART ATTACK, TIME ATTACK: el tablero 0x24 (0x25dd58: */
-                modo_sel = c; mis_sel = -1;                 /* raiz +0x208 bits 5..7 = 0x40 / 0x80, tabla 0x375f58) */
-                tb_bits = (tb_bits & ~0xe0u) | (c == 2 ? 0x40u : 0x80u); tb_sig = 0x24;
+            } else if (c <= 3) {                            /* OUTRUN, HEART ATTACK, TIME ATTACK: el tablero 0x24 (0x25dd58: */
+                modo_sel = c; mis_sel = -1;                 /* raiz +0x208 bits 5..7 = 0x20 / 0x40 / 0x80, tabla 0x375f58 */
+                /* = 0x3a, 0x24, 0x24, 0x24, 0x2b: OUTRUN tambien va a la 0x24, la de 4 posiciones; revision 44, antes
+                   la DC lo llevaba directo al coche) */
+                tb_bits = (tb_bits & ~0xe0u) | (c == 1 ? 0x20u : c == 2 ? 0x40u : 0x80u); tb_sig = 0x24;
                 if (!tb_abre()) sale(P_TABLERO, 1); else bloqueado();
             }
             else if (!sa_abre()) sale(P_SALON, 1);         /* SALON (showroom, 4D4230 = PS2 0x25b418) */
@@ -1201,8 +1202,8 @@ static void control(unsigned n)
             c_arregla_color(); sfx_menu(SFX_CURSOR);
         } else if (n & CONT_Y) {                            /* COLOR: el siguiente desbloqueado de los 8 */
             if (c_desbloqueado(i)) { int o = colores[i], c = o; do c = (c + 1) & 7; while (c != o && !c_color_ok(i, c)); colores[i] = c; }
-        } else if (atras) {                                 /* (C2C: al detalle; INFARTO / CONTRARRELOJ: al tablero) */
-            if (!sp_sel && (modo_sel == 2 || modo_sel == 3) && !tb_abre()) sale(P_TABLERO, 0);
+        } else if (atras) {                                 /* (C2C: al detalle; OUTRUN / INFARTO / CONTRARRELOJ: al tablero) */
+            if (!sp_sel && modo_sel >= 1 && modo_sel <= 3 && !tb_abre()) sale(P_TABLERO, 0);
             else sale(sp_sel ? P_MENU : modo_sel == 0 && mis_sel >= 0 ? P_C2C : P_MODO, 0);
         }
         break; }

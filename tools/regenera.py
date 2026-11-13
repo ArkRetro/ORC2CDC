@@ -20,9 +20,14 @@ sys.path.insert(0, TOOLS)
 ARBOLES = '1,' + ','.join(str(i) for i in range(100, 194))       # OUTRUN2SP y los cursos de Races.bin (100 + registro)
 # CONTRARRELOJ (tableros de cursos, conv_union.arbol_ta): los arboles 200 + codigo (0..0x53) en CURSOTA.DAT y sus
 # uniones nuevas (BK262.. en UNIONESTA.PAK; las de los arboles de arriba conservan su numero)
-ARBOLES_TA = ARBOLES + ',' + ','.join(str(200 + c) for c in range(0x54))
+# y (revision 44) los cursos seguidos del OUTRUN de la consola (tablero 0x24, juegos 2 / 3: csc_data_2_ren_course y
+# csc_data_cvt_ren_course, conv_union.ARBOLES_REN): los arboles 290 / 291 en CURSOTA.DAT y sus 28 uniones (BK470..497,
+# los carteles con los dos destinos iguales) en UNIONESR.PAK, aparte para no cambiar UNIONESTA.PAK
+ARBOLES_TA = ARBOLES + ',' + ','.join(str(200 + c) for c in range(0x54)) + ',290,291'
 UNIONES_TA = ['UNIONESTA.PAK', 'CURSOTA.DAT']
-NBK = 470                                                        # descriptores BK0..469: 262 de UNIONES.PAK + 208 de UNIONESTA.PAK
+UNIONES_REN = ['UNIONESR.PAK']
+BK_REN = 470                                                     # la primera union de los arboles 290 / 291
+NBK = 498                                                        # descriptores BK0..497: 262 de UNIONES.PAK, 208 de UNIONESTA.PAK y 28 de UNIONESR.PAK
 # temas, resultados de OUTRUN2SP (28), menu, avances y metas (sin la 64: no la usa la meta)
 MUSICA = list(range(0, 29)) + [30] + list(range(33, 61)) + [61, 62, 63, 65, 66]
 PARTES = 4                                                       # conv_union.py --parte=k/n (al menos; o --jobs)
@@ -39,7 +44,7 @@ BO = ['BO%02d.DAT' % c for c in range(14)]   # (filas 1 y 6 de 0x35a738: OutRun 
 COLBK = ['COLBK%02d.DAT' % k for k in (10, 11, 12, 13, 14, 25, 26, 27, 28, 29)]
 FIN = ['FIN.DAT', 'GOVER.DAT', 'FINC2C.DAT']                    # (conv_fin.py; FINC2C: el modo 35 de una mision de C2C)
 # segundos aproximados de cada paso en un nucleo (para el porcentaje y el tiempo que queda; medidos en Linux)
-PESO = {'union': 4500, 'unionta': 3000, 'curso': 650, 'seg': 450, 'video_ts': 150, 'video_attr': 450, 'mus': 20, 'coche': 15,
+PESO = {'union': 4500, 'unionta': 3000, 'unionren': 600, 'curso': 650, 'seg': 450, 'video_ts': 150, 'video_attr': 450, 'mus': 20, 'coche': 15,
         'menu': 40, 'trafico': 30, 'camiones': 25}
 PESO_FIN = 300                                                   # empaquetado, revq y comprobacion (al final)
 
@@ -105,9 +110,12 @@ def paso(C, n, log):
     T = lambda x: os.path.join(TOOLS, x)
     tj = lambda *x: os.path.join(t, *x)
     prev = lambda x: os.path.join(W, 'previas', x)
-    if n.startswith('unionta'):                          # los de la Contrarreloj (CURSOTA.DAT, BK262..); antes que 'union'
-        ej(T('conv_union.py'), ISO, os.path.join(W, 'uta'), '--arboles=' + ARBOLES_TA, '--bk-desde=262', '--curso=CURSOTA.DAT',
-           '--parte=%s/%d' % (n[7:], C.partes))
+    if n.startswith('unionta'):                          # los de la Contrarreloj (CURSOTA.DAT, BK262..469); antes que 'union'
+        ej(T('conv_union.py'), ISO, os.path.join(W, 'uta'), '--arboles=' + ARBOLES_TA, '--bk-desde=262', '--bk-hasta=%d' % BK_REN,
+           '--curso=CURSOTA.DAT', '--parte=%s/%d' % (n[7:], C.partes))
+    elif n.startswith('unionren'):                       # los cursos seguidos del OUTRUN (BK470..497 y CURSOTA.DAT)
+        ej(T('conv_union.py'), ISO, os.path.join(W, 'uren'), '--arboles=' + ARBOLES_TA, '--bk-desde=%d' % BK_REN, '--curso=CURSOTA.DAT',
+           '--parte=%s/%d' % (n[8:], C.partes))
     elif n.startswith('union'):
         ej(T('conv_union.py'), ISO, os.path.join(W, 'u'), '--arboles=' + ARBOLES, '--parte=%s/%d' % (n[5:], C.partes))
     elif n == 'curso':                                   # BK00..14, BKD, SOL, COLBK*, CURSO del modo
@@ -206,7 +214,7 @@ def regenera(iso, D, W, jobs=4, informe=print):
     D, W = os.path.abspath(D), os.path.abspath(W)
     C = Contexto(iso, D, W, jobs)
     C.partes = max(PARTES, jobs)                         # (las uniones son independientes: f_bk % partes)
-    for x in ('u', 'uta', 'tmp', 'previas', 'registro'): os.makedirs(os.path.join(W, x), exist_ok=True)
+    for x in ('u', 'uta', 'uren', 'tmp', 'previas', 'registro'): os.makedirs(os.path.join(W, x), exist_ok=True)
     reg = lambda x: os.path.join(W, 'registro', x)
     t0 = time.time()
 
@@ -230,6 +238,7 @@ def regenera(iso, D, W, jobs=4, informe=print):
         if not os.path.isfile(os.path.join(W, 'u0', '.hecho')): falta.append('curso')
         falta += ['union%d' % k for k in range(C.partes)]
     if not hay(D, *UNIONES_TA): falta += ['unionta%d' % k for k in range(C.partes)]
+    if not hay(D, *UNIONES_REN): falta += ['unionren%d' % k for k in range(C.partes)]
     # primero lo que hace falta para arrancar y correr (coches, HUD, menus, sonido, musica, etapas); las peliculas al final
     for k in range(15):
         if not hay(D, 'COCHES.DAT') and not hay(os.path.join(W, 'coche'), 'COCHE%02d.DAT' % k): falta.append('coche%d' % k)
@@ -323,6 +332,16 @@ def regenera(iso, D, W, jobs=4, informe=print):
             if not os.path.exists(os.path.join(D, os.path.basename(f))): shutil.copy2(f, D)
         for f in os.listdir(pak): os.replace(os.path.join(pak, f), os.path.join(D, f))
         shutil.copy2(os.path.join(W, 'uta', 'CURSOTA.DAT'), D)
+    informe('== uniones de los cursos seguidos del OUTRUN: UNIONESR.PAK y descriptores (pak_union.py --pak=UNIONESR.PAK)')
+    if not hay(D, *UNIONES_REN):
+        bk, pak = os.path.join(W, 'bkren'), os.path.join(W, 'pakren')
+        borra(bk); borra(pak); os.makedirs(bk); os.makedirs(pak)
+        for f in glob.glob(os.path.join(W, 'uren', 'BK[0-9]*.DAT')): enlaza(f, os.path.join(bk, os.path.basename(f)))
+        C.env['PYTHON_CPU_COUNT'] = str(jobs)
+        try: post('pakren', py(os.path.join(TOOLS, 'pak_union.py'), bk, pak, '--pak=UNIONESR.PAK'), 3)
+        finally: C.env['PYTHON_CPU_COUNT'] = '1'
+        for f in os.listdir(pak): os.replace(os.path.join(pak, f), os.path.join(D, f))
+        shutil.copy2(os.path.join(W, 'uren', 'CURSOTA.DAT'), D)   # (el mismo que el de uta, con los arboles 290 / 291)
     informe('== etapas: SEGS.PAK y descriptores (pak_union.py --prefijo=SEG; tope = HUECO_ETAPA_MAX de demo/main.c)')
     if not hay(D, 'SEGS.PAK'):
         seg, segpak = os.path.join(W, 'seg'), os.path.join(W, 'segpak')
@@ -345,7 +364,7 @@ def regenera(iso, D, W, jobs=4, informe=print):
     informe('== comprobacion de %s' % D)
     ok = True
     nec = ['BAND.DAT', 'BAND1.DAT', 'BKD.DAT', 'BO.DAT'] + chrs + \
-          'COCHES.DAT COLBK.DAT COLLR.DAT CURSO.DAT EFECTOS.DAT FAROS.DAT FIN.DAT GOVER.DAT HAHUD.DAT HUD.DAT INFARTO.DAT MENU.DAT META.DAT MODOV.DAT MVATTR.VQV MVTS.VQV PARAM.DAT SFX.DAT SEGS.PAK SOL.DAT TAPD.DAT TRAFC.DAT UNIONES.PAK VMU.DAT VOCES.DAT VOCESH.DAT VOCESC.DAT MISION.DAT C2CHUD.DAT C2C.DAT SALON.DAT TABLERO.DAT CURSOTA.DAT UNIONESTA.PAK'.split() + ['RC%02d.DAT' % k for k in range(30)] + \
+          'COCHES.DAT COLBK.DAT COLLR.DAT CURSO.DAT EFECTOS.DAT FAROS.DAT FIN.DAT GOVER.DAT HAHUD.DAT HUD.DAT INFARTO.DAT MENU.DAT META.DAT MODOV.DAT MVATTR.VQV MVTS.VQV PARAM.DAT SFX.DAT SEGS.PAK SOL.DAT TAPD.DAT TRAFC.DAT UNIONES.PAK VMU.DAT VOCES.DAT VOCESH.DAT VOCESC.DAT MISION.DAT C2CHUD.DAT C2C.DAT SALON.DAT TABLERO.DAT CURSOTA.DAT UNIONESTA.PAK UNIONESR.PAK'.split() + ['RC%02d.DAT' % k for k in range(30)] + \
           ['COCHE%02d.DAT' % k for k in range(15)] + ['MUS%d.ADP' % k for k in MUSICA] + SP + FINAL + \
           ['TRAFK%d.DAT' % k for k in range(3)] + FIN + TRAF + BO + COLBK + ['SALIDA.DAT', 'CHRPAR.DAT', 'VISO.DAT', 'INFARTOP.DAT']
     for f in nec:
@@ -371,7 +390,7 @@ def regenera(iso, D, W, jobs=4, informe=print):
 
 def limpia(W):
     """los intermedios de trabajo/ (no los registros ni la cache)"""
-    for x in ('u', 'u0', 'uta', 'bk', 'pak', 'bkta', 'pakta', 'seg', 'segpak', 'coche', 'tmp', 'previas'): borra(os.path.join(W, x))
+    for x in ('u', 'u0', 'uta', 'bk', 'pak', 'bkta', 'pakta', 'uren', 'bkren', 'pakren', 'seg', 'segpak', 'coche', 'tmp', 'previas'): borra(os.path.join(W, x))
 
 def main():
     a = sys.argv[1:]

@@ -10,6 +10,11 @@ typedef struct {
     int mision;             /* NAVI_PUB 0x1bd6f4 (variante 6): sin 2C0028 / 2C0029, el crono ni la puntuacion (C2CHUD.DAT
                                los pone la carrera) */
     int solo_puntos;        /* NAVI_PUB fuera del modo 16 (PS2 0x1bd4ac): solo el panel 2C0029 y la puntuacion */
+    /* mapa de ruta (0x1be240): 0 ninguno (mision sin la variante 4, Contrarreloj de una etapa, preset > 4), 1 el de
+       5 niveles (2C0072 / 70 / 6F: presets 0, 1, 4), 2 el de 15 (2C006E / 6D / 6C: presets 2, 3); casilla actual
+       ([0x5a3ce8], -1 ninguna) y la de cada nivel ([0x5a3ca8 + 4 n], -1 sin llegar; 0x1bd2a8) */
+    int ruta, casilla;
+    int8_t casillas[15];
 } hud_estado_t;
 int hud_carga(const char *fich, int modelo);            /* 0 bien; modelo = indice de tacometro (6 = Testarossa) */
 void hud_dibuja(const hud_estado_t *e);                  /* dentro de la lista TR */
