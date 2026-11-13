@@ -3647,7 +3647,10 @@ Quejas del usuario sobre la revision 43 (video de Flycast en el PC, COAST 2 COAS
   .. s .. x .. a .. coche .." (con "(REINTENTAR)"), y tools/prueba/reintenta.sh compara la primera salida con la del
   reintento. Verificado en Flycast: C2C 1-1 con REINTENTAR desde BEAC (8 y 40 s de gas) y desde PALM (tras la union,
   con -DPRUEBA_PILOTO_MENU): las dos salidas iguales (s 16,00, x 0,02, coche (0, 0, -16)). El paso por la rama -1 no se
-  ha podido forzar con el piloto (las dos pruebas de -DPRUEBA_RAMA=0/1 fueron a PALM): la causa del video es PROBABLE.
+  ha podido completar con el piloto: con -DPRUEBA_RAMA=0/1 fue a PALM; con -DPRUEBA_RAMA_FIJA=1 (nuevo: fuerza la rama
+  derecha, la -1) se vuelve a leer BEAC (SEG17) pero el piloto no llega a la etapa repetida antes del tiempo (REINTENTAR
+  desde la union: salida bien). La causa del video es PROBABLE (encaja: costa con gradas = BEAC vista desde la copia
+  movida).
 - Cielo, "lineas que separan zonas" (dos causas):
   - Consola real (fotos de PALM: una costura vertical recta de otro tono de arriba abajo): el recorte del cielo a
     w = 50 m dejaba vertices a ~16000 px y la PowerVR pierde precision en los planos de UV y color de cada triangulo
