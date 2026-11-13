@@ -1357,15 +1357,18 @@ static void dibuja_etapa(const modelo_t *mo, int l)
    la matriz ya cargada; respeta solo_lod y las apagadas como dibuja_rango */
 static int indices_delante;                                     /* el modelo entero delante del plano cercano */
 /* radio del modelo alrededor de su origen (esferas de sus mallas), para indices_delante; con cache */
+static const void *mr_cl[16]; static float mr_cr[16]; static int mr_cn;
+static void modelo_radio_olvida(void) { mr_cn = 0; }             /* (modelos soltados: sus direcciones se reutilizan) */
 static float modelo_radio(const modelo_t *mo)
 {
-    static const void *cl[16]; static float cr[16]; static int cn; int i; uint32_t k; float r = 0;
+    const void **cl = mr_cl; float *cr = mr_cr; int i; uint32_t k; float r = 0;
+    int cn = mr_cn;
     for (i = 0; i < cn; i++) if (cl[i] == mo->mallas) return cr[i];
     for (k = 0; k < mo->nmallas; k++) {
         const malla_t *m = mo->mallas + k; float d = sqrtf(m->cx * m->cx + m->cy * m->cy + m->cz * m->cz) + m->r;
         if (d > r) r = d;
     }
-    i = cn < 16 ? cn++ : 15; cl[i] = mo->mallas; cr[i] = r;
+    i = mr_cn < 16 ? mr_cn++ : 15; cl[i] = mo->mallas; cr[i] = r;
     return r;
 }
 /* un modelo de matriz rigida M (vectores fila, traslacion en la fila 3) con todas sus mallas delante del plano
@@ -2101,14 +2104,18 @@ static float trs_fin = -1.0f; static int trs_rama;            /* final de la uni
    sentido, b58 deriva tras el golpe (0xB / 0xC), b60 cuadros de recuperacion, b64 cuadros sin choques, b6c golpeado;
    b62 cuadros de parpadeo al aparecer, b53 el cuadro de parpadeo (1 = no se dibuja), c5c1 el bit 0 de +C5C (cerrar el
    coche cuando b64 llegue a 0: 478340), n2f4 cuadros del estado de choque (+2F4) */
+/* camiones con remolque (470360): rh el enganche en el mundo (+C70), ra = {cabeceo, guinada} del remolque en el marco
+   de la cabeza (+C7C / +C80: car+C90 = T(enganche del modelo) Ry(guinada) Rx(cabeceo)) y ra_ant los del cuadro anterior
+   (+CD0, para la prueba de choque 4F9000) */
 typedef struct { coche_t c; int carril, modelo, destino; float v_des;
                  int golpe, lado; float t_golpe, vlat;          /* golpe: estado de choque (16..19) o -1 */
                  float t_recup, wa[3]; int d22;                 /* +2F8, pose del cuadro anterior (mundo de or2), +D22 */
                  float b08; int b14, b18, dir, b58, b60, b64, b6c, b62, b53, c5c1, n2f4;
                  int pt_marca, b72, color, ha;                  /* puntuacion: +C5C (PT_*) y +B72 (rebufo reciente); ha: INFARTO */
                  int toca, freno; float gv[2], gth;             /* toca: +4 0x10000 / +DD4 (el que le toco, TR_JUG el jugador); gv: +20 en el marco de la ruta en gth */
-                 int rc, marcha, b52, c34; float b54, bb4; } trafico_t;   /* rc: coche de carreras (registro + 1; 0 trafico);
+                 int rc, marcha, b52, c34; float b54, bb4;     /* rc: coche de carreras (registro + 1; 0 trafico);
                                                                    marcha +208; radios de la carretera +B54 / +BB4 */
+                 float rh[3], ra[2], ra_ant[2]; } trafico_t;   /* camiones: el remolque (arriba) */
 static trafico_t traf[NTRAF];
 /* COAST 2 COAST: los coches de carreras (comun/rival.c; su IA y sus modelos mas abajo, "coches de carreras") */
 static float rc_objetivo(int e, int d, int *f0, int *f1, float *rate);
@@ -2128,14 +2135,27 @@ static int pt_toca;                                             /* contacto con 
 static uint32_t sup_jug = 2u;                                   /* +244 del jugador: OR de las superficies de las ruedas */
 static uint32_t sup_cen = 2u;                                   /* +248 del jugador: la superficie bajo el centro */
 static uint32_t sup_rueda[4];                                   /* superficie bajo cada rueda (marcas: efectos_paso) */
-#define NMODTRAF 9                                              /* coches de calle (TRAFn.DAT) */
+#define NMODTRAF 9                                              /* coches de calle (TRAFn.DAT, siempre cargados) */
 /* COAST 2 COAST: los modelos de los coches de carreras de la mision (RCmm.DAT, tools/conv_trafico.py --rivales: el
    registro de 4866C0 del modelo 0..29, obj_rc_<coche> con sus 5 LOD) van detras de los del trafico, en las plazas
    NMODTRAF.. (rc_modelos_carga) */
 #define RC_NMOD 6
-#define NMODT (NMODTRAF + RC_NMOD)
+/* y detras los camiones de OUTRUN2SP (TRAFKn.DAT, solo en sus carreras: camion_carga): CAM_M0 = el modelo 39 (cabeza y
+   remolque), + 1 el 40 (la misma cabeza sola: los datos del 39), + 2 el 41 y + 3 el 43 */
+#define CAM_M0 (NMODTRAF + RC_NMOD)
+#define NMODT (CAM_M0 + 4)
 static modelo_t mtraf[NMODT];
 static float largo_traf[NMODT];                                 /* mitad del largo de cada modelo */
+/* remolque de cada modelo (camion_lee): enganche (+4 del segundo descriptor), ruedas (4AD8F0) y su caja de choque */
+#define P_REM 7                                                 /* pieza del remolque; sus ruedas, las 8..11 */
+#define NRREM 4
+typedef struct { int ok; float piv[3], r[NRREM][5], caja1[7]; } trem_t;
+static trem_t trem[NMODT];
+static void traf_remolque(trafico_t *t);
+static void traf_remolque_nace(trafico_t *t);
+static void camion_carga(uint8_t *buf, uint32_t cap);
+static void camion_suelta_ram(void);
+static void camion_suelta_vram(void);
 /* TRAFC.DAT (tools/conv_trafico.py): por modelo, el registro de 4866C0 (clase +324, radio) y la primera caja de choque
    (520950); y la tabla por clase de 472090 (5B3E08 del PC): referencia, aceleracion, frenada, aceleracion fuerte y
    frenada fuerte, en m/cuadro por cuadro */
@@ -2222,6 +2242,7 @@ static void traf_tablas(void)
     if (!d || sz < 8 || memcmp(d, "TRC1", 4)) return;
     memcpy(&n, d + 4, 4);
     /* antes se leia con registros de 52 bytes y el fichero los trae de 48 (sizeof trafc_t): TRAFC.DAT no se cargaba */
+    for (m = CAM_M0; m < NMODT; m++) trc[m].modelo = -1;       /* (los camiones: camion_carga) */
     if (n != NMODTRAF || sz < 8 + n * sizeof(trafc_t) + 8 + 35 * 4 || memcmp(d + 8 + n * sizeof(trafc_t), "ACL1", 4)) return;
     for (m = 0; m < n; m++) memcpy(&trc[m], d + 8 + m * sizeof(trafc_t), sizeof(trafc_t));
     memcpy(acl, d + 8 + n * sizeof(trafc_t) + 8, sizeof acl);
@@ -2322,6 +2343,7 @@ static void traf_nace(trafico_t *t, float s)
     t->pt_marca = 0; t->b72 = 0; t->toca = -1; t->freno = 0; t->gv[0] = t->c.v / 60.0f; t->gv[1] = 0; t->gth = 1e9f;
     t->c.x = carril_x(s, t->carril); coche_coloca(&t->c);
     traf_pose_ant(t);
+    traf_remolque_nace(t);                                      /* 46E830: el enganche (camiones) */
 }
 /* Aparicion y cierre del trafico arcade del original (479080: 477F60 cierra, 478B90 / 4787E0 abren; PS2 0x1dcdd0):
    - cierre (477F60): un coche de trafico (sin +4 0x20) se cierra si su distancia de carretera al jugador (46F990, en
@@ -2458,7 +2480,7 @@ static int traf_carril_478640(const uint8_t *rec)
 static int traf_modelo_de(int id)                               /* modelo del juego -> TRAFn.DAT (-1: no esta) */
 {
     int m;
-    for (m = 0; m < NMODTRAF && trc_ok; m++) if (trc[m].modelo == id) return m;
+    for (m = 0; m < NMODT && trc_ok; m++) if ((m < NMODTRAF || m >= CAM_M0) && trc[m].modelo == id) return m;   /* (y los camiones) */
     return -1;
 }
 /* final comun de 478B90 / 4787E0 (abre el coche en s) */
@@ -2568,7 +2590,13 @@ static void traf_azar(int en_union, int nodo, int pos, const uint8_t *rec)
     }
     if (!carril_libre(NULL, l, s, 25.0f, 25.0f)) return;        /* 43EB60 */
     m = traf_modelo_de(traf_modelo_46ce30(rec));
-    if (m < 0) { traf_clase_sig(); traf_ult_pos = pos; return; }   /* 39..43 (camiones; sin TRAFn.DAT): gastado */
+#ifdef PRUEBA_CAMION
+    {   /* prueba: cada coche al azar es un camion (39, 41, 43 y 40 por turno), si estan cargados (OUTRUN2SP) */
+        static const uint8_t C[4] = { 39, 41, 43, 40 }; static int n_c; int mc = traf_modelo_de(C[n_c % 4]);
+        if (mc >= 0) { m = mc; n_c++; }
+    }
+#endif
+    if (m < 0) { traf_clase_sig(); traf_ult_pos = pos; return; }   /* camiones sin cargar (fuera de OUTRUN2SP): gastado */
     {
         int c = traf_cuenta[m] >= traf_ncol[m] ? 0 : traf_cuenta[m];   /* el siguiente color del modelo (804358) */
         traf_cuenta[m] = c + 1;
@@ -2703,6 +2731,37 @@ static void forma_traf(const trafico_t *t, float ox, float oy, or2_forma_t *f)
 {
     forma_de(t->c.s, t->c.x, t->c.a, t->wa, trc + t->modelo, t->c.pose_t[1], ox, oy, f);
 }
+/* las cajas de choque del coche de trafico (4F9000; +335 cajas): la 0 en su marco y, en los camiones, la 1 (la del
+   remolque) en el de car+C90 (ia / ib = 1: multiply_40a220(+C90) tras el marco del coche; el cuadro anterior con
+   +CD0). En el plano: el enganche (+4 del segundo descriptor) con los ejes del coche y el rumbo menos la guinada del
+   remolque (el cabeceo no cambia la caja en el plano: SIMPLIFICADO, como el del propio coche). Devuelve cuantas */
+static int formas_traf(const trafico_t *t, float ox, float oy, or2_forma_t f[2])
+{
+    const trem_t *r = trem + t->modelo; float c, s_;
+    forma_traf(t, ox, oy, &f[0]);
+    if (!r->ok) return 1;
+    f[1] = f[0]; memcpy(f[1].caja, r->caja1, sizeof f[1].caja);
+    c = cosf(f[0].rumbo); s_ = sinf(f[0].rumbo);                /* (a_mundo de or2_fisica.c) */
+    f[1].x = f[0].x + r->piv[0] * c - r->piv[2] * s_; f[1].y = f[0].y - r->piv[0] * s_ - r->piv[2] * c;
+    f[1].rumbo = f[0].rumbo - t->ra[1];
+    c = cosf(f[0].rumbo_a); s_ = sinf(f[0].rumbo_a);
+    f[1].xa = f[0].xa + r->piv[0] * c - r->piv[2] * s_; f[1].ya = f[0].ya - r->piv[0] * s_ - r->piv[2] * c;
+    f[1].rumbo_a = f[0].rumbo_a - t->ra_ant[1];
+    return 2;
+}
+/* 4F9450 con cajas: la cercania con los centros de los coches (+14: a0 / b0, las cajas 0) y sus radios de 4866C0 y,
+   por caja, la altura de la animacion del otro (+2DC menos medio radio) contra su alto; despues or2_contacto de esas
+   dos cajas sin volver a mirarlo (radios enormes) */
+static int contacto_cajas(const or2_forma_t *a0, const or2_forma_t *a, const or2_forma_t *b0, const or2_forma_t *b, or2_contacto_t *k)
+{
+    or2_forma_t A, B; float dx = b0->x - a0->x, dy = b0->y - a0->y;
+    if (a == a0 && b == b0) return or2_contacto(a, b, k);       /* (las cajas 0: lo mismo) */
+    if (!(sqrtf(dx * dx + dy * dy) < a0->radio + b0->radio)) return 0;
+    if (b0->pose_y - b0->radio * 0.5f > a->caja[1]) return 0;
+    if (a0->pose_y - a0->radio * 0.5f > b->caja[1]) return 0;
+    A = *a; B = *b; A.radio = B.radio = 1e9f;
+    return or2_contacto(&A, &B, k);
+}
 /* el otro coche para or2_choque_coche / or2_choque_trafico (velocidad: +1C4 en su rumbo) */
 static void otro_de(const trafico_t *t, int id, float ox, float oy, const or2_contacto_t *k, or2_otro_t *o)
 {
@@ -2779,7 +2838,7 @@ static void traf_choca(trafico_t *t, int id, const or2_contacto_t *k, float ox, 
 }
 static void traf_choques(void)
 {
-    int i, j, ult; or2_forma_t fa, fb; or2_contacto_t k, k_ult; float ox, oy, th, f[2], r[2];
+    int i, j, ult; or2_forma_t fa, fb[2], ta[2]; or2_contacto_t k, k_ult; float ox, oy, th, f[2], r[2];
 #ifdef DIAG_CHOQUE
     diag_cuadro++;
 #endif
@@ -2792,15 +2851,22 @@ static void traf_choques(void)
         forma_de(yo.s, yo.x, yo.a + yo.deriva, yo_wa, cjm + fpar.modelo, yo.pose_t[1], ox, oy, &fa);
         ult = -1;
         for (i = 0; i < NTRAF; i++) {
-            trafico_t *t = traf + i; float rp, sl;
+            trafico_t *t = traf + i; float rp, sl; int kb, nb;
             if (t->carril < 0 || t->b64 > 0 || fabsf(t->c.s - yo.s) > 30.0f) continue;
-            forma_traf(t, ox, oy, &fb);
-            if (!or2_contacto(&fa, &fb, &k)) continue;
+            nb = formas_traf(t, ox, oy, fb);
+            for (kb = 0; kb < nb; kb++) {                       /* cada caja del otro (el remolque: la 1) */
+            if (!contacto_cajas(&fa, &fa, &fb[0], &fb[kb], &k)) continue;
+#ifdef DIAG_CAMION
+            if (trem[t->modelo].ok || trc[t->modelo].modelo >= 39)
+                dbglog(DBG_INFO, "CAMION: choque del jugador con el %d (modelo %d) caja %d, %.0f km/h\n", i, trc[t->modelo].modelo, kb,
+                       (double)(sqrtf(fis.vx * fis.vx + fis.vy * fis.vy) * 3.6f * fpar.hud));
+#endif
             rp = or2_reparto(&choq, 5, trc[t->modelo].clase, sqrtf(fis.vx * fis.vx + fis.vy * fis.vy), t->c.v);
             sl = k.sep[0] * f[0] + k.sep[1] * f[1];
             yo.s -= rp * sl; yo.x -= rp * (k.sep[0] * r[0] + k.sep[1] * r[1]);
             fa.x -= rp * k.sep[0]; fa.y -= rp * k.sep[1];
             t->c.s += (1.0f - rp) * sl; coche_coloca(&t->c);
+            {   int q; for (q = 0; q < nb; q++) { fb[q].x += (1.0f - rp) * sl * f[0]; fb[q].y += (1.0f - rp) * sl * f[1]; } }
             t->toca = TR_JUG;                                   /* +DD4 */
             {   /* +514 + esquina x 4 = 1 (4F9000, PC 4F9422): la tabla de 41D810 (PS2 0x32b280: 2, 1, 3, 0) da la
                    esquina de cada rueda: del. izq. la 2, del. der. la 1, tras. izq. la 3 y tras. der. la 0 */
@@ -2808,28 +2874,33 @@ static void traf_choques(void)
                 for (w = 0; w < 4; w++) if (k.esq_a[ESQ[w]]) chispa_coche |= 1u << w;
             }
             k_ult = k; ult = i;
+            }
         }
         if (ult >= 0) { traf_choca(traf + ult, ult, &k_ult, ox, oy, th); coche_coloca(&yo); vib_toca = 1; vib_otro = ult; bo_toca_coche = 1; }
     }
     for (i = 0; i < NTRAF; i++) {                               /* el trafico entre si */
-        trafico_t *a = traf + i; or2_otro_t oa, ob;
+        trafico_t *a = traf + i; or2_otro_t oa, ob; int na;
         if (a->carril < 0 || a->b64 > 0) continue;
         mundo_de(a->c.s, a->c.x, &ox, &oy, &th);
         f[0] = sinf(th); f[1] = cosf(th);
-        forma_traf(a, ox, oy, &fa);
+        na = formas_traf(a, ox, oy, ta);
         ult = -1;
         for (j = i + 1; j < NTRAF; j++) {
-            trafico_t *b = traf + j; float rp, sl;
+            trafico_t *b = traf + j; float rp, sl; int ka, kb, nb;
             if (b->carril < 0 || b->b64 > 0 || fabsf(b->c.s - a->c.s) > 30.0f) continue;
-            forma_traf(b, ox, oy, &fb);
-            if (!or2_contacto(&fa, &fb, &k)) continue;
+            nb = formas_traf(b, ox, oy, fb);
+            for (ka = 0; ka < na; ka++) for (kb = 0; kb < nb; kb++) {   /* cajas de A y de B (camiones: 2) */
+            int q;
+            if (!contacto_cajas(&ta[0], &ta[ka], &fb[0], &fb[kb], &k)) continue;
             rp = or2_reparto(&choq, trc[a->modelo].clase, trc[b->modelo].clase, a->c.v, b->c.v);
             sl = k.sep[0] * f[0] + k.sep[1] * f[1];
             a->c.s -= rp * sl; b->c.s += (1.0f - rp) * sl;
-            fa.y -= rp * sl * f[1]; fa.x -= rp * sl * f[0];
+            for (q = 0; q < na; q++) { ta[q].y -= rp * sl * f[1]; ta[q].x -= rp * sl * f[0]; }
+            for (q = 0; q < nb; q++) { fb[q].y += (1.0f - rp) * sl * f[1]; fb[q].x += (1.0f - rp) * sl * f[0]; }
             coche_coloca(&a->c); coche_coloca(&b->c);
             a->toca = j; b->toca = i;                           /* +DD4 */
             k_ult = k; ult = j;
+            }
         }
         if (ult < 0) continue;
         otro_de(a, i, ox, oy, &k_ult, &oa); otro_de(traf + ult, ult, ox, oy, &k_ult, &ob);
@@ -3718,10 +3789,16 @@ static void traf_guia(trafico_t *t, float dt)
 #ifdef DIAG_LAT
 static int cambio_n;                                            /* prueba: cuadros de la IA del trafico */
 #endif
+#ifdef DIAG_CAMION
+static unsigned cuadro_diag_cam;
+#endif
 static void traf_paso(float dt)
 {
     int i;
     cambio_cd++;
+#ifdef DIAG_CAMION
+    cuadro_diag_cam++;
+#endif
 #ifdef DIAG_LAT
     cambio_n++;
     dbglog(DBG_INFO, "LATJ %d %.3f %d %.1f\n", cambio_n, (double)yo.x, carril_cerca(yo.s, yo.x), (double)(yo.v * 3.6f));
@@ -3782,6 +3859,15 @@ static void traf_paso(float dt)
         }
         coche_coloca(&t->c);
         if (t->rc) { int pi; float pf = rc_pos_curso(t->c.s, &pi); rival_sigue(t->rc - 1, pf, pi); }   /* 477090 */
+        traf_remolque(t);                                       /* 470360 (47E780, tras 4A25F0) */
+#ifdef DIAG_CAMION
+        if (trem[t->modelo].ok && fabsf(t->c.s - yo.s) < 150.0f && cuadro_diag_cam % 60 == 0) {
+            float p_[3], th; ruta_en(t->c.s, p_, &th, NULL, NULL);
+            dbglog(DBG_INFO, "CAMION: %d modelo %d s %.1f (jugador %+.1f) x %.2f rumbo de la carretera %.1f, remolque guinada %.2f cabeceo %.2f grados, enganche a %.2f m\n",
+                   i, trc[t->modelo].modelo, (double)t->c.s, (double)(t->c.s - yo.s), (double)t->c.x, (double)(th * 57.2958f), (double)(t->ra[1] * 57.2958f),
+                   (double)(t->ra[0] * 57.2958f), (double)sqrtf((t->rh[0] - t->c.pos[0]) * (t->rh[0] - t->c.pos[0]) + (t->rh[1] - t->c.pos[1]) * (t->rh[1] - t->c.pos[1]) + (t->rh[2] - t->c.pos[2]) * (t->rh[2] - t->c.pos[2])));
+        }
+#endif
 #ifdef DIAG_LAT
         {   /* prueba: desplazamiento lateral de cada coche cercano por cuadro (x en m, carril, b08, cuadros del cambio) */
             int fin_, u_, fila_ = tr_fila(t->c.s, &fin_, &u_);
@@ -5078,7 +5164,7 @@ static void curso_recentra(float dx, float dz)
     for (k = 0; k < 3; k++) if (tramos[k]->datos) modelo_desplaza(tramos[k], dx, dz);
     if (uni_der.datos) modelo_desplaza(&uni_der, dx, dz);
     yo.pos[0] -= dx; yo.pos[2] -= dz;
-    for (k = 0; k < NTRAF; k++) { traf[k].c.pos[0] -= dx; traf[k].c.pos[2] -= dz; }
+    for (k = 0; k < NTRAF; k++) { traf[k].c.pos[0] -= dx; traf[k].c.pos[2] -= dz; traf[k].rh[0] -= dx; traf[k].rh[2] -= dz; }
     for (k = 0; k < NHUMO; k++) { humos[k].p[0] -= dx; humos[k].p[2] -= dz; }
     for (j = 0; j < NMARCA_CLASES; j++)
         for (k = 0; k < marca_n[j]; k++) for (i = 0; i < 4; i++) { marcas[j][k].p[i][0] -= dx; marcas[j][k].p[i][2] -= dz; }
@@ -5255,6 +5341,7 @@ static void curso_fuera(const char *por)
     cm_t0 = 0; carga.estado = 0;
     libera_modelo(&uni); libera_modelo(&uni_der); libera_modelo(&sig);
     col_suelta();                                               /* sus huecos, para el menu */
+    camion_suelta_ram(); camion_suelta_vram();                  /* los camiones de OUTRUN2SP */
     bo_quita();                                                 /* objetos de la union: su RAM y su VRAM */
     tex_suelta(&etapa); ar_suelta();
     meta_suelta();                                              /* META.DAT: su RAM, para el menu */
@@ -5495,7 +5582,8 @@ static void curso_al_menu(void)
        menu: antes de que menu_tablas(1) vuelva a leer las piezas de MENU.DAT en este mismo cuadro, que si no se iban
        a la cima del monton (tras el fin del tiempo de OUTRUN2SP la cima seguida bajaba de 711 a 445 KB en el frontal) */
     if (hueco_col && carga.estado != 1) col_suelta();
-    if (!curso_subido()) { cm_t0 = 0; return; }
+    camion_suelta_ram();                                        /* (y su RAM: la VRAM con el curso, abajo) */
+    if (!curso_subido()) { cm_t0 = 0; camion_suelta_vram(); return; }
     if (!cm_t0) { cm_t0 = timer_ms_gettime64(); return; }
     if (timer_ms_gettime64() - cm_t0 < 60 || carga.estado == 1 || meta_hilo) return;   /* (una lectura en curso: al acabar) */
     curso_fuera("menu");
@@ -7925,7 +8013,7 @@ static void robot_dibuja(robot_ctx_t *rx, int l)
    +1C4 / radio (+08 de 4866C0) en unidades de 65536 por vuelta: las dos igual. car+32 del trafico no se ha localizado
    (0: sin direccion). Bloque TAN1 detras de los pares de TCX1 (tools/conv_trafico.py bloque_tan) */
 #define NTRUEDA 6
-typedef struct { int ok; float radio, r[NTRUEDA][5]; uint16_t *idx, ini[3][NPZ_MAX + 1]; } tani_t;
+typedef struct { int ok, np; float radio, r[NTRUEDA][5]; uint16_t *idx, ini[3][NPZ_MAX + 1]; } tani_t;
 static tani_t tani[NMODT];
 static float traf_giro[NTRAF];                                  /* -car+40 (rad) de cada coche de trafico */
 static void traf_ani_lee(int m)
@@ -7938,7 +8026,9 @@ static void traf_ani_lee(int m)
     if (q + 3 + 5 * NTRUEDA > w + mtraf[m].nruta || memcmp(q, "TAN1", 4) || q[1] != NTRUEDA) return;
     memcpy(&a->radio, q + 2, 4); memcpy(a->r, q + 3, sizeof a->r);
     if (!(a->radio > 0.05f)) return;
-    if (!piezas_indices(&mtraf[m], NTRUEDA + 1, &a->idx, a->ini)) return;
+    /* los camiones (TRAFKn.DAT, REM1 detras de TAN1): el remolque es la pieza 7 y sus ruedas las 8..11 */
+    a->np = q + 3 + 5 * NTRUEDA + 1 <= w + mtraf[m].nruta && !memcmp(q + 3 + 5 * NTRUEDA, "REM1", 4) ? P_REM + 1 + NRREM : NTRUEDA + 1;
+    if (!piezas_indices(&mtraf[m], a->np, &a->idx, a->ini)) return;
     a->ok = 1;
 }
 /* (coches de carreras: sus modelos, ver arriba "coches de carreras") */
@@ -8008,6 +8098,155 @@ static void rc_modelos_carga(uint8_t *buf, uint32_t cap)
     }
     for (i = 0, k = 0; i < n; i++) { int m = rival_reg(i)->modelo, j; for (j = 0; j < rc_nmod && rc_mod_id[j] != m; j++) ; if (j == rc_nmod) k++; }
     if (k) dbglog(DBG_ERROR, "RIVAL: %d coches de carreras sin su modelo (mas de %d distintos): con el de la plaza %d\n", k, RC_NMOD, NMODTRAF);
+}
+/* ---- camiones de OUTRUN2SP con remolque (tools/conv_trafico.py --camiones: TRAFK0..2.DAT). Cada fichero lleva la cabeza
+   como los coches (TCX1, TAN1) y el remolque en su marco (segundo descriptor del LOD, race_ghost_car.cpp second():
+   pieza 7 lo que no gira, 8..11 sus ruedas de 4AD8F0) y detras de TAN1:
+   'REM1' f32 enganche x, y, z (+4 del segundo descriptor: la traslacion de car+C90), u32 4, 4 x {x, y, z, del otro
+   lado, 0} y f32 x 7 la segunda caja de choque (520950, la del remolque en el marco de car+C90);
+   'TRK1' u32 n, n x {el registro de TRC1, u32 con remolque}: los modelos de ese fichero (TRAFK0: el 39 con remolque y
+   el 40, la misma cabeza sin el). En el juego de la consola (preset 0) siguen sin cargarse: 46CE30 y los puntos fijos
+   de esos modelos se gastan sin coche, como antes. */
+#define NCAMF 3
+static const struct { const char *f; int m[2]; } CAMF[NCAMF] = { { "TRAFK0.DAT", { CAM_M0, CAM_M0 + 1 } }, { "TRAFK1.DAT", { CAM_M0 + 2, -1 } },
+                                                                  { "TRAFK2.DAT", { CAM_M0 + 3, -1 } } };
+static int cam_ram;                                             /* 1: los camiones en la RAM (camion_carga) */
+static pvr_ptr_t cam_tv[96]; static int cam_ntv;                /* su VRAM, hasta soltarla (camion_suelta_vram) */
+static uint32_t cam_ta_antes, cam_ta_min_antes;                 /* ta_traf_teo / ta_min_otros_teo sin los camiones */
+/* lee REM1 / TRK1 del fichero del modelo m (ya en mtraf[m] con TAN1) y pone trc / trem de sus modelos; 0 bien */
+static int camion_lee(int f)
+{
+    int m = CAMF[f].m[0], k; const uint32_t *w = (const uint32_t *)mtraf[m].ruta, *q, *e = w + mtraf[m].nruta;
+    if (!tani[m].ok || tani[m].np != P_REM + 1 + NRREM) return -1;
+    q = w + 3 + 3 * w[2] + 3 + 5 * NTRUEDA;                     /* REM1 */
+    if (q + 32 + 2 > e || memcmp(q, "REM1", 4) || q[4] != NRREM || memcmp(q + 32, "TRK1", 4)) return -2;
+    memcpy(trem[m].piv, q + 1, 12); memcpy(trem[m].r, q + 5, sizeof trem[m].r); memcpy(trem[m].caja1, q + 25, 28);
+    q += 32;
+    if (q[1] < 1 || q[1] > 2 || q + 2 + 13 * q[1] > e) return -3;
+    for (k = 0; k < (int)q[1]; k++) {
+        int mm = CAMF[f].m[k];
+        if (mm < 0) return -4;
+        memcpy(&trc[mm], q + 2 + 13 * k, sizeof(trafc_t));
+        if (mm != m) trem[mm] = trem[m];
+        trem[mm].ok = q[2 + 13 * k + 12] != 0;                  /* el 40: la cabeza sola */
+        largo_traf[mm] = 0.5f * (trc[mm].caja[2] - trc[mm].caja[5]);
+    }
+    return 0;
+}
+/* Al empezar una carrera de OUTRUN2SP (el hueco de la union aun prestado, antes de la pantalla de carga y de la zona
+   del curso: su VRAM queda detras del HUD, fuera de la zona): cada fichero se lee en el hueco, sus texturas (VQ) a la
+   VRAM y lo demas (mallas y vertices, ~85-100 KB por fichero) a un bloque del monton de su tamano justo; el 40 usa los
+   datos del 39. Se sueltan al volver al menu (camion_suelta_ram en el primer cuadro, como las colisiones;
+   camion_suelta_vram con el curso, cuando la PowerVR ya no las lee) */
+static void camion_carga(uint8_t *buf, uint32_t cap)
+{
+    unsigned u0, l0, u1, l1; uint32_t v0 = pvr_mem_available(), ct = cam_ta_antes = ta_traf_teo; int f, i, j;
+    if (cam_ram || cam_ntv) return;
+    cam_ta_min_antes = ta_min_otros_teo;
+    ram_kb(&u0, &l0);
+    for (f = 0; f < NCAMF; f++) {
+        int m = CAMF[f].m[0], a = CAMF[f].m[1], r;
+        modelo_t *mo = &mtraf[m];
+        musica_pausa_lectura(1);
+        r = lee_modelo_en(mo, CAMF[f].f, buf, cap);
+        musica_pausa_lectura(0);
+        if (!r && (r = sube_modelo(mo))) tex_suelta(mo);        /* (sin VRAM: el fichero fuera) */
+        if (!r) { compacta_modelo_de(mo, 1); if (mo->datos == buf) r = -5; }   /* (sin RAM: no puede quedarse en el hueco) */
+        if (!r) {
+            for (j = 0; j < (int)mo->nmallas; j++) if (mo->mallas[j].nodo > 0) traf_con_lod[m] = 1;
+            traf_colores(m); traf_ani_lee(m);
+            r = camion_lee(f);
+        }
+        if (r) {
+            dbglog(DBG_ERROR, "CAMION: %s no se pudo cargar (%d): sin ese camion\n", CAMF[f].f, r);
+            for (i = 0; i < (int)mo->ntex && mo->tv; i++) if (mo->tv[i]) { pvr_mem_free(mo->tv[i]); mo->tv[i] = NULL; }
+            free(traf_remap[m][1]); free(traf_remap[m][2]); traf_remap[m][1] = traf_remap[m][2] = NULL;
+            free(tani[m].idx); memset(&tani[m], 0, sizeof tani[m]); traf_con_lod[m] = 0;
+            libera_modelo(mo); trc[m].modelo = -1; trem[m].ok = 0;
+            if (a >= 0) trc[a].modelo = -1;
+            continue;
+        }
+        for (i = 0; i < (int)mo->ntex && cam_ntv < (int)(sizeof cam_tv / sizeof cam_tv[0]); i++) cam_tv[cam_ntv++] = mo->tv[i];
+        if (a >= 0) {                                           /* el 40: los datos del 39 (sin copia) */
+            mtraf[a] = *mo; tani[a] = tani[m]; traf_con_lod[a] = traf_con_lod[m]; traf_ncol[a] = traf_ncol[m];
+            traf_remap[a][1] = traf_remap[m][1]; traf_remap[a][2] = traf_remap[m][2];
+        }
+        if ((uint32_t)modelo_teo(mo, traf_con_lod[m] ? 0 : -1, 0) > ct) ct = modelo_teo(mo, traf_con_lod[m] ? 0 : -1, 0);
+    }
+    cam_ram = 1;
+    if (!cam_ntv) { cam_ram = 0; return; }                      /* (ninguno: sin TRAFKn.DAT) */
+    /* lo reservado del TA para lo que no es la etapa: tres coches de trafico del mayor (ahora un camion, LOD 0) */
+    ta_min_otros_teo += 3 * (ct - ta_traf_teo); ta_traf_teo = ct;
+    ram_kb(&u1, &l1);
+    dbglog(DBG_INFO, "CAMION: modelos 39 40 41 43 cargados: RAM %uK (libre %uK -> %uK), VRAM %uK (libre %uK -> %uK)\n", u1 - u0, l0, l1,
+           (unsigned)((v0 - pvr_mem_available()) >> 10), (unsigned)(v0 >> 10), (unsigned)(pvr_mem_available() >> 10));
+}
+static void camion_suelta_ram(void)
+{
+    int f, i, m, a;
+    if (!cam_ram) return;
+    for (i = 0; i < NTRAF; i++) if (traf[i].carril >= 0 && traf[i].modelo >= CAM_M0) traf_aparca(traf + i);
+    for (f = 0; f < NCAMF; f++) {
+        m = CAMF[f].m[0]; a = CAMF[f].m[1];
+        if (mtraf[m].tv) { free(mtraf[m].tv); mtraf[m].tv = NULL; }   /* (los punteros de la VRAM, en cam_tv) */
+        free(traf_remap[m][1]); free(traf_remap[m][2]); free(tani[m].idx);
+        libera_modelo(&mtraf[m]);
+        for (i = 0; i < 2; i++) {
+            int k = i ? a : m;
+            if (k < 0) continue;
+            if (k != m) memset(&mtraf[k], 0, sizeof mtraf[k]);
+            traf_remap[k][1] = traf_remap[k][2] = NULL; memset(&tani[k], 0, sizeof tani[k]); traf_con_lod[k] = 0; traf_ncol[k] = 1;
+            trc[k].modelo = -1; trem[k].ok = 0;
+        }
+    }
+    ta_traf_teo = cam_ta_antes; ta_min_otros_teo = cam_ta_min_antes;
+    modelo_radio_olvida();
+    cam_ram = 0;
+}
+static void camion_suelta_vram(void)
+{
+    int i;
+    for (i = 0; i < cam_ntv; i++) if (cam_tv[i]) pvr_mem_free(cam_tv[i]);
+    cam_ntv = 0;
+}
+/* 470360 (PC race_traffic.cpp shadow_470360; en el control 47E780 de los modelos con segundo descriptor, tras mover
+   el coche): el enganche del cuadro anterior (+C70, mundo) llevado al marco de la cabeza (T(+14) Ry(+2E) Rx(+2C)
+   Rz(+30): pos, fw y up de la demo) da los angulos 449800 {-atan2(y, sqrt(z z + x x)), atan2(x, z), 0}; el enganche
+   nuevo es el punto a 12 m en esa direccion (40A290(0, 0, 12)) y car+C90 = T(+4 del segundo descriptor) Ry Rx Rz (el
+   remolque se dibuja y choca con ella; +CD0 la del cuadro anterior). Sin seguimiento del suelo: el remolque arrastra
+   el punto tal cual */
+static void traf_remolque(trafico_t *t)
+{
+    const coche_t *c = &t->c; float r[3], d[3], l[3], cy, sy, cp, sp; int j;
+    if (!trem[t->modelo].ok) return;
+    t->ra_ant[0] = t->ra[0]; t->ra_ant[1] = t->ra[1];          /* +C90 -> +CD0 */
+    r[0] = c->fw[1] * c->up[2] - c->fw[2] * c->up[1]; r[1] = c->fw[2] * c->up[0] - c->fw[0] * c->up[2]; r[2] = c->fw[0] * c->up[1] - c->fw[1] * c->up[0];
+    for (j = 0; j < 3; j++) d[j] = t->rh[j] - c->pos[j];
+    l[0] = d[0] * r[0] + d[1] * r[1] + d[2] * r[2];             /* M^-1 (+C70): los ejes de pon_coche (z = -fw) */
+    l[1] = d[0] * c->up[0] + d[1] * c->up[1] + d[2] * c->up[2];
+    l[2] = -(d[0] * c->fw[0] + d[1] * c->fw[1] + d[2] * c->fw[2]);
+    t->ra[1] = atan2f(l[0], l[2]);                              /* 449800 */
+    t->ra[0] = -atan2f(l[1], sqrtf(l[2] * l[2] + l[0] * l[0]));
+    cy = cosf(t->ra[1]); sy = sinf(t->ra[1]); cp = cosf(t->ra[0]); sp = sinf(t->ra[0]);
+    l[0] = 12.0f * cp * sy; l[1] = -12.0f * sp; l[2] = 12.0f * cp * cy;   /* Ry Rx (0, 0, 12) */
+    for (j = 0; j < 3; j++) t->rh[j] = c->pos[j] + l[0] * r[j] + l[1] * c->up[j] - l[2] * c->fw[j];
+}
+/* 46E830 (SetOthcarWork) al abrir el coche: el enganche a 12 m detras de la cabeza (T(+14) R (0, 0, 12)) en el suelo
+   (43EB60 con 0x100); el remolque sale alineado con la cabeza */
+static void traf_remolque_nace(trafico_t *t)
+{
+    float y; int j; uint32_t cl;
+    t->ra[0] = t->ra[1] = t->ra_ant[0] = t->ra_ant[1] = 0;
+    if (!trem[t->modelo].ok) return;
+    for (j = 0; j < 3; j++) t->rh[j] = t->c.pos[j] - 12.0f * t->c.fw[j];
+    y = t->rh[1];
+    if (suelo_mundo(t->rh[0], t->rh[2], &y, 0, &cl) >= 0 && cl != 1) t->rh[1] = y;
+}
+/* car+C90 del remolque (470360: T(enganche) Ry(guinada) Rx(cabeceo)) en W */
+static void traf_remolque_matriz(const trafico_t *t, matrix_t W)
+{
+    const float *p = trem[t->modelo].piv;
+    m_id(W); m_tras(W, p[0], p[1], p[2]); m_ry(W, t->ra[1]); m_rx(W, t->ra[0]);
 }
 /* El trafico en el suelo como el original cada cuadro (PS2 0x1eb0c0; PC tras 504E70 en el paso del trafico): el
    suelo 0x100 bajo su centro (car+14 / +18; sin suelo se queda) y, en la etapa (+5C = 0) a menos de 100 m de la camara
@@ -8150,13 +8389,35 @@ static void traf_anima_paso(float dt)
 /* un coche de trafico en la lista l con la matriz mt (ya con solo_lod puesto): carroceria y ruedas */
 static void traf_dibuja(int i, int l, matrix_t *mt)
 {
-    const trafico_t *t = traf + i; const tani_t *a = tani + t->modelo; modelo_t *mo = &mtraf[t->modelo]; int p;
+    const trafico_t *t = traf + i; const tani_t *a = tani + t->modelo; modelo_t *mo = &mtraf[t->modelo]; int p, mw_ok = 0;
     static matrix_t W __attribute__((aligned(32)));
     if (!a->ok) { mat_load(&vista); mat_apply(mt); dibuja_rango(mo, l, mo->inicio[l], mo->inicio[l + 1], 0, 0, 0); return; }
     indices_delante = modelo_delante(mo, (const float (*)[4])*mt);
-    for (p = 0; p <= NTRUEDA; p++) {
+    for (p = 0; p < a->np; p++) {
         uint32_t k0 = a->ini[l][p], k1 = a->ini[l][p + 1];
         if (k1 <= k0) continue;
+        if (p >= P_REM) {                                       /* el remolque (second()): car+B0 x car+C90 */
+            static matrix_t C __attribute__((aligned(32))), Mw __attribute__((aligned(32))); int u, v, k;
+            if (!trem[t->modelo].ok) break;                     /* el 40: la cabeza sola */
+            if (!mw_ok) {
+                mw_ok = 1;
+                traf_remolque_matriz(t, C);
+                for (u = 0; u < 4; u++) for (v = 0; v < 4; v++) {
+                    float q = 0; for (k = 0; k < 4; k++) q += C[u][k] * (*mt)[k][v]; Mw[u][v] = q;
+                }
+                indices_delante = modelo_delante(mo, (const float (*)[4])Mw);
+            }
+            mat_load(&vista); mat_apply(&Mw);
+            if (p > P_REM) {                                    /* 4AD8F0: con el giro de car+40 */
+                const float *r = trem[t->modelo].r[p - P_REM - 1];
+                m_id(W); m_tras(W, r[0], r[1], r[2]);
+                if (r[3] != 0) m_ry(W, (float)M_PI);
+                m_rx(W, r[3] != 0 ? -traf_giro[i] : traf_giro[i]);
+                mat_apply(&W);
+            }
+            dibuja_indices(mo, l, a->idx + k0, k1 - k0);
+            continue;
+        }
         mat_load(&vista); mat_apply(mt);
         if (p > 0) {
             const float *r = a->r[p - 1];
@@ -9069,6 +9330,8 @@ int main(int argc, char **argv)
                 /* (si no caben, el HUD sigue: las que falten se suben solas al querer dibujarlas, hudd_fin_cuadro;
                    antes hud_ok = 0 y la carrera y las siguientes sin HUD) */
                 if (hud_ok && hud_sube_tex()) dbglog(DBG_ERROR, "HUD: sin RAM o VRAM para sus texturas (se suben al dibujarlas)\n");
+                /* los camiones de OUTRUN2SP (TRAFKn.DAT): detras del HUD, antes de la pantalla de carga y de la zona */
+                if (juego_sp && union_prestable()) camion_carga(hueco_union, cap_union - union_fsp);
                 /* OUTRUN2SP: la pantalla de carga del preset (0x1b8228; sus texturas detras de las del HUD y fuera antes
                    de reservar la zona del curso, demo/sp.c) */
                 if (rival_mis()) {                              /* 47CF40 y los modelos de sus coches (RCmm.DAT) */
@@ -9621,8 +9884,10 @@ int main(int argc, char **argv)
                 float zv = dx * ade[0] + dy * ade[1] + dz * ade[2], xv = dx * der[0] + dy * der[1] + dz * der[2];
                 /* el original no recorta por la vista (4AE5F0: solo la distancia en posiciones); aqui el centro con el
                    margen de medio coche (un autobus de 12 m asomaba y desaparecia con el margen fijo de 4 m) */
-                if (estado == TITULO || mundo_fuera || t->carril < 0 || traf_oculto[i] || zv < -3.0f || zv > 450.0f ||
-                    fabsf(xv) > zv * (320.0f / fx) + fmaxf(4.0f, largo_traf[t->modelo] + 1.5f)) continue;
+                /* (con remolque, 16 m mas: el enganche 1,4..1,8 m detras de la cabeza y el remolque 12 m hacia atras) */
+                float mg = t->carril >= 0 && trem[t->modelo].ok ? 16.0f : 0.0f;
+                if (estado == TITULO || mundo_fuera || t->carril < 0 || traf_oculto[i] || zv < -3.0f - mg || zv > 450.0f ||
+                    fabsf(xv) > zv * (320.0f / fx) + fmaxf(4.0f, largo_traf[t->modelo] + 1.5f) + mg) continue;
 #ifdef DIAG_TRAF
                 if (l == 0) traf_vistos++;
 #endif

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""conv_trafico.py tu.iso carpeta [--solo-tablas]: los coches del trafico (CARS.PS2, \\CARS\\obj_othcar_pmt.sz y la
+"""conv_trafico.py tu.iso carpeta [--solo-tablas | --camiones]: los coches del trafico (CARS.PS2, \\CARS\\obj_othcar_pmt.sz y la
 sombra de \\COMMON\\obj_vshadow_pmt.sz) a TRAFn.DAT (formato de modelo.py) montados como el original los dibuja de
 cerca (llamadas: 4AE0F0 / 4ADBC0 del PC con el LOD 0 del registro de 4866C0): carroceria, sombra (subida 0,1 m) y las
 cuatro ruedas de su descriptor (las del otro lado giradas pi en y), parado y sin luces; solo las texturas que usa.
@@ -36,7 +36,12 @@ aparicion, paso 5; tools/ps2/mips.py).
 Con --solo-tablas solo se escriben TRAFC.DAT y TAPD.DAT. Con --rivales=m,m,.. (modelos 0..29) se escriben RCmm.DAT: los
 coches de carreras de las misiones de COAST 2 COAST (el rival), que el original abre como coches del trafico (suceso 0x55
 de 46E830, 47BC90) y dibuja igual que estos con el registro de 4866C0 de su modelo (obj_rc_<coche>, 5 LOD), en el
-formato de TRAFn.DAT; sin las tablas. Sale de tu disco: no se distribuye."""
+formato de TRAFn.DAT; sin las tablas.
+Con --camiones solo los camiones con remolque de OUTRUN2SP (camiones(): TRAFK0.DAT el 39 y el 40, que es su cabeza
+sola; TRAFK1.DAT el 41; TRAFK2.DAT el 43): la cabeza como los coches y el remolque (el segundo descriptor de cada LOD
+de 4866C0, llamadas_remolque) en su marco, que la demo pone con car+C90 (470360); mismas mallas y LOD que el original
+y las texturas en VQ como el resto; detras de TAN1 los bloques REM1 (bloque_rem: enganche, ruedas y segunda caja de
+choque) y TRK1 (los registros de TRC1 de los modelos del fichero). Sale de tu disco: no se distribuye."""
 import os, struct, sys, zlib
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -99,7 +104,7 @@ NINGUNO = 0xFFFFFFFF
 RUEDAS = [(0x38, False, True), (0x48, True, True), (0x58, False, False), (0x78, False, False), (0x68, True, False),
           (0x88, True, False)]
 
-def llamadas(E, tm, m, lod=0):
+def llamadas(E, tm, m, lod=0, remolque=False):
     """piezas del coche de trafico m y su matriz como las dibuja el original con el LOD lod (4AE0F0 -> model: 4ADBC0
     el LOD 0, 4ADD80 el 1, 4ADF00 los 2..4; race_ghost_car.cpp), parado y sin luces: registro de 4866C0 (PC 650500, 0x44 bytes por modelo): +0 lista
     de 5 LOD, cada uno {descriptor, segundo descriptor (remolque) o 0}. Descriptor: +0 carroceria (con el color),
@@ -114,7 +119,7 @@ def llamadas(E, tm, m, lod=0):
     L = E.u32(E.u32(tm + 0x44 * m) + 4 * lod)
     if not L: return []
     d, d2 = E.u32(L, 2); cerca = lod <= 1
-    if d2: raise SystemExit('modelo %d: remolque (segundo descriptor) sin portar' % m)
+    if d2 and not remolque: raise SystemExit('modelo %d: remolque (segundo descriptor): con --camiones' % m)
     u = lambda o: E.u32(d + o); g3 = lambda o: np.array(E.f32(d + o, 3), float)
     s = cc.Pila(); res = []
     def dib(ident, nombre):
@@ -140,7 +145,57 @@ def llamadas(E, tm, m, lod=0):
         dib(u(o), 'rueda%d' % (k + 1)); s.pop()               # 4AD530: + el giro en x (car+40 / +44, animado)
     if cerca:
         for k in range(6): rueda(k)
+    if d2: res += llamadas_remolque(E, d2, lod)
     return res
+
+def llamadas_remolque(E, d2, lod):
+    """el remolque (segundo descriptor del LOD, race_ghost_car.cpp second(): 4ADBC0 / 4ADD80 / 4ADF00 tras la cabeza) en
+    SU marco: el original lo dibuja con car+C90 (la matriz de 470360) por encima de la del coche. Segundo descriptor:
+    +0 carroceria (con el color), +4 enganche (f32 x 3: la traslacion de car+C90), +10 sombra (subida 0,1 m en el LOD
+    0: 40A290), +14 pilotos (solo con car+4 & 0x300: noche o tunel; la demo no los enciende), +18 freno (car+38 > 0:
+    G_FRENO), +1C / +20 intermitentes (car+C5C, apagados), +68 lista de piezas sin color {id, x, y, z} (cerca); ruedas
+    (4AD8F0, cerca: LOD 0 y 1): +24 en +28, +34 en +38 girada pi en y, +44 en +48 y +54 en +58 girada pi (si hay); las
+    gira car+40 (la de las delanteras de la cabeza). Nombres 'rem_*' (pieza 7 de la demo) y 'remrueda1..4' (8..11)"""
+    import conv_coche as cc
+    u = lambda o: E.u32(d2 + o); g3 = lambda o: np.array(E.f32(d2 + o, 3), float)
+    s = cc.Pila(); res = []; cerca = lod <= 1
+    def dib(ident, nombre):
+        if ident != NINGUNO: res.append((ident, s.m[-1].copy(), nombre))
+    dib(u(0), 'rem_carroceria')
+    dib(u(0x18), 'rem_freno')
+    p = u(0x68) if cerca else 0
+    if p and E.u32(p) != NINGUNO:
+        e = 0
+        while True:
+            s.push(); s.translate(np.array(E.f32(p + e + 4, 3), float)); dib(E.u32(p + e), 'rem_lista'); s.pop()
+            if E.u32(p + e + 0x10) == NINGUNO: break
+            e += 0x10
+    if u(0x10) != NINGUNO:
+        s.push(); s.translate((0.0, 0.1 if lod == 0 else 0.0, 0.0)); dib(u(0x10), 'rem_sombra'); s.pop()
+    if cerca:
+        for k, (o, otro) in enumerate(RUEDAS_REM):
+            if u(o) == NINGUNO: continue
+            s.push(); s.translate(g3(o + 4))
+            if otro: s.rot_y(np.pi)
+            dib(u(o), 'remrueda%d' % (k + 1)); s.pop()
+    return res
+
+# ruedas del remolque como las pone 4AD8F0: {posicion de la pieza, del otro lado (girada pi en y)}; piezas 8..11
+RUEDAS_REM = [(0x24, False), (0x34, True), (0x44, False), (0x54, True)]
+P_REM = 7                                                       # pieza de la demo: lo que no gira del remolque
+
+def bloque_rem(E, tm, m, tc, d):
+    """REM1 (detras de TAN1): 'REM1', f32 enganche x, y, z (+4 del segundo descriptor del LOD 0: 470360 traslada
+    car+C90 ahi), u32 ruedas (4), 4 x {f32 x, y, z, del otro lado, 0} (4AD8F0; x = y = z = 0 si no estan) y f32 x 7 la
+    segunda caja de choque (la del remolque, en el marco de car+C90: 4F9000 con ia / ib = 1)"""
+    d2 = E.u32(E.u32(E.u32(tm + 0x44 * m)) + 4)
+    b = [b'REM1', struct.pack('<3fI', *E.f32(d2 + 4, 3), len(RUEDAS_REM))]
+    for o, otro in RUEDAS_REM:
+        p = E.f32(d2 + o + 4, 3) if E.u32(d2 + o) != NINGUNO else (0.0, 0.0, 0.0)
+        b.append(struct.pack('<5f', *p, 1.0 if otro else 0.0, 0.0))
+    assert d[tc + m * 0x3c] == 2, 'modelo %d con remolque sin segunda caja' % m
+    b.append(d[tc + m * 0x3c + 32:tc + m * 0x3c + 60])
+    return b''.join(b)
 
 def bloque_tan(E, tm, m):
     """TAN1 (detras de los pares de TCX1): 'TAN1', u32 ruedas (6), f32 radio (+08 del registro de 4866C0: el control del
@@ -391,96 +446,138 @@ def tablas(iso, dest, cajas_malla=None):
     open(os.path.join(dest, 'TAPD.DAT'), 'wb').write(TAPD)
     print('TRAFC.DAT: modelos en 0x%x, cajas en 0x%x, tabla por clase en 0x%x' % (tm, tc, tk))
 
+def convierte(A, E, tm, m, claves, ruta_fich, remolque=False, extra=b'', riv=False):
+    """un modelo de trafico m a ruta_fich (TRAFn.DAT / TRAFKn.DAT); con remolque, el segundo descriptor (llamadas_remolque)
+    y detras de TAN1 los bloques extra (REM1, TRK1); riv: un rival (RCmm.DAT, los 8 colores de TCX9). Devuelve la caja
+    de la carroceria del LOD 0"""
+    import conv_coche as cc
+    mod = modelo.Modelo(); mod.ruta = np.zeros((0, 5)); mod.extra = []; vistos = {}
+    for lod in range(5):
+        piezas = llamadas(E, tm, m, lod, remolque); m0 = len(mod.mallas)
+        for ident, M, nom in piezas:
+            b = cc._bloque_recurso(A, ident >> 16)
+            if nom == 'carroceria' and lod == 0: cuerpo = ident & 0xFFFF; med = caja(b, cuerpo); lo, hi = med
+            if id(b) not in vistos: vistos[id(b)] = b
+            pz = int(nom[5:]) if nom.startswith('rueda') else 7 + int(nom[8:]) if nom.startswith('remrueda') else \
+                P_REM if nom.startswith('rem_') else 0
+            cc.pieza(mod, b, ident, R=M[:3, :3], t=M[3, :3], nombre=nom,
+                     grupo=cc.G_PILOTOS if nom == 'pilotos' else cc.G_FRENO if nom in ('freno', 'rem_freno') else cc.NADA,
+                     pieza_id=pz)
+        for x in mod.mallas[m0:]: x[7] = lod               # el LOD en el campo del nodo (la pieza, abajo)
+        if lod == 0: piezas0 = piezas
+    piezas = piezas0
+    largo = hi[2] - lo[2]
+    materiales(mod)
+    for x, v in zip(mod.mallas, mod.verts):
+        q = x[-1]
+        if q is None: continue
+        if q[0] == 'color': v['c'] = q[1]; x[0] = 2 if q[2] else 0
+        else:
+            _, uvs, alfa, esp = q; tr = alfa < 250
+            x[1] = cc._tex_copia(mod, x[1], tr); x[0] = 2 if tr else 0
+            v['u'], v['v'] = uvs[:, 0], uvs[:, 1]
+            e = int(min(255, esp.max())); v['c'] = ((alfa if tr else 255) << 24) | (e << 16) | (e << 8) | e
+    # ruedas: los vertices a su marco (antes de su giro de reposo: la inversa de su matriz), la demo pone la matriz; lo
+    # que no gira del remolque (pieza 7) se queda en el marco del remolque (la demo pone car+C90)
+    for x, v in zip(mod.mallas, mod.verts):
+        if len(x) > 9 and isinstance(x[9], dict) and x[9].get('pieza'):
+            if x[9]['pieza'] != P_REM:
+                Mi = np.linalg.inv(x[9]['M'])
+                P = np.stack([v['x'], v['y'], v['z']], 1).astype(float) @ Mi[:3, :3] + Mi[3, :3]
+                v['x'], v['y'], v['z'] = P[:, 0], P[:, 1], P[:, 2]
+                x[2] = P.mean(0); x[3] = float(np.sqrt(((P - x[2]) ** 2).sum(1).max()))
+            x[7] = x[7] | x[9]['pieza'] << 8
+    # pilotos: el grupo (G_PILOTOS = 1 los normales +C, G_FRENO = 3 los del freno +14) en los bits 24..25 del
+    # campo del nodo; la demo dibuja unos u otros (traf_dibuja: car+38 > 0 del trafico, 4AD4D0)
+    for x in mod.mallas:
+        if len(x) > 9 and isinstance(x[9], dict) and x[9].get('grupo'): x[7] = x[7] | x[9]['grupo'] << 24
+    # colores del original: las texturas alternativas, que recorta_texturas conserva con mallas de mentira (la
+    # clave y sus dos colores; recorta les pone el indice nuevo)
+    pares = []
+    for k in claves:
+        if not any(x[1] == (k[0] & 0xFFFF) for x in mod.mallas): continue
+        pares.append([[9, t & 0xFFFF] + [None] * 6 for t in k[:9 if riv else 3]])
+    for f in pares: mod.mallas.extend(f)
+    mod.recorta_texturas()
+    if mod.vq: mod.comprime(); mod._comprimido = True        # (las alternativas tambien en VQ)
+    falsas = {id(q) for f in pares for q in f}
+    mod.mallas = [x for x in mod.mallas if id(x) not in falsas]
+    # rivales: 'TCX9', los 8 colores de car+0x12 (1..8, +73 del registro de 47CF40) por clave de la lista del modelo
+    # (0x36bc18: {clave, color 1..8}); el trafico: 'TCX1' con 3 (la clave y dos)
+    tcx = [b'TCX9' if riv else b'TCX1', struct.pack('<2I', 9 if riv else NCOLOR.get(m, 3), len(pares))]
+    for f in pares: tcx.append(struct.pack('<%dI' % len(f), *[q[1] for q in f]))
+    tcx.append(bloque_tan(E, tm, m))
+    tcx.append(extra)
+    mod.ruta = np.frombuffer(b''.join(tcx), '<f4').reshape(-1, 1)
+    mod.mallas = [x[:8] for x in mod.mallas]
+    # las mallas que repite otro LOD (el 1 lleva las del 0 salvo la sombra subida) van una vez, con la mascara de
+    # los LOD que las dibujan en el campo del nodo (bit k = LOD k)
+    assert len(mod.mallas) == len(mod.verts)
+    clave = {}; mallas = []; verts = []; nv = 0
+    for x, v in zip(mod.mallas, mod.verts):
+        k = (x[0], x[1], x[7] >> 8, v.tobytes()); lod = x[7] & 0xFF   # x[7] = LOD | pieza << 8
+        if k in clave: clave[k][7] |= 1 << lod; continue
+        y = list(x); y[7] = 1 << lod | (x[7] >> 8) << 8; y[4] = nv; nv += len(v)
+        clave[k] = y; mallas.append(y); verts.append(v)
+    mod.mallas, mod.verts, mod.nv = mallas, verts, nv
+    mod.escribe(ruta_fich)
+    print('%s (modelo %d, registro %d): %.1f m, %d tiras, %d texturas (%d KB), piezas %s; vertices por LOD %s'
+          % (os.path.basename(ruta_fich), m, cuerpo, largo, len(mod.mallas), len(mod.texs), len(mod.blob) >> 10,
+             ' '.join('%s %d:%d' % (q[2], q[0] >> 16, q[0] & 0xFFFF) for q in piezas),
+             ' '.join(str(sum(x[5] for x in mod.mallas if x[7] >> k & 1)) for k in range(5))))
+    return med
+
+def claves_de(E, T, m, n=3):
+    """la lista de colores del modelo m (tabla 0x36bc18): {clave, color 1..} de n palabras (3 el trafico, 9 los rivales)"""
+    p = E.u32(T + 4 * m); r = []
+    while E.u32(p): r.append(E.u32(E.u32(p), n)); p += 4
+    return r
+
+# Camiones (--camiones): {fichero, modelo con remolque, modelos del mismo fichero}: 39 / 40 y 41 / 42 son la misma
+# cabeza (el mismo descriptor del LOD 0) con y sin remolque; el 42 no lo pide ninguna tabla (46CE30 da 0x27..0x29 y
+# 0x2B; puntos fijos de STAGE: 39, 40, 41 y 43) y no se escribe.
+CAMIONES = [('TRAFK0.DAT', 39, (39, 40)), ('TRAFK1.DAT', 41, (41,)), ('TRAFK2.DAT', 43, (43,))]
+
+def camiones(iso, A, dest):
+    """TRAFK0..2.DAT: los camiones con remolque (modelos 39, 41 y 43; el 40 es la cabeza del 39 sola): cabeza como los
+    coches (llamadas), el remolque en su marco (llamadas_remolque, pieza 7 y ruedas 8..11) y detras de TAN1 los bloques
+    REM1 (bloque_rem) y TRK1: 'TRK1', u32 n y por modelo del fichero el registro de TRC1 (48 bytes) y u32 1 si se
+    dibuja con el remolque (0: el 40, sin el segundo descriptor)"""
+    E = A.elf; T, rec = tabla_colores(A)
+    nombre = next(k for k in iso.fich if k.startswith('SLES') or k.startswith('SLUS') or k.startswith('SLPM'))
+    o, s = iso.fich[nombre]; d = bytes(iso.m[o:o + s])
+    tmo, tc = tabla_modelos(d), tabla_cajas(d); tm = E.va(tmo)
+    for fich, m, mods in CAMIONES:
+        trk = [b'TRK1', struct.pack('<I', len(mods))]
+        for mm in mods:
+            r = tmo + mm * 0x44
+            se, k320, clase = struct.unpack('<3i', d[r + 0xc:r + 0x18]); radio, = struct.unpack('<f', d[r + 0x18:r + 0x1c])
+            cj = struct.unpack('<7f', d[tc + mm * 0x3c + 4:tc + mm * 0x3c + 32])
+            con = 1 if E.u32(E.u32(E.u32(tm + 0x44 * mm)) + 4) else 0
+            trk.append(struct.pack('<4i', mm, clase, se, k320) + struct.pack('<8f', radio, *cj) + struct.pack('<I', con))
+            print('camion %d: clase %d, +320 %d, se %d, radio %.2f, cajas %d, remolque %d' % (mm, clase, k320, se, radio, d[tc + mm * 0x3c], con))
+        convierte(A, E, tm, m, claves_de(E, T, m), os.path.join(dest, fich), True, bloque_rem(E, tm, m, tc, d) + b''.join(trk))
+
 def main():
     iso = isomod.Iso(sys.argv[1]); dest = sys.argv[2]
     if '--solo-tablas' in sys.argv[3:]:
         tablas(iso, dest); return
     from ps2.assets import Assets
-    A = Assets(sys.argv[1]); E = A.elf; T, rec = tabla_colores(A); claves = {}
+    A = Assets(sys.argv[1]); E = A.elf
+    if '--camiones' in sys.argv[3:]:
+        camiones(iso, A, dest); return
+    T, rec = tabla_colores(A)
     # --rivales m,m,..: los coches de carreras de las misiones de COAST 2 COAST (el rival: suceso 0x55 de 46E830 con el
     # modelo 0..29, que el trafico dibuja con su registro de 4866C0 como cualquier otro: obj_rc_<coche>, 5 LOD) a
     # RCmm.DAT (mm = el modelo), con el mismo formato que TRAFn.DAT; sin TRAFC.DAT ni TAPD.DAT
     riv = next((a for a in sys.argv[3:] if a.startswith('--rivales=')), None)
     lista = [int(x) for x in riv.split('=', 1)[1].split(',')] if riv else MODELOS
-    for m in lista:
-        p = E.u32(T + 4 * m); claves[m] = []
-        while E.u32(p): claves[m].append(E.u32(E.u32(p), 9 if riv else 3)); p += 4
     print('colores del trafico: tabla en 0x%x' % T)
     nombre = next(k for k in iso.fich if k.startswith('SLES') or k.startswith('SLUS') or k.startswith('SLPM'))
     o, s = iso.fich[nombre]; tm = E.va(tabla_modelos(bytes(iso.m[o:o + s])))
-    import conv_coche as cc
-    medidas = []
-    for n, m in enumerate(lista):
-        mod = modelo.Modelo(); mod.ruta = np.zeros((0, 5)); mod.extra = []; vistos = {}
-        for lod in range(5):
-            piezas = llamadas(E, tm, m, lod); m0 = len(mod.mallas)
-            for ident, M, nom in piezas:
-                b = cc._bloque_recurso(A, ident >> 16)
-                if nom == 'carroceria' and lod == 0: cuerpo = ident & 0xFFFF; medidas.append(caja(b, cuerpo)); lo, hi = medidas[-1]
-                if id(b) not in vistos: vistos[id(b)] = b
-                cc.pieza(mod, b, ident, R=M[:3, :3], t=M[3, :3], nombre=nom,
-                         grupo=cc.G_PILOTOS if nom == 'pilotos' else cc.G_FRENO if nom == 'freno' else cc.NADA,
-                         pieza_id=int(nom[5:]) if nom.startswith('rueda') else 0)
-            for x in mod.mallas[m0:]: x[7] = lod               # el LOD en el campo del nodo (la pieza, abajo)
-            if lod == 0: piezas0 = piezas
-        piezas = piezas0
-        largo = hi[2] - lo[2]
-        materiales(mod)
-        import conv_coche as cc
-        for x, v in zip(mod.mallas, mod.verts):
-            q = x[-1]
-            if q is None: continue
-            if q[0] == 'color': v['c'] = q[1]; x[0] = 2 if q[2] else 0
-            else:
-                _, uvs, alfa, esp = q; tr = alfa < 250
-                x[1] = cc._tex_copia(mod, x[1], tr); x[0] = 2 if tr else 0
-                v['u'], v['v'] = uvs[:, 0], uvs[:, 1]
-                e = int(min(255, esp.max())); v['c'] = ((alfa if tr else 255) << 24) | (e << 16) | (e << 8) | e
-        # ruedas: los vertices a su marco (antes de su giro de reposo: la inversa de su matriz), la demo pone la matriz
-        for x, v in zip(mod.mallas, mod.verts):
-            if len(x) > 9 and isinstance(x[9], dict) and x[9].get('pieza'):
-                Mi = np.linalg.inv(x[9]['M'])
-                P = np.stack([v['x'], v['y'], v['z']], 1).astype(float) @ Mi[:3, :3] + Mi[3, :3]
-                v['x'], v['y'], v['z'] = P[:, 0], P[:, 1], P[:, 2]
-                x[2] = P.mean(0); x[3] = float(np.sqrt(((P - x[2]) ** 2).sum(1).max()))
-                x[7] = x[7] | x[9]['pieza'] << 8
-        # pilotos: el grupo (G_PILOTOS = 1 los normales +C, G_FRENO = 3 los del freno +14) en los bits 24..25 del
-        # campo del nodo; la demo dibuja unos u otros (traf_dibuja: car+38 > 0 del trafico, 4AD4D0)
-        for x in mod.mallas:
-            if len(x) > 9 and isinstance(x[9], dict) and x[9].get('grupo'): x[7] = x[7] | x[9]['grupo'] << 24
-        # colores del original: las texturas alternativas, que recorta_texturas conserva con mallas de mentira (la
-        # clave y sus dos colores; recorta les pone el indice nuevo)
-        m = lista[n]; pares = []
-        for k in claves.get(m, []):
-            if not any(x[1] == (k[0] & 0xFFFF) for x in mod.mallas): continue
-            pares.append([[9, t & 0xFFFF] + [None] * 6 for t in k[:9 if riv else 3]])
-        for f in pares: mod.mallas.extend(f)
-        mod.recorta_texturas()
-        if mod.vq: mod.comprime(); mod._comprimido = True        # (las alternativas tambien en VQ)
-        falsas = {id(q) for f in pares for q in f}
-        mod.mallas = [x for x in mod.mallas if id(x) not in falsas]
-        # rivales: 'TCX9', los 8 colores de car+0x12 (1..8, +73 del registro de 47CF40) por clave de la lista del modelo
-        # (0x36bc18: {clave, color 1..8}); el trafico: 'TCX1' con 3 (la clave y dos)
-        tcx = [b'TCX9' if riv else b'TCX1', struct.pack('<2I', 9 if riv else NCOLOR.get(m, 3), len(pares))]
-        for f in pares: tcx.append(struct.pack('<%dI' % len(f), *[q[1] for q in f]))
-        tcx.append(bloque_tan(E, tm, m))
-        mod.ruta = np.frombuffer(b''.join(tcx), '<f4').reshape(-1, 1)
-        mod.mallas = [x[:8] for x in mod.mallas]
-        # las mallas que repite otro LOD (el 1 lleva las del 0 salvo la sombra subida) van una vez, con la mascara de
-        # los LOD que las dibujan en el campo del nodo (bit k = LOD k)
-        assert len(mod.mallas) == len(mod.verts)
-        clave = {}; mallas = []; verts = []; nv = 0
-        for x, v in zip(mod.mallas, mod.verts):
-            k = (x[0], x[1], x[7] >> 8, v.tobytes()); lod = x[7] & 0xFF   # x[7] = LOD | pieza << 8
-            if k in clave: clave[k][7] |= 1 << lod; continue
-            y = list(x); y[7] = 1 << lod | (x[7] >> 8) << 8; y[4] = nv; nv += len(v)
-            clave[k] = y; mallas.append(y); verts.append(v)
-        mod.mallas, mod.verts, mod.nv = mallas, verts, nv
-        ini = mod.escribe(os.path.join(dest, ('RC%02d.DAT' % m) if riv else ('TRAF%d.DAT' % n)))
-        print('trafico %d (modelo %d, registro %d): %.1f m, %d tiras, %d texturas (%d KB), piezas %s; vertices por LOD %s'
-              % (n, m, cuerpo, largo, len(mod.mallas), len(mod.texs), len(mod.blob) >> 10,
-                 ' '.join('%s %d:%d' % (q[2], q[0] >> 16, q[0] & 0xFFFF) for q in piezas),
-                 ' '.join(str(sum(x[5] for x in mod.mallas if x[7] >> k & 1)) for k in range(5))))
+    medidas = [convierte(A, E, tm, m, claves_de(E, T, m, 9 if riv else 3),
+                         os.path.join(dest, ('RC%02d.DAT' % m) if riv else ('TRAF%d.DAT' % n)), riv=bool(riv))
+               for n, m in enumerate(lista)]
     if not riv: tablas(iso, dest, medidas)
 
 if __name__ == '__main__':

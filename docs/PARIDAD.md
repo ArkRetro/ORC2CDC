@@ -45,7 +45,7 @@ Estado: OK (conectado y verificado al nivel indicado), PARCIAL, PROVISIONAL (apr
 | Adherencia por superficie | get_road_mu 500B30, running_resistance 502120, COLI0200 | OK | coli por rueda | ninguna conocida | — | H, E |
 | Choques coche-coche y muro, choque fuerte, grua | 4F9450/4F9000/4F8490/4F6FE0/4F76E0/4F7BF0/476040/473F30 (ver Choques entre coches), CarBodyWallColiCheck 504CE0 y cbw_coli_wall (la forma de la carroceria contra la COLI: ver Muros y suelo de la carroceria del original), 5038D0, PlWrecker | PARCIAL | CHQ1/POS1 de PARAM.DAT, CJM1/SEC1 de TRAFC.DAT, efectos de IGC.PAK en SFX.DAT | coche-coche: ver Choques entre coches (PROVISIONALES alli; golpeados: parpadeo y cierre del original); vibracion del mando de PS2 (0x1d0420) salvo la de la superficie; grua recoloca en el centro de la fila de poligonos de la carretera (CORREGIDO 2026-11-11: la ruta es ese centro, ver Muros y suelo de la carroceria del original; antes el carril del asfalto mas cercano); avance 10 posiciones x m_pos (CONFIRMADO, antes 25 m supuestos); angulo del choque fuerte por nivel de etapa (CORREGIDO 2026-11-11: 45 grados solo en la primera, 25 / 18 en las demas, PS2 0x1994c4: antes siempre 45 y el vuelco casi no salia); tramos de atrapamiento y de desvio 1 -> 5 por etapa HECHOS (2026-11-11, ver Choque fuerte contra el muro); sin el SE 0x43 de los estados 1 y 5 ni el SE por material (pc_collision_material_sound), sin el handicap +DB4; chispas del muro y de los coches hechas (ver Sombras y marcas) | — | H, E |
 | Camara de carrera | evento CAMERA 385: 4858D0, 484810, 483110, 4A1680 SetCarCamera, 485590/483CE0/4834A0/483600, 4832F0/484A40, 483C10/484BD0 (PS2 0x178500..0x17b540, 0x1817c0) | PARCIAL | demo/camara.c con las tablas CAM1 de PARAM.DAT (vistas 0x2ccd88, por vista y modelo 0x2cd3d8, por modelo 0x2d2838 del fichero SLES) | vista 1 sin interior (no se dibuja el coche); camara de salida (485250) con el ojo y la mira de la escena de la salida los 120 cuadros de START (ver Escena de la salida); sin vista 0x1D (780258 = 0) ni camara de fin (485830); la de la meta (4853D0) en demo/meta.c (ver Escena de la meta) | ver seccion Camara de carrera | E |
-| Trafico (clases, IA, reaccion) | 472090, 472450, 472A50, 47DC10, 4736D0, hit_476040; aparicion 479080 (PS2 0x1dcdd0): 478B90 (0x1dbba0), 4787E0 (0x1db6d0), 4EFB90 (0x1f3818), 4F0030 (0x1f1a88), 46CE30, 478430, 46CC10; cierre 477F60 | PARCIAL | TRAFC.DAT (TRC1, ACL1 y TAP1: tablas de aparicion, velocidad y puntos fijos por etapa); colores (tabla 0x36bc18, modelos 30..43) y materiales en TRAFn.DAT (TCX1) | camino "Lead" de 472450 portado (velocidad por clase y del jugador, ver Choques entre coches: velocidad del trafico de delante) salvo 472320 / 471F90; 478640/46CDA0 en la union simplificados; puntos fijos de coches de carreras y de los modelos 39..43 sin coche | ver Trafico: densidad del original | E |
+| Trafico (clases, IA, reaccion) | 472090, 472450, 472A50, 47DC10, 4736D0, hit_476040; aparicion 479080 (PS2 0x1dcdd0): 478B90 (0x1dbba0), 4787E0 (0x1db6d0), 4EFB90 (0x1f3818), 4F0030 (0x1f1a88), 46CE30, 478430, 46CC10; cierre 477F60 | PARCIAL | TRAFC.DAT (TRC1, ACL1 y TAP1: tablas de aparicion, velocidad y puntos fijos por etapa); colores (tabla 0x36bc18, modelos 30..43) y materiales en TRAFn.DAT (TCX1) | camino "Lead" de 472450 portado (velocidad por clase y del jugador, ver Choques entre coches: velocidad del trafico de delante) salvo 472320 / 471F90; 478640/46CDA0 en la union simplificados; puntos fijos de coches de carreras sin coche; camiones 39/40/41/43 solo en OUTRUN2SP (en el juego de la consola sin coche; ver OUTRUN2SP: camiones) | ver Trafico: densidad del original | E |
 | Piloto y acompanante | ROB01 / ROB02: PS2 0x201b10 / 0x201c40 / 0x202bf0 y 0x202c58 / 0x202de0; pareja 0x205518 / 0x2055b8; CHR.PS2 (CHR_DR_M00 / S00 / W00 / L00 / G00 / H00, G00_USA), bone.bin, ANIMS.PS2 | PARCIAL | CHRPAR.DAT y CHRppaa.DAT (conv_chr.py --pares), comun/robot.c (con el osage de G00): motor de movimientos, conducir con el volante, codo en la puerta, choque, fuera del asfalto, aburrida, META y TIME OVER (ver Coches: el piloto y la acompanante) | cambio de area, asustada, trompo ni poses pedidas (la meta del piloto, estado 9, hecha: ver Escena de la meta) | - | H, E |
 | Rivales | 47CF40 (PS2 0x1ef900) solo desde el gestor de misiones de C2C (496A30, PS2 0x1f9e4c) y la variante 9 (4B02B0, PS2 0x1f7a50 -> 0x1f0910); coches de carreras 47C8A0 / 47BC90 / 477090 / 477510 del modulo del trafico | PARCIAL (2026-11-13): en las misiones de carrera de C2C (ver COAST 2 COAST: misiones de carrera y el rival) | MISION.DAT (conv_mision.py), RC00-29.DAT (conv_trafico.py --rivales), comun/rival.c | no hay rivales en OUTRUN, INFARTO ni CONTRARRELOJ (el original tampoco); SIN PORTAR 472E60, 474080, vaivenes 476CA0..476F40 (ninguna mision de tipo 0 los pide), variante 9 | ver la seccion | E (Flycast) |
 | Carretera, pendientes, bifurcacion | STAGE.PS2, BK.PS2 cs_BK_PALM, COMMON obj_course_obj_bk_palm + obj_OBJ_<ZONA>_BUNKI_TX, descriptores 0xb0, csc_data_2 | OK | conv_tramo/conv_union, CURSO.DAT | arbol entero (15 etapas, 10 bifurcaciones con sus carteles, 5 metas); cielo, niebla, luz y sol de la union como el original (ver Entorno); bifurcaciones = las de PALM (las demas no estan en el disco) | objetos animados de BK (ANIMS) | E |
@@ -868,7 +868,8 @@ Flycast (-DPRUEBA_GUION -DPRUEBA_EMBISTE -DPRUEBA_TRAFICO -DDIAG_CHOQUE; captura
 golpe a 64 km/h de velocimetro -> estado 7, el otro estado 16 (vuela) y a 47; roce largo con el autobus (separacion,
 sin cambio de velocidad, mismo coche en +DA0) y empujon por detras; 65 s de -DPRUEBA_AUTO: 11 roces laterales, sin
 choques en cadena ni incidencias.
-PROVISIONAL: solo la caja 0 (camiones con remolque 39..43 no estan en la demo); sin el filtro +300 < K(5E0AC0) ni
+PROVISIONAL: la caja 1 (el remolque de los camiones, solo en OUTRUN2SP: ver OUTRUN2SP: camiones) en el plano sin el
+cabeceo del remolque; sin el filtro +300 < K(5E0AC0) ni
 +329 > 10 de la pasada (constantes sin localizar en PS2); la profundidad de camara de 4F67A0 se mide desde el jugador;
 lane_range (46D0C0) con la calzada por carriles 0..2 / 3..5; el rumbo del pose anterior del trafico es el de su
 avance (sin +2E8 ni cabeceo/balanceo).
@@ -1883,7 +1884,9 @@ peticion 14 (escoltas 45B5B0, +324 = 6: carrera contra ellos), que no esta en la
   del coche, matriz +C90 con el desplazamiento del segundo descriptor +4; inicio en 1008/1010 con 43EB60), el angulo de
   enganche +C2C de 474990 (recorte del volante) y las cajas del remolque en los choques (4F9000 con ia == 1, +C90);
   dibujo en race_ghost_car.cpp second() (carroceria, pilotos +14/+18, luces +1C/+20, lista +68, sombra +10, ruedas
-  4AD8F0). Es terreno del trafico: no se hizo para no inventar un remolque rigido.
+  4AD8F0). Es terreno del trafico: no se hizo para no inventar un remolque rigido. PORTADO (2026-11-13) para las
+  carreras de OUTRUN2SP (ver OUTRUN2SP, Camiones); en el INFARTO (juego de la consola) el 0x2B se sigue gastando sin
+  coche (los camiones no se cargan fuera de OUTRUN2SP).
 - Listas de aterrizaje / salto de la acompanante del modo (PC 5C0FB0 / 5C0FD0 = PS2 0x40ea30 / 0x40ea40): iguales que
   las del OutRun (0x40eb10 / 0x40eb20) y con las mismas cuentas: CONFIRMADO (comun/voces.c). Sus listas de movimientos
   (PS2 0x40ea48 cerrado / 0x40ea88 descapotable, PC 5C0FD8 / 5C1018) SI son otras (0x6003d, 0x60025, 0x240000/1,
@@ -2249,8 +2252,9 @@ hasta que sale por debajo de su peso, pasando a la siguiente; 800D9C + 1 al abri
 46C950 (PS2 0x1d9c40): 0x78, 0x67, 0x69, 0x5E, 0xD4 y cuentas a 0. En el arbol 0 todos los registros son 0,0,0,0,100
 (sale la 4 como antes); en OUTRUN2SP SANF (0,0,0,3,97), YOSE (0,0,0,5,95)... dan la clase 3 (0x1F, el autobus).
 En el INFARTO (variante 2) la clase 0 pasa a la 4 salvo en el tipo de peticion 0x16 (45C440 = PS2 0x1af3f8: [0x589b08],
-el tipo de infarto.c; 0x1db3c0..0x1db3ec), con la cuenta de la clase que salio (CORREGIDO 2026-11-11: antes siempre 4). Los modelos 39..43 (clases 0..2: camiones) no estan convertidos: se gastan sin coche, como los puntos
-fijos de esos modelos.
+el tipo de infarto.c; 0x1db3c0..0x1db3ec), con la cuenta de la clase que salio (CORREGIDO 2026-11-11: antes siempre 4). Los modelos 39, 40, 41 y 43 (clases 0..2: camiones) salen en las carreras
+de OUTRUN2SP (HECHO 2026-11-13, ver Camiones abajo); en el juego de la consola se siguen gastando sin coche, como los
+puntos fijos de esos modelos.
 
 Estado en la DC (verificado en E, tools/prueba/sp.sh: OUTRUN2SP desde el menu, coche, cambio, musica y 90 s de
 carrera por BEAC -> SANF; `MODO: variante 1, dificultad 0, ..., juego OUTRUN2SP, preset 1`, `CURSO: arbol 1, 15
@@ -2359,10 +2363,48 @@ etapas, salida BEAC`, BAND1.DAT en el hueco de la union; RAM libre 1419..1490 KB
   puntos fijos conservan la etapa de ida (0..29) en el campo +0: 478B90 solo toma los de la etapa actual (44DC50, el
   descriptor) salvo con la red o los rivales (F12), asi que sin red no salen (0 en TAPD: PROBABLE que 44DC50 de 30..59
   en esas etapas, como da ti en las de ida).
-- Camiones (modelos 39..43, clases 0..2): SIN PORTAR (2026-11-11: la matriz del remolque, car+C90, la calcula 470360
-  de race_traffic.cpp con el enganche +C70 / +C7C de cada paso: hace falta portar ese seguimiento, no solo el dibujo). Su registro de 4866C0 trae un segundo descriptor (el remolque)
-  en cada LOD, que 4AE0F0 / 4ADBC0 (race_ghost_car.cpp, d.model) dibuja con su propia matriz articulada: conv_trafico.py
-  para en "remolque (segundo descriptor) sin portar". Hasta portarlo esos coches se gastan sin coche (como antes).
+- Camiones (modelos 39, 40, 41 y 43; clases 0..2), HECHO 2026-11-13 (antes SIN PORTAR: se gastaban sin coche). En
+  el arbol 1 los piden 46CE30 (preset 1 / 3: clase 0 0x27 / 0x29, clases 1 / 2 0x28; solo hay pesos de las clases
+  0..2 en SEG23, la etapa 8 ALAS: 3, 3, 3 de 100) y los puntos fijos de 478B90 de SEG23 (40, 43, 39, 41, 43), SEG24
+  (etapa 5: 43), SEG25 (etapa 1: 39) y SEG26 (etapa 9: 41); el 42 no lo pide nadie.
+  - Modelos (tools/conv_trafico.py --camiones -> TRAFK0.DAT 39 y 40, TRAFK1.DAT 41, TRAFK2.DAT 43): registro de 4866C0
+    (PC 650500; SLES-53998 0x3d6f38 / 0x3d6f68 / 0x3d6f50 / 0x3d6f98), cada LOD {descriptor, segundo descriptor}; el 39
+    y el 40 (y el 41 y el 42) comparten la cabeza (descriptor del LOD 0 0x3d8128 / 0x3d8358): el 40 es la cabeza sola
+    y usa los datos del 39. Cabeza como los coches (4ADBC0 / 4ADD80 / 4ADF00); remolque como second() de
+    race_ghost_car.cpp en su marco: +0 carroceria (con el color), +18 freno (car+38 > 0), +14 pilotos solo con car+4 &
+    0x300 (noche / tunel, apagados como los de la cabeza), +1C / +20 intermitentes (apagados), +68 lista (cerca), +10
+    sombra (subida 0,1 m en el LOD 0, como la del resto del trafico) y ruedas de 4AD8F0 (+24 / +34 / +44 / +54, las del
+    otro lado giradas pi en y, todas con el giro de car+40). Las mismas tiras y los mismos 5 LOD del original
+    (vertices por LOD: 39 1852 / 1852 / 902 / 245 / 207, 41 1902 / 1902 / 977 / 262 / 140, 43 2118 / 2118 / 994 / 296 /
+    151; LOD de 46DF50 con base -35 en el 0x27 y -25 en el 0x28); texturas en VQ como el resto (13 de 15, 13 de 15 y 17
+    de 18: 191 -> 46, 201 -> 46 y 272 -> 64 KB). La pasada de sombra 4AD380 (d0+98 / d1+64 del LOD 0) es None en estos
+    modelos: nada que dibujar.
+  - Seguimiento del remolque: 470360 (PC race_traffic.cpp shadow_470360, en el control 47E780 tras mover el coche;
+    demo/main.c traf_remolque): el enganche del cuadro anterior (+C70, mundo) al marco de la cabeza (T(+14) Ry(+2E)
+    Rx(+2C) Rz(+30)), angulos de 449800 {-atan2(y, sqrt(z z + x x)), atan2(x, z), 0} (+C7C), el enganche nuevo a 12 m
+    en esa direccion y car+C90 = T(+4 del segundo descriptor: (0, 1,4, 1,8) en el 39, (0, 1,45, 0) en el 41, (0, 1,35,
+    3,2) en el 43) Ry Rx Rz; +CD0 la del cuadro anterior. Al abrir el coche (46E830, traf_remolque_nace) el enganche a
+    (0, 0, 12) de la cabeza en el suelo (43EB60 con 0x100). El dibujo: car+B0 x car+C90 (second()).
+  - Choques: la segunda caja de 520950 (la del remolque, en el marco de car+C90: 39 (1,244, 2,906, 11,335, -1,244,
+    -1,4, 1,2), 41 (1,497, 2,118, 9,911, -1,497, -1,45, 2,005), 43 (1,376, 3,059, 11,182, -1,376, -1,35, -0,2)) en
+    4F9000 con ia / ib = 1 (+C90 ahora y +CD0 en el cuadro anterior); la pasada de 4F9450 prueba cada caja de uno
+    contra cada caja del otro (jugador y trafico entre si) con la cercania de los centros (+14) y el radio de 4866C0
+    (+18: 13,82 en los de remolque, 5 en el 40) y separa por cada par que toca (formas_traf / contacto_cajas).
+    SIMPLIFICADO: en el plano, como la caja del propio coche, sin el cabeceo del remolque. Efectos del golpe de la
+    familia camion (0x27..0x2B) de 4F65D0 / 4F67A0 como ya estaban.
+  - Recursos: solo en las carreras de OUTRUN2SP (camion_carga al empezarla, con el hueco de la union aun prestado para
+    leerlos: lo que no son texeles va a un bloque del monton de su tamano y las texturas detras del HUD, antes de la
+    zona del curso; se sueltan al volver al menu). Ver docs/DREAMCAST.md (Camiones de OUTRUN2SP).
+  - PENDIENTE: en el juego de la consola (preset 0: puntos fijos de SEG04 / 05 / 06 / 11 y el 0x2B de 46CE30 y del
+    INFARTO) siguen gastandose sin coche (no se cargan: decision de recursos); 470570 (la camara dentro de una caja del
+    camion, alfa 0,5).
+  - Verificado en Flycast (sp.sh, display 97; -DPRUEBA_CAMION: cada coche al azar es un camion, 39 / 41 / 43 / 40 por
+    turno; -DDIAG_CAMION: angulos del remolque y choques): los cuatro modelos en BEAC y SANF con el remolque en su
+    sitio, ruedas en el suelo y sombra; en las curvas de BEAC (radio ~400 m) la guinada del remolque sigue a la
+    curvatura (1,1..2,1 grados, 12 / R = 1,7) y vuelve a 0 en las rectas, el enganche siempre a 12,00 m; choques del
+    jugador con la caja 1 (roce a lo largo del remolque del 39, sin cambio de velocidad) y con la caja 0 del 40. Sin
+    PRUEBA_CAMION (-DPRUEBA_NODO=8, ALAS; -DDIAG_TRAF): 46CE30 abre un 40 (clase 1) con el jugador en la posicion 16 y
+    478B90 el 40 del punto fijo de la posicion 50 (carril 0), los dos 50 posiciones por delante.
 - Encontrado de paso (juego de la consola): 487EE0 / 487F50 con 43F860 != 0 eligen el piloto y la acompanante por la
   licencia (+0x20, tablas 6549B0 / 6AF268 / 6549C8). CORREGIDO (2026-11-11, ver Coches: la pareja de la carrera).
 
@@ -2618,7 +2660,8 @@ PALM antes 11 coches en la ruta todo el rato (media 10,4; dibujados 9,8), despue
 hasta agotar el tiempo) antes media 9,8 y siempre 11, despues media 3,9 y como mucho 10 (los 9 puntos fijos del
 principio). PENDIENTE: el camino "Lead" de 472450 (470B30, 471E70, 471F90, 472320: los coches por delante del
 siguiente al jugador ajustan su velocidad a la del jugador, con suelos de 250..310 km/h del modelo), 478640 y 46CDA0
-en la union, camiones/autobuses 39..43 y coches de carreras de los puntos fijos.
+en la union, los camiones 39..43 en el juego de la consola (en OUTRUN2SP HECHO: ver OUTRUN2SP, Camiones) y coches de
+carreras de los puntos fijos.
 
 Auditoria de inventos y checkpoint del original (ver arriba): ACEL 1, posicion de carretera m_pos (puntuacion, IA y
 grua), rumbo adelante a 16 posiciones, ampliacion en el principio de la etapa con 44DC70 completo (KTE1), aparicion y

@@ -1050,6 +1050,37 @@ pareja del INFARTO, 35 KB mayor). Con el peor coche y la peor pareja (COCHE06, C
 blanca salvo si no cabe ni a 8x8). Las cifras de RAM son con `-DDIAG_PVRMEM` (48 KB de tabla, que la demo normal no
 lleva); las de antes y despues del bloque del coche (arreglo 4) no se comparan directamente: el bloque son 55 KB fijos.
 
+### Camiones de OUTRUN2SP (2026-11-13)
+
+Los camiones con remolque (TRAFK0..2.DAT: modelos 39 / 40, 41 y 43, docs/PARIDAD.md OUTRUN2SP: Camiones) tienen la
+geometria y los 5 LOD del original (LOD 0 de 1852 / 1902 / 2118 vertices) y las texturas en VQ (156 KB de VRAM; en 16
+bits serian 664). No van con el resto del trafico (cargado al arrancar, RAM y VRAM fijas en todos los modos): solo se
+cargan al empezar una carrera de OUTRUN2SP (`camion_carga`, demo/main.c), cuando el hueco de la union aun esta
+prestado: cada fichero se lee en el hueco, sus texturas suben a la VRAM detras del HUD (antes de la pantalla de carga y
+de la zona del curso: sin huecos) y lo demas (mallas y vertices) se copia a un bloque del monton de su tamano justo; el
+40 usa los datos del 39 (la misma cabeza). Al volver al menu la RAM se suelta en el primer cuadro (con las colisiones,
+`camion_suelta_ram`) y la VRAM con el curso (`curso_fuera`, cuando la PowerVR ya no la lee); en REINTENTAR, con el
+curso de la carrera anterior. El minimo reservado del TA para el trafico (`ta_traf_teo`) pasa al del camion mientras
+estan cargados.
+
+Medido en Flycast (sp.sh, OUTRUN2SP preset 1, la misma ELF con y sin los TRAFKn.DAT):
+
+| | sin camiones | con camiones |
+|---|---|---|
+| RAM al empezar la carrera (`RAMMAPA carrera`: libre, seguido en la cima, en huecos) | 1431 / 894 / 536 KB | 1163 / 894 / 269 KB (-268, todo de los huecos) |
+| VRAM: zona del curso (fuera de ella) | 1344 KB (86) | 1184 KB (88): -160 |
+| la carga (linea `CAMION:`) | - | RAM 267 KB, VRAM 158 KB |
+| cuadros por segundo (lineas MS de `DIAG_MS`, media de cada 30) | 44,6 | 44,4 con `-DPRUEBA_CAMION` (todo el trafico al azar son camiones); 44,8 sin el en ALAS |
+
+Con `PRUEBA_CAMION` (el peor caso: hasta 10 camiones a la vez) el dibujo del trafico pasa de 458 a 1233 us por cuadro
+y la logica de 2,70 a 3,03 ms (los pesados, +320 0 / 1, se asientan siempre con los tres puntos de 46E4B0, como en el
+original); 11 de 202 medidas bajan de 43 (42,9..36,5) en los tramos con varios camiones cerca y una lectura de
+etapa, 0 de 168 sin camiones (sin contar la primera, la de la carga). Lo que la zona del curso pierde (160 KB) deja en la peor combinacion de BEAC -> SANF 374 KB
+libres en la zona, 0 texturas rebajadas. `resultados.sh` (fin del tiempo, modos 25..27 y vuelta al frontal, con
+`-DDIAG_PVRMEM`): los camiones (48 bloques, 156 KB) entre el HUD y la zona sin huecos; el frontal con 1861 KB de VRAM
+libres antes y despues de la carrera; RAM del frontal 1077 (846) antes y 1086 (846) despues; 0 "Out of memory", 0
+"pvr_mem: ERROR", 0 frees dobles.
+
 ### CPU de dibujo (2026-11-10)
 
 Medido con un cuadro congelado (`-DDIAG_CONGELA=600`: un paso de logica por cuadro hasta el paso 600, asi el estado no

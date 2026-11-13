@@ -60,6 +60,9 @@ Medidas de los cambios de etapa (defines de demo/main.c y comun/gd.c; make -C de
   DIAG_PVRMEM            envuelve pvr_mem_malloc / pvr_mem_free (quien pidio cada bloque) y cada RAMMAPA escribe el mapa
                          de la VRAM ("PVRMAPA": bloques por direccion, quien los pidio y huecos); "PVRMEM: libera ... no
                          pedido" si se suelta un bloque que no esta pedido (no se suelta) y "PVRMEM: sin ..." si falta.
+  PRUEBA_CAMION          OUTRUN2SP: cada coche al azar del trafico es un camion (39, 41, 43 y 40 por turno); con
+                         DIAG_CAMION, "CAMION: ..." cada segundo con los angulos del remolque (470360) y cada choque del
+                         jugador con un camion (y con que caja: 1 = el remolque).
   DIAG_TRANS=<ms>        camara lenta (un paso de logica por cuadro y esa espera) en los 6 cuadros de alrededor de cada
                          suceso del cambio de etapa (union, rama, soltar, etapa leida, tercios del fundido del cielo,
                          etapa nueva); "TR: cuadro ..." con el estado del fundido, para capturar cuadro a cuadro.
