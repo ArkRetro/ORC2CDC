@@ -3879,7 +3879,16 @@ arena". Lo que hace el original (SLES-53998 y el PC) y como queda:
 - **Vibracion de la superficie** (0x1d04e4..0x1d0880 con 0x1d0138, PS2; el PC no tiene vibracion): portada en
   vib_paso con las intensidades por clase (arena 0,85: motor grande v x 0,85 x 0,3, 10 cuadros), los bordes
   +268 / +264 y el humo; PENDIENTE el termino de +D34 (derrape medio de 21 cuadros: +C2C no esta en la fisica de la
-  demo) y las banderas +8 0x40 / 0x100. Ver Vibracion del mando.
+  demo) y las banderas +8 0x40 / 0x100. Ver Vibracion del mando. Medido en Flycast por la arena de PALM
+  (-DDIAG_CHOQUE: lineas DIAGVIB): a v = 1,03 m/cuadro grande 0,26 y pequeno 0,07, 10 cuadros (0,85 x 0,3 x v y
+  0,85 x 0,1 x v x 0,75).
+- Verificacion en Flycast (display 94; capturas en el scratchpad, capturas_r44/): arena_palm_frente_antes /
+  arena_palm_frente_despues(2) (-DPRUEBA_FRENTE=7: la camara delante del coche; antes sin nada, despues el polvo de
+  arena detras de las ruedas), arena_palm_polvo_despues (camara de carrera), grava_alpi_despues(2) (ALPI, el arcen de
+  tierra: -DPRUEBA_NODO=2 -DPRUEBA_ARENA=-9.5f -DPRUEBA_ARENA_S=2400: grava saltando y el polvo marron de la clase 1),
+  hierba_alpi_despues, y los registros arena_palm_sin_gas.txt / asfalto_palm_sin_gas.txt / grava_alpi.txt (lineas
+  PART). Vivas: polvo 58-64 (el tope de 64 del PS2), grava 35-69 a 300 km/h (mueren a 15 m del coche), hierba hasta
+  246. VRAM: 22 KB menos libres (1801 / 1357 K frente a 1823 / 1379 K; fuera de la zona 77 K).
 - **Sonido de la superficie**: el original lo tiene (PlayRoadCondition 425A40 del PC: dos canales con el sonido de la
   primera de las 10 entradas de la tabla 623F38 {mascara, sonido, ganancia} que casa con la superficie de las ruedas
   +24C y +250 (CarSound +54 / +6C de 4256F0), volumen por el deslizamiento de las cuatro ruedas y la velocidad).
