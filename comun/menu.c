@@ -635,7 +635,41 @@ void menu_suma_millas(uint32_t millas)
 
 /* variante de [780258] (PS2 0x443508) del modo elegido, como 4EEAD0 del PC (runtime_route_mode: 1 OutRun, 2 Heart
    Attack, 7 Time Attack); COAST 2 COAST (las misiones de Races.bin, variante 5) no esta: corre como OutRun */
-int menu_modo(void) { return sp_sel ? fsp_variante() : modo_sel == 2 ? 2 : modo_sel == 3 ? 7 : 1; }
+static int mis_sel = -1;                                    /* COAST 2 COAST: la mision elegida (ver abajo) */
+int menu_modo(void) { return sp_sel ? fsp_variante() : modo_sel == 2 ? 2 : modo_sel == 3 ? 7 : modo_sel == 0 && mis_sel >= 0 ? 6 : 1; }
+
+/* COAST 2 COAST: misiones de carrera de Races.bin (variante 6 de 4EEAD0, selector 0). El original: pantalla de
+   categorias (4E8130), mapa de misiones (4E9160, nodos desbloqueados por las notas de los vecinos) y detalle (hasta 5
+   carreras); sus graficos (tokens 0x4400d0..0x4400f0 del banco 0x44) no estan convertidos en MENU.DAT. DESVIACION:
+   en su lugar una ventana sobre ELEGIR MODO con la lista de las misiones que la carrera corre (las de carrera, tipo 0,
+   cuyo curso cabe en los huecos de la RAM; main la da con menu_pon_misiones), su nota de la licencia y A / B */
+#define MIS_MAX 94
+static int mis_n, mis_cur, mis_ventana;
+static int16_t mis_idx[MIS_MAX]; static uint8_t mis_cl[MIS_MAX], mis_sb[MIS_MAX];
+static void mis_dibuja(void);
+void menu_pon_misiones(int n, const int16_t *idx, const uint8_t *clave, const uint8_t *sub)
+{
+    int i;
+    mis_n = n < 0 ? 0 : n > MIS_MAX ? MIS_MAX : n;
+    for (i = 0; i < mis_n; i++) { mis_idx[i] = idx[i]; mis_cl[i] = clave[i]; mis_sb[i] = sub[i]; }
+    if (mis_cur >= mis_n) mis_cur = 0;
+}
+int menu_mision(void) { return modo_sel == 0 && !sp_sel ? mis_sel : -1; }
+/* 495A20 (PS2 0x1f81cc): nota de la mision en la licencia +0x1D7 + 5 clave + subclave si mejora o la guardada es 7
+   (sin jugar); +3F4 |= 2. Se guarda en la VMU al volver al menu (menu_entra) */
+void menu_nota_mision(int clave, int sub, int nota)
+{
+    uint8_t *p = activa(); int off = 0x1d7 + 5 * clave + sub, have;
+    if (!p || off < 0x1d7 || off >= 0x1dd + 0xc8) return;
+    have = p[off];
+    if (nota > have || have == 7) { p[0x3f4] |= 2; p[off] = (uint8_t)nota; }
+    dbglog(DBG_INFO, "LICENCIA: mision %d-%d nota %d (guardada %d)\n", clave, sub, nota, p[off]);
+}
+static int mis_nota(int k)
+{
+    const uint8_t *p = activa(); int off = 0x1d7 + 5 * mis_cl[k] + mis_sb[k];
+    return p && off < 0x1dd + 0xc8 ? p[off] : 7;
+}
 int menu_sp(void) { return sp_sel; }
 void menu_entra_sp(void)
 {
@@ -809,6 +843,13 @@ static void control(unsigned n)
         break;
     case P_MENU: case P_MODO:
         if (!an_hecho(&a_sel)) break;
+        if (pant == P_MODO && mis_ventana) {                /* COAST 2 COAST: elegir la mision (DESVIACION, ver arriba) */
+            if (izq) { mis_cur = (mis_cur + mis_n - 1) % mis_n; sfx_menu(SFX_CURSOR); }
+            else if (der) { mis_cur = (mis_cur + 1) % mis_n; sfx_menu(SFX_CURSOR); }
+            else if (ok) { mis_ventana = 0; modo_sel = 0; mis_sel = mis_idx[mis_cur]; GANCHO(pant, 1, 0); sale(P_COCHE, 1); }
+            else if (atras) { mis_ventana = 0; sfx_menu(SFX_CANCELA); }
+            break;
+        }
         carrusel(n, pant == P_MENU ? &c_menu : &c_modo, N_OPC, izq, der);
         if (izq || der) break;
         if (ok) {
@@ -821,7 +862,9 @@ static void control(unsigned n)
                     sp_sel = 1; sfx_menu(SFX_ACEPTA); menu_libera_todo();
                     if (fsp_entra()) { sp_sel = 0; entra(P_MENU, 1); }
                 }
-            } else if (c <= 3) { modo_sel = c; sale(P_COCHE, 1); } else bloqueado();   /* C2C, OUTRUN, HEART ATTACK, TIME ATTACK */
+            } else if (c == 0) {                            /* COAST 2 COAST: la ventana de las misiones */
+                if (mis_n) { mis_ventana = 1; sfx_menu(SFX_ACEPTA); } else bloqueado();
+            } else if (c <= 3) { modo_sel = c; mis_sel = -1; sale(P_COCHE, 1); } else bloqueado();   /* OUTRUN, HEART ATTACK, TIME ATTACK */
         } else if (n & CONT_X) a_licencia(pant);            /* LICENSE */
         else if (n & CONT_Y) bloqueado();                   /* FRIENDS: en linea */
         else if (atras) sale(pant == P_MENU ? P_TITULO : P_MENU, 0);
@@ -1077,6 +1120,7 @@ void menu_dibuja(void)
     switch (pant) {
     case P_MENU: case P_MODO: case P_RANKING: case P_MULTI:
         an_dibuja(&a_sel, sacude, (entra_atras ? a_ent : 1) * a_sal * (cargando ? 0 : 1), 3, 0);
+        if (pant == P_MODO && mis_ventana && mis_n) mis_dibuja();
         break;
     case P_COCHE:
         an_dibuja(&a_sel, 0, a_ent * a_sal, 4, 0);
@@ -1232,6 +1276,20 @@ static void pz_botones(float x, float y, float w, float h, float z, int elegir)
     }
     texto_c("B", xa - 14, y + h - 38, 1, 1, z, 0x2860E8);
     texto(t, n, xa, y + h - 38, 1, 1, z, 0xF0F0F0);
+}
+
+/* la ventana de las misiones de COAST 2 COAST (DESVIACION: sin el mapa del original) */
+static void mis_dibuja(void)
+{
+    char b[48]; int k = mis_cur, nota = mis_nota(k);
+    float x = 120, y = 150, w = 400, h = 170, z = 8;
+    pz_ventana(x, y, w, h, z);
+    texto_c("COAST 2 COAST", x + 14, y + 4, 1, 1, z + 0.01f, 0xF0F0F0);
+    sprintf(b, "<  MISION %d-%d  >", mis_cl[k], mis_sb[k]);
+    texto_c(b, x + w / 2, y + 52, 12, 1, z + 0.01f, 0x202020);
+    if (nota >= 0 && nota <= 6) sprintf(b, "NOTA %d / 6", nota); else strcpy(b, "SIN JUGAR");
+    texto_c(b, x + w / 2, y + 82, 12, 1, z + 0.01f, 0x404040);
+    pz_botones(x, y, w, h, z + 0.01f, 1);
 }
 
 int menu_pausa_entra(void)

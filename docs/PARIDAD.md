@@ -47,7 +47,7 @@ Estado: OK (conectado y verificado al nivel indicado), PARCIAL, PROVISIONAL (apr
 | Camara de carrera | evento CAMERA 385: 4858D0, 484810, 483110, 4A1680 SetCarCamera, 485590/483CE0/4834A0/483600, 4832F0/484A40, 483C10/484BD0 (PS2 0x178500..0x17b540, 0x1817c0) | PARCIAL | demo/camara.c con las tablas CAM1 de PARAM.DAT (vistas 0x2ccd88, por vista y modelo 0x2cd3d8, por modelo 0x2d2838 del fichero SLES) | vista 1 sin interior (no se dibuja el coche); camara de salida (485250) con el ojo y la mira de la escena de la salida los 120 cuadros de START (ver Escena de la salida); sin vista 0x1D (780258 = 0) ni camara de fin (485830); la de la meta (4853D0) en demo/meta.c (ver Escena de la meta) | ver seccion Camara de carrera | E |
 | Trafico (clases, IA, reaccion) | 472090, 472450, 472A50, 47DC10, 4736D0, hit_476040; aparicion 479080 (PS2 0x1dcdd0): 478B90 (0x1dbba0), 4787E0 (0x1db6d0), 4EFB90 (0x1f3818), 4F0030 (0x1f1a88), 46CE30, 478430, 46CC10; cierre 477F60 | PARCIAL | TRAFC.DAT (TRC1, ACL1 y TAP1: tablas de aparicion, velocidad y puntos fijos por etapa); colores (tabla 0x36bc18, modelos 30..43) y materiales en TRAFn.DAT (TCX1) | camino "Lead" de 472450 portado (velocidad por clase y del jugador, ver Choques entre coches: velocidad del trafico de delante) salvo 472320 / 471F90; 478640/46CDA0 en la union simplificados; puntos fijos de coches de carreras y de los modelos 39..43 sin coche | ver Trafico: densidad del original | E |
 | Piloto y acompanante | ROB01 / ROB02: PS2 0x201b10 / 0x201c40 / 0x202bf0 y 0x202c58 / 0x202de0; pareja 0x205518 / 0x2055b8; CHR.PS2 (CHR_DR_M00 / S00 / W00 / L00 / G00 / H00, G00_USA), bone.bin, ANIMS.PS2 | PARCIAL | CHRPAR.DAT y CHRppaa.DAT (conv_chr.py --pares), comun/robot.c (con el osage de G00): motor de movimientos, conducir con el volante, codo en la puerta, choque, fuera del asfalto, aburrida, META y TIME OVER (ver Coches: el piloto y la acompanante) | cambio de area, asustada, trompo ni poses pedidas (la meta del piloto, estado 9, hecha: ver Escena de la meta) | - | H, E |
-| Rivales | 47CF40 (PS2 0x1ef900) solo desde el gestor de misiones de C2C (496A30, PS2 0x1f9e4c) y la variante 9 (4B02B0, PS2 0x1f7a50 -> 0x1f0910); coches de carreras 47C8A0 / 47BC90 / 477090 / 477510 del modulo del trafico | FALTA (solo en las misiones de C2C, que no estan) | - | no hay rivales: el original tampoco los tiene en OUTRUN, INFARTO ni CONTRARRELOJ (ver Rival en las etapas) | todo (con las misiones de C2C) | E (ELF) |
+| Rivales | 47CF40 (PS2 0x1ef900) solo desde el gestor de misiones de C2C (496A30, PS2 0x1f9e4c) y la variante 9 (4B02B0, PS2 0x1f7a50 -> 0x1f0910); coches de carreras 47C8A0 / 47BC90 / 477090 / 477510 del modulo del trafico | PARCIAL (2026-11-13): en las misiones de carrera de C2C (ver COAST 2 COAST: misiones de carrera y el rival) | MISION.DAT (conv_mision.py), RC00-29.DAT (conv_trafico.py --rivales), comun/rival.c | no hay rivales en OUTRUN, INFARTO ni CONTRARRELOJ (el original tampoco); SIN PORTAR 472E60, 474080, vaivenes 476CA0..476F40 (ninguna mision de tipo 0 los pide), variante 9 | ver la seccion | E (Flycast) |
 | Carretera, pendientes, bifurcacion | STAGE.PS2, BK.PS2 cs_BK_PALM, COMMON obj_course_obj_bk_palm + obj_OBJ_<ZONA>_BUNKI_TX, descriptores 0xb0, csc_data_2 | OK | conv_tramo/conv_union, CURSO.DAT | arbol entero (15 etapas, 10 bifurcaciones con sus carteles, 5 metas); cielo, niebla, luz y sol de la union como el original (ver Entorno); bifurcaciones = las de PALM (las demas no estan en el disco) | objetos animados de BK (ANIMS) | E |
 | Temporizador (inicial y ampliacion) | 44DC70 = PS2 0x176730, 450CC0 = PS2 0x1cee40, 450AC0 = PS2 0x1ce1f8 (-1 por paso en 0x5c5f44, crono +1 en 0x5c5f48); cuenta atras t / 60,2 + 0,34 (4BDA30 = PS2 0x1bfff8); crono con CalcFrame2Time (449B30 = PS2 0x1f6d70: t / 60,2, milesimas truncadas); paso real 59,94 Hz: HUD 0,43 % mas lento que el reloj, como el original; tabla 7D2E98 = PS2 0x3cb708 copiada por 0x176040; k636904 = PS2 0x35a938 | OK | TIM1 y KTE1 de PARAM.DAT | formula y tablas CONFIRMADAS en el ELF; variante 1 (fila 0), preset 0 y dificultad 0 PROBABLES (frontal del PC) | trazar el frontal de PS2 | E |
 | Checkpoints, meta, resultados | 44FF20 / 4515B0 (branch_state 7D38E8) con las banderas +0x3C de COLI0200; 4513C0 meta | OK | ampliacion al pasar la pancarta CHECK POINT del principio de la etapa siguiente (ver Checkpoint); meta del original en las 5 etapas finales (z = 0 de la union); voz y efecto de EXTEND TIME, GOAL y TIME OVER (voces.c) | escena de la meta del original (modo 19: guion, camara, coche, piloto, efecto y musica; ver Escena de la meta); millas OutRun, continuar (REINTENTAR / ABANDONAR) y GAME OVER del original (modos 34 / 35 / 27, ver Fin de la carrera); sin la tabla de tiempos de 498670 ni el ranking | — | E |
@@ -1811,7 +1811,7 @@ Races.bin, variante 5 C2C o 6) y el preset del curso [78024C] (4EEA70). En SLES-
 | OUTRUN (variante 1) | fila 0 de los tiempos (44DC70), trafico, puntos 4F2DF0, voces ORC/PERO | OK (lo que ya habia) | E |
 | INFARTO (variante 2) | gestor de peticiones 464350/464D20 (PS2 0x1ae440 / 0x1a7f28), misiones 5A94D8 (PS2 0x3f0b98, 41 x 0x140), fila 1 de los tiempos, voces HC/PERH + HAM\<etapa> | PARCIAL: ver abajo | E |
 | CONTRARRELOJ (variante 7) | fila 2 de los tiempos (44DC70: 0 y 7 -> 2; 450CC0 pasa el 7 como 0), sin trafico (479080 y 47EC00 vuelven con la variante 0, 7 u 8), gestor 0x193 / funcion 0x22 (48B8F0..: curso por codigo [656234], fantasma 465F30..4687C0, GHOST.PS2) | PARCIAL: reglas de tiempo y sin trafico; corre el curso entero con eleccion de rama como el OutRun | E |
-| COAST 2 COAST (variante 6 misiones, 5 campeonatos) | variante 6: misiones de Races.bin / RaceAssignment.bin (gestor 0x20, evento 0x191: 495B90 / 496A30); variante 5: campeonatos Request_Course_SP / OR2 / MIX con peticiones Req_*.bin (gestor 7F9460, evento 0x190); rivales (47CF40) | FALTA: corre como OutRun (como antes); estudio en COAST 2 COAST abajo | - |
+| COAST 2 COAST (variante 6 misiones, 5 campeonatos) | variante 6: misiones de Races.bin / RaceAssignment.bin (gestor 0x20, evento 0x191: 495B90 / 496A30); variante 5: campeonatos Request_Course_SP / OR2 / MIX con peticiones Req_*.bin (gestor 7F9460, evento 0x190); rivales (47CF40) | PARCIAL (2026-11-13): las 76 misiones de carrera (tipo 0) con sus coches de carreras y su nota; sin el mapa de misiones ni los otros tipos ni los campeonatos (ver COAST 2 COAST: misiones de carrera y el rival) | E |
 | SALON (showroom) | frontal 4D4230.. | FALTA (accion bloqueada, como antes) | - |
 | Dificultad (opcion de la licencia +E0) | difficulty_of de 44DC70 (PS2 0x1cdc98): 0 en el juego de la consola (43F860 = [780260] = 1, lo pone SUMO_FE 0x237e28); la licencia (+E0) solo en el de OUTRUN2SP (2 en la variante 4) | OK (2026-11-11; antes al reves: la licencia en los modos de la consola) | E (log `MODO:`) |
 | Multijugador | red / LAN (variantes 3, 4) | no se hace (orden del usuario): la pantalla queda como estaba, con la accion bloqueada | - |
@@ -2084,6 +2084,50 @@ peticion 14 (escoltas 45B5B0, +324 = 6: carrera contra ellos), que no esta en la
     rivales. La entrada OUTRUN2SP: ver OUTRUN2SP (2026-11-11).
   - SIN PORTAR: los campos +0x60..+0x68 del descriptor de BEAC (0x1170003..5, objetos del cielo de mas?), el letrero
     de destinos del final de etapa (0x3fa1d0), los nombres largos de las zonas de SP en los avisos (sale el codigo).
+
+**COAST 2 COAST: misiones de carrera y el rival** (2026-11-13):
+- Menu: UN JUGADOR -> COAST 2 COAST abre una ventana sobre ELEGIR MODO con las misiones de carrera (tipo 0 de Races.bin,
+  76 de 94, y cuyo arbol cabe en los huecos: `arbol_grande` de curso_huecos) con clave-subclave y su nota de la licencia
+  (+0x1D7 + 5 clave + subclave; 7 sin jugar); izquierda / derecha, A (coche, cambio, musica y la carrera) o B. DESVIACION:
+  la pantalla de categorias (4E8130), el mapa de misiones (4E9160) y el detalle no estan (sus graficos, banco 0x44 tokens
+  0x4400d0..0x4400f0 de SLES-53998, no estan en MENU.DAT; habria que convertir el banco y portar 0x242340..0x2443xx).
+- Carrera: variante 6 (menu_modo), el arbol 100 + i de CURSO.DAT (4965A0), los registros de 47CF40 (PS2 0x1ef900) con
+  el registro +0x1C de Races.bin y las tablas del ELF (listas de modelos 0x36be70, familias 0x40b818, clases de los
+  especiales 0x40b858 con la 0x1E -> 0x1B de 0x1d9ae8, colores 0x40b618 por familia, perfil 0x36bd00, c3c 0x36bcf8;
+  constantes 17,99198 / 295 / 1,0431494 / 60 / 3612 / 1/65536 de 0x1ef900) y el largo del curso de 0x1724e0
+  (descriptor +0x96 de PS2: PALM 590, uniones 241; mision 1-1 = 1436 posiciones). La posicion de carretera del curso
+  entero (car+0x260) en la demo: la base de cada etapa del arbol mas (s - principio) / m_pos (rc_pos_curso).
+- Coches de carreras (comun/rival.c y la parte "coches de carreras" de demo/main.c): 47CA40 (PS2 0x1ef230) y 47BC90
+  (0x1ecef8): sin coche avanzan +40 += +44 x ritmo x arranque (escala 2, perfil +0x10 / +0x14, arranque cuadros / 1505;
+  0x3f3cffe8, 0x44bc2000); entre -10 y +60 posiciones del jugador abren un coche del trafico (cada 0x5A cuadros por
+  delante y por detras; los de la parrilla al montar, 47D8B0, en los carriles 2 / 3 parados con marcha 1) hasta c1c a la
+  vez; el coche lo conduce 47A7C0 (PS2 0x1e5dc0: velocidad de su clase x +B78 x escala x ritmo + vaiven coseno, curva
+  {radio, km/h} de 0x40bb68 con +BB4 (479830, PS2 0x1df668: puntos a v x 15 posiciones) o +B54 (479670), rebufo del
+  jugador x 0,7 x su +1C4, minima +0xC, tope del modelo ((134C - 2,3) x -131,39 + 318) x 1,025 / (2438 x 216,72), x 0,05
+  o d / 3 justo delante del jugador), la aceleracion de 472090 (PS2 0x1e43a8) con la tabla 0x40bc98 y por marcha (+208,
+  0x40bcb0 x 0,002 x ritmo x +BCC) y el cambio automatico 502420 con los umbrales de su modelo (487570); se cierra a
+  -15 / +70 posiciones (477F60) y el registro sigue solo (4763D0, 476480 / 4764D0). Clasificacion 477510 y nota 495C20
+  (6 - puesto, 0 el ultimo), guardada al salir de la meta (49CFD0 -> 495A20); el fin del tiempo no la guarda.
+- Modelo: el del original para los coches de carreras, el registro de 4866C0 del modelo 0..29 (obj_rc_<coche>, 5 LOD,
+  1215-2155 vertices en el LOD 0, 22-30 KB de texturas VQ): RCmm.DAT con `conv_trafico.py --rivales=0,..,29` (formato
+  de TRAFn.DAT; 'TCX9': los 8 colores de car+0x12 por clave de la tabla 0x36bc18). No se usan COCHE00-14: un segundo
+  coche de jugador (10-11 mil vertices, 424 KB de bloque) por cada coche de carreras no cabria en el TA ni en la RAM.
+  RAM: hasta RC_NMOD = 6 modelos distintos por mision (~60 KB cada uno en el monton, texeles en la VRAM, leidos en el
+  hueco de la union prestado al empezar la carrera); 18 de las 94 misiones tienen mas (hasta 14): DESVIACION, los de los
+  modelos que no caben se dibujan con el primero. Medido (1-1, dos modelos): RAM libre en la carrera 1301 KB (886 KB
+  seguidos en la cima), VRAM libre 1323 KB antes de la zona del curso.
+- Verificado en Flycast (pantalla 98): `-DPRUEBA_AUTO -DPRUEBA_MISION=0 -DPRUEBA_SIN_TIEMPO -DDIAG_MS`: los 5 coches
+  de la 1-1 abren en la parrilla (+3..+23 posiciones), arrancan en GO con sus marchas, el piloto los adelanta (puesto
+  6/6 -> 3/6) y alguno le vuelve a pasar; 43,9-45,7 cuadros por segundo, sin "Out of memory". Menu real
+  (`-DPRUEBA_PILOTO_MENU -DPRUEBA_SIN_TIEMPO`): UN JUGADOR -> COAST 2 COAST -> ventana -> 1-1 -> coche, cambio, musica ->
+  `MODO: variante 6` -> la carrera entera hasta la META de PALM_T (media 44,7 cuadros por segundo) -> nota en la licencia
+  (`LICENCIA: mision 1-1 nota ...`) -> titulo; RAM al volver 1086 KB libres (1088 al arrancar: los modelos RCmm sueltos).
+- SIN PORTAR: los tipos 1, 2, 3 y 6 (eliminacion por tiempo, derrape y conduccion limpia contra el rival, pillar a los
+  rivales: piden su HUD de puntos y sus rotulos), el rotulo y la voz del principio de la mision (496A30: 0x2b0020 /
+  0x2b003e, voz 0x1e7), el HUD del puesto (DESVIACION: "PUESTO n/N" en texto), la pantalla del resultado y el mapa
+  (de la meta se vuelve al menu), 472E60 / 474080 / los vaivenes, la espera de 474D30 (+C26), 43EB60 al abrir, el bit
+  0 de +0xF, los campeonatos (variante 5) y la variante 9. La puntuacion de OutRun sigue contando (sin comprobar que
+  4F2DF0 corra en la variante 6).
 
 **CONTRARRELOJ** verificado en E: `MODO: variante 7, dificultad 0, fila de tiempos 2`, sin un solo coche de trafico,
 union y ruta leidas como en el OutRun. GOAL (menu real con el piloto y `-DPRUEBA_SIN_TIEMPO`, 2026-11-09): PALM -> ALPI

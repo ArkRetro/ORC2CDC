@@ -25,6 +25,7 @@
 #include "../comun/menu.h"
 #include "../comun/fsp.h"
 #include "../comun/infarto.h"
+#include "../comun/rival.h"
 #include "../comun/vmu.h"
 #include "../comun/robot.h"
 #include "../comun/modo_video.h"
@@ -2105,8 +2106,15 @@ typedef struct { coche_t c; int carril, modelo, destino; float v_des;
                  float t_recup, wa[3]; int d22;                 /* +2F8, pose del cuadro anterior (mundo de or2), +D22 */
                  float b08; int b14, b18, dir, b58, b60, b64, b6c, b62, b53, c5c1, n2f4;
                  int pt_marca, b72, color, ha;                  /* puntuacion: +C5C (PT_*) y +B72 (rebufo reciente); ha: INFARTO */
-                 int toca, freno; float gv[2], gth; } trafico_t;             /* toca: +4 0x10000 / +DD4 (el que le toco, TR_JUG el jugador); gv: +20 en el marco de la ruta en gth */
+                 int toca, freno; float gv[2], gth;             /* toca: +4 0x10000 / +DD4 (el que le toco, TR_JUG el jugador); gv: +20 en el marco de la ruta en gth */
+                 int rc, marcha, b52, c34; float b54, bb4; } trafico_t;   /* rc: coche de carreras (registro + 1; 0 trafico);
+                                                                   marcha +208; radios de la carretera +B54 / +BB4 */
 static trafico_t traf[NTRAF];
+/* COAST 2 COAST: los coches de carreras (comun/rival.c; su IA y sus modelos mas abajo, "coches de carreras") */
+static float rc_objetivo(int e, int d, int *f0, int *f1, float *rate);
+static void rc_acelera(trafico_t *t, float rate, float obj, int f0, int f1);
+static void rc_suelta_coche(trafico_t *t);
+static float rc_pos_curso(float s, int *pos_i);
 static int bo_toca_coche, bo_roce;                              /* +4 0x10000 / 0x400000 del jugador en el paso (44EDE0) */
 /* +C5C del coche para la puntuacion (4F2860): 0x40 ya adelantado, 0x400000 tocado (puntos a la mitad), 0x800000
    chocado (sin puntos) */
@@ -2121,13 +2129,18 @@ static uint32_t sup_jug = 2u;                                   /* +244 del juga
 static uint32_t sup_cen = 2u;                                   /* +248 del jugador: la superficie bajo el centro */
 static uint32_t sup_rueda[4];                                   /* superficie bajo cada rueda (marcas: efectos_paso) */
 #define NMODTRAF 9                                              /* coches de calle (TRAFn.DAT) */
-static modelo_t mtraf[NMODTRAF];
-static float largo_traf[NMODTRAF];                              /* mitad del largo de cada modelo */
+/* COAST 2 COAST: los modelos de los coches de carreras de la mision (RCmm.DAT, tools/conv_trafico.py --rivales: el
+   registro de 4866C0 del modelo 0..29, obj_rc_<coche> con sus 5 LOD) van detras de los del trafico, en las plazas
+   NMODTRAF.. (rc_modelos_carga) */
+#define RC_NMOD 6
+#define NMODT (NMODTRAF + RC_NMOD)
+static modelo_t mtraf[NMODT];
+static float largo_traf[NMODT];                                 /* mitad del largo de cada modelo */
 /* TRAFC.DAT (tools/conv_trafico.py): por modelo, el registro de 4866C0 (clase +324, radio) y la primera caja de choque
    (520950); y la tabla por clase de 472090 (5B3E08 del PC): referencia, aceleracion, frenada, aceleracion fuerte y
    frenada fuerte, en m/cuadro por cuadro */
 typedef struct { int modelo, clase, se, k320; float radio, caja[7]; } trafc_t;   /* 48 bytes, como TRAFC.DAT */
-static trafc_t trc[NMODTRAF];
+static trafc_t trc[NMODT];
 static trafc_t cjm[30];                                         /* los coches del jugador (bloque CJM1), por modelo */
 static float acl[7][5];
 static int trc_ok, cambio_cd;                                   /* cambio_cd: cuadros desde el ultimo cambio (804350) */
@@ -2144,7 +2157,7 @@ static void traf_medidas(void)
 /* colores del trafico (TCX1 de tools/conv_trafico.py, en el sitio de la ruta): el original da a cada coche nuevo de
    un modelo el color siguiente de ese modelo (0, 1, 2, 0...; 2 colores en el 38 y 1 en el 39 y el 41: PC 478B90) y
    cambia las texturas de su lista de colores (408C80). traf_remap[m][c]: textura -> la del color c (NULL en el 0) */
-static int32_t *traf_remap[NMODTRAF][3]; static int traf_ncol[NMODTRAF]; static uint8_t traf_cuenta[NMODTRAF];
+static int32_t *traf_remap[NMODT][3]; static int traf_ncol[NMODT]; static uint8_t traf_cuenta[NMODT];
 static void traf_colores(int m)
 {
     const uint32_t *w = (const uint32_t *)mtraf[m].ruta; uint32_t c, k, i;
@@ -2227,7 +2240,7 @@ static void traf_tablas(void)
    detras de la camara, 4); base = -35 en los modelos 0x1f y 0x27 y -25 en el 0x28 (los grandes), 0 en los demas.
    zv es la distancia delante de la camara (z = -zv). TRAFn.DAT lleva en el campo del nodo de cada malla la mascara de
    los LOD que la dibujan (tools/conv_trafico.py); los ficheros viejos sin LOD (nodo -1) se dibujan enteros. */
-static uint8_t traf_con_lod[NMODTRAF];
+static uint8_t traf_con_lod[NMODT];
 static int traf_lod(int m, float zv)
 {
     int mod = trc_ok ? trc[m].modelo : 0; float base = mod == 0x1f || mod == 0x27 ? -35.0f : mod == 0x28 ? -25.0f : 0.0f, z = -zv;
@@ -2565,6 +2578,7 @@ static void traf_azar(int en_union, int nodo, int pos, const uint8_t *rec)
 }
 static void traf_aparca(trafico_t *t)
 {
+    if (t->rc) rc_suelta_coche(t);                              /* 4763D0: el registro del coche de carreras sigue solo */
     t->carril = t->destino = -1; t->c.s = -1.0e6f; t->c.v = 0; t->golpe = -1; t->b72 = 0; t->b6c = 0; t->b14 = 0;
     t->c5c1 = 0; t->b64 = 0; t->b62 = 0; t->b53 = 0; t->ha = 0;
 }
@@ -3734,10 +3748,10 @@ static void traf_paso(float dt)
         /* 47E4A0: 472450 (objetivo, ritmo y 472320 / 4718D0, que pueden tocar la velocidad y empezar un cambio de
            carril), 472090; golpeado: 473F30; si no, carriles (47E110) */
         d = (int)floorf((t->c.s - yo.s) / TR_POS);
-        obj = traf_objetivo(i, d, &f0, &f1, &rate);
+        obj = t->rc ? rc_objetivo(i, d, &f0, &f1, &rate) : traf_objetivo(i, d, &f0, &f1, &rate);   /* 47A7C0 / 472450 */
         if (t->ha) { obj = t->v_des; f0 = 0; f1 = 1; rate = 0.05f; }   /* INFARTO: la velocidad de la carretera (45D830);
                                                                         SIMPLIFICADO: sin el camino Lead de 472450 */
-        traf_acelera(t, rate, obj, f0, f1);
+        if (t->rc) rc_acelera(t, rate, obj, f0, f1); else traf_acelera(t, rate, obj, f0, f1);
         if (t->b6c) traf_recupera(t, i);
         else traf_carriles(i);
         if (t->golpe >= 0) {                                    /* 4A2400: la animacion del golpe (16..19) y luego +2F8 */
@@ -3759,11 +3773,15 @@ static void traf_paso(float dt)
             }
             if (traf_otra_rama(t)) { traf_aparca(t); continue; }
         }
-        if (t->c.s < yo.s - TR_CIERRA_ATRAS * m_pos || (!t->ha && t->c.s > yo.s + TR_CIERRA_DELANTE * m_pos) ||
+        if (t->rc) {                                            /* 477F60 con +4 0x20 y 80FB14: -15 / 0x46 */
+            int dd = (int)floorf((t->c.s - yo.s) / TR_POS);
+            if (dd < -15 || dd > 0x46 || t->c.s > longitud - 20.0f) { traf_aparca(t); continue; }
+        } else if (t->c.s < yo.s - TR_CIERRA_ATRAS * m_pos || (!t->ha && t->c.s > yo.s + TR_CIERRA_DELANTE * m_pos) ||
             t->c.s > longitud - 20.0f) {                        /* los de la mision (+C5C 0x40000): por delante 0x270F */
             traf_aparca(t); continue;                           /* 477F60: cerrado */
         }
         coche_coloca(&t->c);
+        if (t->rc) { int pi; float pf = rc_pos_curso(t->c.s, &pi); rival_sigue(t->rc - 1, pf, pi); }   /* 477090 */
 #ifdef DIAG_LAT
         {   /* prueba: desplazamiento lateral de cada coche cercano por cuadro (x en m, carril, b08, cuadros del cambio) */
             int fin_, u_, fila_ = tr_fila(t->c.s, &fin_, &u_);
@@ -4910,6 +4928,7 @@ static void col_en_hueco(int k, const float *M)
    RAM */
 #define HUECO_ETAPA_MAX (8400u << 10)
 #define HUECO_UNION_MAX (1800u << 10)
+static uint8_t arbol_grande[RIVAL_NMIS];                        /* el arbol 100 + i tiene una etapa o union que no cabe */
 static int curso_huecos(void)
 {
     int n_grandes = 0;
@@ -4923,11 +4942,11 @@ static int curso_huecos(void)
       for (i = 0; i < ncurso; i++) {
         sprintf(n, "SEG%02d.DAT", curso[i].seg);                 /* (empaquetada: el tamano recompuesto) */
         if (!gd_tam(n, &t) && TAM_SECT(t) > cap_etapa) {
-            if (TAM_SECT(t) <= HUECO_ETAPA_MAX) cap_etapa = TAM_SECT(t); else n_grandes++;
+            if (TAM_SECT(t) <= HUECO_ETAPA_MAX) cap_etapa = TAM_SECT(t); else { n_grandes++; if (a >= 100 && a < 100 + RIVAL_NMIS) arbol_grande[a - 100] = 1; }
         }
         sprintf(n, "BK%02d.DAT", curso[i].f_bk);                  /* (empaquetada: el tamano recompuesto) */
         if (!gd_tam(n, &t) && TAM_SECT(t) > cap_union) {
-            if (TAM_SECT(t) <= HUECO_UNION_MAX) cap_union = TAM_SECT(t); else n_grandes++;
+            if (TAM_SECT(t) <= HUECO_UNION_MAX) cap_union = TAM_SECT(t); else { n_grandes++; if (a >= 100 && a < 100 + RIVAL_NMIS) arbol_grande[a - 100] = 1; }
         }
         col_nombre_union(n, i);
         if (!gd_busca(n, &lba, &t) && TAM_SECT(t) > cap_col) cap_col = TAM_SECT(t);
@@ -5240,6 +5259,235 @@ static void curso_fuera(const char *por)
     tex_suelta(&etapa); ar_suelta();
     meta_suelta();                                              /* META.DAT: su RAM, para el menu */
     dbglog(DBG_INFO, "VRAM: el curso fuera (%s), libre %uK\n", por, (unsigned)(pvr_mem_available() >> 10));
+}
+/* ---------------------------------------------------------------- coches de carreras (COAST 2 COAST)
+   Los registros (comun/rival.c, 47CF40 / 47CA40 / 47BC90) avanzan solos por la posicion de carretera del curso entero
+   (car+0x260: la suma de los largos de las etapas y uniones anteriores, descriptor +0x96 de PS2, mas la posicion en la
+   parte actual); cerca del jugador abren aqui un coche del trafico (rc_abre: el suceso 0x55 de 46E830 con su modelo
+   0..29, que el trafico dibuja con el registro de 4866C0: RCmm.DAT) al que conduce 47A7C0 (rc_objetivo), con la
+   aceleracion por marchas de 472090 (rc_acelera, rc_marcha = 502420) y los radios de la carretera de 479670 / 479830
+   (rc_radios); 477090 (rival_sigue) le lleva la posicion al registro y 4763D0 (rc_suelta_coche) lo devuelve al cerrarse.
+   Lo demas del trafico (carriles 47E110, choques 4F9450, dibujo y LOD) es el mismo que el de los coches de calle.
+   SIN PORTAR de 47A7C0: 472E60 (el ritmo por los coches de alrededor y el empuje de lado +BE4, tablas 5B4200 / 5B40E0
+   por clase) y 474080 (rebufo del de delante: solo con cfg +0x30 & 8, ninguna mision de carrera de tipo 0), el +0xF
+   bit 0 (x 0,5), 43EB60 (sitio ocupado al abrir) y la espera de 0x78 cuadros de 474D30 (+C26 con +BC8). */
+typedef struct { int ok, marchas; float rel, hud, sube[8], baja[8]; } rc_fis_t;
+static int32_t *rc_remap[RC_NMOD][9]; static int rc_mod_id[RC_NMOD], rc_nmod;
+static rc_fis_t rc_fis[RC_NMOD];
+static or2_param_t rc_par_tmp;
+static int rc_base[CURSO_MAX];                                  /* car+0x260 al principio de cada etapa del arbol */
+static rival_jug_t rc_j;                                        /* el jugador como lo leen rival.c y 47A7C0 */
+/* posicion de carretera del curso entero en s (entera en pos_i) */
+static float rc_pos_curso(float s, int *pos_i)
+{
+    const rival_mision_t *mi = rival_mis(); float p; int k = cur_nodo;
+    if (!mi || k < 0 || k >= CURSO_MAX) p = s / m_pos;
+    else if (cur_sig >= 0 && cur_sig < CURSO_MAX && s_sig >= 0 && s >= s_sig) p = (float)rc_base[cur_sig] + (s - s_sig) / m_pos;
+    else if (s_union >= 0 && s >= s_union) p = (float)(rc_base[k] + mi->largo_tramo[k] + 1) + (s - s_union) / m_pos;
+    else p = (float)rc_base[k] + (s - s_etapa) / m_pos;
+    *pos_i = (int)floorf(p);
+    return p;
+}
+/* 0x1724e0: por el arbol (el hijo izquierdo si lo hay), largo de la etapa + 1 + largo de la union + 1 */
+static void rc_bases(void)
+{
+    const rival_mision_t *mi = rival_mis(); int k = 0, b = 0, g;
+    memset(rc_base, 0, sizeof rc_base);
+    if (!mi) return;
+    for (g = 0; g < CURSO_MAX && k >= 0 && k < ncurso && k < RIVAL_NODOS; g++) {
+        rc_base[k] = b; b += mi->largo_tramo[k] + 1 + mi->largo_union[k] + 1;
+        k = curso[k].izq >= 0 ? curso[k].izq : curso[k].der;
+    }
+}
+static void rc_jug_actualiza(int corre)
+{
+    int pi; float p = rc_pos_curso(yo.s, &pi);
+    rc_j.pos = pi; rc_j.frac = p - (float)pi; rc_j.v = fis_ok ? fis.vel_mf : yo.v / 60.0f;
+    rc_j.corre = corre; rc_j.cuadros = crono;
+}
+static int32_t *rc_remap_de(const trafico_t *t)
+{
+    int k = t->modelo - NMODTRAF;
+    return k >= 0 && k < rc_nmod && t->color >= 1 && t->color <= 8 ? rc_remap[k][t->color] : NULL;
+}
+static int rc_slot_modelo(int m)
+{
+    int k;
+    for (k = 0; k < rc_nmod; k++) if (rc_mod_id[k] == m) return NMODTRAF + k;
+    return rc_nmod ? NMODTRAF : -1;                             /* DESVIACION: sin plaza para su modelo, el primero */
+}
+/* 47BC90 (final comun con 46E830): el coche del registro i a ebx posiciones del jugador. -1 si no se puede */
+static int rc_abre(int i, int ebx, int delante, int parrilla)
+{
+    rival_t *r = rival_reg(i); const rival_mision_t *mi = rival_mis(); int k, n = 0, slot = -1, carril, m; float s, v;
+    trafico_t *t;
+    if (!r || !mi) return -1;
+    for (k = 0; k < NTRAF; k++) {
+        if (traf[k].carril >= 0) { if (traf[k].rc) n++; }
+        else if (slot < 0) slot = k;
+    }
+    if (slot < 0 || n >= mi->cfg[7]) return -1;                 /* 476350: los sucesos 9..[680AD4]+7 (c1c + 1) */
+    if ((m = rc_slot_modelo(r->modelo)) < 0) return -1;
+    s = yo.s + ((float)ebx - rc_j.frac) * m_pos;                /* el principio de esa posicion (46FE70) */
+    if (s >= longitud - 20.0f || s < 1.0f) return -1;           /* (43D470: fuera de lo cargado) */
+    if (parrilla && delante) carril = (r->b77 & 1) + 2;         /* fuera del modo 16: (+77 & 1) + 2 */
+    else {                                                      /* 478640 (en la etapa 478430) */
+        int nd, ps, u = traf_lugar(s, &nd, &ps); const uint8_t *rec = ntap ? traf_reg_aparicion(u, nd, ps) : NULL;
+        if (!rec) return -1;
+        carril = u ? traf_carril_478640(rec) : traf_carril_478430(rec);
+        if (carril < 0 || carril >= NCARRIL) return -1;
+    }
+    t = traf + slot;
+    t->modelo = m; t->color = r->color; t->carril = t->destino = carril;
+    v = TR_MAX[5] * TR_KMH * r->v_ref;                          /* registro de velocidad +0x26 x K5B43A4 x +BC0 (1) x +B78 */
+    if (delante && yo.v / 60.0f > 1.0f && v > yo.v) v = yo.v * 0.75f;   /* 6282A0 */
+    if (parrilla) v = 0;                                        /* 47D8B0: +1C4 = 0 */
+    t->v_des = t->c.v = v;
+    traf_nace(t, s);
+    t->b62 = 0;                                                 /* (46E830 no pasa por 4704A0: sin parpadeo) */
+    t->rc = i + 1; t->marcha = parrilla ? 1 : 0;                /* 47D8B0: +208 = 1 (4B00D0 = 0) */
+    t->b52 = t->c34 = 0; t->b54 = t->bb4 = 100000.0f;
+    r->coche = slot;
+    dbglog(DBG_INFO, "RIVAL: abre %d (modelo %d color %d) en %+d posiciones, carril %d, %.0f km/h%s\n", i, r->modelo, r->color,
+           ebx, carril, (double)(v * 3.6f), parrilla ? " (parrilla)" : "");
+    return slot;
+}
+static void rc_suelta_coche(trafico_t *t)
+{
+    int k = t->rc - 1;
+    t->rc = 0;
+    rival_suelta(k, rc_j.pos);
+}
+/* 46F190: radio de la carretera por tres puntos de su carril separados paso m (100000 en recta) */
+static float rc_r3(float s0, float paso, int carril)
+{
+    float x[3], z[3], th, a, b, c, ar; int k;
+    for (k = 0; k < 3; k++) {
+        float s = s0 + k * paso; if (s > longitud - 0.1f) s = longitud - 0.1f;
+        mundo_de(s, tr_cx(s, carril), &x[k], &z[k], &th);
+    }
+    a = hypotf(x[1] - x[0], z[1] - z[0]); b = hypotf(x[2] - x[1], z[2] - z[1]); c = hypotf(x[2] - x[0], z[2] - z[0]);
+    ar = fabsf((x[1] - x[0]) * (z[2] - z[0]) - (x[2] - x[0]) * (z[1] - z[0]));
+    if (ar < 1e-5f) return 100000.0f;
+    a = a * b * c / (2.0f * ar);
+    return a > 100000.0f ? 100000.0f : a;
+}
+/* 479670 (+B54, cada 5 cuadros) y 479830 (+BB4: puntos a v x 15 posiciones, cada 9; PS2 0x1df668) */
+static void rc_radios(trafico_t *t)
+{
+    int fin, u, cs = tr_fila(t->c.s, &fin, &u), paso; float s0, b;
+    {   int nodo, pos; float bb = traf_lugar(t->c.s, &nodo, &pos) ? s_union : (s_sig >= 0 && t->c.s >= s_sig ? s_sig : s_etapa);
+        float ff = (t->c.s - bb) / m_pos; s0 = t->c.s - (ff - floorf(ff)) * m_pos; }
+    if (t->b52 > 0) t->b52--;
+    else if (cs + 3 > fin || (u && (cs < 0xa || cs > 0xaa))) t->b54 = 100000.0f;
+    else { t->b54 = rc_r3(s0, m_pos, t->carril); t->b52 = 4; }
+    if (t->c34 > 0) { t->c34--; return; }
+    if (cs + 3 > fin) { t->bb4 = 100000.0f; return; }
+    paso = (int)(t->c.v / 60.0f * 15.0f);                       /* 0x41700000 */
+    if (u && (cs < 0xa || cs > 0xaa)) { t->bb4 = 100000.0f; return; }
+    if (paso < 1) return;
+    if (paso == 1) { t->bb4 = t->b54; return; }
+    b = rc_r3(s0, paso * m_pos, t->carril);
+    t->bb4 = b; t->c34 = 8;
+}
+/* 502420 (474D30): el cambio automatico del coche de carreras con los umbrales de su modelo (487570) */
+static void rc_marcha(trafico_t *t)
+{
+    int k = t->modelo - NMODTRAF, g = t->marcha; float v = t->c.v / 60.0f; const rc_fis_t *f;
+    if (k < 0 || k >= rc_nmod || !rc_fis[k].ok) return;
+    f = rc_fis + k;
+    if (g < 0 || g > 7) g = 0;
+    if (v > f->sube[g]) g++;                                    /* +38 = 0 (< 128) */
+    else if (f->baja[g] > v) g--;                               /* +282 = 0 */
+    if (g > f->marchas) g = f->marchas;
+    t->marcha = g;
+}
+/* 47A7C0 (PS2 0x1e5dc0): el objetivo de velocidad (+10DC) y su ritmo (+10E0) del coche de carreras */
+static float rc_objetivo(int e, int d, int *f0, int *f1, float *rate)
+{
+    trafico_t *t = traf + e; rival_t *r = rival_reg(t->rc - 1); const rival_mision_t *mi = rival_mis();
+    int cls = tr_cls(e), nodo, pos, k; float ps, v2, b, vmf = t->c.v / 60.0f;
+    const float *C = rival_curva();
+    rc_radios(t); rc_marcha(t);                                 /* (479670 / 479830 y 474D30 antes del control) */
+    tr_rv = ntap ? traf_reg_velocidad(traf_lugar(t->c.s, &nodo, &pos), nodo, pos) : NULL;
+    *f0 = *f1 = 0; *rate = 1.0f; t->freno = 0;                  /* +10D8 = +10D9 = 0, +10E0 = 1, +38 = 0 */
+    b = fabsf(mi && (mi->cfg[12] & 3) == 3 ? t->bb4 : t->b54);  /* 4762E0 */
+    if (!r) return t->c.v;
+    if (t->b6c && t->b60 <= 0) { *f0 = 0; *f1 = 1; ps = 0; }    /* golpeado (con [0x5c773e] <= 1) */
+    else if (fis_ok && fis.t_choque > 0.0f) {                   /* el jugador chocando (+2F0 & 2): la maxima de su clase */
+        ps = TR_MAX[cls] * TR_KMH; *rate = 0.5f;                /* 0x3f00 (0x3e4ccccd con +66 < 0) */
+        if (t->c.v > ps) ps = t->c.v;
+    } else {
+        float tf = (float)crono, a;
+        ps = TR_MAX[cls] * TR_KMH * r->v_ref;                   /* +0x1C de su clase x K x +B78 x +BC0 (1) */
+        ps *= rival_escala_v(&rc_j);                            /* perfil +0x14 (8037B8) o +0x10 */
+        ps *= rival_ritmo(t->rc - 1);
+        a = (tf + r->fase) * 6.28318548f / r->periodo;          /* 0x40c90fdb */
+        ps = (cosf(a) - 1.0f) * r->amp * 60.0f + ps;            /* +B7C (m por cuadro) */
+        v2 = ps;
+        for (k = 0; k < 5; k++) {                               /* la curva (0x40bb68): {radio, km/h del modelo} */
+            float lo = C[2 * k], hi = C[2 * k + 2], tt;
+            if (!(lo <= b) || !(b < hi)) continue;
+            tt = (hi - b) / (hi - lo);
+            v2 = (tt * C[2 * k + 1] + (1.0f - tt) * C[2 * k + 3]) * TR_KMH * r->v_curva;   /* x +B88 x +BC0 */
+            a = (tf + r->fase_c) * 6.28318548f / r->periodo_c;
+            v2 = cosf(a) * r->amp_c * 60.0f + v2;               /* +B8C */
+            break;
+        }
+        if (ps > v2) { ps = v2; *f0 = 1; *f1 = 0; }
+        {   /* el rebufo del jugador: detras de el a 4..60 m y de 4 a 12 m de lado, x 0,7 x su +1C4 */
+            float sj = rc_j.v * 0.7f;                           /* 0x3f333333 */
+            if (sj > 1.0f && vmf > sj) {
+                float bb = fabsf(tr_268(e) - tr_268(TR_JUG)), g = t->b14 ? 0.0f : 4.0f, d0;
+                if (bb < 12.0f && bb > g) {
+                    d0 = tr_dist(TR_JUG, e);
+                    if (d0 < 100.0f) d0 = tr_delante(TR_JUG, e);  /* 46E250 */
+                    if (-4.0f > d0 && d0 > -60.0f) ps *= sj;
+                }
+            }
+        }
+    }
+    {   const float mn = (tr_rv ? (int16_t)rd16(tr_rv + 0xC) : 100) * TR_KMH;   /* +0xC del registro */
+        int q = t->modelo - NMODTRAF;
+        if (mn > ps) ps = mn;
+        else if (q >= 0 && q < rc_nmod && rc_fis[q].ok) {       /* el tope del coche: (rel - 2,3) x -131,39 + 318 */
+            float cap = ((rc_fis[q].rel - 2.3f) * -131.386780f + 318.0f) * 1.025f / (rc_fis[q].hud * 216.720001f) * 60.0f;
+            if (ps > cap) ps = cap;
+        }
+    }
+    if (d >= 0 && d < traf_lejos_v && t->c.v > ps) {            /* justo delante del jugador */
+        if (tr_aparte(e, TR_JUG) < 1 && d <= 3) { *f1 = 1; *f0 = 0; *rate *= 0.05f; }   /* 0x3d4ccccd */
+        else { *rate *= (float)d / 3.0f; if (*rate > 1.0f) *rate = 1.0f; }
+    }
+    return ps;
+}
+/* 472090 (PS2 0x1e43a8) con la tabla del coche de carreras (0x40bc98) y, con marcha (+208), la aceleracion por marcha
+   (0x40bcb0 x 0,002 x ritmo, x +BCC en los primeros 0x5E1 cuadros) */
+static void rc_acelera(trafico_t *t, float rate, float obj, int f0, int f1)
+{
+    const float *tb = rival_acel(), *tm = rival_marcha(); const rival_t *r = rival_reg(t->rc - 1);
+    float s = t->c.v / 60.0f, o = obj / 60.0f, xm = crono < 0x5e1 && r ? r->f38 : 1.0f;
+    int g = t->marcha >= 1 && t->marcha <= 6 ? t->marcha : 0;
+#define RC_ACEL(k) (g ? tm[g - 1] * 0.002f * rate * xm : tb[k] * rate)
+    if (o > s * 1.2f || (o > s && f0 == 1)) { s += RC_ACEL(3); if (s > o) s = o; }
+    else if (o > s) { s += RC_ACEL(1); if (s > o) s = o; }
+    else { int fuerte = (s * 0.8f > o && !f1) || f0 == 1; s -= tb[fuerte ? 4 : 2] * rate; if (s < o) s = o; }
+#undef RC_ACEL
+    t->c.v = s * 60.0f;
+}
+/* cada segundo: los coches de carreras cerca del jugador (prueba) */
+static void rc_diag(void)
+{
+    int i; static int n;
+    if (++n % 60) return;
+    dbglog(DBG_INFO, "RIVAL: jugador pos %d puesto %d/%d %.0f km/h; ", rc_j.pos, rival_puesto() + 1, rival_total(), (double)(yo.v * 3.6f));
+    for (i = 0; i < rival_n(); i++) {
+        rival_t *r = rival_reg(i);
+        if (r->dif < -20 || r->dif > 80) continue;
+        if (r->coche >= 0) dbglog(DBG_INFO, "[%d pos %d coche %d %.0f km/h m%d] ", i, (int)r->pos_i, (int)r->coche, (double)(traf[r->coche].c.v * 3.6f), traf[r->coche].marcha);
+        else dbglog(DBG_INFO, "[%d pos %d] ", i, (int)r->pos_i);
+    }
+    dbglog(DBG_INFO, "\n");
 }
 static void curso_al_menu(void)
 {
@@ -7678,20 +7926,88 @@ static void robot_dibuja(robot_ctx_t *rx, int l)
    (0: sin direccion). Bloque TAN1 detras de los pares de TCX1 (tools/conv_trafico.py bloque_tan) */
 #define NTRUEDA 6
 typedef struct { int ok; float radio, r[NTRUEDA][5]; uint16_t *idx, ini[3][NPZ_MAX + 1]; } tani_t;
-static tani_t tani[NMODTRAF];
+static tani_t tani[NMODT];
 static float traf_giro[NTRAF];                                  /* -car+40 (rad) de cada coche de trafico */
 static void traf_ani_lee(int m)
 {
     const uint32_t *w = (const uint32_t *)mtraf[m].ruta, *q;
     tani_t *a = tani + m;
     free(a->idx); memset(a, 0, sizeof *a);
-    if (!w || mtraf[m].paso_ruta != 1 || mtraf[m].nruta < 3 || memcmp(w, "TCX1", 4)) return;
-    q = w + 3 + 3 * w[2];
+    if (!w || mtraf[m].paso_ruta != 1 || mtraf[m].nruta < 3 || (memcmp(w, "TCX1", 4) && memcmp(w, "TCX9", 4))) return;
+    q = w + 3 + (memcmp(w, "TCX9", 4) ? 3 : 9) * w[2];        /* (TCX9: los coches de carreras, 8 colores) */
     if (q + 3 + 5 * NTRUEDA > w + mtraf[m].nruta || memcmp(q, "TAN1", 4) || q[1] != NTRUEDA) return;
     memcpy(&a->radio, q + 2, 4); memcpy(a->r, q + 3, sizeof a->r);
     if (!(a->radio > 0.05f)) return;
     if (!piezas_indices(&mtraf[m], NTRUEDA + 1, &a->idx, a->ini)) return;
     a->ok = 1;
+}
+/* (coches de carreras: sus modelos, ver arriba "coches de carreras") */
+static void rc_modelos_suelta(void)
+{
+    int k, c;
+    for (k = 0; k < rc_nmod; k++) {
+        int m = NMODTRAF + k;
+        for (c = 0; c < 9; c++) { free(rc_remap[k][c]); rc_remap[k][c] = NULL; }
+        free(tani[m].idx); memset(&tani[m], 0, sizeof tani[m]);
+        libera_modelo(&mtraf[m]); traf_con_lod[m] = 0; traf_ncol[m] = 1; rc_fis[k].ok = 0;
+    }
+    rc_nmod = 0;
+}
+/* los colores de car+0x12 (1..8) de RCmm.DAT ('TCX9': por clave de textura sus 8 colores) */
+static void rc_colores(int k)
+{
+    const modelo_t *mo = &mtraf[NMODTRAF + k]; const uint32_t *w = (const uint32_t *)mo->ruta; uint32_t c, p, i;
+    if (!w || mo->paso_ruta != 1 || mo->nruta < 3 || memcmp(w, "TCX9", 4) || 3 + 9 * w[2] > mo->nruta) return;
+    for (p = 0; p < w[2]; p++) for (c = 0; c < 9; c++) if (w[3 + 9 * p + c] >= mo->ntex) return;
+    for (c = 1; c <= 8; c++) {
+        if (!(rc_remap[k][c] = malloc(mo->ntex * sizeof(int32_t)))) return;
+        for (i = 0; i < mo->ntex; i++) rc_remap[k][c][i] = i;
+        for (p = 0; p < w[2]; p++) rc_remap[k][c][w[3 + 9 * p]] = w[3 + 9 * p + c];
+    }
+}
+/* al empezar la carrera de la mision (con el hueco de la union prestado): los modelos de sus coches de carreras, de
+   los de delante a los de detras, hasta RC_NMOD distintos (cada RCmm.DAT ~85 KB: sus texeles a la VRAM, ~25 KB, y el
+   resto al monton, ~60 KB) */
+static void rc_modelos_carga(uint8_t *buf, uint32_t cap)
+{
+    int n = rival_n(), i, k, usado[RIVAL_MAX];
+    rc_modelos_suelta();
+    memset(usado, 0, sizeof usado);
+    for (;;) {
+        int mejor = -1; float p = -1e9f; char nom[16]; modelo_t *mo; int m, r;
+        for (i = 0; i < n; i++) if (!usado[i] && rival_reg(i)->pos > p) { p = rival_reg(i)->pos; mejor = i; }
+        if (mejor < 0 || rc_nmod >= RC_NMOD) break;
+        usado[mejor] = 1; m = rival_reg(mejor)->modelo;
+        for (k = 0; k < rc_nmod && rc_mod_id[k] != m; k++) ;
+        if (k < rc_nmod) continue;
+        k = rc_nmod; mo = &mtraf[NMODTRAF + k];
+        sprintf(nom, "RC%02d.DAT", m);
+        r = buf ? lee_modelo_en(mo, nom, buf, cap) : lee_modelo(mo, nom);
+        if (r) { dbglog(DBG_ERROR, "RIVAL: no se pudo leer %s (%d)\n", nom, r); break; }
+        if (sube_modelo(mo)) { dbglog(DBG_ERROR, "RIVAL: sin VRAM para %s\n", nom); libera_modelo(mo); break; }
+        compacta_modelo_de(mo, buf != NULL);
+        if (mo->datos == buf) { dbglog(DBG_ERROR, "RIVAL: sin RAM para %s\n", nom); libera_modelo(mo); break; }
+        rc_mod_id[k] = m; rc_nmod++;
+        {   uint32_t j; float lo = 0, hi = 0;
+            for (j = 0; j < mo->nmallas; j++) if (mo->mallas[j].nodo > 0) traf_con_lod[NMODTRAF + k] = 1;
+            for (j = 0; j < mo->nvert; j++) { float z = mo->verts[j].z; if (z < lo) lo = z; if (z > hi) hi = z; }
+            largo_traf[NMODTRAF + k] = (hi - lo) * 0.5f; }
+        traf_ncol[NMODTRAF + k] = 1; rc_colores(k); traf_ani_lee(NMODTRAF + k);
+        if (cjm_ok) trc[NMODTRAF + k] = cjm[m];                 /* el registro de 4866C0 del modelo y su caja (520950) */
+        else { trc[NMODTRAF + k] = trc[0]; trc[NMODTRAF + k].modelo = m; trc[NMODTRAF + k].clase = 5; }
+        if (param_dat) {                                        /* la fila del modelo de PARAM.DAT (5051D0) */
+            int col = or2_columna_modelo(&choq, m);
+            if (col >= 0 && or2_carga_param(param_dat, 200, col, &rc_par_tmp) >= 0) {
+                rc_fis_t *f = rc_fis + k;
+                f->rel = rc_par_tmp.rel_final; f->hud = rc_par_tmp.hud; f->marchas = rc_par_tmp.marchas;
+                memcpy(f->sube, rc_par_tmp.sube, sizeof f->sube); memcpy(f->baja, rc_par_tmp.baja, sizeof f->baja); f->ok = 1;
+            }
+        }
+        dbglog(DBG_INFO, "RIVAL: %s en la plaza %d (clase %d, %u vertices, VRAM libre %uK)\n", nom, NMODTRAF + k,
+               trc[NMODTRAF + k].clase, (unsigned)mo->nvert, (unsigned)(pvr_mem_available() >> 10));
+    }
+    for (i = 0, k = 0; i < n; i++) { int m = rival_reg(i)->modelo, j; for (j = 0; j < rc_nmod && rc_mod_id[j] != m; j++) ; if (j == rc_nmod) k++; }
+    if (k) dbglog(DBG_ERROR, "RIVAL: %d coches de carreras sin su modelo (mas de %d distintos): con el de la plaza %d\n", k, RC_NMOD, NMODTRAF);
 }
 /* El trafico en el suelo como el original cada cuadro (PS2 0x1eb0c0; PC tras 504E70 en el paso del trafico): el
    suelo 0x100 bajo su centro (car+14 / +18; sin suelo se queda) y, en la etapa (+5C = 0) a menos de 100 m de la camara
@@ -8446,6 +8762,15 @@ int main(int argc, char **argv)
     traf_medidas();
     traf_tablas();                                              /* clases y cajas del trafico (TRAFC.DAT) */
     bo_carga_datos();                                           /* objetos animados de las uniones (BO.DAT) */
+    if ((r = rival_inicia())) dbglog(DBG_ERROR, "RIVAL: sin MISION.DAT (%d): COAST 2 COAST sin misiones\n", r);
+    else {   /* COAST 2 COAST: las misiones de carrera (tipo 0) cuyo curso cabe; los otros tipos piden pantallas y HUD que
+                no estan (puntos del derrape / de la conduccion limpia, eliminacion por tiempo, pillar a los rivales) */
+        static int16_t idx[RIVAL_NMIS]; static uint8_t cl[RIVAL_NMIS], sb[RIVAL_NMIS]; int n = 0, k, c_, s_, t_;
+        for (k = 0; k < RIVAL_NMIS; k++)
+            if (!rival_lista(k, &c_, &s_, &t_) && t_ == 0 && !arbol_grande[k]) { idx[n] = k; cl[n] = c_; sb[n] = s_; n++; }
+        menu_pon_misiones(n, idx, cl, sb);
+        dbglog(DBG_INFO, "RIVAL: %d misiones de carrera de COAST 2 COAST en el menu\n", n);
+    }
     if (ruta_pon(&etapa)) { aviso("Sin memoria para la ruta"); for (;;) thd_sleep(1000); }
     salida_calcula();                                           /* 5C2560 en la ruta (coche del menu y salida) */
     fisica_carga();
@@ -8628,7 +8953,7 @@ int main(int argc, char **argv)
                 menu_suma_tiempo(crono);                        /* tiempo de juego (PS2 0x249c5c / 0x24a110) */
                 if (rp == PAUSA_REINTENTA) { estado = TITULO; reintenta = 1; }
                 else { fin_game_over(FIN_PAUSA_ABANDONA); fin_on = 1; estado = FIN; t_estado = 0; }
-            } else if ((rp == PAUSA_REINTENTA || rp == PAUSA_ABANDONA) && !auto_) {
+            } else if ((rp == PAUSA_REINTENTA || rp == PAUSA_ABANDONA) && !auto_ && variante != 6) {
                 menu_suma_tiempo(crono);                        /* tiempo de juego (PS2 0x249c5c / 0x24a110) */
                 /* con la consola (1b4878 = 43F860) los dos piden el modo 0x22 (OutRun Miles) con 450230(6) / (7) y la
                    carrera queda suspendida (PS2 0x249c98 / 0x24a140, modo 34 0x1bc2ac) */
@@ -8642,6 +8967,10 @@ int main(int argc, char **argv)
         if (estado == TITULO) {
             int rm;
             if (!reintenta) curso_al_menu();                    /* la VRAM del curso, para el menu */
+            if (!reintenta && rc_nmod) {                        /* los modelos de los coches de carreras */
+                for (i = 0; i < NTRAF; i++) if (traf[i].carril >= 0 && traf[i].modelo >= NMODTRAF) traf_aparca(traf + i);
+                rc_modelos_suelta();
+            }
             if (ha_hud && !reintenta) { hudd_cierra(ha_hud); ha_hud = NULL; ha_u_txt = ha_u_mar = -1; }   /* INFARTO */
             presta_union(1);                                    /* (en cuanto el curso suelta la union) */
             /* el frontal de recreativa pone sus tablas (~850 KB) en el final del hueco de la union: tras la meta la union
@@ -8693,6 +9022,15 @@ int main(int argc, char **argv)
                    (OutRun 2), 1 -> arbol 1 (OutRun 2 SP) */
                 preset_curso = juego_sp ? (auto_ ? 1 : menu_preset()) : 0;
                 curso_pedido = juego_sp ? preset_curso : PRUEBA_CURSO;
+                {   /* COAST 2 COAST (variante 6): la mision elegida, su curso (el arbol 100 + i de CURSO.DAT, 4965A0) y
+                       sus coches de carreras (MISION.DAT) */
+                    int mi_ = auto_ ? -1 : menu_mision();
+#ifdef PRUEBA_MISION
+                    mi_ = PRUEBA_MISION; variante = 6;          /* prueba: la mision i de Races.bin (con el piloto) */
+#endif
+                    if (variante == 6 && mi_ >= 0 && !rival_carrera(mi_)) curso_pedido = 100 + mi_;
+                    else { if (variante == 6) variante = 1; rival_fuera(); }
+                }
                 or2_choques_preset(&choq, preset_curso);        /* 0x191d20 / 0x191d70 */
                 /* difficulty_of de 44DC70 (PS2 0x1cdc98..0x1cdcbc): 0 en el juego de la consola (43F860 != 0); en el
                    de OUTRUN2SP 2 en la variante 4 y si no la de la licencia activa (+E0) */
@@ -8733,6 +9071,10 @@ int main(int argc, char **argv)
                 if (hud_ok && hud_sube_tex()) dbglog(DBG_ERROR, "HUD: sin RAM o VRAM para sus texturas (se suben al dibujarlas)\n");
                 /* OUTRUN2SP: la pantalla de carga del preset (0x1b8228; sus texturas detras de las del HUD y fuera antes
                    de reservar la zona del curso, demo/sp.c) */
+                if (rival_mis()) {                              /* 47CF40 y los modelos de sus coches (RCmm.DAT) */
+                    rival_prepara();
+                    rc_modelos_carga(union_prestable() ? hueco_union : NULL, cap_union - union_fsp);
+                }
                 presta_union(0);                                /* el hueco de la union vuelve a la carrera */
                 /* (sus tablas en el hueco de la union, que curso_reinicia no usa: nada en el monton antes de col_reserva) */
                 if (juego_sp) sp_carga_entra(variante, preset_curso, hueco_union, cap_union);
@@ -8749,6 +9091,15 @@ int main(int argc, char **argv)
 #endif
                 yo.a = salida_a_;                               /* mirando a -z (4A6ED0: +2C/+2E/+30 = 0) */
                 coche_paso(&yo, 0, 0, 0, 0); traf_inicia(SALIDA); efectos_borra();
+                if (rival_n()) {                                /* 47DAC0: los de delante que se ven, en la parrilla */
+                    int k_;
+                    rc_bases(); rc_jug_actualiza(0); rival_abre = rc_abre; rival_salida(&rc_j);
+                    for (k_ = 0; k_ < ncurso && k_ < RIVAL_NODOS; k_++)
+                        dbglog(DBG_INFO, "RIVAL: etapa %d %.4s base %d largo %d + %d\n", k_, curso[k_].zona, rc_base[k_],
+                               rival_mis()->largo_tramo[k_], rival_mis()->largo_union[k_]);
+                    dbglog(DBG_INFO, "RIVAL: mision %d-%d tipo %d, %d coches de carreras, curso de %d posiciones\n", rival_mis()->clave,
+                           rival_mis()->sub, rival_mis()->tipo, rival_n(), rival_mis()->largo);
+                }
                 if (fis_ok) { float p[3], th; ruta_en(yo.s, p, &th, NULL, NULL); or2_coloca(&fis, &fpar, th + yo.a, 0); }
                 lejos = LEJOS_PS2; entorno_reinicia(); niebla_paso(); niebla_pon();   /* la distancia del original */
                 tim_cuadros = tim_zona(cur_nodo, etapa_n); tiempo = tim_cuadros / TIM_HZ; estado = CUENTA; t_estado = 0; t_cuenta = -60; fac_on = 0; fac_base = 30001; salida_entra(); pausa = 0; crono = 0; pt_inicia(); fin_carrera_empieza(!juego_sp);
@@ -8767,7 +9118,7 @@ int main(int argc, char **argv)
                 }
                 if (cam_ok) { cam_inicia(&cam, &cam_tab); cam_t_choque = 0; }   /* 484EE0 */
                 if (chr_ok == 1) robot_carrera(modelo_jug);          /* 4884D0 / 4885A0 */
-                ram_mapa(variante == 2 ? "carrera INFARTO" : variante == 0 || variante == 7 ? "carrera CONTRARRELOJ" : "carrera OutRun");
+                ram_mapa(variante == 2 ? "carrera INFARTO" : variante == 0 || variante == 7 ? "carrera CONTRARRELOJ" : variante == 6 ? "carrera COAST 2 COAST" : "carrera OutRun");
                 ram_vuelta = 1;
                 /* todo lo de arriba es la carga (GD, VRAM, AICA): la escena de la salida empieza a contar aqui, en su
                    cuadro 0, como START del original (4871A0 en la etapa 60, con la carga ya hecha). Este mismo cuadro
@@ -8855,6 +9206,7 @@ int main(int argc, char **argv)
 #endif
                 coche_paso(&yo, giro, gas, freno, 1.0f / 60);
                 mando.usa = 0;
+                if (rival_n()) { rc_jug_actualiza(1); rival_paso(&rc_j); rc_diag(); }   /* 47EC00: los coches de carreras */
                 traf_paso(1.0f / 60);
                 efectos_paso(&yo, 1.0f / 60);
                 tim_cuadros--; tiempo = tim_cuadros / TIM_HZ;  /* 450AC0: un cuadro de logica */
@@ -9042,6 +9394,15 @@ int main(int argc, char **argv)
                     ram_mapa("resultados");
                     fin_sp_resultados(como, &d); fin_on = 1;
                 }
+            } else if (!fin_on && variante == 6 && t_estado > (uint32_t)fin_t) {
+                /* COAST 2 COAST: 49CFD0 (salida de la meta) guarda la nota de la mision (495A20); el fin del tiempo no.
+                   DESVIACION: la pantalla del resultado de la mision y el mapa no estan: de vuelta al menu */
+                menu_suma_tiempo(crono);
+                if (estado == META && rival_mis()) menu_nota_mision(rival_mis()->clave, rival_mis()->sub, rival_nota());
+                dbglog(DBG_INFO, "RIVAL: fin (%s), puesto %d/%d, nota %d\n", estado == META ? "meta" : "tiempo", rival_puesto() + 1,
+                       rival_total(), rival_nota());
+                meta_sale(); lejos_obj = lejos = LEJOS_PS2;
+                estado = TITULO; nuevo = 0; texto_centro(""); hud_baja_tex(); menu_entra(manual_, pista, NPISTAS);
             } else if (!fin_on && t_estado > (uint32_t)fin_t) {
                 menu_suma_tiempo(crono);                        /* salida de la meta / del fin del tiempo (PS2 0x1b96bc / 0x1b9b58) */
                 fin_empieza(estado == META ? FIN_META : FIN_TIEMPO); fin_on = 1;   /* 33 (sin red) -> 34 / 20 -> 34 */
@@ -9126,8 +9487,9 @@ int main(int argc, char **argv)
         /* marcador (cada 6 cuadros) */
         /* (solo si se va a ver: texto, abajo; sin eso cada 6 cuadros se borraban, escribian y subian 128 KB y se
            recorria el monton con mallinfo para nada) */
-        if (cuadro % 6 == 0 && estado != META && estado != AGOTADO && estado != FIN && (ver || (!hud_ok && estado != TITULO))) {
-            if (estado == TITULO) sprintf(s1, "MENU  VRAM menu %uK libre %uK", menu_vram() >> 10, (unsigned)(pvr_mem_available() >> 10));
+        if (cuadro % 6 == 0 && estado != META && estado != AGOTADO && estado != FIN && (ver || (!hud_ok && estado != TITULO) || (variante == 6 && estado == CARRERA && rival_n()))) {
+            if (variante == 6 && estado == CARRERA && rival_n() && !ver) sprintf(s1, "PUESTO %d/%d", rival_puesto() + 1, rival_total());   /* DESVIACION: el HUD del puesto no esta */
+            else if (estado == TITULO) sprintf(s1, "MENU  VRAM menu %uK libre %uK", menu_vram() >> 10, (unsigned)(pvr_mem_available() >> 10));
             else sprintf(s1, "TIEMPO %3d  %3d km/h %d  %3d%%%s", (int)ceilf(tiempo), fis_ok ? (int)fis.velocidad_hud : (int)(yo.v * 3.6f), fis.marcha,
                          (int)(100 * yo.s / longitud), yo.choque ? "  !" : "");
             if (ver) {
@@ -9266,7 +9628,8 @@ int main(int argc, char **argv)
 #endif
                 pon_coche(&t->c, mt);
                 mat_load(&vista); mat_apply(&mt);
-                mtraf[t->modelo].remap = t->color > 0 && t->color < traf_ncol[t->modelo] ? traf_remap[t->modelo][t->color] : NULL;
+                mtraf[t->modelo].remap = t->rc ? rc_remap_de(t) :
+                                         t->color > 0 && t->color < traf_ncol[t->modelo] ? traf_remap[t->modelo][t->color] : NULL;
                 solo_lod = traf_con_lod[t->modelo] ? traf_lod(t->modelo, zv) : -1;
                 traf_apagado = t->freno > 0 ? 1 : 3;            /* pilotos: los del freno con +38 > 0 (4AD4D0) */
                 traf_dibuja(i, l, &mt);                         /* carroceria y ruedas girando (4AD530) */
@@ -9276,7 +9639,7 @@ int main(int argc, char **argv)
             if (l == 2 && estado != TITULO && !mundo_fuera) { mat_load(&vista); efectos_dibuja(); }
             if (l == 2 && estado != TITULO && !mundo_fuera) sol_dibuja();       /* el sol y su destello (40CBC0) */
             if (l == 2) {
-                int texto = ver || (!hud_ok && estado != TITULO), navi;
+                int texto = ver || (!hud_ok && estado != TITULO) || (variante == 6 && estado == CARRERA && rival_n() && !pausa), navi;
                 if (estado == TITULO && !pide_fsp) menu_dibuja();
                 if (hud_ok && estado != TITULO && !fin_on && !mundo_fuera) {       /* en los modos 34 / 35 / 27 nada (428600) */
                     hud_estado_t he;
@@ -9340,8 +9703,8 @@ int main(int argc, char **argv)
                 if (fin24) final_dibuja2d();                    /* los creditos del final (capa 7) */
                 fin_dibuja();                                   /* millas, continuar y GAME OVER (demo/fin.c) */
                 if (pausa && estado == CARRERA) menu_pausa_dibuja();   /* menu de pausa encima de todo */
-                {   float ty = variante == 2 && !ver && estado == CARRERA && !pausa ? 104.0f : 18.0f;   /* INFARTO: bajo el marcador */
-                    if (texto && ty > 100 && !pausa) caja(36, ty, 568, 92, 0x90000000);
+                {   float ty = variante == 2 && !ver && estado == CARRERA && !pausa ? 104.0f : variante == 6 && !ver && estado == CARRERA && !pausa ? 140.0f : 18.0f;   /* INFARTO / C2C: bajo el marcador */
+                    if (texto && ty > 100 && !pausa) caja(36, ty, variante == 6 ? 200 : 568, variante == 6 ? 34 : 92, 0x90000000);
                     else if (texto) caja(36, 18, 568, ver ? 92 : 34, 0x90000000);
                     if (texto && !(ty > 100 && pausa)) rect_txr(txt_arr, 512, 128, 40, ty + 2, 512, 128, PVR_LIST_TR_POLY);
                 }

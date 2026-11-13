@@ -33,7 +33,10 @@ TAPD.DAT: 'TAPD', u32 n segmentos de STAGE.PS2 (SEGnn.DAT) y por segmento el reg
 velocidad, puntos fijos), para los arboles que no son el del modo OutRun (la demo copia los de su arbol al leerlo). Las
 listas de puntos fijos de las etapas al reves estan en la BSS: se leen tras ejecutar la rutina que las rellena (ver
 aparicion, paso 5; tools/ps2/mips.py).
-Con --solo-tablas solo se escriben TRAFC.DAT y TAPD.DAT. Sale de tu disco: no se distribuye."""
+Con --solo-tablas solo se escriben TRAFC.DAT y TAPD.DAT. Con --rivales=m,m,.. (modelos 0..29) se escriben RCmm.DAT: los
+coches de carreras de las misiones de COAST 2 COAST (el rival), que el original abre como coches del trafico (suceso 0x55
+de 46E830, 47BC90) y dibuja igual que estos con el registro de 4866C0 de su modelo (obj_rc_<coche>, 5 LOD), en el
+formato de TRAFn.DAT; sin las tablas. Sale de tu disco: no se distribuye."""
 import os, struct, sys, zlib
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -394,15 +397,20 @@ def main():
         tablas(iso, dest); return
     from ps2.assets import Assets
     A = Assets(sys.argv[1]); E = A.elf; T, rec = tabla_colores(A); claves = {}
-    for m in MODELOS:
+    # --rivales m,m,..: los coches de carreras de las misiones de COAST 2 COAST (el rival: suceso 0x55 de 46E830 con el
+    # modelo 0..29, que el trafico dibuja con su registro de 4866C0 como cualquier otro: obj_rc_<coche>, 5 LOD) a
+    # RCmm.DAT (mm = el modelo), con el mismo formato que TRAFn.DAT; sin TRAFC.DAT ni TAPD.DAT
+    riv = next((a for a in sys.argv[3:] if a.startswith('--rivales=')), None)
+    lista = [int(x) for x in riv.split('=', 1)[1].split(',')] if riv else MODELOS
+    for m in lista:
         p = E.u32(T + 4 * m); claves[m] = []
-        while E.u32(p): claves[m].append(E.u32(E.u32(p), 3)); p += 4
+        while E.u32(p): claves[m].append(E.u32(E.u32(p), 9 if riv else 3)); p += 4
     print('colores del trafico: tabla en 0x%x' % T)
     nombre = next(k for k in iso.fich if k.startswith('SLES') or k.startswith('SLUS') or k.startswith('SLPM'))
     o, s = iso.fich[nombre]; tm = E.va(tabla_modelos(bytes(iso.m[o:o + s])))
     import conv_coche as cc
     medidas = []
-    for n, m in enumerate(MODELOS):
+    for n, m in enumerate(lista):
         mod = modelo.Modelo(); mod.ruta = np.zeros((0, 5)); mod.extra = []; vistos = {}
         for lod in range(5):
             piezas = llamadas(E, tm, m, lod); m0 = len(mod.mallas)
@@ -442,17 +450,19 @@ def main():
             if len(x) > 9 and isinstance(x[9], dict) and x[9].get('grupo'): x[7] = x[7] | x[9]['grupo'] << 24
         # colores del original: las texturas alternativas, que recorta_texturas conserva con mallas de mentira (la
         # clave y sus dos colores; recorta les pone el indice nuevo)
-        m = MODELOS[n]; pares = []
+        m = lista[n]; pares = []
         for k in claves.get(m, []):
             if not any(x[1] == (k[0] & 0xFFFF) for x in mod.mallas): continue
-            pares.append([[9, t & 0xFFFF] + [None] * 6 for t in k[:3]])
+            pares.append([[9, t & 0xFFFF] + [None] * 6 for t in k[:9 if riv else 3]])
         for f in pares: mod.mallas.extend(f)
         mod.recorta_texturas()
         if mod.vq: mod.comprime(); mod._comprimido = True        # (las alternativas tambien en VQ)
         falsas = {id(q) for f in pares for q in f}
         mod.mallas = [x for x in mod.mallas if id(x) not in falsas]
-        tcx = [b'TCX1', struct.pack('<2I', NCOLOR.get(m, 3), len(pares))]
-        for f in pares: tcx.append(struct.pack('<3I', *[q[1] for q in f]))
+        # rivales: 'TCX9', los 8 colores de car+0x12 (1..8, +73 del registro de 47CF40) por clave de la lista del modelo
+        # (0x36bc18: {clave, color 1..8}); el trafico: 'TCX1' con 3 (la clave y dos)
+        tcx = [b'TCX9' if riv else b'TCX1', struct.pack('<2I', 9 if riv else NCOLOR.get(m, 3), len(pares))]
+        for f in pares: tcx.append(struct.pack('<%dI' % len(f), *[q[1] for q in f]))
         tcx.append(bloque_tan(E, tm, m))
         mod.ruta = np.frombuffer(b''.join(tcx), '<f4').reshape(-1, 1)
         mod.mallas = [x[:8] for x in mod.mallas]
@@ -466,12 +476,12 @@ def main():
             y = list(x); y[7] = 1 << lod | (x[7] >> 8) << 8; y[4] = nv; nv += len(v)
             clave[k] = y; mallas.append(y); verts.append(v)
         mod.mallas, mod.verts, mod.nv = mallas, verts, nv
-        ini = mod.escribe(os.path.join(dest, 'TRAF%d.DAT' % n))
+        ini = mod.escribe(os.path.join(dest, ('RC%02d.DAT' % m) if riv else ('TRAF%d.DAT' % n)))
         print('trafico %d (modelo %d, registro %d): %.1f m, %d tiras, %d texturas (%d KB), piezas %s; vertices por LOD %s'
               % (n, m, cuerpo, largo, len(mod.mallas), len(mod.texs), len(mod.blob) >> 10,
                  ' '.join('%s %d:%d' % (q[2], q[0] >> 16, q[0] & 0xFFFF) for q in piezas),
                  ' '.join(str(sum(x[5] for x in mod.mallas if x[7] >> k & 1)) for k in range(5))))
-    tablas(iso, dest, medidas)
+    if not riv: tablas(iso, dest, medidas)
 
 if __name__ == '__main__':
     main()

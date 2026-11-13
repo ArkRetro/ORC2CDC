@@ -4,7 +4,9 @@
 #   etapas SEGnn/COLnn de todos los arboles (modo OutRun, OUTRUN2SP y las 94 misiones de Races.bin), uniones BKnn
 #   empaquetadas (UNIONES.PAK + descriptores, pak_union.py; las etapas en SEGS.PAK igual), BKD, CURSO, SOL, COLBK*, COLLR, musica MUSn.ADP (28 temas,
 #   28 avances, menu y metas), peliculas MVTS/MVATTR, sonido SFX/VOCES (espanol), menus, HUD, VMU, efectos, personajes (CHRPAR y una CHRppaa por pareja),
-#   meta, salida, fin de carrera FIN/GOVER, OUTRUN2SP CARGASP0-3/GOVSP/SPFE/RUTASP/RANKSP/NOM5A-E/NOMTX, el final de recreativa FINAL/FINE0-9/FINPROP/STAFF (conv_final.py), modo de video, INFARTO/HAHUD/VOCESH, objetos de las uniones BO, trafico, coches COCHE00-14 + COCHES y PARAM.
+#   meta, salida, fin de carrera FIN/GOVER, OUTRUN2SP CARGASP0-3/GOVSP/SPFE/RUTASP/RANKSP/NOM5A-E/NOMTX, el final de recreativa FINAL/FINE0-9/FINPROP/STAFF (conv_final.py), modo de video, INFARTO/HAHUD/VOCESH, objetos de las uniones BO, trafico, coches COCHE00-14 + COCHES y PARAM,
+#   misiones de COAST 2 COAST (MISION.DAT, conv_mision.py) y sus coches de carreras RC00-29 (conv_trafico.py --rivales).
+# Datos de antes del 2026-11-13 sin MISION.DAT ni RC00-29.DAT: basta volver a llamarlo (solo hace esos pasos).
 # Segunda pasada de la VQ (tools/revq.py, vq.UMBRAL2) en las etapas y uniones antes de empaquetarlas y en los modelos
 # sueltos (salvo los coches): con los conversores de ahora no tiene nada que hacer; con unos datos de antes del
 # 2026-11-12 basta borrar SEGS.PAK y UNIONES.PAK con las SEGnn.DAT enteras en datos/ y las uniones sueltas en trabajo/u0, u/.
