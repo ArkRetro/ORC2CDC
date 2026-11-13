@@ -36,6 +36,9 @@ if [ "${MODO_JUEGO:-0}" = 0 ]; then                                  # COAST 2 C
     fi
 fi
 tecla x; espera 6; foto ${P}_6                                       # coche
+if [ "${MODO_JUEGO:-0}" = 0 ] && [ -n "${C2C_RECORRE:-}" ]; then     # B: del coche al detalle de la mision y otra vez A
+    tecla c; espera 5; foto ${P}_6b; tecla x; espera 6; foto ${P}_6c
+fi
 tecla x; espera 5; foto ${P}_7                                       # cambio
 tecla x; espera 6; foto ${P}_8                                       # musica
 tecla x; espera 1; foto ${P}_carga                                   # la pantalla de carga (demo/pcarga.c)

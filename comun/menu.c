@@ -682,18 +682,21 @@ static void l_lista_hace(void)
 static void entra(int p, int atras)
 {
     int cab = cabecera(p);
+    /* al entrar en las pantallas de COAST 2 COAST y al salir de ellas, la VRAM del menu (y el coche 3D) fuera y lo
+       pendiente liberado ya, como antes del frontal de recreativa: sus escenas (hasta 492 KB) van en una VRAM sin
+       huecos y al salir no dejan huecos entre las pantallas que se vuelven a subir (antes: "out of PVR memory" al
+       subir el cambio y la musica tras el coche) */
+    if (p != P_C2C) c2_cierra();
+    if ((p == P_C2C) != (pant == P_C2C)) menu_libera_todo();
     cargando = !asegura(mascara(p)); t_carga = 0;
     barra_ant = pant >= 0 ? barra(pant) : -1;
     pant = p; fase = F_ENTRA; t = 0; entra_atras = atras; t_bloq = 0;
-    if (p != P_C2C) c2_cierra();                            /* (su RAM es del hueco de la union y su VRAM, propia) */
     if (cab < 0) a_cab.u = -1;
     else if (us[cab] != a_cab.u) { a_cab.u = us[cab]; an_tramo(&a_cab, "ENTRA"); }   /* cabecera nueva */
     GANCHO(p, 0, 0);
     switch (p) {
     case P_TITULO: fase = F_QUIETO; pon_pista(-1); break;
     case P_C2C: {
-        int q;
-        for (q = 0; q < NV; q++) if (!(mascara(P_C2C) & VB(q))) baja_p(q);   /* VRAM para las escenas del banco 0x44 */
         if (c2_abre()) { entra(P_MODO, 1); bloqueado(); return; }   /* (sin C2C.DAT o sin el hueco)  */
         c2_entra();
         break; }

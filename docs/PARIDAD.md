@@ -2190,6 +2190,12 @@ peticion 14 (escoltas 45B5B0, +324 = 6: carrera contra ellos), que no esta en la
     Con notas (`-DPRUEBA_NOTAS_C2C`: notas en las categorias 0..4 de la licencia nueva): rango A de Flagman 1 en
     POSICION MEDIA, Flagman 2 abierto y la foto 4 (la del mapa de Flagman 2), los 5 nodos abiertos con su nota (AAA, A,
     B, A, A), derecha al nodo 2 y su detalle con las dos carreras (la 2.a abierta por el 4 de la 1.a; A y AA).
+  - VRAM: al entrar en P_C2C y al salir, la VRAM del menu y el coche 3D fuera y lo pendiente liberado (como antes del
+    frontal de recreativa): sin ello las escenas del banco 0x44 quedaban repartidas por los huecos y, al salir, el
+    coche, el cambio y la musica no encontraban sitio seguido ("pvr_mem: ERROR -- out of PVR memory", revision 41).
+    Flycast (`MODO_JUEGO=0 C2C_RECORRE=1 nav.sh`, con B del coche al detalle y otra vez A): sin errores de pvr_mem;
+    VRAM libre en la pantalla de carga 1618 KB, la misma que por OUTRUN (`MODO_JUEGO=1`); en el coche 936 KB (578 KB
+    por OUTRUN, que guarda las pantallas del menu ya subidas).
   - RAM: las tablas de C2C.DAT (~60 KB) van en el final del hueco de la union prestado (`menu_hueco` = hueco_fsp de
     main, como el frontal de recreativa) solo mientras se ve P_C2C; su VRAM se suelta al salir (spr_cierra).
 - Carrera: variante 6 (menu_modo), el arbol 100 + i de CURSO.DAT (4965A0), los registros de 47CF40 (PS2 0x1ef900) con
