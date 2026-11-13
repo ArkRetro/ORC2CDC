@@ -190,6 +190,59 @@ def elige16(datos, w, h, fmt, umbral=UMBRAL2):
     return vq, n, err
 
 
+# Cielos (revision 44, docs/PARIDAD.md: Cielo, escalones del degradado). La textura del cielo del original es de 8
+# bits con paleta (p. ej. el azul alto de PALM: R 119..121, B 205..214 en pasos de 1) y en RGB565 el cielo casi liso
+# quedaba en zonas de un mismo valor con un salto de 8 entre ellas (R 119 -> 115, 121 -> 123): lineas en el cielo.
+# Aqui el k-means va sobre los texeles de 8 bits (como siempre) pero cada entrada del libro se cuantifica con un
+# tramado ordenado de 2x2 dentro de su bloque (Bayer: umbrales 1/8, 7/8, 5/8, 3/8 en el orden twiddled arriba-izquierda,
+# abajo-izquierda, arriba-derecha, abajo-derecha): la media del bloque guarda la entrada con 1/4 del paso del formato, y
+# los bloques se asignan por la entrada sin cuantificar. Mismos bytes (libro de 2 KB e indices) que la VQ de antes: la
+# memoria de video no cambia. En la pantalla el texel del cielo mide unos 2 px (PALM: 0,28 grados) y el filtro bilineal
+# deja la trama de 4 px casi lisa. Determinista (sin tope de tiempo).
+TRAMA2 = np.array([0.125, 0.875, 0.625, 0.375])
+
+
+def _cuantifica_tramada(c, fmt):
+    """como _cuantifica para bloques (k, 4 texeles twiddled, RGBA en 0-255 float) con el tramado TRAMA2 en el color;
+    el alfa sin tramar. Devuelve (k, 4) palabras de 16 bits"""
+    t = TRAMA2[None, :]
+    def q(x, m): return np.clip(np.floor(x * m / 255.0 + t), 0, m).astype(np.uint32)
+    r, g, b, a = c[..., 0], c[..., 1], c[..., 2], np.clip(np.rint(c[..., 3]), 0, 255).astype(np.uint32)
+    if fmt == 1: v = (q(r, 31) << 11) | (q(g, 63) << 5) | q(b, 31)
+    elif fmt == 0: v = ((a >= 128).astype(np.uint32) << 15) | (q(r, 31) << 10) | (q(g, 31) << 5) | q(b, 31)
+    else: v = (((a * 15 + 127) // 255) << 12) | (q(r, 15) << 8) | (q(g, 15) << 4) | q(b, 15)
+    return v.astype(np.uint16)
+
+
+def codifica_tramada(a, fmt, n=256):
+    """VQ del cielo (ver arriba): RGBA (alto x ancho x 4, uint8) -> (datos: libro de n entradas + indices, error RMS en
+    0-255 de la media de cada bloque decodificado frente a la de la imagen de 8 bits)"""
+    P = _twiddled(a); canales = 3 if fmt == 1 else 4
+    pes = np.tile(np.sqrt(PESO[:canales]), 4)
+    V = P.reshape(-1, 4, 4)[:, :, :canales].reshape(-1, 4 * canales)
+    U, inv, cnt = np.unique(V, axis=0, return_inverse=True, return_counts=True)
+    C = kmeans(U * pes, cnt.astype(float), min(n, len(U)), tiempo=1e9) / pes
+    idx, _ = _asigna(U * pes, C * pes); idx = idx[inv.ravel()]
+    C4 = np.zeros((len(C), 4, 4)); C4[..., 3] = 255; C4[:, :, :canales] = C.reshape(-1, 4, canales)
+    pal = _cuantifica_tramada(C4, fmt)
+    libro = np.zeros((n, 4), np.uint16); libro[:len(C)] = pal
+    datos = libro.tobytes() + (idx + 256 - n).astype(np.uint8).tobytes()
+    rec = decodifica(datos, a.shape[1], a.shape[0], fmt, n).astype(float)
+    h, w = a.shape[:2]
+    m = lambda x: x.reshape(h // 2, 2, w // 2, 2, 4)[..., :canales].mean((1, 3))
+    return datos, float(np.sqrt(((m(rec) - m(a.astype(float))) ** 2).mean()))
+
+
+def elige_cielo(a, fmt):
+    """VQ tramada de una textura del cielo: (datos, n, error) o None si es pequena (menos de 32x32 o de lado < 8: va en
+    16 bits tramados, modelo.codifica16_tramada). Siempre se acepta (el error es el de la media de cada bloque)"""
+    h, w = a.shape[:2]; bloques = w * h // 4
+    if w * h < 32 * 32 or min(w, h) < 8: return None
+    n = 256 if bloques >= 1024 else max(16, (bloques // 4 + 3) & ~3)
+    datos, err = codifica_tramada(a, fmt, n)
+    return datos, n, err
+
+
 def compara(a, datos, fmt, ruta):
     """PNG con la textura sin comprimir (izquierda) y en VQ (derecha)"""
     from PIL import Image

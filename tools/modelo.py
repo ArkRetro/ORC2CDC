@@ -47,6 +47,19 @@ def codifica16(a, fmt, umbral=128):
     out = np.zeros(w * h, np.uint16); out[twiddle(w, h).ravel()] = v.ravel()
     return out.tobytes()
 
+BAYER4 = np.array([[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]]) / 16.0 + 1 / 32.0
+
+def codifica16_tramada(a, fmt):
+    """como codifica16 con un tramado ordenado de 4x4 en el color (los cielos pequenos sin VQ: vq.elige_cielo)"""
+    h, w = a.shape[:2]; t = BAYER4[np.arange(h)[:, None] % 4, np.arange(w)[None, :] % 4]
+    def q(x, m): return np.clip(np.floor(a[..., x].astype(float) * m / 255.0 + t), 0, m).astype(np.uint32)
+    al = a[..., 3].astype(np.uint32)
+    if fmt == 1: v = (q(0, 31) << 11) | (q(1, 63) << 5) | q(2, 31)
+    elif fmt == 0: v = ((al >= 128).astype(np.uint32) << 15) | (q(0, 31) << 10) | (q(1, 31) << 5) | q(2, 31)
+    else: v = (((al * 15 + 127) // 255) << 12) | (q(0, 15) << 8) | (q(1, 15) << 4) | q(2, 15)
+    out = np.zeros(w * h, np.uint16); out[twiddle(w, h).ravel()] = v.ravel()
+    return out.tobytes()
+
 def textura_dc(a):
     """RGBA -> (formato, lista, datos twiddled de 16 bits). Lista 0 opaca, 1 recorte (alfa de 1 bit), 2 transparente.
     Por el contenido de la textura; las mallas de las etapas y uniones deciden la lista por el estado del GS
@@ -57,6 +70,11 @@ def textura_dc(a):
     elif ((al < 16) | (al >= 240)).mean() > 0.97: lista, fmt = 1, 0   # ARGB1555
     else: lista, fmt = 2, 2                                      # ARGB4444
     return fmt, lista, codifica16(a, fmt)
+
+def cielos(mallas):
+    """texturas del cielo (las de las mallas de la lista 3 con el grupo del cielo en el campo del nodo: -256 el que se
+    ve siempre, -257 el del fundido; conv_tramo.pon_cielo): van con tramado (vq.elige_cielo)"""
+    return {x[1] for x in mallas if x[0] == 3 and x[1] >= 0 and x[-1] in (-256, -257)}
 
 def vq_umbral2():
     """umbral de la segunda pasada de la VQ (vq.UMBRAL2); VQ2=0 en el entorno la quita (los datos de antes)"""
@@ -422,8 +440,17 @@ class Modelo:
         import vq
         usadas = {x[1] for x in self.mallas if x[1] >= 0}; blob = b''; texs = []; t0 = time.time(); antes = ahora = 0
         dpng = os.environ.get("VQ_PNG"); errs = []
+        cielo = cielos(self.mallas)
         for ti, (w, h, fmt, li, off, tam) in enumerate(self.texs):
             d = self.blob[off:off + tam]
+            if ti in usadas and ti in cielo and ti < len(self.rgba) and not fmt & 0x200:
+                # el cielo: VQ (o 16 bits) con tramado, desde los 8 bits del original (vq.elige_cielo)
+                antes += tam; r = vq.elige_cielo(self.rgba[ti], fmt & 0xff)
+                if r is not None: d, n, err = r; fmt = fmt | 0x100 | (n - 1) << 16
+                else: d = codifica16_tramada(self.rgba[ti], fmt & 0xff)
+                ahora += len(d); d += b'\0' * (-len(d) % 32)
+                texs.append((w, h, fmt, li, len(blob), len(d))); blob += d
+                continue
             if ti in usadas:
                 antes += tam
                 r = None

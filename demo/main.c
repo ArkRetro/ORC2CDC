@@ -105,6 +105,9 @@ typedef struct {
                                                                      el original (VISO.DAT, pvs_paso) o NULL */
     uint32_t *vis;                                                /* nodos visibles en el cuadro (bits; nodos_visibles) */
     uint32_t *vis_ant;                                            /* los que se dibujaron en el anterior (detras de vis) */
+    uint16_t *grp;                                                /* grupos de nodos (tools/grupos_nodos.py: bits 16-31 de
+                                                                     fl = jefe + 1): clases del grupo en el cuadro, en el
+                                                                     sitio del jefe (nodos_visibles); NULL sin grupos */
     /* fundido de entrada (fe_paso; NULL sin el): por nodo lo que le queda (255 recien aparecido .. 0 entero) y tres
        mascaras de bits (fe_p: el nodo estaba en el cuadro anterior, dibujado o fuera de la vista; fe_f: fuera de la
        vista en este cuadro; fe_m: fe_v no es 0); fe_hist: el modelo ya ha pasado por un cuadro */
@@ -222,8 +225,14 @@ static int lee_modelo_en(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t
             uint32_t n = m->mallas[i].n > 256 ? 256 : m->mallas[i].n;
             m->nodos[m->mallas[i].nodo].relleno[0] += ta_teo(n, 0); m->nodos[m->mallas[i].nodo].relleno[1] += n << 12;
         }
-    m->vis = m->nnodos ? calloc((m->nnodos + 31) / 32 * 2, 4) : NULL; m->ruta_i = 0;   /* vis y vis_ant */
-    m->vis_ant = m->vis ? m->vis + (m->nnodos + 31) / 32 : NULL;
+    {   /* grupos de nodos (tools/grupos_nodos.py; no en los objetos de las uniones: relleno_propio, sus bits 16-31 son
+           otra cosa): 2 bytes por nodo detras de vis y vis_ant */
+        uint32_t g = 0;
+        for (i = 0; i < m->nnodos && !m->relleno_propio && !g; i++) g = m->nodos[i].fl >> 16;
+        m->vis = m->nnodos ? calloc((m->nnodos + 31) / 32 * 2 + (g ? (m->nnodos + 1) / 2 : 0), 4) : NULL; m->ruta_i = 0;   /* vis y vis_ant */
+        m->vis_ant = m->vis ? m->vis + (m->nnodos + 31) / 32 : NULL;
+        m->grp = m->vis && g ? (uint16_t *)(m->vis_ant + (m->nnodos + 31) / 32) : NULL;
+    }
     m->fe_v = NULL; m->fe_p = m->fe_f = m->fe_m = NULL; m->fe_hist = m->fe_n = 0;
 #ifdef CON_FUNDIDO_ENTRADA
     if (m->vis && !m->relleno_propio) {                           /* (un bloque: las tres mascaras y los bytes) */
@@ -814,7 +823,10 @@ static uint32_t vtx_et, vtx_et_ult;                      /* los de la etapa */
 #define TA_MARGEN (64 * 1024)                            /* cabeceras vacias de fin de lista y prudencia */
 #define TA_RESERVA_2D (64 * 1024)                        /* minimo para lo 2D (medido: unos 450 vertices) */
 #define TA_BPV_MIN 56                                    /* bytes por vertice 2D (1,3 x 42,5 medidos en la consola) */
+#ifndef TA_F_MIN                                         /* (prueba en Flycast: -DTA_F_MIN=n simula una consola que
+                                                            gasta mas; Flycast no llena el TA ni sube ta_f solo) */
 #define TA_F_MIN 448                                     /* coste 3D = ta_teo x ta_f / 256 (1,75: ver arriba) */
+#endif
 /* tope de vertices de la etapa por cuadro (tiempo de CPU: transformar y enviar) y distancia de dibujo minima del
    recorte de seguridad por CPU: la distancia es la del original (LEJOS_PS2) y solo se acorta (50 m cada 30 cuadros)
    si la CPU pasa de CPU_MS_CORTA ms por cuadro, y vuelve a crecer por debajo de CPU_MS_ALARGA. Antes 15 / 11,5 ms (60
@@ -6383,6 +6395,7 @@ static void nodos_visibles(modelo_t *mo)
        mismas cuentas) */
     float o0, o1, o2, e0, e1, e2, d0, d1, d2, a0, a1, a2, cer, lej; int pvs_on_; nodo_t *ND = mo->nodos;
     uint32_t *VIS = mo->vis; const uint32_t *VA = mo->vis_ant; const uint32_t nnod = mo->nnodos; (void)VA; const int regs = mo == &uni ? uni_mascara : 7;
+    uint16_t *G = mo->relleno_propio ? NULL : mo->grp;          /* grupos de nodos (abajo) */
 #ifdef CON_FUNDIDO_ENTRADA
     uint32_t *FF = mo->fe_f;                                    /* fuera de la vista (fe_paso) */
 #else
@@ -6391,6 +6404,7 @@ static void nodos_visibles(modelo_t *mo)
     if (!mo->vis) return;
     memcpy(mo->vis_ant, mo->vis, (mo->nnodos + 31) / 32 * 4);  /* lo dibujado en el cuadro anterior (REPARTO_HIST_*) */
     memset(mo->vis, 0, (mo->nnodos + 31) / 32 * 4);
+    if (G) memset(G, 0xFF, mo->nnodos * 2);                     /* sin clase (255, 255): mayor que todas */
     if (FF) memset(FF, 0, (mo->nnodos + 31) / 32 * 4);
 #ifdef DIAG_POPPING
     {   pop_slot_t *ps = pop_slot(mo);
@@ -6417,7 +6431,7 @@ static void nodos_visibles(modelo_t *mo)
         shz_xmtrx_load_rows_4x4(&r0, &r1, &r2, &r3); }
 #endif
     for (j = 0; j < n; j++) {
-        uint32_t i = L ? L[j] : j, rama, u, c_teo, c_v; nodo_t *d; float dx, dy, dz, zv, xv, yv, lim; int cp, cd;
+        uint32_t i = L ? L[j] : j, rama, u, c_teo, c_v, g; nodo_t *d; float dx, dy, dz, zv, xv, yv, lim; int cp, cd;
         if (i >= nnod) continue;
         d = ND + i;
         dx = d->cx - o0; dy = d->cy - o1; dz = d->cz - o2;
@@ -6466,11 +6480,36 @@ static void nodos_visibles(modelo_t *mo)
         }
 #endif
         d->relleno[1] = (d->relleno[1] & ~4095u) | (uint32_t)(cd << 6 | cp);
+        if (G && (g = d->fl >> 16) && g <= nnod) {               /* de un grupo: la clase mas baja de los suyos visibles */
+            uint32_t o = G[g - 1], od = o >> 8, op = o & 255;
+            G[g - 1] = (uint16_t)(((uint32_t)cd < od ? (uint32_t)cd : od) << 8 | ((uint32_t)cp < op ? (uint32_t)cp : op));
+            continue;                                           /* (su coste, abajo) */
+        }
         prio_coste[cd][cp] += c_teo; prio_vtx[cd][cp] += c_v;
     }
 #ifdef SHZ_NODOS
     shz_xmtrx_load_4x4(&nv_xm);
 #endif
+    /* Grupos (DECISION DEL PORT, revision 44; docs/PARIDAD.md, Edificios sin base): los nodos de un mismo objeto
+       (tools/grupos_nodos.py: apilados en planta, como la base y la torre de un edificio) llevan todos la clase de
+       distancia y la de LOD mas bajas de los del grupo que se ven en este cuadro, y su coste va en esa clase: el reparto
+       (nodos_quita) los deja o los quita a la vez. Antes, en la consola real (el TA lleno), la base se quitaba y la parte
+       de arriba no: trozos de torre flotando */
+    if (G) {
+        uint32_t w;
+        for (w = 0; w < (nnod + 31) / 32; w++) {
+            uint32_t b = VIS[w];
+            while (b) {
+                uint32_t i = w * 32 + (uint32_t)__builtin_ctz(b), g, o; nodo_t *d = ND + i;
+                b &= b - 1;
+                if (!(g = d->fl >> 16) || g > nnod) continue;
+                o = G[g - 1];
+                d->relleno[1] = (d->relleno[1] & ~4095u) | ((o >> 8) << 6 | (o & 255));
+                if (pvs_on_) { prio_coste[o >> 8][o & 255] += mo->pvs_teo[2 * i]; prio_vtx[o >> 8][o & 255] += mo->pvs_teo[2 * i + 1]; }
+                else { prio_coste[o >> 8][o & 255] += d->relleno[0]; prio_vtx[o >> 8][o & 255] += d->relleno[1] >> 12; }
+            }
+        }
+    }
 }
 /* quita de mo->vis los nodos de las clases que no caben */
 static void nodos_quita(modelo_t *mo)
@@ -7172,6 +7211,55 @@ static void geo_vista_fin(const modelo_t *t)
    un color del agua (el plano no pone color y el reflejo es una imagen): AGUA_COLOR es el del mar de BEAC con el
    reflejo de la demo 35, el que el usuario dio por bueno. */
 #define AGUA_COLOR 0xFF4064A3u
+/* Recorte del agua contra la piramide entera de la vista (revision 44; foto de INFARTO en BEAC de OUTRUN2SP: "un suelo
+   azul con un triangulo enorme"). El plano del agua de BEAC es una cuadricula de triangulos de 550 m bajo toda la ciudad
+   a y = -51,1 (la calzada, a -50: 1,1 m por encima); con la camara a 2-3 m del plano, los vertices que solo recortaba el
+   plano cercano caian a cientos de miles de pixeles de la pantalla, y la PowerVR real calcula por triangulo los planos
+   de 1/w desde los vertices (como el cielo: docs/PARIDAD.md, Revision 44): la z del agua salia mal (el agua por encima
+   de la calzada y del terreno) y triangulos enteros se perdian (se veia el cielo de debajo). Ahora cada triangulo se
+   recorta contra el plano cercano y los cuatro lados de la pantalla con AGUA_MARGEN px de margen: los vertices que llegan
+   a la PowerVR estan como mucho a ese margen de la pantalla. Flycast (la GPU del PC, en coma flotante) no lo mostraba */
+#define AGUA_MARGEN 32.0f
+static int agua_corta(pt_t *o, const pt_t *e, int n, float a, float b, float c, float d)   /* a x + b y + c w + d >= 0 */
+{
+    int i, m = 0;
+    for (i = 0; i < n; i++) {
+        const pt_t *p = e + i, *q = e + (i + 1) % n;
+        float dp = a * p->x + b * p->y + c * p->w + d, dq = a * q->x + b * q->y + c * q->w + d;
+        if (dp >= 0) o[m++] = *p;
+        if ((dp >= 0) != (dq >= 0)) {
+            float t = dp / (dp - dq);
+            o[m] = *p; o[m].x = p->x + t * (q->x - p->x); o[m].y = p->y + t * (q->y - p->y); o[m].w = p->w + t * (q->w - p->w);
+            o[m].u = p->u + t * (q->u - p->u); o[m].v = p->v + t * (q->v - p->v); m++;
+        }
+    }
+    return m;
+}
+static void agua_tri(const pt_t *p)
+{
+    pt_t a[9], b[9], o[9]; int n, i; const float g = AGUA_MARGEN;
+    if ((n = agua_corta(a, p, 3, 0, 0, 1, -cerca)) < 3) return;          /* w >= cerca */
+    if ((n = agua_corta(b, a, n, 1, 0, g, 0)) < 3) return;              /* x >= -g (x, y: pixeles por w) */
+    if ((n = agua_corta(a, b, n, -1, 0, 640.0f + g, 0)) < 3) return;    /* x <= 640 + g */
+    if ((n = agua_corta(b, a, n, 0, 1, g, 0)) < 3) return;              /* y >= -g */
+    if ((n = agua_corta(a, b, n, 0, -1, 480.0f + g, 0)) < 3) return;    /* y <= 480 + g */
+    if (!ta_cabe(n)) return;
+    for (i = 0; i < n; i++) o[i] = a[i & 1 ? (i + 1) / 2 : (n - i / 2) % n];   /* abanico como tira */
+    envia_tira(o, n); tri_enviados += n - 2;
+}
+static void agua_malla(const modelo_t *mo, const malla_t *m)
+{
+    const vert_t *v = mo->verts + m->v0; uint32_t i, n = m->n > 256 ? 256 : m->n;
+    for (i = 0; i < n; i++) {
+        float x = v[i].x, y = v[i].y, z = v[i].z, w;
+        mat_trans_single3_nodivw(x, y, z, w);
+        pw[i].x = x; pw[i].y = y; pw[i].w = w; pw[i].u = v[i].u; pw[i].v = v[i].v; pw[i].c = AGUA_COLOR; pw[i].o = 0;
+    }
+    for (i = 0; i + 2 < n; i++) {
+        if (pw[i].w < cerca && pw[i + 1].w < cerca && pw[i + 2].w < cerca) continue;
+        agua_tri(pw + i);
+    }
+}
 static void agua_dibuja(void)
 {
     int nodo, pos, u, k; const modelo_t *mo = NULL; const etapa_t *e;
@@ -7188,7 +7276,7 @@ static void agua_dibuja(void)
     pvr_prim(&cab_col[0][0], sizeof(pvr_poly_hdr_t));          /* (sin textura, con la niebla de la tabla) */
     for (k = mo->inicio[3]; k < mo->inicio[4]; k++) {
         const malla_t *m = mo->mallas + k;
-        if (m->n >= 3 && m->nodo == AGUA_NODO) dibuja_malla(mo, m);
+        if (m->n >= 3 && m->nodo == AGUA_NODO) agua_malla(mo, m);
     }
     color_fijo = 0; geo_vista_fin(mo);
 }

@@ -35,7 +35,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ps2.assets import Assets, hash_nombre
 from ps2 import stage
-import modelo, conv_tramo, pvs
+import modelo, conv_tramo, pvs, grupos_nodos
 from conv_tramo import NPERF, NCARRIL, NEXT, NBANDA
 
 DESC = 0xb0                                         # tamano de un descriptor (tramo o union)
@@ -502,6 +502,7 @@ def curso(A, dsal, con_tramos=True, solo_curso=False):
         if hi < 0: vq.UMBRAL = max(umbral, UMBRAL_META)
         try: mod.escribe(f)
         finally: vq.UMBRAL = umbral
+        grupos_nodos.aplica(f)                                 # grupos de nodos para el reparto del TA (revision 44)
         # visibilidad precalculada (tools/pvs.py): en la bifurcacion el ojo tambien va por la rama derecha (BKD.DAT)
         pvs.anade(f, [rd] if hi >= 0 else [])
         print('triangulos de las tiras del VU1: %d, sin dibujar por la bandera ADC: %d' % (mod.tri_total, mod.tri_adc))

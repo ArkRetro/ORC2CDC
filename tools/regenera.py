@@ -184,6 +184,14 @@ def interno(a):
         ts = {r[1] for r in U.arbol(A, 0)} | {r[1] for r in U.arbol(A, 0, 'csc_data_cvt.bin')}
         for i in range(94): ts |= {r[1] for r in U.arbol_mision(A, i)}
         for ti in sorted(ts): print('%d:%d' % (ti, U.segmento_de(A, U.cadena(E, U.u32(E, base + 4 * ti) + 0x0c))))
+    elif a[0] == 'grupos':                               # grupos <datos/> [trabajo/]: los grupos de nodos (revision 44)
+        import grupos_nodos                              # en una carpeta de datos ya hecha (las conversiones de ahora ya
+        W = a[2] if len(a) > 2 else os.path.join(a[1], '..', 'trabajo_grupos')   # los ponen: conv_tramo / conv_union)
+        os.makedirs(W, exist_ok=True); grupos_nodos.datos(a[1], W)
+    elif a[0] == 'cielo':                                # cielo <iso> <datos/> [trabajo/]: cielos tramados (revision 44)
+        import cielo_tramado, grupos_nodos               # en una carpeta de datos ya hecha (modelo.py de ahora ya lo hace)
+        W = a[3] if len(a) > 3 else os.path.join(a[2], '..', 'trabajo_cielo'); os.makedirs(W, exist_ok=True)
+        grupos_nodos.datos(a[2], W, lambda b: cielo_tramado.aplica_bytes(b, a[1])[0])
     elif a[0] == 'revq':                                 # revq <patron>...: tools/revq.py con los ficheros de los patrones
         import revq
         sys.argv = ['revq.py'] + sorted(f for p in a[1:] for f in glob.glob(p)); revq.main()
