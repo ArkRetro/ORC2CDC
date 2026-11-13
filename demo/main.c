@@ -3012,9 +3012,20 @@ static void traf_choques(void)
    - pequeno = min(min(sum, 0,5), 0,75) x escala; grande: si aun se sostiene (+0xC > 0, se descuenta) solo lo cambia uno
      mayor; si no, min(sum, 0,75) x escala y +0xC = min(cuadros, 25); por debajo de 0,001 m/cuadro, o 600 cuadros por
      debajo de 0,01, los dos a 0.
-   PENDIENTE: lo de la superficie de las ruedas (0x1d0138 por +24C..+258 con las intensidades por material, el borde
-   +264/+268, el rebote del muro +8 0x100 y las banderas +8 0x40/0x80/0x2000), que necesita los materiales del original
-   por rueda. La escala: la opcion de CONFIGURACION (0..10, 0x588668 + 0xCC) no esta en la demo: 10 (SUPUESTO).
+   - antes de todo eso (0x1d04e4, con el coche moviendose): la superficie (2026-11-13). f = la mayor intensidad de las
+     cuatro ruedas (0x1d0138 por la clase de la COLI de cada una, +24C..+258: 1 -> 0; 2 (asfalto) 0,25 en la union y
+     si no por el descriptor de la etapa (tabla 0x409b20 por z - 11: METR 0,73, CAPE 0,79, IMPE 0,76 y las 41, 43 y 44
+     igual, con la marca de adoquin; las demas 0,25); 4 (hierba) 0,7; 8 (arena) y 0x80 0,85; 0x10 (grava) 0,9; 0x100
+     0,45; 0x200, 0x800, 0x1000 y 0x2000 0,35; 0x400 0,3; 0x8000 0,4; 0x100000 0,71; 0x200000 0,8; 0x400000 0,25 en
+     la union, LASV (0x12) y 0x30 y si no 0,9; 0x800000 0,5; otra 0,31); pequeno = f x v x 0,1; con f > 0,3 y el coche a
+     menos de 0,1 m del borde izquierdo (+268) o del derecho (+264), pequeno + v x min(0,1 - borde, 2) x 0,01, grande =
+     pequeno x 3, 10 cuadros; si no, con f > 0,7: con la marca de adoquin (v > 0,95) grande = v (f - 0,7) 0,75, 2 cuadros
+     y pequeno x (f - 0,7) 5; sin ella grande = v f 0,3, 10 cuadros, pequeno x 0,75 (y se acaba aqui). Si no (o tras el
+     adoquin): derrapando (|+D34| > 2000) grande + d 1,5 y pequeno + 2 d (d = (|+D34| - 2000) / 100000, 2 cuadros);
+     si no, con el humo de las ruedas en el cuadro (car+0 bit 59 de 0x10a0d8) y v x 0,1 > 0,1 los dos + v x 0,1 (2
+     cuadros); si no el pequeno a 0. PENDIENTE: +D34 (media de 21 cuadros de +C2C + +162, set_old_param_buffer
+     4A2EE0; +C2C no esta en la fisica de la demo: aqui sin ese termino) y las banderas +8 0x40 / 0x100 (salto y rebote
+     del muro, 0 en la demo como hasta ahora). La escala: la opcion de CONFIGURACION (0..10, 0x588668 + 0xCC) no esta en la demo: 10 (SUPUESTO).
    Dreamcast: un solo motor (Puru Puru, MAPLE_FUNC_PURUPURU en el puerto del mando): intensidad = el motor grande en 7
    escalones (1..7) o 1 si solo va el pequeno; se manda solo al cambiar, continua (cont) a VIB_FREC (SUPUESTO). */
 #define VIB_ESCALA 1.0f
@@ -3031,12 +3042,64 @@ static void vib_motores(float grande, float peque)             /* 0x1023a0 */
     vib.vivo = g ? 1 + (g * 6) / 255 : ((int)(peque * 24.0f) & 0xff) ? 1 : 0;   /* nivel del Puru Puru (0..7) */
     if (!vib.vivo) vib.vivo = -1;                               /* -1: control hecho, motor parado */
 }
+static int humo_ban;                                            /* car+0 bit 59: humo de las ruedas (0x10a0d8) */
+static float vib_izq = 100.0f, vib_der = 100.0f;                /* +268 y -+264: hasta los bordes (> 0 dentro) */
+static int part_z(int *en_union, int *pos);
+static float vib_superficie(uint32_t f, int *adoquin)          /* 0x1d0138 */
+{
+    int u, pos, z;
+    switch (f) {
+    case 1: return 0.0f;
+    case 2:
+        z = part_z(&u, &pos);
+        if (u) return 0.25f;
+        if (z == 11 || z == 41) { *adoquin = 1; return 0.730000019f; }   /* tabla 0x409b20 (z - 11) */
+        if (z == 13 || z == 43) { *adoquin = 1; return 0.790000021f; }
+        if (z == 14 || z == 44) { *adoquin = 1; return 0.759999990f; }
+        return 0.25f;
+    case 4: return 0.699999988f;
+    case 8: case 0x80: return 0.850000024f;
+    case 0x10: return 0.899999976f;
+    case 0x100: return 0.449999988f;
+    case 0x200: case 0x800: case 0x1000: case 0x2000: return 0.349999994f;
+    case 0x400: return 0.300000012f;
+    case 0x8000: return 0.400000006f;
+    case 0x100000: return 0.709999979f;
+    case 0x200000: return 0.800000012f;
+    case 0x400000: z = part_z(&u, &pos); return u || z == 0x12 || z == 0x30 ? 0.25f : 0.899999976f;
+    case 0x800000: return 0.5f;
+    default: return 0.310000002f;
+    }
+}
 static void vib_paso(int marcha, int freno, float h2dc, int muro)
 {
     float v = sqrtf(fis.vx * fis.vx + fis.vy * fis.vy) * 0.0166112948f;   /* +1C4 */
     float f23 = vib_v[0] - vib_v[1], f25 = fabsf(f23);         /* +1D0: lo que cambio en el cuadro anterior */
     float f21 = 0.0f, f22 = 0.0f, f24, f1;
     unsigned s2 = 0;
+    if (v > 0.0f) {                                             /* 0x1d04e4: la superficie */
+        int adoquin = 0, k; float f = vib_superficie(sup_rueda[0], &adoquin), x;
+        for (k = 1; k < 4; k++) { x = vib_superficie(sup_rueda[k], &adoquin); if (f < x) f = x; }
+        f22 = f * v * 0.100000001f;
+        if (vib_izq < 0.100000001f && f > 0.300000012f) {      /* +268 < 0,1 */
+            x = -vib_izq + 0.100000001f; if (x > 2.0f) x = 2.0f;
+            f22 += v * x * 0.00999999978f; s2 = 10; f21 = f22 * 3.0f;
+        } else if (-vib_der > -0.100000001f && f > 0.300000012f) {   /* +264 > -0,1 */
+            x = -vib_der + 0.100000001f; if (x > 2.0f) x = 2.0f;
+            f22 += v * x * 0.00999999978f; s2 = 10; f21 = f22 * 3.0f;
+        } else if (f > 0.699999988f && !adoquin) { s2 = 10; f21 = v * f * 0.300000012f; f22 *= 0.75f; }
+        else {
+            if (f > 0.699999988f) {                             /* adoquin */
+                float d = f - 0.699999988f;
+                if (v > 0.949999988f) { s2 = 2; f21 = v * d * 0.75f; }
+                f22 *= d * 5.0f;
+            }
+            if (humo_ban) {                                     /* (sin el termino de +D34: PENDIENTE) */
+                x = v * 0.100000001f;
+                if (x > 0.100000001f) { f21 += x; s2 = 2; f22 += x; }
+            } else f22 = 0.0f;
+        }
+    }
     int toca = vib_toca, toca_ant = vib_toca_ant, muro_ant = vib_muro_ant;
     float h1dc = vib_h[0], e0 = vib_h[0] - vib_h[1], e4 = vib_h[1] - vib_h[2];   /* +1DC, +1E0, +1E4 */
     vib_toca_ant = toca; vib_toca = 0; vib_muro_ant = muro;
@@ -4068,6 +4131,7 @@ static void coche_paso(coche_t *c, float giro, float gas, float freno, float dt)
         e.stick = giro; e.acelerador = gas; e.freno = freno; e.mu = 1.0f; e.en_suelo = 1;
         e.rumbo_carretera = th0; e.rumbo_adelante = th0 + dif_ang(atan2f(dx, -dz) - th0);
         e.dist_izq = iz + c->x; e.dist_der = de - c->x;
+        vib_izq = e.dist_izq; vib_der = e.dist_der;             /* +268 / -+264 (vib_paso) */
         e.manual = manual_ && !auto_piloto; e.cambio_pide = pide_cambio; pide_cambio = 0;
         e.nivel = mando.nivel;
         if (mando.usa) {                                        /* el mando como el original (zona muerta, filtro) */
@@ -4272,7 +4336,10 @@ static void piloto(const coche_t *c, float *giro, float *gas, float *freno)
         if (piloto_rama(c->s)) xc = PRUEBA_RAMA ? 9.0f : -9.0f;   /* prueba: hacia el lado de esa rama */
 #endif
 #ifdef PRUEBA_ARENA
-        xc = PRUEBA_ARENA;                                      /* prueba: por ese desvio (la arena, la hierba) */
+#ifndef PRUEBA_ARENA_S
+#define PRUEBA_ARENA_S 0
+#endif
+        if (c->s >= PRUEBA_ARENA_S) xc = PRUEBA_ARENA;          /* prueba: por ese desvio (la arena, la hierba) desde ese s */
 #endif
     }
     ad = fmaxf(-0.25f, fminf(0.25f, 0.06f * (xc - c->x)));
@@ -4799,9 +4866,10 @@ static void humo_pide(const coche_t *c, const float *vc)       /* 0x10a0d8 */
         if (pon) { humo_m1 |= 1u << n; humo_m2 = humo_m1; }
         t->clase = clase;
     }
+    humo_ban = 0;
     for (n = 0; n < 4; n++) {
         if (neum[n].suelo > 0.707106769f) humo_m2 &= ~(1u << n);
-        if (humo_m2 >> n & 1) humo_echa(c, neum + n, vc);
+        if (humo_m2 >> n & 1) { humo_echa(c, neum + n, vc); humo_ban = 1; }   /* car+0 bit 59 */
     }
     humo_m2 = 0;
 }

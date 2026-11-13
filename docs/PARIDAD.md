@@ -42,7 +42,7 @@ Estado: OK (conectado y verificado al nivel indicado), PARCIAL, PROVISIONAL (apr
 |---|---|---|---|---|---|---|
 | Aceleracion, motor, cambio auto/manual | tabla de parametros 0x2dbc30 (19 col.), par 162 f x 2 (automatico y manual, PAR2), freno 256 f; cambio PS2 0x18d530 | OK | or2_fisica.c clonado; columna por modelo MAP1 | ninguna conocida (`ACEL` = 1 por defecto; `-DACEL=1.35f` da la aceleracion de mas que se pidio antes, no es del juego) | — | H, E |
 | Direccion, derrape (inicio/mantenimiento/salida) | SlipAngleCtrl / RearGripCtrl / CorneringCtrl; temporizador 40 cuadros | OK | decompilacion + banco | ninguna conocida | trazas de entrada comparables con PS2 | H, E |
-| Adherencia por superficie | get_road_mu 500B30, running_resistance 502120, COLI0200 | OK | coli por rueda | ninguna conocida | — | H, E |
+| Adherencia por superficie | get_road_mu 500B30, running_resistance 502120, COLI0200 | OK | coli por rueda; medido en la arena de PALM (2026-11-13, ver Arena, grava y polvo) | ninguna conocida | — | H, E |
 | Choques coche-coche y muro, choque fuerte, grua | 4F9450/4F9000/4F8490/4F6FE0/4F76E0/4F7BF0/476040/473F30 (ver Choques entre coches), CarBodyWallColiCheck 504CE0 y cbw_coli_wall (la forma de la carroceria contra la COLI: ver Muros y suelo de la carroceria del original), 5038D0, PlWrecker | PARCIAL | CHQ1/POS1 de PARAM.DAT, CJM1/SEC1 de TRAFC.DAT, efectos de IGC.PAK en SFX.DAT | coche-coche: ver Choques entre coches (PROVISIONALES alli; golpeados: parpadeo y cierre del original); vibracion del mando de PS2 (0x1d0420) salvo la de la superficie; grua recoloca en el centro de la fila de poligonos de la carretera (CORREGIDO 2026-11-11: la ruta es ese centro, ver Muros y suelo de la carroceria del original; antes el carril del asfalto mas cercano); avance 10 posiciones x m_pos (CONFIRMADO, antes 25 m supuestos); angulo del choque fuerte por nivel de etapa (CORREGIDO 2026-11-11: 45 grados solo en la primera, 25 / 18 en las demas, PS2 0x1994c4: antes siempre 45 y el vuelco casi no salia); tramos de atrapamiento y de desvio 1 -> 5 por etapa HECHOS (2026-11-11, ver Choque fuerte contra el muro); sin el SE 0x43 de los estados 1 y 5 ni el SE por material (pc_collision_material_sound), sin el handicap +DB4; chispas del muro y de los coches hechas (ver Sombras y marcas) | — | H, E |
 | Camara de carrera | evento CAMERA 385: 4858D0, 484810, 483110, 4A1680 SetCarCamera, 485590/483CE0/4834A0/483600, 4832F0/484A40, 483C10/484BD0 (PS2 0x178500..0x17b540, 0x1817c0) | PARCIAL | demo/camara.c con las tablas CAM1 de PARAM.DAT (vistas 0x2ccd88, por vista y modelo 0x2cd3d8, por modelo 0x2d2838 del fichero SLES) | vista 1 sin interior (no se dibuja el coche); camara de salida (485250) con el ojo y la mira de la escena de la salida los 120 cuadros de START (ver Escena de la salida); sin vista 0x1D (780258 = 0) ni camara de fin (485830); la de la meta (4853D0) en demo/meta.c (ver Escena de la meta) | ver seccion Camara de carrera | E |
 | Trafico (clases, IA, reaccion) | 472090, 472450, 472A50, 47DC10, 4736D0, hit_476040; aparicion 479080 (PS2 0x1dcdd0): 478B90 (0x1dbba0), 4787E0 (0x1db6d0), 4EFB90 (0x1f3818), 4F0030 (0x1f1a88), 46CE30, 478430, 46CC10; cierre 477F60 | PARCIAL | TRAFC.DAT (TRC1, ACL1 y TAP1: tablas de aparicion, velocidad y puntos fijos por etapa); colores (tabla 0x36bc18, modelos 30..43) y materiales en TRAFn.DAT (TCX1) | camino "Lead" de 472450 portado (velocidad por clase y del jugador, ver Choques entre coches: velocidad del trafico de delante) salvo 472320 / 471F90; 478640/46CDA0 en la union simplificados; puntos fijos de coches de carreras sin coche; camiones 39/40/41/43 solo en OUTRUN2SP (en el juego de la consola sin coche; ver OUTRUN2SP: camiones) | ver Trafico: densidad del original | E |
@@ -470,7 +470,7 @@ estaba y se dice lo que falta). Estado: CORREGIDO, SE QUEDA (ya era del original
 | Aviso de bifurcacion a 450 m de la separacion | 4BB890 (PS2 0x1c50c0, desde NAVI_PUB 0x1bd534: variante 1, modo 16): 2B0000 "<- FACIL" con el avance car+0x102C entre 0,65 y 0,72 (nivel 0) / 0,70 y 0,75 (nivel 1), presets 0, 1 y 4 | — | CONFIRMADO | CORREGIDO (2026-11-11, ver Bifurcacion: el rotulo <- FACIL) |
 | Marcas de las ruedas: 4 ruedas, media anchura del neumatico (filas 40/41 de la tabla de parametros), 0,2 m entre tramos, alfa 0,5, +0,05 m, v = longitud x 0,5, anillos 256/64/64, texturas 0x570000..2 (EFECTOS.DAT), clase por la superficie (0xC02 asfalto, 0x8004 tierra/arena, 0x18 hierba) | tire_mark_req 41FB50 / 41FDD0 / 4862C0 del PC; SLES-53998 0x10dcd0 / 0x10df38 / 0x1198f0, tabla 0x344d90, constantes 0x32b390..98 | igual | CONFIRMADO | CORREGIDO (2026-11-08) |
 | Marcas en asfalto: las traseras mientras dura el derrape | el original usa la mascara 95AFA8 de PcTireSmokeReq 41C570 (deslizamiento +E0 y agarre +E4 de cada rueda contra 74FF5C) | — | PROVISIONAL (la fisica de la demo no da +E0) | SE QUEDA |
-| Humo del derrape (32, vida 1 s, tamano 0,6 + 2,6 t), ahora desde las ruedas traseras de la fisica; tope de 2 pantallas de area por cuadro (limite de la PowerVR, ver Escena de la salida) | PcTireSmoke 41C420 / 41C570 / 41CB30 / 41D1E0 / 41D330 (fuente 4: 512 particulas, textura 0x19 del PC = 0x2e de obj_course_obj_common en PS2) | — | PROVISIONAL | SE QUEDA (pendiente: portar 41C570..41D5C0 y polvo 41DE20..41F4B0; chispas hechas, ver Sombras y marcas) |
+| Humo y polvo de las ruedas del jugador (64, PcTireSmokeReq por superficie), grava y hierba (256 + 256) de race_particles; tope de 2 pantallas de area por cuadro para el humo (limite de la PowerVR, ver Escena de la salida) | PcTireSmoke 41C420 / 41C570 / 41CB30 / 41D1E0 / 41D330 = SLES-53998 0x109eb0 / 0x10a0d8 / 0x10a708 / 0x10af70 / 0x10b178; grava 41DE20.. = 0x10bd18..; hierba 41E360.. = 0x10c2a8.. (texturas 0x2a / 0x2b / 0x2d de obj_course_obj_common) | igual salvo la prueba del derrape en asfalto | CONFIRMADO (PROVISIONAL: la prueba de deslizamiento +E0 / agarre +E4, car+58 = 1, el estilo del humo de la meta) | CORREGIDO (2026-11-13, ver Arena, grava y polvo) |
 | Sonido: `ESCALA 3` de los efectos frente a la musica | balance 4279C0 (624238 / 624258) | — | PROVISIONAL (mezcla del AICA) | SE QUEDA |
 | Sonido del derrape: deslizamiento / 30 grados | 4260E0 PlaySkid: maximo del deslizamiento de las 4 ruedas (+60/+64.. del cuerpo) | — | PROVISIONAL | SE QUEDA |
 | Golpe: fuerza 0,4 + dv/25 y v/40, 20 cuadros entre golpes | 4264C0 PlayWall, 4F65D0 (una vez cada 60 cuadros) | — | PROVISIONAL | SE QUEDA |
@@ -579,9 +579,8 @@ Peticion del probador: efectos de sombras. Lo que hace el original y como va en 
   Verificado en Flycast (scratchpad chq/roce, chq/embiste, chq/vuelco1: `-DPRUEBA_AUTO -DPRUEBA_GUION -DPRUEBA_CHOQUE
   -DCHOQUE_ANG=.. -DCHOQUE_V=.. -DCHOQUE_GIRO=.. -DCHOQUE_CONG=.. -DDIAG_CHISPA`): muro de clase 0x20 y 0x10000 con
   chispas en la rueda del lado del muro, 0x4000 sin ellas; contra el autobus, en la esquina que entra.
-- PENDIENTE: humo, polvo, grava y hierba de race_particles (41C570.., 41DE20 grava,
-  41E360 hierba; texturas 0x2a grava, 0x2b hierba, 0x2e humo, 0x2f polvo de obj_course_obj_common en
-  SLES-53998); sombras de la escena sobre el coche y oscurecimiento en tuneles (bit 0x200 de 4A25F0); reflejos de la
+- Humo, polvo, grava y hierba de race_particles: HECHO (2026-11-13, ver Arena, grava y polvo; la textura del
+  humo y del polvo es la 0x2d: la 0x2f no la usan las particulas de las ruedas). PENDIENTE: sombras de la escena sobre el coche y oscurecimiento en tuneles (bit 0x200 de 4A25F0); reflejos de la
   carretera (capa 2: ver Suelos). \OBJ\obj_cs_shadow_pmt.sz (recurso 0x56) no esta en el disco de PS2 (ver Suelos).
 
 ## Suelos: estado del GS, mipmaps y capas (2026-11-09)
@@ -1083,8 +1082,9 @@ debajo de 0,001 m/cuadro, o 600 cuadros debajo de 0,01, todo a 0. Demo: vib_paso
 (cada cuadro dibujado). Dreamcast: un motor (Puru Puru en el puerto del mando, MAPLE_FUNC_PURUPURU): nivel 1..7 = el
 grande en 7 escalones, 1 si solo va el pequeno; se manda al cambiar, continuo, frecuencia 26 (SUPUESTO); a 0 si el
 control no corre 3 cuadros (pausa, menus). SUPUESTO: escala 1,0 (la opcion de CONFIGURACION no esta en la demo; su
-valor por defecto sin localizar). PENDIENTE: lo de la superficie (0x1d0138: intensidad por material de cada rueda
-+24C..+258, bordes +264/+268, rebote +8 0x100, banderas +8 0x40/0x80/0x2000).
+valor por defecto sin localizar). Lo de la superficie (0x1d0138: intensidad por material de cada rueda +24C..+258, bordes +264/+268):
+HECHO (2026-11-13, ver Arena, grava y polvo y el comentario de vib_paso); PENDIENTE el termino de +D34 y las banderas
++8 0x40/0x80/0x2000/0x100.
 
 Otras reacciones al choque: la camara (vistas de choque 0x1B/0x1C, la animacion +2D8.. del cuerpo) ya esta en
 demo/camara.c; no se ha encontrado una sacudida de camara propia del golpe al trafico (CalcVibrateMatrix 4A2D70 es la
@@ -3814,3 +3814,77 @@ Lo pendiente de arriba, con las fotos de la Dreamcast PAL (PALM en el modo OutRu
 - Datos regenerados en esta parte (en la carpeta de datos compartida): SEGS.PAK, UNIONES.PAK, UNIONESTA.PAK y los
   descriptores SEGnn.DAT / BKnn.DAT (532), SEG13.DAT y SEG46.DAT sueltas, con `tools/regenera.py --interno grupos` y
   `--interno cielo` sobre los de la revision 43 (PYTHONHASHSEED=0). VRAM y tamanos de las etapas iguales.
+
+## Arena, grava y polvo (2026-11-13)
+
+Peticion del usuario: "en la arena de Palm Beach deberia saltar grava y el coche frenarse cuando pase por zona de
+arena". Lo que hace el original (SLES-53998 y el PC) y como queda:
+
+- **Que es la arena de PALM en la COLI**. Medido en la colision de PALM (SEG00, COLI0200; poligonos secundarios por su
+  poligono de carretera mas cercano): el tipo 3 (clase 0x8) es la franja de arena entre las dos calzadas desde la
+  salida (desvio +11 m, posiciones 0..479) y trozos a los lados; el tipo 2 (0x4) los arcenes de las posiciones 357..590
+  (+-12,5..14 m); el tipo 7 (0x80) va de 16 a 22 m, detras de los muros (tipos 5 y 14). En BEAC el tipo 3 ocupa
+  1246 poligonos. La demo ya clasificaba bien cada rueda (sup_rueda = 1 << tipo del poligono de la COLI bajo la
+  rueda, en el orden del original: 0 del. izq.): no habia nada que corregir en la clasificacion.
+- **Frenado (get_road_mu 500B30 + running_resistance 502120)**. Sin el servicio de red (fuera de linea) GetRoadMu da
+  0 a la clase 1, 0,7 a 4, 8, 0x10 y 0x8000 y 1 a las demas (PC 5C403C / 62806C); SetRunningResistance resta en cada
+  rueda sobre 0x801C (tipos 2, 3, 4 y 15), o en las cuatro si el centro (+248) lo esta, |cos(deriva de la rueda)| x
+  0,175 x 0,0225 x kmh^2 kgf contra su velocidad (6AE4E4..6AE4F8: 0,0225; 0,2; 1; 0,9; 0,175; 0,175). La demo hace
+  las dos cosas igual (or2_mu_superficie, resistencia_tierra) y la fuerza entra en el cuerpo (+94 sin par). Medido en
+  Flycast (`tools/prueba/arena.sh`, -DPRUEBA_X=10.5f -DPRUEBA_ARENA=10.5f -DPRUEBA_V=200 -DPRUEBA_ARENA_GAS=1
+  -DDIAG_PARTICULAS=6: lanzado a 314 km/h y sin gas, por la arena y por el asfalto, x = 0): en la arena las cuatro
+  ruedas con clase 8, mu 0,70 y resistencia -11,9 kgf a 314 km/h por rueda (la formula da -11,8 por rueda... x 4 x
+  9,81 / 1290 kg = 11,8 m/s2); deceleracion sin gas en la arena / en el asfalto / diferencia / formula (m/s2): 286
+  km/h -14,3 / -5,7 / -8,7 / -9,8; 237 km/h -12,6 / -6,8 / -5,8 / -6,8; 176 km/h -10,5 / -7,5 / -3,1 / -3,7;
+  130 km/h -6,8 / -5,1 / -1,7 / -2,0. La diferencia es el 85-90 % de la resistencia de la formula (el resto: otra
+  marcha, la pendiente y el freno motor de cada recorrido). Con gas a fondo por la arena (sin soltar) el coche llega a
+  233 km/h en 290 m desde la salida donde en el asfalto pasa de 300. Coincide con el original: la arena frena
+  (hasta 1,5 g a 300 km/h sin gas). El tipo 7 de detras de los muros no frena (mu 1, sin resistencia), como el
+  original.
+- **Particulas (race_particles, PART_EFC)**: portadas grava, hierba y el humo / polvo del jugador (demo/main.c,
+  "particulas de race_particles"; las direcciones y constantes en los comentarios): grava = PC 41DE20 / 41DF00 /
+  41E190 / 41E230 = SLES-53998 0x10bd18 / 0x10bdd0 / 0x10c088 / 0x10c178; hierba = 41E360 / 41E440 / 41E780 / 41E820 =
+  0x10c2a8 / 0x10c360 / 0x10c670 / 0x10c758; humo = 41C420 / 41C570 / 41CB30 / 41D1E0 / 41D330 / 41D180 = 0x109eb0 /
+  0x10a0d8 / 0x10a708 / 0x10af70 / 0x10b178 / 0x10ad98; los registros de las ruedas de MakePlcarParam 41BD50 =
+  0x109830; el generador y el nacimiento 0x1086f8 / 0x108648 (los de las chispas). Constantes del PS2 0x32b17c..0x32b2d0
+  y 0x3bfe60..0x3bff2c (iguales a las del PC donde el PC las tiene; el PS2 tiene 64 humos, el PC 512, y como mucho 15
+  humos por rueda y cuadro). Texturas: grava 0x57002a, hierba 0x57002b, humo y polvo 0x57002d (las tres de 64x64 de
+  obj_course_obj_common; las cargan 0x10bd9c, 0x10c32c y 0x109f70). La 0x2f (una mancha de arena) NO es de las
+  particulas de las ruedas: la usa 0x1dedd8 (mision, modo 9) y la tabla 0x40a9b0.
+  - Que sale en cada superficie (por la clase de la COLI bajo cada rueda): grava con las traseras sobre los tipos 4 y
+    21 (0x200010); hierba con cualquier rueda sobre el tipo 2 (0x4); polvo (el humo con la tabla de colores de su
+    clase, 0x32b250) en el tipo 4 (clase 1, marron), en el tipo 3 (clase 2: 0x80ECDFCB, el polvo de arena; en BEAC
+    entre las posiciones 0xE7 y 0x176 solo en los cuadros impares), en el 25 (clase 4, blanco) y en el 23 (clase 5),
+    con la rueda movida mas de 0,15 m en el cuadro; en el asfalto de DESE y RUIN (descriptores 9 y 0xC) fuera de la
+    union, polvo de clase 3 en los cuadros impares; humo blanco en asfalto con el derrape. **En la arena de PALM (tipo
+    3) el original no echa grava: echa polvo de arena** (y marcas de la clase 2). La grava salta en los tipos 4 / 21
+    (p. ej. los arcenes de tierra de ALPI, SEG05 posiciones 309..459, y SEG20) y la hierba en los arcenes de hierba.
+  - Dibujo: grava y hierba como 418CF0 (cuadrados de cara a la pantalla de medio lado 0,05 / 0,075 m x proyeccion,
+    trozo de 1/4 x 1/4 de la textura al azar, color de su fuente); el humo como 419DC0 (carteles de medio lado
+    tamano x 0,5 con los cuatro colores en las esquinas y u = 1 a la izquierda). En la lista translucida con niebla y
+    sin escribir z. TA: grava y hierba como mucho 256 + 256 cuadrados (4 vertices, ta_cabe); el humo con el tope de
+    area de antes (HUMO_PANTALLAS = 2 pantallas por cuadro, del mas pequeno al mas grande). VRAM: 24 KB (tres texturas
+    de 64x64 de 16 bits) en lugar de la mancha de 2 KB de antes, cargadas con EFECTOS.DAT al arrancar (fuera de la
+    zona del curso).
+  - PROVISIONAL / PENDIENTE: (a) la prueba del derrape del humo en asfalto (deslizamiento +E0 y agarre +E4 de la
+    rueda contra 0x32b1e8; la fisica de la demo no los da): las traseras mientras dura el derrape, como las marcas;
+    (b) car+58 (la luz del carril de CalcOfsLeftLane 4A45F0, que aclara el humo) = 1; (c) la meta con el estilo 82E7C0
+    echa el humo de los rivales (41CED0 / 41D270 / 41D5C0 = 0x10aad0 / 0x10b050 / 0x10b450): aqui el del jugador;
+    (d) el tope del tamano de 418CF0 (74F7BC / 74F7C0 del PC; en el PS2 el microprograma de la VU1): sin tope;
+    (e) el alfa de los colores (0x80 de las tablas) se toma como 128 / 255 (el microprograma de la VU1 del dibujo
+    sin leer: PROBABLE); (f) el contacto de cada rueda es el punto sobre el plano del coche (no el suelo de la rueda,
+    +3C) y su direccion la del coche girada por angulo_rueda.
+- **Marcas**: efectos_paso leia la superficie de la rueda del otro lado (sup_rueda va en el orden del original y
+  el bucle de las marcas en el de la demo, i ^ 1): CORREGIDO.
+- **Vibracion de la superficie** (0x1d04e4..0x1d0880 con 0x1d0138, PS2; el PC no tiene vibracion): portada en
+  vib_paso con las intensidades por clase (arena 0,85: motor grande v x 0,85 x 0,3, 10 cuadros), los bordes
+  +268 / +264 y el humo; PENDIENTE el termino de +D34 (derrape medio de 21 cuadros: +C2C no esta en la fisica de la
+  demo) y las banderas +8 0x40 / 0x100. Ver Vibracion del mando.
+- **Sonido de la superficie**: el original lo tiene (PlayRoadCondition 425A40 del PC: dos canales con el sonido de la
+  primera de las 10 entradas de la tabla 623F38 {mascara, sonido, ganancia} que casa con la superficie de las ruedas
+  +24C y +250 (CarSound +54 / +6C de 4256F0), volumen por el deslizamiento de las cuatro ruedas y la velocidad).
+  PENDIENTE (no esta en la demo: hacen falta su tabla en el PS2 y sus muestras en SFX.DAT).
+- Datos: EFECTOS.DAT regenerado (el paso 'efectos' de tools/regenera.py: `PYTHONHASHSEED=0 tools/conv_efectos.py <iso>
+  EFECTOS.DAT`; bloques nuevos 'PAR1' con
+  las tres texturas y 'DSC1' con el descriptor de tramo de cada SEGnn, detras del 'ATR1'; lo de antes igual byte a
+  byte, un ejecutable anterior lo sigue leyendo) y copiado a la carpeta de datos compartida.
