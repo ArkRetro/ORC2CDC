@@ -449,7 +449,8 @@ Medido (datos regenerados; la conversion de las 62 etapas, ~4 h con dos a la vez
   dos primeras y las dos ultimas secciones de 100 % a 9-79 % (PALM: salida 71131 -> 56506 vertices en la vista desde
   la camara de la carrera, 100 m despues 58114 -> 49333); las listas de las 62 etapas 2093 KB menos en el disco (SEG46,
   la mayor y la que fija el hueco de la etapa: 8314 -> 8309 KB; SEG13 crece 46 KB, en sus 284 KB de listas). La VRAM y
-  las texturas no cambian.
+  las texturas no cambian. Las 262 uniones (regeneradas tambien, ~1 h 15 min): 99,1 % de media antes y despues (abiertas:
+  desde alguna muestra se ve casi todo); UNIONES.PAK 10 KB menos.
 - Flycast (`DIAG_VTX`, `-DPRUEBA_AUTO -DPRUEBA_NODO=n`, 100 s desde el principio de la etapa, el mismo binario con los
   datos de antes y los de ahora):
 
