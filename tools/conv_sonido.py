@@ -276,16 +276,18 @@ def main():
     idioma = sys.argv[sys.argv.index('--idioma') + 1].upper() if '--idioma' in sys.argv else 'SPANISH'
     assert idioma in IDIOMAS, 'idioma: ' + ', '.join(IDIOMAS)
     voces(iso, irx, tb, td, elf, V, idioma, sal)
-    voces(iso, irx, tb, td, elf, V, idioma, sal, VOZ_BANCOS + VOZ_C2C, 'VOCESC.DAT')
+    voces(iso, irx, tb, td, elf, V, idioma, sal, VOZ_C2C, 'VOCESC.DAT')
 
 
 # ---------------------------------------------------------------- voces (VOCES.DAT)
 VOZ_BANCOS = ('ORC.PAK', 'PERO.pak')
-# VOCESC.DAT (COAST 2 COAST, variante 6): ademas las voces de las misiones que pide 496A30 / 495C20: las del principio de
-# la mision por tipo (tabla 0x40c6b8: 0x1E7, 0x219, 0x1E8, 0x1EA, 0x218; en TRS.PAK) y las de la eliminacion por tiempo y
-# los trompos (0x1EF..0x1F2, 0x15F, 0x160; en TRC.PAK). PROBABLE: los bancos por los ids (la carga del juego por variante
-# no esta trazada)
-VOZ_C2C = ('TRS.PAK', 'TRC.PAK')
+# VOCESC.DAT (COAST 2 COAST, variante 6): los bancos que carga el PS2 con la variante 6 (o 4): 0x1b7fa4 de SLES-53998,
+# 11ED40(0x89A0) y 11ED40(0x869B) = indices 0xA0 PERR.pak y 0x9B TRS.PAK de la tabla de bancos 0x352840 (en lugar de
+# 0x9E PERO.pak y 0x3 ORC.PAK de las otras variantes), y en la meta (modo 19, 0x1b8e70) 11ED40(0x889C) = 0x9C TRE.PAK.
+# TRS lleva las voces del principio de la mision (0x1E2, 0x1E7, 0x1E8, 0x1EA, 0x218, 0x219) y TRE las de la meta
+# (0x1FD..0x203). PERR.pak no tiene las tablas de banco_tablas (otro formato: SIN PORTAR); TRC.PAK no lo carga esta
+# variante
+VOZ_C2C = ('PERR.pak', 'TRS.PAK', 'TRE.PAK')
 VOZ_SE = (('\\IGC.PAK', 1, 0x4d), ('\\IGC.PAK', 0, 0x18d))      # (banco, parte, id)
 VOZ_AREA, VOZ_VUELTA, VOZ_DERRAPE = 0x36f958, 0x36f9a8, 0x36fa80
 VOZ_LISTAS = ((0x40ef60, 2), (0x40ef68, 2), (0x40ef70, 5), (0x40eba8, 3), (0x40ebb8, 3), (0x40eb10, 4), (0x40eb20, 2))

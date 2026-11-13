@@ -2198,8 +2198,9 @@ peticion 14 (escoltas 45B5B0, +324 = 6: carrera contra ellos), que no esta en la
   449E30: 12 cuadros; matriz de 4656B0 = hudd_escala); en 0xB4 la voz del tipo (0x40c6b8: 0x1E7, 0x219, 0x1E8,
   0x1EA, 0x218) y 2B0020 en modo 5 con el rotulo del tipo (0x36f3f8: 2B0065, 2C00FD, 2B0067, 2B0066, 2C00FC); la
   cuenta baja 2 por cuadro. Flycast: el bocadillo "Objetivo: Compite con tus rivales!" al GO. Voces: VOCESC.DAT
-  (conv_sonido.py) = ORC + PERO + TRS.PAK + TRC.PAK: los ids que piden 496A30 / 495C20 solo estan en esos dos bancos
-  (PROBABLE: la carga de bancos por variante del PS2 no esta trazada); la cola de 45BD30 se toma inmediata.
+  (conv_sonido.py) con los bancos que carga el PS2 en la variante 6 (CONFIRMADO, 0x1b7fa4: 11ED40(0x89A0) PERR.pak y
+  11ED40(0x869B) TRS.PAK de la tabla 0x352840, en lugar de PERO / ORC; en la meta 0x1b8e70: 0x889C TRE.PAK): TRS y TRE;
+  PERR.pak SIN PORTAR (no tiene las tablas que lee conv_sonido.banco_tablas). La cola de 45BD30 se toma inmediata.
 - Resultado de la mision (como el original: no hay otra pantalla): la meta (19) guarda la nota (495A20) y pasa al
   modo 34 (OutRun Miles; 4EF550 con la variante 6 y 44FF10: millas = 84B900[nota] - 84B900[nota de antes] >= 0, con
   84B900 = SETUP de OutrunMiles.bin: 100, 200, 400, 600, 800, 900, 1000, 0 para las notas 0..7) y al 35 con los tokens
