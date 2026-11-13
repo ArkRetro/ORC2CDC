@@ -39,9 +39,10 @@ tecla x; espera_log 'menu: guardado OR2C2C' 60; espera 5
 tecla d; espera_log 'menu: guardado OR2C2C' 60; espera 0.5; foto vm_sitio
 espera 10
 xdotool keydown f; xdotool keydown v; espera 0.5; tecla d; espera 0.5; xdotool keyup f; xdotool keyup v
-espera_log 'vmudiag: (TODO BIEN|HAY FALLOS)' 60; espera 1; foto vm_diag
+espera_log 'vmudiag: (TODO BIEN|HAY FALLOS|VMU BIEN)' 60; espera 1; foto vm_diag
 tecla x; espera 3; foto vm_fin
 log 'vmuesc|menu: guardado|vmudiag' 40
 grep -a -q -E 'vmuesc: OR2C2C en a1: -7 ' "$SAL/flycast.txt" || { echo "no sale el -7 (sin sitio)" >&2; ERROR=1; }
 grep -a -q -E 'vmudiag: 5 KOS vmu_block_write \(restaura\): 0,' "$SAL/flycast.txt" || { echo "la prueba de KOS fallo" >&2; ERROR=1; }
 grep -a -q -E 'vmudiag:   releer: BIEN' "$SAL/flycast.txt" || { echo "la relectura de la prueba fallo" >&2; ERROR=1; }
+grep -a -q -E 'vmudiag: VMU BIEN, SIN SITIO' "$SAL/flycast.txt" || { echo "el diagnostico no dice VMU BIEN, SIN SITIO" >&2; ERROR=1; }

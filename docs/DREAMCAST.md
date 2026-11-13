@@ -1440,9 +1440,21 @@ Codigo del error (`vmuesc_codigo`), p. ej. `E-13 FB I2 L180 N20 U1 PA1 M-1 W0 K1
 Pantalla de diagnostico (`vmuesc_pantalla`): las VMU (puerto, funciones, function_data[0], `valid`), la unidad que se
 usaria, y paso a paso con el tiempo y la respuesta maple: 1 leer la raiz (formato: FAT, directorio, bloques), 2 leer la
 FAT (bloques libres), 3 leer el directorio (ficheros, huecos, OR2C2C y si caben 20 bloques), 4 en el bloque libre mas
-alto: leerlo, escribir otro contenido con la ruta propia (respuesta de las 4 fases y de la confirmacion, y sus ms),
-releer y comparar, 5 restaurarlo con `vmu_block_write` de KallistiOS (con la propia si KOS falla) y releer. Al final
-"TODO BIEN" o "HAY FALLOS". El bloque de prueba esta libre en la FAT: no se toca ningun fichero.
+alto: leerlo, escribir otro contenido con la ruta propia ("escribir r/ms" de las 4 fases y de la confirmacion: 7 es
+bien), releer y comparar, 5 restaurarlo con `vmu_block_write` de KallistiOS (con la propia si KOS falla) y releer. Al
+final "TODO BIEN", "VMU BIEN, SIN SITIO" (todo funciona pero no caben los bloques del fichero: borrar partidas) o "HAY
+FALLOS". El bloque de prueba esta libre en la FAT: no se toca ningun fichero.
+
+MENU.DAT: el texto 0x30D va en el MNU2 (conv_menu.py, TEXTOS_GUARDAR); con un MENU.DAT de antes el menu pone 0x31D
+tambien sin sitio (el codigo E-7 lo dice igual). Para tenerlo: borrar MENU.DAT de datos/ y volver a pasar
+tools/regenera.py (solo rehace ese paso, ~1 min). El nuevo solo cambia el MNU2 (32 bytes mas; texturas iguales).
+
+Verificado en Flycast: `tools/prueba/vmu.sh` (licencia nueva guardada y Y: "vmuesc: OR2C2C en a1: 0 ... 2840 ms", el
+segundo guardado en los bloques libres 179..160 y el viejo liberado; `comprueba_vmu.py`: resultado bien, 180 libres;
+segundo arranque: licencia leida) y `tools/prueba/vmu_diag.sh` (VMU con 10 libres: "E-7 FS I1 L10 N20 U2 PA1 M0 W-1
+K-1 R0" y "No hay espacio suficiente para guardar."; la pantalla de diagnostico con todos los pasos bien: fases 7 en
+10-20 ms cada una, KOS 85 ms por bloque). En Flycast la VMU contesta siempre a la primera; lo que haga la real lo dira
+esta pantalla.
 
 ## 3. Otros riesgos de la consola real
 

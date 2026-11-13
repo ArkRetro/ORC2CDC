@@ -246,7 +246,12 @@ consola, el port lo fija al convertir). Hoja de capturas de Flycast: scratchpad 
   de TEXT.PS2 0x206; lo demas de ese texto habla de la memory card del PS2) en una franja en medio de la pantalla y, ya
   guardado, "Exito al guardar." (0x202) con el sonido de aceptar o "Error al guardar!" (0x31D) en rojo con el de
   bloqueado, unos 2,5 s. La barra de ayuda dice GUARDAR (0x42F "Guardar" en mayusculas, como los demas textos de la
-  barra). Textos y barra en MENU.DAT (conv_menu.py: AYUDA, TEXTOS_GUARDAR).
+  barra). Textos y barra en MENU.DAT (conv_menu.py: AYUDA, TEXTOS_GUARDAR). Revision 44 (tambien DESVIACION, para
+  la consola real sin cable serie): el guardado va en un hilo y el menu se sigue moviendo con "Guardando datos."; si
+  falla, debajo de "Error al guardar!" sale un codigo de diagnostico (docs/DREAMCAST.md, Guardado en la VMU) y el
+  aviso dura ~8,5 s; sin sitio en la VMU dice "No hay espacio suficiente para guardar." (la primera frase de TEXT.PS2
+  0x30D, el aviso de sin sitio del PSP; los de la memory card hablan de la ranura del PS2); L + R + Y abre una pantalla
+  de diagnostico de la VMU (letra de la BIOS), que el original no tiene.
 - Iconos de los botones de la barra de ayuda: DESVIACION pedida por el usuario (revision 42). Antes eran el boton gris
   del PS2 (banco 0x48, cuadro 25) sin su simbolo y con la letra de la Dreamcast pintada encima en su color; ahora son
   botones de la Dreamcast dibujados al convertir (conv_menu.py boton_dc): circulos de los colores del mando (A rojo, B

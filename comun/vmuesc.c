@@ -310,7 +310,7 @@ void vmuesc_pantalla(maple_device_t *dev, const vmuesc_diag_t *ult)
     static vmu_root_t rz __attribute__((aligned(32)));
     static uint16_t fat[BLK / 2] __attribute__((aligned(32)));
     static uint8_t orig[BLK] __attribute__((aligned(32))), prueba[BLK] __attribute__((aligned(32)));
-    maple_device_t *v; int i, r, ms, libres = 0, prb = -1, resp[6], tms[6], paso, malo = 0, solte = 0;
+    maple_device_t *v; int i, r, ms, libres = 0, prb = -1, resp[6], tms[6], paso, malo = 0, sitio = 0, solte = 0;
     uint64_t t0, t_pinta = 0;
     n_lin = 0;
     dice(AMARILLO, "DIAGNOSTICO DE LA VMU (revision 44)");
@@ -348,8 +348,9 @@ void vmuesc_pantalla(maple_device_t *dev, const vmuesc_diag_t *ult)
         dice(r ? ROJO : VERDE, "3 directorio: %s %d ms, %d ficheros, %d huecos", r ? nom_maple(r) : "BIEN", mt, nf, nl);
         if (r) { malo = 1; goto suelta; }
         if (tam >= 0) dice(BLANCO, "  OR2C2C: %d bloques", tam); else dice(BLANCO, "  sin OR2C2C");
-        if (libres + (tam > 0 ? tam : 0) < 20) { dice(ROJO, "  NO HAY SITIO: libres %d, hacen falta 20", libres + (tam > 0 ? tam : 0)); malo = 1; }
-        else dice(VERDE, "  sitio: libres %d, hacen falta 20", libres + (tam > 0 ? tam : 0));
+        int nec = ult && ult->necesarios > 0 ? ult->necesarios : 20, hay = libres + (tam > 0 ? tam : 0);
+        if (hay < nec) { dice(ROJO, "  NO HAY SITIO: libres %d, hacen falta %d", hay, nec); sitio = 1; }
+        else dice(VERDE, "  sitio: libres %d, hacen falta %d", hay, nec);
         pinta();
     }
     /* 4: prueba de escritura en un bloque libre (el mas alto: donde iria el fichero), restaurado despues */
@@ -391,7 +392,8 @@ void vmuesc_pantalla(maple_device_t *dev, const vmuesc_diag_t *ult)
 suelta:
     vmufs_mutex_unlock();
 espera:
-    dice(malo ? ROJO : VERDE, "%s - A / B / START: salir", malo ? "HAY FALLOS: haz una foto" : "TODO BIEN");
+    dice(malo ? ROJO : sitio ? AMARILLO : VERDE, "%s - A / B / START: salir", malo ? "HAY FALLOS: haz una foto" :
+         sitio ? "VMU BIEN, SIN SITIO" : "TODO BIEN");
     pinta();
     for (t0 = timer_ms_gettime64(); timer_ms_gettime64() - t0 < 300000; ) {   /* (5 min como mucho) */
         uint32_t b = botones() & (CONT_A | CONT_B | CONT_START);
