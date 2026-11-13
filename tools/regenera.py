@@ -22,6 +22,7 @@ ARBOLES = '1,' + ','.join(str(i) for i in range(100, 194))       # OUTRUN2SP y l
 # uniones nuevas (BK262.. en UNIONESTA.PAK; las de los arboles de arriba conservan su numero)
 ARBOLES_TA = ARBOLES + ',' + ','.join(str(200 + c) for c in range(0x54))
 UNIONES_TA = ['UNIONESTA.PAK', 'CURSOTA.DAT']
+NBK = 470                                                        # descriptores BK0..469: 262 de UNIONES.PAK + 208 de UNIONESTA.PAK
 # temas, resultados de OUTRUN2SP (28), menu, avances y metas (sin la 64: no la usa la meta)
 MUSICA = list(range(0, 29)) + [30] + list(range(33, 61)) + [61, 62, 63, 65, 66]
 PARTES = 4                                                       # conv_union.py --parte=k/n (al menos; o --jobs)
@@ -104,11 +105,11 @@ def paso(C, n, log):
     T = lambda x: os.path.join(TOOLS, x)
     tj = lambda *x: os.path.join(t, *x)
     prev = lambda x: os.path.join(W, 'previas', x)
-    if n.startswith('union'):
-        ej(T('conv_union.py'), ISO, os.path.join(W, 'u'), '--arboles=' + ARBOLES, '--parte=%s/%d' % (n[5:], C.partes))
-    elif n.startswith('unionta'):                        # los de la Contrarreloj (CURSOTA.DAT, BK262..)
+    if n.startswith('unionta'):                          # los de la Contrarreloj (CURSOTA.DAT, BK262..); antes que 'union'
         ej(T('conv_union.py'), ISO, os.path.join(W, 'uta'), '--arboles=' + ARBOLES_TA, '--bk-desde=262', '--curso=CURSOTA.DAT',
            '--parte=%s/%d' % (n[7:], C.partes))
+    elif n.startswith('union'):
+        ej(T('conv_union.py'), ISO, os.path.join(W, 'u'), '--arboles=' + ARBOLES, '--parte=%s/%d' % (n[5:], C.partes))
     elif n == 'curso':                                   # BK00..14, BKD, SOL, COLBK*, CURSO del modo
         ej(T('conv_union.py'), ISO, t, '--sin-tramos')
         u0 = os.path.join(W, 'u0'); os.makedirs(u0, exist_ok=True)
@@ -197,7 +198,7 @@ def regenera(iso, D, W, jobs=4, informe=print):
     D, W = os.path.abspath(D), os.path.abspath(W)
     C = Contexto(iso, D, W, jobs)
     C.partes = max(PARTES, jobs)                         # (las uniones son independientes: f_bk % partes)
-    for x in ('u', 'tmp', 'previas', 'registro'): os.makedirs(os.path.join(W, x), exist_ok=True)
+    for x in ('u', 'uta', 'tmp', 'previas', 'registro'): os.makedirs(os.path.join(W, x), exist_ok=True)
     reg = lambda x: os.path.join(W, 'registro', x)
     t0 = time.time()
 
@@ -338,14 +339,14 @@ def regenera(iso, D, W, jobs=4, informe=print):
     nec = ['BAND.DAT', 'BAND1.DAT', 'BKD.DAT', 'BO.DAT'] + chrs + \
           'COCHES.DAT COLBK.DAT COLLR.DAT CURSO.DAT EFECTOS.DAT FAROS.DAT FIN.DAT GOVER.DAT HAHUD.DAT HUD.DAT INFARTO.DAT MENU.DAT META.DAT MODOV.DAT MVATTR.VQV MVTS.VQV PARAM.DAT SFX.DAT SEGS.PAK SOL.DAT TAPD.DAT TRAFC.DAT UNIONES.PAK VMU.DAT VOCES.DAT VOCESH.DAT VOCESC.DAT MISION.DAT C2CHUD.DAT C2C.DAT SALON.DAT TABLERO.DAT CURSOTA.DAT UNIONESTA.PAK'.split() + ['RC%02d.DAT' % k for k in range(30)] + \
           ['COCHE%02d.DAT' % k for k in range(15)] + ['MUS%d.ADP' % k for k in MUSICA] + SP + FINAL + \
-          ['TRAFK%d.DAT' % k for k in range(3)] + FIN + TRAF + BO + COLBK + ['SALIDA.DAT', 'CHRPAR.DAT', 'VISO.DAT']
+          ['TRAFK%d.DAT' % k for k in range(3)] + FIN + TRAF + BO + COLBK + ['SALIDA.DAT', 'CHRPAR.DAT', 'VISO.DAT', 'INFARTOP.DAT']
     for f in nec:
         if not hay(D, f): informe('FALTA %s' % f); ok = False
     ls = sorted(os.listdir(D))
     nseg = sum(1 for f in ls if f.startswith('SEG') and f[3:-4].isdigit() and f.endswith('.DAT'))
     nbk = sum(1 for f in ls if f.startswith('BK') and f[2:-4].isdigit() and f.endswith('.DAT'))
     if nseg != 62: informe('SEG: %d etapas (se esperan 62)' % nseg); ok = False
-    if nbk != 262: informe('BK: %d uniones (se esperan 262)' % nbk); ok = False
+    if nbk != NBK: informe('BK: %d uniones (se esperan %d)' % (nbk, NBK)); ok = False
     for f in ls:
         if f.startswith('BK') and f[2:-4].isdigit() and f.endswith('.DAT'):
             with open(os.path.join(D, f), 'rb') as h:
@@ -362,7 +363,7 @@ def regenera(iso, D, W, jobs=4, informe=print):
 
 def limpia(W):
     """los intermedios de trabajo/ (no los registros ni la cache)"""
-    for x in ('u', 'u0', 'bk', 'pak', 'seg', 'segpak', 'coche', 'tmp', 'previas'): borra(os.path.join(W, x))
+    for x in ('u', 'u0', 'uta', 'bk', 'pak', 'bkta', 'pakta', 'seg', 'segpak', 'coche', 'tmp', 'previas'): borra(os.path.join(W, x))
 
 def main():
     a = sys.argv[1:]

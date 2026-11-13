@@ -15,8 +15,8 @@ Requisitos
 - Windows 10 u 11 de 64 bits. No hay que instalar nada.
 - Tu ISO de PS2: OutRun 2006 Coast 2 Coast, PAL, SLES-53998, version 1.02
   (la imagen del DVD, unos 1,7 GB; el programa comprueba que sea esa).
-- Unos 4 GB libres en el disco de la carpeta de salida (datos convertidos ~0,9 GB,
-  intermedios ~1 GB mientras trabaja y el GD-ROM ~1 GB).
+- Unos 5 GB libres en el disco de la carpeta de salida (datos convertidos ~0,9 GB,
+  intermedios ~1,5 GB mientras trabaja y el GD-ROM ~1 GB).
 - RAM: con 8 GB va bien; el programa decide cuantos pasos hace a la vez segun los
   nucleos y la memoria (unos 1,5 GB por paso).
 
@@ -37,9 +37,10 @@ Uso
 
 Tiempo
 ------
-Unas horas: de 2 a 5 segun el PC (en 4 nucleos, unas 3 horas). Lo que mas tarda es
-calcular la visibilidad (PVS) de cada etapa y de cada union de las misiones; el
-porcentaje avanza despacio al principio porque las uniones son los pasos mas largos.
+Unas horas: de 3 a 7 segun el PC (en 4 nucleos, unas 4 horas). Lo que mas tarda es
+calcular la visibilidad (PVS) de cada etapa y de cada union: las de las misiones y,
+desde la revision 43, las 208 de los cursos de la Contrarreloj (tableros de cursos);
+el porcentaje avanza despacio al principio porque las uniones son los pasos mas largos.
 Las peliculas, la musica y el GD-ROM son minutos.
 
 Cortar y seguir
