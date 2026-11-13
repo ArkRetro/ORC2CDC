@@ -444,6 +444,35 @@ Cambios (`tools/pvs.py`, `tools/c/pvs.c`, `pvs_paso`):
   se perderian caras que el original ve por detras); la PVS ya quita las caras de atras de lo cerrado, que tapan las
   de delante. En la PowerVR el culling no ahorra TA (los vertices se envian igual), solo relleno.
 
+Medido (datos regenerados; la conversion de las 62 etapas, ~4 h con dos a la vez):
+- Conversion, de lo que queda por seccion (vertices de nodos del fichero): media de las 62 etapas 43,5 -> 39,5 %; las
+  dos primeras y las dos ultimas secciones de 100 % a 9-79 % (PALM: salida 71131 -> 56506 vertices en la vista desde
+  la camara de la carrera, 100 m despues 58114 -> 49333); las listas de las 62 etapas 2093 KB menos en el disco (SEG46,
+  la mayor y la que fija el hueco de la etapa: 8314 -> 8309 KB; SEG13 crece 46 KB, en sus 284 KB de listas). La VRAM y
+  las texturas no cambian.
+- Flycast (`DIAG_VTX`, `-DPRUEBA_AUTO -DPRUEBA_NODO=n`, 100 s desde el principio de la etapa, el mismo binario con los
+  datos de antes y los de ahora):
+
+| Etapa | vertices de la etapa enviados | TA de la etapa (KB) | lo que dibujaria el original tras la PVS: media (maximo) | nodos quitados por el reparto (media) | mas cercano quitado, mediana (m) | entero hasta (m, media) |
+|---|---|---|---|---|---|---|
+| PALM (0) | 13958 / 13894 | 681 / 680 | 41732 (98059) / 40679 (97383) | 253 / 243 | 112 / 119 | 456 / 500 |
+| ALPI (2) | 10375 / 10521 | 517 / 523 | 16376 (38540) / 16472 (38671) | 17 / 17 | 4000 / 4000 | 1836 / 1664 |
+| FORE (4) | 9816 / 7687 | 482 / 381 | 15728 (75303) / 9442 (19459) | 58 / 2 | 4000 / 4000 | 2056 / 3061 |
+| SNOW (8) | 10443 / 9952 | 503 / 480 | 22725 (66868) / 21009 (45600) | 122 / 102 | 3900 / 3950 | 1761 / 1889 |
+| IMPE (13) | 11511 / 11604 | 563 / 568 | 27065 (75113) / 25264 (67621) | 116 / 103 | 2286 / 2286 | 1056 / 1020 |
+
+  (las dos pasadas no van exactamente por los mismos sitios; el maximo es el de las primeras secciones). Donde el tope
+  cortaba lo ganado va a la distancia (PALM: lo entero de 456 a 500 m); donde no, se envia menos (FORE: -22 %).
+- Imagen: (1) por software, con prueba de alfa y la PVS de la seccion (ids de malla, 640 x 480, ojo al azar en el
+  volumen de la carrera y la ruta prolongada, rumbo y cabeceo al azar; `pvs_paso` con su guarda): 0 pixeles distintos
+  de los ficheros de antes enteros en 60 vistas de SEG00 y SEG01 y 40 de SEG04, 08, 13, 22, 29, 37 y 46, y en 120
+  vistas desde las camaras de la escena de la salida de PALM (`DIAG_SALIDA`: ojo a menos de 2,4 m del eje y entre 0,75
+  y 3,95 m de alto); (2) Flycast congelado en el crono 900 (`DIAG_CONGELA`, sin tope ni reparto) en las cinco etapas:
+  0 pixeles distintos fuera del coche y del rotulo Rebufo del HUD, que parpadea (en el tunel de SNOW la luz cambia de
+  un cuadro a otro: dos de las tres capturas iguales a las de `-DSIN_PVS`, la otra cambia igual con cualquier dato).
+- Salida de PALM (nav.sh): los edificios de la calle de la derecha salen enteros con el reparto de antes
+  (`-DREPARTO_CERCA=0.75f`) y con el de ahora.
+
 El diagnostico `pvr_colgado()` (si `pvr_wait_ready` falla 5 veces seguidas escribe en la imagen el estado, los
 vertices, el registro de errores y el uso de VB y OPB) se queda: es lo que permite medir en la consola.
 
