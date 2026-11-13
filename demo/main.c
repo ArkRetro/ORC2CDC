@@ -4708,6 +4708,7 @@ typedef struct {
     int16_t agua_p0, agua_p1; uint8_t agua_alfa, agua, r3_[2];   /* agua del descriptor (+0x6E / +0x70, +0x6C; agua_dibuja) */
     int16_t f_bk; int8_t f_col; uint8_t r2_;                    /* BKnn.DAT de su union; colision: -1 COLBK.DAT,
                                                                    -2 COLLR.DAT (LRBK de las misiones), si no COLBKnn */
+    int16_t un_p0, un_p1;                                       /* +0x72 / +0x74 del descriptor (uni_regs) */
 } etapa_t;
 static etapa_t curso[CURSO_MAX]; static int ncurso;
 /* tramos de la etapa en el sitio s (or2_coche_t.atrapa): 0 en la union (+5C != 0) o sin la tabla */
@@ -5562,8 +5563,7 @@ static void bo_dibuja(int l)
    404B00: esfera contra el plano cercano, los cuatro laterales y el lejano, y el LOD por tamano en pantalla:
    w = r / (z tan(fov vertical / 2)); se descarta si 127 - exponente(w) >= umbral (4044E0(6) en la etapa,
    race_area_display_44f120; 7 con la bandera 0x40 del nodo), es decir, se dibuja si z <= r 2^(umbral - 1) /
-   tan(fov vertical / 2). De las ramas de la union, solo la del coche una vez elegida (race_area_stage_draw_44e290:
-   obj | 1 o | 2). La lista de nodos por seccion de la etapa (cs_CS_<zona>_bin) solo se usaria si el fichero la trae
+   tan(fov vertical / 2). De la union, los registros de uni_regs (race_area_stage_draw_44e290). La lista de nodos por seccion de la etapa (cs_CS_<zona>_bin) solo se usaria si el fichero la trae
    (sec_lista): el formato de PS2 de esas listas esta sin descifrar (tools/conv_tramo.py lee_visibilidad); en su lugar
    va la visibilidad precalculada (pvs_paso, mas abajo). */
 static float dist2_ruta(const modelo_t *m, uint32_t i, const float *p)
@@ -5656,6 +5656,31 @@ static void pvs_paso(modelo_t *mo)
     while (mo->pvs_s > (int32_t)s) pvs_aplica(mo, mo->pvs_s--);
     mo->pvs_on = 1;
 }
+/* Registros de la union que se dibujan (bit r: registro r de la union, 0 el tronco, 1 la rama izquierda, 2 la derecha;
+   bits 8-9 del nodo, tools/modelo.py rama), como race_area_stage_draw_44e290 (PS2 0x172ba0): en la union (car+0x5C)
+   el tronco hasta la posicion 0xE3 y, desde la 0x1D y con la rama ya tomada (451350 = PS2 0x1cfa40), solo la de esa
+   rama; en la etapa (car+0x64, la posicion de la etapa) el tronco de la union que viene pasada la posicion +0x74 del
+   descriptor de la etapa (PC +0x5E), nada entre +0x72 y +0x74 y, antes de +0x72 (PC +0x5C), la rama tomada en la
+   union de antes (451350 del nivel anterior) y no su tronco. Antes la demo dibujaba la union entera en cuanto estaba
+   subida (2500 m antes de llegar: el tronco desde unos 800 m antes que el original) y las dos ramas hasta elegir; y
+   desde el principio de la etapa siguiente hasta soltarla, otra vez las dos ramas y el tronco (cur_rama vuelve a -1).
+   Los porticos de los carteles (0x670000, obj_course_obj_bk_palm, tools/conv_union.py carteles) estan en el registro 0
+   del fichero: van con el tronco (PROBABLE, docs/PARIDAD.md: el original los dibuja en toda la union, bp == 0). */
+static int uni_mascara = 7;
+static int uni_regs(void)
+{
+    int nodo, pos, u = traf_lugar(yo.s, &nodo, &pos), m, lado;
+    if (u) {
+        m = pos < 0xE4 ? 1 : 0;
+        if (pos > 0x1C && cur_rama >= 0) m |= 2 << cur_rama;
+        return m;
+    }
+    if (nodo < 0 || nodo >= ncurso) return 7;
+    if (pos > curso[nodo].un_p1) return 1;                      /* bp = 0: el tronco */
+    if (pos >= curso[nodo].un_p0) return 0;                     /* entre +0x72 y +0x74: nada */
+    lado = etapa_n >= 1 && etapa_n <= 5 ? rama_nivel[etapa_n - 1] : 2;   /* bp = -1: 451350(nivel - 1) */
+    return lado == 0 || lado == 1 ? 2 << lado : 0;
+}
 static void nodos_visibles(modelo_t *mo)
 {
     float tanh = 320.0f / fx, tanv = 240.0f / fx, kh = sqrtf(1 + tanh * tanh), kv = sqrtf(1 + tanv * tanv), lod = fx / 240.0f;
@@ -5664,7 +5689,7 @@ static void nodos_visibles(modelo_t *mo)
     /* (el ojo, los ejes y los planos en variables locales: las escrituras de abajo obligaban a releerlos en cada nodo;
        mismas cuentas) */
     float o0, o1, o2, e0, e1, e2, d0, d1, d2, a0, a1, a2, cer, lej; int pvs_on_; nodo_t *ND = mo->nodos;
-    uint32_t *VIS = mo->vis; const uint32_t nnod = mo->nnodos; const int rama_c = cur_rama;
+    uint32_t *VIS = mo->vis; const uint32_t nnod = mo->nnodos; const int regs = mo == &uni ? uni_mascara : 7;
 #ifdef CON_FUNDIDO_ENTRADA
     uint32_t *FF = mo->fe_f;                                    /* fuera de la vista (fe_paso) */
 #else
@@ -5701,7 +5726,7 @@ static void nodos_visibles(modelo_t *mo)
         lim = d->r * lod * (float)(1u << ((u ? u : 6) - 1));
         if (u && zv > 0 && zv > lim) continue;                  /* LOD */
         rama = (d->fl >> 8) & 3;
-        if (rama && rama_c >= 0 && (int)rama - 1 != rama_c) continue;   /* la otra rama de la union */
+        if (!(regs >> rama & 1)) continue;                     /* registro de la union que no se dibuja */
         if (pvs_on_) {                                       /* PVS: lo que queda visible del nodo desde aqui */
             c_teo = mo->pvs_teo[2 * i]; c_v = mo->pvs_teo[2 * i + 1];
 #ifdef DIAG_VTX
@@ -5833,6 +5858,7 @@ static void nodos_visibles_todos(void)
 #ifdef DIAG_VTX
     diag_pvs_v = 0;
 #endif
+    uni_mascara = uni_regs();                                   /* (44E290) */
     for (i = 0; i < 3; i++) if (geo_visible(tramos[i])) nodos_visibles(tramos[i]);
     for (d = 0; d < ND_PRIO; d++) for (fila_c[d] = fila_v[d] = 0, c = 0; c < NB_PRIO; c++) { fila_c[d] += prio_coste[d][c]; fila_v[d] += prio_vtx[d][c]; }
     /* lo cercano: hasta 3/4 del tope (todo si cabe todo) */

@@ -227,7 +227,7 @@ def compone(M1, M2):
 UMBRAL_META = 24.0                                  # error RMS de la VQ aceptado en las uniones de meta
 NIEBLA_MAX = 8                                      # tramos de niebla por etapa en CURSO.DAT
 # bytes de un registro de CURSO.DAT: el de antes (con el sol de la sombra) y el entorno (escribe_curso)
-REG = 4 + 4 + 16 + 32 + 8 + 4 + 24 * NIEBLA_MAX + 8 + 4 + 4 + 4 + 3 * 64 + 4 + 24 * NIEBLA_MAX + 8 + 4
+REG = 4 + 4 + 16 + 32 + 8 + 4 + 24 * NIEBLA_MAX + 8 + 4 + 4 + 4 + 3 * 64 + 4 + 24 * NIEBLA_MAX + 8 + 4 + 4
 
 def zona_de(ruta):
     """codigo de zona de una ruta del ejecutable (\\Stage\\ZONA\\...)"""
@@ -306,6 +306,12 @@ def transicion(A, E, d0):
     p = u32(E, d0 + 0x58)
     pos, seg = struct.unpack('<Hb', E.lee(p, 3)) if p else (100, 2)
     return pos, seg, u32(E, d0 + 0x3c)
+
+def union_pos(E, d0):
+    """(+0x72, +0x74) del descriptor de tramo d0 (s16; en el PC +0x5C / +0x5E): race_area_stage_draw_44e290 (PS2
+    0x172ba0) dibuja en la etapa la rama tomada en la union de antes hasta la posicion +0x72 y el tronco de la union
+    que viene desde la +0x74 (la demo: uni_regs)"""
+    return struct.unpack('<2h', E.lee(d0 + 0x72, 4))
 
 def metros_a_posicion(d_rama, pos):
     """metros desde el principio de la union hasta el centro de la seccion pos de la colision de una rama (la
@@ -398,12 +404,14 @@ def escribe_curso(sal, regs, extras=()):
         for v in r['soles']: b += struct.pack('<16f', *v)
         b += struct.pack('<I', len(r['niebla0']))
         for p0, p1, modo, d0, d1, c0, c1 in r['niebla0']: b += struct.pack('<2HB3x2f2I', p0, p1, modo, d0, d1, c0, c1)
-        b += b'\0' * (REG - 12 - len(b))
+        b += b'\0' * (REG - 16 - len(b))
         # agua (agua_de): posiciones de carretera en las que se dibuja, alfa +0x6C y 1 si la etapa la tiene
         ag = r.get('agua')
         b += struct.pack('<2hBB2x', *(ag[1:3] if ag else (0, 0)), ag[0] if ag else 0, 1 if ag else 0)
         # fichero de la union (BKnn.DAT, nn = f_bk) y su colision (-1 COLBK.DAT, -2 COLLR.DAT, si no COLBKnn.DAT)
         b += struct.pack('<hbx', r.get('f_bk', -1), r.get('f_col', -1))
+        # posiciones de la etapa de la union (union_pos)
+        b += struct.pack('<2h', *r['un_pos'])
         assert len(b) == REG; return b
     with open(sal, 'wb') as f:
         f.write(b'CUR1' + struct.pack('<2I', len(regs), REG) + b''.join(reg(r) for r in regs))
@@ -454,7 +462,7 @@ def curso(A, dsal, con_tramos=True, solo_curso=False):
         if solo_curso:                                # solo CURSO.DAT (las uniones ya estan)
             meta = -1.0 if hi >= 0 else 0.0
             r = dict(zona=z, seg=n, nivel=nivel[clave], izq=hi, der=hd, bk=(tx, ty, tz, ry), ramas=ramas,
-                     m_pos=m_por_posicion(segs[n]), meta=meta, niebla=niebla(A, z), sol=sol(A, z), **ent, f_bk=clave, f_col=-1 if hi >= 0 else clave, agua=agua_campos(A, d0))
+                     m_pos=m_por_posicion(segs[n]), meta=meta, niebla=niebla(A, z), sol=sol(A, z), **ent, f_bk=clave, f_col=-1 if hi >= 0 else clave, agua=agua_campos(A, d0), un_pos=union_pos(E, d0))
             sal.append(r); print('etapa %2d %s sol %.1f %.1f clima %x transicion %d (%.0f m) %d s'
                                  % (clave, z, *r['sol'], clima, *r['trans'][:1], r['trans_m'], r['trans'][1])); continue
         if hi >= 0:                                   # bifurcacion: la de PALM (las demas no estan en el disco)
@@ -499,7 +507,7 @@ def curso(A, dsal, con_tramos=True, solo_curso=False):
         print('triangulos de las tiras del VU1: %d, sin dibujar por la bandera ADC: %d' % (mod.tri_total, mod.tri_adc))
         r = dict(zona=z, seg=n, nivel=nivel[clave], izq=hi, der=hd, bk=(tx, ty, tz, ry), ramas=ramas,
                  m_pos=m_por_posicion(segs[n]), meta=meta, niebla=niebla(A, z), sol=sol(A, z), f_bk=clave,
-                 f_col=-1 if hi >= 0 else clave, agua=agua_campos(A, d0), **ent)
+                 f_col=-1 if hi >= 0 else clave, agua=agua_campos(A, d0), un_pos=union_pos(E, d0), **ent)
         r['_obj'] = objetos_etapa(A, d0); r['_agua'] = agua_de(A, d0)
         sal.append(r)
         print('etapa %2d %s SEG%02d nivel %d hijos %2d %2d union %s (%.1f, %.1f, %.1f, %.3f) %s/%s %s: %d mallas, '
@@ -683,7 +691,7 @@ def cursos(A, dsal, ids, con_uniones=True, con_tramos=False, parte=(0, 1)):
                             m_pos=m_por_posicion(segs[n]), meta=0.0 if c[0] == 'META' else -1.0, niebla=niebla(A, z),
                             sol=sol(A, z), clima=clima, soles=soles(A, z), niebla0=niebla(A, z, 0),
                             trans=(th[0], th[1]) if th else (tpos, tseg),
-                            trans_m=metros_a_posicion(d_izq, th[0]) if th else -1.0, f_bk=fich[c], f_col=fc, agua=agua_campos(A, d0), _c=c, _ti=ti))
+                            trans_m=metros_a_posicion(d_izq, th[0]) if th else -1.0, f_bk=fich[c], f_col=fc, agua=agua_campos(A, d0), un_pos=union_pos(E, d0), _c=c, _ti=ti))
         return sal
     o2r = registros(o2, False)
     extras = []

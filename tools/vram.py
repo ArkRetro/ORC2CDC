@@ -47,13 +47,13 @@ def kb(texs): return sum(bloque(t[5]) for t in texs) / 1024.0
 
 def curso(d):
     """{id del arbol: [(zona, SEGnn, nivel, izq, der, BKnn)]}: el del modo OutRun (0) y los de 'CURS' (conv_union.py
-    escribe_curso; el fichero de la union en los 4 ultimos bytes del registro)"""
+    escribe_curso; el fichero de la union en el byte 676 del registro, los 4 ultimos antes de las posiciones de la union)"""
     b = open(os.path.join(d, 'CURSO.DAT'), 'rb').read()
     n, r = struct.unpack_from('<2I', b, 4)
     def regs(o, n):
         return [(b[o + r * i:o + 4 + r * i].decode().rstrip('\0'), b[o + 4 + r * i], b[o + 5 + r * i],
                  struct.unpack_from('<b', b, o + 6 + r * i)[0], struct.unpack_from('<b', b, o + 7 + r * i)[0],
-                 struct.unpack_from('<h', b, o + r * (i + 1) - 4)[0] if r >= 672 else i) for i in range(n)]
+                 struct.unpack_from('<h', b, o + r * i + (676 if r >= 684 else r - 4))[0] if r >= 672 else i) for i in range(n)]
     res = {0: regs(12, n)}; o = 12 + r * n
     if b[o:o + 4] == b'CURS':
         for k in range(struct.unpack_from('<I', b, o + 4)[0]):

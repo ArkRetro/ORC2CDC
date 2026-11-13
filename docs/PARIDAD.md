@@ -1637,9 +1637,9 @@ inventada. Causas y arreglo:
   (cubo del reflejo del coche, 414340), nunca en la escena. Antes se anadia cs_ENVBK_PALM a la union y su calzada
   repetia la de cs_BK_PALM a la misma altura (616 de sus 1162 triangulos a menos de 15 cm: el parpadeo de las rayas).
   Ahora no se dibuja (CONFIRMADO).
-- Ramas de la union (race_area_stage_draw_44e290): registros 0 tronco, 1 rama izquierda, 2 derecha; el original dibuja
-  la rama del coche (obj | 1 o | 2 segun 451350). Ahora la demo dibuja las dos hasta elegir rama y despues solo la
-  elegida (PROBABLE: antes de elegir, 451350 sin estudiar).
+- Ramas de la union (race_area_stage_draw_44e290 = PS2 0x172ba0): registros 0 tronco, 1 rama izquierda, 2 derecha;
+  el original dibuja la rama del coche (obj | 1 o | 2 segun 451350) pasada la posicion 0x1C y el tronco hasta la 0xE3
+  (ver "Bifurcaciones: registros de la union", 2026-11-13). Ahora como el original (demo/main.c `uni_regs`).
 - Recorte y distancia (CONFIRMADO): camara de carrera de PS2 en 0x178580: +0xBC = 0,1 (cercano), +0xC0 = 4000
   (lejano); en el PC camera_perspective_404310 con esos campos. LOD por tamano en pantalla de 404B00: un nodo se
   descarta si 127 - exponente(r / (z tan(fov_v / 2))) >= umbral, umbral 6 en la etapa (4044E0(6) en
@@ -2855,6 +2855,32 @@ fbfe7b6, que arreglo la cordillera de LAKE).
   en la bifurcacion BK_PALM las secciones son de ~8,03 m (pos 0x18 a 199 m, 0x84 a 1063 m, 0xF0 a 1929 m de la
   colision) y m_pos de la etapa anda por 7,9-8,1: unos metros de diferencia. car+0x2B0 se lleva con la velocidad del
   coche (yo.v / 60,2 por paso).
-- No portado: la union (cs_BK_PALM) por registros como 44E290 (el tronco hasta 0xE4, la rama del coche desde 0x1C,
-  ninguna rama antes; al principio de la etapa siguiente solo la rama): la demo dibuja el tronco y las dos ramas hasta
-  elegir y luego el tronco y la suya. SIN PORTAR.
+- La union (cs_BK_PALM) por registros como 44E290: portado el 2026-11-13 (seccion siguiente).
+
+## Bifurcaciones: registros de la union (2026-11-13)
+
+Repaso de la queja "texturas en el cielo de las bifurcaciones que se cruzan" (tras fbfe7b6 y 42f41e8) contra
+race_area_stage_draw_44e290 (PC) = PS2 0x172ba0 (llamada desde 0x172410 = 44F120, antes o despues de 0x1725d0 segun
+car+0x5C, como en el PC). Lo que dibuja de la union (registro [7D2E78] << 16 = PS2 [0x5491600], matriz 7D3190):
+- En la union (car+0x5C != 0, s3 = car+0x64): el tronco (registro 0) si la posicion es < 0xE4; la rama (registro 1 si
+  451350 = PS2 0x1cfa40 da 0, 2 si da 1; nada con 2, sin rama aun) si la posicion es >= 0x1D. Antes de la 0x1D no hay
+  ninguna rama.
+- En la etapa (car+0x5C = 0): con la posicion < +0x72 del descriptor (PS2; +0x5C en el PC) la rama tomada en la union
+  de antes (451350 del nivel anterior, v - 1) y no el tronco; entre +0x72 y +0x74 nada; pasada la +0x74 (PC +0x5E) el
+  tronco de la union que viene y los porticos de los carteles (0x670000). Valores de SLES-53998: arbol 0 PALM 0 / 500,
+  LAKE 100 / 563, ALPI 100 / 575, CAST 90 / 570, FORE 64 / 535, DESE 100 / 550, CLOU 100 / 550, INDU 100 / 550, SNOW
+  100 / 625, GHOS 100 / 530, TULI 100 / 570, METR 50 / 600, RUIN 100 / 580, IMPE 60 / 580, CAPE 70 / 538; arbol 1 BEAC
+  100 / 530, SANF 30 / 595, YOSE 70 / 550, NIAG 100 / 570, SEQU 100 / 550, GRAN 0 / 570, MACH 100 / 550, LASV 50 / 600,
+  ALAS 100 / 525, AMAZ 100 / 500, EAST 60 / 600, MAYA 100 / 620, PRIN 100 / 580, FLOR 70 / 530, NEWY 100 / 520.
+- La demo dibujaba la union entera en cuanto estaba subida (2500 m antes del final de la etapa: el tronco desde la
+  posicion ~410 de PALM en vez de la 501), las dos ramas hasta elegir (la eleccion de la demo cae en la posicion
+  ~10-18 de la union) y, desde el principio de la etapa siguiente hasta soltar la union (300 m), otra vez el tronco y
+  las dos ramas (cur_rama vuelve a -1 al cambiar de etapa). Arreglo: CURSO.DAT lleva +0x72 / +0x74 de cada etapa
+  (tools/conv_union.py union_pos, registro de 684 bytes) y demo/main.c `uni_regs` decide los registros de cada cuadro
+  (nodos_visibles: bits 8-9 del nodo, tools/modelo.py rama).
+- PROBABLE: los porticos de los carteles (0x670000, obj_course_obj_bk_palm, tools/conv_union.py carteles) van en el
+  fichero sin registro propio y la demo los dibuja con el tronco; el original los dibuja en toda la union (bp == 0) y
+  en la etapa pasada la +0x74. Solo cambia pasada la posicion 0xE3 de la union, con los porticos ya muy detras del
+  coche.
+- Aproximacion que queda: la demo suelta la union 300 m dentro de la etapa siguiente (UNION_LIBERA; memoria); el
+  original dibuja la rama hasta la posicion +0x72 (~400-800 m), detras del coche.

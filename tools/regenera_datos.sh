@@ -10,6 +10,9 @@
 # 2026-11-12 basta borrar SEGS.PAK y UNIONES.PAK con las SEGnn.DAT enteras en datos/ y las uniones sueltas en trabajo/u0, u/.
 # Coches de antes del 2026-11-12 por la noche (sombra plana P_SOMBRA con su CLAMP y volumenes de sombra en trozos
 # convexos, conv_coche.py): borrar COCHES.DAT y COCHE00-14.DAT de datos/ y trabajo/coche/.
+# CURSO.DAT de antes del 2026-11-13 (registros de 680 bytes; la demo pide 684, con las posiciones +0x72 / +0x74 de la
+# union, conv_union.py union_pos): basta rehacer solo ese fichero con
+#   python3 tools/conv_union.py <iso> <dir> --arboles=1,100,...,193 --sin-uniones --parte=0/1000   (y copiar <dir>/CURSO.DAT)
 # Lo que sale del disco no va al repositorio. Idempotente: lo que ya esta en datos/ (o en trabajo/) no se rehace; si se
 # corta, se vuelve a llamar y sigue. En paralelo (JOBS, por defecto nproc). Sale con error si falla cualquier paso.
 # trabajo/ (por defecto /dev/shm/or2_regenera): intermedios (uniones sueltas, ~350 MB) y registros de cada paso.
