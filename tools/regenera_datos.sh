@@ -13,6 +13,9 @@
 # CURSO.DAT de antes del 2026-11-13 (registros de 680 bytes; la demo pide 684, con las posiciones +0x72 / +0x74 de la
 # union, conv_union.py union_pos): basta rehacer solo ese fichero con
 #   python3 tools/conv_union.py <iso> <dir> --arboles=1,100,...,193 --sin-uniones --parte=0/1000   (y copiar <dir>/CURSO.DAT)
+# PVS de antes del 2026-11-13 (secciones llenas en las puntas de la ruta, tools/pvs.py): basta pasar tools/pvs.py a las
+# SEGnn.DAT enteras (y a las BKkk.DAT sueltas, con --ruta BKD.DAT en las bifurcaciones) y empaquetarlas de nuevo (borrar
+# SEGS.PAK / UNIONES.PAK de datos/); con los conversores de ahora ya salen asi.
 # Lo que sale del disco no va al repositorio. Idempotente: lo que ya esta en datos/ (o en trabajo/) no se rehace; si se
 # corta, se vuelve a llamar y sigue. En paralelo (JOBS, por defecto nproc). Sale con error si falla cualquier paso.
 # trabajo/ (por defecto /dev/shm/or2_regenera): intermedios (uniones sueltas, ~350 MB) y registros de cada paso.
