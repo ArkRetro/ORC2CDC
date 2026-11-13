@@ -1181,6 +1181,78 @@ el bucle de vertices (27 instrucciones por vertice), el piloto (2,1 ms: la mezcl
 vertice), el coche (2,7 ms) y el principio del cuadro (1,6 ms: `coche_entorno` ~0,6 ms, una normal int8 a float por
 vertice).
 
+### Rendimiento: SH4ZAM (2026-11-13)
+
+[SH4ZAM](https://github.com/gyrovorbis/sh4zam) (libreria de matematicas del SH-4 de Falco Girgis, licencia MIT;
+v0.10.0+10, commit 7e57d5c) se instala de kos-ports: `cd /opt/toolchains/dc/kos-ports/sh4zam && make install
+GIT_CHANGESET=7e57d5c` (si no hay kos-ports: `git clone https://github.com/KallistiOS/kos-ports
+/opt/toolchains/dc/kos-ports`; `tools/instala_entorno.sh` hace las dos cosas). Deja las cabeceras en
+`kos-ports/include/sh4zam` (KallistiOS ya pone esa ruta en `KOS_CFLAGS`) y `libsh4zam.a` en `kos-ports/lib`. En el
+repositorio no hay codigo suyo: `comun/shz.h` la incluye y solo se usan funciones en linea (no hace falta
+`-lsh4zam`); va compilada dentro del 1ST_READ.BIN, asi que `windows/construye.sh` copia su licencia en LICENCIAS.txt.
+`-DSIN_SH4ZAM` vuelve a las cuentas en C de antes (y compila sin la libreria); cada uso se quita tambien solo
+(`SIN_SHZ_ROBOT`, `SIN_SHZ_ENTORNO`, `SIN_SHZ_NODOS`). Todo en precision simple (KallistiOS: `-m4-single`, literales
+con f).
+
+Lo que se usa (todo con FTRV, la matriz de la XMTRX por un vector en una instruccion):
+- `m_mul` (comun/robot.c, el esqueleto de los personajes en la logica: 4F2520 / 51B6D0) y `m_por` (demo/main.c,
+  `robot_matrices`: inversa por hueso, base del asiento, ojos): el producto de matrices de filas como
+  `shz_xmtrx_load_unaligned_4x4(b)` + `shz_xmtrx_apply_unaligned_4x4(a)` + store (en columnas la memoria de filas es
+  la traspuesta: (a b)^T = b^T a^T). Antes 64 fmul + 48 fadd en C.
+- `coche_entorno` (las UV del mapa de entorno de la carroceria, una normal int8 por vertice): las filas (0,5, a) y
+  (0,5, b) por (1, x, y, z), un FTRV por vertice; la XMTRX se carga una vez por malla.
+- `nodos_visibles` (esferas de los nodos contra la vista): xv, yv y zv con un FTRV de (dx, dy, dz, 0) por las filas
+  der, arr y ade; la XMTRX de quien llama se guarda y se repone.
+
+Probado y descartado: FIPR (`shz_dot8f`, el producto escalar de 4) en el recorte de mallas de `dibuja_etapa` (zv, xv,
+yv): +0,21 ms en PALM congelado (8022 -> 8231 us: GCC tiene que mover los dos vectores a fv0 / fv4 en cada malla y el
+recorrido ya no cabe en los registros) y 67 pixeles distintos (un borde de malla). SH4ZAM tampoco usa FIPR para el
+producto escalar si no se pide (`SHZ_SH4_DOT_FIPR`). La XMTRX no se puede usar alli: tiene la vista para los vertices.
+No se tocan: la carrera (`mat_trans` de KallistiOS y el bucle de vertices en ensamblador, ya con FTRV y FSRRA),
+`robot_dibuja` (ya FTRV por vertice; lo que queda es la luz entera y la mezcla de pesos) ni las raices de osage, la
+camara, las sombras y el trafico: FSRRA (`shz_inv_sqrtf_fsrra`) solo quitaria latencia de fdiv / fsqrt, que Flycast no
+cuenta (cuenta los ciclos de emision de cada instruccion, 1 para fdiv, fsqrt y FSRRA: sh4_cycles.cpp), asi que no se
+puede medir aqui, y cambiaria el resultado (FSRRA da ~1 / 2^22 de error) en la animacion del pelo o la sombra.
+
+Medido en Flycast (cuadro congelado `-DPRUEBA_AUTO -DDIAG_CONGELA=600 -DDIAG_MS -DDIAG_SIN_CPU -DDIAG_PERFIL
+-DPRUEBA_NODO=0/1/11`, mediana de las lineas MS / PRF del cuadro congelado; antes = el mismo codigo con -DSIN_SH4ZAM,
+que da la misma imagen pixel a pixel que el binario anterior):
+
+| Flycast, cuadro congelado (ms) | dib antes | dib despues | ini (coche_entorno, robot_matrices) antes / despues | nodos_visibles antes / despues |
+|---|---|---|---|---|
+| PALM | 18,10 | 17,76 | 1,93 / 1,77 | 1,76 / 1,58 |
+| LAKE | 12,64 | 12,45 | 1,92 / 1,76 | 0,58 / 0,55 |
+| METR (noche) | 20,80 | 20,38 | 1,93 / 1,77 | 1,62 / 1,36 |
+
+Logica (`log` de las lineas MS de antes de congelar, un paso por cuadro y el mismo estado en los dos): -0,06 / -0,07
+ms por paso (el esqueleto: `m_mul`). En carrera (`-DPRUEBA_AUTO -DDIAG_MS -DDIAG_POS`, el piloto desde la salida de
+PALM hasta el fin del tiempo en CAST, media de las lineas MS por zona; 45 cuadros por segundo fijos en los dos):
+
+| Flycast, carrera (ms) | dib antes / despues | log antes / despues | fps |
+|---|---|---|---|
+| PALM | 16,74 / 16,46 | 2,56 / 2,47 | 44,6 / 44,6 |
+| LAKE | 16,00 / 15,77 | 2,93 / 2,81 | 44,7 / 44,7 |
+| CAST | 15,27 / 15,15 | 2,31 / 2,25 | 44,9 / 44,8 |
+`final.sh` (OUTRUN2SP hasta la meta D y el final con la pareja, `-DDIAG_MS`; medias de las lineas MS por tramo): la
+carrera dib 16,76 -> 16,39 ms, la escena de la meta (la pareja junto al coche) dib 13,14 -> 12,92 y log 1,52 -> 1,45,
+el final (modo 24, FINCHR0D) dib 32,37 -> 32,17 y log 10,79 -> 10,56 (24,5 cuadros por segundo en los dos: el final ya
+iba asi). `nav3.sh` (COAST 2 COAST, la 1-1 en BEAC, mediana de las lineas MS): dib 16,75 -> 16,50, log 2,52 -> 2,45,
+44,8 fps en los dos. Los personajes, el coche y el final se ven igual (capturas de las dos pruebas); en las dos falta
+'FIN: modo 27' a tiempo en final.sh antes y despues (llega despues de los 60 s del script).
+
+Imagen: los cuadros congelados antes / despues solo cambian en la pintura del coche, de 6 a 12 pixeles por captura y
+en 1 nivel de 255 (las UV del mapa de entorno: Flycast hace el FTRV en doble y redondea al final; en C se redondea
+tras cada suma). Lo demas, igual pixel a pixel (en LAKE 2 pixeles de un arbol al fondo cambian tambien entre dos
+capturas del mismo binario). Los nodos y las mallas dibujadas, los vertices y el reparto del TA, iguales.
+
+Fisica: la posicion del coche (`DIAG_POS`, cada 300 pasos) sale igual bit a bit antes / despues hasta el paso 3900
+(65 s, s 5888 m, la entrada en LAKE); desde ahi se separa porque SEG03 termina de leerse en otro paso (s 5445 / 5452:
+la lectura del GD va en su hilo y acaba segun el tiempo de los cuadros) y el piloto automatico se va 0,4 m por
+delante; al fin del tiempo en CAST el coche esta en s 20065 antes y 20130 despues. Es lo que pasa con cualquier cambio
+de tiempo de CPU: el mismo codigo de antes con el perfil del SH4 (`-DDIAG_PERFIL`, que solo cambia el tiempo) se
+separa en el mismo paso 3900 (SEG03 en s 5461). Dos arranques del mismo binario dan las mismas posiciones bit a bit
+hasta el final (s 20130,1 los dos).
+
 ### 45 cuadros por segundo fijos (plan de recursos, 2026-11-12)
 
 Pedido del usuario: la tasa fija a 45 (decision del port: el original presenta un cuadro por campo cuando llega, hasta
@@ -1418,7 +1490,7 @@ a la vez), SEG03 3,52 s con la de 128 KB; en un GD real ~1,4..2,8 s mas por los 
 ## 4. Pruebas
 
 - Entorno y datos desde cero (contenedor nuevo): `tools/instala_entorno.sh` (KallistiOS d81aa3f con kos-chain stable,
-  GCC 15.2; Flycast Release sin Vulkan; paquetes de apt y pip) y `tools/regenera_datos.sh <iso> <datos/>` (todos los
+  GCC 15.2; SH4ZAM 7e57d5c de kos-ports, Rendimiento: SH4ZAM; Flycast Release sin Vulkan; paquetes de apt y pip) y `tools/regenera_datos.sh <iso> <datos/>` (todos los
   conversores, 4 pasos a la vez con un hilo cada uno, intermedios en /dev/shm; idempotente). Regenerado el 2026-11-10:
   513 ficheros, 852,7 MiB (62 SEG + 62 COL, 262 descriptores BKnn + UNIONES.PAK de 20,1 MiB, 62 MUS; con SEGS.PAK desde
   el 2026-11-10: 514, 825,6 MiB); huellas de
