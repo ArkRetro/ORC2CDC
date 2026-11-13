@@ -2550,8 +2550,9 @@ tools/regenera.py), CURSOTA.DAT y las uniones BK262..BK469 en UNIONESTA.PAK (con
   principio de la etapa siguiente se convierte en GOAL (demo/main.c, CUR_SIGUIENTE -> CUR_META).
 - INFARTO: el juego 1 (OutRun 2 SP) corre el arbol 1 (csc_data_cvt); el 0 el de antes (arbol 0, csc_data_2).
 - Uniones nuevas (208: las etapas solas con su bifurcacion y las de los arboles de las metas con un lado -1, cartel
-  BLNK; conv_union.py las numera detras de las 262 de antes, que no cambian): ~1,4 MB sueltas cada una, empaquetadas
-  en UNIONESTA.PAK (pak_union.py --pak=UNIONESTA.PAK; comun/gd.c lee el paquete que nombra cada descriptor).
+  BLNK; conv_union.py las numera detras de las 262 de antes, que no cambian): 285,5 MiB sueltas, 17,3 MiB en
+  UNIONESTA.PAK (pak_union.py --pak=UNIONESTA.PAK; comun/gd.c lee el paquete que nombra cada descriptor). Los datos
+  pasan a 903 MiB de 984 (TABLERO.DAT 0,9 MB, CURSOTA.DAT 0,2 MB).
 - Prueba: `-DPRUEBA_TABLERO_TODO` (la licencia activa con todos los bits 0x8a..0xce al entrar en un tablero) y
   `-DPRUEBA_TA_CODIGO=n` (con -DPRUEBA_AUTO -DPRUEBA_VARIANTE=7: la Contrarreloj del codigo n con el piloto);
   tools/prueba/tablero.sh.
@@ -2563,7 +2564,9 @@ tools/regenera.py), CURSOTA.DAT y las uniones BK262..BK469 en UNIONESTA.PAK (con
   con OutRun 2 SP: el coche y la carrera del arbol 1 (BEAC, HUD de corazones). Con el piloto
   (-DPRUEBA_AUTO -DPRUEBA_VARIANTE=7 -DPRUEBA_SIN_TIEMPO): codigo 0 (PALM_T sola) -> GOAL en el stage clear y la escena
   de la meta; codigo 0x46 (OR2_reverse_goals GOAL_A: TULI_R, CLOU_R, CAST_R, LAKE_R, PALM_R) -> 4 checkpoints y GOAL
-  en PALM_R. Sin "Out of memory" ni "pvr_mem: ERROR"; TABLERO.DAT 124 KB de tablas en el hueco, VRAM libre al abrir el
+  en PALM_R; con los datos empaquetados (UNIONESTA.PAK), codigo 0x41 (SP_goals GOAL_A): BEAC, SANF (el piloto toma
+  la rama -1 de SANF y la etapa se vuelve a cargar, como el original), NIAG, MACH, EAST y GOAL. Sin "Out of memory" ni
+  "pvr_mem: ERROR"; TABLERO.DAT 124 KB de tablas en el hueco, VRAM libre al abrir el
   tablero 481..516 KB (1009 KB de vuelta del salon). No probado en R.
 - SIN PORTAR / BLOQUEADO:
   - La lista de records de cada curso (0x267210 / 0x2674d8 / 0x269880, el foco hacia abajo, los textos de (60, 342) /
