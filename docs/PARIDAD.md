@@ -2884,3 +2884,11 @@ car+0x5C, como en el PC). Lo que dibuja de la union (registro [7D2E78] << 16 = P
   coche.
 - Aproximacion que queda: la demo suelta la union 300 m dentro de la etapa siguiente (UNION_LIBERA; memoria); el
   original dibuja la rama hasta la posicion +0x72 (~400-800 m), detras del coche.
+- Barrido (Flycast, PRUEBA_AUTO con PRUEBA_RAMA, una captura cada 2 s): las 20 bifurcaciones con sus 40 ramas de los
+  arboles 0 y 1, con la union por registros: en todas la etapa que se deja deja de dibujarse en la posicion 0x18-0x1A,
+  la siguiente no sale antes de la 0x84, los registros de la union y el fundido de los cielos (tres tercios) como el
+  original; sin texturas grises, rebajadas ni "Out of memory". Lo que se ve en el cielo de algunas uniones es geometria
+  de la etapa siguiente que ya sale desde su seccion 0: las crestas de SNOW desde la union de DESE y el techo de roca
+  de MAYA (nodos 194 / 195 de cs_CS_MAYA, radios de 1013 y 2436 m) desde la de LASV; sigue igual en la etapa y con la
+  PVS de la seccion 0 de la etapa siguiente desde la union (como la lista de nodos de la seccion 0 que usa 44DE10 en la
+  union, probado y quitado: no cambia nada).
