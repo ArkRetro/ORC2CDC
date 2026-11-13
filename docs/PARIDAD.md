@@ -3620,3 +3620,61 @@ cielo a traves y por debajo. Arreglo (tools/pvs.py y pvs_paso, DREAMCAST.md, PVS
 llenas (la ruta prolongada 32 m por cada punta) y las fachadas de recorte tapan donde su textura tapa; la salida queda
 en 56506 vertices en la vista y los edificios salen enteros como en el original. Sigue siendo mas de lo que cabe:
 alli el reparto aun quita (lo pequeno y lejano primero).
+
+## Revision 44: pausa, reintento, cielo y fotos de la consola real (2026-11-13)
+
+Quejas del usuario sobre la revision 43 (video de Flycast en el PC, COAST 2 COAST, y fotos de la Dreamcast real).
+
+- Pausa: "A y B descentrados" (CORREGIDO). La ventana de 48C5F0 del PC = SLES-53998 0x271ef0..0x272210: texto ELEGIR
+  (0x294) en (x + 45, y + h - 38), ATRAS (0x295) acabando en x + w - 45 (widget +0x960 con +0x480 = 2, a la derecha) y
+  los iconos (0x2720f8 / 0x272188, tabla 0x41f368 de {escena, primer cuadro, ultimo}: ATRAS la entrada 1 = 0x48000a
+  cuadro 25; ELEGIR la entrada [+0x1314] = 5 en la pausa = 0x480009 cuadro 25) CENTRADOS en (x + 27, y + h - 30) y
+  (x + w - 27, y + h - 30) (0x41d80000 = 27, 0x41f00000 = 30, menos 320 / 240: la escena va centrada). Las escenas son
+  de 29 x 29 / 29 x 30 (banco 0x48, las mismas de la barra de ayuda, conv_menu.py iconos_dc). Antes: B a la IZQUIERDA
+  de ATRAS (en el original va a la derecha), los dos 5 px hacia dentro y de 19 px; ahora pz_boton es del tamano del
+  boton_dc de la barra de ayuda (radio 13, borde 1,6) en el punto del original. Lo usan la lista, AUDIO (solo ATRAS) y
+  "Estas seguro?"; el SALON y la compra usan la ventana sin franja de botones (flags 0). Capturas pausa_antes /
+  pausa_despues.
+- REINTENTAR (CORREGIDO un caso; el del video no se ha reproducido tal cual): en las misiones la rama sin hijo vuelve
+  a cargar la MISMA etapa (next_area de 44E590: con [rec + rama * 4 + 0x24] = -1 el registro no cambia; en CURSO.DAT
+  las 94 misiones tienen una rama -1, p. ej. 1-1: BEAC izq 1 der -1) y esa copia se lee con el marco de despues de la
+  union (marco_sig, y su colision con ese marco). Con REINTENTAR desde ella, curso_reinicia la reaprovechaba como la de
+  la salida (etapa_nodo igual al nodo 0, los datos aun en el hueco) y salida_calcula buscaba (0, -16) del mundo en una
+  ruta movida y girada: el coche salia fuera de la calzada y torcido (lo del video: costa con gradas, encima del
+  quitamiedos). Lo mismo con una carrera nueva del mismo arbol desde el menu (curso_al_menu no suelta la etapa de la
+  RAM): "a veces el coche comienza descentrado". Ahora `etapa_movida` (la etapa del hueco es la siguiente de una union
+  o se recentro) obliga a leerla otra vez en el origen. La consola serie escribe en cada salida "SALIDA: arbol .. etapa
+  .. s .. x .. a .. coche .." (con "(REINTENTAR)"), y tools/prueba/reintenta.sh compara la primera salida con la del
+  reintento. Verificado en Flycast: C2C 1-1 con REINTENTAR desde BEAC (8 y 40 s de gas) y desde PALM (tras la union,
+  con -DPRUEBA_PILOTO_MENU): las dos salidas iguales (s 16,00, x 0,02, coche (0, 0, -16)). El paso por la rama -1 no se
+  ha podido forzar con el piloto (las dos pruebas de -DPRUEBA_RAMA=0/1 fueron a PALM): la causa del video es PROBABLE.
+- Cielo, "lineas que separan zonas" (dos causas):
+  - Consola real (fotos de PALM: una costura vertical recta de otro tono de arriba abajo): el recorte del cielo a
+    w = 50 m dejaba vertices a ~16000 px y la PowerVR pierde precision en los planos de UV y color de cada triangulo
+    (cada uno con un error distinto: dos tonos a los lados de una arista). Ahora el plano de recorte es el mas lejano que
+    no quita nada de la pantalla: 600 x fx / sqrt(fx^2 + 320^2 + 240^2) (437 m con la focal de siempre; el cielo esta a
+    >= 707 m del ojo). Flycast no lo muestra (rasteriza en la GPU del PC): sin verificar en la consola.
+  - Flycast y consola: escalones de color del degradado. La textura del cielo del original es de 8 bits con paleta de
+    32 (obj_course_obj_sky_palm: 128 x 128, 256 colores; azul de la parte alta de R 119..121, B 205..214 en pasos de 1)
+    y la de la Dreamcast es RGB565 (VQ): R 119 -> 115 y 121 -> 123, un salto de 8 justo donde el original cambia en 1 y
+    el cielo casi liso queda en zonas con una linea entre ellas (en la captura de PALM, (115,146,206) / (123,146,206) /
+    (123,146,214)). No hay formato de textura con mas bits que filtre (la paleta ARGB8888 de la PowerVR es global y no
+    filtra igual); queda PENDIENTE (YUV422, que tiene 8 bits de luminancia, o tramar la textura al convertir: cambian
+    los datos).
+  - La textura del cielo es continua en u (los bordes del original y de la DC coinciden: diferencia media 3) y las
+    tiras comparten vertices y v: no hay costura de geometria ni de borde (sin CLAMP en el original no hace falta).
+- Fotos de la consola real (PALM, modo OutRun) y la de INFARTO: ver "Pendiente de la revision 44" abajo.
+
+### Pendiente de la revision 44 (investigado, sin corregir)
+
+- Cajas oscuras sin textura (edificios lejanos de PALM que se texturizan al acercarse) y trozos de torre "flotando"
+  sin su base al final de PALM: solo en la consola real. En Flycast el TA nunca se llena (ta_f no sube: Flycast no
+  actualiza TA_ITP_CURRENT) y el reparto de nodos_visibles_todos dibuja todo; en la consola ta_f sube y el reparto
+  quita nodos por clases de distancia y de tamano en pantalla, nodo a nodo: la base de un edificio (otra clase) se
+  quita y la parte de arriba no (flotante). Reproducible en Flycast forzando ta_f (TA_F_MIN mayor). Arreglo pendiente:
+  quitar por edificio (agrupar los nodos de un mismo objeto del registro) en vez de por nodo. Las cajas lisas: mallas
+  sin textura del original (sin_textura del material: 0x60202020 por defecto en modelo.bloque) o niveles pequenos de
+  los mipmaps en la PowerVR real; sin verificar.
+- INFARTO (foto: el coche parado sobre el plano azul del agua, 6c8658f): el plano de agua_dibuja se pinta con z en la
+  lista opaca y tapa lo que quede por debajo de el; con el coche fuera de la calzada (o la etapa movida, ver
+  REINTENTAR) se ve como un suelo azul. Sin reproducir: hace falta la etapa y el sitio (tiempo 14, Etapa 1).

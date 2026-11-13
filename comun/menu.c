@@ -2697,29 +2697,37 @@ static uint32_t pz_mezcla(uint32_t c, int a, float f)       /* c (RGB) hacia el 
     return r;
 }
 /* boton de la Dreamcast (DESVIACION, revision 42, como los de la barra de ayuda de MENU.DAT, conv_menu.py boton_dc):
-   circulo del color del mando con sombra, borde oscuro, degradado y brillo, y la letra blanca con contorno oscuro */
+   circulo del color del mando con sombra, borde oscuro, degradado y brillo, y la letra blanca con contorno oscuro.
+   Revision 44: del tamano del icono del original (los cuadros 25 de las escenas 0x480009 / 0x48000a del banco 0x48,
+   29 x 29 / 29 x 30 centrados en su punto; boton_dc: radio 29 / 2 - 1,5 = 13, borde 1,6, centro medio pixel arriba
+   a la izquierda para la sombra). Antes radio 9,5 (19 px) */
 static void pz_boton(const char *letra, float cx, float cy, uint32_t col, float z)
 {
-    float r = 9.5f; int k;
-    pz_disco(cx + 1, cy + 1, r, r, 0x70000000, 0x70000000, z);
+    float r = 13.0f; int k;
+    cx -= 0.5f; cy -= 0.5f;
+    pz_disco(cx + 1, cy + 1, r, r, 0x73000000, 0x73000000, z);
     pz_disco(cx, cy, r, r, pz_mezcla(col, 255, -0.5f), pz_mezcla(col, 255, -0.5f), z + 0.001f);
-    pz_disco(cx, cy, r - 1.5f, r - 1.5f, pz_mezcla(col, 255, 0.38f), pz_mezcla(col, 255, -0.22f), z + 0.002f);
-    pz_disco(cx, cy - r * 0.42f, r * 0.62f, r * 0.36f, 0x60FFFFFF, 0x00FFFFFF, z + 0.003f);
+    pz_disco(cx, cy, r - 1.6f, r - 1.6f, pz_mezcla(col, 255, 0.38f), pz_mezcla(col, 255, -0.22f), z + 0.002f);
+    pz_disco(cx, cy - r * 0.42f, r * 0.62f, r * 0.36f, 0x73FFFFFF, 0x00FFFFFF, z + 0.003f);
     for (k = 0; k < 4; k++)
-        texto_c(letra, cx + (k & 1 ? 1 : -1), cy + 1 + (k & 2 ? 1 : -1), 12, 0.8f, z + 0.004f, pz_mezcla(col, 0, -0.65f) & 0xFFFFFF);
-    texto_c(letra, cx, cy + 1, 12, 1, z + 0.005f, 0xFFFFFF);
+        texto_c(letra, cx + (k & 1 ? 1 : -1), cy + (k & 2 ? 1 : -1), 12, 0.8f, z + 0.004f, pz_mezcla(col, 0, -0.65f) & 0xFFFFFF);
+    texto_c(letra, cx, cy, 12, 1, z + 0.005f, 0xFFFFFF);
 }
-/* botones de la ventana (48C5F0: ELEGIR 0x294 en (x + 45, y + h - 38), ATRAS 0x295 acabando en x + w - 45) con el
-   boton de la Dreamcast delante (los iconos del original son imagenes del XST sin localizar) */
+/* botones de la ventana (48C5F0 del PC = SLES-53998 0x271ef0..0x272210): ELEGIR 0x294 en (x + 45, y + h - 38) y ATRAS
+   0x295 acabando en x + w - 45 (widget +0x960 con +0x480 = 2: a la derecha). Iconos (0x2720f8 / 0x272188, tabla
+   0x41f368 de {escena, cuadro}: ATRAS la 1 = 0x48000a cuadro 25, ELEGIR la [+0x1314] = 5 en la pausa = 0x480009
+   cuadro 25): ATRAS en (x + w - 27, y + h - 30), a la DERECHA de su texto, y ELEGIR en (x + 27, y + h - 30), a la
+   izquierda del suyo (0x41d80000 = 27, 0x41f00000 = 30; las escenas, centradas en ese punto). Antes ATRAS llevaba el
+   boton a la izquierda y los dos 5 px mas adentro y mas pequenos (revision 43: "A y B descentrados") */
 static void pz_botones(float x, float y, float w, float h, float z, int elegir)
 {
-    int n; const uint8_t *t = txt(0x295, &n); float xa = x + w - 45 - f_ancho(t, n), cy = y + h - 38 + f_h * 0.5f;
+    int n; const uint8_t *t = txt(0x295, &n);
     if (elegir) {
-        pz_boton("A", x + 45 - 13, cy, 0xE22E28, z);
+        pz_boton("A", x + 27, y + h - 30, 0xE22E28, z);
         texto_id(0x294, x + 45, y + h - 38, 1, 1, z, 0xF0F0F0);
     }
-    pz_boton("B", xa - 13, cy, 0x2662DC, z);
-    texto(t, n, xa, y + h - 38, 1, 1, z, 0xF0F0F0);
+    pz_boton("B", x + w - 27, y + h - 30, 0x2662DC, z);
+    texto(t, n, x + w - 45 - f_ancho(t, n), y + h - 38, 1, 1, z, 0xF0F0F0);
 }
 
 int menu_pausa_entra(void)

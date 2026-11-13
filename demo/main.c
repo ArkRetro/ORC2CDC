@@ -4953,6 +4953,9 @@ static void *hueco_pcarga(uint32_t tam)
 static modelo_t *const tramos[3] = { &etapa, &uni, &sig };     /* lo que se dibuja (lo que este subido) */
 static const modelo_t *cielo;                                   /* el cielo que se dibuja */
 static int cur_nodo = -1, cur_sig = -1, cur_rama, cur_en_union, etapa_nodo = -1;   /* etapa actual, siguiente, rama */
+/* la etapa del hueco ya no esta en el origen (en el marco de la salida): es la siguiente de una union (leida con su marco,
+   carga_pide) o se recentro (curso_recentra). curso_reinicia no la puede reaprovechar para la salida (ver alli) */
+static int etapa_movida;
 static int seg_jugador(void) { return cur_nodo >= 0 && cur_nodo < ncurso ? curso[cur_nodo].seg : -1; }
 static int8_t rama_nivel[5];                                    /* 451350(nivel): la rama tomada (2: sin llegar) */
 static int fin_nivel = -1, fin_lado = -1; static float fin_razon = -1;   /* 4AEEF0 al acabarse el tiempo */
@@ -5173,7 +5176,7 @@ static int curso_lee_etapa(int k)
     char n[16]; int r;
     sprintf(n, "SEG%02d.DAT", curso[k].seg);
     r = lee_modelo_en(&etapa, n, hueco_etapa, cap_etapa);
-    etapa_nodo = r ? -1 : k;
+    etapa_nodo = r ? -1 : k; etapa_movida = 0;
     if (!r) { static const float M0[4]; col_en_hueco(k, M0); }   /* la de salida: en el origen */
     return r;
 }
@@ -5202,7 +5205,12 @@ static void curso_reinicia(void)
     while (meta_hilo) thd_sleep(5);
     col_reserva();
     libera_modelo(&uni); libera_modelo(&uni_der); libera_modelo(&sig);
-    if (!etapa.datos || etapa_nodo != k) {
+    /* Revision 44 ("al reintentar, el coche sale por otro lado"): en las misiones la rama sin hijo vuelve a cargar la
+       misma etapa (cur_sig = cur_nodo, next_area de 44E590) y esa copia esta en el marco de despues de la union
+       (marco_sig, y su colision en col_et con ese marco); con REINTENTAR desde ella se reaprovechaba como si fuera la de
+       la salida (etapa_nodo igual) y el coche salia en (0, -16) del mundo, fuera de la calzada y torcido (encima del
+       quitamiedos, en BEAC de la 1-1). Ahora una etapa movida se vuelve a leer, en el origen, como la primera vez */
+    if (!etapa.datos || etapa_nodo != k || etapa_movida) {
         int r;
         libera_modelo(&etapa);
         pcarga_avance(0.7f);                                    /* (la pantalla de carga: se anima mientras lee) */
@@ -5255,6 +5263,7 @@ static void curso_recentra(float dx, float dz)
     uint32_t i; int k, j;
     for (i = 0; i < ruta_n; i++) { ruta_p[PR * i] -= dx; ruta_p[PR * i + 2] -= dz; }
     for (k = 0; k < 3; k++) if (tramos[k]->datos) modelo_desplaza(tramos[k], dx, dz);
+    if (etapa.datos && (dx != 0 || dz != 0)) etapa_movida = 1;
     if (uni_der.datos) modelo_desplaza(&uni_der, dx, dz);
     yo.pos[0] -= dx; yo.pos[2] -= dz;
     for (k = 0; k < NTRAF; k++) { traf[k].c.pos[0] -= dx; traf[k].c.pos[2] -= dz; traf[k].rh[0] -= dx; traf[k].rh[2] -= dz; }
@@ -5373,6 +5382,9 @@ static int curso_paso(void)
     if (s_decide >= 0 && cur_rama < 0 && yo.s >= s_decide) {   /* la rama: el centro mas cercano al coche */
         uint32_t k = j_union + (uint32_t)((yo.s - s_union) / PASO);
         cur_rama = dist_centro(&uni_der, k, yo.pos) < dist_centro(&uni, k, yo.pos);
+#ifdef PRUEBA_RAMA_FIJA
+        cur_rama = PRUEBA_RAMA_FIJA;                            /* prueba: esa rama (1: la derecha, sin hijo en las misiones) */
+#endif
         if (cur_rama) {                                         /* la derecha: su ruta en lugar de la izquierda */
             float p[3], th;
             ruta_n = i_union;
@@ -5412,7 +5424,7 @@ static int curso_paso(void)
     }
     PK("pide etapa");
     if (s_sig >= 0 && yo.s >= s_sig) {                         /* la etapa siguiente pasa a ser la actual */
-        etapa = sig; memset(&sig, 0, sizeof sig); etapa_nodo = cur_sig; cielo = &etapa;
+        etapa = sig; memset(&sig, 0, sizeof sig); etapa_nodo = cur_sig; cielo = &etapa; etapa_movida = 1;
         cur_nodo = cur_sig; cur_sig = -1; memcpy(marco_et, marco_sig, sizeof marco_et);
         etapa_n = curso[cur_nodo].nivel; s_etapa = s_sig; s_suelta = s_sig + UNION_LIBERA;
         if (curso[cur_nodo].m_pos > 1.0f) m_pos = curso[cur_nodo].m_pos;
@@ -6974,13 +6986,21 @@ static const pvr_poly_hdr_t *cielo_cab(const modelo_t *mo, int i, int niebla, in
    plano de fondo (KallistiOS: ISP_BACKGND_D = pvr_set_zclip, 1e-4): en la consola real la PowerVR no dibuja lo que
    tiene 1/w menor (el cielo que se fundia en la union desaparecia); Flycast no lo recorta y no se veia. La escena
    acaba en lejos <= 4000 m (1/w >= 2,5e-4).
-   Recorte del cielo: en el plano w = CIELO_CERCA (50 m) y no en el cercano de la escena (0,1 m). El cielo rodea la
+   Recorte del cielo: en el plano w = CIELO_CERCA (50 m; 437 m desde la revision 44, ver abajo) y no en el cercano de la escena (0,1 m). El cielo rodea la
    camara (707-1938 m del ojo) y sus triangulos que pasan por detras, recortados a 0,1 m, tenian vertices a millones
    de pixeles (1500 m / 0,1 m x 426): la PowerVR calcula los planos de z, color y UV del triangulo en coma flotante
    desde sus vertices y con esas cifras pierde la precision (bandas y texturas rotas en el cielo en la consola real;
    Flycast rasteriza con la GPU del PC y no lo muestra). Lo que se ve del cielo esta a w >= ~700 m: el recorte a 50 m
    no quita nada de la pantalla y deja los vertices por debajo de ~16000 pixeles. */
-#define CIELO_CERCA 50.0f
+/* Revision 44 (consola real, PALM: "lineas verticales en el cielo", una costura recta de otro tono de arriba abajo):
+   con el recorte a 50 m los triangulos del cielo que pasan junto a la camara quedaban con vertices a ~16000 pixeles y la
+   PowerVR seguia perdiendo precision en sus planos de UV y color (cada triangulo con un error distinto: dos tonos a los
+   lados de su arista comun). Ahora el plano de recorte es el mas lejano que no quita nada de la pantalla: el cielo mas
+   cercano esta a >= 707 m del ojo (600 de margen) y el punto visible mas apartado del eje (la esquina, a 320 x 240
+   pixeles del centro con la focal fx) tiene w = d fx / sqrt(fx^2 + 320^2 + 240^2): con fx = 426,7 son 437 m y los
+   vertices recortados quedan a menos de ~1900 pixeles */
+static float cie_cerca = 50.0f;
+#define CIELO_CERCA cie_cerca
 static int cie_lleno;                                           /* la malla, con el alfa del vertice a 255 (cielo_grupo) */
 static int cie_seq;                                             /* mallas del cielo enviadas a la lista 2 (cuadro) */
 static inline void cielo_envia(const pt_t *p, int fin, float z)  /* z = 0: la 1/w del vertice */
@@ -7071,6 +7091,7 @@ static void cielo_dibuja(int l)
     int niebla = niebla_cielo_d > 0;                           /* la lista 0 de la niebla (solo CLOU la tiene) */
     const modelo_t *nuevo = ent_cruza ? &etapa : sig.tv ? &sig : NULL, *viejo = ent_cruza ? &uni : cielo;
     if (l == 0) cie_seq = 0;
+    cie_cerca = 600.0f * fx / sqrtf(fx * fx + 160000.0f);   /* (ver CIELO_CERCA) */
     mat_load(&vista_cielo);
     if (ent_fase == 0) cielo_grupo(cielo, 0, l, 1, niebla, -1);
     else if (ent_fase == 2) cielo_grupo(nuevo ? nuevo : cielo, 0, l, 1, niebla, -1);
@@ -10041,6 +10062,9 @@ int main(int argc, char **argv)
                            rival_mis()->sub, rival_mis()->tipo, rival_n(), rival_mis()->largo);
                 }
                 if (fis_ok) { float p[3], th; ruta_en(yo.s, p, &th, NULL, NULL); or2_coloca(&fis, &fpar, th + yo.a, 0); }
+                dbglog(DBG_INFO, "SALIDA: arbol %d etapa %d %.4s s %.2f x %.2f a %.4f coche %.2f %.2f %.2f%s\n", curso_id, cur_nodo,
+                       curso[cur_nodo].zona, (double)yo.s, (double)yo.x, (double)yo.a, (double)yo.pos[0], (double)yo.pos[1],
+                       (double)yo.pos[2], reintenta ? " (REINTENTAR)" : "");
                 lejos = LEJOS_PS2; entorno_reinicia(); niebla_paso(); niebla_pon();   /* la distancia del original */
                 tim_cuadros = tim_zona(cur_nodo, etapa_n); tiempo = tim_cuadros / TIM_HZ; estado = CUENTA; t_estado = 0; t_cuenta = -60; fac_on = 0; fac_base = 30001; salida_entra(); pausa = 0; crono = 0; pt_inicia(); fin_carrera_empieza(!juego_sp);
                 reintenta = 0;
