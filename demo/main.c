@@ -6439,7 +6439,7 @@ static void nodos_visibles(modelo_t *mo)
     if (!mo->vis) return;
     memcpy(mo->vis_ant, mo->vis, (mo->nnodos + 31) / 32 * 4);  /* lo dibujado en el cuadro anterior (REPARTO_HIST_*) */
     memset(mo->vis, 0, (mo->nnodos + 31) / 32 * 4);
-    if (G) memset(G, 0xFF, mo->nnodos * 2);                     /* sin clase (255, 255): mayor que todas */
+    if (G) memset(G, 0, mo->nnodos * 2);                        /* (0, 0): la mas baja; abajo, la mayor de los suyos */
     if (FF) memset(FF, 0, (mo->nnodos + 31) / 32 * 4);
 #ifdef DIAG_POPPING
     {   pop_slot_t *ps = pop_slot(mo);
@@ -6515,9 +6515,9 @@ static void nodos_visibles(modelo_t *mo)
         }
 #endif
         d->relleno[1] = (d->relleno[1] & ~4095u) | (uint32_t)(cd << 6 | cp);
-        if (G && (g = d->fl >> 16) && g <= nnod) {               /* de un grupo: la clase mas baja de los suyos visibles */
+        if (G && (g = d->fl >> 16) && g <= nnod) {               /* de un grupo: la clase mas alta de los suyos visibles */
             uint32_t o = G[g - 1], od = o >> 8, op = o & 255;
-            G[g - 1] = (uint16_t)(((uint32_t)cd < od ? (uint32_t)cd : od) << 8 | ((uint32_t)cp < op ? (uint32_t)cp : op));
+            G[g - 1] = (uint16_t)(((uint32_t)cd > od ? (uint32_t)cd : od) << 8 | ((uint32_t)cp > op ? (uint32_t)cp : op));
             continue;                                           /* (su coste, abajo) */
         }
         prio_coste[cd][cp] += c_teo; prio_vtx[cd][cp] += c_v;
@@ -6526,10 +6526,12 @@ static void nodos_visibles(modelo_t *mo)
     shz_xmtrx_load_4x4(&nv_xm);
 #endif
     /* Grupos (DECISION DEL PORT, revision 44; docs/PARIDAD.md, Edificios sin base): los nodos de un mismo objeto
-       (tools/grupos_nodos.py: apilados en planta, como la base y la torre de un edificio) llevan todos la clase de
-       distancia y la de LOD mas bajas de los del grupo que se ven en este cuadro, y su coste va en esa clase: el reparto
-       (nodos_quita) los deja o los quita a la vez. Antes, en la consola real (el TA lleno), la base se quitaba y la parte
-       de arriba no: trozos de torre flotando */
+       (tools/grupos_nodos.py: apilados en planta, como la base y la torre de un edificio o la caja y sus capas de
+       ventanas) llevan todos la clase de distancia y la de LOD mas altas de los del grupo que se ven en este cuadro (lo
+       que antes se quita), y su coste va en esa clase: el reparto (nodos_quita) los deja o los quita a la vez. Antes, en
+       la consola real (el TA lleno), se quitaban las capas de ventanas (muchas caras pequenas) y se quedaba la caja: cajas
+       lisas y oscuras, y trozos de torre flotando. Con la clase mas baja (probado) el grupo entero pasaba a lo cercano y
+       el reparto ya no cabia: en la salida de PALM se quitaba todo lo de mas alla (Flycast, -DTA_F_MIN=576) */
     if (G) {
         uint32_t w;
         for (w = 0; w < (nnod + 31) / 32; w++) {

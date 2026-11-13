@@ -7,9 +7,10 @@ tamano en la pantalla, y la base de un edificio (otra clase: mas vertices, otra 
 la demo los dibuje o los quite a la vez:
  - caja de los vertices de cada nodo (sus tiras de las listas 0..2; sin los carteles, que van en el marco del nodo);
  - dos nodos van juntos si los dos miden menos de GRUPO_LADO en planta (x y z: lo grande, terreno y calzada, no
-   arrastra a nada), sus plantas se solapan en al menos GRUPO_SOLAPE del area de la menor, entre su caja y la otra en
-   altura no hay mas de GRUPO_HUECO (apilados: la base y la torre, el tejado, las ventanas) y son de la misma rama de
-   la union (bits 8-9);
+   arrastra a nada), sus plantas se solapan en al menos GRUPO_SOLAPE del area de la menor, la mayor no pasa de
+   GRUPO_PROPORCION veces la menor (un trozo de suelo con un arbol o un banco encima no los junta, ni encadena una
+   manzana entera), entre su caja y la otra en altura no hay mas de GRUPO_HUECO (apilados: la base y la torre, el
+   tejado, las capas de ventanas) y son de la misma rama de la union (bits 8-9);
  - los grupos son las clases de esa relacion (union de conjuntos); el jefe es el nodo de menor indice.
 En el fichero: bits 16-31 de las banderas del nodo = jefe + 1 (0 = el nodo va solo). Lo aplican conv_tramo.convierte
 (SEGnn.DAT) y conv_union.py (BKnn.DAT) justo despues de escribir el modelo (los pasos seg / union / unionta de
@@ -21,6 +22,8 @@ import numpy as np
 GRUPO_LADO = 80.0                                               # m: mayor lado en planta de un nodo que se agrupa
 GRUPO_SOLAPE = 0.5                                              # parte del area en planta del menor que se solapa
 GRUPO_HUECO = 1.0                                               # m: separacion en altura como mucho
+GRUPO_PROPORCION = 4.0                                          # la planta mayor, como mucho 4 veces la menor (un trozo
+                                                                # de suelo con algo encima no arrastra a lo de encima)
 
 NODO = np.dtype([('c', '<f4', 3), ('r', '<f4'), ('fl', '<u4'), ('cartel', '<i4'), ('rel', '<u4', 2)])
 MALLA = np.dtype([('c', '<f4', 3), ('r', '<f4'), ('v0', '<u4'), ('n', '<u4'), ('tex', '<i4'), ('nodo', '<i4')])
@@ -57,7 +60,8 @@ def grupos(N, M, P, ini):
             ox = np.minimum(H[a, 0], H[b, 0]) - np.maximum(L[a, 0], L[b, 0])
             oz = np.minimum(H[a, 2], H[b, 2]) - np.maximum(L[a, 2], L[b, 2])
             hueco = np.maximum(L[a, 1], L[b, 1]) - np.minimum(H[a, 1], H[b, 1])
-            ok = (ox > 0) & (oz > 0) & (ox * oz >= GRUPO_SOLAPE * np.minimum(area[a], area[b])) & (hueco <= GRUPO_HUECO) & (rama[b] == rama[a])
+            ok = (ox > 0) & (oz > 0) & (ox * oz >= GRUPO_SOLAPE * np.minimum(area[a], area[b])) & (hueco <= GRUPO_HUECO) & \
+                 (rama[b] == rama[a]) & (np.maximum(area[a], area[b]) <= GRUPO_PROPORCION * np.minimum(area[a], area[b]))
             for j in b[ok]:
                 ra, rb = raiz(cand[a]), raiz(cand[j])
                 if ra != rb: jefe[max(ra, rb)] = min(ra, rb)

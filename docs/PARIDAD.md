@@ -3698,7 +3698,7 @@ Quejas del usuario sobre la revision 43 (video de Flycast en el PC, COAST 2 COAS
     tiras comparten vertices y v: no hay costura de geometria ni de borde (sin CLAMP en el original no hace falta).
 - Fotos de la consola real (PALM, modo OutRun) y la de INFARTO: ver "Pendiente de la revision 44" abajo.
 
-### Pendiente de la revision 44 (investigado, sin corregir)
+### Pendiente de la revision 44 (investigado; corregido en la segunda parte, abajo)
 
 - Cajas oscuras sin textura (edificios lejanos de PALM que se texturizan al acercarse) y trozos de torre "flotando"
   sin su base al final de PALM: solo en la consola real. En Flycast el TA nunca se llena (ta_f no sube: Flycast no
@@ -3707,7 +3707,110 @@ Quejas del usuario sobre la revision 43 (video de Flycast en el PC, COAST 2 COAS
   quita y la parte de arriba no (flotante). Reproducible en Flycast forzando ta_f (TA_F_MIN mayor). Arreglo pendiente:
   quitar por edificio (agrupar los nodos de un mismo objeto del registro) en vez de por nodo. Las cajas lisas: mallas
   sin textura del original (sin_textura del material: 0x60202020 por defecto en modelo.bloque) o niveles pequenos de
-  los mipmaps en la PowerVR real; sin verificar.
+  los mipmaps en la PowerVR real; sin verificar. -> Corregido abajo (grupos de nodos): eran las dos cosas el reparto.
 - INFARTO (foto: el coche parado sobre el plano azul del agua, 6c8658f): el plano de agua_dibuja se pinta con z en la
   lista opaca y tapa lo que quede por debajo de el; con el coche fuera de la calzada (o la etapa movida, ver
-  REINTENTAR) se ve como un suelo azul. Sin reproducir: hace falta la etapa y el sitio (tiempo 14, Etapa 1).
+  REINTENTAR) se ve como un suelo azul. Sin reproducir: hace falta la etapa y el sitio (tiempo 14, Etapa 1). -> Abajo:
+  NEWY por el arbol equivocado y el agua con la z mal por los vertices fuera de la pantalla.
+
+### Revision 44: fallos de la consola real (2026-11-13, segunda parte)
+
+Lo pendiente de arriba, con las fotos de la Dreamcast PAL (PALM en el modo OutRun y la de INFARTO).
+
+- **Edificios sin base y cajas oscuras lisas (PALM)**. Causa: el reparto del TA (`nodos_visibles_todos`), que en la
+  consola quita nodos (alli ta_f sube con lo que mide `TA_ITP_CURRENT`; Flycast no lo lleva y ta_f se queda en 1,75).
+  Quita nodo a nodo por su clase de distancia y de tamano en la pantalla, y los nodos de un mismo edificio caen en
+  clases distintas: en PALM las torres del final son una caja de 12 vertices (nodo 260: la base y el cuerpo) y dos
+  capas de ventanas de 36 y 52 (562, 568) con la misma planta; la caja (pocas caras grandes) se queda y las ventanas
+  (caras pequenas: caras por pixel altas) se van, o al reves. Las dos fotos son lo mismo: trozos de arriba sin su base
+  (ed6aefe0, 75d97d85) y la caja sin las ventanas, oscura y lisa, que al acercarse vuelve a tenerlas (77d6267b ->
+  34b1edd7). No son mallas sin textura (en PALM solo 37 tiras / 119 vertices sin textura, todas pequenas) ni los
+  mipmaps (las mismas texturas se ven bien de cerca y no hay textura a medias: ver abajo).
+  Arreglo (DECISION DEL PORT: el original no tiene tope del TA ni grupos; walk_404d10 prueba cada nodo por su cuenta):
+  `tools/grupos_nodos.py` junta al convertir los nodos de un mismo objeto (los dos de menos de 80 m en planta, las
+  plantas solapadas en al menos la mitad de la menor, la mayor como mucho 4 veces la menor, a menos de 1 m en altura,
+  de la misma rama de la union; las clases de esa relacion) y escribe en los bits 16-31 de sus banderas el jefe del
+  grupo + 1; `nodos_visibles` da a todos los del grupo que se ven la clase de distancia y la de LOD MAS ALTAS de ellos
+  (las de lo que antes se quita) y cuenta alli el coste de todos: `nodos_quita` los deja o los quita a la vez. Asi,
+  cuando no cabe, el edificio se va entero, como lo pequeno y lejano en el LOD del original, en vez de quedarse a
+  medias. PALM: 209 grupos, 861 de 2512 nodos (hasta 17 por grupo, 1985 vertices el mayor; la torre del final: 260,
+  562 y 568 juntos; los bajos, las fachadas de recorte y el tejado del edificio de la salida, 548..551, juntos); en las
+  62 etapas y 470 uniones. RAM: 2 bytes por nodo (detras de vis); CPU: una pasada mas por los nodos visibles.
+  Probado y descartado: la clase MAS BAJA del grupo (si se ve un trozo cercano, todo el grupo es cercano) y sin el
+  tope de proporcion (un trozo de suelo con algo encima encadenaba manzanas enteras): el coste de los grupos pasaba a
+  lo cercano, el reparto ya no cabia y en la salida de PALM se quitaba todo lo de mas alla ("clase -1": solo la
+  calzada y la playa).
+  Datos: `conv_tramo.convierte` y `conv_union.py` lo hacen al escribir; en una carpeta ya hecha,
+  `tools/regenera.py --interno grupos datos/ [trabajo/]` (recompone, cambia y vuelve a empaquetar SEGS.PAK,
+  UNIONES.PAK y UNIONESTA.PAK; solo cambian 2 bytes por nodo agrupado).
+  Verificacion en Flycast (`-DTA_F_MIN=768`, una consola que gasta 3 veces la cuenta teorica; `-DPRUEBA_AUTO`, PALM):
+  sin los grupos, en la salida de PALM (0'14-0'16) los edificios quedan a medias: cajas lisas sin sus capas de ventanas
+  y fachadas con el cielo a traves (capturas_r44/cajas_antes_tope576.png, edificios_antes_tope576.png); con los grupos
+  salen enteros o no salen (cajas_despues_tope576.png, edificios_despues_tope576.png; referencia sin el tope:
+  edificios_referencia_sin_tope.png; el edificio negro de la derecha es asi en el original, cristal oscuro con
+  ventanas). Sin -DTA_F_MIN (lo de siempre en Flycast) la imagen no cambia.
+- **Medida del TA en la consola**: Flycast no lleva el registro del TA (lo gastado de verdad sale 0) y la unica medida
+  de la consola sigue siendo la de la demo 12c (1,34 veces la cuenta teorica en el cuadro que se colgo; DREAMCAST.md,
+  El tope). Para medirlo sin cable serie: en la pausa, Y (la pantalla de medidas de siempre) escribe ahora en la
+  primera linea `TA <real>K/<teorico>K x<real / teorico> max<el mayor desde el arranque> f<ta_f>` (en Flycast "TA sin
+  registro"): una foto de esa linea tras una vuelta por PALM da el factor de la consola, que es el que pone ta_f (real
+  / teorico x 1,2, nunca por debajo de TA_F_MIN = 1,75). PENDIENTE: la foto del usuario.
+- **Textura no subida con el GD lento**: comprobado que no pasa. Las etapas y uniones se suben a la VRAM a trozos
+  (`sube_trozo`) y el modelo no lleva sus tablas (`tv`) hasta acabar: `geo_visible` no lo dibuja. Con
+  `-DDIAG_GD_LENTO=1000 -DDIAG_TEX_VRAM` (medida nueva: cuenta por segundo las mallas con textura que se dibujan sin
+  ella en la VRAM o con la gris de cuando no cabe nada; linea "TEXVRAM:"), salida en LAKE con el piloto, 140 s por LAKE,
+  su union y la etapa siguiente (CAST): 93 lineas, 3500-9400 mallas con textura por cuadro, 0 sin subir y 0 grises.
+  Las cajas lisas son lo de arriba (el reparto), no texturas a medias ni mallas sin textura.
+- **Cielo con escalones (todas las etapas y el fundido de cielos)**. La VQ del cielo cuantificaba el libro a RGB565
+  sin mas (el azul de PALM de R 119..121 a 115 / 123). Ahora (`vq.elige_cielo`, `modelo.cielos`: las texturas de las
+  mallas de la lista 3 de los grupos -256 y -257, el cielo y el del fundido, en SEGnn.DAT y BKnn.DAT) el k-means va
+  sobre los 8 bits del original como siempre, pero cada entrada del libro se cuantifica con un tramado ordenado de 2x2
+  dentro de su bloque (umbrales 1/8, 7/8, 5/8, 3/8) y los bloques se asignan por la entrada sin cuantificar: la media
+  de cada bloque guarda el color con 1/4 del paso del formato. En la pantalla el texel del cielo mide ~2 px (PALM:
+  0,28 grados por texel) y el bilineal deja la trama casi lisa. Mismos bytes que antes (libro e indices): la VRAM no
+  cambia (SEG00: 506240 bytes de texturas antes y despues). Medido sobre la textura de PALM (media de 2x2, lo que deja
+  el bilineal, frente a los 8 bits del original): error RMS 1,88 -> 1,23 (16 bits tramados sin VQ: 1,06, pero 5 veces
+  la VRAM); en la imagen realzada (x2 de contraste) desaparecen las curvas de nivel del azul (capturas_r44/
+  cielo_tex_antes_despues.png: original, antes, VQ tramada, 16 bits tramados). Datos: las conversiones de ahora ya
+  lo hacen; en una carpeta ya hecha, `tools/regenera.py --interno cielo <iso> datos/` (tools/cielo_tramado.py: busca
+  la imagen de 8 bits de cada textura del cielo entre las de todos los bancos obj_course_obj_sky_* por el menor error
+  y la vuelve a codificar; 0 sin encontrar en las 62 etapas y 470 uniones).
+- **INFARTO: el agua como un suelo azul con un triangulo enorme** (foto d8983416). Sitio: INFARTO del juego de la
+  consola, etapa 1 = NEWY (SEG30; "SALIDA: arbol 0 etapa 0 NEWY"), el parque (la colina de rocas y el edificio de
+  ladrillo, la valla amarilla: en Flycast entre 0'47 y 0'59 del modo OutRun a toda velocidad). El agua de NEWY es una
+  cuadricula de 12 cuadrados de 282 m a y = -12,4 bajo el parque (x -539..307, z -1202..-71), 12 m por debajo de la
+  calzada; las demas etapas con agua tienen triangulos de hasta 550 m (BEAC: la ciudad entera a -51,1, la calzada a
+  -50). En la foto el coche esta encima del azul con su sombra (el volumen de la sombra solo oscurece el suelo de
+  alrededor del coche): el agua sale DELANTE de la calzada, es decir, con la z mal, en un triangulo de la cuadricula.
+  Es el mismo fallo de precision que el cielo (arriba): `agua_dibuja` solo recortaba contra el plano cercano y con la
+  camara a pocos metros del plano los vertices de esos triangulos caian a cientos de miles de pixeles de la pantalla;
+  la PowerVR real saca de los vertices los planos de 1/w de cada triangulo y con esas coordenadas la z sale mal (el
+  triangulo entero por encima de lo que tiene delante). Flycast (la GPU del PC en coma flotante) no lo muestra.
+  Arreglo: cada triangulo del agua se recorta contra el plano cercano y los cuatro lados de la pantalla con 32 px de
+  margen (`agua_tri`): ningun vertice del agua llega a la PowerVR a mas de 32 px de la pantalla. La zona de dibujo
+  (posiciones +0x6E..+0x70 del descriptor, la union pasada la 0xC7) es la del original y no cambia. Verificado en
+  Flycast (que no tenia el fallo): el lago de LAKE sale igual, azul solo donde no tapa el terreno, con las orillas y
+  los arboles delante (capturas_r44/agua_lake_recortada.png; la foto: agua_infarto_antes_foto_usuario.jpg); NEWY con
+  el piloto (arbol 283) sin agua a la vista desde la calzada, como antes. Sin verificar en la consola.
+- **El curso equivocado (la foto de INFARTO en NEWY)**: `curso_huecos` (al arrancar: el mayor fichero de todos los
+  arboles para los huecos de RAM) recorre CURSO.DAT y despues CURSOTA.DAT copiando cada arbol en curso[], y solo
+  volvia a leer el arbol 0 tras CURSO.DAT: curso[] se quedaba con el ultimo arbol de la Contrarreloj (283, el curso
+  seguido de OutRun 2 SP del reves: NEWY .. BEAC, union BK457) con curso_id = 0, y `curso_reinicia` no lo cambiaba
+  (el pedido era el 0). El modo OutRun, el INFARTO del juego OutRun 2 (arbol 0) y la demo de atraccion salian en NEWY
+  en vez de PALM (Flycast: "SALIDA: arbol 0 etapa 0 NEWY"; la foto del usuario: "Etapa 1" en el parque de NEWY). Desde
+  f330617 (los tableros). Ahora el arbol 0 se lee al acabar los dos ficheros.
+- **Salida del jugador** ("a veces el vehiculo comienza descentrado"): `tools/prueba/salidas.sh` (nuevo) hace la salida
+  tres veces en el mismo modo (la primera, REINTENTAR y ABANDONAR + carrera nueva) y compara las lineas "SALIDA:".
+  El original pone el coche en (0, 0, -16) del marco de la etapa de salida (4A6ED0 / 5C2560). Flycast, con el arreglo
+  del arbol de arriba: INFARTO (juego OutRun 2, arbol 0) las tres "SALIDA: arbol 0 etapa 0 PALM s 16.00 x 0.00 a 0.0000
+  coche 0.00 0.00 -16.00"; CONTRARRELOJ (tablero: OutRun 2, CURSO, la primera meta, codigo 60 -> arbol 260) las tres
+  iguales en PALM (0, 0, -16); OUTRUN2SP (lado R, preset 1, arbol 0) la salida y el REINTENTAR iguales en PALM, y tras
+  ABANDONAR el frontal (sin el R) eligio el preset 0: arbol 1, BEAC, "s 16.00 x 0.02 a 0.0018 coche -0.00 -0.01
+  -16.00" (la ruta llega en curva: el cruce se afina a 0,25 m). Siempre en (0, 0, -16) como el original. El "a veces
+  descentrado" del usuario era el caso de la primera parte (la etapa movida al reintentar) y, en los modos del arbol
+  0, la salida en NEWY (el arbol equivocado). Antes del arreglo del arbol el INFARTO salia en NEWY (s 11,82).
+- Visto de paso, sin investigar: en NEWY (arbol 283 con el piloto, Flycast) el cielo del atardecer tiene zonas
+  naranjas de bordes rectos entre 0'38 y 0'58 (las mismas antes y despues de estos cambios; no es el tramado).
+- Datos regenerados en esta parte (en la carpeta de datos compartida): SEGS.PAK, UNIONES.PAK, UNIONESTA.PAK y los
+  descriptores SEGnn.DAT / BKnn.DAT (532), SEG13.DAT y SEG46.DAT sueltas, con `tools/regenera.py --interno grupos` y
+  `--interno cielo` sobre los de la revision 43 (PYTHONHASHSEED=0). VRAM y tamanos de las etapas iguales.

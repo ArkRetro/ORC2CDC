@@ -53,6 +53,10 @@ Borrar los GDI despues (/dev/shm/dcr): llevan los datos de tu disco.
            pelicula de la demo de atraccion por medio), pausa ABANDONAR / REINTENTAR y otro coche en el menu; 7 carreras.
            Las lineas RAMMAPA, "VRAM: zona del curso" y PVRMAPA (el mapa de la VRAM, -DDIAG_PVRMEM) de cada carrera
            deben salir iguales y sin "Out of memory" ni "pvr_mem: ERROR" (docs/DREAMCAST.md, Carreras seguidas).
+  salidas.sh  la salida del jugador tres veces en el mismo modo (revision 44): menu.sh hasta la carrera (MODO_JUEGO=3:
+           por los tableros de la CONTRARRELOJ, el primer curso), sa_1, gas, pausa y REINTENTAR (sa_2), gas, pausa,
+           ABANDONAR y A hasta la carrera siguiente (sa_3); error si las lineas "SALIDA:" no salen iguales (salvo
+           "(REINTENTAR)"). En OUTRUN2SP (MENU_SP=1) la tercera puede ser del otro lado del frontal (sin el R).
   conduce.sh  como nav.sh y despues conduce (A pisado, la cruceta a ratos) [segundos, 180]: una captura cada 5 s
            (c_000..) y "CONGELADO" con error si dos seguidas son iguales (el cronometro del HUD no cambia).
 Medidas de la escena de la salida (make -C demo CPPFLAGS="..."): -DDIAG_SALIDA guarda de cada cuadro dibujado de la

@@ -16,6 +16,7 @@ import modelo, vq, revq
 EMAX = 16.0                                                     # error RMS (0-255) maximo para dar por buena la imagen
 
 _CAND = None
+_HECHAS = {}                                                    # (ancho, alto, formato, texeles de antes) -> nuevos
 def candidatos(iso):
     """{(ancho, alto): [RGBA uint8]} de las texturas de los bancos del cielo de todos los descriptores de tramo"""
     global _CAND
@@ -53,7 +54,10 @@ def aplica_bytes(b, iso):
     blob0 = revq.bloque_texeles(b); blob = b''; n = 0
     for ti, (w, hh, fmt, li, off, tam) in enumerate(texs):
         d = b[blob0 + off:blob0 + off + tam]
-        if ti in cielo and not fmt & 0x200:
+        clave = (w, hh, fmt, bytes(d))
+        if ti in cielo and not fmt & 0x200 and clave in _HECHAS:   # (la misma textura en otra union: el mismo cielo)
+            nd, nf = _HECHAS[clave]; n += nd != d + b'\0' * (-len(d) % 32) or nf != fmt; d, fmt = nd, nf
+        elif ti in cielo and not fmt & 0x200:
             dec = decodifica(d, w, hh, fmt).astype(float)
             mejor, e = None, EMAX
             for a in candidatos(iso).get((w, hh), []):
@@ -66,7 +70,7 @@ def aplica_bytes(b, iso):
                 else: nd = modelo.codifica16_tramada(mejor, fb); nf = (fmt & ~0xFF01FF) | fb
                 nd = nd + b'\0' * (-len(nd) % 32)
                 if nd != d + b'\0' * (-len(d) % 32) or nf != fmt: n += 1
-                d, fmt = nd, nf
+                _HECHAS[clave] = (nd, nf); d, fmt = nd, nf
         d += b'\0' * (-len(d) % 32)
         texs[ti] = [w, hh, fmt, li, len(blob), len(d)]; blob += d
     if not n: return b, 0
