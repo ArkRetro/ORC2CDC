@@ -2645,9 +2645,8 @@ tools/regenera.py), CURSOTA.DAT y las uniones BK262..BK469 en UNIONESTA.PAK (con
   - La opcion B de la etapa 0 (PALM_BT, BEAC_BT, PALM_BR, BEAC_BR: descriptores 0x3e..0x41, bandera 830395 = +0x20c
     bit 0): el tablero la deja poner (con su bit), pero sus etapas no estan convertidas (SEG de los descriptores
     62..65): la carrera corre la etapa normal (aviso en la consola serie). PENDIENTE.
-  - OUTRUN sigue yendo directo al coche (no pedido): el original tambien pasa por la clave 0x24 (4 posiciones, los
-    cursos seguidos con 0xcc / 0xcb) y su juego elige el preset (0x2a6978); la DC le da el juego 0 (OutRun 2: preset
-    1). El preset de los juegos de la consola y el arbol del frontal de OUTRUN2SP: CORREGIDOS el 2026-11-13, ver
+  - OUTRUN por la clave 0x24 (4 posiciones, los cursos seguidos con 0xcc / 0xcb): PORTADO en la revision 44 (Orden
+    de las etapas). El preset de los juegos de la consola y el arbol del frontal de OUTRUN2SP: CORREGIDOS el 2026-11-13, ver
     Preset del curso.
   - INFARTO en OutRun 2 SP: corre el arbol 1 con el preset 0; las misiones, los coches y las misiones base por el
     preset / arbol estan HECHOS (2026-11-13, ver Preset del curso). PENDIENTE: los objetos (OSO, 45C470 con [78024C])
@@ -2742,7 +2741,7 @@ outrun2-decomp r075_course_name de 44DA00, el mismo reparto):
 
 | Juego | Antes (DC) | Ahora (DC) = original |
 |---|---|---|
-| OUTRUN de la consola | preset 0, arbol 0 (csc_data_2) | preset 1, arbol 0 (juego 0: la DC no pasa por el tablero 0x24 de OUTRUN) |
+| OUTRUN de la consola | preset 0, arbol 0 (csc_data_2) | preset 1, arbol 0 con el juego 0 (desde la revision 44 pasa por el tablero 0x24: juegos 1..3 -> preset 0 / 3 / 2, arboles 1 / 290 / 291; ver Orden de las etapas) |
 | INFARTO, juego 0 (OutRun 2) | preset 0, arbol 0 | preset 1, arbol 0 |
 | INFARTO, juego 1 (OutRun 2 SP) | preset 0, arbol 1 | preset 0, arbol 1 (igual) |
 | CONTRARRELOJ | preset 0 (el codigo ya salia del juego: menu_ta_codigo) | 0x2a6978 del juego (1 OutRun 2, 0 SP) |
@@ -2784,8 +2783,8 @@ Lo que lee el preset (todas las lecturas de [0x44350c] del ELF revisadas) y como
   iguales), la camara de 0x17c018 / 0x17e860 (presets 0 / 2 frente a 1 / 3: sin portar), la lista de 7 de 0x22d0a0, los
   records de la Contrarreloj (0x21cc74 / 0x21f7a0 / 0x1fe3c8 / 0x20012c) y 0x28d0c8. La clase 4 de los presets 1 / 3
   con red o rivales ([0x443514] != 0) va por la lista de 7 / 9: la DC no lo mira.
-- PROBABLE: OUTRUN de la consola con el juego 0 (en el original lo elige el tablero 0x24 de 4 posiciones, que la DC no
-  ensena para OUTRUN); COAST 2 COAST con el juego que quedo del ultimo tablero, como los bits del original.
+- OUTRUN de la consola: PORTADO el tablero 0x24 de 4 posiciones (revision 44, Orden de las etapas). COAST 2 COAST con
+  el juego que quedo del ultimo tablero: CONFIRMADO (0x2a6770 llama a 0x2a6978 sin condicion).
 - Pruebas: tools/prueba/sp.sh con SP_LADO=1 (por defecto, el gatillo R: preset 1, arbol 0) o SP_LADO=0 (preset 0, arbol
   1); final.sh y resultados.sh usan SP_LADO=0 (las metas de OutRun 2 SP: FLOR es la clave 13 del arbol 1).
 - Verificado en Flycast (display 95): sp.sh SP_LADO=0 ("Recorrido OutRun2SP"): `juego OUTRUN2SP, preset 0`, `CURSO:
@@ -3932,3 +3931,65 @@ arena". Lo que hace el original (SLES-53998 y el PC) y como queda:
   EFECTOS.DAT`; bloques nuevos 'PAR1' con
   las tres texturas y 'DSC1' con el descriptor de tramo de cada SEGnn, detras del 'ATR1'; lo de antes igual byte a
   byte, un ejecutable anterior lo sigue leyendo) y copiado a la carpeta de datos compartida.
+
+## Orden de las etapas en todos los modos (revision 44, 2026-11-13)
+
+Queja del usuario sobre la revision 43: "el tema del orden de las etapas ahora esta raro" (tras el preset 682b799 y
+los tableros). Revisado contra las tablas del original (SCRIPTS de SLES-53998: csc_data_2, csc_data_cvt, *_ren,
+OR2 / SP_goals y sus _reverse, Races.bin; codigo 0x1760c0, 0x1b63a0, 0x2a6758, 0x2a6978, 0x1bd2a8, 0x1be240).
+- **La causa de la revision 43**: curso_huecos dejaba en curso[] el ultimo arbol de CURSOTA.DAT (283, NEWY .. BEAC del
+  reves) con curso_id 0: OUTRUN, el INFARTO de OutRun 2 y la demo salian en NEWY y seguian por FLOR, PRIN... o
+  repetian NEWY (su rama izquierda es -1). Corregido en 526de98 (Revision 44, segunda parte); comprobado ahora con la
+  prueba de abajo.
+- **Los arboles de la DC son los del original**: los 180 arboles de CURSO.DAT / CURSOTA.DAT comparados registro a
+  registro con los del disco (script del scratchpad r44orden/compara.py): hijos (la clave de +0x2c / +0x30 buscada
+  como en runtime_apply_course_data_44d720 -> +0x24 / +0x28), nivel (la profundidad de 44C850, en profundidad y solo
+  hacia claves mayores; el nivel de la DC es en anchura y sale igual en todos) y metas: sin diferencias. Las claves
+  son los indices salvo en la mision 108 (claves 0, 1, 3, 6, 10; la DC guarda indices). Una rama sin hijo (-1) vuelve
+  a cargar la misma etapa (next_area de 44E590), como ya hacia la DC.
+- **Mapa de ruta del HUD: estaba mal desde la primera version** (CORREGIDO). La DC encendia la casilla numero NIVEL
+  (en PALM -> ALPI se encendia LAKE; en CAST, la de ALPI; parpadeando, inventado) y siempre el mapa de 5 niveles.
+  Original: NAVI_PUB 0x1bd2a8 (= 4BCC40 del PC), al cambiar la clave de la etapa del coche (0x1cf9a8), pone en la
+  casilla de su nivel (0x177270 = 44C940: +8 del registro) la clave o, si el registro lleva +0x74, +0x74 - 1 (solo
+  las metas del reves de la Contrarreloj, arboles 270..279: la casilla del mapa del derecho) y esa es la actual
+  ([0x5a3ce8]); la init (4BC9E0) las pone a -1. 0x1be240 dibuja (en (-241, -124), floats 0x369504) el fondo en la capa
+  2, la actual en la 3 y las de los niveles anteriores hasta la primera sin llegar o la actual (ultimo nivel
+  0x1bd098: 4, o 14 con los presets 2 / 3), sin parpadeo; mapa de 5 (2C0072 / 70 / 6F) con los presets 0, 1, 4 y de
+  15 (2C006E / 6D / 6C) con 2 / 3 (tabla 0x4044a0); nada en las misiones ([0x36f3a4] sin la variante 4) ni en la
+  Contrarreloj de una etapa (0x21ca78 y codigo < 0x3c, 0x21cb28). CURSO*.DAT llevan ahora el +0x74 en el byte libre
+  detras de trans_seg (conv_union.crudos; 0 en todos los arboles de CURSO.DAT, que no hace falta rehacer).
+- **OUTRUN pasa por el tablero 0x24** (PORTADO): la pantalla de UN JUGADOR (0x25dd58) lleva C2C / OUTRUN / INFARTO /
+  CONTRARRELOJ / SALON a la clave de 0x375f58 = 0x3a, 0x24, 0x24, 0x24, 0x2b; con el modo 0x20 la init de 0x24
+  (0x252cf4) usa el carrusel de 4 posiciones 0x419fb0 (OutRun 2, OutRun 2 SP y los dos cursos seguidos, candados 0xcc
+  / 0xcb del SALON, 0x2538ac) y A va al coche con los bits 0..1 = la posicion. La DC ya tenia esa rama del tablero
+  (comun/menu.c) pero llevaba OUTRUN directo al coche con el juego 0; ahora va al tablero y B desde el coche vuelve a
+  el. Juegos 2 / 3 -> presets 3 / 2 (0x2a6978) -> START 0x1760c0(6 / 5) -> csc_data_2_ren / csc_data_cvt_ren con la
+  categoria "%s_course" (0x3cb528, comprobado en el MIPS: las de sin _TA, 15 etapas con los dos hijos iguales):
+  arboles 290 / 291 de CURSOTA.DAT (conv_union.ARBOLES_REN) y sus 28 uniones (los carteles con el mismo destino a
+  los dos lados) BK470..497 en UNIONESR.PAK (7,1 MiB; aparte, UNIONESTA.PAK no cambia). La meta (CAPE / NEWY, clave
+  14) usa la escena de la meta E (450380(8) - 0xA). Con estos presets: mapa de 15, fila de tiempos TIM1 2 / 3,
+  banderero BAND1 / BAND, choques del preset.
+- **CONTRARRELOJ de curso seguido**: el original pone el preset 3 (0x50 / 0x51) o 2 (0x52 / 0x53) (0x2a68e8 /
+  0x2a6884); la DC le dejaba el del juego (1 / 0). CORREGIDO.
+- **El juego elegido se queda** (raiz +0x208 bits 0..1): 0x2a6758 llama a 0x2a6978 con esos bits sin condicion
+  (0x2a6770) al salir del menu en todos los modos, tambien COAST 2 COAST (que no pasa por el tablero), y solo B en el
+  tablero 0x24 los borra (0x253e80). En el original, tras elegir OutRun 2 SP (o un curso seguido) en un tablero, las
+  misiones corren con ese preset (las reglas: choques, trafico, banderero, tiempos; el curso es el de Races.bin) y,
+  al volver a INFARTO, el tablero de 2 posiciones se queda en la 0 si los bits son 2 / 3 (0x252e80). La DC hace lo
+  mismo (menu_juego_cursos). OUTRUN ya no hereda nada: lo elige en su tablero.
+- **Nombre de la etapa**: zona_nombre (el rotulo de texto de la DC) solo se ve sin HUD; sale de curso[cur_sig], la
+  etapa que se carga. CARGASP (solo OUTRUN2SP) va por el preset del lado, que ya da el arbol (Preset del curso). SIN
+  PORTAR: el rotulo de la etapa siguiente del original (0x1bea00 = 4B9450 del PC: con car+0x5c y la clave elegida
+  distinta de la del coche, el token de la tabla 0x369518 (30 escenas 0x2c0048..0x2c0065, por el tipo del descriptor
+  de la etapa elegida) en la capa 5, parpadeando con el bit 0x10 hasta 0x78 cuadros y despues fijo; x -340, o
+  [0x369510] - 340 en las misiones): HUD.DAT no lleva esas escenas.
+- Prueba: `tools/prueba/orden.sh` (GDI con -DPRUEBA_AUTO -DPRUEBA_ORDEN -DPRUEBA_SIN_TIEMPO -DPRUEBA_RAMA_FIJA=r
+  -DPRUEBA_FIN=600 -DPRUEBA_SALTO=600): el piloto corre la lista PO de demo/main.c (OUTRUN juegos 0..3, CONTRARRELOJ
+  5 / 0x3e / 0x43 / 0x46 / 0x4d / 0x50, INFARTO de OutRun 2 SP, misiones 0 y 84) siempre por la rama r, cada etapa
+  desde 600 m antes de su final (PRUEBA_SALTO) y la tercera vez seguida en la misma etapa acaba la carrera;
+  `tools/prueba/orden.py` compara las lineas SALIDA / RECORRIDO / CHECKPOINT / MAPA / GOAL con la tabla del original
+  leida de la ISO (etapas, a donde lleva cada rama, meta, nivel, casilla y mapa). menu.sh: MODO_JUEGO=1 pasa por el
+  tablero (TB_JUEGO=n).
+- Datos: CURSOTA.DAT (arboles 290 / 291 y +0x74), UNIONESR.PAK y BK470..497.DAT: paso `unionren` de
+  tools/regenera.py (`conv_union.py <iso> uren/ --arboles=<ARBOLES_TA> --bk-desde=470 --curso=CURSOTA.DAT` y
+  `pak_union.py --pak=UNIONESR.PAK`; `unionta` lleva ahora --bk-hasta=470), PYTHONHASHSEED=0.

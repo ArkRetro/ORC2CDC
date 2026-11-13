@@ -32,7 +32,14 @@ Scripts (todos: <disc.gdi> [pantalla de Xvfb, por defecto 91] [carpeta de salida
   vmu_diag.sh  VMU A1 casi llena (un fichero RELLENO de 190 bloques: quedan 10 libres, OR2C2C ocupa 20): la licencia no
            se puede guardar, Y ensena "No hay espacio suficiente para guardar." con el codigo (vm_sitio) y L + R + Y
            (F y V pisados) la pantalla de diagnostico de la VMU (vm_diag); A para salir (vm_fin).
-  MODO_JUEGO=n delante de cualquiera: n veces a la derecha en ELEGIR MODO (2 INFARTO, 3 CONTRARRELOJ).
+  MODO_JUEGO=n delante de cualquiera: n veces a la derecha en ELEGIR MODO (1 OUTRUN, 2 INFARTO, 3 CONTRARRELOJ); con
+  1 y 2 pasa por el tablero 0x24 (TB_JUEGO=n: n a la derecha; en OUTRUN 2 / 3 los cursos seguidos de OutRun 2 / SP,
+  con candado salvo con -DPRUEBA_TABLERO_TODO).
+  orden.sh  el orden de las etapas en todos los modos (revision 44; cuarto argumento: la ISO): GDI con -DPRUEBA_AUTO
+           -DPRUEBA_ORDEN -DPRUEBA_SIN_TIEMPO -DPRUEBA_RAMA_FIJA=r -DPRUEBA_FIN=600 -DPRUEBA_SALTO=600; el piloto corre las
+           carreras de la lista PO de demo/main.c (OUTRUN juegos 0..3, CONTRARRELOJ de una etapa, metas y curso seguido,
+           INFARTO de OutRun 2 SP, misiones) siempre por la rama r y tools/prueba/orden.py compara etapas, ramas, meta,
+           nivel y casilla del mapa de ruta con la tabla del original (SCRIPTS de la ISO). Se corre con r = 0 y r = 1.
   Con MODO_JUEGO=0 (COAST 2 COAST): categorias (nv_5b), mapa (5e), detalle (5f) y la 1-1; C2C_RECORRE=1 mueve
   ademas el cursor por las categorias (5c, 5d), el mapa y vuelve atras (5g) antes de entrar.
 Cada uno arranca su Xvfb si el display no existe (se pueden correr a la vez con displays distintos), usa una
