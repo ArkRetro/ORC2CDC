@@ -4802,7 +4802,7 @@ static const char *const ZONA_NOMBRE[][2] = {
     { "RUIN", "ANCIENT RUINS" }, { "CAPE", "CAPE WAY" }, { "IMPE", "IMPERIAL AVENUE" } };
 static const char *zona_nombre(int k)
 {
-    static char z[5]; unsigned i;
+    static char zz[2][5]; static int t; char *z = zz[t ^= 1]; unsigned i;   /* (dos: izquierda y derecha en un rotulo) */
     if (k < 0 || k >= ncurso) return "";
     for (i = 0; i < sizeof ZONA_NOMBRE / sizeof ZONA_NOMBRE[0]; i++) if (!memcmp(ZONA_NOMBRE[i][0], curso[k].zona, 4)) return ZONA_NOMBRE[i][1];
     memcpy(z, curso[k].zona, 4); z[4] = 0; return z;
