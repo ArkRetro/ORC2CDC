@@ -126,8 +126,10 @@ def llamadas(E, tm, m, lod=0, remolque=False):
         if ident != NINGUNO: res.append((ident, s.m[-1].copy(), nombre))
     s.push()                                                    # car+F0
     dib(u(0), 'carroceria')
+    dib(u(8), 'faro_noche')                                     # 4AD4D0: con car+4 & 0x100 (noche; grupo G_FARO)
     dib(u(0xc), 'pilotos')
-    dib(u(0x14), 'freno')                                       # 4AD4D0: en lugar de +C con car+38 > 0 (grupo G_FRENO)
+    dib(u(0x10), 'noche')                                       # 4AD4D0: en lugar de +C con car+4 & 0x300 (G_NOCHE)
+    dib(u(0x14), 'freno')                                       # 4AD4D0: en lugar de +C / +10 con car+38 > 0 (G_FRENO)
     p = u(0x9c) if cerca else 0
     if p and E.u32(p) != NINGUNO:
         e = 0
@@ -162,6 +164,7 @@ def llamadas_remolque(E, d2, lod):
     def dib(ident, nombre):
         if ident != NINGUNO: res.append((ident, s.m[-1].copy(), nombre))
     dib(u(0), 'rem_carroceria')
+    dib(u(0x14), 'rem_noche')                                   # second(): con car+4 & 0x300 y car+38 <= 0 (G_NOCHE)
     dib(u(0x18), 'rem_freno')
     p = u(0x68) if cerca else 0
     if p and E.u32(p) != NINGUNO:
@@ -461,7 +464,8 @@ def convierte(A, E, tm, m, claves, ruta_fich, remolque=False, extra=b'', riv=Fal
             pz = int(nom[5:]) if nom.startswith('rueda') else 7 + int(nom[8:]) if nom.startswith('remrueda') else \
                 P_REM if nom.startswith('rem_') else 0
             cc.pieza(mod, b, ident, R=M[:3, :3], t=M[3, :3], nombre=nom,
-                     grupo=cc.G_PILOTOS if nom == 'pilotos' else cc.G_FRENO if nom in ('freno', 'rem_freno') else cc.NADA,
+                     grupo=cc.G_PILOTOS if nom == 'pilotos' else cc.G_FRENO if nom in ('freno', 'rem_freno') else
+                     cc.G_NOCHE if nom in ('noche', 'rem_noche') else cc.G_FARO if nom == 'faro_noche' else cc.NADA,
                      pieza_id=pz)
         for x in mod.mallas[m0:]: x[7] = lod               # el LOD en el campo del nodo (la pieza, abajo)
         if lod == 0: piezas0 = piezas
@@ -477,6 +481,20 @@ def convierte(A, E, tm, m, claves, ruta_fich, remolque=False, extra=b'', riv=Fal
             x[1] = cc._tex_copia(mod, x[1], tr); x[0] = 2 if tr else 0
             v['u'], v['v'] = uvs[:, 0], uvs[:, 1]
             e = int(min(255, esp.max())); v['c'] = ((alfa if tr else 255) << 24) | (e << 16) | (e << 8) | e
+    # luces de noche (+8 y +10 / +14 del remolque): su estado del GS (tabla 4 -> 7 del registro, modelo.estado_gs) es la
+    # mezcla aditiva (ABE, ALPHA 0x48: Cs As + Cd) con ZTST GEQUAL; copia de su textura con 0x400 | 0x800 en la lista
+    # transparente (compila_cab de la demo: SRCALPHA / ONE, z GEQUAL, textura x vertice). Los pilotos de dia (+C, +14)
+    # se quedan como estaban
+    aditivas = {}
+    for x, ex in zip(mod.mallas, mod.extra):
+        if ex.get('grupo') not in (cc.G_NOCHE, cc.G_FARO) or x[1] < 0: continue
+        r, i, k4, fl = ex['origen']; g = modelo.estado_gs(x[6], x[6].registros()[r], k4)
+        if not (g and g['abe'] and g['alpha'] == 0x48): continue
+        if x[1] not in aditivas:
+            a = mod.rgba[x[1]]; fmt, li, dd = modelo.textura_dc(a)
+            mod.texs.append((a.shape[1], a.shape[0], fmt | 0xC00, 2, len(mod.blob), len(dd))); mod.blob += dd; mod.rgba.append(a)
+            aditivas[x[1]] = len(mod.texs) - 1
+        x[1] = aditivas[x[1]]; x[0] = 2
     # ruedas: los vertices a su marco (antes de su giro de reposo: la inversa de su matriz), la demo pone la matriz; lo
     # que no gira del remolque (pieza 7) se queda en el marco del remolque (la demo pone car+C90)
     for x, v in zip(mod.mallas, mod.verts):
@@ -487,8 +505,9 @@ def convierte(A, E, tm, m, claves, ruta_fich, remolque=False, extra=b'', riv=Fal
                 v['x'], v['y'], v['z'] = P[:, 0], P[:, 1], P[:, 2]
                 x[2] = P.mean(0); x[3] = float(np.sqrt(((P - x[2]) ** 2).sum(1).max()))
             x[7] = x[7] | x[9]['pieza'] << 8
-    # pilotos: el grupo (G_PILOTOS = 1 los normales +C, G_FRENO = 3 los del freno +14) en los bits 24..25 del
-    # campo del nodo; la demo dibuja unos u otros (traf_dibuja: car+38 > 0 del trafico, 4AD4D0)
+    # pilotos: el grupo (G_PILOTOS = 1 los normales +C, G_NOCHE = 2 los de noche +10 (remolque +14), G_FRENO = 3 los del
+    # freno +14 (remolque +18), G_FARO = 4 la luz de noche +8) en los bits 24..26 del campo del nodo; la demo dibuja
+    # los que tocan (traf_luces: car+4 & 0x100 / 0x300 de 4A25F0 y car+38 > 0 del trafico, 4AD4D0 / second())
     for x in mod.mallas:
         if len(x) > 9 and isinstance(x[9], dict) and x[9].get('grupo'): x[7] = x[7] | x[9]['grupo'] << 24
     # colores del original: las texturas alternativas, que recorta_texturas conserva con mallas de mentira (la
