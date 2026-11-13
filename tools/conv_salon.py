@@ -23,6 +23,7 @@ solo=True), un grupo de atlas por pagina (las texturas de cada escena se suben a
      colores: i32 modelo[30] (0x41be90), ficha[30]; filas[110] {u8 registro, i8 color} (0x41ba30: 0x25cc14 / 0x25ce54)
      u32 pista[21] (0x375dcc = 0x375db0 + 4 x 7: 0x25ca10 / 0x25ca4c; suena la pista + 0x21)
      u32 texto de la ventana (0x3a4 "COMPRAR OBJETO": 0x25d5ac), u32 formato de las cifras ("%dM", 0x41ad00: 0x25b8dc)
+     u16 ancho, alto[16] de las imagenes 0x30040..0x3004f de la ventana (spr_etc_xst; uso 'VENT', un cuadro cada una)
      textos: cadenas de bytes (codigos de la fuente 14) acabadas en 0
 Valores que van en el codigo de menu.c (las instrucciones se comprueban aqui): paginas (0x25bce8, 0x25c038, 0x25c4e0,
 0x25c750, 0x25ca80, 0x25cf00: base de los objetos, filas de la lista, escena de la tira, ultimo indice, paso, base,
@@ -157,6 +158,16 @@ def main():
     W(*[u(0x375dcc + 4 * k) for k in range(21)])
     texto(cad[0x3a4])
     fm = bytes(E[0x41ad00 - 0xfff80:0x41ad00 - 0xfff80 + 8]).split(b'\0')[0]; assert fm == b'%dM'; texto(fm)
+    # la ventana de la compra (0x271ca8, el dibujo de la ventana = 48C5F0 del PC): imagenes 0x30040..0x3004f (42D300 =
+    # 0x117b88: banco 3 = spr_etc_xst, ver conv_hud imagenes), su ancho y alto
+    xs = D._ent(D.p_spr, D.n_spr.index('spr_etc_xst.sz')); Te = ch.texturas(xs); vent = []
+    for k in range(0x40, 0x50):
+        ti, l, tp, r, b = ch.imagen_xst(xs, k); vent.append((ti, l, tp, r, b))
+        out.extend(struct.pack('<2H', int(round(r - l)), int(round(b - tp))))
+    assert len(set(v[0] for v in vent)) == 1, 'ventana: una textura'
+    for a_, k in ((0x271d38, 0x4a), (0x271d7c, 0x49), (0x271e9c, 0x40), (0x271ee4, 0x4f), (0x271f44, 0x43), (0x271f70, 0x4e),
+                  (0x271fbc, 0x4d), (0x271ff4, 0x42), (0x272040, 0x41), (0x272084, 0x4c), (0x2720d4, 0x4b)):
+        assert u(a_) == 0x34a50000 | k, 'ventana: imagen en 0x%x' % a_
     usados |= set(b'0123456789-')
     t0 = len(out); struct.pack_into('<I', out, 4, t0)
     pool = bytearray(b'\0')
@@ -202,6 +213,13 @@ def main():
         si = hud.sprite(ti, (0, 0, img.shape[1], img.shape[0]), img.shape[1], img.shape[0])
         hud.pie.append((g, 0, si, 0, float(x0), float(y0), 0.0, 0.0, 0.0, 1.0, 1.0, 1.0))
         hud.uso('BARRA', g, 0, 0)
+        # las 16 imagenes de la ventana, un cuadro cada una (sin VQ: bordes de 1 a 3 pixeles)
+        ti = hud.textura(('SALON', 'VENT'), Te[vent[0][0]]); sin_vq.add(ti)
+        g = hud.grupo('VENT', 16)
+        for k, (_, l, tp, r, b) in enumerate(vent):
+            si = hud.sprite(ti, (l, tp, r, b), r - l, b - tp)
+            hud.pie.append((g, k, si, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0))
+        hud.uso('VENT', g, 0, 0)
         print('  BARRA: %dx%d en (%d, %d)' % (img.shape[1], img.shape[0], x0, y0))
     vq = lambda k, a, fmt, lista: None if k in sin_vq else ch.vq_pequeno(k, a, fmt, lista)
     ruta = os.path.join(sal, 'SALON.DAT')

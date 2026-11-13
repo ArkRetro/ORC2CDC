@@ -2455,28 +2455,57 @@ datos: SALON.DAT (tools/conv_salon.py, paso `salon` de tools/regenera.py).
   escenas de hasta 44 texturas (ETAPAS: 1 MB con VQ): SALON.DAT va por tramos (comun/sprani.c, spr_por_tramos): al
   crear una instancia solo se suben las texturas de los cuadros de su tramo y, si no caben, se echan las de las
   escenas del banco que no usa nadie.
-- DESVIACION / PROVISIONAL: la ventana es la de la pausa (imagenes 0x3004x sin localizar); la camara del coche es la
-  de la seleccion (el preset 1 de 482E70 sin leer) y el coche sale igual este desbloqueado o no (el indicador de
-  28e348 sin seguir); X (LICENCIA en la barra) no hace nada; la barra de ayuda (0x23bd70: ELEGIR, LICENCIA, ATRAS) con
-  los botones de la Dreamcast compuesta en SALON.DAT; el original para la musica al salir de la pagina principal
-  (0x25bf28) y la raiz vuelve a poner la del menu (0x23b5b8, PROBABLE): aqui suena la de los menus al salir del salon.
-  Sin repeticion de teclas al mantener (cada pulsacion mueve uno). ETAPAS y METAS guardan su bit (nada del port lo lee
-  aun: las etapas de OUTRUN2SP y los finales estan todos abiertos).
+- Ventana: las imagenes 0x30040..0x3004f son del banco 3 = spr_etc_xst (0x117b88 = 42D300; las mismas que lee
+  conv_hud para el HUD de C2C), dibujadas como 0x271ca8 (= 48C5F0 del PC, con otros indices: cuerpo 0x3004a, franja
+  0x30049, cabecera 0x3004f + esquinas 0x3004e / 0x3004d, pie 0x30043 + 0x30042 / 0x30041, lados 0x3004c / 0x3004b);
+  titulo con la fuente 14 en blanco en (x + 6, y + 5) (0x271900). Los modos 1 / 2 / 3 de 0x117b88 se dibujan estirando
+  la imagen (PROBABLE: el detalle de 0x117b88 sin seguir; son franjas de un color).
+- X (LICENCIA): la raiz (0x23c150) abre la licencia (pantalla 0x15) cuando la pantalla de encima lo permite (+0x2a4 de
+  su nivel: el salon pone 1 en cada paso con 0x23bb20(raiz, 0, 1)); al volver el salon empieza de nuevo (0x25b418). Igual
+  en la DC (a_licencia con vuelta al salon).
+- Musica: 0x25bf28 la para al salir de la pagina principal (al entrar en una pagina y al salir del salon) y la de
+  musica la para al salir; nadie la vuelve a poner en UN JUGADOR (solo el arranque de la raiz, 0x23b5b8, y la vuelta de
+  la seleccion de musica, 0x24efec, ponen la pista 0x1e): tras el salon los menus quedan sin musica, como el original.
+- Repeticion: 0x284e20 (= 48F4F0): la palanca analogica izquierda marca al pasar de 64 y repite cada 21 pasos
+  mientras se mantiene; la cruceta da solo la pulsacion (0x101bd4), sin repeticion. Portado (joyx / joyy de la DC).
+  No probado en Flycast (el teclado de las pruebas es la cruceta).
+- BLOQUEADO / SIN PORTAR:
+  - Camara del coche: 0x1788c8(1) pone [0x35a9f8] = 1, el preset de 0x3d2bf0 / 0x3d2c08 / 0x3d2c20 (ojo (-3, 7,15, 7),
+    giro x -0,192, fov 35 grados; el 0, la seleccion de coche: (-1,55, 5,75, 2,75)) = 5BA9xx del PC (pc_camera.cpp,
+    482E70). Falta donde coloca el frontal el coche (suceso 0x181 de 28e6d8 / 19c870): sin eso el ojo no se puede poner
+    en la escena del port; se usa la camara de la seleccion de coche (que tampoco es la del original).
+  - Coche bloqueado: 28e348 guarda el desbloqueo en +0x90 y 28e6d8 crea el coche con 19cfd8(modelo, color,
+    bloqueado), que pone el bit 0x40 en las banderas del coche (0x4081 | 0x40). Solo afecta al primer registro al
+    entrar en la pagina (28e788 pasa siempre 1 al moverse). Que hace ese bit al dibujar no esta seguido: el coche sale
+    normal.
+  - ETAPAS (bits 0x8a..0xab) y METAS (0xc1..0xce): los leen los tableros de cursos de los modos INFARTO / CONTRARRELOJ
+    (PS2 0x258bdc: bit 0x8b + 2 x curso, 0x258c48 / 0x258d94 / 0x259f04 / 0x259f80: 0xa8..0xab; 0x24fda4 / 0x250384 /
+    0x253444 / 0x2538bc / 0x2607f8 / 0x260d9c: 0xcb..0xce; PC frontend_rankings.cpp course_lock_bit 4D05E0: 0xc1 + 2 x
+    curso, 0xcb..0xce las metas "OUTRUN2 GOAL A..E", "(R)" y las de OUTRUN2SP). El port no tiene esos tableros (INFARTO y
+    CONTRARRELOJ corren el curso entero, ver Modos de un jugador): los bits se guardan y no desbloquean nada hasta
+    portarlos.
+  - COLORES (bits 0x1c..0x89): los lee la seleccion de coche (0x245038, tabla 0x375A20, 110 colores): Y pasa por los
+    colores con su bit; ya funciona con el arreglo de MNU2 de abajo.
+- PROVISIONAL: la barra de ayuda (0x23bd70: ELEGIR, LICENCIA, ATRAS) con los botones de la Dreamcast compuesta en
+  SALON.DAT (DESVIACION de la revision 42 de las barras).
 - Arreglo de paso (seleccion de coche): comun/menu.c leia las tablas de coches de MNU2 dos bytes corridas (el bit de
   desbloqueo en +32 detras de los 30 modelos u8; conv_menu.mnu2 lo escribe en +30): cada ficha tomaba el bit, los bits
   de los colores y el color inicial de la ficha siguiente (p. ej. el F50, ficha 2, pedia el bit 1 en vez del 0: el F50
   comprado en el salon seguia bloqueado). Ahora en +30; MENU.DAT no cambia. Con ello el color inicial de cada ficha
   (0x375C00) coincide con el del modelo de 0x3d4b80 que usa el salon (Dino 2, F50 1). Esto corrige tambien la
   verificacion de Colores de los coches (2026-11-10), hecha con la tabla corrida una ficha.
-- Prueba: `-DPRUEBA_MILLAS=n` (la licencia activa, si no tiene millas, con n al entrar en el salon; ademas, como antes,
-  la demo de atraccion acaba en las millas) y tools/prueba/salon.sh.
-- Verificado en E (Flycast, `-DPRUEBA_MILLAS=20000`, tools/prueba/salon.sh): pagina principal con 20000M, FERRARIS
+- Prueba: `-DPRUEBA_SALON_MILLAS=n` (la licencia activa, si no tiene millas, con n al entrar en el salon; otro nombre
+  que el PRUEBA_MILLAS de la demo de atraccion) y tools/prueba/salon.sh.
+- Verificado en E (Flycast, `-DPRUEBA_SALON_MILLAS=20000`, tools/prueba/salon.sh): pagina principal con 20000M, FERRARIS
   con el F50 3D y su precio, ventana "COMPRAR OBJETO" (sin el coche), A con SI: "comprado el objeto 0 por 7500 millas
   (quedan 12500)", guardado en la VMU y "Ya tienes este objeto / VEND."; MUSICA DE FONDO (suena el avance 40) y compra
   del objeto 172 (2500); fuera del salon, la seleccion de coche deja elegir el F50 (antes del arreglo de MNU2 no) y la
   musica llega al tema 7. Segundo arranque con la misma VMU: el salon con 10000M, el F50 "Ya tienes este objeto" y
   elegible en la seleccion de coche. VRAM libre al abrir el salon 385-419 KB y con el coche 1170 KB; sin "Out of
   memory" ni "pvr_mem: ERROR". No probado en R.
+  Segunda pasada (ventana con las imagenes 0x3004x, X, musica, `-DPRUEBA_SALON_MILLAS=20000`): la ventana de la compra
+  con su cabecera roja, X en el salon abre ELEGIR CARNET y B vuelve a la pagina principal del salon; los mismos
+  desbloqueos tras reiniciar; sin "Out of memory" ni "pvr_mem: ERROR".
 
 ## Fin de la carrera: millas OutRun, continuar y GAME OVER (2026-11-11)
 

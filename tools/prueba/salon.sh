@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# salon.sh <disc.gdi> [pantalla] [salida/]: el SALON (showroom, SALON.DAT). GDI con -DPRUEBA_MILLAS=20000 (la licencia
+# salon.sh <disc.gdi> [pantalla] [salida/]: el SALON (showroom, SALON.DAT). GDI con -DPRUEBA_SALON_MILLAS=20000 (la licencia
 # nueva con 20000 millas al entrar en el salon). Primer arranque con la VMU vacia: licencia nueva, UN JUGADOR, SALON
 # (cuatro a la derecha): pagina principal (sa_1), COCHES (sa_2: el F50, 7500 M), ventana de compra (sa_3), A: comprado
 # y guardado (sa_4); MUSICA (tres abajo: sa_5), compra del primer tema (sa_6); fuera del salon (sa_7); OUTRUN, la
@@ -26,7 +26,9 @@ tecla Down; espera 1; tecla Down; espera 1; tecla Down; espera 2         # MUSIC
 tecla x; espera 5; foto sa_5
 tecla x; espera 2; tecla x; espera_log 'SALON: comprado' 10 || true; espera_log 'SALON: guardado' 60 || true
 espera 3; foto sa_6
-tecla c; espera 4; tecla c; espera 5; foto sa_7                          # fuera del salon: UN JUGADOR
+tecla s; espera 6; foto sa_6b                                            # X: la licencia (0x23c150)
+tecla c; espera_log 'SALON: SALON.DAT' 30 || true; espera 5; foto sa_6c  # B: de vuelta al salon (pagina principal)
+tecla c; espera 5; foto sa_7                                             # fuera del salon: UN JUGADOR
 for _m in 1 2 3; do tecla Left; espera 1; done                           # OUTRUN
 tecla x; espera 6; tecla Right; espera 2; tecla Right; espera 6; foto sa_8   # seleccion de coche: el F50
 tecla x; espera 5; tecla x; espera_log 'musica: MUS33' 30 || true; espera 6   # cambio, musica

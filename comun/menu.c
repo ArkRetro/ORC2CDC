@@ -461,7 +461,7 @@ static void bloqueado(void);
 static int sa_abre(void);
 static void sa_cierra(void);
 static void sa_entra(void);
-static int sa_control(unsigned n);
+static int sa_control(unsigned n, int atiende);
 static void sa_dibuja(void);
 static int sa_activo(void);
 static int sa_car_on, sa_car_reg, sa_car_col;
@@ -1209,8 +1209,12 @@ int menu_paso(unsigned n)
         }
     }
     if (pant == P_C2C && c2_activo()) spr_paso();         /* (los cursores animados de C2C.DAT) */
-    if (pant == P_SALON && sa_activo() && fase != F_SALE && sa_control(fase == F_QUIETO && !cargando ? n : 0)) {
-        sale(P_MODO, 0); pon_pista(-1); musica_menu();      /* (la musica de los menus: 0x23b5b8, PROBABLE) */
+    if (pant == P_SALON && sa_activo() && fase != F_SALE) {
+        int r = sa_control(n, fase == F_QUIETO && !cargando);
+        /* sin musica: el salon la para al salir (0x25bf28) y la pantalla de UN JUGADOR no la vuelve a poner (en el
+           frontal solo la ponen el arranque de la raiz, 0x23b5b8, y la vuelta de la seleccion de musica, 0x24efec) */
+        if (r == 1) sale(P_MODO, 0);
+        else if (r == 2) a_licencia(P_SALON);
     }
     if (pant == P_LICENCIA && l_desliza) {                  /* 4E2970 estados 6-9: sale 48 px por paso y entra */
         if (++l_desliza == 11) l_idx += l_dir;
@@ -1622,10 +1626,11 @@ static void c2_dibuja(void)
    objeto i en el cuadro paso x i + base, entra de paso x i + 1 y sale hasta paso x (i + 1)); precio "%dM" del
    objeto (0x1f4198: 0x629ee0, 10 x i y PRICES de OutrunMiles.bin) en (480, 368) si no es suyo; millas "%dM" en
    (480, 87); icono de comprado 0x440051 (0x25d1a8 / 0x25d2f8). Sin el coche: menu_coche3d.
-   DESVIACIONES / PROVISIONAL (docs/PARIDAD.md, SALON): la ventana (imagenes 0x3004x sin localizar) es la de la
-   pausa; la camara del coche es la de la seleccion de coche (el preset 1 de 482E70 sin leer); X (LICENCIA en la barra)
-   no hace nada; al salir del salon vuelve la musica de los menus (el original la para en 0x25bf28 y la raiz la pone
-   en 0x23b5b8, PROBABLE). */
+   Ventana de 0x271ca8 con las imagenes 0x3004x de spr_etc_xst; X abre la licencia (0x23c150) y se vuelve al salon;
+   la musica se para al salir (0x25bf28) y no vuelve; palanca analogica con repeticion (0x284e20).
+   BLOQUEADO (docs/PARIDAD.md, SALON): la camara del preset 1 de 482E70 (sin la colocacion del coche del frontal: la de
+   la seleccion de coche), el aspecto del coche bloqueado (bit 0x40 de 19cfd8), los tableros de cursos que leen los
+   bits de ETAPAS y METAS. */
 #define SALON_RAM (384u << 10)                              /* tablas de SALON.DAT (animacion 257 KB, sprites, SAL1) */
 typedef struct { uint32_t tok, pri, ult; } sa_d_t;
 typedef struct {                                            /* bloque SAL1 (tools/conv_salon.py) */
@@ -1638,6 +1643,7 @@ typedef struct {                                            /* bloque SAL1 (tool
     struct { uint8_t reg; int8_t color; } k_fila[110];
     uint32_t pista[21];
     uint32_t t_ventana, t_formato;
+    uint16_t vent_wh[16][2];                                /* imagenes 0x30040..0x3004f de la ventana */
 } sa_t;
 /* paginas (estados 3k .. 3k + 2): base de los objetos (-1: el bit del registro), filas de la lista, tira (escena,
    ultimo indice, paso, base), titulo (entra, quieto, sale), vuelta tras la ventana */
@@ -1649,7 +1655,7 @@ static const sa_pag_t SA_PAG[6] = {
     { 0xac, 0xd9, 0xee, 0x4400a9, 0x14, 0xa, 9, 0x1c, 0x1d, 0x1e, 10 },          /* musica (0x25c750) */
     { 0x1c, 0x49, 0xb7, 0x440080, 0x6d, 0xa, 9, 0x1f, 0x20, 0x21, 13 },          /* colores (0x25ca80) */
     { 0xc1, 0xee, 0xfc, 0x4400c5, 0xd, 0xa, 9, 0x19, 0x1a, 0x1b, 16 } };         /* extras (0x25cf00) */
-static spr_banco_t *sa_bk; static const sa_t *SA; static hud_dat_t *sa_h; static int sa_uf = -1, sa_ub = -1;
+static spr_banco_t *sa_bk; static const sa_t *SA; static hud_dat_t *sa_h; static int sa_uf = -1, sa_ub = -1, sa_uv = -1;
 /* recurso de pantalla (465250 / 465860 / 465970 / 4659F0 / 4652E0 del PC; 0x229708 / 0x228e60 / 0x229080 /
    0x229120 / 0x2297d0 del PS2): una instancia del reproductor; modo 3 = 1 y se suelta al acabar */
 typedef struct { int h, solo; uint32_t tok; int pri, ult, capa, modo; } sa_r_t;
@@ -1699,7 +1705,8 @@ static int sa_abre(void)
         dbglog(DBG_ERROR, "SALON: SALON.DAT sin tablas\n"); spr_cierra(sa_bk); sa_bk = NULL; SA = NULL; menu_hueco(0); return -1;
     }
     spr_por_tramos(sa_bk, 1);
-    sa_h = spr_hud(sa_bk); sa_uf = hudd_uso(sa_h, "F14"); sa_ub = hudd_uso(sa_h, "BARRA");
+    sa_h = spr_hud(sa_bk); sa_uf = hudd_uso(sa_h, "F14"); sa_ub = hudd_uso(sa_h, "BARRA"); sa_uv = hudd_uso(sa_h, "VENT");
+    if (sa_uv >= 0 && hudd_sube_uso(sa_h, sa_uv)) dbglog(DBG_ERROR, "SALON: sin VRAM para la ventana\n");
     if (sa_uf >= 0 && hudd_sube_uso(sa_h, sa_uf)) dbglog(DBG_ERROR, "SALON: sin VRAM para los glifos\n");
     if (sa_ub >= 0 && hudd_sube_uso(sa_h, sa_ub)) dbglog(DBG_ERROR, "SALON: sin VRAM para la barra\n");
     sa_fondo.h = sa_tit.h = sa_tit2.h = sa_icono.h = sa_vent.h = sa_tira.h = -1;
@@ -1710,7 +1717,7 @@ static int sa_abre(void)
 static void sa_cierra(void)
 {
     if (!sa_bk) return;
-    spr_suelta_todas(); spr_cierra(sa_bk); sa_bk = NULL; SA = NULL; sa_h = NULL; sa_uf = sa_ub = -1;
+    spr_suelta_todas(); spr_cierra(sa_bk); sa_bk = NULL; SA = NULL; sa_h = NULL; sa_uf = sa_ub = sa_uv = -1;
     sa_fondo.h = sa_tit.h = sa_tit2.h = sa_icono.h = sa_vent.h = sa_tira.h = -1;
     sa_car_on = 0; sa_ln = 0; sa_ton = 0;
     if (menu_hueco) menu_hueco(0);
@@ -1871,14 +1878,32 @@ static void sa_pag_sale(int p)                              /* 0x25c490 / 0x25c7
     if (p == 3) pon_pista(-1);                              /* 401030 */
     sa_ln = 0; sa_tira_suelta(); sa_tit_sale(g->sale); sa_est = 0;
 }
-static int sa_accion(unsigned n)                            /* 48F5F0: 0 A, 1 B, 2 arriba, 3 izquierda, 4 abajo, 5 derecha */
+/* 0x284e20 (48F4F0 del PC): la palanca analogica izquierda. Por eje, al pasar de 64 marca su sentido y cuenta 20; si
+   sigue pasada, la cuenta baja uno por paso y a -1 vuelve a marcar (repite cada 21 pasos mientras se mantiene); al
+   soltarla (|eje| <= 64), -1. La cruceta solo da la pulsacion (0x101bd4: lo nuevo del cuadro), sin repeticion */
+static int sa_eje_n[2] = { -1, -1 }; static int sa_eje_m[2][2];
+static void sa_ejes(void)
 {
+    maple_device_t *d = maple_enum_type(0, MAPLE_FUNC_CONTROLLER);
+    cont_state_t *st = d ? (cont_state_t *)maple_dev_status(d) : NULL;
+    int v[2], i;
+    v[0] = st ? st->joyx : 0; v[1] = st ? st->joyy : 0;
+    for (i = 0; i < 2; i++) {
+        int a = v[i] < 0 ? -v[i] : v[i];
+        sa_eje_m[i][0] = sa_eje_m[i][1] = 0;
+        if (sa_eje_n[i] >= 0) sa_eje_n[i] = a <= 64 ? -1 : sa_eje_n[i] - 1;
+        else if (a > 64) { sa_eje_m[i][v[i] < 0] = 1; sa_eje_n[i] = 20; }
+    }
+}
+static int sa_accion(unsigned n)                            /* 0x284990 (48F5F0): 0 A, 1 B, 2 arriba, 3 izquierda, */
+{                                                           /* 4 abajo, 5 derecha, 9 X */
     if (n & (CONT_A | CONT_START)) return 0;
     if (n & CONT_B) return 1;
-    if (n & CONT_DPAD_UP) return 2;
-    if (n & CONT_DPAD_LEFT) return 3;
-    if (n & CONT_DPAD_DOWN) return 4;
-    if (n & CONT_DPAD_RIGHT) return 5;
+    if ((n & CONT_DPAD_UP) || sa_eje_m[1][1]) return 2;
+    if ((n & CONT_DPAD_LEFT) || sa_eje_m[0][1]) return 3;
+    if ((n & CONT_DPAD_DOWN) || sa_eje_m[1][0]) return 4;
+    if ((n & CONT_DPAD_RIGHT) || sa_eje_m[0][0]) return 5;
+    if (n & CONT_X) return 9;
     return 12;
 }
 static void sa_pag_control(int p, int a)                    /* 0x25c2d0 / 0x25c5e8 / 0x25c858 / 0x25cd38 / 0x25d008 */
@@ -1905,10 +1930,15 @@ static void sa_pag_control(int p, int a)                    /* 0x25c2d0 / 0x25c5
     }
 }
 /* control y logica de un paso (0x25b5d0); n: botones nuevos (0 si no se atiende la entrada). 1: salir del salon */
-static int sa_control(unsigned n)
+static int sa_control(unsigned n, int atiende)
 {
-    int a = sa_accion(n);
+    int a;
     if (!SA) return 1;
+    sa_ejes(); a = atiende ? sa_accion(n) : 12;
+    /* X: la raiz (0x23c150) abre la licencia (pantalla 0x15) si la de encima lo permite (+0x2a4: el 1 que pone el
+       salon con 0x23bb20(raiz, 0, 1) en cada paso); al volver, el salon empieza otra vez (0x25b418). Al irse, su
+       suspender (0x25b998) para la musica (0x25bf28) */
+    if (a == 9) { pon_pista(-1); return 2; }
     spr_paso();
     sa_icono_paso();
     sr_tick(&sa_fondo);
@@ -1967,12 +1997,13 @@ static void sa_entra(void)
     sa_ton = 0; sa_tira.h = -1; sa_ln = 0; sa_car_on = 0; sa_refresca = 0;
     sa_base = 0xcf; sa_est = 0;
     sr_fila(&sa_tit, 16, 0, 1, 1);                          /* 0x25b418: +0x938 la fila 16 (+0x2084 sin aplicar) */
-#if defined(PRUEBA_MILLAS) && PRUEBA_MILLAS > 1
-    {   /* prueba (-DPRUEBA_MILLAS=n): la licencia activa con n millas al entrar en el salon por primera vez */
+#if defined(PRUEBA_SALON_MILLAS)
+    {   /* prueba (-DPRUEBA_SALON_MILLAS=n): la licencia activa, si no tiene millas, con n al entrar en el salon por
+           primera vez (con la VMU de un arranque anterior, las que le quedaron) */
         static int dado; uint8_t *p = activa(); float m;
         if (p && !dado) {
             memcpy(&m, p + 0x24, 4);
-            if (m < 1.0f) { m = (float)PRUEBA_MILLAS; memcpy(p + 0x24, &m, 4); p[0x3f4] |= 2; }
+            if (m < 1.0f) { m = (float)PRUEBA_SALON_MILLAS; memcpy(p + 0x24, &m, 4); p[0x3f4] |= 2; }
             dado = 1; dbglog(DBG_INFO, "SALON: prueba, la licencia con %.0f millas\n", (double)m);
         }
     }
@@ -1994,7 +2025,33 @@ static void sa_texto(const char *s, float x, float y, float z, uint32_t col)
     }
     hudd_color(0xFFFFFF);
 }
-static void pz_ventana(float x, float y, float w, float h, float z);
+/* ventana (0x271ca8 = 48C5F0 del PC; flags 0, sin franja de botones): las imagenes 0x3004x de spr_etc_xst con
+   0x117b88 (42D300): modo 0 a su tamano, 1 estirada en x, 2 en y, 3 en las dos (aqui, estiradas: PROBABLE) */
+static void sa_img(int k, float x, float y, float w, float h, float z)
+{
+    hudd_pz_t pz; float m[6], q[4]; int iw, ih;
+    if (sa_uv < 0 || hudd_piezas(sa_h, sa_uv, k, &pz, 1) < 1) return;
+    iw = SA->vent_wh[k][0]; ih = SA->vent_wh[k][1];
+    if (iw <= 0 || ih <= 0) return;
+    (void)z;
+    q[0] = q[1] = 0; q[2] = iw; q[3] = ih;
+    m[0] = w / iw; m[1] = 0; m[2] = 0; m[3] = h / ih; m[4] = x; m[5] = y;
+    hudd_sprite(pz.spr, m, q, 1, 0);
+}
+static void sa_ventana_dibuja(float x, float y, float w, float h, float z)
+{
+    hudd_capa(sa_h, z, 0);
+    sa_img(0xa, x + 3, y + 26, w - 9, h - 42, z);           /* 0x3004a (3) cuerpo */
+    sa_img(0x9, x + 3, y + 32, w - 9, 6, z);                /* 0x30049 (1) */
+    sa_img(0xf, x + 9, y, w - 115, 26, z);                  /* 0x3004f (1) cabecera */
+    sa_img(0x3, x + 9, y + h - 16, w - 20, 16, z);          /* 0x30043 (1) pie */
+    sa_img(0xe, x, y, 9, 26, z);                            /* 0x3004e (0) */
+    sa_img(0xd, x + w - 106, y, 106, 26, z);                /* 0x3004d (0) */
+    sa_img(0x2, x, y + h - 16, 9, 16, z);                   /* 0x30042 (0) */
+    sa_img(0x1, x + w - 11, y + h - 16, 11, 16, z);         /* 0x30041 (0) */
+    sa_img(0xc, x, y + 26, 3, h - 42, z);                   /* 0x3004c (2) izquierda */
+    sa_img(0xb, x + w - 6, y + 26, 6, h - 42, z);           /* 0x3004b (2) derecha */
+}
 static void sa_dibuja(void)
 {
     char b[24]; float z;
@@ -2009,7 +2066,7 @@ static void sa_dibuja(void)
     }
     if (sa_ub >= 0) hudd_dibuja(sa_h, sa_ub, 0, 0, 0, 1, 7.5f, 0);   /* barra de ayuda */
     if (sa_est == 0x16 || sa_est == 0x15) {                 /* ventana (48C5F0, capa 0xc) y su icono (0xd) */
-        pz_ventana(330, 180, 239, 130, 8);
+        sa_ventana_dibuja(330, 180, 239, 130, 8); 
         sa_texto((const char *)SA + SA->t_ventana, 330 + 6, 180 + 5, 8.01f, 0xFFFFFF);
         spr_dibuja(0xc, SPR_CAPAS, hudd_z() + 0.01f, 0);
     } else spr_dibuja(0xc, SPR_CAPAS, 8, 0);
