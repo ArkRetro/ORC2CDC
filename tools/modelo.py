@@ -71,6 +71,15 @@ def textura_dc(a):
     else: lista, fmt = 2, 2                                      # ARGB4444
     return fmt, lista, codifica16(a, fmt)
 
+def formato_mezcla(a):
+    """formato de una textura de la lista transparente (estado del GS con ABE): el alfa es la mezcla, tambien si es
+    casi constante (textura_dc lo tomaba por RGB565 y la malla salia opaca: la sombra negra de alfa 0x50 que cubre la
+    calzada del tunel de SNOW, revision 44): RGB565 solo si es todo opaco, ARGB1555 si es casi binario, si no ARGB4444"""
+    al = a[..., 3].astype(int)
+    if (al >= 240).all(): return 1
+    if ((al < 16) | (al >= 240)).mean() > 0.97: return 0
+    return 2
+
 def cielos(mallas):
     """texturas del cielo (las de las mallas de la lista 3 con el grupo del cielo en el campo del nodo: -256 el que se
     ve siempre, -257 el del fundido; conv_tramo.pon_cielo): van con tramado (vq.elige_cielo)"""
@@ -275,7 +284,7 @@ class Modelo:
             if d is None:
                 texs.append((w, h, fmt, li, len(blob), tam)); blob += self.blob[off:off + tam]; continue
             a = self.rgba[j]; li = d['li']
-            fmt = 1 if li == 0 else (0 if li == 1 else textura_dc(a)[0])
+            fmt = 1 if li == 0 else (0 if li == 1 else formato_mezcla(a))
             mip = w == h and w >= 8 and d['mxl'] > 0 and 2 * d['suelo'] >= d['total'] > 0
             datos = datos_mip(a, fmt, d['umbral']) if mip else codifica16(a, fmt, d['umbral'])
             datos += b'\0' * (-len(datos) % 32)
