@@ -1614,6 +1614,41 @@ car+4 a 0 (coche_ban): ni pilotos de noche, ni faros escamoteables, ni luz de lo
   - Capturas (scratchpad capturas_r44/): luces_testa / f50 / 360 _antes / _despues.png (METR, mismo cuadro) y
     luces_testa_flor / luces_360_flor _antes / _despues.png. Datos: ninguno nuevo.
 
+## Tuneles: calzada negra y luces (revision 44)
+
+Queja del usuario: "si el Ferrari entra en un tunel deben verse los efectos de iluminacion en la carretera, que ahora
+se ve negra, y los coches tener los faros encendidos".
+
+- Calzada negra (CORREGIDO, era del port): reproducido en el tunel de SNOW (`PRUEBA_CURSO=189 PRUEBA_NODO=8`, crono
+  950; barrido con PRUEBA_AUTO de los arboles 1 y 189: tuneles en SNOW, LASV y MAYA). La calzada se dibuja (con
+  `-DDEP_TEX` sale de color) pero encima va la sombra pintada del tunel: registro 0 de cs_CS_SNOW (tira 135, entrada
+  0 de la tabla 4, material 1), textura 0 de 32x32 negra con alfa 0x50 en todos los texeles, ABE con ALPHA 0x44 (la
+  mezcla normal), sin color de vertice: en el GS oscurece la calzada al 37,5 %. modelo.textura_dc toma el alfa casi
+  constante por "no es transparencia" y la dejaba en RGB565: en la lista transparente de la PowerVR alfa 1, negro
+  opaco. Ahora `modelo.formato_mezcla` (ajusta_texturas): en la lista transparente RGB565 solo si todo el alfa es >=
+  240, ARGB1555 si es casi binario, si no ARGB4444. Afecta a 6 texturas del disco (todas de los cs_CS: escaneados
+  todos los _pmt de STAGE.PS2 y OBJ.PS2): SNOW 0 (el tunel), INDU 11 (alfa 160-174), METR 57 (108-154) y 96 (0-38:
+  salia opaca y casi no se ve), NIAG 108 (208-254) y BEAC_BT 35 (236-254), y las de sus etapas al reves. Datos
+  rehechos (PYTHONHASHSEED=0, `regenera.py --interno seg` + `--interno revq`): SEG04, 06, 13, 21, 37, 39, 46 y 53
+  (BEAC_BT / BEAC_BR, SEG19 / 51, no estan en ningun arbol); solo cambian esas texturas (565 -> 4444, comprobado byte a
+  byte contra los de antes). Van sueltas (ORD7) en la carpeta de datos en vez del descriptor PAKD de SEGS.PAK (6
+  ficheros, ~27 MB mas en el disco); un regenera.py entero las vuelve a empaquetar.
+- Iluminacion del tunel en el original (CONFIRMADO, datos y PC): no hay luz propia del tunel. Las luces de
+  scn_env_sun_<zona> son un registro fijo por etapa (salvo GRAN lista 1 y FLOR lista 2 de los coches, por tramos de
+  posicion); las luces locales de maya_spl_<zona> (44A1D0) solo existen en CLOU (174 farolas de 0,3 de gris a los lados
+  de la carretera) y FLOR_R; ninguna etapa tiene color de vertice oscuro en la calzada. Lo que se ve en el tunel es
+  la geometria con su luz de etapa, las lamparas del techo (geometria) y la sombra pintada de arriba. Verificado:
+  SNOW (tunel_snow_antes / despues.png), fuera del tunel de dia sin un pixel distinto (tunel_snow_dia_antes /
+  despues.png, crono 500), LASV y MAYA ya se veian bien (tunel_lasv.png, tunel_maya.png; sus datos no cambian).
+- Faros en los tuneles (como el original: NO se encienden de dia). car+4 0x200 ("tunel") y 0x100 (noche) de
+  CheckNightAndTunnel 4A25F0 salen de los bits 0x10 / 8 del trabajo de SCN_EFC, y el unico que los pone es
+  weather_44bd50 (race_area.cpp:236-243 de la decompilacion: 4AFB70 / 4AFB40 con los bits del +0x3C del descriptor de
+  la etapa, al empezar y en el cambio de entorno); 4AFB70 no tiene otro llamador. No hay deteccion de tunel por
+  tramo, superficie de COLI, volumen ni tabla. Solo GHOS / METR (y LASV / FLOR) llevan 0x18. Encender faros, pilotos y
+  haz en los tuneles de dia seria una DESVIACION (habria que inventar la deteccion, p. ej. con la sombra pintada del
+  tunel o geometria encima de la ruta): NO hecho, pendiente de que el usuario lo confirme sabiendo que el original
+  no lo hace.
+
 ## Coches: piezas animadas (como 46AE70 / 469600)
 
 Queja del probador: "las ruedas cuando haces el derrape no se ve como giran" y detalles del coche que no se animan.
