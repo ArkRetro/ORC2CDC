@@ -851,6 +851,8 @@ static uint32_t ta_otros_ult, ta_min_otros_teo, ta_traf_teo;   /* bytes de lo qu
                                                             teorico) y teoricos del coche de trafico mayor con LOD 0 */
 static uint32_t ta_teo_3d, ta_tiras;                     /* bytes teoricos y tiras 3D del cuadro */
 static uint32_t ta_real_ult, ta_opb_ult;                 /* lo que gasto de verdad el TA en el cuadro anterior */
+static uint32_t ta_teo_ult, ta_x_max;                    /* su cuenta teorica y el mayor real / teorico (x 1000) desde
+                                                            que se enciende: la linea "TA" de las medidas (pausa, Y) */
 static int ta_freno;                                     /* 0..3: OPB muy lleno, la etapa baja a (4 - freno) / 4 */
 static int ta_en_etapa;                                  /* lo que se envia ahora es de la etapa (su tope) */
 static int ta_et_corto;                                  /* en este cuadro no cupo alguna tira de la etapa */
@@ -905,8 +907,10 @@ static void ta_fin_cuadro(void)
     ta_opb_ult = opb <= opb_tot ? opb : 0;               /* Flycast no lleva estos registros: 0 */
     if (ta_opb_ult > opb_tot / 10 * 7) { if (ta_freno < 3) ta_freno++; ta_corto = 1; }
     else if (ta_opb_ult < opb_tot / 2 && ta_freno) ta_freno--;
+    ta_teo_ult = teo;
     if (ta_real_ult && teo > 64 * 1024) {               /* con margen del 20 %; nunca baja de TA_F_MIN */
-        uint32_t f = (uint32_t)((uint64_t)ta_real_ult * 256 * 6 / 5 / teo) + 1;
+        uint32_t f = (uint32_t)((uint64_t)ta_real_ult * 256 * 6 / 5 / teo) + 1, x = (uint32_t)((uint64_t)ta_real_ult * 1000 / teo);
+        if (x > ta_x_max) ta_x_max = x;
         if (f > ta_f) { ta_f = f > 1024 ? 1024 : f; ta_bpv = TA_BPV_MIN * ta_f / TA_F_MIN; }   /* lo 2D, en proporcion */
     }
 }
@@ -1084,6 +1088,16 @@ static inline uint32_t fe_escala(uint32_t c, uint32_t k)
 {
     return (c & 0xFF000000u) | ((((c & 0xFF00FFu) * k) >> 8) & 0xFF00FFu) | ((((c & 0xFF00u) * k) >> 8) & 0xFF00u);
 }
+/* medida (revision 44, -DDIAG_TEX_VRAM): cada malla con textura que se dibuja tiene que tenerla en la VRAM (tv, y no la
+   gris de cuando no cabe nada); "TEXVRAM:" por la consola serie cada ~1 s si alguna no. Con -DDIAG_GD_LENTO (el GD de
+   la consola) comprueba las cargas a trozos de las etapas y las uniones (sube_trozo: el modelo no lleva tv hasta subirlo
+   todo, y geo_visible no lo dibuja) */
+#ifdef DIAG_TEX_VRAM
+static uint32_t texvram_mal, texvram_gris, texvram_n;
+#define TEXVRAM(mo, t) do { texvram_n++; if (!(mo)->tv || !(mo)->tv[t]) texvram_mal++; else if ((mo)->tv[t] == tex_gris) texvram_gris++; } while (0)
+#else
+#define TEXVRAM(mo, t) do { } while (0)
+#endif
 static void dibuja_malla(const modelo_t *mo, const malla_t *m)
 {
     const vert_t *v = mo->verts + m->v0; uint32_t i, n = m->n; int detras = 0;
@@ -1241,7 +1255,7 @@ static void dibuja_rango(const modelo_t *mo, int l, uint32_t k0, uint32_t k1, in
         if (m->tex != ult) {
             ult = m->tex;
 #endif
-            if (m->tex >= 0) pvr_prim(&mo->cabs[sin_niebla][mo->remap ? mo->remap[m->tex] : m->tex], sizeof(pvr_poly_hdr_t));
+            if (m->tex >= 0) { TEXVRAM(mo, mo->remap ? mo->remap[m->tex] : m->tex); pvr_prim(&mo->cabs[sin_niebla][mo->remap ? mo->remap[m->tex] : m->tex], sizeof(pvr_poly_hdr_t)); }
             else pvr_prim(&cab_col[sin_niebla][l], sizeof(pvr_poly_hdr_t));
         }
         if (sol_rayo_on && !sol_rayo_res && recorta && l < 2 && (mo == &etapa || mo == &uni || mo == &sig))
@@ -1338,7 +1352,7 @@ static void dibuja_etapa(const modelo_t *mo, int l)
 #ifdef CON_FUNDIDO_ENTRADA
                 if (f) fe_cab(mo, m->tex); else
 #endif
-                if (m->tex >= 0) pvr_prim(&mo->cabs[0][mo->remap ? mo->remap[m->tex] : m->tex], sizeof(pvr_poly_hdr_t));
+                if (m->tex >= 0) { TEXVRAM(mo, mo->remap ? mo->remap[m->tex] : m->tex); pvr_prim(&mo->cabs[0][mo->remap ? mo->remap[m->tex] : m->tex], sizeof(pvr_poly_hdr_t)); }
                 else pvr_prim(&cab_col[0][l], sizeof(pvr_poly_hdr_t));
             }
             if (sol && sol_rayo_on && !sol_rayo_res) sol_rayo_res = sol_rayo_malla(mo, m, cart);   /* (sol_prepara) */
@@ -1440,7 +1454,7 @@ static void dibuja_indices(const modelo_t *mo, int l, const uint16_t *idx, uint3
         if (solo_lod >= 0 && (!((m->nodo >> solo_lod) & 1) || !((traf_luces >> TRAF_GRUPO(m->nodo)) & 1))) continue;
         if (m->tex != ult) {
             ult = m->tex;
-            if (m->tex >= 0) pvr_prim(&mo->cabs[0][mo->remap ? mo->remap[m->tex] : m->tex], sizeof(pvr_poly_hdr_t));
+            if (m->tex >= 0) { TEXVRAM(mo, mo->remap ? mo->remap[m->tex] : m->tex); pvr_prim(&mo->cabs[0][mo->remap ? mo->remap[m->tex] : m->tex], sizeof(pvr_poly_hdr_t)); }
             else pvr_prim(&cab_col[0][l], sizeof(pvr_poly_hdr_t));
         }
         if (m->n <= 256 && (dir || (prueba && ({ float x = m->cx, y = m->cy, z = m->cz, w;
@@ -5152,9 +5166,13 @@ static int curso_huecos(void)
         if (!gd_busca(n, &lba, &tc) && TAM_SECT(t) + TAM_SECT(tc) > cap_etapa && TAM_SECT(tc) > cap_col_e) cap_col_e = TAM_SECT(tc);
       }
     }
-    if (b && fta) free(b);
-    if (b && !fta) { free(b); if (curso_lee_id(0)) return 1; }  /* de vuelta el del modo OutRun */
+    free(b);
   }
+    /* de vuelta el del modo OutRun (curso_id 0), despues de los dos ficheros. Antes se volvia a leer tras CURSO.DAT y
+       el recorrido de CURSOTA.DAT dejaba en curso[] su ultimo arbol con curso_id = 0 (revision 44): curso_reinicia no
+       lo cambiaba (pedido == curso_id) y el modo OutRun, el INFARTO del juego OutRun 2 y la demo de atraccion salian en
+       NEWY (el arbol 283, un curso seguido de la Contrarreloj, con su union BK457) en vez de PALM */
+    if (curso_lee_id(0)) return 1;
     /* el hueco de la union tambien lleva fuera de la carrera las tablas del frontal de OUTRUN2SP (hueco_fsp): nunca
        menor que eso. Con las uniones por registros (una sola etapa de geometria, demo 39) el mayor BKnn bajo de 1730 a
        1506 KB y el frontal ya no cabia (960 + 600 KB): no se podia elegir OUTRUN2SP en el menu */
@@ -10559,6 +10577,12 @@ int main(int argc, char **argv)
            recorria el monton con mallinfo para nada) */
         if (cuadro % 6 == 0 && estado != META && estado != AGOTADO && estado != FIN && (ver || (!hud_ok && estado != TITULO) )) {
             if (estado == TITULO) sprintf(s1, "MENU  VRAM menu %uK libre %uK", menu_vram() >> 10, (unsigned)(pvr_mem_available() >> 10));
+            /* (revision 44) el consumo del TA para medirlo en la consola real sin cable serie: lo que gasto de verdad el
+               cuadro anterior (TA_ITP_CURRENT) / su cuenta teorica (ta_teo), el mayor desde el arranque y ta_f; Flycast no
+               lleva el registro (sale "sin registro") */
+            else if (ver && ta_real_ult) sprintf(s1, "TA %uK/%uK x%.2f max%.2f f%.2f", (unsigned)(ta_real_ult >> 10), (unsigned)(ta_teo_ult >> 10),
+                                                 (double)ta_real_ult / (double)(ta_teo_ult ? ta_teo_ult : 1), (double)ta_x_max / 1000.0, (double)ta_f / 256.0);
+            else if (ver) sprintf(s1, "TA sin registro, teo %uK f%.2f", (unsigned)(ta_teo_ult >> 10), (double)ta_f / 256.0);
             else sprintf(s1, "TIEMPO %3d  %3d km/h %d  %3d%%%s", (int)ceilf(tiempo), fis_ok ? (int)fis.velocidad_hud : (int)(yo.v * 3.6f), fis.marcha,
                          (int)(100 * yo.s / longitud), yo.choque ? "  !" : "");
             if (ver) {
@@ -10808,6 +10832,13 @@ int main(int argc, char **argv)
                 pvr_list_finish();
             }
         }
+#ifdef DIAG_TEX_VRAM
+        if (cuadro % 60 == 0 && estado != TITULO) {
+            dbglog(DBG_INFO, "TEXVRAM: s %.0f %.4s mallas con textura %u, sin subir %u, gris %u\n", (double)yo.s, cur_nodo >= 0 ? curso[cur_nodo].zona : "----",
+                   (unsigned)texvram_n, (unsigned)texvram_mal, (unsigned)texvram_gris);
+            texvram_n = texvram_mal = texvram_gris = 0;
+        }
+#endif
 #ifdef DIAG_VTX
         if (cuadro % 60 == 0) dbglog(DBG_INFO, "DIAG est%d s %.0f/%.0f ram %uK/%uK v%u (etapa %u) tri %u ms %.1f+%.1f lejos %d (%.2f) vram %u (zona %uK fuera %uK reb %u) ta %uK etapa %uK/%uK 2d %u f %u real %uK opb %uK tiras %u teo %uK orig %u cerca %d m clase %d alfa %.2f quitados %u desde %d m (r %.1f) niebla %.5f sombra %u tri %uK pvs %d%d%d -%u rob %u v %u us%s%s\n", estado,
                                      (double)yo.s, (double)longitud, (unsigned)(mallinfo().uordblks >> 10), (unsigned)(mallinfo().fordblks >> 10),
