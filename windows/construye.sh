@@ -41,8 +41,11 @@ $CCW -O3 -ffp-contract=off -shared -static -o "$G/nativo/pvs.dll" "$REPO/tools/c
 $CCW -O2 -ffp-contract=off -shared -static -o "$G/nativo/visible.dll" "$REPO/tools/c/visible.c" -lm
 $CCW -O2 -w -static -o "$G/nativo/musica.exe" "$REPO/tools/c/musica.c"
 
-echo "== 1ST_READ.BIN (demo/ con KallistiOS) e IP.BIN (makeip)"
+echo "== 1ST_READ.BIN (demo/ con KallistiOS y SH4ZAM) e IP.BIN (makeip)"
 set +u; . "$KOS/environ.sh"; set -u
+# la licencia MIT de SH4ZAM (va en el 1ST_READ.BIN): la del codigo que bajo kos-ports (tools/instala_entorno.sh)
+SHZ_LIC=$(ls "$KOS_PORTS"/sh4zam/build/sh4zam-*/LICENSE "$KOS_PORTS"/sh4zam/dist/sh4zam-*/LICENSE 2> /dev/null | head -1)
+[ -n "$SHZ_LIC" ] || { echo "falta SH4ZAM (kos-ports/sh4zam: tools/instala_entorno.sh)" >&2; exit 1; }
 make -s -C "$REPO/demo" > /dev/null
 "$KOS_CC_BASE/bin/sh-elf-objcopy" -R .stack -O binary "$REPO/demo/demo.elf" "$G/dc/1ST_READ.BIN"
 "$KOS/utils/makeip/makeip" -g "$NOMBRE" -c HOMEBREW -n ORC2CDC -f "$G/dc/IP.BIN" > /dev/null
@@ -56,13 +59,15 @@ for f in OutRun2DC.bat LEEME.txt; do sed 's/\r*$/\r/' "$REPO/windows/$f" > "$P/$
 {
     printf 'Componentes de este paquete y sus licencias\r\n\r\n'
     printf ' - programa/tools, programa/outrun2dc.py, OutRun2DC.bat: orc2cdc (codigo propio).\r\n'
-    printf ' - programa/dc/1ST_READ.BIN: la demo de orc2cdc compilada con KallistiOS (licencia de KallistiOS abajo).\r\n'
+    printf ' - programa/dc/1ST_READ.BIN: la demo de orc2cdc compilada con KallistiOS y SH4ZAM (sus licencias abajo).\r\n'
     printf ' - programa/dc/IP.BIN: makeip de KallistiOS.\r\n'
     printf ' - programa/python: Python %s embebido de python.org (licencia en programa/python/LICENSE.txt).\r\n' $PYVER
     printf ' - programa/python/Lib/site-packages: %s, de PyPI; cada uno con su licencia en\r\n' "$RUEDAS"
     printf '   su carpeta *.dist-info. ffmpeg (imageio_ffmpeg/binaries) es software libre (GPL/LGPL, ffmpeg.org).\r\n'
     printf ' - programa/nativo: tools/c de orc2cdc compilado con mingw-w64 (estatico, con winpthreads).\r\n\r\n'
     printf '==== Licencia de KallistiOS ====\r\n'; sed 's/\r*$/\r/' "$KOS/doc/LICENSE.md"
+    printf '\r\n==== Licencia de SH4ZAM (https://github.com/gyrovorbis/sh4zam, por kos-ports) ====\r\n'
+    sed 's/\r*$/\r/' "$SHZ_LIC"
 } > "$P/LICENCIAS.txt"
 # comprobacion: en el paquete no hay nada del disco (ni datos convertidos ni la ISO)
 if find "$P" \( -iname '*.iso' -o -iname '*.DAT' -o -iname '*.ADP' -o -iname '*.VQV' -o -iname '*.PAK' -o -iname '*.gdi' \) | grep -q .; then

@@ -28,6 +28,7 @@
 #include "../comun/rival.h"
 #include "../comun/vmu.h"
 #include "../comun/robot.h"
+#include "../comun/shz.h"
 #include "../comun/modo_video.h"
 #include "camara.h"
 #include "fin.h"
@@ -6333,6 +6334,10 @@ static int uni_regs(void)
     lado = etapa_n >= 1 && etapa_n <= 5 ? rama_nivel[etapa_n - 1] : 2;   /* bp = -1: 451350(nivel - 1) */
     return lado == 0 || lado == 1 ? 2 << lado : 0;
 }
+#if defined(CON_SH4ZAM) && !defined(SIN_SHZ_NODOS)
+#define SHZ_NODOS 1                                             /* nodos_visibles con FTRV (SH4ZAM) */
+static shz_mat4x4_t nv_xm;                                      /* la XMTRX de quien llama */
+#endif
 static void nodos_visibles(modelo_t *mo)
 {
     float tanh = 320.0f / fx, tanv = 240.0f / fx, kh = sqrtf(1 + tanh * tanh), kv = sqrtf(1 + tanv * tanv), lod = fx / 240.0f;
@@ -6368,17 +6373,30 @@ static void nodos_visibles(modelo_t *mo)
     o0 = ojo[0]; o1 = ojo[1]; o2 = ojo[2]; e0 = ade[0]; e1 = ade[1]; e2 = ade[2];
     d0 = der[0]; d1 = der[1]; d2 = der[2]; a0 = arr[0]; a1 = arr[1]; a2 = arr[2]; cer = cerca; lej = lejos;
     pvs_on_ = mo->pvs_on;                                       /* (despues de pvs_paso) */
+#ifdef SHZ_NODOS
+    /* FTRV (SH4ZAM): las filas der, arr y ade por (dx, dy, dz, 0) dan xv, yv y zv de una vez (las mismas sumas; Flycast
+       las hace en doble y redondea al final). La XMTRX de quien llama se guarda y se repone al salir */
+    shz_xmtrx_store_4x4(&nv_xm);
+    {   const shz_vec4_t r0 = shz_vec4_init(d0, d1, d2, 0.0f), r1 = shz_vec4_init(a0, a1, a2, 0.0f), r2 = shz_vec4_init(e0, e1, e2, 0.0f), r3 = shz_vec4_fill(0.0f);
+        shz_xmtrx_load_rows_4x4(&r0, &r1, &r2, &r3); }
+#endif
     for (j = 0; j < n; j++) {
         uint32_t i = L ? L[j] : j, rama, u, c_teo, c_v; nodo_t *d; float dx, dy, dz, zv, xv, yv, lim; int cp, cd;
         if (i >= nnod) continue;
         d = ND + i;
         dx = d->cx - o0; dy = d->cy - o1; dz = d->cz - o2;
+#ifdef SHZ_NODOS
+        {   shz_vec4_t t = shz_xmtrx_transform_vec4(shz_vec4_init(dx, dy, dz, 0.0f)); xv = t.x; yv = t.y; zv = t.z; }
+#else
         zv = dx * e0 + dy * e1 + dz * e2;
+#endif
         if (zv - d->r > lej) { POPR(i, PR_LEJOS); continue; }
         /* detras del plano cercano o fuera de los laterales: fuera de la vista; lo que entra luego por el borde de la
            pantalla no se funde (fe_paso) */
         if (zv + d->r < cer) { if (FF) FF[i >> 5] |= 1u << (i & 31); POPR(i, PR_DETRAS); continue; }
+#ifndef SHZ_NODOS
         xv = dx * d0 + dy * d1 + dz * d2; yv = dx * a0 + dy * a1 + dz * a2;
+#endif
         if (fabsf(xv) - zv * tanh > d->r * kh || fabsf(yv) - zv * tanv > d->r * kv) { if (FF) FF[i >> 5] |= 1u << (i & 31); POPR(i, PR_LADO); continue; }
         u = d->fl & 15;
         lim = d->r * lod * (float)(1u << ((u ? u : 6) - 1));
@@ -6414,6 +6432,9 @@ static void nodos_visibles(modelo_t *mo)
         d->relleno[1] = (d->relleno[1] & ~4095u) | (uint32_t)(cd << 6 | cp);
         prio_coste[cd][cp] += c_teo; prio_vtx[cd][cp] += c_v;
     }
+#ifdef SHZ_NODOS
+    shz_xmtrx_load_4x4(&nv_xm);
+#endif
 }
 /* quita de mo->vis los nodos de las clases que no caben */
 static void nodos_quita(modelo_t *mo)
@@ -8011,6 +8032,19 @@ static void coche_entorno(matrix_t mc)
         if (e->tipo < 2) continue;
         p = m->nodo < 0 ? 0 : (m->nodo >> 8) & 0xFF; if (p >= NPZ) p = 0;
         a = A[p]; b = B[p];
+#if defined(CON_SH4ZAM) && !defined(SIN_SHZ_ENTORNO)
+        {   /* FTRV (SH4ZAM): filas (0,5, a) y (0,5, b) por (1, x, y, z), en el mismo orden que la suma en C (Flycast
+               la hace en doble y redondea al final); la XMTRX se carga una vez por malla (nadie la espera despues:
+               robot_matrices y el dibujo la cargan con mat_load) */
+            const uint32_t nv = m->n;
+            const shz_vec4_t r0 = shz_vec4_init(0.5f, a[0], a[1], a[2]), r1 = shz_vec4_init(0.5f, b[0], b[1], b[2]), r2 = shz_vec4_fill(0.0f);
+            shz_xmtrx_load_rows_4x4(&r0, &r1, &r2, &r2);
+            for (i = 0; i < nv; i++) {
+                uint32_t w = q[i]; shz_vec4_t t = shz_xmtrx_transform_vec4(shz_vec4_init(1.0f, (float)(int8_t)w, (float)(int8_t)(w >> 8), (float)(int8_t)(w >> 16)));
+                v[i].u = t.x; v[i].v = t.y;
+            }
+        }
+#else
         {   /* (en variables locales: escribir v[i] obligaba a releer a y b en cada vertice; mismas cuentas) */
             const float a0 = a[0], a1 = a[1], a2 = a[2], b0 = b[0], b1 = b[1], b2 = b[2]; const uint32_t nv = m->n;
             for (i = 0; i < nv; i++) {
@@ -8019,6 +8053,7 @@ static void coche_entorno(matrix_t mc)
                 v[i].v = 0.5f + x * b0 + y * b1 + z * b2;
             }
         }
+#endif
     }
 }
 
@@ -8209,8 +8244,14 @@ static float band_pos[35][3], band_nor[35][3]; static uint32_t band_lut[33], ban
 static uint32_t chr_vtx, chr_us, chr_vtx_ult, chr_us_ult;      /* vertices del cuadro y tiempo de CPU (us; y del anterior) */
 static void m_por(matrix_t o, const float (*a)[4], const float (*b)[4])   /* o = a b (filas) */
 {
+#if defined(CON_SH4ZAM) && !defined(SIN_SHZ_ROBOT)
+    /* con FTRV (SH4ZAM, comun/shz.h): en columnas la memoria de filas es la traspuesta, (a b)^T = b^T a^T; deja la
+       XMTRX cambiada (robot_matrices la vuelve a cargar con mat_load) */
+    shz_xmtrx_load_unaligned_4x4(&b[0][0]); shz_xmtrx_apply_unaligned_4x4(&a[0][0]); shz_xmtrx_store_4x4((shz_mat4x4_t *)o);
+#else
     int i, j;
     for (i = 0; i < 4; i++) for (j = 0; j < 4; j++) o[i][j] = a[i][0] * b[0][j] + a[i][1] * b[1][j] + a[i][2] * b[2][j] + a[i][3] * b[3][j];
+#endif
 }
 /* La pareja de la carrera (487EE0 / 487F50, PS2 0x205518 / 0x2055b8): CHRPAR.DAT (tools/conv_chr.py tabla_pares) da
    las tablas del original y CHRppaa.DAT (piloto pp, acompanante aa, indices de la tabla de personajes 0x36f7d8) la
@@ -10083,6 +10124,9 @@ int main(int argc, char **argv)
                 if (crono < 0x57e3f) crono++; else crono = 0x57e3f;   /* 7D39DC: tope 0x57E3F (race_manager 4508xx) */
 #ifdef DIAG_CONGELA
                 if (crono == DIAG_CONGELA) { diag_congelado = 1; pasos = paso + 1; printf("CONGELA: crono %d\n", crono); }
+#endif
+#ifdef DIAG_POS
+                if (crono % 300 == 0) printf("POS: crono %d s %.4f pos %.4f %.4f %.4f\n", crono, (double)yo.s, (double)yo.pos[0], (double)yo.pos[1], (double)yo.pos[2]);   /* medida: la posicion por pasos (igual en dos binarios) */
 #endif
 #ifdef PRUEBA_CRONO
                 {   /* crono del HUD frente al reloj de la consola, cada 600 pasos (unos 10 s) */

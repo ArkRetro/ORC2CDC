@@ -43,6 +43,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "robot.h"
+#include "shz.h"
 
 #define SEXAG (1.0f / 60.0f)
 typedef float mat_t[4][4];
@@ -101,12 +102,21 @@ static const uint32_t *t_band, *t_btex, *t_bmate; static uint32_t n_bmate;   /* 
 static const rpieza_t *bpz; static const rmalla_t *bml; static const rvert_t *bvt; static uint32_t bnpz;
 
 /* ---------------------------------------------------------------- matrices de fila: M = op M (pila del PC) */
+#if defined(CON_SH4ZAM) && !defined(SIN_SHZ_ROBOT)
+/* o = a b con FTRV (SH4ZAM): en columnas (lo que ve la XMTRX) la memoria de una matriz de filas es su traspuesta, asi
+   que (a b)^T = b^T a^T: se carga b y se le aplica a. o puede ser a o b (se escribe al final) */
+static void m_mul(mat_t o, const mat_t a, const mat_t b)
+{
+    shz_xmtrx_load_unaligned_4x4(&b[0][0]); shz_xmtrx_apply_unaligned_4x4(&a[0][0]); shz_xmtrx_store_unaligned_4x4(&o[0][0]);
+}
+#else
 static void m_mul(mat_t o, const mat_t a, const mat_t b)       /* o = a b */
 {
     mat_t r; int i, j;
     for (i = 0; i < 4; i++) for (j = 0; j < 4; j++) r[i][j] = a[i][0] * b[0][j] + a[i][1] * b[1][j] + a[i][2] * b[2][j] + a[i][3] * b[3][j];
     memcpy(o, r, sizeof r);
 }
+#endif
 static void m_id(mat_t m) { memset(m, 0, sizeof(mat_t)); m[0][0] = m[1][1] = m[2][2] = m[3][3] = 1; }
 static void op_tras(mat_t m, const float *v) { int j; for (j = 0; j < 4; j++) m[3][j] += v[0] * m[0][j] + v[1] * m[1][j] + v[2] * m[2][j]; }
 static void op_rot(mat_t m, int a, int b, float ang)            /* fila a' = c a + s b, fila b' = -s a + c b */
