@@ -171,3 +171,136 @@ Queda (medido, no hecho):
 - los coches del jugador (32-40 KB de 16 bits, insignias) y las cifras / tacometros del HUD: se quedan por calidad;
 - los juegos de reserva del OPB (614 KB): solo con medidas de la consola real (`TA_OPB_POS`, `ta_freno`);
 - medir en la consola: `DIAG_MS` (cuadros tarde, ms de CPU) y si el recorte por CPU acorta `lejos` a 45.
+
+## Popping (2026-11-13)
+
+Pedido del usuario: quitar en lo posible el popping de edificios, estructuras y objetos del escenario sin cambiar el
+aspecto ni las proporciones, sin perder rendimiento y sin pasarse de la memoria. Este apartado es el sistema en
+tiempo real (recorte, LOD, reparto del TA, cargas); lo que no se ve nunca (PVS mas fina) y los edificios palidos de la
+salida de PALM los lleva el otro trabajo (aa695bb, de03c08).
+
+### 1. Medida: `-DDIAG_POPPING`
+
+Por nodo de la etapa, la union y la etapa siguiente (`nodos_visibles`, `nodos_quita`) la razon por la que no se dibuja
+en el cuadro: `lejos` (plano lejano), `detras` (plano cercano), `lado` (laterales de la vista), `lod` (LOD de 404B00),
+`rama` (registro de la union, 44E290), `pvs` (ninguna malla visible desde la seccion), `tope` (reparto del TA),
+`tramo` (modelo sin subir o sin dibujar, 44C530). Un nodo que aparece o desaparece con el centro dentro de la
+pantalla es un salto que se ve; se cuenta por la razon de antes (o la de ahora si desaparece) y por el radio de su
+esfera en la pantalla (2, 8 y 32 px de 640x480). Ademas: mallas que la PVS enciende o apaga en un nodo que ya se
+dibujaba, mallas que el tope salta al dibujar (orden de las listas) y "falta": la suma de pi px^2 de lo que el tope
+quita en la pantalla (con solapes) / la pantalla. Linea `POP:` cada ~1 s y los 4 saltos mayores (`POPEV:`). Las razones
+van por fichero (datos), no por hueco: el paso de la etapa siguiente a etapa no cuenta. Solo medida (4 x 8 KB).
+
+Prueba: `-DPRUEBA_AUTO -DPRUEBA_SIN_TIEMPO -DDIAG_POPPING -DDIAG_VTX -DDIAG_MS` (el piloto desde la salida de PALM
+por LAKE), 240 s; resumen por razon de s = 60 a 10000 m (sin la escena de la salida, un corte de
+camara) normalizado por 45 cuadros (Flycast puede ir mas lento que el reloj con otras pruebas en marcha). La prueba es
+determinista: dos pasadas del mismo ELF dan las mismas cifras.
+
+### 2. Diagnostico (antes, 5ae7d9c con `-DREPARTO_CERCA=0.75f -DREPARTO_HIST_D=0 -DREPARTO_HIST_P=0 -DSIN_REPARTO_GRANDES -DREPARTO_COSTE=0`, lo de 3da8c7e)
+
+| Razon | aparecen por s (>= 2 / 8 / 32 px) | desaparecen por s (>= 2 / 8 / 32 px) | distancia minima |
+|---|---|---|---|
+| tope del TA | 25,3 / 19,8 / 6,0 | 17,3 / 12,8 / 4,0 | 79-95 m (salida), 190-430 m (resto) |
+| LOD de 404B00 (original) | 7,0 / 0,02 / 0 | 0,2 / 0 / 0 | 44-62 m (todo de ~7,5 px: el umbral) |
+| PVS (nodo entero) | 3,3 / 2,5 / 1,4 | 1,9 / 1,6 / 0,9 | 31-80 m |
+| lateral | 0,2 / 0,06 / 0,01 | 0 | > 700 m (giros) |
+| registro de la union | 0,07 / 0,05 / 0,05 | 0 | |
+| tramo sin subir / carga | 0 | 0 | |
+| mallas de la PVS en nodos ya dibujados | 70 / 31 / 5,0 | 39 / 16 / 3,3 | |
+
+Pantalla sin dibujar por el tope: 43 % de media (s 60-10000). Mallas que el tope salta al dibujar: 1197 en 12 cuadros.
+
+- **El tope del TA es casi todo el popping**: lo que el original dibuja (16000-70000 vertices de la etapa despues de
+  la PVS, linea `orig` de `DIAG_VTX`) no cabe en lo que deja el bufer de parametros (~16000 con el coche y el trafico,
+  846 KB de etapa). Con `REPARTO_CERCA` 0,75 lo cercano por distancia se llevaba casi todo el tope y de lo de mas alla
+  solo quedaban las clases de LOD bajas (lo enorme); el corte de distancia iba de 76 a 430 m (mediana 430) y
+  edificios de 40-300 px de radio entraban y salian ahi. Ademas, si ni la clase de LOD 0 cabia, `prio_p` quedaba en
+  -1 y se iba todo lo de mas alla, el terreno de r 980 m incluido (POPEV: `sig aparece nodo 227 tope r 982 px 340`).
+- El LOD del original no es un problema de la Dreamcast: quita lo que baja de 7,5 px de radio (1/32 de media
+  pantalla, 404B00), lo mismo que en el PS2 y el PC.
+- El recorte lateral es correcto: la vista es 4:3 de 640x480 con fx de la fov del original (483C10 / 484BD0) y el
+  recorte por esfera usa esos mismos limites; lo que entra por `lado` en mitad de la pantalla es lejano y en giros.
+- Cargas: ningun salto por tramos sin subir (la etapa siguiente se lee ~1000 m antes y se dibuja con la escala de
+  44C530; si la lectura llega tarde, el bucle espera: `carga_espera`). No hace falta una precarga predictiva.
+- Profundidad: la PowerVR compara 1/w en coma flotante (no un z-buffer entero de 24 bits como el D3D9 del PC); el plano
+  cercano 0,1 del original (PS2 0x178580) no quita precision lejos y nada se pierde por profundidad (sin w recortada:
+  `inv_w` es 1/w con FSRRA).
+- LOD de mallas: los nodos de las etapas del PS2 solo traen la malla 0 que se dibuje (en STAGE.PS2, 17630 nodos de 7
+  segmentos: 80 con la bandera 0x10 de 404B00 y mallas 1-3, todos en el segmento 3 y con las 4 mallas iguales, 960
+  vertices cada una): no hay LOD del original que usar en el curso. El trafico ya usa sus 5 LOD (46DF50) y el coche del
+  jugador no tiene.
+- PVS: 3,3 nodos por segundo (1,4 de 32 px o mas) y 75 mallas aparecen al cambiar de seccion; es del otro trabajo.
+- CPU: `lejos` solo bajo a 3650 m en Flycast (`CPU_MS_CORTA` 21 ms); en la consola, si la CPU no llega, se acorta de 50
+  en 50 m con el fundido de la niebla (`niebla_pon`): hay que mirarlo alli (`DIAG_MS`).
+
+### 3. OutRun2006Tweaks (emoose, clonado solo para leer en el scratchpad: or2tweaks)
+
+| Ajuste | Que arregla en el PC | Que toca (direccion del exe; decompilacion) | En el port |
+|---|---|---|---|
+| `DisableStageCulling` | "objetos del escenario lejanos que aparecen de golpe" | 2 NOP en 0x40501F, un salto condicional dentro de 404D10 (el recorrido de nodos, protegido por SecuROM: la decompilacion lo tiene como puente, `walk_404d10` en pc_render_queue.cpp). PROBABLE: la prueba del resultado de 404B00 (esfera contra la vista y LOD por tamano: se descarta si 127 - exponente(r / (z tan(fov/2))) >= umbral 6, 7 con la bandera 0x40) | la prueba de LOD de `nodos_visibles`. El concepto (dibujar mas alla del LOD) va como `REPARTO_LOD_MAS`, dentro del reparto del TA (ultimas clases): 0 por defecto (abajo) |
+| `FixZBufferPrecision` | z-fighting y objetos lejanos mal dibujados con el plano cercano 0,1 en un z-buffer entero | gancho de CalcCameraMatrix 0x484BD0 (`camera_project_484bd0`): camara +0xBC (plano cercano) a 1,0 en carrera (0,25 / 0,2 en la vista interior, 0,05 para los efectos de 0x40BE70) | nada: la PowerVR guarda 1/w en coma flotante; el cercano sigue siendo 0,1 (subirlo recortaria lo cercano que el original ve) |
+| `DrawDistanceIncrease` | popping por las listas de nodos por seccion | gancho en 0x44DF6D de `race_area_geometry_44de10`: el original dibuja de cada objeto de la etapa solo los nodos de la lista de la seccion `bp` del coche (cs_CS_<zona>, `geo + [geo + bp x 4]`); el ajuste une las listas de bp a bp + N sin repetir nodos (y quita nodos de LOD malos por etapa, OutRun2006Tweaks.lods.ini) | el port no usa esas listas (su formato de PS2 sigue sin descifrar): dibuja la union de todas (`tools/modelo.py` vis) con la vista, el LOD de 404B00 y la PVS. Es un DrawDistanceIncrease sin limite; lo que limita es el TA. Queda por mirar si salen los nodos "malos" de la lista del ajuste (PALM objeto 1 nodos 0xD-0xF desde la bifurcacion izquierda; ALPI objeto 1 nodos 1, 0xD, 0x22) |
+| `ScreenEdgeCullFix` | objetos (conos) que desaparecen antes del borde en pantallas que no son 4:3 | gancho de CalcBall3D2D 0x449E70 (`project_449e70` de race_traffic.cpp): reescala la x / y de pantalla a 4:3 | nada: la Dreamcast sale en 4:3 (640x480) y el recorte usa esos limites |
+
+(`DisableVehicleLODs`, 0x4AE4E9, LOD 0 para todo el trafico: no cabe en el TA; el trafico sigue con el LOD de 46DF50.)
+No se copia ningun parche: solo las ideas, y el valor del juego (LOD, planos, fov) sigue siendo el de la ISO.
+
+### 4. Cambios (decisiones del port, cada una revertible con su define; `demo/main.c`, `nodos_visibles_todos`)
+
+1. `REPARTO_CERCA` 0,75 -> 0,25: lo cercano por distancia ya no se lleva el tope; lo demas se reparte por la clase de
+   LOD (tamano en la pantalla respecto al LOD del original).
+2. `REPARTO_COSTE` 4: la clase de LOD sube 1 por cada vez que el nodo dobla los 64 vertices: de lo que no cabe se
+   quita antes lo que mas TA gasta por pixel (palmeras, gente, barandillas lejos) y quedan los edificios y las
+   siluetas (pocas caras grandes). Probados y peores: 8 (menos saltos pero mas pantalla sin dibujar), sin coste para
+   lo de 60 px o mas, y un tope de clase 24 para lo grande y caro.
+3. `SIN_REPARTO_GRANDES` (por defecto activo): la clase de LOD 0 (240 px o mas: terreno, mar) antes que lo cercano;
+   si no cabe, se acorta lo cercano (antes `prio_p` = -1 y se iba el terreno).
+4. `REPARTO_HIST_D` / `_P` 4 / 8: histeresis por nodo; lo que se dibujo en el cuadro anterior cuenta como 2 veces mas
+   cerca / mas grande (mascara `vis_ant`, 400 bytes por modelo junto a `vis`): entra al cruzar el corte y solo sale si
+   queda 2 veces mas alla. Con 2 / 4 (1,41 veces) 5,8 desapariciones de 8 px o mas por segundo; con 4 / 8, 4,5.
+5. `REPARTO_LOD_MAS` 0 (sin cambio): con 2, los nodos hasta 4 veces su distancia de LOD entran en las ultimas clases
+   (solo si sobra TA). Los saltos del LOD (5,7 por segundo, de menos de 8 px) pasan a saltos del tope de 2-8 px (+4,1),
+   los de 8 px o mas igual y +0,3-0,6 ms de CPU en Flycast: no compensa hasta medir la CPU en la consola.
+
+Lo que no cambia: la geometria y las texturas, el orden de dibujo, la PVS, la niebla y el velo del limite (`nlim_paso`
+sigue a `prio_d`), el tope del TA y sus margenes (`ta_f`), la RAM (+400 bytes por modelo del monton al leerlo) y la
+VRAM. Sin fundidos ni transparencias.
+
+### 5. Antes / despues (Flycast; los tiempos de Flycast no son los de la consola: falta confirmarlo en la PAL real)
+
+Mismo ELF de prueba con los defines de antes (`-DREPARTO_CERCA=0.75f -DREPARTO_HIST_D=0 -DREPARTO_HIST_P=0
+-DSIN_REPARTO_GRANDES -DREPARTO_COSTE=0`) y con los de ahora; tramo de s que cubren las dos pasadas, por 45 cuadros.
+Saltos del tope del TA (la razon que cambia); "falta" = pantalla sin dibujar por el tope; CPU = `MS` dib (ms por
+cuadro de dibujo, Flycast).
+
+| Prueba | aparecen >= 8 / >= 32 px por s | desaparecen >= 8 / >= 32 px por s | falta | CPU dib (ms) | cuadros por s | zona libre min (KB) |
+|---|---|---|---|---|---|---|
+| PALM -> LAKE (s 60-10937) | 19,8 / 5,8 -> **13,4 / 2,0** | 12,8 / 3,8 -> **4,5 / 0,6** | 40,8 -> **15,4 %** | 16,10 -> 16,40 | 44,84 / 44,84 | 669 / 669 |
+| GHOS -> IMPE, COCHE06 (PRUEBA_NODO=9 RAMA=0 FIN=400) | 14,0 / 4,1 -> **10,1 / 2,2** | 9,1 / 2,7 -> **6,9 / 1,9** | 24,9 -> **20,1 %** | 16,00 -> 16,42 | 43,99 / 43,76 | 266 / 266 (BK09 + IMPE) |
+| OUTRUN2SP (arbol 1: BEAC, BK15, SEG25, BK16, SEG20) | 14,9 / 6,1 -> **9,1 / 2,0** | 9,9 / 3,7 -> **4,4 / 0,8** | 30,3 -> **17,3 %** | 16,27 -> 16,39 | 44,57 / 44,64 | 502 / 502 |
+| INFARTO, GHOS -> IMPE (PRUEBA_VARIANTE=2) | 15,1 / 4,9 -> **12,0 / 2,5** | 12,8 / 4,3 -> **7,1 / 1,7** | 32,6 -> **21,2 %** | 16,44 -> 16,71 | 43,99 / 43,96 | 170 / 170 |
+
+- Vertices por cuadro iguales (28257 / 28176 en PALM; el tope del TA no cambia) y las mismas mallas saltadas por el
+  tope al dibujar (10-22 cuadros de cada pasada, como antes). 0 "Out of memory" y 0 "pvr_mem: ERROR" en las ocho
+  pasadas; RAM: +400 bytes por modelo leido (el minimo del monton cambia con el momento de las cargas: INFARTO 464 /
+  431 KB, los demas iguales); VRAM igual.
+- LOD del original: igual (4-6 por segundo, todo de menos de 8 px).
+- PVS: los saltos de nodos de 8 px o mas suben (PALM 2,5 -> 4,2, OUTRUN2SP 5,1 -> 7,4): ahora se dibuja mas de lo
+  de lejos y se ven mas los cambios de seccion de la PVS (otro trabajo).
+- CPU: +0,1-0,4 ms por cuadro en Flycast (la mascara del cuadro anterior y el coste en la clase); `lejos` igual en las
+  dos (1850-3650 m como minimo en Flycast con las cargas).
+- Imagen (`-DDIAG_CONGELA`, el mismo paso en las dos; capturas en el scratchpad, pop/congelado_antes_despues.png): en
+  la salida de PALM (crono 150) antes faltaban los edificios del fondo de la calle a la derecha (la calle acababa en el
+  cielo) y ahora estan; a cambio, lo caro y pequeno de lejos (la gente de la grada de la izquierda, un arbol) se quita
+  antes. En el crono 1500 (playa) las dos iguales: alli cabe todo.
+
+### 6. Lo que queda
+
+- El TA: lo que el original dibuja es 1-4 veces lo que cabe. Con el reparto nuevo lo que salta es mas pequeno y no
+  parpadea, pero sigue habiendo ~13 apariciones por segundo de 8 px o mas en PALM. Mas sitio solo con VRAM (cada 64 KB
+  de bufer son 128 KB) o midiendo en la consola lo que gasta de verdad el TA (`ta_f` 1,75 sobre lo teorico es el margen
+  de la medida de la demo 12c; `ta_fin_cuadro` ya lo sube solo si la consola gasta mas, nunca lo baja).
+- PVS: los saltos de nodos y mallas al cambiar de seccion (otro trabajo).
+- Medir en la consola real: `DIAG_POPPING` (necesita la consola serie) o al menos `DIAG_MS` y `lejos`.
+- Los nodos "malos" de OutRun2006Tweaks.lods.ini (LOD de otras secciones que el port, sin las listas por seccion,
+  puede dibujar a la vez que el modelo entero): mirarlo en PALM (bifurcacion izquierda) y ALPI.

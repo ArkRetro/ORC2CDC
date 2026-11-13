@@ -278,7 +278,9 @@ colgaria), salida de PALM a 100 km/h, cada 60 cuadros:
 
 (con el trafico del LOD 0; ahora coche + trafico + efectos son ~11500.)
 
-Reparto del tope de la etapa (`nodos_visibles_todos`), como lo veria el jugador:
+Reparto del tope de la etapa (`nodos_visibles_todos`), como lo veria el jugador (desde el 2026-11-13 con
+`REPARTO_CERCA` 0,25, el coste por vertice en la clase de LOD, la clase 0 antes que lo cercano y histeresis por nodo:
+docs/PLAN.md, Popping; lo de abajo es el reparto de antes, que sigue con sus defines):
 
 - clase de distancia de cada nodo visible por la parte mas cercana de su esfera (4 log2(z - r): pasos del 19 %); se
   dibujan enteras las clases cercanas mientras quepan en 3/4 del tope: lo cercano y la calzada siempre;
