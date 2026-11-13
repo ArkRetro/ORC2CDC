@@ -1531,8 +1531,12 @@ car+4 a 0 (coche_ban): ni pilotos de noche, ni faros escamoteables, ni luz de lo
   programa 0x317CF0 / clave 0x158200 del VU1, ver Suelos). Necesitan otra pasada de la calzada con la textura proyectada
   (vertices dobles en el TA) y la luz por vertice de la escena cada cuadro (la escena va con la luz fija de tools/modelo.py).
 - Verificado en Flycast (METR, PRUEBA_AUTO PRUEBA_NODO=11): luz delante del coche, pilotos de noche del jugador y del
-  trafico; de dia (PALM) igual que antes (car+4 = 0: las mallas nuevas no se dibujan). Capturas: scratchpad
-  capturas_r42/faros_antes.png y faros_despues.png.
+  trafico; de dia (PALM) igual que antes (car+4 = 0: las mallas nuevas no se dibujan; sin "LUCES:" en la consola).
+  Coste (METR, `-DDIAG_MS -DDIAG_SIN_CPU`, ~55 lineas MS): 43,8 -> 43,9 fps, dib 18,52 -> 18,45 ms, 28646 -> 28726
+  vertices (los 128 de la luz y las luces del trafico); VRAM libre 1694K -> 1658K (FAROS.DAT 18 KB y las texturas
+  aditivas del trafico); sin "Out of memory". Capturas: scratchpad capturas_r42/faros_antes.png y faros_despues.png.
+  Datos: FAROS.DAT nuevo; TRAF0-8, TRAFK0-2 y RC00-29 hay que rehacerlos (paso trafico / camiones / rivales de
+  regenera.py: borrarlos de la carpeta de datos); con los de antes la demo funciona igual que antes (sin grupos 2 y 4).
 
 ## Coches: piezas animadas (como 46AE70 / 469600)
 
