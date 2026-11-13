@@ -59,7 +59,7 @@ int menu_foto(void);                        /* licencia +0x20 (la foto: PC [7C24
 /* ganchos para otros modulos (voces del locutor, video): se llaman al entrar en cada pantalla (evento 0) y al elegir
    una opcion (evento 1, valor = opcion); NULL = nada */
 enum { MP_TITULO, MP_MENU, MP_MODO, MP_COCHE, MP_CAMBIO, MP_MUSICA, MP_LICENCIA, MP_EDITOR, MP_OPCIONES, MP_RANKING,
-       MP_MULTI, MP_C2C };
+       MP_MULTI, MP_C2C, MP_SALON };
 extern void (*menu_gancho)(int pantalla, int evento, int valor);
 /* lo pone quien dibuja el coche 3D de la seleccion: libera su VRAM (se vuelve a cargar cuando haga falta). El menu lo
    llama cuando una pantalla no cabe: las texturas del coche quedan en medio de la VRAM del menu y la parten (la

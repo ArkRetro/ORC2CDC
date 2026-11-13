@@ -29,6 +29,7 @@ struct spr_banco {
     const uint32_t *tex_esc;                            /* por escena: {desplazamiento de la lista, n} */
     const uint8_t *masc;
     const uint8_t *extra; uint32_t tam_extra;
+    int tramos; uint64_t esc_m;                         /* por tramos (spr_por_tramos): las texturas de las escenas */
 };
 static spr_banco_t *bancos[0x30];                       /* por banco - 0x20 */
 
@@ -67,9 +68,13 @@ typedef struct {
 #define HUECOS 64
 static inst_t ins[SPR_CAPAS * HUECOS];
 static uint8_t usadas[SPR_CAPAS], cursor[SPR_CAPAS];
-typedef struct { spr_banco_t *b; int esc, capa, cuadro; float x, y; } inm_t;
+typedef struct { spr_banco_t *b; int esc, capa, cuadro; float x, y; uint64_t m; } inm_t;
 #define N_INM 160                                       /* (la entrada de nombre: hasta ~110 por cuadro) */
 static inm_t inm[N_INM]; static int n_inm;
+/* bancos por tramos: las texturas que necesita cada instancia (las de los cuadros de su tramo) */
+static uint64_t ins_m[SPR_CAPAS * HUECOS];
+static uint64_t *rec_m;                                 /* recogida de las texturas de una escena (sin dibujar) */
+static void escena(const spr_banco_t *b, int k, float f, float tx, float ty);
 
 static spr_banco_t *banco_de(uint32_t tok, int *esc)
 {
@@ -110,6 +115,49 @@ static int sube(spr_banco_t *b, int k)
     dbglog(DBG_ERROR, "SPRANI: no caben las texturas de %X%04X (%d)\n", b->banco, k, r);
     return r;
 }
+/* Bancos por tramos (el SALON: sus tiras de imagenes son escenas de hasta 44 texturas, 1 MB de VRAM con VQ, de las
+   que cada objeto usa una o dos): al crear una instancia se suben solo las texturas que dibujan los cuadros de su
+   tramo [primero, ultimo] (la escena se evalua cuadro a cuadro sin dibujar) y, si no caben, se echan las de las
+   escenas del banco que no necesita ninguna instancia viva ni inmediata. Las que no son de escenas (glifos, usos
+   propios del conversor) no se tocan. Solo con hasta 64 texturas (si no, como siempre: la escena entera) */
+static uint64_t mascara_tramo(const spr_banco_t *b, int k, float f0, float f1)
+{
+    uint64_t m = 0; int f, lo = (int)floorf(f0 < f1 ? f0 : f1), hi = (int)ceilf(f0 < f1 ? f1 : f0);
+    rec_m = &m;
+    for (f = lo; f <= hi; f++) escena(b, k, (float)f, 0, 0);
+    rec_m = NULL;
+    return m;
+}
+static int sube_m(spr_banco_t *b, uint64_t m)
+{
+    int n = hudd_n_tex(b->h), t, r = 0, intento, j, i;
+    if (n > 64) n = 64;
+    for (intento = 0; intento < 2; intento++) {
+        for (t = 0; t < n; t++) if ((m >> t & 1) && !hudd_residente(b->h, t) && (r = hudd_sube(b->h, t, 1))) break;
+        if (t == n) return 0;
+        if (r != -2 || intento) break;
+        {   uint64_t usa = m; int nt = 0;
+            for (j = 0; j < SPR_CAPAS * HUECOS; j++) if (ins[j].viva && ins[j].b == b) usa |= ins_m[j];
+            for (i = 0; i < n_inm; i++) if (inm[i].b == b) usa |= inm[i].m;
+            for (t = 0; t < n; t++) if ((b->esc_m >> t & 1) && !(usa >> t & 1) && hudd_residente(b->h, t)) { hudd_baja(b->h, t, 1); nt++; }
+            hudd_vacia();
+            dbglog(DBG_INFO, "SPRANI: sin VRAM para un tramo de %X, %d texturas fuera (libre %uK)\n", b->banco, nt,
+                   (unsigned)(pvr_mem_available() >> 10));
+        }
+    }
+    dbglog(DBG_ERROR, "SPRANI: no caben las texturas de un tramo de %X (%d)\n", b->banco, r);
+    return r;
+}
+void spr_por_tramos(spr_banco_t *b, int si)
+{
+    int k; uint32_t q;
+    if (!b) return;
+    b->tramos = si && hudd_n_tex(b->h) <= 64; b->esc_m = 0;
+    for (k = 0; b->tramos && k < b->n_esc; k++) {
+        const uint16_t *l = (const uint16_t *)(b->blq + b->tex_esc[2 * k]);
+        for (q = 0; q < b->tex_esc[2 * k + 1]; q++) if (l[q] < 64) b->esc_m |= 1ull << l[q];
+    }
+}
 int spr_sube_escena(uint32_t token) { int k; spr_banco_t *b = banco_de(token, &k); return b ? sube(b, k) : -1; }
 void spr_baja_texturas(spr_banco_t *b) { if (b) hudd_baja(b->h, 0, -1); }
 
@@ -124,7 +172,8 @@ int spr_crea(uint32_t token, int capa, int modo, int primero, int ultimo)
     s->cuadro = primero; s->primero = primero >= 0 ? primero : 0;
     s->ultimo = ultimo < 0 ? rdf(raiz(b, k) + 8) - 1 : ultimo;
     usadas[capa]++;
-    sube(b, k);
+    if (b->tramos) { ins_m[h] = mascara_tramo(b, k, s->cuadro, s->ultimo); sube_m(b, ins_m[h]); }
+    else sube(b, k);
     return h;
 }
 int spr_crea_entera(uint32_t token, int capa, int modo)
@@ -180,10 +229,11 @@ void spr_paso(void)
 
 void spr_inmediata(uint32_t token, float x, float y, int capa, int cuadro)
 {
-    int k; spr_banco_t *b = banco_de(token, &k);
+    int k; spr_banco_t *b = banco_de(token, &k); uint64_t m = 0;
     if (!b || n_inm >= N_INM || capa < 0 || capa >= SPR_CAPAS) return;
-    if (sube(b, k)) return;
-    inm[n_inm].b = b; inm[n_inm].esc = k; inm[n_inm].capa = capa; inm[n_inm].cuadro = cuadro; inm[n_inm].x = x; inm[n_inm].y = y;
+    if (b->tramos) { m = mascara_tramo(b, k, (float)cuadro, (float)cuadro); if (sube_m(b, m)) return; }
+    else if (sube(b, k)) return;
+    inm[n_inm].m = m; inm[n_inm].b = b; inm[n_inm].esc = k; inm[n_inm].capa = capa; inm[n_inm].cuadro = cuadro; inm[n_inm].x = x; inm[n_inm].y = y;
     n_inm++;
 }
 
@@ -242,6 +292,7 @@ static void pieza(int s, const float *m, float w, float h, float alfa, int adi)
 {
     float q[4]; const float *fr;
     if (s < 0 || s >= E->n_spr || alfa < 0.004f || fabsf(m[0] * m[3] - m[1] * m[2]) < 1e-6f) return;
+    if (rec_m) { int t = hudd_sprite_tex(E->h, s); if (t >= 0 && t < 64) *rec_m |= 1ull << t; return; }
     fr = E->frac + 4 * s; q[0] = fr[0] * w; q[1] = fr[1] * h; q[2] = fr[2] * w; q[3] = fr[3] * h;
     hudd_sprite(s, m, q, alfa, adi);
 }

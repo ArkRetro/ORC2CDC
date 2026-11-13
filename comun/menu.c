@@ -6,9 +6,10 @@
      OPTIONS; MULTIPLAYER fuera, DESVIACION pedida: menu_sin_multi) -> un jugador (COAST 2 COAST, OUTRUN, HEART ATTACK, TIME ATTACK, SHOWROOM) -> coche -> cambio
      AT/MT -> musica -> carrera; B vuelve atras. LICENSE (X en el menu principal y en un jugador) abre la eleccion de
      licencia. HEART ATTACK (INFARTO) y TIME ATTACK (CONTRARRELOJ) llevan a la carrera con su variante (menu_modo);
-     lo que necesita modos que la demo no tiene (multijugador, rankings, SHOWROOM) tiene su pantalla y la accion
+     lo que necesita modos que la demo no tiene (multijugador, rankings) tiene su pantalla y la accion
      bloqueada (sacudida y sonido 3, como un coche sin desbloquear). OUTRUN2SP lleva a la carrera del juego de OUTRUN2SP
      (menu_sp) por su frontal de recreativa (comun/fsp.c).
+   SHOWROOM (SALON) abre el salon del original (P_SALON, SALON.DAT: la tienda de las millas OutRun; ver mas abajo).
    Cursores con los tramos MUEVEij (20 cuadros por paso; 40 en la musica), entradas ENTRA, cambio con AT/MT en bucle y
    AT_OK/MT_OK o AT_ATRAS/MT_ATRAS al confirmar o volver, radio de la musica ENTRA/SALE. Cabeceras: ENTRA y luego
    BRILLO (destello del rotulo en bucle). Barra de ayuda de cada pantalla (AYUDA_*: botones y textos del original,
@@ -60,13 +61,14 @@ static const char *const VNOM[NV] = { "TITULO", "COMUN", "MENU", "MODO", "COCHE"
                                       "MUSICA2" };
 /* pantallas del menu (las de menu.h, MP_*) y la VRAM que necesita cada una */
 enum { P_TITULO, P_MENU, P_MODO, P_COCHE, P_CAMBIO, P_MUSICA, P_LICENCIA, P_EDITOR, P_OPCIONES, P_RANKING, P_MULTI,
-       P_C2C, NP };                                         /* P_C2C: categorias y mapa de COAST 2 COAST (C2C.DAT) */
+       P_C2C, P_SALON, NP };                                /* P_C2C: categorias y mapa de COAST 2 COAST (C2C.DAT); P_SALON:
+                                                               el salon (SALON.DAT) */
 #define VB(v) (1 << (v))
 static const int MASCARA[NP] = {
     VB(V_TITULO), VB(V_COMUN) | VB(V_MENU), VB(V_COMUN) | VB(V_MODO), VB(V_COMUN) | VB(V_COCHE),
     VB(V_COMUN) | VB(V_COCHE) | VB(V_CAMBIO), VB(V_COMUN) | VB(V_MUSICA), VB(V_COMUN) | VB(V_LICENCIA),
     VB(V_COMUN) | VB(V_LICENCIA), VB(V_COMUN) | VB(V_OPCIONES), VB(V_COMUN) | VB(V_RANKING), VB(V_COMUN) | VB(V_MULTI),
-    VB(V_COMUN) | VB(V_MODO) };
+    VB(V_COMUN) | VB(V_MODO), VB(V_COMUN) | VB(V_MODO) };
 
 enum { U_TFONDO, U_TLOGO, U_TSTART, U_FONDO, U_CABMENU, U_PRINC, U_CABMODO, U_UNJUG, U_CABCOCHE, U_INFO, U_INFO_T,
        U_CAND, U_CAMBIO, U_RADIO, U_AYUDA, U_L0, U_T0, U_LISTA, U_MCAND, U_CABMUSICA,
@@ -455,6 +457,16 @@ static void c2_control(unsigned n);
 static void c2_dibuja(void);
 static int c2_activo(void);
 static void bloqueado(void);
+/* SALON (mas abajo) */
+static int sa_abre(void);
+static void sa_cierra(void);
+static void sa_entra(void);
+static int sa_control(unsigned n);
+static void sa_dibuja(void);
+static int sa_activo(void);
+static int sa_car_on, sa_car_reg, sa_car_col;
+typedef struct { int desbl, modelo, bit, ficha; int8_t color, col[8]; } sa_reg_t;
+static sa_reg_t sa_reg[30];
 
 /* ---------------------------------------------------------------- VRAM */
 /* la de la musica, con la lista que se ve */
@@ -503,7 +515,7 @@ unsigned menu_vram(void)
     for (p = 0; p < NV; p++) if (cargada[p]) s += pan[pidx[p]].vram;
     return s;
 }
-void menu_sale(void) { int p; c2_cierra(); for (p = 0; p < NV; p++) baja_p(p); fsp_sale(); hudd_vacia(); }
+void menu_sale(void) { int p; c2_cierra(); sa_cierra(); for (p = 0; p < NV; p++) baja_p(p); fsp_sale(); hudd_vacia(); }
 /* antes del frontal de recreativa: la VRAM del menu fuera (sus tablas siguen en la RAM) */
 static void menu_libera_todo(void) { int p; for (p = 0; p < NV; p++) baja_p(p); if (menu_suelta_coche) menu_suelta_coche(); hudd_vacia(); }
 void menu_libera_vram(void)
@@ -603,7 +615,9 @@ int menu_inicia(void)
         f_w = ((const uint16_t *)f)[0]; f_h = ((const uint16_t *)f)[1]; f_pri = ((const uint16_t *)f)[2];
         f_n = ((const uint16_t *)f)[3]; f_esp = ((const int16_t *)f)[4]; f_ker = ((const uint16_t *)f)[5];
         f_met = (const int8_t *)(f + 12); f_inter = f_met + 2 * f_n;
-        t_modelo = mnu2 + h[4]; t_desbloq = (const int16_t *)(t_modelo + 32);
+        /* u8 modelo[30] y detras, sin relleno (conv_menu.mnu2), i16 desbloqueo[30]: en +30 (antes se leia en +32 y
+           cada ficha tomaba el bit, los colores y el color inicial de la siguiente; revision 42, el SALON) */
+        t_modelo = mnu2 + h[4]; t_desbloq = (const int16_t *)(t_modelo + 30);
         t_colbit = t_desbloq + 30; t_colini = (const int8_t *)(t_colbit + 240);
         if (h[5]) col_tarjeta = h[5];
         if (h[6] && !memcmp(mnu2 + h[6], "PRG1", 4)) prg = mnu2 + h[6] + 4;
@@ -658,7 +672,7 @@ static int cabecera(int p)
 {
     switch (p) {
     case P_MENU: return U_CABMENU;
-    case P_MODO: case P_C2C: return U_CABMODO;
+    case P_MODO: case P_C2C: case P_SALON: return U_CABMODO;
     case P_COCHE: case P_CAMBIO: return U_CABCOCHE;
     case P_MUSICA: return U_CABMUSICA;
     case P_LICENCIA: case P_EDITOR: return U_CABLIC;
@@ -737,7 +751,8 @@ static void entra(int p, int atras)
        huecos y al salir no dejan huecos entre las pantallas que se vuelven a subir (antes: "out of PVR memory" al
        subir el cambio y la musica tras el coche) */
     if (p != P_C2C) c2_cierra();
-    if ((p == P_C2C) != (pant == P_C2C)) menu_libera_todo();
+    if (p != P_SALON) sa_cierra();
+    if ((p == P_C2C) != (pant == P_C2C) || (p == P_SALON) != (pant == P_SALON)) menu_libera_todo();   /* (igual el salon) */
     cargando = !asegura(mascara(p)); t_carga = 0;
     barra_ant = pant >= 0 ? barra(pant) : -1;
     pant = p; fase = F_ENTRA; t = 0; entra_atras = atras; t_bloq = 0;
@@ -750,6 +765,10 @@ static void entra(int p, int atras)
         if (c2_abre()) { entra(P_MODO, 1); bloqueado(); return; }   /* (sin C2C.DAT o sin el hueco)  */
         c2_entra();
         break; }
+    case P_SALON:
+        if (sa_abre()) { entra(P_MODO, 1); bloqueado(); return; }   /* (sin SALON.DAT o sin el hueco) */
+        sa_entra();
+        break;
     case P_MENU: case P_MODO: case P_RANKING: case P_MULTI: {
         static const int U_[] = { U_PRINC, U_UNJUG, U_RANK, U_MULTI };
         int k = p == P_MENU ? 0 : p == P_MODO ? 1 : p == P_RANKING ? 2 : 3;
@@ -878,11 +897,12 @@ int menu_pista(void) { return sp_sel ? fsp_musica() : elegido < n_ok ? elegido :
 int menu_coche3d(void)
 {
     if (sp_sel) return fsp_coche3d() && ficha_de(fsp_modelo()) >= 0;
+    if (pant == P_SALON) return md && sa_car_on && fase != F_SALE && !cargando && ficha_de(sa_reg[sa_car_reg].modelo) >= 0;
     return md && pant == P_COCHE && ficha_de(c_modelo(c_indice())) >= 0 && fase != F_SALE && !cargando && an_hecho(&a_sel);
 }
-int menu_modelo(void) { return sp_sel ? fsp_modelo() : c_modelo(c_indice()); }
+int menu_modelo(void) { return sp_sel ? fsp_modelo() : pant == P_SALON && sa_car_on ? sa_reg[sa_car_reg].modelo : c_modelo(c_indice()); }
 int menu_coche(void) { return ficha_de(menu_modelo()); }
-int menu_color(void) { return sp_sel ? fsp_color() : colores[c_indice()] + 1; }
+int menu_color(void) { return sp_sel ? fsp_color() : pant == P_SALON && sa_car_on ? sa_car_col : colores[c_indice()] + 1; }
 float menu_giro(void) { return giro; }
 int menu_vista(void) { const uint8_t *p = activa(); return p ? l32(p, 0xd8) : 2; }
 int menu_mph(void) { const uint8_t *p = activa(); return p ? l32(p, 0xdc) : 0; }
@@ -1068,7 +1088,9 @@ static void control(unsigned n)
                 }
             } else if (c == 0) {                            /* COAST 2 COAST: categorias (P_C2C) */
                 if (mis_n && !c2_abre()) { modo_sel = 0; sale(P_C2C, 1); } else bloqueado();
-            } else if (c <= 3) { modo_sel = c; mis_sel = -1; sale(P_COCHE, 1); } else bloqueado();   /* OUTRUN, HEART ATTACK, TIME ATTACK */
+            } else if (c <= 3) { modo_sel = c; mis_sel = -1; sale(P_COCHE, 1); }   /* OUTRUN, HEART ATTACK, TIME ATTACK */
+            else if (!sa_abre()) sale(P_SALON, 1);         /* SALON (showroom, 4D4230 = PS2 0x25b418) */
+            else bloqueado();
         } else if (n & CONT_X) a_licencia(pant);            /* LICENSE */
         else if (n & CONT_Y) { if (!g_est) { g_est = G_PIDE; g_t = 0; } }   /* GUARDAR (DESVIACION, rev. 42; el original: FRIENDS, en linea) */
         else if (atras) sale(pant == P_MENU ? P_TITULO : P_MENU, 0);
@@ -1187,6 +1209,9 @@ int menu_paso(unsigned n)
         }
     }
     if (pant == P_C2C && c2_activo()) spr_paso();         /* (los cursores animados de C2C.DAT) */
+    if (pant == P_SALON && sa_activo() && fase != F_SALE && sa_control(fase == F_QUIETO && !cargando ? n : 0)) {
+        sale(P_MODO, 0); pon_pista(-1); musica_menu();      /* (la musica de los menus: 0x23b5b8, PROBABLE) */
+    }
     if (pant == P_LICENCIA && l_desliza) {                  /* 4E2970 estados 6-9: sale 48 px por paso y entra */
         if (++l_desliza == 11) l_idx += l_dir;
         if (l_desliza >= 21) { l_desliza = 0; an_tramo(&a_fl_d, "QUIETA"); an_tramo(&a_fl_i, "QUIETA"); }
@@ -1574,6 +1599,422 @@ static void c2_dibuja(void)
     }
 }
 
+/* ---------------------------------------------------------------- SALON (showroom: la tienda de las millas) */
+/* El SALON del original (SLES-53998 0x25b338..0x25db20, vtable 0x41adec = 4D4230.. del PC, outrun2-decomp
+   platform/frontend_showroom.cpp) con los graficos del banco SPRANI 0x44 (SALON.DAT, tools/conv_salon.py: sus 18
+   escenas, las tablas del ELF en el bloque SAL1, los glifos de la fuente 14 y su barra de ayuda) en el reproductor
+   comun/sprani.c, por tramos (spr_por_tramos: de las tiras de imagenes solo las texturas del objeto que se ve).
+   Se gastan las millas OutRun de la licencia (+0x24, float; las suma 4EF510 al acabar una carrera) en desbloquear
+   objetos: el bit i de la licencia +0x28 (4474E0 = PS2 0x1a1cc8), los mismos que leen la seleccion de coche (0x3759E0)
+   y la de musica (0x4191E8: 172 + tema - 7).
+   Estados (+0x40c del objeto; control 0x25b5d0, tabla de saltos 0x41aca0) como el PC (4D5880):
+     0 / 1 / 2 pagina principal (0x25bce8 / 0x25bde8 / 0x25bf28): lista de 5 filas (0x28..0x2c: COCHES, ESCENARIOS,
+       EXTRAS, MUSICA, COLORES; tabla 0x41ad10 -> estados 3, 6, 15, 9, 12) y la tira 0x44007d; B sale del salon.
+     3..5 coches (0x25c038 / 0x25c2d0 / 0x25c490): 28 registros de 0x41bda0 {modelo, bit}, la ficha (0x25bf68: indice
+       en 0x375968) y su color (0x18a110: 0x3d4b80 por modelo); el coche 3D del registro (28e348 / 28e788).
+     6..8 escenarios (objetos 0x8a + fila), 9..11 musica (0xac + fila; suena el avance de la pista 0x375dcc[i] + 0x21),
+     12..14 colores (0x1c + fila; el coche del registro 0x41ba30[fila] con su color), 15..17 extras (0xc1 + fila).
+     21 / 22 / 23 ventana de compra (0x25d560 / 0x25d878 / 0x25da80): "COMPRAR OBJETO" (0x3a4) en (330, 180, 239,
+       130); icono 0x44005c (filas 252..256: SI, NO, sin millas, no disponible) en la capa 0xd. Con las millas: A con SI
+       compra (0x1a1ba0: bit puesto y millas - precio; +3F4 |= 2) y al cerrar se guarda (0x105f50: aqui la VMU); los
+       objetos de 0x41ad38 no se venden en esta version (icono 6, sonido 3).
+   Pagina (lista 0x24d430: x -180, y -50, 19 por fila, capas 1 / 2, 7 visibles; tira 0x238798 = 446710 del PC:
+   objeto i en el cuadro paso x i + base, entra de paso x i + 1 y sale hasta paso x (i + 1)); precio "%dM" del
+   objeto (0x1f4198: 0x629ee0, 10 x i y PRICES de OutrunMiles.bin) en (480, 368) si no es suyo; millas "%dM" en
+   (480, 87); icono de comprado 0x440051 (0x25d1a8 / 0x25d2f8). Sin el coche: menu_coche3d.
+   DESVIACIONES / PROVISIONAL (docs/PARIDAD.md, SALON): la ventana (imagenes 0x3004x sin localizar) es la de la
+   pausa; la camara del coche es la de la seleccion de coche (el preset 1 de 482E70 sin leer); X (LICENCIA en la barra)
+   no hace nada; al salir del salon vuelve la musica de los menus (el original la para en 0x25bf28 y la raiz la pone
+   en 0x23b5b8, PROBABLE). */
+#define SALON_RAM (384u << 10)                              /* tablas de SALON.DAT (animacion 257 KB, sprites, SAL1) */
+typedef struct { uint32_t tok, pri, ult; } sa_d_t;
+typedef struct {                                            /* bloque SAL1 (tools/conv_salon.py) */
+    char m[4]; uint32_t o_txt;
+    sa_d_t fila[257];
+    uint32_t precio[0xcf];
+    int32_t fuera[26];
+    int32_t c_modelo[30], c_bit[30], c_ficha[30]; int8_t c_color[30]; uint8_t _r[2];
+    int32_t k_modelo[30], k_ficha[30];
+    struct { uint8_t reg; int8_t color; } k_fila[110];
+    uint32_t pista[21];
+    uint32_t t_ventana, t_formato;
+} sa_t;
+/* paginas (estados 3k .. 3k + 2): base de los objetos (-1: el bit del registro), filas de la lista, tira (escena,
+   ultimo indice, paso, base), titulo (entra, quieto, sale), vuelta tras la ventana */
+typedef struct { int base, f0, f1; uint32_t tira; int ult, paso, b0, tit, quieto, sale, vuelta; } sa_pag_t;
+static const sa_pag_t SA_PAG[6] = {
+    { 0xcf, 0x28, 0x2d, 0x44007d, 4, 0x14, 0xa, -1, -1, -1, -1 },                /* principal (0x25bce8) */
+    { -1, 0x2d, 0x49, 0x44007e, 0x1b, 0xa, 9, 0x13, 0x14, 0x15, 4 },             /* coches (0x25c038) */
+    { 0x8a, 0xb7, 0xd9, 0x44007f, 0x21, 0xa, 9, 0x16, 0x17, 0x18, 7 },           /* escenarios (0x25c4e0) */
+    { 0xac, 0xd9, 0xee, 0x4400a9, 0x14, 0xa, 9, 0x1c, 0x1d, 0x1e, 10 },          /* musica (0x25c750) */
+    { 0x1c, 0x49, 0xb7, 0x440080, 0x6d, 0xa, 9, 0x1f, 0x20, 0x21, 13 },          /* colores (0x25ca80) */
+    { 0xc1, 0xee, 0xfc, 0x4400c5, 0xd, 0xa, 9, 0x19, 0x1a, 0x1b, 16 } };         /* extras (0x25cf00) */
+static spr_banco_t *sa_bk; static const sa_t *SA; static hud_dat_t *sa_h; static int sa_uf = -1, sa_ub = -1;
+/* recurso de pantalla (465250 / 465860 / 465970 / 4659F0 / 4652E0 del PC; 0x229708 / 0x228e60 / 0x229080 /
+   0x229120 / 0x2297d0 del PS2): una instancia del reproductor; modo 3 = 1 y se suelta al acabar */
+typedef struct { int h, solo; uint32_t tok; int pri, ult, capa, modo; } sa_r_t;
+static sa_r_t sa_fondo, sa_tit, sa_tit2, sa_icono, sa_vent, sa_tira;   /* +0x2084, +0x938, +0x9d8, +0xbe0, +0x1fe0, +0xa78 */
+static int sa_est;                                          /* +0x40c */
+static int sa_base = 0xcf;                                  /* +0xc84 */
+static int sa_comprado, sa_refresca;                        /* +0xbdc (0 no, 1 si), +0xc80 */
+static int sa_obj, sa_vuelta, sa_puede, sa_eleccion;        /* +0xc88, +0xc8c, +0x2a74, +0x2080 */
+static int sa_mus;                                          /* +0xb45 */
+/* lista (0x24d430 = 48D970): filas de la tabla, la elegida, la primera que se ve y cuantas */
+static int sa_lf0, sa_ln, sa_lsel, sa_lini, sa_llim, sa_lscroll;
+/* tira (0x238798 = 446710): activa, escena, ultimo indice, paso, base, el objeto */
+static int sa_ton, sa_tult, sa_tpaso, sa_tb0, sa_ti; static uint32_t sa_ttok;
+/* registros de las paginas de coches y colores (+0x4c: 30 x 0x20) */
+/* (sa_reg: los registros de las paginas de coches y colores, +0x4c: 30 x 0x20; sa_car_*: el coche 3D, 28e348 /
+   28e788: registro y color) */
+
+static int sa_activo(void) { return SA != NULL; }
+static void sr_suelta(sa_r_t *r) { if (r->h >= 0) spr_suelta(r->h); r->h = -1; r->solo = 0; }
+static void sr_pon(sa_r_t *r, uint32_t tok, int pri, int ult, int capa, int modo, float vel)
+{
+    /* el mismo cuadro quieto que ya esta (el original lo suelta y lo vuelve a poner: lo mismo en pantalla) */
+    if (r->h >= 0 && modo == 0 && pri == ult && r->modo == 0 && r->tok == tok && r->pri == pri && r->ult == ult && r->capa == capa) return;
+    sr_suelta(r);
+    r->h = spr_crea(tok, capa, modo == 3 ? 1 : modo, pri, ult); r->solo = modo == 3;
+    r->tok = tok; r->pri = pri; r->ult = ult; r->capa = capa; r->modo = modo;
+    if (r->h >= 0 && vel != 1.0f) spr_velocidad(r->h, vel);
+}
+static void sr_fila(sa_r_t *r, int f, int capa, int modo, float vel)
+{
+    const sa_d_t *d = &SA->fila[f]; sr_pon(r, d->tok, (int)d->pri, (int)d->ult, capa, modo, vel);
+}
+static int sr_listo(const sa_r_t *r) { return r->h < 0 || spr_estado(r->h) != 1; }   /* 4652E0 */
+static void sr_tick(sa_r_t *r) { if (r->h >= 0 && r->solo && sr_listo(r)) sr_suelta(r); }   /* 4659F0 */
+
+static int sa_abre(void)
+{
+    void *ram; uint32_t tam;
+    if (SA) return 0;
+    if (!(ram = menu_hueco ? menu_hueco(SALON_RAM) : NULL)) { dbglog(DBG_ERROR, "SALON: sin el hueco para SALON.DAT\n"); return -1; }
+    spr_suelta_todas();
+    if (!(sa_bk = spr_abre_en("SALON.DAT", ram, SALON_RAM))) {
+        dbglog(DBG_ERROR, "SALON: no se pudo abrir SALON.DAT\n"); menu_hueco(0); return -1;
+    }
+    SA = (const sa_t *)spr_extra(sa_bk, &tam);
+    if (!SA || ((uintptr_t)SA & 3) || tam < sizeof(sa_t) || memcmp(SA->m, "SAL1", 4) || SA->o_txt >= tam) {
+        dbglog(DBG_ERROR, "SALON: SALON.DAT sin tablas\n"); spr_cierra(sa_bk); sa_bk = NULL; SA = NULL; menu_hueco(0); return -1;
+    }
+    spr_por_tramos(sa_bk, 1);
+    sa_h = spr_hud(sa_bk); sa_uf = hudd_uso(sa_h, "F14"); sa_ub = hudd_uso(sa_h, "BARRA");
+    if (sa_uf >= 0 && hudd_sube_uso(sa_h, sa_uf)) dbglog(DBG_ERROR, "SALON: sin VRAM para los glifos\n");
+    if (sa_ub >= 0 && hudd_sube_uso(sa_h, sa_ub)) dbglog(DBG_ERROR, "SALON: sin VRAM para la barra\n");
+    sa_fondo.h = sa_tit.h = sa_tit2.h = sa_icono.h = sa_vent.h = sa_tira.h = -1;
+    dbglog(DBG_INFO, "SALON: SALON.DAT (%u bytes de tablas en el hueco), VRAM libre %uK\n", (unsigned)hudd_tablas_ocupa(),
+           (unsigned)(pvr_mem_available() >> 10));
+    return 0;
+}
+static void sa_cierra(void)
+{
+    if (!sa_bk) return;
+    spr_suelta_todas(); spr_cierra(sa_bk); sa_bk = NULL; SA = NULL; sa_h = NULL; sa_uf = sa_ub = -1;
+    sa_fondo.h = sa_tit.h = sa_tit2.h = sa_icono.h = sa_vent.h = sa_tira.h = -1;
+    sa_car_on = 0; sa_ln = 0; sa_ton = 0;
+    if (menu_hueco) menu_hueco(0);
+}
+static float sa_millas(void) { const uint8_t *p = c2_lic(); float m; memcpy(&m, p + 0x24, 4); return m; }
+static int sa_ftoi(float f) { return f > -2147483648.0f && f < 2147483648.0f ? (int)f : (int)0x80000000; }   /* cvt.w.s */
+static int sa_tiene(int b) { const uint8_t *p = c2_lic(); return b >= 0 && b < 0x96 * 8 && ((p[0x28 + b / 8] >> (b % 8)) & 1); }   /* 0x1a1cc8 */
+static uint32_t sa_precio(int i) { return i >= 0 && i < 0xcf ? SA->precio[i] : 0; }   /* 0x1f4198 */
+static int sa_vende(int i) { int k; for (k = 0; k < 26; k++) if (SA->fuera[k] == i) return 0; return 1; }   /* 0x25d790 */
+/* 0x1a1ba0 (447460): sin el bit y con las millas (truncadas sin signo, 0x131ca8) >= precio: pone el bit y resta */
+static int sa_compra(int b, uint32_t precio)
+{
+    uint8_t *p = activa(); float m;
+    if (!p || sa_tiene(b)) return 0;
+    memcpy(&m, p + 0x24, 4);
+    if ((m >= 1.0f ? (uint32_t)m : 0u) < precio) return 0;
+    p[0x28 + b / 8] |= (uint8_t)(1 << (b % 8));
+    m -= (int32_t)precio >= 0 ? (float)(int32_t)precio : (float)((precio >> 1) | (precio & 1)) * 2.0f;
+    memcpy(p + 0x24, &m, 4);
+    return 1;
+}
+/* 0x25d170 (4D4200): el objeto de la fila elegida */
+static int sa_objeto(void)
+{
+    if (sa_base == 0xcf) return 0;
+    if (sa_base >= 0) return sa_lsel + sa_base;
+    return sa_lsel >= 0 && sa_lsel < 30 ? sa_reg[sa_lsel].bit : 0;
+}
+
+/* ---- lista (0x24d430 init, 0x24da30 dibujo, 0x24d820 / 0x24d898 anterior / siguiente, 0x24df28 vaciar) */
+static void sa_lista(int f0, int f1, int lim, int scroll) { sa_lf0 = f0; sa_ln = f1 - f0; sa_lsel = 0; sa_lini = 0; sa_llim = lim; sa_lscroll = scroll; }
+static void sa_lista_mueve(int adelante)                    /* (con la vuelta; sin sonido: argumento 0) */
+{
+    if (sa_ln <= 0) return;
+    sa_lsel += adelante ? 1 : -1;
+    if (sa_lsel < 0) sa_lsel = sa_ln - 1; else if (sa_lsel >= sa_ln) sa_lsel = 0;
+}
+static void sa_lista_paso(void)                             /* 48DDA0: la primera que se ve */
+{
+    if (sa_lscroll) {
+        if (sa_lini + sa_llim <= sa_lsel) { if (sa_lsel < sa_ln) sa_lini++; }
+        else if (sa_lsel < sa_lini) sa_lini--;
+        else if (sa_lini < 0) sa_lini = 0;
+    } else { sa_llim = 96; sa_lini = 0; }
+}
+static void sa_lista_dibuja(void)                           /* filas en (-180, -50 + 19 k): la fila (capa 2) y su barra (1) */
+{
+    int i, k = 0;
+    for (i = 0; i < sa_ln; i++) {
+        const sa_d_t *d, *b;
+        if (i < sa_lini || i >= sa_lini + sa_llim) continue;
+        d = &SA->fila[sa_lf0 + i]; b = &SA->fila[i == sa_lsel ? 2 : 1];
+        spr_inmediata(d->tok, -180, -50 + 19.0f * k, 2, (int)d->pri);
+        spr_inmediata(b->tok, -180, -50 + 19.0f * k, 1, (int)b->pri);
+        k++;
+    }
+}
+/* ---- tira de imagenes (446710 / 4467A0 / 4468A0 / 446930 / 446830) */
+static int sa_tcuadro(int i) { return sa_tpaso * i + sa_tb0; }
+static void sa_tira_pon(int pri, int ult, int modo) { sr_pon(&sa_tira, sa_ttok, pri, ult, 4, modo, 1); }
+static void sa_tira_inicia(uint32_t tok, int ult, int paso, int b0)
+{
+    sa_ttok = tok; sa_tult = ult; sa_tpaso = paso; sa_tb0 = b0; sa_ti = 0; sa_ton = 1;
+    sa_tira_pon(1, b0, 1);
+}
+static void sa_tira_deja(void) { sa_tira_pon(sa_tcuadro(sa_ti), sa_tpaso * (sa_ti + 1), 3); }
+static void sa_tira_paso(void)
+{
+    if (!sa_ton) return;
+    sr_tick(&sa_tira);
+    if (!sr_listo(&sa_tira)) return;
+    if (sa_tira.h >= 0) { int f = sa_tcuadro(sa_ti); sa_tira_pon(f, f, 0); }
+    else { int k = sa_tpaso * sa_ti; sa_tira_pon(k + 1, sa_tb0 + k, 1); }
+}
+static void sa_tira_suelta(void) { if (!sa_ton) return; sa_tira_deja(); sr_suelta(&sa_tira); sa_ton = 0; }
+static void sa_tira_sig(void)
+{
+    sa_tira_deja();
+    if (sa_ti < sa_tult) { sa_ti++; sfx_menu(SFX_CURSOR); } else { sa_ti = 0; sfx_menu(SFX_CURSOR); }
+}
+static void sa_tira_ant(void)
+{
+    sa_tira_deja();
+    if (sa_ti > 0) { sa_ti--; sfx_menu(SFX_CURSOR); } else { sa_ti = sa_tult; sfx_menu(SFX_CURSOR); }
+}
+/* ---- titulos (0x25ba48 / 0x25bb50 / 0x25bbe0) */
+static void sa_tit_entra(int f) { sr_fila(&sa_tit, 18, 0, 1, -1); sr_fila(&sa_tit2, f, 0, 1, 1); }
+static void sa_tit_quieto(int f) { sr_fila(&sa_tit2, f, 0, 0, 1); }
+static void sa_tit_sale(int f) { sr_fila(&sa_tit2, f, 0, 1, -1); sr_fila(&sa_tit, 16, 0, 1, 1); }
+/* ---- icono de comprado (0x25d1a8 / 0x25d2f8) */
+static void sa_icono_pon(int f) { if (sa_base != 0xcf) sr_fila(&sa_icono, f, 0, 0, 1); else sr_suelta(&sa_icono); }
+static void sa_icono_muestra(void)
+{
+    sr_suelta(&sa_icono);
+    sa_comprado = sa_tiene(sa_objeto());
+    sa_icono_pon(sa_comprado ? 10 : 7);
+}
+static void sa_icono_paso(void)
+{
+    int f;
+    sr_tick(&sa_icono);
+    if (!sr_listo(&sa_icono) && !sa_refresca) return;
+    if (sa_refresca) { sa_comprado = sa_tiene(sa_objeto()); f = sa_comprado ? 0xb : 8; }
+    else f = sa_comprado ? 0xb : 8;
+    sa_icono_pon(f);
+    sa_refresca = 0;
+}
+/* ---- registros y coche 3D */
+static void sa_registros(int colores)
+{
+    int i, k;
+    for (i = 0; i < 30; i++) {
+        sa_reg_t *r = sa_reg + i;
+        r->modelo = colores ? SA->k_modelo[i] : SA->c_modelo[i];
+        r->ficha = colores ? SA->k_ficha[i] : SA->c_ficha[i];
+        r->bit = colores ? 0 : SA->c_bit[i];
+        r->desbl = c_desbloqueado(r->ficha);                /* 0x244fe0 = 4C8F90 */
+        for (k = 0; k < 8; k++) r->col[k] = c_color_ok(r->ficha, k) ? k + 1 : -1;   /* 0x245038 = 4C8FC0 */
+        if (colores) { r->color = 1; for (k = 0; k < 8; k++) if (r->col[k] != -1) { r->color = r->col[k]; break; } }
+        else r->color = SA->c_color[i];
+    }
+}
+static void sa_coche(int reg, int color) { sa_car_on = 1; sa_car_reg = reg; sa_car_col = color; }
+/* ---- ventana de compra (0x25d560) */
+static void sa_ventana(int obj, int vuelta)
+{
+    sa_obj = obj; sa_vuelta = vuelta;
+    if (sa_tiene(obj)) { sa_est = vuelta; return; }
+    sa_car_on = 0;                                          /* 28e750: el coche fuera */
+    if (!sa_vende(obj)) { sr_fila(&sa_vent, 256, 0xd, 0, 1); sa_puede = 0; sfx_menu(SFX_BLOQUEADO); }
+    else if (sa_ftoi(sa_millas()) < (int)sa_precio(obj)) { sr_fila(&sa_vent, 255, 0xd, 0, 1); sa_puede = 0; sfx_menu(SFX_BLOQUEADO); }
+    else { sr_fila(&sa_vent, 252, 0xd, 0, 1); sa_puede = 1; sfx_menu(SFX_ACEPTA); }
+    sa_eleccion = 3; sa_est = 0x16;
+}
+/* ---- paginas */
+static void sa_pagina(int p)                                /* init (0x25bce8, 0x25c038, ...) */
+{
+    const sa_pag_t *g = SA_PAG + p;
+    sa_base = g->base;
+    if (p == 1 || p == 4) {                                 /* 482E70(1): la camara del salon; registros y coche */
+        sa_registros(p == 4);
+        if (p == 1) sa_coche(0, sa_reg[0].color);
+        else sa_coche(SA->k_fila[0].reg, SA->k_fila[0].color);
+        if (p == 4) sa_refresca = 1;
+    }
+    if (p == 3) { sa_mus = 0; pon_pista(PISTA_AVANCE + (int)SA->pista[0]); }   /* 0x25c9f0: 401000(0, pista + 0x21, 1) */
+    if (p == 0) { sr_suelta(&sa_icono); sa_icono_muestra(); }
+    sa_lista(g->f0, g->f1, p ? 7 : 0x60, p != 0);
+    sa_tira_inicia(g->tira, g->ult, g->paso, g->b0);
+    if (g->tit >= 0) sa_tit_entra(g->tit);
+    sa_est++;
+    if (p) sa_icono_muestra();
+}
+static void sa_pag_sale(int p)                              /* 0x25c490 / 0x25c710 / ...: a la principal */
+{
+    const sa_pag_t *g = SA_PAG + p;
+    if (p == 1 || p == 4) sa_car_on = 0;                    /* 482E70(0), 48c450 */
+    if (p == 3) pon_pista(-1);                              /* 401030 */
+    sa_ln = 0; sa_tira_suelta(); sa_tit_sale(g->sale); sa_est = 0;
+}
+static int sa_accion(unsigned n)                            /* 48F5F0: 0 A, 1 B, 2 arriba, 3 izquierda, 4 abajo, 5 derecha */
+{
+    if (n & (CONT_A | CONT_START)) return 0;
+    if (n & CONT_B) return 1;
+    if (n & CONT_DPAD_UP) return 2;
+    if (n & CONT_DPAD_LEFT) return 3;
+    if (n & CONT_DPAD_DOWN) return 4;
+    if (n & CONT_DPAD_RIGHT) return 5;
+    return 12;
+}
+static void sa_pag_control(int p, int a)                    /* 0x25c2d0 / 0x25c5e8 / 0x25c858 / 0x25cd38 / 0x25d008 */
+{
+    const sa_pag_t *g = SA_PAG + p;
+    sa_lista_paso(); sa_tira_paso();
+    if (sr_listo(&sa_tit2)) sa_tit_quieto(g->quieto);
+    if (a == 0) { sa_ventana(sa_objeto(), g->vuelta); return; }
+    if (a == 1) { sa_est++; sfx_menu(SFX_CANCELA); return; }
+    if (a == 2 || a == 4) {
+        int ad = a == 4;
+        if (p == 3) {
+            if (ad) sa_mus = sa_mus < 0x14 ? sa_mus + 1 : 0; else sa_mus = sa_mus ? sa_mus - 1 : 0x14;
+            pon_pista(PISTA_AVANCE + (int)SA->pista[sa_mus]);   /* 0x25ca40 */
+        }
+        sa_lista_mueve(ad); if (ad) sa_tira_sig(); else sa_tira_ant();
+        if (p == 1) sa_coche(sa_lsel, sa_reg[sa_lsel].color);
+        if (p == 4) sa_coche(SA->k_fila[sa_lsel].reg, SA->k_fila[sa_lsel].color);
+        sa_refresca = 1;
+    }
+    if (p == 1) {                                           /* el registro elegido se desbloqueo (la compra) */
+        sa_reg_t *r = sa_reg + sa_lsel;
+        if (c_desbloqueado(r->ficha) != r->desbl) { r->desbl = 1; sa_coche(sa_lsel, r->color); }
+    }
+}
+/* control y logica de un paso (0x25b5d0); n: botones nuevos (0 si no se atiende la entrada). 1: salir del salon */
+static int sa_control(unsigned n)
+{
+    int a = sa_accion(n);
+    if (!SA) return 1;
+    spr_paso();
+    sa_icono_paso();
+    sr_tick(&sa_fondo);
+    if (sr_listo(&sa_fondo)) sr_fila(&sa_fondo, 5, 0, 0, 1);
+    if (sr_listo(&sa_tit) && sa_est == 1) sr_fila(&sa_tit, 17, 0, 0, 1);
+    switch (sa_est) {
+    case 0: sa_pagina(0); break;
+    case 1:                                                 /* 0x25bde8 */
+        sa_lista_paso(); sa_tira_paso();
+        if (a == 0) {
+            static const int A_[5] = { 3, 6, 0xf, 9, 0xc };  /* 0x41ad10 */
+            if (sa_lsel >= 0 && sa_lsel < 5) sa_est = A_[sa_lsel];
+            sfx_menu(SFX_ACEPTA);
+            pon_pista(-1); sr_suelta(&sa_icono); sa_ln = 0; sa_tira_suelta();   /* 0x25bf28 */
+        } else if (a == 1) { sa_est = 2; sfx_menu(SFX_CANCELA); }
+        else if (a == 2 || a == 4) { sa_lista_mueve(a == 4); if (a == 4) sa_tira_sig(); else sa_tira_ant(); }
+        break;
+    case 2: pon_pista(-1); sr_suelta(&sa_icono); sa_ln = 0; sa_tira_suelta(); return 1;
+    case 3: sa_pagina(1); break;   case 4: sa_pag_control(1, a); break;   case 5: sa_pag_sale(1); break;
+    case 6: sa_pagina(2); break;   case 7: sa_pag_control(2, a); break;   case 8: sa_pag_sale(2); break;
+    case 9: sa_pagina(3); break;   case 10: sa_pag_control(3, a); break;  case 11: sa_pag_sale(3); break;
+    case 12: sa_pagina(4); break;  case 13: sa_pag_control(4, a); break;  case 14: sa_pag_sale(4); break;
+    case 15: sa_pagina(5); break;  case 16: sa_pag_control(5, a); break;  case 17: sa_pag_sale(5); break;
+    case 21: case 22:                                       /* 0x25d878 */
+        if (sa_puede) {
+            if (a == 0) {
+                if (sa_eleccion == 3) {
+                    if (sa_compra(sa_obj, sa_precio(sa_obj))) {
+                        uint8_t *p = activa(); p[0x3f4] |= 2;
+                        dbglog(DBG_INFO, "SALON: comprado el objeto %d por %u millas (quedan %.0f)\n", sa_obj,
+                               (unsigned)sa_precio(sa_obj), (double)sa_millas());
+                    }
+                    sa_refresca = 1; sa_est++;
+                } else if (sa_eleccion == 5) sa_est++;
+            } else if (a == 1) sa_est++;
+            else if (a == 3 && sa_eleccion != 3) { sr_fila(&sa_vent, 252, 0xd, 0, 1); sa_eleccion = 3; }
+            else if (a == 5 && sa_eleccion != 5) { sr_fila(&sa_vent, 253, 0xd, 0, 1); sa_eleccion = 5; }
+        } else if (a == 0 || a == 1) sa_est++;
+        break;
+    case 23:                                                /* 0x25da80 */
+        sr_suelta(&sa_vent);
+        if (sa_eleccion == 3 && activa() && (activa()[0x3f4] & 2)) {
+            int r = vmu_guarda();                           /* 0x105f50 */
+            dbglog(DBG_INFO, "SALON: guardado en la VMU %s (%d)\n", r ? "mal" : "bien", r);
+        }
+        if (sa_vuelta >= 4 && sa_vuelta <= 0x13 && (sa_vuelta - 4) % 3 == 0) sa_est = sa_vuelta;
+        if (sa_est == 4) sa_coche(sa_lsel, sa_reg[sa_lsel].color);
+        if (sa_est == 13) sa_coche(SA->k_fila[sa_lsel].reg, SA->k_fila[sa_lsel].color);
+        break;
+    }
+    return 0;
+}
+static void sa_entra(void)
+{
+    sr_suelta(&sa_fondo); sr_suelta(&sa_tit); sr_suelta(&sa_tit2); sr_suelta(&sa_icono); sr_suelta(&sa_vent);
+    sa_ton = 0; sa_tira.h = -1; sa_ln = 0; sa_car_on = 0; sa_refresca = 0;
+    sa_base = 0xcf; sa_est = 0;
+    sr_fila(&sa_tit, 16, 0, 1, 1);                          /* 0x25b418: +0x938 la fila 16 (+0x2084 sin aplicar) */
+#if defined(PRUEBA_MILLAS) && PRUEBA_MILLAS > 1
+    {   /* prueba (-DPRUEBA_MILLAS=n): la licencia activa con n millas al entrar en el salon por primera vez */
+        static int dado; uint8_t *p = activa(); float m;
+        if (p && !dado) {
+            memcpy(&m, p + 0x24, 4);
+            if (m < 1.0f) { m = (float)PRUEBA_MILLAS; memcpy(p + 0x24, &m, 4); p[0x3f4] |= 2; }
+            dado = 1; dbglog(DBG_INFO, "SALON: prueba, la licencia con %.0f millas\n", (double)m);
+        }
+    }
+#endif
+    sa_icono_muestra();
+}
+/* texto con los glifos de la fuente 14 de SALON.DAT (como c2_texto) */
+static void sa_texto(const char *s, float x, float y, float z, uint32_t col)
+{
+    int i, n = strlen(s);
+    if (!f_met || sa_uf < 0) return;
+    hudd_color(col);
+    for (i = 0; i < n; i++) {
+        int c = (uint8_t)s[i], sig = i + 1 < n ? (uint8_t)s[i + 1] : 0;
+        if (c == 32) { x += (int)(f_w * 0.3f); continue; }
+        if (c - f_pri < 0 || c - f_pri >= f_n) continue;
+        hudd_dibuja(sa_h, sa_uf, c - f_pri, x, y, 1, z, 0); z = hudd_z();
+        x = f_par(c, sig == 32 ? 0 : sig) + x + f_esp;
+    }
+    hudd_color(0xFFFFFF);
+}
+static void pz_ventana(float x, float y, float w, float h, float z);
+static void sa_dibuja(void)
+{
+    char b[24]; float z;
+    if (!SA) return;
+    if (sa_ln > 0) sa_lista_dibuja();
+    spr_dibuja(0, 0xc, 3, 0); z = hudd_z();
+    snprintf(b, sizeof b, (const char *)SA + SA->t_formato, sa_ftoi(sa_millas()));   /* 0x25b8c0: millas */
+    sa_texto(b, 480, 87, z, 0xFFFFFF); z = hudd_z();
+    if (sa_comprado != 1 && sa_base != 0xcf) {             /* el precio */
+        snprintf(b, sizeof b, (const char *)SA + SA->t_formato, (int)sa_precio(sa_objeto()));
+        sa_texto(b, 480, 368, z, 0xFFFFFF);
+    }
+    if (sa_ub >= 0) hudd_dibuja(sa_h, sa_ub, 0, 0, 0, 1, 7.5f, 0);   /* barra de ayuda */
+    if (sa_est == 0x16 || sa_est == 0x15) {                 /* ventana (48C5F0, capa 0xc) y su icono (0xd) */
+        pz_ventana(330, 180, 239, 130, 8);
+        sa_texto((const char *)SA + SA->t_ventana, 330 + 6, 180 + 5, 8.01f, 0xFFFFFF);
+        spr_dibuja(0xc, SPR_CAPAS, hudd_z() + 0.01f, 0);
+    } else spr_dibuja(0xc, SPR_CAPAS, 8, 0);
+}
+
 /* 0x1f6d70: tiempo de juego (licencia +0x10C, cuadros) en horas, minutos y segundos: s = cuadros / 60,2 */
 static void tiempo_lic(uint32_t cuadros, int *h, int *m, int *sg)
 {
@@ -1655,6 +2096,7 @@ void menu_dibuja(void)
         hudd_reglas(NULL, 0);
         break;
     case P_C2C: c2_dibuja(); break;
+    case P_SALON: sa_dibuja(); break;
     case P_COCHE:
         an_dibuja(&a_sel, 0, a_ent * a_sal, 4, 0);
         if (!c_desbloqueado(c_indice()) && an_hecho(&a_sel)) hudd_dibuja(md, us[U_CAND], 0, 0, 0, a_ent * a_sal, 5, 0);

@@ -754,6 +754,8 @@ void hudd_sprite(int s, const float *m, const float *q, float alfa, int aditiva)
     }
 }
 int hudd_residente(const hud_dat_t *h, int t) { return h && h->vtex[t] != NULL; }
+/* la textura de un sprite y cuantas texturas tiene el fichero (comun/sprani.c: las de un tramo de una escena) */
+int hudd_n_tex(const hud_dat_t *h) { return h ? (int)h->n_tex : 0; }
 /* todas sus texturas se pueden subir (un banco SPRANI con usos propios: sin esto solo las de sus grupos) */
 void hudd_todas_usables(hud_dat_t *h) { if (h) memset(h->usada, 1, h->n_tex); }
 

@@ -165,7 +165,8 @@ consola, el port lo fija al convertir). Hoja de capturas de Flycast: scratchpad 
   ver Menu principal sin MULTIPLAYER) -> un jugador -> coche -> cambio ->
   musica -> carrera; LICENCIA (X) desde el menu principal y un jugador. MULTIJUGADOR (0x44002A, tabla 0x41C260: en
   linea, LAN), RANKINGS (0x4400A3, 0x41D908: un jugador, OUTRUN2SP, multijugador), OUTRUN2SP, HEART ATTACK, TIME ATTACK y
-  SHOWROOM existen con la accion bloqueada (sin red, ranking ni esos modos); desde 2026-11-09 HEART ATTACK y TIME ATTACK
+  SHOWROOM existian con la accion bloqueada (sin red, ranking ni esos modos); desde 2026-11-09 HEART ATTACK y TIME ATTACK
+  y desde 2026-11-13 SALON (ver SALON) llevan a lo suyo; HEART ATTACK y TIME ATTACK
   llevan a su carrera (ver Modos de un jugador). OPCIONES (cabecera 0x44006D, barra
   0x44000B): vista (+D8, textos 3-5), unidades (+DC, 6-7) y dificultad (+E0, 8-0xC) de la licencia, sin dar la vuelta,
   se guardan al salir (4D76F0); los rotulos de fila del original son sprites no localizados: se escriben "Ver config." y
@@ -334,7 +335,8 @@ Quejas (DC real, RGB): letras del menu que no se leen; la tarjeta no muestra el 
   (447360: notas 6, cuartetos 0x66) 100.00% (todos los grupos nota 6).
 - **Falta** (inventario del frontal del PC frente al port): las carreras del port no escriben aun notas, millas ni
   tiempo en la licencia (misiones de C2C, SCRIPTS: FALTA), asi que una licencia normal se queda en 0.00% / 0 millas;
-  sin pantalla de misiones (frontend_missions / categories), rankings (frontend_rankings, records), showroom,
+  sin pantalla de misiones (frontend_missions / categories), rankings (frontend_rankings, records), showroom (hecho
+  despues: ver SALON),
   OUTRUN2SP, multijugador ni red (sus pantallas estan con la accion bloqueada). En la tarjeta, los iconos pequenos
   siguen siendo los del editor desplazados (el PC usa 0x44006A / 0x440077 / 0x440078 en (-120,-8), (-137,44),
   (-103,44)).
@@ -1937,7 +1939,7 @@ Races.bin, variante 5 C2C o 6) y el preset del curso [78024C] (4EEA70). En SLES-
 | INFARTO (variante 2) | gestor de peticiones 464350/464D20 (PS2 0x1ae440 / 0x1a7f28), misiones 5A94D8 (PS2 0x3f0b98, 41 x 0x140), fila 1 de los tiempos, voces HC/PERH + HAM\<etapa> | PARCIAL: ver abajo | E |
 | CONTRARRELOJ (variante 7) | fila 2 de los tiempos (44DC70: 0 y 7 -> 2; 450CC0 pasa el 7 como 0), sin trafico (479080 y 47EC00 vuelven con la variante 0, 7 u 8), gestor 0x193 / funcion 0x22 (48B8F0..: curso por codigo [656234], fantasma 465F30..4687C0, GHOST.PS2) | PARCIAL: reglas de tiempo y sin trafico; corre el curso entero con eleccion de rama como el OutRun | E |
 | COAST 2 COAST (variante 6 misiones, 5 campeonatos) | variante 6: misiones de Races.bin / RaceAssignment.bin (gestor 0x20, evento 0x191: 495B90 / 496A30); variante 5: campeonatos Request_Course_SP / OR2 / MIX con peticiones Req_*.bin (gestor 7F9460, evento 0x190); rivales (47CF40) | PARCIAL (2026-11-13): categorias, mapa de misiones y detalle del original (banco 0x44, C2C.DAT); se corren las 76 misiones de carrera (tipo 0) con sus coches de carreras y su nota; sin los otros tipos ni los campeonatos (ver COAST 2 COAST: misiones de carrera y el rival) | E |
-| SALON (showroom) | frontal 4D4230.. | FALTA (accion bloqueada, como antes) | - |
+| SALON (showroom) | frontal 4D4230.. (PS2 0x25b338..0x25db20) | OK (2026-11-13): ver SALON | E |
 | Dificultad (opcion de la licencia +E0) | difficulty_of de 44DC70 (PS2 0x1cdc98): 0 en el juego de la consola (43F860 = [780260] = 1, lo pone SUMO_FE 0x237e28); la licencia (+E0) solo en el de OUTRUN2SP (2 en la variante 4) | OK (2026-11-11; antes al reves: la licencia en los modos de la consola) | E (log `MODO:`) |
 | Multijugador | red / LAN (variantes 3, 4) | no se hace (orden del usuario): la pantalla queda como estaba, con la accion bloqueada | - |
 
@@ -2379,6 +2381,57 @@ union y ruta leidas como en el OutRun. GOAL (menu real con el piloto y `-DPRUEBA
 (+3000 cuadros) -> FORE (+3060) -> SNOW (+3270) -> IMPE (+3240) -> GOAL, sin trafico en todo el curso. SIN PORTAR: la eleccion de etapa / curso por codigo (48B550: una etapa con su meta GOAL_*_TA o el
 curso entero), el fantasma (GHOST.PS2 gc_default_*, formato QHOT/NHOT, modulo 465F30..4687C0) y su record y la
 pantalla de resultado 0x50 del modo 25.
+
+## SALON (showroom: la tienda de las millas OutRun, 2026-11-13)
+
+UN JUGADOR -> SALON abre el salon del original: se gastan las millas OutRun de la licencia (+0x24, float; las suma
+4EF510 = PS2 0x1f41d8 al salir del modo 34) en desbloquear objetos. Codigo: comun/menu.c (pantalla P_SALON, `sa_*`),
+datos: SALON.DAT (tools/conv_salon.py, paso `salon` de tools/regenera.py).
+- Original: SLES-53998 0x25b338..0x25db20 (vtable 0x41adec: destructor 0x25b338, init 0x25b418, control 0x25b5d0,
+  dibujo 0x25b8c0, suspender 0x25b998) = 4D4230.. del PC (outrun2-decomp platform/frontend_showroom.cpp). Misma
+  estructura que el PC con otros tokens del banco 0x44 y otros desplazamientos (+0x40c estado, +0xc84 base de la
+  pagina, +0xbdc comprado, +0xc80 refresco, +0xc88 / +0xc8c objeto y vuelta de la ventana, +0x2a74 / +0x2080 se
+  puede / eleccion, +0xb45 tema). Tabla de filas 0x41ae20 (257 {token, primero, ultimo}; PC 5CAE00 tiene 252: las
+  252..256 del PS2 son los iconos de la ventana, 0x44005c cuadros 0, 1, 2, 4, 6).
+- Paginas (lista 0x24d430 en (-180, -50), 19 por fila, capas 1 / 2, 7 visibles con desplazamiento; tira de imagenes
+  0x238798: objeto i en el cuadro paso x i + base, entra de paso x i + 1, sale hasta paso x (i + 1); titulo 0x4400bb /
+  0x4400ba): principal (filas 0x28..0x2c: FERRARIS, ETAPAS, METAS, MUSICA DE FONDO, COLORES DEL COCHE; tabla 0x41ad10
+  -> estados 3, 6, 15, 9, 12; tira 0x44007d), FERRARIS (28 registros de 0x41bda0 {modelo, bit}: bits de la seleccion
+  de coche, 0x3759E0, comprobado en conv_salon.py; tira 0x44007e), ETAPAS (objetos 0x8a + fila, 34; 0x44007f),
+  METAS (0xc1 + fila, 14; 0x4400c5), MUSICA DE FONDO (0xac + fila = el bit 172 + tema - 7 que lee la seleccion de
+  musica; suena el avance de la pista 0x375dcc[i] + 0x21; 0x4400a9), COLORES DEL COCHE (0x1c + fila, 110; el coche del
+  registro 0x41ba30[fila] con su color; 0x440080).
+- Precio: 0x1f4198 (0x629ee0, que rellena 0x1f3c90: 10 x i y los pares de PRICES de \Scripts\bin\OutrunMiles.bin;
+  p. ej. F50 7500, tema 7 2500), "%dM" (0x41ad00) con la fuente 14 en (480, 368) si el objeto no es suyo (blanco: el
+  0x26ce50(-1) del dibujo; sale claro sobre el fondo, igual que en el codigo); millas "%dM" en (480, 87). Icono de
+  comprado 0x440051 (filas 7..15).
+- Compra (0x25d560 / 0x25d878 / 0x25da80): ventana "COMPRAR OBJETO" (0x3a4) en (330, 180, 239, 130) e icono de la
+  fila 252 (SI) / 253 (NO) con izquierda / derecha; sin millas: fila 255 y sonido 3; los objetos de 0x41ad38 (26: 4,
+  11, 19, 26, 169, 171, 189..192 y colores) no se venden en esta version: fila 256. A con SI: 0x1a1ba0 (sin el bit y
+  con las millas truncadas >= precio: bit de la licencia +0x28 y millas - precio), +3F4 |= 2 y al cerrar 0x105f50
+  guarda (aqui vmu_guarda). El coche 3D se quita mientras esta la ventana (28e750).
+- Coche 3D en FERRARIS y COLORES (28e348 / 28e788): el del registro con su color (0x18a110: 0x3d4b80 por modelo) por
+  el dibujo del coche de la seleccion (menu_coche3d / menu_modelo / menu_color).
+- VRAM / RAM: como COAST 2 COAST, la VRAM del menu y el coche fuera al entrar y al salir (menu_libera_todo); tablas de
+  SALON.DAT (287 KB: animacion recortada a las 18 escenas, 257 KB) en el hueco de la union (menu_hueco). Las tiras son
+  escenas de hasta 44 texturas (ETAPAS: 1 MB con VQ): SALON.DAT va por tramos (comun/sprani.c, spr_por_tramos): al
+  crear una instancia solo se suben las texturas de los cuadros de su tramo y, si no caben, se echan las de las
+  escenas del banco que no usa nadie.
+- DESVIACION / PROVISIONAL: la ventana es la de la pausa (imagenes 0x3004x sin localizar); la camara del coche es la
+  de la seleccion (el preset 1 de 482E70 sin leer) y el coche sale igual este desbloqueado o no (el indicador de
+  28e348 sin seguir); X (LICENCIA en la barra) no hace nada; la barra de ayuda (0x23bd70: ELEGIR, LICENCIA, ATRAS) con
+  los botones de la Dreamcast compuesta en SALON.DAT; el original para la musica al salir de la pagina principal
+  (0x25bf28) y la raiz vuelve a poner la del menu (0x23b5b8, PROBABLE): aqui suena la de los menus al salir del salon.
+  Sin repeticion de teclas al mantener (cada pulsacion mueve uno). ETAPAS y METAS guardan su bit (nada del port lo lee
+  aun: las etapas de OUTRUN2SP y los finales estan todos abiertos).
+- Arreglo de paso (seleccion de coche): comun/menu.c leia las tablas de coches de MNU2 dos bytes corridas (el bit de
+  desbloqueo en +32 detras de los 30 modelos u8; conv_menu.mnu2 lo escribe en +30): cada ficha tomaba el bit, los bits
+  de los colores y el color inicial de la ficha siguiente (p. ej. el F50, ficha 2, pedia el bit 1 en vez del 0: el F50
+  comprado en el salon seguia bloqueado). Ahora en +30; MENU.DAT no cambia. Con ello el color inicial de cada ficha
+  (0x375C00) coincide con el del modelo de 0x3d4b80 que usa el salon (Dino 2, F50 1). Esto corrige tambien la
+  verificacion de Colores de los coches (2026-11-10), hecha con la tabla corrida una ficha.
+- Prueba: `-DPRUEBA_MILLAS=n` (la licencia activa, si no tiene millas, con n al entrar en el salon; ademas, como antes,
+  la demo de atraccion acaba en las millas) y tools/prueba/salon.sh.
 
 ## Fin de la carrera: millas OutRun, continuar y GAME OVER (2026-11-11)
 

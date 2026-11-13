@@ -15,6 +15,8 @@ struct hud_dat;
 struct hud_dat *spr_hud(const spr_banco_t *b);         /* su fichero (los usos propios que anadio el conversor) */
 int spr_sube_escena(uint32_t token);                    /* texturas de la escena a la VRAM; 0 bien */
 void spr_baja_texturas(spr_banco_t *b);                 /* su VRAM fuera (las instancias vivas la vuelven a pedir) */
+/* banco por tramos: al crear una instancia (o una inmediata) solo las texturas de los cuadros de su tramo (ver sprani.c) */
+void spr_por_tramos(spr_banco_t *b, int si);
 /* grupo de instancias */
 enum { SPR_CAPAS = 21 };
 int spr_crea(uint32_t token, int capa, int modo, int primero, int ultimo);   /* 428460 (ultimo < 0: hasta el final) */
