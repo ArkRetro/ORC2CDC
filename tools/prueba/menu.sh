@@ -37,6 +37,10 @@ if [ "${MODO_JUEGO:-0}" = 0 ]; then                                  # COAST 2 C
         tecla c; espera 2; tecla c; espera 3; foto ${P}_5g; tecla x; espera 3; tecla x; espera 3
     fi
 fi
+if [ "${MODO_JUEGO:-0}" = 2 ]; then                                  # INFARTO: el juego de cursos del tablero 0x24
+    tecla x; espera_log 'TABLERO: clave 0x24' 30; espera 4           # (TB_JUEGO=1: OutRun 2 SP; si no OutRun 2)
+    if [ "${TB_JUEGO:-0}" = 1 ]; then tecla Right; espera 3; fi; foto ${P}_5t
+fi
 tecla x; espera 6; foto ${P}_6                                       # coche
 if [ "${MODO_JUEGO:-0}" = 0 ] && [ -n "${C2C_RECORRE:-}" ]; then     # B: del coche al detalle de la mision y otra vez A
     tecla c; espera 5; foto ${P}_6b; tecla x; espera 6; foto ${P}_6c

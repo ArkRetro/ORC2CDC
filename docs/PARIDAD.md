@@ -2573,13 +2573,12 @@ tools/regenera.py), CURSOTA.DAT y las uniones BK262..BK469 en UNIONESTA.PAK (con
     bit 0): el tablero la deja poner (con su bit), pero sus etapas no estan convertidas (SEG de los descriptores
     62..65): la carrera corre la etapa normal (aviso en la consola serie). PENDIENTE.
   - OUTRUN sigue yendo directo al coche (no pedido): el original tambien pasa por la clave 0x24 (4 posiciones, los
-    cursos seguidos con 0xcc / 0xcb) y su juego elige el preset (0x2a6978). El preset de los juegos de la consola en la
-    DC sigue siendo 0 con el arbol 0 (csc_data_2); en el original OutRun 2 es el preset 1 (1760c0(1) = csc_data_2): la
-    fila de tiempos (0x176018), los modelos del trafico (46CE30) y lo demas que lee el preset quedan como antes
-    (PENDIENTE de revisar con el dueno de esas partes; tambien el arbol del frontal de OUTRUN2SP: 44DA00(1) es
-    csc_data_2 en el MIPS).
-  - INFARTO en OutRun 2 SP: corre el arbol 1 con el gestor de peticiones de siempre (comun/infarto.c); que misiones y
-    objetos (OSO, 45C470 con [78024C]) usa el original en ese curso no esta revisado: PENDIENTE (el preset sigue a 0).
+    cursos seguidos con 0xcc / 0xcb) y su juego elige el preset (0x2a6978); la DC le da el juego 0 (OutRun 2: preset
+    1). El preset de los juegos de la consola y el arbol del frontal de OUTRUN2SP: CORREGIDOS el 2026-11-13, ver
+    Preset del curso.
+  - INFARTO en OutRun 2 SP: corre el arbol 1 con el preset 0; las misiones, los coches y las misiones base por el
+    preset / arbol estan HECHOS (2026-11-13, ver Preset del curso). PENDIENTE: los objetos (OSO, 45C470 con [78024C])
+    y los bancos de voz HAM.CVT de ese curso.
   - La escena de la meta de los arboles de la Contrarreloj: la letra sale del codigo (GOAL_A..E; PROBABLE: 450380(8)
     lee la clave del registro, que en los del reves no es 10..14); la etapa sola usa la de la meta A.
 
@@ -2719,7 +2718,14 @@ Lo que lee el preset (todas las lecturas de [0x44350c] del ELF revisadas) y como
 - Verificado en Flycast (display 95): sp.sh SP_LADO=0 ("Recorrido OutRun2SP"): `juego OUTRUN2SP, preset 0`, `CURSO:
   arbol 1, 15 etapas, salida BEAC`, CARGASP0, `BAND: preset 0` (BAND.DAT), tiempo inicial 99 (5999 cuadros); SP_LADO=1
   (gatillo R, "OutRun2"): `preset 1`, el arbol 0 (PALM, sin leer otro), CARGASP1, `BAND: preset 1` (BAND1.DAT); sin
-  "Out of memory" ni "pvr_mem: ERROR" (RAM libre en carrera 926K / 908K).
+  "Out of memory" ni "pvr_mem: ERROR" (RAM libre en carrera 926K / 908K). nav.sh MODO_JUEGO=1 (OUTRUN): `juego consola,
+  preset 1`, PALM, `BAND: preset 1` (el banderero CHR_AUT04), tiempo inicial 99. nav.sh MODO_JUEGO=0 (COAST 2 COAST,
+  mision 1-1): `variante 6, ..., preset 1`, arbol 100. conduce.sh MODO_JUEGO=2 (menu.sh pasa por el tablero 0x24;
+  TB_JUEGO=1 el juego 1), 150 s: juego 0 `INFARTO: preset 1, misiones INFARTOP (0x3f3ed8), coches INFARTOP (0x362718),
+  bases 0 1 3 ...`, la peticion 2 de la mision 0 en las secciones 145..410 y coches de la mision 33, 34, 30, 32, 35, 36
+  en ciclo de 6 (sin el 38); juego 1 `preset 0, misiones INFARTO (0x3f0b98)`, arbol 1 (BEAC), bases 0 6 9 ..., la
+  peticion 2 en 90..400 y el ciclo de 7 con el 38. Sin "Out of memory" ni "pvr_mem: ERROR" en ninguna (RAM libre en
+  carrera 996K / 1028K / 1027K).
 
 ## OUTRUN2SP (2026-11-11)
 
