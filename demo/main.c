@@ -91,6 +91,10 @@ typedef struct { float x, y, z, u, v; uint32_t c; } vert_t;
    rama de la union: 1 izquierda, 2 derecha) y su cartel (matriz del nodo) o -1 */
 typedef struct { float cx, cy, cz, r; uint32_t fl; int32_t cartel; uint32_t relleno[2]; } nodo_t;
 #define NODO_CARTEL 0x10
+/* version lejana de un nodo de vegetacion (tools/lod_veg.py; DESVIACION pedida, docs/PARIDAD.md Palmeras lejanas): los
+   nodos lejanos van al final de la tabla (desde nn0) con la bandera NODO_LEJ y su cartel (un cuadrilatero orientado a la
+   camara con la imagen del nodo); el nodo completo lleva en cartel -2 - (su nodo lejano) */
+#define NODO_LEJ 0x20
 typedef struct {
     tex_t *texs; malla_t *mallas; vert_t *verts; float *ruta;
     uint32_t nmallas, nvert, nruta, paso_ruta, ntex, inicio[5];
@@ -108,6 +112,8 @@ typedef struct {
     uint16_t *grp;                                                /* grupos de nodos (tools/grupos_nodos.py: bits 16-31 de
                                                                      fl = jefe + 1): clases del grupo en el cuadro, en el
                                                                      sitio del jefe (nodos_visibles); NULL sin grupos */
+    uint32_t nn0;                                                 /* nodos del original: los de despues son los lejanos */
+    uint16_t *lej_de;                                             /* de cada nodo lejano (nn0..), su nodo completo */
     /* fundido de entrada (fe_paso; NULL sin el): por nodo lo que le queda (255 recien aparecido .. 0 entero) y tres
        mascaras de bits (fe_p: el nodo estaba en el cuadro anterior, dibujado o fuera de la vista; fe_f: fuera de la
        vista en este cuadro; fe_m: fe_v no es 0); fe_hist: el modelo ya ha pasado por un cuadro */
@@ -219,6 +225,11 @@ static int lee_modelo_en(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t
        relleno[1] = sus vertices << 12 | las clases de distancia (<< 6) y de LOD del cuadro (nodos_visibles) */
     /* (con relleno_propio no: los objetos de las uniones llevan ahi su malla y su animacion, y sus mallas no apuntan a
        nodos; antes se borraba y todas las alas usaban la animacion 0, casi quieta, y el primer pajaro no salia) */
+    /* nodos lejanos (tools/lod_veg.py): desde el primero con NODO_LEJ; relleno[1] del fichero = su nodo completo */
+    for (m->nn0 = 0; m->nn0 < m->nnodos && (m->relleno_propio || !(m->nodos[m->nn0].fl & NODO_LEJ)); m->nn0++) ;
+    if (m->relleno_propio) m->nn0 = m->nnodos;
+    {   static uint16_t lej_tmp[1024]; uint32_t nl = m->nnodos - m->nn0;
+        for (i = 0; i < nl && i < 1024; i++) lej_tmp[i] = (uint16_t)m->nodos[m->nn0 + i].relleno[1];
     if (!m->relleno_propio) for (i = 0; i < m->nnodos; i++) m->nodos[i].relleno[0] = m->nodos[i].relleno[1] = 0;
     for (i = 0; i < m->nmallas && !m->relleno_propio; i++)
         if (m->mallas[i].nodo >= 0 && (uint32_t)m->mallas[i].nodo < m->nnodos && m->mallas[i].n >= 3) {
@@ -229,9 +240,18 @@ static int lee_modelo_en(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t
            otra cosa): 2 bytes por nodo detras de vis y vis_ant */
         uint32_t g = 0;
         for (i = 0; i < m->nnodos && !m->relleno_propio && !g; i++) g = m->nodos[i].fl >> 16;
-        m->vis = m->nnodos ? calloc((m->nnodos + 31) / 32 * 2 + (g ? (m->nnodos + 1) / 2 : 0), 4) : NULL; m->ruta_i = 0;   /* vis y vis_ant */
+        m->vis = m->nnodos ? calloc((m->nnodos + 31) / 32 * 2 + (g ? (m->nnodos + 1) / 2 : 0) + (nl + 1) / 2, 4) : NULL; m->ruta_i = 0;   /* vis y vis_ant */
         m->vis_ant = m->vis ? m->vis + (m->nnodos + 31) / 32 : NULL;
         m->grp = m->vis && g ? (uint16_t *)(m->vis_ant + (m->nnodos + 31) / 32) : NULL;
+        /* (detras, de cada lejano su completo; el lejano lleva el grupo de su completo: van juntos en el reparto) */
+        m->lej_de = m->vis && nl ? (uint16_t *)(m->vis_ant + (m->nnodos + 31) / 32) + (g ? m->nnodos + (m->nnodos & 1) : 0) : NULL;
+        if (nl > 1024 || (nl && !m->lej_de)) m->nn0 = m->nnodos, nl = 0, m->lej_de = NULL;   /* (sin sitio: sin lejanos) */
+        for (i = 0; i < nl; i++) {
+            uint32_t c = lej_tmp[i] < m->nn0 ? lej_tmp[i] : 0;
+            m->lej_de[i] = (uint16_t)c;
+            m->nodos[m->nn0 + i].fl = (m->nodos[m->nn0 + i].fl & 0xFFFFu) | (m->nodos[c].fl & 0xFFFF0000u);
+        }
+    }
     }
     m->fe_v = NULL; m->fe_p = m->fe_f = m->fe_m = NULL; m->fe_hist = m->fe_n = 0;
 #ifdef CON_FUNDIDO_ENTRADA
@@ -6768,6 +6788,21 @@ static float dist2_ruta(const modelo_t *m, uint32_t i, const float *p)
 #ifndef REPARTO_LOD_MAS
 #define REPARTO_LOD_MAS 0
 #endif
+/* Version lejana de la vegetacion (DESVIACION pedida por el usuario, revision 46: "No quiero recortes; en tal caso, las
+   palmeras mas lejanas que se vean pero en version low-poly, y cuando te acerques que se vean bien"; docs/PARIDAD.md,
+   Palmeras lejanas; tools/lod_veg.py): un nodo de vegetacion con version lejana se dibuja con ella (un cuadrilatero
+   orientado a la camara con la imagen del propio nodo: 108 bytes teoricos del TA frente a ~7300 de una palmera)
+   cuando su esfera mide menos de LOD_LEJ_PX de radio en la pantalla (640x480), y con la completa al acercarse. Con
+   histeresis: el que se dibujaba lejano sigue lejano hasta LOD_LEJ_HIST veces el umbral y el completo sigue completo
+   hasta 1 / LOD_LEJ_HIST (no va y viene en el borde). El LOD del original (404B00: 3,75 / 7,5 px) sigue quitando lo
+   mismo. En el reparto del TA cuenta el coste del lejano (la clase por vertices de REPARTO_COSTE con sus 4 vertices):
+   lo lejano ya no se quita antes que los edificios. 0: sin versiones lejanas (lo de antes) */
+#ifndef LOD_LEJ_PX
+#define LOD_LEJ_PX 24.0f
+#endif
+#ifndef LOD_LEJ_HIST
+#define LOD_LEJ_HIST 1.25f
+#endif
 static uint32_t prio_coste[ND_PRIO][NB_PRIO], prio_vtx[ND_PRIO][NB_PRIO];   /* bytes teoricos y vertices por clase */
 static int prio_d = ND_PRIO - 1, prio_p = NB_PRIO - 1, prio_esp_d, prio_esp_p;
 static float prio_alfa = 1.0f;
@@ -6813,6 +6848,8 @@ static uint32_t pop_ap[PR_N][3], pop_de[PR_N][3];                /* apariciones 
 static uint32_t pop_vap[PR_N][3], pop_vde[PR_N][3];
 static float pop_vz[PR_N][2], pop_vpx[PR_N];
 static int pop_veg_ev;                                           /* el evento en curso es de vegetacion */
+static uint32_t pop_lod_lej, pop_lod_comp, pop_lej_n;           /* pasos de completo a lejano y al reves (dibujados en
+                                                                   el cuadro anterior), lejanos dibujados */
 static float pop_zmin[PR_N];
 static uint32_t pop_pvs_ap[3], pop_pvs_de[3], pop_ccorto, pop_cuadros;
 static float pop_falta;                                           /* suma de pi px^2 de lo quitado por el tope en la pantalla */
@@ -6938,7 +6975,7 @@ static void pvs_paso(modelo_t *mo)
                las misiones la etapa siguiente sacaba sobre la union lo que tiene detras de su salida (PALM_T: el monte
                y los edificios de detras de la parrilla, en la carretera de la union) */
             int nd = mo == &etapa ? etapa_nodo : mo == &sig ? cur_sig : -1;
-            if (nd >= 0 && nd < ncurso && viso_m[nd] && viso_nn[nd] == mo->nnodos)
+            if (nd >= 0 && nd < ncurso && viso_m[nd] && viso_nn[nd] == mo->nn0)   /* (sin los lejanos: lod_veg.py) */
                 mo->viso = viso_m[nd] + (k == 0 ? 0 : (viso_nn[nd] + 7) / 8);
             return;
         }
@@ -7013,7 +7050,7 @@ static void nodos_visibles(modelo_t *mo)
         if (d > 50.0f * 50.0f) for (i = 0; i < mo->nruta; i++) if ((e = dist2_ruta(mo, i, yo.pos)) < d) { d = e; k = i; }
         mo->ruta_i = k; s = mo->sec_mapa[k] < mo->nsec ? mo->sec_mapa[k] : mo->nsec - 1;
         L = mo->sec_lista + mo->sec_ini[s]; n = mo->sec_ini[s + 1] - mo->sec_ini[s];
-    } else n = mo->nnodos;
+    } else n = mo->nn0;                                         /* (los lejanos van con su nodo completo, abajo) */
     o0 = ojo[0]; o1 = ojo[1]; o2 = ojo[2]; e0 = ade[0]; e1 = ade[1]; e2 = ade[2];
     d0 = der[0]; d1 = der[1]; d2 = der[2]; a0 = arr[0]; a1 = arr[1]; a2 = arr[2]; cer = cerca; lej = lejos;
     pvs_on_ = mo->pvs_on;                                       /* (despues de pvs_paso) */
@@ -7025,7 +7062,7 @@ static void nodos_visibles(modelo_t *mo)
         shz_xmtrx_load_rows_4x4(&r0, &r1, &r2, &r3); }
 #endif
     for (j = 0; j < n; j++) {
-        uint32_t i = L ? L[j] : j, rama, u, c_teo, c_v, g; nodo_t *d; float dx, dy, dz, zv, xv, yv, lim; int cp, cd;
+        uint32_t i = L ? L[j] : j, rama, u, c_teo, c_v, g, ya; nodo_t *d; float dx, dy, dz, zv, xv, yv, lim; int cp, cd;
         if (i >= nnod) continue;
         d = ND + i;
         dx = d->cx - o0; dy = d->cy - o1; dz = d->cz - o2;
@@ -7055,6 +7092,28 @@ static void nodos_visibles(modelo_t *mo)
 #endif
             if (!c_teo) { POPR(i, PR_PVS); continue; }
         } else { c_teo = d->relleno[0]; c_v = d->relleno[1] >> 12; }
+        ya = VA[i >> 5] & (1u << (i & 31));
+        if (d->cartel <= -2 && (uint32_t)(-2 - d->cartel) < nnod) {
+            /* con version lejana (tools/lod_veg.py): por debajo de LOD_LEJ_PX de radio en la pantalla, el impostor en su
+               lugar (con histeresis: el que se dibujaba sigue hasta LOD_LEJ_HIST veces mas alla del umbral). El LOD, la
+               PVS, la clase y el grupo son los del nodo completo; el coste en el reparto, el del lejano */
+            uint32_t jl = (uint32_t)(-2 - d->cartel); int era_lej = (VA[jl >> 5] >> (jl & 31)) & 1;
+            float umb = LOD_LEJ_PX * (era_lej ? LOD_LEJ_HIST : ya ? 1.0f / LOD_LEJ_HIST : 1.0f);
+            if (zv > d->r && d->r * fx < umb * zv) {
+#ifdef DIAG_POPPING
+                if (ya && pop_ra && pop_ra[i] == PR_DIB) pop_lod_lej++;
+                pop_lej_n++;
+#endif
+                POPR(i, PR_DIB); ya = ya || era_lej; i = jl; d = ND + jl;
+                if (pvs_on_) { c_teo = mo->pvs_teo[2 * i]; c_v = mo->pvs_teo[2 * i + 1]; }
+                else { c_teo = d->relleno[0]; c_v = d->relleno[1] >> 12; }
+                if (!c_teo) c_teo = 1;
+            }
+#ifdef DIAG_POPPING
+            else if (era_lej && pop_ra && pop_ra[i] == PR_DIB) pop_lod_comp++;
+#endif
+            else ya = ya || era_lej;
+        }
         VIS[i >> 5] |= 1u << (i & 31); POPR(i, PR_DIB);
         cd = zv - d->r > 1.0f ? log2x(zv - d->r, 4) : 0; cd = cd > ND_PRIO - 1 ? ND_PRIO - 1 : cd;
         if (zv - d->r > z_tapa) cp = NB_PRIO - 1;               /* tapado por la niebla */
@@ -7068,7 +7127,7 @@ static void nodos_visibles(modelo_t *mo)
             cp = cp < 0 ? 0 : cp > NB_PRIO - 1 ? NB_PRIO - 1 : cp;
         }
 #if REPARTO_HIST_P || REPARTO_HIST_D
-        if (VA[i >> 5] & (1u << (i & 31))) {                   /* ya se dibujaba: se queda hasta pasar el corte con holgura */
+        if (ya) {                                               /* ya se dibujaba: se queda hasta pasar el corte con holgura */
             cd = cd > REPARTO_HIST_D ? cd - REPARTO_HIST_D : 0;
             if (cp < NB_PRIO - 1) cp = cp > REPARTO_HIST_P ? cp - REPARTO_HIST_P : 0;
         }
@@ -7119,7 +7178,8 @@ static void nodos_quita(modelo_t *mo)
             if ((cl >> 6) <= prio_d || (cl & 63) <= prio_p) continue;
             mo->vis[w] &= ~(1u << k);
 #ifdef DIAG_POPPING
-            {   pop_slot_t *ps = pop_slot(mo); if (ps) ps->cur[i] = PR_TOPE; }
+            {   pop_slot_t *ps = pop_slot(mo);                  /* (un lejano: su nodo completo) */
+                if (ps) ps->cur[i >= mo->nn0 && mo->lej_de ? mo->lej_de[i - mo->nn0] : i] = PR_TOPE; }
 #endif
 #ifdef DIAG_VTX
             {
@@ -7225,7 +7285,7 @@ static void pop_mide(void)
         if (!mo->datos || !mo->nodos || !mo->vis || mo->relleno_propio) continue;
         if (!(ps = pop_slot(mo))) continue;
         if (!geo_visible(mo)) memset(ps->cur, PR_TRAMO, mo->nnodos);
-        for (i = 0; i < mo->nnodos; i++) {
+        for (i = 0; i < mo->nn0; i++) {                         /* (los lejanos cuentan como su nodo completo) */
             int a = ps->ant[i], c = ps->cur[i]; const nodo_t *d; float px, z;
             if (c == PR_TOPE && pop_en_pantalla(mo->nodos[i].cx, mo->nodos[i].cy, mo->nodos[i].cz, mo->nodos[i].r, &px, &z))
                 pop_falta += 3.14159f * px * px;                /* lo que falta por el tope (con solapes) */
@@ -7255,7 +7315,8 @@ static void pop_mide(void)
         n += sprintf(b + n, "POPTA: agua %uK bo %uK coche %uK pareja %uK trafico %uK efectos %uK\n", (unsigned)(pop_cat[0] / pop_cuadros >> 10), (unsigned)(pop_cat[1] / pop_cuadros >> 10),
                      (unsigned)(pop_cat[2] / pop_cuadros >> 10), (unsigned)(pop_cat[3] / pop_cuadros >> 10), (unsigned)(pop_cat[4] / pop_cuadros >> 10), (unsigned)(pop_cat[5] / pop_cuadros >> 10));
         memset(pop_cat, 0, sizeof pop_cat);
-        n += sprintf(b + n, "POPVEG:");
+        n += sprintf(b + n, "POPVEG: lod lej %u comp %u n %u |", (unsigned)pop_lod_lej, (unsigned)pop_lod_comp, (unsigned)(pop_lej_n / (pop_cuadros ? pop_cuadros : 1)));
+        pop_lod_lej = pop_lod_comp = pop_lej_n = 0;
         for (k = 1; k < PR_N; k++) if (pop_vap[k][0] || pop_vde[k][0])
             n += sprintf(b + n, " %s +%u/%u/%u -%u/%u/%u z%d-%d px%d", pop_nom[k], (unsigned)pop_vap[k][0], (unsigned)pop_vap[k][1], (unsigned)pop_vap[k][2],
                          (unsigned)pop_vde[k][0], (unsigned)pop_vde[k][1], (unsigned)pop_vde[k][2], pop_vz[k][0] < 1e8f ? (int)pop_vz[k][0] : -1, (int)pop_vz[k][1], (int)pop_vpx[k]);
