@@ -4020,3 +4020,41 @@ OR2 / SP_goals y sus _reverse, Races.bin; codigo 0x1760c0, 0x1b63a0, 0x2a6758, 0
 - Datos: CURSOTA.DAT (arboles 290 / 291 y +0x74), UNIONESR.PAK y BK470..497.DAT: paso `unionren` de
   tools/regenera.py (`conv_union.py <iso> uren/ --arboles=<ARBOLES_TA> --bk-desde=470 --curso=CURSOTA.DAT` y
   `pak_union.py --pak=UNIONESR.PAK`; `unionta` lleva ahora --bk-hasta=470), PYTHONHASHSEED=0.
+
+## Barrido grafico con el disco lento y el TA de la consola (revision 44, 2026-11-14)
+
+Solo busqueda (sin cambios en el juego). Flycast con `-DPRUEBA_AUTO -DPRUEBA_SIN_TIEMPO -DDIAG_GD_LENTO=750
+-DTA_F_MIN=576 -DDIAG_MS -DDIAG_POPPING -DDIAG_TEX_VRAM` (el GD lento ya existia: comun/gd.c, 120 ms por salto + n x
+2048 / KB/s): arboles 290 y 291 enteros (`-DPRUEBA_JUEGO=2 / 3`: las 30 etapas y las 28 uniones BK470..497), arboles
+0 y 1 por la rama izquierda y la Contrarreloj, INFARTO de OutRun 2 SP y las misiones 0 / 84 por la derecha
+(`PRUEBA_ORDEN`, FIN / SALTO 1500), tools/prueba/tablero.sh con el GD lento, y controles con el TA de siempre (448) sin
+GD lento. Informe y capturas: scratchpad capturas_r44/barrido/ (w4.md). Nota: la verificacion de la segunda parte de
+la Revision 44 dice `-DTA_F_MIN=768`, pero sus capturas son *_tope576 y DREAMCAST.md (El tope) dice 576; con 768 la
+imagen se rompe (abajo).
+
+PENDIENTE (encontrado):
+- **Uniones con ta_f 2,25: desaparece la escena 3-4 s** (grave si la consola gasta eso). En casi todas las uniones
+  (290: PALM->LAKE, CAST->FORE, DESE->CLOU, CLOU->INDU, SNOW->GHOS, RUIN->IMPE; 291: NIAG->SEQU, SEQU->GRAN,
+  GRAN->MACH, ALAS->AMAZ, PRIN->FLOR; arboles 0 / 1: BK00, 01, 03, 06, 15, 16; INFARTO igual) el reparto no cabe ni en
+  la clase -1 ("POP: corte 1 m clase -1, falta 500-900 %", "tope mallas 12000-22000" en 34-46 cuadros) y ta_cabe tira
+  lo que no cabe en el orden de envio: la calzada, los muros y el cielo (queda el color de fondo y el plano del agua),
+  33-35 fps. Con 448 no se pierde nada pero RUIN->IMPE dibuja 30000 vertices a 28 ms (31 fps). Causa probable: etapa
+  que acaba + union + etapa siguiente en el mismo tope sin prioridad para lo cercano / la calzada.
+- **Con TA_F_MIN=768 (3 x) PALM sale sin calzada ni edificios** desde la salida (clase -1 siempre, 28000 mallas por
+  segundo fuera; el coche sobre el agua). El factor de la consola sigue sin medir (la linea "TA" de la pausa).
+- **Tirones al entrar en la etapa con el GD lento**: a 750 KB/s SEG08 (CAST) tarda 16,0 s, SEG13 (METR) 16,1, SEG15
+  (CAPE) 15,4, SEG22 (LASV) 14,9 y la union no dura tanto: curso_paso espera (`carga_espera` a 60 m del final) 1-2,6 s
+  (ALPI->CAST "2130 ms 31 cuadros", TULI->METR 2617 / 37, EAST->MAYA 2372 / 20; CAST fps 13,5, METR 11, MAYA 10,7), y
+  antes el final de la union da al vacio (la etapa siguiente aun no esta). Al entrar, 6000-14000 mallas fuera del
+  tope en los primeros cuadros.
+- **"lejos" no se recupera tras la noche**: la CPU de METR baja la distancia a 1850 m (CAPE 1900) y sube 50 m cada 30
+  cuadros: al principio de RUIN sigue en 2550-2700 y bajo el arco de roca se ve el blanco del horizonte en vez del
+  terreno (con 4000 m, en el control, no).
+- Visibles / menores: caja gris lisa sobre el agua al salir de BEAC (291, solo con 576 + GD lento); EAST, antes de la
+  union: la parte de arriba del acantilado flotando sin la de abajo ("tope -20/20/9"); GHOS: el haz de los faros con
+  un cuadrilatero brillante de borde recto delante del morro; el texto "< X  X >" de la bifurcacion se ve con el HUD en
+  las carreras con el piloto (auto_: condicion del rect_txr de txt_cen); NEWY (291) sigue con las zonas naranjas lisas
+  del cielo del atardecer.
+- Sin fallo: texturas sin subir o grises (TEXVRAM 0 en todo), tuneles, agua de LAKE / BEAC / GRAN, HUD de los modos,
+  GOAL y meta, menus / tableros / SALON con el GD lento; los porticos en blanco de las misiones son el BLNK del
+  original (rama -1). Las "torres grises" de la entrada de SANF son los anclajes del puente (igual en el control).
