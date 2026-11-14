@@ -4277,3 +4277,73 @@ Fallos de los barridos (barridos repetidos con `-DPRUEBA_AUTO -DPRUEBA_SIN_TIEMP
 - menu.sh con MODO_JUEGO=3: CERRADO (nav3: tableros 0x24 / 0x25 / 0x26 y arbol 260).
 Sin regresiones vistas: la etapa que se deja se suelta en la union con la rama decidida a 64-66 m ("union + n m") en
 todas las uniones; RAM y VRAM igual en las carreras seguidas; TEXVRAM "sin subir 0, gris 0" en las 1785 lineas.
+
+## Revision 45: el edificio volando de BEAC (tabla 2 de los registros) y el recorte en la PVS (2026-11-14)
+
+Foto del usuario (revision 44, COAST 2 COAST 1-1: BEAC -> LRBK -> PALM_T, puesto 6/6, tiempo 80): sobre el mar, a
+la izquierda de la carretera de la costa, "un trozo de edificio volando" (capas de ventanas y una base marron sin la
+caja). Reproducido en Flycast con el TA de siempre (448; `-DPRUEBA_AUTO -DPRUEBA_MISION=0 -DPRUEBA_SIN_TIEMPO
+-DDIAG_MS -DDIAG_POPPING`): BEAC s 1125-1357 (no al final de BEAC: en la primera recta de la costa, con la barra de
+Inicio-Meta al principio), capturas_r45/edificio_antes.png. No es el reparto del TA, ni VISO, ni los grupos.
+
+- **Causa (CORREGIDO, conversion)**: la tabla 2 de cada registro del modelo (16 bytes por entrada) no va en paralelo con
+  la tabla 3 (las filas de 24 bytes de los paquetes del VIF): cada entrada es (material, material, filas, primera
+  fila de la tabla 3), y la tabla 1 (la malla de cada nodo: n opacas, n de mezcla, primera opaca, primera de mezcla)
+  cuenta ENTRADAS de la tabla 2. PS2 0x110700 (el dibujo de la malla de un nodo, desde 0x1114e0): recorre las
+  entradas de la tabla 2 que da la tabla 1 (+0 cuenta, +8 la primera; de 16 en 16 bytes), de cada una +4 (ya el
+  puntero a la entrada de la tabla 4, cuya +0xC es la textura), +8 filas y +0xC la primera fila de la tabla 3, y
+  dibuja esas filas de 0x18 en 0x18. En 1187 de los 1204 registros de los segmentos cada entrada es (1, i) y da igual;
+  en 7 bloques de etapa (los unicos de los 403 _pmt de la ISO) alguna entrada lleva 2 filas: cs_CS_BEAC (SEG17,
+  registro 3: 968 filas para 967 entradas), BEAC_T (SEG18), BEAC_BT (SEG19, sin uso), GHOS_R (SEG42, registro 2:
+  470 / 467), BEAC_R (SEG50, 553 / 548), BEAC_BR (SEG51, sin uso) y EAST_R (SEG65, registro 7: 312 / 311).
+  tools/modelo.py leia la tabla 1 como filas de la tabla 3 y la textura de la fila i en la entrada i: desde la
+  primera entrada doble, cada tira iba al nodo anterior al suyo y con la textura de otra entrada. Tiras fuera de la
+  esfera de su nodo: SEG17 3001 de 24992 (727 nodos), SEG18 2981 (720), SEG42 6177 (643), SEG50 2574 (405), SEG65
+  12281 (429); las demas etapas 0-24 sueltas (mallas un poco fuera de la esfera del original). La demo recorta cada
+  nodo por su esfera (fuera de la vista, LOD, PVS): en BEAC la fachada de una torre (textura 93) iba con la esfera
+  del nodo 494, a 700 m (`-DDIAG_EDIF`: "razon detras" con la malla en la pantalla), y lo que si se dibujaba llevaba
+  texturas de otro: el "edificio" de la foto eran trozos con la textura de fachada de otras mallas; las "cajas
+  negras" sobre el agua de la misma captura eran los carteles (AMD, Shell, Bridgestone, Vodafone, SEGA) con otra
+  textura.
+  Arreglo: `modelo.filas_t3(blq, reg)` ((k, filas) por entrada de la tabla 2; en paralelo si la tabla no tiene ese
+  formato) en Modelo.bloque (con y sin nodos), texturas_de_carteles, conv_tramo.puntos_asfalto y conv_bo
+  (tiras_de_malla / cuadros_de: entradas de la tabla 2); modelo.nodos cuenta hasta las entradas de la tabla 2.
+  Rehecho, tiras fuera de su nodo: 0 en SEG17. conv_tramo avisa ahora ("AVISO: n tiras fuera de la esfera de su
+  nodo") si vuelve a pasar.
+  En el original: la mascara de cs_CS_BEAC_bin (0x1112f8, conv_viso.mascaras) en las secciones 140-170 (s 1125-1357)
+  lleva los nodos 493..517 y 912 (las torres de ese tramo): el original dibuja los edificios enteros, como ahora.
+  Verificado en Flycast (448): el mismo sitio sin nada volando y con los carteles en la orilla
+  (capturas_r45/edificio_despues.png, edificio_antes_despues.png). Arbol 291 con `-DTA_F_MIN=576` (BEAC_R): la "caja
+  gris lisa sobre el agua al salir de BEAC" de los barridos (w4, lote 2, w7) era esto y ya no esta
+  (beac291_caja_antes_tope576.png / beac291_caja_despues_tope576.png, hojas beac291_hoja_*). La roca de EAST antes de
+  la union (291) NO: el 291 usa EAST (tramo 29, SEG33, sin entradas dobles) y sigue igual
+  (east291_roca_antes_*.png / east291_roca_sin_cambio_*.png); sigue PENDIENTE como dice el lote 1.
+  Etapas afectadas por modo: SEG17 (BEAC) en el arbol de OutRun 2 SP (csc_data_cvt) y las misiones 0, 4, 8, 16, 36,
+  38, 50, 60, 72, 88; SEG18 la 80; SEG42 (GHOS_R) 27, 42, 49, 84, 92; SEG50 (BEAC_R) 5, 24, 46, 48, 61, 81, 83, 85,
+  93; SEG65 (EAST_R) 33, 70, 78, 81, 86, 93 (y los arboles de los cursos seguidos que las usan).
+- **PVS y el recorte (CORREGIDO, herramienta)**: tools/c/pvs.c dejaba tapar a una malla de la lista de recorte (prueba
+  de alfa) un pixel entero si el texel del CENTRO del pixel era opaco; el raster del PVS va a K = 128 pixeles por
+  unidad de tangente (unas 4 veces menos que la pantalla), y lo lejano (texeles menores que el pixel) tapaba por los
+  huecos de las ramas y las ventanas lo que se ve a traves. Ahora solo tapa si TODOS los texeles del pixel (el
+  rectangulo de las UV de sus cuatro esquinas con la perspectiva, por la tabla de sumas de la mascara erosionada) son
+  opacos. Medido en BEAC (puntos 0-400 de la ruta): 8113 de 25139 mallas se ven en alguna seccion mas (+1,3 % de los
+  pares malla-seccion; ninguna se pierde). Para el edificio de la foto no era esto (el nodo 516 queda fuera tambien
+  sin el recorte: su geometria estaba a 1400 m de su esfera). Datos: aplicado a las cinco etapas rehechas; las demas
+  etapas y uniones siguen con la PVS de antes hasta rehacerla (`python3 tools/pvs.py SEGnn.DAT ...` sobre las
+  recompuestas y volver a empaquetar; unas 5-10 min por etapa).
+- **Grupos de nodos, VISO y la union (SIN CAMBIO, pregunta)**: los grupos (tools/grupos_nodos.py) ya se aplican en la
+  etapa siguiente y en la union (nodos_visibles de los tres tramos; cada objeto esta en un solo fichero). Las mascaras
+  del original (VISO.DAT: seccion 0 y ultima de cs_CS) dejan a medias 388 grupos en la seccion 0 y 318 en la ultima de
+  las 62 etapas (p. ej. SEG58: de un grupo de 17 nodos, 6 fuera): el original dibuja solo esas partes desde la union. No
+  se ha cambiado (seria dibujar mas que el original). PREGUNTA al usuario: si se quiere, VISO puede encender el
+  grupo entero cuando el original enciende alguno de sus nodos (DESVIACION).
+- Medidas nuevas: `-DDIAG_EDIF` (con `-DDIAG_POPPING`; DIAG_EDIF_S, DIAG_EDIF_X0/X1/Y0/Y1): al pasar por la s dada,
+  cada malla de los tres tramos con el centro en ese rectangulo de la pantalla: nodo, lista, textura, razon del nodo
+  (POPR), bit de la PVS y la esfera del nodo.
+- Datos (PYTHONHASHSEED=0): SEG17, SEG18, SEG42, SEG50 y SEG65 rehechas con `tools/regenera.py --interno seg <iso>
+  <dir> <ti>` (ti 15, 61, 37, 45, 59), la PVS nueva (`tools/pvs.py` sobre cada una) y `tools/revq.py` (0 KB: ya
+  salen con la segunda pasada), copiadas SUELTAS (ORD7 enteras, como las 8 que ya iban sueltas) a la carpeta de datos
+  en lugar de sus descriptores; SEGS.PAK no se toca (sus trozos de las cinco viejas quedan sin uso, 254 MB; volver a
+  empaquetar todas con pak_union.py no da los mismos bytes que la carpeta compartida en 6 descriptores y SEGS.PAK).
+  Las cinco COLnn.DAT salen iguales byte a byte y VISO.DAT (conv_viso.py) tambien (los nodos no cambian). En una
+  regeneracion completa (regenera.py) salen ya bien y empaquetadas.
