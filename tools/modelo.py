@@ -111,12 +111,19 @@ def estado_gs(blq, reg, k, capa=0):
     del GS que manda el microcodigo del VU1: GIFtag (PRIM en los bits 47-57: bit 4 TME textura, bit 6 ABE mezcla), en
     +08 el registro ALPHA (0x44 (Cs - Cd) As + Cd, la normal; 0x48 Cs As + Cd, la aditiva; 0x58 Cs Ad + Cd y 0x89
     Cd As en las capas 2), +10 TEST (ATE, ATST, AREF con 0x80 = 1, AFAIL, ZTE y ZTST: GEQUAL en todos), +18 CLAMP y
-    +20 TEX1 (MXL = niveles de mip - 1, MMAG, MMIN). None si no lo hay"""
+    +20 TEX1 (MXL = niveles de mip - 1, MMAG, MMIN). None si no lo hay.
+    Pmt64 (zancada 64, tabla 4 de 32): una sola capa; +08 el estado (>> 8) y +0C la textura (>> 16, 0xffff sin ella)"""
     m, A = blq.m, blq.A; n4, o4 = reg[4]; n7, o7 = reg[7]
     if not 0 <= k < n4: return None
-    x = struct.unpack('<9i', m[A + o4 + 36 * k:A + o4 + 36 * k + 36])
-    ti, j = x[3 + 2 * capa], x[4 + 2 * capa]
-    if not 0 <= j < n7: return None
+    if getattr(blq, 'zancada', 72) == 64:
+        if capa: return None
+        e = struct.unpack('<8I', m[A + o4 + 32 * k:A + o4 + 32 * k + 32])
+        j = (e[2] >> 8) & 0xff; ti = (e[3] >> 16) & 0xffff
+        if ti == 0xffff or not 0 <= j < n7: return None
+    else:
+        x = struct.unpack('<9i', m[A + o4 + 36 * k:A + o4 + 36 * k + 36])
+        ti, j = x[3 + 2 * capa], x[4 + 2 * capa]
+        if not 0 <= j < n7: return None
     q = bytes(m[A + o7 + 48 * j:A + o7 + 48 * j + 48])
     prim = (struct.unpack('<Q', q[:8])[0] >> 47) & 0x7ff
     test = struct.unpack('<I', q[16:20])[0]; tex1 = struct.unpack('<Q', q[32:40])[0]
@@ -170,6 +177,20 @@ def nodos(blq, reg):
     anda(0, None)
     return res
 
+def t4_entrada(blq, reg, k):
+    """(material, textura, estado) de la entrada k de la tabla 4 de un registro; textura -1 si no lleva.
+    72 bytes de registro: tabla 4 de 36 (material +0, textura +0C, estado de la capa 1 +10).
+    64 (Pmt64): tabla 4 de 32; +0 material, +08 estado (>> 8), +0C textura (>> 16, 0xffff sin ella)"""
+    m, A = blq.m, blq.A; n4, o4 = reg[4]
+    if not 0 <= k < n4: return None, -1, -1
+    if getattr(blq, 'zancada', 72) == 64:
+        e = struct.unpack_from('<8I', m, A + o4 + 32 * k)
+        ti = (e[3] >> 16) & 0xffff
+        return e[0], (-1 if ti == 0xffff else ti), (e[2] >> 8) & 0xff
+    return (struct.unpack('<i', m[A + o4 + 36 * k:A + o4 + 36 * k + 4])[0],
+            struct.unpack('<i', m[A + o4 + 36 * k + 12:A + o4 + 36 * k + 16])[0],
+            struct.unpack('<i', m[A + o4 + 36 * k + 16:A + o4 + 36 * k + 20])[0])
+
 def filas_t3(blq, reg):
     """[(k, filas)] por entrada de la tabla 2 del registro: k es su entrada de la tabla 4 (material y textura) y filas
     las filas de la tabla 3 (paquetes del VIF, 24 bytes) que dibuja. La entrada de la tabla 2 (16 bytes) es (k, k,
@@ -179,30 +200,52 @@ def filas_t3(blq, reg):
     cada una, las dos tablas en paralelo); en SEG17, 18 y 19 (BEAC de las misiones, el registro 3: 968 filas para 967
     entradas), SEG42 (registro 2), SEG50 y SEG51 (registro 3) y SEG65 (registro 7) alguna entrada lleva 2 filas, y
     leerlas en paralelo corria una fila la geometria y la textura de todo lo de despues (revision 45: el edificio a
-    medias de BEAC, docs/PARIDAD.md). Si la tabla 2 no es de ese formato (no seguida o no cubre la 3): en paralelo"""
+    medias de BEAC, docs/PARIDAD.md). Si la tabla 2 no es de ese formato (no seguida o no cubre la 3): en paralelo.
+    En los bloques Pmt64 (zancada 64) la entrada de la tabla 2 es de 12 bytes: (k, cuenta, primera fila)"""
     m, A = blq.m, blq.A; n2, o2 = reg[2]; n3 = reg[3][0]; res = []; sig = 0
+    z = 12 if getattr(blq, 'zancada', 72) == 64 else 16
     for i in range(max(n2, 0) if 0 <= n2 <= 1 << 20 else 0):
-        k, _, c, p = struct.unpack_from('<4i', m, A + o2 + 16 * i)
+        if z == 12:
+            k, c, p = struct.unpack_from('<3i', m, A + o2 + 12 * i)
+        else:
+            k, _, c, p = struct.unpack_from('<4i', m, A + o2 + 16 * i)
         if p != sig or c < 1: break
         res.append((k, range(p, p + c))); sig = p + c
     if len(res) == n2 and sig == n3: return res
-    return [(struct.unpack_from('<i', m, A + o2 + 16 * i)[0] if i < n2 else -1, range(i, i + 1)) for i in range(n3)]
+    return [(struct.unpack_from('<i', m, A + o2 + z * i)[0] if i < n2 else -1, range(i, i + 1)) for i in range(n3)]
 
 def material_de(blq, reg, k):
     """color del material de la entrada k de la lista de texturas del registro (tabla 4, 36 bytes: el primer campo es
     el material): tabla 5, 64 bytes, difuso r, g, b, a en unidades del GS (128 = 1), luego ambiente, especular,
-    potencia y emision. None si no lo hay"""
+    potencia y emision. En Pmt64: tabla 4 de 32, tabla 5 de 72 bytes y 18 floats en unidades de 1. None si no lo hay"""
     m, A = blq.m, blq.A; n4, o4 = reg[4]; n5, o5 = reg[5]
     if not 0 <= k < n4: return None
+    if getattr(blq, 'zancada', 72) == 64:
+        mi = struct.unpack('<I', m[A + o4 + 32 * k:A + o4 + 32 * k + 4])[0]
+        if not 0 <= mi < n5: return None
+        return tuple(float(x) for x in material_pmt64(m, A + o5 + 72 * mi)[:16])
     mi = struct.unpack('<i', m[A + o4 + 36 * k:A + o4 + 36 * k + 4])[0]
     if not 0 <= mi < n5: return None
     return tuple(float(x) for x in np.frombuffer(m[A + o5 + 64 * mi:A + o5 + 64 * mi + 16], '<f4'))
 
+def material_pmt64(m, p):
+    """los 16 valores de material (difuso RGBA, ambiente RGBA, especular RGB, potencia, emision RGBA) en unidades del
+    GS de una entrada de la tabla 5 de un bloque Pmt64 (72 bytes, 18 floats: difuso, ambiente, especular, emision,
+    potencia, 0; los 16 primeros en unidades de 1, la potencia tal cual)"""
+    v = np.array(struct.unpack_from('<18f', m, p), float)
+    mat = np.r_[v[0:11], v[16], v[12:16]] * 128.0; mat[11] = v[16]
+    return mat
+
 def material_completo(blq, reg, k):
     """material entero de la entrada k de la tabla 4 del registro (tabla 5, 64 bytes): difuso RGBA, ambiente RGBA,
-    especular RGB y potencia, emision RGBA, en unidades del GS (128 = 1). None si no lo hay"""
+    especular RGB y potencia, emision RGBA, en unidades del GS (128 = 1). En Pmt64, tabla 4 de 32 y tabla 5 de 72.
+    None si no lo hay"""
     m, A = blq.m, blq.A; n4, o4 = reg[4]; n5, o5 = reg[5]
     if not 0 <= k < n4: return None
+    if getattr(blq, 'zancada', 72) == 64:
+        mi = struct.unpack('<I', m[A + o4 + 32 * k:A + o4 + 32 * k + 4])[0]
+        if not 0 <= mi < n5: return None
+        return material_pmt64(m, A + o5 + 72 * mi)
     mi = struct.unpack('<i', m[A + o4 + 36 * k:A + o4 + 36 * k + 4])[0]
     if not 0 <= mi < n5: return None
     return np.frombuffer(m[A + o5 + 64 * mi:A + o5 + 64 * mi + 64], '<f4').astype(float)
@@ -240,7 +283,7 @@ def texturas_de_carteles(blq):
         for k, i in ((k, i) for k, filas in filas_t3(blq, reg) for i in filas):
             e = struct.unpack('<6I', m[A + o + 24 * i:A + o + 24 * i + 24])
             if not 0 <= k < n4: continue
-            ti = struct.unpack('<i', m[A + o4 + 36 * k + 12:A + o4 + 36 * k + 16])[0]
+            _, ti, _ = t4_entrada(blq, reg, k)
             if ti < 0 or ti in res: continue
             h = tex.cabeceras(blq)[ti] if ti < len(tex.cabeceras(blq)) else None
             if h is None or (h[11] >> 24) < (h[12] & 0xff) + 1: continue      # los anuncios son apaisados (2:1)
@@ -343,8 +386,7 @@ class Modelo:
                 """la entrada i de la tabla 2 (material y textura) y su fila j de la tabla 3 (paquetes del VIF)"""
                 e = struct.unpack('<6I', m[A + o + 24 * j:A + o + 24 * j + 24])
                 k = ft[i][0] if i < len(ft) else -1
-                ti = struct.unpack('<i', m[A + reg[4][1] + 36 * k + 12:A + reg[4][1] + 36 * k + 16])[0] \
-                    if 0 <= k < reg[4][0] else -1                # la lista de texturas del registro (tabla 4)
+                _, ti, _ = t4_entrada(blq, reg, k)                        # la lista de texturas del registro (tabla 4)
                 ti = base + ti if 0 <= ti < ntb else -1
                 self._mat = material_de(blq, reg, k) if sin_textura == 'material' and ti < 0 else None
                 self._matc = material_completo(blq, reg, k) if self.luz is not None else None

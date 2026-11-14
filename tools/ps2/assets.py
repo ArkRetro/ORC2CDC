@@ -172,7 +172,7 @@ def _bloque_pmt(d):
     """cabecera de bloque de geometria (STAGE/CARS/OBJ...): n registros, n texturas, tamano A, tamano B"""
     if len(d) < 16: return None
     w = struct.unpack_from('<4I', d, 0)
-    if 1 <= w[0] <= 0x400 and w[1] <= 0x1000 and w[2] + w[3] + 16 == len(d) and w[2] >= 72 * w[0]:
+    if 1 <= w[0] <= 0x400 and w[1] <= 0x1000 and w[2] + w[3] + 16 == len(d) and w[2] >= 64 * w[0]:
         return w
     return None
 

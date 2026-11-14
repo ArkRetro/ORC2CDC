@@ -439,3 +439,109 @@ distancia, 1566 pixeles distintos de 1024x768), palmeras_lod_c2400_4.png (las cu
 palmeras_lod_c1200_lado.png / _zoom.png (crono 1200, la calle de la salida, sin tope: todo completo frente a todo
 lejano; las palmeras de la acera a ~30-50 px salen iguales de tamano, color y silueta, 1040 pixeles distintos, solo la
 colocacion de algunas hojas de la copa porque la imagen es la de la direccion de llegada redondeada).
+
+## Plan de trabajo (2026-11-14): estructuras fuera de sitio, popping y OutRunners
+
+Pedido del usuario: (1) revisar las estructuras de las fases de OUTRUN2SP que siguen apareciendo donde no deben;
+(2) reducir el popping de elementos en pantalla; (3) anadir OutRunners al menu principal (la ROM de MAME esta en
+`_entrada\orunners.zip`, la portada en `_entrada\outrunners-220920-101256-3.webp`): la opcion sale en gris hasta
+desbloquearla con 50.000 millas OutRun o escribiendo ENTIRETY en la licencia, al seleccionarla se ve su portada, y el
+menu conserva su estilo grafico.
+
+### 1. Estructuras fuera de sitio (OUTRUN2SP)
+
+**CAUSA ENCONTRADA (2026-11-14): bloques Pmt64 leidos como bloques normales.**
+
+La revision 45 (`502ae3a`) arreglo la tabla 2 de los registros en los 7 segmentos con entradas de 2 filas
+(SEG17/18/19/42/50/51/65) y eso quito el edificio a medias de BEAC. Pero queda otra familia: los **bloques con
+registros de 64 bytes (Pmt64)**, que `ps2.stage.Bloque` lee con zancada 72 (y su tabla 2 con 16 bytes cuando es de
+12). El repositorio ya conoce ese formato en `tools/conv_chr.py` (`class Pmt64`), con una regla de deteccion exacta:
+el u32 que va detras de los registros vale `zancada * n + 4 * ntex`.
+
+Barrido de todo el disco con esa regla (`_trabajo\pmt64.py`): solo hay **15 bloques Pmt64**, y de ellos 11 NO se
+estan leyendo bien:
+
+| Paquete | Bloque | Registros |
+|---|---|---|
+| BK.PS2 | `cs_BK_CAST_R_pmt` (geometria de la union de CAST_R) | 2 |
+| STAGE.PS2 | `PALM_T\obj_course_obj_sky_palm_pmt` (cielo de PALM_T) | 6 |
+| STAGE.PS2 | `BEAC_T\obj_course_obj_sky_beac_pmt` (cielo de BEAC_T) | 6 |
+| COMMON.PS2 | `obj_cors_obj_cs_beac_br`, `..._cs_beac_bt`, `..._cs_palm_br`, `..._cs_palm_bt`, `obj_cors_obj_sk_beac_bt`, `obj_cors_obj_sk_palm_bt`, `obj_course_obj_sk_maya_r`, `obj_end_5a` | 1-7 |
+
+(los otros 4 Pmt64 son los dos de CHR.PS2, que ya se leen bien, y dos de CARS.PS2 que van por otra via).
+
+Con la zancada de 72, todo lo que va del registro 1 en adelante se lee corrido una palabra: cuentas y
+desplazamientos de las 8 tablas de cada registro son los del registro anterior. El resultado es geometria y texturas
+de otro sitio: el cielo de PALM_T y BEAC_T, los objetos de curso de las ramas de BEAC y PALM, la union del castillo
+y el objeto de la meta. Coincide con lo que el usuario sigue viendo fuera de sitio.
+
+Ademas, en esos bloques la tabla 2 es de **12 bytes** (3 u32: entrada de la tabla 4, filas, fila) en vez de 16, la
+tabla 4 de 32 bytes en vez de 36 y la 5 de 72; `Pmt64.material` / `Pmt64.zancada` de `conv_chr.py` ya tienen las tres.
+
+Pasos:
+- 1.1 (hecho) Identificar los bloques: 11 Pmt64 mal leidos (`_trabajo\pmt64.py`, regla de `Pmt64.zancada`).
+- 1.2 (hecho) Reconocer Pmt64 en `ps2/stage.py` y leerlos con la zancada de 64: `registros()`, tabla 2 de 12 bytes en
+  `modelo.filas_t3`, `modelo.t4_entrada` (textura en +0C >> 16, estado en +08 >> 8), materiales de la tabla 5 de 72
+  bytes, `modelo.estado_gs` y `ps2/tex.cabeceras`. Comprobado: con 64 todas las tablas encadenan y las texturas caen
+  en rango; con 72 los cielos ni se podian convertir y los objetos salian con 1/10 de la geometria.
+- 1.3 (hecho, salvo las uniones) Regenerados SEG01 (PALM_T), SEG18 (BEAC_T) y SEG61 (MAYA_R) + COL, con LOD lejano;
+  `SEGS.PAK` y `VISO.DAT` rehechos y GDI remontado. Queda pendiente la union de CAST_R (`cs_BK_CAST_R`, en
+  UNIONES.PAK) y el objeto de la meta (`obj_end_5a`, `conv_final.py`), y `pvs.py` peta con SEG18 (0xC0000005) aunque
+  el SEG queda completo.
+- 1.4 Comprobar en Flycast: cielo de PALM_T/BEAC_T sin geometria encima, objetos de curso en su sitio, y el barrido
+  de etapas para ver si queda algo.
+
+Criterio: ninguna captura con geometria sobre la calzada o en el cielo que no este en el original.
+
+### 2. Popping
+
+Punto de partida: el apartado `## Popping (2026-11-13)` de arriba (el tope del TA era casi todo el popping: 25,3
+apariciones por segundo de 2 px o mas, 43 % de pantalla sin dibujar). La revision 46 anadio el LOD lejano de la
+vegetacion (impostores) y la PVS nueva. Falta re-medir con la 46 y atacar lo que quede.
+
+- 2.1 Re-medir: `-DPRUEBA_AUTO -DPRUEBA_SIN_TIEMPO -DDIAG_POPPING -DDIAG_VTX -DDIAG_MS`, PALM -> LAKE y BEAC, 240 s,
+  con y sin `-DLOD_LEJ_PX=0`, para separar lo que arreglo la 46 de lo que queda.
+- 2.2 Tope del TA (lo grande): ver si cabe subir el presupuesto (bufer de parametros en VRAM), afinar `REPARTO_*` para
+  que el corte sea por distancia y no por orden de lista, y que lo que no cabe entre por las clases de LOD bajas.
+- 2.3 PVS: con la regla nueva, medir si se puede bajar `HUECO` (menos mallas que se encienden y apagan de golpe) sin
+  pasar de RAM (`MAX_KB`).
+- 2.4 LOD: el umbral de 404B00 (7,5 px) es el del original; no se toca salvo en la vegetacion, que ya lleva su version
+  lejana.
+
+Criterio: la mitad de apariciones/desapariciones por segundo que la revision 45 en las mismas etapas, sin bajar de 60
+fps ni de la RAM.
+
+### 3. OutRunners en el menu principal
+
+Lo que hay: `_entrada\orunners.zip` (ROM World de MAME, 11,8 MB) y la portada en webp (0,12 MB). El port
+`MisterPezz82/OutRunners-Dreamcast` es **nativo** (no es MAME: es el decomp de cheviman, KOS, BSD-3, "bring your own
+ROM") y su builder hace un CDI con `outrunners.elf` y seis ficheros en la raiz del ISO: `core.assets`, `tiles4.z`,
+`sprites.z`, `pcm.bin`, `aica_fixed.bin` y `aica_index.bin` (mas `splash.bin` si sale la pantalla de carga).
+
+Como encaja: la Dreamcast no tiene procesos. Se cambia de programa con `arch_exec()` / `arch_exec_at()`
+(`arch/exec.h` de KOS): el binario se carga en RAM y se salta a 0x8C010000; antes, KOS hace `arch_shutdown()` (PVR,
+AICA, GD). Es el "chainload" de KOS; no hay que escribir un loader.
+
+Presupuesto del disco: el GD de la revision 46 ocupa 952.525.169 B de 1.032.433.664 B (908,4 de 984,6 MiB), asi que
+quedan **75,5 MiB** para el binario de OutRunners (5-7 MB) y sus datos. Hay que medirlo en P0; si no cabe, lo primero
+que se puede quitar son las peliculas (MVTS.VQV 7,6 MB + MVATTR.VQV 23,8 MB = 31,4 MB) o dejar OutRunners aparte.
+
+- P0 (hecho): el paquete 0.2 y su `make_disc.py` con `_entrada\orunners.zip` construyen el CDI en 110 s. Datos
+  **13,4 MiB** (13,4 de 75,5 libres) + ELF **7,3 MiB**: cabe con margen.
+- P1 (chainload de prueba, en una rama): cargar su ELF del GD a RAM y llamar a `arch_exec`; medir la RAM libre en el
+  menu (hay que soltar modelos y texturas antes) y comprobar que OutRunners arranca y lee sus ficheros de nuestro
+  disco (`/cd/core.assets`...). Si algun nombre choca con los nuestros, se renombra en su ELF o se mete en carpeta.
+- P2 (menu): entrada nueva al final del menu principal, con la fuente 14 (`texto` / `texto_id`, `U_FUENTE`) para no
+  inventar arte y que case con el estilo; **gris** (color atenuado y `bloqueado()` al pulsar) mientras no este
+  desbloqueada; la portada de `_entrada` convertida a textura PVR y anadida a MENU.DAT (`tools/conv_menu.py`) para
+  verla en la zona de informacion al seleccionar la entrada.
+- P3 (desbloqueo y guardado): `millas >= 50.000` (licencia +0x24, `menu_suma_millas`) **o** nombre `ENTIRETY` (la
+  regla que ya usa `lic_desbloquea`, menu.c 214). No hace falta fichero nuevo: el estado va implicito en la licencia.
+- P4 (GDI): su ELF pasa a un fichero de la raiz (`OUTRUN.BIN` o similar) y sus datos se copian con el resto;
+  `tools/mkgdi.py` no cambia; el menu decide que programa se ejecuta.
+
+Riesgos: RAM (16 MB sin MMU: si no cabe, no cabe), el limite de 75,5 MiB y que OutRunners usa su propio fichero de
+VMU (`ORUNNERS`, 2 bloques), que convive con el nuestro. Plan B si el chainload no sale estable: dejar OutRunners como
+entrada aparte del GDEMU y en el menu solo la portada.
+
+Orden recomendado: 1.1 y 1.2 (es lo que el usuario ve), P0 (media hora), 2.1 y 2.2, y despues P1 a P4.

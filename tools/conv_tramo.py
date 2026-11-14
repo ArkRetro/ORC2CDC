@@ -243,7 +243,7 @@ def puntos_asfalto(seg):
     hs = tex.cabeceras(seg); por_tex = {}
     for k, i in ((k, i) for k, filas in modelo.filas_t3(seg, reg) for i in filas):   # (tabla 2 -> filas de la 3)
         e = struct.unpack('<6I', m[A + o + 24 * i:A + o + 24 * i + 24])
-        ti = struct.unpack('<i', m[A + o4 + 36 * k + 12:A + o4 + 36 * k + 16])[0] if 0 <= k < n4 else -1
+        _, ti, _ = modelo.t4_entrada(seg, reg, k)
         for pk in vif.datos(m, A + e[2], A + seg.w[2]):
             for tr in vif.tiras(pk):
                 if 0x69 not in tr or np.abs(tr[0x69][:, 1] / 32768).mean() < 0.9: continue

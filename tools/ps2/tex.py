@@ -13,11 +13,12 @@ _SW = np.arange(256); _SW = (_SW & 0xE7) | ((_SW & 8) << 1) | ((_SW & 16) >> 1)
 
 def cabeceras(seg):
     m, A = seg.m, seg.A
-    base = A + 72 * seg.w[0]; n = seg.w[1]
+    z = getattr(seg, 'zancada', 72)                       # 64 en los bloques Pmt64 (ps2.stage.Bloque)
+    base = A + z * seg.w[0]; n = seg.w[1]
     offs = struct.unpack('<%dI' % n, m[base:base + 4 * n])
     res = []
     for o in offs:
-        if o >= seg.w[2] or o < 72 * seg.w[0]: break        # despues de las texturas vienen otras tablas
+        if o >= seg.w[2] or o < z * seg.w[0]: break        # despues de las texturas vienen otras tablas
         res.append(struct.unpack('<14I', m[A + o:A + o + 56]))
     return res
 

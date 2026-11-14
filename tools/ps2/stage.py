@@ -9,14 +9,29 @@ import struct
 from . import vif
 
 class Bloque:
-    """un bloque de geometria y texturas (cabecera n registros, n texturas, tamano A, tamano B)"""
+    """un bloque de geometria y texturas (cabecera n registros, n texturas, tamano A, tamano B).
+
+    Los registros son de 72 bytes (8 parejas cuenta / desplazamiento y la marca 87658765 12341234) o de 64 (Pmt64: las
+    8 parejas y nada detras; el mismo formato que tools/conv_chr.py Pmt64). Se distinguen con la regla de Pmt64: el
+    primer u32 de la cabecera de detras de los registros vale zancada * n + 4 * ntex."""
     def __init__(self, iso, o, w):
         self.iso = iso; self.m = iso.m; self.o = o; self.w = w; self.A = o + 16
+        self.zancada = self._zancada()
+
+    def _zancada(self):
+        n, nt = self.w[0], self.w[1]
+        if not 1 <= n <= 0x400: return 72
+        ok = []
+        for z in (72, 64):
+            p = self.A + z * n
+            if p + 4 > len(self.m): continue
+            if struct.unpack_from('<I', self.m, p)[0] == z * n + 4 * nt: ok.append(z)
+        return ok[0] if len(ok) == 1 else 72
 
     def registros(self):
         r = []
         for i in range(self.w[0]):
-            p = self.A + i * 72; ws = struct.unpack('<18I', self.m[p:p + 72])
+            p = self.A + i * self.zancada; ws = struct.unpack('<16I', self.m[p:p + 64])
             r.append([(ws[2 * k], ws[2 * k + 1]) for k in range(8)])
         return r
 
