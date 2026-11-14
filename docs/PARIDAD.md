@@ -4221,3 +4221,59 @@ Pendiente del lote 1: EAST (la roca de la etapa), NEWY (el cielo), el dragon de 
 lista no repasadas una a una con 576 (CLOU, INDU, SNOW, RUIN y las del arbol 291, arboles 0 / 1 e INFARTO) y una pasada
 de una MISION SUPERADA de C2C en Flycast. Datos regenerados: FINC2C.DAT (paso fin de tools/regenera.py,
 PYTHONHASHSEED=0), copiado a la carpeta de datos compartida.
+
+## Verificacion independiente de la revision 44 (2026-11-14, w7)
+
+HEAD limpio (8f1b2aa, `git archive` en /dev/shm/w7, 0 avisos al compilar), datos de la carpeta compartida sin tocar,
+Flycast en el display 94. Capturas en el scratchpad capturas_r44/w7/ (hojas de contactos y `*_analisis.txt`: cargas,
+POP de mas de 1300 ms, cuadros con la etapa a 0 KB, fps minimos por etapa y mallas fuera del tope).
+
+Pruebas del menu (GDI sin defines salvo donde se dice): nav.sh con MODO_JUEGO 0..3 (C2C 1-1 BEAC, OUTRUN arbol 0 por el
+tablero 0x24, INFARTO arbol 0, CONTRARRELOJ arbol 260 por 0x24 / 0x25 / 0x26), sp.sh SP_LADO 0 (preset 0, arbol 1) y 1
+(preset 1, arbol 0), resultados.sh, vmu.sh, vmu_diag.sh ("releer: BIEN", restaura 0), reintenta.sh en C2C y en OUTRUN
+(las tres lineas SALIDA iguales), salon.sh y tablero.sh (-DPRUEBA_SALON_MILLAS=20000: compras, guardados, arbol 230 y
+arbol 1), final.sh y seguidas.sh (-DPRUEBA_PILOTO_MENU -DPRUEBA_NODO=13 -DPRUEBA_FIN=300 -DPRUEBA_SIN_TIEMPO
+-DDIAG_PVRMEM; en OUTRUN las 7 carreras con RAMMAPA 12546-12555K y la zona del curso 1248K en todas). En ninguna
+"Out of memory", "pvr_mem: ERROR" ni "PVRMEM: sin / no pedido". Tres fallos de las pruebas (no del juego), arreglados:
+- sp.sh SP_LADO=1: "CONGELADO a los 95 s": con el lado 1 (PALM) el tiempo se acaba antes de los 120 s y la pantalla de
+  rankings queda quieta. Ahora para al ver "CURSO: tiempo agotado".
+- tablero.sh salia con 1 sin mensaje: al_menu prueba START cada 3 s con espera_log, que pone ERROR=1 en cada intento
+  sin la musica del menu. Ahora los intentos no cuentan como error.
+- final.sh: "no sale 'FIN: modo 27' / 'FSP: frontal'": el final 18 dura ~20 s y los modos 25, 27 y 28 salen durante
+  las fotos fi_00..14; cada espera mira ahora desde el modo 24. El juego paso por los modos 24, 25, 27, 28 y el frontal.
+
+Fallos de los barridos (barridos repetidos con `-DPRUEBA_AUTO -DPRUEBA_SIN_TIEMPO -DTA_F_MIN=576 -DDIAG_GD_LENTO=750
+-DDIAG_MS -DDIAG_POPPING -DDIAG_TEX_VRAM` y `-DPRUEBA_JUEGO=2` (arbol 290 entero hasta CAPE), `=3` (291 hasta NEWY),
+`=1` (arbol 1) y `=0` (arbol 0)):
+- Uniones con ta_f 2,25 (576): CERRADO. Ningun cuadro con "TA etapa 0K/0K" en los cuatro arboles (las 14 uniones del
+  290, las 14 del 291, BK00/02/04/07/12 y BK15/17/20/23/28); calzada, muros y cielo en todas las hojas; fps minimos
+  33-44 (PRIN 33,4, PALM 34,9; medios 44-45). No repasado: INFARTO con 576.
+- Tirones de carga con el GD lento (750): CERRADO. Ninguna linea POP de mas de 1300 ms en ningun arbol; SEG08 12,70 s,
+  SEG13 12,11, SEG15 12,24, SEG29 (MAYA) 13,06, SEG22 (LASV) 11,81, todas leidas antes del final de la union.
+- TA_F_MIN=768: CERRADO solo en PALM; SIGUE en LAKE. En PALM la calzada y lo cercano estan en todos los cuadros (lo
+  lejano entra y sale y hay trozos de colina sueltos). Al pasar a LAKE con trafico (POPTA: coche 1043K, pareja 256K,
+  trafico 220-321K) queda "TA etapa 0K/0K" en muchos segundos y el coche va sobre el plano del agua sin calzada
+  (t768_lake_sin_calzada_b0028.png, 1'25"-1'28"): ni el reparto en la clase -1 ni ta_lej_tope dejan nada a la etapa.
+  Sigue sin medir el factor real de la consola.
+- "lejos" de METR arrastrado a RUIN: CERRADO (POP: METR acaba a 1650 m y RUIN empieza a 4000). PERO la zona blanca bajo
+  el arco al principio de RUIN SIGUE con 576 (b290_tope576_ruin_arco_blanco_lejos4000.png): no es "lejos" sino el
+  reparto del TA (POP de RUIN "clase 12-16 d0" con 576; con 448 "clase 20-27 d19" y la zona blanca es mucho menor;
+  ruin_nodo12_tope576_hoja.png / ruin_nodo12_tope448_hoja.png, desde la salida de RUIN sin METR delante). Con 448 queda
+  un resto pequeno tambien en la captura del lote 2. PENDIENTE: el terreno lejano visto por el arco cae en una clase de
+  distancia que el reparto quita.
+- EAST antes de la union (roca que flota): SIGUE (b291_east_roca_hoja.png, 14'07"-14'10"), como dice el lote 1.
+- BEAC caja gris sobre el agua: SIGUE (b291_beac_caja_gris_hoja.png, 0'04"9; BEAC 25155-25209 mallas fuera del tope en
+  los primeros segundos, "falta 280-318 %").
+- C2C MISION SUPERADA: CERRADO en Flycast. seguidas.sh con MODO_JUEGO=0 (s1/s2/s5_35) y la prueba c2c_y (scratchpad
+  w7/c2c_y.sh): "A SIGUIENTE RONDA, Y REINTENTAR, ABANDONAR B"; X no hace nada y Y da "FIN: modo 30 (REINTENTAR)" y la
+  misma SALIDA (c2c_35_hoja.png, c2c_y_hoja.png).
+- Pareja deformada con la foto 3: SIGUE (foto3_pareja_hoja.png: brazos y torso retorcidos en toda la pasada de PALM).
+- GHOS, haz de los faros con el cuadrilatero de borde recto: SIGUE (b290_ghos_haz_hoja.png), sin cambio a proposito.
+- Texto "< X  X >" con el HUD y el piloto: CERRADO (no sale en las hojas miradas: antes de PALM -> LAKE, EAST -> MAYA,
+  METR -> RUIN, GHOS -> TULI y FLOR -> NEWY).
+- NEWY, zonas naranjas lisas de bordes rectos en el cielo: SIGUE (b291_newy_cielo_naranja.png, 18'52" y 19'22").
+- seguidas.sh sin MODO_JUEGO: CERRADO (va por OUTRUN, 7 carreras, recorrido completo).
+- salon.sh: CERRADO (OUTRUN por el tablero 0x24, sa_8 / sa_9 / sa_10 la seleccion del F50 y MUS33).
+- menu.sh con MODO_JUEGO=3: CERRADO (nav3: tableros 0x24 / 0x25 / 0x26 y arbol 260).
+Sin regresiones vistas: la etapa que se deja se suelta en la union con la rama decidida a 64-66 m ("union + n m") en
+todas las uniones; RAM y VRAM igual en las carreras seguidas; TEXVRAM "sin subir 0, gris 0" en las 1785 lineas.
