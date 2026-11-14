@@ -1534,8 +1534,11 @@ car+4 a 0 (coche_ban): ni pilotos de noche, ni faros escamoteables, ni luz de lo
   TRAFKn y RCmm crecen 1-3 KB (+1 textura de 1 KB en VRAM por modelo con luz aditiva). Los pilotos de dia (+C / +14) se
   quedan como estaban.
 - Focos de los faros (revision 42b; DESVIACION respecto al PS2, del PC). En SLES-53998 0x20e100 (= 4AF5B0) y 0x20e1b8
-  (= 4AF630) calculan todo (parametros de 0x410528 = los de 5C4EA0 del PC: SPOT, WIDE y TEX POS 2 / HEIGHT 1,8 / DIR
-  -20; lejos de la proyeccion 4000, el PC 5000) pero NO se ve nada (CONFIRMADO, desensamblado): el dibujo del suceso
+  (= 4AF630) calculan todo con los parametros de las tablas 0x410688 / 0x410698 / 0x4106A8 (variables 0x5E0138 /
+  0x5E013C / 0x5E0140): TEX POS 2, TEX HEIGHT 1,8 y TEX DIR -20. (El 0x410528 que citaba antes esta mal: es la tabla de
+  SPOT POS / SPOT HEIGHT / SPOT DIR / SPOT INSIDE / SPOT OUTSIDE, cadenas 0x410398..0x4103D8.) La proyeccion va con
+  cerca 0,1 (0x3DCCCCCD en 0x20E16C) y lejos 4000 (0x457A en 0x20E178; el PC usa 5000). Pero NO se ve nada
+  (CONFIRMADO, desensamblado): el dibujo del suceso
   (0x20de10 -> 0x20e7b8) es un `jr ra`, igual que la lluvia 0x20e038 y la sombra 0x20e0b8; nadie lee work+0x170 / +0x1B0
   (los unicos lectores de [0x55c9dc] son los que ponen y quitan banderas), y las dos luces de foco (tipo 1, ids 0 / 1,
   entornos 1 y 2: 0x445360 + id x 0xD0 + entorno x 0x1A0) solo las lee 0x110100 -> 0x168e80, que descarta toda luz cuyo

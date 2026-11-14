@@ -8431,7 +8431,9 @@ static void focos_carga(const tex_t *t, const uint8_t *d, pvr_ptr_t dir)
 static void focos_prepara(const matrix_t *mc, int on)
 {
     const float D2R = 0.0174532924f, pos = 2.0f, alt = 1.8f, dir = -20.0f;       /* 5C4EA0: TEX POS / HEIGHT / DIR */
-    const float zn = 0.1f, zf = 5000.0f, ys = 1.0f / tanf(0.52359879f * 0.5f), xs = ys / 2.0f;   /* 40A950 */
+    /* planos y FOV de la ISO (0x20e100: 0x3DCCCCCD = 0,1 y 0x457A = 4000 en 0x20E16C / 0x20E178; el 5000 de
+       0x3C150C es el del PC). ys = 1 / tan(0,52359879 / 2) = 1 / tan 15 (el 0,52359879 = 30 grados va en 0x20E158) */
+    const float zn = 0.1f, zf = LEJOS_PS2, ys = 1.0f / tanf(0.52359879f * 0.5f), xs = ys / 2.0f;   /* 40A950 */
     float e[3], a[3], p[3], q[3], zx[3], xx[3], yx[3], l, V[4][3], P2, P3, T[4][4]; int i, j;
     focos_n = 0; focos_on = 0;
 #ifdef DIAG_SIN_FOCOS
