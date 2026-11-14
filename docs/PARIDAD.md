@@ -4115,3 +4115,20 @@ Capturas de antes / despues: scratchpad capturas_r44/w61/. Flycast con `-DPRUEBA
   "Nombre de la etapa" arriba.
 - **seguidas.sh** (CORREGIDO): MODO_JUEGO=1 (OUTRUN, arbol 0) por defecto; en COAST 2 COAST PRUEBA_NODO no cuenta.
 - **menu.sh con MODO_JUEGO=3**: ya arreglado en d4d267c (tableros 0x24 / 0x25 / 0x26).
+- PENDIENTE: **BEAC (291) caja gris lisa sobre el agua**: reproducida con `-DPRUEBA_JUEGO=3 -DTA_F_MIN=576
+  -DDIAG_GD_LENTO=750` (gd.c nuevo) y no es de un cuadro: se ve de 0'03"7 a 0'05"4 de crono
+  (capturas_r44/w61/beac_caja_gris_hoja_0303_0515.png), y faltan tambien las torres altas de la derecha. Las lineas POP
+  de BEAC dan "clase 8-18, falta 170-318 %" desde la salida (con 448 la clase no baja asi): es el reparto del TA
+  (nodos_visibles_todos / ta_cabe) cortando los nodos del edificio y dejando una pieza sin textura; TEXVRAM 0 (no es una
+  textura gris). No es del GD lento. No tocado: el reparto del TA lo esta cambiando a la vez el otro lote (cambios sin
+  commit en ta_cabe / nodos_visibles_todos / pop_mide); queda para despues de ese.
+- PENDIENTE: **pareja deformada con las fotos 3..5**: comprobado en el MIPS que el original tampoco convierte nada.
+  El esqueleto sale del personaje (0x205038: [s0 + 8] = personaje, tabla 0x40e3f0: 5..10 y 19 -> esqueleto 2; 11, 12,
+  17, 18 -> 3; 3 / 4 -> 4; 13..15 -> 0; 16 -> 5) y va a SetBone 0x207e60 con bone.bin + 16 x esqueleto; SetMotion
+  0x207fa8 no mira el esqueleto del movimiento (0x2081e8 solo guarda el id y devuelve 1); 0x28b190 guarda el u16 del
+  esqueleto del movimiento en +8 sin usarlo y 0x28b3d8 empareja los canales por el indice de hueso del robot. Los
+  esqueletos 2 (50 huesos) y 3 (53) tienen otro orden (2: hara, kosi, piernas, mune...; 3: hara, mune, kubi, brazos,
+  kosi, piernas) y en ANIMS.PS2 todos los de conducir (HANDOL, OCVT_3x, grupos 4, 6, 0x20) son del esqueleto 3: no
+  hay movimiento de conducir para el 2. Las tablas confirmadas: piloto 0x36f928 = {11, 18, 17, 9, 5, 19}, lista
+  0x40e210 = {0, 1, 2, 4, 3, 5}. Queda por ver quien llama a 0x205038 para el piloto (si algun camino cambia el
+  personaje o el asiento con las fotos 3..5) o si el original sale igual de mal.
