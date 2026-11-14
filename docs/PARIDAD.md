@@ -4410,3 +4410,9 @@ en docs/PLAN.md (Popping, 8).
   Sin "Out of memory". Las uniones casi no tienen vegetacion asi (4 BK de 498 cambian).
 - Lo que sigue apareciendo de la vegetacion por el tope es la que no tiene version lejana (barata, menos de 1500 bytes,
   o alargada: setos y macizos de flores) y, con 576, palmeras cercanas completas.
+- Datos (PYTHONHASHSEED=0): `tools/regenera.py --interno lodveg` sobre una copia de la carpeta compartida
+  (scratchpad/dcwork/datos2): 40 SEG y 8 BK cambian; SEGS.PAK, UNIONES.PAK, UNIONESTA.PAK y UNIONESR.PAK
+  reempaquetados (pak_union.py, comprobado byte a byte) y 370 ficheros (paquetes y descriptores) copiados a datos2: 914
+  MB (antes 955: SEGS.PAK ya no lleva los trozos sin uso de las cinco etapas de la revision 45). Probado con esa carpeta
+  (PALM y BEAC, 448): las mismas cifras, hueco de la etapa 8160 KB, 0 "Out of memory". En una regeneracion completa
+  conv_tramo / conv_union ya lo hacen.
