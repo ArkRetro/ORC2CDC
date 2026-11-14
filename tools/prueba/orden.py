@@ -41,6 +41,17 @@ def esperado(T, rama, ta_sola):
         sal.append((j, T[j][1])); i = j
         if rep >= 3: return sal, None
 
+def arbol_esperado(c):
+    """el arbol que carga el original para el modo de la carrera (ids de CURSO.DAT / CURSOTA.DAT, conv_union.crudos):
+    misiones: la entrada i de Races.bin (+0x18 de los 0x44 bytes) = arbol 100 + i; CONTRARRELOJ: el codigo [656234] =
+    arbol 200 + codigo (48B550); si no, el preset (OUTRUN2SP: el del lado del frontal, +27; consola: 0x2a6978 con el
+    juego de cursos de la raiz +0x208: 0 -> 1, 1 -> 0, 2 -> 3, 3 -> 2) y START 0x1b63a0 -> 0x1760c0(0 / 1 / 5 / 6) con
+    el preset 0 / 1 / 2 / 3: csc_data_cvt (1), csc_data_2 (0), csc_data_cvt_ren (291), csc_data_2_ren (290)"""
+    if c['mis'] >= 0: return 100 + c['mis']
+    if c['var'] == 7 and c['cod'] >= 0: return 200 + c['cod']
+    preset = c['sp'] if c['sp'] >= 0 else (1, 0, 3, 2)[c['juego'] & 3]
+    return (1, 0, 291, 290)[preset]
+
 def main():
     log, iso = sys.argv[1], sys.argv[2]
     from ps2.assets import Assets
@@ -48,8 +59,8 @@ def main():
     txt = open(log, errors='replace').read().splitlines()
     carreras = []; c = None
     for l in txt:
-        m = re.search(r'ORDEN: carrera (\d+) variante (\d+) juego (-?\d+) codigo (-?\d+) mision (-?\d+) rama (-?\d+)', l)
-        if m: c = dict(k=int(m[1]), var=int(m[2]), juego=int(m[3]), cod=int(m[4]), mis=int(m[5]), rama=int(m[6]),
+        m = re.search(r'ORDEN: carrera (\d+) variante (\d+) juego (-?\d+) codigo (-?\d+) mision (-?\d+)(?: sp (-?\d+) preset (-?\d+))? rama (-?\d+)', l)
+        if m: c = dict(k=int(m[1]), var=int(m[2]), juego=int(m[3]), cod=int(m[4]), mis=int(m[5]), sp=int(m[6] or -1), rama=int(m[8]),
                        arbol=None, etapas=[], mapa=[], meta=None, rec=[]); carreras.append(c); continue
         if c is None: continue
         m = re.search(r'SALIDA: arbol (\d+) etapa (\d+) (\w+)', l)
@@ -72,6 +83,7 @@ def main():
         hecho = c['etapas']; n = min(len(exp), len(hecho))
         prob = []
         if c['rama'] < 0: prob.append('sin PRUEBA_RAMA_FIJA')
+        if c['arbol'] != arbol_esperado(c): prob.append('arbol %d, el original %d' % (c['arbol'], arbol_esperado(c)))
         if c.get('atascado'): prob.append('atascado (5 min sin checkpoint)')
         if hecho[:n] != exp[:n]: prob.append('etapas %s, tabla %s' % (hecho, exp))
         acabada = c['meta'] is not None
@@ -86,8 +98,8 @@ def main():
             if (nv, cas, mp) != (T[nodo][4], T[nodo][5], tipo): prob.append('mapa nodo %d: nivel %d casilla %d mapa %d, la tabla %d %d %d' % (nodo, nv, cas, mp, T[nodo][4], T[nodo][5], tipo))
         if not c['mapa']: prob.append('sin lineas MAPA')
         estado = 'GOAL en %s' % c['meta'] if acabada else 'cortada (%d etapas)' % len(hecho)
-        print('carrera %d: variante %d juego %d codigo %d mision %d arbol %d rama %d: %s, %s: %s' % (
-            c['k'], c['var'], c['juego'], c['cod'], c['mis'], c['arbol'], c['rama'], ' '.join(z for _, z in hecho), estado,
+        print('carrera %d: variante %d juego %d codigo %d mision %d sp %d arbol %d rama %d: %s, %s: %s' % (
+            c['k'], c['var'], c['juego'], c['cod'], c['mis'], c['sp'], c['arbol'], c['rama'], ' '.join(z for _, z in hecho), estado,
             'BIEN' if not prob else 'MAL: ' + '; '.join(prob)))
         mal += bool(prob)
     print('orden: %d carreras, %d mal' % (len(carreras), mal))

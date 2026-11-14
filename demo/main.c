@@ -5681,11 +5681,15 @@ static int curso_pedido = PRUEBA_CURSO;                         /* arbol de la c
 #ifdef PRUEBA_ORDEN
 /* prueba (tools/prueba/orden.sh, con -DPRUEBA_AUTO -DPRUEBA_SIN_TIEMPO -DPRUEBA_RAMA_FIJA=r -DPRUEBA_FIN -DPRUEBA_SALTO):
    cada carrera del piloto con el siguiente de la lista {variante, juego de cursos (0..3), codigo de la Contrarreloj,
-   mision}; la tercera vez seguida en la misma etapa (una rama sin hijo con la rama fija) acaba la carrera */
-static const int16_t PO[][4] = {
-    { 1, 0, -1, -1 }, { 1, 1, -1, -1 }, { 1, 2, -1, -1 }, { 1, 3, -1, -1 },   /* OUTRUN: arboles 0, 1, 290, 291 */
-    { 7, 0, 5, -1 }, { 7, 0, 0x3e, -1 }, { 7, 1, 0x43, -1 }, { 7, 0, 0x46, -1 }, { 7, 1, 0x4d, -1 }, { 7, 0, 0x50, -1 },
-    { 2, 1, -1, -1 }, { 6, 0, -1, 0 }, { 6, 0, -1, 84 } };
+   mision, lado del frontal de OUTRUN2SP (-1: el juego de la consola; 0 sin R "Recorrido OutRun2SP", 1 con R
+   "OutRun2": el preset)}; la tercera vez seguida en la misma etapa (una rama sin hijo con la rama fija) acaba la
+   carrera */
+static const int16_t PO[][5] = {
+    { 1, 0, -1, -1, -1 }, { 1, 1, -1, -1, -1 }, { 1, 2, -1, -1, -1 }, { 1, 3, -1, -1, -1 },   /* OUTRUN: arboles 0, 1, 290, 291 */
+    { 7, 0, 5, -1, -1 }, { 7, 0, 0x3e, -1, -1 }, { 7, 1, 0x43, -1, -1 }, { 7, 0, 0x46, -1, -1 }, { 7, 1, 0x4d, -1, -1 },
+    { 7, 0, 0x50, -1, -1 }, { 2, 1, -1, -1, -1 },
+    { 6, 0, -1, 0, -1 }, { 6, 0, -1, 84, -1 }, { 6, 0, -1, 16, -1 }, { 6, 0, -1, 22, -1 },   /* misiones (arboles 100 + i) */
+    { 1, 0, -1, -1, 0 }, { 1, 0, -1, -1, 1 } };                 /* OUTRUN2SP: los dos lados del gatillo R */
 #ifndef PRUEBA_ORDEN_DESDE
 #define PRUEBA_ORDEN_DESDE 0                                    /* (la primera carrera de la lista) */
 #endif
@@ -5915,9 +5919,10 @@ static int curso_paso(void)
         ev |= CUR_RAMA;
 #if defined(PRUEBA_RAMA_FIJA) && defined(PRUEBA_SALTO)
         {   /* prueba (orden.sh): el coche a un carril de la rama fijada (el piloto, que va por los carriles del asfalto mas
-               cercanos, seguia por la otra calzada y se quedaba fuera de la ruta) */
+               cercanos, seguia por la otra calzada y se quedaba fuera de la ruta): el carril 1 en la izquierda y el 4 en la
+               derecha (la izquierda lleva 0..2 y la derecha 3..5, traf_otra_rama) */
             float p_[3], th_;
-            yo.x = carril_x(yo.s, 4); coche_paso(&yo, 0, 0, 0, 0);
+            yo.x = carril_x(yo.s, cur_rama ? 4 : 1); coche_paso(&yo, 0, 0, 0, 0);
             if (fis_ok) { ruta_en(yo.s, p_, &th_, NULL, NULL); or2_coloca(&fis, &fpar, th_ + yo.a, yo.v); }
             dbglog(DBG_INFO, "SALTO: a la rama %d (x %.1f)\n", cur_rama, (double)yo.x);
         }
@@ -10700,6 +10705,9 @@ int main(int argc, char **argv)
 #ifdef PRUEBA_SP
                 juego_sp = 1;                                   /* prueba: el juego de OUTRUN2SP (tambien con el piloto) */
 #endif
+#ifdef PRUEBA_ORDEN
+                juego_sp = PO[po_k][4] >= 0;                    /* prueba: OUTRUN2SP con el lado de la lista */
+#endif
                 /* el preset (ver preset_curso): en OUTRUN2SP el del frontal de recreativa (comun/fsp.c: 0x215fa4 =
                    4C3DC0 del PC, +27 = 0 "Recorrido OutRun2SP" / 1 "OutRun2"); en el juego de la consola 0x2a6758
                    (0x23ab54, al salir del menu) lo pone 0x2a6978 con el juego de cursos de los tableros (raiz +0x208
@@ -10716,7 +10724,7 @@ int main(int argc, char **argv)
                 if (auto_ && !juego_sp) curso_pedido = arbol_de_preset(preset_curso);
 #endif
 #ifdef PRUEBA_ORDEN
-                preset_curso = preset_de_juego(PO[po_k][1]); curso_pedido = arbol_de_preset(preset_curso);
+                preset_curso = juego_sp ? PO[po_k][4] : preset_de_juego(PO[po_k][1]); curso_pedido = arbol_de_preset(preset_curso);
 #endif
                 {   /* COAST 2 COAST (variante 6): la mision elegida, su curso (el arbol 100 + i de CURSO.DAT, 4965A0) y
                        sus coches de carreras (MISION.DAT) */
@@ -10744,7 +10752,8 @@ int main(int argc, char **argv)
 #endif
 #ifdef PRUEBA_ORDEN
                     ta_ = PO[po_k][2];
-                    dbglog(DBG_INFO, "ORDEN: carrera %d variante %d juego %d codigo %d mision %d rama %d\n", po_k, variante, PO[po_k][1], ta_, PO[po_k][3],
+                    dbglog(DBG_INFO, "ORDEN: carrera %d variante %d juego %d codigo %d mision %d sp %d preset %d rama %d\n", po_k, variante, PO[po_k][1], ta_,
+                           PO[po_k][3], PO[po_k][4], preset_curso,
 #ifdef PRUEBA_RAMA_FIJA
                            PRUEBA_RAMA_FIJA
 #else
