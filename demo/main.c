@@ -6802,16 +6802,22 @@ enum { PR_DIB, PR_LEJOS, PR_DETRAS, PR_LADO, PR_LOD, PR_RAMA, PR_PVS, PR_TOPE, P
 #endif
 #ifdef DIAG_POPPING
 #define POP_MAXN 4096
-typedef struct { const void *datos; uint32_t n; uint8_t ant[POP_MAXN], cur[POP_MAXN]; } pop_slot_t;
+typedef struct { const void *datos; uint32_t n; uint8_t ant[POP_MAXN], cur[POP_MAXN], veg[POP_MAXN]; } pop_slot_t;
 static pop_slot_t pop_s[4];
 static uint8_t *pop_r, *pop_ra;                                   /* razones del modelo en curso (cuadro, anterior) */
 static const char *const pop_nom[PR_N] = { "dib", "lejos", "detras", "lado", "lod", "rama", "pvs", "tope", "tramo", "lista" };
 static uint32_t pop_ap[PR_N][3], pop_de[PR_N][3];                /* apariciones / desapariciones: >= 2, >= 8, >= 32 px */
+/* vegetacion (palmeras, arboles, matas): nodos con mas de la mitad de sus vertices en la lista de recorte (hojas con
+   el alfa de recorte de la textura); sus apariciones / desapariciones aparte (linea POPVEG) con la distancia y el
+   radio en la pantalla minimos y maximos de las apariciones de 8 px o mas */
+static uint32_t pop_vap[PR_N][3], pop_vde[PR_N][3];
+static float pop_vz[PR_N][2], pop_vpx[PR_N];
+static int pop_veg_ev;                                           /* el evento en curso es de vegetacion */
 static float pop_zmin[PR_N];
 static uint32_t pop_pvs_ap[3], pop_pvs_de[3], pop_ccorto, pop_cuadros;
 static float pop_falta;                                           /* suma de pi px^2 de lo quitado por el tope en la pantalla */
 static uint64_t pop_t0;
-typedef struct { float px, z, r; int t, nodo, razon, ap; } pop_ev_t;
+typedef struct { float px, z, r; int t, nodo, razon, ap, veg; } pop_ev_t;
 static pop_ev_t pop_ev[4];
 #define POPR(i, x) do { if (pop_r) pop_r[i] = (uint8_t)(x); } while (0)
 static pop_slot_t *pop_slot(const modelo_t *mo)
@@ -6826,6 +6832,16 @@ static pop_slot_t *pop_slot(const modelo_t *mo)
     if (k == 4) return NULL;
     pop_s[k].datos = mo->datos; pop_s[k].n = mo->nnodos;
     memset(pop_s[k].ant, PR_TRAMO, sizeof pop_s[k].ant);           /* recien subido: nada se dibujaba */
+    {   /* vegetacion: vertices de recorte (lista 1) contra los de todas las listas, por nodo */
+        static uint32_t vr[POP_MAXN], vt[POP_MAXN]; uint32_t i;
+        memset(vr, 0, sizeof vr); memset(vt, 0, sizeof vt);
+        for (i = 0; i < mo->inicio[3] && i < mo->nmallas; i++) {
+            const malla_t *m = mo->mallas + i;
+            if (m->nodo < 0 || (uint32_t)m->nodo >= mo->nnodos) continue;
+            vt[m->nodo] += m->n; if (i >= mo->inicio[1] && i < mo->inicio[2]) vr[m->nodo] += m->n;
+        }
+        for (i = 0; i < mo->nnodos; i++) pop_s[k].veg[i] = vt[i] && 2 * vr[i] > vt[i];
+    }
     return &pop_s[k];
 }
 /* radio en pixeles y si el centro esta en la pantalla (delante del plano cercano) */
@@ -6844,10 +6860,18 @@ static void pop_evento(int t, int nodo, int razon, int ap, float px, float z, fl
     int b = px >= 32.0f ? 2 : px >= 8.0f ? 1 : 0, k, m = 0;
     if (px < 2.0f) return;
     for (k = 0; k <= b; k++) (ap ? pop_ap : pop_de)[razon][k]++;
+    if (pop_veg_ev) {
+        for (k = 0; k <= b; k++) (ap ? pop_vap : pop_vde)[razon][k]++;
+        if (ap && px >= 8.0f) {
+            if (z < pop_vz[razon][0] || pop_vz[razon][0] <= 0) pop_vz[razon][0] = z;
+            if (z > pop_vz[razon][1]) pop_vz[razon][1] = z;
+            if (px > pop_vpx[razon]) pop_vpx[razon] = px;
+        }
+    }
     if (ap && z < pop_zmin[razon]) pop_zmin[razon] = z;
     if (px < 8.0f) return;
     for (k = 1; k < 4; k++) if (pop_ev[k].px < pop_ev[m].px) m = k;   /* los 4 mayores de la ventana */
-    if (px > pop_ev[m].px) { pop_ev[m].px = px; pop_ev[m].z = z; pop_ev[m].r = r; pop_ev[m].t = t; pop_ev[m].nodo = nodo; pop_ev[m].razon = razon; pop_ev[m].ap = ap; }
+    if (px > pop_ev[m].px) { pop_ev[m].px = px; pop_ev[m].z = z; pop_ev[m].r = r; pop_ev[m].t = t; pop_ev[m].nodo = nodo; pop_ev[m].razon = razon; pop_ev[m].ap = ap; pop_ev[m].veg = pop_veg_ev; }
 }
 #else
 #define POPR(i, x) do { } while (0)
@@ -7208,8 +7232,10 @@ static void pop_mide(void)
             if ((a == PR_DIB) == (c == PR_DIB)) continue;
             d = mo->nodos + i;
             if (!pop_en_pantalla(d->cx, d->cy, d->cz, d->r, &px, &z)) continue;
+            pop_veg_ev = ps->veg[i];
             if (c == PR_DIB) pop_evento(t, (int)i, a, 1, px, z, d->r);   /* aparece: la razon de antes */
             else pop_evento(t, (int)i, c, 0, px, z, d->r);            /* desaparece: la de ahora */
+            pop_veg_ev = 0;
         }
         memcpy(ps->ant, ps->cur, mo->nnodos);
     }
@@ -7217,7 +7243,7 @@ static void pop_mide(void)
     pop_cuadros++;
     if (!pop_t0) pop_t0 = timer_ms_gettime64();
     if (timer_ms_gettime64() - pop_t0 >= 1000) {
-        char b[1000]; int n = 0; uint32_t dt = (uint32_t)(timer_ms_gettime64() - pop_t0);
+        char b[1600]; int n = 0; uint32_t dt = (uint32_t)(timer_ms_gettime64() - pop_t0);
         n += sprintf(b + n, "POP: %.4s s %.0f %u ms %u cuadros lejos %d corte %d m clase %d d%d |", cur_nodo >= 0 ? curso[cur_nodo].zona : "----", (double)yo.s,
                      (unsigned)dt, (unsigned)pop_cuadros, (int)lejos, (int)(prio_d >= ND_PRIO - 1 ? lejos : powf(2.0f, (prio_d + 1) / 4.0f)), prio_p, prio_d);
         for (k = 1; k < PR_N; k++) if (pop_ap[k][0] || pop_de[k][0])
@@ -7229,10 +7255,17 @@ static void pop_mide(void)
         n += sprintf(b + n, "POPTA: agua %uK bo %uK coche %uK pareja %uK trafico %uK efectos %uK\n", (unsigned)(pop_cat[0] / pop_cuadros >> 10), (unsigned)(pop_cat[1] / pop_cuadros >> 10),
                      (unsigned)(pop_cat[2] / pop_cuadros >> 10), (unsigned)(pop_cat[3] / pop_cuadros >> 10), (unsigned)(pop_cat[4] / pop_cuadros >> 10), (unsigned)(pop_cat[5] / pop_cuadros >> 10));
         memset(pop_cat, 0, sizeof pop_cat);
+        n += sprintf(b + n, "POPVEG:");
+        for (k = 1; k < PR_N; k++) if (pop_vap[k][0] || pop_vde[k][0])
+            n += sprintf(b + n, " %s +%u/%u/%u -%u/%u/%u z%d-%d px%d", pop_nom[k], (unsigned)pop_vap[k][0], (unsigned)pop_vap[k][1], (unsigned)pop_vap[k][2],
+                         (unsigned)pop_vde[k][0], (unsigned)pop_vde[k][1], (unsigned)pop_vde[k][2], pop_vz[k][0] < 1e8f ? (int)pop_vz[k][0] : -1, (int)pop_vz[k][1], (int)pop_vpx[k]);
+        n += sprintf(b + n, "\n");
+        memset(pop_vap, 0, sizeof pop_vap); memset(pop_vde, 0, sizeof pop_vde);
+        for (k = 0; k < PR_N; k++) { pop_vz[k][0] = 1e9f; pop_vz[k][1] = 0; pop_vpx[k] = 0; }
         printf("%s", b);
         for (k = 0; k < 4; k++) if (pop_ev[k].px > 0)
-            printf("POPEV: %s %s nodo %d %s z %.0f r %.1f px %.1f\n", pop_ev[k].t == 0 ? "etapa" : pop_ev[k].t == 1 ? "union" : "sig", pop_ev[k].ap ? "aparece" : "desaparece",
-                   pop_ev[k].nodo, pop_nom[pop_ev[k].razon], (double)pop_ev[k].z, (double)pop_ev[k].r, (double)pop_ev[k].px);
+            printf("POPEV: %s %s nodo %d %s z %.0f r %.1f px %.1f%s\n", pop_ev[k].t == 0 ? "etapa" : pop_ev[k].t == 1 ? "union" : "sig", pop_ev[k].ap ? "aparece" : "desaparece",
+                   pop_ev[k].nodo, pop_nom[pop_ev[k].razon], (double)pop_ev[k].z, (double)pop_ev[k].r, (double)pop_ev[k].px, pop_ev[k].veg ? " veg" : "");
         memset(pop_ap, 0, sizeof pop_ap); memset(pop_de, 0, sizeof pop_de); memset(pop_ev, 0, sizeof pop_ev);
         memset(pop_pvs_ap, 0, sizeof pop_pvs_ap); memset(pop_pvs_de, 0, sizeof pop_pvs_de);
         for (k = 0; k < PR_N; k++) pop_zmin[k] = 1e9f;
