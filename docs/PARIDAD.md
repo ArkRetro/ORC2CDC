@@ -1613,6 +1613,51 @@ car+4 a 0 (coche_ban): ni pilotos de noche, ni faros escamoteables, ni luz de lo
     `-DFOCOS_SIN_CARA` / `-DFOCOS_SIN_ERR` las pruebas.
   - Capturas (scratchpad capturas_r44/): luces_testa / f50 / 360 _antes / _despues.png (METR, mismo cuadro) y
     luces_testa_flor / luces_360_flor _antes / _despues.png. Datos: ninguno nuevo.
+- Revision 46 (queja del usuario, Dreamcast con la revision 44: "no esta arreglado, el haz de luz queda como un cono y
+  no apunta al suelo"; en Flycast igual: una mancha blanca ancha junto al morro con un borde de arriba recto y nitido,
+  sin luz alargada por la calzada). Reproducido en METR (`PRUEBA_CURSO=189 PRUEBA_NODO=11`, crono 2113) y GHOS
+  (`PRUEBA_NODO=9`, crono 900) con la camara de carrera, una lateral baja (`-DPRUEBA_FRENTE=12`: 12 m delante, 4,2 m
+  a un lado, 1,2 m arriba) y una nueva desde arriba (`-DPRUEBA_ARRIBA=14`: 14 m por encima de 3 m detras del coche
+  mirando 12 m por delante), cada pieza sola (`-DDIAG_SIN_FOCOS` / `-DDIAG_SIN_FAROS`). Ninguna de las dos es
+  geometria en el aire: las dos caen en la calzada (desde arriba se ve la mancha en el suelo). Lo que hacia el "cono":
+  - El haz del PC (focos_*) estaba al reves en v (CONFIRMADO por las dos luces del suelo: la del PC, 417550 en
+    outrun2-decomp pc_headlight_pool.cpp, pone v = a x 0,85 (K628084) con a = 0 lo cercano; la del PS2, 0x106f28,
+    v = 1 - a; las dos con u = 1, 5/6, 2/3, 1/2: la textura 0x30009 del PC esta invertida en v respecto a la del PS2,
+    y la DC lleva la del PS2, FAROS.DAT). Con la v del PC (0,5 + 0,5 yc / zc, sesgo +0,5 de 40C550) sobre la textura
+    del PS2, lo cercano salia con las filas de arriba (tenues), los dos focos brillantes a 10-15 m y el corte negro
+    (fila 200) a ~25 m: una pared de luz con el borde recto delante del coche y alas a los lados, que con la camara
+    de carrera queda como una franja encima del capo. Ahora yc va con el signo cambiado (focos_prepara): el corte del
+    haz queda a ~2,8 m (debajo del morro), lo mas brillante de 3 a 9 m y lo lejano se apaga poco a poco por la
+    calzada. DESVIACION (el usuario: "que solo ilumine la calzada"; y el coste): la piramide del proyector se corta en
+    los rayos que llegan al plano del coche a FOCOS_LEJOS = 28 m y el gris baja a 0 de FOCOS_FUNDE = 14 m a 28 m
+    (focos_gris, por la v de cada vertice: sin borde). En el PC el haz sigue (filas 7..60 de esta textura, 8..30 / 255
+    de gris) hasta pasar el horizonte del proyector (las fachadas del fondo, la pared de enfrente); entero anotaba ~485
+    mallas en METR (5,6 ms, 43,0 fps) y 1097 en la salida de FLOR (12,6 ms, 31,7 fps); con 40 m, FLOR 8,8 ms.
+  - La luz del suelo del PS2 (0x106960, FAROS.DAT): desensamblado otra vez 0x106a98 / 0x106eb0 / 0x106f28: los
+    vertices van en el marco de car+B0 con y = 0 (0x106f28 escribe en la y el entero 2 en el primer par de cada tira y
+    0 en los demas: la bandera; el VU1 solo los transforma con la matriz de 0x1643d8 / 0x16b230), es decir, un plano
+    del coche de 1,3 a 80 m por delante, y el GS lo pinta con ZTST ALWAYS (0x169ce0): encima de lo ya dibujado sin
+    mirar la profundidad, asi que en el PS2 siempre "se pega" a la calzada aunque el plano se meta debajo o quede en el
+    aire (balanceo, cambios de pendiente, el bombeo). En la DC va con GEQUAL (con ALWAYS taparia el coche: la lista
+    transparente va despues de lo opaco) y lo que caia bajo la calzada desaparecia (desde la camara de carrera solo
+    quedaba la parte junto al morro). Ahora (faros_rejilla / faros_punto / faros_dibuja) las tiras 2..6 de cada lado
+    se parten en una rejilla de 7 columnas (las 4 del original y sus puntos medios) y 12 lineas (faros_div = 1, 1, 1,
+    2, 6 filas en las tiras 2..6) con la posicion y la UV exactas de los dos triangulos de cada cuadrilatero del
+    original, y en cada cuadro cada punto se pone a la altura de la COLI bajo el (coli_altura modo 0x100, el de la
+    camara y el trafico, con su propia prediccion; sin suelo debajo se queda en el plano del coche); 156 consultas
+    (la columna del centro es la misma en los dos lados). No se dibujan las tiras 0 y 1 (1,3 a 2,6 m: filas 192-255 de
+    la textura, alfa 0) ni la 7 (cruza el horizonte, <= 5 / 255; proyectada cubriria el coche): no se ve diferencia.
+    `-DFAROS_PLANO` dibuja las tiras planas de antes.
+  - Coste (Flycast, `-DDIAG_MS -DDIAG_SIN_CPU`, cuadro congelado, media de las lineas MS): METR crono 2113 44,9 ->
+    44,8 fps, dib 16,72 -> 18,12 ms (FAROSMS: 1,5 ms la rejilla, casi todo las 156 consultas a la COLI, ~9,6 us cada
+    una; FOCOSMS 1,0 -> 1,0 ms, 124 -> 128 mallas); GHOS crono 900 44,8 -> 44,8 fps, dib 17,25 -> 18,59 ms (rejilla
+    1,3 ms, focos 1,36 -> 1,47 ms); peor caso, la salida de FLOR (`PRUEBA_CURSO=1 PRUEBA_NODO=13`, crono 200): 40,1 ->
+    36,1 fps, dib 23,71 -> 26,36 ms (rejilla 1,3 ms, focos 4,2 -> 5,7 ms, 721 -> 880 mallas anotadas: ya iba por debajo
+    de 44). `-DFOCOS_LEJOS=m` / `-DFOCOS_FUNDE=m` para medir otros cortes.
+  - Capturas (scratchpad capturas_r45/): faros_cono_antes / _despues _metr_carrera / _lateral / _arriba.png (el mismo
+    cuadro), faros_cono_antes_metr_*_solo_haz_pc / _solo_luz_suelo.png (cada pieza sola, antes) y
+    faros_cono_antes / _despues _ghos_carrera / _lateral.png, faros_cono_antes / _despues_flor_carrera.png y la hoja
+    faros_cono_antes_despues_metr_ghos_hoja.png (izquierda antes). Datos: ninguno nuevo.
 
 ## Tuneles: calzada negra y luces (revision 44)
 

@@ -4478,6 +4478,16 @@ static void camara_paso(int boton, int salida, int agotado)
         }
     }
 #endif
+#ifdef PRUEBA_ARRIBA
+    {   /* prueba: la camara PRUEBA_ARRIBA m por encima de 3 m por detras del coche, mirando 12 m por delante (la luz de
+           los faros vista desde arriba) */
+        int k;
+        for (k = 0; k < 3; k++) {
+            cam.ojo[k] = yo.pos[k] - yo.fw[k] * 3.0f + yo.up[k] * (float)PRUEBA_ARRIBA;
+            cam.mira[k] = yo.pos[k] + yo.fw[k] * 12.0f;
+        }
+    }
+#endif
 #ifdef DIAG_SALIDA
     if (sal_on && (sal_f < 3 || sal_f % 20 == 0) && sal_f <= 125)
         printf("SALCAM: %d sal %d guion %d pos %.2f %.2f %.2f fw %.2f %.2f %.2f pose %.2f %.2f %.2f r %.2f %.2f %.2f ojo %.2f %.2f %.2f mira %.2f %.2f %.2f fov %.3f vista %d\n", sal_f, salida, e.guion != NULL,
@@ -8179,6 +8189,66 @@ static void sol_prepara(void)
    original la deja encendida: 0x169ce0(0, 2, 1)) */
 static modelo_t faros_m; static pvr_poly_hdr_t faros_cab; static int faros_ok;
 static void focos_carga(const tex_t *t, const uint8_t *d, pvr_ptr_t dir);
+/* La luz del suelo sobre la calzada (revision 46; docs/PARIDAD.md, Luces de noche y faros). Las 16 tiras de 0x106a98
+   son planas (y = 0 en el marco de car+B0) y van de 1,3 a 80 m por delante y hasta 50 m a los lados; el PS2 las pinta
+   con ZTST ALWAYS (encima de todo lo dibujado antes, sin mirar la profundidad: se ven "sobre" la calzada aunque el
+   plano del coche se meta bajo ella o quede en el aire). En la DC la prueba de z es GEQUAL (con ALWAYS taparian el
+   coche: lista transparente, despues de lo opaco) y el plano del coche corta la calzada: lo que queda debajo no se ve y
+   lo de encima flota; con la camara de carrera solo salia la parte de junto al morro, con un borde recto delante y mas
+   ancha que el coche (el "cono"). Ahora cada tira 2..6 de cada lado se parte en una rejilla (FAROS_NC columnas: las 4
+   del original y su punto medio; faros_div filas por tira) con la posicion y la UV exactas de los dos triangulos del
+   original en cada punto (faros_punto) y en cada cuadro cada punto baja o sube a la altura de la COLI bajo el
+   (coli_altura modo 0x100, el de la camara y el trafico, con la altura del plano del coche de referencia; sin suelo
+   debajo se queda en el plano). No se dibujan (no se ve la diferencia): las tiras 0 y 1 (1,3 a 2,6 m, a < 1 / 4: filas
+   192-255 de la textura, alfa 0 en todas) y la 7 (cruza el horizonte: de 80 m por delante a 39 m por detras, filas
+   0-32, alfa x color <= 5 / 255; proyectada sobre la calzada cubriria el coche y lo de detras). */
+#define FAROS_NC 7                                              /* columnas de la rejilla por lado (k = 0, 1/2 .. 3) */
+static const uint8_t faros_div[7] = { 0, 0, 1, 1, 1, 2, 6 };    /* filas por tira 0..6 (1,3 1,8 2,6 3,7 5,5 8,8 17,2 80 m) */
+#define FAROS_NL 12                                             /* lineas de la rejilla: 1 + suma de faros_div */
+static float faros_g[2][FAROS_NL][FAROS_NC][4];                 /* x, z, u, v en el marco del coche (y = 0) */
+static vert_t faros_vw[2 * (FAROS_NL - 1) * 2 * FAROS_NC];      /* las tiras del cuadro en el mundo */
+static malla_t faros_wm[2 * (FAROS_NL - 1)];
+static modelo_t faros_w;                                        /* (solo verts: dibuja_malla) */
+static coli_pred_t faros_pred;                                  /* (el suyo: no toca el del coche) */
+static uint32_t faros_col;                                      /* el color de las tiras (0x50, 0x50, 0x48, 0x80 del GS) */
+#ifdef DIAG_MS
+static unsigned faros_dg_us, faros_dg_suelo;
+#endif
+/* punto de la tira T (8 vertices de 0x106f28: T[2k] = (k, a1), T[2k + 1] = (k, a0), x por 1 - k / 3) en la columna c
+   (0..3, k + s) y la fraccion f de a0 a a1: los triangulos de la tira son (A B C) = (T[2k], T[2k+1], T[2k+2]) y
+   (B C D); con f >= s cae en el primero (P = B + s (C - A) + f (A - B)), si no en el segundo (P = B + s (D - B) + f (C - D)) */
+static void faros_punto(const vert_t *T, float c, float f, float *o)
+{
+    int k = (int)c; float s; const vert_t *A, *B, *C, *D;
+    if (k > 2) k = 2;
+    s = c - (float)k; A = T + 2 * k; B = A + 1; C = A + 2; D = A + 3;
+    if (f >= s) {
+        o[0] = B->x + s * (C->x - A->x) + f * (A->x - B->x); o[1] = B->z + s * (C->z - A->z) + f * (A->z - B->z);
+        o[2] = B->u + s * (C->u - A->u) + f * (A->u - B->u); o[3] = B->v + s * (C->v - A->v) + f * (A->v - B->v);
+    } else {
+        o[0] = B->x + s * (D->x - B->x) + f * (C->x - D->x); o[1] = B->z + s * (D->z - B->z) + f * (C->z - D->z);
+        o[2] = B->u + s * (D->u - B->u) + f * (C->u - D->u); o[3] = B->v + s * (D->v - B->v) + f * (C->v - D->v);
+    }
+}
+/* la rejilla de los dos lados (tiras 0..6 y 8..14 de FAROS.DAT); 0 bien */
+static int faros_rejilla(void)
+{
+    int l, i, j, L, c;
+    if (faros_m.nmallas != 16) return -1;
+    for (i = 0; i < 16; i++) if (faros_m.mallas[i].n != 8) return -1;
+    for (l = 0; l < 2; l++) {
+        L = 0;
+        for (i = 2; i < 7; i++) {
+            const vert_t *T = faros_m.verts + faros_m.mallas[8 * l + i].v0;
+            for (j = 0; j < faros_div[i] || (i == 6 && j == faros_div[i]); j++, L++)
+                for (c = 0; c < FAROS_NC; c++) faros_punto(T, (float)c * 0.5f, (float)j / (float)faros_div[i], faros_g[l][L][c]);
+        }
+        if (L != FAROS_NL) return -1;
+    }
+    for (i = 0; i < 2 * (FAROS_NL - 1); i++) { faros_wm[i].v0 = i * 2 * FAROS_NC; faros_wm[i].n = 2 * FAROS_NC; }
+    faros_w.verts = faros_vw; faros_col = faros_m.verts[0].c;
+    return 0;
+}
 static void faros_carga(void)
 {
     pvr_poly_cxt_t cx; tex_t *t; uint32_t fb, vq, n; pvr_ptr_t dir;
@@ -8191,6 +8261,7 @@ static void faros_carga(void)
     cx.blend.src = PVR_BLEND_SRCALPHA; cx.blend.dst = PVR_BLEND_ONE; cx.depth.write = PVR_DEPTHWRITE_DISABLE;
     cx.depth.comparison = PVR_DEPTHCMP_GEQUAL; cx.txr.uv_clamp = PVR_UVCLAMP_UV;
     pvr_poly_compile(&faros_cab, &cx);
+    if (faros_rejilla()) { libera_modelo(&faros_m); return; }
     focos_carga(t, faros_m.blob ? faros_m.blob + t->off : NULL, dir);   /* (antes de soltar los texeles) */
     compacta_modelo(&faros_m);
     faros_ok = 1;
@@ -8205,9 +8276,50 @@ static void faros_dibuja(matrix_t *mc, uint32_t ban, int choque)
     return;                                                     /* medida: sin la luz del suelo */
 #endif
     memset(K, 0, sizeof K); K[0][0] = K[1][1] = K[2][2] = K[3][3] = 0.99f;
-    mat_load(&vista); mat_apply(mc); mat_apply(&K);
+#ifdef FAROS_PLANO
+    mat_load(&vista); mat_apply(mc); mat_apply(&K);             /* prueba: las tiras planas de antes (revision 45) */
     pvr_prim(&faros_cab, sizeof faros_cab);
     for (i = 0; i < faros_m.nmallas; i++) if (faros_m.mallas[i].n >= 3) dibuja_malla(&faros_m, faros_m.mallas + i);
+#else
+    {   /* la rejilla sobre la calzada (faros_rejilla) */
+        static float P[FAROS_NL][FAROS_NC][3];
+        coli_t *r[2]; int l, L, c, pol, hay = col_hay(); uint32_t cl; vert_t *o = faros_vw;
+#ifdef DIAG_MS
+        uint64_t t0 = timer_us_gettime64(); faros_dg_suelo = 0;
+#endif
+        r[0] = col_et.ok ? &col_et : NULL; r[1] = col_un.ok ? &col_un : NULL;
+        for (l = 0; l < 2; l++) {
+            for (L = 0; L < FAROS_NL; L++) for (c = 0; c < FAROS_NC; c++) {
+                const float *g = faros_g[l][L][c]; float *p = P[L][c], y;
+                if (l && c == FAROS_NC - 1) continue;           /* (x = 0: el punto del otro lado, ya en P) */
+                for (i = 0; i < 3; i++) p[i] = g[0] * (*mc)[0][i] + g[1] * (*mc)[2][i] + (*mc)[3][i];
+                y = p[1];
+                if (hay) {
+                    coli_altura(r, &faros_pred, 0x100, p[0], &y, p[2], &pol, &cl);
+                    if (pol >= 0 && cl != 1) {
+                        p[1] = y;
+#ifdef DIAG_MS
+                        faros_dg_suelo++;
+#endif
+                    }
+                }
+            }
+            for (L = 0; L + 1 < FAROS_NL; L++) for (c = 0; c < FAROS_NC; c++) {
+                int j;
+                for (j = 1; j >= 0; j--, o++) {                 /* (c, lejos) y (c, cerca): el orden de 0x106f28 */
+                    const float *p = P[L + j][c], *g = faros_g[l][L + j][c];
+                    o->x = p[0]; o->y = p[1]; o->z = p[2]; o->u = g[2]; o->v = g[3]; o->c = faros_col;
+                }
+            }
+        }
+        mat_load(&vista); mat_apply(&K);
+        pvr_prim(&faros_cab, sizeof faros_cab);
+        for (i = 0; i < 2 * (FAROS_NL - 1); i++) dibuja_malla(&faros_w, faros_wm + i);
+#ifdef DIAG_MS
+        faros_dg_us = (unsigned)(timer_us_gettime64() - t0);
+#endif
+    }
+#endif
     mat_load(&vista);
 }
 /* ---------------------------------------------------------------- focos de los faros (docs/PARIDAD.md, Luces de noche
@@ -8260,6 +8372,13 @@ static inline uint32_t twid(uint32_t x, uint32_t y)
     for (b = 0; b < 10; b++) r |= ((y >> b) & 1) << (2 * b) | ((x >> b) & 1) << (2 * b + 1);
     return r;
 }
+#ifndef FOCOS_LEJOS
+#define FOCOS_LEJOS 28.0f                                       /* m: lo mas lejos que llega el haz (sobre el plano del coche) */
+#endif
+#ifndef FOCOS_FUNDE
+#define FOCOS_FUNDE 14.0f                                       /* m: desde aqui hasta FOCOS_LEJOS se apaga (focos_gris) */
+#endif
+static float focos_vl = 0.0f, focos_vf = 0.0f;                  /* v de los rayos que llegan a FOCOS_LEJOS y a FOCOS_FUNDE */
 static void focos_carga(const tex_t *t, const uint8_t *d, pvr_ptr_t dir)
 {
     pvr_poly_cxt_t cx; uint32_t fb = t->fmt & 0xff, vq = t->fmt & 0x100, n = ((t->fmt >> 16) & 0xff) + 1, x, y, fila = 0;
@@ -8284,6 +8403,19 @@ static void focos_carga(const tex_t *t, const uint8_t *d, pvr_ptr_t dir)
         }
     }
     focos_a[3] = 2.0f * focos_v - 1.0f;
+    {   /* DESVIACION (revision 46, "que solo ilumine la calzada"): sin los rayos que llegan al plano del coche a mas de
+           FOCOS_LEJOS m (ni los de por encima del horizonte del proyector: la pared de enfrente, los edificios del
+           fondo) y el gris de FOCOS_FUNDE a FOCOS_LEJOS m baja a 0 (focos_gris: sin borde). Con la textura en el
+           sentido del PS2 (focos_prepara) son las filas de arriba (7..68), las que en el PC alumbran lo lejano; con
+           ellas el haz anotaba las mallas de toda la calle (METR 5,6 ms, la salida de FLOR 12,6 ms) */
+        const float D2R = 0.0174532924f, alt = 1.8f, pos = 2.0f, dir = -20.0f;   /* los de focos_prepara (5C4EA0) */
+        float dy = sinf(dir * D2R) * 10.0f + alt, dz = pos - cosf(dir * D2R) * 10.0f;   /* mira - ojo en car+B0 */
+        float tc = atan2f(-dy, -dz);                            /* el rayo del centro, hacia abajo (12,35 grados) */
+        float a2 = tanf(tc - atanf(alt / FOCOS_LEJOS)) / tanf(0.52359879f * 0.5f);   /* -yc / zc de ese rayo */
+        if (a2 < focos_a[2]) focos_a[2] = a2;                   /* (plano 3: v >= 0,5 - 0,5 a2) */
+        focos_vl = 0.5f - 0.5f * a2;
+        focos_vf = 0.5f - 0.5f * tanf(tc - atanf(alt / FOCOS_FUNDE)) / tanf(0.52359879f * 0.5f);
+    }
     focos_tx = (float)(t->w > t->h ? t->w : t->h);
     pvr_poly_cxt_txr(&cx, PVR_LIST_TR_POLY, FMT[fb] | PVR_TXRFMT_TWIDDLED | (vq ? PVR_TXRFMT_VQ_ENABLE : 0), t->w, t->h, dir,
                      PVR_FILTER_BILINEAR);
@@ -8324,7 +8456,10 @@ static void focos_prepara(const matrix_t *mc, int on)
     P2 = zf / (zn - zf); P3 = zn * zf / (zn - zf);
     for (i = 0; i < 4; i++) {                                   /* vista x proyeccion: xc, yc, zc (wc no hace falta) */
         float w = i == 3 ? 1.0f : 0.0f;
-        focos_T[i][0] = V[i][0] * xs; focos_T[i][1] = V[i][1] * ys; focos_T[i][2] = V[i][2] * P2 + w * P3;
+        /* yc con el signo cambiado (revision 46): la textura del PC esta al reves que la del PS2 en v (la luz del suelo
+           del PC, 417550, pone v = a x 0,85 y la del PS2, 0x106f28, v = 1 - a: lo cercano arriba en la del PC y abajo
+           en la del PS2); aqui va la del PS2 (FAROS.DAT), asi que v = 0,5 - 0,5 yc / zc del PC = 0,5 + 0,5 (-yc) / zc */
+        focos_T[i][0] = V[i][0] * xs; focos_T[i][1] = -V[i][1] * ys; focos_T[i][2] = V[i][2] * P2 + w * P3;
         for (j = 0; j < 3; j++) T[i][j] = focos_T[i][j];
     }
     /* planos (en coordenadas del mundo, columnas de T): zc >= 0 y los de lo no negro de la textura (focos_a) */
@@ -8506,7 +8641,15 @@ static void focos_poli(const fv_t *a, const fv_t *b, const fv_t *c, uint32_t co)
 }
 static fv_t focos_fv[256];
 /* tramo de triangulos j0..j1-1 de la tira (vertices j0..j1+1) tal cual */
-static inline void focos_gris(fv_t *a) { if (a->g < 0) { a->g = 128.0f * focos_niebla(a->w) + 0.5f; fv_uv(a); } }   /* UV y gris (al usarlos) */
+static inline void focos_gris(fv_t *a)                         /* UV y gris (al usarlos); el fundido de lo lejano (focos_vl) */
+{
+    if (a->g < 0) {
+        float f;
+        fv_uv(a);
+        f = (a->v - focos_vl) / (focos_vf - focos_vl); f = f < 0.0f ? 0.0f : f > 1.0f ? 1.0f : f;
+        a->g = 128.0f * focos_niebla(a->w) * f + 0.5f;
+    }
+}
 static inline void focos_tramo(fv_t *f, uint32_t j0, uint32_t j1)
 {
     uint32_t k, nv = j1 - j0 + 2; pt_t *o = pw;
@@ -11845,6 +11988,7 @@ int main(int argc, char **argv)
                 printf("MS: %.4s s %.0f fps %.1f dib %.2f log %.2f pvr %.2f tri %u vtx %u tarde %u\n", curso[cur_nodo].zona, (double)yo.s,
                        (double)fps, (double)ms, (double)ms_log, (double)(ps.rnd_last_time / 1000000.0), (unsigned)tri_enviados, (unsigned)vtx_ult,
                        (unsigned)pres_tarde);
+                printf("FAROSMS: us %u puntos sobre la COLI %u de %u\n", faros_dg_us, faros_dg_suelo, FAROS_NL * (2u * FAROS_NC - 1));
                 printf("FOCOSMS: mallas %u vtx %u us %u divisiones %u vtx, de espaldas %u tri, recortados %u tri, vertices de las mallas %u\n", focos_dg_m, focos_dg_v, focos_dg_us, focos_dg_sub, focos_dg_cara, focos_dg_poli, focos_dg_vm);
                 {   static const char *const N[10] = { "ini", "vis", "cielo", "etapa", "bo", "coche", "robot", "traf", "l2", "fin" };
                     char t[200]; int n = 0, j;
