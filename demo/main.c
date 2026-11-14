@@ -7265,6 +7265,9 @@ static void nodos_visibles_todos(void)
         }
 #endif
     }
+#ifdef DIAG_SIN_TOPE
+    cabe = ND_PRIO - 1;                                         /* medida en Flycast: todo, sin reparto */
+#endif
     /* sin sitio ni para la primera clase de distancia (lo que rodea la camara: el terreno y la calzada de alrededor):
        prio_d = -1 y todo se reparte por la clase de LOD, la de lo enorme en la pantalla (0) siempre (DECISION DEL PORT,
        lote 1 de la revision 44). Antes la clase 0 de distancia se dibujaba entera aunque no cupiera y ta_cabe tiraba lo

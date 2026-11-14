@@ -3777,7 +3777,8 @@ Lo pendiente de arriba, con las fotos de la Dreamcast PAL (PALM en el modo OutRu
   Datos: `conv_tramo.convierte` y `conv_union.py` lo hacen al escribir; en una carpeta ya hecha,
   `tools/regenera.py --interno grupos datos/ [trabajo/]` (recompone, cambia y vuelve a empaquetar SEGS.PAK,
   UNIONES.PAK y UNIONESTA.PAK; solo cambian 2 bytes por nodo agrupado).
-  Verificacion en Flycast (`-DTA_F_MIN=768`, una consola que gasta 3 veces la cuenta teorica; `-DPRUEBA_AUTO`, PALM):
+  Verificacion en Flycast (`-DTA_F_MIN=576`, una consola que gasta 2,25 veces la cuenta teorica; `-DPRUEBA_AUTO`, PALM;
+  aqui decia 768 por error, corregido en el lote 1: las capturas *_tope576 y DREAMCAST.md son de 576):
   sin los grupos, en la salida de PALM (0'14-0'16) los edificios quedan a medias: cajas lisas sin sus capas de ventanas
   y fachadas con el cielo a traves (capturas_r44/cajas_antes_tope576.png, edificios_antes_tope576.png); con los grupos
   salen enteros o no salen (cajas_despues_tope576.png, edificios_despues_tope576.png; referencia sin el tope:
@@ -4132,3 +4133,52 @@ Capturas de antes / despues: scratchpad capturas_r44/w61/. Flycast con `-DPRUEBA
   hay movimiento de conducir para el 2. Las tablas confirmadas: piloto 0x36f928 = {11, 18, 17, 9, 5, 19}, lista
   0x40e210 = {0, 1, 2, 4, 3, 5}. Queda por ver quien llama a 0x205038 para el piloto (si algun camino cambia el
   personaje o el asiento con las fotos 3..5) o si el original sale igual de mal.
+
+## Correccion lote 1 de los barridos (revision 44, 2026-11-14)
+
+Los fallos del barrido grafico (w4) y del de jugabilidad (w5) de arriba, por orden de gravedad. Capturas en el
+scratchpad capturas_r44/lote1_*.png. Medidas nuevas con -DDIAG_POPPING: la linea POP lleva el TA de la etapa (tope),
+lo que no es la etapa y prio_alfa, y la linea POPTA el desglose por cuadro de lo que no es la etapa (agua, objetos de
+la union, coche, pareja, trafico, efectos); "d" es el corte de distancia (prio_d, -1 abajo).
+
+- **Uniones con ta_f 2,25: la escena desaparecia 3-4 s** (CORREGIDO). Reproducido en Flycast (`-DPRUEBA_AUTO
+  -DPRUEBA_SIN_TIEMPO -DTA_F_MIN=576 -DDIAG_POPPING -DPRUEBA_JUEGO=2`, PALM -> LAKE): no era la calzada ni las tres
+  etapas en el mismo tope, sino los objetos de la union (bo_dibuja, 4A9DF0: la bandada, los halcones, el dragon...):
+  POPTA "bo 468-638K coche 782K pareja 192K trafico 58-99K", lo que no es la etapa 1620-1730 KB de los ~1790 del 3D y
+  el tope de la etapa 0 KB ("TA etapa 0K/0K"): ta_cabe tiraba todo lo de la etapa, el cielo (que va primero) incluido,
+  y solo quedaban el coche, el trafico y los pajaros sobre el color de fondo y el plano del agua (capturas
+  lote1_union_palm_lake_tope576_antes_*.png). bo_dibuja contaba en la reserva de "lo que no es la etapa" del cuadro
+  anterior (ta_otros_ult), que se aparta entera antes del reparto.
+  Arreglo (DECISION DEL PORT: el original no tiene tope del TA): los objetos de la union van despues de la etapa con su
+  propio tope (`ta_bo_tope`: lo que deja la etapa sin tocar la reserva del coche, la pareja, el trafico y los efectos)
+  y de la etapa solo se les aparta lo que pidieron en el cuadro anterior hasta la mitad de lo libre (`TA_BO_PARTE`);
+  cada nodo de bo_dibuja (un pajaro, el dragon) va entero o no va (su coste se mira antes de enviarlo). Con 448 (lo de
+  siempre) los objetos caben como antes (~300 KB de los ~950 libres) y nada cambia. Despues, con 576: PALM -> LAKE
+  "TA etapa 250-290K, bo 313-383K, tope mallas 0" (antes 14000-18000 mallas por segundo fuera), la calzada, los muros,
+  el cielo y los pajaros en todos los cuadros, 37-38 fps (antes 33-35); LAKE -> ALPI y ALPI -> CAST (la bandada
+  cruzando) y CAST -> FORE sin mallas fuera (lote1_union_*_despues_*.png). No probadas una a una las demas uniones de
+  la lista (CLOU, INDU, SNOW, RUIN, 291, arboles 0 / 1, INFARTO): el mecanismo es el mismo.
+- **TA_F_MIN=768: PALM sin calzada desde la salida** (CORREGIDO lo que se puede). Con 3 veces la cuenta el coche
+  (1043 KB) y la pareja (256-379 KB) se llevan casi todo y a la etapa le quedan 140-174 KB (~1800 vertices): ni lo que
+  rodea la camara (la clase 0 de distancia, que el reparto dibujaba siempre entera) cabe, y ta_cabe tiraba en el orden
+  de envio (el de las texturas: la calzada se iba y se quedaba el mar lejano). Ahora (DECISION DEL PORT) el reparto
+  baja un escalon mas: si ni la clase 0 de distancia cabe, prio_d = -1 y todo se reparte por la clase de LOD (lo
+  enorme en la pantalla, la clase 0, siempre); y como ultimo recurso, si aun asi algo no cabe con el reparto en su
+  minimo, cada malla de la etapa mas alla de `ta_lej_tope` (z - r) no se envia: baja un 20 % en cada cuadro en que algo
+  no cupo y sube un 2 % en los demas hasta soltarse (mas alla de lejos). Con 768: la calzada, los quitamiedos y lo
+  cercano (el cartel de Shell, los edificios de la salida, el autobus) en todos los cuadros de los primeros 30 s; lo
+  lejano (las playas, el mar) sale y entra con el corte (lote1_palm290_tope768_despues_*.png; antes:
+  barrido/palm290_tope768_*.png). Sigue siendo una imagen muy pobre: si la consola gastara 3 veces la cuenta, el coche
+  y la pareja solos llenarian el 80 % del bufer (no se tocan: son los del original). Con 576 el ultimo recurso no se ha
+  visto actuar en las uniones medidas (prio_d -1 si, sin mallas fuera).
+  Documentacion: la verificacion de los grupos de nodos (Revision 44, segunda parte) decia `-DTA_F_MIN=768`; era 576
+  (las capturas *_tope576 y DREAMCAST.md), corregido alli.
+- **C2C, MISION SUPERADA: REINTENTAR con el icono B y la tecla X** (CORREGIDO). `tools/conv_fin.py` iconos_ps2 carga
+  ahora los iconos 4, 8 y 0x10 de la tabla 0x374a60 (banco 0x48, cuadro 25): la pieza de REINTENTAR de 2B004F se
+  empareja con el 0x10 y lleva el boton Y de la Dreamcast (conv_menu.BOTON_DC 0x10 = Y, como RANDOM de los menus);
+  demo/fin.c (0x1bc700, rama mis_seg de 4959E0: "0x10 la misma") lee CONT_Y. FINC2C.DAT regenerado con el paso fin de
+  tools/regenera.py (PYTHONHASHSEED=0) y copiado a la carpeta de datos; FIN.DAT y GOVER.DAT salen iguales byte a byte.
+  Verificado en la maqueta de la escena (c2c_mision_superada_iconos_despues_maqueta.png: A SIGUIENTE RONDA, Y
+  REINTENTAR, ABANDONAR B); sin pasada en Flycast hasta una mision superada.
+- **salon.sh desfasado** (CORREGIDO): tras elegir OUTRUN pulsa A en el tablero 0x24 (espera "TABLERO: clave 0x24"),
+  en los dos arranques. Sin pasada entera en Flycast (en este lote).
