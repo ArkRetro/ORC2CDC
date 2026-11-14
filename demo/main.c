@@ -857,6 +857,26 @@ static int ta_freno;                                     /* 0..3: OPB muy lleno,
 static int ta_en_etapa;                                  /* lo que se envia ahora es de la etapa (su tope) */
 static int ta_et_corto;                                  /* en este cuadro no cupo alguna tira de la etapa */
 static int ta_ofs;                                       /* las tiras que se envian llevan color de desplazamiento */
+/* objetos de la union (bo_dibuja: pajaros, bandada, halcones, flamencos, dragon; DECISION DEL PORT, lote 1 de la revision
+   44): van despues de la etapa con su propio tope (ta_bo_tope: lo que deja la etapa sin tocar la reserva del coche, la
+   pareja, el trafico y los efectos) y de la etapa solo se aparta para ellos lo que gastaron en el cuadro anterior hasta
+   la mitad de lo libre (TA_BO_PARTE). Antes contaban en la reserva de "lo que no es la etapa" del cuadro anterior: con
+   el dragon (~640 KB con ta_f 2,25, sobre los ~1000 del coche y la pareja) el tope de la etapa bajaba a 0 y ta_cabe
+   tiraba el cielo, la calzada y todo lo demas de la union durante 3-4 s */
+#ifndef TA_BO_PARTE
+#define TA_BO_PARTE 2                                    /* lo apartado para ellos: como mucho lo libre / TA_BO_PARTE */
+#endif
+/* Ultimo recurso (DECISION DEL PORT, lote 1 de la revision 44): si con el reparto en su minimo (prio_d = -1 y solo la
+   clase de LOD 0) aun no cabe la etapa, ta_cabe tiraria lo que no cabe en el orden de envio (el de las texturas: la
+   calzada podia irse y quedarse el mar lejano). Entonces cada malla de la etapa mas alla de ta_lej_tope (z - r) no se
+   envia: lo de cerca va primero. Baja un 20 % en cada cuadro en que algo no cupo, con el reparto en su minimo, y sube un
+   2 % en los demas hasta soltarse (mas alla de lejos); con la consola de 1,75-2,25 veces no llega a usarse (prio_ajusta,
+   nodos_visibles_todos) */
+static float ta_lej_tope = 1e9f;
+static int ta_en_bo;                                     /* lo que se envia ahora es de bo_dibuja */
+static uint32_t ta_bo, ta_bo_pide, ta_bo_ult, ta_bo_tope, ta_res_otros;   /* lo de bo_dibuja en este cuadro (enviado y
+                                                            pedido: con lo que no cupo) y lo pedido en el anterior, su tope y
+                                                            la reserva para lo que no es la etapa (coche, pareja, trafico...) */
 /* ta_teo(n, o) para n <= 256 (ta_teo_tab_pon, al arrancar): sin la division por 6 en cada tira */
 static uint32_t ta_teo_tab[2][257];
 static void ta_teo_tab_pon(void)
@@ -866,8 +886,13 @@ static void ta_teo_tab_pon(void)
 }
 #ifdef DIAG_POPPING                                     /* medida (DIAG_POPPING): mallas de la etapa que no caben */
 static uint32_t pop_mc, pop_vc;
+static uint32_t pop_cat[6], pop_cat_v0;                  /* TA de lo que no es la etapa: agua, bo, coche, pareja, trafico, efectos */
+#define POP_CAT0() (pop_cat_v0 = ta_vb)
+#define POP_CAT(k) (pop_cat[k] += ta_vb - pop_cat_v0, pop_cat_v0 = ta_vb)
 #define POP_MALLA(m) do { pop_mc++; pop_vc += (m)->n; } while (0)
 #else
+#define POP_CAT0() ((void)0)
+#define POP_CAT(k) ((void)0)
 #define POP_MALLA(m) do { } while (0)
 #endif
 /* reserva una tira de n vertices; 0 si no cabe (y no se envia) */
@@ -875,8 +900,9 @@ static inline int ta_cabe(uint32_t n)
 {
     uint32_t t = n >= 3 && n <= 256 ? ta_teo_tab[ta_ofs != 0][n] : ta_teo(n, ta_ofs), c = t * ta_f >> 8;
 #ifndef DIAG_SIN_TOPE                                    /* medida en Flycast: sin tope (en la consola se colgaria) */
-    if (ta_vb + c > ta_lim || (ta_en_etapa && ta_et + c > ta_tope_etapa)) {
-        ta_corto = 1; ta_et_corto |= ta_en_etapa;
+    if (ta_vb + c > ta_lim || (ta_en_etapa && ta_et + c > ta_tope_etapa) || (ta_en_bo && ta_bo + c > ta_bo_tope)) {
+        ta_corto |= !ta_en_bo; ta_et_corto |= ta_en_etapa;
+        if (ta_en_bo) ta_bo_pide += c;
 #ifdef DIAG_POPPING
         if (ta_en_etapa) { pop_mc++; pop_vc += n; }
 #endif
@@ -884,6 +910,7 @@ static inline int ta_cabe(uint32_t n)
     }
 #endif
     ta_vb += c; if (ta_en_etapa) ta_et += c;
+    if (ta_en_bo) { ta_bo += c; ta_bo_pide += c; }
     ta_teo_3d += t; ta_tiras++;
     return 1;
 }
@@ -891,18 +918,22 @@ static inline int ta_cabe(uint32_t n)
 static void ta_inicia_cuadro(void)
 {
     uint32_t total = TA_VB_BYTES - TA_MARGEN, r2d = 2 * ta_v2d_ult * ta_bpv, ro = ta_otros_ult + (2 * ta_traf_teo * ta_f >> 8), rmin = ta_min_otros_teo * ta_f >> 8;
+    uint32_t libre, bo;
     if (r2d < TA_RESERVA_2D) r2d = TA_RESERVA_2D;
     if (ro < rmin) ro = rmin;
     ta_lim = total - r2d;
-    ta_tope_etapa = ta_lim > ro ? (ta_lim - ro) / 4 * (4 - ta_freno) : 0;
-    ta_vb = ta_et = 0; ta_v2d = 0; ta_teo_3d = 0; ta_tiras = 0;
+    libre = ta_lim > ro ? ta_lim - ro : 0;
+    bo = ta_bo_ult < libre / TA_BO_PARTE ? ta_bo_ult : libre / TA_BO_PARTE;   /* (los objetos de la union, arriba) */
+    ta_tope_etapa = (libre - bo) / 4 * (4 - ta_freno);
+    ta_res_otros = ro;
+    ta_vb = ta_et = ta_bo = ta_bo_pide = 0; ta_v2d = 0; ta_teo_3d = 0; ta_tiras = 0;
 }
 /* fin del cuadro (tras la ultima lista): lo contado, y lo que gasto el TA si el registro lo dice (consola real) */
 static void ta_fin_cuadro(void)
 {
     uint32_t usado = PVR_GET(PVR_TA_VERTBUF_POS) - PVR_GET(PVR_TA_VERTBUF_START), teo = ta_teo_3d + ta_v2d * 27;   /* 2D: cuadrilateros, 108 / 4 */
     uint32_t opb = (PVR_GET(PVR_TA_OPB_POS) << 2) - PVR_GET(PVR_TA_OPB_START), opb_tot = PVR_GET(PVR_TA_OPB_END) - PVR_GET(PVR_TA_OPB_START);
-    ta_v2d_ult = ta_v2d; ta_otros_ult = ta_vb - ta_et;
+    ta_v2d_ult = ta_v2d; ta_otros_ult = ta_vb - ta_et - ta_bo; ta_bo_ult = ta_bo_pide;
     ta_real_ult = usado < TA_VB_BYTES ? usado : 0;
     ta_opb_ult = opb <= opb_tot ? opb : 0;               /* Flycast no lleva estos registros: 0 */
     if (ta_opb_ult > opb_tot / 10 * 7) { if (ta_freno < 3) ta_freno++; ta_corto = 1; }
@@ -1296,7 +1327,7 @@ static void dibuja_etapa(const modelo_t *mo, int l)
     const float tanh = 320.0f / fx, tanv = 240.0f / fx, kh = sqrtf(1 + tanh * tanh), kv = sqrtf(1 + tanv * tanv);
     const float o0 = ojo[0], o1 = ojo[1], o2 = ojo[2], e0 = ade[0], e1 = ade[1], e2 = ade[2];
     const float d0 = der[0], d1 = der[1], d2 = der[2], a0 = arr[0], a1 = arr[1], a2 = arr[2];
-    const float cer = cerca, lej = lejos, cer15 = cerca * 1.5f;
+    const float cer = cerca, lej = lejos < ta_lej_tope ? lejos : ta_lej_tope, cer15 = cerca * 1.5f;
     const uint32_t *tr = mo->tr, *vis = mo->vis, *pvs = mo->pvs_on ? mo->pvs_m : NULL;
     const malla_t *M = mo->mallas; const nodo_t *N = mo->nodos;
     uint32_t it, it0 = mo->tr_ini[l], it1 = mo->tr_ini[l + 1], vtx_et0 = vtx_env;
@@ -6638,6 +6669,15 @@ static void bo_dibuja(int l)
             }
             if (g >= 64 || !bo_cola[g]) k0 = k1 = w = 0;         /* sin la cola: el cuadro 0 */
             q = g * 4;
+            {   /* el objeto entero o nada (el tope de los objetos de la union, ta_bo_tope): sin pajaros a medias */
+                uint32_t cst = 0;
+                for (j = bo_ini[q]; j < bo_ini[q + 1]; j++) {
+                    const malla_t *m = bo_mod.mallas + bo_idx[j];
+                    if (m->n >= 3 && bo_idx[j] >= bo_mod.inicio[l] && bo_idx[j] < bo_mod.inicio[l + 1])
+                        cst += (m->n <= 256 ? ta_teo_tab[ta_ofs != 0][m->n] : ta_teo(m->n, ta_ofs)) * ta_f >> 8;
+                }
+                if (ta_bo + cst > ta_bo_tope || ta_vb + cst > ta_lim) { ta_bo_pide += cst; continue; }
+            }
             memcpy(W, bo_mod.carteles[nd->cartel], sizeof W);
             mat_load(&vista); mat_apply(&bo_obj[i].M); mat_apply(&W);
             for (j = bo_ini[q]; j < bo_ini[q + 1]; j++) {
@@ -7168,14 +7208,18 @@ static void pop_mide(void)
     pop_cuadros++;
     if (!pop_t0) pop_t0 = timer_ms_gettime64();
     if (timer_ms_gettime64() - pop_t0 >= 1000) {
-        char b[600]; int n = 0; uint32_t dt = (uint32_t)(timer_ms_gettime64() - pop_t0);
-        n += sprintf(b + n, "POP: %.4s s %.0f %u ms %u cuadros lejos %d corte %d m clase %d |", cur_nodo >= 0 ? curso[cur_nodo].zona : "----", (double)yo.s,
-                     (unsigned)dt, (unsigned)pop_cuadros, (int)lejos, (int)(prio_d >= ND_PRIO - 1 ? lejos : powf(2.0f, (prio_d + 1) / 4.0f)), prio_p);
+        char b[1000]; int n = 0; uint32_t dt = (uint32_t)(timer_ms_gettime64() - pop_t0);
+        n += sprintf(b + n, "POP: %.4s s %.0f %u ms %u cuadros lejos %d corte %d m clase %d d%d |", cur_nodo >= 0 ? curso[cur_nodo].zona : "----", (double)yo.s,
+                     (unsigned)dt, (unsigned)pop_cuadros, (int)lejos, (int)(prio_d >= ND_PRIO - 1 ? lejos : powf(2.0f, (prio_d + 1) / 4.0f)), prio_p, prio_d);
         for (k = 1; k < PR_N; k++) if (pop_ap[k][0] || pop_de[k][0])
             n += sprintf(b + n, " %s +%u/%u/%u -%u/%u/%u z%d", pop_nom[k], (unsigned)pop_ap[k][0], (unsigned)pop_ap[k][1], (unsigned)pop_ap[k][2],
                          (unsigned)pop_de[k][0], (unsigned)pop_de[k][1], (unsigned)pop_de[k][2], pop_zmin[k] < 1e8f ? (int)pop_zmin[k] : -1);
-        n += sprintf(b + n, " | falta %.1f%% | pvs +%u/%u/%u -%u/%u/%u | tope mallas %u v %u en %u cuadros\n", (double)(pop_falta * 100.0f / (640.0f * 480.0f) / (float)pop_cuadros), (unsigned)pop_pvs_ap[0], (unsigned)pop_pvs_ap[1], (unsigned)pop_pvs_ap[2],
-                     (unsigned)pop_pvs_de[0], (unsigned)pop_pvs_de[1], (unsigned)pop_pvs_de[2], (unsigned)pop_mc, (unsigned)pop_vc, (unsigned)pop_ccorto);
+        n += sprintf(b + n, " | falta %.1f%% | pvs +%u/%u/%u -%u/%u/%u | tope mallas %u v %u en %u cuadros | TA etapa %uK/%uK otros %uK alfa %.2f vtx %u/%u\n", (double)(pop_falta * 100.0f / (640.0f * 480.0f) / (float)pop_cuadros), (unsigned)pop_pvs_ap[0], (unsigned)pop_pvs_ap[1], (unsigned)pop_pvs_ap[2],
+                     (unsigned)pop_pvs_de[0], (unsigned)pop_pvs_de[1], (unsigned)pop_pvs_de[2], (unsigned)pop_mc, (unsigned)pop_vc, (unsigned)pop_ccorto,
+                     (unsigned)(ta_et >> 10), (unsigned)(ta_tope_etapa >> 10), (unsigned)(ta_otros_ult >> 10), (double)prio_alfa, (unsigned)vtx_et_ult, (unsigned)vtx_ult);
+        n += sprintf(b + n, "POPTA: agua %uK bo %uK coche %uK pareja %uK trafico %uK efectos %uK\n", (unsigned)(pop_cat[0] / pop_cuadros >> 10), (unsigned)(pop_cat[1] / pop_cuadros >> 10),
+                     (unsigned)(pop_cat[2] / pop_cuadros >> 10), (unsigned)(pop_cat[3] / pop_cuadros >> 10), (unsigned)(pop_cat[4] / pop_cuadros >> 10), (unsigned)(pop_cat[5] / pop_cuadros >> 10));
+        memset(pop_cat, 0, sizeof pop_cat);
         printf("%s", b);
         for (k = 0; k < 4; k++) if (pop_ev[k].px > 0)
             printf("POPEV: %s %s nodo %d %s z %.0f r %.1f px %.1f\n", pop_ev[k].t == 0 ? "etapa" : pop_ev[k].t == 1 ? "union" : "sig", pop_ev[k].ap ? "aparece" : "desaparece",
@@ -7221,7 +7265,12 @@ static void nodos_visibles_todos(void)
         }
 #endif
     }
-    prio_d = prio_sube(prio_d, cabe < 0 ? 0 : cabe, &prio_esp_d, ND_PRIO - 1);
+    /* sin sitio ni para la primera clase de distancia (lo que rodea la camara: el terreno y la calzada de alrededor):
+       prio_d = -1 y todo se reparte por la clase de LOD, la de lo enorme en la pantalla (0) siempre (DECISION DEL PORT,
+       lote 1 de la revision 44). Antes la clase 0 de distancia se dibujaba entera aunque no cupiera y ta_cabe tiraba lo
+       que no cabia en el orden de envio: la calzada, los muros y el cielo (Flycast, -DTA_F_MIN=768: PALM sin calzada) */
+    d = cabe < 0 && ((float)fila_c[0] * k > (float)tope || fila_v[0] > vmax) ? -1 : cabe < 0 ? 0 : cabe;
+    prio_d = prio_sube(prio_d, d, &prio_esp_d, ND_PRIO - 1);
     for (cerca_c = cerca_v = 0, d = 0; d <= prio_d; d++) { cerca_c += fila_c[d]; cerca_v += fila_v[d]; }
     /* lo de mas alla, por la clase de LOD */
     memset(col_c, 0, sizeof col_c); memset(col_v, 0, sizeof col_v);
@@ -7231,6 +7280,7 @@ static void nodos_visibles_todos(void)
         acum += col_c[c]; v += col_v[c]; cabe = c;
     }
     if (prio_d == ND_PRIO - 1) cabe = NB_PRIO - 1;
+    if (prio_d < 0 && cabe < 0) cabe = 0;                      /* (lo enorme en la pantalla, siempre) */
     prio_p = prio_sube(prio_p, cabe, &prio_esp_p, NB_PRIO - 1);
     for (prio_est = cerca_c, c = 0; c <= prio_p; c++) prio_est += col_c[c];
     prio_est = prio_est * ta_f >> 8;
@@ -7257,6 +7307,9 @@ static void prio_ajusta(int corto, uint32_t usado)
         a = a < 0.2f ? 0.2f : a > 2.0f ? 2.0f : a;
         prio_alfa = prio_alfa * 0.8f + a * 0.2f;
     }
+    if (corto && prio_d < 0 && prio_p == 0) {                  /* ultimo recurso: lo de cerca primero (ta_lej_tope) */
+        ta_lej_tope = (ta_lej_tope < lejos ? ta_lej_tope : lejos) * 0.8f; if (ta_lej_tope < 20.0f) ta_lej_tope = 20.0f;
+    } else if (!corto && ta_lej_tope < 1e8f) { ta_lej_tope *= 1.02f; if (ta_lej_tope > lejos) ta_lej_tope = 1e9f; }
     if (corto) {
         prio_alfa *= 1.15f; if (prio_alfa > 2.0f) prio_alfa = 2.0f;
         prio_p = prio_p > 2 ? prio_p - 2 : 0; prio_esp_p = prio_esp_d = 0;
@@ -11429,18 +11482,28 @@ int main(int argc, char **argv)
                         geo_vista_fin(tramos[i]);
                     }
                 color_fijo = 0; ta_en_etapa = 0;
+                POP_CAT0();
                 if (l == 0) agua_dibuja();                      /* el plano del agua (0x11a2e8, tras la etapa) */
+                POP_CAT(0);
                 PRF(3);
+                {   uint32_t ya = ta_vb - ta_et - ta_bo, resto = ta_res_otros > ya ? ta_res_otros - ya : 0;   /* (lo que deja la etapa) */
+                    ta_bo_tope = ta_bo + (ta_lim > ta_vb + resto ? ta_lim - ta_vb - resto : 0); }
+                ta_en_bo = 1;
                 bo_dibuja(l);                                   /* pajaros y demas de la union (4A9DF0) */
+                ta_en_bo = 0;
+                POP_CAT(1);
             }
+            POP_CAT0();
             PRF(4);
             if ((estado != TITULO && !mundo_fuera && (!cam_ok || cam_coche_visible(&cam))) || (estado == TITULO && menu_coche3d()) || (fin24 && final_vista()->coche))
 #ifndef DIAG_SIN_COCHE
                 coche_dibuja(l, &mod_coche);
 #endif
+            POP_CAT(2);
             PRF(5);
             if (fin24) robot_dibuja(&rc_chr, l);              /* 514E60 de la pareja del final */
             if (estado != TITULO && !mundo_fuera) { uint64_t t0r = timer_us_gettime64(); robot_dibuja(&rc_chr, l); robot_dibuja(&rc_band, l); chr_us += (uint32_t)(timer_us_gettime64() - t0r); }   /* 4879B0 */
+            POP_CAT(3);
             PRF(6);
 #ifdef DIAG_TRAF
             if (l == 0) traf_vistos = 0;
@@ -11469,12 +11532,14 @@ int main(int argc, char **argv)
                 traf_dibuja(i, l, &mt);                         /* carroceria y ruedas girando (4AD530) */
                 mtraf[t->modelo].remap = NULL; solo_lod = -1;
             }
+            POP_CAT(4);
             PRF(7);
             if (l == 2 && estado != TITULO && !mundo_fuera) { mat_load(&vista); efectos_dibuja(); }
             if (l == 2 && estado != TITULO && !mundo_fuera) sol_dibuja();       /* el sol y su destello (40CBC0) */
             if (l == 2) focos_dibuja();                         /* la segunda pasada de los focos (40C550) */
             if (l == 2 && estado != TITULO && !mundo_fuera && !fin24)              /* faros en el suelo (0x188680) */
                 faros_dibuja(&mod_coche, ani.ban, fis_ok && fis.t_choque > 0);
+            POP_CAT(5);
             if (l == 2) {
                 int texto = ver || (!hud_ok && estado != TITULO), navi;
                 if (estado == TITULO && !pide_fsp) menu_dibuja();
