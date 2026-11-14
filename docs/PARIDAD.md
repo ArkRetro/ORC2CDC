@@ -4207,3 +4207,16 @@ la union, coche, pareja, trafico, efectos); "d" es el corte de distancia (prio_d
   mezcla en la CPU dos cuadros de cada vertice y lo manda por dibuja_malla. Por mirar: si 4044E0 / 4F0E40 eligen un
   solo nivel de detalle del dragon (aqui se dibujan todos los nodos del registro que pasan la esfera y el umbral 8) y
   cuantos objetos del conjunto 11 salen a la vez.
+- **NEWY: zonas naranjas lisas de bordes rectos en el cielo** (SIN RESOLVER, PENDIENTE). Reproducido con `-DPRUEBA_JUEGO=3
+  -DPRUEBA_NODO=14` (NEWY desde la salida, 0'22"-0'24": lote1_newy_cielo_naranja_hoja.png): una zona naranja lisa con
+  un borde vertical recto encima del parque. Con `-DSIN_NIEBLA_LIMITE` (sin el velo del limite, NLIM_A 0,3 desde 0,9 x
+  lejos) no se vio en las capturas de 0'23"-0'26" (otra posicion: no concluyente). Hipotesis por comprobar: edificios
+  lejanos del fondo enteros en el color de la niebla (la del original, scn_env_fog, o el velo) contra un cielo mas
+  oscuro; o mallas del cielo de NEWY ordenadas por la z (con niebla en el cielo la z manda: "Bifurcaciones: texturas
+  que se cruzan en el cielo"). Siguiente paso: `-DDIAG_CONGELA` / el mismo cuadro con y sin el velo y con
+  `-DDIAG_SIN_TRAMO=0` (si la zona sigue sin la etapa, es el cielo).
+
+Pendiente del lote 1: EAST (la roca de la etapa), NEWY (el cielo), el dragon de RUIN -> IMPE (CPU), las uniones de la
+lista no repasadas una a una con 576 (CLOU, INDU, SNOW, RUIN y las del arbol 291, arboles 0 / 1 e INFARTO) y una pasada
+de salon.sh y de una MISION SUPERADA de C2C en Flycast. Datos regenerados: FINC2C.DAT (paso fin de tools/regenera.py,
+PYTHONHASHSEED=0), copiado a la carpeta de datos compartida.

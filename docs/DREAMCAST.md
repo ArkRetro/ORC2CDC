@@ -203,13 +203,17 @@ primera linea `TA <real>K/<teorico>K x<real / teorico> max<el mayor desde el arr
 "TA sin registro". Medido hasta ahora: solo el 1,34 de abajo (demo 12c). Con `-DTA_F_MIN=n` (n / 256 = el factor) se
 simula en Flycast una consola que gasta mas: con 576 (2,25) PALM pierde las ventanas de los edificios lejanos y quedan
 las cajas lisas de las fotos de la consola (sin los grupos de nodos de la revision 44: PARIDAD.md, Revision 44).
+Si ni lo que rodea la camara cabe (la clase 0 de distancia del reparto), el reparto pasa a prio_d = -1 (todo por la
+clase de LOD, la 0 siempre) y, como ultimo recurso, `ta_lej_tope` deja de enviar las mallas de la etapa mas lejanas
+(lo de cerca primero; PARIDAD.md, Correccion lote 1). Con 768 (3 x) el coche y la pareja solos se llevan ~1,3 MB.
 
 | Tope por cuadro | Valor |
 |---|---|
 | total | `TA_VB_BYTES - TA_MARGEN` = 1920 - 64 = 1856 KB (1728 hasta el 2026-11-12) |
 | 2D (va al final, no se corta) | max(64 KB, 2 x lo 2D del cuadro anterior x ta_bpv) |
 | 3D (`ta_lim`) | total - 2D = 1664 KB |
-| etapa (`ta_tope_etapa`) | 3D - max(coche+trafico+efectos del cuadro anterior + 2 coches de trafico con LOD 0, coche + 3 coches de trafico con LOD 0) |
+| etapa (`ta_tope_etapa`) | libre = 3D - max(coche+trafico+efectos del cuadro anterior + 2 coches de trafico con LOD 0, coche + 3 coches de trafico con LOD 0); etapa = libre - min(objetos de la union pedidos en el cuadro anterior, libre / 2) |
+| objetos de la union (`ta_bo_tope`, revision 44 lote 1) | lo que deja la etapa sin tocar la reserva de lo demas; cada objeto entero o nada |
 
 Antes la reserva era 1,25 x lo del cuadro anterior: con el coche de ~600 KB se perdian ~150 KB de la etapa; un coche de
 trafico que se acerca pasa de su LOD 3-4 al 0 (~50 KB), y como mucho dos cambian de un cuadro al siguiente.
