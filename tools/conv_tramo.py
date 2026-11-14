@@ -13,7 +13,7 @@ import os, struct, sys
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ps2 import iso as isomod, stage, tex, vif
-import modelo, pvs, grupos_nodos
+import modelo, pvs, grupos_nodos, lod_veg
 
 def recorrido(seg):
     """camino de la camara: el diametro del grafo de puntos de la calzada (tiras casi horizontales del registro 0),
@@ -674,6 +674,7 @@ def convierte(seg, n, sal, mundo=None, cielo=True, luz=None, objetos=None, agua=
     grupos_nodos.aplica(sal)                                   # grupos de nodos para el reparto del TA (revision 44)
     pvs.anade(sal, quita=True)                                 # visibilidad precalculada por secciones y fuera lo que no
                                                                # se ve nunca (tools/pvs.py)
+    lod_veg.aplica(sal)                                        # version lejana de la vegetacion (revision 46, DESVIACION)
     print('triangulos de las tiras del VU1: %d, sin dibujar por la bandera ADC: %d' % (mod.tri_total, mod.tri_adc))
     print('segmento %d: %d tiras (%d opacas, %d recorte, %d transparentes, %d cielo), %d vertices, %d triangulos, '
           '%d texturas (%d KB), ruta %d puntos (%.0f m), %d KB'

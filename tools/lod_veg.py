@@ -310,7 +310,8 @@ def aplica(fn, informe=True):
             p = q[i, 0] * e + q[i, 1] * up                     # en el marco del nodo (sin giro: ejes del mundo)
             vn[k + i]['x'], vn[k + i]['y'], vn[k + i]['z'] = p; vn[k + i]['u'], vn[k + i]['v'] = uv[i]; vn[k + i]['c'] = 0xFFFFFFFF
         rr = float(np.sqrt((q ** 2).sum(1).max()))
-        mn[j]['c'] = c; mn[j]['r'] = rr; mn[j]['v0'] = nv0 + k; mn[j]['n'] = 4; mn[j]['t'] = nt0 + ai; mn[j]['nodo'] = nn + j
+        mn[j]['c'] = (0.0, 0.0, 0.0); mn[j]['r'] = rr;           # (en el marco del nodo, como los carteles)
+        mn[j]['v0'] = nv0 + k; mn[j]['n'] = 4; mn[j]['t'] = nt0 + ai; mn[j]['nodo'] = nn + j
         nodos_n[j]['c'] = c; nodos_n[j]['r'] = max(float(N[nd]['r']), rr)
         nodos_n[j]['fl'] = (int(N[nd]['fl']) & 0xFFFF030F) | NODO_CARTEL | NODO_LEJ
         nodos_n[j]['cartel'] = nc0 + j; nodos_n[j]['rel'] = (0, nd)
@@ -341,12 +342,24 @@ def aplica(fn, informe=True):
         tf = sum(teo(min(int(M[k]['n']), 256)) for nd in cand for k in cand[nd])
         print('LODVEG %s: %d nodos de vegetacion con version lejana (%d modelos, %d imagenes), TA teorico %d KB -> %d KB '
               '(%.0f veces menos); %d atlas %s, %d KB de VRAM (VQ, error %s)'
-              % (os.path.basename(fn), nf, len(set(rep.values())), len(claves), tf >> 10, (108 * nf) >> 10, tf / max(1, 108 * nf),
+              % (os.path.basename(fn), nf, len({rep[x] for x in cand}), len(claves), tf >> 10, (108 * nf) >> 10, tf / max(1, 108 * nf),
                  len(dims), dims, sum(w_ * h_ // 4 + 2048 for w_, h_ in dims) >> 10, ','.join('%.1f' % e for e in errs)))
     return dict(nodos=nf, imagenes=len(claves), atlas=dims)
 
+def aplica_bytes(b, informe=True):
+    """aplica sobre los bytes de un ORD7 (grupos_nodos.datos: una carpeta de datos ya hecha); los mismos si no cambia"""
+    import tempfile
+    if b[:4] != b'ORD7': return b
+    fd, fn = tempfile.mkstemp(suffix='.DAT', dir='/dev/shm' if os.path.isdir('/dev/shm') else None); os.close(fd)
+    try:
+        open(fn, 'wb').write(b); aplica(fn, informe); return open(fn, 'rb').read()
+    finally: os.remove(fn)
+
 def main():
-    for f in sys.argv[1:]: aplica(f)
+    a = sys.argv[1:]
+    if a and a[0] == '--datos':
+        import grupos_nodos; os.makedirs(a[2], exist_ok=True); return grupos_nodos.datos(a[1], a[2], aplica_bytes)
+    for f in a: aplica(f)
 
 if __name__ == '__main__':
     main()

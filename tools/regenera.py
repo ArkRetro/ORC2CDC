@@ -200,6 +200,11 @@ def interno(a):
         import cielo_tramado, grupos_nodos               # en una carpeta de datos ya hecha (modelo.py de ahora ya lo hace)
         W = a[3] if len(a) > 3 else os.path.join(a[2], '..', 'trabajo_cielo'); os.makedirs(W, exist_ok=True)
         grupos_nodos.datos(a[2], W, lambda b: cielo_tramado.aplica_bytes(b, a[1])[0])
+    elif a[0] == 'lodveg':                               # lodveg <datos/> [trabajo/]: version lejana de la vegetacion
+        import lod_veg, grupos_nodos                     # (revision 46) en una carpeta de datos ya hecha (conv_tramo y
+        W = a[2] if len(a) > 2 else os.path.join(a[1], '..', 'trabajo_lodveg'); os.makedirs(W, exist_ok=True)   # conv_union
+        grupos_nodos.datos(a[1], W, lod_veg.aplica_bytes)   # de ahora ya lo hacen): SEG / BK sueltos y los paquetes,
+                                                         # reempaquetados (PYTHONHASHSEED=0, como todos los pasos)
     elif a[0] == 'revq':                                 # revq <patron>...: tools/revq.py con los ficheros de los patrones
         import revq
         sys.argv = ['revq.py'] + sorted(f for p in a[1:] for f in glob.glob(p)); revq.main()

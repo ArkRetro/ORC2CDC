@@ -84,7 +84,7 @@ def aplica(fn):
     print('%s: %d grupos, %d de %d nodos agrupados' % (os.path.basename(fn), g, n, len(partes(b)[0])))
 
 # paquetes de una carpeta de datos ya hecha: (paquete, prefijo, opciones de pak_union.py como en tools/regenera.py)
-PAQUETES = (('UNIONES.PAK', 'BK', []), ('UNIONESTA.PAK', 'BK', ['--pak=UNIONESTA.PAK']),
+PAQUETES = (('UNIONES.PAK', 'BK', []), ('UNIONESTA.PAK', 'BK', ['--pak=UNIONESTA.PAK']), ('UNIONESR.PAK', 'BK', ['--pak=UNIONESR.PAK']),
             ('SEGS.PAK', 'SEG', ['--pak=SEGS.PAK', '--prefijo=SEG', '--tope=7842']))
 
 def datos(D, W, f=None):

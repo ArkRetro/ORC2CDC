@@ -35,7 +35,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ps2.assets import Assets, hash_nombre
 from ps2 import stage
-import modelo, conv_tramo, pvs, grupos_nodos
+import modelo, conv_tramo, pvs, grupos_nodos, lod_veg
 from conv_tramo import NPERF, NCARRIL, NEXT, NBANDA
 
 DESC = 0xb0                                         # tamano de un descriptor (tramo o union)
@@ -505,6 +505,7 @@ def curso(A, dsal, con_tramos=True, solo_curso=False):
         grupos_nodos.aplica(f)                                 # grupos de nodos para el reparto del TA (revision 44)
         # visibilidad precalculada (tools/pvs.py): en la bifurcacion el ojo tambien va por la rama derecha (BKD.DAT)
         pvs.anade(f, [rd] if hi >= 0 else [])
+        lod_veg.aplica(f)                                      # version lejana de la vegetacion (revision 46, DESVIACION)
         print('triangulos de las tiras del VU1: %d, sin dibujar por la bandera ADC: %d' % (mod.tri_total, mod.tri_adc))
         r = dict(zona=z, seg=n, nivel=nivel[clave], izq=hi, der=hd, bk=(tx, ty, tz, ry), ramas=ramas,
                  m_pos=m_por_posicion(segs[n]), meta=meta, niebla=niebla(A, z), sol=sol(A, z), f_bk=clave,
@@ -689,6 +690,7 @@ def union_fichero(A, combo, f, d0, ri, rd, so):
     try: mod.escribe(f)
     finally: vq.UMBRAL = umbral
     pvs.anade(f, [rd] if combo[0] != 'META' else [])
+    lod_veg.aplica(f)                                          # version lejana de la vegetacion (revision 46, DESVIACION)
     print('%s %s: %d mallas, %d texturas, %d KB' % (os.path.basename(f), combo, len(mod.mallas), len(mod.texs), os.path.getsize(f) >> 10))
 
 def etapa_ficheros(A, ti, dsal):
