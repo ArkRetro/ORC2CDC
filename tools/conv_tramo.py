@@ -665,6 +665,10 @@ def convierte(seg, n, sal, mundo=None, cielo=True, luz=None, objetos=None, agua=
     if not sup[1].any(): sup = (sup[0], np.repeat(pf[:, [0, -1]], NEXT, 1), sup[2])
     mod.ruta = np.concatenate([cam, an, pf, car, sup[0], sup[1], sup[2]], 1)
     mod.recorta_texturas()                                     # solo las texturas que se usan (memoria de video)
+    fuera = [x[7] for x in mod.mallas if 0 <= x[7] < len(mod.nodos) and mod.nodos[x[7]][3] < 0 and
+             np.linalg.norm(x[2] - mod.nodos[x[7]][0]) > mod.nodos[x[7]][1] * 1.05 + 1.0]
+    if fuera:                                                  # (la demo recorta cada nodo por su esfera: revision 45)
+        print('AVISO: %d tiras fuera de la esfera de su nodo (%d nodos; p. ej. %s)' % (len(fuera), len(set(fuera)), sorted(set(fuera))[:8]))
     if mundo is not None: transforma(mod, mundo)
     ini = mod.escribe(sal)
     grupos_nodos.aplica(sal)                                   # grupos de nodos para el reparto del TA (revision 44)

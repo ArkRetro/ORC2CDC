@@ -6791,6 +6791,15 @@ static inline int log2x(float x, int k)                         /* k log2(x) por
    aparte. Cada ~1 s una linea "POP:" y los saltos mayores ("POPEV:"). Las razones se guardan por fichero (datos) y no
    por hueco: el paso de la etapa siguiente a etapa no cuenta como aparecer. Solo medida: no cambia lo que se dibuja. */
 enum { PR_DIB, PR_LEJOS, PR_DETRAS, PR_LADO, PR_LOD, PR_RAMA, PR_PVS, PR_TOPE, PR_TRAMO, PR_LISTA, PR_N };
+#ifndef DIAG_EDIF_X0
+#define DIAG_EDIF_X0 200.0f
+#define DIAG_EDIF_X1 340.0f
+#define DIAG_EDIF_Y0 (-20.0f)
+#define DIAG_EDIF_Y1 210.0f
+#endif
+#ifndef DIAG_EDIF_S
+#define DIAG_EDIF_S 1200
+#endif
 #ifdef DIAG_POPPING
 #define POP_MAXN 4096
 typedef struct { const void *datos; uint32_t n; uint8_t ant[POP_MAXN], cur[POP_MAXN]; } pop_slot_t;
@@ -7294,6 +7303,28 @@ static void nodos_visibles_todos(void)
     if (prio_d < ND_PRIO - 1) for (i = 0; i < 3; i++) if (geo_visible(tramos[i])) nodos_quita(tramos[i]);
 #ifdef DIAG_POPPING
     pop_mide();
+#endif
+#if defined(DIAG_EDIF) && defined(DIAG_POPPING)
+    {   /* medida: las mallas con el centro en un rectangulo de la pantalla, una vez al pasar por DIAG_EDIF_S */
+        static int de_hecho; int t;
+        if (!de_hecho && yo.s >= DIAG_EDIF_S) for (de_hecho = 1, t = 0; t < 3; t++) {
+            modelo_t *mo = tramos[t]; pop_slot_t *ps; uint32_t m;
+            if (!geo_visible(mo) || !(ps = pop_slot(mo))) continue;
+            for (m = 0; m < mo->nmallas; m++) {
+                const malla_t *ma = mo->mallas + m; float dx = ma->cx - ojo[0], dy = ma->cy - ojo[1], dz = ma->cz - ojo[2];
+                float zv = dx * ade[0] + dy * ade[1] + dz * ade[2], xv, yv, sx, sy; int l, nd = ma->nodo;
+                if (zv < 30.0f || nd < 0 || (uint32_t)nd >= mo->nnodos) continue;
+                xv = dx * der[0] + dy * der[1] + dz * der[2]; yv = dx * arr[0] + dy * arr[1] + dz * arr[2];
+                sx = 320.0f + xv * fx / zv; sy = 240.0f - yv * fx / zv;
+                if (sx < DIAG_EDIF_X0 || sx > DIAG_EDIF_X1 || sy < DIAG_EDIF_Y0 || sy > DIAG_EDIF_Y1) continue;
+                l = m < mo->inicio[1] ? 0 : m < mo->inicio[2] ? 1 : m < mo->inicio[3] ? 2 : 3;
+                printf("EDIF: s %d t %d m %d nodo %d l %d tex %d c %.0f %.0f %.0f r %.1f z %.0f px %.0f %.0f razon %s pvsm %d pvs_on %d nfl %x ncr %.0f %.0f %.0f %.1f\n",
+                       (int)yo.s, t, (int)m, nd, l, (int)ma->tex, ma->cx, ma->cy, ma->cz, ma->r, zv, sx, sy, pop_nom[ps->cur[nd]],
+                       mo->pvs_on ? (int)(mo->pvs_m[m >> 5] >> (m & 31) & 1) : -1, mo->pvs_on, (unsigned)mo->nodos[nd].fl,
+                       mo->nodos[nd].cx, mo->nodos[nd].cy, mo->nodos[nd].cz, mo->nodos[nd].r);
+            }
+        }
+    }
 #endif
 #ifdef CON_FUNDIDO_ENTRADA
     fe_paso();                                                  /* lo que aparece en este cuadro */
