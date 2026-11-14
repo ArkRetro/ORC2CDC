@@ -41,6 +41,11 @@ if [ "${MODO_JUEGO:-0}" = 1 ] || [ "${MODO_JUEGO:-0}" = 2 ]; then   # OUTRUN / I
     tecla x; espera_log 'TABLERO: clave 0x24' 30; espera 4           # (TB_JUEGO=n: n a la derecha; 1 OutRun 2 SP, en
     for _j in $(seq 1 ${TB_JUEGO:-0}); do tecla Right; espera 3; done; foto ${P}_5t   # OUTRUN 2 / 3 los cursos seguidos,
 fi                                                                   # con candado sin -DPRUEBA_TABLERO_TODO)
+if [ "${MODO_JUEGO:-0}" = 3 ]; then                                  # CONTRARRELOJ: los tableros 0x24 (juego), 0x25
+    tecla x; espera_log 'TABLERO: clave 0x24' 30; espera 4           # (CURSO / ETAPA) y 0x26 (la primera meta), como
+    tecla x; espera_log 'TABLERO: clave 0x25' 30; espera 4           # salidas.sh (antes MODO_JUEGO=3 se quedaba en la
+    tecla x; espera_log 'TABLERO: clave 0x26' 30; espera 4; foto ${P}_5t   # seleccion de coche)
+fi
 tecla x; espera 6; foto ${P}_6                                       # coche
 if [ "${MODO_JUEGO:-0}" = 0 ] && [ -n "${C2C_RECORRE:-}" ]; then     # B: del coche al detalle de la mision y otra vez A
     tecla c; espera 5; foto ${P}_6b; tecla x; espera 6; foto ${P}_6c

@@ -4058,3 +4058,27 @@ PENDIENTE (encontrado):
 - Sin fallo: texturas sin subir o grises (TEXVRAM 0 en todo), tuneles, agua de LAKE / BEAC / GRAN, HUD de los modos,
   GOAL y meta, menus / tableros / SALON con el GD lento; los porticos en blanco de las misiones son el BLNK del
   original (rama -1). Las "torres grises" de la entrada de SANF son los anclajes del puente (igual en el control).
+
+## Barrido de jugabilidad (revision 44, 2026-11-14, w5)
+
+Solo busqueda (informe y capturas: scratchpad capturas_r44/barrido/w5.md y w5_*.png). Flycast sin GD lento.
+- Muros y suelo con `-DPRUEBA_MURO` (muro.sh): IMPE (ROMA) del arbol 0 desde la salida 300 s, y RUIN -> IMPE -> CAPE
+  del arbol 290 420 s: carroceria dentro de un muro 0, ruedas hundidas 0, PlWrecker 0, trafico hundido 2 / 1 (-0,13 m,
+  0x100). Los saltos de la camara (0,6-2,9 m en un cuadro; 36 con 90 choques y 58 con 355) son todos en choques contra
+  el muro; la camara nunca pasa de 2,8 m sobre el coche. La "camara que salta en ROMA" y los quitamiedos atravesados no
+  se reproducen en Flycast.
+- Carreras seguidas (seguidas.sh con -DDIAG_PVRMEM, en COAST 2 COAST): RAMMAPA de carrera 12716K y zona del curso 992K
+  en las 6, sin errores de RAM ni de VRAM; la salida del REINTENTAR igual a la primera.
+- INFARTO, CONTRARRELOJ (meta A, arbol 260), OUTRUN con cambio manual (marchas 1..5 arriba / abajo, derrape, pausa
+  REINTENTAR / ABANDONAR), OUTRUN2SP fin del tiempo -> mapa -> nombre -> rankings -> GAME OVER -> frontal, VMU (guardar
+  y leer tras reiniciar), SALON (compras, guardado, segundo arranque) y la musica de cada pantalla: sin fallos nuevos.
+- **FALLO (visible): C2C, MISION SUPERADA (modo 35, escena 2B004F)**: salen "B REINTENTAR" y "ABANDONAR B" (dos B) y
+  REINTENTAR se pulsa con X. En la ISO el icono de REINTENTAR de 2B004F es el del bit 0x10 (escena 0x480005 de la
+  tabla 0x374a60); tools/conv_fin.py iconos_ps2 solo carga los iconos 4 y 8 y boton_de lo empareja con el de B (error
+  < 40). En los menus el 0x10 es Y (conv_menu.BOTON_DC, RANDOM de comun/menu.c), y demo/fin.c (0x1bc700, mis_seg) lee
+  CONT_X. PENDIENTE: iconos_ps2 con (4, 8, 0x10), regenerar FINC2C.DAT (paso FIN de tools/regenera.py) y CONT_Y en fin.c.
+- La pareja deformada con la foto 3 (05 / 18) sigue como en "Coches: la pareja de la carrera" (PENDIENTE).
+- Pruebas: menu.sh con MODO_JUEGO=3 pasa ahora por los tableros 0x24 / 0x25 / 0x26 (conduce.sh / reintenta.sh en la
+  CONTRARRELOJ). Desfasados, sin tocar: seguidas.sh sin MODO_JUEGO va por C2C (PRUEBA_NODO no cuenta en las misiones y
+  el recorrido se desfasa: usar MODO_JUEGO=1) y salon.sh (OUTRUN pasa por el tablero 0x24 desde la revision 44: sus
+  capturas sa_8 / 9 / 10 son el tablero y espera MUS33 en vano).
