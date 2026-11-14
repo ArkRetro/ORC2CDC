@@ -243,13 +243,13 @@ static int lee_modelo_en(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t
         m->vis = m->nnodos ? calloc((m->nnodos + 31) / 32 * 2 + (g ? (m->nnodos + 1) / 2 : 0) + (nl + 1) / 2, 4) : NULL; m->ruta_i = 0;   /* vis y vis_ant */
         m->vis_ant = m->vis ? m->vis + (m->nnodos + 31) / 32 : NULL;
         m->grp = m->vis && g ? (uint16_t *)(m->vis_ant + (m->nnodos + 31) / 32) : NULL;
-        /* (detras, de cada lejano su completo; el lejano lleva el grupo de su completo: van juntos en el reparto) */
+        /* (detras, de cada lejano su completo; el lejano va sin grupo: su clase es la 0 del reparto, nodos_visibles) */
         m->lej_de = m->vis && nl ? (uint16_t *)(m->vis_ant + (m->nnodos + 31) / 32) + (g ? m->nnodos + (m->nnodos & 1) : 0) : NULL;
         if (nl > 1024 || (nl && !m->lej_de)) m->nn0 = m->nnodos, nl = 0, m->lej_de = NULL;   /* (sin sitio: sin lejanos) */
         for (i = 0; i < nl; i++) {
             uint32_t c = lej_tmp[i] < m->nn0 ? lej_tmp[i] : 0;
             m->lej_de[i] = (uint16_t)c;
-            m->nodos[m->nn0 + i].fl = (m->nodos[m->nn0 + i].fl & 0xFFFFu) | (m->nodos[c].fl & 0xFFFF0000u);
+            m->nodos[m->nn0 + i].fl &= 0xFFFFu;
         }
     }
     }
@@ -6798,7 +6798,7 @@ static float dist2_ruta(const modelo_t *m, uint32_t i, const float *p)
    mismo. En el reparto del TA cuenta el coste del lejano (la clase por vertices de REPARTO_COSTE con sus 4 vertices):
    lo lejano ya no se quita antes que los edificios. 0: sin versiones lejanas (lo de antes) */
 #ifndef LOD_LEJ_PX
-#define LOD_LEJ_PX 24.0f
+#define LOD_LEJ_PX 48.0f
 #endif
 #ifndef LOD_LEJ_HIST
 #define LOD_LEJ_HIST 1.25f
@@ -6846,6 +6846,7 @@ static uint32_t pop_ap[PR_N][3], pop_de[PR_N][3];                /* apariciones 
    el alfa de recorte de la textura); sus apariciones / desapariciones aparte (linea POPVEG) con la distancia y el
    radio en la pantalla minimos y maximos de las apariciones de 8 px o mas */
 static uint32_t pop_vap[PR_N][3], pop_vde[PR_N][3];
+static uint32_t pop_lap[PR_N][3], pop_lde[PR_N][3];             /* de esa, la que tiene version lejana (lod_veg.py) */
 static float pop_vz[PR_N][2], pop_vpx[PR_N];
 static int pop_veg_ev;                                           /* el evento en curso es de vegetacion */
 static uint32_t pop_lod_lej, pop_lod_comp, pop_lej_n;           /* pasos de completo a lejano y al reves (dibujados en
@@ -6877,7 +6878,7 @@ static pop_slot_t *pop_slot(const modelo_t *mo)
             if (m->nodo < 0 || (uint32_t)m->nodo >= mo->nnodos) continue;
             vt[m->nodo] += m->n; if (i >= mo->inicio[1] && i < mo->inicio[2]) vr[m->nodo] += m->n;
         }
-        for (i = 0; i < mo->nnodos; i++) pop_s[k].veg[i] = vt[i] && 2 * vr[i] > vt[i];
+        for (i = 0; i < mo->nnodos; i++) pop_s[k].veg[i] = vt[i] && 2 * vr[i] > vt[i] ? (mo->nodos[i].cartel <= -2 ? 2 : 1) : 0;
     }
     return &pop_s[k];
 }
@@ -6899,6 +6900,7 @@ static void pop_evento(int t, int nodo, int razon, int ap, float px, float z, fl
     for (k = 0; k <= b; k++) (ap ? pop_ap : pop_de)[razon][k]++;
     if (pop_veg_ev) {
         for (k = 0; k <= b; k++) (ap ? pop_vap : pop_vde)[razon][k]++;
+        if (pop_veg_ev == 2) for (k = 0; k <= b; k++) (ap ? pop_lap : pop_lde)[razon][k]++;
         if (ap && px >= 8.0f) {
             if (z < pop_vz[razon][0] || pop_vz[razon][0] <= 0) pop_vz[razon][0] = z;
             if (z > pop_vz[razon][1]) pop_vz[razon][1] = z;
@@ -7125,6 +7127,7 @@ static void nodos_visibles(modelo_t *mo)
             cp = cp > NB_PRIO - 2 ? NB_PRIO - 2 : cp;           /* (63: solo lo tapado por la niebla) */
 #endif
             cp = cp < 0 ? 0 : cp > NB_PRIO - 1 ? NB_PRIO - 1 : cp;
+            if (d->fl & NODO_LEJ) cp = 0;                       /* lejano: con lo que no se quita (cuesta casi nada) */
         }
 #if REPARTO_HIST_P || REPARTO_HIST_D
         if (ya) {                                               /* ya se dibujaba: se queda hasta pasar el corte con holgura */
@@ -7303,7 +7306,7 @@ static void pop_mide(void)
     pop_cuadros++;
     if (!pop_t0) pop_t0 = timer_ms_gettime64();
     if (timer_ms_gettime64() - pop_t0 >= 1000) {
-        char b[1600]; int n = 0; uint32_t dt = (uint32_t)(timer_ms_gettime64() - pop_t0);
+        char b[2600]; int n = 0; uint32_t dt = (uint32_t)(timer_ms_gettime64() - pop_t0);
         n += sprintf(b + n, "POP: %.4s s %.0f %u ms %u cuadros lejos %d corte %d m clase %d d%d |", cur_nodo >= 0 ? curso[cur_nodo].zona : "----", (double)yo.s,
                      (unsigned)dt, (unsigned)pop_cuadros, (int)lejos, (int)(prio_d >= ND_PRIO - 1 ? lejos : powf(2.0f, (prio_d + 1) / 4.0f)), prio_p, prio_d);
         for (k = 1; k < PR_N; k++) if (pop_ap[k][0] || pop_de[k][0])
@@ -7320,8 +7323,12 @@ static void pop_mide(void)
         for (k = 1; k < PR_N; k++) if (pop_vap[k][0] || pop_vde[k][0])
             n += sprintf(b + n, " %s +%u/%u/%u -%u/%u/%u z%d-%d px%d", pop_nom[k], (unsigned)pop_vap[k][0], (unsigned)pop_vap[k][1], (unsigned)pop_vap[k][2],
                          (unsigned)pop_vde[k][0], (unsigned)pop_vde[k][1], (unsigned)pop_vde[k][2], pop_vz[k][0] < 1e8f ? (int)pop_vz[k][0] : -1, (int)pop_vz[k][1], (int)pop_vpx[k]);
+        n += sprintf(b + n, " | conlod");
+        for (k = 1; k < PR_N; k++) if (pop_lap[k][0] || pop_lde[k][0])
+            n += sprintf(b + n, " %s +%u/%u/%u -%u/%u/%u", pop_nom[k], (unsigned)pop_lap[k][0], (unsigned)pop_lap[k][1], (unsigned)pop_lap[k][2],
+                         (unsigned)pop_lde[k][0], (unsigned)pop_lde[k][1], (unsigned)pop_lde[k][2]);
         n += sprintf(b + n, "\n");
-        memset(pop_vap, 0, sizeof pop_vap); memset(pop_vde, 0, sizeof pop_vde);
+        memset(pop_vap, 0, sizeof pop_vap); memset(pop_vde, 0, sizeof pop_vde); memset(pop_lap, 0, sizeof pop_lap); memset(pop_lde, 0, sizeof pop_lde);
         for (k = 0; k < PR_N; k++) { pop_vz[k][0] = 1e9f; pop_vz[k][1] = 0; pop_vpx[k] = 0; }
         printf("%s", b);
         for (k = 0; k < 4; k++) if (pop_ev[k].px > 0)
