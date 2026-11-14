@@ -4182,3 +4182,28 @@ la union, coche, pareja, trafico, efectos); "d" es el corte de distancia (prio_d
   REINTENTAR, ABANDONAR B); sin pasada en Flycast hasta una mision superada.
 - **salon.sh desfasado** (CORREGIDO): tras elegir OUTRUN pulsa A en el tablero 0x24 (espera "TABLERO: clave 0x24"),
   en los dos arranques. Sin pasada entera en Flycast (en este lote).
+- **EAST antes de la union: la parte de arriba del acantilado flota sobre la carretera** (INVESTIGADO, PENDIENTE). No es
+  el reparto del TA, ni el PVS, ni el LOD: sale igual (EAST desde la salida, `-DPRUEBA_JUEGO=3 -DPRUEBA_NODO=10`, 1'05"
+  a 1'09" de la etapa) con 576, sin tope (`-DTA_F_MIN=128`), sin PVS (`-DSIN_PVS`), sin reparto ni tope
+  (`-DDIAG_SIN_TOPE`, que ahora tambien quita el reparto, y `-DCPU_MS_CORTA=1000`: lejos 4000) y con el LOD de 404B00
+  16 veces mas lejos (`-DREPARTO_LOD_MAS=4`): siempre la masa de roca con el borde de abajo recto y el cielo debajo
+  (lote1_east_roca_sin_reparto_hoja.png, lote1_east_roca_sin_reparto_lod16_hoja.png). Sin la etapa (`-DDIAG_SIN_TRAMO=0`,
+  medida nueva: no dibuja la etapa (0), la union (1) o la siguiente (2)) la roca no esta (lote1_east_roca_sin_etapa_
+  hoja.png): es de la etapa EAST (el tramo 29 de conv_union.tablas) y todo lo que tiene ya se dibuja. Queda por
+  ver si el original tambien la ve asi desde la calzada (la base podria estar en un registro de la union que el original
+  no dibuja aun: uni_regs / +0x72..+0x74 = 60 / 600 de EAST) o si falta una malla en la conversion (tools/conv_tramo.py):
+  buscar en su SEGnn.DAT las mallas del acantilado del final y su nodo.
+- **GHOS: el haz de los faros con un borde recto delante del morro** (INVESTIGADO, sin cambio). Sin la luz del suelo
+  (`-DDIAG_SIN_FAROS`, lote1_ghos_sin_luz_suelo_solo_haz_hoja.png) el borde recto sigue: es el haz proyectado del PC
+  (focos_*), cuya textura (0x30009, spr_etc_xst 9) corta en seco en la fila 200 de 256 (la linea de corte del haz; el
+  PC la proyecta igual, con borde negro) y se suma a la luz del suelo (0x106960, aditiva) donde coinciden: de ahi la
+  zona mas clara. El PS2 no dibuja ese haz (Luces de noche y faros: lo pidio el usuario, del PC); suavizarlo seria otra
+  desviacion. La luz del suelo tiene ademas la DIFERENCIA ya anotada (z GEQUAL con 1 % en vez de ALWAYS): donde la
+  calzada sube por delante del plano del coche la tapa con borde recto; no es lo de las capturas.
+- **RUIN -> IMPE a 31 fps con 448** (REPRODUCIDO, PENDIENTE): es el dragon (conjunto 11 de los objetos de la union,
+  forzado con `-DPRUEBA_BO=11`, `-DPRUEBA_NODO=12` del arbol 290): POPTA "bo 418-475K" (~9000 vertices por cuadro, no
+  los ~2300 de "Objetos animados de las uniones"), 30000-32000 vertices en total, dib 29-31 ms, 29-31 fps durante ~4 s
+  (sin el dragon la misma union va a 43-45 fps con 30000 vertices y 18-19 ms). Lo caro es la CPU: bo_dibuja_malla
+  mezcla en la CPU dos cuadros de cada vertice y lo manda por dibuja_malla. Por mirar: si 4044E0 / 4F0E40 eligen un
+  solo nivel de detalle del dragon (aqui se dibujan todos los nodos del registro que pasan la esfera y el umbral 8) y
+  cuantos objetos del conjunto 11 salen a la vez.

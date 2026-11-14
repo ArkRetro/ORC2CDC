@@ -11476,6 +11476,9 @@ int main(int argc, char **argv)
                 color_fijo = l == DEP_LISTA ? 0xFFFF00FF : 0;
 #endif
                 for (i = 0; i < 3; i++)                         /* etapa, union y etapa siguiente: las que esten subidas */
+#ifdef DIAG_SIN_TRAMO
+                    if (i != DIAG_SIN_TRAMO)                    /* medida: sin la etapa (0), la union (1) o la siguiente (2) */
+#endif
                     if (geo_visible(tramos[i])) {               /* (44DE10: una sola etapa en la union) */
                         geo_vista(tramos[i]);
 #ifndef DEP_TEX
