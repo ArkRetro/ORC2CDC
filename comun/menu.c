@@ -2309,7 +2309,10 @@ static void tb_entra(void)
 #endif
     switch (tb_k) {
     case 0x24:                                              /* 0x252b50 */
-        if (tb_modo() == 1) tb_car_init(TB->b4, 8), tb_car_elige(tb_juego());
+        if (tb_modo() == 1) {                               /* OUTRUN: el carrusel en el juego guardado y los bits 0..1 a
+                                                               0 / 1 (0x252d78..0x252e34: 0 y 2 -> 0, 1 y 3 -> 1) */
+            tb_car_init(TB->b4, 8); tb_car_elige(tb_juego()); tb_bits &= ~2u;
+        }
         else { tb_car_init(TB->b2, 4); if (tb_juego() < 2) tb_car_elige(tb_juego()); }
         break;
     case 0x25:                                              /* 0x2575d0 */
