@@ -4009,8 +4009,11 @@ OR2 / SP_goals y sus _reverse, Races.bin; codigo 0x1760c0, 0x1b63a0, 0x2a6758, 0
   (dan los presets 2 / 3, los mismos arboles 291 / 290 que los juegos 3 / 2 de la consola).
 - **Resultado (2026-11-14)**: rama 0: 18 carreras, todas BIEN (OUTRUN PALM LAKE CAST CLOU TULI / BEAC SANF NIAG MACH
   EAST / los 15 de 290 hasta CAPE y de 291 hasta NEWY; Contrarreloj DESE, metas 0x46 TULI .. PALM; INFARTO; mision 0
-  BEAC PALM; OUTRUN2SP lado 0 BEAC .. EAST, lado 1 PALM .. TULI; las ramas -1 repiten la etapa). Capturas:
-  scratchpad/capturas_r44/orden_rama0_resultado.txt, orden_r0_mapa15_seguido.png.
+  BEAC PALM; OUTRUN2SP lado 0 BEAC .. EAST, lado 1 PALM .. TULI; las ramas -1 repiten la etapa). Rama 1: 18 carreras,
+  todas BIEN (OUTRUN PALM ALPI DESE GHOS CAPE / BEAC YOSE GRAN AMAZ NEWY; los seguidos 290 / 291 igual que con la 0;
+  mision 84 CAPE GHOS DESE ALPI PALM, mision 22 ALPI SNOW ALAS y la repeticion; OUTRUN2SP lado 0 BEAC .. NEWY, lado 1
+  PALM .. CAPE). Nada cruzado en los arboles, las ramas, las metas, el mapa ni el arbol de cada modo. Capturas:
+  scratchpad/capturas_r44/orden_rama0_resultado.txt, orden_rama1_resultado.txt, orden_r0_mapa15_seguido.png.
 - Tablero 0x24 de OUTRUN (CORREGIDO): al entrar, el original pone el carrusel en el juego guardado (0x26e6e8 con la
   raiz +0x208 & 3) y despues deja los bits 0..1 en 0 / 1 (0x252d78..0x252e34: 0 y 2 -> 0, 1 y 3 -> 1); la DC no los
   tocaba. El de INFARTO (0x252e38..) solo pone el carrusel si los bits son 0 / 1 y no los cambia (como la DC).
