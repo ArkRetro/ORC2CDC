@@ -41,10 +41,15 @@ static int lee(uint32_t lba, int n, void *dst)
     uint64_t t0 = jg ? timer_us_gettime64() : 0;
     mutex_lock(&m_gd);
     if (pp) ult_primer_plano = timer_ms_gettime64();
-#ifdef DIAG_GD_LENTO                                    /* medida: en Flycast el GD lee al instante; aqui cada lectura
-                                                           tarda como en la consola (DIAG_GD_LENTO KB/s y 120 ms de
-                                                           salto si no sigue a la anterior) */
-    {   static uint32_t sig; if (gd_diag_lento) thd_sleep((lba != sig ? 120 : 0) + n * 2048 / (DIAG_GD_LENTO)); sig = lba + n; }
+#ifdef DIAG_GD_LENTO                                    /* medida: cada lectura tarda en total como en un lector de
+                                                           DIAG_GD_LENTO KB/s con 120 ms de salto si no sigue a la
+                                                           anterior. Flycast ya emula su propio tiempo de lectura (~1,4
+                                                           MB/s, docs/DREAMCAST.md): se espera solo lo que falta. Antes la
+                                                           espera iba entera ademas de la de Flycast y 750 eran en total
+                                                           ~490 KB/s (revision 44: SEG08 16 s en vez de ~9,5) */
+    static uint32_t sig_lba; uint32_t dl_ms = 0; uint64_t dl_t0 = 0;
+    if (gd_diag_lento) { dl_ms = (lba != sig_lba ? 120 : 0) + n * 2048 / (DIAG_GD_LENTO); dl_t0 = timer_ms_gettime64(); }
+    sig_lba = lba + n;
 #endif
     for (k = 0; k < 4; k++) {
         if (!(r = cdrom_read_sectors_ex(dst, lba + 150, n, ((uintptr_t)dst & 31) == 0))) break;
@@ -52,6 +57,9 @@ static int lee(uint32_t lba, int n, void *dst)
         if (r == ERR_DISC_CHG || r == ERR_NO_DISC) cdrom_reinit();
         thd_sleep(20);
     }
+#ifdef DIAG_GD_LENTO
+    if (dl_ms) { uint64_t h = timer_ms_gettime64() - dl_t0; if (h < dl_ms) thd_sleep(dl_ms - (uint32_t)h); }
+#endif
     if (pp) ult_primer_plano = timer_ms_gettime64();
     mutex_unlock(&m_gd);
     if (jg) { us_juego += timer_us_gettime64() - t0; n_juego++; if (gd_latido) gd_latido(); }

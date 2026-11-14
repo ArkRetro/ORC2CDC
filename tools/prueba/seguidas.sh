@@ -6,9 +6,13 @@
 # 1 meta -> millas -> continuar A (REINTENTAR) -> 2 meta -> B (al titulo; tras 8 s la pelicula de la demo de atraccion,
 # START) -> menu -> 3 pausa ABANDONAR -> millas -> GAME OVER -> menu -> 4 pausa REINTENTAR -> millas -> 5 meta -> B ->
 # menu con otro coche -> 6 meta -> B -> menu -> 7 hasta la meta. Capturas sN_35 (continuar), sN_tit, sN_carrera.
-# MODO_JUEGO=n como menu.sh (3 CONTRARRELOJ). Al final las lineas RAMMAPA, VRAM: zona y FIN: de cada carrera.
+# MODO_JUEGO=n como menu.sh (3 CONTRARRELOJ); por defecto 1 (OUTRUN, arbol 0): en COAST 2 COAST (0) PRUEBA_NODO no
+# cuenta (el arbol es 100 + mision), la carrera empieza a 300 m del final de BEAC con la meta en PALM y las esperas de
+# 400 s no llegan (las carreras 6 y 7 se quedaban en ELEGIR MODO). Al final las lineas RAMMAPA, VRAM: zona y FIN: de
+# cada carrera.
 D=$(cd "$(dirname "$0")" && pwd); . "$D/comun.sh"; set +e
 GDI=${1:-}; PANTALLA=${2:-91}; SAL=${3:-/dev/shm/prueba_seguidas}
+MODO_JUEGO=${MODO_JUEGO:-1}
 arranca ${FLYCAST_OPC:-}; marca
 . "$D/menu.sh"
 # MARCA en la linea que casa (no al final: lo que viene detras puede haber salido ya)

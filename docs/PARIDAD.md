@@ -4082,3 +4082,36 @@ Solo busqueda (informe y capturas: scratchpad capturas_r44/barrido/w5.md y w5_*.
   CONTRARRELOJ). Desfasados, sin tocar: seguidas.sh sin MODO_JUEGO va por C2C (PRUEBA_NODO no cuenta en las misiones y
   el recorrido se desfasa: usar MODO_JUEGO=1) y salon.sh (OUTRUN pasa por el tablero 0x24 desde la revision 44: sus
   capturas sa_8 / 9 / 10 son el tablero y espera MUS33 en vano).
+
+## Correccion de los barridos, lote 2 (revision 44, 2026-11-14, w61)
+
+Capturas de antes / despues: scratchpad capturas_r44/w61/. Flycast con `-DPRUEBA_AUTO -DPRUEBA_SIN_TIEMPO
+-DDIAG_GD_LENTO=n -DDIAG_MS -DDIAG_POPPING -DPRUEBA_JUEGO=2 -DPRUEBA_NODO=k -DPRUEBA_FIN=2800` (arbol 290).
+- **Tirones de carga al entrar en la etapa con el GD lento** (CORREGIDO, dos causas):
+  1. La medida exageraba: `DIAG_GD_LENTO` (comun/gd.c) esperaba n x 2048 / KB/s + 120 ms ademas del tiempo de
+     lectura que ya emula Flycast (~1,4 MB/s, DREAMCAST.md "Cambios de etapa: tirones"): con 750 el lector iba en total
+     a ~490 KB/s (SEG08, 6,6 MB recompuesto + COL08, 16,4 s). Ahora la espera es solo lo que falta para el tiempo de
+     un lector de esa velocidad (medido el tiempo de la lectura de Flycast): 750 es 750.
+  2. La etapa que se deja se soltaba a UNION_LIBERA (300) m dentro de la union; el original la deja de dibujar en la
+     posicion 0x18 de la union con la rama elegida (race_manager 4515B0 bandera 0x20; 44E590 cambia de registro; la DC
+     ya lo hacia en geo_paso y ya no la dibujaba). Ahora se suelta ahi (UNION_LIBERA_POS, 191 m con m_pos 7,95) y la
+     etapa siguiente se pide 109 m antes. La rama se decide a 64-65 m de la union (RECORRIDO, que ahora escribe
+     "union + n m") en ALPI, TULI y METR del 290. El trafico de atras se cierra a TR_CIERRA_ATRAS posiciones.
+  Medido (ALPI -> CAST): antes (750 de antes) SEG08 en 16,44 s, leido en s 7120 y "POP: ALPI 2251 ms 7 cuadros"
+  (parada en carga_espera); con la etapa soltada en 0x18 y el mismo lector (490 nuevo) 17,43 s y parada de 1982 ms;
+  con 750 de verdad 12,93 s, leida en s 6844 (350 m antes de CAST, s 7193) y sin parada. TULI -> METR: SEG13 en
+  12,16 s, 425 m antes; METR -> RUIN: SEG14 en 10,38 s. Ningun POP de mas de 1300 ms. El final de la union ya no da
+  al vacio (alpi_cast_hoja_antes_arriba_despues_abajo.png). PENDIENTE: no hay medida de la consola (GDEMU / GD-ROM);
+  por debajo de ~550 KB/s las etapas de 6-8 MB vuelven a no llegar (es el tiempo de lectura: la memoria no deja leer
+  la etapa siguiente antes de soltar la anterior).
+- **"lejos" arrastrado de METR a RUIN** (CORREGIDO): el recorte de seguridad por CPU (`lejos`, 50 m cada 30
+  cuadros; no es del original, que dibuja a 4000 m: 0x178580) era de la geometria de la etapa que se dejaba y solo
+  volvia a subir con la CPU por debajo de CPU_MS_ALARGA. Ahora al entrar en la etapa siguiente (CUR_SIGUIENTE) vuelve a
+  LEJOS_PS2 y se mide otra vez. Medido: METR acaba a 2250 m y RUIN empieza a 4000 (3850-4000 despues); bajo el arco de
+  roca el terreno en vez del blanco del horizonte (ruin_arco_tras_metr_despues_lejos4000.png; antes
+  capturas_r44/barrido/ruin_tras_metr_lejos2650_0430.png).
+- **Texto "< X  X >" de la bifurcacion con el HUD en las carreras con el piloto** (CORREGIDO): el rotulo de texto de la
+  DC (txt_cen) se dibujaba con el HUD si `estado == CARRERA && auto_ && t_estado >= 50`; ahora solo sin HUD, como dice
+  "Nombre de la etapa" arriba.
+- **seguidas.sh** (CORREGIDO): MODO_JUEGO=1 (OUTRUN, arbol 0) por defecto; en COAST 2 COAST PRUEBA_NODO no cuenta.
+- **menu.sh con MODO_JUEGO=3**: ya arreglado en d4d267c (tableros 0x24 / 0x25 / 0x26).

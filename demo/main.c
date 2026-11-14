@@ -5313,13 +5313,19 @@ static int etapa_n, hud_ok, crono, puntos;
    carga) con las colocaciones del ejecutable: la union en su etapa (+0x98 del descriptor de tramo) y la etapa
    siguiente en el final de su rama. Todo se lee en segundo plano mientras se conduce: la union cuando faltan
    UNION_ANTES m de etapa; la rama se elige al llegar a la separacion (s_decide) por el centro de rama mas cercano al
-   coche; UNION_LIBERA m dentro de la union (y con la rama elegida) se libera la etapa que se deja, se quitan sus puntos
+   coche; en la posicion UNION_LIBERA_POS de la union (y con la rama elegida) se libera la etapa que se deja, se quitan sus puntos
    de la ruta (ruta_recorta) y el marco se recentra en el principio de la union (curso_recentra: las coordenadas no
    crecen de etapa en etapa); entonces se pide la etapa de la rama, que se ve en cuanto esta subida. Al llegar a ella
    pasa a ser la etapa actual y la union se libera UNION_LIBERA m despues. Memoria: etapa + union o union + etapa
    siguiente, en dos huecos fijos. En las etapas finales la union es la meta: GOAL al pasar su pancarta (meta). */
 #define UNION_ANTES 2500.0f
 #define UNION_LIBERA 300.0f
+/* la etapa que se deja se suelta donde el original la deja de dibujar: en su rama y en la posicion 0x18 de la union
+   (race_manager 4515B0, bandera 0x20 con la 0x80 de la colision; 44E590 cambia de registro: geo_paso). Antes a
+   UNION_LIBERA (300) m: la etapa siguiente (2,8-8,2 MB) se pedia 109 m mas tarde y con el GD lento no llegaba al final
+   de la union (carga_espera; barrido de la revision 44). Detras del coche no queda nada suyo: el trafico de atras se
+   cierra a TR_CIERRA_ATRAS posiciones y desde 0x18 no se dibuja */
+#define UNION_LIBERA_POS 0x18
 #define RAMA_SEPARA 6.0f                                        /* m entre los centros de las ramas para elegir */
 enum { CUR_RAMA = 1, CUR_UNION = 2, CUR_SIGUIENTE = 4, CUR_META = 8 };   /* sucesos de curso_paso */
 #define CURSO_MAX 16
@@ -5930,7 +5936,7 @@ static int curso_paso(void)
         if (etapa_n >= 0 && etapa_n < 5) rama_nivel[etapa_n] = (int8_t)cur_rama;
     }
     PK("rama");
-    if (etapa.datos && cur_en_union && cur_rama >= 0 && yo.s > s_union + UNION_LIBERA) {
+    if (etapa.datos && cur_en_union && cur_rama >= 0 && yo.s >= s_union + UNION_LIBERA_POS * m_pos) {
         unsigned u, l;
         tex_muda(&uni, &etapa);                                 /* lo que la union comparte con ella, a su lado */
         libera_modelo(&etapa); etapa_nodo = -1; cielo = &uni;
@@ -11060,8 +11066,8 @@ int main(int argc, char **argv)
                     }
                     if (ev & CUR_RAMA) {
                         texto_centro(zona_nombre(cur_sig)); aviso_rama = 0; t_estado = 0;
-                        dbglog(DBG_INFO, "RECORRIDO: arbol %d nodo %d %.4s rama %d -> nodo %d %.4s%s\n", curso_id, cur_nodo, curso[cur_nodo].zona,
-                               cur_rama, cur_sig, curso[cur_sig].zona, (cur_rama ? curso[cur_nodo].der : curso[cur_nodo].izq) < 0 ? " (sin hijo: la misma)" : "");
+                        dbglog(DBG_INFO, "RECORRIDO: arbol %d nodo %d %.4s rama %d -> nodo %d %.4s (union + %.0f m)%s\n", curso_id, cur_nodo, curso[cur_nodo].zona,
+                               cur_rama, cur_sig, curso[cur_sig].zona, (double)(yo.s - s_union), (cur_rama ? curso[cur_nodo].der : curso[cur_nodo].izq) < 0 ? " (sin hijo: la misma)" : "");
                     }
                     if (variante == 1 && (preset_curso <= 1 || preset_curso == 4) && (etapa_n == 0 || etapa_n == 1)) {   /* 4BB890 */
                         int fin_f, u_, pos_ = tr_fila(yo.s, &fin_f, &u_); float f;
@@ -11088,6 +11094,11 @@ int main(int argc, char **argv)
                     }
                     if (ev & CUR_SIGUIENTE) {
                         texto_centro(zona_nombre(cur_nodo)); t_estado = 0;
+                        /* el recorte por CPU (lejos) era de la geometria de la etapa que se deja: la nueva vuelve a la
+                           distancia del original (LEJOS_PS2, 0x178580) y se mide otra vez. Antes se arrastraba (sube 50 m
+                           cada 30 cuadros y solo por debajo de CPU_MS_ALARGA): tras METR (1850 m) RUIN empezaba a 2550-2700 m
+                           y bajo el arco de roca se veia el blanco del horizonte (barrido de la revision 44) */
+                        if (lejos < lejos_obj) lejos = lejos_obj;
                         int amp = tim_zona(cur_nodo, curso[cur_nodo].nivel);
                         pt_bonus_etapa(); tim_cuadros += amp; tiempo = tim_cuadros / TIM_HZ; t_ext = 0;
                         if (voz_ok) voces_checkpoint();         /* EXTEND TIME: efecto 0x4d y voz 0x16c */
@@ -11117,7 +11128,7 @@ int main(int argc, char **argv)
                         if (ev) DT(Q[0]);
                         if (f != f0) { f0 = f; DT(Q[1]); }
                         if (s_union >= 0 && sx != s_union && pv >= s_union) { DT(Q[2]); }
-                        if (s_union >= 0 && etapa.datos && pv >= s_union + UNION_LIBERA) DT(Q[3]);
+                        if (s_union >= 0 && etapa.datos && pv >= s_union + UNION_LIBERA_POS * m_pos) DT(Q[3]);
                         if (s_sig >= 0 && pv >= s_sig) DT(Q[4]);
                         if (s_union >= 0 && yo.s >= s_union) sx = s_union;
                         if (s_suelta >= 0 && pv >= s_suelta) DT("antes de soltar la union");
@@ -11541,7 +11552,10 @@ int main(int argc, char **argv)
                     else if (texto) caja(36, 18, 568, ver ? 92 : 34, 0x90000000);
                     if (texto && !(ty > 100 && pausa)) rect_txr(txt_arr, 512, 128, 40, ty + 2, 512, 128, PVR_LIST_TR_POLY);
                 }
-                if (estado != TITULO && (!hud_ok ? (estado != CARRERA || t_estado < 50 || auto_ || aviso_rama) : (estado == CARRERA && auto_ && t_estado >= 50))) rect_txr(txt_cen, 256, 32, 64, 180, 512, 64, PVR_LIST_TR_POLY);
+                /* el rotulo de texto de la DC (cuenta, nombre de la etapa, "< X  X >" de la bifurcacion, GOAL!) solo sin HUD:
+                   con el HUD lo dicen las escenas del original. Antes con el HUD y el piloto (auto_) salia el de la
+                   bifurcacion encima del HUD (barrido de la revision 44) */
+                if (estado != TITULO && !hud_ok && (estado != CARRERA || t_estado < 50 || auto_ || aviso_rama)) rect_txr(txt_cen, 256, 32, 64, 180, 512, 64, PVR_LIST_TR_POLY);
             }
             PRF(8);
             pvr_list_finish();

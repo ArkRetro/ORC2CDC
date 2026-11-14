@@ -59,7 +59,8 @@ Borrar los GDI despues (/dev/shm/dcr): llevan los datos de tu disco.
            -DPRUEBA_SIN_TIEMPO y mejor -DDIAG_PVRMEM): meta -> millas -> continuar A (REINTENTAR), B (al menu, con la
            pelicula de la demo de atraccion por medio), pausa ABANDONAR / REINTENTAR y otro coche en el menu; 7 carreras.
            Las lineas RAMMAPA, "VRAM: zona del curso" y PVRMAPA (el mapa de la VRAM, -DDIAG_PVRMEM) de cada carrera
-           deben salir iguales y sin "Out of memory" ni "pvr_mem: ERROR" (docs/DREAMCAST.md, Carreras seguidas).
+           deben salir iguales y sin "Out of memory" ni "pvr_mem: ERROR" (docs/DREAMCAST.md, Carreras seguidas). Por
+           defecto MODO_JUEGO=1 (OUTRUN, arbol 0: PRUEBA_NODO no cuenta en COAST 2 COAST).
   salidas.sh  la salida del jugador tres veces en el mismo modo (revision 44): menu.sh hasta la carrera (MODO_JUEGO=3:
            por los tableros de la CONTRARRELOJ, el primer curso), sa_1, gas, pausa y REINTENTAR (sa_2), gas, pausa,
            ABANDONAR y A hasta la carrera siguiente (sa_3); error si las lineas "SALIDA:" no salen iguales (salvo
