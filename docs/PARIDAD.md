@@ -4373,3 +4373,40 @@ docs/PLAN.md (Popping, 7. Las palmeras).
   45 % del bufer con la pareja; mas bufer pide VRAM).
 - Nota: las pruebas de BEAC usaron la carpeta de datos compartida durante el cambio de la tabla 2 de los registros
   (otro trabajo, mismo dia); las de PALM no dependen de el.
+
+## Revision 46: palmeras lejanas en version de bajo coste (DESVIACION pedida, 2026-11-14)
+
+Peticion del usuario tras la revision 45: "No quiero recortes; en tal caso, las palmeras mas lejanas que se vean pero
+en version low-poly, y cuando te acerques que se vean bien". **DESVIACION pedida**: el original no tiene LOD de la
+vegetacion (los nodos de las etapas de PS2 solo traen la malla 0; 404B00 solo quita por tamano, 3,75 / 7,5 px) y la
+dibuja entera hasta ahi; la Dreamcast no puede (revision 45: el reparto del TA las quitaba de lejos). Detalle y medidas
+en docs/PLAN.md (Popping, 8).
+- **Version lejana** (tools/lod_veg.py, en la conversion: conv_tramo.py y conv_union.py tras la PVS; en una carpeta ya
+  hecha, `tools/regenera.py --interno lodveg datos/ trabajo/`): para cada nodo de vegetacion de recorte (el criterio de
+  POPVEG: mas de la mitad de sus vertices en la lista de recorte) que cuesta al menos 1500 bytes teoricos del TA y que
+  se ve igual desde cualquier lado (en planta no alargado, alto, silueta abierta, muchas piezas, no azulado: palmeras,
+  arboles, arbustos, pinos; tambien unas farolas, la cabina del teleferico y ruinas pequenas; no barandillas, vallas,
+  setos, macizos de flores, fachadas ni carteles), un impostor: un cuadrilatero orientado a la camara alrededor de la
+  vertical (como los carteles del original, face_camera de 404D10: carga_cartel) con la imagen del propio nodo dibujada
+  por software desde su geometria, sus texturas y el color de sus vertices tal y como estan en el fichero (la luz del
+  original cocida; nada de arte nuevo): vista desde la direccion por la que llega la camara (la ruta hacia atras),
+  4 x 4 muestras por texel, el recorte de la PowerVR (alfa >= 0,5). Los nodos del mismo modelo (las mismas tiras con
+  otra matriz) comparten imagen por rumbo (8). Imagenes de hasta 62 texeles de lado en atlas VQ ARGB1555 (lista de
+  recorte). Coste en el TA: 108 bytes teoricos por impostor frente a ~7300 de una palmera de PALM (x 1,75 = 189 frente
+  a 12800 bytes contados): **62-94 veces menos** (PALM 1334 KB -> 18 KB teoricos para sus 179 nodos).
+- **En la demo** (`nodos_visibles`, LOD_LEJ_PX 48 px de radio en la pantalla de 640x480, histeresis LOD_LEJ_HIST 1,25):
+  por debajo del umbral se dibuja el impostor; la visibilidad, el LOD del original (sigue quitando lo mismo por debajo
+  de 3,75 / 7,5 px), la PVS y la clase de distancia son las del nodo completo; el impostor va en la clase de LOD 0 del
+  reparto (con lo que no se quita: ~22 por cuadro, 4 KB). VISO.DAT compara con los nodos del original (`nn0`).
+- **Medido en Flycast** (PRUEBA_AUTO 240 s, por 45 cuadros; antes = el mismo fichero con LOD_LEJ_PX=0): apariciones
+  por el tope del TA de la vegetacion con version lejana (>= 2 / 8 / 32 px por s): PALM con 448 2,76 / 2,58 / 0,24 ->
+  **0,01 / 0,01 / 0,01**; BEAC con 448 2,05 / 2,00 / 0,39 -> **0,10 / 0,10 / 0,10**; con TA_F_MIN=576 PALM 2,44 / 2,44 /
+  2,14 -> 1,37 / 1,37 / 1,37 y BEAC 2,55 / 2,54 / 2,15 -> 1,04 / 1,04 / 1,04 (las que quedan son palmeras completas de
+  25-50 m y 60-130 px que no caben en la salida: el reparto quita lo cercano). Pantalla sin dibujar por el tope (PALM
+  448) 6,3 -> 1,9 %; fps iguales (43,3 / 43,2; dib 18,13 -> 18,21 ms). Captura congelada crono 2400 (playa de PALM) con
+  576: antes 1 palmera del borde derecho, ahora las 8 (capturas_r45/palmeras_lod_c2400_zoom.png: 576 antes, 576 ahora,
+  todo completo sin tope, todo lejano sin tope).
+- RAM: el hueco de la etapa sube 44 KB (SEG46 8116 -> 8160 KB; la mayor). VRAM: hasta 44 KB por etapa (atlas; PALM 40).
+  Sin "Out of memory". Las uniones casi no tienen vegetacion asi (4 BK de 498 cambian).
+- Lo que sigue apareciendo de la vegetacion por el tope es la que no tiene version lejana (barata, menos de 1500 bytes,
+  o alargada: setos y macizos de flores) y, con 576, palmeras cercanas completas.

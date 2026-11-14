@@ -379,3 +379,61 @@ Lo que arreglaria las palmeras de verdad (decision del usuario):
    (cada 64 KB de bufer son 128 KB de VRAM por ir doble).
 3. Dibujar mas alla del recorte del original no es posible sin cambiar el aspecto: no hay LOD de palmeras en los
    datos del PS2 ni texturas de siluetas que usar.
+
+### 8. Palmeras lejanas en version de bajo coste (revision 46, DESVIACION pedida, 2026-11-14)
+
+Peticion del usuario: "No quiero recortes; en tal caso, las palmeras mas lejanas que se vean pero en version low-poly,
+y cuando te acerques que se vean bien". En lugar de que el reparto del TA quite la vegetacion de lejos, cada nodo de
+vegetacion caro tiene una version lejana (tools/lod_veg.py) que la demo dibuja cuando se ve pequeno (demo/main.c
+nodos_visibles, LOD_LEJ_PX / LOD_LEJ_HIST). docs/PARIDAD.md, Revision 46: palmeras lejanas.
+
+Por que un impostor y no una malla simplificada (medido sobre PALM): una palmera son 27 tiras (5 del tronco, 21-22 hojas
+de 3-16 vertices); el TA guarda cada trozo de 6 triangulos con su cabecera, asi que lo minimo por hoja es un
+cuadrilatero (108 bytes teoricos): reducir cada hoja a 4 vertices y el tronco a una tira deja ~2,6 KB de 7,3 (2,8 veces
+menos, lejos de 4-5) sin quitar hojas (cambiaria la silueta). Un impostor de un cuadrilatero son 108 bytes: 68 veces
+menos. Dos o tres planos cruzados fijos: 2-3 veces eso y se ven de canto; el cuadrilatero girado hacia la camara
+alrededor de la vertical (el mecanismo de los carteles del original, carga_cartel) se ve siempre de frente.
+
+Seleccion (lod_veg.candidatos y planta, medido en las 62 etapas: 1928 modelos de recorte distintos, mosaicos en el
+scratchpad lod46/): POPVEG (> 1/2 de los vertices en la lista de recorte), >= 1500 bytes teoricos, no carteles, y con la
+forma de algo que se ve parecido de cualquier lado: desviacion menor / mayor en planta >= 0,35, alto >= 1/2 del lado en
+planta, 2-55 % de texeles opacos en su imagen, >= 12 tiras y no azulado. Quedan palmeras, arboles (verdes, amarillos de
+otono y en flor), arbustos y pinos, y algunas farolas, la cabina del teleferico y ruinas pequenas; fuera barandillas,
+vallas, setos, macizos de flores, fachadas con ventanas, gente y carteles. 3948 nodos en 51 etapas; 4 uniones de 498.
+
+Imagen: vista ortografica desde la direccion de llegada de la camara (la ruta del fichero hacia atras desde el punto
+mas cercano), 62 texeles el lado mayor, 4 x 4 muestras por texel, cobertura >= 0,5 (el recorte de la PowerVR), color de
+lo transparente rellenado con el de los vecinos; los nodos del mismo modelo (ajuste afin de sus vertices al primero)
+comparten imagen redondeando su rumbo de llegada a 8 (PALM: 179 nodos, 11 modelos, 47 imagenes). Atlas VQ ARGB1555
+rectangulares (el ancho que menos ocupa con su libro): PALM 256x512 + 256x64, 40 KB; la que mas, SEG50, 44 KB.
+
+En la demo: radio en la pantalla < LOD_LEJ_PX (48) -> el impostor; con histeresis (el lejano sigue hasta 60 px, el
+completo hasta 38). Probado antes con 24 px: las palmeras de 24-48 px (50-110 m) seguian completas y el tope las
+quitaba (vegetacion de 8 px o mas por el tope 6,28 -> 5,40 por s). El impostor va en la clase de LOD 0 del reparto
+(antes, con la clase del completo menos el coste, el tope lo quitaba alguna vez); sin grupo.
+
+| PALM -> ALPI, por s (>= 2 / 8 / 32 px) | 448 antes | 448 ahora | 576 antes | 576 ahora |
+|---|---|---|---|---|
+| vegetacion con version lejana, aparece por el tope | 2,76 / 2,58 / 0,24 | **0,01 / 0,01 / 0,01** | 2,44 / 2,44 / 2,14 | **1,37 / 1,37 / 1,37** |
+| toda la vegetacion, aparece por el tope | 8,34 / 6,28 / 0,66 | 5,23 / 4,00 / 0,49 | 12,33 / 11,59 / 5,05 | 11,39 / 10,30 / 4,31 |
+| todo, aparece por el tope | 22,79 / 17,15 / 2,44 | 19,11 / 14,29 / 2,25 | 30,48 / 29,07 / 14,55 | 31,01 / 29,00 / 13,82 |
+| pantalla sin dibujar por el tope (mediana) | 6,3 % | 1,9 % | 117 % | 104 % |
+| fps / dib (ms) | 43,31 / 18,13 | 43,22 / 18,21 | 43,77 / 15,80 | 43,79 / 15,98 |
+
+| BEAC -> SANF (PRUEBA_JUEGO=3), BEAC | 448 antes | 448 ahora | 576 antes | 576 ahora |
+|---|---|---|---|---|
+| vegetacion con version lejana, por el tope | 2,05 / 2,00 / 0,39 | **0,10 / 0,10 / 0,10** | 2,55 / 2,54 / 2,15 | **1,04 / 1,04 / 1,04** |
+| toda la vegetacion, por el tope | 3,66 / 3,25 / 0,72 | 1,40 / 1,16 / 0,30 | 6,63 / 5,99 / 3,06 | 4,45 / 3,94 / 1,96 |
+| todo, por el tope | 10,34 / 8,64 / 1,67 | 6,52 / 5,16 / 0,86 | 16,29 / 15,18 / 7,70 | 14,71 / 13,52 / 6,38 |
+| fps / dib (ms) | 43,81 / 17,42 | 43,99 / 16,96 | 44,17 / 15,43 | 44,18 / 15,49 |
+
+(antes = los mismos datos con -DLOD_LEJ_PX=0: el reparto y los costes de antes; ~20-22 impostores por cuadro en PALM y
+BEAC; 2,0-2,5 pasos de lejano a completo por s al acercarse, ~0 al reves; 0 "Out of memory"; RAM minima del monton
+677 -> 669 KB; la zona del curso en PALM 785 -> 745 KB libre, la minima de la prueba igual, 546 KB.) Lo que queda con
+576 son palmeras completas de 25-50 m y 60-130 px que no caben en la salida de PALM (el reparto acorta lo cercano;
+POPEV), y de toda la vegetacion la que no tiene version lejana (setos, macizos, lo barato).
+
+Capturas (scratchpad capturas_r45/): palmeras_lod_c2400_zoom.png (crono 2400, la playa de PALM: 576 antes con 1
+palmera en el borde derecho, 576 ahora con las 8, todo completo sin tope y todo lejano sin tope: iguales a esa
+distancia, 1566 pixeles distintos de 1024x768), palmeras_lod_c2400_4.png (las cuatro enteras); el paso de cerca en
+palmeras_lod_c1200_*.png.
