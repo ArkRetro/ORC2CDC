@@ -435,5 +435,7 @@ POPEV), y de toda la vegetacion la que no tiene version lejana (setos, macizos, 
 
 Capturas (scratchpad capturas_r45/): palmeras_lod_c2400_zoom.png (crono 2400, la playa de PALM: 576 antes con 1
 palmera en el borde derecho, 576 ahora con las 8, todo completo sin tope y todo lejano sin tope: iguales a esa
-distancia, 1566 pixeles distintos de 1024x768), palmeras_lod_c2400_4.png (las cuatro enteras); el paso de cerca en
-palmeras_lod_c1200_*.png.
+distancia, 1566 pixeles distintos de 1024x768), palmeras_lod_c2400_4.png (las cuatro enteras). El paso de cerca:
+palmeras_lod_c1200_lado.png / _zoom.png (crono 1200, la calle de la salida, sin tope: todo completo frente a todo
+lejano; las palmeras de la acera a ~30-50 px salen iguales de tamano, color y silueta, 1040 pixeles distintos, solo la
+colocacion de algunas hojas de la copa porque la imagen es la de la direccion de llegada redondeada).
