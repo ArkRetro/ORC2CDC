@@ -4347,3 +4347,29 @@ Inicio-Meta al principio), capturas_r45/edificio_antes.png. No es el reparto del
   empaquetar todas con pak_union.py no da los mismos bytes que la carpeta compartida en 6 descriptores y SEGS.PAK).
   Las cinco COLnn.DAT salen iguales byte a byte y VISO.DAT (conv_viso.py) tambien (los nodos no cambian). En una
   regeneracion completa (regenera.py) salen ya bien y empaquetadas.
+
+## Revision 45: las palmeras que aparecen de golpe (2026-11-14)
+
+Queja del usuario (Dreamcast real, revision 44): "sigue habiendo popping en las palmeras". Detalle y cifras en
+docs/PLAN.md (Popping, 7. Las palmeras).
+- **No es el original**: el LOD de 404B00 quita las palmeras a 3,75 px de radio (umbral 7, bandera 0x40 en 170 de las
+  174 de PALM; 7,5 px los arboles con umbral 6): en PALM a una mediana de 1126 m (457 m el 10 % mas pequeno) con la
+  camara de carrera (fx ~380). Sin cambiar: el LOD del original no hace saltar vegetacion de 8 px o mas (0,03-0,07 por
+  segundo, en su umbral).
+- **Es el reparto del TA del port** (DECISION DEL PORT, `nodos_visibles_todos`; DIAG_POPPING, linea POPVEG nueva):
+  6,5 apariciones por segundo de vegetacion de 8 px o mas en PALM con el TA de Flycast (448; 0,6 de 32 px o mas) y 11,9
+  (5,0 de 32 px o mas, a 12-150 m) con TA_F_MIN=576; BEAC 3,3 / 5,4. La PVS 0,8-1,8; grupos de nodos, niebla y velo
+  nada. Las palmeras son lo mas caro por pixel (7,3 KB teoricos del TA cada una; la vegetacion de PALM, 1453 KB, mas
+  que todo el tope de la etapa) y el coste por vertices del reparto (REPARTO_COSTE) las quita antes que los edificios.
+- Probado y descartado (Flycast, PLAN.md): sin coste para los vertices de recorte, el recorte a la mitad, histeresis
+  12 / 6, REPARTO_CERCA 0,40. Lo que ganan las palmeras lo pierde el resto (mas saltos de 32 px o mas y mas pantalla sin
+  dibujar) o ni eso; el reparto se queda igual. Unir las hojas en tiras largas (idea del usuario): +63 % de TA por
+  palmera (los trozos de 6 triangulos llevan su cabecera; los degenerados anaden vertices); las hojas ya usan el alfa
+  de recorte de su textura y no hay geometria de silueta que quitar. Sin cambio de datos.
+- Capturas congeladas (scratchpad capturas_r45/palmeras_*): crono 2400 (s 3605, la playa de PALM): sin tope y con 448
+  estan las palmeras del borde derecho de la carretera; con 576 faltan 6-8.
+- PENDIENTE (del usuario): la linea `TA ... x..` de la pantalla de medidas de su consola tras una vuelta por PALM (dice
+  si su consola es la de 448 o la de 576) y decidir si se busca sitio en el TA (el coche del jugador gasta 608 KB, el
+  45 % del bufer con la pareja; mas bufer pide VRAM).
+- Nota: las pruebas de BEAC usaron la carpeta de datos compartida durante el cambio de la tabla 2 de los registros
+  (otro trabajo, mismo dia); las de PALM no dependen de el.

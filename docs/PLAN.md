@@ -305,3 +305,77 @@ cuadro de dibujo, Flycast).
 - Medir en la consola real: `DIAG_POPPING` (necesita la consola serie) o al menos `DIAG_MS` y `lejos`.
 - Los nodos "malos" de OutRun2006Tweaks.lods.ini (LOD de otras secciones que el port, sin las listas por seccion,
   puede dibujar a la vez que el modelo entero): mirarlo en PALM (bifurcacion izquierda) y ALPI.
+
+### 7. Las palmeras (revision 45, 2026-11-14)
+
+Queja del usuario (Dreamcast real, revision 44): "sigue habiendo popping en las palmeras". Medida nueva en
+`DIAG_POPPING`: la vegetacion de recorte (nodos con mas de la mitad de sus vertices en la lista de recorte, la 1: hojas
+con el alfa de recorte de su textura) va aparte, linea `POPVEG:` (como `POP:`, mas la distancia y el radio maximo de
+las apariciones de 8 px o mas) y `veg` en `POPEV:`. Prueba: `-DPRUEBA_AUTO -DPRUEBA_SIN_TIEMPO -DDIAG_POPPING -DDIAG_VTX
+-DDIAG_MS` 240 s (PALM -> ALPI -> DESE; con `-DPRUEBA_JUEGO=3` BEAC -> SANF), por 45 cuadros, s >= 60.
+
+Lo que hace el original (404B00, sin cambiar): las palmeras de PALM (174 nodos con la textura de hojas 113, ARGB1555
+con su recorte) llevan casi todas la bandera 0x40 (umbral 7: 170 de 174), asi que el LOD las quita a 3,75 px de radio
+(240 / 2^6), no a 7,5. Con la focal de la camara en carrera (fx ~380, de px = r fx / (z + r) en POPEV) son
+z = r fx / 3,75 (umbral 6: r fx / 7,5): **PALM (SEG00), vegetacion de 64 vertices o mas: mediana 1126 m (p10 457, p90
+3773)**; en las etapas con muchas palmeras / arboles de recorte (SEG01, 13, 17, 18, 22, 32, 34, 42, 46, 50, 54, 64:
+150-320 nodos, 40000-60000 vertices) la mediana va de 400 a 1700 m (los arboles sin la bandera 0x40, a 7,5 px: 400-930
+m). Siempre bastante mas alla de donde el port las hace aparecer. El LOD del original no hace saltar palmeras de 8 px o mas (0,03-0,07 por segundo, nodos de
+umbral 6 justo en sus 7,5 px a 58-62 m).
+
+Por que aparecen (apariciones por segundo de vegetacion de recorte, >= 8 / >= 32 px; entre parentesis todo):
+
+| Prueba | reparto del TA (tope) | PVS | LOD 404B00 | lateral | fps / dib (ms) |
+|---|---|---|---|---|---|
+| PALM, TA 448 | **6,52 / 0,64** (17,6 / 2,4) | 1,82 / 0,68 | 0,03 / 0 | 0,06 / 0 | 43,3 / 18,1 |
+| PALM, TA_F_MIN=576 | **11,87 / 5,01** (29,3 / 14,4) | 0,82 / 0,47 | 0,04 / 0 | 0,06 / 0 | 43,9 / 15,8 |
+| BEAC, TA 448 | **3,27 / 0,44** (9,8 / 1,5) | 1,34 / 0,44 | 0 / 0 | 0,34 / 0,13 | 44,0 / 17,4 |
+| BEAC, TA_F_MIN=576 | **5,39 / 2,99** (14,8 / 7,7) | 0,83 / 0,39 | 0 / 0 | 0,10 / 0,06 | 44,3 / 15,4 |
+
+- **Es el reparto del TA del port**, no el original: aparecen por el tope a 12-150 m con 30-150 px de radio (el
+  original las dibuja hasta 3,75 px). Grupos de nodos: 65 de las 174 palmeras van agrupadas, todas con un nodo de 4-12
+  vertices (su sombra / base): la clase del grupo es la de la palmera, no cambia nada. La niebla / el velo: nada (lo
+  tapado por la niebla es la ultima clase y no cuenta como salto en la pantalla). La PVS: 0,8-1,8 por segundo (otro
+  trabajo).
+- Por que justo las palmeras: son lo mas caro por pixel de la etapa. Una palmera de PALM: 251 vertices de mediana
+  (hasta 326), 27 tiras (5 del tronco, opacas, textura 109; 21-22 de hojas de 3-16 vertices en el recorte), **7,3 KB
+  teoricos del TA** (x 1,75 = 12,8 KB contados). La vegetacion de 64 vertices o mas de PALM suma 1453 KB teoricos: mas
+  que todo el tope de la etapa (848 KB con 448, 579 con 576). El coche del jugador y la pareja se llevan 608 + 149 KB
+  con 448 (782 + 192 con 576): el 45 % del bufer.
+- Unir las hojas en una tira (idea del usuario: "que esten unidas y el corte solo dibujado"): **no gana, pierde**. Las
+  hojas ya son tiras con el alfa de recorte de su textura (ARGB1555); no hay geometria que solo haga de silueta. El TA
+  guarda cada trozo de 6 triangulos con su ISP/TSP/TCW, asi que unir con triangulos degenerados no quita trozos y anade
+  2-3 vertices por union: una palmera pasa de 7308 a 11940 bytes teoricos (+63 %; todas las de PALM 1310 -> 1993 KB).
+  Las tiras que siguen exactamente a la anterior (mismos 2 vertices, partidas por ADC) son 15 en todo el recorte de PALM
+  (1858 KB -> 1857). Las cabeceras ya van una vez por textura y cuadro (mallas ordenadas por lista y textura). Lo mismo
+  que DREAMCAST.md (El tope, tiras mas largas).
+- Probado en el reparto (Flycast, misma prueba; vegetacion >= 8 / >= 32 px por segundo por el tope, todo >= 8 / >= 32,
+  pantalla sin dibujar mediana):
+
+| Cambio (PALM, TA 448 salvo lo indicado) | vegetacion | todo | falta | fps |
+|---|---|---|---|---|
+| ninguno (lo de ahora) | 6,52 / 0,64 | 17,61 / 2,37 | 5,1 % | 43,30 |
+| sin coste para los vertices de recorte (REPARTO_COSTE solo con lo opaco) | 7,50 / 1,55 | 20,56 / 4,51 | 11,3 % | 43,58 |
+| recorte a la mitad en el coste | 5,69 / 0,59 | 18,18 / 3,04 | 5,7 % | 43,36 |
+| histeresis 12 / 6 (antes 8 / 4) | 6,94 / 0,69 | 18,34 / 2,80 | 4,8 % | 43,53 |
+| histeresis 12 / 6 y recorte a la mitad | 6,07 / 0,62 | 19,02 / 3,37 | 6,8 % | 43,46 |
+| REPARTO_CERCA 0,40 (antes 0,25) | 6,58 / 0,72 | 18,66 / 2,73 | 6,5 % | 43,52 |
+| 576: ninguno / sin coste de recorte / a la mitad | 11,87 / 5,01; 8,34 / 5,29; 11,33 / 4,79 | 29,3 / 14,4; 25,0 / 15,6; 28,4 / 14,8 | | 43,9 |
+| BEAC: ninguno / recorte a la mitad | 3,27 / 0,44; 3,31 / 0,37 | 9,75 / 1,50; 10,88 / 1,81 | 1,2 / 1,4 % | 44,0 |
+
+  Ninguno sirve: lo que las palmeras ganan lo pierde el resto (mas apariciones de 32 px o mas y mas pantalla sin
+  dibujar), porque lo que no cabe no cabe; sin el coste del recorte salen peor hasta las palmeras (cada palmera que
+  entra echa a otras). El reparto se queda como estaba (sin cambio de codigo).
+- Capturas congeladas (`-DDIAG_CONGELA`, el mismo paso; scratchpad capturas_r45/palmeras_*): en el crono 1200 (la calle
+  de la salida) 448 sale igual que sin tope (4 pixeles distintos) y 576 casi (473); en el crono 2400 (s 3605, el paseo
+  de la playa) **con 576 faltan las 6-8 palmeras del borde de la carretera de la derecha** que estan sin tope y con 448
+  (palmeras_c2400_zoom_sintope_448_576.png): es lo que ve el usuario si su consola gasta ~2,25 veces lo teorico.
+
+Lo que arreglaria las palmeras de verdad (decision del usuario):
+1. Medir el TA de su consola: la linea `TA <real>K/<teorico>K x.. max.. f..` de la pantalla de medidas (pausa, Y) tras
+   una vuelta por PALM. Si sale x1,3-1,4 (lo de la demo 12c), `ta_f` se queda en 1,75 y en PALM aparecen ~6,5 por
+   segundo de 8 px (casi todas de menos de 32); si sale ~2, son las 12 por segundo de 576 y las de 30-150 px.
+2. Sitio en el TA: el coche del jugador (608 KB, sin LOD en el original) es lo que mas gasta; mas bufer solo con VRAM
+   (cada 64 KB de bufer son 128 KB de VRAM por ir doble).
+3. Dibujar mas alla del recorte del original no es posible sin cambiar el aspecto: no hay LOD de palmeras en los
+   datos del PS2 ni texturas de siluetas que usar.
