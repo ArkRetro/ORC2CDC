@@ -43,11 +43,13 @@ def duracion(A, k):
     return int(struct.unpack_from('<f', A.a, raiz + 8)[0])
 
 def iconos_ps2(D):
-    """{boton: RGBA} de los iconos del PS2 de la barra de ayuda (tabla 0x374a60, banco 0x48, cuadro 25)"""
+    """{boton: RGBA} de los iconos del PS2 de la barra de ayuda (tabla 0x374a60, banco 0x48, cuadro 25): 4 (cruz), 8
+    (circulo) y 0x10 (el de REINTENTAR de 2B004F, la mision ya superada: 4959E0 lo lee con el bit 0x10; en la Dreamcast
+    es Y, como en los menus: conv_menu.BOTON_DC)"""
     ab, Tb, _ = cm.banco_menu(D, 0x48)
     w = D.elf32(cm.AYUDA_ICONO, 16); mapa = {w[2 * i]: w[2 * i + 1] for i in range(8)}
     res = {}
-    for bt in (4, 8):
+    for bt in (4, 8, 0x10):
         ps = [q for q in ch.escena(ab, mapa[bt] & 0xffff, 25.0) if q['alfa'] >= 0.004]
         assert len(ps) == 1
         l, t, r, b = (int(round(v)) for v in ps[0]['src'])
@@ -55,7 +57,7 @@ def iconos_ps2(D):
     return res
 
 def boton_de(p, T, ps2):
-    """boton (4 / 8) del icono del PS2 que es la pieza p, o None"""
+    """boton (4 / 8 / 0x10) del icono del PS2 que es la pieza p, o None"""
     from PIL import Image
     l, t, r, b = (int(round(v)) for v in p['src'])
     if not (20 <= r - l <= 40 and 20 <= b - t <= 40): return None
@@ -85,7 +87,7 @@ def convierte(iso, sal, previas=None):
               ('CONT_PREG', ag, Tg, 0x2b, t_preg & 0xffff), ('CONT_ELIGE', ag, Tg, 0x2b, t_elige & 0xffff),
               ('GAME_OVER', ac, Tc, 0x2c, t_over & 0xffff)]
     cambiados = [0]; huds = {}
-    def boton(p):                                               # icono del boton de la Dreamcast (A / B) de CONT_ELIGE
+    def boton(p):                                               # icono del boton de la Dreamcast (A / B / Y) de CONT_ELIGE
         bt = boton_de(p, Tg, ps2) if 'bk' not in p else None
         if bt is None: return p
         img, _ = dc[bt]; cambiados[0] += 1

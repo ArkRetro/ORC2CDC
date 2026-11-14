@@ -373,7 +373,8 @@ int fin_paso(uint32_t nuevo)
         } else if (t_elige > n_elige - 1) {
             if (mis_seg) {                              /* 4959E0: A 495A60 (la siguiente) y 30, 0x10 la misma */
                 if (nuevo & BOTON_A) { sfx_menu(SFX_ACEPTA); r = FIN_SIGUIENTE; }
-                else if (nuevo & CONT_X) { sfx_menu(SFX_ACEPTA); r = FIN_REINTENTA; }
+                else if (nuevo & CONT_Y) { sfx_menu(SFX_ACEPTA); r = FIN_REINTENTA; }   /* 0x10 = Y, como en los menus
+                                                           (el icono de 2B004F: conv_fin.iconos_ps2) */
             } else if (nuevo & BOTON_A) { sfx_menu(SFX_ACEPTA); r = FIN_REINTENTA; }   /* 1b49b8(0x1e), 11b2b0(0x40) */
             if (nuevo & BOTON_B) { sfx_menu(SFX_ACEPTA); r = FIN_MENU; }        /* 1b49b8(0x1c) */
         }

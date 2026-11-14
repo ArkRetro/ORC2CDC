@@ -2,8 +2,8 @@
 # salon.sh <disc.gdi> [pantalla] [salida/]: el SALON (showroom, SALON.DAT). GDI con -DPRUEBA_SALON_MILLAS=20000 (la licencia
 # nueva con 20000 millas al entrar en el salon). Primer arranque con la VMU vacia: licencia nueva, UN JUGADOR, SALON
 # (cuatro a la derecha): pagina principal (sa_1), COCHES (sa_2: el F50, 7500 M), ventana de compra (sa_3), A: comprado
-# y guardado (sa_4); MUSICA (tres abajo: sa_5), compra del primer tema (sa_6); fuera del salon (sa_7); OUTRUN, la
-# seleccion de coche en el F50 (sa_8: sin candado) y la musica en el tema 8 de la lista 0 (sa_9: sin candado).
+# y guardado (sa_4); MUSICA (tres abajo: sa_5), compra del primer tema (sa_6); fuera del salon (sa_7); OUTRUN (con A en
+# el tablero 0x24 de los juegos de cursos), la seleccion de coche en el F50 (sa_8: sin candado) y la musica en el tema 8 de la lista 0 (sa_9: sin candado).
 # Segundo arranque con la misma VMU (CONSERVA_VMU=1): el salon con las millas que quedaron (sa_11: 10000 M), FERRARIS
 # con el F50 comprado (sa_12) y la seleccion de coche en el F50 (sa_10). Error sin "SALON: comprado" o sin los guardados.
 D=$(cd "$(dirname "$0")" && pwd); . "$D/comun.sh"
@@ -30,6 +30,7 @@ tecla s; espera 6; foto sa_6b                                            # X: la
 tecla c; espera_log 'SALON: SALON.DAT' 30 || true; espera 5; foto sa_6c  # B: de vuelta al salon (pagina principal)
 tecla c; espera 5; foto sa_7                                             # fuera del salon: UN JUGADOR
 for _m in 1 2 3; do tecla Left; espera 1; done                           # OUTRUN
+tecla x; espera_log 'TABLERO: clave 0x24' 30; espera 4                # el tablero 0x24 de OUTRUN (revision 44)
 tecla x; espera 6; tecla Right; espera 2; tecla Right; espera 6; foto sa_8   # seleccion de coche: el F50
 tecla x; espera 5; tecla x; espera_log 'musica: MUS33' 30 || true; espera 6   # cambio, musica
 for _m in 1 2 3 4 5 6 7; do tecla Right; espera 3; done; espera 3; foto sa_9   # el tema 8 de la lista 0
@@ -46,6 +47,7 @@ tecla x; espera 6; for _m in 1 2 3 4; do tecla Right; espera 2; done     # un ju
 tecla x; espera_log 'SALON: SALON.DAT' 30; espera 5; foto sa_11         # las millas que quedaron (10000 M)
 tecla x; espera 6; foto sa_12                                            # FERRARIS: el F50 ya es suyo
 tecla c; espera 4; tecla c; espera 6; for _m in 1 2 3; do tecla Left; espera 2; done   # OUTRUN
+tecla x; espera_log 'TABLERO: clave 0x24' 30; espera 4                # el tablero 0x24 de OUTRUN
 tecla x; espera 8; tecla Right; espera 3; tecla Right; espera 6; foto sa_10   # seleccion de coche: el F50
 log 'SALON|pvr_mem|Out of' 10
 if grep -a -q 'pvr_mem: ERROR' "$SAL/flycast.txt" "$SAL/flycast_1.txt"; then echo "AVISO: pvr_mem: ERROR" >&2; ERROR=1; fi
