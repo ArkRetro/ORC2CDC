@@ -4181,7 +4181,8 @@ la union, coche, pareja, trafico, efectos); "d" es el corte de distancia (prio_d
   Verificado en la maqueta de la escena (c2c_mision_superada_iconos_despues_maqueta.png: A SIGUIENTE RONDA, Y
   REINTENTAR, ABANDONAR B); sin pasada en Flycast hasta una mision superada.
 - **salon.sh desfasado** (CORREGIDO): tras elegir OUTRUN pulsa A en el tablero 0x24 (espera "TABLERO: clave 0x24"),
-  en los dos arranques. Sin pasada entera en Flycast (en este lote).
+  en los dos arranques. Verificado en Flycast (GDI con -DPRUEBA_SALON_MILLAS=20000): las dos compras y sus guardados,
+  sa_8 / sa_10 la seleccion de coche en el F50 y sa_9 la musica (MUS33), sin errores (lote1_salon_sa7_8_9_10_despues.png).
 - **EAST antes de la union: la parte de arriba del acantilado flota sobre la carretera** (INVESTIGADO, PENDIENTE). No es
   el reparto del TA, ni el PVS, ni el LOD: sale igual (EAST desde la salida, `-DPRUEBA_JUEGO=3 -DPRUEBA_NODO=10`, 1'05"
   a 1'09" de la etapa) con 576, sin tope (`-DTA_F_MIN=128`), sin PVS (`-DSIN_PVS`), sin reparto ni tope
@@ -4218,5 +4219,5 @@ la union, coche, pareja, trafico, efectos); "d" es el corte de distancia (prio_d
 
 Pendiente del lote 1: EAST (la roca de la etapa), NEWY (el cielo), el dragon de RUIN -> IMPE (CPU), las uniones de la
 lista no repasadas una a una con 576 (CLOU, INDU, SNOW, RUIN y las del arbol 291, arboles 0 / 1 e INFARTO) y una pasada
-de salon.sh y de una MISION SUPERADA de C2C en Flycast. Datos regenerados: FINC2C.DAT (paso fin de tools/regenera.py,
+de una MISION SUPERADA de C2C en Flycast. Datos regenerados: FINC2C.DAT (paso fin de tools/regenera.py,
 PYTHONHASHSEED=0), copiado a la carpeta de datos compartida.
