@@ -9,7 +9,9 @@ cada lado, cada 4 m como mucho; a 0,6, 3,3 y 6 m sobre el suelo del perfil) se d
 cuatro caras alrededor (todos los rumbos; cabeceo de -45 a +60 grados). Tapan los triangulos de los nodos que el LOD
 del original dibuja seguro desde ahi (distancia al centro <= r 2^(umbral - 1) fx / 240 con la fov mas abierta, FOV_MAX)
 y que no son de una rama de la union ni carteles: los opacos (lista 0) enteros y los de recorte (lista 1, prueba de
-alfa) solo donde el texel y sus ocho vecinos son opacos (mascaras); lo transparente no tapa. El z-buffer se erosiona
+alfa) solo en los pixeles en los que todos sus texeles son opacos con sus ocho vecinos (mascaras; hasta la revision 44
+solo el texel del centro del pixel, y lo lejano tapaba por los huecos de las ramas y las ventanas: en BEAC 8113 de 25139
+mallas se quitaban en alguna seccion desde la que se ven); lo transparente no tapa. El z-buffer se erosiona
 lo que puede moverse un borde visto desde cualquier punto a EPS metros de la muestra (eps / z radianes, mas un pixel),
 y cada triangulo se ve si algun pixel que toca (rasterizado conservador) no queda detras; los de area nula no pintan
 nada. Es conservador: puede quedar algo que no se ve, pero no se quita nada que se pueda ver desde la zona muestreada.

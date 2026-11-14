@@ -6,8 +6,10 @@
    piramide de la vista se recorta luego en cada cuadro, en la demo). En cada cara:
    1) los oclusores (triangulos de mallas que el LOD del original dibuja seguro desde ahi: occ_lim) van a un z-buffer
       (1/z por pixel, centro del pixel): los opacos (lista 0) enteros; los de recorte (lista 1, prueba de alfa) solo
-      donde su textura tapa seguro: el texel de la UV del centro del pixel (con la perspectiva) y sus ocho vecinos
-      opacos (mascara erosionada que da tools/pvs.py: el filtro bilineal y el redondeo de la UV no abren huecos);
+      en los pixeles que su textura tapa enteros: todos los texeles que caen en el pixel (el rectangulo de las UV de
+      sus cuatro esquinas, con la perspectiva; tabla de sumas de la mascara) opacos con sus ocho vecinos (mascara
+      erosionada que da tools/pvs.py: el filtro bilineal y el redondeo de la UV no abren huecos). Hasta la revision 44
+      solo el texel del centro del pixel: lo lejano (texeles menores que el pixel) tapaba por los huecos;
    2) erosion conservadora: el ojo de verdad puede estar hasta eps metros de la muestra, y un borde de oclusor a z
       metros se mueve como mucho eps / z radianes respecto a lo de detras; cada pixel solo tapa con la profundidad mas
       lejana de su entorno de ese radio (mas un pixel; filtro de minimo de 1/z por niveles: medios lados 1, 3, 7...);
@@ -45,6 +47,7 @@ typedef struct {
     const int *t0; int nn; const float *esf; const unsigned char *fl; const float *occ;
     const float *pos; const int *sec; int npos; float K, eps; unsigned *sal_t, *sal_m; int ntw, nmw;
     int sig; pthread_mutex_t mu;
+    int *sat, *s_ofs;                                            /* tablas de sumas de los texeles que no tapan */
 } trabajo_t;
 
 typedef struct { int W, H; float *niv[NIV]; float *tmp; float *E; } buf_t;
@@ -100,8 +103,30 @@ static int recorta_uv(const float v[3][5], float K, float s[4][5])
     return n;
 }
 
-/* oclusor de recorte: como raster_ocl, solo en los pixeles cuyo texel (UV con la perspectiva) tapa en la mascara */
-static void raster_ocl_alfa(buf_t *b, const float *A, const float *B, const float *C, const unsigned char *m, int mw, int mh)
+/* texeles que no tapan (mascara a 0) en el rectangulo [u0, u1] x [v0, v1] de la textura repetida, con su tabla de sumas
+   S ((w + 1) x (h + 1): S[y][x] = los de [0, x) x [0, y)) */
+static int sin_tapar(const int *S, int w, int h, int u0, int u1, int v0, int v1)
+{
+    int x[4], y[4], nx = 0, ny = 0, i, j, n = 0;
+    if (u1 - u0 + 1 >= w) { x[0] = 0; x[1] = w; nx = 1; }
+    else { u0 %= w; if (u0 < 0) u0 += w; u1 = u0 + (u1 - u0 + w * 4) % w;   /* (u1 - u0 ya < w) */
+           if (u1 < w) { x[0] = u0; x[1] = u1 + 1; nx = 1; } else { x[0] = u0; x[1] = w; x[2] = 0; x[3] = u1 - w + 1; nx = 2; } }
+    if (v1 - v0 + 1 >= h) { y[0] = 0; y[1] = h; ny = 1; }
+    else { v0 %= h; if (v0 < 0) v0 += h; v1 = v0 + (v1 - v0 + h * 4) % h;
+           if (v1 < h) { y[0] = v0; y[1] = v1 + 1; ny = 1; } else { y[0] = v0; y[1] = h; y[2] = 0; y[3] = v1 - h + 1; ny = 2; } }
+    for (i = 0; i < nx; i++) for (j = 0; j < ny; j++) {
+        int xa = x[2 * i], xb = x[2 * i + 1], ya = y[2 * j], yb = y[2 * j + 1], W = w + 1;
+        n += S[yb * W + xb] - S[ya * W + xb] - S[yb * W + xa] + S[ya * W + xa];
+    }
+    return n;
+}
+
+/* oclusor de recorte: como raster_ocl, solo en los pixeles que su textura tapa enteros: todos los texeles (de la mascara
+   erosionada) que caen en el pixel, el rectangulo de las UV de sus cuatro esquinas con la perspectiva. Antes solo el
+   texel del centro del pixel: con texeles mas pequenos que el pixel de la muestra (lo lejano; el raster del PVS tiene
+   K = 128 pixeles por unidad de tangente, unas 4 veces menos que la pantalla) un texel opaco tapaba el pixel entero
+   aunque a su lado hubiera huecos (ventanas, ramas) por los que se ve lo de detras (revision 45) */
+static void raster_ocl_alfa(buf_t *b, const float *A, const float *B, const float *C, const int *S, int mw, int mh)
 {
     float ar = (B[0] - A[0]) * (C[1] - A[1]) - (C[0] - A[0]) * (B[1] - A[1]);
     int x0, x1, y0, y1, x, y; float *zb = b->niv[0];
@@ -117,15 +142,23 @@ static void raster_ocl_alfa(buf_t *b, const float *A, const float *B, const floa
         for (y = y0; y <= y1; y++) {
             float cy = y + 0.5f; float *fila = zb + y * b->W;
             for (x = x0; x <= x1; x++) {
-                float cx = x + 0.5f, w0 = a0 * cx + b0 * cy + c0, w1 = a1 * cx + b1 * cy + c1, w2 = 1.0f - w0 - w1, iz, u, v;
-                int iu, iv;
+                float cx = x + 0.5f, w0 = a0 * cx + b0 * cy + c0, w1 = a1 * cx + b1 * cy + c1, w2 = 1.0f - w0 - w1, iz;
+                float umin = 1e30f, umax = -1e30f, vmin = 1e30f, vmax = -1e30f; int q, ok = 1;
                 if (w0 < 0 || w1 < 0 || w2 < 0) continue;
                 iz = w0 * A[2] + w1 * B[2] + w2 * C[2];
                 if (iz <= fila[x]) continue;
-                u = (w0 * A[3] + w1 * B[3] + w2 * C[3]) / iz * mw; v = (w0 * A[4] + w1 * B[4] + w2 * C[4]) / iz * mh;
-                if (!(fabsf(u) < 1e6f && fabsf(v) < 1e6f)) continue;
-                iu = (int)floorf(u) % mw; iv = (int)floorf(v) % mh; if (iu < 0) iu += mw; if (iv < 0) iv += mh;
-                if (m[iv * mw + iu]) fila[x] = iz;
+                for (q = 0; q < 4 && ok; q++) {                 /* las cuatro esquinas del pixel */
+                    float px = x + (q & 1), py = y + (q >> 1);
+                    float e0 = a0 * px + b0 * py + c0, e1 = a1 * px + b1 * py + c1, e2 = 1.0f - e0 - e1;
+                    float jz = e0 * A[2] + e1 * B[2] + e2 * C[2], u, v;
+                    if (!(jz > 0)) { ok = 0; break; }
+                    u = (e0 * A[3] + e1 * B[3] + e2 * C[3]) / jz * mw; v = (e0 * A[4] + e1 * B[4] + e2 * C[4]) / jz * mh;
+                    if (!(fabsf(u) < 1e6f && fabsf(v) < 1e6f)) { ok = 0; break; }
+                    umin = fminf(umin, u); umax = fmaxf(umax, u); vmin = fminf(vmin, v); vmax = fmaxf(vmax, v);
+                }
+                if (!ok) continue;
+                if (sin_tapar(S, mw, mh, (int)floorf(umin), (int)floorf(umax), (int)floorf(vmin), (int)floorf(vmax))) continue;
+                fila[x] = iz;
             }
         }
     }
@@ -279,8 +312,8 @@ static void una_posicion(trabajo_t *T, buf_t *b, int ip)
                     float v[3][5], s[4][5]; int t = T->tex[j];
                     for (k = 0; k < 3; k++) { vista(T->tri + 9 * j + 3 * k, o, f, v[k]); v[k][3] = T->uv[6 * j + 2 * k]; v[k][4] = T->uv[6 * j + 2 * k + 1]; }
                     n = recorta_uv(v, T->K, s);
-                    if (n >= 3) raster_ocl_alfa(b, s[0], s[1], s[2], T->mas + T->m_ofs[t], T->m_w[t], T->m_h[t]);
-                    if (n == 4) raster_ocl_alfa(b, s[0], s[2], s[3], T->mas + T->m_ofs[t], T->m_w[t], T->m_h[t]);
+                    if (n >= 3) raster_ocl_alfa(b, s[0], s[1], s[2], T->sat + T->s_ofs[t], T->m_w[t], T->m_h[t]);
+                    if (n == 4) raster_ocl_alfa(b, s[0], s[2], s[3], T->sat + T->s_ofs[t], T->m_w[t], T->m_h[t]);
                 }
             }
         }
@@ -350,10 +383,23 @@ int pvs(const float *tri, const unsigned char *opa, const float *uv, const int *
     T.t0 = t0; T.nn = nm; T.esf = esf; T.fl = fl; T.occ = occ; T.pos = pos; T.sec = sec; T.npos = npos;
     T.K = K; T.eps = eps; T.sal_t = sal_t; T.sal_m = sal_m; T.ntw = (t0[nm] + 31) / 32; T.nmw = (nm + 31) / 32; T.sig = 0;
     (void)nsec;
+    {   /* por textura de recorte que tapa (bit 2 de opa), la tabla de sumas de su mascara (sin_tapar) */
+        int j, nt = 0, t; size_t tam = 0;
+        for (j = 0; j < t0[nm]; j++) if ((opa[j] & 4) && tex[j] + 1 > nt) nt = tex[j] + 1;
+        T.s_ofs = calloc(nt > 0 ? nt : 1, sizeof(int));
+        for (t = 0; t < nt; t++) { T.s_ofs[t] = (int)tam; tam += (size_t)(m_w[t] + 1) * (m_h[t] + 1); }
+        T.sat = calloc(tam > 0 ? tam : 1, sizeof(int));
+        for (t = 0; t < nt; t++) {
+            int w = m_w[t], h = m_h[t], x, y, *S = T.sat + T.s_ofs[t]; const unsigned char *mk = mas + m_ofs[t];
+            for (y = 0; y < h; y++) for (x = 0; x < w; x++)
+                S[(y + 1) * (w + 1) + x + 1] = !mk[y * w + x] + S[y * (w + 1) + x + 1] + S[(y + 1) * (w + 1) + x] - S[y * (w + 1) + x];
+        }
+    }
     pthread_mutex_init(&T.mu, NULL);
     if (nhilos < 1) nhilos = 1; if (nhilos > 64) nhilos = 64;
     for (i = 0; i < nhilos; i++) pthread_create(&th[i], NULL, hilo, &T);
     for (i = 0; i < nhilos; i++) pthread_join(th[i], NULL);
     pthread_mutex_destroy(&T.mu);
+    free(T.sat); free(T.s_ofs);
     return 0;
 }
