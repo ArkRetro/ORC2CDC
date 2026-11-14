@@ -15,6 +15,9 @@ while [ $((i * 5)) -lt $SEG ]; do
     case $((i % 4)) in 1) xdotool keydown Left; sleep 0.4; xdotool keyup Left;; 3) xdotool keydown Right; sleep 0.4; xdotool keyup Right;; esac
     espera 5; f=$(printf 'sp_c%03d' $i); foto $f
     h=$(convert "$SAL/$f.png" rgb:- | md5sum | cut -c1-32)
+    # con el lado 1 (PALM, arbol 0) el tiempo se acaba antes de los 120 s sin llegar al punto de control: la pantalla
+    # de rankings (modo 25) queda quieta y no es un cuadro congelado
+    if grep -a -q "CURSO: tiempo agotado" "$SAL/flycast.txt"; then echo "tiempo agotado a los $((i * 5)) s de carrera ($f)"; break; fi
     if [ "$h" = "$ant" ]; then echo "CONGELADO a los $((i * 5)) s de carrera ($f)" >&2; ERROR=1; break; fi
     ant=$h; i=$((i + 1))
 done

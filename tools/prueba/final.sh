@@ -13,9 +13,12 @@ espera_log 'CURSO: GOAL' 400 || true
 for i in 0 1 2 3 4 5; do espera 3; foto fi_m$i; done                    # la escena de la meta (la pareja)
 espera_log 'FINAL: modo 24' 120 || true
 for i in $(seq -w 0 ${FOTOS:-14}); do foto fi_$i; espera 2; done
+# (el final 18 dura ~20 s: los modos 25, 27 y 28 pueden salir ya durante las fotos de arriba; cada espera mira
+# desde el modo 24 y no desde la anterior)
+M24=$MARCA
 espera_log 'FIN: modo 25' 90 || true; espera 3; foto fi_25
-espera_log 'FIN: modo 27' 60 || true; espera 2; foto fi_go
-espera_log 'FSP: frontal' 60 || true; espera 4; foto fi_fsp
+MARCA=$M24; espera_log 'FIN: modo 27' 60 || true; espera 2; foto fi_go
+MARCA=$M24; espera_log 'FSP: frontal' 60 || true; espera 4; foto fi_fsp
 grep -a -q 'FINAL: modo 24' "$SAL/flycast.txt" || { echo "sin el modo 24" >&2; ERROR=1; }
 grep -a -q 'FIN: modo 25' "$SAL/flycast.txt" || { echo "sin el modo 25" >&2; ERROR=1; }
 [ "$(grep -a -c 'FSP: frontal' "$SAL/flycast.txt")" -ge 2 ] || { echo "no vuelve al frontal" >&2; ERROR=1; }

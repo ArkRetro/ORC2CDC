@@ -11,9 +11,10 @@ D=$(cd "$(dirname "$0")" && pwd); . "$D/comun.sh"
 GDI=${1:-}; PANTALLA=${2:-91}; SAL=${3:-/dev/shm/prueba_tablero}
 al_menu() {                                                              # pelicula y titulo hasta la musica del menu
     espera_log 'VIDEO MVTS.VQV: precarga' 900; espera 3                 # (START cada 3 s: salta la pelicula y, en el
-    for _i in $(seq 1 40); do tecla Return; espera_log 'musica: MUS30' 3 2> /dev/null && return 0; done   # titulo, entra
-    return 1                                                             # antes de los 8 s de la demo de atraccion)
-}
+    local e0=${ERROR:-}                                                  # titulo, entra antes de los 8 s de la demo
+    for _i in $(seq 1 40); do tecla Return; espera_log 'musica: MUS30' 3 2> /dev/null && { ERROR=$e0; return 0; }; done
+    return 1                                                             # de atraccion; los intentos sin la musica no
+}                                                                        # son error: espera_log pone ERROR=1)
 if [ -z "${SOLO2:-}" ]; then                                             # SOLO2=1: solo el segundo arranque
 arranca; marca
 al_menu; espera 5
