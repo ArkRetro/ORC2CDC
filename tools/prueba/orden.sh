@@ -2,7 +2,8 @@
 # orden.sh <disc.gdi> [pantalla] [salida/] [iso] [carreras (13)]: el orden de las etapas en todos los modos (revision
 # 44). El GDI va compilado con -DPRUEBA_AUTO -DPRUEBA_ORDEN -DPRUEBA_SIN_TIEMPO -DPRUEBA_RAMA=r -DPRUEBA_RAMA_FIJA=r (0 siempre a la
 # izquierda, 1 siempre a la derecha) -DPRUEBA_FIN=600 -DPRUEBA_SALTO=600 (cada etapa empieza a 600 m de su final): el
-# piloto corre seguidas las carreras de la lista PO de demo/main.c (OUTRUN con los juegos 0..3 del tablero 0x24 -
+# piloto corre seguidas las carreras (desde la -DPRUEBA_ORDEN_DESDE=k, si va; en cada bifurcacion el coche pasa a un
+# carril de la rama fijada: el piloto sigue los carriles del asfalto y se quedaba en la otra calzada) de la lista PO de demo/main.c (OUTRUN con los juegos 0..3 del tablero 0x24 -
 # arboles 0, 1, 290, 291 -, CONTRARRELOJ de una etapa, de metas A..E del derecho y del reves y de curso seguido, INFARTO
 # de OutRun 2 SP y misiones de COAST 2 COAST) y tools/prueba/orden.py compara lo que escribe la consola serie
 # (SALIDA, RECORRIDO, CHECKPOINT, MAPA, GOAL) con la tabla del original de tu ISO: el arbol, la etapa a la que lleva

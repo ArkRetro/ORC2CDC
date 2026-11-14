@@ -5686,7 +5686,10 @@ static const int16_t PO[][4] = {
     { 1, 0, -1, -1 }, { 1, 1, -1, -1 }, { 1, 2, -1, -1 }, { 1, 3, -1, -1 },   /* OUTRUN: arboles 0, 1, 290, 291 */
     { 7, 0, 5, -1 }, { 7, 0, 0x3e, -1 }, { 7, 1, 0x43, -1 }, { 7, 0, 0x46, -1 }, { 7, 1, 0x4d, -1 }, { 7, 0, 0x50, -1 },
     { 2, 1, -1, -1 }, { 6, 0, -1, 0 }, { 6, 0, -1, 84 } };
-static int po_k = -1, po_rep, po_fin, po_ult = -1, po_t;   /* po_t: crono de la ultima etapa */
+#ifndef PRUEBA_ORDEN_DESDE
+#define PRUEBA_ORDEN_DESDE 0                                    /* (la primera carrera de la lista) */
+#endif
+static int po_k = PRUEBA_ORDEN_DESDE - 1, po_rep, po_fin, po_ult = -1, po_t;   /* po_t: crono de la ultima etapa */
 #endif
 static int ta_codigo = -1;                                      /* CONTRARRELOJ: [656234] (el arbol 200 + codigo) */
 static volatile int meta_hilo;                                  /* META.DAT leyendose (hilo) */
@@ -5910,6 +5913,15 @@ static int curso_paso(void)
            [rec + rama * 4 + 0x24] es -1 se queda el mismo) y se vuelve a cargar su etapa */
         if (cur_sig < 0) cur_sig = cur_nodo;
         ev |= CUR_RAMA;
+#if defined(PRUEBA_RAMA_FIJA) && defined(PRUEBA_SALTO)
+        {   /* prueba (orden.sh): el coche a un carril de la rama fijada (el piloto, que va por los carriles del asfalto mas
+               cercanos, seguia por la otra calzada y se quedaba fuera de la ruta) */
+            float p_[3], th_;
+            yo.x = carril_x(yo.s, 4); coche_paso(&yo, 0, 0, 0, 0);
+            if (fis_ok) { ruta_en(yo.s, p_, &th_, NULL, NULL); or2_coloca(&fis, &fpar, th_ + yo.a, yo.v); }
+            dbglog(DBG_INFO, "SALTO: a la rama %d (x %.1f)\n", cur_rama, (double)yo.x);
+        }
+#endif
         if (etapa_n >= 0 && etapa_n < 5) rama_nivel[etapa_n] = (int8_t)cur_rama;
     }
     PK("rama");
@@ -11114,6 +11126,12 @@ int main(int argc, char **argv)
 #ifdef PRUEBA_SIN_TIEMPO
                 if (tim_cuadros < 600) tim_cuadros = 600;        /* prueba: el tiempo no se acaba (rutas enteras hasta GOAL) */
 #ifdef PRUEBA_ORDEN
+                if (crono % 60 == 0 && (cur_rama >= 0 || s_union >= 0)) {   /* prueba: donde va el coche en la union */
+                    float p_[3], th_; ruta_en(yo.s, p_, &th_, NULL, NULL);
+                    dbglog(DBG_INFO, "ORDENDIAG: s %.0f long %.0f union %.0f decide %.0f sig %.0f rama %d carga %d x %.1f v %.1f coche %.0f %.0f ruta %.0f %.0f\n",
+                           (double)yo.s, (double)longitud, (double)s_union, (double)s_decide, (double)s_sig, cur_rama, carga.estado, (double)yo.x,
+                           (double)yo.v, (double)yo.pos[0], (double)yo.pos[2], (double)p_[0], (double)p_[2]);
+                }
                 if (!po_fin && crono - po_t > 60 * 300) { po_fin = 1; dbglog(DBG_INFO, "ORDEN: atascado en la etapa %d (5 min sin checkpoint)\n", cur_nodo); }
                 if (po_fin) tim_cuadros = 0;                    /* prueba: tres veces seguidas la misma etapa (o atascado): la siguiente */
 #endif
