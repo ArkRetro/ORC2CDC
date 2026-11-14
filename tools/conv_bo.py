@@ -113,8 +113,9 @@ def nodos(blq, reg):
     return res
 
 def tiras_de_malla(blq, reg, g):
-    """tiras (tabla 3) de la malla g (tabla 1: n opacas, n de mezcla, primera opaca, primera de mezcla)"""
-    m, A = blq.m, blq.A; n1, o1 = reg[1]; n3 = reg[3][0]
+    """tiras (entradas de la tabla 2, modelo.filas_t3) de la malla g (tabla 1: n opacas, n de mezcla, primera opaca,
+    primera de mezcla)"""
+    m, A = blq.m, blq.A; n1, o1 = reg[1]; n3 = reg[2][0]
     if not 0 <= g < n1: return []
     nop, nmez, pop, pmez = struct.unpack('<4i', m[A + o1 + 16 * g:A + o1 + 16 * g + 16])
     t = []
@@ -123,8 +124,8 @@ def tiras_de_malla(blq, reg, g):
     return t
 
 def cuadros_de(blq, reg, tiras):
-    m, A = blq.m, blq.A; c, o = reg[3]; nf = 1
-    for i in tiras:
+    m, A = blq.m, blq.A; c, o = reg[3]; nf = 1; ft = modelo.filas_t3(blq, reg)
+    for i in (j for t in tiras if t < len(ft) for j in ft[t][1]):
         e = struct.unpack('<6I', m[A + o + 24 * i:A + o + 24 * i + 24])
         nf = max(nf, 1 + sum(1 for x in e[3:6] if x))
     return nf

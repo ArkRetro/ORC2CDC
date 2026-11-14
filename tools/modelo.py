@@ -141,10 +141,11 @@ def nodos(blq, reg):
     +1C matriz (tabla 6, -1 ninguna), +20 primer hijo, +24 siguiente hermano, +28 malla de cada LOD (tabla 1)):
     desde el nodo 0, hermanos en orden y cada hijo antes que el hermano siguiente; la matriz del nodo se multiplica por
     la del padre (409FD0: nueva = m * actual, vectores fila: v * m * padre). Tabla 1 (16 bytes, la malla del nodo):
-    cuenta y primera de las tiras opacas (tabla 3) y de las de mezcla: (n_op, n_mez, primera_op, primera_mez).
-    Devuelve [(indice, banderas, matriz 4x4 o None, esfera (c, r) en el marco del bloque, [tiras de la tabla 3])]"""
+    cuenta y primera de las tiras opacas y de las de mezcla: (n_op, n_mez, primera_op, primera_mez), indices de la
+    tabla 2 (filas_t3: cada una son una o mas filas seguidas de la tabla 3).
+    Devuelve [(indice, banderas, matriz 4x4 o None, esfera (c, r) en el marco del bloque, [tiras de la tabla 2])]"""
     m, A = blq.m, blq.A
-    n0, o0 = reg[0]; n1, o1 = reg[1]; n6, o6 = reg[6]; n3 = reg[3][0]
+    n0, o0 = reg[0]; n1, o1 = reg[1]; n6, o6 = reg[6]; n3 = reg[2][0]   # (tiras: entradas de la tabla 2, filas_t3)
     res = []; vistos = set()
     def mat(i):
         return np.frombuffer(m[A + o6 + 64 * i:A + o6 + 64 * i + 64], '<f4').reshape(4, 4).astype(float) if 0 <= i < n6 else None
@@ -168,6 +169,24 @@ def nodos(blq, reg):
             k = x[9]
     anda(0, None)
     return res
+
+def filas_t3(blq, reg):
+    """[(k, filas)] por entrada de la tabla 2 del registro: k es su entrada de la tabla 4 (material y textura) y filas
+    las filas de la tabla 3 (paquetes del VIF, 24 bytes) que dibuja. La entrada de la tabla 2 (16 bytes) es (k, k,
+    cuenta, primera fila de la tabla 3): PS2 0x110700 (el dibujo de la malla de un nodo, desde 0x1114e0) recorre las
+    entradas de la tabla 2 que nombra la tabla 1 (16 bytes cada una; +4 ya es el puntero a la de la tabla 4, cuya +0xC
+    es la textura) y en cada una +8 filas de la tabla 3 desde +0xC (de 0x18 en 0x18). Casi siempre (1, i) (una fila
+    cada una, las dos tablas en paralelo); en SEG17, 18 y 19 (BEAC de las misiones, el registro 3: 968 filas para 967
+    entradas), SEG42 (registro 2), SEG50 y SEG51 (registro 3) y SEG65 (registro 7) alguna entrada lleva 2 filas, y
+    leerlas en paralelo corria una fila la geometria y la textura de todo lo de despues (revision 45: el edificio a
+    medias de BEAC, docs/PARIDAD.md). Si la tabla 2 no es de ese formato (no seguida o no cubre la 3): en paralelo"""
+    m, A = blq.m, blq.A; n2, o2 = reg[2]; n3 = reg[3][0]; res = []; sig = 0
+    for i in range(max(n2, 0) if 0 <= n2 <= 1 << 20 else 0):
+        k, _, c, p = struct.unpack_from('<4i', m, A + o2 + 16 * i)
+        if p != sig or c < 1: break
+        res.append((k, range(p, p + c))); sig = p + c
+    if len(res) == n2 and sig == n3: return res
+    return [(struct.unpack_from('<i', m, A + o2 + 16 * i)[0] if i < n2 else -1, range(i, i + 1)) for i in range(n3)]
 
 def material_de(blq, reg, k):
     """color del material de la entrada k de la lista de texturas del registro (tabla 4, 36 bytes: el primer campo es
@@ -217,10 +236,9 @@ def texturas_de_carteles(blq):
     """texturas de los carteles del bloque: apaisadas (2:1) en mallas de 4 a 6 vertices, de 6 a 16 m de ancho y 3 a 9 de alto"""
     m, A = blq.m, blq.A; res = []
     for reg in blq.registros():
-        c, o = reg[3]; t2 = reg[2][1]; n4, o4 = reg[4]
-        for i in range(c):
+        c, o = reg[3]; n4, o4 = reg[4]
+        for k, i in ((k, i) for k, filas in filas_t3(blq, reg) for i in filas):
             e = struct.unpack('<6I', m[A + o + 24 * i:A + o + 24 * i + 24])
-            k = struct.unpack('<i', m[A + t2 + 16 * i:A + t2 + 16 * i + 4])[0]
             if not 0 <= k < n4: continue
             ti = struct.unpack('<i', m[A + o4 + 36 * k + 12:A + o4 + 36 * k + 16])[0]
             if ti < 0 or ti in res: continue
@@ -320,29 +338,31 @@ class Modelo:
         self.base_tex = base
         for r, reg in enumerate(blq.registros()):
             if registros is not None and r not in registros: continue
-            c, o = reg[3]; t2 = reg[2][1]
-            def tira_de(i):
-                e = struct.unpack('<6I', m[A + o + 24 * i:A + o + 24 * i + 24])
-                k = struct.unpack('<i', m[A + t2 + 16 * i:A + t2 + 16 * i + 4])[0]
+            c, o = reg[3]; ft = filas_t3(blq, reg)
+            def tira_de(i, j):
+                """la entrada i de la tabla 2 (material y textura) y su fila j de la tabla 3 (paquetes del VIF)"""
+                e = struct.unpack('<6I', m[A + o + 24 * j:A + o + 24 * j + 24])
+                k = ft[i][0] if i < len(ft) else -1
                 ti = struct.unpack('<i', m[A + reg[4][1] + 36 * k + 12:A + reg[4][1] + 36 * k + 16])[0] \
                     if 0 <= k < reg[4][0] else -1                # la lista de texturas del registro (tabla 4)
                 ti = base + ti if 0 <= ti < ntb else -1
                 self._mat = material_de(blq, reg, k) if sin_textura == 'material' and ti < 0 else None
                 self._matc = material_completo(blq, reg, k) if self.luz is not None else None
-                self._origen = (r, i, k, e[0])                   # registro, malla, entrada de la tabla 4 y banderas
+                self._origen = (r, i, k, e[0])                   # registro, malla (tabla 2), entrada de la tabla 4 y banderas
                 # estado del GS de la capa 1 (tabla 7): manda la lista, la mezcla y los mipmaps (escena: objetos)
                 self._gs = estado_gs(blq, reg, k) if (objetos or con_gs) and lista is None else None
                 return e, ti
             if not objetos:
                 self._nodo = -1 if nodo_fijo is None else nodo_fijo
-                for i in range(c):
+                for i in range(len(ft)):
                     if tiras is not None and i not in tiras: continue
-                    e, ti = tira_de(i)
-                    pq = e[2 + cuadro] if cuadro and 0 < cuadro < 4 and e[2 + cuadro] else e[2]
-                    for pk in vif.datos(m, A + pq, A + blq.w[2]):
-                        for tr in vif.tiras(pk):
-                            for dx in (copias or {}).get(r, [(0, 0, 0)]):
-                                self._tira(tr, None, ti, lista, sin_textura, np.array(dx, np.float32), blq)
+                    for j in ft[i][1]:
+                        e, ti = tira_de(i, j)
+                        pq = e[2 + cuadro] if cuadro and 0 < cuadro < 4 and e[2 + cuadro] else e[2]
+                        for pk in vif.datos(m, A + pq, A + blq.w[2]):
+                            for tr in vif.tiras(pk):
+                                for dx in (copias or {}).get(r, [(0, 0, 0)]):
+                                    self._tira(tr, None, ti, lista, sin_textura, np.array(dx, np.float32), blq)
                 continue
             visibles = None if vis is None else vis.get(r, set())
             for k, fl, W, (cc, rad), tiras, con_matriz in nodos(blq, reg):
@@ -359,10 +379,11 @@ class Modelo:
                 self.gid[(id(blq), r, k)] = len(self.nodos)
                 self._nodo = len(self.nodos); self.nodos.append([cc.astype(np.float32), rad, u, ib])
                 for i in tiras:
-                    e, ti = tira_de(i)
-                    for pk in vif.datos(m, A + e[2], A + blq.w[2]):
-                        for tr in vif.tiras(pk):
-                            self._tira(tr, None if cartel else W, ti, lista, sin_textura, np.zeros(3, np.float32), blq)
+                    for j in (ft[i][1] if i < len(ft) else ()):
+                        e, ti = tira_de(i, j)
+                        for pk in vif.datos(m, A + e[2], A + blq.w[2]):
+                            for tr in vif.tiras(pk):
+                                self._tira(tr, None if cartel else W, ti, lista, sin_textura, np.zeros(3, np.float32), blq)
 
     def _tira(self, tr, M, ti, lista, sin_textura, dx, blq):
         """una tira del VU1 partida en las tiras que dibuja de verdad el GS: el triangulo que cierra un vertice con la

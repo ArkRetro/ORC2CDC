@@ -239,10 +239,10 @@ def longitud(q): return float(np.linalg.norm(np.diff(q, axis=0), axis=1).sum()) 
 def puntos_asfalto(seg):
     """vertices del asfalto: tiras casi horizontales del registro 0 con la textura de carretera (la de mas area entre
     las grises del registro: saturacion baja y brillo medio)"""
-    m, A = seg.m, seg.A; reg = seg.registros()[0]; c, o = reg[3]; t2 = reg[2][1]; n4, o4 = reg[4]
+    m, A = seg.m, seg.A; reg = seg.registros()[0]; c, o = reg[3]; n4, o4 = reg[4]
     hs = tex.cabeceras(seg); por_tex = {}
-    for i in range(c):
-        e = struct.unpack('<6I', m[A + o + 24 * i:A + o + 24 * i + 24]); k = struct.unpack('<i', m[A + t2 + 16 * i:A + t2 + 16 * i + 4])[0]
+    for k, i in ((k, i) for k, filas in modelo.filas_t3(seg, reg) for i in filas):   # (tabla 2 -> filas de la 3)
+        e = struct.unpack('<6I', m[A + o + 24 * i:A + o + 24 * i + 24])
         ti = struct.unpack('<i', m[A + o4 + 36 * k + 12:A + o4 + 36 * k + 16])[0] if 0 <= k < n4 else -1
         for pk in vif.datos(m, A + e[2], A + seg.w[2]):
             for tr in vif.tiras(pk):
