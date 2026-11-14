@@ -3982,14 +3982,38 @@ OR2 / SP_goals y sus _reverse, Races.bin; codigo 0x1760c0, 0x1b63a0, 0x2a6758, 0
   PORTAR: el rotulo de la etapa siguiente del original (0x1bea00 = 4B9450 del PC: con car+0x5c y la clave elegida
   distinta de la del coche, el token de la tabla 0x369518 (30 escenas 0x2c0048..0x2c0065, por el tipo del descriptor
   de la etapa elegida) en la capa 5, parpadeando con el bit 0x10 hasta 0x78 cuadros y despues fijo; x -340, o
-  [0x369510] - 340 en las misiones): HUD.DAT no lleva esas escenas.
+  [0x369510] - 340 en las misiones): HUD.DAT no lleva esas escenas. Detalle (2026-11-14, MIPS y outrun2-decomp
+  stage_banner_4b9450): se ve con el coche en la union (car+0x5c != 0; fuera, el estado [0x5a3d36] vuelve a 0) y la
+  clave del registro elegido ([0x549048]+4) distinta de la de la etapa del coche (0x1cf9a8): con una rama -1 (la misma
+  etapa otra vez) no sale. El indice de 0x369518 es el +0 del descriptor del registro ([[rec+0x14]], que
+  44D720 pone del +0x1c: el numero de tramo, el mismo de dsc_seg / conv_union.tablas: 0 PALM .. 29 EAST). Estados:
+  0 -> 1 (contador [0x5a3d34] = 1); 1: dibuja si contador & 0x10, al llegar a 0x78 pasa a 2; 2: siempre. Punto:
+  (w + x - 320, h + 5 - 240) con (w, h) la mitad del tamano de la escena (0x1156c0) y x = -340 ([0x369510] = -42
+  mas con [0x36f3a4] y la variante != 4: misiones). Cada escena son dos piezas: el nombre (126 x 38, texturas 89..98
+  del banco 0x2c, 128 x 128 de 256 colores, tres nombres por textura) y un rotulo comun (82 x 22, textura 74, 16
+  colores). PENDIENTE por la memoria: en 16 bits los 30 nombres son 280 KB (en los avisos residentes de HUD.DAT, con
+  el tope de 350 KB, no caben sin VQ) y C2CHUD.DAT (misiones) los necesita tambien; hay que decidir si van en los
+  avisos con VQ o subidos solo mientras se ven (hudd_sube_uso, con la RAM de HUD.DAT).
 - Prueba: `tools/prueba/orden.sh` (GDI con -DPRUEBA_AUTO -DPRUEBA_ORDEN -DPRUEBA_SIN_TIEMPO -DPRUEBA_RAMA=r -DPRUEBA_RAMA_FIJA=r
   -DPRUEBA_FIN=600 -DPRUEBA_SALTO=600): el piloto corre la lista PO de demo/main.c (OUTRUN juegos 0..3, CONTRARRELOJ
-  5 / 0x3e / 0x43 / 0x46 / 0x4d / 0x50, INFARTO de OutRun 2 SP, misiones 0 y 84) siempre por la rama r, cada etapa
-  desde 600 m antes de su final (PRUEBA_SALTO) y la tercera vez seguida en la misma etapa acaba la carrera;
-  `tools/prueba/orden.py` compara las lineas SALIDA / RECORRIDO / CHECKPOINT / MAPA / GOAL con la tabla del original
-  leida de la ISO (etapas, a donde lleva cada rama, meta, nivel, casilla y mapa). menu.sh: MODO_JUEGO=1 pasa por el
-  tablero (TB_JUEGO=n).
+  5 / 0x3e / 0x43 / 0x46 / 0x4d / 0x50, INFARTO de OutRun 2 SP, misiones 0, 84, 16 y 22, OUTRUN2SP sin y con el
+  gatillo R) siempre por la rama r, cada etapa desde 600 m antes de su final (PRUEBA_SALTO; en la bifurcacion el coche
+  pasa al carril 1 (izquierda, carriles 0..2) o 4 (derecha, 3..5) de la rama fijada: el piloto sigue el asfalto mas
+  cercano y se quedaba en la otra calzada, fuera de la ruta: en la primera pasada "atascado" en MAYA del arbol 291) y
+  la tercera vez seguida en la misma etapa acaba la carrera; `tools/prueba/orden.py` compara las lineas SALIDA /
+  RECORRIDO / CHECKPOINT / MAPA / GOAL con la tabla del original leida de la ISO (etapas, a donde lleva cada rama, meta,
+  nivel, casilla y mapa) y el arbol cargado con el del modo (misiones: Races.bin, 100 + i; CONTRARRELOJ: 200 + codigo;
+  si no el preset (OUTRUN2SP: el del lado; consola: 0x2a6978 del juego) y 0x1b63a0 -> 0x1760c0(0 / 1 / 5 / 6):
+  csc_data_cvt, csc_data_2, csc_data_cvt_ren, csc_data_2_ren = arboles 1, 0, 291, 290). menu.sh: MODO_JUEGO=1 pasa
+  por el tablero (TB_JUEGO=n). Las filas de 15 recorridos del frontal de OUTRUN2SP (+27 = 2 / 3) no estan en la lista
+  (dan los presets 2 / 3, los mismos arboles 291 / 290 que los juegos 3 / 2 de la consola).
+- **Resultado (2026-11-14)**: rama 0: 18 carreras, todas BIEN (OUTRUN PALM LAKE CAST CLOU TULI / BEAC SANF NIAG MACH
+  EAST / los 15 de 290 hasta CAPE y de 291 hasta NEWY; Contrarreloj DESE, metas 0x46 TULI .. PALM; INFARTO; mision 0
+  BEAC PALM; OUTRUN2SP lado 0 BEAC .. EAST, lado 1 PALM .. TULI; las ramas -1 repiten la etapa). Capturas:
+  scratchpad/capturas_r44/orden_rama0_resultado.txt, orden_r0_mapa15_seguido.png.
+- Tablero 0x24 de OUTRUN (CORREGIDO): al entrar, el original pone el carrusel en el juego guardado (0x26e6e8 con la
+  raiz +0x208 & 3) y despues deja los bits 0..1 en 0 / 1 (0x252d78..0x252e34: 0 y 2 -> 0, 1 y 3 -> 1); la DC no los
+  tocaba. El de INFARTO (0x252e38..) solo pone el carrusel si los bits son 0 / 1 y no los cambia (como la DC).
 - Datos: CURSOTA.DAT (arboles 290 / 291 y +0x74), UNIONESR.PAK y BK470..497.DAT: paso `unionren` de
   tools/regenera.py (`conv_union.py <iso> uren/ --arboles=<ARBOLES_TA> --bk-desde=470 --curso=CURSOTA.DAT` y
   `pak_union.py --pak=UNIONESR.PAK`; `unionta` lleva ahora --bk-hasta=470), PYTHONHASHSEED=0.
