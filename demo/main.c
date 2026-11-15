@@ -6775,10 +6775,10 @@ static float dist2_ruta(const modelo_t *m, uint32_t i, const float *p)
    que acababa de aparecer (DIAG_POPPING: 16 por segundo en PALM) y volvia a aparecer al subir. El coste de lo que se
    queda va en la cuenta de su clase: el reparto sigue cabiendo. 0 / 0: lo de antes */
 #ifndef REPARTO_HIST_D
-#define REPARTO_HIST_D 4
+#define REPARTO_HIST_D 8
 #endif
 #ifndef REPARTO_HIST_P
-#define REPARTO_HIST_P 8
+#define REPARTO_HIST_P 16
 #endif
 /* Coste en la clase de LOD (DECISION DEL PORT, popping 2026-11-13): la clase de lo de mas alla del corte de distancia
    sube REPARTO_COSTE / 4 clases por cada vez que el nodo dobla los 64 vertices (y baja si tiene menos): de lo que no
@@ -7446,6 +7446,11 @@ static void nodos_visibles_todos(void)
 /* tras el cuadro: lo que de verdad costo la etapa frente a lo estimado; si alguna tira no cupo, mas prudencia */
 static void prio_ajusta(int corto, uint32_t usado)
 {
+    /* Schmitt (medido, _trabajo\POPPING_INFORME.md): el corte baja de golpe si el cuadro no cabe, pero sube una clase
+       cada 4 cuadros; con un coste que varia un 2-4 % por cuadro el umbral oscilaba y lo que salia tardaba 0,7-1,4 s en
+       volver. Con un 10 % de holgura antes de bajar, los huecos del corte de LOD caen de 0,84 a 0,07 por segundo en
+       PALM (y con la histeresis 8/16, las apariciones de 12,2 a 8,8 por segundo). */
+    if (corto && ta_tope_etapa && ta_et < ta_tope_etapa + ta_tope_etapa / 10) corto = 0;
 #ifdef DIAG_POPPING
     if (corto) pop_ccorto++;
 #endif
