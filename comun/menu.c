@@ -110,6 +110,8 @@ static const uint8_t DESBLOQ_TEMA[N_TEMAS] = { 174, 174, 174, 174, 174, 174, 174
 #define PISTA_AVANCE 33                                     /* avance del tema k: pista 33 + k */
 
 static hud_dat_t *md;
+/* la ficha de la portada de OutRunners y el credito (usos OR_PORTADA / OR_CREDITO de MENU.DAT; -1 sin ellos) */
+static int or_port = -1, or_cred = -1;
 static const m_pant_t *pan; static const m_tramo_t *tra; static int n_pan, n_tra;
 static int pidx[NV], cargada[NV], us[NU]; static uint32_t edad[NV], reloj;
 
@@ -391,7 +393,6 @@ static int n_menu = N_OPC;
 static hudd_regla_t r_menu[20]; static int n_r_menu;
 static int opc_menu(int c) { return n_menu < N_OPC && c >= OPC_QUITADA ? c + 1 : c; }
 static int c_menu, c_modo, c_rank, c_multi, manual, n_ok, pista_sonando, sale_ok;
-static float menu_ylab[N_OPC] = { -1, -1, -1, -1, -1 }, menu_xlab[N_OPC];   /* sitio del rotulo de cada opcion */
 extern int or_programa_lanza(void);                        /* demo/main.c: cadena a OutRunners (arch_exec) */
 /* OUTRUNNERS (DESVIACION pedida): en gris hasta el nombre ENTIRETY de la licencia o tener las 50.000 millas OutRun
    (las del Salon, +0x24 de la licencia). La compra en el Salon es aparte (SALON.DAT) y queda pendiente */
@@ -482,23 +483,17 @@ static void menu_sin_multi(void)
     if (sep < 0 || pto < 0) goto mal;
 #define R_(s_, n_, m_, si_, an_, a_, b_) do { hudd_regla_t *r_ = r_menu + n_r_menu++; r_->spr = s_; r_->nuevo = n_; \
         r_->modo = m_; r_->sitio = si_; r_->ancla = an_; r_->x0 = a_; r_->x1 = b_; } while (0)
-    /* Los cinco sitios del arte: 0 SINGLE PLAYER, 1 OUTRUN2SP, 2 OUTRUNNERS (el rotulo lo escribe el menu con la
-       fuente 14, asi que el de este sitio se quita), 3 RANKINGS y 4 OPTIONS. Antes: MULTIPLAYER fuera y los sitios
-       0..3 con las opciones 0, 2, 3 y 4. */
+    /* Los cinco sitios del arte: 0 SINGLE PLAYER, 1 OUTRUN2SP, 2 OUTRUNNERS, 3 RANKINGS y 4 OPTIONS. La etiqueta, el
+       titulo y la descripcion de OUTRUNNERS son las de MULTIPLAYER redibujadas (tools/menu_rotulo: el sprite de la
+       etiqueta 100, el del titulo 110 y el de la descripcion 107 llevan "OUTRUNNERS" y su texto), asi que el sitio 2
+       toma ese arte: se anima con el carrusel como las demas opciones. */
     R_(lab[1], lab[2], 0, 0, -1, 0, 0);                     /* sitio 1: OUTRUN2SP */
-    R_(lab[2], -1, 0, 0, -1, 0, 0);                         /* sitio 2: lo escribe OUTRUNNERS */
+    R_(lab[2], lab[1], 0, 0, -1, 0, 0);                     /* sitio 2: OUTRUNNERS */
     R_(des[1], des[2], 0, 1, -1, 0, 0); R_(tit[1], tit[2], 0, 1, -1, 0, 0);
+    R_(des[2], des[1], 0, 1, -1, 0, 0); R_(tit[2], tit[1], 0, 1, -1, 0, 0);
     R_(pto, -1, 1, 0, -1, xp - 2, xp + 2);                  /* el punto del sitio 4 */
     R_(sep, -1, 2, 0, lab[N_OPC - 1], 0, 20);               /* el separador delante del rotulo del sitio 4 (7..11 px) */
 #undef R_
-    for (i = 0; i < N_OPC; i++) {                           /* sitio de cada rotulo (el texto de OUTRUNNERS va al 2) */
-        char b[8]; int ini2, fin2, modo2, j2, n2;
-        sprintf(b, "SEL%d", i);
-        if (!tramo(u, b, &ini2, &fin2, &modo2)) continue;
-        n2 = hudd_piezas(md, u, ini2, pz, MAXP);
-        for (j2 = 0; j2 < n2; j2++)
-            if (pz[j2].spr == lab[i] || (i == 2 && pz[j2].y < 360)) { menu_ylab[i] = pz[j2].y; menu_xlab[i] = pz[j2].x; break; }
-    }
     n_menu = N_OPC;
     dbglog(DBG_INFO, "menu: menu principal con OUTRUNNERS en el sitio 2 (rotulos %d..%d, separador %d, puntos %d)\n", lab[0], lab[N_OPC - 1], sep, pto);
     return;
@@ -668,6 +663,7 @@ int menu_inicia(void)
     for (p = 0; p < NV; p++)
         for (pidx[p] = -1, i = 0; i < n_pan; i++) if (!strncmp(pan[i].nombre, VNOM[p], 16)) pidx[p] = i;
     for (i = 0; i < NU; i++) us[i] = hudd_uso(md, UNOM[i]);
+    or_port = hudd_uso(md, "OR_PORTADA"); or_cred = hudd_uso(md, "OR_CREDITO");
     for (i = 0; i < NV; i++) orden_v[i] = i;
     for (i = 1; i < NV; i++)                                /* (pantallas que no estan: al final) */
         for (p = i; p > 0; p--) {
@@ -2537,11 +2533,13 @@ void menu_dibuja(void)
     switch (pant) {
     case P_MENU: case P_MODO: case P_RANKING: case P_MULTI:
         if (pant == P_MENU) {
-            int ok = menu_or_ok();
             hudd_reglas(r_menu, n_r_menu);                  /* (MULTIPLAYER fuera; OUTRUNNERS en el sitio 2) */
-            if (menu_ylab[2] >= 0)                          /* el rotulo de OUTRUNNERS, con la fuente 14 */
-                texto((const uint8_t *)"OUTRUNNERS", 10, menu_xlab[2], menu_ylab[2], 1,
-                      (fase == F_ENTRA && entra_atras) ? a_ent : 1, 3, ok ? 0xF0F0F0 : 0x606060);
+            /* la portada de OutRunners (ficha reducida) detras de las letras rojas del titulo, que van en la capa 3,
+               y el credito debajo de la descripcion */
+            if (c_menu == 2 && or_port >= 0) {
+                hudd_dibuja(md, or_port, 0, 0, 0, (entra_atras ? a_ent : 1) * a_sal, 1.0f, 0);
+                if (or_cred >= 0) hudd_dibuja(md, or_cred, 0, 0, 0, (entra_atras ? a_ent : 1) * a_sal, 1.1f, 0);
+            }
         }
         an_dibuja(&a_sel, sacude, (entra_atras ? a_ent : 1) * a_sal * (cargando ? 0 : 1), 3, 0);
         hudd_reglas(NULL, 0);

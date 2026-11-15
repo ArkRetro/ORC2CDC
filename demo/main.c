@@ -111,6 +111,10 @@ typedef struct {
                                                                      el original (VISO.DAT, pvs_paso) o NULL */
     uint32_t *vis;                                                /* nodos visibles en el cuadro (bits; nodos_visibles) */
     uint32_t *vis_ant;                                            /* los que se dibujaron en el anterior (detras de vis) */
+    uint32_t *pvs_ult;                                            /* gracia de la PVS (P1, nodos_visibles): el ultimo coste
+                                                                     con el que se dibujo el nodo (pvs_teo) y, detras en
+                                                                     bytes, los cuadros de gracia que le quedan (pvs_gra) */
+    uint8_t *pvs_gra;
     uint16_t *grp;                                                /* grupos de nodos (tools/grupos_nodos.py: bits 16-31 de
                                                                      fl = jefe + 1): clases del grupo en el cuadro, en el
                                                                      sitio del jefe (nodos_visibles); NULL sin grupos */
@@ -267,6 +271,9 @@ static int lee_modelo_en(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t
         m->pvs_m = calloc((m->nmallas + 31) / 32, 4); m->pvs_teo = calloc(2 * m->nnodos + 1, 4);
         if (!m->pvs_m || !m->pvs_teo) { free(m->pvs_m); free(m->pvs_teo); m->pvs_m = m->pvs_teo = NULL; m->pvs_l = NULL; }
     }
+    m->pvs_ult = NULL; m->pvs_gra = NULL;
+    if (m->pvs_l && m->nnodos && (m->pvs_ult = calloc(m->nnodos * 5, 1)))
+        m->pvs_gra = (uint8_t *)(m->pvs_ult + m->nnodos);          /* (sin sitio: sin gracia: la PVS como antes) */
     m->blob = b + ((p - b + 31) & ~31); m->datos = b; m->tam = sz;
     return 0;
 }
@@ -412,7 +419,7 @@ static void libera_modelo(modelo_t *m)
     tex_suelta(m);
     if (m->datos && m->datos == hueco_etapa) col_et.ok = 0;      /* su colision va detras en el hueco */
     if (!en_coche_bloque(m->ofs)) free(m->ofs);
-    free(m->vis); free(m->pvs_m); free(m->pvs_teo); free(m->tr); free(m->fe_p);
+    free(m->vis); free(m->pvs_m); free(m->pvs_teo); free(m->pvs_ult); free(m->tr); free(m->fe_p);
     if (!(hueco_etapa && m->datos >= hueco_etapa && m->datos < hueco_etapa + cap_etapa) &&
         !(hueco_union && m->datos >= hueco_union && m->datos < hueco_union + cap_union) && !en_coche_bloque(m->datos))
         free(m->datos);                                           /* (los objetos de la union van dentro del hueco de la
@@ -6864,7 +6871,7 @@ static int pop_veg_ev;                                           /* el evento en
 static uint32_t pop_lod_lej, pop_lod_comp, pop_lej_n;           /* pasos de completo a lejano y al reves (dibujados en
                                                                    el cuadro anterior), lejanos dibujados */
 static float pop_zmin[PR_N];
-static uint32_t pop_pvs_ap[3], pop_pvs_de[3], pop_ccorto, pop_cuadros;
+static uint32_t pop_pvs_ap[3], pop_pvs_de[3], pop_ccorto, pop_cuadros, pop_pvs_gra;
 static float pop_falta;                                           /* suma de pi px^2 de lo quitado por el tope en la pantalla */
 static uint64_t pop_t0;
 typedef struct { float px, z, r; int t, nodo, razon, ap, veg; } pop_ev_t;
@@ -6941,6 +6948,8 @@ static void pop_evento(int t, int nodo, int razon, int ap, float px, float z, fl
 #define PVS_LADO 3.0f                                           /* tools/pvs.py LADO_EXTRA */
 #define PVS_ALTO 6.0f                                           /* la muestra mas alta (ALTURAS) */
 #define PVS_FIN 32.0f                                           /* la ruta prolongada por cada punta (FIN_EXTRA) */
+#define PVS_GRACIA 15                                           /* gracia de la PVS (nodos_visibles): cuadros que sigue
+                                                                   dibujandose un nodo que la PVS apaga, 0,33 s */
 static void pvs_aplica(modelo_t *mo, int s)                     /* XOR de la lista de la seccion s */
 {
     const uint8_t *p = mo->pvs_l + mo->sec_ini[s], *f = mo->pvs_l + mo->sec_ini[s + 1];
@@ -7076,7 +7085,7 @@ static void nodos_visibles(modelo_t *mo)
         shz_xmtrx_load_rows_4x4(&r0, &r1, &r2, &r3); }
 #endif
     for (j = 0; j < n; j++) {
-        uint32_t i = L ? L[j] : j, rama, u, c_teo, c_v, g, ya; nodo_t *d; float dx, dy, dz, zv, xv, yv, lim; int cp, cd;
+        uint32_t i = L ? L[j] : j, rama, u, c_teo, c_v, g, ya, ip; nodo_t *d; float dx, dy, dz, zv, xv, yv, lim; int cp, cd, gracia;
         if (i >= nnod) continue;
         d = ND + i;
         dx = d->cx - o0; dy = d->cy - o1; dz = d->cz - o2;
@@ -7098,15 +7107,34 @@ static void nodos_visibles(modelo_t *mo)
         if (u && zv > 0 && zv > lim * (float)(1 << REPARTO_LOD_MAS)) { POPR(i, PR_LOD); continue; }   /* LOD (y lo de mas) */
         rama = (d->fl >> 8) & 3;
         if (!(regs >> rama & 1)) { POPR(i, PR_RAMA); continue; }   /* registro de la union que no se dibuja */
-        if (mo->viso && !(mo->viso[i >> 3] >> (i & 7) & 1)) { POPR(i, PR_PVS); continue; }   /* fuera de la etapa */
-        if (pvs_on_) {                                       /* PVS: lo que queda visible del nodo desde aqui */
+        /* lo dibujado en el cuadro anterior: el nodo o, si tiene version lejana (lod_veg.py), el impostor que lo
+           sustituyo (mas abajo); la gracia de la PVS y la histeresis miran eso */
+        ya = VA[i >> 5] & (1u << (i & 31));
+        if (d->cartel <= -2 && (uint32_t)(-2 - d->cartel) < nnod)
+            ya |= VA[(uint32_t)(-2 - d->cartel) >> 5] & (1u << ((-2 - d->cartel) & 31));
+        ip = i; gracia = 0; c_teo = 0;
+        if (mo->viso && !(mo->viso[i >> 3] >> (i & 7) & 1)) {    /* fuera de la etapa */
+            /* gracia de la PVS (P1, _trabajo\POPPING_INFORME.md): la PVS apaga nodos enteros 2,8 s de mediana (26 px de
+               radio, 418 m); el que ya se estaba dibujando se queda PVS_GRACIA cuadros (0,33 s) con el ultimo coste que
+               traia. Sin eso es 2,29 de los 3,84 huecos visibles por segundo; con esto, 0,08 */
+            if (!ya || !mo->pvs_gra || !mo->pvs_gra[i]) { POPR(i, PR_PVS); continue; }
+            c_teo = mo->pvs_ult[i]; c_v = d->relleno[1] >> 12; gracia = 1;
+#ifdef DIAG_POPPING
+            pop_pvs_gra++;
+#endif
+        } else if (pvs_on_) {                                /* PVS: lo que queda visible del nodo desde aqui */
             c_teo = mo->pvs_teo[2 * i]; c_v = mo->pvs_teo[2 * i + 1];
 #ifdef DIAG_VTX
             diag_pvs_v += (d->relleno[1] >> 12) - c_v;
 #endif
-            if (!c_teo) { POPR(i, PR_PVS); continue; }
+            if (!c_teo) {                                    /* (la PVS lo apaga: la gracia, como arriba) */
+                if (!ya || !mo->pvs_gra || !mo->pvs_gra[i]) { POPR(i, PR_PVS); continue; }
+                c_teo = mo->pvs_ult[i]; c_v = d->relleno[1] >> 12; gracia = 1;
+#ifdef DIAG_POPPING
+                pop_pvs_gra++;
+#endif
+            }
         } else { c_teo = d->relleno[0]; c_v = d->relleno[1] >> 12; }
-        ya = VA[i >> 5] & (1u << (i & 31));
         if (d->cartel <= -2 && (uint32_t)(-2 - d->cartel) < nnod) {
             /* con version lejana (tools/lod_veg.py): por debajo de LOD_LEJ_PX de radio en la pantalla, el impostor en su
                lugar (con histeresis: el que se dibujaba sigue hasta LOD_LEJ_HIST veces mas alla del umbral). El LOD, la
@@ -7127,6 +7155,10 @@ static void nodos_visibles(modelo_t *mo)
             else if (era_lej && pop_ra && pop_ra[i] == PR_DIB) pop_lod_comp++;
 #endif
             else ya = ya || era_lej;
+        }
+        if (mo->pvs_gra) {                                    /* gracia de la PVS: lo que le queda al nodo (ip) */
+            if (gracia) { if (mo->pvs_gra[ip]) mo->pvs_gra[ip]--; }
+            else if (c_teo) { mo->pvs_gra[ip] = PVS_GRACIA; mo->pvs_ult[ip] = c_teo; }
         }
         VIS[i >> 5] |= 1u << (i & 31); POPR(i, PR_DIB);
         cd = zv - d->r > 1.0f ? log2x(zv - d->r, 4) : 0; cd = cd > ND_PRIO - 1 ? ND_PRIO - 1 : cd;
@@ -7175,7 +7207,11 @@ static void nodos_visibles(modelo_t *mo)
                 if (!(g = d->fl >> 16) || g > nnod) continue;
                 o = G[g - 1];
                 d->relleno[1] = (d->relleno[1] & ~4095u) | ((o >> 8) << 6 | (o & 255));
-                if (pvs_on_) { prio_coste[o >> 8][o & 255] += mo->pvs_teo[2 * i]; prio_vtx[o >> 8][o & 255] += mo->pvs_teo[2 * i + 1]; }
+                if (pvs_on_) {                              /* (con la gracia de la PVS, el ultimo coste que traia) */
+                    uint32_t ct = mo->pvs_teo[2 * i], cv = mo->pvs_teo[2 * i + 1];
+                    if (!ct && mo->pvs_ult && mo->pvs_gra && mo->pvs_gra[i]) { ct = mo->pvs_ult[i]; cv = d->relleno[1] >> 12; }
+                    prio_coste[o >> 8][o & 255] += ct; prio_vtx[o >> 8][o & 255] += cv;
+                }
                 else { prio_coste[o >> 8][o & 255] += d->relleno[0]; prio_vtx[o >> 8][o & 255] += d->relleno[1] >> 12; }
             }
         }
@@ -7330,8 +7366,8 @@ static void pop_mide(void)
         n += sprintf(b + n, "POPTA: agua %uK bo %uK coche %uK pareja %uK trafico %uK efectos %uK\n", (unsigned)(pop_cat[0] / pop_cuadros >> 10), (unsigned)(pop_cat[1] / pop_cuadros >> 10),
                      (unsigned)(pop_cat[2] / pop_cuadros >> 10), (unsigned)(pop_cat[3] / pop_cuadros >> 10), (unsigned)(pop_cat[4] / pop_cuadros >> 10), (unsigned)(pop_cat[5] / pop_cuadros >> 10));
         memset(pop_cat, 0, sizeof pop_cat);
-        n += sprintf(b + n, "POPVEG: lod lej %u comp %u n %u |", (unsigned)pop_lod_lej, (unsigned)pop_lod_comp, (unsigned)(pop_lej_n / (pop_cuadros ? pop_cuadros : 1)));
-        pop_lod_lej = pop_lod_comp = pop_lej_n = 0;
+        n += sprintf(b + n, "POPVEG: lod lej %u comp %u n %u gracia %u |", (unsigned)pop_lod_lej, (unsigned)pop_lod_comp, (unsigned)(pop_lej_n / (pop_cuadros ? pop_cuadros : 1)), (unsigned)pop_pvs_gra);
+        pop_lod_lej = pop_lod_comp = pop_lej_n = pop_pvs_gra = 0;
         for (k = 1; k < PR_N; k++) if (pop_vap[k][0] || pop_vde[k][0])
             n += sprintf(b + n, " %s +%u/%u/%u -%u/%u/%u z%d-%d px%d", pop_nom[k], (unsigned)pop_vap[k][0], (unsigned)pop_vap[k][1], (unsigned)pop_vap[k][2],
                          (unsigned)pop_vde[k][0], (unsigned)pop_vde[k][1], (unsigned)pop_vde[k][2], pop_vz[k][0] < 1e8f ? (int)pop_vz[k][0] : -1, (int)pop_vz[k][1], (int)pop_vpx[k]);
