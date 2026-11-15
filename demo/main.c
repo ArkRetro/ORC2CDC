@@ -1,4 +1,4 @@
-/* Demo jugable del port de OutRun 2006 C2C a Dreamcast: el curso entero del modo (CURSO.DAT: 15 etapas SEGnn.DAT y sus
+﻿/* Demo jugable del port de OutRun 2006 C2C a Dreamcast: el curso entero del modo (CURSO.DAT: 15 etapas SEGnn.DAT y sus
    uniones BKkk.DAT, BKD.DAT; ver curso_paso), que se leen y encadenan mientras se conduce, y los coches (COCHEnn.DAT), convertidos de tu DVD con tools/conv_tramo.py, tools/conv_union.py y tools/conv_coche.py
    (formato ORD6 con texturas VQ, ver tools/modelo.py y tools/vq.py). Necesidades de la consola real (presupuesto del TA, VRAM, GD, video): docs/DREAMCAST.md.
    Orden de carga: datos del GD a la RAM (con aviso en pantalla), PowerVR, texturas a la memoria de video, cabeceras
@@ -8,10 +8,12 @@
    pausa, Y cambia la vista (en pausa ensena/oculta las cifras de rendimiento), cruceta arriba/abajo distancia de dibujo. Sin tocar nada, el titulo pasa a una demostracion automatica. */
 #include <kos.h>
 #include <kos/genwait.h>
+#include <arch/exec.h>                                          /* OutRunners: arch_exec (KOS cambia de programa) */
 #include "pvr_internal.h"                                       /* pvr_state (KallistiOS): la presentacion a FPS_OBJETIVO */
 #include <dc/matrix.h>
 #include <dc/biosfont.h>
 #include <dc/flashrom.h>
+#include <dc/cdrom.h>
 #include <math.h>
 #include <malloc.h>
 #include <stdlib.h>
@@ -10731,6 +10733,29 @@ static void meta_camara(void)
 #endif
 }
 
+/* OutRunners (port nativo de MisterPezz82/OutRunners-Dreamcast, BSD-3): la imagen del juego, sin scrambler, va en el
+   disco como OUTRUNNERS.BIN en la raiz, junto a sus datos (core.assets, tiles4.z, sprites.z, pcm.bin y aica_*.bin),
+   con las rutas del port cambiadas de /cd/assets/ a /cd/ (tools/parche_outrunners.py). Se lanza con arch_exec de
+   KallistiOS: apaga PVR, AICA y GD, copia la imagen a 0x8C010000 y salta; no vuelve. La imagen de la release 0.2 mide
+   1 MB, asi que con 2 MB sobra. Devuelve < 0 si no se pudo lanzar (y entonces se sigue con el juego). */
+#define OUTRUNNERS_MAX (800u << 10)                            /* la imagen mide 792.664 B */
+static uint8_t *or_buf;                                     /* la imagen, reservada al arrancar (en el menu no hay 1 MB seguido) */                            /* la imagen mide 1.006.028 B; 1 MB y 64 KB de margen */
+int or_programa_lanza(void)
+{
+    static uint8_t *img;
+    uint32_t tam = 0; int r; char s[64];
+    /* los huecos fijos de la etapa y de la union parten el monton y no dejan ni 800 KB seguidos: se sueltan aqui (si
+       el lanzamiento fallara, se vuelven a reservar al cargar la etapa siguiente, curso_huecos) */
+    if (hueco_etapa) { free(hueco_etapa); hueco_etapa = NULL; }
+    if (hueco_union) { free(hueco_union); hueco_union = NULL; }
+    if (!(img = memalign(32, OUTRUNNERS_MAX))) { aviso("OUTRUNNERS: sin memoria"); thd_sleep(3000); return -1; }
+    if ((r = gd_carga_en("OUTRUNNERS.BIN", img, OUTRUNNERS_MAX, &tam))) {
+        sprintf(s, "OUTRUNNERS.BIN: error %d", r); aviso(s); thd_sleep(3000); return r;
+    }
+    dbglog(DBG_INFO, "OUTRUNNERS: %u bytes en %p, salto\n", (unsigned)tam, img);
+    arch_exec(img, tam);
+}
+
 int main(int argc, char **argv)
 {
     /* bufer de parametros de TA_VB_BYTES (x2); opacos con bloques de 32 (el suelo cercano toca muchas teselas) y 4
@@ -10757,6 +10782,24 @@ int main(int argc, char **argv)
     elige_video();
     vid_set_mode(modo_video, PM_RGB565);
     vid_clear(0, 0, 0);                                         /* negro mientras carga, sin texto */
+#ifdef PRUEBA_OUTRUNNERS
+    {   /* prueba: el /cd de KallistiOS en este disco antes de la cadena */
+        FILE *f; char s[64]; cd_toc_t toc; int r = cdrom_read_toc(&toc, false), k, i;
+        memset(s, 0, sizeof s); sprintf(s, "TOC r=%d first=%d last=%d", r, TOC_TRACK(toc.first), TOC_TRACK(toc.last));
+        aviso(s); thd_sleep(2000);
+        for (k = 0; k < 3; k++) {
+            i = TOC_TRACK(toc.first) + k;
+            memset(s, 0, sizeof s);
+            sprintf(s, "pista %d: lba %u ctrl %u", i, (unsigned)TOC_LBA(toc.entry[i - 1]), (unsigned)TOC_CTRL(toc.entry[i - 1]));
+            aviso(s); thd_sleep(1500);
+        }
+        f = fopen("/cd/CORE.ASSETS", "rb");
+        memset(s, 0, sizeof s); sprintf(s, "/cd/CORE.ASSETS: %s", f ? "OK" : "NO");
+        aviso(s); thd_sleep(2500);
+        if (f) fclose(f);
+    }
+    or_programa_lanza();                                        /* prueba: cadena a OutRunners al arrancar */
+#endif
     robot_lee();                                                /* CHRPAR.DAT y el bloque de la pareja: antes que los huecos y la ruta (RAM) */
     if (!(coche_bloque = memalign(32, COCHE_RAM))) dbglog(DBG_ERROR, "coche: sin %uK para el bloque\n", COCHE_RAM >> 10);   /* y el del coche */
     if ((r = curso_lee() ? -8 : curso_huecos() ? -9 : curso_lee_etapa(0))) {   /* el arbol y la primera etapa */
@@ -12021,3 +12064,9 @@ int main(int argc, char **argv)
     }
     return 0;
 }
+
+
+
+
+
+

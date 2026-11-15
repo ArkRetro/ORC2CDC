@@ -391,6 +391,22 @@ static int n_menu = N_OPC;
 static hudd_regla_t r_menu[20]; static int n_r_menu;
 static int opc_menu(int c) { return n_menu < N_OPC && c >= OPC_QUITADA ? c + 1 : c; }
 static int c_menu, c_modo, c_rank, c_multi, manual, n_ok, pista_sonando, sale_ok;
+static float menu_ylab[N_OPC] = { -1, -1, -1, -1, -1 }, menu_xlab[N_OPC];   /* sitio del rotulo de cada opcion */
+extern int or_programa_lanza(void);                        /* demo/main.c: cadena a OutRunners (arch_exec) */
+/* OUTRUNNERS (DESVIACION pedida): en gris hasta el nombre ENTIRETY de la licencia o tener las 50.000 millas OutRun
+   (las del Salon, +0x24 de la licencia). La compra en el Salon es aparte (SALON.DAT) y queda pendiente */
+static int menu_or_ok(void)
+{
+    const uint8_t *p = activa(); float m;
+#ifdef OR_DESBLOQUEADO                               /* provisional: la entrada siempre disponible (para probar) */
+    return 1;
+#else
+    if (!p) return 0;
+    if (!memcmp(p, "ENTIRETY", 8)) return 1;
+    memcpy(&m, p + 0x24, 4);
+    return m >= 50000.0f;
+#endif
+}
 static int lista, curs[N_LISTAS], elegido;                  /* 84B0F4, 84B0EC y 830364 del PC */
 
 static int tramo(int u, const char *n, int *ini, int *fin, int *modo)
@@ -466,15 +482,25 @@ static void menu_sin_multi(void)
     if (sep < 0 || pto < 0) goto mal;
 #define R_(s_, n_, m_, si_, an_, a_, b_) do { hudd_regla_t *r_ = r_menu + n_r_menu++; r_->spr = s_; r_->nuevo = n_; \
         r_->modo = m_; r_->sitio = si_; r_->ancla = an_; r_->x0 = a_; r_->x1 = b_; } while (0)
-    for (i = OPC_QUITADA; i < N_OPC - 1; i++) {             /* sitio i: la opcion i + 1 */
-        R_(lab[i], lab[i + 1], 0, 0, -1, 0, 0); R_(des[i], des[i + 1], 0, 1, -1, 0, 0); R_(tit[i], tit[i + 1], 0, 1, -1, 0, 0);
-    }
-    R_(lab[N_OPC - 1], -1, 0, 0, -1, 0, 0); R_(des[N_OPC - 1], -1, 0, 0, -1, 0, 0); R_(tit[N_OPC - 1], -1, 0, 0, -1, 0, 0);
+    /* Los cinco sitios del arte: 0 SINGLE PLAYER, 1 OUTRUN2SP, 2 OUTRUNNERS (el rotulo lo escribe el menu con la
+       fuente 14, asi que el de este sitio se quita), 3 RANKINGS y 4 OPTIONS. Antes: MULTIPLAYER fuera y los sitios
+       0..3 con las opciones 0, 2, 3 y 4. */
+    R_(lab[1], lab[2], 0, 0, -1, 0, 0);                     /* sitio 1: OUTRUN2SP */
+    R_(lab[2], -1, 0, 0, -1, 0, 0);                         /* sitio 2: lo escribe OUTRUNNERS */
+    R_(des[1], des[2], 0, 1, -1, 0, 0); R_(tit[1], tit[2], 0, 1, -1, 0, 0);
     R_(pto, -1, 1, 0, -1, xp - 2, xp + 2);                  /* el punto del sitio 4 */
     R_(sep, -1, 2, 0, lab[N_OPC - 1], 0, 20);               /* el separador delante del rotulo del sitio 4 (7..11 px) */
 #undef R_
-    n_menu = N_OPC - 1;
-    dbglog(DBG_INFO, "menu: menu principal sin MULTIPLAYER (rotulos %d..%d, separador %d, puntos %d)\n", lab[0], lab[N_OPC - 1], sep, pto);
+    for (i = 0; i < N_OPC; i++) {                           /* sitio de cada rotulo (el texto de OUTRUNNERS va al 2) */
+        char b[8]; int ini2, fin2, modo2, j2, n2;
+        sprintf(b, "SEL%d", i);
+        if (!tramo(u, b, &ini2, &fin2, &modo2)) continue;
+        n2 = hudd_piezas(md, u, ini2, pz, MAXP);
+        for (j2 = 0; j2 < n2; j2++)
+            if (pz[j2].spr == lab[i] || (i == 2 && pz[j2].y < 360)) { menu_ylab[i] = pz[j2].y; menu_xlab[i] = pz[j2].x; break; }
+    }
+    n_menu = N_OPC;
+    dbglog(DBG_INFO, "menu: menu principal con OUTRUNNERS en el sitio 2 (rotulos %d..%d, separador %d, puntos %d)\n", lab[0], lab[N_OPC - 1], sep, pto);
     return;
 mal:
     n_r_menu = 0; n_menu = N_OPC;
@@ -1158,13 +1184,18 @@ static void control(unsigned n)
         if (ok) {
             int c = pant == P_MENU ? opc_menu(c_menu) : c_modo;   /* (la opcion del original) */
             GANCHO(pant, 1, c);
-            if (pant == P_MENU) {                           /* SINGLE PLAYER, (MULTIPLAYER), OUTRUN2SP, RANKINGS, OPTIONS */
-                if (c == 0) { sp_sel = 0; sale(P_MODO, 1); } else if (c == 1) sale(P_MULTI, 1); else if (c == 3) sale(P_RANKING, 1);
-                else if (c == 4) sale(P_OPCIONES, 1);
-                else {                                      /* OUTRUN2SP (0x23aba0): el frontal de recreativa (fsp.c) */
+            if (pant == P_MENU) {                           /* SINGLE PLAYER, OUTRUN2SP, OUTRUNNERS, RANKINGS, OPTIONS */
+                if (c_menu == 0) { sp_sel = 0; sale(P_MODO, 1); }
+                else if (c_menu == 1) {                     /* OUTRUN2SP (0x23aba0): el frontal de recreativa (fsp.c) */
                     sp_sel = 1; sfx_menu(SFX_ACEPTA); menu_libera_todo();
                     if (fsp_entra()) { sp_sel = 0; entra(P_MENU, 1); }
                 }
+                else if (c_menu == 2) {                     /* OUTRUNNERS: en gris hasta desbloquearlo */
+                    if (menu_or_ok()) { sfx_menu(SFX_ACEPTA); menu_libera_todo(); or_programa_lanza(); bloqueado(); }
+                    else bloqueado();
+                }
+                else if (c_menu == 3) sale(P_RANKING, 1);
+                else sale(P_OPCIONES, 1);
             } else if (c == 0) {                            /* COAST 2 COAST: categorias (P_C2C) */
                 if (mis_n && !c2_abre()) { modo_sel = 0; sale(P_C2C, 1); } else bloqueado();
             } else if (c <= 3) {                            /* OUTRUN, HEART ATTACK, TIME ATTACK: el tablero 0x24 (0x25dd58: */
@@ -2505,7 +2536,13 @@ void menu_dibuja(void)
     }
     switch (pant) {
     case P_MENU: case P_MODO: case P_RANKING: case P_MULTI:
-        if (pant == P_MENU) hudd_reglas(r_menu, n_r_menu);  /* (sin MULTIPLAYER: menu_sin_multi) */
+        if (pant == P_MENU) {
+            int ok = menu_or_ok();
+            hudd_reglas(r_menu, n_r_menu);                  /* (MULTIPLAYER fuera; OUTRUNNERS en el sitio 2) */
+            if (menu_ylab[2] >= 0)                          /* el rotulo de OUTRUNNERS, con la fuente 14 */
+                texto((const uint8_t *)"OUTRUNNERS", 10, menu_xlab[2], menu_ylab[2], 1,
+                      (fase == F_ENTRA && entra_atras) ? a_ent : 1, 3, ok ? 0xF0F0F0 : 0x606060);
+        }
         an_dibuja(&a_sel, sacude, (entra_atras ? a_ent : 1) * a_sal * (cargando ? 0 : 1), 3, 0);
         hudd_reglas(NULL, 0);
         break;
