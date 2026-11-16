@@ -1,5 +1,8 @@
 #ifndef MUSICA_H
 #define MUSICA_H
+/* ALL I WANT (Crazy Taxi): tema 28 del selector (una tarjeta mas en la lista 2); su pista es MUS67.ADP */
+#define MUSICA_TEMA_ALL_I_WANT 28
+#define MUSICA_PISTA_ALL_I_WANT 67
 void musica_inicia(void);
 int musica_pon(int n);              /* MUSn.PCM desde el principio (en bucle) */
 int musica_pon_una(int n);          /* lo mismo, una sola vez (sin bucle) */

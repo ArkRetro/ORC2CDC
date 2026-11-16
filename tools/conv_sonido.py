@@ -148,6 +148,38 @@ def enc_yamaha(pcm):
     return bytes(nib[i] | (nib[i + 1] << 4) for i in range(0, len(nib), 2))
 
 
+def enc_yamaha_estereo(izq, der):
+    """ADPCM Yamaha del AICA estereo: un byte por muestra (nibble bajo derecho, alto izquierdo).
+
+    Es el mismo predictor y la misma tabla de paso que enc_yamaha, con un estado por canal (lo que
+    espera snd_stream_start_adpcm) y el recorte a 32767 del paso que usa el codificador oficial del
+    AICA. Sirve para codificar de una vez un PCM estereo largo, sin reiniciar el estado entre trozos
+    (asi no hay chasquidos en las uniones)."""
+    e = [[0, 127], [0, 127]]
+    out = bytearray(len(izq))
+    for i in range(len(izq)):
+        pr, paso = e[0]
+        dlt = int(izq[i]) - pr
+        n = min(7, abs(dlt) * 4 // paso)
+        q = min(32767, (paso * DIF_Y[n]) // 8)      # el codificador oficial del AICA recorta el paso
+        if dlt < 0: nl = n | 8; pr -= q
+        else: nl = n; pr += q
+        pr = max(-32768, min(32767, pr))
+        paso = max(127, min(24576, (paso * IDX_Y[n]) >> 8))
+        e[0] = [pr, paso]
+        pr, paso = e[1]
+        dlt = int(der[i]) - pr
+        n = min(7, abs(dlt) * 4 // paso)
+        q = min(32767, (paso * DIF_Y[n]) // 8)
+        if dlt < 0: nr = n | 8; pr -= q
+        else: nr = n; pr += q
+        pr = max(-32768, min(32767, pr))
+        paso = max(127, min(24576, (paso * IDX_Y[n]) >> 8))
+        e[1] = [pr, paso]
+        out[i] = (nl << 4) | nr
+    return bytes(out)
+
+
 def frecuencia(p):
     """pitch de la SPU (0x1000 = 48 kHz) a Hz, redondeado a la frecuencia estandar mas cercana"""
     if p == 0x1000: return 48000

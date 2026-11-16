@@ -17,6 +17,7 @@ Origen (todo se lee del disco al convertir; aqui solo hay tokens de escena, dire
      ayuda de musica 0x4400A6 (PC 0x440087, 0-35), listas de musica (tabla 0x419298): carrusel 0x4400C6 / 0x4400C7 /
        0x440033 (9 / 7 / 12 temas: entra 0-20, tema k quieto en 20+40k), titulos 0x440030 / 0x44002F / 0x44002E
        (110 cuadros por tema), nombre de lista 0x4400C8 (cuadros 1, 2, 0), candado 0x440066 cuadro 5,
+       mas la tarjeta ALL I WANT al final de la lista 2 (menu_musica.py: cuadros 500 / 1320, tema 28 de menu.c),
      ficha del coche 0x4400E5 / 0x4400E6 (normales / "_t", del codigo 0x2445D8 = 4C9010 del PC; logo, clase, cambios y
        barras; coche k quieto en 20(k+1), 15 coches en el orden de la tabla 0x375968; el 0x44007E de antes es otro
        carrusel, con otro orden),
@@ -57,6 +58,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import nativo
 from conv_hud import Disco, Ani, Atlas, Hud, texturas, escena, hornea, imagen_xst, dibuja_grupo, _t, _s
+import menu_musica
 
 B = 0x44                                # SUMO_FE_CVT
 LETRA = ['s']                           # XST del idioma (OR2_IDIOMA=es por defecto: los _sxst y SPANISH.bin)
@@ -540,7 +542,10 @@ def convierte(iso, salida, previas):
     # candado) y una pantalla por lista (MUSICA0/1/2: carrusel y titulos), para que en la VRAM solo este la lista que
     # se ve (las tres juntas pasan de 1,8 MB). Listas 0x4400C6 / 0x4400C7 / 0x440033 (9 / 7 / 12 temas: entra 0-20,
     # tema k quieto en 20+40k, MUEVEij entre ellos) y titulos 0x440030 / 0x44002F / 0x44002E (110 cuadros por tema, en
-    # bucle); nombre de la lista 0x4400C8 (cuadro del grupo = lista: 1, 2, 0 del original, 5C9F18 del PC)
+    # bucle); nombre de la lista 0x4400C8 (cuadro del grupo = lista: 1, 2, 0 del original, 5C9F18 del PC).
+    # La lista 2 lleva una tarjeta mas (tema 28, ALL I WANT, MUS67.ADP): menu_musica.py compone su arte con la fuente 14
+    # y la anade al carrusel (cuadro 500) y a los titulos (1320), con TEMA12 / MUEVE1112 / MUEVE1211. Las otras listas
+    # y los 12 temas originales no cambian.
     tr_lista = lambda n: [('ENTRA', 0, 20, U)] + [('TEMA%d' % k, 20 + 40 * k, 20 + 40 * k, Q) for k in range(n)] + \
         [('MUEVE%d%d' % (k, k + 1), 20 + 40 * k, 60 + 40 * k, U) for k in range(n - 1)]
     pantalla('MUSICA', [cab('CABECERA_MUSICA', 0x44006e),          # "music select" (0x23D4B8: clave 4 -> 0x44006E)
@@ -552,6 +557,10 @@ def convierte(iso, salida, previas):
         pantalla('MUSICA%d' % l, [('MUSICA_L%d' % l, tl, R(0, 20 + 40 * (nt - 1)), 3, (0, 0), tr_lista(nt), False),
                                   ('MUSICA_T%d' % l, tt, R(0, 110 * nt - 1), 6, (0, 0),
                                    [('TEMA%d' % k, 110 * k, 110 * k + 109, BU) for k in range(nt)], False)])
+        if l == 2:
+            ti0 = len(m.tex)
+            menu_musica.anade(m, F)                          # ALL I WANT (tema 28): una tarjeta mas
+            SIN_VQ.update(range(ti0, len(m.tex)))             # el texto del logo, sin VQ
     # LICENCIA (elegir, 0x4E2970 del PC con la tabla 0x41F8E0; editar, 4DD7C0 con 0x416EA8): cabecera "license
     # select", tarjeta 0x440088 (entra 0-12, quieta hasta 24), flechas 0x44008D / 0x44008E (1 quieta, 2-22 al pulsar)
     # a +-200; editor: rayas y rotulos 0x440087 (entra 0-51, opcion i en 51+i, sale 51-0), tarjeta 0x44009F (igual, en
@@ -780,6 +789,9 @@ def maquetas(m, d, hojas):
         'CAMBIO': (False, [('FONDO', 0), ('CABECERA_COCHE', 90), ('CAMBIO', 40), ('AYUDA_CAMBIO', 0)]),
         'MUSICA': (False, [('FONDO', 0), ('CABECERA_MUSICA', 90), ('MUSICA_RADIO', 25), ('MUSICA_AYUDA', 35), ('MUSICA_L0', 20),
                            ('MUSICA_T0', 55), ('MUSICA_LISTA', 0), ('AYUDA_MUSICA', 0)]),
+        'MUSICA2': (False, [('FONDO', 0), ('CABECERA_MUSICA', 90), ('MUSICA_RADIO', 25), ('MUSICA_AYUDA', 35),
+                            ('MUSICA_L2', menu_musica.CUADRO_CARRUSEL), ('MUSICA_T2', menu_musica.CUADRO_TITULO),
+                            ('MUSICA_LISTA', 0), ('AYUDA_MUSICA', 0)]),
     }
     for p, (bl, lst) in esc.items():
         img = fondo(bl)

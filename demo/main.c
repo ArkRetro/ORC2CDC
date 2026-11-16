@@ -21,6 +21,7 @@
 #include "../comun/registro.h"
 #include "../comun/musica.h"
 #include "../comun/or2_fisica.h"
+#include "../comun/turbo_taxi.h"
 #include "../comun/hud.h"
 #include "../comun/sfx.h"
 #include "../comun/voces.h"
@@ -1602,6 +1603,20 @@ static void m_rot(matrix_t M, int a, int b, float ang)        /* fila a' = c a +
 #define m_rx(M, ang) m_rot(M, 1, 2, ang)                       /* [[1,0,0],[0,c,s],[0,-s,c]] */
 #define m_ry(M, ang) m_rot(M, 2, 0, ang)                       /* [[c,0,-s],[0,1,0],[s,0,c]] */
 #define m_rz(M, ang) m_rot(M, 0, 1, ang)                       /* [[c,s,0],[-s,c,0],[0,0,1]] */
+/* rotacion alrededor de un eje cualquiera (el eje del volante del taxi): fila i' = R[i][j] fila j */
+static void m_eje(matrix_t M, float x, float y, float z, float ang)
+{
+    float c = cosf(ang), s = sinf(ang), t = 1.0f - c, R[3][3], n[3][4]; int i, j;
+    R[0][0] = c + x * x * t; R[0][1] = x * y * t + z * s; R[0][2] = x * z * t - y * s;
+    R[1][0] = x * y * t - z * s; R[1][1] = c + y * y * t; R[1][2] = y * z * t + x * s;
+    R[2][0] = x * z * t + y * s; R[2][1] = y * z * t - x * s; R[2][2] = c + z * z * t;
+    for (i = 0; i < 3; i++)
+        for (j = 0; j < 4; j++)
+            n[i][j] = R[i][0] * M[0][j] + R[i][1] * M[1][j] + R[i][2] * M[2][j];
+    for (i = 0; i < 3; i++)
+        for (j = 0; j < 4; j++)
+            M[i][j] = n[i][j];
+}
 
 /* ---------------------------------------------------------------- ruta de la carrera
    Un punto cada PASO m (tools/conv_tramo.py: centro, anchos, perfil, carriles y columnas de la colision). Es la ruta de
@@ -1912,8 +1927,9 @@ static int sal_on, sal_f, sal_rue; static float sal_cam[8];
 static float meta_rueda_y[4];                                  /* 475720: rueda +134 por el suelo bajo cada rueda */
 static uint32_t efe_mascara;                                   /* 95AFAC del guion (82E7C8): humo y marcas por rueda */
 /* chispas (41D810 = PS2 0x10b698): las piden el choque con el muro y con otro coche en cada paso, por rueda de la
-   demo (0 del. der., 1 del. izq., 2 tras. der., 3 tras. izq.: la rueda n del original es la n ^ 1) */
-static unsigned chispa_muro, chispa_coche;
+   demo (0 del. der., 1 del. izq., 2 tras. der., 3 tras. izq.: la rueda n del original es la n ^ 1).  El turbo del
+   taxi pide las dos traseras (2 y 3) durante su arranque. */
+static unsigned chispa_muro, chispa_coche, chispa_turbo;      /* chispa_turbo: 2 y 3, las traseras, al arrancar el turbo */
 static float lejos_guion = LEJOS_PS2;                           /* el lejano del original (op 20 de la meta: 1900) */
 /* fisica del original para el coche del jugador (comun/or2_fisica.c) con la tabla de PARAM.DAT */
 #ifndef MODELO
@@ -1927,6 +1943,13 @@ static float lejos_guion = LEJOS_PS2;                           /* el lejano del
 static int manual_, pide_cambio, auto_piloto, sfx_ok, golpe_cd;
 static int voz_ok, voz_contacto;                              /* voces.c; contacto con impulso en este paso */
 static or2_param_t fpar; static or2_coche_t fis; static int fis_ok, columna = -1;
+/* turbo del taxi de Crazy Taxi: ficha 7 del menu = modelo 0 (COCHE15.DAT) */
+#define TURBO_TAXI_FICHA  7
+#define TURBO_TAXI_MODELO 0
+static turbo_taxi_t turbo_taxi; static int turbo_taxi_ok, turbo_taxi_modelo = -1;
+#ifdef PRUEBA_TURBO_AUTO
+static int turbo_auto_armado;                                   /* prueba: solo el disparo del guion */
+#endif
 /* mando del jugador para or2_volante (volante del original: eje -128..127, cruceta, etapa para CheckWanderer); usa = 1
    solo en el paso de carrera con el jugador al mando */
 static struct { int eje, izq, der, usa, nivel; } mando;
@@ -2135,6 +2158,30 @@ static int fisica_modelo(int m)
     fpar.modelo = m;                                            /* car+0x11: >= 15 los preparados */
     if (ACEL != 1.0f) fpar.par_mult *= ACEL;                    /* opcional (ACEL): no es del original */
     fis_ok = 1; return 0;
+}
+/* El turbo solo existe en el taxi de Crazy Taxi (ficha 7 / modelo 0).  La punta normal sale de
+   PARAM.DAT; los 400 km/h son los del velocimetro, asi que se pasan a m/s del mundo con el factor
+   hud de la tabla (400 / (hud * 3.6)). */
+static int turbo_taxi_es(void)
+{
+    return coche_ficha == TURBO_TAXI_FICHA && modelo_jug == TURBO_TAXI_MODELO;
+}
+static void turbo_taxi_prepara(void)
+{
+    float hud = fpar.hud > 0.05f ? fpar.hud : 0.627604187f;
+    float punta = fpar.v_tope * OR2_HZ;
+    float objetivo = 400.5f / (hud * 3.6f);   /* 400,5 para que el velocimetro (truncado) marque 400 */
+    if (!(punta > 20.0f)) punta = 130.0f;
+    if (!(objetivo > punta + 5.0f)) objetivo = punta * 1.10f;
+    if (objetivo > 195.0f) objetivo = 195.0f;
+    turbo_taxi_inicia(&turbo_taxi, punta, objetivo);
+    turbo_taxi_ok = 1;
+    turbo_taxi_modelo = modelo_jug;
+    dbglog(DBG_INFO, "TURBO taxi: hud %.4f punta %.2f m/s (%.0f km/h fisicos, %.0f de velocimetro), "
+           "objetivo %.2f m/s (400 de velocimetro), freno 1,00 s, armado 1,20 s, sube 3,00 s, empuje 6,00 s, "
+           "caida 4,00 s, chispas 1,40 s\n",
+           (double)hud, (double)punta, (double)(punta * 3.6f), (double)(punta * hud * 3.6f),
+           (double)objetivo);
 }
 static float dif_ang(float a) { while (a > M_PI) a -= 2 * M_PI; while (a < -M_PI) a += 2 * M_PI; return a; }
 #define VMAX 100.0f                                          /* techo teorico; punta real unos 300 km/h */
@@ -4285,7 +4332,34 @@ static void coche_paso(coche_t *c, float giro, float gas, float freno, float dt)
             for (i = 0; i < NTRAF; i++) if (traf[i].b72 > 0) traf[i].b72--;
         }
         x0 = c->x;
+        /* turbo del taxi (ficha 7 / modelo 0): la maquina de estados mira los pedales y la
+           velocidad; la fisica recibe la aceleracion y el tope de esta capa arcade. */
+        if (turbo_taxi_es()) {
+            if (!turbo_taxi_ok || turbo_taxi_modelo != modelo_jug) turbo_taxi_prepara();
+#ifdef PRUEBA_TURBO_AUTO
+            if (!turbo_auto_armado) turbo_taxi_corta(&turbo_taxi);   /* la prueba no deja que el piloto lo encienda solo */
+            else
+#endif
+            turbo_taxi_paso(&turbo_taxi, gas, freno, fis.velocidad, dt);
+            if (fis.t_choque > 0.0f || fis.grua > 0) turbo_taxi_corta(&turbo_taxi);   /* un golpe lo corta */
+            e.turbo_acel = turbo_taxi.activo ? turbo_taxi.acel : 0.0f;
+            e.turbo_tope = turbo_taxi.activo ? turbo_taxi.tope : 0.0f;
+        } else if (turbo_taxi_ok) {
+            turbo_taxi_corta(&turbo_taxi); turbo_taxi_ok = 0; turbo_taxi_modelo = -1;
+        }
         or2_paso(&fis, &fpar, &e, 0.0f);
+#ifdef DIAG_TURBO
+        if (turbo_taxi_es()) {
+            static int n_turbo;
+            n_turbo++;
+            if (turbo_taxi.activo || (n_turbo % 30) == 0)
+                dbglog(DBG_INFO, "TURBO f %d est %d paso %d tfreno %.2f t %.2f v %.1f m/s (%.1f fis %.1f hud) tope %.1f (%.1f hud) acel %.2f gas %.2f fr %.2f chispa %.2f\n",
+                       n_turbo, turbo_taxi.estado, turbo_taxi.paso, (double)turbo_taxi.t_freno, (double)turbo_taxi.t,
+                       (double)fis.velocidad, (double)fis.kmh, (double)fis.velocidad_hud,
+                       (double)turbo_taxi.tope, (double)(turbo_taxi.tope * fpar.hud * 3.6f),
+                       (double)turbo_taxi.acel, (double)gas, (double)freno, (double)turbo_taxi.chispa_t);
+        }
+#endif
 #ifdef DIAG_SUELO_RUEDAS
         {   static int n_d; float sp = sqrtf(fis.vx * fis.vx + fis.vy * fis.vy);
             if (fis.kmh > 400 || fabsf(e.suelo_rueda[0]) + fabsf(e.suelo_rueda[1]) + fabsf(e.suelo_rueda[2]) + fabsf(e.suelo_rueda[3]) > 0.4f || n_d % 30 == 0)
@@ -4619,7 +4693,7 @@ static pvr_poly_hdr_t cab_marca[NMARCA_CLASES]; static int marca_tex_ok;
    resolve_entry 0x182d6c) */
 #define ATR_SEG 66
 static int16_t atr_tab[ATR_SEG][3][32]; static int atr_ok;
-#define NCHISPA 500
+#define NCHISPA 900
 typedef struct { float p[3], v[3]; int vida; } chispa_t;
 static chispa_t chispas[NCHISPA]; static int chispa_n;          /* chispa_n: las vivas van por delante */
 static int chispa_cnt[4], chispa_hay, chispa_par; static float chispa_disp[4][3], chispa_ant[4][3], chispa_coche_ant[3];
@@ -4634,7 +4708,7 @@ static float chispa_azar(void)
 }
 static void chispas_paso(const coche_t *c, const float *r)
 {
-    int i, k, n; float q[4][3], mov[4], vc[3];
+    int i, k, n, nacer[4]; float q[4][3], mov[4], vc[3];
     for (i = 0; i < 4; i++) {
         float fx = i < 2 ? fpar.cg_del : -fpar.cg_tras, ly = fpar.via[i >> 1] * ((i & 1) ? -0.5f : 0.5f), d2 = 0;
         for (k = 0; k < 3; k++) { q[i][k] = c->pos[k] + c->fw[k] * fx + r[k] * ly; d2 += (q[i][k] - chispa_ant[i][k]) * (q[i][k] - chispa_ant[i][k]); }
@@ -4642,20 +4716,27 @@ static void chispas_paso(const coche_t *c, const float *r)
     }
     for (k = 0; k < 3; k++) vc[k] = c->pos[k] - chispa_coche_ant[k];
     if (!chispa_hay || vc[0] * vc[0] + vc[1] * vc[1] + vc[2] * vc[2] > 25.0f) {   /* recien colocado (salida, grua): sin rastro */
-        chispa_hay = 1; memset(chispa_cnt, 0, sizeof chispa_cnt); chispa_muro = chispa_coche = 0;
+        chispa_hay = 1; memset(chispa_cnt, 0, sizeof chispa_cnt); chispa_muro = chispa_coche = chispa_turbo = 0;
         for (i = 0; i < 4; i++) mov[i] = 0;
         vc[0] = vc[1] = vc[2] = 0;
     }
+    /* turbo del taxi: chispas en las dos ruedas traseras (2 y 3 de la demo) durante el arranque; el modulo
+       lleva la cuenta (chispa_t) y las corta al estabilizarse o al cortar el turbo */
+    chispa_turbo = (turbo_taxi.chispa_t > 0.0f) ? 0x0Cu : 0u;
     for (i = 0; i < 4; i++) {                                   /* peticiones (0x10b740..0x10b7e8) */
         float e = 0.0199999996f;                                /* 0x32b270 */
+        nacer[i] = 30;                                          /* chispas por cuadro y rueda */
         if (chispa_muro >> i & 1) { chispa_disp[i][0] = e; chispa_disp[i][1] = e * 3.0f; chispa_disp[i][2] = e; chispa_cnt[i] = 15; }
         else if (chispa_coche >> i & 1) { chispa_disp[i][0] = e * 3.0f; chispa_disp[i][1] = e; chispa_disp[i][2] = e * 3.0f; chispa_cnt[i] = 15; }
+        else if (chispa_turbo >> i & 1) {                       /* turbo: mas chispas y algo mas abiertas */
+            chispa_disp[i][0] = e * 1.6f; chispa_disp[i][1] = e * 4.8f; chispa_disp[i][2] = e * 1.6f; chispa_cnt[i] = 15; nacer[i] = 50;
+        }
     }
 #ifdef DIAG_CHISPA
-    if (chispa_muro | chispa_coche) { static int m; if (m++ % 10 == 0) dbglog(DBG_INFO, "CHISPA muro %x coche %x mov %.3f %.3f %.3f %.3f vivas %d\n",
-        chispa_muro, chispa_coche, (double)mov[0], (double)mov[1], (double)mov[2], (double)mov[3], chispa_n); }
+    if (chispa_muro | chispa_coche | chispa_turbo) { static int m; if (m++ % 10 == 0) dbglog(DBG_INFO, "CHISPA muro %x coche %x turbo %x mov %.3f %.3f %.3f %.3f vivas %d\n",
+        chispa_muro, chispa_coche, chispa_turbo, (double)mov[0], (double)mov[1], (double)mov[2], (double)mov[3], chispa_n); }
 #endif
-    chispa_muro = chispa_coche = 0;
+    chispa_muro = chispa_coche = chispa_turbo = 0;
     for (n = 0; n < 4; n++) {                                   /* nacen (0x10b970..): en el orden de las ruedas del original */
         float a[3], paso[3], base[3]; int j, lleno = 0;
         i = n ^ 1;
@@ -4664,7 +4745,7 @@ static void chispas_paso(const coche_t *c, const float *r)
         if (mov[i] < 0.00999999978f) continue;                  /* 0x3C23D70A */
         for (k = 0; k < 3; k++) { base[k] = vc[k] * 0.899999976f; paso[k] = (q[i][k] - chispa_ant[i][k]) * (1.0f / 30.0f); a[k] = chispa_ant[i][k]; }
         base[1] += 0.0299999993f; a[1] += 0.699999988f;
-        for (j = 0; j < 30; j++) {
+        for (j = 0; j < nacer[i]; j++) {
             chispa_t *h;
             if (chispa_n >= NCHISPA) { lleno = 1; break; }      /* sin sitio: 0x10ba9c sale de la funcion */
             h = chispas + chispa_n++;
@@ -5117,7 +5198,7 @@ static void efectos_borra(void)
 {
     memset(marca_n, 0, sizeof marca_n); memset(marca_sig, 0, sizeof marca_sig); memset(rmarca, 0, sizeof rmarca);
     part_borra();
-    chispa_n = 0; chispa_hay = 0; chispa_muro = chispa_coche = 0;
+    chispa_n = 0; chispa_hay = 0; chispa_muro = chispa_coche = chispa_turbo = 0;
 }
 /* 41FDD0: un tramo de la marca de la rueda r (borde nuevo L, R) en el anillo de su clase; devuelve la fraccion de v */
 static float marca_tramo(rueda_marca_t *r, const float *L, const float *R, float a_nuevo, float a_viejo, int clase)
@@ -8055,11 +8136,123 @@ static void geo_vista_fin(const modelo_t *t)
    (car+5C != 0) pasada la posicion 0xC7 si +0x6E <= 0 (0x172b40 / 0x11a32c).
    DESVIACION pedida por el usuario (el reflejo sin la mascara del alfa de destino, que la PowerVR no tiene, "no queda
    logrado"; prefiere una capa azul como el mar de BEAC): el plano (grupo 2 de la lista 3 en SEGnn.DAT, en el marco de la
-   etapa: tools/conv_tramo.py pon_agua) se pinta opaco y sin textura de AGUA_COLOR, con la z y la niebla de la tabla
-   como el resto de la escena. Ocupa lo que ocupa el agua en el original: lo que se ve del plano. El original no tiene
-   un color del agua (el plano no pone color y el reflejo es una imagen): AGUA_COLOR es el del mar de BEAC con el
-   reflejo de la demo 35, el que el usuario dio por bueno. */
+   etapa: tools/conv_tramo.py pon_agua) se pinta opaco con la z y la niebla de la tabla como el resto de la escena.
+   Revision de agua (2026-11-16): el color plano de AGUA_COLOR se cambia por una textura de ondas 64x64 generada en la
+   RAM al arrancar, con mipmaps, repetida cada 36 m y desplazada con el crono (0,006 / 0,0035 de textura por paso: unas
+   olas de unos 15 m/s). El color de cada etapa sale de la media de las texturas del reflejo del original (tabla
+   agua_tinte: BEAC 14,21,128; LAKE 42,58,69; METR 20,19,15; DESE 218,219,207...), aclarada x1,4 porque en el PS2 el
+   reflejo se suma a la escena (ALPHA 9) y aqui sustituye al color plano. Asi el lago de LAKE deja de ser azul de mar,
+   el de METR de noche no sale azul cielo y el de DESE no sale azul. Coste: 11 KB de VRAM fuera de la zona del curso,
+   los mismos vertices y triangulos (el TA no cambia) y 0 bytes en el GD. */
 #define AGUA_COLOR 0xFF4064A3u
+#define AGUA_TEX_LADO 64
+#define AGUA_TEX_BYTES (6 + 2 * (1 + 4 + 16 + 64 + 256 + 1024 + 4096))
+#define AGUA_TEX_TAM ((AGUA_TEX_BYTES + 31) & ~31u)
+#define AGUA_UV_TILE 36.0f                                        /* metros por vuelta de la textura */
+static uint32_t agua_twiddle(uint32_t x, uint32_t y)
+{
+    uint32_t r = 0; int b;
+    for (b = 0; b < 6; b++) { r |= ((y >> b) & 1u) << (2 * b); r |= ((x >> b) & 1u) << (2 * b + 1); }
+    return r;
+}
+static float agua_ruido(uint32_t x, uint32_t y)
+{
+    uint32_t h = x * 374761393u + y * 668265263u;
+    h = (h ^ (h >> 13)) * 1274126177u;
+    return (float)((h >> 8) & 0xFFFFu) * (1.0f / 65535.0f) - 0.5f;
+}
+/* 64x64 ARGB4444 twiddled con mipmaps (6 bytes de relleno y los niveles de 1x1 a 64x64, como modelo.datos_mip) */
+static uint8_t *agua_tex_datos(void)
+{
+    static float base[AGUA_TEX_LADO * AGUA_TEX_LADO];
+    uint8_t *d = memalign(32, AGUA_TEX_TAM);
+    uint32_t x, y, l, off = 6;
+    if (!d) return NULL;
+    memset(d, 0, AGUA_TEX_TAM);
+    for (y = 0; y < AGUA_TEX_LADO; y++) for (x = 0; x < AGUA_TEX_LADO; x++) {
+        float u = ((float)x + 0.5f) / AGUA_TEX_LADO, v = ((float)y + 0.5f) / AGUA_TEX_LADO;
+        float w = 0.50f * sinf(6.2831853f * (4.0f * u + 2.0f * v)) +
+                  0.30f * sinf(6.2831853f * (9.0f * u - 5.0f * v) + 0.7f) +
+                  0.20f * sinf(6.2831853f * (14.0f * u + 11.0f * v) + 2.0f);
+        float k = 0.80f + 0.20f * w + 0.06f * agua_ruido(x, y);
+        base[y * AGUA_TEX_LADO + x] = k < 0.0f ? 0.0f : k > 1.0f ? 1.0f : k;
+    }
+    for (l = 1; l <= AGUA_TEX_LADO; l <<= 1) {
+        uint16_t *p = (uint16_t *)(d + off);
+        uint32_t s = AGUA_TEX_LADO / l;
+        for (y = 0; y < l; y++) for (x = 0; x < l; x++) {
+            uint32_t bx, by, q; float a = 0.0f;
+            for (by = y * s; by < (y + 1) * s; by++) for (bx = x * s; bx < (x + 1) * s; bx++)
+                a += base[by * AGUA_TEX_LADO + bx];
+            a /= (float)(s * s);
+            q = (uint32_t)(a * 15.0f + 0.5f); if (q > 15) q = 15;
+            p[agua_twiddle(x, y)] = (uint16_t)(0xF000u | (q << 8) | (q << 4) | q);
+        }
+        off += l * l * 2;
+    }
+    return d;
+}
+static pvr_ptr_t agua_tv; static pvr_poly_hdr_t agua_cab; static int agua_ok;
+static void agua_prepara(void)
+{
+    pvr_poly_cxt_t cx; uint8_t *d;
+    if (agua_ok) return;
+    agua_ok = -1;
+    if (!(agua_tv = pvr_mem_malloc(AGUA_TEX_TAM))) return;
+    if (!(d = agua_tex_datos())) { pvr_mem_free(agua_tv); agua_tv = NULL; return; }
+    pvr_txr_load(d, agua_tv, AGUA_TEX_TAM); free(d);
+    pvr_poly_cxt_txr(&cx, PVR_LIST_OP_POLY, PVR_TXRFMT_ARGB4444 | PVR_TXRFMT_TWIDDLED, AGUA_TEX_LADO, AGUA_TEX_LADO,
+                     agua_tv, PVR_FILTER_BILINEAR);
+    cx.gen.fog_type = PVR_FOG_TABLE; cx.gen.culling = PVR_CULLING_NONE;
+    cx.fmt.modifier = true; cx.gen.modifier_mode = false;
+    cx.txr.env = PVR_TXRENV_MODULATE; cx.txr.mipmap = true;
+    cx.depth.comparison = PVR_DEPTHCMP_GEQUAL;
+    pvr_poly_compile(&agua_cab, &cx);
+    agua_ok = 1;
+}
+/* color de cada zona: media de las texturas del reflejo del original +0x60.. (ver la cabecera); x1,4 y tope 240.
+   BEAC se queda con AGUA_COLOR (el azul del mar que el usuario aprobo en la consola); su reflejo medido es mas
+   oscuro (14,21,128 -> 141DB3) pero no se cambia lo ya validado. */
+static uint32_t agua_tinte_de(const char *z)
+{
+    static const struct { char z[4]; uint32_t c; } t[] = {
+        { "LAKE", 0xFF3B5161 }, { "CLOU", 0xFFF0F0F0 }, { "DESE", 0xFFF0F0F0 }, { "TULI", 0xFF354249 },
+        { "METR", 0xFF1C1B15 }, { "IMPE", 0xFFF0C0A0 }, { "BEAC", 0xFF4064A3 }, { "NIAG", 0xFF6C92BE },
+        { "ALAS", 0xFF27537B }, { "GRAN", 0xFF3E4553 }, { "SANF", 0xFFC4C1E4 }, { "AMAZ", 0xFF7677A0 },
+        { "YOSE", 0xFF233F6F }, { "MAYA", 0xFF2B2923 }, { "NEWY", 0xFFC4B9BA }, { "PRIN", 0xFF9DCAE4 },
+        { "FLOR", 0xFF5C829B }, { "EAST", 0xFF4786AF }, { "CAPE", 0xFFABDFE8 }, { "PALM", 0xFFB98F6D },
+    };
+    unsigned i;
+    for (i = 0; i < sizeof t / sizeof t[0]; i++) if (!memcmp(t[i].z, z, 4)) return t[i].c;
+    return AGUA_COLOR;
+}
+/* escala de UV del plano: una vuelta de textura cada AGUA_UV_TILE m (las UV del original son 0..15 en 5 km) */
+static float agua_escala(const modelo_t *mo)
+{
+    float x0 = 1e30f, x1 = -1e30f, z0 = 1e30f, z1 = -1e30f, u0 = 1e30f, u1 = -1e30f, v0 = 1e30f, v1 = -1e30f, e, d, s;
+    uint32_t k, i;
+    for (k = mo->inicio[3]; k < mo->inicio[4]; k++) {
+        const malla_t *m = mo->mallas + k; const vert_t *v;
+        if (m->nodo != AGUA_NODO || m->n < 3) continue;
+        v = mo->verts + m->v0;
+        for (i = 0; i < m->n; i++, v++) {
+            if (v->x < x0) x0 = v->x;
+            if (v->x > x1) x1 = v->x;
+            if (v->z < z0) z0 = v->z;
+            if (v->z > z1) z1 = v->z;
+            if (v->u < u0) u0 = v->u;
+            if (v->u > u1) u1 = v->u;
+            if (v->v < v0) v0 = v->v;
+            if (v->v > v1) v1 = v->v;
+        }
+    }
+    e = x1 - x0 > z1 - z0 ? x1 - x0 : z1 - z0; d = u1 - u0 > v1 - v0 ? u1 - u0 : v1 - v0;
+    s = (e / AGUA_UV_TILE) / (d > 1e-3f ? d : 1.0f);
+    if (!(s > 0.05f)) s = 1.0f;
+    if (s > 64.0f) s = 64.0f;
+    return s;
+}
+static float agua_uv_esc = 1.0f, agua_fase_u, agua_fase_v; static uint32_t agua_col = AGUA_COLOR;
 /* Recorte del agua contra la piramide entera de la vista (revision 44; foto de INFARTO en BEAC de OUTRUN2SP: "un suelo
    azul con un triangulo enorme"). El plano del agua de BEAC es una cuadricula de triangulos de 550 m bajo toda la ciudad
    a y = -51,1 (la calzada, a -50: 1,1 m por encima); con la camara a 2-3 m del plano, los vertices que solo recortaba el
@@ -8102,7 +8295,9 @@ static void agua_malla(const modelo_t *mo, const malla_t *m)
     for (i = 0; i < n; i++) {
         float x = v[i].x, y = v[i].y, z = v[i].z, w;
         mat_trans_single3_nodivw(x, y, z, w);
-        pw[i].x = x; pw[i].y = y; pw[i].w = w; pw[i].u = v[i].u; pw[i].v = v[i].v; pw[i].c = AGUA_COLOR; pw[i].o = 0;
+        pw[i].x = x; pw[i].y = y; pw[i].w = w;
+        pw[i].u = v[i].u * agua_uv_esc + agua_fase_u; pw[i].v = v[i].v * agua_uv_esc + agua_fase_v;
+        pw[i].c = agua_col; pw[i].o = 0;
     }
     for (i = 0; i + 2 < n; i++) {
         if (pw[i].w < cerca && pw[i + 1].w < cerca && pw[i + 2].w < cerca) continue;
@@ -8121,13 +8316,17 @@ static void agua_dibuja(void)
     if (etapa.tv && etapa_nodo == nodo) mo = &etapa;
     else if (sig.tv && cur_sig == nodo) mo = &sig;
     if (!mo || !geo_visible(mo)) return;                        /* (0x11a2e8 va dentro de 0x1725d0) */
-    mat_load(&vista); geo_vista(mo); color_fijo = AGUA_COLOR;
-    pvr_prim(&cab_col[0][0], sizeof(pvr_poly_hdr_t));          /* (sin textura, con la niebla de la tabla) */
+    agua_col = agua_tinte_de(e->zona);
+    agua_uv_esc = agua_escala(mo);
+    agua_fase_u = (float)crono * 0.0060f; agua_fase_v = (float)crono * 0.0035f;
+    mat_load(&vista); geo_vista(mo);
+    if (agua_ok > 0) pvr_prim(&agua_cab, sizeof(pvr_poly_hdr_t));   /* 64x64 de ondas, con la niebla de la tabla */
+    else pvr_prim(&cab_col[0][0], sizeof(pvr_poly_hdr_t));         /* sin VRAM: el color plano de antes */
     for (k = mo->inicio[3]; k < mo->inicio[4]; k++) {
         const malla_t *m = mo->mallas + k;
         if (m->n >= 3 && m->nodo == AGUA_NODO) agua_malla(mo, m);
     }
-    color_fijo = 0; geo_vista_fin(mo);
+    geo_vista_fin(mo);
 }
 
 /* Sol y destello: el de SLES-53998 (0x10f190, el 40CBC0 del PC con otras constantes), con SCN_EFC +0 & 2 y su
@@ -9180,7 +9379,7 @@ typedef struct { uint32_t nv, ne; const float *v; const uint8_t *e; } svol_t;
 #define SVOL_MAX 32                                             /* trozos convexos por coche (6-20 en los 15 coches) */
 static svol_t svol[SVOL_MAX]; static int nsvol;
 static const uint32_t *cex_col, *cex_vd, *cex_grp; static const cex_t *cex_m; static uint32_t cex_nsl, cex_n, cex_ngrp;
-static uint32_t *cex_n0; static int cex_color, cex_luces = -1;   /* cuenta de vertices de cada malla; grupos encendidos */
+static uint32_t *cex_n0; static int cex_color, cex_luces = -1, cex_taxi, cex_freno_hold;   /* cuenta de vertices de cada malla; grupos encendidos */
 static uint32_t cex_mul(uint32_t c, uint32_t luz)
 {
     return 0xFF000000u | ((((c >> 16) & 255) * luz / 255) << 16) | ((((c >> 8) & 255) * luz / 255) << 8) | ((c & 255) * luz / 255);
@@ -9242,24 +9441,37 @@ static void coche_luz(matrix_t mc, int on)
 #define G_DISCO_CAL 6
 static void coche_luces(uint32_t banderas, int freno, int caliente)
 {
-    /* Solo freno y faros: el taxi no lleva quads de pilotos/noche; los pilotos
-       del modelo son textura.  El grupo 3 se enciende con el pedal y se queda
-       6 cuadros al soltar; el 4 solo de noche y con los faros abiertos. */
-    static int freno_hold;
-    int faros = (banderas & 0x900) == 0x900;
-    int frena, est, on;
     uint32_t k;
-    if (freno) freno_hold = 6; else if (freno_hold) freno_hold--;
-    frena = freno || freno_hold;
-    est = (frena ? 1 : 0) | (faros ? 8 : 0) | ((caliente != 0) ? 16 : 0);
-    if (est == cex_luces) return;
-    for (k = 0; k < cex_ngrp; k++) {
-        uint32_t mk = cex_grp[2 * k], g = cex_grp[2 * k + 1];
-        on = (g == G_FRENO && frena) || (g == G_FARO && faros) ||
-             (g == G_DISCO && !(est & 16)) || (g == G_DISCO_CAL && (est & 16));
-        coche.mallas[mk].n = on ? cex_n0[mk] : 0;
+    if (!cex_taxi) {
+        /* Coches originales: las mismas cuentas de 46A560 / 469600, sin cambios. */
+        int pil = freno ? G_FRENO : (banderas & 0x300) ? G_NOCHE : G_PILOTOS, est = pil | ((banderas & 0x900) == 0x900) << 3 |
+            (caliente != 0) << 4;
+        if (est == cex_luces) return;
+        for (k = 0; k < cex_ngrp; k++) {
+            uint32_t mk = cex_grp[2 * k], g = cex_grp[2 * k + 1];
+            coche.mallas[mk].n = (g == (uint32_t)pil || (g == G_FARO && (est & 8)) || (g == G_DISCO && !(est & 16)) ||
+                                  (g == G_DISCO_CAL && (est & 16))) ? cex_n0[mk] : 0;
+        }
+        cex_luces = est;
+        return;
     }
-    cex_luces = est;
+    /* Solo el taxi: no lleva quads de pilotos/noche; los pilotos del modelo son textura.  El grupo 3 se
+       enciende con el pedal y se queda 6 cuadros al soltar; el 4 solo de noche y con los faros abiertos. */
+    {
+        int faros = (banderas & 0x900) == 0x900;
+        int frena, est, on;
+        if (freno) cex_freno_hold = 6; else if (cex_freno_hold) cex_freno_hold--;
+        frena = freno || cex_freno_hold;
+        est = (frena ? 1 : 0) | (faros ? 8 : 0) | ((caliente != 0) ? 16 : 0);
+        if (est == cex_luces) return;
+        for (k = 0; k < cex_ngrp; k++) {
+            uint32_t mk = cex_grp[2 * k], g = cex_grp[2 * k + 1];
+            on = (g == G_FRENO && frena) || (g == G_FARO && faros) ||
+                 (g == G_DISCO && !(est & 16)) || (g == G_DISCO_CAL && (est & 16));
+            coche.mallas[mk].n = on ? cex_n0[mk] : 0;
+        }
+        cex_luces = est;
+    }
 }
 /* Piezas animadas del coche del jugador como 46AE70 / 469600 (bloque ANI1 de tools/conv_coche.py animadas; vertices de
    cada pieza en su marco). Cada cuadro (coche_anima_matrices), en el marco del coche:
@@ -9323,10 +9535,10 @@ static void coche_cab_cex(void)
         if (cex_m[k].tipo >= 2 && t >= 0) compila_cab(&coche, t, cex_m[k].tipo == 3 ? 3 : 1);
     }
 }
-static void coche_cex(int c)
+static void coche_cex(int c, int taxi)
 {
     const uint32_t *w = (const uint32_t *)coche.ruta; uint32_t k;
-    cex_n = 0; cex_ngrp = 0; cex_color = 0; cex_luces = -1; free(cex_n0); cex_n0 = NULL; nsvol = 0;
+    cex_n = 0; cex_ngrp = 0; cex_color = 0; cex_luces = -1; cex_taxi = taxi; cex_freno_hold = 0; free(cex_n0); cex_n0 = NULL; nsvol = 0;
     if (!w || coche.paso_ruta != 1 || coche.nruta < 6 || memcmp(w, "CEX2", 4) || w[1] != 8) return;
     if (6 + 8 * w[2] + 5 * w[3] + w[4] + 2 * w[5] > coche.nruta) return;
     cex_nsl = w[2]; cex_col = w + 6; cex_m = (const cex_t *)(cex_col + 8 * cex_nsl); cex_vd = (const uint32_t *)(cex_m + w[3]);
@@ -9517,25 +9729,38 @@ static void coche_anima_matrices(int titulo)
     ani_ty = ty; ani_base = ani.base;
 #endif
     m_tras(ani_m[0], 0, ty, 0); m_rx(ani_m[0], v);             /* car+F0 (balanceo 0: car+4 & 1) */
-    if (coche_ficha == 7) {                                     /* taxi: pieza 1 cuerpo (cadera) y 2 cabeza (cuello) */
-        const float *p1 = ani.pz[PZ_VOLANTE], *p2 = ani.pz[PZ_ALERON];
+    if (coche_ficha == 7) {                                     /* taxi: pieza 1 cuerpo (cadera), 2 cabeza (cuello), 3 volante */
+        const float *p1 = ani.pz[PZ_VOLANTE], *p2 = ani.pz[PZ_ALERON], *p3 = ani.pz[PZ_FAROS];
         memcpy(ani_m[PZ_VOLANTE], ani_m[0], sizeof(matrix_t));
         memcpy(ani_m[PZ_ALERON], ani_m[0], sizeof(matrix_t));
+        memcpy(ani_m[PZ_FAROS], ani_m[0], sizeof(matrix_t));
         if (!titulo) {
-            /* conduccion: el cuerpo se balancea muy poco (las manos no se separan del volante) y la cabeza gira
-               hacia la curva y cabecea.  La cabeza cuelga del cuerpo (misma matriz) y gira sobre el cuello. */
-            static float taxi_t;
-            float st = (float)(-ani.s204) * U;
-            float yaw_c = st * 0.018f, roll_c = st * 0.008f;
-            float yaw_h = st * 0.090f, nod = 0.010f * sinf(taxi_t * 0.045f);
+            /* Conduccion: el cuerpo se balancea poco (las manos no se separan del volante), la cabeza gira hacia
+               la curva y cabecea, y el volante gira sobre su eje.  El cambio de marcha da un tiron corto de
+               cuerpo y cabeza (fis.marcha / fis.cambio), como el drvJolt del original.  La curva Fcv de
+               MOTDC 0x64D64 (Drv_StartDrive) mueve al piloto con las rpm; aqui se resume en estos gestos. */
+            static float taxi_t, taxi_jolt;
+            static int taxi_marcha_ant, taxi_cambio_ant;
+            float st = (float)(-ani.s204) * U;                  /* direccion, rad (tope +-pi) */
+            float yaw_c = st * 0.008f, roll_c = st * 0.012f, pitch_c = -x * 0.012f;
+            float yaw_h = st * 0.085f, nod = 0.010f * sinf(taxi_t * 0.045f) + x * 0.004f;
+            int mar = fis_ok ? fis.marcha : 0, cam = fis_ok ? fis.cambio : 0;
+            if ((cam != taxi_cambio_ant && cam != 0) || (taxi_marcha_ant != 0 && mar != taxi_marcha_ant))
+                taxi_jolt = 1.0f;
+            taxi_marcha_ant = mar; taxi_cambio_ant = cam;
+            if (taxi_jolt > 0.0f) { taxi_jolt *= 0.88f; if (taxi_jolt < 0.01f) taxi_jolt = 0.0f; }
+            pitch_c += taxi_jolt * 0.024f; nod += taxi_jolt * 0.035f; roll_c += taxi_jolt * 0.010f;
             taxi_t += 1.0f;
             m_tras(ani_m[PZ_VOLANTE], p1[0], p1[1], p1[2]);
-            m_ry(ani_m[PZ_VOLANTE], yaw_c); m_rz(ani_m[PZ_VOLANTE], roll_c);
+            m_rx(ani_m[PZ_VOLANTE], pitch_c); m_rz(ani_m[PZ_VOLANTE], roll_c); m_ry(ani_m[PZ_VOLANTE], yaw_c);
             m_tras(ani_m[PZ_VOLANTE], -p1[0], -p1[1], -p1[2]);
             memcpy(ani_m[PZ_ALERON], ani_m[PZ_VOLANTE], sizeof(matrix_t));
             m_tras(ani_m[PZ_ALERON], p2[0], p2[1], p2[2]);
-            m_ry(ani_m[PZ_ALERON], yaw_h); m_rx(ani_m[PZ_ALERON], nod);
+            m_ry(ani_m[PZ_ALERON], yaw_h); m_rx(ani_m[PZ_ALERON], nod); m_rz(ani_m[PZ_ALERON], roll_c * 0.5f);
             m_tras(ani_m[PZ_ALERON], -p2[0], -p2[1], -p2[2]);
+            m_tras(ani_m[PZ_FAROS], p3[0], p3[1], p3[2]);
+            m_eje(ani_m[PZ_FAROS], 0.0f, p3[3], p3[4], st * 0.14f);
+            m_tras(ani_m[PZ_FAROS], -p3[0], -p3[1], -p3[2]);
         }
     } else {
         memcpy(ani_m[PZ_VOLANTE], ani_m[0], sizeof(matrix_t));
@@ -9545,8 +9770,11 @@ static void coche_anima_matrices(int titulo)
         m_tras(ani_m[PZ_ALERON], ani.pz[PZ_ALERON][0], ani.pz[PZ_ALERON][1], ani.pz[PZ_ALERON][2]);
         m_rx(ani_m[PZ_ALERON], titulo ? 0 : ani.aleron);
     }
-    memcpy(ani_m[PZ_FAROS], ani_m[0], sizeof(matrix_t));
-    m_tras(ani_m[PZ_FAROS], ani.pz[PZ_FAROS][0], ani.pz[PZ_FAROS][1], ani.pz[PZ_FAROS][2]); m_rx(ani_m[PZ_FAROS], ani.roof);
+    if (coche_ficha != 7) {                                     /* en el taxi la pieza 3 es el volante (arriba) */
+        memcpy(ani_m[PZ_FAROS], ani_m[0], sizeof(matrix_t));
+        m_tras(ani_m[PZ_FAROS], ani.pz[PZ_FAROS][0], ani.pz[PZ_FAROS][1], ani.pz[PZ_FAROS][2]);
+        m_rx(ani_m[PZ_FAROS], ani.roof);
+    }
     for (k = 0; k < 4; k++) {                                   /* ruedas: fuera de car+F0 */
         const float *p = ani.pz[PZ_RUEDA + k];
         float y = meta_pas && !titulo ? meta_rueda_y[k] : fis_ok && !titulo ? fis.rueda_y[k] : p[1];   /* car+134 */
@@ -10487,7 +10715,7 @@ static void coche_suelta(void)
 {
     if (!coche.tv) return;
     dbglog(DBG_INFO, "coche: ficha %d fuera de la VRAM (la pide el menu)\n", coche_ficha);
-    libera_modelo(&coche); coche_ficha = -1; cex_n = 0; nsvol = 0; ani.ok = 0;
+    libera_modelo(&coche); coche_ficha = -1; cex_n = 0; cex_taxi = 0; nsvol = 0; ani.ok = 0;
 }
 
 /* un coche cada vez: libera el anterior (RAM y VRAM) y carga el de la ficha k; en el menu, si no cabe en la VRAM, se
@@ -10498,7 +10726,7 @@ static int coche_carga(int k)
 {
     char nom[16]; int r, prest = union_prestable(); uint32_t ct = 0, c, i;
     if (k == coche_ficha && coche.tv) return 0;
-    libera_modelo(&coche); coche_ficha = -1; cex_n = 0; nsvol = 0; ani.ok = 0;
+    libera_modelo(&coche); coche_ficha = -1; cex_n = 0; cex_taxi = 0; nsvol = 0; ani.ok = 0;
     if (ficha_modelo[k] < 30) sprintf(nom, "COCHE%02d.DAT", k); else strcpy(nom, "COCHE.DAT");
     musica_pausa_lectura(1);                                    /* el GD para el coche (la musica tira del anillo) */
     r = prest ? lee_modelo_en(&coche, nom, hueco_union, cap_union - union_fsp) : lee_modelo(&coche, nom);
@@ -10525,7 +10753,7 @@ static int coche_carga(int k)
         dbglog(DBG_ERROR, "coche: sin RAM para %s (%uK)\n", nom, (unsigned)((coche.blob - coche.datos) >> 10));
         libera_modelo(&coche); ani.ok = 0; return -5;
     }
-    coche_cex(menu_color());                                    /* pintura del color elegido y reflejo */
+    coche_cex(menu_color(), k == 7 && ficha_modelo[k] == 0);    /* ficha 7 / modelo 0: el taxi */
     coche_ani_lee();                                            /* piezas animadas (ANI1) */
     coche_ficha = k; modelo_jug = ficha_modelo[k] < 30 ? ficha_modelo[k] : MODELO;
     for (i = 0; i < NMODTRAF; i++) if ((c = modelo_teo(&mtraf[i], traf_con_lod[i] ? 0 : -1, 0)) > ct) ct = c;
@@ -11072,6 +11300,7 @@ int main(int argc, char **argv)
     vblank_handler_add(vbl_antes, NULL);                        /* antes que el de la PowerVR (va en orden) */
     pvr_init(&pp);
     vblank_handler_add(vbl_despues, NULL);
+    agua_prepara();                                             /* textura de ondas del agua (11 KB, una vez) */
     /* la prueba de alfa de la lista de recorte, como la del original: el TEST_1 del GS de los materiales con prueba de
        alfa (los 888 de PALM, LAKE, INDU, SNOW, METR y BEAC: ATST GEQUAL, AREF 0x40 con 0x80 = 1) deja pasar el alfa
        filtrado >= 0,5. La PowerVR arranca con PT_ALPHA_REF = 0xFF (KallistiOS no lo cambia): solo pasaba el alfa 1 tras
@@ -11109,6 +11338,10 @@ int main(int argc, char **argv)
         dbglog(DBG_INFO, "TA: bufer %uK, coche %u vertices, trafico hasta %u (LOD 0), minimo reservado %uK\n", TA_VB_BYTES >> 10,
                (unsigned)modelo_vtx(&coche, -1), (unsigned)cv, (unsigned)((ta_min_otros_teo * ta_f >> 8) >> 10));
     }
+    /* El menu del original necesita 64 KB de VRAM y el taxi nuevo ocupa 22 KB mas que el F40.  Se suelta el coche
+       antes de menu_inicia (su VRAM queda libre) y el propio menu lo vuelve a cargar al entrar en la seleccion
+       (coche_carga en el bucle, menu_coche3d); en el titulo no se dibuja. */
+    libera_modelo(&coche); coche_ficha = -1; cex_n = 0; cex_taxi = 0; nsvol = 0; ani.ok = 0;
     hud_ok = !hud_carga("HUD.DAT", modelo_jug);                 /* el tacometro del modelo (6 = Testarossa) */
     for (l = 0; l < 3; l++) for (i = 0; i < 2; i++) {
         pvr_poly_cxt_t cx; pvr_poly_cxt_col(&cx, LISTA[l]);
@@ -11142,8 +11375,10 @@ int main(int argc, char **argv)
                (unsigned)(mi.fordblks >> 10), union_prestable() ? "prestado" : "ocupado");
         ram_mapa("arranque");
     }
-#if !defined(PRUEBA_AUTO) && !defined(PRUEBA_JUGADOR)              /* las pruebas automaticas van directas */
+#if !defined(PRUEBA_AUTO) && !defined(PRUEBA_JUGADOR) && !defined(PRUEBA_SALON_COMPRAS)   /* las pruebas automaticas van directas */
+#ifndef PRUEBA_SIN_VIDEO
     if (video_titulo) video_titulo();                           /* gancho: pelicula de inicio antes del titulo */
+#endif
 #endif
     gd_hilo_juego();
     menu_entra(manual_, pista, NPISTAS);
@@ -11425,8 +11660,13 @@ int main(int argc, char **argv)
                 ram_mapa("menu");
                 {   int b = menu_tablas(0);                     /* MENU.DAT: en la carrera solo las piezas de la pausa */
                     if (b) dbglog(DBG_INFO, "MENU: %dK de piezas sueltas para la carrera\n", b >> 10); }
+#ifdef PRUEBA_FICHA
+                if (coche_ficha < 0) coche_carga(PRUEBA_FICHA); /* prueba: el coche de PRUEBA_FICHA, no el 9 */
+#else
                 if (coche_ficha < 0) coche_carga(9);            /* el menu lo solto (VRAM) */
+#endif
                 fisica_modelo(modelo_jug);                      /* peso, agarre, motor y marchas de ese coche */
+                turbo_taxi_ok = 0; turbo_taxi_modelo = -1;      /* el turbo del taxi se prepara al primer paso */
                 if (hud_ok) hud_pon_modelo(modelo_jug);         /* y su tacometro */
                 if (union_prestable()) vram_ordena(hueco_union, cap_union - union_fsp);   /* la pareja y el coche, abajo */
                 /* (si no caben, el HUD sigue: las que falten se suben solas al querer dibujarlas, hudd_fin_cuadro;
@@ -11547,6 +11787,29 @@ int main(int argc, char **argv)
                            (double)fis.pose_t[0], (double)fis.pose_t[1], (double)fis.pose_t[2], (double)fis.pose_r[0], (double)fis.pose_r[1], (double)fis.pose_r[2], (double)yo.x);
 #endif
                 if (auto_) piloto(&yo, &giro, &gas, &freno);
+#ifdef PRUEBA_TURBO_AUTO
+                {   /* prueba: el piloto conduce y, en una recta a mas de 250 km/h, se le mete la
+                       secuencia del turbo (freno 2 s -> gas) para medir 0-400 y la caida */
+                    static int n_ta, dispara;
+                    if (auto_ && t_estado > 1) {
+                        if (!dispara && yo.s > 450.0f && fis.velocidad_hud > 200.0f &&
+                            abs((int)fis.d4e - (int)fis.d4c) < 1500 && fabsf(fis.desliz_grados) < 8.0f) {
+                            dispara = 1; turbo_auto_armado = 1; n_ta = 0;
+                            dbglog(DBG_INFO, "TURBO AUTO: disparo t %d s %.1f hud %.1f (recta)\n",
+                                   t_estado, (double)yo.s, (double)fis.velocidad_hud);
+                        }
+                        if (dispara) {
+                            int t = ++n_ta;
+                            if (t <= 8) { gas = 1.0f; freno = 0.0f; }
+                            else if (t < 14) { gas = 0.0f; freno = 0.0f; }
+                            else if (t < 150) { gas = 0.0f; freno = 1.0f; }   /* 2,27 s de freno */
+                            else if (t < 158) { gas = 0.0f; freno = 0.0f; }
+                            else { gas = 1.0f; freno = 0.0f; }
+                            if (turbo_taxi.activo) { gas = 1.0f; freno = 0.0f; }   /* sin freno durante la medida */
+                        }
+                    }
+                }
+#endif
 #if defined(PRUEBA_ARENA) && defined(PRUEBA_ARENA_GAS)
                 {   /* prueba: gas a fondo PRUEBA_ARENA_GAS pasos de la carrera y despues suelto (ni gas ni freno) */
                     static int n_ar;
@@ -11876,8 +12139,11 @@ int main(int argc, char **argv)
         /* camara: en el menu gira alrededor del coche (seleccion de coche); en carrera, la del original (camara.c) */
         if (estado == TITULO) {
             float a = menu_giro();                              /* el coche gira +100/65536 de vuelta por paso (4A5B20) */
+            /* el taxi mide 5,715 m (1,24 m mas que el F50): a 6,0 m la vista lateral del Salon lo sacaba por el
+               borde derecho. Solo para la ficha 7 se aleja la camara; el resto de coches sigue igual. */
+            float d = coche_ficha == 7 ? 8.6f : MENU_CAM_D;
             yo.s = SALIDA; yo.x = SALIDA_X; yo.v = 0; yo.y_ok = 0; coche_paso(&yo, 0, 0, 0, 0); cam_y = yo.pos[1];
-            ojo_[0] = yo.pos[0] + MENU_CAM_D * sinf(a); ojo_[1] = yo.pos[1] + MENU_CAM_Y; ojo_[2] = yo.pos[2] + MENU_CAM_D * cosf(a);
+            ojo_[0] = yo.pos[0] + d * sinf(a); ojo_[1] = yo.pos[1] + MENU_CAM_Y; ojo_[2] = yo.pos[2] + d * cosf(a);
             mira[0] = yo.pos[0]; mira[1] = yo.pos[1] + MENU_CAM_MIRA; mira[2] = yo.pos[2];
         } else if (cam_ok) {
             memcpy(ojo_, cam.ojo, sizeof ojo_); memcpy(mira, cam.mira, sizeof mira);
@@ -11991,9 +12257,9 @@ int main(int argc, char **argv)
         if (estado == CARRERA) prueba_mide();
 #endif
 #ifdef PRUEBA_FRENO
-        if (cex_ngrp) coche_luces(ani.ban, 1, estado != TITULO && ani.caliente);   /* prueba: grupo 3 forzado para la captura */
+        if (cex_n || cex_taxi) coche_luces(ani.ban, 1, estado != TITULO && ani.caliente);   /* prueba: grupo 3 forzado para la captura */
 #else
-        if (cex_ngrp) coche_luces(ani.ban, estado != TITULO && (meta_pas ? meta.freno != 0 : fis_ok ? fis.freno_op != 0 : yo.freno_ant > 0.0f), estado != TITULO && ani.caliente);   /* car+38 != 0 (con la fisica del original coche_paso no toca freno_ant: los pilotos del freno no se encendian nunca) */
+        if (cex_n || cex_taxi) coche_luces(ani.ban, estado != TITULO && (meta_pas ? meta.freno != 0 : fis_ok ? fis.freno_op != 0 : yo.freno_ant > 0.0f), estado != TITULO && ani.caliente);   /* car+38 != 0 (con la fisica del original coche_paso no toca freno_ant: los pilotos del freno no se encendian nunca) */
 #endif
         if (cex_n) coche_entorno(mod_coche);
         if (cex_n) coche_luz(mod_coche, estado != TITULO);     /* la luz del entorno 2 en la pintura */

@@ -583,12 +583,18 @@ def visibilidad_de(seg, blq):
 
 def pon_cielo(mod, cielo, luz=None):
     """el cielo de la etapa como lo dibuja el original (SKY, 4521C0 de la decompilacion del PC): del banco del cielo
-    (descriptor de tramo +0x44, obj_course_obj_sky_<zona>) los objetos +0x4C y +0x50 (grupo 0, el que se ve siempre) y
-    +0x54 (grupo 1, solo en el fundido de un cielo al siguiente); el +0x48 es el del cubo del reflejo del coche
-    (451C20) y no va. cielo = (bloque, registros del grupo 0, registros del grupo 1). Las mallas van en la lista 3 con
-    el grupo en el campo del nodo (-256 - grupo) y la luz del entorno 0 del original (luz: modelo.luz_entorno)"""
+    (descriptor de tramo +0x44, obj_course_obj_sky_<zona>) los objetos +0x4C y +0x50 (grupo 0, el que se ve siempre);
+    el +0x48 es el del cubo del reflejo del coche (451C20) y no va. cielo = (bloque, registros del grupo 0, registros
+    del grupo 1). Las mallas van en la lista 3 con el grupo en el campo del nodo (-256 - grupo) y la luz del entorno 0
+    del original (luz: modelo.luz_entorno).
+
+    El grupo 1 (+0x54) es el OTRO cielo, el que el original dibuja solo durante el fundido de un cielo al siguiente
+    (4521C0). La demo no tiene ese fundido: anadir el grupo 1 duplica la cupula en la misma posicion (los vertices son
+    identicos), con su textura encima de la del grupo 0 por el GEQUAL de la PowerVR, y tapa el cielo con un plano liso
+    (MAYA: el grupo 1 es el degradado 32x16 y el 0 las nubes). Por eso solo se anade el grupo 0."""
     blq, g0, g1 = cielo; mod.luz = luz
-    for g, regs in ((0, g0), (1, g1)):
+    grupos = ((0, g0),) if g0 else ((1, g1),)          # (sin grupo 0, el 1 es el unico cielo: no dejarlo vacio)
+    for g, regs in grupos:
         if regs: mod.bloque(blq, registros=set(regs), lista=3, sin_textura='material', nodo_fijo=-256 - g)
     mod.luz = None
 

@@ -41,6 +41,21 @@ DEF_PARAM = os.path.join(RAIZ, '_trabajo', 'datos', 'PARAM.DAT')
 ESCALA = 0.10625
 PIVOTES = [(6.90, 2.84, 15.50), (-6.90, 2.84, 15.50), (6.50, 2.84, -15.50), (-6.50, 2.84, -15.50)]
 RADIO_RUEDA = 3.123
+# Tiras del volante dentro del cuerpo (taxi_cuerpo.npz): aro 252/253/254 (sintex), centro 173..176.
+# Se sacan del cuerpo y se dibujan como pieza 3 (ANI1) para girarlas con la direccion.
+TIRAS_VOLANTE = (173, 174, 175, 176, 252, 253, 254)
+# Luces del taxi: tiras del modelo original (POLDC0 0x38E8, taxi_cuerpo.npz).  El registro 23
+# (textura 106) tiene los dos pilotos del paragolpes trasero; los registros 35/36 (textura 20), los
+# faros delanteros.  La posicion se lee de sus vertices: no hay coordenadas inventadas.
+REC_PILOTOS = 23
+TIRAS_PILOTOS = (232, 233)
+REC_FAROS = (35, 36)
+# Cada faro son dos lamparas redondas; las tiras de cada una salen del modelo original (por su x):
+# registro 35 -> exterior (255,257,258) e interior (256,259,260); registro 36 -> exterior
+# (262,263,264) e interior (261,265,266).  La caja de cada grupo da el rectangulo de esa lampara.
+FAROS_TIRAS = {35: ((255, 257, 258), (256, 259, 260)),
+               36: ((262, 263, 264), (261, 265, 266))}
+LUCES_INFO = []
 COCHE_RAM = 424 << 10
 LUZ = np.array([0.3, 0.8, 0.5]) / np.linalg.norm([0.3, 0.8, 0.5])
 
@@ -108,7 +123,7 @@ def uv_y_color(mod, escala, giro_y=True):
     return V, col
 
 
-def ordena_tiras(mod, V, col, excluir=(), excluir_tiras=()):
+def ordena_tiras(mod, V, col, excluir=(), excluir_tiras=(), solo_tiras=()):
     """devuelve [(lista, textura, i0, n, posiciones, colores)] con las listas de triangulos convertidas a tiras"""
     salida = []
     for ri in range(len(mod['tex'])):
@@ -118,6 +133,8 @@ def ordena_tiras(mod, V, col, excluir=(), excluir_tiras=()):
         ti = int(mod['tex'][ri])
         for s in range(len(mod['strip_off'])):
             if int(mod['strip_rec'][s]) != ri or s in excluir_tiras:
+                continue
+            if solo_tiras and s not in solo_tiras:
                 continue
             a, n, g = int(mod['strip_off'][s]), int(mod['strip_n'][s]), int(mod['strip_g'][s])
             P = V[a:a + n]
@@ -248,7 +265,10 @@ def construye(piezas, dirpiezas, piloto=True):
     # tira 128 (record 6, textura 133): la esquina trasera izquierda del maletero.  Su UV
     # (u 1,635..1,851) cae en los cromados/pilotos del atlas, no en el amarillo; se fuerza
     # el amarillo liso de la misma textura (en ordena_tiras) en vez de dejarla con el gris.
-    tiras = ordena_tiras(piezas[0], Vc, Cc)
+    tiras = ordena_tiras(piezas[0], Vc, Cc, excluir_tiras=TIRAS_VOLANTE)
+    # el volante (aro + centro) va aparte, como la pieza 3, con su pivote en ANI1; main.c lo gira con la direccion
+    for li, ti, P, C in ordena_tiras(piezas[0], Vc, Cc, solo_tiras=TIRAS_VOLANTE):
+        tiras.append((li, ti, P, C, 3))
     nodos = []
     for k in range(4):
         Vk, Ck = uv_y_color(piezas[1 + k], ESCALA)
@@ -330,41 +350,127 @@ def _textura_luz(mod, rgb):
     return len(mod.texs) - 1
 
 
-def luces_taxi(mod, intensidad=0.80):
-    """luces del taxi en el CEX2: solo freno y faros.  Devuelve [(malla, grupo)]
-    para bloque_ani.  intensidad (0..1) baja el brillo de los faros."""
+def _tira_port(cuerpo, s):
+    """vertices (x,y,z) de una tira de taxi_cuerpo en el marco del port: escala y giro 180 en y,
+    los mismos que uv_y_color usa para el cuerpo."""
+    a, n = int(cuerpo['strip_off'][s]), int(cuerpo['strip_n'][s])
+    P = cuerpo['verts'][a:a + n, :3].astype(np.float64).copy()
+    P[:, 0] *= -1.0
+    P[:, 2] *= -1.0
+    return P * ESCALA
+
+
+def _textura_copia(mod, rgba):
+    """copia una textura del modelo en la lista transparente y aditiva (0x400), para las luces"""
+    a = np.asarray(rgba, np.uint8)
+    fmt, li, datos = modelo.textura_dc(a)
+    fmt |= 0x400
+    off = len(mod.blob)
+    mod.texs.append((a.shape[1], a.shape[0], fmt, 2, off, len(datos)))
+    mod.blob += datos
+    mod.rgba.append(a)
+    return len(mod.texs) - 1
+
+
+def luces_taxi(mod, intensidad=0.80, cuerpo=None, mapa_tex=None):
+    """Luces del taxi en el CEX2: solo freno (grupo 3) y faros (grupo 4).
+
+    La posicion NO se inventa: sale de las tiras del modelo original de Crazy Taxi (POLDC0 0x38E8,
+    taxi_cuerpo.npz).  El runtime (demo/main.c, coche_luces) enciende y apaga mallas por el par
+    (malla, grupo) del CEX2; en los COCHEnn.DAT originales el grupo 3 es una copia de las tiras de
+    luz del propio coche en su sitio (COCHE00: mallas 727/728 del grupo 3 con el mismo centro que
+    las 572/573 del grupo 1).  El taxi hace lo mismo con sus tiras:
+      - registro 23 (textura 106): tiras 232 y 233, los dos pilotos del paragolpes trasero;
+      - registros 35 y 36 (textura 20): dos lamparas redondas por lado (6 tiras por registro).
+
+    Devuelve [(malla, grupo)] para bloque_ani.  Si cuerpo es None se lee taxi_cuerpo.npz del
+    directorio por defecto (para los scripts de vista, que no pasan las piezas).  mapa_tex es el
+    mapa textura original -> indice del modelo; con el se usa la textura 20 (lente del faro) en la
+    copia aditiva; sin el, un color blanco liso."""
+    if cuerpo is None:
+        cuerpo = carga('taxi_cuerpo', DEF_PIEZAS)
     roja = _textura_luz(mod, (255, 24, 24))
     blanca = _textura_luz(mod, (255, 245, 200))
-    def pon(x0, x1, y0, y1, z, tex, col):
+    LUCES_INFO[:] = []
+
+    def pon_quad(P, tex, col, grupo, fuente, dz=0.0):
+        """copia una tira de 4 vertices (orden de la tira original) y la separa dz en z.
+        Devuelve la malla y los vertices finales."""
+        Q = np.asarray(P, np.float64).copy()
+        Q[:, 2] += dz
         V = np.zeros(4, dtype=[('x', '<f4'), ('y', '<f4'), ('z', '<f4'), ('u', '<f4'), ('v', '<f4'), ('c', '<u4')])
-        # orden en Z para una tira de 4 vertices: (x0,y0) (x1,y0) (x0,y1) (x1,y1).
-        # Con el orden ciclico anterior los dos triangulos se solapaban y dejaban un
-        # hueco triangular (la luz se veia como una cuna, no como un rectangulo).
-        V['x'] = [x0, x1, x0, x1]; V['y'] = [y0, y0, y1, y1]; V['z'] = z
+        # mismo orden que la tira original: (x0,y0) (x1,y0) (x0,y1) (x1,y1); UV 0..1
+        V['x'] = Q[:, 0]; V['y'] = Q[:, 1]; V['z'] = Q[:, 2]
         V['u'] = [0.0, 1.0, 0.0, 1.0]; V['v'] = [0.0, 0.0, 1.0, 1.0]
         V['c'] = col
-        mod.verts.append(V)
-        m = [2, tex, np.array([(x0 + x1) * 0.5, (y0 + y1) * 0.5, z], np.float32), 0.30,
-             mod.nv, 4, None, 0]
-        mod.mallas.append(m); mod.nv += 4
+        cc = Q.mean(0)
+        rad = float(np.sqrt(((Q - cc) ** 2).sum(1).max()))
+        m = [2, tex, cc.astype(np.float32), rad, mod.nv, 4, None, 0]
+        mod.verts.append(V); mod.mallas.append(m); mod.nv += 4
         if getattr(mod, 'orden', None) is not None:
             mod.orden[id(m)] = len(mod.orden)
-        return m
+        return m, Q
+
     def c(a, r, g, b):
         return (a << 24) | (int(r * 255) << 16) | (int(g * 255) << 8) | int(b * 255)
+
     quads = []
-    # Solo el grupo 3 (freno): sin pilotos ni luz de noche anadidos.  Los pilotos
-    # del modelo son textura y se quedan; asi sin frenar no hay ningun rectangulo
-    # rojo encima y al frenar aparecen los dos grandes.
-    for sx in (-1.0, 1.0):
-        x0, x1 = sorted((sx * 0.64, sx * 0.84))
-        quads.append((pon(x0, x1, 0.630, 0.710, 3.234, roja,
-                          c(0xFF, 1.00, 0.90, 0.90)), 3))
-    # faros: dos, encendidos de noche con las luces abiertas; brillo rebajado
+    # pilotos traseros: tiras 232/233 del registro 23, con sus vertices Naomi girados y escalados igual
+    # que el cuerpo.  Se copian las 4 esquinas reales (no una caja inventada): el rectangulo queda
+    # inclinado como la lente (18,4 mm de fondo) y mide 0,1320 x 0,0526 m en proyeccion trasera.
+    for s in TIRAS_PILOTOS:
+        ri = int(cuerpo['strip_rec'][s])
+        if ri != REC_PILOTOS:
+            raise SystemExit('tira %d: se esperaba el registro %d, es el %d' % (s, REC_PILOTOS, ri))
+        a, n = int(cuerpo['strip_off'][s]), int(cuerpo['strip_n'][s])
+        if n != 4:
+            raise SystemExit('tira %d: se esperaban 4 vertices, tiene %d' % (s, n))
+        P = _tira_port(cuerpo, s)
+        fuente = 'registro %d (textura %d), tira %d' % (ri, int(cuerpo['tex'][ri]), s)
+        m, Q = pon_quad(P, roja, c(0xFF, 1.00, 0.90, 0.90), 3, fuente, dz=0.002)
+        quads.append((m, 3))
+        LUCES_INFO.append(dict(grupo=3, fuente=fuente, rec=ri, tiras=[s], naomi=cuerpo['verts'][a:a+n, :3].astype(np.float64),
+                               port=P, quad=Q, tex=int(cuerpo['tex'][ri]),
+                               x0=float(P[:, 0].min()), x1=float(P[:, 0].max()),
+                               y0=float(P[:, 1].min()), y1=float(P[:, 1].max()),
+                               z0=float(P[:, 2].min()), z1=float(P[:, 2].max()), z=float(Q[:, 2].mean())))
+    # faros: dos lamparas redondas por lado (registros 35/36).  Cada lampara usa la caja real de sus
+    # tiras y un rectangulo 2 mm por delante del faro (port -z); con la textura 20 original, aditiva.
     col_faro = c(0xFF, 1.0 * intensidad, 0.96 * intensidad, 0.78 * intensidad)
-    for sx in (-1.0, 1.0):
-        quads.append((pon(sx * 0.50, sx * 0.80, 0.50, 0.68, -3.100, blanca, col_faro), 4))
+    tex_faro = blanca
+    if mapa_tex and 20 in mapa_tex:
+        tex_faro = _textura_copia(mod, mod.rgba[mapa_tex[20]])
+    for ri in REC_FAROS:
+        for ss in FAROS_TIRAS[ri]:
+            ss = np.asarray(ss, int)
+            P = np.vstack([_tira_port(cuerpo, s) for s in ss])
+            x0, x1 = float(P[:, 0].min()), float(P[:, 0].max())
+            y0, y1 = float(P[:, 1].min()), float(P[:, 1].max())
+            z = float(P[:, 2].min()) - 0.002       # hacia delante en el port (-z)
+            fuente = 'registro %d (textura %d), tiras %s (lampara)' % (ri, int(cuerpo['tex'][ri]), ','.join(str(int(s)) for s in ss))
+            Q = np.array([[x0, y0, z], [x1, y0, z], [x0, y1, z], [x1, y1, z]], np.float64)
+            m, Q = pon_quad(Q, tex_faro, col_faro, 4, fuente)
+            quads.append((m, 4))
+            LUCES_INFO.append(dict(grupo=4, fuente=fuente, rec=ri, tiras=[int(s) for s in ss],
+                                   naomi=np.array([v[:3] for s in ss for v in cuerpo['verts'][int(cuerpo['strip_off'][s]):int(cuerpo['strip_off'][s]) + int(cuerpo['strip_n'][s])]], np.float64),
+                                   port=P, quad=Q, tex=int(cuerpo['tex'][ri]),
+                                   x0=x0, x1=x1, y0=y0, y1=y1, z0=z, z1=z, z=z))
     return quads
+
+
+def informe_luces():
+    """lineas del informe: de que registro/tira sale cada luz y la correspondencia vertices -> rectangulo"""
+    L = []
+    for x in LUCES_INFO:
+        que = 'freno' if x['grupo'] == 3 else 'faros'
+        L.append('%s (grupo %d): %s' % (que, x['grupo'], x['fuente']))
+        L.append('  Naomi: %s' % '  '.join('(%.6f %.6f %.6f)' % tuple(v) for v in x['naomi']))
+        L.append('  port : %s' % '  '.join('(%.6f %.6f %.6f)' % tuple(v) for v in x['port']))
+        L.append('  rect : x %.6f..%.6f  y %.6f..%.6f  z %.6f..%.6f (fondo %.6f)  ancho %.6f  alto %.6f' %
+                 (x['x0'], x['x1'], x['y0'], x['y1'], x['z0'], x['z1'], x['z1'] - x['z0'],
+                  x['x1'] - x['x0'], x['y1'] - x['y0']))
+        L.append('  quad : %s' % '  '.join('(%.6f %.6f %.6f)' % tuple(v) for v in x['quad']))
+    return L
 
 
 def _hull_volumen(P, tris):
@@ -476,6 +582,12 @@ def bloque_ani(radio, base=0.0, svl=b'', grupos=(), piloto=True):
             pz[2] = (cuello[0], cuello[1], cuello[2], 0.0, 0.0)      # PZ_ALERON: cabeza
         except Exception as ex:
             print('conv_crazytaxi: sin pivotes del piloto: %s' % ex)
+    try:
+        import conv_axel
+        centro, eje = conv_axel.pivote_volante()
+        pz[3] = (centro[0], centro[1], centro[2], eje[1], eje[2])    # PZ_FAROS: volante (eje x = 0)
+    except Exception as ex:
+        print('conv_crazytaxi: sin pivote del volante: %s' % ex)
     cab = struct.pack('<I6f', 15, radio, base, 0.0, 0.0, 0.0, 0.0)
     n = (4 + len(cab) + pz.nbytes + 4) // 4
     ani = b'ANI1' + struct.pack('<I', n) + cab + pz.astype('<f4').tobytes()
@@ -725,8 +837,8 @@ def main():
     if os.environ.get('TAXI_SIN_VQ'):
         mod.vq = False                  # prueba: texturas a 16 bits (para comparar el artefacto del maletero)
     radio = RADIO_RUEDA * ESCALA
-    # luces: pilotos, noche, freno y faros (grupos del CEX2 que conmuta coche_luces)
-    quads = luces_taxi(mod, float(os.environ.get('TAXI_LUZ_INT', '0.80')))
+    # luces: freno (grupo 3) y faros (grupo 4); la posicion sale de las tiras del modelo original
+    quads = luces_taxi(mod, float(os.environ.get('TAXI_LUZ_INT', '0.80')), cuerpo=piezas[0], mapa_tex=mapa_tex)
     mod.mallas.sort(key=lambda x: (x[0], mod.orden[id(x)]))
     grupos = []
     for m, g in quads:
@@ -769,6 +881,15 @@ def main():
             txt += ['', 'fisica: columna %d (F40) + geometria del taxi; PARAM_TAXI.BIN y PARAM_TAXI.DAT' % col]
         except Exception as ex:
             txt.append('fisica: %s' % ex)
+    # luces: de que registro/tira sale cada malla y correspondencia vertices -> rectangulo
+    inf = informe_luces()
+    txt += ['', 'luces: posiciones sacadas de las tiras del modelo original (POLDC0 0x38E8, no inventadas)'] + inf
+    open(os.path.join(a.salida, 'LUCES_TAXI.txt'), 'w').write(
+        '\n'.join(['Luces del taxi: posiciones sacadas del modelo original de Crazy Taxi (POLDC0 0x38E8).',
+                   'Escala 1 u = %.5f m; giro 180 en y (x -> -x, z -> -z), el mismo que el cuerpo.' % ESCALA,
+                   'El runtime (demo/main.c, coche_luces) no calcula posiciones: enciende/apaga las mallas del CEX2.',
+                   'rect = caja de la tira original; quad = malla de luz (freno +0.002 m en z; faros -0.002 m).',
+                   ''] + inf) + '\n')
     open(os.path.join(a.salida, 'COCHE15.txt'), 'w').write('\n'.join(txt) + '\n')
     print('\n'.join(txt))
 

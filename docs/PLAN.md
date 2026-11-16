@@ -536,7 +536,10 @@ que se puede quitar son las peliculas (MVTS.VQV 7,6 MB + MVATTR.VQV 23,8 MB = 31
   desbloqueada; la portada de `_entrada` convertida a textura PVR y anadida a MENU.DAT (`tools/conv_menu.py`) para
   verla en la zona de informacion al seleccionar la entrada.
 - P3 (desbloqueo y guardado): `millas >= 50.000` (licencia +0x24, `menu_suma_millas`) **o** nombre `ENTIRETY` (la
-  regla que ya usa `lic_desbloquea`, menu.c 214). No hace falta fichero nuevo: el estado va implicito en la licencia.
+  regla que ya usa `lic_desbloquea`). No hace falta fichero nuevo: el estado va implicito en la licencia.
+  El taxi de Crazy Taxi sigue la misma regla con la compra del Salon: bit 0xd0 por 50.000 millas **o** nombre
+  `ENTIRETY`; `c_desbloqueado`, el frontal de OUTRUN2SP y el Salon lo respetan (sin candado ni precio/venta con
+  `ENTIRETY`).
 - P4 (GDI): su ELF pasa a un fichero de la raiz (`OUTRUN.BIN` o similar) y sus datos se copian con el resto;
   `tools/mkgdi.py` no cambia; el menu decide que programa se ejecuta.
 

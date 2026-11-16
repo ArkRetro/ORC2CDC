@@ -1,17 +1,23 @@
 #!/usr/bin/env python3
-"""conv_axel.py: Axel (personaje 0x3B de Crazy Taxi, Dreamcast) sentado en el taxi, para meterlo en COCHE15.DAT.
+"""conv_axel.py: Axel (personaje 0x3B de Crazy Taxi, Dreamcast) sentado en el taxi, para COCHE15.DAT.
 
 Lee las 15 piezas del piloto de POLDC0.BIN (offsets y matrices del mapa de modelos de la decompilacion;
-consolesplayingconsoles/crazy-taxi-decomp, model-map/game.dcgs), les aplica una postura sentada estatica y las
-convierte a mallas ORD7 en el marco del coche del port (x derecha, y arriba, z atras), con las texturas 243..256 de
-TEXDC0.BIN. Las mallas van en la pieza 0 (carroceria) para que se dibujen con la matriz del coche, como el resto del
-cuerpo; no se toca el codigo de dibujo.
+consolesplayingconsoles/crazy-taxi-decomp, model-map/game.dcgs), las coloca con una postura sentada
+resuelta con IK a los mandos del taxi (volante y pedales), las escala y las convierte a mallas ORD7 en
+el marco del port (x derecha, y arriba, z atras), con las texturas que usan de TEXDC0.BIN.
+
+La postura no es a ojo: el juego original anima al piloto con una curva Fcv (MOTDC.BIN 0x64D64, la que
+carga Drv_StartDrive) y con drvJolt (aceleracion -> inclinacion del cuerpo y giro de cabeza).  Aqui se
+parte de esa misma idea: cada mano va al aro del volante y cada pie a los pedales, con el cuerpo sentado
+a la altura de la pelvis del original (5,608 u sobre el origen del coche).  El piloto va a la escala del
+juego (1 u = 0,10625 m), la misma del taxi: la postura nueva deja los pies dentro del habitaculo (0,21 m,
+por encima de los bajos de 0,144 m) y la cabeza bajo el marco del parabrisas (1,28 m).  Las manos y los
+pies siguen en los mandos porque el IK se resuelve con los huesos ya escalados.
 
 Uso (lo llama tools/conv_crazytaxi.py):
-  conv_axel.anade(mod, dirpiezas, escala=0.10625, asiento=(-4.36, 0, 1.01))
-
-dirpiezas es la carpeta de _trabajo/crazytaxi con POLDC0.BIN, TEXDC0.BIN y 1ST_READ.BIN (los saca
-_trabajo/crazytaxi_lee.py). Devuelve (mallas, vertices, texturas) anadidos.
+  conv_axel.anade(mod, dirpiezas, escala=0.10625)
+  conv_axel.pivotes()          -> (cadera, cuello) en metros del port
+  conv_axel.pivote_volante()   -> (centro, eje) del volante en metros del port
 """
 import os, struct
 import numpy as np
@@ -40,18 +46,22 @@ PIEZAS = [
 ]
 HUESOS = {0: None, 8: 0, 1: 8, 4: 8, 3: 4, 2: 3, 7: 8, 6: 7, 5: 6, 15: 0, 11: 15, 10: 11, 9: 10,
           14: 15, 13: 14, 12: 13}
-# postura sentada: giros extra en ejes locales del hueso (grados)
-GIROS = {8: ('z', 8.0), 1: ('z', -4.0), 4: ('z', -38.0), 7: ('z', -38.0), 3: ('z', -38.0), 6: ('z', -38.0),
-         11: ('z', 82.0), 14: ('z', 82.0), 10: ('z', -82.0), 13: ('z', -82.0)}
-PELVIS = 10.58410       # altura de la pelvis en la pose de pie (unidades)
-PELVIS_SENTADO = 6.60   # altura de la pelvis sentada (unidades del coche original)
-ASIENTO = (4.36, 0.0, -1.01)   # asiento del piloto en ejes del coche original (+x izquierda, +z delante)
+# geometria del taxi y del piloto, en unidades del modelo (1 u = 0,10625 m)
 ESCALA = 0.10625
-# El modelo de Axel es mas grande que el habitaculo del taxi: a escala 1 los pies quedan a -0,08 m (debajo de la
-# carroceria) y la cabeza casi en el techo.  Se reduce al 80 % y se sube 24,5 cm: pies a +0,18 m (dentro, por encima
-# de los bajos de 0,144 m) y cabeza a 1,40 m (bajo el techo de 1,54 m).
-PILOTO_ESCALA = 0.80
-PILOTO_SUBIDA = 0.245
+ESCALA_PILOTO = 1.00
+ASIENTO = np.array([-4.36, 0.0, 1.01])          # port: x derecha, z atras (morro -z)
+PELVIS_Y = 5.608                                 # altura de la pelvis sentada (curva Fcv de Drv_StartDrive)
+TORSO_PITCH = -8.0                               # grados, hacia delante
+# volante del taxi: aro de strips 252/253/254 (sintex) + centro 173..176; centro y normal del modelo
+VOLANTE_C = np.array([-4.3504, 7.7064, -3.0173])
+VOLANTE_EJE = np.array([0.0, -0.20903, -0.97791])
+VOLANTE_EJE /= np.linalg.norm(VOLANTE_EJE)
+VOLANTE_R = 1.815
+# manos en el aro (9 y 3 en punto, algo por debajo del centro) y pies sobre el suelo del habitaculo
+MANO_L = VOLANTE_C + np.array([-VOLANTE_R * 0.985, -0.30, 0.10])
+MANO_R = VOLANTE_C + np.array([ VOLANTE_R * 0.985, -0.30, 0.10])
+PIE_L = np.array([-5.40, 3.25, -4.90])
+PIE_R = np.array([-3.40, 3.25, -5.60])
 LUZ = np.array([0.3, 0.8, 0.5], float); LUZ /= np.linalg.norm(LUZ)
 
 
@@ -174,6 +184,10 @@ def _a4(M):
     R = np.eye(4); R[:3, :4] = M; return R
 
 
+def _rot4(R):
+    M = np.eye(4); M[:3, :3] = R; return M
+
+
 def _rota(axis, grados):
     a = np.radians(grados); c, s = np.cos(a), np.sin(a)
     if axis == 'x': return np.array([[1, 0, 0], [0, c, -s], [0, s, c]])
@@ -181,59 +195,92 @@ def _rota(axis, grados):
     return np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]])
 
 
-def matrices():
-    """matriz 4x4 de cada pieza en la pose sentada, en ejes del coche original (+x izquierda, +y arriba, +z delante)"""
-    Mb = {}; off_de = {}
+def _aim(base, target):
+    """rota la base (hueso +x local) para apuntar a target; giro minimo (conserva el twist)"""
+    p = (np.linalg.inv(base) @ np.append(target, 1.0))[:3]
+    d = p / max(np.linalg.norm(p), 1e-9)
+    x = np.array([1.0, 0.0, 0.0])
+    c = float(np.dot(x, d)); ax = np.cross(x, d); s = np.linalg.norm(ax)
+    if s < 1e-8:
+        if c > 0: return base
+        ax = np.array([0.0, 0.0, 1.0]); a = np.pi
+    else:
+        ax /= s; a = np.arctan2(s, c)
+    K = np.array([[0, -ax[2], ax[1]], [ax[2], 0, -ax[0]], [-ax[1], ax[0], 0]], float)
+    R = np.eye(3) + np.sin(a) * K + (1 - np.cos(a)) * (K @ K)
+    return base @ _rot4(R)
+
+
+def _ik(S, T, l1, l2, pole):
+    d = T - S; dist = np.linalg.norm(d)
+    dist = max(1e-6, min(dist, l1 + l2 - 1e-5)); dn = d / dist
+    a = (l1 * l1 - l2 * l2 + dist * dist) / (2 * dist)
+    h = np.sqrt(max(0.0, l1 * l1 - a * a))
+    p = pole - dn * np.dot(pole, dn)
+    if np.linalg.norm(p) < 1e-6:
+        p = np.cross(dn, [0, 1, 0])
+        if np.linalg.norm(p) < 1e-6: p = np.cross(dn, [0, 0, 1])
+    p /= np.linalg.norm(p)
+    return S + dn * a + p * h
+
+
+def _rest():
+    Mb = {}
     for nombre, off, b, m in PIEZAS:
-        Mb.setdefault(b, np.array(m, float).reshape(3, 4)); off_de.setdefault(b, []).append(off)
-    # locales: L_b = inv(M_pad) * M_b
-    L = {}
-    for b in Mb:
-        pad = HUESOS[b]
-        L[b] = _a4(Mb[b]) if pad is None or pad == 0 else np.linalg.inv(_a4(Mb[pad])) @ _a4(Mb[b])
-    E = {b: np.eye(4) for b in Mb}
-    for b, (eje, g) in GIROS.items():
-        if b in E: E[b][:3, :3] = _rota(eje, g)
-    G = np.eye(4); G[1, 3] = PELVIS_SENTADO - PELVIS
-    Mw = {}
-    orden = [0, 8, 15, 1, 4, 7, 3, 6, 2, 5, 11, 14, 10, 13, 9, 12]
-    for b in orden:
-        if b not in E: continue
-        pad = HUESOS.get(b)
-        Mp = np.eye(4) if pad is None or pad == 0 else Mw[pad]
-        Mw[b] = Mp @ L[b] @ E[b]
-    for b in list(Mw): Mw[b] = G @ Mw[b]
-    return Mw
+        Mb.setdefault(b, np.array(m, float).reshape(3, 4))
+    return Mb
 
 
-def monta_sentado(dirpiezas):
-    """[(nombre, offset, recs, M 3x4)] de las piezas de Axel sentado"""
-    D = open(os.path.join(dirpiezas, 'POLDC0.BIN'), 'rb').read()
-    Mw = matrices()
-    out = []
-    for nombre, off, b, _m in PIEZAS:
-        recs = parse_modelo(D, off)
-        out.append((nombre, off, recs, Mw[b][:3, :4]))
-    return out
+def matrices(escala=ESCALA_PILOTO, torso_pitch=TORSO_PITCH, head_yaw=0.0, head_nod=0.0):
+    """matriz 4x4 de cada hueso en el marco del port (x derecha, y arriba, z atras), en unidades"""
+    Mb = _rest()
+    L = {0: np.eye(4)}
+    for b, pad in HUESOS.items():
+        if b == 0: continue
+        L[b] = np.linalg.inv(_a4(Mb[pad])) @ _a4(Mb[b]) if pad != 0 else _a4(Mb[b])
+        L[b][:3, 3] *= escala
+    root = np.eye(4); root[:3, 3] = ASIENTO + np.array([0, PELVIS_Y, 0])
+    R15 = _a4(Mb[15]).copy(); R15[:3, 3] = 0
+    R8 = _a4(Mb[8]).copy(); R8[:3, 3] = 0
+    M = {}
+    M[15] = root @ R15
+    M[8] = root @ R8 @ _rot4(_rota('z', torso_pitch))
+    M[1] = M[8] @ L[1] @ _rot4(_rota('y', head_yaw) @ _rota('z', head_nod))
+    for b4, b3, b2, target, pole in (
+            (4, 3, 2, MANO_L, np.array([0, -0.5, 0.8])),
+            (7, 6, 5, MANO_R, np.array([0, -0.5, 0.8]))):
+        base = M[8] @ L[b4]
+        codo = _ik(base[:3, 3], target, np.linalg.norm(L[b3][:3, 3]), np.linalg.norm(L[b2][:3, 3]), pole)
+        M[b4] = _aim(base, codo)
+        M[b3] = _aim(M[b4] @ L[b3], target)
+        M[b2] = M[b3] @ L[b2]
+    Rpie = _a4(Mb[9]).copy(); Rpie[:3, 3] = 0
+    for b11, b10, b9, target, pole in (
+            (11, 10, 9, PIE_L, np.array([0, 0.75, 0.25])),
+            (14, 13, 12, PIE_R, np.array([0, 0.75, 0.25]))):
+        base = M[15] @ L[b11]
+        rodilla = _ik(base[:3, 3], target, np.linalg.norm(L[b10][:3, 3]), np.linalg.norm(L[b9][:3, 3]), pole)
+        M[b11] = _aim(base, rodilla)
+        M[b10] = _aim(M[b11] @ L[b10], target)
+        M[b9] = np.eye(4); M[b9][:3, 3] = target; M[b9][:3, :3] = Rpie[:3, :3]
+    return M
 
 
 def pivotes():
-    """(cadera, cuello) del piloto en el marco del port (metros): pivotes de la pieza 1 (cuerpo) y la 2 (cabeza)"""
+    """(cadera, cuello) del piloto en el marco del port (metros)"""
     M = matrices()
-    esc = ESCALA * PILOTO_ESCALA
-    tras = np.array([-ASIENTO[0], 0.0, -ASIENTO[2]], float) * ESCALA
-    out = []
-    for b in (15, 1):
-        p = M[b][:3, 3] * esc + tras
-        p[1] += PILOTO_SUBIDA
-        out.append(p)
-    return out
+    return M[15][:3, 3] * ESCALA, M[1][:3, 3] * ESCALA
+
+
+def pivote_volante():
+    """(centro, eje) del volante en metros del port. El eje va en pz[3][3..4] (x = 0)"""
+    return VOLANTE_C * ESCALA, VOLANTE_EJE
 
 
 # ------------------------------------------------------------------ conversion a ORD7
-def anade(mod, dirpiezas, escala=ESCALA, asiento=ASIENTO, escala_piloto=PILOTO_ESCALA,
-          subida=PILOTO_SUBIDA):
-    """anade el piloto al modelo ORD7 mod (modelo.Modelo) en la pieza 0. Devuelve (mallas, vertices, texturas)."""
+def anade(mod, dirpiezas, escala=ESCALA, escala_piloto=ESCALA_PILOTO):
+    """anade el piloto al modelo ORD7 mod (modelo.Modelo) en las piezas 1 (cuerpo) y 2 (cabeza)."""
+    D = open(os.path.join(dirpiezas, 'POLDC0.BIN'), 'rb').read()
     T = open(os.path.join(dirpiezas, 'TEXDC0.BIN'), 'rb').read()
     S = open(os.path.join(dirpiezas, '1ST_READ.BIN'), 'rb').read()
     tab = _tabla_texturas(S)
@@ -260,27 +307,22 @@ def anade(mod, dirpiezas, escala=ESCALA, asiento=ASIENTO, escala_piloto=PILOTO_E
             mod.blob += datos; mod.rgba.append(a)
             tex_local[t] = (len(mod.texs) - 1, li)
         return tex_local[t]
-    piezas = monta_sentado(dirpiezas)
-    # asiento: original -> port (x -> -x, z -> -z), escala
-    tras = np.array([-asiento[0], 0.0, -asiento[2]], float) * escala
+    M = matrices()
     nm = nv = 0
-    for nombre, off, recs, M in piezas:
+    for nombre, off, b, _m in PIEZAS:
+        recs = parse_modelo(D, off)
+        Mw = M[b]
         for rec in recs:
             t = int(rec['tex']); tex_ti, tex_li = anade_textura(t) if t >= 0 else (None, 0)
             for s in rec['strips']:
                 if len(s['verts']) < 3: continue
-                P = np.array([v[:3] for v in s['verts']], float)
+                P = np.array([v[:3] for v in s['verts']], float) * escala_piloto
                 N = np.array([v[3:6] for v in s['verts']], float)
                 U = np.array([v[6] for v in s['verts']], float)
                 V = np.array([v[7] for v in s['verts']], float)
-                P = P @ M[:, :3].T + M[:, 3]
-                N = N @ M[:, :3].T
-                # el personaje ya mira a -z (como el morro del coche en el port): no se le gira 180; solo
-                # se escala y se lleva al asiento (port: x -4,36, z +1,01 unidades).  El giro 180 que lleva el
-                # coche de Naomi al port se compensa con el que hay que darle al piloto para mirar al morro
-                # en los ejes originales, asi que aqui no queda ninguno.
-                P = P * (escala * escala_piloto) + tras
-                P[:, 1] += subida
+                P = P @ Mw[:3, :3].T + Mw[:3, 3]
+                N = N @ Mw[:3, :3].T
+                P *= escala
                 N /= np.maximum(np.linalg.norm(N, axis=1, keepdims=True), 1e-6)
                 luz = 0.7 + 0.3 * np.clip(np.abs(N @ LUZ), 0, 1)
                 if t >= 0:
@@ -288,7 +330,6 @@ def anade(mod, dirpiezas, escala=ESCALA, asiento=ASIENTO, escala_piloto=PILOTO_E
                 else:
                     f = rec['face']; alfa = np.full(len(P), max(0.0, min(1.0, f[0])) * 255.0)
                     rgb = np.array(f[1:4])[None, :] * luz[:, None]
-                # lista de triangulos -> tira con degenerados (como ordena_tiras)
                 if s['g'] & 8:
                     q = [0, 1, 2]
                     for j in range(3, len(P), 3): q += [q[-1], j, j, j + 1, j + 2]
@@ -306,8 +347,7 @@ def anade(mod, dirpiezas, escala=ESCALA, asiento=ASIENTO, escala_piloto=PILOTO_E
                 m['u'], m['v'] = U, V
                 m['c'] = (C[:, 3] << 24) | (C[:, 0] << 16) | (C[:, 1] << 8) | C[:, 2]
                 mod.verts.append(m)
-                # pieza 1: cuerpo (con las manos al volante); pieza 2: cabeza (giro/nodo). El coche las dibuja
-                # con sus matrices de ANI1 (PZ_VOLANTE / PZ_ALERON) y main.c las mueve para el taxi.
+                # pieza 1: cuerpo (con las manos al volante); pieza 2: cabeza (giro/nodo)
                 nodo = (2 if nombre == 'head' else 1) << 8
                 mod.mallas.append([tex_li, -1 if tex_ti is None else tex_ti, cc, rad, mod.nv, n, None, nodo])
                 mod.nv += n; nm += 1; nv += n

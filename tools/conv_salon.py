@@ -13,10 +13,10 @@ solo=True), un grupo de atlas por pagina (las texturas de cada escena se suben a
    textos, como en C2C.DAT (conv_c2c.py);
  - el bloque 'SAL1' (extra de SPR1) con las tablas del ELF (little endian):
      'SAL1', u32 desplazamiento de los textos (desde 'SAL1')
-     desc filas[257]  (0x41ae20: {token, primero, ultimo}; 0x25b468 / 0x25b470; las 252.. son los iconos de la
-                       ventana de compra: 0x25d65c..0x25d9e0)
-     u32 precio[0xcf] (0x629ee0 que rellena 0x1f3c90: 10 x i y los pares {objeto, precio} de PRICES de
-                       \\Scripts\\bin\\OutrunMiles.bin; 0x1f4198)
+     desc filas[259] (0x41ae20 + los 2 articulos del Salon en 0xfc/0xfd, vacios hasta que
+                       salon_compras_parche.py les pone el arte; detras los 5 textos de la ventana)
+     u32 precio[0xd1] (0x629ee0 que rellena 0x1f3c90: 10 x i y los pares {objeto, precio} de PRICES de
+                       \\Scripts\\bin\\OutrunMiles.bin; 0x1f4198; 0xcf/0xd0 = OUTRUNNERS/TAXI a 50000)
      i32 fuera[26]    (0x41ad38: los objetos que no se venden en esta version; 0x25d790)
      coches: i32 modelo[30], bit[30], ficha[30] (0x41bda0: {modelo, bit}; ficha = indice del modelo en 0x375968, como
                        0x25bf68), i8 color[30] (0x3d4b80 por modelo: 0x18a110), 2 de relleno
@@ -40,7 +40,7 @@ import conv_sprani as cs
 BANCO = 0x44
 FUENTE = 14
 FILAS = 0x41ae20
-N_FILAS = 257
+N_FILAS = 259                                           # 257 del original + los 2 articulos del Salon
 # paginas (control 0x25b5d0, tabla de saltos 0x41aca0; la principal 0x25bce8): (codigo, base, filas, tira, ultimo,
 # paso, base de la tira, titulo)
 PAGINAS = [(0x25bce8, 0xcf, (0x28, 0x2d), 0x44007d, 4, 0x14, 0xa, None),        # principal (0xcf: ninguno)
@@ -48,7 +48,7 @@ PAGINAS = [(0x25bce8, 0xcf, (0x28, 0x2d), 0x44007d, 4, 0x14, 0xa, None),        
            (0x25c4e0, 0x8a, (0xb7, 0xd9), 0x44007f, 0x21, 0xa, 9, 0x16),         # escenarios
            (0x25c750, 0xac, (0xd9, 0xee), 0x4400a9, 0x14, 0xa, 9, 0x1c),         # musica
            (0x25ca80, 0x1c, (0x49, 0xb7), 0x440080, 0x6d, 0xa, 9, 0x1f),         # colores
-           (0x25cf00, 0xc1, (0xee, 0xfc), 0x4400c5, 0xd, 0xa, 9, 0x19)]          # extras
+           (0x25cf00, 0xc1, (0xee, 0xfe), 0x4400c5, 0xf, 0xa, 9, 0x19)]          # extras + 2 articulos
 
 
 BARRA = [(4, 0x294), None, (0x4000, 0x299), (8, 0x295)]
@@ -115,9 +115,13 @@ def main():
     lui(0x25d5c8, 0x43a5); lui(0x25d5d0, 0x4334); lui(0x25d5dc, 0x436f); lui(0x25d5e8, 0x4302); inm(0x25d5f8, 0xc)
     inm(0x25d668, 0xd); inm(0x25d6cc, 0xd); inm(0x25d734, 0xd)
 
-    filas = [(u(FILAS + 12 * k), u(FILAS + 12 * k + 4), u(FILAS + 12 * k + 8)) for k in range(N_FILAS)]
+    filas = [(u(FILAS + 12 * k), u(FILAS + 12 * k + 4), u(FILAS + 12 * k + 8)) for k in range(257)]
     assert filas[4] == (0x440053, 0, 20) and filas[16] == (0x4400bb, 0, 30) and filas[252] == (0x44005c, 0, 0)
-    assert u(FILAS + 12 * N_FILAS) >> 16 != 0x44, 'filas: 257'
+    assert u(FILAS + 12 * 257) >> 16 != 0x44, 'filas: 257'
+    # los dos articulos (filas 0xfc y 0xfd, delante de los cinco textos de la ventana): el parche de arte les pone
+    # sus cuadros; aqui van vacios para que la tabla tenga el tamano que espera comun/menu.c (SA_NFILA)
+    filas = filas[:0xfc] + [(0, 0, 0), (0, 0, 0)] + filas[0xfc:]
+    assert len(filas) == N_FILAS and filas[0xfe] == (0x44005c, 0, 0)
     # precios (0x1f3c90: 10 x i; luego PRICES)
     from ps2.assets import Assets
     As = Assets(sys.argv[1])
@@ -126,6 +130,8 @@ def main():
     n, o = cm._r077(dm, 'PRICES')
     for k in range(n):
         it, pr = struct.unpack_from('<2I', dm, o + 8 * k); assert it < 0xcf; precio[it] = pr
+    precio += [50000, 50000]                               # OUTRUNNERS y TAXI CRAZY TAXI
+    assert len(precio) == 0xd1
     print('  PRICES: %d precios (%s)' % (n, ', '.join('%d:%d' % (k, precio[k]) for k in (0, 1, 2, 28, 138, 172, 193))))
     fuera = [i(0x41ad38 + 4 * k) for k in range(26)]
     orden = [u(0x375968 + 4 * k) for k in range(30)]
