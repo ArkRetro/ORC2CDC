@@ -91,14 +91,17 @@ static const char *const UNOM[NU] = { "TITULO_FONDO", "TITULO_LOGO", "TITULO_STA
 
 #define N_OPC 5                                             /* opciones de un jugador (y del carrusel 0x440000) */
 #define N_COCHES 15
+#define SPR_ESCUDO_TAXI 613                                /* sprite nuevo de MENU.DAT (tools: _trabajo/ficha_parche.py) */
 /* musica (4C9790 / 4C9C20 del PC; tablas del PS2 0x375DA8 y 0x4191E8): 3 listas de 9 / 7 / 12 temas (68F36C), el
    tema k (0..27, 4C9750: lista 0, luego la 1 y la 2) es la pista k de MUSIC.PS2 (68F370: la misma) y su avance la
    k + 0x21; los temas 0..6 siempre estan y los demas con su bit de la licencia (5C9AB0) */
 #define N_LISTAS 3
-#define N_TEMAS 28
-static const int8_t TEMAS_LISTA[N_LISTAS] = { 9, 7, 12 };
+#define N_TEMAS 29
+/* la lista 2 lleva un tema mas: el 28 es ALL I WANT (Crazy Taxi, MUS67.ADP; ver musica_pon) */
+static const int8_t TEMAS_LISTA[N_LISTAS] = { 9, 7, 13 };
 static const uint8_t DESBLOQ_TEMA[N_TEMAS] = { 174, 174, 174, 174, 174, 174, 174, 172, 173, 174, 175, 176, 177, 178,
-                                               179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192 };
+                                               179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192,
+                                               192 };
 #define T_DEMO (8 * 60)                                     /* inactividad en el titulo hasta la demo */
 #define T_FUNDIDO 12
 #define T_CARGA_MAX 90                                      /* cuadros que se espera a la VRAM de una pantalla */
@@ -108,6 +111,7 @@ static const uint8_t DESBLOQ_TEMA[N_TEMAS] = { 174, 174, 174, 174, 174, 174, 174
 #define HOLGURA (256 * 1024)                                /* libre de mas antes de subir sin echar nada */
 #define PISTA_MENU 30                                       /* musica de los menus */
 #define PISTA_AVANCE 33                                     /* avance del tema k: pista 33 + k */
+#define PISTA_TAXI 67                                       /* MUS67.ADP: una pista de Crazy Taxi (SONG01.AFS) para el taxi */
 
 static hud_dat_t *md;
 /* la ficha de la portada de OutRunners y el credito (usos OR_PORTADA / OR_CREDITO de MENU.DAT; -1 sin ellos) */
@@ -176,6 +180,17 @@ static void texto_id(int id, float x, float y, int flags, float alfa, float z, u
 static void texto_c(const char *s, float x, float y, int flags, float alfa, float z, uint32_t col)
 {
     texto((const uint8_t *)s, strlen(s), x, y, flags, alfa, z, col);
+}
+/* la ficha del taxi (COCHE07 = modelo 0 = F50) lleva el escudo de Crazy Taxi encima del de Ferrari: el sprite 613,
+   36x57 en (573, 63), el mismo sitio que el escudo 154 de CABECERA_COCHE. En el resto de fichas no se dibuja. */
+static void escudo_taxi(float alfa, float z)
+{
+    float m[6], q[4];
+    if (!md || alfa <= 0.004f || hudd_n_spr(md) <= SPR_ESCUDO_TAXI) return;
+    m[0] = 1; m[1] = 0; m[2] = 0; m[3] = 1; m[4] = 573; m[5] = 63;
+    q[0] = 0; q[1] = 0; q[2] = 36; q[3] = 57;
+    hudd_capa(md, z, 0);
+    hudd_sprite(SPR_ESCUDO_TAXI, m, q, alfa, 0);
 }
 
 /* ---------------------------------------------------------------- licencias (registro de 0x40C del original) */
@@ -698,8 +713,13 @@ static float giro;
 static int c_indice(void) { return c_cursor + 15 * c_var; }
 static int c_modelo(int i) { return t_modelo ? t_modelo[i] : i; }
 static int lic_bit(int b) { const uint8_t *p = activa(); return p && ((p[0x28 + b / 8] >> (b % 8)) & 1); }
-/* 4C8F90: las dos primeras fichas siempre; las demas, su bit de la licencia */
-static int c_desbloqueado(int i) { return i < 2 || (t_desbloq && lic_bit(t_desbloq[i])); }
+/* 4C8F90: las dos primeras fichas siempre; las demas, su bit de la licencia.  La ficha del taxi (modelo 0 normal y
+   15 "_t") esta siempre: es una entrada nueva de Crazy Taxi, no del carrusel original. */
+static int c_desbloqueado(int i)
+{
+    if (i < 2 || (t_modelo && i < 30 && (t_modelo[i] == 0 || t_modelo[i] == 15))) return 1;
+    return t_desbloq && lic_bit(t_desbloq[i]);
+}
 /* 4C8FC0: color c de la ficha i */
 static int c_color_ok(int i, int c)
 {
@@ -770,6 +790,7 @@ static int pon_pista(int n)
 }
 static void pon_musica(int k)
 {
+    if (k == 28) { pon_pista(28); return; }                 /* ALL I WANT: suena entero (musica_pon lo lleva a MUS67) */
     if (pista_sonando != PISTA_AVANCE + k && pista_sonando != k && pon_pista(PISTA_AVANCE + k) && k < n_ok) pon_pista(k);
 }
 static void musica_menu(void)
@@ -779,7 +800,7 @@ static void musica_menu(void)
 /* 4C9750: tema de la lista y el cursor actuales */
 static int tema_actual(void) { int k = curs[lista], l; for (l = 0; l < lista; l++) k += TEMAS_LISTA[l]; return k; }
 static int lic_bit(int b);
-static int tema_libre(int k) { return k <= 6 || lic_bit(DESBLOQ_TEMA[k]); }   /* 4474E0 solo por encima del 6 */
+static int tema_libre(int k) { return k == 28 || k <= 6 || lic_bit(DESBLOQ_TEMA[k]); }   /* 4474E0; el 28 (ALL I WANT) siempre */
 static void musica_lista(void)                              /* carrusel y titulo de la lista actual en su tema */
 {
     static const int UL[N_LISTAS] = { U_L0, U_L1, U_L2 }, UT[N_LISTAS] = { U_T0, U_T1, U_T2 };
@@ -962,7 +983,10 @@ void menu_entra_sp(void)
 }
 int menu_preset(void) { return sp_sel ? fsp_preset() : 0; }
 int menu_manual(void) { return sp_sel ? fsp_manual() : manual; }
-int menu_pista(void) { return sp_sel ? fsp_musica() : elegido < n_ok ? elegido : 0; }
+int menu_pista(void) {
+    if (sp_sel) return fsp_musica();
+    return elegido < n_ok ? elegido : 0;                   /* 28 = ALL I WANT; musica_pon lo lleva a MUS67 */
+}
 int menu_coche3d(void)
 {
     if (sp_sel) return fsp_coche3d() && ficha_de(fsp_modelo()) >= 0;
@@ -1792,6 +1816,9 @@ static int sa_obj, sa_vuelta, sa_puede, sa_eleccion;        /* +0xc88, +0xc8c, +
 static int sa_mus;                                          /* +0xb45 */
 /* lista (0x24d430 = 48D970): filas de la tabla, la elegida, la primera que se ve y cuantas */
 static int sa_lf0, sa_ln, sa_lsel, sa_lini, sa_llim, sa_lscroll;
+/* filas visibles de la pagina de COLORES: el taxi (modelo 0) no tiene colores; se saltan sus
+   filas sin tocar el indice de la tabla (el bit del objeto sigue siendo base + fila original) */
+static int sa_cvis[110], sa_cn;
 /* tira (0x238798 = 446710): activa, escena, ultimo indice, paso, base, el objeto */
 static int sa_ton, sa_tult, sa_tpaso, sa_tb0, sa_ti; static uint32_t sa_ttok;
 /* registros de las paginas de coches y colores (+0x4c: 30 x 0x20) */
@@ -1865,10 +1892,11 @@ static int sa_compra(int b, uint32_t precio)
     return 1;
 }
 /* 0x25d170 (4D4200): el objeto de la fila elegida */
+static int sa_crow(int i) { return sa_base == 0x1c && i >= 0 && i < sa_cn ? sa_cvis[i] : i; }
 static int sa_objeto(void)
 {
     if (sa_base == 0xcf) return 0;
-    if (sa_base >= 0) return sa_lsel + sa_base;
+    if (sa_base >= 0) return sa_base + sa_crow(sa_lsel);
     return sa_lsel >= 0 && sa_lsel < 30 ? sa_reg[sa_lsel].bit : 0;
 }
 
@@ -1894,28 +1922,31 @@ static void sa_lista_dibuja(void)                           /* filas en (-180, -
     for (i = 0; i < sa_ln; i++) {
         const sa_d_t *d, *b;
         if (i < sa_lini || i >= sa_lini + sa_llim) continue;
-        d = &SA->fila[sa_lf0 + i]; b = &SA->fila[i == sa_lsel ? 2 : 1];
+        d = &SA->fila[(sa_base == 0x1c ? 0x49 : sa_lf0) + sa_crow(i)]; b = &SA->fila[i == sa_lsel ? 2 : 1];
         spr_inmediata(d->tok, -180, -50 + 19.0f * k, 2, (int)d->pri);
         spr_inmediata(b->tok, -180, -50 + 19.0f * k, 1, (int)b->pri);
         k++;
     }
 }
 /* ---- tira de imagenes (446710 / 4467A0 / 4468A0 / 446930 / 446830) */
-static int sa_tcuadro(int i) { return sa_tpaso * i + sa_tb0; }
+static int sa_tcuadro(int i) { return sa_tpaso * (sa_base == 0x1c ? sa_crow(i) : i) + sa_tb0; }
 static void sa_tira_pon(int pri, int ult, int modo) { sr_pon(&sa_tira, sa_ttok, pri, ult, 4, modo, 1); }
 static void sa_tira_inicia(uint32_t tok, int ult, int paso, int b0)
 {
     sa_ttok = tok; sa_tult = ult; sa_tpaso = paso; sa_tb0 = b0; sa_ti = 0; sa_ton = 1;
     sa_tira_pon(1, b0, 1);
 }
-static void sa_tira_deja(void) { sa_tira_pon(sa_tcuadro(sa_ti), sa_tpaso * (sa_ti + 1), 3); }
+static void sa_tira_deja(void) {
+    int i = sa_base == 0x1c ? sa_crow(sa_ti) : sa_ti;
+    sa_tira_pon(sa_tcuadro(sa_ti), sa_tpaso * (i + 1), 3);
+}
 static void sa_tira_paso(void)
 {
     if (!sa_ton) return;
     sr_tick(&sa_tira);
     if (!sr_listo(&sa_tira)) return;
     if (sa_tira.h >= 0) { int f = sa_tcuadro(sa_ti); sa_tira_pon(f, f, 0); }
-    else { int k = sa_tpaso * sa_ti; sa_tira_pon(k + 1, sa_tb0 + k, 1); }
+    else { int i = sa_base == 0x1c ? sa_crow(sa_ti) : sa_ti, k = sa_tpaso * i; sa_tira_pon(k + 1, sa_tb0 + k, 1); }
 }
 static void sa_tira_suelta(void) { if (!sa_ton) return; sa_tira_deja(); sr_suelta(&sa_tira); sa_ton = 0; }
 static void sa_tira_sig(void)
@@ -1981,17 +2012,26 @@ static void sa_ventana(int obj, int vuelta)
 static void sa_pagina(int p)                                /* init (0x25bce8, 0x25c038, ...) */
 {
     const sa_pag_t *g = SA_PAG + p;
+    int i;
     sa_base = g->base;
     if (p == 1 || p == 4) {                                 /* 482E70(1): la camara del salon; registros y coche */
         sa_registros(p == 4);
-        if (p == 1) sa_coche(0, sa_reg[0].color);
-        else sa_coche(SA->k_fila[0].reg, SA->k_fila[0].color);
+        if (p == 4) {                                       /* sin las filas del taxi (modelo 0) */
+            sa_cn = 0;
+            for (i = 0; i < 110; i++) {
+                int reg = SA->k_fila[i].reg;
+                if (reg >= 0 && reg < 30 && SA->k_modelo[reg] != 0) sa_cvis[sa_cn++] = i;
+            }
+            if (sa_cn > 0) sa_coche(SA->k_fila[sa_cvis[0]].reg, SA->k_fila[sa_cvis[0]].color);
+        } else sa_coche(0, sa_reg[0].color);
         if (p == 4) sa_refresca = 1;
     }
     if (p == 3) { sa_mus = 0; pon_pista(PISTA_AVANCE + (int)SA->pista[0]); }   /* 0x25c9f0: 401000(0, pista + 0x21, 1) */
     if (p == 0) { sr_suelta(&sa_icono); sa_icono_muestra(); }
     sa_lista(g->f0, g->f1, p ? 7 : 0x60, p != 0);
+    if (p == 4) sa_ln = sa_cn;
     sa_tira_inicia(g->tira, g->ult, g->paso, g->b0);
+    if (p == 4 && sa_cn > 0) sa_tult = sa_cn - 1;
     if (g->tit >= 0) sa_tit_entra(g->tit);
     sa_est++;
     if (p) sa_icono_muestra();
@@ -2046,7 +2086,7 @@ static void sa_pag_control(int p, int a)                    /* 0x25c2d0 / 0x25c5
         }
         sa_lista_mueve(ad); if (ad) sa_tira_sig(); else sa_tira_ant();
         if (p == 1) sa_coche(sa_lsel, sa_reg[sa_lsel].color);
-        if (p == 4) sa_coche(SA->k_fila[sa_lsel].reg, SA->k_fila[sa_lsel].color);
+        if (p == 4) { int row = 0x49 + sa_crow(sa_lsel); sa_coche(SA->k_fila[row].reg, SA->k_fila[row].color); }
         sa_refresca = 1;
     }
     if (p == 1) {                                           /* el registro elegido se desbloqueo (la compra) */
@@ -2111,7 +2151,7 @@ static int sa_control(unsigned n, int atiende)
         }
         if (sa_vuelta >= 4 && sa_vuelta <= 0x13 && (sa_vuelta - 4) % 3 == 0) sa_est = sa_vuelta;
         if (sa_est == 4) sa_coche(sa_lsel, sa_reg[sa_lsel].color);
-        if (sa_est == 13) sa_coche(SA->k_fila[sa_lsel].reg, SA->k_fila[sa_lsel].color);
+        if (sa_est == 13) { int row = 0x49 + sa_crow(sa_lsel); sa_coche(SA->k_fila[row].reg, SA->k_fila[row].color); }
         break;
     }
     return 0;
@@ -2549,10 +2589,12 @@ void menu_dibuja(void)
     case P_TABLERO: tb_dibuja(); break;
     case P_COCHE:
         an_dibuja(&a_sel, 0, a_ent * a_sal, 4, 0);
+        if (c_cursor == 2 && ficha_de(c_modelo(2)) == 7) escudo_taxi(a_ent * a_sal, 7.0f);
         if (!c_desbloqueado(c_indice()) && an_hecho(&a_sel)) hudd_dibuja(md, us[U_CAND], 0, 0, 0, a_ent * a_sal, 5, 0);
         break;
     case P_CAMBIO:
         an_dibuja(&a_sel, 0, 1, 7, 0);
+        if (c_cursor == 2 && ficha_de(c_modelo(2)) == 7) escudo_taxi(a_sal, 7.2f);
         break;
     case P_MUSICA:
         an_dibuja(&a_radio, 0, 1, 4, 0);

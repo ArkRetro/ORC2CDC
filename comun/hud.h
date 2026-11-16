@@ -84,6 +84,7 @@ void hudd_escala(float sx, float sy);
 void hudd_capa(hud_dat_t *h, float z, int fondo);
 void hudd_sprite(int s, const float *m, const float *q, float alfa, int aditiva);
 int hudd_sprite_tex(const hud_dat_t *h, int s);
+int hudd_n_spr(const hud_dat_t *h);                        /* sprites del fichero (para comprobar un indice nuevo) */
 float hudd_z(void);                                      /* z de la siguiente pieza */
 void hudd_todas_usables(hud_dat_t *h);                   /* todas sus texturas se pueden subir (SPRANI con usos) */
 int hudd_n_tex(const hud_dat_t *h);                       /* texturas del fichero */

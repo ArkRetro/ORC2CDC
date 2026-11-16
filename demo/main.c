@@ -886,6 +886,8 @@ static int ta_freno;                                     /* 0..3: OPB muy lleno,
 static int ta_en_etapa;                                  /* lo que se envia ahora es de la etapa (su tope) */
 static int ta_et_corto;                                  /* en este cuadro no cupo alguna tira de la etapa */
 static int ta_ofs;                                       /* las tiras que se envian llevan color de desplazamiento */
+static int precalentando;                                /* etapa_precalienta: el reparto que se ejecuta no es un cuadro */
+static int en_cuenta;                                    /* estado CUENTA: el precalentamiento manda (sin prio_ajusta) */
 /* objetos de la union (bo_dibuja: pajaros, bandada, halcones, flamencos, dragon; DECISION DEL PORT, lote 1 de la revision
    44): van despues de la etapa con su propio tope (ta_bo_tope: lo que deja la etapa sin tocar la reserva del coche, la
    pareja, el trafico y los efectos) y de la etapa solo se aparta para ellos lo que gastaron en el cuadro anterior hasta
@@ -894,6 +896,38 @@ static int ta_ofs;                                       /* las tiras que se env
    tiraba el cielo, la calzada y todo lo demas de la union durante 3-4 s */
 #ifndef TA_BO_PARTE
 #define TA_BO_PARTE 2                                    /* lo apartado para ellos: como mucho lo libre / TA_BO_PARTE */
+#endif
+/* Holgura del tope de la etapa (prueba del presupuesto, 2026-11-15): +54 KB. En la salida de PALM la vista cuesta
+   1,84x el presupuesto y el corte de LOD (prio_p) se queda en la clase 24; la clase 25 (los edificios y palmeras del
+   margen) cuesta +84 KB teoricos. La simulacion de INFORME_ARRANQUE.md (+54 KB: 846 -> 900 KB) baja el pico de 161 a
+   40 px. Se toma de la reserva de lo que no es la etapa (ro: coche, pareja, trafico, efectos), que lleva el margen de 2
+   coches de trafico con LOD 0, no del bufer: ta_cabe sigue mirando ta_lim y el cuadro nunca pasa de TA_VB_BYTES. Si la
+   reserva no sobrara, el coche o el trafico se quedarian sin sitio (medir "otros" y "tope mallas" con -DDIAG_POPPING).
+   La VRAM no cambia con esta holgura; si se quisiera subir el bufer de verdad, cada 64 KB de etapa son 128 KB de VRAM
+   por el doble bufer (docs/DREAMCAST.md). En la salida el tope sube 840 -> 893 KB (+53 enviados), pero con ta_f
+   1,75 y prio_alfa 0,8 solo son ~+35 KB teoricos; la columna de clase 25 que hace falta para el edificio cuesta
+   +84 KB teoricos y el volumen sigue entrando a ~1 s. Ademas el +54 sale del margen de 2 coches de trafico con LOD 0
+   (ro = otros 843 + 110 = 952 KB), que en PALM no hay pero en otras etapas puede faltar. Medido en Flycast con dup47
+   (PRESUPUESTO_INFORME.md): 55 apariciones de 32 px frente a 82, pero 12 desapariciones de 32 px frente a 0 y el pico
+   de la primera oleada sigue en 156,9 (158,3 antes); no llega al criterio de <5, asi que se deja a 0. La prueba se
+   compila con -DTA_ETAPA_HOLGURA=55296. */
+#ifndef TA_ETAPA_HOLGURA
+#define TA_ETAPA_HOLGURA 0
+#endif
+/* Precalentamiento de la etapa al empezar la carrera (2026-11-15): con la pantalla de carga (o su ultimo cuadro) aun
+   delante, el reparto del TA se ejecuta varias veces con la camara de la parrilla, para que prio_d/prio_p y la
+   histeresis por nodo lleguen al estado estable antes del semaforo. Sin esto el primer cuadro de carrera arranca con
+   prio_p = 63 (el valor del menu, con prio_alfa 0,26) y todo lo que la vista deja ver se dibuja; en el segundo cuadro
+   prio_alfa sube a ~0,8 y el corte baja de golpe (PALM, DIAG_POPPING: 42 desapariciones de 8 px o mas, 13 de 32 px o mas,
+   el edificio 1977/1983 de 118 px entre ellas). El precalentamiento no dibuja nada ni toca texturas: solo el reparto (etapa_precalienta,
+   llamada al empezar la carrera, antes de la cuenta atras). PRECALIENTA_ALFA: lo enviado / lo estimado por el reparto en
+   los primeros cuadros (medido 0,74-0,84 en PALM; con 0,80 el corte queda en prio_p 17, el volumen del edificio 1969
+   (clase 19) no entra hasta el GO: el presupuesto de la etapa no llega a una clase mas). */
+#ifndef PRECALIENTA_ALFA
+#define PRECALIENTA_ALFA 0.80f
+#endif
+#ifndef PRECALIENTA_MAX
+#define PRECALIENTA_MAX 120                                  /* cuadros simulados como mucho (para en cuanto se asienta) */
 #endif
 /* Ultimo recurso (DECISION DEL PORT, lote 1 de la revision 44): si con el reparto en su minimo (prio_d = -1 y solo la
    clase de LOD 0) aun no cabe la etapa, ta_cabe tiraria lo que no cabe en el orden de envio (el de las texturas: la
@@ -954,6 +988,11 @@ static void ta_inicia_cuadro(void)
     libre = ta_lim > ro ? ta_lim - ro : 0;
     bo = ta_bo_ult < libre / TA_BO_PARTE ? ta_bo_ult : libre / TA_BO_PARTE;   /* (los objetos de la union, arriba) */
     ta_tope_etapa = (libre - bo) / 4 * (4 - ta_freno);
+    /* holgura del tope de la etapa (+54 KB, arriba): nunca por encima de ta_lim, donde ya no cabe nada mas */
+    if (ta_tope_etapa < ta_lim) {
+        uint32_t h = ta_tope_etapa + TA_ETAPA_HOLGURA;
+        ta_tope_etapa = h < ta_lim ? h : ta_lim;
+    }
     ta_res_otros = ro;
     ta_vb = ta_et = ta_bo = ta_bo_pide = 0; ta_v2d = 0; ta_teo_3d = 0; ta_tiras = 0;
 }
@@ -4450,6 +4489,9 @@ static float cam_suelo(const float *p)
 }
 /* un paso de logica de la camara (4858D0) con el coche del jugador; boton = cambio de vista (entrada 0x40000);
    agotado = la del fin del tiempo (485830) */
+#ifdef DIAG_SUS
+static float ani_ty, ani_base;                                  /* medida: subida/bajada de la carroceria por 4A2910 */
+#endif
 static void camara_paso(int boton, int salida, int agotado)
 {
     cam_entrada_t e; float th, q[3], h, v;
@@ -4510,6 +4552,15 @@ static void camara_paso(int boton, int salida, int agotado)
             (double)yo.s, (double)s_base, (double)yo.pos[0], (double)yo.pos[1], (double)yo.pos[2], (double)cam.ojo[0], (double)cam.ojo[1],
             (double)cam.ojo[2], (double)cam.mira[0], (double)cam.mira[1], (double)cam.mira[2], cam.vista, (double)cam_suelo(cam.ojo),
             (double)yo.fw[0], (double)yo.fw[1], (double)yo.fw[2], (double)yo.up[0], (double)yo.up[1], (double)yo.up[2]); }
+#endif
+#ifdef DIAG_SUS
+    {   /* medida del temblor: altura/pitch/roll de la fisica y de la camara; ruedas (extension y altura de dibujo) */
+        static int n;
+        if (++n % 2 == 0) dbglog(DBG_INFO, "SUS t%d v%.1f alt %.4f cab %.5f bal %.5f ty %.4f base %.4f y %.4f r %.4f %.4f %.4f %.4f ext %.4f %.4f %.4f %.4f ojo %.4f mira %.4f\n",
+            n, (double)fis.kmh, (double)fis.alt, (double)fis.cabeceo, (double)fis.balanceo, (double)ani_ty, (double)ani_base, (double)yo.pos[1],
+            (double)fis.rueda_y[0], (double)fis.rueda_y[1], (double)fis.rueda_y[2], (double)fis.rueda_y[3],
+            (double)fis.r[0].ext, (double)fis.r[1].ext, (double)fis.r[2].ext, (double)fis.r[3].ext,
+            (double)cam.ojo[1], (double)cam.mira[1]); }
 #endif
 }
 
@@ -5278,7 +5329,7 @@ static void aviso(const char *s)
 extern void video_titulo(void) __attribute__((weak));
 extern int video_atraccion(void) __attribute__((weak));        /* comun/video.c */
 enum { TITULO, CUENTA, CARRERA, META, AGOTADO, FIN };   /* FIN: carrera suspendida (pausa -> modo 34) */
-#define NPISTAS 28                                  /* temas de carrera en el GD: MUS0..27.ADP (menu.c) */
+#define NPISTAS 29                                  /* temas de carrera en el GD: MUS0..27.ADP y el 28 (ALL I WANT -> MUS67.ADP) */
 /* camara de la seleccion de coche: distancia, altura y punto de mira sobre el coche (m) */
 #define MENU_CAM_D 6.0f
 #define MENU_CAM_Y 1.4f
@@ -5772,6 +5823,7 @@ static const int16_t PO[][5] = {
 static int po_k = PRUEBA_ORDEN_DESDE - 1, po_rep, po_fin, po_ult = -1, po_t;   /* po_t: crono de la ultima etapa */
 #endif
 static int ta_codigo = -1;                                      /* CONTRARRELOJ: [656234] (el arbol 200 + codigo) */
+static void etapa_precalienta(void);                            /* (el reparto del TA antes del semaforo: abajo) */
 static volatile int meta_hilo;                                  /* META.DAT leyendose (hilo) */
 static void *meta_lee(void *p)
 {
@@ -6797,6 +6849,12 @@ static float dist2_ruta(const modelo_t *m, uint32_t i, const float *p)
 #ifndef REPARTO_COSTE
 #define REPARTO_COSTE 4
 #endif
+/* Regla de grupo en runtime (prueba, 2026-11-15): un nodo con r < REPARTO_GRUPO_RMIN m no fija la clase del grupo si
+   hay alguno mayor; su clase individual no cambia. En PALM el grupo 2004/2039/1869 lo retiene una franja de ventanas de
+   5 KB (r 6,6 m) y el edificio entra de golpe. Solo con -DREPARTO_GRUPO_VOL (por defecto no cambia nada). */
+#ifndef REPARTO_GRUPO_RMIN
+#define REPARTO_GRUPO_RMIN 8.0f
+#endif
 /* Mas alla del LOD del original (DECISION DEL PORT, popping 2026-11-13; la idea de DisableStageCulling de
    OutRun2006Tweaks, que en el PC quita la prueba de 404B00): los nodos hasta 2^REPARTO_LOD_MAS veces la distancia de
    su LOD de 404B00 (radio en la pantalla de 7,5 / 2^REPARTO_LOD_MAS px) entran en el reparto en las clases de LOD 41..
@@ -6967,7 +7025,7 @@ static void pvs_aplica(modelo_t *mo, int s)                     /* XOR de la lis
         else { mo->pvs_teo[2 * ma->nodo] -= ta_teo(n, 0); mo->pvs_teo[2 * ma->nodo + 1] -= n; }
 #ifdef DIAG_POPPING
         {   float px, z;                                        /* malla de un nodo que ya se dibujaba, en la pantalla */
-            if (pop_ra && pop_ra[ma->nodo] == PR_DIB && pop_en_pantalla(ma->cx, ma->cy, ma->cz, ma->r, &px, &z) && px >= 2.0f)
+            if (!precalentando && pop_ra && pop_ra[ma->nodo] == PR_DIB && pop_en_pantalla(ma->cx, ma->cy, ma->cz, ma->r, &px, &z) && px >= 2.0f)
                 (mo->pvs_m[i >> 5] & w ? pop_pvs_ap : pop_pvs_de)[px >= 32.0f ? 2 : px >= 8.0f ? 1 : 0]++;
         }
 #endif
@@ -7050,6 +7108,15 @@ static void nodos_visibles(modelo_t *mo)
     float o0, o1, o2, e0, e1, e2, d0, d1, d2, a0, a1, a2, cer, lej; int pvs_on_; nodo_t *ND = mo->nodos;
     uint32_t *VIS = mo->vis; const uint32_t *VA = mo->vis_ant; const uint32_t nnod = mo->nnodos; (void)VA; const int regs = mo == &uni ? uni_mascara : 7;
     uint16_t *G = mo->relleno_propio ? NULL : mo->grp;          /* grupos de nodos (abajo) */
+#ifdef REPARTO_GRUPO_VOL
+    /* regla de grupo en runtime (prueba, 2026-11-15): un nodo pequeno (r < REPARTO_GRUPO_RMIN) no fija la clase del
+       grupo si el grupo tiene algun nodo de volumen; asi una franja de ventanas de 5 KB no retiene al edificio entero.
+       Su clase individual no cambia: solo deja de arrastrar a los demas. Si ninguno del grupo llega al umbral se usa la
+       clase mayor de todos (comportamiento de siempre). 4096 = POP_MAXN, el maximo de nodos de un modelo. */
+    static uint16_t GV[4096];
+    int gv_ok = nnod <= 4096;                                    /* (si el modelo es mayor, se queda la regla de siempre) */
+    if (G && gv_ok) memset(GV, 0, nnod * 2);
+#endif
 #ifdef CON_FUNDIDO_ENTRADA
     uint32_t *FF = mo->fe_f;                                    /* fuera de la vista (fe_paso) */
 #else
@@ -7183,6 +7250,12 @@ static void nodos_visibles(modelo_t *mo)
         if (G && (g = d->fl >> 16) && g <= nnod) {               /* de un grupo: la clase mas alta de los suyos visibles */
             uint32_t o = G[g - 1], od = o >> 8, op = o & 255;
             G[g - 1] = (uint16_t)(((uint32_t)cd > od ? (uint32_t)cd : od) << 8 | ((uint32_t)cp > op ? (uint32_t)cp : op));
+#ifdef REPARTO_GRUPO_VOL
+            if (gv_ok && d->r >= REPARTO_GRUPO_RMIN) {            /* solo el volumen fija la clase del grupo */
+                o = GV[g - 1]; od = o >> 8; op = o & 255;
+                GV[g - 1] = (uint16_t)(((uint32_t)cd > od ? (uint32_t)cd : od) << 8 | ((uint32_t)cp > op ? (uint32_t)cp : op));
+            }
+#endif
             continue;                                           /* (su coste, abajo) */
         }
         prio_coste[cd][cp] += c_teo; prio_vtx[cd][cp] += c_v;
@@ -7206,6 +7279,9 @@ static void nodos_visibles(modelo_t *mo)
                 b &= b - 1;
                 if (!(g = d->fl >> 16) || g > nnod) continue;
                 o = G[g - 1];
+#ifdef REPARTO_GRUPO_VOL
+                if (gv_ok && GV[g - 1]) o = GV[g - 1];            /* el volumen manda; el pequeno no arrastra */
+#endif
                 d->relleno[1] = (d->relleno[1] & ~4095u) | ((o >> 8) << 6 | (o & 255));
                 if (pvs_on_) {                              /* (con la gracia de la PVS, el ultimo coste que traia) */
                     uint32_t ct = mo->pvs_teo[2 * i], cv = mo->pvs_teo[2 * i + 1];
@@ -7331,6 +7407,7 @@ static int geo_visible(const modelo_t *t);
 static void pop_mide(void)
 {
     int k, t; uint32_t i;
+    if (precalentando) return;                                  /* (etapa_precalienta no es un cuadro de juego) */
     for (t = 0; t < 3; t++) {
         const modelo_t *mo = tramos[t]; pop_slot_t *ps;
         if (!mo->datos || !mo->nodos || !mo->vis || mo->relleno_propio) continue;
@@ -7482,6 +7559,14 @@ static void nodos_visibles_todos(void)
 /* tras el cuadro: lo que de verdad costo la etapa frente a lo estimado; si alguna tira no cupo, mas prudencia */
 static void prio_ajusta(int corto, uint32_t usado)
 {
+    /* Durante la cuenta atras (la camara de la salida) manda el precalentamiento: alli la etapa ocupa poco de la
+       pantalla y usado / prio_est baja a 0,26, lo que dispararia prio_alfa y el corte (la oleada de la salida). El
+       corte y prio_alfa se quedan como los dejo etapa_precalienta hasta el semaforo; si aun asi una tira no cabe
+       (otra etapa, otra camara de salida), se baja el corte como siempre, pero sin tocar prio_alfa. */
+    if (en_cuenta) {
+        if (corto) { prio_p = prio_p > 2 ? prio_p - 2 : 0; prio_esp_d = prio_esp_p = 0; if (prio_p == 0 && prio_d > 0) prio_d--; }
+        return;
+    }
     /* Schmitt (medido, _trabajo\POPPING_INFORME.md): el corte baja de golpe si el cuadro no cabe, pero sube una clase
        cada 4 cuadros; con un coste que varia un 2-4 % por cuadro el umbral oscilaba y lo que salia tardaba 0,7-1,4 s en
        volver. Con un 10 % de holgura antes de bajar, los huecos del corte de LOD caen de 0,84 a 0,07 por segundo en
@@ -8986,6 +9071,68 @@ static void salida_calcula(void)
 #define SALIDA_X salida_x_
 #endif
 
+/* Precalentamiento del reparto del TA con la camara de la parrilla (arriba, TA_ETAPA_HOLGURA): se ejecuta con la etapa
+   ya leida y sus texturas subidas y la pantalla de carga (o su ultimo cuadro) delante; no envia nada a la PowerVR.
+   Deja prio_d/prio_p, prio_alfa, la histeresis y la mascara de visibilidad de la etapa en el estado estable del primer
+   cuadro de carrera, para que el primer cuadro no dibuje todo (prio_p 63) y el segundo lo corte de golpe. La camara es
+   la que usara el primer cuadro (camara_paso con el coche en la parrilla; si no hay CAM1, 6,5 m detras y 1,6 m por
+   encima, como pop_arranque.py). No toca la VRAM ni el modelo; pon_vista/camara_paso se vuelven a llamar igual en el
+   bucle, asi que no hay salto de camara. */
+static void etapa_precalienta(void)
+{
+    float fw[3], up[3], o[3], m[3]; int k, n, quieto = 0, pd, pp, ed, ep;
+    uint32_t i, vivos = 0; uint64_t t0 = timer_us_gettime64();
+    if (!etapa.datos || !etapa.tv || !etapa.nodos || !etapa.nnodos || cur_nodo < 0 || !etapa.vis) return;
+    /* la misma camara del primer cuadro de la carrera: la de camara.c con el coche ya en la parrilla, en su estado de
+       salida (485250) si la escena de SALIDA.DAT la lleva; si no, la de carrera 6,5 m detras y 1,6 m por encima */
+    if (cam_ok) camara_paso(0, sal_on && sal_f < 120, 0);
+    if (cam_ok) { pon_vista(cam.ojo, cam.mira, cam.balanceo); fx = 320.0f / tanf(cam.fov * 0.5f); }
+    else {
+        for (k = 0; k < 3; k++) { fw[k] = yo.fw[k]; up[k] = yo.up[k]; }
+        for (k = 0; k < 3; k++) { o[k] = yo.pos[k] - 6.5f * fw[k] + 1.6f * up[k]; m[k] = yo.pos[k] + 6.0f * fw[k] + 1.1f * up[k]; }
+        pon_vista(o, m, 0.0f); fx = 320.0f / 0.75f;
+    }
+    cerca = CERCA_PS2; lejos = LEJOS_PS2;
+    /* de cero: ni la mascara ni la histeresis de la carrera anterior (REINTENTAR) */
+    memset(etapa.vis, 0, (etapa.nnodos + 31) / 32 * 4);
+    if (etapa.vis_ant) memset(etapa.vis_ant, 0, (etapa.nnodos + 31) / 32 * 4);
+    if (etapa.pvs_m) {                                           /* PVS desde la seccion 0 (pvs_paso la mueve) */
+        memset(etapa.pvs_m, 0, (etapa.nmallas + 31) / 32 * 4);
+        if (etapa.pvs_teo) memset(etapa.pvs_teo, 0, (2 * etapa.nnodos + 1) * 4);
+        if (etapa.pvs_ult) memset(etapa.pvs_ult, 0, etapa.nnodos * 5);
+        etapa.pvs_s = -1; etapa.pvs_i = 0; etapa.pvs_on = 0;
+    }
+    prio_d = ND_PRIO - 1; prio_p = NB_PRIO - 1; prio_esp_d = prio_esp_p = 0; prio_alfa = PRECALIENTA_ALFA;
+    /* el primer cuadro de carrera no tiene medida del anterior: el mismo presupuesto que ta_inicia_cuadro dara alli */
+    ta_otros_ult = 0; ta_v2d_ult = 0; ta_freno = 0; ta_bo_ult = 0; ta_lej_tope = 1e9f;
+    precalentando = 1;
+    for (n = 0; n < PRECALIENTA_MAX; n++) {
+        pd = prio_d; pp = prio_p; ed = prio_esp_d; ep = prio_esp_p;
+        ta_corto = ta_et_corto = 0;
+        ta_inicia_cuadro();
+        nodos_visibles_todos();
+        if (n >= 8 && pd == prio_d && pp == prio_p && ed == prio_esp_d && ep == prio_esp_p) {
+            if (++quieto >= 4) { n++; break; }
+        } else quieto = 0;
+    }
+    precalentando = 0;
+    ta_corto = ta_et_corto = 0;
+#ifdef DIAG_POPPING
+    /* el primer cuadro de carrera no es una aparicion: lo dibujado en el precalentamiento cuenta como anterior */
+    for (k = 0; k < 4; k++) if (pop_s[k].datos) memcpy(pop_s[k].ant, pop_s[k].cur, pop_s[k].n);
+    pop_r = pop_ra = NULL;
+#endif
+    for (i = 0; i < (etapa.nnodos + 31) / 32; i++) vivos += (uint32_t)__builtin_popcount(etapa.vis[i]);
+    {   uint32_t nt = 0, ntv = 0, mt = 0, mtv = 0;
+        for (i = 0; i < etapa.ntex; i++) { nt++; if (etapa.tv[i]) ntv++; }
+        for (i = 0; i < NMODTRAF; i++) if (mtraf[i].ntex) { mt++; if (mtraf[i].tv) mtv++; }
+        dbglog(DBG_INFO, "PRECARGA: reparto de %.4s estable en %d cuadros (%u us): prio_d %d prio_p %d alfa %.2f, tope etapa %uK, "
+               "estimado %uK, %u nodos dibujados; etapa %u/%u texturas y trafico %u/%u ya en VRAM\n", curso[cur_nodo].zona,
+               n, (unsigned)(timer_us_gettime64() - t0), prio_d, prio_p, (double)prio_alfa, (unsigned)(ta_tope_etapa >> 10), (unsigned)(prio_est >> 10), (unsigned)vivos,
+               (unsigned)ntv, (unsigned)nt, (unsigned)mtv, (unsigned)mt);
+    }
+}
+
 /* La PowerVR no termina el cuadro (en la consola real, por un bufer lleno o un parametro ilegal): se escribe el
    diagnostico directamente en la imagen que se esta viendo, para que el probador lo pueda leer. */
 static int pvr_fallos;
@@ -9095,14 +9242,22 @@ static void coche_luz(matrix_t mc, int on)
 #define G_DISCO_CAL 6
 static void coche_luces(uint32_t banderas, int freno, int caliente)
 {
-    int pil = freno ? G_FRENO : (banderas & 0x300) ? G_NOCHE : G_PILOTOS, est = pil | ((banderas & 0x900) == 0x900) << 3 |
-        (caliente != 0) << 4;
+    /* Solo freno y faros: el taxi no lleva quads de pilotos/noche; los pilotos
+       del modelo son textura.  El grupo 3 se enciende con el pedal y se queda
+       6 cuadros al soltar; el 4 solo de noche y con los faros abiertos. */
+    static int freno_hold;
+    int faros = (banderas & 0x900) == 0x900;
+    int frena, est, on;
     uint32_t k;
+    if (freno) freno_hold = 6; else if (freno_hold) freno_hold--;
+    frena = freno || freno_hold;
+    est = (frena ? 1 : 0) | (faros ? 8 : 0) | ((caliente != 0) ? 16 : 0);
     if (est == cex_luces) return;
     for (k = 0; k < cex_ngrp; k++) {
         uint32_t mk = cex_grp[2 * k], g = cex_grp[2 * k + 1];
-        coche.mallas[mk].n = (g == (uint32_t)pil || (g == G_FARO && (est & 8)) || (g == G_DISCO && !(est & 16)) ||
-                              (g == G_DISCO_CAL && (est & 16))) ? cex_n0[mk] : 0;
+        on = (g == G_FRENO && frena) || (g == G_FARO && faros) ||
+             (g == G_DISCO && !(est & 16)) || (g == G_DISCO_CAL && (est & 16));
+        coche.mallas[mk].n = on ? cex_n0[mk] : 0;
     }
     cex_luces = est;
 }
@@ -9188,6 +9343,12 @@ static void coche_cex(int c)
     coche_cab_cex();
     coche_color(c);
     coche_luces(0, 0, 0);                                       /* pilotos sin luces ni freno */
+#ifdef PRUEBA_FRENO_LOAD
+    for (k = 0; k < cex_ngrp; k++) {                            /* prueba: grupo 3 visible desde la carga */
+        uint32_t mk = cex_grp[2 * k], g = cex_grp[2 * k + 1];
+        if (g == G_FRENO) coche.mallas[mk].n = cex_n0[mk];
+    }
+#endif
     {   /* SVL1 (tools/conv_coche.py bloque_svl): partes convexas de los volumenes +08 y +10, detras de los grupos */
         const uint32_t *q = cex_grp + 2 * w[5], *fin = w + coche.nruta; uint32_t n, j;
         if (q + 2 <= fin && !memcmp(q, "SVL1", 4) && (n = q[1]) <= SVOL_MAX) {
@@ -9352,13 +9513,38 @@ static void coche_anima_matrices(int titulo)
         m_tras(ani_m[0], 0, -fpar.alt_cg, 0);
     }
     memcpy(cuerpo, ani_m[0], sizeof(matrix_t));
+#ifdef DIAG_SUS
+    ani_ty = ty; ani_base = ani.base;
+#endif
     m_tras(ani_m[0], 0, ty, 0); m_rx(ani_m[0], v);             /* car+F0 (balanceo 0: car+4 & 1) */
-    memcpy(ani_m[PZ_VOLANTE], ani_m[0], sizeof(matrix_t));
-    m_tras(ani_m[PZ_VOLANTE], ani.pz[PZ_VOLANTE][0], ani.pz[PZ_VOLANTE][1], ani.pz[PZ_VOLANTE][2]);
-    m_rx(ani_m[PZ_VOLANTE], ani.pz[PZ_VOLANTE][3]); m_rz(ani_m[PZ_VOLANTE], (float)(-ani.s204) * U * 0.416666657f);
-    memcpy(ani_m[PZ_ALERON], ani_m[0], sizeof(matrix_t));
-    m_tras(ani_m[PZ_ALERON], ani.pz[PZ_ALERON][0], ani.pz[PZ_ALERON][1], ani.pz[PZ_ALERON][2]);
-    m_rx(ani_m[PZ_ALERON], titulo ? 0 : ani.aleron);
+    if (coche_ficha == 7) {                                     /* taxi: pieza 1 cuerpo (cadera) y 2 cabeza (cuello) */
+        const float *p1 = ani.pz[PZ_VOLANTE], *p2 = ani.pz[PZ_ALERON];
+        memcpy(ani_m[PZ_VOLANTE], ani_m[0], sizeof(matrix_t));
+        memcpy(ani_m[PZ_ALERON], ani_m[0], sizeof(matrix_t));
+        if (!titulo) {
+            /* conduccion: el cuerpo se balancea muy poco (las manos no se separan del volante) y la cabeza gira
+               hacia la curva y cabecea.  La cabeza cuelga del cuerpo (misma matriz) y gira sobre el cuello. */
+            static float taxi_t;
+            float st = (float)(-ani.s204) * U;
+            float yaw_c = st * 0.018f, roll_c = st * 0.008f;
+            float yaw_h = st * 0.090f, nod = 0.010f * sinf(taxi_t * 0.045f);
+            taxi_t += 1.0f;
+            m_tras(ani_m[PZ_VOLANTE], p1[0], p1[1], p1[2]);
+            m_ry(ani_m[PZ_VOLANTE], yaw_c); m_rz(ani_m[PZ_VOLANTE], roll_c);
+            m_tras(ani_m[PZ_VOLANTE], -p1[0], -p1[1], -p1[2]);
+            memcpy(ani_m[PZ_ALERON], ani_m[PZ_VOLANTE], sizeof(matrix_t));
+            m_tras(ani_m[PZ_ALERON], p2[0], p2[1], p2[2]);
+            m_ry(ani_m[PZ_ALERON], yaw_h); m_rx(ani_m[PZ_ALERON], nod);
+            m_tras(ani_m[PZ_ALERON], -p2[0], -p2[1], -p2[2]);
+        }
+    } else {
+        memcpy(ani_m[PZ_VOLANTE], ani_m[0], sizeof(matrix_t));
+        m_tras(ani_m[PZ_VOLANTE], ani.pz[PZ_VOLANTE][0], ani.pz[PZ_VOLANTE][1], ani.pz[PZ_VOLANTE][2]);
+        m_rx(ani_m[PZ_VOLANTE], ani.pz[PZ_VOLANTE][3]); m_rz(ani_m[PZ_VOLANTE], (float)(-ani.s204) * U * 0.416666657f);
+        memcpy(ani_m[PZ_ALERON], ani_m[0], sizeof(matrix_t));
+        m_tras(ani_m[PZ_ALERON], ani.pz[PZ_ALERON][0], ani.pz[PZ_ALERON][1], ani.pz[PZ_ALERON][2]);
+        m_rx(ani_m[PZ_ALERON], titulo ? 0 : ani.aleron);
+    }
     memcpy(ani_m[PZ_FAROS], ani_m[0], sizeof(matrix_t));
     m_tras(ani_m[PZ_FAROS], ani.pz[PZ_FAROS][0], ani.pz[PZ_FAROS][1], ani.pz[PZ_FAROS][2]); m_rx(ani_m[PZ_FAROS], ani.roof);
     for (k = 0; k < 4; k++) {                                   /* ruedas: fuera de car+F0 */
@@ -11307,6 +11493,8 @@ int main(int argc, char **argv)
                 if (chr_ok == 1) robot_carrera(modelo_jug);          /* 4884D0 / 4885A0 */
                 ram_mapa(variante == 2 ? "carrera INFARTO" : variante == 0 || variante == 7 ? "carrera CONTRARRELOJ" : variante == 6 ? "carrera COAST 2 COAST" : "carrera OutRun");
                 ram_vuelta = 1;
+                etapa_precalienta();                            /* (con la pantalla de carga aun en pantalla: el reparto
+                                                                   del TA estable antes del semaforo) */
                 /* todo lo de arriba es la carga (GD, VRAM, AICA): la escena de la salida empieza a contar aqui, en su
                    cuadro 0, como START del original (4871A0 en la etapa 60, con la carga ya hecha). Este mismo cuadro
                    da un paso mas (el cuadro 0 de la escena: el coche y la camara del guion ya puestos; sin el se veia
@@ -11802,7 +11990,11 @@ int main(int argc, char **argv)
 #ifdef PRUEBA_MURO
         if (estado == CARRERA) prueba_mide();
 #endif
-        if (cex_n) coche_luces(ani.ban, estado != TITULO && (meta_pas ? meta.freno != 0 : fis_ok ? fis.freno_op != 0 : yo.freno_ant > 0.0f), estado != TITULO && ani.caliente);   /* car+38 != 0 (con la fisica del original coche_paso no toca freno_ant: los pilotos del freno no se encendian nunca) */
+#ifdef PRUEBA_FRENO
+        if (cex_ngrp) coche_luces(ani.ban, 1, estado != TITULO && ani.caliente);   /* prueba: grupo 3 forzado para la captura */
+#else
+        if (cex_ngrp) coche_luces(ani.ban, estado != TITULO && (meta_pas ? meta.freno != 0 : fis_ok ? fis.freno_op != 0 : yo.freno_ant > 0.0f), estado != TITULO && ani.caliente);   /* car+38 != 0 (con la fisica del original coche_paso no toca freno_ant: los pilotos del freno no se encendian nunca) */
+#endif
         if (cex_n) coche_entorno(mod_coche);
         if (cex_n) coche_luz(mod_coche, estado != TITULO);     /* la luz del entorno 2 en la pintura */
         rc_chr.listo = rc_band.listo = 0; chr_vtx_ult = chr_vtx; chr_us_ult = chr_us; chr_vtx = chr_us = 0;
@@ -11813,6 +12005,7 @@ int main(int argc, char **argv)
             chr_us += (uint32_t)(timer_us_gettime64() - t0r);
         }
         tri_enviados = 0; vtx_ult = vtx_env; vtx_env = 0; ta_inicia_cuadro(); vtx_et_ult = vtx_et; vtx_et = 0;
+        en_cuenta = estado == CUENTA;                           /* (el precalentamiento manda hasta el semaforo) */
 #ifdef DIAG_MS
         prf_v0 = 0;
 #endif

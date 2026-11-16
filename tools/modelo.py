@@ -550,7 +550,10 @@ class Modelo:
     def escribe(self, sal):
         self.ajusta_texturas()
         if self.vq and not getattr(self, '_comprimido', False): self.comprime(); self._comprimido = True
-        self.mallas.sort(key=lambda x: (x[0], x[1]))
+        if getattr(self, 'orden_original', False) and getattr(self, 'orden', None) is not None:
+            self.mallas.sort(key=lambda x: (x[0], self.orden.get(id(x), 0)))
+        else:
+            self.mallas.sort(key=lambda x: (x[0], x[1]))
         inicio = [sum(1 for x in self.mallas if x[0] < l) for l in range(5)]
         nsec = len(self.secciones) if self.mapa is not None else 0
         with open(sal, 'wb') as f:

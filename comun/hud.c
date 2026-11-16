@@ -23,7 +23,7 @@ struct hud_dat {
     uint8_t *tx; uint32_t tam;                              /* parcial: el fichero entero en un bufer temporal (hud_carga) o NULL; bytes del fichero */
     h_tex_t *tex; h_spr_t *spr; h_grp_t *grp; h_pc_t *pie; h_uso_t *uso;
     h_pc_t **gp;                                            /* parcial: las piezas de cada grupo en su bloque (o NULL) */
-    uint32_t n_tex, n_grp, n_uso;
+    uint32_t n_tex, n_spr, n_grp, n_uso;
     pvr_ptr_t *vtex; uint8_t *usada; uint32_t *dibujada;      /* dibujada: ultimo cuadro en que se uso la textura */
     pvr_poly_hdr_t *cab, *cabf, *caba;                      /* por textura: encima de todo / detras de la escena 3D / aditiva */
     int taco, g_fuera, off_taco;                            /* g_fuera: DIG_PUNTOS_FUERA (estilo 0xD, sin uso propio) */
@@ -220,7 +220,7 @@ hud_dat_t *hudd_abre(const char *fich, int modelo, int parcial)
         free(h); return NULL;
     }
     c = (uint32_t *)h->dat;
-    h->n_tex = c[1]; h->n_grp = c[3]; h->n_uso = c[5];
+    h->n_tex = c[1]; h->n_spr = c[2]; h->n_grp = c[3]; h->n_uso = c[5];
     h->tex = (h_tex_t *)(h->dat + c[6]); h->spr = (h_spr_t *)(h->dat + c[7]); h->grp = (h_grp_t *)(h->dat + c[8]);
     {   /* piezas a 24 bytes en su sitio; en un fichero parcial (solo tablas en la RAM) lo de detras se baja y el bloque
            se encoge */
@@ -730,7 +730,8 @@ void hudd_capa(hud_dat_t *h, float z, int fondo)
     H = h; ult_tex = -1; modo_fondo = fondo; zcapa = z; zpaso = fondo ? 0.000001f : 0.001f;
 }
 float hudd_z(void) { return zcapa; }
-int hudd_sprite_tex(const hud_dat_t *h, int s) { return h && s >= 0 ? h->spr[s].tex : -1; }
+int hudd_sprite_tex(const hud_dat_t *h, int s) { return h && s >= 0 && (uint32_t)s < h->n_spr ? h->spr[s].tex : -1; }
+int hudd_n_spr(const hud_dat_t *h) { return h ? (int)h->n_spr : 0; }
 void hudd_sprite(int s, const float *m, const float *q, float alfa, int aditiva)
 {
     const h_spr_t *sp; int k; pvr_vertex_t v;

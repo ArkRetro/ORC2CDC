@@ -84,6 +84,7 @@ int musica_pon_una(int n)
 int musica_pon(int n)
 {
     char nom[16];
+    if (n == 28) n = 67;                     /* ALL I WANT (Crazy Taxi): MUS67.ADP, una sola pista */
     musica_para();
     una = 0; leida = 0;
     thd_sleep(30);
