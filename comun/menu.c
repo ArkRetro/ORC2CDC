@@ -1817,7 +1817,9 @@ static int sa_mus;                                          /* +0xb45 */
 /* lista (0x24d430 = 48D970): filas de la tabla, la elegida, la primera que se ve y cuantas */
 static int sa_lf0, sa_ln, sa_lsel, sa_lini, sa_llim, sa_lscroll;
 /* filas visibles de la pagina de COLORES: el taxi (modelo 0) no tiene colores; se saltan sus
-   filas sin tocar el indice de la tabla (el bit del objeto sigue siendo base + fila original) */
+   filas sin tocar el indice de la tabla (el bit del objeto sigue siendo base + fila original).
+   La ficha de pruebas es la 7 de COCHES.DAT (modelo 0, COCHE07); en MNU2 es la posicion 2 y
+   sus 6 filas de color son k_fila[8..13] (bits 36..41). */
 static int sa_cvis[110], sa_cn;
 /* tira (0x238798 = 446710): activa, escena, ultimo indice, paso, base, el objeto */
 static int sa_ton, sa_tult, sa_tpaso, sa_tb0, sa_ti; static uint32_t sa_ttok;
