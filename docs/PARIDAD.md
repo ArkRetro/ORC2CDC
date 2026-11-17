@@ -3672,6 +3672,38 @@ de METR de noche (20,19,15) y el de DESE (218,219,207) salian con el azul del ma
   bits no guarda ni prueba el alfa de destino. Las mallas de agua de la escena (lagos, cascadas: 64x64 a 512x256,
   VQ y mipmaps) y el brillo aditivo del mar de PALM (64x64, alfa 47/255, 8 mallas) se siguen dibujando como antes.
 
+### Agua: color solido por zona (2026-11-17, revision 4)
+
+El usuario pide un unico color plano por zona, sin textura, UV, scroll, niebla, reflejo, espuma, destellos ni tinte por
+vertice. Se sustituye el color unico de la revision 3 por la tabla `agua_color_de` de `demo/main.c` (una entrada por
+zona; lo que no este en la tabla usa el azul marino 0xFF0E2248). PALM y BEAC conservan el azul aprobado 0xFF4064A3.
+
+| Zona | Nombre | Color | Zona | Nombre | Color |
+|---|---|---|---|---|---|
+| PALM | (aprobado) | FF4064A3 | BEAC | (aprobado) | FF4064A3 |
+| LAKE | jeans | FF3E5A78 | NIAG | aguamarina | FFA8E8E0 |
+| METR | noche | FF131A2E | IMPE | cobalto | FF3B4A9C |
+| DESE | cerceta | FF0E6B66 | CAPE | acero | FF6B7C8A |
+| CLOU | resto | FF0E2248 | TULI | resto | FF0E2248 |
+| ALAS | resto | FF0E2248 | GRAN | resto | FF0E2248 |
+| SANF | resto | FF0E2248 | AMAZ | resto | FF0E2248 |
+| YOSE | resto | FF0E2248 | MAYA | resto | FF0E2248 |
+| NEWY | resto | FF0E2248 | PRIN | resto | FF0E2248 |
+| FLOR | resto | FF0E2248 | EAST | resto | FF0E2248 |
+
+- Implementacion: `agua_color_de` devuelve el color de `etapa_t.zona`; `agua_malla` lo escribe en el color de todos los
+  vertices (`pw[i].c`). La cabecera `agua_cab` sigue siendo `pvr_poly_cxt_col`, `PVR_FOG_DISABLE`,
+  `PVR_DEPTHCMP_GEQUAL`; no hay textura, UV, scroll ni mezcla por vertice.
+- PALM normal no lleva plano de agua en CURSO.DAT (`agua=0`; su mar son las mallas aditivas de la escena). La entrada
+  PALM queda para sus variantes. CAPE normal (SEG15) tampoco; las misiones con SEG48 tienen un unico plano de 4
+  vertices a -887,9 m, fuera de la ruta (no se ve desde la carretera).
+- Comprobado en Flycast con las pruebas automaticas directas (`-DPRUEBA_AUTO -DPRUEBA_SIN_TIEMPO -DPRUEBA_CURSO=...
+  -DPRUEBA_NODO=...`, y `-DPRUEBA_AGUA_S` para empezar en la franja de agua). GDI de prueba con `_trabajo/datos` (el
+  juego con los planos de agua); `datos_r44` y `gdi_unificado` no se han tocado. Pixeles exactos del color en las
+  capturas: LAKE 13.946, BEAC 4.225, NIAG 8.949, METR 1.521, IMPE 642, DESE 542, CLOU (resto) 8.157.
+- Capturas y tabla final: `_trabajo/agua_zonas/AGUA_ZONAS_CAPTURAS.png` y `_trabajo/AGUA_ZONAS_INFORME.md`.
+
+
 ## Bifurcaciones: franja a escalones sobre el horizonte (2026-11-11)
 
 Queja del usuario (demo 35, consola real): "en el cielo de algunas bifurcaciones hay texturas que se mezclan y no se

@@ -889,6 +889,17 @@ static int ta_et_corto;                                  /* en este cuadro no cu
 static int ta_ofs;                                       /* las tiras que se envian llevan color de desplazamiento */
 static int precalentando;                                /* etapa_precalienta: el reparto que se ejecuta no es un cuadro */
 static int en_cuenta;                                    /* estado CUENTA: el precalentamiento manda (sin prio_ajusta) */
+/* Arranque de la carrera (FINAL4/BEAC): los primeros REPARTO_ARRANQUE cuadros de CARRERA (600: unos 10 s de
+   logica, cubre de sobra los 5 s del encargo) el reparto no baja de lo que dejo etapa_precalienta. En BEAC la
+   vista de la salida tiene nodos enormes (la puerta y los bloques de la orilla) que caen en la clase de distancia 0
+   por su radio; con REPARTO_CERCA 0,25 se comen el cupo de lo cercano y el corte baja a 16 m (DIAG_POPPING: falta
+   115 %, los edificios de los dos lados desaparecen y vuelven al subir). El suelo solo actua en CARRERA; en CUENTA
+   manda el precalentamiento (no se recalcula el reparto) y despues del arranque manda el reparto normal. */
+#ifndef REPARTO_ARRANQUE
+#define REPARTO_ARRANQUE 600
+#endif
+static int arranque_hold;                                /* CARRERA y t_estado < REPARTO_ARRANQUE: suelo del reparto */
+static int precal_d = -1, precal_p = -1;                 /* corte estable del precalentamiento (suelo del arranque) */
 /* objetos de la union (bo_dibuja: pajaros, bandada, halcones, flamencos, dragon; DECISION DEL PORT, lote 1 de la revision
    44): van despues de la etapa con su propio tope (ta_bo_tope: lo que deja la etapa sin tocar la reserva del coche, la
    pareja, el trafico y los efectos) y de la etapa solo se aparta para ellos lo que gastaron en el cuadro anterior hasta
@@ -7589,7 +7600,9 @@ static void nodos_visibles_todos(void)
        lote 1 de la revision 44). Antes la clase 0 de distancia se dibujaba entera aunque no cupiera y ta_cabe tiraba lo
        que no cabia en el orden de envio: la calzada, los muros y el cielo (Flycast, -DTA_F_MIN=768: PALM sin calzada) */
     d = cabe < 0 && ((float)fila_c[0] * k > (float)tope || fila_v[0] > vmax) ? -1 : cabe < 0 ? 0 : cabe;
+    if (arranque_hold && precal_d >= 0 && (d < precal_d || d < 0)) d = precal_d;   /* (suelo del arranque) */
     prio_d = prio_sube(prio_d, d, &prio_esp_d, ND_PRIO - 1);
+    if (arranque_hold && precal_d >= 0 && prio_d < precal_d) prio_d = precal_d;
     for (cerca_c = cerca_v = 0, d = 0; d <= prio_d; d++) { cerca_c += fila_c[d]; cerca_v += fila_v[d]; }
     /* lo de mas alla, por la clase de LOD */
     memset(col_c, 0, sizeof col_c); memset(col_v, 0, sizeof col_v);
@@ -7600,7 +7613,9 @@ static void nodos_visibles_todos(void)
     }
     if (prio_d == ND_PRIO - 1) cabe = NB_PRIO - 1;
     if (prio_d < 0 && cabe < 0) cabe = 0;                      /* (lo enorme en la pantalla, siempre) */
+    if (arranque_hold && precal_p >= 0 && cabe < precal_p) cabe = precal_p;   /* (suelo del arranque) */
     prio_p = prio_sube(prio_p, cabe, &prio_esp_p, NB_PRIO - 1);
+    if (arranque_hold && precal_p >= 0 && prio_p < precal_p) prio_p = precal_p;
     for (prio_est = cerca_c, c = 0; c <= prio_p; c++) prio_est += col_c[c];
     prio_est = prio_est * ta_f >> 8;
 #ifdef DIAG_VTX
@@ -8037,6 +8052,7 @@ static int cielo_lmax(const modelo_t *mo, int g, float a, int lmin)
     }
     return r;
 }
+static uint32_t agua_color_de(const char *z);                /* (color del agua de la zona; abajo, en agua_dibuja) */
 /* el grupo g del cielo de mo en la lista l con alfa a; lmin: la lista mas alta de las capas de debajo */
 static void cielo_grupo(const modelo_t *mo, int g, int l, float a, int niebla, int lmin)
 {
@@ -8046,11 +8062,27 @@ static void cielo_grupo(const modelo_t *mo, int g, int l, float a, int niebla, i
     for (k = mo->inicio[3]; k < mo->inicio[4]; k++) {
         const malla_t *m = mo->mallas + k; int gm = m->nodo <= -256 ? -256 - m->nodo : 0;
         int lm = m->tex >= 0 ? (int)mo->texs[m->tex].lista : 0, le = lm < lmin ? lmin : lm;
+        int nf = niebla;
+        color_mul = a < 0.9f ? ((uint32_t)(a * 255) << 24) | 0xFFFFFF : 0;
         if (m->n < 3 || gm != g || (a >= 0.9f && le != l)) continue;
+        /* El mar/suelo lejano del cielo (BEAC: 91 cuadrilateros de 550 m a y = -51 sin textura y la cupula de
+           abajo, toda por debajo del horizonte) lleva la niebla de la tabla: en el original se funde con el color
+           de scn_env_fog (BEAC 0xBDD4E1) y aqui salia blanco solido en el limite de dibujado. El cielo de arriba
+           no cambia (sigue sin niebla salvo CLOU). */
+        if (m->tex < 0) nf = 1;
+        else {   /* (una malla del cielo con todos sus vertices por debajo del ojo es el mar/suelo lejano) */
+            const vert_t *vv = mo->verts + m->v0; uint32_t q, nn = m->n > 256 ? 256 : m->n;
+            for (q = 0; q < nn; q++) if (vv[q].y > 0.0f) break;
+            if (q == nn) nf = 1;
+        }
+        if (nf && m->tex < 0) {                                 /* mar/suelo sin textura: el color del agua de la zona */
+            uint32_t cw = cur_nodo >= 0 ? agua_color_de(curso[cur_nodo].zona) : 0xFF4064A3u;
+            color_mul = (a < 0.9f ? (uint32_t)(a * 255) << 24 : 0xFF000000u) | (cw & 0xFFFFFF);
+        } else if (a < 0.9f) color_mul = ((uint32_t)(a * 255) << 24) | 0xFFFFFF;
         cie_lleno = a >= 0.9f && le == 2 && lm != 2;            /* subida a la transparente: entera */
-        if (m->tex >= 0) pvr_prim(cielo_cab(mo, m->tex, niebla, a >= 0.9f ? le : 2), sizeof(pvr_poly_hdr_t));
-        else pvr_prim(&cab_col[!niebla][a >= 0.9f ? le : 2], sizeof(pvr_poly_hdr_t));
-        cielo_malla(mo, m, l == 2 && !niebla ? 1.2e-4f * (1.0f + (float)cie_seq++ * (1.0f / 1024.0f)) : 0);
+        if (m->tex >= 0) pvr_prim(cielo_cab(mo, m->tex, nf, a >= 0.9f ? le : 2), sizeof(pvr_poly_hdr_t));
+        else pvr_prim(&cab_col[!nf][a >= 0.9f ? le : 2], sizeof(pvr_poly_hdr_t));
+        cielo_malla(mo, m, l == 2 && !nf ? 1.2e-4f * (1.0f + (float)cie_seq++ * (1.0f / 1024.0f)) : 0);
     }
     color_mul = 0; cie_lleno = 0;
 }
@@ -8135,124 +8167,36 @@ static void geo_vista_fin(const modelo_t *t)
    (prueba del alfa de destino). Se dibuja en la etapa con la posicion de carretera entre +0x6E y +0x70, y en la union
    (car+5C != 0) pasada la posicion 0xC7 si +0x6E <= 0 (0x172b40 / 0x11a32c).
    DESVIACION pedida por el usuario (el reflejo sin la mascara del alfa de destino, que la PowerVR no tiene, "no queda
-   logrado"; prefiere una capa azul como el mar de BEAC): el plano (grupo 2 de la lista 3 en SEGnn.DAT, en el marco de la
-   etapa: tools/conv_tramo.py pon_agua) se pinta opaco con la z y la niebla de la tabla como el resto de la escena.
-   Revision de agua (2026-11-16): el color plano de AGUA_COLOR se cambia por una textura de ondas 64x64 generada en la
-   RAM al arrancar, con mipmaps, repetida cada 36 m y desplazada con el crono (0,006 / 0,0035 de textura por paso: unas
-   olas de unos 15 m/s). El color de cada etapa sale de la media de las texturas del reflejo del original (tabla
-   agua_tinte: BEAC 14,21,128; LAKE 42,58,69; METR 20,19,15; DESE 218,219,207...), aclarada x1,4 porque en el PS2 el
-   reflejo se suma a la escena (ALPHA 9) y aqui sustituye al color plano. Asi el lago de LAKE deja de ser azul de mar,
-   el de METR de noche no sale azul cielo y el de DESE no sale azul. Coste: 11 KB de VRAM fuera de la zona del curso,
-   los mismos vertices y triangulos (el TA no cambia) y 0 bytes en el GD. */
-#define AGUA_COLOR 0xFF4064A3u
-#define AGUA_TEX_LADO 64
-#define AGUA_TEX_BYTES (6 + 2 * (1 + 4 + 16 + 64 + 256 + 1024 + 4096))
-#define AGUA_TEX_TAM ((AGUA_TEX_BYTES + 31) & ~31u)
-#define AGUA_UV_TILE 36.0f                                        /* metros por vuelta de la textura */
-static uint32_t agua_twiddle(uint32_t x, uint32_t y)
-{
-    uint32_t r = 0; int b;
-    for (b = 0; b < 6; b++) { r |= ((y >> b) & 1u) << (2 * b); r |= ((x >> b) & 1u) << (2 * b + 1); }
-    return r;
-}
-static float agua_ruido(uint32_t x, uint32_t y)
-{
-    uint32_t h = x * 374761393u + y * 668265263u;
-    h = (h ^ (h >> 13)) * 1274126177u;
-    return (float)((h >> 8) & 0xFFFFu) * (1.0f / 65535.0f) - 0.5f;
-}
-/* 64x64 ARGB4444 twiddled con mipmaps (6 bytes de relleno y los niveles de 1x1 a 64x64, como modelo.datos_mip) */
-static uint8_t *agua_tex_datos(void)
-{
-    static float base[AGUA_TEX_LADO * AGUA_TEX_LADO];
-    uint8_t *d = memalign(32, AGUA_TEX_TAM);
-    uint32_t x, y, l, off = 6;
-    if (!d) return NULL;
-    memset(d, 0, AGUA_TEX_TAM);
-    for (y = 0; y < AGUA_TEX_LADO; y++) for (x = 0; x < AGUA_TEX_LADO; x++) {
-        float u = ((float)x + 0.5f) / AGUA_TEX_LADO, v = ((float)y + 0.5f) / AGUA_TEX_LADO;
-        float w = 0.50f * sinf(6.2831853f * (4.0f * u + 2.0f * v)) +
-                  0.30f * sinf(6.2831853f * (9.0f * u - 5.0f * v) + 0.7f) +
-                  0.20f * sinf(6.2831853f * (14.0f * u + 11.0f * v) + 2.0f);
-        float k = 0.80f + 0.20f * w + 0.06f * agua_ruido(x, y);
-        base[y * AGUA_TEX_LADO + x] = k < 0.0f ? 0.0f : k > 1.0f ? 1.0f : k;
-    }
-    for (l = 1; l <= AGUA_TEX_LADO; l <<= 1) {
-        uint16_t *p = (uint16_t *)(d + off);
-        uint32_t s = AGUA_TEX_LADO / l;
-        for (y = 0; y < l; y++) for (x = 0; x < l; x++) {
-            uint32_t bx, by, q; float a = 0.0f;
-            for (by = y * s; by < (y + 1) * s; by++) for (bx = x * s; bx < (x + 1) * s; bx++)
-                a += base[by * AGUA_TEX_LADO + bx];
-            a /= (float)(s * s);
-            q = (uint32_t)(a * 15.0f + 0.5f); if (q > 15) q = 15;
-            p[agua_twiddle(x, y)] = (uint16_t)(0xF000u | (q << 8) | (q << 4) | q);
-        }
-        off += l * l * 2;
-    }
-    return d;
-}
-static pvr_ptr_t agua_tv; static pvr_poly_hdr_t agua_cab; static int agua_ok;
-static void agua_prepara(void)
-{
-    pvr_poly_cxt_t cx; uint8_t *d;
-    if (agua_ok) return;
-    agua_ok = -1;
-    if (!(agua_tv = pvr_mem_malloc(AGUA_TEX_TAM))) return;
-    if (!(d = agua_tex_datos())) { pvr_mem_free(agua_tv); agua_tv = NULL; return; }
-    pvr_txr_load(d, agua_tv, AGUA_TEX_TAM); free(d);
-    pvr_poly_cxt_txr(&cx, PVR_LIST_OP_POLY, PVR_TXRFMT_ARGB4444 | PVR_TXRFMT_TWIDDLED, AGUA_TEX_LADO, AGUA_TEX_LADO,
-                     agua_tv, PVR_FILTER_BILINEAR);
-    cx.gen.fog_type = PVR_FOG_TABLE; cx.gen.culling = PVR_CULLING_NONE;
-    cx.fmt.modifier = true; cx.gen.modifier_mode = false;
-    cx.txr.env = PVR_TXRENV_MODULATE; cx.txr.mipmap = true;
-    cx.depth.comparison = PVR_DEPTHCMP_GEQUAL;
-    pvr_poly_compile(&agua_cab, &cx);
-    agua_ok = 1;
-}
-/* color de cada zona: media de las texturas del reflejo del original +0x60.. (ver la cabecera); x1,4 y tope 240.
-   BEAC se queda con AGUA_COLOR (el azul del mar que el usuario aprobo en la consola); su reflejo medido es mas
-   oscuro (14,21,128 -> 141DB3) pero no se cambia lo ya validado. */
-static uint32_t agua_tinte_de(const char *z)
+   logrado"): el plano (grupo 2 de la lista 3 en SEGnn.DAT, en el marco de la etapa: tools/conv_tramo.py pon_agua) se
+   pinta opaco con la z de la escena.
+   Revision de agua 4 (2026-11-17): el usuario pide el color solido POR ZONA, sin textura, UV, niebla ni reflejos.
+   La tabla agua_color_de (mas abajo) da el color de cada zona; PALM y BEAC conservan el azul aprobado 0xFF4064A3
+   (no se cambian), el resto sigue la tabla pedida y las zonas con agua que no llevan color propio usan el azul
+   marino 0xFF0E2248. Sigue sin textura, sin UV ni scroll, sin tinte por vertice, sin espuma, sin destellos y sin la
+   niebla de la tabla: un solo tono por etapa en toda la superficie, tambien al fondo. La z, el recorte contra la
+   piramide de la vista (AGUA_MARGEN) y las condiciones de dibujo son los mismos de las revisiones anteriores. */
+/* Tabla zona -> color del agua (ARGB opaco). Sin textura, sin UV y sin tinte por vertice: el color es el mismo en
+   todos los vertices de la zona. PALM y BEAC se dejan como estaban: 0xFF4064A3, el azul aprobado en la consola.
+   Las zonas con agua que no tienen color propio (CLOU, TULI, ALAS, GRAN, SANF, AMAZ, YOSE, MAYA, NEWY, PRIN,
+   FLOR y EAST) usan el azul marino/jeans 0xFF0E2248. PALM normal no trae plano en CURSO.DAT (su mar son las mallas
+   aditivas de la escena); la entrada vale para sus variantes. CAPE normal tampoco (SEG15, agua=0); las misiones que
+   usan SEG48 si lo traen. */
+static uint32_t agua_color_de(const char *z)
 {
     static const struct { char z[4]; uint32_t c; } t[] = {
-        { "LAKE", 0xFF3B5161 }, { "CLOU", 0xFFF0F0F0 }, { "DESE", 0xFFF0F0F0 }, { "TULI", 0xFF354249 },
-        { "METR", 0xFF1C1B15 }, { "IMPE", 0xFFF0C0A0 }, { "BEAC", 0xFF4064A3 }, { "NIAG", 0xFF6C92BE },
-        { "ALAS", 0xFF27537B }, { "GRAN", 0xFF3E4553 }, { "SANF", 0xFFC4C1E4 }, { "AMAZ", 0xFF7677A0 },
-        { "YOSE", 0xFF233F6F }, { "MAYA", 0xFF2B2923 }, { "NEWY", 0xFFC4B9BA }, { "PRIN", 0xFF9DCAE4 },
-        { "FLOR", 0xFF5C829B }, { "EAST", 0xFF4786AF }, { "CAPE", 0xFFABDFE8 }, { "PALM", 0xFFB98F6D },
+        { "PALM", 0xFF4064A3u }, { "BEAC", 0xFF4064A3u },   /* aprobados: no cambiar */
+        { "LAKE", 0xFF3E5A78u }, { "NIAG", 0xFFA8E8E0u },   /* jeans / aguamarina */
+        { "METR", 0xFF131A2Eu }, { "IMPE", 0xFF3B4A9Cu },   /* noche / cobalto */
+        { "DESE", 0xFF0E6B66u }, { "CAPE", 0xFF6B7C8Au },   /* cerceta / acero */
+        { "CLOU", 0xFF0E2248u }, { "TULI", 0xFF0E2248u }, { "ALAS", 0xFF0E2248u },
+        { "GRAN", 0xFF0E2248u }, { "SANF", 0xFF0E2248u }, { "AMAZ", 0xFF0E2248u },
+        { "YOSE", 0xFF0E2248u }, { "MAYA", 0xFF0E2248u }, { "NEWY", 0xFF0E2248u },
+        { "PRIN", 0xFF0E2248u }, { "FLOR", 0xFF0E2248u }, { "EAST", 0xFF0E2248u },
     };
     unsigned i;
     for (i = 0; i < sizeof t / sizeof t[0]; i++) if (!memcmp(t[i].z, z, 4)) return t[i].c;
-    return AGUA_COLOR;
+    return 0xFF0E2248u;                                     /* resto de zonas con agua */
 }
-/* escala de UV del plano: una vuelta de textura cada AGUA_UV_TILE m (las UV del original son 0..15 en 5 km) */
-static float agua_escala(const modelo_t *mo)
-{
-    float x0 = 1e30f, x1 = -1e30f, z0 = 1e30f, z1 = -1e30f, u0 = 1e30f, u1 = -1e30f, v0 = 1e30f, v1 = -1e30f, e, d, s;
-    uint32_t k, i;
-    for (k = mo->inicio[3]; k < mo->inicio[4]; k++) {
-        const malla_t *m = mo->mallas + k; const vert_t *v;
-        if (m->nodo != AGUA_NODO || m->n < 3) continue;
-        v = mo->verts + m->v0;
-        for (i = 0; i < m->n; i++, v++) {
-            if (v->x < x0) x0 = v->x;
-            if (v->x > x1) x1 = v->x;
-            if (v->z < z0) z0 = v->z;
-            if (v->z > z1) z1 = v->z;
-            if (v->u < u0) u0 = v->u;
-            if (v->u > u1) u1 = v->u;
-            if (v->v < v0) v0 = v->v;
-            if (v->v > v1) v1 = v->v;
-        }
-    }
-    e = x1 - x0 > z1 - z0 ? x1 - x0 : z1 - z0; d = u1 - u0 > v1 - v0 ? u1 - u0 : v1 - v0;
-    s = (e / AGUA_UV_TILE) / (d > 1e-3f ? d : 1.0f);
-    if (!(s > 0.05f)) s = 1.0f;
-    if (s > 64.0f) s = 64.0f;
-    return s;
-}
-static float agua_uv_esc = 1.0f, agua_fase_u, agua_fase_v; static uint32_t agua_col = AGUA_COLOR;
 /* Recorte del agua contra la piramide entera de la vista (revision 44; foto de INFARTO en BEAC de OUTRUN2SP: "un suelo
    azul con un triangulo enorme"). El plano del agua de BEAC es una cuadricula de triangulos de 550 m bajo toda la ciudad
    a y = -51,1 (la calzada, a -50: 1,1 m por encima); con la camara a 2-3 m del plano, los vertices que solo recortaba el
@@ -8289,15 +8233,25 @@ static void agua_tri(const pt_t *p)
     for (i = 0; i < n; i++) o[i] = a[i & 1 ? (i + 1) / 2 : (n - i / 2) % n];   /* abanico como tira */
     envia_tira(o, n); tri_enviados += n - 2;
 }
-static void agua_malla(const modelo_t *mo, const malla_t *m)
+/* cabecera del agua: color por vertice, sin textura y sin niebla (el mismo tono cerca y lejos) */
+static pvr_poly_hdr_t agua_cab;
+static void agua_prepara(void)
+{
+    pvr_poly_cxt_t cx;
+    pvr_poly_cxt_col(&cx, PVR_LIST_OP_POLY);
+    cx.gen.fog_type = PVR_FOG_DISABLE; cx.gen.culling = PVR_CULLING_NONE;
+    cx.depth.comparison = PVR_DEPTHCMP_GEQUAL;
+    pvr_poly_compile(&agua_cab, &cx);
+}
+static void agua_malla(const modelo_t *mo, const malla_t *m, uint32_t c)
 {
     const vert_t *v = mo->verts + m->v0; uint32_t i, n = m->n > 256 ? 256 : m->n;
     for (i = 0; i < n; i++) {
         float x = v[i].x, y = v[i].y, z = v[i].z, w;
         mat_trans_single3_nodivw(x, y, z, w);
         pw[i].x = x; pw[i].y = y; pw[i].w = w;
-        pw[i].u = v[i].u * agua_uv_esc + agua_fase_u; pw[i].v = v[i].v * agua_uv_esc + agua_fase_v;
-        pw[i].c = agua_col; pw[i].o = 0;
+        pw[i].u = pw[i].v = 0.0f;                                   /* sin textura */
+        pw[i].c = c; pw[i].o = 0;                                   /* color plano de la zona */
     }
     for (i = 0; i + 2 < n; i++) {
         if (pw[i].w < cerca && pw[i + 1].w < cerca && pw[i + 2].w < cerca) continue;
@@ -8306,7 +8260,7 @@ static void agua_malla(const modelo_t *mo, const malla_t *m)
 }
 static void agua_dibuja(void)
 {
-    int nodo, pos, u, k; const modelo_t *mo = NULL; const etapa_t *e;
+    int nodo, pos, u, k; const modelo_t *mo; const etapa_t *e; uint32_t c;
     if (cur_nodo < 0) return;
     u = traf_lugar(yo.s, &nodo, &pos);
     if (nodo < 0 || nodo >= ncurso) return;
@@ -8315,16 +8269,14 @@ static void agua_dibuja(void)
     if (u ? pos <= 0xC7 || e->agua_p0 > 0 : pos < e->agua_p0 || pos > e->agua_p1) return;
     if (etapa.tv && etapa_nodo == nodo) mo = &etapa;
     else if (sig.tv && cur_sig == nodo) mo = &sig;
+    else return;
     if (!mo || !geo_visible(mo)) return;                        /* (0x11a2e8 va dentro de 0x1725d0) */
-    agua_col = agua_tinte_de(e->zona);
-    agua_uv_esc = agua_escala(mo);
-    agua_fase_u = (float)crono * 0.0060f; agua_fase_v = (float)crono * 0.0035f;
+    c = agua_color_de(e->zona);                                 /* color solido de la zona */
     mat_load(&vista); geo_vista(mo);
-    if (agua_ok > 0) pvr_prim(&agua_cab, sizeof(pvr_poly_hdr_t));   /* 64x64 de ondas, con la niebla de la tabla */
-    else pvr_prim(&cab_col[0][0], sizeof(pvr_poly_hdr_t));         /* sin VRAM: el color plano de antes */
+    pvr_prim(&agua_cab, sizeof(pvr_poly_hdr_t));                /* color plano, sin textura ni niebla */
     for (k = mo->inicio[3]; k < mo->inicio[4]; k++) {
         const malla_t *m = mo->mallas + k;
-        if (m->n >= 3 && m->nodo == AGUA_NODO) agua_malla(mo, m);
+        if (m->n >= 3 && m->nodo == AGUA_NODO) agua_malla(mo, m, c);
     }
     geo_vista_fin(mo);
 }
@@ -9281,10 +9233,15 @@ static void etapa_precalienta(void)
 {
     float fw[3], up[3], o[3], m[3]; int k, n, quieto = 0, pd, pp, ed, ep;
     uint32_t i, vivos = 0; uint64_t t0 = timer_us_gettime64();
+    precal_d = precal_p = -1;                                /* (si no se puede precalentar, sin suelo en el arranque) */
     if (!etapa.datos || !etapa.tv || !etapa.nodos || !etapa.nnodos || cur_nodo < 0 || !etapa.vis) return;
     /* la misma camara del primer cuadro de la carrera: la de camara.c con el coche ya en la parrilla, en su estado de
        salida (485250) si la escena de SALIDA.DAT la lleva; si no, la de carrera 6,5 m detras y 1,6 m por encima */
-    if (cam_ok) camara_paso(0, sal_on && sal_f < 120, 0);
+    /* Camara de CARRERA (la del primer cuadro despues del GO), no la de la escena de salida: la de SALIDA.DAT es
+       el primer plano del coche durante la cuenta atras y no ve la ciudad; con ella el reparto se quedaba en
+       prio_d 19/prio_p 21 y al GO la camara de carrera pedia mucho mas (BEAC: falta 115 %, los edificios de los
+       dos lados entraban y salian). camara_paso(..., 0, ...) es la misma que usa el bucle en CARRERA. */
+    if (cam_ok) camara_paso(0, 0, 0);
     if (cam_ok) { pon_vista(cam.ojo, cam.mira, cam.balanceo); fx = 320.0f / tanf(cam.fov * 0.5f); }
     else {
         for (k = 0; k < 3; k++) { fw[k] = yo.fw[k]; up[k] = yo.up[k]; }
@@ -9316,6 +9273,8 @@ static void etapa_precalienta(void)
     }
     precalentando = 0;
     ta_corto = ta_et_corto = 0;
+    precal_d = prio_d; precal_p = prio_p;                /* (suelo del reparto en los primeros cuadros de CARRERA) */
+
 #ifdef DIAG_POPPING
     /* el primer cuadro de carrera no es una aparicion: lo dibujado en el precalentamiento cuenta como anterior */
     for (k = 0; k < 4; k++) if (pop_s[k].datos) memcpy(pop_s[k].ant, pop_s[k].cur, pop_s[k].n);
@@ -11300,7 +11259,7 @@ int main(int argc, char **argv)
     vblank_handler_add(vbl_antes, NULL);                        /* antes que el de la PowerVR (va en orden) */
     pvr_init(&pp);
     vblank_handler_add(vbl_despues, NULL);
-    agua_prepara();                                             /* textura de ondas del agua (11 KB, una vez) */
+    agua_prepara();                                             /* cabecera del agua: color plano, sin textura */
     /* la prueba de alfa de la lista de recorte, como la del original: el TEST_1 del GS de los materiales con prueba de
        alfa (los 888 de PALM, LAKE, INDU, SNOW, METR y BEAC: ATST GEQUAL, AREF 0x40 con 0x80 = 1) deja pasar el alfa
        filtrado >= 0,5. La PowerVR arranca con PT_ALPHA_REF = 0xFF (KallistiOS no lo cambia): solo pasaba el alfa 1 tras
@@ -11690,6 +11649,9 @@ int main(int argc, char **argv)
                 memset(&yo, 0, sizeof yo); yo.s = SALIDA; yo.x = SALIDA_X;
 #ifdef PRUEBA_FIN
                 yo.s = longitud - PRUEBA_FIN; yo.x = carril_x(yo.s, 4);   /* prueba: a PRUEBA_FIN m del final */
+#endif
+#ifdef PRUEBA_AGUA_S
+                yo.s = PRUEBA_AGUA_S; yo.x = carril_x(yo.s, 4);   /* prueba: salida en una posicion de la etapa (agua) */
 #endif
 #ifdef PRUEBA_X
                 yo.x = PRUEBA_X;                                /* prueba: salida en otro desvio (p.ej. la hierba) */
@@ -12272,11 +12234,12 @@ int main(int argc, char **argv)
         }
         tri_enviados = 0; vtx_ult = vtx_env; vtx_env = 0; ta_inicia_cuadro(); vtx_et_ult = vtx_et; vtx_et = 0;
         en_cuenta = estado == CUENTA;                           /* (el precalentamiento manda hasta el semaforo) */
+        arranque_hold = estado == CARRERA && t_estado < REPARTO_ARRANQUE;   /* (suelo del arranque, ver arriba) */
 #ifdef DIAG_MS
         prf_v0 = 0;
 #endif
         PRF(0);
-        if (estado != TITULO && !mundo_fuera) nodos_visibles_todos();   /* los del original que caben en el TA */
+        if (estado != TITULO && !mundo_fuera && !en_cuenta) nodos_visibles_todos();   /* en CUENTA manda el precalentamiento */
         PRF(1);
         if (estado != TITULO && !mundo_fuera) sol_prepara();                    /* el rayo hacia el sol de este cuadro */
         if (estado != TITULO && !mundo_fuera) traf_parpadea(pausa || estado != CARRERA);   /* 4AE5F0 (sin traf_paso: suspendido) */
