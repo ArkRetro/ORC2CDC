@@ -2480,13 +2480,17 @@ static void traf_tablas(void)
 }
 /* LOD del coche de trafico por la distancia, como 46DF50 del PC (en SLES-53998 0x1dd728, constantes en lui): z de la
    camara (negativa delante) frente a base - 130 (LOD 4), base - 85 (3), base - 50 (2), base - 40 (1) y 5 (0; mas alla,
-   detras de la camara, 4); base = -35 en los modelos 0x1f y 0x27 y -25 en el 0x28 (los grandes), 0 en los demas.
+   detras de la camara, 4). Umbral del LOD 0 = 5 (0x628138); 40 / 50 / 85 / 130 = umbrales 1..4 (.rdata 0x5b4350..60);
+   base = tabla del modelo - 30 (0x628100): -35 en los modelos 0x1f y 0x27 (.rdata 0x5b4364 -> base -65), -25 en el 0x28
+   (0x6282d0 -> base -55), 0 en los demas (-> base -30). Ejemplo modelos normales (base -30): LOD 0 hasta ~70 m
+   delante, LOD 1 hasta 80, LOD 2 hasta 110, LOD 3 hasta 145 y LOD 4 desde 160. Antes del 2026-11-18 (RAM1B) faltaba el
+   -30 de 0x628100 y las bases eran -35 / -25 / 0: cada corte saltaba 30 m antes que en el original.
    zv es la distancia delante de la camara (z = -zv). TRAFn.DAT lleva en el campo del nodo de cada malla la mascara de
    los LOD que la dibujan (tools/conv_trafico.py); los ficheros viejos sin LOD (nodo -1) se dibujan enteros. */
 static uint8_t traf_con_lod[NMODT];
 static int traf_lod(int m, float zv)
 {
-    int mod = trc_ok ? trc[m].modelo : 0; float base = mod == 0x1f || mod == 0x27 ? -35.0f : mod == 0x28 ? -25.0f : 0.0f, z = -zv;
+    int mod = trc_ok ? trc[m].modelo : 0; float base = mod == 0x1f || mod == 0x27 ? -65.0f : mod == 0x28 ? -55.0f : -30.0f, z = -zv;
     if (z <= base - 130.0f) return 4;
     if (z <= base - 85.0f) return 3;
     if (z <= base - 50.0f) return 2;
@@ -3185,7 +3189,10 @@ static void traf_choques(void)
      si no, con el humo de las ruedas en el cuadro (car+0 bit 59 de 0x10a0d8) y v x 0,1 > 0,1 los dos + v x 0,1 (2
      cuadros); si no el pequeno a 0. PENDIENTE: +D34 (media de 21 cuadros de +C2C + +162, set_old_param_buffer
      4A2EE0; +C2C no esta en la fisica de la demo: aqui sin ese termino) y las banderas +8 0x40 / 0x100 (salto y rebote
-     del muro, 0 en la demo como hasta ahora). La escala: la opcion de CONFIGURACION (0..10, 0x588668 + 0xCC) no esta en la demo: 10 (SUPUESTO).
+     del muro, 0 en la demo como hasta ahora). La escala: la opcion de CONFIGURACION (0..10, 0x588668 + 0xCC, la lee
+     0x1d0420 via 0x1201d0 y la divide entre 10,0 con tope 10 y fuera de rango a 0) no esta en la demo: su valor por
+     defecto es 10, el maximo (CONFIRMADO 2026-11-19 en el SLES-53998: el init de las opciones 0x1a1508 escribe sw 10
+     en +0xCC, y tambien en +0xD4 y +0xD0), asi que VIB_ESCALA 1,0 es la del original recien arrancado.
    Dreamcast: un solo motor (Puru Puru, MAPLE_FUNC_PURUPURU en el puerto del mando): intensidad = el motor grande en 7
    escalones (1..7) o 1 si solo va el pequeno; se manda solo al cambiar, continua (cont) a VIB_FREC (SUPUESTO). */
 #define VIB_ESCALA 1.0f
@@ -3307,10 +3314,11 @@ static void vib_paso(int marcha, int freno, float h2dc, int muro)
 }
 /* una vez por cuadro dibujado: manda al Puru Puru lo que dejo el ultimo control; si el control del jugador no ha
    corrido en 3 cuadros seguidos (pausa, menus, fin) los motores a 0, como 0x17c284 con el suceso suspendido (un cuadro
-   sin paso de logica, por el reloj de 59,94 Hz, no lo para) */
+   sin paso de logica, por el reloj de 59,94 Hz, no lo para). Sin Jump Pack (PuruPuru) en el mando no hay vibracion:
+   en Flycast el slot del puerto A debe llevar "Puru Puru" (emu.cfg: device1.2 = 3; el 1 de ahora es una VMU) */
 static void vib_cuadro(void)
 {
-    static maple_device_t *dev; static int enviado, sin_control;
+    static maple_device_t *dev; static int enviado, sin_control, sin_puru;
     maple_device_t *d = NULL, *mc = maple_enum_type(0, MAPLE_FUNC_CONTROLLER);
     int u, nivel;
     if (vib.vivo) { sin_control = 0; nivel = vib.vivo > 0 ? vib.vivo : 0; }
@@ -3322,7 +3330,12 @@ static void vib_cuadro(void)
         if (x && (x->info.functions & MAPLE_FUNC_PURUPURU)) d = x;
     }
     if (d != dev) { dev = d; enviado = 0; }
-    if (!d || nivel == enviado) return;
+    if (!d) {                                                 /* aviso una sola vez: sin Jump Pack no hay vibracion */
+        if (mc && !sin_puru) { sin_puru = 1; dbglog(DBG_WARNING, "VIB: mando en el puerto %d sin PuruPuru (Jump Pack): sin vibracion\n", mc->port); }
+        return;
+    }
+    sin_puru = 0;
+    if (nivel == enviado) return;
     {
         purupuru_effect_t e;
         e.raw = 0; e.motor = 1;
@@ -6841,7 +6854,7 @@ static void bo_dibuja(int l)
             if (zv + nd->r < cerca || zv - nd->r > lejos) continue;
             xv = dx * der[0] + dy * der[1] + dz * der[2]; yv = dx * arr[0] + dy * arr[1] + dz * arr[2];
             if (fabsf(xv) - zv * (320.0f / fx) > nd->r * 2.0f || fabsf(yv) - zv * (240.0f / fx) > nd->r * 2.0f) continue;
-            if (zv > nd->r * (float)(1 << ((fl & 0x40) ? 6 : 7)) * fx / 240.0f) continue;   /* LOD: muy pequeno */
+            if (zv > nd->r * (float)(1 << ((fl & 0x40) ? 6 : 5)) * fx / 240.0f) continue;   /* LOD por radio proyectado, como el original: umbral 7 bajo la bandera 0x40 (pc_render_queue.cpp 162) y 6 en la ventana de dibujo de la carrera (race_area.cpp 1138: 4044E0(6); restaurado a 7 al salir, linea 1141). Antes de RAM1B (2026-11-18) era 8 sin fuente y la bandera al reves */
             k0 = 0; k1 = 0; w = 0;
             if ((fl & 0x20) && an != 0xffff) {                  /* 0x103018 y 0x1030a8: cuadro k, k + 1 y la fraccion */
                 float f = bo_valor(an); int nf = g < 64 ? bo_nf[g] : 1, e;
@@ -6883,7 +6896,11 @@ static void bo_dibuja(int l)
    404B00: esfera contra el plano cercano, los cuatro laterales y el lejano, y el LOD por tamano en pantalla:
    w = r / (z tan(fov vertical / 2)); se descarta si 127 - exponente(w) >= umbral (4044E0(6) en la etapa,
    race_area_display_44f120; 7 con la bandera 0x40 del nodo), es decir, se dibuja si z <= r 2^(umbral - 1) /
-   tan(fov vertical / 2). De la union, los registros de uni_regs (race_area_stage_draw_44e290). La lista de nodos por seccion de la etapa (cs_CS_<zona>_bin) solo se usaria si el fichero la trae
+   tan(fov vertical / 2). Verificado en RAM1B (2026-11-18) en las fuentes de la decomp: race_area.cpp 1138-1141
+   (4044E0(6) antes del dibujo de la etapa y 4044E0(7) al salir de el) y race_area_runtime.cpp 1018 (el umbral por
+   defecto, 7, cuando no hay curso); la bandera 0x40 sube a 7 solo en su subarbol (pc_render_queue.cpp 162, restaurado
+   al volver: 187). Los nodos traen el umbral en los bits 0-3 de fl (tools/modelo.py: 7 con 0x40, UMBRAL_CURSO 6 si no).
+   De la union, los registros de uni_regs (race_area_stage_draw_44e290). La lista de nodos por seccion de la etapa (cs_CS_<zona>_bin) solo se usaria si el fichero la trae
    (sec_lista): el formato de PS2 de esas listas esta sin descifrar (tools/conv_tramo.py lee_visibilidad); en su lugar
    va la visibilidad precalculada (pvs_paso, mas abajo). */
 static float dist2_ruta(const modelo_t *m, uint32_t i, const float *p)
@@ -8062,7 +8079,7 @@ static void cielo_grupo(const modelo_t *mo, int g, int l, float a, int niebla, i
     for (k = mo->inicio[3]; k < mo->inicio[4]; k++) {
         const malla_t *m = mo->mallas + k; int gm = m->nodo <= -256 ? -256 - m->nodo : 0;
         int lm = m->tex >= 0 ? (int)mo->texs[m->tex].lista : 0, le = lm < lmin ? lmin : lm;
-        int nf = niebla;
+        int nf = niebla, suelo = 0;
         color_mul = a < 0.9f ? ((uint32_t)(a * 255) << 24) | 0xFFFFFF : 0;
         if (m->n < 3 || gm != g || (a >= 0.9f && le != l)) continue;
         /* El mar/suelo lejano del cielo (BEAC: 91 cuadrilateros de 550 m a y = -51 sin textura y la cupula de
@@ -8075,6 +8092,13 @@ static void cielo_grupo(const modelo_t *mo, int g, int l, float a, int niebla, i
             for (q = 0; q < nn; q++) if (vv[q].y > 0.0f) break;
             if (q == nn) nf = 1;
         }
+        /* RAM2 (generalizacion del arreglo de BEAC): el suelo lejano del cielo es el telon que queda justo detras del
+           corte de dibujado, asi que su niebla es la de la tabla EN el corte (la entrada 0: scn_env_fog de la zona
+           evaluada a "lejos" mas el velo NLIM_A), no la de su distancia geometrica (~700-2000 m, casi nada en etapas
+           con niebla debil o sin densidad: GRAN 0,000, YOSE/NEWY 0,0002). En BEAC no cambia nada visible: su mar es el
+           plano del agua, que tapa la cupula de abajo. Con niebla atmosferica (CLOU) se queda con la distancia real
+           como el original. */
+        suelo = nf && !niebla;
         if (nf && m->tex < 0) {                                 /* mar/suelo sin textura: el color del agua de la zona */
             uint32_t cw = cur_nodo >= 0 ? agua_color_de(curso[cur_nodo].zona) : 0xFF4064A3u;
             color_mul = (a < 0.9f ? (uint32_t)(a * 255) << 24 : 0xFF000000u) | (cw & 0xFFFFFF);
@@ -8082,7 +8106,7 @@ static void cielo_grupo(const modelo_t *mo, int g, int l, float a, int niebla, i
         cie_lleno = a >= 0.9f && le == 2 && lm != 2;            /* subida a la transparente: entera */
         if (m->tex >= 0) pvr_prim(cielo_cab(mo, m->tex, nf, a >= 0.9f ? le : 2), sizeof(pvr_poly_hdr_t));
         else pvr_prim(&cab_col[!nf][a >= 0.9f ? le : 2], sizeof(pvr_poly_hdr_t));
-        cielo_malla(mo, m, l == 2 && !nf ? 1.2e-4f * (1.0f + (float)cie_seq++ * (1.0f / 1024.0f)) : 0);
+        cielo_malla(mo, m, l == 2 && !nf ? 1.2e-4f * (1.0f + (float)cie_seq++ * (1.0f / 1024.0f)) : suelo ? 1.0f / lejos : 0);
     }
     color_mul = 0; cie_lleno = 0;
 }
@@ -8233,13 +8257,17 @@ static void agua_tri(const pt_t *p)
     for (i = 0; i < n; i++) o[i] = a[i & 1 ? (i + 1) / 2 : (n - i / 2) % n];   /* abanico como tira */
     envia_tira(o, n); tri_enviados += n - 2;
 }
-/* cabecera del agua: color por vertice, sin textura y sin niebla (el mismo tono cerca y lejos) */
+/* cabecera del agua: color por vertice y sin textura. La niebla de la tabla (RAM2, generalizacion del arreglo de BEAC):
+   cerca sigue con el tono solido de la zona (la niebla del original es ~0 a esas distancias) y lo que esta justo en
+   el corte de dibujado se funde con un poco de niebla del color y densidad de scn_env_fog de la zona (niebla_pon),
+   como el mar de BEAC con 0xBDD4E1, en vez de verse un tono solido hasta el borde del plano. La revision de agua 4
+   la llevaba con PVR_FOG_DISABLE ("el mismo tono cerca y lejos"); se reactiva solo la tabla, sin UV ni scroll. */
 static pvr_poly_hdr_t agua_cab;
 static void agua_prepara(void)
 {
     pvr_poly_cxt_t cx;
     pvr_poly_cxt_col(&cx, PVR_LIST_OP_POLY);
-    cx.gen.fog_type = PVR_FOG_DISABLE; cx.gen.culling = PVR_CULLING_NONE;
+    cx.gen.fog_type = PVR_FOG_TABLE; cx.gen.culling = PVR_CULLING_NONE;
     cx.depth.comparison = PVR_DEPTHCMP_GEQUAL;
     pvr_poly_compile(&agua_cab, &cx);
 }
@@ -12156,9 +12184,16 @@ int main(int argc, char **argv)
                 pvr_get_stats(&ps);
                 sprintf(s2, "%.1ffps %lutri cpu %.1f+%.1f pvr %.1fms", (double)fps, (unsigned long)tri_enviados,
                         (double)ms_log, (double)ms, (double)(ps.rnd_last_time / 1000000.0));
+#ifdef PRUEBA_AUTO
+                /* prueba (RAM2): etapa, union, rama y s en la linea del marcador, para saber donde esta el coche en
+                   cada captura de Flycast (el serial de la consola no sale en el flycast.exe de Windows) */
+                sprintf(s3, "%.4s u%d rama%d s%.0f de %.0f d%d/%d ram%uK", cur_nodo >= 0 && cur_nodo < ncurso ? curso[cur_nodo].zona : "----",
+                        cur_en_union, cur_rama, (double)yo.s, (double)longitud, (int)lejos, (int)lejos_obj, (unsigned)(mi.uordblks >> 10));
+#else
                 sprintf(s3, "d%d/%d salto%d der%d%s ram%uK vram%uK c%.1fs x%.1f mu%.1f%.1f", (int)lejos, (int)lejos_obj, saltos_ver, (int)(yo.deriva * 57.3f), yo.t_derrape ? "D" : "",
                         (unsigned)(mi.uordblks >> 10), (unsigned)(pvr_mem_available() >> 10), (double)t_carga,
                         (double)yo.x, (double)fis.r[0].mu, (double)fis.r[2].mu);   /* desvio y mu delante/detras izq. */
+#endif
             }
             /* INFARTO: los corazones, las filas y la nota los dibuja el HUD (4BCD50 y los rotulos de HAHUD.DAT) */
             texto_arriba(s1, ver ? s2 : NULL, ver ? s3 : NULL);
@@ -12406,6 +12441,34 @@ int main(int argc, char **argv)
                     else if (texto) caja(36, 18, 568, ver ? 92 : 34, 0x90000000);
                     if (texto && !(ty > 100 && pausa)) rect_txr(txt_arr, 512, 128, 40, ty + 2, 512, 128, PVR_LIST_TR_POLY);
                 }
+#ifdef PRUEBA_AUTO
+                /* prueba (RAM2): tira de 6 cuadros de 14x14 abajo a la izquierda con la etapa, la rama, la union, s y
+                   lejos en el COLOR de cada cuadro (base luminosa G 90/180 para distinguirla del negro), para leer de
+                   las capturas de Flycast donde esta el coche (el serial no sale en el flycast.exe de Windows). Solo
+                   en los builds de prueba */
+                if (estado == CARRERA || estado == CUENTA) {
+                    uint8_t q[6][3];
+                    uint32_t sv = (uint32_t)fmaxf(0, yo.s);
+                    q[0][0] = (uint8_t)(cur_nodo >= 0 && cur_nodo < ncurso ? cur_nodo + 1 : 0); q[0][1] = 90; q[0][2] = 0;
+                    q[1][0] = (uint8_t)(cur_rama >= 0 ? cur_rama + 3 : 2); q[1][1] = 90; q[1][2] = 0;
+                    q[2][0] = (uint8_t)(cur_en_union ? 1 : 0); q[2][1] = (uint8_t)(90 + ent_fase); q[2][2] = 0;
+                    q[3][0] = (uint8_t)((sv >> 4) & 255); q[3][1] = 180; q[3][2] = 0;
+                    q[4][0] = (uint8_t)((sv >> 12) & 255); q[4][1] = (uint8_t)(180 + (estado == CARRERA ? 1 : 2)); q[4][2] = 0;
+                    q[5][0] = (uint8_t)(int)fmaxf(0, fminf(255, lejos / 32.0f)); q[5][1] = 40; q[5][2] = 0;
+                    for (i = 0; i < 6; i++) {
+                        pvr_poly_cxt_t cx; pvr_poly_hdr_t hd; pvr_vertex_t v;
+                        pvr_poly_cxt_col(&cx, PVR_LIST_OP_POLY);
+                        cx.gen.fog_type = PVR_FOG_DISABLE;
+                        pvr_poly_compile(&hd, &cx); pvr_prim(&hd, sizeof hd);
+                        v.argb = 0xFF000000u | (uint32_t)q[i][0] << 16 | (uint32_t)q[i][1] << 8 | q[i][2];
+                        v.oargb = 0; v.z = 12.0f; v.u = v.v = 0;
+                        v.flags = PVR_CMD_VERTEX; v.x = 4 + 16.0f * i; v.y = 460; pvr_prim(&v, sizeof v);
+                        v.x += 14.0f; pvr_prim(&v, sizeof v);
+                        v.x -= 14.0f; v.y += 14.0f; pvr_prim(&v, sizeof v);
+                        v.flags = PVR_CMD_VERTEX_EOL; v.x += 14.0f; pvr_prim(&v, sizeof v);
+                    }
+                }
+#endif
                 /* el rotulo de texto de la DC (cuenta, nombre de la etapa, "< X  X >" de la bifurcacion, GOAL!) solo sin HUD:
                    con el HUD lo dicen las escenas del original. Antes con el HUD y el piloto (auto_) salia el de la
                    bifurcacion encima del HUD (barrido de la revision 44) */
