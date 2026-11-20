@@ -261,7 +261,6 @@ static uint32_t elige_4bfbd0(void)
     int8_t bl; int k, r, e;
     if (!pulsa(8) && !r_4bfb20() && (WU8(8) & 3) != 1) return 0;
     bl = WI8(0x19); k = bl;
-    if (T && T->coche[k][0] == 0 && !menu_taxi_comprado()) { sonido(3); return 0; }   /* taxi sin comprar ni ENTIRETY */
     r = T->coche[k][4];
     if (!pulsa(8)) sonido_4bee60(T->son[T->voz_coche[k] & 63]);
     suelta(0x8449c4); suelta(0x8449cc); suelta(0x84497c); suelta(0x844980); suelta(0x844984);

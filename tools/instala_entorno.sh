@@ -36,7 +36,7 @@ if [ ! -x $DC/sh-elf/bin/sh-elf-gcc ]; then
            -e 's/^verbose=.*/verbose=0/' -e 's/^enable_objc=.*/enable_objc=0/' -e 's/^enable_objcpp=.*/enable_objcpp=0/' $cfg
     [ -f Makefile.cfg ] && sed -i -e 's/^makejobs=.*/makejobs=4/' -e 's/^enable_objc=.*/enable_objc=0/' \
            -e 's/^enable_objcpp=.*/enable_objcpp=0/' -e 's/^toolchain_profile=.*/toolchain_profile=stable/' Makefile.cfg
-    make                                                  # GCC 15.2, binutils y newlib en /opt/toolchains/dc/sh-elf
+    make platform=dreamcast                               # GCC 15.2, binutils y newlib en /opt/toolchains/dc/sh-elf
 fi
 [ -f $KOS/environ.sh ] || cp $KOS/doc/environ.sh.sample $KOS/environ.sh
 set +u; . $KOS/environ.sh; set -u

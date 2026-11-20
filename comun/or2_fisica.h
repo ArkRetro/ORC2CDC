@@ -259,10 +259,6 @@ typedef struct {
     float suelo_rueda[4];
     int   suelo_ok;
     int   sin_ayuda_tierra; /* 1 = sin CheckWanderer (la variante de juego 0)                        */
-    /* turbo del taxi (ficha 7 / modelo 0): capa arcade longitudinal, solo el jugador.  acel en m/s2
-       (+ empuja, - frena) y tope en m/s (0 = el tope normal de la fisica). */
-    float turbo_acel;
-    float turbo_tope;
 } or2_entrada_t;
 
 /* materiales de tierra/arena/hierba (2, 3, 4 y 15): mu 0,7 y resistencia de rodadura (SetRunningResistance) */
