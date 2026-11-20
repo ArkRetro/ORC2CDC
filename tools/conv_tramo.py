@@ -12,7 +12,7 @@ saca de los descriptores del ejecutable para los tramos que siguen a una bifurca
 import os, struct, sys
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from ps2 import iso as isomod, stage, tex, vif
+from ps2 import stage, tex, vif
 import modelo, pvs, grupos_nodos, lod_veg
 
 def recorrido(seg):
@@ -504,11 +504,11 @@ def carriles_uniformes(an, car=None):
 
 def transforma(mod, M):
     """lleva el modelo y su ruta al marco del curso: M = (tx, ty, tz, ry), giro alrededor de y (x' = x cos + z sen,
-    z' = -x sen + z cos, el de pc_matrix_rotate_y del original) y traslacion. El cielo (lista 3, centrado en la camara)
-    solo gira. En la ruta se mueven la posicion y las alturas (perfil y alturas exteriores); el resto son desvios"""
+    z' = -x sen + z cos, el de pc_matrix_rotate_y del original) y traslacion. El cielo solo gira con la camara. El agua de la lista 3
+    se coloca en el mundo. En la ruta se mueven la posicion y las alturas (perfil y alturas exteriores)."""
     tx, ty, tz, ry = M; c, s = np.cos(ry), np.sin(ry)
     def gira(x, z): return x * c + z * s, -x * s + z * c
-    cielo = {x[4] for x in mod.mallas if x[0] == 3}
+    cielo = {x[4] for x in mod.mallas if x[0] == 3 and x[7] != -258}
     locales = {x[4] for x in mod.mallas if isinstance(x[7], int) and x[7] >= 0 and mod.nodos[x[7]][3] >= 0}
     i0 = 0
     for v in mod.verts:
@@ -519,7 +519,7 @@ def transforma(mod, M):
         i0 += len(v)
     for x in mod.mallas:
         cx, cz = gira(x[2][0], x[2][2])
-        x[2] = np.array([cx, x[2][1], cz]) + (0 if x[0] == 3 else np.array([tx, ty, tz]))
+        x[2] = np.array([cx, x[2][1], cz]) + (0 if x[4] in cielo else np.array([tx, ty, tz]))
     for nd in mod.nodos:
         cx, cz = gira(nd[0][0], nd[0][2]); nd[0] = np.array([cx, nd[0][1] + ty, cz], np.float32) + np.array([tx, 0, tz], np.float32)
     G = np.array([[c, 0, -s], [0, 1, 0], [s, 0, c]])          # el giro en vectores fila (v @ G)
@@ -588,12 +588,10 @@ def pon_cielo(mod, cielo, luz=None):
     del grupo 1). Las mallas van en la lista 3 con el grupo en el campo del nodo (-256 - grupo) y la luz del entorno 0
     del original (luz: modelo.luz_entorno).
 
-    El grupo 1 (+0x54) es el OTRO cielo, el que el original dibuja solo durante el fundido de un cielo al siguiente
-    (4521C0). La demo no tiene ese fundido: anadir el grupo 1 duplica la cupula en la misma posicion (los vertices son
-    identicos), con su textura encima de la del grupo 0 por el GEQUAL de la PowerVR, y tapa el cielo con un plano liso
-    (MAYA: el grupo 1 es el degradado 32x16 y el 0 las nubes). Por eso solo se anade el grupo 0."""
+    El grupo 1 (+0x54) solo se dibuja durante la mezcla. El motor necesita los dos grupos
+    por separado aunque compartan geometria. Si solo hay un cielo, se usa como cielo normal."""
     blq, g0, g1 = cielo; mod.luz = luz
-    grupos = ((0, g0),) if g0 else ((1, g1),)          # (sin grupo 0, el 1 es el unico cielo: no dejarlo vacio)
+    grupos = ((0, g0), (1, g1)) if g0 else ((0, g1),)
     for g, regs in grupos:
         if regs: mod.bloque(blq, registros=set(regs), lista=3, sin_textura='material', nodo_fijo=-256 - g)
     mod.luz = None
@@ -694,8 +692,16 @@ def main():
     curso (conv_union.py los saca de los descriptores del ejecutable)"""
     ruta, n, sal = sys.argv[1], int(sys.argv[2]), sys.argv[3]
     mundo = tuple(float(x) for x in sys.argv[4:8]) if len(sys.argv) >= 8 else None
-    seg = stage.segmentos(isomod.Iso(ruta))[n]
-    convierte(seg, n, sal, mundo)
+    import conv_union
+    from ps2.assets import Assets
+    A = Assets(ruta)
+    seg = A.segmentos()[n]
+    d0 = conv_union.descriptor_de_segmento(A, seg)
+    if d0 is None:
+        print('Segmento sin descriptor de etapa: se usa el bloque de cielo por geometria.', file=sys.stderr)
+        convierte(seg, n, sal, mundo)
+    else:
+        conv_union.convierte_descriptor(A, d0, seg, n, sal, mundo)
 
 if __name__ == '__main__':
     main()

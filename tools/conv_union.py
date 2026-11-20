@@ -128,6 +128,20 @@ def segmento_de(A, ruta_coli):
             k += 1
     raise SystemExit('tramo %s no encontrado' % rel)
 
+def descriptor_de_segmento(A, seg):
+    """Descriptor cuya ruta de colision nombra la primera entrada del segmento de STAGE.PS2."""
+    try:
+        base, nprim, _ = tablas(A)
+    except (StopIteration, SystemExit):                         # disco sin ejecutable o sin la tabla conocida
+        return None
+    for i in range(nprim):
+        d0 = u32(A.elf, base + 4 * i)
+        ruta = cadena(A.elf, d0 + 0x0c)
+        partes = ruta.split('\\', 2)
+        if len(partes) == 3 and hash_nombre('\\' + partes[2]) == seg.ent[0][0]:
+            return d0
+    return None
+
 def coli_bytes(A, ruta):
     return A.datos(A.entrada('BK.PS2', ruta.split('\\')[-1]))
 
@@ -693,13 +707,17 @@ def union_fichero(A, combo, f, d0, ri, rd, so):
     lod_veg.aplica(f)                                          # version lejana de la vegetacion (revision 46, DESVIACION)
     print('%s %s: %d mallas, %d texturas, %d KB' % (os.path.basename(f), combo, len(mod.mallas), len(mod.texs), os.path.getsize(f) >> 10))
 
+def convierte_descriptor(A, d0, seg, n, sal, mundo=None):
+    z = zona_de(cadena(A.elf, d0 + 0x0c))
+    return conv_tramo.convierte(seg, n, sal, mundo, cielo=cielo_de(A, A.elf, d0), luz=luces(soles(A, z)),
+                               objetos=objetos_etapa(A, d0), agua=agua_de(A, d0))
+
 def etapa_ficheros(A, ti, dsal):
     """SEGnn.DAT y COLnn.DAT de la etapa del descriptor ti (como curso)"""
     import conv_coli
     E = A.elf; base, nprim, base2 = tablas(A); d0 = u32(E, base + 4 * ti)
-    ruta_c = cadena(E, d0 + 0x0c); z = zona_de(ruta_c); n = segmento_de(A, ruta_c); seg = A.segmentos()[n]
-    conv_tramo.convierte(seg, n, os.path.join(dsal, 'SEG%02d.DAT' % n), cielo=cielo_de(A, E, d0), luz=luces(soles(A, z)),
-                         objetos=objetos_etapa(A, d0), agua=agua_de(A, d0))
+    ruta_c = cadena(E, d0 + 0x0c); n = segmento_de(A, ruta_c); seg = A.segmentos()[n]
+    convierte_descriptor(A, d0, seg, n, os.path.join(dsal, 'SEG%02d.DAT' % n))
     for h, o, s in seg.ent:
         d = bytes(seg.m[o:o + s])
         if d[:8] == b'COLI0200': conv_coli.escribe(d, os.path.join(dsal, 'COL%02d.DAT' % n), 0); break
