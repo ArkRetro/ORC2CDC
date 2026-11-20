@@ -1477,12 +1477,16 @@ de OutRun 2 SP (las 15 etapas seguidas) que dio el usuario.
   SEG29) y que desde dentro no se ven nunca. CORREGIDO: antes de la entrada (y < 0, sin mirar el desvio lateral: la
   carretera de la union no sigue la ruta prolongada y fuera de PVS_LADO no habia PVS) la PVS de la seccion 0
   (`-DPVS_ANTES_VISO`: lo de antes).
-- El crecimiento de la etapa siguiente (geo_vista) queda apagado (`-DGEO_CRECE` lo vuelve a poner): con la etapa
-  aplastada desde el suelo de su marco los cartones y la selva eran una lamina encima de la union.
+- El crecimiento de la etapa siguiente (geo_vista) se apago en la Rev 1.4 y vuelve en la Rev 1.5 (`-DSIN_GEO_CRECE`
+  lo quita): sin el, en todas las bifurcaciones la etapa siguiente aparecia de golpe y entera. Lo que hacia de lamina
+  encima de la union era lo de detras de la entrada, que ya no se dibuja (DETRAS_ENTRADA).
 - La mancha amarilla que tapaba la pantalla en el CHECK POINT de MAYA y las franjas blancas del suelo de la meta: la
   textura 101 de SEG29 son tiras de polvo translucidas en la salida y en la meta, ocho fotogramas de una animacion de
   nodos del original (pilas de 4 nodos iguales en el mismo sitio y la tira corriendo por la calzada) que la demo
-  dibujaba todos a la vez. `-DDIAG_SIN_L2` y `-DDIAG_CICLO` (apaga por turnos el sol, los efectos y la etapa) llevaron
+  dibujaba todos a la vez (Rev 1.5: la regla contaba mallas y no nodos y quitaba tambien las cascadas de NIAG, SEG21
+  texturas 105 / 106 / 107 / 111, y cosas de LASV, AMAZ y SEG53 / 54 / 58; ahora cuenta nodos distintos y solo queda
+  la de MAYA; y la prueba era de todas las parejas de mallas, hasta 33 millones de comparaciones en el hilo de carga
+  en mitad de la union, que quitaba tiempo a los cuadros: ahora ordenada, n log n). `-DDIAG_SIN_L2` y `-DDIAG_CICLO` (apaga por turnos el sol, los efectos y la etapa) llevaron
   hasta ellas; no era el humo (`-DDIAG_SIN_HUMO`) ni z-fighting (subirlas 4 cm no cambiaba nada). DESVIACION
   (CORREGIDO): una textura de la lista translucida con al menos 16 mallas en pilas de 3 o mas nodos en el mismo centro
   no se dibuja (lee_modelo_en; con los datos de hoy solo esa: las pilas de 2 de la textura 16 de las uniones no
