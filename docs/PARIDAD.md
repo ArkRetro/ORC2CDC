@@ -1459,6 +1459,48 @@ corta y media distancia.
 - Lo que queda del popping es el tope del TA (falta 13-31 % en partes de NEWY con el coche 608 KB y la pareja 149 KB por
   cuadro) y el LOD del original: no se ha cambiado el reparto.
 
+### LASV -> MAYA, la meta de MAYA y el agua de LASV (Rev 1.4, 2026-11-20)
+
+Queja: en OutRun 2 (arbol 1), de LASV a MAYA, al salir de la bifurcacion una estructura tapa la vista; al principio de
+MAYA cosas flotando en el aire; en la meta lineas blancas en el suelo y la piramide mal hecha; quitar el brillo del cielo
+de la carroceria; y en LASV el suelo mojado sin agua de las ruedas. Reproducido en Flycast (`-DPRUEBA_AUTO
+-DPRUEBA_SIN_TIEMPO -DPRUEBA_CURSO=1 -DPRUEBA_NODO=7 -DPRUEBA_RAMA=0 -DPRUEBA_RAMA_FIJA=0`) y comparado con un video
+de OutRun 2 SP (las 15 etapas seguidas) que dio el usuario.
+- La pared negra de la union (1'23"-1'25" de carrera; al final la camara la atravesaba: pantalla negra): MAYA (la etapa
+  siguiente) desde la union. `-DDIAG_SIN_TRAMO=2` la quita y `-DDIAG_SIGV` dio los nodos: el 1460 de SEG29 es un anillo
+  de cartones de selva de 164 m de alto que rodea la etapa y pasa 400 m por detras de su entrada (cruza la carretera de
+  la union) y el 195 una panoramica de 2,4 km de radio. DESVIACION (CORREGIDO): con la camara antes de la entrada de la
+  etapa siguiente (`sig_antes`, pvs_paso) no se dibujan sus mallas con el centro detras de la entrada
+  (DETRAS_ENTRADA: ese sitio es de la union). En el original los aplasta el crecimiento (44C530); en el video la
+  entrada a MAYA es una autovia despejada.
+- La losa flotante sobre la union: los nodos que VISO.DAT da para la seccion 0 de MAYA con la camara fuera (el 194 de
+  SEG29) y que desde dentro no se ven nunca. CORREGIDO: antes de la entrada (y < 0, sin mirar el desvio lateral: la
+  carretera de la union no sigue la ruta prolongada y fuera de PVS_LADO no habia PVS) la PVS de la seccion 0
+  (`-DPVS_ANTES_VISO`: lo de antes).
+- El crecimiento de la etapa siguiente (geo_vista) queda apagado (`-DGEO_CRECE` lo vuelve a poner): con la etapa
+  aplastada desde el suelo de su marco los cartones y la selva eran una lamina encima de la union.
+- La mancha amarilla que tapaba la pantalla en el CHECK POINT de MAYA y las franjas blancas del suelo de la meta: la
+  textura 101 de SEG29 son tiras de polvo translucidas en la salida y en la meta, ocho fotogramas de una animacion de
+  nodos del original (pilas de 4 nodos iguales en el mismo sitio y la tira corriendo por la calzada) que la demo
+  dibujaba todos a la vez. `-DDIAG_SIN_L2` y `-DDIAG_CICLO` (apaga por turnos el sol, los efectos y la etapa) llevaron
+  hasta ellas; no era el humo (`-DDIAG_SIN_HUMO`) ni z-fighting (subirlas 4 cm no cambiaba nada). DESVIACION
+  (CORREGIDO): una textura de la lista translucida con al menos 16 mallas en pilas de 3 o mas nodos en el mismo centro
+  no se dibuja (lee_modelo_en; con los datos de hoy solo esa: las pilas de 2 de la textura 16 de las uniones no
+  llegan). PENDIENTE: la animacion de nodos del original (+18 del PmtNode) para sacarlas como en la PS2.
+- La piramide de la meta (BK26, nodo 4): un render de los datos fuera de la demo (scratchpad rtex.py) da la misma
+  forma que Flycast: la "cupula" gris de detras es geometria del disco (texturas 7 y 14, x +-400 m, hasta 271 m de
+  alto), no un fallo de dibujo. Sin referencia de la meta del original (el video es el modo de 15 etapas, sin meta en
+  MAYA): sin cambios.
+- Brillo del cielo en la carroceria (Rev 1.3): quitado a peticion (refl_busca; `-DCON_REFLEJO_CIELO` lo vuelve a poner).
+  El reflejo del tunel tambien depende de esa tabla y se va con el; el coche usa su mapa de entorno fijo.
+- Agua de las ruedas sobre mojado (NUEVO): la fuente 6 de las particulas del SLES-53998 (0x10c8b8 / 0x10c988 /
+  0x10cc80 / 0x10cd58, textura 0x57002c, que tools/conv_efectos.py anade a EFECTOS.DAT como cuarta de PAR1), con la
+  superficie +40 & 0x400080: LASV usa la 0x400000 en casi toda la etapa (`-DDIAG_PARTICULAS`). Detalle en agua_pide.
+  PROVISIONAL: el tamano crece car+1C4 x AGUA_CRECE (0,25) por cuadro; con x 1, lo leido, las gotas llegaban a 20 m de
+  lado y tapaban media pantalla, y en el video la estela es baja y pegada a las ruedas (el dibujo del tipo 3, 0x108d30,
+  no esta leido). Sin EFECTOS.DAT nuevo, sin agua (como antes).
+- NO verificado en consola real.
+
 ### Reflejo del cielo y de los tuneles (Rev 1.3, 2026-11-20; DESVIACION pedida)
 
 - El original (SLES-53998 0x103dc8 -> 0x1040e0 -> 0x172f30 = 414340 / 414050 / 44CD30 del PC): cada cuadro, con el coche

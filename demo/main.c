@@ -87,6 +87,14 @@ static void pvrmem_mapa(const char *donde)
 /* ---------------------------------------------------------------- modelos */
 typedef struct { uint32_t w, h, fmt, lista, off, tam; } tex_t;
 typedef struct { float cx, cy, cz, r; uint32_t v0, n; int32_t tex; int32_t nodo; } malla_t;   /* nodo del original o -1 */
+/* la camara antes de la entrada de la etapa siguiente (en la union; pvs_paso pone sig_antes y la entrada: el punto 0
+   de su ruta y su direccion). DESVIACION (Rev 1.4, LASV -> MAYA, docs/PARIDAD.md): mientras tanto no se dibujan las
+   mallas de esa etapa con el centro detras de la entrada (ese sitio es de la union). En SEG29 el nodo 1460 es un anillo
+   de cartones de selva de 164 m de alto que rodea la etapa y pasa 400 m por detras de su entrada, y el 195 una
+   panoramica de 2,4 km de radio: desde la carretera de la union eran una pared negra que tapaba el cielo y la camara
+   la atravesaba justo antes de entrar (pantalla negra). En el original los aplastaba el crecimiento (44C530) */
+static int sig_antes; static float sig_ent[4];                  /* x, z de la entrada y direccion (x, z) */
+#define DETRAS_ENTRADA(mo, m) ((mo) == &sig && sig_antes && ((m)->cx - sig_ent[0]) * sig_ent[2] + ((m)->cz - sig_ent[1]) * sig_ent[3] < 0.0f)
 #define AGUA_NODO (-258)                                         /* lista 3, grupo 2: el plano del agua (agua_dibuja) */
 typedef struct { float x, y, z, u, v; uint32_t c; } vert_t;
 /* nodo del original (tools/modelo.py): esfera, banderas (bits 0-3 umbral de LOD, bit 4 orientado a la camara, bits 8-9
@@ -229,6 +237,33 @@ static int lee_modelo_en(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t
     m->sec_mapa = m->nsec ? (const uint16_t *)p : NULL; p += m->nsec ? m->nruta * 2 : 0;
     p = b + ((p - b + 3) & ~3);
     if (!v7) for (i = 0; i < m->nmallas; i++) m->mallas[i].nodo = -1;   /* ORD5/6: distancia maxima, sin nodos */
+    /* fotogramas de una animacion de nodos (Rev 1.4, DESVIACION, docs/PARIDAD.md): en SEG29 (MAYA) la textura 101 son
+       tiras de polvo translucidas en la salida y en la meta, ocho fotogramas de una animacion del original (pilas de 4
+       nodos iguales en el mismo sitio y la tira corriendo por la calzada). La demo no anima los nodos de la etapa y los
+       dibujaba todos a la vez: la mancha amarilla que tapaba la vista en el CHECK POINT y las franjas blancas en el suelo
+       de la meta (el original, en el video de referencia, no saca nada asi). Una textura de la lista translucida con al
+       menos 16 mallas en pilas de 3 o mas nodos en el mismo centro no se dibuja (con los datos de hoy solo esa; las
+       pilas de 2 de las uniones, la 16 de los BK, no llegan) */
+    if (v7 && m != &coche && m != &chr && !m->relleno_propio && m->inicio[3] <= m->nmallas && m->ntex <= 256) {
+        static uint16_t pil[256];
+        memset(pil, 0, sizeof pil);
+        for (i = m->inicio[2]; i < m->inicio[3]; i++) {
+            const malla_t *a_ = m->mallas + i; uint32_t j, c = 0; const nodo_t *na;
+            if (a_->tex < 0 || (uint32_t)a_->tex >= m->ntex || a_->nodo < 0 || (uint32_t)a_->nodo >= m->nnodos) continue;
+            na = m->nodos + a_->nodo; if (na->cartel >= 0) continue;
+            for (j = m->inicio[2]; j < m->inicio[3] && c < 2; j++) {
+                const malla_t *b_ = m->mallas + j; const nodo_t *nb;
+                if (j == i || b_->tex != a_->tex || b_->nodo < 0 || (uint32_t)b_->nodo >= m->nnodos || b_->nodo == a_->nodo) continue;
+                nb = m->nodos + b_->nodo;
+                if (nb->cartel < 0 && fabsf(nb->cx - na->cx) < 0.5f && fabsf(nb->cy - na->cy) < 0.5f && fabsf(nb->cz - na->cz) < 0.5f) c++;
+            }
+            if (c >= 2 && pil[a_->tex] < 0xffff) pil[a_->tex]++;
+        }
+        for (i = m->inicio[2]; i < m->inicio[3]; i++) {
+            malla_t *a_ = m->mallas + i;
+            if (a_->tex >= 0 && (uint32_t)a_->tex < m->ntex && pil[a_->tex] >= 16) a_->n = 0;   /* (n < 3: apagada) */
+        }
+    }
     /* presupuesto del TA (nodos_visibles): relleno[0] = bytes teoricos del TA de las tiras del nodo (ta_teo),
        relleno[1] = sus vertices << 12 | las clases de distancia (<< 6) y de LOD del cuadro (nodos_visibles) */
     /* (con relleno_propio no: los objetos de las uniones llevan ahi su malla y su animacion, y sus mallas no apuntan a
@@ -768,6 +803,9 @@ static void refl_busca(void)
 {
     static uint8_t sec[2048] __attribute__((aligned(32))); uint32_t lba, tam;
     refl_lba = 0;
+#ifndef CON_REFLEJO_CIELO
+    return;                                                     /* (Rev 1.4: quitado a peticion; -DCON_REFLEJO_CIELO lo vuelve a poner) */
+#endif
     if (gd_busca("REFLEJO.DAT", &lba, &tam) || tam < 3 * 2048 || gd_lee(lba, 1, sec) || memcmp(sec, "RFL1", 4)) return;
     memcpy(&refl_nreg, sec + 4, 4); memcpy(&tam, sec + 8, 4); memcpy(&refl_sec_tunel, sec + 12, 4);
     if (tam != REFL_LADO || !refl_nreg) return;
@@ -826,6 +864,9 @@ static void norm(float *v) { float l = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * 
 
 /* matriz de pantalla: X = 320 W + fx xv, Y = 240 W - fx yv, W = Z = zv (columnas: ftrv suma columna_j * entrada_j).
    bal: balanceo de la camara (rad, + = el lado derecho de la camara sube; el +130 del original, 482F20 Rz) */
+#ifdef DIAG_CICLO
+static int dg_fase;                                             /* medida: 0 todo, 1 sin sol, 2 sin efectos, 3 sin la etapa */
+#endif
 static void pon_vista(const float *o, const float *mira, float bal)
 {
     int j; float k;
@@ -1429,6 +1470,7 @@ static void dibuja_rango(const modelo_t *mo, int l, uint32_t k0, uint32_t k1, in
 #ifndef DIAG_SIN_TOPE
             if (vtx_et + (vtx_env - vtx_et0) > VTX_ETAPA_MAX) { ta_corto = 1; ta_et_corto = 1; POP_MALLA(m); continue; }
 #endif
+            if (DETRAS_ENTRADA(mo, m)) continue;                 /* (sig_antes) */
             cartel = malla_de_cartel(mo, m);
             if (!cartel) {
                 dx = m->cx - ojo[0]; dy = m->cy - ojo[1]; dz = m->cz - ojo[2];
@@ -1538,6 +1580,7 @@ static void dibuja_etapa(const modelo_t *mo, int l)
 #ifndef DIAG_SIN_TOPE
             if ((int32_t)(ve - vtx_et0) > vres) { ta_corto = 1; ta_et_corto = 1; POP_MALLA(m); continue; }
 #endif
+            if (DETRAS_ENTRADA(mo, m)) continue;                 /* (sig_antes) */
             if (!cart) {
                 float dx = m->cx - o0, dy = m->cy - o1, dz = m->cz - o2, zv, xv, yv;
                 zv = dx * e0 + dy * e1 + dz * e2;
@@ -4920,7 +4963,7 @@ static float dist3(const float *a, const float *b)
 typedef struct { float p[3], v[3]; int vida; uint32_t col; float uv[4]; } trozo_t;   /* uv: +40 +44 +48 +4C */
 static trozo_t gravas[NTROZO], hierbas[NTROZO]; static int grava_n, hierba_n, grava_pl, hierba_pl;
 static uint32_t col_hierba = 0xFFFFFFFFu;
-static pvr_poly_hdr_t cab_part[3]; static int part_tex_ok;      /* grava, hierba, humo */
+static pvr_poly_hdr_t cab_part[4]; static int part_tex_ok, agua_tex_ok;   /* grava, hierba, humo; agua (fuente 6) */
 static void trozo_celda(trozo_t *h)                             /* un trozo de los 4 x 4 de la textura (0x10c114..) */
 {
     h->uv[2] = (float)((rand() >> 13) & 3) * 0.25f; h->uv[3] = (float)((rand() >> 13) & 3) * 0.25f;
@@ -5135,6 +5178,69 @@ static void humo_paso(void)                                     /* 0x10b178 */
         if (muere) *h = humos[--humo_n]; else i++;
     }
 }
+/* Agua de las ruedas sobre mojado (fuente 6 del SLES-53998, Rev 1.4: el asfalto mojado de LASV; no estaba en la demo).
+   0x10c8b8 la crea: 256 particulas de 0x60, tipo de dibujo 3 (como el humo: carteles de cara a la camara de medio lado
+   tamano x 0,5), textura 0x57002c (EFECTOS.DAT), color de la fuente 0xFFFFFFFF (0x32b2d4), tamano 0,1 (0x32b2d8).
+   Peticion (0x10c988, cada cuadro): la rueda n con +40 & 0x400080 (la superficie mojada; 0x400000 es la que 0x1d0138
+   cuenta como asfalto en LASV) pone su cuenta a 3 (0x32b2f0); cada 4 cuadros (0x107bc0 & 3 == 0), cada trasera (2, 3)
+   con la cuenta > 0 y movida 0,01 m o mas echa 5 (0x32b2ec) gotas repartidas del contacto anterior al de ahora,
+   0,3 m (0x32b2fc) mas arriba, +- 0,01 (0x3bfe70), con velocidad = la del coche (car+20) x 0,75 (0x32b2e4) + (lo
+   movido x la normal, a 0,01 de largo, hacia fuera: la rueda 2 al reves) +- 0,01 (0x32b2e8); la cuenta baja 1.
+   Nace (0x10cc80): colores 0xFF000000 | 0x32b300.. (blancos), vida 30 (0x32b310) + azar x 30 cuadros. Cada cuadro
+   (0x10cd58): avanza, x y z por 0,99 (0x32b314), muere bajo el plano de la rueda 2 (0x48e4d8, el de la fuente),
+   y -= 0x3B315723, tamano + car+1C4 (m por cuadro) x 1 (0x32b2dc) y muere al acabar la vida. El alfa del color como
+   el del humo (255 aqui, PROBABLE: el microprograma de la VU1 del dibujo no esta leido) */
+#define NAGUA 256
+/* PROVISIONAL (Rev 1.4): con car+1C4 x 1 tal cual las gotas llegaban a 20 m de lado antes de caer y tapaban media
+   pantalla; en el video de referencia (OutRun 2 SP, LASV) la estela es baja y pegada a las ruedas. Sin el dibujo del
+   original leido (0x108d30, tipo 3) se calibra con el video */
+#define AGUA_CRECE 0.25f
+typedef struct { float p[3], v[3], tam; int vida; } agua_t;
+static agua_t aguas[NAGUA]; static int agua_n, agua_cuenta[4];
+static void agua_pide(const float *vc)                         /* 0x10c988 */
+{
+    static const float EP[3] = { 0.00999999978f, 0.00999999978f, 0.00999999978f }, EV[3] = { 0.00999999978f, 0.00999999978f, 0.00999999978f };
+    int n, j, k;
+    for (n = 0; n < 4; n++) if (neum[n].sup & 0x400080u) agua_cuenta[n] = 3;
+    if (part_cuadro & 3) return;
+    for (n = 2; n < 4; n++) {
+        const neum_t *t = neum + n; float d[3], s[3], bv[3], a[3], l;
+        if (t->mov < 0.00999999978f) continue;
+        if (agua_cuenta[n] > 0) {
+            for (k = 0; k < 3; k++) d[k] = t->p[k] - t->ant[k];
+            s[0] = d[1] * t->n[2] - d[2] * t->n[1]; s[1] = d[2] * t->n[0] - d[0] * t->n[2]; s[2] = d[0] * t->n[1] - d[1] * t->n[0];
+            l = sqrtf(s[0] * s[0] + s[1] * s[1] + s[2] * s[2]); l = l > 1e-6f ? 0.00999999978f / l : 0;
+            if (!(n & 1)) l = -l;
+            for (k = 0; k < 3; k++) bv[k] = s[k] * l + vc[k] * 0.75f;
+            for (k = 0; k < 3; k++) { d[k] *= 0.2f; a[k] = t->ant[k]; }
+            a[1] += 0.300000012f;
+            for (j = 0; j < 5; j++) {
+                agua_t *h;
+                if (agua_n >= NAGUA) return;                    /* (0x108850 sin sitio: se acaba la peticion) */
+                h = aguas + agua_n++;
+                part_nace(h->p, h->v, a, EP, bv, EV);
+                h->tam = 0.100000001f;
+                h->vida = 30 + (int)(part_rand() * 30.0f);
+                for (k = 0; k < 3; k++) a[k] += d[k];
+            }
+        }
+        if (--agua_cuenta[n] < 0) agua_cuenta[n] = 0;
+    }
+}
+static void agua_paso(const float *vc)                         /* 0x10cd58 */
+{
+    const neum_t *t = neum + 2; float v = sqrtf(vc[0] * vc[0] + vc[1] * vc[1] + vc[2] * vc[2]); int i, k;
+    for (i = 0; i < agua_n; ) {
+        agua_t *h = aguas + i; int muere = 0;
+        for (k = 0; k < 3; k++) h->p[k] += h->v[k];
+        h->v[0] *= 0.99000001f; h->v[2] *= 0.99000001f;
+        if (part_plano(h->p, t) < 0) muere = 1;
+        h->v[1] -= 0.00270000007f;                              /* 0x3B315723 */
+        h->tam += v * AGUA_CRECE;
+        if (--h->vida <= 0) muere = 1;
+        if (muere) *h = aguas[--agua_n]; else i++;
+    }
+}
 /* un paso de las particulas (41BC60: las peticiones y despues cada fuente; el coche ya movido) */
 static void part_paso(const coche_t *c, const float *r)
 {
@@ -5145,8 +5251,10 @@ static void part_paso(const coche_t *c, const float *r)
     memcpy(part_coche_ant, c->pos, 12); part_coche_hay = 1;
     neum_paso(c, r);
     if (part_tex_ok) { trozos_pide(c); humo_pide(c, vc); }
+    if (agua_tex_ok) agua_pide(vc);
     trozos_paso(c);
     humo_paso();
+    agua_paso(vc);
 #ifdef DIAG_PARTICULAS
     {   static int m; if (m++ % DIAG_PARTICULAS == 0) dbglog(DBG_INFO, "PART s %.2f x %.2f v %.4f kmh %d sup %x %x %x %x cen %x mu %.2f %.2f %.2f %.2f rt %.2f %.2f %.2f %.2f mov %.3f %.3f clase %d %d %d %d mascara %x grava %d hierba %d humo %d z %d masa %.0f\n",
             (double)c->s, (double)c->x, (double)(fis_ok ? fis.velocidad : 0), fis_ok ? fis.kmh : 0, (unsigned)neum[0].sup, (unsigned)neum[1].sup, (unsigned)neum[2].sup, (unsigned)neum[3].sup,
@@ -5158,7 +5266,7 @@ static void part_paso(const coche_t *c, const float *r)
 }
 static void part_borra(void)
 {
-    memset(neum, 0, sizeof neum); grava_n = hierba_n = humo_n = 0; humo_m1 = humo_m2 = 0; part_coche_hay = 0;
+    memset(neum, 0, sizeof neum); grava_n = hierba_n = humo_n = agua_n = 0; memset(agua_cuenta, 0, sizeof agua_cuenta); humo_m1 = humo_m2 = 0; part_coche_hay = 0;
 }
 static void part_recentra(float dx, float dz)
 {
@@ -5167,6 +5275,7 @@ static void part_recentra(float dx, float dz)
     for (k = 0; k < grava_n; k++) { gravas[k].p[0] -= dx; gravas[k].p[2] -= dz; }
     for (k = 0; k < hierba_n; k++) { hierbas[k].p[0] -= dx; hierbas[k].p[2] -= dz; }
     for (k = 0; k < humo_n; k++) { humos[k].p[0] -= dx; humos[k].p[2] -= dz; }
+    for (k = 0; k < agua_n; k++) { aguas[k].p[0] -= dx; aguas[k].p[2] -= dz; }
     part_coche_ant[0] -= dx; part_coche_ant[2] -= dz;
 }
 
@@ -5210,7 +5319,7 @@ static void efectos_inicia(void)
     if (e && atr_ok && o + 8 <= sz && !memcmp(e + o, "PAR1", 4)) {   /* grava, hierba y humo (0x57002a / 2b / 2d) */
         uint32_t n, k, h[4];
         memcpy(&n, e + o + 4, 4); o += 8;
-        for (k = 0; k < n && k < 3 && o + 16 <= sz; k++) {
+        for (k = 0; k < n && k < 4 && o + 16 <= sz; k++) {
             pvr_ptr_t v;
             memcpy(h, e + o, 16); o += 16;
             if (h[2] > 2 || o + h[3] > sz || !(v = pvr_mem_malloc(h[3]))) break;
@@ -5219,14 +5328,15 @@ static void efectos_inicia(void)
             cx.gen.fog_type = PVR_FOG_TABLE; cx.gen.culling = PVR_CULLING_NONE; cx.txr.env = PVR_TXRENV_MODULATEALPHA;
             cx.depth.write = PVR_DEPTHWRITE_DISABLE;
             pvr_poly_compile(&cab_part[k], &cx);
-            part_tex_ok = k + 1 == 3;
+            if (k + 1 == 3) part_tex_ok = 1;
+            if (k + 1 == 4) agua_tex_ok = 1;                    /* (EFECTOS.DAT de la Rev 1.4 en adelante) */
         }
         if (part_tex_ok && o + 8 <= sz && !memcmp(e + o, "DSC1", 4)) {
             memcpy(&n, e + o + 4, 4);
             if (n == ATR_SEG && o + 8 + ATR_SEG <= sz) { memcpy(dsc_seg, e + o + 8, ATR_SEG); dsc_ok = 1; }
         }
     }
-    dbglog(DBG_INFO, "EFECTOS: marcas %d chispas %d tramos %d particulas %d descriptores %d\n", marca_tex_ok, chispa_tex_ok, atr_ok, part_tex_ok, dsc_ok);
+    dbglog(DBG_INFO, "EFECTOS: marcas %d chispas %d tramos %d particulas %d agua %d descriptores %d\n", marca_tex_ok, chispa_tex_ok, atr_ok, part_tex_ok, agua_tex_ok, dsc_ok);
     free(e);
 }
 static void efectos_borra(void)
@@ -5358,6 +5468,9 @@ static void efectos_dibuja(void)
             for (j = i; j > 0 && humos[ord[j - 1]].tam > humos[i].tam; j--) ord[j] = ord[j - 1];
             ord[j] = (uint8_t)i;
         }
+#ifdef DIAG_SIN_HUMO
+        humo_n = 0;
+#endif
         pvr_prim(&cab_part[2], sizeof(pvr_poly_hdr_t));
         humo_px = 0;
         for (i = 0; i < humo_n; i++) {                          /* (tope HUMO_PANTALLAS) */
@@ -5371,6 +5484,19 @@ static void efectos_dibuja(void)
             c[0] = (h->col[1] & 0xffffff) | a; c[1] = (h->col[3] & 0xffffff) | a;   /* colores de las esquinas como 419DC0 */
             c[2] = (h->col[0] & 0xffffff) | a; c[3] = (h->col[2] & 0xffffff) | a;
             if (pt_cuad_humo((const float (*)[3])p, UVH, c)) break;
+        }
+        if (agua_tex_ok && agua_n) {                            /* agua de las ruedas (fuente 6, agua_pide) */
+            pvr_prim(&cab_part[3], sizeof(pvr_poly_hdr_t));
+            for (i = 0; i < agua_n; i++) {
+                const agua_t *h = aguas + i; float m = h->tam * 0.5f, p[4][3]; uint32_t c[4]; int k;
+                for (k = 0; k < 4; k++) {
+                    float sx = (k & 1) ? m : -m, sy = (k & 2) ? -m : m;
+                    p[k][0] = h->p[0] + sx * der[0] + sy * arr[0]; p[k][1] = h->p[1] + sx * der[1] + sy * arr[1];
+                    p[k][2] = h->p[2] + sx * der[2] + sy * arr[2];
+                }
+                c[0] = c[1] = c[2] = c[3] = 0xFFFFFFFFu;
+                if (pt_cuad_humo((const float (*)[3])p, UVH, c)) break;
+            }
         }
     }
 #ifdef DIAG_SALIDA
@@ -6852,6 +6978,9 @@ static void bo_dibuja(int l)
 {
     static matrix_t W __attribute__((aligned(32)));
     const bo_conj_t *c; int i; uint32_t k;
+#ifdef DIAG_SIN_BO
+    return;
+#endif
     if (bo_estado != 3 || !(bo_obj[0].ini & 2) || bo_sel < 0) return;
     c = bo_conj + bo_sel;
     for (i = 0; i < c->n && i < 4; i++) {
@@ -7200,7 +7329,7 @@ static void pvs_recuerda(modelo_t *mo)
 static void pvs_paso(modelo_t *mo)
 {
     uint32_t k, a, b, i, s; float d, e, t[2], l, x, li, ld; const float *r, *r0, *r1;
-    mo->pvs_on = 0; mo->viso = NULL;
+    mo->pvs_on = 0; mo->viso = NULL; if (mo == &sig) sig_antes = 0;
 #ifdef SIN_PVS
     return;
 #endif
@@ -7216,6 +7345,25 @@ static void pvs_paso(modelo_t *mo)
     if (l < 1e-3f) return;
     if (k == 0 || k + 1 == mo->nruta) {                         /* mas alla de una punta: hasta PVS_FIN */
         float y = ((ojo[0] - r[0]) * t[0] + (ojo[2] - r[2]) * t[1]) / l;
+#ifndef PVS_ANTES_VISO
+        if (k == 0 && y < 0.0f && mo == &sig) {
+            /* La camara antes del principio de la etapa siguiente (en la union): la PVS de su seccion 0 (tools/pvs.py la
+               muestrea desde la ruta prolongada FIN_EXTRA m hacia atras) en vez de la lista de la seccion 0 del original
+               (VISO.DAT). Rev 1.4 (LASV -> MAYA): con VISO, desde la union se veian nodos de MAYA que desde dentro no se
+               ven nunca (el 194 de SEG29: 81 vertices a 44-282 m de altura y 1 km de radio, una pared de selva oscura
+               delante y una losa en el cielo) y desaparecian de golpe al pasar la entrada. Desde cualquier punto antes de la
+               entrada (y < 0) y sin mirar el desvio lateral: la carretera de la union no sigue la ruta prolongada y fuera
+               de PVS_LADO no habia PVS y se dibujaba la etapa entera. -DPVS_ANTES_VISO: lo de antes */
+            s = 0; sig_antes = 1; sig_ent[0] = r[0]; sig_ent[1] = r[2]; sig_ent[2] = t[0] / l; sig_ent[3] = t[1] / l;
+            if (mo->pvs_s != (int32_t)s) {
+                while (mo->pvs_s < (int32_t)s) pvs_aplica(mo, ++mo->pvs_s);
+                while (mo->pvs_s > (int32_t)s) pvs_aplica(mo, mo->pvs_s--);
+                pvs_recuerda(mo);
+            }
+            mo->pvs_on = 1;
+            return;
+        }
+#endif
         if ((k == 0 && y < -PVS_FIN) || (k + 1 == mo->nruta && y > PVS_FIN)) {
             /* la camara antes del principio de la etapa (en la union, la etapa siguiente) o pasado su final (la que se
                deja): lo que dibuja el original en su seccion 0 o en la ultima (VISO.DAT, viso_lee); antes todo, y en
@@ -7266,6 +7414,9 @@ static int uni_regs(void)
 #if defined(CON_SH4ZAM) && !defined(SIN_SHZ_NODOS)
 #define SHZ_NODOS 1                                             /* nodos_visibles con FTRV (SH4ZAM) */
 static shz_mat4x4_t nv_xm;                                      /* la XMTRX de quien llama */
+#endif
+#ifdef DIAG_SIGV
+static float dg_sig_r; static int dg_sig_n, dg_sig_c;
 #endif
 static void nodos_visibles(modelo_t *mo)
 {
@@ -7406,6 +7557,10 @@ static void nodos_visibles(modelo_t *mo)
             else if (c_teo) { mo->pvs_gra[ip] = PVS_GRACIA; mo->pvs_ult[ip] = c_teo; }
         }
         VIS[i >> 5] |= 1u << (i & 31); POPR(i, PR_DIB);
+#ifdef DIAG_SIGV
+        if (mo == &sig && d->r / fmaxf(zv, 1.0f) > dg_sig_r) { dg_sig_r = d->r / fmaxf(zv, 1.0f); dg_sig_n = (int)i; }
+        if (mo == &sig) dg_sig_c++;
+#endif
         cd = zv - d->r > 1.0f ? log2x(zv - d->r, 4) : 0; cd = cd > ND_PRIO - 1 ? ND_PRIO - 1 : cd;
         if (zv - d->r > z_tapa) cp = NB_PRIO - 1;               /* tapado por la niebla */
         else if (zv <= 0 || lim <= 0) cp = 0;
@@ -7655,7 +7810,13 @@ static void nodos_visibles_todos(void)
     diag_pvs_v = 0;
 #endif
     uni_mascara = uni_regs();                                   /* (44E290) */
+#ifdef DIAG_SIGV
+    dg_sig_r = 0; dg_sig_n = -1; dg_sig_c = 0;
+#endif
     for (i = 0; i < 3; i++) if (geo_visible(tramos[i])) nodos_visibles(tramos[i]);
+#ifdef DIAG_SIGV
+    {   static unsigned dg_f; if (sig.datos && (dg_f++ % 10) == 0) printf("SIGV: crono %d s %.0f pvs %d i %d viso %d nodos %d mayor %d (r/z %.2f) pr %d/%d\n", (int)crono, (double)yo.s, sig.pvs_on, (int)sig.pvs_i, sig.viso != NULL, dg_sig_c, dg_sig_n, (double)dg_sig_r, (int)sig.paso_ruta, (int)ruta_pr); }
+#endif
     for (d = 0; d < ND_PRIO; d++) for (fila_c[d] = fila_v[d] = 0, c = 0; c < NB_PRIO; c++) { fila_c[d] += prio_coste[d][c]; fila_v[d] += prio_vtx[d][c]; }
     /* lo cercano: hasta REPARTO_CERCA del tope (todo si cabe todo) */
     for (acum = v = 0, cabe = -1, d = 0; d < ND_PRIO; d++) {
@@ -8182,6 +8343,9 @@ static void cielo_dibuja(int l)
     if (l == 0) cie_seq = 0;
     cie_cerca = 600.0f * fx / sqrtf(fx * fx + 160000.0f);   /* (ver CIELO_CERCA) */
     mat_load(&vista_cielo);
+#ifdef DIAG_CIELO_FIJO
+    cielo_grupo(cielo, 0, l, 1, niebla, -1); return;
+#endif
     if (ent_fase == 0) cielo_grupo(cielo, 0, l, 1, niebla, -1);
     else if (ent_fase == 2) cielo_grupo(nuevo ? nuevo : cielo, 0, l, 1, niebla, -1);
     else {
@@ -8214,7 +8378,10 @@ static void geo_paso(void)
 {
     int nodo, pos, u = traf_lugar(yo.s, &nodo, &pos);
     geo_odo += fabsf(yo.v) * (1.0f / 60.2f);                    /* velocidad por cuadro del original (4A1140) */
-    if (!u || !cur_en_union || cur_rama < 0) { geo_reinicia(); return; }
+    /* (Rev 1.4) tambien en la union de la meta, sin rama: la etapa que se deja deja de dibujarse en la posicion 0x18 como
+       en las bifurcaciones. Antes se seguia dibujando hasta la pancarta y su calzada y su final (MAYA: la plaza de la
+       piramide) se pintaban encima de los de BKnn.DAT de la meta: lineas blancas en el suelo y la piramide mezclada */
+    if (!u || !cur_en_union || (cur_rama < 0 && !(cur_nodo >= 0 && cur_nodo < ncurso && !tiene_hijos(curso + cur_nodo)))) { geo_reinicia(); return; }
     if (!geo_cambio && pos >= 0x18) { geo_cambio = 1; geo_esc = 0; geo_odo0 = -1.0f; }
     if (!geo_cambio || !sig.tv) return;                         /* (44C530 solo con la etapa nueva leida: 0xC..0x11) */
     if (pos >= 0xF0) { geo_esc = 1.0f; return; }
@@ -8223,6 +8390,9 @@ static void geo_paso(void)
     geo_esc = (geo_odo - geo_odo0) / 200.0f;
     if (geo_esc < 0) geo_esc = 0;
     if (geo_esc > 1) geo_esc = 1;
+#ifdef DIAG_GEO
+    { static int n_; if (n_++ % 6 == 0) dbglog(DBG_INFO, "GEO: crono %d pos %d s %.0f x %.1f coche %.1f %.1f %.1f ojo %.1f %.1f %.1f esc %.2f\n", crono, pos, (double)yo.s, (double)yo.x, (double)yo.pos[0], (double)yo.pos[1], (double)yo.pos[2], (double)ojo[0], (double)ojo[1], (double)ojo[2], (double)geo_esc); }
+#endif
 }
 /* el tramo t (etapa, union o etapa siguiente) se dibuja en este cuadro */
 static int geo_visible(const modelo_t *t)
@@ -8234,9 +8404,17 @@ static int geo_visible(const modelo_t *t)
 }
 /* vista de la etapa siguiente con la escala y de 44DE10 alrededor del suelo de su marco (filas: p' = p S vista) */
 static matrix_t vista_geo __attribute__((aligned(32)));
+/* DESVIACION (Rev 1.4, LASV -> MAYA): sin el aplastamiento. La etapa siguiente sale a su escala desde que el factor
+   pasa de 0,1 (20 m despues de la posicion 0x84). Aplastada hacia la base de su marco, la geometria que en su sitio
+   queda muy por debajo (o por encima) de la carretera de la union pasaba por la altura de la camara: en MAYA (baja
+   hasta 55 m por debajo de su base) un plano verde que tapaba la vista y paredes de selva oscuras durante los 200 m del
+   crecimiento. A 400-700 m y con la niebla, que aparezca entera no se nota. -DGEO_CRECE: lo del original */
 static void geo_vista(const modelo_t *t)
 {
     float f = geo_esc, y0 = (1.0f - f) * marco_sig[1]; int j;
+#ifndef GEO_CRECE
+    return;
+#endif
     if (t != &sig || f >= 1.0f) return;
     memcpy(vista_geo, vista, sizeof vista_geo);
     for (j = 0; j < 4; j++) { vista[1][j] = f * vista_geo[1][j]; vista[3][j] = vista_geo[3][j] + y0 * vista_geo[1][j]; }
@@ -8244,6 +8422,9 @@ static void geo_vista(const modelo_t *t)
 }
 static void geo_vista_fin(const modelo_t *t)
 {
+#ifndef GEO_CRECE
+    return;
+#endif
     if (t != &sig || geo_esc >= 1.0f) return;
     memcpy(vista, vista_geo, sizeof vista); mat_load(&vista);
 }
@@ -12390,6 +12571,9 @@ int main(int argc, char **argv)
             if (rc_band.ok) robot_matrices(&rc_band, &mod_coche, 0);
             chr_us += (uint32_t)(timer_us_gettime64() - t0r);
         }
+#ifdef DIAG_CICLO
+        dg_fase = (int)(cuadros_ms(crono) / 500) % 4;
+#endif
         tri_enviados = 0; vtx_ult = vtx_env; vtx_env = 0; ta_inicia_cuadro(); vtx_et_ult = vtx_et; vtx_et = 0;
         en_cuenta = estado == CUENTA;                           /* (el precalentamiento manda hasta el semaforo) */
         arranque_hold = estado == CARRERA && crono < REPARTO_ARRANQUE;   /* (suelo del arranque, ver arriba) */
@@ -12417,6 +12601,12 @@ int main(int argc, char **argv)
                 color_fijo = l == DEP_LISTA ? 0xFFFF00FF : 0;
 #endif
                 for (i = 0; i < 3; i++)                         /* etapa, union y etapa siguiente: las que esten subidas */
+#ifdef DIAG_CICLO
+                    if (!(dg_fase == 3 && i == 0))
+#endif
+#ifdef DIAG_SIN_L2
+                    if (l != 2)
+#endif
 #ifdef DIAG_SIN_TRAMO
                     if (i != DIAG_SIN_TRAMO)                    /* medida: sin la etapa (0), la union (1) o la siguiente (2) */
 #endif
@@ -12481,9 +12671,18 @@ int main(int argc, char **argv)
             }
             POP_CAT(4);
             PRF(7);
+#ifdef DIAG_CICLO
+            if (dg_fase != 2)
+#endif
             if (l == 2 && estado != TITULO && !mundo_fuera) { mat_load(&vista); efectos_dibuja(); }
+#ifdef DIAG_CICLO
+            if (dg_fase != 1)
+#endif
             if (l == 2 && estado != TITULO && !mundo_fuera) sol_dibuja();       /* el sol y su destello (40CBC0) */
             if (l == 2) focos_dibuja();                         /* la segunda pasada de los focos (40C550) */
+#ifdef DIAG_CICLO
+            if (dg_fase != 2)
+#endif
             if (l == 2 && estado != TITULO && !mundo_fuera && !fin24)              /* faros en el suelo (0x188680) */
                 faros_dibuja(&mod_coche, ani.ban, fis_ok && fis.t_choque > 0);
             POP_CAT(5);
