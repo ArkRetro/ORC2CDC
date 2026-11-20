@@ -952,10 +952,35 @@ static void carga_col(const char *nombre, uint8_t *buf, uint32_t cap)
     snprintf(carga_col_nombre, sizeof carga_col_nombre, "%s", nombre); carga_col_buf = buf; carga_col_cap = cap;
 }
 static void modelo_coloca(modelo_t *m, const float *M);
+/* Reflejo del cielo en la carroceria (REFLEJO.DAT de tools/conv_reflejo.py; ver alli y coche_reflejo): por etapa, un
+   mapa de 32x32 del cielo en su marco y la tabla de puntos de la ruta bajo techo. El registro de la etapa (2 sectores)
+   se lee con ella: el de la salida al leerla y el de la siguiente en el hilo de carga, nunca en mitad de la carrera. */
+#define REFL_LADO 32
+static uint32_t refl_lba, refl_nreg, refl_sec_tunel;            /* 0: sin REFLEJO.DAT (el mapa fijo del coche, como antes) */
+static uint8_t refl_reg[2][4096] __attribute__((aligned(32)));  /* [0] la etapa actual, [1] la siguiente */
+static volatile int refl_hay[2];                                /* el registro esta leido y trae mapa */
+static int refl_pend;                                           /* el mapa de refl_reg[0] esta por subir a la VRAM */
+static void refl_busca(void)
+{
+    static uint8_t sec[2048] __attribute__((aligned(32))); uint32_t lba, tam;
+    refl_lba = 0;
+    if (gd_busca("REFLEJO.DAT", &lba, &tam) || tam < 3 * 2048 || gd_lee(lba, 1, sec) || memcmp(sec, "RFL1", 4)) return;
+    memcpy(&refl_nreg, sec + 4, 4); memcpy(&tam, sec + 8, 4); memcpy(&refl_sec_tunel, sec + 12, 4);
+    if (tam != REFL_LADO || !refl_nreg) return;
+    refl_lba = lba;
+}
+static void refl_lee(int seg, int cual)
+{
+    refl_hay[cual] = 0;
+    if (!refl_lba || seg < 0 || (uint32_t)seg >= refl_nreg) return;
+    if (gd_lee(refl_lba + 1 + 2 * seg, 2, refl_reg[cual])) return;
+    refl_hay[cual] = refl_reg[cual][2048 + 2] & 1;
+}
 static void *carga_hilo(void *p)
 {
     carga_t *c = p;
     c->r = lee_modelo_en(c->m, c->nombre, c->buf, c->cap);
+    if (!c->r && !strncmp(c->nombre, "SEG", 3)) refl_lee(atoi(c->nombre + 3), 1);   /* el reflejo de la etapa siguiente */
     if (!c->r && c->con_marco) modelo_coloca(c->m, c->marco);   /* en su sitio del marco de la carrera */
     memset(&c->col, 0, sizeof c->col);
     if (!c->r && c->col_nombre[0]) {                            /* su colision: detras del modelo en su hueco o en col_buf */
@@ -6313,6 +6338,7 @@ static int curso_lee_etapa(int k)
     sprintf(n, "SEG%02d.DAT", curso[k].seg);
     r = lee_modelo_en(&etapa, n, hueco_etapa, cap_etapa);
     etapa_nodo = r ? -1 : k; etapa_movida = 0;
+    refl_lee(r ? -1 : curso[k].seg, 0); refl_pend = 1;
     if (!r) { static const float M0[4]; col_en_hueco(k, M0); }   /* la de salida: en el origen */
     return r;
 }
@@ -6596,6 +6622,7 @@ static int curso_paso(void)
     if (s_sig >= 0 && yo.s >= s_sig) {                         /* la etapa siguiente pasa a ser la actual */
         entorno_cambia_etapa();
         etapa = sig; memset(&sig, 0, sizeof sig); etapa_nodo = cur_sig; cielo = &etapa; etapa_movida = 1;
+        memcpy(refl_reg[0], refl_reg[1], sizeof refl_reg[0]); refl_hay[0] = refl_hay[1]; refl_hay[1] = 0; refl_pend = 1;
         cur_nodo = cur_sig; cur_sig = -1; memcpy(marco_et, marco_sig, sizeof marco_et);
         etapa_n = curso[cur_nodo].nivel; s_etapa = s_sig; s_suelta = s_sig + UNION_LIBERA;
         if (curso[cur_nodo].m_pos > 1.0f) m_pos = curso[cur_nodo].m_pos;
@@ -10079,13 +10106,92 @@ static uint32_t noche_ban(void)
 static matrix_t ani_m[NPZ] __attribute__((aligned(32)));      /* matriz de cada pieza en el marco del coche */
 /* lee el CEX2 del coche recien cargado: desplazamiento por vertice, cabeceras con desplazamiento para el entorno y
    grupos de luces */
+/* Reflejo del cielo (DESVIACION pedida, Rev 1.3; el original dibuja un cubo del entorno por cuadro: tools/conv_reflejo.py).
+   En carrera, las mallas con mapa de entorno (tipos 2 y 3) cambian la textura fija del coche por el mapa del cielo de la
+   etapa o, bajo techo, por el del tunel, y sus UV salen del vector reflejado R = I - 2 (N.I) N (I: del ojo al coche; N:
+   la normal del vertice) en el marco del mapa: u = 0,5 + REFL_ESCALA Rx / (1 + Ry), v = 0,5 + REFL_ESCALA Rz / (1 + Ry).
+   El marco del cielo es el de la etapa (el giro de su colocacion, marco_et[3]: el cielo solo gira con ella); el del tunel,
+   el del coche (las lamparas van a lo largo de su eje z). Las mismas cabeceras que compila_cab con otra textura y CLAMP
+   (fuera del mapa, su borde: el suelo). Fuera de la carrera, o sin REFLEJO.DAT, el mapa fijo del coche como antes. */
+#define REFL_ESCALA 0.4f
+#define REFL_MAX 4                                              /* texturas de entorno distintas de un coche (1 o 2) */
+static pvr_ptr_t refl_tv[2][2];                                 /* [cielo, tunel][RGB565, ARGB1555 con alfa 1] */
+static pvr_poly_hdr_t refl_cab[2][2][REFL_MAX] __attribute__((aligned(32)));   /* [cielo, tunel][niebla][textura] */
+static int32_t refl_tex[REFL_MAX]; static uint8_t refl_tipo[REFL_MAX]; static int refl_ntex, refl_est;   /* refl_est: 0 el del coche, 1 cielo, 2 tunel */
+static void refl_sube_mapa(const uint8_t *px, pvr_ptr_t rgb, pvr_ptr_t argb)
+{
+    static uint16_t t[REFL_LADO * REFL_LADO] __attribute__((aligned(32))); int i;
+    pvr_txr_load((void *)px, rgb, sizeof t);
+    for (i = 0; i < REFL_LADO * REFL_LADO; i++) {               /* RGB565 -> ARGB1555 con alfa 1 (los cristales) */
+        uint16_t v = (uint16_t)(px[2 * i] | px[2 * i + 1] << 8);
+        t[i] = (uint16_t)(0x8000u | (v >> 1 & 0x7fe0u) | (v & 0x1fu));
+    }
+    pvr_txr_load(t, argb, sizeof t);
+}
+static int refl_prepara(void)                                   /* la VRAM (8 KB, una vez) y el mapa del tunel */
+{
+    static uint8_t sec[2048] __attribute__((aligned(32))); int i, j;
+    if (refl_tv[0][0]) return 1;
+    if (!refl_lba) return 0;
+    for (i = 0; i < 2; i++) for (j = 0; j < 2; j++)
+        if (!(refl_tv[i][j] = pvr_mem_malloc(2 * REFL_LADO * REFL_LADO))) { refl_lba = 0; dbglog(DBG_ERROR, "REFLEJO: sin VRAM\n"); return 0; }
+    if (!gd_lee(refl_lba + refl_sec_tunel, 1, sec)) refl_sube_mapa(sec, refl_tv[1][0], refl_tv[1][1]);
+    dbglog(DBG_INFO, "REFLEJO: %u etapas, VRAM libre %uK\n", (unsigned)refl_nreg, (unsigned)(pvr_mem_available() >> 10));
+    return 1;
+}
+static void refl_compila(void)                                  /* las cabeceras del cielo y del tunel de las texturas de entorno */
+{
+    int v, f, i;
+    for (v = 0; v < 2; v++) for (i = 0; i < refl_ntex; i++) {
+        const tex_t *t = coche.texs + refl_tex[i]; int alfa = t->lista == 2;
+        for (f = 0; f < 2; f++) {
+            pvr_poly_cxt_t cx;
+            pvr_poly_cxt_txr(&cx, LISTA[t->lista], (alfa ? PVR_TXRFMT_ARGB1555 : PVR_TXRFMT_RGB565) | PVR_TXRFMT_TWIDDLED, REFL_LADO, REFL_LADO,
+                             refl_tv[v][alfa], PVR_FILTER_BILINEAR);
+            cx.gen.fog_type = f ? PVR_FOG_DISABLE : PVR_FOG_TABLE; cx.gen.culling = PVR_CULLING_NONE;
+            cx.txr.env = PVR_TXRENV_MODULATE; cx.gen.specular = PVR_SPECULAR_ENABLE;
+            if (refl_tipo[i] == 3) { cx.blend.src = PVR_BLEND_ONE; cx.blend.dst = PVR_BLEND_ONE; }
+            cx.txr.uv_clamp = PVR_UVCLAMP_U | PVR_UVCLAMP_V;
+            pvr_poly_compile(&refl_cab[v][f][i], &cx);
+        }
+    }
+}
+/* el mapa de este cuadro (0 el del coche, 1 el cielo, 2 el tunel) con sus cabeceras puestas */
+static int refl_elige(int carrera)
+{
+    int e = 0, f, i;
+    if (carrera && refl_ntex && refl_prepara()) {
+        if (refl_pend) { refl_pend = 0; if (refl_hay[0]) refl_sube_mapa(refl_reg[0], refl_tv[0][0], refl_tv[0][1]); }
+        if (refl_hay[0]) {
+            uint32_t n = refl_reg[0][2048] | refl_reg[0][2049] << 8; int k = (int)((yo.s - s_etapa) * (1.0f / PASO));
+            e = !cur_en_union && k >= 0 && (uint32_t)k < n && refl_reg[0][2052 + k] > 127 ? 2 : 1;
+        }
+    }
+    if (e != refl_est) {
+        if (e && !refl_est) refl_compila();                     /* (las del coche pueden haber cambiado: otro coche) */
+        for (i = 0; i < refl_ntex; i++) {
+            if (!e) compila_cab(&coche, refl_tex[i], refl_tipo[i] == 3 ? 3 : 1);
+            else for (f = 0; f < 2; f++) coche.cabs[f][refl_tex[i]] = refl_cab[e - 1][f][i];
+        }
+        refl_est = e;
+#ifdef DIAG_REFLEJO
+        dbglog(DBG_INFO, "REFLEJO: mapa %d (s %.0f, etapa %d)\n", e, (double)(yo.s - s_etapa), cur_nodo);
+#endif
+    }
+    return e;
+}
 /* cabeceras de las texturas de la pintura y el reflejo (con desplazamiento: especular 1, sumada 3) */
 static void coche_cab_cex(void)
 {
-    uint32_t k;
+    uint32_t k; int i;
+    refl_ntex = 0; refl_est = 0;
     for (k = 0; k < cex_n; k++) {
         int32_t t = coche.mallas[cex_m[k].malla].tex;
-        if (cex_m[k].tipo >= 2 && t >= 0) compila_cab(&coche, t, cex_m[k].tipo == 3 ? 3 : 1);
+        if (cex_m[k].tipo >= 2 && t >= 0) {
+            compila_cab(&coche, t, cex_m[k].tipo == 3 ? 3 : 1);
+            for (i = 0; i < refl_ntex && refl_tex[i] != t; i++) {}
+            if (i == refl_ntex && refl_ntex < REFL_MAX) { refl_tex[i] = t; refl_tipo[i] = (uint8_t)cex_m[k].tipo; refl_ntex++; }
+        }
     }
 }
 static void coche_cex(int c, int taxi)
@@ -10168,6 +10274,46 @@ static void coche_entorno(matrix_t mc)
             }
         }
 #endif
+    }
+}
+
+/* UV del reflejo (refl_elige: 1 cielo, 2 tunel): el vector reflejado de cada vertice en el marco del mapa */
+static void coche_reflejo(matrix_t mc, int mapa)
+{
+    float b[3][3], Am[3][3], Is[3], W[NPZ][3][3], I[3], l; uint32_t k, i; int j, q, p;
+    for (j = 0; j < 3; j++) I[j] = yo.pos[j] - ojo[j];
+    l = I[0] * I[0] + I[1] * I[1] + I[2] * I[2]; if (l < 1e-6f) return;
+    l = 1.0f / sqrtf(l); for (j = 0; j < 3; j++) I[j] *= l;
+    if (mapa == 2) for (j = 0; j < 3; j++) { b[j][0] = mc[j][0]; b[j][1] = mc[j][1]; b[j][2] = mc[j][2]; }   /* marco del coche */
+    else {                                                      /* marco de la etapa: mundo girado -marco_et[3] en y */
+        float c = cosf(marco_et[3]), sn = sinf(marco_et[3]);
+        b[0][0] = c; b[0][1] = 0; b[0][2] = -sn; b[1][0] = 0; b[1][1] = 1; b[1][2] = 0; b[2][0] = sn; b[2][1] = 0; b[2][2] = c;
+    }
+    for (q = 0; q < 3; q++) {
+        Is[q] = I[0] * b[q][0] + I[1] * b[q][1] + I[2] * b[q][2];
+        for (j = 0; j < 3; j++) Am[j][q] = (mc[j][0] * b[q][0] + mc[j][1] * b[q][1] + mc[j][2] * b[q][2]) * (1.0f / 127.0f);
+    }
+    for (p = 0; p < NPZ; p++)                                   /* piezas animadas: sus ejes en el marco del mapa */
+        for (j = 0; j < 3; j++) {
+            const float *r = ani.ok ? ani_m[p][j] : (const float[3]){ j == 0, j == 1, j == 2 };
+            for (q = 0; q < 3; q++) W[p][j][q] = r[0] * Am[0][q] + r[1] * Am[1][q] + r[2] * Am[2][q];
+        }
+    for (k = 0; k < cex_n; k++) {
+        const cex_t *e = cex_m + k; const malla_t *m = coche.mallas + e->malla; vert_t *v = coche.verts + m->v0;
+        const uint32_t *vd = cex_vd + e->v0; const uint32_t nv = m->n;
+        if (e->tipo < 2) continue;
+        p = m->nodo < 0 ? 0 : (m->nodo >> 8) & 0xFF; if (p >= NPZ) p = 0;
+        {   const float w00 = W[p][0][0], w01 = W[p][0][1], w02 = W[p][0][2], w10 = W[p][1][0], w11 = W[p][1][1], w12 = W[p][1][2],
+                        w20 = W[p][2][0], w21 = W[p][2][1], w22 = W[p][2][2], ix = Is[0], iy = Is[1], iz = Is[2];
+            for (i = 0; i < nv; i++) {
+                uint32_t w = vd[i]; float x = (int8_t)w, y = (int8_t)(w >> 8), z = (int8_t)(w >> 16);
+                float nx = x * w00 + y * w10 + z * w20, ny = x * w01 + y * w11 + z * w21, nz = x * w02 + y * w12 + z * w22;
+                float d = 2.0f * (nx * ix + ny * iy + nz * iz), den = 1.0f + iy - d * ny, g;
+                if (den < 0.25f) den = 0.25f;                   /* muy hacia abajo: el borde del mapa (CLAMP) */
+                g = REFL_ESCALA / den;
+                v[i].u = 0.5f + (ix - d * nx) * g; v[i].v = 0.5f + (iz - d * nz) * g;
+            }
+        }
     }
 }
 
@@ -11808,6 +11954,7 @@ int main(int argc, char **argv)
     }
     or_programa_lanza();                                        /* prueba: cadena a OutRunners al arrancar */
 #endif
+    refl_busca();                                               /* REFLEJO.DAT: el reflejo del cielo por etapa */
     robot_lee();                                                /* CHRPAR.DAT y el bloque de la pareja: antes que los huecos y la ruta (RAM) */
     if (!(coche_bloque = memalign(32, COCHE_RAM))) dbglog(DBG_ERROR, "coche: sin %uK para el bloque\n", COCHE_RAM >> 10);   /* y el del coche */
     if ((r = curso_lee() ? -8 : curso_huecos() ? -9 : curso_lee_etapa(0))) {   /* el arbol y la primera etapa */
@@ -12827,7 +12974,7 @@ int main(int argc, char **argv)
 #else
         if (cex_n || cex_taxi) coche_luces(ani.ban, estado != TITULO && (meta_pas ? meta.freno != 0 : fis_ok ? fis.freno_op != 0 : yo.freno_ant > 0.0f), estado != TITULO && ani.caliente);   /* car+38 != 0 (con la fisica del original coche_paso no toca freno_ant: los pilotos del freno no se encendian nunca) */
 #endif
-        if (cex_n) coche_entorno(mod_coche);
+        if (cex_n) { int r_ = refl_elige(estado != TITULO); if (r_) coche_reflejo(mod_coche, r_); else coche_entorno(mod_coche); }
         if (cex_n) coche_luz(mod_coche, estado != TITULO);     /* la luz del entorno 2 en la pintura */
         rc_chr.listo = rc_band.listo = 0; chr_vtx_ult = chr_vtx; chr_us_ult = chr_us; chr_vtx = chr_us = 0;
         if (fin24 && chr_ok == 1) robot_matrices(&rc_chr, &mod_coche, 0);   /* la pareja del final */
