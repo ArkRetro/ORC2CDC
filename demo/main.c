@@ -113,9 +113,10 @@ typedef struct {
     uint32_t *vis;                                                /* nodos visibles en el cuadro (bits; nodos_visibles) */
     uint32_t *vis_ant;                                            /* los que se dibujaron en el anterior (detras de vis) */
     uint32_t *pvs_ult;                                            /* gracia de la PVS (P1, nodos_visibles): el ultimo coste
-                                                                     con el que se dibujo el nodo (pvs_teo) y, detras en
-                                                                     bytes, los cuadros de gracia que le quedan (pvs_gra) */
+                                                                     con el que se dibujo el nodo (pvs_teo), seguido de
+                                                                     pvs_dibujo y los cuadros que le quedan (pvs_gra) */
     uint8_t *pvs_gra;
+    uint32_t *pvs_dibujo;                                       /* tiras de la ultima seccion visible de cada nodo */
     uint16_t *grp;                                                /* grupos de nodos (tools/grupos_nodos.py: bits 16-31 de
                                                                      fl = jefe + 1): clases del grupo en el cuadro, en el
                                                                      sitio del jefe (nodos_visibles); NULL sin grupos */
@@ -272,9 +273,15 @@ static int lee_modelo_en(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t
         m->pvs_m = calloc((m->nmallas + 31) / 32, 4); m->pvs_teo = calloc(2 * m->nnodos + 1, 4);
         if (!m->pvs_m || !m->pvs_teo) { free(m->pvs_m); free(m->pvs_teo); m->pvs_m = m->pvs_teo = NULL; m->pvs_l = NULL; }
     }
-    m->pvs_ult = NULL; m->pvs_gra = NULL;
-    if (m->pvs_l && m->nnodos && (m->pvs_ult = calloc(m->nnodos * 5, 1)))
-        m->pvs_gra = (uint8_t *)(m->pvs_ult + m->nnodos);          /* (sin sitio: sin gracia: la PVS como antes) */
+    m->pvs_ult = NULL; m->pvs_gra = NULL; m->pvs_dibujo = m->pvs_m;
+    if (m->pvs_l && m->nnodos) {
+        uint32_t palabras = (m->nmallas + 31) / 32;
+        m->pvs_ult = calloc(1, 5 * m->nnodos + 4 * palabras);
+        if (m->pvs_ult) {
+            m->pvs_dibujo = m->pvs_ult + m->nnodos;
+            m->pvs_gra = (uint8_t *)(m->pvs_dibujo + palabras);
+        }
+    }
     m->blob = b + ((p - b + 31) & ~31); m->datos = b; m->tam = sz;
     return 0;
 }
@@ -898,7 +905,7 @@ static int en_cuenta;                                    /* estado CUENTA: el pr
 #ifndef REPARTO_ARRANQUE
 #define REPARTO_ARRANQUE 600
 #endif
-static int arranque_hold;                                /* CARRERA y t_estado < REPARTO_ARRANQUE: suelo del reparto */
+static int arranque_hold;                                /* primeros pasos de carrera, medidos desde GO */
 static int precal_d = -1, precal_p = -1;                 /* corte estable del precalentamiento (suelo del arranque) */
 /* objetos de la union (bo_dibuja: pajaros, bandada, halcones, flamencos, dragon; DECISION DEL PORT, lote 1 de la revision
    44): van despues de la etapa con su propio tope (ta_bo_tope: lo que deja la etapa sin tocar la reserva del coche, la
@@ -1044,9 +1051,22 @@ static inline void envia(const pt_t *p, int fin)
     v->x = p->x * iw; v->y = p->y * iw; v->z = iw; v->u = p->u; v->v = p->v; v->argb = p->c; v->oargb = p->o;
     pvr_dr_commit(v);
 }
+/* El agua y los triangulos muy grandes de la escena comparten el recorte lateral. */
+#define MARGEN_RECORTE 32.0f
+static void envia_recorte_lateral(const pt_t *p, int n);
+static inline uint32_t interpola_argb(uint32_t a, uint32_t b, float t)
+{
+    const uint32_t canales = 0x00ff00ffu;
+    uint32_t k, rb, ag;
+    if (a == b) return a;
+    k = (uint32_t)(t * 256.0f + 0.5f);
+    rb = (a & canales) * (256 - k) + (b & canales) * k;
+    ag = ((a >> 8) & canales) * (256 - k) + ((b >> 8) & canales) * k;
+    return ((rb >> 8) & canales) | (ag & (canales << 8));
+}
 static void tri_recortado(const pt_t *p)
 {
-    pt_t o[4]; int n = 0, i;
+    pt_t o[4]; int n = 0, i, lateral = 0;
     for (i = 0; i < 3; i++) {
         const pt_t *a = p + i, *b = p + (i + 1) % 3;
         int da = a->w >= cerca, db = b->w >= cerca;
@@ -1054,10 +1074,20 @@ static void tri_recortado(const pt_t *p)
         if (da != db) {
             float t = (cerca - a->w) / (b->w - a->w);
             o[n].x = a->x + t * (b->x - a->x); o[n].y = a->y + t * (b->y - a->y); o[n].w = cerca;
-            o[n].u = a->u + t * (b->u - a->u); o[n].v = a->v + t * (b->v - a->v); o[n].c = a->c; o[n].o = a->o; n++;
+            o[n].u = a->u + t * (b->u - a->u); o[n].v = a->v + t * (b->v - a->v);
+            o[n].c = a->c; o[n].o = a->o;
+            if (ta_en_etapa) {
+                o[n].c = interpola_argb(a->c, b->c, t); o[n].o = interpola_argb(a->o, b->o, t);
+                /* El cruce por w=0,1 de una pared larga puede quedar a millones de pixeles.
+                   El camino habitual sirve mientras la proyeccion queda cerca de la pantalla. */
+                lateral |= fabsf(o[n].x) > 4096.0f * cerca || fabsf(o[n].y) > 4096.0f * cerca;
+            }
+            n++;
         }
     }
-    if (n < 3 || !ta_cabe(n)) return;
+    if (n < 3) return;
+    if (lateral) { envia_recorte_lateral(o, n); return; }
+    if (!ta_cabe(n)) return;
     if (n == 3) { envia(o, 0); envia(o + 1, 0); envia(o + 2, 1); tri_enviados++; }
     else { envia(o, 0); envia(o + 1, 0); envia(o + 3, 0); envia(o + 2, 1); tri_enviados += 2; }
 }
@@ -1335,7 +1365,7 @@ static void dibuja_rango(const modelo_t *mo, int l, uint32_t k0, uint32_t k1, in
         if (recorta) {
             float dx, dy, dz, zv, xv, yv;
             if (mo->vis && m->nodo >= 0 && !(mo->vis[m->nodo >> 5] & (1u << (m->nodo & 31)))) continue;
-            if (mo->pvs_on && m->nodo >= 0 && !(mo->pvs_m[k >> 5] & (1u << (k & 31)))) continue;   /* PVS: no se ve */
+            if (mo->pvs_on && m->nodo >= 0 && !(mo->pvs_dibujo[k >> 5] & (1u << (k & 31)))) continue;   /* PVS: no se ve */
 #ifndef DIAG_SIN_TOPE
             if (vtx_et + (vtx_env - vtx_et0) > VTX_ETAPA_MAX) { ta_corto = 1; ta_et_corto = 1; POP_MALLA(m); continue; }
 #endif
@@ -1408,7 +1438,7 @@ static void dibuja_etapa(const modelo_t *mo, int l)
     const float o0 = ojo[0], o1 = ojo[1], o2 = ojo[2], e0 = ade[0], e1 = ade[1], e2 = ade[2];
     const float d0 = der[0], d1 = der[1], d2 = der[2], a0 = arr[0], a1 = arr[1], a2 = arr[2];
     const float cer = cerca, lej = lejos < ta_lej_tope ? lejos : ta_lej_tope, cer15 = cerca * 1.5f;
-    const uint32_t *tr = mo->tr, *vis = mo->vis, *pvs = mo->pvs_on ? mo->pvs_m : NULL;
+    const uint32_t *tr = mo->tr, *vis = mo->vis, *pvs = mo->pvs_on ? mo->pvs_dibujo : NULL;
     const malla_t *M = mo->mallas; const nodo_t *N = mo->nodos;
     uint32_t it, it0 = mo->tr_ini[l], it1 = mo->tr_ini[l + 1], vtx_et0 = vtx_env;
     int ult = -2, sol = l < 2 && (mo == &etapa || mo == &uni || mo == &sig);
@@ -5544,7 +5574,7 @@ static int etapa_n, hud_ok, crono, puntos;
    crecen de etapa en etapa); entonces se pide la etapa de la rama, que se ve en cuanto esta subida. Al llegar a ella
    pasa a ser la etapa actual y la union se libera UNION_LIBERA m despues. Memoria: etapa + union o union + etapa
    siguiente, en dos huecos fijos. En las etapas finales la union es la meta: GOAL al pasar su pancarta (meta). */
-#define UNION_ANTES 2500.0f
+#define UNION_ANTES 2800.0f
 #define UNION_LIBERA 300.0f
 /* la etapa que se deja se suelta donde el original la deja de dibujar: en su rama y en la posicion 0x18 de la union
    (race_manager 4515B0, bandera 0x20 con la 0x80 de la colision; 44E590 cambia de registro: geo_paso). Antes a
@@ -6054,6 +6084,8 @@ static uint64_t pk_t;
 #define PK(n) do { } while (0)
 #endif
 static int sube_turno;                                          /* un trozo de texturas por cuadro (lo pone el bucle) */
+static void entorno_cambia_etapa(void);
+static int ent_cruza;  /* la mezcla sigue usando el cielo de la union despues del checkpoint */
 static int curso_paso(void)
 {
     int ev = 0; const etapa_t *e = curso + cur_nodo;
@@ -6184,6 +6216,7 @@ static int curso_paso(void)
     }
     PK("pide etapa");
     if (s_sig >= 0 && yo.s >= s_sig) {                         /* la etapa siguiente pasa a ser la actual */
+        entorno_cambia_etapa();
         etapa = sig; memset(&sig, 0, sizeof sig); etapa_nodo = cur_sig; cielo = &etapa; etapa_movida = 1;
         cur_nodo = cur_sig; cur_sig = -1; memcpy(marco_et, marco_sig, sizeof marco_et);
         etapa_n = curso[cur_nodo].nivel; s_etapa = s_sig; s_suelta = s_sig + UNION_LIBERA;
@@ -6192,7 +6225,7 @@ static int curso_paso(void)
         ev |= CUR_SIGUIENTE;
     }
     PK("siguiente");
-    if (s_suelta >= 0 && uni.datos && yo.s > s_suelta) { libera_modelo(&uni); col_un.ok = 0; s_suelta = -1; }
+    if (s_suelta >= 0 && uni.datos && yo.s > s_suelta && !ent_cruza) { libera_modelo(&uni); col_un.ok = 0; s_suelta = -1; }
     PK("suelta union");
     return ev;
 }
@@ -7140,6 +7173,37 @@ static void pvs_aplica(modelo_t *mo, int s)                     /* XOR de la lis
 #endif
     }
 }
+/* Aplicar la PVS de la seccion a las tiras que dibuja el motor. Si un nodo desaparece
+   entero, conservar exactamente su ultimo subconjunto. nodos_visibles decide si sigue
+   dentro de la gracia y del presupuesto. La mascara XOR se mantiene aparte e intacta. */
+static void pvs_recuerda(modelo_t *mo)
+{
+    uint32_t k = mo->inicio[0], fin, it = 0;
+    if (!mo->pvs_gra) return;
+    while (k < mo->inicio[3]) {
+        int32_t nd;
+        if (mo->tr) {
+            uint32_t tramo = mo->tr[it++];
+            nd = (int32_t)(tramo >> 16) - 1; fin = tramo & 0xffff;
+        } else {
+            nd = mo->mallas[k].nodo;
+            for (fin = k + 1; fin < mo->inicio[3] && mo->mallas[fin].nodo == nd; fin++) {}
+        }
+        if (nd >= 0 && (uint32_t)nd < mo->nnodos) {
+            uint32_t padre = (uint32_t)nd >= mo->nn0 && mo->lej_de ? mo->lej_de[nd - mo->nn0] : (uint32_t)nd;
+            if (mo->pvs_teo[2 * padre]) {
+                while (k < fin) {
+                    uint32_t w = k >> 5, sig = (w + 1) << 5;
+                    uint32_t hasta = fin < sig ? fin : sig;
+                    uint32_t bits = (~0u << (k & 31)) & (~0u >> (31 - ((hasta - 1) & 31)));
+                    mo->pvs_dibujo[w] = (mo->pvs_dibujo[w] & ~bits) | (mo->pvs_m[w] & bits);
+                    k = hasta;
+                }
+            }
+        }
+        k = fin;
+    }
+}
 static void pvs_paso(modelo_t *mo)
 {
     uint32_t k, a, b, i, s; float d, e, t[2], l, x, li, ld; const float *r, *r0, *r1;
@@ -7174,8 +7238,11 @@ static void pvs_paso(modelo_t *mo)
     li = CON_SUP ? r[C_LIM] : r[3]; ld = CON_SUP ? r[C_LIM + 1] : r[4];
     if (x < -li - PVS_LADO || x > ld + PVS_LADO || ojo[1] > altura_punto(r, x) + PVS_ALTO) return;
     s = mo->sec_mapa[k] < mo->nsec ? mo->sec_mapa[k] : mo->nsec - 1;
-    while (mo->pvs_s < (int32_t)s) pvs_aplica(mo, ++mo->pvs_s);
-    while (mo->pvs_s > (int32_t)s) pvs_aplica(mo, mo->pvs_s--);
+    if (mo->pvs_s != (int32_t)s) {
+        while (mo->pvs_s < (int32_t)s) pvs_aplica(mo, ++mo->pvs_s);
+        while (mo->pvs_s > (int32_t)s) pvs_aplica(mo, mo->pvs_s--);
+        pvs_recuerda(mo);
+    }
     mo->pvs_on = 1;
 }
 /* Registros de la union que se dibujan (bit r: registro r de la union, 0 el tronco, 1 la rama izquierda, 2 la derecha;
@@ -7801,12 +7868,12 @@ static void niebla_de(const etapa_t *e, float pos, float *d, int *modo, uint32_t
 }
 /* estado de la transicion de entorno en la union */
 static int ent_fase;                                            /* 0 en la etapa, 1 mezclando, 2 ya la nueva */
-static int ent_nodo = -1, ent_nuevo = -1, ent_t, ent_n;         /* etapa de referencia, la nueva; cuadros que quedan */
+static int ent_nuevo = -1, ent_t, ent_n;         /* destino, cuadros que quedan y duracion */
 /* El fundido que no ha acabado al llegar a la etapa nueva (la etapa se leyo tarde: GD lento) sigue en ella hasta el
-   final (ent_cruza): el cielo viejo es el de la union, que no se suelta hasta UNION_LIBERA m despues, y la luz vieja
+   final (ent_cruza): el cielo viejo es el de la union, que se conserva durante toda la mezcla, y la luz vieja
    la de ent_viejo con el giro de su marco (ent_giro). Antes se cortaba al cambiar de etapa: el cielo, la niebla y la
    luz saltaban de golpe a los de la etapa nueva. */
-static int ent_cruza, ent_viejo = -1; static float ent_giro;
+static int ent_viejo = -1; static float ent_giro;
 static float ent_dur;                                           /* duracion (cuadros x 60,2 / 60: 7D28D8) */
 static float ent_d0; static int ent_m0; static uint32_t ent_c0; /* niebla guardada al empezar (7D28E0) */
 static int cie_b8, cie_ba, cie_2a, cie_tercio;                  /* cuentas de los tres tercios del cielo (451E90) */
@@ -7814,22 +7881,14 @@ static float cie_a[4]; static int cie_on[4];                    /* viejo 0, viej
 static float sol_int;                                           /* intensidad del sol (SCN_EFC +9C) */
 static void entorno_reinicia(void)
 {
-    ent_fase = 0; ent_nodo = cur_nodo; ent_nuevo = -1; ent_cruza = 0; ent_viejo = -1;
+    ent_fase = 0; ent_nuevo = -1; ent_cruza = 0; ent_viejo = -1;
     geo_reinicia();
     sol_int = cur_nodo >= 0 && (curso[cur_nodo].clima & 2) ? 1.0f : 0.0f;   /* al empezar: sin fundido (4AFCC0) */
 }
-/* la niebla, la transicion de la union, el cielo y el sol (cada paso de logica) */
-static void niebla_paso(void)
+/* Guardar el entorno saliente antes de promover sig: la lectura y el checkpoint
+   pueden completarse en el mismo paso. Tambien hay rutas que vuelven al mismo nodo. */
+static void entorno_intenta_union(void)
 {
-    float d0, d1, t, d; int m0, m1, k; uint32_t c0, c1;
-    if (cur_nodo < 0) return;
-    if (cur_nodo != ent_nodo) {                                 /* ya en la etapa nueva */
-        ent_cruza = ent_fase == 1 && cur_nodo == ent_nuevo && ent_viejo >= 0 && uni.tv && etapa.tv;   /* a medias: sigue */
-        ent_nodo = cur_nodo; if (!ent_cruza) ent_fase = 0;
-    }
-    if (ent_cruza && (!uni.tv || ent_fase != 1)) { ent_cruza = 0; ent_fase = 0; }   /* acabado (o sin el cielo viejo) */
-    if (ent_cruza) { horizonte_mira(ent_viejo, &uni); horizonte_mira(cur_nodo, &etapa); }
-    else { horizonte_mira(cur_nodo, cielo); if (cur_sig >= 0 && sig.tv) horizonte_mira(cur_sig, &sig); }
     if (ent_fase == 0 && cur_sig >= 0 && s_union >= 0 && curso[cur_nodo].trans_m >= 0 && sig.tv &&
         yo.s >= s_union + curso[cur_nodo].trans_m) {           /* 44A000 fase 1 -> 2 y 451E90 estado 0 -> 1 */
         ent_fase = 1; ent_nuevo = cur_sig; ent_viejo = cur_nodo; ent_giro = marco_et[3];
@@ -7839,6 +7898,22 @@ static void niebla_paso(void)
         cie_a[0] = cie_a[1] = cie_a[2] = cie_a[3] = 1; cie_on[0] = cie_on[1] = 1; cie_on[2] = cie_on[3] = 0;
         dbglog(DBG_INFO, "ENTORNO: transicion %.4s -> %.4s en s %.0f (%d cuadros)\n", curso[cur_nodo].zona, curso[cur_sig].zona, (double)yo.s, ent_n);
     }
+}
+static void entorno_cambia_etapa(void)
+{
+    entorno_intenta_union();
+    ent_cruza = ent_fase == 1 && ent_nuevo == cur_sig && uni.tv && sig.tv;
+    if (!ent_cruza) ent_fase = 0;
+}
+/* la niebla, la transicion de la union, el cielo y el sol (cada paso de logica) */
+static void niebla_paso(void)
+{
+    float d0, d1, t, d; int m0, m1, k; uint32_t c0, c1;
+    if (cur_nodo < 0) return;
+    if (ent_cruza && (!uni.tv || ent_fase != 1)) { ent_cruza = 0; ent_fase = 0; }   /* acabado (o sin el cielo viejo) */
+    if (ent_cruza) { horizonte_mira(ent_viejo, &uni); horizonte_mira(cur_nodo, &etapa); }
+    else { horizonte_mira(cur_nodo, cielo); if (cur_sig >= 0 && sig.tv) horizonte_mira(cur_sig, &sig); }
+    entorno_intenta_union();
     if (ent_fase == 1) {
         if (--ent_t < 0) ent_fase = 2;
         if (cie_tercio > 0) {                                   /* 451E90: un tercio tras otro */
@@ -7912,7 +7987,8 @@ static void luz_actual(int e, float *v, float *d)
    reparto del TA (nlim_paso, nlim_prio), y velaba lo medio. Delante de NLIM_INI x lejos la tabla es la de la niebla
    del original (imagen igual). -DSIN_NIEBLA_LIMITE la quita. */
 #define NLIM_A 0.3f
-#define NLIM_INI 0.9f
+#define NLIM_INI 0.12f
+#define NLIM_ANCHO 0.52f
 static float niebla_tab[129];                                   /* la tabla puesta (niebla_pon; focos_niebla) */
 static void niebla_pon(void)
 {
@@ -7947,7 +8023,7 @@ static void niebla_pon(void)
         f = (z - lejos * 0.55f) / (lejos * 0.45f); f = f < 0 ? 0 : f > 1 ? 1 : f;
         if (lejos >= LEJOS_PS2 || lejos >= lejos_guion) f = 0;  /* la del original: sin fundido (no lo tiene) */
         g = niebla_d * z; g = niebla_d <= 0 ? 0 : niebla_modo == 2 ? 1 - expf(-g * g) : 1 - expf(-g);
-        h = (z - NLIM_INI * nl) / ((1 - NLIM_INI) * nl); h = h < 0 ? 0 : h > 1 ? 1 : h;
+        h = (z - NLIM_INI * nl) / (NLIM_ANCHO * nl); h = h < 0 ? 0 : h > 1 ? 1 : h;
         h = a * h * h * (3 - 2 * h);                            /* suave (smoothstep) */
         tab[i] = 1 - (1 - f) * (1 - g) * (1 - h);
     }
@@ -8069,44 +8145,30 @@ static int cielo_lmax(const modelo_t *mo, int g, float a, int lmin)
     }
     return r;
 }
-static uint32_t agua_color_de(const char *z);                /* (color del agua de la zona; abajo, en agua_dibuja) */
+static pvr_poly_hdr_t cielo_sin_textura[2][3];              /* como las capas con textura, sin escribir profundidad */
 /* el grupo g del cielo de mo en la lista l con alfa a; lmin: la lista mas alta de las capas de debajo */
 static void cielo_grupo(const modelo_t *mo, int g, int l, float a, int niebla, int lmin)
 {
     uint32_t k;
     if (!mo || !mo->tv || a <= 0.1f || (a < 0.9f && l != 2)) return;
-    if (a < 0.9f) color_mul = ((uint32_t)(a * 255) << 24) | 0xFFFFFF;
+    color_mul = a < 0.9f ? ((uint32_t)(a * 255) << 24) | 0xFFFFFF : 0;
     for (k = mo->inicio[3]; k < mo->inicio[4]; k++) {
         const malla_t *m = mo->mallas + k; int gm = m->nodo <= -256 ? -256 - m->nodo : 0;
         int lm = m->tex >= 0 ? (int)mo->texs[m->tex].lista : 0, le = lm < lmin ? lmin : lm;
-        int nf = niebla, suelo = 0;
-        color_mul = a < 0.9f ? ((uint32_t)(a * 255) << 24) | 0xFFFFFF : 0;
+        int nf = niebla;
         if (m->n < 3 || gm != g || (a >= 0.9f && le != l)) continue;
-        /* El mar/suelo lejano del cielo (BEAC: 91 cuadrilateros de 550 m a y = -51 sin textura y la cupula de
-           abajo, toda por debajo del horizonte) lleva la niebla de la tabla: en el original se funde con el color
-           de scn_env_fog (BEAC 0xBDD4E1) y aqui salia blanco solido en el limite de dibujado. El cielo de arriba
-           no cambia (sigue sin niebla salvo CLOU). */
-        if (m->tex < 0) nf = 1;
-        else {   /* (una malla del cielo con todos sus vertices por debajo del ojo es el mar/suelo lejano) */
-            const vert_t *vv = mo->verts + m->v0; uint32_t q, nn = m->n > 256 ? 256 : m->n;
-            for (q = 0; q < nn; q++) if (vv[q].y > 0.0f) break;
-            if (q == nn) nf = 1;
+        /* La cupula inferior de BEAC lleva niebla. El color de cada capa viene de sus
+           vertices. El agua del escenario tiene su grupo y su propio pase. */
+        if (!nf) {
+            const vert_t *v = mo->verts + m->v0;
+            uint32_t q, n = m->n > 256 ? 256 : m->n;
+            for (q = 0; q < n && v[q].y <= 0.0f; q++) {}
+            nf = q == n;
         }
-        /* RAM2 (generalizacion del arreglo de BEAC): el suelo lejano del cielo es el telon que queda justo detras del
-           corte de dibujado, asi que su niebla es la de la tabla EN el corte (la entrada 0: scn_env_fog de la zona
-           evaluada a "lejos" mas el velo NLIM_A), no la de su distancia geometrica (~700-2000 m, casi nada en etapas
-           con niebla debil o sin densidad: GRAN 0,000, YOSE/NEWY 0,0002). En BEAC no cambia nada visible: su mar es el
-           plano del agua, que tapa la cupula de abajo. Con niebla atmosferica (CLOU) se queda con la distancia real
-           como el original. */
-        suelo = nf && !niebla;
-        if (nf && m->tex < 0) {                                 /* mar/suelo sin textura: el color del agua de la zona */
-            uint32_t cw = cur_nodo >= 0 ? agua_color_de(curso[cur_nodo].zona) : 0xFF4064A3u;
-            color_mul = (a < 0.9f ? (uint32_t)(a * 255) << 24 : 0xFF000000u) | (cw & 0xFFFFFF);
-        } else if (a < 0.9f) color_mul = ((uint32_t)(a * 255) << 24) | 0xFFFFFF;
         cie_lleno = a >= 0.9f && le == 2 && lm != 2;            /* subida a la transparente: entera */
         if (m->tex >= 0) pvr_prim(cielo_cab(mo, m->tex, nf, a >= 0.9f ? le : 2), sizeof(pvr_poly_hdr_t));
-        else pvr_prim(&cab_col[!nf][a >= 0.9f ? le : 2], sizeof(pvr_poly_hdr_t));
-        cielo_malla(mo, m, l == 2 && !nf ? 1.2e-4f * (1.0f + (float)cie_seq++ * (1.0f / 1024.0f)) : suelo ? 1.0f / lejos : 0);
+        else pvr_prim(&cielo_sin_textura[!nf][a >= 0.9f ? le : 2], sizeof(pvr_poly_hdr_t));
+        cielo_malla(mo, m, l == 2 && !nf ? 1.2e-4f * (1.0f + (float)cie_seq++ * (1.0f / 1024.0f)) : nf && !niebla ? 1.0f / lejos : 0);
     }
     color_mul = 0; cie_lleno = 0;
 }
@@ -8198,7 +8260,7 @@ static void geo_vista_fin(const modelo_t *t)
    (no se cambian), el resto sigue la tabla pedida y las zonas con agua que no llevan color propio usan el azul
    marino 0xFF0E2248. Sigue sin textura, sin UV ni scroll, sin tinte por vertice, sin espuma, sin destellos y sin la
    niebla de la tabla: un solo tono por etapa en toda la superficie, tambien al fondo. La z, el recorte contra la
-   piramide de la vista (AGUA_MARGEN) y las condiciones de dibujo son los mismos de las revisiones anteriores. */
+   piramide de la vista (MARGEN_RECORTE) y las condiciones de dibujo son los mismos de las revisiones anteriores. */
 /* Tabla zona -> color del agua (ARGB opaco). Sin textura, sin UV y sin tinte por vertice: el color es el mismo en
    todos los vertices de la zona. PALM y BEAC se dejan como estaban: 0xFF4064A3, el azul aprobado en la consola.
    Las zonas con agua que no tienen color propio (CLOU, TULI, ALAS, GRAN, SANF, AMAZ, YOSE, MAYA, NEWY, PRIN,
@@ -8227,35 +8289,49 @@ static uint32_t agua_color_de(const char *z)
    plano cercano caian a cientos de miles de pixeles de la pantalla, y la PowerVR real calcula por triangulo los planos
    de 1/w desde los vertices (como el cielo: docs/PARIDAD.md, Revision 44): la z del agua salia mal (el agua por encima
    de la calzada y del terreno) y triangulos enteros se perdian (se veia el cielo de debajo). Ahora cada triangulo se
-   recorta contra el plano cercano y los cuatro lados de la pantalla con AGUA_MARGEN px de margen: los vertices que llegan
+   recorta contra el plano cercano y los cuatro lados de la pantalla con MARGEN_RECORTE px de margen: los vertices que llegan
    a la PowerVR estan como mucho a ese margen de la pantalla. Flycast (la GPU del PC, en coma flotante) no lo mostraba */
-#define AGUA_MARGEN 32.0f
-static int agua_corta(pt_t *o, const pt_t *e, int n, float a, float b, float c, float d)   /* a x + b y + c w + d >= 0 */
+static int corta_plano(pt_t *o, const pt_t *e, int n, float a, float b, float c, float d)   /* a x + b y + c w + d >= 0 */
 {
     int i, m = 0;
     for (i = 0; i < n; i++) {
         const pt_t *p = e + i, *q = e + (i + 1) % n;
         float dp = a * p->x + b * p->y + c * p->w + d, dq = a * q->x + b * q->y + c * q->w + d;
         if (dp >= 0) o[m++] = *p;
-        if ((dp >= 0) != (dq >= 0)) {
+        if ((dp > 0 && dq < 0) || (dp < 0 && dq > 0)) {
             float t = dp / (dp - dq);
             o[m] = *p; o[m].x = p->x + t * (q->x - p->x); o[m].y = p->y + t * (q->y - p->y); o[m].w = p->w + t * (q->w - p->w);
-            o[m].u = p->u + t * (q->u - p->u); o[m].v = p->v + t * (q->v - p->v); m++;
+            o[m].u = p->u + t * (q->u - p->u); o[m].v = p->v + t * (q->v - p->v);
+            o[m].c = interpola_argb(p->c, q->c, t); o[m].o = interpola_argb(p->o, q->o, t); m++;
         }
     }
     return m;
 }
+static void envia_recorte_lateral(const pt_t *p, int n)
+{
+    pt_t a[8], b[8]; int i; unsigned fuera = 15; const float g = MARGEN_RECORTE;
+    /* En carreteras y paredes, muchos de estos triangulos quedan enteros a un lado.
+       Descartarlos antes de interpolar vertices y colores en los cuatro planos. */
+    for (i = 0; i < n && fuera; i++) {
+        float w = p[i].w;
+        unsigned lados = (p[i].x < -g * w) | ((p[i].x > (640.0f + g) * w) << 1)
+                       | ((p[i].y < -g * w) << 2) | ((p[i].y > (480.0f + g) * w) << 3);
+        fuera &= lados;
+    }
+    if (fuera) return;
+    if ((n = corta_plano(b, p, n, 1, 0, g, 0)) < 3) return;
+    if ((n = corta_plano(a, b, n, -1, 0, 640.0f + g, 0)) < 3) return;
+    if ((n = corta_plano(b, a, n, 0, 1, g, 0)) < 3) return;
+    if ((n = corta_plano(a, b, n, 0, -1, 480.0f + g, 0)) < 3) return;
+    if (!ta_cabe(n)) return;
+    for (i = 0; i < n; i++) b[i] = a[i & 1 ? (i + 1) / 2 : (n - i / 2) % n];
+    envia_tira(b, n); tri_enviados += n - 2;
+}
 static void agua_tri(const pt_t *p)
 {
-    pt_t a[9], b[9], o[9]; int n, i; const float g = AGUA_MARGEN;
-    if ((n = agua_corta(a, p, 3, 0, 0, 1, -cerca)) < 3) return;          /* w >= cerca */
-    if ((n = agua_corta(b, a, n, 1, 0, g, 0)) < 3) return;              /* x >= -g (x, y: pixeles por w) */
-    if ((n = agua_corta(a, b, n, -1, 0, 640.0f + g, 0)) < 3) return;    /* x <= 640 + g */
-    if ((n = agua_corta(b, a, n, 0, 1, g, 0)) < 3) return;              /* y >= -g */
-    if ((n = agua_corta(a, b, n, 0, -1, 480.0f + g, 0)) < 3) return;    /* y <= 480 + g */
-    if (!ta_cabe(n)) return;
-    for (i = 0; i < n; i++) o[i] = a[i & 1 ? (i + 1) / 2 : (n - i / 2) % n];   /* abanico como tira */
-    envia_tira(o, n); tri_enviados += n - 2;
+    pt_t a[4];
+    int n = corta_plano(a, p, 3, 0, 0, 1, -cerca);
+    if (n >= 3) envia_recorte_lateral(a, n);
 }
 /* cabecera del agua: color por vertice y sin textura. La niebla de la tabla (RAM2, generalizacion del arreglo de BEAC):
    cerca sigue con el tono solido de la zona (la niebla del original es ~0 a esas distancias) y lo que esta justo en
@@ -9283,7 +9359,7 @@ static void etapa_precalienta(void)
     if (etapa.pvs_m) {                                           /* PVS desde la seccion 0 (pvs_paso la mueve) */
         memset(etapa.pvs_m, 0, (etapa.nmallas + 31) / 32 * 4);
         if (etapa.pvs_teo) memset(etapa.pvs_teo, 0, (2 * etapa.nnodos + 1) * 4);
-        if (etapa.pvs_ult) memset(etapa.pvs_ult, 0, etapa.nnodos * 5);
+        if (etapa.pvs_ult) memset(etapa.pvs_ult, 0, etapa.nnodos * 5 + (etapa.nmallas + 31) / 32 * 4);
         etapa.pvs_s = -1; etapa.pvs_i = 0; etapa.pvs_on = 0;
     }
     prio_d = ND_PRIO - 1; prio_p = NB_PRIO - 1; prio_esp_d = prio_esp_p = 0; prio_alfa = PRECALIENTA_ALFA;
@@ -11335,6 +11411,9 @@ int main(int argc, char **argv)
         cx.gen.fog_type = i ? PVR_FOG_DISABLE : PVR_FOG_TABLE; cx.gen.culling = PVR_CULLING_NONE;
         if (l != 2) { cx.fmt.modifier = true; cx.gen.modifier_mode = false; }   /* recibe la sombra del coche */
         pvr_poly_compile(&cab_col[i][l], &cx);
+        cx.fmt.modifier = false;
+        cx.depth.write = PVR_DEPTHWRITE_DISABLE;
+        pvr_poly_compile(&cielo_sin_textura[i][l], &cx);
     }
     pvr_fog_table_color(1.0f, 0.55f, 0.70f, 0.92f);
     niebla_pon();
@@ -12269,7 +12348,7 @@ int main(int argc, char **argv)
         }
         tri_enviados = 0; vtx_ult = vtx_env; vtx_env = 0; ta_inicia_cuadro(); vtx_et_ult = vtx_et; vtx_et = 0;
         en_cuenta = estado == CUENTA;                           /* (el precalentamiento manda hasta el semaforo) */
-        arranque_hold = estado == CARRERA && t_estado < REPARTO_ARRANQUE;   /* (suelo del arranque, ver arriba) */
+        arranque_hold = estado == CARRERA && crono < REPARTO_ARRANQUE;   /* (suelo del arranque, ver arriba) */
 #ifdef DIAG_MS
         prf_v0 = 0;
 #endif
