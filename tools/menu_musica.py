@@ -77,7 +77,7 @@ def _piezas(pie):
 
 def _par(F, c, sig):
     i = c - F.pri
-    if F.ker and sig and 0 <= sig - F.pri < F.n:
+    if F.ker is not None and sig and 0 <= sig - F.pri < F.n:
         return F.met[i][1] - F.ker[i * F.n + sig - F.pri]
     return F.met[i][1] + F.esp
 
