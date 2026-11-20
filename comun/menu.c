@@ -26,7 +26,7 @@
    Sonido (como el original): efectos del frontal con sfx_menu (cursor, aceptar, bloqueado, cancelar); el titulo va
    sin musica (en el original suena la pelicula), al salir de el arranca la musica de menu (pista 30 de MUSIC.PS2,
    MUS30.ADP); en la musica cada tema suena con su avance (pista 33 + tema) y al confirmar empieza el tema elegido.
-   Musica: las 3 listas del original (9 / 7 / 12 temas) mas ALL I WANT al final de la lista 2 (tema 28, MUS67.ADP;
+   Musica: las 3 listas del original (9 / 7 / 12 temas;
    una tarjeta mas, para cualquier coche), 29 en total; el gatillo R pasa a la siguiente (el bit 0x2000, R1 / R2 del
    PS2), candado y sonido 3 en los temas sin su bit de la licencia, RANDOM (Y) elige uno desbloqueado y sale a correr.
    VRAM: en la RAM solo las tablas de MENU.DAT; las texturas de cada pantalla se leen del GD al entrar y se quedan
@@ -92,17 +92,14 @@ static const char *const UNOM[NU] = { "TITULO_FONDO", "TITULO_LOGO", "TITULO_STA
 
 #define N_OPC 5                                             /* opciones de un jugador (y del carrusel 0x440000) */
 #define N_COCHES 15
-#define SPR_ESCUDO_TAXI 613                                /* sprite nuevo de MENU.DAT (tools: _trabajo/ficha_parche.py) */
-/* musica (4C9790 / 4C9C20 del PC; tablas del PS2 0x375DA8 y 0x4191E8): 3 listas de 9 / 7 / 13 temas (68F36C), el
-   tema k (0..28, 4C9750: lista 0, luego la 1 y la 2) es la pista k de MUSIC.PS2 (68F370: la misma) y su avance la
-   k + 0x21; los temas 0..6 siempre estan y los demas con su bit de la licencia (5C9AB0). El 28 es ALL I WANT (Crazy
-   Taxi, MUS67.ADP): una tarjeta mas al final de la lista 2 y siempre disponible, para cualquier coche. */
+/* musica (4C9790 / 4C9C20 del PC; tablas del PS2 0x375DA8 y 0x4191E8): 3 listas de 9 / 7 / 12 temas (68F36C), el
+   tema k (0..27, 4C9750: lista 0, luego la 1 y la 2) es la pista k de MUSIC.PS2 (68F370: la misma) y su avance la
+   k + 0x21; los temas 0..6 siempre estan y los demas con su bit de la licencia (5C9AB0). */
 #define N_LISTAS 3
-#define N_TEMAS 29
-static const int8_t TEMAS_LISTA[N_LISTAS] = { 9, 7, 13 };
+#define N_TEMAS 28
+static const int8_t TEMAS_LISTA[N_LISTAS] = { 9, 7, 12 };
 static const uint8_t DESBLOQ_TEMA[N_TEMAS] = { 174, 174, 174, 174, 174, 174, 174, 172, 173, 174, 175, 176, 177, 178,
-                                               179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192,
-                                               192 };
+                                               179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192 };
 #define T_DEMO (8 * 60)                                     /* inactividad en el titulo hasta la demo */
 #define T_FUNDIDO 12
 #define T_CARGA_MAX 90                                      /* cuadros que se espera a la VRAM de una pantalla */
@@ -112,7 +109,6 @@ static const uint8_t DESBLOQ_TEMA[N_TEMAS] = { 174, 174, 174, 174, 174, 174, 174
 #define HOLGURA (256 * 1024)                                /* libre de mas antes de subir sin echar nada */
 #define PISTA_MENU 30                                       /* musica de los menus */
 #define PISTA_AVANCE 33                                     /* avance del tema k: pista 33 + k */
-/* ALL I WANT (tema 28): MUS67.ADP; la conversion de tema a pista la hace musica_pon (MUSICA_PISTA_ALL_I_WANT) */
 
 static hud_dat_t *md;
 /* la ficha de la portada de OutRunners y el credito (usos OR_PORTADA / OR_CREDITO de MENU.DAT; -1 sin ellos) */
@@ -181,17 +177,6 @@ static void texto_id(int id, float x, float y, int flags, float alfa, float z, u
 static void texto_c(const char *s, float x, float y, int flags, float alfa, float z, uint32_t col)
 {
     texto((const uint8_t *)s, strlen(s), x, y, flags, alfa, z, col);
-}
-/* la ficha del taxi (COCHE07 = modelo 0 = F50) lleva el escudo de Crazy Taxi encima del de Ferrari: el sprite 613,
-   36x57 en (573, 63), el mismo sitio que el escudo 154 de CABECERA_COCHE. En el resto de fichas no se dibuja. */
-static void escudo_taxi(float alfa, float z)
-{
-    float m[6], q[4];
-    if (!md || alfa <= 0.004f || hudd_n_spr(md) <= SPR_ESCUDO_TAXI) return;
-    m[0] = 1; m[1] = 0; m[2] = 0; m[3] = 1; m[4] = 573; m[5] = 63;
-    q[0] = 0; q[1] = 0; q[2] = 36; q[3] = 57;
-    hudd_capa(md, z, 0);
-    hudd_sprite(SPR_ESCUDO_TAXI, m, q, alfa, 0);
 }
 
 /* ---------------------------------------------------------------- licencias (registro de 0x40C del original) */
@@ -410,13 +395,11 @@ static hudd_regla_t r_menu[20]; static int n_r_menu;
 static int opc_menu(int c) { return n_menu < N_OPC && c >= OPC_QUITADA ? c + 1 : c; }
 static int c_menu, c_modo, c_rank, c_multi, manual, n_ok, pista_sonando, sale_ok;
 extern int or_programa_lanza(void);                        /* demo/main.c: cadena a OutRunners (arch_exec) */
-/* Bits de la licencia para los dos articulos del Salon (SALON.DAT, tabla de precios 0xcf / 0xd0). El bit va en
+/* Bit de la licencia para el articulo del Salon (SALON.DAT, tabla de precios 0xcf). El bit va en
    +0x28 de la licencia y lo guarda la VMU con el resto: la compra es persistente. */
 #define SA_BIT_OUTRUNNERS 0xcf
-#define SA_BIT_TAXI 0xd0
 static int lic_bit(int b);
-/* el nombre ENTIRETY de la licencia (el truco del editor, 447360): desbloquea OUTRUNNERS y el taxi, como el
-   original */
+/* el nombre ENTIRETY de la licencia (el truco del editor, 447360): desbloquea OUTRUNNERS */
 static int lic_entirety(const uint8_t *p) { return p && !memcmp(p, "ENTIRETY", 8); }
 /* OUTRUNNERS (DESVIACION pedida): comprado en el Salon o el nombre ENTIRETY de la licencia. Ya no hay define
    provisional: la entrada esta cerrada hasta la compra. */
@@ -426,15 +409,6 @@ static int menu_or_ok(void)
     if (!p) return 0;
     if (lic_entirety(p)) return 1;
     return lic_bit(SA_BIT_OUTRUNNERS);
-}
-/* la ficha del taxi: comprada en el Salon (bit SA_BIT_TAXI) o el nombre ENTIRETY, igual que OUTRUNNERS; la usa
-   tambien el frontal de OUTRUN2SP */
-int menu_taxi_comprado(void)
-{
-    const uint8_t *p = activa();
-    if (!p) return 0;
-    if (lic_entirety(p)) return 1;
-    return lic_bit(SA_BIT_TAXI);
 }
 static int lista, curs[N_LISTAS], elegido;                  /* 84B0F4, 84B0EC y 830364 del PC */
 
@@ -680,35 +654,6 @@ void menu_carga_sale(void)
 }
 int menu_precarga(void) { return md || (md = hudd_abre("MENU.DAT", 0, 1)) ? 0 : -1; }
 
-#ifdef PRUEBA_TAXI_DESBLOQUEO
-static int c_desbloqueado(int i);
-/* Prueba de los dos caminos de desbloqueo del taxi (compilada solo con -DPRUEBA_TAXI_DESBLOQUEO): la licencia
-   activa, primero con el bit 0xd0 (compra del Salon) y el nombre no-ENTIRETY, y luego sin el bit y con el nombre
-   ENTIRETY. Se registra lo que ven la seleccion de coche / el frontal de OUTRUN2SP (menu_taxi_comprado) y el Salon
-   (sa_tiene). Al final se deja la licencia como estaba. */
-static void prueba_taxi_desbloqueo(void)
-{
-    uint8_t *p = activa(); uint8_t salvo[LIC_BYTES]; int i, ficha = -1;
-    if (!p) { dbglog(DBG_WARNING, "PRUEBA TAXI: sin licencia activa\n"); return; }
-    memcpy(salvo, p, LIC_BYTES);
-    for (i = 0; i < 30; i++) if (t_modelo && t_modelo[i] == 0) { ficha = i; break; }
-    /* A: comprado (bit 0xd0), nombre cualquiera */
-    p[0x28 + SA_BIT_TAXI / 8] |= (uint8_t)(1u << (SA_BIT_TAXI % 8));
-    memset(p, 0, 16); memcpy(p, "ARK", 3);
-    dbglog(DBG_INFO, "PRUEBA TAXI: bit 0xd0=1 nombre=ARK -> comprado/fsp=%d c_desbloqueado(%d)=%d salon=%d\n",
-           menu_taxi_comprado(), ficha, ficha >= 0 ? c_desbloqueado(ficha) : -1, sa_tiene(SA_BIT_TAXI));
-    /* B: nombre ENTIRETY, sin el bit */
-    p[0x28 + SA_BIT_TAXI / 8] &= (uint8_t)~(1u << (SA_BIT_TAXI % 8));
-    memset(p, 0, 16); memcpy(p, "ENTIRETY", 8);
-    dbglog(DBG_INFO, "PRUEBA TAXI: bit 0xd0=0 nombre=ENTIRETY -> comprado/fsp=%d c_desbloqueado(%d)=%d salon=%d\n",
-           menu_taxi_comprado(), ficha, ficha >= 0 ? c_desbloqueado(ficha) : -1, sa_tiene(SA_BIT_TAXI));
-    /* C: ni bit ni nombre (control: tiene que seguir bloqueado) */
-    memset(p, 0, 16); memcpy(p, "ARK", 3);
-    dbglog(DBG_INFO, "PRUEBA TAXI: bit 0xd0=0 nombre=ARK -> comprado/fsp=%d c_desbloqueado(%d)=%d salon=%d\n",
-           menu_taxi_comprado(), ficha, ficha >= 0 ? c_desbloqueado(ficha) : -1, sa_tiene(SA_BIT_TAXI));
-    memcpy(p, salvo, LIC_BYTES);
-}
-#endif
 
 int menu_inicia(void)
 {
@@ -748,9 +693,6 @@ int menu_inicia(void)
         if (h[5]) col_tarjeta = h[5];
         if (h[6] && !memcmp(mnu2 + h[6], "PRG1", 4)) prg = mnu2 + h[6] + 4;
     }
-#ifdef PRUEBA_TAXI_DESBLOQUEO
-    prueba_taxi_desbloqueo();
-#endif
     menu_sin_multi();
     return 0;
 }
@@ -764,18 +706,8 @@ static float giro;
 static int c_indice(void) { return c_cursor + 15 * c_var; }
 static int c_modelo(int i) { return t_modelo ? t_modelo[i] : i; }
 static int lic_bit(int b) { const uint8_t *p = activa(); return p && ((p[0x28 + b / 8] >> (b % 8)) & 1); }
-/* 4C8F90: las dos primeras fichas siempre; las demas, su bit de la licencia. La ficha del taxi (modelo 0) es una
-   entrada nueva de Crazy Taxi: se compra en el Salon (bit SA_BIT_TAXI) o el nombre ENTIRETY, y hasta entonces no se
-   puede elegir. El F50 tuneado (modelo 15, variante "_t") sigue como estaba. */
-static int c_desbloqueado(int i)
-{
-    if (i < 2) return 1;
-    if (t_modelo && i < 30) {
-        if (t_modelo[i] == 15) return 1;
-        if (t_modelo[i] == 0) return menu_taxi_comprado();
-    }
-    return t_desbloq && lic_bit(t_desbloq[i]);
-}
+/* 4C8F90: las dos primeras fichas siempre; las demas, su bit de la licencia */
+static int c_desbloqueado(int i) { return i < 2 || (t_desbloq && lic_bit(t_desbloq[i])); }
 /* 4C8FC0: color c de la ficha i */
 static int c_color_ok(int i, int c)
 {
@@ -846,7 +778,6 @@ static int pon_pista(int n)
 }
 static void pon_musica(int k)
 {
-    if (k == MUSICA_TEMA_ALL_I_WANT) { pon_pista(k); return; }   /* ALL I WANT: suena entero (musica_pon lo lleva a MUS67) */
     if (pista_sonando != PISTA_AVANCE + k && pista_sonando != k && pon_pista(PISTA_AVANCE + k) && k < n_ok) pon_pista(k);
 }
 static void musica_menu(void)
@@ -856,7 +787,7 @@ static void musica_menu(void)
 /* 4C9750: tema de la lista y el cursor actuales */
 static int tema_actual(void) { int k = curs[lista], l; for (l = 0; l < lista; l++) k += TEMAS_LISTA[l]; return k; }
 static int lic_bit(int b);
-static int tema_libre(int k) { return k == MUSICA_TEMA_ALL_I_WANT || k <= 6 || lic_bit(DESBLOQ_TEMA[k]); }   /* 4474E0 */
+static int tema_libre(int k) { return k <= 6 || lic_bit(DESBLOQ_TEMA[k]); }   /* 4474E0 solo por encima del 6 */
 static void musica_lista(void)                              /* carrusel y titulo de la lista actual en su tema */
 {
     static const int UL[N_LISTAS] = { U_L0, U_L1, U_L2 }, UT[N_LISTAS] = { U_T0, U_T1, U_T2 };
@@ -1048,7 +979,7 @@ int menu_preset(void) { return sp_sel ? fsp_preset() : 0; }
 int menu_manual(void) { return sp_sel ? fsp_manual() : manual; }
 int menu_pista(void) {
     if (sp_sel) return fsp_musica();
-    return elegido < n_ok ? elegido : 0;                   /* 28 = ALL I WANT; musica_pon lo lleva a MUS67 */
+    return elegido < n_ok ? elegido : 0;
 }
 int menu_coche3d(void)
 {
@@ -1855,14 +1786,14 @@ static void c2_dibuja(void)
    la seleccion de coche), el aspecto del coche bloqueado (bit 0x40 de 19cfd8), los tableros de cursos que leen los
    bits de ETAPAS y METAS. */
 #define SALON_RAM (384u << 10)                              /* tablas de SALON.DAT (animacion 257 KB, sprites, SAL1) */
-/* Los dos articulos nuevos (OUTRUNNERS y TAXI CRAZY TAXI) son las dos primeras filas visibles de EXTRAS: sus
-   registros van al final de la tabla (0xfc y 0xfd), delante de los textos de la ventana de compra, y un mapa de
+/* El articulo nuevo (OUTRUNNERS) es la primera fila visible de EXTRAS: SALON.DAT guarda sitio para dos
+   registros al final de la tabla (0xfc y 0xfd; solo se usa el primero), delante de los textos de la ventana de compra, y un mapa de
    filas los presenta primero. Asi no se mueve ningun bit de los objetos que ya vendia el Salon. */
 #define SA_NFILA 259                                        /* 257 + los 2 articulos */
 #define SA_NPRECIO 0xd1                                     /* 0xcf + los 2 articulos (0xcf y 0xd0) */
 #define SA_FVENT 254                                        /* primera fila de los textos de la ventana */
 #define SA_FITEM 0xfc                                       /* primera fila de los dos articulos */
-#define SA_NITEM 2
+#define SA_NITEM 1                                          /* articulos que se ven (la fila 0xfd del fichero no se usa) */
 typedef struct { uint32_t tok, pri, ult; } sa_d_t;
 typedef struct {                                            /* bloque SAL1 (tools/conv_salon.py) */
     char m[4]; uint32_t o_txt;
@@ -1898,14 +1829,12 @@ static int sa_obj, sa_vuelta, sa_puede, sa_eleccion;        /* +0xc88, +0xc8c, +
 static int sa_mus;                                          /* +0xb45 */
 /* lista (0x24d430 = 48D970): filas de la tabla, la elegida, la primera que se ve y cuantas */
 static int sa_lf0, sa_ln, sa_lsel, sa_lini, sa_llim, sa_lscroll;
-/* filas visibles de la pagina de COLORES: el taxi (modelo 0) no tiene colores; se saltan sus
-   filas sin tocar el indice de la tabla (el bit del objeto sigue siendo base + fila original).
-   La ficha de pruebas es la 7 de COCHES.DAT (modelo 0, COCHE07); en MNU2 es la posicion 2 y
-   sus 6 filas de color son k_fila[8..13] (bits 36..41). */
+/* filas visibles de la pagina de COLORES: todas las de la tabla, en su orden */
 static int sa_cvis[110], sa_cn;
-/* orden visible de la pagina EXTRAS: los dos articulos (filas 0xfc y 0xfd) primero y despues los 14 extras de
+/* orden visible de la pagina EXTRAS: el articulo (fila 0xfc) primero y despues los 14 extras de
    siempre (filas 0xee..0xfb). El objeto de la fila i sigue siendo 0xc1 + fila real, asi que los bits no cambian. */
-static const int sa_xorden[16] = { 14, 15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 };
+#define SA_NEXTRA 15                                        /* filas de EXTRAS que se ven */
+static const int sa_xorden[SA_NEXTRA] = { 14, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 };
 /* tira (0x238798 = 446710): activa, escena, ultimo indice, paso, base, el objeto */
 static int sa_ton, sa_tult, sa_tpaso, sa_tb0, sa_ti; static uint32_t sa_ttok;
 /* registros de las paginas de coches y colores (+0x4c: 30 x 0x20) */
@@ -1969,7 +1898,6 @@ static int sa_tiene(int b)
     /* los dos articulos cuentan como comprados tambien con el nombre ENTIRETY (es el mismo desbloqueo que lee el
        menu): asi la ficha no ofrece una compra que ya esta hecha y el icono de comprado sale desde el principio */
     if (b == SA_BIT_OUTRUNNERS && menu_or_ok()) return 1;
-    if (b == SA_BIT_TAXI && menu_taxi_comprado()) return 1;   /* el nombre ENTIRETY ya lo desbloquea: sin precio ni compra */
     return b >= 0 && b < 0x96 * 8 && ((p[0x28 + b / 8] >> (b % 8)) & 1);
 }   /* 0x1a1cc8 */
 static uint32_t sa_precio(int i) { return i >= 0 && i < SA_NPRECIO ? SA->precio[i] : 0; }   /* 0x1f4198 */
@@ -1990,7 +1918,7 @@ static int sa_compra(int b, uint32_t precio)
 static int sa_crow(int i) { return sa_base == 0x1c && i >= 0 && i < sa_cn ? sa_cvis[i] : i; }
 static int sa_fila_de(int i)
 {
-    if (sa_base == 0xc1 && i >= 0 && i < 16) return sa_xorden[i];
+    if (sa_base == 0xc1 && i >= 0 && i < SA_NEXTRA) return sa_xorden[i];
     return sa_crow(i);
 }
 static int sa_item_nuevo(void) { return sa_base == 0xc1 && sa_lsel >= 0 && sa_lsel < SA_NITEM; }
@@ -2147,11 +2075,11 @@ static void sa_pagina(int p)                                /* init (0x25bce8, 0
     sa_base = g->base;
     if (p == 1 || p == 4) {                                 /* 482E70(1): la camara del salon; registros y coche */
         sa_registros(p == 4);
-        if (p == 4) {                                       /* sin las filas del taxi (modelo 0) */
+        if (p == 4) {
             sa_cn = 0;
             for (i = 0; i < 110; i++) {
                 int reg = SA->k_fila[i].reg;
-                if (reg >= 0 && reg < 30 && SA->k_modelo[reg] != 0) sa_cvis[sa_cn++] = i;
+                if (reg >= 0 && reg < 30) sa_cvis[sa_cn++] = i;
             }
             if (sa_cn > 0) sa_coche(SA->k_fila[sa_cvis[0]].reg, SA->k_fila[sa_cvis[0]].color);
         } else sa_coche(0, sa_reg[0].color);
@@ -2162,12 +2090,13 @@ static void sa_pagina(int p)                                /* init (0x25bce8, 0
     if (p != 5) sa_arte_suelta();
     sa_lista(g->f0, g->f1, p ? 7 : 0x60, p != 0);
     if (p == 4) sa_ln = sa_cn;
-    if (p == 5)                                             /* EXTRAS: los dos articulos tienen que estar en la lista */
-        dbglog(DBG_INFO, "SALON EXTRAS: fila %02x tok %08x precio %u; fila %02x tok %08x precio %u\n",
-               SA_FITEM, (unsigned)SA->fila[SA_FITEM].tok, (unsigned)sa_precio(0xcf),
-               SA_FITEM + 1, (unsigned)SA->fila[SA_FITEM + 1].tok, (unsigned)sa_precio(0xd0));
+    if (p == 5) sa_ln = SA_NEXTRA;
+    if (p == 5)                                             /* EXTRAS: el articulo tiene que estar en la lista */
+        dbglog(DBG_INFO, "SALON EXTRAS: fila %02x tok %08x precio %u\n",
+               SA_FITEM, (unsigned)SA->fila[SA_FITEM].tok, (unsigned)sa_precio(0xcf));
     sa_tira_inicia(g->tira, g->ult, g->paso, g->b0);
     if (p == 4 && sa_cn > 0) sa_tult = sa_cn - 1;
+    if (p == 5) sa_tult = SA_NEXTRA - 1;
     if (p == 5) sa_prev_actualiza();
     if (g->tit >= 0) sa_tit_entra(g->tit);
     sa_est++;
@@ -2726,12 +2655,10 @@ void menu_dibuja(void)
     case P_TABLERO: tb_dibuja(); break;
     case P_COCHE:
         an_dibuja(&a_sel, 0, a_ent * a_sal, 4, 0);
-        if (c_cursor == 2 && ficha_de(c_modelo(2)) == 7) escudo_taxi(a_ent * a_sal, 7.0f);
         if (!c_desbloqueado(c_indice()) && an_hecho(&a_sel)) hudd_dibuja(md, us[U_CAND], 0, 0, 0, a_ent * a_sal, 5, 0);
         break;
     case P_CAMBIO:
         an_dibuja(&a_sel, 0, 1, 7, 0);
-        if (c_cursor == 2 && ficha_de(c_modelo(2)) == 7) escudo_taxi(a_sal, 7.2f);
         break;
     case P_MUSICA:
         an_dibuja(&a_radio, 0, 1, 4, 0);

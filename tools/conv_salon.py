@@ -16,7 +16,7 @@ solo=True), un grupo de atlas por pagina (las texturas de cada escena se suben a
      desc filas[259] (0x41ae20 + los 2 articulos del Salon en 0xfc/0xfd, vacios hasta que
                        salon_compras_parche.py les pone el arte; detras los 5 textos de la ventana)
      u32 precio[0xd1] (0x629ee0 que rellena 0x1f3c90: 10 x i y los pares {objeto, precio} de PRICES de
-                       \\Scripts\\bin\\OutrunMiles.bin; 0x1f4198; 0xcf/0xd0 = OUTRUNNERS/TAXI a 50000)
+                       \\Scripts\\bin\\OutrunMiles.bin; 0x1f4198; 0xcf = OUTRUNNERS a 50000; 0xd0 queda sin uso)
      i32 fuera[26]    (0x41ad38: los objetos que no se venden en esta version; 0x25d790)
      coches: i32 modelo[30], bit[30], ficha[30] (0x41bda0: {modelo, bit}; ficha = indice del modelo en 0x375968, como
                        0x25bf68), i8 color[30] (0x3d4b80 por modelo: 0x18a110), 2 de relleno
@@ -131,7 +131,7 @@ def main():
     n, o = cm._r077(dm, 'PRICES')
     for k in range(n):
         it, pr = struct.unpack_from('<2I', dm, o + 8 * k); assert it < 0xcf; precio[it] = pr
-    precio += [50000, 50000]                               # OUTRUNNERS y TAXI CRAZY TAXI
+    precio += [50000, 0]                                   # OUTRUNNERS; el 0xd0 queda sin uso (el tamano de la tabla no cambia)
     assert len(precio) == 0xd1
     print('  PRICES: %d precios (%s)' % (n, ', '.join('%d:%d' % (k, precio[k]) for k in (0, 1, 2, 28, 138, 172, 193))))
     fuera = [i(0x41ad38 + 4 * k) for k in range(26)]

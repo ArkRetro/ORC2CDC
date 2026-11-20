@@ -386,26 +386,10 @@ del menu 30). Ahora como el original (4C9790 / 4C9C20 del PC, frontend_music.cpp
   carrera con NIGHT FLIGHT (MUS5; correlacion 0,4-0,75 en ventanas de 4 s); en la pausa, AUDIO con la musica a 0 la
   quita (0,03; el flujo sigue avanzando) y a 10 vuelve (0,4-0,5), guardado en la VMU. No probado en R (GDEMU): solo cambia el tamano del disco y el numero de ficheros.
 
-### ALL I WANT: una tarjeta mas en la lista 2 (DESVIACION, 2026-11-16)
+### ALL I WANT (retirada en la Rev 1.1, 2026-11-20)
 
-La lista 2 tiene una tarjeta mas, **ALL I WANT** (Crazy Taxi), al final: 13 temas en la lista 2 y 29 en total
-(`TEMAS_LISTA = { 9, 7, 13 }`, `N_TEMAS 29`). Es el tema 28 y su pista es `MUS67.ADP` (`musica_pon` lo lleva a la
-67); no es exclusiva del taxi: `tema_libre(28)` es siempre cierto y la pantalla `P_MUSICA` no mira la ficha, asi
-que se puede elegir con cualquier coche, como los temas normales de OutRun. `PISTA_TAXI` ya no existe; la
-correspondencia esta en `musica.h` (`MUSICA_TEMA_ALL_I_WANT` / `MUSICA_PISTA_ALL_I_WANT`).
-
-Arte (`tools/menu_musica.py`, llamado por `tools/conv_menu.py` al convertir la lista 2): como ALL I WANT no
-existe en el arte del PS2, se compone con la fuente 14 del propio MENU.DAT y seis piezas: rotulo (234x31),
-etiqueta CRAZY TAXI (112x19), icono/escudo (62x49), visor de la radio (134x15), caratula (136x126) y tira
-inferior (271x18). Se anaden al cuadro 500 del carrusel (`MUSICA_L2`, 20 + 40 x 12) y al 1320 del titulo
-(`MUSICA_T2`, 110 x 12), con `TEMA12`, `MUEVE1112` y `MUEVE1211`; los 12 temas originales y sus tramos no se
-tocan. Las texturas nuevas van en el rango de MUSICA2 (detras de las suyas) y sin VQ, para que el texto no se
-coma el borde; la pantalla pasa de 808 a ~960 KB de VRAM.
-
-Datos: `MUS67.ADP` sale de SONG01.AFS, indice 7 (104,81 s, 4.622.048 B, ADPCM de Yamaha 44,1 kHz estereo).
-Comprobacion sin emulador (`tools/prueba_musica.py <MENU.DAT> <MUS67.ADP> --adx SONG07.adx`): la tarjeta esta en
-MUSICA2 con sus seis piezas, los 12 temas siguen, el flujo de los 15 coches elige el tema 28 y el audio
-decodificado correlaciona 0,9994 con la pista original. Render de la tarjeta: `_trabajo/musica_all4/render/`.
+La tarjeta ALL I WANT (Crazy Taxi, tema 28, `MUS67.ADP`) que se habia anadido a la lista 2 ya no existe: la lista 2
+vuelve a sus 12 temas del original (`TEMAS_LISTA = { 9, 7, 12 }`, `N_TEMAS 28`) y `tools/menu_musica.py` se ha quitado.
 
 ## Pausa y mezcla de audio (2026-11-08)
 
@@ -2647,20 +2631,15 @@ datos: SALON.DAT (tools/conv_salon.py, paso `salon` de tools/regenera.py).
   con su cabecera roja, X en el salon abre ELEGIR CARNET y B vuelve a la pagina principal del salon; los mismos
   desbloqueos tras reiniciar; sin "Out of memory" ni "pvr_mem: ERROR".
 
-### Articulos OUTRUNNERS y TAXI CRAZY TAXI (2026-11-16)
+### Articulo OUTRUNNERS (2026-11-16; el del taxi, retirado en la Rev 1.1, 2026-11-20)
 
-- EXTRAS vende OUTRUNNERS (objeto 0xcf) y TAXI CRAZY TAXI (objeto 0xd0) por 50.000 millas cada uno; la compra es la
-  normal de `sa_compra` (pone el bit de la licencia +0x28, resta las millas, +0x3F4 |= 2 y guarda en la VMU). El precio
-  no cambia.
-- Desbloqueo del taxi: el bit comprado **o** el nombre `ENTIRETY` de la licencia, la misma regla que la entrada
-  OUTRUNNERS. `menu_taxi_comprado()` (menu.c) devuelve 1 con cualquiera de los dos; lo usan `c_desbloqueado()` (la
-  ficha del taxi en la seleccion de coche y en el Salon: sin candado) y `fsp.c` (el frontal de OUTRUN2SP deja aceptar
-  el taxi). `sa_tiene()` da el objeto 0xd0 por comprado con `ENTIRETY`: el Salon enseña el icono de comprado y no el
-  precio ni la ventana de compra. Con el bit 0xd0 la compra y el guardado siguen igual.
-- Prueba: `-DPRUEBA_TAXI_DESBLOQUEO` (solo prueba) registra por la consola serie los dos caminos al arrancar: bit
-  0xd0 sin ENTIRETY, nombre ENTIRETY sin el bit y un control con ninguno de los dos. Las tres lineas dan
-  `comprado/fsp=1 c_desbloqueado(2)=1 salon=1` en los dos caminos y `0 0 0` en el control (ficha 2 = modelo 0 = taxi).
-  Log y reproduccion: `_trabajo/TAXI_ENTIRETY_INFORME.md`.
+- METAS vende OUTRUNNERS (objeto 0xcf) por 50.000 millas; la compra es la normal de `sa_compra` (pone el bit de la
+  licencia +0x28, resta las millas, +0x3F4 |= 2 y guarda en la VMU). El nombre `ENTIRETY` de la licencia tambien lo
+  desbloquea.
+- El articulo TAXI CRAZY TAXI (objeto 0xd0), la ficha del taxi (que ocupaba la del F50: ficha 7, modelo 0), su turbo
+  y su piloto se han quitado: la ficha 7 vuelve a ser el F50 del original, con su bit de la licencia, sus colores y
+  su columna de PARAM.DAT. SALON.DAT conserva el sitio de la fila 0xfd y del precio 0xd0 (sin uso) para no cambiar
+  el formato.
 
 ## Tableros de cursos de INFARTO y CONTRARRELOJ (2026-11-13)
 
