@@ -1436,6 +1436,29 @@ Ahora (tools/conv_coche.py `materiales`, `extension`; tools/conv_trafico.py; dem
 - PENDIENTE: capa 2 de las mallas con textura propia (mismo mapa: haria falta una segunda pasada); el estado de la
   tabla 7 (mezclas del GS); leer el microcodigo VU1 para la formula exacta del reflejo; reflejo del trafico por cuadro.
 
+### Estructuras descolocadas y popping cercano (Rev 1.4, 2026-11-20)
+
+Queja: en MAYA, IMPE (Paris) y NEWY estructuras de los margenes salen en el cielo o cruzando la carretera, y popping a
+corta y media distancia.
+- Reproduccion en Flycast (`-DPRUEBA_AUTO`, salida en MAYA / IMPE / NEWY y el arbol 1 entero hasta NEWY por la derecha
+  con `-DPRUEBA_RAMA=1 -DPRUEBA_RAMA_FIJA=1 -DPRUEBA_SALTO=900`): nada descolocado. La causa probable es de la consola:
+  la PowerVR no recorta en la pantalla y un vertice proyectado a decenas de miles de pixeles (delante del plano
+  cercano, pero muy cerca de la camara y muy a un lado: muros, pilares, paredes que se pasan rozando) estropea la tira
+  (sale estirada hacia el cielo o cruzando la calzada); Flycast la dibuja bien. El arreglo de 7dfe8a9 solo recortaba a
+  la pantalla los vertices nuevos del plano cercano (tri_recortado).
+- Banda de guarda (CORREGIDO, sin verificar en consola real): `fuera_guarda` / `esfera_en_guarda` (GUARDA_PX 4096): la
+  via directa (malla_sq, `seguro`) solo con la esfera de la malla entera dentro de la banda; `dibuja_malla` recorta a
+  la pantalla (envia_recorte_lateral) las tiras enteras delante del plano cercano con algun vertice fuera; y
+  tri_recortado mira todos sus vertices, no solo los recortados. Medido (`-DDIAG_GUARDA`, arbol 1 hasta NEWY): ~11300
+  tiras en toda la carrera (~1 por cuadro, mas en NEWY) que antes iban a la PowerVR con vertices fuera de la banda.
+- PVS cerca de la camara (DECISION DEL PORT): los nodos pequenos (radio < PVS_CERCA_R = 80 m) con el centro a menos de
+  PVS_CERCA = 120 m se dibujan enteros aunque la tabla de tools/pvs.py de alguna de sus tiras por tapada (lo que las
+  tapaba puede haberse quitado por el tope del TA). Coste medido en NEWY (DIAG_POPPING): el mismo reparto (corte y
+  falta iguales); sin el limite de radio, el suelo y la calzada (radios de cientos de m) contaban enteros y el corte
+  bajaba a 1 m.
+- Lo que queda del popping es el tope del TA (falta 13-31 % en partes de NEWY con el coche 608 KB y la pareja 149 KB por
+  cuadro) y el LOD del original: no se ha cambiado el reparto.
+
 ### Reflejo del cielo y de los tuneles (Rev 1.3, 2026-11-20; DESVIACION pedida)
 
 - El original (SLES-53998 0x103dc8 -> 0x1040e0 -> 0x172f30 = 414340 / 414050 / 44CD30 del PC): cada cuadro, con el coche
