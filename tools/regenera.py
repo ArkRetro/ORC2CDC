@@ -357,6 +357,8 @@ def regenera(iso, D, W, jobs=4, informe=print):
         for f in os.listdir(segpak): os.replace(os.path.join(segpak, f), os.path.join(D, f))
     if not hay(D, 'VISO.DAT'):                           # nodos del original en la seccion 0 y la ultima de cada etapa
         post('viso', py(os.path.join(TOOLS, 'conv_viso.py'), iso, D))   # (conv_viso.py: lee SEGnn.DAT y SEGS.PAK)
+    if not hay(D, 'REFLEJO.DAT'):                        # el reflejo del cielo y los tramos bajo techo de cada etapa
+        post('reflejo', py(os.path.join(TOOLS, 'conv_reflejo.py'), D))   # (conv_reflejo.py: lee SEGnn.DAT y SEGS.PAK)
     if not hay(D, 'COCHES.DAT'):
         for f in glob.glob(os.path.join(W, 'coche', 'COCHE[0-9]*.DAT')): os.replace(f, os.path.join(D, os.path.basename(f)))
         post('coches', py(os.path.join(TOOLS, 'conv_coche.py'), iso, '--todos', D, '--fichas', '99'), 0)   # solo COCHES.DAT
@@ -369,7 +371,7 @@ def regenera(iso, D, W, jobs=4, informe=print):
     informe('== comprobacion de %s' % D)
     ok = True
     nec = ['BAND.DAT', 'BAND1.DAT', 'BKD.DAT', 'BO.DAT'] + chrs + \
-          'COCHES.DAT COLBK.DAT COLLR.DAT CURSO.DAT EFECTOS.DAT FAROS.DAT FIN.DAT GOVER.DAT HAHUD.DAT HUD.DAT INFARTO.DAT MENU.DAT META.DAT MODOV.DAT MVATTR.VQV MVTS.VQV PARAM.DAT SFX.DAT SEGS.PAK SOL.DAT TAPD.DAT TRAFC.DAT UNIONES.PAK VMU.DAT VOCES.DAT VOCESH.DAT VOCESC.DAT MISION.DAT C2CHUD.DAT C2C.DAT SALON.DAT TABLERO.DAT CURSOTA.DAT UNIONESTA.PAK UNIONESR.PAK'.split() + ['RC%02d.DAT' % k for k in range(30)] + \
+          'COCHES.DAT COLBK.DAT COLLR.DAT CURSO.DAT EFECTOS.DAT FAROS.DAT FIN.DAT GOVER.DAT HAHUD.DAT HUD.DAT INFARTO.DAT MENU.DAT META.DAT MODOV.DAT MVATTR.VQV MVTS.VQV PARAM.DAT SFX.DAT SEGS.PAK SOL.DAT TAPD.DAT TRAFC.DAT UNIONES.PAK VMU.DAT VOCES.DAT VOCESH.DAT VOCESC.DAT MISION.DAT C2CHUD.DAT C2C.DAT SALON.DAT TABLERO.DAT CURSOTA.DAT UNIONESTA.PAK UNIONESR.PAK REFLEJO.DAT'.split() + ['RC%02d.DAT' % k for k in range(30)] + \
           ['COCHE%02d.DAT' % k for k in range(15)] + ['MUS%d.ADP' % k for k in MUSICA] + SP + FINAL + \
           ['TRAFK%d.DAT' % k for k in range(3)] + FIN + TRAF + BO + COLBK + ['SALIDA.DAT', 'CHRPAR.DAT', 'VISO.DAT', 'INFARTOP.DAT']
     for f in nec:

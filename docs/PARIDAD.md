@@ -1436,6 +1436,31 @@ Ahora (tools/conv_coche.py `materiales`, `extension`; tools/conv_trafico.py; dem
 - PENDIENTE: capa 2 de las mallas con textura propia (mismo mapa: haria falta una segunda pasada); el estado de la
   tabla 7 (mezclas del GS); leer el microcodigo VU1 para la formula exacta del reflejo; reflejo del trafico por cuadro.
 
+### Reflejo del cielo y de los tuneles (Rev 1.3, 2026-11-20; DESVIACION pedida)
+
+- El original (SLES-53998 0x103dc8 -> 0x1040e0 -> 0x172f30 = 414340 / 414050 / 44CD30 del PC): cada cuadro, con el coche
+  del jugador en marcha, dibuja el entorno desde el coche en un cubo de caras de 64x64 (proyeccion de 90 grados, cerca
+  0,1 y lejos 2000; la cara 3 todos los cuadros y otra por turno, [0x448a60]: 0, 1, 2, 4, 5) con el modelo simplificado
+  de la etapa (cs_ENV_<zona>: 8000-14000 vertices y 20-40 texturas, ~500 KB en el disco de PS2) y su cielo, y lo usa de
+  mapa de entorno. CONFIRMADO en el MIPS (la cadena de llamadas y las constantes); no se ha leido 0x1047c8 (como pasa
+  el cubo a la textura del coche).
+- En la Dreamcast (peticion: "solo el cielo y los tuneles"): el cubo no cabe (una pasada mas por cuadro con un sistema
+  de presentacion ajustado en consola, y ~250 KB de RAM por etapa para cs_ENV). Como el cielo de una etapa no cambia,
+  `tools/conv_reflejo.py` calcula una vez por etapa un mapa de 32x32 de su cielo (el grupo 0 de SEGnn.DAT, en el marco
+  del fichero; u = 0,5 + 0,4 dx / (1 + dy), v = 0,5 + 0,4 dz / (1 + dy)) y la tabla de puntos de la ruta bajo techo
+  (geometria de la etapa entre 3 y 14 m sobre el centro de la calzada y a +-2,5 m, en 24 m seguidos o mas):
+  REFLEJO.DAT, 2 sectores por etapa, leidos con la etapa (el hilo de carga). En carrera `refl_elige` cambia la textura
+  de entorno del coche (tipos 2 y 3 de CEX2) por ese mapa, o por el del tunel bajo techo, y `coche_reflejo` pone las UV
+  con el vector reflejado de cada vertice (R = I - 2 (N.I) N, I del ojo al coche) en el marco del mapa: el de la etapa
+  (marco_et[3]) para el cielo, el del coche para el tunel. Sin vertices ni pasadas de mas: el mismo color de
+  desplazamiento de antes; 8 KB de VRAM y 8 KB de RAM. Fuera de la carrera, o sin REFLEJO.DAT, el mapa fijo del coche.
+- INVENTADO (no sale del disco): la intensidad del cielo en el mapa (x 0,30: a plena luz quemaba la pintura; el original
+  atenua su cubo con [8A8BD4] / [8A8BD8], sin leer), el color del suelo bajo el horizonte (el del horizonte x 0,45) y el
+  mapa del tunel (penumbra con dos filas de lamparas). El original reflejaria ahi cs_ENV (edificios, montes, la boveda).
+- Verificado en Flycast (`-DPRUEBA_AUTO -DPRUEBA_SIN_TIEMPO -DDIAG_REFLEJO`, arbol 0): PALM a cielo abierto (mapa 1) y
+  las dos galerias de ALPI (mapa 2 en s 3132-3348 y 3678-3945 de la etapa, y de vuelta al cielo); `nav3.sh` normal.
+  NO verificado en consola real (el coste por cuadro es el de `coche_entorno` mas una division por vertice).
+
 ## Coches: montaje y luces (como el original)
 
 Queja del probador: "diseno de coches mal". Se comparo cada coche con un render de referencia montado con el codigo de
