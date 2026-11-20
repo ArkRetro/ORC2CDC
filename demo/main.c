@@ -112,6 +112,7 @@ typedef struct {
                                                                      el original (VISO.DAT, pvs_paso) o NULL */
     uint32_t *vis;                                                /* nodos visibles en el cuadro (bits; nodos_visibles) */
     uint32_t *vis_ant;                                            /* los que se dibujaron en el anterior (detras de vis) */
+    uint32_t *pvs_ent;                                            /* nodos cercanos: enteros, sin la mascara de la PVS (PVS_CERCA) */
     uint32_t *pvs_ult;                                            /* gracia de la PVS (P1, nodos_visibles): el ultimo coste
                                                                      con el que se dibujo el nodo (pvs_teo), seguido de
                                                                      pvs_dibujo y los cuadros que le quedan (pvs_gra) */
@@ -250,6 +251,7 @@ static int lee_modelo_en(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t
         for (i = 0; i < m->nnodos && !m->relleno_propio && !g; i++) g = m->nodos[i].fl >> 16;
         m->vis = m->nnodos ? calloc((m->nnodos + 31) / 32 * 2 + (g ? (m->nnodos + 1) / 2 : 0) + (nl + 1) / 2, 4) : NULL; m->ruta_i = 0;   /* vis y vis_ant */
         m->vis_ant = m->vis ? m->vis + (m->nnodos + 31) / 32 : NULL;
+        m->pvs_ent = m->nnodos ? calloc((m->nnodos + 31) / 32, 4) : NULL;
         m->grp = m->vis && g ? (uint16_t *)(m->vis_ant + (m->nnodos + 31) / 32) : NULL;
         /* (detras, de cada lejano su completo; el lejano va sin grupo: su clase es la 0 del reparto, nodos_visibles) */
         m->lej_de = m->vis && nl ? (uint16_t *)(m->vis_ant + (m->nnodos + 31) / 32) + (g ? m->nnodos + (m->nnodos & 1) : 0) : NULL;
@@ -427,7 +429,7 @@ static void libera_modelo(modelo_t *m)
     tex_suelta(m);
     if (m->datos && m->datos == hueco_etapa) col_et.ok = 0;      /* su colision va detras en el hueco */
     if (!en_coche_bloque(m->ofs)) free(m->ofs);
-    free(m->vis); free(m->pvs_m); free(m->pvs_teo); free(m->pvs_ult); free(m->tr); free(m->fe_p);
+    free(m->vis); free(m->pvs_ent); free(m->pvs_m); free(m->pvs_teo); free(m->pvs_ult); free(m->tr); free(m->fe_p);
     if (!(hueco_etapa && m->datos >= hueco_etapa && m->datos < hueco_etapa + cap_etapa) &&
         !(hueco_union && m->datos >= hueco_union && m->datos < hueco_union + cap_union) && !en_coche_bloque(m->datos))
         free(m->datos);                                           /* (los objetos de la union van dentro del hueco de la
@@ -1064,6 +1066,25 @@ static inline uint32_t interpola_argb(uint32_t a, uint32_t b, float t)
     ag = ((a >> 8) & canales) * (256 - k) + ((b >> 8) & canales) * k;
     return ((rb >> 8) & canales) | (ag & (canales << 8));
 }
+/* Banda de guarda (Rev 1.4): la PowerVR de la consola no recorta en la pantalla; un vertice proyectado a decenas de
+   miles de pixeles (delante del plano cercano pero muy cerca de la camara y muy a un lado: una pared, un muro o el
+   pilar de un puente que se pasa rozando) estropea la tira en la consola real (el triangulo sale estirado hacia el
+   cielo o cruzando la carretera); Flycast los dibuja bien. Antes solo se recortaban a la pantalla los vertices nuevos
+   del plano cercano (tri_recortado, el arreglo de 7dfe8a9); ahora tambien los de las mallas enteras delante de el:
+   la directa (seguro) solo si la esfera entera cae dentro de GUARDA_PX pixeles, y dibuja_malla recorta a la pantalla
+   las tiras que tienen algun vertice fuera de la banda. */
+#define GUARDA_PX 4096.0f
+static inline int fuera_guarda(const pt_t *p)
+{
+    const float w = p->w;
+    return p->x < -GUARDA_PX * w || p->x > (640.0f + GUARDA_PX) * w || p->y < -GUARDA_PX * w || p->y > (480.0f + GUARDA_PX) * w;
+}
+/* la esfera (xv, yv, zv, r en el marco de la vista) proyectada queda dentro de la banda de guarda */
+static inline int esfera_en_guarda(float xv, float yv, float zv, float r)
+{
+    const float k = fx * (1.0f / GUARDA_PX), z = zv - r;
+    return z > (fabsf(xv) + r) * k && z > (fabsf(yv) + r) * k;
+}
 static void tri_recortado(const pt_t *p)
 {
     pt_t o[4]; int n = 0, i, lateral = 0;
@@ -1080,12 +1101,12 @@ static void tri_recortado(const pt_t *p)
                 o[n].c = interpola_argb(a->c, b->c, t); o[n].o = interpola_argb(a->o, b->o, t);
                 /* El cruce por w=0,1 de una pared larga puede quedar a millones de pixeles.
                    El camino habitual sirve mientras la proyeccion queda cerca de la pantalla. */
-                lateral |= fabsf(o[n].x) > 4096.0f * cerca || fabsf(o[n].y) > 4096.0f * cerca;
             }
             n++;
         }
     }
     if (n < 3) return;
+    for (i = 0; i < n; i++) lateral |= fuera_guarda(o + i);   /* (todos: tambien los que no se recortaron) */
     if (lateral) { envia_recorte_lateral(o, n); return; }
     if (!ta_cabe(n)) return;
     if (n == 3) { envia(o, 0); envia(o + 1, 0); envia(o + 2, 1); tri_enviados++; }
@@ -1255,6 +1276,20 @@ static void dibuja_malla(const modelo_t *mo, const malla_t *m)
     else if (color_mul) for (i = 0; i < n; i++) pw[i].c = mul_argb(pw[i].c, color_mul);
     if (fe_s) for (i = 0; i < n; i++) { pw[i].c = fe_escala(pw[i].c, fe_s); pw[i].o = fe_o; }
     if (!detras) {
+        int fuera = 0;
+        for (i = 0; i < n && !fuera; i++) fuera = fuera_guarda(pw + i);
+        if (fuera) {                                            /* (banda de guarda: cada triangulo a la pantalla) */
+#ifdef DIAG_GUARDA
+            {   static uint32_t ng, nt; ng++; nt += n - 2;
+                if ((ng & 255) == 0) dbglog(DBG_INFO, "GUARDA: %u tiras (%u triangulos) recortadas a la pantalla\n", (unsigned)ng, (unsigned)nt); }
+#endif
+            for (i = 0; i + 2 < n; i++) {
+                pt_t t[3]; t[0] = pw[i]; t[1] = pw[i + 1]; t[2] = pw[i + 2];
+                if (i & 1) { pt_t q = t[0]; t[0] = t[1]; t[1] = q; }   /* (el sentido de la tira; sin culling da igual) */
+                envia_recorte_lateral(t, 3);
+            }
+            return;
+        }
         if (!ta_cabe(n)) return;
         envia_tira(pw, n);
         tri_enviados += n - 2;
@@ -1365,7 +1400,8 @@ static void dibuja_rango(const modelo_t *mo, int l, uint32_t k0, uint32_t k1, in
         if (recorta) {
             float dx, dy, dz, zv, xv, yv;
             if (mo->vis && m->nodo >= 0 && !(mo->vis[m->nodo >> 5] & (1u << (m->nodo & 31)))) continue;
-            if (mo->pvs_on && m->nodo >= 0 && !(mo->pvs_dibujo[k >> 5] & (1u << (k & 31)))) continue;   /* PVS: no se ve */
+            if (mo->pvs_on && m->nodo >= 0 && !(mo->pvs_dibujo[k >> 5] & (1u << (k & 31))) &&
+                !(mo->pvs_ent && mo->pvs_ent[m->nodo >> 5] & (1u << (m->nodo & 31)))) continue;   /* PVS: no se ve (salvo lo cercano) */
 #ifndef DIAG_SIN_TOPE
             if (vtx_et + (vtx_env - vtx_et0) > VTX_ETAPA_MAX) { ta_corto = 1; ta_et_corto = 1; POP_MALLA(m); continue; }
 #endif
@@ -1377,7 +1413,7 @@ static void dibuja_rango(const modelo_t *mo, int l, uint32_t k0, uint32_t k1, in
                 xv = dx * der[0] + dy * der[1] + dz * der[2];
                 yv = dx * arr[0] + dy * arr[1] + dz * arr[2];
                 if (fabsf(xv) - zv * tanh > m->r * kh || fabsf(yv) - zv * tanv > m->r * kv) continue;
-                seguro = zv - m->r > cerca * 1.5f && m->n <= 256;
+                seguro = zv - m->r > cerca * 1.5f && m->n <= 256 && esfera_en_guarda(xv, yv, zv, m->r);
             }
         }
 #ifdef DEP_TEX
@@ -1438,7 +1474,7 @@ static void dibuja_etapa(const modelo_t *mo, int l)
     const float o0 = ojo[0], o1 = ojo[1], o2 = ojo[2], e0 = ade[0], e1 = ade[1], e2 = ade[2];
     const float d0 = der[0], d1 = der[1], d2 = der[2], a0 = arr[0], a1 = arr[1], a2 = arr[2];
     const float cer = cerca, lej = lejos < ta_lej_tope ? lejos : ta_lej_tope, cer15 = cerca * 1.5f;
-    const uint32_t *tr = mo->tr, *vis = mo->vis, *pvs = mo->pvs_on ? mo->pvs_dibujo : NULL;
+    const uint32_t *tr = mo->tr, *vis = mo->vis, *pvs = mo->pvs_on ? mo->pvs_dibujo : NULL, *ent = mo->pvs_ent;
     const malla_t *M = mo->mallas; const nodo_t *N = mo->nodos;
     uint32_t it, it0 = mo->tr_ini[l], it1 = mo->tr_ini[l + 1], vtx_et0 = vtx_env;
     int ult = -2, sol = l < 2 && (mo == &etapa || mo == &uni || mo == &sig);
@@ -1474,7 +1510,7 @@ static void dibuja_etapa(const modelo_t *mo, int l)
 #ifdef DIAG_MS
             dg_mallas++;
 #endif
-            if (pvs && m->nodo >= 0 && !(pvs[k >> 5] & (1u << (k & 31)))) continue;   /* PVS: no se ve */
+            if (pvs && m->nodo >= 0 && !(pvs[k >> 5] & (1u << (k & 31))) && !(ent && ent[m->nodo >> 5] & (1u << (m->nodo & 31)))) continue;   /* PVS: no se ve (salvo lo cercano) */
 #ifndef DIAG_SIN_TOPE
             if ((int32_t)(ve - vtx_et0) > vres) { ta_corto = 1; ta_et_corto = 1; POP_MALLA(m); continue; }
 #endif
@@ -1485,7 +1521,7 @@ static void dibuja_etapa(const modelo_t *mo, int l)
                 xv = dx * d0 + dy * d1 + dz * d2;
                 yv = dx * a0 + dy * a1 + dz * a2;
                 if (fabsf(xv) - zv * tanh > m->r * kh || fabsf(yv) - zv * tanv > m->r * kv) continue;
-                seguro = zv - m->r > cer15 && m->n <= 256;
+                seguro = zv - m->r > cer15 && m->n <= 256 && esfera_en_guarda(xv, yv, zv, m->r);
             }
             f = m->tex >= 0 ? fv : 0;                           /* (lo que no tiene textura no se funde) */
             if (m->tex + (f ? 0x10000 : 0) != ult) {
@@ -7148,6 +7184,16 @@ static void pop_evento(int t, int nodo, int razon, int ap, float px, float z, fl
 #define PVS_LADO 3.0f                                           /* tools/pvs.py LADO_EXTRA */
 #define PVS_ALTO 6.0f                                           /* la muestra mas alta (ALTURAS) */
 #define PVS_FIN 32.0f                                           /* la ruta prolongada por cada punta (FIN_EXTRA) */
+#ifndef PVS_CERCA_TODO
+#define PVS_CERCA_TODO 0                                         /* 1: tambien los nodos que la PVS apaga enteros */
+#endif
+#ifndef PVS_CERCA
+#define PVS_CERCA 120.0f                                         /* m: centro mas cerca, el nodo entero (nodos_visibles) */
+#endif
+#ifndef PVS_CERCA_R
+#define PVS_CERCA_R 80.0f                                        /* m: solo nodos de este radio o menos (lo grande, suelo y
+                                                                    calzada, sigue con la PVS: entero costaria todo el TA) */
+#endif
 #define PVS_GRACIA 15                                           /* gracia de la PVS (nodos_visibles): cuadros que sigue
                                                                    dibujandose un nodo que la PVS apaga, 0,33 s */
 static void pvs_aplica(modelo_t *mo, int s)                     /* XOR de la lista de la seccion s */
@@ -7303,6 +7349,7 @@ static void nodos_visibles(modelo_t *mo)
     memset(mo->vis, 0, (mo->nnodos + 31) / 32 * 4);
     if (G) memset(G, 0, mo->nnodos * 2);                        /* (0, 0): la mas baja; abajo, la mayor de los suyos */
     if (FF) memset(FF, 0, (mo->nnodos + 31) / 32 * 4);
+    if (mo->pvs_ent) memset(mo->pvs_ent, 0, (mo->nnodos + 31) / 32 * 4);
 #ifdef DIAG_POPPING
     {   pop_slot_t *ps = pop_slot(mo);
         pop_r = ps ? ps->cur : NULL; pop_ra = ps ? ps->ant : NULL;
@@ -7365,6 +7412,14 @@ static void nodos_visibles(modelo_t *mo)
 #ifdef DIAG_POPPING
             pop_pvs_gra++;
 #endif
+        } else if (pvs_on_ && mo->pvs_ent && zv < PVS_CERCA && d->r < PVS_CERCA_R && (PVS_CERCA_TODO || mo->pvs_teo[2 * i])) {
+            /* PVS conservadora cerca de la camara (Rev 1.4): la tabla da por tapadas tiras, y nodos enteros, que a
+               corta distancia si se ven (NEWY: del anclaje del puente quedaba la celosia de arriba sin sus muros;
+               tools/pvs.py mira desde el centro de la calzada y lo que los tapaba puede no dibujarse por el tope del
+               TA). Los nodos pequenos (radio < PVS_CERCA_R) con el centro a menos de PVS_CERCA m se dibujan enteros, con su coste
+               entero */
+            mo->pvs_ent[i >> 5] |= 1u << (i & 31);
+            c_teo = d->relleno[0]; c_v = d->relleno[1] >> 12;
         } else if (pvs_on_) {                                /* PVS: lo que queda visible del nodo desde aqui */
             c_teo = mo->pvs_teo[2 * i]; c_v = mo->pvs_teo[2 * i + 1];
 #ifdef DIAG_VTX
