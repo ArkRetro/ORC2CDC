@@ -14,7 +14,7 @@ PYVER=3.13.17                                            # (la ultima 3.13 con e
 # las mismas versiones que el entorno de Linux donde se prueban los conversores (tools/instala_entorno.sh)
 RUEDAS="numpy==2.5.3 scipy==1.18.1 pillow==12.3.0 imageio-ffmpeg==0.8.1"
 KOS=${KOS_BASE:-/opt/toolchains/dc/kos}
-NOMBRE="OUTRUN DC PRUEBA"                                # (el titulo del IP.BIN, el de tools/mkgdi.py)
+NOMBRE=${NOMBRE:-"OUTRUN DC PRUEBA"}                              # (el titulo del IP.BIN, el de tools/mkgdi.py)
 DL=$SAL/descargas; P=$SAL/OutRun2DC; G=$P/programa
 rm -rf "$P"; mkdir -p "$DL/ruedas" "$G/python" "$G/tools/ps2" "$G/nativo" "$G/dc"
 

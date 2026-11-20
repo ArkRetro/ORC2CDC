@@ -2067,12 +2067,15 @@ static int sa_compra(int b, uint32_t precio)
 }
 /* 0x25d170 (4D4200): la fila de la tabla que se ve en la posicion i de la lista */
 static int sa_crow(int i) { return sa_base == 0x1c && i >= 0 && i < sa_cn ? sa_cvis[i] : i; }
+/* el articulo OUTRUNNERS solo si SALON.DAT trae su arte (tools/conv_salon.py deja la fila vacia: el arte y
+   OUTRUNNERS.BIN no salen del disco de PS2); sin el, las 14 filas del original en su orden */
+static int sa_articulo(void) { return SA && SA->fila[SA_FITEM].tok != 0; }
 static int sa_fila_de(int i)
 {
-    if (sa_base == 0xc1 && i >= 0 && i < SA_NEXTRA) return sa_xorden[i];
+    if (sa_base == 0xc1 && sa_articulo() && i >= 0 && i < SA_NEXTRA) return sa_xorden[i];
     return sa_crow(i);
 }
-static int sa_item_nuevo(void) { return sa_base == 0xc1 && sa_lsel >= 0 && sa_lsel < SA_NITEM; }
+static int sa_item_nuevo(void) { return sa_base == 0xc1 && sa_articulo() && sa_lsel >= 0 && sa_lsel < SA_NITEM; }
 /* el objeto de la fila elegida */
 static int sa_objeto(void)
 {
@@ -2145,7 +2148,7 @@ static void sa_tira_inicia(uint32_t tok, int ult, int paso, int b0)
 }
 static void sa_tira_deja(void) {
     int i;
-    if (sa_base == 0xc1 && sa_ti >= 0 && sa_ti < SA_NITEM) return;   /* el articulo no usa la tira */
+    if (sa_base == 0xc1 && sa_articulo() && sa_ti >= 0 && sa_ti < SA_NITEM) return;   /* el articulo no usa la tira */
     i = sa_fila_de(sa_ti);
     sa_tira_pon(sa_tcuadro(sa_ti), sa_tpaso * (i + 1), 3);
 }
@@ -2241,13 +2244,13 @@ static void sa_pagina(int p)                                /* init (0x25bce8, 0
     if (p != 5) sa_arte_suelta();
     sa_lista(g->f0, g->f1, p ? 7 : 0x60, p != 0);
     if (p == 4) sa_ln = sa_cn;
-    if (p == 5) sa_ln = SA_NEXTRA;
+    if (p == 5) sa_ln = sa_articulo() ? SA_NEXTRA : SA_NEXTRA - 1;
     if (p == 5)                                             /* EXTRAS: el articulo tiene que estar en la lista */
         dbglog(DBG_INFO, "SALON EXTRAS: fila %02x tok %08x precio %u\n",
                SA_FITEM, (unsigned)SA->fila[SA_FITEM].tok, (unsigned)sa_precio(0xcf));
     sa_tira_inicia(g->tira, g->ult, g->paso, g->b0);
     if (p == 4 && sa_cn > 0) sa_tult = sa_cn - 1;
-    if (p == 5) sa_tult = SA_NEXTRA - 1;
+    if (p == 5) sa_tult = (sa_articulo() ? SA_NEXTRA : SA_NEXTRA - 1) - 1;
     if (p == 5) sa_prev_actualiza();
     if (g->tit >= 0) sa_tit_entra(g->tit);
     sa_est++;
