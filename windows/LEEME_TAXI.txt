@@ -1,0 +1,36 @@
+OutRun Mod Rev 1.0 (con el taxi de Crazy Taxi) para Dreamcast (orc2cdc) - programa para Windows
+===============================================================================================
+
+Que hace
+--------
+Hace un GD-ROM nuevo de OutRun para Dreamcast con el taxi y con los arreglos de la Rev 1.4
+(la entrada a Maya desde Las Vegas sin la pared negra ni las losas en el cielo, la meta de
+Maya sin las franjas blancas, la banda de guarda de la PowerVR y el agua de las ruedas en el
+asfalto mojado de Las Vegas).
+
+El taxi, Axel y sus canciones NO estan en la ISO de PS2 (son de Crazy Taxi de Dreamcast), asi
+que este programa no los fabrica: los toma de TU GD-ROM de OutRun para Dreamcast que ya los
+lleva (su disc.gdi con las pistas) y le pone el programa nuevo de la Dreamcast (la rama rev-1.0
+de orc2cdc). Este paquete no lleva nada de ningun juego.
+
+Requisitos
+----------
+- Windows 10 u 11 de 64 bits. No hay que instalar nada.
+- Tu GD-ROM de OutRun para Dreamcast con el taxi: disc.gdi, track01.iso, track02.raw y
+  track03.iso (o track03.bin de 2352 bytes) en la misma carpeta.
+- Opcional, para el agua de las ruedas: tu ISO de PS2 de OutRun 2006 Coast 2 Coast (PAL,
+  SLES-53998, version 1.02). Sin ella todo funciona igual, sin el agua.
+- Unos 2,2 GB libres en la carpeta de salida.
+
+Uso
+---
+1. Descomprime el zip entero en una carpeta (por ejemplo C:\OutRunTaxi).
+2. Doble clic en OutRunTaxi.bat. (Si Windows avisa, "Mas informacion" y "Ejecutar de todas
+   formas": el programa no esta firmado.)
+3. Elige el disc.gdi de tu GD-ROM con el taxi, despues (opcional) tu ISO de PS2 (Cancelar = sin
+   agua) y la carpeta de salida. Dentro se crea OutRunMod_Taxi.
+   Desde una consola: OutRunTaxi.bat "D:\dc\outrun\disc.gdi" "D:\salida" --iso "D:\isos\or2.iso"
+4. Tarda menos de un minuto. Al final dice LISTO y donde esta el disc.gdi nuevo.
+   Abrelo con Flycast o copia disc.gdi y las tres pistas a una carpeta de la SD del GDEMU.
+
+La carpeta de salida no puede ser la del GD-ROM de entrada (no se sobrescribe tu disco).

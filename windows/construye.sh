@@ -14,8 +14,13 @@ PYVER=3.13.17                                            # (la ultima 3.13 con e
 # las mismas versiones que el entorno de Linux donde se prueban los conversores (tools/instala_entorno.sh)
 RUEDAS="numpy==2.5.3 scipy==1.18.1 pillow==12.3.0 imageio-ffmpeg==0.8.1"
 KOS=${KOS_BASE:-/opt/toolchains/dc/kos}
-NOMBRE="OUTRUN DC PRUEBA"                                # (el titulo del IP.BIN, el de tools/mkgdi.py)
-DL=$SAL/descargas; P=$SAL/OutRun2DC; G=$P/programa
+NOMBRE=${NOMBRE:-"OUTRUN DC PRUEBA"}                    # (el titulo del IP.BIN, el de tools/mkgdi.py)
+# PROGRAMA=taxi: el de OutRun Mod con el taxi (windows/outrun_taxi.py: rehace el GD-ROM desde el del usuario con el
+# taxi, que no sale de la ISO de PS2); si no, el de siempre (windows/outrun2dc.py: todo desde la ISO)
+PROGRAMA=${PROGRAMA:-iso}
+if [ "$PROGRAMA" = taxi ]; then PAQ=OutRunMod_Taxi; BAT=OutRunTaxi.bat; LEEME=LEEME_TAXI.txt
+else PAQ=OutRun2DC; BAT=OutRun2DC.bat; LEEME=LEEME.txt; fi
+DL=$SAL/descargas; P=$SAL/$PAQ; G=$P/programa
 rm -rf "$P"; mkdir -p "$DL/ruedas" "$G/python" "$G/tools/ps2" "$G/nativo" "$G/dc"
 
 echo "== Python $PYVER embebido y ruedas ($RUEDAS)"
@@ -55,10 +60,11 @@ echo "== codigo"
 cp "$REPO"/tools/*.py "$G/tools/"; cp "$REPO"/tools/ps2/*.py "$G/tools/ps2/"
 mkdir -p "$G/tools/c"; cp "$REPO"/tools/c/{pvs,visible,musica}.c "$G/tools/c/"
 cp "$REPO/windows/outrun2dc.py" "$G/"
-for f in OutRun2DC.bat LEEME.txt; do sed 's/\r*$/\r/' "$REPO/windows/$f" > "$P/$f"; done
+[ "$PROGRAMA" = taxi ] && cp "$REPO/windows/outrun_taxi.py" "$G/"
+for f in $BAT $LEEME; do sed 's/\r*$/\r/' "$REPO/windows/$f" > "$P/$f"; done
 {
     printf 'Componentes de este paquete y sus licencias\r\n\r\n'
-    printf ' - programa/tools, programa/outrun2dc.py, OutRun2DC.bat: orc2cdc (codigo propio).\r\n'
+    printf ' - programa/tools, programa/*.py, %s: orc2cdc (codigo propio).\r\n' "$BAT"
     printf ' - programa/dc/1ST_READ.BIN: la demo de orc2cdc compilada con KallistiOS y SH4ZAM (sus licencias abajo).\r\n'
     printf ' - programa/dc/IP.BIN: makeip de KallistiOS.\r\n'
     printf ' - programa/python: Python %s embebido de python.org (licencia en programa/python/LICENSE.txt).\r\n' $PYVER
@@ -75,10 +81,10 @@ if find "$P" \( -iname '*.iso' -o -iname '*.DAT' -o -iname '*.ADP' -o -iname '*.
 fi
 
 echo "== zip"
-cd "$SAL"; rm -f OutRun2DC.zip OutRun2DC_partes.z*
-zip -q -r -9 OutRun2DC.zip OutRun2DC
-if [ "$(stat -c %s OutRun2DC.zip)" -gt $((29 * 1024 * 1024)) ]; then
-    zip -q -r -9 -s 29m OutRun2DC_partes.zip OutRun2DC
+cd "$SAL"; rm -f $PAQ.zip ${PAQ}_partes.z*
+zip -q -r -9 $PAQ.zip $PAQ
+if [ "$(stat -c %s $PAQ.zip)" -gt $((29 * 1024 * 1024)) ]; then
+    zip -q -r -9 -s 29m ${PAQ}_partes.zip $PAQ
 fi
-ls -l "$SAL"/OutRun2DC*.z*
+ls -l "$SAL"/$PAQ*.z*
 du -sh "$P"
