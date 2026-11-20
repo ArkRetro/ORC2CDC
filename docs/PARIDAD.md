@@ -2411,7 +2411,27 @@ peticion 14 (escoltas 45B5B0, +324 = 6: carrera contra ellos), que no esta en la
   - DESVIACION: solo se corren las misiones de carrera (tipo 0, 76 de 94) cuyo arbol cabe en los huecos
     (`arbol_grande` de curso_huecos); las de los tipos 1, 2, 3 y 6 se ven en el mapa y en el detalle como en el
     original (boton, icono del tipo, nota, rotulo) pero A en ellas da el sonido de bloqueado. Los campeonatos (botones
-    4..6, suceso 0x3c, variante 5) tampoco estan: A en ellos, bloqueado (en el original, sonido 0x40 y su pantalla).
+    4..6, suceso 0x3c, variante 5): ver el punto siguiente.
+  - Peticiones: el mapa de los campeonatos (Rev 1.2, 2026-11-20). A en los botones 4..6 abiertos abre la pantalla del
+    original (PS2 0x240d68 inicio, 0x240e20 control, 0x241228 dibujo, 0x240bc8 cursor, 0x240948 resultados hechos =
+    4EA330 / 4EA3C0 / 4EA610 / 4EA210 / 4EA030 del PC, outrun2-decomp platform/frontend_requests.cpp: el mismo codigo
+    con los tokens de PS2 y los textos una posicion antes): fondo 0x4400cc / encima 0x4400cd (cuadro 1 fuera de la
+    salida), los 16 nodos (cursor 0x4400d8 en 0x4170b0, vecinos 0x4171c8), el nodo 0x4400df y la nota 0x4400e0 de
+    las etapas con resultado (media de sus resultados, 0x240748), las casillas del nodo (0x4172c8 por nodo: 0, 1, 1,
+    1, 2, 2, 2, 3 x 4, 4 x 5; 0x4400d5 cuadro 3 hecha / 5 sin hacer, icono 0x4400d3 del curso, nota), el titulo
+    0x4400d6 (campeonato / curso / lista), el pie 0x4400f0 (la chica) y el cuadro de texto (0x461 en la salida, 0x462
+    con resultado, 0x380 sin el). Detalle (A en un nodo con resultado): el cursor en la casilla, la imagen de su
+    lista (0x4400d4) y las peticiones de REQUEST_NORMAL / SPECIAL1..3 del guion del curso (Req_*.bin, registros de
+    0x74; el rotulo de cada una por su tipo y subtipo, 0x240a08, textos 0x353..). Resultados: los cuartetos de la
+    licencia +0x36E + 2 tipo de curso (0x2406b0). Datos: bloque REQ1 de C2C.DAT (tools/conv_c2c.py, con las
+    direcciones comprobadas en el codigo). Verificado en Flycast: licencia nueva (Clarissa abierta, mapa, 15 nodos,
+    textos, B a las categorias, el mapa de Flagman igual que antes) y con `-DPRUEBA_NOTAS_CAMP` (nodos con nota,
+    casillas con icono y nota, detalle con las listas SOLICITUD / SOLICITUD ESPECIAL 1..3 y sus peticiones).
+    PENDIENTE (lo que falta para correrlos): el gestor de peticiones de la variante 5 (PC 7F9460, evento 0x190; PS2
+    0x22xxxx) no esta portado ni tiene fuente en la decompilacion del PC (alli corre el x86 traducido), asi que A en
+    la salida o en una casilla da el sonido de bloqueado en vez de pasar al coche. La acompanante de la variante 5
+    ya se elige como 487F50 (`robot_pareja` con `menu_campeonato`: 46C520 = la quinta palabra de 0x2a6b08: grupo 4
+    -> CHR_DR_G00, 5 -> CHR_DR_L00, 6 -> CHR_DR_H00); sin carrera aun no se ve.
   - PROBABLE: el salto de linea de los textos de las categorias ('\n' en TEXT.PS2) baja el alto de la celda (17) como
     42C610 del PC (el printf de PS2 0x117640 no se ha seguido); el orden entre el texto y las capas de sprites (el texto
     va encima de todas). Sin el fundido de entrada / salida de los recursos (las escenas aparecen y se van de golpe).

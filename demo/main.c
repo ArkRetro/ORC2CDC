@@ -9802,8 +9802,14 @@ static int robot_pareja(int sp, int var, int foto, int *pil, int *aco)
     if (!chr_tab_ok) return -1;
     if (sp) { *pil = (int)chr_tab[0]; *aco = (int)(var >= 0 && var < 10 ? chr_tab[1 + var] : 6); return 0; }
     if (foto < 0 || foto > 5) return -2;                        /* (el PC: fuera de su lista de 6) */
-    if (var == 5) return -3;                                    /* 46C520 ([7F94D4], la red): SIN PORTAR */
-    k = lista[foto]; n = var == 2 ? 1 : var == 9 ? 2 : 0;      /* 505340(k, n) */
+    k = lista[foto];
+    if (var == 5) {                                             /* 487F50: el campeonato (46C520 = [7F94D4]) elige la */
+        int c = menu_campeonato();                              /* acompanante: 0 -> 3, 1 -> 4, 2 -> 5 de la tabla */
+        if (k > 5 || c < 0 || c > 2) return -3;                 /* (otro valor: el indice 6, fuera de la tabla) */
+        *pil = (int)P[k]; *aco = (int)A[3 + c];
+        return 0;
+    }
+    n = var == 2 ? 1 : var == 9 ? 2 : 0;                        /* 505340(k, n) */
     if (k > 5 || T[3 * k + n] > 5) return -4;
     *pil = (int)P[k]; *aco = (int)A[T[3 * k + n]];
     return 0;
