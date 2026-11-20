@@ -100,9 +100,10 @@ def main():
     for cod, base, (f0, f1), tira, ult, paso, b0, tit in PAGINAS:
         assert hay(cod, 0x80, 0x24000000 | (base & 0xffff), ADDIU), 'base %x' % cod
         assert hay(cod, 0x300, 0x24000000 | f0, ADDIU), 'primera fila %x' % cod
-        assert hay(cod, 0x300, 0x28020000 | f1, 0xfc1fffff), 'ultima fila %x' % cod     # slti v0, rs, f1
+        mas = 2 if cod == 0x25cf00 else 0                    # extras: el ELF no tiene los 2 articulos del Salon
+        assert hay(cod, 0x300, 0x28020000 | (f1 - mas), 0xfc1fffff), 'ultima fila %x' % cod     # slti v0, rs, f1
         assert hay(cod, 0x300, 0x34a50000 | (tira & 0xffff)), 'tira %x' % cod
-        assert hay(cod, 0x300, 0x24060000 | ult) and hay(cod, 0x300, 0x24070000 | paso) and \
+        assert hay(cod, 0x300, 0x24060000 | (ult - mas)) and hay(cod, 0x300, 0x24070000 | paso) and \
             hay(cod, 0x300, 0x24080000 | b0), 'tira %x' % cod
         if tit is not None: assert hay(cod, 0x300, 0x24050000 | tit), 'titulo %x' % cod
     # lista: 19 de paso, (-180, -50), capa 1, limite 7 (0x60 la principal)
