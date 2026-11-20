@@ -213,6 +213,18 @@ static void tramos_nodo(modelo_t *m)
     }
     m->tr_ini[3] = i;
 }
+/* (lee_modelo_en: las pilas de nodos de la lista translucida) */
+typedef struct { int32_t tex, x, y, z, nodo; } pila_t;
+static int pila_cmp_sitio(const pila_t *a, const pila_t *b)
+{
+    return a->tex != b->tex ? (a->tex < b->tex ? -1 : 1) : a->x != b->x ? (a->x < b->x ? -1 : 1) :
+           a->y != b->y ? (a->y < b->y ? -1 : 1) : a->z != b->z ? (a->z < b->z ? -1 : 1) : 0;
+}
+static int pila_cmp(const void *a, const void *b)
+{
+    int c = pila_cmp_sitio(a, b);
+    return c ? c : ((const pila_t *)a)->nodo - ((const pila_t *)b)->nodo;
+}
 static int lee_modelo_en(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t cap)
 {
     uint32_t sz, h[13], i, v7; uint8_t *b = buf ? (gd_carga_en(nombre, buf, cap, &sz) ? NULL : buf) : gd_carga(nombre, &sz), *p;
@@ -243,23 +255,29 @@ static int lee_modelo_en(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t
        nodos iguales en el mismo sitio y la tira corriendo por la calzada). La demo no anima los nodos de la etapa y los
        dibujaba todos a la vez: la mancha amarilla que tapaba la vista en el CHECK POINT y las franjas blancas en el suelo
        de la meta (el original, en el video de referencia, no saca nada asi). Una textura de la lista translucida con al
-       menos 16 mallas en pilas de 3 o mas nodos en el mismo centro no se dibuja (con los datos de hoy solo esa; las
-       pilas de 2 de las uniones, la 16 de los BK, no llegan) */
+       menos 16 mallas en pilas de 3 o mas NODOS en el mismo centro no se dibuja (con los datos de hoy solo esa). La
+       primera version contaba mallas y no nodos y quitaba tambien las cascadas de NIAG (SEG21: dos nodos por sitio con
+       varias mallas cada uno) y cosas de LASV (SEG22), AMAZ (SEG26) y SEG53 / 54 / 58: corregido en la Rev 1.4b */
     if (v7 && m != &coche && m != &chr && !m->relleno_propio && m->inicio[3] <= m->nmallas && m->ntex <= 256) {
-        static uint16_t pil[256];
+        /* (Rev 1.4b: agrupando por textura y centro del nodo, ordenado; antes eran todas las parejas de mallas de la
+           lista translucida, hasta 33 millones de comparaciones en el hilo de carga en mitad de la union) */
+        static uint16_t pil[256]; uint32_t n2 = m->inicio[3] - m->inicio[2], k2 = 0, a2, b2, c2;
+        pila_t *q = n2 ? malloc(n2 * sizeof(pila_t)) : NULL;
         memset(pil, 0, sizeof pil);
-        for (i = m->inicio[2]; i < m->inicio[3]; i++) {
-            const malla_t *a_ = m->mallas + i; uint32_t j, c = 0; const nodo_t *na;
+        for (i = m->inicio[2]; q && i < m->inicio[3]; i++) {
+            const malla_t *a_ = m->mallas + i; const nodo_t *na;
             if (a_->tex < 0 || (uint32_t)a_->tex >= m->ntex || a_->nodo < 0 || (uint32_t)a_->nodo >= m->nnodos) continue;
             na = m->nodos + a_->nodo; if (na->cartel >= 0) continue;
-            for (j = m->inicio[2]; j < m->inicio[3] && c < 2; j++) {
-                const malla_t *b_ = m->mallas + j; const nodo_t *nb;
-                if (j == i || b_->tex != a_->tex || b_->nodo < 0 || (uint32_t)b_->nodo >= m->nnodos || b_->nodo == a_->nodo) continue;
-                nb = m->nodos + b_->nodo;
-                if (nb->cartel < 0 && fabsf(nb->cx - na->cx) < 0.5f && fabsf(nb->cy - na->cy) < 0.5f && fabsf(nb->cz - na->cz) < 0.5f) c++;
-            }
-            if (c >= 2 && pil[a_->tex] < 0xffff) pil[a_->tex]++;
+            q[k2].tex = a_->tex; q[k2].nodo = a_->nodo;
+            q[k2].x = (int32_t)floorf(na->cx * 2.0f + 0.5f); q[k2].y = (int32_t)floorf(na->cy * 2.0f + 0.5f); q[k2].z = (int32_t)floorf(na->cz * 2.0f + 0.5f);
+            k2++;
         }
+        if (q) qsort(q, k2, sizeof(pila_t), pila_cmp);
+        for (a2 = 0; q && a2 < k2; a2 = b2) {                  /* grupos de la misma textura y el mismo centro */
+            for (b2 = a2 + 1, c2 = 1; b2 < k2 && !pila_cmp_sitio(q + a2, q + b2); b2++) if (q[b2].nodo != q[b2 - 1].nodo) c2++;
+            if (c2 >= 3 && pil[q[a2].tex] + (b2 - a2) <= 0xffff) pil[q[a2].tex] += (uint16_t)(b2 - a2);   /* (nodos distintos) */
+        }
+        free(q);
         for (i = m->inicio[2]; i < m->inicio[3]; i++) {
             malla_t *a_ = m->mallas + i;
             if (a_->tex >= 0 && (uint32_t)a_->tex < m->ntex && pil[a_->tex] >= 16) a_->n = 0;   /* (n < 3: apagada) */
@@ -1507,6 +1525,9 @@ static inline int32_t ta_resto(void)
     int32_t a = (int32_t)ta_lim - (int32_t)ta_vb, b = (int32_t)ta_tope_etapa - (int32_t)ta_et;
     return ta_en_etapa && b < a ? b : a;
 }
+#ifdef DIAG_TEX
+static unsigned dg_tx[4]; static float dg_lej;
+#endif
 static void dibuja_etapa(const modelo_t *mo, int l)
 {
     const float tanh = 320.0f / fx, tanv = 240.0f / fx, kh = sqrtf(1 + tanh * tanh), kv = sqrtf(1 + tanv * tanv);
@@ -1549,9 +1570,18 @@ static void dibuja_etapa(const modelo_t *mo, int l)
 #ifdef DIAG_MS
             dg_mallas++;
 #endif
+#ifdef DIAG_TEX
+            if (m->tex == DIAG_TEX && mo == &etapa) dg_tx[0]++;
+#endif
             if (pvs && m->nodo >= 0 && !(pvs[k >> 5] & (1u << (k & 31))) && !(ent && ent[m->nodo >> 5] & (1u << (m->nodo & 31)))) continue;   /* PVS: no se ve (salvo lo cercano) */
+#ifdef DIAG_TEX
+            if (m->tex == DIAG_TEX && mo == &etapa) dg_tx[1]++;
+#endif
 #ifndef DIAG_SIN_TOPE
             if ((int32_t)(ve - vtx_et0) > vres) { ta_corto = 1; ta_et_corto = 1; POP_MALLA(m); continue; }
+#endif
+#ifdef DIAG_TEX
+            if (m->tex == DIAG_TEX && mo == &etapa) { dg_tx[2]++; if (!cart) { float dx_ = m->cx - o0, dy_ = m->cy - o1, dz_ = m->cz - o2, z_ = dx_ * e0 + dy_ * e1 + dz_ * e2; if (z_ - m->r > lej) dg_tx[3]++; dg_lej = lej; } }
 #endif
             if (DETRAS_ENTRADA(mo, m)) continue;                 /* (sig_antes) */
             if (!cart) {
@@ -8454,15 +8484,14 @@ static int geo_visible(const modelo_t *t)
 }
 /* vista de la etapa siguiente con la escala y de 44DE10 alrededor del suelo de su marco (filas: p' = p S vista) */
 static matrix_t vista_geo __attribute__((aligned(32)));
-/* DESVIACION (Rev 1.4, LASV -> MAYA): sin el aplastamiento. La etapa siguiente sale a su escala desde que el factor
-   pasa de 0,1 (20 m despues de la posicion 0x84). Aplastada hacia la base de su marco, la geometria que en su sitio
-   queda muy por debajo (o por encima) de la carretera de la union pasaba por la altura de la camara: en MAYA (baja
-   hasta 55 m por debajo de su base) un plano verde que tapaba la vista y paredes de selva oscuras durante los 200 m del
-   crecimiento. A 400-700 m y con la niebla, que aparezca entera no se nota. -DGEO_CRECE: lo del original */
+/* El crecimiento del original (44C530 / 44DE10): la etapa siguiente sale aplastada hacia la base de su marco y crece
+   durante 200 m de la union. La Rev 1.4 lo quito (LASV -> MAYA: lo que queda detras de la entrada pasaba por la altura
+   de la camara) y la etapa siguiente aparecia de golpe y entera al pasar el factor de 0,1 en todas las bifurcaciones;
+   en la Rev 1.4b vuelve (lo de detras de la entrada ya no se dibuja: DETRAS_ENTRADA). -DSIN_GEO_CRECE: sin el */
 static void geo_vista(const modelo_t *t)
 {
     float f = geo_esc, y0 = (1.0f - f) * marco_sig[1]; int j;
-#ifndef GEO_CRECE
+#ifdef SIN_GEO_CRECE
     return;
 #endif
     if (t != &sig || f >= 1.0f) return;
@@ -8472,7 +8501,7 @@ static void geo_vista(const modelo_t *t)
 }
 static void geo_vista_fin(const modelo_t *t)
 {
-#ifndef GEO_CRECE
+#ifdef SIN_GEO_CRECE
     return;
 #endif
     if (t != &sig || geo_esc >= 1.0f) return;
@@ -12581,6 +12610,13 @@ int main(int argc, char **argv)
         }
 #ifdef DIAG_CICLO
         dg_fase = (int)(cuadros_ms(crono) / 500) % 4;
+#endif
+#ifdef DIAG_TEX
+        {   static unsigned f_; if ((f_++ % 30) == 0) printf("TEX%d: crono %d nodos %u pvs %u tope %u lejos %u (lej %.0f lejos %.0f tope %.0f)\n", DIAG_TEX, (int)crono, dg_tx[0], dg_tx[1], dg_tx[2], dg_tx[3], (double)dg_lej, (double)lejos, (double)ta_lej_tope);
+            if (etapa.pvs_teo && etapa.nnodos > 985) printf("  nodos 982-985: vis %d%d%d%d pvs_on %d teo %u %u %u %u sec %d\n",
+                (int)(etapa.vis[982 >> 5] >> (982 & 31) & 1), (int)(etapa.vis[983 >> 5] >> (983 & 31) & 1), (int)(etapa.vis[984 >> 5] >> (984 & 31) & 1), (int)(etapa.vis[985 >> 5] >> (985 & 31) & 1),
+                etapa.pvs_on, etapa.pvs_teo[2 * 982], etapa.pvs_teo[2 * 983], etapa.pvs_teo[2 * 984], etapa.pvs_teo[2 * 985], (int)etapa.pvs_s);
+            memset(dg_tx, 0, sizeof dg_tx); }
 #endif
         tri_enviados = 0; vtx_ult = vtx_env; vtx_env = 0; ta_inicia_cuadro(); vtx_et_ult = vtx_et; vtx_et = 0;
         en_cuenta = estado == CUENTA;                           /* (el precalentamiento manda hasta el semaforo) */
