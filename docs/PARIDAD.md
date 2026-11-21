@@ -1505,6 +1505,22 @@ de OutRun 2 SP (las 15 etapas seguidas) que dio el usuario.
   no esta leido). Sin EFECTOS.DAT nuevo, sin agua (como antes).
 - NO verificado en consola real.
 
+### Auditoria del popping, fundido de entrada y velo del fondo (Rev 2.0 / Mod 1.6, 2026-11-21)
+
+Auditoria (Rev 1.9, Flycast con el piloto, `-DDIAG_POPPING`, 5 etapas de cada modo; scratchpad auditoria.py): saltos de
+nodos de 32 px o mas por segundo 3,5-12,3 segun la etapa; de ellos por el reparto del TA ("tope", los que se ven) 0,9-3,0
+y por la PVS ("pvs") 1,0-9,3, que casi nunca se ven (el contador mira el centro del nodo en la pantalla, no si esta
+tapado): dibujando los datos desde la carretera (pvs_audit.py) la PVS quita de lo visible 0,00 % de pixeles en BEAC, 0,01 %
+en MACH, 0,11 % en SANF y 1,29 % en PALM, con dos huecos reales: SANF nodo 177 (terreno, s ~2370) y PALM nodos 493-510 y
+569 (fachada, s ~4300) (PENDIENTE). Los saltos del reparto estan a 280-400 m de mediana y el 90 % antes de ~900 m; la
+distancia de dibujo esta en 2650-3200 m: una niebla solo en el limite no los tapa (y la de media distancia la quito el
+usuario en la demo 40).
+Cambios (pedidos: "opcion 2" y "algo de niebla en el fondo"): el fundido de entrada vuelve por defecto
+(`-DSIN_FUNDIDO_ENTRADA` lo quita; se quito tras la demo 35) y el velo del limite NLIM_A pasa de 0,3 a 0,45 en el mismo
+tramo. Medido en SANF (61 s): los saltos son los mismos (12,9 frente a 12,5 por segundo: el fundido no los evita, los
+suaviza) y el coste del fundido en el TA es pequeno (saltos por el tope 4,8 frente a 4,5 por segundo). Comprobado con
+`-DDIAG_FUNDIDO` (lo que se funde, en magenta) que funciona con el envio en dos pasadas y la reserva por listas.
+
 ### Torres del puente de SANF y laminas en la union hacia MACH (Rev 1.8 / Mod 1.4, 2026-11-21)
 
 Queja: en OutRun 2 SP, SANF y MACH, "elementos importantes que no cargan dejando huecos". Comparado con el video de

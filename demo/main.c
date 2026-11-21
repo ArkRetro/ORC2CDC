@@ -42,6 +42,11 @@
 #include "perfil.h"
 #endif
 #include "meta.h"
+/* Rev 2.0: el fundido de entrada (fe_paso) va por defecto (pedido: "opcion 2" de la auditoria del popping, 2026-11-21);
+   -DSIN_FUNDIDO_ENTRADA lo quita (como de la demo 35 a la Rev 1.9) */
+#if !defined(SIN_FUNDIDO_ENTRADA) && !defined(CON_FUNDIDO_ENTRADA)
+#define CON_FUNDIDO_ENTRADA
+#endif
 
 #ifdef DIAG_PVRMEM
 /* Medida: los bloques de pvr_mem (pvr_mem_malloc / pvr_mem_free de KallistiOS son debiles: estos los envuelven) con
@@ -8297,7 +8302,9 @@ static void luz_actual(int e, float *v, float *d)
    limite de la distancia de dibujado"): antes iba de 0,65 x nlim_d a nlim_d, con nlim_d la distancia del corte del
    reparto del TA (nlim_paso, nlim_prio), y velaba lo medio. Delante de NLIM_INI x lejos la tabla es la de la niebla
    del original (imagen igual). -DSIN_NIEBLA_LIMITE la quita. */
-#define NLIM_A 0.3f
+/* Rev 2.0 (pedido: "algo de niebla en el fondo"): NLIM_A 0,3 -> 0,45, en el mismo tramo (no a media distancia: la demo
+   40 lo pidio en el limite) */
+#define NLIM_A 0.45f
 #define NLIM_INI 0.12f
 #define NLIM_ANCHO 0.52f
 static float niebla_tab[129];                                   /* la tabla puesta (niebla_pon; focos_niebla) */
