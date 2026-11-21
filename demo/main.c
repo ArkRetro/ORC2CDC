@@ -980,8 +980,14 @@ static uint32_t vtx_et, vtx_et_ult;                      /* los de la etapa */
    En LASV la calzada mojada es translucida (textura 3 de SEG22, lista 2) sobre una capa opaca con los edificios
    reflejados: en los tramos cargados lo opaco gastaba el tope, la calzada no cabia y se veia el reflejo sobre negro
    ("el suelo desaparece") */
-#define RESERVA_L2 15                                    /* % */
-static uint32_t vtx_reserva;
+/* Rev 1.7: en vez de un 15 % fijo, cada lista deja a las de detras lo que gastaron en el cuadro anterior (x 1,1; x 1,5
+   si no cupieron), con un minimo de RESERVA_MIN % por lista y un maximo de RESERVA_MAX % en total. En PALM, mirando de
+   lado a los edificios de la salida, lo opaco (los forjados y los pilares) llenaba el tope y las fachadas con ventanas
+   y las hojas de las palmeras (lista de recorte) no cabian: "edificios en esqueleto" y palmeras sin hojas. Asi lo que
+   se queda fuera es lo lejano de la lista opaca (dibuja_etapa manda lo cercano primero) */
+#define RESERVA_MIN 4                                    /* % */
+#define RESERVA_MAX 60                                   /* % */
+static uint32_t vtx_reserva, lst_uso[3], lst_vtx[3]; static uint8_t lst_corto[3];
 #define LEJOS_MIN 600.0f
 /* Con FPS_OBJETIVO 45 (plan de recursos, 2026-11-12) el cuadro tiene 22,2 ms: 21 / 17 ms (la medida es tiempo de
    reloj desde que empieza la logica hasta que acaba el dibujo, sin las esperas de la PowerVR ni del campo: ya incluye
@@ -4743,6 +4749,13 @@ static void camara_paso(int boton, int salida, int agotado)
         e.guion = sal_cam;
     }
     cam_paso(&cam, &cam_tab, &e);
+#ifdef PRUEBA_CAM_FIJA
+    {   /* prueba: camara fija en el mundo (PV_X, PV_Y, PV_Z y la direccion PV_DX, PV_DZ), para repetir una captura */
+        static const float V_[5] = { PV_X, PV_Y, PV_Z, PV_DX, PV_DZ };
+        cam.ojo[0] = V_[0]; cam.ojo[1] = V_[1]; cam.ojo[2] = V_[2];
+        cam.mira[0] = V_[0] + V_[3]; cam.mira[1] = V_[1] - 0.06f; cam.mira[2] = V_[2] + V_[4];
+    }
+#endif
 #ifdef PRUEBA_FRENTE
     {   /* prueba: la camara delante del coche mirando al morro (PRUEBA_FRENTE m delante, a un lado y 1,2 m arriba) */
         int k; float d[3];
@@ -12710,8 +12723,15 @@ int main(int argc, char **argv)
 #ifdef DEP_LISTA
                 color_fijo = l == DEP_LISTA ? 0xFFFF00FF : 0;
 #endif
-                {   uint32_t tope_g = ta_tope_etapa;          /* (RESERVA_L2) */
-                if (l < 2) { ta_tope_etapa -= ta_tope_etapa / 100 * RESERVA_L2; vtx_reserva = VTX_ETAPA_MAX / 100 * RESERVA_L2; }
+                {   uint32_t tope_g = ta_tope_etapa, u0 = ta_et, v0 = vtx_et, res = 0, resv = 0; int c0 = ta_et_corto, j_;
+                    for (j_ = l + 1; j_ < 3; j_++) {          /* (lst_uso: lo de las listas que vienen detras) */
+                        uint32_t nu = lst_uso[j_] / 10 * (lst_corto[j_] ? 15 : 11), nv = lst_vtx[j_] / 10 * (lst_corto[j_] ? 15 : 11);
+                        uint32_t mu = tope_g / 100 * RESERVA_MIN, mv = VTX_ETAPA_MAX / 100 * RESERVA_MIN;
+                        res += nu > mu ? nu : mu; resv += nv > mv ? nv : mv;
+                    }
+                    if (res > tope_g / 100 * RESERVA_MAX) res = tope_g / 100 * RESERVA_MAX;
+                    if (resv > VTX_ETAPA_MAX / 100 * RESERVA_MAX) resv = VTX_ETAPA_MAX / 100 * RESERVA_MAX;
+                    ta_tope_etapa -= res; vtx_reserva = resv; ta_et_corto = 0;
                 for (i = 0; i < 3; i++)                         /* etapa, union y etapa siguiente: las que esten subidas */
 #ifdef DIAG_CICLO
                     if (!(dg_fase == 3 && i == 0))
@@ -12730,7 +12750,8 @@ int main(int argc, char **argv)
                         dibuja_rango(tramos[i], l, tramos[i]->inicio[l], tramos[i]->inicio[l + 1], 1, 0, 0);
                         geo_vista_fin(tramos[i]);
                     }
-                ta_tope_etapa = tope_g; vtx_reserva = 0; }
+                    ta_tope_etapa = tope_g; vtx_reserva = 0;
+                    lst_uso[l] = ta_et - u0; lst_vtx[l] = vtx_et - v0; lst_corto[l] = (uint8_t)ta_et_corto; ta_et_corto |= c0; }
                 color_fijo = 0; ta_en_etapa = 0;
                 POP_CAT0();
 #ifndef DIAG_SIN_PLANO
@@ -12943,6 +12964,7 @@ int main(int argc, char **argv)
                                      (unsigned)ta_tiras, (unsigned)(ta_teo_3d >> 10), (unsigned)diag_orig_vtx, (int)(prio_d >= ND_PRIO - 1 ? lejos : powf(2.0f, (prio_d + 1) / 4.0f)), prio_p, (double)prio_alfa, (unsigned)diag_quitado_n,
                                      (int)(diag_quitado_n ? diag_quitado_z : lejos), (double)diag_quitado_r, (double)niebla_d, (unsigned)sombra_tri, (unsigned)(sombra_teo >> 10),
                                      etapa.pvs_on, uni.pvs_on, sig.pvs_on, (unsigned)diag_pvs_v, (unsigned)chr_vtx_ult, (unsigned)chr_us_ult, ta_et_corto ? " CORTO" : "", ta_corto ? " TOPE" : "");
+        if (cuadro % 60 == 0) dbglog(DBG_INFO, "LISTAS: %uK %uK %uK v %u %u %u corto %d%d%d\n", (unsigned)(lst_uso[0] >> 10), (unsigned)(lst_uso[1] >> 10), (unsigned)(lst_uso[2] >> 10), (unsigned)lst_vtx[0], (unsigned)lst_vtx[1], (unsigned)lst_vtx[2], lst_corto[0], lst_corto[1], lst_corto[2]);
 #endif
         PRF(9);
 #ifdef DIAG_RETARDO
