@@ -1505,6 +1505,24 @@ de OutRun 2 SP (las 15 etapas seguidas) que dio el usuario.
   no esta leido). Sin EFECTOS.DAT nuevo, sin agua (como antes).
 - NO verificado en consola real.
 
+### Torres del puente de SANF y laminas en la union hacia MACH (Rev 1.8 / Mod 1.4, 2026-11-21)
+
+Queja: en OutRun 2 SP, SANF y MACH, "elementos importantes que no cargan dejando huecos". Comparado con el video de
+referencia y con `-DDIAG_POPPING -DDIAG_NODO=n` (por que se quita un nodo cada cuadro) y `-DDIAG_SIGM` (la malla mayor de
+la etapa siguiente que se dibuja).
+- SANF, el Golden Gate (CORREGIDO): las torres (nodos 765 y 775 de SEG25, 323 m de alto, ~100 px de radio a 700 m) van en
+  un grupo (tools/grupos_nodos.py) con piezas pequenas del puente y el grupo toma la clase de LOD mas alta de los suyos:
+  el reparto del TA las quitaba ("tope") y se veian los cables colgando sin torres. Ahora lo lejano que ocupa mucho en la
+  pantalla (radio >= GRANDE_PX 48 px a mas de GRANDE_Z 100 m) va con lo que no se quita y sin la clase de su grupo.
+- Union hacia MACH (CORREGIDO): mientras crece la etapa siguiente (geo_vista) no se dibujan sus nubes (mallas enteras
+  mas de SIG_NUBES 600 m por encima de lo mas alto de su carretera) ni sus cupulas de cielo (nodos de radio mayor que
+  SIG_CUPULA_R 2000 m: el degradado azul de MACH, nodos 1069 / 1072 de SEG27, lista opaca). Aplastadas hacia la base de
+  su marco eran laminas azul marino y siluetas palidas en el cielo de la union. Y los paneles lisos azul marino de las
+  nubes de MACH (textura 43 de SEG27 / SEG59, 32x32, 17 tiras a 900-1650 m) no se dibujan nunca: el video del original
+  no los saca; seran una mascara o un estado del GS que la demo no tiene (PENDIENTE: leerlo en el MIPS).
+- Lo que queda en la union hacia MACH es la silueta de sus montes en la niebla con el cielo aun de la etapa anterior; el
+  original tambien los ensena ahi.
+
 ### Edificios en esqueleto y palmeras sin hojas (Rev 1.7 / Mod 1.3, 2026-11-21)
 
 Captura del usuario en la salida de PALM con el coche girado a la derecha: edificios sin fachada (solo forjados y

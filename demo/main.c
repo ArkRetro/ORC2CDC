@@ -94,7 +94,13 @@ typedef struct { float cx, cy, cz, r; uint32_t v0, n; int32_t tex; int32_t nodo;
    panoramica de 2,4 km de radio: desde la carretera de la union eran una pared negra que tapaba el cielo y la camara
    la atravesaba justo antes de entrar (pantalla negra). En el original los aplastaba el crecimiento (44C530) */
 static int sig_antes; static float sig_ent[4];                  /* x, z de la entrada y direccion (x, z) */
-#define DETRAS_ENTRADA(mo, m) ((mo) == &sig && sig_antes && ((m)->cx - sig_ent[0]) * sig_ent[2] + ((m)->cz - sig_ent[1]) * sig_ent[3] < 0.0f)
+/* Rev 1.8: y mientras crece (geo_vista) las mallas que estan enteras mas de SIG_NUBES m por encima de lo mas alto de su
+   carretera (nubes): las capas de nubes de MACH (SEG27, nodos 1069-1073, textura 43, a 900-1650 m), aplastadas hacia la
+   base de su marco, bajaban sobre la union como laminas palidas y oscuras. Salen al acabar el crecimiento, en su sitio */
+static int sig_crece;
+#define SIG_CUPULA_R 2000.0f                                    /* (y las cupulas de cielo de la etapa: MACH 1069 / 1072, 2,5 km) */
+#define SIG_NUBES 600.0f                                        /* m sobre lo mas alto de la carretera (lee_modelo_en) */
+#define DETRAS_ENTRADA(mo, m) ((mo) == &sig && ((sig_antes && ((m)->cx - sig_ent[0]) * sig_ent[2] + ((m)->cz - sig_ent[1]) * sig_ent[3] < 0.0f) || (sig_crece && (((mo)->nubes && ((mo)->nubes[(uint32_t)((m) - (mo)->mallas) >> 5] >> ((uint32_t)((m) - (mo)->mallas) & 31) & 1)) || ((m)->nodo >= 0 && (uint32_t)(m)->nodo < (mo)->nnodos && (mo)->nodos[(m)->nodo].r > SIG_CUPULA_R)))))
 #define AGUA_NODO (-258)                                         /* lista 3, grupo 2: el plano del agua (agua_dibuja) */
 typedef struct { float x, y, z, u, v; uint32_t c; } vert_t;
 /* nodo del original (tools/modelo.py): esfera, banderas (bits 0-3 umbral de LOD, bit 4 orientado a la camara, bits 8-9
@@ -120,6 +126,7 @@ typedef struct {
     uint32_t *vis;                                                /* nodos visibles en el cuadro (bits; nodos_visibles) */
     uint32_t *vis_ant;                                            /* los que se dibujaron en el anterior (detras de vis) */
     uint32_t *pvs_ent;                                            /* nodos cercanos: enteros, sin la mascara de la PVS (PVS_CERCA) */
+    uint32_t *nubes;                                              /* mallas muy por encima de la carretera (Rev 1.8: DETRAS_ENTRADA) */
     uint32_t *pvs_ult;                                            /* gracia de la PVS (P1, nodos_visibles): el ultimo coste
                                                                      con el que se dibujo el nodo (pvs_teo), seguido de
                                                                      pvs_dibujo y los cuadros que le quedan (pvs_gra) */
@@ -322,6 +329,30 @@ static int lee_modelo_en(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t
         m->vis = m->nnodos ? calloc((m->nnodos + 31) / 32 * 2 + (g ? (m->nnodos + 1) / 2 : 0) + (nl + 1) / 2, 4) : NULL; m->ruta_i = 0;   /* vis y vis_ant */
         m->vis_ant = m->vis ? m->vis + (m->nnodos + 31) / 32 : NULL;
         m->pvs_ent = m->nnodos ? calloc((m->nnodos + 31) / 32, 4) : NULL;
+        m->nubes = NULL;
+        if (!m->relleno_propio && m->nruta && m->paso_ruta >= 3 && m->inicio[3] <= m->nmallas) {   /* (DETRAS_ENTRADA) */
+            float ytop = -1e30f; uint32_t q_, k_, hay_ = 0;
+            for (q_ = 0; q_ < m->nruta; q_++) if (m->ruta[q_ * m->paso_ruta + 1] > ytop) ytop = m->ruta[q_ * m->paso_ruta + 1];
+            for (q_ = 0; q_ < m->inicio[3] && !hay_; q_++) {
+                const malla_t *a_ = m->mallas + q_; float y0_ = 1e30f;
+                if (a_->n < 3 || a_->v0 + a_->n > m->nvert) continue;
+                for (k_ = 0; k_ < a_->n; k_++) if (m->verts[a_->v0 + k_].y < y0_) y0_ = m->verts[a_->v0 + k_].y;
+                hay_ = y0_ > ytop + SIG_NUBES;
+            }
+            if (hay_ && (m->nubes = calloc((m->nmallas + 31) / 32, 4)))
+                for (q_ = 0; q_ < m->inicio[3]; q_++) {
+                    const malla_t *a_ = m->mallas + q_; float y0_ = 1e30f;
+                    if (a_->n < 3 || a_->v0 + a_->n > m->nvert) continue;
+                    for (k_ = 0; k_ < a_->n; k_++) if (m->verts[a_->v0 + k_].y < y0_) y0_ = m->verts[a_->v0 + k_].y;
+                    if (y0_ > ytop + SIG_NUBES) {
+                        m->nubes[q_ >> 5] |= 1u << (q_ & 31);
+                        /* (y si su textura es de 32x32 o menos, apagada siempre: los paneles azul marino lisos de MACH,
+                           SEG27 / SEG59 textura 43, 17 tiras a 900-1650 m; el video del original no los saca nunca, son
+                           una mascara o un efecto con un estado del GS que la demo no tiene) */
+                        if (a_->tex >= 0 && (uint32_t)a_->tex < m->ntex && m->texs[a_->tex].w <= 32 && m->texs[a_->tex].h <= 32) m->mallas[q_].n = 0;
+                    }
+                }
+        }
         m->grp = m->vis && g ? (uint16_t *)(m->vis_ant + (m->nnodos + 31) / 32) : NULL;
         /* (detras, de cada lejano su completo; el lejano va sin grupo: su clase es la 0 del reparto, nodos_visibles) */
         m->lej_de = m->vis && nl ? (uint16_t *)(m->vis_ant + (m->nnodos + 31) / 32) + (g ? m->nnodos + (m->nnodos & 1) : 0) : NULL;
@@ -499,7 +530,7 @@ static void libera_modelo(modelo_t *m)
     tex_suelta(m);
     if (m->datos && m->datos == hueco_etapa) col_et.ok = 0;      /* su colision va detras en el hueco */
     if (!en_coche_bloque(m->ofs)) free(m->ofs);
-    free(m->vis); free(m->pvs_ent); free(m->pvs_m); free(m->pvs_teo); free(m->pvs_ult); free(m->tr); free(m->fe_p);
+    free(m->vis); free(m->pvs_ent); free(m->nubes); m->nubes = NULL; free(m->pvs_m); free(m->pvs_teo); free(m->pvs_ult); free(m->tr); free(m->fe_p);
     if (!(hueco_etapa && m->datos >= hueco_etapa && m->datos < hueco_etapa + cap_etapa) &&
         !(hueco_union && m->datos >= hueco_union && m->datos < hueco_union + cap_union) && !en_coche_bloque(m->datos))
         free(m->datos);                                           /* (los objetos de la union van dentro del hueco de la
@@ -1585,6 +1616,9 @@ static inline int32_t ta_resto(void)
 #ifdef DIAG_TEX
 static unsigned dg_tx[4]; static float dg_lej;
 #endif
+#ifdef DIAG_SIGM
+static float dg_sm_r; static int dg_sm_k;
+#endif
 #define PRIMERO_CD 24                                           /* (dibuja_etapa: clase de distancia, 4 log2 m: unos 64 m) */
 static void dibuja_etapa(const modelo_t *mo, int l)
 {
@@ -1653,6 +1687,9 @@ static void dibuja_etapa(const modelo_t *mo, int l)
             if (m->tex == DIAG_TEX && mo == &etapa) { dg_tx[2]++; if (!cart) { float dx_ = m->cx - o0, dy_ = m->cy - o1, dz_ = m->cz - o2, z_ = dx_ * e0 + dy_ * e1 + dz_ * e2; if (z_ - m->r > lej) dg_tx[3]++; dg_lej = lej; } }
 #endif
             if (DETRAS_ENTRADA(mo, m)) continue;                 /* (sig_antes) */
+#ifdef DIAG_SIGM
+            if (mo == &sig && m->r > dg_sm_r) { dg_sm_r = m->r; dg_sm_k = (int)k; }
+#endif
             if (!cart) {
                 float dx = m->cx - o0, dy = m->cy - o1, dz = m->cz - o2, zv, xv, yv;
                 zv = dx * e0 + dy * e1 + dz * e2;
@@ -7507,6 +7544,8 @@ static shz_mat4x4_t nv_xm;                                      /* la XMTRX de q
 #ifdef DIAG_SIGV
 static float dg_sig_r; static int dg_sig_n, dg_sig_c;
 #endif
+#define GRANDE_PX 48.0f                                         /* (nodos_visibles: Rev 1.8) */
+#define GRANDE_Z 100.0f
 static void nodos_visibles(modelo_t *mo)
 {
     float tanh = 320.0f / fx, tanv = 240.0f / fx, kh = sqrtf(1 + tanh * tanh), kv = sqrtf(1 + tanv * tanv), lod = fx / 240.0f;
@@ -7514,7 +7553,7 @@ static void nodos_visibles(modelo_t *mo)
     uint32_t j, n; const uint16_t *L = NULL;
     /* (el ojo, los ejes y los planos en variables locales: las escrituras de abajo obligaban a releerlos en cada nodo;
        mismas cuentas) */
-    float o0, o1, o2, e0, e1, e2, d0, d1, d2, a0, a1, a2, cer, lej; int pvs_on_; nodo_t *ND = mo->nodos;
+    float o0, o1, o2, e0, e1, e2, d0, d1, d2, a0, a1, a2, cer, lej; int pvs_on_, grande; nodo_t *ND = mo->nodos;
     uint32_t *VIS = mo->vis; const uint32_t *VA = mo->vis_ant; const uint32_t nnod = mo->nnodos; (void)VA; const int regs = mo == &uni ? uni_mascara : 7;
     uint16_t *G = mo->relleno_propio ? NULL : mo->grp;          /* grupos de nodos (abajo) */
 #ifdef REPARTO_GRUPO_VOL
@@ -7650,6 +7689,7 @@ static void nodos_visibles(modelo_t *mo)
         if (mo == &sig && d->r / fmaxf(zv, 1.0f) > dg_sig_r) { dg_sig_r = d->r / fmaxf(zv, 1.0f); dg_sig_n = (int)i; }
         if (mo == &sig) dg_sig_c++;
 #endif
+        grande = 0;
         cd = zv - d->r > 1.0f ? log2x(zv - d->r, 4) : 0; cd = cd > ND_PRIO - 1 ? ND_PRIO - 1 : cd;
         if (zv - d->r > z_tapa) cp = NB_PRIO - 1;               /* tapado por la niebla */
         else if (zv <= 0 || lim <= 0) cp = 0;
@@ -7661,6 +7701,11 @@ static void nodos_visibles(modelo_t *mo)
 #endif
             cp = cp < 0 ? 0 : cp > NB_PRIO - 1 ? NB_PRIO - 1 : cp;
             if (d->fl & NODO_LEJ) cp = 0;                       /* lejano: con lo que no se quita (cuesta casi nada) */
+            /* Rev 1.8: lo lejano que ocupa mucho en la pantalla (el radio de su esfera, GRANDE_PX px o mas, a mas de
+               GRANDE_Z m) va con lo que no se quita y sin la clase de su grupo (abajo): las torres del puente de SANF
+               (nodos 765 y 775 de SEG25, 323 m de alto, ~100 px a 700 m) van en un grupo con piezas pequenas del puente
+               y el grupo toma la clase mas alta: se quitaban las primeras y se veian los cables sin las torres */
+            if (zv - d->r > GRANDE_Z && d->r * fx >= GRANDE_PX * zv) { cp = 0; grande = 1; }
         }
 #if REPARTO_HIST_P || REPARTO_HIST_D
         if (ya) {                                               /* ya se dibujaba: se queda hasta pasar el corte con holgura */
@@ -7669,7 +7714,7 @@ static void nodos_visibles(modelo_t *mo)
         }
 #endif
         d->relleno[1] = (d->relleno[1] & ~4095u) | (uint32_t)(cd << 6 | cp);
-        if (G && (g = d->fl >> 16) && g <= nnod) {               /* de un grupo: la clase mas alta de los suyos visibles */
+        if (!grande && G && (g = d->fl >> 16) && g <= nnod) {   /* de un grupo: la clase mas alta de los suyos visibles */
             uint32_t o = G[g - 1], od = o >> 8, op = o & 255;
             G[g - 1] = (uint16_t)(((uint32_t)cd > od ? (uint32_t)cd : od) << 8 | ((uint32_t)cp > op ? (uint32_t)cp : op));
 #ifdef REPARTO_GRUPO_VOL
@@ -7961,6 +8006,16 @@ static void nodos_visibles_todos(void)
     if (prio_d < ND_PRIO - 1) for (i = 0; i < 3; i++) if (geo_visible(tramos[i])) nodos_quita(tramos[i]);
 #ifdef DIAG_POPPING
     pop_mide();
+#endif
+#if defined(DIAG_NODO) && defined(DIAG_POPPING)
+    {   static unsigned f_; pop_slot_t *ps = etapa.datos ? pop_slot(&etapa) : NULL;
+        if (ps && (f_++ % 20) == 0 && DIAG_NODO < etapa.nnodos) {
+            const nodo_t *d_ = etapa.nodos + DIAG_NODO; float dx_ = d_->cx - ojo[0], dy_ = d_->cy - ojo[1], dz_ = d_->cz - ojo[2];
+            float z_ = dx_ * ade[0] + dy_ * ade[1] + dz_ * ade[2];
+            printf("NODO %d: s %.0f %.4s %s z %.0f r %.0f cl %u/%u prio %d/%d alfa %.2f grupo %u\n", DIAG_NODO, (double)yo.s, cur_nodo >= 0 ? curso[cur_nodo].zona : "----",
+                   pop_nom[ps->cur[DIAG_NODO]], (double)z_, (double)d_->r, (unsigned)((d_->relleno[1] & 4095) >> 6), (unsigned)(d_->relleno[1] & 63), prio_d, prio_p, (double)prio_alfa, (unsigned)(d_->fl >> 16));
+        }
+    }
 #endif
 #if defined(DIAG_EDIF) && defined(DIAG_POPPING)
     {   /* medida: las mallas con el centro en un rectangulo de la pantalla, una vez al pasar por DIAG_EDIF_S */
@@ -8484,7 +8539,7 @@ static void geo_paso(void)
     if (geo_esc < 0) geo_esc = 0;
     if (geo_esc > 1) geo_esc = 1;
 #ifdef DIAG_GEO
-    { static int n_; if (n_++ % 6 == 0) dbglog(DBG_INFO, "GEO: crono %d pos %d s %.0f x %.1f coche %.1f %.1f %.1f ojo %.1f %.1f %.1f esc %.2f\n", crono, pos, (double)yo.s, (double)yo.x, (double)yo.pos[0], (double)yo.pos[1], (double)yo.pos[2], (double)ojo[0], (double)ojo[1], (double)ojo[2], (double)geo_esc); }
+    { static int n_; if (n_++ % 6 == 0) dbglog(DBG_INFO, "GEO: crono %d pos %d s %.0f x %.1f coche %.1f %.1f %.1f ojo %.1f %.1f %.1f esc %.2f base %.0f nubes %d crece %d\n", crono, pos, (double)yo.s, (double)yo.x, (double)yo.pos[0], (double)yo.pos[1], (double)yo.pos[2], (double)ojo[0], (double)ojo[1], (double)ojo[2], (double)geo_esc, (double)marco_sig[1], sig.nubes != NULL, sig_crece); }
 #endif
 }
 /* el tramo t (etapa, union o etapa siguiente) se dibuja en este cuadro */
@@ -8504,6 +8559,7 @@ static matrix_t vista_geo __attribute__((aligned(32)));
 static void geo_vista(const modelo_t *t)
 {
     float f = geo_esc, y0 = (1.0f - f) * marco_sig[1]; int j;
+    if (t == &sig) sig_crece = f < 1.0f;                     /* (DETRAS_ENTRADA) */
 #ifdef SIN_GEO_CRECE
     return;
 #endif
@@ -12689,6 +12745,11 @@ int main(int argc, char **argv)
         }
 #ifdef DIAG_CICLO
         dg_fase = (int)(cuadros_ms(crono) / 500) % 4;
+#endif
+#ifdef DIAG_SIGM
+        {   static unsigned f_; if ((f_++ % 10) == 0 && sig.datos) { const malla_t *m_ = dg_sm_k >= 0 ? sig.mallas + dg_sm_k : NULL;
+            printf("SIGM: s %.0f malla %d r %.0f nodo %d tex %d c %.0f %.0f %.0f crece %d\n", (double)yo.s, dg_sm_k, (double)dg_sm_r, m_ ? (int)m_->nodo : -1, m_ ? (int)m_->tex : -1, m_ ? (double)m_->cx : 0.0, m_ ? (double)m_->cy : 0.0, m_ ? (double)m_->cz : 0.0, sig_crece); }
+            dg_sm_r = 0; dg_sm_k = -1; }
 #endif
 #ifdef DIAG_TEX
         {   static unsigned f_; if ((f_++ % 30) == 0) printf("TEX%d: s %.0f crono %d nodos %u pvs %u tope %u lejos %u (lej %.0f lejos %.0f tope %.0f)\n", DIAG_TEX, (double)yo.s, (int)crono, dg_tx[0], dg_tx[1], dg_tx[2], dg_tx[3], (double)dg_lej, (double)lejos, (double)ta_lej_tope);
