@@ -1526,10 +1526,14 @@ de OutRun 2 SP (las 15 etapas seguidas) que dio el usuario.
 Queja: en OutRun 2 SP, SANF y MACH, "elementos importantes que no cargan dejando huecos". Comparado con el video de
 referencia y con `-DDIAG_POPPING -DDIAG_NODO=n` (por que se quita un nodo cada cuadro) y `-DDIAG_SIGM` (la malla mayor de
 la etapa siguiente que se dibuja).
-- SANF, el Golden Gate (CORREGIDO): las torres (nodos 765 y 775 de SEG25, 323 m de alto, ~100 px de radio a 700 m) van en
-  un grupo (tools/grupos_nodos.py) con piezas pequenas del puente y el grupo toma la clase de LOD mas alta de los suyos:
-  el reparto del TA las quitaba ("tope") y se veian los cables colgando sin torres. Ahora lo lejano que ocupa mucho en la
-  pantalla (radio >= GRANDE_PX 48 px a mas de GRANDE_Z 100 m) va con lo que no se quita y sin la clase de su grupo.
+- SANF, el Golden Gate (CORREGIDO en la Rev 1.9): las torres (nodos 765 y 775 de SEG25, 323 m de alto) van en un grupo
+  (tools/grupos_nodos.py) con piezas pequenas del puente y el grupo toma la clase de LOD mas alta de los suyos: el reparto
+  del TA las quitaba ("tope") y se veian los cables colgando sin torres. La Rev 1.8 lo decidia cada cuadro por el tamano
+  en la pantalla y ponia esos nodos en la clase 0 (la que no se quita): la clase 0 no cabia, el reparto se quedaba en su
+  minimo (corte 1 m, clase -1) y lo de alrededor del umbral cambiaba de clase: el suelo y el puente parpadeaban (queja
+  del usuario). Rev 1.9: al leer la etapa los nodos de radio >= GRUPO_RMAX 150 m salen de su grupo y llevan su propia
+  clase. Medido con -DDIAG_POPPING en los primeros 18 s de SANF (puente): saltos de 32 px o mas por segundo 11,6 (Rev
+  1.7), 16,4 (1.8), 12,1 (1.9); el corte del principio 45 m / clase 23 como en la 1.7 (1 m / -1 en la 1.8).
 - Union hacia MACH (CORREGIDO): mientras crece la etapa siguiente (geo_vista) no se dibujan sus nubes (mallas enteras
   mas de SIG_NUBES 600 m por encima de lo mas alto de su carretera) ni sus cupulas de cielo (nodos de radio mayor que
   SIG_CUPULA_R 2000 m: el degradado azul de MACH, nodos 1069 / 1072 de SEG27, lista opaca). Aplastadas hacia la base de

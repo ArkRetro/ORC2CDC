@@ -232,6 +232,7 @@ static int pila_cmp(const void *a, const void *b)
     int c = pila_cmp_sitio(a, b);
     return c ? c : ((const pila_t *)a)->nodo - ((const pila_t *)b)->nodo;
 }
+#define GRUPO_RMAX 150.0f
 static int lee_modelo_en(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t cap)
 {
     uint32_t sz, h[13], i, v7; uint8_t *b = buf ? (gd_carga_en(nombre, buf, cap, &sz) ? NULL : buf) : gd_carga(nombre, &sz), *p;
@@ -307,6 +308,13 @@ static int lee_modelo_en(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t
         }
         for (i = 0; r2 && i < m->nnodos; i++) if (r2[i] > m->nodos[i].r * m->nodos[i].r) m->nodos[i].r = sqrtf(r2[i]) + 0.5f;
         free(r2);
+        /* Rev 1.9: los nodos enormes (radio >= GRUPO_RMAX m) salen de su grupo (tools/grupos_nodos.py) y el reparto les da
+           su propia clase: las torres del Golden Gate (SANF, SEG25 765 / 775, 323 m de alto) iban con piezas pequenas del
+           puente y el grupo toma la clase mas alta: se quitaban y se veian los cables sin torres. Al leer, no por cuadro:
+           la Rev 1.8 lo decidia cada cuadro por el tamano en la pantalla (y las ponia en la clase 0, la que no se quita):
+           el reparto se quedaba en su minimo y lo de alrededor del umbral cambiaba de clase: el suelo y el puente
+           aparecian y desaparecian */
+        for (i = 0; i < m->nnodos; i++) if (m->nodos[i].r >= GRUPO_RMAX) m->nodos[i].fl &= 0xFFFFu;
     }
     /* presupuesto del TA (nodos_visibles): relleno[0] = bytes teoricos del TA de las tiras del nodo (ta_teo),
        relleno[1] = sus vertices << 12 | las clases de distancia (<< 6) y de LOD del cuadro (nodos_visibles) */
@@ -7594,8 +7602,6 @@ static shz_mat4x4_t nv_xm;                                      /* la XMTRX de q
 #ifdef DIAG_SIGV
 static float dg_sig_r; static int dg_sig_n, dg_sig_c;
 #endif
-#define GRANDE_PX 48.0f                                         /* (nodos_visibles: Rev 1.8) */
-#define GRANDE_Z 100.0f
 static void nodos_visibles(modelo_t *mo)
 {
     float tanh = 320.0f / fx, tanv = 240.0f / fx, kh = sqrtf(1 + tanh * tanh), kv = sqrtf(1 + tanv * tanv), lod = fx / 240.0f;
@@ -7603,7 +7609,7 @@ static void nodos_visibles(modelo_t *mo)
     uint32_t j, n; const uint16_t *L = NULL;
     /* (el ojo, los ejes y los planos en variables locales: las escrituras de abajo obligaban a releerlos en cada nodo;
        mismas cuentas) */
-    float o0, o1, o2, e0, e1, e2, d0, d1, d2, a0, a1, a2, cer, lej; int pvs_on_, grande; nodo_t *ND = mo->nodos;
+    float o0, o1, o2, e0, e1, e2, d0, d1, d2, a0, a1, a2, cer, lej; int pvs_on_; nodo_t *ND = mo->nodos;
     uint32_t *VIS = mo->vis; const uint32_t *VA = mo->vis_ant; const uint32_t nnod = mo->nnodos; (void)VA; const int regs = mo == &uni ? uni_mascara : 7;
     uint16_t *G = mo->relleno_propio ? NULL : mo->grp;          /* grupos de nodos (abajo) */
 #ifdef REPARTO_GRUPO_VOL
@@ -7739,7 +7745,6 @@ static void nodos_visibles(modelo_t *mo)
         if (mo == &sig && d->r / fmaxf(zv, 1.0f) > dg_sig_r) { dg_sig_r = d->r / fmaxf(zv, 1.0f); dg_sig_n = (int)i; }
         if (mo == &sig) dg_sig_c++;
 #endif
-        grande = 0;
         cd = zv - d->r > 1.0f ? log2x(zv - d->r, 4) : 0; cd = cd > ND_PRIO - 1 ? ND_PRIO - 1 : cd;
         if (zv - d->r > z_tapa) cp = NB_PRIO - 1;               /* tapado por la niebla */
         else if (zv <= 0 || lim <= 0) cp = 0;
@@ -7751,11 +7756,6 @@ static void nodos_visibles(modelo_t *mo)
 #endif
             cp = cp < 0 ? 0 : cp > NB_PRIO - 1 ? NB_PRIO - 1 : cp;
             if (d->fl & NODO_LEJ) cp = 0;                       /* lejano: con lo que no se quita (cuesta casi nada) */
-            /* Rev 1.8: lo lejano que ocupa mucho en la pantalla (el radio de su esfera, GRANDE_PX px o mas, a mas de
-               GRANDE_Z m) va con lo que no se quita y sin la clase de su grupo (abajo): las torres del puente de SANF
-               (nodos 765 y 775 de SEG25, 323 m de alto, ~100 px a 700 m) van en un grupo con piezas pequenas del puente
-               y el grupo toma la clase mas alta: se quitaban las primeras y se veian los cables sin las torres */
-            if (zv - d->r > GRANDE_Z && d->r * fx >= GRANDE_PX * zv) { cp = 0; grande = 1; }
         }
 #if REPARTO_HIST_P || REPARTO_HIST_D
         if (ya) {                                               /* ya se dibujaba: se queda hasta pasar el corte con holgura */
@@ -7764,7 +7764,7 @@ static void nodos_visibles(modelo_t *mo)
         }
 #endif
         d->relleno[1] = (d->relleno[1] & ~4095u) | (uint32_t)(cd << 6 | cp);
-        if (!grande && G && (g = d->fl >> 16) && g <= nnod) {   /* de un grupo: la clase mas alta de los suyos visibles */
+        if (G && (g = d->fl >> 16) && g <= nnod) {               /* de un grupo: la clase mas alta de los suyos visibles */
             uint32_t o = G[g - 1], od = o >> 8, op = o & 255;
             G[g - 1] = (uint16_t)(((uint32_t)cd > od ? (uint32_t)cd : od) << 8 | ((uint32_t)cp > op ? (uint32_t)cp : op));
 #ifdef REPARTO_GRUPO_VOL
