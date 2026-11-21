@@ -1505,6 +1505,31 @@ de OutRun 2 SP (las 15 etapas seguidas) que dio el usuario.
   no esta leido). Sin EFECTOS.DAT nuevo, sin agua (como antes).
 - NO verificado en consola real.
 
+### Carga, suelo de LASV, faros, agua y cascadas de NIAG (Rev 1.6 / Mod 1.2, 2026-11-21)
+
+Queja: carga irregular de elementos en general; en LASV bajadas de cuadros con el agua de las ruedas y el suelo que
+desaparece; faros de noche que no apuntan al suelo y demasiado brillantes; las cascadas de NIAG aparecen y desaparecen
+y su agua parece una capa solida turquesa. Medido en Flycast (`-DDIAG_VTX`, `-DDIAG_TEX=n`, `-DDIAG_SIN_TOPE`).
+- Suelo de LASV (CORREGIDO): la calzada mojada es translucida (textura 3 de SEG22, lista 2) sobre una capa opaca con
+  los edificios reflejados. Las listas van en orden (0, 1, 2) y en los tramos cargados (s 450-650) lo opaco llenaba el
+  tope del TA: la calzada no cabia y se veia el reflejo sobre negro. Ahora las listas 0 y 1 dejan RESERVA_L2 (15 %)
+  del tope del TA y de vertices de la etapa a la translucida.
+- Envio de lo cercano primero (dibuja_etapa, dos pasadas por lista): la clase de distancia <= PRIMERO_CD (unos 64 m)
+  o la de LOD 0 y despues el resto: si un cuadro no cabe, se queda fuera lo lejano. Y un cuadro suelto que no cabe ya
+  no baja el corte del reparto (prio_ajusta: dos seguidos si): antes un solo cuadro llevaba el corte de 4000 m a 5 m
+  y los edificios volvian a golpes durante segundos (la "carga irregular").
+- Esferas de los nodos (CORREGIDO): al leer cada etapa el radio de cada nodo crece hasta cubrir todos sus vertices
+  (lee_modelo_en). En unos pocos nodos del disco la esfera no los contiene (NIAG 984, la cascada de la derecha, 85 m
+  corta; LASV 2177, 432 m) y el recorte por la vista los quitaba enteros con sus tiras en la pantalla.
+- Agua de las ruedas: como mucho NAGUA 128 gotas (el original 256), AGUA_TAM_MAX 1,2 m y AGUA_PANTALLAS 0,5
+  pantallas de area entre todas (cada gota es un cuadrado translucido: la PowerVR paga por pixel y ordena por triangulo).
+- Faros (DESVIACION pedida): la luz del suelo (FAROS.DAT) x FAROS_BRILLO 0,4 de alfa y los focos proyectados x
+  FOCOS_BRILLO 0,55. Era un parche blanco delante del coche que en el video del original casi no se ve.
+- Agua de NIAG (DESVIACION pedida): color por vertice entre el fondo (0x1A4470, mirando hacia abajo) y el cielo
+  reflejado (0x6A9AC6, rasante), con (1 - cos)^3 del angulo con la vertical (agua_malla, agua_fresnel). Colores del
+  video del original. Las demas zonas siguen con su color solido.
+- NO verificado en consola real; los cuadros por segundo de Flycast no son los de la Dreamcast.
+
 ### Reflejo del cielo y de los tuneles (Rev 1.3, 2026-11-20; DESVIACION pedida)
 
 - El original (SLES-53998 0x103dc8 -> 0x1040e0 -> 0x172f30 = 414340 / 414050 / 44CD30 del PC): cada cuadro, con el coche

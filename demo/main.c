@@ -282,6 +282,24 @@ static int lee_modelo_en(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t
             if (a_->tex >= 0 && (uint32_t)a_->tex < m->ntex && pil[a_->tex] >= 16) a_->n = 0;   /* (n < 3: apagada) */
         }
     }
+    /* Rev 1.5b: la esfera de cada nodo cubre todos sus vertices. En unos pocos nodos del disco (NIAG: el 984, la
+       cascada de la derecha, 85 m corta; LASV 432 m en el 2177) la esfera del original no los contiene y el recorte
+       por la vista (nodos_visibles) quitaba el nodo entero con sus tiras aun en la pantalla: la cascada no salia nunca
+       o aparecia y desaparecia. El centro se queda; solo crece el radio */
+    if (v7 && m != &coche && m != &chr && !m->relleno_propio && m->nnodos && m->inicio[3] <= m->nmallas) {
+        float *r2 = calloc(m->nnodos, sizeof(float));
+        for (i = 0; r2 && i < m->inicio[3]; i++) {
+            const malla_t *ma = m->mallas + i; const nodo_t *nd; uint32_t j;
+            if (ma->nodo < 0 || (uint32_t)ma->nodo >= m->nnodos || ma->n < 3 || ma->v0 + ma->n > m->nvert) continue;
+            nd = m->nodos + ma->nodo; if (nd->cartel >= 0) continue;
+            for (j = 0; j < ma->n; j++) {
+                const vert_t *v = m->verts + ma->v0 + j; float dx = v->x - nd->cx, dy = v->y - nd->cy, dz = v->z - nd->cz, d = dx * dx + dy * dy + dz * dz;
+                if (d > r2[ma->nodo]) r2[ma->nodo] = d;
+            }
+        }
+        for (i = 0; r2 && i < m->nnodos; i++) if (r2[i] > m->nodos[i].r * m->nodos[i].r) m->nodos[i].r = sqrtf(r2[i]) + 0.5f;
+        free(r2);
+    }
     /* presupuesto del TA (nodos_visibles): relleno[0] = bytes teoricos del TA de las tiras del nodo (ta_teo),
        relleno[1] = sus vertices << 12 | las clases de distancia (<< 6) y de LOD del cuadro (nodos_visibles) */
     /* (con relleno_propio no: los objetos de las uniones llevan ahi su malla y su animacion, y sus mallas no apuntan a
@@ -958,6 +976,12 @@ static uint32_t vtx_et, vtx_et_ult;                      /* los de la etapa */
    con la distancia del original no se envian mas vertices (Flycast, PALM: 27100 vertices y 55,5 -> 56 cuadros por
    segundo; docs/PARIDAD.md, Fundido de entrada) */
 #define VTX_ETAPA_MAX 20000
+/* Rev 1.5b: parte del tope del TA y de vertices de la etapa que las listas opaca y de recorte dejan a la translucida.
+   En LASV la calzada mojada es translucida (textura 3 de SEG22, lista 2) sobre una capa opaca con los edificios
+   reflejados: en los tramos cargados lo opaco gastaba el tope, la calzada no cabia y se veia el reflejo sobre negro
+   ("el suelo desaparece") */
+#define RESERVA_L2 15                                    /* % */
+static uint32_t vtx_reserva;
 #define LEJOS_MIN 600.0f
 /* Con FPS_OBJETIVO 45 (plan de recursos, 2026-11-12) el cuadro tiene 22,2 ms: 21 / 17 ms (la medida es tiempo de
    reloj desde que empieza la logica hasta que acaba el dibujo, sin las esperas de la PowerVR ni del campo: ya incluye
@@ -1486,7 +1510,7 @@ static void dibuja_rango(const modelo_t *mo, int l, uint32_t k0, uint32_t k1, in
             if (mo->pvs_on && m->nodo >= 0 && !(mo->pvs_dibujo[k >> 5] & (1u << (k & 31))) &&
                 !(mo->pvs_ent && mo->pvs_ent[m->nodo >> 5] & (1u << (m->nodo & 31)))) continue;   /* PVS: no se ve (salvo lo cercano) */
 #ifndef DIAG_SIN_TOPE
-            if (vtx_et + (vtx_env - vtx_et0) > VTX_ETAPA_MAX) { ta_corto = 1; ta_et_corto = 1; POP_MALLA(m); continue; }
+            if (vtx_et + (vtx_env - vtx_et0) + vtx_reserva > VTX_ETAPA_MAX) { ta_corto = 1; ta_et_corto = 1; POP_MALLA(m); continue; }
 #endif
             if (DETRAS_ENTRADA(mo, m)) continue;                 /* (sig_antes) */
             cartel = malla_de_cartel(mo, m);
@@ -1555,6 +1579,7 @@ static inline int32_t ta_resto(void)
 #ifdef DIAG_TEX
 static unsigned dg_tx[4]; static float dg_lej;
 #endif
+#define PRIMERO_CD 24                                           /* (dibuja_etapa: clase de distancia, 4 log2 m: unos 64 m) */
 static void dibuja_etapa(const modelo_t *mo, int l)
 {
     const float tanh = 320.0f / fx, tanv = 240.0f / fx, kh = sqrtf(1 + tanh * tanh), kv = sqrtf(1 + tanv * tanv);
@@ -1572,17 +1597,28 @@ static void dibuja_etapa(const modelo_t *mo, int l)
     const uint32_t *teo = ta_teo_tab[mo->ofs != NULL], tf = ta_f, cf = color_fijo;
     const vert_t *VV = mo->verts; const uint32_t *OF = mo->ofs;
     uint32_t dvb = 0, dt = 0, dn = 0, dtri = 0, ve = vtx_env; int32_t r = ta_resto();
-    const int32_t vres = (int32_t)VTX_ETAPA_MAX - (int32_t)vtx_et;   /* vtx_et + (vtx_env - vtx_et0) > VTX_ETAPA_MAX */
+    const int32_t vres = (int32_t)VTX_ETAPA_MAX - (int32_t)vtx_et - (int32_t)vtx_reserva;   /* vtx_et + (vtx_env - vtx_et0) > VTX_ETAPA_MAX */
 #define ET_VUELCA() do { ta_vb += dvb; if (ta_en_etapa) ta_et += dvb; ta_teo_3d += dt; ta_tiras += dn; tri_enviados += dtri; \
                          vtx_env = ve; dvb = dt = dn = dtri = 0; } while (0)
 #define ET_RECARGA() do { ve = vtx_env; r = ta_resto(); } while (0)
     uint32_t kb = mo->inicio[l];                                /* fin del tramo anterior = principio del siguiente */
+    int pase;
     ta_ofs = mo->ofs != NULL;
+    /* Rev 1.5b: dos pasadas, primero lo cercano y lo enorme en la pantalla (clase de distancia <= PRIMERO_CD o de LOD 0:
+       el suelo, la calzada y lo que rodea la camara) y despues el resto. Si el cuadro llega al tope del TA o de vertices
+       se queda fuera lo lejano y no el suelo (LASV s 454: con el orden del fichero la calzada iba al final y se veia el
+       fondo negro). La lista transparente la ordena la PowerVR por triangulo: el orden de envio no cambia lo que se ve */
+    for (pase = 0; pase < 2; pase++) {
+    kb = mo->inicio[l];
     for (it = it0; it < it1; it++) {
         uint32_t t = tr[it], nd = t >> 16, ka = kb, k, fv = 0; int cart = 0;
         kb = t & 0xFFFF;
+        if (!nd && pase) continue;                              /* (mallas sueltas: en la primera) */
         if (nd) {
             if (!(vis[(nd - 1) >> 5] & (1u << ((nd - 1) & 31)))) continue;
+            {   uint32_t cl_ = N[nd - 1].relleno[1] & 4095u;
+                int primero = (cl_ >> 6) <= PRIMERO_CD || (cl_ & 63) == 0;
+                if (primero != (pase == 0)) continue; }
             cart = N[nd - 1].cartel >= 0;                       /* (malla_de_cartel: nodo valido con cartel) */
 #ifdef CON_FUNDIDO_ENTRADA
             if (mo->fe_n) fv = mo->fe_v[nd - 1];                /* el nodo se esta fundiendo (fe_paso) */
@@ -1673,6 +1709,7 @@ static void dibuja_etapa(const modelo_t *mo, int l)
             }
             else { ET_VUELCA(); dibuja_malla(mo, m); if (fo && !ta_corto) focos_anota(mo, m); ET_RECARGA(); }
         }
+    }
     }
     ET_VUELCA();
 #undef ET_VUELCA
@@ -5220,11 +5257,16 @@ static void humo_paso(void)                                     /* 0x10b178 */
    (0x10cd58): avanza, x y z por 0,99 (0x32b314), muere bajo el plano de la rueda 2 (0x48e4d8, el de la fuente),
    y -= 0x3B315723, tamano + car+1C4 (m por cuadro) x 1 (0x32b2dc) y muere al acabar la vida. El alfa del color como
    el del humo (255 aqui, PROBABLE: el microprograma de la VU1 del dibujo no esta leido) */
-#define NAGUA 256
+#define NAGUA 128                                              /* (Rev 1.5b: 256 en el original; ver AGUA_PANTALLAS) */
 /* PROVISIONAL (Rev 1.4): con car+1C4 x 1 tal cual las gotas llegaban a 20 m de lado antes de caer y tapaban media
    pantalla; en el video de referencia (OutRun 2 SP, LASV) la estela es baja y pegada a las ruedas. Sin el dibujo del
    original leido (0x108d30, tipo 3) se calibra con el video */
 #define AGUA_CRECE 0.25f
+/* Rev 1.5b (bajadas de cuadros en LASV): cada gota es un cuadrado translucido y la PowerVR paga por pixel cubierto (y
+   ordena la lista translucida por triangulo). Tamano como mucho AGUA_TAM_MAX m y, entre todas, como mucho AGUA_PANTALLAS
+   pantallas de area (el humo se queda con el resto de HUMO_PANTALLAS) */
+#define AGUA_TAM_MAX 1.2f
+#define AGUA_PANTALLAS 0.5f
 typedef struct { float p[3], v[3], tam; int vida; } agua_t;
 static agua_t aguas[NAGUA]; static int agua_n, agua_cuenta[4];
 static void agua_pide(const float *vc)                         /* 0x10c988 */
@@ -5266,7 +5308,7 @@ static void agua_paso(const float *vc)                         /* 0x10cd58 */
         h->v[0] *= 0.99000001f; h->v[2] *= 0.99000001f;
         if (part_plano(h->p, t) < 0) muere = 1;
         h->v[1] -= 0.00270000007f;                              /* 0x3B315723 */
-        h->tam += v * AGUA_CRECE;
+        h->tam += v * AGUA_CRECE; if (h->tam > AGUA_TAM_MAX) h->tam = AGUA_TAM_MAX;
         if (--h->vida <= 0) muere = 1;
         if (muere) *h = aguas[--agua_n]; else i++;
     }
@@ -5281,7 +5323,9 @@ static void part_paso(const coche_t *c, const float *r)
     memcpy(part_coche_ant, c->pos, 12); part_coche_hay = 1;
     neum_paso(c, r);
     if (part_tex_ok) { trozos_pide(c); humo_pide(c, vc); }
+#ifndef DIAG_SIN_AGUA
     if (agua_tex_ok) agua_pide(vc);
+#endif
     trozos_paso(c);
     humo_paso();
     agua_paso(vc);
@@ -5516,6 +5560,8 @@ static void efectos_dibuja(void)
             if (pt_cuad_humo((const float (*)[3])p, UVH, c)) break;
         }
         if (agua_tex_ok && agua_n) {                            /* agua de las ruedas (fuente 6, agua_pide) */
+            float px_ = (HUMO_PANTALLAS - AGUA_PANTALLAS) * 640.0f * 480.0f;
+            if (humo_px < px_) humo_px = px_;                   /* (AGUA_PANTALLAS) */
             pvr_prim(&cab_part[3], sizeof(pvr_poly_hdr_t));
             for (i = 0; i < agua_n; i++) {
                 const agua_t *h = aguas + i; float m = h->tam * 0.5f, p[4][3]; uint32_t c[4]; int k;
@@ -7945,6 +7991,10 @@ static void prio_ajusta(int corto, uint32_t usado)
        volver. Con un 10 % de holgura antes de bajar, los huecos del corte de LOD caen de 0,84 a 0,07 por segundo en
        PALM (y con la histeresis 8/16, las apariciones de 12,2 a 8,8 por segundo). */
     if (corto && ta_tope_etapa && ta_et < ta_tope_etapa + ta_tope_etapa / 10) corto = 0;
+    /* Rev 1.5b: un cuadro suelto que no cabe ya no baja el corte (con el envio de lo cercano primero, dibuja_etapa,
+       lo que se pierde es lo lejano); dos seguidos si. Antes un solo cuadro llevaba el corte de 4000 m a 5 m y el
+       reparto tardaba segundos en devolver los edificios (la carga a golpes de LASV) */
+    {   static int seguidos; seguidos = corto ? seguidos + 1 : 0; if (seguidos == 1) corto = 0; }
 #ifdef DIAG_POPPING
     if (corto) pop_ccorto++;
 #endif
@@ -8559,11 +8609,28 @@ static void agua_prepara(void)
     cx.depth.comparison = PVR_DEPTHCMP_GEQUAL;
     pvr_poly_compile(&agua_cab, &cx);
 }
+/* Rev 1.5b (pedido: "el agua de NIAG parece una capa solida azul turquesa"): en las zonas de agua_fresnel el color va
+   por vertice entre el del fondo (mirando hacia abajo) y el del cielo reflejado (rasante), con (1 - cos)^3 del angulo
+   con la vertical, como un Fresnel. Colores del video del original (OutRun 2 SP, NIAG): azul medio al pie de las
+   cataratas, mas claro hacia el horizonte. Sin texturas ni pasadas de mas */
+static uint32_t agua_fondo, agua_cielo; static int agua_fresnel;
+static uint32_t col_mezcla(uint32_t a, uint32_t b, float f)
+{
+    uint32_t r = 0; int k;
+    for (k = 0; k < 24; k += 8) r |= (uint32_t)((float)((a >> k) & 255) * (1.0f - f) + (float)((b >> k) & 255) * f) << k;
+    return r | 0xFF000000u;
+}
 static void agua_malla(const modelo_t *mo, const malla_t *m, uint32_t c)
 {
     const vert_t *v = mo->verts + m->v0; uint32_t i, n = m->n > 256 ? 256 : m->n;
     for (i = 0; i < n; i++) {
         float x = v[i].x, y = v[i].y, z = v[i].z, w;
+        if (agua_fresnel) {
+            float dx = x - ojo[0], dy = ojo[1] - y, dz = z - ojo[2], l = sqrtf(dx * dx + dy * dy + dz * dz), cs, f;
+            cs = l > 0.01f ? dy / l : 1.0f; cs = cs < 0.0f ? 0.0f : cs > 1.0f ? 1.0f : cs;
+            f = 1.0f - cs; f = f * f * f;
+            c = col_mezcla(agua_fondo, agua_cielo, f);
+        }
         mat_trans_single3_nodivw(x, y, z, w);
         pw[i].x = x; pw[i].y = y; pw[i].w = w;
         pw[i].u = pw[i].v = 0.0f;                                   /* sin textura */
@@ -8588,6 +8655,8 @@ static void agua_dibuja(void)
     else return;
     if (!mo || !geo_visible(mo)) return;                        /* (0x11a2e8 va dentro de 0x1725d0) */
     c = agua_color_de(e->zona);                                 /* color solido de la zona */
+    agua_fresnel = !memcmp(e->zona, "NIAG", 4);                 /* (agua_malla) */
+    agua_fondo = 0xFF1A4470u; agua_cielo = 0xFF6A9AC6u;
     mat_load(&vista); geo_vista(mo);
     pvr_prim(&agua_cab, sizeof(pvr_poly_hdr_t));                /* color plano, sin textura ni niebla */
     for (k = mo->inicio[3]; k < mo->inicio[4]; k++) {
@@ -8805,6 +8874,8 @@ static vert_t faros_vw[2 * (FAROS_NL - 1) * 2 * FAROS_NC];      /* las tiras del
 static malla_t faros_wm[2 * (FAROS_NL - 1)];
 static modelo_t faros_w;                                        /* (solo verts: dibuja_malla) */
 static coli_pred_t faros_pred;                                  /* (el suyo: no toca el del coche) */
+#define FAROS_BRILLO 0.4f
+#define FOCOS_BRILLO 0.55f                                      /* (focos_gris: Rev 1.5b, igual) */
 static uint32_t faros_col;                                      /* el color de las tiras (0x50, 0x50, 0x48, 0x80 del GS) */
 #ifdef DIAG_MS
 static unsigned faros_dg_us, faros_dg_suelo;
@@ -8842,6 +8913,9 @@ static int faros_rejilla(void)
     }
     for (i = 0; i < 2 * (FAROS_NL - 1); i++) { faros_wm[i].v0 = i * 2 * FAROS_NC; faros_wm[i].n = 2 * FAROS_NC; }
     faros_w.verts = faros_vw; faros_col = faros_m.verts[0].c;
+    /* DESVIACION (Rev 1.5b, pedida: "bajar la intensidad"): el alfa de la luz del suelo x FAROS_BRILLO; con el del GS
+       (0x80) era un parche blanco delante del coche que en el video del original apenas se ve */
+    faros_col = (faros_col & 0xFFFFFFu) | (uint32_t)((float)(faros_col >> 24) * FAROS_BRILLO) << 24;
     return 0;
 }
 static void faros_carga(void)
@@ -9244,7 +9318,7 @@ static inline void focos_gris(fv_t *a)                         /* UV y gris (al 
         float f;
         fv_uv(a);
         f = (a->v - focos_vl) / (focos_vf - focos_vl); f = f < 0.0f ? 0.0f : f > 1.0f ? 1.0f : f;
-        a->g = 128.0f * focos_niebla(a->w) * f + 0.5f;
+        a->g = 128.0f * FOCOS_BRILLO * focos_niebla(a->w) * f + 0.5f;
     }
 }
 static inline void focos_tramo(fv_t *f, uint32_t j0, uint32_t j1)
@@ -12604,10 +12678,10 @@ int main(int argc, char **argv)
         dg_fase = (int)(cuadros_ms(crono) / 500) % 4;
 #endif
 #ifdef DIAG_TEX
-        {   static unsigned f_; if ((f_++ % 30) == 0) printf("TEX%d: crono %d nodos %u pvs %u tope %u lejos %u (lej %.0f lejos %.0f tope %.0f)\n", DIAG_TEX, (int)crono, dg_tx[0], dg_tx[1], dg_tx[2], dg_tx[3], (double)dg_lej, (double)lejos, (double)ta_lej_tope);
-            if (etapa.pvs_teo && etapa.nnodos > 985) printf("  nodos 982-985: vis %d%d%d%d pvs_on %d teo %u %u %u %u sec %d\n",
-                (int)(etapa.vis[982 >> 5] >> (982 & 31) & 1), (int)(etapa.vis[983 >> 5] >> (983 & 31) & 1), (int)(etapa.vis[984 >> 5] >> (984 & 31) & 1), (int)(etapa.vis[985 >> 5] >> (985 & 31) & 1),
-                etapa.pvs_on, etapa.pvs_teo[2 * 982], etapa.pvs_teo[2 * 983], etapa.pvs_teo[2 * 984], etapa.pvs_teo[2 * 985], (int)etapa.pvs_s);
+        {   static unsigned f_; if ((f_++ % 30) == 0) printf("TEX%d: s %.0f crono %d nodos %u pvs %u tope %u lejos %u (lej %.0f lejos %.0f tope %.0f)\n", DIAG_TEX, (double)yo.s, (int)crono, dg_tx[0], dg_tx[1], dg_tx[2], dg_tx[3], (double)dg_lej, (double)lejos, (double)ta_lej_tope);
+            if (etapa.pvs_teo && etapa.nnodos > 2096) printf("  nodos 982-985: vis %d%d%d%d pvs_on %d teo %u %u %u %u sec %d\n",
+                (int)(etapa.vis[2090 >> 5] >> (2090 & 31) & 1), (int)(etapa.vis[2096 >> 5] >> (2096 & 31) & 1), (int)(etapa.vis[984 >> 5] >> (984 & 31) & 1), (int)(etapa.vis[985 >> 5] >> (985 & 31) & 1),
+                etapa.pvs_on, etapa.pvs_teo[2 * 2090], etapa.pvs_teo[2 * 2096], etapa.pvs_teo[2 * 984], etapa.pvs_teo[2 * 985], (int)etapa.pvs_s);
             memset(dg_tx, 0, sizeof dg_tx); }
 #endif
         tri_enviados = 0; vtx_ult = vtx_env; vtx_env = 0; ta_inicia_cuadro(); vtx_et_ult = vtx_et; vtx_et = 0;
@@ -12636,6 +12710,8 @@ int main(int argc, char **argv)
 #ifdef DEP_LISTA
                 color_fijo = l == DEP_LISTA ? 0xFFFF00FF : 0;
 #endif
+                {   uint32_t tope_g = ta_tope_etapa;          /* (RESERVA_L2) */
+                if (l < 2) { ta_tope_etapa -= ta_tope_etapa / 100 * RESERVA_L2; vtx_reserva = VTX_ETAPA_MAX / 100 * RESERVA_L2; }
                 for (i = 0; i < 3; i++)                         /* etapa, union y etapa siguiente: las que esten subidas */
 #ifdef DIAG_CICLO
                     if (!(dg_fase == 3 && i == 0))
@@ -12654,9 +12730,12 @@ int main(int argc, char **argv)
                         dibuja_rango(tramos[i], l, tramos[i]->inicio[l], tramos[i]->inicio[l + 1], 1, 0, 0);
                         geo_vista_fin(tramos[i]);
                     }
+                ta_tope_etapa = tope_g; vtx_reserva = 0; }
                 color_fijo = 0; ta_en_etapa = 0;
                 POP_CAT0();
-                if (l == 0) agua_dibuja();                      /* el plano del agua (0x11a2e8, tras la etapa) */
+#ifndef DIAG_SIN_PLANO
+                if (l == 0) agua_dibuja();
+#endif                      /* el plano del agua (0x11a2e8, tras la etapa) */
                 POP_CAT(0);
                 PRF(3);
                 {   uint32_t ya = ta_vb - ta_et - ta_bo, resto = ta_res_otros > ya ? ta_res_otros - ya : 0;   /* (lo que deja la etapa) */
