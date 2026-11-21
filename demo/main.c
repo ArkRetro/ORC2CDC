@@ -43,11 +43,6 @@
 #include "perfil.h"
 #endif
 #include "meta.h"
-/* Rev 2.0: el fundido de entrada (fe_paso) va por defecto (pedido: "opcion 2" de la auditoria del popping, 2026-11-21);
-   -DSIN_FUNDIDO_ENTRADA lo quita (como de la demo 35 a la Rev 1.9) */
-#if !defined(SIN_FUNDIDO_ENTRADA) && !defined(CON_FUNDIDO_ENTRADA)
-#define CON_FUNDIDO_ENTRADA
-#endif
 
 #ifdef DIAG_PVRMEM
 /* Medida: los bloques de pvr_mem (pvr_mem_malloc / pvr_mem_free de KallistiOS son debiles: estos los envuelven) con
@@ -238,6 +233,86 @@ static int pila_cmp(const void *a, const void *b)
     return c ? c : ((const pila_t *)a)->nodo - ((const pila_t *)b)->nodo;
 }
 #define GRUPO_RMAX 150.0f
+/* Rev 2.1 (pedido del usuario tras la auditoria del popping: "eliminar el 10 % de las palmeras, arboles y arbustos de
+   decoracion de los margenes; el publico de las gradas, simplificado y que cargue a la vez que las gradas"). DESVIACION.
+   Que textura es vegetacion o publico en cada SEGnn.DAT lo dice decor_tabla.h (tools/decor_tabla.py: color y bordes del
+   alfa de la textura, revisado a mano; las mismas etapas en el clasico y en el GD-ROM del taxi). Aqui, al leer:
+   - un nodo es de vegetacion o de publico si mas de la mitad de sus vertices van en tiras de recorte con una textura de
+     ese tipo (y no es cartel ni nodo lejano);
+   - publico: va al grupo de la grada que tiene debajo (el nodo opaco de mas de 3 m de alto con su centro dentro de la
+     planta; tools/grupos_nodos.py: el reparto del TA los quita o los pone a la vez) y se queda con una de cada
+     DECOR_PUBLICO tiras (antes 2 de los 3 nodos de cada bloque de PALM iban sueltos y aparecian sin la grada);
+   - vegetacion: fuera uno de cada DECOR_VEG por la posicion (hash de x, z al metro: siempre los mismos, repartidos), con
+     su version lejana (lod_veg.py).
+   -DSIN_DECOR_REDUCE: como antes */
+#include "decor_tabla.h"
+#define DECOR_VEG 10
+#define DECOR_PUBLICO 2
+static void decor_reduce(modelo_t *m, const char *nombre)
+{
+#ifndef SIN_DECOR_REDUCE
+    static uint8_t ttipo[512]; int seg; uint32_t q;
+    uint32_t nn = m->nnodos, i, j, nveg = 0, nquit = 0, npub = 0;
+    float (*bb)[6] = nn ? malloc(nn * sizeof *bb) : NULL; uint32_t (*cv)[2] = nn ? calloc(nn, sizeof *cv) : NULL;
+    uint8_t *cl = nn ? calloc(nn, 1) : NULL; uint32_t (*ct)[2] = nn ? calloc(nn, sizeof *ct) : NULL;
+    if (!bb || !cv || !cl || !ct || m->inicio[3] > m->nmallas || strncmp(nombre, "SEG", 3) || m->ntex > 512) { free(bb); free(cv); free(cl); free(ct); return; }
+    seg = atoi(nombre + 3); memset(ttipo, 0, sizeof ttipo);
+    for (q = 0; q < sizeof DECOR_TAB / sizeof DECOR_TAB[0]; q++) if (DECOR_TAB[q][0] == seg && DECOR_TAB[q][1] < m->ntex) ttipo[DECOR_TAB[q][1]] = (uint8_t)DECOR_TAB[q][2];
+    for (i = 0; i < nn; i++) { bb[i][0] = bb[i][1] = bb[i][2] = 1e30f; bb[i][3] = bb[i][4] = bb[i][5] = -1e30f; }
+    for (i = 0; i < m->inicio[3]; i++) {
+        const malla_t *ma = m->mallas + i; uint32_t k;
+        if (ma->nodo < 0 || (uint32_t)ma->nodo >= nn || ma->n < 3 || ma->v0 + ma->n > m->nvert) continue;
+        cv[ma->nodo][0] += ma->n; if (i >= m->inicio[1] && i < m->inicio[2]) cv[ma->nodo][1] += ma->n;
+        if (i >= m->inicio[1] && i < m->inicio[2] && ma->tex >= 0 && (uint32_t)ma->tex < m->ntex && ttipo[ma->tex]) ct[ma->nodo][ttipo[ma->tex] - 1] += ma->n;
+        for (k = 0; k < ma->n; k++) {
+            const vert_t *v = m->verts + ma->v0 + k; float *b = bb[ma->nodo];
+            b[0] = fminf(b[0], v->x); b[1] = fminf(b[1], v->y); b[2] = fminf(b[2], v->z);
+            b[3] = fmaxf(b[3], v->x); b[4] = fmaxf(b[4], v->y); b[5] = fmaxf(b[5], v->z);
+        }
+    }
+    for (i = 0; i < nn; i++) {                                  /* 1 vegetacion, 2 estructura opaca alta (grada) */
+        const nodo_t *d = m->nodos + i; float ax = bb[i][3] - bb[i][0], az = bb[i][5] - bb[i][2], ay = bb[i][4] - bb[i][1];
+        if (!cv[i][0] || d->cartel >= 0 || (d->fl & NODO_LEJ)) continue;
+        if ((ax > az ? ax : az) < 25.0f && ay > 1.5f && ay < 35.0f && 2 * ct[i][0] > cv[i][0]) cl[i] = 1;   /* (como decor_tabla.py) */
+        else if ((ax > az ? ax : az) < 25.0f && 2 * ct[i][1] > cv[i][0]) cl[i] = 5;   /* (publico: abajo busca su grada) */
+        else if (2 * cv[i][1] <= cv[i][0] && ay > 3.0f && (ax > az ? ax : az) < 120.0f) cl[i] = 2;
+    }
+    for (i = 0; i < nn; i++) {
+        float cx, cz; int32_t g = -1; uint32_t h;
+        if (cl[i] != 1 && cl[i] != 5) continue;
+        if (cl[i] == 1) nveg++;
+        cx = (bb[i][0] + bb[i][3]) * 0.5f; cz = (bb[i][2] + bb[i][5]) * 0.5f;
+        for (j = 0; cl[i] == 5 && j < nn && g < 0; j++)
+            if (cl[j] == 2 && cx > bb[j][0] - 1.0f && cx < bb[j][3] + 1.0f && cz > bb[j][2] - 1.0f && cz < bb[j][5] + 1.0f &&
+                (bb[j][3] - bb[j][0]) * (bb[j][5] - bb[j][2]) > (bb[i][3] - bb[i][0]) * (bb[i][5] - bb[i][2])) g = (int32_t)j;
+        if (g >= 0) {                                           /* publico de la grada g */
+            uint32_t jefe = m->nodos[g].fl >> 16 ? (m->nodos[g].fl >> 16) - 1 : (uint32_t)g;
+            if (!(m->nodos[g].fl >> 16)) m->nodos[g].fl |= (uint32_t)(g + 1) << 16;
+            m->nodos[i].fl = (m->nodos[i].fl & 0xFFFFu) | (jefe + 1) << 16;
+            cl[i] = 4; npub++;
+            continue;
+        }
+        if (cl[i] == 5) { cl[i] = 0; continue; }                /* (publico sin grada debajo: como estaba) */
+        h = ((uint32_t)(int32_t)floorf(cx) * 73856093u) ^ ((uint32_t)(int32_t)floorf(cz) * 19349663u);
+        h ^= h >> 13; h *= 0x5bd1e995u; h ^= h >> 15;
+        if (h % DECOR_VEG == 0) {                               /* fuera, con su version lejana */
+            int32_t lej = m->nodos[i].cartel <= -2 ? -2 - m->nodos[i].cartel : -1;
+            cl[i] = 3; if (lej >= 0 && (uint32_t)lej < nn) cl[lej] = 3;
+            nquit++;
+        }
+    }
+    for (i = 0; i < m->nmallas; i++) {                          /* (una pasada: 3 fuera, 4 publico) */
+        malla_t *ma = m->mallas + i;
+        if (ma->nodo < 0 || (uint32_t)ma->nodo >= nn || ma->n < 3) continue;
+        if (cl[ma->nodo] == 3) ma->n = 0;
+        else if (cl[ma->nodo] == 4 && cv[ma->nodo][1]++ % DECOR_PUBLICO) ma->n = 0;   /* (cv[.][1]: ya no hace falta) */
+    }
+    dbglog(DBG_INFO, "DECOR: %u de vegetacion, %u quitados, %u de publico con su grada\n", (unsigned)nveg, (unsigned)nquit, (unsigned)npub);
+    free(bb); free(cv); free(cl); free(ct);
+#else
+    (void)m; (void)nombre;
+#endif
+}
 static int lee_modelo_en(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t cap)
 {
     uint32_t sz, h[13], i, v7; uint8_t *b = buf ? (gd_carga_en(nombre, buf, cap, &sz) ? NULL : buf) : gd_carga(nombre, &sz), *p;
@@ -320,6 +395,7 @@ static int lee_modelo_en(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t
            el reparto se quedaba en su minimo y lo de alrededor del umbral cambiaba de clase: el suelo y el puente
            aparecian y desaparecian */
         for (i = 0; i < m->nnodos; i++) if (m->nodos[i].r >= GRUPO_RMAX) m->nodos[i].fl &= 0xFFFFu;
+        decor_reduce(m, nombre);
     }
     /* presupuesto del TA (nodos_visibles): relleno[0] = bytes teoricos del TA de las tiras del nodo (ta_teo),
        relleno[1] = sus vertices << 12 | las clases de distancia (<< 6) y de LOD del cuadro (nodos_visibles) */
@@ -8352,9 +8428,7 @@ static void luz_actual(int e, float *v, float *d)
    limite de la distancia de dibujado"): antes iba de 0,65 x nlim_d a nlim_d, con nlim_d la distancia del corte del
    reparto del TA (nlim_paso, nlim_prio), y velaba lo medio. Delante de NLIM_INI x lejos la tabla es la de la niebla
    del original (imagen igual). -DSIN_NIEBLA_LIMITE la quita. */
-/* Rev 2.0 (pedido: "algo de niebla en el fondo"): NLIM_A 0,3 -> 0,45, en el mismo tramo (no a media distancia: la demo
-   40 lo pidio en el limite) */
-#define NLIM_A 0.45f
+#define NLIM_A 0.3f
 #define NLIM_INI 0.12f
 #define NLIM_ANCHO 0.52f
 static float niebla_tab[129];                                   /* la tabla puesta (niebla_pon; focos_niebla) */

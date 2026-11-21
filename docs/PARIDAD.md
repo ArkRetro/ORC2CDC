@@ -1521,6 +1521,25 @@ de OutRun 2 SP (las 15 etapas seguidas) que dio el usuario.
   no esta leido). Sin EFECTOS.DAT nuevo, sin agua (como antes).
 - NO verificado en consola real.
 
+### Menos vegetacion y publico con sus gradas (Rev 2.1 / Mod 1.7, 2026-11-21; DESVIACION pedida)
+
+El usuario no quiere el fundido ni el velo reforzado de la Rev 2.0 ("se hace incomodo"): vuelven a como en la Rev 1.9
+(fundido solo con `-DCON_FUNDIDO_ENTRADA`, NLIM_A 0,3). En su lugar pide bajar el coste: quitar el 10 % de las palmeras,
+arboles y arbustos de decoracion de los margenes y simplificar el publico de las gradas para que cargue con ellas.
+- tools/decor_tabla.py hace demo/decor_tabla.h (numeros de textura por SEGnn: 1 vegetacion, 2 publico) con el color y
+  los bordes del alfa de cada textura de recorte, revisado a mano en todas las etapas (fuera, a mano: almenas de CAST,
+  una verja de METR, la barandilla con jardineras de BEAC, el cartel a rayas de FLOR y una estructura y una palmera con
+  tronco de EAST). Las 62 SEGnn.DAT del clasico y del GD-ROM del taxi son identicas: la misma tabla.
+- decor_reduce (al leer la etapa): fuera uno de cada DECOR_VEG (10) nodos de vegetacion (planta < 25 m, 1,5-35 m de alto),
+  elegidos por un hash de su posicion (siempre los mismos, repartidos), con su version lejana; el publico sobre una
+  grada va al grupo de la grada y se queda con una de cada DECOR_PUBLICO (2) tiras. PALM: 55 de 575 plantas fuera y 30
+  nodos de publico (3 por bloque de gradas) con su grada. El publico de pie en el arcen (BEAC, NIAG, LASV, SANF) no se toca.
+- `-DSIN_DECOR_REDUCE`: como antes.
+- Medido (`-DDIAG_POPPING`, Flycast, las mismas pruebas que la auditoria de la Rev 2.0): PALM, saltos por el tope del TA
+  2,8 -> 2,3 por segundo y el reparto en su minimo (corte 1 m) el 44 -> 35 % del tiempo; CAST 3,0 -> 2,9; BEAC, SANF y
+  LAKE igual. La vegetacion lejana ya va como impostor (lod_veg.py) y cuesta poco: lo que no cabe es sobre todo
+  edificios y terreno.
+
 ### Auditoria del popping, fundido de entrada y velo del fondo (Rev 2.0 / Mod 1.6, 2026-11-21)
 
 Auditoria (Rev 1.9, Flycast con el piloto, `-DDIAG_POPPING`, 5 etapas de cada modo; scratchpad auditoria.py): saltos de
