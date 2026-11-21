@@ -1521,6 +1521,19 @@ de OutRun 2 SP (las 15 etapas seguidas) que dio el usuario.
   no esta leido). Sin EFECTOS.DAT nuevo, sin agua (como antes).
 - NO verificado en consola real.
 
+### Edificios en esqueleto y palmeras sin hojas (Rev 1.7 / Mod 1.3, 2026-11-21)
+
+Captura del usuario en la salida de PALM con el coche girado a la derecha: edificios sin fachada (solo forjados y
+pilares) y palmeras sin hojas. Propuesta del usuario: quitar el esqueleto interior y dejar las fachadas. Los datos
+(vista cenital y render de los datos con la camara de la captura, scratchpad) muestran que las fachadas y las hojas
+estan en el disco: son de la lista de recorte (texturas con transparencia: ventanas, hojas), que va detras de la opaca
+(forjados, pilares, troncos). Mirando de lado a toda la manzana lo opaco llenaba el tope del TA y la lista de recorte
+no cabia. No se quita geometria (el esqueleto se ve a traves de las ventanas: el original es asi). CORREGIDO: cada lista
+deja a las de detras lo que gastaron en el cuadro anterior (x 1,1, o x 1,5 si no cupieron), entre RESERVA_MIN 4 % por
+lista y RESERVA_MAX 60 % en total (sustituye al RESERVA_L2 fijo de la Rev 1.6). Lo que se queda fuera es lo lejano de
+la lista opaca (dibuja_etapa manda lo cercano primero). Prueba: `-DPRUEBA_CAM_FIJA -DPV_X=-14 -DPV_Y=3.2 -DPV_Z=-40
+-DPV_DX=1 -DPV_DZ=0` (camara fija en el mundo) y `-DDIAG_VTX` (linea LISTAS: lo de cada lista).
+
 ### Carga, suelo de LASV, faros, agua y cascadas de NIAG (Rev 1.6 / Mod 1.2, 2026-11-21)
 
 Queja: carga irregular de elementos en general; en LASV bajadas de cuadros con el agua de las ruedas y el suelo que
