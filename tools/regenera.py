@@ -370,7 +370,7 @@ def regenera(iso, D, W, jobs=4, informe=print):
     post('revq', py(os.path.join(TOOLS, 'regenera.py'), '--interno', 'revq', *(os.path.join(D, p) for p in
                     ('TRAF[0-9]*.DAT', 'CHR[0-9]*.DAT', 'BAND*.DAT', 'BO[0-9]*.DAT'))))
     post('libros', py(os.path.join(TOOLS, 'libros.py'), *(os.path.join(D, p) for p in
-                      ('TRAF[0-9]*.DAT', 'CHR[0-9]*.DAT', 'BAND*.DAT', 'BO[0-9]*.DAT'))))
+                      ('TRAF*.DAT', 'CHR[0-9]*.DAT', 'BAND*.DAT', 'BO[0-9]*.DAT'))))
 
     # ------------------------------------------------------------ comprobacion
     informe('== comprobacion de %s' % D)

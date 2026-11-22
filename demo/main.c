@@ -99,9 +99,13 @@ static int sig_antes; static float sig_ent[4];                  /* x, z de la en
    carretera (nubes): las capas de nubes de MACH (SEG27, nodos 1069-1073, textura 43, a 900-1650 m), aplastadas hacia la
    base de su marco, bajaban sobre la union como laminas palidas y oscuras. Salen al acabar el crecimiento, en su sitio */
 static int sig_crece;
+/* Rev 2.3: margen de lo de detras de la entrada. La pancarta CHECK POINT (objetos de la etapa, conv_tramo) esta en
+   z = 0 y el punto 0 de la ruta 5,9..7,8 m mas adelante: con el corte en 0 no se dibujaba mientras se llegaba por la
+   union (se veia al pasar por debajo). Lo de SEG29 queda 400 m por detras */
+#define DETRAS_MARGEN 40.0f
 #define SIG_CUPULA_R 2000.0f                                    /* (y las cupulas de cielo de la etapa: MACH 1069 / 1072, 2,5 km) */
 #define SIG_NUBES 600.0f                                        /* m sobre lo mas alto de la carretera (lee_modelo_en) */
-#define DETRAS_ENTRADA(mo, m) ((mo) == &sig && ((sig_antes && ((m)->cx - sig_ent[0]) * sig_ent[2] + ((m)->cz - sig_ent[1]) * sig_ent[3] < 0.0f) || (sig_crece && (((mo)->nubes && ((mo)->nubes[(uint32_t)((m) - (mo)->mallas) >> 5] >> ((uint32_t)((m) - (mo)->mallas) & 31) & 1)) || ((m)->nodo >= 0 && (uint32_t)(m)->nodo < (mo)->nnodos && (mo)->nodos[(m)->nodo].r > SIG_CUPULA_R)))))
+#define DETRAS_ENTRADA(mo, m) ((mo) == &sig && ((sig_antes && ((m)->cx - sig_ent[0]) * sig_ent[2] + ((m)->cz - sig_ent[1]) * sig_ent[3] < -DETRAS_MARGEN) || (sig_crece && (((mo)->nubes && ((mo)->nubes[(uint32_t)((m) - (mo)->mallas) >> 5] >> ((uint32_t)((m) - (mo)->mallas) & 31) & 1)) || ((m)->nodo >= 0 && (uint32_t)(m)->nodo < (mo)->nnodos && (mo)->nodos[(m)->nodo].r > SIG_CUPULA_R)))))
 #define AGUA_NODO (-258)                                         /* lista 3, grupo 2: el plano del agua (agua_dibuja) */
 typedef struct { float x, y, z, u, v; uint32_t c; } vert_t;
 /* nodo del original (tools/modelo.py): esfera, banderas (bits 0-3 umbral de LOD, bit 4 orientado a la camara, bits 8-9
