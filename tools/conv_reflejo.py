@@ -166,6 +166,7 @@ def cubierta(m):
     return np.clip(np.round(v * 255), 0, 255).astype(np.uint8), int(cub.sum())
 
 LADO2 = 16; RAYOS = 32; PASO_MAPA = 12; RADIO = 300.0; ALTO_OJO = 1.0; GANANCIA2 = 0.85
+DESENFOQUE = float(os.environ.get("REFL_DESENFOQUE", "1.2"))   # (0,5 en pruebas: mas siluetas)
 NODO_LEJ = 0x20
 
 def triangulos(m):
@@ -192,7 +193,7 @@ def triangulos(m):
 def suaviza(a, n):
     """RAYOS x RAYOS -> n x n: desenfoque (el reflejo en una carroceria curva no tiene bordes duros) y caja"""
     from PIL import Image, ImageFilter
-    im = Image.fromarray(np.clip(a, 0, 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(1.2))
+    im = Image.fromarray(np.clip(a, 0, 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(DESENFOQUE))
     return np.asarray(im.resize((n, n), Image.BOX)).astype(np.float64)
 
 def rgb565n(a, n):
