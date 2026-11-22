@@ -205,6 +205,7 @@ typedef struct { float cx, cy, cz, r; uint32_t fl; int32_t cartel; uint32_t rell
 typedef struct {
     tex_t *texs; malla_t *mallas; vert_t *verts; float *ruta;
     uint32_t nmallas, nvert, nruta, paso_ruta, ntex, inicio[5];
+    uint8_t ntapas; uint32_t tapa_k[8], tapa_n[8];               /* placas de una cara (tapas_busca): malla y su cuenta */
     nodo_t *nodos; float (*carteles)[4][4];                      /* ORD7: nodos y matrices de los carteles (filas) */
     uint32_t nnodos, ncarteles, nsec;                             /* secciones de la tabla de visibilidad del original */
     const uint32_t *sec_ini; const uint16_t *sec_lista, *sec_mapa;   /* lista de nodos por seccion; seccion por punto */
@@ -429,6 +430,75 @@ static void decor_reduce(modelo_t *m, const char *nombre)
     (void)m; (void)nombre;
 #endif
 }
+/* Placas de una sola cara que cruzan la calzada (queja del usuario: "un muro al final del tunel de la etapa de nieve
+   de OutRun2SP": ALAS, SEG23, malla 8147 del nodo 227, 24 x 8 m desde el asfalto en la salida del tunel, s 1100). La
+   demo dibuja todo sin descartar caras (PVR_CULLING_NONE: el sentido de las tiras del PS2 no dice cual es la cara buena
+   en general) y esa placa, cuya cara mira hacia delante (al sentido de la marcha), se veia por detras desde el tunel:
+   en el original no sale. Aqui, al leer: mallas de 4-8 vertices, planas y verticales, que cruzan el centro de la
+   calzada (de -2 a +2 m a los lados de la ruta), desde menos de 1 m del suelo hasta mas de 3 m, con la normal de su
+   primera cara a menos de ~37 grados del sentido de la ruta, a mas de 8 m de su principio (lo de s = 0 es del inicio
+   de la etapa y no se ha podido comprobar) y no carteles ni versiones lejanas. Cada cuadro (tapas_paso) solo se
+   dibujan con la camara delante de su plano: el descarte de la cara de atras, para esas mallas. En las 62 etapas y 498
+   uniones: SEG23 (esta), SEG26, SEG52 y SEG58. -DSIN_TAPAS: como antes */
+static float ojo[3];                                             /* (la camara: mas abajo) */
+static void tapas_busca(modelo_t *m)
+{
+    uint32_t k, i, j, b; const float *R = m->ruta; uint32_t pr = m->paso_ruta;
+    m->ntapas = 0;
+#ifdef SIN_TAPAS
+    return;
+#endif
+    if (!R || pr < 5 || m->nruta < 4 || !m->nodos) return;
+    for (k = m->inicio[0]; k < m->inicio[3] && m->ntapas < 8; k++) {
+        const malla_t *ma = m->mallas + k; const vert_t *v = m->verts + ma->v0; float n[3], l, c[3] = { 0, 0, 0 }, mejor = 1e30f;
+        float t[3], dr[3], la0 = 1e30f, la1 = -1e30f, h0 = 1e30f, h1 = -1e30f, ft;
+        if (ma->n < 4 || ma->n > 8 || ma->v0 + ma->n > m->nvert) continue;
+        if (ma->nodo >= 0 && (uint32_t)ma->nodo < m->nnodos && (m->nodos[ma->nodo].cartel >= 0 || (m->nodos[ma->nodo].fl & NODO_LEJ))) continue;
+        n[0] = (v[1].y - v[0].y) * (v[2].z - v[0].z) - (v[1].z - v[0].z) * (v[2].y - v[0].y);
+        n[1] = (v[1].z - v[0].z) * (v[2].x - v[0].x) - (v[1].x - v[0].x) * (v[2].z - v[0].z);
+        n[2] = (v[1].x - v[0].x) * (v[2].y - v[0].y) - (v[1].y - v[0].y) * (v[2].x - v[0].x);
+        l = sqrtf(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]); if (l < 1.0f) continue;
+        n[0] /= l; n[1] /= l; n[2] /= l;
+        if (fabsf(n[1]) > 0.5f) continue;                       /* (vertical) */
+        for (j = 0; j < ma->n; j++) {
+            float d = (v[j].x - v[0].x) * n[0] + (v[j].y - v[0].y) * n[1] + (v[j].z - v[0].z) * n[2];
+            if (fabsf(d) > 0.5f) break;
+            c[0] += v[j].x / ma->n; c[1] += v[j].y / ma->n; c[2] += v[j].z / ma->n;
+        }
+        if (j < ma->n) continue;                                /* (plana) */
+        for (i = 0, b = 0; i < m->nruta; i++) {
+            float dx = R[i * pr] - c[0], dz = R[i * pr + 2] - c[2], d = dx * dx + dz * dz;
+            if (d < mejor) { mejor = d; b = i; }
+        }
+        if (mejor > 400.0f || b < 2 || b + 1 >= m->nruta) continue;   /* (a mas de 20 m de la ruta; s > 8 m) */
+        for (j = 0; j < 3; j++) t[j] = R[(b + 1) * pr + j] - R[(b - 1) * pr + j];
+        l = sqrtf(t[0] * t[0] + t[1] * t[1] + t[2] * t[2]); if (l < 1e-3f) continue;
+        for (j = 0; j < 3; j++) t[j] /= l;
+        l = sqrtf(t[0] * t[0] + t[2] * t[2]); dr[0] = -t[2] / l; dr[1] = 0; dr[2] = t[0] / l;
+        for (j = 0; j < ma->n; j++) {
+            float dx = v[j].x - R[b * pr], dy = v[j].y - R[b * pr + 1], dz = v[j].z - R[b * pr + 2], la = dx * dr[0] + dz * dr[2];
+            la0 = fminf(la0, la); la1 = fmaxf(la1, la); h0 = fminf(h0, dy); h1 = fmaxf(h1, dy);
+        }
+        ft = n[0] * t[0] + n[1] * t[1] + n[2] * t[2];
+        if (la0 < -2.0f && la1 > 2.0f && h0 < 1.0f && h1 > 3.0f && ft > 0.8f) {
+            m->tapa_k[m->ntapas] = k; m->tapa_n[m->ntapas] = ma->n; m->ntapas++;
+            dbglog(DBG_INFO, "TAPA: malla %u (nodo %d, textura %d), s %u, de una cara\n", (unsigned)k, (int)ma->nodo, (int)ma->tex, (unsigned)(b * 4));
+        }
+    }
+}
+/* cada cuadro: las tapas solo con la camara delante de su plano (la cara de la primera de su tira) */
+static void tapas_paso(modelo_t *m)
+{
+    uint32_t i;
+    for (i = 0; i < m->ntapas; i++) {
+        malla_t *ma = m->mallas + m->tapa_k[i]; const vert_t *v = m->verts + ma->v0;
+        float n0 = (v[1].y - v[0].y) * (v[2].z - v[0].z) - (v[1].z - v[0].z) * (v[2].y - v[0].y);
+        float n1 = (v[1].z - v[0].z) * (v[2].x - v[0].x) - (v[1].x - v[0].x) * (v[2].z - v[0].z);
+        float n2 = (v[1].x - v[0].x) * (v[2].y - v[0].y) - (v[1].y - v[0].y) * (v[2].x - v[0].x);
+        float d = (ojo[0] - v[0].x) * n0 + (ojo[1] - v[0].y) * n1 + (ojo[2] - v[0].z) * n2;
+        ma->n = d > 0 ? m->tapa_n[i] : 0;
+    }
+}
 static int lee_modelo_en(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t cap)
 {
     uint32_t sz, h[13], i, v7; uint8_t *b = buf ? (gd_carga_en(nombre, buf, cap, &sz) ? NULL : buf) : gd_carga(nombre, &sz), *p;
@@ -439,7 +509,7 @@ static int lee_modelo_en(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t
     v7 = !memcmp(b, "ORD7", 4);                                   /* ORD7: con nodos y visibilidad del original */
     if (!v7 && memcmp(b, "ORD5", 4) && memcmp(b, "ORD6", 4)) { if (!buf) free(b); return -2; }   /* ORD6: VQ */
     memset(h, 0, sizeof h); memcpy(h, b + 4, (v7 ? 13 : 10) * 4);
-    m->nmallas = h[0]; m->nvert = h[1]; m->nruta = h[2]; m->paso_ruta = h[3]; m->ntex = h[4];
+    m->nmallas = h[0]; m->nvert = h[1]; m->nruta = h[2]; m->paso_ruta = h[3]; m->ntex = h[4]; m->ntapas = 0;
     for (i = 0; i < 5; i++) m->inicio[i] = h[5 + i];
     m->nnodos = h[10]; m->ncarteles = h[11]; m->nsec = h[12] & 0x7FFFFFFFu;
     p = b + (v7 ? 56 : 44);
@@ -515,6 +585,7 @@ static int lee_modelo_en(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t
            aparecian y desaparecian */
         for (i = 0; i < m->nnodos; i++) if (m->nodos[i].r >= GRUPO_RMAX) m->nodos[i].fl &= 0xFFFFu;
         decor_reduce(m, nombre);
+        tapas_busca(m);
     }
     /* presupuesto del TA (nodos_visibles): relleno[0] = bytes teoricos del TA de las tiras del nodo (ta_teo),
        relleno[1] = sus vertices << 12 | las clases de distancia (<< 6) y de LOD del cuadro (nodos_visibles) */
@@ -7750,6 +7821,7 @@ static void pvs_recuerda(modelo_t *mo)
 static void pvs_paso(modelo_t *mo)
 {
     uint32_t k, a, b, i, s; float d, e, t[2], l, x, li, ld; const float *r, *r0, *r1;
+    tapas_paso(mo);                                             /* (Rev 2.9: placas de una cara) */
     mo->pvs_on = 0; mo->viso = NULL; if (mo == &sig) sig_antes = 0;
 #ifdef SIN_PVS
     return;
