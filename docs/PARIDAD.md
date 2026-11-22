@@ -1521,6 +1521,17 @@ de OutRun 2 SP (las 15 etapas seguidas) que dio el usuario.
   no esta leido). Sin EFECTOS.DAT nuevo, sin agua (como antes).
 - NO verificado en consola real.
 
+### Sin reflejo del entorno y con tiras de 6 (Rev 2.7 / Mod 2.3, 2026-11-22)
+
+El usuario: "hay muchos tirones en etapas de noche como en las vegas, creo que el efecto reflejo ha sido
+contraproducente, asi que vamos a deshacerlo ... y nos quedamos con T6". Medido en Flycast (piloto, LASV -> MAYA
+150 s, mismas opciones): con el reflejo 38,5 fps de media, 22,1 ms de CPU y 607 cuadros tarde; sin el 41,4 fps,
+20,1 ms y 386. Ahora:
+- el reflejo solo con `-DCON_REFLEJO` (refl_busca no busca REFLEJO.DAT): la carroceria con el mapa fijo de cada coche,
+  como la Rev 2.3; sin los ~118 KB de RAM de los mapas. tools/regenera.py y el programa del taxi ya no hacen
+  REFLEJO.DAT (tools/conv_reflejo.py se queda para -DCON_REFLEJO);
+- las tiras de la PowerVR en 6 por defecto (`-DTIRA_2`: como KallistiOS).
+
 ### Longitud de las tiras en las listas de objetos (prueba -DTIRA_6, 2026-11-22)
 
 Pregunta: "si estamos poniendo el tamano de strip en 6". No: todas las cabeceras salen de pvr_poly_compile de

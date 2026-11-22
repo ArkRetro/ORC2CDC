@@ -50,7 +50,11 @@
    0x80840000) en todas las cabeceras de pvr_poly_compile. -DTIRA_6 la pone en 6 (prueba pedida: menos entradas en las
    listas de objetos y menos trabajo del TA con tiras largas; a cambio un tile puede recorrer triangulos que no le
    tocan). Todas las cabeceras del juego salen de pvr_poly_compile: se envuelve en el enlazado (-Wl,--wrap,
-   demo/Makefile). Flycast no reproduce ese coste: se mide en la consola (linea de diagnostico, Y en la pausa: "T6"). */
+   demo/Makefile). Flycast no reproduce ese coste: se mide en la consola (linea de diagnostico, Y en la pausa: "T6").
+   Rev 2.7: 6 por defecto (eleccion del usuario tras probarlo); -DTIRA_2 la deja en 2 como KallistiOS. */
+#ifndef TIRA_2
+#define TIRA_6 1
+#endif
 void __real_pvr_poly_compile(pvr_poly_hdr_t *dst, const pvr_poly_cxt_t *src);
 void __wrap_pvr_poly_compile(pvr_poly_hdr_t *dst, const pvr_poly_cxt_t *src)
 {
@@ -1109,7 +1113,7 @@ static void modelo_coloca(modelo_t *m, const float *M);
 /* Reflejo del entorno en la carroceria (Rev 2.4; REFLEJO.DAT 'RFL2' de tools/conv_reflejo.py; ver alli, refl_elige y
    coche_reflejo): por etapa, un mapa de 16x16 del entorno (cielo, edificios, arboles, techos) cada RFL paso puntos de su
    ruta, en el marco de la etapa. Los mapas de la etapa se leen con ella: los de la salida al leerla y los de la
-   siguiente en el hilo de carga, nunca en mitad de la carrera. -DSIN_REFLEJO: el mapa fijo del coche (como la Rev 1.4) */
+   siguiente en el hilo de carga, nunca en mitad de la carrera. Rev 2.7: solo con -DCON_REFLEJO (sin el, el mapa fijo del coche, como la Rev 2.3) */
 #define REFL_LADO 16
 #define REFL_TEX (REFL_LADO * REFL_LADO * 2)                     /* bytes de un mapa (RGB565 twiddled) */
 static uint32_t refl_lba, refl_nreg, refl_paso, refl_max;       /* refl_lba 0: sin REFLEJO.DAT (el mapa fijo del coche) */
@@ -1121,8 +1125,8 @@ static void refl_busca(void)
 {
     static uint8_t sec[2048] __attribute__((aligned(32))); uint32_t lba, tam, i, lado;
     refl_lba = 0;
-#ifdef SIN_REFLEJO
-    return;
+#ifndef CON_REFLEJO
+    return;                                                     /* Rev 2.7: quitado a peticion (tirones de noche, LASV); -DCON_REFLEJO lo pone */
 #endif
     if (gd_busca("REFLEJO.DAT", &lba, &tam) || tam < 2 * 2048 || gd_lee(lba, 1, sec) || memcmp(sec, "RFL2", 4)) return;
     memcpy(&refl_nreg, sec + 4, 4); memcpy(&lado, sec + 8, 4); memcpy(&refl_paso, sec + 12, 4);
