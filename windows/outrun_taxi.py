@@ -152,7 +152,7 @@ def main():
     if os.path.isdir(os.path.join(AQUI, 'nativo')): os.environ.setdefault('OR2_NATIVO', os.path.join(AQUI, 'nativo'))
     import subprocess
     for args in (['--datos', D, os.path.join(W, 'libros')],
-                 [os.path.join(D, p) for p in ('TRAF[0-9]*.DAT', 'CHR[0-9]*.DAT', 'BAND*.DAT', 'BO[0-9]*.DAT')]):
+                 [os.path.join(D, p) for p in ('TRAF*.DAT', 'CHR[0-9]*.DAT', 'BAND*.DAT', 'BO[0-9]*.DAT')]):
         r = subprocess.run([sys.executable, os.path.join(o2.TOOLS, 'libros.py')] + args, capture_output=True, text=True)
         if r.returncode: raise SystemExit('fallo tools/libros.py:\n' + (r.stderr or r.stdout)[-2000:])
         for l in r.stdout.splitlines()[-4:]: informe('  ' + l)
