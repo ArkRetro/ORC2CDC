@@ -316,6 +316,8 @@ def regenera(iso, D, W, jobs=4, informe=print):
             enlaza(f, os.path.join(bk, os.path.basename(f)))
         # segunda pasada de la VQ (tools/revq.py; sin nada que hacer si las uniones se convirtieron con el modelo.py de ahora)
         post('revq_bk', py(os.path.join(TOOLS, 'regenera.py'), '--interno', 'revq', os.path.join(bk, 'BK[0-9]*.DAT')))
+        # libros VQ reducidos de las texturas pequenas (tools/libros.py, con pvrtex; Rev 2.2)
+        post('libros_bk', py(os.path.join(TOOLS, 'libros.py'), os.path.join(bk, 'BK[0-9]*.DAT')))
         C.env['PYTHON_CPU_COUNT'] = str(jobs)
         try: post('pak', py(os.path.join(TOOLS, 'pak_union.py'), bk, pak), 3)
         finally: C.env['PYTHON_CPU_COUNT'] = '1'
@@ -330,6 +332,7 @@ def regenera(iso, D, W, jobs=4, informe=print):
         bk, pak = os.path.join(W, 'bkta'), os.path.join(W, 'pakta')
         borra(bk); borra(pak); os.makedirs(bk); os.makedirs(pak)
         for f in glob.glob(os.path.join(W, 'uta', 'BK[0-9]*.DAT')): enlaza(f, os.path.join(bk, os.path.basename(f)))
+        post('libros_ta', py(os.path.join(TOOLS, 'libros.py'), os.path.join(bk, 'BK[0-9]*.DAT')))
         C.env['PYTHON_CPU_COUNT'] = str(jobs)
         try: post('pakta', py(os.path.join(TOOLS, 'pak_union.py'), bk, pak, '--pak=UNIONESTA.PAK'), 3)
         finally: C.env['PYTHON_CPU_COUNT'] = '1'
@@ -342,6 +345,7 @@ def regenera(iso, D, W, jobs=4, informe=print):
         bk, pak = os.path.join(W, 'bkren'), os.path.join(W, 'pakren')
         borra(bk); borra(pak); os.makedirs(bk); os.makedirs(pak)
         for f in glob.glob(os.path.join(W, 'uren', 'BK[0-9]*.DAT')): enlaza(f, os.path.join(bk, os.path.basename(f)))
+        post('libros_ren', py(os.path.join(TOOLS, 'libros.py'), os.path.join(bk, 'BK[0-9]*.DAT')))
         C.env['PYTHON_CPU_COUNT'] = str(jobs)
         try: post('pakren', py(os.path.join(TOOLS, 'pak_union.py'), bk, pak, '--pak=UNIONESR.PAK'), 3)
         finally: C.env['PYTHON_CPU_COUNT'] = '1'
@@ -353,6 +357,7 @@ def regenera(iso, D, W, jobs=4, informe=print):
         borra(seg); borra(segpak); os.makedirs(seg); os.makedirs(segpak)
         for f in glob.glob(os.path.join(D, 'SEG[0-9]*.DAT')): enlaza(f, os.path.join(seg, os.path.basename(f)))
         post('revq_seg', py(os.path.join(TOOLS, 'regenera.py'), '--interno', 'revq', os.path.join(seg, 'SEG[0-9]*.DAT')))
+        post('libros_seg', py(os.path.join(TOOLS, 'libros.py'), os.path.join(seg, 'SEG[0-9]*.DAT')))
         post('segpak', py(os.path.join(TOOLS, 'pak_union.py'), seg, segpak, '--pak=SEGS.PAK', '--prefijo=SEG', '--tope=7842'))
         for f in os.listdir(segpak): os.replace(os.path.join(segpak, f), os.path.join(D, f))
     if not hay(D, 'VISO.DAT'):                           # nodos del original en la seccion 0 y la ultima de cada etapa
@@ -366,6 +371,8 @@ def regenera(iso, D, W, jobs=4, informe=print):
     informe('== segunda pasada de la VQ en los modelos sueltos (revq.py: trafico, personajes, banderero, objetos; no los coches)')
     post('revq', py(os.path.join(TOOLS, 'regenera.py'), '--interno', 'revq', *(os.path.join(D, p) for p in
                     ('TRAF[0-9]*.DAT', 'CHR[0-9]*.DAT', 'BAND*.DAT', 'BO[0-9]*.DAT'))))
+    post('libros', py(os.path.join(TOOLS, 'libros.py'), *(os.path.join(D, p) for p in
+                      ('TRAF[0-9]*.DAT', 'CHR[0-9]*.DAT', 'BAND*.DAT', 'BO[0-9]*.DAT'))))
 
     # ------------------------------------------------------------ comprobacion
     informe('== comprobacion de %s' % D)
