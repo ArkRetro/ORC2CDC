@@ -299,7 +299,7 @@ static void vmu_lee(void)
    sin sitio / directorio lleno / sin VMU. vmu_diag: lo del ultimo guardado (el codigo que se ensena con el error y la
    pantalla de diagnostico, L + R + Y). Codigos: vmuesc.h y docs/DREAMCAST.md */
 static vmuesc_diag_t vmu_diag;
-static int vmu_escribe(const uint8_t *buf, int n)
+static int vmu_escribe_n(const char *nombre, const uint8_t *buf, int n)
 {
     maple_device_t *dev, *v; int r = VE_SIN_VMU, k, nv;
     uint8_t *b; int nb = (n + 511) & ~511;
@@ -313,20 +313,50 @@ static int vmu_escribe(const uint8_t *buf, int n)
         if (k) thd_sleep(500);
         if (!(dev = vmu_unidad_guardar())) { r = VE_SIN_VMU; vmu_diag.cod = r; vmu_diag.intento = k + 1;
                                              dbglog(DBG_ERROR, "menu: no hay ninguna VMU\n"); break; }
-        r = vmuesc_escribe(dev, VMU_NOMBRE, b, nb, &vmu_diag);
+        r = vmuesc_escribe(dev, nombre, b, nb, &vmu_diag);
         vmu_diag.intento = k + 1; vmu_diag.n_vmu = nv;
         {
             char c[80]; vmuesc_codigo(&vmu_diag, c, sizeof c);
             dbglog(r ? DBG_ERROR : DBG_INFO, "menu: guardado %s en %c%d (%d bytes, %d bloques), intento %d: %s (%d) [%s]\n",
-                   VMU_NOMBRE, 'a' + dev->port, dev->unit, n, nb / 512, k + 1, !r ? "bien, releido igual" :
+                   nombre, 'a' + dev->port, dev->unit, n, nb / 512, k + 1, !r ? "bien, releido igual" :
                    r == VE_SITIO ? "no hay sitio" : r == VE_DISTINTO ? "releido distinto" : r == VE_RELEE ?
                    "no se puede releer" : "fallo", r, c);
         }
-        if (!r) { vmu_puerto = dev->port; vmu_unidad = dev->unit; break; }
+        if (!r) { if (!strcmp(nombre, VMU_NOMBRE)) { vmu_puerto = dev->port; vmu_unidad = dev->unit; } break; }
         if (r == VE_SITIO || r == VE_DIR_LLENO || r == VE_FORMATO) break;   /* reintentar no sirve */
     }
     free(b);
     return r;
+}
+static int vmu_escribe(const uint8_t *buf, int n) { return vmu_escribe_n(VMU_NOMBRE, buf, n); }
+/* otro fichero de la VMU (el fantasma de la CONTRARRELOJ, demo/main.c): datos con la cabecera VMS del juego y la
+   descripcion larga desc; lo escribe en la VMU de la licencia (o la primera). Bloquea unos segundos: desde un hilo.
+   0 bien o VE_* */
+int menu_vmu_guarda(const char *nombre, const char *desc, const uint8_t *datos, int n)
+{
+    vmu_pkg_t pkg; uint8_t *out = NULL; int tam, r;
+    memset(&pkg, 0, sizeof pkg); vmu_cabecera(&pkg);
+    strncpy(pkg.desc_long, desc, sizeof pkg.desc_long - 1);
+    pkg.eyecatch_type = VMUPKG_EC_NONE; pkg.eyecatch_data = NULL;   /* (sin la imagen: 8 bloques menos) */
+    pkg.data_len = n; pkg.data = datos;
+    if (vmu_pkg_build(&pkg, &out, &tam)) return VE_MEMORIA;
+    musica_pausa_lectura(1); vmu_lcd_pausa(1); thd_sleep(100);
+    r = vmu_escribe_n(nombre, out, tam);
+    vmu_lcd_pausa(0); musica_pausa_lectura(0);
+    free(out);
+    return r;
+}
+/* lee el fichero nombre de cualquier VMU: sus datos (sin la cabecera VMS) en buf (como mucho cap bytes); bytes o -1 */
+int menu_vmu_lee(const char *nombre, uint8_t *buf, int cap)
+{
+    maple_device_t *dev; void *v = NULL; int sz = 0, i, n = -1;
+    for (i = 0; (dev = maple_enum_type(i, MAPLE_FUNC_MEMCARD)); i++) if (!vmufs_read(dev, nombre, &v, &sz)) break;
+    if (!dev || !v) return -1;
+    {   vmu_pkg_t pk;
+        if (!vmu_pkg_parse(v, sz, &pk) && pk.data_len > 0) { n = pk.data_len < cap ? pk.data_len : cap; memcpy(buf, pk.data, n); }
+    }
+    free(v);
+    return n;
 }
 /* el fichero empaquetado (cabecera VMS + datos), malloc; NULL sin memoria */
 static uint8_t *vmu_prepara(int *n)

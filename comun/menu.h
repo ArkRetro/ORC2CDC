@@ -80,4 +80,7 @@ void menu_pausa_dibuja(void);
 void menu_pausa_sale(void);
 unsigned menu_pausa_vram(void);                          /* VRAM que pedira la pausa (bytes; 0 si ya esta subida) */
 int menu_campeonato(void);                /* campeonato de COAST 2 COAST elegido (46C520): 1 SP, 0 OutRun 2, 2 mixto; -1 ninguno */
+/* ficheros propios en la VMU (el fantasma de la CONTRARRELOJ): 0 bien o VE_* (comun/vmuesc.h); bytes leidos o -1 */
+int menu_vmu_guarda(const char *nombre, const char *desc, const uint8_t *datos, int n);
+int menu_vmu_lee(const char *nombre, uint8_t *buf, int cap);
 #endif
