@@ -106,10 +106,12 @@ def disposicion(A, m):
 # ------------------------------------------------------------------ montaje
 NADA, G_PILOTOS, G_NOCHE, G_FRENO, G_FARO = 0, 1, 2, 3, 4   # grupos de piezas que la demo enciende y apaga (CEX2)
 G_DISCO, G_DISCO_CAL = 5, 6     # disco de freno +90 de la rueda o el caliente +94 (c38 > 200 y car+1F4 != 0)
+G_INTERIOR = 7                  # el habitaculo +04 (vista interior, vm = 2): ni tapa ni se vacia ni se cuenta con el resto
 # piezas animadas (bloque ANI1, campo del nodo de cada malla << 8): sus vertices van en el marco de la pieza (el de la
 # ultima operacion de la pila antes del giro animado) y la demo pone la matriz de cada cuadro (coche_anima)
 P_CUERPO, P_VOLANTE, P_ALERON, P_FAROS, P_PINZA, P_RUEDA, NPIEZAS = 0, 1, 2, 3, 4, 8, 12   # pinza y rueda: + k (0..3)
 P_SOMBRA = 12   # la sombra plana +0C: pieza propia (fuera de car+F0), sin datos en ANI1 (que sigue con NPIEZAS)
+P_INTERIOR = 13 # el habitaculo +04: pieza propia con la matriz local identidad (46AE70 con vm = 2), sin datos en ANI1
 # margenes del vaciado con piezas animadas (no son datos del juego: rangos que cubren lo que se ve al moverse):
 # direccion +-30 grados (el tope de car+32 en 4A4710: 5461 = 30 grados), volante +-5461 x 6 x 0,41667 (46AE70)
 DIR_MAX = 5461 * 2 * np.pi / 65536; VOL_MAX = 5461 * 6 * 2 * np.pi / 65536 * 0.416666657; ALERON_MIN = -0.305432618
@@ -143,7 +145,9 @@ def llamadas(A, m, pose=None):
     (demo/main.c coche_anima_matrices). (Antes iba con car+F0 subida 0,01 como en 0x1893f8 / 0x189904, otro dibujo que
     no es el de carrera: con el balanceo y la subida se metia bajo la calzada.)
     +08/+10 (volumenes de sombra) no son piezas: van aparte (volumenes(), bloque SVL1 de CEX2).
-    No va (como en el original con vm = 1): +04 (vista interior, vm = 2). Discos: +90 (G_DISCO) o el caliente +94
+    +04 (el habitaculo: salpicadero, cuadro de instrumentos y capo) va como pieza P_INTERIOR del grupo G_INTERIOR: el
+    original lo dibuja solo con vm = 2 (car+4 & 0xC000 = 0x8000, la vista interior de 4A2BA0), con la matriz local
+    identidad (sin car+F0) y, de lo demas, solo los faros escamoteables +64 y su luz +60; con vm = 1 no. Discos: +90 (G_DISCO) o el caliente +94
     (G_DISCO_CAL) con c38 > 200 y car+1F4 (km/h del modelo) != 0, los dos con su grupo (la demo elige).
     Animadas (pose: dict con 'giro' y 'dir' (4 ruedas), 'volante', 'aleron', 'faros' en radianes; None = parado):
     volante girado en z por car+204, aleron del modelo 5 en x (roof_angle, car+2FC), faros en x (car+2FC), ruedas en
@@ -189,6 +193,7 @@ def llamadas(A, m, pose=None):
         if u(w + 4) != NINGUNO:
             dib(u(w + 4), 'disco', G_DISCO, P_RUEDA + k); dib(u(w + 8), 'disco_cal', G_DISCO_CAL, P_RUEDA + k)
         s.pop()
+    dib(u(4), 'interior', G_INTERIOR, P_INTERIOR)               # vm = 2: matriz local identidad (fuera de car+F0)
     return res
 
 def poses(A, m):
@@ -451,7 +456,7 @@ def visibilidad(mod, res=(960, 720), bajas=True, posturas=None):
         lib.visibles(T.ctypes.data_as(f), len(T), op.ctypes.data_as(ctypes.POINTER(ctypes.c_ubyte)), C.ctypes.data_as(f),
                      len(C), res[0], res[1], cuenta.ctypes.data_as(ctypes.POINTER(ctypes.c_int)))
         vis |= cuenta > 0
-    return vis | ((grupo != NADA) & (grupo != G_DISCO) & (grupo != G_DISCO_CAL)), dueno
+    return vis | ((grupo != NADA) & (grupo != G_DISCO) & (grupo != G_DISCO_CAL)), dueno   # (G_INTERIOR entero)
 
 def vacia(mod, vis, dueno, hueco=2, maximo=256):
     """rehace las tiras con solo los triangulos visibles (corta si hay mas de hueco ocultos seguidos; tiras de
@@ -484,7 +489,7 @@ def vertices(mod):
 
 def vertices_dibujados(mod):
     """los que se dibujan a la vez: todo lo fijo, el faro encendido, el mayor de los tres juegos de pilotos y el
-    mayor de los dos juegos de discos"""
+    mayor de los dos juegos de discos (el habitaculo G_INTERIOR va solo, con la vista interior: no cuenta)"""
     g = {}
     for x in mod.mallas: k = x[9].get('grupo', NADA) if len(x) > 9 else NADA; g[k] = g.get(k, 0) + x[5]
     return g.get(NADA, 0) + g.get(G_FARO, 0) + max(g.get(G_PILOTOS, 0), g.get(G_NOCHE, 0), g.get(G_FRENO, 0)) + \

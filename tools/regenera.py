@@ -42,7 +42,7 @@ UNIONES = ['UNIONES.PAK', 'CURSO.DAT', 'COLLR.DAT', 'COLBK.DAT', 'BKD.DAT', 'SOL
 TRAF = ['TRAF%d.DAT' % n for n in range(9)]
 BO = ['BO%02d.DAT' % c for c in range(14)]   # (filas 1 y 6 de 0x35a738: OutRun y misiones de C2C, conv_bo.py)
 COLBK = ['COLBK%02d.DAT' % k for k in (10, 11, 12, 13, 14, 25, 26, 27, 28, 29)]
-FIN = ['FIN.DAT', 'GOVER.DAT', 'FINC2C.DAT']                    # (conv_fin.py; FINC2C: el modo 35 de una mision de C2C)
+FIN = ['FIN.DAT', 'GOVER.DAT', 'FINC2C.DAT', 'GOALT.DAT']       # (conv_fin.py; FINC2C: el modo 35 de una mision de C2C; GOALT: la tabla de la meta)
 # segundos aproximados de cada paso en un nucleo (para el porcentaje y el tiempo que queda; medidos en Linux)
 PESO = {'union': 4500, 'unionta': 3000, 'unionren': 600, 'curso': 650, 'seg': 450, 'video_ts': 150, 'video_attr': 450, 'mus': 20, 'coche': 15,
         'menu': 40, 'trafico': 30, 'camiones': 25}

@@ -287,8 +287,14 @@ void cam_traslada(cam_t *c, float dx, float dy, float dz)
     c->mira[0] -= dx; c->mira[1] -= dy; c->mira[2] -= dz;
 }
 
-int cam_coche_visible(const cam_t *c)
+/* 4A2BA0 (PC driving/pc_camera.cpp camera_car_flags_4a2ba0): car+4 & 0xC000 con la vista +34A. En la mezcla de
+   vistas (+33C > 0): 0x4000 (por fuera) salvo con el ojo dentro de la caja del coche (482E80, bit 0x10): entonces 0x8000
+   (el habitaculo). Fuera de la mezcla: vista 0 nada (con el desvanecido +EA0 / +E9C del habitaculo al pasar de la 1 a
+   la 0: aqui sin el), 1 = 0x8000, las demas 0x4000. Devuelve 0 (nada), 1 (0x8000: vm = 2, el habitaculo +04 de la
+   disposicion) o 2 (0x4000: vm = 1, el coche entero) */
+int cam_coche_modo(const cam_t *c)
 {
-    if (c->n33c > 0) return !c->dentro;                      /* 4A2BA0 en la mezcla: por fuera salvo dentro de la caja */
-    return c->vista >= 2;                                    /* 0: sin coche; 1: interior (no lo hay en la demo) */
+    if (c->n33c > 0) return c->dentro ? 1 : 2;
+    return c->vista == 0 ? 0 : c->vista == 1 ? 1 : 2;
 }
+int cam_coche_visible(const cam_t *c) { return cam_coche_modo(c) == 2; }
