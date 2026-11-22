@@ -6,7 +6,8 @@ los toma de TU GD-ROM de OutRun para Dreamcast que ya los lleva (el disc.gdi con
 los ficheros de ese disco y el programa de la Dreamcast de este paquete (programa/dc: 1ST_READ.BIN de la rama rev-1.0,
 con los arreglos, e IP.BIN "OUTRUN MOD REV 1.0"). Si le das tambien tu ISO de PS2 (SLES-53998), rehace EFECTOS.DAT con
 la textura del agua de las ruedas (tools/conv_efectos.py, segundos); sin ella se queda el EFECTOS.DAT del disco
-(todo igual, sin el agua en el asfalto mojado).
+(todo igual, sin el agua en el asfalto mojado). Despues pasa tools/libros.py (libros VQ reducidos, Rev 2.2 / Mod 1.8:
+mas VRAM libre) con el pvrtex.exe del paquete.
 Uso: outrun_taxi.py [disc.gdi] [carpeta] [--iso tu.iso | --sin-iso] [--bin 1ST_READ.BIN --ip IP.BIN] [--sin-dialogos]
 Sin el disc.gdi o la carpeta, los pide con los dialogos de Windows (PowerShell) o, si no hay, por teclado."""
 import os, shutil, struct, sys, time
@@ -147,6 +148,14 @@ def main():
             informe('AVISO: no se pudo rehacer EFECTOS.DAT (se queda el del disco, sin agua):\n' + (r.stderr or r.stdout)[-2000:])
         else:
             shutil.move(nuevo, os.path.join(D, 'EFECTOS.DAT')); informe('  hecho')
+    informe('== libros VQ reducidos de las texturas pequenas (tools/libros.py con pvrtex; si ya lo estan, sin cambios)')
+    if os.path.isdir(os.path.join(AQUI, 'nativo')): os.environ.setdefault('OR2_NATIVO', os.path.join(AQUI, 'nativo'))
+    import subprocess
+    for args in (['--datos', D, os.path.join(W, 'libros')],
+                 [os.path.join(D, p) for p in ('TRAF[0-9]*.DAT', 'CHR[0-9]*.DAT', 'BAND*.DAT', 'BO[0-9]*.DAT')]):
+        r = subprocess.run([sys.executable, os.path.join(o2.TOOLS, 'libros.py')] + args, capture_output=True, text=True)
+        if r.returncode: raise SystemExit('fallo tools/libros.py:\n' + (r.stderr or r.stdout)[-2000:])
+        for l in r.stdout.splitlines()[-4:]: informe('  ' + l)
     import gdi
     informe('== GD-ROM en %s' % car)
     ultimo = [-1]
