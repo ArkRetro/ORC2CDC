@@ -1533,8 +1533,11 @@ ruedas: solo la pieza +04 de la disposicion del modelo (el habitaculo: salpicade
 1224-4347 vertices segun el coche), con la matriz local identidad (sin car+F0), y los faros escamoteables +64; sin
 pilotos, sombra ni la pareja (487880 solo con 0x4000). Antes la demo no dibujaba nada en la vista 1.
 - tools/conv_coche.py: la pieza +04 entra en el modelo como pieza P_INTERIOR (13) del grupo G_INTERIOR (7): no tapa en el
-  vaciado, no se vacia y no cuenta en el tope de vertices (va sola). Los 15 COCHEnn.DAT crecen 80-130 KB de fichero y
-  0-34 KB de texturas (el del 360 Spider +34 KB, los demas 0-4 KB).
+  vaciado y no cuenta en el tope de vertices (va sola); `vacia_interior` le quita lo que no se ve desde el ojo de la
+  vista interior (tabla CAM1 por modelo; camaras a +-0,15 m girando +-50 grados y de -25 a +15: 4347 -> 3588 vertices en
+  el Dino). Texturas: 0-34 KB mas por coche. RAM: el bloque fijo del coche (COCHE_RAM) pasa de 424 a 480 KB (el mayor,
+  COCHE13, pide 474 KB); antes de agrandarlo el coche se salia del bloque al monton y la musica del menu daba "Out of
+  memory". Medido con nav3 y sp: libre en el menu 684 KB, 675-835 KB tras las lecturas, sin "Out of memory".
 - demo/camara.c `cam_coche_modo` (4A2BA0, sin el desvanecido +EA0 / +E9C al pasar de la 1 a la 0); demo/main.c
   `coche_dibuja(l, mc, interior)`: con 1 solo PZ_INTERIOR y PZ_FAROS; con 0 todo menos PZ_INTERIOR.
 - Verificado en E (Flycast, `-DPRUEBA_VISTA=1`, piloto en PALM): capo y salpicadero desde el asiento, sin "Out of memory".

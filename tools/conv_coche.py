@@ -458,6 +458,44 @@ def visibilidad(mod, res=(960, 720), bajas=True, posturas=None):
         vis |= cuenta > 0
     return vis | ((grupo != NADA) & (grupo != G_DISCO) & (grupo != G_DISCO_CAL)), dueno   # (G_INTERIOR entero)
 
+def ojo_interior(A, m):
+    """el ojo de la vista interior del modelo m (tabla CAM1 por modelo de 484EE0, la de tools/conv_param.py: sus tres
+    primeros floats; demo/camara.c lo usa como ojo y mira 1 m delante) en el marco del coche"""
+    import conv_param
+    d = A.elf.d; cam, _ = conv_param.busca_camara(d, conv_param.segmentos(d))
+    if cam is None: return None
+    mod_t = np.frombuffer(cam[0x64c + 0x5460:0x64c + 0x5460 + 0x438], '<f4').reshape(30, 9)
+    return mod_t[m, :3].astype(float)
+
+def vacia_interior(A, mod, m, res=(960, 720)):
+    """del habitaculo (G_INTERIOR) quita lo que no se ve desde el ojo de la vista interior: camaras en el ojo y a
+    +-0,15 m, girando +-50 grados a los lados y de -25 a +15 grados arriba (el cabeceo de la vista y los derrapes);
+    lo opaco del habitaculo tapa. Solo se ve en esa vista: lo demas (bajos del salpicadero, caras de dentro) sobra"""
+    ojo = ojo_interior(A, m)
+    if ojo is None: print('   habitaculo: sin el ojo de la vista interior (entero)'); return
+    T, dueno = triangulos(mod)
+    es = np.array([mod.mallas[k][9].get('grupo', NADA) == G_INTERIOR for k in dueno])
+    if not es.any(): return
+    Ti = np.ascontiguousarray(T[es])
+    op = np.array([1 if mod.mallas[k][0] == 0 else 0 for k in dueno[es]], np.uint8)
+    C = []
+    for dx in (-0.15, 0.0, 0.15):
+        for dy in (-0.1, 0.0, 0.1):
+            o = ojo + (dx, dy, 0.0)
+            for yaw in np.radians(np.arange(-50, 51, 10)):
+                for pit in np.radians((-25, -12, 0, 15)):
+                    dr = np.array([np.sin(yaw) * np.cos(pit), np.sin(pit), -np.cos(yaw) * np.cos(pit)])
+                    C.append(mira(o, o + dr))
+    C = np.array(C, np.float32); lib = _lib(); f = ctypes.POINTER(ctypes.c_float)
+    cuenta = np.zeros(len(Ti), np.int32)
+    lib.visibles(Ti.ctypes.data_as(f), len(Ti), op.ctypes.data_as(ctypes.POINTER(ctypes.c_ubyte)), C.ctypes.data_as(f),
+                 len(C), res[0], res[1], cuenta.ctypes.data_as(ctypes.POINTER(ctypes.c_int)))
+    vis = np.ones(len(T), bool); vis[np.nonzero(es)[0]] = cuenta > 0
+    n0 = sum(x[5] for x in mod.mallas if x[9].get('grupo') == G_INTERIOR)
+    vacia(mod, vis, dueno)
+    n1 = sum(x[5] for x in mod.mallas if x[9].get('grupo') == G_INTERIOR)
+    print('   habitaculo: %d -> %d vertices (lo que se ve desde el ojo %.2f %.2f %.2f)' % (n0, n1, *ojo))
+
 def vacia(mod, vis, dueno, hueco=2, maximo=256):
     """rehace las tiras con solo los triangulos visibles (corta si hay mas de hueco ocultos seguidos; tiras de
     hasta maximo vertices: la demo no dibuja mas de 256 por tira)"""
@@ -706,6 +744,7 @@ def convierte(A, m, sal, tope=TOPE, vista=None):
             vis, dueno = visibilidad(mod, bajas=baj, posturas=poses(A, m)); vacia(mod, vis, dueno)
             print("   %s: %d vertices" % (nota, vertices_dibujados(mod)))
             if vertices_dibujados(mod) <= tope: break
+    vacia_interior(A, mod, m)
     if vista:
         try:
             dibuja_vista(mod, os.path.join(vista, os.path.basename(sal).replace('.DAT', '.png')))
