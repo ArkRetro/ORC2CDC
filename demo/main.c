@@ -9973,6 +9973,9 @@ typedef struct { uint32_t nv, ne; const float *v; const uint8_t *e; } svol_t;
 static svol_t svol[SVOL_MAX]; static int nsvol;
 static const uint32_t *cex_col, *cex_vd, *cex_grp; static const cex_t *cex_m; static uint32_t cex_nsl, cex_n, cex_ngrp;
 static uint32_t *cex_n0; static int cex_color, cex_luces = -1, cex_taxi, cex_freno_hold;   /* cuenta de vertices de cada malla; grupos encendidos */
+static int refl_activo;                                          /* el reflejo pone la pintura de los vertices de entorno */
+static uint32_t *refl_ofs0, *refl_pos;                          /* la pintura (desplazamiento) de los vertices de entorno y
+                                                                   donde empieza cada malla (Rev 2.6: coche_reflejo la mezcla) */
 static uint32_t cex_mul(uint32_t c, uint32_t luz)
 {
     return 0xFF000000u | ((((c >> 16) & 255) * luz / 255) << 16) | ((((c >> 8) & 255) * luz / 255) << 8) | ((c & 255) * luz / 255);
@@ -9999,7 +10002,10 @@ static void coche_color(int c)
                 col = 0xFF000000u | (uint32_t)(((p >> 16) & 255) * lr[0]) << 16 | (uint32_t)(((p >> 8) & 255) * lr[1]) << 8 | (uint32_t)((p & 255) * lr[2]);
             } else col = cex_mul(p, q >> 24);
             if (e->tipo == 1) coche.verts[m->v0 + i].c = (coche.verts[m->v0 + i].c & 0xFF000000u) | (col & 0xFFFFFF);
-            else coche.ofs[m->v0 + i] = col;
+            else {
+                if (refl_ofs0 && refl_pos) refl_ofs0[refl_pos[k] + i] = col;
+                if (!refl_activo || !refl_ofs0) coche.ofs[m->v0 + i] = col;   /* (con el reflejo, coche_reflejo) */
+            }
         }
     }
     cex_color = c;
@@ -10139,13 +10145,24 @@ static matrix_t ani_m[NPZ] __attribute__((aligned(32)));      /* matriz de cada 
 #ifndef REFL_SOL
 #define REFL_SOL 1.0f                                           /* el destello del sol en el mapa (x su color) */
 #endif
-#define REFL_SOL_EXP 24.0f                                      /* (cos^24: ~13 grados de medio ancho) */
+#define REFL_SOL_EXP 160.0f                                     /* (cos^160: ~5 grados de medio ancho) */
+#ifndef REFL_CIELO_K
+#define REFL_CIELO_K 1.15f                                      /* el horizonte nitido: lo de arriba mas claro... */
+#endif
+#ifndef REFL_SUELO_K
+#define REFL_SUELO_K 0.45f                                      /* ...y lo de abajo mas oscuro (en 0,05 de dy) */
+#endif
+#ifndef REFL_MEZ
+#define REFL_MEZ 0.0f                                           /* cuanto de la pintura sustituye el reflejo (x Fresnel; 0,55 la volvia malva) */
+#endif
 static pvr_ptr_t refl_tv[2][2];                                 /* [textura que se alterna][RGB565, ARGB1555 con alfa 1] */
 static pvr_poly_hdr_t refl_cab[2][2][REFL_MAX] __attribute__((aligned(32)));   /* [textura][niebla][textura del coche] */
 static int32_t refl_tex[REFL_MAX]; static uint8_t refl_tipo[REFL_MAX]; static int refl_ntex, refl_est, refl_buf, refl_cab_ok;
 static uint32_t *refl_esp;                                      /* el especular de cada malla de entorno (por cex) */
 static int refl_firma[6] = { -1, -1, -1, -1, -1, -1 };          /* la ultima mezcla: mapas, fraccion, etapa y sol */
-static float refl_dir[REFL_LADO * REFL_LADO][3];               /* la direccion (mundo) de cada texel */
+#define REFL_SAL 32                                             /* lado de la textura del reflejo (Rev 2.6; los mapas son de 16) */
+static float refl_dir[REFL_SAL * REFL_SAL][3];                 /* la direccion (mundo) de cada texel de la salida */
+static uint16_t refl_tws[REFL_SAL * REFL_SAL];                  /* (x, y) -> texel twiddled de la salida */
 #define REFL_FIJO_LADO 32
 #ifndef REFL_FIJO
 #define REFL_FIJO 0.9f                                          /* peso del mapa propio del coche (su brillo de siempre) */
@@ -10155,7 +10172,7 @@ static float refl_dir[REFL_LADO * REFL_LADO][3];               /* la direccion (
 #endif
 #define REFL_LUM_CIELO 150.0f                                   /* brillo medio de lo de arriba a cielo abierto */
 #define REFL_LUZ_MIN 0.3f                                       /* el mapa del coche bajo techo, como mucho tan apagado */
-static int16_t refl_env[REFL_LADO * REFL_LADO][3]; static float refl_env_luz = 1;   /* el entorno mezclado (refl_mezcla) */
+static int16_t refl_env[REFL_SAL * REFL_SAL][3]; static float refl_env_luz = 1;   /* el entorno mezclado (refl_mezcla) */
 static uint8_t refl_fijo[REFL_FIJO_LADO * REFL_FIJO_LADO][3]; static int refl_fijo_ok;
 static uint16_t refl_tw[REFL_LADO * REFL_LADO];                  /* (x, y) -> texel twiddled (y en los bits pares) */
 static int refl_prepara(void)                                   /* la VRAM (2 KB, una vez) */
@@ -10164,12 +10181,17 @@ static int refl_prepara(void)                                   /* la VRAM (2 KB
     if (refl_tv[0][0]) return 1;
     if (!refl_lba) return 0;
     for (i = 0; i < 2; i++) for (j = 0; j < 2; j++)
-        if (!(refl_tv[i][j] = pvr_mem_malloc(REFL_TEX))) { refl_lba = 0; dbglog(DBG_ERROR, "REFLEJO: sin VRAM\n"); return 0; }
+        if (!(refl_tv[i][j] = pvr_mem_malloc(2 * REFL_SAL * REFL_SAL))) { refl_lba = 0; dbglog(DBG_ERROR, "REFLEJO: sin VRAM\n"); return 0; }
     for (i = 0; i < REFL_LADO * REFL_LADO; i++) {
         uint32_t x = i % REFL_LADO, y = i / REFL_LADO, t = 0, k;
         for (k = 0; k < 4; k++) t |= ((y >> k) & 1) << (2 * k) | ((x >> k) & 1) << (2 * k + 1);
         refl_tw[i] = (uint16_t)t;
-        {   float a = ((x + 0.5f) / REFL_LADO - 0.5f) / REFL_ESCALA, b = ((y + 0.5f) / REFL_LADO - 0.5f) / REFL_ESCALA, q = a * a + b * b;
+    }
+    for (i = 0; i < REFL_SAL * REFL_SAL; i++) {
+        uint32_t x = i % REFL_SAL, y = i / REFL_SAL, t = 0, k;
+        for (k = 0; k < 5; k++) t |= ((y >> k) & 1) << (2 * k) | ((x >> k) & 1) << (2 * k + 1);
+        refl_tws[i] = (uint16_t)t;
+        {   float a = ((x + 0.5f) / REFL_SAL - 0.5f) / REFL_ESCALA, b = ((y + 0.5f) / REFL_SAL - 0.5f) / REFL_ESCALA, q = a * a + b * b;
             float dy = (1 - q) / (1 + q);
             refl_dir[i][0] = a * (1 + dy); refl_dir[i][1] = dy; refl_dir[i][2] = b * (1 + dy);
         }
@@ -10183,7 +10205,7 @@ static void refl_compila(void)                                  /* las cabeceras
         const tex_t *t = coche.texs + refl_tex[i]; int alfa = t->lista == 2;
         for (f = 0; f < 2; f++) {
             pvr_poly_cxt_t cx;
-            pvr_poly_cxt_txr(&cx, LISTA[t->lista], (alfa ? PVR_TXRFMT_ARGB1555 : PVR_TXRFMT_RGB565) | PVR_TXRFMT_TWIDDLED, REFL_LADO, REFL_LADO,
+            pvr_poly_cxt_txr(&cx, LISTA[t->lista], (alfa ? PVR_TXRFMT_ARGB1555 : PVR_TXRFMT_RGB565) | PVR_TXRFMT_TWIDDLED, REFL_SAL, REFL_SAL,
                              refl_tv[v][alfa], PVR_FILTER_BILINEAR);
             cx.gen.fog_type = f ? PVR_FOG_DISABLE : PVR_FOG_TABLE; cx.gen.culling = PVR_CULLING_NONE;
             cx.txr.env = PVR_TXRENV_MODULATE; cx.gen.specular = PVR_SPECULAR_ENABLE;
@@ -10218,12 +10240,16 @@ static void refl_mezcla(const uint16_t *A, float aa, const uint16_t *B, float ab
 {
     float ca = cosf(aa), sa = sinf(aa), cb = cosf(ab), sb = sinf(ab), lum = 0; int i, j, ra[3], rb[3], r[3];
     if (!refl_lut_ok) { for (i = 0; i < 256; i++) refl_lut[i] = (uint8_t)(255.0f * powf(i / 255.0f, REFL_GAMMA) + 0.5f); refl_lut_ok = 1; }
-    for (i = 0; i < REFL_LADO * REFL_LADO; i++) {
-        float a = ((i % REFL_LADO) + 0.5f) * (1.0f / REFL_LADO) - 0.5f, b = ((i / REFL_LADO) + 0.5f) * (1.0f / REFL_LADO) - 0.5f;
+    for (i = 0; i < REFL_SAL * REFL_SAL; i++) {
+        float a = ((i % REFL_SAL) + 0.5f) * (1.0f / REFL_SAL) - 0.5f, b = ((i / REFL_SAL) + 0.5f) * (1.0f / REFL_SAL) - 0.5f;
         refl_muestra(A, ca, sa, a, b, ra);
         if (f > 0.0f) { refl_muestra(B, cb, sb, a, b, rb); for (j = 0; j < 3; j++) r[j] = (int)(ra[j] + f * (rb[j] - ra[j])); }
         else for (j = 0; j < 3; j++) r[j] = ra[j];
         for (j = 0; j < 3; j++) r[j] = refl_lut[r[j] < 0 ? 0 : r[j] > 255 ? 255 : r[j]];
+        {   float t = refl_dir[i][1] * (1.0f / 0.05f) * 0.5f + 0.5f, k;   /* el horizonte: nitido */
+            t = t < 0 ? 0 : t > 1 ? 1 : t; k = REFL_SUELO_K + (REFL_CIELO_K - REFL_SUELO_K) * t;
+            for (j = 0; j < 3; j++) { r[j] = (int)(r[j] * k); if (r[j] > 255) r[j] = 255; }
+        }
         {   float c = refl_dir[i][0] * sol[0] + refl_dir[i][1] * sol[1] + refl_dir[i][2] * sol[2];
             if (c > 0.0f) { c = powf(c, REFL_SOL_EXP) * REFL_SOL; for (j = 0; j < 3; j++) { r[j] += (int)(c * solc[j]); if (r[j] > 255) r[j] = 255; } }
         }
@@ -10232,7 +10258,7 @@ static void refl_mezcla(const uint16_t *A, float aa, const uint16_t *B, float ab
         else lum += 0;
     }
     {   int nu = 0;
-        for (i = 0; i < REFL_LADO * REFL_LADO; i++) nu += refl_dir[i][1] > 0.2f;
+        for (i = 0; i < REFL_SAL * REFL_SAL; i++) nu += refl_dir[i][1] > 0.2f;
         lum = lum / (3.0f * (float)(nu ? nu : 1)) / REFL_LUM_CIELO;     /* 1 a cielo abierto, menos bajo techo */
         refl_env_luz = lum < REFL_LUZ_MIN ? REFL_LUZ_MIN : lum > 1 ? 1 : lum;
     }
@@ -10242,11 +10268,11 @@ static void refl_mezcla(const uint16_t *A, float aa, const uint16_t *B, float ab
    mas el entorno (refl_env); en una de las dos texturas que se alternan */
 static void refl_compone(void)
 {
-    static uint16_t t5[REFL_LADO * REFL_LADO] __attribute__((aligned(32))), t1[REFL_LADO * REFL_LADO] __attribute__((aligned(32)));
+    static uint16_t t5[REFL_SAL * REFL_SAL] __attribute__((aligned(32))), t1[REFL_SAL * REFL_SAL] __attribute__((aligned(32)));
     float I[3], l, kf = REFL_FIJO * refl_env_luz; int i, j, r[3];
     for (j = 0; j < 3; j++) I[j] = yo.pos[j] - ojo[j];
     l = sqrtf(I[0] * I[0] + I[1] * I[1] + I[2] * I[2]); l = l > 1e-3f ? 1.0f / l : 0; for (j = 0; j < 3; j++) I[j] *= l;
-    for (i = 0; i < REFL_LADO * REFL_LADO; i++) {
+    for (i = 0; i < REFL_SAL * REFL_SAL; i++) {
         float fj[3] = { 0, 0, 0 };
         if (refl_fijo_ok) {
             float n0 = refl_dir[i][0] - I[0], n1 = refl_dir[i][1] - I[1], n2 = refl_dir[i][2] - I[2], q = n0 * n0 + n1 * n1 + n2 * n2;
@@ -10265,8 +10291,8 @@ static void refl_compone(void)
             }
         }
         for (j = 0; j < 3; j++) { r[j] = (int)(fj[j] * kf + refl_env[i][j] * (refl_fijo_ok ? REFL_ENT : 1.0f)); if (r[j] > 255) r[j] = 255; if (r[j] < 0) r[j] = 0; }
-        t5[refl_tw[i]] = (uint16_t)((r[0] >> 3) << 11 | (r[1] >> 2) << 5 | (r[2] >> 3));
-        t1[refl_tw[i]] = (uint16_t)(0x8000u | (r[0] >> 3) << 10 | (r[1] >> 3) << 5 | (r[2] >> 3));
+        t5[refl_tws[i]] = (uint16_t)((r[0] >> 3) << 11 | (r[1] >> 2) << 5 | (r[2] >> 3));
+        t1[refl_tws[i]] = (uint16_t)(0x8000u | (r[0] >> 3) << 10 | (r[1] >> 3) << 5 | (r[2] >> 3));
     }
     refl_buf ^= 1;
     pvr_txr_load(t5, refl_tv[refl_buf][0], sizeof t5); pvr_txr_load(t1, refl_tv[refl_buf][1], sizeof t1);
@@ -10334,6 +10360,7 @@ static int refl_elige(int carrera)
             if (!e) compila_cab(&coche, refl_tex[i], refl_tipo[i] == 3 ? 3 : 1);
             else for (f = 0; f < 2; f++) coche.cabs[f][refl_tex[i]] = refl_cab[refl_buf][f][i];
         }
+        if (!e && cex_color) { refl_activo = 0; coche_color(cex_color); }   /* sin el reflejo: la pintura de siempre */
         if (!e && refl_esp) {                                   /* sin el reflejo: el especular de siempre */
             uint32_t k, j;
             for (k = 0; k < cex_n; k++) {
@@ -10341,7 +10368,7 @@ static int refl_elige(int carrera)
                 if (cex_m[k].tipo >= 2) for (j = 0; j < m->n; j++) coche.verts[m->v0 + j].c = refl_esp[k];
             }
         }
-        refl_est = e;
+        refl_est = e; refl_activo = e;
 #ifdef DIAG_REFLEJO
         dbglog(DBG_INFO, "REFLEJO: %d (s %.0f, etapa %d)\n", e, (double)(yo.s - s_etapa), cur_nodo);
 #endif
@@ -10352,8 +10379,14 @@ static int refl_elige(int carrera)
 static void coche_cab_cex(void)
 {
     uint32_t k; int i;
-    refl_ntex = 0; refl_est = 0; refl_firma[0] = -1; refl_cab_ok = 0;
+    refl_ntex = 0; refl_est = 0; refl_activo = 0; refl_firma[0] = -1; refl_cab_ok = 0;
     free(refl_esp); refl_esp = malloc(cex_n * sizeof(uint32_t));
+    free(refl_pos); free(refl_ofs0); refl_ofs0 = NULL;
+    if ((refl_pos = malloc(cex_n * sizeof(uint32_t)))) {
+        uint32_t tot = 0;
+        for (k = 0; k < cex_n; k++) { refl_pos[k] = tot; if (cex_m[k].tipo >= 2) tot += cex_n0[cex_m[k].malla]; }
+        refl_ofs0 = tot ? malloc(tot * sizeof(uint32_t)) : NULL;
+    }
     for (k = 0; refl_esp && k < cex_n; k++) {
         const malla_t *m = coche.mallas + cex_m[k].malla; refl_esp[k] = m->n ? coche.verts[m->v0].c : 0xFFFFFFFFu;
     }
@@ -10452,11 +10485,8 @@ static void coche_entorno(matrix_t mc)
 /* UV del reflejo (refl_elige) en el marco del mundo y el Fresnel en el especular de cada vertice */
 static void coche_reflejo(matrix_t mc, int mapa)
 {
-    float Am[3][3], W[NPZ][3][3], I[3], l; uint32_t k, i; int j, q, p;
+    float Am[3][3], W[NPZ][3][3]; uint32_t k, i; int j, q, p;
     (void)mapa;
-    for (j = 0; j < 3; j++) I[j] = yo.pos[j] - ojo[j];
-    l = I[0] * I[0] + I[1] * I[1] + I[2] * I[2]; if (l < 1e-6f) return;
-    l = 1.0f / sqrtf(l); for (j = 0; j < 3; j++) I[j] *= l;
     for (q = 0; q < 3; q++) for (j = 0; j < 3; j++) Am[j][q] = mc[j][q] * (1.0f / 127.0f);
     for (p = 0; p < NPZ; p++)                                   /* piezas animadas: sus ejes en el mundo */
         for (j = 0; j < 3; j++) {
@@ -10467,13 +10497,21 @@ static void coche_reflejo(matrix_t mc, int mapa)
         const cex_t *e = cex_m + k; const malla_t *m = coche.mallas + e->malla; vert_t *v = coche.verts + m->v0;
         const uint32_t *vd = cex_vd + e->v0; const uint32_t nv = m->n, c0 = refl_esp ? refl_esp[k] : 0xFFFFFFFFu;
         const float er = (float)((c0 >> 16) & 255), eg = (float)((c0 >> 8) & 255), eb = (float)(c0 & 255); const uint32_t ea = c0 & 0xFF000000u;
+        const uint32_t *o0 = refl_ofs0 && refl_pos && coche.ofs ? refl_ofs0 + refl_pos[k] : NULL; uint32_t *ofs = coche.ofs ? coche.ofs + m->v0 : NULL;
         if (e->tipo < 2) continue;
         p = m->nodo < 0 ? 0 : (m->nodo >> 8) & 0xFF; if (p >= NPZ) p = 0;
         {   const float w00 = W[p][0][0], w01 = W[p][0][1], w02 = W[p][0][2], w10 = W[p][1][0], w11 = W[p][1][1], w12 = W[p][1][2],
-                        w20 = W[p][2][0], w21 = W[p][2][1], w22 = W[p][2][2], ix = I[0], iy = I[1], iz = I[2];
+                        w20 = W[p][2][0], w21 = W[p][2][1], w22 = W[p][2][2];
+            const float p0 = mc[3][0] - ojo[0], p1 = mc[3][1] - ojo[1], p2 = mc[3][2] - ojo[2];
             for (i = 0; i < nv; i++) {
                 uint32_t w = vd[i]; float x = (int8_t)w, y = (int8_t)(w >> 8), z = (int8_t)(w >> 16);
                 float nx = x * w00 + y * w10 + z * w20, ny = x * w01 + y * w11 + z * w21, nz = x * w02 + y * w12 + z * w22;
+                /* Rev 2.6: la vista hasta este vertice (no hasta el centro del coche): en un panel plano cada punto se ve
+                   desde otro angulo y el reflejo dibuja el entorno (con una sola vista, un color liso) */
+                float ix = v[i].x * mc[0][0] + v[i].y * mc[1][0] + v[i].z * mc[2][0] + p0;
+                float iy = v[i].x * mc[0][1] + v[i].y * mc[1][1] + v[i].z * mc[2][1] + p1;
+                float iz = v[i].x * mc[0][2] + v[i].y * mc[1][2] + v[i].z * mc[2][2] + p2, il = ix * ix + iy * iy + iz * iz;
+                il = il > 1e-6f ? 1.0f / sqrtf(il) : 0; ix *= il; iy *= il; iz *= il;
                 float d = 2.0f * (nx * ix + ny * iy + nz * iz), den = 1.0f + iy - d * ny, g, t, F;
                 if (den < 0.25f) den = 0.25f;                   /* muy hacia abajo: el borde del mapa (CLAMP) */
                 g = REFL_ESCALA / den;
@@ -10481,6 +10519,10 @@ static void coche_reflejo(matrix_t mc, int mapa)
                 t = 1.0f - fabsf(0.5f * d); t = t < 0 ? 0 : t;
                 F = REFL_F0 + (1.0f - REFL_F0) * t * t;
                 v[i].c = ea | (uint32_t)(er * F) << 16 | (uint32_t)(eg * F) << 8 | (uint32_t)(eb * F);
+                if (o0 && REFL_MEZ > 0.0f) {                    /* la pintura cede ante el reflejo (lo oscuro oscurece) */
+                    uint32_t q = o0[i]; float g2 = 1.0f - REFL_MEZ * F;
+                    ofs[i] = (q & 0xFF000000u) | (uint32_t)(((q >> 16) & 255) * g2) << 16 | (uint32_t)(((q >> 8) & 255) * g2) << 8 | (uint32_t)((q & 255) * g2);
+                }
             }
         }
     }
