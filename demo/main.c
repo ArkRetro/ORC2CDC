@@ -1269,6 +1269,16 @@ static uint32_t vtx_et, vtx_et_ult;                      /* los de la etapa */
    con la distancia del original no se envian mas vertices (Flycast, PALM: 27100 vertices y 55,5 -> 56 cuadros por
    segundo; docs/PARIDAD.md, Fundido de entrada) */
 #define VTX_ETAPA_MAX 20000
+/* Rev 2.8 (pedido: "mejora el framerate de las vegas"): el tope del TA de la etapa x ta_escala / 256 en las zonas de
+   PRESUP_ZONAS (prio_ajusta lo pone): la CPU del cuadro va con lo que se manda (perfil en LASV: dibuja_etapa y el envio
+   de vertices son el 38 %; los faros 0,3 ms). De noche lo lejano casi no se ve. */
+#ifndef PRESUP_ZONAS
+#define PRESUP_ZONAS ""                                         /* (medido en LASV al 85 %: 40,1 -> 40,4 fps y el tope 0,9 -> 1,9 saltos por s: no compensa) */
+#endif
+#ifndef PRESUP_ESCALA
+#define PRESUP_ESCALA 218                                       /* /256: 85 % */
+#endif
+static uint32_t ta_escala = 256;
 /* Rev 1.5b: parte del tope del TA y de vertices de la etapa que las listas opaca y de recorte dejan a la translucida.
    En LASV la calzada mojada es translucida (textura 3 de SEG22, lista 2) sobre una capa opaca con los edificios
    reflejados: en los tramos cargados lo opaco gastaba el tope, la calzada no cabia y se veia el reflejo sobre negro
@@ -1415,6 +1425,7 @@ static void ta_inicia_cuadro(void)
     libre = ta_lim > ro ? ta_lim - ro : 0;
     bo = ta_bo_ult < libre / TA_BO_PARTE ? ta_bo_ult : libre / TA_BO_PARTE;   /* (los objetos de la union, arriba) */
     ta_tope_etapa = (libre - bo) / 4 * (4 - ta_freno);
+    if (ta_escala != 256) ta_tope_etapa = (uint32_t)((uint64_t)ta_tope_etapa * ta_escala >> 8);   /* (Rev 2.8: PRESUP_ZONAS) */
     /* holgura del tope de la etapa (+54 KB, arriba): nunca por encima de ta_lim, donde ya no cabe nada mas */
     if (ta_tope_etapa < ta_lim) {
         uint32_t h = ta_tope_etapa + TA_ETAPA_HOLGURA;
@@ -1765,10 +1776,13 @@ static float focos_pl[5][4];                                    /* planos de esa
 static const modelo_t *focos_fuera;                             /* modelo con otra vista (la etapa siguiente escalada) */
 static struct { const modelo_t *mo; const malla_t *m; } focos_l[FOCOS_MAX];
 static uint32_t focos_n;
+static float focos_e[3];                                         /* el proyector en el mundo (focos_prepara) */
+#define FOCOS_ANOTA_D 40.0f                                     /* m: mas alla del haz (FOCOS_LEJOS 28 m) y con holgura */
 static inline void focos_anota(const modelo_t *mo, const malla_t *m)
 {
-    int i;
+    int i; float dx = m->cx - focos_e[0], dy = m->cy - focos_e[1], dz = m->cz - focos_e[2], lim = FOCOS_ANOTA_D + m->r;
     if (mo == focos_fuera || focos_n >= FOCOS_MAX) return;
+    if (dx * dx + dy * dy + dz * dz > lim * lim) return;         /* (Rev 2.8: lejos del haz, sin los 5 planos; LASV) */
     for (i = 0; i < 5; i++) {
         const float *p = focos_pl[i];
         if (p[0] * m->cx + p[1] * m->cy + p[2] * m->cz + p[3] < -m->r) return;
@@ -7740,6 +7754,23 @@ static void pop_evento(int t, int nodo, int razon, int ap, float px, float z, fl
 #define PVS_CERCA_R 80.0f                                        /* m: solo nodos de este radio o menos (lo grande, suelo y
                                                                     calzada, sigue con la PVS: entero costaria todo el TA) */
 #endif
+/* Rev 2.8 (queja: "zonas sin dibujar" en RUIN y en los puentes): los nodos grandes (estructuras: ruinas, puentes) no se
+   recortan con la PVS (ni enteros ni por tiras) mientras su borde este a menos de PVS_GRANDE_D: se dibujan enteros.
+   Medido en RUIN (Rev 2.7): 9,4 de los 10 saltos grandes por s eran de la PVS, de nodos de 84-288 m de radio, con el
+   presupuesto del TA casi siempre de sobra (1 % de media sin caber). -DPVS_GRANDE_R=0: como antes */
+#ifndef PVS_GRANDE_R
+#define PVS_GRANDE_R 60.0f
+#endif
+#define PVS_GRANDE_D 800.0f
+/* Solo en las etapas de PVS_GRANDE_ZONAS (medido una a una): en LASV, que va justa de presupuesto, dibujarlas enteras
+   subia lo que no cabe del 3 al 27 % de media y bajaba 41,3 -> 39,7 fps; en MAYA los saltos por el tope 0,1 -> 3,4 por
+   s. Se probo encenderla sola con holgura del TA (y apagarla al llenarse): o costaba en LASV / MAYA o se apagaba tambien
+   en RUIN. En RUIN: saltos grandes 10,0 -> 4,5 por s (los de la PVS 9,4 -> 2,9), mismos fps (44,4) */
+#ifndef PVS_GRANDE_ZONAS
+#define PVS_GRANDE_ZONAS "RUIN"                                  /* 4 letras por zona, seguidas: "RUINSANF" */
+#endif
+static int pvs_grande_on;
+#define PVS_GRANDE(d, zv) (pvs_grande_on && PVS_GRANDE_R > 0 && (d)->r >= PVS_GRANDE_R && (zv) - (d)->r < PVS_GRANDE_D)
 #define PVS_GRACIA 15                                           /* gracia de la PVS (nodos_visibles): cuadros que sigue
                                                                    dibujandose un nodo que la PVS apaga, 0,33 s */
 static void pvs_aplica(modelo_t *mo, int s)                     /* XOR de la lista de la seccion s */
@@ -7971,7 +8002,7 @@ static void nodos_visibles(modelo_t *mo)
         if (d->cartel <= -2 && (uint32_t)(-2 - d->cartel) < nnod)
             ya |= VA[(uint32_t)(-2 - d->cartel) >> 5] & (1u << ((-2 - d->cartel) & 31));
         ip = i; gracia = 0; c_teo = 0;
-        if (mo->viso && !(mo->viso[i >> 3] >> (i & 7) & 1)) {    /* fuera de la etapa */
+        if (mo->viso && !(mo->viso[i >> 3] >> (i & 7) & 1) && !PVS_GRANDE(d, zv)) {   /* fuera de la etapa */
             /* gracia de la PVS (P1, _trabajo\POPPING_INFORME.md): la PVS apaga nodos enteros 2,8 s de mediana (26 px de
                radio, 418 m); el que ya se estaba dibujando se queda PVS_GRACIA cuadros (0,33 s) con el ultimo coste que
                traia. Sin eso es 2,29 de los 3,84 huecos visibles por segundo; con esto, 0,08 */
@@ -7980,6 +8011,9 @@ static void nodos_visibles(modelo_t *mo)
 #ifdef DIAG_POPPING
             pop_pvs_gra++;
 #endif
+        } else if (pvs_on_ && mo->pvs_ent && PVS_GRANDE(d, zv)) {
+            mo->pvs_ent[i >> 5] |= 1u << (i & 31);            /* (Rev 2.8: estructura grande, entera) */
+            c_teo = d->relleno[0]; c_v = d->relleno[1] >> 12;
         } else if (pvs_on_ && mo->pvs_ent && zv < PVS_CERCA && d->r < PVS_CERCA_R && (PVS_CERCA_TODO || mo->pvs_teo[2 * i])) {
             /* PVS conservadora cerca de la camara (Rev 1.4): la tabla da por tapadas tiras, y nodos enteros, que a
                corta distancia si se ven (NEWY: del anclaje del puente quedaba la celosia de arriba sin sus muros;
@@ -8399,6 +8433,13 @@ static void prio_ajusta(int corto, uint32_t usado)
        lo que se pierde es lo lejano); dos seguidos si. Antes un solo cuadro llevaba el corte de 4000 m a 5 m y el
        reparto tardaba segundos en devolver los edificios (la carga a golpes de LASV) */
     {   static int seguidos; seguidos = corto ? seguidos + 1 : 0; if (seguidos == 1) corto = 0; }
+    {   const char *z = PVS_GRANDE_ZONAS, *e = PRESUP_ZONAS; size_t k;   /* (Rev 2.8; zona: 4 letras sin terminador) */
+        pvs_grande_on = 0; ta_escala = 256;
+        if (cur_nodo >= 0 && cur_nodo < ncurso && !cur_en_union)
+            for (k = 0; k + 4 <= strlen(z); k += 4) if (!memcmp(z + k, curso[cur_nodo].zona, 4)) pvs_grande_on = 1;
+        if (cur_nodo >= 0 && cur_nodo < ncurso)
+            for (k = 0; k + 4 <= strlen(e); k += 4) if (!memcmp(e + k, curso[cur_nodo].zona, 4)) ta_escala = PRESUP_ESCALA;
+    }
 #ifdef DIAG_POPPING
     if (corto) pop_ccorto++;
 #endif
@@ -9410,7 +9451,12 @@ static void faros_dibuja(matrix_t *mc, uint32_t ban, int choque)
 #else
     {   /* la rejilla sobre la calzada (faros_rejilla) */
         static float P[FAROS_NL][FAROS_NC][3];
+        /* Rev 2.8 (LASV: 156 consultas de la altura del suelo, 1,07 ms por cuadro): cada cuadro solo la mitad de las
+           lineas (alternas); las otras con la altura sobre el plano del coche del cuadro anterior (la rejilla va con el
+           coche y la calzada cambia poco en un cuadro). -DFAROS_TODAS: todas, como antes */
+        static float H[2][FAROS_NL][FAROS_NC]; static uint8_t Hok[2][FAROS_NL]; static uint32_t turno;
         coli_t *r[2]; int l, L, c, pol, hay = col_hay(); uint32_t cl; vert_t *o = faros_vw;
+        turno++;
 #ifdef DIAG_MS
         uint64_t t0 = timer_us_gettime64(); faros_dg_suelo = 0;
 #endif
@@ -9421,15 +9467,20 @@ static void faros_dibuja(matrix_t *mc, uint32_t ban, int choque)
                 if (l && c == FAROS_NC - 1) continue;           /* (x = 0: el punto del otro lado, ya en P) */
                 for (i = 0; i < 3; i++) p[i] = g[0] * (*mc)[0][i] + g[1] * (*mc)[2][i] + (*mc)[3][i];
                 y = p[1];
+#ifndef FAROS_TODAS
+                if (hay && Hok[l][L] && ((L + turno) & 1)) { p[1] = y + H[l][L][c]; continue; }   /* (la del cuadro anterior) */
+#endif
+                H[l][L][c] = 0;
                 if (hay) {
                     coli_altura(r, &faros_pred, 0x100, p[0], &y, p[2], &pol, &cl);
                     if (pol >= 0 && cl != 1) {
-                        p[1] = y;
+                        H[l][L][c] = y - p[1]; p[1] = y;
 #ifdef DIAG_MS
                         faros_dg_suelo++;
 #endif
                     }
                 }
+                Hok[l][L] = 1;
             }
             for (L = 0; L + 1 < FAROS_NL; L++) for (c = 0; c < FAROS_NC; c++) {
                 int j;
@@ -9486,7 +9537,7 @@ static pvr_poly_hdr_t focos_cab; static int focos_ok; static float focos_v = 1.0
 static float focos_a[4] = { 1, 1, 1, 1 };                       /* lo no negro de la textura: u0, u1, v0 y v1 = focos_v como
                                                                    x + a0 z >= 0, a1 z - x >= 0, y + a2 z >= 0, a3 z - y >= 0 */
 static float focos_T[4][3];                                      /* mundo -> (xc, yc, zc) del proyector (filas) */
-static float focos_e[3], focos_tx = 256.0f;                     /* el proyector en el mundo; texeles de lado de la textura */
+static float focos_tx = 256.0f;                                 /* texeles de lado de la textura (focos_e: arriba) */
 static uint32_t focos_vsub;                                     /* vertices de las divisiones en este cuadro (FOCOS_VSUB) */
 #ifdef DIAG_MS
 static unsigned focos_dg_m, focos_dg_v, focos_dg_us, focos_dg_sub, focos_dg_cara, focos_dg_poli, focos_dg_vm;
