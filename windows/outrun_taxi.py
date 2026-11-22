@@ -148,6 +148,17 @@ def main():
             informe('AVISO: no se pudo rehacer EFECTOS.DAT (se queda el del disco, sin agua):\n' + (r.stderr or r.stdout)[-2000:])
         else:
             shutil.move(nuevo, os.path.join(D, 'EFECTOS.DAT')); informe('  hecho')
+        # Mod 2.5.1: los 15 coches del menu con el habitaculo de la vista interior (COCHE00..14; el taxi es COCHE15 y
+        # COCHES.DAT se quedan los del disco) y GOALT.DAT (la tabla de tiempos de la meta), desde la ISO
+        informe('== COCHE00..14.DAT (con el habitaculo) y GOALT.DAT desde la ISO (unos minutos)')
+        tmp = os.path.join(W, 'nuevos'); os.makedirs(tmp, exist_ok=True)
+        for args in (['conv_coche.py', iso, '--todos', tmp, '--fichas', ','.join(str(i) for i in range(15))],
+                     ['conv_fin.py', iso, tmp]):
+            r = subprocess.run([sys.executable, os.path.join(o2.TOOLS, args[0])] + args[1:], capture_output=True, text=True)
+            if r.returncode: informe('AVISO: fallo %s (se quedan los del disco):\n%s' % (args[0], (r.stderr or r.stdout)[-2000:]))
+        for f in ['COCHE%02d.DAT' % i for i in range(15)] + ['GOALT.DAT']:
+            if os.path.isfile(os.path.join(tmp, f)): shutil.move(os.path.join(tmp, f), os.path.join(D, f))
+        shutil.rmtree(tmp, ignore_errors=True); informe('  hecho')
     informe('== libros VQ reducidos de las texturas pequenas (tools/libros.py con pvrtex; si ya lo estan, sin cambios)')
     if os.path.isdir(os.path.join(AQUI, 'nativo')): os.environ.setdefault('OR2_NATIVO', os.path.join(AQUI, 'nativo'))
     import subprocess
