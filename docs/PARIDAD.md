@@ -1505,6 +1505,16 @@ de OutRun 2 SP (las 15 etapas seguidas) que dio el usuario.
   no esta leido). Sin EFECTOS.DAT nuevo, sin agua (como antes).
 - NO verificado en consola real.
 
+### La pancarta CHECK POINT otra vez (Rev 2.3 / Mod 1.9, 2026-11-22)
+
+Queja del usuario: "han desaparecido las marcas de checkpoint". La pancarta (objetos de la etapa, ver Checkpoint) esta
+en z = 0 y el punto 0 de la ruta, 5,9..7,8 m mas adelante (medido en SEG01/03/05/16/38/49): con la regla de la Rev 1.4b
+(DETRAS_ENTRADA: lo de la etapa siguiente con el centro detras de la entrada no se dibuja mientras se va por la union)
+quedaba fuera hasta cruzar la entrada, ya debajo de ella; en todas las etapas. Ahora con un margen de DETRAS_MARGEN
+40 m (lo de SEG29 que motivo la regla queda 400 m por detras). Comprobado en Flycast (PALM -> ALPI con el piloto):
+la pancarta al llegar, antes no. Tambien los TRAFK*.DAT (trafico) pasan por tools/libros.py (el patron TRAF[0-9]* los
+dejaba fuera): 17 texturas, 17 KB.
+
 ### Libros VQ reducidos (Rev 2.2 / Mod 1.8, 2026-11-22)
 
 Plan de VRAM tras el estudio del flujo por tramo: las texturas de las etapas ya van casi todas en VQ (31,8 MB frente a
