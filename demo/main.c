@@ -12225,6 +12225,7 @@ static int gh_nodo_ant = -1, gh_rama_ant = -1; static float gh_union_ant = -1;  
 static coche_t gh_c; static matrix_t gh_mat __attribute__((aligned(32))); static pvr_poly_hdr_t *gh_cabs; static uint32_t gh_ncabs;
 static uint8_t *gh_a0; static uint32_t gh_nv;                     /* el alfa de cada vertice del coche (gh_dibuja) */
 static volatile int gh_guardando;
+static uint8_t gh_buf[sizeof(gh_cab_t) + sizeof gh_rep];        /* el fichero de la VMU (lectura y guardado) */
 #define GH_U (65536.0f / 6.2831853f)
 /* al empezar la carrera (y REINTENTAR): la grabacion a cero; en la CONTRARRELOJ la del curso, de la RAM o de la VMU */
 static void gh_empieza(void)
@@ -12233,10 +12234,10 @@ static void gh_empieza(void)
     gh_nrec = 0; gh_lleno = 0; gh_grabando = clave >= 0; gh_ve = 0; gh_nodo_ant = gh_rama_ant = -1; gh_union_ant = -1;
     if (clave < 0) { gh_nrep = 0; gh_clave = -1; return; }
     if (clave != gh_clave) {                                    /* otro curso: el suyo de la VMU */
-        static uint8_t b[sizeof(gh_cab_t) + sizeof gh_rep]; char nm[16]; int n;
+        uint8_t *b = gh_buf; char nm[16]; int n;
         gh_nrep = 0; gh_clave = clave;
         sprintf(nm, "ORGH%04X", clave);
-        n = gh_guardando ? -1 : menu_vmu_lee(nm, b, sizeof b);
+        n = gh_guardando ? -1 : menu_vmu_lee(nm, b, sizeof gh_buf);
         if (n >= (int)sizeof(gh_cab_t)) {
             gh_cab_t c; memcpy(&c, b, sizeof c);
             if (!memcmp(c.marca, "ORGH", 4) && c.ver == 1 && c.clave == clave && c.n <= GH_MAX && n >= (int)(sizeof c + c.n * sizeof(gh_m_t))) {
@@ -12264,7 +12265,7 @@ static void gh_graba(void)
 }
 static void *gh_hilo(void *p)
 {
-    static uint8_t b[sizeof(gh_cab_t) + sizeof gh_rep]; char nm[16]; int r, n = gh_rep_cab.n;
+    uint8_t *b = gh_buf; char nm[16]; int r, n = gh_rep_cab.n;
     memcpy(b, &gh_rep_cab, sizeof gh_rep_cab); memcpy(b + sizeof gh_rep_cab, gh_rep, n * sizeof(gh_m_t));
     sprintf(nm, "ORGH%04X", gh_rep_cab.clave);
     r = menu_vmu_guarda(nm, "OutRun Fantasma", b, (int)(sizeof gh_rep_cab + n * sizeof(gh_m_t)));
