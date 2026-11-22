@@ -1521,6 +1521,32 @@ de OutRun 2 SP (las 15 etapas seguidas) que dio el usuario.
   no esta leido). Sin EFECTOS.DAT nuevo, sin agua (como antes).
 - NO verificado en consola real.
 
+### Reflejo del entorno en la carroceria (Rev 2.4 / Mod 2.0, 2026-11-22; DESVIACION pedida)
+
+Peticion: volver a poner el reflejo en la carroceria, muy simplificado. Lo que no gusto de la Rev 1.3: "un cambio de
+color muy abrupto y no se apreciaba bien el reflejo" (el mapa era solo el cielo x 0,3 sobre toda la pintura, con un
+suelo inventado de borde duro, y el mapa del tunel entraba de golpe). Referencia: el video de OutRun 2 SP del usuario
+(el original dibuja un cubo del entorno por cuadro con cs_ENV_<zona>: ver Reflejo del cielo y de los tuneles): bandas
+suaves del color del cielo en lo que mira arriba y en los cantos (rejillas, tapa trasera, aleron, aletas), naranja al
+atardecer, gris con luces en el tunel; de frente casi solo la pintura.
+- Datos (`tools/conv_reflejo.py`, REFLEJO.DAT 'RFL2'): por etapa, un mapa de 16x16 (RGB565 twiddled, 512 bytes) cada
+  12 puntos de su ruta (48 m) visto desde 1 m sobre ella: rayos (32 x 32, tools/c/reflejo.c) contra los triangulos de
+  las listas 0 y 1 de la etapa a menos de 300 m (sin las versiones lejanas), cada uno con el color medio de su textura
+  por el de sus vertices, y el cielo (el grupo 0) donde no chocan; desenfocado y reducido a 16x16, x 0,85. La misma
+  proyeccion que antes (u = 0,5 + 0,4 dx / (1 + dy)). Sin tabla de tuneles: el techo de las galerias esta en los mapas.
+- Demo (`refl_elige`, `refl_mezcla`, `coche_reflejo`): cada cuadro, la mezcla lineal de los dos mapas de alrededor
+  (solo se rehace si cambia en 1/32), en el marco del mundo (cada mapa girado desde el de su etapa); en la union, del
+  ultimo de la etapa al primero de la siguiente entre el 25 % y el final de lo andado. Dos texturas de 16x16 que se
+  alternan (RGB565 y ARGB1555 para los cristales: 2 KB de VRAM), con una curva de contraste (REFL_GAMMA 2,2: el
+  suelo oscuro, el cielo claro). Fresnel: el especular de cada vertice por 0,04 + 0,96 (1 - |N.I|)^3. Sin pasadas ni
+  vertices de mas en el TA. Primer ajuste (0,15 + (1 - |N.I|)^2, sin curva): la tapa trasera salia lechosa, como un
+  velo claro; con el de ahora el rojo queda profundo y el reflejo va en los cantos y costados (Flycast, PALM y las
+  galerias de ALPI con el piloto: capturas scratchpad vt/cmp_refl2.png y vt/r2_gal.png).
+- INVENTADO: la ganancia (0,85), el Fresnel, la curva, la altura del punto de vista (1 m) y el desenfoque.
+- Coste: RAM, dos bufers del tamano de la etapa con mas mapas (malloc al buscar REFLEJO.DAT); CPU, la mezcla (256
+  texeles, solo al cambiar) y el Fresnel por vertice de entorno. `-DSIN_REFLEJO`: el mapa fijo del coche.
+- NO verificado en consola real.
+
 ### La pancarta CHECK POINT otra vez (Rev 2.3 / Mod 1.9, 2026-11-22)
 
 Queja del usuario: "han desaparecido las marcas de checkpoint". La pancarta (objetos de la etapa, ver Checkpoint) esta

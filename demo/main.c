@@ -952,29 +952,42 @@ static void carga_col(const char *nombre, uint8_t *buf, uint32_t cap)
     snprintf(carga_col_nombre, sizeof carga_col_nombre, "%s", nombre); carga_col_buf = buf; carga_col_cap = cap;
 }
 static void modelo_coloca(modelo_t *m, const float *M);
-/* Reflejo del cielo en la carroceria (REFLEJO.DAT de tools/conv_reflejo.py; ver alli y coche_reflejo): por etapa, un
-   mapa de 32x32 del cielo en su marco y la tabla de puntos de la ruta bajo techo. El registro de la etapa (2 sectores)
-   se lee con ella: el de la salida al leerla y el de la siguiente en el hilo de carga, nunca en mitad de la carrera. */
-#define REFL_LADO 32
-static uint32_t refl_lba, refl_nreg, refl_sec_tunel;            /* 0: sin REFLEJO.DAT (el mapa fijo del coche, como antes) */
-static uint8_t refl_reg[2][4096] __attribute__((aligned(32)));  /* [0] la etapa actual, [1] la siguiente */
-static volatile int refl_hay[2];                                /* el registro esta leido y trae mapa */
-static int refl_pend;                                           /* el mapa de refl_reg[0] esta por subir a la VRAM */
+/* Reflejo del entorno en la carroceria (Rev 2.4; REFLEJO.DAT 'RFL2' de tools/conv_reflejo.py; ver alli, refl_elige y
+   coche_reflejo): por etapa, un mapa de 16x16 del entorno (cielo, edificios, arboles, techos) cada RFL paso puntos de su
+   ruta, en el marco de la etapa. Los mapas de la etapa se leen con ella: los de la salida al leerla y los de la
+   siguiente en el hilo de carga, nunca en mitad de la carrera. -DSIN_REFLEJO: el mapa fijo del coche (como la Rev 1.4) */
+#define REFL_LADO 16
+#define REFL_TEX (REFL_LADO * REFL_LADO * 2)                     /* bytes de un mapa (RGB565 twiddled) */
+static uint32_t refl_lba, refl_nreg, refl_paso, refl_max;       /* refl_lba 0: sin REFLEJO.DAT (el mapa fijo del coche) */
+static uint32_t refl_tab[100][2];                               /* por etapa: sector de sus mapas y cuantos */
+static uint8_t *refl_reg[2];                                    /* [0] los mapas de la etapa actual, [1] los de la siguiente */
+static volatile uint32_t refl_hay[2];                           /* mapas leidos en cada uno (0: ninguno) */
+static int refl_pend;                                           /* los de refl_reg[0] cambiaron: rehacer la mezcla */
 static void refl_busca(void)
 {
-    static uint8_t sec[2048] __attribute__((aligned(32))); uint32_t lba, tam;
+    static uint8_t sec[2048] __attribute__((aligned(32))); uint32_t lba, tam, i, lado;
     refl_lba = 0;
-    if (gd_busca("REFLEJO.DAT", &lba, &tam) || tam < 3 * 2048 || gd_lee(lba, 1, sec) || memcmp(sec, "RFL1", 4)) return;
-    memcpy(&refl_nreg, sec + 4, 4); memcpy(&tam, sec + 8, 4); memcpy(&refl_sec_tunel, sec + 12, 4);
-    if (tam != REFL_LADO || !refl_nreg) return;
+#ifdef SIN_REFLEJO
+    return;
+#endif
+    if (gd_busca("REFLEJO.DAT", &lba, &tam) || tam < 2 * 2048 || gd_lee(lba, 1, sec) || memcmp(sec, "RFL2", 4)) return;
+    memcpy(&refl_nreg, sec + 4, 4); memcpy(&lado, sec + 8, 4); memcpy(&refl_paso, sec + 12, 4);
+    if (lado != REFL_LADO || !refl_nreg || refl_nreg > 100 || !refl_paso) return;
+    memcpy(refl_tab, sec + 16, 8 * refl_nreg); refl_max = 0;
+    for (i = 0; i < refl_nreg; i++) if (refl_tab[i][1] > refl_max) refl_max = refl_tab[i][1];
+    if (!refl_max || refl_max > 400) return;
+    for (i = 0; i < 2; i++)                                     /* (sectores enteros: gd_lee) */
+        if (!(refl_reg[i] = memalign(32, (refl_max * REFL_TEX + 2047) & ~2047u))) { dbglog(DBG_ERROR, "REFLEJO: sin RAM\n"); return; }
     refl_lba = lba;
+    dbglog(DBG_INFO, "REFLEJO: %u etapas, hasta %u mapas (%u KB x 2)\n", (unsigned)refl_nreg, (unsigned)refl_max, (unsigned)((refl_max * REFL_TEX + 2047) >> 10));
 }
 static void refl_lee(int seg, int cual)
 {
+    uint32_t n;
     refl_hay[cual] = 0;
-    if (!refl_lba || seg < 0 || (uint32_t)seg >= refl_nreg) return;
-    if (gd_lee(refl_lba + 1 + 2 * seg, 2, refl_reg[cual])) return;
-    refl_hay[cual] = refl_reg[cual][2048 + 2] & 1;
+    if (!refl_lba || seg < 0 || (uint32_t)seg >= refl_nreg || !(n = refl_tab[seg][1])) return;
+    if (gd_lee(refl_lba + refl_tab[seg][0], (n * REFL_TEX + 2047) / 2048, refl_reg[cual])) return;
+    refl_hay[cual] = n;
 }
 static void *carga_hilo(void *p)
 {
@@ -6622,7 +6635,7 @@ static int curso_paso(void)
     if (s_sig >= 0 && yo.s >= s_sig) {                         /* la etapa siguiente pasa a ser la actual */
         entorno_cambia_etapa();
         etapa = sig; memset(&sig, 0, sizeof sig); etapa_nodo = cur_sig; cielo = &etapa; etapa_movida = 1;
-        memcpy(refl_reg[0], refl_reg[1], sizeof refl_reg[0]); refl_hay[0] = refl_hay[1]; refl_hay[1] = 0; refl_pend = 1;
+        { uint8_t *t_ = refl_reg[0]; refl_reg[0] = refl_reg[1]; refl_reg[1] = t_; refl_hay[0] = refl_hay[1]; refl_hay[1] = 0; refl_pend = 1; }
         cur_nodo = cur_sig; cur_sig = -1; memcpy(marco_et, marco_sig, sizeof marco_et);
         etapa_n = curso[cur_nodo].nivel; s_etapa = s_sig; s_suelta = s_sig + UNION_LIBERA;
         if (curso[cur_nodo].m_pos > 1.0f) m_pos = curso[cur_nodo].m_pos;
@@ -10106,40 +10119,42 @@ static uint32_t noche_ban(void)
 static matrix_t ani_m[NPZ] __attribute__((aligned(32)));      /* matriz de cada pieza en el marco del coche */
 /* lee el CEX2 del coche recien cargado: desplazamiento por vertice, cabeceras con desplazamiento para el entorno y
    grupos de luces */
-/* Reflejo del cielo (DESVIACION pedida, Rev 1.3; el original dibuja un cubo del entorno por cuadro: tools/conv_reflejo.py).
-   En carrera, las mallas con mapa de entorno (tipos 2 y 3) cambian la textura fija del coche por el mapa del cielo de la
-   etapa o, bajo techo, por el del tunel, y sus UV salen del vector reflejado R = I - 2 (N.I) N (I: del ojo al coche; N:
-   la normal del vertice) en el marco del mapa: u = 0,5 + REFL_ESCALA Rx / (1 + Ry), v = 0,5 + REFL_ESCALA Rz / (1 + Ry).
-   El marco del cielo es el de la etapa (el giro de su colocacion, marco_et[3]: el cielo solo gira con ella); el del tunel,
-   el del coche (las lamparas van a lo largo de su eje z). Las mismas cabeceras que compila_cab con otra textura y CLAMP
-   (fuera del mapa, su borde: el suelo). Fuera de la carrera, o sin REFLEJO.DAT, el mapa fijo del coche como antes. */
+/* Reflejo del entorno (DESVIACION pedida, Rev 2.4; el original dibuja un cubo del entorno por cuadro:
+   tools/conv_reflejo.py). En carrera las mallas con mapa de entorno (tipos 2 y 3) cambian la textura fija del coche por
+   la mezcla de los dos mapas de la ruta mas cercanos (refl_mezcla, en el marco del mundo: cada mapa girado desde el de
+   su etapa; en la union, el ultimo de la etapa y el primero de la siguiente segun lo andado), en dos texturas de 16x16
+   que se alternan (la del cuadro que se esta dibujando no se toca). UV del vector reflejado R = I - 2 (N.I) N:
+   u = 0,5 + REFL_ESCALA Rx / (1 + Ry), v = 0,5 + REFL_ESCALA Rz / (1 + Ry). Fresnel: el especular de cada vertice por
+   F0 + (1 - F0) (1 - |N.I|)^2 (fuerte en los cantos y en lo que mira arriba desde la camara de detras, poco de frente:
+   como en el video de referencia). Sin cambios bruscos: ni mapa de tunel aparte (el techo esta en los mapas) ni salto
+   entre etapas. La Rev 1.3 (solo el cielo x 0,3 y el tunel de golpe) se quito en la 1.4 a peticion. */
 #define REFL_ESCALA 0.4f
 #define REFL_MAX 4                                              /* texturas de entorno distintas de un coche (1 o 2) */
-static pvr_ptr_t refl_tv[2][2];                                 /* [cielo, tunel][RGB565, ARGB1555 con alfa 1] */
-static pvr_poly_hdr_t refl_cab[2][2][REFL_MAX] __attribute__((aligned(32)));   /* [cielo, tunel][niebla][textura] */
-static int32_t refl_tex[REFL_MAX]; static uint8_t refl_tipo[REFL_MAX]; static int refl_ntex, refl_est;   /* refl_est: 0 el del coche, 1 cielo, 2 tunel */
-static void refl_sube_mapa(const uint8_t *px, pvr_ptr_t rgb, pvr_ptr_t argb)
+#define REFL_F0 0.04f
+#ifndef REFL_GAMMA
+#define REFL_GAMMA 2.2f                                         /* contraste del mapa: el suelo oscuro, el cielo claro */
+#endif
+static pvr_ptr_t refl_tv[2][2];                                 /* [textura que se alterna][RGB565, ARGB1555 con alfa 1] */
+static pvr_poly_hdr_t refl_cab[2][2][REFL_MAX] __attribute__((aligned(32)));   /* [textura][niebla][textura del coche] */
+static int32_t refl_tex[REFL_MAX]; static uint8_t refl_tipo[REFL_MAX]; static int refl_ntex, refl_est, refl_buf, refl_cab_ok;
+static uint32_t *refl_esp;                                      /* el especular de cada malla de entorno (por cex) */
+static int refl_firma[4] = { -1, -1, -1, -1 };                  /* la ultima mezcla: mapas, fraccion y etapa */
+static uint16_t refl_tw[REFL_LADO * REFL_LADO];                  /* (x, y) -> texel twiddled (y en los bits pares) */
+static int refl_prepara(void)                                   /* la VRAM (2 KB, una vez) */
 {
-    static uint16_t t[REFL_LADO * REFL_LADO] __attribute__((aligned(32))); int i;
-    pvr_txr_load((void *)px, rgb, sizeof t);
-    for (i = 0; i < REFL_LADO * REFL_LADO; i++) {               /* RGB565 -> ARGB1555 con alfa 1 (los cristales) */
-        uint16_t v = (uint16_t)(px[2 * i] | px[2 * i + 1] << 8);
-        t[i] = (uint16_t)(0x8000u | (v >> 1 & 0x7fe0u) | (v & 0x1fu));
-    }
-    pvr_txr_load(t, argb, sizeof t);
-}
-static int refl_prepara(void)                                   /* la VRAM (8 KB, una vez) y el mapa del tunel */
-{
-    static uint8_t sec[2048] __attribute__((aligned(32))); int i, j;
+    int i, j;
     if (refl_tv[0][0]) return 1;
     if (!refl_lba) return 0;
     for (i = 0; i < 2; i++) for (j = 0; j < 2; j++)
-        if (!(refl_tv[i][j] = pvr_mem_malloc(2 * REFL_LADO * REFL_LADO))) { refl_lba = 0; dbglog(DBG_ERROR, "REFLEJO: sin VRAM\n"); return 0; }
-    if (!gd_lee(refl_lba + refl_sec_tunel, 1, sec)) refl_sube_mapa(sec, refl_tv[1][0], refl_tv[1][1]);
-    dbglog(DBG_INFO, "REFLEJO: %u etapas, VRAM libre %uK\n", (unsigned)refl_nreg, (unsigned)(pvr_mem_available() >> 10));
+        if (!(refl_tv[i][j] = pvr_mem_malloc(REFL_TEX))) { refl_lba = 0; dbglog(DBG_ERROR, "REFLEJO: sin VRAM\n"); return 0; }
+    for (i = 0; i < REFL_LADO * REFL_LADO; i++) {
+        uint32_t x = i % REFL_LADO, y = i / REFL_LADO, t = 0, k;
+        for (k = 0; k < 4; k++) t |= ((y >> k) & 1) << (2 * k) | ((x >> k) & 1) << (2 * k + 1);
+        refl_tw[i] = (uint16_t)t;
+    }
     return 1;
 }
-static void refl_compila(void)                                  /* las cabeceras del cielo y del tunel de las texturas de entorno */
+static void refl_compila(void)                                  /* las cabeceras de las dos texturas de mezcla */
 {
     int v, f, i;
     for (v = 0; v < 2; v++) for (i = 0; i < refl_ntex; i++) {
@@ -10156,26 +10171,87 @@ static void refl_compila(void)                                  /* las cabeceras
         }
     }
 }
-/* el mapa de este cuadro (0 el del coche, 1 el cielo, 2 el tunel) con sus cabeceras puestas */
+/* muestra bilineal (en el marco del mundo) del mapa m (twiddled) de una etapa girada ang: rgb x 1 en 0..255 */
+static void refl_muestra(const uint16_t *m, float c, float sn, float a, float b, int *rgb)
+{
+    float x = (c * a - sn * b) * REFL_LADO + (REFL_LADO * 0.5f - 0.5f), y = (sn * a + c * b) * REFL_LADO + (REFL_LADO * 0.5f - 0.5f), fx, fy, w[4];
+    int x0, y0, k, j; uint16_t t[4];
+    x = x < 0 ? 0 : x > REFL_LADO - 1.001f ? REFL_LADO - 1.001f : x; y = y < 0 ? 0 : y > REFL_LADO - 1.001f ? REFL_LADO - 1.001f : y;
+    x0 = (int)x; y0 = (int)y; fx = x - x0; fy = y - y0;
+    t[0] = m[refl_tw[y0 * REFL_LADO + x0]]; t[1] = m[refl_tw[y0 * REFL_LADO + x0 + 1]];
+    t[2] = m[refl_tw[(y0 + 1) * REFL_LADO + x0]]; t[3] = m[refl_tw[(y0 + 1) * REFL_LADO + x0 + 1]];
+    w[0] = (1 - fx) * (1 - fy); w[1] = fx * (1 - fy); w[2] = (1 - fx) * fy; w[3] = fx * fy;
+    for (j = 0; j < 3; j++) {
+        float r = 0;
+        for (k = 0; k < 4; k++) {
+            uint32_t v = t[k], q = j == 0 ? (v >> 11) * 255 / 31 : j == 1 ? ((v >> 5) & 63) * 255 / 63 : (v & 31) * 255 / 31;
+            r += w[k] * (float)q;
+        }
+        rgb[j] = (int)r;
+    }
+}
+static uint8_t refl_lut[256]; static int refl_lut_ok;
+/* la textura de este cuadro: (1 - f) A + f B; A y B mapas de 16x16 de etapas giradas aa / ab (marco_et / marco_sig) */
+static void refl_mezcla(const uint16_t *A, float aa, const uint16_t *B, float ab, float f)
+{
+    static uint16_t t5[REFL_LADO * REFL_LADO] __attribute__((aligned(32))), t1[REFL_LADO * REFL_LADO] __attribute__((aligned(32)));
+    float ca = cosf(aa), sa = sinf(aa), cb = cosf(ab), sb = sinf(ab); int i, j, ra[3], rb[3], r[3];
+    if (!refl_lut_ok) { for (i = 0; i < 256; i++) refl_lut[i] = (uint8_t)(255.0f * powf(i / 255.0f, REFL_GAMMA) + 0.5f); refl_lut_ok = 1; }
+    for (i = 0; i < REFL_LADO * REFL_LADO; i++) {
+        float a = ((i % REFL_LADO) + 0.5f) * (1.0f / REFL_LADO) - 0.5f, b = ((i / REFL_LADO) + 0.5f) * (1.0f / REFL_LADO) - 0.5f;
+        refl_muestra(A, ca, sa, a, b, ra);
+        if (f > 0.0f) { refl_muestra(B, cb, sb, a, b, rb); for (j = 0; j < 3; j++) r[j] = (int)(ra[j] + f * (rb[j] - ra[j])); }
+        else for (j = 0; j < 3; j++) r[j] = ra[j];
+        for (j = 0; j < 3; j++) r[j] = refl_lut[r[j] < 0 ? 0 : r[j] > 255 ? 255 : r[j]];
+        t5[refl_tw[i]] = (uint16_t)((r[0] >> 3) << 11 | (r[1] >> 2) << 5 | (r[2] >> 3));
+        t1[refl_tw[i]] = (uint16_t)(0x8000u | (r[0] >> 3) << 10 | (r[1] >> 3) << 5 | (r[2] >> 3));
+    }
+    refl_buf ^= 1;
+    pvr_txr_load(t5, refl_tv[refl_buf][0], sizeof t5); pvr_txr_load(t1, refl_tv[refl_buf][1], sizeof t1);
+}
+/* el mapa de este cuadro (0 el del coche, 1 el del entorno) con sus cabeceras puestas */
 static int refl_elige(int carrera)
 {
     int e = 0, f, i;
-    if (carrera && refl_ntex && refl_prepara()) {
-        if (refl_pend) { refl_pend = 0; if (refl_hay[0]) refl_sube_mapa(refl_reg[0], refl_tv[0][0], refl_tv[0][1]); }
-        if (refl_hay[0]) {
-            uint32_t n = refl_reg[0][2048] | refl_reg[0][2049] << 8; int k = (int)((yo.s - s_etapa) * (1.0f / PASO));
-            e = !cur_en_union && k >= 0 && (uint32_t)k < n && refl_reg[0][2052 + k] > 127 ? 2 : 1;
+    if (carrera && refl_ntex && refl_prepara() && refl_hay[0]) {
+        const uint16_t *M0 = (const uint16_t *)refl_reg[0], *A, *B = NULL; uint32_t n = refl_hay[0]; float fr = 0, aa = marco_et[3], ab = aa;
+        int firma[4];
+        if (cur_en_union && s_union >= 0 && yo.s >= s_union) {  /* la union: del ultimo de la etapa al primero de la siguiente */
+            A = M0 + (n - 1) * REFL_LADO * REFL_LADO;
+            if (s_sig > s_union && refl_hay[1]) {
+                fr = ((yo.s - s_union) / (s_sig - s_union) - 0.25f) * (1.0f / 0.75f);
+                fr = fr < 0 ? 0 : fr > 1 ? 1 : fr; B = (const uint16_t *)refl_reg[1]; ab = marco_sig[3];
+            }
+        } else {                                                /* la etapa: los dos mapas de alrededor */
+            float k = (yo.s - s_etapa) * (1.0f / (PASO * (float)refl_paso)); int i0;
+            k = k < 0 ? 0 : k; i0 = (int)k; fr = k - (float)i0;
+            if ((uint32_t)i0 >= n - 1) { i0 = (int)n - 1; fr = 0; }
+            A = M0 + i0 * REFL_LADO * REFL_LADO; if (fr > 0) B = A + REFL_LADO * REFL_LADO;
         }
+        if (!B) fr = 0;
+        firma[0] = (int)(A - M0); firma[1] = B ? (int)(intptr_t)B : 0; firma[2] = (int)(fr * 32.0f); firma[3] = (int)(intptr_t)refl_reg[0];
+        if (refl_pend || memcmp(firma, refl_firma, sizeof firma)) {
+            refl_mezcla(A, aa, B ? B : A, ab, B ? (float)firma[2] * (1.0f / 32.0f) : 0.0f);
+            memcpy(refl_firma, firma, sizeof firma); refl_pend = 0; refl_est = -1;   /* (otra textura: cabeceras) */
+        }
+        e = 1;
     }
     if (e != refl_est) {
-        if (e && !refl_est) refl_compila();                     /* (las del coche pueden haber cambiado: otro coche) */
+        if (e && !refl_cab_ok) { refl_compila(); refl_cab_ok = 1; }   /* (las del coche pueden haber cambiado: otro coche) */
         for (i = 0; i < refl_ntex; i++) {
             if (!e) compila_cab(&coche, refl_tex[i], refl_tipo[i] == 3 ? 3 : 1);
-            else for (f = 0; f < 2; f++) coche.cabs[f][refl_tex[i]] = refl_cab[e - 1][f][i];
+            else for (f = 0; f < 2; f++) coche.cabs[f][refl_tex[i]] = refl_cab[refl_buf][f][i];
+        }
+        if (!e && refl_esp) {                                   /* sin el reflejo: el especular de siempre */
+            uint32_t k, j;
+            for (k = 0; k < cex_n; k++) {
+                const malla_t *m = coche.mallas + cex_m[k].malla;
+                if (cex_m[k].tipo >= 2) for (j = 0; j < m->n; j++) coche.verts[m->v0 + j].c = refl_esp[k];
+            }
         }
         refl_est = e;
 #ifdef DIAG_REFLEJO
-        dbglog(DBG_INFO, "REFLEJO: mapa %d (s %.0f, etapa %d)\n", e, (double)(yo.s - s_etapa), cur_nodo);
+        dbglog(DBG_INFO, "REFLEJO: %d (s %.0f, etapa %d)\n", e, (double)(yo.s - s_etapa), cur_nodo);
 #endif
     }
     return e;
@@ -10184,7 +10260,11 @@ static int refl_elige(int carrera)
 static void coche_cab_cex(void)
 {
     uint32_t k; int i;
-    refl_ntex = 0; refl_est = 0;
+    refl_ntex = 0; refl_est = 0; refl_firma[0] = -1; refl_cab_ok = 0;
+    free(refl_esp); refl_esp = malloc(cex_n * sizeof(uint32_t));
+    for (k = 0; refl_esp && k < cex_n; k++) {
+        const malla_t *m = coche.mallas + cex_m[k].malla; refl_esp[k] = m->n ? coche.verts[m->v0].c : 0xFFFFFFFFu;
+    }
     for (k = 0; k < cex_n; k++) {
         int32_t t = coche.mallas[cex_m[k].malla].tex;
         if (cex_m[k].tipo >= 2 && t >= 0) {
@@ -10277,41 +10357,38 @@ static void coche_entorno(matrix_t mc)
     }
 }
 
-/* UV del reflejo (refl_elige: 1 cielo, 2 tunel): el vector reflejado de cada vertice en el marco del mapa */
+/* UV del reflejo (refl_elige) en el marco del mundo y el Fresnel en el especular de cada vertice */
 static void coche_reflejo(matrix_t mc, int mapa)
 {
-    float b[3][3], Am[3][3], Is[3], W[NPZ][3][3], I[3], l; uint32_t k, i; int j, q, p;
+    float Am[3][3], W[NPZ][3][3], I[3], l; uint32_t k, i; int j, q, p;
+    (void)mapa;
     for (j = 0; j < 3; j++) I[j] = yo.pos[j] - ojo[j];
     l = I[0] * I[0] + I[1] * I[1] + I[2] * I[2]; if (l < 1e-6f) return;
     l = 1.0f / sqrtf(l); for (j = 0; j < 3; j++) I[j] *= l;
-    if (mapa == 2) for (j = 0; j < 3; j++) { b[j][0] = mc[j][0]; b[j][1] = mc[j][1]; b[j][2] = mc[j][2]; }   /* marco del coche */
-    else {                                                      /* marco de la etapa: mundo girado -marco_et[3] en y */
-        float c = cosf(marco_et[3]), sn = sinf(marco_et[3]);
-        b[0][0] = c; b[0][1] = 0; b[0][2] = -sn; b[1][0] = 0; b[1][1] = 1; b[1][2] = 0; b[2][0] = sn; b[2][1] = 0; b[2][2] = c;
-    }
-    for (q = 0; q < 3; q++) {
-        Is[q] = I[0] * b[q][0] + I[1] * b[q][1] + I[2] * b[q][2];
-        for (j = 0; j < 3; j++) Am[j][q] = (mc[j][0] * b[q][0] + mc[j][1] * b[q][1] + mc[j][2] * b[q][2]) * (1.0f / 127.0f);
-    }
-    for (p = 0; p < NPZ; p++)                                   /* piezas animadas: sus ejes en el marco del mapa */
+    for (q = 0; q < 3; q++) for (j = 0; j < 3; j++) Am[j][q] = mc[j][q] * (1.0f / 127.0f);
+    for (p = 0; p < NPZ; p++)                                   /* piezas animadas: sus ejes en el mundo */
         for (j = 0; j < 3; j++) {
             const float *r = ani.ok ? ani_m[p][j] : (const float[3]){ j == 0, j == 1, j == 2 };
             for (q = 0; q < 3; q++) W[p][j][q] = r[0] * Am[0][q] + r[1] * Am[1][q] + r[2] * Am[2][q];
         }
     for (k = 0; k < cex_n; k++) {
         const cex_t *e = cex_m + k; const malla_t *m = coche.mallas + e->malla; vert_t *v = coche.verts + m->v0;
-        const uint32_t *vd = cex_vd + e->v0; const uint32_t nv = m->n;
+        const uint32_t *vd = cex_vd + e->v0; const uint32_t nv = m->n, c0 = refl_esp ? refl_esp[k] : 0xFFFFFFFFu;
+        const float er = (float)((c0 >> 16) & 255), eg = (float)((c0 >> 8) & 255), eb = (float)(c0 & 255); const uint32_t ea = c0 & 0xFF000000u;
         if (e->tipo < 2) continue;
         p = m->nodo < 0 ? 0 : (m->nodo >> 8) & 0xFF; if (p >= NPZ) p = 0;
         {   const float w00 = W[p][0][0], w01 = W[p][0][1], w02 = W[p][0][2], w10 = W[p][1][0], w11 = W[p][1][1], w12 = W[p][1][2],
-                        w20 = W[p][2][0], w21 = W[p][2][1], w22 = W[p][2][2], ix = Is[0], iy = Is[1], iz = Is[2];
+                        w20 = W[p][2][0], w21 = W[p][2][1], w22 = W[p][2][2], ix = I[0], iy = I[1], iz = I[2];
             for (i = 0; i < nv; i++) {
                 uint32_t w = vd[i]; float x = (int8_t)w, y = (int8_t)(w >> 8), z = (int8_t)(w >> 16);
                 float nx = x * w00 + y * w10 + z * w20, ny = x * w01 + y * w11 + z * w21, nz = x * w02 + y * w12 + z * w22;
-                float d = 2.0f * (nx * ix + ny * iy + nz * iz), den = 1.0f + iy - d * ny, g;
+                float d = 2.0f * (nx * ix + ny * iy + nz * iz), den = 1.0f + iy - d * ny, g, t, F;
                 if (den < 0.25f) den = 0.25f;                   /* muy hacia abajo: el borde del mapa (CLAMP) */
                 g = REFL_ESCALA / den;
                 v[i].u = 0.5f + (ix - d * nx) * g; v[i].v = 0.5f + (iz - d * nz) * g;
+                t = 1.0f - fabsf(0.5f * d); t = t < 0 ? 0 : t;
+                F = REFL_F0 + (1.0f - REFL_F0) * t * t * t;
+                v[i].c = ea | (uint32_t)(er * F) << 16 | (uint32_t)(eg * F) << 8 | (uint32_t)(eb * F);
             }
         }
     }
