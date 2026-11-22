@@ -1505,6 +1505,26 @@ de OutRun 2 SP (las 15 etapas seguidas) que dio el usuario.
   no esta leido). Sin EFECTOS.DAT nuevo, sin agua (como antes).
 - NO verificado en consola real.
 
+### Huecos de RUIN y framerate de LASV (Rev 2.8 / Mod 2.4, 2026-11-22)
+
+Pedido: texturas de los puentes y de RUIN a 8x8 / 16x16 de lejos y 32x32 de cerca ("ahi se crean zonas sin dibujar") y
+mejorar el framerate de LASV. Medido antes de tocar nada (Flycast, piloto, RUIN 110 s): VRAM de sobra (793 KB libres,
+0 texturas rebajadas) y el TA casi nunca lleno (1 % de media sin caber); de los 10 saltos grandes por s, 9,4 eran de la
+PVS, de nodos de 84-288 m de radio (estructuras). Las texturas no eran la causa (bajarlas no cierra huecos; mipmaps
+gastarian un tercio mas de VRAM): no se cambian.
+- PVS_GRANDE (nodos_visibles): en las zonas de PVS_GRANDE_ZONAS ("RUIN") los nodos de 60 m de radio o mas no se
+  recortan con la PVS (ni enteros ni por tiras) a menos de 800 m. RUIN: saltos grandes 10,0 -> 4,8 por s (PVS 9,4 ->
+  3,3), 44,4 -> 43,7 fps. Para todas las etapas no: en LASV 41,3 -> 39,7 fps y lo que no cabe 3 -> 27 %; en MAYA los
+  saltos por el tope 0,1 -> 3,4 por s; encenderla sola con holgura del TA o costaba en esas o se apagaba en RUIN.
+- LASV (perfil del SH4 de noche: dibuja_etapa 25 %, envio de vertices 13 %, piloto y pareja 6 %, faros 5 %). Medido
+  quitando cada cosa: agua 0, objetos 0, focos de los faros 0,65 ms, la luz de los faros en el suelo ~1 ms. La rejilla
+  de la luz de los faros consulta la altura del suelo en 156 puntos por cuadro (1,34 ms): ahora la mitad de las lineas
+  por cuadro, alternas, y las otras con la altura sobre el plano del coche del cuadro anterior (0,79 ms;
+  `-DFAROS_TODAS` como antes); focos_anota descarta por distancia antes de los 5 planos. LASV 41,1 -> 41,7 fps, 20,3 ->
+  19,8 ms de CPU. Bajar el tope del TA al 85 % en LASV (PRESUP_ZONAS) solo daba 40,1 -> 40,4 fps con el doble de saltos
+  por el tope: queda apagado.
+- NO verificado en consola real.
+
 ### Sin reflejo del entorno y con tiras de 6 (Rev 2.7 / Mod 2.3, 2026-11-22)
 
 El usuario: "hay muchos tirones en etapas de noche como en las vegas, creo que el efecto reflejo ha sido
