@@ -314,17 +314,24 @@ static int pila_cmp(const void *a, const void *b)
      DECOR_PUBLICO tiras (antes 2 de los 3 nodos de cada bloque de PALM iban sueltos y aparecian sin la grada);
    - vegetacion: fuera uno de cada DECOR_VEG por la posicion (hash de x, z al metro: siempre los mismos, repartidos), con
      su version lejana (lod_veg.py).
+   Rev 2.6 (pedido: "eliminar un 5 % de los arboles, arbustos, farolas, arboles con nieve, arbustos de desierto,
+   palmeras" mas): la vegetacion pasa a DECOR_VEG_N de cada DECOR_VEG (15 %; la tabla incluye ahora la nevada, la de
+   invierno, la de zonas secas y las palmeras que el color no reconocia), las farolas (tipo 3 de la tabla: nodos opacos
+   de planta < 2,5 m y 5-16 m de alto con esa textura) una de cada DECOR_FAROLA (5 %) por otros bits de la posicion, y
+   con cada arbol quitado su tronco si va en otro nodo (opaco, de planta < 2,5 m, bajo la copa: no queda un palo solo).
    -DSIN_DECOR_REDUCE: como antes */
 #include "decor_tabla.h"
-#define DECOR_VEG 10
+#define DECOR_VEG 20
+#define DECOR_VEG_N 3
+#define DECOR_FAROLA 20
 #define DECOR_PUBLICO 2
 static void decor_reduce(modelo_t *m, const char *nombre)
 {
 #ifndef SIN_DECOR_REDUCE
     static uint8_t ttipo[512]; int seg; uint32_t q;
-    uint32_t nn = m->nnodos, i, j, nveg = 0, nquit = 0, npub = 0;
+    uint32_t nn = m->nnodos, i, j, nveg = 0, nquit = 0, npub = 0, nfar = 0, nfarq = 0, ntron = 0;
     float (*bb)[6] = nn ? malloc(nn * sizeof *bb) : NULL; uint32_t (*cv)[2] = nn ? calloc(nn, sizeof *cv) : NULL;
-    uint8_t *cl = nn ? calloc(nn, 1) : NULL; uint32_t (*ct)[2] = nn ? calloc(nn, sizeof *ct) : NULL;
+    uint8_t *cl = nn ? calloc(nn, 1) : NULL; uint32_t (*ct)[3] = nn ? calloc(nn, sizeof *ct) : NULL;
     if (!bb || !cv || !cl || !ct || m->inicio[3] > m->nmallas || strncmp(nombre, "SEG", 3) || m->ntex > 512) { free(bb); free(cv); free(cl); free(ct); return; }
     seg = atoi(nombre + 3); memset(ttipo, 0, sizeof ttipo);
     for (q = 0; q < sizeof DECOR_TAB / sizeof DECOR_TAB[0]; q++) if (DECOR_TAB[q][0] == seg && DECOR_TAB[q][1] < m->ntex) ttipo[DECOR_TAB[q][1]] = (uint8_t)DECOR_TAB[q][2];
@@ -333,7 +340,8 @@ static void decor_reduce(modelo_t *m, const char *nombre)
         const malla_t *ma = m->mallas + i; uint32_t k;
         if (ma->nodo < 0 || (uint32_t)ma->nodo >= nn || ma->n < 3 || ma->v0 + ma->n > m->nvert) continue;
         cv[ma->nodo][0] += ma->n; if (i >= m->inicio[1] && i < m->inicio[2]) cv[ma->nodo][1] += ma->n;
-        if (i >= m->inicio[1] && i < m->inicio[2] && ma->tex >= 0 && (uint32_t)ma->tex < m->ntex && ttipo[ma->tex]) ct[ma->nodo][ttipo[ma->tex] - 1] += ma->n;
+        if (i >= m->inicio[1] && i < m->inicio[2] && ma->tex >= 0 && (uint32_t)ma->tex < m->ntex && ttipo[ma->tex] && ttipo[ma->tex] < 3) ct[ma->nodo][ttipo[ma->tex] - 1] += ma->n;
+        if ((i < m->inicio[1] || i >= m->inicio[2]) && ma->tex >= 0 && (uint32_t)ma->tex < m->ntex && ttipo[ma->tex] == 3) ct[ma->nodo][2] += ma->n;
         for (k = 0; k < ma->n; k++) {
             const vert_t *v = m->verts + ma->v0 + k; float *b = bb[ma->nodo];
             b[0] = fminf(b[0], v->x); b[1] = fminf(b[1], v->y); b[2] = fminf(b[2], v->z);
@@ -345,13 +353,20 @@ static void decor_reduce(modelo_t *m, const char *nombre)
         if (!cv[i][0] || d->cartel >= 0 || (d->fl & NODO_LEJ)) continue;
         if ((ax > az ? ax : az) < 25.0f && ay > 1.5f && ay < 35.0f && 2 * ct[i][0] > cv[i][0]) cl[i] = 1;   /* (como decor_tabla.py) */
         else if ((ax > az ? ax : az) < 25.0f && 2 * ct[i][1] > cv[i][0]) cl[i] = 5;   /* (publico: abajo busca su grada) */
+        else if ((ax > az ? ax : az) < 2.5f && ay > 5.0f && ay < 16.0f && 2 * ct[i][2] > cv[i][0]) cl[i] = 6;   /* farola */
         else if (2 * cv[i][1] <= cv[i][0] && ay > 3.0f && (ax > az ? ax : az) < 120.0f) cl[i] = 2;
     }
     for (i = 0; i < nn; i++) {
         float cx, cz; int32_t g = -1; uint32_t h;
-        if (cl[i] != 1 && cl[i] != 5) continue;
+        if (cl[i] != 1 && cl[i] != 5 && cl[i] != 6) continue;
         if (cl[i] == 1) nveg++;
         cx = (bb[i][0] + bb[i][3]) * 0.5f; cz = (bb[i][2] + bb[i][5]) * 0.5f;
+        if (cl[i] == 6) {                                       /* farola: una de cada DECOR_FAROLA */
+            h = ((uint32_t)(int32_t)floorf(cx) * 73856093u) ^ ((uint32_t)(int32_t)floorf(cz) * 19349663u);
+            h ^= h >> 13; h *= 0x5bd1e995u; h ^= h >> 15; nfar++;
+            if ((h >> 7) % DECOR_FAROLA == 0) { cl[i] = 3; nfarq++; } else cl[i] = 0;
+            continue;
+        }
         for (j = 0; cl[i] == 5 && j < nn && g < 0; j++)
             if (cl[j] == 2 && cx > bb[j][0] - 1.0f && cx < bb[j][3] + 1.0f && cz > bb[j][2] - 1.0f && cz < bb[j][5] + 1.0f &&
                 (bb[j][3] - bb[j][0]) * (bb[j][5] - bb[j][2]) > (bb[i][3] - bb[i][0]) * (bb[i][5] - bb[i][2])) g = (int32_t)j;
@@ -365,10 +380,17 @@ static void decor_reduce(modelo_t *m, const char *nombre)
         if (cl[i] == 5) { cl[i] = 0; continue; }                /* (publico sin grada debajo: como estaba) */
         h = ((uint32_t)(int32_t)floorf(cx) * 73856093u) ^ ((uint32_t)(int32_t)floorf(cz) * 19349663u);
         h ^= h >> 13; h *= 0x5bd1e995u; h ^= h >> 15;
-        if (h % DECOR_VEG == 0) {                               /* fuera, con su version lejana */
+        if (h % DECOR_VEG < DECOR_VEG_N) {                      /* fuera, con su version lejana y su tronco */
             int32_t lej = m->nodos[i].cartel <= -2 ? -2 - m->nodos[i].cartel : -1;
             cl[i] = 3; if (lej >= 0 && (uint32_t)lej < nn) cl[lej] = 3;
             nquit++;
+            for (j = 0; j < nn; j++) {                          /* el tronco: opaco, fino, bajo la copa y hasta ella */
+                float tx = (bb[j][0] + bb[j][3]) * 0.5f, tz = (bb[j][2] + bb[j][5]) * 0.5f, fj = fmaxf(bb[j][3] - bb[j][0], bb[j][5] - bb[j][2]);
+                if (j == i || cl[j] || !cv[j][0] || 2 * cv[j][1] > cv[j][0] || fj > 2.5f || m->nodos[j].cartel >= 0) continue;
+                if (tx < bb[i][0] - 1.0f || tx > bb[i][3] + 1.0f || tz < bb[i][2] - 1.0f || tz > bb[i][5] + 1.0f) continue;
+                if (bb[j][1] > bb[i][1] + 0.5f || bb[j][4] < bb[i][1] - 1.0f || bb[j][4] > bb[i][4] + 1.0f) continue;
+                cl[j] = 3; ntron++;
+            }
         }
     }
     for (i = 0; i < m->nmallas; i++) {                          /* (una pasada: 3 fuera, 4 publico) */
@@ -377,7 +399,8 @@ static void decor_reduce(modelo_t *m, const char *nombre)
         if (cl[ma->nodo] == 3) ma->n = 0;
         else if (cl[ma->nodo] == 4 && cv[ma->nodo][1]++ % DECOR_PUBLICO) ma->n = 0;   /* (cv[.][1]: ya no hace falta) */
     }
-    dbglog(DBG_INFO, "DECOR: %u de vegetacion, %u quitados, %u de publico con su grada\n", (unsigned)nveg, (unsigned)nquit, (unsigned)npub);
+    dbglog(DBG_INFO, "DECOR: %u de vegetacion, %u quitados (%u troncos), %u farolas, %u quitadas, %u de publico con su grada\n", (unsigned)nveg,
+           (unsigned)nquit, (unsigned)ntron, (unsigned)nfar, (unsigned)nfarq, (unsigned)npub);
     free(bb); free(cv); free(cl); free(ct);
 #else
     (void)m; (void)nombre;
@@ -9118,15 +9141,16 @@ static int sol_pantalla(float *q, float *P, float *sx, float *sy)
    inclinacion de las etapas). Un rectangulo de toda la pantalla en la lista translucida (4 vertices): blanco tenido del
    color del sol, alfa SOL_DESL x la intensidad del sol x lo que la camara mira hacia el ((c - 0,8) / 0,18)^2, por lo
    que se ve del sol (los rayos de sol_visible con el sol en pantalla) y por el cielo del reflejo (menos bajo techo);
-   arriba entero, abajo x 0,3; suavizado en el tiempo. -DSIN_DESLUMBRA: sin el */
+   arriba entero, abajo x 0,3; suavizado en el tiempo. Rev 2.6 definitiva: QUITADO a peticion ("no esta logrando el
+   resultado que espero"); -DCON_DESLUMBRA lo vuelve a poner */
 #ifndef SOL_DESL
 #define SOL_DESL 0.45f
 #endif
-static float sol_desl, sol_vis_ult = 1.0f;
+static float sol_desl __attribute__((unused)), sol_vis_ult = 1.0f;
 static int refl_activo; static float refl_env_luz;            /* (definidos con el reflejo, mas abajo) */
 static void sol_deslumbra(void)
 {
-#ifndef SIN_DESLUMBRA
+#ifdef CON_DESLUMBRA
     float v[16], d[3], p0, y0, q[3], c, g = 0, l; int k; uint32_t col, at, ab;
     if (sol_ok && sol_int > 0 && cur_nodo >= 0) {
         luz_actual(1, v, d); luz_angulos(d, &p0, &y0);

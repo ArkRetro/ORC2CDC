@@ -1505,6 +1505,25 @@ de OutRun 2 SP (las 15 etapas seguidas) que dio el usuario.
   no esta leido). Sin EFECTOS.DAT nuevo, sin agua (como antes).
 - NO verificado en consola real.
 
+### Un 5 % mas de decoracion de los margenes y sin deslumbramiento (Rev 2.6 / Mod 2.2 definitivas, 2026-11-22; DESVIACION pedida)
+
+Pedido: "eliminar un 5 % de los arboles, arbustos, farolas, arboles con nieve, arbustos de desierto, palmeras, son
+elementos que estan en los margenes de todas las etapas" (ademas del 10 % de la Rev 2.1) y quitar el deslumbramiento
+("no esta logrando el resultado que espero"). Se publica con el mismo nombre, Rev 2.6 (y Mod 2.2).
+- tools/decor_tabla.py: la vegetacion que el color no reconocia (nevada, de invierno sin hojas, de zonas secas,
+  palmeras y arboles verdes oscuros) elegida a mano en una hoja de las texturas de recorte sin clasificar de las 62
+  etapas (VEG_REF, por su contenido: tambien en sus copias), y las farolas (tipo 3, FAROLA_REF) elegidas por su silueta
+  entre los nodos opacos finos (planta < 2,5 m, 5-16 m de alto) repetidos en cada etapa: de brazo, de doble globo, de
+  farol. No: postes de vallas, troncos sueltos, rocas, mastiles ni columnas con algo encima. Tabla: 247 texturas de
+  vegetacion (antes 213), 16 de farolas.
+- demo/main.c decor_reduce: vegetacion 3 de cada 20 (15 %), farolas 1 de cada 20 (5 %, otros bits de la posicion), y
+  con cada arbol quitado su tronco si va en otro nodo (no queda un palo solo).
+- Medido (Flycast, piloto, PALM -> ALPI 150 s): PALM 86 de 575 de vegetacion fuera (antes 55) y 1 de 37 farolas; ALPI
+  103 de 763 (antes 60 de 730). fps iguales (41,3 / 20,0 ms de CPU frente a 41,2 / 20,0: la escena va por el tope del
+  TA); popping de PALM por el tope 2,1 -> 2,0 por s, presupuesto que no cabe 16 -> 15 % de media (155 -> 152 % el
+  peor); ALPI igual.
+- Deslumbramiento: fuera (`-DCON_DESLUMBRA` lo vuelve a poner).
+
 ### Lacado con brillos, deslumbramiento del sol y registro de la VRAM (Rev 2.6 / Mod 2.2, 2026-11-22; DESVIACION pedida)
 
 Pedido: la opcion A del reflejo (mas contraste), "que los coches conserven su lacado con reflejo, aplicando brillos no

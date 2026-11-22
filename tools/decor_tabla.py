@@ -22,6 +22,19 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import vq
 
 FUERA_MD5 = set()                                                # md5 de la imagen (RGBA) de FUERA_REF (main)
+VEG_MD5 = set(); FAROLA_MD5 = set()                              # de VEG_REF y FAROLA_REF
+
+# Rev 2.6 (pedido: "eliminar un 5 % de los arboles, arbustos, farolas, arboles con nieve, arbustos de desierto,
+# palmeras"): vegetacion que el color no reconoce (nevada, de invierno sin hojas, de zonas secas, palmeras y algunos
+# arboles verdes oscuros), elegida a mano en una hoja de las texturas de recorte sin clasificar de todas las etapas
+VEG_REF = [(5, 37), (5, 56), (6, 81), (6, 79), (6, 82), (6, 80), (9, 26), (10, 67), (20, 29), (23, 123), (26, 32),
+           (31, 66), (31, 74), (31, 76), (33, 62), (33, 26), (33, 25), (38, 37), (38, 56), (39, 81), (39, 79), (39, 82),
+           (39, 80), (42, 30), (43, 66), (52, 20), (55, 124), (58, 31), (63, 66), (63, 74), (63, 72), (65, 66), (65, 28),
+           (65, 27)]
+# farolas (tipo 3): nodos opacos de planta < 2,5 m y 5-16 m de alto repetidos en la etapa, elegidos a mano por su
+# silueta (de brazo, de doble globo, de farol); su textura principal (opaca)
+FAROLA_REF = [(0, 116), (1, 14), (3, 5), (11, 24), (13, 61), (30, 88), (30, 105), (31, 82), (34, 110), (44, 25),
+              (46, 61), (48, 118), (57, 38), (62, 105), (62, 88), (63, 81)]
 
 # (etapa, textura) de referencia de los falsos positivos (SEGnn.DAT de la conversion de SLES-53998 de este repositorio)
 FUERA_REF = [(8, 69), (13, 16), (17, 67), (18, 26), (32, 103), (33, 55),
@@ -70,36 +83,51 @@ def clasifica(d):
     cand = (nv > 0) & (2 * nr > nv) & (N['cartel'] < 0) & ~lej & (fp < 25) & (ext[:, 1] > 1.5) & (ext[:, 1] < 35)
     est = (nv > 0) & (2 * nr <= nv) & (N['cartel'] < 0) & ~lej & (ext[:, 1] > 3) & (fp < 120)
     cache = {}; tipo = {}
+    def md5(t):
+        if t not in cache:
+            im = d['imagen'](t); cache[t] = (rasgos(im), hashlib.md5(im.tobytes()).hexdigest())
+        return cache[t]
     for n in np.nonzero(cand)[0]:
         if not tx[n]: continue
         t = max(tx[n], key=tx[n].get)
-        if t not in cache:
-            im = d['imagen'](t); cache[t] = (rasgos(im), hashlib.md5(im.tobytes()).hexdigest())
-        (e, gb), h = cache[t]
+        (e, gb), h = md5(t)
+        if h in VEG_MD5: tipo[t] = 1; continue                   # (antes que FUERA: 33/26 y 65/28 son plantas)
         if h in FUERA_MD5: continue
         if gb >= 1.15 and e >= 0.16: tipo[t] = 1; continue
         if nst[n] >= 8 and q4[n] >= 0.9 * nst[n] and qs[n] / max(q4[n], 1) < 3.0:
             cx, cz = (lo[n, 0] + hi[n, 0]) / 2, (lo[n, 2] + hi[n, 2]) / 2
             if (est & (lo[:, 0] - 1 < cx) & (hi[:, 0] + 1 > cx) & (lo[:, 2] - 1 < cz) & (hi[:, 2] + 1 > cz)).any(): tipo[t] = tipo.get(t, 2)
+    # farolas: opacas, planta < 2,5 m, 5-16 m de alto, con una textura de FAROLA_REF (por su contenido)
+    to = [dict() for _ in range(nn)]
+    for k in range(li[3]):
+        n = int(M['nodo'][k]); c = int(M['n'][k])
+        if 0 <= n < nn and c >= 3 and not li[1] <= k < li[2]: to[n][int(M['tex'][k])] = to[n].get(int(M['tex'][k]), 0) + c
+    far = (nv > 0) & (2 * nr <= nv) & (N['cartel'] < 0) & ~lej & (fp < 2.5) & (ext[:, 1] > 5) & (ext[:, 1] < 16)
+    for n in np.nonzero(far)[0]:
+        if not to[n]: continue
+        t = max(to[n], key=to[n].get)
+        if t >= 0 and md5(t)[1] in FAROLA_MD5: tipo[t] = 3
     return tipo
 
 def main():
     if len(sys.argv) < 2: raise SystemExit(__doc__)
     datos = sys.argv[1]; sal = sys.argv[2] if len(sys.argv) > 2 else os.path.join(os.path.dirname(__file__), '..', 'demo', 'decor_tabla.h')
-    for s, t in FUERA_REF:
-        d = lee(datos, 'SEG%02d.DAT' % s)
-        if d: FUERA_MD5.add(hashlib.md5(d['imagen'](t).tobytes()).hexdigest())
+    for ref, conj in ((FUERA_REF, FUERA_MD5), (VEG_REF, VEG_MD5), (FAROLA_REF, FAROLA_MD5)):
+        for s, t in ref:
+            d = lee(datos, 'SEG%02d.DAT' % s)
+            if d: conj.add(hashlib.md5(d['imagen'](t).tobytes()).hexdigest())
     filas = []
     for s in range(100):
         f = 'SEG%02d.DAT' % s
         if not os.path.exists(os.path.join(datos, f)): continue
         d = lee(datos, f)
         if d is None: continue
-        tipo = {t: k for t, k in clasifica(d).items() if (s, t) not in FUERA_REF}
+        tipo = {t: k for t, k in clasifica(d).items() if (s, t) not in FUERA_REF or (s, t) in VEG_REF}
         for t in sorted(tipo): filas.append((s, t, tipo[t]))
-        if tipo: print('%s: vegetacion %s publico %s' % (f, [t for t in sorted(tipo) if tipo[t] == 1], [t for t in sorted(tipo) if tipo[t] == 2]))
+        if tipo: print('%s: vegetacion %s publico %s farolas %s' % (f, [t for t in sorted(tipo) if tipo[t] == 1], [t for t in sorted(tipo) if tipo[t] == 2],
+                                                                    [t for t in sorted(tipo) if tipo[t] == 3]))
     with open(sal, 'w') as o:
-        o.write('/* decor_tabla.h: hecho por tools/decor_tabla.py (no editar): etapa (SEGnn), textura, 1 vegetacion / 2 publico */\n')
+        o.write('/* decor_tabla.h: hecho por tools/decor_tabla.py (no editar): etapa (SEGnn), textura, 1 vegetacion / 2 publico / 3 farola */\n')
         o.write('static const uint16_t DECOR_TAB[][3] = {\n')
         for i in range(0, len(filas), 6): o.write('    ' + ' '.join('{ %d, %d, %d },' % x for x in filas[i:i + 6]) + '\n')
         o.write('};\n')
