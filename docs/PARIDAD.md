@@ -1521,6 +1521,27 @@ de OutRun 2 SP (las 15 etapas seguidas) que dio el usuario.
   no esta leido). Sin EFECTOS.DAT nuevo, sin agua (como antes).
 - NO verificado en consola real.
 
+### Libros VQ reducidos (Rev 2.2 / Mod 1.8, 2026-11-22)
+
+Plan de VRAM tras el estudio del flujo por tramo: las texturas de las etapas ya van casi todas en VQ (31,8 MB frente a
+152 MB sin comprimir) y los libros son el 36 % de lo que ocupan: una VQ de 32x32 lleva 2 KB de libro y 256 bytes de
+indices. La PowerVR acepta libros de N < 256 entradas (las ultimas; demo/main.c ya los dibuja: elige16 los hacia en
+algunas), asi que `tools/libros.py` vuelve a codificar con pvrtex (utils/pvrtex de KallistiOS, ELBG de FFmpeg) las
+texturas usadas, en VQ con libro de 256 y sin mipmaps: 64 entradas hasta 32x32, 128 hasta 128x64, si el error RMS contra
+la imagen de ahora es <= 8 (de 255) y el alfa de recorte cambia en <= 1 % de los texeles. Comparado antes con 28
+texturas de 6 etapas: con 128 entradas pvrtex da 5,2 de RMS y el k-means de tools/vq.py 5,9 (27 de 28 mejor).
+- Datos: SEG16 (IMPE) 82 de 85 candidatas, 82 KB menos, RMS media 4,7 (maxima 7,5); a la vista, iguales
+  (scratchpad lib/comparacion.png). Todas las etapas y uniones (los cuatro paquetes reempaquetados con pak_union.py) y
+  los modelos sueltos (trafico, personajes, banderero, objetos: 381 KB menos; lo fijo de la carrera 617 -> 586 KB).
+- VRAM libre en la zona del curso (tools/vram.py --zona 1248, 496 combinaciones): media 573 -> **624 KB** (+51; de +20
+  a +96), peor caso BK242 + IMPE 219 -> **304 KB**; PALM 530 -> 614, BEAC 400 -> 454, LASV 495 -> 549.
+- No cambia el popping por si solo: los saltos medidos son del tope del TA (el bufer de parametros), no de la VRAM. Es
+  margen para lo siguiente (versiones lejanas de los edificios, soltar texturas al entrar en la union).
+- `tools/regenera.py` lo hace despues de cada revq (uniones, uniones de la Contrarreloj y del OUTRUN, etapas y modelos
+  sueltos). En Windows, `pvrtex.exe` compilado con mingw-w64 (windows/construye.sh, su fuente LGPL en el paquete).
+  Sin pvrtex, sin cambios (lo dice). Determinista (las mismas entradas dan los mismos bytes).
+- NO verificado en consola real.
+
 ### Menos vegetacion y publico con sus gradas (Rev 2.1 / Mod 1.7, 2026-11-21; DESVIACION pedida)
 
 El usuario no quiere el fundido ni el velo reforzado de la Rev 2.0 ("se hace incomodo"): vuelven a como en la Rev 1.9

@@ -39,12 +39,18 @@ find "$SP" -type d \( -name tests -o -name __pycache__ \) -prune -exec rm -rf {}
 PTH=$(ls "$G"/python/python3*._pth)
 printf '%s\r\n' "$(basename "$(ls "$G"/python/python3*.zip)")" . 'Lib\site-packages' '..\tools' '..' 'import site' > "$PTH"
 
-echo "== partes en C (mingw-w64): pvs.dll, visible.dll, musica.exe"
+echo "== partes en C (mingw-w64): pvs.dll, visible.dll, musica.exe, pvrtex.exe"
 CCW=x86_64-w64-mingw32-gcc
 # (sin -march: cualquier x86-64; -ffp-contract=off: sin FMA, las mismas cuentas en todos los PC)
 $CCW -O3 -ffp-contract=off -shared -static -o "$G/nativo/pvs.dll" "$REPO/tools/c/pvs.c" -lpthread -lm
 $CCW -O2 -ffp-contract=off -shared -static -o "$G/nativo/visible.dll" "$REPO/tools/c/visible.c" -lm
 $CCW -O2 -w -static -o "$G/nativo/musica.exe" "$REPO/tools/c/musica.c"
+# pvrtex de KallistiOS (utils/pvrtex: libros VQ reducidos, tools/libros.py); LGPL (codigo de FFmpeg): va su fuente
+PVT=$(mktemp -d); (cd "$KOS/utils/pvrtex" && tar cf - --exclude='*.o' --exclude=./pvrtex .) | tar xf - -C "$PVT"
+make -s -C "$PVT" CC=$CCW CXX=x86_64-w64-mingw32-g++ TARGET=pvrtex.exe CXXFLAGS="-O3 -w -static" \
+    CFLAGS="-O3 -w -static -std=gnu17" pvrtex.exe > /dev/null
+cp "$PVT/pvrtex.exe" "$G/nativo/"; rm -rf "$PVT"
+mkdir -p "$G/fuentes"; (cd "$KOS/utils" && zip -qr "$G/fuentes/pvrtex.zip" pvrtex -x '*.o' 'pvrtex/pvrtex')
 
 echo "== 1ST_READ.BIN (demo/ con KallistiOS y SH4ZAM) e IP.BIN (makeip)"
 set +u; . "$KOS/environ.sh"; set -u
@@ -70,7 +76,9 @@ for f in $BAT $LEEME; do sed 's/\r*$/\r/' "$REPO/windows/$f" > "$P/$f"; done
     printf ' - programa/python: Python %s embebido de python.org (licencia en programa/python/LICENSE.txt).\r\n' $PYVER
     printf ' - programa/python/Lib/site-packages: %s, de PyPI; cada uno con su licencia en\r\n' "$RUEDAS"
     printf '   su carpeta *.dist-info. ffmpeg (imageio_ffmpeg/binaries) es software libre (GPL/LGPL, ffmpeg.org).\r\n'
-    printf ' - programa/nativo: tools/c de orc2cdc compilado con mingw-w64 (estatico, con winpthreads).\r\n\r\n'
+    printf ' - programa/nativo: tools/c de orc2cdc compilado con mingw-w64 (estatico, con winpthreads).\r\n'
+    printf ' - programa/nativo/pvrtex.exe: pvrtex de KallistiOS (utils/pvrtex), LGPL por el codigo de FFmpeg que lleva;\r\n'
+    printf '   su codigo fuente, tal cual se compila, en programa/fuentes/pvrtex.zip.\r\n\r\n'
     printf '==== Licencia de KallistiOS ====\r\n'; sed 's/\r*$/\r/' "$KOS/doc/LICENSE.md"
     printf '\r\n==== Licencia de SH4ZAM (https://github.com/gyrovorbis/sh4zam, por kos-ports) ====\r\n'
     sed 's/\r*$/\r/' "$SHZ_LIC"
