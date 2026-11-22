@@ -260,7 +260,7 @@ static modelo_t coche;                                         /* el del jugador
    (memalign) tras soltar el anterior: el de su mismo tamano no cabia en el hueco del que se solto (memalign pide algo
    mas) y otras cosas lo ocupaban entre medias (las piezas de MENU.DAT al volver al menu). Asi, volver al frontal de
    OUTRUN2SP (que suelta el coche y lo vuelve a leer) bajaba lo seguido en la cima del monton de 696 a 369 KB */
-#define COCHE_RAM (424u << 10)
+#define COCHE_RAM (480u << 10)                                  /* Rev 2.9.1: con el habitaculo +04 el mayor es COCHE13, 474 KB */
 static uint8_t *coche_bloque; static uint32_t coche_usado;
 static int en_coche_bloque(const void *p) { return coche_bloque && (const uint8_t *)p >= coche_bloque && (const uint8_t *)p < coche_bloque + COCHE_RAM; }
 static modelo_t chr;                                           /* el piloto y la acompanante (CHR.DAT): tampoco */
