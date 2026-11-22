@@ -13,4 +13,4 @@ clean: rm-elf
 rm-elf:
 	-rm -f $(TARGET)
 $(TARGET): $(OBJS)
-	kos-cc -o $(TARGET) $(OBJS) -Wl,--wrap=pvr_scene_finish
+	kos-cc -o $(TARGET) $(OBJS) -Wl,--wrap=pvr_scene_finish -Wl,--wrap=pvr_poly_compile

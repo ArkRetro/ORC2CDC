@@ -1521,6 +1521,14 @@ de OutRun 2 SP (las 15 etapas seguidas) que dio el usuario.
   no esta leido). Sin EFECTOS.DAT nuevo, sin agua (como antes).
 - NO verificado en consola real.
 
+### Longitud de las tiras en las listas de objetos (prueba -DTIRA_6, 2026-11-22)
+
+Pregunta: "si estamos poniendo el tamano de strip en 6". No: todas las cabeceras salen de pvr_poly_compile de
+KallistiOS, que parte de PVR_CMD_POLYHDR (0x80840000): Strip_Len (bits 18-19) = 1, 2 triangulos por entrada de la lista
+de objetos de cada tile. -DTIRA_6 la pone en 6 envolviendo pvr_poly_compile en el enlazado (demo/Makefile, como
+pvr_scene_finish). Flycast no lo distingue (41,2 frente a 41,3 fps, PowerVR 7,5 ms, imagen igual): se mide en la
+consola con la linea de diagnostico (Y en la pausa: fps, CPU, PowerVR y TA; "T2" / "T6" al final). Por defecto, 2.
+
 ### Un 5 % mas de decoracion de los margenes y sin deslumbramiento (Rev 2.6 / Mod 2.2 definitivas, 2026-11-22; DESVIACION pedida)
 
 Pedido: "eliminar un 5 % de los arboles, arbustos, farolas, arboles con nieve, arbustos de desierto, palmeras, son
