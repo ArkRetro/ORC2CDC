@@ -44,6 +44,25 @@
 #endif
 #include "meta.h"
 
+/* Longitud de las tiras en las listas de objetos de la PowerVR (Strip_Len, bits 18-19 de la cabecera del poligono:
+   1, 2, 4 o 6 triangulos de una tira por entrada de la lista de cada tile). KallistiOS la deja en 2 (PVR_CMD_POLYHDR
+   0x80840000) en todas las cabeceras de pvr_poly_compile. -DTIRA_6 la pone en 6 (prueba pedida: menos entradas en las
+   listas de objetos y menos trabajo del TA con tiras largas; a cambio un tile puede recorrer triangulos que no le
+   tocan). Todas las cabeceras del juego salen de pvr_poly_compile: se envuelve en el enlazado (-Wl,--wrap,
+   demo/Makefile). Flycast no reproduce ese coste: se mide en la consola (linea de diagnostico, Y en la pausa: "T6"). */
+void __real_pvr_poly_compile(pvr_poly_hdr_t *dst, const pvr_poly_cxt_t *src);
+void __wrap_pvr_poly_compile(pvr_poly_hdr_t *dst, const pvr_poly_cxt_t *src)
+{
+    __real_pvr_poly_compile(dst, src);
+#ifdef TIRA_6
+    dst->cmd = (dst->cmd & ~(3u << 18)) | (3u << 18);
+#endif
+}
+#ifdef TIRA_6
+#define TIRA_TXT " T6"
+#else
+#define TIRA_TXT " T2"
+#endif
 #ifdef DIAG_VRAMLOG
 /* Registro de la VRAM (Rev 2.6, pedido con el material de investigacion del usuario: contrato CSV
    seq,frame,event,id,bytes,asset con event alloc / free / fail / mark). Cada evento sale por la consola como una linea
@@ -13194,7 +13213,7 @@ int main(int argc, char **argv)
             if (ver) {
                 pvr_stats_t ps; struct mallinfo mi = mallinfo();
                 pvr_get_stats(&ps);
-                sprintf(s2, "%.1ffps %lutri cpu %.1f+%.1f pvr %.1fms", (double)fps, (unsigned long)tri_enviados,
+                sprintf(s2, "%.1ffps %lutri cpu %.1f+%.1f pvr %.1fms" TIRA_TXT, (double)fps, (unsigned long)tri_enviados,
                         (double)ms_log, (double)ms, (double)(ps.rnd_last_time / 1000000.0));
 #ifdef PRUEBA_AUTO
                 /* prueba (RAM2): etapa, union, rama y s en la linea del marcador, para saber donde esta el coche en
