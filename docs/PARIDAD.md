@@ -53,7 +53,7 @@ Estado: OK (conectado y verificado al nivel indicado), PARCIAL, PROVISIONAL (apr
 | Checkpoints, meta, resultados | 44FF20 / 4515B0 (branch_state 7D38E8) con las banderas +0x3C de COLI0200; 4513C0 meta | OK | ampliacion al pasar la pancarta CHECK POINT del principio de la etapa siguiente (ver Checkpoint); meta del original en las 5 etapas finales (z = 0 de la union); voz y efecto de EXTEND TIME, GOAL y TIME OVER (voces.c) | escena de la meta del original (modo 19: guion, camara, coche, piloto, efecto y musica; ver Escena de la meta); millas OutRun, continuar (REINTENTAR / ABANDONAR) y GAME OVER del original (modos 34 / 35 / 27, ver Fin de la carrera); tabla de tiempos por etapa de 498670 / 4979E0 desde la Rev 2.9.1 (variantes 1 y 7, sin sus efectos); sin el ranking | — | E |
 | Puntuacion modo OutRun | 4F2DF0, 4F2660, 4F2B20, 4B9770 | PARCIAL | main.c pt_* | posicion de carretera = m_pos de CURSO.DAT (CONFIRMADO; antes 2,5 m supuestos, 3,2 veces los puntos por avance); bonus de etapa en el checkpoint | el salto de +64 al cambiar de curso (PENDIENTE) | E |
 | Eventos, scripts, progresion, misiones | SCRIPTS.PS2 (Races, RaceAttack, OutrunMiles, Req_*) | FALTA | — | — | — | — |
-| Modos de un jugador (INFARTO, CONTRARRELOJ) | 464350 / 464D20 (PS2 0x1ae440 / 0x1a7f28), 44DC70, 479080 | PARCIAL | ver Modos de un jugador | tipos de peticion con objetos, fantasma | — | E |
+| Modos de un jugador (INFARTO, CONTRARRELOJ) | 464350 / 464D20 (PS2 0x1ae440 / 0x1a7f28), 44DC70, 479080 | PARCIAL | ver Modos de un jugador | tipos de peticion con objetos; fantasma desde la Rev 2.9.2 (con el coche del jugador, formato propio) | — | E |
 | Coches del jugador | CARS.PS2 1-32 / 33-63, disposicion 0x3d3ff0; materiales tabla 4/5 del bloque; colores 0x35ad48 (PC 64D120/408C80); mapa de entorno del bloque | PARCIAL | 15 coches montados como 46A560 (port comprobado), con interior, 9320-11195 vertices dibujados; pintura, 8 colores (Y en la seleccion), reflejo y luces (+7C/+80/+84/+60, CEX2) del original con los bits de noche / tunel de 4A25F0 y la luz de los faros en el suelo (0x188680); piezas animadas (ruedas, volante, aleron, faros, disco caliente, car+F0 y el cuerpo de la fisica; ANI1) | UV de entorno con la formula esferica clasica (la del microcodigo VU1 sin leer); focos de los faros sobre la escena (0x20e1b8 / 40C550) sin portar | ver secciones Coches | E |
 | Escenarios, texturas, materiales | STAGE.PS2, VQ, scn_env_fog_<zona> | PARCIAL | 15 tramos + 15 uniones; mallas con su material (tabla 5) y la luz del entorno 1 de la zona; niebla, cielo y sol del original (ver Entorno); tiras (ADC), nodos, LOD y planos del original | objetos de tramo: el registro de obj_course_obj_cs_<zona> que dibuja la etapa (pancarta CHECK POINT y carteles, ver Checkpoint: la pancarta); objetos animados de las uniones (ver Objetos animados de las uniones); cs_ENV_* no es de la escena (es del reflejo del coche); destello con oclusion aproximada por rayos (ver Entorno); luces locales (maya_spl) sin portar | — | E |
 | HUD, menus, transiciones | SPRANI/XST, TEXT.PS2 (espanol: SPANISH.bin y XST _sxst) | PARCIAL | HUD.DAT, MENU.DAT; todas las pantallas del menu principal y de un jugador, licencia con VMU (icono, eyecatch y LCD: VMU.DAT, ver VMU), seleccion de coche del original, menu de pausa con AUDIO (ver Menus y Pausa y mezcla) | titulo es un cuadro del video (la pelicula de titulo en bucle detras del rotulo, sin hacer); textos bfont antiguos en la demo automatica y el aviso de rama; rotulos de las filas de opciones (sprites sin localizar) | quitar textos bfont | E |
@@ -1520,6 +1520,29 @@ de OutRun 2 SP (las 15 etapas seguidas) que dio el usuario.
   lado y tapaban media pantalla, y en el video la estela es baja y pegada a las ruedas (el dibujo del tipo 3, 0x108d30,
   no esta leido). Sin EFECTOS.DAT nuevo, sin agua (como antes).
 - NO verificado en consola real.
+
+### Coche fantasma de la CONTRARRELOJ (Rev 2.9.2 / Mod 2.5.2, 2026-11-22)
+
+El original (PC 465F30..4687C0; SLES-53998 GHOST.PS2 y la tarjeta de memoria) graba en la Contrarreloj el coche del
+jugador (4671D0 / 466E50), en la meta guarda el mejor por curso (467880 / 467960) y en la carrera siguiente de ese curso
+lo reproduce (467E30) con un coche translucido (4AE0F0: alfa +B68). En la Dreamcast (demo/main.c gh_*):
+- Grabacion propia (DESVIACION del formato): una muestra de 12 bytes cada 8 pasos de logica en el marco de la carretera
+  (etapa del arbol, etapa o union y rama, distancia desde el principio de esa parte, x lateral, rumbo, deriva, velocidad);
+  se reproduce interpolando y se coloca como el trafico (coche_coloca / pon_coche). PALM entera: 533 muestras (6,4 KB).
+- El mejor por curso (codigo del tablero + preset) en la RAM y en la VMU: fichero ORGHppcc (9 bloques una etapa; sin la
+  imagen de presentacion), escrito en un hilo durante la escena de la meta si mejora el tiempo; al empezar una carrera
+  de otro curso se lee de la VMU. comun/menu.c menu_vmu_guarda / menu_vmu_lee.
+- Dibujo (DESVIACION): con el modelo del coche del jugador (un segundo COCHEnn.DAT no cabe en la RAM ni la VRAM), sus
+  piezas animadas, en la lista transparente con alfa 0,5 (cabeceras recompiladas para esa lista; el alfa se pone en los
+  vertices durante su dibujo para que vaya por la ruta directa). Medido en PALM (Flycast, piloto): 42,7 -> 41,2 fps con el
+  fantasma a la vista (33,8 con el alfa por color_mul, descartado).
+- Solo se ve en la parte de la ruta cargada (la etapa o union actual, la siguiente o la union anterior) y por la misma
+  rama del jugador.
+- Verificado en E (`-DPRUEBA_AUTO -DPRUEBA_VARIANTE=7 -DPRUEBA_TA_CODIGO=0 -DPRUEBA_MILLAS -DPRUEBA_GH_ADELANTO=15`,
+  REINTENTAR con el mando): primera carrera graba y guarda ORGH0100 (releido igual), la segunda lo reproduce delante.
+  `-DDIAG_GH`: donde lo pone; `-DGH_OPACO`: opaco.
+- SIN PORTAR: el coche de la grabacion (otro modelo que el del jugador), el fantasma de la red, la escena 2B0061 y el
+  tiempo del fantasma en la meta (497430), la pantalla RANKINGS (siguiente revision).
 
 ### Vista interior y tabla de tiempos de la meta (Rev 2.9.1 / Mod 2.5.1, 2026-11-22)
 

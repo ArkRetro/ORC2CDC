@@ -80,4 +80,7 @@ int menu_pausa_paso(unsigned botones_nuevos);
 void menu_pausa_dibuja(void);
 void menu_pausa_sale(void);
 unsigned menu_pausa_vram(void);                          /* VRAM que pedira la pausa (bytes; 0 si ya esta subida) */
+/* ficheros propios en la VMU (el fantasma de la CONTRARRELOJ): 0 bien o VE_* (comun/vmuesc.h); bytes leidos o -1 */
+int menu_vmu_guarda(const char *nombre, const char *desc, const uint8_t *datos, int n);
+int menu_vmu_lee(const char *nombre, uint8_t *buf, int cap);
 #endif

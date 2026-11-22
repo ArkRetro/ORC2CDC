@@ -6746,6 +6746,7 @@ static uint64_t pk_t;
 static int sube_turno;                                          /* un trozo de texturas por cuadro (lo pone el bucle) */
 static void entorno_cambia_etapa(void);
 static int ent_cruza;  /* la mezcla sigue usando el cielo de la union despues del checkpoint */
+static void gh_cambia_etapa(int nodo_ant, float s_un, int rama);   /* (coche fantasma, mas abajo) */
 static int curso_paso(void)
 {
     int ev = 0; const etapa_t *e = curso + cur_nodo;
@@ -6882,6 +6883,7 @@ static int curso_paso(void)
 #endif
         etapa = sig; memset(&sig, 0, sizeof sig); etapa_nodo = cur_sig; cielo = &etapa; etapa_movida = 1;
         { uint8_t *t_ = refl_reg[0]; refl_reg[0] = refl_reg[1]; refl_reg[1] = t_; refl_hay[0] = refl_hay[1]; refl_hay[1] = 0; refl_pend = 1; }
+        gh_cambia_etapa(cur_nodo, s_union, cur_rama);          /* el fantasma: la union de la anterior sigue en la ruta */
         cur_nodo = cur_sig; cur_sig = -1; memcpy(marco_et, marco_sig, sizeof marco_et);
         etapa_n = curso[cur_nodo].nivel; s_etapa = s_sig; s_suelta = s_sig + UNION_LIBERA;
         if (curso[cur_nodo].m_pos > 1.0f) m_pos = curso[cur_nodo].m_pos;
@@ -12196,6 +12198,205 @@ static void tabla_entra(void)
     hud_baja_tex(); hudd_vacia();
     tabla_on = !fin_tabla_entra(&t);
 }
+/* ---------------------------------------------------------------- coche fantasma de la CONTRARRELOJ (Rev 2.9.2)
+   El original (PC 465F30..4687C0, GHOST%02d.DAT; SLES-53998: GHOST.PS2 y la tarjeta de memoria) graba el coche del
+   jugador en la Contrarreloj (4671D0 / 466E50: paquetes de la matriz del coche en un registro de 0x9CAC bytes), al
+   llegar a la meta guarda la mejor por curso (467880 / 467960) y en la carrera siguiente de ese curso la reproduce
+   (467E30, interpolando) con un coche translucido (4AE0F0: alfa +B68 con car+4 & 0x40) del modelo de la grabacion.
+   DESVIACIONES de la Dreamcast (formato y memoria propios, no el del original):
+   - Cada GH_PASO pasos de logica una muestra de 12 bytes en el marco de la carretera: la etapa del arbol (nodo), si
+     va por la etapa o su union y la rama tomada, la distancia desde el principio de esa parte (1/4 m), la x lateral
+     (cm), el rumbo respecto a la ruta y la deriva (65536 = 2 pi) y la velocidad. Se reproduce interpolando y se
+     coloca como el trafico (coche_coloca / pon_coche). 1 minuto = ~5,4 KB (11 bloques de VMU); el registro del
+     original ocupa ~40 KB (80 bloques).
+   - Se dibuja con el modelo del coche que lleva el jugador (un segundo COCHEnn.DAT no cabe en la RAM ni en la VRAM),
+     en la lista transparente con alfa 0,5 y las piezas animadas del jugador.
+   - Solo se ve si va por la etapa (o union) actual, la siguiente ya cargada o la union de la anterior: si se aleja
+     mas de eso, o toma la otra rama de una bifurcacion, no se dibuja.
+   - Uno por curso (codigo del tablero + preset), en la RAM y en la VMU (fichero ORGHppcc, cc = codigo, pp = preset),
+     guardado en un hilo al llegar a la meta si mejora el tiempo del que habia. */
+#define GH_PASO 8                                               /* pasos de logica entre muestras (7,5 por segundo) */
+#define GH_MAX 2400                                             /* muestras (5 min 20 s) */
+typedef struct { uint8_t nodo, fl; uint16_t d; int16_t x, a, der, v; } gh_m_t;   /* fl: bit 0 union, bits 1..2 rama + 1 */
+typedef struct { char marca[4]; uint16_t ver, clave; uint32_t n, total_ms, modelo; } gh_cab_t;
+static gh_m_t gh_rec[GH_MAX], gh_rep[GH_MAX];
+static gh_cab_t gh_rep_cab; static int gh_nrec, gh_nrep, gh_clave = -1, gh_grabando, gh_ve, gh_lleno;
+static int gh_nodo_ant = -1, gh_rama_ant = -1; static float gh_union_ant = -1;   /* la union de la etapa anterior */
+static coche_t gh_c; static matrix_t gh_mat __attribute__((aligned(32))); static pvr_poly_hdr_t *gh_cabs; static uint32_t gh_ncabs;
+static uint8_t *gh_a0; static uint32_t gh_nv;                     /* el alfa de cada vertice del coche (gh_dibuja) */
+static volatile int gh_guardando;
+#define GH_U (65536.0f / 6.2831853f)
+/* al empezar la carrera (y REINTENTAR): la grabacion a cero; en la CONTRARRELOJ la del curso, de la RAM o de la VMU */
+static void gh_empieza(void)
+{
+    int clave = variante == 7 && ta_codigo >= 0 ? (preset_curso & 0xff) << 8 | (ta_codigo & 0xff) : -1;
+    gh_nrec = 0; gh_lleno = 0; gh_grabando = clave >= 0; gh_ve = 0; gh_nodo_ant = gh_rama_ant = -1; gh_union_ant = -1;
+    if (clave < 0) { gh_nrep = 0; gh_clave = -1; return; }
+    if (clave != gh_clave) {                                    /* otro curso: el suyo de la VMU */
+        static uint8_t b[sizeof(gh_cab_t) + sizeof gh_rep]; char nm[16]; int n;
+        gh_nrep = 0; gh_clave = clave;
+        sprintf(nm, "ORGH%04X", clave);
+        n = gh_guardando ? -1 : menu_vmu_lee(nm, b, sizeof b);
+        if (n >= (int)sizeof(gh_cab_t)) {
+            gh_cab_t c; memcpy(&c, b, sizeof c);
+            if (!memcmp(c.marca, "ORGH", 4) && c.ver == 1 && c.clave == clave && c.n <= GH_MAX && n >= (int)(sizeof c + c.n * sizeof(gh_m_t))) {
+                gh_rep_cab = c; memcpy(gh_rep, b + sizeof c, c.n * sizeof(gh_m_t)); gh_nrep = c.n;
+            }
+        }
+        dbglog(DBG_INFO, "FANTASMA: curso %04X, %s (%d muestras, %u ms)\n", clave, gh_nrep ? "leido de la VMU" : "sin fantasma",
+               gh_nrep, gh_nrep ? (unsigned)gh_rep_cab.total_ms : 0);
+    } else dbglog(DBG_INFO, "FANTASMA: curso %04X, el de la RAM (%d muestras)\n", clave, gh_nrep);
+}
+/* la etapa pasa a la siguiente (curso_paso, CUR_SIGUIENTE): la union de la anterior sigue en la ruta */
+static void gh_cambia_etapa(int nodo_ant, float s_un, int rama) { gh_nodo_ant = nodo_ant; gh_union_ant = s_un; gh_rama_ant = rama; }
+/* un paso de logica en carrera (crono ya contado): una muestra cada GH_PASO */
+static void gh_graba(void)
+{
+    gh_m_t *m; int un; float base, d;
+    if (!gh_grabando || crono % GH_PASO || gh_lleno) return;
+    if (gh_nrec >= GH_MAX) { gh_lleno = 1; dbglog(DBG_INFO, "FANTASMA: grabacion llena (%d muestras)\n", GH_MAX); return; }
+    un = s_union >= 0 && yo.s >= s_union; base = un ? s_union : s_etapa; d = (yo.s - base) * 4.0f;
+    m = gh_rec + gh_nrec++;
+    m->nodo = (uint8_t)cur_nodo; m->fl = (uint8_t)(un | ((cur_rama + 1) & 3) << 1);
+    m->d = (uint16_t)(d < 0 ? 0 : d > 65535 ? 65535 : d);
+    m->x = (int16_t)(yo.x * 100.0f); m->a = (int16_t)(yo.a * GH_U); m->der = (int16_t)(yo.deriva * GH_U);
+    m->v = (int16_t)(yo.v * 10.0f);
+}
+static void *gh_hilo(void *p)
+{
+    static uint8_t b[sizeof(gh_cab_t) + sizeof gh_rep]; char nm[16]; int r, n = gh_rep_cab.n;
+    memcpy(b, &gh_rep_cab, sizeof gh_rep_cab); memcpy(b + sizeof gh_rep_cab, gh_rep, n * sizeof(gh_m_t));
+    sprintf(nm, "ORGH%04X", gh_rep_cab.clave);
+    r = menu_vmu_guarda(nm, "OutRun Fantasma", b, (int)(sizeof gh_rep_cab + n * sizeof(gh_m_t)));
+    dbglog(r ? DBG_ERROR : DBG_INFO, "FANTASMA: guardado %s (%d muestras, %u ms): %d\n", nm, n, (unsigned)gh_rep_cab.total_ms, r);
+    gh_guardando = 0; (void)p;
+    return NULL;
+}
+/* GOAL (4513C0): si mejora al que habia (o no habia) pasa a ser el fantasma del curso y se guarda en la VMU */
+static void gh_meta(int total_ms)
+{
+    if (!gh_grabando) return;
+    gh_grabando = 0;
+    if (gh_lleno || gh_nrec < 2) return;
+    if (gh_nrep && (int)gh_rep_cab.total_ms <= total_ms) {
+        dbglog(DBG_INFO, "FANTASMA: %d ms no mejora %u ms\n", total_ms, (unsigned)gh_rep_cab.total_ms); return; }
+    if (gh_guardando) { dbglog(DBG_ERROR, "FANTASMA: aun guardando el anterior\n"); return; }
+    memcpy(gh_rep, gh_rec, gh_nrec * sizeof(gh_m_t)); gh_nrep = gh_nrec;
+    memcpy(gh_rep_cab.marca, "ORGH", 4); gh_rep_cab.ver = 1; gh_rep_cab.clave = (uint16_t)gh_clave;
+    gh_rep_cab.n = gh_nrec; gh_rep_cab.total_ms = total_ms; gh_rep_cab.modelo = 0;
+    gh_guardando = 1;
+    if (!thd_create(1, gh_hilo, NULL)) gh_hilo(NULL);
+}
+/* principio de la parte (etapa o union) por la que va la muestra en la ruta cargada, o -1 si no esta */
+static float gh_base(const gh_m_t *m)
+{
+    int nodo = m->nodo, un = m->fl & 1, rama = ((m->fl >> 1) & 3) - 1;
+    if (!un) {
+        if (nodo == cur_nodo) return s_etapa;
+        if (nodo == cur_sig && s_sig >= 0) return s_sig;
+        return -1;
+    }
+    if (nodo == cur_nodo && s_union >= 0) {
+        if (rama >= 0 && cur_rama >= 0 && rama != cur_rama) return -1;   /* la otra rama */
+        if (rama >= 0 && cur_rama < 0 && s_decide >= 0 && s_union + m->d * 0.25f > s_decide) return -1;
+        return s_union;
+    }
+    if (nodo == gh_nodo_ant && gh_union_ant >= 0 && (rama < 0 || gh_rama_ant < 0 || rama == gh_rama_ant)) return gh_union_ant;
+    return -1;
+}
+/* el fantasma del cuadro: 1 si se ve (gh_mat lista) */
+static int gh_coloca(void)
+{
+    int i, k; float f, b0, b1, s0, s1;
+    const gh_m_t *m0, *m1;
+    if (!gh_nrep || variante != 7) return 0;
+#ifndef PRUEBA_GH_ADELANTO
+#define PRUEBA_GH_ADELANTO 0                                    /* prueba: el fantasma n pasos por delante (el piloto repite) */
+#endif
+    i = (crono + PRUEBA_GH_ADELANTO) / GH_PASO; f = (float)((crono + PRUEBA_GH_ADELANTO) % GH_PASO) / GH_PASO;
+    if (i >= gh_nrep) i = gh_nrep - 1, f = 0;                    /* llego: se queda en su ultima muestra */
+    m0 = gh_rep + i; m1 = i + 1 < gh_nrep ? m0 + 1 : m0;
+#ifdef DIAG_GH
+    static int gh_dn; if (++gh_dn % 60 == 0) dbglog(DBG_INFO, "GH: i %d nodo %d fl %d d %.1f base %.0f | jugador nodo %d s %.0f etapa %.0f union %.0f\n", i, m0->nodo, m0->fl,
+                                (double)(m0->d * 0.25f), (double)gh_base(m0), cur_nodo, (double)yo.s, (double)s_etapa, (double)s_union);
+#endif
+    if ((b0 = gh_base(m0)) < 0) return 0;
+    s0 = b0 + m0->d * 0.25f;
+    b1 = gh_base(m1); s1 = b1 >= 0 ? b1 + m1->d * 0.25f : s0;
+    if (s1 < s0 || s1 - s0 > 40.0f) s1 = s0;                    /* (cambio de parte: sin interpolar) */
+    gh_c.s = s0 + (s1 - s0) * f;
+    if (gh_c.s < s_base + 1.0f || gh_c.s > longitud - 1.0f) return 0;
+    gh_c.x = (m0->x + (m1->x - m0->x) * f) * 0.01f;
+    k = (int16_t)(m1->a - m0->a); gh_c.a = (m0->a + k * f) / GH_U;
+    k = (int16_t)(m1->der - m0->der); gh_c.deriva = (m0->der + k * f) / GH_U;
+    gh_c.v = (m0->v + (m1->v - m0->v) * f) * 0.1f;
+    gh_c.y_ok = 0; memset(gh_c.pose_t, 0, sizeof gh_c.pose_t); memset(gh_c.pose_r, 0, sizeof gh_c.pose_r);
+    coche_coloca(&gh_c); pon_coche(&gh_c, gh_mat);
+#ifdef DIAG_GH
+    if (gh_dn % 60 == 0) dbglog(DBG_INFO, "GH: s %.1f x %.1f pos %.1f %.1f %.1f (jugador %.1f %.1f %.1f) cabs %p\n", (double)gh_c.s, (double)gh_c.x,
+                                (double)gh_c.pos[0], (double)gh_c.pos[1], (double)gh_c.pos[2], (double)yo.pos[0], (double)yo.pos[1], (double)yo.pos[2], (void *)gh_cabs);
+#endif
+    return 1;
+}
+/* cabeceras del coche del jugador pasadas a la lista transparente con alfa (4AE0F0: alfa +B68), una vez por coche */
+static void gh_prepara_cabs(void)
+{
+    uint32_t i, f;
+    if (gh_cabs && gh_ncabs == coche.ntex + 1) return;
+    free(gh_cabs); gh_cabs = NULL; gh_ncabs = 0;
+    free(gh_a0); gh_a0 = NULL; gh_nv = 0;
+    for (i = 0; i < coche.nmallas; i++) if (coche.mallas[i].v0 + coche.mallas[i].n > gh_nv) gh_nv = coche.mallas[i].v0 + coche.mallas[i].n;
+    if (!coche.cabs[0] || !coche.tv || !(gh_a0 = malloc(gh_nv)) || !(gh_cabs = memalign(32, (coche.ntex + 1) * sizeof(pvr_poly_hdr_t)))) {
+        free(gh_a0); gh_a0 = NULL; return; }
+    for (i = 0; i < coche.ntex; i++) {                          /* compila_cab con la lista transparente y alfa */
+        pvr_poly_cxt_t cx; tex_t *t = coche.texs + i; uint32_t fb = t->fmt & 0xff, vq = t->fmt & 0x100, n = ((t->fmt >> 16) & 0xff) + 1;
+        pvr_ptr_t dir = vq ? (pvr_ptr_t)((uintptr_t)coche.tv[i] - (2048 - 8 * n)) : coche.tv[i];
+        f = ((const uint32_t *)(coche.cabs[0] + i))[0] & PVR_TA_CMD_SPECULAR_MASK;   /* (el desplazamiento de la pintura) */
+        pvr_poly_cxt_txr(&cx, PVR_LIST_TR_POLY, FMT[fb] | PVR_TXRFMT_TWIDDLED | (vq ? PVR_TXRFMT_VQ_ENABLE : 0), t->w, t->h, dir,
+                         PVR_FILTER_BILINEAR);
+        cx.gen.fog_type = PVR_FOG_TABLE; cx.gen.culling = PVR_CULLING_NONE; cx.gen.alpha = PVR_ALPHA_ENABLE;
+        cx.txr.env = PVR_TXRENV_MODULATEALPHA; cx.blend.src = PVR_BLEND_SRCALPHA; cx.blend.dst = PVR_BLEND_INVSRCALPHA;
+        if (f) cx.gen.specular = PVR_SPECULAR_ENABLE;
+        pvr_poly_compile(gh_cabs + i, &cx);
+    }
+    gh_ncabs = coche.ntex + 1;
+}
+#define GH_ALFA 0x80                                            /* 0,5 */
+/* en la lista transparente: todas las piezas del coche (menos habitaculo y sombra) con las cabeceras de gh_cabs */
+static void gh_dibuja(int lista)
+{
+    pvr_poly_hdr_t *orig = coche.cabs[0]; int l, p;
+    if (!ani.ok) return;
+    gh_prepara_cabs();
+    if (!gh_cabs) return;
+#ifdef GH_OPACO
+    l = lista;                                                  /* prueba: opaco, con las cabeceras del coche */
+    for (p = 0; p < NPZ; p++) {
+        uint32_t a = ani.ini[l][p], b = ani.ini[l][p + 1];
+        if (b <= a || p == PZ_INTERIOR || p == PZ_SOMBRA) continue;
+        mat_load(&vista); mat_apply(&gh_mat); mat_apply(&ani_m[p]);
+        dibuja_indices(&coche, l, ani.idx + a, b - a);
+    }
+    (void)orig; return;
+#endif
+    if (lista != 2) return;
+    {   /* el alfa en los vertices (y vuelta al acabar): asi las mallas enteras delante del plano cercano van por la ruta
+           directa (dibuja_malla_directa); con color_mul todas iban por dibuja_malla (medido: 42,7 -> 33,8 fps) */
+        vert_t *v = (vert_t *)coche.verts; uint32_t i;
+        for (i = 0; i < gh_nv; i++) { uint32_t c = v[i].c; gh_a0[i] = c >> 24; v[i].c = (c & 0xFFFFFF) | ((c >> 24) * GH_ALFA >> 8) << 24; }
+    }
+    coche.cabs[0] = gh_cabs; indices_delante = modelo_delante(&coche, (const float (*)[4])gh_mat);
+    for (l = 0; l < 3; l++)
+        for (p = 0; p < NPZ; p++) {
+            uint32_t a = ani.ini[l][p], b = ani.ini[l][p + 1];
+            if (b <= a || p == PZ_INTERIOR || p == PZ_SOMBRA) continue;
+            mat_load(&vista); mat_apply(&gh_mat); mat_apply(&ani_m[p]);
+            dibuja_indices(&coche, 2, ani.idx + a, b - a);
+        }
+    coche.cabs[0] = orig; indices_delante = 0;
+    {   vert_t *v = (vert_t *)coche.verts; uint32_t i;
+        for (i = 0; i < gh_nv; i++) v[i].c = (v[i].c & 0xFFFFFF) | (uint32_t)gh_a0[i] << 24; }
+}
 static void meta_sale(void)
 {
     if (tabla_on) { fin_tabla_sale(); tabla_on = 0; }
@@ -13051,7 +13252,7 @@ int main(int argc, char **argv)
                        curso[cur_nodo].zona, (double)yo.s, (double)yo.x, (double)yo.a, (double)yo.pos[0], (double)yo.pos[1],
                        (double)yo.pos[2], reintenta ? " (REINTENTAR)" : "");
                 lejos = LEJOS_PS2; entorno_reinicia(); niebla_paso(); niebla_pon();   /* la distancia del original */
-                tim_cuadros = tim_zona(cur_nodo, etapa_n); tiempo = tim_cuadros / TIM_HZ; estado = CUENTA; t_estado = 0; t_cuenta = -60; fac_on = 0; fac_base = 30001; salida_entra(); pausa = 0; crono = 0; pt_inicia(); fin_carrera_empieza(!juego_sp); etapas_empieza(); etapa_entra(cur_nodo);
+                tim_cuadros = tim_zona(cur_nodo, etapa_n); tiempo = tim_cuadros / TIM_HZ; estado = CUENTA; t_estado = 0; t_cuenta = -60; fac_on = 0; fac_base = 30001; salida_entra(); pausa = 0; crono = 0; pt_inicia(); fin_carrera_empieza(!juego_sp); etapas_empieza(); etapa_entra(cur_nodo); gh_empieza();
                 reintenta = 0;
                 if (voz_ok) voces_carrera();
                 if (variante == 6) {                            /* C2CHUD.DAT: sus tablas en la RAM y todas sus texturas */
@@ -13205,6 +13406,7 @@ int main(int argc, char **argv)
                 }
                 voz_contacto = 0;
                 if (crono < 0x57e3f) crono++; else crono = 0x57e3f;   /* 7D39DC: tope 0x57E3F (race_manager 4508xx) */
+                gh_graba();                                     /* el fantasma de la CONTRARRELOJ */
 #ifdef DIAG_CONGELA
                 if (crono == DIAG_CONGELA) { diag_congelado = 1; pasos = paso + 1; printf("CONGELA: crono %d\n", crono); }
 #endif
@@ -13349,6 +13551,7 @@ int main(int argc, char **argv)
 #endif
                     if (ev & CUR_META) {
                         if (cur_nodo >= 0 && cur_nodo < ncurso) etapa_acaba(curso[cur_nodo].nivel);   /* 4513C0: la ultima */
+                        gh_meta(cuadros_ms(crono));             /* 467190 / 467880: el fantasma del curso */
                         estado = META; t_estado = 0; pt_bonus_etapa(); texto_centro("GOAL!");
                         if (variante == 2) infarto_meta();      /* 44FF10 */
                         if (voz_ok) voces_meta();
@@ -13725,6 +13928,8 @@ int main(int argc, char **argv)
 #endif
             } else if (estado != TITULO && !mundo_fuera && cam_ok && cam_coche_modo(&cam) == 1 && !fin24)
                 coche_dibuja(l, &mod_coche, 1);                 /* la vista interior: el habitaculo (vm = 2) */
+            if (l == 0) gh_ve = estado != TITULO && !mundo_fuera && !fin24 && gh_coloca();   /* el fantasma (Contrarreloj) */
+            if (gh_ve) gh_dibuja(l);
             POP_CAT(2);
             PRF(5);
             if (fin24) robot_dibuja(&rc_chr, l);              /* 514E60 de la pareja del final */
