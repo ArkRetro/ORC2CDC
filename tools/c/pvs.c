@@ -109,10 +109,12 @@ static int sin_tapar(const int *S, int w, int h, int u0, int u1, int v0, int v1)
 {
     int x[4], y[4], nx = 0, ny = 0, i, j, n = 0;
     if (u1 - u0 + 1 >= w) { x[0] = 0; x[1] = w; nx = 1; }
-    else { u0 %= w; if (u0 < 0) u0 += w; u1 = u0 + (u1 - u0 + w * 4) % w;   /* (u1 - u0 ya < w) */
+    else { int d = u1 - u0; u0 %= w; if (u0 < 0) u0 += w; u1 = u0 + d;   /* (0 <= d < w - 1; Rev 2.9.2: antes u1 - u0 con u0 ya
+                                                                           reducido: con u1 < -4 w el indice salia negativo y se
+                                                                           leia fuera de S; en Windows, 0xC0000005 en SEG18 / 55) */
            if (u1 < w) { x[0] = u0; x[1] = u1 + 1; nx = 1; } else { x[0] = u0; x[1] = w; x[2] = 0; x[3] = u1 - w + 1; nx = 2; } }
     if (v1 - v0 + 1 >= h) { y[0] = 0; y[1] = h; ny = 1; }
-    else { v0 %= h; if (v0 < 0) v0 += h; v1 = v0 + (v1 - v0 + h * 4) % h;
+    else { int d = v1 - v0; v0 %= h; if (v0 < 0) v0 += h; v1 = v0 + d;
            if (v1 < h) { y[0] = v0; y[1] = v1 + 1; ny = 1; } else { y[0] = v0; y[1] = h; y[2] = 0; y[3] = v1 - h + 1; ny = 2; } }
     for (i = 0; i < nx; i++) for (j = 0; j < ny; j++) {
         int xa = x[2 * i], xb = x[2 * i + 1], ya = y[2 * j], yb = y[2 * j + 1], W = w + 1;
