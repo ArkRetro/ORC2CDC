@@ -1521,6 +1521,20 @@ de OutRun 2 SP (las 15 etapas seguidas) que dio el usuario.
   no esta leido). Sin EFECTOS.DAT nuevo, sin agua (como antes).
 - NO verificado en consola real.
 
+### El muro a la salida del tunel de ALAS (Rev 2.9 / Mod 2.5, 2026-11-22)
+
+Queja: "un muro que se ve al final de la etapa de nieve en outrun2sp ... una zona de tunel, al final del tunel".
+Reproducido en Flycast (piloto, arbol 1, nodo 8 = ALAS, SEG23, capturas cada 0,25 s): al salir del primer tunel el
+hueco de la salida se tapaba con una pared con el ladrillo del tunel hasta pasarla. Es la malla 8147 del nodo 227
+(textura 89): una placa de 24 x 8 m desde el asfalto que cruza la calzada en s 1100, cuya cara (la de la primera de su
+tira) mira hacia delante: desde el tunel se ve por detras. La demo dibuja todo sin descartar caras (PVR_CULLING_NONE);
+en el original no sale. No se borra: `tapas_busca` (al leer) marca las placas de una cara asi (4-8 vertices, planas,
+verticales, que cruzan el centro de la calzada desde el suelo hasta mas de 3 m, con la normal a menos de ~37 grados
+del sentido de la ruta, a mas de 8 m de su principio, no carteles ni versiones lejanas) y `tapas_paso` (cada cuadro)
+solo las dibuja con la camara delante de su plano. En las 62 etapas y 498 uniones: SEG23 (esta), SEG26, SEG52 y SEG58
+(estas tres no comprobadas en pantalla). `-DSIN_TAPAS`: como antes. Encontrada con tools/invasion.py y una busqueda de
+placas perpendiculares a la ruta (docs/AUDITORIA_MOTOR.md).
+
 ### Huecos de RUIN y framerate de LASV (Rev 2.8 / Mod 2.4, 2026-11-22)
 
 Pedido: texturas de los puentes y de RUIN a 8x8 / 16x16 de lejos y 32x32 de cerca ("ahi se crean zonas sin dibujar") y

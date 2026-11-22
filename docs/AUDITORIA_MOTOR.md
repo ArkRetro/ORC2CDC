@@ -40,6 +40,11 @@ Resultado (Rev 2.8, revisado a mano con vistas cenitales de cada caso dudoso):
   de su entrada; Rev 2.3: la pancarta de CHECK POINT) eran de la union y del crecimiento de la etapa siguiente, en
   tiempo de ejecucion, no de los datos.
 
+**Iteracion 2 (Rev 2.9)**: el muro de la salida del tunel de ALAS (queja del usuario) SI estaba en los datos y el
+detector lo marco con un triangulo (nodo 227, textura 89): no se reviso porque era uno solo. Es una placa de una cara
+vista por detras (la demo no descarta caras): corregido con tapas_busca / tapas_paso (docs/PARIDAD.md). Leccion: cada
+fila del detector se revisa, aunque sea de un triangulo.
+
 Pendiente: lo que solo pasa en tiempo de ejecucion (la etapa siguiente creciendo, uniones, trafico). Para eso hace
 falta la etapa y el momento: con ellos se reproduce con el piloto (PRUEBA_CURSO / PRUEBA_NODO) y se captura.
 
