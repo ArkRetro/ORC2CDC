@@ -2167,7 +2167,7 @@ static void dibuja_indices(const modelo_t *mo, int l, const uint16_t *idx, uint3
 /* piezas animadas de un modelo (tools/conv_coche.py animadas, conv_trafico.py: la pieza va en el campo del nodo << 8; 0
    = la que no se mueve): idx = las mallas ordenadas por lista y pieza, ini[l][p] = la primera de la pieza p en la lista
    l. Devuelve 1 si hay alguna malla de una pieza animada (0: sin piezas, idx = NULL) */
-#define NPZ_MAX 13
+#define NPZ_MAX 14
 static int piezas_indices(const modelo_t *mo, int np, uint16_t **idx, uint16_t ini[3][NPZ_MAX + 1])
 {
     uint32_t k, n = 0; int l, p, hay = 0;
@@ -10296,6 +10296,7 @@ static void coche_luz(matrix_t mc, int on)
 #define G_FARO 4
 #define G_DISCO 5
 #define G_DISCO_CAL 6
+#define G_INTERIOR 7                                            /* el habitaculo: siempre encendido (lo elige coche_dibuja) */
 static void coche_luces(uint32_t banderas, int freno, int caliente)
 {
     uint32_t k;
@@ -10305,7 +10306,7 @@ static void coche_luces(uint32_t banderas, int freno, int caliente)
     for (k = 0; k < cex_ngrp; k++) {
         uint32_t mk = cex_grp[2 * k], g = cex_grp[2 * k + 1];
         coche.mallas[mk].n = (g == (uint32_t)pil || (g == G_FARO && (est & 8)) || (g == G_DISCO && !(est & 16)) ||
-                              (g == G_DISCO_CAL && (est & 16))) ? cex_n0[mk] : 0;
+                              (g == G_DISCO_CAL && (est & 16)) || g == G_INTERIOR) ? cex_n0[mk] : 0;
     }
     cex_luces = est;
 }
@@ -10328,9 +10329,10 @@ static void coche_luces(uint32_t banderas, int freno, int caliente)
    (t = car+1F4 / 480, x = car+1CC acotado a +-pi/2, car+1CC = media de 30 cuadros de 1000 x car+1C8 (4A2D70), car+1C8
    = cambio de car+1C4 en el cuadro); balanceo 0 (solo con car+4 & 1 = 0: el jugador lo tiene). En la seleccion el
    coche esta parado: todo en reposo (4A5B20 llama a 4A2910 y 4A4710 con car+1F4 = 0). */
-#define NPZ 13                                                  /* piezas que se dibujan (las 12 de ANI1 y la sombra) */
+#define NPZ 14                                                  /* piezas que se dibujan (las 12 de ANI1, la sombra y el habitaculo) */
 #define NPZ_ANI 12                                              /* las de ANI1 (con sus datos) */
 #define PZ_SOMBRA 12                                            /* la sombra plana +0C (tools/conv_coche.py P_SOMBRA) */
+#define PZ_INTERIOR 13                                          /* el habitaculo +04 (P_INTERIOR): solo con la vista interior */
 #define PZ_VOLANTE 1
 #define PZ_ALERON 2
 #define PZ_FAROS 3
@@ -10943,16 +10945,20 @@ static void coche_anima_matrices(int titulo)
        jugador ([0x557108] + 0xB0, aqui mod_coche) y T(0, 0,05, 0), fuera de car+F0: no sigue la suspension ni la
        subida de 4A2910 */
     m_id(ani_m[PZ_SOMBRA]); m_tras(ani_m[PZ_SOMBRA], 0, 0.05f, 0);
+    m_id(ani_m[PZ_INTERIOR]);                                   /* 46AE70 con vm = 2: la matriz local es la identidad */
 }
 /* el coche del jugador en la lista l: cada pieza con su matriz (sin ANI1, entero con la del coche) */
-static void coche_dibuja(int l, matrix_t *mc)
+/* interior = 1: car+4 & 0xC000 = 0x8000 (vm = 2, la vista interior de 4A2BA0: cam_coche_modo): como 46AE70, solo el
+   habitaculo +04 y los faros escamoteables +64 (y su luz +60, que va con la carroceria: aqui no; sin ruedas, sombra,
+   pilotos ni la pareja); 0 (vm = 1): todo menos el habitaculo */
+static void coche_dibuja(int l, matrix_t *mc, int interior)
 {
     int p;
-    if (!ani.ok) { mat_load(&vista); mat_apply(mc); dibuja_rango(&coche, l, coche.inicio[l], coche.inicio[l + 1], 0, 0, 0); return; }
+    if (!ani.ok) { if (interior) return; mat_load(&vista); mat_apply(mc); dibuja_rango(&coche, l, coche.inicio[l], coche.inicio[l + 1], 0, 0, 0); return; }
     indices_delante = modelo_delante(&coche, (const float (*)[4])*mc);
     for (p = 0; p < NPZ; p++) {
         uint32_t a = ani.ini[l][p], b = ani.ini[l][p + 1];
-        if (b <= a) continue;
+        if (b <= a || (interior ? p != PZ_INTERIOR && p != PZ_FAROS : p == PZ_INTERIOR)) continue;
         mat_load(&vista); mat_apply(mc); mat_apply(&ani_m[p]);
         dibuja_indices(&coche, l, ani.idx + a, b - a);
     }
@@ -12027,8 +12033,40 @@ static void fin_empieza(int como)
     }
     fin_entra(como, &c);
 }
+/* el tiempo de cada etapa (race_manager 7D3954: 450E10 guarda en el nivel el crono menos lo de los niveles anteriores,
+   en ms; 4505A0) y si se supero (7D38AC: 4506A0), para la tabla de la meta (demo/fin.c fin_tabla_*) */
+static int et_ms[15], et_ok[15], et_nodo[15], tabla_on;
+static void etapas_empieza(void) { memset(et_ms, 0, sizeof et_ms); memset(et_ok, 0, sizeof et_ok); memset(et_nodo, -1, sizeof et_nodo); tabla_on = 0; }
+static void etapa_acaba(int nivel)
+{
+    int k, ms = cuadros_ms(crono);
+    if (nivel < 0 || nivel >= 15) return;
+    for (k = 0; k < nivel; k++) ms -= et_ms[k];
+    et_ms[nivel] = ms; et_ok[nivel] = 1;
+    dbglog(DBG_INFO, "ETAPA: nivel %d superado en %d ms\n", nivel, ms);
+}
+static void etapa_entra(int nodo) { if (nodo >= 0 && nodo < ncurso && curso[nodo].nivel < 15) et_nodo[curso[nodo].nivel] = nodo; }
+/* GAD de la meta (0x19e6d0): la tabla de tiempos en las variantes 1 y 7 (la 2 y la 6 tienen sus propias pantallas) */
+static void tabla_entra(void)
+{
+    fin_tabla_t t; int k;
+    memset(&t, 0, sizeof t);
+    t.variante = variante; t.n = 0;
+    for (k = 0; k < ncurso; k++) if (curso[k].nivel + 1 > t.n) t.n = curso[k].nivel + 1;   /* 4EF710 */
+    if (t.n > 15) t.n = 15;
+    for (k = 0; k < t.n; k++) {
+        t.ok[k] = et_ok[k]; t.ms[k] = et_ms[k];
+        if (et_nodo[k] >= 0) memcpy(t.zona[k], curso[et_nodo[k]].zona, 4); else memset(t.zona[k], ' ', 4);
+    }
+    t.avance = 1; t.total_ms = cuadros_ms(crono); t.puntos = pt_visible();
+    /* el NAVI ya no dibuja (4B8E30(0) en la variante 1; en la 7 no dibuja en la meta): sus texturas fuera de la VRAM
+       como en el modo 34 (vuelven al empezar otra carrera, hud_sube_tex) */
+    hud_baja_tex(); hudd_vacia();
+    tabla_on = !fin_tabla_entra(&t);
+}
 static void meta_sale(void)
 {
+    if (tabla_on) { fin_tabla_sale(); tabla_on = 0; }
     meta_termina(); meta_pas = meta_cam = 0; efe_mascara = 0; meta.activa = 0;
     cerca = CERCA_PS2; lejos_guion = LEJOS_PS2;
 }
@@ -12880,7 +12918,7 @@ int main(int argc, char **argv)
                        curso[cur_nodo].zona, (double)yo.s, (double)yo.x, (double)yo.a, (double)yo.pos[0], (double)yo.pos[1],
                        (double)yo.pos[2], reintenta ? " (REINTENTAR)" : "");
                 lejos = LEJOS_PS2; entorno_reinicia(); niebla_paso(); niebla_pon();   /* la distancia del original */
-                tim_cuadros = tim_zona(cur_nodo, etapa_n); tiempo = tim_cuadros / TIM_HZ; estado = CUENTA; t_estado = 0; t_cuenta = -60; fac_on = 0; fac_base = 30001; salida_entra(); pausa = 0; crono = 0; pt_inicia(); fin_carrera_empieza(!juego_sp);
+                tim_cuadros = tim_zona(cur_nodo, etapa_n); tiempo = tim_cuadros / TIM_HZ; estado = CUENTA; t_estado = 0; t_cuenta = -60; fac_on = 0; fac_base = 30001; salida_entra(); pausa = 0; crono = 0; pt_inicia(); fin_carrera_empieza(!juego_sp); etapas_empieza(); etapa_entra(cur_nodo);
                 reintenta = 0;
                 if (voz_ok) voces_carrera();
                 if (variante == 6) {                            /* C2CHUD.DAT: sus tablas en la RAM y todas sus texturas */
@@ -13115,6 +13153,7 @@ int main(int argc, char **argv)
                            y bajo el arco de roca se veia el blanco del horizonte (barrido de la revision 44) */
                         if (lejos < lejos_obj) lejos = lejos_obj;
                         int amp = tim_zona(cur_nodo, curso[cur_nodo].nivel);
+                        etapa_acaba(curso[cur_nodo].nivel - 1); etapa_entra(cur_nodo);   /* 44FF20: stage clear */
                         pt_bonus_etapa(); tim_cuadros += amp; tiempo = tim_cuadros / TIM_HZ; t_ext = 0;
                         if (voz_ok) voces_checkpoint();         /* EXTEND TIME: efecto 0x4d y voz 0x16c */
                         if (variante == 2) infarto_etapa(cur_nodo, curso[cur_nodo].nivel);   /* stage clear */
@@ -13153,6 +13192,7 @@ int main(int argc, char **argv)
                     }
 #endif
                     if (ev & CUR_META) {
+                        if (cur_nodo >= 0 && cur_nodo < ncurso) etapa_acaba(curso[cur_nodo].nivel);   /* 4513C0: la ultima */
                         estado = META; t_estado = 0; pt_bonus_etapa(); texto_centro("GOAL!");
                         if (variante == 2) infarto_meta();      /* 44FF10 */
                         if (voz_ok) voces_meta();
@@ -13192,6 +13232,15 @@ int main(int argc, char **argv)
                fisica, sin giro de las ruedas). Hasta la demo 39 el coche seguia con el freno a 0,6 (PROVISIONAL) y
                seguia andando tras el fin del tiempo (el usuario en la demo 39) */
             int fin_t = estado == META ? (meta_lista() ? META_CUADROS : 600) : variante == 2 || variante == 5 ? 0x258 : 0xf0;
+#ifdef PRUEBA_TABLA
+#define TABLA_AUTO 1                                            /* prueba: la tabla de la meta tambien con el piloto */
+#else
+#define TABLA_AUTO 0
+#endif
+            if (estado == META && (variante == 1 || variante == 7) && !juego_sp && (!auto_ || TABLA_AUTO)) {   /* GAD 0x19e6d0 */
+                if (!tabla_on && t_estado >= META_CUADROS - 0x3fc) tabla_entra();   /* (sin esperar a la voz: 49A190) */
+                if (tabla_on) fin_tabla_paso();
+            }
             if (estado == META && meta_lista()) {               /* modo 19 (49CC50): suceso 7 y el coche del guion */
                 meta_juego_paso();
                 if (lejos_obj > lejos_guion) lejos_obj = lejos_guion;
@@ -13238,6 +13287,7 @@ int main(int argc, char **argv)
                     dbglog(DBG_INFO, "RIVAL: fin (%s), puesto %d/%d, nota %d (antes %d)\n", estado == META ? "meta" : "tiempo",
                            rival_puesto() + 1, rival_total(), rival_nota(), c2c_nota_ant);
                 }
+                if (tabla_on) { fin_tabla_sale(); tabla_on = 0; }   /* salida del modo 19: la tabla de la meta fuera */
                 fin_empieza(estado == META ? FIN_META : FIN_TIEMPO); fin_on = 1;   /* 33 (sin red) -> 34 / 20 -> 34 */
             }
             if (fin_on) {                                       /* modos 34 / 35 / 27 (demo/fin.c) */
@@ -13511,10 +13561,12 @@ int main(int argc, char **argv)
             }
             POP_CAT0();
             PRF(4);
-            if ((estado != TITULO && !mundo_fuera && (!cam_ok || cam_coche_visible(&cam))) || (estado == TITULO && menu_coche3d()) || (fin24 && final_vista()->coche))
+            if ((estado != TITULO && !mundo_fuera && (!cam_ok || cam_coche_visible(&cam))) || (estado == TITULO && menu_coche3d()) || (fin24 && final_vista()->coche)) {
 #ifndef DIAG_SIN_COCHE
-                coche_dibuja(l, &mod_coche);
+                coche_dibuja(l, &mod_coche, 0);
 #endif
+            } else if (estado != TITULO && !mundo_fuera && cam_ok && cam_coche_modo(&cam) == 1 && !fin24)
+                coche_dibuja(l, &mod_coche, 1);                 /* la vista interior: el habitaculo (vm = 2) */
             POP_CAT(2);
             PRF(5);
             if (fin24) robot_dibuja(&rc_chr, l);              /* 514E60 de la pareja del final */
@@ -13636,6 +13688,7 @@ int main(int argc, char **argv)
                 if (estado == META || estado == AGOTADO || estado == FIN) texto = 0;
                 if (fin24) final_dibuja2d();                    /* los creditos del final (capa 7) */
                 fin_dibuja();                                   /* millas, continuar y GAME OVER (demo/fin.c) */
+                if (tabla_on) fin_tabla_dibuja();               /* la tabla de tiempos de la meta (GAD 0x19e6d0) */
                 if (pausa && estado == CARRERA) menu_pausa_dibuja();   /* menu de pausa encima de todo */
                 {   float ty = variante == 2 && !ver && estado == CARRERA && !pausa ? 104.0f : 18.0f;   /* INFARTO: bajo el marcador */
                     if (texto && ty > 100 && !pausa) caja(36, ty, 568, 92, 0x90000000);

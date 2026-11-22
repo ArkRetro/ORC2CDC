@@ -445,3 +445,153 @@ void fin_sale(void)
 }
 
 int fin_activo(void) { return fase >= 0; }
+
+/* ---------------------------------------------------------------- la tabla de tiempos por etapa de la meta
+   GAD de la meta (PS2 0x19e6d0, PC 498670) en las variantes 1 y 7 de la consola, cuando el temporizador del modo 19
+   baja de 0x3FC (variante 1) y la voz de GOAL ha acabado: 0x1a05f8 (4979E0) y, al acabar, el panel de la variante.
+   Tabla (contador 0x577cdc = TB.cnt, +1 por paso desde 0):
+     filas = cnt / 30 (0x35c7a0) sin pasar de las superadas (las primeras seguidas con 4506A0); a la vista las 5
+     (0x35c7a4) que acaban en la ultima: primera = max(0, filas - 4); por fila a la vista el fondo 2C000D y el rotulo
+     0x3ef430[fila] en (0, y0 + 38 k);
+     de la primera a la ultima fila: mientras se llena (30 cuadros si esta superada, si no 30 x car+102C) la barra
+     (imagen 0x30002 en (344, y0 + 195 + 38 k) y 0x30003 en (346, y0 + 199 + 38 k) estirada por el porcentaje
+     (cnt % 30) x 100 / 30) y el porcentaje (fuente 4, "%02d%%" o "100%%", en (470, y0 + 195 + 38 k)); llena: el tiempo
+     de la etapa (4505A0: "% 2d'%02d\"%03d", blanco, en (338, y0 + 195 + 38 k)) o, sin superar, la barra con car+102C;
+     siempre el nombre de la etapa (2C0047, cuadro = 0x35c7b0[descriptor de la zona]) en (267, y0 + 206 + 38 k);
+     acaba cuando cnt pasa de (superadas + 1) x 30.
+   Paneles (0x19eb00 / 0x19ebe4): variante 1, 2C00AE en (0, y0), el tiempo total en (338, y0 + 385) y la puntuacion
+   ("%07d", amarilla) en (x, y0 + 428); variante 7, 2C00AF en (0, 0) y el tiempo total amarillo en (x, 385). La x de
+   lo amarillo se desliza (0x19fb08): empieza en 520 (puntuacion) o 500 (tiempo) a -20 px por paso con un ancho de 3
+   (gad init 4970F0); fase 0 velocidad x 1,02 hasta pasar de largo el primer umbral (408 / 388), fase 1 x 0,7 hasta el
+   destino (358 / 338), fase 2 x 1; por debajo del destino yendo a la izquierda, o por encima de destino + ancho yendo a
+   la derecha, rebota (v = -v x 0,7) y el ancho x 0,7; se queda en el destino con |v| y |x - destino| < 1 (0x35c79c).
+   Texto: la fuente 4 a escala 1 alineada a la derecha del punto (0x117558(0)), un caracter cada 20 px (0x1be3c8).
+   SIN PORTAR: los efectos 0xAD / 0x80AD (barra) y 0xB0 (fin de la tabla) y la espera de la voz de GOAL (49A190): los
+   bancos de sonido que los traen dependen de la etapa (sin localizar cual carga la meta) y comun/sfx.c no dice si una voz
+   suena; la variante 0 (records, 47EE70: el tiempo en verde y 2C00B7) y la 9. */
+#define TB_FILA_CUADROS 30                              /* [0x35c7a0] */
+#define TB_FILAS 5                                      /* [0x35c7a4] */
+#define TB_ALTO 38                                      /* 0x1a0770: addiu 0x26 */
+static const char TB_CH[] = "0123456789'\"% ";          /* tools/conv_fin.py TABLA_CH: cuadros de T_CH */
+static struct {
+    hud_dat_t *h; fin_tabla_t d; int on, cnt, sup, panel;
+    int u_fila, u_e[15], u_nombre, u_panel, u_b0, u_b1, u_ch, nombre[15], s_b1; float b1_w, b1_h;
+    float x, v, w;                                      /* 0x577ce0.. / 0x577cf0..: deslizamiento (x, ancho, v) */
+} TB;
+
+int fin_tabla_entra(const fin_tabla_t *t)
+{
+    int i; char n[16]; hudd_pz_t pz[2];
+    fin_tabla_sale();
+    memset(&TB, 0, sizeof TB); TB.d = *t;
+    if (TB.d.n > 15) TB.d.n = 15;
+    if (!(TB.h = hudd_abre_gd("GOALT.DAT"))) { dbglog(DBG_ERROR, "FIN: sin GOALT.DAT\n"); return -1; }
+    TB.u_fila = hudd_uso(TB.h, "T_FILA"); TB.u_nombre = hudd_uso(TB.h, "T_NOMBRE");
+    TB.u_panel = hudd_uso(TB.h, t->variante == 1 ? "T_PANEL" : "T_PANEL7");
+    TB.u_b0 = hudd_uso(TB.h, "T_BARRA0"); TB.u_b1 = hudd_uso(TB.h, "T_BARRA1"); TB.u_ch = hudd_uso(TB.h, "T_CH");
+    for (i = 0; i < 15; i++) { sprintf(n, "T_E%d", i); TB.u_e[i] = hudd_uso(TB.h, n); }
+    for (i = 0; i < TB.d.n; i++) {                       /* NZ_<zona>: x = el cuadro de 2C0047 */
+        int u; memcpy(n, "NZ_", 3); memcpy(n + 3, t->zona[i], 4); n[7] = 0;
+        u = hudd_uso(TB.h, n); TB.nombre[i] = u >= 0 ? hudd_uso_x(TB.h, u) : -1;
+    }
+    TB.s_b1 = hudd_piezas(TB.h, TB.u_b1, 0, pz, 2) > 0 ? pz[0].spr : -1;
+    if (TB.s_b1 >= 0) hudd_spr_tam(TB.h, TB.s_b1, &TB.b1_w, &TB.b1_h);
+    while (TB.sup < TB.d.n && TB.d.ok[TB.sup]) TB.sup++;   /* 4506A0 de las primeras seguidas */
+    hudd_sube_uso(TB.h, TB.u_fila); hudd_sube_uso(TB.h, TB.u_nombre); hudd_sube_uso(TB.h, TB.u_b0); hudd_sube_uso(TB.h, TB.u_ch);
+    TB.x = t->variante == 1 ? 520.0f : 500.0f; TB.v = -20.0f; TB.w = 3.0f;   /* 4970F0 */
+    TB.on = 1;
+    dbglog(DBG_INFO, "FIN: tabla de la meta (variante %d, %d etapas, %d superadas), VRAM libre %uK\n", t->variante, TB.d.n,
+           TB.sup, (unsigned)(pvr_mem_available() >> 10));
+    return 0;
+}
+
+static void desliza(float destino, float umbral)        /* 0x19fb08 */
+{
+    if (TB.x < umbral && TB.panel == 1) TB.panel = 2;
+    if (TB.x < destino && TB.panel == 2) TB.panel = 3;
+    TB.v *= TB.panel == 1 ? 1.02f : TB.panel == 2 ? 0.7f : 1.0f;
+    if (TB.x < destino && TB.v < 0) { TB.v = -TB.v * 0.7f; TB.w *= 0.7f; }
+    if (TB.x > destino + TB.w && TB.v > 0) { TB.v = -TB.v * 0.7f; TB.w *= 0.7f; }
+    TB.x += TB.v;
+    if (TB.v > -1 && TB.v < 1 && TB.x > destino - 1 && TB.x < destino + 1) { TB.x = destino; TB.v = 0; }
+}
+
+void fin_tabla_paso(void)
+{
+    if (!TB.on) return;
+    if (!TB.panel) {
+        TB.cnt++;
+        if (TB.cnt > (TB.sup + 1) * TB_FILA_CUADROS) { TB.panel = 1; hudd_sube_uso(TB.h, TB.u_panel); }
+    } else if (TB.d.variante == 1) desliza(358, 408);  /* 0x19eb38.. */
+    else desliza(338, 388);                            /* 0x19ec14.. */
+}
+
+static void texto(const char *s, float x, float y, uint32_t rgb, float z)   /* 0x1be3c8: 20 px por caracter */
+{
+    hudd_color(rgb);
+    for (; *s; s++, x += 20) {
+        const char *p = strchr(TB_CH, *s);
+        if (p && *s != ' ') hudd_dibuja(TB.h, TB.u_ch, (int)(p - TB_CH), x, y, 1, z, 0);
+    }
+    hudd_color(0xFFFFFF);
+}
+static void tiempo_txt(char *b, int ms)                 /* "% 2d'%02d\"%03d" */
+{
+    if (ms < 0) ms = 0;
+    sprintf(b, "%2d'%02d\"%03d", ms / 60000 % 100, ms / 1000 % 60, ms % 1000);
+}
+static void barra(float y, float pc, float z)           /* 0x117ac0 / 0x1179e0 */
+{
+    hudd_dibuja(TB.h, TB.u_b0, 0, 344, y + 195, 1, z, 0);
+    if (TB.s_b1 >= 0 && pc > 0) {
+        const float m[6] = { pc, 0, 0, 1, 346, y + 199 }, q[4] = { 0, 0, 1, TB.b1_h };
+        hudd_capa(TB.h, z + 0.5f, 0); hudd_sprite(TB.s_b1, m, q, 1, 0);
+    }
+}
+static void porcentaje(float y, int pc, float z)       /* 0x19ffb0 */
+{
+    char b[8];
+    if (pc != 100) sprintf(b, "%02d%%", pc); else strcpy(b, "100%");
+    texto(b, 470, y + 195, 0xFFFFFF, z);
+}
+
+void fin_tabla_dibuja(void)
+{
+    int filas, pri, k, f; float y0, z = 140; char b[24];
+    if (!TB.on || !TB.h) return;
+    y0 = TB.d.variante == 1 ? -20.0f : 0.0f;
+    filas = TB.cnt / TB_FILA_CUADROS; if (filas > TB.sup) filas = TB.sup;
+    pri = filas - TB_FILAS + 1; if (pri < 0) pri = 0;
+    for (k = 0; k < TB_FILAS && pri + k < 15; k++) {   /* fondo y rotulo de las filas a la vista */
+        hudd_dibuja(TB.h, TB.u_fila, 0, 0, y0 + TB_ALTO * k, 1, z, 0);
+        hudd_dibuja(TB.h, TB.u_e[pri + k], 0, 0, y0 + TB_ALTO * k, 1, z + 1, 0);
+    }
+    for (f = pri; f <= filas && f < TB.d.n; f++) {
+        float y = y0 + TB_ALTO * (f - pri);
+        int largo = TB.d.ok[f] ? TB_FILA_CUADROS : (int)(TB_FILA_CUADROS * TB.d.avance);
+        if (TB_FILA_CUADROS * f <= TB.cnt && TB.cnt < TB_FILA_CUADROS * f + largo) {   /* llenandose */
+            float pc = (float)(TB.cnt % TB_FILA_CUADROS) * (100.0f / TB_FILA_CUADROS);
+            barra(y, pc, z + 2); porcentaje(y, (int)pc, z + 4);
+        }
+        if (TB.cnt >= TB_FILA_CUADROS * f + largo) {    /* llena */
+            if (TB.d.ok[f]) { tiempo_txt(b, TB.d.ms[f]); texto(b, 338, y + 195, 0xFFFFFF, z + 4); }
+            else { barra(y, TB.d.avance * 100, z + 2); porcentaje(y, (int)(TB.d.avance * 100), z + 4); }
+        }
+        if (TB.nombre[f] >= 0) hudd_dibuja(TB.h, TB.u_nombre, TB.nombre[f], 0, y, 1, z + 3, 0);
+    }
+    if (TB.panel) {
+        hudd_dibuja(TB.h, TB.u_panel, 0, 0, TB.d.variante == 1 ? y0 : 0, 1, z + 6, 0);
+        tiempo_txt(b, TB.d.total_ms);
+        if (TB.d.variante == 1) {
+            int p = TB.d.puntos > 9999999 ? 9999999 : TB.d.puntos < 0 ? 0 : TB.d.puntos;
+            texto(b, 338, y0 + 385, 0xFFFFFF, z + 7);
+            sprintf(b, "%07d", p); texto(b, TB.x, y0 + 428, 0xFFFF00, z + 7);
+        } else texto(b, TB.x, 385, 0xFFFF00, z + 7);
+    }
+}
+
+void fin_tabla_sale(void)
+{
+    if (TB.h) { pvr_wait_ready(); hudd_cierra(TB.h); }
+    TB.h = NULL; TB.on = 0;
+}

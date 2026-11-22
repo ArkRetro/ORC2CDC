@@ -57,6 +57,8 @@ void cam_paso(cam_t *c, const cam_tablas_t *t, const cam_entrada_t *e);
    Solo lo son el ojo y la mira de salida; el resto del estado es local al coche (ojo y mira locales, mezcla de vistas)
    o angular (historia del cabeceo, giro guardado del choque), y se recalcula en cada paso desde el coche */
 void cam_traslada(cam_t *c, float dx, float dy, float dz);
-/* 4A2BA0: si se dibuja la carroceria por fuera con la vista actual */
+/* 4A2BA0: si se dibuja la carroceria por fuera con la vista actual (car+4 & 0xC000 == 0x4000) */
 int  cam_coche_visible(const cam_t *c);
+/* 4A2BA0: 0 sin coche, 1 el habitaculo (0x8000, vista interior), 2 el coche entero (0x4000) */
+int  cam_coche_modo(const cam_t *c);
 #endif

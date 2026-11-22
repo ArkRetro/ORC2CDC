@@ -43,6 +43,22 @@ typedef struct {
     uint8_t *ram; uint32_t ram_cap;
 } fin_sp_t;
 void fin_sp_resultados(int como, const fin_sp_t *d);
+/* La tabla de tiempos por etapa de la meta (GAD 0x19e6d0 = 498670: variantes 1 y 7 de la consola; 0x1a05f8 = 4979E0)
+   y despues el panel de la variante (2C00AE con el tiempo total y la puntuacion, o 2C00AF con el tiempo). GOALT.DAT de
+   tools/conv_fin.py */
+typedef struct {
+    int variante;           /* [780258]: 1 OutRun (y0 = -20, panel 2C00AE), 7 Contrarreloj (y0 = 0, panel 2C00AF) */
+    int n;                  /* etapas del curso (4EF710: las filas que puede haber) */
+    int ok[15];             /* 4506A0: etapa superada */
+    int ms[15];             /* 4505A0: tiempo de la etapa (ms) */
+    char zona[15][4];       /* la zona de la etapa de cada nivel (el nombre: 44C8D0 de 450560) */
+    float avance;           /* car+102C: lo corrido de la etapa sin superar (0..1) */
+    int total_ms, puntos;   /* 451180(0) (el crono) y 4BF0E8 (0x19ff08) */
+} fin_tabla_t;
+int  fin_tabla_entra(const fin_tabla_t *t);         /* abre GOALT.DAT (solo tablas); 0 bien */
+void fin_tabla_paso(void);                          /* un paso de logica */
+void fin_tabla_dibuja(void);                        /* dentro de la lista TR */
+void fin_tabla_sale(void);                          /* suelta GOALT.DAT y su VRAM */
 void fin_sale(void);                                /* suelta FIN.DAT / GOVER.DAT (y su VRAM) */
 int  fin_activo(void);
 #endif

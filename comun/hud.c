@@ -732,6 +732,12 @@ void hudd_capa(hud_dat_t *h, float z, int fondo)
 float hudd_z(void) { return zcapa; }
 int hudd_sprite_tex(const hud_dat_t *h, int s) { return h && s >= 0 && (uint32_t)s < h->n_spr ? h->spr[s].tex : -1; }
 int hudd_n_spr(const hud_dat_t *h) { return h ? (int)h->n_spr : 0; }
+void hudd_spr_tam(const hud_dat_t *h, int s, float *w, float *hh)
+{
+    *w = *hh = 0;
+    if (h && s >= 0 && (uint32_t)s < h->n_spr) { *w = h->spr[s].w; *hh = h->spr[s].h; }
+}
+int hudd_uso_x(const hud_dat_t *h, int u) { return h && u >= 0 && u < (int)h->n_uso ? h->uso[u].x : 0; }
 void hudd_sprite(int s, const float *m, const float *q, float alfa, int aditiva)
 {
     const h_spr_t *sp; int k; pvr_vertex_t v;

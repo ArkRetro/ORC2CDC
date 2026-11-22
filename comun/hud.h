@@ -85,6 +85,8 @@ void hudd_capa(hud_dat_t *h, float z, int fondo);
 void hudd_sprite(int s, const float *m, const float *q, float alfa, int aditiva);
 int hudd_sprite_tex(const hud_dat_t *h, int s);
 int hudd_n_spr(const hud_dat_t *h);                        /* sprites del fichero (para comprobar un indice nuevo) */
+void hudd_spr_tam(const hud_dat_t *h, int s, float *w, float *hh);   /* ancho y alto (px) del sprite s */
+int hudd_uso_x(const hud_dat_t *h, int u);                 /* la x del uso (GOALT.DAT: NZ_<zona> lleva ahi un cuadro) */
 float hudd_z(void);                                      /* z de la siguiente pieza */
 void hudd_todas_usables(hud_dat_t *h);                   /* todas sus texturas se pueden subir (SPRANI con usos) */
 int hudd_n_tex(const hud_dat_t *h);                       /* texturas del fichero */
