@@ -16,6 +16,7 @@
 #include <dc/cdrom.h>
 #include <math.h>
 #include <malloc.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include "../comun/gd.h"
 #include "../comun/registro.h"
@@ -44,6 +45,69 @@
 #endif
 #include "meta.h"
 
+#ifdef DIAG_VRAMLOG
+/* Registro de la VRAM (Rev 2.6, pedido con el material de investigacion del usuario: contrato CSV
+   seq,frame,event,id,bytes,asset con event alloc / free / fail / mark). Cada evento sale por la consola como una linea
+   "VRAMEV,<seq>,<frame>,<event>,<id>,<bytes>,<asset>" (sin bufer: nada se pierde; la traza va mas lenta que el juego
+   normal, comparar con una ejecucion sin ella). Que se registra:
+   - pvr_mem (envolviendo pvr_mem_malloc / pvr_mem_free, debiles en KallistiOS): alloc con el bloque real (request2size
+     de pvr_mem_core.c: tam + 4 redondeado a 32, 32 como minimo), free, fail con lo pedido. asset: la textura
+     (FICHERO:tN) si la pide la subida de un modelo, o "pvr@<direccion de vuelta>" (HUD, menus, efectos...).
+   - la zona del curso: su bloque NO se registra como reserva (agrupa las texturas de etapa y union: se registran ellas,
+     con id = su direccion dentro de la zona, y sus free cuando su lado se vacia); una marca da su tamano. La busqueda
+     del mayor bloque (malloc / free de prueba) no se registra.
+   - mark: zona del curso, etapa de salida, fichero leido, etapa nueva, checkpoint.
+   No se registra: las texturas compartidas entre union y etapa (no son reservas: tex_igual), lo que KallistiOS reserva
+   por su cuenta antes de main (bufer de vertices del TA, pvr_init), ni la RAM. */
+static uint32_t vl_seq, vl_frame; static int vl_calla; static char vl_asset[40];
+static void vl_ev(const char *ev, uint32_t id, uint32_t bytes, const char *asset)
+{
+    if (id) printf("VRAMEV,%u,%u,%s,%08lx,%u,%s\n", (unsigned)++vl_seq, (unsigned)vl_frame, ev, (unsigned long)id, (unsigned)bytes, asset ? asset : "");
+    else printf("VRAMEV,%u,%u,%s,,%u,%s\n", (unsigned)++vl_seq, (unsigned)vl_frame, ev, (unsigned)bytes, asset ? asset : "");
+}
+static void vl_marca(const char *f, ...)
+{
+    char b[64]; va_list ap; int i;
+    va_start(ap, f); vsnprintf(b, sizeof b, f, ap); va_end(ap);
+    for (i = 0; b[i]; i++) if (b[i] == ',' || b[i] == '\n' || b[i] == '"') b[i] = ';';
+    vl_ev("mark", 0, 0, b);
+}
+#define VL_BLOQUE(t) ((t) + 4 < 32 ? 32u : (uint32_t)(((t) + 4 + 31) & ~31u))
+#ifdef DIAG_PVRMEM
+#error "DIAG_VRAMLOG y DIAG_PVRMEM envuelven los dos pvr_mem: uno solo"
+#endif
+extern void *pvr_int_malloc(size_t bytes); extern void pvr_int_free(void *ptr);
+pvr_ptr_t pvr_mem_malloc(size_t tam)
+{
+    void *p = pvr_int_malloc(tam); char a[40];
+    if (!vl_calla) {
+        if (vl_asset[0]) snprintf(a, sizeof a, "%s", vl_asset); else snprintf(a, sizeof a, "pvr@%08lx", (unsigned long)(uint32_t)__builtin_return_address(0));
+        if (p) vl_ev("alloc", (uint32_t)p, VL_BLOQUE(tam), a); else vl_ev("fail", 0, (uint32_t)tam, a);
+    }
+    return p;
+}
+void pvr_mem_free(pvr_ptr_t p)
+{
+    if (!vl_calla && p) vl_ev("free", (uint32_t)p, 0, "");
+    pvr_int_free(p);
+}
+#define VL_ZMAX 4096
+static uint32_t vl_z[3][VL_ZMAX]; static int vl_nz[3];           /* reservas vivas de cada lado de la zona */
+static void vl_zona_alloc(int lado, uint32_t a, uint32_t tam)
+{
+    vl_ev("alloc", a, tam, vl_asset[0] ? vl_asset : "zona");
+    if (vl_nz[lado] < VL_ZMAX) vl_z[lado][vl_nz[lado]++] = a; else vl_marca("PERDIDO free de la zona %d", lado);
+}
+static void vl_zona_vacia(int lado)
+{
+    int i; for (i = 0; i < vl_nz[lado]; i++) vl_ev("free", vl_z[lado][i], 0, ""); vl_nz[lado] = 0;
+}
+#define VL_ASSET(...) snprintf(vl_asset, sizeof vl_asset, __VA_ARGS__)
+#define VL_ASSET_FIN() (vl_asset[0] = 0)
+#else
+#define VL_ASSET(...) ((void)0)
+#define VL_ASSET_FIN() ((void)0)
+#endif
 #ifdef DIAG_PVRMEM
 /* Medida: los bloques de pvr_mem (pvr_mem_malloc / pvr_mem_free de KallistiOS son debiles: estos los envuelven) con
    quien los pidio (la direccion de vuelta y pvrmem_dueno, que pone hud.c con el fichero) para el mapa de la VRAM de
@@ -159,6 +223,9 @@ typedef struct {
     uint32_t *ofs;                                                /* color de desplazamiento por vertice o NULL (coche) */
     const int32_t *remap;                                         /* textura -> la del color elegido, o NULL (trafico) */
     uint32_t tam;                                                 /* bytes del fichero leido */
+#ifdef DIAG_VRAMLOG
+    char vl_nom[16];                                              /* (registro de la VRAM) el fichero */
+#endif
     int relleno_propio;                                           /* lo pone quien pide la lectura: relleno[0] de los
                                                                      nodos trae datos del conversor (conv_bo.py) y no se
                                                                      usa para el presupuesto del TA */
@@ -321,6 +388,9 @@ static int lee_modelo_en(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t
 {
     uint32_t sz, h[13], i, v7; uint8_t *b = buf ? (gd_carga_en(nombre, buf, cap, &sz) ? NULL : buf) : gd_carga(nombre, &sz), *p;
     if (!b) return -1;
+#ifdef DIAG_VRAMLOG
+    snprintf(m->vl_nom, sizeof m->vl_nom, "%s", nombre); vl_marca("leido %s", nombre);
+#endif
     v7 = !memcmp(b, "ORD7", 4);                                   /* ORD7: con nodos y visibilidad del original */
     if (!v7 && memcmp(b, "ORD5", 4) && memcmp(b, "ORD6", 4)) { if (!buf) free(b); return -2; }   /* ORD6: VQ */
     memset(h, 0, sizeof h); memcpy(h, b + 4, (v7 ? 13 : 10) * 4);
@@ -526,7 +596,11 @@ static int sube_modelo(modelo_t *m)
     for (f = 0; f < 2; f++) m->cabs[f] = memalign(32, (m->ntex + 1) * sizeof(pvr_poly_hdr_t));
     m->tv = calloc(m->ntex + 1, sizeof(pvr_ptr_t));
     for (i = 0; i < m->ntex; i++) {
-        tex_t *t = m->texs + i; pvr_ptr_t v = pvr_mem_malloc(t->tam);
+        tex_t *t = m->texs + i; pvr_ptr_t v;
+#ifdef DIAG_VRAMLOG
+        VL_ASSET("%s:t%u", m->vl_nom, (unsigned)i);
+#endif
+        v = pvr_mem_malloc(t->tam); VL_ASSET_FIN();
         uint32_t fb = t->fmt & 0xff;
         if (!v) return -3;
         if (fb > 2 || (t->tam & 31)) return -4;
@@ -613,6 +687,9 @@ static void tex_suelta(modelo_t *m)
     for (i = 0; i < m->ntex; i++) if (m->tv && m->tv[i] && (!m->tfl || (m->tfl[i] & TF_PROPIA))) pvr_mem_free(m->tv[i]);
     if (m->lado == 1) ar_abajo = ar_ini;                          /* su lado de la zona del curso, entero */
     if (m->lado == 2) ar_arriba = ar_fin;
+#ifdef DIAG_VRAMLOG
+    if (m->lado == 1 || m->lado == 2) vl_zona_vacia(m->lado);
+#endif
     if (m->tex0) { memcpy(m->texs, m->tex0, m->ntex * sizeof(tex_t)); free(m->tex0); }
     free(m->tv); free(m->tfl); free(m->cabs[0]); free(m->cabs[1]);
     m->tv = NULL; m->tfl = NULL; m->tex0 = NULL; m->cabs[0] = m->cabs[1] = NULL; m->lado = 0;
@@ -688,7 +765,14 @@ static void ar_suelta(void)
     if (ar_lastre) pvr_mem_free(ar_lastre);
     ar_lastre = NULL;
 #endif
+#ifdef DIAG_VRAMLOG
+    if (ar_bloque) { vl_zona_vacia(1); vl_zona_vacia(2); vl_marca("zona del curso fuera"); }
+    vl_calla++;
+#endif
     if (ar_bloque) pvr_mem_free(ar_bloque);
+#ifdef DIAG_VRAMLOG
+    vl_calla--;
+#endif
     ar_bloque = NULL; ar_ini = ar_fin = ar_abajo = ar_arriba = 0;
 }
 /* la zona del curso: el mayor bloque de lo libre menos la reserva (pvr_mem no dice cual es el mayor hueco: se busca) */
@@ -701,15 +785,26 @@ static void ar_reserva(void)
     if (hi > PRUEBA_VRAM_KB * 1024u) hi = PRUEBA_VRAM_KB * 1024u;   /* prueba: zona pequena (rebajas y apuros) */
 #endif
     if (hi < 65536) return;
+#ifdef DIAG_VRAMLOG
+    vl_calla++;                                                   /* (la zona: se registran sus texturas, no el bloque) */
+#endif
     if (!(p = pvr_mem_malloc(hi))) {                              /* troceada: busqueda del mayor que cabe (32 KB) */
         while (hi - lo > 32768) {
             k = ((lo + hi) / 2) & ~32767u;
             if (k <= lo) break;
             if ((p = pvr_mem_malloc(k))) { pvr_mem_free(p); lo = k; } else hi = k;
         }
-        if (!lo || !(p = pvr_mem_malloc(lo))) return;
+        if (!lo || !(p = pvr_mem_malloc(lo))) {
+#ifdef DIAG_VRAMLOG
+            vl_calla--;
+#endif
+            return;
+        }
         hi = lo;
     }
+#ifdef DIAG_VRAMLOG
+    vl_calla--; vl_marca("zona del curso %uK", (unsigned)(hi >> 10));
+#endif
     ar_bloque = p; ar_ini = ar_abajo = (uintptr_t)p; ar_fin = ar_arriba = ar_ini + hi;
     ar_max_abajo = 0; ar_min_arriba = hi; vram_rebajadas = vram_fuera = 0;
 #ifdef PRUEBA_VRAM_KB
@@ -727,10 +822,16 @@ static pvr_ptr_t vram_pide(uint32_t tam, int lado, uint8_t *fl)
     uintptr_t a; pvr_ptr_t v;
     if (ar_bloque && lado == 1 && (a = (ar_abajo + 31) & ~(uintptr_t)31) + tam <= ar_arriba) {
         ar_abajo = a + tam; if (ar_abajo - ar_ini > ar_max_abajo) ar_max_abajo = ar_abajo - ar_ini;
+#ifdef DIAG_VRAMLOG
+        vl_zona_alloc(1, (uint32_t)a, tam);
+#endif
         return (pvr_ptr_t)a;
     }
     if (ar_bloque && lado == 2 && ar_arriba - ar_ini >= tam && (a = (ar_arriba - tam) & ~(uintptr_t)31) >= ar_abajo) {
         ar_arriba = a; if (ar_arriba - ar_ini < ar_min_arriba) ar_min_arriba = ar_arriba - ar_ini;
+#ifdef DIAG_VRAMLOG
+        vl_zona_alloc(2, (uint32_t)a, tam);
+#endif
         return (pvr_ptr_t)a;
     }
     if ((v = pvr_mem_malloc(tam))) { *fl |= TF_PROPIA; vram_fuera++; }
@@ -850,8 +951,12 @@ static int sube_trozo(uint32_t max)
         } else if ((t->fmt & 0xff) <= 2 && !(t->tam & 31) && t->tam && (j = tex_igual(sub.comp, m, i)) >= 0) {
             v = sub.comp->tv[j]; m->tfl[i] = TF_AJENA; sub.b_comp += t->tam; sub.n_comp++; gasto += t->tam / 4;   /* (la comparacion) */
         } else if ((t->fmt & 0xff) <= 2 && !(t->tam & 31) && t->tam) {
+#ifdef DIAG_VRAMLOG
+            VL_ASSET("%s:t%u", m->vl_nom, (unsigned)i);
+#endif
             v = vram_pide(t->tam, sub.lado, m->tfl + i);
             if (!v && !sub.apuro) { sub.apuro = 1; if (vram_apuro()) v = vram_pide(t->tam, sub.lado, m->tfl + i); }
+            VL_ASSET_FIN();
             if (v) { sub.v = v; sub.hecho = 0; continue; }        /* (se sube arriba, por partes) */
             if (!tex_rebaja(m, i, sub.lado)) { v = m->tv[i]; sub.n_reb++; gasto += t->tam; }
         }
@@ -905,13 +1010,20 @@ static void tex_muda(modelo_t *m, const modelo_t *de)
         if ((m->tfl[i] & (TF_AJENA | TF_REBAJADA)) != TF_AJENA) continue;
         for (j = 0; j < de->ntex && de->tv[j] != m->tv[i]; j++) ;
         if (j == de->ntex) continue;                              /* (no es de esa etapa) */
-        if (!(v = vram_pide(m->texs[i].tam, 2, &fl))) { faltan++; continue; }
+#ifdef DIAG_VRAMLOG
+        VL_ASSET("%s:t%u", m->vl_nom, (unsigned)i);
+#endif
+        v = vram_pide(m->texs[i].tam, 2, &fl); VL_ASSET_FIN();
+        if (!v) { faltan++; continue; }
         pvr_txr_load(m->tv[i], v, m->texs[i].tam);
         m->tv[i] = v; m->tfl[i] = fl; compila_cab(m, i, 0); n++; b += m->texs[i].tam;
     }
     if (faltan) {
         thd_sleep(40);                                            /* la PowerVR acaba el cuadro que lee las de la etapa */
         ar_abajo = ar_ini;                                        /* (libera_modelo de la etapa viene ahora) */
+#ifdef DIAG_VRAMLOG
+        vl_zona_vacia(1);
+#endif
         for (;;) {
             int k = -1; uint32_t tam, o; pvr_ptr_t v; uint8_t fl = 0; const uint8_t *src;
             for (i = 0; i < m->ntex; i++) {                       /* la compartida de direccion mas alta */
@@ -6634,6 +6746,9 @@ static int curso_paso(void)
     PK("pide etapa");
     if (s_sig >= 0 && yo.s >= s_sig) {                         /* la etapa siguiente pasa a ser la actual */
         entorno_cambia_etapa();
+#ifdef DIAG_VRAMLOG
+        vl_marca("entra en la etapa %s", sig.vl_nom);
+#endif
         etapa = sig; memset(&sig, 0, sizeof sig); etapa_nodo = cur_sig; cielo = &etapa; etapa_movida = 1;
         { uint8_t *t_ = refl_reg[0]; refl_reg[0] = refl_reg[1]; refl_reg[1] = t_; refl_hay[0] = refl_hay[1]; refl_hay[1] = 0; refl_pend = 1; }
         cur_nodo = cur_sig; cur_sig = -1; memcpy(marco_et, marco_sig, sizeof marco_et);
@@ -9077,6 +9192,58 @@ static int sol_pantalla(float *q, float *P, float *sx, float *sy)
     *sx = fx * P[0] / -P[2]; *sy = fx * P[1] / -P[2];            /* 0x1f6b70: en la pantalla de 640 x 480 */
     return *sx > -360 && *sx < 360 && *sy > -280 && *sy < 280;  /* 0x10f4f0..0x10f56c */
 }
+/* Deslumbramiento de cara al sol (DESVIACION pedida, Rev 2.6: "cuando sale el sol y un haz se dirige a la vision del
+   jugador"; en el video de referencia la imagen se blanquea, mas arriba que abajo, al ir hacia el sol aunque su disco
+   quede por encima de la pantalla; aqui el destello del original solo sale con el sol en pantalla, casi nunca con la
+   inclinacion de las etapas). Un rectangulo de toda la pantalla en la lista translucida (4 vertices): blanco tenido del
+   color del sol, alfa SOL_DESL x la intensidad del sol x lo que la camara mira hacia el ((c - 0,8) / 0,18)^2, por lo
+   que se ve del sol (los rayos de sol_visible con el sol en pantalla) y por el cielo del reflejo (menos bajo techo);
+   arriba entero, abajo x 0,3; suavizado en el tiempo. -DSIN_DESLUMBRA: sin el */
+#ifndef SOL_DESL
+#define SOL_DESL 0.45f
+#endif
+static float sol_desl, sol_vis_ult = 1.0f;
+static int refl_activo; static float refl_env_luz;            /* (definidos con el reflejo, mas abajo) */
+static void sol_deslumbra(void)
+{
+#ifndef SIN_DESLUMBRA
+    float v[16], d[3], p0, y0, q[3], c, g = 0, l; int k; uint32_t col, at, ab;
+    if (sol_ok && sol_int > 0 && cur_nodo >= 0) {
+        luz_actual(1, v, d); luz_angulos(d, &p0, &y0);
+        if (cam_ok) p0 *= cam.f358;
+        q[0] = cosf(p0) * sinf(y0); q[1] = -sinf(p0); q[2] = cosf(p0) * cosf(y0);   /* del ojo al sol (-d) */
+        {   /* hacia el sol en el rumbo (el sol de las etapas va 30-60 grados alto: la camara casi nunca lo mira de cara) */
+            float lq = sqrtf(q[0] * q[0] + q[2] * q[2]), la = sqrtf(ade[0] * ade[0] + ade[2] * ade[2]), el = fabsf(q[1]);
+            c = lq > 0 && la > 0 ? (ade[0] * q[0] + ade[2] * q[2]) / (lq * la) : 0;
+            l = el < 0.5f ? 1.0f : 1.0f - (el - 0.5f) * 1.4f; l = l < 0.3f ? 0.3f : l;   /* (mas bajo, mas fuerte) */
+        }
+        if (c > 0.75f) {
+            float t = (c - 0.75f) * (1.0f / 0.23f); t = t > 1 ? 1 : t;
+            g = SOL_DESL * sol_int * t * t * l * sol_vis_ult;
+            if (refl_activo) g *= (refl_env_luz - 0.3f) * (1.0f / 0.7f);   /* bajo techo, menos (REFL_LUZ_MIN) */
+        }
+    }
+    sol_desl += (g - sol_desl) * 0.08f;                         /* (sin saltos: ~0,2 s) */
+#ifdef DIAG_SOL
+    { static int c_; if (++c_ % 30 == 0) dbglog(DBG_INFO, "DESL %.3f (objetivo %.3f) crono %d\n", (double)sol_desl, (double)g, crono); }
+#endif
+    if (sol_desl < 0.01f) return;
+    {   float a0 = curso[cur_nodo].luz[0][9], a1 = curso[cur_nodo].luz[0][10], a2 = curso[cur_nodo].luz[0][11];
+        uint32_t r = (uint32_t)(255 * (0.7f + 0.3f * fminf(a0, 1))), gg = (uint32_t)(255 * (0.7f + 0.3f * fminf(a1, 1))), b = (uint32_t)(255 * (0.7f + 0.3f * fminf(a2, 1)));
+        col = r << 16 | gg << 8 | b; }
+    at = (uint32_t)(sol_desl * 255) << 24 | col; ab = (uint32_t)(sol_desl * 0.3f * 255) << 24 | col;
+    {   pvr_poly_cxt_t cx; pvr_poly_hdr_t hd; pvr_vertex_t vv;
+        pvr_poly_cxt_col(&cx, PVR_LIST_TR_POLY); cx.gen.shading = PVR_SHADE_GOURAUD; cx.depth.comparison = PVR_DEPTHCMP_ALWAYS;
+        cx.depth.write = PVR_DEPTHWRITE_DISABLE; pvr_poly_compile(&hd, &cx); pvr_prim(&hd, sizeof hd);
+        vv.oargb = 0; vv.z = 8.5f; vv.u = vv.v = 0;
+        vv.flags = PVR_CMD_VERTEX; vv.argb = at; vv.x = 0; vv.y = 0; pvr_prim(&vv, sizeof vv);
+        vv.x = 640; pvr_prim(&vv, sizeof vv);
+        vv.argb = ab; vv.x = 0; vv.y = 480; pvr_prim(&vv, sizeof vv);
+        vv.flags = PVR_CMD_VERTEX_EOL; vv.x = 640; pvr_prim(&vv, sizeof vv);
+    }
+    (void)k;
+#endif
+}
 /* antes de las listas: el rayo del cuadro si el sol se va a dibujar (lo prueban las mallas de dibuja_rango) */
 static void sol_prepara(void)
 {
@@ -9647,7 +9814,7 @@ static void sol_dibuja(void)
                                                       (unsigned)sol_n_mallas, (unsigned)sol_n_esf, (unsigned)sol_n_tri);
               if (c % 60 == 0) sol_n_mallas = sol_n_esf = sol_n_tri = 0; }
 #endif
-    if (!en) { sol_rayo_on = 0; return; }
+    if (!en) { sol_rayo_on = 0; sol_vis_ult = 1.0f; return; }
     fov = 2 * atanf(240.0f / fx) * 57.29578f * 0.01f;           /* cam+A0 en grados / 100 */
     size = fov; spread = fov * 0.13f;
     bright = 0.99f;                                             /* se apaga hacia los bordes (0x10f654..0x10f720) */
@@ -9655,6 +9822,7 @@ static void sol_dibuja(void)
     if (sy < -100) bright *= (sy + 280) * 0.00555556f; else if (sy > 100) bright *= (280 - sy) * 0.00555556f;
     edge = bright; flare = bright * 0.65f;
     if (sol_rayo_on) vis = sol_visible();                       /* (sin el rayo: el sol entero) */
+    sol_vis_ult = vis / SOL_VIS;                                /* (el deslumbramiento: lo que se ve del sol) */
     sol_rayo_on = 0;
     {   float lq = sqrtf(q[0] * q[0] + q[1] * q[1] + q[2] * q[2]);
         facing = (ade[0] * q[0] + ade[1] * q[1] + ade[2] * q[2]) / (lq > 0 ? lq : 1); }
@@ -10137,20 +10305,20 @@ static matrix_t ani_m[NPZ] __attribute__((aligned(32)));      /* matriz de cada 
 #define REFL_ESCALA 0.4f
 #define REFL_MAX 4                                              /* texturas de entorno distintas de un coche (1 o 2) */
 #ifndef REFL_F0
-#define REFL_F0 0.5f                                            /* Fresnel: de frente (0,2) a canto (1) con (1 - |N.I|)^2 */
+#define REFL_F0 0.6f                                            /* Fresnel: de frente (0,2) a canto (1) con (1 - |N.I|)^2 */
 #endif
 #ifndef REFL_GAMMA
-#define REFL_GAMMA 1.5f                                         /* contraste del mapa: el suelo mas oscuro, el cielo igual */
+#define REFL_GAMMA 1.8f                                         /* contraste del mapa: el suelo mas oscuro, el cielo igual */
 #endif
 #ifndef REFL_SOL
-#define REFL_SOL 1.0f                                           /* el destello del sol en el mapa (x su color) */
+#define REFL_SOL 2.0f                                           /* el destello del sol en el mapa (x su color) */
 #endif
 #define REFL_SOL_EXP 160.0f                                     /* (cos^160: ~5 grados de medio ancho) */
 #ifndef REFL_CIELO_K
-#define REFL_CIELO_K 1.15f                                      /* el horizonte nitido: lo de arriba mas claro... */
+#define REFL_CIELO_K 1.5f                                       /* el horizonte nitido: lo de arriba mas claro... */
 #endif
 #ifndef REFL_SUELO_K
-#define REFL_SUELO_K 0.45f                                      /* ...y lo de abajo mas oscuro (en 0,05 de dy) */
+#define REFL_SUELO_K 0.25f                                      /* ...y lo de abajo mas oscuro (en 0,05 de dy) */
 #endif
 #ifndef REFL_MEZ
 #define REFL_MEZ 0.0f                                           /* cuanto de la pintura sustituye el reflejo (x Fresnel; 0,55 la volvia malva) */
@@ -10165,10 +10333,13 @@ static float refl_dir[REFL_SAL * REFL_SAL][3];                 /* la direccion (
 static uint16_t refl_tws[REFL_SAL * REFL_SAL];                  /* (x, y) -> texel twiddled de la salida */
 #define REFL_FIJO_LADO 32
 #ifndef REFL_FIJO
-#define REFL_FIJO 0.9f                                          /* peso del mapa propio del coche (su brillo de siempre) */
+#define REFL_FIJO 1.0f                                          /* peso del mapa propio del coche (su brillo de siempre) */
 #endif
 #ifndef REFL_ENT
-#define REFL_ENT 0.6f                                           /* peso del entorno */
+#define REFL_ENT 1.0f                                           /* peso del entorno */
+#endif
+#ifndef REFL_UMBRAL
+#define REFL_UMBRAL 150                                         /* del entorno solo pasa lo que brilla mas (brillos, no color) */
 #endif
 #define REFL_LUM_CIELO 150.0f                                   /* brillo medio de lo de arriba a cielo abierto */
 #define REFL_LUZ_MIN 0.3f                                       /* el mapa del coche bajo techo, como mucho tan apagado */
@@ -10215,54 +10386,86 @@ static void refl_compila(void)                                  /* las cabeceras
         }
     }
 }
-/* muestra bilineal (en el marco del mundo) del mapa m (twiddled) de una etapa girada ang: rgb x 1 en 0..255 */
-static void refl_muestra(const uint16_t *m, float c, float sn, float a, float b, int *rgb)
+/* Rev 2.6 (rendimiento: la mezcla iba casi cada cuadro con ~24000 divisiones enteras y 1024 powf; en Flycast 24,8 ms
+   de CPU por cuadro frente a 18,0): mapas de origen decodificados una vez (tablas, sin divisiones), donde cae cada texel
+   de la salida en el mapa girado precalculado por angulo (cambia con la etapa), el horizonte y el sol en tablas (el sol
+   solo se recalcula si se mueve) y la mezcla en enteros */
+static uint8_t refl_dec[2][REFL_LADO * REFL_LADO][3]; static const uint16_t *refl_dec_de[2];
+static uint8_t refl_l5[32], refl_l6[64];
+static uint8_t refl_si[2][REFL_SAL * REFL_SAL], refl_sw[2][REFL_SAL * REFL_SAL][2]; static float refl_si_ang[2] = { 1e9f, 1e9f };
+static uint8_t refl_hork[REFL_SAL * REFL_SAL];                  /* el horizonte nitido (x 1/128) */
+static uint8_t refl_solt[REFL_SAL * REFL_SAL]; static float refl_sol_ult[4] = { 9, 9, 9, 9 };
+static void refl_decodifica(const uint16_t *m, int c)
 {
-    float x = (c * a - sn * b) * REFL_LADO + (REFL_LADO * 0.5f - 0.5f), y = (sn * a + c * b) * REFL_LADO + (REFL_LADO * 0.5f - 0.5f), fx, fy, w[4];
-    int x0, y0, k, j; uint16_t t[4];
-    x = x < 0 ? 0 : x > REFL_LADO - 1.001f ? REFL_LADO - 1.001f : x; y = y < 0 ? 0 : y > REFL_LADO - 1.001f ? REFL_LADO - 1.001f : y;
-    x0 = (int)x; y0 = (int)y; fx = x - x0; fy = y - y0;
-    t[0] = m[refl_tw[y0 * REFL_LADO + x0]]; t[1] = m[refl_tw[y0 * REFL_LADO + x0 + 1]];
-    t[2] = m[refl_tw[(y0 + 1) * REFL_LADO + x0]]; t[3] = m[refl_tw[(y0 + 1) * REFL_LADO + x0 + 1]];
-    w[0] = (1 - fx) * (1 - fy); w[1] = fx * (1 - fy); w[2] = (1 - fx) * fy; w[3] = fx * fy;
+    int i;
+    if (refl_dec_de[c] == m) return;
+    if (!refl_l5[31]) { for (i = 0; i < 32; i++) refl_l5[i] = (uint8_t)(i * 255 / 31); for (i = 0; i < 64; i++) refl_l6[i] = (uint8_t)(i * 255 / 63); }
+    for (i = 0; i < REFL_LADO * REFL_LADO; i++) {
+        uint16_t v = m[refl_tw[i]];
+        refl_dec[c][i][0] = refl_l5[v >> 11]; refl_dec[c][i][1] = refl_l6[(v >> 5) & 63]; refl_dec[c][i][2] = refl_l5[v & 31];
+    }
+    refl_dec_de[c] = m;
+}
+static void refl_tabla(int c, float ang)                        /* donde cae cada texel de la salida en un mapa girado ang */
+{
+    float cs = cosf(ang), sn = sinf(ang); int i;
+    if (refl_si_ang[c] == ang) return;
+    for (i = 0; i < REFL_SAL * REFL_SAL; i++) {
+        float a = ((i % REFL_SAL) + 0.5f) * (1.0f / REFL_SAL) - 0.5f, b = ((i / REFL_SAL) + 0.5f) * (1.0f / REFL_SAL) - 0.5f;
+        float x = (cs * a - sn * b) * REFL_LADO + (REFL_LADO * 0.5f - 0.5f), y = (sn * a + cs * b) * REFL_LADO + (REFL_LADO * 0.5f - 0.5f);
+        int x0, y0;
+        x = x < 0 ? 0 : x > REFL_LADO - 1.001f ? REFL_LADO - 1.001f : x; y = y < 0 ? 0 : y > REFL_LADO - 1.001f ? REFL_LADO - 1.001f : y;
+        x0 = (int)x; y0 = (int)y;
+        refl_si[c][i] = (uint8_t)(y0 * REFL_LADO + x0); refl_sw[c][i][0] = (uint8_t)((x - x0) * 255.0f); refl_sw[c][i][1] = (uint8_t)((y - y0) * 255.0f);
+    }
+    refl_si_ang[c] = ang;
+}
+static inline void refl_bilin(int c, int i, int *rgb)
+{
+    const uint8_t *p = refl_dec[c][refl_si[c][i]]; int fx = refl_sw[c][i][0], fy = refl_sw[c][i][1], j;
     for (j = 0; j < 3; j++) {
-        float r = 0;
-        for (k = 0; k < 4; k++) {
-            uint32_t v = t[k], q = j == 0 ? (v >> 11) * 255 / 31 : j == 1 ? ((v >> 5) & 63) * 255 / 63 : (v & 31) * 255 / 31;
-            r += w[k] * (float)q;
-        }
-        rgb[j] = (int)r;
+        int t = p[j] * (255 - fx) + p[3 + j] * fx, u = p[3 * REFL_LADO + j] * (255 - fx) + p[3 * REFL_LADO + 3 + j] * fx;
+        rgb[j] = (t * (255 - fy) + u * fy) >> 16;
     }
 }
 static uint8_t refl_lut[256]; static int refl_lut_ok;
-/* la textura de este cuadro: (1 - f) A + f B; A y B mapas de 16x16 de etapas giradas aa / ab (marco_et / marco_sig) */
+/* el entorno de este cuadro: (1 - f) A + f B; A y B mapas de 16x16 de etapas giradas aa / ab (marco_et / marco_sig) */
 static void refl_mezcla(const uint16_t *A, float aa, const uint16_t *B, float ab, float f, const float *sol, const float *solc)
 {
-    float ca = cosf(aa), sa = sinf(aa), cb = cosf(ab), sb = sinf(ab), lum = 0; int i, j, ra[3], rb[3], r[3];
-    if (!refl_lut_ok) { for (i = 0; i < 256; i++) refl_lut[i] = (uint8_t)(255.0f * powf(i / 255.0f, REFL_GAMMA) + 0.5f); refl_lut_ok = 1; }
+    int i, j, ra[3], rb[3], r[3], fi = (int)(f * 256.0f), sumu = 0, nu = 0; float lum;
+    if (!refl_lut_ok) {
+        for (i = 0; i < 256; i++) refl_lut[i] = (uint8_t)(255.0f * powf(i / 255.0f, REFL_GAMMA) + 0.5f);
+        for (i = 0; i < REFL_SAL * REFL_SAL; i++) {
+            float t = refl_dir[i][1] * (1.0f / 0.05f) * 0.5f + 0.5f; t = t < 0 ? 0 : t > 1 ? 1 : t;
+            refl_hork[i] = (uint8_t)((REFL_SUELO_K + (REFL_CIELO_K - REFL_SUELO_K) * t) * 128.0f > 255 ? 255 : (REFL_SUELO_K + (REFL_CIELO_K - REFL_SUELO_K) * t) * 128.0f);
+        }
+        refl_lut_ok = 1;
+    }
+    if (fabsf(sol[0] - refl_sol_ult[0]) + fabsf(sol[1] - refl_sol_ult[1]) + fabsf(sol[2] - refl_sol_ult[2]) > 0.01f) {
+        for (i = 0; i < REFL_SAL * REFL_SAL; i++) {
+            float c = refl_dir[i][0] * sol[0] + refl_dir[i][1] * sol[1] + refl_dir[i][2] * sol[2];
+            c = c > 0.0f ? powf(c, REFL_SOL_EXP) * REFL_SOL : 0.0f; refl_solt[i] = (uint8_t)(c > 1 ? 255 : c * 255.0f);
+        }
+        memcpy(refl_sol_ult, sol, 3 * sizeof(float));
+    }
+    refl_decodifica(A, 0); refl_tabla(0, aa);
+    if (fi > 0) { refl_decodifica(B, 1); refl_tabla(1, ab); }
     for (i = 0; i < REFL_SAL * REFL_SAL; i++) {
-        float a = ((i % REFL_SAL) + 0.5f) * (1.0f / REFL_SAL) - 0.5f, b = ((i / REFL_SAL) + 0.5f) * (1.0f / REFL_SAL) - 0.5f;
-        refl_muestra(A, ca, sa, a, b, ra);
-        if (f > 0.0f) { refl_muestra(B, cb, sb, a, b, rb); for (j = 0; j < 3; j++) r[j] = (int)(ra[j] + f * (rb[j] - ra[j])); }
+        refl_bilin(0, i, ra);
+        if (fi > 0) { refl_bilin(1, i, rb); for (j = 0; j < 3; j++) r[j] = ra[j] + (((rb[j] - ra[j]) * fi) >> 8); }
         else for (j = 0; j < 3; j++) r[j] = ra[j];
-        for (j = 0; j < 3; j++) r[j] = refl_lut[r[j] < 0 ? 0 : r[j] > 255 ? 255 : r[j]];
-        {   float t = refl_dir[i][1] * (1.0f / 0.05f) * 0.5f + 0.5f, k;   /* el horizonte: nitido */
-            t = t < 0 ? 0 : t > 1 ? 1 : t; k = REFL_SUELO_K + (REFL_CIELO_K - REFL_SUELO_K) * t;
-            for (j = 0; j < 3; j++) { r[j] = (int)(r[j] * k); if (r[j] > 255) r[j] = 255; }
+        for (j = 0; j < 3; j++) {
+            int v = (refl_lut[r[j] < 0 ? 0 : r[j] > 255 ? 255 : r[j]] * refl_hork[i]) >> 7;
+            v += (refl_solt[i] * (int)solc[j]) >> 8; r[j] = v > 255 ? 255 : v;
+            refl_env[i][j] = (int16_t)r[j];
         }
-        {   float c = refl_dir[i][0] * sol[0] + refl_dir[i][1] * sol[1] + refl_dir[i][2] * sol[2];
-            if (c > 0.0f) { c = powf(c, REFL_SOL_EXP) * REFL_SOL; for (j = 0; j < 3; j++) { r[j] += (int)(c * solc[j]); if (r[j] > 255) r[j] = 255; } }
-        }
-        for (j = 0; j < 3; j++) refl_env[i][j] = (int16_t)r[j];
-        if (refl_dir[i][1] > 0.2f) lum += (float)(r[0] + r[1] + r[2]);   /* (lo de arriba: cielo o techo) */
-        else lum += 0;
+        if (refl_dir[i][1] > 0.2f) { sumu += r[0] + r[1] + r[2]; nu++; }   /* (lo de arriba: cielo o techo) */
     }
-    {   int nu = 0;
-        for (i = 0; i < REFL_SAL * REFL_SAL; i++) nu += refl_dir[i][1] > 0.2f;
-        lum = lum / (3.0f * (float)(nu ? nu : 1)) / REFL_LUM_CIELO;     /* 1 a cielo abierto, menos bajo techo */
-        refl_env_luz = lum < REFL_LUZ_MIN ? REFL_LUZ_MIN : lum > 1 ? 1 : lum;
-    }
+    lum = (float)sumu / (3.0f * (float)(nu ? nu : 1)) / REFL_LUM_CIELO;     /* 1 a cielo abierto, menos bajo techo */
+    refl_env_luz = lum < REFL_LUZ_MIN ? REFL_LUZ_MIN : lum > 1 ? 1 : lum;
 }
+static int refl_turno;                                          /* cuadro par: la textura; impar: los vertices */
+static inline float refl_rsq(float x) { __asm__("fsrra %0" : "+f"(x)); return x; }   /* 1 / raiz (FSRRA) */
 /* la textura de este cuadro: el mapa propio del coche visto desde la camara (su brillo de siempre: u = 0,5 + 0,5 N.der,
    v = 0,5 - 0,5 N.arr con N la normal que refleja hacia cada texel, N ~ R - I) por la luz del entorno (menos bajo techo)
    mas el entorno (refl_env); en una de las dos texturas que se alternan */
@@ -10270,15 +10473,16 @@ static void refl_compone(void)
 {
     static uint16_t t5[REFL_SAL * REFL_SAL] __attribute__((aligned(32))), t1[REFL_SAL * REFL_SAL] __attribute__((aligned(32)));
     float I[3], l, kf = REFL_FIJO * refl_env_luz; int i, j, r[3];
+    if (refl_turno & 1) return;                                 /* (en cuadros alternos con coche_reflejo: la camara gira despacio) */
     for (j = 0; j < 3; j++) I[j] = yo.pos[j] - ojo[j];
-    l = sqrtf(I[0] * I[0] + I[1] * I[1] + I[2] * I[2]); l = l > 1e-3f ? 1.0f / l : 0; for (j = 0; j < 3; j++) I[j] *= l;
+    l = I[0] * I[0] + I[1] * I[1] + I[2] * I[2]; l = l > 1e-6f ? refl_rsq(l) : 0; for (j = 0; j < 3; j++) I[j] *= l;
     for (i = 0; i < REFL_SAL * REFL_SAL; i++) {
         float fj[3] = { 0, 0, 0 };
         if (refl_fijo_ok) {
             float n0 = refl_dir[i][0] - I[0], n1 = refl_dir[i][1] - I[1], n2 = refl_dir[i][2] - I[2], q = n0 * n0 + n1 * n1 + n2 * n2;
             if (q > 1e-6f) {
                 float x, y, fx, fy; int x0, y0, k;
-                q = 1.0f / sqrtf(q); n0 *= q; n1 *= q; n2 *= q;
+                q = refl_rsq(q); n0 *= q; n1 *= q; n2 *= q;
                 x = (0.5f + 0.5f * (n0 * der[0] + n1 * der[1] + n2 * der[2])) * REFL_FIJO_LADO - 0.5f;
                 y = (0.5f - 0.5f * (n0 * arr[0] + n1 * arr[1] + n2 * arr[2])) * REFL_FIJO_LADO - 0.5f;
                 x = x < 0 ? 0 : x > REFL_FIJO_LADO - 1.001f ? REFL_FIJO_LADO - 1.001f : x; y = y < 0 ? 0 : y > REFL_FIJO_LADO - 1.001f ? REFL_FIJO_LADO - 1.001f : y;
@@ -10290,7 +10494,12 @@ static void refl_compone(void)
                 }
             }
         }
-        for (j = 0; j < 3; j++) { r[j] = (int)(fj[j] * kf + refl_env[i][j] * (refl_fijo_ok ? REFL_ENT : 1.0f)); if (r[j] > 255) r[j] = 255; if (r[j] < 0) r[j] = 0; }
+        {   /* el entorno solo como brillo blanco: lo que su luminancia pasa de REFL_UMBRAL (Rev 2.6: "brillos, no cambios de
+               color"; sumar el entorno entero tenia la pintura de gris o de rosa) */
+            int lu = (refl_env[i][0] + refl_env[i][1] + refl_env[i][2]) / 3 - REFL_UMBRAL;
+            float br = lu > 0 ? (float)lu * (255.0f / (255 - REFL_UMBRAL)) * REFL_ENT : 0.0f;
+            for (j = 0; j < 3; j++) { r[j] = (int)(fj[j] * kf + br); if (r[j] > 255) r[j] = 255; if (r[j] < 0) r[j] = 0; }
+        }
         t5[refl_tws[i]] = (uint16_t)((r[0] >> 3) << 11 | (r[1] >> 2) << 5 | (r[2] >> 3));
         t1[refl_tws[i]] = (uint16_t)(0x8000u | (r[0] >> 3) << 10 | (r[1] >> 3) << 5 | (r[2] >> 3));
     }
@@ -10345,13 +10554,13 @@ static int refl_elige(int carrera)
             A = M0 + i0 * REFL_LADO * REFL_LADO; if (fr > 0) B = A + REFL_LADO * REFL_LADO;
         }
         if (!B) fr = 0;
-        firma[0] = (int)(A - M0); firma[1] = B ? (int)(intptr_t)B : 0; firma[2] = (int)(fr * 32.0f); firma[3] = (int)(intptr_t)refl_reg[0];
+        firma[0] = (int)(A - M0); firma[1] = B ? (int)(intptr_t)B : 0; firma[2] = (int)(fr * 8.0f); firma[3] = (int)(intptr_t)refl_reg[0];
         firma[4] = (int)(sol[0] * 64.0f) * 256 + (int)(sol[2] * 64.0f); firma[5] = (int)(solc[0] + solc[1] + solc[2]) / 8;
         if (refl_pend || memcmp(firma, refl_firma, sizeof firma)) {
-            refl_mezcla(A, aa, B ? B : A, ab, B ? (float)firma[2] * (1.0f / 32.0f) : 0.0f, sol, solc);
+            refl_mezcla(A, aa, B ? B : A, ab, B ? (float)firma[2] * (1.0f / 8.0f) : 0.0f, sol, solc);
             memcpy(refl_firma, firma, sizeof firma); refl_pend = 0;
         }
-        refl_compone(); e = 1;                                  /* (cada cuadro: la camara gira) */
+        refl_turno++; refl_compone(); e = 1;                    /* (la camara gira: textura y vertices en cuadros alternos) */
         if (refl_est == 1) for (i = 0; i < refl_ntex; i++) for (f = 0; f < 2; f++) coche.cabs[f][refl_tex[i]] = refl_cab[refl_buf][f][i];
     }
     if (e != refl_est) {
@@ -10485,8 +10694,10 @@ static void coche_entorno(matrix_t mc)
 /* UV del reflejo (refl_elige) en el marco del mundo y el Fresnel en el especular de cada vertice */
 static void coche_reflejo(matrix_t mc, int mapa)
 {
-    float Am[3][3], W[NPZ][3][3]; uint32_t k, i; int j, q, p;
+    float Am[3][3], W[NPZ][3][3]; uint32_t k, i; int j, q, p; static int ya;
     (void)mapa;
+    if (!(refl_turno & 1) && ya) return;                        /* (cuadros alternos con refl_compone; el primero, siempre) */
+    ya = 1;
     for (q = 0; q < 3; q++) for (j = 0; j < 3; j++) Am[j][q] = mc[j][q] * (1.0f / 127.0f);
     for (p = 0; p < NPZ; p++)                                   /* piezas animadas: sus ejes en el mundo */
         for (j = 0; j < 3; j++) {
@@ -10511,7 +10722,7 @@ static void coche_reflejo(matrix_t mc, int mapa)
                 float ix = v[i].x * mc[0][0] + v[i].y * mc[1][0] + v[i].z * mc[2][0] + p0;
                 float iy = v[i].x * mc[0][1] + v[i].y * mc[1][1] + v[i].z * mc[2][1] + p1;
                 float iz = v[i].x * mc[0][2] + v[i].y * mc[1][2] + v[i].z * mc[2][2] + p2, il = ix * ix + iy * iy + iz * iz;
-                il = il > 1e-6f ? 1.0f / sqrtf(il) : 0; ix *= il; iy *= il; iz *= il;
+                il = il > 1e-6f ? refl_rsq(il) : 0; ix *= il; iy *= il; iz *= il;
                 float d = 2.0f * (nx * ix + ny * iy + nz * iz), den = 1.0f + iy - d * ny, g, t, F;
                 if (den < 0.25f) den = 0.25f;                   /* muy hacia abajo: el borde del mapa (CLAMP) */
                 g = REFL_ESCALA / den;
@@ -11694,7 +11905,11 @@ static int vram_ordena(uint8_t *buf, uint32_t cap)
     }
     for (k = 0, o = 0; k < 2; k++) if (M[k]->tv) for (i = 0; i < M[k]->ntex; i++) if (M[k]->tv[i]) {
         uint32_t t = M[k]->texs[i].tam;
-        if ((M[k]->tv[i] = pvr_mem_malloc(t))) { pvr_txr_load(buf + o, M[k]->tv[i], t); compila_cab(M[k], i, 0); n++; }
+#ifdef DIAG_VRAMLOG
+        VL_ASSET("%s:t%u", M[k]->vl_nom, (unsigned)i);
+#endif
+        M[k]->tv[i] = pvr_mem_malloc(t); VL_ASSET_FIN();
+        if (M[k]->tv[i]) { pvr_txr_load(buf + o, M[k]->tv[i], t); compila_cab(M[k], i, 0); n++; }
         else mal++;                                             /* (no pasa: la misma VRAM que se acaba de soltar) */
         o += (t + 31) & ~31u;
     }
@@ -12889,6 +13104,9 @@ int main(int argc, char **argv)
                         pt_bonus_etapa(); tim_cuadros += amp; tiempo = tim_cuadros / TIM_HZ; t_ext = 0;
                         if (voz_ok) voces_checkpoint();         /* EXTEND TIME: efecto 0x4d y voz 0x16c */
                         if (variante == 2) infarto_etapa(cur_nodo, curso[cur_nodo].nivel);   /* stage clear */
+#ifdef DIAG_VRAMLOG
+                        vl_marca("checkpoint etapa %d", cur_nodo);
+#endif
                         dbglog(DBG_INFO, "CHECKPOINT: etapa %d (%.4s) nivel %d s %.0f, +%d cuadros, quedan %d (%.1f s)\n", cur_nodo,
                                curso[cur_nodo].zona, curso[cur_nodo].nivel, (double)yo.s, amp, tim_cuadros, (double)tiempo);
 #ifdef PRUEBA_SALTO
@@ -13327,7 +13545,7 @@ int main(int argc, char **argv)
 #ifdef DIAG_CICLO
             if (dg_fase != 1)
 #endif
-            if (l == 2 && estado != TITULO && !mundo_fuera) sol_dibuja();       /* el sol y su destello (40CBC0) */
+            if (l == 2 && estado != TITULO && !mundo_fuera) { sol_dibuja(); sol_deslumbra(); }   /* el sol y su destello (40CBC0); el deslumbramiento */
             if (l == 2) focos_dibuja();                         /* la segunda pasada de los focos (40C550) */
 #ifdef DIAG_CICLO
             if (dg_fase != 2)
@@ -13521,6 +13739,9 @@ int main(int argc, char **argv)
             if (estado == CARRERA && ++pf_n == 900) perfil_vuelca();
 #endif
         }
+#endif
+#ifdef DIAG_VRAMLOG
+        vl_frame++;
 #endif
         if (++cuadro % 30 == 0) {
             uint64_t t1 = timer_ms_gettime64();
