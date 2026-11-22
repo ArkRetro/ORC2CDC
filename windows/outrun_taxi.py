@@ -7,7 +7,7 @@ los ficheros de ese disco y el programa de la Dreamcast de este paquete (program
 con los arreglos, e IP.BIN "OUTRUN MOD REV 1.0"). Si le das tambien tu ISO de PS2 (SLES-53998), rehace EFECTOS.DAT con
 la textura del agua de las ruedas (tools/conv_efectos.py, segundos); sin ella se queda el EFECTOS.DAT del disco
 (todo igual, sin el agua en el asfalto mojado). Despues pasa tools/libros.py (libros VQ reducidos, Rev 2.2 / Mod 1.8:
-mas VRAM libre) con el pvrtex.exe del paquete, y rehace REFLEJO.DAT (el reflejo del entorno, Rev 2.4 / Mod 2.0).
+mas VRAM libre) con el pvrtex.exe del paquete. El REFLEJO.DAT de tu disco se quita (Mod 2.3: sin el reflejo del entorno).
 Uso: outrun_taxi.py [disc.gdi] [carpeta] [--iso tu.iso | --sin-iso] [--bin 1ST_READ.BIN --ip IP.BIN] [--sin-dialogos]
 Sin el disc.gdi o la carpeta, los pide con los dialogos de Windows (PowerShell) o, si no hay, por teclado."""
 import os, shutil, struct, sys, time
@@ -156,10 +156,7 @@ def main():
         r = subprocess.run([sys.executable, os.path.join(o2.TOOLS, 'libros.py')] + args, capture_output=True, text=True)
         if r.returncode: raise SystemExit('fallo tools/libros.py:\n' + (r.stderr or r.stdout)[-2000:])
         for l in r.stdout.splitlines()[-4:]: informe('  ' + l)
-    informe('== reflejo del entorno en la carroceria (tools/conv_reflejo.py: unos minutos)')
-    r = subprocess.run([sys.executable, os.path.join(o2.TOOLS, 'conv_reflejo.py'), D], capture_output=True, text=True)
-    if r.returncode: informe('AVISO: no se pudo rehacer REFLEJO.DAT (sin reflejo):\n' + (r.stderr or r.stdout)[-2000:])
-    else: informe('  ' + (r.stdout.splitlines() or [''])[-1])
+    if os.path.isfile(os.path.join(D, 'REFLEJO.DAT')): os.remove(os.path.join(D, 'REFLEJO.DAT'))   # (Mod 2.3: sin reflejo)
     import gdi
     informe('== GD-ROM en %s' % car)
     ultimo = [-1]
