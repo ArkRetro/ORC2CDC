@@ -1521,7 +1521,7 @@ de OutRun 2 SP (las 15 etapas seguidas) que dio el usuario.
   no esta leido). Sin EFECTOS.DAT nuevo, sin agua (como antes).
 - NO verificado en consola real.
 
-### Reflejo del entorno en la carroceria (Rev 2.4 / Mod 2.0, 2026-11-22; DESVIACION pedida)
+### Reflejo del entorno en la carroceria (Rev 2.4 / Mod 2.0 y Rev 2.5 / Mod 2.1, 2026-11-22; DESVIACION pedida)
 
 Peticion: volver a poner el reflejo en la carroceria, muy simplificado. Lo que no gusto de la Rev 1.3: "un cambio de
 color muy abrupto y no se apreciaba bien el reflejo" (el mapa era solo el cielo x 0,3 sobre toda la pintura, con un
@@ -1542,7 +1542,16 @@ atardecer, gris con luces en el tunel; de frente casi solo la pintura.
   vertices de mas en el TA. Primer ajuste (0,15 + (1 - |N.I|)^2, sin curva): la tapa trasera salia lechosa, como un
   velo claro; con el de ahora el rojo queda profundo y el reflejo va en los cantos y costados (Flycast, PALM y las
   galerias de ALPI con el piloto: capturas scratchpad vt/cmp_refl2.png y vt/r2_gal.png).
-- INVENTADO: la ganancia (0,85), el Fresnel, la curva, la altura del punto de vista (1 m) y el desenfoque.
+- Rev 2.5 / Mod 2.1 (queja: "la carroceria tiene color opaco sin brillos"; medido en Flycast, brillo de los pixeles
+  rojos del coche, media / percentil 99: el mapa fijo del coche 110-132 / 181-202, la Rev 2.4 58-82 / 92-140): el
+  brillo de siempre lo daba el mapa propio de cada coche (esferico, visto desde la camara). Ahora la textura de 16x16
+  se compone cada cuadro (`refl_compone`) con ese mapa (reducido a 32x32 al leer el coche, refl_fijo_lee; muestreado
+  con la normal que refleja hacia cada texel, N ~ R - I) x 0,9 x la luz de lo de arriba en el entorno (1 a cielo
+  abierto, hasta 0,3 bajo techo) mas el entorno x 0,6, con el destello del sol (la luz del entorno 2: cos^24 x su
+  color) y la curva 1,5; Fresnel 0,5 + 0,5 (1 - |N.I|)^2. Medido: 99-130 / 153-186 (como el mapa fijo) y con el
+  entorno encima (capturas scratchpad vt/cmp_refl4.png).
+- INVENTADO: los pesos (0,9 / 0,6), la ganancia (0,85), el Fresnel, la curva, el sol, la altura del punto de vista
+  (1 m) y el desenfoque.
 - Coste: RAM, dos bufers del tamano de la etapa con mas mapas (malloc al buscar REFLEJO.DAT); CPU, la mezcla (256
   texeles, solo al cambiar) y el Fresnel por vertice de entorno. `-DSIN_REFLEJO`: el mapa fijo del coche.
 - NO verificado en consola real.
