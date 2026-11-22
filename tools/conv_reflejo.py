@@ -1,26 +1,23 @@
 #!/usr/bin/env python3
-"""conv_reflejo.py <datos/> [REFLEJO.DAT]: el reflejo del cielo en la carroceria del coche del jugador, por etapa.
+"""conv_reflejo.py <datos/> [REFLEJO.DAT]: el reflejo del entorno en la carroceria del coche del jugador (Rev 2.4).
 
 El original (SLES-53998 0x103dc8 / 0x1040e0 = 414340 / 414050 del PC) dibuja cada cuadro el entorno visto desde el coche
-en un cubo de caras de 64x64 (una cara fija y otra por turno, con cs_ENV_<zona> y el cielo de la etapa) y lo usa de mapa
-de entorno de la carroceria. DESVIACION (Rev 1.3, pedida: "solo el cielo y los tuneles"): la Dreamcast no dibuja ese cubo
-(una pasada mas por cuadro y el modelo cs_ENV de cada etapa, ~250 KB de RAM, no caben); como el cielo de una etapa no
-cambia, su mapa se calcula aqui una vez por etapa, de los mismos datos convertidos (el grupo 0 del cielo de SEGnn.DAT), y
-demo/main.c lo consulta cada cuadro con el vector reflejado de cada vertice en el marco de la etapa: el reflejo gira con
-el coche y con la camara sin dibujar nada de mas. Bajo techo (tuneles y galerias) el cielo no se ve: la tabla de puntos
-cubiertos de la ruta, tambien de aqui, cambia el mapa por el del tunel.
+en un cubo de caras de 64x64 (con cs_ENV_<zona>, una version simplificada de la etapa, y su cielo) y lo usa de mapa de
+entorno de la carroceria. DESVIACION: la Dreamcast no dibuja ese cubo; aqui se calcula una vez, de los datos ya
+convertidos de cada etapa, un mapa de 16x16 cada PASO_MAPA puntos de su ruta (48 m), visto desde ALTO_OJO sobre ella:
+rayos (RAYOS x RAYOS, tools/c/reflejo.c con ctypes) contra los triangulos de las listas 0 y 1 a menos de RADIO (cada uno
+con el color medio de su textura por el de sus vertices) y el cielo (el grupo 0 de SEGnn.DAT, mapa_cielo) donde no
+chocan; desenfocado (sin bordes duros), reducido a 16x16 y x GANANCIA2. demo/main.c mezcla cada cuadro los dos mapas
+de alrededor (y en la union el ultimo de la etapa con el primero de la siguiente) y pone el Fresnel por vertice. La
+Rev 1.3 (un mapa del cielo por etapa y otro del tunel que entraba de golpe; formato 'RFL1') se quito en la 1.4.
 
-REFLEJO.DAT (sectores de 2048 bytes; el registro de SEGnn.DAT son los sectores 1 + 2 n y 2 + 2 n):
-  sector 0: 'RFL1', u32 registros, u32 lado del mapa (32), u32 sector del mapa del tunel
-  mapa: lado x lado texeles RGB565 'twiddled'. Proyeccion: el vector d (unitario, y arriba, en el marco del fichero)
-        cae en u = 0,5 + 0,4 dx / (1 + dy), v = 0,5 + 0,4 dz / (1 + dy): el cenit en el centro, el horizonte en el
-        circulo de radio 0,4 y hasta dy = -0,22 en el borde (mas abajo se repite el borde: CLAMP). Bajo el horizonte,
-        donde el cielo no llega, el color del horizonte oscurecido (el suelo; el original reflejaria cs_ENV).
-  cubierta: u16 puntos de la ruta, u16 1 si hay mapa, u8 por punto (0 a cielo abierto .. 255 bajo techo, con rampa)
-  mapa del tunel (el ultimo sector): penumbra con dos filas de lamparas a lo largo del eje z del coche (en su marco).
-
-Cubierto: sobre el centro de la calzada y a +-2,5 m hay geometria de la etapa (listas 0..2, sin los carteles) entre 3 y
-14 m por encima, en al menos MIN_PUNTOS puntos seguidos (24 m: un puente suelto no cuenta)."""
+REFLEJO.DAT 'RFL2' (sectores de 2048 bytes):
+  sector 0: 'RFL2', u32 registros (SEGnn: n), u32 lado (16), u32 puntos de la ruta entre mapas; desde el byte 16,
+            por registro u32 sector de sus mapas y u32 cuantos (0: sin mapas)
+  mapas: lado x lado texeles RGB565 'twiddled' seguidos, uno por punto 0, PASO_MAPA, 2 PASO_MAPA... y el ultimo punto.
+  Proyeccion: el vector d (unitario, y arriba, en el marco del fichero) cae en u = 0,5 + 0,4 dx / (1 + dy),
+  v = 0,5 + 0,4 dz / (1 + dy) (el cenit en el centro, el horizonte en el circulo de radio 0,4).
+Lento (minutos; en paralelo por etapa, PYTHON_CPU_COUNT)."""
 import os, struct, sys
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -168,25 +165,85 @@ def cubierta(m):
     for _ in range(RAMPA): v = np.maximum(v, np.convolve(v, [0.5, 0, 0.5], 'same') * 0.75)
     return np.clip(np.round(v * 255), 0, 255).astype(np.uint8), int(cub.sum())
 
+LADO2 = 16; RAYOS = 32; PASO_MAPA = 12; RADIO = 300.0; ALTO_OJO = 1.0; GANANCIA2 = 0.85
+NODO_LEJ = 0x20
+
+def triangulos(m):
+    """los triangulos de la etapa que se reflejan (listas 0 y 1, sin los nodos lejanos) y su color medio: la textura
+    media (con su alfa) por el color de los vertices"""
+    lej = lambda ma: 0 <= ma['nodo'] < m.nn and m.nodos[ma['nodo']]['ban'] & NODO_LEJ
+    T = tiras(m, m.listas[0], m.listas[2], lambda ma: not lej(ma))
+    P = m.verts['p'].astype(np.float32); C = m.verts['c']
+    tex_de = np.full(len(m.verts), -1, np.int32)
+    for k in range(m.listas[0], m.listas[2]):
+        ma = m.mallas[k]; tex_de[ma['v0']:ma['v0'] + ma['n']] = ma['tex']
+    med = {}
+    for t in set(tex_de[T[:, 0]].tolist()):
+        if t < 0: med[t] = np.array([128.0] * 3); continue
+        im = m.imagen(t).astype(np.float64); a = im[..., 3:] / 255.0
+        med[t] = (im[..., :3] * a).sum((0, 1)) / max(a.sum(), 1)
+    vc = np.stack([(C >> 16) & 255, (C >> 8) & 255, C & 255], 1).astype(np.float64) / 255.0
+    M = np.array([med.get(t, np.array([128.0] * 3)) for t in range(-1, max(med) + 1)])   # (indice t + 1)
+    col = M[tex_de[T[:, 0]] + 1] * vc[T].mean(1)
+    tri = P[T].reshape(-1, 9)
+    ok = np.linalg.norm(np.cross(tri[:, 3:6] - tri[:, :3], tri[:, 6:9] - tri[:, :3]), axis=1) > 1e-4
+    return np.ascontiguousarray(tri[ok]), np.ascontiguousarray(col[ok].astype(np.float32))
+
+def suaviza(a, n):
+    """RAYOS x RAYOS -> n x n: desenfoque (el reflejo en una carroceria curva no tiene bordes duros) y caja"""
+    from PIL import Image, ImageFilter
+    im = Image.fromarray(np.clip(a, 0, 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(1.2))
+    return np.asarray(im.resize((n, n), Image.BOX)).astype(np.float64)
+
+def rgb565n(a, n):
+    a = np.clip(np.round(a), 0, 255).astype(np.uint32)
+    v = ((a[..., 0] >> 3) << 11) | ((a[..., 1] >> 2) << 5) | (a[..., 2] >> 3)
+    out = np.zeros(n * n, np.uint16); out[twiddle(n, n).ravel()] = v.ravel(); return out.tobytes()
+
+def mapas_etapa(args):
+    """los mapas de 16x16 de una etapa: uno cada PASO_MAPA puntos de su ruta (y el ultimo punto)"""
+    datos, k = args
+    import ctypes, nativo
+    lib = nativo.lib('reflejo'); f = ctypes.POINTER(ctypes.c_float)
+    lib.rayos.argtypes = [f, f, ctypes.c_int, f, f, ctypes.c_int, ctypes.c_float, f, f]; lib.rayos.restype = ctypes.c_int
+    m = carga(datos, 'SEG%02d.DAT' % k, {})
+    c = mapa_cielo(m)
+    fondo = np.zeros((RAYOS, RAYOS, 3)) + 128.0 if c is None else \
+        np.asarray(__import__('PIL.Image').Image.fromarray(np.clip(c, 0, 255).astype(np.uint8)).resize((RAYOS, RAYOS))).astype(np.float64)
+    fondo = np.ascontiguousarray(fondo.reshape(-1, 3).astype(np.float32))
+    D = direcciones(RAYOS).reshape(-1, 3); D = np.ascontiguousarray((D / np.linalg.norm(D, axis=1, keepdims=True)).astype(np.float32))
+    tri, col = triangulos(m)
+    lo = np.minimum(np.minimum(tri[:, 0:3], tri[:, 3:6]), tri[:, 6:9]); hi = np.maximum(np.maximum(tri[:, 0:3], tri[:, 3:6]), tri[:, 6:9])
+    puntos = list(range(0, m.nr, PASO_MAPA))
+    if puntos[-1] != m.nr - 1: puntos.append(m.nr - 1)
+    sal = np.zeros((len(D), 3), np.float32); bloques = []
+    for i in puntos:
+        o = (m.ruta[i, :3].astype(np.float32) + np.array([0, ALTO_OJO, 0], np.float32))
+        cerca = ((lo - RADIO <= o) & (hi + RADIO >= o)).all(1)
+        t, cl = np.ascontiguousarray(tri[cerca]), np.ascontiguousarray(col[cerca])
+        lib.rayos(t.ctypes.data_as(f), cl.ctypes.data_as(f), len(t), np.ascontiguousarray(o).ctypes.data_as(f),
+                  D.ctypes.data_as(f), len(D), ctypes.c_float(0.3), fondo.ctypes.data_as(f), sal.ctypes.data_as(f))
+        bloques.append(rgb565n(suaviza(sal.reshape(RAYOS, RAYOS, 3), LADO2) * GANANCIA2, LADO2))
+    return k, b''.join(bloques), len(puntos), c is not None
+
 def main():
+    """REFLEJO.DAT 'RFL2' (Rev 2.4): por etapa, un mapa de 16x16 del entorno cada PASO_MAPA puntos de la ruta"""
     if len(sys.argv) < 2: raise SystemExit(__doc__.split('\n')[0])
     datos = sys.argv[1]; sal = sys.argv[2] if len(sys.argv) > 2 else os.path.join(datos, 'REFLEJO.DAT')
     nums = sorted(int(f[3:5]) for f in os.listdir(datos) if len(f) == 9 and f.startswith('SEG') and f.endswith('.DAT') and f[3:5].isdigit())
     if not nums: raise SystemExit('no hay SEGnn.DAT en %s' % datos)
-    nreg = max(nums) + 1; paks = {}
-    out = bytearray(SECTOR * (2 + 2 * nreg))
-    struct.pack_into('<4s3I', out, 0, b'RFL1', nreg, LADO, 1 + 2 * nreg)
+    nreg = max(nums) + 1
+    from multiprocessing import Pool
+    with Pool(int(os.environ.get('PYTHON_CPU_COUNT') or os.cpu_count() or 1)) as pool:
+        res = {k: (b, n, cie) for k, b, n, cie in pool.imap_unordered(mapas_etapa, [(datos, k) for k in nums])}
+    cab = bytearray(SECTOR); struct.pack_into('<4s3I', cab, 0, b'RFL2', nreg, LADO2, PASO_MAPA)
+    cuerpo = bytearray(); sec = 1; maxn = 0
     for k in nums:
-        m = carga(datos, 'SEG%02d.DAT' % k, paks); o = SECTOR * (1 + 2 * k)
-        c = mapa_cielo(m)
-        if c is not None: out[o:o + SECTOR] = rgb565(c * GANANCIA)
-        cub, nc = cubierta(m); npt = min(len(cub), SECTOR - 4)
-        if len(cub) > npt: print('  SEG%02d: %d puntos de ruta, se guardan %d' % (k, len(cub), npt))
-        struct.pack_into('<2H', out, o + SECTOR, npt, 1 if c is not None else 0); out[o + SECTOR + 4:o + SECTOR + 4 + npt] = cub[:npt].tobytes()
-        print('SEG%02d: cielo %s, %d de %d puntos bajo techo' % (k, 'si' if c is not None else 'NO', nc, len(cub)), flush=True)
-    out[SECTOR * (1 + 2 * nreg):] = rgb565(mapa_tunel())
-    open(sal, 'wb').write(out)
-    print('%s: %d bytes, %d etapas' % (os.path.basename(sal), len(out), len(nums)))
+        b, n, cie = res[k]; b += b'\0' * (-len(b) % SECTOR)
+        struct.pack_into('<2I', cab, 16 + 8 * k, sec, n); cuerpo += b; sec += len(b) // SECTOR; maxn = max(maxn, n)
+        print('SEG%02d: %d mapas%s' % (k, n, '' if cie else ' (sin cielo)'), flush=True)
+    tmp = sal + '.tmp'; open(tmp, 'wb').write(bytes(cab) + bytes(cuerpo)); os.replace(tmp, sal)
+    print('%s: %d KB, %d etapas, hasta %d mapas por etapa (%d KB)' % (os.path.basename(sal), (SECTOR + len(cuerpo)) >> 10, len(nums), maxn, maxn * LADO2 * LADO2 * 2 >> 10))
 
 if __name__ == '__main__':
     main()

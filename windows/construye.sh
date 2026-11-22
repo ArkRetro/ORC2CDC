@@ -34,11 +34,12 @@ find "$SP" -type d \( -name tests -o -name __pycache__ \) -prune -exec rm -rf {}
 PTH=$(ls "$G"/python/python3*._pth)
 printf '%s\r\n' "$(basename "$(ls "$G"/python/python3*.zip)")" . 'Lib\site-packages' '..\tools' '..' 'import site' > "$PTH"
 
-echo "== partes en C (mingw-w64): pvs.dll, visible.dll, musica.exe, pvrtex.exe"
+echo "== partes en C (mingw-w64): pvs.dll, visible.dll, reflejo.dll, musica.exe, pvrtex.exe"
 CCW=x86_64-w64-mingw32-gcc
 # (sin -march: cualquier x86-64; -ffp-contract=off: sin FMA, las mismas cuentas en todos los PC)
 $CCW -O3 -ffp-contract=off -shared -static -o "$G/nativo/pvs.dll" "$REPO/tools/c/pvs.c" -lpthread -lm
 $CCW -O2 -ffp-contract=off -shared -static -o "$G/nativo/visible.dll" "$REPO/tools/c/visible.c" -lm
+$CCW -O2 -ffp-contract=off -shared -static -o "$G/nativo/reflejo.dll" "$REPO/tools/c/reflejo.c" -lm
 $CCW -O2 -w -static -o "$G/nativo/musica.exe" "$REPO/tools/c/musica.c"
 # pvrtex de KallistiOS (utils/pvrtex: libros VQ reducidos, tools/libros.py); LGPL (codigo de FFmpeg): va su fuente
 PVT=$(mktemp -d); (cd "$KOS/utils/pvrtex" && tar cf - --exclude='*.o' --exclude=./pvrtex .) | tar xf - -C "$PVT"
@@ -59,7 +60,7 @@ git -C "$REPO" log -1 --format='demo de orc2cdc %h (%cs)' > "$G/dc/VERSION.txt"
 
 echo "== codigo"
 cp "$REPO"/tools/*.py "$G/tools/"; cp "$REPO"/tools/ps2/*.py "$G/tools/ps2/"
-mkdir -p "$G/tools/c"; cp "$REPO"/tools/c/{pvs,visible,musica}.c "$G/tools/c/"
+mkdir -p "$G/tools/c"; cp "$REPO"/tools/c/{pvs,visible,musica,reflejo}.c "$G/tools/c/"
 cp "$REPO/windows/outrun2dc.py" "$G/"
 for f in OutRun2DC.bat LEEME.txt; do sed 's/\r*$/\r/' "$REPO/windows/$f" > "$P/$f"; done
 {
