@@ -1505,6 +1505,34 @@ de OutRun 2 SP (las 15 etapas seguidas) que dio el usuario.
   no esta leido). Sin EFECTOS.DAT nuevo, sin agua (como antes).
 - NO verificado en consola real.
 
+### Lacado con brillos, deslumbramiento del sol y registro de la VRAM (Rev 2.6 / Mod 2.2, 2026-11-22; DESVIACION pedida)
+
+Pedido: la opcion A del reflejo (mas contraste), "que los coches conserven su lacado con reflejo, aplicando brillos no
+cambios de color, no quiero que los ferrari se vean mate", el efecto del original "cuando sale el sol y un haz se dirige
+a la vision del jugador" sin bajar los fps, y el plan del material de investigacion de VRAM que paso el usuario.
+- Reflejo (refl_compone): el mapa propio del coche a peso 1 (el lacado de la Rev 2.3) y del entorno solo lo que pasa de
+  REFL_UMBRAL 150 de luminancia, como brillo blanco (cielo claro, horizonte, sol); lo medio y lo oscuro ya no tine la
+  pintura. Textura de 32x32, horizonte nitido (x 1,5 arriba, x 0,25 abajo), sol cos^160 x 2, Fresnel 0,6 + 0,4
+  (1 - |N.I|)^2 con la vista hasta cada vertice. Medido (pixeles rojos del Testarossa): saturacion 146-169 frente a
+  108-131 del mapa fijo, brillo 115-134 / percentil 99 160-216 (mapa fijo 115-125 / 181-192): rojo mas vivo y brillos.
+- Deslumbramiento (sol_deslumbra): en el video de referencia la imagen se blanquea, mas arriba que abajo, al ir hacia el
+  sol aunque su disco quede por encima de la pantalla (el destello del original solo sale con el sol en pantalla, casi
+  nunca con la inclinacion de las etapas). Un rectangulo de toda la pantalla en la lista translucida, blanco tenido del
+  sol, alfa 0,45 x intensidad del sol x ((rumbo hacia el sol - 0,75) / 0,23)^2 x la altura (x 1 hasta 30 grados, x 0,3
+  a 60) x lo que se ve del sol x el cielo (menos bajo techo); abajo x 0,3; suavizado (~0,2 s). Medido: PALM 27-33 s de
+  carrera hacia el sol, alfa 0,19-0,35. -DSIN_DESLUMBRA.
+- Rendimiento (Flycast, PRUEBA_AUTO, PALM y ALPI 150 s, media de cuadros > 30 fps): sin reflejo ni deslumbramiento 43,5
+  fps / 18,0 ms de CPU; Rev 2.5 40,6 / 20,6; primer intento 35,3 / 24,8 (la mezcla casi cada cuadro con ~24000 divisiones
+  enteras y 1024 powf); con tablas (sin divisiones), mezcla en pasos de 1/8, FSRRA y textura / vertices en cuadros
+  alternos: **41,2 / 20,0** (PowerVR 7,5 ms en todos: el deslumbramiento no se nota). Mas rapido que la Rev 2.5.
+- Registro de la VRAM (`-DDIAG_VRAMLOG`, docs/REGISTRO_VRAM.md): eventos alloc / free / fail / mark con el contrato del
+  material del usuario. Captura PALM -> ALPI 150 s: 1020 eventos, 0 fallos, 0 avisos del analizador del usuario
+  (AnalizarRegistroVram.ps1, PowerShell 7 en Linux); pico de reservas registradas 1643 KB en el cuadro 2583 (al leer
+  SEG05 con SEG00 aun en la zona): pvr_mem fuera de la zona 662 KB (HUD 278, coche y modelos fijos 186, efectos 49...),
+  etapas 473, trafico 322, uniones 148. La zona del curso (1280 KB) llego a 599 KB con SEG00 y 621 con SEG05: no se
+  lleno. El libro reducido se reserva tal cual (demo/main.c sube_modelo, vram_pide; el dibujo apunta 2048 - 8 N antes).
+- NO verificado en consola real.
+
 ### Reflejo del entorno en la carroceria (Rev 2.4 / Mod 2.0 y Rev 2.5 / Mod 2.1, 2026-11-22; DESVIACION pedida)
 
 Peticion: volver a poner el reflejo en la carroceria, muy simplificado. Lo que no gusto de la Rev 1.3: "un cambio de
