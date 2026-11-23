@@ -205,6 +205,11 @@ typedef struct { float cx, cy, cz, r; uint32_t fl; int32_t cartel; uint32_t rell
    camara con la imagen del nodo); el nodo completo lleva en cartel -2 - (su nodo lejano) */
 #define NODO_LEJ 0x20
 #define NODO_LEJ3D 0x40                                         /* version lejana lowpoly de un nodo grande (tools/lod_grande.py) */
+/* Ventana de la PVS (Rev 2.9.5, DESVIACION; pvs_ventana): secciones a cada lado de la del ojo cuyas mallas tambien se
+   dibujan. 0: solo la del ojo (lo de antes) */
+#ifndef PVS_VENTANA
+#define PVS_VENTANA 3
+#endif
 typedef struct {
     tex_t *texs; malla_t *mallas; vert_t *verts; float *ruta;
     uint32_t nmallas, nvert, nruta, paso_ruta, ntex, inicio[5];
@@ -227,6 +232,9 @@ typedef struct {
                                                                      pvs_dibujo y los cuadros que le quedan (pvs_gra) */
     uint8_t *pvs_gra;
     uint32_t *pvs_dibujo;                                       /* tiras de la ultima seccion visible de cada nodo */
+    uint32_t *pvs_mv, *pvs_cv; int32_t pvs_sv[2];                 /* ventana de la PVS (Rev 2.9.5, pvs_ventana): las mascaras
+                                                                     de las secciones s - PVS_VENTANA y s + PVS_VENTANA, los
+                                                                     bytes teoricos de cada nodo en ellas y sus secciones */
     uint16_t *grp;                                                /* grupos de nodos (tools/grupos_nodos.py: bits 16-31 de
                                                                      fl = jefe + 1): clases del grupo en el cuadro, en el
                                                                      sitio del jefe (nodos_visibles); NULL sin grupos */
@@ -622,6 +630,7 @@ static int lee_modelo_en(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t
     m->carteles = (float (*)[4][4])p; p += m->ncarteles * 64;
     m->sec_ini = m->nsec ? (const uint32_t *)p : NULL; p += m->nsec ? (m->nsec + 1) * 4 : 0;
     m->pvs_l = NULL; m->pvs_m = m->pvs_teo = NULL; m->pvs_s = -1; m->pvs_i = 0; m->pvs_on = 0;
+    m->pvs_mv = m->pvs_cv = NULL; m->pvs_sv[0] = m->pvs_sv[1] = -1;
     if (m->nsec && (h[12] >> 31)) {                               /* PVS: listas XOR en bytes (pvs_aplica) */
         m->pvs_l = p; m->sec_lista = NULL; p += m->sec_ini[m->nsec]; p = b + ((p - b + 1) & ~1);
     } else { m->sec_lista = m->nsec ? (const uint16_t *)p : NULL; p += m->nsec ? m->sec_ini[m->nsec] * 2 : 0; }
@@ -765,6 +774,9 @@ static int lee_modelo_en(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t
             m->pvs_dibujo = m->pvs_ult + m->nnodos;
             m->pvs_gra = (uint8_t *)(m->pvs_dibujo + palabras);
         }
+#if PVS_VENTANA
+        if ((m->pvs_mv = calloc(1, 8 * palabras + 8 * m->nnodos))) m->pvs_cv = m->pvs_mv + 2 * palabras;
+#endif
     }
     m->blob = b + ((p - b + 31) & ~31); m->datos = b; m->tam = sz;
     return 0;
@@ -918,7 +930,7 @@ static void libera_modelo(modelo_t *m)
     tex_suelta(m);
     if (m->datos && m->datos == hueco_etapa) col_et.ok = 0;      /* su colision va detras en el hueco */
     if (!en_coche_bloque(m->ofs)) free(m->ofs);
-    free(m->vis); free(m->pvs_ent); free(m->nubes); m->nubes = NULL; free(m->pvs_m); free(m->pvs_teo); free(m->pvs_ult); free(m->tr); free(m->fe_p);
+    free(m->vis); free(m->pvs_ent); free(m->nubes); m->nubes = NULL; free(m->pvs_m); free(m->pvs_teo); free(m->pvs_ult); free(m->pvs_mv); m->pvs_mv = m->pvs_cv = NULL; free(m->tr); free(m->fe_p);
     if (!(hueco_etapa && m->datos >= hueco_etapa && m->datos < hueco_etapa + cap_etapa) &&
         !(hueco_union && m->datos >= hueco_union && m->datos < hueco_union + cap_union) && !en_coche_bloque(m->datos))
         free(m->datos);                                           /* (los objetos de la union van dentro del hueco de la
@@ -1499,7 +1511,8 @@ static uint32_t vtx_reserva, lst_uso[3], lst_vtx[3]; static uint8_t lst_corto[3]
      0..3  el tope del TA de la etapa y de los vertices del reparto: 100 -> 94 -> 87 -> 80 % (SALTO_TA, los de la
            2.9.2.f)
      3..6  el lejano: 3800 -> 3200 -> 2800 -> 2400 m (SALTO_LEJ)
-     6..9  emergencia (lo que antes hacia el recorte por CPU): el lejano 2400 -> 600 m (LEJOS_MIN)
+     6..9  emergencia (lo que antes hacia el recorte por CPU): el lejano 2400 -> 600 m (LEJOS_MIN); Rev 2.9.5: hasta
+           SALTO_LEJ_SUELO (1200 m)
    Primero el TA y despues el lejano: medido en Flycast (METR, por tramos de la misma carrera) el lejano fijo en 2400 da
    lo mismo que en 3800 (35,6 / 35,2 fps) y el TA al 80 % con 3800, 36,5 (el reparto del TA ya limita lo que se envia;
    el lejano solo ahorra de verdad por debajo de ~1000 m). El lejano sigue al del nivel poco a poco (cada 4 cuadros
@@ -1520,6 +1533,15 @@ static uint32_t vtx_reserva, lst_uso[3], lst_vtx[3]; static uint8_t lst_corto[3]
 #define SALTO_LEJ_BAJA 24.0f                                    /* m cada 4 cuadros (240 m/s a 40 fps) */
 #define SALTO_LEJ_SUBE 16.0f                                    /* m cada 4 cuadros (160 m/s) */
 static const float SALTO_LEJ[4] = { LEJOS_MAX, 3200.0f, 2800.0f, 2400.0f };
+/* Rev 2.9.5 (DESVIACION, queja: "las fases de noche tienen elementos que aparecen y desaparecen"): la emergencia (6..9)
+   baja el lejano de 2400 a SALTO_LEJ_SUELO y no a LEJOS_MIN (600 m). En METR el nivel se quedaba en la emergencia y el
+   lejano iba y venia entre 600 y 2400 m: lo que entraba y salia por el limite (razon "lejos" de DIAG_POPPING: 4,6 por
+   s de 8 px o mas, 2,4 de 32 px o mas) eran edificios, y de noche la franja de niebla del limite es debil (niebla_pon:
+   cielo mas oscuro que la niebla). Medido 1200 y 1700 (Flycast, METR): con 1700 los del limite 0,2 por s pero mas
+   cortes del tope cerca (el TA se reparte entre mas); con 1200, 0,8 y menos en total (18,7 frente a 20,3), mismos fps */
+#ifndef SALTO_LEJ_SUELO
+#define SALTO_LEJ_SUELO 1200.0f
+#endif
 static const uint16_t SALTO_TA[4] = { 256, 240, 222, 205 };   /* (Rev 2.9.2.f: 94 / 87 / 80 %; antes 90 / 80 / 70) */
 static float salto_q, salto_trab __attribute__((unused));       /* nivel (0..SALTO_Q_MAX) y trabajo medio (ms) */
 static uint32_t salto_ta = 256;                                 /* tope del TA de la etapa por el nivel (/256) */
@@ -1527,7 +1549,7 @@ static int32_t pres_trab;                                       /* trabajo del u
 static float salto_lejos(float q)                               /* el lejano del nivel */
 {
     int i;
-    if (q >= 6.0f) { float l = SALTO_LEJ[3] - (q - 6.0f) * ((SALTO_LEJ[3] - LEJOS_MIN) / 3.0f); return l < LEJOS_MIN ? LEJOS_MIN : l; }
+    if (q >= 6.0f) { float l = SALTO_LEJ[3] - (q - 6.0f) * ((SALTO_LEJ[3] - SALTO_LEJ_SUELO) / 3.0f); return l < SALTO_LEJ_SUELO ? SALTO_LEJ_SUELO : l; }
     if (q <= 3.0f) return SALTO_LEJ[0];
     q -= 3.0f; i = (int)q; return SALTO_LEJ[i] + (q - (float)i) * (SALTO_LEJ[i + 1] - SALTO_LEJ[i]);
 }
@@ -2015,7 +2037,12 @@ static const modelo_t *focos_fuera;                             /* modelo con ot
 static struct { const modelo_t *mo; const malla_t *m; } focos_l[FOCOS_MAX];
 static uint32_t focos_n;
 static float focos_e[3];                                         /* el proyector en el mundo (focos_prepara) */
-#define FOCOS_ANOTA_D 40.0f                                     /* m: mas alla del haz (FOCOS_LEJOS 28 m) y con holgura */
+/* m: lo que se anota para la pasada del haz: la esfera de la malla a menos de esto del proyector. Rev 2.9.5: 40 -> 30
+   (el haz llega a FOCOS_LEJOS, 28 m sobre el plano del coche: a 30 m del proyector no hay nada que iluminar; METR:
+   FOCOSMS 713 -> 618 us por cuadro, misma imagen) */
+#ifndef FOCOS_ANOTA_D
+#define FOCOS_ANOTA_D 30.0f
+#endif
 static inline void focos_anota(const modelo_t *mo, const malla_t *m)
 {
     int i; float dx = m->cx - focos_e[0], dy = m->cy - focos_e[1], dz = m->cz - focos_e[2], lim = FOCOS_ANOTA_D + m->r;
@@ -8129,8 +8156,15 @@ static void pop_evento(int t, int nodo, int razon, int ap, float px, float z, fl
 #endif
 static int pvs_grande_on;
 #define PVS_GRANDE(d, zv) (pvs_grande_on && PVS_GRANDE_R > 0 && (d)->r >= PVS_GRANDE_R && (zv) - (d)->r < PVS_GRANDE_D)
-#define PVS_GRACIA 15                                           /* gracia de la PVS (nodos_visibles): cuadros que sigue
-                                                                   dibujandose un nodo que la PVS apaga, 0,33 s */
+/* Gracia de la PVS (nodos_visibles): cuadros que sigue dibujandose un nodo que la PVS apaga (antes 15, 0,33 s).
+   Rev 2.9.5 (DESVIACION, saltos de la noche): 240 (6 s a 40 fps). En GHOS la tabla apaga nodos enteros (montes y
+   bosque de 60-700 m de radio) en rachas de 9-30 secciones (72-240 m, 1,5-4 s) entre otras en las que se ven: con 0,33
+   s se iban y volvian (DIAG_POPPING: 12 desapariciones por s de 8 px o mas, 5 de 32 px o mas). Lo que se queda cuesta
+   TA (su ultimo coste va en el reparto, que lo quita antes si no cabe) pero no se ve si la tabla acierta; con 120 y
+   200 cuadros medido peor y casi igual (ver docs/PARIDAD.md, Saltos en las etapas de noche) */
+#ifndef PVS_GRACIA
+#define PVS_GRACIA 240
+#endif
 static void pvs_aplica(modelo_t *mo, int s)                     /* XOR de la lista de la seccion s */
 {
     const uint8_t *p = mo->pvs_l + mo->sec_ini[s], *f = mo->pvs_l + mo->sec_ini[s + 1];
@@ -8146,13 +8180,56 @@ static void pvs_aplica(modelo_t *mo, int s)                     /* XOR de la lis
         mo->pvs_m[i >> 5] ^= w;
         if (mo->pvs_m[i >> 5] & w) { mo->pvs_teo[2 * ma->nodo] += ta_teo(n, 0); mo->pvs_teo[2 * ma->nodo + 1] += n; }
         else { mo->pvs_teo[2 * ma->nodo] -= ta_teo(n, 0); mo->pvs_teo[2 * ma->nodo + 1] -= n; }
-#ifdef DIAG_POPPING
-        {   float px, z;                                        /* malla de un nodo que ya se dibujaba, en la pantalla */
-            if (!precalentando && pop_ra && pop_ra[ma->nodo] == PR_DIB && pop_en_pantalla(ma->cx, ma->cy, ma->cz, ma->r, &px, &z) && px >= 2.0f)
-                (mo->pvs_m[i >> 5] & w ? pop_pvs_ap : pop_pvs_de)[px >= 32.0f ? 2 : px >= 8.0f ? 1 : 0]++;
-        }
-#endif
     }
+}
+/* Ventana de la PVS (Rev 2.9.5, DESVIACION; queja: "las fases de noche tienen elementos que aparecen y desaparecen").
+   tools/pvs.py da por visible una malla en la seccion de cada muestra del ojo que la ve y en sus dos vecinas (8 m a
+   cada lado); entre muestras (cada 4 m a lo largo y a lo ancho, a 0,6 / 3,3 / 6 m de alto) la camara puede verla por
+   un hueco (entre los troncos de GHOS, entre los edificios de METR) desde una seccion en la que la tabla la da por
+   tapada: aparecia de golpe al entrar en la primera seccion que la ve (en GHOS, montes y bosque de 80-700 m de radio
+   a 300-1000 m, 30-300 px) y se apagaba al salir de la ultima. Ahora se dibuja tambien lo de las secciones s -
+   PVS_VENTANA y s + PVS_VENTANA (como las rachas de la tabla son de 3 secciones o mas, con PVS_VENTANA <= 3 es lo de
+   toda la ventana de s - 3 a s + 3, +-24 m): lo que va a verse ya esta dibujado (tapado) un poco antes y lo que se
+   deja de ver se va un poco despues. Las dos mascaras se mueven como la de la seccion (pvs_aplica_v) y llevan los bytes
+   teoricos de cada nodo (pvs_cv) para el reparto del TA (pvs_coste: el mayor de los tres) */
+static void pvs_aplica_v(modelo_t *mo, int s, uint32_t *mk, uint32_t *cv)
+{
+    const uint8_t *p = mo->pvs_l + mo->sec_ini[s], *f = mo->pvs_l + mo->sec_ini[s + 1];
+    int32_t i = -1;
+    while (p < f) {
+        uint32_t d = *p++, w; const malla_t *ma;
+        if (d == 255) { d = p[0] | (uint32_t)p[1] << 8; p += 2; }
+        i += d;
+        if ((uint32_t)i >= mo->nmallas) break;
+        ma = mo->mallas + i;
+        if (ma->nodo < 0 || (uint32_t)ma->nodo >= mo->nnodos || ma->n < 3) continue;
+        w = 1u << (i & 31); mk[i >> 5] ^= w;
+        if (mk[i >> 5] & w) cv[ma->nodo] += ta_teo(ma->n > 256 ? 256 : ma->n, 0); else cv[ma->nodo] -= ta_teo(ma->n > 256 ? 256 : ma->n, 0);
+    }
+}
+static int pvs_ventana(modelo_t *mo)                            /* mueve las dos de la ventana a s -+ PVS_VENTANA */
+{
+    int k, cambia = 0; uint32_t pal = (mo->nmallas + 31) / 32;
+    if (!mo->pvs_mv || mo->pvs_s < 0) return 0;
+    for (k = 0; k < 2; k++) {
+        int32_t t = mo->pvs_s + (k ? PVS_VENTANA : -PVS_VENTANA);
+        uint32_t *mk = mo->pvs_mv + k * pal, *cv = mo->pvs_cv + k * mo->nnodos;
+        t = t < 0 ? 0 : t >= (int32_t)mo->nsec ? (int32_t)mo->nsec - 1 : t;
+        if (mo->pvs_sv[k] != t) cambia = 1;
+        while (mo->pvs_sv[k] < t) pvs_aplica_v(mo, ++mo->pvs_sv[k], mk, cv);
+        while (mo->pvs_sv[k] > t) pvs_aplica_v(mo, mo->pvs_sv[k]--, mk, cv);
+    }
+    return cambia;
+}
+static inline uint32_t pvs_coste(const modelo_t *mo, uint32_t i)   /* bytes teoricos del nodo en la ventana */
+{
+    uint32_t c = mo->pvs_teo[2 * i];
+    if (mo->pvs_cv) {
+        uint32_t a = mo->pvs_cv[i], b = mo->pvs_cv[mo->nnodos + i];
+        if (a > c) c = a;
+        if (b > c) c = b;
+    }
+    return c;
 }
 /* Aplicar la PVS de la seccion a las tiras que dibuja el motor. Si un nodo desaparece
    entero, conservar exactamente su ultimo subconjunto. nodos_visibles decide si sigue
@@ -8172,12 +8249,24 @@ static void pvs_recuerda(modelo_t *mo)
         }
         if (nd >= 0 && (uint32_t)nd < mo->nnodos) {
             uint32_t padre = (uint32_t)nd >= mo->nn0 && mo->lej_de ? mo->lej_de[nd - mo->nn0] : (uint32_t)nd;
-            if (mo->pvs_teo[2 * padre]) {
+            if (pvs_coste(mo, padre)) {
+                uint32_t pal = (mo->nmallas + 31) / 32;
                 while (k < fin) {
                     uint32_t w = k >> 5, sig = (w + 1) << 5;
                     uint32_t hasta = fin < sig ? fin : sig;
                     uint32_t bits = (~0u << (k & 31)) & (~0u >> (31 - ((hasta - 1) & 31)));
-                    mo->pvs_dibujo[w] = (mo->pvs_dibujo[w] & ~bits) | (mo->pvs_m[w] & bits);
+                    uint32_t m = mo->pvs_m[w] | (mo->pvs_mv ? mo->pvs_mv[w] | mo->pvs_mv[pal + w] : 0);   /* (con la ventana) */
+#ifdef DIAG_POPPING
+                    {   uint32_t cb = (mo->pvs_dibujo[w] ^ m) & bits;   /* mallas que se encienden o apagan al dibujar */
+                        while (cb && !precalentando && pop_ra && pop_ra[padre] == PR_DIB) {
+                            uint32_t q = (uint32_t)__builtin_ctz(cb), j = w * 32 + q; const malla_t *ma = mo->mallas + j; float px, z;
+                            cb &= cb - 1;
+                            if (ma->n >= 3 && pop_en_pantalla(ma->cx, ma->cy, ma->cz, ma->r, &px, &z) && px >= 2.0f)
+                                (m >> q & 1 ? pop_pvs_ap : pop_pvs_de)[px >= 32.0f ? 2 : px >= 8.0f ? 1 : 0]++;
+                        }
+                    }
+#endif
+                    mo->pvs_dibujo[w] = (mo->pvs_dibujo[w] & ~bits) | (m & bits);
                     k = hasta;
                 }
             }
@@ -8218,7 +8307,7 @@ static void pvs_paso(modelo_t *mo)
             if (mo->pvs_s != (int32_t)s) {
                 while (mo->pvs_s < (int32_t)s) pvs_aplica(mo, ++mo->pvs_s);
                 while (mo->pvs_s > (int32_t)s) pvs_aplica(mo, mo->pvs_s--);
-                pvs_recuerda(mo);
+                pvs_ventana(mo); pvs_recuerda(mo);
             }
             mo->pvs_on = 1;
             return;
@@ -8242,7 +8331,7 @@ static void pvs_paso(modelo_t *mo)
     if (mo->pvs_s != (int32_t)s) {
         while (mo->pvs_s < (int32_t)s) pvs_aplica(mo, ++mo->pvs_s);
         while (mo->pvs_s > (int32_t)s) pvs_aplica(mo, mo->pvs_s--);
-        pvs_recuerda(mo);
+        pvs_ventana(mo); pvs_recuerda(mo);
     }
     mo->pvs_on = 1;
 }
@@ -8374,7 +8463,7 @@ static void nodos_visibles(modelo_t *mo)
         } else if (pvs_on_ && mo->pvs_ent && PVS_GRANDE(d, zv)) {
             mo->pvs_ent[i >> 5] |= 1u << (i & 31);            /* (Rev 2.8: estructura grande, entera) */
             c_teo = d->relleno[0]; c_v = d->relleno[1] >> 12;
-        } else if (pvs_on_ && mo->pvs_ent && zv < PVS_CERCA && d->r < PVS_CERCA_R && (PVS_CERCA_TODO || mo->pvs_teo[2 * i])) {
+        } else if (pvs_on_ && mo->pvs_ent && zv < PVS_CERCA && d->r < PVS_CERCA_R && (PVS_CERCA_TODO || pvs_coste(mo, i))) {
             /* PVS conservadora cerca de la camara (Rev 1.4): la tabla da por tapadas tiras, y nodos enteros, que a
                corta distancia si se ven (NEWY: del anclaje del puente quedaba la celosia de arriba sin sus muros;
                tools/pvs.py mira desde el centro de la calzada y lo que los tapaba puede no dibujarse por el tope del
@@ -8384,6 +8473,11 @@ static void nodos_visibles(modelo_t *mo)
             c_teo = d->relleno[0]; c_v = d->relleno[1] >> 12;
         } else if (pvs_on_) {                                /* PVS: lo que queda visible del nodo desde aqui */
             c_teo = mo->pvs_teo[2 * i]; c_v = mo->pvs_teo[2 * i + 1];
+            if (mo->pvs_cv) {                                   /* (Rev 2.9.5: con la ventana, el mayor; los vertices en
+                                                                   proporcion) */
+                uint32_t cw = pvs_coste(mo, i);
+                if (cw > c_teo) { c_v = d->relleno[0] ? (uint32_t)((uint64_t)(d->relleno[1] >> 12) * cw / d->relleno[0]) : c_v; c_teo = cw; }
+            }
 #ifdef DIAG_VTX
             diag_pvs_v += (d->relleno[1] >> 12) - c_v;
 #endif
@@ -8412,7 +8506,7 @@ static void nodos_visibles(modelo_t *mo)
                 pop_lej_n++; if (lej3d) pop_lej3d++;
 #endif
                 POPR(i, PR_DIB); ya = ya || era_lej; i = jl; d = ND + jl;
-                if (pvs_on_) { c_teo = mo->pvs_teo[2 * i]; c_v = mo->pvs_teo[2 * i + 1]; }
+                if (pvs_on_) { c_teo = pvs_coste(mo, i); c_v = mo->pvs_teo[2 * i + 1]; if (c_teo > mo->pvs_teo[2 * i]) c_v = d->relleno[1] >> 12; }
                 else { c_teo = d->relleno[0]; c_v = d->relleno[1] >> 12; }
                 if (!c_teo) c_teo = 1;
             }
@@ -8486,7 +8580,7 @@ static void nodos_visibles(modelo_t *mo)
 #endif
                 d->relleno[1] = (d->relleno[1] & ~4095u) | ((o >> 8) << 6 | (o & 255));
                 if (pvs_on_) {                              /* (con la gracia de la PVS, el ultimo coste que traia) */
-                    uint32_t ct = mo->pvs_teo[2 * i], cv = mo->pvs_teo[2 * i + 1];
+                    uint32_t ct = pvs_coste(mo, i), cv = ct > mo->pvs_teo[2 * i] ? d->relleno[1] >> 12 : mo->pvs_teo[2 * i + 1];
                     if (!ct && mo->pvs_ult && mo->pvs_gra && mo->pvs_gra[i]) { ct = mo->pvs_ult[i]; cv = d->relleno[1] >> 12; }
                     prio_coste[o >> 8][o & 255] += ct; prio_vtx[o >> 8][o & 255] += cv;
                 }
@@ -8670,6 +8764,24 @@ static void pop_mide(void)
 }
 #endif
 static void geo_reinicia(void);
+/* Histeresis del corte del reparto (Rev 2.9.5, DESVIACION; nodos_visibles_todos): el corte (pd, pp) de antes se queda
+   si lo que dibuja cabe en REPARTO_SCHMITT_HI / 95 del tope de siempre (0: sin ella, lo de antes) */
+#ifndef REPARTO_SCHMITT
+#define REPARTO_SCHMITT 1
+#endif
+#ifndef REPARTO_SCHMITT_HI
+#define REPARTO_SCHMITT_HI 100
+#endif
+#if REPARTO_SCHMITT
+static int reparto_cabe(int pd, int pp, uint32_t tope, uint32_t vmax, float k)
+{
+    uint32_t c = 0, v = 0; int d, q;
+    for (d = 0; d < ND_PRIO; d++)
+        for (q = 0; q < NB_PRIO; q++)
+            if (d <= pd || q <= pp) { c += prio_coste[d][q]; v += prio_vtx[d][q]; }
+    return (float)c * k * 95.0f <= (float)tope * (float)REPARTO_SCHMITT_HI && (uint64_t)v * 95u <= (uint64_t)vmax * REPARTO_SCHMITT_HI;
+}
+#endif
 static void nodos_visibles_todos(void)
 {
     static uint32_t fila_c[ND_PRIO], fila_v[ND_PRIO], col_c[NB_PRIO], col_v[NB_PRIO];
@@ -8719,6 +8831,14 @@ static void nodos_visibles_todos(void)
        lote 1 de la revision 44). Antes la clase 0 de distancia se dibujaba entera aunque no cupiera y ta_cabe tiraba lo
        que no cabia en el orden de envio: la calzada, los muros y el cielo (Flycast, -DTA_F_MIN=768: PALM sin calzada) */
     d = cabe < 0 && ((float)fila_c[0] * k > (float)tope || fila_v[0] > vmax) ? -1 : cabe < 0 ? 0 : cabe;
+#if REPARTO_SCHMITT
+    /* Rev 2.9.5 (DESVIACION, saltos de la noche): el corte de antes no baja mientras lo que dibuja quepa en el tope
+       entero (REPARTO_SCHMITT_HI: el 100 % del TA de la etapa y de los vertices del reparto) aunque el objetivo, con el
+       95 % de siempre, pida bajar. El tope del TA de la etapa cambia cada cuadro (el coche, el trafico, el nivel del
+       salto, que se mueve un poco en cada cuadro de carrera) y el corte bajaba y subia una clase con el: lo del borde
+       del corte aparecia y desaparecia. Lo que se envia sigue sin pasar del tope (ta_cabe) */
+    if (d < prio_d && reparto_cabe(prio_d, prio_p, tope, vmax, k)) d = prio_d;
+#endif
     if (arranque_hold && precal_d >= 0 && (d < precal_d || d < 0)) d = precal_d;   /* (suelo del arranque) */
     prio_d = prio_sube(prio_d, d, &prio_esp_d, ND_PRIO - 1);
     if (arranque_hold && precal_d >= 0 && prio_d < precal_d) prio_d = precal_d;
@@ -8732,6 +8852,9 @@ static void nodos_visibles_todos(void)
     }
     if (prio_d == ND_PRIO - 1) cabe = NB_PRIO - 1;
     if (prio_d < 0 && cabe < 0) cabe = 0;                      /* (lo enorme en la pantalla, siempre) */
+#if REPARTO_SCHMITT
+    if (cabe < prio_p && reparto_cabe(prio_d, prio_p, tope, vmax, k)) cabe = prio_p;   /* (igual, el de LOD) */
+#endif
     if (arranque_hold && precal_p >= 0 && cabe < precal_p) cabe = precal_p;   /* (suelo del arranque) */
     prio_p = prio_sube(prio_p, cabe, &prio_esp_p, NB_PRIO - 1);
     if (arranque_hold && precal_p >= 0 && prio_p < precal_p) prio_p = precal_p;
@@ -10541,6 +10664,8 @@ static void etapa_precalienta(void)
         memset(etapa.pvs_m, 0, (etapa.nmallas + 31) / 32 * 4);
         if (etapa.pvs_teo) memset(etapa.pvs_teo, 0, (2 * etapa.nnodos + 1) * 4);
         if (etapa.pvs_ult) memset(etapa.pvs_ult, 0, etapa.nnodos * 5 + (etapa.nmallas + 31) / 32 * 4);
+        if (etapa.pvs_mv) memset(etapa.pvs_mv, 0, 8 * ((etapa.nmallas + 31) / 32) + 8 * etapa.nnodos);
+        etapa.pvs_sv[0] = etapa.pvs_sv[1] = -1;
         etapa.pvs_s = -1; etapa.pvs_i = 0; etapa.pvs_on = 0;
     }
     prio_d = ND_PRIO - 1; prio_p = NB_PRIO - 1; prio_esp_d = prio_esp_p = 0; prio_alfa = PRECALIENTA_ALFA;
