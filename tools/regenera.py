@@ -63,6 +63,11 @@ def voces_163(D):
         return any(struct.unpack_from('<H', d, om + 20 * k)[0] == 0x163 for k in range(n))
     except (OSError, struct.error): return False
 
+def tiene(D, f, marca):
+    """Rev 2.9.4: el fichero f de D lleva la marca (los de antes se rehacen: GOALT.DAT sin T_MEJOR, TABLERO.DAT sin LST1)"""
+    try: return marca in open(os.path.join(D, f), 'rb').read()
+    except OSError: return False
+
 def hay(D, *fs): return all(os.path.isfile(os.path.join(D, f)) and os.path.getsize(os.path.join(D, f)) > 0 for f in fs)
 
 def mueve(D, *rutas):
@@ -275,6 +280,8 @@ def regenera(iso, D, W, jobs=4, informe=print):
                   (['RC%02d.DAT' % k for k in range(30)], 'rivales'), (['MISION.DAT'], 'mision'), (['C2CHUD.DAT'], 'c2chud'),
                   (['C2C.DAT'], 'c2c'), (['SALON.DAT'], 'salon'), (['TABLERO.DAT'], 'tablero')):
         if not hay(D, *fs): falta.append(n)
+    if 'fin' not in falta and hay(D, 'GOALT.DAT') and not tiene(D, 'GOALT.DAT', b'T_MEJOR'): falta.append('fin')
+    if 'tablero' not in falta and hay(D, 'TABLERO.DAT') and not tiene(D, 'TABLERO.DAT', b'LST1'): falta.append('tablero')
 
     informe('== %d pasos en %d a la vez (registros en %s)' % (len(falta), jobs, os.path.join(W, 'registro')))
     total = sum(peso(n) for n in falta) + PESO_FIN; hecho = [0.0]; t1 = time.time(); mal = []

@@ -1355,7 +1355,7 @@ static void carga_espera(void) { while (carga.estado == 1) thd_sleep(5); }
 #define CERCA_PS2 0.1f
 #define LEJOS_PS2 4000.0f
 #ifndef LEJOS_MAX
-#define LEJOS_MAX 3200.0f                                       /* Rev 2.9.2.c (pedido): techo del lejano en toda la demo (2.9.2.b: 3500; el original 4000) */
+#define LEJOS_MAX 3800.0f                                       /* Rev 2.9.4 (pedido): techo del lejano en toda la demo (2.9.2.c: 3200; 2.9.2.b: 3500; el original 4000) */
 #endif
 static float ojo[3], der[3], arr[3], ade[3], fx = 320.0f / 0.75f, cerca = CERCA_PS2, lejos = LEJOS_MAX;
 static matrix_t vista __attribute__((aligned(32))), vista_cielo __attribute__((aligned(32))),
@@ -1468,6 +1468,7 @@ static uint32_t vtx_reserva, lst_uso[3], lst_vtx[3]; static uint8_t lst_corto[3]
 /* Con FPS_OBJETIVO 45 (plan de recursos, 2026-11-12) el cuadro tiene 22,2 ms: 21 / 17 ms (la medida es tiempo de
    reloj desde que empieza la logica hasta que acaba el dibujo, sin las esperas de la PowerVR ni del campo: ya incluye
    las interrupciones y el hilo de carga; 1,2 ms de margen y la misma histeresis de 4 ms que antes) */
+/* (Rev 2.9.4: solo con -DSIN_SALTO; con el salto adaptativo el recorte va en su nivel: SALTO_*) */
 #ifndef CPU_MS_CORTA                                     /* ms de CPU por cuadro (dibujo + logica) que acortan / alargan */
 #define CPU_MS_CORTA 24.0f                                       /* (Rev 2.9.2.e: a 40 fps el cuadro tiene 25 ms; antes 21 / 17 */
 #endif                                                           /*  con 45 fps) */
@@ -1478,16 +1479,65 @@ static uint32_t vtx_reserva, lst_uso[3], lst_vtx[3]; static uint8_t lst_corto[3]
    La logica ya va a 59,94 pasos por segundo pase lo que pase (cada cuadro da los pasos del tiempo pasado: si un cuadro
    tarda, el siguiente da mas pasos y el juego no se frena); lo que se ve son FPS_OBJETIVO cuadros por segundo con el
    ritmo del barrido (pres_espera). Cuando la CPU o la PowerVR no llegan, el cuadro empieza tarde (pres_tarde) y esa
-   cadencia se rompe. Cada SALTO_VENTANA cuadros dibujados en carrera: con SALTO_SUBE o mas tarde, un nivel mas; con
-   SALTO_BAJA ventanas seguidas sin ninguno, uno menos. Niveles: 1 sin los focos de los faros sobre la escena ni la
-   luz del suelo (noche: ~1,6 ms en LASV) y el tope del TA de la etapa al 94 %; 2 al 87 %; 3 al 80 % y el lejano como
-   mucho a SALTO_LEJOS. -DSIN_SALTO: sin el */
-#define SALTO_VENTANA 40
-#define SALTO_SUBE 2
-#define SALTO_BAJA 3
-#define SALTO_LEJOS 2400.0f
+   cadencia se rompe. -DSIN_SALTO: sin el.
+   Rev 2.9.4 (pedido: "que mantenga los 40 fps con frameskip progresivo adaptativo y que aumente la distancia de
+   dibujado a 3800"): ADAPTATIVO. Antes un contador (2 cuadros tarde en 40: un nivel mas de 4) y el recorte por CPU
+   aparte (-50 m cada 30 cuadros por encima de CPU_MS_CORTA, +50 m por debajo de CPU_MS_ALARGA). Ahora un nivel
+   continuo salto_q (0..SALTO_Q_MAX) que cada cuadro de carrera sube o baja segun cuanto falte:
+   - el trabajo del cuadro (pres_trab: de pres_espera a pres_espera sin la espera al campo, en us: CPU, envio al TA y
+     lo que se espere a la PowerVR; como mucho 2 cuadros, por las cargas del GD), media movil de 1/16 (salto_trab),
+     contra el cuadro de FPS_OBJETIVO (SALTO_PRESUP, 25 ms);
+   - por encima de SALTO_PRESUP - SALTO_W_SUBE sube SALTO_K_SUBE por ms de mas y cuadro (como mucho SALTO_SUBE_MAX:
+     un pico de unos segundos, como los objetos de la union de PALM, 14-18 ms, no lo lleva al fondo), y cada cuadro
+     que empieza tarde suma SALTO_TARDE (en la emergencia, 6..9, SALTO_EMERG veces menos);
+   - por debajo de SALTO_PRESUP - SALTO_W_BAJA (y SALTO_VETO cuadros sin ninguno tarde) baja SALTO_K_BAJA por ms que
+     sobra, como mucho SALTO_BAJA_MAX por cuadro (un nivel en ~2 s): entre los dos umbrales no se mueve (histeresis:
+     no oscila);
+   - leyendo del GD (carga.estado 1) no se mueve: el tiempo es del hilo de carga, no de la escena.
+   Que recorta cada tramo del nivel (lineal dentro de el, sin escalones):
+     0..3  el tope del TA de la etapa y de los vertices del reparto: 100 -> 94 -> 87 -> 80 % (SALTO_TA, los de la
+           2.9.2.f)
+     3..6  el lejano: 3800 -> 3200 -> 2800 -> 2400 m (SALTO_LEJ)
+     6..9  emergencia (lo que antes hacia el recorte por CPU): el lejano 2400 -> 600 m (LEJOS_MIN)
+   Primero el TA y despues el lejano: medido en Flycast (METR, por tramos de la misma carrera) el lejano fijo en 2400 da
+   lo mismo que en 3800 (35,6 / 35,2 fps) y el TA al 80 % con 3800, 36,5 (el reparto del TA ya limita lo que se envia;
+   el lejano solo ahorra de verdad por debajo de ~1000 m). El lejano sigue al del nivel poco a poco (cada 4 cuadros
+   -SALTO_LEJ_BAJA / +SALTO_LEJ_SUBE m), dentro de la franja de niebla del limite: lo que entra o sale esta ya en el
+   color de la niebla, sin saltos. La logica sigue a 59,94 pasos por segundo. Medida: -DSALTO_OBS=q fija el nivel y
+   -DSALTO_OBS_LEJ=m el lejano */
+#define SALTO_Q_MAX 9.0f
+#define SALTO_PRESUP (1000.0f / FPS_OBJETIVO)                   /* ms del cuadro (FPS_OBJETIVO: mas abajo) */
+#define SALTO_W_SUBE 1.0f                                       /* ms: sube por encima de 24 (con 40 fps) */
+#define SALTO_W_BAJA 3.0f                                       /* ms: baja por debajo de 22 */
+#define SALTO_K_SUBE 0.012f                                     /* nivel por ms de mas y cuadro */
+#define SALTO_SUBE_MAX 0.03f                                    /* nivel por cuadro (un nivel en ~0,8 s) */
+#define SALTO_K_BAJA 0.004f                                     /* nivel por ms que sobra y cuadro */
+#define SALTO_BAJA_MAX 0.012f                                   /* nivel por cuadro */
+#define SALTO_EMERG 4.0f                                        /* en 6..9 sube SALTO_EMERG veces mas despacio */
+#define SALTO_TARDE 0.08f                                       /* nivel por cuadro tarde */
+#define SALTO_VETO 40                                           /* cuadros sin bajar tras uno tarde (1 s) */
+#define SALTO_LEJ_BAJA 24.0f                                    /* m cada 4 cuadros (240 m/s a 40 fps) */
+#define SALTO_LEJ_SUBE 16.0f                                    /* m cada 4 cuadros (160 m/s) */
+static const float SALTO_LEJ[4] = { LEJOS_MAX, 3200.0f, 2800.0f, 2400.0f };
 static const uint16_t SALTO_TA[4] = { 256, 240, 222, 205 };   /* (Rev 2.9.2.f: 94 / 87 / 80 %; antes 90 / 80 / 70) */
-static int salto_niv;
+static float salto_q, salto_trab __attribute__((unused));       /* nivel (0..SALTO_Q_MAX) y trabajo medio (ms) */
+static uint32_t salto_ta = 256;                                 /* tope del TA de la etapa por el nivel (/256) */
+static int32_t pres_trab;                                       /* trabajo del ultimo cuadro (us) */
+static float salto_lejos(float q)                               /* el lejano del nivel */
+{
+    int i;
+    if (q >= 6.0f) { float l = SALTO_LEJ[3] - (q - 6.0f) * ((SALTO_LEJ[3] - LEJOS_MIN) / 3.0f); return l < LEJOS_MIN ? LEJOS_MIN : l; }
+    if (q <= 3.0f) return SALTO_LEJ[0];
+    q -= 3.0f; i = (int)q; return SALTO_LEJ[i] + (q - (float)i) * (SALTO_LEJ[i + 1] - SALTO_LEJ[i]);
+}
+static __attribute__((unused)) uint32_t salto_ta_de(float q)    /* el tope del TA del nivel (/256) */
+{
+    int i;
+    if (q <= 0) return 256;
+    if (q >= 3.0f) return SALTO_TA[3];
+    i = (int)q;
+    return (uint32_t)((float)SALTO_TA[i] + (q - (float)i) * (float)(SALTO_TA[i + 1] - SALTO_TA[i]) + 0.5f);
+}
 static uint32_t ta_bpv = TA_BPV_MIN, ta_f = TA_F_MIN, ta_vb, ta_et, ta_lim, ta_tope_etapa, ta_corto, ta_v2d, ta_v2d_ult;
 static uint32_t ta_otros_ult, ta_min_otros_teo, ta_traf_teo;   /* bytes de lo que no es la etapa (cuadro anterior; minimo
                                                             teorico) y teoricos del coche de trafico mayor con LOD 0 */
@@ -6246,11 +6296,15 @@ static void pres_espera(int carrera)
     uint32_t g; int f;
     if (FPS_OBJETIVO >= pres_hz || !carrera) { lim_on = 0; return; }
     if (!lim_on) { lim_on = 1; lim_base = vbl_n; lim_k = 0; }
+    static uint64_t t_sale;
+    uint64_t t0 = timer_us_gettime64();
+    pres_trab = t_sale ? (int32_t)(t0 - t_sale) : 0;            /* el trabajo del cuadro anterior (Rev 2.9.4) */
     g = lim_base + (lim_k * pres_hz + FPS_OBJETIVO - 1) / FPS_OBJETIVO;
     if ((int32_t)(vbl_n - g) > 1) { lim_base = g = vbl_n; lim_k = 0; pres_tarde++; }   /* tarde: la cuenta, desde aqui */
     f = irq_disable();
     while ((int32_t)(vbl_n - g) < 0) genwait_wait((void *)&vbl_n, "pres_espera", 100);
     irq_restore(f);
+    t_sale = timer_us_gettime64();
     pres_campo = g + PRES_LAT;
     if (++lim_k == FPS_OBJETIVO) { lim_base += pres_hz; lim_k = 0; }   /* FPS_OBJETIVO cuadros = pres_hz campos */
 }
@@ -6538,12 +6592,21 @@ static int ta_meta_busca(const char *fich, int seg, etapa_t *e)
 }
 /* Rev 2.9.3 (pedido: rankings y records): el registro de la carrera de UN JUGADOR en sus tablas (comun/rksp.c rkuj_*,
    con el formato y el orden de las de OUTRUN2SP: 0x1fc69c..0x1fc7a8 y 0x1fbb20..0x1fbd18 para el nombre y el coche de
-   la licencia). El PS2 los guarda en su base 0x5f8598 (0x2270a8) con otro formato: DESVIACION. Que se guarda: OUTRUN
-   (variante 1: puntos y tiempo; al acabar o con el tiempo agotado) e INFARTO (2: corazones y tiempo) por la meta a la
-   que lleva la ruta (las ramas a la derecha) y el preset del curso; CONTRARRELOJ (7) solo las metas A..E de OutRun 2 y
-   de OutRun 2 SP al llegar (codigos 0x3c..0x45; tiempo por cambio). Las etapas sueltas, del reves y los cursos
-   seguidos: solo el fantasma (ORGH). Sin licencia, nada */
+   la licencia). DESVIACION de formato. Rev 2.9.4 (correccion): 0x5f8598 / 0x2270a8 / 0x226df8 / 0x227310 son el
+   cliente de los rankings EN RED (DNAS, sin portar; 0x226fc0 acepta un tablero por codigo de la Contrarreloj, etapas
+   sueltas incluidas), no la base local; las tablas locales del PS2 son \Common\def_orhiscores.bin (0x3ef798), que
+   0x1a18e8 / 0x1a1910 carga en 0x577d44 (PROBABLE, formato sin leer). Que se guarda: OUTRUN (variante 1: puntos y
+   tiempo; al acabar o con el tiempo agotado) e INFARTO (2: corazones y tiempo) por la meta a la que lleva la ruta (las
+   ramas a la derecha) y el preset del curso; CONTRARRELOJ (7) al llegar: las metas A..E de OutRun 2 y de OutRun 2 SP
+   (codigos 0x3c..0x45; tiempo por cambio) en rkuj y, Rev 2.9.4, lo demas (etapas sueltas 0x00..0x3b, metas del reves
+   0x46..0x4f y cursos seguidos 0x50..0x53) en RKTA (rkta_inserta). Con la opcion B de la etapa (fl_) no se registra.
+   Sin licencia, nada. Rev 2.9.4 tambien: los corazones saturan a 0xfff (DESVIACION: el campo es de 12 bits, 0x1fc69c;
+   antes daban la vuelta), sin la variante 2 con los presets 2 / 3 (rksp_tabla(2, 2..) pisaria las de la variante 0),
+   el coche es el de la salida (rk_modelo; menu_modelo() al final dependia del estado del menu) y la licencia se marca
+   con cambios sin guardar (menu_marca_cambios) */
 static int ta_codigo;                                            /* (definida mas abajo) */
+static int rk_modelo;                                            /* Rev 2.9.4: menu_modelo() al empezar la carrera */
+static int ta_opcion_b;                                          /* (definida mas abajo) */
 static uint32_t l32_lic(const uint8_t *l, int o) { uint32_t v; memcpy(&v, l + o, 4); return v; }
 static void rk_un_jugador(int meta, int piloto)
 {
@@ -6551,19 +6614,28 @@ static void rk_un_jugador(int meta, int piloto)
     int v, p = preset_curso & 3, c, ruta = 0, k, cambio = manual_ & 1, pos;
     if (!l || piloto || juego_sp) return;
     if (variante == 1 || variante == 2) {
+        if (variante == 2 && p > 1) return;                     /* (Rev 2.9.4) */
         for (k = 0; k < 4; k++) if (rama_nivel[k] == 1) ruta |= 1 << k;
         c = __builtin_popcount(ruta); v = variante;
     } else if (variante == 7 && meta && ta_codigo >= 0x3c && ta_codigo < 0x46) {
         c = (ta_codigo - 0x3c) % 5; p = ta_codigo < 0x41 ? 1 : 0; v = 0;
         ruta = c == 0 ? 0 : (1 << c) - 1;                       /* (una ruta que lleva a esa meta, para las marcas) */
+    } else if (variante == 7 && meta && ms && !ta_opcion_b && rkta_indice(ta_codigo) >= 0) {   /* Rev 2.9.4: RKTA */
+        char nm[5]; for (k = 0; k < 4; k++) nm[k] = (char)l[k]; nm[4] = 0;
+        pos = rkta_inserta(ta_codigo, ms, rk_modelo, cambio, (int)(l32_lic(l, 0x1c) & 0x1f), nm);
+        if (pos >= 0) menu_marca_cambios();
+        dbglog(DBG_INFO, "RANKING: contrarreloj codigo 0x%02x: %u ms, puesto %d (RKTA)\n", ta_codigo, (unsigned)ms, pos + 1);
+        return;
     } else return;
-    r0 = ((uint32_t)puntos & 0xffffff) | ((uint32_t)(menu_modelo() & 0xf) << 28) | ((uint32_t)ruta << 24);
-    r8 = v == 2 ? (uint32_t)infarto_total() & 0xfff : 0;
+    r0 = ((uint32_t)puntos & 0xffffff) | ((uint32_t)(rk_modelo & 0xf) << 28) | ((uint32_t)ruta << 24);
+    {   uint32_t ht = v == 2 && infarto_total() > 0 ? (uint32_t)infarto_total() : 0;   /* saturado (Rev 2.9.4) */
+        r8 = ht > 0xfff ? 0xfff : ht; }
     r8 |= (uint32_t)cambio << 17 | (uint32_t)(l32_lic(l, 0x1c) & 0x1f) << 12;
     memcpy(rec, &r0, 4); memcpy(rec + 4, &ms, 4); memcpy(rec + 8, &r8, 4); memset(rec + 11, 0, 5);
     for (k = 0; k < 4 && l[k]; k++) rec[11 + k] = l[k];           /* strncpy(rec + 0xB, licencia, 4) */
     if (v == 0 && !ms) return;
     pos = rkuj_inserta(rec, v, p, c, cambio, 0);
+    if (pos >= 0) menu_marca_cambios();                           /* (Rev 2.9.4) */
     dbglog(DBG_INFO, "RANKING: un jugador variante %d preset %d meta %c ruta %x: %d puntos, %u ms, puesto %d\n",
            v, p, 'A' + c, ruta, puntos, (unsigned)ms, pos + 1);
 }
@@ -6738,6 +6810,7 @@ static const int16_t PO[][5] = {
 static int po_k = PRUEBA_ORDEN_DESDE - 1, po_rep, po_fin, po_ult = -1, po_t;   /* po_t: crono de la ultima etapa */
 #endif
 static int ta_codigo = -1;                                      /* CONTRARRELOJ: [656234] (el arbol 200 + codigo) */
+static int ta_opcion_b;                                         /* Rev 2.9.4: la opcion B de la etapa (raiz +0x20c bit 0) */
 static void etapa_precalienta(void);                            /* (el reparto del TA antes del semaforo: abajo) */
 static volatile int meta_hilo;                                  /* META.DAT leyendose (hilo) */
 static void *meta_lee(void *p)
@@ -7812,7 +7885,7 @@ static float dist2_ruta(const modelo_t *m, uint32_t i, const float *p)
 /* Rev 2.9.3 (el usuario: "en industrial complex hay zonas que no se dibujan y se ven azules", "en ancient ruins hay
    estatuas en la montana ... como unos bloques blancos"): de 900 m al lejano el lowpoly (12 % de los triangulos, el
    color medio de cada textura) se veia como bloques planos oscuros o, con la niebla, claros. Ahora el completo hasta
-   LOD_GRANDE_FR del lejano (con el lejano de 3200: 2560 m) y el lowpoly solo en el ultimo tramo, dentro de la franja de
+   LOD_GRANDE_FR del lejano (con el lejano de 3800: 3040 m; con 3200, 2560) y el lowpoly solo en el ultimo tramo, dentro de la franja de
    niebla del limite (NLIM_FRANJA); LOD_GRANDE_D sigue como minimo */
 #ifndef LOD_GRANDE_FR
 #define LOD_GRANDE_FR 0.8f
@@ -8520,7 +8593,9 @@ static void geo_reinicia(void);
 static void nodos_visibles_todos(void)
 {
     static uint32_t fila_c[ND_PRIO], fila_v[ND_PRIO], col_c[NB_PRIO], col_v[NB_PRIO];
-    uint32_t i, tope = ta_tope_etapa / 100 * 95, acum, v, cerca_c, cerca_v, vmax = (uint32_t)(VTX_ETAPA_MAX / prio_alfa); int c, d, cabe;
+    uint32_t i, tope = ta_tope_etapa / 100 * 95, acum, v, cerca_c, cerca_v, vmax = (uint32_t)(VTX_ETAPA_MAX * salto_ta / 256 / prio_alfa); int c, d, cabe;
+    /* (Rev 2.9.4: los vertices del reparto tambien x el tope del salto: en Flycast lo pesado de PALM llega a 30000
+       vertices sin llenar el TA y el tope del TA solo no recortaba nada) */
     float k = (float)ta_f / 256.0f * prio_alfa;                 /* bytes enviados por byte teorico de los nodos */
     memset(prio_coste, 0, sizeof prio_coste); memset(prio_vtx, 0, sizeof prio_vtx);
 #ifdef DIAG_VTX
@@ -8652,7 +8727,7 @@ static void prio_ajusta(int corto, uint32_t usado)
             for (k = 0; k + 4 <= strlen(z); k += 4) if (!memcmp(z + k, curso[cur_nodo].zona, 4)) pvs_grande_on = 1;
         if (cur_nodo >= 0 && cur_nodo < ncurso)
             for (k = 0; k + 4 <= strlen(e); k += 4) if (!memcmp(e + k, curso[cur_nodo].zona, 4)) ta_escala = PRESUP_ESCALA;
-        ta_escala = ta_escala * SALTO_TA[salto_niv & 3] >> 8;    /* salto progresivo (Rev 2.9.2.e) */
+        ta_escala = ta_escala * salto_ta >> 8;                  /* salto progresivo (Rev 2.9.2.e; adaptativo: 2.9.4) */
     }
 #ifdef DIAG_POPPING
     if (corto) pop_ccorto++;
@@ -8929,8 +9004,13 @@ static void niebla_pon(void)
         float t = i ? (float)(1 << (i >> 4)) * (16 + (i & 15)) / 16.0f : 1.0f, z = lejos / t, f, g, h;
         /* Rev 2.9.2.f (pedido: "se aprecian calvas al final de la distancia de dibujado ... como una niebla en el
            limite"): la franja del limite siempre, del NLIM_FRANJA x lejos al lejano (antes con el lejano en su
-           maximo no habia fundido: el corte a 3200 m se veia seco); acortado por la CPU, desde 0,55 x lejos como antes */
-        {   float f0 = lejos >= LEJOS_MAX || lejos >= lejos_guion ? NLIM_FRANJA : 0.55f;
+           maximo no habia fundido: el corte a 3200 m se veia seco); acortado por la CPU, desde 0,55 x lejos como antes.
+           Rev 2.9.4: el lejano lo mueve poco a poco el salto adaptativo, asi que la franja no salta de 0,85 a 0,55 al
+           bajar de su maximo: NLIM_FRANJA hasta el lejano de los niveles 3..6 (SALTO_LEJ[3], 2400 m) y de ahi a 0,55 en
+           LEJOS_MIN, seguido */
+        {   float f0 = NLIM_FRANJA;
+            if (lejos < SALTO_LEJ[3] && lejos < lejos_guion)
+                f0 = 0.55f + (NLIM_FRANJA - 0.55f) * (lejos > LEJOS_MIN ? (lejos - LEJOS_MIN) / (SALTO_LEJ[3] - LEJOS_MIN) : 0.0f);
             f = (z - lejos * f0) / (lejos * (1.0f - f0)); f = f < 0 ? 0 : f > 1 ? 1 : f; f *= fb; }
         g = niebla_d * z; g = niebla_d <= 0 ? 0 : niebla_modo == 2 ? 1 - expf(-g * g) : 1 - expf(-g);
         h = (z - NLIM_INI * nl) / (NLIM_ANCHO * nl); h = h < 0 ? 0 : h > 1 ? 1 : h;
@@ -12275,7 +12355,8 @@ static void fin_empieza(int como)
 /* el tiempo de cada etapa (race_manager 7D3954: 450E10 guarda en el nivel el crono menos lo de los niveles anteriores,
    en ms; 4505A0) y si se supero (7D38AC: 4506A0), para la tabla de la meta (demo/fin.c fin_tabla_*) */
 static int et_ms[15], et_ok[15], et_nodo[15], tabla_on;
-static void etapas_empieza(void) { memset(et_ms, 0, sizeof et_ms); memset(et_ok, 0, sizeof et_ok); memset(et_nodo, -1, sizeof et_nodo); tabla_on = 0; }
+static int tabla_hecha;                                         /* la tabla de la meta ya se intento abrir en esta carrera */
+static void etapas_empieza(void) { memset(et_ms, 0, sizeof et_ms); memset(et_ok, 0, sizeof et_ok); memset(et_nodo, -1, sizeof et_nodo); tabla_on = 0; tabla_hecha = 0; }
 static void etapa_acaba(int nivel)
 {
     int k, ms = cuadros_ms(crono);
@@ -12285,6 +12366,11 @@ static void etapa_acaba(int nivel)
     dbglog(DBG_INFO, "ETAPA: nivel %d superado en %d ms\n", nivel, ms);
 }
 static void etapa_entra(int nodo) { if (nodo >= 0 && nodo < ncurso && curso[nodo].nivel < 15) et_nodo[curso[nodo].nivel] = nodo; }
+/* Rev 2.9.4: la Contrarreloj de una etapa (0x19e918: variante 7 y 0x21cb28 = 48B350, codigo [0x373e54] < 0x3C) no
+   ensena la tabla de etapas: la escena 2B0063 "MEJOR TIEMPO:" y el registro 2 del fantasma (demo/fin.c) */
+static int tabla_solo(void) { return variante == 7 && ta_codigo >= 0 && ta_codigo < 0x3c; }
+static int gh_mejor(int ms);                                    /* (mas abajo, con el fantasma) */
+static int tabla_hud_fuera;                                     /* solo: el HUD ya bajado (hud_baja_tex) */
 /* GAD de la meta (0x19e6d0): la tabla de tiempos en las variantes 1 y 7 (la 2 y la 6 tienen sus propias pantallas) */
 static void tabla_entra(void)
 {
@@ -12298,9 +12384,15 @@ static void tabla_entra(void)
         if (et_nodo[k] >= 0) memcpy(t.zona[k], curso[et_nodo[k]].zona, 4); else memset(t.zona[k], ' ', 4);
     }
     t.avance = 1; t.total_ms = cuadros_ms(crono); t.puntos = pt_visible();
+    /* Rev 2.9.4: 466190(2), el registro 2 del fantasma: 467C60 lo pone en cada stage clear si la vuelta mejora, asi
+       que en la meta es min(record anterior, esta carrera), tambien cuando gh_meta no guardo (gh_lleno) */
+    t.solo = tabla_solo(); t.mejor_ms = gh_mejor(t.total_ms);
     /* el NAVI ya no dibuja (4B8E30(0) en la variante 1; en la 7 no dibuja en la meta): sus texturas fuera de la VRAM
-       como en el modo 34 (vuelven al empezar otra carrera, hud_sube_tex) */
-    hud_baja_tex(); hudd_vacia();
+       como en el modo 34 (vuelven al empezar otra carrera, hud_sube_tex). Con solo se entra en el cuadro 0 de la meta y
+       hud_aviso("META") aun usa el HUD: se bajan despues (bloque del modo 19, a los 0xB4 cuadros, como antes) */
+    tabla_hud_fuera = 0; tabla_hecha = 1;               /* (una vez por meta: sin GOALT.DAT no se reintenta cada paso, ni
+                                                           se vuelve a abrir en las millas al quitarla fin_tabla_sale) */
+    if (!t.solo) { hud_baja_tex(); hudd_vacia(); tabla_hud_fuera = 1; }
     tabla_on = !fin_tabla_entra(&t);
 }
 /* ---------------------------------------------------------------- coche fantasma de la CONTRARRELOJ (Rev 2.9.2)
@@ -12395,6 +12487,12 @@ static void gh_meta(int total_ms)
     gh_rep_cab.n = gh_nrec; gh_rep_cab.total_ms = total_ms; gh_rep_cab.modelo = 0;
     gh_guardando = 1;
     if (!thd_create(1, gh_hilo, NULL)) gh_hilo(NULL);
+}
+/* Rev 2.9.4: el mejor tiempo del curso con esta carrera (466190(2) en la meta): min(fantasma, ms) */
+static int gh_mejor(int ms)
+{
+    if (gh_nrep && gh_clave >= 0 && (int)gh_rep_cab.total_ms < ms) return (int)gh_rep_cab.total_ms;
+    return ms;
 }
 /* principio de la parte (etapa o union) por la que va la muestra en la ruta cargada, o -1 si no esta */
 static float gh_base(const gh_m_t *m)
@@ -13069,19 +13167,45 @@ int main(int argc, char **argv)
     for (;;) {
         pres_espera(estado != TITULO);                          /* en carrera: el campo de este cuadro (FPS_OBJETIVO) */
 #ifndef SIN_SALTO
-        {   /* salto progresivo: los cuadros que empezaron tarde en la ventana */
-            static uint32_t sv_n, sv_t0, sv_limpias;
+        {   /* salto progresivo adaptativo (Rev 2.9.4, ver SALTO_*): el nivel por el trabajo de cada cuadro */
+            static uint32_t sv_tarde, sv_veto, sv_n; static int sv_ent = 0;
             if (estado == CARRERA) {
-                if (++sv_n >= SALTO_VENTANA) {
-                    uint32_t t = pres_tarde - sv_t0; int ant = salto_niv;
-                    if (t >= SALTO_SUBE) { if (salto_niv < 3) salto_niv++; sv_limpias = 0; }
-                    else if (t == 0) { if (++sv_limpias >= SALTO_BAJA && salto_niv > 0) { salto_niv--; sv_limpias = 0; } }
-                    else sv_limpias = 0;
-                    if (salto_niv != ant) dbglog(DBG_INFO, "SALTO: nivel %d (%u tarde en %d cuadros, %.4s)\n", salto_niv, (unsigned)t, SALTO_VENTANA,
-                                                 cur_nodo >= 0 ? curso[cur_nodo].zona : "----");
-                    sv_n = 0; sv_t0 = pres_tarde;
+                float w = (float)pres_trab * 0.001f, q = salto_q; int tarde = pres_tarde != sv_tarde;
+                sv_tarde = pres_tarde;
+                if (w > 2.0f * SALTO_PRESUP) w = 2.0f * SALTO_PRESUP;  /* (una carga del GD no es la escena) */
+                salto_trab += (w - salto_trab) * (1.0f / 16.0f);
+                if (carga.estado == 1) { if (tarde) sv_veto = SALTO_VETO; }   /* leyendo del GD: quieto (no es la escena) */
+                else if (tarde) { q += SALTO_TARDE / (q >= 6.0f ? SALTO_EMERG : 1.0f); sv_veto = SALTO_VETO; }
+                else if (sv_veto) sv_veto--;
+                if (carga.estado != 1) {
+                    if (salto_trab > SALTO_PRESUP - SALTO_W_SUBE) {
+                        float d = SALTO_K_SUBE * (salto_trab - (SALTO_PRESUP - SALTO_W_SUBE));
+                        q += (d < SALTO_SUBE_MAX ? d : SALTO_SUBE_MAX) / (q >= 6.0f ? SALTO_EMERG : 1.0f);
+                    } else if (salto_trab < SALTO_PRESUP - SALTO_W_BAJA && !sv_veto) {
+                        float d = SALTO_K_BAJA * ((SALTO_PRESUP - SALTO_W_BAJA) - salto_trab);
+                        q -= d < SALTO_BAJA_MAX ? d : SALTO_BAJA_MAX;
+                    }
                 }
-            } else if (estado == TITULO) { salto_niv = 0; sv_n = 0; sv_t0 = pres_tarde; sv_limpias = 0; }
+                salto_q = q < 0 ? 0 : q > SALTO_Q_MAX ? SALTO_Q_MAX : q;
+#ifdef SALTO_OBS
+                salto_q = SALTO_OBS;
+#endif
+                salto_ta = salto_ta_de(salto_q);
+                if ((int)salto_q != sv_ent) {
+                    sv_ent = (int)salto_q;
+                    dbglog(DBG_INFO, "SALTO: nivel %.2f (lejano %d m, TA %u/256, trabajo %.1f ms, %.4s)\n", (double)salto_q, (int)salto_lejos(salto_q),
+                           (unsigned)salto_ta, (double)salto_trab, cur_nodo >= 0 ? curso[cur_nodo].zona : "----");
+                }
+            } else if (estado == TITULO) { salto_q = 0; salto_trab = SALTO_PRESUP - SALTO_W_BAJA; salto_ta = 256; sv_tarde = pres_tarde; sv_veto = 0; sv_ent = 0; }
+            if (estado != TITULO && (++sv_n & 3) == 0) {          /* el lejano sigue al del nivel, poco a poco */
+                float tope = salto_lejos(salto_q);
+#ifdef SALTO_OBS_LEJ
+                tope = SALTO_OBS_LEJ;
+#endif
+                if (tope > lejos_obj) tope = lejos_obj;
+                if (lejos > tope) lejos = lejos - SALTO_LEJ_BAJA > tope ? lejos - SALTO_LEJ_BAJA : tope;
+                else if (lejos < tope) lejos = lejos + SALTO_LEJ_SUBE < tope ? lejos + SALTO_LEJ_SUBE : tope;
+            }
         }
 #endif
         maple_device_t *mc = maple_enum_type(0, MAPLE_FUNC_CONTROLLER);
@@ -13241,7 +13365,7 @@ int main(int argc, char **argv)
                 if (c2c_hud) hudd_baja(c2c_hud, 0, -1);
                 presta_union(1);
                 auto_ = rm == MENU_DEMO;
-                if (!auto_) { manual_ = menu_manual(); pista = menu_pista(); }
+                if (!auto_) { manual_ = menu_manual(); pista = menu_pista(); rk_modelo = menu_modelo(); }
                 variante = auto_ ? 1 : menu_modo();             /* la demo de atraccion es la del modo OutRun */
 #ifdef PRUEBA_VARIANTE
                 variante = PRUEBA_VARIANTE;                     /* prueba: 2 INFARTO, 7 Time Attack */
@@ -13295,7 +13419,7 @@ int main(int argc, char **argv)
                        A..E de OR2 / SP_goals y de las del reves, los cursos seguidos csc_data_*_ren). INFARTO: el juego
                        de cursos (raiz +0x208 bits 0..1): 1 -> csc_data_cvt, el arbol 1 */
                     int fl_ = 0, ta_ = auto_ || juego_sp ? -1 : menu_ta_codigo(&fl_), ha_ = auto_ || juego_sp ? -1 : menu_ha_juego();
-                    ta_codigo = -1;
+                    ta_codigo = -1; ta_opcion_b = fl_;          /* (Rev 2.9.4: con la opcion B no se registra en RKTA) */
 #ifdef PRUEBA_TA_CODIGO
                     ta_ = PRUEBA_TA_CODIGO;                     /* prueba: el codigo de la Contrarreloj (con el piloto) */
 #endif
@@ -13651,7 +13775,12 @@ int main(int argc, char **argv)
                            distancia del original (LEJOS_PS2, 0x178580) y se mide otra vez. Antes se arrastraba (sube 50 m
                            cada 30 cuadros y solo por debajo de CPU_MS_ALARGA): tras METR (1850 m) RUIN empezaba a 2550-2700 m
                            y bajo el arco de roca se veia el blanco del horizonte (barrido de la revision 44) */
-                        if (lejos < lejos_obj) lejos = lejos_obj;
+                        /* (Rev 2.9.4: el nivel del salto, como mucho el que recorta el TA, 3: el lejano de vuelta a
+                           LEJOS_MAX; si la etapa nueva tambien es pesada, vuelve a subir en ~1 s) */
+                        if (salto_q > 3.0f) salto_q = 3.0f;
+                        {   float t = salto_lejos(salto_q);
+                            if (t > lejos_obj) t = lejos_obj;
+                            if (lejos < t) lejos = t; }
                         int amp = tim_zona(cur_nodo, curso[cur_nodo].nivel);
                         etapa_acaba(curso[cur_nodo].nivel - 1); etapa_entra(cur_nodo);   /* 44FF20: stage clear */
                         pt_bonus_etapa(); tim_cuadros += amp; tiempo = tim_cuadros / TIM_HZ; t_ext = 0;
@@ -13739,8 +13868,14 @@ int main(int argc, char **argv)
 #define TABLA_AUTO 0
 #endif
             if (estado == META && (variante == 1 || variante == 7) && !juego_sp && (!auto_ || TABLA_AUTO)) {   /* GAD 0x19e6d0 */
-                if (!tabla_on && t_estado >= META_CUADROS - 0x3fc) tabla_entra();   /* (sin esperar a la voz: 49A190) */
+                int solo_ = tabla_solo();               /* Rev 2.9.4: 0x19e918 (paso 0 en el primer paso del GAD) */
+                if (!tabla_on && !tabla_hecha && !fin_on && t_estado >= (solo_ ? 0u : (uint32_t)(META_CUADROS - 0x3fc)))
+                    tabla_entra();                      /* (sin esperar a la voz: 49A190; una vez, y no en los modos 34 / 35) */
                 if (tabla_on) fin_tabla_paso();
+                /* (el momento de la tabla de siempre; tambien si GOALT.DAT falto y la tabla no se abrio) */
+                if (tabla_hecha && solo_ && !tabla_hud_fuera && !fin_on && t_estado >= META_CUADROS - 0x3fc) {
+                    hud_baja_tex(); hudd_vacia(); tabla_hud_fuera = 1; }
+                if (tabla_on && solo_ && t_estado + 10 >= (uint32_t)fin_t) fin_tabla_quita();   /* 0x1b4a20() < 10: paso 3 */
             }
             if (estado == META && meta_lista()) {               /* modo 19 (49CC50): suceso 7 y el coche del guion */
                 meta_juego_paso();
@@ -14318,9 +14453,10 @@ int main(int argc, char **argv)
 #ifdef DIAG_MS
             if (estado != TITULO && cur_nodo >= 0) {        /* medida: tiempos medios de los ultimos 30 cuadros */
                 pvr_stats_t ps; pvr_get_stats(&ps);
-                printf("MS: %.4s s %.0f fps %.1f dib %.2f log %.2f pvr %.2f tri %u vtx %u tarde %u\n", curso[cur_nodo].zona, (double)yo.s,
+                printf("MS: %.4s s %.0f fps %.1f dib %.2f log %.2f pvr %.2f tri %u vtx %u tarde %u lej %d niv %.2f\n", curso[cur_nodo].zona, (double)yo.s,
                        (double)fps, (double)ms, (double)ms_log, (double)(ps.rnd_last_time / 1000000.0), (unsigned)tri_enviados, (unsigned)vtx_ult,
-                       (unsigned)pres_tarde);
+                       (unsigned)pres_tarde, (int)lejos, (double)salto_q);
+                printf("SALTOMS: nivel %.2f trabajo %.2f ms TA %u lejano %d\n", (double)salto_q, (double)salto_trab, (unsigned)salto_ta, (int)lejos);
                 printf("FAROSMS: us %u puntos sobre la COLI %u de %u\n", faros_dg_us, faros_dg_suelo, FAROS_NL * (2u * FAROS_NC - 1));
                 printf("FOCOSMS: mallas %u vtx %u us %u divisiones %u vtx, de espaldas %u tri, recortados %u tri, vertices de las mallas %u\n", focos_dg_m, focos_dg_v, focos_dg_us, focos_dg_sub, focos_dg_cara, focos_dg_poli, focos_dg_vm);
                 {   static const char *const N[10] = { "ini", "vis", "cielo", "etapa", "bo", "coche", "robot", "traf", "l2", "fin" };
@@ -14339,8 +14475,10 @@ int main(int argc, char **argv)
                tope de la etapa y la distancia acababa siempre en el minimo) */
             /* el presupuesto del TA ya lo reparte nodos_visibles_todos: aqui solo la CPU (DIAG_SIN_CPU: para medir en
                Flycast, que no da el tiempo del SH4 de la consola, sin este recorte) */
-#ifndef DIAG_SIN_CPU
-            if (ms + ms_log > CPU_MS_CORTA || (salto_niv >= 3 && lejos > SALTO_LEJOS)) {   /* acorta (la CPU no llega; salto 3) */
+            /* Rev 2.9.4: con el salto adaptativo el recorte por CPU va en su nivel (SALTO_*, arriba del bucle); este, el de
+               antes, solo con -DSIN_SALTO */
+#if !defined(DIAG_SIN_CPU) && defined(SIN_SALTO)
+            if (ms + ms_log > CPU_MS_CORTA) {                  /* acorta (la CPU no llega) */
                 if (lejos > LEJOS_MIN) lejos -= 50.0f;
             } else if (ms + ms_log < CPU_MS_ALARGA) {
                 if (lejos < lejos_obj) lejos += 50.0f;         /* vuelve a la del original */

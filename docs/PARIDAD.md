@@ -1505,6 +1505,153 @@ de OutRun 2 SP (las 15 etapas seguidas) que dio el usuario.
   no esta leido). Sin EFECTOS.DAT nuevo, sin agua (como antes).
 - NO verificado en consola real.
 
+### 40 fps adaptativos y lejano 3800 (Rev 2.9.4, 2026-11-23)
+
+Pedido: "que mantenga los 40 fps con frameskip progresivo adaptativo y que aumente la distancia de dibujado a 3800".
+DESVIACION. Verificado en Flycast (no en consola real: Flycast no da el tiempo del SH4 ni llena el TA como la consola).
+- LEJOS_MAX 3200 -> 3800 (demo/main.c): el arranque, el lejano de la carrera, lejos_guion y los topes de la meta, la
+  franja de niebla del limite y el lowpoly de lo grande (LOD_GRANDE_FR 0,8: el completo hasta 3040 m). LEJOS_PS2 (4000)
+  sigue para el proyector de los faros (40A950). Revisado: ninguna tabla depende del lejano; el cielo va a 1/w 1,2e-4
+  (8333 m), mas alla; la niebla (129 entradas, a lejano / t) se rehace sola al cambiar el lejano.
+- Salto progresivo ADAPTATIVO (SALTO_*; antes, 2.9.2.e/f, un contador de cuadros tarde con 4 niveles y el recorte por
+  CPU aparte de 50 m cada 30 cuadros): un nivel continuo salto_q 0..9 que cada cuadro de carrera sigue al trabajo medio
+  del cuadro (pres_trab: de pres_espera a pres_espera sin la espera al campo; media de 1/16) contra los 25 ms de un
+  cuadro a 40 fps: sube por encima de 24 ms en proporcion a lo que falte (como mucho 0,03 por cuadro) y +0,08 por cuadro
+  tarde; baja por debajo de 22 ms (como mucho 0,012 por cuadro) si no hubo ninguno tarde en 1 s; entre 22 y 24 ms no se
+  mueve (histeresis). Leyendo del GD no se mueve. Tramos, lineales (sin escalones):
+  0..3 el tope del TA de la etapa y de los vertices del reparto al 94 / 87 / 80 %; 3..6 el lejano 3800 -> 3200 -> 2800
+  -> 2400 m; 6..9 emergencia, el lejano a 600 m (lo que hacia el recorte por CPU, 4 veces mas despacio). El lejano sigue
+  al del nivel a 240 m/s al bajar y 160 m/s al subir, dentro de la franja de niebla del limite (que ya no salta de 0,85
+  a 0,55: 0,85 hasta 2400 m y de ahi a 0,55 en 600 m, seguido). Al cambiar de etapa el nivel vuelve como mucho a 3 (el
+  lejano entero). La logica sigue a 59,94 pasos por segundo. `-DSIN_SALTO`: sin el, con el recorte por CPU de antes.
+- Por que primero el TA: medido en METR (mismos tramos de la carrera) con el lejano fijo, 3800 m 35,2 fps (355 cuadros
+  tarde), 2400 m 35,6 (447) y 3800 m con el TA al 80 %, 36,5 (269): el reparto del TA ya limita lo que se envia y el
+  lejano solo ahorra por debajo de ~1000 m. En PALM, 3800 m fijos sin recorte: 39,13 fps (51 tarde), lo mismo que 3200
+  con el recorte de antes (39,12, 53).
+- Medido (Flycast, piloto, -DDIAG_MS, -DPRUEBA_NODO=n, 150 s; medias de toda la etapa; "comun": solo los tramos de 500 m
+  que recorren las dos pruebas):
+
+| Etapa | 2.9.3 (3200, salto 2.9.2.f): fps / desv. / tarde / lejano | 2.9.4 (3800 + adaptativo): fps / desv. / tarde / lejano / nivel | comun fps / tarde |
+|---|---|---|---|
+| PALM | 39,12 / 2,73 / 53 (1,8 %) / 2565 m | 39,15 / 2,68 / 49 (1,7 %) / 3714 m / 1,39 | 38,90 / 53 -> 38,92 / 49 |
+| INDU | 39,38 / 2,07 / 38 (1,1 %) / 2748 m | 39,59 / 1,46 / 17 (0,6 %) / 3800 m / 1,02 | 39,06 / 34 -> 39,25 / 17 |
+| METR | 37,20 / 4,09 / 238 (5,7 %) / 2112 m | 37,27 / 3,51 / 194 (6,0 %) / 1664 m / 7,21 | 36,98 / 238 -> 36,99 / 194 |
+| RUIN | 39,61 / 2,33 / 8 (0,2 %) / 3044 m | 39,80 / 0,57 / 4 (0,1 %) / 3577 m / 0,31 | 39,40 / 8 -> 39,49 / 4 |
+
+  En PALM, INDU y RUIN el lejano queda en 3800 casi siempre con los mismos fps o mejores. METR (noche) no llega a 25 ms
+  ni con todo recortado (la geometria cercana de la ciudad, ~10 ms de etapa con 600 m): el nivel acaba en la emergencia
+  y el lejano baja mas que antes (de noche casi no se ve); sin la llegada (la escena de la meta, ~130 tarde en las dos),
+  63 cuadros tarde frente a 109. Pendiente aparte: en PALM, tras leer SEG05, los objetos de la union (bo_dibuja) gastan
+  14-18 ms durante ~2 s (32 fps con cualquier nivel); el tope de subida evita que ese pico se lleve el lejano al fondo.
+
+### Rankings y records (Rev 2.9.4)
+
+Tres cambios de paridad (SLES-53998, analisis estatico del ELF). Sin verificar en Flycast ni en consola real en esta
+entrega: compilado; la logica nueva de comun/rksp.c probada en el anfitrion (insercion, RKTA <-> 16 bytes, RKU2 de ida
+y vuelta). Datos de prueba nuevos (no van al repo): GOALT.DAT y TABLERO.DAT regenerados en /dev/shm/datos294/ (pasos
+`fin` y `tablero` de tools/regenera.py, o `python3 -I tools/conv_fin.py <iso> <dir>` y
+`python3 -I tools/conv_tablero.py <iso> <dir>`). Con los ficheros de antes todo sigue funcionando sin lo nuevo.
+
+**1. Tiempo del fantasma en la meta de la Contrarreloj de una etapa** (demo/fin.c fin_tabla_*, demo/main.c
+tabla_entra / modo 19, tools/conv_fin.py tabla()):
+- Original: el GAD de la meta 0x19e6d0 (= 498670 del PC; modos 19 y 22; 0x19f2f8 en los 20 / 21) tiene, antes de la
+  tabla de etapas, la rama 0x19e918 `if (v == 7 && 0x21cb28())` con 0x21cb28 = 48B350 = `[0x373e54] < 0x3C` (el codigo
+  del curso): en la CONTRARRELOJ DE UNA ETAPA no hay tabla 0x1a05f8 ni panel 2C00AF, sino la escena 2B0063 ("MEJOR
+  TIEMPO:", banco 0x2B, cuadros 0..0x46) y el tiempo del registro 2 del fantasma. Pasos [0x577c86] (0x3ef290): 0
+  (0x19e960) 0x20a010(2) ('NHOT' en el registro 2; sin el, 0x1b4a10(0): el modo acaba) y 0x114d00(0x2B0063, capa 0,
+  modo 1, 0, 0x46); 1 (0x19e9ac) mientras 0x115230(h) == 1 el temporizador a 0xB4; 2 (0x19e9cc) mientras suene la voz de
+  GOAL (0x1b8e10 = 49A190) lo mismo, despues el efecto 0xB0 una vez y en cada paso 0x19fe08(0xCD, 0xF5, blanco)
+  (= 497430: 466190(2) en ms, fuente 4, "% 2d'%02d\"%03d", 20 px por caracter) hasta 0x1b4a20() < 10; 3 (0x19ea24)
+  0x114eb0(h). El registro 2 lo pone 467C60 en cada stage clear si la vuelta mejora: en la meta es min(record anterior,
+  esta carrera).
+- Correccion: la escena es la **2B0063**; la 2B0061 del PS2 es el rotulo "Posicion" del puesto (0x1c02d8). La 2B0061 del
+  PC es otra numeracion. (Lo que decia la seccion del fantasma, Rev 2.9.2, queda corregido.)
+- La DC ensenaba en la contrarreloj de una etapa la tabla de etapas y T_PANEL7: **fallo de paridad corregido (cambio
+  visible)**. Ahora (fin_tabla_t.solo = variante 7 y codigo < 0x3C): GOALT.DAT trae el grupo T_MEJOR (2B0063, 71
+  cuadros, una textura de 64 KB); fin_tabla_entra entra en el primer paso de la meta (no a los 0xB4), sube solo
+  T_MEJOR y T_CH y dibuja la escena (cuadros 0..0x46) y, acabada, el mejor tiempo en (205, 245) en blanco con T_CH;
+  fin_tabla_quita (paso 3) la quita cuando al modo le quedan 10 cuadros. mejor_ms = min(gh_rep_cab.total_ms, esta
+  carrera) (gh_mejor), el equivalente del registro 2 (tambien cuando gh_meta no guardo por gh_lleno). Con solo, el HUD
+  (hud_aviso("META")) no se baja al entrar sino a los 0xB4 cuadros, como antes. Las metas A..E, las del reves y los
+  cursos seguidos (codigo >= 0x3C) y la variante 1 siguen igual.
+- DESVIACION: sin la espera de la voz de GOAL (el tiempo sale al acabar la escena, quiza antes que en el PS2) ni el
+  efecto 0xB0. Con un GOALT.DAT de antes (sin T_MEJOR) se ensena solo el tiempo y sale un aviso en el registro.
+  SIN PORTAR: la copia de los modos 20 / 21 (GAD 0x19f2f8, fin del tiempo: PROBABLE que no se llegue nunca).
+- tools/conv_fin.py comprueba el codigo del PS2 (0x19e96c / 0x19e984 y 0x19f57c / 0x19f594 = 2B0063, 0x46, 0xCD / 0xF5,
+  fuente 4, formato 0x3ef3c8, 0x3C de 48B350, < 10 de 0x19ea10) y, con dir_previas, hace la maqueta tabla_mejor.png.
+- Probar: `-DPRUEBA_AUTO -DPRUEBA_VARIANTE=7 -DPRUEBA_TA_CODIGO=0 -DPRUEBA_MILLAS -DPRUEBA_TABLA` con el GOALT.DAT nuevo:
+  dos carreras (REINTENTAR); la primera ensena su tiempo, la segunda el menor; con `-DPRUEBA_TA_CODIGO=0x3c` (meta A)
+  la tabla de siempre; con `-DPRUEBA_VARIANTE=1` sin cambios. En el registro: "FIN: Contrarreloj de una etapa, MEJOR
+  TIEMPO n ms, VRAM libre nK".
+
+**2. Lista de records en los tableros de la CONTRARRELOJ** (comun/menu.c tb_lista_*, tools/conv_tablero.py):
+- Original: la lista 0x267120 (= 51E080 / 51C050 del PC; registros de 0x14A4 bytes): 0x267210 reset (modo 1: 5 filas a
+  la vista y las flechas 0x440034 cuadros 0..0xa, capa 8, modo 3), 0x2674d8 anade, 0x269880 rellena, 0x268910 dibuja
+  y 0x268d88 da el cuadro de cada columna con la tabla 0x41dcb8 (150 x {token, primero, ultimo}, = 5E70F8 del PC con
+  los tokens del PS2) y las locales 0x41db18 (B30), 0x41db38 (B16) y 0x41db48 (D30). Tablero 0x26 (0x24f620 /
+  0x250c80 / 0x250e2c): 10 filas de clase 6; 0x27 (0x2582d8..0x258388): 10 de clase 7. Cada fila en (99, i x 36 -
+  100): fondo 0x440035 (0..10 de entrada, capa 4, luego el 10), puesto 0x440040, cambio 0x440037, bandera 0x440038,
+  configuracion 0x440039, coche 0x44003a (D30), ruta 0x440041 (B16; cuadro 31 con el curso seguido); nombre (fuente
+  0xe) en (316, 124 + 36 i) y tiempo "%2d'%.2d'%.3d" en (484, misma y). Datos sin red: las tablas 0x2804 / 0x9154 /
+  0x4d84 de la partida (0x269b60 = 51D0F0).
+- DC: TABLERO.DAT lleva el grupo de atlas 'L' (escenas 0x35, 0x40, 0x37, 0x38, 0x39, 0x3a, 0x41, 0x34: una textura VQ
+  de 512x256) y, detras de 'TAB1', el bloque 'LST1' (la tabla 0x41dcb8, B30 / B16 / D30 y las constantes 99, -100, 36,
+  124, 484, 316, 5 y 82, todas comprobadas en el codigo por el conversor). tb_abre lo usa si esta (con un TABLERO.DAT de
+  antes: sin lista, como en la 2.9.3). TABLERO.DAT pasa de 959680 a 1023872 bytes (animacion recortada 134 KB); medir en
+  Flycast el dbglog de tb_abre (tablas en el hueco de 256 KB y VRAM libre: antes 481..516 KB).
+- Que lista: metas A..E (0x3c..0x45) de rkuj (las dos tablas de cambio mezcladas por tiempo, las 10 mejores);
+  metas del reves, cursos seguidos y etapas de RKTA (ver 3). La lista sigue a la posicion del carrusel, a R y al juego.
+- Control: abajo lleva el foco a la flecha de abajo y luego a la de arriba (cuadros 0xb / 0xc; 0xa sin foco), arriba lo
+  deshace, A con el foco en una flecha pasa de pagina (puestos 1..5 / 6..10); con el foco en la lista el carrusel no se
+  mueve y el cursor 0x4400f2 no se ve; B vuelve el foco al carrusel (PROBABLE). En la etapa 0 de 0x27, abajo sigue
+  siendo la opcion B si esta desbloqueada; DESVIACION: abajo con la opcion B puesta la quita y lleva el foco a la lista
+  (el original solo la alterna y las filas 6..10 de la etapa 0 no se podian ver).
+- DESVIACIONES: el cambio mezclado (el PS2 tiene una tabla por meta con el cambio en el registro), nombre de 4
+  caracteres, filas vacias con fondo y puesto sin texto, sin la fila resaltada (cuadro 11), sin el deslizamiento al pasar
+  de pagina (51C220), columnas sin la entrada animada (solo el fondo); el tick de cada fila no esta desensamblado en el
+  PS2 (se toma el 51DB70 del PC). Los textos de las filas (0x268a74..0x268b00 / 0x26b758): fuente 14 en (316 / 484,
+  124 + 36 x fila) con las banderas 1 de 0x116aa8 (sin alinear, la y arriba de las letras; antes 9, centrado en
+  vertical, y salian subidas y cortadas por el borde de la fila). La bandera de la fila se limita a 0..25 (0x41dcb8:
+  26 cuadros de 0x440038; DESVIACION, como tarjeta()). SIN PORTAR: la barra de ayuda con lista, la lista con red (0x226df8 / 0x5f8598), "Total players", filtros,
+  rotulos (60, 342) / (60, 82), las listas del tablero 0x25 (0x440065 / 0x4400a4) y la del OUTRUN (0x24).
+- Probar: con el TABLERO.DAT nuevo, UN JUGADOR -> CONTRARRELOJ -> CURSO / ETAPA; mover el carrusel, R, abajo y A.
+  `-DPRUEBA_TABLERO_TODO` desbloquea las ETAPAS y METAS.
+
+**3. rk_un_jugador revisado y records de la CONTRARRELOJ por codigo** (demo/main.c, comun/rksp.c, comun/menu.c,
+demo/nombre.c):
+- Correccion de atribucion: 0x5f8598 / 0x2270a8 / 0x226df8 / 0x227310 son el cliente de los rankings EN RED (DNAS; una
+  cola de 16 peticiones de 0x14 bytes que despacha 0x227128; 0x226fc0 acepta los id 0x21..0x74, uno por codigo de la
+  Contrarreloj 0x00..0x53; 0x1bbcac..0x1bbfb8 sube el registro al acabar). Las tablas locales del PS2 son
+  \Common\def_orhiscores.bin (0x3ef798), cargadas por 0x1a18e8 / 0x1a1910 en 0x577d44 (PROBABLE, formato sin leer).
+  0x1a65c8 / 0x1a7180 (47EE70 / 47EF30) son los records por etapa de la variante 0 de OUTRUN2SP (QHOT), no los de la
+  consola.
+- rk_un_jugador: los corazones saturan a 0xfff (antes `& 0xfff` daba la vuelta pasados 4095; tambien en demo/nombre.c;
+  DESVIACION: el original guarda 12 bits); sin la variante 2 con los presets 2 / 3 (pisaria las tablas de la variante
+  0); el coche es el de la salida (rk_modelo = menu_modelo() junto a manual_; antes se leia al final y dependia del
+  estado del menu); tras insertar marca la licencia con cambios sin guardar (menu_marca_cambios, +3F4 |= 2).
+- RKTA (nuevo): los records de la CONTRARRELOJ de las etapas sueltas (0x00..0x3b), metas del reves (0x46..0x4f) y cursos
+  seguidos (0x50..0x53): 74 tablas de 10 filas de 8 bytes (u32 ms en los bits 0..22, modelo << 23, bandera << 27;
+  nombre de 4 con el cambio en el bit 7 del primero), insercion con < estricto. rk_un_jugador los registra al llegar a la
+  meta (no con la opcion B de la etapa: corre la etapa normal). Las metas A..E siguen en rkuj.
+- VMU, fichero version 4: 'RKSP' (igual), 'RKU2' (los records de UN JUGADOR compactos: solo las 42 tablas usadas,
+  6720 bytes en lugar de las 0x2bc0 de 'RKUJ') y 'RKTA' (5924 bytes), los dos con u32 de tamano detras de la marca. Se
+  siguen leyendo 'RKUJ' y los ficheros de antes; los lectores de la 2.9.3 paran en 'RKU2' (conservan 'RKSP', pierden
+  los records de UN JUGADOR). Tamano con VMU.DAT: 66 bloques con todo (64 la 2.9.3, 42 la version 2).
+- RANKINGS: con UN JUGADOR, R pasa por un cuarto modo CONTRARRELOJ ETAPA (izquierda / derecha: 15 etapas, metas del
+  reves A..E y curso seguido; X el sentido; Y el juego) con el tablero de la entrada de nombre (nombre_t consulta 3 con
+  tabla16 = rkta_fila16) y el fondo del registro de la etapa: solo distingue las metas (RANKSP.DAT 0x40d248: las
+  etapas que no son meta llevan todas el 0x37000C / 0x37000D de la meta A), asi que la posicion va en un rotulo de la
+  banda ("ETAPA n NORMAL / REVES", "META x REVES", "CURSO ...") y el titulo va sin la linea "META A". DESVIACION (el
+  original los ensena en la lista de los tableros y en la red).
+- Meta de la Contrarreloj de una etapa (tabla_solo): la escena MEJOR TIEMPO se abre una vez por carrera (tabla_hecha):
+  antes se volvia a abrir en las millas (fin_tabla_sale la quitaba y con solo el umbral es el cuadro 0) y sin GOALT.DAT
+  se reintentaba en cada paso; el HUD se baja a los 0xB4 cuadros tambien si la tabla no se pudo abrir. Medir en la
+  consola: entre el cuadro 0 y el 0xB4 la VRAM libre baja a 45..57K (HUD y MEJOR TIEMPO a la vez).
+- Probar: con licencia, `-DPRUEBA_VARIANTE=7 -DPRUEBA_TA_CODIGO=0 -DPRUEBA_MILLAS` sin `-DPRUEBA_AUTO` no registra con el
+  piloto: correr con el mando una etapa (registro: "RANKING: contrarreloj codigo 0x00: n ms, puesto 1 (RKTA)"),
+  guardar (Y), reiniciar y ver la fila en el tablero de ETAPAS y en RANKINGS -> UN JUGADOR -> R x 3. `-DPRUEBA_FIN=m`
+  y `-DPRUEBA_SIN_TIEMPO` para acabar antes / llegar a la meta.
+
 ### Auditoria del usuario (Rev 2.9.3 / Mod 2.5.3, 2026-11-23)
 
 Pedido: "audita revisa y corrige" (lista de fallos de la 2.9.2.f). Verificado en Flycast (no en consola real).
@@ -1546,6 +1693,10 @@ Pedido: "audita revisa y corrige" (lista de fallos de la 2.9.2.f). Verificado en
   cambios.
 - INFARTO, corazones al adelantar: funcionan (prueba con el piloto: peticion de adelantar, +217 y +247 corazones, anillo
   y corazones volando). En el modo OutRun el original no da corazones.
+- (Anadido en la Rev 2.9.4, ver Rankings y records) La Contrarreloj de una etapa no ensena la tabla de etapas en la meta
+  (0x19e918 / 0x21cb28) sino 2B0063 "MEJOR TIEMPO:" y el tiempo del fantasma; los records de UN JUGADOR de la 2.9.3
+  atribuian a 0x5f8598 / 0x2270a8 la base local y son los rankings en red; los corazones de INFARTO daban la vuelta
+  pasados 4095.
 
 ### Franja de niebla en el limite y edificios lejanos (Rev 2.9.2.f / Mod 2.5.2.f, 2026-11-23)
 
@@ -1652,8 +1803,9 @@ lo reproduce (467E30) con un coche translucido (4AE0F0: alfa +B68). En la Dreamc
 - Verificado en E (`-DPRUEBA_AUTO -DPRUEBA_VARIANTE=7 -DPRUEBA_TA_CODIGO=0 -DPRUEBA_MILLAS -DPRUEBA_GH_ADELANTO=15`,
   REINTENTAR con el mando): primera carrera graba y guarda ORGH0100 (releido igual), la segunda lo reproduce delante.
   `-DDIAG_GH`: donde lo pone; `-DGH_OPACO`: opaco.
-- SIN PORTAR: el coche de la grabacion (otro modelo que el del jugador), el fantasma de la red, la escena 2B0061 y el
-  tiempo del fantasma en la meta (497430), la pantalla RANKINGS (siguiente revision).
+- SIN PORTAR: el coche de la grabacion (otro modelo que el del jugador), el fantasma de la red, la escena 2B0063 (no
+  2B0061: esa es "Posicion" en el PS2) y el tiempo del fantasma en la meta (497430): portados en la Rev 2.9.4 (Rankings y
+  records); la pantalla RANKINGS (siguiente revision).
 
 ### Vista interior y tabla de tiempos de la meta (Rev 2.9.1 / Mod 2.5.1, 2026-11-22)
 
@@ -3267,9 +3419,9 @@ tools/regenera.py), CURSOTA.DAT y las uniones BK262..BK469 en UNIONESTA.PAK (con
   "pvr_mem: ERROR"; TABLERO.DAT 124 KB de tablas en el hueco, VRAM libre al abrir el
   tablero 481..516 KB (1009 KB de vuelta del salon). No probado en R.
 - SIN PORTAR / BLOQUEADO:
-  - La lista de records de cada curso (0x267210 / 0x2674d8 / 0x269880, el foco hacia abajo, los textos de (60, 342) /
-    (60, 82) y el titulo de filtro 0x4400b6 / 0x4400de): la DC no guarda records de la Contrarreloj (48B3D0, la tabla
-    de 7B17F8). La barra de ayuda es la de sin lista.
+  - La lista de records de cada curso (0x267210 / 0x2674d8 / 0x269880) y el foco hacia abajo: PORTADOS en la Rev 2.9.4
+    (Rankings y records). Siguen sin portar los textos de (60, 342) / (60, 82), el titulo de filtro 0x4400b6 / 0x4400de
+    y la barra de ayuda con lista.
   - La opcion B de la etapa 0 (PALM_BT, BEAC_BT, PALM_BR, BEAC_BR: descriptores 0x3e..0x41, bandera 830395 = +0x20c
     bit 0): el tablero la deja poner (con su bit), pero sus etapas no estan convertidas (SEG de los descriptores
     62..65): la carrera corre la etapa normal (aviso en la consola serie). PENDIENTE.

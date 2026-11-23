@@ -469,13 +469,26 @@ int fin_activo(void) { return fase >= 0; }
    Texto: la fuente 4 a escala 1 alineada a la derecha del punto (0x117558(0)), un caracter cada 20 px (0x1be3c8).
    SIN PORTAR: los efectos 0xAD / 0x80AD (barra) y 0xB0 (fin de la tabla) y la espera de la voz de GOAL (49A190): los
    bancos de sonido que los traen dependen de la etapa (sin localizar cual carga la meta) y comun/sfx.c no dice si una voz
-   suena; la variante 0 (records, 47EE70: el tiempo en verde y 2C00B7) y la 9. */
+   suena; la variante 0 (records, 47EE70: el tiempo en verde y 2C00B7) y la 9.
+   Rev 2.9.4, la Contrarreloj de una etapa (TB.d.solo): 0x19e918 `if (v == 7 && 0x21cb28())` (21cb28 = 48B350: codigo
+   del curso [0x373e54] < 0x3C) va antes de la tabla, que alli no sale (ni el panel 2C00AF). Maquina de pasos
+   [0x577c86] (0x3ef290):
+     paso 0 (0x19e960): 0x20a010(2) (465F70: el registro 2 del fantasma tiene 'NHOT'); sin el, 0x1b4a10(0) (el modo
+       acaba); con el, h = 0x114d00(0x2B0063, capa 0, modo 1, cuadro 0, ultimo 0x46) ("MEJOR TIEMPO:", T_MEJOR);
+     paso 1 (0x19e9ac): mientras 0x115230(h) == 1 (la escena en curso, cuadros 0..0x46) sostiene el temporizador en 0xB4;
+     paso 2 (0x19e9cc): mientras suene la voz de GOAL (0x1b8e10 = 49A190), lo mismo; despues, una vez, el efecto 0xB0
+       ([0x35c790]) y en cada paso 0x19fe08(0xCD, 0xF5, blanco) (= 497430: 466190(2), el mejor del curso en ms, fuente
+       4, "% 2d'%02d\"%03d", 20 px por caracter: texto() / tiempo_txt()) hasta 0x1b4a20() < 10;
+     paso 3 (0x19ea24): 0x114eb0(h) (la escena fuera: fin_tabla_quita); paso 4: nada.
+   DESVIACION: como la tabla, sin la espera de la voz de GOAL (el tiempo sale al acabar la escena, cuadro 0x46) ni el
+   efecto 0xB0. Con un GOALT.DAT de antes de la 2.9.4 (sin T_MEJOR): solo el tiempo (DESVIACION, con log). */
 #define TB_FILA_CUADROS 30                              /* [0x35c7a0] */
 #define TB_FILAS 5                                      /* [0x35c7a4] */
 #define TB_ALTO 38                                      /* 0x1a0770: addiu 0x26 */
 static const char TB_CH[] = "0123456789'\"% ";          /* tools/conv_fin.py TABLA_CH: cuadros de T_CH */
 static struct {
     hud_dat_t *h; fin_tabla_t d; int on, cnt, sup, panel;
+    int u_mejor, quitado;                               /* solo: T_MEJOR (2B0063, [0x577c78]) y el paso 3 (0x114eb0) */
     int u_fila, u_e[15], u_nombre, u_panel, u_b0, u_b1, u_ch, nombre[15], s_b1; float b1_w, b1_h;
     float x, v, w;                                      /* 0x577ce0.. / 0x577cf0..: deslizamiento (x, ancho, v) */
 } TB;
@@ -487,6 +500,16 @@ int fin_tabla_entra(const fin_tabla_t *t)
     memset(&TB, 0, sizeof TB); TB.d = *t;
     if (TB.d.n > 15) TB.d.n = 15;
     if (!(TB.h = hudd_abre_gd("GOALT.DAT"))) { dbglog(DBG_ERROR, "FIN: sin GOALT.DAT\n"); return -1; }
+    if (TB.d.solo) {                                    /* 0x19e918: sin tabla ni panel; 2B0063 y el tiempo (T_CH) */
+        TB.u_mejor = hudd_uso(TB.h, "T_MEJOR"); TB.u_ch = hudd_uso(TB.h, "T_CH");
+        if (TB.u_mejor < 0) dbglog(DBG_ERROR, "FIN: GOALT.DAT sin T_MEJOR (anterior a la 2.9.4): solo el tiempo\n");
+        else hudd_sube_uso(TB.h, TB.u_mejor);
+        hudd_sube_uso(TB.h, TB.u_ch);
+        TB.on = 1;
+        dbglog(DBG_INFO, "FIN: Contrarreloj de una etapa, MEJOR TIEMPO %d ms, VRAM libre %uK\n", TB.d.mejor_ms,
+               (unsigned)(pvr_mem_available() >> 10));
+        return 0;
+    }
     TB.u_fila = hudd_uso(TB.h, "T_FILA"); TB.u_nombre = hudd_uso(TB.h, "T_NOMBRE");
     TB.u_panel = hudd_uso(TB.h, t->variante == 1 ? "T_PANEL" : "T_PANEL7");
     TB.u_b0 = hudd_uso(TB.h, "T_BARRA0"); TB.u_b1 = hudd_uso(TB.h, "T_BARRA1"); TB.u_ch = hudd_uso(TB.h, "T_CH");
@@ -520,6 +543,7 @@ static void desliza(float destino, float umbral)        /* 0x19fb08 */
 void fin_tabla_paso(void)
 {
     if (!TB.on) return;
+    if (TB.d.solo) { TB.cnt++; return; }                /* sin panel ni deslizamiento */
     if (!TB.panel) {
         TB.cnt++;
         if (TB.cnt > (TB.sup + 1) * TB_FILA_CUADROS) { TB.panel = 1; hudd_sube_uso(TB.h, TB.u_panel); }
@@ -560,6 +584,14 @@ void fin_tabla_dibuja(void)
 {
     int filas, pri, k, f; float y0, z = 140; char b[24];
     if (!TB.on || !TB.h) return;
+    if (TB.d.solo) {                                    /* pasos 0..2 de 0x19e960 (0x114d00 / 0x19fe08) */
+        if (TB.quitado) return;                         /* paso 3: 0x114eb0 */
+        hudd_dibuja(TB.h, TB.u_mejor, TB.cnt < 0x46 ? TB.cnt : 0x46, 0, 0, 1, z, 0);
+        if ((TB.cnt > 0x46 || TB.u_mejor < 0) && TB.d.mejor_ms >= 0) {   /* paso 2: 0x115230(h) != 1 */
+            tiempo_txt(b, TB.d.mejor_ms); texto(b, 205, 245, 0xFFFFFF, z + 4);   /* (0xCD, 0xF5), blanco */
+        }
+        return;
+    }
     y0 = TB.d.variante == 1 ? -20.0f : 0.0f;
     filas = TB.cnt / TB_FILA_CUADROS; if (filas > TB.sup) filas = TB.sup;
     pri = filas - TB_FILAS + 1; if (pri < 0) pri = 0;
@@ -590,6 +622,8 @@ void fin_tabla_dibuja(void)
         } else texto(b, TB.x, 385, 0xFFFF00, z + 7);
     }
 }
+
+void fin_tabla_quita(void) { TB.quitado = 1; }     /* 0x19ea24: 0x114eb0(h) */
 
 void fin_tabla_sale(void)
 {

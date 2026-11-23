@@ -46,10 +46,16 @@ static int inserta_en(uint8_t *tab, const uint8_t rec[16], int v, int p, int c, 
 }
 int rksp_inserta(const uint8_t rec[16], int v, int p, int c, int a, int b) { return inserta_en(tab, rec, v, p, c, a, b); }
 
-/* Rev 2.9.3: los records de UN JUGADOR de la consola (OUTRUN, HEART ATTACK y TIME ATTACK del frontal; el PS2 los
-   guarda en su base 0x5f8598 con 0x226df8 / 0x2270a8, con otro formato). DESVIACION: la Dreamcast los guarda con el
-   formato y el orden de las tablas de OUTRUN2SP (las mismas cuentas de rksp_tabla), para ensenarlos con el mismo tablero
-   (0x200398), y empiezan vacias (sin nombre; tiempo 0xFFFFFFFF), no con los registros por defecto de OUTRUN2SP. */
+/* Rev 2.9.3: los records de UN JUGADOR de la consola (OUTRUN, HEART ATTACK y TIME ATTACK del frontal). DESVIACION: la
+   Dreamcast los guarda con el formato y el orden de las tablas de OUTRUN2SP (las mismas cuentas de rksp_tabla), para
+   ensenarlos con el mismo tablero (0x200398), y empiezan vacias (sin nombre; tiempo 0xFFFFFFFF), no con los registros
+   por defecto de OUTRUN2SP.
+   Rev 2.9.4 (correccion): 0x5f8598 / 0x2270a8 / 0x226df8 / 0x227310 NO son la base local de records sino el cliente de
+   los rankings en red (DNAS: "User: %I64u / rating: ..." y DNAS_Init junto a su codigo; 0x2270a8 mete una peticion en
+   una cola de 16 entradas de 0x14 bytes que despacha 0x227128; 0x226fc0 acepta los id 0x21..0x74, uno por codigo de la
+   Contrarreloj 0x00..0x53): sin portar. Las tablas locales del PS2 son las de \Common\def_orhiscores.bin (cadena
+   0x3ef798), que 0x1a18e8 / 0x1a1910 carga en 0x577d44 (PROBABLE: su formato no esta leido). El formato de la DC sigue
+   siendo una DESVIACION. */
 uint8_t *rkuj_tablas(void) { return tab_uj; }
 int rkuj_hay(void) { return hay_uj; }
 void rkuj_pon(const uint8_t *t) { memcpy(tab_uj, t, RKSP_TAM); hay_uj = 1; }
@@ -63,4 +69,112 @@ int rkuj_inserta(const uint8_t rec[16], int v, int p, int c, int a, int b)
 {
     if (!hay_uj) rkuj_vacia();
     return inserta_en(tab_uj, rec, v, p, c, a, b);
+}
+
+/* Rev 2.9.4: RKU2. Las 42 tablas que rk_un_jugador (demo/main.c) llega a usar, en este orden: variante 1 presets 0 / 1
+   x metas 0..4, variante 2 igual, variante 0 presets 0 / 1 x cambio 0 / 1 x metas 0..4 (configuracion 0) y variante 1
+   presets 2 / 3 (los cursos seguidos: rksp_tabla no usa la cuenta). DESVIACION de formato (la VMU: 6720 bytes en lugar
+   de las 0x2bc0 de RKUJ) */
+static uint32_t rkuj2_tabla(int i)
+{
+    if (i < 10) return rksp_tabla(1, i / 5, i % 5, 0, 0);
+    if (i < 20) return rksp_tabla(2, (i - 10) / 5, i % 5, 0, 0);
+    if (i < 40) { i -= 20; return rksp_tabla(0, i / 10, i % 5, (i / 5) & 1, 0); }
+    return rksp_tabla(1, 2 + (i - 40), 0, 0, 0);
+}
+void rkuj_compacta(uint8_t *out)
+{
+    int i;
+    if (!hay_uj) rkuj_vacia();
+    for (i = 0; i < RKUJ2_N; i++) memcpy(out + i * 160, tab_uj + rkuj2_tabla(i), 160);
+}
+int rkuj_expande(const uint8_t *in, uint32_t tam)
+{
+    int i;
+    if (tam < RKUJ2_TAM) return -1;
+    rkuj_vacia();
+    for (i = 0; i < RKUJ2_N; i++) memcpy(tab_uj + rkuj2_tabla(i), in + i * 160, 160);
+    return 0;
+}
+
+/* Rev 2.9.4: RKTA, los records de la CONTRARRELOJ por codigo que no son las metas A..E (0x3c..0x45, en rkuj). El PS2
+   los tiene en la red (0x226df8: un tablero por codigo, 0x226fc0) y el PC en sus tablas locales de una etapa (0x4d84 de
+   frontend_rankings 51D0F0: 10 por codigo, sin separar por cambio; el cambio va en cada fila), metas (0x2804) y cursos
+   seguidos (0x9154). DESVIACION: formato propio de 8 bytes por fila (rksp.h) y nombre de 4 caracteres (como rkuj).
+   Indice: codigos 0x00..0x3b en el indice = codigo (15 etapas x 2 juegos x 2 sentidos), 0x46..0x4f en 0x3c + (codigo -
+   0x46) y 0x50..0x53 en 0x46 + (codigo - 0x50). Insercion con < estricto, como inserta_en de la variante 0 */
+#define RKTA_VACIA 0x7fffffu
+static uint8_t tab_ta[RKTA_TAM];
+static int hay_ta;
+int rkta_indice(int c)
+{
+    if (c >= 0 && c < 0x3c) return c;
+    if (c >= 0x46 && c < 0x50) return 0x3c + c - 0x46;
+    if (c >= 0x50 && c < 0x54) return 0x46 + c - 0x50;
+    return -1;
+}
+uint8_t *rkta_tablas(void) { return tab_ta; }
+int rkta_hay(void) { return hay_ta; }
+static void rkta_vacia(void)
+{
+    uint32_t i, f = RKTA_VACIA;
+    for (i = 0; i < RKTA_TAM; i += 8) { memcpy(tab_ta + i, &f, 4); memset(tab_ta + i + 4, 0, 4); }
+    hay_ta = 1;
+}
+int rkta_pon(const uint8_t *t, uint32_t tam)
+{
+    uint16_t n, f; uint32_t i, j;
+    if (tam < 4) return -1;
+    memcpy(&n, t, 2); memcpy(&f, t + 2, 2);
+    if ((uint64_t)tam < 4u + (uint64_t)n * f * 8) return -1;   /* (en 64 bits: n x f x 8 de un RKTA corrupto daba la
+                                                           vuelta en 32 y pasaba, y se leia fuera del bufer) */
+    rkta_vacia();                                       /* (otro numero de tablas o de filas: lo que cabe) */
+    for (i = 0; i < n && i < RKTA_N; i++)
+        for (j = 0; j < f && j < RKTA_FILAS; j++) memcpy(tab_ta + (i * RKTA_FILAS + j) * 8, t + 4 + (i * f + j) * 8, 8);
+    return 0;
+}
+int rkta_bloque(uint8_t *out)
+{
+    uint16_t n = RKTA_N, f = RKTA_FILAS;
+    if (!hay_ta) rkta_vacia();
+    memcpy(out, &n, 2); memcpy(out + 2, &f, 2); memcpy(out + 4, tab_ta, RKTA_TAM);
+    return RKTA_BLOQUE;
+}
+int rkta_inserta(int codigo, uint32_t ms, int modelo, int cambio, int bandera, const char *nombre)
+{
+    int k = rkta_indice(codigo), at, i; uint8_t *t, r[8]; uint32_t w;
+    if (k < 0 || !ms) return -1;
+    if (ms >= RKTA_VACIA) ms = RKTA_VACIA - 1;          /* (el crono topa en 0x57E3F cuadros: cabe) */
+    if (!hay_ta) rkta_vacia();
+    t = tab_ta + k * RKTA_FILAS * 8;
+    for (at = 0; at < RKTA_FILAS; at++) { memcpy(&w, t + at * 8, 4); if (ms < (w & RKTA_VACIA)) break; }
+    if (at == RKTA_FILAS) return -1;
+    w = ms | (uint32_t)(modelo & 0xf) << 23 | (uint32_t)(bandera & 0x1f) << 27;
+    memcpy(r, &w, 4); memset(r + 4, 0, 4);
+    for (i = 0; i < 4 && nombre && nombre[i]; i++) r[4 + i] = (uint8_t)nombre[i] & 0x7f;   /* strncpy 4 */
+    r[4] |= (uint8_t)((cambio & 1) << 7);               /* (los nombres son ASCII: el bit 7 queda libre) */
+    memmove(t + (at + 1) * 8, t + at * 8, (RKTA_FILAS - 1 - at) * 8);
+    memcpy(t + at * 8, r, 8);
+    return at;
+}
+int rkta_fila16(int codigo, uint8_t out[160])
+{
+    int k = rkta_indice(codigo), i, j; const uint8_t *t;
+    if (k < 0) return -1;
+    for (i = 0; i < 10; i++) {                          /* vacias: tiempo 0xFFFFFFFF y sin nombre (como rkuj) */
+        uint32_t z = 0, f = 0xffffffffu; uint8_t *o = out + 16 * i;
+        memcpy(o, &z, 4); memcpy(o + 4, &f, 4); memset(o + 8, 0, 8);
+    }
+    if (!hay_ta) return 0;
+    t = tab_ta + k * RKTA_FILAS * 8;
+    for (i = 0; i < RKTA_FILAS && i < 10; i++) {
+        uint32_t w, r0, r8; uint8_t *o = out + 16 * i; const uint8_t *q = t + i * 8;
+        memcpy(&w, q, 4);
+        if ((w & RKTA_VACIA) == RKTA_VACIA || !(q[4] & 0x7f)) continue;
+        r0 = (w >> 23 & 0xf) << 28; r8 = (uint32_t)(q[4] >> 7) << 17 | (w >> 27 & 0x1f) << 12;
+        w &= RKTA_VACIA;
+        memcpy(o, &r0, 4); memcpy(o + 4, &w, 4); memcpy(o + 8, &r8, 4);
+        for (j = 0; j < 4 && (q[4 + j] & 0x7f); j++) o[11 + j] = q[4 + j] & 0x7f;
+    }
+    return 0;
 }
