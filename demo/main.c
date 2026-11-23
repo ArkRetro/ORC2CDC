@@ -203,6 +203,7 @@ typedef struct { float cx, cy, cz, r; uint32_t fl; int32_t cartel; uint32_t rell
    nodos lejanos van al final de la tabla (desde nn0) con la bandera NODO_LEJ y su cartel (un cuadrilatero orientado a la
    camara con la imagen del nodo); el nodo completo lleva en cartel -2 - (su nodo lejano) */
 #define NODO_LEJ 0x20
+#define NODO_LEJ3D 0x40                                         /* version lejana lowpoly de un nodo grande (tools/lod_grande.py) */
 typedef struct {
     tex_t *texs; malla_t *mallas; vert_t *verts; float *ruta;
     uint32_t nmallas, nvert, nruta, paso_ruta, ntex, inicio[5];
@@ -7792,6 +7793,10 @@ static float dist2_ruta(const modelo_t *m, uint32_t i, const float *p)
    hasta 1 / LOD_LEJ_HIST (no va y viene en el borde). El LOD del original (404B00: 3,75 / 7,5 px) sigue quitando lo
    mismo. En el reparto del TA cuenta el coste del lejano (la clase por vertices de REPARTO_COSTE con sus 4 vertices):
    lo lejano ya no se quita antes que los edificios. 0: sin versiones lejanas (lo de antes) */
+#ifndef LOD_GRANDE_D
+#define LOD_GRANDE_D 900.0f                                     /* m: el completo de los grandes mas cerca (pedido) */
+#endif
+#define LOD_GRANDE_H 50.0f
 #ifndef LOD_LEJ_PX
 #define LOD_LEJ_PX 48.0f
 #endif
@@ -7844,7 +7849,7 @@ static uint32_t pop_vap[PR_N][3], pop_vde[PR_N][3];
 static uint32_t pop_lap[PR_N][3], pop_lde[PR_N][3];             /* de esa, la que tiene version lejana (lod_veg.py) */
 static float pop_vz[PR_N][2], pop_vpx[PR_N];
 static int pop_veg_ev;                                           /* el evento en curso es de vegetacion */
-static uint32_t pop_lod_lej, pop_lod_comp, pop_lej_n;           /* pasos de completo a lejano y al reves (dibujados en
+static uint32_t pop_lod_lej, pop_lod_comp, pop_lej_n, pop_lej3d;           /* pasos de completo a lejano y al reves (dibujados en
                                                                    el cuadro anterior), lejanos dibujados */
 static float pop_zmin[PR_N];
 static uint32_t pop_pvs_ap[3], pop_pvs_de[3], pop_ccorto, pop_cuadros, pop_pvs_gra;
@@ -8223,10 +8228,15 @@ static void nodos_visibles(modelo_t *mo)
                PVS, la clase y el grupo son los del nodo completo; el coste en el reparto, el del lejano */
             uint32_t jl = (uint32_t)(-2 - d->cartel); int era_lej = (VA[jl >> 5] >> (jl & 31)) & 1;
             float umb = LOD_LEJ_PX * (era_lej ? LOD_LEJ_HIST : ya ? 1.0f / LOD_LEJ_HIST : 1.0f);
-            if (zv > d->r && d->r * fx < umb * zv) {
+            /* Rev 2.9.2.d (pedido): los grandes con version lejana lowpoly (tools/lod_grande.py, NODO_LEJ3D) por la
+               distancia: el lowpoly con lo mas cercano del nodo a mas de LOD_GRANDE_D por delante y el completo al
+               acercarse (histeresis LOD_GRANDE_H: el que se dibujaba sigue hasta pasar el umbral por ese margen) */
+            int lej3d = (ND[jl].fl & NODO_LEJ3D) != 0;
+            float dg = LOD_GRANDE_D + (era_lej ? -LOD_GRANDE_H : ya ? LOD_GRANDE_H : 0.0f);
+            if (lej3d ? zv - d->r > dg : (zv > d->r && d->r * fx < umb * zv)) {
 #ifdef DIAG_POPPING
                 if (ya && pop_ra && pop_ra[i] == PR_DIB) pop_lod_lej++;
-                pop_lej_n++;
+                pop_lej_n++; if (lej3d) pop_lej3d++;
 #endif
                 POPR(i, PR_DIB); ya = ya || era_lej; i = jl; d = ND + jl;
                 if (pvs_on_) { c_teo = mo->pvs_teo[2 * i]; c_v = mo->pvs_teo[2 * i + 1]; }
@@ -8462,8 +8472,9 @@ static void pop_mide(void)
         n += sprintf(b + n, "POPTA: agua %uK bo %uK coche %uK pareja %uK trafico %uK efectos %uK\n", (unsigned)(pop_cat[0] / pop_cuadros >> 10), (unsigned)(pop_cat[1] / pop_cuadros >> 10),
                      (unsigned)(pop_cat[2] / pop_cuadros >> 10), (unsigned)(pop_cat[3] / pop_cuadros >> 10), (unsigned)(pop_cat[4] / pop_cuadros >> 10), (unsigned)(pop_cat[5] / pop_cuadros >> 10));
         memset(pop_cat, 0, sizeof pop_cat);
-        n += sprintf(b + n, "POPVEG: lod lej %u comp %u n %u gracia %u |", (unsigned)pop_lod_lej, (unsigned)pop_lod_comp, (unsigned)(pop_lej_n / (pop_cuadros ? pop_cuadros : 1)), (unsigned)pop_pvs_gra);
-        pop_lod_lej = pop_lod_comp = pop_lej_n = pop_pvs_gra = 0;
+        n += sprintf(b + n, "POPVEG: lod lej %u comp %u n %u (grandes %u) gracia %u |", (unsigned)pop_lod_lej, (unsigned)pop_lod_comp, (unsigned)(pop_lej_n / (pop_cuadros ? pop_cuadros : 1)),
+                     (unsigned)(pop_lej3d / (pop_cuadros ? pop_cuadros : 1)), (unsigned)pop_pvs_gra);
+        pop_lod_lej = pop_lod_comp = pop_lej_n = pop_pvs_gra = pop_lej3d = 0;
         for (k = 1; k < PR_N; k++) if (pop_vap[k][0] || pop_vde[k][0])
             n += sprintf(b + n, " %s +%u/%u/%u -%u/%u/%u z%d-%d px%d", pop_nom[k], (unsigned)pop_vap[k][0], (unsigned)pop_vap[k][1], (unsigned)pop_vap[k][2],
                          (unsigned)pop_vde[k][0], (unsigned)pop_vde[k][1], (unsigned)pop_vde[k][2], pop_vz[k][0] < 1e8f ? (int)pop_vz[k][0] : -1, (int)pop_vz[k][1], (int)pop_vpx[k]);

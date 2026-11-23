@@ -205,6 +205,10 @@ def interno(a):
         W = a[2] if len(a) > 2 else os.path.join(a[1], '..', 'trabajo_lodveg'); os.makedirs(W, exist_ok=True)   # conv_union
         grupos_nodos.datos(a[1], W, lod_veg.aplica_bytes)   # de ahora ya lo hacen): SEG / BK sueltos y los paquetes,
                                                          # reempaquetados (PYTHONHASHSEED=0, como todos los pasos)
+    elif a[0] == 'lodgrande':                            # lodgrande <datos/> [trabajo/]: version lejana lowpoly de lo grande
+        import lod_grande, grupos_nodos                  # (Rev 2.9.2.d; conv_tramo y conv_union ya lo hacen: aqui para las
+        W = a[2] if len(a) > 2 else os.path.join(a[1], '..', 'trabajo_lodgrande'); os.makedirs(W, exist_ok=True)   # hechas
+        grupos_nodos.datos(a[1], W, lod_grande.aplica_bytes)   # antes; idempotente)
     elif a[0] == 'revq':                                 # revq <patron>...: tools/revq.py con los ficheros de los patrones
         import revq
         sys.argv = ['revq.py'] + sorted(f for p in a[1:] for f in glob.glob(p)); revq.main()
@@ -373,6 +377,8 @@ def regenera(iso, D, W, jobs=4, informe=print):
                     ('TRAF[0-9]*.DAT', 'CHR[0-9]*.DAT', 'BAND*.DAT', 'BO[0-9]*.DAT'))))
     post('libros', py(os.path.join(TOOLS, 'libros.py'), *(os.path.join(D, p) for p in
                       ('TRAF*.DAT', 'CHR[0-9]*.DAT', 'BAND*.DAT', 'BO[0-9]*.DAT'))))
+    informe('== version lejana lowpoly de lo grande (tools/lod_grande.py; lo ya hecho no cambia)')
+    post('lodgrande', py(os.path.join(TOOLS, 'regenera.py'), '--interno', 'lodgrande', D, os.path.join(W, 'lodgrande')))
 
     # ------------------------------------------------------------ comprobacion
     informe('== comprobacion de %s' % D)

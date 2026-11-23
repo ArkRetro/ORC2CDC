@@ -1521,6 +1521,26 @@ de OutRun 2 SP (las 15 etapas seguidas) que dio el usuario.
   no esta leido). Sin EFECTOS.DAT nuevo, sin agua (como antes).
 - NO verificado en consola real.
 
+### Version lejana lowpoly de lo grande (Rev 2.9.2.d / Mod 2.5.2.d, 2026-11-23)
+
+Pedido: "modelos lowpoly y texturas de baja resolucion para los elementos grandes como puentes, montanas, bloques de
+edificios, ruinas, piramides ... cuando el coche este a 900 m cargara completo". DESVIACION. tools/lod_grande.py (detras
+de lod_veg.py en conv_tramo / conv_union; en una carpeta ya hecha `regenera.py --interno lodgrande`, que el programa de
+Windows clasico pasa al final y el del taxi sobre los datos de tu GD):
+- candidatos: nodos de radio >= 40 m, al menos el 60 % de sus vertices en la lista opaca, >= 6000 bytes teoricos del
+  TA, no carteles ni con version lejana de vegetacion;
+- version lejana: solo sus triangulos opacos, agrupados en una rejilla que crece hasta el 12 % de los triangulos
+  (24..400), en tiras voraces, sin textura: la textura reducida a 8x8 cocida en el color de los vertices (textura x
+  color / 255, como MODULATE): 0 KB de VRAM;
+- en el fichero como los lejanos de lod_veg.py (NODO_LEJ + NODO_LEJ3D 0x40, cartel -1, el completo con cartel = -2 -
+  lejano; la PVS reindexada).
+En las 560 etapas y uniones: 18725 nodos grandes, 5.500.137 -> 451.643 triangulos (8,2 %); como mucho 89 por fichero y
+~100 KB de vertices mas (el hueco de la etapa crece: RAM libre en el menu 575 -> 444 KB, OUTRUN2SP 505 KB, sin "Out of
+memory"). demo/main.c nodos_visibles: con NODO_LEJ3D el lejano si lo mas cercano del nodo esta a mas de LOD_GRANDE_D
+(900 m) por delante, el completo al acercarse (histeresis 50 m). Medido (Flycast, piloto, OR2 rama derecha, PRUEBA_SALTO
+1500): 5-11 grandes en lowpoly por cuadro en PALM; apariciones por el tope del reparto 1566 -> 1369 (-12,6 %); 42,7 fps
+igual (lo que se ahorra de lejos lo gasta lo que antes no cabia). `-DLOD_GRANDE_D=m`: otra distancia.
+
 ### Little Bloste y lejano a 3200 m (Rev 2.9.2.c / Mod 2.5.2.c, 2026-11-23)
 
 Pedido: quitar SH4ZAM y hacer las cuentas con una herramienta propia, Little Bloste, documentada; y el lejano maximo a
