@@ -1521,6 +1521,15 @@ de OutRun 2 SP (las 15 etapas seguidas) que dio el usuario.
   no esta leido). Sin EFECTOS.DAT nuevo, sin agua (como antes).
 - NO verificado en consola real.
 
+### Lejano a 3500 m (Rev 2.9.2.b / Mod 2.5.2.b, 2026-11-23)
+
+Pedido: "reducir la distancia de dibujado maxima de 4000 a 3500 de forma global". DESVIACION. LEJOS_MAX (3500) es el techo
+del plano lejano en la carrera, la salida, la meta (el op 20 del guion de la meta, 4000, se recorta) y al volver de cada
+escena; LEJOS_PS2 (4000) queda como el del original para el proyector de los faros (40A950) y las cuentas. El recorte
+por CPU sigue igual (minimo 600 m, -50 m por cuadro por encima de 21 ms, +50 m por debajo de 17 ms). Medido en PALM
+(Flycast, piloto, 95 muestras): lejano medio 2203 -> 1750 m, 41,5 -> 41,7 fps (dentro de lo que varia una prueba).
+`-DLEJOS_MAX=4000.0f`: como antes.
+
 ### Fantasma simplificado, menos repetidos, menos trafico y la meta desde la vista 1 (Rev 2.9.2.a / Mod 2.5.2.a, 2026-11-23)
 
 Pedido del usuario (todo DESVIACION salvo la meta):

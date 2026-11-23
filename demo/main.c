@@ -1353,7 +1353,10 @@ static void carga_espera(void) { while (carga.estado == 1) thd_sleep(5); }
    PowerVR no tiene banda de guarda ni la necesita */
 #define CERCA_PS2 0.1f
 #define LEJOS_PS2 4000.0f
-static float ojo[3], der[3], arr[3], ade[3], fx = 320.0f / 0.75f, cerca = CERCA_PS2, lejos = LEJOS_PS2;
+#ifndef LEJOS_MAX
+#define LEJOS_MAX 3500.0f                                       /* Rev 2.9.2.b (pedido): techo del lejano en toda la demo (el original 4000) */
+#endif
+static float ojo[3], der[3], arr[3], ade[3], fx = 320.0f / 0.75f, cerca = CERCA_PS2, lejos = LEJOS_MAX;
 static matrix_t vista __attribute__((aligned(32))), vista_cielo __attribute__((aligned(32))),
                 mod_coche __attribute__((aligned(32)));
 static uint32_t tri_enviados;
@@ -2629,7 +2632,7 @@ static uint32_t efe_mascara;                                   /* 95AFAC del gui
    demo (0 del. der., 1 del. izq., 2 tras. der., 3 tras. izq.: la rueda n del original es la n ^ 1).  El turbo del
    taxi pide las dos traseras (2 y 3) durante su arranque. */
 static unsigned chispa_muro, chispa_coche, chispa_turbo;      /* chispa_turbo: 2 y 3, las traseras, al arrancar el turbo */
-static float lejos_guion = LEJOS_PS2;                           /* el lejano del original (op 20 de la meta: 1900) */
+static float lejos_guion = LEJOS_MAX;                           /* el lejano del original (op 20 de la meta: 1900) */
 /* fisica del original para el coche del jugador (comun/or2_fisica.c) con la tabla de PARAM.DAT */
 #ifndef MODELO
 #define MODELO 6                                                /* modelo del coche (car+0x11): 6 = Testarossa */
@@ -8887,7 +8890,7 @@ static void niebla_pon(void)
     for (i = 0; i < 129; i++) {
         float t = i ? (float)(1 << (i >> 4)) * (16 + (i & 15)) / 16.0f : 1.0f, z = lejos / t, f, g, h;
         f = (z - lejos * 0.55f) / (lejos * 0.45f); f = f < 0 ? 0 : f > 1 ? 1 : f;
-        if (lejos >= LEJOS_PS2 || lejos >= lejos_guion) f = 0;  /* la del original: sin fundido (no lo tiene) */
+        if (lejos >= LEJOS_MAX || lejos >= lejos_guion) f = 0;  /* la del original: sin fundido (no lo tiene) */
         g = niebla_d * z; g = niebla_d <= 0 ? 0 : niebla_modo == 2 ? 1 - expf(-g * g) : 1 - expf(-g);
         h = (z - NLIM_INI * nl) / (NLIM_ANCHO * nl); h = h < 0 ? 0 : h > 1 ? 1 : h;
         h = a * h * h * (3 - 2 * h);                            /* suave (smoothstep) */
@@ -10326,7 +10329,7 @@ static void etapa_precalienta(void)
         for (k = 0; k < 3; k++) { o[k] = yo.pos[k] - 6.5f * fw[k] + 1.6f * up[k]; m[k] = yo.pos[k] + 6.0f * fw[k] + 1.1f * up[k]; }
         pon_vista(o, m, 0.0f); fx = 320.0f / 0.75f;
     }
-    cerca = CERCA_PS2; lejos = LEJOS_PS2;
+    cerca = CERCA_PS2; lejos = LEJOS_MAX;
     /* de cero: ni la mascara ni la histeresis de la carrera anterior (REINTENTAR) */
     memset(etapa.vis, 0, (etapa.nnodos + 31) / 32 * 4);
     if (etapa.vis_ant) memset(etapa.vis_ant, 0, (etapa.nnodos + 31) / 32 * 4);
@@ -12497,7 +12500,7 @@ static void meta_sale(void)
 {
     if (tabla_on) { fin_tabla_sale(); tabla_on = 0; }
     meta_termina(); meta_pas = meta_cam = 0; efe_mascara = 0; meta.activa = 0;
-    cerca = CERCA_PS2; lejos_guion = LEJOS_PS2;
+    cerca = CERCA_PS2; lejos_guion = LEJOS_MAX;
 }
 /* un paso de logica del modo 19: suceso 7 (4874A0), el coche (475720) y sus efectos */
 static void meta_juego_paso(void)
@@ -12506,7 +12509,7 @@ static void meta_juego_paso(void)
     meta_paso(&meta);
     if (meta.coloca >= 0) meta_marco = meta.coloca ? col_un.marco : col_et.marco;   /* op 7: el coche al origen */
     if (meta.cerca > 0) cerca = meta.cerca;                     /* op 19 / 20: camara +BC / +C0 */
-    if (meta.lejos > 0) lejos_guion = meta.lejos;
+    if (meta.lejos > 0) lejos_guion = meta.lejos > LEJOS_MAX ? LEJOS_MAX : meta.lejos;
     efe_mascara = (meta.humo & 1 ? 3u : 0u) | (meta.humo & 2 ? 0xCu : 0u);
     meta_pas = meta.pasplcar;
     if (!meta_pas) { coche_paso(&yo, 0, 0, 0.6f, 1.0f / 60); return; }
@@ -13347,7 +13350,7 @@ int main(int argc, char **argv)
                 dbglog(DBG_INFO, "SALIDA: arbol %d etapa %d %.4s s %.2f x %.2f a %.4f coche %.2f %.2f %.2f%s\n", curso_id, cur_nodo,
                        curso[cur_nodo].zona, (double)yo.s, (double)yo.x, (double)yo.a, (double)yo.pos[0], (double)yo.pos[1],
                        (double)yo.pos[2], reintenta ? " (REINTENTAR)" : "");
-                lejos = LEJOS_PS2; entorno_reinicia(); niebla_paso(); niebla_pon();   /* la distancia del original */
+                lejos = LEJOS_MAX; entorno_reinicia(); niebla_paso(); niebla_pon();   /* la distancia del original */
                 tim_cuadros = tim_zona(cur_nodo, etapa_n); tiempo = tim_cuadros / TIM_HZ; estado = CUENTA; t_estado = 0; t_cuenta = -60; fac_on = 0; fac_base = 30001; salida_entra(); pausa = 0; crono = 0; pt_inicia(); fin_carrera_empieza(!juego_sp); etapas_empieza(); etapa_entra(cur_nodo); gh_empieza();
                 reintenta = 0;
                 if (voz_ok) voces_carrera();
@@ -13699,12 +13702,12 @@ int main(int argc, char **argv)
             if (estado == META && meta_lista()) {               /* modo 19 (49CC50): suceso 7 y el coche del guion */
                 meta_juego_paso();
                 if (lejos_obj > lejos_guion) lejos_obj = lejos_guion;
-                else if (lejos_guion >= LEJOS_PS2 && lejos_obj < LEJOS_PS2) lejos_obj = lejos = LEJOS_PS2;
+                else if (lejos_guion >= LEJOS_MAX && lejos_obj < LEJOS_MAX) lejos_obj = lejos = LEJOS_MAX;
                 if (lejos > lejos_obj) lejos = lejos_obj;
             } else if (estado == META) coche_paso(&yo, 0, 0, 0.6f, 1.0f / 60);
             if (estado != FIN) pt_msg_paso();
             if (!fin_on && FIN_ATRACCION && ((nuevo & CONT_START) || t_estado > (uint32_t)fin_t)) {   /* demo de atraccion: al menu */
-                meta_sale(); lejos_obj = lejos = LEJOS_PS2;
+                meta_sale(); lejos_obj = lejos = LEJOS_MAX;
                 estado = TITULO; auto_ = 0; nuevo = 0; texto_centro(""); hud_baja_tex(); menu_entra(manual_, pista, NPISTAS);
             } else if (!fin_on && juego_sp && (fin24 || t_estado > (uint32_t)fin_t)) {
                 int a25 = 1, como = fin24 ? fin24_como : estado == META ? FIN_META : FIN_TIEMPO;
@@ -13748,7 +13751,7 @@ int main(int argc, char **argv)
             if (fin_on) {                                       /* modos 34 / 35 / 27 (demo/fin.c) */
                 int rf = fin_paso(nuevo);
                 nuevo = 0;
-                if (rf != FIN_SIGUE) { fin_on = 0; meta_sale(); lejos_obj = lejos = LEJOS_PS2; texto_centro(""); }
+                if (rf != FIN_SIGUE) { fin_on = 0; meta_sale(); lejos_obj = lejos = LEJOS_MAX; texto_centro(""); }
                 if (rf == FIN_SIGUIENTE) {                      /* 495A60: con 495B80 y la nota >= +0x24 (4) la subclave
                                                                    siguiente si existe; despues el modo 30 */
                     int mi_ = menu_mision(), sg = mi_ >= 0 ? rival_siguiente(mi_) : -1;
