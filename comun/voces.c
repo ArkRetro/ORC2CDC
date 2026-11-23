@@ -33,6 +33,7 @@
      (4B9CD0 / 0x1c00d8) es el efecto 0x18d cuando quedan 600 cuadros o menos, cada 16, 8 o 4 cuadros (por debajo de
      420 y de 240).
    Todo va por pasos de logica (60 por segundo), como el original. */
+#include <kos.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -127,7 +128,7 @@ void voces_checkpoint(void)
 void voces_bocina(void)
 {
     if (!listo || infarto) return;
-    if (espera <= 0) { sfx_voz(0x163); espera = 90; }
+    if (espera <= 0) { sfx_voz(0x163); espera = 90; dbglog(DBG_INFO, "VOCES: bocina, voz 0x163\n"); }
 }
 void voces_meta(void) { if (listo) sfx_voz(0x16b); }
 void voces_tiempo_fuera(void) { if (listo) sfx_voz(0x155); }
