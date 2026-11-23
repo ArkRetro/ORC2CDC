@@ -1521,6 +1521,21 @@ de OutRun 2 SP (las 15 etapas seguidas) que dio el usuario.
   no esta leido). Sin EFECTOS.DAT nuevo, sin agua (como antes).
 - NO verificado en consola real.
 
+### Franja de niebla en el limite y edificios lejanos (Rev 2.9.2.f / Mod 2.5.2.f, 2026-11-23)
+
+Pedido: "se aprecian calvas al final de la distancia de dibujado ... como una niebla en el limite de dibujado" y "hay
+algunos edificios que no renderizan ahora y antes si".
+- Niebla del limite (niebla_pon): con el lejano en su maximo (LEJOS_MAX, 3200 m) no habia fundido (la condicion venia de
+  cuando el maximo era el 4000 del original): el corte se veia seco. Ahora siempre una franja del NLIM_FRANJA (0,85) x
+  lejano al lejano que lleva lo de la escena al color de la niebla de la etapa (acortado por la CPU, desde 0,55 como
+  antes); de noche (cielo mas oscuro que la niebla) con la fuerza de la luminancia del horizonte / la de la niebla.
+- Edificios: tools/lod_grande.py dejaba en la version lejana solo los triangulos opacos; en las etapas de ciudad las
+  fachadas con ventanas van en la lista de recorte y de lejos el edificio se quedaba en el esqueleto o casi vacio (en
+  NEWY 53 de 364). Ahora opacas y de recorte, con la textura reducida a la media de sus texeles opacos. En las 560
+  etapas y uniones: 22836 nodos, 6.551.544 -> 466.476 triangulos.
+- Salto progresivo mas suave: tope del TA al 94 / 87 / 80 % (antes 90 / 80 / 70 %), que en lo pesado dejaba fuera
+  edificios lejanos.
+
 ### 40 fps fijos y salto progresivo (Rev 2.9.2.e / Mod 2.5.2.e, 2026-11-23)
 
 Pedido: "frameskip progresivo e intentar que los fps se mantengan fijos a 40". DESVIACION. FPS_OBJETIVO 45 -> 40 (a 60 Hz
