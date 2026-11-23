@@ -640,6 +640,31 @@ def bloque_svl(vols):
             b.append(struct.pack('<2H3bB3bx', a, c, *q1.tolist(), 1 if n2 is None else 2, *q2.tolist()))
     return b''.join(b)
 
+def fantasma(vols, tol=0.01):
+    """GHO1 (detras de ANI1 en CEX2): el coche fantasma de la Contrarreloj (demo/main.c gh_dibuja, Rev 2.9.2.a): las
+    caras de las envolventes de los trozos convexos de los volumenes de sombra (la forma del coche en ~200-400
+    triangulos, sin texturas), sin las interiores (las que comparte con otro trozo con la normal opuesta: en translucido
+    se verian como franjas). 'GHO1', u32 palabras del bloque, u32 triangulos; por triangulo 9 f32 (vertices en el marco
+    del coche, hacia fuera en sentido antihorario visto desde fuera) y f32 luz (0..1, de la normal)"""
+    from scipy.spatial import ConvexHull
+    caras = []
+    for k, (P, _) in enumerate(vols):
+        try: H = ConvexHull(P)
+        except Exception: continue
+        c = P.mean(0)
+        for t, eq in zip(H.simplices, H.equations):
+            n, d = eq[:3], eq[3]
+            T = P[t]
+            if np.dot(np.cross(T[1] - T[0], T[2] - T[0]), n) < 0: T = T[[0, 2, 1]]
+            caras.append((k, n, d, T))
+    fuera = []
+    for i, (k, n, d, T) in enumerate(caras):
+        interior = any(k2 != k and np.dot(n, n2) < -0.999 and abs(d + d2) < tol for k2, n2, d2, _ in caras)
+        if not interior: fuera.append((n, T))
+    L = np.array([0.3, 0.8, 0.5]); L /= np.linalg.norm(L)
+    datos = b''.join(T.astype('<f4').tobytes() + struct.pack('<f', 0.45 + 0.55 * max(0.0, float(np.dot(n, L)))) for n, T in fuera)
+    return b'GHO1' + struct.pack('<2I', 3 + len(datos) // 4, len(fuera)) + datos, len(caras), len(fuera)
+
 def registro_modelo(A, m):
     """registro de 4866C0 del modelo m (PC 650500, 0x44 bytes; en SLES-53998 localizado por firma como en
     conv_trafico.py): +08 radio de la rueda, +1C (car+30C = la mitad: balanceo vertical de 4A2910), +20/+24 cabeceo
@@ -708,6 +733,7 @@ def extension(mod):
     for g in grs: pal.append(struct.pack('<2I', *g))
     if getattr(mod, '_svol', None): pal.append(bloque_svl(mod._svol))
     if getattr(mod, '_ani', None): pal.append(mod._ani)
+    if getattr(mod, '_gho', None): pal.append(mod._gho)
     b = b''.join(pal)
     return np.frombuffer(b, '<f4').reshape(-1, 1)
 
@@ -753,6 +779,8 @@ def convierte(A, m, sal, tope=TOPE, vista=None):
     sombra_clamp(A, mod, m)
     mod._svol = volumenes(A, m)
     mod._ani = animadas(A, mod, m)                              # piezas animadas a su marco y bloque ANI1
+    mod._gho, nc, nf = fantasma(mod._svol)                      # el coche fantasma (GHO1, detras de ANI1)
+    print('   fantasma: %d triangulos (%d caras de los trozos, sin las interiores)' % (nf, nc))
     mod.mallas.sort(key=lambda x: (x[0], x[1]))                # el orden de escribe (estable): el de CEX2
     mod.ruta = extension(mod)
     vesp = sum(x[5] for x in mod.mallas if x[9].get('esp') and x[9]['esp'][0] >= ESP_ENTORNO)

@@ -1521,6 +1521,25 @@ de OutRun 2 SP (las 15 etapas seguidas) que dio el usuario.
   no esta leido). Sin EFECTOS.DAT nuevo, sin agua (como antes).
 - NO verificado en consola real.
 
+### Fantasma simplificado, menos repetidos, menos trafico y la meta desde la vista 1 (Rev 2.9.2.a / Mod 2.5.2.a, 2026-11-23)
+
+Pedido del usuario (todo DESVIACION salvo la meta):
+- **Fantasma**: "que no tengan color, menos poligonos sin textura, que conserven su traslucidez" (con el coche entero el
+  TA no daba para la etapa). tools/conv_coche.py `fantasma`: bloque GHO1 con las caras de las envolventes de los trozos
+  convexos de los volumenes de sombra sin las interiores (182-566 triangulos segun el coche); demo/main.c gh_dibuja: sin
+  textura, gris azulado con la luz de la normal, alfa 0,44, lista transparente. PALM (piloto): 42,8 -> 42,2 fps con el
+  fantasma a la vista (con el coche entero de la 2.9.2: 41,2). Los COCHEnn.DAT sin GHO1 (de antes) no dibujan fantasma.
+- **Repetidos y segunda fila** (decor_reduce, todas las etapas, al leer): vegetacion 15 -> 30 % ("10 palmeras -> 7");
+  objetos iguales repetidos fuera de la calzada (misma firma: vertices, texturas y medidas; no pegados a otro igual ni
+  con algo grande encima) 1 de cada 3 ("3 carteles -> 2"); edificios tapados por otro del mismo lado mas cerca de la ruta
+  (80 % de su tramo, 70 % de su alto) 1 de cada 3. Medido (OR2, rama derecha): PALM 37 de 109 repetidos y 1 de 3
+  edificios, ALPI 1 / 1, DESE 10 de 39, GHOS 4 de 10, CAPE 2 de 6 y 1 de 3. Capturas del recorrido: sin huecos.
+- **Trafico -5 %**: 1 de cada 20 aperturas del trafico de la calle (478B90) se gasta sin coche (TRAF_MENOS; no los
+  puntos fijos ni los coches de mision).
+- **Meta desde la vista 1** (fallo): 4A2BA0 solo usa la vista de carrera en el modo 16; en la salida, la meta y el fin
+  del tiempo el coche va entero (coche_modo). Antes la escena de la meta desde la vista 1 dibujaba el habitaculo.
+  Verificado en E (`-DPRUEBA_VISTA=1`, meta en IMPE): el derrape entero.
+
 ### Coche fantasma de la CONTRARRELOJ (Rev 2.9.2 / Mod 2.5.2, 2026-11-22)
 
 El original (PC 465F30..4687C0; SLES-53998 GHOST.PS2 y la tarjeta de memoria) graba en la Contrarreloj el coche del
