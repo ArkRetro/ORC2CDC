@@ -31,7 +31,20 @@ tablero, y el bloque 'TAB1' (little endian; la barra de ayuda {4, 0x294}, {8, 0x
   desc cursor, candado, r_si, r_no, aviso_b, b_ani[4][3]                          (b_ani: 0x41a6c8, 0x41a6f0, 0x41a890,
                                                                                    0x41a8b8: encender 0..0xf modo 5,
                                                                                    apagar 0xf..0x1e modo 3, capa 1)
-  f32 candado_x, candado_y"""
+  f32 candado_x, candado_y
+  Rev 2.9.4, la lista de records de cada curso (objeto 0x267120 = 51E080 / 51C050 del PC; 0x267210 reset, 0x2674d8
+  anade, 0x269880 rellena, 0x268910 dibuja, 0x268d88 cuadro de cada columna = 51C710) detras de TAB1 (comun/menu.c la
+  lee solo si esta: un TABLERO.DAT de antes sigue valiendo, sin la lista):
+  'LST1', desc lista[150]                      la tabla de cuadros 0x41dcb8 {token, primero, ultimo} (= 5E70F8 del PC)
+  u8 b30[30], u8 _[2], u8 b16[16], u32 d30[30] 0x41db18 / 0x41db38 / 0x41db48 (locales de 0x268d88: nombre de la
+                                                etapa, ruta y coche)
+  f32 x, y0, paso, y_texto, x_tiempo, x_nombre 99, -100, 36 (0x2685cc / 0x2685c0 / 0x2685a8), 124 (0x268a5c), 484
+                                                (0x268a10) y [0x41db10] = 316
+  u32 visibles, flechas                         5 (modo 1 de 0x267210: 0x26736c) y el indice de las flechas en la lista
+                                                (82: 0x440034 cuadros 0..0xa, capa 8, modo 3: 0x267378)
+  Grupo de atlas 'L' con las escenas de las columnas: 0x35 fondo, 0x40 puesto, 0x37 cambio, 0x38 bandera, 0x39
+  configuracion, 0x3a coche, 0x41 ruta y 0x34 flechas (0x3f, la columna a[6], queda fuera: sin red a[6] = 0 y su
+  cuadro 0 no tiene piezas; 0x3e, 0x65 y 0xa4 son de otros modos de la lista y del tablero 0x25, sin portar)"""
 import os, struct, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import conv_hud as ch
@@ -85,6 +98,21 @@ def main():
     assert all(u(0x375e60 + 8 * k) == 0xa for k in range(15))
     # barra de ayuda sin la lista (0x25303c..0x253068: {4, 0x294}, -1, -1, {8, 0x295})
     inm(0x25304c, 4); inm(0x253050, 0x294); inm(0x253068, 8); inm(0x253040, 0x295)
+    # Rev 2.9.4: la lista (0x267210): la tabla de cuadros en 0x2672bc (lui 0x42 en s7 / addiu -0x2348) y el modo 1 con
+    # 5 filas a la vista (0x26736c) y las flechas en la entrada 0x3d8 / 12 = 82, capa 8, modo 3 (0x267378..0x26738c)
+    w = u(0x2672bc); assert w >> 26 == 9 and (w & 0xffff) == (-0x2348 & 0xffff), hex(w)
+    w = u(0x267354); assert w >> 26 == 9 and (w & 0xffff) == (-0x2348 & 0xffff), hex(w)
+    inm(0x26736c, 5); inm(0x267384, 8); inm(0x26738c, 3)
+    assert u(0x267380) & 0xffff == 0x3d8 and u(0x267388) & 0xffff == 0x3dc and u(0x267378) & 0xffff == 0x3e0
+    LISTA = 0x41dcb8
+    # las locales de 0x268d88: 0x41db18 (30 bytes), 0x41db38 (16) y 0x41db48 (30 palabras)
+    assert par(0x268da4, 0x268e08) == 0x41db38 and par(0x268d94, 0x268da8) == 0x41db18
+    assert par(0x268d8c, 0x268d9c) == 0x41db48
+    # coordenadas de 0x268910 / 0x268570 (lui de los flotantes) y la x del nombre [0x41db10]
+    fl = lambda a: struct.unpack('<f', struct.pack('<I', (u(a) & 0xffff) << 16))[0]
+    X, Y0, PASO, YT, XT = fl(0x2685cc), fl(0x2685c0), fl(0x2685a8), fl(0x268a5c), fl(0x268a10)
+    assert (X, Y0, PASO, YT, XT) == (99.0, -100.0, 36.0, 124.0, 484.0), (X, Y0, PASO, YT, XT)
+    assert par(0x268a64, 0x268a68) == 0x41db10 and u(0x41db10) == 316
 
     out = bytearray(b'TAB1') + bytes(4)
     toks = set()
@@ -94,8 +122,24 @@ def main():
             assert tok >> 16 == 0x44, 'tabla 0x%x: %x' % (t, tok)
             out += struct.pack('<3I', tok, f0, f1); toks.add(tok & 0xffff)
     out += struct.pack('<2f', -363.0, -206.0)
+    # Rev 2.9.4: 'LST1' (la lista de records)
+    lst = [(u(LISTA + 12 * k), u(LISTA + 12 * k + 4), u(LISTA + 12 * k + 8)) for k in range(150)]
+    assert all(t >> 16 == 0x44 for t, _, _ in lst)
+    assert lst[0] == (0x440035, 0, 10) and lst[82] == (0x440034, 0, 10) and lst[0x5e] == (0x440040, 0, 0)
+    assert lst[0x23] == (0x440041, 31, 31) and lst[0x24] == (0x440037, 0, 0) and lst[0x26] == (0x440038, 0, 0)
+    assert lst[0x40] == (0x440039, 0, 0) and lst[0x43] == (0x44003a, 0, 0) and lst[4] == (0x440041, 0, 0)
+    E8 = lambda a, n: bytes(E[a - 0xfff80:a - 0xfff80 + n])
+    b30, b16 = E8(0x41db18, 30), E8(0x41db38, 16); d30 = [u(0x41db48 + 4 * k) for k in range(30)]
+    assert sorted(b30) == list(range(30)) and sorted(b16) == list(range(16)) and all(v < 15 for v in d30)
+    out += b'LST1'
+    for t, f0, f1 in lst: out += struct.pack('<3I', t, f0, f1)
+    out += b30 + bytes(2) + b16 + struct.pack('<30I', *d30)
+    out += struct.pack('<6f', X, Y0, PASO, YT, XT, float(u(0x41db10)))
+    out += struct.pack('<2I', 5, 82)
     grupos = [('B', [0x3b, 0xa5, 0xf2, 0x66]), ('C', [0x3c, 0xa2]), ('A', [0x3d, 0xbf, 0x43, 0xbe, 0xf3]),
-              ('D', [0x36, 0xbd, 0x42, 0xbc, 0xe2, 0xe3, 0xf5, 0xf6, 0xe4])]
+              ('D', [0x36, 0xbd, 0x42, 0xbc, 0xe2, 0xe3, 0xf5, 0xf6, 0xe4]),
+              ('L', [0x35, 0x40, 0x37, 0x38, 0x39, 0x3a, 0x41, 0x34])]       # Rev 2.9.4: la lista
+    toks |= {0x35, 0x40, 0x37, 0x38, 0x39, 0x3a, 0x41, 0x34}
     assert set(k for _, ks in grupos for k in ks) == toks, sorted(toks)
     ruta = os.path.join(sal, 'TABLERO.DAT')
     cs.escribe(D, BANCO, ruta, grupos, bytes(out), vq=ch.vq_pequeno, solo=True)

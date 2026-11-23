@@ -141,6 +141,9 @@ def tabla(D, elf, iso):
      - variante 1, al acabar la tabla (0x19eb00): la escena 2C00AE en (0, y0) -> T_PANEL, el tiempo total (0x19fd68)
        en (338, y0 + 385) y la puntuacion (0x19ff08, "%07d", amarilla) en (x, y0 + 428) con x deslizandose (0x19fb08);
        variantes 0 / 7 / 8 (0x19ebe4): la escena 2C00AF en (0, 0) -> T_PANEL7 y el tiempo total amarillo en (x, 385).
+     - Rev 2.9.4, la Contrarreloj de una etapa (0x19e918: variante 7 y 0x21cb28, codigo < 0x3C): sin tabla ni panel,
+       la escena 2B0063 ("MEJOR TIEMPO:", banco 0x2B, cuadros 0..0x46) -> T_MEJOR, y el mejor tiempo del curso
+       (0x19fe08 = 497430: registro 2 del fantasma, 466190) en (205, 245) con T_CH.
     Glifos: fuente 4 (escala 1, modo 0 de 0x117558: alineada a la derecha del punto) -> T_CH, un cuadro por caracter de
     TABLA_CH"""
     import conv_union as cu
@@ -201,6 +204,20 @@ def tabla(D, elf, iso):
             hud.pie.append((g, k, si, 0, float(p['M'][2, 0]), float(p['M'][2, 1]), 0, 0, 0.0, 1.0, 1.0, 1.0))
     hud.uso('T_CH', g, 0, 0, capa=1)
     print('  T_CH: %d glifos de la fuente 4 (%dx%d)' % (j, W, H))
+    # Rev 2.9.4: la Contrarreloj de una etapa (0x19e918: variante 7 y 0x21cb28 = 48B350, codigo del curso [0x373e54] <
+    # 0x3C) no ensena la tabla: la escena 2B0063 ("MEJOR TIEMPO:", capa 0, modo 1, cuadros 0..0x46 con 0x114d00) y el
+    # tiempo del registro 2 del fantasma (0x19fe08 = 497430: 466190(2), fuente 4, "% 2d'%02d\"%03d" en (0xCD, 0xF5),
+    # blanco; con T_CH). La copia de los modos 20 / 21 (GAD 0x19f2f8) crea la misma escena. Ojo: en el PS2 es 2B0063;
+    # la 2B0061 del PS2 es el rotulo "Posicion" (la del PC es otra numeracion)
+    assert lui_ori(elf, 0x19e96c, 0x19e984) == 0x2b0063 and lui_ori(elf, 0x19f57c, 0x19f594) == 0x2b0063
+    assert u32(elf, 0x19e994) & 0xffff == 0x46                  # ultimo cuadro (t0 de 0x114d00)
+    assert (u32(elf, 0x19e9f8) & 0xffff, u32(elf, 0x19e9fc) & 0xffff) == (0xcd, 0xf5)   # x, y del tiempo
+    assert u32(elf, 0x19fe90) & 0xffff == 4 and u32(elf, 0x19fec4) & 0xffff == 0xf3c8   # fuente 4, formato 0x3ef3c8
+    assert u32(elf, 0x21cb34) & 0xffff == 0x3c                  # 48B350: codigo < 0x3C
+    assert u32(elf, 0x19ea10) & 0xffff == 0xa                   # paso 2 -> 3 con 0x1b4a20() < 10
+    ag, Tg, _ = D.banco(0x2b)
+    g = ch.grupo_escena(hud, 'T_MEJOR', ag, Tg, 0x2b, 0x63, 0x47, 'tab_')
+    hud.uso('T_MEJOR', g, 0, 0, capa=1)                         # (capa 0 en el original; en la DC basta la z)
     print('GOALT.DAT: %d zonas con nombre (%d cuadros), %d etiquetas' % (len(zonas), nf, len(etiq)))
     return hud
 
@@ -215,6 +232,13 @@ def maquetas(huds, d):
         for n, c in cosas:
             u = next(u for u in hud.lay if u[0] == n); ch.dibuja_grupo(img, hud, u[1], c, u[3], u[4])
         img.save(os.path.join(d, nombre + '.png'))
+    # Rev 2.9.4: la Contrarreloj de una etapa, T_MEJOR (cuadro 70) y " 1'23\"456" con T_CH en (205, 245) a 20 px
+    hud = huds['GOALT.DAT']; img = Image.new('RGBA', (640, 480), (40, 60, 90, 255))
+    u = next(u for u in hud.lay if u[0] == 'T_MEJOR'); ch.dibuja_grupo(img, hud, u[1], 70, u[3], u[4])
+    u = next(u for u in hud.lay if u[0] == 'T_CH')
+    for i, c in enumerate(b" 1'23\"456"):
+        if c != 0x20: ch.dibuja_grupo(img, hud, u[1], TABLA_CH.index(bytes([c])), 205 + 20 * i, 245)
+    img.save(os.path.join(d, 'tabla_mejor.png'))
 
 if __name__ == '__main__':
     if len(sys.argv) < 3: raise SystemExit(__doc__)

@@ -293,13 +293,25 @@ static void vmu_lee(void)
             memcpy(&lic_sel, d + 8, 4);
             memcpy(lic, d + 12, sizeof lic);
             {   /* version 2: 'RKSP' y los rankings de OUTRUN2SP; version 3 (Rev 2.9.3): bloques con su marca, 'RKSP' el
-                   primero (las versiones de antes lo siguen leyendo) y 'RKUJ' los records de UN JUGADOR */
+                   primero (las versiones de antes lo siguen leyendo) y 'RKUJ' los records de UN JUGADOR. Version 4 (Rev
+                   2.9.4): detras de 'RKSP', bloques con marca y tamano (u32 tam y tam bytes): 'RKU2' (los records de UN
+                   JUGADOR compactos, rkuj_compacta) y 'RKTA' (los de la CONTRARRELOJ por codigo). 'RKSP' y 'RKUJ' siguen
+                   con su tamano fijo; una marca desconocida o un tamano que no cuadra paran la lectura (los lectores de la
+                   2.9.3 paran en 'RKU2': conservan 'RKSP') */
                 int q = o + 12 + (int)sizeof lic;
-                while (ver >= 2 && q + 4 + RKSP_TAM <= sz) {
-                    if (!memcmp(b + q, "RKSP", 4)) rksp_pon(b + q + 4);
-                    else if (!memcmp(b + q, "RKUJ", 4)) rkuj_pon(b + q + 4);
+                while (ver >= 2 && q + 8 <= sz) {
+                    uint32_t tb;
+                    if (!memcmp(b + q, "RKSP", 4) || !memcmp(b + q, "RKUJ", 4)) {
+                        if (q + 4 + RKSP_TAM > sz) break;
+                        if (b[q + 3] == 'P') rksp_pon(b + q + 4); else rkuj_pon(b + q + 4);
+                        q += 4 + RKSP_TAM; continue;
+                    }
+                    memcpy(&tb, b + q + 4, 4);
+                    if (ver < 4 || tb > (uint32_t)(sz - q - 8)) break;
+                    if (!memcmp(b + q, "RKU2", 4)) { if (rkuj_expande(b + q + 8, tb)) break; }
+                    else if (!memcmp(b + q, "RKTA", 4)) { if (rkta_pon(b + q + 8, tb)) break; }
                     else break;
-                    q += 4 + RKSP_TAM;
+                    q += 8 + (int)tb;
                 }
             }
             if (lic_sel < -1 || lic_sel >= N_LIC || (lic_sel >= 0 && !lic_usada(lic_sel))) lic_sel = -1;
@@ -377,13 +389,17 @@ int menu_vmu_lee(const char *nombre, uint8_t *buf, int cap)
 /* el fichero empaquetado (cabecera VMS + datos), malloc; NULL sin memoria */
 static uint8_t *vmu_prepara(int *n)
 {
-    vmu_pkg_t pkg; uint8_t *d, *out = NULL; int v = rkuj_hay() ? 3 : rksp_hay() ? 2 : 1;
-    uint32_t tam = 12 + sizeof lic + (rksp_hay() ? 4 + RKSP_TAM : 0) + (rkuj_hay() ? 4 + RKSP_TAM : 0), q;
+    /* Rev 2.9.4 (version 4): 'RKU2' (6720 bytes) en lugar de 'RKUJ' (0x2bc0) y 'RKTA' (5924): con VMU.DAT, 66 bloques
+       con todo (64 la 2.9.3 con 'RKUJ'). 'RKSP' va el primero, como antes */
+    vmu_pkg_t pkg; uint8_t *d, *out = NULL; int v = rkuj_hay() || rkta_hay() ? 4 : rksp_hay() ? 2 : 1;
+    uint32_t tam = 12 + sizeof lic + (rksp_hay() ? 4 + RKSP_TAM : 0) + (rkuj_hay() ? 8 + RKUJ2_TAM : 0) +
+                   (rkta_hay() ? 8 + RKTA_BLOQUE : 0), q, tb;
     d = malloc(tam); if (!d) return NULL;
     memcpy(d, "OR2L", 4); memcpy(d + 4, &v, 4); memcpy(d + 8, &lic_sel, 4); memcpy(d + 12, lic, sizeof lic);
     q = 12 + sizeof lic;
     if (rksp_hay()) { memcpy(d + q, "RKSP", 4); memcpy(d + q + 4, rksp_tablas(), RKSP_TAM); q += 4 + RKSP_TAM; }
-    if (rkuj_hay()) { memcpy(d + q, "RKUJ", 4); memcpy(d + q + 4, rkuj_tablas(), RKSP_TAM); }   /* (version 3) */
+    if (rkuj_hay()) { tb = RKUJ2_TAM; memcpy(d + q, "RKU2", 4); memcpy(d + q + 4, &tb, 4); rkuj_compacta(d + q + 8); q += 8 + tb; }
+    if (rkta_hay()) { tb = RKTA_BLOQUE; memcpy(d + q, "RKTA", 4); memcpy(d + q + 4, &tb, 4); rkta_bloque(d + q + 8); q += 8 + tb; }
     memset(&pkg, 0, sizeof pkg);
     vmu_cabecera(&pkg);                                     /* descripciones, icono y eyecatch (comun/vmu.c) */
     pkg.data_len = tam; pkg.data = d;
@@ -1036,6 +1052,10 @@ void menu_suma_tiempo(int cuadros)
     p32(p, 0x10c, l32(p, 0x10c) + cuadros); p[0x3f4] |= 2;
     dbglog(DBG_INFO, "LICENCIA: tiempo de juego +%d cuadros = %d\n", cuadros, l32(p, 0x10c));
 }
+
+/* Rev 2.9.4: la licencia activa con cambios sin guardar (+3F4 |= 2), tras un registro en las tablas de records
+   (rk_un_jugador: antes dependia de que menu_suma_tiempo la marcara justo antes, y con crono <= 0 no lo hacia) */
+void menu_marca_cambios(void) { uint8_t *p = activa(); if (p) p[0x3f4] |= 2; }
 
 /* millas OutRun de la licencia activa (+0x24, float): 4EF510 (PS2 0x1f41d8) al salir del modo 34 suma las de la carrera
    (entero sin signo pasado a float, suma en float) y marca +3F4 |= 2 */
@@ -2449,9 +2469,10 @@ static void sa_dibuja(void)
           0xcb..0xce (curso seguido) y 0xc1 + 2 i / 0xc2 + 2 i (metas del reves): los METAS que vende el SALON.
      0x27 (0x257e58, control 0x258610): las 15 etapas; R (0x25a880) las del reves con los candados 0x8a + 2 i /
           0x8b + 2 i; abajo en la etapa 0 la opcion B (0xa8..0xab): ETAPAS del SALON.
-   Sin la lista de records de cada curso (0x267210 / 0x2674d8 / 0x269880: no hay records de Contrarreloj en la DC):
-   el foco no baja a la lista (la barra de ayuda es la de sin tarjeta de memoria, 0x25303c). El curso elegido llega a
-   la carrera por menu_ta_codigo (0x2a6758 = 4EEC80 del PC) y menu_ha_arbol. */
+   Rev 2.9.4: la lista de records de cada curso en la CONTRARRELOJ (0x26 y 0x27; ver tb_lista_*), si TABLERO.DAT trae
+   el bloque 'LST1' (uno de antes: sin la lista). La barra de ayuda sigue siendo la de sin tarjeta de memoria
+   (0x25303c; la de con lista no se ha buscado: SIN PORTAR). El curso elegido llega a la carrera por menu_ta_codigo
+   (0x2a6758 = 4EEC80 del PC) y menu_ha_arbol. */
 #define TABLERO_RAM (256u << 10)                            /* tablas de TABLERO.DAT (animacion, sprites, TAB1) */
 typedef struct { uint32_t tok, pri, ult; } tb_d_t;
 typedef struct {
@@ -2460,6 +2481,15 @@ typedef struct {
     tb_d_t cursor, candado, r_si, r_no, aviso, bani[4][3];  /* 0x41a078, 0x41a088, 0x419d58, 0x419d64, 0x41abd0, 0x41a6c8.. */
     float cx, cy;                                           /* el candado en (-363, -206) */
 } tb_t;
+/* Rev 2.9.4: 'LST1' detras de tb_t (tools/conv_tablero.py): la lista de records (objeto 0x267120 = 51E080 del PC) */
+typedef struct {
+    char m[4];
+    tb_d_t lista[150];                                      /* 0x41dcb8 (= 5E70F8 del PC): los cuadros de 0x268d88 */
+    uint8_t b30[30], _p[2], b16[16]; uint32_t d30[30];      /* 0x41db18 / 0x41db38 / 0x41db48 */
+    float x, y0, paso, yt, xt, xn;                          /* 99, -100, 36 (0x2685cc..), 124, 484, 316 ([0x41db10]) */
+    uint32_t vis, flechas;                                  /* 5 (0x26736c) y 82 (0x440034: 0x267378) */
+} tb_lt_t;
+static const tb_lt_t *TL;
 static spr_banco_t *tb_bk; static const tb_t *TB;
 static int tb_k = 0x24; static int tb_sig = 0x24;                      /* clave del tablero y la del siguiente */
 static uint32_t tb_bits;                                    /* raiz +0x208 (la declaracion de arriba) */
@@ -2469,6 +2499,15 @@ static int tb_opb;                                          /* +0x27e68: opcion 
 static struct { const tb_d_t *t; int max, idx; sa_r_t r; } tb_car;   /* carrusel (0x26df20 = 51B7B0 del PC) */
 static sa_r_t tb_cur, tb_cand, tb_rind, tb_bani, tb_aviso;
 static int tb_activo(void) { return TB != NULL; }
+/* Rev 2.9.4: la lista de records de cada curso (mas abajo) */
+#define TB_LN 10                                            /* 10 filas de clase 6 / 7 (0x24f620 / 0x2582d8) */
+typedef struct { int hay; uint32_t ms; char nombre[5]; int cambio, bandera, config, coche, ruta; } tb_fila_t;
+static tb_fila_t tb_fila[TB_LN];
+static sa_r_t tb_fsr[TB_LN][7];                             /* fondo, puesto, cambio, bandera, configuracion, coche, ruta */
+static int tb_lclave = -1, tb_ltop, tb_lfoco, tb_lclase, tb_lseg, tb_letapa, tb_lcodigo = -1;
+static sa_r_t tb_lfl;                                       /* las flechas 0x440034 (+0x26120 del PC) */
+static void tb_lista_olvida(void);
+static void tb_lista_suelta(void);
 static int tb_abre(void)
 {
     void *ram; uint32_t tam;
@@ -2484,14 +2523,17 @@ static int tb_abre(void)
     }
     spr_por_tramos(tb_bk, 1);
     tb_car.r.h = tb_cur.h = tb_cand.h = tb_rind.h = tb_bani.h = tb_aviso.h = -1;
-    dbglog(DBG_INFO, "TABLERO: TABLERO.DAT (%u bytes de tablas en el hueco), VRAM libre %uK\n", (unsigned)hudd_tablas_ocupa(),
-           (unsigned)(pvr_mem_available() >> 10));
+    TL = tam >= sizeof(tb_t) + sizeof(tb_lt_t) && !memcmp((const uint8_t *)TB + sizeof(tb_t), "LST1", 4) ?
+         (const tb_lt_t *)((const uint8_t *)TB + sizeof(tb_t)) : NULL;   /* (uno de antes de la 2.9.4: sin la lista) */
+    tb_lista_olvida();
+    dbglog(DBG_INFO, "TABLERO: TABLERO.DAT (%u bytes de tablas en el hueco), VRAM libre %uK, %s\n", (unsigned)hudd_tablas_ocupa(),
+           (unsigned)(pvr_mem_available() >> 10), TL ? "con la lista de records" : "sin la lista de records (anterior a la 2.9.4)");
     return 0;
 }
 static void tb_cierra(void)
 {
     if (!tb_bk) return;
-    spr_suelta_todas(); spr_cierra(tb_bk); tb_bk = NULL; TB = NULL;
+    spr_suelta_todas(); tb_lista_olvida(); spr_cierra(tb_bk); tb_bk = NULL; TB = NULL; TL = NULL;
     tb_car.r.h = tb_cur.h = tb_cand.h = tb_rind.h = tb_bani.h = tb_aviso.h = -1;
     if (menu_hueco) menu_hueco(0);
 }
@@ -2564,6 +2606,7 @@ static void tb_entra(void)
 {
     tb_k = tb_sig;
     sr_suelta(&tb_cur); sr_suelta(&tb_cand); sr_suelta(&tb_rind); sr_suelta(&tb_bani); sr_suelta(&tb_aviso);
+    tb_lista_suelta();
     tb_opb = 0;
 #if defined(PRUEBA_TABLERO_TODO)
     {   /* prueba (-DPRUEBA_TABLERO_TODO): la licencia activa con todas las ETAPAS y METAS del SALON (bits 0x8a..0xce)
@@ -2597,6 +2640,190 @@ static void tb_opcion_b(int pon)                            /* 0x259ea0 / 0x25a0
     if (pon) { sr_pon(&tb_bani, t[1].tok, (int)t[0].pri, (int)t[1].ult, 1, 5, 1); tb_opb = 1; }
     else { sr_pon(&tb_bani, t[2].tok, (int)t[2].pri, (int)t[2].ult, 1, 3, 1); tb_opb = 0; }
 }
+/* ---- Rev 2.9.4: la lista de records de cada curso (SLES-53998, objeto 0x267120 = 51E080 / 51C050 del PC):
+   0x267210 = 51C440 (reset: el modo 1 da 5 filas a la vista, +0x70d4, y las flechas 0x440034 cuadros 0..0xa en la
+   capa 8, modo 3), 0x2674d8 = 51E140 (anade un registro), 0x269880 = 51F280 (rellena y ensena desde la fila top),
+   0x268910 = 51EDC0 (dibuja) y 0x268d88 = 51C710 (el cuadro de cada columna: tb_fr). Tableros (CONTRARRELOJ, palabra
+   0x80): 0x26 (0x24f620 al entrar, 0x250c80 / 0x250e2c al mover el carrusel) 10 filas de clase 6 (a[1] = puesto, a[7]
+   = 0x251c58() el indice, a[8] = fila); 0x27 (0x2582d8..0x258388) 10 filas de clase 7 de la etapa elegida
+   (0x25ac10). Cada fila (tick de 51DB70 del PC, PROBABLE igual en el PS2: no desensamblado) en (99, fila x 36 - 100):
+   el fondo 0x440035 (cuadros 0..10 de entrada, capa 4, despues el 10; el 11 con la fila resaltada, sin uso aqui) y en
+   la capa 8 el puesto (0x440040, cuadro = puesto: clases 0, 6 y 7 con 0x267d40), el cambio (0x440037, AT / MT) y la
+   bandera de la licencia (0x440038), en la 9 la configuracion (0x440039: (v != 0) x 2), el coche (0x44003a, cuadro
+   D30[coche]) y la ruta (0x440041: B16[ruta]; clase 6 con el curso seguido [0x375fac] = 1: frames(8) = cuadro 31;
+   clase 7: frames(0xa, etapa)); la columna a[6] (0x44003f) sin red es el cuadro 0, sin piezas: no se pone. Textos
+   (0x268910, widgets con 0x26e7e8, fuente 0xe = la 14, banderas 0xb: sin alinear y centrado en vertical): el nombre
+   en (316, 124 + 36 fila) y el tiempo "%2d'%.2d'%.3d" en (484, misma y).
+   Datos (0x269b60 = 51D0F0, sin red [0x373ea4] = 0): las tablas de la partida 0x2804 (metas, 10 por meta), 0x9154
+   (curso seguido) y 0x4d84 (etapas). En la Dreamcast:
+   - metas A..E (0x3c..0x45): rkuj (comun/rksp.c, variante 0, preset del codigo, cuenta = meta, configuracion 0) con
+     las dos tablas de cambio mezcladas por tiempo. DESVIACION: el PS2 tiene una tabla por meta con el cambio en cada
+     registro; el nombre es de 4 caracteres (el PS2 guarda 16);
+   - lo demas (metas del reves, cursos seguidos y etapas): RKTA (Rev 2.9.4, rkta_fila16), si esta;
+   - filas vacias: el fondo y el puesto, sin texto (DESVIACION: no se sabe que pone el PS2 por defecto).
+   Control (como 4CB480 / 4CEF30 del PC): abajo lleva el foco del carrusel (0) a la flecha de abajo (1) y a la de
+   arriba (7), arriba lo deshace; con el foco en una flecha A pasa de pagina (top 0 <-> 5, sonido 0x40) y el carrusel
+   no se mueve; B vuelve el foco al carrusel (PROBABLE). Flechas: cuadro 0xa sin foco, 0xb / 0xc con el foco abajo /
+   arriba (51EC80). SIN PORTAR: el deslizamiento de las filas al pasar de pagina (51C220: las filas se ponen ya en su
+   sitio), la lista con red (0x226df8 / 0x5f8598), "Total players", los filtros y los rotulos (60, 342) / (60, 82). */
+static int ta_codigo_de(int juego, int curso, int c);
+static const tb_d_t *tb_fr(int clase, int v)                /* 0x268d88 (51C710): la entrada de la lista */
+{
+    int i;
+    if (!TL) return NULL;
+    switch (clase) {
+    case 0: case 10: i = v + 0x14; break;
+    case 1: i = v + 0x24; break;                            /* cambio */
+    case 2: i = (v >= 0 && v <= 25 ? v : 0) + 0x26; break;  /* bandera (0x41dcb8: 26 cuadros de 0x440038, 0x26..0x3f;
+                                                               DESVIACION: limitada como en tarjeta(), una licencia
+                                                               corrupta con 26..31 daria la configuracion o el coche) */
+    case 3: i = (v != 0) * 2 + 0x40; break;                 /* configuracion (sin las tablas de OUTRUN2SP) */
+    case 4: i = (v >= 0 && v < 30 ? (int)TL->d30[v] : 0) + 0x43; break;   /* coche */
+    case 5: i = v + 0x5c; break;
+    case 6: i = v + 0x5e; break;                            /* puesto */
+    case 8: i = v + 0x23; break;                            /* curso seguido */
+    case 9: i = (v >= 0 && v < 16 ? TL->b16[v] : 0) + 4; break;   /* ruta */
+    default: return NULL;
+    }
+    return i >= 0 && i < 150 ? TL->lista + i : NULL;
+}
+static void tb_lista_esconde(void)
+{
+    int i, k;
+    for (i = 0; i < TB_LN; i++) for (k = 0; k < 7; k++) sr_suelta(&tb_fsr[i][k]);
+}
+static void tb_lista_olvida(void)                          /* los asideros a -1 sin soltar (tras spr_suelta_todas) */
+{
+    int i, k;
+    for (i = 0; i < TB_LN; i++) for (k = 0; k < 7; k++) tb_fsr[i][k].h = -1;
+    tb_lfl.h = -1; tb_lclave = -1; tb_ltop = 0; tb_lfoco = 0; tb_lcodigo = -1;
+}
+static void tb_lista_suelta(void)
+{
+    tb_lista_esconde(); sr_suelta(&tb_lfl);
+    tb_lclave = -1; tb_ltop = 0; tb_lfoco = 0; tb_lcodigo = -1;
+}
+static uint32_t tb_l32(const uint8_t *p) { uint32_t v; memcpy(&v, p, 4); return v; }
+static void tb_fila_de(tb_fila_t *f, const uint8_t *r)     /* un registro de 16 bytes (rksp.h) */
+{
+    uint32_t r0 = tb_l32(r), r8 = tb_l32(r + 8); int k;
+    f->ms = tb_l32(r + 4);
+    for (k = 0; k < 4 && r[11 + k]; k++) f->nombre[k] = (char)r[11 + k];
+    f->nombre[k] = 0;
+    f->hay = f->ms != 0xffffffffu && f->nombre[0];
+    f->cambio = (int)(r8 >> 17) & 1; f->bandera = (int)(r8 >> 12) & 0x1f; f->config = (int)(r8 >> 18) & 1;
+    f->coche = (int)(r0 >> 28); f->ruta = (int)(r0 >> 24) & 0xf;
+}
+/* 0x24f620 / 0x250c80 / 0x2582d8: las filas del curso de la posicion del carrusel */
+static void tb_lista_llena(void)
+{
+    int i, j, c, codigo;
+    tb_lista_esconde();
+    for (i = 0; i < TB_LN; i++) { tb_fila[i].hay = 0; tb_fila[i].nombre[0] = 0; }
+    tb_ltop = 0;
+    if (tb_k == 0x26) { c = tb_car.idx + (tb_ra ? 6 : 0); codigo = ta_codigo_de(tb_juego(), 1, c); tb_lclase = 6; }
+    else { c = tb_car.idx + (tb_rd ? 0xf : 0); codigo = ta_codigo_de(tb_juego(), 0, c); tb_lclase = 7; }
+    tb_lseg = codigo >= 0x50 && codigo <= 0x53;             /* 0x251c58: [0x375fac] = 1 con el curso seguido */
+    tb_letapa = tb_car.idx; tb_lcodigo = codigo;
+    if (codigo >= 0x3c && codigo < 0x46) {                  /* metas A..E: rkuj con los dos cambios mezclados */
+        const uint8_t *t = rkuj_hay() ? rkuj_tablas() : NULL;
+        int p = codigo < 0x41 ? 1 : 0, m = (codigo - 0x3c) % 5, ia = 0, ib = 0;
+        if (t) {
+            const uint8_t *A = t + rksp_tabla(0, p, m, 0, 0), *B = t + rksp_tabla(0, p, m, 1, 0);
+            for (i = 0; i < TB_LN; ) {                      /* las 10 mejores de las 20, saltando las vacias */
+                tb_fila_t fa, fb; int ha, hb;
+                fa.hay = fb.hay = 0;
+                if (ia < 10) tb_fila_de(&fa, A + 16 * ia);
+                if (ib < 10) tb_fila_de(&fb, B + 16 * ib);
+                ha = ia < 10 && fa.hay; hb = ib < 10 && fb.hay;
+                if (ia < 10 && !ha) { ia++; continue; }
+                if (ib < 10 && !hb) { ib++; continue; }
+                if (!ha && !hb) break;
+                if (ha && (!hb || fa.ms <= fb.ms)) { tb_fila[i] = fa; ia++; }
+                else { tb_fila[i] = fb; ib++; }
+                i++;
+            }
+        }
+    }
+    else if (codigo >= 0 && rkta_hay()) {                   /* Rev 2.9.4: RKTA (comun/rksp.c) */
+        uint8_t q[160];
+        if (rkta_fila16(codigo, q) >= 0) for (i = 0; i < TB_LN; i++) tb_fila_de(&tb_fila[i], q + 16 * i);
+    }
+    for (i = j = 0; i < TB_LN; i++) j += tb_fila[i].hay;
+    dbglog(DBG_INFO, "TABLERO: lista del curso 0x%02x (clase %d): %d records\n", codigo, tb_lclase, j);
+}
+/* 0x269880 (51F280) y el tick de cada fila: las filas top..top + 4 con sus columnas, en su sitio */
+static void tb_lista_ensena(void)
+{
+    int i, k;
+    tb_lista_esconde();
+    for (i = tb_ltop; i < tb_ltop + (int)TL->vis && i < TB_LN; i++) {
+        tb_fila_t *f = tb_fila + i; float y = TL->y0 + TL->paso * (float)(i - tb_ltop);
+        const tb_d_t *d[7]; static const int CAPA[7] = { 4, 8, 8, 8, 9, 9, 9 };
+        d[0] = TL->lista + 0;                               /* fondo: 0..10 de entrada */
+        d[1] = tb_fr(6, i);
+        d[2] = f->hay ? tb_fr(1, f->cambio) : NULL;
+        d[3] = f->hay ? tb_fr(2, f->bandera) : NULL;
+        d[4] = f->hay ? tb_fr(3, f->config) : NULL;
+        d[5] = f->hay ? tb_fr(4, f->coche) : NULL;
+        d[6] = !f->hay ? NULL : tb_lclase == 7 ? tb_fr(10, tb_letapa) : tb_lseg ? tb_fr(8, 0) : tb_fr(9, f->ruta);
+        for (k = 0; k < 7; k++) {
+            if (!d[k]) continue;
+            sr_pon(&tb_fsr[i][k], d[k]->tok, (int)d[k]->pri, (int)d[k]->ult, CAPA[k], k == 0 ? 5 : 0, 1);
+            if (tb_fsr[i][k].h >= 0) spr_traslada(tb_fsr[i][k].h, TL->x, y);
+        }
+    }
+}
+static void tb_lista_flecha(void)                           /* 51EC80: 0xa, 0xb (foco abajo) o 0xc (arriba) */
+{
+    const tb_d_t *d = TL->lista + TL->flechas;
+    int f = tb_lfoco == 1 ? 0xb : tb_lfoco == 7 ? 0xc : 0xa;
+    if (tb_lfl.h < 0) { sr_pon(&tb_lfl, d->tok, (int)d->pri, (int)d->ult, 8, 5, 1); return; }   /* 0..0xa de entrada */
+    if (tb_lfl.modo == 5 && !sr_listo(&tb_lfl)) return;
+    sr_pon(&tb_lfl, d->tok, f, f, 8, 0, 1);                 /* (el mismo cuadro quieto: nada) */
+}
+/* un paso: la lista sigue a la posicion del carrusel (y a R); devuelve 1 si el foco esta en ella */
+static int tb_lista_paso(void)
+{
+    int clave;
+    if (!TL || tb_modo() != 4 || (tb_k != 0x26 && tb_k != 0x27)) return 0;
+    clave = tb_k << 16 | tb_juego() << 12 | (tb_k == 0x26 ? tb_ra : tb_rd) << 8 | tb_car.idx;
+    if (clave != tb_lclave) { tb_lclave = clave; tb_lfoco = 0; tb_lista_llena(); tb_lista_ensena(); }
+    tb_lista_flecha();
+    return tb_lfoco != 0;
+}
+static int tb_lista_control(int a)                          /* 1: la accion es de la lista */
+{
+    if (!TL || tb_lclave < 0) return 0;
+    if (a == 4 && tb_lfoco != 7) {                          /* abajo: 0 -> 1 -> 7 */
+        tb_lfoco = tb_lfoco == 0 ? 1 : 7; sfx_menu(SFX_CURSOR); return 1;
+    }
+    if (a == 2 && tb_lfoco) { tb_lfoco = tb_lfoco == 7 ? 1 : 0; sfx_menu(SFX_CURSOR); return 1; }
+    if (!tb_lfoco) return 0;
+    if (a == 0) {                                           /* A: la otra pagina (top 0 <-> 5) */
+        int top = tb_lfoco == 1 ? (int)TL->vis : 0;
+        if (top != tb_ltop && TB_LN > (int)TL->vis) { tb_ltop = top; tb_lista_ensena(); sfx_menu(SFX_ACEPTA); }
+        return 1;
+    }
+    if (a == 1) { tb_lfoco = 0; sfx_menu(SFX_CANCELA); return 1; }   /* (PROBABLE) */
+    return 1;                                               /* izquierda / derecha / R: nada */
+}
+static void tb_lista_dibuja(float z)                        /* 0x268910: nombre y tiempo de las filas a la vista */
+{
+    int i; char b[24];
+    if (!TL || tb_lclave < 0) return;
+    for (i = tb_ltop; i < tb_ltop + (int)TL->vis && i < TB_LN; i++) {
+        const tb_fila_t *f = tb_fila + i; float y = TL->yt + TL->paso * (float)(i - tb_ltop);
+        unsigned q, mn;
+        if (!f->hay) continue;
+        /* 0x268a74..0x268b00 y 0x26b758: la fuente 14 en (316 / 484, 124 + 36 x fila) con las banderas 1 de 0x116aa8
+           (0x26b7ac: sin alinear, la y es la de arriba de las letras; antes 9, centrado en vertical, y salian subidas) */
+        texto_c(f->nombre, TL->xn, y, 1, 1, z, 0xFFFFFF);
+        q = f->ms / 1000; mn = q / 60;
+        snprintf(b, sizeof b, "%2u'%.2u'%.3u", mn, q - mn * 60, (unsigned)(f->ms % 1000));
+        texto_c(b, TL->xt, y, 1, 1, z, 0xFFFFFF);
+    }
+}
 /* un paso del tablero: 0 sigue, 1 al coche (clave 0xa), 2 atras a UN JUGADOR, 3 a otro tablero (tb_sig) */
 static int tb_control(unsigned n, int atiende)
 {
@@ -2606,7 +2833,11 @@ static int tb_control(unsigned n, int atiende)
     if (atiende && a == 12 && r1_nuevo) a = 11;               /* el gatillo R (bit 0x2000 del frontal) */
     spr_paso();
     tb_car_paso();
-    if (tb_cur.h < 0) sr_pon(&tb_cur, TB->cursor.tok, (int)TB->cursor.pri, (int)TB->cursor.ult, 4, 0, 1);   /* +0x2a8 */
+    if (tb_lista_paso() && a != 12) { if (tb_lista_control(a)) a = 12; }   /* Rev 2.9.4: el foco en la lista */
+    else if ((a == 4 || a == 2) && !(tb_k == 0x27 && tb_car.idx == 0 && a == 4 && (tb_opb || sa_tiene(tb_bit_b()))) &&
+             tb_lista_control(a)) a = 12;              /* abajo: a la lista (la opcion B de la etapa 0 antes) */
+    if (tb_lfoco) sr_suelta(&tb_cur);
+    else if (tb_cur.h < 0) sr_pon(&tb_cur, TB->cursor.tok, (int)TB->cursor.pri, (int)TB->cursor.ult, 4, 0, 1);   /* +0x2a8 */
     b = tb_candado();
     if (b >= 0 && !sa_tiene(b)) {
         if (tb_cand.h < 0) { sr_pon(&tb_cand, TB->candado.tok, (int)TB->candado.pri, (int)TB->candado.ult, 4, 0, 1); spr_traslada(tb_cand.h, TB->cx, TB->cy); }
@@ -2659,7 +2890,9 @@ static int tb_control(unsigned n, int atiende)
         break;
     case 4:                                                 /* abajo: la opcion B en la etapa 0 (0x259ea0) */
         if (tb_k != 0x27 || i != 0) break;
-        if (tb_opb) tb_opcion_b(0);
+        if (tb_opb) { tb_opcion_b(0); tb_lista_control(4); }   /* DESVIACION (Rev 2.9.4): al quitar la opcion B, el foco
+                                                           a la lista (el original solo la alterna: sin esto las filas
+                                                           6..10 de la etapa 0 no se podian ver con la opcion B) */
         else if (sa_tiene(tb_bit_b())) tb_opcion_b(1);
         break;
     case 11:                                                /* R: las del reves (0x250288 / 0x25914c) */
@@ -2673,22 +2906,27 @@ static void tb_dibuja(void)
 {
     if (!TB) return;
     spr_dibuja(0, SPR_CAPAS, 3, 0);
+    tb_lista_dibuja(hudd_z() + 0.01f);                      /* Rev 2.9.4 */
 }
 /* CONTRARRELOJ: el codigo del curso de la carrera ([656234]; 0x2a6758 = 4EEC80 del PC) o -1. preset: 0x2a6978 (juego
    0 -> 1, 1 -> 0) y los cursos seguidos (5 / 11: preset 2 / 3) */
-int menu_ta_codigo(int *bandera)
+static int ta_codigo_de(int juego, int curso, int c)       /* 0x2a6758 con el juego, curso / etapa y la posicion */
 {
-    int pre = tb_juego() == 0 ? 1 : tb_juego() == 1 ? 0 : tb_juego() == 2 ? 3 : 2, c = tb_codigo();
-    if (bandera) *bandera = 0;
-    if (sp_sel || modo_sel != 3 || tb_modo() != 4) return -1;
-    if (!(tb_bits & 0x800)) {                               /* 0x2a6800: una etapa */
+    int pre = juego == 0 ? 1 : juego == 1 ? 0 : juego == 2 ? 3 : 2;
+    if (!curso) {                                           /* 0x2a6800: una etapa */
         if (c >= 0xf) c += 0xf;
         if (pre == 0) c += 0xf;
-        if (bandera) *bandera = tb_20c;
         return c;
     }
     if (pre == 0) return c == 5 ? 0x52 : c == 11 ? 0x53 : c + (c > 5 ? 0x45 : 0x41);
     return c == 5 ? 0x50 : c == 11 ? 0x51 : c + (c > 5 ? 0x40 : 0x3c);
+}
+int menu_ta_codigo(int *bandera)
+{
+    if (bandera) *bandera = 0;
+    if (sp_sel || modo_sel != 3 || tb_modo() != 4) return -1;
+    if (bandera && !(tb_bits & 0x800)) *bandera = tb_20c;
+    return ta_codigo_de(tb_juego(), (tb_bits & 0x800) != 0, tb_codigo());
 }
 /* INFARTO: el juego de cursos elegido (raiz +0x208 bits 0..1): 0 OutRun 2 (csc_data_2: el arbol 0), 1 OutRun 2 SP
    (csc_data_cvt: el arbol 1); -1 fuera del INFARTO */
@@ -3134,18 +3372,49 @@ void menu_pausa_dibuja(void)
    Mandos: izquierda / derecha la meta A..E, arriba / abajo la pagina (1..5 / 6..10), R el modo (OUTRUN -> INFARTO ->
    CONTRARRELOJ), Y el juego (OutRun 2 / OutRun 2 SP), X el cambio (AT / MT: las tablas de tiempo van por cambio), B
    vuelve. Las tablas de cada cosa se abren de nuevo al cambiar (RANKSP.DAT, NOM5x.DAT del fondo y NOMTX.DAT, ~200 KB,
-   en el hueco de los tableros). DESVIACION: el original lo ensena con la lista del frontal 0x267120 (sin portar). */
+   en el hueco de los tableros). DESVIACION: el original lo ensena con la lista del frontal 0x267120 (Rev 2.9.4: portada
+   en los tableros de la CONTRARRELOJ, tb_lista_*).
+   Rev 2.9.4: con UN JUGADOR, R tiene un cuarto modo, CONTRARRELOJ ETAPA (rk_v = 3): los records RKTA (comun/rksp.c)
+   por codigo. Izquierda / derecha recorre 21 posiciones (las 15 etapas, las METAS DEL REVES A..E y el curso seguido),
+   X el sentido (normal / del reves: etapas y curso seguido), Y el juego; el codigo sale de la posicion con las cuentas de
+   0x2a6758 (ta_codigo_de, como menu_ta_codigo). Se ensena con el mismo tablero (nombre_t consulta 3: tabla16 de
+   rkta_fila16, leida como la variante 0) con el fondo de la meta del registro: la etapa n con el registro n (PROBABLE:
+   el arbol de OutRun numera las 15 etapas como sus registros 0..14), las metas del reves con 10 + meta y el curso
+   seguido con el 14 (el fondo solo cambia en las metas: las etapas que no son meta llevan el de la meta A, 0x40d248),
+   sin la linea "META A" del titulo y con un rotulo de la posicion en la banda ("ETAPA n NORMAL / REVES", "META x REVES",
+   "CURSO ..."). Todo DESVIACION: el original lo ensena en la lista de los tableros y en la red. */
 static int rk_v = 1, rk_p = 1, rk_c, rk_a, rk_pag, rk_abierto;
 static void *rk_ram;
+static uint8_t rk_t16[160];                                 /* Rev 2.9.4: la tabla de la consulta 3 */
+static int rk_codigo(void)                                  /* Rev 2.9.4: el codigo de la posicion de CONTRARRELOJ ETAPA */
+{
+    int j = rk_p ? 0 : 1;                                   /* (preset 1 = OutRun 2 = juego 0: 0x2a6978) */
+    if (rk_c < 15) return ta_codigo_de(j, 0, rk_c + (rk_a ? 15 : 0));
+    if (rk_c < 20) return ta_codigo_de(j, 1, 6 + rk_c - 15);
+    return ta_codigo_de(j, 1, rk_a ? 11 : 5);
+}
 static int rk_carga(void)
 {
     nombre_t d;
     memset(&d, 0, sizeof d);
     d.consulta = rk_set ? 2 : 1; d.variante = rk_v; d.preset = rk_p; d.cuenta = rk_c; d.registro4 = 10 + rk_c;
     d.manual = rk_a; d.config = 0; d.ruta = 0; d.ram = rk_ram; d.ram_cap = TABLERO_RAM;
+    if (rk_v == 3) {                                        /* Rev 2.9.4: CONTRARRELOJ ETAPA */
+        rkta_fila16(rk_codigo(), rk_t16);
+        d.consulta = 3; d.tabla16 = rk_t16; d.variante = 0; d.manual = 0; d.cuenta = 0;
+        d.registro4 = rk_c < 15 ? rk_c : rk_c < 20 ? 10 + rk_c - 15 : 14;
+        /* el rotulo de la posicion en la banda: el fondo solo distingue las metas (RANKSP.DAT 0x40d248: las etapas que no
+           son meta llevan todas el de la meta A, 0x37000C / 0x37000D), asi que sin el rotulo la etapa no se veia */
+        if (rk_c < 15) { char e[3] = { rk_c >= 9 ? '1' : (char)('1' + rk_c), rk_c >= 9 ? (char)('0' + rk_c - 9) : 0, 0 };
+                         snprintf(d.rotulo3, sizeof d.rotulo3, "ETAPA %s %s", e, rk_a ? "REVES" : "NORMAL"); }
+        else if (rk_c < 20) snprintf(d.rotulo3, sizeof d.rotulo3, "META %c REVES", 'A' + rk_c - 15);
+        else snprintf(d.rotulo3, sizeof d.rotulo3, "CURSO %s", rk_a ? "REVES" : "NORMAL");
+    }
     if (nombre_entra(&d)) return -1;
     nombre_pagina(rk_pag);
-    dbglog(DBG_INFO, "RANKING: consulta %s, variante %d preset %d meta %c cambio %s, VRAM libre %uK\n", rk_set ? "UN JUGADOR" : "OUTRUN2SP",
+    if (rk_v == 3) dbglog(DBG_INFO, "RANKING: consulta CONTRARRELOJ ETAPA, codigo 0x%02x (posicion %d, %s), VRAM libre %uK\n", rk_codigo(),
+                          rk_c, rk_a ? "del reves" : "normal", (unsigned)(pvr_mem_available() >> 10));
+    else dbglog(DBG_INFO, "RANKING: consulta %s, variante %d preset %d meta %c cambio %s, VRAM libre %uK\n", rk_set ? "UN JUGADOR" : "OUTRUN2SP",
            rk_v, rk_p, 'A' + rk_c, rk_a ? "MT" : "AT", (unsigned)(pvr_mem_available() >> 10));
     return 0;
 }
@@ -3155,6 +3424,7 @@ static int rk_abre(void)
     if (!(rk_ram = menu_hueco ? menu_hueco(TABLERO_RAM) : NULL)) { dbglog(DBG_ERROR, "RANKING: sin el hueco\n"); return -1; }
     spr_suelta_todas();
     rk_pag = 0;
+    if (rk_v == 3 && !rk_set) { rk_v = 1; rk_c %= 5; }     /* (Rev 2.9.4: ETAPA solo con UN JUGADOR) */
     if (rk_carga()) { menu_hueco(0); rk_ram = NULL; return -1; }
     rk_abierto = 1;
     return 0;
@@ -3172,11 +3442,13 @@ static void rk_control(unsigned n, int r1)
     if (!rk_abierto) return;
     nombre_paso(0);                                         /* (spr_paso: las escenas de la tabla) */
     if (n & CONT_B) { sale(P_RANKING, 0); return; }
-    if (n & CONT_DPAD_LEFT) { rk_c = (rk_c + 4) % 5; cambia = 1; }
-    if (n & CONT_DPAD_RIGHT) { rk_c = (rk_c + 1) % 5; cambia = 1; }
-    if (r1) { rk_v = rk_v == 1 ? 2 : rk_v == 2 ? 0 : 1; cambia = 1; }
+    {   int np = rk_v == 3 ? 21 : 5;                        /* (Rev 2.9.4: 21 posiciones en CONTRARRELOJ ETAPA) */
+        if (n & CONT_DPAD_LEFT) { rk_c = (rk_c + np - 1) % np; cambia = 1; }
+        if (n & CONT_DPAD_RIGHT) { rk_c = (rk_c + 1) % np; cambia = 1; }
+    }
+    if (r1) { rk_v = rk_v == 1 ? 2 : rk_v == 2 ? 0 : rk_v == 0 && rk_set ? 3 : 1; rk_c %= 5; cambia = 1; }
     if (n & CONT_Y) { rk_p ^= 1; cambia = 1; }
-    if (n & CONT_X) { rk_a ^= 1; cambia = rk_v == 0; }
+    if (n & CONT_X) { rk_a ^= 1; cambia = rk_v == 0 || (rk_v == 3 && (rk_c < 15 || rk_c == 20)); }
     if (n & (CONT_DPAD_UP | CONT_DPAD_DOWN)) { rk_pag ^= 1; nombre_pagina(rk_pag); sfx_menu(SFX_CURSOR); }
     if (cambia) {
         sfx_menu(SFX_CURSOR);

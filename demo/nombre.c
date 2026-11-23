@@ -101,6 +101,7 @@ static float lf(const uint32_t *l, int i) { float f; memcpy(&f, l + i, 4); retur
 /* 0x2012a8 / 0x2013e8 / 0x201528 (PC 4B2080 / 4B2150 / 4B2220): las 10 filas de la tabla */
 static int consulta;                                    /* Rev 2.9.3: la consulta de RANKINGS (sin registro del jugador) */
 static const uint8_t *tablas_de;                        /* las tablas que se ensenan (rksp o, en la consulta, rkuj) */
+static char rot3[16];                                   /* Rev 2.9.4: el rotulo de la consulta 3 */
 static void filas(uint32_t t, int tipo)
 {
     int i; const uint8_t *r = (tablas_de ? tablas_de : rksp_tablas()) + t;
@@ -122,7 +123,8 @@ int nombre_entra(const nombre_t *d)
 {
     uint32_t tam, curso, t; const uint8_t *x; uint8_t rec[16]; char n[16]; int ruta, sel_t; fila_t *e;
     nombre_sale();
-    consulta = d->consulta; tablas_de = d->consulta == 2 ? rkuj_tablas() : NULL;
+    consulta = d->consulta; tablas_de = d->consulta == 2 ? rkuj_tablas() : d->consulta == 3 ? d->tabla16 : NULL;
+    if (consulta == 3 && !tablas_de) { consulta = 1; tablas_de = NULL; }   /* (Rev 2.9.4: sin tabla, la de OUTRUN2SP) */
     /* las tablas de los tres bancos, una detras de otra en la RAM fija (nunca en el monton: 86 + 110..113 + 6 KB, que
        quedarian bajo lo que se pida hasta volver al frontal); lo que sobra, para los sectores de las subidas de texturas */
     r_ram = d->ram; r_cap = d->ram ? d->ram_cap : 0; r_o = 0;
@@ -160,14 +162,17 @@ int nombre_entra(const nombre_t *d)
     /* el registro de la carrera (0x1fc69c..0x1fc7a8) */
     {
         uint32_t r0 = ((uint32_t)d->puntos & 0xffffff) | ((uint32_t)(d->modelo & 0xf) << 28) | ((uint32_t)ruta << 24);
-        uint32_t r8 = variante == 2 ? (uint32_t)d->corazones & 0xfff : 0;
+        /* Rev 2.9.4: los corazones saturan a 0xfff (DESVIACION: el original los enmascara a 12 bits, 0x1fc69c, y una
+           carrera de mas de 4095 daba la vuelta y acababa al final de la tabla) */
+        uint32_t r8 = variante == 2 && d->corazones > 0 ? (d->corazones > 0xfff ? 0xfffu : (uint32_t)d->corazones) : 0;
         r8 = (r8 & 0xfff9ffffu) | (uint32_t)(cambio & 1) << 17 | (uint32_t)(conf & 1) << 18;
         memcpy(rec, &r0, 4); memcpy(rec + 4, &d->tiempo, 4); memcpy(rec + 8, &r8, 4); memset(rec + 11, 0, 5);
     }
     puesto = consulta || (variante == 0 && d->tiempo == 0) ? 10 : rksp_inserta(rec, variante, preset, cuenta, cambio, conf);
     if (!(puesto < 10)) puesto = -1;
     k34c = (int)t34c[(cambio + conf * 2 + variante * 4) & 15];
-    t = rksp_tabla(variante, preset, cuenta, cambio, conf);
+    t = consulta == 3 ? 0 : rksp_tabla(variante, preset, cuenta, cambio, conf);   /* (3: tabla16 de 160 bytes: el
+                                                           desplazamiento de rksp no vale, leeria fuera de ella) */
     if (variante >= 0 && variante <= 2) filas(t, variante);
     else memset(fila, 0, sizeof fila);
     e = puesto >= 0 ? fila + puesto : &fj;              /* la fila del jugador */
@@ -177,8 +182,12 @@ int nombre_entra(const nombre_t *d)
     e->ruta = ruta; e->tipo = variante; e->tiempo = d->tiempo; e->cambio = (int8_t)cambio; e->conf = (int8_t)conf;
     pagina = puesto < 0 ? 5 : puesto / 5 * 5;
     if (consulta) { pagina = 0; fj.tipo = -1; cuenta = linea = d->cuenta; k34c = (int)t34c[(cambio + conf * 2 + variante * 4) & 15];
-                    t = rksp_tabla(variante, preset, cuenta, cambio, conf);
-                    if (variante >= 0 && variante <= 2) filas(t, variante); }
+                    t = consulta == 3 ? 0 : rksp_tabla(variante, preset, cuenta, cambio, conf);   /* (3: tabla16) */
+                    if (variante >= 0 && variante <= 2) filas(t, variante);
+                    /* Rev 2.9.4: consulta 3 sin la linea de la meta (t[2 + linea]: "META A" no es la posicion) y con su
+                       rotulo en la banda (DESVIACION, como toda la consulta 3) */
+                    if (consulta == 3) linea = -1; }
+    snprintf(rot3, sizeof rot3, "%s", consulta == 3 ? d->rotulo3 : "");
     h_tit = h_tab = h_puesto = -1;
     primero = 1; est = 0; hecho = 0; voz = 1;
     sel_t = k34c + preset * 6;
@@ -361,6 +370,7 @@ static int tablero(void)                                /* 0x200398 con [0x424] 
     else if (fj.tipo == 1) puntos(&fj, 0x144, 0x1a3);
     else if (fj.tipo == 2) corazones(&fj, 0x144, 0x1a3);
     if (fj.tipo >= 0 && fj.tipo <= 2) texto(1, 0x32, 0x1a3, 0xffffff, rotulo[fj.tipo]);
+    if (consulta == 3 && rot3[0]) texto(1, 0x32, 0x1a3, 0xffffff, rot3);   /* (Rev 2.9.4: donde va el rotulo 0x443) */
     return 1;
 }
 static void escribe(const txt_t *q, float z)            /* 0x1175a8: 0x116fa0 / 0x116e10 por caracter */

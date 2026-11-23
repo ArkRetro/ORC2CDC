@@ -54,10 +54,15 @@ typedef struct {
     char zona[15][4];       /* la zona de la etapa de cada nivel (el nombre: 44C8D0 de 450560) */
     float avance;           /* car+102C: lo corrido de la etapa sin superar (0..1) */
     int total_ms, puntos;   /* 451180(0) (el crono) y 4BF0E8 (0x19ff08) */
+    /* Rev 2.9.4: la Contrarreloj de una etapa (0x19e918: variante 7 y 0x21cb28 = 48B350, codigo < 0x3C) no ensena la
+       tabla ni el panel: la escena 2B0063 ("MEJOR TIEMPO:", T_MEJOR) y el mejor tiempo del curso (0x19fe08 = 497430) */
+    int solo;
+    int mejor_ms;           /* 466190(2): palabra +4 del registro 2 del fantasma (el mejor del curso); -1 sin el */
 } fin_tabla_t;
 int  fin_tabla_entra(const fin_tabla_t *t);         /* abre GOALT.DAT (solo tablas); 0 bien */
 void fin_tabla_paso(void);                          /* un paso de logica */
 void fin_tabla_dibuja(void);                        /* dentro de la lista TR */
+void fin_tabla_quita(void);                         /* solo: paso 3 del GAD (0x19ea24: 0x114eb0, la escena fuera) */
 void fin_tabla_sale(void);                          /* suelta GOALT.DAT y su VRAM */
 void fin_sale(void);                                /* suelta FIN.DAT / GOVER.DAT (y su VRAM) */
 int  fin_activo(void);
