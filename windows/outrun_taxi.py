@@ -167,6 +167,11 @@ def main():
         r = subprocess.run([sys.executable, os.path.join(o2.TOOLS, 'libros.py')] + args, capture_output=True, text=True)
         if r.returncode: raise SystemExit('fallo tools/libros.py:\n' + (r.stderr or r.stdout)[-2000:])
         for l in r.stdout.splitlines()[-4:]: informe('  ' + l)
+    informe('== version lejana lowpoly de lo grande (tools/lod_grande.py, Mod 2.5.2.d; lo ya hecho no cambia; unos minutos)')
+    r = subprocess.run([sys.executable, os.path.join(o2.TOOLS, 'regenera.py'), '--interno', 'lodgrande', D, os.path.join(W, 'lodgrande')],
+                       capture_output=True, text=True)
+    if r.returncode: raise SystemExit('fallo tools/lod_grande.py:\n' + (r.stderr or r.stdout)[-2000:])
+    informe('  ' + (r.stdout.strip().splitlines() or ['hecho'])[-1])
     if os.path.isfile(os.path.join(D, 'REFLEJO.DAT')): os.remove(os.path.join(D, 'REFLEJO.DAT'))   # (Mod 2.3: sin reflejo)
     import gdi
     informe('== GD-ROM en %s' % car)
