@@ -1505,6 +1505,31 @@ de OutRun 2 SP (las 15 etapas seguidas) que dio el usuario.
   no esta leido). Sin EFECTOS.DAT nuevo, sin agua (como antes).
 - NO verificado en consola real.
 
+### Auditoria del usuario (Rev 2.9.3 / Mod 2.5.3, 2026-11-23)
+
+Pedido: "audita revisa y corrige" (lista de fallos de la 2.9.2.f). Verificado en Flycast (no en consola real).
+- Faros de noche que se encendian y apagaban solos: el salto progresivo (2.9.2.e) quitaba los faros y los focos desde el
+  nivel 1, que sube y baja durante la carrera. Ahora no dependen del salto (demo/main.c faros_dibuja / focos_prepara).
+- "Zonas azules" en INDUSTRIAL COMPLEX y "bloques blancos" en ANCIENT RUINS: la version lejana lowpoly de la 2.9.2.d (12 %
+  de los triangulos, el color medio de cada textura) desde 900 m se veia como bloques planos oscuros (forzada de cerca:
+  fachadas negras y gris azuladas) o, con la niebla, claros. LOD_GRANDE_FR (0,8): el completo hasta el 80 % del lejano
+  (2560 m con 3200) y el lowpoly solo en el ultimo tramo, dentro de la franja de niebla. LOD_GRANDE_D (900) queda como
+  minimo. El hueco blanco al fondo del desfiladero de RUIN sale igual sin lowpoly y sin franja: es el limite de 3200 m.
+- CONTRARRELOJ sin el derrape de la salida: demo/meta.c callaba los efectos de la escena de salida (op 5) con la
+  variante 6 / 7 tomando 450240 por la variante; 450240 es el estado del fin de la carrera ([7D38F0] del PC, 0 en la
+  salida, 450230 lo pone al acabar): los efectos suenan en todos los modos.
+- SALON, COLORES DEL COCHE: el coche que se ensena es el de 0x41ba30[fila] (0x25ce50: [+0x410] x 8); la DC sumaba el
+  0x49 de la tabla de rotulos y ensenaba el coche y el color de 73 filas mas abajo. Comprobado fila a fila (DINO 246 GTS,
+  365 GTS/4 DAYTONA, F50 en sus colores).
+- SALON, cabecera: el original pone la de la clave 0x2B de 0x416B70 (0x23D5B8 -> 0x440077, "showroom"); la DC dejaba la
+  de ELEGIR MODO. Va en SALON.DAT (grupo COMUN de tools/conv_salon.py; MENU.DAT lleva el arte de OUTRUNNERS hecho
+  aparte y no se rehace); con un SALON.DAT de antes, la de ELEGIR MODO.
+- Ecualizador de la radio (MUSICA): la escena 0x4400A7 es una sola pieza de un cuadro (capa 0..470, n = 1) y el frontal
+  de musica del PC (frontend_music.cpp, 0x440088 0..0x19 modo 5) no dibuja nada mas: no se ha encontrado animacion del
+  ecualizador en los datos ni en el codigo. Sin cambios.
+- Frases de la acompanante al pitar: el PC dice la voz 0x163 al tocar la bocina (boton 2, [82F23C]); el PS2 no tiene ni
+  la bocina ni la voz (sin 0x163 en 0x202e60..0x205cac): no aplica.
+
 ### Franja de niebla en el limite y edificios lejanos (Rev 2.9.2.f / Mod 2.5.2.f, 2026-11-23)
 
 Pedido: "se aprecian calvas al final de la distancia de dibujado ... como una niebla en el limite de dibujado" y "hay
