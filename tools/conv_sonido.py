@@ -321,6 +321,7 @@ VOZ_BANCOS = ('ORC.PAK', 'PERO.pak')
 # variante
 VOZ_C2C = ('PERR.pak', 'TRS.PAK', 'TRE.PAK')
 VOZ_SE = (('\\IGC.PAK', 1, 0x4d), ('\\IGC.PAK', 0, 0x18d))      # (banco, parte, id)
+VOZ_EXTRA = (0x163,)                # de HC.PAK a VOCES.DAT (la respuesta a la bocina, Rev 2.9.3)
 VOZ_AREA, VOZ_VUELTA, VOZ_DERRAPE = 0x36f958, 0x36f9a8, 0x36fa80
 VOZ_LISTAS = ((0x40ef60, 2), (0x40ef68, 2), (0x40ef70, 5), (0x40eba8, 3), (0x40ebb8, 3), (0x40eb10, 4), (0x40eb20, 2))
 VOZ_MOV = 0x40eb28                  # movimientos del coche cerrado: {lista, cuenta} x 8
@@ -353,6 +354,15 @@ def voces(iso, irx, tb, td, elf, V, idioma, sal, bancos=VOZ_BANCOS, nombre='VOCE
                 p, v = se(i)
                 if p != 0x400 or i in muestras: continue           # solo las voces (12 kHz); los SE van aparte
                 muestras[i] = (muestra_banco(datos, o), frecuencia(p), v)
+    if nombre == 'VOCES.DAT':
+        # Rev 2.9.3 (pedido: bocina en X): la voz 0x163 con la que la acompanante del PC contesta a la bocina (489A90,
+        # [82F23C]); el PS2 no tiene bocina, pero la voz esta en su banco del INFARTO (\\<IDIOMA>\\HC.PAK)
+        A, B, (ta, tbb) = banco_tablas(fichero_paquete(iso, 'SOUND.PS2', '\\%s\\HC.PAK' % idioma))
+        for datos, t in ((A, ta), (B, tbb)):
+            for i in VOZ_EXTRA:
+                if i in t and i not in muestras:
+                    p, v = se(i)
+                    if p == 0x400: muestras[i] = (muestra_banco(datos, t[i]), frecuencia(p), v)
     for nb, parte, i in VOZ_SE:
         A, B, t = banco_tablas(fichero_paquete(iso, 'SOUND.PS2', nb))
         p, v = se(i)

@@ -39,5 +39,6 @@ void sfx_muestra_toca(uint32_t a, uint32_t muestras, uint32_t hz, int vol_irx);
 int  sfx_canal_nuevo(void);                /* -1 si no quedan */
 void sfx_muestra_toca_en(int canal, uint32_t a, uint32_t muestras, uint32_t hz, int vol_irx);
 void sfx_canal_calla(int canal);
+void sfx_bocina(int on);                   /* Rev 2.9.3: la bocina (boton X; sonido propio en bucle mientras on) */
 
 #endif

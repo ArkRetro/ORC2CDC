@@ -471,3 +471,50 @@ void sfx_voz_calla(void)
     if (canal_voz >= 0) snd_sfx_stop(canal_voz);
     if (canal_voz_se >= 0) snd_sfx_stop(canal_voz_se);
 }
+
+/* Rev 2.9.3 (pedido del usuario: "claxon en X"): la bocina. DESVIACION: el PS2 no tiene bocina (el PC si: boton 2, y en
+   el modo OutRun la acompanante contesta con la voz 0x163) ni muestra de bocina en ningun banco: el sonido es propio,
+   sintetizado aqui (dos tonos de 400 y 500 Hz con armonicos impares suavizados, como una bocina de dos notas), en PCM de
+   16 bits a 24 kHz: 2400 muestras = 10 ms x 10, un numero entero de periodos de los dos tonos para el bucle. Suena en
+   bucle mientras se pulsa. */
+#define BOC_HZ 24000
+#define BOC_N 2400
+static uint32_t boc_a; static int boc_canal = -1, boc_on;
+static int bocina_prepara(void)
+{
+    int16_t *b; int i, k; const float PI2 = 6.2831853f;
+    if (boc_a) return 0;
+    if (!(b = malloc(BOC_N * 2))) return -1;
+    for (i = 0; i < BOC_N; i++) {
+        float t = (float)i / BOC_HZ, v = 0;
+        for (k = 1; k <= 7; k += 2) {                           /* cuadrada suave: armonicos impares 1/k^1,5 */
+            float g = 1.0f / (k * sqrtf((float)k));
+            v += g * (sinf(PI2 * 400.0f * k * t) + 0.9f * sinf(PI2 * 500.0f * k * t));
+        }
+        v *= 6500.0f;
+        if (v > 32000.0f) v = 32000.0f; else if (v < -32000.0f) v = -32000.0f;
+        b[i] = (int16_t)v;
+    }
+    boc_a = snd_mem_malloc(BOC_N * 2);
+    if (boc_a) spu_memload(boc_a, b, BOC_N * 2);
+    free(b);
+    if (!boc_a) return -1;
+    boc_canal = snd_sfx_chn_alloc();
+    return boc_canal < 0 ? -1 : 0;
+}
+void sfx_bocina(int on)
+{
+    muestra_dat_t m; int vol;
+    if (!listo) return;
+    on = on ? 1 : 0;
+    if (on == boc_on) return;
+    boc_on = on;
+    if (!on) { if (boc_canal >= 0) snd_sfx_stop(boc_canal); return; }
+    if (bocina_prepara()) return;
+    vol = (int)(vol_se(0x2c00) * vol_general + 0.5f);
+    if (vol > 255) vol = 255;
+    if (vol <= 0) return;
+    memset(&m, 0, sizeof m);
+    m.formato = 1; m.bucle = 1; m.ini = 0; m.fin = BOC_N;
+    manda(boc_canal, AICA_CH_CMD_START, &m, boc_a, BOC_HZ, vol, 128);
+}

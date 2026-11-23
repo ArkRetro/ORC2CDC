@@ -12,7 +12,7 @@ Linux y en Windows (el programa de windows/): mismos pasos, mismas salidas.
 Lo que sale del disco no va al repositorio. Tiempo: unas horas en 4 nucleos (la visibilidad PVS de cada etapa y union
 es lo que mas tarda). Sale con error si falla cualquier paso.
 Las partes en C (tools/c: musica, pvs, visible) y ffmpeg: tools/nativo.py (en Windows, ya compiladas: OR2_NATIVO)."""
-import glob, os, shutil, subprocess, sys, threading, time
+import struct, glob, os, shutil, subprocess, sys, threading, time
 from concurrent.futures import ThreadPoolExecutor
 
 TOOLS = os.path.dirname(os.path.abspath(__file__))
@@ -55,6 +55,13 @@ def peso(n):
 
 # ---------------------------------------------------------------- utilidades
 def py(*a): return [sys.executable, '-u'] + [str(x) for x in a]
+
+def voces_163(D):
+    """Rev 2.9.3: VOCES.DAT con la voz 0x163 (la respuesta a la bocina, de HC.PAK); los de antes se rehacen"""
+    try:
+        d = open(os.path.join(D, 'VOCES.DAT'), 'rb').read(); n, om = struct.unpack_from('<2I', d, 4)
+        return any(struct.unpack_from('<H', d, om + 20 * k)[0] == 0x163 for k in range(n))
+    except (OSError, struct.error): return False
 
 def hay(D, *fs): return all(os.path.isfile(os.path.join(D, f)) and os.path.getsize(os.path.join(D, f)) > 0 for f in fs)
 
@@ -253,7 +260,7 @@ def regenera(iso, D, W, jobs=4, informe=print):
         if not hay(D, 'COCHES.DAT') and not hay(os.path.join(W, 'coche'), 'COCHE%02d.DAT' % k): falta.append('coche%d' % k)
     for f, n in (('MENU.DAT', 'menu'), ('HUD.DAT', 'hud'), ('VMU.DAT', 'vmu'), ('MODOV.DAT', 'modov')):
         if not hay(D, f): falta.append(n)
-    if not hay(D, 'SFX.DAT', 'VOCES.DAT', 'VOCESC.DAT'): falta.append('sonido')
+    if not hay(D, 'SFX.DAT', 'VOCES.DAT', 'VOCESC.DAT') or not voces_163(D): falta.append('sonido')
     falta += ['mus%d' % k for k in MUSICA if not hay(D, 'MUS%d.ADP' % k)]
     for l in C.saca(py(os.path.join(TOOLS, 'regenera.py'), '--interno', 'segs', iso)).split():
         ti, n = l.split(':')
