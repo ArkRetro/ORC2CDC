@@ -407,6 +407,7 @@ int menu_guarda_vmu(void) { return vmu_guarda(); }
 typedef struct { int u; float c; int ini, fin, modo; } anim_t;
 enum { F_ENTRA, F_QUIETO, F_SALE };
 static anim_t a_cab, a_sel, a_aux, a_radio, a_ayuda, a_tarj, a_fl_d, a_fl_i, a_ed, a_ed_t, a_barra;
+static void eq_dibuja(float z);                             /* ecualizador de la radio (Rev 2.9.3) */
 static int pant = -1, fase, t, sig, inact, t_bloq, entra_atras, barra_ant = -1, cargando, t_carga;
 enum { G_NADA, G_PIDE, G_BIEN, G_MAL };
 static int g_est, g_t;                                      /* guardar con Y (g_paso) */
@@ -2853,6 +2854,7 @@ void menu_dibuja(void)
         break;
     case P_MUSICA:
         an_dibuja(&a_radio, 0, 1, 4, 0);
+        if (fase != F_SALE && an_hecho(&a_radio) && a_radio.c >= 25.0f) eq_dibuja(4.2f);   /* (Rev 2.9.3) */
         an_dibuja(&a_ayuda, 0, a_sal, 4.5f, 0);
         if (!cargando) {                                    /* (la lista nueva aun sin VRAM: sin carrusel) */
             an_dibuja(&a_sel, sacude, a_sal, 3, 0);
@@ -2993,6 +2995,28 @@ static void pz_rect(float x, float y, float w, float h, uint32_t argb, float z)
         v.flags = k == 3 ? PVR_CMD_VERTEX_EOL : PVR_CMD_VERTEX;
         v.x = x + ((k & 1) ? w : 0); v.y = y + ((k & 2) ? h : 0);
         pvr_prim(&v, sizeof v);
+    }
+}
+/* Rev 2.9.3 (pedido del usuario, con un video del original: "la radio ... tiene un ecualizador que en el original
+   tiene animacion y en el port no"). DESVIACION: la escena de la radio del PS2 (0x4400A7) es una sola pieza quieta y ni
+   ella ni los titulos (0x44002E..0x440030) animan el ecualizador; el video (otra version) enciende la rejilla de
+   puntos apagados que lleva la radio: 20 columnas de 3 px cada 4 desde x = 267 y 5 filas de 1 px cada 2 desde y = 252
+   (medidas en la escena), en el azul de los titulos (66, 150, 204). Alturas al azar, mas altas en los graves, que
+   suben de golpe y bajan poco a poco */
+static void eq_dibuja(float z)
+{
+    static float h[20]; static int t;
+    int c, f;
+    if ((t++ & 3) == 0)
+        for (c = 0; c < 20; c++) {
+            float base = 4.2f - c * 0.12f, o = base * (0.35f + (rand() % 1000) * 0.00065f);
+            if (o > h[c]) h[c] = o;
+        }
+    for (c = 0; c < 20; c++) {
+        int n = (int)(h[c] + 0.5f);
+        if (n > 5) n = 5;
+        for (f = 0; f < n; f++) pz_rect(267.0f + 4 * c, 260.0f - 2 * f, 3.0f, 1.0f, 0xFF4296CC, z);
+        h[c] -= 0.18f; if (h[c] < 0) h[c] = 0;
     }
 }
 /* ventana (PROVISIONAL, ver arriba) con las medidas de 48C5F0: cuerpo claro, cabecera de 26, pie de 16 y franja de
