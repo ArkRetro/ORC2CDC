@@ -11,6 +11,7 @@ typedef struct {
     int   contacto;         /* 1 si en este cuadro ha chocado con otro coche (car+4 & 0x4000000)            */
     float en_etapa;         /* posiciones de carretera recorridas en la etapa actual (car+0x260 - car+0x25E) */
     int   zona;             /* nivel de la etapa actual en el arbol del curso (0..4; 44C940)                */
+    int   susto;            /* Rev 2.9.3: 1 si en este paso ha pasado rozando un coche del trafico deprisa  */
 } voces_coche_t;
 
 int  voces_inicia(void);            /* despues de sfx_inicia: carga VOCES.DAT; 0 = bien */
@@ -19,6 +20,7 @@ void voces_salida(void);            /* modo GAME del original (empieza a contar 
 void voces_checkpoint(void);        /* EXTEND TIME: efecto, voz y comentario de la zona nueva */
 void voces_paso(const voces_coche_t *c);   /* un paso de logica de la carrera (60 por segundo) */
 void voces_tiempo(int cuadros);     /* un paso de logica: aviso de poco tiempo (cuadros que quedan) */
+void voces_bocina(void);            /* Rev 2.9.3: la bocina (X) en el modo OutRun: voz 0x163 */
 void voces_meta(void);              /* GOAL */
 void voces_tiempo_fuera(void);      /* TIME OVER */
 void voces_para(void);

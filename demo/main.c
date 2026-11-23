@@ -2643,6 +2643,7 @@ static float lejos_guion = LEJOS_MAX;                           /* el lejano del
 #endif
 static int manual_, pide_cambio, auto_piloto, sfx_ok, golpe_cd;
 static int voz_ok, voz_contacto;                              /* voces.c; contacto con impulso en este paso */
+static int voz_susto, bocina_x;                                 /* Rev 2.9.3: paso rozando el trafico; X pulsado (bocina) */
 static or2_param_t fpar; static or2_coche_t fis; static int fis_ok, columna = -1;
 /* mando del jugador para or2_volante (volante del original: eje -128..127, cruceta, etapa para CheckWanderer); usa = 1
    solo en el paso de carrera con el jugador al mando */
@@ -10165,6 +10166,8 @@ static void pt_paso(void)
         clase = trc_ok ? trc[t->modelo].clase : 3;
         if (clase == 5 && py - (int)floorf(t->c.s / m_pos) < 2) continue;
         t->pt_marca |= PT_PASADO; pt_pasados++;               /* 84DF0C++ antes de mirar +C5C 0x800000 */
+        /* Rev 2.9.3: rozandolo deprisa (centros a menos de 2,4 m de lado, mas de 120 km/h): la voz de asustada */
+        if (fabsf(t->c.x - yo.x) < 2.4f && yo.v > 33.3f) voz_susto = 1;
         if (t->pt_marca & PT_SIN) continue;
         if (clase == 5) { pts = (t->pt_marca & PT_MITAD) ? 12500 : t->b72 > 0 ? 50000 : 25000; tipo = 3; }
         else {
@@ -13073,9 +13076,19 @@ int main(int argc, char **argv)
             /* pedales: volumenes 1 y 2 del original, 0..255 tal cual (el original lee la presion de los botones
                sin curva); A y B/X a fondo */
             gas = st->rtrig / 255.0f; if (b & CONT_A) gas = 1;
-            freno = st->ltrig / 255.0f; if (b & (CONT_B | CONT_X)) freno = 1;
+            freno = st->ltrig / 255.0f; if (b & CONT_B) freno = 1;
+            /* Rev 2.9.3 (pedido: "claxon en X quitando el freno de ese boton"): X es la bocina (DESVIACION: el PS2 no
+               tiene; en el PC es el boton 2). Antes X frenaba como B */
+            bocina_x = (b & CONT_X) != 0;
         }
         mando.nivel = etapa_n;
+        {   /* la bocina: suena mientras X en la carrera (no en pausa ni con el piloto); en el modo OutRun la acompanante
+               contesta (489A90 del PC: [82F23C] -> voz 0x163) al pulsarla */
+            static int ant_x; int on = bocina_x && !pausa && !auto_ && (estado == CUENTA || estado == CARRERA);
+            sfx_bocina(on);
+            if (on && !ant_x && voz_ok && estado == CARRERA && variante == 1) voces_bocina();
+            ant_x = on;
+        }
 
         /* estados (una vez por paso de logica) */
         for (paso = 0; paso < pasos; paso++) {
@@ -13453,10 +13466,10 @@ int main(int argc, char **argv)
                     voces_coche_t vc;
                     vc.derrape = yo.t_derrape != 0; vc.choque = fis_ok ? fis.choque : 0;
                     vc.t_choque = fis_ok ? fis.t_choque : 0; vc.t_recup = fis_ok ? fis.t_recup : 0;
-                    vc.contacto = voz_contacto; vc.en_etapa = (yo.s - s_etapa) / m_pos; vc.zona = curso[cur_nodo].nivel;
+                    vc.contacto = voz_contacto; vc.en_etapa = (yo.s - s_etapa) / m_pos; vc.zona = curso[cur_nodo].nivel; vc.susto = voz_susto;
                     voces_paso(&vc); voces_tiempo(tim_cuadros);
                 }
-                voz_contacto = 0;
+                voz_contacto = 0; voz_susto = 0;
                 if (crono < 0x57e3f) crono++; else crono = 0x57e3f;   /* 7D39DC: tope 0x57E3F (race_manager 4508xx) */
                 gh_graba();                                     /* el fantasma de la CONTRARRELOJ */
 #ifdef DIAG_CONGELA

@@ -21,7 +21,8 @@
      licencia; en OUTRUN2SP el 9 en las variantes 1, 3, 4 y 5 y el 6 en el resto). Las voces son las mismas para
      todas (SPANISH: 0x11f048 elige el juego de voces por la variante, no por el personaje, y en espanol todos los
      juegos de 0x3527a0 dan SPANISH).
-     Las de asustada y trompo solo las dice en Coast 2 Coast (variantes 3 y 4): aqui no.
+     Las de asustada y trompo el original solo las dice en Coast 2 Coast (variantes 3 y 4); desde la Rev 2.9.3 tambien
+     aqui (DESVIACION pedida), con la bocina (0x163) y 0x71 / 0x78 en el sorteo de los derrapes.
    - INFARTO (variante 2, voces_modo(1)): sin los comentarios de zona (488BD0 solo OutRun) ni de derrapes (488C90
      solo 1, 3, 4); las listas de aterrizaje / salto del INFARTO (PC 5C0FB0 / 5C0FD0 = PS2 0x40ea30 / 0x40ea40, delante
      de sus listas de movimientos 0x40ea48 / 0x40ea88 como las del OutRun 0x40eb10 / 0x40eb20 / 0x40eb28) son
@@ -88,9 +89,14 @@ static void toca_cola(void)
     cola_fin = (cola_fin + 1) & 7;
 }
 
+/* Rev 2.9.3 (pedido: "todas las voces de la chica"): 0x71 y 0x78 estan en ORC.PAK (comentarios de la misma serie que
+   los de derrapes 0x6e..0x77) pero ninguna tabla del PS2 las usa. DESVIACION: entran en el sorteo de los derrapes
+   desde el 14 (la lista de varios al azar), con el mismo retardo y prioridad */
+static const com_t extra_derr[2] = { { 0x71, 120, 0, 0, -1, 14, -1 }, { 0x78, 120, 0, 0, -1, 14, -1 } };
 static void pon_pendiente(void)
 {
     if (pend_n <= 0) return;
+    if (pend_n >= 2 && pend_n <= 6) { pend[pend_n++] = &extra_derr[0]; pend[pend_n++] = &extra_derr[1]; }
     pon_cola(pend[rand() % pend_n]);
     pend_n = 0;
 }
@@ -115,6 +121,14 @@ void voces_checkpoint(void)
     checkpoint = 1;
 }
 
+/* Rev 2.9.3 (pedido: claxon en X): 489A90 del PC en el modo OutRun ([82F23C], la bocina): la voz 0x163 si no espera
+   otra reaccion (+80 <= 0) y 90 pasos de espera. El PS2 no tiene bocina; la voz 0x163 esta en su banco HC.PAK (la
+   anade tools/conv_sonido.py a VOCES.DAT). En el INFARTO, como el PC, nada */
+void voces_bocina(void)
+{
+    if (!listo || infarto) return;
+    if (espera <= 0) { sfx_voz(0x163); espera = 90; }
+}
 void voces_meta(void) { if (listo) sfx_voz(0x16b); }
 void voces_tiempo_fuera(void) { if (listo) sfx_voz(0x155); }
 void voces_para(void) { if (listo) sfx_voz_calla(); }
@@ -152,6 +166,16 @@ static void reacciona(const voces_coche_t *c)
         reaccion = R_SALTO; sfx_voz(T->salto[turno(&turno_salto, T->n_salto)]);
     } else reaccion = R_NADA;
     if (c->contacto && c->t_choque > 0.0f && espera <= 0) { sfx_voz(T->choque[rand() % 5]); espera = 90; }
+    /* Rev 2.9.3 (pedido: "todas las voces de la chica"): asustada (5C1540, alternando) y trompo (5C1548, alternando,
+       150 pasos de espera) que el original solo dice en COAST 2 COAST (variantes 3 y 4). DESVIACION: tambien aqui.
+       Asustada: al pasar muy cerca de un coche del trafico deprisa (la DC no tiene car+4 & 0x1000: lo marca demo/main.c);
+       trompo: al empezar un choque del estado 7 (el trompo de 48A6BC) */
+    {   static int ant_trompo, alt_a, alt_t;
+        int trompo = c->t_choque > 0.0f && c->choque == 7;
+        if (c->susto && c->t_choque <= 0.0f && espera <= 0) { sfx_voz(T->asustada[alt_a]); alt_a ^= 1; espera = 90; }
+        if (trompo && !ant_trompo && espera <= 0) { sfx_voz(T->trompo[alt_t]); alt_t ^= 1; espera = 150; }
+        ant_trompo = trompo;
+    }
 }
 
 void voces_paso(const voces_coche_t *c)
