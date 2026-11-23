@@ -47,6 +47,7 @@
 #include "vmuesc.h"
 #include "fsp.h"
 #include "sprani.h"
+#include "../demo/nombre.h"
 
 void (*menu_gancho)(int pantalla, int evento, int valor);
 void (*menu_suelta_coche)(void);
@@ -63,7 +64,7 @@ static const char *const VNOM[NV] = { "TITULO", "COMUN", "MENU", "MODO", "COCHE"
                                       "MUSICA2" };
 /* pantallas del menu (las de menu.h, MP_*) y la VRAM que necesita cada una */
 enum { P_TITULO, P_MENU, P_MODO, P_COCHE, P_CAMBIO, P_MUSICA, P_LICENCIA, P_EDITOR, P_OPCIONES, P_RANKING, P_MULTI,
-       P_C2C, P_SALON, P_TABLERO, NP };                     /* P_C2C: categorias y mapa de COAST 2 COAST (C2C.DAT); P_SALON:
+       P_C2C, P_SALON, P_TABLERO, P_RKLISTA, NP };          /* P_RKLISTA: la consulta de RANKINGS (Rev 2.9.3) */                     /* P_C2C: categorias y mapa de COAST 2 COAST (C2C.DAT); P_SALON:
                                                                el salon (SALON.DAT); P_TABLERO: los tableros de cursos
                                                                de INFARTO / CONTRARRELOJ (TABLERO.DAT) */
 #define VB(v) (1 << (v))
@@ -71,7 +72,7 @@ static const int MASCARA[NP] = {
     VB(V_TITULO), VB(V_COMUN) | VB(V_MENU), VB(V_COMUN) | VB(V_MODO), VB(V_COMUN) | VB(V_COCHE),
     VB(V_COMUN) | VB(V_COCHE) | VB(V_CAMBIO), VB(V_COMUN) | VB(V_MUSICA), VB(V_COMUN) | VB(V_LICENCIA),
     VB(V_COMUN) | VB(V_LICENCIA), VB(V_COMUN) | VB(V_OPCIONES), VB(V_COMUN) | VB(V_RANKING), VB(V_COMUN) | VB(V_MULTI),
-    VB(V_COMUN) | VB(V_MODO), VB(V_COMUN) | VB(V_MODO), VB(V_COMUN) | VB(V_MODO) };
+    VB(V_COMUN) | VB(V_MODO), VB(V_COMUN) | VB(V_MODO), VB(V_COMUN) | VB(V_MODO), VB(V_COMUN) };
 
 enum { U_TFONDO, U_TLOGO, U_TSTART, U_FONDO, U_CABMENU, U_PRINC, U_CABMODO, U_UNJUG, U_CABCOCHE, U_INFO, U_INFO_T,
        U_CAND, U_CAMBIO, U_RADIO, U_AYUDA, U_L0, U_T0, U_LISTA, U_MCAND, U_CABMUSICA,
@@ -291,8 +292,16 @@ static void vmu_lee(void)
             memcpy(&ver, d + 4, 4);
             memcpy(&lic_sel, d + 8, 4);
             memcpy(lic, d + 12, sizeof lic);
-            if (ver >= 2 && o + 12 + (int)sizeof lic + 4 + RKSP_TAM <= sz && !memcmp(d + 12 + sizeof lic, "RKSP", 4))
-                rksp_pon(d + 12 + sizeof lic + 4);              /* version 2: los rankings de OUTRUN2SP */
+            {   /* version 2: 'RKSP' y los rankings de OUTRUN2SP; version 3 (Rev 2.9.3): bloques con su marca, 'RKSP' el
+                   primero (las versiones de antes lo siguen leyendo) y 'RKUJ' los records de UN JUGADOR */
+                int q = o + 12 + (int)sizeof lic;
+                while (ver >= 2 && q + 4 + RKSP_TAM <= sz) {
+                    if (!memcmp(b + q, "RKSP", 4)) rksp_pon(b + q + 4);
+                    else if (!memcmp(b + q, "RKUJ", 4)) rkuj_pon(b + q + 4);
+                    else break;
+                    q += 4 + RKSP_TAM;
+                }
+            }
             if (lic_sel < -1 || lic_sel >= N_LIC || (lic_sel >= 0 && !lic_usada(lic_sel))) lic_sel = -1;
             vmu_ok = 1;
         }
@@ -368,11 +377,13 @@ int menu_vmu_lee(const char *nombre, uint8_t *buf, int cap)
 /* el fichero empaquetado (cabecera VMS + datos), malloc; NULL sin memoria */
 static uint8_t *vmu_prepara(int *n)
 {
-    vmu_pkg_t pkg; uint8_t *d, *out = NULL; int v = rksp_hay() ? 2 : 1;
-    uint32_t tam = 12 + sizeof lic + (v == 2 ? 4 + RKSP_TAM : 0);
+    vmu_pkg_t pkg; uint8_t *d, *out = NULL; int v = rkuj_hay() ? 3 : rksp_hay() ? 2 : 1;
+    uint32_t tam = 12 + sizeof lic + (rksp_hay() ? 4 + RKSP_TAM : 0) + (rkuj_hay() ? 4 + RKSP_TAM : 0), q;
     d = malloc(tam); if (!d) return NULL;
     memcpy(d, "OR2L", 4); memcpy(d + 4, &v, 4); memcpy(d + 8, &lic_sel, 4); memcpy(d + 12, lic, sizeof lic);
-    if (v == 2) { memcpy(d + 12 + sizeof lic, "RKSP", 4); memcpy(d + 16 + sizeof lic, rksp_tablas(), RKSP_TAM); }
+    q = 12 + sizeof lic;
+    if (rksp_hay()) { memcpy(d + q, "RKSP", 4); memcpy(d + q + 4, rksp_tablas(), RKSP_TAM); q += 4 + RKSP_TAM; }
+    if (rkuj_hay()) { memcpy(d + q, "RKUJ", 4); memcpy(d + q + 4, rkuj_tablas(), RKSP_TAM); }   /* (version 3) */
     memset(&pkg, 0, sizeof pkg);
     vmu_cabecera(&pkg);                                     /* descripciones, icono y eyecatch (comun/vmu.c) */
     pkg.data_len = tam; pkg.data = d;
@@ -590,6 +601,11 @@ static void tb_entra(void);
 static int tb_control(unsigned n, int atiende);
 static void tb_dibuja(void);
 static int tb_activo(void);
+static int rk_abre(void);
+static void rk_cierra(void);
+static void rk_control(unsigned n, int r1);
+static void rk_dibuja(void);
+static int rk_set;                                          /* 0 OUTRUN2SP, 1 UN JUGADOR */
 static int tb_sig;
 static uint32_t tb_bits;
 typedef struct { int desbl, modelo, bit, ficha; int8_t color, col[8]; } sa_reg_t;
@@ -927,7 +943,9 @@ static void entra(int p, int atras)
     if (p != P_C2C) c2_cierra();
     if (p != P_SALON) sa_cierra();
     if (p != P_TABLERO) tb_cierra();
-    if ((p == P_C2C) != (pant == P_C2C) || (p == P_SALON) != (pant == P_SALON) || (p == P_TABLERO) != (pant == P_TABLERO))
+    if (p != P_RKLISTA) rk_cierra();
+    if ((p == P_C2C) != (pant == P_C2C) || (p == P_SALON) != (pant == P_SALON) || (p == P_TABLERO) != (pant == P_TABLERO) ||
+        (p == P_RKLISTA) != (pant == P_RKLISTA))
         menu_libera_todo();                                 /* (igual el salon y los tableros) */
     cargando = !asegura(mascara(p)); t_carga = 0;
     barra_ant = pant >= 0 ? barra(pant) : -1;
@@ -944,6 +962,10 @@ static void entra(int p, int atras)
     case P_SALON:
         if (sa_abre()) { entra(P_MODO, 1); bloqueado(); return; }   /* (sin SALON.DAT o sin el hueco) */
         sa_entra();
+        break;
+    case P_RKLISTA:
+        if (rk_abre()) { entra(P_RANKING, 1); bloqueado(); return; }   /* (sin RANKSP.DAT o sin el hueco) */
+        fase = F_QUIETO;
         break;
     case P_TABLERO:
         if (tb_abre()) { entra(P_MODO, 1); bloqueado(); return; }   /* (sin TABLERO.DAT o sin el hueco) */
@@ -1336,7 +1358,10 @@ static void control(unsigned n)
         if (!an_hecho(&a_sel)) break;
         carrusel(n, pant == P_RANKING ? &c_rank : &c_multi, pant == P_RANKING ? 3 : 2, izq, der);
         if (izq || der) break;
-        if (ok) bloqueado();                                /* sin datos de ranking ni red */
+        /* Rev 2.9.3: UN JUGADOR y OUTRUN2SP a la consulta de sus tablas (DESVIACION: el original pasa por el carrusel
+           de modo 0x440099 / 0x44009a, pantalla 0x33, y la lista 0x267120 de la pantalla 0x30; aqui la tabla del tablero
+           0x200398 de OUTRUN2SP); MULTIJUGADOR sin red */
+        if (ok) { if (c_rank < 2) { rk_set = c_rank == 0; sale(P_RKLISTA, 1); } else bloqueado(); }
         else if (atras) sale(P_MENU, 0);
         break;
     case P_COCHE: {
@@ -1466,6 +1491,7 @@ int menu_paso(unsigned n)
         if (r == 1) sale(P_MODO, 0);
         else if (r == 2) a_licencia(P_SALON);
     }
+    if (pant == P_RKLISTA && fase != F_SALE && !cargando) rk_control(n, r1_nuevo);
     if (pant == P_TABLERO && tb_activo() && fase != F_SALE) {
         int r = tb_control(n, fase == F_QUIETO && !cargando);
         if (r == 1) sale(P_COCHE, 1);
@@ -2762,6 +2788,7 @@ void menu_dibuja(void)
     case P_C2C: c2_dibuja(); break;
     case P_SALON: sa_dibuja(); break;
     case P_TABLERO: tb_dibuja(); break;
+    case P_RKLISTA: rk_dibuja(); break;
     case P_COCHE:
         an_dibuja(&a_sel, 0, a_ent * a_sal, 4, 0);
         if (c_cursor == 2 && ficha_de(c_modelo(2)) == 7) escudo_taxi(a_ent * a_sal, 7.0f);
@@ -3099,3 +3126,62 @@ void menu_pausa_dibuja(void)
     }
     u_fuente = U_FUENTE;
 }
+
+/* ---------------------------------------------------------------- RANKINGS (Rev 2.9.3)
+   La consulta de las tablas: OUTRUN2SP (rksp, las de la entrada de nombre del juego de recreativa) y UN JUGADOR (rkuj,
+   las que guarda demo/main.c rk_un_jugador). Se ensenan con el tablero de la entrada de nombre (demo/nombre.c, 0x200398
+   con [0x424] = 1 y sin fila del jugador: lo que hace la demo de atraccion con 0x1ffa58) sobre el fondo de la meta.
+   Mandos: izquierda / derecha la meta A..E, arriba / abajo la pagina (1..5 / 6..10), R el modo (OUTRUN -> INFARTO ->
+   CONTRARRELOJ), Y el juego (OutRun 2 / OutRun 2 SP), X el cambio (AT / MT: las tablas de tiempo van por cambio), B
+   vuelve. Las tablas de cada cosa se abren de nuevo al cambiar (RANKSP.DAT, NOM5x.DAT del fondo y NOMTX.DAT, ~200 KB,
+   en el hueco de los tableros). DESVIACION: el original lo ensena con la lista del frontal 0x267120 (sin portar). */
+static int rk_v = 1, rk_p = 1, rk_c, rk_a, rk_pag, rk_abierto;
+static void *rk_ram;
+static int rk_carga(void)
+{
+    nombre_t d;
+    memset(&d, 0, sizeof d);
+    d.consulta = rk_set ? 2 : 1; d.variante = rk_v; d.preset = rk_p; d.cuenta = rk_c; d.registro4 = 10 + rk_c;
+    d.manual = rk_a; d.config = 0; d.ruta = 0; d.ram = rk_ram; d.ram_cap = TABLERO_RAM;
+    if (nombre_entra(&d)) return -1;
+    nombre_pagina(rk_pag);
+    dbglog(DBG_INFO, "RANKING: consulta %s, variante %d preset %d meta %c cambio %s, VRAM libre %uK\n", rk_set ? "UN JUGADOR" : "OUTRUN2SP",
+           rk_v, rk_p, 'A' + rk_c, rk_a ? "MT" : "AT", (unsigned)(pvr_mem_available() >> 10));
+    return 0;
+}
+static int rk_abre(void)
+{
+    if (rk_abierto) return 0;
+    if (!(rk_ram = menu_hueco ? menu_hueco(TABLERO_RAM) : NULL)) { dbglog(DBG_ERROR, "RANKING: sin el hueco\n"); return -1; }
+    spr_suelta_todas();
+    rk_pag = 0;
+    if (rk_carga()) { menu_hueco(0); rk_ram = NULL; return -1; }
+    rk_abierto = 1;
+    return 0;
+}
+static void rk_cierra(void)
+{
+    if (!rk_abierto) return;
+    nombre_sale(); rk_abierto = 0;
+    if (menu_hueco) menu_hueco(0);
+    rk_ram = NULL;
+}
+static void rk_control(unsigned n, int r1)
+{
+    int cambia = 0;
+    if (!rk_abierto) return;
+    nombre_paso(0);                                         /* (spr_paso: las escenas de la tabla) */
+    if (n & CONT_B) { sale(P_RANKING, 0); return; }
+    if (n & CONT_DPAD_LEFT) { rk_c = (rk_c + 4) % 5; cambia = 1; }
+    if (n & CONT_DPAD_RIGHT) { rk_c = (rk_c + 1) % 5; cambia = 1; }
+    if (r1) { rk_v = rk_v == 1 ? 2 : rk_v == 2 ? 0 : 1; cambia = 1; }
+    if (n & CONT_Y) { rk_p ^= 1; cambia = 1; }
+    if (n & CONT_X) { rk_a ^= 1; cambia = rk_v == 0; }
+    if (n & (CONT_DPAD_UP | CONT_DPAD_DOWN)) { rk_pag ^= 1; nombre_pagina(rk_pag); sfx_menu(SFX_CURSOR); }
+    if (cambia) {
+        sfx_menu(SFX_CURSOR);
+        pvr_wait_ready();
+        if (rk_carga()) { dbglog(DBG_ERROR, "RANKING: no se pudo abrir la tabla\n"); rk_cierra(); sale(P_RANKING, 0); }
+    }
+}
+static void rk_dibuja(void) { if (rk_abierto) nombre_dibuja(3.0f); }

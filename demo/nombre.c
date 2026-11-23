@@ -99,9 +99,11 @@ static int lee_nom1(const uint8_t *b, uint32_t tam)
 static float lf(const uint32_t *l, int i) { float f; memcpy(&f, l + i, 4); return f; }
 
 /* 0x2012a8 / 0x2013e8 / 0x201528 (PC 4B2080 / 4B2150 / 4B2220): las 10 filas de la tabla */
+static int consulta;                                    /* Rev 2.9.3: la consulta de RANKINGS (sin registro del jugador) */
+static const uint8_t *tablas_de;                        /* las tablas que se ensenan (rksp o, en la consulta, rkuj) */
 static void filas(uint32_t t, int tipo)
 {
-    int i; const uint8_t *r = rksp_tablas() + t;
+    int i; const uint8_t *r = (tablas_de ? tablas_de : rksp_tablas()) + t;
     for (i = 0; i < 10; i++, r += 16) {
         uint32_t r0 = rd32(r), r8 = rd32(r + 8); fila_t *f = fila + i;
         memset(f, 0, sizeof *f);
@@ -120,6 +122,7 @@ int nombre_entra(const nombre_t *d)
 {
     uint32_t tam, curso, t; const uint8_t *x; uint8_t rec[16]; char n[16]; int ruta, sel_t; fila_t *e;
     nombre_sale();
+    consulta = d->consulta; tablas_de = d->consulta == 2 ? rkuj_tablas() : NULL;
     /* las tablas de los tres bancos, una detras de otra en la RAM fija (nunca en el monton: 86 + 110..113 + 6 KB, que
        quedarian bajo lo que se pida hasta volver al frontal); lo que sobra, para los sectores de las subidas de texturas */
     r_ram = d->ram; r_cap = d->ram ? d->ram_cap : 0; r_o = 0;
@@ -161,7 +164,7 @@ int nombre_entra(const nombre_t *d)
         r8 = (r8 & 0xfff9ffffu) | (uint32_t)(cambio & 1) << 17 | (uint32_t)(conf & 1) << 18;
         memcpy(rec, &r0, 4); memcpy(rec + 4, &d->tiempo, 4); memcpy(rec + 8, &r8, 4); memset(rec + 11, 0, 5);
     }
-    puesto = variante == 0 && d->tiempo == 0 ? 10 : rksp_inserta(rec, variante, preset, cuenta, cambio, conf);
+    puesto = consulta || (variante == 0 && d->tiempo == 0) ? 10 : rksp_inserta(rec, variante, preset, cuenta, cambio, conf);
     if (!(puesto < 10)) puesto = -1;
     k34c = (int)t34c[(cambio + conf * 2 + variante * 4) & 15];
     t = rksp_tabla(variante, preset, cuenta, cambio, conf);
@@ -173,6 +176,9 @@ int nombre_entra(const nombre_t *d)
     e->coche = (int8_t)d->modelo; e->score = d->puntos; e->cuenta = variante == 2 ? (int16_t)d->corazones : 0;
     e->ruta = ruta; e->tipo = variante; e->tiempo = d->tiempo; e->cambio = (int8_t)cambio; e->conf = (int8_t)conf;
     pagina = puesto < 0 ? 5 : puesto / 5 * 5;
+    if (consulta) { pagina = 0; fj.tipo = -1; cuenta = linea = d->cuenta; k34c = (int)t34c[(cambio + conf * 2 + variante * 4) & 15];
+                    t = rksp_tabla(variante, preset, cuenta, cambio, conf);
+                    if (variante >= 0 && variante <= 2) filas(t, variante); }
     h_tit = h_tab = h_puesto = -1;
     primero = 1; est = 0; hecho = 0; voz = 1;
     sel_t = k34c + preset * 6;
@@ -229,6 +235,7 @@ int nombre_paso(uint32_t nuevo)
 {
     if (!activo) return 0;
     spr_paso();
+    if (consulta) return 0;                             /* (la consulta la lleva comun/menu.c) */
     if (voz) {                                          /* 0x1fcd64: 0x80A2 sin sonar y el idioma 0 -> 0x158 */
         voz = 0;
         if (sfx_voces_idioma() && !strcmp(sfx_voces_idioma(), "ENGLISHC")) sfx_menu(0x158);
@@ -330,6 +337,7 @@ static int tablero(void)                                /* 0x200398 con [0x424] 
     L = lay[pagina < 5 ? 0 : 1]; base = pagina / 5 * 5;
     for (i = 0; i < 5; i++) {
         const fila_t *f = fila + base + (4 - i); const uint32_t *a = L + i * 15; char b[8]; int k;
+        if (consulta && !f->nom[0]) continue;           /* (consulta: fila vacia de los records de UN JUGADOR) */
         for (k = 0; k < 6 && f->nom[k]; k++) b[k] = (char)filtro[(uint8_t)f->nom[k]];   /* 0x200308(.., 6) */
         b[k] = 0;
         texto(0, (int)lf(a, 1), (int)lf(a, 2), 0xffff00, b);
@@ -338,7 +346,8 @@ static int tablero(void)                                /* 0x200398 con [0x424] 
             sprintf(nb, "%2d", pagina + i + 1); cifras(3, nb, (int)lf(m, 11), (int)lf(m, 12), 3);
             spr_inmediata(0x3d0026, lf(m, 11) + 46.0f, lf(m, 12), 3, 10);
         }
-        spr_inmediata(0x3d0024, lf(a, 5), lf(a, 6), 3, f->coche >= 0 && f->coche < 10 ? (int)f_coche[(int)f->coche] : 0);
+        if (!consulta || (f->coche >= 0 && f->coche < 10))   /* (consulta: sin icono para los coches de fuera de OUTRUN2SP) */
+            spr_inmediata(0x3d0024, lf(a, 5), lf(a, 6), 3, f->coche >= 0 && f->coche < 10 ? (int)f_coche[(int)f->coche] : 0);
         spr_inmediata(0x3d0027, lf(a, 3), lf(a, 4), 3, f->cambio);
         marcas((int)lf(a, 7), (int)lf(a, 8), 3, f->ruta, preset == 2 || preset == 3 ? 0x3d0011 : 0x3d0014);
         if (f->tipo == 0) {
@@ -381,6 +390,9 @@ void nombre_dibuja(float z)
     spr_dibuja(5, SPR_CAPAS, hudd_z(), 0);
 }
 
+/* consulta: la pagina (0: puestos 1..5, 5: 6..10) */
+void nombre_pagina(int p) { if (activo && consulta) pagina = p ? 5 : 0; }
+int nombre_activo(void) { return activo; }
 void nombre_sale(void)                                  /* 0x1fd528 (4B0950: 428600) y 49AAE0 */
 {
     spr_suelta_todas();

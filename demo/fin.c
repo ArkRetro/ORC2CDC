@@ -306,6 +306,7 @@ static void sp_siguiente(void)                          /* 1ba7f0..1ba848 (PC re
     /* 450240 = 1 o (variante 0 y record [0x5a2030]: 47EF30, los records de la Contrarreloj, SIN PORTAR) -> 26; si no 27 */
     if (como == FIN_TIEMPO) {
         nombre_t n;
+        memset(&n, 0, sizeof n);                        /* (consulta = 0: la entrada de nombre) */
         n.variante = sp_d.variante; n.preset = sp_d.preset; n.puntos = sp_d.puntos; n.corazones = sp_d.corazones;
         n.tiempo = 0;                                   /* 451180(0): [0x5c60f0], -1 sin acabar -> 0 (PROBABLE) */
         n.modelo = sp_d.modelo; n.manual = sp_d.manual; n.config = sp_d.config; n.registro4 = sp_d.registro4;
