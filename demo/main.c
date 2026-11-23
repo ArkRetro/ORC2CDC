@@ -6581,12 +6581,57 @@ static void viso_lee(void)
 }
 /* el arbol id (CURSO.DAT; los de la Contrarreloj, 200 + codigo, en CURSOTA.DAT) en curso[]; 0 bien */
 #define CURSO_FICH(id) ((id) >= 200 ? "CURSOTA.DAT" : "CURSO.DAT")
+/* Rev 2.9.3 (el usuario: "en el modo contrarreloj al finalizar etapa el partenon queda encima de la bifurcacion"): la
+   CONTRARRELOJ de una etapa (codigo < 0x3c) es el registro de 44D720 con la union 0 y los hijos 0 / 0 (conv_union.py
+   arbol_ta): con hijos el modelo es el de la bifurcacion, y en las etapas finales (TULI, METR, RUIN, IMPE, CAPE y sus
+   variantes) el decorado de la meta de la etapa (el templo de CAPE) quedaba encima de ella. DESVIACION: en una etapa
+   que en algun arbol es final (hijos -1), su union de meta de ese arbol (la del modo OutRun: meta, sin bifurcacion);
+   la carrera acaba igual en la meta. Buscado en CURSO.DAT y CURSOTA.DAT sin rehacer datos */
+static int ta_meta_busca(const char *fich, int seg, etapa_t *e)
+{
+    uint32_t sz, n0, r, i, m, o, n, k; uint8_t *b = gd_carga(fich, &sz); int ok = 0;
+    if (!b) return 0;
+    if (sz >= 12 && !memcmp(b, "CUR1", 4)) {
+        memcpy(&n0, b + 4, 4); memcpy(&r, b + 8, 4);
+        if (r == sizeof(etapa_t) && 12 + n0 * r <= sz) {
+            for (k = 0; k < n0 && !ok; k++) {
+                const etapa_t *q = (const etapa_t *)(b + 12 + k * r);
+                if (q->seg == seg && q->izq < 0 && q->der < 0) { memcpy(e, q, sizeof *e); ok = 1; }
+            }
+            i = 12 + n0 * r;
+            if (!ok && sz >= i + 8 && !memcmp(b + i, "CURS", 4)) {
+                memcpy(&m, b + i + 4, 4);
+                for (i += 8; m-- && i + 12 <= sz && !ok; i += 12) {
+                    memcpy(&o, b + i + 4, 4); memcpy(&n, b + i + 8, 4);
+                    if (o + n * r > sz) continue;
+                    for (k = 0; k < n && !ok; k++) {
+                        const etapa_t *q = (const etapa_t *)(b + o + k * r);
+                        if (q->seg == seg && q->izq < 0 && q->der < 0) { memcpy(e, q, sizeof *e); ok = 1; }
+                    }
+                }
+            }
+        }
+    }
+    free(b);
+    return ok;
+}
+static void ta_meta_final(void)
+{
+    etapa_t e;
+    if (ncurso != 1 || !(ta_meta_busca("CURSO.DAT", curso[0].seg, &e) || ta_meta_busca("CURSOTA.DAT", curso[0].seg, &e))) return;
+    dbglog(DBG_INFO, "CURSO: Contrarreloj de una etapa final (%.4s): la union de meta BK%02d en vez de BK%02d (bifurcacion)\n",
+           curso[0].zona, e.f_bk, curso[0].f_bk);
+    curso[0].f_bk = e.f_bk; curso[0].f_col = e.f_col; curso[0].meta = e.meta; curso[0].izq = curso[0].der = -1;
+    memcpy(curso[0].bk, e.bk, sizeof e.bk); memcpy(curso[0].rama, e.rama, sizeof e.rama);
+    curso[0].trans_pos = e.trans_pos; curso[0].trans_seg = e.trans_seg; curso[0].trans_m = e.trans_m;
+}
 static int curso_lee_id(int id)
 {
     uint32_t sz, o, n; int r; uint8_t *b = gd_carga(CURSO_FICH(id), &sz);
     if (!b) return -1;
     if ((r = curso_busca(b, sz, id, &o, &n))) { free(b); return r; }
     memcpy(curso, b + o, n * sizeof(etapa_t)); ncurso = n; curso_id = id; free(b);
+    if (id >= 200 && id < 200 + 0x3c) ta_meta_final();           /* (Rev 2.9.3) */
     {   uint8_t seg[CURSO_MAX]; int k;                          /* las tablas de aparicion del trafico de sus etapas */
         for (k = 0; k < ncurso && k < CURSO_MAX; k++) seg[k] = curso[k].seg;
         traf_tap_arbol(seg, ncurso); }
