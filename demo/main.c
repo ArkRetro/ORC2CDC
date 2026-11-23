@@ -31,7 +31,7 @@
 #include "../comun/rival.h"
 #include "../comun/vmu.h"
 #include "../comun/robot.h"
-#include "../comun/shz.h"
+#include "../comun/lbloste.h"
 #include "../comun/modo_video.h"
 #include "camara.h"
 #include "fin.h"
@@ -1353,7 +1353,7 @@ static void carga_espera(void) { while (carga.estado == 1) thd_sleep(5); }
 #define CERCA_PS2 0.1f
 #define LEJOS_PS2 4000.0f
 #ifndef LEJOS_MAX
-#define LEJOS_MAX 3500.0f                                       /* Rev 2.9.2.b (pedido): techo del lejano en toda la demo (el original 4000) */
+#define LEJOS_MAX 3200.0f                                       /* Rev 2.9.2.c (pedido): techo del lejano en toda la demo (2.9.2.b: 3500; el original 4000) */
 #endif
 static float ojo[3], der[3], arr[3], ade[3], fx = 320.0f / 0.75f, cerca = CERCA_PS2, lejos = LEJOS_MAX;
 static matrix_t vista __attribute__((aligned(32))), vista_cielo __attribute__((aligned(32))),
@@ -8013,9 +8013,9 @@ static int uni_regs(void)
     lado = etapa_n >= 1 && etapa_n <= 5 ? rama_nivel[etapa_n - 1] : 2;   /* bp = -1: 451350(nivel - 1) */
     return lado == 0 || lado == 1 ? 2 << lado : 0;
 }
-#if defined(CON_SH4ZAM) && !defined(SIN_SHZ_NODOS)
-#define SHZ_NODOS 1                                             /* nodos_visibles con FTRV (SH4ZAM) */
-static shz_mat4x4_t nv_xm;                                      /* la XMTRX de quien llama */
+#if defined(CON_LBLOSTE) && !defined(SIN_LB_NODOS)
+#define LB_NODOS 1                                              /* nodos_visibles con FTRV (Little Bloste) */
+static float nv_xm[16] __attribute__((aligned(8)));             /* la XMTRX de quien llama */
 #endif
 #ifdef DIAG_SIGV
 static float dg_sig_r; static int dg_sig_n, dg_sig_c;
@@ -8067,20 +8067,21 @@ static void nodos_visibles(modelo_t *mo)
     o0 = ojo[0]; o1 = ojo[1]; o2 = ojo[2]; e0 = ade[0]; e1 = ade[1]; e2 = ade[2];
     d0 = der[0]; d1 = der[1]; d2 = der[2]; a0 = arr[0]; a1 = arr[1]; a2 = arr[2]; cer = cerca; lej = lejos;
     pvs_on_ = mo->pvs_on;                                       /* (despues de pvs_paso) */
-#ifdef SHZ_NODOS
-    /* FTRV (SH4ZAM): las filas der, arr y ade por (dx, dy, dz, 0) dan xv, yv y zv de una vez (las mismas sumas; Flycast
-       las hace en doble y redondea al final). La XMTRX de quien llama se guarda y se repone al salir */
-    shz_xmtrx_store_4x4(&nv_xm);
-    {   const shz_vec4_t r0 = shz_vec4_init(d0, d1, d2, 0.0f), r1 = shz_vec4_init(a0, a1, a2, 0.0f), r2 = shz_vec4_init(e0, e1, e2, 0.0f), r3 = shz_vec4_fill(0.0f);
-        shz_xmtrx_load_rows_4x4(&r0, &r1, &r2, &r3); }
+#ifdef LB_NODOS
+    /* FTRV (Little Bloste, comun/lbloste.h): las filas der, arr y ade por (dx, dy, dz, 0) dan xv, yv y zv de una vez
+       (las mismas sumas; Flycast las hace en doble y redondea al final). La XMTRX de quien llama se guarda y se repone
+       al salir */
+    lb_xmtrx_guarda(nv_xm);
+    {   const float r0[4] = { d0, d1, d2, 0.0f }, r1[4] = { a0, a1, a2, 0.0f }, r2[4] = { e0, e1, e2, 0.0f }, r3[4] = { 0, 0, 0, 0 };
+        lb_xmtrx_filas(r0, r1, r2, r3); }
 #endif
     for (j = 0; j < n; j++) {
         uint32_t i = L ? L[j] : j, rama, u, c_teo, c_v, g, ya, ip; nodo_t *d; float dx, dy, dz, zv, xv, yv, lim; int cp, cd, gracia;
         if (i >= nnod) continue;
         d = ND + i;
         dx = d->cx - o0; dy = d->cy - o1; dz = d->cz - o2;
-#ifdef SHZ_NODOS
-        {   shz_vec4_t t = shz_xmtrx_transform_vec4(shz_vec4_init(dx, dy, dz, 0.0f)); xv = t.x; yv = t.y; zv = t.z; }
+#ifdef LB_NODOS
+        {   float w_ = 0.0f; xv = dx; yv = dy; zv = dz; lb_ftrv(&xv, &yv, &zv, &w_); }
 #else
         zv = dx * e0 + dy * e1 + dz * e2;
 #endif
@@ -8088,7 +8089,7 @@ static void nodos_visibles(modelo_t *mo)
         /* detras del plano cercano o fuera de los laterales: fuera de la vista; lo que entra luego por el borde de la
            pantalla no se funde (fe_paso) */
         if (zv + d->r < cer) { if (FF) FF[i >> 5] |= 1u << (i & 31); POPR(i, PR_DETRAS); continue; }
-#ifndef SHZ_NODOS
+#ifndef LB_NODOS
         xv = dx * d0 + dy * d1 + dz * d2; yv = dx * a0 + dy * a1 + dz * a2;
 #endif
         if (fabsf(xv) - zv * tanh > d->r * kh || fabsf(yv) - zv * tanv > d->r * kv) { if (FF) FF[i >> 5] |= 1u << (i & 31); POPR(i, PR_LADO); continue; }
@@ -8198,8 +8199,8 @@ static void nodos_visibles(modelo_t *mo)
         }
         prio_coste[cd][cp] += c_teo; prio_vtx[cd][cp] += c_v;
     }
-#ifdef SHZ_NODOS
-    shz_xmtrx_load_4x4(&nv_xm);
+#ifdef LB_NODOS
+    lb_xmtrx_carga(nv_xm);
 #endif
     /* Grupos (DECISION DEL PORT, revision 44; docs/PARIDAD.md, Edificios sin base): los nodos de un mismo objeto
        (tools/grupos_nodos.py: apilados en planta, como la base y la torre de un edificio o la caja y sus capas de
@@ -10847,16 +10848,17 @@ static void coche_entorno(matrix_t mc)
         if (e->tipo < 2) continue;
         p = m->nodo < 0 ? 0 : (m->nodo >> 8) & 0xFF; if (p >= NPZ) p = 0;
         a = A[p]; b = B[p];
-#if defined(CON_SH4ZAM) && !defined(SIN_SHZ_ENTORNO)
-        {   /* FTRV (SH4ZAM): filas (0,5, a) y (0,5, b) por (1, x, y, z), en el mismo orden que la suma en C (Flycast
-               la hace en doble y redondea al final); la XMTRX se carga una vez por malla (nadie la espera despues:
-               robot_matrices y el dibujo la cargan con mat_load) */
+#if defined(CON_LBLOSTE) && !defined(SIN_LB_ENTORNO)
+        {   /* FTRV (Little Bloste): filas (0,5, a) y (0,5, b) por (1, x, y, z), en el mismo orden que la suma en C
+               (Flycast la hace en doble y redondea al final); la XMTRX se carga una vez por malla (nadie la espera
+               despues: robot_matrices y el dibujo la cargan con mat_load) */
             const uint32_t nv = m->n;
-            const shz_vec4_t r0 = shz_vec4_init(0.5f, a[0], a[1], a[2]), r1 = shz_vec4_init(0.5f, b[0], b[1], b[2]), r2 = shz_vec4_fill(0.0f);
-            shz_xmtrx_load_rows_4x4(&r0, &r1, &r2, &r2);
+            const float r0[4] = { 0.5f, a[0], a[1], a[2] }, r1[4] = { 0.5f, b[0], b[1], b[2] }, r2[4] = { 0, 0, 0, 0 };
+            lb_xmtrx_filas(r0, r1, r2, r2);
             for (i = 0; i < nv; i++) {
-                uint32_t w = q[i]; shz_vec4_t t = shz_xmtrx_transform_vec4(shz_vec4_init(1.0f, (float)(int8_t)w, (float)(int8_t)(w >> 8), (float)(int8_t)(w >> 16)));
-                v[i].u = t.x; v[i].v = t.y;
+                uint32_t w = q[i]; float tx = 1.0f, ty = (float)(int8_t)w, tz = (float)(int8_t)(w >> 8), tw = (float)(int8_t)(w >> 16);
+                lb_ftrv(&tx, &ty, &tz, &tw);
+                v[i].u = tx; v[i].v = ty;
             }
         }
 #else
@@ -11119,10 +11121,10 @@ static float band_pos[35][3], band_nor[35][3]; static uint32_t band_lut[33], ban
 static uint32_t chr_vtx, chr_us, chr_vtx_ult, chr_us_ult;      /* vertices del cuadro y tiempo de CPU (us; y del anterior) */
 static void m_por(matrix_t o, const float (*a)[4], const float (*b)[4])   /* o = a b (filas) */
 {
-#if defined(CON_SH4ZAM) && !defined(SIN_SHZ_ROBOT)
-    /* con FTRV (SH4ZAM, comun/shz.h): en columnas la memoria de filas es la traspuesta, (a b)^T = b^T a^T; deja la
-       XMTRX cambiada (robot_matrices la vuelve a cargar con mat_load) */
-    shz_xmtrx_load_unaligned_4x4(&b[0][0]); shz_xmtrx_apply_unaligned_4x4(&a[0][0]); shz_xmtrx_store_4x4((shz_mat4x4_t *)o);
+#if defined(CON_LBLOSTE) && !defined(SIN_LB_ROBOT)
+    /* con FTRV (Little Bloste, comun/lbloste.h): XMTRX = b y cada fila de a por FTRV; deja la XMTRX = b (robot_matrices
+       la vuelve a cargar con mat_load) */
+    lb_mat_mul(o, a, b);
 #else
     int i, j;
     for (i = 0; i < 4; i++) for (j = 0; j < 4; j++) o[i][j] = a[i][0] * b[0][j] + a[i][1] * b[1][j] + a[i][2] * b[2][j] + a[i][3] * b[3][j];
@@ -12713,6 +12715,51 @@ int or_programa_lanza(void)
     arch_exec(img, tam);
 }
 
+#ifdef LBLOSTE_PRUEBA
+/* autoprueba de Little Bloste (comun/lbloste.h): cada funcion frente a su cuenta en C con entradas al azar; escribe el
+   error maximo (relativo al tamano del resultado) y si la XMTRX vuelve igual tras guardar / cargar */
+static void lb_prueba(void)
+{
+    uint32_t sem = 12345; int k, i, j, malos = 0; float emax_v = 0, emax_m = 0, emax_f = 0;
+#define LBR() ((sem = sem * 1103515245u + 12345u), ((float)((sem >> 8) & 0xFFFF) / 32768.0f - 1.0f) * 100.0f)
+    for (k = 0; k < 4000; k++) {
+        float m[16], g[16], v[4], r[4], c[4], A[4][4], B[4][4], O[4][4], C[4][4], R[4][4];
+        for (i = 0; i < 16; i++) m[i] = LBR();
+        for (i = 0; i < 4; i++) v[i] = LBR();
+        lb_xmtrx_carga(m); lb_xmtrx_guarda(g);
+        if (memcmp(m, g, sizeof m)) malos++;                    /* guardar lo cargado: exacto */
+        r[0] = v[0]; r[1] = v[1]; r[2] = v[2]; r[3] = v[3]; lb_ftrv(&r[0], &r[1], &r[2], &r[3]);
+        for (i = 0; i < 4; i++) { float s_ = fabsf(m[i] * v[0]) + fabsf(m[4 + i] * v[1]) + fabsf(m[8 + i] * v[2]) + fabsf(m[12 + i] * v[3]) + 1e-6f;
+                                  c[i] = m[i] * v[0] + m[4 + i] * v[1] + m[8 + i] * v[2] + m[12 + i] * v[3];
+                                  emax_v = fmaxf(emax_v, fabsf(r[i] - c[i]) / s_); }
+        for (i = 0; i < 4; i++) for (j = 0; j < 4; j++) { R[i][j] = m[4 * i + j]; }
+        lb_xmtrx_filas(R[0], R[1], R[2], R[3]);             /* filas: r_i . v */
+        r[0] = v[0]; r[1] = v[1]; r[2] = v[2]; r[3] = v[3]; lb_ftrv(&r[0], &r[1], &r[2], &r[3]);
+        for (i = 0; i < 4; i++) { float e = R[i][0] * v[0] + R[i][1] * v[1] + R[i][2] * v[2] + R[i][3] * v[3];
+                                  float s_ = fabsf(R[i][0] * v[0]) + fabsf(R[i][1] * v[1]) + fabsf(R[i][2] * v[2]) + fabsf(R[i][3] * v[3]) + 1e-6f;
+                                  emax_f = fmaxf(emax_f, fabsf(r[i] - e) / s_); }
+        for (i = 0; i < 4; i++) for (j = 0; j < 4; j++) { A[i][j] = LBR(); B[i][j] = LBR(); }
+        lb_mat_mul(O, (const float (*)[4])A, (const float (*)[4])B);
+        for (i = 0; i < 4; i++) for (j = 0; j < 4; j++) {
+            float s_ = fabsf(A[i][0] * B[0][j]) + fabsf(A[i][1] * B[1][j]) + fabsf(A[i][2] * B[2][j]) + fabsf(A[i][3] * B[3][j]) + 1e-6f;
+            C[i][j] = A[i][0] * B[0][j] + A[i][1] * B[1][j] + A[i][2] * B[2][j] + A[i][3] * B[3][j];
+            emax_m = fmaxf(emax_m, fabsf(O[i][j] - C[i][j]) / s_); }
+        memcpy(A, B, sizeof A); lb_mat_mul(A, (const float (*)[4])A, (const float (*)[4])B);   /* o = a (alias) */
+        for (i = 0; i < 4; i++) for (j = 0; j < 4; j++) {
+            float e = B[i][0] * B[0][j] + B[i][1] * B[1][j] + B[i][2] * B[2][j] + B[i][3] * B[3][j];
+            float s_ = fabsf(B[i][0] * B[0][j]) + fabsf(B[i][1] * B[1][j]) + fabsf(B[i][2] * B[2][j]) + fabsf(B[i][3] * B[3][j]) + 1e-6f;
+            emax_m = fmaxf(emax_m, fabsf(A[i][j] - e) / s_); }
+    }
+#undef LBR
+    dbglog(DBG_INFO, "LBLOSTE: %s, 4000 casos: carga/guarda distintos %d, error maximo (respecto a la suma de los |terminos|; 1 ulp = 6e-8) ftrv %.2e, filas %.2e, mat_mul %.2e\n",
+#ifdef CON_LBLOSTE
+           "SH-4 (FTRV)",
+#else
+           "en C",
+#endif
+           malos, (double)emax_v, (double)emax_f, (double)emax_m);
+}
+#endif
 int main(int argc, char **argv)
 {
     /* bufer de parametros de TA_VB_BYTES (x2); opacos con bloques de 32 (el suelo cercano toca muchas teselas) y 4
@@ -12802,6 +12849,9 @@ int main(int argc, char **argv)
     pres_hz = modo_video == DM_640x480_PAL_IL ? 50 : 60;
     vblank_handler_add(vbl_antes, NULL);                        /* antes que el de la PowerVR (va en orden) */
     pvr_init(&pp);
+#ifdef LBLOSTE_PRUEBA
+    lb_prueba();
+#endif
     vblank_handler_add(vbl_despues, NULL);
     agua_prepara();                                             /* cabecera del agua: color plano, sin textura */
     /* la prueba de alfa de la lista de recorte, como la del original: el TEST_1 del GS de los materiales con prueba de
