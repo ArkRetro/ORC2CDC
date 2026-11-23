@@ -1479,13 +1479,13 @@ static uint32_t vtx_reserva, lst_uso[3], lst_vtx[3]; static uint8_t lst_corto[3]
    ritmo del barrido (pres_espera). Cuando la CPU o la PowerVR no llegan, el cuadro empieza tarde (pres_tarde) y esa
    cadencia se rompe. Cada SALTO_VENTANA cuadros dibujados en carrera: con SALTO_SUBE o mas tarde, un nivel mas; con
    SALTO_BAJA ventanas seguidas sin ninguno, uno menos. Niveles: 1 sin los focos de los faros sobre la escena ni la
-   luz del suelo (noche: ~1,6 ms en LASV) y el tope del TA de la etapa al 90 %; 2 al 80 %; 3 al 70 % y el lejano como
+   luz del suelo (noche: ~1,6 ms en LASV) y el tope del TA de la etapa al 94 %; 2 al 87 %; 3 al 80 % y el lejano como
    mucho a SALTO_LEJOS. -DSIN_SALTO: sin el */
 #define SALTO_VENTANA 40
 #define SALTO_SUBE 2
 #define SALTO_BAJA 3
 #define SALTO_LEJOS 2400.0f
-static const uint16_t SALTO_TA[4] = { 256, 230, 205, 180 };
+static const uint16_t SALTO_TA[4] = { 256, 240, 222, 205 };   /* (Rev 2.9.2.f: 94 / 87 / 80 %; antes 90 / 80 / 70) */
 static int salto_niv;
 static uint32_t ta_bpv = TA_BPV_MIN, ta_f = TA_F_MIN, ta_vb, ta_et, ta_lim, ta_tope_etapa, ta_corto, ta_v2d, ta_v2d_ult;
 static uint32_t ta_otros_ult, ta_min_otros_teo, ta_traf_teo;   /* bytes de lo que no es la etapa (cuadro anterior; minimo
@@ -8805,10 +8805,13 @@ static void luz_actual(int e, float *v, float *d)
 #define NLIM_A 0.3f
 #define NLIM_INI 0.12f
 #define NLIM_ANCHO 0.52f
+#ifndef NLIM_FRANJA
+#define NLIM_FRANJA 0.85f                                       /* Rev 2.9.2.f: la franja del limite (fraccion del lejano) */
+#endif
 static float niebla_tab[129];                                   /* la tabla puesta (niebla_pon; focos_niebla) */
 static void niebla_pon(void)
 {
-    static float a_hecho = -1; float *tab = niebla_tab; int i; uint32_t c = niebla_c; float a;
+    static float a_hecho = -1, fb_hecho = -1; float *tab = niebla_tab; int i; uint32_t c = niebla_c; float a, fb = 1.0f;
 #ifdef SIN_NIEBLA_LIMITE
     float nl = 1e9f;
 #else
@@ -8828,16 +8831,21 @@ static void niebla_pon(void)
 #endif
 #endif
         a = (float)(int)(a * 64.0f) / 64.0f;                     /* (escalones: la tabla no se rehace por nada) */
+        fb = hz && lc > 1 && lh < lc ? lh / lc : 1.0f;           /* (la franja del limite, igual: Rev 2.9.2.f) */
+        fb = (float)(int)(fb * 64.0f) / 64.0f;
     }
     if (niebla_d == niebla_d_hecha && niebla_modo == niebla_modo_hecho && niebla_c == niebla_c_hecho && lejos == niebla_lejos_hecho &&
-        a == a_hecho) return;
+        a == a_hecho && fb == fb_hecho) return;
     niebla_d_hecha = niebla_d; niebla_modo_hecho = niebla_modo; niebla_c_hecho = niebla_c; niebla_lejos_hecho = lejos;
-    a_hecho = a;
+    a_hecho = a; fb_hecho = fb;
     pvr_fog_table_color(1.0f, ((c >> 16) & 0xff) / 255.0f, ((c >> 8) & 0xff) / 255.0f, (c & 0xff) / 255.0f);
     for (i = 0; i < 129; i++) {
         float t = i ? (float)(1 << (i >> 4)) * (16 + (i & 15)) / 16.0f : 1.0f, z = lejos / t, f, g, h;
-        f = (z - lejos * 0.55f) / (lejos * 0.45f); f = f < 0 ? 0 : f > 1 ? 1 : f;
-        if (lejos >= LEJOS_MAX || lejos >= lejos_guion) f = 0;  /* la del original: sin fundido (no lo tiene) */
+        /* Rev 2.9.2.f (pedido: "se aprecian calvas al final de la distancia de dibujado ... como una niebla en el
+           limite"): la franja del limite siempre, del NLIM_FRANJA x lejos al lejano (antes con el lejano en su
+           maximo no habia fundido: el corte a 3200 m se veia seco); acortado por la CPU, desde 0,55 x lejos como antes */
+        {   float f0 = lejos >= LEJOS_MAX || lejos >= lejos_guion ? NLIM_FRANJA : 0.55f;
+            f = (z - lejos * f0) / (lejos * (1.0f - f0)); f = f < 0 ? 0 : f > 1 ? 1 : f; f *= fb; }
         g = niebla_d * z; g = niebla_d <= 0 ? 0 : niebla_modo == 2 ? 1 - expf(-g * g) : 1 - expf(-g);
         h = (z - NLIM_INI * nl) / (NLIM_ANCHO * nl); h = h < 0 ? 0 : h > 1 ? 1 : h;
         h = a * h * h * (3 - 2 * h);                            /* suave (smoothstep) */
