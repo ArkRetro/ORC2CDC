@@ -581,6 +581,7 @@ static int sa_tiene(int b);
 static void sa_prueba_pagina(int p);
 #endif
 static int sa_car_on, sa_car_reg, sa_car_col;
+static int sa_cab = -1;                                    /* Rev 2.9.3: cabecera "showroom" 0x440077 de SALON.DAT */
 /* TABLEROS de cursos (mas abajo) */
 static int tb_abre(void);
 static void tb_cierra(void);
@@ -841,7 +842,9 @@ static int cabecera(int p)
 {
     switch (p) {
     case P_MENU: return U_CABMENU;
-    case P_MODO: case P_C2C: case P_SALON: case P_TABLERO: return U_CABMODO;
+    case P_SALON: if (sa_cab >= 0) return -1;              /* la del salon (0x416B70 clave 0x2B: 0x440077, "showroom") */
+    /* fall through */                                     /* (SALON.DAT de antes: la de ELEGIR MODO) */
+    case P_MODO: case P_C2C: case P_TABLERO: return U_CABMODO;
     case P_COCHE: case P_CAMBIO: return U_CABCOCHE;
     case P_MUSICA: return U_CABMUSICA;
     case P_LICENCIA: case P_EDITOR: return U_CABLIC;
@@ -1978,7 +1981,7 @@ static int sa_abre(void)
     if (sa_uv >= 0 && hudd_sube_uso(sa_h, sa_uv)) dbglog(DBG_ERROR, "SALON: sin VRAM para la ventana\n");
     if (sa_uf >= 0 && hudd_sube_uso(sa_h, sa_uf)) dbglog(DBG_ERROR, "SALON: sin VRAM para los glifos\n");
     if (sa_ub >= 0 && hudd_sube_uso(sa_h, sa_ub)) dbglog(DBG_ERROR, "SALON: sin VRAM para la barra\n");
-    sa_fondo.h = sa_tit.h = sa_tit2.h = sa_icono.h = sa_vent.h = sa_tira.h = sa_arte.h = -1;
+    sa_fondo.h = sa_tit.h = sa_tit2.h = sa_icono.h = sa_vent.h = sa_tira.h = sa_arte.h = sa_cab = -1;
     dbglog(DBG_INFO, "SALON: SALON.DAT (%u bytes de tablas en el hueco), VRAM libre %uK\n", (unsigned)hudd_tablas_ocupa(),
            (unsigned)(pvr_mem_available() >> 10));
     return 0;
@@ -1987,7 +1990,7 @@ static void sa_cierra(void)
 {
     if (!sa_bk) return;
     spr_suelta_todas(); spr_cierra(sa_bk); sa_bk = NULL; SA = NULL; sa_h = NULL; sa_uf = sa_ub = sa_uv = -1;
-    sa_fondo.h = sa_tit.h = sa_tit2.h = sa_icono.h = sa_vent.h = sa_tira.h = sa_arte.h = -1;
+    sa_fondo.h = sa_tit.h = sa_tit2.h = sa_icono.h = sa_vent.h = sa_tira.h = sa_arte.h = sa_cab = -1;
     sa_car_on = 0; sa_ln = 0; sa_ton = 0;
     if (menu_hueco) menu_hueco(0);
 }
@@ -2257,7 +2260,8 @@ static void sa_pag_control(int p, int a)                    /* 0x25c2d0 / 0x25c5
         }
         sa_lista_mueve(ad); if (ad) sa_tira_sig(); else sa_tira_ant();
         if (p == 1) sa_coche(sa_lsel, sa_reg[sa_lsel].color);
-        if (p == 4) { int row = 0x49 + sa_crow(sa_lsel); sa_coche(SA->k_fila[row].reg, SA->k_fila[row].color); }
+        if (p == 4) {   /* 0x25ce50: 0x41ba30[+0x410] (Rev 2.9.3: sin el 0x49 de los rotulos, que daba el coche de otra fila) */
+            int row = sa_crow(sa_lsel); sa_coche(SA->k_fila[row].reg, SA->k_fila[row].color); }
         if (p == 5) sa_prev_actualiza();
         sa_refresca = 1;
     }
@@ -2323,7 +2327,7 @@ static int sa_control(unsigned n, int atiende)
         }
         if (sa_vuelta >= 4 && sa_vuelta <= 0x13 && (sa_vuelta - 4) % 3 == 0) sa_est = sa_vuelta;
         if (sa_est == 4) sa_coche(sa_lsel, sa_reg[sa_lsel].color);
-        if (sa_est == 13) { int row = 0x49 + sa_crow(sa_lsel); sa_coche(SA->k_fila[row].reg, SA->k_fila[row].color); }
+        if (sa_est == 13) { int row = sa_crow(sa_lsel); sa_coche(SA->k_fila[row].reg, SA->k_fila[row].color); }
         break;
     }
     return 0;
@@ -2335,6 +2339,9 @@ static void sa_entra(void)
     sa_ton = 0; sa_tira.h = -1; sa_ln = 0; sa_car_on = 0; sa_refresca = 0;
     sa_base = 0xcf; sa_est = 0;
     sr_fila(&sa_tit, 16, 0, 1, 1);                          /* 0x25b418: +0x938 la fila 16 (+0x2084 sin aplicar) */
+    /* Rev 2.9.3 (el usuario: nombres que no corresponden en el salon): la cabecera del salon es "showroom" (0x23D4A8 con
+       la clave 0x2B: 0x440077; 0..40 entra, como las de MENU.DAT), no la de ELEGIR MODO; -1 sin ella en SALON.DAT */
+    if (sa_cab < 0) { sa_cab = spr_crea(0x00440077u, 4, 1, 0, 40); }
 #if defined(PRUEBA_SALON_MILLAS)
     {   /* prueba (-DPRUEBA_SALON_MILLAS=n): la licencia activa, si no tiene millas, con n al entrar en el salon por
            primera vez (con la VMU de un arranque anterior, las que le quedaron) */

@@ -184,7 +184,7 @@ def main():
     # ---- escenas por pagina (un grupo de atlas cada una)
     toks = lambda f0, f1: sorted(set(filas[k][0] & 0xffff for k in range(f0, f1)))
     comun = sorted(set(filas[k][0] & 0xffff for k in list(range(0, 34)) + list(range(252, 257))))
-    grupos = [('COMUN', comun + [0x7d] + toks(0x28, 0x2d))]
+    grupos = [('COMUN', comun + [0x7d, 0x77] + toks(0x28, 0x2d))]   # 0x77: la cabecera "showroom" (Rev 2.9.3)
     for nom, (cod, base, (f0, f1), tira, *_r) in zip(['COCHES', 'ESCENARIOS', 'MUSICA', 'COLORES', 'EXTRAS'], PAGINAS[1:]):
         grupos.append((nom, sorted(set(toks(f0, f1) + [tira & 0xffff]) - set(k for _, ks in grupos for k in ks))))
     for nom, ks in grupos: print('  grupo %s: %s' % (nom, ' '.join('%x' % k for k in ks)))
