@@ -43,6 +43,7 @@
 #include "perfil.h"
 #endif
 #include "meta.h"
+#include "../comun/rksp.h"
 
 /* Longitud de las tiras en las listas de objetos de la PowerVR (Strip_Len, bits 18-19 de la cabecera del poligono:
    1, 2, 4 o 6 triangulos de una tira por entrada de la lista de cada tile). KallistiOS la deja en 2 (PVR_CMD_POLYHDR
@@ -6534,6 +6535,37 @@ static int ta_meta_busca(const char *fich, int seg, etapa_t *e)
     }
     free(b);
     return ok;
+}
+/* Rev 2.9.3 (pedido: rankings y records): el registro de la carrera de UN JUGADOR en sus tablas (comun/rksp.c rkuj_*,
+   con el formato y el orden de las de OUTRUN2SP: 0x1fc69c..0x1fc7a8 y 0x1fbb20..0x1fbd18 para el nombre y el coche de
+   la licencia). El PS2 los guarda en su base 0x5f8598 (0x2270a8) con otro formato: DESVIACION. Que se guarda: OUTRUN
+   (variante 1: puntos y tiempo; al acabar o con el tiempo agotado) e INFARTO (2: corazones y tiempo) por la meta a la
+   que lleva la ruta (las ramas a la derecha) y el preset del curso; CONTRARRELOJ (7) solo las metas A..E de OutRun 2 y
+   de OutRun 2 SP al llegar (codigos 0x3c..0x45; tiempo por cambio). Las etapas sueltas, del reves y los cursos
+   seguidos: solo el fantasma (ORGH). Sin licencia, nada */
+static int ta_codigo;                                            /* (definida mas abajo) */
+static uint32_t l32_lic(const uint8_t *l, int o) { uint32_t v; memcpy(&v, l + o, 4); return v; }
+static void rk_un_jugador(int meta, int piloto)
+{
+    const uint8_t *l = menu_licencia(); uint8_t rec[16]; uint32_t r0, r8, ms = meta ? (uint32_t)cuadros_ms(crono) : 0;
+    int v, p = preset_curso & 3, c, ruta = 0, k, cambio = manual_ & 1, pos;
+    if (!l || piloto || juego_sp) return;
+    if (variante == 1 || variante == 2) {
+        for (k = 0; k < 4; k++) if (rama_nivel[k] == 1) ruta |= 1 << k;
+        c = __builtin_popcount(ruta); v = variante;
+    } else if (variante == 7 && meta && ta_codigo >= 0x3c && ta_codigo < 0x46) {
+        c = (ta_codigo - 0x3c) % 5; p = ta_codigo < 0x41 ? 1 : 0; v = 0;
+        ruta = c == 0 ? 0 : (1 << c) - 1;                       /* (una ruta que lleva a esa meta, para las marcas) */
+    } else return;
+    r0 = ((uint32_t)puntos & 0xffffff) | ((uint32_t)(menu_modelo() & 0xf) << 28) | ((uint32_t)ruta << 24);
+    r8 = v == 2 ? (uint32_t)infarto_total() & 0xfff : 0;
+    r8 |= (uint32_t)cambio << 17 | (uint32_t)(l32_lic(l, 0x1c) & 0x1f) << 12;
+    memcpy(rec, &r0, 4); memcpy(rec + 4, &ms, 4); memcpy(rec + 8, &r8, 4); memset(rec + 11, 0, 5);
+    for (k = 0; k < 4 && l[k]; k++) rec[11 + k] = l[k];           /* strncpy(rec + 0xB, licencia, 4) */
+    if (v == 0 && !ms) return;
+    pos = rkuj_inserta(rec, v, p, c, cambio, 0);
+    dbglog(DBG_INFO, "RANKING: un jugador variante %d preset %d meta %c ruta %x: %d puntos, %u ms, puesto %d\n",
+           v, p, 'A' + c, ruta, puntos, (unsigned)ms, pos + 1);
 }
 static void ta_meta_final(void)
 {
@@ -13757,6 +13789,7 @@ int main(int argc, char **argv)
                            rival_puesto() + 1, rival_total(), rival_nota(), c2c_nota_ant);
                 }
                 if (tabla_on) { fin_tabla_sale(); tabla_on = 0; }   /* salida del modo 19: la tabla de la meta fuera */
+                rk_un_jugador(estado == META, auto_);                  /* Rev 2.9.3: los records de UN JUGADOR */
                 fin_empieza(estado == META ? FIN_META : FIN_TIEMPO); fin_on = 1;   /* 33 (sin red) -> 34 / 20 -> 34 */
             }
             if (fin_on) {                                       /* modos 34 / 35 / 27 (demo/fin.c) */
