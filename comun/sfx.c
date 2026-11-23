@@ -517,4 +517,5 @@ void sfx_bocina(int on)
     memset(&m, 0, sizeof m);
     m.formato = 1; m.bucle = 1; m.ini = 0; m.fin = BOC_N;
     manda(boc_canal, AICA_CH_CMD_START, &m, boc_a, BOC_HZ, vol, 128);
+    dbglog(DBG_INFO, "SFX: bocina (canal %d, volumen %d)\n", boc_canal, vol);
 }
