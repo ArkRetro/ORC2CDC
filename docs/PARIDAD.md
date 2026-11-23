@@ -1505,6 +1505,66 @@ de OutRun 2 SP (las 15 etapas seguidas) que dio el usuario.
   no esta leido). Sin EFECTOS.DAT nuevo, sin agua (como antes).
 - NO verificado en consola real.
 
+### Saltos en las etapas de noche (Rev 2.9.5, 2026-11-23)
+
+Queja (Rev 2.9.4): "las fases de noche tienen elementos que aparecen y desaparecen". DESVIACION. Verificado en Flycast
+(no en consola real: Flycast no da el tiempo del SH4 ni llena el TA como la consola). Medido con `-DPRUEBA_AUTO
+-DPRUEBA_SIN_TIEMPO -DDIAG_MS -DDIAG_POPPING` (lineas POP: saltos por segundo de 8 px o mas / de 32 px o mas, por razon;
+Flycast con la misma compilacion repite la carrera igual, asi que antes y despues se comparan en el mismo tramo).
+- Causas, por razon de DIAG_POPPING:
+  - "pvs" (GHOS: 12,4 apariciones y 12,1 desapariciones por s de 8 px o mas, igual con y sin faros): la PVS de
+    tools/pvs.py, no un fallo de la demo. Sin lowpoly (`-DLOD_GRANDE_D=1e9f`) y sin `decor_reduce` (`-DSIN_DECOR_REDUCE`)
+    sale lo mismo; con `-DSIN_PVS` desaparecen (y no cambian los fps en Flycast). Mirando la tabla de SEG09 (las
+    mascaras de las 634 secciones), nodos enteros como el monte 1 (r 715 m) o los bloques de bosque 193 / 194 / 27
+    (r ~100 m, 40-60 px a 500-900 m) se encienden en rachas de 3 secciones (una sola muestra del ojo los ve por un hueco
+    entre los troncos, mas sus dos vecinas) y se apagan en rachas de 9-30 secciones (1,5-4 s a 200 km/h); la gracia
+    (PVS_GRACIA, 15 cuadros) era mucho mas corta. Y como las muestras van cada 4 m a lo largo y a lo ancho y a 0,6 /
+    3,3 / 6 m de alto, desde la camara entre muestras se ve a veces lo que la tabla da por tapado: aparece al entrar en
+    la primera seccion que lo ve.
+  - "lejos" (METR: 3,1 / 2,0 por s): la emergencia del salto adaptativo (nivel 6..9) bajaba el lejano a 600 m y de ahi
+    subia y bajaba; de noche la franja de niebla del limite es debil (cielo mas oscuro que la niebla).
+  - "tope" (GHOS +12,5 / -5,7, METR +5,6 / -1,7): el reparto del TA; el corte bajaba en el mismo cuadro en cuanto el
+    objetivo, con el 95 % del tope, pedia una clase menos, y el tope cambia cada cuadro (coche, trafico y el nivel del
+    salto, que se mueve un poco en cada cuadro de carrera). Muchas de GHOS a 1155 m son lo tapado 63/64 por la niebla
+    (va a la ultima clase): en GHOS el horizonte es del color de la niebla y no se ven. Probado no tratarlo asi de
+    noche (silueta clara contra el cielo negro): en METR no habia saltos ahi y el TA de mas quitaba cosas cercanas;
+    descartado.
+- Cambios (demo/main.c; cada uno con su `-D` para volver a lo de antes):
+  - PVS_GRACIA 15 -> 240 cuadros (6 s): el nodo que la PVS apaga sigue dibujandose con su ultimo coste. Medido en GHOS:
+    120 cuadros, desapariciones "pvs" 2,4 por s; 200, 1,3; sin coste de fps.
+  - Ventana de la PVS (PVS_VENTANA 3, pvs_ventana / pvs_aplica_v / pvs_coste): ademas de la mascara de la seccion del
+    ojo, las de s - 3 y s + 3 (como las rachas de la tabla son de 3 o mas, lo de toda la ventana, +-24 m); lo que va a
+    verse ya esta dibujado (tapado) antes de verse. 2 mascaras y 8 bytes por nodo mas por modelo (~12 KB en GHOS). En
+    el reparto, el mayor coste de los tres. La medida de las mallas de la PVS (POP "pvs" de despues de "falta") mira
+    ahora lo que se dibuja (pvs_dibujo en pvs_recuerda) y no la mascara.
+  - Histeresis del corte del reparto (REPARTO_SCHMITT, reparto_cabe): el corte de antes se queda mientras lo que dibuja
+    quepa en el 100 % del tope (del TA de la etapa y de los vertices); el objetivo sigue con el 95 %. Lo que se envia
+    sigue limitado por ta_cabe.
+  - SALTO_LEJ_SUELO 1200 m: la emergencia baja el lejano de 2400 a 1200 y no a 600. Probado 1700 (lo que se pedia,
+    1600-1800): en METR 0,2 saltos del limite por s pero mas del tope cerca (20,3 en total frente a 18,7 con 1200), en
+    las demas igual y los mismos fps.
+  - Focos de los faros: FOCOS_ANOTA_D 40 -> 30 m (el haz acaba a FOCOS_LEJOS, 28 m: misma imagen); FOCOSMS en METR
+    713 -> 611 us por cuadro, en GHOS 784 -> 676. FOCOS_VSUB sin tocar (las divisiones son las del haz de cerca). Los
+    faros siguen encendidos toda la etapa.
+- Medido (Flycast, piloto, 140 s por prueba, tres a la vez; mismas medias de mide.py; saltos por s de 8 px o mas / de
+  32 px o mas). "Antes" es la 2.9.4 (`-DREPARTO_SCHMITT=0 -DSALTO_LEJ_SUELO=600.0f -DPVS_GRACIA=15 -DPVS_VENTANA=0
+  -DFOCOS_ANOTA_D=40.0f`):
+
+| Etapa | fps antes / despues | tarde | lejano medio (min) | nivel | saltos 8 px / 32 px | pvs | tope | lejos |
+|---|---|---|---|---|---|---|---|---|
+| GHOS | 38,12 / 37,71 | 106 / 138 | 1578 (600) / 1600 (1200) | 7,17 / 7,98 | 31,3 / 9,1 -> 16,8 / 3,4 | +8,4 -7,5 -> +4,7 -0,5 | +9,0 -3,9 -> +8,0 -3,1 | +0,8 -1,3 -> +0,1 -0,0 |
+| METR | 35,26 / 33,54 | 304 / 414 | 1552 (600) / 1909 (1200) | 7,46 / 7,54 | 23,3 / 7,8 -> 18,7 / 5,3 | +6,2 -2,1 -> +5,4 -0,1 | +6,5 -1,9 -> +8,4 -2,2 | +3,0 -1,6 -> +0,4 -0,4 |
+| PALM | 38,17 / 38,10 | 96 / 104 | 1983 (600) / 1971 (1200) | 6,22 / 7,00 | 31,9 / 9,3 -> 22,8 / 5,9 | +4,9 -3,5 -> +2,2 -0,1 | +16,8 -4,3 -> +15,7 -4,0 | +0,9 -1,3 -> +0,3 -0,3 |
+| INDU | 38,62 / 38,54 | 86 / 90 | 2260 (886) / 2149 (1200) | 5,53 / 6,27 | 29,8 / 12,1 -> 21,7 / 5,8 | +9,5 -6,6 -> +6,0 -0,1 | +9,4 -3,9 -> +10,6 -4,5 | +0,1 -0,1 -> +0,1 -0,3 |
+
+  Los de 32 px o mas bajan a la mitad o menos en todas. METR pierde 1,7 fps (cada parte ~0,4-0,5: la ventana, la
+  histeresis del reparto y el suelo del lejano; la gracia no cuesta): es la que ya no llegaba (la ciudad cercana,
+  ~28 ms de CPU por cuadro en Flycast) y se eligio menos saltos (pedido). Lo que queda: apariciones del tope al
+  acercarse (lo que entra por la clase de distancia o de LOD) y las mallas de la PVS dentro de nodos que ya se dibujan
+  (METR ~40 por s de 8 px o mas, casi todas de cosas que salen de detras de otras). `-DPVS_VENTANA=0`,
+  `-DREPARTO_SCHMITT=0`, `-DPVS_GRACIA=15`, `-DSALTO_LEJ_SUELO=600.0f`, `-DFOCOS_ANOTA_D=40.0f`: lo de antes.
+- NO verificado en consola real (alli el TA y la CPU pesan distinto: la ventana y la gracia dibujan algo mas).
+
 ### 40 fps adaptativos y lejano 3800 (Rev 2.9.4, 2026-11-23)
 
 Pedido: "que mantenga los 40 fps con frameskip progresivo adaptativo y que aumente la distancia de dibujado a 3800".
