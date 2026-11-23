@@ -6,8 +6,9 @@ piramides; ... cuando el coche este a 900 m cargara completo".
 
 Candidatos: nodos del original (no carteles, ni con version lejana de lod_veg.py, ni lejanos) de radio >= R_MIN m con la
 mayor parte de sus vertices en la lista opaca y un coste teorico del TA de al menos MIN_TEO bytes. Su version lejana:
- - solo los triangulos opacos (las tiras de la lista 0: lo de recorte y transparente, barandillas, cables, hojas,
-   cristales, de lejos no se ve);
+ - los triangulos opacos y los de recorte (listas 0 y 1: en las etapas de ciudad las fachadas con ventanas van en la
+   de recorte; Rev 2.9.2.f, antes solo los opacos y de lejos esos edificios se quedaban en el esqueleto), rellenos (el
+   color medio de la textura, sin los huecos); lo transparente (cristales, agua) no;
  - simplificada por agrupacion de vertices en una rejilla (cada celda un vertice: la media de los suyos), con la celda
    creciendo hasta quedar en OBJ de los triangulos (como mucho MAX_TRI, como poco MIN_TRI); fuera los triangulos que
    se aplastan y los repetidos;
@@ -34,11 +35,19 @@ OBJ, MIN_TRI, MAX_TRI = 0.12, 24, 400
 BAJA = 8                                                         # texeles de lado de la textura reducida
 
 def _baja(d, t, cache, cb):
+    """la textura t reducida a BAJA x BAJA: la media de los texeles opacos (alfa >= 128) de cada bloque; un bloque sin
+    ninguno, la media opaca de toda la textura (los huecos de recorte de las fachadas no oscurecen el color)"""
     if t in cb: return cb[t]
     tx, li, fmt = _textura(d, t, cache)
-    h, w = tx.shape[:2]; bh, bw = max(1, h // BAJA), max(1, w // BAJA)
-    a = tx[:bh * BAJA, :bw * BAJA, :3].reshape(BAJA, bh, BAJA, bw, 3).mean((1, 3)) if h >= BAJA and w >= BAJA else \
-        np.broadcast_to(tx[..., :3].reshape(-1, 3).mean(0), (BAJA, BAJA, 3)).copy()
+    h, w = tx.shape[:2]; op = (tx[..., 3] >= 128).astype(np.float32)
+    if not op.any(): op[:] = 1
+    tot = (tx[..., :3] * op[..., None]).reshape(-1, 3).sum(0) / op.sum()
+    if h >= BAJA and w >= BAJA:
+        bh, bw = h // BAJA, w // BAJA
+        q = tx[:bh * BAJA, :bw * BAJA, :3] * op[:bh * BAJA, :bw * BAJA, None]
+        s_ = q.reshape(BAJA, bh, BAJA, bw, 3).sum((1, 3)); n_ = op[:bh * BAJA, :bw * BAJA].reshape(BAJA, bh, BAJA, bw).sum((1, 3))
+        a = np.where(n_[..., None] > 0, s_ / np.maximum(n_, 1)[..., None], tot)
+    else: a = np.broadcast_to(tot, (BAJA, BAJA, 3)).copy()
     cb[t] = a.astype(np.float32); return cb[t]
 
 def candidatos(d):
@@ -48,7 +57,7 @@ def candidatos(d):
         x = M[k]; nd = int(x['nodo'])
         if not 0 <= nd < nn or x['n'] < 3: continue
         vt[nd] += x['n']; tb[nd] += teo(min(int(x['n']), 256))
-        if k < ini[1]: vo[nd] += x['n']; ms.setdefault(nd, []).append(k)
+        if k < ini[2]: vo[nd] += x['n']; ms.setdefault(nd, []).append(k)   # opacas y de recorte (fachadas)
     ok = (vt > 0) & (N['r'] >= R_MIN) & (vo >= 0.6 * vt) & (tb >= MIN_TEO) & (N['cartel'] == -1) & ((N['fl'] & NODO_LEJ) == 0)
     return {int(i): ms[int(i)] for i in np.nonzero(ok)[0] if int(i) in ms}
 
