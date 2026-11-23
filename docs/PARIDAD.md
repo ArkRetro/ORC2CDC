@@ -1540,11 +1540,28 @@ Pedido: "audita revisa y corrige" (lista de fallos de la 2.9.2.f). Verificado en
 - SALON, cabecera: el original pone la de la clave 0x2B de 0x416B70 (0x23D5B8 -> 0x440077, "showroom"); la DC dejaba la
   de ELEGIR MODO. Va en SALON.DAT (grupo COMUN de tools/conv_salon.py; MENU.DAT lleva el arte de OUTRUNNERS hecho
   aparte y no se rehace); con un SALON.DAT de antes, la de ELEGIR MODO.
-- Ecualizador de la radio (MUSICA): la escena 0x4400A7 es una sola pieza de un cuadro (capa 0..470, n = 1) y el frontal
-  de musica del PC (frontend_music.cpp, 0x440088 0..0x19 modo 5) no dibuja nada mas: no se ha encontrado animacion del
-  ecualizador en los datos ni en el codigo. Sin cambios.
-- Frases de la acompanante al pitar: el PC dice la voz 0x163 al tocar la bocina (boton 2, [82F23C]); el PS2 no tiene ni
-  la bocina ni la voz (sin 0x163 en 0x202e60..0x205cac): no aplica.
+- Ecualizador de la radio (MUSICA): la escena 0x4400A7 es una sola pieza de un cuadro y los titulos (0x44002E..30)
+  solo mueven las letras (que la DC ya animaba); el usuario ensena en un video del PS2 la rejilla de puntos de la radio
+  encendida por columnas. No encontrado donde lo dibuja el PS2 (PROBABLE: la capa de 640x480 sin cuadros, n = 0, de la
+  escena de la lista 0x4400C6, que rellena el codigo). DESVIACION (comun/menu.c eq_dibuja): la rejilla (20 columnas de
+  3 px cada 4 desde x = 267, 5 filas de 1 px cada 2 desde y = 252, medida en la escena) se enciende en el azul de los
+  titulos (66, 150, 204) con alturas al azar (mas altas en los graves), no sacadas de la musica.
+- Bocina en X (pedido): el PS2 no tiene bocina; el PC si (boton 2, [82F23C] -> la acompanante dice la voz 0x163 en el
+  modo OutRun, 489A90). DESVIACION: X ya no frena (B y el gatillo L si) y es la bocina: sonido propio sintetizado
+  (comun/sfx.c sfx_bocina, dos tonos de 400 / 500 Hz en PCM de 16 bits en bucle mientras se pulsa) y en el modo OutRun
+  la voz 0x163, que esta en HC.PAK del PS2 (tools/conv_sonido.py la anade a VOCES.DAT; tools/regenera.py rehace el
+  sonido si VOCES.DAT no la tiene). Probado en Flycast (sin sonido en la prueba): 18 bocinazos en 90 s sin fallos.
+- Todas las voces de la acompanante (pedido): asustada (al pasar rozando el trafico a mas de 120 km/h) y trompo (choque
+  del estado 7), que el original solo dice en COAST 2 COAST, y 0x71 / 0x78 (en ORC.PAK sin uso en las tablas) en el
+  sorteo de los derrapes. DESVIACION.
+- CONTRARRELOJ de una etapa final (el "partenon encima de la bifurcacion", captura del usuario en CAPE): el registro de
+  44D720 lleva la union 0 con hijos 0 / 0 (la bifurcacion) y el decorado de la meta de la etapa quedaba encima.
+  DESVIACION (demo/main.c ta_meta_final): en una etapa que es final en algun arbol de CURSO.DAT / CURSOTA.DAT, su union
+  de meta (CAPE: BK14 en vez de BK276), sin rehacer datos. Verificado en CAPE: la meta con el templo detras del GOAL.
+  Las etapas no finales (1..12) acaban en la recta de la union 0 como antes; las metas A..E (meta C por el menu) sin
+  cambios.
+- INFARTO, corazones al adelantar: funcionan (prueba con el piloto: peticion de adelantar, +217 y +247 corazones, anillo
+  y corazones volando). En el modo OutRun el original no da corazones.
 
 ### Franja de niebla en el limite y edificios lejanos (Rev 2.9.2.f / Mod 2.5.2.f, 2026-11-23)
 
