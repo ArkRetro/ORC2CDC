@@ -53,11 +53,9 @@ make -s -C "$PVT" CC=$CCW CXX=x86_64-w64-mingw32-g++ TARGET=pvrtex.exe CXXFLAGS=
 cp "$PVT/pvrtex.exe" "$G/nativo/"; rm -rf "$PVT"
 mkdir -p "$G/fuentes"; (cd "$KOS/utils" && zip -qr "$G/fuentes/pvrtex.zip" pvrtex -x '*.o' 'pvrtex/pvrtex')
 
-echo "== 1ST_READ.BIN (demo/ con KallistiOS y SH4ZAM) e IP.BIN (makeip)"
+echo "== 1ST_READ.BIN (demo/ con KallistiOS y Little Bloste) e IP.BIN (makeip)"
 set +u; . "$KOS/environ.sh"; set -u
-# la licencia MIT de SH4ZAM (va en el 1ST_READ.BIN): la del codigo que bajo kos-ports (tools/instala_entorno.sh)
-SHZ_LIC=$(ls "$KOS_PORTS"/sh4zam/build/sh4zam-*/LICENSE "$KOS_PORTS"/sh4zam/dist/sh4zam-*/LICENSE 2> /dev/null | head -1)
-[ -n "$SHZ_LIC" ] || { echo "falta SH4ZAM (kos-ports/sh4zam: tools/instala_entorno.sh)" >&2; exit 1; }
+# (desde la Rev 2.9.2.c sin SH4ZAM: las matematicas del SH-4 son Little Bloste, comun/lbloste.h, codigo propio)
 make -s -C "$REPO/demo" > /dev/null
 "$KOS_CC_BASE/bin/sh-elf-objcopy" -R .stack -O binary "$REPO/demo/demo.elf" "$G/dc/1ST_READ.BIN"
 "$KOS/utils/makeip/makeip" -g "$NOMBRE" -c HOMEBREW -n ORC2CDC -f "$G/dc/IP.BIN" > /dev/null
@@ -72,7 +70,8 @@ for f in $BAT $LEEME; do sed 's/\r*$/\r/' "$REPO/windows/$f" > "$P/$f"; done
 {
     printf 'Componentes de este paquete y sus licencias\r\n\r\n'
     printf ' - programa/tools, programa/*.py, %s: orc2cdc (codigo propio).\r\n' "$BAT"
-    printf ' - programa/dc/1ST_READ.BIN: la demo de orc2cdc compilada con KallistiOS y SH4ZAM (sus licencias abajo).\r\n'
+    printf ' - programa/dc/1ST_READ.BIN: la demo de orc2cdc compilada con KallistiOS (su licencia abajo); las matematicas\r\n'
+    printf '   del SH-4 son Little Bloste (codigo propio de orc2cdc, comun/lbloste.h).\r\n'
     printf ' - programa/dc/IP.BIN: makeip de KallistiOS.\r\n'
     printf ' - programa/python: Python %s embebido de python.org (licencia en programa/python/LICENSE.txt).\r\n' $PYVER
     printf ' - programa/python/Lib/site-packages: %s, de PyPI; cada uno con su licencia en\r\n' "$RUEDAS"
@@ -81,8 +80,6 @@ for f in $BAT $LEEME; do sed 's/\r*$/\r/' "$REPO/windows/$f" > "$P/$f"; done
     printf ' - programa/nativo/pvrtex.exe: pvrtex de KallistiOS (utils/pvrtex), LGPL por el codigo de FFmpeg que lleva;\r\n'
     printf '   su codigo fuente, tal cual se compila, en programa/fuentes/pvrtex.zip.\r\n\r\n'
     printf '==== Licencia de KallistiOS ====\r\n'; sed 's/\r*$/\r/' "$KOS/doc/LICENSE.md"
-    printf '\r\n==== Licencia de SH4ZAM (https://github.com/gyrovorbis/sh4zam, por kos-ports) ====\r\n'
-    sed 's/\r*$/\r/' "$SHZ_LIC"
 } > "$P/LICENCIAS.txt"
 # comprobacion: en el paquete no hay nada del disco (ni datos convertidos ni la ISO)
 if find "$P" \( -iname '*.iso' -o -iname '*.DAT' -o -iname '*.ADP' -o -iname '*.VQV' -o -iname '*.PAK' -o -iname '*.gdi' \) | grep -q .; then

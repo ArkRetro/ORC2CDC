@@ -43,7 +43,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "robot.h"
-#include "shz.h"
+#include "lbloste.h"
 
 #define SEXAG (1.0f / 60.0f)
 typedef float mat_t[4][4];
@@ -102,12 +102,12 @@ static const uint32_t *t_band, *t_btex, *t_bmate; static uint32_t n_bmate;   /* 
 static const rpieza_t *bpz; static const rmalla_t *bml; static const rvert_t *bvt; static uint32_t bnpz;
 
 /* ---------------------------------------------------------------- matrices de fila: M = op M (pila del PC) */
-#if defined(CON_SH4ZAM) && !defined(SIN_SHZ_ROBOT)
-/* o = a b con FTRV (SH4ZAM): en columnas (lo que ve la XMTRX) la memoria de una matriz de filas es su traspuesta, asi
-   que (a b)^T = b^T a^T: se carga b y se le aplica a. o puede ser a o b (se escribe al final) */
+#if defined(CON_LBLOSTE) && !defined(SIN_LB_ROBOT)
+/* o = a b con FTRV (Little Bloste, comun/lbloste.h lb_mat_mul): XMTRX = b y cada fila de a por FTRV. o puede ser a o b
+   (se escribe al final) */
 static void m_mul(mat_t o, const mat_t a, const mat_t b)
 {
-    shz_xmtrx_load_unaligned_4x4(&b[0][0]); shz_xmtrx_apply_unaligned_4x4(&a[0][0]); shz_xmtrx_store_unaligned_4x4(&o[0][0]);
+    lb_mat_mul(o, a, b);
 }
 #else
 static void m_mul(mat_t o, const mat_t a, const mat_t b)       /* o = a b */

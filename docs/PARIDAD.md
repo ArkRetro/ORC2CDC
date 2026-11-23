@@ -1521,6 +1521,15 @@ de OutRun 2 SP (las 15 etapas seguidas) que dio el usuario.
   no esta leido). Sin EFECTOS.DAT nuevo, sin agua (como antes).
 - NO verificado en consola real.
 
+### Little Bloste y lejano a 3200 m (Rev 2.9.2.c / Mod 2.5.2.c, 2026-11-23)
+
+Pedido: quitar SH4ZAM y hacer las cuentas con una herramienta propia, Little Bloste, documentada; y el lejano maximo a
+3200 m. comun/lbloste.h (docs/LBLOSTE.md): carga / guarda de la XMTRX con FRCHG y FMOV.S, FTRV y el producto de matrices
+de filas, con su version en C (-DSIN_LBLOSTE). Los tres usos de antes (recorte de nodos, UV del entorno del coche,
+matrices de los personajes) con las mismas cuentas. Autoprueba (-DLBLOSTE_PRUEBA, 4000 casos): XMTRX exacta al guardar
+lo cargado, error maximo ~2e-7 de la suma de los terminos (como la cuenta en C). PALM: 41,50 fps (C: 41,31). LEJOS_MAX
+3500 -> 3200 m. SH4ZAM fuera de tools/instala_entorno.sh y de windows/construye.sh (y su licencia del paquete).
+
 ### Lejano a 3500 m (Rev 2.9.2.b / Mod 2.5.2.b, 2026-11-23)
 
 Pedido: "reducir la distancia de dibujado maxima de 4000 a 3500 de forma global". DESVIACION. LEJOS_MAX (3500) es el techo

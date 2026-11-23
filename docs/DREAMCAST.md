@@ -1192,6 +1192,9 @@ vertice).
 
 ### Rendimiento: SH4ZAM (2026-11-13)
 
+**Desde la Rev 2.9.2.c ya no se usa ni se instala: lo sustituye Little Bloste (comun/lbloste.h, codigo propio; docs/LBLOSTE.md),
+con las mismas cuentas en los mismos tres sitios. Lo de abajo queda como historia.**
+
 [SH4ZAM](https://github.com/gyrovorbis/sh4zam) (libreria de matematicas del SH-4 de Falco Girgis, licencia MIT;
 v0.10.0+10, commit 7e57d5c) se instala de kos-ports: `cd /opt/toolchains/dc/kos-ports/sh4zam && make install
 GIT_CHANGESET=7e57d5c` (si no hay kos-ports: `git clone https://github.com/KallistiOS/kos-ports
