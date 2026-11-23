@@ -1468,11 +1468,25 @@ static uint32_t vtx_reserva, lst_uso[3], lst_vtx[3]; static uint8_t lst_corto[3]
    reloj desde que empieza la logica hasta que acaba el dibujo, sin las esperas de la PowerVR ni del campo: ya incluye
    las interrupciones y el hilo de carga; 1,2 ms de margen y la misma histeresis de 4 ms que antes) */
 #ifndef CPU_MS_CORTA                                     /* ms de CPU por cuadro (dibujo + logica) que acortan / alargan */
-#define CPU_MS_CORTA 21.0f
-#endif
+#define CPU_MS_CORTA 24.0f                                       /* (Rev 2.9.2.e: a 40 fps el cuadro tiene 25 ms; antes 21 / 17 */
+#endif                                                           /*  con 45 fps) */
 #ifndef CPU_MS_ALARGA
-#define CPU_MS_ALARGA 17.0f
+#define CPU_MS_ALARGA 20.0f
 #endif
+/* Salto progresivo (Rev 2.9.2.e, pedido: "frameskip progresivo ... que los fps se mantengan fijos a 40"). DESVIACION.
+   La logica ya va a 59,94 pasos por segundo pase lo que pase (cada cuadro da los pasos del tiempo pasado: si un cuadro
+   tarda, el siguiente da mas pasos y el juego no se frena); lo que se ve son FPS_OBJETIVO cuadros por segundo con el
+   ritmo del barrido (pres_espera). Cuando la CPU o la PowerVR no llegan, el cuadro empieza tarde (pres_tarde) y esa
+   cadencia se rompe. Cada SALTO_VENTANA cuadros dibujados en carrera: con SALTO_SUBE o mas tarde, un nivel mas; con
+   SALTO_BAJA ventanas seguidas sin ninguno, uno menos. Niveles: 1 sin los focos de los faros sobre la escena ni la
+   luz del suelo (noche: ~1,6 ms en LASV) y el tope del TA de la etapa al 90 %; 2 al 80 %; 3 al 70 % y el lejano como
+   mucho a SALTO_LEJOS. -DSIN_SALTO: sin el */
+#define SALTO_VENTANA 40
+#define SALTO_SUBE 2
+#define SALTO_BAJA 3
+#define SALTO_LEJOS 2400.0f
+static const uint16_t SALTO_TA[4] = { 256, 230, 205, 180 };
+static int salto_niv;
 static uint32_t ta_bpv = TA_BPV_MIN, ta_f = TA_F_MIN, ta_vb, ta_et, ta_lim, ta_tope_etapa, ta_corto, ta_v2d, ta_v2d_ult;
 static uint32_t ta_otros_ult, ta_min_otros_teo, ta_traf_teo;   /* bytes de lo que no es la etapa (cuadro anterior; minimo
                                                             teorico) y teoricos del coche de trafico mayor con LOD 0 */
@@ -6190,7 +6204,7 @@ enum { TITULO, CUENTA, CARRERA, META, AGOTADO, FIN };   /* FIN: carrera suspendi
    - Fuera de la carrera (menus, peliculas, cargas) como antes: cada cuadro en cuanto esta (hasta 60 / 50).
    FPS_OBJETIVO >= campos por segundo (60 o 50) lo desactiva. */
 #ifndef FPS_OBJETIVO
-#define FPS_OBJETIVO 45
+#define FPS_OBJETIVO 40                                         /* Rev 2.9.2.e (pedido: "fijos a 40"); antes 45 */
 #endif
 #define PRES_LAT 2                                              /* campos de la espera de un cuadro a su presentacion */
 static volatile uint32_t vbl_n;                                 /* campos (vblank) desde pvr_init */
@@ -8552,6 +8566,7 @@ static void prio_ajusta(int corto, uint32_t usado)
             for (k = 0; k + 4 <= strlen(z); k += 4) if (!memcmp(z + k, curso[cur_nodo].zona, 4)) pvs_grande_on = 1;
         if (cur_nodo >= 0 && cur_nodo < ncurso)
             for (k = 0; k + 4 <= strlen(e); k += 4) if (!memcmp(e + k, curso[cur_nodo].zona, 4)) ta_escala = PRESUP_ESCALA;
+        ta_escala = ta_escala * SALTO_TA[salto_niv & 3] >> 8;    /* salto progresivo (Rev 2.9.2.e) */
     }
 #ifdef DIAG_POPPING
     if (corto) pop_ccorto++;
@@ -9552,7 +9567,7 @@ static void faros_dibuja(matrix_t *mc, uint32_t ban, int choque)
 {
     static matrix_t K __attribute__((aligned(32)));
     uint32_t i;
-    if (!faros_ok || choque || (ban & 0x900) != 0x900) return;
+    if (!faros_ok || choque || (ban & 0x900) != 0x900 || salto_niv >= 1) return;   /* (salto progresivo, nivel 1) */
 #ifdef DIAG_SIN_FAROS
     return;                                                     /* medida: sin la luz del suelo */
 #endif
@@ -9730,7 +9745,7 @@ static void focos_prepara(const matrix_t *mc, int on)
 #ifdef DIAG_SIN_FOCOS
     on = 0;                                                     /* medida: sin los focos */
 #endif
-    if (!on || !focos_ok) return;
+    if (!on || !focos_ok || salto_niv >= 1) return;            /* (salto progresivo, nivel 1) */
     p[0] = 0; p[1] = alt; p[2] = pos;
     q[0] = 0; q[1] = alt + (sinf(dir * D2R) * 10.0f + alt); q[2] = pos + (pos - cosf(dir * D2R) * 10.0f);
     for (j = 0; j < 3; j++) {                                   /* en el mundo (filas: p car+B0) */
@@ -12956,6 +12971,22 @@ int main(int argc, char **argv)
 
     for (;;) {
         pres_espera(estado != TITULO);                          /* en carrera: el campo de este cuadro (FPS_OBJETIVO) */
+#ifndef SIN_SALTO
+        {   /* salto progresivo: los cuadros que empezaron tarde en la ventana */
+            static uint32_t sv_n, sv_t0, sv_limpias;
+            if (estado == CARRERA) {
+                if (++sv_n >= SALTO_VENTANA) {
+                    uint32_t t = pres_tarde - sv_t0; int ant = salto_niv;
+                    if (t >= SALTO_SUBE) { if (salto_niv < 3) salto_niv++; sv_limpias = 0; }
+                    else if (t == 0) { if (++sv_limpias >= SALTO_BAJA && salto_niv > 0) { salto_niv--; sv_limpias = 0; } }
+                    else sv_limpias = 0;
+                    if (salto_niv != ant) dbglog(DBG_INFO, "SALTO: nivel %d (%u tarde en %d cuadros, %.4s)\n", salto_niv, (unsigned)t, SALTO_VENTANA,
+                                                 cur_nodo >= 0 ? curso[cur_nodo].zona : "----");
+                    sv_n = 0; sv_t0 = pres_tarde;
+                }
+            } else if (estado == TITULO) { salto_niv = 0; sv_n = 0; sv_t0 = pres_tarde; sv_limpias = 0; }
+        }
+#endif
         maple_device_t *mc = maple_enum_type(0, MAPLE_FUNC_CONTROLLER);
         cont_state_t *st = mc ? (cont_state_t *)maple_dev_status(mc) : NULL;
         uint32_t b = st ? st->buttons : 0, nuevo = b & ~bot_ant;
@@ -14201,7 +14232,7 @@ int main(int argc, char **argv)
             /* el presupuesto del TA ya lo reparte nodos_visibles_todos: aqui solo la CPU (DIAG_SIN_CPU: para medir en
                Flycast, que no da el tiempo del SH4 de la consola, sin este recorte) */
 #ifndef DIAG_SIN_CPU
-            if (ms + ms_log > CPU_MS_CORTA) {               /* acorta (seguridad: la CPU no llega al cuadro) */
+            if (ms + ms_log > CPU_MS_CORTA || (salto_niv >= 3 && lejos > SALTO_LEJOS)) {   /* acorta (la CPU no llega; salto 3) */
                 if (lejos > LEJOS_MIN) lejos -= 50.0f;
             } else if (ms + ms_log < CPU_MS_ALARGA) {
                 if (lejos < lejos_obj) lejos += 50.0f;         /* vuelve a la del original */
