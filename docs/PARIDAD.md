@@ -1505,6 +1505,17 @@ de OutRun 2 SP (las 15 etapas seguidas) que dio el usuario.
   no esta leido). Sin EFECTOS.DAT nuevo, sin agua (como antes).
 - NO verificado en consola real.
 
+### 40 fps fijos y salto progresivo (Rev 2.9.2.e / Mod 2.5.2.e, 2026-11-23)
+
+Pedido: "frameskip progresivo e intentar que los fps se mantengan fijos a 40". DESVIACION. FPS_OBJETIVO 45 -> 40 (a 60 Hz
+un cuadro cada 1 y 2 campos alternos; a 50 Hz 4 cada 5), CPU_MS_CORTA / ALARGA 21 / 17 -> 24 / 20 ms (cuadro de 25 ms).
+Salto progresivo (demo/main.c, SALTO_*): cada 40 cuadros dibujados en carrera, con 2 o mas que empezaron tarde un nivel
+mas, con 3 ventanas seguidas sin ninguno uno menos; nivel 1 sin los focos de los faros sobre la escena ni la luz del
+suelo y el tope del TA de la etapa al 90 %, nivel 2 al 80 %, nivel 3 al 70 % y el lejano como mucho a 2400 m. La logica
+sigue a 59,94 pasos por segundo (un cuadro tarde no frena el juego). Medido (Flycast, piloto, ~100 medidas):
+PALM 41,8 fps (desviacion 3,80, 178 cuadros tarde) con 45 sin salto -> 39,2 (2,63, 53); LASV 41,4 (4,00, 196) -> 39,4
+(1,41, 30). `-DSIN_SALTO`, `-DFPS_OBJETIVO=45`: como antes.
+
 ### Version lejana lowpoly de lo grande (Rev 2.9.2.d / Mod 2.5.2.d, 2026-11-23)
 
 Pedido: "modelos lowpoly y texturas de baja resolucion para los elementos grandes como puentes, montanas, bloques de
