@@ -644,8 +644,8 @@ def fantasma(vols, tol=0.01):
     """GHO1 (detras de ANI1 en CEX2): el coche fantasma de la Contrarreloj (demo/main.c gh_dibuja, Rev 2.9.2.a): las
     caras de las envolventes de los trozos convexos de los volumenes de sombra (la forma del coche en ~200-400
     triangulos, sin texturas), sin las interiores (las que comparte con otro trozo con la normal opuesta: en translucido
-    se verian como franjas). 'GHO1', u32 palabras del bloque, u32 triangulos; por triangulo 9 f32 (vertices en el marco
-    del coche, hacia fuera en sentido antihorario visto desde fuera) y f32 luz (0..1, de la normal)"""
+    se verian como franjas). 'GHO1', u32 palabras del bloque, u32 triangulos; por triangulo 9 i16 (vertices en mm en el
+    marco del coche) y u16 luz (0..255, de la normal): 20 bytes; relleno hasta 4"""
     from scipy.spatial import ConvexHull
     caras = []
     for k, (P, _) in enumerate(vols):
@@ -662,7 +662,9 @@ def fantasma(vols, tol=0.01):
         interior = any(k2 != k and np.dot(n, n2) < -0.999 and abs(d + d2) < tol for k2, n2, d2, _ in caras)
         if not interior: fuera.append((n, T))
     L = np.array([0.3, 0.8, 0.5]); L /= np.linalg.norm(L)
-    datos = b''.join(T.astype('<f4').tobytes() + struct.pack('<f', 0.45 + 0.55 * max(0.0, float(np.dot(n, L)))) for n, T in fuera)
+    datos = b''.join(np.clip(np.round(T * 1000), -32767, 32767).astype('<i2').tobytes() +
+                     struct.pack('<H', int(round(255 * (0.45 + 0.55 * max(0.0, float(np.dot(n, L))))))) for n, T in fuera)
+    datos += bytes(-len(datos) % 4)
     return b'GHO1' + struct.pack('<2I', 3 + len(datos) // 4, len(fuera)) + datos, len(caras), len(fuera)
 
 def registro_modelo(A, m):
