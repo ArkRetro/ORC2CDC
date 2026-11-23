@@ -346,7 +346,9 @@ static int pila_cmp(const void *a, const void *b)
    -DSIN_DECOR_REDUCE: como antes */
 #include "decor_tabla.h"
 #define DECOR_VEG 20
-#define DECOR_VEG_N 3
+#define DECOR_VEG_N 6                                           /* Rev 2.9.2.a (pedido: "10 palmeras -> 7"): 30 %; antes 3 (15 %) */
+#define DECOR_REPE 3                                            /* repetidos iguales: fuera 1 de cada 3 ("3 carteles -> 2") */
+#define DECOR_DETRAS 3                                          /* edificios tapados por otro de delante: fuera 1 de cada 3 */
 #define DECOR_FAROLA 20
 #define DECOR_PUBLICO 2
 static void decor_reduce(modelo_t *m, const char *nombre)
@@ -416,6 +418,101 @@ static void decor_reduce(modelo_t *m, const char *nombre)
                 cl[j] = 3; ntron++;
             }
         }
+    }
+    /* Rev 2.9.2.a (pedido: "si hay una zona con 3 carteles iguales deja solo 2 ... en zonas donde haya una linea de
+       edificios al frente quita alguno que este detras", con un patron que valga para todas las etapas). DESVIACION.
+       Unidad = el nodo o su grupo entero (tools/grupos_nodos.py: base y torre de un edificio van juntas). Con la ruta
+       de la etapa (el punto mas cercano: lado, distancia lateral y tramo a lo largo):
+       - repetidos: unidades sin clasificar (ni vegetacion, ni publico, ni farola) de un solo nodo, de 1,5-15 m de lado y
+         1,5-15 m de alto, fuera de la calzada (mas de 3 m mas alla del asfalto), con la misma firma (vertices, suma de
+         texturas y medidas al medio metro) que al menos otras 2 de la etapa; no las que estan pegadas a una igual (a
+         menos de 1,5 veces su lado: vallas, barreras, tramos seguidos) ni las que tienen algo grande encima (pilares):
+         fuera 1 de cada DECOR_REPE por la posicion;
+       - edificios de la segunda fila: unidades opacas de mas de 8 m de alto y 10-90 m de lado a mas de 20 m de la ruta
+         con otra del mismo lado mas cerca de la ruta (al menos 5 m) que las tapa en el 80 % de su tramo y tiene al menos
+         el 70 % de su alto: fuera 1 de cada DECOR_DETRAS. */
+    if (m->ruta && m->nruta > 2 && m->paso_ruta >= 5) {
+        uint32_t nr = m->nruta, pr = m->paso_ruta, u, nrep = 0, nrepq = 0, ndet = 0, ndetq = 0;
+        int32_t *uni = malloc(nn * sizeof *uni); float (*ub)[6] = malloc(nn * sizeof *ub); float (*fr)[5] = malloc(nn * sizeof *fr);
+        uint32_t *uv = calloc(nn, sizeof *uv), *ut = calloc(nn, sizeof *ut); uint8_t *uk = calloc(nn, 1);
+        if (uni && ub && fr && uv && ut && uk) {
+            for (i = 0; i < nn; i++) { uint32_t g = m->nodos[i].fl >> 16; uni[i] = g && g <= nn ? (int32_t)(g - 1) : (int32_t)i;
+                                       ub[i][0] = ub[i][1] = ub[i][2] = 1e30f; ub[i][3] = ub[i][4] = ub[i][5] = -1e30f; }
+            for (i = 0; i < nn; i++) {                          /* medidas de cada unidad; uk: 1 opaca, 2 mezcla o no vale */
+                u = (uint32_t)uni[i];
+                if (!cv[i][0]) continue;
+                if (cl[i] || m->nodos[i].cartel >= 0 || (m->nodos[i].fl & NODO_LEJ)) uk[u] = 2;
+                for (j = 0; j < 3; j++) { ub[u][j] = fminf(ub[u][j], bb[i][j]); ub[u][3 + j] = fmaxf(ub[u][3 + j], bb[i][3 + j]); }
+                uv[u] += cv[i][0]; if (u != i) uk[u] = uk[u] == 2 ? 2 : uk[u] | 4;   /* 4: grupo de varios */
+                if (!uk[u] || uk[u] == 4) uk[u] |= 2 * cv[i][1] > cv[i][0] ? 8 : 1;   /* 8: casi todo de recorte */
+            }
+            for (i = 0; i < m->inicio[3]; i++) { const malla_t *ma = m->mallas + i;    /* firma: suma de texturas */
+                if (ma->nodo >= 0 && (uint32_t)ma->nodo < nn && ma->n >= 3) ut[uni[ma->nodo]] += (uint32_t)(ma->tex + 1) * 2654435761u; }
+            for (u = 0; u < nn; u++) {                          /* marco de la ruta: lado, lateral, tramo, alto, ancho */
+                float cx = (ub[u][0] + ub[u][3]) * 0.5f, cz = (ub[u][2] + ub[u][5]) * 0.5f, mejor = 1e30f, tx, tz, l;
+                uint32_t k, kb = 0;
+                fr[u][0] = 0;
+                if (!uv[u] || uni[u] != (int32_t)u || (uk[u] & 2)) continue;
+                for (k = 0; k < nr; k += 2) { const float *p = m->ruta + pr * k; float d = (p[0] - cx) * (p[0] - cx) + (p[2] - cz) * (p[2] - cz);
+                                              if (d < mejor) { mejor = d; kb = k; } }
+                {   const float *p = m->ruta + pr * kb, *q = m->ruta + pr * (kb + 1 < nr ? kb + 1 : kb - 1);
+                    float dx = q[0] - p[0], dz = q[2] - p[2], n = sqrtf(dx * dx + dz * dz) + 1e-6f, e0 = 1e30f, e1 = -1e30f; int c;
+                    if (kb + 1 >= nr) { dx = -dx; dz = -dz; }
+                    tx = dx / n; tz = dz / n; l = (cx - p[0]) * tz - (cz - p[2]) * tx;
+                    for (c = 0; c < 4; c++) { float x = ub[u][c & 1 ? 3 : 0] - p[0], z = ub[u][c & 2 ? 5 : 2] - p[2], a = x * tx + z * tz;
+                                              e0 = fminf(e0, a); e1 = fmaxf(e1, a); }
+                    fr[u][0] = l; fr[u][1] = kb * 4.0f + e0; fr[u][2] = kb * 4.0f + e1;   /* (ruta cada 4 m: PASO) */ fr[u][3] = ub[u][4] - p[1];
+                    fr[u][4] = fmaxf(l < 0 ? p[3] : p[4], 3.0f);  /* (el asfalto de ese lado) */
+                }
+            }
+            for (u = 0; u < nn; u++) {                          /* repetidos */
+                float ax = ub[u][3] - ub[u][0], az = ub[u][5] - ub[u][2], ay = ub[u][4] - ub[u][1], lado = fmaxf(ax, az), dmin = 1e30f;
+                uint32_t v, igual = 0; int encima = 0;
+                if (uni[u] != (int32_t)u || !uv[u] || uk[u] != 1 || lado < 1.5f || lado > 15.0f || ay < 1.5f || ay > 15.0f) continue;
+                if (fabsf(fr[u][0]) < fr[u][4] + 3.0f) continue;
+                for (v = 0; v < nn; v++) {
+                    float bx, bz, by;
+                    if (v == u || uni[v] != (int32_t)v || !uv[v]) continue;
+                    bx = ub[v][3] - ub[v][0]; bz = ub[v][5] - ub[v][2]; by = ub[v][4] - ub[v][1];
+                    if (fmaxf(bx, bz) > 20.0f && ub[v][1] > ub[u][4] - 1.0f && ub[v][1] < ub[u][4] + 2.0f &&
+                        (ub[u][0] + ub[u][3]) * 0.5f > ub[v][0] && (ub[u][0] + ub[u][3]) * 0.5f < ub[v][3] &&
+                        (ub[u][2] + ub[u][5]) * 0.5f > ub[v][2] && (ub[u][2] + ub[u][5]) * 0.5f < ub[v][5]) encima = 1;
+                    if (uv[v] != uv[u] || ut[v] != ut[u] || fabsf(by - ay) > 0.5f || fabsf(fmaxf(bx, bz) - lado) > 0.5f) continue;
+                    igual++;
+                    {   float dx = (ub[v][0] + ub[v][3] - ub[u][0] - ub[u][3]) * 0.5f, dz = (ub[v][2] + ub[v][5] - ub[u][2] - ub[u][5]) * 0.5f;
+                        dmin = fminf(dmin, sqrtf(dx * dx + dz * dz)); }
+                }
+                if (igual < 2 || encima || dmin < 1.5f * lado) continue;
+                nrep++;
+                {   float cx = (ub[u][0] + ub[u][3]) * 0.5f, cz = (ub[u][2] + ub[u][5]) * 0.5f; uint32_t h;
+                    h = ((uint32_t)(int32_t)floorf(cx) * 83492791u) ^ ((uint32_t)(int32_t)floorf(cz) * 2654435761u);
+                    h ^= h >> 13; h *= 0x5bd1e995u; h ^= h >> 15;
+                    if ((h >> 5) % DECOR_REPE == 0) { uk[u] = 16; nrepq++; } }
+            }
+            for (u = 0; u < nn; u++) {                          /* edificios de la segunda fila */
+                float lado = fmaxf(ub[u][3] - ub[u][0], ub[u][5] - ub[u][2]); uint32_t v; int tapado = 0;
+                if (uni[u] != (int32_t)u || !uv[u] || !(uk[u] & 1) || (uk[u] & (2 | 8 | 16)) || fr[u][3] < 8.0f || lado < 10.0f || lado > 90.0f) continue;
+                if (fabsf(fr[u][0]) < 20.0f) continue;
+                for (v = 0; v < nn && !tapado; v++) {
+                    float ov;
+                    if (v == u || uni[v] != (int32_t)v || !uv[v] || !(uk[v] & 1) || (uk[v] & (2 | 8)) || (fr[v][0] < 0) != (fr[u][0] < 0)) continue;
+                    if (fabsf(fr[v][0]) > fabsf(fr[u][0]) - 5.0f || fr[v][3] < 0.7f * fr[u][3]) continue;
+                    ov = fminf(fr[u][2], fr[v][2]) - fmaxf(fr[u][1], fr[v][1]);
+                    if (ov >= 0.8f * (fr[u][2] - fr[u][1])) tapado = 1;
+                }
+                if (!tapado) continue;
+                ndet++;
+                {   float cx = (ub[u][0] + ub[u][3]) * 0.5f, cz = (ub[u][2] + ub[u][5]) * 0.5f; uint32_t h;
+                    h = ((uint32_t)(int32_t)floorf(cx) * 19349663u) ^ ((uint32_t)(int32_t)floorf(cz) * 83492791u);
+                    h ^= h >> 13; h *= 0x5bd1e995u; h ^= h >> 15;
+                    if ((h >> 3) % DECOR_DETRAS == 0) { uk[u] |= 32; ndetq++; } }
+            }
+            for (i = 0; i < nn; i++) if (uk[uni[i]] & 48) { cl[i] = 3;
+                int32_t lej = m->nodos[i].cartel <= -2 ? -2 - m->nodos[i].cartel : -1; if (lej >= 0 && (uint32_t)lej < nn) cl[lej] = 3; }
+            dbglog(DBG_INFO, "DECOR: %s repetidos %u (%u fuera), edificios tapados %u (%u fuera)\n", nombre, (unsigned)nrep, (unsigned)nrepq,
+                   (unsigned)ndet, (unsigned)ndetq);
+        }
+        free(uni); free(ub); free(fr); free(uv); free(ut); free(uk);
     }
     for (i = 0; i < m->nmallas; i++) {                          /* (una pasada: 3 fuera, 4 publico) */
         malla_t *ma = m->mallas + i;
@@ -3375,6 +3472,12 @@ static void traf_azar(int en_union, int nodo, int pos, const uint8_t *rec)
     }
 #endif
     if (m < 0) { traf_clase_sig(); traf_ult_pos = pos; return; }   /* camiones sin cargar (fuera de OUTRUN2SP): gastado */
+#ifndef TRAF_MENOS
+#define TRAF_MENOS 20                                           /* Rev 2.9.2.a (pedido): 1 de cada 20 aperturas gastada (-5 %) */
+#endif
+    {   static unsigned n_ap;
+        if (TRAF_MENOS > 0 && ++n_ap % TRAF_MENOS == 0) { traf_clase_sig(); traf_ult_pos = pos; return; }   /* (como sin modelo) */
+    }
     {
         int c = traf_cuenta[m] >= traf_ncol[m] ? 0 : traf_cuenta[m];   /* el siguiente color del modelo (804358) */
         traf_cuenta[m] = c + 1;
@@ -10363,6 +10466,7 @@ static uint32_t noche_ban(void)
     c = curso[area].clima;
     return (c & 8 ? 0x500u : 0) | (c & 0x10 ? 0x200u : 0);
 }
+static const float *gho_t; static uint32_t gho_n;               /* GHO1: triangulos del coche fantasma (9 f32 + luz) */
 static matrix_t ani_m[NPZ] __attribute__((aligned(32)));      /* matriz de cada pieza en el marco del coche */
 /* lee el CEX2 del coche recien cargado: desplazamiento por vertice, cabeceras con desplazamiento para el entorno y
    grupos de luces */
@@ -10831,7 +10935,11 @@ static void coche_ani_lee(void)
         n = q[1]; q += 2;
         for (j = 0; j < n && q + 2 <= fin; j++) q += 2 + 3 * q[0] + 3 * q[1];
     }
+    gho_n = 0; gho_t = NULL;
     if (q + 9 + 5 * NPZ_ANI > fin || memcmp(q, "ANI1", 4) || q[1] < 9 + 5 * NPZ_ANI) return;
+    {   const uint32_t *g = q + q[1];                            /* GHO1 (tools/conv_coche.py fantasma): el coche fantasma */
+        if (g + 3 <= fin && !memcmp(g, "GHO1", 4) && g + 3 + 10 * g[2] <= fin) { gho_n = g[2]; gho_t = (const float *)(g + 3); }
+    }
     ani.modelo = q[2]; memcpy(&ani.radio, q + 3, 6 * 4); memcpy(ani.pz, q + 9, sizeof ani.pz);
     if (!(ani.radio > 0.05f)) ani.radio = 0.33f;
     if (!piezas_indices(&coche, NPZ, &ani.idx, ani.ini)) return;
@@ -12077,8 +12185,8 @@ static void tabla_entra(void)
      (cm), el rumbo respecto a la ruta y la deriva (65536 = 2 pi) y la velocidad. Se reproduce interpolando y se
      coloca como el trafico (coche_coloca / pon_coche). 1 minuto = ~5,4 KB (11 bloques de VMU); el registro del
      original ocupa ~40 KB (80 bloques).
-   - Se dibuja con el modelo del coche que lleva el jugador (un segundo COCHEnn.DAT no cabe en la RAM ni en la VRAM),
-     en la lista transparente con alfa 0,5 y las piezas animadas del jugador.
+   - Se dibuja con la forma simplificada del coche que lleva el jugador (GHO1, 200-400 triangulos sin textura ni color,
+     translucido: Rev 2.9.2.a; en la 2.9.2 era el coche entero con alfa 0,5 y el TA no daba para la etapa).
    - Solo se ve si va por la etapa (o union) actual, la siguiente ya cargada o la union de la anterior: si se aleja
      mas de eso, o toma la otra rama de una bifurcacion, no se dibuja.
    - Uno por curso (codigo del tablero + preset), en la RAM y en la VMU (fichero ORGHppcc, cc = codigo, pp = preset),
@@ -12089,9 +12197,12 @@ typedef struct { uint8_t nodo, fl; uint16_t d; int16_t x, a, der, v; } gh_m_t;  
 typedef struct { char marca[4]; uint16_t ver, clave; uint32_t n, total_ms, modelo; } gh_cab_t;
 static gh_m_t gh_rec[GH_MAX], gh_rep[GH_MAX];
 static gh_cab_t gh_rep_cab; static int gh_nrec, gh_nrep, gh_clave = -1, gh_grabando, gh_ve, gh_lleno;
+/* 4A2BA0 con el modo de juego: la vista de carrera (interior 0x8000 o nada en la 0) solo vale en el modo 16 (carrera); en
+   la salida (13 / 14), la meta (19), el fin del tiempo (20..22) y lo demas el coche va entero (0x4000: dl = 2, PC
+   driving/pc_camera.cpp kind[]). Antes la meta desde la vista 1 seguia con el habitaculo: no se veia el derrape */
+static int coche_modo(int carrera) { return !cam_ok ? 2 : carrera ? cam_coche_modo(&cam) : 2; }
 static int gh_nodo_ant = -1, gh_rama_ant = -1; static float gh_union_ant = -1;   /* la union de la etapa anterior */
-static coche_t gh_c; static matrix_t gh_mat __attribute__((aligned(32))); static pvr_poly_hdr_t *gh_cabs; static uint32_t gh_ncabs;
-static uint8_t *gh_a0; static uint32_t gh_nv;                     /* el alfa de cada vertice del coche (gh_dibuja) */
+static coche_t gh_c; static matrix_t gh_mat __attribute__((aligned(32)));
 static volatile int gh_guardando;
 static uint8_t gh_buf[sizeof(gh_cab_t) + sizeof gh_rep];        /* el fichero de la VMU (lectura y guardado) */
 #define GH_U (65536.0f / 6.2831853f)
@@ -12202,69 +12313,52 @@ static int gh_coloca(void)
     gh_c.y_ok = 0; memset(gh_c.pose_t, 0, sizeof gh_c.pose_t); memset(gh_c.pose_r, 0, sizeof gh_c.pose_r);
     coche_coloca(&gh_c); pon_coche(&gh_c, gh_mat);
 #ifdef DIAG_GH
-    if (gh_dn % 60 == 0) dbglog(DBG_INFO, "GH: s %.1f x %.1f pos %.1f %.1f %.1f (jugador %.1f %.1f %.1f) cabs %p\n", (double)gh_c.s, (double)gh_c.x,
-                                (double)gh_c.pos[0], (double)gh_c.pos[1], (double)gh_c.pos[2], (double)yo.pos[0], (double)yo.pos[1], (double)yo.pos[2], (void *)gh_cabs);
+    if (gh_dn % 60 == 0) dbglog(DBG_INFO, "GH: s %.1f x %.1f pos %.1f %.1f %.1f (jugador %.1f %.1f %.1f) GHO1 %u\n", (double)gh_c.s, (double)gh_c.x,
+                                (double)gh_c.pos[0], (double)gh_c.pos[1], (double)gh_c.pos[2], (double)yo.pos[0], (double)yo.pos[1], (double)yo.pos[2], (unsigned)gho_n);
 #endif
     return 1;
 }
-/* cabeceras del coche del jugador pasadas a la lista transparente con alfa (4AE0F0: alfa +B68), una vez por coche */
-static void gh_prepara_cabs(void)
-{
-    uint32_t i, f;
-    if (gh_cabs && gh_ncabs == coche.ntex + 1) return;
-    free(gh_cabs); gh_cabs = NULL; gh_ncabs = 0;
-    free(gh_a0); gh_a0 = NULL; gh_nv = 0;
-    for (i = 0; i < coche.nmallas; i++) if (coche.mallas[i].v0 + coche.mallas[i].n > gh_nv) gh_nv = coche.mallas[i].v0 + coche.mallas[i].n;
-    if (!coche.cabs[0] || !coche.tv || !(gh_a0 = malloc(gh_nv)) || !(gh_cabs = memalign(32, (coche.ntex + 1) * sizeof(pvr_poly_hdr_t)))) {
-        free(gh_a0); gh_a0 = NULL; return; }
-    for (i = 0; i < coche.ntex; i++) {                          /* compila_cab con la lista transparente y alfa */
-        pvr_poly_cxt_t cx; tex_t *t = coche.texs + i; uint32_t fb = t->fmt & 0xff, vq = t->fmt & 0x100, n = ((t->fmt >> 16) & 0xff) + 1;
-        pvr_ptr_t dir = vq ? (pvr_ptr_t)((uintptr_t)coche.tv[i] - (2048 - 8 * n)) : coche.tv[i];
-        f = ((const uint32_t *)(coche.cabs[0] + i))[0] & PVR_TA_CMD_SPECULAR_MASK;   /* (el desplazamiento de la pintura) */
-        pvr_poly_cxt_txr(&cx, PVR_LIST_TR_POLY, FMT[fb] | PVR_TXRFMT_TWIDDLED | (vq ? PVR_TXRFMT_VQ_ENABLE : 0), t->w, t->h, dir,
-                         PVR_FILTER_BILINEAR);
-        cx.gen.fog_type = PVR_FOG_TABLE; cx.gen.culling = PVR_CULLING_NONE; cx.gen.alpha = PVR_ALPHA_ENABLE;
-        cx.txr.env = PVR_TXRENV_MODULATEALPHA; cx.blend.src = PVR_BLEND_SRCALPHA; cx.blend.dst = PVR_BLEND_INVSRCALPHA;
-        if (f) cx.gen.specular = PVR_SPECULAR_ENABLE;
-        pvr_poly_compile(gh_cabs + i, &cx);
-    }
-    gh_ncabs = coche.ntex + 1;
-}
-#define GH_ALFA 0x80                                            /* 0,5 */
-/* en la lista transparente: todas las piezas del coche (menos habitaculo y sombra) con las cabeceras de gh_cabs */
+#define GH_ALFA 0x70                                            /* (Rev 2.9.2.a: sin textura, ~0,44) */
+#define GH_COLOR 0xD8E4F0                                       /* gris azulado claro, sin la pintura del coche (pedido) */
+/* Rev 2.9.2.a (pedido: "que no tengan color, menos poligonos, sin textura, que conserven su traslucidez"; con el coche
+   entero el TA no daba para la etapa): los triangulos de GHO1 (las envolventes de los volumenes de sombra, 200-400 por
+   coche, tools/conv_coche.py fantasma) sin textura en la lista transparente, con la luz de su normal (fija en el marco
+   del coche) y alfa GH_ALFA. Sin GHO1 (coches de antes de la 2.9.2.a) no se dibuja. -DGH_COCHE: el coche entero de la
+   2.9.2 */
+static pvr_poly_hdr_t gh_cab_col __attribute__((aligned(32))); static int gh_cab_ok;
 static void gh_dibuja(int lista)
 {
-    pvr_poly_hdr_t *orig = coche.cabs[0]; int l, p;
-    if (!ani.ok) return;
-    gh_prepara_cabs();
-    if (!gh_cabs) return;
-#ifdef GH_OPACO
-    l = lista;                                                  /* prueba: opaco, con las cabeceras del coche */
-    for (p = 0; p < NPZ; p++) {
-        uint32_t a = ani.ini[l][p], b = ani.ini[l][p + 1];
-        if (b <= a || p == PZ_INTERIOR || p == PZ_SOMBRA) continue;
-        mat_load(&vista); mat_apply(&gh_mat); mat_apply(&ani_m[p]);
-        dibuja_indices(&coche, l, ani.idx + a, b - a);
+    uint32_t i; int k;
+    if (lista != 2 || !gho_n) return;
+    if (!gh_cab_ok) {
+        pvr_poly_cxt_t cx;
+        pvr_poly_cxt_col(&cx, PVR_LIST_TR_POLY);
+        cx.gen.culling = PVR_CULLING_NONE; cx.gen.fog_type = PVR_FOG_TABLE; cx.gen.alpha = PVR_ALPHA_ENABLE;
+        cx.blend.src = PVR_BLEND_SRCALPHA; cx.blend.dst = PVR_BLEND_INVSRCALPHA;
+        pvr_poly_compile(&gh_cab_col, &cx); gh_cab_ok = 1;
     }
-    (void)orig; return;
-#endif
-    if (lista != 2) return;
-    {   /* el alfa en los vertices (y vuelta al acabar): asi las mallas enteras delante del plano cercano van por la ruta
-           directa (dibuja_malla_directa); con color_mul todas iban por dibuja_malla (medido: 42,7 -> 33,8 fps) */
-        vert_t *v = (vert_t *)coche.verts; uint32_t i;
-        for (i = 0; i < gh_nv; i++) { uint32_t c = v[i].c; gh_a0[i] = c >> 24; v[i].c = (c & 0xFFFFFF) | ((c >> 24) * GH_ALFA >> 8) << 24; }
-    }
-    coche.cabs[0] = gh_cabs; indices_delante = modelo_delante(&coche, (const float (*)[4])gh_mat);
-    for (l = 0; l < 3; l++)
-        for (p = 0; p < NPZ; p++) {
-            uint32_t a = ani.ini[l][p], b = ani.ini[l][p + 1];
-            if (b <= a || p == PZ_INTERIOR || p == PZ_SOMBRA) continue;
-            mat_load(&vista); mat_apply(&gh_mat); mat_apply(&ani_m[p]);
-            dibuja_indices(&coche, 2, ani.idx + a, b - a);
+    if (!ta_cabe(3 * gho_n)) return;
+    mat_load(&vista); mat_apply(&gh_mat); if (ani.ok) mat_apply(&ani_m[0]);
+    pvr_prim(&gh_cab_col, sizeof gh_cab_col);
+    for (i = 0; i < gho_n; i++) {
+        const float *t = gho_t + 10 * i; float X[3], Y[3], W[3]; uint32_t c; int ok = 1;
+        for (k = 0; k < 3; k++) {
+            float x = t[3 * k], y = t[3 * k + 1], z = t[3 * k + 2], w;
+            mat_trans_single3_nodivw(x, y, z, w);
+            if (!(w > cerca)) { ok = 0; break; }
+            X[k] = x; Y[k] = y; W[k] = w;
         }
-    coche.cabs[0] = orig; indices_delante = 0;
-    {   vert_t *v = (vert_t *)coche.verts; uint32_t i;
-        for (i = 0; i < gh_nv; i++) v[i].c = (v[i].c & 0xFFFFFF) | (uint32_t)gh_a0[i] << 24; }
+        if (!ok) continue;
+        {   float l = t[9]; uint32_t r = (uint32_t)(((GH_COLOR >> 16) & 255) * l), g = (uint32_t)(((GH_COLOR >> 8) & 255) * l), b = (uint32_t)((GH_COLOR & 255) * l);
+            c = (uint32_t)GH_ALFA << 24 | r << 16 | g << 8 | b; }
+        for (k = 0; k < 3; k++) {
+            pvr_vertex_t v; float iw = 1.0f / W[k];
+            v.flags = k == 2 ? PVR_CMD_VERTEX_EOL : PVR_CMD_VERTEX;
+            v.x = X[k] * iw; v.y = Y[k] * iw; v.z = iw; v.u = v.v = 0; v.argb = c; v.oargb = 0;
+            pvr_prim(&v, sizeof v);
+        }
+    }
+    vtx_env += 3 * gho_n;
 }
 static void meta_sale(void)
 {
@@ -13675,7 +13769,7 @@ int main(int argc, char **argv)
         rc_chr.listo = rc_band.listo = 0; chr_vtx_ult = chr_vtx; chr_us_ult = chr_us; chr_vtx = chr_us = 0;
         if (fin24 && chr_ok == 1) robot_matrices(&rc_chr, &mod_coche, 0);   /* la pareja del final */
         if (chr_ok == 1 && estado != TITULO && !mundo_fuera) {
-            uint64_t t0r = timer_us_gettime64(); robot_matrices(&rc_chr, &mod_coche, !cam_ok || cam_coche_visible(&cam));
+            uint64_t t0r = timer_us_gettime64(); robot_matrices(&rc_chr, &mod_coche, coche_modo(estado == CARRERA) == 2);
             if (rc_band.ok) robot_matrices(&rc_band, &mod_coche, 0);
             chr_us += (uint32_t)(timer_us_gettime64() - t0r);
         }
@@ -13765,11 +13859,11 @@ int main(int argc, char **argv)
             }
             POP_CAT0();
             PRF(4);
-            if ((estado != TITULO && !mundo_fuera && (!cam_ok || cam_coche_visible(&cam))) || (estado == TITULO && menu_coche3d()) || (fin24 && final_vista()->coche)) {
+            if ((estado != TITULO && !mundo_fuera && coche_modo(estado == CARRERA) == 2) || (estado == TITULO && menu_coche3d()) || (fin24 && final_vista()->coche)) {
 #ifndef DIAG_SIN_COCHE
                 coche_dibuja(l, &mod_coche, 0);
 #endif
-            } else if (estado != TITULO && !mundo_fuera && cam_ok && cam_coche_modo(&cam) == 1 && !fin24)
+            } else if (estado != TITULO && !mundo_fuera && coche_modo(estado == CARRERA) == 1 && !fin24)
                 coche_dibuja(l, &mod_coche, 1);                 /* la vista interior: el habitaculo (vm = 2) */
             if (l == 0) gh_ve = estado != TITULO && !mundo_fuera && !fin24 && gh_coloca();   /* el fantasma (Contrarreloj) */
             if (gh_ve) gh_dibuja(l);
@@ -13939,7 +14033,7 @@ int main(int argc, char **argv)
             if (l == 0) {                                       /* volumenes de sombra (afectan a lo opaco y recortado) */
                 pvr_list_begin(PVR_LIST_OP_MOD);
                 sombra_tri = sombra_teo = 0;
-                if ((estado != TITULO && !mundo_fuera && (!cam_ok || cam_coche_visible(&cam))) || (fin24 && final_vista()->coche)) {
+                if ((estado != TITULO && !mundo_fuera && coche_modo(estado == CARRERA) == 2) || (fin24 && final_vista()->coche)) {
                     /* en car+F0 como 0x1886e0 (los volumenes van tras cargar la matriz local, como la carroceria) */
                     static matrix_t mf __attribute__((aligned(32))); int i_, j_;
                     for (i_ = 0; i_ < 4; i_++)
