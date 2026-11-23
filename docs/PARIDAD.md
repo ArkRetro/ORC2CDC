@@ -1529,6 +1529,8 @@ Pedido del usuario (todo DESVIACION salvo la meta):
   convexos de los volumenes de sombra sin las interiores (182-566 triangulos segun el coche); demo/main.c gh_dibuja: sin
   textura, gris azulado con la luz de la normal, alfa 0,44, lista transparente. PALM (piloto): 42,8 -> 42,2 fps con el
   fantasma a la vista (con el coche entero de la 2.9.2: 41,2). Los COCHEnn.DAT sin GHO1 (de antes) no dibujan fantasma.
+  GHO1 con los vertices en mm (i16, 20 bytes por triangulo) y COCHE_RAM 480 -> 496 KB: el mayor, COCHE13, pide 480 KB
+  (con GHO1 en f32 no cabia en el bloque y la musica del menu daba "Out of memory").
 - **Repetidos y segunda fila** (decor_reduce, todas las etapas, al leer): vegetacion 15 -> 30 % ("10 palmeras -> 7");
   objetos iguales repetidos fuera de la calzada (misma firma: vertices, texturas y medidas; no pegados a otro igual ni
   con algo grande encima) 1 de cada 3 ("3 carteles -> 2"); edificios tapados por otro del mismo lado mas cerca de la ruta

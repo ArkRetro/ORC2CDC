@@ -261,7 +261,8 @@ static modelo_t coche;                                         /* el del jugador
    (memalign) tras soltar el anterior: el de su mismo tamano no cabia en el hueco del que se solto (memalign pide algo
    mas) y otras cosas lo ocupaban entre medias (las piezas de MENU.DAT al volver al menu). Asi, volver al frontal de
    OUTRUN2SP (que suelta el coche y lo vuelve a leer) bajaba lo seguido en la cima del monton de 696 a 369 KB */
-#define COCHE_RAM (480u << 10)                                  /* Rev 2.9.1: con el habitaculo +04 el mayor es COCHE13, 474 KB */
+#define COCHE_RAM (496u << 10)                                  /* Rev 2.9.1: con el habitaculo +04 el mayor es COCHE13, 474 KB;
+                                                                   Rev 2.9.2.a: con GHO1 (fantasma) 484 KB */
 static uint8_t *coche_bloque; static uint32_t coche_usado;
 static int en_coche_bloque(const void *p) { return coche_bloque && (const uint8_t *)p >= coche_bloque && (const uint8_t *)p < coche_bloque + COCHE_RAM; }
 static modelo_t chr;                                           /* el piloto y la acompanante (CHR.DAT): tampoco */
@@ -10567,7 +10568,7 @@ static uint32_t noche_ban(void)
     c = curso[area].clima;
     return (c & 8 ? 0x500u : 0) | (c & 0x10 ? 0x200u : 0);
 }
-static const float *gho_t; static uint32_t gho_n;               /* GHO1: triangulos del coche fantasma (9 f32 + luz) */
+static const int16_t *gho_t; static uint32_t gho_n;             /* GHO1: triangulos del coche fantasma (9 i16 mm + luz) */
 static matrix_t ani_m[NPZ] __attribute__((aligned(32)));      /* matriz de cada pieza en el marco del coche */
 /* lee el CEX2 del coche recien cargado: desplazamiento por vertice, cabeceras con desplazamiento para el entorno y
    grupos de luces */
@@ -11039,7 +11040,7 @@ static void coche_ani_lee(void)
     gho_n = 0; gho_t = NULL;
     if (q + 9 + 5 * NPZ_ANI > fin || memcmp(q, "ANI1", 4) || q[1] < 9 + 5 * NPZ_ANI) return;
     {   const uint32_t *g = q + q[1];                            /* GHO1 (tools/conv_coche.py fantasma): el coche fantasma */
-        if (g + 3 <= fin && !memcmp(g, "GHO1", 4) && g + 3 + 10 * g[2] <= fin) { gho_n = g[2]; gho_t = (const float *)(g + 3); }
+        if (g + 3 <= fin && !memcmp(g, "GHO1", 4) && g + 3 + 5 * g[2] <= fin) { gho_n = g[2]; gho_t = (const int16_t *)(g + 3); }
     }
     ani.modelo = q[2]; memcpy(&ani.radio, q + 3, 6 * 4); memcpy(ani.pz, q + 9, sizeof ani.pz);
     if (!(ani.radio > 0.05f)) ani.radio = 0.33f;
@@ -12473,15 +12474,15 @@ static void gh_dibuja(int lista)
     mat_load(&vista); mat_apply(&gh_mat); if (ani.ok) mat_apply(&ani_m[0]);
     pvr_prim(&gh_cab_col, sizeof gh_cab_col);
     for (i = 0; i < gho_n; i++) {
-        const float *t = gho_t + 10 * i; float X[3], Y[3], W[3]; uint32_t c; int ok = 1;
+        const int16_t *t = gho_t + 10 * i; float X[3], Y[3], W[3]; uint32_t c; int ok = 1;
         for (k = 0; k < 3; k++) {
-            float x = t[3 * k], y = t[3 * k + 1], z = t[3 * k + 2], w;
+            float x = t[3 * k] * 0.001f, y = t[3 * k + 1] * 0.001f, z = t[3 * k + 2] * 0.001f, w;
             mat_trans_single3_nodivw(x, y, z, w);
             if (!(w > cerca)) { ok = 0; break; }
             X[k] = x; Y[k] = y; W[k] = w;
         }
         if (!ok) continue;
-        {   float l = t[9]; uint32_t r = (uint32_t)(((GH_COLOR >> 16) & 255) * l), g = (uint32_t)(((GH_COLOR >> 8) & 255) * l), b = (uint32_t)((GH_COLOR & 255) * l);
+        {   float l = (uint16_t)t[9] * (1.0f / 255); uint32_t r = (uint32_t)(((GH_COLOR >> 16) & 255) * l), g = (uint32_t)(((GH_COLOR >> 8) & 255) * l), b = (uint32_t)((GH_COLOR & 255) * l);
             c = (uint32_t)GH_ALFA << 24 | r << 16 | g << 8 | b; }
         for (k = 0; k < 3; k++) {
             pvr_vertex_t v; float iw = 1.0f / W[k];
