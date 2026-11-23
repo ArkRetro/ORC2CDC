@@ -231,7 +231,7 @@ typedef struct {
                                                                      pvs_dibujo y los cuadros que le quedan (pvs_gra) */
     uint8_t *pvs_gra;
     uint32_t *pvs_dibujo;                                       /* tiras de la ultima seccion visible de cada nodo */
-    uint32_t *pvs_mv, *pvs_cv; int32_t pvs_sv[2];                 /* ventana de la PVS (Rev 2.9.5, pvs_ventana): las mascaras
+    uint32_t *pvs_mv; uint16_t *pvs_cv; int32_t pvs_sv[2];                 /* ventana de la PVS (Rev 2.9.5, pvs_ventana): las mascaras
                                                                      de las secciones s - PVS_VENTANA y s + PVS_VENTANA, los
                                                                      bytes teoricos de cada nodo en ellas y sus secciones */
     uint16_t *grp;                                                /* grupos de nodos (tools/grupos_nodos.py: bits 16-31 de
@@ -629,7 +629,7 @@ static int lee_modelo_en(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t
     m->carteles = (float (*)[4][4])p; p += m->ncarteles * 64;
     m->sec_ini = m->nsec ? (const uint32_t *)p : NULL; p += m->nsec ? (m->nsec + 1) * 4 : 0;
     m->pvs_l = NULL; m->pvs_m = m->pvs_teo = NULL; m->pvs_s = -1; m->pvs_i = 0; m->pvs_on = 0;
-    m->pvs_mv = m->pvs_cv = NULL; m->pvs_sv[0] = m->pvs_sv[1] = -1;
+    m->pvs_mv = NULL; m->pvs_cv = NULL; m->pvs_sv[0] = m->pvs_sv[1] = -1;
     if (m->nsec && (h[12] >> 31)) {                               /* PVS: listas XOR en bytes (pvs_aplica) */
         m->pvs_l = p; m->sec_lista = NULL; p += m->sec_ini[m->nsec]; p = b + ((p - b + 1) & ~1);
     } else { m->sec_lista = m->nsec ? (const uint16_t *)p : NULL; p += m->nsec ? m->sec_ini[m->nsec] * 2 : 0; }
@@ -774,7 +774,9 @@ static int lee_modelo_en(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t
             m->pvs_gra = (uint8_t *)(m->pvs_dibujo + palabras);
         }
 #if PVS_VENTANA
-        if ((m->pvs_mv = calloc(1, 8 * palabras + 8 * m->nnodos))) m->pvs_cv = m->pvs_mv + 2 * palabras;
+        /* (Rev 2.9.5: los costes de la ventana en 16 bits, en unidades de 32 bytes: la mitad de RAM; con 8 bytes por nodo
+           el menu quedaba con 54 KB menos y fallaba una peticion de 217 KB al arrancar) */
+        if ((m->pvs_mv = calloc(1, 8 * palabras + 4 * m->nnodos))) m->pvs_cv = (uint16_t *)(m->pvs_mv + 2 * palabras);
 #endif
     }
     m->blob = b + ((p - b + 31) & ~31); m->datos = b; m->tam = sz;
@@ -929,7 +931,7 @@ static void libera_modelo(modelo_t *m)
     tex_suelta(m);
     if (m->datos && m->datos == hueco_etapa) col_et.ok = 0;      /* su colision va detras en el hueco */
     if (!en_coche_bloque(m->ofs)) free(m->ofs);
-    free(m->vis); free(m->pvs_ent); free(m->nubes); m->nubes = NULL; free(m->pvs_m); free(m->pvs_teo); free(m->pvs_ult); free(m->pvs_mv); m->pvs_mv = m->pvs_cv = NULL; free(m->tr); free(m->fe_p);
+    free(m->vis); free(m->pvs_ent); free(m->nubes); m->nubes = NULL; free(m->pvs_m); free(m->pvs_teo); free(m->pvs_ult); free(m->pvs_mv); m->pvs_mv = NULL; m->pvs_cv = NULL; free(m->tr); free(m->fe_p);
     if (!(hueco_etapa && m->datos >= hueco_etapa && m->datos < hueco_etapa + cap_etapa) &&
         !(hueco_union && m->datos >= hueco_union && m->datos < hueco_union + cap_union) && !en_coche_bloque(m->datos))
         free(m->datos);                                           /* (los objetos de la union van dentro del hueco de la
@@ -8112,7 +8114,7 @@ static void pvs_aplica(modelo_t *mo, int s)                     /* XOR de la lis
    toda la ventana de s - 3 a s + 3, +-24 m): lo que va a verse ya esta dibujado (tapado) un poco antes y lo que se
    deja de ver se va un poco despues. Las dos mascaras se mueven como la de la seccion (pvs_aplica_v) y llevan los bytes
    teoricos de cada nodo (pvs_cv) para el reparto del TA (pvs_coste: el mayor de los tres) */
-static void pvs_aplica_v(modelo_t *mo, int s, uint32_t *mk, uint32_t *cv)
+static void pvs_aplica_v(modelo_t *mo, int s, uint32_t *mk, uint16_t *cv)
 {
     const uint8_t *p = mo->pvs_l + mo->sec_ini[s], *f = mo->pvs_l + mo->sec_ini[s + 1];
     int32_t i = -1;
@@ -8124,7 +8126,8 @@ static void pvs_aplica_v(modelo_t *mo, int s, uint32_t *mk, uint32_t *cv)
         ma = mo->mallas + i;
         if (ma->nodo < 0 || (uint32_t)ma->nodo >= mo->nnodos || ma->n < 3) continue;
         w = 1u << (i & 31); mk[i >> 5] ^= w;
-        if (mk[i >> 5] & w) cv[ma->nodo] += ta_teo(ma->n > 256 ? 256 : ma->n, 0); else cv[ma->nodo] -= ta_teo(ma->n > 256 ? 256 : ma->n, 0);
+        {   uint16_t c = (uint16_t)((ta_teo(ma->n > 256 ? 256 : ma->n, 0) + 31) >> 5);   /* (unidades de 32 bytes) */
+            if (mk[i >> 5] & w) cv[ma->nodo] += c; else cv[ma->nodo] -= c; }
     }
 }
 static int pvs_ventana(modelo_t *mo)                            /* mueve las dos de la ventana a s -+ PVS_VENTANA */
@@ -8133,7 +8136,7 @@ static int pvs_ventana(modelo_t *mo)                            /* mueve las dos
     if (!mo->pvs_mv || mo->pvs_s < 0) return 0;
     for (k = 0; k < 2; k++) {
         int32_t t = mo->pvs_s + (k ? PVS_VENTANA : -PVS_VENTANA);
-        uint32_t *mk = mo->pvs_mv + k * pal, *cv = mo->pvs_cv + k * mo->nnodos;
+        uint32_t *mk = mo->pvs_mv + k * pal; uint16_t *cv = mo->pvs_cv + k * mo->nnodos;
         t = t < 0 ? 0 : t >= (int32_t)mo->nsec ? (int32_t)mo->nsec - 1 : t;
         if (mo->pvs_sv[k] != t) cambia = 1;
         while (mo->pvs_sv[k] < t) pvs_aplica_v(mo, ++mo->pvs_sv[k], mk, cv);
@@ -8145,7 +8148,7 @@ static inline uint32_t pvs_coste(const modelo_t *mo, uint32_t i)   /* bytes teor
 {
     uint32_t c = mo->pvs_teo[2 * i];
     if (mo->pvs_cv) {
-        uint32_t a = mo->pvs_cv[i], b = mo->pvs_cv[mo->nnodos + i];
+        uint32_t a = (uint32_t)mo->pvs_cv[i] << 5, b = (uint32_t)mo->pvs_cv[mo->nnodos + i] << 5;
         if (a > c) c = a;
         if (b > c) c = b;
     }
@@ -10584,7 +10587,7 @@ static void etapa_precalienta(void)
         memset(etapa.pvs_m, 0, (etapa.nmallas + 31) / 32 * 4);
         if (etapa.pvs_teo) memset(etapa.pvs_teo, 0, (2 * etapa.nnodos + 1) * 4);
         if (etapa.pvs_ult) memset(etapa.pvs_ult, 0, etapa.nnodos * 5 + (etapa.nmallas + 31) / 32 * 4);
-        if (etapa.pvs_mv) memset(etapa.pvs_mv, 0, 8 * ((etapa.nmallas + 31) / 32) + 8 * etapa.nnodos);
+        if (etapa.pvs_mv) memset(etapa.pvs_mv, 0, 8 * ((etapa.nmallas + 31) / 32) + 4 * etapa.nnodos);
         etapa.pvs_sv[0] = etapa.pvs_sv[1] = -1;
         etapa.pvs_s = -1; etapa.pvs_i = 0; etapa.pvs_on = 0;
     }
