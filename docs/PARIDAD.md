@@ -1581,6 +1581,11 @@ Flycast con la misma compilacion repite la carrera igual, asi que antes y despue
   `-DREPARTO_SCHMITT=0`, `-DPVS_GRACIA=15`, `-DSALTO_LEJ_SUELO=600.0f`, `-DFOCOS_ANOTA_D=40.0f`: lo de antes.
 - NO verificado en consola real (alli el TA y la CPU pesan distinto: la ventana y la gracia dibujan algo mas).
 
+- RAM (comprobado en el GDI de la 2.9.5): la ventana de la PVS guarda los costes de sus dos secciones en 16 bits
+  (unidades de 32 bytes; con 32 bits el menu perdia 54 KB). Aun asi el menu queda con ~383 KB libres (426 KB en la 2.9.3:
+  los records de la 2.9.4 y la ventana) y al arrancar sale una vez "Out of memory ... diff 217088": es newlib, que pide
+  al monton el bloque con su margen y no cabe; la peticion se sirve con lo que ya hay (SALIDA.DAT y lo demas se leen
+  bien, nav3 llega a la carrera sin errores en el clasico y en el taxi). Hay menos margen: vigilarlo en la consola.
 ### 40 fps adaptativos y lejano 3800 (Rev 2.9.4, 2026-11-23)
 
 Pedido: "que mantenga los 40 fps con frameskip progresivo adaptativo y que aumente la distancia de dibujado a 3800".
