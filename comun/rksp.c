@@ -11,8 +11,8 @@
 #include <string.h>
 #include "rksp.h"
 
-static uint8_t tab[RKSP_TAM];
-static int hay;
+static uint8_t tab[RKSP_TAM], tab_uj[RKSP_TAM];
+static int hay, hay_uj;
 
 uint8_t *rksp_tablas(void) { return tab; }
 int rksp_hay(void) { return hay; }
@@ -29,7 +29,7 @@ uint32_t rksp_tabla(int v, int p, int c, int a, int b)
 
 static uint32_t rd(const uint8_t *p) { uint32_t v; memcpy(&v, p, 4); return v; }
 
-int rksp_inserta(const uint8_t rec[16], int v, int p, int c, int a, int b)
+static int inserta_en(uint8_t *tab, const uint8_t rec[16], int v, int p, int c, int a, int b)
 {
     uint32_t t = rksp_tabla(v, p, c, a, b), at;
     if (t + 160 > RKSP_TAM) return -1;
@@ -43,4 +43,24 @@ int rksp_inserta(const uint8_t rec[16], int v, int p, int c, int a, int b)
     memmove(tab + t + (at + 1) * 16, tab + t + at * 16, (9 - at) * 16);   /* los de detras bajan, el decimo se pierde */
     memcpy(tab + t + at * 16, rec, 16);
     return (int)at;
+}
+int rksp_inserta(const uint8_t rec[16], int v, int p, int c, int a, int b) { return inserta_en(tab, rec, v, p, c, a, b); }
+
+/* Rev 2.9.3: los records de UN JUGADOR de la consola (OUTRUN, HEART ATTACK y TIME ATTACK del frontal; el PS2 los
+   guarda en su base 0x5f8598 con 0x226df8 / 0x2270a8, con otro formato). DESVIACION: la Dreamcast los guarda con el
+   formato y el orden de las tablas de OUTRUN2SP (las mismas cuentas de rksp_tabla), para ensenarlos con el mismo tablero
+   (0x200398), y empiezan vacias (sin nombre; tiempo 0xFFFFFFFF), no con los registros por defecto de OUTRUN2SP. */
+uint8_t *rkuj_tablas(void) { return tab_uj; }
+int rkuj_hay(void) { return hay_uj; }
+void rkuj_pon(const uint8_t *t) { memcpy(tab_uj, t, RKSP_TAM); hay_uj = 1; }
+static void rkuj_vacia(void)
+{
+    uint32_t i, z = 0, f = 0xffffffffu;
+    for (i = 0; i + 16 <= RKSP_TAM; i += 16) { memcpy(tab_uj + i, &z, 4); memcpy(tab_uj + i + 4, &f, 4); memset(tab_uj + i + 8, 0, 8); }
+    hay_uj = 1;
+}
+int rkuj_inserta(const uint8_t rec[16], int v, int p, int c, int a, int b)
+{
+    if (!hay_uj) rkuj_vacia();
+    return inserta_en(tab_uj, rec, v, p, c, a, b);
 }

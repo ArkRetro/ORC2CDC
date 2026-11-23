@@ -14,4 +14,9 @@ void rksp_pon(const uint8_t *t);            /* las leidas de la VMU */
 uint32_t rksp_tabla(int variante, int preset, int cuenta, int a, int b);
 /* 0x1fae90 con un registro: lo inserta en su tabla y devuelve su puesto (0..9) o -1 */
 int rksp_inserta(const uint8_t rec[16], int variante, int preset, int cuenta, int a, int b);
+/* Rev 2.9.3: los records de UN JUGADOR (mismo formato y orden; vacias hasta el primer registro: nombre vacio) */
+uint8_t *rkuj_tablas(void);
+int rkuj_hay(void);                         /* 1: leidas de la VMU o con algun registro */
+void rkuj_pon(const uint8_t *t);
+int rkuj_inserta(const uint8_t rec[16], int variante, int preset, int cuenta, int a, int b);
 #endif

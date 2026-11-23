@@ -7731,6 +7731,14 @@ static float dist2_ruta(const modelo_t *m, uint32_t i, const float *p)
 #define LOD_GRANDE_D 900.0f                                     /* m: el completo de los grandes mas cerca (pedido) */
 #endif
 #define LOD_GRANDE_H 50.0f
+/* Rev 2.9.3 (el usuario: "en industrial complex hay zonas que no se dibujan y se ven azules", "en ancient ruins hay
+   estatuas en la montana ... como unos bloques blancos"): de 900 m al lejano el lowpoly (12 % de los triangulos, el
+   color medio de cada textura) se veia como bloques planos oscuros o, con la niebla, claros. Ahora el completo hasta
+   LOD_GRANDE_FR del lejano (con el lejano de 3200: 2560 m) y el lowpoly solo en el ultimo tramo, dentro de la franja de
+   niebla del limite (NLIM_FRANJA); LOD_GRANDE_D sigue como minimo */
+#ifndef LOD_GRANDE_FR
+#define LOD_GRANDE_FR 0.8f
+#endif
 #ifndef LOD_LEJ_PX
 #define LOD_LEJ_PX 48.0f
 #endif
@@ -8166,7 +8174,7 @@ static void nodos_visibles(modelo_t *mo)
                distancia: el lowpoly con lo mas cercano del nodo a mas de LOD_GRANDE_D por delante y el completo al
                acercarse (histeresis LOD_GRANDE_H: el que se dibujaba sigue hasta pasar el umbral por ese margen) */
             int lej3d = (ND[jl].fl & NODO_LEJ3D) != 0;
-            float dg = LOD_GRANDE_D + (era_lej ? -LOD_GRANDE_H : ya ? LOD_GRANDE_H : 0.0f);
+            float dg = (lejos * LOD_GRANDE_FR > LOD_GRANDE_D ? lejos * LOD_GRANDE_FR : LOD_GRANDE_D) + (era_lej ? -LOD_GRANDE_H : ya ? LOD_GRANDE_H : 0.0f);
             if (lej3d ? zv - d->r > dg : (zv > d->r && d->r * fx < umb * zv)) {
 #ifdef DIAG_POPPING
                 if (ya && pop_ra && pop_ra[i] == PR_DIB) pop_lod_lej++;
@@ -9575,7 +9583,8 @@ static void faros_dibuja(matrix_t *mc, uint32_t ban, int choque)
 {
     static matrix_t K __attribute__((aligned(32)));
     uint32_t i;
-    if (!faros_ok || choque || (ban & 0x900) != 0x900 || salto_niv >= 1) return;   /* (salto progresivo, nivel 1) */
+    if (!faros_ok || choque || (ban & 0x900) != 0x900) return;   /* Rev 2.9.3: ya no se apagan con el salto progresivo
+                                                                   (el usuario: se encendian y apagaban solos de noche) */
 #ifdef DIAG_SIN_FAROS
     return;                                                     /* medida: sin la luz del suelo */
 #endif
@@ -9753,7 +9762,7 @@ static void focos_prepara(const matrix_t *mc, int on)
 #ifdef DIAG_SIN_FOCOS
     on = 0;                                                     /* medida: sin los focos */
 #endif
-    if (!on || !focos_ok || salto_niv >= 1) return;            /* (salto progresivo, nivel 1) */
+    if (!on || !focos_ok) return;                              /* (Rev 2.9.3: sin depender del salto progresivo) */
     p[0] = 0; p[1] = alt; p[2] = pos;
     q[0] = 0; q[1] = alt + (sinf(dir * D2R) * 10.0f + alt); q[2] = pos + (pos - cosf(dir * D2R) * 10.0f);
     for (j = 0; j < 3; j++) {                                   /* en el mundo (filas: p car+B0) */
