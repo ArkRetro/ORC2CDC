@@ -8,6 +8,9 @@ Uso:
   conv_coche.py <iso> --modelo m <salida.dat> [--tope n] [--vista dir]   un modelo (byte car+0x11)
   --rebaja: variante A (texturas que no se ven de cerca con menos resolucion: rebaja_texturas); --carrera: variante B
       (las mallas que no se ven desde la persecucion con el bit NODO_CERCA: parte_carrera). Rev 2.9.6, DESVIACION
+  --visible (implica --rebaja; con --todos): ademas COCHEnnL.DAT, el ligero de la carrera (variante C2): sin lo oculto
+      siempre, menos triangulos en lo que se ve (simplifica) y las texturas visibles grandes a la mitad (clase
+      'visible'); con --modelo, solo el ligero en <salida.dat>. Rev 2.9.7, DESVIACION
 
 Montaje (todo se lee del disco al convertir; aqui no hay datos del juego): el de 46A560 (el coche en la seleccion; en
 carrera 46AE70 / 469600 hacen lo mismo) portado tal cual en llamadas(): pila de matrices del PC (Pila), piezas en su
@@ -549,8 +552,9 @@ def _area(T):
     a = T[:, 3:6] - T[:, 0:3]; b = T[:, 6:9] - T[:, 0:3]
     return 0.5 * np.linalg.norm(np.cross(a, b), axis=1)
 
-def clasifica_texturas(mod):
-    """{textura: (clase, ancho, alto nuevos, parte sin ver)} con la regla de arriba (las que cambian y las que no)"""
+def clasifica_texturas(mod, visible=False):
+    """{textura: (clase, ancho, alto nuevos, parte sin ver)} con la regla de arriba (las que cambian y las que no); con
+    visible (C2, Rev 2.9.7) tambien la clase 'visible' (_mitad)"""
     T, dueno = triangulos(mod)
     grupo = np.array([mod.mallas[k][9].get('grupo', NADA) for k in dueno])
     fuera = grupo == G_INTERIOR                                 # el habitaculo no se dibuja por fuera
@@ -578,29 +582,52 @@ def clasifica_texturas(mod):
         elif pz <= {'interior'}: clase = 'interior'
         elif pz <= PZ_CUERPO_N and oc >= OCULTA_MIN: clase = 'oculta_hab' if pz & PZ_HAB_N else 'oculta'
         else: clase = 'fija'
+        if visible and clase == 'fija' and not u['fija'] and li == 0 and max(w, h) >= 256 and not pz <= {'interior'}:
+            w2, h2, err = _mitad(mod.rgba[ti])
+            res[ti] = ('visible', w2, h2, oc) if err <= VIS_TEX_MAX else ('visible', w, h, oc); continue
         if clase in ('rueda', 'oculta'): s = 64.0 / max(w, h)
         elif clase in ('interior', 'oculta_hab'): s = 0.5
         else: s = 1.0
         res[ti] = (clase, max(8, int(w * s)), max(8, int(h * s)), oc)
     return res
 
-def rebaja_texturas(mod):
-    """variante A: aplica clasifica_texturas (antes de recorta_texturas y de la VQ). Devuelve {clase: (antes, despues)}
-    en texeles"""
+def _reduce(a, w2, h2):
+    """la imagen RGBA a w2 x h2 con un filtro de caja y el alfa premultiplicado (sin bordes del color de fuera)"""
     from PIL import Image
-    cl = clasifica_texturas(mod); suma = {}
+    a = a.astype(np.float32); al = a[..., 3:4] / 255.0
+    pm = np.concatenate([a[..., :3] * al, a[..., 3:4]], 2)
+    r = np.stack([np.asarray(Image.fromarray(pm[..., c]).resize((w2, h2), Image.BOX)) for c in range(4)], 2)
+    rgb = np.where(r[..., 3:4] > 0, r[..., :3] * 255.0 / np.maximum(r[..., 3:4], 1e-3), 0)
+    return np.clip(np.round(np.concatenate([rgb, r[..., 3:4]], 2)), 0, 255).astype(np.uint8)
+
+def _mitad(a):
+    """C2: el tamano de la textura visible a la mitad en el lado en que menos se nota (error RMS del RGB al volver a
+    ampliarla, bilineal, con repeticion) o en los dos si su error no pasa de VIS_TEX_ERR. Devuelve (ancho, alto, error)"""
+    from PIL import Image
+    h, w = a.shape[:2]
+    def err(w2, h2):
+        b = _reduce(a, w2, h2).astype(np.float32)
+        t = np.tile(b, (3, 3, 1))                               # repetida, para que el borde no cuente de mas
+        up = np.stack([np.asarray(Image.fromarray(t[..., c]).resize((3 * w, 3 * h), Image.BILINEAR)) for c in range(3)], 2)
+        up = up[h:2 * h, w:2 * w]
+        return float(np.sqrt(((up - a[..., :3].astype(np.float32)) ** 2).mean()))
+    c = sorted((err(*s), s) for s in ((w // 2, h), (w, h // 2)))
+    e2 = err(w // 2, h // 2)
+    if e2 <= VIS_TEX_ERR: return w // 2, h // 2, e2
+    return c[0][1][0], c[0][1][1], c[0][0]
+
+def rebaja_texturas(mod, visible=False, cl=None):
+    """variante A: aplica clasifica_texturas (antes de recorta_texturas y de la VQ); visible: con la clase 'visible' de
+    C2; cl: las clases ya hechas. Devuelve {clase: (antes, despues)} en texeles"""
+    cl = cl or clasifica_texturas(mod, visible); suma = {}
     for ti, (clase, w2, h2, oc) in cl.items():
         w, h, fmt, li, off, tam = mod.texs[ti]
         s = suma.setdefault(clase, [0, 0]); s[0] += w * h; s[1] += w2 * h2
-        if (w2, h2) == (w, h):
-            if max(w, h) > 64: print('   textura %3d %-10s %3dx%-3d    igual  (sin ver %3.0f %%; %s)' % (
+        if (w2, h2) == (w, h) or ti not in {x[1] for x in mod.mallas}:
+            if max(w, h) > 64 and (w2, h2) == (w, h): print('   textura %3d %-10s %3dx%-3d    igual  (sin ver %3.0f %%; %s)' % (
                 ti, clase, w, h, 100 * oc, ' '.join(sorted({x[8] for x in mod.mallas if x[1] == ti}))))
             continue
-        a = mod.rgba[ti].astype(np.float32); al = a[..., 3:4] / 255.0
-        pm = np.concatenate([a[..., :3] * al, a[..., 3:4]], 2)  # alfa premultiplicado: sin bordes del color de fuera
-        r = np.stack([np.asarray(Image.fromarray(pm[..., c]).resize((w2, h2), Image.BOX)) for c in range(4)], 2)
-        rgb = np.where(r[..., 3:4] > 0, r[..., :3] * 255.0 / np.maximum(r[..., 3:4], 1e-3), 0)
-        b = np.clip(np.round(np.concatenate([rgb, r[..., 3:4]], 2)), 0, 255).astype(np.uint8)
+        b = _reduce(mod.rgba[ti], w2, h2)
         d = modelo.codifica16(b, fmt & 0xff)
         mod.texs[ti] = (w2, h2, fmt, li, len(mod.blob), len(d)); mod.blob += d; mod.rgba[ti] = b
         print('   textura %3d %-10s %3dx%-3d -> %3dx%-3d (sin ver %3.0f %%; %s)' % (
@@ -691,6 +718,310 @@ def vertices_dibujados(mod, cerca=True):
 
 def triangulos_n(mod):
     return sum(x[5] - 2 for x in mod.mallas)
+
+# ------------------------------------------------------------------ coche visible mas ligero (Rev 2.9.7, C2, DESVIACION pedida)
+# --visible: ademas del COCHEnn.DAT de siempre (con --rebaja: el de la seleccion de coche y el salon, sin cambios), el
+# ligero COCHEnnL.DAT que la demo carga para la carrera (demo/main.c coche_carga: coche_pide_ligero): menos triangulos en
+# lo que se ve del coche y menos resolucion en sus texturas visibles grandes, para dejar TA y VRAM a la etapa. De cerca
+# (seleccion) se notaba en los reflejos de la pintura (capo, paragolpes): por eso dos ficheros; los dos modelos en uno
+# (con NODO_CERCA) no caben en el bloque del coche (COCHE_RAM: 660-740 KB frente a 496). El original lleva la geometria
+# y las texturas enteras.
+#  - Siempre el vaciado de lo que no se ve (visibilidad() con la vuelta baja, el de cuando se pasa del tope): no cambia
+#    la imagen desde las camaras del juego.
+#  - simplifica(): solo las mallas opacas (lista 0) de carroceria, extra, puertas, volante, palanca, aleron, ruedas
+#    (llanta y neumatico), pinzas y discos; no las luces, ni lo de recorte o transparente (emblemas, letras, matriculas,
+#    cristales, rejillas de recorte), ni la sombra, ni el habitaculo. Por pieza (las animadas se mueven aparte) una malla
+#    de posiciones con "cunas" (los atributos de un vertice en un grupo de mallas con el mismo material, textura y
+#    pieza). Las tiras del original no comparten vertices y en la misma posicion cada una trae su normal y su luz cocida,
+#    que difieren un poco (0xBE frente a 0xC0): se juntan en una cuna las de la misma posicion y grupo con UV a menos de
+#    VIS_SUELDA_UV, color a menos de VIS_SUELDA_C por canal y normales a menos de ~25 grados (con la media); si no, son
+#    otra cuna (costura: arista viva, otra UV u otro grupo). Colapso de aristas u -> v del mas barato al mas caro: u
+#    desaparece y v queda donde estaba, y cada cuna de u pasa a la cuna de v del otro lado de la arista (no hay UV,
+#    color ni normal nuevos); el coste es el error cuadrico generalizado (Garland-Heckbert 1998) de posicion, UV, color y
+#    normal de las cunas (la luz cocida y la normal, de la que sale el reflejo de la pintura) con el area de peso, mas el de los planos de las aristas de borde,
+#    costura o limite de grupo (perpendiculares a la cara, peso VIS_BORDE): esas lineas solo se acortan a lo largo de si
+#    mismas y sin doblarse. Fuera el colapso que deje una cuna de u sin pareja (esquinas de costura), que en un borde no
+#    vaya a lo largo de el, que gire una cara mas de 37 grados (VIS_GIRO), la deje sin area o rompa la variedad
+#    (condicion del enlace); fijas las posiciones que usan las mallas que no se simplifican (cristales, luces, emblemas,
+#    matriculas), las que estan a menos de VIS_CERCA de ellas (para que lo de alrededor no las tape) y las de aristas de
+#    mas de dos caras. Hasta dejar VIS_RAZON de los triangulos o llegar al error VIS_TOPE.
+#  - Lo simplificado sale en tiras nuevas (tiras(): voraz, desde el triangulo libre con menos vecinos libres, hacia los
+#    dos lados, hasta 256 vertices; la demo no descarta caras, asi que el sentido de la tira da igual).
+#  - Texturas (clasifica_texturas con visible, con las clases del coche de siempre): las de --rebaja y ademas (clase
+#    'visible') las opacas de fuera con un lado de 256 o mas, sin pintura, reflejo, luces ni sombra: a la mitad en el
+#    lado en que menos se nota (menor error al volver a ampliarla) y en los dos si ese error no pasa de VIS_TEX_ERR; si
+#    aun la mejor mitad pasa de VIS_TEX_MAX (atlas de motor y salpicadero con detalle), entera. Siguen con la VQ
+#    (comprobado: todas las rebajadas salen con VQ).
+VIS_RAZON = 0.6                 # parte de los triangulos simplificables que queda
+VIS_TOPE = 1e-3                 # error maximo de un colapso (m2 de area x m2 de distancia; casi nunca llega)
+VIS_GIRO = 0.8                  # coseno minimo entre la normal de una cara antes y despues de un colapso
+VIS_UV, VIS_COLOR = 0.5, 0.06   # peso de las UV (1 = 0,5 m) y del color (255 = 6 cm) en el error
+VIS_NORMAL = 0.1                # peso de la normal (el reflejo de la pintura sale de ella: 0,1 rad = 1 cm)
+VIS_SUELDA_UV, VIS_SUELDA_C = 1 / 512, 12   # vertices de tiras distintas que se sueldan (UV y color por canal)
+VIS_CERCA = 0.04                # fijas las posiciones a menos de esto (m) de lo que no se simplifica
+VIS_TEX_MAX = 8.0               # textura 'visible' que no se baja si aun la mejor mitad pasa de este error RMS (atlas
+                                # de motor y salpicadero con detalle: el 360, 575, F430 y 550, que en carrera se notaban)
+VIS_BORDE = 10.0                # peso de los planos de las aristas de borde, costura y limite
+VIS_TEX_ERR = 3.0               # error RMS (0-255) para bajar una textura en los dos lados
+PZ_SIMPLIFICA = {'carroceria', 'extra', 'puerta', 'volante', 'palanca', 'aleron', 'buje', 'pinza', 'disco', 'disco_cal'}
+
+def _cuadrica(P):
+    """cuadrica generalizada del triangulo de puntos P (3 x n, las 3 primeras la posicion): (A, b, c) por su area"""
+    p, q, r = P
+    e1 = q - p; l1 = np.linalg.norm(e1)
+    if l1 < 1e-12: return None
+    e1 = e1 / l1; e2 = r - p - np.dot(e1, r - p) * e1; l2 = np.linalg.norm(e2)
+    if l2 < 1e-12: return None
+    e2 = e2 / l2
+    g = P[:, :3]; area = 0.5 * np.linalg.norm(np.cross(g[1] - g[0], g[2] - g[0]))
+    pe1, pe2 = np.dot(p, e1), np.dot(p, e2)
+    A = np.eye(len(p)) - np.outer(e1, e1) - np.outer(e2, e2)
+    return A * area, (pe1 * e1 + pe2 * e2 - p) * area, (np.dot(p, p) - pe1 * pe1 - pe2 * pe2) * area
+
+def _normal(a, b, c):
+    n = np.cross(b - a, c - a); l = np.linalg.norm(n)
+    return (n / l if l > 1e-14 else None), l
+
+def _grupos_vis(mod):
+    """{clave: [mallas]} de lo que se simplifica (mismo material, textura, pieza y grupo)"""
+    g = {}
+    for k, x in enumerate(mod.mallas):
+        ex = x[9]
+        if x[0] != 0 or x[5] < 3 or x[8] not in PZ_SIMPLIFICA or ex.get('grupo', NADA) not in (NADA, G_DISCO, G_DISCO_CAL):
+            continue
+        clave = (x[1], id(x[6]), x[7], x[8], ex.get('grupo', NADA), ex.get('pieza', P_CUERPO), ex.get('esp'), ex.get('uv'),
+                 ex.get('cerca', False))
+        g.setdefault(clave, []).append(k)
+    return g
+
+def simplifica(mod, razon=VIS_RAZON, tope=VIS_TOPE):
+    """variante C2 (ver arriba): simplifica las mallas de _grupos_vis y las rehace en tiras (en lugar de las de antes).
+    Devuelve los triangulos de lo simplificable antes y despues"""
+    import heapq
+    diag = os.environ.get('VIS_DIAG')
+    V = np.concatenate(mod.verts); grupos = sorted(_grupos_vis(mod).values())
+    if not grupos: return 0, 0
+    en_grupo = {k: gi for gi, ks in enumerate(grupos) for k in ks}
+    def clave_pos(v, pz): return (pz, round(float(v['x']), 4), round(float(v['y']), 4), round(float(v['z']), 4))
+    # posiciones que usan las mallas que no se simplifican (luces, cristales, emblemas, matriculas, otra pieza...): fijas,
+    # y tambien las que estan a menos de VIS_CERCA de su superficie (muestras cada 2 cm): la carroceria de alrededor no
+    # se mueve y no puede taparlas (sin esto, el hueco de la matricula del 360 se aplanaba y la tapaba a medias)
+    from scipy.spatial import cKDTree
+    ajenas = set(); muestras = {}
+    for k, x in enumerate(mod.mallas):
+        if k in en_grupo: continue
+        pz = x[9].get('pieza', P_CUERPO)
+        for j in range(x[5]): ajenas.add(clave_pos(V[x[4] + j], pz))
+        if x[9].get('grupo', NADA) == G_INTERIOR or x[8] == 'sombra': continue
+        Q = np.stack([V['x'][x[4]:x[4] + x[5]], V['y'][x[4]:x[4] + x[5]], V['z'][x[4]:x[4] + x[5]]], 1).astype(float)
+        L = muestras.setdefault(pz, [])
+        for j in range(x[5] - 2):
+            a, b, c = Q[j:j + 3]; n = int(min(25, np.ceil(max(np.linalg.norm(b - a), np.linalg.norm(c - a), np.linalg.norm(c - b)) / 0.02)))
+            for i in range(n + 1):
+                for h in range(n + 1 - i): L.append(a + (b - a) * (i / max(n, 1)) + (c - a) * (h / max(n, 1)))
+    arboles = {pz: cKDTree(np.array(L)) for pz, L in muestras.items() if L}
+    # posiciones (por pieza animada: cada una se mueve aparte) y cunas (wedges: los atributos de un vertice en un grupo;
+    # las tiras del original no comparten vertices y en la misma posicion cada una trae su normal y su luz cocida, que
+    # difieren un poco: se juntan los de la misma posicion y grupo con UV a menos de VIS_SUELDA_UV, color a menos de
+    # VIS_SUELDA_C por canal y normales a menos de ~25 grados, con la media de color y normal; si no, otra cuna: costura)
+    pos = {}; P = []; pfijo = []
+    cunas = []                                                  # [posicion, grupo, vertice, normal, suma color, suma N, n]
+    por_pos = {}; caras = {}; vistos = set()
+    for gi, ks in enumerate(grupos):
+        for k in ks:
+            x = mod.mallas[k]; i0, n = x[4], x[5]; N = x[9]['N']; pz = x[9].get('pieza', P_CUERPO); ids = []
+            for j in range(n):
+                v = V[i0 + j]; c = int(v['c']); nj = N[j].astype(float); kp = clave_pos(v, pz)
+                if kp not in pos:
+                    pos[kp] = len(P); P.append((float(v['x']), float(v['y']), float(v['z']))); pfijo.append(kp in ajenas)
+                p = pos[kp]
+                col = np.array([(c >> 24) & 255, (c >> 16) & 255, (c >> 8) & 255, c & 255], float)
+                el = None
+                for i in por_pos.get((p, gi), ()):
+                    w = cunas[i]; a = w[2]
+                    if abs(a['u'] - v['u']) <= VIS_SUELDA_UV and abs(a['v'] - v['v']) <= VIS_SUELDA_UV and \
+                            np.abs(w[4] / w[6] - col).max() <= VIS_SUELDA_C and \
+                            np.dot(w[5], nj) >= 0.9 * np.linalg.norm(w[5]) * max(np.linalg.norm(nj), 1e-9):
+                        el = i; break
+                if el is None:
+                    el = len(cunas); cunas.append([p, gi, v.copy(), nj, col.copy(), nj.copy(), 1])
+                    por_pos.setdefault((p, gi), []).append(el)
+                else:
+                    w = cunas[el]; w[4] += col; w[5] += nj; w[6] += 1
+                ids.append(el)
+            for j in range(n - 2):
+                t = (ids[j], ids[j + 1], ids[j + 2]); tp = frozenset(cunas[i][0] for i in t)
+                if len(tp) < 3 or tp in vistos: continue        # degenerados y repetidos (caras dobles: sin descarte, sobran)
+                vistos.add(tp); caras[len(caras)] = list(t)
+    P = np.array(P); pfijo = np.array(pfijo, bool); nP = len(P); nw = len(cunas)
+    pz_de = np.array([kp[0] for kp in sorted(pos, key=pos.get)])
+    for pz, t in arboles.items():
+        i = np.nonzero(pz_de == pz)[0]
+        if len(i): pfijo[i[t.query(P[i], distance_upper_bound=VIS_CERCA)[0] <= VIS_CERCA]] = True
+    for w in cunas:                                             # media del color y de la normal de lo soldado
+        if w[6] > 1:
+            q = np.round(w[4] / w[6]).astype(np.uint32); w[2]['c'] = q[0] << 24 | q[1] << 16 | q[2] << 8 | q[3]
+            ln = np.linalg.norm(w[5]); w[3] = w[5] / ln * np.linalg.norm(w[3]) if ln > 1e-9 else w[3]
+        w[2]['x'], w[2]['y'], w[2]['z'] = P[w[0]]
+    cp = np.array([w[0] for w in cunas])
+    X = np.zeros((nw, 11))                                      # posicion, UV, color y normal de cada cuna, con su peso
+    for i, w in enumerate(cunas):
+        c = int(w[2]['c']); n = np.asarray(w[3], float); ln = np.linalg.norm(n); n = n / ln if ln > 1e-9 else n
+        X[i] = (*P[w[0]], VIS_UV * w[2]['u'], VIS_UV * w[2]['v'], VIS_COLOR * ((c >> 16) & 255) / 255,
+                VIS_COLOR * ((c >> 8) & 255) / 255, VIS_COLOR * (c & 255) / 255, *(VIS_NORMAL * n))
+    # cuadricas generalizadas por cuna; las de las aristas de borde, costura o limite de grupo (planos por la arista
+    # perpendiculares a la cara, con peso VIS_BORDE): guardan la forma de esas lineas
+    QA = np.zeros((nw, 11, 11)); Qb = np.zeros((nw, 11)); Qc = np.zeros(nw)
+    de = [set() for _ in range(nP)]; quitar = []
+    for f, t in caras.items():
+        q = _cuadrica(X[t])
+        if q is None: quitar.append(f); continue
+        for i in t: QA[i] += q[0]; Qb[i] += q[1]; Qc[i] += q[2]; de[cp[i]].add(f)
+    for f in quitar: del caras[f]
+    nt0 = len(caras)
+    PA = np.zeros((nP, 3, 3)); Pb = np.zeros((nP, 3)); Pc = np.zeros(nP)   # las de las aristas, por posicion
+    arista = {}
+    for f, t in caras.items():
+        for a, b in ((0, 1), (1, 2), (2, 0)): arista.setdefault(frozenset((cp[t[a]], cp[t[b]])), []).append((f, t[a], t[b]))
+    for e, L in arista.items():
+        if len(L) > 2: pfijo[list(e)] = True; continue          # aristas de mas de dos caras: fijas
+        if len(L) == 2 and {L[0][1], L[0][2]} == {L[1][1], L[1][2]}: continue   # interior, sin costura
+        for f, a, b in L:                                       # borde, costura o limite: plano de la arista
+            t = caras[f]; pa, pb = P[cp[a]], P[cp[b]]; n, _ = _normal(*P[cp[t]])
+            d = pb - pa; ld = np.linalg.norm(d)
+            if n is None or ld < 1e-9: continue
+            m = np.cross(d / ld, n); A3 = np.outer(m, m) * VIS_BORDE * ld * ld; b3 = -A3 @ pa; c3 = pa @ A3 @ pa
+            for i in (cp[a], cp[b]): PA[i] += A3; Pb[i] += b3; Pc[i] += c3
+    vivo = np.ones(nP, bool); ver = np.zeros(nP, int); heap = []
+    if diag: print('   simplifica: %d posiciones (%d fijas), %d cunas, %d caras, %d grupos' % (nP, pfijo.sum(), nw, nt0, len(grupos)))
+    def vecinos(p):
+        s = set()
+        for f in de[p]: s.update(cp[caras[f]])
+        s.discard(p); return s
+    def bordes(p):                                              # aristas abiertas (de una cara) en p
+        c = {}
+        for f in de[p]:
+            for i in cp[caras[f]]:
+                if i != p: c[i] = c.get(i, 0) + 1
+        return {i for i, n in c.items() if n == 1}
+    def colapso(u, v):
+        """(coste, comunes, mapa de cunas de u a cunas de v) o None si no vale"""
+        comunes = [f for f in de[u] if v in cp[caras[f]]]
+        if not comunes or len(comunes) > 2: return None
+        bu = bordes(u)
+        if bu and (len(bu) != 2 or v not in bu): return None    # en un borde, solo a lo largo de el
+        if not bu and len(comunes) != 2: return None
+        mapa = {}
+        for f in de[u]:
+            for i in caras[f]:
+                if cp[i] == u: mapa.setdefault(i, set())
+        for f in comunes:
+            t = caras[f]; wu = [i for i in t if cp[i] == u][0]; wv = [i for i in t if cp[i] == v][0]; mapa[wu].add(wv)
+        if any(len(s) != 1 for s in mapa.values()): return None   # una cuna de u sin la arista, o que ira a dos
+        mapa = {a: next(iter(s)) for a, s in mapa.items()}
+        if len(set(mapa.values())) != len(mapa): return None
+        x = P[v]; c = float(x @ (PA[u] + PA[v]) @ x + 2 * (Pb[u] + Pb[v]) @ x + Pc[u] + Pc[v])
+        for a, b in mapa.items():
+            x = X[b]; c += float(x @ (QA[a] + QA[b]) @ x + 2 * (Qb[a] + Qb[b]) @ x + Qc[a] + Qc[b])
+        return c, comunes, mapa
+    def mete(u, v):
+        if pfijo[u]: return
+        r = colapso(u, v)
+        if r is not None: heapq.heappush(heap, (r[0], u, v, ver[u], ver[v]))
+    for u in range(nP):
+        for v in vecinos(u): mete(u, v)
+    objetivo = int(round(nt0 * razon)); quedan = nt0
+    while heap and quedan > objetivo:
+        c, u, v, vu, vv = heapq.heappop(heap)
+        if c > tope:
+            if diag: print('   simplifica: tope de error con %d caras' % quedan)
+            break
+        if not (vivo[u] and vivo[v]) or ver[u] != vu or ver[v] != vv: continue
+        r = colapso(u, v)
+        if r is None: continue
+        _, comunes, mapa = r
+        terceros = {i for f in comunes for i in cp[caras[f]]} - {u, v}
+        if vecinos(u) & vecinos(v) != terceros: continue        # condicion del enlace
+        nuevas = []
+        for f in de[u]:
+            if f in comunes: continue
+            t = caras[f]; t2 = [mapa.get(i, i) for i in t]
+            n0, _ = _normal(*P[cp[t]]); n1, l1 = _normal(*P[cp[t2]])
+            if n0 is None or n1 is None or l1 < 1e-10 or np.dot(n0, n1) < VIS_GIRO: break
+            nuevas.append((f, t2))
+        else:
+            for f in comunes:
+                for i in caras[f]: de[cp[i]].discard(f)
+                del caras[f]; quedan -= 1
+            for f, t2 in nuevas: caras[f] = t2; de[v].add(f)
+            de[u] = set(); vivo[u] = False
+            for a, b in mapa.items(): QA[b] += QA[a]; Qb[b] += Qb[a]; Qc[b] += Qc[a]
+            PA[v] += PA[u]; Pb[v] += Pb[u]; Pc[v] += Pc[u]
+            ver[v] += 1
+            for w in vecinos(v): mete(v, w); mete(w, v)
+    # tiras nuevas de cada grupo (detras de las mallas que no se tocan)
+    por_grupo = {}
+    for t in caras.values(): por_grupo.setdefault(cunas[t[0]][1], []).append(t)
+    nuevas = []; verts = []; n2 = 0
+    for k, x in enumerate(mod.mallas):
+        if k in en_grupo: continue
+        verts.append(V[x[4]:x[4] + x[5]].copy()); nuevas.append(x[:4] + [n2] + x[5:]); n2 += x[5]
+    for gi, ks in enumerate(grupos):
+        x0 = mod.mallas[ks[0]]
+        for s in tiras(por_grupo.get(gi, [])):
+            q = np.array([cunas[i][2] for i in s]); verts.append(q)
+            Q = np.stack([q['x'], q['y'], q['z']], 1).astype(float); cc = Q.mean(0)
+            nuevas.append([x0[0], x0[1], cc, float(np.sqrt(((Q - cc) ** 2).sum(1).max())), n2, len(q), x0[6], x0[7], x0[8],
+                           dict(x0[9], N=np.array([cunas[i][3] for i in s], np.float32))])
+            n2 += len(q)
+    mod.mallas, mod.verts, mod.nv = nuevas, verts, n2
+    return nt0, quedan
+
+def tiras(tris, maximo=256):
+    """tiras voraces de los triangulos (tripletes de indices): desde el triangulo libre con menos vecinos libres, por la
+    arista de los dos ultimos vertices hacia delante y luego hacia atras (sin descarte de caras el sentido da igual);
+    de las tres formas de empezar, la que mas triangulos coge. Devuelve [indices de cada tira]"""
+    import heapq
+    por_arista = {}
+    for f, t in enumerate(tris):
+        for e in ((t[0], t[1]), (t[1], t[2]), (t[2], t[0])): por_arista.setdefault(frozenset(e), []).append(f)
+    libre = [True] * len(tris)
+    def grado(f):
+        t = tris[f]
+        return sum(1 for e in ((t[0], t[1]), (t[1], t[2]), (t[2], t[0])) for g in por_arista[frozenset(e)] if g != f and libre[g])
+    def sigue(s, usados):
+        while len(s) < maximo:
+            cand = [g for g in por_arista.get(frozenset((s[-2], s[-1])), ()) if libre[g] and g not in usados]
+            if not cand: break
+            g = min(cand, key=grado); r = [i for i in tris[g] if i != s[-2] and i != s[-1]]
+            if len(r) != 1: break
+            s.append(r[0]); usados.add(g)
+        return s
+    res = []; orden = [(grado(f), f) for f in range(len(tris))]; heapq.heapify(orden)
+    while orden:
+        _, f = heapq.heappop(orden)
+        if not libre[f]: continue
+        mejor = None
+        for r in range(3):
+            t = tris[f]; us = {f}; s = sigue([t[r], t[(r + 1) % 3], t[(r + 2) % 3]], us)
+            s.reverse(); s = sigue(s, us)
+            if mejor is None or len(us) > len(mejor[1]): mejor = (s, us)
+        for g in mejor[1]: libre[g] = False
+        res.append(mejor[0])
+    return res
+
+def triangulos_dibujados(mod, cerca=False):
+    """triangulos con area de lo que se dibuja a la vez en carrera (como vertices_dibujados)"""
+    V = np.concatenate(mod.verts); g = {}
+    for x in mod.mallas:
+        if not cerca and x[9].get('cerca'): continue
+        i0, n = x[4], x[5]
+        if n < 3: continue
+        P = np.stack([V['x'][i0:i0 + n], V['y'][i0:i0 + n], V['z'][i0:i0 + n]], 1).astype(float)
+        a = np.linalg.norm(np.cross(P[1:-1] - P[:-2], P[2:] - P[:-2]), axis=1)
+        k = x[9].get('grupo', NADA); g[k] = g.get(k, 0) + int((a > 1e-9).sum())
+    return g.get(NADA, 0) + g.get(G_FARO, 0) + max(g.get(G_PILOTOS, 0), g.get(G_NOCHE, 0), g.get(G_FRENO, 0)) + \
+        max(g.get(G_DISCO, 0), g.get(G_DISCO_CAL, 0))
 
 # ------------------------------------------------------------------ salida
 def rebanadas(P, tris, holgura=0.03, minimo=0.005):
@@ -916,12 +1247,13 @@ def sombra_clamp(A, mod, m):
         w, h, fmt, li, off, tam = mod.texs[ti]; mod.texs[ti] = (w, h, fmt | bits, li, off, tam)
     print('   sombra plana: CLAMP %s%s (texturas %s)' % ('u' if ms else '-', 'v' if mt else '-', sorted(sus - otras)))
 
-def convierte(A, m, sal, tope=TOPE, vista=None, rebaja=False, carrera=False):
+def convierte(A, m, sal, tope=TOPE, vista=None, rebaja=False, carrera=False, visible=False):
     """el coche montado como el original (llamadas) y, si lo que se dibuja a la vez pasa del tope del TA, sin lo que
     no se ve desde las camaras del juego (con la vuelta baja de los choques y, si aun no cabe, sin ella). No se tapa,
-    no se anade y no se cambia ninguna pieza. rebaja: variante A (rebaja_texturas); carrera: variante B (parte_carrera)"""
+    no se anade y no se cambia ninguna pieza. rebaja: variante A (rebaja_texturas); carrera: variante B (parte_carrera);
+    visible: C2 (Rev 2.9.7: siempre sin lo oculto, simplifica y rebaja_texturas con la clase 'visible'; implica rebaja)"""
     mod, e, d = monta(A, m)
-    t0, v0 = triangulos_n(mod), vertices_dibujados(mod); nota = 'completo'
+    t0, v0 = triangulos_n(mod), vertices_dibujados(mod); nota = 'completo'; td0 = triangulos_dibujados(mod)
     if v0 > tope:
         for baj, nota in ((True, 'sin lo oculto'), (False, 'sin lo oculto ni la vuelta baja')):
             mod, e, d = monta(A, m)
@@ -929,7 +1261,21 @@ def convierte(A, m, sal, tope=TOPE, vista=None, rebaja=False, carrera=False):
             print("   %s: %d vertices" % (nota, vertices_dibujados(mod)))
             if vertices_dibujados(mod) <= tope: break
     vacia_interior(A, mod, m)
-    if rebaja: rebaja_texturas(mod)
+    cl = None
+    if visible:
+        # C2: las clases de las texturas, con el coche de siempre (lo vaciado dejaria por vistas las de los bajos); luego
+        # siempre sin lo oculto (con la vuelta baja) y simplificado
+        cl = clasifica_texturas(mod, True); td0 = triangulos_dibujados(mod)
+        if nota == 'completo':
+            mod, e, d = monta(A, m); nota = 'sin lo oculto'
+            vis, dueno = visibilidad(mod, bajas=True, posturas=poses(A, m)); vacia(mod, vis, dueno)
+            print("   %s: %d vertices" % (nota, vertices_dibujados(mod)))
+            vacia_interior(A, mod, m)
+        td1, vd1 = triangulos_dibujados(mod), vertices_dibujados(mod)
+        a, b = simplifica(mod); nota += ', simplificado'
+        print('   simplificado: %d -> %d triangulos simplificables; dibujados %d -> %d (vaciado) -> %d; vertices %d -> %d'
+              % (a, b, td0, td1, triangulos_dibujados(mod), vd1, vertices_dibujados(mod)))
+    if rebaja or visible: rebaja_texturas(mod, visible, cl)
     if carrera: parte_carrera(A, mod, m)
     if vista:
         try:
@@ -944,14 +1290,15 @@ def convierte(A, m, sal, tope=TOPE, vista=None, rebaja=False, carrera=False):
     mod.mallas.sort(key=lambda x: (x[0], x[1]))                # el orden de escribe (estable): el de CEX2
     mod.ruta = extension(mod)
     vesp = sum(x[5] for x in mod.mallas if x[9].get('esp') and x[9]['esp'][0] >= ESP_ENTORNO)
-    vd = vertices_dibujados(mod); vt = vertices(mod); vc = vertices_carrera(mod)
+    vd = vertices_dibujados(mod); vt = vertices(mod); vc = vertices_carrera(mod); td = triangulos_dibujados(mod)
     mod.mallas = [x[:8] for x in mod.mallas]                    # fuera el nombre de la pieza y lo demas
     mod.escribe(sal)
     kb = len(mod.blob) >> 10
     print('modelo %2d %-28s tri %5d -> %5d  vtx %5d -> %5d (carrera %5d, en el fichero %5d)  tex %2d (%3d KB)  entorno %4d vtx'
           '  %s  -> %s' % (m, e.nombre, t0, triangulos_n(mod), v0, vd, vc, vt, len(mod.texs), kb, vesp, nota, os.path.basename(sal)))
+    if visible: print('   dibujados: %d -> %d triangulos con area' % (td0, td))
     return dict(modelo=m, nombre=e.nombre, tri0=t0, tri=triangulos_n(mod), vtx0=v0, vtx=vd, vtx_carrera=vc, kb=kb, nota=nota,
-                entorno=vesp)
+                entorno=vesp, tdib0=td0, tdib=td)
 
 def dibuja_vista(mod, ruta):
     """perfil y tres cuartos (comprobacion rapida, sin z-buffer)"""
@@ -981,19 +1328,22 @@ def main():
         return defecto
     tope = int(op('--tope', TOPE)); vista = op('--vista'); todos = op('--todos'); m = op('--modelo')
     solo = op('--fichas'); solo = None if solo is None else [int(x) for x in solo.split(',')]
-    rebaja = '--rebaja' in a; carrera = '--carrera' in a; a = [x for x in a if x not in ('--rebaja', '--carrera')]
+    rebaja = '--rebaja' in a; carrera = '--carrera' in a; visible = '--visible' in a
+    a = [x for x in a if x not in ('--rebaja', '--carrera', '--visible')]
     A = Assets(a[0] if a else None)
     if todos is not None:
         os.makedirs(todos, exist_ok=True)
         hechos = bytearray(b'\xff' * len(FICHA_MODELO))
         for k, mm in enumerate(FICHA_MODELO):
             if solo is not None and k not in solo: continue
-            convierte(A, mm, os.path.join(todos, 'COCHE%02d.DAT' % k), tope, vista, rebaja, carrera)
+            convierte(A, mm, os.path.join(todos, 'COCHE%02d.DAT' % k), tope, vista, rebaja or visible, carrera)
+            if visible:                                         # (Rev 2.9.7) el ligero de la carrera, aparte
+                convierte(A, mm, os.path.join(todos, 'COCHE%02dL.DAT' % k), tope, vista, True, False, True)
         for k, mm in enumerate(FICHA_MODELO):
-            if os.path.exists(os.path.join(todos, 'COCHE%02d.DAT' % k)): hechos[k] = mm
+            if os.path.exists(os.path.join(todos, 'COCHE%02d.DAT' % k)): hechos[k] = mm   # (COCHEnnL.DAT: opcional)
         with open(os.path.join(todos, 'COCHES.DAT'), 'wb') as f: f.write(b'CCH1' + bytes(hechos))
     elif m is not None:
-        convierte(A, int(m), a[1], tope, vista, rebaja, carrera)
+        convierte(A, int(m), a[1], tope, vista, rebaja, carrera, visible)
     else:
         print(__doc__)
 

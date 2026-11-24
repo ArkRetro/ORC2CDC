@@ -1521,6 +1521,106 @@ de OutRun 2 SP (las 15 etapas seguidas) que dio el usuario.
   no esta leido). Sin EFECTOS.DAT nuevo, sin agua (como antes).
 - NO verificado en consola real.
 
+### Coche visible mas ligero (Rev 2.9.7)
+
+Pedido del usuario (variante "C2", para reducir los saltos): menos poligonos y texturas en las partes VISIBLES de los
+Ferrari sin perder estetica: ~35-40 % menos triangulos dibujados por coche simplificando la geometria visible con
+contornos, siluetas y aristas vivas; luces, emblemas y matriculas sin tocar; la pintura, el reflejo y los emblemas sin
+tocar y las demas texturas visibles de 256 a la mitad, con VQ; si de cerca se nota, el modelo completo en la seleccion
+y el ligero en carrera. DESVIACION (el original lleva el coche entero). Medido en Flycast, no en la consola real.
+
+- tools/conv_coche.py `--visible` (implica `--rebaja`; sin ella sale lo mismo que antes, comprobado byte a byte en los
+  15): escribe el COCHEnn.DAT de siempre (el de `--rebaja`, Rev 2.9.6, identico) y ademas COCHEnnL.DAT, el ligero:
+  - siempre sin lo oculto (el vaciado de cuando se pasa del tope, con la vuelta baja: no cambia la imagen desde las
+    camaras del juego);
+  - simplifica(): colapso de aristas por error cuadrico (Garland-Heckbert) de posicion, UV, color (la luz cocida) y
+    normal (de ella sale el reflejo de la pintura), con el area de peso, en las mallas opacas de carroceria, extra,
+    puertas, volante, palanca, aleron, ruedas (llanta y neumatico), pinzas y discos. Colapsos u -> v sin vertices
+    nuevos (cada "cuna" de u, sus atributos en un grupo de material, pasa a la de v del otro lado de la arista);
+    bordes abiertos, costuras de UV / normal / color y limites de material solo se acortan a lo largo de si mismos (con
+    planos de arista de peso VIS_BORDE) y sus esquinas quedan; fijas las posiciones de lo que no se simplifica (luces,
+    cristales, emblemas, matriculas, sombra) y las que estan a menos de 4 cm de ello (VIS_CERCA: sin esto la carroceria
+    de alrededor de la matricula del 360 se aplanaba y la tapaba a medias); fuera el colapso que gire una cara mas de
+    37 grados (VIS_GIRO 0,8) o rompa la variedad. Hasta el 60 % de los triangulos simplificables (VIS_RAZON) o el
+    error VIS_TOPE. Las tiras de las mismas posiciones traen normales y luz algo distintas (0xBE / 0xC0): se juntan
+    (media) si la UV, el color (12 por canal) y la normal (~25 grados) casi coinciden. Re-estripificado voraz (tiras de
+    hasta 256 vertices; sin descarte de caras el sentido da igual);
+  - texturas: las de `--rebaja` y ademas (clase 'visible') las opacas de fuera con un lado de 256, sin pintura,
+    reflejo, luces ni sombra, a la mitad en el lado en que menos se nota (menor error RMS al ampliarla otra vez) o en
+    los dos si ese error es de 3 o menos; si aun la mejor mitad pasa de 8 (VIS_TEX_MAX: los atlas de motor y
+    salpicadero del 360, 575, F430 y 550, que en carrera se notaban: el motor del 360 se ve bajo el cristal) se queda.
+    Bajan sobre todo los bajos (256x128 -> 128x128 o 256x64) y un atlas de 256x256 (Testarossa, a 256x128). Todas
+    con VQ (comprobado en los 15).
+- demo/main.c coche_carga: en carrera el ligero COCHEnnL.DAT (coche_pide_ligero, al empezar la carrera; al
+  reintentar se queda) y en el menu el completo COCHEnn.DAT (cuando el menu ensena el coche, menu_coche3d, lo vuelve a
+  cargar si esta el ligero). Compatible: sin COCHEnnL.DAT (datos de antes, el taxi) se queda el completo (coche_sin_ligero, sin volver a
+  pedirlo). De cerca SI se notaba (capturas de la seleccion con el ligero: reflejos a facetas en el capo y el
+  paragolpes, la toma lateral del 360), y los dos modelos en un fichero con NODO_CERCA (como la variante B) no caben en
+  el bloque del coche (COCHE_RAM 496 KB: saldrian 660-740 KB): por eso dos ficheros. Coste: en la carga de cada carrera
+  se lee el ligero (300-380 KB del GD) y al volver a la seleccion el completo. La salida y la meta (escenas de cerca
+  dentro de la carrera) usan el ligero.
+- tools/regenera.py: los pasos cocheN usan `--visible` y la comprobacion pide COCHE00..14L.DAT; coches_visibles()
+  rehace los coches de unos datos sin COCHE00L.DAT (o con uno de mas de 10500 vertices).
+- comun/menu.c `-DDIAG_GIRO_FIJO=angulo` (medida): el coche de la seleccion quieto, para capturas comparables.
+
+Triangulos dibujados a la vez en carrera (con area: lo fijo, el faro, el mayor juego de pilotos y de discos), vertices
+del TA del coche en carrera y VRAM de sus texturas (base = la Rev 2.9.6, COCHEnn.DAT):
+
+| ficha | coche | triangulos base / C2 | vertices en carrera base / C2 | VRAM KB base / C2 |
+|---|---|---|---|---|
+| 00 | 360sp | 7351 / 4665 (-37 %) | 10910 / 7456 (-32 %) | 182 / 178 |
+| 01 | 575sa | 8256 / 5255 (-36 %) | 11674 / 7832 (-33 %) | 141 / 138 |
+| 02 | gto | 7003 / 4420 (-37 %) | 10916 / 7516 (-31 %) | 161 / 154 |
+| 03 | 250gto | 6587 / 4093 (-38 %) | 9374 / 6345 (-32 %) | 158 / 154 |
+| 04 | f40 | 7584 / 5186 (-32 %) | 11511 / 8484 (-26 %) | 183 / 179 |
+| 05 | f430 | 7580 / 4704 (-38 %) | 11288 / 7535 (-33 %) | 127 / 123 |
+| 06 | fx | 7569 / 5004 (-34 %) | 11212 / 8092 (-28 %) | 186 / 178 |
+| 07 | f50 | 7594 / 4869 (-36 %) | 10921 / 7466 (-32 %) | 147 / 143 |
+| 08 | f355sp | 7178 / 4490 (-37 %) | 10746 / 7468 (-31 %) | 165 / 149 |
+| 09 | testa | 6971 / 4786 (-31 %) | 10585 / 7939 (-25 %) | 151 / 139 |
+| 10 | 328gts | 6941 / 4160 (-40 %) | 10882 / 7195 (-34 %) | 153 / 145 |
+| 11 | 512bb | 6435 / 3772 (-41 %) | 10035 / 6680 (-33 %) | 180 / 176 |
+| 12 | 550b | 7743 / 4788 (-38 %) | 11091 / 7364 (-34 %) | 133 / 125 |
+| 13 | dino | 6940 / 4097 (-41 %) | 10089 / 6329 (-37 %) | 140 / 136 |
+| 14 | dayts | 7110 / 4435 (-38 %) | 10502 / 7179 (-32 %) | 148 / 141 |
+| | total | 108842 / 68724 (-37 %) | 161736 / 110880 (-31 %) | 2354 / 2255 (-4,2 %) |
+
+Medidas (Flycast, piloto, `-DPRUEBA_AUTO -DPRUEBA_SIN_TIEMPO -DDIAG_MS -DDIAG_POPPING -DPRUEBA_NODO=n -DPRUEBA_FICHA=f`,
+140 s, tres Flycast a la vez; el mismo tramo de s de las dos pruebas: lineas MS desde s 200, POP del tramo comun;
+coche = us de CPU y vertices de la linea PRF; saltos por segundo de 8 px o mas / de 32 px o mas, total y por razon):
+
+| prueba | fps | tarde | salto | lejano | coche us / vtx | saltos 8 / 32 px | tope (+ / -) | pvs (+ / -) |
+|---|---|---|---|---|---|---|---|---|
+| Dino PALM base | 38,33 | 47 | 6,27 | 2246 | 2406 / 10054 | 33,6 / 7,8 | +25,4/6,6 -5,3/0,5 | +2,3/0,4 -0,1/0,1 |
+| Dino PALM C2 | 38,37 | 45 | 6,85 | 2099 | 1930 / 6294 | 27,9 / 4,9 | +19,9/4,1 -4,4/0,3 | +3,1/0,3 -0,1/0,1 |
+| Dino GHOS base | 37,64 | 51 | 7,63 | 1864 | 2423 / 10081 | 27,8 / 4,2 | +16,1/1,5 -3,4/0,0 | +7,1/1,7 -1,2/0,9 |
+| Dino GHOS C2 | 37,39 | 59 | 7,95 | 1668 | 1952 / 6321 | 29,3 / 3,8 | +14,0/0,9 -5,3/0,1 | +8,7/1,8 -1,2/0,8 |
+| Dino METR base | 34,22 | 160 | 8,34 | 1644 | 2407 / 10081 | 22,5 / 6,8 | +7,7/2,2 -1,9/0,4 | +11,4/3,5 -0,1/0,0 |
+| Dino METR C2 | 34,80 | 143 | 8,17 | 1695 | 1944 / 6321 | 23,8 / 6,7 | +7,7/1,9 -2,6/0,6 | +11,4/3,5 -0,1/0,0 |
+| 360 PALM base | 38,15 | 48 | 6,92 | 2052 | 2685 / 10615 | 33,0 / 7,1 | +23,8/5,9 -5,7/0,5 | +1,7/0,2 -0,1/0,1 |
+| 360 PALM C2 | 38,24 | 47 | 6,78 | 2101 | 2279 / 7161 | 29,4 / 5,3 | +19,0/4,0 -5,6/0,3 | +2,5/0,2 -0,1/0,1 |
+| 360 GHOS base | 37,59 | 57 | 7,97 | 1634 | 2772 / 10888 | 27,4 / 4,5 | +14,8/1,6 -4,2/0,1 | +7,2/1,9 -1,1/0,8 |
+| 360 GHOS C2 | 37,61 | 57 | 7,98 | 1647 | 2363 / 7434 | 30,1 / 3,9 | +14,2/0,9 -5,7/0,1 | +8,7/2,0 -1,3/0,9 |
+| 360 METR base | 35,24 | 157 | 8,44 | 1579 | 2765 / 10887 | 21,0 / 6,2 | +7,8/2,1 -2,4/0,5 | +9,3/3,2 -0,1/0,0 |
+| 360 METR C2 | 35,50 | 148 | 8,27 | 1621 | 2365 / 7433 | 19,8 / 5,6 | +6,2/1,4 -2,4/0,5 | +9,6/3,2 -0,1/0,0 |
+- El coche cuesta un 15-20 % menos de CPU (2400 -> 1950 us el Dino, 2770 -> 2370 el 360) y un 31-37 % menos de vertices
+  del TA. Los fps y los cuadros tarde casi no cambian (+-0,3 fps, como en la variante B: lo que deja libre el coche lo
+  ocupa la etapa, cuyo tope sale de lo que gasto lo demas). En PALM bajan los saltos (8 px 33 -> 28 / 29 por s, 32 px
+  7,8 -> 4,9 y 7,1 -> 5,3, casi todos de "tope"); en GHOS suben los de 8 px (27,8 -> 29,3 y 27,4 -> 30,1: mas
+  apariciones "pvs" y desapariciones "tope"; el lejano del Dino baja 1864 -> 1668) y bajan los de 32 px; en METR casi
+  igual (22,5 -> 23,8 y 21,0 -> 19,8 de 8 px; 6,8 -> 6,7 y 6,2 -> 5,6 de 32 px) con algo menos de cuadros tarde.
+  Flycast repite la carrera casi igual (una primera version de C2, con otros ajustes, dio los mismos fps a +-0,2 y los
+  mismos saltos a +-1 por s): diferencias de ese orden son ruido. VRAM: -4 KB por coche de
+  media (-99 KB los 15): poca, porque la pintura, los reflejos, las luces, los emblemas y los atlas con detalle se
+  quedan.
+- Lo que se pierde a la vista (capturas con la imagen congelada, `-DDIAG_CONGELA=1500`, el mismo cuadro): en carrera
+  las curvas de las aletas traseras y del paragolpes salen algo mas poligonales en el contorno (1-2 pixeles a 640x480)
+  y el reflejo de la pintura en la tapa del motor y las aletas sale a facetas (zonas mas planas, mas visible en el 360);
+  las llantas y los neumaticos no se distinguen. Los bajos con la mitad de resolucion. Matriculas, pilotos, emblemas y
+  el motor del 360 igual. La seleccion de coche, igual pixel a pixel (el completo).
+- No verificado en la consola real (alli el TA puede pesar mas que en Flycast y los vertices de menos rendir mas), ni
+  la vuelta al menu tras una carrera en Flycast (la recarga del completo: el mismo camino que el cambio de ficha).
+
 ### Coches mas ligeros (Rev 2.9.6)
 
 Pedido del usuario: optimizar los 15 coches del jugador (COCHE00..14.DAT) para ganar rendimiento sin perder estetica,

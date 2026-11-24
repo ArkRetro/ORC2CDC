@@ -79,6 +79,14 @@ def coches_rebajados(D):
         return not any(struct.unpack_from('<2I', d['texs'], 24 * i) == (512, 256) for i in range(len(d['texs']) // 24))
     except Exception: return True
 
+def coches_visibles(D):
+    """Rev 2.9.7: los coches ligeros de la carrera (COCHEnnL.DAT de conv_coche.py --visible, C2: el 360 Spider con unos
+    8900 vertices en el fichero; el completo COCHEnn.DAT, 12307): sin ellos (datos de antes) se rehacen los coches"""
+    try:
+        b = open(os.path.join(D, 'COCHE00L.DAT'), 'rb').read(12)
+        return b[:4] == b'ORD7' and struct.unpack_from('<I', b, 8)[0] < 10500
+    except (OSError, struct.error): return False
+
 def hay(D, *fs): return all(os.path.isfile(os.path.join(D, f)) and os.path.getsize(os.path.join(D, f)) > 0 for f in fs)
 
 def mueve(D, *rutas):
@@ -191,7 +199,7 @@ def paso(C, n, log):
     elif n == 'camiones':                                        # los camiones con remolque de OUTRUN2SP (39/40, 41, 43)
         ej(T('conv_trafico.py'), ISO, t, '--camiones'); mueve(D, tj('TRAFK0.DAT'), tj('TRAFK1.DAT'), tj('TRAFK2.DAT'))
     elif n.startswith('coche'):
-        ej(T('conv_coche.py'), ISO, '--todos', t, '--fichas', n[5:], '--rebaja')   # (Rev 2.9.6: texturas que no se ven de cerca rebajadas)
+        ej(T('conv_coche.py'), ISO, '--todos', t, '--fichas', n[5:], '--visible')   # (Rev 2.9.7: COCHEnn.DAT con --rebaja y el ligero COCHEnnL.DAT, C2)
         c = os.path.join(W, 'coche'); os.makedirs(c, exist_ok=True)
         for f in glob.glob(tj('COCHE[0-9]*.DAT')): os.replace(f, os.path.join(c, os.path.basename(f)))
     else: raise Fallo('paso desconocido: %s' % n)
@@ -272,12 +280,14 @@ def regenera(iso, D, W, jobs=4, informe=print):
     if not hay(D, *UNIONES_TA): falta += ['unionta%d' % k for k in range(C.partes)]
     if not hay(D, *UNIONES_REN): falta += ['unionren%d' % k for k in range(C.partes)]
     # primero lo que hace falta para arrancar y correr (coches, HUD, menus, sonido, musica, etapas); las peliculas al final
-    viejos = hay(D, 'COCHE00.DAT') and not coches_rebajados(D)
+    viejos = hay(D, 'COCHE00.DAT') and not (coches_rebajados(D) and coches_visibles(D))
     if viejos:                                           # (las copias intermedias de antes no valen; las de D se cambian al acabar)
         for k in range(15):
-            if os.path.isfile(os.path.join(W, 'coche', 'COCHE%02d.DAT' % k)): os.remove(os.path.join(W, 'coche', 'COCHE%02d.DAT' % k))
+            for f in ('COCHE%02d.DAT' % k, 'COCHE%02dL.DAT' % k):
+                if os.path.isfile(os.path.join(W, 'coche', f)): os.remove(os.path.join(W, 'coche', f))
     for k in range(15):
-        if (viejos or not hay(D, 'COCHES.DAT')) and not hay(os.path.join(W, 'coche'), 'COCHE%02d.DAT' % k): falta.append('coche%d' % k)
+        if (viejos or not hay(D, 'COCHES.DAT')) and not hay(os.path.join(W, 'coche'), 'COCHE%02d.DAT' % k, 'COCHE%02dL.DAT' % k):
+            falta.append('coche%d' % k)
     for f, n in (('MENU.DAT', 'menu'), ('HUD.DAT', 'hud'), ('VMU.DAT', 'vmu'), ('MODOV.DAT', 'modov')):
         if not hay(D, f): falta.append(n)
     if not hay(D, 'SFX.DAT', 'VOCES.DAT', 'VOCESC.DAT') or not voces_163(D): falta.append('sonido')
@@ -414,7 +424,7 @@ def regenera(iso, D, W, jobs=4, informe=print):
     ok = True
     nec = ['BAND.DAT', 'BAND1.DAT', 'BKD.DAT', 'BO.DAT'] + chrs + \
           'COCHES.DAT COLBK.DAT COLLR.DAT CURSO.DAT EFECTOS.DAT FAROS.DAT FIN.DAT GOVER.DAT HAHUD.DAT HUD.DAT INFARTO.DAT MENU.DAT META.DAT MODOV.DAT MVATTR.VQV MVTS.VQV PARAM.DAT SFX.DAT SEGS.PAK SOL.DAT TAPD.DAT TRAFC.DAT UNIONES.PAK VMU.DAT VOCES.DAT VOCESH.DAT VOCESC.DAT MISION.DAT C2CHUD.DAT C2C.DAT SALON.DAT TABLERO.DAT CURSOTA.DAT UNIONESTA.PAK UNIONESR.PAK'.split() + ['RC%02d.DAT' % k for k in range(30)] + \
-          ['COCHE%02d.DAT' % k for k in range(15)] + ['MUS%d.ADP' % k for k in MUSICA] + SP + FINAL + \
+          ['COCHE%02d.DAT' % k for k in range(15)] + ['COCHE%02dL.DAT' % k for k in range(15)] + ['MUS%d.ADP' % k for k in MUSICA] + SP + FINAL + \
           ['TRAFK%d.DAT' % k for k in range(3)] + FIN + TRAF + BO + COLBK + ['SALIDA.DAT', 'CHRPAR.DAT', 'VISO.DAT', 'INFARTOP.DAT']
     for f in nec:
         if not hay(D, f): informe('FALTA %s' % f); ok = False
