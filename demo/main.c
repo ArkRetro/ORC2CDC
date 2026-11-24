@@ -861,6 +861,20 @@ static uint32_t modelo_teo(const modelo_t *m, int lod, int o)
         if (m->mallas[i].n >= 3 && (lod < 0 || (((m->mallas[i].nodo >> lod) & 1) && TRAF_GRUPO(m->mallas[i].nodo) != 3 && TRAF_GRUPO(m->mallas[i].nodo) != 2))) c += ta_teo(m->mallas[i].n > 256 ? 256 : m->mallas[i].n, o);
     return c;
 }
+/* Coches mas ligeros en carrera (Rev 2.9.6, DESVIACION pedida; tools/conv_coche.py parte_carrera, opcion --carrera): las
+   mallas del coche del jugador con NODO_CERCA en el campo del nodo solo se ven de cerca (seleccion, salon, salida, meta)
+   y no se dibujan con la camara de persecucion (coche_sin_cerca). Sin el bit (los coches de antes) se dibuja todo */
+#define NODO_CERCA 0x10000
+static int sin_cerca;                                           /* dibuja_indices salta las mallas con NODO_CERCA */
+/* bytes teoricos del TA del coche del jugador en carrera: todas sus mallas menos las de NODO_CERCA (sin ese bit, lo
+   mismo que modelo_teo(m, -1, o)) */
+static uint32_t coche_teo_carrera(const modelo_t *m, int o)
+{
+    uint32_t i, c = 0;
+    for (i = 0; i < m->nmallas; i++)
+        if (m->mallas[i].n >= 3 && !(m->mallas[i].nodo >= 0 && (m->mallas[i].nodo & NODO_CERCA))) c += ta_teo(m->mallas[i].n > 256 ? 256 : m->mallas[i].n, o);
+    return c;
+}
 
 /* ---------------------------------------------------------------- memoria de video del curso
    Antes cada textura de las etapas y uniones se pedia a pvr_mem (el dlmalloc de KallistiOS) y la VRAM se troceaba:
@@ -2347,6 +2361,7 @@ static void dibuja_indices(const modelo_t *mo, int l, const uint16_t *idx, uint3
     for (j = 0; j < n; j++) {
         const malla_t *m = mo->mallas + idx[j];
         if (m->n < 3) continue;
+        if (sin_cerca && m->nodo >= 0 && (m->nodo & NODO_CERCA)) continue;   /* (Rev 2.9.6: el coche en carrera) */
         if (solo_lod >= 0 && (!((m->nodo >> solo_lod) & 1) || !((traf_luces >> TRAF_GRUPO(m->nodo)) & 1))) continue;
         if (m->tex != ult) {
             ult = m->tex;
@@ -12370,7 +12385,7 @@ static int coche_carga(int k)
     coche_ani_lee();                                            /* piezas animadas (ANI1) */
     coche_ficha = k; modelo_jug = ficha_modelo[k] < 30 ? ficha_modelo[k] : MODELO;
     for (i = 0; i < NMODTRAF; i++) if ((c = modelo_teo(&mtraf[i], traf_con_lod[i] ? 0 : -1, 0)) > ct) ct = c;
-    ta_min_otros_teo = modelo_teo(&coche, -1, 1) + 3 * ct; ta_traf_teo = ct;   /* lo reservado: este coche y tres de trafico (LOD 0) */
+    ta_min_otros_teo = coche_teo_carrera(&coche, 1) + 3 * ct; ta_traf_teo = ct;   /* lo reservado: este coche (en carrera) y tres de trafico (LOD 0) */
     dbglog(DBG_INFO, "coche: ficha %d %s modelo %d, %u vertices, %u texturas, VRAM libre %uK\n", k, nom, modelo_jug,
            (unsigned)modelo_vtx(&coche, -1), (unsigned)coche.ntex, (unsigned)(pvr_mem_available() >> 10));
     return 0;
@@ -12550,6 +12565,9 @@ static gh_cab_t gh_rep_cab; static int gh_nrec, gh_nrep, gh_clave = -1, gh_graba
    la salida (13 / 14), la meta (19), el fin del tiempo (20..22) y lo demas el coche va entero (0x4000: dl = 2, PC
    driving/pc_camera.cpp kind[]). Antes la meta desde la vista 1 seguia con el habitaculo: no se veia el derrape */
 static int coche_modo(int carrera) { return !cam_ok ? 2 : carrera ? cam_coche_modo(&cam) : 2; }
+/* (Rev 2.9.6) el coche del jugador sin las mallas NODO_CERCA: solo en carrera con la camara de persecucion, fuera de
+   la escena de la salida y de la meta y sin mezcla de vistas (al pasar de una vista a otra el ojo pasa cerca) */
+static int coche_sin_cerca(int carrera) { return carrera && cam_ok && !fin24 && !meta_cam && !sal_on && cam.n33c == 0; }
 static int gh_nodo_ant = -1, gh_rama_ant = -1; static float gh_union_ant = -1;   /* la union de la etapa anterior */
 static coche_t gh_c; static matrix_t gh_mat __attribute__((aligned(32)));
 static volatile int gh_guardando;
@@ -13236,7 +13254,7 @@ int main(int argc, char **argv)
         for (i = 0; i < NMODTRAF; i++) {
             if ((c = modelo_teo(&mtraf[i], traf_con_lod[i] ? 0 : -1, 0)) > ct) { ct = c; cv = modelo_vtx(&mtraf[i], traf_con_lod[i] ? 0 : -1); }
         }
-        ta_min_otros_teo = modelo_teo(&coche, -1, 1) + 3 * ct + (chr_ok == 1 ? modelo_teo(&chr, -1, 0) : 0); ta_traf_teo = ct;
+        ta_min_otros_teo = coche_teo_carrera(&coche, 1) + 3 * ct + (chr_ok == 1 ? modelo_teo(&chr, -1, 0) : 0); ta_traf_teo = ct;
         dbglog(DBG_INFO, "TA: bufer %uK, coche %u vertices, trafico hasta %u (LOD 0), minimo reservado %uK\n", TA_VB_BYTES >> 10,
                (unsigned)modelo_vtx(&coche, -1), (unsigned)cv, (unsigned)((ta_min_otros_teo * ta_f >> 8) >> 10));
     }
@@ -14328,7 +14346,9 @@ int main(int argc, char **argv)
             PRF(4);
             if ((estado != TITULO && !mundo_fuera && coche_modo(estado == CARRERA) == 2) || (estado == TITULO && menu_coche3d()) || (fin24 && final_vista()->coche)) {
 #ifndef DIAG_SIN_COCHE
+                sin_cerca = coche_sin_cerca(estado == CARRERA);                  /* (Rev 2.9.6) la persecucion: sin lo que solo se ve de cerca */
                 coche_dibuja(l, &mod_coche, 0);
+                sin_cerca = 0;
 #endif
             } else if (estado != TITULO && !mundo_fuera && coche_modo(estado == CARRERA) == 1 && !fin24)
                 coche_dibuja(l, &mod_coche, 1);                 /* la vista interior: el habitaculo (vm = 2) */

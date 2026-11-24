@@ -6,6 +6,8 @@ Uso:
       los 15 coches del modo OUTRUN: COCHEnn.DAT (nn = ficha del menu) y COCHES.DAT ('CCH1' y el modelo de cada
       ficha, 0xFF si no esta; lo lee demo/main.c)
   conv_coche.py <iso> --modelo m <salida.dat> [--tope n] [--vista dir]   un modelo (byte car+0x11)
+  --rebaja: variante A (texturas que no se ven de cerca con menos resolucion: rebaja_texturas); --carrera: variante B
+      (las mallas que no se ven desde la persecucion con el bit NODO_CERCA: parte_carrera). Rev 2.9.6, DESVIACION
 
 Montaje (todo se lee del disco al convertir; aqui no hay datos del juego): el de 46A560 (el coche en la seleccion; en
 carrera 46AE70 / 469600 hacen lo mismo) portado tal cual en llamadas(): pila de matrices del PC (Pila), piezas en su
@@ -522,14 +524,168 @@ def vacia(mod, vis, dueno, hueco=2, maximo=256):
                 nv += len(q); j = e + 1
     mod.mallas, mod.verts, mod.nv = nuevas, verts, nv
 
+# ------------------------------------------------------------------ coches mas ligeros (Rev 2.9.6, DESVIACION pedida)
+# Variante A (--rebaja): menos resolucion en las texturas que no se ven de cerca. Regla, por las piezas (nombres de
+# llamadas()) que usan cada textura (ya vaciado el coche):
+#  - FIJA (no se toca): la que usa alguna malla con pintura o reflejo (CEX2 'esp': carroceria y cristales, sus mapas de
+#    entorno), alguna luz (grupos G_PILOTOS..G_FARO, piezas faros, faro_luz, pilotos*, aleron_freno), la sombra, y las
+#    de recorte o transparentes (lista 1 / 2: emblemas, letras, matriculas, rejillas) salvo las de las ruedas;
+#  - RUEDA: solo la usan buje (llanta y neumatico), pinza y discos: a 64 de lado como mucho (con su proporcion);
+#  - INTERIOR: solo la usa el habitaculo +04 (G_INTERIOR, solo la vista interior): a la mitad de lado;
+#  - OCULTA: opaca, solo de carroceria, extra, puertas, volante, palanca o habitaculo y con el 85 % o mas de su area
+#    sin ver desde las camaras del juego (camaras(), seleccion, carrera y vuelta baja, en reposo) contando los cristales,
+#    rejillas y recortes como opacos y sin el habitaculo: bajos, motor bajo el cristal o la rejilla y lo que solo se ve
+#    por las ventanillas. Si la comparte el habitaculo, volante o palanca (salpicadero visto por el cristal): a la mitad;
+#    si no (bajos y motor): a 64 de lado como mucho;
+#  - el resto (carroceria, faros, pilotos, emblemas, matriculas y lo que se ve por fuera): FIJA.
+# Las de 64 o menos de lado no cambian. La reduccion es un filtro de caja con el alfa premultiplicado.
+PZ_RUEDA_N = {'buje', 'pinza', 'disco', 'disco_cal'}
+PZ_LUZ_N = {'faros', 'faro_luz', 'pilotos', 'pilotos_noche', 'pilotos_freno', 'aleron_freno', 'sombra'}
+PZ_CUERPO_N = {'carroceria', 'extra', 'puerta', 'volante', 'palanca', 'aleron', 'interior'}
+PZ_HAB_N = {'interior', 'volante', 'palanca'}
+OCULTA_MIN = 0.85                                               # parte del area sin ver para ser OCULTA
+
+def _area(T):
+    a = T[:, 3:6] - T[:, 0:3]; b = T[:, 6:9] - T[:, 0:3]
+    return 0.5 * np.linalg.norm(np.cross(a, b), axis=1)
+
+def clasifica_texturas(mod):
+    """{textura: (clase, ancho, alto nuevos, parte sin ver)} con la regla de arriba (las que cambian y las que no)"""
+    T, dueno = triangulos(mod)
+    grupo = np.array([mod.mallas[k][9].get('grupo', NADA) for k in dueno])
+    fuera = grupo == G_INTERIOR                                 # el habitaculo no se dibuja por fuera
+    Tv = np.ascontiguousarray(np.where(fuera[:, None], 0, T).astype(np.float32))
+    op = (~fuera).astype(np.uint8)                              # cristales, rejillas y recortes: tambien tapan
+    C = camaras(True); cuenta = np.zeros(len(T), np.int32); lib = _lib(); f = ctypes.POINTER(ctypes.c_float)
+    lib.visibles(Tv.ctypes.data_as(f), len(Tv), op.ctypes.data_as(ctypes.POINTER(ctypes.c_ubyte)), C.ctypes.data_as(f),
+                 len(C), 960, 720, cuenta.ctypes.data_as(ctypes.POINTER(ctypes.c_int)))
+    area = _area(T); uso = {}
+    for i, k in enumerate(dueno):
+        x = mod.mallas[k]
+        if x[1] < 0: continue
+        u = uso.setdefault(x[1], {'pz': set(), 'fija': False, 'a': 0.0, 'oc': 0.0})
+        u['pz'].add(x[8]); u['a'] += area[i]; u['oc'] += area[i] if cuenta[i] == 0 else 0.0
+    for x in mod.mallas:                                        # (las mallas de 2 vertices no tienen triangulos)
+        if x[1] < 0 or x[1] not in uso: continue
+        if x[9].get('esp') or x[9].get('grupo', NADA) not in (NADA, G_INTERIOR, G_DISCO, G_DISCO_CAL) or x[8] in PZ_LUZ_N:
+            uso[x[1]]['fija'] = True
+    res = {}
+    for ti, u in sorted(uso.items()):
+        w, h, fmt, li = mod.texs[ti][:4]; pz = u['pz']; oc = u['oc'] / max(u['a'], 1e-9)
+        if max(w, h) <= 64 or u['fija']: clase = 'fija'
+        elif pz <= PZ_RUEDA_N: clase = 'rueda'
+        elif li != 0: clase = 'fija'
+        elif pz <= {'interior'}: clase = 'interior'
+        elif pz <= PZ_CUERPO_N and oc >= OCULTA_MIN: clase = 'oculta_hab' if pz & PZ_HAB_N else 'oculta'
+        else: clase = 'fija'
+        if clase in ('rueda', 'oculta'): s = 64.0 / max(w, h)
+        elif clase in ('interior', 'oculta_hab'): s = 0.5
+        else: s = 1.0
+        res[ti] = (clase, max(8, int(w * s)), max(8, int(h * s)), oc)
+    return res
+
+def rebaja_texturas(mod):
+    """variante A: aplica clasifica_texturas (antes de recorta_texturas y de la VQ). Devuelve {clase: (antes, despues)}
+    en texeles"""
+    from PIL import Image
+    cl = clasifica_texturas(mod); suma = {}
+    for ti, (clase, w2, h2, oc) in cl.items():
+        w, h, fmt, li, off, tam = mod.texs[ti]
+        s = suma.setdefault(clase, [0, 0]); s[0] += w * h; s[1] += w2 * h2
+        if (w2, h2) == (w, h):
+            if max(w, h) > 64: print('   textura %3d %-10s %3dx%-3d    igual  (sin ver %3.0f %%; %s)' % (
+                ti, clase, w, h, 100 * oc, ' '.join(sorted({x[8] for x in mod.mallas if x[1] == ti}))))
+            continue
+        a = mod.rgba[ti].astype(np.float32); al = a[..., 3:4] / 255.0
+        pm = np.concatenate([a[..., :3] * al, a[..., 3:4]], 2)  # alfa premultiplicado: sin bordes del color de fuera
+        r = np.stack([np.asarray(Image.fromarray(pm[..., c]).resize((w2, h2), Image.BOX)) for c in range(4)], 2)
+        rgb = np.where(r[..., 3:4] > 0, r[..., :3] * 255.0 / np.maximum(r[..., 3:4], 1e-3), 0)
+        b = np.clip(np.round(np.concatenate([rgb, r[..., 3:4]], 2)), 0, 255).astype(np.uint8)
+        d = modelo.codifica16(b, fmt & 0xff)
+        mod.texs[ti] = (w2, h2, fmt, li, len(mod.blob), len(d)); mod.blob += d; mod.rgba[ti] = b
+        print('   textura %3d %-10s %3dx%-3d -> %3dx%-3d (sin ver %3.0f %%; %s)' % (
+            ti, clase, w, h, w2, h2, 100 * oc, ' '.join(sorted({x[8] for x in mod.mallas if x[1] == ti}))))
+    return suma
+
+# Variante B (--carrera): las mallas que solo se ven de cerca llevan el bit NODO_CERCA en el campo del nodo y la demo
+# no las dibuja con la camara de persecucion en carrera (demo/main.c coche_dibuja); la seleccion, el salon, la salida,
+# la meta y la vista interior dibujan todo. Sin el bit (coches de antes) se dibuja todo, como hasta ahora.
+# Criterio (el del vaciado, con otras camaras): se ve en carrera el triangulo que gana algun pixel a 640x480 (la
+# pantalla) en CERCA_MIN o mas de las camaras de carrera (las de camaras(): detras, a +-100 grados de deriva, 1,9-2,9 m
+# de alto y 4,5-6,5 m) x las 6 posturas de las piezas animadas; las luces, siempre. Lo demas (lo que solo se ve de lado
+# o de frente desde cerca, por debajo, desde la seleccion, y lo que solo asoma en un pixel de 1-3 camaras: piezas
+# pequenas a la distancia de la persecucion) va aparte, con el bit. Las tiras se parten como en vacia (huecos de 2).
+NODO_CERCA = 0x10000
+CERCA_MIN = 4
+
+def camaras_carrera():
+    return camaras(False)[48:]                                  # sin las 48 de la seleccion ni la vuelta baja
+
+def parte_carrera(A, mod, m, res=(640, 480), minimo=CERCA_MIN):
+    T, dueno = triangulos(mod)
+    grupo = np.array([mod.mallas[k][9].get('grupo', NADA) for k in dueno])
+    fuera = grupo == G_INTERIOR
+    op = np.array([1 if mod.mallas[k][0] == 0 and grupo[i] == NADA else 0 for i, k in enumerate(dueno)], np.uint8)
+    C = camaras_carrera(); lib = _lib(); f = ctypes.POINTER(ctypes.c_float); cuenta = np.zeros(len(T), np.int32)
+    for D in poses(A, m):
+        Tp, _ = triangulos(mod, posa(mod, D)); Tp = np.ascontiguousarray(np.where(fuera[:, None], 0, Tp).astype(np.float32))
+        c = np.zeros(len(T), np.int32)
+        lib.visibles(Tp.ctypes.data_as(f), len(Tp), op.ctypes.data_as(ctypes.POINTER(ctypes.c_ubyte)), C.ctypes.data_as(f),
+                     len(C), res[0], res[1], c.ctypes.data_as(ctypes.POINTER(ctypes.c_int)))
+        cuenta += c
+    vis = (cuenta >= minimo) | ((grupo != NADA) & (grupo != G_DISCO) & (grupo != G_DISCO_CAL)) | fuera
+    n0 = vertices_carrera(mod)
+    V = np.concatenate(mod.verts); nuevas = []; verts = []; nv = 0; ti = 0
+    def tira(x, a, b, cerca):                                   # triangulos a..b de la malla x (vertices a..b+2)
+        nonlocal nv
+        j = a
+        while j <= b:
+            e = min(b, j + 256 - 3)
+            q = V[x[4] + j:x[4] + e + 3].copy(); verts.append(q)
+            P = np.stack([q['x'], q['y'], q['z']], 1).astype(float); cc = P.mean(0)
+            nuevas.append([x[0], x[1], cc, float(np.sqrt(((P - cc) ** 2).sum(1).max())), nv, len(q), x[6], x[7], x[8],
+                           dict(x[9], N=x[9]['N'][j:e + 3], cerca=cerca)])
+            nv += len(q); j = e + 1
+    for x in mod.mallas:
+        n = x[5]; v = vis[ti:ti + n - 2]; ti += n - 2
+        if n < 3: tira(x, 0, -1, False); continue
+        tramos = []; a = None; oc = 0                           # lo de carrera: como vacia (huecos de 2)
+        for j in range(n - 2):
+            if v[j]:
+                if a is None: a = j
+                b = j; oc = 0
+            elif a is not None:
+                oc += 1
+                if oc > 2: tramos.append((a, b)); a = None; oc = 0
+        if a is not None: tramos.append((a, b))
+        if tramos and tramos[0][0] <= 2: tramos[0] = (0, tramos[0][1])          # 1 o 2 triangulos sueltos en las
+        if tramos and tramos[-1][1] >= n - 5: tramos[-1] = (tramos[-1][0], n - 3)   # puntas: no vale la pena partir
+        dentro = np.zeros(n - 2, bool)
+        for a, b in tramos: dentro[a:b + 1] = True; tira(x, a, b, False)
+        j = 0
+        while j < n - 2:                                        # lo demas: solo de cerca
+            if dentro[j]: j += 1; continue
+            k = j
+            while k + 1 < n - 2 and not dentro[k + 1]: k += 1
+            tira(x, j, k, True); j = k + 1
+    mod.mallas, mod.verts, mod.nv = nuevas, verts, nv
+    print('   carrera: %d -> %d vertices (en la seleccion %d)' % (n0, vertices_carrera(mod), vertices_dibujados(mod)))
+
+def vertices_carrera(mod):
+    """los de vertices_dibujados sin las mallas solo de cerca"""
+    return vertices_dibujados(mod, cerca=False)
+
 def vertices(mod):
     return sum(x[5] for x in mod.mallas)
 
-def vertices_dibujados(mod):
+def vertices_dibujados(mod, cerca=True):
     """los que se dibujan a la vez: todo lo fijo, el faro encendido, el mayor de los tres juegos de pilotos y el
-    mayor de los dos juegos de discos (el habitaculo G_INTERIOR va solo, con la vista interior: no cuenta)"""
+    mayor de los dos juegos de discos (el habitaculo G_INTERIOR va solo, con la vista interior: no cuenta); cerca =
+    False: sin las mallas solo de cerca (variante B, en carrera)"""
     g = {}
-    for x in mod.mallas: k = x[9].get('grupo', NADA) if len(x) > 9 else NADA; g[k] = g.get(k, 0) + x[5]
+    for x in mod.mallas:
+        if not cerca and len(x) > 9 and x[9].get('cerca'): continue
+        k = x[9].get('grupo', NADA) if len(x) > 9 else NADA; g[k] = g.get(k, 0) + x[5]
     return g.get(NADA, 0) + g.get(G_FARO, 0) + max(g.get(G_PILOTOS, 0), g.get(G_NOCHE, 0), g.get(G_FRENO, 0)) + \
         max(g.get(G_DISCO, 0), g.get(G_DISCO_CAL, 0))
 
@@ -683,7 +839,7 @@ def animadas(A, mod, m):
     (+4C, a = giro en x +58), 2 aleron del modelo 5 (+1C), 3 faros escamoteables (+68, a = abiertos +78, b = cuadros
     +74; sin faros, b = 0), 4..7 pinza de la rueda k y 8..11 rueda k (+98 + 0x20 k = car+130 parado, a = caida +A4)"""
     E = A.elf; L = disposiciones(A) + 0x128 * m
-    for x in mod.mallas: x[7] = x[9].get('pieza', P_CUERPO) << 8
+    for x in mod.mallas: x[7] = x[9].get('pieza', P_CUERPO) << 8 | (NODO_CERCA if x[9].get('cerca') else 0)
     # los vertices de cada malla son una entrada de mod.verts (pieza() anade una por trozo de tira; vacia() igual)
     off = 0; trozos = []
     for v in mod.verts: trozos.append((off, v)); off += len(v)
@@ -760,10 +916,10 @@ def sombra_clamp(A, mod, m):
         w, h, fmt, li, off, tam = mod.texs[ti]; mod.texs[ti] = (w, h, fmt | bits, li, off, tam)
     print('   sombra plana: CLAMP %s%s (texturas %s)' % ('u' if ms else '-', 'v' if mt else '-', sorted(sus - otras)))
 
-def convierte(A, m, sal, tope=TOPE, vista=None):
+def convierte(A, m, sal, tope=TOPE, vista=None, rebaja=False, carrera=False):
     """el coche montado como el original (llamadas) y, si lo que se dibuja a la vez pasa del tope del TA, sin lo que
     no se ve desde las camaras del juego (con la vuelta baja de los choques y, si aun no cabe, sin ella). No se tapa,
-    no se anade y no se cambia ninguna pieza"""
+    no se anade y no se cambia ninguna pieza. rebaja: variante A (rebaja_texturas); carrera: variante B (parte_carrera)"""
     mod, e, d = monta(A, m)
     t0, v0 = triangulos_n(mod), vertices_dibujados(mod); nota = 'completo'
     if v0 > tope:
@@ -773,6 +929,8 @@ def convierte(A, m, sal, tope=TOPE, vista=None):
             print("   %s: %d vertices" % (nota, vertices_dibujados(mod)))
             if vertices_dibujados(mod) <= tope: break
     vacia_interior(A, mod, m)
+    if rebaja: rebaja_texturas(mod)
+    if carrera: parte_carrera(A, mod, m)
     if vista:
         try:
             dibuja_vista(mod, os.path.join(vista, os.path.basename(sal).replace('.DAT', '.png')))
@@ -786,13 +944,14 @@ def convierte(A, m, sal, tope=TOPE, vista=None):
     mod.mallas.sort(key=lambda x: (x[0], x[1]))                # el orden de escribe (estable): el de CEX2
     mod.ruta = extension(mod)
     vesp = sum(x[5] for x in mod.mallas if x[9].get('esp') and x[9]['esp'][0] >= ESP_ENTORNO)
-    vd = vertices_dibujados(mod); vt = vertices(mod)
+    vd = vertices_dibujados(mod); vt = vertices(mod); vc = vertices_carrera(mod)
     mod.mallas = [x[:8] for x in mod.mallas]                    # fuera el nombre de la pieza y lo demas
     mod.escribe(sal)
     kb = len(mod.blob) >> 10
-    print('modelo %2d %-28s tri %5d -> %5d  vtx %5d -> %5d (en el fichero %5d)  tex %2d (%3d KB)  entorno %4d vtx  %s'
-          '  -> %s' % (m, e.nombre, t0, triangulos_n(mod), v0, vd, vt, len(mod.texs), kb, vesp, nota, os.path.basename(sal)))
-    return dict(modelo=m, nombre=e.nombre, tri0=t0, tri=triangulos_n(mod), vtx0=v0, vtx=vd, kb=kb, nota=nota, entorno=vesp)
+    print('modelo %2d %-28s tri %5d -> %5d  vtx %5d -> %5d (carrera %5d, en el fichero %5d)  tex %2d (%3d KB)  entorno %4d vtx'
+          '  %s  -> %s' % (m, e.nombre, t0, triangulos_n(mod), v0, vd, vc, vt, len(mod.texs), kb, vesp, nota, os.path.basename(sal)))
+    return dict(modelo=m, nombre=e.nombre, tri0=t0, tri=triangulos_n(mod), vtx0=v0, vtx=vd, vtx_carrera=vc, kb=kb, nota=nota,
+                entorno=vesp)
 
 def dibuja_vista(mod, ruta):
     """perfil y tres cuartos (comprobacion rapida, sin z-buffer)"""
@@ -822,18 +981,19 @@ def main():
         return defecto
     tope = int(op('--tope', TOPE)); vista = op('--vista'); todos = op('--todos'); m = op('--modelo')
     solo = op('--fichas'); solo = None if solo is None else [int(x) for x in solo.split(',')]
+    rebaja = '--rebaja' in a; carrera = '--carrera' in a; a = [x for x in a if x not in ('--rebaja', '--carrera')]
     A = Assets(a[0] if a else None)
     if todos is not None:
         os.makedirs(todos, exist_ok=True)
         hechos = bytearray(b'\xff' * len(FICHA_MODELO))
         for k, mm in enumerate(FICHA_MODELO):
             if solo is not None and k not in solo: continue
-            convierte(A, mm, os.path.join(todos, 'COCHE%02d.DAT' % k), tope, vista)
+            convierte(A, mm, os.path.join(todos, 'COCHE%02d.DAT' % k), tope, vista, rebaja, carrera)
         for k, mm in enumerate(FICHA_MODELO):
             if os.path.exists(os.path.join(todos, 'COCHE%02d.DAT' % k)): hechos[k] = mm
         with open(os.path.join(todos, 'COCHES.DAT'), 'wb') as f: f.write(b'CCH1' + bytes(hechos))
     elif m is not None:
-        convierte(A, int(m), a[1], tope, vista)
+        convierte(A, int(m), a[1], tope, vista, rebaja, carrera)
     else:
         print(__doc__)
 

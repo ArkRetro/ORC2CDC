@@ -1505,6 +1505,72 @@ de OutRun 2 SP (las 15 etapas seguidas) que dio el usuario.
   no esta leido). Sin EFECTOS.DAT nuevo, sin agua (como antes).
 - NO verificado en consola real.
 
+### Coches mas ligeros (Rev 2.9.6)
+
+Pedido del usuario: optimizar los 15 coches del jugador (COCHE00..14.DAT) para ganar rendimiento sin perder estetica,
+midiendo dos variantes y con capturas lado a lado antes de decidir. DESVIACION (las dos): el original lleva el coche
+entero y las texturas a su tamano. Las dos son opciones de tools/conv_coche.py; sin ellas sale lo mismo que antes (el
+COCHE00.DAT de ahora sale igual: 1425 mallas, 12307 vertices). Medido en Flycast, no en la consola real.
+
+- Variante A, `--rebaja` (rebaja_texturas / clasifica_texturas): menos resolucion en las texturas que no se ven de
+  cerca. Regla por las piezas de llamadas() que usan cada textura, ya vaciado el coche: FIJA (no se toca) la de una
+  malla con pintura o reflejo (CEX2), con luz (G_PILOTOS..G_FARO, faros, faro_luz, pilotos*, aleron_freno), la sombra y
+  las de recorte o transparentes (emblemas, letras, matriculas, rejillas); RUEDA (solo buje, pinza y discos): 64 de lado
+  como mucho; INTERIOR (solo el habitaculo +04, que solo dibuja la vista interior): la mitad; OCULTA (opaca, de
+  carroceria / puertas / volante / palanca / habitaculo, con el 85 % o mas de su area sin ver desde las camaras del
+  vaciado contando cristales y rejillas como opacos: bajos, motor bajo cristal o rejilla, lo que solo se ve por las
+  ventanillas): la mitad si la comparte el habitaculo, volante o palanca, si no 64 de lado. Las de 64 o menos no
+  cambian. Filtro de caja con el alfa premultiplicado, y la VQ de siempre. En los 15 coches: 53 de ruedas y discos, 3
+  del interior (la 512x256 del 360 Spider es el salpicadero: solo la usa el habitaculo, queda en 256x128, no en
+  256x256), 4 ocultas (motor y bajos del Enzo, F50, 328 y Dino) y 2 ocultas del habitaculo (Dino y Daytona). Lo de la carroceria, faros, pilotos,
+  emblemas y matriculas no cambia; los bajos del 360 (256x128) y el atlas de motor y habitaculo del 360 (256x256)
+  quedan FIJA porque se ven (spider). VRAM de los 15: 2618 KB -> 2354 KB (360 Spider 229 -> 182 KB, Dino 177 -> 140).
+- Variante B, `--carrera` (parte_carrera): las tiras que no se ven desde la persecucion van aparte con el bit
+  NODO_CERCA (0x10000) en el campo del nodo y la demo no las dibuja en carrera con la camara de persecucion
+  (coche_sin_cerca: estado CARRERA, sin la escena de la salida ni la de la meta, sin mezcla de vistas, no en los
+  finales); la seleccion, el salon, la salida, la meta y la vista interior dibujan todo (el habitaculo ya solo se
+  enviaba con la vista 1: coche_dibuja salta PZ_INTERIOR en las demas, comprobado). Criterio: el del vaciado con otras
+  camaras: se queda en carrera el triangulo que gana algun pixel a 640x480 en 4 o mas de las camaras de carrera de
+  camaras() (detras con +-100 grados de deriva, 1,9-2,9 m de alto, 4,5-6,5 m) por las 6 posturas de las piezas
+  animadas; las luces siempre. Sale lo que solo se ve de lado o de frente desde cerca, desde abajo o desde la
+  seleccion, y lo que asoma en un pixel de 1 a 3 camaras (piezas pequenas a esa distancia). Las tiras se parten como
+  en vacia (huecos de 2); 1 o 2 triangulos sueltos en las puntas se quedan en carrera (partir cuesta 2 vertices). El
+  minimo reservado del TA para el coche (ta_min_otros_teo) cuenta solo lo de carrera (coche_teo_carrera). Compatible:
+  sin el bit (los ficheros de antes) se dibuja y se reserva todo, como hasta ahora. En carrera: 360 Spider 10910 ->
+  9998 vertices, Dino 10089 -> 8631 (todos: -5 % a -15 %); en la seleccion suben 100-300 por los cortes.
+
+PROVISIONAL (pendiente de que el usuario elija con las capturas). Medidas en Flycast (piloto automatico, `-DPRUEBA_AUTO
+-DPRUEBA_SIN_TIEMPO -DDIAG_MS -DPRUEBA_NODO=n -DPRUEBA_FICHA=f`, 140 s; Flycast repite la misma carrera, asi que se
+comparan las lineas MS del mismo tramo de s, de 200 al final comun; coche = us de CPU y vertices de la linea PRF;
+VRAM: textura del coche, libre al cargarlo y zona libre minima de la carrera):
+
+| prueba | fps | tarde | lejano | salto | coche us / vtx | VRAM coche / libre / zona libre |
+|---|---|---|---|---|---|---|
+| 360 PALM base | 39,72 | 7 | 3227 | 3,75 | 2578 / 10616 | 229 / 1594 / 594 KB |
+| 360 PALM A | 39,75 | 6 | 3301 | 3,58 | 2588 / 10616 | 182 / 1641 / 658 KB |
+| 360 PALM B | 39,60 | 13 | 2890 | 4,86 | 2521 / 9704 | 229 / 1594 / 622 KB |
+| Dino PALM base | 39,19 | 35 | 3697 | 2,31 | 2381 / 10054 | 177 / 1646 / 686 KB |
+| Dino PALM A | 39,22 | 33 | 3732 | 2,22 | 2391 / 10054 | 140 / 1683 / 718 KB |
+| Dino PALM B | 39,04 | 41 | 2990 | 4,57 | 2215 / 8596 | 177 / 1646 / 686 KB |
+| 360 METR base | 36,27 | 168 | 1562 | 8,32 | 2655 / 10888 | zona libre 779 KB |
+| 360 METR A | 36,31 | 167 | 1571 | 8,29 | 2653 / 10888 | 843 KB |
+| 360 METR B | 35,98 | 180 | 1550 | 8,37 | 2605 / 9976 | 779 KB |
+| Dino METR base | 35,82 | 198 | 1543 | 8,37 | 2320 / 10081 | 843 KB |
+| Dino METR A | 35,85 | 196 | 1541 | 8,38 | 2322 / 10081 | 875 KB |
+| Dino METR B | 35,78 | 202 | 1556 | 8,33 | 2140 / 8623 | 843 KB |
+
+- A: los fps y los cuadros tarde no cambian (el TA y la CPU son los mismos); la VRAM que deja el coche (37-47 KB) va
+  a la zona del curso (+32 / +64 KB) y en PALM el lejano sube un poco (3227 -> 3301, 3697 -> 3732). Capturas con la
+  imagen congelada (`-DDIAG_CONGELA=1500`, el mismo cuadro pixel a pixel): en carrera no se distingue (diferencias de
+  1-2 niveles de color en las ruedas); en la seleccion las llantas se ven algo mas blandas.
+- B: el coche cuesta menos (-9 % y -14 % de vertices, -2 % y -7 % de CPU) y la imagen congelada en carrera es la misma
+  (4 y 10 pixeles distintos, ninguno del contorno del coche), pero la carrera no va mejor: el TA que deja libre lo
+  ocupa la etapa (el tope de la etapa sale de lo que gasto lo demas en el cuadro anterior), que cuesta mas CPU, y el
+  salto adaptativo sube (PALM: lejano 3227 -> 2890 y 3697 -> 2990; METR igual). Con la reserva de antes
+  (coche_teo_carrera = modelo_teo) sale lo mismo (360 PALM: lejano 2931, salto 4,67): no es la reserva. En la consola
+  real, si el limite es el TA y no la CPU, podria ser al reves: sin medir.
+- Recomendacion (pendiente del usuario): A si; B no en Flycast (el codigo de la demo no cambia nada sin el bit).
+
 ### Saltos en las etapas de noche (Rev 2.9.5, 2026-11-23)
 
 Queja (Rev 2.9.4): "las fases de noche tienen elementos que aparecen y desaparecen". DESVIACION. Verificado en Flycast
