@@ -465,7 +465,7 @@ class Assets:
             try:
                 os.makedirs(self.cache, exist_ok=True)
                 json.dump({'iso': self.ruta, 'segundos': round(time.time() - t0, 1), 'nombres': self._nom},
-                          open(ruta, 'w'))
+                          open(ruta, 'w', encoding='utf-8'))
             except OSError:
                 pass
         for p in self._paq: self._pon_nombres(p)

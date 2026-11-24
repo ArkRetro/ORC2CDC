@@ -116,7 +116,7 @@ class Contexto:
         # un hilo por paso: numpy / scipy (OMP, OpenBLAS, MKL) y os.cpu_count() de Python 3.13 (hilos de pvs.py, Pool
         # de conv_video.py)
         self.env.update(OR2_ISO=iso, TOOLS=TOOLS, PYTHONDONTWRITEBYTECODE='1', OMP_NUM_THREADS='1',
-                        OPENBLAS_NUM_THREADS='1', MKL_NUM_THREADS='1', PYTHON_CPU_COUNT='1', PYTHONIOENCODING='utf-8',
+                        OPENBLAS_NUM_THREADS='1', MKL_NUM_THREADS='1', PYTHON_CPU_COUNT='1', PYTHONIOENCODING='utf-8', PYTHONUTF8='1',
                         PYTHONHASHSEED='0')               # (conv_sp.py recorre conjuntos de cadenas: sin esto cambia
                                                           # de una vez a otra; con 0, los mismos bytes en Linux y Windows)
         self.env.setdefault('OR2_CACHE', os.path.join(W, 'cache'))
@@ -127,7 +127,7 @@ class Contexto:
         if r.returncode: raise Fallo('%s: salida %d' % (os.path.basename(cmd[2]) if len(cmd) > 2 else cmd[0], r.returncode))
 
     def saca(self, cmd):
-        r = subprocess.run(cmd, capture_output=True, text=True, env=self.env, cwd=self.W)
+        r = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', env=self.env, cwd=self.W)
         if r.returncode: raise Fallo('%s\n%s' % (' '.join(cmd), r.stdout + r.stderr))
         return r.stdout
 
