@@ -68,6 +68,17 @@ def tiene(D, f, marca):
     try: return marca in open(os.path.join(D, f), 'rb').read()
     except OSError: return False
 
+def coches_rebajados(D):
+    """Rev 2.9.6: COCHE00.DAT (el 360 Spider) sin la 512x256 del salpicadero = convertido con --rebaja; los de antes se
+    rehacen (el unico coche con una textura de ese tamano es ese)"""
+    try:
+        b = open(os.path.join(D, 'COCHE00.DAT'), 'rb').read()
+        if b[:4] != b'ORD7': return True
+        import pvs
+        d = pvs.lee(os.path.join(D, 'COCHE00.DAT'))
+        return not any(struct.unpack_from('<2I', d['texs'], 24 * i) == (512, 256) for i in range(len(d['texs']) // 24))
+    except Exception: return True
+
 def hay(D, *fs): return all(os.path.isfile(os.path.join(D, f)) and os.path.getsize(os.path.join(D, f)) > 0 for f in fs)
 
 def mueve(D, *rutas):
@@ -180,7 +191,7 @@ def paso(C, n, log):
     elif n == 'camiones':                                        # los camiones con remolque de OUTRUN2SP (39/40, 41, 43)
         ej(T('conv_trafico.py'), ISO, t, '--camiones'); mueve(D, tj('TRAFK0.DAT'), tj('TRAFK1.DAT'), tj('TRAFK2.DAT'))
     elif n.startswith('coche'):
-        ej(T('conv_coche.py'), ISO, '--todos', t, '--fichas', n[5:])
+        ej(T('conv_coche.py'), ISO, '--todos', t, '--fichas', n[5:], '--rebaja')   # (Rev 2.9.6: texturas que no se ven de cerca rebajadas)
         c = os.path.join(W, 'coche'); os.makedirs(c, exist_ok=True)
         for f in glob.glob(tj('COCHE[0-9]*.DAT')): os.replace(f, os.path.join(c, os.path.basename(f)))
     else: raise Fallo('paso desconocido: %s' % n)
@@ -261,8 +272,12 @@ def regenera(iso, D, W, jobs=4, informe=print):
     if not hay(D, *UNIONES_TA): falta += ['unionta%d' % k for k in range(C.partes)]
     if not hay(D, *UNIONES_REN): falta += ['unionren%d' % k for k in range(C.partes)]
     # primero lo que hace falta para arrancar y correr (coches, HUD, menus, sonido, musica, etapas); las peliculas al final
+    viejos = hay(D, 'COCHE00.DAT') and not coches_rebajados(D)
+    if viejos:                                           # (las copias intermedias de antes no valen; las de D se cambian al acabar)
+        for k in range(15):
+            if os.path.isfile(os.path.join(W, 'coche', 'COCHE%02d.DAT' % k)): os.remove(os.path.join(W, 'coche', 'COCHE%02d.DAT' % k))
     for k in range(15):
-        if not hay(D, 'COCHES.DAT') and not hay(os.path.join(W, 'coche'), 'COCHE%02d.DAT' % k): falta.append('coche%d' % k)
+        if (viejos or not hay(D, 'COCHES.DAT')) and not hay(os.path.join(W, 'coche'), 'COCHE%02d.DAT' % k): falta.append('coche%d' % k)
     for f, n in (('MENU.DAT', 'menu'), ('HUD.DAT', 'hud'), ('VMU.DAT', 'vmu'), ('MODOV.DAT', 'modov')):
         if not hay(D, f): falta.append(n)
     if not hay(D, 'SFX.DAT', 'VOCES.DAT', 'VOCESC.DAT') or not voces_163(D): falta.append('sonido')
