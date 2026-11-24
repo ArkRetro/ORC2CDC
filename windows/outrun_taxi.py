@@ -143,7 +143,7 @@ def main():
         os.environ.setdefault('OR2_CACHE', os.path.join(W, 'cache'))
         nuevo = os.path.join(W, 'EFECTOS.DAT')
         r = subprocess.run([sys.executable, os.path.join(o2.TOOLS, 'conv_efectos.py'), iso, nuevo],
-                           capture_output=True, text=True)
+                           capture_output=True, text=True, encoding='utf-8', errors='replace')
         if r.returncode or not os.path.isfile(nuevo):
             informe('AVISO: no se pudo rehacer EFECTOS.DAT (se queda el del disco, sin agua):\n' + (r.stderr or r.stdout)[-2000:])
         else:
@@ -154,7 +154,7 @@ def main():
         tmp = os.path.join(W, 'nuevos'); os.makedirs(tmp, exist_ok=True)
         for args in (['conv_coche.py', iso, '--todos', tmp, '--fichas', ','.join(str(i) for i in range(15)), '--visible'],   # (Mod 2.5.6; 2.5.7: y el ligero de carrera COCHEnnL)
                      ['conv_fin.py', iso, tmp]):
-            r = subprocess.run([sys.executable, os.path.join(o2.TOOLS, args[0])] + args[1:], capture_output=True, text=True)
+            r = subprocess.run([sys.executable, os.path.join(o2.TOOLS, args[0])] + args[1:], capture_output=True, text=True, encoding='utf-8', errors='replace')
             if r.returncode: informe('AVISO: fallo %s (se quedan los del disco):\n%s' % (args[0], (r.stderr or r.stdout)[-2000:]))
         for f in ['COCHE%02d.DAT' % i for i in range(15)] + ['COCHE%02dL.DAT' % i for i in range(15)] + ['GOALT.DAT']:
             if os.path.isfile(os.path.join(tmp, f)): shutil.move(os.path.join(tmp, f), os.path.join(D, f))
@@ -164,12 +164,12 @@ def main():
     import subprocess
     for args in (['--datos', D, os.path.join(W, 'libros')],
                  [os.path.join(D, p) for p in ('TRAF*.DAT', 'CHR[0-9]*.DAT', 'BAND*.DAT', 'BO[0-9]*.DAT')]):
-        r = subprocess.run([sys.executable, os.path.join(o2.TOOLS, 'libros.py')] + args, capture_output=True, text=True)
+        r = subprocess.run([sys.executable, os.path.join(o2.TOOLS, 'libros.py')] + args, capture_output=True, text=True, encoding='utf-8', errors='replace')
         if r.returncode: raise SystemExit('fallo tools/libros.py:\n' + (r.stderr or r.stdout)[-2000:])
         for l in r.stdout.splitlines()[-4:]: informe('  ' + l)
     informe('== version lejana lowpoly de lo grande (tools/lod_grande.py, Mod 2.5.2.d; lo ya hecho no cambia; unos minutos)')
     r = subprocess.run([sys.executable, os.path.join(o2.TOOLS, 'regenera.py'), '--interno', 'lodgrande', D, os.path.join(W, 'lodgrande')],
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, encoding='utf-8', errors='replace')
     if r.returncode: raise SystemExit('fallo tools/lod_grande.py:\n' + (r.stderr or r.stdout)[-2000:])
     informe('  ' + (r.stdout.strip().splitlines() or ['hecho'])[-1])
     if os.path.isfile(os.path.join(D, 'REFLEJO.DAT')): os.remove(os.path.join(D, 'REFLEJO.DAT'))   # (Mod 2.3: sin reflejo)
