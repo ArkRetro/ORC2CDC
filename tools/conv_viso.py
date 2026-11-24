@@ -20,7 +20,7 @@ nodos del ORD7 son los del bloque principal en el orden de modelo.Modelo.bloque 
 orden, y en cada uno los nodos con tiras en el orden de modelo.nodos), comprobados esfera a esfera contra el
 fichero; los de despues (objetos de la etapa: la pancarta CHECK POINT y los carteles, que el original dibuja aparte)
 van siempre puestos."""
-import glob, os, struct, sys
+import glob, os, struct, sys, tempfile
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ps2.assets import Assets
@@ -83,8 +83,8 @@ def main():
     for f in sorted(glob.glob(os.path.join(datos, 'SEG[0-9]*.DAT'))):
         n = int(os.path.basename(f)[3:-4]); b = open(f, 'rb').read()
         if b[:4] != b'ORD7': b = pak_union.recompone(b, pak)
-        tmp = '/dev/shm/viso_%d.dat' % os.getpid()
-        open(tmp, 'wb').write(b)
+        fd, tmp = tempfile.mkstemp(suffix='.dat', prefix='viso_', dir='/dev/shm' if os.path.isdir('/dev/shm') else None)
+        with os.fdopen(fd, 'wb') as fo: fo.write(b)             # (en Windows no hay /dev/shm: el temporal del sistema)
         try: d = pvs.lee(tmp)
         finally: os.remove(tmp)
         r = de_segmento(S[n], d)
