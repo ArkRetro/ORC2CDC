@@ -12349,15 +12349,26 @@ static void coche_suelta(void)
    echan las pantallas guardadas del menu. Fuera de la carrera (arranque, menus, salida) el fichero se lee en el hueco
    de la union (union_prestable) y solo lo que queda sin los texeles pasa al monton: el COCHEnn.DAT entero (450-580 KB)
    ya no cabe seguido en el monton del menu. 0 bien */
+/* (Rev 2.9.7, DESVIACION pedida: docs/PARIDAD.md, Coche visible mas ligero) en carrera el coche ligero COCHEnnL.DAT
+   (tools/conv_coche.py --visible: menos triangulos y texturas en lo que se ve) y en el menu (seleccion, salon) el
+   completo COCHEnn.DAT: los dos a la vez no caben en el bloque del coche (COCHE_RAM). coche_pide_ligero lo pone el
+   arranque de la carrera y lo quita el menu; sin COCHEnnL.DAT (datos de antes) se queda el completo (coche_sin_ligero) */
+static int coche_ligero, coche_pide_ligero; static uint32_t coche_sin_ligero;
 static int coche_carga(int k)
 {
-    char nom[16]; int r, prest = union_prestable(); uint32_t ct = 0, c, i;
-    if (k == coche_ficha && coche.tv) return 0;
+    char nom[16]; int r, prest = union_prestable(), lig = coche_pide_ligero && ficha_modelo[k] < 30 && !((coche_sin_ligero >> k) & 1);
+    uint32_t ct = 0, c, i;
+    if (k == coche_ficha && coche.tv && coche_ligero == lig) return 0;
     libera_modelo(&coche); coche_ficha = -1; cex_n = 0; nsvol = 0; ani.ok = 0;
-    if (ficha_modelo[k] < 30) sprintf(nom, "COCHE%02d.DAT", k); else strcpy(nom, "COCHE.DAT");
+    if (ficha_modelo[k] < 30) sprintf(nom, lig ? "COCHE%02dL.DAT" : "COCHE%02d.DAT", k); else strcpy(nom, "COCHE.DAT");
     musica_pausa_lectura(1);                                    /* el GD para el coche (la musica tira del anillo) */
     r = prest ? lee_modelo_en(&coche, nom, hueco_union, cap_union - union_fsp) : lee_modelo(&coche, nom);
+    if (r == -1 && lig) {                                       /* sin el ligero: el completo (y no se vuelve a pedir) */
+        coche_sin_ligero |= 1u << k; lig = 0; sprintf(nom, "COCHE%02d.DAT", k);
+        r = prest ? lee_modelo_en(&coche, nom, hueco_union, cap_union - union_fsp) : lee_modelo(&coche, nom);
+    }
     musica_pausa_lectura(0);
+    coche_ligero = lig;
     if (r) { dbglog(DBG_ERROR, "coche: no se pudo leer %s (%d)\n", nom, r); return r; }
     if ((r = sube_modelo(&coche))) {                            /* sin VRAM: fuera la cache del menu y otra vez */
         for (i = 0; i < coche.ntex; i++) if (coche.tv[i]) pvr_mem_free(coche.tv[i]);
@@ -13487,8 +13498,10 @@ int main(int argc, char **argv)
             }
             rm = reintenta ? MENU_CARRERA : pide_fsp ? MENU_SIGUE : menu_paso(nuevo);   /* titulo, modos, coche, cambio y musica */
             ttit += 1.0f / 60;
-            if (menu_coche3d() && menu_coche() >= 0 && menu_coche() != coche_ficha && menu_coche() != coche_malo &&
-                coche_carga(menu_coche())) coche_malo = menu_coche();                              /* (sin reintentos) */
+            if (menu_coche3d() && menu_coche() >= 0 && (menu_coche() != coche_ficha || coche_ligero) && menu_coche() != coche_malo) {
+                coche_pide_ligero = 0;                          /* (Rev 2.9.7) en el menu el completo */
+                if (coche_carga(menu_coche())) coche_malo = menu_coche();                          /* (sin reintentos) */
+            }
 #ifdef PRUEBA_JUGADOR
             rm = MENU_CARRERA;                                  /* prueba: directo a la carrera con el mando */
 #endif
@@ -13616,8 +13629,9 @@ int main(int argc, char **argv)
                 pcarga_pausa();                                 /* (lo que se queda en la VRAM, sin la pantalla: pcarga.c) */
                 dbglog(DBG_INFO, "MODO: variante %d, dificultad %d, fila de tiempos %d, juego %s, preset %d\n", variante, tim_dif, TIM_FILA,
                        juego_sp ? "OUTRUN2SP" : "consola", preset_curso);
+                coche_pide_ligero = 1;                          /* (Rev 2.9.7) en carrera, COCHEnnL.DAT si lo hay */
 #ifndef PRUEBA_FICHA                                            /* prueba: el coche de PRUEBA_FICHA, no el del menu */
-                if (!auto_ && menu_coche() >= 0 && menu_coche() != coche_ficha && coche_carga(menu_coche())) coche_carga(9);
+                if (!auto_ && menu_coche() >= 0 && coche_carga(menu_coche())) coche_carga(9);   /* (el mismo: solo si es el completo) */
 #endif
                 pcarga_avance(0.3f);
                 {   /* el piloto y la acompanante de esta carrera (487EE0 / 487F50): la licencia en el juego de la
@@ -13636,10 +13650,12 @@ int main(int argc, char **argv)
                 {   int b = menu_tablas(0);                     /* MENU.DAT: en la carrera solo las piezas de la pausa */
                     if (b) dbglog(DBG_INFO, "MENU: %dK de piezas sueltas para la carrera\n", b >> 10); }
 #ifdef PRUEBA_FICHA
-                if (coche_ficha < 0) coche_carga(PRUEBA_FICHA); /* prueba: el coche de PRUEBA_FICHA, no el 9 */
+                {   int f = coche_ficha >= 0 ? coche_ficha : PRUEBA_FICHA;   /* prueba: el de PRUEBA_FICHA, no el 9 */
 #else
-                if (coche_ficha < 0) coche_carga(9);            /* el menu lo solto (VRAM) */
+                {   int f = coche_ficha >= 0 ? coche_ficha : 9;  /* el menu lo solto (VRAM) */
 #endif
+                    if (coche_carga(f)) { coche_pide_ligero = 0; coche_carga(f); }   /* (el ligero; si no se pudo, el completo) */
+                }
                 fisica_modelo(modelo_jug);                      /* peso, agarre, motor y marchas de ese coche */
                 if (hud_ok) hud_pon_modelo(modelo_jug);         /* y su tacometro */
                 if (union_prestable()) vram_ordena(hueco_union, cap_union - union_fsp);   /* la pareja y el coche, abajo */

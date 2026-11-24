@@ -1405,6 +1405,10 @@ int menu_paso(unsigned n)
     aplica_audio();                                         /* volumen de la licencia activa (cambia al elegirla) */
     giro += 100.0f * 2.0f * (float)M_PI / 65536.0f;         /* 4A5B20: +100 por paso */
     if (giro > 2.0f * (float)M_PI) giro -= 2.0f * (float)M_PI;
+#ifdef DIAG_GIRO_FIJO
+    giro = DIAG_GIRO_FIJO;                                  /* medida: el coche de la seleccion quieto en ese angulo
+                                                               (capturas comparables pixel a pixel, Rev 2.9.7) */
+#endif
     if (cargando) {                                         /* la VRAM de la pantalla aun no esta: se espera */
 #ifdef PRUEBA_SALON_COMPRAS
         if (pant == P_SALON) { cargando = 0; fase = F_QUIETO; }   /* prueba: la tienda sin esperar la VRAM */
