@@ -152,7 +152,7 @@ def main():
         # COCHES.DAT se quedan los del disco) y GOALT.DAT (la tabla de tiempos de la meta), desde la ISO
         informe('== COCHE00..14.DAT (con el habitaculo) y GOALT.DAT desde la ISO (unos minutos)')
         tmp = os.path.join(W, 'nuevos'); os.makedirs(tmp, exist_ok=True)
-        for args in (['conv_coche.py', iso, '--todos', tmp, '--fichas', ','.join(str(i) for i in range(15))],
+        for args in (['conv_coche.py', iso, '--todos', tmp, '--fichas', ','.join(str(i) for i in range(15)), '--rebaja'],   # (Mod 2.5.6)
                      ['conv_fin.py', iso, tmp]):
             r = subprocess.run([sys.executable, os.path.join(o2.TOOLS, args[0])] + args[1:], capture_output=True, text=True)
             if r.returncode: informe('AVISO: fallo %s (se quedan los del disco):\n%s' % (args[0], (r.stderr or r.stdout)[-2000:]))
