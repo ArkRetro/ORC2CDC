@@ -1874,6 +1874,9 @@ static float ta_lej_tope = 1e9f;
    corte_nodos lo usa como factor de esas mallas en el cuadro siguiente */
 static uint32_t cn_ns_real, cn_ns_est, cn_ns_f __attribute__((unused)) = 512, cn_cielo, cn_cielo_ult __attribute__((unused));   /* (cn_ns_f /256; cielo: bytes) */
 static int cn_activo;                                         /* el corte por nodos ya ha hecho caber la etapa */
+#define CN_MAXN 4096                                            /* (nodos por tramo; como LQ_MAXN) */
+static uint32_t cn_ult[3][CN_MAXN]; static uint16_t cn_vult[3][CN_MAXN];   /* bytes del TA y vertices de cada nodo en el
+                                                                   cuadro (dibuja_etapa; corte_nodos los usa en el siguiente) */
 static int ta_en_bo;                                     /* lo que se envia ahora es de bo_dibuja */
 static uint32_t ta_bo, ta_bo_pide, ta_bo_ult, ta_bo_tope, ta_res_otros;   /* lo de bo_dibuja en este cuadro (enviado y
                                                             pedido: con lo que no cupo) y lo pedido en el anterior, su tope y
@@ -2483,6 +2486,10 @@ static void dibuja_etapa(const modelo_t *mo, int l)
 #define ET_RECARGA() do { ve = vtx_env; r = ta_resto(); } while (0)
     uint32_t kb = mo->inicio[l];                                /* fin del tramo anterior = principio del siguiente */
     int pase;
+    /* (Rev 2.9.9, CORTE_NODO: lo que cuesta cada nodo en este cuadro, para corte_nodos en el siguiente) */
+    uint32_t *const cnu = mo == &etapa ? cn_ult[0] : mo == &uni ? cn_ult[1] : mo == &sig ? cn_ult[2] : NULL;
+    uint16_t *const cnv = mo == &etapa ? cn_vult[0] : mo == &uni ? cn_vult[1] : mo == &sig ? cn_vult[2] : NULL;
+    const uint32_t cnn = mo->nnodos <= CN_MAXN ? mo->nnodos : 0;
     ta_ofs = mo->ofs != NULL;
     /* Rev 1.5b: dos pasadas, primero lo cercano y lo enorme en la pantalla (clase de distancia <= PRIMERO_CD o de LOD 0:
        el suelo, la calzada y lo que rodea la camara) y despues el resto. Si el cuadro llega al tope del TA o de vertices
@@ -2505,6 +2512,7 @@ static void dibuja_etapa(const modelo_t *mo, int l)
 #endif
         }
         __builtin_prefetch(M + ka);
+        {   const uint32_t run_c0 = ta_vb + dvb, run_v0 = ve;       /* (lo que costo esta tira de mallas del nodo) */
         for (k = ka; k < kb; k++) {
             const malla_t *m = M + k; int seguro = 0; uint32_t f;
             __builtin_prefetch(m + 2);
@@ -2601,6 +2609,8 @@ static void dibuja_etapa(const modelo_t *mo, int l)
                 cn_ns_real += ta_vb - vb0_; cn_ns_est += teo[m->n <= 256 ? m->n : 256] * tf >> 8;
                 ET_RECARGA();
             }
+        }
+        if (nd && nd <= cnn && cnu) { uint32_t dv_ = cnv[nd - 1] + (ve - run_v0); cnu[nd - 1] += ta_vb + dvb - run_c0; cnv[nd - 1] = (uint16_t)(dv_ < 65535u ? dv_ : 65535u); }
         }
     }
     }
@@ -9305,15 +9315,17 @@ static void lejsec_paso(int mueve, int carrera)            /* (carrera: estado =
    de cada nodo por ta_f y por prio_alfa) no cabia en el tope de la etapa, ta_cabe tiraba mallas sueltas en el orden de
    envio de dibuja_etapa (por textura) y en cada lista con su parte del tope: de un edificio se iba la planta baja y se
    quedaba el piso de arriba flotando, o se quedaban solo las ventanas (captura del usuario en BEAC, reproducida con
-   ta_f 576 o con el salto en su nivel alto: 86 mallas de hasta 247 px). Ahora se cuenta lo que va a costar de verdad
-   cada nodo visible (sus mallas de las tres listas con las mismas pruebas que dibuja_etapa: la PVS por malla, la vista,
-   el lejano; lo que no va por la directa con el factor medido en el cuadro anterior, cn_ns_f) y, si no cabe, se quitan
+   ta_f 576 o con el salto en su nivel alto: 86 mallas de hasta 247 px). Ahora se cuenta lo que va a costar cada nodo
+   visible: lo que costo de verdad en el cuadro anterior si se dibujo (dibuja_etapa lo apunta en cn_ult: sus mallas de
+   las tres listas tras la PVS por malla y la vista) o, si es nuevo, su coste teorico por ta_f (cerca de la camara, por
+   el factor de lo que no va por la directa medido en el cuadro anterior, cn_ns_f). Si no cabe, se quitan
    nodos ENTEROS (los de un grupo de tools/grupos_nodos.py llevan la misma clase: el grupo entero) por su clase de LOD
    del reparto, que va por el tamano en la pantalla (lo pequeno y lejano primero; lo de menos de 16 m y lo enorme en la
    pantalla, nunca). El que tiene version lejana (lod_grande.py: lowpoly de lo grande; lod_veg.py: el cartel de la
    vegetacion) se cambia por ella si cabe, en vez de quitarse. Lo que queda cabe entero: dibuja_etapa no reparte el
-   tope entre las listas (cn_activo) y ta_cabe no corta nada salvo un error de la cuenta. Coste: una pasada mas por las
-   mallas de los nodos visibles (solo las pruebas, sin transformar vertices). -DCORTE_NODO=0: lo de antes */
+   tope entre las listas (cn_activo) y ta_cabe solo corta si un nodo cuesta mas que en el cuadro anterior y no queda
+   margen (CORTE_MARGEN). Coste: una pasada por los nodos visibles (con las mallas una a una costaba ~3 ms por cuadro
+   en Flycast, PALM: descartado) y 18 KB por tramo para lo de cada nodo. -DCORTE_NODO=0: lo de antes */
 #ifndef CORTE_NODO
 #define CORTE_NODO 1
 #endif
@@ -9336,11 +9348,8 @@ static inline int cn_clave(const nodo_t *d)
     uint32_t cl = d->relleno[1] & 4095u, cd = cl >> 6, cp = cl & 63;
     return !cn_modo && cd <= CORTE_CERCA_CD ? 0 : (int)cp;
 }
-static inline int cn_cerca(const nodo_t *d) { return ((d->relleno[1] & 4095u) >> 6) <= CORTE_CERCA_CD; }
 static void corte_nodos(void)
 {
-    const float tanh = 320.0f / fx, tanv = 240.0f / fx, kh = sqrtf(1 + tanh * tanh), kv = sqrtf(1 + tanv * tanv);
-    const float cer = cerca, lej = lejos < ta_lej_tope ? lejos : ta_lej_tope, cer15 = cerca * 1.5f;
     uint32_t tope, vtope, acum, v, nsf, c0; int t, cut, c, nq[3] = { 0, 0, 0 };
     cn_activo = 0;
     /* el factor de lo que no va por la directa: lo medido en el cuadro anterior (sube en el acto, baja 1/32 por cuadro) */
@@ -9351,39 +9360,29 @@ static void corte_nodos(void)
     }
     cn_ns_real = cn_ns_est = 0; nsf = cn_ns_f;
     memset(cn_c, 0, sizeof cn_c); memset(cn_v, 0, sizeof cn_v); memset(cn_cp, 0, sizeof cn_cp); memset(cn_vp, 0, sizeof cn_vp);
+    /* el coste de cada nodo visible: el que tuvo al enviarlo en el cuadro anterior (dibuja_etapa, cn_ult: sus mallas de
+       las tres listas tras la PVS por malla y la vista) si se dibujo; si no, el teorico de lo que la PVS deja ver por
+       ta_f (y por el factor de lo que no va por la directa si esta cerca) */
     for (t = 0; t < 3; t++) {
-        const modelo_t *mo = tramos[t]; const uint32_t *tr, *vis, *pvs, *ent, *teo; const malla_t *M; const nodo_t *N; int l;
-        if (!geo_visible(mo) || !mo->tr || !mo->vis) continue;
-        tr = mo->tr; vis = mo->vis; pvs = mo->pvs_on ? mo->pvs_dibujo : NULL; ent = mo->pvs_ent; M = mo->mallas; N = mo->nodos;
-        teo = ta_teo_tab[mo->ofs != NULL];
-        for (l = 0; l < 3; l++) {
-            uint32_t it, kb = mo->inicio[l];
-            for (it = mo->tr_ini[l]; it < mo->tr_ini[l + 1]; it++) {
-                uint32_t tt = tr[it], nd = tt >> 16, ka = kb, k, cc = 0, cv = 0; int cart = 0, cl = 0, ce = 1;
-                kb = tt & 0xFFFF;
-                if (nd) {
-                    if (!(vis[(nd - 1) >> 5] & (1u << ((nd - 1) & 31)))) continue;
-                    cart = N[nd - 1].cartel >= 0; cl = (int)(N[nd - 1].relleno[1] & 63); ce = cn_cerca(N + nd - 1);
+        const modelo_t *mo = tramos[t]; uint32_t w, nw; uint32_t *cu = cn_ult[t]; uint16_t *cvu = cn_vult[t];
+        if (!geo_visible(mo) || !mo->tr || !mo->vis || mo->nnodos > LQ_MAXN) continue;
+        nw = (mo->nnodos + 31) / 32;
+        for (w = 0; w < nw; w++) {
+            uint32_t b = mo->vis[w], ya = mo->vis_ant[w];
+            while (b) {
+                uint32_t i = w * 32 + (uint32_t)__builtin_ctz(b), cc, cv, cl; const nodo_t *d = mo->nodos + i;
+                b &= b - 1;
+                if (ya >> (i & 31) & 1) { cc = cu[i]; cv = cvu[i]; }
+                else {
+                    float dx = d->cx - ojo[0], dy = d->cy - ojo[1], dz = d->cz - ojo[2], zv = dx * ade[0] + dy * ade[1] + dz * ade[2];
+                    cc = mo->pvs_on ? pvs_coste(mo, i) : d->relleno[0];
+                    if (!cc && mo->pvs_ult) cc = mo->pvs_ult[i];
+                    cc = cc * ta_f >> 8; if (zv - d->r < cerca * 1.5f) cc = cc * nsf >> 8;
+                    cv = d->relleno[1] >> 12;
                 }
-                for (k = ka; k < kb; k++) {
-                    const malla_t *m = M + k; uint32_t n = m->n <= 256 ? m->n : 256, ci; int seguro = 0;
-                    if (!nd && m->nodo >= 0 && !(vis[m->nodo >> 5] & (1u << (m->nodo & 31)))) continue;
-                    if (m->n < 3) continue;
-                    if (pvs && m->nodo >= 0 && !(pvs[k >> 5] & (1u << (k & 31))) && !(ent && ent[m->nodo >> 5] & (1u << (m->nodo & 31)))) continue;
-                    if (DETRAS_ENTRADA(mo, m)) continue;
-                    if (!cart) {
-                        float dx = m->cx - ojo[0], dy = m->cy - ojo[1], dz = m->cz - ojo[2], zv, xv, yv;
-                        zv = dx * ade[0] + dy * ade[1] + dz * ade[2];
-                        if (zv + m->r < cer || zv - m->r > lej) continue;
-                        xv = dx * der[0] + dy * der[1] + dz * der[2]; yv = dx * arr[0] + dy * arr[1] + dz * arr[2];
-                        if (fabsf(xv) - zv * tanh > m->r * kh || fabsf(yv) - zv * tanv > m->r * kv) continue;
-                        seguro = zv - m->r > cer15 && m->n <= 256 && esfera_en_guarda(xv, yv, zv, m->r);
-                    }
-                    ci = teo[n] * ta_f >> 8;
-                    if (!seguro) ci = ci * nsf >> 8;
-                    cc += ci; cv += m->n;
-                }
-                if (ce) { cn_cp[cl] += cc; cn_vp[cl] += cv; } else { cn_c[cl] += cc; cn_v[cl] += cv; }
+                cu[i] = 0; cvu[i] = 0;                          /* (dibuja_etapa lo vuelve a contar en este cuadro) */
+                cl = d->relleno[1] & 4095u;
+                if ((cl >> 6) <= CORTE_CERCA_CD) { cn_cp[cl & 63] += cc; cn_vp[cl & 63] += cv; } else { cn_c[cl & 63] += cc; cn_v[cl & 63] += cv; }
             }
         }
     }
