@@ -9044,7 +9044,8 @@ static void nodos_quita(modelo_t *mo)
             if ((cl >> 6) <= prio_d || (cl & 63) <= prio_p) continue;
             mo->vis[w] &= ~(1u << k);
 #if LEJ_EN_TOPE
-            if (i < mo->nn0 && mo->nodos[i].cartel <= -2 && lq_n[lq_t] < 1024) { lq_i[lq_t][lq_n[lq_t]] = (uint16_t)i; lq_c[lq_t][lq_n[lq_t]++] = (uint16_t)cl; }
+            /* (no los de un grupo: el lowpoly de un piso sin la base del edificio quedaria flotando) */
+            if (i < mo->nn0 && mo->nodos[i].cartel <= -2 && !(mo->nodos[i].fl >> 16) && lq_n[lq_t] < 1024) { lq_i[lq_t][lq_n[lq_t]] = (uint16_t)i; lq_c[lq_t][lq_n[lq_t]++] = (uint16_t)cl; }
 #endif
 #ifdef DIAG_POPPING
             {   pop_slot_t *ps = pop_slot(mo);                  /* (un lejano: su nodo completo) */
@@ -9366,10 +9367,12 @@ static uint16_t cn_lista[3][2048]; static uint8_t cn_clase[3][2048];   /* los qu
 #ifdef DIAG_POPPING
 static uint32_t cn_dg_cuad, cn_dg_corta, cn_dg_quit, cn_dg_lowp;
 #endif
-static inline int cn_grande(const nodo_t *d)                   /* radio en la pantalla de CORTE_GRANDE_PX o mas */
+static inline int cn_grande(const nodo_t *d)                   /* radio en la pantalla de CORTE_GRANDE_PX o mas; o de un
+                                                                   grupo (tools/grupos_nodos.py: los pisos de un edificio):
+                                                                   todo el grupo igual, que no quede un piso sin la base */
 {
     float dx = d->cx - ojo[0], dy = d->cy - ojo[1], dz = d->cz - ojo[2], zv = dx * ade[0] + dy * ade[1] + dz * ade[2];
-    return zv <= d->r || d->r * fx >= CORTE_GRANDE_PX * zv;
+    return (d->fl >> 16) || zv <= d->r || d->r * fx >= CORTE_GRANDE_PX * zv;
 }
 static int cn_cut_g;                                            /* el corte de lo grande (el de lo pequeno: cut) */
 static inline int cn_clave(const nodo_t *d)
@@ -9481,7 +9484,7 @@ static void corte_nodos(void)
                 cn_dg_quit++;
                 if (ps) ps->cur[i >= mo->nn0 && mo->lej_de ? mo->lej_de[i - mo->nn0] : i] = PR_TOPE;
 #endif
-                if (i < mo->nn0 && mo->nodos[i].cartel <= -2 && nq[t] < 2048) { cn_lista[t][nq[t]] = (uint16_t)i; cn_clase[t][nq[t]++] = (uint8_t)k; }
+                if (i < mo->nn0 && mo->nodos[i].cartel <= -2 && !(mo->nodos[i].fl >> 16) && nq[t] < 2048) {   /* (no los de un grupo) */ cn_lista[t][nq[t]] = (uint16_t)i; cn_clase[t][nq[t]++] = (uint8_t)k; }
             }
         }
     }
