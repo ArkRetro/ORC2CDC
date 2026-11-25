@@ -1601,7 +1601,22 @@ static uint32_t vtx_et, vtx_et_ult;                      /* los de la etapa */
 #define TA_BPV_MIN 56                                    /* bytes por vertice 2D (1,3 x 42,5 medidos en la consola) */
 #ifndef TA_F_MIN                                         /* (prueba en Flycast: -DTA_F_MIN=n simula una consola que
                                                             gasta mas; Flycast no llena el TA ni sube ta_f solo) */
-#define TA_F_MIN 448                                     /* coste 3D = ta_teo x ta_f / 256 (1,75: ver arriba) */
+/* Rev 2.9.9 (queja: "faltan edificios enteros"): 400 (1,5625) en vez de 448 (1,75). Lo unico medido en la consola es
+   "al menos 1,34" (demo 12c); 400 deja un 16 % sobre eso y la consola sube ta_f sola con lo que mide (TA_F_SEGURO, el
+   10 % sobre lo mayor medido en un cuadro cargado). En Flycast (sin el registro) ta_f se queda aqui: con 448, en la
+   salida de BEAC parado el reparto quitaba 43 nodos grandes (24 px o mas) que con 400 caben (DIAG_FALTA). SUPUESTO: que
+   la consola no pase de 1,56 x la cuenta en los primeros cuadros cargados, antes de que ta_f se ajuste */
+#define TA_F_MIN 400                                     /* coste 3D = ta_teo x ta_f / 256 (1,5625: ver arriba) */
+#endif
+/* Rev 2.9.9: ta_f sube solo con cuadros cargados (ta_fin_cuadro), con un 10 % de margen. -DTA_F_SEGURO=0: lo de antes */
+#ifndef TA_F_SEGURO
+#define TA_F_SEGURO 1
+#endif
+#ifndef TA_F_LLENO
+#define TA_F_LLENO 25                                    /* % del bufer por cuadro desde el que se mira la medida */
+#endif
+#ifndef TA_F_MARGEN
+#define TA_F_MARGEN 10                                   /* % sobre lo medido */
 #endif
 /* tope de vertices de la etapa por cuadro (tiempo de CPU: transformar y enviar) y distancia de dibujo minima del
    recorte de seguridad por CPU: la distancia es la del original (LEJOS_PS2) y solo se acorta (50 m cada 30 cuadros)
@@ -1611,7 +1626,11 @@ static uint32_t vtx_et, vtx_et_ult;                      /* los de la etapa */
    segundo, lo que pide el usuario para la consola (40-50); la geometria la limita el TA (nodos_visibles_todos), asi que
    con la distancia del original no se envian mas vertices (Flycast, PALM: 27100 vertices y 55,5 -> 56 cuadros por
    segundo; docs/PARIDAD.md, Fundido de entrada) */
-#define VTX_ETAPA_MAX 20000
+/* Rev 2.9.9: 24000 (antes 20000; el salto ya no lo baja con SALTO_TA). En la salida de BEAC parado, con ta_f 400, los
+   20000 vertices eran lo que se acababa antes que el TA (19384 / 19400 en corte_nodos) */
+#ifndef VTX_ETAPA_MAX
+#define VTX_ETAPA_MAX 24000
+#endif
 /* Rev 2.8 (pedido: "mejora el framerate de las vegas"): el tope del TA de la etapa x ta_escala / 256 en las zonas de
    PRESUP_ZONAS (prio_ajusta lo pone): la CPU del cuadro va con lo que se manda (perfil en LASV: dibuja_etapa y el envio
    de vertices son el 38 %; los faros 0,3 ms). De noche lo lejano casi no se ve. */
@@ -1698,6 +1717,16 @@ static const float SALTO_LEJ[4] = { LEJOS_MAX, 3200.0f, 2800.0f, 2400.0f };
    cortes del tope cerca (el TA se reparte entre mas); con 1200, 0,8 y menos en total (18,7 frente a 20,3), mismos fps */
 #ifndef SALTO_LEJ_SUELO
 #define SALTO_LEJ_SUELO 1200.0f
+#endif
+/* Rev 2.9.9 (DESVIACION, queja: "faltan edificios enteros, no cargan bien"): el nivel del salto ya no toca lo que se
+   dibuja. Antes recortaba el tope del TA de la etapa (SALTO_TA, hasta el 80 %) y el lejano (hasta SALTO_LEJ_SUELO):
+   en una maquina lenta (el Flycast de Android del usuario) o con el coche parado (24-26 ms por cuadro en Flycast) el
+   nivel subia a 7-9, el lejano bajaba a 1200-1850 m y el reparto se quedaba en su minimo (ta_cabe tiraba trozos de
+   edificios cercanos). Lo que se dibuja depende ahora de la posicion y la vista (la leccion de Crazy Taxi), no del
+   tiempo medido: el salto solo deja la cadencia de presentacion (pres_espera) y la logica a 59,94 pasos por segundo.
+   -DSALTO_GEOM=1: lo de antes */
+#ifndef SALTO_GEOM
+#define SALTO_GEOM 0
 #endif
 static const uint16_t SALTO_TA[4] = { 256, 240, 222, 205 };   /* (Rev 2.9.2.f: 94 / 87 / 80 %; antes 90 / 80 / 70) */
 static float salto_q, salto_trab __attribute__((unused));       /* nivel (0..SALTO_Q_MAX) y trabajo medio (ms) */
@@ -1839,6 +1868,11 @@ static int precal_d = -1, precal_p = -1;                 /* corte estable del pr
    2 % en los demas hasta soltarse (mas alla de lejos); con la consola de 1,75-2,25 veces no llega a usarse (prio_ajusta,
    nodos_visibles_todos) */
 static float ta_lej_tope = 1e9f;
+/* Rev 2.9.9 (CORTE_NODO, ver corte_nodos): lo que costo de verdad en el cuadro lo de la etapa que no va por la directa
+   (recortado contra el plano cercano o la banda de guarda, carteles) frente a su cuenta como una tira (ta_teo x ta_f):
+   corte_nodos lo usa como factor de esas mallas en el cuadro siguiente */
+static uint32_t cn_ns_real, cn_ns_est, cn_ns_f __attribute__((unused)) = 512, cn_cielo, cn_cielo_ult __attribute__((unused));   /* (cn_ns_f /256; cielo: bytes) */
+static int cn_activo;                                         /* el corte por nodos ya ha hecho caber la etapa */
 static int ta_en_bo;                                     /* lo que se envia ahora es de bo_dibuja */
 static uint32_t ta_bo, ta_bo_pide, ta_bo_ult, ta_bo_tope, ta_res_otros;   /* lo de bo_dibuja en este cuadro (enviado y
                                                             pedido: con lo que no cupo) y lo pedido en el anterior, su tope y
@@ -1950,11 +1984,27 @@ static void ta_fin_cuadro(void)
     if (ta_opb_ult > opb_tot / 10 * 7) { if (ta_freno < 3) ta_freno++; ta_corto = 1; }
     else if (ta_opb_ult < opb_tot / 2 && ta_freno) ta_freno--;
     ta_teo_ult = teo;
+#if TA_F_SEGURO
+    /* Rev 2.9.9 (DESVIACION): ta_f sigue a lo que mide el registro de la consola (TA_ITP_CURRENT) solo con cuadros que
+       llenan al menos el TA_F_LLENO % del bufer (en los pequenos, el menu o un cuadro casi vacio, la proporcion no dice
+       nada del cuadro cargado), con un margen del TA_F_MARGEN % (antes el 20 %) y sin bajar nunca (lo mayor visto: un
+       cuadro cargado que guarde peor sus tiras no puede pasar del bufer). Donde el registro no se lleva (Flycast) ta_f se
+       queda en TA_F_MIN */
+    if (ta_real_ult && teo > 64 * 1024) {
+        uint32_t x = (uint32_t)((uint64_t)ta_real_ult * 1000 / teo);
+        if (x > ta_x_max) ta_x_max = x;
+        if ((uint64_t)ta_real_ult * 100 >= (uint64_t)TA_VB_BYTES * TA_F_LLENO) {
+            uint32_t f = (uint32_t)((uint64_t)ta_real_ult * 256 * (100 + TA_F_MARGEN) / 100 / teo) + 1;
+            if (f > ta_f) { ta_f = f > 1024 ? 1024 : f; ta_bpv = TA_BPV_MIN * ta_f / TA_F_MIN; }   /* lo 2D, en proporcion */
+        }
+    }
+#else
     if (ta_real_ult && teo > 64 * 1024) {               /* con margen del 20 %; nunca baja de TA_F_MIN */
         uint32_t f = (uint32_t)((uint64_t)ta_real_ult * 256 * 6 / 5 / teo) + 1, x = (uint32_t)((uint64_t)ta_real_ult * 1000 / teo);
         if (x > ta_x_max) ta_x_max = x;
         if (f > ta_f) { ta_f = f > 1024 ? 1024 : f; ta_bpv = TA_BPV_MIN * ta_f / TA_F_MIN; }   /* lo 2D, en proporcion */
     }
+#endif
 }
 static int (*const pvr_prim_real)(const void *, size_t) = pvr_prim;   /* sin contar (volumenes de sombra) */
 /* pvr_prim contando los vertices (lo 2D) */
@@ -2515,10 +2565,12 @@ static void dibuja_etapa(const modelo_t *mo, int l)
             else
 #endif
             if (cart) {
-                ET_VUELCA();
+                uint32_t vb0_;
+                ET_VUELCA(); vb0_ = ta_vb;
                 carga_cartel((const float (*)[4])mo->carteles[N[m->nodo].cartel]);
                 dibuja_malla(mo, m);
                 mat_load(&vista);
+                cn_ns_real += ta_vb - vb0_; cn_ns_est += teo[m->n <= 256 ? m->n : 256] * tf >> 8;
                 ET_RECARGA();
             }
             else if (seguro) {                                  /* dibuja_malla_directa con las cuentas locales */
@@ -2542,7 +2594,12 @@ static void dibuja_etapa(const modelo_t *mo, int l)
                 }
                 dtri += n - 2; ve += n;
             }
-            else { ET_VUELCA(); dibuja_malla(mo, m); if (fo && !ta_corto) focos_anota(mo, m); ET_RECARGA(); }
+            else {
+                uint32_t vb0_;
+                ET_VUELCA(); vb0_ = ta_vb; dibuja_malla(mo, m); if (fo && !ta_corto) focos_anota(mo, m);
+                cn_ns_real += ta_vb - vb0_; cn_ns_est += teo[m->n <= 256 ? m->n : 256] * tf >> 8;
+                ET_RECARGA();
+            }
         }
     }
     }
@@ -8185,6 +8242,9 @@ static float dist2_ruta(const modelo_t *m, uint32_t i, const float *p)
 #ifndef REPARTO_COSTE
 #define REPARTO_COSTE 4
 #endif
+#ifndef REPARTO_COSTE_PX
+#define REPARTO_COSTE_PX 24.0f                                  /* Rev 2.9.9: radio en px desde el que no cuenta (1e9f: antes) */
+#endif
 /* Regla de grupo en runtime (prueba, 2026-11-15): un nodo con r < REPARTO_GRUPO_RMIN m no fija la clase del grupo si
    hay alguno mayor; su clase individual no cambia. En PALM el grupo 2004/2039/1869 lo retiene una franja de ventanas de
    5 KB (r 6,6 m) y el edificio entra de golpe. Solo con -DREPARTO_GRUPO_VOL (por defecto no cambia nada). */
@@ -8600,6 +8660,18 @@ static float nv_xm[16] __attribute__((aligned(8)));             /* la XMTRX de q
 #ifdef DIAG_SIGV
 static float dg_sig_r; static int dg_sig_n, dg_sig_c;
 #endif
+/* Rev 2.9.9 (LEJ_EN_TOPE, CORTE_NODO): las versiones lejanas puestas en lugar de un nodo que no cabia (lej_cambia,
+   corte_nodos), por tramo, en este cuadro y en el anterior. En el cuadro siguiente no cuentan como "ya se dibujaba"
+   para el nodo completo (la histeresis del reparto, REPARTO_HIST_*): si contaran, el completo entraria con la clase
+   rebajada, el reparto ya no cabria y se quitaria lo demas (medido: BEAC con ta_f 576, el corte en prio_p -1) */
+#define LQ_MAXN 4096
+static uint32_t lq_marca[3][LQ_MAXN / 32], lq_ant[3][LQ_MAXN / 32];
+static inline int lq_tramo(const modelo_t *mo) { return mo == &etapa ? 0 : mo == &uni ? 1 : mo == &sig ? 2 : -1; }
+static inline void lq_pon(const modelo_t *mo, uint32_t j)
+{
+    int t = lq_tramo(mo);
+    if (t >= 0 && j < LQ_MAXN) lq_marca[t][j >> 5] |= 1u << (j & 31);
+}
 static void nodos_visibles(modelo_t *mo)
 {
     float tanh = 320.0f / fx, tanv = 240.0f / fx, kh = sqrtf(1 + tanh * tanh), kv = sqrtf(1 + tanv * tanv), lod = fx / 240.0f;
@@ -8610,6 +8682,7 @@ static void nodos_visibles(modelo_t *mo)
     float o0, o1, o2, e0, e1, e2, d0, d1, d2, a0, a1, a2, cer, lej; int pvs_on_; nodo_t *ND = mo->nodos;
     uint32_t *VIS = mo->vis; const uint32_t *VA = mo->vis_ant; const uint32_t nnod = mo->nnodos; (void)VA; const int regs = mo == &uni ? uni_mascara : 7;
     uint16_t *G = mo->relleno_propio ? NULL : mo->grp;          /* grupos de nodos (abajo) */
+    const uint32_t *const LQ_ANT = lq_tramo(mo) >= 0 && nnod <= LQ_MAXN ? lq_ant[lq_tramo(mo)] : NULL;   /* (Rev 2.9.9) */
 #ifdef REPARTO_GRUPO_VOL
     /* regla de grupo en runtime (prueba, 2026-11-15): un nodo pequeno (r < REPARTO_GRUPO_RMIN) no fija la clase del
        grupo si el grupo tiene algun nodo de volumen; asi una franja de ventanas de 5 KB no retiene al edificio entero.
@@ -8681,7 +8754,7 @@ static void nodos_visibles(modelo_t *mo)
         /* lo dibujado en el cuadro anterior: el nodo o, si tiene version lejana (lod_veg.py), el impostor que lo
            sustituyo (mas abajo); la gracia de la PVS y la histeresis miran eso */
         ya = VA[i >> 5] & (1u << (i & 31));
-        if (d->cartel <= -2 && (uint32_t)(-2 - d->cartel) < nnod)
+        if (d->cartel <= -2 && (uint32_t)(-2 - d->cartel) < nnod && !(LQ_ANT && (LQ_ANT[(uint32_t)(-2 - d->cartel) >> 5] >> ((-2 - d->cartel) & 31) & 1)))
             ya |= VA[(uint32_t)(-2 - d->cartel) >> 5] & (1u << ((-2 - d->cartel) & 31));
         ip = i; gracia = 0; c_teo = 0;
         if (mo->viso && !(mo->viso[i >> 3] >> (i & 7) & 1) && !PVS_GRANDE(d, zv)) {   /* fuera de la etapa */
@@ -8726,7 +8799,7 @@ static void nodos_visibles(modelo_t *mo)
             /* con version lejana (tools/lod_veg.py): por debajo de LOD_LEJ_PX de radio en la pantalla, el impostor en su
                lugar (con histeresis: el que se dibujaba sigue hasta LOD_LEJ_HIST veces mas alla del umbral). El LOD, la
                PVS, la clase y el grupo son los del nodo completo; el coste en el reparto, el del lejano */
-            uint32_t jl = (uint32_t)(-2 - d->cartel); int era_lej = (VA[jl >> 5] >> (jl & 31)) & 1;
+            uint32_t jl = (uint32_t)(-2 - d->cartel); int era_lej = (VA[jl >> 5] >> (jl & 31)) & 1 && !(LQ_ANT && (LQ_ANT[jl >> 5] >> (jl & 31) & 1));
             float umb = LOD_LEJ_PX * (era_lej ? LOD_LEJ_HIST : ya ? 1.0f / LOD_LEJ_HIST : 1.0f);
             /* Rev 2.9.2.d (pedido): los grandes con version lejana lowpoly (tools/lod_grande.py, NODO_LEJ3D) por la
                distancia: el lowpoly con lo mas cercano del nodo a mas de LOD_GRANDE_D por delante y el completo al
@@ -8764,7 +8837,9 @@ static void nodos_visibles(modelo_t *mo)
         else {
             cp = 40 + log2x(zv / lim, 8);
 #if REPARTO_COSTE
-            if (c_v > 1) cp += (log2x((float)c_v, 4) - 24) * REPARTO_COSTE / 4;   /* lo caro por pixel, despues */
+            /* (Rev 2.9.9: lo grande en la pantalla, REPARTO_COSTE_PX de radio o mas, sin la cuenta del coste: un
+               edificio grande de muchas caras ya no se quita antes que lo pequeno y barato) */
+            if (c_v > 1 && d->r * fx < REPARTO_COSTE_PX * zv) cp += (log2x((float)c_v, 4) - 24) * REPARTO_COSTE / 4;   /* lo caro por pixel, despues */
             cp = cp > NB_PRIO - 2 ? NB_PRIO - 2 : cp;           /* (63: solo lo tapado por la niebla) */
 #endif
             cp = cp < 0 ? 0 : cp > NB_PRIO - 1 ? NB_PRIO - 1 : cp;
@@ -8823,6 +8898,42 @@ static void nodos_visibles(modelo_t *mo)
         }
     }
 }
+/* Rev 2.9.9 (DESVIACION, LEJ_EN_TOPE): lo que el reparto quita y tiene version lejana (tools/lod_grande.py: lowpoly de lo
+   grande; tools/lod_veg.py: cartel de la vegetacion) no desaparece: va su version lejana mientras quepa en lo que le
+   sobra al reparto, de lo mayor en la pantalla a lo menor (la clase de LOD). Antes la version lejana solo iba por la
+   distancia (0,8 x lejano) o por el tamano (48 px) y el reparto quitaba el nodo entero. -DLEJ_EN_TOPE=0: lo de antes */
+#ifndef LEJ_EN_TOPE
+#define LEJ_EN_TOPE 1
+#endif
+#if LEJ_EN_TOPE
+static uint16_t lq_i[3][1024]; static uint16_t lq_c[3][1024]; static int lq_n[3], lq_t;   /* quitados con version lejana */
+#ifdef DIAG_POPPING
+static uint32_t lq_dg_n;
+#endif
+/* las versiones lejanas de lo quitado, con st bytes teoricos y sv vertices de sitio */
+static void lej_cambia(int32_t st, int32_t sv)
+{
+    int c, t, q;
+    for (c = 0; c < NB_PRIO; c++) for (t = 0; t < 3; t++) {
+        modelo_t *mo = tramos[t];
+        for (q = 0; q < lq_n[t]; q++) {
+            uint32_t i = lq_i[t][q], jl; int32_t cj, vj;
+            if ((lq_c[t][q] & 63) != c) continue;
+            jl = (uint32_t)(-2 - mo->nodos[i].cartel);
+            if (jl >= mo->nnodos) continue;
+            cj = (int32_t)(mo->pvs_on ? pvs_coste(mo, jl) : mo->nodos[jl].relleno[0]); vj = (int32_t)(mo->nodos[jl].relleno[1] >> 12);
+            if (!cj || cj > st || vj > sv) continue;
+            st -= cj; sv -= vj;
+            mo->vis[jl >> 5] |= 1u << (jl & 31); lq_pon(mo, jl);
+            mo->nodos[jl].relleno[1] = (mo->nodos[jl].relleno[1] & ~4095u) | lq_c[t][q];   /* (la clase del completo) */
+#ifdef DIAG_POPPING
+            {   pop_slot_t *ps = pop_slot(mo); if (ps) ps->cur[i] = PR_DIB; }
+            lq_dg_n++;
+#endif
+        }
+    }
+}
+#endif
 /* quita de mo->vis los nodos de las clases que no caben */
 static void nodos_quita(modelo_t *mo)
 {
@@ -8834,6 +8945,9 @@ static void nodos_quita(modelo_t *mo)
             int k = __builtin_ctz(b), cl; b &= b - 1; i = w * 32 + k; cl = mo->nodos[i].relleno[1] & 4095;
             if ((cl >> 6) <= prio_d || (cl & 63) <= prio_p) continue;
             mo->vis[w] &= ~(1u << k);
+#if LEJ_EN_TOPE
+            if (i < mo->nn0 && mo->nodos[i].cartel <= -2 && lq_n[lq_t] < 1024) { lq_i[lq_t][lq_n[lq_t]] = (uint16_t)i; lq_c[lq_t][lq_n[lq_t]++] = (uint16_t)cl; }
+#endif
 #ifdef DIAG_POPPING
             {   pop_slot_t *ps = pop_slot(mo);                  /* (un lejano: su nodo completo) */
                 if (ps) ps->cur[i >= mo->nn0 && mo->lej_de ? mo->lej_de[i - mo->nn0] : i] = PR_TOPE; }
@@ -9106,6 +9220,168 @@ static void lejsec_paso(int mueve, int carrera)            /* (carrera: estado =
 #endif
 }
 #endif
+/* Rev 2.9.9 (DESVIACION, queja: "faltan edificios enteros ... lo estas gestionando mal"): corte de la etapa por nodos
+   enteros, tras el reparto y antes de enviar nada. Antes, si lo que dejaba el reparto (una estimacion: el coste teorico
+   de cada nodo por ta_f y por prio_alfa) no cabia en el tope de la etapa, ta_cabe tiraba mallas sueltas en el orden de
+   envio de dibuja_etapa (por textura) y en cada lista con su parte del tope: de un edificio se iba la planta baja y se
+   quedaba el piso de arriba flotando, o se quedaban solo las ventanas (captura del usuario en BEAC, reproducida con
+   ta_f 576 o con el salto en su nivel alto: 86 mallas de hasta 247 px). Ahora se cuenta lo que va a costar de verdad
+   cada nodo visible (sus mallas de las tres listas con las mismas pruebas que dibuja_etapa: la PVS por malla, la vista,
+   el lejano; lo que no va por la directa con el factor medido en el cuadro anterior, cn_ns_f) y, si no cabe, se quitan
+   nodos ENTEROS (los de un grupo de tools/grupos_nodos.py llevan la misma clase: el grupo entero) por su clase de LOD
+   del reparto, que va por el tamano en la pantalla (lo pequeno y lejano primero; lo de menos de 16 m y lo enorme en la
+   pantalla, nunca). El que tiene version lejana (lod_grande.py: lowpoly de lo grande; lod_veg.py: el cartel de la
+   vegetacion) se cambia por ella si cabe, en vez de quitarse. Lo que queda cabe entero: dibuja_etapa no reparte el
+   tope entre las listas (cn_activo) y ta_cabe no corta nada salvo un error de la cuenta. Coste: una pasada mas por las
+   mallas de los nodos visibles (solo las pruebas, sin transformar vertices). -DCORTE_NODO=0: lo de antes */
+#ifndef CORTE_NODO
+#define CORTE_NODO 1
+#endif
+#ifndef CORTE_CERCA_CD
+#define CORTE_CERCA_CD 16                                       /* clase de distancia (4 log2 m): 16 m, siempre */
+#endif
+#ifndef CORTE_MARGEN
+#define CORTE_MARGEN 3                                          /* % del tope y de los vertices que se deja libre */
+#endif
+#if CORTE_NODO
+static uint32_t cn_c[NB_PRIO], cn_v[NB_PRIO], cn_cp[NB_PRIO], cn_vp[NB_PRIO];   /* coste (bytes del TA) y vertices por clase
+                                                                   (cn_cp / cn_vp: lo de menos de CORTE_CERCA_CD) */
+static int cn_modo;                                             /* 0: lo cercano siempre; 1: solo la clase de LOD */
+static uint16_t cn_lista[3][2048]; static uint8_t cn_clase[3][2048];   /* los quitados de cada tramo y su clase */
+#ifdef DIAG_POPPING
+static uint32_t cn_dg_cuad, cn_dg_corta, cn_dg_quit, cn_dg_lowp;
+#endif
+static inline int cn_clave(const nodo_t *d)
+{
+    uint32_t cl = d->relleno[1] & 4095u, cd = cl >> 6, cp = cl & 63;
+    return !cn_modo && cd <= CORTE_CERCA_CD ? 0 : (int)cp;
+}
+static inline int cn_cerca(const nodo_t *d) { return ((d->relleno[1] & 4095u) >> 6) <= CORTE_CERCA_CD; }
+static void corte_nodos(void)
+{
+    const float tanh = 320.0f / fx, tanv = 240.0f / fx, kh = sqrtf(1 + tanh * tanh), kv = sqrtf(1 + tanv * tanv);
+    const float cer = cerca, lej = lejos < ta_lej_tope ? lejos : ta_lej_tope, cer15 = cerca * 1.5f;
+    uint32_t tope, vtope, acum, v, nsf, c0; int t, cut, c, nq[3] = { 0, 0, 0 };
+    cn_activo = 0;
+    /* el factor de lo que no va por la directa: lo medido en el cuadro anterior (sube en el acto, baja 1/32 por cuadro) */
+    if (cn_ns_est > 4096) {
+        uint32_t f = (uint32_t)((uint64_t)cn_ns_real * 256 / cn_ns_est) + 16;
+        cn_ns_f = f > cn_ns_f ? f : cn_ns_f - (cn_ns_f - f) / 32;
+        if (cn_ns_f < 256) cn_ns_f = 256; else if (cn_ns_f > 2048) cn_ns_f = 2048;
+    }
+    cn_ns_real = cn_ns_est = 0; nsf = cn_ns_f;
+    memset(cn_c, 0, sizeof cn_c); memset(cn_v, 0, sizeof cn_v); memset(cn_cp, 0, sizeof cn_cp); memset(cn_vp, 0, sizeof cn_vp);
+    for (t = 0; t < 3; t++) {
+        const modelo_t *mo = tramos[t]; const uint32_t *tr, *vis, *pvs, *ent, *teo; const malla_t *M; const nodo_t *N; int l;
+        if (!geo_visible(mo) || !mo->tr || !mo->vis) continue;
+        tr = mo->tr; vis = mo->vis; pvs = mo->pvs_on ? mo->pvs_dibujo : NULL; ent = mo->pvs_ent; M = mo->mallas; N = mo->nodos;
+        teo = ta_teo_tab[mo->ofs != NULL];
+        for (l = 0; l < 3; l++) {
+            uint32_t it, kb = mo->inicio[l];
+            for (it = mo->tr_ini[l]; it < mo->tr_ini[l + 1]; it++) {
+                uint32_t tt = tr[it], nd = tt >> 16, ka = kb, k, cc = 0, cv = 0; int cart = 0, cl = 0, ce = 1;
+                kb = tt & 0xFFFF;
+                if (nd) {
+                    if (!(vis[(nd - 1) >> 5] & (1u << ((nd - 1) & 31)))) continue;
+                    cart = N[nd - 1].cartel >= 0; cl = (int)(N[nd - 1].relleno[1] & 63); ce = cn_cerca(N + nd - 1);
+                }
+                for (k = ka; k < kb; k++) {
+                    const malla_t *m = M + k; uint32_t n = m->n <= 256 ? m->n : 256, ci; int seguro = 0;
+                    if (!nd && m->nodo >= 0 && !(vis[m->nodo >> 5] & (1u << (m->nodo & 31)))) continue;
+                    if (m->n < 3) continue;
+                    if (pvs && m->nodo >= 0 && !(pvs[k >> 5] & (1u << (k & 31))) && !(ent && ent[m->nodo >> 5] & (1u << (m->nodo & 31)))) continue;
+                    if (DETRAS_ENTRADA(mo, m)) continue;
+                    if (!cart) {
+                        float dx = m->cx - ojo[0], dy = m->cy - ojo[1], dz = m->cz - ojo[2], zv, xv, yv;
+                        zv = dx * ade[0] + dy * ade[1] + dz * ade[2];
+                        if (zv + m->r < cer || zv - m->r > lej) continue;
+                        xv = dx * der[0] + dy * der[1] + dz * der[2]; yv = dx * arr[0] + dy * arr[1] + dz * arr[2];
+                        if (fabsf(xv) - zv * tanh > m->r * kh || fabsf(yv) - zv * tanv > m->r * kv) continue;
+                        seguro = zv - m->r > cer15 && m->n <= 256 && esfera_en_guarda(xv, yv, zv, m->r);
+                    }
+                    ci = teo[n] * ta_f >> 8;
+                    if (!seguro) ci = ci * nsf >> 8;
+                    cc += ci; cv += m->n;
+                }
+                if (ce) { cn_cp[cl] += cc; cn_vp[cl] += cv; } else { cn_c[cl] += cc; cn_v[cl] += cv; }
+            }
+        }
+    }
+    /* el tope de toda la etapa (las tres listas), sin el cielo del cuadro anterior y con un margen */
+    tope = ta_tope_etapa > cn_cielo_ult ? ta_tope_etapa - cn_cielo_ult : 0; tope -= tope / 100 * CORTE_MARGEN;
+    vtope = (uint32_t)VTX_ETAPA_MAX * salto_ta / 256; vtope -= vtope / 100 * CORTE_MARGEN;
+    /* primero lo cercano entero y lo demas por la clase de LOD; si ni lo cercano cabe, todo por la clase de LOD (la 0, lo
+       enorme en la pantalla, siempre) */
+    for (acum = v = 0, c = 0; c < NB_PRIO; c++) { acum += cn_cp[c]; v += cn_vp[c]; }
+    cn_modo = acum > tope || v > vtope;
+    if (cn_modo) acum = v = 0;
+    for (cut = -1, c = 0; c < NB_PRIO; c++) {
+        uint32_t ec = cn_c[c] + (cn_modo ? cn_cp[c] : 0), ev = cn_v[c] + (cn_modo ? cn_vp[c] : 0);
+        if (c > 0 && (acum + ec > tope || v + ev > vtope)) break;
+        acum += ec; v += ev; cut = c;
+    }
+#ifdef DIAG_POPPING
+    if (++cn_dg_cuad % 120 == 0) {                             /* (linea CORTE cada 120 cuadros: los contadores desde el arranque) */
+        printf("CORTE: %.4s s %.0f cuadros %u corta %u quitados %u lowpoly %u (reparto %u) tope %uK pide %uK cerca0 %uK modo %u vtx %u/%u ns %u cielo %uK ta_f %u lim %uK otros %uK bo %uK\n", cur_nodo >= 0 ? curso[cur_nodo].zona : "----",
+               (double)yo.s, (unsigned)cn_dg_cuad, (unsigned)cn_dg_corta, (unsigned)cn_dg_quit, (unsigned)cn_dg_lowp,
+#if LEJ_EN_TOPE
+               (unsigned)lq_dg_n,
+#else
+               0u,
+#endif
+               (unsigned)(tope >> 10), (unsigned)(acum >> 10), (unsigned)(cn_cp[0] >> 10), (unsigned)cn_modo,
+               (unsigned)v, (unsigned)vtope, (unsigned)nsf, (unsigned)(cn_cielo_ult >> 10), (unsigned)ta_f, (unsigned)(ta_lim >> 10), (unsigned)(ta_res_otros >> 10), (unsigned)(ta_bo_ult >> 10));
+    }
+#endif
+    if (cut == NB_PRIO - 1) { cn_activo = 1; return; }          /* cabe todo */
+#ifdef DIAG_POPPING
+    cn_dg_corta++;
+#endif
+    /* fuera los nodos de las clases de mas alla del corte; con version lejana, ella si cabe (de la clase mas baja a la
+       mas alta: lo mayor en la pantalla primero) */
+    c0 = tope > acum ? tope - acum : 0;                         /* lo que sobra para las versiones lejanas */
+    for (t = 0; t < 3; t++) {
+        modelo_t *mo = tramos[t]; uint32_t w;
+#ifdef DIAG_POPPING
+        pop_slot_t *ps = geo_visible(mo) ? pop_slot(mo) : NULL;
+#endif
+        if (!geo_visible(mo) || !mo->tr || !mo->vis) continue;
+        for (w = 0; w < (mo->nnodos + 31) / 32; w++) {
+            uint32_t b = mo->vis[w];
+            while (b) {
+                uint32_t i = w * 32 + (uint32_t)__builtin_ctz(b); int k = cn_clave(mo->nodos + i);
+                b &= b - 1;
+                if (k <= cut) continue;
+                mo->vis[w] &= ~(1u << (i & 31));
+#ifdef DIAG_POPPING
+                cn_dg_quit++;
+                if (ps) ps->cur[i >= mo->nn0 && mo->lej_de ? mo->lej_de[i - mo->nn0] : i] = PR_TOPE;
+#endif
+                if (i < mo->nn0 && mo->nodos[i].cartel <= -2 && nq[t] < 2048) { cn_lista[t][nq[t]] = (uint16_t)i; cn_clase[t][nq[t]++] = (uint8_t)k; }
+            }
+        }
+    }
+    for (c = cut + 1; c < NB_PRIO && c0; c++) for (t = 0; t < 3; t++) {
+        modelo_t *mo = tramos[t]; int q;
+        for (q = 0; q < nq[t]; q++) {
+            uint32_t i = cn_lista[t][q], jl, cj, vj;
+            if (cn_clase[t][q] != c) continue;
+            jl = (uint32_t)(-2 - mo->nodos[i].cartel);
+            if (jl >= mo->nnodos) continue;
+            cj = ((mo->pvs_on ? pvs_coste(mo, jl) : mo->nodos[jl].relleno[0]) * ta_f >> 8) * nsf >> 8; vj = mo->nodos[jl].relleno[1] >> 12;
+            if (!cj || cj > c0 || v + vj > vtope) continue;
+            c0 -= cj; v += vj;
+            mo->vis[jl >> 5] |= 1u << (jl & 31); lq_pon(mo, jl);
+            mo->nodos[jl].relleno[1] = (mo->nodos[jl].relleno[1] & ~4095u) | (mo->nodos[i].relleno[1] & 4095u);
+#ifdef DIAG_POPPING
+            {   pop_slot_t *ps = pop_slot(mo); if (ps) ps->cur[i] = PR_DIB; }
+            cn_dg_lowp++;
+#endif
+        }
+    }
+    cn_activo = 1;
+}
+#endif
 static void nodos_visibles_todos(void)
 {
     static uint32_t fila_c[ND_PRIO], fila_v[ND_PRIO], col_c[NB_PRIO], col_v[NB_PRIO];
@@ -9115,6 +9391,7 @@ static void nodos_visibles_todos(void)
        vertices sin llenar el TA y el tope del TA solo no recortaba nada) */
     float k = (float)ta_f / 256.0f * prio_alfa;                 /* bytes enviados por byte teorico de los nodos */
     memset(prio_coste, 0, sizeof prio_coste); memset(prio_vtx, 0, sizeof prio_vtx);
+    memcpy(lq_ant, lq_marca, sizeof lq_ant); memset(lq_marca, 0, sizeof lq_marca);   /* (Rev 2.9.9) */
 #ifdef DIAG_VTX
     diag_pvs_v = 0;
 #endif
@@ -9214,7 +9491,17 @@ static void nodos_visibles_todos(void)
     diag_quitado_z = 1e9f; diag_quitado_r = 0; diag_quitado_n = 0;
     for (diag_orig_vtx = 0, d = 0; d < ND_PRIO; d++) diag_orig_vtx += fila_v[d];
 #endif
+#if LEJ_EN_TOPE
+    lq_n[0] = lq_n[1] = lq_n[2] = 0;
+    if (prio_d < ND_PRIO - 1) for (i = 0; i < 3; i++) if (geo_visible(tramos[i])) { lq_t = (int)i; nodos_quita(tramos[i]); }
+    if (lq_n[0] + lq_n[1] + lq_n[2]) {                          /* (lo que le sobra al reparto: bytes teoricos y vertices) */
+        uint32_t ac = cerca_c, av = cerca_v;
+        for (c = 0; c <= prio_p; c++) { ac += col_c[c]; av += col_v[c]; }
+        lej_cambia((int32_t)((float)tope / k) - (int32_t)ac, (int32_t)vmax - (int32_t)av);
+    }
+#else
     if (prio_d < ND_PRIO - 1) for (i = 0; i < 3; i++) if (geo_visible(tramos[i])) nodos_quita(tramos[i]);
+#endif
 #ifdef DIAG_POPPING
     pop_mide();
 #endif
@@ -9270,7 +9557,7 @@ static void tope_fijo_paso(int carrera)
         if (salto_q >= (float)tf_k + 1.0f) tf_k = salto_q >= 3.0f ? 3 : (int)salto_q;
         else if (tf_k > 0 && salto_q < (float)tf_k - 0.5f) tf_k = (int)(salto_q + 0.5f);
     }
-    if (tf_on) salto_ta = SALTO_TA[tf_k];
+    if (tf_on) salto_ta = SALTO_GEOM ? SALTO_TA[tf_k] : 256;   /* (Rev 2.9.9: SALTO_GEOM) */
 }
 #ifdef DIAG_FALTA
 /* Rev 2.9.9 (medida, -DDIAG_FALTA): lo que esta dentro de la vista y del lejano nominal (LEJOS_MAX) pero NO se dibuja
@@ -13969,7 +14256,7 @@ int main(int argc, char **argv)
 #ifdef SALTO_OBS
                 salto_q = SALTO_OBS;
 #endif
-                if (!tf_on) salto_ta = salto_ta_de(salto_q);       /* (con TOPE_FIJO, en escalones: tope_fijo_paso) */
+                if (!tf_on) salto_ta = SALTO_GEOM ? salto_ta_de(salto_q) : 256;       /* (con TOPE_FIJO, en escalones: tope_fijo_paso) */
                 if ((int)salto_q != sv_ent) {
                     sv_ent = (int)salto_q;
                     dbglog(DBG_INFO, "SALTO: nivel %.2f (lejano %d m, TA %u/256, trabajo %.1f ms, %.4s)\n", (double)salto_q, (int)salto_lejos(salto_q),
@@ -13980,7 +14267,7 @@ int main(int argc, char **argv)
             lejos = lejos_salto = lej_base();                   /* (Rev 2.9.8 P5: el del salto; si otro lo puso, ese) */
 #endif
             if (estado != TITULO && (++sv_n & 3) == 0) {          /* el lejano sigue al del nivel, poco a poco */
-                float tope = salto_lejos(salto_q);
+                float tope = salto_lejos(SALTO_GEOM ? salto_q : 0.0f);   /* (Rev 2.9.9: SALTO_GEOM) */
 #ifdef SALTO_OBS_LEJ
                 tope = SALTO_OBS_LEJ;
 #endif
@@ -14953,6 +15240,10 @@ int main(int argc, char **argv)
         falta_prepara();
 #endif
         if (estado != TITULO && !mundo_fuera && !en_cuenta) nodos_visibles_todos();   /* en CUENTA manda el precalentamiento */
+#if CORTE_NODO
+        cn_cielo_ult = cn_cielo; cn_cielo = 0;
+        if (estado != TITULO && !mundo_fuera && !en_cuenta) corte_nodos(); else cn_activo = 0;   /* (Rev 2.9.9) */
+#endif
         PRF(1);
         if (estado != TITULO && !mundo_fuera) sol_prepara();                    /* el rayo hacia el sol de este cuadro */
         if (estado != TITULO && !mundo_fuera) traf_parpadea(pausa || estado != CARRERA);   /* 4AE5F0 (sin traf_paso: suspendido) */
@@ -14965,7 +15256,9 @@ int main(int argc, char **argv)
             if (estado != TITULO && !mundo_fuera) {             /* en el menu no se ve la etapa */
                 ta_en_etapa = 1;
                 PRF(0);
-                cielo_dibuja(l);                                /* el cielo (y su fundido en la union) */
+                {   uint32_t ce0_ = ta_et;
+                    cielo_dibuja(l);                            /* el cielo (y su fundido en la union) */
+                    cn_cielo += ta_et - ce0_; }
                 PRF(2);
                 mat_load(&vista);
 #ifdef DEP_LISTA
@@ -14979,6 +15272,7 @@ int main(int argc, char **argv)
                     }
                     if (res > tope_g / 100 * RESERVA_MAX) res = tope_g / 100 * RESERVA_MAX;
                     if (resv > VTX_ETAPA_MAX / 100 * RESERVA_MAX) resv = VTX_ETAPA_MAX / 100 * RESERVA_MAX;
+                    if (cn_activo) res = resv = 0;              /* (Rev 2.9.9: corte_nodos ya la ha hecho caber entera) */
                     ta_tope_etapa -= res; vtx_reserva = resv; ta_et_corto = 0;
                 for (i = 0; i < 3; i++)                         /* etapa, union y etapa siguiente: las que esten subidas */
 #ifdef DIAG_CICLO
