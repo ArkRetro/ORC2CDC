@@ -1781,6 +1781,73 @@ tandas salvo PALM con 0 en la segunda, que no llego a subir ALPI), y entre paren
 - Ficheros: `m298/P4/` del directorio de trabajo (medidas.txt, union.txt, res/, cong/, sh/, py/sube.py, py/tabla.py,
   py/difcong.py).
 
+#### P5. Lejano por seccion, solo hacia abajo (`-DLEJ_SEC`, apagado por defecto)
+
+DESVIACION (`tools/reparto_sec.py` `lejanos`; `demo/main.c`: `LEJ_SEC`, `LEJ_SEC_MARGEN`, `LEJ_SEC_MIN`, `lej_base`,
+`lsec_objetivo`, `lejsec_paso`, `repsec_lee`). Tecnica de Crazy Taxi (un lejano distinto por tramo): solo la idea, nada
+de su codigo ni de sus datos.
+- Fuera de linea, en el mismo fichero de P2 (REPSEC.DAT, ahora 'RSC2': entradas de 16 bytes con el desplazamiento del
+  lejano; 'RSC1' se sigue leyendo; el corte de P2 sale identico byte a byte en las 61 etapas): por seccion de la PVS un
+  u16 con la mayor distancia de un punto de la ruta de la seccion a la cara de atras de la esfera de cada malla que la
+  PVS deja ver desde la seccion o sus dos vecinas (|c - p| + r: lo grande, el mar y los montes por su esfera), mas las
+  mallas que no son de un nodo y las de la version lejana de un nodo visible (el cielo, lista 3, no lo corta el lejano).
+  Despues se adelanta lo que hara falta mas adelante: lej[s] = max(lej[s], lej[k] - 1,25 x (ruta de s a k)), para que el
+  lejano, que sube 16 m cada 4 cuadros, llegue a tiempo a una seccion abierta yendo a unos 120 m/s (`--ritmo`). 61
+  etapas, 158 KB, 85 s.
+- En la demo, solo en la etapa (no en la union), en CARRERA y con el ojo dentro de lo que muestrea la PVS: objetivo =
+  lej[seccion del ojo] + `LEJ_SEC_MARGEN` (200 m), como poco `LEJ_SEC_MIN` (400) y, con la union o la etapa siguiente en
+  la vista, como poco lo mas lejano de sus nodos. Se sigue con `SALTO_LEJ_BAJA` / `SALTO_LEJ_SUBE` cada 4 cuadros y
+  lejos = min(lejano del salto, ese). Nunca sube el lejano.
+- La franja del limite (`NLIM_FRANJA`) va con el lejano cortado; el velo tenue (`NLIM_INI`, `NLIM_ANCHO`), el recorte de
+  la franja a 0,55 y el LOD de lo grande (`LOD_GRANDE_FR`) siguen con el lejano del salto (`lej_base`), para no cambiar lo
+  de delante.
+- `-DDIAG_POPPING`: linea `POPLEJ:` por segundo (cuadros, cuantos corta, objetivo, seccion, salto, lejos).
+  `-DDIAG_NLIM`: solo la franja del limite, en magenta y a toda fuerza (sin la niebla del original ni el velo).
+- Con `LEJ_SEC` 0 todo va como antes. Datos nuevos: solo REPSEC.DAT 'RSC2' en d298 (sustituye a la v2 de P2).
+
+Lejano de la seccion (salida de la herramienta, con el adelanto): PALM 3477 m de media (2854..4063), GHOS 1805
+(1200..2468), METR 2604 (1944..3351), INDU 2333 (1783..3025), CAST 1848 (1231..2623), RUIN 1601 (1167..2068). En CAST lo
+que lo fija son los montes y los lejanos lowpoly de lo grande a 1-2,5 km que la PVS deja ver, no los 550 m de la
+distancia efectiva que se estimaba.
+
+Medida: `-DPRUEBA_AUTO -DPRUEBA_NODO=n -DPRUEBA_SIN_TIEMPO -DDIAG_MS -DDIAG_POPPING` con `-DLEJ_SEC=0` y `=1` (el mismo
+codigo y los mismos datos d298), 140 s con el piloto (paso 10), dos tandas con los carriles cambiados, tres Flycast a la
+vez (:92, :93, :94). La tabla es la media de las dos tandas (tarde: la suma). "corta": cuadros en que el lejano de la
+seccion queda por debajo del del salto.
+
+| Etapa | LEJ_SEC | fps | tarde (%) | 8 px+ | 32 px+ | lejos +8/32 -8/32 | lejano medio | corta |
+|---|---|---|---|---|---|---|---|---|
+| GHOS (9) | 0 | 36,38 | 244 (6,0) | 26,5 | 3,65 | +0,0/0,0 -0,8/0,0 | 1702 | - |
+| GHOS (9) | 1 | 36,27 | 257 (6,1) | 25,2 | 3,40 | +0,0/0,0 -0,8/0,0 | 1613 | 24 % |
+| METR (11) | 0 | 32,74 | 743 (14,6) | 19,1 | 5,20 | +0,7/0,3 -0,6/0,2 | 1880 | - |
+| METR (11) | 1 | 32,05 | 901 (16,7) | 18,4 | 5,15 | +0,6/0,2 -0,5/0,2 | 1752 | 21 % |
+| PALM (0) | 0 | 36,56 | 300 (5,6) | 26,7 | 5,90 | +1,6/0,3 -2,9/0,4 | 1632 | - |
+| PALM (0) | 1 | 36,38 | 289 (5,7) | 27,0 | 5,35 | +1,4/0,3 -2,8/0,3 | 1653 | 0 % |
+| INDU (7) | 0 | 37,38 | 200 (3,9) | 25,2 | 6,60 | +0,0/0,0 -0,2/0,0 | 2055 | - |
+| INDU (7) | 1 | 37,15 | 205 (4,1) | 24,0 | 6,50 | +0,0/0,0 -0,2/0,0 | 1833 | 29 % |
+| Suma de las 4 | 0 | | | 97,4 | 21,35 | | | |
+| Suma de las 4 | 1 | | | 94,5 | 20,40 | | | |
+
+- Criterio: NO se cumple. Las sumas bajan (8 px -3,0 %, 32 px -4,4 %), pero METR pierde 0,69 fps y sube un 21 % los
+  cuadros tarde (primera tanda -1,28 fps y +55 %; segunda -0,10 y +1 %). Queda APAGADO por defecto (`LEJ_SEC` 0).
+- Es ruido: entre las dos tandas con el mismo valor la suma de 8 px cambia 8,6 por s (101,7 / 93,1). En PALM el lejano
+  del salto ya esta por debajo del de la seccion en todos los cuadros (corta el 0 %) y aun asi la prueba con 1 sale
+  distinta. La razon "lejos" no se mueve (0,0-1,6 por s en las dos): lo que corta el lejano de la seccion la PVS ya no
+  lo dejaba ver.
+- Cuando corta, poco: 70-240 m de media (hasta 1309 m en INDU). En las etapas pesadas el salto ya lleva el lejano a
+  1200-2000 m (GHOS 1649-1755, METR 1835-1925 de media), por debajo de lo que pide la seccion; solo corta al empezar la
+  etapa o tras bajar el nivel. Los fps no suben en ninguna (-0,10 a -0,69).
+- Capturas congeladas (`-DDIAG_CONGELA`, el salto fijo en 0 con `-DSALTO_OBS=0`, lejos 3800 frente a 1592 en CAST crono
+  900 y 2397 en METR crono 600; tambien con el salto libre en CAST, 2100 frente a 1592). Con `-DDIAG_NLIM` hay 0 pixeles
+  magenta con 0 y con 1: la franja cae en las dos sobre nada visible (con 1 de 1353 a 1592 m en CAST y de 2037 a 2397 en
+  METR). Entre 0 y 1 hay 0 pixeles distintos en la escena; solo cambian 196, el cuadro de diagnostico que pinta el
+  lejano en color. La imagen no cambia.
+- Las pruebas dan el "Out of memory ... diff 217088" de newlib al arrancar, el ya conocido.
+- SUPUESTO, sin medir: en la consola real, donde el lejano si ahorra por debajo de ~1000 m, solo se notaria en las
+  secciones de lejano corto (RUIN, CAST, FORE: 1167-1431 m como minimo), y solo con el salto por encima.
+- Ficheros: `m298/P5/` del directorio de trabajo (medidas.txt, res/, cong/, tablas/, sh/, py/lej.py, py/tabla.py,
+  py/quien.py).
+
 ### Coche visible mas ligero (Rev 2.9.7)
 
 Pedido del usuario (variante "C2", para reducir los saltos): menos poligonos y texturas en las partes VISIBLES de los
