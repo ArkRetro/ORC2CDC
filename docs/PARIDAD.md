@@ -1712,6 +1712,75 @@ sirve de medida del ruido). "TA coche": KB por cuadro del coche (POPTA).
 - SUPUESTO, sin medir: en la consola real, si el TA limita, 25 KB menos por cuadro podrian notarse algo.
 - Ficheros: `m298/P3/` del directorio de trabajo (medidas.txt, res/, cong/, coches/, conv/ y v1_orden_roto/).
 
+#### P4. Subida de texturas por DMA (`-DSUBE_DMA`, apagado por defecto)
+
+DESVIACION (`demo/main.c`: `SUBE_DMA`, `tex_carga`, `sdma_lanza`, `sdma_hecho`, `sdma_espera`). Tecnica de Crazy Taxi
+(sube las texturas por el DMA del canal 2 por la ruta de texturas del TA cuando origen, destino y tamano son multiplos
+de 32): solo la idea, nada de su codigo ni de sus datos. Con `SUBE_DMA` 1 las texturas de `sube_trozo` (en carrera, 32 KB
+por cuadro, y de una vez en las cargas de etapa y union de `sube_tramo`), `sube_modelo` y `tex_rebaja` van por
+`pvr_txr_load_dma` en vez de por las Store Queues (`pvr_txr_load`):
+- Alineacion: no hace falta tocar las herramientas. `tools/modelo.py` ya escribe cada textura del blob en multiplo de 32
+  y con el tamano en multiplo de 32; el blob va a 32 dentro de su bufer (`memalign(32)`), `vram_pide` y `pvr_mem_malloc`
+  dan direcciones de 32 y los trozos de una textura grande van en multiplos de 32. Medido: 0 subidas por SQ en carrera
+  con `SUBE_DMA` 1 (linea `SUBE`, columna `sqK`); lo que no este alineado iria por SQ.
+- Cola de 64 subidas: la interrupcion del fin de cada DMA de la PVR lanza la siguiente (el DMA de la PVR va de una en
+  una) y la CPU sigue con el cuadro. `sdma_espera` vacia la cola antes de soltar un origen o una textura (`tex_suelta`,
+  `compacta_modelo_de`, `carga_pide`, `tex_muda`), antes de dar al modelo sus tablas (fin de `sube_trozo` y de
+  `sube_modelo`) y antes de cualquier subida por SQ de estas funciones. KOS vacia la cache del origen (`dma_map_src`).
+  La PVR va con `dma_enabled` 0: nadie mas usa el canal 2 (con P7 habria que poner la subida en cola con los vertices).
+- `-DDIAG_MS`: linea `SUBE:` cada 30 cuadros (trozos, us dentro de `sube_trozo`, el trozo mayor, us esperando a la
+  cola, DMAs, KB por DMA y por SQ). `-DDIAG_SUBE_CMP`: al acabar cada subida compara lo leido de la VRAM con el blob
+  (linea `SUBECMP:`).
+- Con `SUBE_DMA` 0 todo va como antes (las esperas no hacen nada). Datos: ninguno nuevo (lgdat2).
+
+Medida: `-DPRUEBA_AUTO -DPRUEBA_NODO=n -DPRUEBA_SIN_TIEMPO -DDIAG_MS -DDIAG_POPPING` con `-DSUBE_DMA=0` y `=1` (el
+mismo codigo y los mismos datos lgdat2), 140 s con el piloto automatico (paso 10), dos tandas (la segunda con los
+carriles cambiados), dos o tres Flycast a la vez. La tabla es la media de las dos tandas (tarde: suma de las dos y
+media de los porcentajes). "us subida": us de CPU dentro de `sube_trozo` en carrera en la prueba (lo mismo en las dos
+tandas salvo PALM con 0 en la segunda, que no llego a subir ALPI), y entre parentesis el trozo mayor.
+
+| Etapa | SUBE_DMA | fps | tarde (%) | 8 px+ | 32 px+ | us subida (trozo max) |
+|---|---|---|---|---|---|---|
+| GHOS (9) | 0 | 36,24 | 241 (6,4) | 27,2 | 3,7 | 8497 (6975) |
+| GHOS (9) | 1 | 36,25 | 233 (6,4) | 28,4 | 4,0 | 1755 (1041) |
+| METR (11) | 0 | 33,45 | 553 (12,9) | 19,7 | 5,3 | 3491 (1791) |
+| METR (11) | 1 | 33,84 | 491 (12,2) | 20,9 | 5,8 | 3429 (1810) |
+| PALM (0) | 0 | 36,72 | 258 (5,1) | 28,5 | 6,0 | 11504 (7791) |
+| PALM (0) | 1 | 36,73 | 241 (4,9) | 26,9 | 5,2 | 3800 (684) |
+| INDU (7) | 0 | 37,25 | 186 (4,3) | 24,4 | 6,4 | 2193 (1071) |
+| INDU (7) | 1 | 37,39 | 169 (3,8) | 25,9 | 6,8 | 2024 (1042) |
+| Suma de las 4 | 0 | | | 99,7 | 21,3 | |
+| Suma de las 4 | 1 | | | 102,1 | 21,7 | |
+
+- Por tanda: la primera da sumas 95,1 -> 100,3 (8 px) y 21,3 -> 21,2 (32 px); la segunda 104,3 -> 103,8 y 21,2 ->
+  22,1. Entre las dos tandas con el mismo valor la suma de 8 px cambia 9 por s (95,1 / 104,3): las diferencias de
+  la tabla son ruido. El cambio solo actua en 1-5 ventanas de 30 cuadros de unas 70-90 por etapa (las de subida) y no
+  toca lo que se dibuja: no puede mover el popping.
+- Criterio (bajar el total de 8 px o de 32 px sin perder mas de 0,3 fps ni subir mas de un 10 % los cuadros tarde en
+  ninguna): con la media de las dos tandas NO se cumple (los dos totales suben, dentro del ruido); los fps no bajan en
+  ninguna (+0,01, +0,39, +0,01 y +0,14) y los cuadros tarde bajan en las cuatro. A la letra, la primera tanda sola
+  pasaria (32 px -0,1) y la segunda no (PALM +18 % de cuadros tarde). Queda APAGADO por defecto (`SUBE_DMA` 0); poner
+  1 no cambia la imagen y quita CPU en las subidas.
+- Tramos de union (medido en Flycast, todas las pruebas de las dos tandas y LASV -> MAYA con `-DPRUEBA_CURSO=1
+  -DPRUEBA_NODO=7 -DPRUEBA_RAMA=0 -DPRUEBA_RAMA_FIJA=0`, 230 s): en las ventanas con subida la CPU de `sube_trozo` baja
+  de 24,8 a 9,9 us por KB (51,9 ms para 2099 KB con 0, 25,4 ms para 2570 KB con 1) y el trozo mayor de 7791 a 1810 us;
+  esas ventanas pasan de 32,16 a 32,70 fps, de 29,91 a 29,23 ms de CPU (dib + log) y de 4,13 a 3,32 cuadros tarde por
+  ventana (15 y 19 ventanas: pocas muestras). PALM -> union (141 KB en 5 trozos): 1171 -> 998 us; la subida de ALPI en la
+  union (416 / 473 KB): 1955 + 8254 -> 82 + 2611 us. LASV -> union (141 KB): 1577 -> 1400 us; la de MAYA en la union
+  (535 KB, 17 trozos): 9106 us (el mayor 6916) -> 1885 us (el mayor 395). La carga de la etapa de salida de una vez
+  (1088-1122 KB): 13642 -> 13353 us y 13373 -> 12873 us (de una vez la CPU espera a la cola). La espera medida en
+  `sdma_espera` es 0 us en todas: en Flycast el DMA acaba enseguida.
+- Texturas identicas: `-DDIAG_SUBE_CMP` en 6 pruebas de PALM -> union -> ALPI (36 subidas, 3060 texturas): 0 distintas
+  entre la VRAM y el blob, con 0 y con 1. Capturas congeladas (`-DDIAG_CONGELA`, PALM) en los cronos 1800 y 2300
+  (PALM), 3900 (union, con ALPI ya subida) y 6600 (ALPI): 0, 0, 3 y 0 pixeles distintos entre 1 y 0 de 786432; los 3 del
+  crono 3900 tambien cambian entre dos capturas de la misma prueba con 1 (ruido).
+- Las pruebas dan el "Out of memory ... diff 217088" de newlib al arrancar, el ya conocido.
+- SUPUESTO, sin medir: en la consola real el DMA corre en paralelo con la CPU, y la copia por SQ de 32 KB cuesta del
+  orden de 0,1-0,3 ms; la ganancia seria de ese orden por cuadro de subida. No se ha comprobado en la consola que la
+  subida por DMA a la ruta de texturas del TA mientras se envian vertices por SQ al TA no de problemas.
+- Ficheros: `m298/P4/` del directorio de trabajo (medidas.txt, union.txt, res/, cong/, sh/, py/sube.py, py/tabla.py,
+  py/difcong.py).
+
 ### Coche visible mas ligero (Rev 2.9.7)
 
 Pedido del usuario (variante "C2", para reducir los saltos): menos poligonos y texturas en las partes VISIBLES de los
