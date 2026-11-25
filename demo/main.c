@@ -1877,7 +1877,7 @@ static int cn_activo;                                         /* el corte por no
 #define CORTE_VTX_HOLGURA 32                                    /* /256: 12,5 % */
 #endif
 #define CN_MAXN 4096                                            /* (nodos por tramo; como LQ_MAXN) */
-static uint32_t cn_ult[3][CN_MAXN]; static uint16_t cn_vult[3][CN_MAXN];   /* bytes del TA y vertices de cada nodo en el
+static uint16_t cn_ult[3][CN_MAXN]; static uint16_t cn_vult[3][CN_MAXN];   /* bytes del TA (/32) y vertices de cada nodo en el
                                                                    cuadro (dibuja_etapa; corte_nodos los usa en el siguiente) */
 static int ta_en_bo;                                     /* lo que se envia ahora es de bo_dibuja */
 static uint32_t ta_bo, ta_bo_pide, ta_bo_ult, ta_bo_tope, ta_res_otros;   /* lo de bo_dibuja en este cuadro (enviado y
@@ -2491,7 +2491,7 @@ static void dibuja_etapa(const modelo_t *mo, int l)
     uint32_t kb = mo->inicio[l];                                /* fin del tramo anterior = principio del siguiente */
     int pase;
     /* (Rev 2.9.9, CORTE_NODO: lo que cuesta cada nodo en este cuadro, para corte_nodos en el siguiente) */
-    uint32_t *const cnu = mo == &etapa ? cn_ult[0] : mo == &uni ? cn_ult[1] : mo == &sig ? cn_ult[2] : NULL;
+    uint16_t *const cnu = mo == &etapa ? cn_ult[0] : mo == &uni ? cn_ult[1] : mo == &sig ? cn_ult[2] : NULL;
     uint16_t *const cnv = mo == &etapa ? cn_vult[0] : mo == &uni ? cn_vult[1] : mo == &sig ? cn_vult[2] : NULL;
     const uint32_t cnn = mo->nnodos <= CN_MAXN ? mo->nnodos : 0;
     ta_ofs = mo->ofs != NULL;
@@ -2614,7 +2614,7 @@ static void dibuja_etapa(const modelo_t *mo, int l)
                 ET_RECARGA();
             }
         }
-        if (nd && nd <= cnn && cnu) { uint32_t dv_ = cnv[nd - 1] + (ve - run_v0); cnu[nd - 1] += ta_vb + dvb - run_c0; cnv[nd - 1] = (uint16_t)(dv_ < 65535u ? dv_ : 65535u); }
+        if (nd && nd <= cnn && cnu) { uint32_t dv_ = cnv[nd - 1] + (ve - run_v0); uint32_t dc_ = cnu[nd - 1] + ((ta_vb + dvb - run_c0 + 16) >> 5); cnu[nd - 1] = (uint16_t)(dc_ < 65535u ? dc_ : 65535u); cnv[nd - 1] = (uint16_t)(dv_ < 65535u ? dv_ : 65535u); }
         }
     }
     }
@@ -6927,8 +6927,9 @@ static void repsec_lee(void)
 {
     uint32_t sz, n, i, k, tot = 0, s[4], e, v2; uint8_t *b, *p;
     free(rsec_dat); rsec_dat = NULL; memset(rsec_m, 0, sizeof rsec_m); memset(rsec_n, 0, sizeof rsec_n); memset(rsec_lej, 0, sizeof rsec_lej);
-#if !REPARTO_SEC && !LEJ_SEC && !defined(DIAG_POPPING)
-    return;                                                     /* (sin usarla ni medirla: ni se lee) */
+#if !REPARTO_SEC && !LEJ_SEC && !(defined(DIAG_POPPING) && DIAG_POP298)
+    return;                                                     /* (sin usarla ni medirla: ni se lee; la medida, POPSEC,
+                                                                   solo con -DDIAG_POP298: 38K menos con DIAG_POPPING) */
 #endif
     if (!(b = gd_carga("REPSEC.DAT", &sz))) { dbglog(DBG_INFO, "REPSEC: sin REPSEC.DAT (el reparto de siempre)\n"); return; }
     /* 'RSC1': entradas de 12 bytes (SEG, secciones, corte); 'RSC2' (P5): de 16, con el desplazamiento del lejano */
@@ -8378,12 +8379,13 @@ static pop_slot_t *pop_slot(const modelo_t *mo)
     pop_s[k].datos = mo->datos; pop_s[k].n = mo->nnodos;
     memset(pop_s[k].ant, PR_TRAMO, sizeof pop_s[k].ant);           /* recien subido: nada se dibujaba */
     {   /* vegetacion: vertices de recorte (lista 1) contra los de todas las listas, por nodo */
-        static uint32_t vr[POP_MAXN], vt[POP_MAXN]; uint32_t i;
+        static uint16_t vr[POP_MAXN], vt[POP_MAXN]; uint32_t i;   /* (16 bits, con tope: 16K menos de RAM) */
         memset(vr, 0, sizeof vr); memset(vt, 0, sizeof vt);
         for (i = 0; i < mo->inicio[3] && i < mo->nmallas; i++) {
             const malla_t *m = mo->mallas + i;
             if (m->nodo < 0 || (uint32_t)m->nodo >= mo->nnodos) continue;
-            vt[m->nodo] += m->n; if (i >= mo->inicio[1] && i < mo->inicio[2]) vr[m->nodo] += m->n;
+            {   uint32_t a_ = vt[m->nodo] + m->n; vt[m->nodo] = (uint16_t)(a_ < 65535u ? a_ : 65535u); }
+            if (i >= mo->inicio[1] && i < mo->inicio[2]) { uint32_t a_ = vr[m->nodo] + m->n; vr[m->nodo] = (uint16_t)(a_ < 65535u ? a_ : 65535u); }
         }
         for (i = 0; i < mo->nnodos; i++) pop_s[k].veg[i] = vt[i] && 2 * vr[i] > vt[i] ? (mo->nodos[i].cartel <= -2 ? 2 : 1) : 0;
     }
@@ -8924,7 +8926,9 @@ static void nodos_visibles(modelo_t *mo)
 #define LEJ_EN_TOPE 1
 #endif
 #if LEJ_EN_TOPE
-static uint16_t lq_i[3][1024]; static uint16_t lq_c[3][1024]; static int lq_n[3], lq_t;   /* quitados con version lejana */
+#define LQ_LISTA 2048
+static uint16_t lq_i[LQ_LISTA]; static uint16_t lq_c[LQ_LISTA]; static int lq_n[3], lq_nt, lq_t;   /* quitados con version lejana
+                                                                   (los tres tramos; el tramo en los bits 12-13 de lq_c) */
 #ifdef DIAG_POPPING
 static uint32_t lq_dg_n;
 #endif
@@ -8934,16 +8938,16 @@ static void lej_cambia(int32_t st, int32_t sv)
     int c, t, q;
     for (c = 0; c < NB_PRIO; c++) for (t = 0; t < 3; t++) {
         modelo_t *mo = tramos[t];
-        for (q = 0; q < lq_n[t]; q++) {
-            uint32_t i = lq_i[t][q], jl; int32_t cj, vj;
-            if ((lq_c[t][q] & 63) != c) continue;
+        for (q = 0; q < lq_nt; q++) {
+            uint32_t i = lq_i[q], jl; int32_t cj, vj;
+            if ((lq_c[q] & 63) != c || lq_c[q] >> 12 != (uint32_t)t) continue;
             jl = (uint32_t)(-2 - mo->nodos[i].cartel);
             if (jl >= mo->nnodos) continue;
             cj = (int32_t)(mo->pvs_on ? pvs_coste(mo, jl) : mo->nodos[jl].relleno[0]); vj = (int32_t)(mo->nodos[jl].relleno[1] >> 12);
             if (!cj || cj > st || vj > sv) continue;
             st -= cj; sv -= vj;
             mo->vis[jl >> 5] |= 1u << (jl & 31); lq_pon(mo, jl);
-            mo->nodos[jl].relleno[1] = (mo->nodos[jl].relleno[1] & ~4095u) | lq_c[t][q];   /* (la clase del completo) */
+            mo->nodos[jl].relleno[1] = (mo->nodos[jl].relleno[1] & ~4095u) | (lq_c[q] & 4095u);   /* (la clase del completo) */
 #ifdef DIAG_POPPING
             {   pop_slot_t *ps = pop_slot(mo); if (ps) ps->cur[i] = PR_DIB; }
             lq_dg_n++;
@@ -8965,7 +8969,7 @@ static void nodos_quita(modelo_t *mo)
             mo->vis[w] &= ~(1u << k);
 #if LEJ_EN_TOPE
             /* (no los de un grupo: el lowpoly de un piso sin la base del edificio quedaria flotando) */
-            if (i < mo->nn0 && mo->nodos[i].cartel <= -2 && !(mo->nodos[i].fl >> 16) && lq_n[lq_t] < 1024) { lq_i[lq_t][lq_n[lq_t]] = (uint16_t)i; lq_c[lq_t][lq_n[lq_t]++] = (uint16_t)cl; }
+            if (i < mo->nn0 && mo->nodos[i].cartel <= -2 && !(mo->nodos[i].fl >> 16) && lq_n[lq_t] < 1024 && lq_nt < LQ_LISTA && i < 4096u) { lq_i[lq_nt] = (uint16_t)i; lq_c[lq_nt++] = (uint16_t)(cl | lq_t << 12); lq_n[lq_t]++; }
 #endif
 #ifdef DIAG_POPPING
             {   pop_slot_t *ps = pop_slot(mo);                  /* (un lejano: su nodo completo) */
@@ -9283,7 +9287,9 @@ static uint32_t cn_c[NB_PRIO], cn_v[NB_PRIO], cn_cp[NB_PRIO], cn_vp[NB_PRIO], cn
                                      del TA) y vertices por clase (cn_cp / cn_vp: lo de menos de CORTE_CERCA_CD; cn_cg / cn_vg:
                                      lo grande en la pantalla, CORTE_GRANDE_PX; cn_c / cn_v: lo demas) */
 static int cn_modo;                                             /* 0: lo cercano siempre; 1: solo la clase de LOD */
-static uint16_t cn_lista[3][2048]; static uint8_t cn_clase[3][2048];   /* los quitados de cada tramo y su clase */
+#define CN_LISTA 3072
+static uint16_t cn_lista[CN_LISTA]; static uint8_t cn_clase[CN_LISTA];   /* los quitados de los tres tramos (el tramo en
+                                                                   los bits 12-13 de cn_lista) y su clase */
 #ifdef DIAG_POPPING
 static uint32_t cn_dg_cuad, cn_dg_corta, cn_dg_quit, cn_dg_lowp;
 #endif
@@ -9302,7 +9308,7 @@ static inline int cn_clave(const nodo_t *d)
 }
 static void corte_nodos(void)
 {
-    uint32_t tope, vtope, acum, v, nsf, c0, alfa_n; int t, cut, c, nq[3] = { 0, 0, 0 };
+    uint32_t tope, vtope, acum, v, nsf, c0, alfa_n; int t, cut, c, nq[3] = { 0, 0, 0 }, nqt = 0;
     cn_activo = 0;
     /* el factor de lo que no va por la directa: lo medido en el cuadro anterior (sube en el acto, baja 1/32 por cuadro) */
     if (cn_ns_est > 4096) {
@@ -9318,7 +9324,7 @@ static void corte_nodos(void)
        las tres listas tras la PVS por malla y la vista) si se dibujo; si no, el teorico de lo que la PVS deja ver por
        ta_f (y por el factor de lo que no va por la directa si esta cerca) */
     for (t = 0; t < 3; t++) {
-        const modelo_t *mo = tramos[t]; uint32_t w, nw; uint32_t *cu = cn_ult[t]; uint16_t *cvu = cn_vult[t];
+        const modelo_t *mo = tramos[t]; uint32_t w, nw; uint16_t *cu = cn_ult[t]; uint16_t *cvu = cn_vult[t];
         if (!geo_visible(mo) || !mo->tr || !mo->vis || mo->nnodos > LQ_MAXN) continue;
         nw = (mo->nnodos + 31) / 32;
         for (w = 0; w < nw; w++) {
@@ -9326,7 +9332,7 @@ static void corte_nodos(void)
             while (b) {
                 uint32_t i = w * 32 + (uint32_t)__builtin_ctz(b), cc, cv, cl; const nodo_t *d = mo->nodos + i;
                 b &= b - 1;
-                if (ya >> (i & 31) & 1) { cc = cu[i]; cv = cvu[i]; }
+                if (ya >> (i & 31) & 1) { cc = (uint32_t)cu[i] << 5; cv = cvu[i]; }
                 else {                                          /* (nuevo: lo teorico de lo que deja la PVS, por lo que
                                                                    la vista recorta de media, alfa_n; los vertices en proporcion) */
                     float dx = d->cx - ojo[0], dy = d->cy - ojo[1], dz = d->cz - ojo[2], zv = dx * ade[0] + dy * ade[1] + dz * ade[2];
@@ -9404,15 +9410,15 @@ static void corte_nodos(void)
                 cn_dg_quit++;
                 if (ps) ps->cur[i >= mo->nn0 && mo->lej_de ? mo->lej_de[i - mo->nn0] : i] = PR_TOPE;
 #endif
-                if (i < mo->nn0 && mo->nodos[i].cartel <= -2 && !(mo->nodos[i].fl >> 16) && nq[t] < 2048) {   /* (no los de un grupo) */ cn_lista[t][nq[t]] = (uint16_t)i; cn_clase[t][nq[t]++] = (uint8_t)k; }
+                if (i < mo->nn0 && mo->nodos[i].cartel <= -2 && !(mo->nodos[i].fl >> 16) && nq[t] < 2048 && nqt < CN_LISTA && i < 4096u) {   /* (no los de un grupo) */ cn_lista[nqt] = (uint16_t)(i | (uint32_t)t << 12); cn_clase[nqt++] = (uint8_t)k; nq[t]++; }
             }
         }
     }
     for (c = cut + 1; c < NB_PRIO && c0; c++) for (t = 0; t < 3; t++) {
         modelo_t *mo = tramos[t]; int q;
-        for (q = 0; q < nq[t]; q++) {
-            uint32_t i = cn_lista[t][q], jl, cj, vj;
-            if (cn_clase[t][q] != c) continue;
+        for (q = 0; q < nqt; q++) {
+            uint32_t i = cn_lista[q] & 4095u, jl, cj, vj;
+            if (cn_clase[q] != c || cn_lista[q] >> 12 != (uint32_t)t) continue;
             jl = (uint32_t)(-2 - mo->nodos[i].cartel);
             if (jl >= mo->nnodos) continue;
             cj = ((mo->pvs_on ? pvs_coste(mo, jl) : mo->nodos[jl].relleno[0]) * ta_f >> 8) * nsf >> 8; vj = mo->nodos[jl].relleno[1] >> 12;
@@ -9539,7 +9545,7 @@ static void nodos_visibles_todos(void)
     for (diag_orig_vtx = 0, d = 0; d < ND_PRIO; d++) diag_orig_vtx += fila_v[d];
 #endif
 #if LEJ_EN_TOPE
-    lq_n[0] = lq_n[1] = lq_n[2] = 0;
+    lq_n[0] = lq_n[1] = lq_n[2] = lq_nt = 0;
     if (prio_d < ND_PRIO - 1) for (i = 0; i < 3; i++) if (geo_visible(tramos[i])) { lq_t = (int)i; nodos_quita(tramos[i]); }
     if (lq_n[0] + lq_n[1] + lq_n[2]) {                          /* (lo que le sobra al reparto: bytes teoricos y vertices) */
         uint32_t ac = cerca_c, av = cerca_v;
@@ -9654,10 +9660,15 @@ static int fa_en_vista(float cx, float cy, float cz, float r, float *zv_, float 
 }
 static void falta_mide(int carrera)                             /* (carrera: estado == CARRERA) */
 {
-    static uint16_t mv_n[POP_MAXN], mv_f[POP_MAXN];            /* por nodo: mallas en la vista y las que faltan */
-    static float mv_px[POP_MAXN];                               /* la mayor que falta */
+    /* por nodo: mallas en la vista y las que faltan, y la mayor que falta (del monton en la primera carrera y no en el
+       bss: con 32K mas de bss la medida de la 2.9.9 se quedaba sin los efectos ni la musica al arrancar) */
+    static uint16_t *mv_n, *mv_f; static float *mv_px;
     static int fa_cuadro, fa_cong; int t, lista = 0;
     if (precalentando || !carrera) return;
+    if (!mv_n) {
+        mv_n = malloc(POP_MAXN * 2); mv_f = malloc(POP_MAXN * 2); mv_px = malloc(POP_MAXN * 4);
+        if (!mv_n || !mv_f || !mv_px) { free(mv_n); free(mv_f); free(mv_px); mv_n = mv_f = NULL; mv_px = NULL; printf("FALTA: sin memoria\n"); return; }
+    }
     fa_cuadro++;
 #ifdef DIAG_CONGELA
     if (diag_congelado) { fa_cong++; lista = fa_cong == 30 || fa_cong == 240; }
