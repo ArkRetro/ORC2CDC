@@ -406,7 +406,12 @@ def regenera(iso, D, W, jobs=4, informe=print):
     if not hay(D, 'VISO.DAT'):                           # nodos del original en la seccion 0 y la ultima de cada etapa
         post('viso', py(os.path.join(TOOLS, 'conv_viso.py'), iso, D))   # (conv_viso.py: lee SEGnn.DAT y SEGS.PAK)
     if not hay(D, 'REPSEC.DAT'):                         # Rev 2.9.8 P2: corte del reparto del TA por seccion de la PVS
-        post('repsec', py(os.path.join(TOOLS, 'reparto_sec.py'), D))   # (lee SEGnn.DAT y SEGS.PAK; opcional en la demo)
+        # (lee SEGnn.DAT y SEGS.PAK; opcional en la demo: por defecto, con REPARTO_SEC y LEJ_SEC a 0, ni se lee. Si
+        #  falla no para la conversion: sin el fichero la demo hace lo de siempre; fuera el temporal, que iria al GD-ROM)
+        try: post('repsec', py(os.path.join(TOOLS, 'reparto_sec.py'), D))
+        except SystemExit as e:
+            if os.path.isfile(os.path.join(D, 'REPSEC.DAT.tmp')): os.remove(os.path.join(D, 'REPSEC.DAT.tmp'))
+            informe('AVISO: %s; sigue sin REPSEC.DAT (opcional)' % e)
     # (Rev 2.7: sin REFLEJO.DAT: el reflejo del entorno se quito, daba tirones de noche; tools/conv_reflejo.py lo sigue
     #  haciendo a mano para -DCON_REFLEJO)
     if not hay(D, 'COCHES.DAT'):
