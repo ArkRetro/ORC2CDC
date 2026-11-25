@@ -821,6 +821,73 @@ static void compila_cab(modelo_t *m, uint32_t i, int especular)   /* especular: 
         pvr_poly_compile(&m->cabs[f][i], &cx);
     }
 }
+/* Rev 2.9.8 P4 (DESVIACION, tecnica de Crazy Taxi: solo la idea, nada de su codigo): con SUBE_DMA las texturas de los
+   modelos (sube_trozo, que tambien hace las cargas de etapa y union de una vez, y sube_modelo) suben a la VRAM por el
+   DMA del canal 2 (pvr_txr_load_dma, ruta de texturas del TA) en vez de por las Store Queues (pvr_txr_load), cuando el
+   origen, el destino y el tamano son multiplos de 32 (tools/modelo.py ya alinea cada textura del blob a 32 y su
+   tamano a 32; el blob va a 32 en el bufer, que es de memalign(32); vram_pide da direcciones de 32). Las subidas van
+   a una cola: la interrupcion del fin de cada DMA lanza la siguiente (el DMA de la PVR es de uno en uno), y la CPU
+   sigue con el cuadro. sdma_espera vacia la cola: antes de soltar un origen o una textura (tex_suelta,
+   compacta_modelo_de, carga_pide, tex_muda), antes de dar al modelo sus tablas (fin de sube_trozo y sube_modelo) y
+   antes de cualquier subida por las Store Queues de estas funciones. KOS vacia la cache del origen
+   (dma_map_src). La PVR va con dma_enabled 0: el canal 2 no lo usa nadie mas */
+#ifndef SUBE_DMA
+#define SUBE_DMA 0
+#endif
+#define SDMA_COLA 64
+static struct { const void *o; pvr_ptr_t d; uint32_t n; } sdma_c[SDMA_COLA];
+static volatile uint32_t sdma_ini, sdma_fin;                     /* cola: [ini, fin), ini la que va en el DMA */
+static volatile int sdma_vuela, sdma_fallo;                       /* un DMA en marcha; uno no se pudo lanzar */
+#ifdef DIAG_MS
+static uint32_t sdma_dg_b, sdma_dg_sq, sdma_dg_n, sdma_dg_esp;   /* medida (linea SUBE): bytes por DMA, por SQ, DMAs,
+                                                                     us esperando a la cola */
+#endif
+static void sdma_lanza(void);
+static void sdma_hecho(void *d) { (void)d; sdma_vuela = 0; sdma_ini++; sdma_lanza(); }   /* (en la interrupcion) */
+static void sdma_lanza(void)                                      /* (con las interrupciones cerradas) */
+{
+    if (sdma_vuela || sdma_fallo || sdma_ini == sdma_fin) return;
+    sdma_vuela = 1;
+    if (pvr_txr_load_dma(sdma_c[sdma_ini % SDMA_COLA].o, sdma_c[sdma_ini % SDMA_COLA].d, sdma_c[sdma_ini % SDMA_COLA].n, false,
+                         sdma_hecho, NULL) < 0) { sdma_vuela = 0; sdma_fallo = 1; }   /* (la hace sdma_espera por SQ) */
+}
+static void sdma_espera(void)
+{
+#ifdef DIAG_MS
+    uint64_t t0 = timer_us_gettime64(); int hubo = sdma_ini != sdma_fin;
+#endif
+    while (sdma_ini != sdma_fin) {
+        if (sdma_fallo && !sdma_vuela) {                          /* (no pasa: alineado y de uno en uno) */
+            pvr_txr_load(sdma_c[sdma_ini % SDMA_COLA].o, sdma_c[sdma_ini % SDMA_COLA].d, sdma_c[sdma_ini % SDMA_COLA].n);
+            sdma_ini++; if (sdma_ini == sdma_fin) sdma_fallo = 0;
+        }
+    }
+    sdma_fallo = 0;
+#ifdef DIAG_MS
+    if (hubo) sdma_dg_esp += (uint32_t)(timer_us_gettime64() - t0);
+#endif
+}
+/* subida de texeles de la RAM a la VRAM: por la cola del DMA si se puede; si no, por SQ (vaciada antes la cola) */
+static void tex_carga(const void *o, pvr_ptr_t d, uint32_t n)
+{
+    if (SUBE_DMA && n && !(((uintptr_t)o | (uintptr_t)d | n) & 31)) {
+        irq_mask_t q;
+        while (sdma_fin - sdma_ini >= SDMA_COLA) if (sdma_fallo) sdma_espera();   /* llena: la vacia la interrupcion */
+        q = irq_disable();
+        sdma_c[sdma_fin % SDMA_COLA].o = o; sdma_c[sdma_fin % SDMA_COLA].d = d; sdma_c[sdma_fin % SDMA_COLA].n = n;
+        sdma_fin++; sdma_lanza();
+        irq_restore(q);
+#ifdef DIAG_MS
+        sdma_dg_b += n; sdma_dg_n++;
+#endif
+        return;
+    }
+    sdma_espera();
+    pvr_txr_load(o, d, n);
+#ifdef DIAG_MS
+    sdma_dg_sq += n;
+#endif
+}
 static int sube_modelo(modelo_t *m)
 {
     uint32_t i, f;
@@ -833,12 +900,13 @@ static int sube_modelo(modelo_t *m)
 #endif
         v = pvr_mem_malloc(t->tam); VL_ASSET_FIN();
         uint32_t fb = t->fmt & 0xff;
-        if (!v) return -3;
-        if (fb > 2 || (t->tam & 31)) return -4;
+        if (!v) { sdma_espera(); return -3; }
+        if (fb > 2 || (t->tam & 31)) { sdma_espera(); return -4; }
         m->tv[i] = v;
-        pvr_txr_load(m->blob + t->off, v, t->tam);
+        tex_carga(m->blob + t->off, v, t->tam);               /* (P4: por DMA con SUBE_DMA) */
         compila_cab(m, i, 0);
     }
+    sdma_espera();                                                /* (P4: subidas acabadas antes de dibujar o soltar) */
     return 0;
 }
 
@@ -939,6 +1007,7 @@ static void sube_quita(modelo_t *m)                              /* y fuera otra
 static void tex_suelta(modelo_t *m)
 {
     uint32_t i;
+    sdma_espera();                                                /* (P4: nada subiendo de sus texeles ni a su VRAM) */
     if (sub.m == m) {                                             /* a medio subir: lo que lleve (y la que iba por partes) */
         sube_pon(m);
         if (sub.v && sub.k < sub.n) m->tv[sub.ord ? sub.ord[sub.k] : sub.k] = sub.v;
@@ -977,6 +1046,7 @@ static void modelo_mueve(modelo_t *m, uint8_t *d);
 static void compacta_modelo_de(modelo_t *m, int prestado)
 {
     uint8_t *d;
+    sdma_espera();                                                /* (P4: el blob puede ser origen de un DMA) */
     if (!m->datos || !m->blob || m->datos == hueco_etapa || (m->datos == hueco_union && !prestado)) return;
     if (prestado) { if ((d = memalign(32, m->blob - m->datos))) memcpy(d, m->datos, m->blob - m->datos); }
     else d = realloc(m->datos, m->blob - m->datos);
@@ -1150,7 +1220,7 @@ static int tex_rebaja(modelo_t *m, uint32_t i, int lado)
             for (c = 0; c < 4; c++) if (CAN[fb][c][1]) r |= ((sum[c] + nb / 2) / nb) << CAN[fb][c][0];
             o[j] = r;
         }
-        pvr_txr_load(o, v, tam); free(o);
+        tex_carga(o, v, tam); sdma_espera(); free(o);             /* (P4: el origen se suelta ahora) */
         dbglog(DBG_INFO, "VRAM: textura %u (%ux%u, %uK) rebajada a %ux%u\n", (unsigned)i, (unsigned)t->w, (unsigned)t->h, (unsigned)(t->tam >> 10), (unsigned)w, (unsigned)h);
         t->w = w; t->h = h; t->fmt = fb | (t->fmt & 0xC00); t->tam = tam;
         m->tv[i] = v; m->tfl[i] |= TF_REBAJADA;
@@ -1191,7 +1261,21 @@ static void sube_inicia(modelo_t *m, int lado, const modelo_t *comp)
     if (sub.ord) { for (i = 0; i < n; i++) sub.ord[i] = i; ord_texs = m->texs; qsort(sub.ord, n, sizeof *sub.ord, ord_tam); }
     sub.m = m; sub.comp = comp; sub.n = n;
 }
+static int sube_trozo_(uint32_t max);
+#ifdef DIAG_MS
+static uint32_t sdma_dg_us, sdma_dg_max, sdma_dg_tr;              /* medida (linea SUBE): us en sube_trozo, el mayor, trozos */
+#endif
 static int sube_trozo(uint32_t max)
+{
+#ifdef DIAG_MS
+    uint64_t t0 = timer_us_gettime64(); int r = sub.m != NULL, h = sube_trozo_(max); uint32_t d = (uint32_t)(timer_us_gettime64() - t0);
+    if (r) { sdma_dg_us += d; sdma_dg_tr++; if (d > sdma_dg_max) sdma_dg_max = d; }
+    return h;
+#else
+    return sube_trozo_(max);
+#endif
+}
+static int sube_trozo_(uint32_t max)
 {
     modelo_t *m = sub.m; uint32_t i, gasto = 0; int j;
 #ifdef DIAG_PICO
@@ -1204,7 +1288,7 @@ static int sube_trozo(uint32_t max)
         i = sub.ord ? sub.ord[sub.k] : sub.k; t = m->texs + i;
         if (sub.v) {                                              /* una textura grande a medias: su parte siguiente */
             uint32_t q = t->tam - sub.hecho; if (q > max - gasto) q = (max - gasto + 31) & ~31u;
-            pvr_txr_load(m->blob + t->off + sub.hecho, (pvr_ptr_t)((uintptr_t)sub.v + sub.hecho), q);
+            tex_carga(m->blob + t->off + sub.hecho, (pvr_ptr_t)((uintptr_t)sub.v + sub.hecho), q);   /* (P4: DMA) */
             sub.hecho += q; gasto += q;
             if (sub.hecho < t->tam) break;
             v = sub.v; sub.v = NULL; sub.hecho = 0;
@@ -1233,6 +1317,17 @@ static int sube_trozo(uint32_t max)
     dg_d = (uint32_t)(timer_us_gettime64() - dg_t0); sub.dg_us += dg_d; sub.dg_b += gasto; sub.dg_tr++; if (dg_d > sub.dg_max) sub.dg_max = dg_d;
 #endif
     if (sub.k < sub.n) { sube_quita(m); return 0; }
+    sdma_espera();                                                /* (P4: todo en la VRAM antes de que se dibuje) */
+#ifdef DIAG_SUBE_CMP
+    {   uint32_t ig = 0, di = 0, bi = 0;                          /* medida (P4): lo subido, leido de la VRAM = el blob */
+        for (i = 0; i < m->ntex; i++) {
+            if (!m->tv[i] || (m->tfl[i] & (TF_AJENA | TF_REBAJADA))) continue;
+            if (memcmp((const void *)m->tv[i], m->blob + m->texs[i].off, m->texs[i].tam)) di++; else ig++;
+            bi += m->texs[i].tam;
+        }
+        printf("SUBECMP: lado %d dma %d: %u texturas iguales, %u distintas (%uK)\n", sub.lado, SUBE_DMA, (unsigned)ig, (unsigned)di, (unsigned)(bi >> 10));
+    }
+#endif
     free(sub.ord); sub.ord = NULL; sub.m = NULL;
     vram_rebajadas += sub.n_reb;
 #ifdef DIAG_PICO
@@ -1264,6 +1359,7 @@ static void tex_muda(modelo_t *m, const modelo_t *de)
 {
     static uint8_t tmp[4096] __attribute__((aligned(32)));
     uint32_t i, j, n = 0, b = 0, faltan = 0;
+    sdma_espera();                                                /* (P4: las de la union, ya en la VRAM) */
     if (!m->tv || !m->tfl || !de->tv) return;
     for (i = 0; i < m->ntex; i++) {
         pvr_ptr_t v; uint8_t fl = 0;
@@ -1382,6 +1478,7 @@ static void *carga_hilo(void *p)
 /* marco: colocacion del fichero (x, y, z, giro y; modelo_coloca) o NULL */
 static void carga_pide(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t cap, const float *marco)
 {
+    sdma_espera();                                                /* (P4: el bufer de la lectura puede ser un origen) */
     carga.m = m; carga.nombre = nombre; carga.buf = buf; carga.cap = cap; carga.r = 0; carga.estado = 1; carga.t0 = timer_ms_gettime64();
     carga.con_marco = marco != NULL; if (marco) memcpy(carga.marco, marco, sizeof carga.marco);
     /* la colision que va con este modelo (carga_col, justo antes) o ninguna */
@@ -15028,6 +15125,9 @@ int main(int argc, char **argv)
                 printf("MS: %.4s s %.0f fps %.1f dib %.2f log %.2f pvr %.2f tri %u vtx %u tarde %u lej %d niv %.2f\n", curso[cur_nodo].zona, (double)yo.s,
                        (double)fps, (double)ms, (double)ms_log, (double)(ps.rnd_last_time / 1000000.0), (unsigned)tri_enviados, (unsigned)vtx_ult,
                        (unsigned)pres_tarde, (int)lejos, (double)salto_q);
+                printf("SUBE: dma %d trozos %u us %u max %u esp %u dmas %u dmaK %u sqK %u\n", SUBE_DMA, (unsigned)sdma_dg_tr, (unsigned)sdma_dg_us,
+                       (unsigned)sdma_dg_max, (unsigned)sdma_dg_esp, (unsigned)sdma_dg_n, (unsigned)(sdma_dg_b >> 10), (unsigned)(sdma_dg_sq >> 10));   /* (P4) */
+                sdma_dg_tr = sdma_dg_us = sdma_dg_max = sdma_dg_esp = sdma_dg_n = sdma_dg_b = sdma_dg_sq = 0;
                 printf("SALTOMS: nivel %.2f trabajo %.2f ms TA %u lejano %d\n", (double)salto_q, (double)salto_trab, (unsigned)salto_ta, (int)lejos);
                 printf("FAROSMS: us %u puntos sobre la COLI %u de %u\n", faros_dg_us, faros_dg_suelo, FAROS_NL * (2u * FAROS_NC - 1));
                 printf("FOCOSMS: mallas %u vtx %u us %u divisiones %u vtx, de espaldas %u tri, recortados %u tri, vertices de las mallas %u\n", focos_dg_m, focos_dg_v, focos_dg_us, focos_dg_sub, focos_dg_cara, focos_dg_poli, focos_dg_vm);
