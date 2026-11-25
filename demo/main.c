@@ -1874,6 +1874,9 @@ static float ta_lej_tope = 1e9f;
    corte_nodos lo usa como factor de esas mallas en el cuadro siguiente */
 static uint32_t cn_ns_real, cn_ns_est, cn_ns_f __attribute__((unused)) = 512, cn_cielo, cn_cielo_ult __attribute__((unused));   /* (cn_ns_f /256; cielo: bytes) */
 static int cn_activo;                                         /* el corte por nodos ya ha hecho caber la etapa */
+#ifndef CORTE_VTX_HOLGURA
+#define CORTE_VTX_HOLGURA 32                                    /* /256: 12,5 % */
+#endif
 #define CN_MAXN 4096                                            /* (nodos por tramo; como LQ_MAXN) */
 static uint32_t cn_ult[3][CN_MAXN]; static uint16_t cn_vult[3][CN_MAXN];   /* bytes del TA y vertices de cada nodo en el
                                                                    cuadro (dibuja_etapa; corte_nodos los usa en el siguiente) */
@@ -2480,7 +2483,9 @@ static void dibuja_etapa(const modelo_t *mo, int l)
     const uint32_t *teo = ta_teo_tab[mo->ofs != NULL], tf = ta_f, cf = color_fijo;
     const vert_t *VV = mo->verts; const uint32_t *OF = mo->ofs;
     uint32_t dvb = 0, dt = 0, dn = 0, dtri = 0, ve = vtx_env; int32_t r = ta_resto();
-    const int32_t vres = (int32_t)VTX_ETAPA_MAX - (int32_t)vtx_et - (int32_t)vtx_reserva;   /* vtx_et + (vtx_env - vtx_et0) > VTX_ETAPA_MAX */
+    /* (Rev 2.9.9: con corte_nodos, CORTE_VTX_HOLGURA /256 de mas: el tope de vertices es de tiempo de CPU, no cuelga
+       nada, y si corte_nodos se queda corto con un nodo nuevo es mejor pasarse un poco que partir un edificio) */
+    const int32_t vres = (int32_t)VTX_ETAPA_MAX + (cn_activo ? (int32_t)(VTX_ETAPA_MAX * CORTE_VTX_HOLGURA / 256) : 0) - (int32_t)vtx_et - (int32_t)vtx_reserva;   /* vtx_et + (vtx_env - vtx_et0) > VTX_ETAPA_MAX */
 #define ET_VUELCA() do { ta_vb += dvb; if (ta_en_etapa) ta_et += dvb; ta_teo_3d += dt; ta_tiras += dn; tri_enviados += dtri; \
                          vtx_env = ve; dvb = dt = dn = dtri = 0; } while (0)
 #define ET_RECARGA() do { ve = vtx_env; r = ta_resto(); } while (0)
@@ -9374,7 +9379,7 @@ static inline int cn_clave(const nodo_t *d)
 }
 static void corte_nodos(void)
 {
-    uint32_t tope, vtope, acum, v, nsf, c0; int t, cut, c, nq[3] = { 0, 0, 0 };
+    uint32_t tope, vtope, acum, v, nsf, c0, alfa_n; int t, cut, c, nq[3] = { 0, 0, 0 };
     cn_activo = 0;
     /* el factor de lo que no va por la directa: lo medido en el cuadro anterior (sube en el acto, baja 1/32 por cuadro) */
     if (cn_ns_est > 4096) {
@@ -9383,6 +9388,7 @@ static void corte_nodos(void)
         if (cn_ns_f < 256) cn_ns_f = 256; else if (cn_ns_f > 2048) cn_ns_f = 2048;
     }
     cn_ns_real = cn_ns_est = 0; nsf = cn_ns_f;
+    {   float a = prio_alfa * 1.1f; alfa_n = a >= 1.0f ? 256 : a <= 0.25f ? 64 : (uint32_t)(a * 256.0f); }
     memset(cn_c, 0, sizeof cn_c); memset(cn_v, 0, sizeof cn_v); memset(cn_cp, 0, sizeof cn_cp); memset(cn_vp, 0, sizeof cn_vp);
     memset(cn_cg, 0, sizeof cn_cg); memset(cn_vg, 0, sizeof cn_vg);
     /* el coste de cada nodo visible: el que tuvo al enviarlo en el cuadro anterior (dibuja_etapa, cn_ult: sus mallas de
@@ -9398,12 +9404,14 @@ static void corte_nodos(void)
                 uint32_t i = w * 32 + (uint32_t)__builtin_ctz(b), cc, cv, cl; const nodo_t *d = mo->nodos + i;
                 b &= b - 1;
                 if (ya >> (i & 31) & 1) { cc = cu[i]; cv = cvu[i]; }
-                else {
+                else {                                          /* (nuevo: lo teorico de lo que deja la PVS, por lo que
+                                                                   la vista recorta de media, alfa_n; los vertices en proporcion) */
                     float dx = d->cx - ojo[0], dy = d->cy - ojo[1], dz = d->cz - ojo[2], zv = dx * ade[0] + dy * ade[1] + dz * ade[2];
-                    cc = mo->pvs_on ? pvs_coste(mo, i) : d->relleno[0];
-                    if (!cc && mo->pvs_ult) cc = mo->pvs_ult[i];
-                    cc = cc * ta_f >> 8; if (zv - d->r < cerca * 1.5f) cc = cc * nsf >> 8;
-                    cv = d->relleno[1] >> 12;
+                    uint32_t ct = mo->pvs_on ? pvs_coste(mo, i) : d->relleno[0];
+                    if (!ct && mo->pvs_ult) ct = mo->pvs_ult[i];
+                    cv = d->relleno[0] ? (uint32_t)((uint64_t)(d->relleno[1] >> 12) * ct / d->relleno[0]) : d->relleno[1] >> 12;
+                    cc = (ct * ta_f >> 8) * alfa_n >> 8; cv = cv * alfa_n >> 8;
+                    if (zv - d->r < cerca * 1.5f) cc = cc * nsf >> 8;
                 }
                 cu[i] = 0; cvu[i] = 0;                          /* (dibuja_etapa lo vuelve a contar en este cuadro) */
                 cl = d->relleno[1] & 4095u;
