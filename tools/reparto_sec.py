@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""reparto_sec.py datos/ [salida.DAT] [--tope-kb=N] [--alfa=X] [--ta-f=X] [--lejos=M] [--fov=GRADOS] [--suave=N] [--solo=SEGnn]:
+"""reparto_sec.py datos/ [salida.DAT] [--tope-kb=N] [--alfa=X] [--ta-f=X] [--lejos=M] [--fov=GRADOS] [--suave=N] [--solo=SEGnn]
+[--ritmo=X] [--sin-lejano]:
 corte del reparto del TA precalculado por seccion de la PVS (Rev 2.9.8 P2, DESVIACION; tecnica tomada de Crazy Taxi:
 lo que se dibuja depende de la posicion, decidido fuera de linea para un presupuesto fijo; docs/PARIDAD.md "Rev 2.9.8:
 lecciones de Crazy Taxi", P2). No toca ningun SEGnn.DAT: lee los ya convertidos (sueltos o recompuestos de SEGS.PAK)
@@ -25,8 +26,19 @@ GHOS, METR y PALM. Medidas con alfa 1,10 y suave 1 y con alfa 1,00 y suave 8 (po
 tabla queda en carrera 1-3 clases por encima del corte de siempre en GHOS e INDU y 7-13 por debajo en METR y PALM (el
 lejano adaptativo de esas dos baja mucho lo que hay que repartir y la tabla no lo sabe).
 
-Formato (little endian): 'RSC1', u32 numero de etapas, por etapa u32 SEG, u32 secciones, u32 desplazamiento; en el
-desplazamiento, por seccion 2 bytes con signo: prio_d (-1..47) y prio_p (-1..63)."""
+Rev 2.9.8 P5 (LEJ_SEC, DESVIACION; tecnica tomada de Crazy Taxi: el lejano depende del tramo): en el mismo fichero,
+por seccion, el lejano de la seccion (u16, m): la mayor distancia de un punto de la ruta de la seccion a la cara de
+atras de la esfera de cada malla que la PVS deja ver desde la seccion o sus dos vecinas (|c - p| + r: lo grande, el
+mar o los montes, por su esfera y no por su centro), con las mallas que no son de un nodo (se dibujan siempre; el
+cielo, lista 3, no lo corta el lejano y no cuenta) y las de la version lejana de un nodo visible. Despues se adelanta
+lo que hara falta: lej[s] = max(lej[s], lej[k] - RITMO x (distancia por la ruta de s a k)) para las k de delante, para
+que el lejano (que sube SALTO_LEJ_SUBE m cada 4 cuadros en la demo) llegue a tiempo a una seccion abierta yendo a
+~120 m/s. La demo hace lejos = min(lejano del salto, lej[s] + LEJ_SEC_MARGEN) (demo/main.c, lejsec_paso).
+
+Formato (little endian): 'RSC2', u32 numero de etapas, por etapa u32 SEG, u32 secciones, u32 desplazamiento del
+corte, u32 desplazamiento del lejano (0: sin el); en el corte, por seccion 2 bytes con signo: prio_d (-1..47) y prio_p
+(-1..63); en el lejano, por seccion un u16 (m). Con --sin-lejano, el 'RSC1' de antes (las entradas de 12 bytes, sin el
+ultimo desplazamiento)."""
 import os, struct, sys, tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # (con python -I: los modulos de tools/)
 import numpy as np
@@ -98,6 +110,49 @@ def corte(cost, vtx, tope, vmax, k):
     if d == ND_PRIO - 1: p = NB_PRIO - 1
     if d < 0 and p < 0: p = 0
     return d, p
+
+RITMO = 1.25                                                    # m de lejano por m de ruta (P5: SALTO_LEJ_SUBE / velocidad)
+
+def lejanos(d, S, mapa, ritmo):
+    """P5: el lejano de cada seccion (m, ver arriba)"""
+    M, N, R = d['M'], d['N'], d['R']; nm = len(M); nn = len(N); ns = S.shape[0]; i3 = d['h'][8]
+    g = M['nodo'].astype(np.int64); idx = np.arange(nm)
+    mc = M['c'].astype(np.float64); mr = M['r'].astype(np.float64)
+    util = M['n'] >= 3
+    siempre = util & (g < 0) & (g > -256) & (idx < i3)        # (lo que no es de un nodo; el cielo es -256 - grupo)
+    fl = N['fl'].astype(np.int64); cart = N['cartel'].astype(np.int64)
+    nn0 = nn
+    for i in range(nn):
+        if fl[i] & NODO_LEJ: nn0 = i; break
+    padre = np.full(nn, -1, np.int64)                          # de cada lejano (nn0..), su nodo completo
+    for i in range(nn0):
+        j = -2 - cart[i]
+        if cart[i] <= -2 and nn0 <= j < nn: padre[j] = i
+    de_nodo = util & (g >= 0) & (g < nn) & (idx < i3)
+    lej_m = de_nodo & (g >= nn0)
+    P = R[:, :3].astype(np.float64)
+    raw = np.zeros(ns)
+    for s in range(ns):
+        v = (S[max(0, s - 1)] | S[s] | S[min(ns - 1, s + 1)]) & de_nodo
+        nv = np.zeros(nn, bool); nv[g[v & (g < nn0)]] = True
+        lv = lej_m.copy(); lv[lej_m] = nv[np.maximum(padre[g[lej_m]], 0)] & (padre[g[lej_m]] >= 0)
+        sel = v | lv | siempre
+        if not sel.any(): continue
+        c = mc[sel]; r = mr[sel]
+        for ip in np.nonzero(mapa == s)[0]:
+            raw[s] = max(raw[s], float((np.sqrt(((c - P[ip]) ** 2).sum(1)) + r).max()))
+    # adelanto: la distancia por la ruta del primer punto de cada seccion
+    cum = np.concatenate([[0.0], np.cumsum(np.hypot(np.diff(P[:, 0]), np.diff(P[:, 2])))])
+    pos = np.zeros(ns); vistos = np.zeros(ns, bool)
+    for ip in range(len(P)):
+        s = int(mapa[ip])
+        if s < ns and not vistos[s]: pos[s] = cum[ip]; vistos[s] = True
+    for s in range(1, ns):
+        if not vistos[s]: pos[s] = pos[s - 1]
+    t = raw.copy()
+    for s in range(ns - 2, -1, -1):
+        t[s] = max(t[s], t[s + 1] - ritmo * max(pos[s + 1] - pos[s], 0.0))
+    return np.minimum(np.ceil(t), 65535).astype(np.int64), raw
 
 def etapa(b, op):
     fd, tmp = tempfile.mkstemp(suffix='.dat', prefix='rsec_', dir='/dev/shm' if os.path.isdir('/dev/shm') else None)
@@ -189,7 +244,13 @@ def etapa(b, op):
             o2[s] = out[a0:a1].min(0)
         out = o2
     print('  nodos %d (%d originales) mallas %d; vertices pedidos %.0f, nodos visibles %.0f' % (nn, nn0, nm, np.mean([x[0] for x in VV]), np.mean([x[1] for x in VV])))
-    return ns, out, (float(np.mean(est)) if est else 0.0)
+    lej = None
+    if not op['sin_lejano']:
+        lej, raw = lejanos(d, S, mapa, op['ritmo'])
+        print('  lejano por seccion (P5): medio %.0f m (%d..%d), sin adelanto %.0f m (%.0f..%.0f); %.0f %% de las secciones por '
+              'debajo de 3800 m, %.0f %% por debajo de 2000' % (lej.mean(), lej.min(), lej.max(), raw.mean(), raw.min(), raw.max(),
+                                                               100.0 * (lej < 3800).mean(), 100.0 * (lej < 2000).mean()))
+    return ns, out, (float(np.mean(est)) if est else 0.0), lej
 
 def main():
     a = [x for x in sys.argv[1:] if not x.startswith('--')]
@@ -197,7 +258,8 @@ def main():
     if not a: raise SystemExit(__doc__)
     datos = a[0]; sal = a[1] if len(a) > 1 else os.path.join(datos, 'REPSEC.DAT')
     o = dict(tope_kb=float(op.get('tope-kb', 800)), alfa=float(op.get('alfa', 1.0)), ta_f=float(op.get('ta-f', 1.75)),
-             lejos=float(op.get('lejos', 3800)), fov=float(op.get('fov', 50)), suave=int(op.get('suave', 8)))
+             lejos=float(op.get('lejos', 3800)), fov=float(op.get('fov', 50)), suave=int(op.get('suave', 8)),
+             ritmo=float(op.get('ritmo', RITMO)), sin_lejano='--sin-lejano' in sys.argv[1:])
     solo = op.get('solo')
     pakf = os.path.join(datos, 'SEGS.PAK'); pak = None
     ent = []
@@ -211,20 +273,25 @@ def main():
             b = pak_union.recompone(b, pak)
         r = etapa(b, o)
         if r is None: print('%s: sin PVS' % f); continue
-        ns, t, e = r
+        ns, t, e, lej = r
         print('%s: %d secciones, prio_d %.1f (%d..%d) prio_p %.1f (%d..%d), pedido medio %.0f KB, %d cambios' %
               (f, ns, t[:, 0].mean(), t[:, 0].min(), t[:, 0].max(), t[:, 1].mean(), t[:, 1].min(), t[:, 1].max(), e / 1024,
                int((np.diff(t, axis=0) != 0).any(1).sum())))
         sys.stdout.flush()
-        ent.append((int(f[3:-4]), ns, t.astype(np.int8).tobytes()))
-    cab = b'RSC1' + struct.pack('<I', len(ent)); off = len(cab) + 12 * len(ent); cuerpo = b''
-    for nseg, ns, m in ent:
-        cab += struct.pack('<3I', nseg, ns, off + len(cuerpo)); cuerpo += m + b'\0' * (-len(m) % 4)
+        ent.append((int(f[3:-4]), ns, t.astype(np.int8).tobytes(), None if lej is None else lej.astype('<u2').tobytes()))
+    v2 = not o['sin_lejano']
+    cab = (b'RSC2' if v2 else b'RSC1') + struct.pack('<I', len(ent)); off = len(cab) + (16 if v2 else 12) * len(ent); cuerpo = b''
+    for nseg, ns, m, lj in ent:
+        o1 = off + len(cuerpo); cuerpo += m + b'\0' * (-len(m) % 4)
+        if not v2: cab += struct.pack('<3I', nseg, ns, o1); continue
+        o2 = off + len(cuerpo); cuerpo += lj + b'\0' * (-len(lj) % 4)
+        cab += struct.pack('<4I', nseg, ns, o1, o2)
     tmp = sal + '.tmp'
     with open(tmp, 'wb') as fo: fo.write(cab + cuerpo)
     os.replace(tmp, sal)
-    print('%s: %d etapas, %d bytes (tope %.0f KB, alfa %.2f, ta_f %.2f, lejos %.0f, fov %.0f, suave %d)' %
-          (sal, len(ent), len(cab) + len(cuerpo), o['tope_kb'], o['alfa'], o['ta_f'], o['lejos'], o['fov'], o['suave']))
+    print('%s: %d etapas, %d bytes (tope %.0f KB, alfa %.2f, ta_f %.2f, lejos %.0f, fov %.0f, suave %d, %s)' %
+          (sal, len(ent), len(cab) + len(cuerpo), o['tope_kb'], o['alfa'], o['ta_f'], o['lejos'], o['fov'], o['suave'],
+           'lejano por seccion, ritmo %.2f' % o['ritmo'] if v2 else 'sin lejano'))
 
 if __name__ == '__main__':
     main()

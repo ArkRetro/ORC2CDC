@@ -1499,6 +1499,36 @@ static void carga_espera(void) { while (carga.estado == 1) thd_sleep(5); }
 #define LEJOS_MAX 3800.0f                                       /* Rev 2.9.4 (pedido): techo del lejano en toda la demo (2.9.2.c: 3200; 2.9.2.b: 3500; el original 4000) */
 #endif
 static float ojo[3], der[3], arr[3], ade[3], fx = 320.0f / 0.75f, cerca = CERCA_PS2, lejos = LEJOS_MAX;
+/* Rev 2.9.8 P5 (DESVIACION; tecnica tomada de Crazy Taxi: el lejano depende del tramo, docs/PARIDAD.md "Rev 2.9.8:
+   lecciones de Crazy Taxi"): lejano por seccion de la PVS, solo hacia abajo. REPSEC.DAT (tools/reparto_sec.py, 'RSC2')
+   lleva por seccion la mayor distancia de la ruta de la seccion a la cara de atras de lo que la PVS deja ver desde
+   ella (adelantada para que llegue a tiempo a lo abierto) y en la etapa lejos = min(lejano del salto, ese +
+   LEJ_SEC_MARGEN), siguiendolo con SALTO_LEJ_BAJA / SALTO_LEJ_SUBE (lejsec_paso). Nunca sube el lejano: con la union
+   o la etapa siguiente en la vista, como mucho hasta lo mas lejano de ellas. La franja del limite (NLIM_FRANJA) va con
+   el lejano cortado (cae donde acaba la escena); el velo tenue (NLIM_INI, NLIM_ANCHO), su recorte a 0,55 y el LOD de
+   lo grande (LOD_GRANDE_FR), con el lejano del salto (lej_base): la imagen de delante no cambia.
+   Medido en Flycast (docs/PARIDAD.md, P5; dos tandas en GHOS, METR, PALM e INDU): corta en el 0-29 % de los cuadros,
+   70-240 m de media (el salto ya suele estar por debajo); saltos de 8 px -3 % y de 32 px -4 % (dentro del ruido entre
+   tandas), METR -0,69 fps y +21 % de cuadros tarde, la razon "lejos" igual y la imagen igual (capturas congeladas):
+   APAGADO por defecto. LEJ_SEC=0: lo de antes */
+#ifndef LEJ_SEC
+#define LEJ_SEC 0
+#endif
+#ifndef LEJ_SEC_MARGEN
+#define LEJ_SEC_MARGEN 200.0f                                   /* m sobre el lejano de la seccion (el ojo fuera de la ruta) */
+#endif
+#ifndef LEJ_SEC_MIN
+#define LEJ_SEC_MIN 400.0f                                      /* m: nunca por debajo (los nodos cercanos van enteros) */
+#endif
+static float lejos_salto __attribute__((unused)) = LEJOS_MAX, lsec_puesto __attribute__((unused)) = LEJOS_MAX;  /* (P5) el lejano sin la seccion y el ultimo puesto */
+static inline float lej_base(void)                              /* el lejano del salto (lo de antes); con LEJ_SEC=0, lejos */
+{
+#if LEJ_SEC
+    return lejos != lsec_puesto ? lejos : lejos_salto;          /* (si otro lo ha puesto despues, ese) */
+#else
+    return lejos;
+#endif
+}
 static matrix_t vista __attribute__((aligned(32))), vista_cielo __attribute__((aligned(32))),
                 mod_coche __attribute__((aligned(32)));
 static uint32_t tri_enviados;
@@ -6865,31 +6895,39 @@ static void viso_lee(void)
 #define REPARTO_SEC 0
 #endif
 static uint8_t *rsec_dat; static const int8_t *rsec_m[CURSO_MAX]; static uint32_t rsec_n[CURSO_MAX];
+static const uint16_t *rsec_lej[CURSO_MAX];                     /* (Rev 2.9.8 P5, LEJ_SEC: el lejano de la seccion, m) */
 static void repsec_lee(void)
 {
-    uint32_t sz, n, i, k, tot = 0, s[3]; uint8_t *b, *p;
-    free(rsec_dat); rsec_dat = NULL; memset(rsec_m, 0, sizeof rsec_m); memset(rsec_n, 0, sizeof rsec_n);
-#if !REPARTO_SEC && !defined(DIAG_POPPING)
+    uint32_t sz, n, i, k, tot = 0, s[4], e, v2; uint8_t *b, *p;
+    free(rsec_dat); rsec_dat = NULL; memset(rsec_m, 0, sizeof rsec_m); memset(rsec_n, 0, sizeof rsec_n); memset(rsec_lej, 0, sizeof rsec_lej);
+#if !REPARTO_SEC && !LEJ_SEC && !defined(DIAG_POPPING)
     return;                                                     /* (sin usarla ni medirla: ni se lee) */
 #endif
     if (!(b = gd_carga("REPSEC.DAT", &sz))) { dbglog(DBG_INFO, "REPSEC: sin REPSEC.DAT (el reparto de siempre)\n"); return; }
-    if (sz < 8 || memcmp(b, "RSC1", 4)) { free(b); return; }
+    /* 'RSC1': entradas de 12 bytes (SEG, secciones, corte); 'RSC2' (P5): de 16, con el desplazamiento del lejano */
+    if (sz < 8 || (memcmp(b, "RSC1", 4) && memcmp(b, "RSC2", 4))) { free(b); return; }
+    v2 = b[3] == '2'; e = v2 ? 16 : 12; s[3] = 0;
     memcpy(&n, b + 4, 4);
-    for (k = 0; k < (uint32_t)ncurso; k++) for (i = 0; i < n && 8 + 12 * i + 12 <= sz; i++) {
-        memcpy(s, b + 8 + 12 * i, 12);
-        if (s[0] == curso[k].seg && s[2] + 2 * s[1] <= sz) { tot += 2 * s[1]; break; }
+    for (k = 0; k < (uint32_t)ncurso; k++) for (i = 0; i < n && 8 + e * i + e <= sz; i++) {
+        memcpy(s, b + 8 + e * i, e);
+        if (s[0] == curso[k].seg && s[2] + 2 * s[1] <= sz) { tot += (v2 ? 4 : 2) * s[1]; break; }
     }
     if (tot && (rsec_dat = malloc(tot))) {
         p = rsec_dat;
-        for (k = 0; k < (uint32_t)ncurso; k++) for (i = 0; i < n && 8 + 12 * i + 12 <= sz; i++) {
-            uint32_t j; memcpy(s, b + 8 + 12 * i, 12);
+        for (k = 0; k < (uint32_t)ncurso; k++) for (i = 0; i < n && 8 + e * i + e <= sz; i++) {
+            uint32_t j; memcpy(s, b + 8 + e * i, e);
             if (s[0] != curso[k].seg || s[2] + 2 * s[1] > sz) continue;
             for (j = 0; j < k; j++) if (curso[j].seg == curso[k].seg && rsec_m[j]) break;   /* (la misma etapa: la misma) */
-            if (j < k) { rsec_m[k] = rsec_m[j]; rsec_n[k] = rsec_n[j]; break; }
-            memcpy(p, b + s[2], 2 * s[1]); rsec_m[k] = (const int8_t *)p; rsec_n[k] = s[1]; p += 2 * s[1]; break;
+            if (j < k) { rsec_m[k] = rsec_m[j]; rsec_n[k] = rsec_n[j]; rsec_lej[k] = rsec_lej[j]; break; }
+            memcpy(p, b + s[2], 2 * s[1]); rsec_m[k] = (const int8_t *)p; rsec_n[k] = s[1]; p += 2 * s[1];
+            if (v2) {                                           /* (2 * s[1] es par: el u16 queda alineado) */
+                if (s[3] && s[3] + 2 * s[1] <= sz) { memcpy(p, b + s[3], 2 * s[1]); rsec_lej[k] = (const uint16_t *)p; }
+                p += 2 * s[1];
+            }
+            break;
         }
     }
-    dbglog(DBG_INFO, "REPSEC: %u bytes para %d etapas (activo %d)\n", (unsigned)tot, ncurso, REPARTO_SEC);
+    dbglog(DBG_INFO, "REPSEC: %u bytes para %d etapas (%.4s; reparto %d, lejano %d)\n", (unsigned)tot, ncurso, (const char *)b, REPARTO_SEC, LEJ_SEC);
     free(b);
 }
 /* el arbol id (CURSO.DAT; los de la Contrarreloj, 200 + codigo, en CURSOTA.DAT) en curso[]; 0 bien */
@@ -8739,7 +8777,8 @@ static void nodos_visibles(modelo_t *mo)
                distancia: el lowpoly con lo mas cercano del nodo a mas de LOD_GRANDE_D por delante y el completo al
                acercarse (histeresis LOD_GRANDE_H: el que se dibujaba sigue hasta pasar el umbral por ese margen) */
             int lej3d = (ND[jl].fl & NODO_LEJ3D) != 0;
-            float dg = (lejos * LOD_GRANDE_FR > LOD_GRANDE_D ? lejos * LOD_GRANDE_FR : LOD_GRANDE_D) + (era_lej ? -LOD_GRANDE_H : ya ? LOD_GRANDE_H : 0.0f);
+            float lb_ = lej_base();                                 /* (Rev 2.9.8 P5: el lejano del salto) */
+            float dg = (lb_ * LOD_GRANDE_FR > LOD_GRANDE_D ? lb_ * LOD_GRANDE_FR : LOD_GRANDE_D) + (era_lej ? -LOD_GRANDE_H : ya ? LOD_GRANDE_H : 0.0f);
             if (lej3d ? zv - d->r > dg : (zv > d->r && d->r * fx < umb * zv)) {
 #ifdef DIAG_POPPING
                 if (ya && pop_ra && pop_ra[i] == PR_DIB) pop_lod_lej++;
@@ -9058,6 +9097,60 @@ static int prio_sube_sec(int actual, int objetivo, int *espera)
     else *espera = 0;
     return actual;
 }
+#if LEJ_SEC
+/* Rev 2.9.8 P5 (LEJ_SEC, ver lejos): el objetivo del lejano por la seccion. LEJOS_MAX (no corta) fuera de la carrera, en
+   la union, sin tabla para la etapa o con el ojo fuera de lo que muestrea la PVS. Con la union o la etapa siguiente en
+   la vista (geo_visible), como mucho lo mas lejano de sus nodos (|c - ojo| + r): la tabla solo es de la etapa */
+static float lsec_f = LEJOS_MAX, lsec_obj_v = LEJOS_MAX;         /* el lejano de la seccion seguido y su objetivo */
+static float lsec_lejos_de(const modelo_t *mo, float t)
+{
+    uint32_t i, n = mo->nn0 < mo->nnodos ? mo->nn0 : mo->nnodos;
+    for (i = 0; i < n && t < LEJOS_MAX; i++) {
+        const nodo_t *d = mo->nodos + i; float dx = d->cx - ojo[0], dy = d->cy - ojo[1], dz = d->cz - ojo[2], l = d->r + sqrtf(dx * dx + dy * dy + dz * dz);
+        if (l > t) t = l;
+    }
+    return t;
+}
+static float lsec_objetivo(int carrera)
+{
+    const uint16_t *t; int32_t s; float l;
+    if (!carrera || cur_en_union || etapa_nodo < 0 || etapa_nodo >= ncurso || !(t = rsec_lej[etapa_nodo]) || rsec_n[etapa_nodo] != etapa.nsec) return LEJOS_MAX;
+    if (!geo_visible(&etapa) || !etapa.pvs_on || (s = etapa.pvs_s) < 0 || (uint32_t)s >= etapa.nsec) return LEJOS_MAX;
+    l = (float)t[s] + LEJ_SEC_MARGEN;
+    if (l < LEJ_SEC_MIN) l = LEJ_SEC_MIN;
+    if (uni.datos && uni.nodos && geo_visible(&uni)) l = lsec_lejos_de(&uni, l);
+    if (sig.datos && sig.nodos && geo_visible(&sig)) l = lsec_lejos_de(&sig, l);
+    return l < LEJOS_MAX ? l : LEJOS_MAX;
+}
+/* cada 4 cuadros, tras el lejano del salto (lejos_salto): el de la seccion lo sigue con las velocidades del salto y
+   lejos = el menor de los dos */
+static void lejsec_paso(int mueve, int carrera)            /* (carrera: estado == CARRERA) */
+{
+#ifdef DIAG_POPPING
+    static uint32_t dn, dact; static float dsec, dsal, dlej, dobj; static uint64_t dt0;
+#endif
+    if (!carrera) lsec_f = lsec_obj_v = LEJOS_MAX;     /* (la meta, el salon, el menu: el lejano de siempre) */
+    else if (mueve) {
+        float o = lsec_obj_v = lsec_objetivo(carrera);
+        if (lsec_f > lejos_salto) lsec_f = lejos_salto;         /* (por encima del salto no corta: baja desde el puesto) */
+        if (lsec_f > o) lsec_f = lsec_f - SALTO_LEJ_BAJA > o ? lsec_f - SALTO_LEJ_BAJA : o;
+        else if (lsec_f < o) lsec_f = lsec_f + SALTO_LEJ_SUBE < o ? lsec_f + SALTO_LEJ_SUBE : o;
+    }
+    lejos = lsec_f < lejos_salto ? lsec_f : lejos_salto;
+#ifdef DIAG_POPPING
+    if (carrera && !precalentando) {
+        uint64_t ah = timer_ms_gettime64();
+        dn++; dact += lejos < lejos_salto; dsec += lsec_f; dsal += lejos_salto; dlej += lejos; dobj += lsec_obj_v;
+        if (!dt0) dt0 = ah;
+        if (ah - dt0 >= 1000) {
+            printf("POPLEJ: %.4s s %.0f cuadros %u corta %u objetivo %.0f seccion %.0f salto %.0f lejos %.0f sec %d\n", cur_nodo >= 0 ? curso[cur_nodo].zona : "----",
+                   (double)yo.s, (unsigned)dn, (unsigned)dact, (double)(dobj / dn), (double)(dsec / dn), (double)(dsal / dn), (double)(dlej / dn), (int)etapa.pvs_s);
+            dn = dact = 0; dsec = dsal = dlej = dobj = 0; dt0 = ah;
+        }
+    }
+#endif
+}
+#endif
 static void nodos_visibles_todos(void)
 {
     static uint32_t fila_c[ND_PRIO], fila_v[ND_PRIO], col_c[NB_PRIO], col_v[NB_PRIO];
@@ -9496,10 +9589,11 @@ static float niebla_tab[129];                                   /* la tabla pues
 static void niebla_pon(void)
 {
     static float a_hecho = -1, fb_hecho = -1; float *tab = niebla_tab; int i; uint32_t c = niebla_c; float a, fb = 1.0f;
+    float lb = lej_base();                                      /* (Rev 2.9.8 P5: el lejano del salto) */
 #ifdef SIN_NIEBLA_LIMITE
     float nl = 1e9f;
 #else
-    float nl = lejos;
+    float nl = lb;
 #endif
     if (!(c & 0xFFFFFF) && niebla_d <= 0) c = 0xFF8CB3EBu;      /* sin niebla ni horizonte: el azul de antes */
     {   /* el velo no aclara lo lejano contra un cielo mas oscuro que la niebla (la noche de METR y GHOS: niebla clara,
@@ -9518,10 +9612,14 @@ static void niebla_pon(void)
         fb = hz && lc > 1 && lh < lc ? lh / lc : 1.0f;           /* (la franja del limite, igual: Rev 2.9.2.f) */
         fb = (float)(int)(fb * 64.0f) / 64.0f;
     }
+    static float lb_hecho = -1;
     if (niebla_d == niebla_d_hecha && niebla_modo == niebla_modo_hecho && niebla_c == niebla_c_hecho && lejos == niebla_lejos_hecho &&
-        a == a_hecho && fb == fb_hecho) return;
+        a == a_hecho && fb == fb_hecho && lb == lb_hecho) return;
     niebla_d_hecha = niebla_d; niebla_modo_hecho = niebla_modo; niebla_c_hecho = niebla_c; niebla_lejos_hecho = lejos;
-    a_hecho = a; fb_hecho = fb;
+    a_hecho = a; fb_hecho = fb; lb_hecho = lb;
+#ifdef DIAG_NLIM
+    c = 0xFFFF00FFu;                                            /* medida (Rev 2.9.8 P5): solo la franja del limite, en magenta */
+#endif
     pvr_fog_table_color(1.0f, ((c >> 16) & 0xff) / 255.0f, ((c >> 8) & 0xff) / 255.0f, (c & 0xff) / 255.0f);
     for (i = 0; i < 129; i++) {
         float t = i ? (float)(1 << (i >> 4)) * (16 + (i & 15)) / 16.0f : 1.0f, z = lejos / t, f, g, h;
@@ -9532,13 +9630,16 @@ static void niebla_pon(void)
            bajar de su maximo: NLIM_FRANJA hasta el lejano de los niveles 3..6 (SALTO_LEJ[3], 2400 m) y de ahi a 0,55 en
            LEJOS_MIN, seguido */
         {   float f0 = NLIM_FRANJA;
-            if (lejos < SALTO_LEJ[3] && lejos < lejos_guion)
-                f0 = 0.55f + (NLIM_FRANJA - 0.55f) * (lejos > LEJOS_MIN ? (lejos - LEJOS_MIN) / (SALTO_LEJ[3] - LEJOS_MIN) : 0.0f);
+            if (lb < SALTO_LEJ[3] && lb < lejos_guion)          /* (P5: por el lejano del salto, no el de la seccion) */
+                f0 = 0.55f + (NLIM_FRANJA - 0.55f) * (lb > LEJOS_MIN ? (lb - LEJOS_MIN) / (SALTO_LEJ[3] - LEJOS_MIN) : 0.0f);
             f = (z - lejos * f0) / (lejos * (1.0f - f0)); f = f < 0 ? 0 : f > 1 ? 1 : f; f *= fb; }
         g = niebla_d * z; g = niebla_d <= 0 ? 0 : niebla_modo == 2 ? 1 - expf(-g * g) : 1 - expf(-g);
         h = (z - NLIM_INI * nl) / (NLIM_ANCHO * nl); h = h < 0 ? 0 : h > 1 ? 1 : h;
         h = a * h * h * (3 - 2 * h);                            /* suave (smoothstep) */
         tab[i] = 1 - (1 - f) * (1 - g) * (1 - h);
+#ifdef DIAG_NLIM
+        tab[i] = f / (fb > 0 ? fb : 1.0f);                      /* (sin la niebla del original ni el velo, a toda fuerza) */
+#endif
     }
     pvr_fog_far_depth(lejos);
     pvr_fog_table_custom(tab);
@@ -13830,6 +13931,9 @@ int main(int argc, char **argv)
                            (unsigned)salto_ta, (double)salto_trab, cur_nodo >= 0 ? curso[cur_nodo].zona : "----");
                 }
             } else if (estado == TITULO) { salto_q = 0; salto_trab = SALTO_PRESUP - SALTO_W_BAJA; salto_ta = 256; sv_tarde = pres_tarde; sv_veto = 0; sv_ent = 0; }
+#if LEJ_SEC
+            lejos = lejos_salto = lej_base();                   /* (Rev 2.9.8 P5: el del salto; si otro lo puso, ese) */
+#endif
             if (estado != TITULO && (++sv_n & 3) == 0) {          /* el lejano sigue al del nivel, poco a poco */
                 float tope = salto_lejos(salto_q);
 #ifdef SALTO_OBS_LEJ
@@ -13839,6 +13943,9 @@ int main(int argc, char **argv)
                 if (lejos > tope) lejos = lejos - SALTO_LEJ_BAJA > tope ? lejos - SALTO_LEJ_BAJA : tope;
                 else if (lejos < tope) lejos = lejos + SALTO_LEJ_SUBE < tope ? lejos + SALTO_LEJ_SUBE : tope;
             }
+#if LEJ_SEC
+            lejos_salto = lejos; lejsec_paso((sv_n & 3) == 0 && estado != TITULO, estado == CARRERA); lsec_puesto = lejos;   /* (P5) */
+#endif
         }
 #endif
         maple_device_t *mc = maple_enum_type(0, MAPLE_FUNC_CONTROLLER);
