@@ -1521,6 +1521,71 @@ de OutRun 2 SP (las 15 etapas seguidas) que dio el usuario.
   no esta leido). Sin EFECTOS.DAT nuevo, sin agua (como antes).
 - NO verificado en consola real.
 
+### Rev 2.9.8: lecciones de Crazy Taxi
+
+Comparacion tecnica con Crazy Taxi de Dreamcast (material de referencia: de el se toma la TECNICA, nunca codigo ni
+datos) y cambios P1..P7 propuestos a partir de ella. El principio que se aplica: lo que se dibuja depende de la
+posicion y de la vista, no de la carga del cuadro anterior (Crazy Taxi tiene bufers de tamano fijo por lista, lejanos
+por tramo y listas precalculadas, y no se le ha encontrado ningun tope dinamico). Todo medido en Flycast, NO en la
+consola real (Flycast no da el tiempo de la PowerVR ni llena el TA como la consola).
+
+#### P1. Tope de la etapa estable (`-DTOPE_FIJO`, `-DTOPE_RES_KB`)
+
+DESVIACION (`demo/main.c`: `TOPE_FIJO`, `tope_fijo_paso`, `ta_inicia_cuadro`). Antes el tope del TA de la etapa salia
+cada cuadro de lo que gasto el anterior (2D, coche, pareja, trafico y efectos + 2 coches de trafico con LOD 0) y de
+`salto_ta`, interpolado con el nivel del salto (que se mueve un poco en cada cuadro): cambiaba unas 19-38 veces por
+segundo (medido, linea `POPTOPE` de `-DDIAG_POPPING`), y el reparto quitaba y devolvia clases (razon "tope", 2.9.5).
+Con `TOPE_FIJO` (1 por defecto):
+- La reserva de lo que no es la etapa y la de lo 2D son fijas por etapa (y por union): el mayor valor visto en ella,
+  en pasos de 16 KB, como minimo `TOPE_RES_KB` (0 por defecto). Sube en el acto si hace falta (el coche y el trafico
+  van despues de la etapa; si no cupieran se cortarian por `ta_lim`) y solo baja al cruzar una seccion de la PVS, si
+  en las ultimas `TOPE_BAJA_SEC` (16) secciones no ha pasado del `TOPE_BAJA_PCT` (90) % de ella (`TOPE_MARGEN`: margen
+  opcional de 1/n; 0).
+- `salto_ta` va en los 4 escalones de `SALTO_TA` (256, 240, 222, 205), sin interpolar, y solo cambia de escalon al
+  cruzar una seccion de la PVS (o cada `TOPE_SIN_SEC`, 60, cuadros sin cambiar de seccion), con histeresis: sube al
+  llegar el nivel al escalon siguiente y baja si queda medio escalon por debajo.
+- Los objetos de la union (`bo`), `ta_freno` y `ta_cabe` siguen como antes; el tope total del TA no cambia.
+- `-DTOPE_FIJO=0`: lo de antes. `-DDIAG_POPPING` anade la linea `POPTOPE:` (cambios del tope por s, los que no
+  coinciden con un cruce de seccion, minimo y maximo, reservas y `salto_ta`).
+
+Medida: `-DPRUEBA_AUTO -DPRUEBA_NODO=n -DPRUEBA_SIN_TIEMPO -DDIAG_MS -DDIAG_POPPING` con `-DTOPE_FIJO=0` y `=1` (el
+mismo codigo), datos lgdat2 (sin datos nuevos), 140 s con el piloto automatico (paso 10), tres Flycast a la vez.
+Saltos por s de 8 px o mas / de 32 px o mas (todas las razones; "tope" aparte), solo las lineas de la zona del nodo.
+Valores definitivos (reserva en pasos de 16 KB, bajada tras 16 secciones al 90 %):
+
+| Etapa | TOPE_FIJO | fps | tarde (%) | 8 px+ | 32 px+ | tope +8/32 -8/32 | cambios del tope / s | reserva media |
+|---|---|---|---|---|---|---|---|---|
+| GHOS (9) | 0 | 37,46 | 113 (4,7) | 22,9 | 3,5 | +10,5/0,8 -3,8/0,1 | 37,9 | (variable) |
+| GHOS (9) | 1 | 37,58 | 105 (4,3) | 21,7 | 3,2 | +9,9/0,7 -3,5/0,1 | 0,4 | 817 KB |
+| METR (11) | 0 | 33,83 | 337 (13,4) | 22,2 | 6,9 | +8,0/1,7 -2,1/0,3 | 33,1 | (variable) |
+| METR (11) | 1 | 34,08 | 290 (12,4) | 20,9 | 5,3 | +8,3/1,6 -2,2/0,4 | 0,7 | 863 KB |
+| PALM (0) | 0 | 37,44 | 120 (4,7) | 25,4 | 5,6 | +16,0/4,1 -4,8/0,5 | 19,2 | (variable) |
+| PALM (0) | 1 | 37,42 | 123 (4,8) | 26,9 | 6,0 | +16,8/4,5 -4,7/0,4 | 0,7 | 817 KB |
+| INDU (7) | 0 | 37,99 | 121 (3,6) | 21,0 | 5,2 | +8,6/1,4 -4,7/0,5 | 18,8 | (variable) |
+| INDU (7) | 1 | 37,99 | 119 (3,5) | 20,0 | 5,0 | +8,2/1,4 -4,5/0,4 | 1,2 | 791 KB |
+| Suma de las 4 | 0 | | | 91,5 | 21,2 | | | |
+| Suma de las 4 | 1 | | | 89,5 | 19,5 | | | |
+
+- Medido: el tope ya no cambia en cada cuadro (de 19-38 cambios por s a 0,4-1,2). El total de saltos baja un 2 % en
+  8 px (91,5 -> 89,5) y un 8 % en 32 px (21,2 -> 19,5); por etapa baja en GHOS, METR e INDU y sube en PALM (+1,5 / +0,4).
+  fps: +0,12, +0,25, -0,02 y 0,00; cuadros tarde: -7 %, -14 %, +2,5 % y -2 %. Criterio (bajar el total de 8 px o de
+  32 px sin perder mas de 0,3 fps ni subir mas de un 10 % los cuadros tarde en ninguna): cumplido, queda ACTIVO.
+- Primera version (descartada): reserva con 1/16 de margen y bajada solo tras 64 secciones por debajo del 80 %. En PALM
+  la reserva de la salida (1096 KB) tardaba en bajar; suma 90,4 -> 90,8 (8 px) y 19,6 -> 20,6 (32 px), PALM 24,5 ->
+  27,7. No cumplia.
+- Ruido: con `TOPE_FIJO=0` las dos tandas dan 23,3 / 22,9 (GHOS), 22,3 / 22,2 (METR), 24,5 / 25,4 (PALM) y 20,3 /
+  21,0 (INDU) saltos de 8 px por s: la carrera no se repite del todo (el trafico y la razon "detras" cambian). La
+  mejora de la suma (-2,0 en 8 px) es del orden de ese ruido, y casi toda la de 32 px (-1,7) viene de la razon
+  "detras" de METR (+2,1/1,5 por s con `TOPE_FIJO=0`, que la otra tanda y `TOPE_FIJO=1` no tienen): sin ella las sumas
+  quedan 89,4 / 19,7 frente a 89,5 / 19,5, practicamente iguales. Se deja activo porque cumple el criterio, el tope es
+  estable de verdad (la columna de cambios) y fps y cuadros tarde no empeoran, pero la mejora del popping en Flycast es
+  marginal. SUPUESTO: en la consola
+  real, donde el TA si limita, el tope estable deberia notarse mas; sin medir.
+- La razon "tope" casi no cambia (desapariciones de 8 px: 3,8 -> 3,5, 2,1 -> 2,2, 4,8 -> 4,7 y 4,7 -> 4,5 por s): la
+  estimacion de la propuesta (un tercio a la mitad menos) no se cumple en Flycast; lo que baja es sobre todo lo de 32 px
+  de otras razones. Las apariciones del "tope" al acercarse siguen (el reparto sigue cortando por coste): P2/P3.
+- Ficheros de la medida: `m298/p1/` del directorio de trabajo (medidas.txt, res/flycast_p1b_<nodo>_<0|1>.txt).
+
 ### Coche visible mas ligero (Rev 2.9.7)
 
 Pedido del usuario (variante "C2", para reducir los saltos): menos poligonos y texturas en las partes VISIBLES de los
