@@ -6904,6 +6904,9 @@ static void viso_lee(void)
 #endif
 static uint8_t *rsec_dat; static const int8_t *rsec_m[CURSO_MAX]; static uint32_t rsec_n[CURSO_MAX];
 static const uint16_t *rsec_lej[CURSO_MAX];                     /* (Rev 2.9.8 P5, LEJ_SEC: el lejano de la seccion, m) */
+/* (revision de la 2.9.8: el trozo [o, o + 2 n) dentro del fichero sin desbordar en 32 bits; n, como mucho 65536
+   secciones) */
+#define RSEC_DENTRO(o, n) ((o) <= sz && (n) <= 65536u && 2u * (n) <= sz - (o))
 static void repsec_lee(void)
 {
     uint32_t sz, n, i, k, tot = 0, s[4], e, v2; uint8_t *b, *p;
@@ -6918,18 +6921,18 @@ static void repsec_lee(void)
     memcpy(&n, b + 4, 4);
     for (k = 0; k < (uint32_t)ncurso; k++) for (i = 0; i < n && 8 + e * i + e <= sz; i++) {
         memcpy(s, b + 8 + e * i, e);
-        if (s[0] == curso[k].seg && s[2] + 2 * s[1] <= sz) { tot += (v2 ? 4 : 2) * s[1]; break; }
+        if (s[0] == curso[k].seg && RSEC_DENTRO(s[2], s[1])) { tot += (v2 ? 4 : 2) * s[1]; break; }
     }
     if (tot && (rsec_dat = malloc(tot))) {
         p = rsec_dat;
         for (k = 0; k < (uint32_t)ncurso; k++) for (i = 0; i < n && 8 + e * i + e <= sz; i++) {
             uint32_t j; memcpy(s, b + 8 + e * i, e);
-            if (s[0] != curso[k].seg || s[2] + 2 * s[1] > sz) continue;
+            if (s[0] != curso[k].seg || !RSEC_DENTRO(s[2], s[1])) continue;
             for (j = 0; j < k; j++) if (curso[j].seg == curso[k].seg && rsec_m[j]) break;   /* (la misma etapa: la misma) */
             if (j < k) { rsec_m[k] = rsec_m[j]; rsec_n[k] = rsec_n[j]; rsec_lej[k] = rsec_lej[j]; break; }
             memcpy(p, b + s[2], 2 * s[1]); rsec_m[k] = (const int8_t *)p; rsec_n[k] = s[1]; p += 2 * s[1];
             if (v2) {                                           /* (2 * s[1] es par: el u16 queda alineado) */
-                if (s[3] && s[3] + 2 * s[1] <= sz) { memcpy(p, b + s[3], 2 * s[1]); rsec_lej[k] = (const uint16_t *)p; }
+                if (s[3] && RSEC_DENTRO(s[3], s[1])) { memcpy(p, b + s[3], 2 * s[1]); rsec_lej[k] = (const uint16_t *)p; }
                 p += 2 * s[1];
             }
             break;
