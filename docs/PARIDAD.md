@@ -1987,6 +1987,140 @@ Medido (cuadro congelado, BEAC s 95, 24 px o mas):
 
 Resultados en m299/diag del directorio de trabajo (capturas, tablas, consolas).
 
+### Rev 2.9.9: que no falten edificios
+
+Queja (captura del usuario en el Flycast de Android, parado en la salida, 0'10"963, F50): "faltan edificios enteros,
+no cargan bien, lo estas gestionando mal". El diagnostico (seccion de arriba, `-DDIAG_FALTA`) encontro tres causas:
+el salto adaptativo recortaba el lejano y el tope del TA segun el tiempo del cuadro; cuando el reparto no cabia,
+`ta_cabe` tiraba mallas sueltas en el orden de envio (por textura), y de un edificio quedaba el piso de arriba
+flotando; y el reparto quitaba antes lo grande con muchos vertices que lo pequeno y barato. Principio (Crazy Taxi, Rev
+2.9.8): lo que se dibuja depende de la posicion y de la vista, no del tiempo medido ni de la carga del cuadro
+anterior; si no cabe, se quita lo pequeno y lejano por nodos enteros y lo grande que tiene version lejana se cambia
+por ella. Todo es DESVIACION (el original no tiene tope del TA). Todo medido en el Flycast de aqui, NO en la consola
+ni en Android.
+
+#### Cambios (`demo/main.c`)
+
+- `SALTO_GEOM` (0 por defecto; 1 = lo de antes): el nivel del salto adaptativo ya no toca lo que se dibuja (ni
+  `salto_ta`, el tope del TA al 94/87/80 %, ni el lejano, que bajaba hasta 1200 m). Queda la cadencia de presentacion
+  (`pres_espera`) y la logica a 59,94 pasos por segundo. Con el coche parado el cuadro de Flycast cuesta 24-26 ms y el
+  nivel subia a 7-9: en una maquina lenta (Android) el reparto se quedaba en su minimo.
+- `CORTE_NODO` (1): `corte_nodos`, despues del reparto y antes de enviar nada, suma lo que va a costar cada nodo
+  visible (TA y vertices): lo que costo de verdad en el cuadro anterior si se dibujo (`dibuja_etapa` lo apunta en
+  `cn_ult` / `cn_vult`, por nodo y tramo) o, si es nuevo, su coste teorico de lo que deja la PVS por `ta_f` y por lo que
+  la vista recorta de media (`prio_alfa` x 1,1; cerca de la camara, por el factor de lo que no va por la directa medido,
+  `cn_ns_f`). Si no cabe en el tope de la etapa (las tres listas, sin el cielo del cuadro anterior y con un 3 % de
+  margen, `CORTE_MARGEN`) quita NODOS ENTEROS por la clase de LOD del reparto (tamano en la pantalla: lo pequeno y
+  lejano primero); lo de menos de 16 m (`CORTE_CERCA_CD`) nunca, salvo que ni eso quepa (entonces solo por la clase de
+  LOD). Los de un grupo (`tools/grupos_nodos.py`, los pisos de un edificio) llevan la misma clase y van o se quitan
+  juntos. Con el corte hecho, `dibuja_etapa` ya no reparte el tope entre las listas (`cn_activo`: sin la reserva de
+  las listas 1 y 2) y el tope de vertices tiene un 12,5 % de holgura (`CORTE_VTX_HOLGURA`; es tiempo de CPU, no
+  cuelga nada): `ta_cabe` no parte edificios. Una primera version que contaba las mallas una a una costaba ~3 ms por
+  cuadro en PALM (descartada).
+- Presupuesto de lo pequeno (`CORTE_GRANDE_PX` 24, `CORTE_PEQ_TA`, `CORTE_PEQ_VTX`): lo que mide menos de 24 px de
+  radio en la pantalla (y no es de un grupo) solo cabe en el tope de la 2.9.8 (`ta_f` 448 y 20000 vertices); el sitio
+  de mas solo lo gasta lo grande. Sin esto la geometria pequena y lejana crecia y el cuadro costaba ~0,4 fps mas (PALM,
+  CLOU).
+- `LEJ_EN_TOPE` (1): lo que el reparto (`nodos_quita`) o `corte_nodos` quitan y tiene version lejana (lowpoly de lo
+  grande de `tools/lod_grande.py`, cartel de la vegetacion de `tools/lod_veg.py`) va con ella si cabe en lo que sobra,
+  de lo mayor a lo menor; no los de un grupo (el lowpoly de un piso sin la base quedaba flotando: visto con `ta_f`
+  576). Esas versiones no cuentan como "ya se dibujaba" para el nodo completo en el cuadro siguiente (`lq_marca` /
+  `lq_ant`): si contaran, el completo entraba con la clase rebajada y el reparto se hundia (medido: `prio_p` -1).
+- Reparto (`nodos_visibles`): lo de 24 px o mas (`REPARTO_COSTE_PX`) no se penaliza por sus vertices
+  (`REPARTO_COSTE`), y si su umbral de LOD es bajo va con la clase de su tamano (umbral 6): un edificio grande ya no se
+  quita antes que lo pequeno y barato.
+- `TA_F_MIN` 400 (1,5625; antes 448 = 1,75) y `TA_F_SEGURO` (1): `ta_f` solo sigue al registro de la consola
+  (`TA_ITP_CURRENT`) con cuadros que llenan al menos el 25 % del bufer (`TA_F_LLENO`), con un 10 % de margen
+  (`TA_F_MARGEN`, antes 20 %) y sin bajar. En Flycast (sin el registro: `TA_ITP_CURRENT` = `TA_ISP_BASE`, comprobado en
+  su codigo, pvr_regs.cpp) se queda en 400.
+- `VTX_ETAPA_MAX` 24000 (antes 20000): en la salida de BEAC parado, con `ta_f` 400, los vertices eran lo primero que se
+  acababa.
+
+#### Medida
+
+Flags: `-DPRUEBA_AUTO -DPRUEBA_NODO=n -DPRUEBA_SIN_TIEMPO -DDIAG_MS -DDIAG_POPPING -DDIAG_FALTA`, 140 s con el piloto
+automatico (paso 10), tres Flycast a la vez (:90 :91 :92, como la tanda del diagnostico). "Antes" = faa81ea (2.9.8 con
+el diagnostico; m299/diag/etapas/flycast_f*), "despues" = la punta. "Grandes que faltan" = media por muestra de
+nodos y mallas de 24 px o mas de radio que estan en la vista (hasta LEJOS_MAX) y no se dibujan, por las razones que
+son faltas de verdad (lejos, tope, tramo, ta_cabe, vtx, m_lejos, ltope...). No cuenta "rama" (registros de la union que
+el original tampoco dibuja), ni "pvs" / "pvsm" (oclusion precalculada; SUPUESTO que es correcta, no se ha comprobado
+pixel a pixel): esas dos van en la ultima columna. "999 px": la esfera envuelve la camara.
+
+| Etapa | fps antes | fps despues | dif | tarde antes / despues | lejano antes / despues | grandes que faltan antes | despues (razon) | mayor antes / despues (px) | pvs+rama antes / despues |
+|---|---|---|---|---|---|---|---|---|---|
+| PALM (0) | 36,18 | 34,35 | -1,82 | 189 / 295 | 1592 / 3800 | 22,78 (lejos 10,22, tope 8,16, tramo 1,93, ta_cabe 0,31, m_lejos 1,98, entrada 0,17) | 2,02 (tope 0,92, tramo 0,94, entrada 0,16) | 999 / 999 | 36,5 / 43,9 |
+| LAKE (1) | 38,55 | 37,24 | -1,31 | 61 / 141 | 2578 / 3800 | 3,68 (lejos 0,17, tope 2,33, ta_cabe 0,55, vtx 0,04, m_lejos 0,60) | 0,86 (tope 0,21, tramo 0,65) | 135 / 999 | 29,1 / 28,4 |
+| ALPI (2) | 38,29 | 38,18 | -0,11 | 97 / 84 | 2653 / 3800 | 3,12 (lejos 0,00, tope 1,44, tramo 1,42, ta_cabe 0,23, m_lejos 0,02) | 0,03 (tope 0,03) | 999 / 27 | 53,3 / 61,4 |
+| CAST (3) | 38,00 | 36,53 | -1,48 | 108 / 201 | 1907 / 3800 | 10,67 (lejos 3,69, tope 5,76, tramo 0,39, ta_cabe 0,82) | 1,59 (tope 0,76, tramo 0,81, entrada 0,02) | 209 / 999 | 88,5 / 87,4 |
+| FORE (4) | 38,95 | 38,61 | -0,35 | 39 / 56 | 2914 / 3800 | 0,20 (tope 0,10, tramo 0,10) | 0,42 (tramo 0,42) | 999 / 210 | 101,3 / 100,0 |
+| DESE (5) | 38,49 | 38,04 | -0,45 | 86 / 105 | 3082 / 3800 | 5,68 (tope 2,48, tramo 2,19, ta_cabe 0,01, vtx 0,87, entrada 0,12) | 1,67 (tope 0,01, tramo 1,66) | 999 / 999 | 61,6 / 65,9 |
+| CLOU (6) | 35,56 | 33,45 | -2,11 | 202 / 397 | 1684 / 3800 | 13,15 (lejos 5,27, tope 7,43, ta_cabe 0,27, vtx 0,01, m_lejos 0,17) | 4,35 (tope 3,05, tramo 1,22, entrada 0,08) | 172 / 999 | 33,1 / 30,2 |
+| INDU (7) | 37,20 | 35,54 | -1,65 | 107 / 212 | 2057 / 3800 | 17,78 (lejos 13,53, tope 1,83, ta_cabe 2,41, m_lejos 0,01) | 0,03 (tope 0,03) | 176 / 61 | 113,9 / 117,5 |
+| SNOW (8) | 38,22 | 38,52 | +0,30 | 103 / 70 | 2905 / 3800 | 7,39 (lejos 0,01, tope 4,79, tramo 2,04, ta_cabe 0,46, vtx 0,07, entrada 0,01) | 3,95 (tope 3,82, tramo 0,13) | 310 / 217 | 39,5 / 43,9 |
+| GHOS (9) | 36,68 | 36,09 | -0,59 | 130 / 205 | 1687 / 3800 | 10,50 (lejos 6,72, tope 2,16, ta_cabe 1,62) | 0,77 (tope 0,34, tramo 0,43) | 114 / 136 | 51,8 / 52,0 |
+| TULI (10) | 37,39 | 36,25 | -1,14 | 103 / 188 | 1737 / 3686 | 6,10 (lejos 0,08, tope 3,50, tramo 0,01, ta_cabe 2,52) | 0,11 (tope 0,11) | 999 / 38 | 49,9 / 45,4 |
+| METR (11) | 31,87 | 31,34 | -0,53 | 538 / 430 | 1937 / 3722 | 8,55 (lejos 2,09, tope 3,42, tramo 0,10, ta_cabe 0,40, m_lejos 2,55) | 0,42 (tope 0,42) | 256 / 99 | 97,6 / 94,2 |
+| RUIN (12) | 38,54 | 38,41 | -0,13 | 65 / 85 | 2727 / 3573 | 12,93 (tope 2,19, tramo 0,07, ta_cabe 9,83, vtx 0,83) | 3,74 (tope 3,49, ta_cabe 0,24) | 999 / 999 | 13,2 / 14,2 |
+| IMPE (13) | 38,10 | 37,12 | -0,98 | 79 / 146 | 2255 / 3596 | 4,61 (tope 3,10, ta_cabe 1,45, vtx 0,06) | 0,21 (tope 0,21) | 282 / 51 | 46,1 / 45,4 |
+| CAPE (14) | 38,75 | 38,31 | -0,44 | 85 / 92 | 2750 / 3599 | 1,60 (tope 1,40, ta_cabe 0,06, vtx 0,01, m_lejos 0,13) | 0,01 (tramo 0,01) | 164 / 255 | 109,3 / 105,3 |
+| **Media / suma** | 37,38 | 36,53 | -0,85 | 1992 / 2707 (+36 %) | | 128,73 (suma) | 20,19 (suma) | | |
+
+Cuadro congelado de la captura del usuario (BEAC, arbol 1, F50, parado en s 95: `-DPRUEBA_CURSO=1 -DPRUEBA_NODO=0
+-DPRUEBA_FICHA=7 -DPRUEBA_PARADO -DPRUEBA_PARA_S=95 -DDIAG_CONGELA=658`; lo de 24 px o mas que falta en el cuadro):
+
+| Variante | ta_f | tope de la etapa | nodos que faltan (tope / lejos) | mallas (ta_cabe / m_lejos) | pvs / pvsm |
+|---|---|---|---|---|---|
+| 2.9.8 aqui (salto 7,4: lejano 1853 m, TA al 80 %) | 448 | 794K | 19 (hasta 36 px) / 16 (hasta 58 px) | 0 / 7 | 12 / 13 |
+| 2.9.8 con `-DTA_F_MIN=576` | 576 | 720K | 28 (hasta 124 px) / 0 | 85 (hasta 247 px) / 0 | 12 / 11 |
+| 2.9.8 con 640 y la maquina lenta | 640 | 512K | 30 (hasta 197 px) / 30 (hasta 155 px) | 1 / 6 | 8 / 9 |
+| **2.9.9 por defecto** | 400 | 1088K | **0 / 0** | **0 / 0** | 8 / 11 |
+| 2.9.9 con la maquina lenta (`-DDIAG_RETARDO=12000`) | 400 | 1088K | 0 / 0 (la misma imagen) | 0 / 0 | 8 / 11 |
+| 2.9.9 en s 75 (cerca de donde estaba el usuario; 09c2bde) | 400 | 1088K | 0 / 0 | 0 / 0 | 14 / 16 |
+| 2.9.9 con `-DTA_F_MIN=576` | 576 | 800K | 129 (hasta 111 px) / 0 | 0 / 0 | 12 / 3 |
+
+Imagenes: m299/fix/comp_final_beac_s95.jpg (usuario, 2.9.8 aqui, 2.9.8 con ta_f 576; 2.9.9 por defecto, con la
+maquina lenta y con ta_f 576).
+
+**Medido**
+- Los grandes que faltan bajan de 128,7 a 20,2 por muestra (suma de las 15 etapas). Desaparecen del todo
+  lejos (41,8), m_lejos (5,5), ta_cabe (21,0: nunca mas un piso flotando) y vtx (1,9).
+- Lo que queda: "tope" (lo que no cabe ni con la version lejana: sobre todo SNOW y RUIN al salir, donde la vista pide
+  mas de 24000 vertices) y "tramo" (la union o la etapa siguiente a la vista antes de acabar de subir; depende de la
+  carga del GD, no del reparto).
+- En la captura del usuario: ningun edificio que falte por el reparto (1 nodo de 24 px, el skyline lejano) y la imagen
+  es la misma con la maquina lenta (`-DDIAG_RETARDO=12000`): ya no depende del tiempo. En la carrera con la maquina
+  lenta (PALM y METR, 12 ms mas por cuadro; 09c2bde) faltan lo mismo que a velocidad normal (PALM 2,40: tope 1,58,
+  tramo 0,67; METR 0,34: tope), frente a 23,0 y 8,1 de la 2.9.8 lenta (lejos, tope, ta_cabe y m_lejos); fps 24,27 y
+  21,75 frente a 25,17 y 22,30.
+- Con `-DTA_F_MIN=576` (una consola que gastara 2,25 veces la cuenta) no cabe: faltan nodos enteros (129 de hasta 111
+  px) y ninguna malla suelta (ta_cabe 0, antes 85 de hasta 247 px). Pero queda un caso de trozo flotando: el tejado de
+  la torre gris de detras del edificio amarillo es un nodo aparte y sus pisos (nodos 572-575, sin grupo en los datos:
+  `tools/grupos_nodos.py` no los junta) se quitan uno a uno; el tejado, que cabe, se queda en el aire
+  (m299/fix/g576_vs_nl.jpg; con `-DLEJ_EN_TOPE=0` cabe la torre y no pasa). Con el `ta_f` por defecto no ocurre.
+  Arreglarlo del todo pide juntar esos pisos en los datos (`tools/regenera.py --interno grupos`), no hecho aqui.
+- Coste: -0,85 fps de media (37,38 -> 36,53; de +0,30 en SNOW a -2,11 en CLOU) y +36 % de cuadros tarde (1992 -> 2707); lo que mas pierde son las etapas en las que el salto quitaba mas (PALM, CLOU, INDU, CAST, LAKE: -1,3 a -2,1). Por partes (PALM, ms por cuadro, PRF de DIAG_MS): el reparto y `corte_nodos` 3,84 frente a 3,79,
+  la etapa 9,22 frente a 7,87 (8,75 con solo el salto quitado, `-DSALTO_OBS=0` del diagnostico): ~0,9 ms es dibujar
+  lo que el salto quitaba y ~0,5 ms lo grande que antes no cabia.
+- El objetivo era no perder mas de 0,5 fps de media ni subir los cuadros tarde mas de un 15 %: NO se cumple. Se ha
+  elegido que no falten edificios, lo que pidio el usuario: con el salto quitando geometria otra vez se recuperaria
+  ~0,9 fps en las etapas cargadas a costa de volver a perder el lejano y el tope en las maquinas lentas.
+
+**Supuesto (no comprobado)**
+- Que en el Flycast de Android pase lo mismo que aqui: se supone que el registro del TA tampoco se lleva (mismo
+  codigo de Flycast) y que lo que veia el usuario era el salto (maquina lenta: tope al 80 % y lejano a 1200-1850 m) mas
+  `ta_cabe`. No se ha probado en Android.
+- La consola real: `ta_f` 1,5625 deja un 16 % sobre el 1,34 medido en la demo 12c (que era "al menos"); si la consola
+  gastara mas de ~1,6 veces la cuenta, el primer cuadro cargado antes de que `ta_f` suba podria llenar el bufer. Hace
+  falta la foto de la linea TA de la pausa (Y) en la consola. 24000 vertices: mas CPU por cuadro en la consola, sin
+  medir alli.
+- Que "pvs" / "pvsm" sea oclusion correcta.
+- Los interruptores de la 2.9.8 que estaban apagados (REPARTO_SEC, LEJ_SEC, COCHE_TRASERO, SUBE_DMA) siguen apagados:
+  no se han medido con estos cambios. LEJ_SEC bajaria el lejano (faltas "lejos" otra vez); REPARTO_SEC daria un corte
+  fijo por seccion, pero el que manda ahora es `corte_nodos`.
+
+Ficheros: m299/fix/ del directorio de trabajo (tabla_final.md, comp_final_beac_s95.jpg, etapas/ las consolas de la
+tanda final, res/ las de los congelados, sh/ y py/: comp.py, cong.py, prf.py).
+
 ### Coche visible mas ligero (Rev 2.9.7)
 
 Pedido del usuario (variante "C2", para reducir los saltos): menos poligonos y texturas en las partes VISIBLES de los
