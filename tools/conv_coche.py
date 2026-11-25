@@ -10,7 +10,9 @@ Uso:
       (las mallas que no se ven desde la persecucion con el bit NODO_CERCA: parte_carrera). Rev 2.9.6, DESVIACION
   --visible (implica --rebaja; con --todos): ademas COCHEnnL.DAT, el ligero de la carrera (variante C2): sin lo oculto
       siempre, menos triangulos en lo que se ve (simplifica) y las texturas visibles grandes a la mitad (clase
-      'visible'); con --modelo, solo el ligero en <salida.dat>. Rev 2.9.7, DESVIACION
+      'visible'); con --modelo, solo el ligero en <salida.dat>. Rev 2.9.7, DESVIACION. Rev 2.9.8 (P3, DESVIACION): en el
+      ligero, ademas, lo que no se ve desde el cono trasero en tiras aparte con NODO_TRASERO (parte_trasera; --sin-trasero:
+      sin eso, como en la 2.9.7)
 
 Montaje (todo se lee del disco al convertir; aqui no hay datos del juego): el de 46A560 (el coche en la seleccion; en
 carrera 46AE70 / 469600 hacen lo mismo) portado tal cual en llamadas(): pila de matrices del PC (Pila), piezas en su
@@ -648,6 +650,45 @@ CERCA_MIN = 4
 def camaras_carrera():
     return camaras(False)[48:]                                  # sin las 48 de la seleccion ni la vuelta baja
 
+def separa(mod, vis, marca):
+    """parte las tiras de mod: lo de vis (por triangulo, en el orden de triangulos()) queda como estaba y lo demas va
+    en tiras aparte con marca = True en el extra (cerca: NODO_CERCA, variante B; tras: NODO_TRASERO, Rev 2.9.8 P3);
+    huecos de 2 como en vacia y 1 o 2 triangulos sueltos en las puntas se quedan (partir cuesta 2 vertices)"""
+    V = np.concatenate(mod.verts); nuevas = []; verts = []; nv = 0; ti = 0
+    def tira(x, a, b, cerca):                                   # triangulos a..b de la malla x (vertices a..b+2)
+        nonlocal nv
+        j = a
+        while j <= b:
+            e = min(b, j + 256 - 3)
+            q = V[x[4] + j:x[4] + e + 3].copy(); verts.append(q)
+            P = np.stack([q['x'], q['y'], q['z']], 1).astype(float); cc = P.mean(0)
+            nuevas.append([x[0], x[1], cc, float(np.sqrt(((P - cc) ** 2).sum(1).max())), nv, len(q), x[6], x[7], x[8],
+                           dict(x[9], N=x[9]['N'][j:e + 3], **{marca: cerca})])
+            nv += len(q); j = e + 1
+    for x in mod.mallas:
+        n = x[5]; v = vis[ti:ti + n - 2]; ti += n - 2
+        if n < 3: tira(x, 0, -1, False); continue
+        tramos = []; a = None; oc = 0                           # lo de vis: como vacia (huecos de 2)
+        for j in range(n - 2):
+            if v[j]:
+                if a is None: a = j
+                b = j; oc = 0
+            elif a is not None:
+                oc += 1
+                if oc > 2: tramos.append((a, b)); a = None; oc = 0
+        if a is not None: tramos.append((a, b))
+        if tramos and tramos[0][0] <= 2: tramos[0] = (0, tramos[0][1])          # 1 o 2 triangulos sueltos en las
+        if tramos and tramos[-1][1] >= n - 5: tramos[-1] = (tramos[-1][0], n - 3)   # puntas: no vale la pena partir
+        dentro = np.zeros(n - 2, bool)
+        for a, b in tramos: dentro[a:b + 1] = True; tira(x, a, b, False)
+        j = 0
+        while j < n - 2:                                        # lo demas: aparte, con la marca
+            if dentro[j]: j += 1; continue
+            k = j
+            while k + 1 < n - 2 and not dentro[k + 1]: k += 1
+            tira(x, j, k, True); j = k + 1
+    mod.mallas, mod.verts, mod.nv = nuevas, verts, nv
+
 def parte_carrera(A, mod, m, res=(640, 480), minimo=CERCA_MIN):
     T, dueno = triangulos(mod)
     grupo = np.array([mod.mallas[k][9].get('grupo', NADA) for k in dueno])
@@ -662,41 +703,162 @@ def parte_carrera(A, mod, m, res=(640, 480), minimo=CERCA_MIN):
         cuenta += c
     vis = (cuenta >= minimo) | ((grupo != NADA) & (grupo != G_DISCO) & (grupo != G_DISCO_CAL)) | fuera
     n0 = vertices_carrera(mod)
-    V = np.concatenate(mod.verts); nuevas = []; verts = []; nv = 0; ti = 0
-    def tira(x, a, b, cerca):                                   # triangulos a..b de la malla x (vertices a..b+2)
-        nonlocal nv
-        j = a
-        while j <= b:
-            e = min(b, j + 256 - 3)
-            q = V[x[4] + j:x[4] + e + 3].copy(); verts.append(q)
-            P = np.stack([q['x'], q['y'], q['z']], 1).astype(float); cc = P.mean(0)
-            nuevas.append([x[0], x[1], cc, float(np.sqrt(((P - cc) ** 2).sum(1).max())), nv, len(q), x[6], x[7], x[8],
-                           dict(x[9], N=x[9]['N'][j:e + 3], cerca=cerca)])
-            nv += len(q); j = e + 1
-    for x in mod.mallas:
-        n = x[5]; v = vis[ti:ti + n - 2]; ti += n - 2
-        if n < 3: tira(x, 0, -1, False); continue
-        tramos = []; a = None; oc = 0                           # lo de carrera: como vacia (huecos de 2)
-        for j in range(n - 2):
-            if v[j]:
-                if a is None: a = j
-                b = j; oc = 0
-            elif a is not None:
-                oc += 1
-                if oc > 2: tramos.append((a, b)); a = None; oc = 0
-        if a is not None: tramos.append((a, b))
-        if tramos and tramos[0][0] <= 2: tramos[0] = (0, tramos[0][1])          # 1 o 2 triangulos sueltos en las
-        if tramos and tramos[-1][1] >= n - 5: tramos[-1] = (tramos[-1][0], n - 3)   # puntas: no vale la pena partir
-        dentro = np.zeros(n - 2, bool)
-        for a, b in tramos: dentro[a:b + 1] = True; tira(x, a, b, False)
-        j = 0
-        while j < n - 2:                                        # lo demas: solo de cerca
-            if dentro[j]: j += 1; continue
-            k = j
-            while k + 1 < n - 2 and not dentro[k + 1]: k += 1
-            tira(x, j, k, True); j = k + 1
-    mod.mallas, mod.verts, mod.nv = nuevas, verts, nv
+    separa(mod, vis, 'cerca')
     print('   carrera: %d -> %d vertices (en la seleccion %d)' % (n0, vertices_carrera(mod), vertices_dibujados(mod)))
+
+# ------------------------------------------------------------------ coche trasero segun la camara (Rev 2.9.8 P3, DESVIACION)
+# Tecnica de Crazy Taxi (0x8c0200e4..0x8c02017c: el cuerpo "bajo", sin el frontal, cuando la camara esta detras; aqui solo
+# la idea, nada de su codigo ni de sus datos). Con --visible (y sin --sin-trasero), en el ligero COCHEnnL.DAT: los
+# triangulos que no se ven desde ninguna camara del cono trasero van en tiras aparte (separa, huecos de 2) con el bit
+# NODO_TRASERO en el campo del nodo, al final de su lista y textura (orden: lista, textura, trasero; ver convierte). La demo no las
+# envia con la camara dentro del cono (demo/main.c coche_trasero, -DCOCHE_TRASERO); fuera de el, en la vista interior,
+# la salida, la meta, el salon y los finales va todo. El original dibuja el coche entero.
+#  - El cono, en el marco del coche (el morro es -z, detras +z) y desde su origen: guinada del ojo 180 +- TRAS_GUINADA
+#    (35 grados) contada desde el morro; cabeceo de la camara de TRAS_CAB (-65..+5 grados: el ojo de 5 grados por debajo
+#    a 65 por encima); alabeo +-TRAS_ALABEO (35) y el ojo a TRAS_DMIN (3 m) o mas. Lo que se ve desde un ojo no depende
+#    de hacia donde mire la camara (si el coche cabe en la imagen): cada camara del cono mira al centro del coche con el
+#    campo justo para que quepa, a distancias TRAS_DIST (de 3 a 60 m, casi una proyeccion paralela), guinada y cabeceo
+#    cada TRAS_PASO grados, alabeo 0 y en los bordes +-35 (camaras_trasero). Por las 6 posturas de poses().
+#  - Z-buffer por software (tools/c/visible.c, el de vacia y parte_carrera): tapa lo opaco de la lista 0 sin grupo; los
+#    cristales, recortes, luces y la sombra no tapan pero se miran. El habitaculo (G_INTERIOR, solo la vista interior) y
+#    la sombra plana (P_SOMBRA: va en el suelo, fuera de car+F0) no se separan.
+#  - Borde (TRAS_ANILLO, 1): pasa a visible el triangulo oculto que comparte un vertice (posicion a 1 mm) con uno
+#    visible: las astillas entre los angulos de la rejilla estan en el borde de lo que se ve. Sin el borde se separaba
+#    el 4,6-6,8 % de los vertices pero la comprobacion encontraba 1-8 triangulos traseros que asomaban (aun con las
+#    rondas); con el borde por aristas (y no por vertices), 2,3 % y 5 que asomaban (modelo 9); con el de vertices, 0.
+#  - Rondas (TRAS_RONDAS, 4): con camaras y posturas al azar dentro del cono, lo que asoma pasa a visible (astillas de la
+#    carroceria entre los angulos de la rejilla, que la primera version dejaba: 2-8 triangulos por coche).
+#  - comprueba_trasero: otras camaras al azar dentro del cono (distancias, guinada, cabeceo, alabeo y punto al que
+#    miran entre las de la rejilla) y posturas al azar (giro de las ruedas, direccion, volante, aleron y faros entre los
+#    de poses()) a 1280x960: los triangulos NODO_TRASERO que ganan algun pixel (0 = la imagen dentro del cono es la
+#    misma con y sin ellos).
+NODO_TRASERO = 0x20000
+TRAS_GUINADA, TRAS_CAB, TRAS_ALABEO, TRAS_DMIN = 35.0, (-65.0, 5.0), 35.0, 3.0
+TRAS_DIST = (3.0, 3.6, 4.5, 5.5, 7.0, 9.0, 13.0, 20.0, 60.0)
+TRAS_PASO = 5.0
+TRAS_RONDAS = 4                 # rondas al azar de parte_trasera
+TRAS_ANILLO = 1                 # anillos de triangulos visibles anadidos al borde de lo oculto
+
+def mira_t(ojo, punto, alabeo=0.0, th=0.75):
+    """como mira con alabeo (radianes, giro de la camara sobre su eje) y la tangente del medio angulo horizontal th"""
+    f = np.array(punto, float) - ojo; f /= np.linalg.norm(f)
+    r = np.cross(f, [0, 1, 0]); r /= np.linalg.norm(r); u = np.cross(r, f)
+    r, u = r * np.cos(alabeo) + u * np.sin(alabeo), u * np.cos(alabeo) - r * np.sin(alabeo)
+    tv = th * 0.75
+    M = np.zeros((4, 4))
+    M[:3, 0] = r / th; M[:3, 1] = u / tv; M[:3, 2] = f; M[:3, 3] = f
+    M[3, 0] = -(ojo @ r) / th; M[3, 1] = -(ojo @ u) / tv; M[3, 2] = M[3, 3] = -(ojo @ f)
+    return M.astype(np.float32)
+
+def _ojo_t(d, gui, cab):
+    """el ojo a d m del origen del coche con la guinada gui (0 = detras, +z) y el cabeceo de la camara cab (grados;
+    negativo = mira hacia abajo: el ojo por encima)"""
+    g, e = np.radians(gui), np.radians(-cab)
+    return np.array([d * np.cos(e) * np.sin(g), d * np.sin(e), d * np.cos(e) * np.cos(g)])
+
+def _encuadre(mod):
+    V = np.concatenate(mod.verts); P = np.stack([V['x'], V['y'], V['z']], 1).astype(float)
+    c = (P.min(0) + P.max(0)) / 2; return c, float(np.sqrt(((P - c) ** 2).sum(1).max())) + 0.3
+
+def _cam_t(ojo, c, R, alabeo=0.0, mira_a=None):
+    """camara en ojo que mira a c (o a mira_a) con el campo para que quepa la esfera (c, R)"""
+    d = np.linalg.norm(ojo - c); s = np.sin(min(np.arcsin(min(R / d, 0.999)) + (0 if mira_a is None else 0.35), 1.45))
+    th = max(0.75, s / np.sqrt(max(1 - s * s, 1e-6)) * 1.05 / 0.75)   # (el medio angulo vertical es th x 0,75)
+    return mira_t(ojo, c if mira_a is None else mira_a, alabeo, th)
+
+def camaras_trasero(mod, paso=TRAS_PASO):
+    c, R = _encuadre(mod); C = []
+    gs = np.arange(-TRAS_GUINADA, TRAS_GUINADA + 1e-6, paso); cs = np.arange(TRAS_CAB[0], TRAS_CAB[1] + 1e-6, paso)
+    for d in TRAS_DIST:
+        for g in gs:
+            for cb in cs:
+                o = _ojo_t(d, g, cb)
+                if np.linalg.norm(o - c) <= R + 0.05: continue      # (no pasa: TRAS_DMIN deja el ojo fuera)
+                C.append(_cam_t(o, c, R))
+                if d == 5.5 and (abs(g) == TRAS_GUINADA or cb in TRAS_CAB or (g % 10 == 0 and cb % 10 == 0)):
+                    for al in (-TRAS_ALABEO, TRAS_ALABEO): C.append(_cam_t(o, c, R, np.radians(al)))
+    return np.array(C, np.float32)
+
+def _cuenta_t(mod, C, posturas, res):
+    """por triangulo (orden de triangulos()), en cuantas camaras x posturas gana algun pixel"""
+    T, dueno = triangulos(mod)
+    grupo = np.array([mod.mallas[k][9].get('grupo', NADA) for k in dueno])
+    fuera = grupo == G_INTERIOR
+    op = np.array([1 if mod.mallas[k][0] == 0 and grupo[i] == NADA else 0 for i, k in enumerate(dueno)], np.uint8)
+    lib = _lib(); f = ctypes.POINTER(ctypes.c_float); cuenta = np.zeros(len(T), np.int32)
+    for D in posturas:
+        Tp, _ = triangulos(mod, posa(mod, D))
+        Tp = np.ascontiguousarray(np.where(fuera[:, None], 0, Tp).astype(np.float32))
+        c = np.zeros(len(T), np.int32)
+        lib.visibles(Tp.ctypes.data_as(f), len(Tp), op.ctypes.data_as(ctypes.POINTER(ctypes.c_ubyte)), C.ctypes.data_as(f),
+                     len(C), res[0], res[1], c.ctypes.data_as(ctypes.POINTER(ctypes.c_int)))
+        cuenta += c
+    return cuenta, dueno, grupo
+
+def parte_trasera(A, mod, m, res=(960, 720), rondas=TRAS_RONDAS):
+    """P3 (ver arriba): separa con NODO_TRASERO lo que no se ve desde el cono trasero. Despues de la rejilla, rondas de
+    camaras y posturas al azar (_azar_t, otra semilla cada una): lo que asoma en alguna pasa a visible (astillas entre
+    los angulos de la rejilla); hasta una ronda sin nada o TRAS_RONDAS"""
+    C = camaras_trasero(mod)
+    cuenta, dueno, grupo = _cuenta_t(mod, C, poses(A, m), res)
+    pz = np.array([mod.mallas[k][9].get('pieza', P_CUERPO) for k in dueno])
+    vis = (cuenta > 0) | (grupo == G_INTERIOR) | (pz == P_SOMBRA) | np.array([mod.mallas[k][5] < 3 for k in dueno], bool)
+    oc0 = int((~vis).sum()); rec = []
+    if TRAS_ANILLO:                                             # fuera del oculto el borde: lo que toca a algo visible
+        T, _ = triangulos(mod); Q = np.round(T.reshape(-1, 3, 3).astype(np.float64), 3)
+        clave = {}; vid = np.zeros((len(T), 3), np.int64)
+        for i in range(len(T)):
+            for j in range(3): vid[i, j] = clave.setdefault(tuple(Q[i, j]), len(clave))
+        for _ in range(TRAS_ANILLO):
+            pv = np.zeros(len(clave), bool); pv[vid[vis].ravel()] = True
+            vis = vis | pv[vid].any(1)
+    oc1 = int((~vis).sum())
+    for r in range(rondas):
+        Cr, Pr = _azar_t(A, mod, m, np.random.default_rng(1000 * (r + 1) + m))
+        cr, _, _ = _cuenta_t(mod, Cr, Pr, (1280, 960))
+        nuevos = (cr > 0) & ~vis; rec.append(int(nuevos.sum())); vis |= nuevos
+        if not nuevos.any(): break
+    n0 = vertices_carrera(mod); t0 = len(dueno)
+    separa(mod, vis, 'tras')
+    n1 = vertices_dibujados(mod, cerca=False, tras=False)
+    print('   trasero: %d camaras x %d posturas; %d de %d triangulos no se ven desde el cono (%d sin el borde, %d tras las '
+          'rondas al azar: %s); vertices %d -> %d con la camara en el cono (%.1f %%), %d mallas traseras' % (len(C),
+          len(poses(A, m)), oc0, t0, oc1, int((~vis).sum()), '+'.join(map(str, rec)), n0, n1, 100.0 * (n0 - n1) / max(n0, 1),
+          sum(1 for x in mod.mallas if x[9].get('tras'))))
+    return n0, n1
+
+def _azar_t(A, mod, m, rng, ncam=240, npos=4):
+    """camaras al azar dentro del cono (distancia, guinada, cabeceo, alabeo y punto al que miran; una de cada 4 en el
+    borde de la guinada y otra en el del cabeceo) y posturas al azar (poses_azar)"""
+    c, R = _encuadre(mod); C = []
+    for i in range(ncam):
+        d = float(np.exp(rng.uniform(np.log(TRAS_DMIN), np.log(80.0))))
+        g = rng.uniform(-TRAS_GUINADA, TRAS_GUINADA); cb = rng.uniform(*TRAS_CAB)
+        if i % 4 == 0: g = TRAS_GUINADA * rng.choice((-1, 1))
+        if i % 4 == 1: cb = TRAS_CAB[rng.integers(2)]
+        o = _ojo_t(d, g, cb)
+        if np.linalg.norm(o - c) <= R + 0.05: continue
+        C.append(_cam_t(o, c, R, np.radians(rng.uniform(-TRAS_ALABEO, TRAS_ALABEO)), c + rng.uniform(-0.8, 0.8, 3)))
+    return np.array(C, np.float32), poses_azar(A, m, npos, rng)
+
+def poses_azar(A, m, n, rng):
+    """posturas al azar entre las de poses(): giro de las ruedas, direccion, volante, aleron y faros"""
+    L = disposiciones(A) + 0x128 * m; arriba = A.elf.f32(L + 0x78) if A.elf.u32(L + 0x64) != NINGUNO else 0.0
+    res = []
+    for i in range(n):
+        sg = rng.uniform(-1, 1)
+        q = {'giro': list(rng.uniform(0, 2 * np.pi, 4)), 'dir': [sg * DIR_MAX] * 2 + [0.0] * 2, 'volante': sg * VOL_MAX,
+             'aleron': ALERON_MIN * rng.uniform(0, 1), 'faros': arriba * rng.uniform(0, 1)}
+        res.append({p: M for _, M, _, _, p in llamadas(A, m, q) if p != P_CUERPO})
+    return res
+
+def comprueba_trasero(A, mod, m, res=(1280, 960), semilla=298):
+    """camaras y posturas al azar dentro del cono (_azar_t, con otra semilla que las rondas de parte_trasera): devuelve
+    (triangulos traseros que ganan algun pixel, camaras x posturas, triangulos traseros)"""
+    C, P = _azar_t(A, mod, m, np.random.default_rng(semilla + m))
+    cuenta, dueno, _ = _cuenta_t(mod, C, P, res)
+    tr = np.array([bool(mod.mallas[k][9].get('tras')) for k in dueno])
+    return int(((cuenta > 0) & tr).sum()), len(C) * len(P), int(tr.sum())
 
 def vertices_carrera(mod):
     """los de vertices_dibujados sin las mallas solo de cerca"""
@@ -705,13 +867,14 @@ def vertices_carrera(mod):
 def vertices(mod):
     return sum(x[5] for x in mod.mallas)
 
-def vertices_dibujados(mod, cerca=True):
+def vertices_dibujados(mod, cerca=True, tras=True):
     """los que se dibujan a la vez: todo lo fijo, el faro encendido, el mayor de los tres juegos de pilotos y el
     mayor de los dos juegos de discos (el habitaculo G_INTERIOR va solo, con la vista interior: no cuenta); cerca =
-    False: sin las mallas solo de cerca (variante B, en carrera)"""
+    False: sin las mallas solo de cerca (variante B, en carrera); tras = False: sin las traseras (P3, Rev 2.9.8)"""
     g = {}
     for x in mod.mallas:
         if not cerca and len(x) > 9 and x[9].get('cerca'): continue
+        if not tras and len(x) > 9 and x[9].get('tras'): continue
         k = x[9].get('grupo', NADA) if len(x) > 9 else NADA; g[k] = g.get(k, 0) + x[5]
     return g.get(NADA, 0) + g.get(G_FARO, 0) + max(g.get(G_PILOTOS, 0), g.get(G_NOCHE, 0), g.get(G_FRENO, 0)) + \
         max(g.get(G_DISCO, 0), g.get(G_DISCO_CAL, 0))
@@ -1170,7 +1333,8 @@ def animadas(A, mod, m):
     (+4C, a = giro en x +58), 2 aleron del modelo 5 (+1C), 3 faros escamoteables (+68, a = abiertos +78, b = cuadros
     +74; sin faros, b = 0), 4..7 pinza de la rueda k y 8..11 rueda k (+98 + 0x20 k = car+130 parado, a = caida +A4)"""
     E = A.elf; L = disposiciones(A) + 0x128 * m
-    for x in mod.mallas: x[7] = x[9].get('pieza', P_CUERPO) << 8 | (NODO_CERCA if x[9].get('cerca') else 0)
+    for x in mod.mallas: x[7] = x[9].get('pieza', P_CUERPO) << 8 | (NODO_CERCA if x[9].get('cerca') else 0) | \
+        (NODO_TRASERO if x[9].get('tras') else 0)
     # los vertices de cada malla son una entrada de mod.verts (pieza() anade una por trozo de tira; vacia() igual)
     off = 0; trozos = []
     for v in mod.verts: trozos.append((off, v)); off += len(v)
@@ -1247,7 +1411,7 @@ def sombra_clamp(A, mod, m):
         w, h, fmt, li, off, tam = mod.texs[ti]; mod.texs[ti] = (w, h, fmt | bits, li, off, tam)
     print('   sombra plana: CLAMP %s%s (texturas %s)' % ('u' if ms else '-', 'v' if mt else '-', sorted(sus - otras)))
 
-def convierte(A, m, sal, tope=TOPE, vista=None, rebaja=False, carrera=False, visible=False):
+def convierte(A, m, sal, tope=TOPE, vista=None, rebaja=False, carrera=False, visible=False, trasero=False):
     """el coche montado como el original (llamadas) y, si lo que se dibuja a la vez pasa del tope del TA, sin lo que
     no se ve desde las camaras del juego (con la vuelta baja de los choques y, si aun no cabe, sin ella). No se tapa,
     no se anade y no se cambia ninguna pieza. rebaja: variante A (rebaja_texturas); carrera: variante B (parte_carrera);
@@ -1277,6 +1441,12 @@ def convierte(A, m, sal, tope=TOPE, vista=None, rebaja=False, carrera=False, vis
               % (a, b, td0, td1, triangulos_dibujados(mod), vd1, vertices_dibujados(mod)))
     if rebaja or visible: rebaja_texturas(mod, visible, cl)
     if carrera: parte_carrera(A, mod, m)
+    tras = None
+    if trasero:                                                 # (Rev 2.9.8 P3) lo que no se ve desde el cono trasero
+        n0, n1 = parte_trasera(A, mod, m); malos, nc, ntr = comprueba_trasero(A, mod, m)
+        print('   trasero, comprobacion: %d de %d triangulos traseros ganan algun pixel en %d camaras x posturas al azar'
+              % (malos, ntr, nc))
+        tras = dict(vtx_tras0=n0, vtx_tras=n1, tras_malos=malos, tras_tri=ntr)
     if vista:
         try:
             dibuja_vista(mod, os.path.join(vista, os.path.basename(sal).replace('.DAT', '.png')))
@@ -1287,7 +1457,10 @@ def convierte(A, m, sal, tope=TOPE, vista=None, rebaja=False, carrera=False, vis
     mod._ani = animadas(A, mod, m)                              # piezas animadas a su marco y bloque ANI1
     mod._gho, nc, nf = fantasma(mod._svol)                      # el coche fantasma (GHO1, detras de ANI1)
     print('   fantasma: %d triangulos (%d caras de los trozos, sin las interiores)' % (nf, nc))
-    mod.mallas.sort(key=lambda x: (x[0], x[1]))                # el orden de escribe (estable): el de CEX2
+    mod.mallas.sort(key=lambda x: (x[0], x[1], bool(x[9].get('tras'))))   # el orden de escribe (estable): el de CEX2
+    # (P3: las traseras al final de su lista y textura; escribe vuelve a ordenar por lista y textura y CEX2 va por el
+    # numero de malla, asi que no pueden ir al final de la lista: con (lista, trasera, textura) la pintura, el reflejo
+    # y las luces de CEX2 caian en otras mallas, visto en las capturas congeladas)
     mod.ruta = extension(mod)
     vesp = sum(x[5] for x in mod.mallas if x[9].get('esp') and x[9]['esp'][0] >= ESP_ENTORNO)
     vd = vertices_dibujados(mod); vt = vertices(mod); vc = vertices_carrera(mod); td = triangulos_dibujados(mod)
@@ -1298,7 +1471,7 @@ def convierte(A, m, sal, tope=TOPE, vista=None, rebaja=False, carrera=False, vis
           '  %s  -> %s' % (m, e.nombre, t0, triangulos_n(mod), v0, vd, vc, vt, len(mod.texs), kb, vesp, nota, os.path.basename(sal)))
     if visible: print('   dibujados: %d -> %d triangulos con area' % (td0, td))
     return dict(modelo=m, nombre=e.nombre, tri0=t0, tri=triangulos_n(mod), vtx0=v0, vtx=vd, vtx_carrera=vc, kb=kb, nota=nota,
-                entorno=vesp, tdib0=td0, tdib=td)
+                entorno=vesp, tdib0=td0, tdib=td, **(tras or {}))
 
 def dibuja_vista(mod, ruta):
     """perfil y tres cuartos (comprobacion rapida, sin z-buffer)"""
@@ -1328,8 +1501,8 @@ def main():
         return defecto
     tope = int(op('--tope', TOPE)); vista = op('--vista'); todos = op('--todos'); m = op('--modelo')
     solo = op('--fichas'); solo = None if solo is None else [int(x) for x in solo.split(',')]
-    rebaja = '--rebaja' in a; carrera = '--carrera' in a; visible = '--visible' in a
-    a = [x for x in a if x not in ('--rebaja', '--carrera', '--visible')]
+    rebaja = '--rebaja' in a; carrera = '--carrera' in a; visible = '--visible' in a; trasero = '--sin-trasero' not in a
+    a = [x for x in a if x not in ('--rebaja', '--carrera', '--visible', '--sin-trasero')]
     A = Assets(a[0] if a else None)
     if todos is not None:
         os.makedirs(todos, exist_ok=True)
@@ -1338,12 +1511,12 @@ def main():
             if solo is not None and k not in solo: continue
             convierte(A, mm, os.path.join(todos, 'COCHE%02d.DAT' % k), tope, vista, rebaja or visible, carrera)
             if visible:                                         # (Rev 2.9.7) el ligero de la carrera, aparte
-                convierte(A, mm, os.path.join(todos, 'COCHE%02dL.DAT' % k), tope, vista, True, False, True)
+                convierte(A, mm, os.path.join(todos, 'COCHE%02dL.DAT' % k), tope, vista, True, False, True, trasero)
         for k, mm in enumerate(FICHA_MODELO):
             if os.path.exists(os.path.join(todos, 'COCHE%02d.DAT' % k)): hechos[k] = mm   # (COCHEnnL.DAT: opcional)
         with open(os.path.join(todos, 'COCHES.DAT'), 'wb') as f: f.write(b'CCH1' + bytes(hechos))
     elif m is not None:
-        convierte(A, int(m), a[1], tope, vista, rebaja, carrera, visible)
+        convierte(A, int(m), a[1], tope, vista, rebaja, carrera, visible, visible and trasero)
     else:
         print(__doc__)
 

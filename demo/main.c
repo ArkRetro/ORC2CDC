@@ -867,6 +867,21 @@ static uint32_t modelo_teo(const modelo_t *m, int lod, int o)
    y no se dibujan con la camara de persecucion (coche_sin_cerca). Sin el bit (los coches de antes) se dibuja todo */
 #define NODO_CERCA 0x10000
 static int sin_cerca;                                           /* dibuja_indices salta las mallas con NODO_CERCA */
+/* Coche trasero segun la camara (Rev 2.9.8 P3, DESVIACION; la tecnica del cuerpo "bajo" de Crazy Taxi, sin su codigo ni
+   sus datos): las mallas del ligero COCHEnnL.DAT con NODO_TRASERO (tools/conv_coche.py parte_trasera) no se ven desde
+   ningun ojo del cono trasero (comprobado con el z-buffer por software) y no se envian con la camara dentro de el
+   (coche_trasero_paso). Por defecto apagado (-DCOCHE_TRASERO=0: se envia todo, como en la 2.9.7): medido en Flycast
+   no cumplio el criterio (docs/PARIDAD.md, Rev 2.9.8 P3); -DCOCHE_TRASERO=1 lo enciende. Sin el bit (los ficheros de
+   antes), igual que apagado */
+#ifndef COCHE_TRASERO
+#define COCHE_TRASERO 0
+#endif
+#define NODO_TRASERO 0x20000
+static int sin_trasero;                                         /* dibuja_indices salta las mallas con NODO_TRASERO */
+static int tras_dentro;                                         /* la camara en el cono (con histeresis) */
+#ifdef DIAG_POPPING
+static uint32_t tras_dg_cuadros, tras_dg_dentro, tras_dg_cambios, tras_dg_vtx;   /* medida: por segundo (POPTRAS) */
+#endif
 /* bytes teoricos del TA del coche del jugador en carrera: todas sus mallas menos las de NODO_CERCA (sin ese bit, lo
    mismo que modelo_teo(m, -1, o)) */
 static uint32_t coche_teo_carrera(const modelo_t *m, int o)
@@ -2425,6 +2440,7 @@ static void dibuja_indices(const modelo_t *mo, int l, const uint16_t *idx, uint3
         const malla_t *m = mo->mallas + idx[j];
         if (m->n < 3) continue;
         if (sin_cerca && m->nodo >= 0 && (m->nodo & NODO_CERCA)) continue;   /* (Rev 2.9.6: el coche en carrera) */
+        if (sin_trasero && m->nodo >= 0 && (m->nodo & NODO_TRASERO)) continue;   /* (Rev 2.9.8 P3: la camara detras) */
         if (solo_lod >= 0 && (!((m->nodo >> solo_lod) & 1) || !((traf_luces >> TRAF_GRUPO(m->nodo)) & 1))) continue;
         if (m->tex != ult) {
             ult = m->tex;
@@ -8837,6 +8853,10 @@ static void pop_mide(void)
                (unsigned)tf_dg_cam, (unsigned)tf_dg_cams, (unsigned)(tf_dg_min == ~0u ? 0 : tf_dg_min >> 10), (unsigned)(tf_dg_max >> 10),
                (unsigned)(tf_res >> 10), (unsigned)(tf_r2d >> 10), (unsigned)salto_ta, tf_on);   /* (Rev 2.9.8 P1) */
         tf_dg_cam = tf_dg_cams = tf_dg_max = 0; tf_dg_min = ~0u;
+        printf("POPTRAS: %.4s dentro %u de %u cuadros cambios %u vtx %u por cuadro dentro activo %d\n", cur_nodo >= 0 ? curso[cur_nodo].zona : "----",
+               (unsigned)tras_dg_dentro, (unsigned)tras_dg_cuadros, (unsigned)tras_dg_cambios,
+               (unsigned)(tras_dg_dentro ? tras_dg_vtx / tras_dg_dentro : 0), COCHE_TRASERO);   /* (Rev 2.9.8 P3) */
+        tras_dg_cuadros = tras_dg_dentro = tras_dg_cambios = tras_dg_vtx = 0;
         for (k = 0; k < 4; k++) if (pop_ev[k].px > 0)
             printf("POPEV: %s %s nodo %d %s z %.0f r %.1f px %.1f%s\n", pop_ev[k].t == 0 ? "etapa" : pop_ev[k].t == 1 ? "union" : "sig", pop_ev[k].ap ? "aparece" : "desaparece",
                    pop_ev[k].nodo, pop_nom[pop_ev[k].razon], (double)pop_ev[k].z, (double)pop_ev[k].r, (double)pop_ev[k].px, pop_ev[k].veg ? " veg" : "");
@@ -12795,6 +12815,48 @@ static int coche_modo(int carrera) { return !cam_ok ? 2 : carrera ? cam_coche_mo
 /* (Rev 2.9.6) el coche del jugador sin las mallas NODO_CERCA: solo en carrera con la camara de persecucion, fuera de
    la escena de la salida y de la meta y sin mezcla de vistas (al pasar de una vista a otra el ojo pasa cerca) */
 static int coche_sin_cerca(int carrera) { return carrera && cam_ok && !fin24 && !meta_cam && !sal_on && cam.n33c == 0; }
+/* (Rev 2.9.8 P3) la camara en el cono trasero del coche del jugador: el ojo, en el marco del coche (mod_coche: filas
+   derecha, arriba y detras) y desde su origen, a TRAS_DMIN o mas, con la guinada a 180 +- TRAS_GUI grados del morro, el
+   cabeceo (el de una camara que mira al coche: negativo = hacia abajo) entre TRAS_CAB0 y TRAS_CAB1 y el alabeo (el
+   arriba del coche frente al de la pantalla) a +-TRAS_ALA: el cono de tools/conv_coche.py camaras_trasero. Lo que se ve
+   desde un ojo no depende de hacia donde mire la camara. Histeresis de TRAS_HIST grados (Crazy Taxi no tiene): se entra
+   con TRAS_HIST dentro del cono (y 0,25 m mas lejos) y se sale al salir del cono, asi que dentro del estado la camara
+   esta siempre dentro del cono comprobado. Solo donde coche_sin_cerca (carrera, sin salida, meta, mezcla de vistas ni
+   finales) y en las vistas exteriores; nunca en la vista interior, el salon ni la seleccion (COCHEnn.DAT, sin el bit).
+   El reflejo (coche_reflejo) y la sombra no cambian: el coche no se dibuja en ningun reflejo */
+#define TRAS_GUI 35.0f
+#define TRAS_CAB0 (-65.0f)
+#define TRAS_CAB1 5.0f
+#define TRAS_ALA 35.0f
+#define TRAS_DMIN 3.0f
+#define TRAS_HIST 4.0f
+static void coche_trasero_paso(int carrera)
+{
+    float e[3], x, y, z, h, d, gui, cab, ala, mg;
+    int j, dentro;
+    for (j = 0; j < 3; j++) e[j] = ojo[j] - mod_coche[3][j];
+    x = e[0] * mod_coche[0][0] + e[1] * mod_coche[0][1] + e[2] * mod_coche[0][2];
+    y = e[0] * mod_coche[1][0] + e[1] * mod_coche[1][1] + e[2] * mod_coche[1][2];
+    z = e[0] * mod_coche[2][0] + e[1] * mod_coche[2][1] + e[2] * mod_coche[2][2];
+    h = sqrtf(x * x + z * z); d = sqrtf(h * h + y * y);
+    gui = fabsf(atan2f(x, z)) * 57.29578f;                      /* 0 = el ojo justo detras (+z) */
+    cab = -atan2f(y, h) * 57.29578f;
+    ala = fabsf(atan2f(mod_coche[1][0] * der[0] + mod_coche[1][1] * der[1] + mod_coche[1][2] * der[2],
+                       mod_coche[1][0] * arr[0] + mod_coche[1][1] * arr[1] + mod_coche[1][2] * arr[2])) * 57.29578f;
+    mg = tras_dentro ? 0.0f : TRAS_HIST;
+    dentro = COCHE_TRASERO && coche_sin_cerca(carrera) && coche_modo(carrera) == 2 && d >= TRAS_DMIN + (tras_dentro ? 0.0f : 0.25f) &&
+             gui <= TRAS_GUI - mg && cab >= TRAS_CAB0 + mg && cab <= TRAS_CAB1 - mg && ala <= TRAS_ALA - mg;
+#ifdef DIAG_POPPING
+    tras_dg_cuadros++; tras_dg_dentro += dentro; tras_dg_cambios += dentro != tras_dentro;
+    if (dentro) { uint32_t i; for (i = 0; i < coche.nmallas; i++) if (coche.mallas[i].nodo >= 0 && (coche.mallas[i].nodo & NODO_TRASERO)) tras_dg_vtx += coche.mallas[i].n; }
+#endif
+#ifdef DIAG_CONGELA
+    {   static int dicho;                                       /* medida: el cono en el cuadro congelado */
+        if (diag_congelado && dicho < 3) { dicho++; printf("TRASCONG: guinada %.1f cabeceo %.1f alabeo %.1f d %.2f dentro %d activo %d\n",
+                                                            (double)gui, (double)cab, (double)ala, (double)d, dentro, COCHE_TRASERO); } }
+#endif
+    tras_dentro = dentro;
+}
 static int gh_nodo_ant = -1, gh_rama_ant = -1; static float gh_union_ant = -1;   /* la union de la etapa anterior */
 static coche_t gh_c; static matrix_t gh_mat __attribute__((aligned(32)));
 static volatile int gh_guardando;
@@ -14488,6 +14550,7 @@ int main(int argc, char **argv)
         if (fin24) pon_vista(final_vista()->ojo, final_vista()->mira, final_vista()->balanceo);
         else pon_vista(ojo_, mira, estado != TITULO && cam_ok ? cam.balanceo : 0.0f);
         pon_coche(&yo, mod_coche);
+        coche_trasero_paso(estado == CARRERA);                  /* (Rev 2.9.8 P3) la camara en el cono trasero */
 #ifdef DIAG_SALIDA
         if (sal_on && (sal_f < 3 || sal_f % 20 < 2) && sal_f <= 125) {
             float q[4]; int j_;
@@ -14606,8 +14669,9 @@ int main(int argc, char **argv)
             if ((estado != TITULO && !mundo_fuera && coche_modo(estado == CARRERA) == 2) || (estado == TITULO && menu_coche3d()) || (fin24 && final_vista()->coche)) {
 #ifndef DIAG_SIN_COCHE
                 sin_cerca = coche_sin_cerca(estado == CARRERA);                  /* (Rev 2.9.6) la persecucion: sin lo que solo se ve de cerca */
+                sin_trasero = tras_dentro;                      /* (Rev 2.9.8 P3) la camara detras: sin lo que no se ve */
                 coche_dibuja(l, &mod_coche, 0);
-                sin_cerca = 0;
+                sin_cerca = sin_trasero = 0;
 #endif
             } else if (estado != TITULO && !mundo_fuera && coche_modo(estado == CARRERA) == 1 && !fin24)
                 coche_dibuja(l, &mod_coche, 1);                 /* la vista interior: el habitaculo (vm = 2) */

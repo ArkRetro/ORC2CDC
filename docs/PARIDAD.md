@@ -1586,6 +1586,79 @@ Valores definitivos (reserva en pasos de 16 KB, bajada tras 16 secciones al 90 %
   de otras razones. Las apariciones del "tope" al acercarse siguen (el reparto sigue cortando por coste): P2/P3.
 - Ficheros de la medida: `m298/p1/` del directorio de trabajo (medidas.txt, res/flycast_p1b_<nodo>_<0|1>.txt).
 
+#### P3. Coche trasero segun la camara (`-DCOCHE_TRASERO`, apagado por defecto)
+
+DESVIACION (`tools/conv_coche.py`: `parte_trasera`, `camaras_trasero`, `comprueba_trasero`, `separa`; `demo/main.c`:
+`NODO_TRASERO`, `coche_trasero_paso`, `sin_trasero`). Tecnica de Crazy Taxi (con la camara detras dibuja un cuerpo sin
+el frontal): solo la idea, nada de su codigo ni de sus datos. El original dibuja el coche entero.
+- Herramienta (con `--visible`, en el ligero COCHEnnL.DAT; `--sin-trasero`: como en la 2.9.7): los triangulos que no
+  se ven desde ningun ojo del cono trasero van en tiras aparte con el bit `NODO_TRASERO` (0x20000) en el campo del
+  nodo, al final de su lista y textura (no al final de la lista: `escribe` vuelve a ordenar por lista y textura y CEX2
+  va por numero de malla; con las traseras al final de la lista la pintura, el reflejo y las luces caian en otras
+  mallas, visto en las capturas congeladas de una primera version, descartada con sus medidas). Cono, en el marco del
+  coche y desde su origen: guinada del ojo 180 +- 35 grados del morro, cabeceo de la camara -65..+5 (el ojo de 5
+  grados por debajo a 65 por encima), alabeo +-35, ojo a 3 m o mas. Lo que se ve desde un ojo no depende de hacia donde
+  mire la camara si el coche cabe en la imagen: camaras que miran al coche con el campo justo, a 3-60 m, cada 5 grados,
+  alabeo 0 y +-35 en los bordes, por las 6 posturas de `poses()`, con el z-buffer por software de tools/c/visible.c a
+  960x720. Despues: fuera del oculto el borde (el triangulo que comparte un vertice con uno visible) y 4 rondas de 240
+  camaras y 4 posturas al azar (giro de ruedas, direccion, aleron, faros) a 1280x960; lo que asoma pasa a visible.
+  `comprueba_trasero`: otras ~940 camaras x posturas al azar.
+- Sin el borde se separaba el 4,6-6,8 % de los vertices de carrera, pero la comprobacion encontraba 1-8 triangulos
+  traseros que asomaban (astillas de la carroceria entre los angulos de la rejilla), aun con las rondas; con el borde
+  por aristas, 2,3 % y 5 que asomaban (modelo 9); con el borde por vertices queda en 0-5,2 % por coche (media 1,7 %):
+  el 360 Spider (ficha 0) 7456 -> 7351, la ficha 14 7179 -> 6805 (-5,2 %), la 12 -4,5 %, la 11 -3,5 %, la ficha 9 (la de
+  las pruebas automaticas) 0 (su COCHE09L.DAT sale igual que antes). Comprobacion: 0 triangulos traseros que ganan un
+  pixel en 13 coches y 1 en dos (fichas 6 y 13). Lo que solo se ve desde el cono es poco: el vaciado de la 2.9.6/2.9.7
+  ya quito lo que no se ve desde ninguna camara, y desde 65 grados por encima se ve casi todo el frontal.
+- Demo: `coche_trasero_paso` (una vez por cuadro, tras `pon_coche`): el ojo en el marco de `mod_coche`, guinada,
+  cabeceo y alabeo (el arriba del coche frente al de la pantalla) y distancia. Histeresis de 4 grados (Crazy Taxi no
+  tiene): se entra con 4 grados dentro del cono (y 0,25 m mas lejos) y se sale al salir del cono comprobado. Solo donde
+  `coche_sin_cerca` (carrera, sin la escena de la salida ni la de la meta, sin mezcla de vistas, no en los finales) y
+  en las vistas exteriores; nunca en la vista interior, el salon ni la seleccion (COCHEnn.DAT, sin el bit). El coche no
+  se dibuja en ningun reflejo (el reflejo es el mapa de entorno de la pintura, que sigue igual) y la sombra no cambia.
+  `-DDIAG_POPPING`: linea `POPTRAS:` (cuadros dentro del cono, cambios, vertices traseros) y con `-DDIAG_CONGELA` la
+  linea `TRASCONG:` con los angulos del cuadro congelado. Sin el bit (los ficheros de antes) no cambia nada.
+- Datos nuevos: los 15 COCHEnnL.DAT (en el directorio de trabajo, d298 y m298/P3/coches); COCHE09L.DAT igual que antes.
+
+Medida: `-DPRUEBA_AUTO -DPRUEBA_NODO=n -DPRUEBA_SIN_TIEMPO -DDIAG_MS -DDIAG_POPPING -DPRUEBA_FICHA=14` con
+`-DCOCHE_TRASERO=0` y `=1` (el mismo codigo y los mismos datos d298), 140 s con el piloto automatico (paso 10), tres
+Flycast a la vez. La ficha 14 es la que mas separa; con la ficha 9 de siempre no hay nada que separar (tanda aparte:
+sirve de medida del ruido). "TA coche": KB por cuadro del coche (POPTA).
+
+| Etapa | TRASERO | fps | tarde (%) | 8 px+ | 32 px+ | tope +8/32 -8/32 | en el cono | TA coche |
+|---|---|---|---|---|---|---|---|---|
+| GHOS (9) | 0 | 37,41 | 109 (4,5) | 21,5 | 3,2 | +10,1/0,8 -3,4/0,1 | - | 397 KB |
+| GHOS (9) | 1 | 37,28 | 116 (4,8) | 22,9 | 3,3 | +11,0/1,0 -3,9/0,0 | 100 % | 372 KB |
+| METR (11) | 0 | 34,57 | 235 (11,0) | 20,0 | 5,3 | +7,3/1,6 -2,2/0,4 | - | 397 KB |
+| METR (11) | 1 | 34,47 | 241 (11,2) | 21,1 | 6,0 | +7,7/2,0 -2,5/0,5 | 100 % | 372 KB |
+| PALM (0) | 0 | 37,99 | 73 (3,1) | 27,9 | 6,3 | +17,5/4,5 -3,2/0,5 | - | 394 KB |
+| PALM (0) | 1 | 37,52 | 104 (4,3) | 25,9 | 5,6 | +17,6/4,4 -3,4/0,3 | 100 % | 369 KB |
+| INDU (7) | 0 | 38,11 | 83 (3,0) | 24,2 | 6,2 | +10,3/1,6 -5,8/0,6 | - | 394 KB |
+| INDU (7) | 1 | 38,04 | 78 (3,2) | 25,2 | 6,8 | +10,2/1,7 -6,0/0,7 | 100 % | 369 KB |
+| Suma de las 4 | 0 | | | 93,6 | 21,0 | | | |
+| Suma de las 4 | 1 | | | 95,1 | 21,7 | | | |
+
+- Medido: con la camara de persecucion el ojo esta siempre en el cono (100 % de los cuadros de la zona, 0 cambios; en
+  los cuadros congelados guinada 0,0-0,3, cabeceo -20,4 / -28,9, alabeo 0, 5,9-6,2 m) y se dejan de enviar 410
+  vertices por cuadro: el TA del coche baja 25 KB por cuadro (-6 %). Pero la suma de saltos sube (8 px 93,6 -> 95,1, 32
+  px 21,0 -> 21,7), los fps bajan en las cuatro (-0,13, -0,10, -0,47 y -0,07) y los cuadros tarde suben un 42 % en
+  PALM (73 -> 104) y un 6 % en GHOS. Criterio (bajar el total de 8 px o de 32 px sin perder mas de 0,3 fps ni subir
+  mas de un 10 % los cuadros tarde en ninguna): NO se cumple. Queda APAGADO por defecto (`COCHE_TRASERO` 0).
+- Ruido (tanda con la ficha 9, sin mallas traseras: las dos compilaciones hacen lo mismo): sumas 89,3 / 89,6 (8 px) y
+  19,2 / 19,2 (32 px); fps -0,26, -0,14, -0,13 y -0,01; cuadros tarde +10 %, +2 %, +6 % y +2 %. Las diferencias de la
+  ficha 14 son de ese orden salvo PALM (-0,47 fps, +42 % tarde; su prueba con 0 salio con una desviacion de 1,59
+  frente a 2,3-2,8 de las demas: probablemente es la de 0 la que salio buena). Lo que deja libre el coche (25 KB de
+  unos 1000 por cuadro) lo vuelve a ocupar la etapa, como con la variante B de la 2.9.6.
+- Capturas congeladas (`-DDIAG_CONGELA`, GHOS, ficha 14, en el cono): crono 2100, 0 pixeles distintos en el coche
+  entre `COCHE_TRASERO` 1 y 0, y 0 pixeles entre los datos nuevos con 0 y los de antes (lgdat2) con 0 (el reparto en
+  tiras no cambia la imagen); fuera del coche 1730 que tambien cambian entre dos capturas de la misma prueba. Crono 3300:
+  0 pixeles en toda la captura en las tres comparaciones.
+  En el crono 900 la lluvia y el humo cambian la imagen entre capturas de la misma prueba (25-30 mil pixeles en la
+  caja del coche): no sirve. No se han hecho capturas en derrape fuerte ni en el borde del cono: el piloto no sale del
+  cono; lo del borde lo cubre la comprobacion por software.
+- SUPUESTO, sin medir: en la consola real, si el TA limita, 25 KB menos por cuadro podrian notarse algo.
+- Ficheros: `m298/P3/` del directorio de trabajo (medidas.txt, res/, cong/, coches/, conv/ y v1_orden_roto/).
+
 ### Coche visible mas ligero (Rev 2.9.7)
 
 Pedido del usuario (variante "C2", para reducir los saltos): menos poligonos y texturas en las partes VISIBLES de los
