@@ -1586,6 +1586,75 @@ Valores definitivos (reserva en pasos de 16 KB, bajada tras 16 secciones al 90 %
   de otras razones. Las apariciones del "tope" al acercarse siguen (el reparto sigue cortando por coste): P2/P3.
 - Ficheros de la medida: `m298/p1/` del directorio de trabajo (medidas.txt, res/flycast_p1b_<nodo>_<0|1>.txt).
 
+#### P2. Corte del reparto precalculado por seccion (`-DREPARTO_SEC`, apagado por defecto)
+
+DESVIACION (`tools/reparto_sec.py`, nuevo; `tools/regenera.py`, paso `repsec`; `demo/main.c`: `REPARTO_SEC`,
+`repsec_lee`, `rsec_corte`, `prio_sube_sec`, `nodos_visibles_todos`). Tecnica de Crazy Taxi (el conjunto dibujado es
+una funcion de la posicion, decidida fuera de linea para un presupuesto fijo): solo la idea, nada de su codigo ni de
+sus datos. El original no tiene reparto del TA (lo dibuja todo).
+- Herramienta: lee los SEGnn.DAT ya convertidos (sueltos o recompuestos de SEGS.PAK; no regenera nada ni toca ningun
+  fichero) y escribe REPSEC.DAT ('RSC1': por etapa SEG, secciones y desplazamiento; 2 bytes con signo por seccion de la
+  PVS: `prio_d` -1..47 y `prio_p` -1..63). Por cada punto de la ruta de la seccion, una camara de persecucion nominal
+  (6 m detras, 2,5 m arriba, horizontal, fov 50) y lo que deja ver la PVS de la seccion y de s -+ 3 (el mayor coste de
+  los tres, como `pvs_coste`), repite lo de `nodos_visibles` (lejos, cercano, laterales, LOD de 404B00, lejanos de
+  `lod_veg.py` / `lod_grande.py`, nodos cercanos enteros, clases con el coste por vertices, grupos) y el reparto de
+  `nodos_visibles_todos` con un tope nominal (800 KB al 95 %, k = ta_f 1,75 x alfa). No repite la niebla, la
+  histeresis por nodo, la gracia de la PVS, `decor_reduce` ni `PVS_GRANDE`. El corte es el menor de los puntos de la
+  seccion y luego el menor de `--suave` secciones a cada lado. 61 etapas, 79 KB (en la RAM solo las 15 del arbol: 19 KB,
+  como VISO.DAT); 48 s.
+- Demo, con `REPARTO_SEC` 1 y la tabla de la etapa (no en la union; la cuenta de secciones tiene que coincidir): el
+  corte de la seccion del ojo es el objetivo si lo que dibuja cabe en el tope entero (el 100 % de `REPARTO_SCHMITT`);
+  si no cabe (emergencia) el reparto de siempre sin pasar de la tabla. Con la tabla no se usa la histeresis de
+  `REPARTO_SCHMITT`; el corte sube hacia la tabla una clase cada `REPARTO_SEC_SUBE` (4) cuadros y baja en el acto;
+  `prio_ajusta` (cuadro que no cabe de verdad) sigue igual. Sin REPSEC.DAT, o con `REPARTO_SEC` 0, lo de antes (con 0 y
+  sin `-DDIAG_POPPING` ni se lee el fichero). `-DDIAG_POPPING`: linea `POPSEC:` por s (cuadros con tabla, emergencias,
+  cuadros con el corte igual a la tabla, cambios de la tabla, corte de siempre menos tabla, lo pedido y el tope).
+- Calibracion (medida): con alfa 0,75 (el `prio_alfa` de carrera) lo pedido fuera de linea salia ~1,4 veces menor
+  que en carrera y la tabla quedaba 8-9 clases de distancia y 4-13 de LOD por encima del corte de siempre (GHOS, METR,
+  PALM). Se midieron dos tablas: v1 (alfa 1,10, suave 1) y v2 (alfa 1,00, suave 8; la que dan los valores por defecto).
+- Datos nuevos: REPSEC.DAT (en d298 del directorio de trabajo, la v2; las tres en m298/P2/tablas). Es opcional: no
+  esta en la comprobacion de `regenera.py`.
+
+Medida: `-DPRUEBA_AUTO -DPRUEBA_NODO=n -DPRUEBA_SIN_TIEMPO -DDIAG_MS -DDIAG_POPPING` con `-DREPARTO_SEC=0` y `=1` (el
+mismo codigo y los mismos datos d298 con REPSEC.DAT; con 0 la tabla solo se mide), 140 s con el piloto automatico
+(paso 10), tres Flycast a la vez. Las de 0 son una tanda y las de 1 otra (v2, la tercera). "corte = tabla": cuadros
+con tabla en los que el corte final es el de la tabla; "emerg.": cuadros con tabla en los que no cabe.
+
+| Etapa | SEC | fps | tarde (%) | 8 px+ | 32 px+ | tope +8/32 -8/32 | corte = tabla | emerg. | cambios de la tabla / s | siempre - tabla (d / p) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| GHOS (9) | 0 | 36,56 | 191 (6,4) | 18,3 | 2,8 | +8,5/0,6 -2,8/0,0 | 0 % | - | 0,67 | -9,0 / -12,6 |
+| GHOS (9) | 1 | 37,04 | 159 (5,2) | 20,2 | 3,9 | +11,9/1,9 -2,6/0,1 | 55 % | 9 % | 0,99 | -3,4 / +0,8 |
+| METR (11) | 0 | 33,26 | 336 (13,7) | 22,9 | 7,0 | +8,1/1,7 -2,2/0,4 | 16 % | - | 1,77 | -8,9 / -4,4 |
+| METR (11) | 1 | 34,29 | 261 (10,5) | 23,4 | 7,6 | +11,6/3,2 -1,9/0,6 | 57 % | 7 % | 1,25 | +7,2 / +8,7 |
+| PALM (0) | 0 | 36,82 | 147 (5,4) | 26,3 | 5,4 | +15,3/3,8 -3,8/0,3 | 0 % | - | 1,62 | -7,7 / -8,4 |
+| PALM (0) | 1 | 37,32 | 125 (4,5) | 23,9 | 8,4 | +17,9/7,0 -3,8/0,8 | 53 % | 13 % | 1,23 | +12,0 / +13,1 |
+| INDU (7) | 0 | 37,45 | 131 (4,0) | 20,5 | 5,2 | +9,0/1,5 -4,5/0,5 | 13 % | - | 2,42 | -3,9 / -0,4 |
+| INDU (7) | 1 | 37,70 | 122 (3,7) | 20,1 | 6,0 | +9,9/2,3 -3,2/0,5 | 49 % | 14 % | 1,28 | -1,0 / +3,4 |
+| Suma de las 4 | 0 | | | 88,0 | 20,4 | | | | | |
+| Suma de las 4 | 1 | | | 87,6 | 25,9 | | | | | |
+
+(Con 0 la tabla solo se mide y las columnas de la tabla son de la que habia en los datos: la de calibracion, alfa 0,75
+y suave 1, en GHOS, METR y PALM, y la v1 en INDU; con 1, "siempre - tabla" es el corte que pediria el reparto de
+siempre en ese cuadro menos la tabla.)
+- Medido: fps +0,48, +1,03, +0,50 y +0,25; cuadros tarde -17 %, -22 %, -15 % y -7 %. Los saltos de 8 px quedan igual
+  (88,0 -> 87,6, dentro del ruido de 1-2 por etapa entre tandas, P1) y los de 32 px suben un 27 % (20,4 -> 25,9; PALM
+  5,4 -> 8,4), casi todo apariciones del "tope" (+3,1 en 32 px en las cuatro): el corte de la tabla cambia al cruzar
+  secciones (1-1,3 veces por s) y lo que entra, entra a la vez; con el reparto de siempre entraba de clase en clase.
+  En METR y PALM la tabla queda 7-13 clases por debajo de lo que cabria (el lejano adaptativo, 1600-2300 m de media,
+  quita lo lejano y la tabla, calculada con 3800 m, no lo sabe): se dibuja menos y de ahi salen los fps. En GHOS e
+  INDU queda 1-3 por encima y hay emergencia en el 9-14 % de los cuadros.
+- v1 (alfa 1,10, suave 1; descartada): suma 88,0 -> 89,4 (8 px) y 20,4 -> 24,8 (32 px), fps +0,31, +0,47, +0,40 y
+  +0,13, la tabla cambiaba 1,8-2,4 veces por s.
+- Criterio (bajar el total de 8 px o de 32 px sin perder mas de 0,3 fps ni subir mas de un 10 % los cuadros tarde en
+  ninguna): a la letra la v2 lo cumple por 0,4 saltos de 8 px por s, menos que el ruido, mientras los de 32 px suben un
+  27 % y en la mitad de los cuadros el corte no es el de la tabla. DECISION: queda APAGADO por defecto (`REPARTO_SEC`
+  0): no baja el popping, que es para lo que se propuso; la mejora de fps es por dibujar menos en METR y PALM.
+- SUPUESTO, sin medir: una tabla que supiera el lejano adaptativo (o que guardara el corte relativo a lo que hay que
+  repartir) y que cambiara solo de una clase por seccion quedaria mas cerca del corte de siempre; en la consola real
+  el tope nominal no se ha comparado con `ta_f` real.
+- Todas las pruebas dan el "Out of memory ... diff 217088" de newlib al arrancar, el conocido.
+- Ficheros: `m298/P2/` del directorio de trabajo (medidas.txt, res/, tablas/, sh/, py/sec.py).
+
 #### P3. Coche trasero segun la camara (`-DCOCHE_TRASERO`, apagado por defecto)
 
 DESVIACION (`tools/conv_coche.py`: `parte_trasera`, `camaras_trasero`, `comprueba_trasero`, `separa`; `demo/main.c`:

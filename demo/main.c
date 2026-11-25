@@ -6756,6 +6756,45 @@ static void viso_lee(void)
     }
     free(b);
 }
+/* Rev 2.9.8 P2 (DESVIACION; tecnica tomada de Crazy Taxi, docs/PARIDAD.md "Rev 2.9.8: lecciones de Crazy Taxi"):
+   corte del reparto del TA precalculado por seccion de la PVS (REPSEC.DAT, tools/reparto_sec.py): por etapa, 2 bytes
+   por seccion (prio_d, prio_p con signo) que caben con un tope nominal. nodos_visibles_todos lo usa como objetivo y solo
+   baja de el si el cuadro no cabe de verdad (REPARTO_SEC). Solo las etapas del arbol cargado, como VISO.DAT; sin el
+   fichero (o con otra cuenta de secciones) el reparto de siempre. Medido en Flycast (docs/PARIDAD.md, P2): fps +0,25
+   a +1,0 y menos cuadros tarde, pero los saltos de 32 px o mas suben un 27 % (los de la razon "tope" al cambiar el
+   corte de una seccion a otra) y los de 8 px quedan igual (87,6 frente a 88,0, dentro del ruido): APAGADO por defecto.
+   Con 0 (y sin DIAG_POPPING) ni se lee REPSEC.DAT: lo de antes */
+#ifndef REPARTO_SEC
+#define REPARTO_SEC 0
+#endif
+static uint8_t *rsec_dat; static const int8_t *rsec_m[CURSO_MAX]; static uint32_t rsec_n[CURSO_MAX];
+static void repsec_lee(void)
+{
+    uint32_t sz, n, i, k, tot = 0, s[3]; uint8_t *b, *p;
+    free(rsec_dat); rsec_dat = NULL; memset(rsec_m, 0, sizeof rsec_m); memset(rsec_n, 0, sizeof rsec_n);
+#if !REPARTO_SEC && !defined(DIAG_POPPING)
+    return;                                                     /* (sin usarla ni medirla: ni se lee) */
+#endif
+    if (!(b = gd_carga("REPSEC.DAT", &sz))) { dbglog(DBG_INFO, "REPSEC: sin REPSEC.DAT (el reparto de siempre)\n"); return; }
+    if (sz < 8 || memcmp(b, "RSC1", 4)) { free(b); return; }
+    memcpy(&n, b + 4, 4);
+    for (k = 0; k < (uint32_t)ncurso; k++) for (i = 0; i < n && 8 + 12 * i + 12 <= sz; i++) {
+        memcpy(s, b + 8 + 12 * i, 12);
+        if (s[0] == curso[k].seg && s[2] + 2 * s[1] <= sz) { tot += 2 * s[1]; break; }
+    }
+    if (tot && (rsec_dat = malloc(tot))) {
+        p = rsec_dat;
+        for (k = 0; k < (uint32_t)ncurso; k++) for (i = 0; i < n && 8 + 12 * i + 12 <= sz; i++) {
+            uint32_t j; memcpy(s, b + 8 + 12 * i, 12);
+            if (s[0] != curso[k].seg || s[2] + 2 * s[1] > sz) continue;
+            for (j = 0; j < k; j++) if (curso[j].seg == curso[k].seg && rsec_m[j]) break;   /* (la misma etapa: la misma) */
+            if (j < k) { rsec_m[k] = rsec_m[j]; rsec_n[k] = rsec_n[j]; break; }
+            memcpy(p, b + s[2], 2 * s[1]); rsec_m[k] = (const int8_t *)p; rsec_n[k] = s[1]; p += 2 * s[1]; break;
+        }
+    }
+    dbglog(DBG_INFO, "REPSEC: %u bytes para %d etapas (activo %d)\n", (unsigned)tot, ncurso, REPARTO_SEC);
+    free(b);
+}
 /* el arbol id (CURSO.DAT; los de la Contrarreloj, 200 + codigo, en CURSOTA.DAT) en curso[]; 0 bien */
 #define CURSO_FICH(id) ((id) >= 200 ? "CURSOTA.DAT" : "CURSO.DAT")
 /* Rev 2.9.3 (el usuario: "en el modo contrarreloj al finalizar etapa el partenon queda encima de la bifurcacion"): la
@@ -6862,6 +6901,7 @@ static int curso_lee_id(int id)
         for (k = 0; k < ncurso && k < CURSO_MAX; k++) seg[k] = curso[k].seg;
         traf_tap_arbol(seg, ncurso); }
     viso_lee();
+    repsec_lee();                                               /* (Rev 2.9.8 P2) */
     return 0;
 }
 static int curso_lee(void)
@@ -8101,6 +8141,13 @@ static float dist2_ruta(const modelo_t *m, uint32_t i, const float *p)
 static uint32_t prio_coste[ND_PRIO][NB_PRIO], prio_vtx[ND_PRIO][NB_PRIO];   /* bytes teoricos y vertices por clase */
 static int prio_d = ND_PRIO - 1, prio_p = NB_PRIO - 1, prio_esp_d, prio_esp_p;
 static float prio_alfa = 1.0f;
+#ifdef DIAG_POPPING
+/* (Rev 2.9.8 P2: el corte precalculado por seccion, REPARTO_SEC; linea POPSEC por segundo) cuadros, con tabla, en los
+   que no cabe (emergencia), con el corte final igual al de la tabla; lo que pedia el reparto de siempre menos la tabla;
+   lo pedido (bytes enviados estimados de todo lo visible) y el tope */
+static uint32_t rs_dg_cuad, rs_dg_tab, rs_dg_emer, rs_dg_igual, rs_dg_cambios; static int32_t rs_dg_dd, rs_dg_dp;
+static uint64_t rs_dg_pide, rs_dg_tope; static int rs_dg_ant = -100;
+#endif
 static float niebla_d; static int niebla_modo;                   /* la niebla del cuadro (niebla_paso) */
 #ifdef DIAG_VTX
 static float diag_quitado_z, diag_quitado_r;                     /* el nodo quitado mas cercano (z - r) y su radio */
@@ -8857,6 +8904,11 @@ static void pop_mide(void)
                (unsigned)tras_dg_dentro, (unsigned)tras_dg_cuadros, (unsigned)tras_dg_cambios,
                (unsigned)(tras_dg_dentro ? tras_dg_vtx / tras_dg_dentro : 0), COCHE_TRASERO);   /* (Rev 2.9.8 P3) */
         tras_dg_cuadros = tras_dg_dentro = tras_dg_cambios = tras_dg_vtx = 0;
+        printf("POPSEC: %.4s tabla %u de %u cuadros emergencia %u igual %u cambios %u din-tabla d %.1f p %.1f pide %uK tope %uK activo %d\n",
+               cur_nodo >= 0 ? curso[cur_nodo].zona : "----", (unsigned)rs_dg_tab, (unsigned)rs_dg_cuad, (unsigned)rs_dg_emer, (unsigned)rs_dg_igual,
+               (unsigned)rs_dg_cambios, rs_dg_tab ? (double)rs_dg_dd / rs_dg_tab : 0.0, rs_dg_tab ? (double)rs_dg_dp / rs_dg_tab : 0.0,
+               (unsigned)(rs_dg_cuad ? rs_dg_pide / rs_dg_cuad >> 10 : 0), (unsigned)(rs_dg_cuad ? rs_dg_tope / rs_dg_cuad >> 10 : 0), REPARTO_SEC);   /* (Rev 2.9.8 P2) */
+        rs_dg_cuad = rs_dg_tab = rs_dg_emer = rs_dg_igual = rs_dg_cambios = 0; rs_dg_dd = rs_dg_dp = 0; rs_dg_pide = rs_dg_tope = 0;
         for (k = 0; k < 4; k++) if (pop_ev[k].px > 0)
             printf("POPEV: %s %s nodo %d %s z %.0f r %.1f px %.1f%s\n", pop_ev[k].t == 0 ? "etapa" : pop_ev[k].t == 1 ? "union" : "sig", pop_ev[k].ap ? "aparece" : "desaparece",
                    pop_ev[k].nodo, pop_nom[pop_ev[k].razon], (double)pop_ev[k].z, (double)pop_ev[k].r, (double)pop_ev[k].px, pop_ev[k].veg ? " veg" : "");
@@ -8876,8 +8928,8 @@ static void geo_reinicia(void);
 #ifndef REPARTO_SCHMITT_HI
 #define REPARTO_SCHMITT_HI 100
 #endif
-#if REPARTO_SCHMITT
-static int reparto_cabe(int pd, int pp, uint32_t tope, uint32_t vmax, float k)
+static __attribute__((unused)) int reparto_cabe(   /* (tambien REPARTO_SEC) */
+    int pd, int pp, uint32_t tope, uint32_t vmax, float k)
 {
     uint32_t c = 0, v = 0; int d, q;
     for (d = 0; d < ND_PRIO; d++)
@@ -8885,11 +8937,35 @@ static int reparto_cabe(int pd, int pp, uint32_t tope, uint32_t vmax, float k)
             if (d <= pd || q <= pp) { c += prio_coste[d][q]; v += prio_vtx[d][q]; }
     return (float)c * k * 95.0f <= (float)tope * (float)REPARTO_SCHMITT_HI && (uint64_t)v * 95u <= (uint64_t)vmax * REPARTO_SCHMITT_HI;
 }
+/* Rev 2.9.8 P2 (REPARTO_SEC, repsec_lee): el corte de la tabla en la seccion de la PVS del ojo en la etapa, si la
+   hay (no en la union: la tabla es de la etapa) */
+static int rsec_corte(int *pd, int *pp)
+{
+    const int8_t *t; int32_t s;
+    if (cur_en_union || etapa_nodo < 0 || etapa_nodo >= ncurso || !(t = rsec_m[etapa_nodo]) || rsec_n[etapa_nodo] != etapa.nsec) return 0;
+    if (!etapa.pvs_on || (s = etapa.pvs_s) < 0 || (uint32_t)s >= etapa.nsec) return 0;
+    *pd = t[2 * s]; *pp = t[2 * s + 1];
+    if (*pd < -1) *pd = -1; else if (*pd > ND_PRIO - 1) *pd = ND_PRIO - 1;
+    if (*pp < -1) *pp = -1; else if (*pp > NB_PRIO - 1) *pp = NB_PRIO - 1;
+    return 1;
+}
+/* subida hacia el corte de la tabla: una clase cada REPARTO_SEC_SUBE cuadros (sin los 2 de holgura de prio_sube: el
+   objetivo es fijo en la seccion); bajar, en el acto */
+#ifndef REPARTO_SEC_SUBE
+#define REPARTO_SEC_SUBE 4
 #endif
+static int prio_sube_sec(int actual, int objetivo, int *espera)
+{
+    if (objetivo < actual) { *espera = 0; return objetivo; }
+    if (objetivo > actual) { if (++*espera >= REPARTO_SEC_SUBE) { *espera = 0; return actual + 1; } }
+    else *espera = 0;
+    return actual;
+}
 static void nodos_visibles_todos(void)
 {
     static uint32_t fila_c[ND_PRIO], fila_v[ND_PRIO], col_c[NB_PRIO], col_v[NB_PRIO];
     uint32_t i, tope = ta_tope_etapa / 100 * 95, acum, v, cerca_c, cerca_v, vmax = (uint32_t)(VTX_ETAPA_MAX * salto_ta / 256 / prio_alfa); int c, d, cabe;
+    int rs_d = -2, rs_p = -2, rs_tab = 0, rs_ok = 0, rs_hay;     /* (Rev 2.9.8 P2: el corte de la tabla) */
     /* (Rev 2.9.4: los vertices del reparto tambien x el tope del salto: en Flycast lo pesado de PALM llega a 30000
        vertices sin llenar el TA y el tope del TA solo no recortaba nada) */
     float k = (float)ta_f / 256.0f * prio_alfa;                 /* bytes enviados por byte teorico de los nodos */
@@ -8935,16 +9011,34 @@ static void nodos_visibles_todos(void)
        lote 1 de la revision 44). Antes la clase 0 de distancia se dibujaba entera aunque no cupiera y ta_cabe tiraba lo
        que no cabia en el orden de envio: la calzada, los muros y el cielo (Flycast, -DTA_F_MIN=768: PALM sin calzada) */
     d = cabe < 0 && ((float)fila_c[0] * k > (float)tope || fila_v[0] > vmax) ? -1 : cabe < 0 ? 0 : cabe;
+    /* Rev 2.9.8 P2 (DESVIACION, REPARTO_SEC): con la tabla de la seccion, su corte es el objetivo si lo que dibuja cabe
+       en el tope entero (el mismo 100 % que REPARTO_SCHMITT); si no cabe (emergencia: el coche, el trafico, la union o
+       el tope real menor que el nominal), lo de siempre pero sin pasar de la tabla */
+    rs_hay = rsec_corte(&rs_d, &rs_p);
+#ifdef DIAG_POPPING
+    if (!precalentando) {
+        uint32_t tc_ = 0; for (c = 0; c < ND_PRIO; c++) tc_ += fila_c[c];
+        rs_dg_cuad++; rs_dg_pide += (uint64_t)((float)tc_ * k); rs_dg_tope += ta_tope_etapa;
+        if (rs_hay) { rs_dg_tab++; rs_dg_dd += d - rs_d; if (rs_d * 64 + rs_p != rs_dg_ant) { rs_dg_cambios++; rs_dg_ant = rs_d * 64 + rs_p; } }
+    }
+#endif
+    if (REPARTO_SEC && rs_hay) {
+        rs_tab = 1; rs_ok = reparto_cabe(rs_d, rs_p, tope, vmax, k);
+        if (rs_ok) d = rs_d; else if (d > rs_d) d = rs_d;
+#ifdef DIAG_POPPING
+        if (!rs_ok && !precalentando) rs_dg_emer++;
+#endif
+    }
 #if REPARTO_SCHMITT
     /* Rev 2.9.5 (DESVIACION, saltos de la noche): el corte de antes no baja mientras lo que dibuja quepa en el tope
        entero (REPARTO_SCHMITT_HI: el 100 % del TA de la etapa y de los vertices del reparto) aunque el objetivo, con el
        95 % de siempre, pida bajar. El tope del TA de la etapa cambia cada cuadro (el coche, el trafico, el nivel del
        salto, que se mueve un poco en cada cuadro de carrera) y el corte bajaba y subia una clase con el: lo del borde
        del corte aparecia y desaparecia. Lo que se envia sigue sin pasar del tope (ta_cabe) */
-    if (d < prio_d && reparto_cabe(prio_d, prio_p, tope, vmax, k)) d = prio_d;
+    if (!rs_tab && d < prio_d && reparto_cabe(prio_d, prio_p, tope, vmax, k)) d = prio_d;   /* (P2: con la tabla, no) */
 #endif
     if (arranque_hold && precal_d >= 0 && (d < precal_d || d < 0)) d = precal_d;   /* (suelo del arranque) */
-    prio_d = prio_sube(prio_d, d, &prio_esp_d, ND_PRIO - 1);
+    prio_d = rs_tab ? prio_sube_sec(prio_d, d, &prio_esp_d) : prio_sube(prio_d, d, &prio_esp_d, ND_PRIO - 1);
     if (arranque_hold && precal_d >= 0 && prio_d < precal_d) prio_d = precal_d;
     for (cerca_c = cerca_v = 0, d = 0; d <= prio_d; d++) { cerca_c += fila_c[d]; cerca_v += fila_v[d]; }
     /* lo de mas alla, por la clase de LOD */
@@ -8956,12 +9050,19 @@ static void nodos_visibles_todos(void)
     }
     if (prio_d == ND_PRIO - 1) cabe = NB_PRIO - 1;
     if (prio_d < 0 && cabe < 0) cabe = 0;                      /* (lo enorme en la pantalla, siempre) */
+#ifdef DIAG_POPPING
+    if (rs_hay && !precalentando) rs_dg_dp += cabe - rs_p;
+#endif
+    if (rs_tab) cabe = rs_ok || cabe > rs_p ? rs_p : cabe;   /* (Rev 2.9.8 P2: el de LOD de la tabla, igual) */
 #if REPARTO_SCHMITT
-    if (cabe < prio_p && reparto_cabe(prio_d, prio_p, tope, vmax, k)) cabe = prio_p;   /* (igual, el de LOD) */
+    else if (cabe < prio_p && reparto_cabe(prio_d, prio_p, tope, vmax, k)) cabe = prio_p;   /* (igual, el de LOD) */
 #endif
     if (arranque_hold && precal_p >= 0 && cabe < precal_p) cabe = precal_p;   /* (suelo del arranque) */
-    prio_p = prio_sube(prio_p, cabe, &prio_esp_p, NB_PRIO - 1);
+    prio_p = rs_tab ? prio_sube_sec(prio_p, cabe, &prio_esp_p) : prio_sube(prio_p, cabe, &prio_esp_p, NB_PRIO - 1);
     if (arranque_hold && precal_p >= 0 && prio_p < precal_p) prio_p = precal_p;
+#ifdef DIAG_POPPING
+    if (rs_hay && !precalentando && prio_d == rs_d && prio_p == rs_p) rs_dg_igual++;
+#endif
     for (prio_est = cerca_c, c = 0; c <= prio_p; c++) prio_est += col_c[c];
     prio_est = prio_est * ta_f >> 8;
 #ifdef DIAG_VTX
