@@ -1864,6 +1864,93 @@ seccion queda por debajo del del salto.
 - Ficheros: `m298/P5/` del directorio de trabajo (medidas.txt, res/, cong/, tablas/, sh/, py/lej.py, py/tabla.py,
   py/quien.py).
 
+#### Medida final de la Rev 2.9.8 (las 15 etapas; `-DDIAG_POP298`)
+
+Medida final de la Rev 2.9.8 en las 15 etapas de m298/etapas.txt, todo en Flycast (NO en la consola). Flags de la
+referencia: -DPRUEBA_AUTO -DPRUEBA_NODO=n -DPRUEBA_SIN_TIEMPO -DDIAG_MS -DDIAG_POPPING; 140 s de piloto automatico,
+paso 10; mide.py (fps294) y pop.py (np295), solo las lineas de la zona del nodo.
+
+**Rondas con la misma carga (la tabla que cuenta).** Por cada nodo, tres Flycast a la vez (:90, :91, :92):
+A = 060dc9a (Rev 2.9.7) con lgdat2 (la referencia rehecha), B = la 2.9.8 por defecto con d298, C = la 2.9.8 con
+lgdat2 (para separar los datos nuevos del codigo). La referencia de m298/ (2 Flycast a la vez) va en la columna "fps
+ref": con 3 Flycast el anfitrion (4 nucleos) va mas cargado y no es comparable cuadro a cuadro.
+
+| Etapa (nodo) | fps A | fps B | B-A | fps C | tarde % A / B / C | salto A / B / C | lejano A / B / C | 8 px+ A / B / C | 32 px+ A / B / C | fps ref (2 Fc) | fps fin (3 Fc) |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| PALM (0) | 37,74 | 37,77 | +0,03 | 37,56 | 4,3 / 4,2 / 4,6 | 7,48 / 7,61 / 7,67 | 1779 / 1721 / 1702 | 22,6 / 24,8 / 25,8 | 4,8 / 4,9 / 5,3 | 37,73 | 36,56 |
+| LAKE (1) | 39,54 | 39,49 | -0,05 | 39,35 | 0,7 / 0,7 / 1,0 | 2,25 / 2,13 / 2,13 | 3651 / 3725 / 3729 | 6,3 / 6,1 / 6,3 | 1,3 / 1,4 / 1,4 | 38,78 | 37,70 |
+| ALPI (2) | 39,47 | 39,37 | -0,10 | 39,39 | 0,7 / 0,9 / 0,9 | 0,57 / 0,93 / 0,89 | 3800 / 3800 / 3800 | 8,4 / 9,0 / 9,0 | 1,9 / 1,7 / 1,8 | 39,41 | 38,07 |
+| CAST (3) | 39,34 | 39,23 | -0,11 | 39,18 | 1,0 / 1,2 / 1,3 | 3,90 / 4,19 / 4,29 | 3128 / 3018 / 3007 | 17,8 / 18,0 / 17,9 | 5,3 / 5,2 / 5,4 | 38,70 | 38,30 |
+| FORE (4) | 39,60 | 39,58 | -0,02 | 39,52 | 0,5 / 0,5 / 0,6 | 0,32 / 0,57 / 0,58 | 3800 / 3800 / 3800 | 12,0 / 12,2 / 11,8 | 2,5 / 2,5 / 2,4 | 39,10 | 38,38 |
+| DESE (5) | 39,32 | 39,37 | +0,05 | 39,36 | 1,0 / 0,9 / 0,9 | 1,91 / 1,85 / 1,80 | 3561 / 3601 / 3610 | 9,5 / 9,4 / 9,7 | 3,0 / 2,9 / 3,2 | 38,97 | 38,13 |
+| CLOU (6) | 36,99 | 36,98 | -0,01 | 36,93 | 6,2 / 6,2 / 6,4 | 7,53 / 7,45 / 7,54 | 1773 / 1806 / 1772 | 28,0 / 29,7 / 28,8 | 3,8 / 3,5 / 3,7 | 36,47 | 35,42 |
+| INDU (7) | 38,48 | 38,41 | -0,07 | 38,47 | 2,6 / 2,6 / 2,5 | 5,69 / 5,72 / 5,82 | 2329 / 2317 / 2283 | 24,9 / 25,7 / 25,5 | 6,5 / 6,6 / 6,6 | 38,28 | 37,18 |
+| SNOW (8) | 39,51 | 39,51 | +0,00 | 39,47 | 0,7 / 0,7 / 0,7 | 0,98 / 1,16 / 1,20 | 3800 / 3785 / 3778 | 3,5 / 3,4 / 3,3 | 1,3 / 1,3 / 1,2 | 38,95 | 38,04 |
+| GHOS (9) | 37,48 | 37,62 | +0,14 | 37,58 | 4,8 / 4,4 / 4,5 | 7,80 / 7,68 / 7,77 | 1712 / 1744 / 1708 | 24,6 / 25,4 / 24,9 | 3,7 / 3,8 / 3,6 | 37,32 | 36,66 |
+| TULI (10) | 38,73 | 38,60 | -0,13 | 38,62 | 2,1 / 2,4 / 2,3 | 6,28 / 6,38 / 6,32 | 2247 / 2207 / 2227 | 34,0 / 30,2 / 30,2 | 4,3 / 3,4 / 3,4 | 38,70 | 37,69 |
+| METR (11) | 34,76 | 34,57 | -0,19 | 34,57 | 11,0 / 11,5 / 11,4 | 7,49 / 7,50 / 7,49 | 1823 / 1826 / 1827 | 20,4 / 19,3 / 19,6 | 5,9 / 5,2 / 5,3 | 33,30 | 33,24 |
+| RUIN (12) | 39,03 | 39,08 | +0,05 | 39,06 | 1,6 / 1,5 / 1,6 | 2,84 / 3,09 / 3,07 | 3432 / 3424 / 3403 | 9,9 / 9,3 / 8,6 | 1,8 / 1,7 / 1,3 | 38,85 | 38,14 |
+| IMPE (13) | 39,18 | 39,09 | -0,09 | 39,04 | 1,2 / 1,4 / 1,5 | 3,50 / 4,20 / 4,35 | 3264 / 2952 / 2897 | 18,3 / 17,4 / 18,7 | 4,5 / 4,0 / 3,9 | 39,06 | 38,10 |
+| CAPE (14) | 39,42 | 39,35 | -0,07 | 39,40 | 0,8 / 1,0 / 0,8 | 1,20 / 1,63 / 1,53 | 3791 / 3768 / 3739 | 15,8 / 15,8 / 15,8 | 4,6 / 4,5 / 4,6 | 39,19 | 38,39 |
+| **Total** | 38,57 | 38,53 | -0,04 | 38,50 | cuadros 946.0 / 950.0 / 993.0 | | | 256,0 / 255,7 / 255,9 | 55,2 / 52,6 / 53,1 | 38,19 | 37,33 |
+
+Saltos sumados en las 15 etapas, por razon (por s, +8/32 apariciones, -8/32 desapariciones):
+
+| razon | A (2.9.7) | B (2.9.8, d298) | C (2.9.8, lgdat2) |
+|---|---|---|---|
+| tope | +103,8/18,3 -39,9/3,6 | +102,2/17,2 -40,4/3,6 | +102,5/17,1 -40,6/3,6 |
+| pvs | +94,2/28,2 -3,6/1,0 | +95,4/28,2 -3,6/1,0 | +94,7/28,2 -3,7/1,0 |
+| lejos | +3,4/0,4 -3,0/0,4 | +3,5/0,4 -4,1/0,3 | +3,7/0,5 -4,5/0,5 |
+| lado | +4,6/1,0 | +4,4/0,5 | +3,7/0,5 |
+| detras | +1,4/0,5 | 0 | 0 |
+| rama | +2,1/1,6 | +2,2/1,6 | +2,1/1,5 |
+| lod, tramo | ~0 | ~0 | ~0 |
+
+**Medido**
+- Media de fps de las 15: A 38,57, B 38,53 (-0,04), C 38,50. Por etapa B-A va de -0,19 (METR) a +0,14 (GHOS);
+  ninguna pierde mas de 0,3 fps. Cuadros tarde sumados: A 946, B 950, C 993.
+- Saltos sumados: 8 px o mas A 256,0, B 255,7, C 255,9 (igual); 32 px o mas A 55,2, B 52,6 (-4,7 %), C 53,1. Lo de
+  32 px que baja es sobre todo "detras" de METR/TULI (solo sale en A) y "lado"; "tope" baja algo (+18,3 a +17,2 en
+  32 px) y "lejos" sube un poco en las desapariciones (-3,0 a -4,1 en 8 px, casi todo PALM).
+- Mayor subida de 8 px: PALM 22,6 -> 24,8 (+9,7 %, justo por debajo del 10 %), de "lejos" (-0,6 -> -1,7) y "tope".
+  Con lgdat2 (C) 25,8: no es de los datos nuevos. TULI baja 34,0 -> 30,2 y METR 20,4 -> 19,3.
+- Salto medio: igual o un poco mas alto en B (IMPE 3,50 -> 4,20, CAPE 1,20 -> 1,63, ALPI 0,57 -> 0,93), lejano medio
+  algo menor alli (IMPE 3264 -> 2952 m).
+- Out of memory: las 45 pruebas de las rondas (y las 15 de la tanda suelta) dan solo el "Out of memory ... diff 217088"
+  de newlib al arrancar, el ya conocido; ninguno nuevo. Ningun cuelgue: todas escriben lineas MS hasta el final de los
+  140 s y avanzan lo mismo que A (s final de la etapa a +-6 %). Todas las etapas cargan (75-97 muestras MS por prueba).
+  Ninguna linea "No se pud", panic, assert ni excepcion.
+
+**Lo que encontro la medida: el diagnostico nuevo bajaba ~1 fps (corregido).** La primera tanda (punta de c298 tal
+cual, d298, 3 Flycast en carriles) y la primera ronda A/B/C daban en TODAS las etapas ~1 fps menos (media 37,47 frente
+a 38,56, de -0,84 a -1,39 por etapa), un 50 % mas de cuadros tarde (1450 frente a 928) y el salto mucho mas alto en las
+ligeras (ALPI 0,56 -> 4,37, FORE 0,30 -> 4,96, SNOW 0,95 -> 4,96). Igual con d298 que con lgdat2.
+- Sin -DDIAG_POPPING no habia diferencia (ALPI: 39,82 / 39,81 / 39,82 fps con 2.9.7, 2.9.8+lgdat2 y 2.9.8+d298).
+- Por commits (ALPI, todos con -DTOPE_FIJO=0): 060dc9a 39,45, P1 39,22, P1+P3 38,90, P1..P4 38,40: cada P sumaba un poco.
+  TOPE_FIJO=0 en la punta no lo arreglaba (38,26).
+- La causa: las lineas nuevas por segundo (POPTOPE, POPTRAS, POPSEC y la SUBE de DIAG_MS cada 30 cuadros) llevan ~35 %
+  mas de texto por la consola serie (117 frente a 87 KB en ALPI); la CPU del cuadro sube ~0,5-0,6 ms y el salto
+  adaptativo lo amplifica. Es solo de la medida: el juego sin diagnostico no cambia.
+- Arreglo (commit de esta medida): esas lineas, y POPLEJ, solo se escriben con -DDIAG_POP298 (los contadores siguen);
+  coche_trasero_paso no mira el cono con COCHE_TRASERO=0 (salvo con DIAG_CONGELA). Con solo las POP* fuera quedaba
+  -0,3 fps (ALPI 39,18, PALM 37,30); con SUBE y el cono tambien fuera, -0,1..0,2 en las pruebas sueltas y la tabla de
+  arriba.
+- Las tablas antes/despues de P1..P5 se hicieron con las dos variantes compiladas con el mismo diagnostico, asi que su
+  comparacion vale; pero sus cifras absolutas (fps, salto) estan ~0,5-1 fps por debajo de la referencia por esto.
+- Para usar topes.py, tras.py, sec.py, lej.py o sube.py hay que compilar con -DDIAG_POP298.
+
+**Tanda suelta (m298/fin/res/, punta sin el arreglo, 3 Flycast en carriles):** media 37,33 fps frente a 38,19 de la
+referencia de 2 Flycast; saltos 8 px 244,5 frente a 235,6. No cuenta para la comparacion (otra carga y el diagnostico
+caro), solo como deteccion del problema.
+
+**Supuesto (no comprobado)**
+- Que la consola serie de Flycast bloquee al ritmo del puerto (~11 KB/s) se deduce de las cifras (~215 B/s mas, ~19 ms
+  por s, ~0,5 ms por cuadro), no se ha medido el tiempo de printf.
+- En la consola real la 2.9.8 por defecto solo difiere de la 2.9.7 en TOPE_FIJO=1 (P1) y el orden de mallas del coche
+  ligero (P3, datos d298); no se ha medido en la consola.
+- Ficheros: `m298/fin/` y `m298/final.md` del directorio de trabajo (res4/ las rondas definitivas, res3/ la primera
+  ronda, res/ la tanda suelta, bis/ la biseccion, sh/, py/comp4.py).
+
 ### Coche visible mas ligero (Rev 2.9.7)
 
 Pedido del usuario (variante "C2", para reducir los saltos): menos poligonos y texturas en las partes VISIBLES de los

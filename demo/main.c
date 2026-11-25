@@ -1733,6 +1733,14 @@ static __attribute__((unused)) uint32_t salto_ta_de(float q)    /* el tope del T
      baja si queda medio escalon por debajo.
    Asi el tope que ve nodos_visibles_todos es el mismo en toda la seccion (con y sin REPARTO_SCHMITT). Los objetos de
    la union (bo) y ta_freno siguen como antes. -DTOPE_FIJO=0: lo de antes */
+/* Rev 2.9.8 (medida, no es del original): las lineas POPTOPE, POPTRAS, POPSEC y POPLEJ de DIAG_POPPING (P1, P3, P2,
+   P5) y SUBE de DIAG_MS (P4) solo se escriben con -DDIAG_POP298 (los contadores siguen igual). Medido en Flycast
+   (docs/PARIDAD.md, Rev 2.9.8, medida final): con ellas la consola serie lleva ~35 % mas de texto, la CPU del cuadro
+   sube ~0,5 ms y, con el salto adaptativo, todas las etapas daban ~1 fps menos y el salto mas alto que la 2.9.7 con
+   los mismos -DDIAG_MS -DDIAG_POPPING: la medida dejaba de ser comparable. Sin DIAG_POPPING no habia diferencia */
+#ifndef DIAG_POP298
+#define DIAG_POP298 0
+#endif
 #ifndef TOPE_FIJO
 #define TOPE_FIJO 1
 #endif
@@ -9032,15 +9040,15 @@ static void pop_mide(void)
         memset(pop_vap, 0, sizeof pop_vap); memset(pop_vde, 0, sizeof pop_vde); memset(pop_lap, 0, sizeof pop_lap); memset(pop_lde, 0, sizeof pop_lde);
         for (k = 0; k < PR_N; k++) { pop_vz[k][0] = 1e9f; pop_vz[k][1] = 0; pop_vpx[k] = 0; }
         printf("%s", b);
-        printf("POPTOPE: %.4s cambios %u sin cruzar %u min %uK max %uK res %uK 2d %uK salto_ta %u fijo %d\n", cur_nodo >= 0 ? curso[cur_nodo].zona : "----",
+        if (DIAG_POP298) printf("POPTOPE: %.4s cambios %u sin cruzar %u min %uK max %uK res %uK 2d %uK salto_ta %u fijo %d\n", cur_nodo >= 0 ? curso[cur_nodo].zona : "----",
                (unsigned)tf_dg_cam, (unsigned)tf_dg_cams, (unsigned)(tf_dg_min == ~0u ? 0 : tf_dg_min >> 10), (unsigned)(tf_dg_max >> 10),
                (unsigned)(tf_res >> 10), (unsigned)(tf_r2d >> 10), (unsigned)salto_ta, tf_on);   /* (Rev 2.9.8 P1) */
         tf_dg_cam = tf_dg_cams = tf_dg_max = 0; tf_dg_min = ~0u;
-        printf("POPTRAS: %.4s dentro %u de %u cuadros cambios %u vtx %u por cuadro dentro activo %d\n", cur_nodo >= 0 ? curso[cur_nodo].zona : "----",
+        if (DIAG_POP298) printf("POPTRAS: %.4s dentro %u de %u cuadros cambios %u vtx %u por cuadro dentro activo %d\n", cur_nodo >= 0 ? curso[cur_nodo].zona : "----",
                (unsigned)tras_dg_dentro, (unsigned)tras_dg_cuadros, (unsigned)tras_dg_cambios,
                (unsigned)(tras_dg_dentro ? tras_dg_vtx / tras_dg_dentro : 0), COCHE_TRASERO);   /* (Rev 2.9.8 P3) */
         tras_dg_cuadros = tras_dg_dentro = tras_dg_cambios = tras_dg_vtx = 0;
-        printf("POPSEC: %.4s tabla %u de %u cuadros emergencia %u igual %u cambios %u din-tabla d %.1f p %.1f pide %uK tope %uK activo %d\n",
+        if (DIAG_POP298) printf("POPSEC: %.4s tabla %u de %u cuadros emergencia %u igual %u cambios %u din-tabla d %.1f p %.1f pide %uK tope %uK activo %d\n",
                cur_nodo >= 0 ? curso[cur_nodo].zona : "----", (unsigned)rs_dg_tab, (unsigned)rs_dg_cuad, (unsigned)rs_dg_emer, (unsigned)rs_dg_igual,
                (unsigned)rs_dg_cambios, rs_dg_tab ? (double)rs_dg_dd / rs_dg_tab : 0.0, rs_dg_tab ? (double)rs_dg_dp / rs_dg_tab : 0.0,
                (unsigned)(rs_dg_cuad ? rs_dg_pide / rs_dg_cuad >> 10 : 0), (unsigned)(rs_dg_cuad ? rs_dg_tope / rs_dg_cuad >> 10 : 0), REPARTO_SEC);   /* (Rev 2.9.8 P2) */
@@ -9143,7 +9151,7 @@ static void lejsec_paso(int mueve, int carrera)            /* (carrera: estado =
         dn++; dact += lejos < lejos_salto; dsec += lsec_f; dsal += lejos_salto; dlej += lejos; dobj += lsec_obj_v;
         if (!dt0) dt0 = ah;
         if (ah - dt0 >= 1000) {
-            printf("POPLEJ: %.4s s %.0f cuadros %u corta %u objetivo %.0f seccion %.0f salto %.0f lejos %.0f sec %d\n", cur_nodo >= 0 ? curso[cur_nodo].zona : "----",
+            if (DIAG_POP298) printf("POPLEJ: %.4s s %.0f cuadros %u corta %u objetivo %.0f seccion %.0f salto %.0f lejos %.0f sec %d\n", cur_nodo >= 0 ? curso[cur_nodo].zona : "----",
                    (double)yo.s, (unsigned)dn, (unsigned)dact, (double)(dobj / dn), (double)(dsec / dn), (double)(dsal / dn), (double)(dlej / dn), (int)etapa.pvs_s);
             dn = dact = 0; dsec = dsal = dlej = dobj = 0; dt0 = ah;
         }
@@ -13133,6 +13141,13 @@ static void coche_trasero_paso(int carrera)
 {
     float e[3], x, y, z, h, d, gui, cab, ala, mg;
     int j, dentro;
+#if !COCHE_TRASERO && !defined(DIAG_CONGELA)
+    (void)carrera; (void)e; (void)x; (void)y; (void)z; (void)h; (void)d; (void)gui; (void)cab; (void)ala; (void)mg; (void)j; (void)dentro;
+#ifdef DIAG_POPPING
+    tras_dg_cuadros++;                                          /* (apagado: ni se mira el cono; dentro = 0 como antes) */
+#endif
+    tras_dentro = 0; return;
+#endif
     for (j = 0; j < 3; j++) e[j] = ojo[j] - mod_coche[3][j];
     x = e[0] * mod_coche[0][0] + e[1] * mod_coche[0][1] + e[2] * mod_coche[0][2];
     y = e[0] * mod_coche[1][0] + e[1] * mod_coche[1][1] + e[2] * mod_coche[1][2];
@@ -15232,7 +15247,7 @@ int main(int argc, char **argv)
                 printf("MS: %.4s s %.0f fps %.1f dib %.2f log %.2f pvr %.2f tri %u vtx %u tarde %u lej %d niv %.2f\n", curso[cur_nodo].zona, (double)yo.s,
                        (double)fps, (double)ms, (double)ms_log, (double)(ps.rnd_last_time / 1000000.0), (unsigned)tri_enviados, (unsigned)vtx_ult,
                        (unsigned)pres_tarde, (int)lejos, (double)salto_q);
-                printf("SUBE: dma %d trozos %u us %u max %u esp %u dmas %u dmaK %u sqK %u\n", SUBE_DMA, (unsigned)sdma_dg_tr, (unsigned)sdma_dg_us,
+                if (DIAG_POP298) printf("SUBE: dma %d trozos %u us %u max %u esp %u dmas %u dmaK %u sqK %u\n", SUBE_DMA, (unsigned)sdma_dg_tr, (unsigned)sdma_dg_us,
                        (unsigned)sdma_dg_max, (unsigned)sdma_dg_esp, (unsigned)sdma_dg_n, (unsigned)(sdma_dg_b >> 10), (unsigned)(sdma_dg_sq >> 10));   /* (P4) */
                 sdma_dg_tr = sdma_dg_us = sdma_dg_max = sdma_dg_esp = sdma_dg_n = sdma_dg_b = sdma_dg_sq = 0;
                 printf("SALTOMS: nivel %.2f trabajo %.2f ms TA %u lejano %d\n", (double)salto_q, (double)salto_trab, (unsigned)salto_ta, (int)lejos);
