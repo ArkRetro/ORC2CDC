@@ -1935,6 +1935,42 @@ caro), solo como deteccion del problema.
 - Ficheros: `m298/fin/` y `m298/final.md` del directorio de trabajo (res4/ las rondas definitivas, res3/ la primera
   ronda, res/ la tanda suelta, bis/ la biseccion, sh/, py/comp4.py).
 
+### Rev 2.9.9 (diagnostico): edificios enteros que faltan (`-DDIAG_FALTA`)
+
+Queja: en la salida de la playa (captura del usuario en Flycast de Android: parado, 0'10"963, F50) faltan edificios
+enteros, un trozo del edificio blanco de la izquierda flota sin su parte de abajo y a la derecha hay huecos. Solo
+medida (nada cambia sin los -D): todo en el Flycast de aqui, NO en la consola ni en Android.
+
+Herramientas nuevas (`demo/main.c`):
+- `-DDIAG_FALTA` (con `-DDIAG_POPPING`): `falta_mide` / `falta_prepara` y las marcas por malla `fm_buf` (FM_PON en
+  `dibuja_etapa`, `dibuja_rango` y `ta_cabe`). Lo que esta en la vista (esfera contra la piramide, hasta LEJOS_MAX) y NO
+  se dibuja, con la razon: por nodo lejos, lod, rama, pvs, tope (corte prio_d / prio_p), tramo, lista; por malla de un
+  nodo dibujado ta_cabe, vtx, pvsm (mascara de la PVS), m_lejos, ltope, entrada; y tex0 / texg (enviada sin su
+  textura). Linea `FALTA:` por s (cada `FALTA_CADA` cuadros una muestra; cuenta lo de `FALTA_GRANDE_PX` = 24 px o mas
+  de radio en la pantalla) y con `-DDIAG_CONGELA` el listado del cuadro congelado (`FALTAINI`, `FALTAN`, `FALTAM`,
+  `FALTAP`, `FALTAFIN`).
+- `-DPRUEBA_PARADO` (el piloto no acelera), `-DPRUEBA_PARA_S=m` (conduce hasta m metros de la etapa y se para en seco),
+  `-DPRUEBA_PARA_GIRA=rad`, `-DPRUEBA_GIRA=rad`.
+
+La captura es del arbol 1 (preset de OutRun 2 SP: BEAC, la playa de salida), no de PALM del arbol 0: se reproduce con
+`-DPRUEBA_CURSO=1 -DPRUEBA_NODO=0 -DPRUEBA_FICHA=7 -DPRUEBA_PARADO -DPRUEBA_PARA_S=95 -DDIAG_CONGELA=658`.
+
+Medido (cuadro congelado, BEAC s 95, 24 px o mas):
+- Con el Flycast de aqui (ta_f 448): 19 nodos por el corte del reparto (tope, hasta 36 px), 16 por el lejano (salto 7,4:
+  lejano 1853 m), 0 mallas por ta_cabe; la imagen sale entera salvo lo lejano.
+- Con `-DTA_F_MIN=576` (el TA medido 2,25 veces lo teorico): prio_d 0, 28 nodos por el tope (hasta 124 px) y 86 mallas por
+  ta_cabe (hasta 247 px), de nodos a 60-150 m: el edificio blanco de la izquierda (nodos 1132-1148) pierde su parte de
+  abajo y el de la derecha (484) se queda en las ventanas. Es la captura del usuario. Con 768: 91 nodos y 100 mallas.
+- La razon: `ta_f` sube con lo que diga el registro del TA (`ta_fin_cuadro`, con 20 % de margen) y no baja nunca; el
+  reparto se queda en su minimo (prio_d 0, la clase de LOD 0 siempre) y lo que aun no cabe lo tira `ta_cabe` en el orden
+  de envio de `dibuja_etapa` (por textura): trozos de edificios cercanos.
+- El salto adaptativo: con el coche parado el trabajo del cuadro (24-26 ms en Flycast) lo lleva a 7-9 y el lejano a
+  1200-1850 m (en PALM de la carrera, nivel 9 desde los 1150 m). Con `-DSALTO_OBS=0` en la carrera de 140 s: PALM 35,17
+  frente a 36,00 fps y de 20,7 a 3,4 elementos grandes que faltan por muestra (lejos 10,2 -> 0, tope 8,2 -> 3,4); METR
+  31,34 frente a 31,67 fps.
+
+Resultados en m299/diag del directorio de trabajo (capturas, tablas, consolas).
+
 ### Coche visible mas ligero (Rev 2.9.7)
 
 Pedido del usuario (variante "C2", para reducir los saltos): menos poligonos y texturas en las partes VISIBLES de los

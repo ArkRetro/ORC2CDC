@@ -1850,6 +1850,21 @@ static void ta_teo_tab_pon(void)
     uint32_t n; int o;
     for (o = 0; o < 2; o++) for (n = 0; n < 257; n++) ta_teo_tab[o][n] = n >= 3 ? ta_teo(n, o) : ta_teo(3, o);
 }
+/* Rev 2.9.9 (medida, no es del original; -DDIAG_FALTA, con -DDIAG_POPPING): por malla del tramo que se dibuja (etapa,
+   union, siguiente), lo que le paso en el cuadro: 0 no llego al envio, 1 enviada, 2 no cupo en el TA (ta_cabe o el
+   tope de la etapa), 3 no cupo en los vertices (VTX_ETAPA_MAX). falta_mide (abajo) lo lee tras el cuadro */
+#ifdef DIAG_FALTA
+#ifndef DIAG_POPPING
+#error "DIAG_FALTA necesita DIAG_POPPING"
+#endif
+static uint8_t *fm_buf[3]; static uint32_t fm_cap[3];
+static uint8_t *fm_cur; static const void *fm_mo; static uint32_t fm_k;   /* el del tramo en curso, su modelo y la malla */
+#define FM_PON(m, v) do { if (fm_cur) fm_cur[(const malla_t *)(m) - ((const malla_t *)fm_mo)] = (uint8_t)(v); } while (0)
+#define FM_PON_SI(mo, m, v) do { if (fm_mo == (const void *)(mo)->mallas) FM_PON(m, v); } while (0)
+#else
+#define FM_PON(m, v) do { } while (0)
+#define FM_PON_SI(mo, m, v) do { } while (0)
+#endif
 #ifdef DIAG_POPPING                                     /* medida (DIAG_POPPING): mallas de la etapa que no caben */
 static uint32_t pop_mc, pop_vc;
 static uint32_t pop_cat[6], pop_cat_v0;                  /* TA de lo que no es la etapa: agua, bo, coche, pareja, trafico, efectos */
@@ -1871,6 +1886,9 @@ static inline int ta_cabe(uint32_t n)
         if (ta_en_bo) ta_bo_pide += c;
 #ifdef DIAG_POPPING
         if (ta_en_etapa) { pop_mc++; pop_vc += n; }
+#endif
+#ifdef DIAG_FALTA
+        if (fm_cur && ta_en_etapa) fm_cur[fm_k] = 2;    /* (alguna tira de la malla no cupo) */
 #endif
         return 0;
     }
@@ -2315,7 +2333,7 @@ static void dibuja_rango(const modelo_t *mo, int l, uint32_t k0, uint32_t k1, in
             if (mo->pvs_on && m->nodo >= 0 && !(mo->pvs_dibujo[k >> 5] & (1u << (k & 31))) &&
                 !(mo->pvs_ent && mo->pvs_ent[m->nodo >> 5] & (1u << (m->nodo & 31)))) continue;   /* PVS: no se ve (salvo lo cercano) */
 #ifndef DIAG_SIN_TOPE
-            if (vtx_et + (vtx_env - vtx_et0) + vtx_reserva > VTX_ETAPA_MAX) { ta_corto = 1; ta_et_corto = 1; POP_MALLA(m); continue; }
+            if (vtx_et + (vtx_env - vtx_et0) + vtx_reserva > VTX_ETAPA_MAX) { ta_corto = 1; ta_et_corto = 1; POP_MALLA(m); FM_PON_SI(mo, m, 3); continue; }
 #endif
             if (DETRAS_ENTRADA(mo, m)) continue;                 /* (sig_antes) */
             cartel = malla_de_cartel(mo, m);
@@ -2329,6 +2347,9 @@ static void dibuja_rango(const modelo_t *mo, int l, uint32_t k0, uint32_t k1, in
                 seguro = zv - m->r > cerca * 1.5f && m->n <= 256 && esfera_en_guarda(xv, yv, zv, m->r);
             }
         }
+#ifdef DIAG_FALTA
+        if (recorta && fm_cur && fm_mo == mo->mallas) { fm_k = k; fm_cur[k] = 1; }
+#endif
 #ifdef DEP_TEX
         if (recorta && !sin_niebla) {                      /* depuracion: color = numero de textura */
             if (ult == -2) pvr_prim(&cab_col[1][l], sizeof(pvr_poly_hdr_t));
@@ -2449,7 +2470,7 @@ static void dibuja_etapa(const modelo_t *mo, int l)
             if (m->tex == DIAG_TEX && mo == &etapa) dg_tx[1]++;
 #endif
 #ifndef DIAG_SIN_TOPE
-            if ((int32_t)(ve - vtx_et0) > vres) { ta_corto = 1; ta_et_corto = 1; POP_MALLA(m); continue; }
+            if ((int32_t)(ve - vtx_et0) > vres) { ta_corto = 1; ta_et_corto = 1; POP_MALLA(m); FM_PON(m, 3); continue; }
 #endif
 #ifdef DIAG_TEX
             if (m->tex == DIAG_TEX && mo == &etapa) { dg_tx[2]++; if (!cart) { float dx_ = m->cx - o0, dy_ = m->cy - o1, dz_ = m->cz - o2, z_ = dx_ * e0 + dy_ * e1 + dz_ * e2; if (z_ - m->r > lej) dg_tx[3]++; dg_lej = lej; } }
@@ -2467,6 +2488,9 @@ static void dibuja_etapa(const modelo_t *mo, int l)
                 if (fabsf(xv) - zv * tanh > m->r * kh || fabsf(yv) - zv * tanv > m->r * kv) continue;
                 seguro = zv - m->r > cer15 && m->n <= 256 && esfera_en_guarda(xv, yv, zv, m->r);
             }
+#ifdef DIAG_FALTA
+            if (fm_cur) { fm_k = k; fm_cur[k] = 1; }
+#endif
             f = m->tex >= 0 ? fv : 0;                           /* (lo que no tiene textura no se funde) */
             if (m->tex + (f ? 0x10000 : 0) != ult) {
                 ult = m->tex + (f ? 0x10000 : 0);
@@ -2501,7 +2525,7 @@ static void dibuja_etapa(const modelo_t *mo, int l)
                 /* (fundiendose, f: con desplazamiento en el TA, ta_teo_tab[1], y el color de fe_pon en sq_vtx_fe) */
                 uint32_t n = m->n, tt = f ? ta_teo_tab[1][n] : teo[n], c = tt * tf >> 8;
 #ifndef DIAG_SIN_TOPE
-                if ((int32_t)c > r) { ta_corto = 1; ta_et_corto |= ta_en_etapa; POP_MALLA(m); continue; }
+                if ((int32_t)c > r) { ta_corto = 1; ta_et_corto |= ta_en_etapa; POP_MALLA(m); FM_PON(m, 2); continue; }
 #endif
                 r -= c; dvb += c; dt += tt; dn++;
                 if (fo) focos_anota(mo, m);                     /* (focos: se dibuja) */
@@ -9248,6 +9272,141 @@ static void tope_fijo_paso(int carrera)
     }
     if (tf_on) salto_ta = SALTO_TA[tf_k];
 }
+#ifdef DIAG_FALTA
+/* Rev 2.9.9 (medida, -DDIAG_FALTA): lo que esta dentro de la vista y del lejano nominal (LEJOS_MAX) pero NO se dibuja
+   en el cuadro, con la razon. Por nodo (los del original, < nn0): la razon de DIAG_POPPING (lejos, lod, rama, pvs, tope
+   = el corte prio_d / prio_p del reparto, tramo, lista = no esta en la lista de nodos de la seccion); y por malla de los
+   nodos que si se dibujan: ta_cabe (no cupo en el TA), vtx (no cupo en los vertices), pvsm (la mascara de la PVS),
+   lejos (el lejano del cuadro, menor que el nominal por el salto), ltope (ta_lej_tope), entrada (DETRAS_ENTRADA),
+   lowpoly (va su version lejana) y otra; y las enviadas sin su textura (tex0: no subida, texg: la gris). Radio en la
+   pantalla: r fx / z (640x480; 999 si la esfera envuelve la camara). FALTA_GRANDE_PX: lo que cuenta como grande. Cada
+   FALTA_CADA cuadros de carrera una muestra; por s la linea FALTA (muestras y por razon: nodos grandes que faltan,
+   mallas grandes, la mayor); con DIAG_CONGELA el listado entero del cuadro congelado (FALTAN / FALTAM) */
+#ifndef FALTA_GRANDE_PX
+#define FALTA_GRANDE_PX 24.0f
+#endif
+#ifndef FALTA_CADA
+#define FALTA_CADA 15
+#endif
+#ifndef FALTA_LISTA_PX
+#define FALTA_LISTA_PX 4.0f
+#endif
+enum { FM_R_TA = PR_N, FM_R_VTX, FM_R_PVSM, FM_R_LEJOS, FM_R_LTOPE, FM_R_ENT, FM_R_LOWP, FM_R_OTRA, FM_R_TEX0, FM_R_TEXG, FM_R_N };
+static const char *const fm_nom[FM_R_N] = { "dib", "lejos", "detras", "lado", "lod", "rama", "pvs", "tope", "tramo", "lista",
+                                            "ta_cabe", "vtx", "pvsm", "m_lejos", "ltope", "entrada", "lowpoly", "otra", "tex0", "texg" };
+static uint32_t fa_n[FM_R_N], fa_m[FM_R_N], fa_muestras, fa_vista; static float fa_px[FM_R_N]; static int fa_nd[FM_R_N], fa_t[FM_R_N];
+static uint64_t fa_t0;
+static void falta_prepara(void)                                 /* al empezar el cuadro: las marcas a 0 (y el sitio) */
+{
+    int i;
+    for (i = 0; i < 3; i++) {
+        const modelo_t *mo = tramos[i];
+        if (!mo->datos || !mo->mallas) continue;
+        if (fm_cap[i] < mo->nmallas) { free(fm_buf[i]); fm_buf[i] = malloc(mo->nmallas); fm_cap[i] = fm_buf[i] ? mo->nmallas : 0; }
+        if (fm_buf[i]) memset(fm_buf[i], 0, fm_cap[i]);
+    }
+}
+/* esfera en la vista (como nodos_visibles) hasta LEJOS_MAX; z del centro, radio en px y centro en la pantalla */
+static int fa_en_vista(float cx, float cy, float cz, float r, float *zv_, float *px, float *sx, float *sy)
+{
+    float tanh = 320.0f / fx, tanv = 240.0f / fx, kh = sqrtf(1 + tanh * tanh), kv = sqrtf(1 + tanv * tanv);
+    float dx = cx - ojo[0], dy = cy - ojo[1], dz = cz - ojo[2], zv = dx * ade[0] + dy * ade[1] + dz * ade[2], xv, yv;
+    if (zv - r > LEJOS_MAX || zv + r < cerca) return 0;
+    xv = dx * der[0] + dy * der[1] + dz * der[2]; yv = dx * arr[0] + dy * arr[1] + dz * arr[2];
+    if (fabsf(xv) - zv * tanh > r * kh || fabsf(yv) - zv * tanv > r * kv) return 0;
+    *zv_ = zv; *px = zv > r ? r * fx / zv : 999.0f;
+    *sx = zv > 1.0f ? 320.0f + xv * fx / zv : (xv < 0 ? -999.0f : 999.0f); *sy = zv > 1.0f ? 240.0f - yv * fx / zv : (yv < 0 ? 999.0f : -999.0f);
+    return 1;
+}
+static void falta_mide(int carrera)                             /* (carrera: estado == CARRERA) */
+{
+    static uint16_t mv_n[POP_MAXN], mv_f[POP_MAXN];            /* por nodo: mallas en la vista y las que faltan */
+    static float mv_px[POP_MAXN];                               /* la mayor que falta */
+    static int fa_cuadro, fa_cong; int t, lista = 0;
+    if (precalentando || !carrera) return;
+    fa_cuadro++;
+#ifdef DIAG_CONGELA
+    if (diag_congelado) { fa_cong++; lista = fa_cong == 30 || fa_cong == 240; }
+#endif
+    if (!lista && fa_cuadro % FALTA_CADA) return;
+    fa_muestras++;
+    if (lista) printf("FALTAINI: %.4s s %.1f crono %d cong %d lejos %.0f ltope %.0f prio_d %d prio_p %d alfa %.2f ta_f %u tope %uK et %uK salto %.2f ta %u fx %.0f ojo %.1f %.1f %.1f pvs %d%d%d sec %d\n",
+                      cur_nodo >= 0 ? curso[cur_nodo].zona : "----", (double)yo.s, (int)crono, fa_cong, (double)lejos, (double)(ta_lej_tope < 1e8f ? ta_lej_tope : -1),
+                      prio_d, prio_p, (double)prio_alfa, (unsigned)ta_f, (unsigned)(ta_tope_etapa >> 10), (unsigned)(ta_et >> 10), (double)salto_q, (unsigned)salto_ta, (double)fx,
+                      (double)ojo[0], (double)ojo[1], (double)ojo[2], etapa.pvs_on, uni.pvs_on, sig.pvs_on, (int)etapa.pvs_s);
+    for (t = 0; t < 3; t++) {
+        const modelo_t *mo = tramos[t]; pop_slot_t *ps; uint32_t i, k, nn; const uint8_t *fm = fm_cap[t] >= mo->nmallas ? fm_buf[t] : NULL; int gv;
+        if (!mo->datos || !mo->nodos || !mo->vis || mo->relleno_propio || !(ps = pop_slot(mo))) continue;
+        nn = mo->nn0 < POP_MAXN ? mo->nn0 : POP_MAXN; gv = geo_visible(mo);
+        memset(mv_n, 0, nn * 2); memset(mv_f, 0, nn * 2); memset(mv_px, 0, nn * 4);
+        /* las mallas de los nodos que se dibujan (sin el cielo ni el agua: lista 3) */
+        for (k = 0; gv && k < mo->inicio[3] && k < mo->nmallas; k++) {
+            const malla_t *m = mo->mallas + k; uint32_t nd; int r_ = -1, lej = 0; float zv, px, sx, sy;
+            if (m->nodo < 0 || (uint32_t)m->nodo >= mo->nnodos || m->n < 3) continue;
+            nd = (uint32_t)m->nodo;
+            if (nd >= mo->nn0) { if (!mo->lej_de) continue; nd = mo->lej_de[nd - mo->nn0]; lej = 1; }
+            if (nd >= nn || ps->cur[nd] != PR_DIB) continue;
+            if (malla_de_cartel(mo, m)) continue;               /* (carteles: en el marco de su nodo) */
+            if (!fa_en_vista(m->cx, m->cy, m->cz, m->r, &zv, &px, &sx, &sy)) continue;
+            {   uint32_t dn = (uint32_t)m->nodo; int dib = (mo->vis[dn >> 5] >> (dn & 31)) & 1;
+                if (!dib) { if (lej || (mo->nodos[nd].cartel <= -2)) r_ = FM_R_LOWP; else r_ = PR_TOPE; }   /* (el otro de la pareja completo / lejano) */
+                else if (!lej) mv_n[nd]++;
+                if (dib) {
+                    int f = fm ? fm[k] : 1;
+                    if (f == 2) r_ = FM_R_TA; else if (f == 3) r_ = FM_R_VTX;
+                    else if (f == 0) {
+                        if (mo->pvs_on && !(mo->pvs_dibujo[k >> 5] & (1u << (k & 31))) && !(mo->pvs_ent && mo->pvs_ent[dn >> 5] & (1u << (dn & 31)))) r_ = FM_R_PVSM;
+                        else if (DETRAS_ENTRADA(mo, m)) r_ = FM_R_ENT;
+                        else if (zv - m->r > lejos) r_ = FM_R_LEJOS;
+                        else if (zv - m->r > ta_lej_tope) r_ = FM_R_LTOPE;
+                        else r_ = FM_R_OTRA;
+                    } else if (m->tex >= 0) {
+                        int tx = mo->remap ? mo->remap[m->tex] : m->tex;
+                        if (!mo->tv || !mo->tv[tx]) r_ = FM_R_TEX0; else if (mo->tv[tx] == tex_gris) r_ = FM_R_TEXG;
+                    }
+                }
+            }
+            if (r_ < 0 || r_ == FM_R_LOWP || r_ == PR_TOPE) continue;   /* (enviada; o va la otra version del nodo) */
+            if (!lej) { mv_f[nd]++; if (px > mv_px[nd]) mv_px[nd] = px; }
+            if (px >= FALTA_GRANDE_PX) { fa_m[r_]++; if (px > fa_px[r_]) { fa_px[r_] = px; fa_nd[r_] = (int)nd; fa_t[r_] = t; } }
+            if (lista && px >= FALTA_LISTA_PX)
+                printf("FALTAM: %s malla %u nodo %u %s r %.1f z %.0f px %.1f en %.0f %.0f lista %d tex %d\n", t == 0 ? "etapa" : t == 1 ? "union" : "sig", (unsigned)k, (unsigned)nd, fm_nom[r_],
+                       (double)m->r, (double)zv, (double)px, (double)sx, (double)sy, k < mo->inicio[1] ? 0 : k < mo->inicio[2] ? 1 : 2, (int)m->tex);
+        }
+        /* los nodos que no se dibujan */
+        for (i = 0; i < nn; i++) {
+            const nodo_t *d = mo->nodos + i; int c = gv ? ps->cur[i] : PR_TRAMO; float zv, px, sx, sy;
+            if (!fa_en_vista(d->cx, d->cy, d->cz, d->r, &zv, &px, &sx, &sy)) continue;
+            if (c == PR_DIB) {
+                fa_vista++;
+                if (lista && mv_f[i] && px >= FALTA_LISTA_PX)
+                    printf("FALTAP: %s nodo %u dib r %.1f z %.0f px %.1f en %.0f %.0f mallas %u faltan %u (mayor %.1f px) grupo %u cl %u/%u\n", t == 0 ? "etapa" : t == 1 ? "union" : "sig",
+                           (unsigned)i, (double)d->r, (double)zv, (double)px, (double)sx, (double)sy, (unsigned)mv_n[i], (unsigned)mv_f[i], (double)mv_px[i], (unsigned)(d->fl >> 16),
+                           (unsigned)((d->relleno[1] & 4095) >> 6), (unsigned)(d->relleno[1] & 63));
+                continue;
+            }
+            if (c == PR_DETRAS || c == PR_LADO) continue;      /* (fuera de la vista por su propia prueba) */
+            if (c == PR_LISTA && d->r <= 0) continue;
+            if (px >= FALTA_GRANDE_PX) { fa_n[c]++; if (px > fa_px[c]) { fa_px[c] = px; fa_nd[c] = (int)i; fa_t[c] = t; } }
+            if (lista && px >= FALTA_LISTA_PX)
+                printf("FALTAN: %s nodo %u %s r %.1f z %.0f px %.1f en %.0f %.0f grupo %u cl %u/%u fl %x pvs_teo %u gra %u\n", t == 0 ? "etapa" : t == 1 ? "union" : "sig", (unsigned)i, fm_nom[c],
+                       (double)d->r, (double)zv, (double)px, (double)sx, (double)sy, (unsigned)(d->fl >> 16), (unsigned)((d->relleno[1] & 4095) >> 6), (unsigned)(d->relleno[1] & 63), (unsigned)d->fl,
+                       mo->pvs_teo ? (unsigned)mo->pvs_teo[2 * i] : 0u, mo->pvs_gra ? (unsigned)mo->pvs_gra[i] : 0u);
+        }
+    }
+    if (lista) printf("FALTAFIN: %d\n", fa_cong);
+    if (!fa_t0) fa_t0 = timer_ms_gettime64();
+    if (timer_ms_gettime64() - fa_t0 >= 1000) {
+        char b[1400]; int n = 0, r;
+        n += sprintf(b + n, "FALTA: %.4s s %.0f muestras %u vista %u lejos %.0f d %d p %d salto %.2f |", cur_nodo >= 0 ? curso[cur_nodo].zona : "----", (double)yo.s,
+                     (unsigned)fa_muestras, (unsigned)(fa_muestras ? fa_vista / fa_muestras : 0), (double)lejos, prio_d, prio_p, (double)salto_q);
+        for (r = 1; r < FM_R_N; r++) if (fa_n[r] || fa_m[r])
+            n += sprintf(b + n, " %s %u/%u (%.0f px %c%d)", fm_nom[r], (unsigned)fa_n[r], (unsigned)fa_m[r], (double)fa_px[r], "eus"[fa_t[r]], fa_nd[r]);
+        printf("%s\n", b);
+        memset(fa_n, 0, sizeof fa_n); memset(fa_m, 0, sizeof fa_m); memset(fa_px, 0, sizeof fa_px); fa_muestras = fa_vista = 0; fa_t0 = timer_ms_gettime64();
+    }
+}
+#endif
 /* tras el cuadro: lo que de verdad costo la etapa frente a lo estimado; si alguna tira no cupo, mas prudencia */
 static void prio_ajusta(int corto, uint32_t usado)
 {
@@ -14235,6 +14394,12 @@ int main(int argc, char **argv)
                     or2_coloca(&fis, &fpar, th, PRUEBA_V / (fpar.hud * 3.6f));
                 }
 #endif
+#ifdef PRUEBA_GIRA
+                if (t_estado == 1 && fis_ok) {                  /* prueba (diagnostico): el coche girado PRUEBA_GIRA rad, parado */
+                    float p[3], th; ruta_en(yo.s, p, &th, NULL, NULL);
+                    or2_coloca(&fis, &fpar, th + (PRUEBA_GIRA), 0.0f);
+                }
+#endif
 #ifdef PRUEBA_CHOQUE
 #ifdef CHOQUE_POS
                 if (t_estado == 58) { yo.s = s_etapa + (CHOQUE_POS) * m_pos; yo.y_ok = 0; }   /* prueba: desde esa posicion de carretera */
@@ -14249,6 +14414,23 @@ int main(int argc, char **argv)
                            (double)fis.pose_t[0], (double)fis.pose_t[1], (double)fis.pose_t[2], (double)fis.pose_r[0], (double)fis.pose_r[1], (double)fis.pose_r[2], (double)yo.x);
 #endif
                 if (auto_) piloto(&yo, &giro, &gas, &freno);
+#if defined(PRUEBA_PARADO) && defined(PRUEBA_PARA_S)
+                {   /* prueba (diagnostico): el piloto hasta PRUEBA_PARA_S m de la etapa; alli se para en seco (girado
+                       PRUEBA_PARA_GIRA rad respecto a la ruta) y se queda parado */
+                    static int pa_;
+#ifndef PRUEBA_PARA_GIRA
+#define PRUEBA_PARA_GIRA 0.0f
+#endif
+                    if (auto_ && !pa_ && fis_ok && yo.s - s_etapa >= (PRUEBA_PARA_S)) {
+                        float p_[3], th_; ruta_en(yo.s, p_, &th_, NULL, NULL); pa_ = 1;
+                        or2_coloca(&fis, &fpar, th_ + (PRUEBA_PARA_GIRA), 0.0f);
+                        printf("PARA: crono %d s %.1f\n", (int)crono, (double)yo.s);
+                    }
+                    if (auto_ && pa_) { giro = 0; gas = 0; freno = 1; }
+                }
+#elif defined(PRUEBA_PARADO)
+                if (auto_) { giro = 0; gas = 0; freno = 1; }   /* prueba (diagnostico): parado en la salida */
+#endif
 #if defined(PRUEBA_ARENA) && defined(PRUEBA_ARENA_GAS)
                 {   /* prueba: gas a fondo PRUEBA_ARENA_GAS pasos de la carrera y despues suelto (ni gas ni freno) */
                     static int n_ar;
@@ -14767,6 +14949,9 @@ int main(int argc, char **argv)
         prf_v0 = 0;
 #endif
         PRF(0);
+#ifdef DIAG_FALTA
+        falta_prepara();
+#endif
         if (estado != TITULO && !mundo_fuera && !en_cuenta) nodos_visibles_todos();   /* en CUENTA manda el precalentamiento */
         PRF(1);
         if (estado != TITULO && !mundo_fuera) sol_prepara();                    /* el rayo hacia el sol de este cuadro */
@@ -14806,12 +14991,18 @@ int main(int argc, char **argv)
                     if (i != DIAG_SIN_TRAMO)                    /* medida: sin la etapa (0), la union (1) o la siguiente (2) */
 #endif
                     if (geo_visible(tramos[i])) {               /* (44DE10: una sola etapa en la union) */
+#ifdef DIAG_FALTA
+                        fm_cur = fm_cap[i] >= tramos[i]->nmallas ? fm_buf[i] : NULL; fm_mo = tramos[i]->mallas;
+#endif
                         geo_vista(tramos[i]);
 #ifndef DEP_TEX
                         if (tramos[i]->tr && tramos[i]->vis) dibuja_etapa(tramos[i], l); else
 #endif
                         dibuja_rango(tramos[i], l, tramos[i]->inicio[l], tramos[i]->inicio[l + 1], 1, 0, 0);
                         geo_vista_fin(tramos[i]);
+#ifdef DIAG_FALTA
+                        fm_cur = NULL; fm_mo = NULL;
+#endif
                     }
                     ta_tope_etapa = tope_g; vtx_reserva = 0;
                     lst_uso[l] = ta_et - u0; lst_vtx[l] = vtx_et - v0; lst_corto[l] = (uint8_t)ta_et_corto; ta_et_corto |= c0; }
@@ -15040,6 +15231,9 @@ int main(int argc, char **argv)
         PRF(9);
 #ifdef DIAG_RETARDO
         { uint64_t t_ = timer_us_gettime64(); while (timer_us_gettime64() - t_ < DIAG_RETARDO) ; }   /* medida: cuadro mas lento */
+#endif
+#ifdef DIAG_FALTA
+        if (estado != TITULO && !mundo_fuera) falta_mide(estado == CARRERA);
 #endif
         if (estado != TITULO) prio_ajusta(ta_et_corto, ta_et);
         ta_et_corto = 0;
