@@ -8852,6 +8852,9 @@ static void nodos_visibles(modelo_t *mo)
             if (c_v > 1 && d->r * fx < REPARTO_COSTE_PX * zv) cp += (log2x((float)c_v, 4) - 24) * REPARTO_COSTE / 4;   /* lo caro por pixel, despues */
             cp = cp > NB_PRIO - 2 ? NB_PRIO - 2 : cp;           /* (63: solo lo tapado por la niebla) */
 #endif
+            /* Rev 2.9.9: lo grande en la pantalla (REPARTO_COSTE_PX de radio o mas) va por su tamano, como si tuviera el
+               umbral de LOD de la etapa (6): un nodo grande con un umbral bajo ya no se quita antes que lo pequeno */
+            if (u && u < 6 && d->r * fx >= REPARTO_COSTE_PX * zv) { int c6 = 40 + log2x(zv / (d->r * lod * 32.0f), 8); if (c6 < cp) cp = c6; }
             cp = cp < 0 ? 0 : cp > NB_PRIO - 1 ? NB_PRIO - 1 : cp;
             if (d->fl & NODO_LEJ) cp = 0;                       /* lejano: con lo que no se quita (cuesta casi nada) */
         }
@@ -9255,14 +9258,35 @@ static void lejsec_paso(int mueve, int carrera)            /* (carrera: estado =
 #ifndef CORTE_MARGEN
 #define CORTE_MARGEN 3                                          /* % del tope y de los vertices que se deja libre */
 #endif
+/* Lo pequeno en la pantalla (radio de la esfera del nodo por debajo de CORTE_GRANDE_PX) solo cabe en el tope de antes
+   de la Rev 2.9.9 (ta_f 448 / 256 y 20000 vertices: CORTE_PEQ_TA y CORTE_PEQ_VTX, /256 del de ahora); lo grande, en el
+   tope entero. Con el tope mayor para todo (medido en Flycast, las 15 etapas) el cuadro llevaba mas geometria pequena
+   y lejana y costaba ~1 fps; asi el sitio de mas (ta_f 400, VTX_ETAPA_MAX 24000) solo lo gasta lo grande que antes
+   faltaba. Fijo (no depende del tiempo del cuadro). CORTE_PEQ_TA=256 y CORTE_PEQ_VTX=256: lo mismo para todo */
+#ifndef CORTE_GRANDE_PX
+#define CORTE_GRANDE_PX 24.0f
+#endif
+#ifndef CORTE_PEQ_TA
+#define CORTE_PEQ_TA (TA_F_MIN * 256 / 448)
+#endif
+#ifndef CORTE_PEQ_VTX
+#define CORTE_PEQ_VTX (20000 * 256 / VTX_ETAPA_MAX)
+#endif
 #if CORTE_NODO
-static uint32_t cn_c[NB_PRIO], cn_v[NB_PRIO], cn_cp[NB_PRIO], cn_vp[NB_PRIO];   /* coste (bytes del TA) y vertices por clase
-                                                                   (cn_cp / cn_vp: lo de menos de CORTE_CERCA_CD) */
+static uint32_t cn_c[NB_PRIO], cn_v[NB_PRIO], cn_cp[NB_PRIO], cn_vp[NB_PRIO], cn_cg[NB_PRIO], cn_vg[NB_PRIO];   /* coste (bytes
+                                     del TA) y vertices por clase (cn_cp / cn_vp: lo de menos de CORTE_CERCA_CD; cn_cg / cn_vg:
+                                     lo grande en la pantalla, CORTE_GRANDE_PX; cn_c / cn_v: lo demas) */
 static int cn_modo;                                             /* 0: lo cercano siempre; 1: solo la clase de LOD */
 static uint16_t cn_lista[3][2048]; static uint8_t cn_clase[3][2048];   /* los quitados de cada tramo y su clase */
 #ifdef DIAG_POPPING
 static uint32_t cn_dg_cuad, cn_dg_corta, cn_dg_quit, cn_dg_lowp;
 #endif
+static inline int cn_grande(const nodo_t *d)                   /* radio en la pantalla de CORTE_GRANDE_PX o mas */
+{
+    float dx = d->cx - ojo[0], dy = d->cy - ojo[1], dz = d->cz - ojo[2], zv = dx * ade[0] + dy * ade[1] + dz * ade[2];
+    return zv <= d->r || d->r * fx >= CORTE_GRANDE_PX * zv;
+}
+static int cn_cut_g;                                            /* el corte de lo grande (el de lo pequeno: cut) */
 static inline int cn_clave(const nodo_t *d)
 {
     uint32_t cl = d->relleno[1] & 4095u, cd = cl >> 6, cp = cl & 63;
@@ -9280,6 +9304,7 @@ static void corte_nodos(void)
     }
     cn_ns_real = cn_ns_est = 0; nsf = cn_ns_f;
     memset(cn_c, 0, sizeof cn_c); memset(cn_v, 0, sizeof cn_v); memset(cn_cp, 0, sizeof cn_cp); memset(cn_vp, 0, sizeof cn_vp);
+    memset(cn_cg, 0, sizeof cn_cg); memset(cn_vg, 0, sizeof cn_vg);
     /* el coste de cada nodo visible: el que tuvo al enviarlo en el cuadro anterior (dibuja_etapa, cn_ult: sus mallas de
        las tres listas tras la PVS por malla y la vista) si se dibujo; si no, el teorico de lo que la PVS deja ver por
        ta_f (y por el factor de lo que no va por la directa si esta cerca) */
@@ -9302,7 +9327,9 @@ static void corte_nodos(void)
                 }
                 cu[i] = 0; cvu[i] = 0;                          /* (dibuja_etapa lo vuelve a contar en este cuadro) */
                 cl = d->relleno[1] & 4095u;
-                if ((cl >> 6) <= CORTE_CERCA_CD) { cn_cp[cl & 63] += cc; cn_vp[cl & 63] += cv; } else { cn_c[cl & 63] += cc; cn_v[cl & 63] += cv; }
+                if ((cl >> 6) <= CORTE_CERCA_CD) { cn_cp[cl & 63] += cc; cn_vp[cl & 63] += cv; }
+                else if (cn_grande(d)) { cn_cg[cl & 63] += cc; cn_vg[cl & 63] += cv; }
+                else { cn_c[cl & 63] += cc; cn_v[cl & 63] += cv; }
             }
         }
     }
@@ -9314,10 +9341,19 @@ static void corte_nodos(void)
     for (acum = v = 0, c = 0; c < NB_PRIO; c++) { acum += cn_cp[c]; v += cn_vp[c]; }
     cn_modo = acum > tope || v > vtope;
     if (cn_modo) acum = v = 0;
-    for (cut = -1, c = 0; c < NB_PRIO; c++) {
-        uint32_t ec = cn_c[c] + (cn_modo ? cn_cp[c] : 0), ev = cn_v[c] + (cn_modo ? cn_vp[c] : 0);
-        if (c > 0 && (acum + ec > tope || v + ev > vtope)) break;
-        acum += ec; v += ev; cut = c;
+    {   /* lo grande y lo pequeno juntos, clase a clase, hasta el tope de lo pequeno; despues solo lo grande, hasta el
+           entero */
+        uint32_t tope_p = (uint32_t)((uint64_t)tope * CORTE_PEQ_TA >> 8), vtope_p = (uint32_t)((uint64_t)vtope * CORTE_PEQ_VTX >> 8);
+        int peq = 1;
+        for (cut = cn_cut_g = -1, c = 0; c < NB_PRIO; c++) {
+            uint32_t gc = cn_cg[c] + (cn_modo ? cn_cp[c] : 0), gv = cn_vg[c] + (cn_modo ? cn_vp[c] : 0);
+            if (peq && (c == 0 || (acum + gc + cn_c[c] <= tope_p && v + gv + cn_v[c] <= vtope_p))) {
+                acum += gc + cn_c[c]; v += gv + cn_v[c]; cut = cn_cut_g = c; continue;
+            }
+            peq = 0;
+            if (acum + gc > tope || v + gv > vtope) break;
+            acum += gc; v += gv; cn_cut_g = c;
+        }
     }
 #ifdef DIAG_POPPING
     if (++cn_dg_cuad % 120 == 0) {                             /* (linea CORTE cada 120 cuadros: los contadores desde el arranque) */
@@ -9333,6 +9369,7 @@ static void corte_nodos(void)
     }
 #endif
     if (cut == NB_PRIO - 1) { cn_activo = 1; return; }          /* cabe todo */
+    /* (lo cercano en el modo 0 tiene la clave 0: nunca pasa de cut) */
 #ifdef DIAG_POPPING
     cn_dg_corta++;
 #endif
@@ -9350,7 +9387,7 @@ static void corte_nodos(void)
             while (b) {
                 uint32_t i = w * 32 + (uint32_t)__builtin_ctz(b); int k = cn_clave(mo->nodos + i);
                 b &= b - 1;
-                if (k <= cut) continue;
+                if (k <= cut || (k <= cn_cut_g && (cn_grande(mo->nodos + i) || (cn_modo && ((mo->nodos[i].relleno[1] & 4095u) >> 6) <= CORTE_CERCA_CD)))) continue;
                 mo->vis[w] &= ~(1u << (i & 31));
 #ifdef DIAG_POPPING
                 cn_dg_quit++;
