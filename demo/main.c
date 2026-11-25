@@ -1576,6 +1576,47 @@ static __attribute__((unused)) uint32_t salto_ta_de(float q)    /* el tope del T
     i = (int)q;
     return (uint32_t)((float)SALTO_TA[i] + (q - (float)i) * (float)(SALTO_TA[i + 1] - SALTO_TA[i]) + 0.5f);
 }
+/* Rev 2.9.8 P1 (DESVIACION; tecnica tomada de Crazy Taxi, docs/PARIDAD.md "Rev 2.9.8: lecciones de Crazy Taxi"): tope
+   de la etapa estable. Antes el tope de la etapa salia cada cuadro de lo que gasto el anterior (2D, coche, pareja,
+   trafico y efectos + 2 coches de trafico con LOD 0) y del nivel del salto (salto_ta, interpolado): cambiaba en cada
+   cuadro y el reparto (nodos_visibles_todos, 95 % del tope) quitaba y devolvia clases (razon "tope" de DIAG_POPPING).
+   Crazy Taxi tiene bufers de tamano fijo por lista y el detalle solo cambia con la posicion. Con TOPE_FIJO:
+   - la reserva de lo que no es la etapa (y la de lo 2D) es fija por etapa: el mayor valor visto en la etapa (en pasos
+     de 16 KB, con 1 / TOPE_MARGEN de margen si no es 0), como minimo TOPE_RES_KB; sube en el acto si hace falta (el coche y el trafico van despues de la etapa
+     y si no cupieran se cortarian) y solo baja al cruzar una seccion de la PVS, si en las ultimas TOPE_BAJA_SEC
+     secciones no ha pasado de TOPE_BAJA_PCT % de ella;
+   - salto_ta va en los 4 escalones de SALTO_TA (sin interpolar) y solo cambia de escalon al cruzar una seccion de la
+     PVS (o cada TOPE_SIN_SEC cuadros si no hay PVS), con histeresis: sube al llegar el nivel al escalon siguiente y
+     baja si queda medio escalon por debajo.
+   Asi el tope que ve nodos_visibles_todos es el mismo en toda la seccion (con y sin REPARTO_SCHMITT). Los objetos de
+   la union (bo) y ta_freno siguen como antes. -DTOPE_FIJO=0: lo de antes */
+#ifndef TOPE_FIJO
+#define TOPE_FIJO 1
+#endif
+#ifndef TOPE_RES_KB
+#define TOPE_RES_KB 0                                           /* reserva minima de lo que no es la etapa (KB; 0: la medida) */
+#endif
+#ifndef TOPE_BAJA_SEC
+#define TOPE_BAJA_SEC 16                                        /* secciones (~8 m) sin necesitarla antes de bajarla */
+#endif
+#ifndef TOPE_BAJA_PCT
+#define TOPE_BAJA_PCT 90
+#endif
+#ifndef TOPE_MARGEN
+#define TOPE_MARGEN 0                                           /* margen de la reserva: 1 / TOPE_MARGEN (0: ninguno; ro ya
+                                                                   lleva 2 coches de trafico con LOD 0) */
+#endif
+#define TF_REDONDEA(x) (((x) + (TOPE_MARGEN ? (x) / (TOPE_MARGEN ? TOPE_MARGEN : 1) : 0) + 16383) & ~16383u)   /* (pasos de 16 KB) */
+#ifndef TOPE_SIN_SEC
+#define TOPE_SIN_SEC 60                                         /* cuadros sin cambiar de seccion que cuentan como cruzarla */
+#endif
+static int tf_on;                                               /* TOPE_FIJO en uso en este cuadro (carrera) */
+static uint32_t tf_res, tf_r2d, tf_mres, tf_mr2d;               /* reservas fijas y lo mayor pedido desde la ultima bajada */
+static int tf_k, tf_nsec, tf_cuad;                              /* escalon de salto_ta, secciones y cuadros desde... */
+static int tf_nodo = -2, tf_uni = -1, tf_cruza; static int32_t tf_sec = -1;   /* etapa y seccion del cuadro anterior */
+#ifdef DIAG_POPPING
+static uint32_t tf_dg_ant, tf_dg_cam, tf_dg_cams, tf_dg_min = ~0u, tf_dg_max;   /* cambios del tope (en la seccion) */
+#endif
 static uint32_t ta_bpv = TA_BPV_MIN, ta_f = TA_F_MIN, ta_vb, ta_et, ta_lim, ta_tope_etapa, ta_corto, ta_v2d, ta_v2d_ult;
 static uint32_t ta_otros_ult, ta_min_otros_teo, ta_traf_teo;   /* bytes de lo que no es la etapa (cuadro anterior; minimo
                                                             teorico) y teoricos del coche de trafico mayor con LOD 0 */
@@ -1696,6 +1737,20 @@ static void ta_inicia_cuadro(void)
     uint32_t libre, bo;
     if (r2d < TA_RESERVA_2D) r2d = TA_RESERVA_2D;
     if (ro < rmin) ro = rmin;
+    if (tf_on && !precalentando) {                             /* (Rev 2.9.8 P1: reservas fijas por etapa, arriba) */
+        if (ro > tf_mres) tf_mres = ro;
+        if (r2d > tf_mr2d) tf_mr2d = r2d;
+        if (ro > tf_res) tf_res = TF_REDONDEA(ro);              /* sube en el acto */
+        if (r2d > tf_r2d) tf_r2d = TF_REDONDEA(r2d);
+        if (tf_cruza && tf_nsec >= TOPE_BAJA_SEC) {             /* baja solo al cruzar una seccion */
+            uint32_t m = TF_REDONDEA(tf_mres), m2 = TF_REDONDEA(tf_mr2d);
+            if ((uint64_t)tf_mres * 100 < (uint64_t)tf_res * TOPE_BAJA_PCT) tf_res = m;
+            if ((uint64_t)tf_mr2d * 100 < (uint64_t)tf_r2d * TOPE_BAJA_PCT) tf_r2d = m2;
+            tf_nsec = 0; tf_mres = ro; tf_mr2d = r2d;
+        }
+        if (tf_res < (uint32_t)TOPE_RES_KB * 1024) tf_res = (uint32_t)TOPE_RES_KB * 1024;
+        ro = tf_res; r2d = tf_r2d;
+    }
     ta_lim = total - r2d;
     libre = ta_lim > ro ? ta_lim - ro : 0;
     bo = ta_bo_ult < libre / TA_BO_PARTE ? ta_bo_ult : libre / TA_BO_PARTE;   /* (los objetos de la union, arriba) */
@@ -1706,6 +1761,13 @@ static void ta_inicia_cuadro(void)
         uint32_t h = ta_tope_etapa + TA_ETAPA_HOLGURA;
         ta_tope_etapa = h < ta_lim ? h : ta_lim;
     }
+#ifdef DIAG_POPPING
+    if (!precalentando) {                                       /* (P1: cuantas veces cambia el tope, y cuantas sin cruzar seccion) */
+        if (ta_tope_etapa != tf_dg_ant) { tf_dg_cam++; if (!tf_cruza) tf_dg_cams++; tf_dg_ant = ta_tope_etapa; }
+        if (ta_tope_etapa < tf_dg_min) tf_dg_min = ta_tope_etapa;
+        if (ta_tope_etapa > tf_dg_max) tf_dg_max = ta_tope_etapa;
+    }
+#endif
     ta_res_otros = ro;
     ta_vb = ta_et = ta_bo = ta_bo_pide = 0; ta_v2d = 0; ta_teo_3d = 0; ta_tiras = 0;
 }
@@ -8691,6 +8753,10 @@ static void pop_mide(void)
         memset(pop_vap, 0, sizeof pop_vap); memset(pop_vde, 0, sizeof pop_vde); memset(pop_lap, 0, sizeof pop_lap); memset(pop_lde, 0, sizeof pop_lde);
         for (k = 0; k < PR_N; k++) { pop_vz[k][0] = 1e9f; pop_vz[k][1] = 0; pop_vpx[k] = 0; }
         printf("%s", b);
+        printf("POPTOPE: %.4s cambios %u sin cruzar %u min %uK max %uK res %uK 2d %uK salto_ta %u fijo %d\n", cur_nodo >= 0 ? curso[cur_nodo].zona : "----",
+               (unsigned)tf_dg_cam, (unsigned)tf_dg_cams, (unsigned)(tf_dg_min == ~0u ? 0 : tf_dg_min >> 10), (unsigned)(tf_dg_max >> 10),
+               (unsigned)(tf_res >> 10), (unsigned)(tf_r2d >> 10), (unsigned)salto_ta, tf_on);   /* (Rev 2.9.8 P1) */
+        tf_dg_cam = tf_dg_cams = tf_dg_max = 0; tf_dg_min = ~0u;
         for (k = 0; k < 4; k++) if (pop_ev[k].px > 0)
             printf("POPEV: %s %s nodo %d %s z %.0f r %.1f px %.1f%s\n", pop_ev[k].t == 0 ? "etapa" : pop_ev[k].t == 1 ? "union" : "sig", pop_ev[k].ap ? "aparece" : "desaparece",
                    pop_ev[k].nodo, pop_nom[pop_ev[k].razon], (double)pop_ev[k].z, (double)pop_ev[k].r, (double)pop_ev[k].px, pop_ev[k].veg ? " veg" : "");
@@ -8841,6 +8907,24 @@ static void nodos_visibles_todos(void)
 #ifdef CON_FUNDIDO_ENTRADA
     fe_paso();                                                  /* lo que aparece en este cuadro */
 #endif
+}
+/* Rev 2.9.8 P1 (TOPE_FIJO, junto a SALTO_TA): antes de ta_inicia_cuadro. Etapa y seccion de la PVS del ojo (la del
+   cuadro anterior: pvs_paso), si se ha cruzado una y el escalon de salto_ta */
+static void tope_fijo_paso(int carrera)
+{
+    int32_t s = cur_en_union ? uni.pvs_s : etapa.pvs_s;
+    tf_cruza = 0;
+    if (!carrera) { tf_on = 0; tf_nodo = -2; tf_k = 0; tf_sec = -1; return; }
+    tf_on = TOPE_FIJO;
+    if (cur_nodo != tf_nodo || cur_en_union != tf_uni) {        /* etapa (o union) nueva: reservas desde lo de ahora */
+        tf_nodo = cur_nodo; tf_uni = cur_en_union; tf_res = tf_r2d = tf_mres = tf_mr2d = 0; tf_nsec = 0; tf_cuad = 0;
+        tf_sec = s; tf_cruza = 1;
+    } else if (s != tf_sec || ++tf_cuad >= TOPE_SIN_SEC) { tf_sec = s; tf_cuad = 0; tf_nsec++; tf_cruza = 1; }
+    if (tf_cruza) {                                             /* escalon de salto_ta, con histeresis */
+        if (salto_q >= (float)tf_k + 1.0f) tf_k = salto_q >= 3.0f ? 3 : (int)salto_q;
+        else if (tf_k > 0 && salto_q < (float)tf_k - 0.5f) tf_k = (int)(salto_q + 0.5f);
+    }
+    if (tf_on) salto_ta = SALTO_TA[tf_k];
 }
 /* tras el cuadro: lo que de verdad costo la etapa frente a lo estimado; si alguna tira no cupo, mas prudencia */
 static void prio_ajusta(int corto, uint32_t usado)
@@ -13347,7 +13431,7 @@ int main(int argc, char **argv)
 #ifdef SALTO_OBS
                 salto_q = SALTO_OBS;
 #endif
-                salto_ta = salto_ta_de(salto_q);
+                if (!tf_on) salto_ta = salto_ta_de(salto_q);       /* (con TOPE_FIJO, en escalones: tope_fijo_paso) */
                 if ((int)salto_q != sv_ent) {
                     sv_ent = (int)salto_q;
                     dbglog(DBG_INFO, "SALTO: nivel %.2f (lejano %d m, TA %u/256, trabajo %.1f ms, %.4s)\n", (double)salto_q, (int)salto_lejos(salto_q),
@@ -14289,6 +14373,7 @@ int main(int argc, char **argv)
                 etapa.pvs_on, etapa.pvs_teo[2 * 2090], etapa.pvs_teo[2 * 2096], etapa.pvs_teo[2 * 984], etapa.pvs_teo[2 * 985], (int)etapa.pvs_s);
             memset(dg_tx, 0, sizeof dg_tx); }
 #endif
+        tope_fijo_paso((estado == CARRERA || estado == CUENTA) && !mundo_fuera);   /* (Rev 2.9.8 P1) */
         tri_enviados = 0; vtx_ult = vtx_env; vtx_env = 0; ta_inicia_cuadro(); vtx_et_ult = vtx_et; vtx_et = 0;
         en_cuenta = estado == CUENTA;                           /* (el precalentamiento manda hasta el semaforo) */
         arranque_hold = estado == CARRERA && crono < REPARTO_ARRANQUE;   /* (suelo del arranque, ver arriba) */
