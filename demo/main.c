@@ -1608,7 +1608,7 @@ static uint32_t vtx_et, vtx_et_ult;                      /* los de la etapa */
    la consola no pase de 1,56 x la cuenta en los primeros cuadros cargados, antes de que ta_f se ajuste */
 #define TA_F_MIN 400                                     /* coste 3D = ta_teo x ta_f / 256 (1,5625: ver arriba) */
 #endif
-/* Rev 2.9.9: ta_f sube solo con cuadros cargados (ta_fin_cuadro), con un 10 % de margen. -DTA_F_SEGURO=0: lo de antes */
+/* Rev 2.9.9: ta_f sube solo con cuadros cargados (ta_fin_cuadro), con un 20 % de margen. -DTA_F_SEGURO=0: lo de antes */
 #ifndef TA_F_SEGURO
 #define TA_F_SEGURO 1
 #endif
@@ -1616,7 +1616,7 @@ static uint32_t vtx_et, vtx_et_ult;                      /* los de la etapa */
 #define TA_F_LLENO 25                                    /* % del bufer por cuadro desde el que se mira la medida */
 #endif
 #ifndef TA_F_MARGEN
-#define TA_F_MARGEN 10                                   /* % sobre lo medido */
+#define TA_F_MARGEN 20                                   /* % sobre lo medido (20 como antes de la 2.9.9: prudencia en la consola real, donde un TA lleno cuelga la PowerVR; en Flycast y Android no cambia nada) */
 #endif
 /* tope de vertices de la etapa por cuadro (tiempo de CPU: transformar y enviar) y distancia de dibujo minima del
    recorte de seguridad por CPU: la distancia es la del original (LEJOS_PS2) y solo se acorta (50 m cada 30 cuadros)
