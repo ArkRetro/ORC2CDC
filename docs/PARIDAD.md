@@ -6206,3 +6206,86 @@ VOCES.DAT (216990 bytes) redondeado a 4 KB. Al arrancar ya no cabia seguido en e
 lee en el hueco de la union (como ya hacia `sfx_voces_juego` con VOCESH/VOCESC), y si al arrancar no se puede, se
 reintenta al empezar la carrera (`voces_inicia_en`). Medido en Flycast: "VOZ: VOCES.DAT, 35 muestras, 210 KB en el
 AICA" al arrancar y ningun "Out of memory". Las notas anteriores que llaman "conocido" a ese aviso estan equivocadas.
+
+## Rev 2.9.9.c: huecos al entrar en las etapas (el crecimiento espera a ver la etapa de frente)
+
+Queja: "corregir el crecimiento de las etapas para que no se aprecien la falta de elementos (huecos) como en la
+montana del gran canon". Todo medido en el Flycast de aqui (NO en la consola ni en Android).
+
+### Causa (medida)
+
+- No falta nada por cargar. Con el modelo entero de SEG24 dibujado fuera de la consola (todas las mallas, sin PVS, sin
+  reparto y sin recorte) desde la camara del juego en la union YOSE -> GRAN, sale el mismo trozo: es toda la geometria
+  que hay. (La camara se saco del cuadro congelado, `-DDIAG_CONGELA=4400 -DDIAG_FALTA`, y luego de la linea `GEOC:`
+  de `-DDIAG_GEO`: la camara en el marco de la etapa siguiente.)
+- Las dos ramas de la bifurcacion (la misma geometria en todas las uniones de los arboles 0 y 1: medido en 16 entradas)
+  llegan a la etapa siguiente por una curva de 90 grados. Entre las posiciones 133 y ~215 de la union el coche va
+  PERPENDICULAR al eje de la etapa siguiente, de 770 a 100 m a un lado y ~300 m antes de la entrada. El original
+  (44C530) hace crecer la etapa entre la posicion 0x84 y ~157: desde ahi hasta la entrada (~posicion 243, unos 700 m)
+  la etapa, entera, se ve DE LADO Y POR FUERA. Su decorado solo esta hecho para verse desde su carretera.
+  - GRAN: las paredes del canon vistas por detras, acabadas de golpe donde acaba la etapa, encima de los muros de la
+    union; y lo de arriba de la meseta (SEG24 nodo 60, 31 mallas de recorte entre 219 y 484 m de alto) visto por
+    debajo: una losa oscura (cortada, ademas, por DETRAS_ENTRADA en el plano de la entrada).
+  - MACH (arbol 1, rama izquierda desde NIAG): sus fondos de cielo (SEG27 nodos 1069-1073, cilindros azules de 2,1 a
+    2,7 km) vistos a medias: una raya vertical que parte el cielo en dos (el de la union a un lado, azul liso al otro)
+    y una silueta palida gigante. Es la queja de las "bandas dividiendo el cielo en las bifurcaciones" en esa union.
+- SUPUESTO: el original ensena lo mismo en GRAN (la lista de VISO.DAT da la misma imagen, medido por el agente
+  anterior; no hay video de esa union para compararlo).
+- Lo que NO era: texturas sin subir, reparto del TA, lejano, LOD ni la PVS de la seccion 0 (rellenar los nodos
+  enteros, `PVS_ANTES` del WIP, no cambiaba la imagen y costaba TA: 526K -> 570K en GRAN; QUITADO).
+
+### Arreglo (`demo/main.c`, todo DESVIACION)
+
+- `GEO_RUMBO` (1): el factor del crecimiento (7D3184, `geo_paso`) no pasa del que da el rumbo del coche a un punto 200 m
+  dentro de la etapa siguiente por su eje (`geo_rumbo_f`): 0 con mas de 32 grados, 1 con menos de 14, y no baja. En la
+  bifurcacion la etapa empieza a verse en la posicion ~183 (antes ~135) y esta entera en la ~209, unos 280 m antes de
+  la entrada (antes en la ~157): crece en ~210 m, como los 200 del original, pero cuando el coche ya gira hacia ella.
+  Mientras tanto el cielo de la union queda limpio. En una union recta el rumbo es ~0 y queda el factor del original.
+  `-DGEO_RUMBO=0`: lo de antes.
+- `SIG_PANO_R` / `SIG_PANO_ALTO`: con la camara antes de la entrada no se dibujan los "techos" de la etapa siguiente:
+  nodos de 600 m de radio o mas, todo de recorte, cuya esfera pasa por detras de la entrada y con todos sus vertices
+  150 m o mas por encima de ella. En las 30 etapas de los arboles 0 y 1 solo cae GRAN 60 (comprobado con los datos). Desde
+  la entrada, mirando por el eje, ninguna de sus mallas toca la pantalla: al pasarla no salta nada. (La regla del WIP,
+  sin la altura, cogia tambien fondos que si se ven desde la entrada: YOSE 233-235, CLOU 1469, SNOW 182 con 617 mallas,
+  IMPE 1208 / 1226...; estrechada.)
+- `SIG_CUP_F`: tampoco salen hasta pasar la entrada los fondos de cielo que rodean la etapa por delante (nodos de mas de
+  2000 m de radio con el centro medio radio o mas por delante de la entrada: solo MACH 1069-1073 y SNOW 176). Una
+  primera version los dibujaba enteros (sin el corte de DETRAS_ENTRADA): la raya seguia (DESCARTADA).
+- `DETRAS_X` / `DETRAS_Z`: DETRAS_ENTRADA usa en los carteles el centro de su nodo (sus mallas van en el marco del
+  nodo y su centro no dice donde estan: en SANF 96 nodos-cartel a 1,6-3,1 km por delante de la entrada se quitaban en
+  toda la union).
+- `-DDIAG_GEO` escribe ademas `GEOC:` (camara, rumbo y factor en el marco de la etapa siguiente).
+
+### Medida
+
+Flycast de aqui, tres a la vez, piloto automatico. "Antes" = 467dd28 (Rev 2.9.9.b). Capturas (antes | despues) y
+registros en el scratchpad, `m29c/huecos/`.
+
+- Lo que se ve:
+  - YOSE -> GRAN (`gran_1m13..1m17_antes_despues.jpg`): antes, de 1'12" a 1'17", el trozo de pared y la losa oscura en
+    el cielo; despues el cielo limpio hasta 1'15", el monte creciendo detras del muro de 1'15" a 1'16"4 y el canon
+    entero a 1'17"4, igual que antes.
+  - NIAG -> MACH (`mach_1m19..1m21_antes_despues.jpg`): antes, la raya vertical y el azul liso de 1'19" a 1'21"5;
+    despues no salen.
+  - Otras 14 entradas (arbol 0: ALPI, DESE, GHOS, CAPE, LAKE, CAST, CLOU, TULI; arbol 1: SANF, NIAG, EAST, YOSE, AMAZ,
+    NEWY), con una captura por segundo en la union: sin trozos sueltos antes ni despues; despues la etapa sale ~1,5 s
+    mas tarde. (AMAZ y NEWY solo se miraron con el WIP.)
+- fps y cuadros tarde, sin los -D de diagnostico (`-DDIAG_MS -DDIAG_POPPING` solo; el emulador es determinista: dos
+  tiradas iguales dan las mismas cifras):
+
+| Tramo | fps antes | fps despues | tarde antes | tarde despues | segundos con el reparto hundido (corte < 1000 m) antes / despues |
+|---|---|---|---|---|---|
+| YOSE entera (hasta GRAN) | 39,12 | 39,18 | 47 | 44 | 3 / 0 |
+| YOSE, la union (s >= 6000) | 38,11 | 38,51 | 12 | 10 | |
+
+- Con `-DDIAG_GEO -DDIAG_FALTA -DPRUEBA_SALTO=3000` (los del barrido de las uniones; con ellos la logica cuesta 2-3 ms
+  mas en la union por las lineas que escribe, y "despues" escribe el doble): PALM 33,90 -> 33,66 fps (tarde 322 -> 328),
+  LAKE 36,21 -> 36,15 (146 -> 147), CAST 36,13 -> 35,91 (167 -> 188), CLOU 32,87 -> 32,90 (275 -> 265), ALPI 37,14 ->
+  37,19 (114 -> 111), DESE 37,46 -> 37,25 (111 -> 118), GHOS 35,27 -> 35,04 (200 -> 209). Segundos con el reparto
+  hundido: PALM 18 -> 13 y 20 -> 15 (dos tiradas), ALPI 7 -> 4, DESE 8 -> 4, GHOS 2 -> 0, CAST 21 -> 16, CLOU 13 -> 7,
+  LAKE 7 -> 8. SUPUESTO: la diferencia de "tarde" de estas tiradas es de las lineas de diagnostico (en la tirada
+  limpia de YOSE no la hay); no se repitieron limpias.
+- RAM: "VOZ: VOCES.DAT, 35 muestras" y ningun "Out of memory" en todas las tiradas. Lo nuevo son 16 int32 y 4 int de bss.
+- Pendiente / no medido: las uniones de las misiones y de C2C (otros arboles), la meta, y la consola real. En la
+  entrada de MACH no se ha mirado cuadro a cuadro si los fondos de cielo saltan al pasarla (en las capturas, una por
+  segundo, no se nota).
