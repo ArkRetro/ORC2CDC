@@ -1874,6 +1874,11 @@ static float ta_lej_tope = 1e9f;
    corte_nodos lo usa como factor de esas mallas en el cuadro siguiente */
 static uint32_t cn_ns_real, cn_ns_est, cn_ns_f __attribute__((unused)) = 512, cn_cielo, cn_cielo_ult __attribute__((unused));   /* (cn_ns_f /256; cielo: bytes) */
 static int cn_activo;                                         /* el corte por nodos ya ha hecho caber la etapa */
+/* (revision 2.9.9: cn_ult solo vale si corte_nodos corrio en el cuadro anterior con el mismo modelo en el tramo; si no,
+   en la cuenta atras, sin corte, dibuja_etapa lo acumulaba cuadro a cuadro hasta 65535 y en el primer cuadro de la
+   carrera, en la salida, el corte quitaba casi toda la etapa; y tras etapa = sig el tramo 0 leia los costes de la
+   etapa vieja por numero de nodo) */
+static int cn_previo; static const void *cn_dat[3];
 #ifndef CORTE_VTX_HOLGURA
 #define CORTE_VTX_HOLGURA 32                                    /* /256: 12,5 % */
 #endif
@@ -9357,7 +9362,7 @@ static void lejsec_paso(int mueve, int carrera)            /* (carrera: estado =
 #define CORTE_GRANDE_PX 24.0f
 #endif
 #ifndef CORTE_PEQ_TA
-#define CORTE_PEQ_TA (TA_F_MIN * 256 / 448)
+#define CORTE_PEQ_TA (TA_F_MIN < 448 ? TA_F_MIN * 256 / 448 : 256)   /* (revision: con -DTA_F_MIN mayor, nunca mas que el tope) */
 #endif
 #ifndef CORTE_PEQ_VTX
 #define CORTE_PEQ_VTX (20000 * 256 / VTX_ETAPA_MAX)
@@ -9388,8 +9393,8 @@ static inline int cn_clave(const nodo_t *d)
 }
 static void corte_nodos(void)
 {
-    uint32_t tope, vtope, acum, v, nsf, c0, alfa_n; int t, cut, c, nq[3] = { 0, 0, 0 }, nqt = 0;
-    cn_activo = 0;
+    uint32_t tope, vtope, acum, v, nsf, c0, alfa_n; int t, cut, c, nq[3] = { 0, 0, 0 }, nqt = 0, previo = cn_previo, nofiable = 0;
+    cn_activo = 0; cn_previo = 1;
     /* el factor de lo que no va por la directa: lo medido en el cuadro anterior (sube en el acto, baja 1/32 por cuadro) */
     if (cn_ns_est > 4096) {
         uint32_t f = (uint32_t)((uint64_t)cn_ns_real * 256 / cn_ns_est) + 16;
@@ -9404,15 +9409,16 @@ static void corte_nodos(void)
        las tres listas tras la PVS por malla y la vista) si se dibujo; si no, el teorico de lo que la PVS deja ver por
        ta_f (y por el factor de lo que no va por la directa si esta cerca) */
     for (t = 0; t < 3; t++) {
-        const modelo_t *mo = tramos[t]; uint32_t w, nw; uint16_t *cu = cn_ult[t]; uint16_t *cvu = cn_vult[t];
-        if (!geo_visible(mo) || !mo->tr || !mo->vis || mo->nnodos > LQ_MAXN) continue;
+        const modelo_t *mo = tramos[t]; uint32_t w, nw; uint16_t *cu = cn_ult[t]; uint16_t *cvu = cn_vult[t]; int fiable;
+        if (!geo_visible(mo) || !mo->tr || !mo->vis || mo->nnodos > LQ_MAXN) { cn_dat[t] = NULL; continue; }
+        fiable = previo && cn_dat[t] == (const void *)mo->datos; cn_dat[t] = mo->datos; nofiable |= !fiable;
         nw = (mo->nnodos + 31) / 32;
         for (w = 0; w < nw; w++) {
             uint32_t b = mo->vis[w], ya = mo->vis_ant[w];
             while (b) {
                 uint32_t i = w * 32 + (uint32_t)__builtin_ctz(b), cc, cv, cl; const nodo_t *d = mo->nodos + i;
                 b &= b - 1;
-                if (ya >> (i & 31) & 1) { cc = (uint32_t)cu[i] << 5; cv = cvu[i]; }
+                if (fiable && (ya >> (i & 31) & 1)) { cc = (uint32_t)cu[i] << 5; cv = cvu[i]; }
                 else {                                          /* (nuevo: lo teorico de lo que deja la PVS, por lo que
                                                                    la vista recorta de media, alfa_n; los vertices en proporcion) */
                     float dx = d->cx - ojo[0], dy = d->cy - ojo[1], dz = d->cz - ojo[2], zv = dx * ade[0] + dy * ade[1] + dz * ade[2];
@@ -9430,6 +9436,11 @@ static void corte_nodos(void)
             }
         }
     }
+    /* (revision 2.9.9: sin lo de cada nodo del cuadro anterior, en el primer cuadro de la carrera o con un modelo nuevo en
+       un tramo, no se corta: lo estimado se pasaba (BEAC, GO: 1091K para un tope de 1041K y 101 nodos fuera un cuadro;
+       con lo medido en el siguiente, 846K). Ese cuadro va como antes de la Rev 2.9.9: el tope repartido por listas y
+       ta_cabe, que ya protege el TA) */
+    if (nofiable) return;
     /* el tope de toda la etapa (las tres listas), sin el cielo del cuadro anterior y con un margen */
     tope = ta_tope_etapa > cn_cielo_ult ? ta_tope_etapa - cn_cielo_ult : 0; tope -= tope / 100 * CORTE_MARGEN;
     vtope = (uint32_t)VTX_ETAPA_MAX * salto_ta / 256; vtope -= vtope / 100 * CORTE_MARGEN;
@@ -9505,6 +9516,7 @@ static void corte_nodos(void)
             if (!cj || cj > c0 || v + vj > vtope) continue;
             c0 -= cj; v += vj;
             mo->vis[jl >> 5] |= 1u << (jl & 31); lq_pon(mo, jl);
+            if (jl < CN_MAXN) { cn_ult[t][jl] = 0; cn_vult[t][jl] = 0; }   /* (revision: entra tras la pasada que los pone a 0) */
             mo->nodos[jl].relleno[1] = (mo->nodos[jl].relleno[1] & ~4095u) | (mo->nodos[i].relleno[1] & 4095u);
 #ifdef DIAG_POPPING
             {   pop_slot_t *ps = pop_slot(mo); if (ps) ps->cur[i] = PR_DIB; }
@@ -15458,7 +15470,7 @@ int main(int argc, char **argv)
         if (estado != TITULO && !mundo_fuera && !en_cuenta) nodos_visibles_todos();   /* en CUENTA manda el precalentamiento */
 #if CORTE_NODO
         cn_cielo_ult = cn_cielo; cn_cielo = 0;
-        if (estado != TITULO && !mundo_fuera && !en_cuenta) corte_nodos(); else cn_activo = 0;   /* (Rev 2.9.9) */
+        if (estado != TITULO && !mundo_fuera && !en_cuenta) corte_nodos(); else cn_activo = cn_previo = 0;   /* (Rev 2.9.9) */
 #endif
         PRF(1);
         if (estado != TITULO && !mundo_fuera) sol_prepara();                    /* el rayo hacia el sol de este cuadro */
