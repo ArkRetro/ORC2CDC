@@ -23,6 +23,7 @@ int  sfx_hay(int id);                      /* 1 si SFX.DAT trae la muestra "se%0
    efectos de carrera 0x4d y 0x18d, por otro canal); sfx_voz_calla las corta. Las tablas de cuando habla (voces.c) y el
    idioma del banco vienen en el mismo fichero. */
 int  sfx_voces_inicia(void);               /* 0 = bien */
+int  sfx_voces_inicia_en(void *buf, uint32_t cap);   /* lo mismo leyendo en RAM prestada (NULL: del monton) */
 void sfx_voz(int id);
 void sfx_voz_calla(void);
 const void *sfx_voces_tablas(uint32_t *tam);

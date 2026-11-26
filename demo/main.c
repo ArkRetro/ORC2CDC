@@ -14401,7 +14401,10 @@ int main(int argc, char **argv)
     t_carga = (timer_ms_gettime64() - t_ini) / 1000.0f;
     musica_inicia();                                            /* la musica la pone el menu (sin MENU.DAT, aqui) */
     sfx_ok = !sfx_inicia();
-    voz_ok = sfx_ok && !voces_inicia();                         /* VOCES.DAT: voces de la carrera */
+    /* VOCES.DAT: voces de la carrera. (Rev 2.9.9.b) se lee en el hueco de la union si se puede: del monton ya no cabia
+       (212 KB seguidos) y sin voces la copiloto no hablaba; si aun asi falla, se reintenta al empezar la carrera */
+    voz_ok = sfx_ok && !voces_inicia_en(union_prestable() ? hueco_union : NULL, union_prestable() ? cap_union - union_fsp : 0);
+    if (sfx_ok && !voz_ok) dbglog(DBG_ERROR, "VOZ: sin VOCES.DAT al arrancar (se reintenta al empezar la carrera)\n");
     if (sfx_ok && salida_carga()) dbglog(DBG_ERROR, "SALIDA: sin SALIDA.DAT (la salida sin su escena)\n");
     /* META.DAT (113 KB) no se lee aqui: en el menu las tablas de MENU.DAT (~1,2 MB seguidos) no cabian con el en el
        monton ("Out of memory" al arrancar) y al empezar la carrera tampoco hay 113 KB seguidos; se lee al subir la
@@ -14737,6 +14740,8 @@ int main(int argc, char **argv)
                 }
                 /* voces del modo (bancos HC/PERH/HAM del INFARTO o ORC/PERO): se leen en el hueco de la union, aun
                    prestado (el AICA guarda uno de los dos juegos) */
+                if (sfx_ok && !voz_ok && union_prestable())            /* (Rev 2.9.9.b) no cupo al arrancar */
+                    voz_ok = !voces_inicia_en(hueco_union, cap_union - union_fsp);
                 if (voz_ok && union_prestable())
                     sfx_voces_juego(variante == 2 ? "VOCESH.DAT" : variante == 6 ? "VOCESC.DAT" : "VOCES.DAT", hueco_union, cap_union - union_fsp);   /* (sin el final del frontal) */
                 if (variante == 2) { infarto_preset(preset_curso); if (infarto_inicia()) { dbglog(DBG_ERROR, "MODO: sin INFARTO.DAT\n"); variante = 1; } }

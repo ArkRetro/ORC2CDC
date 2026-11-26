@@ -6197,3 +6197,12 @@ en docs/PLAN.md (Popping, 8).
   MB (antes 955: SEGS.PAK ya no lleva los trozos sin uso de las cinco etapas de la revision 45). Probado con esa carpeta
   (PALM y BEAC, 448): las mismas cifras, hueco de la etapa 8160 KB, 0 "Out of memory". En una regeneracion completa
   conv_tramo / conv_union ya lo hacen.
+
+## Rev 2.9.9.b: las voces de la copiloto otra vez (correccion)
+
+El "Out of memory ... diff 217088" que desde la 2.9.5 se daba por inofensivo en estas notas NO lo era: 217088 es
+VOCES.DAT (216990 bytes) redondeado a 4 KB. Al arrancar ya no cabia seguido en el monton, `voces_inicia` fallaba,
+`voz_ok` quedaba a 0 y en la carrera no sonaba ninguna voz de la copiloto (lo noto el usuario). Arreglo: VOCES.DAT se
+lee en el hueco de la union (como ya hacia `sfx_voces_juego` con VOCESH/VOCESC), y si al arrancar no se puede, se
+reintenta al empezar la carrera (`voces_inicia_en`). Medido en Flycast: "VOZ: VOCES.DAT, 35 muestras, 210 KB en el
+AICA" al arrancar y ningun "Out of memory". Las notas anteriores que llaman "conocido" a ese aviso estan equivocadas.

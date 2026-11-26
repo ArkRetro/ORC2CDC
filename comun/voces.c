@@ -60,11 +60,11 @@ static int acomp = 9;                                   /* la acompanante (work+
 void voces_modo(int ha) { infarto = ha; }
 void voces_acompanante(int k) { acomp = k; }
 
-int voces_inicia(void)
+int voces_inicia_en(void *buf, uint32_t cap)
 {
     uint32_t tam;
     if (listo) return 0;
-    if (sfx_voces_inicia()) return -1;
+    if (sfx_voces_inicia_en(buf, cap)) return -1;
     T = sfx_voces_tablas(&tam);
     if (!T || tam < sizeof(tablas_t)) return -1;
     listo = 1;

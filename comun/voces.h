@@ -14,7 +14,8 @@ typedef struct {
     int   susto;            /* Rev 2.9.3: 1 si en este paso ha pasado rozando un coche del trafico deprisa  */
 } voces_coche_t;
 
-int  voces_inicia(void);            /* despues de sfx_inicia: carga VOCES.DAT; 0 = bien */
+int  voces_inicia_en(void *buf, uint32_t cap);   /* despues de sfx_inicia: carga VOCES.DAT (en RAM prestada o, con NULL, del monton); 0 = bien */
+#define voces_inicia() voces_inicia_en(NULL, 0)
 void voces_carrera(void);           /* al empezar una carrera (488 5A0 + 4880C0: borra la cola y los contadores) */
 void voces_salida(void);            /* modo GAME del original (empieza a contar el tiempo): la voz de salida */
 void voces_checkpoint(void);        /* EXTEND TIME: efecto, voz y comentario de la zona nueva */
