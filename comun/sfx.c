@@ -389,10 +389,13 @@ static int voces_lee(const char *fich, void *buf, uint32_t cap)
     return 0;
 }
 static const char *voz_fich;
-int sfx_voces_inicia(void)
+/* (Rev 2.9.9.b) buf/cap: RAM prestada para leer el fichero (el hueco de la union); NULL: del monton. VOCES.DAT (212 KB)
+   ya no cabia seguido en el monton al arrancar ("Out of memory ... diff 217088" desde la 2.9.5) y la carrera se quedaba
+   sin las voces de la copiloto */
+int sfx_voces_inicia_en(void *buf, uint32_t cap)
 {
     if (!listo || n_voz) return n_voz ? 0 : -1;
-    if (voces_lee("VOCES.DAT", NULL, 0)) return -1;
+    if (voces_lee("VOCES.DAT", buf, cap)) return -1;
     voz_fich = "VOCES.DAT";
     canal_voz = snd_sfx_chn_alloc();
     canal_voz_se = snd_sfx_chn_alloc();
@@ -408,6 +411,7 @@ int sfx_voces_juego(const char *fich, void *buf, uint32_t cap)
     voz_fich = fich;
     return 0;
 }
+int sfx_voces_inicia(void) { return sfx_voces_inicia_en(NULL, 0); }
 static int voz_grupo = -1;
 void sfx_voz_grupo(int g) { voz_grupo = g; }
 
