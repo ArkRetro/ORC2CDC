@@ -2105,6 +2105,105 @@ maquina lenta y con ta_f 576).
 Ficheros: m299/fix/ del directorio de trabajo (tabla_final.md, comp_final_beac_s95.jpg, etapas/ las consolas de la
 tanda final, res/ las de los congelados, sh/ y py/: comp.py, cong.py, prf.py).
 
+#### Medida final de la 2.9.9 (A/B en las 15 etapas, 3 Flycast a la vez)
+
+Todo en el Flycast de aqui (NO en la consola ni en Android). Flags: `-DPRUEBA_AUTO -DPRUEBA_NODO=n -DPRUEBA_SIN_TIEMPO
+-DDIAG_MS -DDIAG_POPPING`, 140 s de piloto, paso 10, lgdat2; mide.py y pop.py solo con las lineas de la zona. Por cada
+etapa una ronda de tres Flycast a la vez (:90 :91 :92), como la medida final de la 2.9.8.
+- Pasada 1 (con el contador `-DDIAG_FALTA`): A = faa81ea (rev-1.1 39509d3 + solo el contador, que sin el -D no cambia
+  el juego), B = punta de c299 (d1f8600), Bz = la punta sin el contador.
+- Pasada 2 (sin el contador): A = 39509d3 (rev-1.1 tal cual), B = la punta, Ag = faa81ea con el contador (repeticion
+  de la A de la pasada 1).
+
+**Lo que encontro la medida: la 2.9.9 se quedaba sin efectos ni musica con el diagnostico (corregido, d1f8600).** Con
+`-DDIAG_MS -DDIAG_POPPING` la 2.9.9 (109K mas de bss que la 2.9.8: cn_ult, cn_vult, cn_lista, lq_*) no cabia al
+arrancar: "Out of memory ... diff 61440" (EFECTOS: marcas 0 chispas 0 particulas 0 agua 0) y "Out of memory ... diff
+65536" + "snd_stream_init_ex(): memory allocation failed" (sin musica). Pasaba en todas las tandas de m299/fix
+(flycast_e*, h*, j*, m*: 15 de 15), asi que la tabla de la seccion de arriba midio la 2.9.9 sin chispas, marcas,
+particulas ni agua. La compilacion por defecto si arrancaba con todo, pero con 84K libres bajo la pila del nucleo
+(`_arch_mem_top - THD_KERNEL_STACK_SIZE`) frente a 192K de la 2.9.8. Arreglo: cn_ult en 16 bits (bytes / 32), una
+lista para los tres tramos en cn_lista y lq_* (mismo orden y mismos topes por tramo), y en la medida REPSEC.DAT solo
+con `-DDIAG_POP298`, vr / vt en 16 bits y mv_* de falta_mide del monton. Por defecto 38K menos (2.966.716 bytes de
+imagen frente a 3.004.636). Tras el arreglo las 90 pruebas arrancan con EFECTOS 3/1/1/1/1/1 y sin el fallo de
+snd_stream; el unico "Out of memory" es el "diff 217088" de siempre (90 de 90, tambien en A).
+
+| Etapa | fps A0 | fps B0 | B-A | tarde % A0 / B0 | salto A0 / B0 | lejano A0 / B0 | 8 px+ A0 / B0 | 32 px+ A0 / B0 | grandes que faltan Af / Bf | fps Af / Bf / Bz |
+|---|---|---|---|---|---|---|---|---|---|---|
+| PALM | 37,67 | 35,72 | -1,95 | 4,4 / 9,1 | 7,68 / 8,14 | 1696 / 3800 | 24,6 / 9,9 | 4,9 / 0,9 | 22,78 / 3,19 | 36,18 / 34,27 / 35,72 |
+| LAKE | 38,81 | 37,98 | -0,83 | 2,4 / 4,0 | 2,15 / 5,93 | 3722 / 3800 | 5,8 / 2,8 | 1,4 / 0,2 | 3,79 / 0,56 | 38,10 / 37,02 / 38,14 |
+| ALPI | 38,98 | 38,89 | -0,09 | 1,8 / 1,9 | 1,07 / 3,65 | 3792 / 3800 | 7,8 / 7,0 | 1,5 / 1,2 | 1,63 / 0,25 | 38,78 / 37,97 / 39,14 |
+| CAST | 38,60 | 38,48 | -0,12 | 3,0 / 2,7 | 3,79 / 6,99 | 3153 / 3800 | 14,9 / 14,6 | 4,5 / 2,6 | 10,88 / 0,83 | 38,36 / 37,07 / 38,45 |
+| FORE | 39,60 | 39,29 | -0,31 | 0,5 / 1,1 | 0,50 / 3,68 | 3800 / 3800 | 11,1 / 11,2 | 2,2 / 2,2 | 0,19 / 0,00 | 38,94 / 38,71 / 39,32 |
+| DESE | 39,21 | 38,73 | -0,48 | 1,3 / 2,4 | 1,50 / 3,14 | 3640 / 3800 | 8,2 / 4,8 | 2,5 / 1,8 | 3,11 / 0,22 | 38,71 / 38,21 / 38,86 |
+| CLOU | 37,10 | 35,13 | -1,97 | 5,9 / 10,8 | 7,61 / 7,95 | 1744 / 3800 | 28,4 / 21,7 | 3,6 / 2,2 | 12,62 / 3,94 | 35,76 / 33,77 / 35,08 |
+| INDU | 38,43 | 37,05 | -1,38 | 2,7 / 5,7 | 5,98 / 6,66 | 2233 / 3800 | 25,4 / 11,1 | 6,5 / 4,2 | 16,95 / 0,03 | 37,10 / 35,51 / 37,01 |
+| SNOW | 39,59 | 39,35 | -0,24 | 0,6 / 1,0 | 1,01 / 4,03 | 3782 / 3800 | 3,0 / 3,4 | 1,1 / 0,8 | 1,80 / 3,96 | 38,89 / 38,36 / 39,30 |
+| GHOS | 37,75 | 36,45 | -1,30 | 4,1 / 7,3 | 7,77 / 8,03 | 1708 / 3800 | 23,6 / 15,6 | 3,5 / 2,7 | 10,81 / 0,93 | 36,70 / 35,35 / 36,37 |
+| TULI | 38,60 | 37,26 | -1,34 | 2,3 / 5,4 | 6,47 / 7,70 | 2171 / 3754 | 29,6 / 23,0 | 3,5 / 3,2 | 6,38 / 0,07 | 37,39 / 36,00 / 37,37 |
+| METR | 34,09 | 32,86 | -1,23 | 12,6 / 17,1 | 7,60 / 7,65 | 1787 / 3800 | 22,0 / 11,8 | 6,4 / 3,1 | 8,98 / 0,49 | 32,39 / 30,99 / 32,72 |
+| RUIN | 39,08 | 38,91 | -0,17 | 1,5 / 1,7 | 2,73 / 5,03 | 3395 / 3800 | 8,6 / 10,5 | 1,6 / 1,6 | 12,93 / 4,26 | 38,55 / 38,21 / 38,89 |
+| IMPE | 39,02 | 38,00 | -1,02 | 1,5 / 3,6 | 4,22 / 6,13 | 2943 / 3800 | 18,6 / 15,5 | 4,0 / 2,7 | 4,61 / 0,15 | 38,13 / 36,79 / 37,96 |
+| CAPE | 39,34 | 38,85 | -0,49 | 1,0 / 1,9 | 1,56 / 4,71 | 3764 / 3800 | 16,4 / 12,4 | 4,7 / 4,2 | 1,40 / 0,00 | 38,77 / 38,16 / 38,83 |
+| **Total** | 38,39 | 37,53 | -0,86 | cuadros 1184 / 1851 | | | 248,0 / 175,3 | 51,9 / 33,6 | 118,8 / 18,9 | 37,52 / 36,43 / 37,54 |
+
+"grandes que faltan": nodos y mallas de 24 px o mas dentro de la vista que no se dibujan, por las razones reales
+(lejos, tope, tramo, ta_cabe, vtx, m_lejos, entrada; no rama, pvs ni pvsm), suma por muestra. La repeticion Ag da
+120,3 (A de la pasada 1: 118,8).
+
+Saltos por segundo sumados en las 15 (8 px+ / 32 px+, apariciones + desapariciones):
+
+| razon | A0 (rev-1.1) | B0 (2.9.9) |
+|---|---|---|
+| tope | 138,9 / 19,6 | 31,1 / 1,0 |
+| lejos | 7,9 / 1,0 | 0 / 0 |
+| pvs | 91,3 / 27,1 | 131,0 / 29,1 |
+| lado | 4,9 / 0,8 | 6,3 / 1,1 |
+| rama | 2,2 / 1,5 | 4,1 / 1,7 |
+| detras, lod, tramo | 2,6 / 1,6 | 2,1 / 0,7 |
+
+Grandes que faltan por razon (Af / Bf): lejos 41,50 / 0; tope 45,17 / 15,03; ta_cabe 20,84 / 0; m_lejos 5,53 / 0;
+vtx 2,02 / 0; tramo 3,62 / 3,70; entrada 0,17 / 0,16. De diseno: rama 126,6 / 157,7; pvs 341 / 342; pvsm 453 / 453.
+
+**Medido**
+- Lo que pidio el usuario: los grandes que faltan bajan de 118,8 a 18,9 (-84 %); "lejos", "ta_cabe", "m_lejos" y
+  "vtx" desaparecen; "tope" baja de 45,2 a 15,0. El lejano medio pasa a 3730-3800 m en todas (A: 1696 en PALM, 1744 en
+  CLOU). Los saltos de 8 px o mas bajan de 248,0 a 175,3 por s (-29 %) y los de 32 px de 51,9 a 33,6 (-35 %).
+- Coste: -0,86 fps de media sin el contador (38,39 -> 37,53) y +56 % de cuadros tarde (1184 -> 1851); con el
+  contador -1,09 (37,52 -> 36,43). Las cargadas pierden mas: PALM -1,95, CLOU -1,97, INDU -1,38, TULI -1,34, GHOS
+  -1,30, METR -1,23, IMPE -1,02; ALPI, CAST, RUIN, SNOW y FORE menos de 0,35. La desviacion de los fps sube en casi
+  todas (PALM 3,07 -> 3,98, IMPE 1,24 -> 2,62).
+- Ya con efectos y musica en B (la medida de m299/fix los tenia apagados en B): -0,86 aqui frente a -0,85 alli, la
+  misma cifra, pero aquella era con A con efectos y B sin ellos.
+- Capturas lado a lado A | B con la imagen congelada y parado (F50; m299/capturas/): la salida de BEAC s 95 (la del
+  usuario), tambien con la maquina lenta (`-DDIAG_RETARDO=12000`), INDU s 2297, CAST s 2864, PALM s 2618, DESE s 3188 y
+  CLOU s 517. En A faltan por lejos / tope / m_lejos: BEAC 16 + 19 nodos y 7 mallas (lenta: 26 nodos por lejos, hasta
+  155 px, y el cielo sin lo de detras de las palmeras), INDU 40 + 10 nodos (la refineria y la grua de la izquierda),
+  PALM s 2618 66 nodos y 14 mallas (toda la ciudad del fondo); en B ninguno por esas razones. CAST y DESE congelados
+  casi no tienen huecos ni en A (tope 1 y 3 nodos). CLOU s 517 sigue igual en las dos: 50 y 48 nodos por tope (hasta
+  133 px, tapados por la niebla en la imagen).
+- Cuelgues: ninguno. Las 90 pruebas escriben lineas MS hasta el final (72-106 por prueba) y llegan a la misma s
+  final que A (+-6 %); ninguna linea "No se pud", panic, assert ni excepcion.
+
+**Regresiones (B frente a A)**
+- fps y cuadros tarde (arriba): el objetivo de -0,5 fps / +15 % de cuadros tarde no se cumple.
+- Saltos "pvs" +43 % (91,3 -> 131,0 de 8 px por s): con el lejano a 3800 m entra mas lejos y la PVS lo pone y lo quita
+  al cambiar de seccion. Los de 32 px "pvs" casi igual (27,1 -> 29,1).
+- SNOW: grandes que faltan 1,80 -> 3,96 (por "tope", en la salida) y 8 px 3,0 -> 3,4. RUIN: 8 px 8,6 -> 10,5 (aunque
+  los grandes que faltan bajan de 12,9 a 4,3).
+- "rama" (lo de la otra rama de la union, que el original tampoco dibuja) 126,6 -> 157,7: no es un fallo, mas lejano.
+- RAM (corregida en d1f8600): sin el arreglo, la 2.9.9 con el diagnostico se quedaba sin efectos ni musica, y por
+  defecto con 84K de margen. Con el arreglo, por defecto queda ~122K de margen (sin medir el margen exacto por defecto
+  tras el arreglo; si medido que la de diagnostico arranca con todo).
+
+**Supuesto (no comprobado)**
+- Android y la consola: lo de arriba de esta seccion. El coste en fps puede ser mayor en una maquina mas lenta: el
+  salto ya no quita geometria, asi que alli se dibuja todo y bajan los fps.
+- Que el contador (DIAG_FALTA) no cambie lo que falta: cuesta ~0,9-1,1 fps a los dos y las dos pasadas dan lo mismo
+  en A (118,8 / 120,3).
+
+Ficheros: m299/final/ del directorio de trabajo (final.md, tablas.md, res/ las consolas y medida_<n>.txt, cap/ los
+congelados, sh/ y py/), m299/capturas/*.png (recorte 192,144..832,624 de 1024x768).
+
 ### Coche visible mas ligero (Rev 2.9.7)
 
 Pedido del usuario (variante "C2", para reducir los saltos): menos poligonos y texturas en las partes VISIBLES de los
