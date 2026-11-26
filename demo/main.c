@@ -183,6 +183,7 @@ typedef struct { float cx, cy, cz, r; uint32_t v0, n; int32_t tex; int32_t nodo;
    panoramica de 2,4 km de radio: desde la carretera de la union eran una pared negra que tapaba el cielo y la camara
    la atravesaba justo antes de entrar (pantalla negra). En el original los aplastaba el crecimiento (44C530) */
 static int sig_antes; static float sig_ent[4];                  /* x, z de la entrada y direccion (x, z) */
+static int sig_pano_listo;                                      /* Rev 2.9.9.c: sig_pano_busca ya hecho para la etapa siguiente */
 /* Rev 1.8: y mientras crece (geo_vista) las mallas que estan enteras mas de SIG_NUBES m por encima de lo mas alto de su
    carretera (nubes): las capas de nubes de MACH (SEG27, nodos 1069-1073, textura 43, a 900-1650 m), aplastadas hacia la
    base de su marco, bajaban sobre la union como laminas palidas y oscuras. Salen al acabar el crecimiento, en su sitio */
@@ -193,7 +194,46 @@ static int sig_crece;
 #define DETRAS_MARGEN 40.0f
 #define SIG_CUPULA_R 2000.0f                                    /* (y las cupulas de cielo de la etapa: MACH 1069 / 1072, 2,5 km) */
 #define SIG_NUBES 600.0f                                        /* m sobre lo mas alto de la carretera (lee_modelo_en) */
-#define DETRAS_ENTRADA(mo, m) ((mo) == &sig && ((sig_antes && ((m)->cx - sig_ent[0]) * sig_ent[2] + ((m)->cz - sig_ent[1]) * sig_ent[3] < -DETRAS_MARGEN) || (sig_crece && (((mo)->nubes && ((mo)->nubes[(uint32_t)((m) - (mo)->mallas) >> 5] >> ((uint32_t)((m) - (mo)->mallas) & 31) & 1)) || ((m)->nodo >= 0 && (uint32_t)(m)->nodo < (mo)->nnodos && (mo)->nodos[(m)->nodo].r > SIG_CUPULA_R)))))
+/* Rev 2.9.9.c: las mallas de un cartel van en el marco de su nodo (modelo_coloca no las mueve): su centro no dice
+   donde estan y DETRAS_ENTRADA las quitaba o dejaba al azar (SANF: 96 nodos de 88 mallas a 1,6-3,1 km por delante de la
+   entrada, quitados en toda la union). Ahora, el centro de su nodo */
+#define DETRAS_X(mo, m) (malla_de_cartel(mo, m) ? (mo)->nodos[(m)->nodo].cx : (m)->cx)
+#define DETRAS_Z(mo, m) (malla_de_cartel(mo, m) ? (mo)->nodos[(m)->nodo].cz : (m)->cz)
+/* Rev 2.9.9.c (SIG_PANO_R, DESVIACION): y con la camara antes de la entrada, los techos que cuelgan sobre la union:
+   nodos de SIG_PANO_R m de radio o mas, todo de recorte (lista 1), cuya esfera pasa por detras de la entrada y con todos
+   sus vertices SIG_PANO_ALTO m o mas por encima de ella (sig_pano_busca los busca, como mucho SIG_PANO_MAX). GRAN:
+   SEG24 nodo 60 (888 m, 31 mallas entre 219 y 484 m de alto: lo de arriba de la meseta, de 333 m por detras de la
+   entrada a 523 m por delante): desde la carretera de la union se veia por debajo, una losa oscura en el cielo junto a
+   las paredes del canon (con DETRAS_MARGEN, cortada). Desde la entrada, mirando por el eje, no toca la pantalla: al
+   pasarla no salta nada. De las 15 + 15 etapas de los arboles 0 y 1 es el unico (los otros nodos grandes de recorte
+   que pasan por detras de la entrada, FORE 517, DESE 160, CLOU 1469, SNOW 182, IMPE 1208 / 1226, YOSE 233-235, MAYA
+   1460 y FLOR 330 / 352, bajan hasta el suelo y son fondos que se ven desde la entrada: esos se quedan).
+   -DSIG_PANO_R=0: lo de antes */
+#ifndef SIG_PANO_R
+#define SIG_PANO_R 600.0f
+#endif
+#define SIG_PANO_ALTO 150.0f
+#define SIG_PANO_MAX 8
+static int sig_pano_n; static int32_t sig_pano[SIG_PANO_MAX];
+static inline int sig_pano_es(int32_t nd) { int i; for (i = 0; i < sig_pano_n; i++) if (sig_pano[i] == nd) return 1; return 0; }
+#define SIG_PANO(mo, m) (sig_pano_n && (m)->nodo >= 0 && sig_pano_es((m)->nodo))
+/* Rev 2.9.9.c (SIG_CUP_F, DESVIACION): y los fondos de cielo de la etapa siguiente que la rodean por delante de su
+   entrada (nodos de mas de SIG_CUPULA_R m de radio con el centro SIG_CUP_F radios o mas por delante: los cilindros azules
+   de MACH, SEG27 nodos 1069-1073, de 2,1 a 2,7 km de radio y a 1,6-2,1 km) tampoco salen hasta pasar la entrada. Desde
+   la union, que llega de lado, se veian a medias: una raya vertical que partia el cielo en dos, el de la union a un
+   lado y un azul liso al otro, desde que acababa de crecer hasta casi la entrada (la queja: "bandas dividiendo el
+   cielo en las bifurcaciones"). No es solo el corte de DETRAS_MARGEN (6 de 25 mallas del 1069): con los nodos enteros
+   la raya seguia. Los que rodean la salida (centro en la entrada: MAYA 195 / 2260, ALAS 275 / 1206) siguen como en la
+   Rev 1.4. -DSIG_CUP_F=1e9: lo de antes */
+#ifndef SIG_CUP_F
+#define SIG_CUP_F 0.5f
+#endif
+static int sig_cup_n; static int32_t sig_cup[SIG_PANO_MAX];
+static inline int sig_cup_es(int32_t nd) { int i; for (i = 0; i < sig_cup_n; i++) if (sig_cup[i] == nd) return 1; return 0; }
+#define SIG_CUP(mo, m) (sig_cup_n && (m)->nodo >= 0 && sig_cup_es((m)->nodo))
+#define DETRAS_PLANO(mo, m) ((DETRAS_X(mo, m) - sig_ent[0]) * sig_ent[2] + (DETRAS_Z(mo, m) - sig_ent[1]) * sig_ent[3] < -DETRAS_MARGEN)
+#define DETRAS_CRECE(mo, m) (((mo)->nubes && ((mo)->nubes[(uint32_t)((m) - (mo)->mallas) >> 5] >> ((uint32_t)((m) - (mo)->mallas) & 31) & 1)) || ((m)->nodo >= 0 && (uint32_t)(m)->nodo < (mo)->nnodos && (mo)->nodos[(m)->nodo].r > SIG_CUPULA_R))
+#define DETRAS_ENTRADA(mo, m) ((mo) == &sig && ((sig_antes && (DETRAS_PLANO(mo, m) || SIG_PANO(mo, m) || SIG_CUP(mo, m))) || (sig_crece && DETRAS_CRECE(mo, m))))
 #define AGUA_NODO (-258)                                         /* lista 3, grupo 2: el plano del agua (agua_dibuja) */
 typedef struct { float x, y, z, u, v; uint32_t c; } vert_t;
 /* nodo del original (tools/modelo.py): esfera, banderas (bits 0-3 umbral de LOD, bit 4 orientado a la camara, bits 8-9
@@ -7481,6 +7521,7 @@ static int curso_paso(void)
             PK("bo_subido");
         } else if (m == &sig) {
             int i;
+            sig_pano_listo = 0; sig_pano_n = 0; sig_cup_n = 0;               /* (Rev 2.9.9.c: sig_pano_busca, con la primera vista desde la union) */
             col_et = carga.col;                                 /* raiz 0: la etapa siguiente en su marco */
             if (!col_et.ok) dbglog(DBG_ERROR, "COLI: sin la colision de %s\n", fich_sig);
             if ((i = ruta_anade(m)) < 0) curso_error("Sin memoria para la ruta");
@@ -8616,6 +8657,32 @@ static int pvs_ventana(modelo_t *mo)                            /* mueve las dos
     }
     return cambia;
 }
+/* Rev 2.9.9.c (SIG_PANO_R): los telones de la entrada de la etapa siguiente (ver DETRAS_ENTRADA), una vez por etapa */
+static void sig_pano_busca(const modelo_t *mo)
+{
+    uint32_t i;
+    sig_pano_n = 0; sig_cup_n = 0;
+    for (i = 0; mo->nodos && i < mo->nn0 && sig_cup_n < SIG_PANO_MAX; i++) {   /* (SIG_CUP_F: los fondos de cielo de delante) */
+        const nodo_t *d = mo->nodos + i;
+        if (d->r > SIG_CUPULA_R && (d->cx - sig_ent[0]) * sig_ent[2] + (d->cz - sig_ent[1]) * sig_ent[3] >= SIG_CUP_F * d->r) sig_cup[sig_cup_n++] = (int32_t)i;
+    }
+    if (sig_cup_n) dbglog(DBG_INFO, "PVS: %d fondos de cielo de %.4s por delante de su entrada, fuera hasta la entrada\n", sig_cup_n, cur_sig >= 0 && cur_sig < ncurso ? curso[cur_sig].zona : "----");
+    for (i = 0; SIG_PANO_R > 0 && mo->nodos && i < mo->nn0 && sig_pano_n < SIG_PANO_MAX; i++) {
+        const nodo_t *d = mo->nodos + i; uint32_t q, k, l1 = 0, otras = 0; float y0 = 1e9f;
+        if (d->r < SIG_PANO_R || (d->cx - sig_ent[0]) * sig_ent[2] + (d->cz - sig_ent[1]) * sig_ent[3] - d->r > -DETRAS_MARGEN) continue;
+        for (q = 0; q < mo->inicio[3] && q < mo->nmallas && !otras; q++) {
+            const malla_t *ma = mo->mallas + q;
+            if (ma->nodo != (int32_t)i || ma->n < 3) continue;
+            if (q >= mo->inicio[1] && q < mo->inicio[2]) l1++; else otras++;
+            for (k = 0; k < ma->n; k++) if (mo->verts[ma->v0 + k].y < y0) y0 = mo->verts[ma->v0 + k].y;
+        }
+        if (l1 && !otras && y0 - mo->ruta[1] >= SIG_PANO_ALTO) {
+            sig_pano[sig_pano_n++] = (int32_t)i;
+            dbglog(DBG_INFO, "PVS: techo sobre la entrada de %.4s: nodo %u (r %.0f, %u mallas de recorte, a %.0f m o mas), fuera hasta la entrada\n",
+                   cur_sig >= 0 && cur_sig < ncurso ? curso[cur_sig].zona : "----", (unsigned)i, (double)d->r, (unsigned)l1, (double)(y0 - mo->ruta[1]));
+        }
+    }
+}
 static inline uint32_t pvs_coste(const modelo_t *mo, uint32_t i)   /* bytes teoricos del nodo en la ventana */
 {
     uint32_t c = mo->pvs_teo[2 * i];
@@ -8704,6 +8771,7 @@ static void pvs_paso(modelo_t *mo)
                 while (mo->pvs_s > (int32_t)s) pvs_aplica(mo, mo->pvs_s--);
                 pvs_ventana(mo); pvs_recuerda(mo);
             }
+            if (!sig_pano_listo) { sig_pano_listo = 1; sig_pano_busca(mo); }   /* (Rev 2.9.9.c: una vez por etapa siguiente) */
             mo->pvs_on = 1;
             return;
         }
@@ -10351,7 +10419,40 @@ static void cielo_dibuja(int l)
 static float geo_esc = 1.0f;                                    /* 7D3184 */
 static float geo_odo, geo_odo0 = -1.0f;                         /* car+0x2B0 (m) y 7D2E6C */
 static int geo_cambio;                                          /* 44E590 ya cambio al registro de la etapa siguiente */
-static void geo_reinicia(void) { geo_esc = 1.0f; geo_odo0 = -1.0f; geo_cambio = 0; }
+/* Rev 2.9.9.c (GEO_RUMBO, DESVIACION): el crecimiento espera a que la etapa siguiente se vea de frente. Las dos ramas de
+   la bifurcacion (la misma geometria en todas) llegan a la entrada por una curva de 90 grados: entre las posiciones 0x84
+   y 0xF0 el coche va PERPENDICULAR al eje de la etapa siguiente, de 700 a 100 m a un lado y unos 300 m antes de la
+   entrada, y la etapa, ya crecida del todo desde la posicion ~157, se ve de lado y por fuera durante ~500 m: su
+   decorado solo esta hecho para verse desde su carretera y desde alli es un trozo suelto (YOSE -> GRAN: las paredes del
+   canon por detras y acabadas de golpe donde acaba la etapa, flotando sobre los muros de la union; la queja: "un
+   trozo grande de montana sin cargar"; no falta nada: es toda la geometria que hay, comprobado fuera de la consola con
+   el modelo entero). Ahora el factor de 44C530 no pasa del que da el rumbo del coche a un punto GEO_RUMBO_L m dentro
+   de la etapa por su eje: 0 con mas de GEO_RUMBO_A0 grados, 1 con menos de GEO_RUMBO_A1 (en la bifurcacion, de la
+   posicion ~183 a la ~209: unos 210 m, como los 200 del original, y entera unos 280 m antes de la entrada). No baja
+   (geo_rumbo: el mayor visto). En una union recta el rumbo es ~0 y queda el factor del original. -DGEO_RUMBO=0: lo
+   de antes */
+#ifndef GEO_RUMBO
+#define GEO_RUMBO 1
+#endif
+#define GEO_RUMBO_L 200.0f
+#define GEO_RUMBO_T0 0.6249f                                    /* tan 32 */
+#define GEO_RUMBO_T1 0.2493f                                    /* tan 14 */
+static float geo_rumbo;
+static void geo_reinicia(void) { geo_esc = 1.0f; geo_odo0 = -1.0f; geo_cambio = 0; geo_rumbo = 0; }
+static float geo_rumbo_f(void)
+{
+    const float *r0 = sig.ruta, *r1; float tx, tz, l, vx, vz, a, lat, g;
+    if (!GEO_RUMBO || !r0 || sig.nruta < 2 || sig.paso_ruta != ruta_pr) return 1.0f;
+    r1 = r0 + sig.paso_ruta; tx = r1[0] - r0[0]; tz = r1[2] - r0[2]; l = sqrtf(tx * tx + tz * tz);
+    if (l < 1e-3f) return 1.0f;
+    vx = r0[0] - yo.pos[0]; vz = r0[2] - yo.pos[2];
+    a = (vx * tx + vz * tz) / l; lat = fabsf(vx * tz - vz * tx) / l;   /* m antes de la entrada por el eje y a un lado */
+    if (a <= 0) return 1.0f;                                    /* (ya a la altura de la entrada) */
+    a += GEO_RUMBO_L;
+    g = (GEO_RUMBO_T0 * a - lat) / ((GEO_RUMBO_T0 - GEO_RUMBO_T1) * a);
+    if (g > geo_rumbo) geo_rumbo = g > 1.0f ? 1.0f : g;
+    return geo_rumbo;
+}
 static void geo_paso(void)
 {
     int nodo, pos, u = traf_lugar(yo.s, &nodo, &pos);
@@ -10362,13 +10463,21 @@ static void geo_paso(void)
     if (!u || !cur_en_union || (cur_rama < 0 && !(cur_nodo >= 0 && cur_nodo < ncurso && !tiene_hijos(curso + cur_nodo)))) { geo_reinicia(); return; }
     if (!geo_cambio && pos >= 0x18) { geo_cambio = 1; geo_esc = 0; geo_odo0 = -1.0f; }
     if (!geo_cambio || !sig.tv) return;                         /* (44C530 solo con la etapa nueva leida: 0xC..0x11) */
-    if (pos >= 0xF0) { geo_esc = 1.0f; return; }
     if (pos <= 0x84) { geo_esc = 0; geo_odo0 = -1.0f; return; }
-    if (geo_odo0 < 0) geo_odo0 = geo_odo;
-    geo_esc = (geo_odo - geo_odo0) / 200.0f;
-    if (geo_esc < 0) geo_esc = 0;
-    if (geo_esc > 1) geo_esc = 1;
+    if (pos >= 0xF0) geo_esc = 1.0f;
+    else {
+        if (geo_odo0 < 0) geo_odo0 = geo_odo;
+        geo_esc = (geo_odo - geo_odo0) / 200.0f;
+        if (geo_esc < 0) geo_esc = 0;
+        if (geo_esc > 1) geo_esc = 1;
+    }
+    {   float g = geo_rumbo_f();                                /* (Rev 2.9.9.c: GEO_RUMBO) */
+        if (geo_esc > g) geo_esc = g; }
 #ifdef DIAG_GEO
+    {   /* (la camara en el marco de la etapa siguiente: para verla entera fuera de la consola) */
+        static int n2_; float c_ = cosf(marco_sig[3]), s_ = sinf(marco_sig[3]), dx_ = ojo[0] - marco_sig[0], dz_ = ojo[2] - marco_sig[2];
+        if (n2_++ % 6 == 0 && cur_sig >= 0) dbglog(DBG_INFO, "GEOC: crono %d %.4s pos %d ojo %.1f %.1f %.1f ade %.4f %.4f %.4f esc %.2f antes %d fx %.1f\n", crono, curso[cur_sig].zona, pos,
+            (double)(dx_ * c_ - dz_ * s_), (double)(ojo[1] - marco_sig[1]), (double)(dx_ * s_ + dz_ * c_), (double)(ade[0] * c_ - ade[2] * s_), (double)ade[1], (double)(ade[0] * s_ + ade[2] * c_), (double)geo_esc, sig_antes, (double)fx); }
     { static int n_; if (n_++ % 6 == 0) dbglog(DBG_INFO, "GEO: crono %d pos %d s %.0f x %.1f coche %.1f %.1f %.1f ojo %.1f %.1f %.1f esc %.2f base %.0f nubes %d crece %d\n", crono, pos, (double)yo.s, (double)yo.x, (double)yo.pos[0], (double)yo.pos[1], (double)yo.pos[2], (double)ojo[0], (double)ojo[1], (double)ojo[2], (double)geo_esc, (double)marco_sig[1], sig.nubes != NULL, sig_crece); }
 #endif
 }
