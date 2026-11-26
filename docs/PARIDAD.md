@@ -2204,6 +2204,20 @@ vtx 2,02 / 0; tramo 3,62 / 3,70; entrada 0,17 / 0,16. De diseno: rama 126,6 / 15
 Ficheros: m299/final/ del directorio de trabajo (final.md, tablas.md, res/ las consolas y medida_<n>.txt, cap/ los
 congelados, sh/ y py/), m299/capturas/*.png (recorte 192,144..832,624 de 1024x768).
 
+#### Revision de la 2.9.9: costes viejos en corte_nodos
+
+- **Salida (medido en Flycast, BEAC, linea CN1 temporal):** en la cuenta atras no hay corte, pero `dibuja_etapa` seguia
+  sumando en `cn_ult` cada cuadro. En el primer cuadro de la carrera el corte veia 52 MB para un tope de 1041K, pasaba
+  al modo 1 y quitaba 139 nodos, tambien los cercanos: un cuadro con la etapa casi vacia justo en la salida. Con la
+  estimacion de lo nuevo en vez de lo viejo aun quitaba 101 (1091K estimado frente a 846K medido en el cuadro
+  siguiente).
+- **Cambio de etapa (`etapa = sig`):** el tramo 0 leia los costes de la etapa vieja por numero de nodo. En BEAC s 6666
+  daba 425K frente a 822K en el cuadro siguiente.
+- **Arreglo:** `cn_ult` solo vale si `corte_nodos` corrio en el cuadro anterior con el mismo modelo en el tramo. Si no,
+  ese cuadro no corta y va como antes de la 2.9.9 (tope por listas y `ta_cabe`). Tras el arreglo, el primer cuadro con
+  corte en la salida ya da 852K y 33 nodos, como los siguientes.
+
+
 ### Coche visible mas ligero (Rev 2.9.7)
 
 Pedido del usuario (variante "C2", para reducir los saltos): menos poligonos y texturas en las partes VISIBLES de los
