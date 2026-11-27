@@ -2576,6 +2576,55 @@ static __attribute__((noinline)) uint32_t tramo_sig(const uint32_t *tr, uint32_t
     return it;
 }
 #endif
+/* Rev 2.9.9.d (FPS; -DETAPA_CULL=0: lo de antes). En dibuja_etapa las pruebas de cada malla (PVS y la esfera contra la
+   piramide de la vista) iban con el ojo, los tres ejes y siete constantes (19 floats) en un bucle que ademas lleva las
+   cuentas del TA: el compilador las tenia en la pila y releia una docena por malla, y se miran unas 6000-9000 mallas
+   por cuadro para dibujar 2500-3500 (METR). Ahora las elige etapa_mallas_vistas, un bucle corto que deja todo en registros
+   y pasa el centro de la esfera a la pantalla con un ftrv de la matriz ya cargada (la vista: X = 320 W + fx xv,
+   Y = 240 W - fx yv, W = zv), con las mismas pruebas multiplicadas por fx:
+     zv + r < cerca, zv - r > lejos; |xv| - zv tan > r k  =>  |X - 320 W| - 320 W > r k fx (y lo mismo con Y y 240);
+     seguro: (W - r) G > |X - 320 W| + r fx (esfera_en_guarda).
+   Solo en los tramos de un nodo, sin cartel, sin DETRAS_ENTRADA (la etapa siguiente antes de la entrada o creciendo:
+   alli la matriz cargada va escalada) y mientras quepa en el tope de vertices (si no, el camino de siempre, que corta).
+   Lo que cambia es el redondeo de las pruebas (la cuenta va por otro camino): solo puede cambiar una malla cuya esfera
+   roza el borde de la vista a menos de milimetros */
+#if !defined(ETAPA_CULL) && ETAPA_FINO && !defined(DIAG_TEX) && !defined(DIAG_SIGM)
+#define ETAPA_CULL 1
+#endif
+#ifndef ETAPA_CULL
+#define ETAPA_CULL 0
+#endif
+#if ETAPA_CULL
+/* las mallas de [k, kb) que pasan la PVS (pvs: NULL = todas) y la vista, hasta ETC_N: en lk el indice | 0x10000 si va
+   directa (seguro); *kn = la primera que queda por mirar. cu: cerca, lejos, kh fx, kv fx, fx, GUARDA_PX, 1,5 cerca. La
+   XMTRX es la vista. Devuelve cuantas */
+#define ETC_N 32
+static __attribute__((noinline)) uint32_t etapa_mallas_vistas(const malla_t *M, uint32_t k, uint32_t kb, const uint32_t *pvs, const float *cu, uint32_t *lk, uint32_t *kn)
+{
+    const float cer = cu[0], lej = cu[1], khfx = cu[2], kvfx = cu[3], fxx = cu[4], g = cu[5], cer15 = cu[6];
+    uint32_t n = 0;
+    for (; k < kb && n < ETC_N; k++) {
+        const malla_t *m = M + k;
+        __builtin_prefetch(m + 2);
+        if (m->n < 3) continue;
+#ifdef DIAG_MS
+        dg_mallas++;
+#endif
+        if (pvs && !(pvs[k >> 5] & (1u << (k & 31)))) continue;
+        {   register float x __asm__("fr4") = m->cx, y __asm__("fr5") = m->cy, z __asm__("fr6") = m->cz, w __asm__("fr7") = 1.0f;
+            const float r = m->r; float xc, yc, zr;
+            __asm__("ftrv xmtrx,fv4\n" : "+f"(x), "+f"(y), "+f"(z), "+f"(w));
+            if (z + r < cer || z - r > lej) continue;
+            xc = fabsf(x - 320.0f * z); yc = fabsf(240.0f * z - y);
+            if (xc - 320.0f * z > r * khfx || yc - 240.0f * z > r * kvfx) continue;
+            zr = z - r;
+            lk[n++] = k | (zr > cer15 && m->n <= 256 && zr * g > xc + r * fxx && zr * g > yc + r * fxx ? 0x10000u : 0);
+        }
+    }
+    *kn = k;
+    return n;
+}
+#endif
 static void dibuja_etapa(const modelo_t *mo, int l)
 {
     const float tanh = 320.0f / fx, tanv = 240.0f / fx, kh = sqrtf(1 + tanh * tanh), kv = sqrtf(1 + tanv * tanv);
@@ -2609,6 +2658,15 @@ static void dibuja_etapa(const modelo_t *mo, int l)
        falta, y DETRAS_ENTRADA, que solo es de la etapa siguiente) */
     int sol_p = sol && sol_rayo_on && !sol_rayo_res;
     const int es_sig = mo == &sig && (sig_antes || sig_crece);
+#endif
+#if ETAPA_CULL
+    const int cull = !es_sig;                                   /* (la vista cargada sin escalar: etapa_mallas_vistas) */
+    const float cu[7] = { cer, lej, kh * fx, kv * fx, fx, GUARDA_PX, cer15 };
+#ifndef DIAG_SIN_TOPE
+#define ET_CABE() ((int32_t)(ve - vtx_et0) <= vres)
+#else
+#define ET_CABE() 1
+#endif
 #endif
     /* (Rev 2.9.9, CORTE_NODO: lo que cuesta cada nodo en este cuadro, para corte_nodos en el siguiente) */
     uint16_t *const cnu = mo == &etapa ? cn_ult[0] : mo == &uni ? cn_ult[1] : mo == &sig ? cn_ult[2] : NULL;
@@ -2667,8 +2725,27 @@ static void dibuja_etapa(const modelo_t *mo, int l)
         /* (en un tramo de un nodo todas las mallas son suyas: si el nodo esta en pvs_ent, la PVS no quita ninguna) */
         const uint32_t *const pvs_t = nd && pvs && ent && (ent[(nd - 1) >> 5] & (1u << ((nd - 1) & 31))) ? NULL : pvs;
 #endif
+#if ETAPA_CULL
+        uint32_t lk[ETC_N], ln = 0, li = 0, kn = ka; int lmodo = cull && nd && !cart && ET_CABE();
+#endif
         for (k = ka; k < kb; k++) {
-            const malla_t *m = M + k; int seguro = 0; uint32_t f;
+            const malla_t *m; int seguro = 0; uint32_t f;
+#if ETAPA_CULL
+            /* (etapa_mallas_vistas: la PVS y la vista en el bucle corto, ETC_N mallas por llamada. Si el tope de
+               vertices se pasa al dibujar una, lo que queda del tramo va por el camino de siempre desde la siguiente,
+               que es lo que hacia: k ya es la siguiente a la ultima dibujada) */
+            if (lmodo && !ET_CABE()) lmodo = 0;
+            if (lmodo) {
+                if (li >= ln) {
+                    if (kn >= kb) break;
+                    ln = etapa_mallas_vistas(M, kn, kb, pvs_t, cu, lk, &kn); li = 0;
+                    if (!ln) break;
+                }
+                k = lk[li] & 0xFFFF; seguro = lk[li] >> 16; li++;
+                m = M + k; goto et_vista;
+            }
+#endif
+            m = M + k;
             __builtin_prefetch(m + 2);
             if (!nd && m->nodo >= 0 && !(vis[m->nodo >> 5] & (1u << (m->nodo & 31)))) continue;
             if (m->n < 3) continue;
@@ -2708,6 +2785,9 @@ static void dibuja_etapa(const modelo_t *mo, int l)
                 if (fabsf(xv) - zv * tanh > m->r * kh || fabsf(yv) - zv * tanv > m->r * kv) continue;
                 seguro = zv - m->r > cer15 && m->n <= 256 && esfera_en_guarda(xv, yv, zv, m->r);
             }
+#if ETAPA_CULL
+        et_vista:
+#endif
 #ifdef DIAG_FALTA
             if (fm_cur) { fm_k = k; fm_cur[k] = 1; }
 #endif
@@ -2785,6 +2865,7 @@ static void dibuja_etapa(const modelo_t *mo, int l)
     ET_VUELCA();
 #undef ET_VUELCA
 #undef ET_RECARGA
+#undef ET_CABE
     if (ta_en_etapa) vtx_et += vtx_env - vtx_et0;
     ta_ofs = 0;
 }
