@@ -1022,6 +1022,7 @@ void infarto_paso(const infarto_coche_t *c)         /* 464D20 */
         if (!ant_ok) { ant_pos[0] = c->x; ant_pos[1] = c->y; ant_pos[2] = c->z; ant_ok = 1; }
         memcpy(oc.ant, ant_pos, sizeof ant_pos);
         haobj_paso(&oc);
+        { int k; for (k = haobj_postes(); k > 0; k--) sfx_voz_se(0xcd); }   /* 4AA140 con +78 = 0xCD (modo 16) */
         ant_pos[0] = c->x; ant_pos[1] = c->y; ant_pos[2] = c->z;
     }
     if (c->en_union) { hoja_t++; hoja_paso(c); }    /* 464D20: 7F8B34 + 1 en la union */

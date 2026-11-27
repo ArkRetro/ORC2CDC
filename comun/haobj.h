@@ -22,6 +22,7 @@ void haobj_paso(const haobj_coche_t *c);     /* colocacion, toques y vuelo; un p
 int  haobj_toques(int *cl, int max);
 /* cruces de arcos en este paso (+7C == 3 del original, 0x1d42f0): cuantos y su clase */
 int  haobj_cruces(int *cl, int max);
+int  haobj_postes(void);                 /* postes de los arcos tocados en este paso (0x1d4434: +7C 1 / 2, efecto 0xCD) */
 /* 4611D0 con la clase 0x10 (accion -11): el ancho de los arcos (clase 0x0B) del tramo lo..hi con la fila t {inicio,
    medio, final, reparto} de 0x3f7218 y los carriles del primero (carriles(x, z), sec: la seccion de un punto) */
 void haobj_arcos(int lo, int hi, const float *t, int (*carriles)(float x, float z), int (*sec)(float x, float z),

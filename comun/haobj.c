@@ -33,7 +33,7 @@ static uint32_t lba_o, tam_o, nfich;
 static obj_t *ob; static int nob;
 static int toq_cl[16], ntoq, cru_cl[8], ncru; static uint32_t reloj_obj;
 #define NPIEZA 40                        /* 0x134..0x15B */
-static int n_est, n_pie, base_pie, toq_g, toq_p; static int (*sec_cb)(float x, float z);
+static int n_est, n_pie, base_pie, toq_g, toq_p, npos; static int (*sec_cb)(float x, float z);
 static int (*suelo_cb)(float x, float z, float *y);
 static struct { int reg; float p[3], R[3][3]; } marca[2]; static int n_marca; static float marca_a;   /* 7F24D0 / D4, [0x58a140] */
 void haobj_marcas(int n, const int *reg, const float (*p)[3], const float *fx, const float *fz)
@@ -114,7 +114,7 @@ static void euler(float R[3][3], const float *a, float yaw)   /* Ry(yaw) Ry(ay) 
 void haobj_paso(const haobj_coche_t *c)
 {
     int i; float fx = c->fw[0], fz = c->fw[2], fl = sqrtf(fx * fx + fz * fz);
-    ntoq = 0; ncru = 0; reloj_obj++; toq_g = toq_p = 0; sec_cb = c->sec; suelo_cb = c->suelo;
+    ntoq = 0; ncru = 0; reloj_obj++; toq_g = toq_p = 0; npos = 0; sec_cb = c->sec; suelo_cb = c->suelo;
     marca_a += 0.2094395f; if (marca_a > 3.14159274f) marca_a -= 6.28318548f;   /* 0x1a7f78: el vaiven de las marcas */
     if (!ob) return;
 #ifdef DIAG_HA
@@ -163,7 +163,9 @@ void haobj_paso(const haobj_coche_t *c)
         if (o->est == 1 && (o->cl == PRUEBA_HA_TOQUE || PRUEBA_HA_TOQUE < 0) && !(o->tipo == 8 && (o->vuela || !o->act))) {   /* prueba: los de esa clase, a la linea del coche */
             float dx = o->p[0] - c->pos[0], dz = o->p[2] - c->pos[2], al = dx * fx + dz * fz, la = dx * fz - dz * fx;
             if (al > 25.0f && al < 40.0f && fabsf(la) < 25.0f && !o->rg) { o->p[0] = c->pos[0] + fx * al; o->p[2] = c->pos[2] + fz * al; o->rg = 1;
-
+#ifdef PRUEBA_HA_POSTE
+                if (o->tipo == 7) { o->p[0] += fz * 3.0f * o->esc; o->p[2] -= fx * 3.0f * o->esc; }   /* prueba: un poste en la linea */
+#endif
                 if (o->tipo == 8) { o->r0[0] = o->p[0]; o->r0[2] = o->p[2]; } }
         }
 #endif
@@ -177,7 +179,24 @@ void haobj_paso(const haobj_coche_t *c)
             e2 = (c->pos[0] - c->ant[0]) * (bz - c->ant[2]) - (c->pos[2] - c->ant[2]) * (bx - c->ant[0]);
             if (d1 * d2 <= 0 && e1 * e2 <= 0 && (d1 != 0 || d2 != 0) && o->p[1] + h > c->pos[1]) {
                 if (ncru < 8) cru_cl[ncru++] = o->cl;
-                o->est = 2; o->t = 0; o->giro = 0;
+#ifdef DIAG_HA
+                dbglog(DBG_INFO, "DIAGHA arco %d cruzado\n", i);
+#endif
+                o->est = 2; o->t = 0; o->giro = 0; o->v[0] = 0;   /* +7C = 3: sin giro (+94 = 0 de 0x1d41d0) */
+                continue;
+            }
+            {   int q;                                  /* cada poste (0x1d4434): (+-h, y + 0,3), radio 0,3 x escala, 0xCD */
+                for (q = 0; q < 2; q++) {
+                    float px = q ? ax : bx, pz = q ? az : bz, dx = px - c->pos[0], dz = pz - c->pos[2], r = 0.3f * o->esc;
+                    float al = dx * fx + dz * fz, la = dx * fz - dz * fx;
+                    if (fabsf(o->p[1] + 0.3f - c->pos[1]) > 3.0f || !(fabsf(al) < 2.3f + r && fabsf(la) < 1.1f + r)) continue;
+                    o->est = 2; o->t = 0; o->v[0] = q ? 0.2f : -0.2f;   /* 0x1d4508: +7C 1 (-h) -> -0,2, 2 (+h) -> +0,2 */
+                    npos++;
+#ifdef DIAG_HA
+                    dbglog(DBG_INFO, "DIAGHA poste %d del arco %d tocado (giro %.1f)\n", q + 1, i, (double)o->v[0]);
+#endif
+                    break;
+                }
             }
             continue;
         }
@@ -208,8 +227,8 @@ void haobj_paso(const haobj_coche_t *c)
                 o->v[0] = fx * c->v * 1.1f + (la >= 0 ? fz : -fz) * 3.0f; o->v[2] = fz * c->v * 1.1f - (la >= 0 ? fx : -fx) * 3.0f;
                 o->v[1] = 5.0f + c->v * 0.1f; o->giro = 0;
             }
-        } else if (o->est == 2 && o->tipo == 7) {       /* 0x1d4508: gira, y a los 3 s se cierra (parpadea el ultimo) */
-            o->giro += 0.2f;
+        } else if (o->est == 2 && o->tipo == 7) {       /* 0x1d4508: gira (+94), y a los 3 s se cierra (parpadea el ultimo) */
+            o->giro += o->v[0];
             if (++o->t >= 180) o->est = 3;
         } else if (o->est == 2 && o->tipo == 8) {       /* 0x1d50e0: sube con el coche y a los 0,319 s se encoge 0,03 */
             float t = (float)++o->t / 60.0f;
@@ -288,6 +307,7 @@ void haobj_est_abre(int si)
     for (i = nob - n_pie; i < nob; i++) ob[i].est = si ? (ob[i].est == 3 ? 4 : ob[i].est) : 3;
     if (!si) base_pie = 0;
 }
+int haobj_postes(void) { return npos; }
 int haobj_cruces(int *cl, int max) { int i; for (i = 0; i < ncru && i < max; i++) cl[i] = cru_cl[i]; return ncru; }
 void haobj_arcos(int lo, int hi, const float *t, int (*carriles)(float x, float z), int (*sec)(float x, float z),
                  void (*dir)(float x, float z, float *fx, float *fz))
