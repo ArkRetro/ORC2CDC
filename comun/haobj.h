@@ -19,6 +19,8 @@ void haobj_paso(const haobj_coche_t *c);     /* colocacion, toques y vuelo; un p
 int  haobj_toques(int *cl, int max);
 /* cuantos objetos vivos de una clase hay (para contar los que pide la peticion) */
 int  haobj_cuenta(int clase);
+/* 45C8E0: los vivos de una clase en las secciones lo..hi (sec: la seccion de un punto, 43F370) */
+int  haobj_cuenta_sec(int clase, int lo, int hi, int (*sec)(float x, float z));
 /* lo que hay que dibujar: registro del banco 0x57 y matriz (filas: ejes y traslacion, en el mundo), los mas cercanos al
    ojo dentro de la distancia (HAOBJ_LEJOS), como mucho max */
 #define HAOBJ_LEJOS 160.0f

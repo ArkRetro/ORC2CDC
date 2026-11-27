@@ -28,7 +28,7 @@ typedef struct {
 static uint8_t *cab;                     /* el primer sector de HAOSO.DAT */
 static uint32_t lba_o, tam_o, nfich;
 static obj_t *ob; static int nob;
-static int toq_cl[16], ntoq;
+static int toq_cl[16], ntoq; static uint32_t reloj_obj;
 
 int haobj_inicia(void)
 {
@@ -78,7 +78,7 @@ static void euler(float R[3][3], const float *a, float yaw)   /* Ry(yaw) Ry(ay) 
 void haobj_paso(const haobj_coche_t *c)
 {
     int i; float fx = c->fw[0], fz = c->fw[2], fl = sqrtf(fx * fx + fz * fz);
-    ntoq = 0;
+    ntoq = 0; reloj_obj++;
     if (!ob) return;
 #ifdef DIAG_HA
     {   static int t; float dm = 1e9f; int k, est = 0;
@@ -100,6 +100,7 @@ void haobj_paso(const haobj_coche_t *c)
                 if (r >= 0) o->p[1] = y;
             }
             if (o->cl >= 5 && o->cl <= 9) o->p[1] += 0.65f;   /* 0x5b0078 */
+            if (o->tipo == 6) o->p[1] += o->cl == 0x39 ? 1.0f : 1.2f;   /* 0x1d3d48: la moneda / el corazon, a 1,2 (la 57: 1,0) */
             euler(o->R, o->a, m3);
             o->est = 1;
 #ifdef DIAG_HA
@@ -118,12 +119,29 @@ void haobj_paso(const haobj_coche_t *c)
             float dx = o->p[0] - c->pos[0], dz = o->p[2] - c->pos[2], dy = o->p[1] - c->pos[1], al, la;
             if (fabsf(dx) > 4.0f || fabsf(dz) > 4.0f || fabsf(dy) > 3.0f) continue;
             al = dx * fx + dz * fz; la = dx * fz - dz * fx;
-            if (fabsf(al) < 2.3f + 0.3f && fabsf(la) < 1.1f + 0.3f) {
+#ifdef DIAG_HA
+
+#endif
+            {   float r = o->tipo == 6 ? 0.8f : 0.3f;  /* (la moneda: su radio, PROBABLE) */
+                if (!(fabsf(al) < 2.3f + r && fabsf(la) < 1.1f + r)) continue;
+            }
+            {
                 if (ntoq < 16) toq_cl[ntoq++] = o->cl;
+#ifdef DIAG_HA
+                dbglog(DBG_INFO, "DIAGHA toque objeto %d clase %d tipo %d (ntoq %d)\n", i, o->cl, o->tipo, ntoq);
+#endif
                 o->est = 2; o->t = 0;
+                if (o->tipo == 6) {                     /* 0x1d3fc8: la escala a 0,3 y sube con el coche (y = 25 t - 39,2 t^2) */
+                    o->v[0] = c->pos[1]; o->esc *= 0.3f; continue;
+                }
                 o->v[0] = fx * c->v * 1.1f + (la >= 0 ? fz : -fz) * 3.0f; o->v[2] = fz * c->v * 1.1f - (la >= 0 ? fx : -fx) * 3.0f;
                 o->v[1] = 5.0f + c->v * 0.1f; o->giro = 0;
             }
+        } else if (o->est == 2 && o->tipo == 6) {
+            float t = (float)++o->t / 60.0f;
+            o->p[0] = c->pos[0]; o->p[2] = c->pos[2]; o->p[1] = o->v[0] + 25.0f * t - 39.2f * t * t;
+            if (t > 0.319f) o->esc -= 0.015f;
+            if (o->esc <= 0.0f || o->t > 60) o->est = 3;
         } else if (o->est == 2) {                       /* SIMPLIFICADO: vuelo balistico y fuera a los 2 s */
             const float dt = 1.0f / 60.0f;
             o->p[0] += o->v[0] * dt; o->p[1] += o->v[1] * dt; o->p[2] += o->v[2] * dt; o->v[1] -= 9.8f * dt;
@@ -145,6 +163,12 @@ int haobj_cercano(const float pos[3], const float fw[3], int cl, float *lat)
     }
     return k >= 0;
 }
+int haobj_cuenta_sec(int clase, int lo, int hi, int (*sec)(float x, float z))
+{
+    int i, n = 0, k;
+    for (i = 0; i < nob; i++) if (ob[i].cl == clase && ob[i].est == 1 && sec && (k = sec(ob[i].p[0], ob[i].p[2])) >= lo && k <= hi) n++;
+    return n;
+}
 int haobj_cuenta(int clase) { int i, n = 0; for (i = 0; i < nob; i++) if (ob[i].cl == clase && ob[i].est < 2) n++; return n; }
 int haobj_lista(haobj_dib_t *v, int max, const float ojo[3])
 {
@@ -163,7 +187,12 @@ int haobj_lista(haobj_dib_t *v, int max, const float ojo[3])
         dd[j] = d; e = v + j; e->reg = o->reg;
         {   float R[3][3]; int a, b;
             memcpy(R, o->R, sizeof R);
-            if (o->est == 2) {                          /* girando sobre su eje x local */
+            if (o->tipo == 6 && o->est == 1) {          /* 0x1d3d48: gira 0,05 por paso sobre la vertical */
+                float a = 0.05f * (float)reloj_obj, c = cosf(a), s = sinf(a), T[3][3];
+                { int q; for (q = 0; q < 3; q++) { T[q][0] = R[q][0] * c - R[q][2] * s; T[q][1] = R[q][1]; T[q][2] = R[q][0] * s + R[q][2] * c; } }
+                memcpy(R, T, sizeof R);
+            }
+            if (o->est == 2 && o->tipo != 6) {          /* girando sobre su eje x local */
                 float c = cosf(o->giro), s = sinf(o->giro), T[3][3];
                 for (a = 0; a < 3; a++) { T[a][0] = R[a][0]; T[a][1] = R[a][1] * c + R[a][2] * s; T[a][2] = -R[a][1] * s + R[a][2] * c; }
                 memcpy(R, T, sizeof R);

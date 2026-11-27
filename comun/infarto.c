@@ -106,6 +106,8 @@ static int k2_ini, k2_ult, k2_c, k2_d;              /* 7F2988, 7F8B38, 7F1C50, 7
 static int k6_a, k6_b, k6_max;                      /* 7F23BC, 7F23BE, 7F23C0 */
 /* tipos 7 y 24 (golpea el cono azul; 24: derrapando): 7F1C88 / 7F1C8A, 7F1C90 clase, 7F1C8C cuantos, 7F1C8E / 7F1C8F */
 static int k7_cl, k7_need, k7_ok, k7_mal;
+/* tipo 15 (recoge monedas): 7F1C9C / 7F1C9E secciones, 7F1CA0 cuantas, 7F1CA2 de la clase 0x0A en el tramo, 7F1CA3 / 7F1CA1 */
+static int k15_need, k15_tramo, k15_a, k15_39;
 /* tipos 8 y 23 (circula por el azul / el rojo; 23: derrapando) */
 static int k8_a, k8_b, k8_lado, k8_ult, k8_dist, k8_max;   /* 7F2530, 7F2532, 7F2538, 7F253C, 7F2540, 7F2534 */
 /* reacciones de la acompanante que piden las peticiones (487D60 / 487D90 / 487DD0; robot 1: comun/robot.c robot_pide,
@@ -525,7 +527,7 @@ static int sucesos(const uint8_t *t, const infarto_coche_t *c)
 
 /* ---- tipos de peticion: puesta en marcha (464350 / PS2 0x1ae768), control (464D20 / 0x1a7fe4), evaluacion
    (464350 / 0x1aea30) */
-static int portado(int k) { return k == 0 || k == 2 || k == 22 || k == 6 || k == 8 || k == 23 || k == 7 || k == 24; }
+static int portado(int k) { return k == 0 || k == 2 || k == 22 || k == 6 || k == 8 || k == 23 || k == 7 || k == 24 || k == 15; }
 static const uint8_t *pts(int k)                    /* la tabla de 45E2F0 del tipo k (INFARTOX.DAT PTS2) */
 {
     static const uint8_t cero[24];
@@ -542,6 +544,10 @@ static void puesta(const uint8_t *r, const infarto_coche_t *c)
     case 6: k6_a = w0; k6_b = w2; k6_max = 0; reinicia_res(); break;
     case 7: case 24:                                /* 464350 caso 3 (PS2 0x1ae7d0) */
         k7_cl = w6; k7_need = w8; k7_ok = k7_mal = 0; reinicia_res(); break;
+    case 15:                                        /* 464350 caso 8: 45C950 (PS2 0x1ae8a8) */
+        k15_a = k15_39 = 0; k15_need = r[8];
+        k15_tramo = haobj_cuenta_sec(0x0a, w0, w2, c->seccion_xz);
+        reinicia_res(); break;
     case 8: case 23:                                /* 464350 caso 4 (PS2 0x1ae800) */
         k8_a = w0; k8_b = w2; k8_lado = w6; k8_ult = -1; k8_dist = 0; k8_max = 0; reinicia_res(); break;
     }
@@ -608,6 +614,16 @@ static void control(const infarto_coche_t *c)
         got = k7_ok - k7_mal * 3;
         resultado(got >= k7_need ? 800000 : (int)((float)got * (800000.0f / (float)k7_need)));
         break; }
+    case 15: {                                      /* 4617A0 (PS2 0x1b0260): monedas tocadas, 0x3f07c0 */
+        int tc[16], n = haobj_toques(tc, 16), i;
+        sucesos(pts(15), c);
+        for (i = 0; i < n; i++) {
+            if (tc[i] == 0x0a) k15_a = (int8_t)(k15_a + 1); else if (tc[i] == 0x39) k15_39 = (int8_t)(k15_39 + 1); else continue;
+            dbglog(DBG_INFO, "INFARTO: moneda de la clase %d cogida (%d + %d de %d; en el tramo %d)\n", tc[i], k15_a, k15_39, k15_need, k15_tramo);
+            sfx_voz_se(0xd6); rob_cara(4); rob_para();
+        }
+        resultado((int)((float)(k15_a + k15_39) * (800000.0f / (float)(k15_need ? k15_need : 1))));
+        break; }
     case 8: case 23: {                              /* 45EEB0 (PS2 0x1a9af8) */
         float a = c->ofs * (float)k8_lado, b = c->d264 * c->d268; int ok = !(q == 23 && !(c->d36 > 0)), e;
         sucesos(pts(8), c);                         /* (0x1a9a80: la tabla 0x3efcb8) */
@@ -668,6 +684,19 @@ static void evalua(const infarto_coche_t *c)
         if (nt == 7) { float k = mantiene(v_ini - c->kmh); edi += k == 1.0f ? 700000 : (int)(k * 700000.0f); }
         {   int32_t h = corazones_res(edi, nt);
             contador = hs * 20 / 7; cara_t = 0x78;  /* (meter_b) */
+            fin_peticion(nt, h / 10000);
+        }
+        break; }
+    case 15: {                                      /* 463DF0 (PS2 0x1b03e0) */
+        int hs = res_pos() / 10000, nt = nota(hs), ebp; int32_t edi = 0;
+        if (hs > 0x50) hs = 0x50;
+        if (nt == 7) {
+            edi = k15_a == k15_tramo ? 700000 : (int)((float)k15_a / (float)(k15_tramo ? k15_tramo : 1) * 700000.0f);
+            ebp = k15_39 + k15_a;
+            if (ebp > k15_need) edi += (int)((float)(ebp - k15_need) * 0.5f) * 10000;
+        }
+        {   int32_t h = corazones_res(edi + hs * 10000, nt);
+            contador = hs * 20 / 7; cara_t = 0x78;
             fin_peticion(nt, h / 10000);
         }
         break; }

@@ -29,6 +29,7 @@ typedef struct {
     const float *marco;     /* colocacion de la etapa (x, y, z, giro y) para los objetos de la mision (haobj.c) */
     int (*suelo)(float x, float z, float *y);   /* la consulta del suelo (43F2F0) */
     float fx, fz;           /* eje adelante del coche */
+    int (*seccion_xz)(float x, float z);        /* 43F370: la seccion (car+0x64) de un punto del mundo */
     int   sig;              /* la clave de la etapa siguiente si ya se ha elegido la rama en la union (451350 != 2), si no -1 */
 } infarto_coche_t;
 
