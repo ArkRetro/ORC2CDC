@@ -7408,3 +7408,83 @@ PRUEBA_HA_MISION / PRUEBA_NODO / TB_JUEGO=1 (preset 0) como antes; scripts en $S
 **SIN PORTAR (PENDIENTE):** la IA de carreras de los escoltas del 14 (+B58 = 0x12) y sus modelos de coche del jugador; el
 registro de aparicion de la puesta del 9 (0x1f20e8) y del 22; la accion -19 (0x1abd10: [0x589d04] = w4, sin leer quien lo
 usa); el aspecto del coche fantasma; el giro de la estela 2C0007; los tipos 17, 18 y 21 (no los pide ninguna mision).
+
+## COAST 2 COAST: campeonatos, cuarta tanda (agente c2c4, 2026-11-27)
+
+Sobre "campeonatos, tercera tanda (agente c2c3)" con `git merge infarto3` (0375cc8). Todo en Flycast (nivel E), no en la
+consola. Datos de prueba: $S/modos/c2c/dat2 (CAMP.DAT, CAMPOBJ.DAT nuevos) y dat_inf (actualizado con modos/infarto/dat:
+HAHUD.DAT e INFARTOX.DAT de infarto3), carpeta montada con h4/datos2.sh; scripts en $S/modos/c2c/h4 (mk.sh, gdi.sh,
+auto.sh con INI=, medir.sh / mide.py para los fps con y sin dibujo, donde.py: en que grupo / nodo / lista sale un tipo).
+
+### Merge de infarto3
+- Conflictos: comun/haobj.h (las dos API), demo/main.c (hud_rotulo_uso de C2C y ha_spr3d del INFARTO), demo/Makefile (la
+  lista de -Os de c2c3, que ya era la de infarto3 mas mision.o y campeonato.o; hud, sfx y camara a -O2), docs. infarto.c
+  queda igual que en infarto3. Arranque: 379K.
+
+### HECHO: tipo 15, empujar la pelota (0x293190 / 0x2934e8)
+- La pelota es la clase 0x11 del banco de objetos = registro 1 de obj_tour_pmt (recurso 0x1ee, tabla 0x40a958; no es del
+  banco 0x57, por eso faltaba en HAOSO.DAT). tools/conv_camp.py: CAMP.DAT 'CLS1' (clase -> registro de CAMPOBJ.DAT y
+  escala) y CAMPOBJ.DAT (ORD7 como HAOBJ.DAT: la pelota 150 triangulos, el meteorito 159; 27 KB, se lee en la carrera del
+  campeonato). haobj_clase / HAOBJ_TOUR: haobj dibuja esos registros con el modelo de CAMPOBJ.DAT.
+- Control: fase 1 los objetos (0x293390 / 0x293448), +0xc = 80 / (largo x 0,85); fases 2..5 (0x2934e8) por cada pelota:
+  si se ha quedado 5 secciones atras y el jugador va antes de la mitad - 10, otra en la mitad (lateral 0,5, una vez); con
+  +3FC == 8 (tocada) el medidor suma lo que ha avanzado desde el toque anterior x +0xc (PROBABLE: 4 si no avanzo; el
+  original suma 4 con +3F8, que pone 0x1d1af0 / 0x1d2608 con el modelo 0x1ee0001); en la 4, pasado el final, lo ultimo
+  y hecha; nota 6: + 70 x 0x22f090. Efectos 0x422cd0[rand % 7] (CAMP.DAT 'SND1').
+- SIMPLIFICADO (DESVIACION): sin el cuerpo rigido 516E10 del original (control 2, el de los conos): la pelota (radio 1 x
+  escala 2, apoyada en el suelo) sale con la velocidad del coche + 5 m/s, rueda con 5 m/s2 de frenada y gira al rodar.
+- E (Clarissa nodo 8 lista 1, `-DPRUEBA_HA_TOQUE=0x11`): 5 toques (secciones 104..136), "peticion 15 hecha: 92 - 0, nota
+  6"; cap4/t15/pelota.png. fps (DIAG_MS, con / sin dibujar objetos): 35,72 / 35,74; 61 triangulos de media, 150 como mucho.
+
+### HECHO: tipo 19, los meteoritos (0x29da88 / 0x29e018)
+- Clase 0x3d = registro 4 de obj_tour_pmt (control 0x0d, objeto de 10 m de radio x escala). Fase 1: objetos y la voz 0x7f;
+  fases 2..4 (0x29e018): caen (+C0 / +BC / +B0, como la estrella del INFARTO: desde 200 m, 6 m por paso; empiezan a 40
+  secciones por delante, PROBABLE: el original mira [0x55cf38] & 3 == 2) y al llegar al suelo el efecto 0x423830; golpe
+  (+7C y +80 == 8, una vez por meteorito, +D0): penalizacion + p[5] (+0x74, flotante: 14 / 15 / 16...) y, sin choque, la
+  reaccion 0x182d38 con la velocidad x 0,9 (camp_golpe: solo la velocidad); en la 4 el medidor con el avance / (largo x
+  0,9); la 5 no da bono. SIN PORTAR: 0x22df58 (vibracion), el efecto 0x22c6c8 de la llegada y el HUD de 0x22e9a0.
+- E (Clarissa nodo 6 lista 1, `-DPRUEBA_HA_TOQUE=0x3d`): 10 golpes, penalizacion 100, nota 0 (cap4/t19/meteoritos.png);
+  sin forzar, 39,81 / 39,78 fps con / sin dibujarlos, 159 triangulos de media (318 como mucho).
+
+### HECHO: tipo 5, ir por la zona de color (0x2a3db0)
+- La zona NO esta en el guion (+0x10..+0x1c a cero; 'ZON1' de CAMP.DAT lo comprueba): la pone 0x2323e8 por el subtipo:
+  0 -> lateral 0..0,5 (color 2), 1 -> 0,5..1 (3), 2 -> 0,25..0,75 (4); 0x232768 la mira (fraccion del ancho de borde a
+  borde) entre el inicio y el final. Control: dentro (y derrapando si +0x78 == 1) el medidor con el avance / (largo x
+  0,9), animo por la velocidad; nota 6: el bono de 0x22f090 con 0,9.
+- 0x1f3a70 (los +0x58 de los parametros, en 0x2937f0 para todos los tipos) NO pinta franjas: copia una tabla de 12 bytes
+  por seccion a 0x5d5da8, la de la aparicion del trafico (0x1f3818). No esta portado (el trafico de la peticion).
+- DESVIACION: como lo marca el original sobre la carretera no esta averiguado; aqui una tira translucida del color del
+  rotulo (rojo, azul, verde) de 2 a 150 m por delante, <= 50 triangulos (camp_zona_dibuja). El lateral: 0 el borde
+  derecho (PROBABLE, el dibujo del rotulo "Circula por el azul" lleva el azul a la derecha; los objetos de c2c3 usan el
+  lateral al reves, SUPUESTO alli).
+- E (Jennifer nodo 5 lista 1: 5/1, 5/0, 5/2): notas 2, 5 y 6 con el piloto; cap4/t5_azul.png. fps 39,16 / 39,17 con / sin.
+
+### HECHO: el fantasma de la CONTRARRELOJ
+- gh_rec / gh_rep (2 x 28,8 KB de BSS) al monton solo en la CONTRARRELOJ (gh_empieza: malloc de 57,6 KB al empezar la
+  carrera con un codigo de curso; gh_suelta al volver al menu o al empezar otro modo; si gh_hilo esta guardando en la VMU,
+  al acabar el hilo; gh_gen + 1 en cada suelta). El fichero de la VMU (GH_BUF = 12 + 28,8 KB) va al monton solo mientras
+  se lee (gh_empieza) o se guarda (gh_hilo), como en c2c3.
+- E (`-DPRUEBA_VARIANTE=7 -DPRUEBA_TA_CODIGO=0`): GOAL en PALM -> "guardado ORGH0100 en a1 (5948 bytes, 12 bloques) ...
+  releido igual"; con la misma VMU otro arranque: "FANTASMA: curso 0100, leido de la VMU (398 muestras, 52890 ms)";
+  697K libres en la carrera. cap4/fantasma/log_vmu.txt.
+
+### RAM
+- Arranque (nav3.sh, MODO_JUEGO=1, sin defines): 426K libres (379K tras el merge; 370K con 15 / 19 antes del fantasma),
+  "VOZ: VOCES.DAT, 35 muestras", sin "Out of memory". FRIO en camp_*, c2c_paso y carga_hilo. Ningun modulo de cada cuadro
+  a -Os.
+
+### SIN PORTAR (lo averiguado)
+- 16, minijuegos (clase 0x29f520, 0x1860 bytes): fase 1 0x2a0d08 reparte los registros de 0x2c del guion de +0x7c
+  ({+0x20 clase 0 aviso / 1 puerta, +0x24 simbolo o carriles, +0x26 / +0x28 secciones, +0x2a cuantos}, +0x80: relativo
+  al inicio) en la lista A (+0xc, +0x70 cuantos) y B (+0x8a4, +0x72), y el subtipo (tabla 0x4239f0) los prepara; cada paso
+  (0x423a10) por el subtipo. Subtipo 2 (el mas usado, 22): avisos con la voz 0x423c30[simbolo] (0x1a7..0x1ad) y puertas de
+  n carriles con un simbolo cada uno (el bueno al azar, 0x2a1ba0); al pasar la seccion de la puerta 0x29fb28 mira el carril
+  (fraccion de borde a borde, k / n < f < (k + 1) / n): bien, + 88 / puertas y el destello 2C0002; mal, efecto 0xd4. El
+  dibujo (0x2a0138) son sprites 3D (0x115870, como ha_spr3d) del banco 0x46: tablas 0x423ae0 (subtipo 0), 0x423b10 (1),
+  0x423b68 (2), 0x423af8...; hay que convertirlos a CAMPHUD.DAT. Las voces de los minijuegos y de casi todos los tipos
+  estan en los bancos HAM_MIS\*.PAK (tabla 0x352840, entradas 54..77: SOUND*, MEMORY, MATH, CARS, FOOD*, GHOST, DUCK,
+  GATES, CONEHIT...), que no estan en VOCESH.DAT (solo HC.PAK, PERH.pak y los HAM de etapa): sin ellas las voces de los
+  tipos del campeonato no suenan.
+- 11 (0x294a90), 9, 22: los coches de la peticion salen del registro de aparicion 0x1f20e8 con la tabla de 0x46 bytes de
+  +0x10 de los parametros (0x1f1a88) y 0x22dac0; el mismo que el INFARTO dejo sin portar (9 / 22). 13, 14, 20, 21, 23, 24:
+  sin empezar. El letrero 3D (0x232e60) y el rotulo del 20: sin empezar.
