@@ -945,24 +945,29 @@ def _normal(a, b, c):
     n = np.cross(b - a, c - a); l = np.linalg.norm(n)
     return (n / l if l > 1e-14 else None), l
 
-def _grupos_vis(mod):
-    """{clave: [mallas]} de lo que se simplifica (mismo material, textura, pieza y grupo)"""
+def _grupos_vis(mod, vale=None):
+    """{clave: [mallas]} de lo que se simplifica (mismo material, textura, pieza y grupo); vale: otra regla de que
+    mallas se simplifican (conv_trafico.py --ligero) en lugar de la de los coches"""
     g = {}
     for k, x in enumerate(mod.mallas):
         ex = x[9]
-        if x[0] != 0 or x[5] < 3 or x[8] not in PZ_SIMPLIFICA or ex.get('grupo', NADA) not in (NADA, G_DISCO, G_DISCO_CAL):
+        if x[5] < 3: continue
+        if vale is not None:
+            if not vale(x): continue
+        elif x[0] != 0 or x[8] not in PZ_SIMPLIFICA or ex.get('grupo', NADA) not in (NADA, G_DISCO, G_DISCO_CAL):
             continue
         clave = (x[1], id(x[6]), x[7], x[8], ex.get('grupo', NADA), ex.get('pieza', P_CUERPO), ex.get('esp'), ex.get('uv'),
                  ex.get('cerca', False))
         g.setdefault(clave, []).append(k)
     return g
 
-def simplifica(mod, razon=VIS_RAZON, tope=VIS_TOPE):
+def simplifica(mod, razon=VIS_RAZON, tope=VIS_TOPE, vale=None, objetivo=None, giro=False):
     """variante C2 (ver arriba): simplifica las mallas de _grupos_vis y las rehace en tiras (en lugar de las de antes).
-    Devuelve los triangulos de lo simplificable antes y despues"""
+    Devuelve los triangulos de lo simplificable antes y despues. vale: la regla de _grupos_vis; objetivo: triangulos
+    simplificables que deben quedar (en lugar de razon; conv_trafico.py --ligero); giro: el de tiras()"""
     import heapq
     diag = os.environ.get('VIS_DIAG')
-    V = np.concatenate(mod.verts); grupos = sorted(_grupos_vis(mod).values())
+    V = np.concatenate(mod.verts); grupos = sorted(_grupos_vis(mod, vale).values())
     if not grupos: return 0, 0
     en_grupo = {k: gi for gi, ks in enumerate(grupos) for k in ks}
     def clave_pos(v, pz): return (pz, round(float(v['x']), 4), round(float(v['y']), 4), round(float(v['z']), 4))
@@ -1093,7 +1098,7 @@ def simplifica(mod, razon=VIS_RAZON, tope=VIS_TOPE):
         if r is not None: heapq.heappush(heap, (r[0], u, v, ver[u], ver[v]))
     for u in range(nP):
         for v in vecinos(u): mete(u, v)
-    objetivo = int(round(nt0 * razon)); quedan = nt0
+    objetivo = int(round(nt0 * razon)) if objetivo is None else int(objetivo); quedan = nt0; cmax = 0.0
     while heap and quedan > objetivo:
         c, u, v, vu, vv = heapq.heappop(heap)
         if c > tope:
@@ -1120,8 +1125,9 @@ def simplifica(mod, razon=VIS_RAZON, tope=VIS_TOPE):
             de[u] = set(); vivo[u] = False
             for a, b in mapa.items(): QA[b] += QA[a]; Qb[b] += Qb[a]; Qc[b] += Qc[a]
             PA[v] += PA[u]; Pb[v] += Pb[u]; Pc[v] += Pc[u]
-            ver[v] += 1
+            ver[v] += 1; cmax = max(cmax, c)
             for w in vecinos(v): mete(v, w); mete(w, v)
+    if diag: print('   simplifica: %d -> %d caras, coste maximo %.2g' % (nt0, quedan, cmax))
     # tiras nuevas de cada grupo (detras de las mallas que no se tocan)
     por_grupo = {}
     for t in caras.values(): por_grupo.setdefault(cunas[t[0]][1], []).append(t)
@@ -1131,7 +1137,7 @@ def simplifica(mod, razon=VIS_RAZON, tope=VIS_TOPE):
         verts.append(V[x[4]:x[4] + x[5]].copy()); nuevas.append(x[:4] + [n2] + x[5:]); n2 += x[5]
     for gi, ks in enumerate(grupos):
         x0 = mod.mallas[ks[0]]
-        for s in tiras(por_grupo.get(gi, [])):
+        for s in tiras(por_grupo.get(gi, []), giro=giro):
             q = np.array([cunas[i][2] for i in s]); verts.append(q)
             Q = np.stack([q['x'], q['y'], q['z']], 1).astype(float); cc = Q.mean(0)
             nuevas.append([x0[0], x0[1], cc, float(np.sqrt(((Q - cc) ** 2).sum(1).max())), n2, len(q), x0[6], x0[7], x0[8],
@@ -1140,10 +1146,14 @@ def simplifica(mod, razon=VIS_RAZON, tope=VIS_TOPE):
     mod.mallas, mod.verts, mod.nv = nuevas, verts, n2
     return nt0, quedan
 
-def tiras(tris, maximo=256):
+def tiras(tris, maximo=256, giro=False):
     """tiras voraces de los triangulos (tripletes de indices): desde el triangulo libre con menos vecinos libres, por la
     arista de los dos ultimos vertices hacia delante y luego hacia atras (sin descarte de caras el sentido da igual);
-    de las tres formas de empezar, la que mas triangulos coge. Devuelve [indices de cada tira]"""
+    de las tres formas de empezar, la que mas triangulos coge. Devuelve [indices de cada tira].
+    giro (conv_trafico.py --ligero; solo para mallas opacas): cuando la tira no puede seguir por su ultima arista sigue
+    por la otra arista libre del ultimo triangulo (p q r -> p q r p d: repite un vertice, y con el el triangulo p q r,
+    que al ser opaco y el mismo no cambia la imagen): un vertice de mas en lugar de los dos de empezar otra tira, y una
+    malla menos que recorrer en la demo"""
     import heapq
     por_arista = {}
     for f, t in enumerate(tris):
@@ -1155,7 +1165,13 @@ def tiras(tris, maximo=256):
     def sigue(s, usados):
         while len(s) < maximo:
             cand = [g for g in por_arista.get(frozenset((s[-2], s[-1])), ()) if libre[g] and g not in usados]
-            if not cand: break
+            if not cand:
+                if not giro or len(s) + 2 > maximo: break
+                cand = [g for g in por_arista.get(frozenset((s[-3], s[-1])), ()) if libre[g] and g not in usados]
+                if not cand: break
+                g = min(cand, key=grado); r = [i for i in tris[g] if i != s[-3] and i != s[-1]]
+                if len(r) != 1: break
+                s += [s[-3], r[0]]; usados.add(g); continue
             g = min(cand, key=grado); r = [i for i in tris[g] if i != s[-2] and i != s[-1]]
             if len(r) != 1: break
             s.append(r[0]); usados.add(g)
