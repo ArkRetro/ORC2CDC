@@ -4270,11 +4270,23 @@ static void traf_aparece(void)
     traf_libera();
     if (variante == 0 || variante == 7 || variante == 8) return;   /* 479080: sin trafico en el Time Attack */
     if (variante == 5) {                                        /* (C2C) los coches de la peticion del tipo 11 */
-        haobj_auto_t v[NTRAF]; int i;
+        haobj_auto_t v[NTRAF]; int i, j, l; uint8_t nuevo[NTRAF];
         for (i = 0; i < NTRAF; i++) { v[i].pos = traf[i].carril >= 0 ? traf[i].c.pos : NULL; v[i].marca = traf[i].ha_m;
-            v[i].sec = (int)floorf((traf[i].c.s - s_etapa) / m_pos); v[i].golpe = traf[i].b6c && !traf[i].n2f4; }
+            v[i].sec = (int)floorf((traf[i].c.s - s_etapa) / m_pos); v[i].golpe = traf[i].b6c && !traf[i].n2f4; nuevo[i] = v[i].pos && !(v[i].marca & HA_VISTO); }
         camp_autos(v, NTRAF);
         for (i = 0; i < NTRAF; i++) traf[i].ha_m = v[i].marca;
+        if (camp_pares_pide())                                  /* (tipo 20, DESVIACION: sin 0x1f1a88, a cada coche nuevo de la */
+            for (i = 0; i < NTRAF; i++) {                       /* peticion otro al lado, en el carril de al lado: el par) */
+                if (!nuevo[i] || !(traf[i].ha_m & HA_CAMP)) continue;
+                {   float c0[NCARRIL]; int k, q, nl = 0;              /* (los carriles distintos aqui; uno libre en medio si se puede) */
+                    for (k = 0; k < NCARRIL; k++) { float x = carril_x(traf[i].c.s, k); for (q = 0; q < nl && fabsf(c0[q] - x) > 0.5f; q++) ; if (q == nl) c0[nl++] = x; }
+                    l = traf[i].carril + 2 < nl ? traf[i].carril + 2 : traf[i].carril >= 2 ? traf[i].carril - 2 : traf[i].carril + 1 < nl ? traf[i].carril + 1 : traf[i].carril - 1;
+                    if (l < 0) continue; }
+                for (j = 0; j < NTRAF && traf[j].carril >= 0; j++) ;
+                if (j >= NTRAF) break;
+                traf_abre(traf + j, traf[i].c.s, l, traf[i].modelo, traf[i].color, traf_ult_pos);
+                traf[j].ha_m = HA_VISTO | HA_CAMP; traf[j].c.v = traf[i].c.v; traf[j].v_des = traf[i].v_des;
+            }
     }
     if (variante == 2) {
         static int vistas;
@@ -8215,6 +8227,7 @@ static void camp_millas_(int m) { menu_suma_millas((uint32_t)m); }
 static void camp_obj_(int cl, int tipo, float sec, float lat, float esc);
 static void camp_chica_(int que, uint32_t v);
 static void camp_golpe_(void);
+static void ha_punto(int sec, float *p, float *fx, float *fz);
 /* al salir del menu: el campeonato elegido (menu_camp: nodo del mapa y casilla), su arbol, la salida y el gestor */
 FRIO static void camp_preparado(int auto_)
 {
@@ -8238,7 +8251,7 @@ FRIO static void camp_preparado(int auto_)
     }
     camp_g = g; curso_pedido = CAMP_ARBOL(g); nodo_salida = cn > 0 ? cn - 1 : 0;
     if (g == 0) preset_curso = 0;                               /* el curso de OutRun 2 SP: el preset 0 (PROBABLE) */
-    camp_graba = menu_nota_camp; camp_voz = camp_voz_; camp_se = camp_se_; camp_millas = camp_millas_; camp_obj = camp_obj_; camp_chica = camp_chica_; camp_golpe = camp_golpe_; camp_bancos = camp_bancos_;
+    camp_graba = menu_nota_camp; camp_voz = camp_voz_; camp_se = camp_se_; camp_millas = camp_millas_; camp_obj = camp_obj_; camp_chica = camp_chica_; camp_golpe = camp_golpe_; camp_bancos = camp_bancos_; camp_punto = ha_punto;
     dbglog(DBG_INFO, "CAMP: campeonato %d, arbol %d, salida nodo %d, casilla %d\n", g, curso_pedido, nodo_salida, cl);
 }
 /* los objetos de la peticion (comun/campeonato.c pon_objetos) en el mundo: la seccion sec de la etapa y la fraccion lat
@@ -8324,6 +8337,36 @@ static void camp_zona_dibuja(void)
     }
     vtx_env += (uint32_t)n;
 }
+/* (C2C, tipo 20) las lineas de los pares (0x296da0): DESVIACION, sin los modelos 0x57002f / 0x57002a; una cinta vertical
+   translucida de 0,3 m entre los dos coches (2 triangulos por par, como mucho 10) */
+static void camp_lineas_dibuja(void)
+{
+    static pvr_poly_hdr_t cab __attribute__((aligned(32))); static int cab_ok;
+    float a[10][3], b[10][3]; int n = camp_lineas(a, b, 10), i, k;
+#ifdef DIAG_SIN_C20
+    return;
+#endif
+    if (!n || !ta_cabe(4 * n)) return;
+    if (!cab_ok) {
+        pvr_poly_cxt_t cx; pvr_poly_cxt_col(&cx, PVR_LIST_TR_POLY);
+        cx.gen.culling = PVR_CULLING_NONE; cx.gen.fog_type = PVR_FOG_TABLE; cx.gen.alpha = PVR_ALPHA_ENABLE;
+        cx.blend.src = PVR_BLEND_SRCALPHA; cx.blend.dst = PVR_BLEND_INVSRCALPHA;
+        pvr_poly_compile(&cab, &cx); cab_ok = 1;
+    }
+    mat_load(&vista); pvr_prim(&cab, sizeof cab);
+    for (i = 0; i < n; i++)
+        for (k = 0; k < 4; k++) {
+            const float *q = k < 2 ? a[i] : b[i]; float X = q[0], Y = q[1] + (k & 1 ? 0.15f : -0.15f), Z = q[2], w; pvr_vertex_t v;
+            mat_trans_single3_nodivw(X, Y, Z, w);
+            if (!(w > cerca)) w = cerca;
+            v.flags = k == 3 ? PVR_CMD_VERTEX_EOL : PVR_CMD_VERTEX; v.x = X / w; v.y = Y / w; v.z = 1.0f / w;
+            v.u = v.v = 0; v.argb = 0xb0ffe040u; v.oargb = 0; pvr_prim(&v, sizeof v);
+        }
+    vtx_env += (uint32_t)(4 * n);
+#ifdef DIAG_MS
+    {   static int t_; if (++t_ % 30 == 0) dbglog(DBG_INFO, "C20: %d lineas, %d triangulos\n", n, 2 * n); }
+#endif
+}
 /* 0x22a048: lo que lee el gestor del coche del jugador (los mismos campos que el INFARTO) */
 FRIO static void camp_paso_jug(int toca)
 {
@@ -8349,6 +8392,7 @@ FRIO static void camp_paso_jug(int toca)
     c.impulso = ha_impulso; c.impulso_rapido = ha_rapido; c.roce = (toca & 2) != 0; c.muro = yo.choque == 1;
     memcpy(c.sup, sup_rueda, sizeof c.sup); c.derrapa = yo.t_derrape != 0;
     c.rebufo = fis_ok ? fis.rebufo : 0.0f; c.rebufo_ang = fis_ok ? (int)(fabsf(fis.beta) * 10430.3779f) : 0;
+    memcpy(c.xyz, yo.pos, sizeof c.xyz); c.fx = yo.fw[0]; c.fz = yo.fw[2];
 #ifdef PRUEBA_CAMP_PASA
     {   static int k, extra;                                    /* prueba: un adelantamiento cada 1,5 s; derrape, rebufo y */
         if (!c.en_union && ++k % 90 == 0) extra++;              /* +60 km/h la mitad del tiempo (el piloto no lo hace) */
@@ -16331,7 +16375,7 @@ int main(int argc, char **argv)
                 coche_dibuja(l, &mod_coche, 1);                 /* la vista interior: el habitaculo (vm = 2) */
             if (l == 0) gh_ve = estado != TITULO && !mundo_fuera && !fin24 && gh_coloca();   /* el fantasma (Contrarreloj) */
             if (gh_ve) gh_dibuja(l);
-            if (variante == 5 && l == 2 && estado == CARRERA) camp_zona_dibuja();   /* (C2C) la zona del tipo 5 */
+            if (variante == 5 && l == 2 && estado == CARRERA) { camp_zona_dibuja(); camp_lineas_dibuja(); }   /* (C2C) la zona del 5, las lineas del 20 */
             POP_CAT(2);
             PRF(5);
             if (fin24) robot_dibuja(&rc_chr, l);              /* 514E60 de la pareja del final */

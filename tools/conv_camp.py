@@ -45,6 +45,8 @@ CAMP.DAT (little endian):
      (0x423830) y golpea 3 + 3 (0x423840, 0x423850)
   detras, 'ZON1', u32 n y n x {u16 peticion, u16 0, f32 de0, de1, hasta0, hasta1}: la zona lateral de las peticiones del
      tipo 5 (+0x10..+0x1c del registro de 0x74 del guion; 0x232768 la interpola de la seccion inicial a la final)
+  detras, 'C111' u16[3] 2 bytes 0 (0x422e00) y 'LET1' u16[2]: los registros del banco 0x57 (HAOBJ.DAT) del letrero de
+     inicio y del de fin de la peticion (0x22a2b0 -> 0x232e60 con 0x1a7c80 / 0x1a7cb0, el idioma de conv_infarto.IDIOMA)
 
 VOCESM.DAT (`voces_mision`; tambien solo con --solo-voces): las voces de los bancos que la carrera del campeonato
   carga por etapa (0x22ac00, estado 0: por cada peticion de la lista, el switch 0x415280 por el tipo da el banco de la
@@ -260,7 +262,7 @@ def main():
                 pp = rel[r + 0x58]; blk = d[pp:pp + 0x88]; tipo, sub = struct.unpack_from('<2I', blk, 0)
                 assert 1 <= tipo <= 24 and 0 <= ini < fin, (nombres[k], q, tipo, ini, fin)
                 # el rotulo del anuncio (0x22f9d0: switch 0x4155b0 por el tipo, deja el token en a1 y el banco en a2)
-                m = corre(0x22faec, {19: tipo, 16: sub, 17: PAR}, {0x22fe08: 0, 0x22fe10: 1}, {PAR: blk})
+                m = corre(0x22faec, {19: tipo, 16: sub, 17: PAR}, {0x22fe10: 1}, {PAR: blk})   # (el 20 pasa por 0x22fe08: 2B0039)
                 tok = m.r[5] & 0xffffffff if m.r[3] == 1 else 0
                 # la voz del anuncio (0x2a6358: switch 0x423d70 por el tipo, a0 = la voz en 0x2a6548)
                 try:
@@ -338,6 +340,11 @@ def main():
     # delante y cada 60 pasos como poco
     assert par(0x294d98 + 4, 0x294da4) == 0x422e00, 'efectos del tipo 11 (0x294a90)'
     out += b'C111' + struct.pack('<3H2x', *[u(0x422e00 + 4 * k) for k in range(3)])
+    # el letrero de inicio / fin de la peticion (0x22a2b0 -> 0x232e60 con 0x1a7c80 / 0x1a7cb0): los registros del banco
+    # 0x57 por idioma, los mismos de las marcas del INFARTO (HAOBJ.DAT); el 2B0039 del 20 ya va en el rotulo (0x22fe08)
+    import conv_infarto as ci
+    assert u(0x22a42c) == 0x0c000000 | (0x1a7c80 >> 2) and u(0x22a490) == 0x0c000000 | (0x1a7cb0 >> 2) and u(0x22a448) == 0x0c000000 | (0x232e60 >> 2)
+    out += b'LET1' + struct.pack('<2H', *ci.marcas(u, par))
     print('  zonas del tipo 5: %s' % ' '.join('%d:(%.2f..%.2f)-(%.2f..%.2f)' % ((struct.unpack('<2H4f', z)[0],) + tuple(struct.unpack('<2H4f', z)[2:])) for z in zon))
     print('  efectos de la pelota y los meteoritos: %s' % ' '.join('%x' % x for x in snd))
     open(os.path.join(sal, 'CAMP.DAT'), 'wb').write(out)

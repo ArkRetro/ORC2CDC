@@ -28,6 +28,7 @@ typedef struct {
     int   bola_sec, bola_toca;   /* la pelota del tipo 15: su seccion (-1 sin pelota) y si se ha tocado en este paso */
     int   met_caen, met_llegan;  /* meteoritos del tipo 19 que empiezan a caer / llegan al suelo en este paso      */
     float lat;              /* (tipo 5) el lateral del coche: fraccion del ancho de la carretera, 0 el borde derecho   */
+    float xyz[3], fx, fz;   /* (tipos 20 / 21) la posicion del coche (car+0x14) y su direccion en xz                     */
 } camp_coche_t;
 
 /* al empezar la carrera: fila (46C520: 1 OutRun2 SP, 0 OutRun 2, 2 mixto), forzada (cfg1: se sale de una etapa del
@@ -55,6 +56,8 @@ extern void (*camp_obj)(int cl, int tipo, float sec, float lat, float esc);
    (0x205220); -1 solo prepara (al empezar la etapa) */
 extern void (*camp_chica)(int que, uint32_t v);
 extern void (*camp_golpe)(void);           /* el golpe del meteorito (0x182d38 con el estado 7 y la velocidad x 0,9) */
+/* el centro de la seccion sec de la etapa y su direccion en xz (43E570; el letrero de inicio / fin, 0x232e60) */
+extern void (*camp_punto)(int sec, float *p, float *fx, float *fz);
 int  camp_clases(const uint8_t **v);
 /* la zona del tipo 5 de la peticion en curso (anuncio..final): lateral lo..hi y secciones s0..s1; su color (2..4) o 0 */
 int  camp_zona(float *lo, float *hi, int *s0, int *s1);       /* 'CLS1' de CAMP.DAT: n x {u8 clase, u8 registro de CAMPOBJ.DAT, u16, f32 escala} */
@@ -69,4 +72,7 @@ int  camp_total(void);                      /* +0x1fe4 */
 struct haobj_auto_s; struct haobj_s3d_s;
 void camp_autos(struct haobj_auto_s *v, int n);
 int  camp_spr3d(struct haobj_s3d_s *v, int max, int (*cuadros)(const char *g));
+/* (tipo 20) las lineas entre los coches de cada par abierto (0x296da0): a[k], b[k] los dos puntos (+1 m en y); cuantas */
+int  camp_lineas(float (*a)[3], float (*b)[3], int max);
+int  camp_pares_pide(void);                 /* (tipo 20) 1: a cada coche nuevo de la peticion, otro al lado (main.c) */
 #endif
