@@ -8158,9 +8158,10 @@ static void camp_paso_jug(int toca)
     memcpy(c.sup, sup_rueda, sizeof c.sup); c.derrapa = yo.t_derrape != 0;
     c.rebufo = fis_ok ? fis.rebufo : 0.0f; c.rebufo_ang = fis_ok ? (int)(fabsf(fis.beta) * 10430.3779f) : 0;
 #ifdef PRUEBA_CAMP_PASA
-    {   static int k, extra;                                    /* prueba: un adelantamiento cada 1,5 s y derrape la mitad */
-        if (!c.en_union && ++k % 90 == 0) extra++;              /* del tiempo (el piloto apenas adelanta ni derrapa) */
-        c.pasados += extra; c.derrapa |= (k % 240) < 120; }
+    {   static int k, extra;                                    /* prueba: un adelantamiento cada 1,5 s; derrape, rebufo y */
+        if (!c.en_union && ++k % 90 == 0) extra++;              /* +60 km/h la mitad del tiempo (el piloto no lo hace) */
+        c.pasados += extra; c.derrapa |= (k % 240) < 120;
+        if ((k % 240) < 120) { c.rebufo = 0.5f; c.rebufo_ang = 0; c.kmh += 60.0f; } }   /* (rebufo y +60 km/h a ratos) */
 #endif
     camp_paso(&c);
 }

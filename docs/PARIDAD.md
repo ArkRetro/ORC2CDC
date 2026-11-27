@@ -6894,7 +6894,14 @@ CURSO.DAT, A en su mapa da el sonido de bloqueado (menu_camp_puede).
   adelanta): sale en el registro 4 (tipo 16) con la lista SPECIAL1 ("¡Choca con el fantasma!", 11/1, y 3/0;
   camp_forzada_nodo5_lista1), el tipo 3 llena el medidor (133 - 0, nota 6, 80 + 126 corazones, la cara de corazones,
   camp_tipo3_nota6), etapa nota 3 en la lista 1 y la siguiente (LASV) otra vez con SPECIAL1.
-- El paso a SPECIAL1..3 por las notas sin forzar (0x22e850) no se ha visto: el piloto no saca notas de 4 o mas.
+- Jennifer (grupo 5, `-DPRUEBA_AUTO -DPRUEBA_CAMP=0 -DPRUEBA_CAMP_PASA`, que ademas da rebufo y +60 km/h la mitad del
+  tiempo): `CURSO: arbol 0`, PALM con 12/0 (145..410) y 1/0 (475..560) del guion de Palm_Beach; el rebufo llena el
+  medidor (91 - 3, nota 6, 80 + 34 corazones; camp_jennifer_palm_tipo12_nota6), la velocidad (pasar de 265 km/h) solo 8
+  (el piloto no llega), etapa nota 3. El +0x7c del tipo 12 es un flotante (lwc1 en 0x2a41f8): leido como entero el
+  medidor no subia (corregido).
+- El paso a SPECIAL1..3 por las notas sin forzar (0x22e850) no se ha visto: el piloto no saca notas de 4 o mas en todas
+  las peticiones de dos etapas seguidas. Tampoco se ha visto entero el camino de Jennifer desde el menu (se abre con
+  Clarissa en rango A: ver el desbloqueo arriba) ni B en el coche de vuelta al mapa de las peticiones.
 
 **RAM.** Al arrancar no se reserva nada del campeonato: CAMP.DAT (20,8 KB) y el estado (~1 KB) van en el monton desde que
 sale del menu hasta que vuelve (camp_inicia / camp_libera). campeonato.o con -Os (5,9 KB). Para no bajar la RAM del

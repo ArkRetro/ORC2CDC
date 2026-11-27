@@ -313,7 +313,7 @@ static void tipo_paso(pet_t *p, const camp_coche_t *c, float dpos)
         else if (p->fase == 5 && p->nota == 6) p->extra += (!p->c50 && !p->c4c && !p->c54 ? 30 : 0) + (int)(40.0f * frena(p->v_ini, p->v_fin));
         break;
     case 12:                                            /* 0x2a4198: ir al rebufo el p[7] % de la peticion */
-        {   float k = d->p[7] * 0.01f;
+        {   float k; memcpy(&k, &d->p[7], 4); k *= 0.01f;   /* (+0x7c en flotante: lwc1, 0x2a41f8) */
             if (k <= 0.0f) k = 1.0f;
             if (p->fase == 4) {
                 if (c->rebufo > 0.18f && c->rebufo_ang < 0x5dc) { if (!p->h74) { p->h74 = 1; p->h70 = 0; } }
