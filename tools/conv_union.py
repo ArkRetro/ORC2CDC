@@ -624,6 +624,7 @@ def crudos(A, i):
     if i == 0: return cat('csc_data_2', 'csc_data_2_course')
     if i == 1: return cat('csc_data_cvt', 'csc_data_cvt_course')
     if i in ARBOLES_REN: return cat(*ARBOLES_REN[i])
+    if i in ARBOLES_REQ: return cat(ARBOLES_REQ[i], ARBOLES_REQ[i])
     if 100 <= i < 200:
         e = [x for x in A.busca('*Races.bin') if x.paquete.startswith('SCRIPTS')][0]; d = A.datos(e)
         n, o = conv_menu._r077(d, 'Races'); nc, nrel = struct.unpack_from('<2I', d, 0)
@@ -641,6 +642,15 @@ def crudos(A, i):
 def arbol_ren(A, i):
     """registros (como arbol) del curso seguido del OUTRUN de la consola (ARBOLES_REN)"""
     return [(q[1], q[7], q[8], q[11], q[12]) for q in crudos(A, i)]
+
+# los campeonatos de COAST 2 COAST (variante 5, comun/campeonato.c; PS2 46C2F0 / 4EEB50: 64F040[cfg0]): los del grupo 4
+# (Request_Course_SP) y del 5 (Request_Course_OR2) son los arboles 1 (csc_data_cvt) y 0 (csc_data_2), lo comprueba
+# tools/conv_camp.py; el del 6 (Req_Course_MIX_PS2) seria el 302 (11 uniones nuevas: SIN HACER, ver docs/PARIDAD.md).
+# Sus metas llevan los hijos 0 / -1: como -1 / -1 (la meta)
+ARBOLES_REQ = {302: 'Req_Course_MIX_PS2'}
+
+def arbol_req(A, i):
+    return [(q[1], q[7], q[8], q[11] if q[12] >= 0 else -1, q[12]) for q in crudos(A, i)]
 
 def tabla_bunki(A):
     """tabla de los carteles de destino por tipo de registro (PS2 0x3f9da0, PC 5D4FD8: 16 bytes por tipo = el +0 del
@@ -782,6 +792,7 @@ def cursos(A, dsal, ids, con_uniones=True, con_tramos=False, parte=(0, 1), nombr
     extras = []
     for i in ids:
         rs = registros(arbol(A, 0, 'csc_data_cvt.bin') if i == 1 else arbol_ren(A, i) if i in ARBOLES_REN else
+                       arbol_req(A, i) if i in ARBOLES_REQ else
                        arbol_ta(A, i - 200) if i >= 200 else arbol_mision(A, i - 100), 100 <= i < 200)
         # +0x74 del registro: la casilla del mapa de ruta del HUD es +0x74 - 1 si no es 0 y si no la clave (0x1bd2a8;
         # solo las metas del reves de la Contrarreloj lo llevan)

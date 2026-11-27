@@ -1,0 +1,450 @@
+/* campeonato.c: los campeonatos de COAST 2 COAST (variante 5 de [780258] = PS2 0x443508), como el original.
+
+   Fuente: SLES-53998 (el PC, 7F9460, no tiene fuente: alli corre el x86 traducido). El gestor es el suceso 0x190
+   (descriptor en la tabla 0x3ee900: {0x22db28, 0x22db50, 0x22db70, 0, 0x22dbb0}) sobre el objeto 0x616238 (los
+   desplazamientos de abajo son los suyos) con sus metodos 0x229e88 (inicio), 0x22a048 (control), 0x22a2b0 (dibujo),
+   0x22a5b8 (HUD), 0x22ac00 (etapa) y 0x22b470 (fin); las peticiones las llevan 24 objetos, uno por tipo (0x22a930: la
+   fabrica de 0x4151f0, clases en 0x292788..0x2a4800), todos llamados en cada paso por su vtable +0x24.
+   - Guion (0x22ac00 / 0x22b600): por cada etapa, la lista +0x1ff8 (REQUEST_NORMAL / SPECIAL1..3) del Req_<etapa>.bin
+     del tipo de su descriptor (CAMP.DAT, tools/conv_camp.py); cada peticion es una seccion de carretera [inicio, fin].
+   - Lista de la etapa siguiente (0x22e850, al entrar en la union): con la salida forzada desde el mapa (+0x68) la del
+     mapa (+0x70); si no, por el histograma de notas de los niveles anteriores (0x22e808: ninguna nota menor que n).
+   - Peticion en curso (0x22b7d0): la primera con inicio - 32 < seccion < fin + 30; fases (0x232988): 1 anuncio (desde
+     inicio - 30), 2 espera, 3 empieza (inicio), 4 en curso, 5 acaba (fin: nota 0x22e670 y corazones 0x22e728), 6 la
+     nota a la etapa (0x22e498) con su rotulo y su voz, 7 hecha.
+   - Medidor +0x28 (0..80) que llena cada tipo con el avance del coche mientras cumple; penalizacion +0x2c (0x22c818:
+     choques, golpes, muro, ruedas fuera, roces; tope 100); nota = el mayor k con medidor - penalizacion >= umbral[k]
+     (0, 10, 20, 30, 45, 60, 80), tope 4 con un golpe, -3 con uno mas rapido, -4 con un choque (0x22e6d8).
+   - Corazones: los del medidor (tope 80) y con nota >= 4 los extra de la lista, de la dificultad y v media x 0,2; con
+     nota 6 cada tipo suma su bono (vtable +0x24, fase 5). Fuera de las peticiones un choque quita 50, un golpe de uno
+     mas rapido 20 y un golpe 10 (0x22c818). La etapa: media de las notas de sus peticiones (0x22ebb0), a los cuartetos
+     de la licencia +0x36E + 2 tipo en la casilla de su lista si mejora (0x22edd8) con millas[nota] x (lista + 1).
+   Tipos portados (su control de la vtable +0x24): 1 velocidad (0x29c828), 2 derrape (0x298360), 3 adelantar
+   (0x29f038), 4 no chocar (0x29ec18), 12 rebufo (0x2a4198). Los demas (5 colores, 6 conos, 7 monedas, 8 arcos, 11 / 13 /
+   14 / 15 / 16 / 19..24: objetos del guion, minijuegos, coches de la peticion) se anuncian y se evaluan con el medidor a
+   cero: SIN PORTAR (ver docs/PARIDAD.md, campeonatos). */
+#include <kos.h>
+#include <string.h>
+#include <stdlib.h>
+#include <math.h>
+#include "gd.h"
+#include "campeonato.h"
+
+int (*camp_graba)(int tipo, int lista, int nota);
+void (*camp_voz)(int id);
+void (*camp_se)(int id);
+void (*camp_millas)(int m);
+
+#define DT 0.016611295f                                 /* +0x180 (0x3c881469) */
+#define LLENO 80.0f                                     /* 0x3741a8 */
+#define NIV 5
+typedef struct {                                        /* CAMP.DAT: la peticion */
+    int16_t ini, fin; uint8_t tipo, sub, rot, b46; uint16_t voz, _r; int32_t p[10];   /* p[k] = +0x60 + 4 k */
+} cpet_t;
+typedef struct {
+    char m[4]; uint32_t ver, npet, opet;
+    float umbral[7]; int32_t tope, extra_lista[4], extra_dif[5], millas[7];
+    float penal[17][2][6];
+    uint16_t voz_nota[4][7], voz_animo[2][5];
+    uint8_t rot_nota[7], marco_nota[2], marco_anuncio, rot_generico, _p;
+    uint16_t lista[60][4]; uint8_t arbol[3][15];
+} cdat_t;
+typedef struct {                                        /* el registro 0x74 de la peticion (+0x20 los contadores) */
+    const cpet_t *d; int fase, ant, nota, cor, extra;   /* +8, +4, +0x24, +0x30, +0x34 */
+    float med, pen, v_ini, v_fin, v_med, v_suma, t;     /* +0x28, +0x2c, +0x5c, +0x60, +0x64, +0x68, +0x6c */
+    int n, c38, c40, c44, c48, c4c, c50, c54;           /* +0x70, contadores de 0x22c818 */
+    const float *P;                                     /* +0xc de los parametros (0x2323e8) */
+    int h70, h74, h78, tmr; float h7c;                  /* +0x70.. de los parametros (los usa cada tipo); +0xc del objeto del tipo */
+} pet_t;
+typedef struct {                                        /* el registro 0x74 del tipo de etapa (+0x1fc + 0x74 tipo) */
+    int tipo, cuenta, idx, cor, nota_media, nota[4], pnota[3], pcor[3], hist[7];   /* +0x200, +0x204, +0x208, +0x224.. */
+} etapa_t;
+typedef struct {
+    cdat_t *d; const cpet_t *pets;
+    int fila, forzada, lista_cfg, dif, lista, nivel;    /* +0xf0, +0x68, +0x70, +0x1ff8, +0x168 */
+    etapa_t et[NIV]; pet_t pet[3]; int npet, cur;       /* +0x7c (la lista), +0x80 */
+    float pos, pos_ant; int en_union_ant, union_hecha;  /* +0x3e78 / +0x3e7c, +0x3de0 */
+    int total, disp, ultima_nota;                       /* +0x1fe4, +0x1fe8 */
+    uint32_t reloj, voz_ult; struct { int id, retardo, prio; } vc[8]; int vc_cab, vc_fin;   /* 0x1ac3d8 */
+    int ban_on, ban_m4c, ban_txt, ban_mar, ban_n, ban_abre, ban_cierra, ban_ver;          /* rotulo */
+    int animo_ult, nota3, nota1;                        /* 0x3b5678, 0x6213b0, 0x6213b8 */
+} camp_t;
+static camp_t *C;
+
+int camp_activo(void) { return C != NULL; }
+int camp_tipo(int g, int nodo) { return C && g >= 0 && g < 3 && nodo >= 0 && nodo < 15 ? C->d->arbol[g][nodo] : -1; }
+void camp_libera(void)
+{
+    if (!C) return;
+    free(C->d); free(C); C = NULL;
+}
+int camp_inicia(int grupo, int fila, int forzada, int lista, int dificultad)
+{
+    uint32_t tam; cdat_t *d;
+    camp_libera();
+    if (!(d = gd_carga("CAMP.DAT", &tam))) { dbglog(DBG_ERROR, "CAMP: sin CAMP.DAT\n"); return -1; }
+    if (tam < sizeof(cdat_t) || memcmp(d->m, "CMP1", 4) || d->opet != sizeof(cdat_t) || d->opet + d->npet * sizeof(cpet_t) > tam) {
+        dbglog(DBG_ERROR, "CAMP: CAMP.DAT no vale\n"); free(d); return -2;
+    }
+    if (!(C = calloc(1, sizeof *C))) { free(d); return -3; }
+    (void)grupo; C->d = d; C->pets = (const cpet_t *)((const uint8_t *)d + d->opet);
+    C->fila = fila >= 0 && fila < 4 ? fila : 0; C->forzada = forzada; C->lista_cfg = lista & 3;
+    C->dif = dificultad < 0 ? 0 : dificultad > 4 ? 4 : dificultad;
+    C->lista = 0; C->nivel = -1; C->cur = -1; C->reloj = 0x10000; C->animo_ult = -1;
+    dbglog(DBG_INFO, "CAMP: fila %d, forzada %d lista %d, %u bytes\n", C->fila, forzada, C->lista_cfg, (unsigned)(tam + sizeof *C));
+    return 0;
+}
+
+/* ---- voces: la cola 0x1ac3d8 / 0x1ac330 (la del INFARTO, PS2 0x1ac3d8 = 45BD30 del PC) */
+static void suena(int id) { if ((id & 0x1ff) && (id & 0x1ff) != 0x1ff && camp_voz) camp_voz(id & 0x1ff); }
+static void voz(int id, int retardo, int prio)
+{
+    int k;
+    if (!(C->reloj - C->voz_ult <= (uint32_t)C->vc[C->vc_cab].retardo)) {
+        C->voz_ult = C->reloj; C->vc[C->vc_cab].retardo = retardo; C->vc[C->vc_cab].prio = prio; C->vc[C->vc_cab].id = id;
+        suena(id); return;
+    }
+    if (C->vc[C->vc_fin].prio >= prio) return;
+    C->vc_fin = (C->vc_fin + 1) & 7; k = C->vc_fin;
+    C->vc[k].prio = prio; C->vc[k].id = id; C->vc[k].retardo = retardo;
+}
+static void voz_bomba(void)
+{
+    if (C->vc_cab == C->vc_fin || C->reloj - C->voz_ult <= (uint32_t)C->vc[C->vc_cab].retardo) return;
+    C->voz_ult = C->reloj; C->vc_cab = (C->vc_cab + 1) & 7; suena(C->vc[C->vc_cab].id);
+}
+static void voz_calla(void) { C->vc_cab = C->vc_fin; }   /* 0x1ac318 */
+/* 0x2a6240: la de animo (al azar de 5 sin repetir la ultima; 0x423ee0 los tipos 1 y 2, 0x423ef8 los demas) */
+static void animo(int tipo, int k)
+{
+    if (k < 0) k = rand() % 5;
+    if (k == C->animo_ult && ++k >= 5) k = 0;
+    C->animo_ult = k; voz(C->d->voz_animo[tipo == 1 || tipo == 2 ? 0 : 1][k], 0x3c, 5);
+}
+
+/* ---- rotulo (0x22f9d0 el del anuncio, 0x22f7a0 el de la nota; los de HAHUD.DAT del INFARTO: marco 2B0020 y el texto
+   generico 2B003D que a los 30 cuadros pasa al de la peticion; SIN la deformacion de entrada / salida) */
+static void rotulo_abre(int modo, int texto, int marco, int abre, int cierra)
+{
+    if (texto == 0xff) return;
+    C->ban_on = 1; C->ban_m4c = modo; C->ban_txt = texto; C->ban_mar = marco; C->ban_n = 0; C->ban_abre = abre;
+    C->ban_cierra = cierra; C->ban_ver = modo ? texto : C->d->rot_generico;
+}
+static void rotulo_paso(void)
+{
+    if (!C->ban_on) return;
+    if (C->ban_n <= 10) C->ban_n++;
+    else if (!C->ban_m4c) {
+        if (C->ban_abre < 0 || C->ban_n - 20 < C->ban_abre) C->ban_n++;
+        else { C->ban_ver = C->ban_txt; C->ban_m4c = 1; C->ban_n = 0; }
+    } else if (C->ban_cierra < 0 || C->ban_n - 10 < C->ban_cierra) C->ban_n++;
+    else C->ban_on = 0;
+}
+int camp_rotulo(int *texto, int *marco, int *cuadro)
+{
+    if (!C || !C->ban_on || C->ban_ver == 0xff) return 0;
+    *texto = C->ban_ver; *marco = C->ban_mar; *cuadro = C->ban_n;
+    return 1;
+}
+uint32_t camp_tinte(void) { return 0xffffffffu; }
+
+/* ---- la etapa */
+static etapa_t *et_cur(void) { return C->nivel >= 0 && C->nivel < NIV ? &C->et[C->nivel] : NULL; }
+/* 0x22f030: los corazones de la carrera (+0x1fe4) */
+static void suma_total(void)
+{
+    int k, t = 0;
+    for (k = 0; k <= C->nivel && k < NIV; k++) t += C->et[k].cor;
+    C->total = t;
+}
+/* 0x2323e8: la fila de penalizaciones del tipo (0x374240: tipo 5 -> +0xf0, 2 -> +0x60, 16 -> +0x300, si no tipo x
+   0x30 + 0x18 x (subtipo < 2 ? subtipo : 1)) */
+static const float *penal(const cpet_t *d)
+{
+    const float *b = &C->d->penal[0][0][0]; int o;
+    if (d->tipo == 5) o = 0xf0; else if (d->tipo == 2) o = 0x60; else if (d->tipo == 16) o = 0x300;
+    else o = d->tipo * 0x30 + 0x18 * (d->sub < 2 ? d->sub : 1);
+    o /= 4; return o + 6 <= 204 ? b + o : b;
+}
+void camp_etapa(int tipo)
+{
+    etapa_t *e; unsigned w; int i, n;
+    if (!C) return;
+    if (++C->nivel >= NIV) C->nivel = NIV - 1;
+    if (C->forzada) C->lista = C->lista_cfg;            /* 0x22ac00: +0x1ff8 = +0x70 con +0x68 */
+    e = et_cur(); memset(e, 0, sizeof *e); e->tipo = tipo; e->idx = -1;
+    for (i = 0; i < 4; i++) e->nota[i] = 7;
+    C->npet = 0; C->cur = -1; C->union_hecha = 0;
+    w = tipo >= 0 && tipo < 60 ? C->d->lista[tipo][C->lista] : 0xffff;
+    n = w == 0xffff ? 0 : (int)(w & 15);
+    for (i = 0; i < n && i < 3; i++) {                  /* 0x22b600: 0x22e630 (a cero) y 0x2323e8 */
+        pet_t *p = &C->pet[i]; memset(p, 0, sizeof *p);
+        p->d = &C->pets[(w >> 4) + i]; p->P = penal(p->d); C->npet++; e->cuenta++;
+    }
+    dbglog(DBG_INFO, "CAMP: nivel %d etapa tipo %d lista %d, %d peticiones:", C->nivel, tipo, C->lista, C->npet);
+    for (i = 0; i < C->npet; i++) dbglog(DBG_INFO, " %d/%d (%d..%d)", C->pet[i].d->tipo, C->pet[i].d->sub, C->pet[i].d->ini, C->pet[i].d->fin);
+    dbglog(DBG_INFO, "\n");
+}
+/* 0x22e808: ninguna nota menor que n en el nivel k */
+static int sin_menores(int k, int n)
+{
+    int i;
+    if (k < 0 || k >= NIV) return 1;
+    for (i = 0; i < n && i < 7; i++) if (C->et[k].hist[i]) return 0;
+    return 1;
+}
+/* 0x22e850: la lista de la etapa siguiente, al entrar en la union */
+static void elige_lista(void)
+{
+    int ant = C->lista, v = C->nivel;
+    C->lista = 0;
+    if (C->forzada) { C->lista = C->lista_cfg; return; }
+    if (v == 1) C->lista = sin_menores(0, 4) && sin_menores(1, 4) ? 1 : 0;
+    else if (v == 2) {
+        C->lista = sin_menores(2, 3) ? 1 : 0;
+        if (ant == 1 && sin_menores(2, 4)) C->lista = 2;
+    } else if (v == 3) {
+        C->lista = sin_menores(3, 3) ? 1 : 0;
+        if (ant > 0 && sin_menores(3, 4)) C->lista = 2;
+        if (ant == 2 && sin_menores(3, 5)) C->lista = 3;
+    }
+}
+void camp_fin_etapa(void)                               /* 0x22c000 con 0x1cec50: 0x22edd8 y las millas */
+{
+    etapa_t *e;
+    if (!C || !(e = et_cur())) return;
+    if (camp_graba && e->nota[C->lista] != 7) {         /* (si mejora: millas[nota] x (lista + 1) a la licencia, 0x1f41c0) */
+        int m = camp_graba(e->tipo, C->lista, e->nota[C->lista]) ? C->d->millas[e->nota[C->lista]] * (C->lista + 1) : 0;
+        if (m && camp_millas) camp_millas(m);
+        dbglog(DBG_INFO, "CAMP: etapa %d lista %d nota %d, %d corazones (%d)\n", e->tipo, C->lista, e->nota[C->lista], e->cor, m);
+    } else dbglog(DBG_INFO, "CAMP: etapa %d sin nota (%d/%d)\n", e->tipo, e->idx + 1, e->cuenta);
+}
+
+/* ---- la peticion: nota y corazones */
+static void nota_de(pet_t *p)                           /* 0x22e670 + 0x22e6d8 */
+{
+    float g = p->med - p->pen; int k, t = 6;
+    p->nota = 0;
+    for (k = 0; k < 7; k++) if (C->d->umbral[k] <= g) p->nota = k;
+    if (p->c40) t = 4;
+    if (p->c44) t -= 3;
+    if (p->c48) t -= 4;
+    if (t < p->nota) p->nota = t;
+    if (p->nota < 0) p->nota = 0;
+}
+static void corazones_de(pet_t *p)                      /* 0x22e728 */
+{
+    int c = (int)(p->med - p->pen);
+    if (c < 0) c = 0;
+    if (c > C->d->tope) c = C->d->tope;
+    p->cor = c;
+    if (p->nota >= 4) p->extra += C->d->extra_lista[C->lista] + C->d->extra_dif[C->dif] + (int)(p->v_med * 0.2f);
+}
+static void a_la_etapa(pet_t *p)                        /* 0x22e498 + 0x22ebb0 + 0x22ed30 */
+{
+    etapa_t *e = et_cur(); int i, s = 0, h = p->cor + p->extra;
+    if (!e || e->idx < 0 || e->idx > 2) return;
+    e->cor += h; e->pnota[e->idx] = p->nota; e->pcor[e->idx] = h;
+    memset(e->hist, 0, sizeof e->hist);
+    for (i = 0; i <= e->idx; i++) { e->hist[e->pnota[i]]++; s += e->pnota[i]; }
+    e->nota_media = s / (e->idx + 1);
+    if (e->idx >= e->cuenta - 1 && (e->nota[C->lista] == 7 || e->nota[C->lista] < e->nota_media)) e->nota[C->lista] = e->nota_media;
+}
+/* 0x22f090: el bono por la velocidad: 0 si v_ini - v_fin < 10 o >= 30; (30 - d) / 20 entre medias */
+static float frena(float a, float b) { float d = a - b; return d < 10.0f || d >= 30.0f ? 0.0f : fminf(1.0f, (30.0f - d) / 20.0f); }
+static int bono(const pet_t *p, float k)                /* 30 x el exceso del medidor sobre 80 hasta 80 / k, + 40 x 0x22f090 */
+{
+    float x = 80.0f / k - LLENO, r = x > 0.0f ? (p->med - p->pen - LLENO) / x : 1.0f;
+    if (r > 1.0f) r = 1.0f;
+    if (r < 0.0f) r = 0.0f;
+    return (int)(r * 30.0f) + (int)(40.0f * frena(p->v_ini, p->v_fin));
+}
+
+/* ---- los tipos: el control de su vtable +0x24 (solo con la peticion en curso de su tipo) */
+static void tipo_paso(pet_t *p, const camp_coche_t *c, float dpos)
+{
+    const cpet_t *d = p->d; float largo = (float)(d->fin - d->ini);
+    switch (d->tipo) {
+    case 1:                                             /* 0x29c828: pasar de p[7] km/h */
+        if (p->fase == 4) {
+            if (c->kmh < (float)d->p[7]) {
+                if (p->h78) { p->h78 = 0; p->h74 = 0; }
+                if (p->h74 == 0x3c) voz(0xf1, 0x3c, 0xa);
+                p->h74++;
+            } else if (!p->h78) { p->h78 = 1; voz(0xf0, 0x3c, 0xb); }
+            if (p->h78) {
+                p->med += dpos * (LLENO / largo);
+                if (++p->h70 % 0x6f == 0) animo(1, rand() % 5);
+            }
+        } else if (p->fase == 5 && p->nota == 6) p->extra += bono(p, 1.0f);
+        break;
+    case 2: case 9:                                     /* 0x298360: derrapar (el 9 es otra clase; SIN PORTAR su diferencia) */
+        if (p->fase == 4) {
+            if (c->derrapa) { if (!p->h74) { p->h74 = 1; voz(0x8c6, 0x3c, 0); } }
+            else p->h74 = 0;
+            if (p->h74) {
+                int v = (int)c->kmh, k = ++p->h70;
+                if ((v > 0xf0 && k % 100 == 0) || (v > 0xc8 && k % 0x8c == 0) || (v > 0x96 && k % 0xb4 == 0)) animo(2, k % 5);
+                p->med += dpos * (LLENO / (largo * 0.9f));
+            }
+        } else if (p->fase == 5 && p->nota == 6) p->extra += bono(p, 0.85f);
+        break;
+    case 3:                                             /* 0x29f038: adelantar p[8] coches (hasta p[9]) */
+        if (p->fase == 3) { p->h70 = p->h74 = p->h78 = c->pasados; p->h7c = d->p[8] > 0 ? LLENO / (float)d->p[8] : 0.0f; }
+        else if (p->fase == 4) {
+            int n = c->pasados, s = 0;
+            p->h78 = n;
+            if (n > p->h74) { s = n - p->h74; p->h74 = n; if (d->sub == 1 && !p->tmr) { if (camp_se) camp_se(0xd8); p->tmr = 0x258; } }
+            else if (n < p->h74) { s = n - p->h74; p->h74 = n; }
+            if (p->tmr > 0) p->tmr--;
+            if (s > 0) { if (n - p->h70 <= d->p[9]) p->med += s * p->h7c; animo(3, -1); }
+            else if (s < 0 && n - p->h70 >= 0) p->med += s * p->h7c;
+        } else if (p->fase == 5 && p->nota == 6) {
+            int b = 0, n = p->h78 - p->h70;
+            if (!p->c4c && !p->c54) b = 25;
+            if (!p->c50 && !p->c40) b += 25;
+            if (n >= d->p[9]) b += 20;
+            else if (d->p[9] > d->p[8]) b += (int)((float)(n - d->p[8]) / (float)(d->p[9] - d->p[8]) * 20.0f);
+            p->extra += b;
+        }
+        break;
+    case 4:                                             /* 0x29ec18: no chocar (los sucesos penalizan, 0x22c818) */
+        if (p->fase == 4) p->med += dpos * (LLENO / (largo * 0.9f));
+        else if (p->fase == 5 && p->nota == 6) p->extra += (!p->c50 && !p->c4c && !p->c54 ? 30 : 0) + (int)(40.0f * frena(p->v_ini, p->v_fin));
+        break;
+    case 12:                                            /* 0x2a4198: ir al rebufo el p[7] % de la peticion */
+        {   float k = d->p[7] * 0.01f;
+            if (k <= 0.0f) k = 1.0f;
+            if (p->fase == 4) {
+                if (c->rebufo > 0.18f && c->rebufo_ang < 0x5dc) { if (!p->h74) { p->h74 = 1; p->h70 = 0; } }
+                else if (p->h74) { p->h70 = 0; p->h74 = 0; }
+                if (p->h74) {
+                    int v = (int)c->kmh, m = ++p->n;
+                    p->med += dpos * (LLENO / (largo * k));
+                    if ((v > 0xf0 && m % 0x78 == 0) || (v > 0xc8 && v <= 0xf0 && m % 0xb4 == 0) || (v > 0x96 && v <= 0xc8 && m % 0xdc == 0)) {
+                        if (rand() & 3) animo(12, -1);
+                    }
+                }
+            } else if (p->fase == 5 && p->nota == 6) p->extra += bono(p, k);
+        }
+        break;
+    default: break;                                     /* SIN PORTAR */
+    }
+}
+
+/* ---- 0x22c818: los sucesos (con la peticion en curso entre sus fases 3 y 5, o sin ella) */
+static const uint32_t MASCARA = 0x2f03f82u;             /* superficies de asfalto (la del INFARTO, 45E2F0) */
+static int sucesos(pet_t *p, const camp_coche_t *c)
+{
+    static const uint8_t B[14] = { 0, 0, 1, 1, 0, 0, 1, 2, 2, 2, 2, 0, 0, 0 };   /* (los del INFARTO: PROBABLE la tabla 0x4154c0) */
+    etapa_t *e = et_cur(); int r = 0, k, en = p && p->fase >= 3 && p->fase <= 5;
+    if (!e) return 0;
+    if (c->choque_ini) {
+        int i = c->choque - 1 >= 0 && c->choque - 1 <= 13 ? B[c->choque - 1] : 2;
+        if (i == 0) {                                   /* choque */
+            voz_calla();
+            if (en) {
+                voz(c->choque == 1 ? 0x94d : 0x14e, 0x3c, 5); p->pen += p->P[0]; p->c38++; p->c48++; suma_total();
+                if ((int)p->P[0] < C->total) e->cor -= (int)p->P[0]; else e->cor = 0;
+            } else { suma_total(); if (C->total > 50) e->cor -= 50; else e->cor = 0; voz(0x950, 0x3c, 5); }
+            r = 1;
+        } else if (i == 1 && c->impulso_rapido) {       /* golpe de uno mas rapido */
+            voz_calla();
+            if (en) {
+                p->pen += p->P[1]; voz(0x149, 0x3c, 5); p->c44++; p->c38++; suma_total();
+                if ((int)p->P[1] < C->total) e->cor -= (int)p->P[1]; else e->cor = 0;
+            } else { suma_total(); if (C->total > 20) e->cor -= 20; else e->cor = 0; voz(0x14c, 0x3c, 5); }
+            r = 1;
+        }
+    } else if (c->impulso) {                            /* golpe */
+        if (en) {
+            p->pen += p->P[2]; p->c40++; p->c38++; suma_total();
+            if ((int)p->P[2] < C->total) e->cor -= (int)p->P[2]; else e->cor = 0;
+        } else { suma_total(); if (C->total > 10) e->cor -= 10; else e->cor = 0; }
+        r = 1;
+    } else if (c->roce && en) { p->pen += p->P[5] * DT; p->c50++; r = 1; }
+    if (en) {
+        for (k = 0; k < 4; k++) if (!(c->sup[k] & MASCARA)) { p->pen += p->P[4] * DT; p->c4c++; r = 1; }
+        if (c->muro) { p->pen += p->P[3] * DT; p->c54++; r = 1; }
+        if (p->pen > 100.0f) p->pen = 100.0f;
+    }
+    return r;
+}
+
+/* ---- 0x232988: la maquina de fases de la peticion en curso */
+static void fases(pet_t *p, const camp_coche_t *c)
+{
+    const cpet_t *d = p->d; int a = p->fase, s = c->seccion;
+    etapa_t *e = et_cur();
+    p->ant = a;
+    if (s < d->ini - 30) p->fase = 0;
+    else if (s < d->ini) p->fase = a == 0 ? 1 : 2;
+    else if (s <= d->fin) p->fase = a == 2 ? 3 : 4;
+    else p->fase = a == 4 ? 5 : a == 5 ? 6 : 7;
+    switch (p->fase) {
+    case 1:                                             /* el anuncio: 0x22f9d0 y la voz 0x2a6358 */
+        if (e) e->idx++;
+        if (d->rot != 0xff) rotulo_abre(0, d->rot, C->d->marco_anuncio, 30, -1);
+        else rotulo_abre(1, C->d->rot_generico, C->d->marco_anuncio, -1, -1);   /* (DESVIACION: el texto del banco 0x46, sin convertir) */
+        voz_calla(); if (d->voz && d->voz != 0xffff) voz(d->voz, 0x3c, 9);
+        dbglog(DBG_INFO, "CAMP: peticion %d/%d (%d..%d)\n", d->tipo, d->sub, d->ini, d->fin);
+        break;
+    case 3:                                             /* empieza: la voz 0x8e8 (0x2a6580) */
+        p->v_ini = p->v_med = c->kmh; p->v_suma = p->t = 0.0f; p->n = 0;
+        if (!(d->tipo == 16 && d->sub == 5)) voz(0x8e8, 0x3c, 9);
+        break;
+    case 4:
+        p->t += DT; p->n++; p->v_suma += c->kmh; if (p->n > 0) p->v_med = p->v_suma / (float)p->n;
+        break;
+    case 5:                                             /* acaba: la nota y los corazones */
+        p->v_fin = c->kmh; nota_de(p); corazones_de(p);
+        break;
+    case 6:                                             /* a la etapa, el rotulo de la nota (0x22f7a0) y su voz (0x2a65a8) */
+        a_la_etapa(p); C->ultima_nota = p->nota;
+        rotulo_abre(1, C->d->rot_nota[p->nota], C->d->marco_nota[p->nota >= 4], -1, 0x78);
+        {   int k;
+            if (p->nota >= 4) k = (C->nota3++ % 3) + 4;
+            else if (p->nota >= 2) k = p->nota;
+            else k = C->nota1++ & 1;
+            voz(C->d->voz_nota[C->fila][k], 0x3c, 0xa);
+        }
+        dbglog(DBG_INFO, "CAMP: peticion %d hecha: %d - %d, nota %d, %d + %d corazones\n", d->tipo, (int)p->med, (int)p->pen, p->nota, p->cor, p->extra);
+        break;
+    default: break;
+    }
+}
+
+void camp_paso(const camp_coche_t *c)
+{
+    pet_t *p; int i;
+    if (!C) return;
+    C->reloj++;
+    C->pos_ant = C->pos; C->pos = c->pos;
+    if (c->en_union) {                                  /* 0x22c000: la lista de la siguiente al entrar en la union */
+        if (!C->union_hecha) { elige_lista(); C->union_hecha = 1; }
+        C->cur = -1;                                    /* 0x22b7d0: sin peticion en la union */
+    } else {
+        float dpos = C->pos - C->pos_ant;
+        if (dpos < 0.0f || dpos > 50.0f) dpos = 0.0f;
+        if (C->cur >= 0 && C->pet[C->cur].fase >= 7) C->cur = -1;
+        if (C->cur < 0)                                 /* 0x22b7d0 */
+            for (i = 0; i < C->npet; i++) if (C->pet[i].d->ini - 32 < c->seccion && c->seccion < C->pet[i].d->fin + 30 && C->pet[i].fase < 7) { C->cur = i; break; }
+        p = C->cur >= 0 ? &C->pet[C->cur] : NULL;
+        if (p) fases(p, c);
+        sucesos(p, c);                                  /* (con el tipo 4, 0x22e9a0: el HUD de la nota, SIN PORTAR) */
+        if (p) tipo_paso(p, c, dpos);
+    }
+    suma_total();
+    if (C->disp < C->total) C->disp += (C->total - C->disp + 2) / 3;   /* (el contador se acerca; 22e118: PROBABLE) */
+    else if (C->disp > C->total) C->disp -= (C->disp - C->total + 2) / 3;
+    rotulo_paso(); voz_bomba();
+}
+int camp_total(void) { return C ? C->total : 0; }
+int camp_corazones(void) { return C ? C->disp : 0; }
+int camp_filas(int32_t *v)                              /* 0x22a5b8: 0x1bd920(k, R[k] +0x20c) por cada nivel hasta el actual */
+{
+    int k, n = C ? C->nivel : -1;
+    if (n < 0) { v[0] = 0; return 0; }
+    for (k = 0; k <= n && k < NIV; k++) v[k] = C->et[k].cor;
+    return n < NIV ? n : NIV - 1;
+}
