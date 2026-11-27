@@ -838,7 +838,7 @@ static inline int malla_de_cartel(const modelo_t *m, const malla_t *ma)
    entradas del libro - 1. Una
    VQ con libro reducido (N < 256 entradas, las ultimas) se direcciona 2048 - 8 N bytes antes de sus datos: la PowerVR
    lee el libro en la direccion de la textura y los indices 2 KB despues, y nunca toca las entradas que faltan. */
-static void compila_cab(modelo_t *m, uint32_t i, int especular)   /* especular: 1 desplazamiento, 2 ademas sumada */
+FRIO static void compila_cab(modelo_t *m, uint32_t i, int especular)   /* especular: 1 desplazamiento, 2 ademas sumada */
 {
     pvr_poly_cxt_t cx; tex_t *t = m->texs + i; uint32_t f, fb = t->fmt & 0xff, vq = t->fmt & 0x100, n = ((t->fmt >> 16) & 0xff) + 1;
     pvr_ptr_t dir = vq ? (pvr_ptr_t)((uintptr_t)m->tv[i] - (2048 - 8 * n)) : m->tv[i];
@@ -7252,7 +7252,7 @@ static void repsec_lee(void)
    variantes) el decorado de la meta de la etapa (el templo de CAPE) quedaba encima de ella. DESVIACION: en una etapa
    que en algun arbol es final (hijos -1), su union de meta de ese arbol (la del modo OutRun: meta, sin bifurcacion);
    la carrera acaba igual en la meta. Buscado en CURSO.DAT y CURSOTA.DAT sin rehacer datos */
-static int ta_meta_busca(const char *fich, int seg, etapa_t *e)
+FRIO static int ta_meta_busca(const char *fich, int seg, etapa_t *e)
 {
     uint32_t sz, n0, r, i, m, o, n, k; uint8_t *b = gd_carga(fich, &sz); int ok = 0;
     if (!b) return 0;
@@ -11326,7 +11326,7 @@ static void faros_punto(const vert_t *T, float c, float f, float *o)
     }
 }
 /* la rejilla de los dos lados (tiras 0..6 y 8..14 de FAROS.DAT); 0 bien */
-static int faros_rejilla(void)
+FRIO static int faros_rejilla(void)
 {
     int l, i, j, L, c;
     if (faros_m.nmallas != 16) return -1;
@@ -12032,7 +12032,7 @@ static float salida_delante(float s)                            /* (0, -16) por 
     float p[3], th; ruta_en(s, p, &th, NULL, NULL);
     return (0.0f - p[0]) * sinf(th) + (-16.0f - p[2]) * -cosf(th);
 }
-static void salida_calcula(void)
+FRIO static void salida_calcula(void)
 {
     float s, p[3], th, a0 = 0, a, ss = 0, lo, hi; int k;
     for (s = s_base; s < s_base + 400.0f && s < longitud; s += 0.25f) {
@@ -12600,7 +12600,7 @@ static int refl_elige(int carrera)
     return e;
 }
 /* cabeceras de las texturas de la pintura y el reflejo (con desplazamiento: especular 1, sumada 3) */
-static void coche_cab_cex(void)
+FRIO static void coche_cab_cex(void)
 {
     uint32_t k; int i;
     refl_ntex = 0; refl_est = 0; refl_activo = 0; refl_firma[0] = -1; refl_cab_ok = 0;
@@ -12623,7 +12623,7 @@ static void coche_cab_cex(void)
         }
     }
 }
-static void coche_cex(int c)
+FRIO static void coche_cex(int c)
 {
     const uint32_t *w = (const uint32_t *)coche.ruta; uint32_t k;
     cex_n = 0; cex_ngrp = 0; cex_color = 0; cex_luces = -1; free(cex_n0); cex_n0 = NULL; nsvol = 0;
@@ -13441,7 +13441,7 @@ FRIO static void camion_carga(uint8_t *buf, uint32_t cap)
     dbglog(DBG_INFO, "CAMION: modelos 39 40 41 43 cargados: RAM %uK (libre %uK -> %uK), VRAM %uK (libre %uK -> %uK)\n", u1 - u0, l0, l1,
            (unsigned)((v0 - pvr_mem_available()) >> 10), (unsigned)(v0 >> 10), (unsigned)(pvr_mem_available() >> 10));
 }
-static void camion_suelta_ram(void)
+FRIO static void camion_suelta_ram(void)
 {
     int f, i, m, a;
     if (!cam_ram) return;
@@ -13897,7 +13897,7 @@ FRIO static int coche_carga(int k)
    efectos) y el HUD ya no cabia en su sitio (32 KB de el detras de los efectos y huecos sueltos fuera de la zona, que
    cada cambio de coche podia trocear mas). Los texeles pasan por buf (el hueco de la union, aun prestado) y vuelven en
    el mismo orden; despues sus cabeceras. 0 bien; si no cabe en buf, nada se mueve */
-static int vram_ordena(uint8_t *buf, uint32_t cap)
+FRIO static int vram_ordena(uint8_t *buf, uint32_t cap)
 {
     modelo_t *const M[2] = { &chr, &coche }; uint32_t o = 0, i, k, n = 0, mal = 0;
     for (k = 0; k < 2; k++) if (M[k]->tv) for (i = 0; i < M[k]->ntex; i++) if (M[k]->tv[i]) o += (M[k]->texs[i].tam + 31) & ~31u;
