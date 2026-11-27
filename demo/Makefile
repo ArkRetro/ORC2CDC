@@ -7,7 +7,7 @@ all: rm-elf $(TARGET)
 ../comun/hud.o ../comun/menu.o: CFLAGS += -Dpvr_prim=ta_prim
 # Rev 2.9.9.c: los menus compilados por tamano (-Os gana a -O2, que va antes): 19 KB menos de codigo, que son RAM del
 # monton; no son codigo de la carrera. Quitar esta linea vuelve a -O2
-../comun/menu.o ../comun/mision.o ../comun/rival.o ../comun/campeonato.o ../comun/infarto.o ../comun/fsp.o ../comun/vmuesc.o ../comun/sprani.o ../comun/rksp.o ../comun/modo_video.o ../comun/registro.o ../comun/voces.o pcarga.o meta.o sp.o fin.o final.o nombre.o: CFLAGS += -Os
+../comun/menu.o ../comun/mision.o ../comun/rival.o ../comun/campeonato.o ../comun/infarto.o ../comun/fsp.o ../comun/vmuesc.o ../comun/sprani.o ../comun/rksp.o ../comun/modo_video.o ../comun/registro.o ../comun/voces.o ../comun/vmu.o ../comun/sfx.o ../comun/gd.o ../comun/musica.o pcarga.o meta.o sp.o fin.o final.o nombre.o: CFLAGS += -Os
 # pvr_state de KallistiOS (la presentacion a FPS_OBJETIVO esconde el render acabado hasta su campo: demo/main.c)
 main.o: CFLAGS += -I$(KOS_BASE)/kernel/arch/dreamcast/hardware/pvr
 include $(KOS_BASE)/Makefile.rules
