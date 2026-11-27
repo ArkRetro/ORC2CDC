@@ -6786,9 +6786,12 @@ static void part_recentra(float dx, float dz)
 }
 
 /* buf_arr: bufer de paso de los textos y de la mancha del humo (se suben a la VRAM al momento); el texto del centro usa
-   su principio (antes tenia el suyo, y la mancha otro: 18 KB de RAM que ahora ocupan las chispas) */
+   su principio (antes tenia el suyo, y la mancha otro: 18 KB de RAM que ahora ocupan las chispas).
+   (c2c8) 32 filas de 512 en vez de las 128 de la textura de arriba (TAM_ARR): texto_arriba la sube por franjas (96 KB
+   menos de BSS, que son RAM libre del monton al arrancar) */
 #define TAM_CEN (256 * 32 * 2)
-static uint16_t buf_arr[512 * 128] __attribute__((aligned(32)));
+#define TAM_ARR (512 * 128 * 2)
+static uint16_t buf_arr[512 * 32] __attribute__((aligned(32)));
 FRIO static void efectos_inicia(void)
 {
     pvr_poly_cxt_t cx; uint32_t sz;
@@ -7018,11 +7021,15 @@ static pvr_ptr_t txt_arr, txt_cen;
 
 static void texto_arriba(const char *l1, const char *l2, const char *l3)
 {
-    memset(buf_arr, 0, sizeof buf_arr);
-    bfont_draw_str(buf_arr + 4 * 512 + 4, 512, 1, l1);
-    if (l2) bfont_draw_str(buf_arr + 32 * 512 + 4, 512, 1, l2);
-    if (l3) bfont_draw_str(buf_arr + 60 * 512 + 4, 512, 1, l3);
-    pvr_txr_load(buf_arr, txt_arr, sizeof buf_arr);
+    /* las franjas de filas [0, 32) [32, 60) [60, 92) [92, 124) [124, 128): cada linea (24 filas, y lo que se salga de
+       los 512 de ancho en la siguiente) cae entera en la suya, a la fila 4, 32 y 60 como antes */
+    static const uint8_t F0[5] = { 0, 32, 60, 92, 124 }, F1[5] = { 32, 60, 92, 124, 128 };
+    const char *l[5] = { l1, l2, l3, NULL, NULL }; int k;
+    for (k = 0; k < 5; k++) {
+        memset(buf_arr, 0, (F1[k] - F0[k]) * 512 * 2);
+        if (l[k]) bfont_draw_str(buf_arr + (k ? 0 : 4 * 512) + 4, 512, 1, l[k]);
+        pvr_txr_load(buf_arr, (uint8_t *)txt_arr + F0[k] * 1024, (F1[k] - F0[k]) * 1024);
+    }
 }
 static void texto_centro(const char *s)
 {
@@ -15516,7 +15523,7 @@ int main(int argc, char **argv)
     PVR_SET(PVR_PT_ALPHA_REF, 0x80);
     pvr_set_shadow_scale(true, SOMBRA_ESCALA);                  /* lo que queda dentro de la sombra del coche */
     pvr_set_bg_color(0.45f, 0.65f, 0.95f);
-    txt_arr = pvr_mem_malloc(sizeof buf_arr); txt_cen = pvr_mem_malloc(TAM_CEN);
+    txt_arr = pvr_mem_malloc(TAM_ARR); txt_cen = pvr_mem_malloc(TAM_CEN);
     if ((tex_gris = pvr_mem_malloc(128))) { uint16_t g[64]; for (i = 0; i < 64; i++) g[i] = 0xF888; pvr_txr_load(g, tex_gris, 128); }
     for (i = 0, r = 0; i < NMODTRAF; i++) { r |= sube_modelo(&mtraf[i]); if (!r) compacta_modelo(&mtraf[i]); }   /* texeles fuera de la RAM */
     /* (la etapa de salida no: su VRAM la da curso_reinicia, en la zona del curso, al empezar la carrera) */
@@ -15582,6 +15589,9 @@ int main(int argc, char **argv)
     menu_coches(coches_m);
     menu_fichas(ficha_modelo, N_FICHAS);                        /* modelo de cada COCHEnn.DAT (orden del menu: MENU.DAT) */
     menu_suelta_coche = coche_suelta;                           /* si una pantalla del menu no cabe: fuera el coche 3D */
+#ifdef DIAG_RESERVA
+    {   static void *r_; r_ = malloc(DIAG_RESERVA); dbglog(DBG_INFO, "DIAG_RESERVA: %u bytes %s\n", (unsigned)DIAG_RESERVA, r_ ? "tomados" : "sin RAM"); }   /* (prueba: el monton como antes de c2c8) */
+#endif
     {   unsigned u, l; struct mallinfo mi = mallinfo(); ram_kb(&u, &l);
         dbglog(DBG_INFO, "RAM: al arrancar en uso %uK, libre %uK (%uK en huecos del monton); hueco de la union %s\n", u, l,
                (unsigned)(mi.fordblks >> 10), union_prestable() ? "prestado" : "ocupado");
