@@ -842,6 +842,18 @@ static inline int malla_de_cartel(const modelo_t *m, const malla_t *ma)
    entradas del libro - 1. Una
    VQ con libro reducido (N < 256 entradas, las ultimas) se direcciona 2048 - 8 N bytes antes de sus datos: la PowerVR
    lee el libro en la direccion de la textura y los indices 2 KB despues, y nunca toca las entradas que faltan. */
+/* D adjust de los mipmaps (bits 24-27 del formato, tools/remip.py sesgo: las rectangulares estiradas a cuadradas; 0 el
+   de siempre, 1,0). MIP_SESGO_FLYCAST (prueba): Flycast no multiplica la D como la PowerVR, aproxima un sesgo de LOD
+   de -4 / -2 / -1 niveles para 0,25 / 0,5 / 0,75 (rend/TexCache.cpp D_Adjust_LoD_Bias); con esto el emulador ensena
+   los niveles que pide la consola (0,25 -> -2: su 0,5; 0,5 -> -1: su 0,75; 0,75 -> -0,4: 1,0) */
+static inline int mip_sesgo(int d)
+{
+#ifdef MIP_SESGO_FLYCAST
+    return d == 1 ? 2 : d == 2 ? 3 : 4;
+#else
+    return d;
+#endif
+}
 FRIO static void compila_cab(modelo_t *m, uint32_t i, int especular)   /* especular: 1 desplazamiento, 2 ademas sumada */
 {
     pvr_poly_cxt_t cx; tex_t *t = m->texs + i; uint32_t f, fb = t->fmt & 0xff, vq = t->fmt & 0x100, n = ((t->fmt >> 16) & 0xff) + 1;
@@ -862,7 +874,7 @@ FRIO static void compila_cab(modelo_t *m, uint32_t i, int especular)   /* especu
            bilineal en el nivel mas cercano, como MMIN 4 del GS) */
         if (t->fmt & 0x800) { cx.depth.comparison = PVR_DEPTHCMP_GEQUAL; if (t->lista == 2) cx.txr.env = PVR_TXRENV_MODULATEALPHA; }
         if ((t->fmt & 0x400) && t->lista == 2) { cx.blend.src = PVR_BLEND_SRCALPHA; cx.blend.dst = PVR_BLEND_ONE; }
-        if (t->fmt & 0x200) cx.txr.mipmap = true;
+        if (t->fmt & 0x200) { cx.txr.mipmap = true; if (t->fmt & 0x0F000000) cx.txr.mipmap_bias = mip_sesgo((t->fmt >> 24) & 15); }
         /* 0x1000 / 0x2000: CLAMP del GS en u / v (la sombra plana del coche, tools/conv_coche.py sombra_clamp) */
         if (t->fmt & 0x3000) cx.txr.uv_clamp = ((t->fmt & 0x1000) ? PVR_UVCLAMP_U : 0) | ((t->fmt & 0x2000) ? PVR_UVCLAMP_V : 0);
         pvr_poly_compile(&m->cabs[f][i], &cx);
