@@ -2639,12 +2639,26 @@ static __attribute__((noinline)) uint32_t etapa_mallas_vistas(const malla_t *M, 
         {   register float x __asm__("fr4") = m->cx, y __asm__("fr5") = m->cy, z __asm__("fr6") = m->cz, w __asm__("fr7") = 1.0f;
             const float r = m->r; float xc, yc, zr;
             __asm__("ftrv xmtrx,fv4\n" : "+f"(x), "+f"(y), "+f"(z), "+f"(w));
-            if (z + r < cer || z - r > lej) continue;
+            if (z + r < cer || z - r > lej) goto fuera;
             xc = fabsf(x - 320.0f * z); yc = fabsf(240.0f * z - y);
-            if (xc - 320.0f * z > r * khfx || yc - 240.0f * z > r * kvfx) continue;
+            if (xc - 320.0f * z > r * khfx || yc - 240.0f * z > r * kvfx) goto fuera;
             zr = z - r;
             lk[n++] = k | (zr > cer15 && m->n <= 256 && zr * g > xc + r * fxx && zr * g > yc + r * fxx ? 0x10000u : 0);
         }
+    fuera:
+#ifdef DIAG_CULL_CMP
+        {   /* (medida: la prueba de siempre, con el ojo y los ejes, frente a la del ftrv) */
+            static uint32_t nt, nv, nseg; const float tanh = 320.0f / fx, tanv = 240.0f / fx, kh = sqrtf(1 + tanh * tanh), kv = sqrtf(1 + tanv * tanv);
+            float dx = m->cx - ojo[0], dy = m->cy - ojo[1], dz = m->cz - ojo[2], zv, xv, yv; int vo, so = 0, vn, sn;
+            zv = dx * ade[0] + dy * ade[1] + dz * ade[2]; xv = dx * der[0] + dy * der[1] + dz * der[2]; yv = dx * arr[0] + dy * arr[1] + dz * arr[2];
+            vo = !(zv + m->r < cer || zv - m->r > lej) && !(fabsf(xv) - zv * tanh > m->r * kh || fabsf(yv) - zv * tanv > m->r * kv);
+            if (vo) so = zv - m->r > cer15 && m->n <= 256 && esfera_en_guarda(xv, yv, zv, m->r);
+            vn = n && (lk[n - 1] & 0xFFFF) == k; sn = vn && (lk[n - 1] >> 16);
+            nt++; if (vo != vn) nv++; else if (so != sn) nseg++;
+            if ((nt & 0x3FFFF) == 0) printf("CULLCMP: etapa %u mallas, %u distintas en la vista, %u en seguro\n", (unsigned)nt, (unsigned)nv, (unsigned)nseg);
+        }
+#endif
+        ;
     }
     *kn = k;
     return n;
@@ -9195,6 +9209,9 @@ static void nodos_visibles(modelo_t *mo)
     const float ncu[9] = { o0, o1, o2, cer, lej, tanh, tanv, kh, kv };
     uint32_t nc_i[NC_N], nc_c = 0, nc_k = 0, nc_j = 0; float nc_z[NC_N];
     (void)j;
+#ifdef DIAG_CULL_CMP
+    static uint32_t nc_bm[4096 / 32]; memset(nc_bm, 0, sizeof nc_bm);
+#endif
     for (;;) {
         uint32_t i, rama, u, c_teo, c_v, g, ya, ip; nodo_t *d; float zv, lim; int cp, cd, gracia;
         if (nc_k >= nc_c) {                                     /* (nodos_candidatos: los que pasan lejos / detras / lado) */
@@ -9203,6 +9220,9 @@ static void nodos_visibles(modelo_t *mo)
             if (!nc_c) continue;
         }
         i = nc_i[nc_k]; zv = nc_z[nc_k]; nc_k++; d = ND + i;
+#ifdef DIAG_CULL_CMP
+        if (i < 4096) nc_bm[i >> 5] |= 1u << (i & 31);
+#endif
 #else
     for (j = 0; j < n; j++) {
         uint32_t i = L ? L[j] : j, rama, u, c_teo, c_v, g, ya, ip; nodo_t *d; float dx, dy, dz, zv, xv, yv, lim; int cp, cd, gracia;
@@ -9345,6 +9365,20 @@ static void nodos_visibles(modelo_t *mo)
         }
         prio_coste[cd][cp] += c_teo; prio_vtx[cd][cp] += c_v;
     }
+#if defined(DIAG_CULL_CMP) && NODOS_CULL
+    {   /* (medida: las tres pruebas de siempre, aqui, frente a lo que dio nodos_candidatos) */
+        static uint32_t nt, nd_; uint32_t jj;
+        for (jj = 0; jj < n; jj++) {
+            uint32_t i = L ? L[jj] : jj; nodo_t *d; float dx, dy, dz, zv, xv, yv, w_ = 0.0f; int pasa;
+            if (i >= nnod || i >= 4096) continue;
+            d = ND + i; dx = d->cx - o0; dy = d->cy - o1; dz = d->cz - o2;
+            xv = dx; yv = dy; zv = dz; lb_ftrv(&xv, &yv, &zv, &w_);
+            pasa = !(zv - d->r > lej) && !(zv + d->r < cer) && !(fabsf(xv) - zv * tanh > d->r * kh || fabsf(yv) - zv * tanv > d->r * kv);
+            nt++; if (pasa != (int)((nc_bm[i >> 5] >> (i & 31)) & 1)) nd_++;
+        }
+        {   static uint32_t q; if ((++q & 1023) == 0) printf("CULLCMP: nodos %u, %u distintos\n", (unsigned)nt, (unsigned)nd_); }
+    }
+#endif
 #ifdef LB_NODOS
     lb_xmtrx_carga(nv_xm);
 #endif
