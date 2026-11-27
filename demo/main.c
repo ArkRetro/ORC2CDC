@@ -3380,7 +3380,27 @@ static void ha_rotulo_uso(int *actual, const char *nombre)
     *actual = u;
     if (hudd_sube_uso(ha_hud, u)) dbglog(DBG_ERROR, "HAHUD: sin VRAM para %s\n", nombre);
 }
-static int ha_u_txt = -1, ha_u_mar = -1;                                        /* [780258] (PS2 0x443508) de la carrera */
+static int ha_u_txt = -1, ha_u_mar = -1;
+/* el panel de la nota y la hoja de resultados del INFARTO (comun/infarto.c infarto_dibujos): cada grupo se sube al verse
+   y se baja cuando deja de verse (VRAM fuera de la zona, como los rotulos) */
+static void ha_dibujos(void)
+{
+    static int sub[24], nsub;
+    infarto_dib_t d[24]; infarto_num_t nv[5]; int nn = 0, n = infarto_dibujos(d, 24, nv, &nn), i, k, ahora[24], na = 0;
+    for (i = 0; i < n; i++) {
+        int u = hudd_uso(ha_hud, d[i].g);
+        if (u < 0) { static int av; if (!av++) dbglog(DBG_ERROR, "HAHUD: sin el grupo %s (HAHUD.DAT de antes de la Rev 1.1)\n", d[i].g); continue; }
+        ahora[na++] = u;
+        if (!hudd_uso_residente(ha_hud, u) && hudd_sube_uso(ha_hud, u)) dbglog(DBG_ERROR, "HAHUD: sin VRAM para %s\n", d[i].g);
+        if (hudd_uso_residente(ha_hud, u)) hudd_dibuja(ha_hud, u, d[i].cuadro, d[i].x, d[i].y, 1, 125 + 0.01f * i, 0);
+    }
+    for (k = 0; k < nsub; k++) {
+        for (i = 0; i < na && ahora[i] != sub[k]; i++) ;
+        if (i == na) hudd_baja_uso(ha_hud, sub[k]);
+    }
+    memcpy(sub, ahora, sizeof(int) * (size_t)na); nsub = na;
+    for (i = 0; i < nn; i++) { char b[16]; sprintf(b, "%3d", (int)nv[i].v); hud_cifras("CRONO", b, nv[i].x, nv[i].y, 0xFFFFFF); }
+}                                        /* [780258] (PS2 0x443508) de la carrera */
 /* Juego de la carrera (PS2 [0x59acac] = PC [780260], 0x1b4878 = 43F860): 1 el de la consola (SUMO_FE: el menu lo pone
    al entrar, 0x237e28), 0 el de OUTRUN2SP (el menu principal lo pone a 0 al elegirlo: 0x23aba0, opcion 2, y +21C = 7).
    Preset del curso (PS2 [0x44350c] = [gp-0x7b64] = PC [78024C]; gp = 0x44b070, 0x1012f8): START (0x1b63a0) lee el
@@ -15252,6 +15272,8 @@ int main(int argc, char **argv)
                         hc.muro = yo.choque == 1; memcpy(hc.sup, sup_rueda, sizeof hc.sup);
                         hc.d36 = fis_ok ? fis.d36 : 0; hc.seccion_union = cur_en_union ? (int)floorf((yo.s - s_union) / m_pos) : 0; hc.derrapa = yo.t_derrape != 0; hc.kmh = fis_ok ? fis.velocidad_hud : yo.v * 3.6f; hc.vel_mf = fis_ok ? fis.vel_mf : 0;
                         hc.hud = fis_ok ? fpar.hud : 0;
+                        hc.ofs = fis_ok ? fis.ofs : 0; hc.d268 = vib_izq; hc.d264 = -vib_der; hc.modelo = modelo_jug;
+                        hc.x = yo.pos[0]; hc.y = yo.pos[1]; hc.z = yo.pos[2]; hc.sig = cur_en_union && cur_rama >= 0 ? cur_sig : -1;
                         infarto_paso(&hc);
 #ifdef DIAG_HA
                         if (crono % 60 == 0) { int q;
@@ -15884,6 +15906,7 @@ int main(int argc, char **argv)
                             infarto_spr_t sv[64]; int ns = infarto_medidor(sv, 64);
                             for (i = 0; i < ns; i++)        /* HA_C0..HA_C5 empiezan en el cuadro 0x1F */
                                 hudd_dibuja(ha_hud, hudd_uso(ha_hud, G[sv[i].g & 7]), sv[i].cuadro - (sv[i].g < 6 ? 0x1f : 0), sv[i].x, sv[i].y, 1, 120 + 0.01f * i, 0);
+                            ha_dibujos();                   /* 45BDF0 y 4603F0 */
                         }
                     }
                 }

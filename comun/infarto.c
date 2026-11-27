@@ -40,6 +40,7 @@
 #include "gd.h"
 #include "sfx.h"
 #include "infarto.h"
+#include "robot.h"
 
 #define NIV 15
 static uint8_t *dat;
@@ -53,6 +54,36 @@ static int inf_preset = -1, inf_cargado = -1;
 static uint32_t lba_coches;                         /* el fichero de la tabla de coches del preset */
 static uint8_t base_k[15];                          /* 45C160: la mision base de la clave en el arbol del preset */
 static uint8_t *mis1;                               /* misiones del preset 1 (INFARTOP.DAT) */
+/* INFARTOX.DAT (tools/conv_infarto.py extra): secciones con etiqueta; PTS2 = 26 x 6 u32, la tabla de 45E2F0 por tipo */
+static uint8_t *xdat; static uint32_t xtam;
+static const uint8_t *xsec(const char *tag, uint32_t *n)
+{
+    uint32_t k, c;
+    if (!xdat || xtam < 8) return NULL;
+    memcpy(&c, xdat + 4, 4);
+    for (k = 0; k < c && 8 + 12 * k + 12 <= xtam; k++) {
+        const uint8_t *e = xdat + 8 + 12 * k; uint32_t o, l;
+        memcpy(&o, e + 4, 4); memcpy(&l, e + 8, 4);
+        if (!memcmp(e, tag, 4) && o + l <= xtam) { if (n) *n = l; return xdat + o; }
+    }
+    return NULL;
+}
+static const uint8_t *x_pts, *x_hoja, *x_clas, *x_rgir;   /* PTS2, HOJA, CLAS, RGIR */
+static int lee_x(void)
+{
+    uint32_t lba, tam, n;
+    if (xdat) return 0;
+    if (gd_busca("INFARTOX.DAT", &lba, &tam) || tam < 8 || tam > 65536) { dbglog(DBG_ERROR, "INFARTO: sin INFARTOX.DAT\n"); return -1; }
+    n = (tam + 2047) & ~2047u;
+    if (!(xdat = memalign(32, n))) return -1;
+    if (gd_lee(lba, (int)(n >> 11), xdat) || memcmp(xdat, "HRX1", 4)) { free(xdat); xdat = NULL; return -1; }
+    xtam = tam;
+    {   uint32_t l; x_pts = xsec("PTS2", &l); if (x_pts && l < 26 * 24) x_pts = NULL;
+        x_hoja = xsec("HOJA", &l); if (x_hoja && l < 136) x_hoja = NULL;
+        x_clas = xsec("CLAS", &l); if (x_clas && l < 26) x_clas = NULL;
+        x_rgir = xsec("RGIR", &l); if (x_rgir && l < 64) x_rgir = NULL; }
+    return 0;
+}
 static int ny_tramo;                                /* 1: la etapa del jugador es la del descriptor 0x1a (NEWY) */
 static uint8_t lv[NIV][0x44];                       /* 7F2548 + nivel * 0x44 (registro del nivel) */
 #define LV_SEL(l)   (*(int8_t *)&lv[l][0])
@@ -72,6 +103,32 @@ static int k0_fase, k0_9c, k0_98, k0_a0, k0_ab0, k0_aac, k0_a, k0_b;   /* 7F8A90
 static int k2_ini, k2_ult, k2_c, k2_d;              /* 7F2988, 7F8B38, 7F1C50, 7F1C52 */
 /* tipo 6 */
 static int k6_a, k6_b, k6_max;                      /* 7F23BC, 7F23BE, 7F23C0 */
+/* tipos 8 y 23 (circula por el azul / el rojo; 23: derrapando) */
+static int k8_a, k8_b, k8_lado, k8_ult, k8_dist, k8_max;   /* 7F2530, 7F2532, 7F2538, 7F253C, 7F2540, 7F2534 */
+/* reacciones de la acompanante que piden las peticiones (487D60 / 487D90 / 487DD0; robot 1: comun/robot.c robot_pide,
+   con los movimientos de CHRH.DAT) */
+static void rob_mov(uint32_t id) { robot_pide(1, id, 0, 0, 0); }        /* 487D60: +68 = id, +78 = 2 */
+static void rob_cara(int v) { robot_pide(0, 0, 1, v, 0); }              /* 487D90: +70 = v, +78 = 0, +7C = 1 */
+static void rob_para(void) { robot_pide(0, 0, 0, 0, 1); }               /* 487DD0: +7C = 0 */
+static uint8_t *chrh;                               /* CHRH.DAT (tools/conv_chr.py --infarto) */
+/* el animo de la acompanante (PS2 0x1aac60): el coche 9 siempre 0x6003D; si no, rand x 2^-31 < 0,5 -> otro, si no 0x6003E */
+static uint32_t anima(int modelo, uint32_t otro)
+{
+    if (modelo == 9) return 0x6003d;
+    return (float)rand() * 4.65661287e-10f < 0.5f ? otro : 0x6003e;
+}
+/* 45B380 (PS2 0x1aa3a0): 1 en los coches 2..24 cuyo byte de la tabla es 0 (los "callados": sin reacciones) */
+static int modelo_callado(int m)
+{
+    static const uint8_t B[23] = { 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 1, 0, 1, 0, 0, 1, 1, 1, 1, 1, 0 };
+    unsigned k = (unsigned)(m - 2);
+    return k <= 0x16 && !B[k];
+}
+static int modelo_jug;                              /* car+0x11 del jugador (el ultimo paso) */
+/* 45BDF0 (PS2 0x1ad6f4): el panel de la nota 7F8B2C que entra 7F8B28 cuadros (0x78 al cerrar la peticion) */
+static int cara_t, cara_nota;                       /* 7F8B28, 7F8B2C */
+/* 4603F0 (PS2 0x1ad004): la hoja de resultados mientras el jugador esta en la union (7F8B34: cuadros en ella) */
+static uint32_t hoja_t; static int hoja_sig = -1, hoja_k, hoja_hb = -1, hoja_hb_t, hoja_hs = -1, hoja_hs_t;
 /* coches de la mision */
 static const uint8_t *ct_base; static int ct_v, ct_i, ct_n, ct_pend = -1, ct_sec;  /* 7F24B8, 7F24C0, 7F24BC, 7F24C4 */
 static infarto_hud_t hud;
@@ -275,6 +332,14 @@ int infarto_inicia(void)
     mis = dat + o[0]; pun = dat + o[1]; anu = dat + o[2]; res = dat + o[3]; cor = dat + o[4]; grp = dat + o[5];
     modelos = modelos_c;
     lee_preset();
+    lee_x();
+    {   uint32_t lba, tam;                          /* CHRH.DAT: ~52 KB del monton mientras dure el modo */
+        if (!chrh && !gd_busca("CHRH.DAT", &lba, &tam) && tam < 131072 && (chrh = memalign(32, (tam + 2047) & ~2047u))) {
+            if (gd_lee(lba, (int)((tam + 2047) >> 11), chrh)) { free(chrh); chrh = NULL; }
+            else robot_extra(chrh, tam);
+        }
+        if (!chrh) dbglog(DBG_ERROR, "INFARTO: sin CHRH.DAT (la acompanante no reacciona a las peticiones)\n");
+    }
     inf_cargado = inf_preset;
     dbglog(DBG_INFO, "INFARTO: preset %d, misiones %s, coches %s, bases %d %d %d ...\n", inf_preset, mis1 ? "INFARTOP (0x3f3ed8)" : "INFARTO (0x3f0b98)",
            lba_coches != lba_dat ? "INFARTOP (0x362718)" : "INFARTO (0x35c958)", base_k[0], base_k[1], base_k[2]);
@@ -340,6 +405,9 @@ static int mision(int k, int nivel)                 /* 45C2C0 (PS2 0x1aedb8) por
         }
     }
     e = mis_tabla(LV_SEL(l), k);
+#ifdef PRUEBA_HA_MISION
+    if (l == 0) e = PRUEBA_HA_MISION;               /* prueba: la mision de la primera etapa */
+#endif
     LV_U32(l, 4) = e;
     return e < n_mis ? e : 0;
 }
@@ -403,13 +471,17 @@ static void fin_peticion(int r, int h)              /* 462F10 (PS2 0x1b3a78) + 4
     int tab = t == 0xff ? rd32(res + 28 + 5 * 32) : t;
     rotulo_cierra();
     voz(rd32(res + 28 + tab * 32 + nt * 4), 0x3c, 9);   /* 45DDC0 (PS2 0x1b3880) */
+    if (x_rgir && !(modelo_jug == 9 && nt == 5)) {  /* 45DED0 (PS2 0x1b3988) */
+        rob_para();
+        if (nt > 0) rob_mov((uint32_t)rd32(x_rgir + (modelo_callado(modelo_jug) ? 32 : 0) + 4 * nt));
+    }
     rotulo_nota(nt);
     lv[nivel_act][0x38 + nt]++;
     if (n_req < 5) LV_U32(nivel_act, 8 + 4 * n_req) = nt;
     LV_U32(nivel_act, 0x1c) += nt;
     if ((int8_t)lv[nivel_act][0x40] < 5) LV_U32(nivel_act, 0x20 + 4 * (int8_t)lv[nivel_act][0x40]) = h;
     score += h * 10000; lv[nivel_act][0x40]++;
-    hud.nota = nt; hud.t_nota = 0;
+    hud.nota = nt; hud.t_nota = 0; cara_nota = nt;  /* 462EA0: 7F8B2C */
     dbglog(DBG_INFO, "INFARTO: fin de la peticion tipo %d: resultado %d, nota %d, +%d corazones, total %d\n", q,
            (int)(result / 10000), nt, h, (int)(score / 10000));
     medidor = 2;                                    /* 7F19F8 = 2: se cierra (45FB80) */
@@ -419,6 +491,7 @@ static void cierra(int nt, int32_t edi, int hs)    /* cola comun de las evaluaci
 {
     int32_t h = corazones_res(edi, nt);
     contador = (hs + hs / 2) * 10 / 7;               /* 7F8B30 (PS2 0x35c950): efecto 0xD5 cada 10 cuadros */
+    cara_t = 0x78;                                  /* 7F8B28 (PS2 0x35c948) */
     fin_peticion(nt, h / 10000);
 }
 
@@ -448,7 +521,12 @@ static int sucesos(const uint8_t *t, const infarto_coche_t *c)
 
 /* ---- tipos de peticion: puesta en marcha (464350 / PS2 0x1ae768), control (464D20 / 0x1a7fe4), evaluacion
    (464350 / 0x1aea30) */
-static int portado(int k) { return k == 0 || k == 2 || k == 22 || k == 6; }
+static int portado(int k) { return k == 0 || k == 2 || k == 22 || k == 6 || k == 8 || k == 23; }
+static const uint8_t *pts(int k)                    /* la tabla de 45E2F0 del tipo k (INFARTOX.DAT PTS2) */
+{
+    static const uint8_t cero[24];
+    return x_pts && k >= 0 && k < 26 ? x_pts + 24 * k : cero;
+}
 static void puesta(const uint8_t *r, const infarto_coche_t *c)
 {
     int w0 = rd16(r), w2 = rd16(r + 2), w6 = rd16(r + 6), w8 = rd16(r + 8);
@@ -458,6 +536,8 @@ static void puesta(const uint8_t *r, const infarto_coche_t *c)
     case 2: case 22:                                /* 45F310 (el 22 instala ademas un registro de aparicion: SIN PORTAR) */
         k2_c = w6; k2_d = w8; k2_ini = k2_ult = c->pasados; reinicia_res(); break;
     case 6: k6_a = w0; k6_b = w2; k6_max = 0; reinicia_res(); break;
+    case 8: case 23:                                /* 464350 caso 4 (PS2 0x1ae800) */
+        k8_a = w0; k8_b = w2; k8_lado = w6; k8_ult = -1; k8_dist = 0; k8_max = 0; reinicia_res(); break;
     }
     medidor = 1;                                    /* 7F19F8 = 1 */
 }
@@ -469,9 +549,11 @@ static void control(const infarto_coche_t *c)
         if (k0_fase == 2) {
             if (c->d36 > 0) { if (--k0_9c < 0) k0_9c = 0; }
             else if (k0_9c < 0x78) k0_9c += 2;
-            else { k0_fase = 1; k0_aac = 0; }
+            else { k0_fase = 1; k0_aac = 0; rob_para(); }
         } else if (c->d36 > 0) {
+            unsigned qf = (unsigned)((k0_a0 - bonus) / 80000);   /* PS2 0x1a8e50: tabla 0x3efb40 */
             k0_fase = 2; k0_9c = 0; voz(0xc6, 0x3c, 0); k0_aac = c->seccion;
+            rob_cara(qf <= 2 ? 0 : qf <= 4 ? 5 : qf == 5 ? 3 : 4);
         }
         sucesos(pun, c);
         if (k0_fase == 2) {
@@ -499,13 +581,26 @@ static void control(const infarto_coche_t *c)
             sfx_voz_se(0x50);
             contador = 10;
             voz(V[dx23dc % 5], 0x3c, 0);
+            rob_mov(anima(c->modelo, q == 22 ? 0x6003d : 0x6003f));   /* PS2 0x1aac60 */
         }
         dx23dc++; break; }
     case 6: {                                       /* 45F540 (PS2 0x1aaf18) */
         int edi = (int)((float)(c->seccion - k6_a) / (float)(int16_t)(k6_b - k6_a) * 800000.0f);
         if (sucesos(pun + 72, c)) voz(0x14f, 0x3c, 6);
+        else { rob_cara(0); rob_para(); }
         if (edi > k6_max) k6_max = edi;
         resultado(k6_max); break; }
+    case 8: case 23: {                              /* 45EEB0 (PS2 0x1a9af8) */
+        float a = c->ofs * (float)k8_lado, b = c->d264 * c->d268; int ok = !(q == 23 && !(c->d36 > 0)), e;
+        sucesos(pts(8), c);                         /* (0x1a9a80: la tabla 0x3efcb8) */
+        if (a > 0.0f && b < 0.0f && ok) {
+            if (k8_ult < 0) k8_ult = c->seccion - 1;
+            if (c->seccion > k8_ult) { k8_dist += c->seccion - k8_ult; k8_ult = c->seccion; }
+            rob_cara(5); rob_para();
+        } else k8_ult = -1;
+        e = (int)((float)k8_dist / ((float)(int16_t)(k8_b - k8_a) * 0.9f) * 800000.0f);   /* 0x1a9aa0 */
+        if (e > k8_max) k8_max = e;
+        resultado(k8_max); break; }
     default: {                                      /* sin peticion: PS2 0x1a8100..0x1a8250 */
         static const uint8_t T[14] = { 0, 0, 1, 1, 0, 0, 1, 2, 2, 2, 2, 0, 0, 0 };
         if (c->choque_ini) {
@@ -550,6 +645,15 @@ static void evalua(const infarto_coche_t *c)
             if (cap < hs) { hs = cap; edi = cap * 10000; }
         }
         cierra(nt, edi, hs); break; }
+    case 8: case 23: {                              /* 463250 (PS2 0x1a9c70) */
+        int hs = res_pos() / 10000, nt = nota(hs), ebp = 0;
+        if (nt == 7) {
+            float v = (float)k8_dist / (float)(int16_t)(k8_b - k8_a) / 0.1f;
+            if (v > 1.0f) v = 1.0f;
+            hs = 0x50;
+            ebp = (int)(v * 300000.0f) + (int)(mantiene(v_ini - c->kmh) * 400000.0f);
+        }
+        cierra(nt, hs * 10000 + ebp, hs); break; }
     default: fin_peticion(0, 0); break;
     }
 }
@@ -590,6 +694,87 @@ static int previa(const uint8_t *r, int sec)
     return 1;
 }
 
+/* 45C7E0 (PS2 0x1af710): la clase 1..3 de la mision especial de la clave k (0: no lo es) */
+static int clase_mision(int k)
+{
+    int l = nivel_act + 1, q;
+    if (l >= NIV || k < 0) return 0;
+    q = mision(k, l);
+    return q >= 0xf && q - 0xf < 26 && x_clas ? x_clas[q - 0xf] : 0;
+}
+/* 4603F0: lo que hace la hoja al pasar cada cuadro de su guion (43FA00: los pasos de este cuadro; aqui uno por paso) */
+static void hoja_paso(const infarto_coche_t *c)
+{
+    uint32_t t = hoja_t; int lvl = nivel_act, i, n = n_req;
+    if (lvl == 4 || lvl < 0 || lvl >= NIV || !x_hoja) return;
+    if (t >= 0x21c) {                               /* la mision especial de la etapa siguiente (2B003F..41) */
+        if (c->sig < 0) return;                     /* 451350 = 2: sin rama elegida */
+        if (hoja_sig != c->sig) { hoja_sig = c->sig; hoja_k = clase_mision(c->sig); }
+        if (t == 0x276 && hoja_k >= 1 && hoja_k <= 3) { sfx_voz_se(0xdb); hoja_hs = hoja_k; hoja_hs_t = 0; }
+        if (t == 0x294) {                           /* (0x9cc.. con la bandera 0x800 del controlador) */
+            if (hoja_k == 1) sfx_voz_se(0x1cc);
+            else if (hoja_k == 2) { sfx_voz_se(0x1cd); sfx_voz_se(0xd9); }
+            else if (hoja_k == 3) { sfx_voz_se(0x1ce); sfx_voz_se(0xda); }
+        }
+        return;
+    }
+    if (t == 0x78) {
+        sfx_voz_se(0xa9);                           /* (0x8a9) */
+        dbglog(DBG_INFO, "INFARTO: hoja de resultados del nivel %d: %d peticiones, nota media %d\n", lvl, n,
+               (int8_t)lv[lvl][0x40] > 0 ? LV_U32(lvl, 0x1c) / (int8_t)lv[lvl][0x40] : -1);
+    }
+    if (t < 0x168) {
+        for (i = 0; i < n && i < 5; i++)
+            if (t == 0x78u + (uint32_t)i * 0x3c + 0x3c) sfx_voz_se(rd32(x_hoja + 4 * (LV_U32(lvl, 8 + 4 * i) & 7)));
+    }
+    if (t == 0x1a4 && (int8_t)lv[lvl][0x40] > 0) { /* la nota media: voz, rotulo 2B0007..0D y la acompanante */
+        int g = LV_U32(lvl, 0x1c) / (int8_t)lv[lvl][0x40];
+        g = g < 0 ? 0 : g > 7 ? 7 : g;
+        sfx_voz_se(rd32(x_hoja + 4 * g));
+        hoja_hb = g; hoja_hb_t = 0;
+        rob_mov((uint32_t)rd32(x_hoja + 72 + (modelo_callado(c->modelo) ? 32 : 0) + 4 * (g < 1 ? 1 : g)));
+    }
+}
+int infarto_dibujos(infarto_dib_t *v, int max, infarto_num_t *nv, int *nn)
+{
+    int n = 0, lvl = nivel_act, i, cn = 0;
+    uint32_t t = hoja_t;
+#define DIB(nom, cu, X, Y) do { if (n < max) { strncpy(v[n].g, nom, 11); v[n].g[11] = 0; v[n].cuadro = (cu); v[n].x = (X); v[n].y = (Y); n++; } } while (0)
+    if (cara_t > 0 && dat) {                        /* 45BDF0 */
+        char b[20]; int x = cara_t > 0x5a ? (int)((1.0f - (float)(cara_t - 0x5a) * 0.0333333f) * 384.0f) - 0x9c : 0xe4;
+        sprintf(b, "HA_CARA%d", cara_nota & 7); DIB(b, 0, (float)x, 93.0f);
+    }
+    if (hoja_hb >= 0) {                             /* 428320(0x3effe8[g], 9, 3): una vez */
+        char b[20]; sprintf(b, "HA_HB%d", hoja_hb); DIB(b, hoja_hb_t, 0, 0);
+        if (++hoja_hb_t >= 90) hoja_hb = -1;
+    }
+    if (hoja_hs >= 1) {                             /* 428320(2B003F + k - 1, 7, 3) */
+        char b[20]; sprintf(b, "HA_HS%d", hoja_hs); DIB(b, hoja_hs_t, 0, 0);
+        if (++hoja_hs_t >= 180) hoja_hs = -1;
+    }
+    if (dat && x_hoja && lvl >= 0 && lvl < 4 && t >= 0x78 && t < 0x21c) {
+        if (t < 0x168) {
+            char b[20];
+            sprintf(b, "HA_HN%d", lvl); DIB(b, 0, 0, 0);
+            if (n_req >= 1 && n_req <= 3) { sprintf(b, "HA_HC%d", n_req); DIB(b, 0, 0, 0); }
+            for (i = 0; i < n_req && i < 5; i++) {
+                uint32_t lim = 0x78 + (uint32_t)i * 0x3c; float y; int g = -1;
+                {   union { uint32_t u; float f; } q; q.u = (uint32_t)rd32(x_hoja + 32 + 4 * i); y = (float)(int)q.f; }
+                if (t >= lim + 0x3c) g = LV_U32(lvl, 8 + 4 * i) & 7;
+                else if (t >= lim) g = (int)(t >> 2) & 7;
+                if (g >= 0) { sprintf(b, "HA_HG%d", g); DIB(b, 0, 276.0f, y + 224.0f); }   /* (96 x 32: 4294C0 = (48, 16)) */
+                if (nv && cn < 5) { nv[cn].x = 0x19d; nv[cn].y = rd32(x_hoja + 52 + 4 * i); nv[cn].v = LV_U32(lvl, 0x20 + 4 * i); cn++; }
+            }
+        }
+        if (t >= 0x1a4) DIB("HA_HE", 0, 0, -4.0f);
+        else if (t >= 0x168) {
+            char b[20]; DIB("HA_HE", 0, 0, -4.0f); sprintf(b, "HA_HA%d", (int)(t >> 2) & 7); DIB(b, 0, 0, -4.0f);
+        }
+    }
+#undef DIB
+    if (nn) *nn = cn;
+    return n;
+}
 static void gestor_(const infarto_coche_t *c)       /* 464350 (PS2 0x1ae440) */
 {
     if (!c->en_union) {
@@ -627,6 +812,7 @@ void infarto_carrera(int clave, int nivel)          /* 45E0F0 */
         LV_U32(l, 8) = LV_U32(l, 12) = LV_U32(l, 16) = LV_U32(l, 20) = LV_U32(l, 24) = -1; }
     memset(&hud, 0, sizeof hud); hud.nota = -1; hud.nota_etapa = -1; hud.anuncio = -1; hud.t_nota = hud.t_etapa = hud.t_anuncio = 9999;
     clave_act = clave; nivel_act = nivel; empieza(0, 3); n_req = 0; rec_i = 0; h_nivel = 0;
+    hoja_t = 0; hoja_sig = -1; hoja_hb = hoja_hs = -1; cara_t = 0; cara_nota = 0;
     cuenta_peticiones(mision(clave, nivel));
     if (dat) sfx_voz_grupo(grp[clave >= 0 && clave < 15 ? clave : 0]);
 }
@@ -649,6 +835,7 @@ void infarto_etapa(int clave, int nivel)            /* 464350, stage clear */
     dbglog(DBG_INFO, "INFARTO: etapa %d terminada: %d corazones en ella, nota media %d, total %d\n", clave_act, (int)edi,
            hud.nota_etapa, (int)(score / 10000));
     disp = score; h_nivel = score / 10000; tot_ver = 0;   /* 7F2468, 7F2464 */
+    hoja_t = 0; hoja_sig = -1;                       /* 7F8B34 = 0 (464350 en el stage clear) */
     clave_act = clave; nivel_act = nivel; n_req = 0; rec_i = 0; trafico = 1;
     cuenta_peticiones(mision(clave, nivel));
     sfx_voz_grupo(grp[clave >= 0 && clave < 15 ? clave : 0]);
@@ -674,7 +861,8 @@ void infarto_paso(const infarto_coche_t *c)         /* 464D20 */
     reloj++;
     if (!dat) return;
     if (vs_n < 0x57e3f) { vs_suma += c->vel_mf; vs_n++; }
-    hud_coche = c->hud;
+    hud_coche = c->hud; modelo_jug = c->modelo;
+    if (c->en_union) { hoja_t++; hoja_paso(c); }    /* 464D20: 7F8B34 + 1 en la union */
     control(c);
     alerta = score == disp ? 0 : score > disp ? 1 : -1;   /* 7F1CAC */
     d = (score - disp) / 32;                         /* el contador alcanza a los corazones */
@@ -684,6 +872,7 @@ void infarto_paso(const infarto_coche_t *c)         /* 464D20 */
     if (c->en_union) sec_union_ult = c->seccion_union;
     estadisticas(c);
     medidor_paso();
+    cara_t--;                                       /* 45FB80 (PS2 0x1acf48): 7F8B28 - 1 */
     efectos_paso();
     rotulo_paso();
     if (contador > 0) { if (contador % 10 == 0) sfx_voz_se(0xd5); contador--; }
@@ -701,6 +890,11 @@ void infarto_paso(const infarto_coche_t *c)         /* 464D20 */
         if (s <= c->seccion + 0x32) ct_pend = ct_i;
         break;
     }
+#ifdef DIAG_HA
+    if (q != 3 && reloj % 60 == 0)
+        dbglog(DBG_INFO, "DIAGHA tipo %d sec %d resultado %d bonus %d ofs %.2f izq %.2f der %.2f d36 %d k8 %d/%d\n", q, c->seccion,
+               (int)(result / 10000), (int)(bonus / 10000), (double)c->ofs, (double)c->d268, (double)c->d264, c->d36, k8_dist, k8_b - k8_a);
+#endif
     hud.tipo = q; hud.resultado = q == 3 ? 0 : (int)(res_pos() / 10000); hud.corazones = disp / 10000; hud.total = score / 10000;
     if (hud.t_nota < 9999) hud.t_nota++;
     if (hud.t_etapa < 9999) hud.t_etapa++;
@@ -729,7 +923,8 @@ void infarto_coche_abierto(int ok)
     ct_n++; ct_i = ct_pend + 1;
     if (ct_v & 0x80) { ct_pend = ct_i < 0x64 ? ct_i : -1; } else ct_pend = -1;
 }
-void infarto_libera(void) { free(dat); dat = NULL; free(mis1); mis1 = NULL; inf_cargado = -1; }
+void infarto_libera(void) { free(dat); dat = NULL; free(mis1); mis1 = NULL; free(xdat); xdat = NULL; x_pts = NULL;
+                          robot_extra(NULL, 0); free(chrh); chrh = NULL; inf_cargado = -1; }
 /* sprites de la animacion (428460: cuadros ini..fin, modo 0 en bucle, 1 una vez; estado 3 = acabado) */
 static void spr_abre(spr_t *s, int g, int ini, int fin, int modo, float x, float y)
 {

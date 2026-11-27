@@ -51,6 +51,46 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ps2.iso import Iso
 import conv_sonido as cs
 
+def extra(elf, V, u32, par):
+    """INFARTOX.DAT: lo que piden los tipos de peticion de la Rev 1.1 (docs/PARIDAD.md, INFARTO: los tipos de peticion
+    que faltaban). 'HRX1', u32 n, n x {char[4] etiqueta, u32 desplazamiento, u32 tamano}, datos:
+      PTS2: 26 x 6 u32, la tabla de puntos de 45E2F0 (PS2 0x1a8988) de cada tipo de peticion, leida del par lui/addiu
+            del a0 de la llamada de su control (0 en los tipos que no la llaman: 7 / 24, 17, 18, 21)"""
+    sec = []
+    # tablas de puntos por tipo: (tipos, lui, addiu, direccion esperada); 0, 2, 22 y 6 como en INFARTO.DAT
+    pts = [(0,), 0x1a8d6c, 0x1a8d78, 0x3efb20], [(2,), 0x1aaaf0, 0x1aab00, 0x3efd60], [(22,), 0x1aaaf4, 0x1aaafc, 0x3efd78], \
+          [(6,), 0x1aaf3c, 0x1aafa8, 0x3efda8], [(8, 23), 0x1a9a84, 0x1a9a90, 0x3efcb8], [(9,), 0x1a9f4c, 0x1a9f58, 0x3efcd0], \
+          [(11,), 0x1aa384, 0x1aa390, 0x3efce8], [(14,), 0x1ab6e0, 0x1ab6ec, 0x3efdc0], [(15,), 0x1b0264, 0x1b026c, 0x3f07c0], \
+          [(16, 25), 0x1b0678, 0x1b06a8, 0x3f07d8], [(19,), 0x1b11dc, 0x1b11e4, 0x3f0810], [(20,), 0x1b1f70, 0x1b1f7c, 0x3f0828]
+    t = [bytes(24)] * 26
+    for tipos, a, b, esp in pts:
+        d = par(a, b); assert d == esp, 'tabla de puntos 0x%x != 0x%x' % (d, esp)
+        for k in tipos: t[k] = elf[V(d):V(d) + 24]
+    sec.append((b'PTS2', b''.join(t)))
+    # HOJA: la hoja de resultados de la etapa 4603F0 (PS2 0x1ad004): 8 u32 voces por nota (0x3f7308), 5 f32 y de las
+    # filas (0x3eff98), 5 u32 y de las cifras (0x3effb0), 8 u32 movimientos de la acompanante por nota (0x3f0b50; los
+    # coches de 45B380: 0x3f0b70) y 8 u32 mas de la otra tabla
+    tv = par(0x1ad3c0, 0x1ad3c8); assert tv == 0x3f7308, hex(tv)
+    ty = par(0x1ad1d0, 0x1ad1e8); assert ty == 0x3eff98, hex(ty)
+    tt = par(0x1ad1d4, 0x1ad1dc); assert tt == 0x3effb0, hex(tt)
+    ta = par(0x1ad410, 0x1ad414); tb = par(0x1ad404, 0x1ad40c); assert (ta, tb) == (0x3f0b50, 0x3f0b70), (hex(ta), hex(tb))
+    sec.append((b'HOJA', elf[V(tv):V(tv) + 32] + elf[V(ty):V(ty) + 20] + elf[V(tt):V(tt) + 20] + elf[V(ta):V(ta) + 32] +
+                elf[V(tb):V(tb) + 32]))
+    # CLAS: 26 u8, la clase de la mision 0x0F.. (45C7E0 = PS2 0x1af710, tabla de saltos 0x3f06e0: 1, 2 o 3) para el
+    # rotulo de la mision especial que viene (2B003F..41)
+    tj = par(0x1af748, 0x1af750); assert tj == 0x3f06e0, hex(tj)
+    caso = {0x1af764: 1, 0x1af76c: 2, 0x1af774: 3, 0x1af77c: 0}
+    sec.append((b'CLAS', bytes(caso[u32(tj + 4 * i)] for i in range(26))))
+    # RGIR: 2 x 8 u32, el movimiento de la acompanante por nota al acabar la peticion (45DED0 = PS2 0x1b3988: 0x3f0a68,
+    # 0x3f0a88 con los coches de 45B380)
+    ra = par(0x1b39c0, 0x1b39c8); rb_ = par(0x1b39f0, 0x1b39f4); assert (ra, rb_) == (0x3f0a68, 0x3f0a88), (hex(ra), hex(rb_))
+    sec.append((b'RGIR', elf[V(ra):V(ra) + 32] + elf[V(rb_):V(rb_) + 32]))
+    cab = 8 + 12 * len(sec); out = bytearray(b'HRX1' + struct.pack('<I', len(sec))); datos = b''
+    for tag, d in sec:
+        out += tag + struct.pack('<2I', cab + len(datos), len(d)); datos += d
+        while len(datos) % 4: datos += b'\0'
+    return bytes(out + datos)
+
 def main():
     if len(sys.argv) < 3: raise SystemExit(__doc__.split('\n')[0])
     iso = Iso(sys.argv[1]); sal = sys.argv[2]; os.makedirs(sal, exist_ok=True)
@@ -68,6 +108,8 @@ def main():
     def li(a):
         w = u32(a); assert w >> 26 in (9, 13) and (w >> 21) & 31 == 0, 'se esperaba un li en 0x%x' % a
         return w & 0xffff
+    if '--solo-x' in sys.argv:                          # solo INFARTOX.DAT
+        open(os.path.join(sal, 'INFARTOX.DAT'), 'wb').write(extra(elf, V, u32, par)); return
 
     misiones = par(0x1a7bdc, 0x1a7be4)                  # 45E050 / quest_records: [0x44350c] == 0
     assert misiones == 0x3f0b98, hex(misiones)
@@ -182,6 +224,8 @@ def main():
     outp = b'HRP1' + struct.pack('<%dI' % len(partes), *offs) + struct.pack('<I', off) + b''.join(partes)
     open(os.path.join(sal, 'INFARTOP.DAT'), 'wb').write(outp)
     print('INFARTOP.DAT: %d bytes (misiones 0x%x, coches 0x%x)' % (len(outp), mis1, tt1))
+    open(os.path.join(sal, 'INFARTOX.DAT'), 'wb').write(extra(elf, V, u32, par))
+    print('INFARTOX.DAT: %d bytes' % os.path.getsize(os.path.join(sal, 'INFARTOX.DAT')))
 
     # HAHUD.DAT
     import numpy as np, conv_hud as ch
@@ -211,6 +255,41 @@ def main():
     a2c, T2c, _ = D.banco(0x2c)
     escenas = [(n, k, f, 0x2b) for n, k, f in escenas] + [('HA_PANEL', 0x2a, range(1), 0x2c)]
     escenas += [('HA_FILA%d' % i, fil[i] & 0xffff, range(2), 0x2c) for i in range(5)]
+    # Rev 1.1: el panel de la nota que entra (45BDF0 = PS2 0x1ad6f4, tabla 0x3f0010 por la nota 7F8B2C) y la hoja de
+    # resultados de la etapa (4603F0 = PS2 0x1ad004): titulo del nivel (0x3eff60), peticiones del nivel 2C0090..92, nota
+    # de cada fila (0x3eff78; la que corre: la misma tabla por (t >> 2) & 7), "Ranking en la etapa" 2C0081 y su animacion
+    # (0x3effc8), el rotulo de la nota media (0x3effe8, banco 0x2B, entero: 428320 con el modo 3) y el de la mision
+    # especial que viene (2B003F..41, enteros). Las del banco 0x2C, solo el cuadro 0 (429530 con el cuadro 0)
+    def tabla(lui, add, esp, n):
+        a = par(lui, add); assert a == esp, 'tabla 0x%x != 0x%x' % (a, esp)
+        return struct.unpack_from('<%dI' % n, elf, V(a))
+    def todos(bk_, tok):
+        am = ag if bk_ == 0x2b else a2c
+        sc = am.escenas[tok & 0xffff]; nc, pc = struct.unpack_from('<2I', am.a, sc); raiz = pc + (nc - 1) * 0x24
+        return range(int(struct.unpack_from('<f', am.a, raiz + 8)[0]))
+    for i, tok in enumerate(tabla(0x1ad764, 0x1ad76c, 0x3f0010, 8)):
+        assert tok >> 16 == 0x2c; escenas.append(('HA_CARA%d' % i, tok & 0xffff, range(1), 0x2c))
+    for i, tok in enumerate(tabla(0x1ad0cc, 0x1ad0d4, 0x3eff60, 5)):
+        assert tok >> 16 == 0x2c; escenas.append(('HA_HN%d' % i, tok & 0xffff, range(1), 0x2c))
+    assert [u32(a) & 0xffff for a in (0x1ad178, 0x1ad184, 0x1ad1a8)] == [0x90, 0x91, 0x92], 'peticiones del nivel 2C0090..92'
+    for i in range(3): escenas.append(('HA_HC%d' % (i + 1), 0x90 + i, range(1), 0x2c))
+    for i, tok in enumerate(tabla(0x1ad24c, 0x1ad254, 0x3eff78, 8)):
+        assert tok >> 16 == 0x2c; escenas.append(('HA_HG%d' % i, tok & 0xffff, range(1), 0x2c))
+    assert u32(0x1ad440) & 0xffff == 0x81; escenas.append(('HA_HE', 0x81, range(1), 0x2c))
+    for i, tok in enumerate(tabla(0x1ad4fc, 0x1ad504, 0x3effc8, 8)):
+        assert tok >> 16 == 0x2c; escenas.append(('HA_HA%d' % i, tok & 0xffff, range(1), 0x2c))
+    for i, tok in enumerate(tabla(0x1ad3d8, 0x1ad3e0, 0x3effe8, 8)):
+        assert tok >> 16 == 0x2b; escenas.append(('HA_HB%d' % i, tok & 0xffff, todos(0x2b, tok), 0x2b))
+    assert [u32(a) & 0xffff for a in (0x1ad5e4, 0x1ad5f8, 0x1ad61c)] == [0x3f, 0x40, 0x41], 'misiones especiales 2B003F..41'
+    for i in range(3): escenas.append(('HA_HS%d' % (i + 1), 0x3f + i, todos(0x2b, 0x2b003f + i), 0x2b))
+    # 429530 (x, y) con 4294C0 (la mitad del tamano de la escena, PS2 0x1156c0): el uso lleva (w / 2 - 320, h / 2 - 240)
+    # y la demo pasa la x / y del original sin el 4294C0 (hud.c: escena centrada en (320, 240))
+    desp = {}
+    for nombre, k, _, bk in escenas:
+        if not (nombre.startswith('HA_CARA') or nombre.startswith('HA_H')): continue
+        am = ag if bk == 0x2b else a2c
+        sc = am.escenas[k]; nc, pc = struct.unpack_from('<2I', am.a, sc); raiz = pc + (nc - 1) * 0x24
+        w, h = struct.unpack_from("<hh", am.a, raiz); desp[nombre] = (int(round(w * 0.5 - 320)), int(round(h * 0.5 - 240)))
     for nombre, k, fotos, bk in escenas:
         am = ag if bk == 0x2b else a2c
         lst = []; ant = None
@@ -250,7 +329,7 @@ def main():
             for j, p in zip(range(k0, len(hud.pie)), vis):  # la pieza vale n cuadros (hud.c: flags >> 4); bit 2: la capa
                 q = list(hud.pie[j])                        # SPRANI lleva el 4 en +0x48 (resplandor que se suma)
                 q[3] = (q[3] & 11) | (4 if am.a[p['L'] + 0x48] & 4 else 0) | (min(n, 4095) << 4); hud.pie[j] = tuple(q)
-        hud.uso(nombre, g, 0, 0, capa=4)
+        hud.uso(nombre, g, *desp.get(nombre, (0, 0)), capa=4)
     hud.escribe(os.path.join(sal, 'HAHUD.DAT'))
     print('HAHUD.DAT: %d bytes, %d texturas' % (os.path.getsize(os.path.join(sal, 'HAHUD.DAT')), len(hud.tex)))
 

@@ -22,6 +22,11 @@ typedef struct {
     float kmh;              /* car+0x1F8 (km/h del velocimetro)                                                 */
     float vel_mf;           /* car+0x1C4 (m por cuadro)                                                         */
     float hud;              /* parametro +0x2438 del coche (+0x2B4): factor del velocimetro                     */
+    float ofs;              /* car+0x26C: distancia lateral al centro de la carretera (> 0 a la derecha)       */
+    float d268, d264;       /* car+0x268 / +0x264 (4A4010): hasta el borde izquierdo (> 0 dentro) y el derecho (< 0) */
+    float x, y, z;          /* car+0x14 (marco del mundo de la demo)                                            */
+    int   modelo;           /* car+0x11                                                                         */
+    int   sig;              /* la clave de la etapa siguiente si ya se ha elegido la rama en la union (451350 != 2), si no -1 */
 } infarto_coche_t;
 
 /* coche que pide abrir el gestor (45D470): clase (+324), seccion de la etapa, carril, modelo del juego */
@@ -56,6 +61,12 @@ int infarto_rotulo(int *texto, int *marco, int *cuadro);
 typedef struct { int g, cuadro; float x, y; } infarto_spr_t;
 int infarto_medidor(infarto_spr_t *v, int max);
 uint32_t infarto_tinte(void);
+/* lo 2D del modo que no es el medidor: el panel de la nota que entra (45BDF0) y la hoja de resultados de la etapa (4603F0):
+   grupos de HAHUD.DAT (nombre), su cuadro y (x, y) de hudd_dibuja (el uso ya lleva el 4294C0 del original); cifras "%3d"
+   en (x, y) de 4BC990 */
+typedef struct { char g[12]; int cuadro; float x, y; } infarto_dib_t;
+typedef struct { int x, y; int32_t v; } infarto_num_t;
+int infarto_dibujos(infarto_dib_t *v, int max, infarto_num_t *nv, int *nn);
 /* 4BCD50: filas de los niveles terminados (7F244C, hasta 4) y la de la etapa (7F2464) en v[n]; devuelve n */
 int infarto_filas(int32_t *v);
 #endif
