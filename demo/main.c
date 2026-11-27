@@ -3400,7 +3400,8 @@ static void ha_spr3d(void)
         if (k == na && na < 4) ahora[na++] = u;
         if (!hudd_uso_residente(ha_hud, u) && hudd_sube_uso(ha_hud, u)) continue;
         zv = dx * ade[0] + dy * ade[1] + dz * ade[2];
-        if (zv < cerca * 2.0f || (sc = d[i].esc * fx / zv * 0.03125f) <= 0.0f) continue;
+        if (zv < cerca * 2.0f) continue;
+        sc = d[i].esc > 0.0f ? d[i].esc * fx / zv * 0.03125f : 1.0f;   /* (esc <= 0: 429530, sin escala) */
         hudd_escala(sc, sc);
         hudd_dibuja(ha_hud, u, d[i].cuadro, (dx * der[0] + dy * der[1] + dz * der[2]) * fx / zv,
                     -(dx * arr[0] + dy * arr[1] + dz * arr[2]) * fx / zv, 1, 110 + 0.01f * i, 0);

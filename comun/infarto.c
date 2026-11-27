@@ -1291,6 +1291,9 @@ int infarto_spr3d(infarto_s3d_t *v, int max, int (*cuadros)(const char *g))
             if (++k20_fr[i] >= nc) k20_fr[i] = (int16_t)(nc - 1);   /* (+B66 + 1, tope [+8] - 1) */
         }
     }
+    {   uint32_t l = 0; const uint8_t *a = xsec("ARC2", &l);   /* los de los objetos (arcos y estrellas) */
+        if (cuadros) n += haobj_spr3d(v + n, max - n, cuadros, a && l >= 60 ? (const float *)a : NULL);
+    }
     return n;
 }
 void infarto_libera(void) { free(dat); dat = NULL; free(mis1); mis1 = NULL; free(xdat); xdat = NULL; x_pts = NULL;

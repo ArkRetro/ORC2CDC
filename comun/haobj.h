@@ -49,6 +49,12 @@ void haobj_est_abre(int si);             /* 461080 / 45C880 con la clase 0x13 (-
    con su direccion; n = 0 las quita */
 void haobj_marcas(int n, const int *reg, const float (*p)[3], const float *fx, const float *fz);
 int  haobj_lista(haobj_dib_t *v, int max, const float ojo[3]);
+/* sprites 3D (4295D0 = PS2 0x115870): grupo de HAHUD.DAT, cuadro, punto del mundo y escala (px = esc x foco / z / 32;
+   esc <= 0: sin escala, el sprite 2D de 429530 en el punto proyectado) */
+typedef struct haobj_s3d_s { char g[8]; int cuadro; float p[3], esc; } haobj_s3d_t;
+/* los de los objetos: 2C0002 del arco cruzado (0x1d4508, arc2: los 5 puntos de ARC2), 2C0007 de la estrella que llega
+   (0x1d4d80) y 2C0000 de la que sube (0x1d50e0); cuadros(g): los del grupo */
+int  haobj_spr3d(haobj_s3d_t *v, int max, int (*cuadros)(const char *g), const float *arc2);
 /* tipo 11, "Atrapa el corazon" (46DB60 = PS2 0x1dcaf8, el anillo 0x5d51f8 de 32 registros de 0x5C): dos corazones
    (registro 0x2a del banco 0x57, 1aa5b8) en los puntos l[2][3] (INFARTOX.DAT ANI1) del marco de cada coche vivo.
    Por plaza de trafico: pos / fw / up del coche (pos NULL: plaza libre) y marca (+C5C 0x20000: 0 en un coche nuevo; la

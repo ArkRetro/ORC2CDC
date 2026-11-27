@@ -26,7 +26,7 @@ typedef struct {
     float p[3], R[3][3], v[3], esc, giro;
     /* estrellas (tipo 8, control 0x1d4d80): +A4 reposo, +B0 paso del vuelo, +C0 activa, +BC volando, +74 tiempo del
        bote, +CC seccion (-32768: sin calcular); pieza: uno de los 40 trozos 0x134.. (est 4: abierto sin usar) */
-    float r0[3], b0[3], t74; uint8_t act, vuela, pieza; int16_t sec;
+    float r0[3], b0[3], t74; uint8_t act, vuela, pieza, tr; int16_t sec;   /* tr: cuadro de la estela 2C0007 (+98) */
 } obj_t;
 static uint8_t *cab;                     /* el primer sector de HAOSO.DAT */
 static uint32_t lba_o, tam_o, nfich;
@@ -112,9 +112,11 @@ static void euler(float R[3][3], const float *a, float yaw)   /* Ry(yaw) Ry(ay) 
     for (i = 0; i < 3; i++) for (j = 0; j < 3; j++) { T[i][j] = 0; for (k = 0; k < 3; k++) T[i][j] += Y[i][k] * X[k][j]; }
     for (i = 0; i < 3; i++) for (j = 0; j < 3; j++) { R[i][j] = 0; for (k = 0; k < 3; k++) R[i][j] += T[i][k] * Z[k][j]; }
 }
+static float jug_p[3], jug_f[2];        /* el jugador del ultimo paso (los destellos del arco) */
 void haobj_paso(const haobj_coche_t *c)
 {
     int i; float fx = c->fw[0], fz = c->fw[2], fl = sqrtf(fx * fx + fz * fz);
+    memcpy(jug_p, c->pos, sizeof jug_p); jug_f[0] = c->fw[0]; jug_f[1] = c->fw[2];
     ntoq = 0; ncru = 0; reloj_obj++; toq_g = toq_p = 0; npos = 0; sec_cb = c->sec; suelo_cb = c->suelo;
     marca_a += 0.2094395f; if (marca_a > 3.14159274f) marca_a -= 6.28318548f;   /* 0x1a7f78: el vaiven de las marcas */
     if (!ob) return;
@@ -258,6 +260,7 @@ void haobj_est_paso(int sec_jug, int lim, int *activas, const float *pz, haobj_e
     for (i = 0; i < nob - n_pie; i++) {
         obj_t *o = ob + i;
         if (o->tipo != 8 || o->est == 0) continue;
+        if (o->act && o->tr < 250) o->tr += 2;          /* 0x1d4d80: +98 + 2 por paso (la estela 2C0007) */
         if (!o->act) {                                  /* +C0 = 0: hasta 40 secciones por delante (+CC) */
             if (o->sec == -32768) { if (calc < 4 && sec_cb) { o->sec = (int16_t)sec_cb(o->r0[0], o->r0[2]); calc++; } continue; }
             if (*activas < lim && sec_jug + 0x28 >= o->sec) { if (!*activas) r->primera = 1; o->act = 1; ++*activas; }
@@ -487,6 +490,29 @@ int haobj_anillo_toca(const float pos[3])
             float dx = ani[j].w[q][0] - pos[0], dz = ani[j].w[q][2] - pos[2];
             if (!ani[j].on[q] || dx * dx + dz * dz > 16.0f) continue;   /* (0x1aa4a4: <= 16) */
             ani[j].on[q] = 0; n++;
+        }
+    }
+    return n;
+}
+int haobj_spr3d(haobj_s3d_t *v, int max, int (*cuadros)(const char *g), const float *arc2)
+{
+    int i, k, n = 0, n02 = cuadros("HA_S02"), n07 = cuadros("HA_S07"), n00 = cuadros("HA_S00");
+    for (i = 0; i < nob && n < max; i++) {
+        const obj_t *o = ob + i;
+        if (o->tipo == 7 && o->est == 2 && o->v[0] == 0 && arc2 && o->t < n02) {   /* 0x1d4508 con +94 == 0: 5 destellos */
+            float l = sqrtf(jug_f[0] * jug_f[0] + jug_f[1] * jug_f[1]), fx = l > 1e-4f ? jug_f[0] / l : 0, fz = l > 1e-4f ? jug_f[1] / l : 1;
+            float s = o->t < 7 ? (float)(6 - o->t) * 0.1f + 1.5f : 1.5f;   /* el radio: 2,1 -> 1,5 */
+            for (k = 0; k < 5 && n < max; k++) {        /* (+-x lateral, y arriba) en el marco del coche, 3 m por delante */
+                const float *q = arc2 + 3 * k;
+                strcpy(v[n].g, "HA_S02"); v[n].cuadro = o->t; v[n].esc = 0.7f;
+                v[n].p[0] = jug_p[0] + (fz * q[0] + fx * q[2]) * s + fx * 3.0f; v[n].p[1] = jug_p[1] + q[1] * s;
+                v[n].p[2] = jug_p[2] + (-fx * q[0] + fz * q[2]) * s + fz * 3.0f; n++;
+            }
+        } else if (o->tipo == 8 && o->est == 1 && o->act && !o->pieza && o->tr <= n07) {   /* 0x1d4d80: la estela, escala 3 */
+            strcpy(v[n].g, "HA_S07"); v[n].cuadro = o->tr; v[n].esc = 3.0f;
+            memcpy(v[n].p, o->vuela ? o->p : o->r0, sizeof v[n].p); n++;   /* (SIN el giro por la direccion del vuelo) */
+        } else if (o->tipo == 8 && o->est == 2 && !o->pieza && o->t < n00) {   /* 0x1d50e0: 2C0000 en el punto, sin escala */
+            strcpy(v[n].g, "HA_S00"); v[n].cuadro = o->t; v[n].esc = 0; memcpy(v[n].p, o->p, sizeof v[n].p); n++;
         }
     }
     return n;

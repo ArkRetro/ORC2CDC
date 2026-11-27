@@ -55,7 +55,7 @@ struct haobj_auto_s;
 void infarto_autos(struct haobj_auto_s *v, int n);
 /* sprites 3D (4295D0 = PS2 0x115870): grupo de HAHUD.DAT, cuadro, punto del mundo y escala (px = esc x foco / z / 32);
    cuadros(g): los del grupo (para recortar) */
-typedef struct { char g[8]; int cuadro; float p[3], esc; } infarto_s3d_t;
+typedef struct haobj_s3d_s infarto_s3d_t;   /* (= haobj_s3d_t de haobj.h) */
 int  infarto_spr3d(infarto_s3d_t *v, int max, int (*cuadros)(const char *g));
 void infarto_paso(const infarto_coche_t *c);   /* 464D20, un paso de logica (modo 16) */
 int  infarto_corazones(void);               /* los que ensena el contador (7F1C80 / 10000) */
