@@ -6438,3 +6438,113 @@ NO HECHO / DUDAS
 - La pareja (2,5 ms por cuadro) y `nodos_visibles` (1 ms) son lo siguiente que queda.
 
 Ficheros: m29c/opt del directorio de trabajo (res/ las consolas, cap/ las capturas antes | despues, py/ y sh/).
+
+## Rev 2.9.9.c: medida final A/B en las 15 etapas (2026-11-27)
+
+Todo en el Flycast de aqui (NO en la consola ni en Android). A = 467dd28 (Rev 2.9.9.b), B = f0fc01c (Rev 2.9.9.c: huecos
++ cielo + optimizacion). Los dos con los mismos datos (lgdat2: la 2.9.9.c no trae ficheros de datos nuevos). Flags:
+`-DPRUEBA_AUTO -DPRUEBA_NODO=n -DPRUEBA_SIN_TIEMPO -DDIAG_MS -DDIAG_POPPING`, 140 s de piloto, paso 10; mide.py y pop.py
+solo con las lineas de la zona. Tres Flycast a la vez (:90 :91 :92), como la medida final de la 2.9.9.
+- Pasada 1, una ronda por etapa: A0 y B0 sin el contador, Bf = B con `-DDIAG_FALTA`.
+- Pasada 2: Af = A con `-DDIAG_FALTA`, tres etapas distintas a la vez.
+
+| Etapa | fps A0 | fps B0 | B-A | tarde A0 / B0 | salto A0 / B0 | lejano A0 / B0 | 8 px+ A0 / B0 | 32 px+ A0 / B0 | grandes que faltan Af / Bf | fps Af / Bf |
+|---|---|---|---|---|---|---|---|---|---|---|
+| PALM | 35,63 | 37,24 | +1,61 | 242 / 146 | 8,15 / 7,86 | 3800 / 3800 | 9,6 / 8,6 | 0,9 / 0,8 | 2,22 / 3,78 | 34,23 / 35,92 |
+| LAKE | 37,86 | 38,65 | +0,79 | 130 / 73 | 6,04 / 4,34 | 3800 / 3800 | 3,2 / 2,2 | 0,2 / 0,1 | 1,14 / 1,80 | 36,97 / 37,69 |
+| ALPI | 38,76 | 39,03 | +0,27 | 69 / 51 | 3,91 / 0,72 | 3800 / 3800 | 7,0 / 6,6 | 1,2 / 1,2 | 1,34 / 2,06 | 37,85 / 38,55 |
+| CAST | 37,93 | 38,98 | +1,05 | 120 / 55 | 6,94 / 3,48 | 3800 / 3800 | 14,3 / 15,2 | 2,8 / 3,1 | 0,82 / 1,05 | 36,98 / 37,50 |
+| FORE | 39,32 | 39,43 | +0,11 | 29 / 21 | 2,33 / 0,26 | 3800 / 3800 | 9,8 / 10,4 | 2,0 / 2,1 | 0,37 / 0,00 | 38,84 / 38,97 |
+| DESE | 38,63 | 38,97 | +0,34 | 83 / 56 | 3,35 / 1,40 | 3800 / 3800 | 5,6 / 4,3 | 1,8 / 1,7 | 1,91 / 3,55 | 37,88 / 38,45 |
+| CLOU | 34,50 | 36,40 | +1,90 | 321 / 188 | 8,07 / 7,45 | 3800 / 3800 | 20,0 / 21,2 | 2,1 / 2,0 | 4,57 / 5,01 | 33,37 / 34,70 |
+| INDU | 37,16 | 38,63 | +1,47 | 151 / 59 | 6,85 / 5,24 | 3800 / 3800 | 10,3 / 11,1 | 3,9 / 4,3 | 0,26 / 0,02 | 35,73 / 37,20 |
+| SNOW | 38,92 | 38,97 | +0,05 | 60 / 56 | 3,82 / 0,53 | 3800 / 3800 | 3,2 / 3,2 | 0,7 / 0,7 | 3,68 / 3,84 | 38,16 / 38,39 |
+| GHOS | 36,71 | 37,82 | +1,11 | 167 / 93 | 8,10 / 7,12 | 3800 / 3800 | 14,3 / 15,4 | 2,4 / 2,7 | 0,80 / 0,83 | 36,01 / 36,79 |
+| TULI | 37,43 | 38,45 | +1,02 | 138 / 70 | 7,84 / 5,64 | 3573 / 3693 | 21,0 / 21,1 | 2,7 / 2,7 | 0,10 / 0,10 | 36,37 / 37,29 |
+| METR | 32,68 | 34,49 | +1,81 | 407 / 285 | 7,76 / 7,01 | 3680 / 3776 | 13,6 / 13,8 | 4,7 / 4,6 | 0,70 / 0,52 | 30,83 / 32,96 |
+| RUIN | 38,94 | 39,29 | +0,35 | 50 / 28 | 4,83 / 0,76 | 3565 / 3722 | 9,5 / 11,8 | 1,4 / 2,1 | 4,44 / 4,41 | 38,21 / 38,90 |
+| IMPE | 38,00 | 38,89 | +0,89 | 101 / 45 | 6,56 / 4,33 | 3618 / 3717 | 19,0 / 22,3 | 5,5 / 5,5 | 0,21 / 0,13 | 36,98 / 37,89 |
+| CAPE | 38,89 | 39,18 | +0,29 | 54 / 35 | 4,08 / 0,95 | 3705 / 3761 | 16,6 / 11,3 | 6,4 / 3,8 | 0,01 / 0,00 | 38,18 / 38,80 |
+| **Media / suma** | 37,42 | 38,29 | +0,87 | 2122 / 1261 | 5,91 / 3,81 | 3743 / 3778 | 177,0 / 178,5 | 38,7 / 37,4 | 22,6 / 27,1 | 36,44 / 37,33 |
+
+"tarde": cuadros que empiezan tarde. "salto": nivel medio del reparto adaptativo (salto_q). "8 px+ / 32 px+": apariciones
++ desapariciones por segundo. "grandes que faltan": nodos y mallas de 24 px o mas en la vista que no se dibujan por
+razones reales (tope, tramo, entrada; no rama, pvs ni pvsm), suma por muestra.
+
+**Medido**
+- fps: +0,87 de media sin el contador (37,42 -> 38,29) y +0,89 con el (36,44 -> 37,33). Suben las 15 etapas en las dos
+  pasadas. Las cargadas ganan mas: CLOU +1,90, METR +1,81, PALM +1,61, INDU +1,47. La 2.9.9 habia costado -0,86.
+- Cuadros tarde: 2122 -> 1261 (-41 %) sin el contador; 2871 -> 2017 (-30 %) con el. Bajan en las 15.
+- La desviacion de los fps baja en las 15 sin el contador (PALM 3,98 -> 3,01; IMPE 2,54 -> 1,41).
+- El nivel del reparto ("salto") baja de 5,91 a 3,81 y el lejano medio sube de 3743 a 3778 m: se recorta menos.
+- Saltos de 8 px o mas: 177,0 -> 178,5 por s (+0,8 %); de 32 px: 38,7 -> 37,4. Con el contador 170,8 -> 169,6 y
+  35,6 -> 35,1. Sin cambio apreciable. La razon "tramo" desaparece (2,0 / 0,9 -> 0).
+- Grandes que faltan: 22,6 -> 27,1. "tope" igual (14,55 -> 14,05), "entrada" 0,38 -> 0,14, "tramo" 7,62 -> 12,91.
+- RAM: "VOZ: VOCES.DAT, 35 muestras" en las 60 tiradas y 0 lineas "Out of memory". Con los -D de medida la RAM libre
+  al arrancar es 262K en A y 278K en B.
+- Menus + carrera con la compilacion normal de B (tools/prueba/nav3.sh, sin -D): "VOZ: VOCES.DAT, 35 muestras, 210 KB
+  en el AICA", "VOZ 0x1e7" en carrera, 0 "Out of memory", EFECTOS 3/1/1/1/1/1, RAM libre al arrancar 333K (seguido en
+  la cima 139K). Las 14 pantallas salen.
+- YOSE -> GRAN (arbol 1, nodo 2, rama 1), una captura por segundo: en A el trozo de pared suelto y la losa oscura
+  sobre el muro de 1'12"6 a 1'17"3; en B cielo limpio hasta 1'14"5, la pared crece de 1'15"5 a 1'16"4 (cortada por
+  la derecha ~1 s) y a 1'17"3 esta como en A sin la losa. Despues de la entrada, igual en las dos.
+- PALM -> ALPI (arbol 0, la rama que coge el piloto), una captura por segundo: sin bandas en el cielo, sin trozos
+  sueltos y sin huecos, en A y en B (hojas alpi_01 a alpi_03, de 1'07" a 1'15"; las otras cuatro sin abrir).
+- Compila con los mismos 4 avisos que A (los -D de medida); 1 en la compilacion normal.
+- Cuelgues: ninguno. Las 60 tiradas escriben lineas MS hasta el final (80-112 por tirada).
+
+**Regresiones (B frente a A)**
+- Grandes que faltan por "tramo" (la etapa siguiente esta en la vista y aun no se dibuja): 7,62 -> 12,91. Sube en PALM
+  (1,09 -> 2,67), DESE (1,75 -> 3,54), LAKE (0,84 -> 1,63), ALPI (1,31 -> 2,06), CLOU (1,24 -> 2,08) y CAST (0 -> 0,23);
+  baja en FORE e INDU. Es el arreglo de los huecos (GEO_RUMBO): la etapa siguiente espera a que el coche gire hacia
+  ella. En DESE las lineas con "tramo" van de s 5968 a 6611 en B y de s 6000 a 6288 en A.
+- RUIN: saltos de 8 px 9,5 -> 11,8 y de 32 px 1,4 -> 2,1, igual en las dos pasadas (9,4 -> 11,5 y 1,3 -> 2,1). Toda
+  la diferencia es la razon "detras" (+1,7 / 0,7): cuatro nodos (6, 8, 795, 796; 71 m de radio, a 42 m) que aparecen
+  al cruzar la meta (s 5053). En A no salen en RUIN en ninguna de las dos pasadas; en METR, IMPE y TULI salen tambien
+  en A. Causa sin determinar.
+- IMPE: 8 px 19,0 -> 22,3 sin el contador ("lado" +2,3); con el contador 18,7 -> 19,6. INDU: 32 px +0,3 o +0,4 en
+  las dos pasadas (3,9 -> 4,3 y 3,7 -> 4,0).
+- Saltos "pvs": 117,9 -> 124,9 de 8 px por s (+6 %) sin el contador y 116,5 -> 120,0 (+3 %) con el.
+- Ninguna etapa pierde fps ni gana cuadros tarde.
+
+**Supuesto (no comprobado)**
+- Android y la consola. Flycast cuenta instrucciones y no los fallos de cache: la ganancia sera del mismo signo y de
+  otro tamano.
+- Que el "detras" de RUIN sea el cambio de camara de la meta cayendo en otro cuadro, y no algo que falte antes. No
+  hay captura de ese momento.
+- Que el +3-6 % de "pvs" venga de que B recorta menos (lejano mas alto) y no de PVS_RACHAS.
+
+**Avisos sobre la medida**
+- En los mismos 140 s cada tirada emula un tiempo distinto (65-71 s de etapa en INDU), asi que B0 recorre entre un 9 % menos y
+  un 2 % mas de etapa que A0; Bf y Af quedan a +-8 %. Las medias son de tramos algo distintos.
+- PALM -> LAKE con `-DPRUEBA_RAMA_FIJA=0`: el piloto se atasca en la bifurcacion (s 5257) en A y en B. Sin capturas
+  de esa union; se cambio por PALM -> ALPI.
+- Las capturas de las uniones van emparejadas por la s del registro, que llega con retraso: mirar el crono del HUD.
+- Fuera de la tarea: en ALPI (s ~6700, a la izquierda) hay un tronco de conifera sin copa. Sale igual en A, en B y
+  en B con `-DRECORTE_TIRAS=0` (cuadro congelado 4410): no es de la 2.9.9.c.
+
+Ficheros: m29c/final/ del directorio de trabajo (final.md, tablas.md, res/ las consolas y medida_<n>.txt, cap/ las
+capturas A | B de YOSE -> GRAN, PALM -> ALPI y los menus, sh/ y py/).
+
+### Saltos por s sumados en las etapas medidas, por razon (8 px+ / 32 px+, apariciones + desapariciones)
+| razon | A0 | B0 | Af | Bf |
+|---|---|---|---|---|
+| detras | 3,0 / 2,2 | 4,8 / 2,6 | 3,6 / 2,1 | 2,9 / 1,7 |
+| lado | 13,4 / 5,4 | 11,4 / 3,5 | 9,7 / 3,7 | 9,4 / 3,1 |
+| lejos | 0,0 / 0,0 | 0,0 / 0,0 | 0,0 / 0,0 | 0,0 / 0,0 |
+| lod | 0,2 / 0,0 | 0,2 / 0,0 | 0,4 / 0,0 | 0,4 / 0,0 |
+| pvs | 117,9 / 26,1 | 124,9 / 27,7 | 116,5 / 25,7 | 120,0 / 26,5 |
+| rama | 3,6 / 1,4 | 3,9 / 1,6 | 3,4 / 1,4 | 3,8 / 1,5 |
+| tope | 36,1 / 2,5 | 33,2 / 1,8 | 35,0 / 2,0 | 33,1 / 2,2 |
+| tramo | 2,0 / 0,9 | 0,0 / 0,0 | 1,9 / 0,8 | 0,0 / 0,0 |
+
+### Grandes que faltan (24 px+, suma por muestra de las etapas medidas), por razon
+| razon | Af | Bf |
+|---|---|---|
+| entrada (real) | 0,38 | 0,14 |
+| pvs | 321,42 | 333,13 |
+| pvsm | 433,60 | 441,09 |
+| rama | 158,47 | 158,10 |
+| tope (real) | 14,55 | 14,05 |
+| tramo (real) | 7,62 | 12,91 |
+
