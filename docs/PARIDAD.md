@@ -8446,6 +8446,19 @@ py/oveja.py: los cuadros de una escena del banco 0x46; serie4.sh: las medidas y 
   16/n" a "peticion 16 hecha"): 3 39,51 / 39,60 fps (-0,09), 35 muestras; 4 39,67 / 39,73 (-0,06), 26; 5 39,45 / 39,63
   (-0,18), 30. Triangulos: los conos 4..7 de media (57 como mucho, los de antes); los sprites son quads 2D (2 triangulos)
   fuera de la escena: como mucho ~12 cifras / 8 regalos / 3 ovejas a la vez.
+- RAM al arrancar (h16b/nav3.sh, MODO_JUEGO=1, sin defines, compilado limpio): sobre integra 88630c1 el codigo nuevo
+  (+4 KB de .text) pasaba .init (alineado a 8 KB) al bloque siguiente: 408K -> 400K. Recortado minijuego.c (otros() para
+  los carriles malos de 1..5, numero() mas corto, el puntero local Q, las probabilidades con enteros y MJLOG: los
+  registros de cada aviso / puerta / peticion solo con PRUEBA_AUTO) hasta 0xba030 de .text: .init vuelve a 0x8c0ca000
+  (408K, medido sin el merge solo por el tamano, PROBABLE). Tras `git merge integra` (a0b2d19, con c2c7): .text 0xbac70,
+  .init en 0x8c0cc000 como integra sola; nav3 (cap16b/nav3_final.txt): "RAMMAPA arranque: en uso 13021K, libre 400K",
+  "VOZ: VOCES.DAT, 35 muestras", sin "Out of memory": igual que integra (400K segun el jefe; no medido aqui el tip de
+  integra solo). OJO: unos ~3 KB mas de .text en cualquier rama vuelven a saltar .init a 0x8c0ce000 (-8K).
+- Tras el merge (CAMP.DAT de tools/conv_camp.py: sus 35 678 primeros bytes iguales a $S/modos/c2c/dat_int/CAMP.DAT, y
+  'M162' detras de 'M161'; MJHUD.DAT igual): h16b/serie5.sh repite 16/3 (37 / 39), 16/4 (10 / 9), 16/5 (16 ovejas, 16 /
+  12) y 16/2 + 16/1 + 16/0 (prepara1 / prepara2 ahora con otros()): todas "bien" con PRUEBA_MJ, las mismas notas
+  (cap16b/t3b, t4b, t5b, t12b, repaso_merge.png).
+- Scripts: pgrep -c -f /opt/flycast/build/flycast (el proceso se llama Flycast-rend).
 - Datos nuevos: CAMP.DAT + 72 bytes ('M162'), MJHUD.DAT 149 -> 278 KB (+129 KB: 22 cifras de 64x64, 5 regalos de
   128x128, la oveja 128x512 con 78 cuadros y zzz).
 - DESVIACION / SUPUESTO: las cifras se separan por el lateral de la carretera, no por el eje x de la camara; el panel de
