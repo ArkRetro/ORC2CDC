@@ -4145,7 +4145,7 @@ peticion 14 (escoltas 45B5B0, +324 = 6: carrera contra ellos), que no esta en la
   mision superada (4959E0) con A = 495A60 (la subclave siguiente si la nota llega a +0x24 = 4) y REINTENTAR, el boton
   0x10 la misma y B al menu; si no 2B004A); FINC2C.DAT (conv_fin.py). El fin del tiempo: 34 y 35 sin nota. Fuera la
   vuelta directa al menu.
-- SIN PORTAR: los tipos 1, 2, 3 y 6 (los de su juego) (puntos 4BD230 / 4BD340, marcas
+- HECHO (2026-11-27, ver COAST 2 COAST: misiones de tipo 1, 2, 3 y 6): los tipos 1, 2, 3 y 6 y los vaivenes. Lo de antes: SIN PORTAR los tipos 1, 2, 3 y 6 (los de su juego) (puntos 4BD230 / 4BD340, marcas
   495E90, notas por umbrales) no estan en la lista. Tambien 472E60 / 474080 / los vaivenes, la espera de 474D30, 43EB60
   al abrir, el bit 0 de +0xF, el boton 0x10 del PS2 (la X de la Dreamcast, PROBABLE), los campeonatos y la variante 9.
 
@@ -6641,3 +6641,106 @@ hechos no se rehacen solos: hay que borrar TRAF0-8.DAT / TRAFK0-2.DAT de la carp
 - Solo probado en Flycast, no en la consola.
 - Entrega (Rev 2.9.9.c): `--ligero` solo en el paso `trafico` (TRAF0..8). Los camiones (TRAFK0..2) se quedan como
   estaban: casi no ganaban y no se llego a ver ninguno en el juego con los datos nuevos.
+
+## COAST 2 COAST: misiones de tipo 1, 2, 3 y 6, vaivenes de los rivales (agente c2c, 2026-11-27)
+
+Se juegan las 18 misiones que faltaban (tipos de +0x20 de Races.bin: 1 eliminacion por tiempo, 3 misiones; 2 derrape,
+7; 3 rebufo, 5; 6 pillar al rival, 3) con sus reglas, su HUD, su nota y su resultado. Las 94 misiones abren desde el
+mapa del menu (antes A en ellas daba el sonido de bloqueado); solo siguen cerradas las de `arbol_grande` (no caben).
+
+**Gestor (comun/mision.c, nuevo).** 496A30 de SLES-53998 (PS2 0x1f8d0c, el mission_manager_control_496a30 del PC,
+comprobado en el ELF de PS2 tipo a tipo: 0x1f9050 tipo 3, 0x1f90d0 tipo 2, 0x1f9144 tipo 6, 0x1f91b0 tipo 1, 0x1f9428 la
+escala) y lo que llama: 477B60 (0x1f13c8), 477430 (0x1f0da8), 495C20 (0x1f85d0), 495E90 (0x1f8930), 4961F0 y 495A20. Se
+movieron aqui los rotulos del principio (antes en demo/main.c, c2c_paso).
+- Tipo 1: el reloj [836388] = segundos (+0x28) x 60; baja 1 por paso; en los ultimos 5 s el pitido 0x518D cada segundo;
+  a los 0x168 cuadros el rotulo 2B0064 ("¡KO! en 5, 4.."); con el jugador ultimo entre 0x3D y 0x168 la voz 0x1F2; en 0:
+  si el ultimo es el jugador, mision fallada (450230(2): el fin del tiempo, modo 20) con su nota guardada; si no, sale el
+  ultimo coche de carreras (477430: fuera de la clasificacion, su coche cerrado, los puestos de detras suben uno), el
+  rotulo del eliminado (0x36f418 por su +0x76: 2B0056..) y la voz 0x1F0; con 2 en carrera, ganada (meta sin camara).
+- Tipo 2: con el derrape (+D36 > 0) a mas de 10 km/h, en el asfalto y sin toque reciente (+DA4), 10 puntos por paso, 20
+  por encima del 95 % del tope del coche ((+134C - 2,3) x -131,39 + 318). Tipo 3: con rebufo (+E68 > 0,18 y |+162| <
+  0x5DC) lo mismo (20 por encima del tope); un choque con otro coche (+4 0x10000 y 0x4000000) quita 2000 y pone +DA4 =
+  0x1E. El rival suma 10 / 20 (bit 3 de +0x70) en 477B60 con su bandera (0x200 derrape, 0x100 rebufo).
+- Tipo 6: con el jugador ultimo baja su reloj (segundos x 60); en 0 fallada. El rival en el ultimo puesto gasta su +0x98
+  (el mismo tiempo, puesto en el montaje 47CF40) y en 0 esta pillado (rotulo 0x36f430: 2B0050..; con 2 en carrera,
+  ganada y su rotulo en vez de GOAL en la meta, 498670).
+- Tipos 1 y 6: car+0xDBC = [83638C] / 600 x 0,17 + 1 (sube con el jugador detras: ActionForce2 escala el avance; demo:
+  `jug_escala` en coche_paso).
+- Nota (495C20): 0 y 1 por el puesto; 2 y 3: por encima de los puntos del rival 4, 5 o 6 (umbrales +0x38 / +0x3C), si
+  no por la razon con 0,3 / 0,5 / 0,7 / 1 (PS2 0x36f450); 6: (reloj + 5) / 6 contra los umbrales, 0 si acaba ultimo. Se
+  guarda en la licencia (+0x1D7 + 5 clave + sub, menu_nota_mision) al salir de la meta (49CFD0) y en los finales de la
+  mision (495A20): la VMU la escribe como las de carrera.
+- Marcas (495E90): tipos 2 / 3 sobre el coche (495D90: el punto de la tabla PS2 0x40c370 por modelo, x - 0,7; con la
+  vista interior en (234, 108)) la nota de lo ganado desde la ultima (2B000F + (puntos x 0,014), cuadro 0x1F), a los 500
+  la grande 2B0015 (cuadros 0x3D..0x69, velocidad 2) que vuela a (210, -160) en 0,25 s con el efecto 0x52 y con el
+  choque (-2000) 2B000E; tipo 6: 2B000E cada 70 cuadros de reloj perdido.
+- Fin: `mision_fin()` 1 pasa a la meta (estado META sin la escena de la meta y con el coche quieto, `c2c_susp`, como el
+  suspend_race de 49C9C0 con 8363A4); 2 acaba el tiempo (estado AGOTADO).
+
+**HUD (NAVI_PUB 0x1bd6f4).** Panel 2C0029 en los tipos 2 / 3 / 6 (0x1bd748); puntos 4BD230 (0x1bf108: "%07d" del jugador
+en (0x1E1, 0x49), estilo 1 o 0xD fuera del asfalto / con +DA4; el rival en (0x1E1, 0x67) y su imagen 2C024F con el
+desplazamiento de 0x369838 / 0x36983c) y 4BD340 (0x1bf260: "%04d" de (reloj + 5) / 6, 2C00F1 delante, el estilo del que
+va primero); cifras de 0x1c3c68 (estilos de 0x404818: 1 = escena 2C00B9, 0xD = 2C00C0, cuadro = cifra, 0x10 px).
+Datos: tools/conv_hud.py --c2c escribe C2CHUD.DAT (lo de todos, 187 KB de VQ) y por tipo C2CH1.DAT (eliminados y
+2B0064, 110 KB), C2CH23.DAT (notas, solo sus cuadros dibujados, 32 KB) y C2CH6.DAT (pillados, 108 KB): solo se abre el
+del tipo de la mision. C2C_VRAM_RESERVA 196 KB + el del tipo. Las texturas se suben de una en una (antes todas: pedian
+~190 KB seguidos del monton para leer sus sectores).
+- SIN PORTAR: las etiquetas sobre los rivales (4BAD20 = PS2 0x1c4158: 2C00C5 en los tipos 2 / 3 / 6, 2B0046..48 o cifras
+  en los 0 / 1; la escena 2C00C5 ya esta en C2CHUD.DAT) y la lista de puestos 4BA8C0 de los tipos 1 / 6.
+
+**Rivales (comun/rival.c).** Vaivenes de los registros sin coche 476CA0 / 476DF0 (PS2 0x1ee8b0 / 0x1eea68: a, b, c de
++0x44 o 1/3, 1, 7 y 0,4, 2, 6; rachas de +28 hasta +24 = (b + azar x (c - b)) x 60 con la bandera de +0x70) y 476F40 (con
++0x48: ninguna mision la tiene), llamados como 47C8A0 / 47CA40 (cfg +0x30 & 8 / & 0x10). Con coche (477090): bit 0 del
+rebufo (el del jugador de 47A7C0 y 474080), bit 1 del derrape y bit 3 de 4960A0 (rapido) en `rc_objetivo`.
+- 474080 (rebufo del coche de delante, cfg +0x30 & 8): SIMPLIFICADO, PROBABLE: un coche delante a 4..60 m y menos de 2 m de
+  lado mas rapido que 0,7 x el suyo: x (v x 0,7) como el del jugador (las constantes 0x628138 / 0x628244 del PC sin buscar
+  en la PS2).
+- 474990 / 474D30 (el derrape del coche de carreras): SIMPLIFICADO, PROBABLE. Las zonas de derrape son del original
+  (MISION.DAT 'MIX2', de la lista del primer puntero de +0x44: nodo, etapa / union, secciones y sus 6 factores; 5
+  misiones, 66 zonas); en ellas, en curva (+B54 < 300 m) y a mas de 80 km/h la carroceria se cruza hacia dentro hasta
+  0,25 rad x factor y pone la bandera. Sin el +162 del coche, sin las constantes 0x5b43fc.. (no localizadas en la PS2) y
+  sin la espera de 0x78 cuadros (+C26) de 474D30.
+- SIN PORTAR: 472E60 (ritmo por los coches de alrededor, +BE4). La variante 9 (4B02B0): no aplica (solo el selector 3 de
+  la palabra del frontal, que el menu UN JUGADOR no da).
+- RAM: las misiones de 5 rivales de modelos distintos (tipo 1, y 18 de las 94 en total) troceaban el monton y se quedaban
+  sin colisiones ("COLI: sin RAM", tambien en 059fc97 con -DPRUEBA_MISION=21) y sin HUD. rc_modelos_carga solo carga el
+  segundo y siguientes con 906 KB libres (colisiones 406 + HUD 180 + modelo 80 + la lectura del curso 240, medido); los
+  demas se dibujan con el primero (DESVIACION, como ya pasaba con mas de 6). 12-1: 3 modelos, colisiones y HUD bien.
+- Poligonos (peticion del usuario): RCmm.DAT con `conv_trafico.py --rivales --ligero` (DESVIACION pedida, la de los
+  coches del trafico: LOD 0 -6..-10 % de triangulos; tools/regenera.py la pasa). No se dibujan mas coches que antes (el
+  tope c1c de la mision y los 16 del trafico).
+
+**RAM al arrancar.** mision.o y rival.o con -Os; los registros de los coches de carreras (rival.c: 100 x 0x7C y la
+clasificacion) pasan de la BSS al monton solo mientras hay mision (calloc en 47CF40): el programa ocupa 4 KB menos que
+059fc97 (text + data + bss 2946596 frente a 2950676). Medido en Flycast: "RAM: al arrancar ... libre 376K" con
+`-DPRUEBA_AUTO -DPRUEBA_MISION=21` (059fc97 igual: 372K); sin defines (nav3.sh, MODO_JUEGO=1): libre 356K, "VOZ:
+VOCES.DAT, 35 muestras", sin "Out of memory", carrera OutRun 647K libres. En la carrera: 12-1 (tipo 1) libre ~390 KB,
+tipos 2 / 3 / 6 ~480-640 KB tras las colisiones; VRAM libre tras el HUD 85-105 KB.
+
+**MISION.DAT** (tools/conv_mision.py): detras de las millas el bloque 'MIX2' (punto de las marcas 0x40c370 por modelo y
+las zonas de derrape por mision); lo anterior igual byte a byte (la demo de antes lo lee igual).
+
+**Verificado en Flycast (E, pantalla :93, `-DPRUEBA_AUTO -DPRUEBA_MISION=i -DPRUEBA_SIN_TIEMPO`):**
+- 12-1 (i 21, tipo 1; `-DPRUEBA_ESCALA=1.4f` para que el piloto no sea ultimo): "¡KO! en 5..1", eliminada Clarissa
+  ("¡KO! CLARISSA"), la posicion pasa de 5/6 a 5/5; tres eliminaciones seguidas cada 40 s; sin la escala, el piloto
+  ultimo a los 40 s: "mision fallada, nota 1" y el fin del tiempo.
+- 3-1 (i 5, tipo 2, `-DPRUEBA_PUNTOS`: derrape forzado a ratos, el piloto no derrapa): puntos del jugador y del rival
+  ("Rival", 7 cifras), notas sobre el coche y la grande que vuela a los puntos; el rival gana puntos con sus rachas; la
+  nota pasa de 3 a 4 cuando sus puntos pasan los del rival.
+- 9-1 (i 15, tipo 3, `-DPRUEBA_PUNTOS`): puntos, rebufo, estilo de las cifras cambiado fuera del asfalto.
+- 6-1 (i 9, tipo 6, `-DPRUEBA_ESCALA=1.4f`): corazones del jugador y del rival, el del rival baja con el detras, pillado:
+  "¡PLANTADO! WOLF" en lugar de GOAL con el coche quieto, nota 6.
+- Sin "Out of memory" en ninguna (059fc97 con la 12-1: sin colisiones). Capturas: /dev/shm/c2c_t1b (hoja.png, hoja2.png),
+  /dev/shm/c2c_t2, /dev/shm/c2c_t3, /dev/shm/c2c_t6 (hoja.png).
+- Cuadros por segundo y poligonos (`-DDIAG_MS`, lineas MS, 60 medias de 30 cuadros, la misma mision con 059fc97 y lgdat2
+  frente a esta rama, el piloto igual): 12-1 (tipo 1) 39,25 -> 39,23 fps, triangulos por cuadro 13459 -> 13805 (+346),
+  vertices 20330 -> 20708 (+378: el HUD de la mision y los rotulos; 059fc97 ademas sin colisiones); 3-1 (tipo 2, con los
+  puntos y las marcas) 37,69 -> 37,61 fps (55 medias), triangulos 18814 -> 18490 (-324), vertices 29374 -> 29090 (-284: los
+  RC ligeros compensan el HUD). Menos de 0,1 fps en las dos.
+- PENDIENTE de ver en Flycast: la carrera entera hasta la meta de un tipo 2 / 3 y el modo 35 desde el menu real (el flujo
+  de la meta es el del tipo 0, sin cambios), la marca 2B000E del choque del tipo 3.
+
+**Sin hacer: los campeonatos (variante 5).** El gestor de peticiones (PC 7F9460, evento 0x190) no tiene fuente en la
+decompilacion (corre el x86 traducido) y en la PS2 esta hacia 0x22xxxx sin seguir; es un modulo entero (peticiones de
+Req_*.bin por curso, su HUD y sus resultados). El mapa de los campeonatos ya estaba (Rev 1.2); A en una casilla sigue
+dando el sonido de bloqueado.

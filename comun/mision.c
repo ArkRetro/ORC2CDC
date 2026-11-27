@@ -278,6 +278,7 @@ void mision_paso(const mision_jug_t *j)
     rivales_477b60();
     nota_495c20();
     marcas_495e90(j);
+#ifdef DIAG_MISION
     {   static int n;
         if (++n % 120 == 0) {
             int ri = rival_47da80(); const rival_t *r = rival_reg(ri);
@@ -285,6 +286,7 @@ void mision_paso(const mision_jug_t *j)
                    r ? (int)r->d98 : -1, r ? r->fl71 : 0, rival_puesto() + 1, rival_total(), (int)nota_b0, (double)mision_escala());
         }
     }
+#endif
 }
 
 /* ---------------------------------------------------------------- HUD de la mision

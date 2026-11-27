@@ -32,19 +32,19 @@ static float t_acel[5], t_curva[12], t_marcha[6]; static int32_t t_millas[8];
 static int tab_ok;
 /* 'MIX2' (2026-11-27): el punto de las marcas por modelo y las zonas de derrape de cada mision */
 static float t_cabeza[16][3]; static uint32_t mix_off[RIVAL_NMIS], mix_base; static int mix_ok;
-#define NZONAS 64
+#define NZONAS 24                                               /* (MISION.DAT de SLES-53998: 20 como mucho) */
 static rival_zona_t zonas[NZONAS]; static int nzonas;
 
 static rival_mision_t mis; static int mis_ok;
 static int32_t esp_w[8][12]; static int nesp;                   /* especiales: e0..e18, e1c, e20, hay24, e24[2] */
 
-static rival_t rc[RIVAL_MAX]; static int nrc;
+static rival_t *rc; static int nrc;                            /* (en el monton solo en la mision: 12 KB menos al arrancar) */
 static uint32_t semilla;                                        /* 6A4E2C[0] (PS2 [0x5c80b8]) */
 static int largo;                                               /* 803710: largo del curso en posiciones */
 static int clas_n, lider = -1, ultimo = -1, jug_puesto, jug_puesto_ant, lejos_8037b8, clas_hecha_80fb18;
 static int paso_802e08, bulk_80fb09, sin_vaiven_80fb08, cd_delante_800d98, cd_detras_80a5a0;
 typedef struct { int32_t pos; float frac, pf; int32_t dif; int idx; } entrada_t;   /* registro de 0x14 de 80FB1C */
-static entrada_t clas[RIVAL_MAX + 1];
+static entrada_t *clas;
 
 static uint32_t u32le(const uint8_t *p) { return (uint32_t)p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24; }
 
@@ -81,7 +81,8 @@ int rival_lista(int i, int *clave, int *sub, int *tipo)
     if (!lista_ok || i < 0 || i >= RIVAL_NMIS) return -1;
     *clave = lista_cl[i]; *sub = lista_sub[i]; *tipo = lista_tipo[i]; return 0;
 }
-void rival_fuera(void) { mis_ok = 0; nrc = 0; }
+static void suelta_regs(void) { free(rc); free(clas); rc = NULL; clas = NULL; nrc = 0; }
+void rival_fuera(void) { mis_ok = 0; suelta_regs(); }
 const rival_mision_t *rival_mis(void) { return mis_ok ? &mis : NULL; }
 const float *rival_acel(void) { return t_acel; }
 const float *rival_curva(void) { return t_curva; }
@@ -90,7 +91,7 @@ const float *rival_marcha(void) { return t_marcha; }
 int rival_carrera(int i)
 {
     uint32_t sz; uint8_t *b; const uint8_t *r; int k;
-    mis_ok = 0; nrc = 0;
+    mis_ok = 0; suelta_regs();
     if (!tab_ok || i < 0 || i >= RIVAL_NMIS) return -1;
     if (!(b = gd_carga("MISION.DAT", &sz))) return -2;
     if (sz < 16 + (uint32_t)(i + 1) * REG_BYTES) { free(b); return -3; }
@@ -160,7 +161,10 @@ static void monta_47cf40(void)
     semilla = c[11] ? (uint32_t)c[11] & 0xffffu : 0xa5deu;
     if (count < 1) count = 1;
     if (count > RIVAL_MAX) count = RIVAL_MAX;
-    nrc = count; memset(rc, 0, sizeof rc);
+    suelta_regs();
+    rc = calloc(count, sizeof *rc); clas = calloc(count + 1, sizeof *clas);
+    if (!rc || !clas) { suelta_regs(); return; }
+    nrc = count;
     sin_vaiven_80fb08 = 0; bulk_80fb09 = 0;
     lider = ultimo = -1; clas_n = 0; lejos_8037b8 = 0; clas_hecha_80fb18 = 0;   /* 4774B0 */
     edi = mis.largo;                                            /* 0x1724e0(c18 = -1): todo el curso */
