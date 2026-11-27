@@ -47,6 +47,8 @@
 #endif
 #include "meta.h"
 #include "../comun/rksp.h"
+/* (INFARTO 3) FRIO: por tamano lo que solo corre al cargar (no en cada cuadro de la carrera) */
+#define FRIO __attribute__((optimize("Os")))
 
 /* Longitud de las tiras en las listas de objetos de la PowerVR (Strip_Len, bits 18-19 de la cabecera del poligono:
    1, 2, 4 o 6 triangulos de una tira por entrada de la lista de cada tile). KallistiOS la deja en 2 (PVR_CMD_POLYHDR
@@ -405,7 +407,7 @@ static int pila_cmp(const void *a, const void *b)
 #define DECOR_DETRAS 3                                          /* edificios tapados por otro de delante: fuera 1 de cada 3 */
 #define DECOR_FAROLA 20
 #define DECOR_PUBLICO 2
-static void decor_reduce(modelo_t *m, const char *nombre)
+FRIO static void decor_reduce(modelo_t *m, const char *nombre)
 {
 #ifndef SIN_DECOR_REDUCE
     static uint8_t ttipo[512]; int seg; uint32_t q;
@@ -592,7 +594,7 @@ static void decor_reduce(modelo_t *m, const char *nombre)
    dibujan con la camara delante de su plano: el descarte de la cara de atras, para esas mallas. En las 62 etapas y 498
    uniones: SEG23 (esta), SEG26, SEG52 y SEG58. -DSIN_TAPAS: como antes */
 static float ojo[3];                                             /* (la camara: mas abajo) */
-static void tapas_busca(modelo_t *m)
+FRIO static void tapas_busca(modelo_t *m)
 {
     uint32_t k, i, j, b; const float *R = m->ruta; uint32_t pr = m->paso_ruta;
     m->ntapas = 0;
@@ -3157,7 +3159,7 @@ static int ruta_pon(const modelo_t *m)
    saltos). Devuelve el primer punto de m en la ruta, o -1 */
 #define RECENTRA 25
 static uint32_t ruta_salto;                                     /* primer punto de m usado (la parte entera) */
-static int ruta_anade(const modelo_t *m)
+FRIO static int ruta_anade(const modelo_t *m)
 {
     const float *b = m->ruta; uint32_t j = 0, k, c, i0 = ruta_n, n; float ax, az, tx, tz, l, o0 = 0, d0 = 0, d1, f = 0;
     if ((int)m->paso_ruta != PR || m->nruta < 8 || !ruta_n) return -1;
@@ -6533,7 +6535,7 @@ static void part_recentra(float dx, float dz)
    su principio (antes tenia el suyo, y la mancha otro: 18 KB de RAM que ahora ocupan las chispas) */
 #define TAM_CEN (256 * 32 * 2)
 static uint16_t buf_arr[512 * 128] __attribute__((aligned(32)));
-static void efectos_inicia(void)
+FRIO static void efectos_inicia(void)
 {
     pvr_poly_cxt_t cx; uint32_t sz;
     uint8_t *e = gd_carga("EFECTOS.DAT", &sz); uint32_t o = 8;
@@ -7266,7 +7268,7 @@ static int ta_codigo;                                            /* (definida ma
 static int rk_modelo;                                            /* Rev 2.9.4: menu_modelo() al empezar la carrera */
 static int ta_opcion_b;                                          /* (definida mas abajo) */
 static uint32_t l32_lic(const uint8_t *l, int o) { uint32_t v; memcpy(&v, l + o, 4); return v; }
-static void rk_un_jugador(int meta, int piloto)
+FRIO static void rk_un_jugador(int meta, int piloto)
 {
     const uint8_t *l = menu_licencia(); uint8_t rec[16]; uint32_t r0, r8, ms = meta ? (uint32_t)cuadros_ms(crono) : 0;
     int v, p = preset_curso & 3, c, ruta = 0, k, cambio = manual_ & 1, pos;
@@ -7307,7 +7309,7 @@ static void ta_meta_final(void)
     memcpy(curso[0].bk, e.bk, sizeof e.bk); memcpy(curso[0].rama, e.rama, sizeof e.rama);
     curso[0].trans_pos = e.trans_pos; curso[0].trans_seg = e.trans_seg; curso[0].trans_m = e.trans_m;
 }
-static int curso_lee_id(int id)
+FRIO static int curso_lee_id(int id)
 {
     uint32_t sz, o, n; int r; uint8_t *b = gd_carga(CURSO_FICH(id), &sz);
     if (!b) return -1;
@@ -7367,7 +7369,7 @@ static void col_en_hueco(int k, const float *M)
 #define HUECO_ETAPA_MAX (8400u << 10)
 #define HUECO_UNION_MAX (1800u << 10)
 static uint8_t arbol_grande[RIVAL_NMIS];                        /* el arbol 100 + i tiene una etapa o union que no cabe */
-static int curso_huecos(void)
+FRIO static int curso_huecos(void)
 {
     int n_grandes = 0, fta;
     uint32_t lba, t, tc, sz, o, m, a; int i; char n[16]; uint8_t *b;
@@ -7470,7 +7472,7 @@ static int po_k = PRUEBA_ORDEN_DESDE - 1, po_rep, po_fin, po_ult = -1, po_t;   /
 #endif
 static int ta_codigo = -1;                                      /* CONTRARRELOJ: [656234] (el arbol 200 + codigo) */
 static int ta_opcion_b;                                         /* Rev 2.9.4: la opcion B de la etapa (raiz +0x20c bit 0) */
-static void etapa_precalienta(void);                            /* (el reparto del TA antes del semaforo: abajo) */
+FRIO static void etapa_precalienta(void);                            /* (el reparto del TA antes del semaforo: abajo) */
 static volatile int meta_hilo;                                  /* META.DAT leyendose (hilo) */
 static void *meta_lee(void *p)
 {
@@ -7480,7 +7482,7 @@ static void *meta_lee(void *p)
     meta_hilo = 0;
     return NULL;
 }
-static void curso_reinicia(void)
+FRIO static void curso_reinicia(void)
 {
     int k;
     if (curso_pedido != curso_id) {                             /* otro arbol: sus indices son otros */
@@ -8138,7 +8140,7 @@ static void c2c_se(int id) { if (id == 0x518d) { if (voz_ok) sfx_voz(id); } else
    (tools/conv_union.py) */
 #define CAMP_ARBOL(g) ((g) == 0 ? 1 : (g) == 1 ? 0 : 302)
 static int camp_g = -1;
-static int curso_tiene(int id)                                  /* el arbol id en CURSO.DAT (solo su indice: 16 KB, */
+FRIO static int curso_tiene(int id)                                  /* el arbol id en CURSO.DAT (solo su indice: 16 KB, */
 {                                                               /* detras de los 15 registros del modo OutRun) */
     uint32_t lba, tam, i, m, r0, e[3]; uint8_t *b; int r = -1;
     if (gd_busca(CURSO_FICH(id), &lba, &tam) || !(b = memalign(32, 16384))) return -1;
@@ -8158,7 +8160,7 @@ static void camp_voz_(int id) { if (voz_ok) sfx_voz(id); }
 static void camp_se_(int id) { if (voz_ok) sfx_voz_se(id); }
 static void camp_millas_(int m) { menu_suma_millas((uint32_t)m); }
 /* al salir del menu: el campeonato elegido (menu_camp: nodo del mapa y casilla), su arbol, la salida y el gestor */
-static void camp_preparado(int auto_)
+FRIO static void camp_preparado(int auto_)
 {
     int cl = 0, cn = auto_ ? -1 : menu_camp(&cl), cf = menu_campeonato(), g;
 #ifdef PRUEBA_CAMP
@@ -11466,7 +11468,7 @@ static int faros_rejilla(void)
     faros_col = (faros_col & 0xFFFFFFu) | (uint32_t)((float)(faros_col >> 24) * FAROS_BRILLO) << 24;
     return 0;
 }
-static void faros_carga(void)
+FRIO static void faros_carga(void)
 {
     pvr_poly_cxt_t cx; tex_t *t; uint32_t fb, vq, n; pvr_ptr_t dir;
     if (lee_modelo(&faros_m, "FAROS.DAT") || faros_m.ntex < 1 || sube_modelo(&faros_m)) { libera_modelo(&faros_m); return; }
@@ -11607,7 +11609,7 @@ static inline uint32_t twid(uint32_t x, uint32_t y)
 #define FOCOS_FUNDE 14.0f                                       /* m: desde aqui hasta FOCOS_LEJOS se apaga (focos_gris) */
 #endif
 static float focos_vl = 0.0f, focos_vf = 0.0f;                  /* v de los rayos que llegan a FOCOS_LEJOS y a FOCOS_FUNDE */
-static void focos_carga(const tex_t *t, const uint8_t *d, pvr_ptr_t dir)
+FRIO static void focos_carga(const tex_t *t, const uint8_t *d, pvr_ptr_t dir)
 {
     pvr_poly_cxt_t cx; uint32_t fb = t->fmt & 0xff, vq = t->fmt & 0x100, n = ((t->fmt >> 16) & 0xff) + 1, x, y, fila = 0;
     uint32_t x0 = t->w, x1 = 0, y0 = t->h;
@@ -12181,7 +12183,7 @@ static void salida_calcula(void)
    la que usara el primer cuadro (camara_paso con el coche en la parrilla; si no hay CAM1, 6,5 m detras y 1,6 m por
    encima, como pop_arranque.py). No toca la VRAM ni el modelo; pon_vista/camara_paso se vuelven a llamar igual en el
    bucle, asi que no hay salto de camara. */
-static void etapa_precalienta(void)
+FRIO static void etapa_precalienta(void)
 {
     float fw[3], up[3], o[3], m[3]; int k, n, quieto = 0, pd, pp, ed, ep;
     uint32_t i, vivos = 0; uint64_t t0 = timer_us_gettime64();
@@ -13135,7 +13137,7 @@ static void robot_suelta(void)                                  /* la pareja fue
     memset(&chr, 0, sizeof chr); rc_chr.ok = 0; chr_par = -1;
     if (chr_ok) chr_ok = -1;
 }
-static int robot_carga(int pil, int aco)
+FRIO static int robot_carga(int pil, int aco)
 {
     char nom[16]; int k, n = 0, r; uint32_t i, t;
     if (chr_ok == 1 && chr_par == pil * 100 + aco) return 0;
@@ -13437,7 +13439,7 @@ static void rc_colores(int k)
 /* al empezar la carrera de la mision (con el hueco de la union prestado): los modelos de sus coches de carreras, de
    los de delante a los de detras, hasta RC_NMOD distintos (cada RCmm.DAT ~85 KB: sus texeles a la VRAM, ~25 KB, y el
    resto al monton, ~60 KB) */
-static void rc_modelos_carga(uint8_t *buf, uint32_t cap)
+FRIO static void rc_modelos_carga(uint8_t *buf, uint32_t cap)
 {
     int n = rival_n(), i, k, usado[RIVAL_MAX];
     rc_modelos_suelta();
@@ -13525,7 +13527,7 @@ static int camion_lee(int f)
    VRAM y lo demas (mallas y vertices, ~85-100 KB por fichero) a un bloque del monton de su tamano justo; el 40 usa los
    datos del 39. Se sueltan al volver al menu (camion_suelta_ram en el primer cuadro, como las colisiones;
    camion_suelta_vram con el curso, cuando la PowerVR ya no las lee) */
-static void camion_carga(uint8_t *buf, uint32_t cap)
+FRIO static void camion_carga(uint8_t *buf, uint32_t cap)
 {
     unsigned u0, l0, u1, l1; uint32_t v0 = pvr_mem_available(), ct = cam_ta_antes = ta_traf_teo; int f, i, j;
     if (cam_ram || cam_ntv) return;
@@ -13968,7 +13970,7 @@ static void coche_suelta(void)
    completo COCHEnn.DAT: los dos a la vez no caben en el bloque del coche (COCHE_RAM). coche_pide_ligero lo pone el
    arranque de la carrera y lo quita el menu; sin COCHEnnL.DAT (datos de antes) se queda el completo (coche_sin_ligero) */
 static int coche_ligero, coche_pide_ligero; static uint32_t coche_sin_ligero;
-static int coche_carga(int k)
+FRIO static int coche_carga(int k)
 {
     char nom[16]; int r, prest = union_prestable(), lig = coche_pide_ligero && ficha_modelo[k] < 30 && !((coche_sin_ligero >> k) & 1);
     uint32_t ct = 0, c, i;
@@ -14245,7 +14247,8 @@ static void coche_trasero_paso(int carrera)
 static int gh_nodo_ant = -1, gh_rama_ant = -1; static float gh_union_ant = -1;   /* la union de la etapa anterior */
 static coche_t gh_c; static matrix_t gh_mat __attribute__((aligned(32)));
 static volatile int gh_guardando;
-static uint8_t gh_buf[sizeof(gh_cab_t) + sizeof gh_rep];        /* el fichero de la VMU (lectura y guardado) */
+#define GH_BUF (sizeof(gh_cab_t) + sizeof gh_rep)                 /* el fichero de la VMU (lectura y guardado): en el */
+                                                                /* monton solo mientras se lee o se guarda (C2C 3: 28 KB de RAM del arranque) */
 #define GH_U (65536.0f / 6.2831853f)
 /* al empezar la carrera (y REINTENTAR): la grabacion a cero; en la CONTRARRELOJ la del curso, de la RAM o de la VMU */
 static void gh_empieza(void)
@@ -14254,16 +14257,17 @@ static void gh_empieza(void)
     gh_nrec = 0; gh_lleno = 0; gh_grabando = clave >= 0; gh_ve = 0; gh_nodo_ant = gh_rama_ant = -1; gh_union_ant = -1;
     if (clave < 0) { gh_nrep = 0; gh_clave = -1; return; }
     if (clave != gh_clave) {                                    /* otro curso: el suyo de la VMU */
-        uint8_t *b = gh_buf; char nm[16]; int n;
+        uint8_t *b = gh_guardando ? NULL : malloc(GH_BUF); char nm[16]; int n;
         gh_nrep = 0; gh_clave = clave;
         sprintf(nm, "ORGH%04X", clave);
-        n = gh_guardando ? -1 : menu_vmu_lee(nm, b, sizeof gh_buf);
+        n = !b ? -1 : menu_vmu_lee(nm, b, GH_BUF);
         if (n >= (int)sizeof(gh_cab_t)) {
             gh_cab_t c; memcpy(&c, b, sizeof c);
             if (!memcmp(c.marca, "ORGH", 4) && c.ver == 1 && c.clave == clave && c.n <= GH_MAX && n >= (int)(sizeof c + c.n * sizeof(gh_m_t))) {
                 gh_rep_cab = c; memcpy(gh_rep, b + sizeof c, c.n * sizeof(gh_m_t)); gh_nrep = c.n;
             }
         }
+        free(b);
         dbglog(DBG_INFO, "FANTASMA: curso %04X, %s (%d muestras, %u ms)\n", clave, gh_nrep ? "leido de la VMU" : "sin fantasma",
                gh_nrep, gh_nrep ? (unsigned)gh_rep_cab.total_ms : 0);
     } else dbglog(DBG_INFO, "FANTASMA: curso %04X, el de la RAM (%d muestras)\n", clave, gh_nrep);
@@ -14285,12 +14289,13 @@ static void gh_graba(void)
 }
 static void *gh_hilo(void *p)
 {
-    uint8_t *b = gh_buf; char nm[16]; int r, n = gh_rep_cab.n;
+    uint8_t *b = malloc(GH_BUF); char nm[16]; int r, n = gh_rep_cab.n;
+    if (!b) { dbglog(DBG_ERROR, "FANTASMA: sin RAM para guardarlo\n"); gh_guardando = 0; return NULL; }
     memcpy(b, &gh_rep_cab, sizeof gh_rep_cab); memcpy(b + sizeof gh_rep_cab, gh_rep, n * sizeof(gh_m_t));
     sprintf(nm, "ORGH%04X", gh_rep_cab.clave);
     r = menu_vmu_guarda(nm, "OutRun Fantasma", b, (int)(sizeof gh_rep_cab + n * sizeof(gh_m_t)));
     dbglog(r ? DBG_ERROR : DBG_INFO, "FANTASMA: guardado %s (%d muestras, %u ms): %d\n", nm, n, (unsigned)gh_rep_cab.total_ms, r);
-    gh_guardando = 0; (void)p;
+    free(b); gh_guardando = 0; (void)p;
     return NULL;
 }
 /* GOAL (4513C0): si mejora al que habia (o no habia) pasa a ser el fantasma del curso y se guarda en la VMU */
@@ -14508,7 +14513,7 @@ static int band_carga(void)
      BKD.DAT (1,4-5 MB en el arbol 1; 174 KB con SEG13 en el 0).
    Un hueco con una lectura en marcha (el hilo de carga) no se usa (sin esperar: la otra lectura no puede estar a la
    vez). El mayor de los dos; NULL sin ninguno (el modo que no quepa se salta) */
-static uint8_t *hueco_fin(uint32_t *cap)
+FRIO static uint8_t *hueco_fin(uint32_t *cap)
 {
 #define A32(q) ((uint8_t *)(((uintptr_t)(q) + 31) & ~(uintptr_t)31))
     uint8_t *a = NULL, *b = NULL, *fa = NULL, *fb = NULL, *q; uint32_t t, lba; char n[16]; int k;
@@ -14553,7 +14558,7 @@ static uint8_t *hueco_fin(uint32_t *cap)
 static modelo_t fin_mod, fin_prop, fin_sky;
 static int fin_chr;                                             /* la pareja del final en chr (FINCHRgg.DAT) */
 /* la pareja del final en buf (el hueco de la etapa): como robot_carga sin copiar al bloque (sus texturas con sube_modelo) */
-static int final24_chr(int g, uint8_t *buf, uint32_t cap)
+FRIO static int final24_chr(int g, uint8_t *buf, uint32_t cap)
 {
     char nom[20]; int k, n = 0, r; uint32_t i;
     sprintf(nom, "FINCHR%02X.DAT", g & 0xff);
@@ -14597,7 +14602,7 @@ static void final24_suelta(void)
     libera_modelo(&fin_mod); libera_modelo(&fin_prop); libera_modelo(&fin_sky);
     fin24 = fin_rue = 0;
 }
-static int final24_entra(int como)
+FRIO static int final24_entra(int como)
 {
     int c = final_columna(variante, preset_curso, meta_g), r; char n[24]; uint32_t lba, t, o;
     uint8_t *a, *fa;
