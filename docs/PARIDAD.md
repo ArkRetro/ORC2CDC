@@ -5187,6 +5187,8 @@ ENCONTRADO Y ARREGLADO EN EL CODIGO
   la imagen es la misma.
 
 ENCONTRADO, ARREGLADO EN EL CONVERSOR, FALTA REGENERAR LOS DATOS
+(Rev 2.9.9.c: tools/regenera.py detecta los datos de antes de este arreglo y los rehace; ver "Rev 2.9.9.c: bandas en el
+cielo en las bifurcaciones")
 - Franjas lisas en la cupula del fundido (lo que se ve en las capturas: rectangulos y arcos de un color en el cielo
   intermedio de los tercios 2 y 3, en todos los cambios desde o hacia una etapa con la cupula de PALM: SEG00, 01, 03,
   17, 18, 26...). No es del dibujo: dos de las cinco tiras de esa cupula (grupo 1 del cielo, objeto +0x54) salian del
@@ -6289,3 +6291,57 @@ registros en el scratchpad, `m29c/huecos/`.
 - Pendiente / no medido: las uniones de las misiones y de C2C (otros arboles), la meta, y la consola real. En la
   entrada de MACH no se ha mirado cuadro a cuadro si los fondos de cielo saltan al pasarla (en las capturas, una por
   segundo, no se nota).
+
+## Rev 2.9.9.c: bandas en el cielo en las bifurcaciones (2026-11-27)
+
+Queja del usuario (Flycast de Android): "fallos graficos en el cielo (aparecen bandas dividiendo el cielo) en las
+bifurcaciones". Todo lo de aqui esta medido en el Flycast de Linux; nada en la consola ni en Android.
+
+LO QUE SE HA MIRADO (9 cruces de union con capturas cada 0,5-0,7 s: PALM -> LAKE, YOSE -> GRAN, GRAN -> AMAZ, LAKE -> FORE,
+CAST -> INDU, CLOU -> METR, INDU -> RUIN, SNOW -> IMPE, AMAZ -> NEWY; y GRAN -> AMAZ y AMAZ -> NEWY cuadro a cuadro con
+`-DDIAG_TRANS`)
+- Datos: los cielos de la carpeta de datos de las pruebas ya estan hechos con el conversor arreglado (ps2/vif.py, ver
+  "Cambios de etapa: cielo del fundido"). En las 62 etapas y las uniones no queda ninguna malla del cielo con textura
+  y todas las UV a 0 (antes: dos de las cinco tiras de la cupula del fundido de PALM y las etapas con su cupula). En
+  todo el modelo quedan 6286 mallas con UV a 0 (eran 28965); no son del cielo y no se han mirado.
+- PERO tools/regenera.py no rehacia unos datos viejos: es idempotente y lo que ya esta en datos/ no se repite. Quien
+  convirtio su ISO antes del arreglo del conversor sigue con las franjas lisas en la cupula del fundido, que solo se
+  ve en las uniones (los tercios 2 y 3 del cambio de cielo): es la causa mas probable de lo que ve el usuario
+  (SUPUESTO: no hay captura suya ni se sabe la fecha de sus datos). Ahora regenera.py lo detecta (`cielo_liso`: alguna
+  malla del cielo de SEG00.DAT o de BK00.DAT, sueltos o en su paquete, con textura y todas las UV a 0) y, si es asi,
+  avisa, quita las etapas (SEGnn.DAT, SEGS.PAK, VISO.DAT, REPSEC.DAT) o las uniones (BKnn.DAT, los tres UNIONES*.PAK y
+  los intermedios de trabajo/) y sus pasos vuelven a la lista. Es Python con numpy, igual en Linux y en Windows.
+  Probado con los datos de las pruebas (no los toca) y con una copia de SEG00 / BK00 con las UV de una malla del cielo
+  a 0 (los detecta y quita lo dicho). La conversion entera detras de eso (horas) NO se ha vuelto a pasar.
+- En los 9 cruces, con los datos buenos, no ha salido ninguna banda: el fundido va liso cuadro a cuadro. Lo unico
+  parecido es del original: la cupula del fundido de NEWY (SEG30, grupo 1) lleva el color en los vertices (naranja a un
+  lado, blanco al otro, gajos de 18 grados) y durante el tercio 3 (0,7 s) se ve un borde inclinado entre los dos tonos.
+  Sin tocar.
+- Mallas del cielo que no caben en el TA (`-DDIAG_CIELO`, linea "CIELO:"): 0 en todos los cruces, antes y despues.
+- Fondo de la PowerVR a la vista (`-DDIAG_FONDO`, magenta, en PALM -> LAKE, YOSE -> GRAN y GRAN -> AMAZ): como mucho 217
+  pixeles de 307200 en una captura (GRAN, en la etapa) y 115 dentro de las uniones (rendijas y trozos sueltos). Con la union quitada
+  (`-DDIAG_SIN_TRAMO=1`) si se ve: por debajo del borde de la cupula (1,6 a 18 grados bajo el horizonte segun el cielo)
+  quedaba el azul fijo del fondo con el borde recto del horizonte.
+
+CAMBIOS EN EL CODIGO (DESVIACION los dos; son prevencion: en el Flycast de Linux la imagen de los cruces es la misma)
+- CIELO_TOPE 0 (`-DCIELO_TOPE=1`: como antes): el cielo no obedece el tope de TA de la etapa (`ta_en_cielo` en
+  `ta_cabe`), solo el del cuadro (`ta_lim`). La capa que se funde va entera a la lista transparente, la ultima, y
+  llegaba con el tope de la etapa gastado por las listas anteriores; ademas `corte_nodos` aparta para el cielo lo que
+  costo en el cuadro anterior (`cn_cielo`) y lo que no cabia no se contaba, asi que no se curaba solo. Ahora
+  `cn_cielo` cuenta tambien lo que no cupo. No se ha visto fallar (0 mallas fuera en las medidas); en la consola
+  `ta_f` y los topes son otros. `-DDIAG_CIELO` (o `-DDIAG_TRANS`) escribe "CIELO: ..." cada 30 cuadros si alguna
+  malla del cielo no cupo.
+- FONDO_CIELO 1 (`-DFONDO_CIELO=0`: el azul fijo): el color de fondo de la PowerVR es el del horizonte del cielo del
+  momento (`fondo_pon`: `horizonte_de`, y en el fundido de la union mezclado del viejo al nuevo como la niebla). Donde
+  el escenario no tapa lo de debajo de la cupula, o en las rendijas, ya no sale azul claro bajo un cielo naranja o de
+  noche.
+- Prueba: `-DPRUEBA_S0=<m>` empieza la carrera a esos metros del final de la etapa (para llegar a la union en 20 s).
+
+NO HECHO / DUDAS
+- Android: no se ha podido mirar. Si con los datos rehechos siguen las bandas hace falta una captura.
+- En el fundido cada capa pasa de la lista opaca a la transparente al bajar de alfa 0,9 y deja de dibujarse por debajo
+  de 0,1 (como el original, 452080): dos escalones del 10 % por tercio. No se ha tocado.
+- Las mallas del cielo enteras por debajo del horizonte llevan niebla (cielo_grupo, por el mar de BEAC). En 43 de las
+  62 etapas hay alguna; en varias (ALPI, CLOU, CAPE, GRAN...) es una sola malla de 12 vertices que cubre un sector, y
+  el resto de esa altura va en mallas que cruzan el horizonte, sin niebla. Solo se veria con el horizonte al
+  descubierto; no se ha visto en los cruces y no se ha tocado.

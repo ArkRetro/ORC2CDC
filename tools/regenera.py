@@ -87,6 +87,42 @@ def coches_visibles(D):
         return b[:4] == b'ORD7' and struct.unpack_from('<I', b, 8)[0] < 10500
     except (OSError, struct.error): return False
 
+def cielo_liso(D, f):
+    """Rev 2.9.9.c: el ORD7 f de D (suelto o descriptor PAKD de SEGS.PAK / UNIONES.PAK) tiene en el cielo (lista 3) alguna
+    malla con textura y todas las UV a 0: es de antes del arreglo de ps2/vif.py (tiras con las UV en varios UNPACK: la
+    cupula del fundido del cielo salia a franjas de un color en los cambios de etapa). None si no se puede leer"""
+    try:
+        import numpy as np, pak_union
+        b = open(os.path.join(D, f), 'rb').read()
+        if b[:4] == b'PAKD':
+            b = pak_union.recompone(b, open(os.path.join(D, b[20:36].rstrip(b'\0').decode()), 'rb').read())
+        if b[:4] != b'ORD7': return None
+        h = struct.unpack_from('<13I', b, 4); nm, nv, nt = h[0], h[1], h[4]; c0, c1 = h[8], h[9]
+        M = np.frombuffer(b, np.dtype([('c', '<f4', 4), ('v0', '<u4'), ('n', '<u4'), ('t', '<i4'), ('nodo', '<i4')]), nm, 56 + 24 * nt)
+        V = np.frombuffer(b, '<f4', nv * 6, 56 + 24 * nt + 32 * nm).reshape(nv, 6)
+        return any(m['t'] >= 0 and m['n'] >= 3 and not V[m['v0']:m['v0'] + m['n'], 3:5].any() for m in M[c0:c1])
+    except Exception: return None
+
+def cielos_viejos(D):
+    """Rev 2.9.9.c: (etapas, uniones) de D hechas con el conversor de antes: cielo_liso en la etapa y en la union de PALM,
+    cuya cupula del fundido era la que salia a franjas"""
+    return cielo_liso(D, 'SEG00.DAT') is True, cielo_liso(D, 'BK00.DAT') is True
+
+def quita_viejos(D, W, segs, uniones, informe=print):
+    """quita de D y de trabajo/ las etapas o las uniones viejas para que sus pasos vuelvan a la lista (horas: la PVS)"""
+    n = 0
+    if segs:
+        informe('AVISO: las etapas (SEGnn.DAT) son de antes del arreglo de las UV del cielo (franjas en los cambios de etapa): se rehacen')
+        for f in glob.glob(os.path.join(D, 'SEG[0-9]*.DAT')) + [os.path.join(D, x) for x in ('SEGS.PAK', 'VISO.DAT', 'REPSEC.DAT')]:
+            if os.path.isfile(f): os.remove(f); n += 1
+    if uniones:
+        informe('AVISO: las uniones (BKnn.DAT) son de antes del arreglo de las UV del cielo (franjas en los cambios de etapa): se rehacen')
+        fs = glob.glob(os.path.join(D, 'BK[0-9]*.DAT')) + [os.path.join(D, x) for x in ('UNIONES.PAK', 'UNIONESTA.PAK', 'UNIONESR.PAK')]
+        for d in ('u', 'u0', 'uta', 'uren'): fs += glob.glob(os.path.join(W, d, 'BK[0-9]*.DAT')) + [os.path.join(W, d, '.hecho')]
+        for f in fs:
+            if os.path.isfile(f): os.remove(f); n += 1
+    return n
+
 def hay(D, *fs): return all(os.path.isfile(os.path.join(D, f)) and os.path.getsize(os.path.join(D, f)) > 0 for f in fs)
 
 def mueve(D, *rutas):
@@ -272,6 +308,9 @@ def regenera(iso, D, W, jobs=4, informe=print):
     os.environ.setdefault('OR2_CACHE', C.env['OR2_CACHE'])
     C.musica = nativo.programa('musica')
 
+    # Rev 2.9.9.c: las etapas y uniones del conversor de antes (cupula del cielo con UV a 0) se quitan y se rehacen
+    sv, uv = cielos_viejos(D)
+    if sv or uv: quita_viejos(D, W, sv, uv, informe)
     # lista de pasos que faltan (lo hecho no se repite)
     falta = []
     if not hay(D, *UNIONES):                             # (conv_union.py no rehace las uniones sueltas que ya estan)
