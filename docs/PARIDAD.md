@@ -6685,8 +6685,18 @@ hechos no se rehacen solos: hay que borrar TRAF0-8.DAT / TRAFK0-2.DAT de la carp
     frontal. 0 "Out of memory", 0 "pvr_mem: ERROR".
   - Capturas: scratchpad modos/sp/cap/t15/ (re_8c la lista de 5 filas, re_2 el mapa de 15, re_n* el ranking) y
     modos/sp/cap/o15/ (re_8c, re_3, re_n1).
-- PENDIENTE: no se ha corrido un recorrido de 15 hasta la meta desde el frontal de OUTRUN2SP (la meta E y su final son
-  los de los cursos seguidos de la consola, comprobados alli); los records de la Contrarreloj de 15 tras la meta (26 en
+- Recorridos enteros hasta la meta desde el frontal (Flycast, :97, GDI con -DPRUEBA_PILOTO_MENU -DPRUEBA_SIN_TIEMPO,
+  scratchpad modos/sp/scr/s15.sh = final.sh con espera larga; capturas modos/sp/cap/s15o/ y s15t/):
+  - OutRun de 15 (lado R, preset 3, arbol 290): las 14 uniones BK470..483 leidas (1,7..2,4 s), GOAL en CAPE, meta E
+    (escena 5, musica 63), final de recreativa (modo 24, FINE4), modo 25 con la funcion 0x50 hasta el cuadro 510 (0x1FE,
+    la meta), GAME OVER y vuelta al frontal. RAM libre minima en carrera 235K (BKD.DAT detras de BK481).
+  - Contrarreloj de 15 (lado 0, preset 2, arbol 291): BK484..497 (BK497, la de la meta, 14,4 s en Flycast con
+    META.DAT), GOAL en NEWY, meta E (escena 34), modo 25 hasta el cuadro 510, GAME OVER y frontal (sin modo 24: la
+    Contrarreloj no tiene final en la DC, final_columna). RAM libre minima 249K (META.DAT con la union de la meta).
+  - Sin cuelgues, sin "Out of memory", "pvr_mem: ERROR" ni "No se pudo". Aviso visto, que no es de estos cambios:
+    "FINAL: sin FINCHR11.DAT (-2)": en los datos de prueba (LGDAT2) los FINCHRgg.DAT son descriptores PAKD de un
+    ACTORES.PAK que rev-1.1 no recompone (comun/gd.c es_union solo BK / SEG): el final sale sin la pareja.
+- Los records de la Contrarreloj de 15 tras la meta (26 en
   la variante 0 con record, [0x5a2030]) siguen como antes (SIN PORTAR en todas las Contrarrelojes de OUTRUN2SP).
 
 ### 2. Voces del INFARTO: HAM.CVT (preset 0) y HAM_SR
