@@ -54,6 +54,7 @@ CAMP.DAT (little endian):
      y cuantos x {f32 x, y, z (el objetivo en el marco de la etapa del PS2), s16 seccion desde, hasta}}: los objetivos de las
      fotos del tipo 24 (lista +0x70, filas de 0x20 hasta +0x18 == -1; 0x2a5fd8 / 0x2a60a0)
   detras de 'M161', 'C131' (c2c8): los sprites y voces de las clases del tipo 13 y por peticion sus coches (ver main)
+  detras, 'M163' (c2c9): los coches del subtipo 6 de los minijuegos (sus modelos y por peticion sus coches; ver main)
   detras, 'C221', u32 n y n x {u16 peticion, u8 cuantas, u8 0 y cuantas x {s16 seccion desde el inicio, hasta, f32 +8,
      +0xc (lo que se suma a cada una), i32 +0x10}}: las ventanas de la bocina del tipo 22 (lista +0x7c, filas de 0x18
      hasta -1; 0x29bfc0 / 0x29c058)
@@ -303,7 +304,7 @@ def main():
         d_ = bytes(As.datos(por_hash[hash_nombre('\\bin\\%s.bin' % n_)])); nn, oo = cm._r077(d_, n_)
         usadas.update(struct.unpack_from('<I', d_, oo + 0x78 * k + 0x1c)[0] for k in range(nn))
     PAR = mips.Mips.PILA - 0x8000                            # parametros en la memoria del interprete (la pila)
-    lista = []; pets = bytearray(); npet = 0; tipos = {}; objs = []; t46 = []; zon = []; c14 = []; m16 = []; c24 = []; c22 = []; c13 = []
+    lista = []; pets = bytearray(); npet = 0; tipos = {}; objs = []; t46 = []; zon = []; c14 = []; m16 = []; c24 = []; c22 = []; c13 = []; c166 = []
     # 0x297e20: +0x18 del objeto = 0x423080[clase] (la clase del banco 0x57); comprobado por el codigo que la lee
     assert par(0x29800c, 0x298014) == 0x423080, 'clases de los objetos (0x297e20)'
     banco = lambda c: u(0x423080 + 4 * c) & 0xff
@@ -375,6 +376,16 @@ def main():
                             regs.append(struct.pack('<4B2h', cl_ & 0xff, b24, n2a, 0, s26 + (ini if r80 else 0), s28 + (ini if r80 else 0)))
                             q_ += 0x2c
                     m16.append(struct.pack('<H2B', npet, sub, len(regs)) + b''.join(regs))
+                    if sub == 6:                              # (c2c9) los coches del subtipo 6 (0x2a3bd0: la lista +0x5c, filas
+                        cs6 = []                              # de 0x14 hasta +8 < 0 o +0xa < 0); +0x64 / +0x66 (0x2a3300)
+                        if pp + 0x5c in rel:
+                            q_ = rel[pp + 0x5c]
+                            while len(cs6) < 100:
+                                sc_, lc_ = struct.unpack_from('<hb', d, q_ + 8)
+                                if sc_ < 0 or lc_ < 0: break
+                                cs6.append((sc_, lc_)); q_ += 0x14
+                        m64, m66 = struct.unpack_from('<2h', blk, 0x64)
+                        c166.append(struct.pack('<H2B2h', npet, len(cs6), 0, m64, m66) + b''.join(struct.pack('<hbx', *x) for x in cs6))
                 if tipo == 24 and pp + 0x70 in rel:           # los objetivos de las fotos (0x2a5fd8: +0x70, filas de 0x20 hasta
                     q_ = rel[pp + 0x70]; cs24 = []            # +0x18 == -1; +0x74 != 0: las secciones desde el inicio)
                     while len(cs24) < 16:
@@ -470,6 +481,23 @@ def main():
     while len(b13) % 4: b13 += b'\0'
     out += b'C131' + struct.pack('<I', len(b13)) + b13
     print('  tipo 13: %d peticiones, %s coches' % (len(c13), [x[2] for x in c13]))
+    # (c2c9) el subtipo 6 de los minijuegos (los coches, 0x2a3300 / 0x2a3510): 0x2a3bd0 da a cada coche de la lista la clase
+    # +0x78 + 3 (+0x78 = +8 de los parametros, el azar del banco CARS) con rand < 0,5 o una de las otras dos (3..5);
+    # 0x22d0a0 al abrir cada coche de la lista cuenta en +0x7a los de esa clase (0x22d278) y le pone el modelo 0x415500
+    # [plaza % 3] (los contados) o 0x415510 / 0x415530 [plaza % 7] (los demas, por la clave de la etapa); 0x19c6f0 los
+    # tine por la clase (+0xd10: 3 rojo, 4 verde, 5 azul; 0x111bb0). El trafico de la peticion con los modelos +0x64 o
+    # 0x104. Bloque 'M163' (detras de 'C131'): u8 contados[3], otros[7], otros_1a[7], 0 x 3, u32 n y n x {u16 peticion, u8
+    # coches, 0, s16 +0x64, +0x66 y coches x {s16 seccion desde el inicio, s8 carril, u8 0}}
+    assert u(0x22d278) == 0x94820078 and u(0x22d280) == 0x24420003 and u(0x22d28c) == 0x9482007a, 'la cuenta del 16/6 (0x22d0a0)'
+    assert par(0x22d2e0, 0x22d2e8) == 0x415500 and par(0x22d318, 0x22d320) == 0x415530, 'modelos del 16/6 (0x22d0a0)'
+    assert u(0x22d33c) == 0x3c050041 and u(0x22d344) == 0x24a55510, 'modelos de los demas (0x22d0a0: 0x415510)'
+    assert u(0x2a3474) == 0x24080104 and u(0x2a3384) == 0x0c000000 | (0x2a3bd0 >> 2), 'el subtipo 6 (0x2a3300)'
+    assert u(0x19c708) == 0x2442a970 and u(0x3ea970 + 8) == 0x19c74c and u(0x3ea970 + 16) == 0x19c77c, 'el tinte (0x19c6f0)'
+    b6 = bytes([u(0x415500 + 4 * k) for k in range(3)] + [u(0x415510 + 4 * k) for k in range(7)] + [u(0x415530 + 4 * k) for k in range(7)]) + b'\0\0\0'
+    b6 += struct.pack('<I', len(c166)) + b''.join(c166)
+    while len(b6) % 4: b6 += b'\0'
+    out += b'M163' + struct.pack('<I', len(b6)) + b6
+    print('  minijuego 16/6: %d peticiones, %s coches, modelos %s' % (len(c166), [x[2] for x in c166], list(b6[:17])))
     print('  tipo 16: %d peticiones, %d sprites del banco 0x46' % (len(m16), len(t16)))
     print('  zonas del tipo 5: %s' % ' '.join('%d:(%.2f..%.2f)-(%.2f..%.2f)' % ((struct.unpack('<2H4f', z)[0],) + tuple(struct.unpack('<2H4f', z)[2:])) for z in zon))
     print('  efectos de la pelota y los meteoritos: %s' % ' '.join('%x' % x for x in snd))
