@@ -46,7 +46,7 @@
 #define NIV 15
 static uint8_t *dat;
 static const uint8_t *mis, *pun, *anu, *res, *cor, *grp, *modelos;
-static uint8_t modelos_c[56], coches_t[4096] __attribute__((aligned(32)));   /* 2 sectores con la tabla */
+static uint8_t modelos_c[56];
 static uint32_t lba_dat, off_coches;
 /* el preset [0x44350c] de la carrera (infarto_preset; 0x1760c0: 0 OutRun 2 SP, 1 OutRun 2): INFARTO.DAT lleva las
    tablas del preset 0, INFARTOP.DAT las del 1 (misiones 0x3f3ed8, coches 0x362718) y la mision base de las claves de
@@ -86,7 +86,15 @@ static int lee_x(void)
     return 0;
 }
 static int ny_tramo;                                /* 1: la etapa del jugador es la del descriptor 0x1a (NEWY) */
-static uint8_t lv[NIV][0x44];                       /* 7F2548 + nivel * 0x44 (registro del nivel) */
+/* (INFARTO 3) las tablas grandes del modo, en el monton solo mientras dura (infarto_inicia / infarto_libera): ~9 KB
+   menos de bss, que son RAM del arranque */
+struct ha_mem;
+static struct ha_mem *hm;
+#define coches_t (hm->coches_t_)                    /* 2 sectores con la tabla de coches */
+#define lv (hm->lv_)                                /* 7F2548 + nivel * 0x44 (registro del nivel) */
+#define m_rec (hm->m_rec_)
+#define m_roto (hm->m_roto_)
+#define m_efe (hm->m_efe_)
 #define LV_SEL(l)   (*(int8_t *)&lv[l][0])
 #define LV_U32(l, o) (*(int32_t *)&lv[l][o])
 static int q = 3, rec_i, req_ini, n_req, n_mis, n_fin, quest_act, clave_act = -1, nivel_act;   /* 7F2428, 7F24E4, 7F24C8, 7F24CC */
@@ -160,12 +168,17 @@ static infarto_hud_t hud;
    (1/15 x velocidad x pasos del recorrido; 0: parabola x = (y - 100)^2 x 0,008 + 200; 1 y 3: un eje lineal y el otro
    acercandose 0,335 x velocidad por paso; 2: lineal), abren 0x5B..0x69 donde quedan y se cierran */
 typedef struct { int usado, g, ini, fin, modo; float c, vel, x, y; int volteado; } spr_t;   /* modo 0 bucle, 1 una vez */
-static spr_t m_rec[20];                            /* 7F1A08 + k * 0x1C: centro y anillo */
 static int16_t m_f18[20];                          /* +0x18: color del centro / 7 en el anillo */
-static spr_t m_roto[24];                           /* 2B000E sueltos (roturas) */
 static spr_t m_alerta;                             /* [688B34]: 2B000E en (166, 182) mientras baja el contador (4BCD50) */
 typedef struct { int usado, est, n, tipo, f, vida; float x0, y0, x1, y1, x, y, vel; spr_t s; } efe_t;
-static efe_t m_efe[16]; static int m_efe_n, m_efe_i;   /* 7F2038 (16 x 0x38), 7F8B20, 7F8B24 */
+static int m_efe_n, m_efe_i;                        /* 7F8B20, 7F8B24 */
+struct ha_mem {
+    uint8_t coches_t_[4096];
+    uint8_t lv_[NIV][0x44];
+    spr_t m_rec_[20];                              /* 7F1A08 + k * 0x1C: centro y anillo */
+    spr_t m_roto_[24];                             /* 2B000E sueltos (roturas) */
+    efe_t m_efe_[16];                              /* 7F2038 (16 x 0x38) */
+};
 static int32_t m_prev;                              /* 7F1C3C */
 static int m_t8c74, m_t8c78, m_t2510, m_visto;      /* 7F8C74, 7F8C78, 7F2510, 7F1CA8 */
 static uint32_t m_tinte = 0xffffffff;               /* 7F8B68: color del marco del rotulo */
@@ -325,6 +338,8 @@ int infarto_inicia(void)
     uint32_t tam, o[8];
     if (dat && inf_cargado == inf_preset) return 0;
     if (dat) infarto_libera();                      /* otro preset: otra vez */
+    if (!hm && !(hm = memalign(32, sizeof *hm))) return -1;
+    memset(hm, 0, sizeof *hm);
     /* en la RAM todo menos las tablas de coches (51 KB: se lee del GD la de cada accion -14, 0x320 bytes) */
     if (gd_busca("INFARTO.DAT", &lba_dat, &tam)) return -1;
     if (!(dat = memalign(32, 2048))) return -1;
@@ -1087,7 +1102,8 @@ void infarto_coche_abierto(int ok)
     if (ct_v & 0x80) { ct_pend = ct_i < 0x64 ? ct_i : -1; } else ct_pend = -1;
 }
 void infarto_libera(void) { free(dat); dat = NULL; free(mis1); mis1 = NULL; free(xdat); xdat = NULL; x_pts = NULL;
-                          robot_extra(NULL, 0); free(chrh); chrh = NULL; haobj_libera(); inf_cargado = -1; }
+                          robot_extra(NULL, 0); free(chrh); chrh = NULL; haobj_libera(); inf_cargado = -1;
+                          free(hm); hm = NULL; }
 /* sprites de la animacion (428460: cuadros ini..fin, modo 0 en bucle, 1 una vez; estado 3 = acabado) */
 static void spr_abre(spr_t *s, int g, int ini, int fin, int modo, float x, float y)
 {

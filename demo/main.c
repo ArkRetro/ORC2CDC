@@ -45,6 +45,8 @@
 #endif
 #include "meta.h"
 #include "../comun/rksp.h"
+/* (INFARTO 3) FRIO: por tamano lo que solo corre al cargar (no en cada cuadro de la carrera) */
+#define FRIO __attribute__((optimize("Os")))
 
 /* Longitud de las tiras en las listas de objetos de la PowerVR (Strip_Len, bits 18-19 de la cabecera del poligono:
    1, 2, 4 o 6 triangulos de una tira por entrada de la lista de cada tile). KallistiOS la deja en 2 (PVR_CMD_POLYHDR
@@ -403,7 +405,7 @@ static int pila_cmp(const void *a, const void *b)
 #define DECOR_DETRAS 3                                          /* edificios tapados por otro de delante: fuera 1 de cada 3 */
 #define DECOR_FAROLA 20
 #define DECOR_PUBLICO 2
-static void decor_reduce(modelo_t *m, const char *nombre)
+FRIO static void decor_reduce(modelo_t *m, const char *nombre)
 {
 #ifndef SIN_DECOR_REDUCE
     static uint8_t ttipo[512]; int seg; uint32_t q;
@@ -3155,7 +3157,7 @@ static int ruta_pon(const modelo_t *m)
    saltos). Devuelve el primer punto de m en la ruta, o -1 */
 #define RECENTRA 25
 static uint32_t ruta_salto;                                     /* primer punto de m usado (la parte entera) */
-static int ruta_anade(const modelo_t *m)
+FRIO static int ruta_anade(const modelo_t *m)
 {
     const float *b = m->ruta; uint32_t j = 0, k, c, i0 = ruta_n, n; float ax, az, tx, tz, l, o0 = 0, d0 = 0, d1, f = 0;
     if ((int)m->paso_ruta != PR || m->nruta < 8 || !ruta_n) return -1;
@@ -6530,7 +6532,7 @@ static void part_recentra(float dx, float dz)
    su principio (antes tenia el suyo, y la mancha otro: 18 KB de RAM que ahora ocupan las chispas) */
 #define TAM_CEN (256 * 32 * 2)
 static uint16_t buf_arr[512 * 128] __attribute__((aligned(32)));
-static void efectos_inicia(void)
+FRIO static void efectos_inicia(void)
 {
     pvr_poly_cxt_t cx; uint32_t sz;
     uint8_t *e = gd_carga("EFECTOS.DAT", &sz); uint32_t o = 8;
@@ -7303,7 +7305,7 @@ static void ta_meta_final(void)
     memcpy(curso[0].bk, e.bk, sizeof e.bk); memcpy(curso[0].rama, e.rama, sizeof e.rama);
     curso[0].trans_pos = e.trans_pos; curso[0].trans_seg = e.trans_seg; curso[0].trans_m = e.trans_m;
 }
-static int curso_lee_id(int id)
+FRIO static int curso_lee_id(int id)
 {
     uint32_t sz, o, n; int r; uint8_t *b = gd_carga(CURSO_FICH(id), &sz);
     if (!b) return -1;
@@ -7466,7 +7468,7 @@ static int po_k = PRUEBA_ORDEN_DESDE - 1, po_rep, po_fin, po_ult = -1, po_t;   /
 #endif
 static int ta_codigo = -1;                                      /* CONTRARRELOJ: [656234] (el arbol 200 + codigo) */
 static int ta_opcion_b;                                         /* Rev 2.9.4: la opcion B de la etapa (raiz +0x20c bit 0) */
-static void etapa_precalienta(void);                            /* (el reparto del TA antes del semaforo: abajo) */
+FRIO static void etapa_precalienta(void);                            /* (el reparto del TA antes del semaforo: abajo) */
 static volatile int meta_hilo;                                  /* META.DAT leyendose (hilo) */
 static void *meta_lee(void *p)
 {
@@ -7476,7 +7478,7 @@ static void *meta_lee(void *p)
     meta_hilo = 0;
     return NULL;
 }
-static void curso_reinicia(void)
+FRIO static void curso_reinicia(void)
 {
     int k;
     if (curso_pedido != curso_id) {                             /* otro arbol: sus indices son otros */
@@ -11310,7 +11312,7 @@ static int faros_rejilla(void)
     faros_col = (faros_col & 0xFFFFFFu) | (uint32_t)((float)(faros_col >> 24) * FAROS_BRILLO) << 24;
     return 0;
 }
-static void faros_carga(void)
+FRIO static void faros_carga(void)
 {
     pvr_poly_cxt_t cx; tex_t *t; uint32_t fb, vq, n; pvr_ptr_t dir;
     if (lee_modelo(&faros_m, "FAROS.DAT") || faros_m.ntex < 1 || sube_modelo(&faros_m)) { libera_modelo(&faros_m); return; }
@@ -12025,7 +12027,7 @@ static void salida_calcula(void)
    la que usara el primer cuadro (camara_paso con el coche en la parrilla; si no hay CAM1, 6,5 m detras y 1,6 m por
    encima, como pop_arranque.py). No toca la VRAM ni el modelo; pon_vista/camara_paso se vuelven a llamar igual en el
    bucle, asi que no hay salto de camara. */
-static void etapa_precalienta(void)
+FRIO static void etapa_precalienta(void)
 {
     float fw[3], up[3], o[3], m[3]; int k, n, quieto = 0, pd, pp, ed, ep;
     uint32_t i, vivos = 0; uint64_t t0 = timer_us_gettime64();
@@ -13281,7 +13283,7 @@ static void rc_colores(int k)
 /* al empezar la carrera de la mision (con el hueco de la union prestado): los modelos de sus coches de carreras, de
    los de delante a los de detras, hasta RC_NMOD distintos (cada RCmm.DAT ~85 KB: sus texeles a la VRAM, ~25 KB, y el
    resto al monton, ~60 KB) */
-static void rc_modelos_carga(uint8_t *buf, uint32_t cap)
+FRIO static void rc_modelos_carga(uint8_t *buf, uint32_t cap)
 {
     int n = rival_n(), i, k, usado[RIVAL_MAX];
     rc_modelos_suelta();
@@ -13361,7 +13363,7 @@ static int camion_lee(int f)
    VRAM y lo demas (mallas y vertices, ~85-100 KB por fichero) a un bloque del monton de su tamano justo; el 40 usa los
    datos del 39. Se sueltan al volver al menu (camion_suelta_ram en el primer cuadro, como las colisiones;
    camion_suelta_vram con el curso, cuando la PowerVR ya no las lee) */
-static void camion_carga(uint8_t *buf, uint32_t cap)
+FRIO static void camion_carga(uint8_t *buf, uint32_t cap)
 {
     unsigned u0, l0, u1, l1; uint32_t v0 = pvr_mem_available(), ct = cam_ta_antes = ta_traf_teo; int f, i, j;
     if (cam_ram || cam_ntv) return;
@@ -13804,7 +13806,7 @@ static void coche_suelta(void)
    completo COCHEnn.DAT: los dos a la vez no caben en el bloque del coche (COCHE_RAM). coche_pide_ligero lo pone el
    arranque de la carrera y lo quita el menu; sin COCHEnnL.DAT (datos de antes) se queda el completo (coche_sin_ligero) */
 static int coche_ligero, coche_pide_ligero; static uint32_t coche_sin_ligero;
-static int coche_carga(int k)
+FRIO static int coche_carga(int k)
 {
     char nom[16]; int r, prest = union_prestable(), lig = coche_pide_ligero && ficha_modelo[k] < 30 && !((coche_sin_ligero >> k) & 1);
     uint32_t ct = 0, c, i;
@@ -14433,7 +14435,7 @@ static void final24_suelta(void)
     libera_modelo(&fin_mod); libera_modelo(&fin_prop); libera_modelo(&fin_sky);
     fin24 = fin_rue = 0;
 }
-static int final24_entra(int como)
+FRIO static int final24_entra(int como)
 {
     int c = final_columna(variante, preset_curso, meta_g), r; char n[24]; uint32_t lba, t, o;
     uint8_t *a, *fa;
