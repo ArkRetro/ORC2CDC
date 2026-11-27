@@ -1914,6 +1914,18 @@ static float ta_lej_tope = 1e9f;
    corte_nodos lo usa como factor de esas mallas en el cuadro siguiente */
 static uint32_t cn_ns_real, cn_ns_est, cn_ns_f __attribute__((unused)) = 512, cn_cielo, cn_cielo_ult __attribute__((unused));   /* (cn_ns_f /256; cielo: bytes) */
 static int cn_activo;                                         /* el corte por nodos ya ha hecho caber la etapa */
+/* Rev 2.9.9.c (DESVIACION, CIELO_TOPE 0; -DCIELO_TOPE=1: como antes): el cielo no obedece el tope de la etapa. El cielo
+   va el primero de cada lista, pero la lista transparente es la ultima del cuadro: la capa que se funde en la union
+   (alfa < 0,9, toda en esa lista) llegaba a ta_cabe con el tope de la etapa ya gastado por las listas opaca y
+   perforada de la etapa, la union y la etapa siguiente, y sus mallas (anillos y gajos de la cupula) no cabian: el
+   cielo quedaba partido, un trozo con las nubes de la capa de arriba y otro con el degradado liso de la de debajo, con
+   el borde recto de la malla (las "bandas" del cielo en las bifurcaciones). Y no se curaba solo: corte_nodos aparta
+   para el cielo lo que costo en el cuadro anterior (cn_cielo), y lo que no cabia no se contaba. Ahora el cielo solo
+   mira el tope del cuadro (ta_lim) y cn_cielo cuenta tambien lo que no cupo (cie_corto: mallas en el cuadro) */
+#ifndef CIELO_TOPE
+#define CIELO_TOPE 0
+#endif
+static int ta_en_cielo, cie_corto;
 /* (revision 2.9.9: cn_ult solo vale si corte_nodos corrio en el cuadro anterior con el mismo modelo en el tramo; si no,
    en la cuenta atras, sin corte, dibuja_etapa lo acumulaba cuadro a cuadro hasta 65535 y en el primer cuadro de la
    carrera, en la salida, el corte quitaba casi toda la etapa; y tras etapa = sig el tramo 0 leia los costes de la
@@ -1967,7 +1979,8 @@ static inline int ta_cabe(uint32_t n)
 {
     uint32_t t = n >= 3 && n <= 256 ? ta_teo_tab[ta_ofs != 0][n] : ta_teo(n, ta_ofs), c = t * ta_f >> 8;
 #ifndef DIAG_SIN_TOPE                                    /* medida en Flycast: sin tope (en la consola se colgaria) */
-    if (ta_vb + c > ta_lim || (ta_en_etapa && ta_et + c > ta_tope_etapa) || (ta_en_bo && ta_bo + c > ta_bo_tope)) {
+    if (ta_vb + c > ta_lim || (ta_en_etapa && (CIELO_TOPE || !ta_en_cielo) && ta_et + c > ta_tope_etapa) || (ta_en_bo && ta_bo + c > ta_bo_tope)) {
+        if (ta_en_cielo) { cie_corto++; if (!CIELO_TOPE) cn_cielo += c; return 0; }   /* (no es la etapa la que no cabe) */
         ta_corto |= !ta_en_bo; ta_et_corto |= ta_en_etapa;
         if (ta_en_bo) ta_bo_pide += c;
 #ifdef DIAG_POPPING
@@ -10130,6 +10143,29 @@ static void niebla_paso(void)
     }
     niebla_d = d0; niebla_modo = m0; niebla_c = c0;
 }
+/* Rev 2.9.9.c (DESVIACION, FONDO_CIELO 1; -DFONDO_CIELO=0: el azul fijo de antes): el color de fondo de la PowerVR (lo
+   que se ve donde no llega ningun poligono: por debajo del borde de la cupula del cielo, que en muchas etapas acaba
+   1,6 grados bajo el horizonte, cuando el escenario no lo tapa, y en las rendijas entre mallas) es el del horizonte del
+   cielo del momento (horizonte_de; en el fundido de la union, mezclado del viejo al nuevo como la niebla). Antes era
+   siempre un azul claro: bajo un cielo naranja (GRAN) o de noche quedaba como una banda azul lisa con el borde recto
+   del horizonte */
+#ifndef FONDO_CIELO
+#define FONDO_CIELO 1
+#endif
+static void fondo_pon(void)
+{
+    uint32_t c = 0, c1; float t; int k;
+    if (FONDO_CIELO && cur_nodo >= 0) {
+        if (ent_fase && ent_nuevo >= 0) {
+            c1 = horizonte_de(curso[ent_nuevo].zona); c = horizonte_de(curso[ent_cruza && ent_viejo >= 0 ? ent_viejo : cur_nodo].zona);
+            t = ent_fase == 1 && ent_t > 0 && ent_dur > 0 ? ent_t / ent_dur : 0;
+            if (!c || !c1) c = c1 ? c1 : c;
+            else { uint32_t m = 0xFF000000u; for (k = 0; k < 24; k += 8) m |= (uint32_t)(((c >> k) & 0xff) * t + ((c1 >> k) & 0xff) * (1 - t)) << k; c = m; }
+        } else c = horizonte_de(curso[cur_nodo].zona);
+    }
+    if (c) pvr_set_bg_color(((c >> 16) & 255) / 255.0f, ((c >> 8) & 255) / 255.0f, (c & 255) / 255.0f);
+    else pvr_set_bg_color(0.45f, 0.65f, 0.95f);
+}
 /* direccion (hacia donde va) de la luz e de la etapa k en el mundo: (0, 0, -1) girada en x por la inclinacion y en y
    por el rumbo (44A430), en el marco de la etapa (M) */
 static void luz_dir(int k, int e, const float *M, float *d)
@@ -14982,6 +15018,15 @@ int main(int argc, char **argv)
                 if (strcmp(s1, msg)) { strcpy(msg, s1); texto_centro(msg); }
                 if (t_estado >= 300) { estado = CARRERA; t_estado = 0; if (voz_ok) voces_salida(); }   /* GO!: temporizador 60 */
             }
+#ifdef PRUEBA_S0                                                /* prueba: la carrera empieza a PRUEBA_S0 m del final de la etapa */
+            if (estado == CARRERA) {
+                float p_[3], th_;
+                yo.s = longitud - PRUEBA_S0; yo.x = carril_x(yo.s, 4); coche_paso(&yo, 0, 0, 0, 0);
+                if (fis_ok) { ruta_en(yo.s, p_, &th_, NULL, NULL); or2_coloca(&fis, &fpar, th_ + yo.a, 0); }
+                traf_inicia(yo.s);
+                dbglog(DBG_INFO, "SALTO: salida a s %.0f (%d m del final)\n", (double)yo.s, PRUEBA_S0);
+            }
+#endif
             curso_paso();                                       /* la union ya se puede ir leyendo */
             if (auto_ && (nuevo & CONT_START)) { estado = TITULO; auto_ = 0; nuevo = 0; texto_centro(""); hud_baja_tex(); menu_entra(manual_, pista, NPISTAS); }
             coche_paso(&yo, 0, 0, 0, 1.0f / 60);
@@ -15511,7 +15556,7 @@ int main(int argc, char **argv)
 #ifdef DIAG_FONDO
         else pvr_set_bg_color(1.0f, 0.0f, 1.0f);                /* prueba: los huecos en magenta */
 #else
-        else pvr_set_bg_color(0.45f, 0.65f, 0.95f);
+        else fondo_pon();
 #endif
         ta_fin_cuadro();                                        /* el TA ya termino el cuadro anterior: lo que gasto */
         niebla_pon();                                           /* niebla de la etapa y distancia de dibujo */
@@ -15599,7 +15644,10 @@ int main(int argc, char **argv)
                 ta_en_etapa = 1;
                 PRF(0);
                 {   uint32_t ce0_ = ta_et;
+                    if (l == 0) cie_corto = 0;
+                    ta_en_cielo = 1;
                     cielo_dibuja(l);                            /* el cielo (y su fundido en la union) */
+                    ta_en_cielo = 0;
                     cn_cielo += ta_et - ce0_; }
                 PRF(2);
                 mat_load(&vista);
@@ -15881,6 +15929,16 @@ int main(int argc, char **argv)
                            (double)cie_a[0], (double)cie_a[1], (double)cie_a[2], (double)cie_a[3], cie_on[0], cie_on[1], cie_on[2], cie_on[3],
                            cielo == &uni ? "union" : "etapa", sig.tv != NULL, cie_seq, dt_que);
             thd_sleep(DIAG_TRANS);
+        }
+#endif
+#if defined(DIAG_TRANS) || defined(DIAG_CIELO)                 /* medida: mallas del cielo que no cupieron en el TA */
+        {   static int cc_n, cc_c, cc_m;
+            if (cie_corto && estado == CARRERA) { cc_c++; cc_m += cie_corto; }
+            if (++cc_n >= 30) {
+                if (cc_c) printf("CIELO: s %.0f crono %d fase %d, %d cuadros de 30 con mallas del cielo fuera (%d mallas) ta %uK/%uK etapa %uK/%uK cielo %uK\n", (double)yo.s,
+                                 (int)crono, ent_fase, cc_c, cc_m, (unsigned)(ta_vb >> 10), (unsigned)(ta_lim >> 10), (unsigned)(ta_et >> 10), (unsigned)(ta_tope_etapa >> 10), (unsigned)(cn_cielo >> 10));
+                cc_n = cc_c = cc_m = 0;
+            }
         }
 #endif
         hudd_fin_cuadro();                                      /* VRAM del HUD y los menus que ya no lee la PowerVR */
