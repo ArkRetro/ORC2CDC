@@ -107,6 +107,9 @@ def extra(elf, V, u32, par):
     # 0x1aba2c)
     te = par(0x1aba2c, 0x1aba30); assert te == 0x3f7328, hex(te)
     sec.append((b'ESC1', elf[V(te):V(te) + 32]))
+    # FAN1: 3 u32, los efectos del fantasma a 7 secciones (tipo 20, 0x1b1f18: tabla 0x3f0840 por rand % 3)
+    tf_ = par(0x1b1f80, 0x1b1f84); assert tf_ == 0x3f0840, hex(tf_)
+    sec.append((b'FAN1', elf[V(tf_):V(tf_) + 12]))
     # ESC2: 2 x 10 x 12 bytes, los escoltas de la accion -12 (0x1ab3c8: la tabla 0x368528 + w4 x 0x78; cada uno {u16
     # seccion desde w6 (0xffff: fin), u8 carril, u8 0, u32 modelo, s8 +8, u8 +B74, u16 0}); solo hay 2 (w4 0 / 1)
     tk = par(0x1ab3f4, 0x1ab404); assert tk == 0x368528, hex(tk)
@@ -620,6 +623,11 @@ def main():
     # en (0, 30), capa 1
     assert u32(0x1abcb4) & 0xffff == 5 and u32(0x1abcec) & 0xffff == 6, 'puesto 2B0005 / 2B0006'
     escenas.append(('HA_RK0', 5, range(1), 0x2b)); escenas.append(('HA_RK1', 6, todos(0x2b, 0x2b0006), 0x2b))
+    # (INFARTO 3) sprites 3D (4295D0 = PS2 0x115870, en el mundo con escala): 2C0006 los corazones sobre los coches del tipo
+    # 20 (0x1b2190), 2C0002 los destellos del arco cruzado (0x1d4508), 2C0007 / 2C0000 la estela de las estrellas (0x1d4d80 /
+    # 0x1d50e0), con todos sus cuadros
+    assert u32(0x1b22c8) & 0xffff == 6, 'corazones 2C0006 del tipo 20'
+    for k in (6, 2, 7, 0): escenas.append(('HA_S%02X' % k, k, todos(0x2c, 0x2c0000 + k), 0x2c))
     # 429530 (x, y) con 4294C0 (la mitad del tamano de la escena, PS2 0x1156c0): el uso lleva (w / 2 - 320, h / 2 - 240)
     # y la demo pasa la x / y del original sin el 4294C0 (hud.c: escena centrada en (320, 240))
     desp = {}

@@ -37,7 +37,7 @@ typedef struct {
 } infarto_coche_t;
 
 /* coche que pide abrir el gestor (45D470): clase (+324), seccion de la etapa, carril, modelo del juego */
-typedef struct { int clase, seccion, carril, modelo, id; } infarto_coche_nuevo_t;
+typedef struct { int clase, seccion, carril, modelo, id, fantasma; } infarto_coche_nuevo_t;   /* fantasma: +C5C 0x80000 */
 
 int  infarto_inicia(void);                  /* lee INFARTO.DAT; 0 bien */
 void infarto_preset(int preset);            /* el preset [0x44350c] de la carrera, antes de infarto_inicia */
@@ -53,6 +53,10 @@ int  infarto_metas(char *nom);
    un paso de logica, con todas las plazas */
 struct haobj_auto_s;
 void infarto_autos(struct haobj_auto_s *v, int n);
+/* sprites 3D (4295D0 = PS2 0x115870): grupo de HAHUD.DAT, cuadro, punto del mundo y escala (px = esc x foco / z / 32);
+   cuadros(g): los del grupo (para recortar) */
+typedef struct { char g[8]; int cuadro; float p[3], esc; } infarto_s3d_t;
+int  infarto_spr3d(infarto_s3d_t *v, int max, int (*cuadros)(const char *g));
 void infarto_paso(const infarto_coche_t *c);   /* 464D20, un paso de logica (modo 16) */
 int  infarto_corazones(void);               /* los que ensena el contador (7F1C80 / 10000) */
 int  infarto_total(void);                   /* 7F23C4 / 10000 */
