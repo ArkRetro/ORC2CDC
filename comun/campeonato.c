@@ -29,6 +29,7 @@
 #include <math.h>
 #include "gd.h"
 #include "campeonato.h"
+#include "haobj.h"
 
 int (*camp_graba)(int tipo, int lista, int nota);
 void (*camp_voz)(int id);
@@ -37,6 +38,7 @@ void (*camp_millas)(int m);
 void (*camp_obj)(int cl, int tipo, float sec, float lat, float esc);
 void (*camp_chica)(int que, uint32_t v);
 void (*camp_golpe)(void);
+void (*camp_bancos)(int n, const uint8_t *tipo, const uint8_t *sub, int fila, int *rnd);
 
 #define DT 0.016611295f                                 /* +0x180 (0x3c881469) */
 #define LLENO 80.0f                                     /* 0x3741a8 */
@@ -62,6 +64,7 @@ typedef struct {                                        /* el registro 0x74 de l
     int n, c38, c40, c44, c48, c4c, c50, c54;           /* +0x70, contadores de 0x22c818 */
     const float *P;                                     /* +0xc de los parametros (0x2323e8) */
     int h70, h74, h78, tmr; float h7c;                  /* +0x70.. de los parametros (los usa cada tipo); +0xc del objeto del tipo */
+    int rnd;                                            /* +8 de los parametros: el azar del banco de voces (0x22ac00) */
 } pet_t;
 typedef struct {                                        /* el registro 0x74 del tipo de etapa (+0x1fc + 0x74 tipo) */
     int tipo, cuenta, idx, cor, nota_media, nota[4], pnota[3], pcor[3], hist[7];   /* +0x200, +0x204, +0x208, +0x224.. */
@@ -76,6 +79,8 @@ typedef struct {
     uint32_t reloj, voz_ult; struct { int id, retardo, prio; } vc[8]; int vc_cab, vc_fin;   /* 0x1ac3d8 */
     int ban_on, ban_m4c, ban_txt, ban_mar, ban_n, ban_abre, ban_cierra, ban_ver;          /* rotulo */
     int animo_ult, nota3, nota1;                        /* 0x3b5678, 0x6213b0, 0x6213b8 */
+    const uint16_t *se11; int k11_tmr, k11_golpes;      /* 'C111' (0x422e00); +0xc del objeto del tipo 11; golpes del paso */
+    uint8_t ver11[24]; int16_t fr11[24]; float p11[24][3];   /* el dibujo de los coches de la peticion (camp_spr3d) */
 } camp_t;
 static camp_t *C;
 
@@ -89,6 +94,7 @@ void camp_libera(void)
 {
     if (!C) return;
     if (camp_obj) camp_obj(-2, 0, 0, 0, 0);
+    if (camp_bancos) camp_bancos(-1, NULL, NULL, 0, NULL);
     free(C->d); free(C); C = NULL;
 }
 int camp_inicia(int grupo, int fila, int forzada, int lista, int dificultad)
@@ -108,7 +114,11 @@ int camp_inicia(int grupo, int fila, int forzada, int lista, int dificultad)
             if (o + 4 + 56 + 8 <= tam && !memcmp((const uint8_t *)d + o, "CHI1", 4)) { C->chi = (const uint8_t *)d + o + 4; o += 4 + 56 + 8; }
             if (C->chi && o + 8 <= tam && !memcmp((const uint8_t *)d + o, "CLS1", 4) && (memcpy(&n, (const uint8_t *)d + o + 4, 4), o + 8 + 8 * n <= tam)) {
                 C->cls = (const uint8_t *)d + o + 8; C->ncls = (int)n; o += 8 + 8 * n; }
-            if (C->cls && o + 4 + 2 * NSND <= tam && !memcmp((const uint8_t *)d + o, "SND1", 4)) C->snd = (const uint16_t *)((const uint8_t *)d + o + 4); }
+            if (C->cls && o + 4 + 2 * NSND <= tam && !memcmp((const uint8_t *)d + o, "SND1", 4)) {
+                C->snd = (const uint16_t *)((const uint8_t *)d + o + 4); o += 4 + 2 * NSND;
+                if (o + 8 <= tam && !memcmp((const uint8_t *)d + o, "ZON1", 4)) { memcpy(&n, (const uint8_t *)d + o + 4, 4); o += 8 + 20 * n; }
+                if (o + 12 <= tam && !memcmp((const uint8_t *)d + o, "C111", 4)) C->se11 = (const uint16_t *)((const uint8_t *)d + o + 4);
+            } }
     }
     C->fila = fila >= 0 && fila < 4 ? fila : 0; C->forzada = forzada; C->lista_cfg = lista & 3;
     C->dif = dificultad < 0 ? 0 : dificultad > 4 ? 4 : dificultad;
@@ -203,7 +213,16 @@ void camp_etapa(int tipo)
     n = w == 0xffff ? 0 : (int)(w & 15);
     for (i = 0; i < n && i < 3; i++) {                  /* 0x22b600: 0x22e630 (a cero) y 0x2323e8 */
         pet_t *p = &C->pet[i]; memset(p, 0, sizeof *p);
-        p->d = &C->pets[(w >> 4) + i]; p->P = penal(p->d); C->npet++; e->cuenta++;
+        p->d = &C->pets[(w >> 4) + i]; p->P = penal(p->d); p->rnd = -1; C->npet++; e->cuenta++;
+    }
+    /* 0x22ac00, estados 0..2: los bancos de voces de las peticiones (y su azar en +8), +0xf0 = rand % 4 (la fila de las
+       voces de la nota, 0x2a65a8) y su banco RANK (comun/vozmis.c) */
+    C->fila = rand() & 3;
+    if (camp_bancos) {
+        uint8_t t[3], b[3]; int r[3];
+        for (i = 0; i < C->npet; i++) { t[i] = C->pet[i].d->tipo; b[i] = C->pet[i].d->sub; }
+        camp_bancos(C->npet, t, b, C->fila, r);
+        for (i = 0; i < C->npet; i++) C->pet[i].rnd = r[i];
     }
     dbglog(DBG_INFO, "CAMP: nivel %d etapa tipo %d lista %d, %d peticiones:", C->nivel, tipo, C->lista, C->npet);
     for (i = 0; i < C->npet; i++) dbglog(DBG_INFO, " %d/%d (%d..%d)", C->pet[i].d->tipo, C->pet[i].d->sub, C->pet[i].d->ini, C->pet[i].d->fin);
@@ -489,8 +508,75 @@ static void tipo_paso(pet_t *p, const camp_coche_t *c, float dpos)
             }
         }
         break;
+    case 11:                                            /* 0x294a90: chocar con los coches de la peticion (subtipos 0 y 1) */
+        if (p->fase == 1) {                             /* 0x1f20e8(+0x10 de los parametros): los coches nuevos son de la peticion */
+            p->h70 = 0; p->h7c = d->p[6] > 0 ? LLENO / (float)d->p[6] : 0.0f; C->k11_tmr = 0x1a;   /* +0x74 = 80 / p78; +0x18 = 0x1a */
+        } else if (p->fase == 4 && C->k11_golpes > 0) { /* +0xb6c y +0x2f4 == 0: el medidor + p74 (y +0x10 + 1) */
+            p->med += p->h7c * (float)C->k11_golpes; p->h70 += C->k11_golpes;
+            dbglog(DBG_INFO, "CAMP: coche de la peticion golpeado (%d de %d), medidor %d\n", p->h70, d->p[6], (int)p->med);
+        } else if (p->fase == 5 && p->nota == 6) {      /* +0x10 > p78: < p7c ? (n - p78) / (p7c - p78) x 70 : (n - p7c) x 5 + 70 */
+            int n = p->h70, a = d->p[6], b = d->p[7];
+            p->extra += n <= a ? 0 : n < b ? (int)((float)(n - a) / (float)(b - a) * 70.0f) : (n - b) * 5 + 70;
+        }
+        C->k11_golpes = 0;
+        break;
     default: break;                                     /* SIN PORTAR */
     }
+}
+
+/* ---- los coches de la peticion del tipo 11 (0x1f20e8 / 0x1f1a88: el trafico sale con la tabla de 0x46 bytes de
+   +0x10 de los parametros; [0x55cf38 + 8 + plaza] & 3 == 2 los marca). SIMPLIFICADO (DESVIACION): aqui los coches del
+   trafico que aparecen por delante del jugador desde el anuncio (fase 1) hasta el final (fase 4) son los de la peticion,
+   con los modelos del trafico (los de la tabla, 0x96 / 0xa5 o +0x64, no estan en la DC) */
+static const pet_t *pet11(void)
+{
+    const pet_t *p = C && C->cur >= 0 ? &C->pet[C->cur] : NULL;
+    return p && p->d->tipo == 11 && p->d->sub < 2 && p->fase >= 1 && p->fase <= 4 ? p : NULL;
+}
+void camp_autos(haobj_auto_t *v, int n)
+{
+    const pet_t *p = pet11(); int i, js;
+    if (!C) return;
+    js = (int)floorf(C->pos);
+    for (i = 0; i < n && i < 24; i++) {
+        C->ver11[i] = 0;
+        if (!v[i].pos) continue;
+        if (!(v[i].marca & HA_VISTO)) {                 /* (una plaza nueva: el coche acaba de aparecer) */
+            v[i].marca |= HA_VISTO; C->fr11[i] = 0;
+            if (p && v[i].sec > js) v[i].marca |= HA_CAMP | (p->d->sub == 1 ? HA_FANT : 0);
+        }
+        if (!(v[i].marca & HA_CAMP)) continue;
+        if (!p) { v[i].marca &= ~(HA_CAMP | HA_FANT); continue; }   /* (0x1f20e8(0) en la fase 5) */
+        if (v[i].sec - 7 == js && C->k11_tmr >= 0x3c) { /* 0x294e00: un coche 7 secciones por delante: 0x422e00[rand % 3] */
+            if (C->se11 && camp_se) camp_se(C->se11[rand() % 3]);
+            C->k11_tmr = 0;
+        }
+#ifdef PRUEBA_C11
+        if (v[i].sec == js && !(v[i].marca & HA_SUELTO)) v[i].golpe = 1;   /* prueba: pasar a su lado cuenta como golpe */
+#endif
+        if (v[i].golpe && !(v[i].marca & HA_SUELTO)) { v[i].marca |= HA_SUELTO; C->k11_golpes++; }   /* (una vez por coche: PROBABLE) */
+        if (!(v[i].marca & HA_SUELTO) && v[i].sec - js < 10) { C->ver11[i] = 1; memcpy(C->p11[i], v[i].pos, sizeof C->p11[i]); }
+    }
+    if (p) C->k11_tmr++;
+}
+/* el dibujo: 11/1 el 2C0006 de los fantasmas (0x294b18 lo prepara; como el 0x1b2190 del INFARTO: escala 1,68 hasta el
+   cuadro 25, luego - 0,2 por cuadro); 11/0 DESVIACION: sin el modelo de los coches de la peticion, el icono del
+   corazon del medidor (HA_C0, 2B000F) sobre ellos */
+int camp_spr3d(haobj_s3d_t *v, int max, int (*cuadros)(const char *g))
+{
+    const pet_t *p = pet11(); int i, k = 0, f, nc;
+    if (!p) return 0;
+    f = p->d->sub == 1; nc = cuadros ? cuadros(f ? "HA_S06" : "HA_C0") : 1;
+    for (i = 0; i < 24 && k < max; i++) {
+        if (!C->ver11[i]) continue;
+        strcpy(v[k].g, f ? "HA_S06" : "HA_C0");   /* (g: 8 bytes) */ memcpy(v[k].p, C->p11[i], sizeof v[k].p); v[k].p[1] += 1.6f;
+        if (f) {
+            v[k].cuadro = C->fr11[i]; v[k].esc = C->fr11[i] <= 0x19 ? 1.68f : 1.68f - (float)(C->fr11[i] - 0x19) * 0.2f;
+            if (++C->fr11[i] >= nc) C->fr11[i] = (int16_t)(nc - 1);
+        } else { v[k].cuadro = (int)(C->reloj % (uint32_t)(nc > 0 ? nc : 1)); v[k].esc = 2.0f; }
+        k++;
+    }
+    return k;
 }
 
 /* ---- 0x22c818: los sucesos (con la peticion en curso entre sus fases 3 y 5, o sin ella) */

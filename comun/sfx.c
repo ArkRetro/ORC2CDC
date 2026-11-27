@@ -418,11 +418,31 @@ void sfx_voz_grupo(int g) { voz_grupo = g; }
 const void *sfx_voces_tablas(uint32_t *tam) { if (tam) *tam = voz_tablas_tam; return voz_tablas; }
 const char *sfx_voces_idioma(void) { return voz_idioma; }
 
+/* (C2C, campeonatos) las voces de los bancos de las peticiones de la etapa (comun/vozmis.c, VOCESM.DAT): se buscan
+   antes que las de VOCESH.DAT con 10 bits de id (UFO.pak: 0x23f) */
+static const voz_dat_t *voz_x; static volatile int n_voz_x; static uint32_t voz_x_spu; static int voz_x_suena;
+void sfx_voz_extra(const void *filas, int n, uint32_t base)
+{
+    if (voz_x_suena && n_voz_x) sfx_voz_calla();               /* (su memoria del AICA se va a reescribir) */
+    n_voz_x = 0; voz_x = filas; voz_x_spu = base; n_voz_x = filas ? n : 0; voz_x_suena = 0;
+}
 static void toca_voz(int id, int canal)
 {
     int i, vol;
     muestra_dat_t m;
     if (canal < 0) return;
+    for (i = 0; i < n_voz_x && voz_x[i].id != (id & 0x3ff); i++) ;
+    if (i < n_voz_x) {
+        vol = (int)(vol_se(voz_x[i].vol) * vol_general + 0.5f);
+        if (vol > 255) vol = 255;
+        if (vol <= 0) return;
+        dbglog(DBG_INFO, "VOZ 0x%x (peticion)\n", id & 0x3ff);
+        memset(&m, 0, sizeof m);
+        m.formato = 2; m.fin = voz_x[i].n;
+        snd_sfx_stop(canal); voz_x_suena = 1;
+        manda(canal, AICA_CH_CMD_START, &m, voz_x_spu + voz_x[i].desp, voz_x[i].frec, vol, 128);
+        return;
+    }
     i = n_voz;
     if (voz_grupo >= 0) {                                       /* la del banco de la etapa (HAM: id + 0x200 (g + 1)) */
         int k = (id & 0x1ff) + 0x200 * (voz_grupo + 1);
@@ -440,8 +460,8 @@ static void toca_voz(int id, int canal)
     manda(canal, AICA_CH_CMD_START, &m, voz_spu + voz[i].desp, voz[i].frec, vol, 128);
 }
 
-void sfx_voz(int id) { if (n_voz) toca_voz(id, (id & 0x1ff) == 0x4d || (id & 0x1ff) == 0x18d ? canal_voz_se : canal_voz); }
-void sfx_voz_se(int id) { if (n_voz) toca_voz(id, canal_voz_se); }   /* efectos de los bancos de voz (424940 directo) */
+void sfx_voz(int id) { if (n_voz || n_voz_x) toca_voz(id, (id & 0x1ff) == 0x4d || (id & 0x1ff) == 0x18d ? canal_voz_se : canal_voz); }
+void sfx_voz_se(int id) { if (n_voz || n_voz_x) toca_voz(id, canal_voz_se); }   /* efectos de los bancos de voz (424940 directo) */
 
 /* una muestra suelta (ADPCM de Yamaha) por el canal de efectos de las voces: el efecto 0x96 de la escena de la meta
    (demo/meta.c). sfx_muestra_sube la deja en el AICA (0 si no cabe); vol: el de la tabla SE del IRX */

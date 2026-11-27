@@ -83,6 +83,7 @@ int  haobj_anillo_toca(const float pos[3]);   /* 0x1aa3e8: los corazones a 4 m (
 #define HA_FANT   0x08000000             /* +C5C 0x80000: fantasma (tipo 20; la tabla de coches con 0x40) */
 #define HA_VISTO  0x04000000             /* ya visto por el tipo 20 (+B66 a 0) */
 #define HA_SERIE  0x03ffffff
+#define HA_CAMP   0x80000000u            /* (C2C, campeonatos) coche de la peticion del tipo 11 (comun/campeonato.c) */
 void haobj_pares(haobj_auto_t *v, int n, int lo, int hi, const float jug[3]);
 void haobj_pares_vacia(void);
 /* 0x1aa024..0x1aa078: la linea (los dos coches + 1 m en y) en el marco del jugador contra su caja (0x1978d8 con +338;
