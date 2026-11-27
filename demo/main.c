@@ -3549,9 +3549,9 @@ static int ha_u_txt = -1, ha_u_mar = -1, camp_u_txt = -1;
 static int ha_cuadros(const char *g) { int u = ha_hud ? hudd_uso(ha_hud, g) : -1; return u < 0 ? 1 : hudd_cuadros(ha_hud, u); }
 static void ha_spr3d(void)
 {
-    static int sub[8], nsub;
-    infarto_s3d_t d[32]; int n = variante == 5 ? camp_spr3d(d, 32, ha_cuadros) : infarto_spr3d(d, 32, ha_cuadros), i, k, ahora[8], na = 0;
-    if (variante == 5) n += mj_spr3d(d + n, 32 - n, ha_cuadros);   /* (C2C) los minijuegos: MJ_kk de MJHUD.DAT */
+    static int sub[16], nsub;                                   /* (16 grupos a la vez: las cifras de los minijuegos) */
+    infarto_s3d_t d[48]; int n = variante == 5 ? camp_spr3d(d, 32, ha_cuadros) : infarto_spr3d(d, 32, ha_cuadros), i, k, ahora[16], na = 0;
+    if (variante == 5) n += mj_spr3d(d + n, 48 - n, ha_cuadros);   /* (C2C) los minijuegos: MJ_kk de MJHUD.DAT */
 #ifdef PRUEBA_C11
     { static int t_; if (n && ++t_ % 60 == 0) dbglog(DBG_INFO, "C11: %d sprites (%s uso %d cuadros %d) en %.0f %.0f %.0f\n", n, d[0].g, hudd_uso(ha_hud, d[0].g), ha_cuadros(d[0].g), (double)d[0].p[0], (double)d[0].p[1], (double)d[0].p[2]); }
 #endif
@@ -3570,8 +3570,12 @@ static void ha_spr3d(void)
         if (u < 0) continue;
         um = h == mj_hud ? u | 0x10000 : u;
         for (k = 0; k < na && ahora[k] != um; k++) ;
-        if (k == na && na < 8) ahora[na++] = um;
+        if (k == na && na < 16) ahora[na++] = um;
         if (!hudd_uso_residente(h, u) && hudd_sube_uso(h, u)) continue;
+        if (d[i].esc < 0.0f) {                                  /* (minijuego.c) en la pantalla: (p[0], p[1]) desde el centro a -esc */
+            hudd_escala(-d[i].esc, -d[i].esc); hudd_dibuja(h, u, d[i].cuadro, d[i].p[0], d[i].p[1], 1, 110 + 0.01f * i, 0); hudd_escala(1, 1);
+            continue;
+        }
         zv = dx * ade[0] + dy * ade[1] + dz * ade[2];
         if (zv < cerca * 2.0f) continue;
         sc = d[i].esc > 0.0f ? d[i].esc * fx / zv * 0.03125f : 1.0f;   /* (esc <= 0: 429530, sin escala) */
@@ -8422,7 +8426,11 @@ FRIO static int curso_tiene(int id)                                  /* el arbol
     free(b); return r;
 }
 static int camp_puede(int g) { return g < 0 || g > 2 ? -1 : g < 2 ? 0 : curso_tiene(CAMP_ARBOL(g)); }
+#ifdef PRUEBA_MJ_TIPO                                           /* prueba: las peticiones de la etapa PRUEBA_MJ_TIPO (0..59) en la primera */
+static int camp_tipo_nodo(int nodo) { static int n_; return n_++ ? camp_tipo(camp_g, nodo) : PRUEBA_MJ_TIPO; }
+#else
 static int camp_tipo_nodo(int nodo) { return camp_tipo(camp_g, nodo); }
+#endif
 static void camp_voz_(int id) { if (voz_ok) sfx_voz(id); }
 FRIO static void camp_bancos_(int n, const uint8_t *t, const uint8_t *b, int f, int *r)   /* comun/vozmis.c */
 {

@@ -220,6 +220,23 @@ def minijuegos(u, par, m16, out):
     blk += struct.pack('<I', len(m16)) + b''.join(m16)
     while len(blk) % 4: blk += b'\0'
     out += b'M161' + struct.pack('<I', len(blk)) + blk
+    # 'M162' (detras de 'M161', agente c2c16b): los subtipos 3 (la suma), 4 (los regalos) y 5 (las ovejas): i32 nivel[3][2]
+    # (0x3b5648: {de, hasta} del numero de un aviso del 3, por +0x24), u8 signo[2] (el grupo MJ_kk del + y del -: 0x423bdc
+    # y 0x423bd8), cifra[2][10] (las cifras de los negativos 0x423be0 y de los demas 0x423c08, 0x2a0838), regalo[5]
+    # (0x423af8), oveja (0x460028, 0x2a2e80) y zzz (0x460027, 0x2322a0), 3 bytes, u16 efecto_oveja (0x188) y salto[3]
+    # (0x423a70): 64 bytes
+    assert par(0x2a20c4, 0x2a20cc) == 0x3b5648, 'niveles del 16/3 (0x2a2080)'
+    assert u(0x2a0b64) == 0x3c020042 and u(0x2a0b6c) == 0x8c443bdc and u(0x2a0b30) == 0x3c020042 and u(0x2a0b38) == 0x8c443bd8, 'signos (0x2a0838)'
+    assert par(0x2a0b98, 0x2a0bac) == 0x423bd8 and u(0x2a0c20) == 0x24420002 and u(0x2a0c64) == 0x2442000c, 'cifras (0x2a0838)'
+    assert par(0x2a06b0, 0x2a06b8) == 0x423af8, 'regalos del 16/4 (0x2a0138)'
+    assert u(0x2a2fdc) == 0x3c050046 and u(0x2a2fe8) == 0x34a50028, 'la oveja (0x2a2e80)'
+    assert u(0x2322b0) == 0x3c050046 and u(0x2322c8) == 0x34a50027, 'zzz (0x2322a0)'
+    assert u(0x2a3108) == 0x24040188 and par(0x2a311c, 0x2a3120) == 0x423a70, 'efectos de la oveja (0x2a2e80)'
+    b2 = struct.pack('<6i', *[struct.unpack('<i', struct.pack('<I', u(0x3b5648 + 4 * k)))[0] for k in range(6)])
+    b2 += bytes([tk(u(0x423bdc)), tk(u(0x423bd8))] + [tk(u(0x423be0 + 4 * k)) for k in range(10)] + [tk(u(0x423c08 + 4 * k)) for k in range(10)])
+    b2 += bytes([tk(u(0x423af8 + 4 * k)) for k in range(5)] + [tk(0x460028), tk(0x460027)]) + b'\0\0\0'
+    b2 += struct.pack('<4H', 0x188, *[u(0x423a70 + 4 * k) for k in range(3)])
+    out += b'M162' + struct.pack('<I', len(b2)) + b2
     return toks
 
 
