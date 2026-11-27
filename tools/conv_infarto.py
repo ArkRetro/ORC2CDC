@@ -91,6 +91,65 @@ def extra(elf, V, u32, par):
         while len(datos) % 4: datos += b'\0'
     return bytes(out + datos)
 
+# registros del banco 0x57 (obj_course_obj_common_pmt) que se convierten para los objetos de las peticiones: los
+# conos 0x19 / 0x1e / 0x1f (tipos 7 / 24), las monedas 0x1c / 0x1d (15), el arco 0x2b (16 / 25), la caja 0x30 (19)
+REGS_OBJ = (0x19, 0x1c, 0x1d, 0x1e, 0x1f, 0x30)
+def objetos(A, elf, V, u32, par, sal):
+    """HAOSO.DAT y HAOBJ.DAT: los objetos de las peticiones (Rev 1.1).
+    El fichero de objetos de la mision (45C470 = PS2 0x1af428, comprobado): preset 0 ([gp-0x7b64] == 0) y mision >= 15
+    la tabla de saltos 0x3f05c0 por mision - 15; preset != 0 y mision >= 15 la 0x3f0630; mision < 15 solo con el preset
+    0, la 0x3f06a0 por el descriptor de la clave - 15 (= la mision base). Cada caso: lui v0 / b / addiu v0 con el
+    nombre ("oso_qt_*.sz" de OSO.PS2); el caso por defecto, ninguno. Los registros de 0x28 de cada fichero (4F0660 /
+    4F0D10: hasta y < -10000): {f32 pos[3], f32 angulos[3], u32 clase +18, u32 tipo +1C, u32 +20, u32 +24}, en el
+    marco de la etapa. Clase -> modelo y escala: 0x40a958 (8 bytes por clase; recurso << 16 | registro).
+    HAOSO.DAT: 'HAO1', u32 ficheros, 2 x 41 u8 fichero por (preset, mision) (0xff: ninguno), 2 de relleno, 64 x {u16
+      registro del banco 0x57 (0xffff otro recurso), u16 0, f32 escala} por clase, ficheros x {u32 desplazamiento,
+      u32 objetos}, y los objetos: {u8 clase, u8 tipo, u16 0, f32 pos[3], f32 angulos[3]} (28 bytes).
+    HAOBJ.DAT: ORD7 de conv_bo.modelo_conjunto con los registros REGS_OBJ del banco 0x57 (nodo: banderas << 16 |
+      registro; relleno: codigo de malla)."""
+    import conv_bo, conv_coche
+    def caso(t):
+        a, b, c = u32(t), u32(t + 4), u32(t + 8)
+        if a >> 16 == 0x3c02 and b >> 26 == 4 and c >> 16 == 0x2442:
+            d = ((a & 0xffff) << 16) + (c & 0xffff) - (0x10000 if c & 0x8000 else 0)
+            return elf[V(d):].split(b'\0')[0].decode()
+        return None
+    assert par(0x1af46c, 0x1af474) == 0x3f05c0 and par(0x1af574, 0x1af57c) == 0x3f0630 and par(0x1af658, 0x1af660) == 0x3f06a0
+    nombres = []; idx = bytearray([0xff] * 82)
+    for pr, mi, jt, n in ((0, 15, 0x3f05c0, 26), (1, 15, 0x3f0630, 26), (0, 0, 0x3f06a0, 15)):
+        for i in range(n):
+            nm = caso(u32(jt + 4 * i))
+            if nm is None: continue
+            if nm not in nombres: nombres.append(nm)
+            idx[pr * 41 + mi + i] = nombres.index(nm)
+    tc = 0x40a958
+    assert u32(tc + 8 * 9) == 0x57001e and u32(tc + 8 * 10) == 0x57001c, 'tabla de clases 0x40a958'
+    clases = b''
+    for c in range(64):
+        mid = u32(tc + 8 * c); esc = struct.unpack('<f', elf[V(tc + 8 * c + 4):V(tc + 8 * c + 8)])[0]
+        reg = mid & 0xffff if mid >> 16 == 0x57 and 0 < esc < 100 else 0xffff
+        clases += struct.pack('<HHf', reg, 0, esc if reg != 0xffff else 0.0)
+    fich = []; datos = b''
+    for nm in nombres:
+        d = A.datos(A.entrada('OSO.PS2', '\\' + nm)); o = 4; k = 0
+        while o + 0x28 <= len(d):
+            r = struct.unpack_from('<6f4I', d, o)
+            if r[1] < -10000: break
+            datos += struct.pack('<BBH6f', r[6], r[7], 0, *r[:6]); o += 0x28; k += 1
+        fich.append(k)
+    cab = 4 + 4 + 82 + 2 + len(clases) + 8 * len(fich)
+    out = b'HAO1' + struct.pack('<I', len(fich)) + bytes(idx) + b'\0\0' + clases
+    o = cab
+    for k in fich: out += struct.pack('<2I', o, k); o += 28 * k
+    out += datos
+    open(os.path.join(sal, 'HAOSO.DAT'), 'wb').write(out)
+    print('HAOSO.DAT: %d ficheros (%s), %d objetos, el mayor %d; %d bytes' % (len(fich), ' '.join(nombres), sum(fich), max(fich), len(out)))
+    E = A.elf; nombre = E.cadena(E.u32(conv_coche.recursos(A) + 4 * 0x57)).split('\\')[-1]
+    blq = A.bloque(A.entrada('COMMON.PS2', nombre))
+    mod = conv_bo.modelo_conjunto(A, blq, set(REGS_OBJ), os.path.join(sal, 'HAOBJ.DAT'))
+    print('HAOBJ.DAT: %d mallas, %d vertices, %d nodos, %d texturas (%d KB), %d KB' % (len(mod.mallas), mod.nv, len(mod.nodos),
+          len(mod.texs), len(mod.blob) >> 10, os.path.getsize(os.path.join(sal, 'HAOBJ.DAT')) >> 10))
+
 def main():
     if len(sys.argv) < 3: raise SystemExit(__doc__.split('\n')[0])
     iso = Iso(sys.argv[1]); sal = sys.argv[2]; os.makedirs(sal, exist_ok=True)
@@ -110,6 +169,9 @@ def main():
         return w & 0xffff
     if '--solo-x' in sys.argv:                          # solo INFARTOX.DAT
         open(os.path.join(sal, 'INFARTOX.DAT'), 'wb').write(extra(elf, V, u32, par)); return
+    if '--solo-obj' in sys.argv:                        # solo HAOSO.DAT y HAOBJ.DAT
+        from ps2.assets import Assets
+        objetos(Assets(sys.argv[1]), elf, V, u32, par, sal); return
 
     misiones = par(0x1a7bdc, 0x1a7be4)                  # 45E050 / quest_records: [0x44350c] == 0
     assert misiones == 0x3f0b98, hex(misiones)
@@ -225,6 +287,7 @@ def main():
     open(os.path.join(sal, 'INFARTOP.DAT'), 'wb').write(outp)
     print('INFARTOP.DAT: %d bytes (misiones 0x%x, coches 0x%x)' % (len(outp), mis1, tt1))
     open(os.path.join(sal, 'INFARTOX.DAT'), 'wb').write(extra(elf, V, u32, par))
+    objetos(A, elf, V, u32, par, sal)
     print('INFARTOX.DAT: %d bytes' % os.path.getsize(os.path.join(sal, 'INFARTOX.DAT')))
 
     # HAHUD.DAT

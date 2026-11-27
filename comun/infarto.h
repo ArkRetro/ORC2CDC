@@ -26,6 +26,9 @@ typedef struct {
     float d268, d264;       /* car+0x268 / +0x264 (4A4010): hasta el borde izquierdo (> 0 dentro) y el derecho (< 0) */
     float x, y, z;          /* car+0x14 (marco del mundo de la demo)                                            */
     int   modelo;           /* car+0x11                                                                         */
+    const float *marco;     /* colocacion de la etapa (x, y, z, giro y) para los objetos de la mision (haobj.c) */
+    int (*suelo)(float x, float z, float *y);   /* la consulta del suelo (43F2F0) */
+    float fx, fz;           /* eje adelante del coche */
     int   sig;              /* la clave de la etapa siguiente si ya se ha elegido la rama en la union (451350 != 2), si no -1 */
 } infarto_coche_t;
 

@@ -28,6 +28,7 @@
 #include "../comun/menu.h"
 #include "../comun/fsp.h"
 #include "../comun/infarto.h"
+#include "../comun/haobj.h"
 #include "../comun/rival.h"
 #include "../comun/vmu.h"
 #include "../comun/robot.h"
@@ -3045,6 +3046,7 @@ static int suelo_mundo(float x, float z, float *y, int spl, uint32_t *clase)
     if (clase) *clase = k;
     return pol;
 }
+static int ha_suelo(float x, float z, float *y) { return suelo_mundo(x, z, y, 0, NULL); }   /* 43F2F0 (haobj.c) */
 /* lo mismo en la distancia s y el desvio x de la ruta (la ruta solo da el sitio) */
 static int suelo_ruta(float s, float x, float *y, int spl, uint32_t *clase)
 {
@@ -5818,6 +5820,13 @@ static void piloto(const coche_t *c, float *giro, float *gas, float *freno)
 #ifdef PRUEBA_RAMA
         if (piloto_rama(c->s)) xc = PRUEBA_RAMA ? 9.0f : -9.0f;   /* prueba: hacia el lado de esa rama */
 #endif
+#ifdef PRUEBA_HA_CONOS
+        {   float lat;                                          /* prueba: hacia el objeto de la clase pedida (haobj.c) */
+            static int n_; int h_ = variante == 2 && haobj_cercano(c->pos, c->fw, PRUEBA_HA_CONOS, &lat);
+            if (h_) xc = c->x + lat * PRUEBA_HA_SIGNO;
+            if (++n_ % 60 == 0) dbglog(DBG_INFO, "DIAGHA piloto: objeto %d lat %.1f x %.1f xc %.1f\n", h_, (double)(h_ ? lat : 0), (double)c->x, (double)xc);
+        }
+#endif
 #ifdef PRUEBA_ARENA
 #ifndef PRUEBA_ARENA_S
 #define PRUEBA_ARENA_S 0
@@ -8368,6 +8377,50 @@ static void bo_dibuja_malla(const malla_t *ma, int g, uint32_t off, int k0, int 
     }
     mt.verts = t; mt.ofs = NULL; m.v0 = 0; m.n = n;
     dibuja_malla(&mt, &m);
+}
+/* INFARTO: los objetos de las peticiones (comun/haobj.c) con los modelos de HAOBJ.DAT (registros del banco 0x57, como
+   BOnn.DAT); como mucho HA_OBJ_MAX a la vez, los mas cercanos dentro de HAOBJ_LEJOS, y con el tope de los objetos de la
+   union (ta_bo_tope). ha_obj_tri / ha_obj_vtx: lo enviado en el ultimo cuadro (para medirlo) */
+#define HA_OBJ_MAX 24
+static modelo_t ha_mod; static int ha_mod_ok; static uint32_t ha_obj_tri, ha_obj_vtx, ha_obj_n, ha_dg[4];
+static void ha_obj_dibuja(int l)
+{
+    static matrix_t W __attribute__((aligned(32))), Mo __attribute__((aligned(32)));
+    static haobj_dib_t d[HA_OBJ_MAX]; int n, i, ult; uint32_t k, j;
+    if (l == 0) { ha_obj_tri = ha_obj_vtx = 0; }
+    if (!ha_mod_ok) { ha_obj_n = 999; return; }
+    n = haobj_lista(d, HA_OBJ_MAX, ojo);
+    if (l == 0) ha_obj_n = (uint32_t)n;
+    for (i = 0; i < n; i++) {
+        float dx = d[i].M[3][0] - ojo[0], dy = d[i].M[3][1] - ojo[1], dz = d[i].M[3][2] - ojo[2], zv = dx * ade[0] + dy * ade[1] + dz * ade[2];
+        if (zv < -4.0f) continue;                               /* detras de la camara */
+        memcpy(Mo, d[i].M, sizeof Mo);
+        for (k = 0; k < ha_mod.nnodos; k++) {
+            const nodo_t *nd = ha_mod.nodos + k; int g = nd->relleno[0] & 0xff; uint32_t cst = 0;
+            if ((int)(nd->fl & 0xffff) != d[i].reg) continue;
+            ha_dg[0]++;
+            for (j = ha_mod.inicio[l]; j < ha_mod.inicio[l + 1]; j++) {
+                const malla_t *m = ha_mod.mallas + j;
+                if ((m->nodo & 0xff) == g && m->n >= 3) cst += (m->n <= 256 ? ta_teo_tab[ta_ofs != 0][m->n] : ta_teo(m->n, ta_ofs)) * ta_f >> 8;
+            }
+            if (!cst) { ha_dg[1]++; continue; }
+            if (ta_bo + cst > ta_bo_tope || ta_vb + cst > ta_lim) { ta_bo_pide += cst; ha_dg[2]++; continue; }
+            memcpy(W, ha_mod.carteles[nd->cartel], sizeof W);
+            mat_load(&vista); mat_apply(&Mo); mat_apply(&W);
+            ult = -2;
+            for (j = ha_mod.inicio[l]; j < ha_mod.inicio[l + 1]; j++) {
+                const malla_t *m = ha_mod.mallas + j;
+                if ((m->nodo & 0xff) != g || m->n < 3) continue;
+                if (m->tex != ult) {
+                    ult = m->tex;
+                    if (m->tex >= 0) pvr_prim(&ha_mod.cabs[0][m->tex], sizeof(pvr_poly_hdr_t));
+                    else pvr_prim(&cab_col[0][l], sizeof(pvr_poly_hdr_t));
+                }
+                dibuja_malla(&ha_mod, m); ha_obj_tri += m->n - 2; ha_obj_vtx += m->n;
+            }
+        }
+    }
+    mat_load(&vista);
 }
 /* 4A9DF0: cada nodo de los registros de cada objeto con su matriz (umbral de LOD 8 de 4044E0, 7 con la bandera 0x40) */
 static void bo_dibuja(int l)
@@ -14848,6 +14901,7 @@ int main(int argc, char **argv)
                 rc_modelos_suelta();
             }
             if (ha_hud && !reintenta) { hudd_cierra(ha_hud); ha_hud = NULL; ha_u_txt = ha_u_mar = -1; }   /* INFARTO */
+            if (ha_mod_ok && !reintenta) { libera_modelo(&ha_mod); ha_mod_ok = 0; }
             if (c2c_hud && !reintenta) { hudd_cierra(c2c_hud); c2c_hud = NULL; }                       /* COAST 2 COAST */
             presta_union(1);                                    /* (en cuanto el curso suelta la union) */
             /* el frontal de recreativa pone sus tablas (~850 KB) en el final del hueco de la union: tras la meta la union
@@ -15081,6 +15135,11 @@ int main(int argc, char **argv)
                     /* el medidor, el panel y las filas (HAHUD.DAT: solo sus tablas en la RAM, ~150 KB; las texturas VQ,
                        40 KB, se leen del GD al subirlas, ya con la zona del curso reservada) */
                     if (!ha_hud && !(ha_hud = hudd_abre("HAHUD.DAT", 0, 1))) dbglog(DBG_ERROR, "HAHUD: no se pudo abrir\n");
+                    if (!ha_mod_ok) {                           /* los modelos de los objetos (HAOBJ.DAT, ~7 KB) */
+                        ha_mod.relleno_propio = 1;              /* (como BOnn.DAT: relleno[0] = malla | animacion) */
+                        if (!lee_modelo(&ha_mod, "HAOBJ.DAT")) { sube_tramo(&ha_mod, 0, NULL); ha_mod_ok = 1; }
+                        else dbglog(DBG_ERROR, "HAOBJ: no se pudo leer HAOBJ.DAT\n");
+                    }
                     if (ha_hud) {                               /* los corazones siempre; los rotulos al verse */
                         static const char *const C[8] = { "HA_CORAZON", "HA_ROTO", "HA_PANEL", "HA_FILA0", "HA_FILA1", "HA_FILA2", "HA_FILA3", "HA_FILA4" };
                         for (i = 0; i < 8; i++)
@@ -15273,8 +15332,13 @@ int main(int argc, char **argv)
                         hc.d36 = fis_ok ? fis.d36 : 0; hc.seccion_union = cur_en_union ? (int)floorf((yo.s - s_union) / m_pos) : 0; hc.derrapa = yo.t_derrape != 0; hc.kmh = fis_ok ? fis.velocidad_hud : yo.v * 3.6f; hc.vel_mf = fis_ok ? fis.vel_mf : 0;
                         hc.hud = fis_ok ? fpar.hud : 0;
                         hc.ofs = fis_ok ? fis.ofs : 0; hc.d268 = vib_izq; hc.d264 = -vib_der; hc.modelo = modelo_jug;
-                        hc.x = yo.pos[0]; hc.y = yo.pos[1]; hc.z = yo.pos[2]; hc.sig = cur_en_union && cur_rama >= 0 ? cur_sig : -1;
+                        hc.x = yo.pos[0]; hc.y = yo.pos[1]; hc.z = yo.pos[2]; hc.marco = marco_et; hc.suelo = ha_suelo; hc.fx = yo.fw[0]; hc.fz = yo.fw[2]; hc.sig = cur_en_union && cur_rama >= 0 ? cur_sig : -1;
                         infarto_paso(&hc);
+#ifdef DIAG_HA
+                        if (crono % 120 == 0) { dbglog(DBG_INFO, "DIAGHA objetos: %u dibujados, %u triangulos, %u vertices (ultimo cuadro); nodos %u sin mallas %u tope %u, modelo %u nodos %u mallas inicio %u %u %u\n", (unsigned)ha_obj_n, (unsigned)ha_obj_tri, (unsigned)ha_obj_vtx,
+   (unsigned)ha_dg[0], (unsigned)ha_dg[1], (unsigned)ha_dg[2], (unsigned)ha_mod.nnodos, (unsigned)ha_mod.nmallas, (unsigned)ha_mod.inicio[0], (unsigned)ha_mod.inicio[1], (unsigned)ha_mod.inicio[2]);
+  if (ha_mod.nnodos) dbglog(DBG_INFO, "DIAGHA nodo0 fl 0x%x relleno 0x%x malla0 nodo 0x%x\n", (unsigned)ha_mod.nodos[0].fl, (unsigned)ha_mod.nodos[0].relleno[0], (unsigned)ha_mod.mallas[0].nodo); memset(ha_dg, 0, sizeof ha_dg); }
+#endif
 #ifdef DIAG_HA
                         if (crono % 60 == 0) { int q;
                             for (q = 0; q < NTRAF; q++) if (traf[q].carril >= 0)
@@ -15775,6 +15839,7 @@ int main(int argc, char **argv)
                     ta_bo_tope = ta_bo + (ta_lim > ta_vb + resto ? ta_lim - ta_vb - resto : 0); }
                 ta_en_bo = 1;
                 bo_dibuja(l);                                   /* pajaros y demas de la union (4A9DF0) */
+                if (variante == 2) ha_obj_dibuja(l);            /* INFARTO: conos, monedas... (comun/haobj.c) */
                 ta_en_bo = 0;
                 POP_CAT(1);
             }
