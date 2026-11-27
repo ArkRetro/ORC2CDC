@@ -440,6 +440,7 @@ FRIO static void decor_reduce(modelo_t *m, const char *nombre)
         else if ((ax > az ? ax : az) < 2.5f && ay > 5.0f && ay < 16.0f && 2 * ct[i][2] > cv[i][0]) cl[i] = 6;   /* farola */
         else if (2 * cv[i][1] <= cv[i][0] && ay > 3.0f && (ax > az ? ax : az) < 120.0f) cl[i] = 2;
     }
+    free(ct); ct = NULL;                                        /* (RAM: ya no hace falta; ver mas abajo) */
     for (i = 0; i < nn; i++) {
         float cx, cz; int32_t g = -1; uint32_t h;
         if (cl[i] != 1 && cl[i] != 5 && cl[i] != 6) continue;
@@ -491,9 +492,12 @@ FRIO static void decor_reduce(modelo_t *m, const char *nombre)
          el 70 % de su alto: fuera 1 de cada DECOR_DETRAS. */
     if (m->ruta && m->nruta > 2 && m->paso_ruta >= 5) {
         uint32_t nr = m->nruta, pr = m->paso_ruta, u, nrep = 0, nrepq = 0, ndet = 0, ndetq = 0;
-        int32_t *uni = malloc(nn * sizeof *uni); float (*ub)[6] = malloc(nn * sizeof *ub); float (*fr)[5] = malloc(nn * sizeof *fr);
+        /* (c2c7) RAM: con 2955 nodos (SEG22, LASV) las 10 tablas juntas eran 102 bytes por nodo (301 KB) y al cambiar de
+           etapa en carrera no cabian en el monton troceado ("Out of memory ... diff 57344": fr fallaba y se saltaba esta
+           parte). ct se suelta arriba y bb en cuanto ub esta hecha, antes de pedir fr (cabe en su hueco): 70 por nodo */
+        int32_t *uni = malloc(nn * sizeof *uni); float (*ub)[6] = malloc(nn * sizeof *ub); float (*fr)[5] = NULL;
         uint32_t *uv = calloc(nn, sizeof *uv), *ut = calloc(nn, sizeof *ut); uint8_t *uk = calloc(nn, 1);
-        if (uni && ub && fr && uv && ut && uk) {
+        if (uni && ub && uv && ut && uk) {
             for (i = 0; i < nn; i++) { uint32_t g = m->nodos[i].fl >> 16; uni[i] = g && g <= nn ? (int32_t)(g - 1) : (int32_t)i;
                                        ub[i][0] = ub[i][1] = ub[i][2] = 1e30f; ub[i][3] = ub[i][4] = ub[i][5] = -1e30f; }
             for (i = 0; i < nn; i++) {                          /* medidas de cada unidad; uk: 1 opaca, 2 mezcla o no vale */
@@ -506,6 +510,8 @@ FRIO static void decor_reduce(modelo_t *m, const char *nombre)
             }
             for (i = 0; i < m->inicio[3]; i++) { const malla_t *ma = m->mallas + i;    /* firma: suma de texturas */
                 if (ma->nodo >= 0 && (uint32_t)ma->nodo < nn && ma->n >= 3) ut[uni[ma->nodo]] += (uint32_t)(ma->tex + 1) * 2654435761u; }
+            free(bb); bb = NULL;                                /* (de aqui en adelante, ub) */
+            if (!(fr = malloc(nn * sizeof *fr))) goto sin_fr;
             for (u = 0; u < nn; u++) {                          /* marco de la ruta: lado, lateral, tramo, alto, ancho */
                 float cx = (ub[u][0] + ub[u][3]) * 0.5f, cz = (ub[u][2] + ub[u][5]) * 0.5f, mejor = 1e30f, tx, tz, l;
                 uint32_t k, kb = 0;
@@ -570,6 +576,7 @@ FRIO static void decor_reduce(modelo_t *m, const char *nombre)
             dbglog(DBG_INFO, "DECOR: %s repetidos %u (%u fuera), edificios tapados %u (%u fuera)\n", nombre, (unsigned)nrep, (unsigned)nrepq,
                    (unsigned)ndet, (unsigned)ndetq);
         }
+      sin_fr:
         free(uni); free(ub); free(fr); free(uv); free(ut); free(uk);
     }
     for (i = 0; i < m->nmallas; i++) {                          /* (una pasada: 3 fuera, 4 publico) */
@@ -7327,6 +7334,19 @@ static void ram_mapa(const char *donde)
     pvrmem_mapa(donde);
 #endif
 }
+#ifdef DIAG_MALLOC
+/* diagnostico: cada peticion de RAM que falla (o de 32 KB o mas) con su tamano y quien la pide (Makefile: --wrap) */
+void *__real_malloc(size_t n); void *__real_memalign(size_t a, size_t n); void *__real_realloc(void *p, size_t n);
+void *__real_calloc(size_t k, size_t n);
+static void dm_log(const char *f, size_t n, void *p, void *q)
+{
+    if (!p || n >= 32768) dbglog(DBG_INFO, "MALLOC %s %u -> %p desde %p tope %p\n", f, (unsigned)n, p, q, sbrk(0));
+}
+void *__wrap_malloc(size_t n) { void *p = __real_malloc(n); dm_log("malloc", n, p, __builtin_return_address(0)); return p; }
+void *__wrap_memalign(size_t a, size_t n) { void *p = __real_memalign(a, n); dm_log("memalign", n, p, __builtin_return_address(0)); return p; }
+void *__wrap_realloc(void *o, size_t n) { void *p = __real_realloc(o, n); if (n) dm_log("realloc", n, p, __builtin_return_address(0)); return p; }
+void *__wrap_calloc(size_t k, size_t n) { void *p = __real_calloc(k, n); dm_log("calloc", k * n, p, __builtin_return_address(0)); return p; }
+#endif
 static void curso_error(const char *s) { dbglog(DBG_ERROR, "CURSO: %s\n", s); vid_set_mode(modo_video, PM_RGB565); aviso(s); for (;;) thd_sleep(1000); }
 /* los registros del arbol id de CURSO.DAT (en b, sz bytes): su desplazamiento y cuenta; 0 bien */
 static int curso_busca(const uint8_t *b, uint32_t sz, int id, uint32_t *o, uint32_t *n)
