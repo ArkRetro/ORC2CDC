@@ -6730,8 +6730,8 @@ las zonas de derrape por mision); lo anterior igual byte a byte (la demo de ante
 - 9-1 (i 15, tipo 3, `-DPRUEBA_PUNTOS`): puntos, rebufo, estilo de las cifras cambiado fuera del asfalto.
 - 6-1 (i 9, tipo 6, `-DPRUEBA_ESCALA=1.4f`): corazones del jugador y del rival, el del rival baja con el detras, pillado:
   "¡PLANTADO! WOLF" en lugar de GOAL con el coche quieto, nota 6.
-- Sin "Out of memory" en ninguna (059fc97 con la 12-1: sin colisiones). Capturas: /dev/shm/c2c_t1b (hoja.png, hoja2.png),
-  /dev/shm/c2c_t2, /dev/shm/c2c_t3, /dev/shm/c2c_t6 (hoja.png).
+- Sin "Out of memory" en ninguna (059fc97 con la 12-1: sin colisiones). Capturas (fuera del repo, en el scratchpad de la sesion:
+  modos/c2c/cap/): tipo1_hud, tipo1_ko_cuenta, tipo1_eliminado, tipo2_derrape, tipo3_rebufo, tipo6_pillado.
 - Cuadros por segundo y poligonos (`-DDIAG_MS`, lineas MS, 60 medias de 30 cuadros, la misma mision con 059fc97 y lgdat2
   frente a esta rama, el piloto igual): 12-1 (tipo 1) 39,25 -> 39,23 fps, triangulos por cuadro 13459 -> 13805 (+346),
   vertices 20330 -> 20708 (+378: el HUD de la mision y los rotulos; 059fc97 ademas sin colisiones); 3-1 (tipo 2, con los
