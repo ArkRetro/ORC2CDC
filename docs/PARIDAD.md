@@ -6652,3 +6652,108 @@ tools/prueba/final.sh (preset 0, meta D, final 18): "FINAL: FINCHR2C.DAT, 4219 m
 pareja en las capturas, modos 25 / 27 / 28 y vuelta al frontal. Datos sin cambios. PENDIENTE: que tools/regenera.py
 produzca ACTORES.PAK (hoy los datos regenerados desde la ISO, y los del programa de Windows, llevan los FIN sueltos, que
 tambien funcionan).
+
+## Rev 2.9.9.d: arreglo de FPS (culling en bucles cortos, sin quitar nada) (2026-11-27)
+
+Pedido: subir los fps (sobre todo METR, CLOU y PALM) y bajar los cuadros tarde sin perder nada en pantalla. Todo en el
+Flycast de Linux, una sola instancia; nada en la consola ni en Android. Flycast cuenta instrucciones (1 ciclo, emparejadas
+si son de unidades distintas, +2 por cada uno de los tres primeros accesos a memoria de cada bloque) y no fallos de cache.
+
+PERFIL (`-DDIAG_PERFIL`, METR, cuadro congelado 1500): dibuja_etapa 21-30 %, dibuja_indices (coche y trafico) 11 %,
+robot_dibuja 9 %, nodos_visibles 8 %, coche_entorno 3 %. En dibuja_etapa el envio de vertices es un tercio; el resto es
+la prueba de cada malla: el ojo, los ejes y las constantes (19 floats) no cabian en los registros y se releian de la pila.
+
+HECHO (`demo/main.c`, cada uno con su -D; no cambian que se dibuja)
+- `ETAPA_CULL` (1): `etapa_mallas_vistas` elige en un bucle corto las mallas de un tramo de nodo que pasan la PVS y la
+  vista, 32 por llamada; el centro va a la pantalla con un ftrv de la vista ya cargada (X = 320 W + fx xv,
+  Y = 240 W - fx yv, W = zv) y las pruebas de siempre multiplicadas por fx. No en los carteles, ni en la etapa siguiente
+  antes de la entrada o creciendo (alli la vista va escalada), ni pasado el tope de vertices (ahi sigue el camino de
+  siempre desde la malla siguiente, lo mismo que hacia).
+- `NODOS_CULL` (1): `nodos_candidatos` hace las tres primeras pruebas de cada nodo de nodos_visibles (lejos, detras,
+  lado) en un bucle corto, con el mismo ftrv y las mismas marcas (FF, POPR); el bucle de siempre solo ve los que pasan.
+- `FOCOS_LOTE` (1): las mallas dibujadas se apuntan y `focos_lote` las mira para los focos al final, en el mismo orden.
+- `demo/Makefile`: `comun/vmuesc.o` con -Os (como en la rama de integracion): devuelve la RAM del codigo nuevo.
+- Medida: `-DDIAG_CULL_CMP` hace en cada cuadro las pruebas de siempre al lado de las nuevas y escribe "CULLCMP:".
+
+PROBADO Y QUITADO
+- Dos vertices por vuelta en los bucles de la SQ (sq_vtx, sq_vtx_ofs, sq_pt): METR congelado coche 2,27 -> 2,49 ms,
+  etapa 9,30 -> 9,71 (peor en Flycast).
+- La primera version de ETAPA_CULL, una llamada por malla visible: etapa 9,30 -> 9,50 (la entrada y salida de la
+  funcion costaba lo que ahorraba).
+- Los bucles por vertice de robot_dibuja en funciones aparte: 2,49 -> 2,51 ms (nada).
+
+MEDIDA 1: cuadro congelado (`-DDIAG_CONGELA=1500 -DDIAG_FALTA`), ms (mediana); imagen comparada pixel a pixel con la base
+
+| Etapa | dib base | dib nuevo | vis | etapa | pixeles distintos |
+|---|---|---|---|---|---|
+| METR | 23,56 | 22,21 | 3,17 -> 2,36 | 9,30 -> 8,76 | 0 |
+| PALM | 13,29 | 12,42 | 2,25 -> 1,55 | 2,20 -> 2,06 | 0 |
+| CLOU | 14,25 | 13,49 | 2,37 -> 1,80 | 3,46 -> 3,31 | 0 |
+
+(PALM y CLOU sin FOCOS_LOTE.) Por separado (METR): ETAPA_CULL etapa 9,30 -> 8,84; NODOS_CULL vis 3,23 -> 2,36;
+FOCOS_LOTE etapa 8,84 -> 8,76. Las mismas mallas recorridas y dibujadas (linea MAL) y la misma lista de focos (FOCOSMS).
+
+MEDIDA 2: `-DDIAG_CULL_CMP` con el piloto (METR, CLOU, SNOW -> IMPE, INDU -> FORE; 140 s): de 30,4 millones de mallas
+miradas, 2 distintas en la vista y 1 en seguro (el redondeo de una esfera que roza el borde de la vista); de 20,1
+millones de nodos, 0 distintos.
+
+MEDIDA 3: A/B en las 15 etapas. A = 4b1c25b, B = ca8c459 (ETAPA_CULL + NODOS_CULL; sin FOCOS_LOTE, que es de despues).
+`-DPRUEBA_AUTO -DPRUEBA_NODO=n -DPRUEBA_SIN_TIEMPO -DDIAG_MS -DDIAG_POPPING`, 140 s de piloto, paso 10, una sola
+instancia (la 2.9.9.c se midio con tres a la vez: las cifras de A no son las de su tabla). Sin -DDIAG_FALTA: la columna
+de grandes que faltan queda vacia (no dio tiempo a la segunda pasada).
+
+| Etapa | fps A | fps B | B-A | tarde A / B | cpu ms A / B | salto A / B | lejano A / B | 8 px+ A / B | 32 px+ A / B | grandes que faltan A / B |
+|---|---|---|---|---|---|---|---|---|---|---|
+| PALM | 37,30 | 37,99 | +0,69 | 146 / 93 | 24,00 / 23,09 | 7,86 / 6,77 | 3800 / 3800 | 8,2 / 8,8 | 0,8 / 0,8 | - / - |
+| LAKE | 38,73 | 38,75 | +0,02 | 72 / 71 | 21,65 / 21,13 | 3,93 / 2,76 | 3800 / 3800 | 2,3 / 2,5 | 0,1 / 0,1 | - / - |
+| ALPI | 38,99 | 38,99 | +0,00 | 53 / 55 | 20,33 / 20,00 | 0,56 / 0,27 | 3800 / 3800 | 6,6 / 6,5 | 1,2 / 1,1 | - / - |
+| CAST | 38,71 | 38,99 | +0,28 | 83 / 53 | 21,96 / 20,89 | 3,20 / 2,24 | 3800 / 3800 | 13,1 / 14,7 | 2,4 / 2,6 | - / - |
+| FORE | 39,00 | 39,41 | +0,41 | 58 / 20 | 20,05 / 19,37 | 0,29 / 0,30 | 3800 / 3800 | 8,3 / 11,9 | 1,6 / 2,3 | - / - |
+| DESE | 38,91 | 39,19 | +0,28 | 37 / 31 | 20,10 / 19,01 | 1,22 / 1,18 | 3800 / 3800 | 6,8 / 5,7 | 2,5 / 2,2 | - / - |
+| CLOU | 36,00 | 36,61 | +0,61 | 237 / 208 | 25,35 / 24,61 | 7,61 / 6,91 | 3800 / 3800 | 18,9 / 18,4 | 1,8 / 1,8 | - / - |
+| INDU | 38,29 | 38,70 | +0,41 | 53 / 31 | 23,01 / 22,15 | 4,27 / 2,72 | 3800 / 3800 | 13,6 / 14,4 | 5,1 / 5,1 | - / - |
+| SNOW | 39,36 | 38,91 | -0,45 | 25 / 64 | 20,17 / 19,97 | 0,59 / 0,29 | 3800 / 3800 | 3,8 / 9,2 | 0,9 / 1,3 | - / - |
+| GHOS | 37,60 | 37,74 | +0,14 | 143 / 126 | 23,76 / 23,33 | 6,99 / 6,55 | 3800 / 3800 | 11,9 / 12,4 | 2,1 / 2,2 | - / - |
+| TULI | 38,52 | 38,74 | +0,22 | 69 / 54 | 22,20 / 21,72 | 5,78 / 4,21 | 3598 / 3694 | 19,6 / 21,2 | 2,6 / 2,7 | - / - |
+| METR | 35,32 | 35,76 | +0,44 | 221 / 207 | 27,00 / 26,25 | 6,84 / 6,58 | 3800 / 3800 | 12,2 / 12,2 | 3,2 / 3,3 | - / - |
+| RUIN | 39,28 | 39,31 | +0,03 | 37 / 31 | 19,00 / 18,77 | 0,81 / 0,29 | 3576 / 3573 | 8,7 / 9,1 | 1,2 / 1,3 | - / - |
+| IMPE | 38,92 | 39,01 | +0,09 | 43 / 28 | 21,46 / 20,77 | 4,33 / 3,09 | 3717 / 3800 | 15,8 / 17,5 | 3,4 / 2,8 | - / - |
+| CAPE | 39,13 | 39,28 | +0,15 | 28 / 24 | 20,20 / 18,96 | 1,34 / 0,31 | 3800 / 3800 | 12,6 / 11,8 | 4,0 / 3,7 | - / - |
+| **Media / suma (15)** | 38,27 | 38,49 | +0,22 | 1305 / 1096 | | 3,71 / 2,96 | 3766 / 3778 | 162,4 / 176,3 | 32,9 / 33,3 | 0,00 / 0,00 |
+
+tiradas con 'VOZ: VOCES.DAT, 35 muestras': 30 de 30; lineas 'Out of memory': 0
+
+Saltos por s sumados en las 15 (apariciones + / desapariciones -, 8 px / 32 px), por razon:
+
+| razon | A +8/32 -8/32 | B +8/32 -8/32 |
+|---|---|---|
+| lado | +6.3/1.7 -0.0/0.0 | +5.4/0.8 -0.0/0.0 |
+| lod | +0.1/0.0 -0.0/0.0 | +0.1/0.0 -0.0/0.0 |
+| pvs | +104.3/27.2 -18.3/1.1 | +109.8/28.3 -20.0/1.3 |
+| rama | +2.7/1.0 -0.0/0.0 | +2.6/1.1 -0.0/0.0 |
+| tope | +19.8/1.1 -10.7/0.3 | +23.7/1.2 -13.6/0.4 |
+| tramo | +0.3/0.1 -0.0/0.0 | +1.3/0.6 -0.0/0.0 |
+
+- fps: +0,22 de media; las peores suben (PALM +0,69, CLOU +0,61, METR +0,44); SNOW -0,45 (25 -> 64 cuadros tarde).
+  Cuadros tarde 1305 -> 1096 (-16 %). El nivel del reparto baja (3,71 -> 2,96): se recorta menos.
+- Saltos de 8 px: 162,4 -> 176,3 por s (+8,5 %), sobre todo "pvs" (+5,5: FORE, IMPE, CAST) y "tope" (+3,9: SNOW).
+  SUPUESTO: es la variacion entre tiradas (el piloto no hace dos veces la misma carrera; en la 2.9.8 dos tiradas iguales
+  daban hasta 9 por s de diferencia): el cuadro congelado sale identico pixel a pixel con las mismas mallas, y la
+  comparacion en cada cuadro (MEDIDA 2) no encuentra diferencias que cambien lo que se dibuja. No se ha repetido la
+  tanda para separarlo del ruido.
+- RAM (compilacion normal, tools/prueba/nav3.sh): libre al arrancar 352K en la base y 352K con todo (sin el -Os de
+  vmuesc.o, 344K). "VOZ: VOCES.DAT, 35 muestras" en las 30 tiradas y en las nav3, 0 "Out of memory", guardado en la VMU.
+
+Variante -O2 de la rama de integracion (8e2a856, pedida): mision.o, rival.o, campeonato.o, infarto.o y haobj.o fuera de
+la linea -Os. Codigo 809024 -> 822296 bytes. RAM libre al arrancar (nav3): 416K -> 408K. C2C (`-DPRUEBA_MISION=0`, BEAC,
+140 s): 37,52 -> 37,51 fps, 122 -> 123 tarde. INFARTO (`-DPRUEBA_VARIANTE=2`, PALM): 37,26 -> 37,13 fps. Sin ganancia
+medible en Flycast; VOZ 35 muestras y 0 Out of memory en las dos. En rev-1.1 (4b1c25b) esos ficheros ya van con -O2
+(solo menu.o va con -Os) y haobj.o no existe.
+
+NO HECHO / QUEDA
+- La pareja (2,5 ms por cuadro para 2898 vertices) y el coche (2,3 ms): sin tocar (lo probado no ganaba).
+- Cuadros tarde en cambios de seccion y cargas, salto_q, tiras unidas con degenerados: sin estudiar.
+- Store queues y prefetch: sin cambios.
+- Consola real y Android: sin medir.
+
+Ficheros: modos/fps/ del directorio de trabajo (res/ las consolas, cap/ las comparaciones, sh/ y py/).
