@@ -40,6 +40,7 @@ void (*camp_obj)(int cl, int tipo, float sec, float lat, float esc);
 void (*camp_chica)(int que, uint32_t v);
 void (*camp_golpe)(void);
 void (*camp_punto)(int sec, float *p, float *fx, float *fz);
+void (*camp_marco)(const float *l, float *w);
 void (*camp_bancos)(int n, const uint8_t *tipo, const uint8_t *sub, int fila, int *rnd);
 
 #define DT 0.016611295f                                 /* +0x180 (0x3c881469) */
@@ -90,6 +91,10 @@ typedef struct {
     const uint8_t *c14p; int n14c, nx14, objetivo, suma, k14_cambio, k14_toq;   /* la peticion del 14 en curso: sus coches, el siguiente */
     int16_t v14[100];                                   /* el valor de cada coche (+0x10 de su registro de +0x5c) */
     int16_t val11[24];                                  /* el valor del coche de cada plaza (su dibujo) */
+    const uint8_t *c24; uint32_t n24;                   /* 'C241': los objetivos de las fotos de cada peticion */
+    const uint8_t *c24p; int n24c, rel24, act24, nota24; uint16_t hecho24;   /* la del 24 en curso; el activo (+0x10, -1) */
+    const uint8_t *c22; uint32_t n22;                   /* 'C221': las ventanas de la bocina de cada peticion */
+    const uint8_t *c22p; int n22c, est22, obj22, cur22; uint32_t hecho22; float tot22, ant22;   /* +0xc, +0x18, +0x2c, +0x24; +0x14, +0x1c */
 } camp_t;
 static camp_t *C;
 
@@ -133,6 +138,12 @@ int camp_inicia(int grupo, int fila, int forzada, int lista, int dificultad)
                         C->let = (const uint16_t *)((const uint8_t *)d + o + 4); o += 8;
                         if (o + 8 + 264 <= tam && !memcmp((const uint8_t *)d + o, "C141", 4)) {
                             memcpy(&C->n14, (const uint8_t *)d + o + 4, 4); C->t14 = (const int32_t *)((const uint8_t *)d + o + 8); C->c14 = (const uint8_t *)d + o + 8 + 264;
+                            {   const uint8_t *e = C->c14; uint32_t k;   /* detras, 'C241' (los objetivos del 24) */
+                                for (k = 0; k < C->n14 && e + 4 <= (const uint8_t *)d + tam; k++) e += 4 + 4 * e[2];
+                                if (e + 8 <= (const uint8_t *)d + tam && !memcmp(e, "C241", 4)) { memcpy(&C->n24, e + 4, 4); C->c24 = e + 8;
+                                    for (e += 8, k = 0; k < C->n24 && e + 4 <= (const uint8_t *)d + tam; k++) e += 4 + 16 * e[2];
+                                    if (e + 8 <= (const uint8_t *)d + tam && !memcmp(e, "C221", 4)) { memcpy(&C->n22, e + 4, 4); C->c22 = e + 8; } }
+                            }
                         }
                     }
                 }
@@ -374,6 +385,12 @@ static void cara_nota(const pet_t *p)
     if (camp_chica) camp_chica(0, n < 2 ? 0 : n < 4 ? 5 : n == 4 ? 3 : 4);
 }
 static void chica_para(void) { if (camp_chica) camp_chica(1, 0); }
+static void ventana22(int i, float *a, float *b)       /* (tipo 22) la ventana i en secciones de la etapa (+0 + 8 / +4 + 0xc) */
+{
+    const uint8_t *o = C->c22p + 16 * i; float f8, fc; int ini = C->pet[C->cur].d->ini;
+    memcpy(&f8, o + 4, 4); memcpy(&fc, o + 8, 4);
+    *a = (float)(ini + (int16_t)(o[0] | o[1] << 8)) + f8; *b = (float)(ini + (int16_t)(o[2] | o[3] << 8)) + fc;
+}
 static void tipo_paso(pet_t *p, const camp_coche_t *c, float dpos)
 {
     const cpet_t *d = p->d; float largo = (float)(d->fin - d->ini);
@@ -606,8 +623,80 @@ static void tipo_paso(pet_t *p, const camp_coche_t *c, float dpos)
         }
         break;
     case 16: p->med += mj_paso((int)(d - C->pets), d->sub, p->fase, p->rnd, c, voz); break;   /* los minijuegos (minijuego.c) */
+    case 22:                                            /* 0x29b3d0: la bocina (pulsarla en las ventanas de la lista +0x7c) */
+        if (p->fase == 1) {                             /* 0x29bfc0: las ventanas y su largo total (+0x14; PROBABLE la suma) */
+            uint32_t k; const uint8_t *e = C->c22; int pi = (int)(d - C->pets), i;
+            C->c22p = NULL; C->n22c = 0; C->est22 = 0; C->obj22 = -2; C->hecho22 = 0; C->tot22 = 0;
+            for (k = 0; e && k < C->n22; k++, e += 4 + 16 * e[2]) if ((e[0] | e[1] << 8) == pi) { C->c22p = e + 4; C->n22c = e[2] > 32 ? 32 : e[2]; break; }
+            for (i = 0; i < C->n22c; i++) { float a, b; ventana22(i, &a, &b); C->tot22 += b - a; }
+            if (C->tot22 <= 0) C->tot22 = 1;
+            dbglog(DBG_INFO, "CAMP: bocina: %d ventanas, %.0f secciones\n", C->n22c, (double)C->tot22);
+        } else if (p->fase == 4 && C->c22p) {           /* 0x29c058: la ventana (+0x24) o la siguiente (+0x28) */
+            int i, nx = -1; float a, b, f = c->pos;
+            C->cur22 = -1;
+            for (i = 0; i < C->n22c; i++) {
+                if (C->hecho22 >> i & 1) continue;
+                ventana22(i, &a, &b);
+                if (a <= f && f <= b) { C->cur22 = i; break; }
+                if (b < f) C->hecho22 |= 1u << i;
+            }
+            if (C->cur22 < 0) for (i = 0; i < C->n22c && nx < 0; i++) { ventana22(i, &a, &b); if (!(C->hecho22 >> i & 1) && f <= a) nx = i; }
+            if (C->est22 == 0) {                        /* (0x1b4518: el boton de la bocina) */
+                if (c->bocina) { C->est22 = 1; if (camp_se) camp_se(0x1bc); C->obj22 = nx >= 0 ? nx : C->cur22 >= 0 ? C->cur22 : -2; }
+            } else if (!c->bocina) C->est22 = 0;        /* (el 0x81bc que la para: SIN, el efecto es corto) */
+            else if (C->obj22 == C->cur22) {            /* sonando en su ventana: medidor + 80 x avance / largo x 1,25 en la carretera */
+                if (c->lat >= 0.0f && c->lat <= 1.0f) p->med += LLENO * (f - C->ant22) / C->tot22 * 1.25f;   /* (0x2325a0(0, 1)) */
+            } else { p->pen += LLENO * (f - C->ant22) / C->tot22 * 0.25f; if (p->pen > 100.0f) p->pen = 100.0f; }   /* fuera: x 0,25 */
+            C->ant22 = f;
+        } else if (p->fase == 5) {
+            C->c22p = NULL;
+            if (p->nota == 6) p->extra += bono(p, 0.9f);
+        }
+        if (p->fase != 4) C->ant22 = c->pos;
+        break;
+    case 24:                                            /* 0x2a48a0: las fotos (los objetivos de la lista +0x70 del guion) */
+        if (p->fase == 1) {                             /* 0x2a5fd8: los objetivos (+0x14 cuantos) */
+            uint32_t k; const uint8_t *e = C->c24; int pi = (int)(d - C->pets);
+            C->c24p = NULL; C->n24c = 0; C->act24 = -1; C->hecho24 = 0; C->nota24 = -1;
+            for (k = 0; e && k < C->n24; k++, e += 4 + 16 * e[2]) if ((e[0] | e[1] << 8) == pi) { C->c24p = e + 4; C->n24c = e[2] > 16 ? 16 : e[2]; C->rel24 = e[3] ? d->ini : 0; break; }
+            dbglog(DBG_INFO, "CAMP: fotos: %d objetivos\n", C->n24c);
+        } else if (p->fase >= 2 && p->fase <= 4 && C->c24p) {
+            int i;                                      /* 0x2a60a0: el objetivo de la seccion; pasado su final, perdido */
+            for (i = 0; i < C->n24c; i++) {
+                const uint8_t *o = C->c24p + 16 * i; int s0 = (int16_t)(o[12] | o[13] << 8) + C->rel24, s1 = (int16_t)(o[14] | o[15] << 8) + C->rel24;
+                if (C->hecho24 >> i & 1) continue;
+                if (C->act24 == i) { if (s1 < c->seccion) { C->hecho24 |= (uint16_t)(1u << i); C->act24 = -1; } }
+                else if (C->act24 < 0 && s0 < c->seccion) { C->act24 = i; voz(rand() & 1 ? 0xf4 : 0xf3, 0x3c, 4);
+                    dbglog(DBG_INFO, "CAMP: foto %d: el objetivo (secciones %d..%d)\n", i, s0, s1); }
+            }
+            if (p->fase == 4 && C->act24 >= 0 && c->foto && camp_marco) {   /* 0x2a4fa8: el disparo (+0x2c la nota de la foto) */
+                const uint8_t *o = C->c24p + 16 * C->act24; float l[3], w[3], a, b, df; int nf = 0;
+                memcpy(l, o, 12); camp_marco(l, w);
+                a = atan2f(w[0] - c->xyz[0], w[2] - c->xyz[2]); b = atan2f(c->fx, c->fz); df = a - b;   /* (0x2bb0a0 x 2) */
+                if (df < -3.14159265f) df += 6.28318531f;
+                if (df > 3.14159265f) df -= 6.28318531f;
+                if (fabsf(df) < 0.50265f) nf = (int)((1.0f - fabsf(df) / 0.50265f) * 10.0f + 0.5f);   /* (+0x24: el 0,5; SIMPLIFICADO) */
+                p->med += (float)nf / 10.0f * (LLENO / ((float)C->n24c * 0.9f));   /* (0x2a5074, al acabar el disparo) */
+                if (camp_se) camp_se(0x174);
+                C->nota24 = nf; C->hecho24 |= (uint16_t)(1u << C->act24); C->act24 = -1;
+                dbglog(DBG_INFO, "CAMP: foto: %.0f grados del objetivo, nota %d, medidor %d\n", (double)(df * 57.29578f), nf, (int)p->med);
+            }
+        } else if (p->fase == 5) {
+            C->c24p = NULL; C->act24 = -1;
+            if (p->nota == 6) p->extra += bono(p, 0.9f);
+        }
+        break;
     default: break;                                     /* SIN PORTAR */
     }
+}
+/* (tipo 22) 1 con una ventana de la bocina en curso (las pruebas) */
+int camp_bocina22(void) { return C && C->c22p && C->cur22 >= 0; }
+/* (tipo 24) el objetivo de la foto activo, en el mundo (camp_marco); 0 ninguno */
+int camp_foto(float *w)
+{
+    const pet_t *p = C && C->cur >= 0 ? &C->pet[C->cur] : NULL; float l[3];
+    if (!p || p->d->tipo != 24 || !C->c24p || C->act24 < 0 || !camp_marco) return 0;
+    memcpy(l, C->c24p + 16 * C->act24, 12); camp_marco(l, w); return 1;
 }
 
 /* ---- los coches de la peticion del tipo 11 (0x1f20e8 / 0x1f1a88: el trafico sale con la tabla de 0x46 bytes de
@@ -653,6 +742,9 @@ void camp_autos(haobj_auto_t *v, int n)
 #ifdef PRUEBA_C14
                 if (abs(v[i].sec - js) <= 1 && (rand() & 1)) v[i].golpe = 1;   /* prueba: la mitad de los que pasa a su lado */
 #endif
+#ifdef PRUEBA_C14V
+                {   static int t_; if (abs(v[i].sec - js) <= 2 && ++t_ % 10 == 0) dbglog(DBG_INFO, "C14V: coche %d a %.1f m (radio %.1f), seccion %d / %d\n", k + 1, (double)sqrtf(d2(v[i].pos, C->xyz)), (double)r, v[i].sec, js); }
+#endif
                 if (d2(v[i].pos, C->xyz) < r * r || v[i].golpe) {   /* +0x72 += valor (no baja de 0) */
                     int a = C->suma; C->suma += C->v14[k]; if (C->suma < 0) C->suma = 0;
                     C->k14_cambio += C->suma - a; C->k14_toq = 1;
@@ -696,8 +788,12 @@ int camp_coche14(int *sec, int *carril, int *marca)
 {
     const pet_t *p = pet11(); const uint8_t *e;
     if (!p || p->d->tipo != 14 || !C->c14p || C->nx14 >= C->n14c) return 0;
-    e = C->c14p + 4 * C->nx14;
-    *sec = p->d->ini + (int16_t)(e[0] | e[1] << 8); *carril = (int8_t)e[2];
+    for (;;) {                                          /* (c2c7: los que el tope de main.c deja pasar sin abrir, fuera) */
+        e = C->c14p + 4 * C->nx14;
+        *sec = p->d->ini + (int16_t)(e[0] | e[1] << 8); *carril = (int8_t)e[2];
+        if (*sec >= (int)floorf(C->pos) + 5 || ++C->nx14 >= C->n14c) break;
+    }
+    if (C->nx14 >= C->n14c) return 0;
     if (*sec - (int)floorf(C->pos) > 40) return 0;
     *marca = (int)(HA_VISTO | HA_CAMP) | (C->nx14 + 1); C->nx14++;
     return 1;
