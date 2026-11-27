@@ -124,9 +124,13 @@ static int busca(const char *nombre, uint32_t *lba, uint32_t *tam)
 /* Las etapas tambien (SEGS.PAK, tools/pak_union.py --prefijo=SEG): su descriptor ocupa varios sectores y se lee al final
    del hueco de destino; la ventana es lo que queda entre el fichero y el descriptor (el empaquetador solo empaqueta
    la etapa que deja 64 KB de ventana en el hueco de la etapa). */
+/* Y los personajes de los finales (FINCHRgg.DAT, FINGgg.DAT, FINHgg.DAT): en los datos van como descriptores de
+   ACTORES.PAK (repiten modelo: 46 MB sueltos, 6,4 MB empaquetados) y sin recomponerlos el final de recreativa salia
+   sin la pareja ("FINAL: sin FINCHRgg.DAT (-2)"). Un FIN* suelto (FINE, FINSKY, FINAL) cuesta solo leer un sector. */
 static int es_union(const char *n)
 {
-    return (n[0] == 'B' && n[1] == 'K' && n[2] >= '0' && n[2] <= '9') || (n[0] == 'S' && n[1] == 'E' && n[2] == 'G' && n[3] >= '0' && n[3] <= '9');
+    return (n[0] == 'B' && n[1] == 'K' && n[2] >= '0' && n[2] <= '9') || (n[0] == 'S' && n[1] == 'E' && n[2] == 'G' && n[3] >= '0' && n[3] <= '9')
+        || (n[0] == 'F' && n[1] == 'I' && n[2] == 'N' && (n[3] == 'C' || n[3] == 'G' || n[3] == 'H'));
 }
 static uint8_t desc[2048] __attribute__((aligned(32)));
 static char pak_nom[17]; static uint32_t pak_lba, pak_tam;
