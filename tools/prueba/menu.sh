@@ -16,7 +16,11 @@ if [ -n "${MENU_SP:-}" ]; then                                       # MENU_SP=1
     if [ "${SP_LADO:-1}" = 1 ]; then                                 # OutRun2SP": preset 0, arbol 1); SP_LADO=0 sin el R
         tecla v; espera 3; foto ${P}_8b                              # gatillo R: el otro lado ("OutRun2": preset 1, arbol 0)
     fi
-    tecla x; espera 5; foto ${P}_9                                   # elige la musica
+    for _f in $(seq 1 ${SP_FILA:-0}); do xdotool keydown Right; sleep 0.1; xdotool keyup Right; espera 2; done   # SP_FILA=n: n filas a la derecha (3 / 4: los 15
+    [ "${SP_FILA:-0}" = 0 ] || foto ${P}_8c                          # recorridos de OutRun / Contrarreloj, presets 2 / 3)
+    tecla x; espera 5; foto ${P}_9                                   # elige la musica (o la configuracion: Contrarreloj)
+    if [ -n "${SP_CONF:-}" ]; then tecla x; espera 5; foto ${P}_9b; fi   # SP_CONF=1: la Contrarreloj pide antes la
+                                                                     # configuracion del coche (la pulsacion de arriba)
     tecla x; espera 1; foto ${P}_carga                               # la pantalla de carga (el mapa, demo/pcarga.c)
     espera_log 'VRAM: zona del curso' 90; espera ${ESPERA_CARRERA:-15}
 else

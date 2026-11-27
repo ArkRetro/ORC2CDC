@@ -431,8 +431,13 @@ static void paso4_4c0110(void)
 {
     /* 453320 = [0x54c108] (PS2 0x178478) = el byte +0x13 de los ajustes de 0x5493d0 (0x178108, copiado por 0x178338),
        2 por defecto (0x177310 / 0x177440, nadie lo cambia): 5 filas con los 15 recorridos continuos (presets 2 / 3,
-       arboles csc_data_cvt_ren / csc_data_2_ren). Esos arboles no estan convertidos: DESVIACION, 0 (3 filas) */
+       arboles csc_data_cvt_ren / csc_data_2_ren = 291 / 290 de CURSOTA.DAT). Desde la Rev 2.9.9.c (modos "sp") como
+       el original; -DFSP_FILAS3: 0 (3 filas, la DESVIACION de antes) */
+#ifdef FSP_FILAS3
     int r = 0;
+#else
+    int r = 2;
+#endif
     P32(0x8449e0, (uint32_t)r);
     if (r == 0) P32(0x844944, 0); else if (r > 0 && r <= 2) P32(0x844944, 1);
     P32(0x84a24c, T->m60[0]); P32(0x84a23c, 0x2e0022);

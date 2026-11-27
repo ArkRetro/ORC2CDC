@@ -614,6 +614,21 @@ static void gestor_(const infarto_coche_t *c)       /* 464350 (PS2 0x1ae440) */
     evalua(c);
 }
 static void gestor(const infarto_coche_t *c) { gestor_(c); filas_paso(); }   /* las filas al final de 464350 */
+/* el banco HAM de la etapa: con VOCESH.DAT / VOCESHC.DAT de la Rev 2.9.9.c (VHG1) el de 0x173a6c (preset 1:
+   0x1b3be8, si no 0x1b3c70; la clase de la mision de su nivel, 0x1af710), si no el grupo de INFARTO.DAT (HAM\<clave>) */
+static void voz_banco(int clave, int nivel)
+{
+    int l = nivel < 0 ? 0 : nivel >= NIV ? NIV - 1 : nivel, g = sfx_voz_grupo_ham(LV_U32(l, 4), clave);
+    if (g < 0) g = grp[clave >= 0 && clave < 15 ? clave : 0];
+    sfx_voz_grupo(g);
+    dbglog(DBG_INFO, "INFARTO: voces del banco %d (clave %d, mision %d, preset %d)\n", g, clave, (int)LV_U32(l, 4), inf_preset);
+}
+/* el fichero de voces del modo: VOCESHC.DAT (Rev 2.9.9.c: HAM.CVT) con el preset 0 si esta; si no VOCESH.DAT */
+const char *infarto_voces(void)
+{
+    uint32_t lba, tam;
+    return inf_preset != 1 && !gd_busca("VOCESHC.DAT", &lba, &tam) ? "VOCESHC.DAT" : "VOCESH.DAT";
+}
 
 void infarto_carrera(int clave, int nivel)          /* 45E0F0 */
 {
@@ -628,7 +643,7 @@ void infarto_carrera(int clave, int nivel)          /* 45E0F0 */
     memset(&hud, 0, sizeof hud); hud.nota = -1; hud.nota_etapa = -1; hud.anuncio = -1; hud.t_nota = hud.t_etapa = hud.t_anuncio = 9999;
     clave_act = clave; nivel_act = nivel; empieza(0, 3); n_req = 0; rec_i = 0; h_nivel = 0;
     cuenta_peticiones(mision(clave, nivel));
-    if (dat) sfx_voz_grupo(grp[clave >= 0 && clave < 15 ? clave : 0]);
+    if (dat) voz_banco(clave, nivel);
 }
 void infarto_etapa(int clave, int nivel)            /* 464350, stage clear */
 {
@@ -651,7 +666,7 @@ void infarto_etapa(int clave, int nivel)            /* 464350, stage clear */
     disp = score; h_nivel = score / 10000; tot_ver = 0;   /* 7F2468, 7F2464 */
     clave_act = clave; nivel_act = nivel; n_req = 0; rec_i = 0; trafico = 1;
     cuenta_peticiones(mision(clave, nivel));
-    sfx_voz_grupo(grp[clave >= 0 && clave < 15 ? clave : 0]);
+    voz_banco(clave, nivel);
 }
 void infarto_meta(void)                             /* 464350 con 44FF10 */
 {

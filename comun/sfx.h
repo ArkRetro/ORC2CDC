@@ -31,6 +31,7 @@ const char *sfx_voces_idioma(void);
 /* otro juego de voces (VOCESH.DAT del INFARTO / VOCES.DAT); buf, cap: RAM prestada para leerlo. 0 = bien */
 int  sfx_voces_juego(const char *fich, void *buf, uint32_t cap);
 void sfx_voz_grupo(int g);                 /* banco HAM de la etapa (-1: ninguno) */
+int  sfx_voz_grupo_ham(int mision, int clave);   /* (Rev 2.9.9.c) el grupo de VHG1 para esa mision y clave; -1 sin VHG1 */
 void sfx_voz_se(int id);                   /* un efecto del banco de voces por el canal de efectos */
 /* una muestra suelta (ADPCM de Yamaha) por el canal de efectos de las voces (la escena de la meta, demo/meta.c) */
 uint32_t sfx_muestra_sube(const void *adpcm, uint32_t bytes);   /* direccion en el AICA o 0 */

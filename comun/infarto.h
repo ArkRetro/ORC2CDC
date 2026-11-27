@@ -29,6 +29,7 @@ typedef struct { int clase, seccion, carril, modelo, id; } infarto_coche_nuevo_t
 
 int  infarto_inicia(void);                  /* lee INFARTO.DAT; 0 bien */
 void infarto_preset(int preset);            /* el preset [0x44350c] de la carrera, antes de infarto_inicia */
+const char *infarto_voces(void);           /* (Rev 2.9.9.c) VOCESHC.DAT (HAM.CVT) con el preset 0 si esta, si no VOCESH.DAT */
 void infarto_tramo_1a(int si);              /* 1: el jugador en la etapa del descriptor 0x1a (NEWY) */
 void infarto_libera(void);
 void infarto_carrera(int clave, int nivel); /* 45E0F0 al empezar la carrera en la etapa de esa clave */

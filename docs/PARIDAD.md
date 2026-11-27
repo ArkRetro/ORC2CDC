@@ -2747,7 +2747,7 @@ lo reproduce (467E30) con un coche translucido (4AE0F0: alfa +B68). En la Dreamc
 - Verificado en E (`-DPRUEBA_AUTO -DPRUEBA_VARIANTE=7 -DPRUEBA_TA_CODIGO=0 -DPRUEBA_MILLAS -DPRUEBA_GH_ADELANTO=15`,
   REINTENTAR con el mando): primera carrera graba y guarda ORGH0100 (releido igual), la segunda lo reproduce delante.
   `-DDIAG_GH`: donde lo pone; `-DGH_OPACO`: opaco.
-- SIN PORTAR: el coche de la grabacion (otro modelo que el del jugador), el fantasma de la red, la escena 2B0063 (no
+- HECHO (Rev 2.9.9.c, ver Modos "sp" 3): el coche de la grabacion. SIN PORTAR: el fantasma de la red, la escena 2B0063 (no
   2B0061: esa es "Posicion" en el PS2) y el tiempo del fantasma en la meta (497430): portados en la Rev 2.9.4 (Rankings y
   records); la pantalla RANKINGS (siguiente revision).
 
@@ -4374,7 +4374,7 @@ tools/regenera.py), CURSOTA.DAT y las uniones BK262..BK469 en UNIONESTA.PAK (con
     Preset del curso.
   - INFARTO en OutRun 2 SP: corre el arbol 1 con el preset 0; las misiones, los coches y las misiones base por el
     preset / arbol estan HECHOS (2026-11-13, ver Preset del curso). PENDIENTE: los objetos (OSO, 45C470 con [78024C])
-    y los bancos de voz HAM.CVT de ese curso.
+    y los bancos de voz HAM.CVT de ese curso (HECHOS en la Rev 2.9.9.c, ver Modos "sp" 2).
   - La escena de la meta de los arboles de la Contrarreloj: la letra sale del codigo (GOAL_A..E; PROBABLE: 450380(8)
     lee la clave del registro, que en los del reves no es 10..14); la etapa sola usa la de la meta A.
 
@@ -4501,7 +4501,7 @@ Lo que lee el preset (todas las lecturas de [0x44350c] del ELF revisadas) y como
     0x36bf90 (0x25 x 6, 0x21, 0x22, 0x23) en vez de la de 7. No se veia antes (el preset 0 nunca corria el arbol 1
     salvo el INFARTO de OutRun 2 SP del 2026-11-13).
 - SIN PORTAR (lecturas del preset de partes que la DC no tiene): los bancos de voz HAM.CVT del INFARTO de OutRun 2 SP
-  (0x173a6c; VOCESH.DAT solo lleva los HAM del preset 1, PENDIENTE), los sonidos 0x841a / 0x8443 de 0x173cbc, el
+  (0x173a6c: HECHO en la Rev 2.9.9.c, ver Modos "sp" 2), los sonidos 0x841a / 0x8443 de 0x173cbc, el
   recurso 0x12b / 0xc3 de 0x1736b0 / 0x1b7ac8 / 0x206cac / 0x287e98 (el personaje del banderero, que la DC lee con
   BAND / BAND1), el mapa de ruta del HUD (0x1be240 / 0x1bfb60 / 0x1c36f8 / 0x1cc0d0: tablas por preset, presets 0 y 1
   iguales), la camara de 0x17c018 / 0x17e860 (presets 0 / 2 frente a 1 / 3: sin portar), la lista de 7 de 0x22d0a0, los
@@ -4618,7 +4618,7 @@ etapas, salida BEAC`, BAND1.DAT en el hueco de la union; RAM libre 1419..1490 KB
   0x1ba968 / 0x1baaf8 / 0x1babe8), comprobado instruccion a instruccion con race_end_modes.cpp:
   - 25: temporizador 0xB4, banco 0x34, musica 100050(0, 0x1C, 1) = sprintf("\music\%02d.ps2", 0x1C) en bucle (MUS28),
     en la variante 0 0x5a2030 = 1a7180(preset); con el banco el suceso 0x188 con la funcion 0x15 (1b4a90 = preset 2 / 3
-    -> la 0x50, resultado de la Contrarreloj de 15 etapas: esos presets no salen, SIN PORTAR); A o START (210c58:
+    -> la 0x50, resultado de los 15 recorridos: HECHO en la Rev 2.9.9.c, ver Modos "sp" 1); A o START (210c58:
     210988(1) / (4)) o el mapa acabado ([0x370dc8]) y despues el temporizador o A / START: 26 con 450240 = 1 o en la
     variante 0 con el record ([0x5a2030]), si no 27 (las variantes 3 / 4 piden antes el 27). Sin el 26: al 27. La
     animacion de carga del banco 0x33 (288d20(1) mientras se lee el banco) no sale: la Dreamcast lo lee de un tiron.
@@ -4789,9 +4789,8 @@ memory", RAM del menu igual que antes (939 KB libres).
 - 453320 = [0x54c108] (PS2 0x178478, su unica lectura 0x214e00): lo copia 0x178338 del byte +0x13 de los ajustes de
   [0x35a9e8] = 0x5493d0 (0x178108); 0x177310 / 0x177440 (al arrancar, 0x1077c4) lo ponen a 2 y nada mas lo escribe: en
   el PS2 sale 2 -> 8449E0 = 2, 844944 = 1 y la lista de 5 filas con los 15 recorridos continuos (presets 2 / 3: arboles
-  csc_data_cvt_ren / csc_data_2_ren, 0x1760c0). Esos arboles, el resultado de la Contrarreloj de 15 etapas (funcion
-  0x50 del suceso 0x188, 4AED50) y sus metas no estan convertidos: DESVIACION, la Dreamcast toma 0 (3 filas) hasta
-  portarlos.
+  csc_data_cvt_ren / csc_data_2_ren, 0x1760c0). HECHO en la Rev 2.9.9.c (ver Modos "sp" 1): las 5 filas, los
+  arboles 291 / 290 y el resultado de la funcion 0x50 del suceso 0x188 (4AED50).
 - Balance musica / motor (+21, 48B1B0 = PS2 0x1bd020 -> 0x5a2079, leido por 0x1bd030): en las carreras (modos 13 / 0x10,
   0x11f148 / 0x11f570) elige el registro de mezcla 0x3c15d0 + balance x 0x1C (7 floats: 1,0 0,5 0,5 0,8 1,0 0,8 0,7 /
   0,9 0,7 0,7 0,8 1,0 0,8 0,7 / 0,8 1,5 1,0 0,8 1,0 0,8 0,7; fuera de carrera 0x3c15b0: 0,9 0,7 0,7 0,7 1,0 0,8 0,7) que
@@ -6652,3 +6651,123 @@ tools/prueba/final.sh (preset 0, meta D, final 18): "FINAL: FINCHR2C.DAT, 4219 m
 pareja en las capturas, modos 25 / 27 / 28 y vuelta al frontal. Datos sin cambios. PENDIENTE: que tools/regenera.py
 produzca ACTORES.PAK (hoy los datos regenerados desde la ISO, y los del programa de Windows, llevan los FIN sueltos, que
 tambien funcionan).
+## Modos "sp" (Rev 2.9.9.c): 15 recorridos de OUTRUN2SP, voces HAM.CVT del INFARTO y coche de la grabacion del fantasma (2026-11-27)
+
+### 1. Los 15 recorridos continuos de OUTRUN2SP (presets 2 / 3)
+
+- Original: [0x54c108] = 2 (0x177310 / 0x177440 al arrancar; nadie lo cambia) -> 8449E0 = 2 y la lista de 5 filas del
+  frontal ("Modo OutRun / Modo contrarreloj 15 recorridos continuos"; 4C3DC0 filas 3 / 4: +1F = 1 / 0, +27 = 2 / 3 con
+  el lado 0 / 1 del gatillo R) -> START 0x1760c0(5 / 6) con "%s_course": csc_data_cvt_ren / csc_data_2_ren = arboles
+  291 / 290 de CURSOTA.DAT (los de los cursos seguidos del OUTRUN de la consola, revision 44, ya en el disco y
+  comprobados con orden.sh). La Dreamcast tomaba 0 (3 filas): HECHO como el original (comun/fsp.c paso4;
+  `-DFSP_FILAS3` vuelve a las 3 filas).
+- Resultado (modo 25): con los presets 2 / 3 (1b4a90 en 0x1ba7b4) el suceso 0x188 lleva la funcion 0x50 (PS2 0x209ad8 /
+  0x209cc8 / 0x209d08 = PC 4AED50 / 4AEEC0 / 4AEEE0), no la 0x15: el mapa de 15 (340001 / 34000C con el preset 2, si no
+  340000 / 34000B; capas 1 y 5), 34001D (capa 6) y el coche del modelo ([0x410048 + 48B140 x 4]) en la capa 4, modo 1,
+  de su cuadro 0 al de la posicion: meta (0x1cff70(0xE)) 0x1FE; si no, 0x1E por nivel acabado (0x3C en los niveles 5 y
+  10, 0x209a40) y en el siguiente razon x 23 (46) en la etapa, 23 + razon x 7 (46 + razon x 14) en la union y razon x 30
+  en la etapa 14 (0x209a68 / 0x209aa0 / 0x41f0). Acaba cuando el coche llega a su ultimo cuadro. demo/fin.c ta_init /
+  ta_control; tablas en el bloque 'TA50' detras de RSP1 en RUTASP.DAT (tools/conv_sp.py tablas_ruta: cada constante
+  comprobada en el codigo; con el RUTASP.DAT de antes sale el mapa de la 0x15).
+- Entrada de nombre (modo 26) con los presets 2 / 3 (0x200400..0x2004d4): la tabla 3D001D / 3D001E (cuadros 0..0x14)
+  en lugar de t + 0, sin la linea de la meta ([0x360] = 6) (demo/nombre.c tablero). El fondo, 44DC50(450560(4)): el
+  descriptor de la etapa del nivel 4 de su arbol (desc4p de demo/main.c: RANKSP.DAT solo trae los de los arboles 0 /
+  1). Los rankings de esos presets ya estaban en comun/rksp.c.
+- Ya iban por preset sin cambios: CARGASP2 / 3, tiempos TIM1 2 / 3, mapa de 15 del HUD, banderero, choques, la meta E
+  (clave 14) y el final de recreativa.
+- Espacio del GD y presupuestos: los 15 recorridos usan las SEGnn / COLnn de los arboles 0 / 1 y las uniones
+  BK470..497 (UNIONESR.PAK, 7,1 MiB) que ya estaban en el disco; ninguna es SEG46 ni de las uniones con el cielo de
+  FLOR_R (las que no caben en los huecos): caben todos. Las 28 uniones frente a las 30 bifurcaciones de los arboles 0 / 1
+  (tools/vram.py lee_dat y la cabecera ORD7 de los LGDAT2, script scratchpad modos/sp/scr/uni.py): texturas media 179 /
+  max 221 KB frente a 172 / 209 KB; vertices del modelo media 41306 / max 42295 frente a 41141 / 41591 (+0,4 % / +1,7 %:
+  los mismos LRBK con otros carteles). El TA no sube (el tope del TA es global, demo/main.c ta_*, y la etapa es la misma
+  SEGnn); la VRAM, como mucho +12 KB en una union, dentro de la zona del curso. Medido en Flycast (arbol 290): huecos
+  8142K / 1584K al arrancar, RAM libre en carrera 331..463K, VRAM libre de la zona 558..1003K, SEG03 en 7,09 s, BK470 /
+  471 en 1,7..1,9 s; modo 25 con 3154..4572K de RAM fija.
+- Verificado en E (Flycast, display 97; tools/prueba/resultados.sh con SP_FILA=n (pulsaciones cortas a la derecha) y
+  SP_CONF=1 para la configuracion de la Contrarreloj):
+  - "Modo contrarreloj 15 recorridos", lado 0: `FSP: carrera (... variante 0, preset 2 ...)`, `CURSO: arbol 291, 15
+    etapas, salida BEAC`, fin del tiempo en SANF -> `FIN: modo 25, funcion 0x50 (15 recorridos, preset 2): coche 340009
+    hasta el cuadro 53` (mapa de 15 con el coche en la segunda etapa), `NOMBRE: modo 26, variante 0 preset 2` (tabla de
+    la Contrarreloj de 15), GAME OVER y vuelta al frontal.
+  - "Modo OutRun 15 recorridos", lado 1 (gatillo R): `variante 1 ... preset 3`, `CURSO: arbol 290, 15 etapas, salida
+    PALM`, funcion 0x50 hasta el cuadro 52 (30 + 0,969 x 23), la tabla de OutRun de 15 (PUNTUACION 75680), GAME OVER y
+    frontal. 0 "Out of memory", 0 "pvr_mem: ERROR".
+  - Capturas: scratchpad modos/sp/cap/t15/ (re_8c la lista de 5 filas, re_2 el mapa de 15, re_n* el ranking) y
+    modos/sp/cap/o15/ (re_8c, re_3, re_n1).
+- Recorridos enteros hasta la meta desde el frontal (Flycast, :97, GDI con -DPRUEBA_PILOTO_MENU -DPRUEBA_SIN_TIEMPO,
+  scratchpad modos/sp/scr/s15.sh = final.sh con espera larga; capturas modos/sp/cap/s15o/ y s15t/):
+  - OutRun de 15 (lado R, preset 3, arbol 290): las 14 uniones BK470..483 leidas (1,7..2,4 s), GOAL en CAPE, meta E
+    (escena 5, musica 63), final de recreativa (modo 24, FINE4), modo 25 con la funcion 0x50 hasta el cuadro 510 (0x1FE,
+    la meta), GAME OVER y vuelta al frontal. RAM libre minima en carrera 235K (BKD.DAT detras de BK481).
+  - Contrarreloj de 15 (lado 0, preset 2, arbol 291): BK484..497 (BK497, la de la meta, 14,4 s en Flycast con
+    META.DAT), GOAL en NEWY, meta E (escena 34), modo 25 hasta el cuadro 510, GAME OVER y frontal (sin modo 24: la
+    Contrarreloj no tiene final en la DC, final_columna). RAM libre minima 249K (META.DAT con la union de la meta).
+  - Sin cuelgues, sin "Out of memory", "pvr_mem: ERROR" ni "No se pudo". Aviso visto, que no es de estos cambios:
+    "FINAL: sin FINCHR11.DAT (-2)": en los datos de prueba (LGDAT2) los FINCHRgg.DAT son descriptores PAKD de un
+    ACTORES.PAK que rev-1.1 no recompone (comun/gd.c es_union solo BK / SEG): el final sale sin la pareja.
+- Los records de la Contrarreloj de 15 tras la meta (26 en
+  la variante 0 con record, [0x5a2030]) siguen como antes (SIN PORTAR en todas las Contrarrelojes de OUTRUN2SP).
+
+### 2. Voces del INFARTO: HAM.CVT (preset 0) y HAM_SR
+
+- Original (SLES-53998): el cargador de la etapa (0x173a54..0x173aa4, variante 2) pide con 11ed40 un banco por etapa:
+  con el preset 1 ([0x44350c], 0x173a6c) 0x1b3be8(clave), si no 0x1b3c70(clave); id = base[c] + clave con c =
+  0x1af710(clave) = la clase de la mision de su nivel (0x1aeff0: < 15 -> 0; 15..40 por la tabla de saltos 0x3f06e0 -> 1,
+  2 o 3) y base 0x8443 / 0x844f / 0x8458 / 0x845d (HAM\1A.., HAM_SR\3A1.., HAM_SR\4A2.., HAM_SR\5A3..; el byte bajo es la
+  entrada de la tabla de bancos 0x352840) o 0x841a / 0x8426 / 0x842f / 0x8434 (HAM.CVT y HAM_SR.CVT). La Dreamcast
+  llevaba solo HAM\ (la clase 0 del preset 1), tambien con el preset 0, y sin HAM_SR (misiones >= 15, niveles 2..4).
+- Conversion (tools/conv_infarto.py vocesh): VOCESH.DAT (preset 1: HAM y HAM_SR, 26 bancos distintos) y VOCESHC.DAT
+  (nuevo, preset 0: HAM.CVT y HAM_SR.CVT, 35 bancos distintos). Cada muestra distinta (por id y datos) una sola vez con
+  la mascara de los bancos que la llevan (bloque 'VHG1' detras de los datos: mascaras u64, grupo por clase y clave,
+  clase de cada mision 0..47); las de HC.PAK / PERH.pak como siempre. HAM.CVT\2A, \3A y HAM_SR\5D2 llevan las tablas
+  al principio del sector siguiente (banco_tablas_ham; conv_sonido.banco_tablas no las veia y salian vacios). AICA:
+  VOCESH.DAT 740 -> 511 KB (75 muestras), VOCESHC.DAT 653 KB (90). Tres muestras de HAM_SR.CVT pasan de 65535 (el
+  largo maximo del AICA) y no van: suena la de HC / PERH si la hay (0xd8 de 5D3; 0x16e y 0xdc de 5E3).
+- Demo: comun/sfx.c lee VHG1 (sin el, con los ficheros de antes, id + 0x200 (grupo + 1) como hasta ahora) y
+  sfx_voz_grupo_ham(mision, clave); comun/infarto.c voz_banco (al empezar y en cada stage clear, con la mision de
+  mision()) e infarto_voces() (VOCESHC.DAT con el preset 0 si esta en el disco); demo/main.c pone el preset antes.
+- DESVIACION que queda: el PS2 elige el banco al cargar la etapa (la mision de 1aeff0 queda fijada entonces); la DC en
+  el stage clear, con la mision que ya elegia alli.
+- Verificado en E: OUTRUN2SP lado 0, Infarto (sp.sh SP_FILA=1 SP_LADO=0): `VOZ: VOCESHC.DAT, 90 muestras, 653 KB en el
+  AICA (bancos HAM por clase y clave)`, `INFARTO: voces del banco 0 (clave 0, mision 0, preset 0)` y las voces de la
+  copiloto (0xe7, 0xe8, 0xc8, 0xd7...). INFARTO de la consola (nav3.sh MODO_JUEGO=2, preset 1): `VOZ: VOCESH.DAT, 75
+  muestras, 511 KB` y el banco 0. Con el piloto (-DPRUEBA_AUTO -DPRUEBA_VARIANTE=2
+  -DPRUEBA_JUEGO=1 -DPRUEBA_SALTO=600 -DPRUEBA_RAMA=1, preset 0, arbol 1): el banco cambia en cada stage clear como en
+  la tabla de VHG1 (clave 0 -> 0, 2 -> 2, 5 -> 5, 9 -> 8, 14 -> 10). En esa carrera todas las misiones fueron < 15
+  (clase 0): los HAM_SR (clases 1..3) no se han visto elegir en Flycast.
+- PENDIENTE: oirlo (Flycast va sin audio en las pruebas: se comprueba por la consola serie que la voz pedida existe).
+
+### 3. El fantasma de la CONTRARRELOJ con el coche de la grabacion
+
+- Original: 467E30 / 4AE0F0 dibujan el fantasma con el modelo grabado. La Dreamcast lo dibujaba siempre con la forma
+  del coche del jugador. Ahora (demo/main.c gh_*, comun/gho.c):
+  - ORGH guarda en `modelo` 0x80000000 | color << 8 | ficha del coche que grabo (mismo formato ORGH 'ver' 1; las
+    grabaciones de antes llevan 0 y se ven con el coche del jugador, como antes; una version vieja de la demo lee las
+    nuevas igual).
+  - Si la ficha grabada no es la del jugador, gho_lee saca del GD el bloque GHO1 (la forma simplificada sin textura de
+    la Rev 2.9.2.a) de su COCHEnnL.DAT (el ligero; si no esta, COCHEnn.DAT) sin leer el fichero: la cabecera ORD7 da
+    donde empieza CEX2 y se recorren CEX2 / SVL1 / ANI1 sector a sector (un sector de cache) hasta GHO1. Va en gh_buf
+    (el bufer del fichero de la VMU, libre en carrera; gh_meta vuelve al coche del jugador antes de escribir alli):
+    0 KB de monton y 0 KB de VRAM (sin texturas). COCHE00L: 182 triangulos (3,6 KB).
+  - Translucido como antes (gris azulado, alfa 0,44). Pedido del usuario (menos poligonos, <= 0,3 fps): solo las caras
+    que miran al ojo (GHO1 son envolventes convexas con las caras hacia fuera; el ojo pasado al marco del coche): de
+    182 triangulos / 546 vertices por cuadro a ~68 / ~205 (medias de 300 cuadros: 64..72 triangulos, 194..218
+    vertices). `-DGH_DOS_CARAS` las dos caras como antes.
+  - Medido en Flycast (PALM_T, codigo 0, piloto con -DPRUEBA_FICHA=5 contra la grabacion de la ficha 0,
+    -DPRUEBA_GH_ADELANTO=15 -DDIAG_MS, 77..78 medidas de 30 cuadros, misma carrera): sin dibujar el fantasma
+    (-DPRUEBA_GH_OCULTO) 39,21 fps / dib 19,83 ms / 27059 vtx; con el fantasma de una cara 39,16 fps / 20,03 ms /
+    27402 vtx (**-0,05 fps**); con las dos caras 38,98 fps / 20,22 ms / 27664 vtx (-0,23 fps). Flycast, no la consola.
+- Verificado en E: primera carrera con la ficha 0 (`FANTASMA: guardado ORGH0100 (407 muestras, 54102 ms)`), segunda
+  arrancada con la misma VMU y la ficha 5: `FANTASMA: coche de la grabacion ficha 0 (color 1): GHO1 de COCHE00L.DAT,
+  182 triangulos`, la forma gris del F50 delante del F430 del jugador (scratchpad modos/sp/cap/ghc/gh_b*.png y
+  modos/sp/cap/ghc_zoom.png; con las dos caras gh/ y gh_zoom.png). Sin "Out of memory".
+- DESVIACION que queda: el fantasma usa el cuerpo de la fisica del jugador (ani_m[0], unos cm), como antes; sin el
+  color de la grabacion (guardado, pero el fantasma sigue sin pintura por la peticion de la 2.9.2.a).
+
+### Medidas generales
+
+- RAM: binario + BSS +5,3 KB (text 769120 -> 772892, bss 2174628 -> 2176100: 1,3 KB de las mascaras de las voces);
+  al arrancar "en uso 13021K, libre 342K" (nav3.sh), "VOZ: VOCES.DAT, 35 muestras"; ninguna prueba con "Out of memory".
+- Datos nuevos / cambiados (scratchpad modos/sp/dat): RUTASP.DAT (bloque TA50, +192 bytes), VOCESH.DAT (526 KB),
+  VOCESHC.DAT (672 KB, nuevo; regenera.py paso `infarto`).
