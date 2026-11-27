@@ -34,6 +34,7 @@ int (*camp_graba)(int tipo, int lista, int nota);
 void (*camp_voz)(int id);
 void (*camp_se)(int id);
 void (*camp_millas)(int m);
+void (*camp_obj)(int cl, int tipo, float sec, float lat, float esc);
 
 #define DT 0.016611295f                                 /* +0x180 (0x3c881469) */
 #define LLENO 80.0f                                     /* 0x3741a8 */
@@ -49,6 +50,9 @@ typedef struct {
     uint8_t rot_nota[7], marco_nota[2], marco_anuncio, rot_generico, _p;
     uint16_t lista[60][4]; uint8_t arbol[3][15];
 } cdat_t;
+typedef struct {                                        /* CAMP.DAT 'OBJ1': una fila de objetos de una peticion */
+    uint16_t pet; int16_t s0, s1; uint8_t n, clase, banco, _p; float l0, l1, f;
+} cobj_t;
 typedef struct {                                        /* el registro 0x74 de la peticion (+0x20 los contadores) */
     const cpet_t *d; int fase, ant, nota, cor, extra;   /* +8, +4, +0x24, +0x30, +0x34 */
     float med, pen, v_ini, v_fin, v_med, v_suma, t;     /* +0x28, +0x2c, +0x5c, +0x60, +0x64, +0x68, +0x6c */
@@ -60,7 +64,7 @@ typedef struct {                                        /* el registro 0x74 del 
     int tipo, cuenta, idx, cor, nota_media, nota[4], pnota[3], pcor[3], hist[7];   /* +0x200, +0x204, +0x208, +0x224.. */
 } etapa_t;
 typedef struct {
-    cdat_t *d; const cpet_t *pets;
+    cdat_t *d; const cpet_t *pets; const cobj_t *objs; uint32_t nobj;
     int fila, forzada, lista_cfg, dif, lista, nivel;    /* +0xf0, +0x68, +0x70, +0x1ff8, +0x168 */
     etapa_t et[NIV]; pet_t pet[3]; int npet, cur;       /* +0x7c (la lista), +0x80 */
     float pos, pos_ant; int en_union_ant, union_hecha;  /* +0x3e78 / +0x3e7c, +0x3de0 */
@@ -76,6 +80,7 @@ int camp_tipo(int g, int nodo) { return C && g >= 0 && g < 3 && nodo >= 0 && nod
 void camp_libera(void)
 {
     if (!C) return;
+    if (camp_obj) camp_obj(-2, 0, 0, 0, 0);
     free(C->d); free(C); C = NULL;
 }
 int camp_inicia(int grupo, int fila, int forzada, int lista, int dificultad)
@@ -88,6 +93,10 @@ int camp_inicia(int grupo, int fila, int forzada, int lista, int dificultad)
     }
     if (!(C = calloc(1, sizeof *C))) { free(d); return -3; }
     (void)grupo; C->d = d; C->pets = (const cpet_t *)((const uint8_t *)d + d->opet);
+    {   uint32_t o = d->opet + d->npet * sizeof(cpet_t), n;   /* los objetos (detras; los CAMP.DAT de antes no los tienen) */
+        if (o + 8 <= tam && !memcmp((const uint8_t *)d + o, "OBJ1", 4) && (memcpy(&n, (const uint8_t *)d + o + 4, 4), o + 8 + n * sizeof(cobj_t) <= tam)) {
+            C->objs = (const cobj_t *)((const uint8_t *)d + o + 8); C->nobj = n; }
+    }
     C->fila = fila >= 0 && fila < 4 ? fila : 0; C->forzada = forzada; C->lista_cfg = lista & 3;
     C->dif = dificultad < 0 ? 0 : dificultad > 4 ? 4 : dificultad;
     C->lista = 0; C->nivel = -1; C->cur = -1; C->reloj = 0x10000; C->animo_ult = -1;
@@ -175,6 +184,7 @@ void camp_etapa(int tipo)
     e = et_cur(); memset(e, 0, sizeof *e); e->tipo = tipo; e->idx = -1;
     for (i = 0; i < 4; i++) e->nota[i] = 7;
     C->npet = 0; C->cur = -1; C->union_hecha = 0;
+    if (camp_obj) camp_obj(-1, 0, 0, 0, 0);
     w = tipo >= 0 && tipo < 60 ? C->d->lista[tipo][C->lista] : 0xffff;
     n = w == 0xffff ? 0 : (int)(w & 15);
     for (i = 0; i < n && i < 3; i++) {                  /* 0x22b600: 0x22e630 (a cero) y 0x2323e8 */
@@ -260,7 +270,32 @@ static int bono(const pet_t *p, float k)                /* 30 x el exceso del me
     return (int)(r * 30.0f) + (int)(40.0f * frena(p->v_ini, p->v_fin));
 }
 
+/* ---- los objetos de la peticion (fase 1 de los tipos 6, 7 y 8): 0x293968 reparte cuantos de la seccion inicial a la
+   final (sin llegar) con el lateral de una punta a otra; 0x2938d0 uno suelto (cuantos 1); 0x297e20 su tipo de control
+   (el switch por la clase: 0..1 y 5, 8, 11..13 conos, 2..3 monedas, 4 arcos) y la clase del banco (CAMP.DAT). Devuelve
+   cuantos hay de la clase de objeto k (0x295fa8 / 0x2958f8 / 0x29a890: los que cuentan para el medidor) */
+static int pon_objetos(const pet_t *p, int k)
+{
+    uint32_t i; int j, n = 0, pi = (int)(p->d - C->pets);
+    if (!camp_obj) return 0;
+    camp_obj(-1, 0, 0, 0, 0);
+    for (i = 0; i < C->nobj; i++) {
+        const cobj_t *o = C->objs + i; int t = o->clase == 2 || o->clase == 3 ? 6 : o->clase == 4 ? 7 : 2;
+        if (o->pet != pi) continue;
+        for (j = 0; j < o->n; j++) {
+            camp_obj(o->banco, t, o->s0 + (float)j * (float)(o->s1 - o->s0) / (float)o->n,
+                     o->l0 + (float)j * (o->l1 - o->l0) / (float)o->n, o->clase == 4 ? o->f : 1.0f);
+            if (o->clase == k) n++;
+        }
+    }
+    dbglog(DBG_INFO, "CAMP: objetos de la peticion %d, %d de la clase %d\n", pi, n, k);
+    return n;
+}
+/* cuantos de la clase del banco cl en la lista de este paso */
+static int cuantos(const int *v, int n, int cl) { int i, k = 0; for (i = 0; i < n; i++) k += v[i] == cl; return k; }
+
 /* ---- los tipos: el control de su vtable +0x24 (solo con la peticion en curso de su tipo) */
+static int k6;                                         /* 0x3b5528 */
 static void tipo_paso(pet_t *p, const camp_coche_t *c, float dpos)
 {
     const cpet_t *d = p->d; float largo = (float)(d->fin - d->ini);
@@ -327,6 +362,44 @@ static void tipo_paso(pet_t *p, const camp_coche_t *c, float dpos)
                 }
             } else if (p->fase == 5 && p->nota == 6) p->extra += bono(p, k);
         }
+        break;
+    case 6:                                             /* 0x295a28: los conos azules (clase 1 = 5 del banco), no los rojos */
+        if (p->fase == 1) { int n = pon_objetos(p, 1); p->h7c = n > 0 ? LLENO / ((float)n * 0.99f) : 0.0f; p->h70 = 0; }
+        else if (p->fase >= 2 && p->fase <= 4) {        /* 0x295d48: rojo +0x2c += 3 x; azul (derrapando si p70 == 1) */
+            int az = cuantos(c->toq, c->ntoq, 5), ro = cuantos(c->toq, c->ntoq, 6), v = (int)c->kmh;
+            p->pen += 3.0f * p->h7c * (float)ro;
+            if (az && (d->p[4] != 1 || c->derrapa)) {
+                p->med += p->h7c * (float)az;            /* (la voz: 0x3b5528 cada 6 / 7 / 8 por la velocidad, SIMPLIFICADO) */
+                k6++; if ((v > 0xf0 && k6 % 6 == 0) || (v > 0xc8 && k6 % 7 == 0) || (v > 0x96 && (k6 & 7) == 0)) animo(6, k6 % 5);
+            }
+        } else if (p->fase == 5 && p->nota == 6) p->extra += (int)(70.0f * frena(p->v_ini, p->v_fin));
+        break;
+    case 7:                                             /* 0x2953b8: monedas (2 = 0x0a) y corazones (3 = 0x39), p70 de ellas */
+        if (p->fase == 1) { p->h78 = pon_objetos(p, 2); p->h70 = p->h74 = p->tmr = 0; p->h7c = d->p[4] > 0 ? LLENO / (float)d->p[4] : 0.0f; }
+        else if (p->fase >= 2 && p->fase <= 4) {        /* 0x295740 (derrapando si p74 == 1) */
+            int mo = cuantos(c->toq, c->ntoq, 0x0a), co = cuantos(c->toq, c->ntoq, 0x39);
+            if (p->fase == 4) p->tmr++;
+            if ((mo || co) && (d->p[5] != 1 || c->derrapa)) {
+                p->med += p->h7c * (float)(mo + co); p->h70 += mo; p->h74 += co;
+                if (mo) animo(7, -1);
+                if (co && p->tmr >= 0xb5) { p->tmr = 0; animo(7, -1); }
+            }
+        } else if (p->fase == 5 && p->nota == 6) {      /* 70 x cogidas / todas (70 todas) + la mitad de lo que pasa de p70 */
+            int b = p->h70 == p->h78 ? 70 : p->h78 ? (int)((float)p->h70 / (float)p->h78 * 70.0f) : 0, t = p->h70 + p->h74;
+            if (d->p[4] < t) b += (int)((float)(t - d->p[4]) * 0.5f);
+            p->extra += b;
+        }
+        break;
+    case 8:                                             /* 0x29a330: cruzar p70 arcos (4 = 0x0b) */
+        if (p->fase == 1) { pon_objetos(p, 4); p->h7c = d->p[4] > 0 ? LLENO / ((float)d->p[4] * 0.99f) : 0.0f; p->tmr = 0; }
+        else if (p->fase >= 2 && p->fase <= 4) {        /* 0x29a670 (derrapando si p74 == 1) */
+            int a = cuantos(c->cru, c->ncru, 0x0b);
+            if (p->fase == 4) p->tmr++;
+            if (a && (d->p[5] != 1 || c->derrapa)) {
+                p->med += p->h7c * (float)a;
+                if (p->tmr >= 0x78) { p->tmr = 0; animo(8, -1); }
+            }
+        } else if (p->fase == 5 && p->nota == 6) p->extra += (int)(70.0f * frena(p->v_ini, p->v_fin));
         break;
     default: break;                                     /* SIN PORTAR */
     }

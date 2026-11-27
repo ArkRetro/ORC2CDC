@@ -414,3 +414,29 @@ int haobj_lista(haobj_dib_t *v, int max, const float ojo[3])
     }
     return n;
 }
+
+/* (C2C, campeonatos) los objetos de la peticion en curso (PS2 0x2938d0 / 0x293968 + 0x297e20): los pone comun/
+   campeonato.c ya en el mundo; los de antes se quitan (haobj_pon(-1, ...)). Clase y tipo de 0x297e20 (tabla 0x423080);
+   la altura como 45DB70 (clases 5..9 + 0,65, monedas a 1,2 / 1,0) y la escala de la clase x esc (el arco: el +0x18 de
+   la fila del guion, la mitad de su ancho / 3) */
+int haobj_pon(int cl, int tipo, const float p[3], float yaw, float esc)
+{
+    static int cap; obj_t *o; uint16_t reg; float e, a[3] = { 0, 0, 0 };
+    if (cl < 0) { free(ob); ob = NULL; nob = cap = 0; n_est = n_pie = 0; ntoq = ncru = 0; return 0; }
+    if (!cab || cl >= 64) return -1;
+    memcpy(&reg, cab + 8 + 84 + 8 * cl, 2); memcpy(&e, cab + 8 + 84 + 8 * cl + 4, 4);
+    if (reg == 0xffff) return -1;
+    if (!ob) cap = 0;
+    if (nob >= cap) {
+        obj_t *n = realloc(ob, (size_t)(cap + 32) * sizeof(obj_t));
+        if (!n) return -1;
+        ob = n; cap += 32;
+    }
+    o = ob + nob++; memset(o, 0, sizeof *o);
+    o->cl = (uint8_t)cl; o->tipo = (uint8_t)tipo; o->reg = (int16_t)reg; o->esc = e * (esc > 0.0f ? esc : 1.0f); o->sec = -32768;
+    memcpy(o->p, p, sizeof o->p);
+    if (cl >= 5 && cl <= 9) o->p[1] += 0.65f;
+    if (tipo == 6) o->p[1] += cl == 0x39 ? 1.0f : 1.2f;
+    euler(o->R, a, yaw); o->est = 1;
+    return 0;
+}

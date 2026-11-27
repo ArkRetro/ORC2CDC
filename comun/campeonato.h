@@ -22,6 +22,8 @@ typedef struct {
     int   derrapa;          /* derrape (0x22bf08)                                                             */
     float rebufo;           /* car+0xE68                                                                      */
     int   rebufo_ang;       /* |car+0x162| en unidades de 65536 por vuelta                                    */
+    const int *toq; int ntoq;   /* clases de los objetos tocados en este paso (comun/haobj.c, +3F8 / +3FC == 8)   */
+    const int *cru; int ncru;   /* clases de los arcos cruzados en este paso (+7C == 3)                           */
 } camp_coche_t;
 
 /* al empezar la carrera: fila (46C520: 1 OutRun2 SP, 0 OutRun 2, 2 mixto), forzada (cfg1: se sale de una etapa del
@@ -38,6 +40,10 @@ extern int (*camp_graba)(int tipo, int lista, int nota);
 extern void (*camp_voz)(int id);           /* voces (VOCESH.DAT) */
 extern void (*camp_se)(int id);            /* efectos del banco de voces */
 extern void (*camp_millas)(int m);         /* millas a la licencia */
+/* los objetos de la peticion (0x2938d0 / 0x293968 / 0x297e20): uno de la clase cl (banco 0x57) y tipo de control tipo
+   en la seccion sec de la etapa y la fraccion lat del ancho de la carretera, con la escala esc (el arco); cl = -1 quita
+   los que haya, -2 ademas suelta lo de los objetos (fin del campeonato) */
+extern void (*camp_obj)(int cl, int tipo, float sec, float lat, float esc);
 /* HUD (0x22a5b8: el panel 2C002A, las filas 0x1bd920 por nivel y el contador; 0x230f70 / 0x2314e8: los rotulos) */
 int  camp_rotulo(int *texto, int *marco, int *cuadro);
 uint32_t camp_tinte(void);

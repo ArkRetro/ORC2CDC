@@ -31,8 +31,9 @@ CAMP.DAT (little endian):
      ninguno), u8 banco46 (1: el rotulo es del banco 0x46, que no esta en la DC), u16 voz del anuncio (0x2a6358; 0 ninguna),
      u16 0, i32 p[10] (+0x60..+0x84 de sus parametros)
   detras de las peticiones, los objetos de las peticiones de los tipos de OBJ_TIPOS (conos, monedas, arcos...):
-  'OBJ1', u32 n y n filas de 20 bytes {u16 peticion, s16 seccion inicial, s16 final, u8 cuantos, u8 clase de objeto
-     (0x297e20: 0 / 1 conos rojo / azul, 2 / 3 moneda / corazon, 4 arco...), f32 lateral inicial, final (fraccion del
+  'OBJ1', u32 n y n filas de 24 bytes {u16 peticion, s16 seccion inicial, s16 final, u8 cuantos, u8 clase de objeto
+     (0x297e20: 0 / 1 conos rojo / azul, 2 / 3 moneda / corazon, 4 arco...), u8 su clase del banco 0x57 (tabla 0x423080,
+     la de comun/haobj.c), u8 0, 2 bytes 0, f32 lateral inicial, final (fraccion del
      ancho de la carretera), f32 +0x18 (el ancho del arco)}: las filas del guion (0x293968: cuantos objetos repartidos de
      la seccion inicial a la final, con el lateral de una punta a otra, sin llegar a la final) y los puntos sueltos
      (0x2938d0: cuantos = 1); las secciones ya con el inicio de la peticion sumado si el guion lo pide (+0xc / +8)
@@ -109,6 +110,9 @@ def main():
         usadas.update(struct.unpack_from('<I', d_, oo + 0x78 * k + 0x1c)[0] for k in range(nn))
     PAR = mips.Mips.PILA - 0x8000                            # parametros en la memoria del interprete (la pila)
     lista = []; pets = bytearray(); npet = 0; tipos = {}; objs = []
+    # 0x297e20: +0x18 del objeto = 0x423080[clase] (la clase del banco 0x57); comprobado por el codigo que la lee
+    assert par(0x29800c, 0x298014) == 0x423080, 'clases de los objetos (0x297e20)'
+    banco = lambda c: u(0x423080 + 4 * c) & 0xff
     for k in range(60):
         h_ = hash_nombre('\\bin\\%s.bin' % nombres[k])
         if h_ not in por_hash: assert k not in usadas, nombres[k]; lista += [0xffff] * 4; continue
@@ -142,14 +146,14 @@ def main():
                         while struct.unpack_from('<i', d, q_)[0] != -1:
                             n_, cl_, f8, re_, s0, s1, l0, l1 = struct.unpack_from('<2ifi2i2f', d, q_)
                             assert 0 < n_ < 256 and 0 <= cl_ < 15
-                            objs.append(struct.pack('<H2h2B3f', npet, s0 + (ini if re_ else 0), s1 + (ini if re_ else 0), n_, cl_, l0, l1, f8))
+                            objs.append(struct.pack('<H2h4B2x3f', npet, s0 + (ini if re_ else 0), s1 + (ini if re_ else 0), n_, cl_, banco(cl_), 0, l0, l1, f8))
                             q_ += 0x20
                     if pp + po in rel:                        # puntos de 0x2c hasta seccion == -1
                         q_ = rel[pp + po]
                         while struct.unpack_from('<i', d, q_ + 4)[0] != -1:
                             l0, s0, re_ = struct.unpack_from('<f2i', d, q_); cl_, = struct.unpack_from('<i', d, q_ + 0x10)
                             f8, = struct.unpack_from('<f', d, q_ + 0x18); assert 0 <= cl_ < 15
-                            objs.append(struct.pack('<H2h2B3f', npet, s0 + (ini if re_ else 0), s0 + (ini if re_ else 0), 1, cl_, l0, l0, f8))
+                            objs.append(struct.pack('<H2h4B2x3f', npet, s0 + (ini if re_ else 0), s0 + (ini if re_ else 0), 1, cl_, banco(cl_), 0, l0, l0, f8))
                             q_ += 0x2c
                 npet += 1
     W('240H', *lista)

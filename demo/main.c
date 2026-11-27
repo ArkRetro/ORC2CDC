@@ -8159,6 +8159,7 @@ static int camp_tipo_nodo(int nodo) { return camp_tipo(camp_g, nodo); }
 static void camp_voz_(int id) { if (voz_ok) sfx_voz(id); }
 static void camp_se_(int id) { if (voz_ok) sfx_voz_se(id); }
 static void camp_millas_(int m) { menu_suma_millas((uint32_t)m); }
+static void camp_obj_(int cl, int tipo, float sec, float lat, float esc);
 /* al salir del menu: el campeonato elegido (menu_camp: nodo del mapa y casilla), su arbol, la salida y el gestor */
 FRIO static void camp_preparado(int auto_)
 {
@@ -8182,13 +8183,37 @@ FRIO static void camp_preparado(int auto_)
     }
     camp_g = g; curso_pedido = CAMP_ARBOL(g); nodo_salida = cn > 0 ? cn - 1 : 0;
     if (g == 0) preset_curso = 0;                               /* el curso de OutRun 2 SP: el preset 0 (PROBABLE) */
-    camp_graba = menu_nota_camp; camp_voz = camp_voz_; camp_se = camp_se_; camp_millas = camp_millas_;
+    camp_graba = menu_nota_camp; camp_voz = camp_voz_; camp_se = camp_se_; camp_millas = camp_millas_; camp_obj = camp_obj_;
     dbglog(DBG_INFO, "CAMP: campeonato %d, arbol %d, salida nodo %d, casilla %d\n", g, curso_pedido, nodo_salida, cl);
+}
+/* los objetos de la peticion (comun/campeonato.c pon_objetos) en el mundo: la seccion sec de la etapa y la fraccion lat
+   del ancho del asfalto (0 el borde izquierdo: SUPUESTO, el 0x1909b8 del original da los dos puntos del borde sin
+   saber aqui cual es cual), a la altura de la calzada y girados con la carretera (el arco atraviesa la carretera) */
+static void camp_obj_(int cl, int tipo, float sec, float lat, float esc)
+{
+    float p[3], th, iz, de, x, s;
+    if (cl < 0) { if (cl == -2) haobj_libera(); else haobj_pon(-1, 0, NULL, 0, 0); return; }
+    haobj_inicia();                                             /* (la cabecera de HAOSO.DAT: clase -> modelo y escala; ya leida: nada) */
+    s = s_etapa + sec * m_pos; ruta_en(s, p, &th, &iz, &de);
+    x = -iz + lat * (iz + de);
+    p[0] += x * cosf(th); p[2] += x * sinf(th); p[1] = altura(s, x);
+    if (haobj_pon(cl, tipo, p, -th, esc)) dbglog(DBG_ERROR, "CAMP: el objeto de la clase %d no se pudo poner\n", cl);
+#ifdef DIAG_HA
+    dbglog(DBG_INFO, "DIAGHA camp: clase %d tipo %d seccion %.1f lat %.2f en (%.1f, %.1f, %.1f); coche (%.1f, %.1f, %.1f)\n", cl, tipo, (double)sec, (double)lat,
+           (double)p[0], (double)p[1], (double)p[2], (double)yo.pos[0], (double)yo.pos[1], (double)yo.pos[2]);
+#endif
 }
 /* 0x22a048: lo que lee el gestor del coche del jugador (los mismos campos que el INFARTO) */
 static void camp_paso_jug(int toca)
 {
-    static float t_choque_ant; camp_coche_t c;
+    static float t_choque_ant, ant[3]; static int ant_ok; camp_coche_t c; int tq[16], cr[8];
+    {   haobj_coche_t oc;                                       /* los objetos de la peticion: toques, cruces y vuelo */
+        memset(&oc, 0, sizeof oc); oc.suelo = ha_suelo; memcpy(oc.pos, yo.pos, sizeof oc.pos);
+        oc.fw[0] = yo.fw[0]; oc.fw[2] = yo.fw[2]; oc.v = yo.v;
+        if (!ant_ok || cur_en_union) { memcpy(ant, yo.pos, sizeof ant); ant_ok = 1; }
+        memcpy(oc.ant, ant, sizeof ant); haobj_paso(&oc); memcpy(ant, yo.pos, sizeof ant);
+        c.ntoq = haobj_toques(tq, 16); c.toq = tq; c.ncru = haobj_cruces(cr, 8); c.cru = cr;
+    }
     c.en_union = cur_en_union; c.pos = cur_en_union ? 0.0f : (yo.s - s_etapa) / m_pos; c.seccion = (int)floorf(c.pos);
     c.kmh = fis_ok ? fis.velocidad_hud : yo.v * 3.6f; c.pasados = pt_pasados;
     c.choque = fis_ok ? fis.choque : 0;
@@ -16130,7 +16155,7 @@ int main(int argc, char **argv)
                     ta_bo_tope = ta_bo + (ta_lim > ta_vb + resto ? ta_lim - ta_vb - resto : 0); }
                 ta_en_bo = 1;
                 bo_dibuja(l);                                   /* pajaros y demas de la union (4A9DF0) */
-                if (variante == 2) ha_obj_dibuja(l);            /* INFARTO: conos, monedas... (comun/haobj.c) */
+                if (variante == 2 || variante == 5) ha_obj_dibuja(l);   /* INFARTO y campeonatos: conos, monedas... (comun/haobj.c) */
                 ta_en_bo = 0;
                 POP_CAT(1);
             }
@@ -16414,6 +16439,7 @@ int main(int argc, char **argv)
                 if (DIAG_POP298) printf("SUBE: dma %d trozos %u us %u max %u esp %u dmas %u dmaK %u sqK %u\n", SUBE_DMA, (unsigned)sdma_dg_tr, (unsigned)sdma_dg_us,
                        (unsigned)sdma_dg_max, (unsigned)sdma_dg_esp, (unsigned)sdma_dg_n, (unsigned)(sdma_dg_b >> 10), (unsigned)(sdma_dg_sq >> 10));   /* (P4) */
                 sdma_dg_tr = sdma_dg_us = sdma_dg_max = sdma_dg_esp = sdma_dg_n = sdma_dg_b = sdma_dg_sq = 0;
+                if (variante == 5) printf("HAOBJMS: %u objetos, %u tri, %u vtx\n", (unsigned)ha_obj_n, (unsigned)ha_obj_tri, (unsigned)ha_obj_vtx);
                 printf("SALTOMS: nivel %.2f trabajo %.2f ms TA %u lejano %d\n", (double)salto_q, (double)salto_trab, (unsigned)salto_ta, (int)lejos);
                 printf("FAROSMS: us %u puntos sobre la COLI %u de %u\n", faros_dg_us, faros_dg_suelo, FAROS_NL * (2u * FAROS_NC - 1));
                 printf("FOCOSMS: mallas %u vtx %u us %u divisiones %u vtx, de espaldas %u tri, recortados %u tri, vertices de las mallas %u\n", focos_dg_m, focos_dg_v, focos_dg_us, focos_dg_sub, focos_dg_cara, focos_dg_poli, focos_dg_vm);

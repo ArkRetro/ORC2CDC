@@ -7213,3 +7213,45 @@ Sobre "COAST 2 COAST: los campeonatos (variante 5), agente c2c2". Todo verificad
   cinco etapas EAST_R -> LASV_R -> DESE_R -> ALPI_R -> BEAC_R por BK498, BK499, BK501, BK504 (leidas del paquete en ~2,1
   s) hasta `CURSO: GOAL en BEAC`, con las peticiones de sus guiones (16, 13, 14, 22: sin portar, nota 0). Sin "Out of
   memory"; "VOZ: VOCES.DAT, 35 muestras". Capturas: modos/c2c/cap3/holly (r_*: una cada 15 s; r_225 en la union).
+
+### Merge de infarto2 y RAM del arranque
+
+- `git merge infarto2` (comun/haobj.c: los objetos de las peticiones del INFARTO, con sus modelos de HAOBJ.DAT y
+  HAOSO.DAT). Conflictos resueltos: demo/Makefile (la union de las dos listas de -Os, SIN camara.o, hud.o ni sfx.o, que
+  corren en cada cuadro; sfx.o vuelve a -O2), demo/main.c (los enganches de los dos modos), docs (las dos secciones).
+- Para la prueba, los datos de modos/infarto/dat copiados a modos/c2c/dat_inf (HAOBJ.DAT, HAOSO.DAT, INFARTOX.DAT,
+  HAHUD.DAT, CHRH.DAT, VOCESH.DAT, HAMnnn.DAT) y enlazados en datos2 (h3/datos2.sh).
+- RAM: con el merge el arranque bajaba a 345K. Se recupera con el FRIO de infarto3 (efe7f03, cherry-pick: infarto.o
+  con sus tablas al monton y `FRIO` = -Os en la carga de main.c), FRIO tambien en tapas_busca, rk_un_jugador,
+  curso_huecos, focos_carga, robot_carga, hueco_fin, final24_chr, camp_preparado y curso_tiene (solo corren al cargar
+  o al acabar), y el bufer del fichero del fantasma de la CONTRARRELOJ (gh_buf, 28 KB de BSS) al monton solo mientras
+  se lee o se guarda en la VMU. nav3.sh (MODO_JUEGO=1, sin defines): "RAMMAPA arranque: libre 381K", "VOZ: VOCES.DAT, 35
+  muestras", sin "Out of memory". Leer el fantasma comprobado en la CONTRARRELOJ (MODO_JUEGO=3: "FANTASMA: curso 013C,
+  sin fantasma"); guardarlo en la meta (malloc en gh_hilo) NO se ha visto: PROBABLE.
+
+### Tipos 6 (conos), 7 (monedas) y 8 (arcos): HECHO
+
+- Objetos (un sistema propio de C2C, tabla 0x61e8a0 de 250 x 0x2c, distinto del del INFARTO pero con los mismos
+  objetos del banco 0x57): cada tipo lee de sus parametros una lista de filas (0x293968: {cuantos, clase, +8, relativa,
+  seccion inicial, final, lateral inicial, final}: cuantos repartidos sin llegar a la final) y una de puntos (0x2938d0,
+  0x2c bytes); campos por tipo: 6 +0x74 / +0x78, 7 y 8 +0x78 / +0x7c (15 +0x70 / +0x74 y 19 +0x78 / +0x7c tambien se
+  convierten). La clase (0..14) da el control (0x297e20: 0..1 conos, 2..3 moneda / corazon, 4 arco...) y la clase del
+  banco (tabla 0x423080: 6 / 5 conos rojo / azul, 0x0a moneda, 0x39 corazon, 0x0b arco).
+- tools/conv_camp.py: CAMP.DAT lleva detras de las peticiones 'OBJ1' con 335 filas (28 884 bytes en total).
+- comun/campeonato.c `pon_objetos` en la fase 1 (el anuncio, como el original) y comun/haobj.c `haobj_pon` (nuevo):
+  el objeto ya en el mundo; demo/main.c `camp_obj_`: la seccion -> s de la ruta y el lateral como fraccion del asfalto
+  (SUPUESTO: 0 es el borde izquierdo; con el piloto los conos azules quedan en su linea), a la altura de la calzada y
+  girado con la carretera. Los toques y los cruces de arcos de haobj_paso llegan a cada tipo en camp_coche_t.
+- 6 (0x295a28 / 0x295d48): azul +80 / (azules x 0,99) al medidor (derrapando si +0x70 == 1), rojo 3 veces eso a la
+  penalizacion; nota 6: +70 x 0x22f090. 7 (0x2953b8 / 0x295740): moneda o corazon +80 / p70 (derrapando si +0x74 == 1);
+  nota 6: 70 x cogidas / todas + (cogidas + corazones - p70) / 2. 8 (0x29a330 / 0x29a670): arco cruzado +80 / (p70 x
+  0,99); nota 6: +70 x 0x22f090. SIMPLIFICADO: la voz de animo (0x2a6240) por cuenta de toques y velocidad, no con el
+  contador exacto 0x3b5528.
+- E (Jennifer, `-DPRUEBA_CAMP=0 -DPRUEBA_CAMP_NODO=7`, Cloudy Highland): lista 1 (8, 7, 8): 15 arcos cruzados solo con
+  el piloto, "peticion 8 hecha: 93 - 0, nota 6, 80 + 119"; monedas 28 - 3, nota 2 (con `-DPRUEBA_HA_TOQUE=-1`, que pone
+  los objetos en su linea: 76 de 75 + corazones, nota 5); lista 2 (6, 6, 6): conos azules tocados por el piloto 8 / 31
+  / 40, notas 0, 3, 3; la cara de la chica y el contador de corazones suben. Capturas cap3/obj_toque (arcos, monedas),
+  cap3/conos.
+- Poligonos y fps (los modelos ya aligerados del INFARTO; como mucho 24 objetos a menos de 160 m; DIAG_MS, las mismas
+  pasadas con y sin dibujarlos `DIAG_SIN_HAOBJ`, cap3/medidas): conos 94 triangulos de media (190 como mucho), 39,74
+  frente a 39,78 fps (-0,04); arcos y monedas 156 de media (464 como mucho), 37,87 frente a 38,03 (-0,16).

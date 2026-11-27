@@ -48,4 +48,7 @@ void haobj_est_abre(int si);             /* 461080 / 45C880 con la clase 0x13 (-
    con su direccion; n = 0 las quita */
 void haobj_marcas(int n, const int *reg, const float (*p)[3], const float *fx, const float *fz);
 int  haobj_lista(haobj_dib_t *v, int max, const float ojo[3]);
+/* (C2C, campeonatos) un objeto de la clase cl (tipo de su control: 2 cono, 6 moneda, 7 arco) en p del mundo con giro
+   yaw y escala de la clase x esc; cl < 0 quita todos. 0 bien */
+int  haobj_pon(int cl, int tipo, const float p[3], float yaw, float esc);
 #endif
