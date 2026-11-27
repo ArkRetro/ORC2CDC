@@ -7255,3 +7255,20 @@ Sobre "COAST 2 COAST: los campeonatos (variante 5), agente c2c2". Todo verificad
 - Poligonos y fps (los modelos ya aligerados del INFARTO; como mucho 24 objetos a menos de 160 m; DIAG_MS, las mismas
   pasadas con y sin dibujarlos `DIAG_SIN_HAOBJ`, cap3/medidas): conos 94 triangulos de media (190 como mucho), 39,74
   frente a 39,78 fps (-0,04); arcos y monedas 156 de media (464 como mucho), 37,87 frente a 38,03 (-0,16).
+
+### Reacciones de la acompanante (0x205288 / 0x2052f8 / 0x2a66a8): HECHO
+
+- Tipos 1 y 2 (0x29c828 / 0x298360): al empezar a cumplir (pasar de la velocidad, derrapar) 0x205288(1, fila) con la
+  fila por la nota (switch 0x4236f0 / 0x4230f0: 0..1 -> 0, 2..3 -> 5, 4 -> 3, 5..6 -> 4; aqui la nota de ese momento
+  sacada del medidor, PROBABLE: el original lee +0x24); al dejar de cumplir 0x2052f8 (para).
+- Fase 6 (la nota, 0x232de0 -> 0x2a66a8): para y el movimiento de la tabla 0x423e60 por la nota, o 0x423e80 con los
+  modelos de coche que elige el switch 0x423ec0 (por modelo - 2). tools/conv_camp.py: bloque 'CHI1' detras de 'OBJ1'
+  (las dos tablas y la eleccion por modelo). Los movimientos (0x60048, 0x260009, 0x6003f, 0x260003, 0x26000d) ya estan
+  en CHRH.DAT del INFARTO (comprobado: conv_chr.py con ellos da el mismo fichero byte a byte).
+- comun/robot.c robot_pide (el del INFARTO) desde demo/main.c `camp_chica_`; CHRH.DAT (~52 KB del monton) se lee al
+  empezar cada etapa del campeonato y se suelta al acabarlo.
+- La pareja no salia en las pruebas `-DPRUEBA_CAMP` ("CHR: sin pareja (-3 ...)": robot_pareja leia el campeonato del
+  menu); ahora lo lee del elegido en camp_preparado (camp_g; con el menu es el mismo).
+- E (Jennifer, `-DPRUEBA_CAMP=0 -DPRUEBA_CAMP_PASA -DDIAG_HA`): rebufo nota 6 -> "DIAGHA acompanante: movimiento
+  0x26000d (esta)", velocidad: "cara 0 (0x26000a, esta)" y nota 0 -> 0x60048; capturas cap3/chica (la acompanante se
+  mueve en el coche tras la nota). En carrera 303K libres con la pareja y CHRH.DAT, sin "Out of memory".

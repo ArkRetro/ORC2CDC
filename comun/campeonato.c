@@ -35,6 +35,7 @@ void (*camp_voz)(int id);
 void (*camp_se)(int id);
 void (*camp_millas)(int m);
 void (*camp_obj)(int cl, int tipo, float sec, float lat, float esc);
+void (*camp_chica)(int que, uint32_t v);
 
 #define DT 0.016611295f                                 /* +0x180 (0x3c881469) */
 #define LLENO 80.0f                                     /* 0x3741a8 */
@@ -64,7 +65,7 @@ typedef struct {                                        /* el registro 0x74 del 
     int tipo, cuenta, idx, cor, nota_media, nota[4], pnota[3], pcor[3], hist[7];   /* +0x200, +0x204, +0x208, +0x224.. */
 } etapa_t;
 typedef struct {
-    cdat_t *d; const cpet_t *pets; const cobj_t *objs; uint32_t nobj;
+    cdat_t *d; const cpet_t *pets; const cobj_t *objs; uint32_t nobj; const uint8_t *chi;   /* chi: 'CHI1' */
     int fila, forzada, lista_cfg, dif, lista, nivel;    /* +0xf0, +0x68, +0x70, +0x1ff8, +0x168 */
     etapa_t et[NIV]; pet_t pet[3]; int npet, cur;       /* +0x7c (la lista), +0x80 */
     float pos, pos_ant; int en_union_ant, union_hecha;  /* +0x3e78 / +0x3e7c, +0x3de0 */
@@ -95,7 +96,9 @@ int camp_inicia(int grupo, int fila, int forzada, int lista, int dificultad)
     (void)grupo; C->d = d; C->pets = (const cpet_t *)((const uint8_t *)d + d->opet);
     {   uint32_t o = d->opet + d->npet * sizeof(cpet_t), n;   /* los objetos (detras; los CAMP.DAT de antes no los tienen) */
         if (o + 8 <= tam && !memcmp((const uint8_t *)d + o, "OBJ1", 4) && (memcpy(&n, (const uint8_t *)d + o + 4, 4), o + 8 + n * sizeof(cobj_t) <= tam)) {
-            C->objs = (const cobj_t *)((const uint8_t *)d + o + 8); C->nobj = n; }
+            C->objs = (const cobj_t *)((const uint8_t *)d + o + 8); C->nobj = n;
+            o += 8 + n * sizeof(cobj_t);
+            if (o + 4 + 56 + 8 <= tam && !memcmp((const uint8_t *)d + o, "CHI1", 4)) C->chi = (const uint8_t *)d + o + 4; }
     }
     C->fila = fila >= 0 && fila < 4 ? fila : 0; C->forzada = forzada; C->lista_cfg = lista & 3;
     C->dif = dificultad < 0 ? 0 : dificultad > 4 ? 4 : dificultad;
@@ -185,6 +188,7 @@ void camp_etapa(int tipo)
     for (i = 0; i < 4; i++) e->nota[i] = 7;
     C->npet = 0; C->cur = -1; C->union_hecha = 0;
     if (camp_obj) camp_obj(-1, 0, 0, 0, 0);
+    if (camp_chica) camp_chica(-1, 0);                  /* (CHRH.DAT ya leido al empezar la etapa) */
     w = tipo >= 0 && tipo < 60 ? C->d->lista[tipo][C->lista] : 0xffff;
     n = w == 0xffff ? 0 : (int)(w & 15);
     for (i = 0; i < n && i < 3; i++) {                  /* 0x22b600: 0x22e630 (a cero) y 0x2323e8 */
@@ -296,6 +300,14 @@ static int cuantos(const int *v, int n, int cl) { int i, k = 0; for (i = 0; i < 
 
 /* ---- los tipos: el control de su vtable +0x24 (solo con la peticion en curso de su tipo) */
 static int k6;                                         /* 0x3b5528 */
+/* 0x205288 con la fila de la nota de ahora (el switch 0x4230f0 / 0x4236f0: 0..1 -> 0, 2..3 -> 5, 4 -> 3, 5..6 -> 4) */
+static void cara_nota(const pet_t *p)
+{
+    float g = p->med - p->pen; int k, n = 0;
+    for (k = 0; k < 7; k++) if (C->d->umbral[k] <= g) n = k;
+    if (camp_chica) camp_chica(0, n < 2 ? 0 : n < 4 ? 5 : n == 4 ? 3 : 4);
+}
+static void chica_para(void) { if (camp_chica) camp_chica(1, 0); }
 static void tipo_paso(pet_t *p, const camp_coche_t *c, float dpos)
 {
     const cpet_t *d = p->d; float largo = (float)(d->fin - d->ini);
@@ -303,10 +315,10 @@ static void tipo_paso(pet_t *p, const camp_coche_t *c, float dpos)
     case 1:                                             /* 0x29c828: pasar de p[7] km/h */
         if (p->fase == 4) {
             if (c->kmh < (float)d->p[7]) {
-                if (p->h78) { p->h78 = 0; p->h74 = 0; }
+                if (p->h78) { p->h78 = 0; p->h74 = 0; chica_para(); }
                 if (p->h74 == 0x3c) voz(0xf1, 0x3c, 0xa);
                 p->h74++;
-            } else if (!p->h78) { p->h78 = 1; voz(0xf0, 0x3c, 0xb); }
+            } else if (!p->h78) { p->h78 = 1; voz(0xf0, 0x3c, 0xb); cara_nota(p); }
             if (p->h78) {
                 p->med += dpos * (LLENO / largo);
                 if (++p->h70 % 0x6f == 0) animo(1, rand() % 5);
@@ -315,8 +327,8 @@ static void tipo_paso(pet_t *p, const camp_coche_t *c, float dpos)
         break;
     case 2: case 9:                                     /* 0x298360: derrapar (el 9 es otra clase; SIN PORTAR su diferencia) */
         if (p->fase == 4) {
-            if (c->derrapa) { if (!p->h74) { p->h74 = 1; voz(0x8c6, 0x3c, 0); } }
-            else p->h74 = 0;
+            if (c->derrapa) { if (!p->h74) { p->h74 = 1; voz(0x8c6, 0x3c, 0); cara_nota(p); } }
+            else if (p->h74) { p->h74 = 0; chica_para(); }
             if (p->h74) {
                 int v = (int)c->kmh, k = ++p->h70;
                 if ((v > 0xf0 && k % 100 == 0) || (v > 0xc8 && k % 0x8c == 0) || (v > 0x96 && k % 0xb4 == 0)) animo(2, k % 5);
@@ -480,6 +492,11 @@ static void fases(pet_t *p, const camp_coche_t *c)
             else if (p->nota >= 2) k = p->nota;
             else k = C->nota1++ & 1;
             voz(C->d->voz_nota[C->fila][k], 0x3c, 0xa);
+        }
+        if (camp_chica && C->chi && p->nota >= 0 && p->nota < 7) {   /* 0x2a66a8: para y el movimiento de la nota */
+            int m = c->modelo - 2, t = m >= 0 && m < 8 ? C->chi[56 + m] : 0; uint32_t id;
+            memcpy(&id, C->chi + 28 * t + 4 * p->nota, 4);
+            camp_chica(1, 0); camp_chica(2, id);
         }
         dbglog(DBG_INFO, "CAMP: peticion %d hecha: %d - %d, nota %d, %d + %d corazones\n", d->tipo, (int)p->med, (int)p->pen, p->nota, p->cor, p->extra);
         break;

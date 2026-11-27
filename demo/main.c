@@ -8160,6 +8160,7 @@ static void camp_voz_(int id) { if (voz_ok) sfx_voz(id); }
 static void camp_se_(int id) { if (voz_ok) sfx_voz_se(id); }
 static void camp_millas_(int m) { menu_suma_millas((uint32_t)m); }
 static void camp_obj_(int cl, int tipo, float sec, float lat, float esc);
+static void camp_chica_(int que, uint32_t v);
 /* al salir del menu: el campeonato elegido (menu_camp: nodo del mapa y casilla), su arbol, la salida y el gestor */
 FRIO static void camp_preparado(int auto_)
 {
@@ -8183,16 +8184,35 @@ FRIO static void camp_preparado(int auto_)
     }
     camp_g = g; curso_pedido = CAMP_ARBOL(g); nodo_salida = cn > 0 ? cn - 1 : 0;
     if (g == 0) preset_curso = 0;                               /* el curso de OutRun 2 SP: el preset 0 (PROBABLE) */
-    camp_graba = menu_nota_camp; camp_voz = camp_voz_; camp_se = camp_se_; camp_millas = camp_millas_; camp_obj = camp_obj_;
+    camp_graba = menu_nota_camp; camp_voz = camp_voz_; camp_se = camp_se_; camp_millas = camp_millas_; camp_obj = camp_obj_; camp_chica = camp_chica_;
     dbglog(DBG_INFO, "CAMP: campeonato %d, arbol %d, salida nodo %d, casilla %d\n", g, curso_pedido, nodo_salida, cl);
 }
 /* los objetos de la peticion (comun/campeonato.c pon_objetos) en el mundo: la seccion sec de la etapa y la fraccion lat
    del ancho del asfalto (0 el borde izquierdo: SUPUESTO, el 0x1909b8 del original da los dos puntos del borde sin
    saber aqui cual es cual), a la altura de la calzada y girados con la carretera (el arco atraviesa la carretera) */
+static uint8_t *camp_chrh;                                      /* CHRH.DAT (las caras y movimientos de la acompanante) */
+static void camp_chica_(int que, uint32_t v)                    /* 0x205288 / 0x2052f8 / 0x205220 (comun/robot.c) */
+{
+    if (!camp_chrh) {                                           /* (la primera vez en la carrera: ~52 KB del monton) */
+        uint32_t lba, tam;
+        if (!gd_busca("CHRH.DAT", &lba, &tam) && tam < 131072 && (camp_chrh = memalign(32, (tam + 2047) & ~2047u))) {
+            if (gd_lee(lba, (int)((tam + 2047) >> 11), camp_chrh)) { free(camp_chrh); camp_chrh = NULL; }
+            else robot_extra(camp_chrh, tam);
+        }
+        if (!camp_chrh) return;
+    }
+    if (que < 0) return;                                        /* (solo leerlo: al empezar la etapa) */
+    dbglog(DBG_INFO, "CAMP: acompanante %s 0x%x\n", que == 0 ? "cara" : que == 1 ? "para" : "movimiento", (unsigned)v);
+    if (que == 0) robot_pide(0, 0, 1, (int)v, 0); else if (que == 1) robot_pide(0, 0, 0, 0, 1); else robot_pide(1, v, 0, 0, 0);
+}
 static void camp_obj_(int cl, int tipo, float sec, float lat, float esc)
 {
     float p[3], th, iz, de, x, s;
-    if (cl < 0) { if (cl == -2) haobj_libera(); else haobj_pon(-1, 0, NULL, 0, 0); return; }
+    if (cl < 0) {
+        if (cl == -2) { haobj_libera(); if (camp_chrh) { robot_extra(NULL, 0); free(camp_chrh); camp_chrh = NULL; } }
+        else haobj_pon(-1, 0, NULL, 0, 0);
+        return;
+    }
     haobj_inicia();                                             /* (la cabecera de HAOSO.DAT: clase -> modelo y escala; ya leida: nada) */
     s = s_etapa + sec * m_pos; ruta_en(s, p, &th, &iz, &de);
     x = -iz + lat * (iz + de);
@@ -8212,7 +8232,7 @@ static void camp_paso_jug(int toca)
         oc.fw[0] = yo.fw[0]; oc.fw[2] = yo.fw[2]; oc.v = yo.v;
         if (!ant_ok || cur_en_union) { memcpy(ant, yo.pos, sizeof ant); ant_ok = 1; }
         memcpy(oc.ant, ant, sizeof ant); haobj_paso(&oc); memcpy(ant, yo.pos, sizeof ant);
-        c.ntoq = haobj_toques(tq, 16); c.toq = tq; c.ncru = haobj_cruces(cr, 8); c.cru = cr;
+        c.ntoq = haobj_toques(tq, 16); c.toq = tq; c.ncru = haobj_cruces(cr, 8); c.cru = cr; c.modelo = modelo_jug;
     }
     c.en_union = cur_en_union; c.pos = cur_en_union ? 0.0f : (yo.s - s_etapa) / m_pos; c.seccion = (int)floorf(c.pos);
     c.kmh = fis_ok ? fis.velocidad_hud : yo.v * 3.6f; c.pasados = pt_pasados;
@@ -13133,7 +13153,8 @@ static int robot_pareja(int sp, int var, int foto, int *pil, int *aco)
     if (foto < 0 || foto > 5) return -2;                        /* (el PC: fuera de su lista de 6) */
     k = lista[foto];
     if (var == 5) {                                             /* 487F50: el campeonato (46C520 = [7F94D4]) elige la */
-        int c = menu_campeonato();                              /* acompanante: 0 -> 3, 1 -> 4, 2 -> 5 de la tabla */
+        int c = camp_g == 0 ? 1 : camp_g == 1 ? 0 : camp_g == 2 ? 2 : menu_campeonato();   /* acompanante: 0 -> 3, 1 -> 4, */
+                                                                /* 2 -> 5 de la tabla (el de camp_preparado: tambien el de PRUEBA_CAMP) */
         if (k > 5 || c < 0 || c > 2) return -3;                 /* (otro valor: el indice 6, fuera de la tabla) */
         *pil = (int)P[k]; *aco = (int)A[3 + c];
         return 0;

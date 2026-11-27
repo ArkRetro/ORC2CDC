@@ -37,6 +37,8 @@ CAMP.DAT (little endian):
      ancho de la carretera), f32 +0x18 (el ancho del arco)}: las filas del guion (0x293968: cuantos objetos repartidos de
      la seccion inicial a la final, con el lateral de una punta a otra, sin llegar a la final) y los puntos sueltos
      (0x2938d0: cuantos = 1); las secciones ya con el inicio de la peticion sumado si el guion lo pide (+0xc / +8)
+  detras, 'CHI1' y la reaccion de la acompanante a la nota (0x2a66a8 en la fase 6): u32 movimiento[2][7] (tablas
+     0x423e60 y 0x423e80 por la nota) y u8 tabla[8] (por el modelo del coche - 2, el switch 0x423ec0: 1 la segunda)
 """
 import os, struct, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -179,6 +181,10 @@ def main():
     while len(out) % 4: out.append(0)
     struct.pack_into('<2I', out, 8, npet, len(out)); out += pets
     out += b'OBJ1' + struct.pack('<I', len(objs)) + b''.join(objs)
+    assert u(0x2a66e8) == 0x24703e60 and u(0x2a6724) == 0x24503e80 and par(0x2a6704, 0x2a670c) == 0x423ec0, 'nota (0x2a66a8)'
+    sel = [1 if u(0x423ec0 + 4 * k) == 0x2a6720 else 0 for k in range(8)]
+    out += b'CHI1' + struct.pack('<14I', *[u(0x423e60 + 4 * k) for k in range(7)], *[u(0x423e80 + 4 * k) for k in range(7)]) + bytes(sel)
+    print('  acompanante: %s / %s, tabla %s' % ([hex(u(0x423e60 + 4 * k)) for k in range(7)], [hex(u(0x423e80 + 4 * k)) for k in range(7)], sel))
     open(os.path.join(sal, 'CAMP.DAT'), 'wb').write(out)
     for t in sorted(tipos): print('  tipo %2d: %s' % (t, sorted(tipos[t])))
     print('CAMP.DAT: %d peticiones, %d filas de objetos, %d bytes' % (npet, len(objs), len(out)))
