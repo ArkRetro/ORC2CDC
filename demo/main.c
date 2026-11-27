@@ -2438,6 +2438,31 @@ static inline void focos_anota(const modelo_t *mo, const malla_t *m)
     }
     focos_l[focos_n].mo = mo; focos_l[focos_n].m = m; focos_n++;
 }
+/* Rev 2.9.9.d (FPS; -DFOCOS_LOTE=0: lo de antes): dibuja_etapa apunta en una lista las mallas que dibuja para los focos y
+   focos_anota las mira despues en un bucle corto con el proyector en registros, en el mismo orden (la misma lista
+   focos_l). En el bucle de las mallas costaba 0,7 ms por cuadro en METR (de noche) */
+#ifndef FOCOS_LOTE
+#define FOCOS_LOTE 1
+#endif
+#if FOCOS_LOTE
+#define FQ_N 64
+static __attribute__((noinline)) void focos_lote(const modelo_t *mo, const malla_t *M, const uint16_t *q, uint32_t n)
+{
+    const float e0 = focos_e[0], e1 = focos_e[1], e2 = focos_e[2]; uint32_t j, fn = focos_n;
+    if (mo == focos_fuera) return;
+    for (j = 0; j < n && fn < FOCOS_MAX; j++) {
+        const malla_t *m = M + q[j]; int i; float dx = m->cx - e0, dy = m->cy - e1, dz = m->cz - e2, lim = FOCOS_ANOTA_D + m->r;
+        if (dx * dx + dy * dy + dz * dz > lim * lim) continue;
+        for (i = 0; i < 5; i++) {
+            const float *p = focos_pl[i];
+            if (p[0] * m->cx + p[1] * m->cy + p[2] * m->cz + p[3] < -m->r) break;
+        }
+        if (i < 5) continue;
+        focos_l[fn].mo = mo; focos_l[fn].m = m; fn++;
+    }
+    focos_n = fn;
+}
+#endif
 static void dibuja_rango(const modelo_t *mo, int l, uint32_t k0, uint32_t k1, int recorta, int sin_niebla, int solo_lista)
 {
     float tanh = 320.0f / fx, tanv = 240.0f / fx, kh = sqrtf(1 + tanh * tanh), kv = sqrtf(1 + tanv * tanv);
@@ -2636,6 +2661,12 @@ static void dibuja_etapa(const modelo_t *mo, int l)
     uint32_t it, it0 = mo->tr_ini[l], it1 = mo->tr_ini[l + 1], vtx_et0 = vtx_env;
     int ult = -2, sol = l < 2 && (mo == &etapa || mo == &uni || mo == &sig);
     const int fo = focos_on && l == 0;                          /* (focos_anota: escena opaca) */
+#if FOCOS_LOTE
+    uint16_t fq[FQ_N]; uint32_t nfq = 0;                        /* (focos_lote: las dibujadas, en orden) */
+#define FO_ANOTA(m) do { if (nfq == FQ_N) { focos_lote(mo, M, fq, nfq); nfq = 0; } fq[nfq++] = (uint16_t)((m) - M); } while (0)
+#else
+#define FO_ANOTA(m) focos_anota(mo, m)
+#endif
     /* las cuentas del TA y de los vertices de las mallas directas (dibuja_malla_directa con ta_cabe) en variables
        locales: lo mismo que antes (mismas pruebas, mismos resultados), sin leer y escribir ~10 globales por malla. Se
        vuelcan antes de lo que las usa (dibuja_malla) y al final */
@@ -2834,7 +2865,7 @@ static void dibuja_etapa(const modelo_t *mo, int l)
                 if ((int32_t)c > r) { ta_corto = 1; ta_et_corto |= ta_en_etapa; POP_MALLA(m); FM_PON(m, 2); continue; }
 #endif
                 r -= c; dvb += c; dt += tt; dn++;
-                if (fo) focos_anota(mo, m);                     /* (focos: se dibuja) */
+                if (fo) FO_ANOTA(m);                            /* (focos: se dibuja) */
 #ifdef DIAG_NO_ENVIA
                 if (ta_en_etapa) { ve += n; continue; }
 #endif
@@ -2850,7 +2881,7 @@ static void dibuja_etapa(const modelo_t *mo, int l)
             }
             else {
                 uint32_t vb0_;
-                ET_VUELCA(); vb0_ = ta_vb; dibuja_malla(mo, m); if (fo && !ta_corto) focos_anota(mo, m);
+                ET_VUELCA(); vb0_ = ta_vb; dibuja_malla(mo, m); if (fo && !ta_corto) FO_ANOTA(m);
                 cn_ns_real += ta_vb - vb0_; cn_ns_est += teo[m->n <= 256 ? m->n : 256] * tf >> 8;
                 ET_RECARGA();
             }
@@ -2863,6 +2894,10 @@ static void dibuja_etapa(const modelo_t *mo, int l)
     if (ndif < 0) dg_dif_desb++; else if ((unsigned)ndif > dg_dif_max) dg_dif_max = (unsigned)ndif;
 #endif
     ET_VUELCA();
+#if FOCOS_LOTE
+    if (nfq) focos_lote(mo, M, fq, nfq);
+#endif
+#undef FO_ANOTA
 #undef ET_VUELCA
 #undef ET_RECARGA
 #undef ET_CABE
