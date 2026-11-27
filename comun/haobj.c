@@ -444,6 +444,9 @@ void haobj_anillo(haobj_auto_t *v, int n, const float *l)
 static struct { int8_t a, b; } par[NPAR];
 static float dist2(const float *a, const float *b) { float x = a[0] - b[0], z = a[2] - b[2], y = a[1] - b[1]; return x * x + y * y + z * z; }
 void haobj_pares_vacia(void) { int i; for (i = 0; i < NPAR; i++) par[i].a = par[i].b = -1; }
+static uint32_t par_mas;
+void haobj_pares_mascara(uint32_t m) { par_mas = m; }
+int haobj_par(int i, int *a, int *b) { if (i < 0 || i >= NPAR || par[i].a < 0) return 0; *a = par[i].a; *b = par[i].b; return 1; }
 void haobj_pares(haobj_auto_t *v, int n, int lo, int hi, const float jug[3])
 {
     int i, j, k, left = NPAR, ord[32], no = 0;
@@ -466,10 +469,11 @@ void haobj_pares(haobj_auto_t *v, int n, int lo, int hi, const float jug[3])
         }
     for (k = 0; k < no && left > 0; k++) {
         haobj_auto_t *c = v + ord[k]; int best = -1; float bd = 6400.0f;
-        if (c->sec < lo || c->sec > hi || (c->marca & (HA_PAR | HA_SUELTO))) continue;
+        if (c->sec < lo || c->sec > hi || (c->marca & (HA_PAR | HA_SUELTO)) || (par_mas && !(c->marca & par_mas))) continue;
         for (j = 0; j < n; j++) {                       /* el vivo mas cercano (< 80 m) del tramo y no cruzado */
             float d;
-            if (j == ord[k] || !v[j].pos || (v[j].marca & HA_SUELTO) || v[j].sec < lo || v[j].sec > hi) continue;
+            if (j == ord[k] || !v[j].pos || (v[j].marca & HA_SUELTO) || v[j].sec < lo || v[j].sec > hi
+                || (par_mas && (!(v[j].marca & par_mas) || (v[j].marca & HA_PAR)))) continue;   /* (C2C 0x296560: ni ya emparejado) */
             d = dist2(c->pos, v[j].pos);
             if (d < bd) { bd = d; best = j; }
         }

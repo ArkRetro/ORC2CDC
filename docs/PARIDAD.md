@@ -7109,7 +7109,8 @@ sprites del banco 0x46 (no convertido). Tampoco: los rotulos del banco 0x46 (los
 DESVIACION, sale el generico), el letrero 3D de inicio / fin de la peticion (0x232e60 con 0x1a7c80 / 0x1a7cb0), la
 silueta 2C0067 / 0x460064 que se llena (como en el INFARTO), las reacciones de la acompanante (0x205288 / 0x2a66a8) y
 la vibracion (0x2052f8). -> HECHO despues: 6, 7, 8, los rotulos del banco 0x46 y las reacciones (ver "tercera tanda"),
-15, 19 y 5 (ver "cuarta tanda"), 11 (subtipos 0 y 1) y las voces de las peticiones (ver "quinta tanda").
+15, 19 y 5 (ver "cuarta tanda"), 11 (subtipos 0 y 1) y las voces de las peticiones (ver "quinta tanda"), 20, 21, 14
+  (PARCIAL) y el letrero 3D de inicio / fin (ver "sexta tanda").
 
 **Holly (grupo 6, Req_Course_MIX_PS2):** `tools/conv_union.py --arboles=...,302` ya sabe hacer su arbol (ARBOLES_REQ):
 EAST_R / BK262, LASV_R / BK263 ... PALM_R / BK95 (comprobado: los demas arboles de CURSO.DAT salen igual byte a byte),
@@ -7520,7 +7521,7 @@ Sobre "COAST 2 COAST: los campeonatos (variante 5), agente c2c2". Todo verificad
   rotulo se sube mientras se ve y se baja despues, `hud_rotulo_uso`, como los HA_Tnn).
 - E (Jennifer, PALM): "¡Ve al rebufo de los coches!" con su dibujo (tipo 12) y "¡Excede la velocidad!" con el
   velocimetro (tipo 1), cap3/rotulos (r_033, r_063, la ampliacion c2c3_rt_z.png).
-- SIN PORTAR: el letrero 3D de inicio / fin de la peticion (0x232e60 con 0x1a7c80 / 0x1a7cb0).
+- SIN PORTAR: el letrero 3D de inicio / fin de la peticion (0x232e60 con 0x1a7c80 / 0x1a7cb0). -> HECHO (ver "sexta tanda").
 
 ### Medidas finales y lo que queda
 
@@ -7725,7 +7726,8 @@ auto.sh con INI=, medir.sh / mide.py para los fps con y sin dibujo, donde.py: en
   tipos del campeonato no suenan.
 - 11 (0x294a90), 9, 22: los coches de la peticion salen del registro de aparicion 0x1f20e8 con la tabla de 0x46 bytes de
   +0x10 de los parametros (0x1f1a88) y 0x22dac0; el mismo que el INFARTO dejo sin portar (9 / 22). 13, 14, 20, 21, 23, 24:
-  sin empezar. El letrero 3D (0x232e60) y el rotulo del 20: sin empezar.
+  sin empezar. El letrero 3D (0x232e60) y el rotulo del 20: sin empezar. -> HECHO 20, 21, el letrero y el rotulo del 20; 14
+  PARCIAL; 23 no lo pide ningun guion (ver "sexta tanda").
 
 ## Integracion (rama integra): SP + musica + INFARTO 3 + campeonatos c2c4 (2026-11-27)
 
@@ -7958,3 +7960,128 @@ NO HECHO / QUEDA
 - Consola real y Android: sin medir.
 
 Ficheros: modos/fps/ del directorio de trabajo (res/ las consolas, cap/ las comparaciones, sh/ y py/).
+  tanda (el tiempo se fue en las voces y el 11). -> HECHO 20, 21, el rotulo del 20 y el letrero; 14 PARCIAL (ver "sexta
+  tanda").
+
+## COAST 2 COAST: campeonatos, sexta tanda (agente c2c6, 2026-11-27)
+
+Sobre "campeonatos, quinta tanda (agente c2c5)" (7e5b270). Todo en Flycast (nivel E), no en la consola. Datos de prueba:
+$S/modos/c2c/dat4/CAMP.DAT (lo de antes igual byte a byte salvo el rotulo de las 9 peticiones del tipo 20, y detras 'LET1'
+y 'C141'; CAMPHUD.DAT, CAMPOBJ.DAT y VOCESM.DAT salen iguales que los de dat2 / dat3), carpeta montada con h6/datos2.sh
+(lgdat2 + dat + dat_inf + dat2 + dat3 + dat4 en modos/c2c/datos4); scripts en $S/modos/c2c/h6 (los de h5 para este
+worktree; corre.sh: compila con los defines, GDI propio, auto.sh y copia registro y capturas a cap6/<nombre>; correw.sh lo
+mismo con otro arbol, para la base c2c5). Capturas y registros en $S/modos/c2c/cap6.
+
+### Lo que piden los guiones (CAMP.DAT, h6/donde.py)
+- 14: 7 peticiones (Holly); 20: 9 (Clarissa); 21: 8 (Clarissa); 24: 6 (Holly); 23: NINGUNA (ningun guion de los tres
+  arboles la pide: no se porta). 13: 10 y 22: 7 (Holly).
+
+### HECHO: tipo 20, cruzar la linea entre dos coches (0x296120) y su rotulo
+- Lo averiguado: la clase (0x474 bytes) lleva 20 pares de 0x38 en +0xc {plaza a, plaza b (0x19a ninguna), punto a + 1 m,
+  punto b + 1 m, ...}. Fase 1: como el 11 (0x1f1a88 / 0x1f20e8 con los modelos +0x64 o 0x104; 0x22dac0); +0x70 de los
+  parametros = 0. Fases 2..4 (0x296560): suelta los pares con un coche que falta; empareja los coches de la peticion
+  ([0x55cf38 + 8 + i] & 3 == 2) de la cadena +0x314 del jugador (< 250 m) dentro de [inicio, fin] con el mas cercano a
+  menos de 6 secciones que no este emparejado ni cruzado (+C5C 0xc000 << 33). Fase 4 (0x296f58): la linea en el marco del
+  jugador contra su caja (0x1978d8 con +0x338, como el 9 del INFARTO); cruzada: 0x296cc0 la suelta, movimiento 0x6003d
+  (coche 9) o 0x6003e / 0x6003f (rand < 0,5), +0x70 + 1 y el medidor + 80 / p74 (0x374190 + 0x18). Fase 5: suelta los 20 y
+  0x1f20e8(0); nota 6: (+0x50 == 0 ? 40 : 0) + min(1, (n - p74) / (p78 - p74)) x 30 si n > p74, + (n - p78) x 5 si n > p78.
+  Dibujo (0x296da0, fases 2..4): los modelos 0x57002f y 0x57002a en los pares (SIN PORTAR, ver abajo).
+- El rotulo: el switch 0x4155b0 lleva el 20 a 0x22fe08, que es 2B0039 ("¡Cruza la linea!" con los dos coches, el HA_T17 de
+  HAHUD.DAT; con a2 = 0, el del banco 0x2B). tools/conv_camp.py paraba alli el interprete como si fuera el caso 0 (sin
+  rotulo): ya no, y las 9 peticiones del 20 salen con su rotulo.
+- Portado: comun/campeonato.c (case 20, camp_autos, camp_lineas) con los pares del INFARTO (comun/haobj.c haobj_pares /
+  haobj_pares_cruza, con la mascara nueva haobj_pares_mascara(HA_CAMP): solo los coches de la peticion y sin emparejar uno
+  ya emparejado). DESVIACION (sin 0x1f1a88): como el 11, los coches del trafico que aparecen por delante desde el anuncio son
+  los de la peticion, y a cada uno main.c le abre otro al lado (`camp_pares_pide`: dos carriles mas alla si los hay, para
+  dejar uno libre entre los dos); 10 pares como mucho (los del INFARTO), con 80 m en vez de 6 secciones.
+- Dibujo (DESVIACION, sin los modelos 0x57002f / 0x57002a): una cinta translucida amarilla de 0,3 m entre los dos coches
+  (+1 m), 2 triangulos por par (main.c camp_lineas_dibuja).
+- E (Clarissa nodo 4 lista 1: 20/0 90..240, 21/0 348..490, 20/0 565..640; `-DPRUEBA_AUTO -DPRUEBA_CAMP=1
+  -DPRUEBA_CAMP_NODO=4 -DPRUEBA_CAMP_LISTA=1 -DPRUEBA_SIN_TIEMPO`): el rotulo "¡Cruza la linea!" (cap6/t20d/mos.png), los
+  pares (registro "HAOBJ: par 0: plazas 4 y 3 a 10.4 m") y la linea amarilla entre dos coches (cap6/t20d/z42.png). El
+  piloto no pasa entre ellos: con `-DPRUEBA_C20` (un par a 3 secciones cuenta como cruzado) "linea cruzada (1 de 6),
+  medidor 13", la reaccion 0x6003e y la nota 1 (cap6/t2021p). NO verificado: un cruce de verdad conducido.
+
+### HECHO (SIMPLIFICADO): tipo 21, los OVNIs (0x292840)
+- Lo averiguado: fase 1 como el 11 con los modelos +0x64 o 0xb4 y 0x22dac0(10); fase 3 el sonido 0x1d8, fase 5 0x81d8 (lo
+  para). Fase 4: +0x70 += el avance; con mas de 100 km/h, dentro de la carretera (0x2325a0(0, 1)) y sin OVNI encima (+0x18
+  == 0) el medidor + avance x 80 / (largo x 0,85) y cada 0xb4 pasos la voz (0x2a6240 o la de 0x422c70 alternando, 0x3b5520 /
+  0x3b5522). Fases 2 y 4, 0x292d28: por los coches de la peticion con +0xd14 == 4 y sin +C5C 0x8000 el toque 0x1d3a10 (radio
+  4); tocado: +0x18 = el coche, efecto 0x23f (UFO.pak), 0x2052f8 y el movimiento 0x60048; despues 0x1f pasos que lo acerca
+  (+0xd18 del jugador), 50 de giro (+0xc, angulo al azar) en los que cada 10 la penalizacion + 3, y lo suelta (+C5C 0x8000 y
+  +0xb64 = 0x3c). Nota 6: (sin roces, ruedas fuera ni muro 30) + 40 x 0x22f090.
+- Portado (case 21 y camp_autos): el medidor y el bono como el original; el toque a 5 m del coche (PROBABLE) o al
+  golpearlo; la penalizacion de 3 cada 10 pasos en los 30 ultimos (3 veces), la voz 0x23f, la reaccion 0x60048 y camp_golpe
+  (v x 0,9) al empezar. DESVIACION: el jugador no se acerca ni gira con el OVNI; sin el sonido continuo 0x1d8; sin el modelo
+  del OVNI (0xb4: no esta en la DC), los coches de la peticion con el sprite 2C0006 encima (el de 11/1, HA_S06).
+- E (la misma etapa): "peticion 21 hecha: 94 - 0, nota 6, 80 + 90 corazones" (con c2c5, nota 0). NO verificado: el toque
+  (ni con `-DPRUEBA_C21`, que lo da a 8 secciones: los coches de la peticion van por delante y el piloto no los alcanza).
+
+### PARCIAL: tipo 14, la suma (0x29ccb8)
+- Lo averiguado: fase 1 +0x70 = +0x72 = 0 y 0x29d410: los coches de la lista +0x5c de los parametros (registros de 0x14
+  {+8 s16 seccion desde el inicio, +0xa s8 carril, +0xc = 3, +0x10 el valor}, 0x298268 los cuenta hasta uno negativo, 100
+  como mucho); valor: con rand < 0,2 uno de 0x3b55d0 + 0x28 x nivel entre los 0x3b55c0[nivel] primeros (negativos: -10,
+  -5...), si no de 0x3b5548 / 0x3b5538 (5, 10; 2..10...); nivel = +0x74 (byte) de los parametros; objetivo +0x70: por rondas
+  (hasta 10) cada valor con 0,7 (positivo) / 0,4 (negativo), hasta pasar de la suma de todos / 8. Fase 4: por los coches con
+  +0xd14 == 3 el toque 0x1d3a10 (radio 3, o 4 si |valor| >= 10): +0x72 += valor (no baja de 0), medidor = (objetivo -
+  |objetivo - suma|) / objetivo x 80 x 1,15, +0x3d78 / +0x3d74 (mas cerca / mas lejos) y 0x232290 (el HUD); el que se queda
+  atras sale (0x19c990). Nota 6: (sin ruedas fuera ni muro 30) + 40 x 0x22f090. HUD 0x231fe0 (objetivo) / 0x232290 (suma).
+- tools/conv_camp.py: 'C141' (las tablas y los coches de las 7 peticiones: 68, 20, 25, 32, 15, 27 y 26).
+- Portado: el valor de cada coche y el objetivo como 0x29d410, el toque (radio + 1,5 m, PROBABLE), la suma, el medidor y el
+  bono; main.c pone los coches de la lista 40 secciones antes de la suya en su carril, con el modelo de un coche del trafico
+  (DESVIACION: no se sabe que modelo y velocidad les da el original; aqui los del trafico). DESVIACION: el numero sobre el
+  coche con las cifras del HUD (rojo el negativo, sin signo) y la suma y el objetivo bajo el contador de corazones, sin el
+  panel del original; el nivel de un guion con basura en +0x74 (0x87, Las Vegas) se topa a 2.
+- E (Holly nodo 2 lista 0: 16/0, 14/0 380..590, `-DPRUEBA_CAMP=2 -DPRUEBA_CAMP_NODO=2 -DPRUEBA_CAMP_LISTA=0
+  -DPRUEBA_C14`, que da por tocados la mitad de los coches a 1 seccion): "suma: 32 coches, nivel 0, objetivo 155", los 23
+  primeros puestos en sus secciones y carriles, "suma 10 (+10) de 155, medidor 5", el rotulo "¡Consigue el total!" y el
+  objetivo en pantalla (cap6/t14b/mos.png). NO verificado: los coches y sus numeros en pantalla (el registro dice que se
+  dibujan a 25..75 m, pero en las capturas de LASV no se ve ningun coche en la carretera: PENDIENTE).
+
+### HECHO: el letrero 3D de inicio / fin de la peticion (0x232e60)
+- Lo averiguado: el dibujo del gestor (0x22a2b0) por cada peticion de la lista de la etapa: en su inicio el modelo de
+  0x1a7c80 y en su fin el de 0x1a7cb0 (salvo los minijuegos, tipo 0x10), mientras la seccion del jugador esta entre la del
+  letrero - 100 y + 2; 0x232e60 lo pone en el centro de la seccion (0x22c500) + 4 m + [+0x18c] (con 0x22b880), con escala
+  (1, 1), si el jugador esta entre - 50 y + 2 (y en la etapa siguiente si cae alli: 0x176e20 / 0x176e48, SIN PORTAR). Son
+  los mismos modelos por idioma que las marcas del INFARTO (0x570035 "INICIO" y 0x570024 en espanol).
+- CAMP.DAT 'LET1' (los dos registros, conv_infarto.marcas); comun/campeonato.c `letrero` con haobj_marcas (el vaiven del
+  INFARTO en vez de [+0x18c]: PROBABLE) y el punto de main.c (ha_punto, `camp_punto`). 2 triangulos por letrero.
+- E: "HAOBJ: 1 marcas (registros 0x35 / 0x0)" al anunciar cada peticion y 0x24 al acabar; INICIO sobre la carretera
+  (cap6/t14b/mos.png, cap6/t20d/mos.png) y FIN (cap6/t14/mos2.png). PROBABLE: la posicion (en una curva de NIAG sale al
+  lado de la carretera, como en el INFARTO).
+
+### Medidas (Flycast, DIAG_MS, la misma pasada con y sin `-DDIAG_SIN_C20 -DDIAG_SIN_C11 -DDIAG_SIN_LET`; cap6/m_con, m_sin)
+| elemento | tramo | fps con / sin | triangulos de la escena con / sin | suyos (media / max por cuadro) |
+|---|---|---|---|---|
+| 20, lineas | 20/0 90..240, 19 muestras | 39,76 / 39,76 | 16394 / 16388 | 3,25 / 4 |
+| 21, sprites | 21/0 348..490, 21 muestras | 38,57 / 38,52 | 17434 / 17430 | quads 2D (fuera de la escena) |
+| letreros | la etapa entera, 113 muestras | 38,66 / 38,66 | 15872 / 15865 | 2 / 2 |
+| 14, numeros | sin medir (cifras 2D del HUD; los coches de la lista ocupan plazas del trafico, ninguno de mas) | | | |
+
+### RAM
+- Arranque (h6/nav3.sh, MODO_JUEGO=1, sin defines, compilado limpio, datos4; cap6/nav3_final.txt): "RAMMAPA arranque:
+  libre 418K" (c2c5: 426K), "VOZ: VOCES.DAT, 35 muestras", sin "Out of memory". El programa crece 5,3 KB (2 874 128 ->
+  2 879 452 de text + data + bss) y pasa un escalon de 8 KB del .init: de ahi los 8 KB. Nada nuevo en el monton al arrancar
+  ni en la carrera (los pares y el 14 van en el estado del campeonato, ~0,3 KB mas del monton solo en el campeonato; 'C141'
+  + 'LET1' 1,2 KB de CAMP.DAT). Ningun modulo de cada cuadro a -Os (campeonato.o ya lo estaba).
+- Pruebas nuevas (solo con defines): PRUEBA_C20 (un par a 3 secciones cuenta como cruzado), PRUEBA_C21 (un OVNI a 8
+  secciones cuenta como toque), PRUEBA_C14 (la mitad de los coches con numero a 1 seccion cuentan como tocados);
+  DIAG_SIN_C20 / DIAG_SIN_LET (medidas sin las lineas / los letreros).
+
+### Lo que queda (con lo averiguado)
+- Ajeno a esta tanda: "Out of memory ... diff 57344" al pasar de NIAG a LASV en la prueba de Clarissa nodo 4: sale igual con
+  la base c2c5 (cap6/base_n4b), la carrera sigue (PENDIENTE: que lectura es).
+- 24, las fotos (0x2a48a0; 6 peticiones): fase 1 0x2a5fd8 lee la lista +0x70 de los parametros (registros de 0x20 hasta
+  +0x18 == -1, +0x74 relativa al inicio: los objetivos), fase 4 0x2a4fa8 (la camara: 0x2bb0a0 proyecta el objetivo; el
+  disparo 0x2a60a0), fase 5 suelta (0x21bb48) y nota 6: min(1, (medidor - pen - 80) / (80 / 0,9 - 80)) x 30 + 40 x
+  0x22f090. SIN PORTAR: faltan los objetivos en CAMP.DAT y el HUD de la camara.
+- 23 (0x2987a0, los patos con el sistema de objetos 0x61e8a0): ningun guion lo pide.
+- 20: los modelos 0x57002f / 0x57002a del dibujo; 21: el acercamiento y el giro del jugador (0x292d28) y el sonido 0x1d8;
+  14: verlo en pantalla, el panel 0x231fe0 / 0x232290 y las voces +0x3d74 / +0x3d78.
+- 0x1f1a88 / 0x1f20e8 (el generador del trafico de la peticion, la tabla de 0x46 bytes) y con el los tipos 13 y 22: sin
+  empezar en esta tanda. El 14 no lo necesita: sus coches son la lista +0x5c del guion ('C141'); PROBABLE que el 13 y el 22
+  tambien lleven su lista +0x5c (mirarlo con h6/objs.py).
+- 16 (minijuegos): sin empezar en esta tanda.
+- (FPS y c2c6 en integra, 2026-11-27) nav3.sh con los datos juntos (CAMP.DAT de c2c/dat4): "VOZ: VOCES.DAT, 35
+  muestras", "RAMMAPA arranque: libre 408K", sin "Out of memory", carrera de COAST 2 COAST. PENDIENTE (c2c6, tambien en
+  la base c2c5): "Out of memory ... diff 57344" en carrera al pasar de NIAG a LASV (Clarissa nodo 4).

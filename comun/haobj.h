@@ -86,6 +86,8 @@ int  haobj_anillo_toca(const float pos[3]);   /* 0x1aa3e8: los corazones a 4 m (
 #define HA_CAMP   0x80000000u            /* (C2C, campeonatos) coche de la peticion del tipo 11 (comun/campeonato.c) */
 void haobj_pares(haobj_auto_t *v, int n, int lo, int hi, const float jug[3]);
 void haobj_pares_vacia(void);
+void haobj_pares_mascara(uint32_t m);    /* (C2C, tipo 20) m != 0: solo se emparejan los coches con esa marca (HA_CAMP) */
+int  haobj_par(int i, int *a, int *b);   /* el par i (0..9) abierto: sus plazas; 0 si no lo esta */
 /* 0x1aa024..0x1aa078: la linea (los dos coches + 1 m en y) en el marco del jugador contra su caja (0x1978d8 con +338;
    aqui 2,3 x 1,1 m en xz, PROBABLE); cuantos pares cruzados en este paso (se sueltan) */
 int  haobj_pares_cruza(haobj_auto_t *v, int n, const float pos[3], float fx, float fz);
