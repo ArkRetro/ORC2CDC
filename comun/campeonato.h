@@ -25,6 +25,8 @@ typedef struct {
     const int *toq; int ntoq;   /* clases de los objetos tocados en este paso (comun/haobj.c, +3F8 / +3FC == 8)   */
     const int *cru; int ncru;   /* clases de los arcos cruzados en este paso (+7C == 3)                           */
     int   modelo;           /* el modelo del coche (car+0x11)                                                 */
+    int   bola_sec, bola_toca;   /* la pelota del tipo 15: su seccion (-1 sin pelota) y si se ha tocado en este paso */
+    int   met_caen, met_llegan;  /* meteoritos del tipo 19 que empiezan a caer / llegan al suelo en este paso      */
 } camp_coche_t;
 
 /* al empezar la carrera: fila (46C520: 1 OutRun2 SP, 0 OutRun 2, 2 mixto), forzada (cfg1: se sale de una etapa del
@@ -48,6 +50,8 @@ extern void (*camp_obj)(int cl, int tipo, float sec, float lat, float esc);
 /* la acompanante (comun/robot.c robot_pide): que 0 la fila de caras v (0x205288), 1 para (0x2052f8), 2 el movimiento v
    (0x205220); -1 solo prepara (al empezar la etapa) */
 extern void (*camp_chica)(int que, uint32_t v);
+extern void (*camp_golpe)(void);           /* el golpe del meteorito (0x182d38 con el estado 7 y la velocidad x 0,9) */
+int  camp_clases(const uint8_t **v);       /* 'CLS1' de CAMP.DAT: n x {u8 clase, u8 registro de CAMPOBJ.DAT, u16, f32 escala} */
 /* HUD (0x22a5b8: el panel 2C002A, las filas 0x1bd920 por nivel y el contador; 0x230f70 / 0x2314e8: los rotulos) */
 int  camp_rotulo(int *texto, int *marco, int *cuadro);
 uint32_t camp_tinte(void);

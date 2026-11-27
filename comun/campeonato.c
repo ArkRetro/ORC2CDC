@@ -36,10 +36,12 @@ void (*camp_se)(int id);
 void (*camp_millas)(int m);
 void (*camp_obj)(int cl, int tipo, float sec, float lat, float esc);
 void (*camp_chica)(int que, uint32_t v);
+void (*camp_golpe)(void);
 
 #define DT 0.016611295f                                 /* +0x180 (0x3c881469) */
 #define LLENO 80.0f                                     /* 0x3741a8 */
 #define NIV 5
+#define NSND 19                                         /* 'SND1': los efectos de los tipos 15 y 19 (abajo) */
 typedef struct {                                        /* CAMP.DAT: la peticion */
     int16_t ini, fin; uint8_t tipo, sub, rot, b46; uint16_t voz, _r; int32_t p[10];   /* p[k] = +0x60 + 4 k */
 } cpet_t;
@@ -66,6 +68,7 @@ typedef struct {                                        /* el registro 0x74 del 
 } etapa_t;
 typedef struct {
     cdat_t *d; const cpet_t *pets; const cobj_t *objs; uint32_t nobj; const uint8_t *chi;   /* chi: 'CHI1' */
+    const uint8_t *cls; int ncls; const uint16_t *snd; int obj_s0;   /* 'CLS1', 'SND1'; la seccion del ultimo objeto puesto */
     int fila, forzada, lista_cfg, dif, lista, nivel;    /* +0xf0, +0x68, +0x70, +0x1ff8, +0x168 */
     etapa_t et[NIV]; pet_t pet[3]; int npet, cur;       /* +0x7c (la lista), +0x80 */
     float pos, pos_ant; int en_union_ant, union_hecha;  /* +0x3e78 / +0x3e7c, +0x3de0 */
@@ -77,6 +80,10 @@ typedef struct {
 static camp_t *C;
 
 int camp_activo(void) { return C != NULL; }
+int camp_clases(const uint8_t **v) { *v = C ? C->cls : NULL; return C ? C->ncls : 0; }
+/* un efecto de una fila de 'SND1' al azar entre los n primeros (0x11c090 con tabla[rand % n]: 0x422cd0 la pelota, 7;
+   0x423820 / 0x423830 / 0x423840 / 0x423850 los meteoritos, 3 cada una) */
+static void se_de(int base, int n) { int id; if (!C->snd || !camp_se) return; id = C->snd[base + rand() % n]; if (id) camp_se(id); }
 int camp_tipo(int g, int nodo) { return C && g >= 0 && g < 3 && nodo >= 0 && nodo < 15 ? C->d->arbol[g][nodo] : -1; }
 void camp_libera(void)
 {
@@ -98,7 +105,10 @@ int camp_inicia(int grupo, int fila, int forzada, int lista, int dificultad)
         if (o + 8 <= tam && !memcmp((const uint8_t *)d + o, "OBJ1", 4) && (memcpy(&n, (const uint8_t *)d + o + 4, 4), o + 8 + n * sizeof(cobj_t) <= tam)) {
             C->objs = (const cobj_t *)((const uint8_t *)d + o + 8); C->nobj = n;
             o += 8 + n * sizeof(cobj_t);
-            if (o + 4 + 56 + 8 <= tam && !memcmp((const uint8_t *)d + o, "CHI1", 4)) C->chi = (const uint8_t *)d + o + 4; }
+            if (o + 4 + 56 + 8 <= tam && !memcmp((const uint8_t *)d + o, "CHI1", 4)) { C->chi = (const uint8_t *)d + o + 4; o += 4 + 56 + 8; }
+            if (C->chi && o + 8 <= tam && !memcmp((const uint8_t *)d + o, "CLS1", 4) && (memcpy(&n, (const uint8_t *)d + o + 4, 4), o + 8 + 8 * n <= tam)) {
+                C->cls = (const uint8_t *)d + o + 8; C->ncls = (int)n; o += 8 + 8 * n; }
+            if (C->cls && o + 4 + 2 * NSND <= tam && !memcmp((const uint8_t *)d + o, "SND1", 4)) C->snd = (const uint16_t *)((const uint8_t *)d + o + 4); }
     }
     C->fila = fila >= 0 && fila < 4 ? fila : 0; C->forzada = forzada; C->lista_cfg = lista & 3;
     C->dif = dificultad < 0 ? 0 : dificultad > 4 ? 4 : dificultad;
@@ -284,12 +294,13 @@ static int pon_objetos(const pet_t *p, int k)
     if (!camp_obj) return 0;
     camp_obj(-1, 0, 0, 0, 0);
     for (i = 0; i < C->nobj; i++) {
-        const cobj_t *o = C->objs + i; int t = o->clase == 2 || o->clase == 3 ? 6 : o->clase == 4 ? 7 : 2;
+        const cobj_t *o = C->objs + i;
+        int t = o->clase == 2 || o->clase == 3 ? 6 : o->clase == 4 ? 7 : o->clase == 8 ? 0x10 : o->clase == 9 ? 0x0d : 2;   /* (0x10 / 0x0d: haobj.h) */
         if (o->pet != pi) continue;
         for (j = 0; j < o->n; j++) {
             camp_obj(o->banco, t, o->s0 + (float)j * (float)(o->s1 - o->s0) / (float)o->n,
                      o->l0 + (float)j * (o->l1 - o->l0) / (float)o->n, o->clase == 4 ? o->f : 1.0f);
-            if (o->clase == k) n++;
+            if (o->clase == k && !n++) C->obj_s0 = o->s0;
         }
     }
     dbglog(DBG_INFO, "CAMP: objetos de la peticion %d, %d de la clase %d\n", pi, n, k);
@@ -412,6 +423,41 @@ static void tipo_paso(pet_t *p, const camp_coche_t *c, float dpos)
                 if (p->tmr >= 0x78) { p->tmr = 0; animo(8, -1); }
             }
         } else if (p->fase == 5 && p->nota == 6) p->extra += (int)(70.0f * frena(p->v_ini, p->v_fin));
+        break;
+    case 15:                                            /* 0x293190: empujar la pelota (clase 8 = 0x11 del banco) */
+        if (p->fase == 1) { pon_objetos(p, 8); p->h7c = LLENO / ((float)(d->fin - d->ini) * 0.85f); p->h70 = p->h78 = 0; p->h74 = C->obj_s0; }
+        else if (p->fase >= 2) {                        /* 0x2934e8 (fases 2..5) */
+            int mid = d->ini + (d->fin - d->ini) / 2;
+            if (!p->h70 && c->bola_sec >= 0 && c->bola_sec + 5 < c->seccion && c->seccion < mid - 10 && camp_obj) {
+                camp_obj(0x11, 0x10, (float)mid, 0.5f, 1.0f); p->h70 = 1; p->h74 = mid;   /* la que se ha dejado atras: otra en medio */
+            }
+            if (p->fase < 5 && !p->h78) {
+                if (c->bola_toca) {                     /* +3FC == 8: lo que ha avanzado desde el toque anterior (+4 si nada) */
+                    float g = (float)(c->bola_sec - p->h74) * p->h7c;
+                    p->med += g > 0.0f ? g : 4.0f; p->h74 = c->bola_sec; se_de(0, 7);
+                    dbglog(DBG_INFO, "CAMP: pelota tocada en la seccion %d (jugador %d), medidor %d\n", c->bola_sec, c->seccion, (int)p->med);
+                } else if (p->fase == 4 && c->bola_sec > d->fin) {   /* pasa del final: lo ultimo y hecha (+400) */
+                    p->med += (float)(c->bola_sec - p->h74) * p->h7c; p->h74 = c->bola_sec; p->h78 = 1;
+                }
+            } else p->h78 = 1;
+            if (p->fase == 5 && p->nota == 6) p->extra += (int)(70.0f * frena(p->v_ini, p->v_fin));
+        }
+        break;
+    case 19:                                            /* 0x29da88: los meteoritos (clase 9 = 0x3d): no dejar que te den */
+        if (p->fase == 1) { p->h70 = pon_objetos(p, 9); voz(0x7f, 0x3c, 0xb); }
+        else if (p->fase >= 2 && p->fase <= 4) {        /* 0x29e018 (fases 2..4; en la 4 el medidor con el avance) */
+            int k = cuantos(c->toq, c->ntoq, 0x3d); float pm;
+            if (p->fase == 4) p->med += dpos * (LLENO / (largo * 0.9f));
+            if (c->met_caen) se_de(7, 3);               /* 0x423820: empieza a caer */
+            if (c->met_llegan) se_de(10, 3);            /* 0x423830: en el suelo (SIN 0x22df58 ni el efecto 0x22c6c8) */
+            memcpy(&pm, &d->p[5], 4);                   /* +0x74 de los parametros, flotante */
+            if (k) dbglog(DBG_INFO, "CAMP: meteorito: %d golpes en la seccion %d (penalizacion %d + %d x %d)\n", k, c->seccion, (int)p->pen, k, (int)pm);
+            for (; k > 0; k--) {                        /* golpe: +0x2c += p74; sin choque (+2F0 & 2), 0x182d38 y v x 0,9 */
+                p->pen += pm; if (p->pen > 100.0f) p->pen = 100.0f;
+                if (!c->choque && camp_golpe) camp_golpe();
+                se_de(13, 3); se_de(16, 3);             /* 0x423840 y 0x423850 */
+            }
+        }
         break;
     default: break;                                     /* SIN PORTAR */
     }

@@ -1502,7 +1502,7 @@ static void refl_lee(int seg, int cual)
     if (gd_lee(refl_lba + refl_tab[seg][0], (n * REFL_TEX + 2047) / 2048, refl_reg[cual])) return;
     refl_hay[cual] = n;
 }
-static void *carga_hilo(void *p)
+FRIO static void *carga_hilo(void *p)
 {
     carga_t *c = p;
     c->r = lee_modelo_en(c->m, c->nombre, c->buf, c->cap);
@@ -8197,6 +8197,7 @@ static void camp_se_(int id) { if (voz_ok) sfx_voz_se(id); }
 static void camp_millas_(int m) { menu_suma_millas((uint32_t)m); }
 static void camp_obj_(int cl, int tipo, float sec, float lat, float esc);
 static void camp_chica_(int que, uint32_t v);
+static void camp_golpe_(void);
 /* al salir del menu: el campeonato elegido (menu_camp: nodo del mapa y casilla), su arbol, la salida y el gestor */
 FRIO static void camp_preparado(int auto_)
 {
@@ -8220,14 +8221,14 @@ FRIO static void camp_preparado(int auto_)
     }
     camp_g = g; curso_pedido = CAMP_ARBOL(g); nodo_salida = cn > 0 ? cn - 1 : 0;
     if (g == 0) preset_curso = 0;                               /* el curso de OutRun 2 SP: el preset 0 (PROBABLE) */
-    camp_graba = menu_nota_camp; camp_voz = camp_voz_; camp_se = camp_se_; camp_millas = camp_millas_; camp_obj = camp_obj_; camp_chica = camp_chica_;
+    camp_graba = menu_nota_camp; camp_voz = camp_voz_; camp_se = camp_se_; camp_millas = camp_millas_; camp_obj = camp_obj_; camp_chica = camp_chica_; camp_golpe = camp_golpe_;
     dbglog(DBG_INFO, "CAMP: campeonato %d, arbol %d, salida nodo %d, casilla %d\n", g, curso_pedido, nodo_salida, cl);
 }
 /* los objetos de la peticion (comun/campeonato.c pon_objetos) en el mundo: la seccion sec de la etapa y la fraccion lat
    del ancho del asfalto (0 el borde izquierdo: SUPUESTO, el 0x1909b8 del original da los dos puntos del borde sin
    saber aqui cual es cual), a la altura de la calzada y girados con la carretera (el arco atraviesa la carretera) */
 static uint8_t *camp_chrh;                                      /* CHRH.DAT (las caras y movimientos de la acompanante) */
-static void camp_chica_(int que, uint32_t v)                    /* 0x205288 / 0x2052f8 / 0x205220 (comun/robot.c) */
+FRIO static void camp_chica_(int que, uint32_t v)                    /* 0x205288 / 0x2052f8 / 0x205220 (comun/robot.c) */
 {
     if (!camp_chrh) {                                           /* (la primera vez en la carrera: ~52 KB del monton) */
         uint32_t lba, tam;
@@ -8241,28 +8242,34 @@ static void camp_chica_(int que, uint32_t v)                    /* 0x205288 / 0x
     dbglog(DBG_INFO, "CAMP: acompanante %s 0x%x\n", que == 0 ? "cara" : que == 1 ? "para" : "movimiento", (unsigned)v);
     if (que == 0) robot_pide(0, 0, 1, (int)v, 0); else if (que == 1) robot_pide(0, 0, 0, 0, 1); else robot_pide(1, v, 0, 0, 0);
 }
-static void camp_obj_(int cl, int tipo, float sec, float lat, float esc)
+FRIO static void camp_obj_(int cl, int tipo, float sec, float lat, float esc)
 {
     float p[3], th, iz, de, x, s;
     if (cl < 0) {
         if (cl == -2) { haobj_libera(); if (camp_chrh) { robot_extra(NULL, 0); free(camp_chrh); camp_chrh = NULL; } }
-        else haobj_pon(-1, 0, NULL, 0, 0);
+        else haobj_pon(-1, 0, NULL, 0, 0, 0);
         return;
     }
     haobj_inicia();                                             /* (la cabecera de HAOSO.DAT: clase -> modelo y escala; ya leida: nada) */
     s = s_etapa + sec * m_pos; ruta_en(s, p, &th, &iz, &de);
     x = -iz + lat * (iz + de);
     p[0] += x * cosf(th); p[2] += x * sinf(th); p[1] = altura(s, x);
-    if (haobj_pon(cl, tipo, p, -th, esc)) dbglog(DBG_ERROR, "CAMP: el objeto de la clase %d no se pudo poner\n", cl);
+    if (haobj_pon(cl, tipo, p, -th, esc, (int)sec)) dbglog(DBG_ERROR, "CAMP: el objeto de la clase %d no se pudo poner\n", cl);
 #ifdef DIAG_HA
     dbglog(DBG_INFO, "DIAGHA camp: clase %d tipo %d seccion %.1f lat %.2f en (%.1f, %.1f, %.1f); coche (%.1f, %.1f, %.1f)\n", cl, tipo, (double)sec, (double)lat,
            (double)p[0], (double)p[1], (double)p[2], (double)yo.pos[0], (double)yo.pos[1], (double)yo.pos[2]);
 #endif
 }
-/* 0x22a048: lo que lee el gestor del coche del jugador (los mismos campos que el INFARTO) */
-static void camp_paso_jug(int toca)
+FRIO static void camp_golpe_(void)                                   /* el meteorito: 0x182d38 (estado 7) y v x 0,9 */
 {
-    static float t_choque_ant, ant[3]; static int ant_ok; camp_coche_t c; int tq[16], cr[8];
+    if (!fis_ok) return;
+    fis.vx *= 0.9f; fis.vy *= 0.9f; yo.v = sqrtf(fis.vx * fis.vx + fis.vy * fis.vy); voz_contacto = 1;
+}
+static int ha_seccion(float x, float z);
+/* 0x22a048: lo que lee el gestor del coche del jugador (los mismos campos que el INFARTO) */
+FRIO static void camp_paso_jug(int toca)
+{
+    static float t_choque_ant, ant[3]; static int ant_ok, bola_n, bola_s = -1; camp_coche_t c; int tq[16], cr[8];
     {   haobj_coche_t oc;                                       /* los objetos de la peticion: toques, cruces y vuelo */
         memset(&oc, 0, sizeof oc); oc.suelo = ha_suelo; memcpy(oc.pos, yo.pos, sizeof oc.pos);
         oc.fw[0] = yo.fw[0]; oc.fw[2] = yo.fw[2]; oc.v = yo.v;
@@ -8271,6 +8278,12 @@ static void camp_paso_jug(int toca)
         c.ntoq = haobj_toques(tq, 16); c.toq = tq; c.ncru = haobj_cruces(cr, 8); c.cru = cr; c.modelo = modelo_jug;
     }
     c.en_union = cur_en_union; c.pos = cur_en_union ? 0.0f : (yo.s - s_etapa) / m_pos; c.seccion = (int)floorf(c.pos);
+    {   float bp[3]; haobj_met_t mt;                            /* la pelota (su seccion al tocarla y cada 0,5 s) y los meteoritos */
+        if (haobj_bola(bp, &c.bola_toca)) { if (c.bola_toca || bola_s < 0 || ++bola_n % 30 == 0) bola_s = ha_seccion(bp[0], bp[2]); }
+        else bola_s = -1;
+        c.bola_sec = bola_s;
+        haobj_meteoros(c.seccion, &mt); c.met_caen = mt.caen; c.met_llegan = mt.llegan;
+    }
     c.kmh = fis_ok ? fis.velocidad_hud : yo.v * 3.6f; c.pasados = pt_pasados;
     c.choque = fis_ok ? fis.choque : 0;
     c.choque_ini = fis_ok && fis.t_choque > 0.0f && t_choque_ant <= 0.0f; t_choque_ant = fis_ok ? fis.t_choque : 0;
@@ -8286,7 +8299,7 @@ static void camp_paso_jug(int toca)
     camp_paso(&c);
 }
 /* 496A30 en el modo 16 (sin pausa): lo que lee del jugador */
-static void c2c_paso(void)
+FRIO static void c2c_paso(void)
 {
     mision_jug_t j; static int8_t da4;
     if (!rival_mis()) return;
@@ -8660,6 +8673,7 @@ static int ha_carriles(float x, float z)                        /* (+0xA4 de los
     return n;
 }
 static modelo_t ha_mod; static int ha_mod_ok; static uint32_t ha_obj_tri, ha_obj_vtx, ha_obj_n, ha_dg[4];
+static modelo_t camp_mod; static int camp_mod_ok;             /* CAMPOBJ.DAT (C2C: obj_tour_pmt, HAOBJ_TOUR | registro) */
 /* 45ECA0 / 45E9B0: lo que la mision de la etapa pinta sobre ella (HAMpqq.DAT: los carriles azul / rojo), en el marco de
    la etapa + (0, 0,1, 0); DESVIACION (poligonos): solo los trozos de tira (tools/conv_infarto.py trocea) a menos de
    HA_META_LEJOS del ojo y no detras, con el tope de los objetos de la union */
@@ -8709,7 +8723,7 @@ static void ha_meta_dibuja(int l)
 static void ha_obj_dibuja(int l)
 {
     static matrix_t W __attribute__((aligned(32))), Mo __attribute__((aligned(32)));
-    haobj_dib_t d[HA_OBJ_MAX]; int n, i, ult, reg; uint32_t k, j;
+    haobj_dib_t d[HA_OBJ_MAX]; int n, i, ult, reg; uint32_t k, j; modelo_t *mo;
     if (l == 0) { ha_obj_tri = ha_obj_vtx = 0; }
     ha_meta_dibuja(l);
 #ifdef DIAG_SIN_HAOBJ
@@ -8723,32 +8737,34 @@ static void ha_obj_dibuja(int l)
         if (zv < -4.0f) continue;                               /* detras de la camara */
         memcpy(Mo, d[i].M, sizeof Mo);
         reg = d[i].reg;                                         /* la moneda lejana (tools/conv_infarto.py aligera_monedas) */
+        mo = reg & HAOBJ_TOUR ? &camp_mod : &ha_mod;            /* (C2C: CAMPOBJ.DAT) */
+        if (reg & HAOBJ_TOUR) { if (!camp_mod_ok) continue; reg &= 0xff; }
         if ((reg == 0x1c || reg == 0x1d) && zv > 40.0f) reg |= 0x80;
         if (reg == 0x2a && zv > 30.0f) reg |= 0x80;            /* el corazon plano del tipo 11 (aligera_corazon) */
         if (reg == 0x30 && zv * zv > 625.0f * (Mo[0][0] * Mo[0][0] + Mo[0][1] * Mo[0][1] + Mo[0][2] * Mo[0][2])) reg |= 0x80;   /* la estrella plana: desde 25 m x escala */
-        for (k = 0; k < ha_mod.nnodos; k++) {
-            const nodo_t *nd = ha_mod.nodos + k; int g = nd->relleno[0] & 0xff; uint32_t cst = 0;
+        for (k = 0; k < mo->nnodos; k++) {
+            const nodo_t *nd = mo->nodos + k; int g = nd->relleno[0] & 0xff; uint32_t cst = 0;
             if ((int)(nd->fl & 0xffff) != reg) continue;
             if (d[i].reg == 0x2b && zv > 40.0f && (nd->fl >> 16) & 0x20) continue;   /* el arco lejano: solo los postes */
             ha_dg[0]++;
-            for (j = ha_mod.inicio[l]; j < ha_mod.inicio[l + 1]; j++) {
-                const malla_t *m = ha_mod.mallas + j;
+            for (j = mo->inicio[l]; j < mo->inicio[l + 1]; j++) {
+                const malla_t *m = mo->mallas + j;
                 if ((m->nodo & 0xff) == g && m->n >= 3) cst += (m->n <= 256 ? ta_teo_tab[ta_ofs != 0][m->n] : ta_teo(m->n, ta_ofs)) * ta_f >> 8;
             }
             if (!cst) { ha_dg[1]++; continue; }
             if (ta_bo + cst > ta_bo_tope || ta_vb + cst > ta_lim) { ta_bo_pide += cst; ha_dg[2]++; continue; }
-            memcpy(W, ha_mod.carteles[nd->cartel], sizeof W);
+            memcpy(W, mo->carteles[nd->cartel], sizeof W);
             mat_load(&vista); mat_apply(&Mo); mat_apply(&W);
             ult = -2;
-            for (j = ha_mod.inicio[l]; j < ha_mod.inicio[l + 1]; j++) {
-                const malla_t *m = ha_mod.mallas + j;
+            for (j = mo->inicio[l]; j < mo->inicio[l + 1]; j++) {
+                const malla_t *m = mo->mallas + j;
                 if ((m->nodo & 0xff) != g || m->n < 3) continue;
                 if (m->tex != ult) {
                     ult = m->tex;
-                    if (m->tex >= 0) pvr_prim(&ha_mod.cabs[0][m->tex], sizeof(pvr_poly_hdr_t));
+                    if (m->tex >= 0) pvr_prim(&mo->cabs[0][m->tex], sizeof(pvr_poly_hdr_t));
                     else pvr_prim(&cab_col[0][l], sizeof(pvr_poly_hdr_t));
                 }
-                dibuja_malla(&ha_mod, m); ha_obj_tri += m->n - 2; ha_obj_vtx += m->n;
+                dibuja_malla(mo, m); ha_obj_tri += m->n - 2; ha_obj_vtx += m->n;
             }
         }
     }
@@ -15248,6 +15264,7 @@ int main(int argc, char **argv)
             if (ha_hud && !reintenta) { hudd_cierra(ha_hud); ha_hud = NULL; ha_u_txt = ha_u_mar = -1; }   /* INFARTO */
             if (camp_hud && !reintenta) { hudd_cierra(camp_hud); camp_hud = NULL; camp_u_txt = -1; }   /* campeonatos */
             if (ha_mod_ok && !reintenta) { libera_modelo(&ha_mod); ha_mod_ok = 0; }
+            if (camp_mod_ok && !reintenta) { libera_modelo(&camp_mod); camp_mod_ok = 0; }
             if (c2c_hud && !reintenta) { hudd_cierra(c2c_hud); c2c_hud = NULL; }                       /* COAST 2 COAST */
             if (c2c_hud2 && !reintenta) { hudd_cierra(c2c_hud2); c2c_hud2 = NULL; }
             presta_union(1);                                    /* (en cuanto el curso suelta la union) */
@@ -15491,6 +15508,13 @@ int main(int argc, char **argv)
                        40 KB, se leen del GD al subirlas, ya con la zona del curso reservada) */
                     if (!ha_hud && !(ha_hud = hudd_abre("HAHUD.DAT", 0, 1))) dbglog(DBG_ERROR, "HAHUD: no se pudo abrir\n");
                     if (variante == 5 && !camp_hud && !(camp_hud = hudd_abre("CAMPHUD.DAT", 0, 1))) dbglog(DBG_ERROR, "CAMPHUD: no se pudo abrir\n");
+                    if (variante == 5 && !camp_mod_ok) {        /* (C2C) la pelota y el meteorito (CAMPOBJ.DAT, ~27 KB) */
+                        const uint8_t *cv; int nc = camp_clases(&cv), q;
+                        camp_mod.relleno_propio = 1;
+                        if (!lee_modelo(&camp_mod, "CAMPOBJ.DAT")) { sube_tramo(&camp_mod, 0, NULL); camp_mod_ok = 1; }
+                        else dbglog(DBG_ERROR, "CAMPOBJ: no se pudo leer CAMPOBJ.DAT\n");
+                        for (q = 0; q < nc; q++) { float e; memcpy(&e, cv + 8 * q + 4, 4); haobj_clase(cv[8 * q], cv[8 * q + 1], e); }
+                    }
                     if (!ha_mod_ok) {                           /* los modelos de los objetos (HAOBJ.DAT, ~7 KB) */
                         ha_mod.relleno_propio = 1;              /* (como BOnn.DAT: relleno[0] = malla | animacion) */
                         if (!lee_modelo(&ha_mod, "HAOBJ.DAT")) { sube_tramo(&ha_mod, 0, NULL); ha_mod_ok = 1; }

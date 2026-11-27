@@ -39,6 +39,10 @@ CAMP.DAT (little endian):
      (0x2938d0: cuantos = 1); las secciones ya con el inicio de la peticion sumado si el guion lo pide (+0xc / +8)
   detras, 'CHI1' y la reaccion de la acompanante a la nota (0x2a66a8 en la fase 6): u32 movimiento[2][7] (tablas
      0x423e60 y 0x423e80 por la nota) y u8 tabla[8] (por el modelo del coche - 2, el switch 0x423ec0: 1 la segunda)
+  detras, 'CLS1', u32 n y n x {u8 clase, u8 registro de obj_tour_pmt, u16 0, f32 escala}: las clases de los objetos que
+     son de ese recurso (tabla 0x40a958); sus modelos en CAMPOBJ.DAT (ORD7, como HAOBJ.DAT)
+  detras, 'SND1' y u16 efectos[19] (0x11c090): la pelota 7 (0x422cd0), el meteorito que cae 3 (0x423820), llega 3
+     (0x423830) y golpea 3 + 3 (0x423840, 0x423850)
 """
 import os, struct, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -49,6 +53,7 @@ LISTAS = ['REQUEST_NORMAL', 'REQUEST_SPECIAL1', 'REQUEST_SPECIAL2', 'REQUEST_SPE
 # tipo -> (filas, puntos): los campos de sus parametros que leen sus funciones de objetos (0x293968 / 0x2938d0): 6
 # 0x295ca0 / 0x295bf0, 7 0x2956a0 / 0x2955f8, 8 0x29a5c8 / 0x29a518, 15 0x293448 / 0x293390, 19 0x29df78 / 0x29ded0
 OBJ_TIPOS = {6: (0x74, 0x78), 7: (0x78, 0x7c), 8: (0x78, 0x7c), 15: (0x70, 0x74), 19: (0x78, 0x7c)}
+REGS_TOUR = (1, 4)                                           # obj_tour_pmt: la pelota (tipo 15) y el meteorito (19)
 
 
 def main():
@@ -186,7 +191,27 @@ def main():
     sel = [1 if u(0x423ec0 + 4 * k) == 0x2a6720 else 0 for k in range(8)]
     out += b'CHI1' + struct.pack('<14I', *[u(0x423e60 + 4 * k) for k in range(7)], *[u(0x423e80 + 4 * k) for k in range(7)]) + bytes(sel)
     print('  acompanante: %s / %s, tabla %s' % ([hex(u(0x423e60 + 4 * k)) for k in range(7)], [hex(u(0x423e80 + 4 * k)) for k in range(7)], sel))
+    # las clases de los objetos de C2C que no son del banco 0x57 sino de obj_tour_pmt (recurso 0x1ee): la pelota del tipo
+    # 15 (0x11 -> registro 1) y los meteoritos del 19 (0x3d -> registro 4); tabla de clases 0x40a958 (recurso << 16 |
+    # registro, f32 escala), la misma que lee tools/conv_infarto.py
+    assert u(0x40a958 + 8 * 0x11) == 0x1ee0001 and u(0x40a958 + 8 * 0x3d) == 0x1ee0004, 'tabla de clases 0x40a958'
+    cls = [(c, u(0x40a958 + 8 * c) & 0xffff, f(0x40a958 + 8 * c + 4)) for c in range(64) if u(0x40a958 + 8 * c) >> 16 == 0x1ee
+           and u(0x40a958 + 8 * c) & 0xffff in REGS_TOUR]
+    out += b'CLS1' + struct.pack('<I', len(cls)) + b''.join(struct.pack('<BBHf', c, r, 0, e) for c, r, e in cls)
+    print('  clases de obj_tour_pmt: %s' % ', '.join('0x%x -> %d (x %g)' % x for x in cls))
+    # los efectos (0x11c090) de los tipos 15 y 19, por el codigo que lee cada tabla (tabla[rand % n])
+    assert par(0x29365c, 0x293660) == 0x422cd0, 'efectos de la pelota (0x2934e8)'
+    assert par(0x29e16c, 0x29e170) == 0x423820 and par(0x29e254, 0x29e258) == 0x423830, 'efectos del meteorito (0x29e018)'
+    assert par(0x29e390, 0x29e394) == 0x423840 and par(0x29e3b8, 0x29e3bc) == 0x423850, 'efectos del golpe (0x29e018)'
+    snd = [u(0x422cd0 + 4 * k) for k in range(7)] + [u(t + 4 * k) for t in (0x423820, 0x423830, 0x423840, 0x423850) for k in range(3)]
+    out += b'SND1' + struct.pack('<19H', *snd)
+    print('  efectos de la pelota y los meteoritos: %s' % ' '.join('%x' % x for x in snd))
     open(os.path.join(sal, 'CAMP.DAT'), 'wb').write(out)
+    # CAMPOBJ.DAT: sus modelos (ORD7 de conv_bo.modelo_conjunto, como HAOBJ.DAT; nodo: banderas << 16 | registro)
+    import conv_bo
+    mod = conv_bo.modelo_conjunto(As, As.bloque(As.entrada('COMMON.PS2', 'obj_tour_pmt.sz')), set(REGS_TOUR), os.path.join(sal, 'CAMPOBJ.DAT'))
+    print('CAMPOBJ.DAT: %d mallas, %d vertices (%d triangulos), %d texturas, %d KB' % (len(mod.mallas), mod.nv, mod.nv - 2 * len(mod.mallas),
+          len(mod.texs), os.path.getsize(os.path.join(sal, 'CAMPOBJ.DAT')) >> 10))
     for t in sorted(tipos): print('  tipo %2d: %s' % (t, sorted(tipos[t])))
     # CAMPHUD.DAT: los rotulos del anuncio del banco SPRANI 0x46 (el rotulo 0x40 + k de la peticion es el grupo CA_Tkk),
     # cada uno con su escena entera, como los HA_Tnn de HAHUD.DAT (tools/conv_infarto.py)

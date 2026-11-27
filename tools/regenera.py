@@ -234,7 +234,7 @@ def paso(C, n, log):
     elif n == 'mision': ej(T('conv_mision.py'), ISO, t); mueve(D, tj('MISION.DAT'))   # Races.bin y tablas de 47CF40
     elif n == 'c2chud': ej(T('conv_hud.py'), ISO, t, '--c2c'); mueve(D, tj('C2CHUD.DAT'))   # HUD de las misiones de C2C
     elif n == 'c2c': ej(T('conv_c2c.py'), ISO, t); mueve(D, tj('C2C.DAT'))   # pantallas de C2C (banco 0x44, menu.c)
-    elif n == 'camp': ej(T('conv_camp.py'), ISO, t); mueve(D, tj('CAMP.DAT'))   # campeonatos de C2C (campeonato.c)
+    elif n == 'camp': ej(T('conv_camp.py'), ISO, t); mueve(D, tj('CAMP.DAT'), tj('CAMPHUD.DAT'), tj('CAMPOBJ.DAT'))   # campeonatos de C2C (campeonato.c)
     elif n == 'salon': ej(T('conv_salon.py'), ISO, t); mueve(D, tj('SALON.DAT'))   # el SALON (showroom, banco 0x44, menu.c)
     elif n == 'tablero': ej(T('conv_tablero.py'), ISO, t); mueve(D, tj('TABLERO.DAT'))   # tableros de cursos (banco 0x44, menu.c)
     elif n == 'camiones':                                        # los camiones con remolque de OUTRUN2SP (39/40, 41, 43)

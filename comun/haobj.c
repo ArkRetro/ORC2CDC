@@ -27,6 +27,7 @@ typedef struct {
     /* estrellas (tipo 8, control 0x1d4d80): +A4 reposo, +B0 paso del vuelo, +C0 activa, +BC volando, +74 tiempo del
        bote, +CC seccion (-32768: sin calcular); pieza: uno de los 40 trozos 0x134.. (est 4: abierto sin usar) */
     float r0[3], b0[3], t74; uint8_t act, vuela, pieza, tr; int16_t sec;   /* tr: cuadro de la estela 2C0007 (+98) */
+    uint8_t gol;                         /* (C2C) el meteorito ya ha golpeado al jugador (+D0) */
 } obj_t;
 static uint8_t *cab;                     /* el primer sector de HAOSO.DAT */
 static uint32_t lba_o, tam_o, nfich;
@@ -113,11 +114,43 @@ static void euler(float R[3][3], const float *a, float yaw)   /* Ry(yaw) Ry(ay) 
     for (i = 0; i < 3; i++) for (j = 0; j < 3; j++) { R[i][j] = 0; for (k = 0; k < 3; k++) R[i][j] += T[i][k] * Z[k][j]; }
 }
 static float jug_p[3], jug_f[2];        /* el jugador del ultimo paso (los destellos del arco) */
+static int bola_k = -1, bola_toca;      /* (C2C) la pelota tocada la ultima (o la ultima puesta) y el toque de este paso */
+/* (C2C) la pelota del tipo 15 (clase 0x11, control 2 = el cuerpo rigido 516E10 de los conos en el original: SIMPLIFICADO,
+   DESVIACION) y los meteoritos del 19 (clase 0x3d, control 0x0d); fx, fz: el eje adelante del coche */
+static void c2c_paso(obj_t *o, const haobj_coche_t *c, float fx, float fz)
+{
+    const float dt = 1.0f / 60.0f; float dx = o->p[0] - c->pos[0], dz = o->p[2] - c->pos[2], dy = o->p[1] - c->pos[1], al, la, r;
+    if (o->est != 1) return;
+    if (o->tipo == HAOBJ_METEORO) {                    /* el golpe al jugador (+7C y +80 == 8; una vez, +D0) */
+        if (!o->act || o->gol || fabsf(dx) > 8.0f || fabsf(dz) > 8.0f || fabsf(dy) > 8.0f) return;
+        al = dx * fx + dz * fz; la = dx * fz - dz * fx; r = 1.5f * o->esc;   /* (el radio: PROBABLE) */
+        if (fabsf(al) < 2.3f + r && fabsf(la) < 1.1f + r) { o->gol = 1; if (ntoq < 16) toq_cl[ntoq++] = o->cl; }
+        return;
+    }
+    {   float v2 = o->v[0] * o->v[0] + o->v[2] * o->v[2];   /* la pelota rueda: rozamiento y el suelo */
+        if (v2 > 0.01f) {
+            float y = 9999.9f, v = sqrtf(v2), k = v > 0.2f ? 1.0f - 5.0f * dt / v : 0.0f;   /* (5 m/s2 de frenada) */
+            o->p[0] += o->v[0] * dt; o->p[2] += o->v[2] * dt; o->giro += v * dt / o->esc;   /* (radio 1 x escala) */
+            o->v[0] *= k; o->v[2] *= k;
+            if (suelo_cb && suelo_cb(o->p[0], o->p[2], &y) >= 0) o->p[1] = y + o->esc;
+        } else o->v[0] = o->v[2] = 0;
+    }
+    if (o->t > 0) { o->t--; return; }
+    if (fabsf(dx) > 6.0f || fabsf(dz) > 6.0f || fabsf(dy) > 4.0f) return;
+    al = dx * fx + dz * fz; la = dx * fz - dz * fx; r = o->esc;
+    if (!(fabsf(al) < 2.3f + r && fabsf(la) < 1.1f + r) || al < 0.0f) return;
+    {   float v = c->v + 5.0f, s = la >= 0.0f ? 1.0f : -1.0f;   /* el toque: por delante del coche y un poco al lado */
+        o->v[0] = fx * v + fz * s * 0.5f; o->v[2] = fz * v - fx * s * 0.5f; o->t = 20;
+        if (ntoq < 16) toq_cl[ntoq++] = o->cl;
+        bola_k = (int)(o - ob); bola_toca = 1;
+        {   float a = atan2f(o->v[0], o->v[2]), e[3] = { 0, 0, 0 }; euler(o->R, e, a); }
+    }
+}
 void haobj_paso(const haobj_coche_t *c)
 {
     int i; float fx = c->fw[0], fz = c->fw[2], fl = sqrtf(fx * fx + fz * fz);
     memcpy(jug_p, c->pos, sizeof jug_p); jug_f[0] = c->fw[0]; jug_f[1] = c->fw[2];
-    ntoq = 0; ncru = 0; reloj_obj++; toq_g = toq_p = 0; npos = 0; sec_cb = c->sec; suelo_cb = c->suelo;
+    ntoq = 0; ncru = 0; reloj_obj++; toq_g = toq_p = 0; npos = 0; sec_cb = c->sec; suelo_cb = c->suelo; bola_toca = 0;
     marca_a += 0.2094395f; if (marca_a > 3.14159274f) marca_a -= 6.28318548f;   /* 0x1a7f78: el vaiven de las marcas */
     if (!ob) return;
 #ifdef DIAG_HA
@@ -169,7 +202,7 @@ void haobj_paso(const haobj_coche_t *c)
 #ifdef PRUEBA_HA_POSTE
                 if (o->tipo == 7) { o->p[0] += fz * 3.0f * o->esc; o->p[2] -= fx * 3.0f * o->esc; }   /* prueba: un poste en la linea */
 #endif
-                if (o->tipo == 8) { o->r0[0] = o->p[0]; o->r0[2] = o->p[2]; } }
+                if (o->tipo == 8 || o->tipo == HAOBJ_METEORO) { o->r0[0] = o->p[0]; o->r0[2] = o->p[2]; } }
         }
 #endif
         if (o->est == 1 && o->tipo == 7) {              /* el arco (0x1d42f0): cruce del paso del coche entre los postes */
@@ -203,6 +236,7 @@ void haobj_paso(const haobj_coche_t *c)
             }
             continue;
         }
+        if (o->tipo == HAOBJ_BOLA || o->tipo == HAOBJ_METEORO) { c2c_paso(o, c, fx, fz); continue; }
         if (o->est == 1 && o->tipo == 8) o->giro += 0.1f;   /* 0x1d4d80: +6C + 0,1 por paso */
         if (o->est == 1) {                              /* toque del jugador (0x1d3720) */
             float dx = o->p[0] - c->pos[0], dz = o->p[2] - c->pos[2], dy = o->p[1] - c->pos[1], al, la;
@@ -549,6 +583,7 @@ int haobj_lista(haobj_dib_t *v, int max, const float ojo[3])
         const obj_t *o = ob + i; float dx, dy, dz, d; haobj_dib_t *e;
         if (o->est != 1 && o->est != 2) continue;
         if (o->est == 2 && o->tipo == 7 && o->t >= 120 && (o->t & 1)) continue;   /* parpadeo del ultimo segundo */
+        if (o->tipo == HAOBJ_METEORO && !o->act) continue;   /* (C2C) el meteorito, desde que empieza a caer */
         dx = o->p[0] - ojo[0]; dy = o->p[1] - ojo[1]; dz = o->p[2] - ojo[2]; d = dx * dx + dy * dy + dz * dz;
         if (d > HAOBJ_LEJOS * HAOBJ_LEJOS) continue;
         if (n == max) {                                 /* lleno: sustituye al mas lejano si este esta mas cerca */
@@ -572,7 +607,7 @@ int haobj_lista(haobj_dib_t *v, int max, const float ojo[3])
                 float c = cosf(o->giro), s = sinf(o->giro), T[3][3]; int q;
                 for (q = 0; q < 3; q++) { T[q][0] = R[q][0] * c - R[q][2] * s; T[q][1] = R[q][1]; T[q][2] = R[q][0] * s + R[q][2] * c; }
                 memcpy(R, T, sizeof R);
-            } else if (o->est == 2 && o->tipo != 6 && o->tipo != 8) {   /* girando sobre su eje x local */
+            } else if ((o->est == 2 && o->tipo != 6 && o->tipo != 8) || o->tipo == HAOBJ_BOLA || (o->tipo == HAOBJ_METEORO && o->vuela)) {   /* girando sobre su eje x local */
                 float c = cosf(o->giro), s = sinf(o->giro), T[3][3];
                 for (a = 0; a < 3; a++) { T[a][0] = R[a][0]; T[a][1] = R[a][1] * c + R[a][2] * s; T[a][2] = -R[a][1] * s + R[a][2] * c; }
                 memcpy(R, T, sizeof R);
@@ -590,12 +625,22 @@ int haobj_lista(haobj_dib_t *v, int max, const float ojo[3])
    campeonato.c ya en el mundo; los de antes se quitan (haobj_pon(-1, ...)). Clase y tipo de 0x297e20 (tabla 0x423080);
    la altura como 45DB70 (clases 5..9 + 0,65, monedas a 1,2 / 1,0) y la escala de la clase x esc (el arco: el +0x18 de
    la fila del guion, la mitad de su ancho / 3) */
-int haobj_pon(int cl, int tipo, const float p[3], float yaw, float esc)
+static struct { uint8_t cl; uint16_t reg; float esc; } cext[8]; static int ncext;
+void haobj_clase(int cl, int reg, float esc)
 {
-    static int cap; obj_t *o; uint16_t reg; float e, a[3] = { 0, 0, 0 };
-    if (cl < 0) { free(ob); ob = NULL; nob = cap = 0; n_est = n_pie = 0; ntoq = ncru = 0; return 0; }
+    int i;
+    for (i = 0; i < ncext && cext[i].cl != cl; i++) ;
+    if (i == 8) return;
+    if (i == ncext) ncext++;
+    cext[i].cl = (uint8_t)cl; cext[i].reg = (uint16_t)(HAOBJ_TOUR | reg); cext[i].esc = esc;
+}
+int haobj_pon(int cl, int tipo, const float p[3], float yaw, float esc, int sec)
+{
+    static int cap; obj_t *o; uint16_t reg = 0xffff; float e = 1, a[3] = { 0, 0, 0 }; int i;
+    if (cl < 0) { free(ob); ob = NULL; nob = cap = 0; n_est = n_pie = 0; ntoq = ncru = 0; bola_k = -1; return 0; }
     if (!cab || cl >= 64) return -1;
-    memcpy(&reg, cab + 8 + 84 + 8 * cl, 2); memcpy(&e, cab + 8 + 84 + 8 * cl + 4, 4);
+    for (i = 0; i < ncext; i++) if (cext[i].cl == cl) { reg = cext[i].reg; e = cext[i].esc; }
+    if (reg == 0xffff) { memcpy(&reg, cab + 8 + 84 + 8 * cl, 2); memcpy(&e, cab + 8 + 84 + 8 * cl + 4, 4); }
     if (reg == 0xffff) return -1;
     if (!ob) cap = 0;
     if (nob >= cap) {
@@ -604,10 +649,46 @@ int haobj_pon(int cl, int tipo, const float p[3], float yaw, float esc)
         ob = n; cap += 32;
     }
     o = ob + nob++; memset(o, 0, sizeof *o);
-    o->cl = (uint8_t)cl; o->tipo = (uint8_t)tipo; o->reg = (int16_t)reg; o->esc = e * (esc > 0.0f ? esc : 1.0f); o->sec = -32768;
-    memcpy(o->p, p, sizeof o->p);
+    o->cl = (uint8_t)cl; o->tipo = (uint8_t)tipo; o->reg = (int16_t)reg; o->esc = e * (esc > 0.0f ? esc : 1.0f); o->sec = (int16_t)sec;
+    memcpy(o->p, p, sizeof o->p); memcpy(o->r0, p, sizeof o->r0);
+    if (tipo == HAOBJ_BOLA) { bola_k = nob - 1; o->p[1] += o->esc; }   /* (la pelota: radio 1 x escala, apoyada) */
     if (cl >= 5 && cl <= 9) o->p[1] += 0.65f;
     if (tipo == 6) o->p[1] += cl == 0x39 ? 1.0f : 1.2f;
     euler(o->R, a, yaw); o->est = 1;
     return 0;
+}
+int haobj_bola(float p[3], int *toca)
+{
+    *toca = bola_toca;
+    if (bola_k < 0 || bola_k >= nob || ob[bola_k].tipo != HAOBJ_BOLA) return 0;
+    memcpy(p, ob[bola_k].p, sizeof ob[0].p);
+    return 1;
+}
+/* (C2C) los meteoritos del tipo 19 (control 0x0d y 0x29e018): los de hasta 40 secciones por delante del jugador empiezan
+   a caer (+C0; PROBABLE: el original mira [0x55cf38] & 3 == 2) desde 200 m por su direccion (la de la estrella del
+   INFARTO, 4AADC0: de lado y hacia abajo -0,5 - rand) a 6 m por paso (+B0) hasta su punto (+A4) */
+void haobj_meteoros(int sec_jug, haobj_met_t *r)
+{
+    int i, q;
+    memset(r, 0, sizeof *r);
+    for (i = 0; i < nob; i++) {
+        obj_t *o = ob + i;
+        if (o->tipo != HAOBJ_METEORO || o->est != 1) continue;
+        if (o->gol == 1) { o->gol = 2; r->golpes++; }
+        if (!o->act) {
+            float d[3], l, fx = jug_f[0], fz = jug_f[1];
+            if (sec_jug + 0x28 < o->sec) continue;
+            l = sqrtf(fx * fx + fz * fz); if (l < 1e-4f) { fx = 0; fz = 1; l = 1; }
+            d[0] = fz / l; d[2] = -fx / l; d[1] = -0.5f - (float)rand() * 4.65661287e-10f;
+            if (rand() <= 0x3ffffffe) { d[0] = -d[0]; d[2] = -d[2]; }
+            l = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+            for (q = 0; q < 3; q++) { d[q] /= l; o->b0[q] = d[q] * 6.0f; o->p[q] = o->r0[q] - 200.0f * d[q]; }
+            o->act = 1; o->vuela = 1; r->caen++;
+            continue;
+        }
+        if (o->vuela) {
+            o->p[0] += o->b0[0]; o->p[1] += o->b0[1]; o->p[2] += o->b0[2]; o->giro += 0.2f;
+            if (o->p[1] <= o->r0[1]) { memcpy(o->p, o->r0, sizeof o->p); o->vuela = 0; r->llegan++; }
+        }
+    }
 }

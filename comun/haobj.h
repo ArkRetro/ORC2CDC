@@ -49,9 +49,16 @@ void haobj_est_abre(int si);             /* 461080 / 45C880 con la clase 0x13 (-
    con su direccion; n = 0 las quita */
 void haobj_marcas(int n, const int *reg, const float (*p)[3], const float *fx, const float *fz);
 int  haobj_lista(haobj_dib_t *v, int max, const float ojo[3]);
-/* (C2C, campeonatos) un objeto de la clase cl (tipo de su control: 2 cono, 6 moneda, 7 arco) en p del mundo con giro
-   yaw y escala de la clase x esc; cl < 0 quita todos. 0 bien */
-int  haobj_pon(int cl, int tipo, const float p[3], float yaw, float esc);
+/* (C2C, campeonatos) un objeto de la clase cl (tipo de su control: 2 cono, 6 moneda, 7 arco, HAOBJ_BOLA, HAOBJ_METEORO) en
+   p del mundo con giro yaw, escala de la clase x esc y la seccion sec de la etapa; cl < 0 quita todos. 0 bien */
+int  haobj_pon(int cl, int tipo, const float p[3], float yaw, float esc, int sec);
+#define HAOBJ_BOLA 0x10                  /* la pelota del tipo 15 (rueda al tocarla) */
+#define HAOBJ_METEORO 0x0d               /* el meteorito del tipo 19 (cae y golpea) */
+#define HAOBJ_TOUR 0x100                 /* registro de CAMPOBJ.DAT (obj_tour_pmt) en haobj_dib_t.reg */
+void haobj_clase(int cl, int reg, float esc);   /* la clase cl con el registro reg de CAMPOBJ.DAT (CAMP.DAT CLS1) */
+int  haobj_bola(float p[3], int *toca);  /* la pelota (la ultima tocada o puesta): 1 si hay; toca: tocada en este paso */
+typedef struct { int caen, llegan, golpes; } haobj_met_t;
+void haobj_meteoros(int sec_jug, haobj_met_t *r);   /* un paso de los meteoritos; cuantos empiezan a caer, llegan y golpean */
 /* sprites 3D (4295D0 = PS2 0x115870): grupo de HAHUD.DAT, cuadro, punto del mundo y escala (px = esc x foco / z / 32;
    esc <= 0: sin escala, el sprite 2D de 429530 en el punto proyectado) */
 typedef struct haobj_s3d_s { char g[8]; int cuadro; float p[3], esc; } haobj_s3d_t;
