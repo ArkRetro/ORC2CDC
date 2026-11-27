@@ -43,6 +43,8 @@ CAMP.DAT (little endian):
      son de ese recurso (tabla 0x40a958); sus modelos en CAMPOBJ.DAT (ORD7, como HAOBJ.DAT)
   detras, 'SND1' y u16 efectos[19] (0x11c090): la pelota 7 (0x422cd0), el meteorito que cae 3 (0x423820), llega 3
      (0x423830) y golpea 3 + 3 (0x423840, 0x423850)
+  detras, 'ZON1', u32 n y n x {u16 peticion, u16 0, f32 de0, de1, hasta0, hasta1}: la zona lateral de las peticiones del
+     tipo 5 (+0x10..+0x1c del registro de 0x74 del guion; 0x232768 la interpola de la seccion inicial a la final)
 """
 import os, struct, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -116,7 +118,7 @@ def main():
         d_ = bytes(As.datos(por_hash[hash_nombre('\\bin\\%s.bin' % n_)])); nn, oo = cm._r077(d_, n_)
         usadas.update(struct.unpack_from('<I', d_, oo + 0x78 * k + 0x1c)[0] for k in range(nn))
     PAR = mips.Mips.PILA - 0x8000                            # parametros en la memoria del interprete (la pila)
-    lista = []; pets = bytearray(); npet = 0; tipos = {}; objs = []; t46 = []
+    lista = []; pets = bytearray(); npet = 0; tipos = {}; objs = []; t46 = []; zon = []
     # 0x297e20: +0x18 del objeto = 0x423080[clase] (la clase del banco 0x57); comprobado por el codigo que la lee
     assert par(0x29800c, 0x298014) == 0x423080, 'clases de los objetos (0x297e20)'
     banco = lambda c: u(0x423080 + 4 * c) & 0xff
@@ -163,6 +165,8 @@ def main():
                             f8, = struct.unpack_from('<f', d, q_ + 0x18); assert 0 <= cl_ < 15
                             objs.append(struct.pack('<H2h4B2x3f', npet, s0 + (ini if re_ else 0), s0 + (ini if re_ else 0), 1, cl_, banco(cl_), 0, l0, l0, f8))
                             q_ += 0x2c
+                if tipo == 5:                                 # la zona del 5 (0x232768: +0x10 / +0x14 de, +0x18 / +0x1c hasta)
+                    zon.append(struct.pack('<2H4f', npet, 0, *struct.unpack_from('<4f', d, r + 0x10)))
                 npet += 1
     W('240H', *lista)
     # los tipos de las etapas de los tres arboles (grupos 4, 5, 6: registros de 0x78, +0x1c el descriptor de tramo; el
@@ -205,6 +209,8 @@ def main():
     assert par(0x29e390, 0x29e394) == 0x423840 and par(0x29e3b8, 0x29e3bc) == 0x423850, 'efectos del golpe (0x29e018)'
     snd = [u(0x422cd0 + 4 * k) for k in range(7)] + [u(t + 4 * k) for t in (0x423820, 0x423830, 0x423840, 0x423850) for k in range(3)]
     out += b'SND1' + struct.pack('<19H', *snd)
+    out += b'ZON1' + struct.pack('<I', len(zon)) + b''.join(zon)
+    print('  zonas del tipo 5: %s' % ' '.join('%d:(%.2f..%.2f)-(%.2f..%.2f)' % ((struct.unpack('<2H4f', z)[0],) + tuple(struct.unpack('<2H4f', z)[2:])) for z in zon))
     print('  efectos de la pelota y los meteoritos: %s' % ' '.join('%x' % x for x in snd))
     open(os.path.join(sal, 'CAMP.DAT'), 'wb').write(out)
     # CAMPOBJ.DAT: sus modelos (ORD7 de conv_bo.modelo_conjunto, como HAOBJ.DAT; nodo: banderas << 16 | registro)

@@ -306,6 +306,23 @@ static int pon_objetos(const pet_t *p, int k)
     dbglog(DBG_INFO, "CAMP: objetos de la peticion %d, %d de la clase %d\n", pi, n, k);
     return n;
 }
+/* 0x2323e8 con el tipo 5: la zona lateral (fraccion del ancho de la carretera, de borde a borde) y su color (+0xc): subtipo 0
+   0..0,5 (2), 1 0,5..1 (3), 2 0,25..0,75 (4); 0x232768 la mira entre el inicio y el final de la peticion */
+static int zona_de(const cpet_t *d, float *lo, float *hi)
+{
+    if (d->tipo != 5 || d->sub > 2) return 0;
+    *lo = d->sub == 1 ? 0.5f : d->sub == 2 ? 0.25f : 0.0f; *hi = *lo + 0.5f;
+    return 2 + d->sub;
+}
+int camp_zona(float *lo, float *hi, int *s0, int *s1)
+{
+    const pet_t *p; int c;
+    if (!C || C->cur < 0) return 0;
+    p = &C->pet[C->cur];
+    if (p->fase < 1 || p->fase > 5 || !(c = zona_de(p->d, lo, hi))) return 0;
+    *s0 = p->d->ini; *s1 = p->d->fin;
+    return c;
+}
 /* cuantos de la clase del banco cl en la lista de este paso */
 static int cuantos(const int *v, int n, int cl) { int i, k = 0; for (i = 0; i < n; i++) k += v[i] == cl; return k; }
 
@@ -423,6 +440,19 @@ static void tipo_paso(pet_t *p, const camp_coche_t *c, float dpos)
                 if (p->tmr >= 0x78) { p->tmr = 0; animo(8, -1); }
             }
         } else if (p->fase == 5 && p->nota == 6) p->extra += (int)(70.0f * frena(p->v_ini, p->v_fin));
+        break;
+    case 5:                                             /* 0x2a3db0: ir por la zona del subtipo (0x2323e8 / 0x232768) */
+        if (p->fase == 4) {
+            float lo, hi; int dentro = zona_de(d, &lo, &hi) && c->seccion >= d->ini && c->seccion < d->fin && c->lat > lo && c->lat < hi;
+            if (dentro && (d->p[6] != 1 || c->derrapa)) { if (!p->h74) { p->h74 = 1; p->h7c = 0.0f; } }   /* (+0x78 == 1: derrapando) */
+            else if (p->h74) { p->h7c = 0.0f; p->h74 = 0; }
+            p->h7c += dpos;
+            if (p->h74) {
+                int v = (int)c->kmh, k = ++p->tmr;
+                p->med += dpos * (LLENO / (largo * 0.9f));
+                if ((v > 0xf0 && k % 100 == 0) || (v > 0xc8 && k % 0x8c == 0) || (v > 0x96 && k % 0xb4 == 0)) animo(5, k % 5);
+            }
+        } else if (p->fase == 5 && p->nota == 6) p->extra += bono(p, 0.9f);
         break;
     case 15:                                            /* 0x293190: empujar la pelota (clase 8 = 0x11 del banco) */
         if (p->fase == 1) { pon_objetos(p, 8); p->h7c = LLENO / ((float)(d->fin - d->ini) * 0.85f); p->h70 = p->h78 = 0; p->h74 = C->obj_s0; }

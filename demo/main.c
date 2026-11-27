@@ -8266,6 +8266,47 @@ FRIO static void camp_golpe_(void)                                   /* el meteo
     fis.vx *= 0.9f; fis.vy *= 0.9f; yo.v = sqrtf(fis.vx * fis.vx + fis.vy * fis.vy); voz_contacto = 1;
 }
 static int ha_seccion(float x, float z);
+/* (C2C) la zona del tipo 5 sobre la carretera: DESVIACION (el original la marca de otra forma, SIN averiguar): una tira
+   translucida de su color (el del rotulo del subtipo: rojo, azul, verde) entre los laterales lo..hi, de 6 en 6 m y solo de 2 a 150 m por delante del coche
+   (<= 50 triangulos), en la lista transparente */
+#define CZ_PASO 6.0f
+#define CZ_LEJOS 150.0f
+static void camp_zona_dibuja(void)
+{
+    static pvr_poly_hdr_t cab __attribute__((aligned(32))); static int cab_ok;
+    float lo, hi, s, s0, s1; int a, b, col = camp_zona(&lo, &hi, &a, &b), n = 0; uint32_t c;
+    if (!col) return;
+#ifdef DIAG_SIN_ZONA
+    return;                                                     /* medida: sin dibujarla */
+#endif
+    s0 = s_etapa + (float)a * m_pos; s1 = s_etapa + (float)b * m_pos;
+    if (s0 < yo.s + 2.0f) s0 = yo.s + 2.0f;
+    if (s1 > yo.s + CZ_LEJOS) s1 = yo.s + CZ_LEJOS;
+    if (s1 <= s0 || !ta_cabe(2 * (int)((s1 - s0) / CZ_PASO + 2))) return;
+    if (!cab_ok) {
+        pvr_poly_cxt_t cx; pvr_poly_cxt_col(&cx, PVR_LIST_TR_POLY);
+        cx.gen.culling = PVR_CULLING_NONE; cx.gen.fog_type = PVR_FOG_TABLE; cx.gen.alpha = PVR_ALPHA_ENABLE;
+        cx.blend.src = PVR_BLEND_SRCALPHA; cx.blend.dst = PVR_BLEND_INVSRCALPHA;
+        pvr_poly_compile(&cab, &cx); cab_ok = 1;
+    }
+    c = col == 2 ? 0x60ff4040u : col == 3 ? 0x603070ffu : 0x6040e040u;   /* (los rotulos: 0 rojo, 1 azul, 2 verde) */
+    mat_load(&vista); pvr_prim(&cab, sizeof cab);
+    for (s = s0; ; s += CZ_PASO) {
+        float p[3], th, iz, de; int k;
+        if (s > s1) s = s1;
+        ruta_en(s, p, &th, &iz, &de);
+        for (k = 0; k < 2; k++) {
+            float x = de - (k ? hi : lo) * (iz + de), X = p[0] + x * cosf(th), Y = altura(s, x) + 0.06f, Z = p[2] + x * sinf(th), w;
+            pvr_vertex_t v;
+            mat_trans_single3_nodivw(X, Y, Z, w);
+            if (!(w > cerca)) w = cerca;
+            v.flags = s >= s1 && k ? PVR_CMD_VERTEX_EOL : PVR_CMD_VERTEX; v.x = X / w; v.y = Y / w; v.z = 1.0f / w;
+            v.u = v.v = 0; v.argb = c; v.oargb = 0; pvr_prim(&v, sizeof v); n++;
+        }
+        if (s >= s1) break;
+    }
+    vtx_env += (uint32_t)n;
+}
 /* 0x22a048: lo que lee el gestor del coche del jugador (los mismos campos que el INFARTO) */
 FRIO static void camp_paso_jug(int toca)
 {
@@ -8284,6 +8325,7 @@ FRIO static void camp_paso_jug(int toca)
         c.bola_sec = bola_s;
         haobj_meteoros(c.seccion, &mt); c.met_caen = mt.caen; c.met_llegan = mt.llegan;
     }
+    {   float p[3], th, iz, de; ruta_en(yo.s, p, &th, &iz, &de); c.lat = iz + de > 0.1f ? (de - yo.x) / (iz + de) : 0.5f; }   /* (0 el borde derecho: PROBABLE, el dibujo del rotulo) */
     c.kmh = fis_ok ? fis.velocidad_hud : yo.v * 3.6f; c.pasados = pt_pasados;
     c.choque = fis_ok ? fis.choque : 0;
     c.choque_ini = fis_ok && fis.t_choque > 0.0f && t_choque_ant <= 0.0f; t_choque_ant = fis_ok ? fis.t_choque : 0;
@@ -14347,6 +14389,7 @@ static void coche_trasero_paso(int carrera)
 static int gh_nodo_ant = -1, gh_rama_ant = -1; static float gh_union_ant = -1;   /* la union de la etapa anterior */
 static coche_t gh_c; static matrix_t gh_mat __attribute__((aligned(32)));
 static volatile int gh_guardando, gh_soltar;
+static uint32_t gh_gen;                                         /* (C2C 4) +1 cada vez que gh_rec / gh_rep se sueltan (para invalidar lo que apunte a ellos) */
 #define GH_BUF (sizeof(gh_cab_t) + GH_MAX * sizeof(gh_m_t))      /* el fichero de la VMU (lectura y guardado): en el */
                                                                 /* monton solo mientras se lee o se guarda (C2C 3: 28 KB de RAM del arranque) */
 #define GH_U (65536.0f / 6.2831853f)
@@ -14355,7 +14398,7 @@ static void gh_suelta(void)
 {
     if (!gh_rec) return;
     if (gh_guardando) { gh_soltar = 1; return; }
-    free(gh_rec); gh_rec = gh_rep = NULL; gh_nrep = gh_nrec = 0; gh_clave = -1; gh_grabando = 0; gh_soltar = 0;
+    free(gh_rec); gh_rec = gh_rep = NULL; gh_nrep = gh_nrec = 0; gh_clave = -1; gh_grabando = 0; gh_soltar = 0; gh_gen++;
 }
 /* al empezar la carrera (y REINTENTAR): la grabacion a cero; en la CONTRARRELOJ la del curso, de la RAM o de la VMU */
 static void gh_empieza(void)
@@ -16271,6 +16314,7 @@ int main(int argc, char **argv)
                 coche_dibuja(l, &mod_coche, 1);                 /* la vista interior: el habitaculo (vm = 2) */
             if (l == 0) gh_ve = estado != TITULO && !mundo_fuera && !fin24 && gh_coloca();   /* el fantasma (Contrarreloj) */
             if (gh_ve) gh_dibuja(l);
+            if (variante == 5 && l == 2 && estado == CARRERA) camp_zona_dibuja();   /* (C2C) la zona del tipo 5 */
             POP_CAT(2);
             PRF(5);
             if (fin24) robot_dibuja(&rc_chr, l);              /* 514E60 de la pareja del final */

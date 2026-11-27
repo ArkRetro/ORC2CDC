@@ -27,6 +27,7 @@ typedef struct {
     int   modelo;           /* el modelo del coche (car+0x11)                                                 */
     int   bola_sec, bola_toca;   /* la pelota del tipo 15: su seccion (-1 sin pelota) y si se ha tocado en este paso */
     int   met_caen, met_llegan;  /* meteoritos del tipo 19 que empiezan a caer / llegan al suelo en este paso      */
+    float lat;              /* (tipo 5) el lateral del coche: fraccion del ancho de la carretera, 0 el borde derecho   */
 } camp_coche_t;
 
 /* al empezar la carrera: fila (46C520: 1 OutRun2 SP, 0 OutRun 2, 2 mixto), forzada (cfg1: se sale de una etapa del
@@ -51,7 +52,9 @@ extern void (*camp_obj)(int cl, int tipo, float sec, float lat, float esc);
    (0x205220); -1 solo prepara (al empezar la etapa) */
 extern void (*camp_chica)(int que, uint32_t v);
 extern void (*camp_golpe)(void);           /* el golpe del meteorito (0x182d38 con el estado 7 y la velocidad x 0,9) */
-int  camp_clases(const uint8_t **v);       /* 'CLS1' de CAMP.DAT: n x {u8 clase, u8 registro de CAMPOBJ.DAT, u16, f32 escala} */
+int  camp_clases(const uint8_t **v);
+/* la zona del tipo 5 de la peticion en curso (anuncio..final): lateral lo..hi y secciones s0..s1; su color (2..4) o 0 */
+int  camp_zona(float *lo, float *hi, int *s0, int *s1);       /* 'CLS1' de CAMP.DAT: n x {u8 clase, u8 registro de CAMPOBJ.DAT, u16, f32 escala} */
 /* HUD (0x22a5b8: el panel 2C002A, las filas 0x1bd920 por nivel y el contador; 0x230f70 / 0x2314e8: los rotulos) */
 int  camp_rotulo(int *texto, int *marco, int *cuadro);
 uint32_t camp_tinte(void);
