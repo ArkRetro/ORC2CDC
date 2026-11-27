@@ -9054,6 +9054,40 @@ static float nv_xm[16] __attribute__((aligned(8)));             /* la XMTRX de q
 #ifdef DIAG_SIGV
 static float dg_sig_r; static int dg_sig_n, dg_sig_c;
 #endif
+/* Rev 2.9.9.d (FPS; -DNODOS_CULL=0: lo de antes). Como ETAPA_CULL en dibuja_etapa: las tres primeras pruebas de cada
+   nodo de nodos_visibles (lejos, detras del plano cercano y fuera de los laterales: las que quitan casi todos los
+   nodos de la lista de la seccion) en un bucle corto, nodos_candidatos, con todo en registros; el bucle de siempre solo
+   ve los que pasan (con su zv). Las mismas cuentas (el mismo ftrv con las mismas filas) y las mismas marcas (FF, POPR) */
+#if !defined(NODOS_CULL) && defined(LB_NODOS)
+#define NODOS_CULL 1
+#endif
+#ifndef NODOS_CULL
+#define NODOS_CULL 0
+#endif
+#if NODOS_CULL
+#define NC_N 32
+/* nodos L[j..n) (o j..n sin L) que pasan las tres pruebas, hasta NC_N: indice en oi y zv en oz; *jn = el siguiente j.
+   cu: ojo (3), cerca, lejos, tanh, tanv, kh, kv. La XMTRX son las filas der, arr, ade (LB_NODOS) */
+static __attribute__((noinline)) uint32_t nodos_candidatos(const nodo_t *ND, const uint16_t *L, uint32_t j, uint32_t n, uint32_t nnod,
+                                                           const float *cu, uint32_t *FF, uint32_t *oi, float *oz, uint32_t *jn)
+{
+    const float o0 = cu[0], o1 = cu[1], o2 = cu[2], cer = cu[3], lej = cu[4], tanh = cu[5], tanv = cu[6], kh = cu[7], kv = cu[8];
+    uint32_t c = 0;
+    for (; j < n && c < NC_N; j++) {
+        const uint32_t i = L ? L[j] : j; const nodo_t *d; float xv, yv, zv, w_ = 0.0f;
+        if (i >= nnod) continue;
+        d = ND + i;
+        xv = d->cx - o0; yv = d->cy - o1; zv = d->cz - o2;
+        lb_ftrv(&xv, &yv, &zv, &w_);
+        if (zv - d->r > lej) { POPR(i, PR_LEJOS); continue; }
+        if (zv + d->r < cer) { if (FF) FF[i >> 5] |= 1u << (i & 31); POPR(i, PR_DETRAS); continue; }
+        if (fabsf(xv) - zv * tanh > d->r * kh || fabsf(yv) - zv * tanv > d->r * kv) { if (FF) FF[i >> 5] |= 1u << (i & 31); POPR(i, PR_LADO); continue; }
+        oi[c] = i; oz[c] = zv; c++;
+    }
+    *jn = j;
+    return c;
+}
+#endif
 /* Rev 2.9.9 (LEJ_EN_TOPE, CORTE_NODO): las versiones lejanas puestas en lugar de un nodo que no cabia (lej_cambia,
    corte_nodos), por tramo, en este cuadro y en el anterior. En el cuadro siguiente no cuentan como "ya se dibujaba"
    para el nodo completo (la histeresis del reparto, REPARTO_HIST_*): si contaran, el completo entraria con la clase
@@ -9122,6 +9156,19 @@ static void nodos_visibles(modelo_t *mo)
     {   const float r0[4] = { d0, d1, d2, 0.0f }, r1[4] = { a0, a1, a2, 0.0f }, r2[4] = { e0, e1, e2, 0.0f }, r3[4] = { 0, 0, 0, 0 };
         lb_xmtrx_filas(r0, r1, r2, r3); }
 #endif
+#if NODOS_CULL
+    const float ncu[9] = { o0, o1, o2, cer, lej, tanh, tanv, kh, kv };
+    uint32_t nc_i[NC_N], nc_c = 0, nc_k = 0, nc_j = 0; float nc_z[NC_N];
+    (void)j;
+    for (;;) {
+        uint32_t i, rama, u, c_teo, c_v, g, ya, ip; nodo_t *d; float zv, lim; int cp, cd, gracia;
+        if (nc_k >= nc_c) {                                     /* (nodos_candidatos: los que pasan lejos / detras / lado) */
+            if (nc_j >= n) break;
+            nc_c = nodos_candidatos(ND, L, nc_j, n, nnod, ncu, FF, nc_i, nc_z, &nc_j); nc_k = 0;
+            if (!nc_c) continue;
+        }
+        i = nc_i[nc_k]; zv = nc_z[nc_k]; nc_k++; d = ND + i;
+#else
     for (j = 0; j < n; j++) {
         uint32_t i = L ? L[j] : j, rama, u, c_teo, c_v, g, ya, ip; nodo_t *d; float dx, dy, dz, zv, xv, yv, lim; int cp, cd, gracia;
         if (i >= nnod) continue;
@@ -9140,6 +9187,7 @@ static void nodos_visibles(modelo_t *mo)
         xv = dx * d0 + dy * d1 + dz * d2; yv = dx * a0 + dy * a1 + dz * a2;
 #endif
         if (fabsf(xv) - zv * tanh > d->r * kh || fabsf(yv) - zv * tanv > d->r * kv) { if (FF) FF[i >> 5] |= 1u << (i & 31); POPR(i, PR_LADO); continue; }
+#endif
         u = d->fl & 15;
         lim = d->r * lod * (float)(1u << ((u ? u : 6) - 1));
         if (u && zv > 0 && zv > lim * (float)(1 << REPARTO_LOD_MAS)) { POPR(i, PR_LOD); continue; }   /* LOD (y lo de mas) */
