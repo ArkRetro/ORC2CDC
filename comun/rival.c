@@ -34,6 +34,7 @@ static int tab_ok;
 static float t_cabeza[16][3]; static uint32_t mix_off[RIVAL_NMIS], mix_base; static int mix_ok;
 #define NZONAS 24                                               /* (MISION.DAT de SLES-53998: 20 como mucho) */
 static rival_zona_t zonas[NZONAS]; static int nzonas;
+static float t_pace[12][19]; static int pace_ok;            /* 'PAC1': 472B60 (6 x {dist, angulo, factor}, limite) */
 
 static rival_mision_t mis; static int mis_ok;
 static int32_t esp_w[8][12]; static int nesp;                   /* especiales: e0..e18, e1c, e20, hay24, e24[2] */
@@ -70,6 +71,23 @@ int rival_inicia(void)
         if ((uint32_t)(t - b) + 8 + 192 + 4 * RIVAL_NMIS <= sz && !memcmp(t, "MIX2", 4) && u32le(t + 4) == RIVAL_NMIS) {
             memcpy(t_cabeza, t + 8, 192); memcpy(mix_off, t + 200, 4 * RIVAL_NMIS);
             mix_base = (uint32_t)(t - b); mix_ok = 1;
+        }
+        pace_ok = 0;
+        if (mix_ok) {
+            uint32_t q;
+            for (q = mix_base; q + 4 + 12 * 0x48 <= sz; q += 4)
+                if (!memcmp(b + q, "PAC1", 4)) {
+                    int c, k2;
+                    for (c = 0; c < 12; c++) {
+                        const uint8_t *e = b + q + 4 + 0x48 * c;
+                        for (k2 = 0; k2 < 6; k2++) {
+                            int16_t an; memcpy(&t_pace[c][3 * k2], e + 12 * k2, 4); memcpy(&an, e + 12 * k2 + 4, 2);
+                            t_pace[c][3 * k2 + 1] = an; memcpy(&t_pace[c][3 * k2 + 2], e + 12 * k2 + 8, 4);
+                        }
+                        memcpy(&t_pace[c][18], e + 0x3c, 4);
+                    }
+                    pace_ok = 1; break;
+                }
         }
     }
     lista_ok = tab_ok = 1;
@@ -471,6 +489,12 @@ void rival_banderas(int i, int bits)
     if (r) r->fl71 = (uint8_t)((r->fl71 & ~0xf) | (bits & 0xf));
 }
 int rival_zonas(const rival_zona_t **z) { *z = zonas; return nzonas; }
+const float *rival_pace(int carreras, int clase)
+{
+    if (!pace_ok) return NULL;
+    if (carreras) return clase >= 0 && clase < 4 ? t_pace[8 + clase] : NULL;
+    return clase >= 0 && clase < 8 ? t_pace[clase] : NULL;
+}
 const float *rival_cabeza(int modelo) { return mix_ok ? t_cabeza[modelo >= 0 && modelo < 16 ? modelo : 0] : NULL; }
 
 /* 47DA80 (PS2 0x1f0c60): el coche de carreras de referencia del HUD: el lider ([64E190]) o, si lidera el jugador, el

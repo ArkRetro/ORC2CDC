@@ -73,6 +73,9 @@ int  rival_ultimo(void);                        /* 64E194 (477350): el ultimo de
 void rival_elimina(int i);                      /* 477430: fuera de la carrera (eliminado o pillado) */
 void rival_banderas(int i, int bits);           /* 477090: +0x71 bits 0..2 del coche abierto (y el 3 con 4960A0) */
 typedef struct { uint8_t nodo, en_union; uint16_t desde, hasta, pad; float v[6]; } rival_zona_t;
-int  rival_zonas(const rival_zona_t **z);       /* 474990: las zonas de derrape de la mision (MISION.DAT 'MIX2') */
+int  rival_zonas(const rival_zona_t **z);
+/* 472B60: la tabla del de delante (coche de carreras o del trafico) de su clase: 6 x {distancia, angulo (65536 = vuelta),
+   factor} y el limite (MISION.DAT 'PAC1' = PS2 0x40bcc8 / 0x40bde8); NULL sin ella */
+const float *rival_pace(int carreras, int clase);       /* 474990: las zonas de derrape de la mision (MISION.DAT 'MIX2') */
 const float *rival_cabeza(int modelo);          /* 495D90: el punto de las marcas del coche del jugador (PS2 0x40c370) */
 #endif

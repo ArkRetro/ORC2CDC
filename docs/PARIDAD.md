@@ -6744,3 +6744,55 @@ las zonas de derrape por mision); lo anterior igual byte a byte (la demo de ante
 decompilacion (corre el x86 traducido) y en la PS2 esta hacia 0x22xxxx sin seguir; es un modulo entero (peticiones de
 Req_*.bin por curso, su HUD y sus resultados). El mapa de los campeonatos ya estaba (Rev 1.2); A en una casilla sigue
 dando el sonido de bloqueado.
+
+### C2C, segunda tanda (agente c2c, 2026-11-27): verificacion por el menu, 472E60, 474080 y la espera de 474D30
+
+**Verificado en Flycast por el menu real** (licencia nueva con `-DPRUEBA_NOTAS_C2C`, el piloto conduce:
+`-DPRUEBA_PILOTO_MENU -DPRUEBA_SIN_TIEMPO -DPRUEBA_PUNTOS`, salida cerca de la meta con `-DPRUEBA_NODO` / `-DPRUEBA_FIN`):
+- Tipo 2 entrando por el menu: UN JUGADOR -> COAST 2 COAST -> categorias -> mapa (dos a la derecha) -> detalle "3
+  PRINCIPIANTE" ("¡¡¡Derrapa para ganar puntos!!!") -> coche, cambio, musica -> `RIVAL: mision 3-1 tipo 2` -> META ->
+  `LICENCIA: mision 3-1 nota 3 (guardada 3)` -> modo 34 -> modo 35 "¡MISION FALLIDA!" (nota < 4: 2B0068) con REINTENTAR /
+  ABANDONAR.
+- Tipo 3 (9-1, `-DPRUEBA_MISION=15` con el menu real) hasta la meta: nota 4, `LICENCIA: mision 9-1 nota 4 (guardada 4)`
+  (antes 7, sin jugar), 830 millas, modo 35 "¡MISION SUPERADA!" con SIGUIENTE RONDA / REINTENTAR / ABANDONAR.
+- La marca 2B000E del choque del tipo 3 (el corazon roto que sale sobre el coche al restar 2000): vista con el choque
+  forzado cada 15 s de `-DPRUEBA_PUNTOS` (que el piloto choque de verdad con otro coche no se ha visto).
+- Capturas (scratchpad, modos/c2c/cap/): menu_tipo2_meta_35, menu_tipo3_meta_35, tipo3_marca_2B000E; registros
+  log_menu_tipo2.txt / log_menu_tipo3.txt / log_472b60.txt.
+
+**472E60 / 472B60 (PS2 0x1e55f8 / 0x1e5188), HECHO con lo que falta marcado.** El coche de carreras no pasa de la
+velocidad que le deja el de delante (+314, tr_del) ni el de delante de ese: con la tabla de la clase del de delante
+(MISION.DAT 'PAC1', del ELF: 0x40bcc8 los del trafico, 8 clases, y 0x40bde8 los coches de carreras, 4; 6 filas
+{distancia, angulo, factor} y un limite), a menos de la distancia de una fila y con el angulo hacia el menor que el de
+la fila (x (1 - |sen(derrape / 2)|)), su velocidad x el factor (con factor < 1: x 0,99 con el jugador, x 0,999 con los
+demas); pasados 360,3 cuadros, nada si el de delante va mas deprisa; no con el jugador delante cambiando de carril.
+PROBABLE: la clase (+320 del original) es la +324 de la demo; sin el termino de +BB8 ni el empuje de lado +BE4 (3,5 m, que
+este trafico no lee). Medido en la 12-1: limita (229 veces en ~80 s, `472B60 n` en la linea RIVAL), 39,23 fps como antes
+(triangulos por cuadro 13536, 059fc97 13459).
+
+**474080 (PS2 0x1e8090): constantes del original.** Sin rebufo con |+162| > 15 grados (0x3bb40000 = 360 / 65536); por
+los coches de delante en orden hasta 60 m; si el de delante va a mas de 0,7 x su +1C4 (> 1) y esta a menos de 5 de lado: a
+mas de 10 el rebufo (x 0,7 x +1C4, +C 0x40000) y si no nada; los de 5 de lado o mas (a mas de 15) solo apuntan el carril
+libre (+C08, que este trafico no usa). Sigue PROBABLE la condicion de entrada (+C 0x20000, tomada por cfg +0x30 & 8).
+
+**La espera de 474D30 (PS2 0x1e96a0): no ocurre en el original.** Tras subir de marcha (+208 > +1D8) y con mas de 0x384
+cuadros, con azar / 65535 < +BC8 (y sin +8 0x10000) +C26 = 0x78 y durante esos cuadros no se llama al cambio 502420. Pero
++BC8 no lo escribe nadie al abrir el coche de carreras (0x1ed360..0x1ed3dc copia del registro +B78..+B94, +BD0, +BCC y
++C36..+C38, nada en +BC8; en el PC tampoco hay quien lo escriba fuera de su borrado): vale 0 y la espera no salta. No se
+porta (seria codigo muerto).
+
+**RAM:** text + data + bss 2949528 (059fc97: 2950676); 'PAC1' son 912 bytes de BSS en rival.c.
+
+**Campeonatos (variante 5): investigado, NO portado.** Lo averiguado en SLES-53998:
+- Es un suceso del juego como el gestor de misiones: la tabla de descriptores de sucesos (5 palabras: inicio, control,
+  dibujo, 0, fin) en 0x3ee900..; el de las misiones (0x191) en 0x3eea1c = {0x1f7ce0, 0x1f7d00, 0x1f7d20, 0, 0x1f7d40} y
+  justo antes (0x190) el de los campeonatos {0x22db28, 0x22db50, 0x22db70, 0, 0x22dbb0}: envoltorios que llaman a los
+  metodos de un objeto en la BSS 0x616238 (0x229e88 inicio, 0x22a048 control, 0x22a2b0 dibujo, 0x22a5b8, 0x22ac00,
+  0x22b470 fin).
+- Tamano: 0x229e88..~0x234000, unas 108 funciones (~40 KB de codigo MIPS, ~10 000 instrucciones), con su propio lector
+  de guion (0x21ba68, 60 llamadas: las peticiones de Req_*.bin), la cola de voces (0x1ac3d8), los coches (0x1e1910) y el
+  HUD de sprites (0x164xxx). En el PC (7F9460) no hay fuente: corre el x86 traducido.
+- Pantallas: el mapa de campeonatos ya portado (Rev 1.2, frontal 0x240d68..); en carrera las peticiones del guion del
+  curso (REQUEST_NORMAL / SPECIAL1..3) con su HUD; el resultado va a los cuartetos de la licencia (+0x36E).
+- Portarlo es un modulo del tamano del INFARTO (comun/infarto.c): no cabe en esta tanda. A en una casilla del mapa de
+  campeonatos sigue dando el sonido de bloqueado.

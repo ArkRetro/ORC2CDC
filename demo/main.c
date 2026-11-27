@@ -7898,6 +7898,30 @@ static void rc_marcha(trafico_t *t)
     t->marcha = g;
 }
 /* 47A7C0 (PS2 0x1e5dc0): el objetivo de velocidad (+10DC) y su ritmo (+10E0) del coche de carreras */
+/* 472B60 (PS2 0x1e5188): la velocidad que deja el coche o delante a uno de carreras: con la tabla de la clase del de
+   delante (MISION.DAT 'PAC1' = 0x40bcc8 del trafico, 0x40bde8 de los de carreras), a menos de la distancia de una fila y
+   con el angulo hacia el (65536 la vuelta, x (1 - |sen(derrape / 2)|)) menor que el de la fila: la del de delante x el
+   factor de la fila (si es < 1, x 0,99 con el jugador y 0,999 con los demas). Pasados 360,3 cuadros, si el de delante va
+   mas deprisa, nada. PROBABLE: la clase (+320 del original) es la +324 de la demo (tr_cls) y el termino de +BB8 falta */
+static int rc_pace_n;                                           /* (prueba: veces que 472B60 limita, en rc_diag) */
+static float rc_pace(int e, int o, float ps)
+{
+    trafico_t *t = traf + e; int car = o != TR_JUG && traf[o].rc, k; const float *T;
+    float d = tr_dist(o, e), vo = o == TR_JUG ? yo.v : traf[o].c.v, f, rel, ebx;
+    if (crono > 360 && vo > t->c.v) return ps;
+    if (!(T = rival_pace(car, car ? tr_cls(o) & 3 : tr_cls(o))) || !(d < T[18])) return ps;
+    f = fabsf(sinf(t->c.deriva * 0.5f));
+    if (car) f *= fabsf(sinf(traf[o].c.deriva * 0.5f));
+    rel = dif_ang(atan2f(tr_x(o) - tr_x(e), tr_s(o) - tr_s(e)) - (t->c.a + t->c.deriva));
+    ebx = fabsf(rel) * 10430.378f * (1.0f - f);
+    for (k = 0; k < 6; k++) {
+        if (!(T[3 * k] > d) || !(ebx < T[3 * k + 1])) continue;
+        rc_pace_n++;
+        if (T[3 * k + 2] < 1.0f) return vo * (o == TR_JUG ? 0.99f : 0.999f);
+        return vo * T[3 * k + 2];
+    }
+    return ps;
+}
 static float rc_objetivo(int e, int d, int *f0, int *f1, float *rate)
 {
     trafico_t *t = traf + e; rival_t *r = rival_reg(t->rc - 1); const rival_mision_t *mi = rival_mis();
@@ -7932,6 +7956,14 @@ static float rc_objetivo(int e, int d, int *f0, int *f1, float *rate)
             break;
         }
         if (ps > v2) { ps = v2; *f0 = 1; *f1 = 0; }
+        {   /* 472E60 (PS2 0x1e55f8): el ritmo por el de delante (+314) y el de delante de ese (472B60); sin el empuje de
+               lado +BE4 (este trafico no lo lee). No con el jugador delante cambiando de carril (+C 0x600) */
+            int pv = tr_del[e], pp = pv >= 0 ? tr_del[pv] : -1; float r0, r1;
+            if (pv >= 0 && !(pv == TR_JUG && t->b14 > 0)) {
+                r1 = rc_pace(e, pv, ps); r0 = pp >= 0 ? rc_pace(e, pp, ps) : ps;
+                if (!(r0 < r1)) { if (ps > r1) ps = r1; } else if (ps > r0) ps = r0;
+            }
+        }
         {   /* el rebufo del jugador: detras de el a 4..60 m y de 4 a 12 m de lado, x 0,7 x su +1C4 */
             float sj = rc_j.v * 0.7f;                           /* 0x3f333333 */
             if (sj > 1.0f && vmf > sj) {
@@ -7942,17 +7974,27 @@ static float rc_objetivo(int e, int d, int *f0, int *f1, float *rate)
                     if (-4.0f > d0 && d0 > -60.0f) { ps *= sj; bits |= 1; }
                 }
             }
-            if (!(bits & 1) && mi && (mi->cfg[12] & 8)) {      /* 474080 (cfg +0x30 & 8): el rebufo del coche de delante,
-                                                                   SIMPLIFICADO (PROBABLE: 2 m de lado, 4..60 m) */
-                float sv = vmf * 0.7f; int q, mejor = -1; float dm = 60.0f;
-                if (sv > 1.0f && fabsf(t->c.deriva) < 0.05f)
-                    for (q = 0; q < NTRAF; q++) {
-                        float dd;
-                        if (q == e || traf[q].carril < 0 || !(traf[q].c.v / 60.0f > sv)) continue;
-                        dd = traf[q].c.s - t->c.s;
-                        if (dd > 4.0f && dd <= dm && fabsf(traf[q].c.x - t->c.x) < 2.0f) { dm = dd; mejor = q; }
+            if (!(bits & 1) && mi && (mi->cfg[12] & 8)) {      /* 474080 (PS2 0x1e8090; con +C 0x20000, que aqui se toma
+                                                                   por cfg +0x30 & 8, PROBABLE): por los coches de delante en
+                                                                   orden (+314) hasta 60 m, con el suyo a menos de 15 grados
+                                                                   (|+162| x 360 / 65536), si el de delante va a mas de 0,7 x
+                                                                   su +1C4 (> 1) y a menos de 5 de lado: a mas de 10 el rebufo
+                                                                   (x 0,7 x +1C4 y +C 0x40000); si no, el siguiente */
+                float sv = vmf * 0.7f, dprev = 0.0f; int q;
+                if (sv > 1.0f && fabsf(t->c.deriva) * 57.29578f <= 15.0f)
+                    for (;;) {
+                        int mejor = -1; float dm = 60.0f + 1e-3f;
+                        for (q = 0; q < NTRAF; q++) {
+                            float dd;
+                            if (q == e || traf[q].carril < 0) continue;
+                            dd = traf[q].c.s - t->c.s;
+                            if (dd > dprev && dd < dm) { dm = dd; mejor = q; }
+                        }
+                        if (mejor < 0 || dm > 60.0f) break;
+                        dprev = dm;
+                        if (!(traf[mejor].c.v / 60.0f > sv)) continue;
+                        if (fabsf(traf[mejor].c.x - t->c.x) < 5.0f) { if (dm > 10.0f) { ps *= sv; bits |= 1; } break; }
                     }
-                if (mejor >= 0) { ps *= sv; bits |= 1; }
             }
         }
     }
@@ -7996,7 +8038,7 @@ static void rc_diag(void)
 {
     int i; static int n;
     if (++n % 60) return;
-    dbglog(DBG_INFO, "RIVAL: jugador pos %d puesto %d/%d %.0f km/h; ", rc_j.pos, rival_puesto() + 1, rival_total(), (double)(yo.v * 3.6f));
+    dbglog(DBG_INFO, "RIVAL: jugador pos %d puesto %d/%d %.0f km/h, 472B60 %d; ", rc_j.pos, rival_puesto() + 1, rival_total(), (double)(yo.v * 3.6f), rc_pace_n);
     for (i = 0; i < rival_n(); i++) {
         rival_t *r = rival_reg(i);
         if (r->dif < -20 || r->dif > 80) continue;
@@ -8074,6 +8116,7 @@ static void c2c_paso(void)
     c2c_marca_punto(j.mx, j.my);
 #ifdef PRUEBA_PUNTOS
     if ((crono / 240) & 1) { j.d36 = 1; j.rebufo = 1.0f; j.beta = 0; }   /* prueba: derrape / rebufo a ratos (el piloto no lo hace) */
+    if (crono % 900 == 450) j.choque = 1;                     /* prueba: un choque con otro coche (la marca 2B000E del tipo 3) */
 #endif
     mision_ui_paso(); mision_paso(&j);
     if (fis_ok && da4 != (int8_t)fis.da4) fis.da4 = da4;

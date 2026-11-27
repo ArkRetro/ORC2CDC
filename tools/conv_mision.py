@@ -170,6 +170,11 @@ def extension(E, par, d, o, rel, cats, n):
         if x is None: offs.append(0)
         else: offs.append(len(out)); out += x
     out = out[:tabla_o] + struct.pack('<%dI' % n, *offs) + out[tabla_o + 4 * n:]
+    # 'PAC1' (detras): las tablas de 472B60 (el ritmo del coche de carreras detras de otro; PS2 0x1e5188): 8 clases de
+    # 0x48 bytes para los del trafico (0x40bcc8, por +0x320 del de delante) y 4 para los coches de carreras (0x40bde8);
+    # cada una 6 x {f32 distancia, i16 angulo, i16 0, f32 factor} y f32 limite en +0x3C
+    assert par(0x1e5408, 0x1e5410) == 0x40bcc8 and par(0x1e536c, 0x1e5374) == 0x40bde8, 'ELF inesperado (472B60)'
+    out += b'PAC1' + bytes(E.lee(0x40bcc8, 8 * 0x48)) + bytes(E.lee(0x40bde8, 4 * 0x48))
     print('MIX2: %d misiones con zonas de derrape (%d zonas)' % (sum(1 for x in listas if x),
           sum(struct.unpack_from('<I', x)[0] for x in listas if x)))
     return out
