@@ -14285,7 +14285,8 @@ FRIO static void tabla_entra(void)
 #define GH_MAX 2400                                             /* muestras (5 min 20 s) */
 typedef struct { uint8_t nodo, fl; uint16_t d; int16_t x, a, der, v; } gh_m_t;   /* fl: bit 0 union, bits 1..2 rama + 1 */
 typedef struct { char marca[4]; uint16_t ver, clave; uint32_t n, total_ms, modelo; } gh_cab_t;
-static gh_m_t gh_rec[GH_MAX], gh_rep[GH_MAX];
+static gh_m_t *gh_rec, *gh_rep;                                 /* (C2C 4) la grabacion y el fantasma: en el monton solo en la */
+                                                                /* CONTRARRELOJ (2 x 28 KB menos de BSS: RAM del arranque) */
 static gh_cab_t gh_rep_cab; static int gh_nrec, gh_nrep, gh_clave = -1, gh_grabando, gh_ve, gh_lleno;
 /* 4A2BA0 con el modo de juego: la vista de carrera (interior 0x8000 o nada en la 0) solo vale en el modo 16 (carrera); en
    la salida (13 / 14), la meta (19), el fin del tiempo (20..22) y lo demas el coche va entero (0x4000: dl = 2, PC
@@ -14345,16 +14346,29 @@ static void coche_trasero_paso(int carrera)
 }
 static int gh_nodo_ant = -1, gh_rama_ant = -1; static float gh_union_ant = -1;   /* la union de la etapa anterior */
 static coche_t gh_c; static matrix_t gh_mat __attribute__((aligned(32)));
-static volatile int gh_guardando;
-#define GH_BUF (sizeof(gh_cab_t) + sizeof gh_rep)                 /* el fichero de la VMU (lectura y guardado): en el */
+static volatile int gh_guardando, gh_soltar;
+#define GH_BUF (sizeof(gh_cab_t) + GH_MAX * sizeof(gh_m_t))      /* el fichero de la VMU (lectura y guardado): en el */
                                                                 /* monton solo mientras se lee o se guarda (C2C 3: 28 KB de RAM del arranque) */
 #define GH_U (65536.0f / 6.2831853f)
+/* (C2C 4) fuera de la CONTRARRELOJ: sin grabacion ni fantasma en la RAM (si se esta guardando, al acabar gh_hilo) */
+static void gh_suelta(void)
+{
+    if (!gh_rec) return;
+    if (gh_guardando) { gh_soltar = 1; return; }
+    free(gh_rec); gh_rec = gh_rep = NULL; gh_nrep = gh_nrec = 0; gh_clave = -1; gh_grabando = 0; gh_soltar = 0;
+}
 /* al empezar la carrera (y REINTENTAR): la grabacion a cero; en la CONTRARRELOJ la del curso, de la RAM o de la VMU */
 static void gh_empieza(void)
 {
     int clave = variante == 7 && ta_codigo >= 0 ? (preset_curso & 0xff) << 8 | (ta_codigo & 0xff) : -1;
     gh_nrec = 0; gh_lleno = 0; gh_grabando = clave >= 0; gh_ve = 0; gh_nodo_ant = gh_rama_ant = -1; gh_union_ant = -1;
-    if (clave < 0) { gh_nrep = 0; gh_clave = -1; return; }
+    if (clave < 0) { gh_suelta(); gh_nrep = 0; gh_clave = -1; return; }
+    gh_soltar = 0;
+    if (!gh_rec) {
+        if (!(gh_rec = malloc(2 * GH_MAX * sizeof(gh_m_t)))) {
+            dbglog(DBG_ERROR, "FANTASMA: sin RAM para la grabacion\n"); gh_grabando = 0; gh_nrep = 0; gh_clave = -1; return; }
+        gh_rep = gh_rec + GH_MAX; gh_nrep = 0; gh_clave = -1;
+    }
     if (clave != gh_clave) {                                    /* otro curso: el suyo de la VMU */
         uint8_t *b = gh_guardando ? NULL : malloc(GH_BUF); char nm[16]; int n;
         gh_nrep = 0; gh_clave = clave;
@@ -14395,6 +14409,7 @@ static void *gh_hilo(void *p)
     r = menu_vmu_guarda(nm, "OutRun Fantasma", b, (int)(sizeof gh_rep_cab + n * sizeof(gh_m_t)));
     dbglog(r ? DBG_ERROR : DBG_INFO, "FANTASMA: guardado %s (%d muestras, %u ms): %d\n", nm, n, (unsigned)gh_rep_cab.total_ms, r);
     free(b); gh_guardando = 0; (void)p;
+    if (gh_soltar) gh_suelta();                                 /* (ya fuera de la CONTRARRELOJ) */
     return NULL;
 }
 /* GOAL (4513C0): si mejora al que habia (o no habia) pasa a ser el fantasma del curso y se guarda en la VMU */
@@ -15964,7 +15979,7 @@ int main(int argc, char **argv)
                 }
                 if (rf == FIN_REINTENTA) { estado = TITULO; mundo_fuera = 0; reintenta = 1; meta_suelta(); }   /* modo 30: la salida con lo elegido */
                 else if (rf == FIN_MENU) {                      /* 28 */
-                    estado = TITULO; mundo_fuera = 0; hud_baja_tex(); camp_libera(); menu_entra(manual_, pista, NPISTAS);
+                    estado = TITULO; mundo_fuera = 0; hud_baja_tex(); camp_libera(); gh_suelta(); menu_entra(manual_, pista, NPISTAS);
                     /* 49AF90 estado 3: sin la consola (43F860 = 0) y sin [65994C] vuelve al frontal de recreativa (modo 10) */
                     if (juego_sp && !auto_) pide_fsp = 1;      /* (en TITULO, con el hueco de la union libre) */
                     auto_ = 0;
