@@ -6821,4 +6821,99 @@ cruzados / p8.
 
 **SIN PORTAR (PENDIENTE):** 19 (cajas que caen y sueltan las estrellas: 461940, tabla 64AAA8), lo visual de 8 / 23
 (carriles pintados 45ECA0 / 45E9B0 con registros de obj_course_obj_cs_<zona> por mision; marcas de la accion -5
-45B000 / 45B2A0 con los modelos por idioma 64A9E8 / 64AA00) y los tipos 11, 9, 14 y 20.
+45B000 / 45B2A0 con los modelos por idioma 64A9E8 / 64AA00) y los tipos 11, 9, 14 y 20. -> HECHO el 19, los carriles,
+las marcas y el toque de los postes: ver "INFARTO 2" (abajo); siguen sin portar 11, 9, 14 y 20.
+
+## INFARTO 2: estrellas (tipo 19), carriles pintados, marcas de la accion -5 y postes de los arcos (Rev 1.1, 2026-11-27)
+
+Sobre las tres secciones INFARTO anteriores (rama de 6fd5886). Todo verificado en Flycast (nivel E), no en la consola.
+Datos nuevos o cambiados (tools/conv_infarto.py): INFARTOX.DAT con las secciones EST1, MARC y META; HAOBJ.DAT con la
+estrella lejana y las dos marcas; HAMpqq.DAT (24 ficheros, `--solo-metas`; tambien en la conversion entera).
+
+**HECHO: tipo 19, "Recoge las estrellas"** (comun/haobj.c `haobj_est_paso`, comun/infarto.c `est_*`; solo lo pide la
+mision 39 del preset 0, FLOR). Lo averiguado (PS2, comprobado instruccion a instruccion):
+- Lo que el PC llama "cajas" son estrellas: la clase 0x12 es el modelo 0x570030 del banco 0x57, una estrella de 5 puntas
+  en bipiramide (20 triangulos sueltos); los objetos de oso_qt con clase 0x12 llevan el tipo 8 = suceso 0x61 (inicio
+  0x1d4b60, control 0x1d4d80, = PC 4AADC0 / 4AC440).
+- Inicio 0x1d4b60: reposo +A4 = el suelo bajo el punto (0x18dfc8 modo 0x100); +CC la seccion, +CE el carril; D = el eje
+  lateral de la seccion (0x190028: +24 - +30), y = 0, normalizado, y = -0,5 - rand x 2^-31; la mitad de las veces x / z
+  al reves; normalizado; +B0 = 6 D; la estrella sale de reposo - 200 D (llega de un lado y desde arriba). 0x1d4a58: +50 =
+  1, +90 = 1,5 (radio del toque), +78 = 0xD6, +94 = 1, +BC = 1, +C0 = 0, +C4 = 1, sprite 2C0007.
+- Control 0x1d4d80: +6C + 0,1 por paso; se dibuja en pos + (0, 2, 0) con escala +50 x 1,5; al tocarla (0x1d3720) +7C = 1,
+  escala x 0,7 y control 0x1d50e0 (sube con el coche: y = coche + 25 t - 39,2 t^2, desde t > 0,319 la escala - 0,03, giro
+  + 20).
+- Peticion 0x1b11c8 (461940; puntos 0x3f0810; tambien como llamada [7F2528] fuera de la peticion desde la accion -15):
+  cada estrella sin +C0 se activa si las activas (0x589d74) < el tope (0x589d60) y seccion del jugador + 0x28 >= +CC (la
+  primera: movimiento 0x220011 de la acompanante); con +BC avanza +B0 por paso hasta el suelo (alli y = reposo + 0,05,
+  +BC = 0); despues bota y = reposo + 0,05 + 20 t - 39,2 t^2 (t + 1/60) y al caer suelta 5 trozos de la tabla 0x3f7348
+  (0x368630 por el carril: los 7 apuntan a la misma; {desvio, angulos, escala 0,3}) en los objetos 0x134 + base + j
+  (base 0x589d6c, a 0 desde 40), cada uno en el suelo de su punto + 0,05, botando igual. Estrella tocada (+7C == 1 y +80
+  == 8): rotas + 1 (0x589d66) y movimiento 0x260009; trozo tocado: cogidos + 1 (0x589d68). Resultado = 800000 / n x
+  rotas - bono.
+- Puesta 0x1b1150 (464350 y la accion -15 = 0x1b0030 con n 0x28 y c 0x32): n = p6, c = p8, rotas = activas = 0, tope =
+  45C8E0 de la clase 0x12 en el tramo. Accion -10 (0x1af790): abre los 40 trozos (suceso 0x61); -13 (0x1af990) los
+  cierra; -16 (0x1b00b8) quita la llamada.
+- Evaluacion 0x1b1778: nota 7 -> 800000 + (rotas >= c ? (rotas - c) x 10000 + 0x46 : (int)(70 / (c - n) x (rotas - n)))
+  + cogidos x 10000 x 0,1 (el PC resta; la PS2 suma); si no, el tope de corazones de la nota (0x1b07f0); medidor h x 20 / 7.
+- SIMPLIFICADO / PROBABLE: el toque con la caja aproximada del coche (2,3 x 1,1 m + 1,5) de haobj.c; el eje lateral por la
+  direccion de la ruta de la demo (ha_dir); la seccion de cada estrella se calcula al vuelo (4 por paso) con ha_s.
+  SIN PORTAR: el sprite 2C0007 (la estela de la estrella al llegar: 0x1d4d80 entre +A4 / pos y +B0, cuadro + 2 por paso,
+  efectos 0x216E / 0x10DC del PC) y el 2C0000 de la que sube.
+- Poligonos (DESVIACION pedida): la estrella cercana es la del original (20 triangulos / 60 vertices, ya ligera); desde
+  25 m x escala (37 m la grande, 11 m los trozos) una plana de 8 triangulos / 20 vertices (las 5 puntas y el pentagono:
+  tools/conv_infarto.py `aligera_estrella`); como mucho 24 objetos (los mas cercanos, HA_OBJ_MAX) dentro de 160 m; 70
+  estrellas y 40 trozos como mucho.
+- E: mision 39 en la clave 13 (FLOR, PRUEBA_HA_MISION=39 PRUEBA_NODO=13, TB_JUEGO=1): "estrellas 100..555: 70 en el
+  tramo, n 40 c 50", las estrellas llegan de lado, botan y sueltan 5 trozos (capturas cap/e19a/h_0030, h_0035,
+  cap/e19b/h_0040: estrellas en la carretera y subiendo sobre el coche al cogerlas); con PRUEBA_HA_TOQUE=0x12 y
+  PRUEBA_SIN_TIEMPO: "29 grandes (n 40, c 50) y 77 trozos", fin de la peticion con nota 1 (el bono del piloto por salirse
+  del asfalto se come el resultado; cap/e19c).
+- Corregido de paso: tools/conv_infarto.py `aligera_monedas` ordenaba la lista de mallas sin sus vertices (varias
+  mallas de HAOBJ.DAT se quedaban con los vertices de otra); ahora van juntas.
+
+**HECHO: los carriles pintados de las misiones** (45ECA0 / 45E9B0 = PS2 0x1a9a48: [0x44350c] == 0 -> 0x1a9850, si no
+0x1a95b0). Cada caso de las tablas de saltos 0x3efc60 (preset 0, misiones 15..36) y 0x3efbf0 (preset 1, 15..40, solo las
+14 de la lista de 0x1a95d0) pasa a 0x1118b8 uno o dos registros de obj_course_obj_cs_<zona>, dibujados en el marco de la
+etapa + (0, 0,1, 0). La conversion los lee del codigo (`sigue_dibujos`: lui / ori de a0, jal y b con su hueco) y no de
+las tablas del PC, que no coinciden en varios (PS2: 0x5a0006 / 0x5a0003, 0xfa0005, 0x100000b...). 24 ficheros
+HAMpqq.DAT (p = 0 / 1, qq la mision), sin texturas (el color de su material), de 50 a 1199 triangulos.
+- DESVIACION (poligonos): las tiras van en trozos de 18 vertices (`trocea`) y la demo dibuja solo los trozos a menos de
+  150 m del ojo y no detras (main.c `ha_meta_dibuja`), con el tope de los objetos de la union. Se lee al empezar la
+  carrera del modo y en cada etapa (`ha_meta_carga`, el nombre de `infarto_metas` con la seccion META de INFARTOX.DAT).
+- SIN PORTAR: las misiones < 15 del preset 0 (0x1a9998: por la etapa de 0x176700, 0x14 -> 0x1020001, 0x19 -> 0xfa0002,
+  0x1d -> 0x1020003).
+- E: mision 29 del preset 0 en FLOR (1010003 + 1010004): el carril rojo de "Derrapa y circula por el rojo" pintado a la
+  izquierda de la carretera (cap/m29/h_0080, h_0085).
+
+**HECHO: las marcas de principio y fin de la accion -5** (463950 caso 14 = PS2 0x1af13c, 45B000 = 0x1a8648, 45B2A0 /
+45B200 = 0x1a8840): los modelos por idioma de 0x1a7c80 / 0x1a7cb0 (tablas 0x3684d8 / 0x3684f0 por 0x1f6548; el espanol,
+indice 4: 0x570035 "INICIO" y 0x570024), una pancarta de 16 x 2,7 m (2 triangulos), en el centro de la seccion + 4 m
+(0x1a868c) con su direccion, + sen(a) en y con a + 0,2094 por paso (0x1a7f78, [0x58a144]). En HAOBJ.DAT (registros de
+MARC); la demo las pone con `punto_sec` (main.c `ha_punto`). PROBABLE: la orientacion (con el eje +z del modelo por la
+carretera el texto salia al reves en las capturas: va girada 180 grados, cap/arc2/h_0004 antes, cap/arc3/h_0005 despues).
+SIN PORTAR: las marcas de la etapa siguiente (0x176e48: 7F24D8 / 7F24DC cuando la seccion cae en otra etapa).
+
+**HECHO: el toque de los postes de los arcos** (0x1d42f0 / 0x1d4434): sin cruce, cada poste (+-h, y + 0,3) con radio
+0,3 x escala y efecto 0xCD -> +7C 1 (el de -h) / 2 (el de +h) -> 0x1d4508 con giro -0,2 / +0,2 por paso. Corregido: el
+arco cruzado (+7C = 3) no gira (+94 = 0 desde 0x1d41d0; antes giraba 0,2). E: mision 3 en la clave 7 con
+PRUEBA_HA_TOQUE=0x0b y la prueba nueva PRUEBA_HA_POSTE (un poste en la linea del coche): "poste 1 del arco 24 tocado
+(giro -0.2)" (cap/arc3). SIN PORTAR: el sprite 2C0002 (0x1d4508 con +94 == 0: 5 destellos alrededor del coche, puntos de
+la tabla del PC 681CAC en el marco de car+D28 por la escala (6 - cuadro) x K + 1,5, proyectados, capa 5, cuadro + 1 por
+paso hasta el final de la escena): necesita un grupo de HAHUD.DAT del banco 0x2C, la proyeccion en main.c y el dibujo con
+escala en hud.c.
+
+**Medidas** (Flycast, -DDIAG_MS -DDIAG_HA, piloto del menu, muestras de 30 cuadros en el mismo tramo de las dos pasadas):
+- Estrellas (mision 39, FLOR, s 830..4420, 91 muestras): 39,52 fps, dib 19,55 ms, 13255 tri / 20884 vtx por cuadro;
+  sin dibujar los objetos (DIAG_SIN_HAOBJ) 39,63 fps, 18,36 ms, 13128 / 20613: -0,11 fps, +127 triangulos y +271
+  vertices de media; los objetos, 23 dibujados de media, 137 triangulos (como mucho 299) y 359 vertices (755).
+- Carriles (mision 29, FLOR, s 3700..4824): 39,73 fps frente a 39,69 sin ellos (DIAG_SIN_HAMETA), +85 triangulos de
+  media; los carriles: 79 triangulos de media (como mucho 142) y 90 vertices (164).
+
+**RAM:** al arrancar 357 K libres (nav3.sh, "VOZ: VOCES.DAT, 35 muestras", sin "Out of memory"; la punta de partida,
+350 K con los mismos datos). El .init del programa va alineado a 8 KB: el codigo solo baja la RAM al pasar de un multiplo
+a otro. Para compensar lo nuevo (+5 KB de codigo y +0,6 KB de bss) y bajar un escalon: -Os tambien en fin.o, meta.o,
+sprani.o, rival.o, camara.o, voces.o, sfx.o, gd.o, musica.o y hud.o (demo/Makefile) y en lee_modelo_en (main.c): el
+programa queda en 702 KB de .text (antes 712). Coste de ese -Os en la carrera (la misma pasada de las estrellas con
+todo el -Os nuevo, hud.o incluido): 39,42 fps y dib 19,65 ms frente a 39,52 / 19,55 (-0,10 fps, en el ruido de Flycast;
+PENDIENTE medirlo en la consola). Carrera del INFARTO con DIAG_HA: 258 K libres (mision 39) y 264 K (mision 29), sin
+"Out of memory" (no cambia con el escalon del arranque).
