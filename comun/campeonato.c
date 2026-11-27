@@ -30,6 +30,7 @@
 #include "gd.h"
 #include "campeonato.h"
 #include "haobj.h"
+#include "minijuego.h"
 
 int (*camp_graba)(int tipo, int lista, int nota);
 void (*camp_voz)(int id);
@@ -103,6 +104,7 @@ void camp_libera(void)
     if (!C) return;
     if (camp_obj) camp_obj(-2, 0, 0, 0, 0);
     if (camp_bancos) camp_bancos(-1, NULL, NULL, 0, NULL);
+    mj_libera();
     free(C->d); free(C); C = NULL;
 }
 int camp_inicia(int grupo, int fila, int forzada, int lista, int dificultad)
@@ -136,6 +138,7 @@ int camp_inicia(int grupo, int fila, int forzada, int lista, int dificultad)
                 }
             } }
     }
+    mj_inicia((const uint8_t *)d, tam);               /* (el tipo 16: comun/minijuego.c) */
     C->fila = fila >= 0 && fila < 4 ? fila : 0; C->forzada = forzada; C->lista_cfg = lista & 3;
     C->dif = dificultad < 0 ? 0 : dificultad > 4 ? 4 : dificultad;
     C->lista = 0; C->nivel = -1; C->cur = -1; C->reloj = 0x10000; C->animo_ult = -1; C->let_k = -1; C->k21_pl = -1;
@@ -602,6 +605,7 @@ static void tipo_paso(pet_t *p, const camp_coche_t *c, float dpos)
             if (p->nota == 6) p->extra += (!p->c50 && !p->c4c && !p->c54 ? 30 : 0) + (int)(40.0f * frena(p->v_ini, p->v_fin));
         }
         break;
+    case 16: p->med += mj_paso((int)(d - C->pets), d->sub, p->fase, p->rnd, c, voz); break;   /* los minijuegos (minijuego.c) */
     default: break;                                     /* SIN PORTAR */
     }
 }

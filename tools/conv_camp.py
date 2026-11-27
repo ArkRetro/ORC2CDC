@@ -185,6 +185,38 @@ def voces_mision(D, u, par, sal):
         len(out), nb, tam[0] >> 10, max(tam[1:5]) >> 10, max(tam[5:]) >> 10))
 
 
+def minijuegos(u, par, m16, out):
+    """el bloque 'M161' de CAMP.DAT (detras de lo demas) para comun/minijuego.c: u32 bytes, u16 voz_aviso2[7] (0x423c30),
+    u16 animo[10] (0x4239c0: 2 de los subtipos 0 / 1, 3 del 2 en 0x4239c8, 3 de los demas en 0x4239d8), u8 sprite[34] (el
+    grupo MJ_kk: 6 del subtipo 0 (0x423ae0), 9 + 12 del 1 (0x423b10), 7 del 2 (0x423b68)), u8 cuantos1[2] (0x423ad8), 2 bytes,
+    f32 columna[9] y altura[9] (0x423b88 / 0x423bb0, por (columnas - 1) x 3 + columna), u32 n y n peticiones {u16 peticion, u8
+    subtipo, u8 registros y cada uno {u8 clase, u8 +0x24, u8 cuantos, u8 0, s16 seccion, s16 hasta}} (secciones de la etapa); devuelve los tokens del banco 0x46 de sus
+    sprites (los grupos MJ_kk de MJHUD.DAT). Cada tabla comprobada por el codigo que la lee (clase 0x29f520, vtable 0x423a80)"""
+    assert par(0x2a1e58, 0x2a1e60) == 0x423c30, 'voces de los avisos del 16/2 (0x2a1e00)'
+    assert par(0x2a055c, 0x2a0564) == 0x423b68, 'simbolos del 16/2 (0x2a0138)'
+    assert par(0x29f994, 0x29f99c) == 0x4239c0 and par(0x29fa0c, 0x29fa14) == 0x4239c8 and par(0x29fa70, 0x29fa74) == 0x4239d8, 'animo (0x29f7a0)'
+    assert u(0x2a0d40) == 0x8e05007c and u(0x2a0d3c) == 0x84af0000, 'registros de +0x7c (0x2a0d08)'
+    toks = []
+    def tk(t):
+        assert t >> 16 == 0x46, hex(t)
+        if t not in toks: toks.append(t)
+        return toks.index(t)
+    assert par(0x2a050c, 0x2a0514) == 0x423ae0 and par(0x2a052c, 0x2a0534) == 0x423b10, 'simbolos de los subtipos 0 / 1 (0x2a0138)'
+    assert par(0x2a03e0, 0x2a03e8) == 0x423b88 and par(0x2a04ac, 0x2a04b4) == 0x423bb0, 'columnas (0x2a0138)'
+    assert u(0x2a165c) == 0x3c020042 and u(0x2a1660) == 0x90433ad8, 'cuantos de cada clase del 16/1 (0x2a1618: 0x423ad8)'
+    f_ = lambda a: struct.unpack('<f', struct.pack('<I', u(a)))[0]
+    sp = [tk(u(0x423ae0 + 4 * k)) for k in range(6)] + [tk(u(0x423b10 + 4 * k)) for k in range(u(0x423ad8) + u(0x423ad8 + 4))] + \
+         [tk(u(0x423b68 + 4 * k)) for k in range(7)]
+    assert len(sp) == 34, len(sp)
+    blk = struct.pack('<7H', *[u(0x423c30 + 4 * k) for k in range(7)]) + struct.pack('<10H', *[u(0x4239c0 + 4 * k) for k in range(10)])
+    blk += bytes(sp) + bytes([u(0x423ad8), u(0x423ad8 + 4)]) + b'\0\0'
+    blk += struct.pack('<18f', *[f_(0x423b88 + 4 * k) for k in range(9)], *[f_(0x423bb0 + 4 * k) for k in range(9)])
+    blk += struct.pack('<I', len(m16)) + b''.join(m16)
+    while len(blk) % 4: blk += b'\0'
+    out += b'M161' + struct.pack('<I', len(blk)) + blk
+    return toks
+
+
 def main():
     if len(sys.argv) < 3: raise SystemExit(__doc__.split('\n')[0])
     D = ch.Disco(sys.argv[1]); sal = sys.argv[2]; os.makedirs(sal, exist_ok=True)
@@ -247,7 +279,7 @@ def main():
         d_ = bytes(As.datos(por_hash[hash_nombre('\\bin\\%s.bin' % n_)])); nn, oo = cm._r077(d_, n_)
         usadas.update(struct.unpack_from('<I', d_, oo + 0x78 * k + 0x1c)[0] for k in range(nn))
     PAR = mips.Mips.PILA - 0x8000                            # parametros en la memoria del interprete (la pila)
-    lista = []; pets = bytearray(); npet = 0; tipos = {}; objs = []; t46 = []; zon = []; c14 = []
+    lista = []; pets = bytearray(); npet = 0; tipos = {}; objs = []; t46 = []; zon = []; c14 = []; m16 = []
     # 0x297e20: +0x18 del objeto = 0x423080[clase] (la clase del banco 0x57); comprobado por el codigo que la lee
     assert par(0x29800c, 0x298014) == 0x423080, 'clases de los objetos (0x297e20)'
     banco = lambda c: u(0x423080 + 4 * c) & 0xff
@@ -301,6 +333,15 @@ def main():
                         if sc_ < 0 or lc_ < 0: break
                         cs14.append((sc_, lc_)); q_ += 0x14
                     c14.append(struct.pack('<H2B', npet, len(cs14), blk[0x74]) + b''.join(struct.pack('<hbx', *x) for x in cs14))
+                if tipo == 16:                                # los minijuegos (0x2a0d08: los registros de 0x2c de +0x7c, +0x80 relativos)
+                    regs = []
+                    if pp + 0x7c in rel:
+                        q_ = rel[pp + 0x7c]; r80 = struct.unpack_from('<i', blk, 0x80)[0] != 0
+                        while struct.unpack_from('<h', d, q_ + 0x26)[0] != -1 and len(regs) < 100:
+                            cl_, b24, s26, s28, n2a = struct.unpack_from('<iBxhhB', d, q_ + 0x20)
+                            regs.append(struct.pack('<4B2h', cl_ & 0xff, b24, n2a, 0, s26 + (ini if r80 else 0), s28 + (ini if r80 else 0)))
+                            q_ += 0x2c
+                    m16.append(struct.pack('<H2B', npet, sub, len(regs)) + b''.join(regs))
                 if tipo == 5:                                 # la zona del 5 (0x232768: +0x10 / +0x14 de, +0x18 / +0x1c hasta)
                     zon.append(struct.pack('<2H4f', npet, 0, *struct.unpack_from('<4f', d, r + 0x10)))
                 npet += 1
@@ -363,6 +404,8 @@ def main():
                    for a, b in ((0x3b55c0, 0x3b55d0), (0x3b5538, 0x3b5548)))
     out += b'C141' + struct.pack('<I', len(c14)) + t14 + b''.join(c14)
     print('  tipo 14: %d peticiones, %s coches' % (len(c14), [x[2] for x in c14]))
+    t16 = minijuegos(u, par, m16, out)
+    print('  tipo 16: %d peticiones, %d sprites del banco 0x46' % (len(m16), len(t16)))
     print('  zonas del tipo 5: %s' % ' '.join('%d:(%.2f..%.2f)-(%.2f..%.2f)' % ((struct.unpack('<2H4f', z)[0],) + tuple(struct.unpack('<2H4f', z)[2:])) for z in zon))
     print('  efectos de la pelota y los meteoritos: %s' % ' '.join('%x' % x for x in snd))
     open(os.path.join(sal, 'CAMP.DAT'), 'wb').write(out)
@@ -385,6 +428,14 @@ def main():
     print('CAMPHUD.DAT: %d rotulos del banco 0x46 (%s), %d bytes, %d texturas' % (len(t46), ' '.join('%X' % t for t in t46),
           os.path.getsize(os.path.join(sal, 'CAMPHUD.DAT')), len(hud.tex)))
     print('CAMP.DAT: %d peticiones, %d filas de objetos, %d bytes' % (npet, len(objs), len(out)))
+    # MJHUD.DAT: los sprites 3D de los minijuegos (0x2a0138 -> 0x115870, banco 0x46): el grupo MJ_kk es el token t16[k]
+    hud = ch.Hud(); hud.taco = [0xff] * 16; hud.vq = lambda i, a, fmt, l_: ch.vq_pequeno(i, a, fmt, l_, 'MJHUD: ')
+    for k_, tok in enumerate(t16):
+        sc = A46.escenas[tok & 0xffff]; nc, pc = struct.unpack_from('<2I', A46.a, sc); raiz = pc + (nc - 1) * 0x24
+        n_ = max(1, int(struct.unpack_from('<f', A46.a, raiz + 8)[0])); nm = 'MJ_%02d' % k_
+        g_ = ch.grupo_escena(hud, nm, A46, T46, 0x46, tok & 0xffff, n_, prefijo='mj_'); hud.uso(nm, g_, 0, 0, capa=4)
+    hud.escribe(os.path.join(sal, 'MJHUD.DAT'))
+    print('MJHUD.DAT: %d sprites (%s), %d bytes' % (len(t16), ' '.join('%X' % t for t in t16), os.path.getsize(os.path.join(sal, 'MJHUD.DAT'))))
 
 
 if __name__ == '__main__':
