@@ -186,8 +186,8 @@ void fin_game_over(int c)
    PS2 0x1ba6c0 / 0x1ba748 / 0x1ba910 (tabla de modos 0x3f8e50 + 25 x 16; PC 49A790 / 49A800 / 49A920): temporizador
    0xB4 (1b4a10), el banco 0x34 ROUTE_CVT (1183d0 / 115d78), la musica 401000(0, 0x1C, 1) (\music\28.ps2 en bucle,
    MUS28.ADP), 0x5a2030 = 1a7180(preset) solo en la variante 0 (el record de la Contrarreloj) y la animacion de carga
-   (288d20(1)). Con el banco leido el suceso 0x188 con la funcion 0x15 (el mapa de la ruta; la 0x50, resultado de la
-   Contrarreloj de los presets 2 / 3, si 1b4a90: esos presets no salen, SIN PORTAR) y fuera la animacion de carga. Despues
+   (288d20(1)). Con el banco leido el suceso 0x188 con la funcion 0x15 (el mapa de la ruta; la 0x50, resultado de los
+   15 recorridos de los presets 2 / 3, si 1b4a90: ta_init, abajo) y fuera la animacion de carga. Despues
    A o START (210c58: 210988(1) / (4)) o el mapa acabado (209d50 = [0x370dc8]) y entonces el temporizador o A / START
    piden el modo siguiente (1ba7f0..1ba848): 26 (entrada de nombre) con 450240 = 1 (fin del tiempo) o en la variante 0
    con el record; si no, 27. Las variantes 3 / 4 piden antes el 27. En la Dreamcast el banco se lee de un tiron al
@@ -292,10 +292,54 @@ static void ruta_control(void)                          /* 0x209518 */
         spr_traslada(ru.h, ru.p[ru.step][0], -ru.p[ru.step][1]);
     }
 }
+/* Rev 2.9.9.c (modos "sp"): la funcion 0x50 del suceso 0x188 (PS2 0x209ad8 / 0x209cc8 / 0x209d08 = PC 4AED50 /
+   4AEEC0 / 4AEEE0), el resultado de los 15 recorridos continuos (presets 2 / 3: 1b4a90 = 0x1ba7b4 la elige en vez de la
+   0x15): el mapa de 15 (340001 / 34000C con el preset 2, si no 340000 / 34000B; capas 1 / 5, modo 0), el rotulo 34001D
+   (capa 6, modo 1) y el coche del modelo ([0x410048 + 48B140 x 4]: 340002..34001E) en la capa 4, modo 1, de su cuadro
+   0 al de la posicion: la meta (0x1cff70(0xE)) 0x1FE; si no, por cada nivel acabado 0x1E (0x3C en los niveles 5 y
+   10, 0x209a40) y en el nivel n + 1 (4AEEF0: [0x370dd0] nivel, [0x370dcc] etapa / union, [0x370dd4] razon) la razon x
+   23 (46 en los niveles 5 y 10) por la etapa, 23 + razon x 7 (46 + razon x 14) por la union, y razon x 30 en la etapa
+   del nivel 14. Acaba (0x209cc8: [0x370dc8] = 1) cuando el coche llega a su ultimo cuadro (115230 == 3). Tablas: el
+   bloque 'TA50' de RUTASP.DAT (tools/conv_sp.py tablas_ruta, comprobadas en el codigo) */
+typedef struct {
+    char id[4];                                         /* 'TA50' */
+    uint32_t tok[30];                                   /* 0x410048: el coche por modelo */
+    uint32_t mapa[4], rotulo;                           /* 340001 / 34000C (preset 2), 340000 / 34000B; 34001D */
+    uint32_t c_ext, c_nor, c_meta, n_ult;               /* 0x3C / 0x1E por nivel, 0x1FE la meta, 14 el ultimo nivel */
+    float b_ext, b_nor, e_ext, e_nor, ult;              /* 46 / 23, 14 / 7, 30 */
+} rta_t;
+static const rta_t *RT;
+static int ta_h = -1;                                   /* 0x5dfa10 */
+static void ta_init(void)                               /* 0x209ad8 */
+{
+    const fin_sp_t *d = &sp_d; int last = 0, i, n, ext;
+    ru_hecho = 0;                                       /* [0x370dc8] = 0 */
+    if (d->preset == 2) { spr_crea_entera(RT->mapa[0], 1, 0); spr_crea_entera(RT->mapa[1], 5, 0); }
+    else { spr_crea_entera(RT->mapa[2], 1, 0); spr_crea_entera(RT->mapa[3], 5, 0); }
+    spr_crea_entera(RT->rotulo, 6, 1);
+    if (ru_nivel < 0) last = (int)RT->c_meta;          /* 0x1cff70(0xE): la meta (ru_nivel -1: FIN_META) */
+    else {
+        for (i = 0; i < ru_nivel; i++) last += i == 5 || i == 10 ? (int)RT->c_ext : (int)RT->c_nor;
+        n = ru_nivel + 1; ext = n == 5 || n == 10;
+        if (ru_lado == 0) {
+            if (ru_nivel == (int)RT->n_ult) last += (int)(ru_razon * RT->ult);
+            else last += (int)(ru_razon * (ext ? RT->b_ext : RT->b_nor));
+        } else last += (int)((ext ? RT->b_ext : RT->b_nor) + ru_razon * (ext ? RT->e_ext : RT->e_nor));
+    }
+    if (last < 0) last = 0;
+    ta_h = spr_crea(RT->tok[d->modelo >= 0 && d->modelo < 30 ? d->modelo : 0], 4, 1, 0, last);
+    dbglog(DBG_INFO, "FIN: modo 25, funcion 0x50 (15 recorridos, preset %d): coche %06x hasta el cuadro %d\n", d->preset,
+           (unsigned)RT->tok[d->modelo >= 0 && d->modelo < 30 ? d->modelo : 0], last);
+}
+static void ta_control(void)                            /* 0x209cc8 */
+{
+    if (ta_h >= 0 && spr_estado(ta_h) == 3) ru_hecho = 1;
+}
+static int ta_on;                                       /* el modo 25 con la funcion 0x50 */
 static void ruta_suelta(void)                           /* 0x2099f8 */
 {
     spr_suelta_todas();
-    ru_nivel = -1; ru_razon = -1; ru_hecho = 0; ru_lado = -1;
+    ru_nivel = -1; ru_razon = -1; ru_hecho = 0; ru_lado = -1; ta_h = -1; ta_on = 0;   /* (0x209d08: lo mismo) */
 }
 static void a_game_over(void);
 static void sp_siguiente(void)                          /* 1ba7f0..1ba848 (PC result_next) */
@@ -309,7 +353,7 @@ static void sp_siguiente(void)                          /* 1ba7f0..1ba848 (PC re
         memset(&n, 0, sizeof n);                        /* (consulta = 0: la entrada de nombre) */
         n.variante = sp_d.variante; n.preset = sp_d.preset; n.puntos = sp_d.puntos; n.corazones = sp_d.corazones;
         n.tiempo = 0;                                   /* 451180(0): [0x5c60f0], -1 sin acabar -> 0 (PROBABLE) */
-        n.modelo = sp_d.modelo; n.manual = sp_d.manual; n.config = sp_d.config; n.registro4 = sp_d.registro4;
+        n.modelo = sp_d.modelo; n.manual = sp_d.manual; n.config = sp_d.config; n.registro4 = sp_d.registro4; n.desc4p = sp_d.desc4p;
         n.ram = f_ram; n.ram_cap = f_cap;
         n.ruta = 0;                                     /* 450320: bit n = derecha en el nivel n */
         { int k; for (k = 0; k < 4; k++) if (sp_d.rama[k] == 1) n.ruta |= 1 << k; }
@@ -333,6 +377,8 @@ void fin_sp_resultados(int c, const fin_sp_t *d)
     musica_pausa_lectura(0);
     R = rb ? (const rsp_t *)spr_extra(rb, &tam) : NULL;
     if (R && (tam < sizeof *R || memcmp(R->id, "RSP1", 4))) R = NULL;
+    RT = R && tam >= sizeof *R + sizeof *RT && !memcmp((const uint8_t *)R + sizeof *R, "TA50", 4) ? (const rta_t *)((const uint8_t *)R + sizeof *R) : NULL;
+    ta_on = RT && (d->preset == 2 || d->preset == 3);  /* 1b4a90 (sin el bloque TA50, RUTASP.DAT de antes: la 0x15) */
     if (!R) {                                           /* sin el modo 25: el siguiente (26 o 27) */
         dbglog(DBG_ERROR, "FIN: sin RUTASP.DAT (RAM fija %uK): sin el modo 25\n", (unsigned)(f_cap >> 10));
         if (rb) spr_cierra(rb);
@@ -385,14 +431,15 @@ int fin_paso(uint32_t nuevo)
         int in = (nuevo & (CONT_START | BOTON_A)) != 0; /* 210c58: 210988(1) START, (4) la cruz */
         if (t_temp > 0) t_temp--;                       /* el temporizador del modo (1b4a48) */
         if (s25 == 0) {                                 /* 118500 / 115ea8: el banco leido */
-            ruta_init(); s25 = 1;                       /* 19c870(0x188, 0x15), 288dd8 */
+            if (ta_on) ta_init(); else ruta_init();     /* 19c870(0x188, 1b4a90 ? 0x50 : 0x15), 288dd8 */
+            s25 = 1;
         } else {
             if (s25 == 1) {
                 if (in) { sp_siguiente(); in = 0; }
                 else if (ru_hecho) s25 = 2;             /* 209d50 */
             }
             if (fase == 25 && s25 == 2 && (t_temp < 1 || in)) sp_siguiente();
-            if (fase == 25) ruta_control();             /* el suceso 0x188 (tras el modo) */
+            if (fase == 25) { if (ta_on) ta_control(); else ruta_control(); }   /* el suceso 0x188 (tras el modo) */
         }
         if (fase == 25) spr_paso();
     } else if (fase == 26) {                            /* 0x1baaf8 / 49AA60 */

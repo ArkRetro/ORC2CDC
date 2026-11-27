@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """conv_infarto.py tu.iso salida/: datos del modo INFARTO (HEART ATTACK, variante 2 de [780258] / PS2 0x443508) de
-OutRun 2006 Coast 2 Coast (PS2, SLES-53998) -> INFARTO.DAT, INFARTOP.DAT y VOCESH.DAT. Sale de tu disco: no se distribuye.
+OutRun 2006 Coast 2 Coast (PS2, SLES-53998) -> INFARTO.DAT, INFARTOP.DAT, VOCESH.DAT y VOCESHC.DAT. Sale de tu disco: no se distribuye.
 
 Todo se lee del ELF de PS2 (SLES_539.98) en las direcciones de esta version; cada tabla se comprueba por el codigo que
 la usa (el par lui/addiu de la instruccion indicada) para no leer basura de otra version. Logica y nombres del port de
@@ -254,39 +254,101 @@ def main():
     hud.escribe(os.path.join(sal, 'HAHUD.DAT'))
     print('HAHUD.DAT: %d bytes, %d texturas' % (os.path.getsize(os.path.join(sal, 'HAHUD.DAT')), len(hud.tex)))
 
-    # VOCESH.DAT
+    # VOCESH.DAT (preset 1: HAM / HAM_SR) y VOCESHC.DAT (Rev 2.9.9.c, preset 0: HAM.CVT / HAM_SR.CVT)
+    for preset, nombre in ((1, 'VOCESH.DAT'), (0, 'VOCESHC.DAT')):
+        vocesh(iso, elf, u32, V, sal, preset, nombre)
+
+# Bancos de voz del INFARTO (Rev 2.9.9.c, modos "sp"). PS2: el cargador de la etapa (0x173a54..0x173aa4, variante 2)
+# pide con 11ed40 el banco 0x1b3be8(clave) con el preset 1 ([0x44350c], 0x173a6c) y 0x1b3c70(clave) con los demas:
+# id = base[c] + clave con c = 0x1af710(clave) (la clase de la mision de su nivel, 0x1aeff0 = 45C160 / 45C2C0: < 15 ->
+# 0; 15..40 por la tabla de saltos 0x3f06e0 -> 1, 2 o 3) y base = 0x8443 / 0x844f / 0x8458 / 0x845d (HAM\1A..,
+# HAM_SR\3A1.., HAM_SR\4A2.., HAM_SR\5A3..) o 0x841a / 0x8426 / 0x842f / 0x8434 (los mismos de HAM.CVT y HAM_SR.CVT);
+# el byte bajo es la entrada de la tabla de bancos 0x352840. Formato: VOZ1 de siempre (HC.PAK y PERH.pak con su id
+# tal cual) con las muestras de los bancos una sola vez (las mismas en varios bancos comparten los datos) y, detras
+# de los datos, el bloque 'VHG1' (comun/sfx.c): u32 n; n u64 mascara de los grupos (bancos distintos) que llevan esa
+# muestra con ese id (0 = HC / PERH, la de siempre); u8 grupo[4][15] por clase y clave (0xff sin banco); u8 clase de
+# las misiones 0..47. Sin 'VHG1' (ficheros de antes) la demo usa los grupos de INFARTO.DAT (id + 0x200 (grupo + 1)).
+# Algunos bancos (HAM.CVT\2A, \3A, HAM_SR\5D2) llevan las tablas al principio del sector siguiente (banco_tablas_ham).
+def banco_tablas_ham(d):
+    A_, B_, t = cs.banco_tablas(d)
+    if not t[0] and not t[1]:
+        a, _, b, _ = struct.unpack_from('<4I', d, 0); o = (16 + a + b + 2047) & ~2047; t = []
+        for _ in range(2):
+            n = struct.unpack_from('<I', d, o)[0] if o + 4 <= len(d) else 0
+            t.append(dict(struct.unpack_from('<2I', d, o + 4 + 8 * k) for k in range(n))); o += 4 + 8 * n
+    return A_, B_, t
+
+def vocesh(iso, elf, u32, V, sal, preset, nombre):
     irx = cs.fichero_paquete(iso, 'SYSTEM.PS2', '\\IRX\\SOUNDCD.IRX')
     tb, td, _ = cs.elf_seccion_irx(irx)
     se = lambda i: struct.unpack_from('<HH', irx, td + cs.IRX_SE - tb + 12 * i)
-    muestras = {}
-    def banco(d, desp):
-        A_, B_, (ta, tbb) = cs.banco_tablas(d)
-        for datos, t in ((A_, ta), (B_, tbb)):
+    # 0x1b3be8 / 0x1b3c70: la base de cada clase (addiu v0, s0, b: la clase 0 en +0x34, 1 en +0x20, 2 en +0x44, 3 en +0x50)
+    f = 0x1b3be8 if preset == 1 else 0x1b3c70
+    assert u32(f + 0xc) == 0x0c06bdc4                                   # jal 0x1af710
+    bases = []
+    for o in (0x34, 0x20, 0x44, 0x50):
+        w = u32(f + o); assert w >> 26 == 9 and (w >> 21) & 31 == 16, hex(w)
+        bases.append(w & 0xffff)
+    assert bases == ([0x8443, 0x844f, 0x8458, 0x845d] if preset == 1 else [0x841a, 0x8426, 0x842f, 0x8434]), [hex(b) for b in bases]
+    # 0x1af710: misiones >= 15 por la tabla de saltos 0x3f06e0 (26 casos) -> 1 / 2 / 3
+    assert u32(0x1af730) == 0x2862000f and u32(0x1af740) == 0x2c62001a and u32(0x1af748) == 0x3c02003f and u32(0x1af750) == 0x244206e0
+    destino = {0x1af764: 1, 0x1af76c: 2, 0x1af774: 3}
+    clase = [0] * 15 + [destino.get(u32(0x3f06e0 + 4 * k), 0) for k in range(26)] + [0] * 7
+    tbb = 0x352840
+    nom = lambda k: elf[V(u32(tbb + 4 * k)):].split(b'\0')[0].decode()
+    muestras = {}                                       # (id, mascara) -> (pcm, frec, vol); mascara 0 = la de siempre
+    def tablas(d):
+        A_, B_, (ta, tbt) = banco_tablas_ham(d); r = {}
+        for datos, t in ((A_, ta), (B_, tbt)):
             for i, o in t.items():
                 p, v = se(i)
-                if not (0x100 <= p <= 0x3fff) or v == 0: continue
-                if i + desp not in muestras: muestras[i + desp] = (cs.muestra_banco(datos, o), cs.frecuencia(p), v)
+                if not (0x100 <= p <= 0x3fff) or v == 0 or i in r: continue
+                r[i] = (tuple(cs.muestra_banco(datos, o)), cs.frecuencia(p), v)
+        return r
+    base = {}
     for nb in ('HC.PAK', 'PERH.pak'):
-        banco(cs.fichero_paquete(iso, 'SOUND.PS2', '\\SPANISH\\' + nb), 0)
-    vistos = set()
-    for k in range(15):
-        if grupo[k] in vistos: continue
-        vistos.add(grupo[k]); banco(datos_b[k], 0x200 * (grupo[k] + 1))
-    filas = []; blob = bytearray()
-    for i in sorted(muestras):
-        pcm, f, v = muestras[i]
-        while len(blob) % 32: blob.append(0)
-        datos = cs.enc_yamaha(pcm)
-        assert len(pcm) < 65536, 'voz 0x%x demasiado larga para el AICA' % i
-        filas.append(struct.pack('<HH4I', i, v, len(blob), len(datos), f, len(pcm)))
-        blob += datos
+        for i, m in tablas(cs.fichero_paquete(iso, 'SOUND.PS2', '\\SPANISH\\' + nb)).items(): base.setdefault(i, m)
+    grupos = []                                         # md5 de cada banco distinto
+    grupo = [[0xff] * 15 for _ in range(4)]
+    por_grupo = []
+    for c in range(4):
+        for k in range(15):
+            e = (bases[c] + k) & 0xff
+            if e >= 0x6c: continue
+            n = nom(e)
+            if not n.startswith('HAM'): continue
+            d = cs.fichero_paquete(iso, 'SOUND.PS2', '\\SPANISH\\' + n); h = hashlib.md5(d).digest()
+            if h not in grupos: grupos.append(h); por_grupo.append(tablas(d))
+            grupo[c][k] = grupos.index(h)
+    assert len(grupos) <= 64, len(grupos)
+    pares = {}                                          # (id, muestra) -> mascara
+    largas = []
+    for g, t in enumerate(por_grupo):
+        for i, m in t.items():
+            if i in base and base[i][0] == m[0]: continue
+            if len(m[0]) >= 65536: largas.append((g, i, len(m[0]))); continue   # (el AICA: 16 bits de largo)
+            pares[(i, m)] = pares.get((i, m), 0) | 1 << g
+    filas = []; blob = bytearray(); datos_de = {}
+    ent = [(i, m, 0) for i, m in sorted(base.items())] + [(i, m, k) for (i, m), k in sorted(pares.items(), key=lambda x: (x[0][0], x[1]))]
+    for i, (pcm, fr, v), mask in ent:
+        if pcm not in datos_de:
+            while len(blob) % 32: blob.append(0)
+            dat = cs.enc_yamaha(pcm)
+            assert len(pcm) < 65536, 'voz 0x%x demasiado larga para el AICA' % i
+            datos_de[pcm] = (len(blob), len(dat)); blob += dat
+        o, n = datos_de[pcm]
+        filas.append((struct.pack('<HH4I', i, v, o, n, fr, len(pcm)), mask))
     off_m = 32; off_t = off_m + 20 * len(filas); off_d = (off_t + 31) & ~31
-    out = bytearray(b'VOZ1' + struct.pack('<5I', len(filas), off_m, off_t, off_d, off_d + len(blob)) +
-                    b'SPANISH\0')
-    out += b''.join(filas); out += bytes(off_d - len(out)) + blob
-    open(os.path.join(sal, 'VOCESH.DAT'), 'wb').write(out)
-    print('VOCESH.DAT: %d bytes, %d muestras, %.1f s' % (len(out), len(filas),
-          sum(len(m[0]) / m[1] for m in muestras.values())))
+    out = bytearray(b'VOZ1' + struct.pack('<5I', len(filas), off_m, off_t, off_d, off_d + len(blob)) + b'SPANISH\0')
+    out += b''.join(f for f, _ in filas); out += bytes(off_d - len(out)) + blob
+    out += b'VHG1' + struct.pack('<I', len(filas)) + b''.join(struct.pack('<Q', m) for _, m in filas)
+    out += bytes(sum(grupo, [])) + bytes(clase)
+    while len(out) % 4: out.append(0)
+    open(os.path.join(sal, nombre), 'wb').write(out)
+    print('%s: %d bytes (%d KB en el AICA), %d muestras (%d de HC / PERH), %d bancos distintos, %d datos distintos' %
+          (nombre, len(out), len(blob) >> 10, len(filas), len(base), len(grupos), len(datos_de)))
+    if largas: print('  sin las muestras de mas de 65535 (el AICA; la de HC / PERH si la hay): %s' % ', '.join('grupo %d voz 0x%x (%d)' % x for x in largas))
+    print('  grupos por clase y clave: %s' % ' / '.join(','.join('-' if g == 0xff else str(g) for g in grupo[c]) for c in range(4)))
 
 if __name__ == '__main__':
     main()

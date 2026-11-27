@@ -14966,7 +14966,7 @@ int main(int argc, char **argv)
                 if (sfx_ok && !voz_ok && union_prestable())            /* (Rev 2.9.9.b) no cupo al arrancar */
                     voz_ok = !voces_inicia_en(hueco_union, cap_union - union_fsp);
                 if (voz_ok && union_prestable())
-                    sfx_voces_juego(variante == 2 ? "VOCESH.DAT" : variante == 6 ? "VOCESC.DAT" : "VOCES.DAT", hueco_union, cap_union - union_fsp);   /* (sin el final del frontal) */
+                    sfx_voces_juego(variante == 2 ? (infarto_preset(preset_curso), infarto_voces()) : variante == 6 ? "VOCESC.DAT" : "VOCES.DAT", hueco_union, cap_union - union_fsp);   /* (sin el final del frontal) */
                 if (variante == 2) { infarto_preset(preset_curso); if (infarto_inicia()) { dbglog(DBG_ERROR, "MODO: sin INFARTO.DAT\n"); variante = 1; } }
                 else infarto_libera();                          /* 64 KB de tablas: solo en su modo */
                 if (voz_ok) { voces_modo(variante == 2); if (variante != 2) sfx_voz_grupo(-1); }
@@ -15450,6 +15450,9 @@ int main(int argc, char **argv)
                     d.variante = variante; d.puntos = puntos; d.corazones = variante == 2 ? infarto_total() : 0;
                     d.manual = fsp_manual(); d.config = fsp_config();
                     d.registro4 = etapa_n == 4 ? cur_nodo : -1;   /* 450560(4): la clave del nivel 4 al entrar en su etapa */
+                    d.desc4p = 0;                               /* (Rev 2.9.9.c) los 15 recorridos: la del nivel 4 si ha llegado */
+                    if (preset_curso >= 2 && etapa_n >= 4 && dsc_ok) for (k = 0; k < ncurso; k++)
+                        if (curso[k].nivel == 4 && curso[k].seg < ATR_SEG) { d.desc4p = 1 + dsc_seg[curso[k].seg]; break; }
                     d.ram = hueco_fin(&d.ram_cap);              /* sus tablas, fuera del monton */
                     ram_mapa("resultados");
                     fin_sp_resultados(como, &d); fin_on = 1;

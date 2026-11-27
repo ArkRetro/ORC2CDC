@@ -103,6 +103,10 @@ typedef struct {                /* como en VOCES.DAT */
 } voz_dat_t;
 
 static voz_dat_t voz[MAX_VOCES];
+/* Rev 2.9.9.c (modos "sp"): bloque 'VHG1' de VOCESH.DAT / VOCESHC.DAT (tools/conv_infarto.py vocesh): la mascara de
+   los grupos (bancos HAM distintos) de cada muestra (0 = HC / PERH), el grupo por clase de mision y clave y la clase de
+   cada mision (0x1af710). Sin el (ficheros de antes): id + 0x200 (grupo + 1) */
+static uint64_t voz_msk[MAX_VOCES]; static uint8_t voz_ghk[4][15], voz_cls[48]; static int voz_vhg;
 static uint32_t voz_spu, voz_tablas_tam;
 static uint8_t *voz_tablas;
 static int n_voz, canal_voz = -1, canal_voz_se = -1;
@@ -382,10 +386,15 @@ static int voces_lee(const char *fich, void *buf, uint32_t cap)
     spu_memload(voz_spu, d + h[4], (h[5] - h[4] + 3) & ~3u);
     n = h[1];
     for (i = 0; i < n; i++) memcpy(&voz[i], d + h[2] + 20 * i, 20);
+    voz_vhg = 0;
+    if (tam >= h[5] + 8 + 8 * n + 60 + 48 && !memcmp(d + h[5], "VHG1", 4) && !memcmp(d + h[5] + 4, &n, 4)) {
+        memcpy(voz_msk, d + h[5] + 8, 8 * n); memcpy(voz_ghk, d + h[5] + 8 + 8 * n, 60); memcpy(voz_cls, d + h[5] + 8 + 8 * n + 60, 48);
+        voz_vhg = 1;
+    }
     memcpy(voz_idioma, d + 24, 8); voz_idioma[8] = 0;
     n_voz = n;
     if (!buf) free(d);
-    dbglog(DBG_INFO, "VOZ: %s, %u muestras, %u KB en el AICA\n", fich, (unsigned)n, (unsigned)((h[5] - h[4]) >> 10));
+    dbglog(DBG_INFO, "VOZ: %s, %u muestras, %u KB en el AICA%s\n", fich, (unsigned)n, (unsigned)((h[5] - h[4]) >> 10), voz_vhg ? " (bancos HAM por clase y clave)" : "");
     return 0;
 }
 static const char *voz_fich;
@@ -414,6 +423,15 @@ int sfx_voces_juego(const char *fich, void *buf, uint32_t cap)
 int sfx_voces_inicia(void) { return sfx_voces_inicia_en(NULL, 0); }
 static int voz_grupo = -1;
 void sfx_voz_grupo(int g) { voz_grupo = g; }
+/* (VHG1) el grupo del banco que pide el cargador de la etapa del PS2 (0x173a6c: 0x1b3be8 / 0x1b3c70) para la mision m y
+   la clave k: base[0x1af710(m)] + k; -1 sin VHG1 */
+int sfx_voz_grupo_ham(int m, int k)
+{
+    int c;
+    if (!voz_vhg || k < 0 || k >= 15) return -1;
+    c = m >= 0 && m < 48 ? voz_cls[m] & 3 : 0;
+    return voz_ghk[c][k] == 0xff ? -1 : voz_ghk[c][k];
+}
 
 const void *sfx_voces_tablas(uint32_t *tam) { if (tam) *tam = voz_tablas_tam; return voz_tablas; }
 const char *sfx_voces_idioma(void) { return voz_idioma; }
@@ -424,7 +442,11 @@ static void toca_voz(int id, int canal)
     muestra_dat_t m;
     if (canal < 0) return;
     i = n_voz;
-    if (voz_grupo >= 0) {                                       /* la del banco de la etapa (HAM: id + 0x200 (g + 1)) */
+    if (voz_vhg) {                                              /* (VHG1) la del banco de la etapa, si no la de siempre */
+        uint64_t b = voz_grupo >= 0 && voz_grupo < 64 ? (uint64_t)1 << voz_grupo : 0;
+        if (b) for (i = 0; i < n_voz && !(voz[i].id == (id & 0x1ff) && (voz_msk[i] & b)); i++) ;
+        if (i >= n_voz) for (i = 0; i < n_voz && !(voz[i].id == (id & 0x1ff) && !voz_msk[i]); i++) ;
+    } else if (voz_grupo >= 0) {                                /* la del banco de la etapa (HAM: id + 0x200 (g + 1)) */
         int k = (id & 0x1ff) + 0x200 * (voz_grupo + 1);
         for (i = 0; i < n_voz && voz[i].id != k; i++) ;
     }
