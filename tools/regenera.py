@@ -464,6 +464,12 @@ def regenera(iso, D, W, jobs=4, informe=print):
                       ('TRAF*.DAT', 'CHR[0-9]*.DAT', 'BAND*.DAT', 'BO[0-9]*.DAT'))))
     informe('== version lejana lowpoly de lo grande (tools/lod_grande.py; lo ya hecho no cambia)')
     post('lodgrande', py(os.path.join(TOOLS, 'regenera.py'), '--interno', 'lodgrande', D, os.path.join(W, 'lodgrande')))
+    # mipmaps en lo lejano (tools/remip.py, docs/PARIDAD.md): sobre las etapas y uniones ya hechas, una vez (no es
+    # idempotente por si solo: cada pasada gastaria otra vez lo minimo de cada fichero; la marca va en trabajo/)
+    if not os.path.isfile(os.path.join(W, 'remip.hecho')):
+        informe('== mipmaps en lo lejano (tools/remip.py)')
+        post('remip', py(os.path.join(TOOLS, 'remip.py'), '--datos', D, D, os.path.join(W, 'remip')))
+        with open(os.path.join(W, 'remip.hecho'), 'w') as f: f.write('hecho\n')
 
     # ------------------------------------------------------------ comprobacion
     informe('== comprobacion de %s' % D)
