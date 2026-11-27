@@ -7284,3 +7284,17 @@ Sobre "COAST 2 COAST: los campeonatos (variante 5), agente c2c2". Todo verificad
 - E (Jennifer, PALM): "¡Ve al rebufo de los coches!" con su dibujo (tipo 12) y "¡Excede la velocidad!" con el
   velocimetro (tipo 1), cap3/rotulos (r_033, r_063, la ampliacion c2c3_rt_z.png).
 - SIN PORTAR: el letrero 3D de inicio / fin de la peticion (0x232e60 con 0x1a7c80 / 0x1a7cb0).
+
+### Medidas finales y lo que queda
+
+- RAM al arrancar (nav3.sh, MODO_JUEGO=1, sin defines, datos de prueba datos2): "RAMMAPA arranque: libre 373K" (4106ba2:
+  364K), "VOZ: VOCES.DAT, 35 muestras", sin "Out of memory" (cap3/log_nav3.txt). En la carrera del campeonato con la
+  pareja, CHRH.DAT y los objetos: ~300K libres.
+- Por el menu real (`-DPRUEBA_PILOTO_MENU -DPRUEBA_SIN_TIEMPO`, h3/camp.sh, Clarissa): mapa -> coche -> BEAC con la
+  peticion 11 anunciada con su rotulo del banco 0x46 y la reaccion de la acompanante a la nota; cap3/menu.
+- SIN PORTAR (por orden de lo que piden los guiones): 16 los minijuegos (104 peticiones, casi todas de Holly; clase
+  0x29f520 de 0x1860 bytes con 8 subtipos), 13 alimentar a la chica, 22 la bocina, 11 chocar con los coches de la
+  peticion (necesita los coches propios 0x22d088 / 0x1e1910), 5 colores (las franjas pintadas de +0x58 de los
+  parametros, 0x1f3a70, y el lateral 0x232768), 15 la pelota y 19 los meteoritos (sus objetos ya estan en CAMP.DAT
+  OBJ1, falta su control: 0x293190 / 0x29da88 y los objetos de tipos 0xb / 0xd / 0xe que haobj no mueve), 14, 20, 21,
+  23, 24; el letrero 3D de inicio / fin (0x232e60) y la silueta 2C0067 / 0x460064.
