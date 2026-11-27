@@ -39,8 +39,14 @@
      rand % 40 pasos (hasta 200) una oveja 0x460028 cruza la pantalla (0x228e60: (0, -50) a 0,55, velocidad 1 + 0,1 x rand
      % 10) con los efectos 0x188 y 0x423a70[rand % 3]; el carril bueno cuenta las ovejas, los demas bueno - 4 + rand % 8;
      zzz (0x460027, 0x2322a0) en el panel de la peticion desde el primer paso de la fase 4 hasta la 5.
-   El 6 (los coches): SIN PORTAR (se anuncia, tiene sus conos y sus voces, y acaba con el medidor a cero; necesita el
-   trafico de la peticion 0x1f1a88); ver docs/PARIDAD.md. */
+   - 6, los coches (0x2a3300 / 0x2a3510, CARS: agente c2c9): la puerta 0 con su carril bueno al azar; 0x2a3bd0 da a cada
+     coche de la lista +0x5c la clase +0x78 + 3 (+0x78 = +8, el azar del banco) con rand < 0,5 o una de las otras dos
+     (3..5); 0x1f1a88 / 0x1f20e8 el trafico de la peticion con los modelos +0x64 o 0x104. 0x22d0a0, al abrir cada coche de
+     la lista, cuenta en +0x7a los de la clase pedida y les da el modelo 0x415500 (los demas 0x415510 / 0x415530);
+     0x19c6f0 los tine por su clase (3 rojo, 4 verde, 5 azul). En la fase 4 el carril bueno de la puerta 0 lleva la
+     cuenta y los demas cuenta - 1 + rand % 3 (> 0, distintos de ella), cada vez que cambia; la puerta, como los demas.
+     Numeros en la puerta a escala 3 (0x2a0788). Aqui (bloque 'M163'): main.c abre los coches de la lista con
+     mj_coche y los tine (DESVIACION: color_mul, el multiplicador de los vertices). */
 #include <kos.h>
 #include <string.h>
 #include <stdlib.h>
@@ -71,6 +77,9 @@ typedef struct {
     const uint8_t *m2, *cpets; uint32_t ncpet;          /* 'M162' (3..5) y las peticiones de CAMP.DAT (sus parametros) */
     int ant, icono, t_ico, zzz, t_zzz, t_ov, n_ov;      /* la fase anterior (+4), el regalo del HUD (0x231fe0) y zzz */
     struct { int on; float cu, v; } ov[10];             /* las ovejas (+0x1208, 10 x 0xa0): cuadro y velocidad */
+    const uint8_t *m3, *c6p; uint32_t n6;               /* (c2c9) 'M163' (el 6) y los coches de la peticion en curso */
+    int n6c, nx6, cl6, cuenta, ini6;                    /* sus coches, el siguiente, la clase pedida (+0x78 + 3), +0x7a, inicio */
+    int8_t c6[100];                                     /* la clase de cada coche (+0xb de su registro de +0x5c) */
 } mj_t;
 static mj_t *M;
 /* el bloque 'M161': u16 voz_aviso2[7] (0), u16 animo[10] (14), u8 sprite[34] (34: 6 del subtipo 0, 21 del 1, 7 del 2), u8
@@ -90,7 +99,7 @@ static float f32_(int o) { float f; memcpy(&f, M->m + o, 4); return f; }
 #define M2_SE 56
 static int rnd15(void) { return rand() & 0x7fff; }   /* (x 2^-15: rand < 0,5 es < 16384, < 0,4 < 13108, > 0,8 > 26214) */
 
-void mj_libera(void) { free(M); M = NULL; }
+void mj_libera(void) { if (M && M->c6p && camp_trafpet) camp_trafpet(NULL); free(M); M = NULL; }
 int mj_inicia(const uint8_t *d, uint32_t tam)
 {
     uint32_t o, l; mj_t *q;
@@ -104,6 +113,9 @@ int mj_inicia(const uint8_t *d, uint32_t tam)
     if (o + 8 + 64 <= tam && !memcmp(d + o, "M162", 4)) q->m2 = d + o + 8;
     q->ncpet = ((const uint32_t *)d)[2]; l = ((const uint32_t *)d)[3];   /* (cdat_t: npet, opet; cpet_t de 52 bytes, p[6] en +36) */
     if (l + q->ncpet * 52 <= tam) q->cpets = d + l;
+    for (o = 0; o + 8 + 24 <= tam; o++)                 /* (c2c9) 'M163' detras de 'C131' */
+        if (!memcmp(d + o, "M163", 4) && (memcpy(&l, d + o + 4, 4), l >= 24 && o + 8 + l <= tam)) {
+            q->m3 = d + o + 8; memcpy(&q->n6, q->m3 + 20, 4); break; }
     q->icono = q->zzz = -1; q->n_ov = 100; M = q;
     MJLOG(DBG_INFO, "MJ: %u peticiones del tipo 16, %u bytes%s\n", (unsigned)q->n, (unsigned)sizeof *q, q->m2 ? ", M162" : "");
     return 0;
@@ -279,6 +291,48 @@ static int ovejas(int js)
     }
     return sale;
 }
+/* 0x2a3300 / 0x2a3bd0: el subtipo 6 (los coches); rnd: +8 de los parametros (el azar del banco CARS) */
+static void prepara6(int pet, int rnd)
+{
+    mj_t *const Q = M;
+    const uint8_t *e = Q->m3 ? Q->m3 + 24 : NULL; uint32_t k; int i, o0, o1;
+    Q->c6p = NULL; Q->n6c = Q->nx6 = Q->cuenta = 0;
+    for (k = 0; e && k < Q->n6; k++, e += 8 + 4 * e[2]) if (u16_(e) == pet) { Q->c6p = e + 8; Q->n6c = e[2] > 100 ? 100 : e[2]; break; }
+    if (!Q->c6p) return;
+    Q->ini6 = Q->cpets && (uint32_t)pet < Q->ncpet ? (int16_t)u16_(Q->cpets + 52 * pet) : 0;
+    Q->cl6 = 3 + (rnd >= 0 ? rnd : rand()) % 3;          /* (+0x78 + 3; el banco tiene 3: PROBABLE) */
+    o0 = Q->cl6 == 3 ? 4 : 3; o1 = Q->cl6 == 5 ? 4 : 5;   /* (las otras dos; con el 5 al reves que 0x2a3bd0: da igual, rand & 1) */
+    for (i = 0; i < Q->n6c; i++) Q->c6[i] = (int8_t)(rnd15() < 16384 ? Q->cl6 : rand() & 1 ? o0 : o1);
+    if (Q->nb && Q->b[0].n) { Q->b[0].buena = (uint8_t)(rand() % Q->b[0].n); memset(Q->b[0].sim, 0xff, sizeof Q->b[0].sim); }
+    if (camp_trafpet) {                                 /* 0x1f20e8(+0x10): el trafico con los modelos +0x64 (o 0x104) */
+        camp_trafpet_t r; int16_t m64 = (int16_t)u16_(e + 4);
+        for (i = 0; i < 7; i++) r.modelo[i] = m64 != -1 ? m64 : 0x104;
+        r.tope = 4; r.lod = 1; r.marca = 0; camp_trafpet(&r);   /* (los suyos son los de la lista: mj_coche) */
+    }
+    MJLOG(DBG_INFO, "MJ: coches: %d en la lista, la clase %d (azar %d), +0x64 %d\n", Q->n6c, Q->cl6, rnd, (int16_t)u16_(e + 4));
+}
+/* (main.c) el siguiente coche de la lista del 6 que abrir, como camp_coche14: seccion, carril y marca (HA_VISTO |
+   HA_CAMP | indice + 1 | el modelo del juego << 8 | la clase - 2 << 16); 0x22d0a0 cuenta los de la clase pedida */
+int mj_coche(int *sec, int *carril, int *marca)
+{
+    mj_t *const Q = M; const uint8_t *e; int c, mo;
+#ifdef DIAG_SIN_MJ6
+    return 0;                                           /* (medida: el 16/6 sin sus coches) */
+#endif
+    if (!M || Q->pet < 0 || Q->sub != 6 || !Q->c6p || Q->nx6 >= Q->n6c || Q->ant < 1 || Q->ant > 4) return 0;
+    for (;;) {
+        e = Q->c6p + 4 * Q->nx6;
+        *sec = Q->ini6 + (int16_t)u16_(e); *carril = (int8_t)e[2];
+        if (*sec >= Q->js + 5 || ++Q->nx6 >= Q->n6c) break;
+    }
+    if (Q->nx6 >= Q->n6c || *sec - Q->js > 40) return 0;
+    c = Q->c6[Q->nx6];
+    if (c == Q->cl6) Q->cuenta++;                       /* 0x22d278: +0x7a + 1 */
+    mo = c == Q->cl6 ? Q->m3[rand() % 3] : Q->m3[3 + rand() % 7];   /* 0x415500 / 0x415510 (SIMPLIFICADO: al azar, sin 0x415530) */
+    *marca = (int)(HA_VISTO | HA_CAMP) | (Q->nx6 + 1) | mo << 8 | (c - 2) << 16; Q->nx6++;
+    MJLOG(DBG_INFO, "MJ: coche %d en la seccion %d carril %d: clase %d, modelo %d, cuenta %d\n", Q->nx6, *sec, *carril, c, mo, Q->cuenta);
+    return 1;
+}
 /* 0x29fb28: el jugador por el carril k de n (lat: la fraccion de camp_obj) */
 static int carril_ok(float lat, int n, int k) { return n > 0 && (float)k / (float)n < lat && lat < (float)(k + 1) / (float)n; }
 
@@ -299,6 +353,7 @@ float mj_paso(int pet, int sub, int fase, int rnd, const camp_coche_t *c, void (
             else if (sub == 4) prepara4(Q->cpets && (uint32_t)pet < Q->ncpet ? (int)Q->cpets[52 * pet + 36] : 1);
             else if (sub == 5) prepara5();
         }
+        if (sub == 6) prepara6(pet, rnd);
 #ifdef PRUEBA_MJ                                        /* (prueba: lo preparado) */
         for (k = 0; k < Q->nb && sub >= 3; k++)
             dbglog(DBG_INFO, "MJ: puerta %d en la seccion %d: %d carriles, el bueno %d: %d %d %d%s\n", k, Q->b[k].sec, Q->b[k].n, Q->b[k].buena,
@@ -319,8 +374,14 @@ float mj_paso(int pet, int sub, int fase, int rnd, const camp_coche_t *c, void (
         }
     }
     if (fase >= 5) Q->icono = -1;                       /* (SUPUESTO: el regalo del HUD se va al acabar la peticion) */
+    if (sub == 6 && fase >= 5 && fase_ant < 5 && Q->c6p && camp_trafpet) camp_trafpet(NULL);   /* 0x1f20e8(0) */
+    if (sub == 6 && fase == 4 && Q->c6p && Q->nb && Q->b[0].n && Q->b[0].sim[Q->b[0].buena] != Q->cuenta) {   /* 0x2a3510 */
+        mj_ent_t *b = &Q->b[0]; int s, v, n = b->n > 6 ? 6 : b->n;
+        b->sim[b->buena] = (int16_t)Q->cuenta;
+        for (s = 0; s < n; s++) if (s != b->buena) { do v = Q->cuenta + rand() % 3 - 1; while (v <= 0 || v == Q->cuenta); b->sim[s] = (int16_t)v; }
+    }
     if (fase >= 4 && fase <= 6) {
-        if ((sub <= 2 || (Q->m2 && sub <= 5)) && fase == 4) {   /* 0x2a13f8 / 0x2a1948 / 0x2a1e00 / 0x2a24d8 / 0x2a2be0 / 0x2a2e80 */
+        if ((sub <= 2 || (Q->m2 && sub <= 5) || (sub == 6 && Q->c6p)) && fase == 4) {   /* 0x2a13f8 / 0x2a1948 / 0x2a1e00 / 0x2a24d8 / 0x2a2be0 / 0x2a2e80 */
             for (k = 0; k < Q->na && (sub == 1 || sub == 2); k++) {   /* (los avisos: el 1 a 20 secciones, solo 0x232350; el 2 su voz) */
                 mj_ent_t *a = &Q->a[k];
                 if (!a->pend || c->seccion < a->sec - (sub == 1 ? 20 : 0)) continue;
@@ -399,7 +460,7 @@ int mj_spr3d(haobj_s3d_t *v, int max, int (*cuadros)(const char *g))
         else { strcpy(v[m].g, "HA_S02"); v[m].cuadro = Q->destello - 1; memcpy(v[m].p, Q->yo, sizeof v[m].p); v[m].p[1] += 1.5f; v[m].esc = 0.7f; m++; }   /* (la de los arcos) */
     }
     sub = Q->sub;
-    if (sub > 5 || (sub > 2 && !Q->m2) || !mj_mundo) return m;
+    if (sub > 6 || (sub > 2 && !Q->m2) || (sub == 6 && !Q->c6p) || !mj_mundo) return m;
     if (sub == 5) {                                     /* las ovejas (0x228e60: capa 9, en (0, -50) a 0,55) y zzz */
         float p[3] = { 0.0f, -50.0f, 0.0f };
         for (k = 0; k < 10; k++) if (Q->ov[k].on) {
@@ -419,7 +480,7 @@ int mj_spr3d(haobj_s3d_t *v, int max, int (*cuadros)(const char *g))
             for (k = 0; k < (lista ? Q->nb : Q->na); k++) {
                 mj_ent_t *e = lista ? &Q->b[k] : &Q->a[k];
                 int col = sub == 0 && k < Q->na ? Q->a[k].n : 1, filas, f, j;
-                if ((sub == 2 || sub == 5) && e->cl != 1) continue;   /* (el 2 y el 5: solo las puertas) */
+                if ((sub == 2 || sub >= 5) && e->cl != 1) continue;   /* (el 2, el 5 y el 6: solo las puertas) */
                 if (e->sec < Q->js - 2 || e->sec >= Q->js + 50 || col < 1 || col > 3) continue;
                 filas = e->n / col;
                 for (f = 0; f < filas; f++) {

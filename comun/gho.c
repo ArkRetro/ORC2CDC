@@ -24,7 +24,8 @@ static int palabra(uint32_t off, uint32_t *w)          /* el u32 del byte off de
     memcpy(w, g_cache + (off & 2047), 4);
     return 0;
 }
-int gho_lee(const char *fich, void *dst, uint32_t cap, uint8_t *sector, uint32_t *n)
+/* (c2c9) frio, solo al cargar: -Os (el codigo cuenta en pasos de 8 KB de RAM) */
+__attribute__((optimize("Os"))) int gho_lee(const char *fich, void *dst, uint32_t cap, uint8_t *sector, uint32_t *n)
 {
     uint32_t h[13], i, r, w[6], q, fin, k, nv, a, b, t;
     *n = 0;

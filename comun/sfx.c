@@ -229,7 +229,8 @@ static void calla_grupo(int g)
     }
 }
 
-int sfx_inicia(void)
+/* (c2c9) frio, solo al cargar: -Os (el codigo cuenta en pasos de 8 KB de RAM) */
+__attribute__((optimize("Os"))) int sfx_inicia(void)
 {
     uint32_t tam, h[8], off, total, *cab;
     int g, i;
@@ -366,7 +367,8 @@ void sfx_menu(int id)
 /* ---------------------------------------------------------------- voces */
 /* lee un VOZ1 (VOCES.DAT o VOCESH.DAT) en el AICA; buf/cap: RAM prestada para el fichero (NULL: del monton). Las
    tablas de cuando habla se quedan con las del primero que las traiga (VOCESH.DAT no lleva) */
-static int voces_lee(const char *fich, void *buf, uint32_t cap)
+/* (c2c9) frio, solo al cargar: -Os (el codigo cuenta en pasos de 8 KB de RAM) */
+__attribute__((optimize("Os"))) static int voces_lee(const char *fich, void *buf, uint32_t cap)
 {
     uint32_t tam = 0, h[8], i, n;
     uint8_t *d;

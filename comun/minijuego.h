@@ -16,6 +16,9 @@ float mj_paso(int pet, int sub, int fase, int rnd, const camp_coche_t *c, void (
 /* los sprites 3D de la peticion en curso (0x2a0138 -> 0x115870): grupo MJ_kk de MJHUD.DAT (o HA_S02 de HAHUD.DAT),
    cuadro, punto y escala; cuadros(g): los cuadros de un grupo */
 int  mj_spr3d(struct haobj_s3d_s *v, int max, int (*cuadros)(const char *g));
+/* (c2c9, subtipo 6) el siguiente coche de la lista que abrir: seccion de la etapa, carril y la marca de su plaza (HA_VISTO |
+   HA_CAMP | indice + 1 | el modelo del juego << 8 | (la clase 3..5 - 2) << 16: el tinte 1 rojo, 2 verde, 3 azul); 0 ninguno */
+int  mj_coche(int *sec, int *carril, int *marca);
 /* (main.c) el punto del mundo de la seccion sec de la etapa en la fraccion lat del ancho del asfalto (la de camp_obj) y dx m
    mas hacia el mismo lado */
 extern void (*mj_mundo)(float sec, float lat, float dx, float p[3]);

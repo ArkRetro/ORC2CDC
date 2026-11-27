@@ -59,7 +59,8 @@ static float angw(float a)
 }
 
 /* --------------------------------------------------------- carga de tabla */
-int or2_carga_param(const float *t, int filas, int col, or2_param_t *p)
+/* (c2c9) frio, solo al cargar: -Os (el codigo cuenta en pasos de 8 KB de RAM) */
+__attribute__((optimize("Os"))) int or2_carga_param(const float *t, int filas, int col, or2_param_t *p)
 {
     int g;
     float k;

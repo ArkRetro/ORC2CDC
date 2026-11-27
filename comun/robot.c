@@ -481,7 +481,8 @@ static const uint32_t *tabla_de(const uint8_t *B, uint32_t Bn, const char *k, ui
 }
 static const uint32_t *tabla(const char *k, uint32_t *n) { return tabla_de(B, Bn, k, n); }
 static int osage_lee(int p, const uint32_t *w, uint32_t n);
-int robot_inicia(const void *rbt, uint32_t bytes)
+/* (c2c9) frio, solo al cargar: -Os (el codigo cuenta en pasos de 8 KB de RAM) */
+__attribute__((optimize("Os"))) int robot_inicia(const void *rbt, uint32_t bytes)
 {
     const uint32_t *w = rbt; uint32_t i, n;
     listo = 0;
@@ -1072,7 +1073,8 @@ int robot_b_nmat(void) { return (int)n_bmate; }
 const float *robot_b_material(int i) { return (const float *)(t_bmate + 9 * i); }
 const float (*robot_b_huesos(void))[4][4] { return (const float (*)[4][4])mot_b->M; }
 const float (*robot_b_inversa(int i))[4] { return mot_b->inv[i]; }
-void robot_band_inicia(int preset, const float *marco)  /* 0x2046f0 */
+/* (c2c9) frio, solo al cargar: -Os (el codigo cuenta en pasos de 8 KB de RAM) */
+__attribute__((optimize("Os"))) void robot_band_inicia(int preset, const float *marco)  /* 0x2046f0 */
 {
     static const float A[3] = { 0.14599999785f, 0.18000000715f, 0.00700000022f }, Bp[3] = { 0.17499999702f, 0.68000000715f, 0.01499999966f };
     motor_t *m = MOT(2); const uint32_t *f; int k;

@@ -191,7 +191,8 @@ mal:
     return NULL;
 }
 
-hud_dat_t *hudd_abre(const char *fich, int modelo, int parcial)
+/* (c2c9) frio, solo al cargar: -Os (el codigo cuenta en pasos de 8 KB de RAM) */
+__attribute__((optimize("Os"))) hud_dat_t *hudd_abre(const char *fich, int modelo, int parcial)
 {
     uint32_t sz, *c, i, j; hud_dat_t *h = calloc(1, sizeof *h);
     if (!h || !parcial) hudd_tablas_en(NULL, 0);            /* (la RAM de hudd_tablas_en solo vale para este) */
@@ -299,7 +300,8 @@ static int pal_une(const uint16_t *a, int na, const uint16_t *b, int nb, uint16_
     return n;
 }
 static uint32_t tam_vram(const hud_dat_t *h, int i);
-static void pal_reparte(hud_dat_t *h)
+/* (c2c9) frio, solo al cargar: -Os (el codigo cuenta en pasos de 8 KB de RAM) */
+__attribute__((optimize("Os"))) static void pal_reparte(hud_dat_t *h)
 {
     uint16_t *col, *nc, tmp[256]; int16_t *orden; uint32_t i, j, n = h->n_tex; int k, b, s;
     h->pal = malloc(n * sizeof *h->pal); h->con_pal = calloc(n, 1);
@@ -514,7 +516,8 @@ uint32_t hudd_grupos_suelta2(hud_dat_t *h, int t0, int nt, int t1, int n1)
     }
     return b;
 }
-int hudd_grupos_carga(hud_dat_t *h)
+/* (c2c9) frio, solo al cargar: -Os (el codigo cuenta en pasos de 8 KB de RAM) */
+__attribute__((optimize("Os"))) int hudd_grupos_carga(hud_dat_t *h)
 {
     enum { TROZO = 8 };
     uint32_t ini, fin, pos, sec, k, j, g = 0, ip = 0, npz = 0, falta = 0; uint8_t *t, *nuevo, pz_[sizeof(h_pie_t)];
