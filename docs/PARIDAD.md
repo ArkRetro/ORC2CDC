@@ -6872,7 +6872,8 @@ categorias del guion (+0x58 / +0x5c), los coches de la peticion (0x22d088 / 0x22
 sprites del banco 0x46 (no convertido). Tampoco: los rotulos del banco 0x46 (los de los tipos 1, 12 y los minijuegos:
 DESVIACION, sale el generico), el letrero 3D de inicio / fin de la peticion (0x232e60 con 0x1a7c80 / 0x1a7cb0), la
 silueta 2C0067 / 0x460064 que se llena (como en el INFARTO), las reacciones de la acompanante (0x205288 / 0x2a66a8) y
-la vibracion (0x2052f8).
+la vibracion (0x2052f8). -> HECHO despues: 6, 7, 8, los rotulos del banco 0x46 y las reacciones (ver "tercera tanda"),
+15, 19 y 5 (ver "cuarta tanda"), 11 (subtipos 0 y 1) y las voces de las peticiones (ver "quinta tanda").
 
 **Holly (grupo 6, Req_Course_MIX_PS2):** `tools/conv_union.py --arboles=...,302` ya sabe hacer su arbol (ARBOLES_REQ):
 EAST_R / BK262, LASV_R / BK263 ... PALM_R / BK95 (comprobado: los demas arboles de CURSO.DAT salen igual byte a byte),
@@ -7297,7 +7298,8 @@ Sobre "COAST 2 COAST: los campeonatos (variante 5), agente c2c2". Todo verificad
   peticion (necesita los coches propios 0x22d088 / 0x1e1910), 5 colores (las franjas pintadas de +0x58 de los
   parametros, 0x1f3a70, y el lateral 0x232768), 15 la pelota y 19 los meteoritos (sus objetos ya estan en CAMP.DAT
   OBJ1, falta su control: 0x293190 / 0x29da88 y los objetos de tipos 0xb / 0xd / 0xe que haobj no mueve), 14, 20, 21,
-  23, 24; el letrero 3D de inicio / fin (0x232e60) y la silueta 2C0067 / 0x460064.
+  23, 24; el letrero 3D de inicio / fin (0x232e60) y la silueta 2C0067 / 0x460064. -> HECHO: 15, 19 y 5 (ver "cuarta
+  tanda"); 11 subtipos 0 / 1 (ver "quinta tanda").
 ## INFARTO 3: tipos 11, 9, 14 y 20, sprites 3D de los objetos y RAM del arranque (Rev 1.1, 2026-11-27)
 
 Sobre "INFARTO 2" (rama infarto2, f0a330a). Todo en Flycast (nivel E), no en la consola. Datos nuevos o cambiados
@@ -7488,3 +7490,112 @@ auto.sh con INI=, medir.sh / mide.py para los fps con y sin dibujo, donde.py: en
 - 11 (0x294a90), 9, 22: los coches de la peticion salen del registro de aparicion 0x1f20e8 con la tabla de 0x46 bytes de
   +0x10 de los parametros (0x1f1a88) y 0x22dac0; el mismo que el INFARTO dejo sin portar (9 / 22). 13, 14, 20, 21, 23, 24:
   sin empezar. El letrero 3D (0x232e60) y el rotulo del 20: sin empezar.
+
+## COAST 2 COAST: campeonatos, quinta tanda (agente c2c5, 2026-11-27)
+
+Sobre "campeonatos, cuarta tanda (agente c2c4)" (rama c2c4, b7958da). Todo en Flycast (nivel E), no en la consola.
+Datos de prueba: $S/modos/c2c/dat3 (VOCESM.DAT nuevo y CAMP.DAT con 'C111' detras de lo de antes, que sale igual byte a
+byte; CAMPHUD.DAT y CAMPOBJ.DAT salen iguales que los de dat2), carpeta montada con h5/datos2.sh (lgdat2 + dat + dat_inf
++ dat2 + dat3); scripts en $S/modos/c2c/h5 (los de h4 para este worktree; gdi.sh con GD= para tener varios GDI a la
+vez; py/bancos.py lista la tabla 0x352840 con los id de cada banco, py/peor.py lo que pide cada etapa en el AICA).
+Capturas y registros en $S/modos/c2c/cap5.
+
+### HECHO: las voces de las peticiones (bancos HAM_MIS de 0x352840)
+
+Lo averiguado (SLES-53998):
+- El metodo de la etapa del gestor (0x22ac00, maquina de estados +0xe8): estado 0, por cada peticion de la lista el
+  switch 0x415280 (tipo - 1) da el banco 0x80nn de la tabla 0x352840 (las entradas 0x6c..0x96 y 0xa5 son HAM_MIS\...;
+  las "54..77" de la cuarta tanda son HAM_SR\ y HAM\ de las etapas): 1 MATCH, 2 DRIFT, 3 PASS, 4 COLLIDE, 5 ZONE, 6
+  CONEHIT, 7 COIN, 8 GATES, 9 ninguno, 10 NITRO, 11 HCARS (subtipo 0) / GHOST (1), 12 SLIP, 13 FOOD1..6 (rand % 6 a +8
+  de los parametros), 14 MTOTAL, 15 BALL, 16 por el subtipo (0x415300: 0 MEMORY, 1 ODD_ONE, 2 SOUND si la etapa solo
+  tiene esa peticion (0x22bd40 == 0x22bd60) y si no SOUND2..8 con rand % 7 (0x415320), 3 MATH, 4 ITEMS, 5 SHEEP, 6 CARS
+  con rand % 3 a +8), 17 HOLDLINE, 18 KEEPCONT (no estan en el disco en espanol; ningun guion los pide), 19 METEOR, 20
+  CUTLINE, 21 UFO, 22 HHORN, 23 DUCK, 24 PHOTO. Cada banco va al hueco 0x600 / 0x700 / 0x800 de 0x374180 si no lo lleva
+  ya otro (+0xf4) y 0x11ed40 los carga. Estado 1: +0xf0 = rand % 4 (0x22b148): la fila de las voces de la nota
+  (0x2a65a8) es al azar en cada etapa (la segunda tanda la tenia por PROBABLE = 46C520: corregido en camp_etapa).
+  Estado 2: el banco RANK1..4 de 0x415268[+0xf0] en el hueco 4 (las voces de la nota 0xb3..0xc7 y 0x151..0x153, que
+  tampoco sonaban).
+- La variante 5 carga al empezar COMMON.pak (hueco 1) y PERH.pak (hueco 9) (0x1b7f74; el INFARTO: HC.PAK y PERH).
+  COMMON es HC.PAK sin 0x14a / 0x14b / 0x163 y con 0xc6..0xcb (0x8c6, la voz del derrape del tipo 2, no sonaba).
+- Las tablas de algunos bancos (RANK3, ITEMS, PERR) van detras de un relleno de ceros hasta el siguiente multiplo de 2048
+  (tools/conv_camp.py `tablas_banco`; conv_sonido.banco_tablas no lo sabe: PERR.pak sigue SIN PORTAR en VOCESC.DAT).
+- Los id de voz son de 10 bits (UFO.pak 0x23f): sfx.c busca los de la etapa con 10 (VOCESH.DAT sigue con 9).
+
+Conversion (tools/conv_camp.py `voces_mision`, tambien solo con `--solo-voces`; regenera.py paso camp): VOCESM.DAT
+(1,9 MB en el disco, 47 bancos: COMMON 6 voces 34 KB, RANK 37..43 KB, los de las peticiones de 5 a 138 KB) y la tabla
+(tipo, subtipo) -> (banco, cuantos al azar). Fuera (DESVIACION): tres muestras de mas de 65535 muestras que un canal del
+AICA no toca de una vez: PASS 0xd8 (el efecto del convoy del 3/1, 3,4 s), NITRO 0x17d (6,7 s) y DUCK 0x1e1 (5,8 s).
+
+Codigo: comun/vozmis.c (-Os: solo corre al cambiar de etapa) y el enganche `camp_bancos` (campeonato.c lo llama en
+camp_etapa con las peticiones de la lista; main.c `camp_bancos_` abre VOCESM.DAT la primera vez: ~2 KB de indice en el
+monton durante el campeonato). Por etapa: suelta el bloque anterior del AICA, pide uno con COMMON + RANK + los bancos de
+las peticiones sin repetir, y un hilo (thd_create) lo lee de 32 KB en 32 KB (malloc solo mientras lee) y lo sube con
+spu_memload; al acabar, sfx_voz_extra pasa las filas a sfx.c, que las busca antes que las de VOCESH.DAT (por el canal de
+voz y por el de efectos: camp_se tambien). La variante 5 sigue con VOCESH.DAT (sfx_voces_juego), sin infarto_voces().
+
+AICA: con VOCESH.DAT quedan ~294 KB libres (824 KB con VOCES.DAT; VOCESH ocupa 740 KB, VOCES 210 KB); lo que mas pide
+una etapa de los tres arboles con el peor azar (py/peor.py) son 280 KB (tres 13/0 con FOOD distintos); las etapas de
+las pruebas piden 83..123 KB. Si no cabe: "VOZM: sin sitio" y esa etapa sin esas voces (no se ha visto).
+
+E (Flycast; el Flycast de las pruebas va con audio:backend=null: verificado por el registro "VOZ 0x... (peticion)", no
+escuchado; PROBABLE que el volumen sea el de la consola, la tabla SE del IRX como en VOCESH.DAT):
+- Jennifer entera hasta la meta (`-DPRUEBA_AUTO -DPRUEBA_CAMP=0 -DPRUEBA_SIN_TIEMPO`, cap5/voces/jennifer_goal.txt):
+  cinco etapas, cinco juegos de bancos (p. ej. "VOZM: etapa con 5 bancos (COMMON.pak RANK1.pak GATES.pak ZONE.pak
+  COIN.pak), 20 voces, 123 KB en el AICA" y "20 voces de la etapa en el AICA" poco despues), 43 voces de peticion
+  tocadas: anuncios (0x197 SLIP, 0x177 MATCH, 0x195 GATES), animo de COMMON (0xc6..0xca), nota de RANK (0xb8, 0xbe,
+  0x152) y de los tipos (0xf1); "CURSO: GOAL en IMPE", sin "Out of memory".
+- Clarissa BEAC (11/0 y 3/0): HCARS + PASS y la voz 0x1a6 del anuncio del 11 (cap5/t11c/flycast.txt).
+- Sin probar: los bancos al azar (FOOD, SOUND2..8, CARS) en una carrera (ningun piloto paso por 13 / 16 en esta tanda).
+
+### HECHO (SIMPLIFICADO): tipo 11, chocar con los coches de la peticion (subtipos 0 y 1)
+
+Lo averiguado: el control 0x294a90 (vtable 0x422ec0 +0x24). Fase 1: copia a +0x10 de los parametros la tabla de
+aparicion de 0x46 bytes que da 0x1f1a88, pone en +0x1e..+0x2a los 7 modelos (+0x64, o 0x96 con el subtipo 0 / 0xa5 con
+el 1 si +0x64 == -1) y 0x1f20e8(+0x10) la deja en [0x5d5fd8], que 0x1f1a88 (el generador del trafico, tabla 0x5d5e78
+de 5 x 0x46) usa mientras no sea 0; con el subtipo 1 prepara el sprite 2C0006 (0x115ae0); +0x74 = 80 / p78; 0x22dac0
+llena 24 enteros con rand % 0x19 (o % p66). Fase 4: por las plazas 1..23 del trafico (0x556f28) con [0x55cf38 + 8 + i] &
+3 == 2: con el coche 7 secciones por delante del jugador y 60 pasos desde el anterior, un efecto de 0x422e00 (0xd1..0xd3,
+de GHOST.pak; CAMP.DAT 'C111'); golpeado (+0xb6c y +0x2f4 == 0), medidor + p74 y +0x10 + 1. Fase 5: 0x1f20e8(0); con
+nota 6, +0x10 > p78 ? (< p7c ? (n - p78) / (p7c - p78) x 70 : (n - p7c) x 5 + 70) : 0. El subtipo 2 (0x295298) no lo pide
+ningun guion.
+
+Portado (comun/campeonato.c `camp_autos` / `camp_spr3d`; main.c traf_aparece y ha_spr3d en la variante 5):
+- SIMPLIFICADO / DESVIACION: sin 0x1f1a88 (el generador con la tabla de la peticion): los coches del trafico que
+  aparecen por delante del jugador entre el anuncio y el final son los de la peticion (marca HA_CAMP de la plaza), con
+  los modelos del trafico (0x96 / 0xa5 no son modelos que tenga la DC; no se ha averiguado a que coche corresponden, asi
+  que tampoco se usa RCmm.DAT). El golpe: b6c && !n2f4, una vez por coche (PROBABLE, como el 20 del INFARTO).
+- Dibujo: 11/1 el 2C0006 de HAHUD.DAT (HA_S06) sobre el coche, como el 0x1b2190 del INFARTO; 11/0 (DESVIACION: sin su
+  modelo) el icono del corazon del medidor (HA_C0) a escala 2 sobre el coche, a menos de 10 secciones. Un quad por coche
+  (no son triangulos de la escena).
+- E (`-DPRUEBA_AUTO -DPRUEBA_CAMP=1 -DPRUEBA_SIN_TIEMPO -DPRUEBA_C11`; PRUEBA_C11 cuenta como golpe pasar por la seccion
+  del coche, porque el piloto no apunta a ellos): BEAC 11/0 (90..290): "coche de la peticion golpeado (1 de 10), medidor
+  8" ... 4 de 10, "peticion 11 hecha: 32 - 0, nota 3"; el corazon sobre un coche de la peticion en cap5/t11c/z42.png
+  (ampliacion de r_042). NO verificado: golpes de verdad (sin PRUEBA_C11) ni el 11/1 en pantalla.
+
+### Medidas
+
+- Tipo 11 (BEAC 11/0, la misma pasada con y sin los sprites `-DDIAG_SIN_C11`, DIAG_MS, 21 muestras de 30 cuadros entre
+  el anuncio y el final; cap5/medidas/c11_con.txt y c11_sin.txt): 38,69 frente a 38,89 fps (-0,20), dibujo 19,68 frente
+  a 19,59 ms, 17822 frente a 17818 triangulos de media (+4: un quad por coche marcado, 1..2 a la vez). Los coches son los
+  del trafico (ninguno de mas).
+- Voces: nada por cuadro; al cambiar de etapa un hilo lee 83..123 KB (las pruebas) del GD; sin tirones apreciables en
+  Flycast (no medido aparte).
+- RAM al arrancar (nav3.sh, MODO_JUEGO=1, sin defines, datos3; cap5/nav3_final.txt): "RAMMAPA arranque: libre 426K"
+  (igual que c2c4), "VOZ: VOCES.DAT, 35 muestras", sin "Out of memory". El programa crece 4,3 KB (2 869 688 -> 2 874 128
+  de text + data + bss) sin pasar de escalon de 8 KB (queda a ~1,1 KB del siguiente); vozmis.o y lo nuevo de
+  campeonato.c a -Os, sfx.c sigue a -O2 (corre en cada cuadro). En la carrera del campeonato: ~2 KB del indice de
+  VOCESM.DAT y las filas de la etapa (< 2 KB); 32 KB mas solo mientras el hilo lee.
+
+### SIN PORTAR (lo averiguado en esta tanda)
+
+- 0x1f1a88 / 0x1f20e8 (el generador del trafico con la tabla de la peticion): el 11 va SIMPLIFICADO (arriba); 13 y 22
+  lo necesitan de verdad (los coches que se acercan / a los que se toca la bocina). Tampoco el 9 / 22 del INFARTO
+  (0x1a9e08). Lo que falta: el formato de los 0x46 bytes (hay 5 en 0x5d5e78, de 0x158 bytes cada 5; +0xe..+0x1c los 7
+  modelos) y que son los modelos 0x96 / 0xa5.
+- 22 la bocina (0x29b3d0, clase de 0x38): fase 1 0x29b798 (con +0x78 == 1) y por la clase +0x14 (vtable de 0x29b330);
+  fase 3 0x29bfc0(+0x7c) y [+0x1ec] / [+0x1e8] del gestor; fase 4 +0x70 += el avance y 0x29c058; fase 5 el efecto 0x1bc
+  (HHORN.pak, que ya suena con VOCESM.DAT) y con nota 6 30 x min(1, (medidor - pen - 80) / (80 / 0,9 - 80)) + 40 x
+  0x22f090.
+- 13 (FOOD: el azar del banco ya queda en pet_t.rnd, el +8 que lee el tipo), 14, 16 (los minijuegos: sus bancos de voz
+  ya se cargan), 20, 21, 23, 24; el rotulo propio del 20; el letrero 3D de inicio / fin (0x232e60): sin empezar en esta
+  tanda (el tiempo se fue en las voces y el 11).
