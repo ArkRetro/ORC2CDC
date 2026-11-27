@@ -49,6 +49,11 @@
 #include "haobj.h"
 
 void (*mj_mundo)(float sec, float lat, float dx, float p[3]);
+#ifdef PRUEBA_AUTO                                      /* el registro de cada aviso y puerta, solo en las pruebas (el codigo */
+#define MJLOG dbglog                                    /* de mas hacia saltar .init al siguiente bloque de 8 KB: -8K de RAM) */
+#else
+#define MJLOG(...) ((void)0)
+#endif
 
 #define NMAX 50
 typedef struct {                                        /* un registro de la lista A o B (0x2c bytes en el original) */
@@ -83,24 +88,24 @@ static float f32_(int o) { float f; memcpy(&f, M->m + o, 4); return f; }
 #define M2_OVE 51
 #define M2_ZZZ 52
 #define M2_SE 56
-static float rnd15(void) { return (float)(rand() & 0x7fff) * 3.0517578e-5f; }
+static int rnd15(void) { return rand() & 0x7fff; }   /* (x 2^-15: rand < 0,5 es < 16384, < 0,4 < 13108, > 0,8 > 26214) */
 
 void mj_libera(void) { free(M); M = NULL; }
 int mj_inicia(const uint8_t *d, uint32_t tam)
 {
-    uint32_t o, l;
+    uint32_t o, l; mj_t *q;
     mj_libera();
     for (o = 0; o + 8 + CAB <= tam; o++)                /* (el bloque va detras de los demas, sin alinear: se busca su firma) */
         if (!memcmp(d + o, "M161", 4) && (memcpy(&l, d + o + 4, 4), l >= CAB && o + 8 + l <= tam)) break;
-    if (o + 8 + CAB > tam || !(M = calloc(1, sizeof *M))) return -1;
-    M->m = d + o + 8; memcpy(&M->n, M->m + CAB - 4, 4); M->pets = M->m + CAB; M->pet = -1;
-    M->c13a0 = (uint32_t)rand(); M->c1398 = (uint32_t)rand();
-    for (o += 8 + l; o + 8 + 64 <= tam; o++)            /* 'M162' detras (tools/conv_camp.py; sin el, los 3..5 sin portar) */
-        if (!memcmp(d + o, "M162", 4) && (memcpy(&l, d + o + 4, 4), l >= 64 && o + 8 + l <= tam)) { M->m2 = d + o + 8; break; }
-    memcpy(&M->ncpet, d + 8, 4); memcpy(&l, d + 12, 4); /* (cdat_t: npet, opet; cpet_t de 52 bytes, p[6] = +0x78 en +36) */
-    if (l + M->ncpet * 52 <= tam) M->cpets = d + l;
-    M->icono = M->zzz = -1; M->n_ov = 100;
-    dbglog(DBG_INFO, "MJ: %u peticiones del tipo 16, %u bytes%s\n", (unsigned)M->n, (unsigned)sizeof *M, M->m2 ? ", M162" : "");
+    if (o + 8 + CAB > tam || !(q = calloc(1, sizeof *q))) return -1;
+    q->m = d + o + 8; memcpy(&q->n, q->m + CAB - 4, 4); q->pets = q->m + CAB; q->pet = -1;
+    q->c13a0 = (uint32_t)rand(); q->c1398 = (uint32_t)rand();
+    o += 8 + l;                                         /* 'M162' justo detras (tools/conv_camp.py; sin el, los 3..5 sin portar) */
+    if (o + 8 + 64 <= tam && !memcmp(d + o, "M162", 4)) q->m2 = d + o + 8;
+    q->ncpet = ((const uint32_t *)d)[2]; l = ((const uint32_t *)d)[3];   /* (cdat_t: npet, opet; cpet_t de 52 bytes, p[6] en +36) */
+    if (l + q->ncpet * 52 <= tam) q->cpets = d + l;
+    q->icono = q->zzz = -1; q->n_ov = 100; M = q;
+    MJLOG(DBG_INFO, "MJ: %u peticiones del tipo 16, %u bytes%s\n", (unsigned)q->n, (unsigned)sizeof *q, q->m2 ? ", M162" : "");
     return 0;
 }
 static int u16_(const uint8_t *p) { return p[0] | p[1] << 8; }
@@ -108,55 +113,65 @@ static int u16_(const uint8_t *p) { return p[0] | p[1] << 8; }
 /* 0x2a0d08 (y 0x2a3778: los conos de las puertas) */
 static void reparte(int pet)
 {
-    const uint8_t *e = M->pets; uint32_t k; int i, j, nr = 0;
-    M->na = M->nb = 0; M->pet = pet; M->t1204 = 0;
-    for (k = 0; k < M->n; k++, e += 4 + 8 * e[3]) if (u16_(e) == pet) { nr = e[3]; break; }
-    if (k == M->n) return;
+    mj_t *const Q = M;
+    const uint8_t *e = Q->pets; uint32_t k; int i, j, nr = 0;
+    Q->na = Q->nb = 0; Q->pet = pet; Q->t1204 = 0;
+    for (k = 0; k < Q->n; k++, e += 4 + 8 * e[3]) if (u16_(e) == pet) { nr = e[3]; break; }
+    if (k == Q->n) return;
     if (camp_obj) camp_obj(-1, 0, 0, 0, 0);
     for (i = 0; i < nr; i++) {
         const uint8_t *r = e + 4 + 8 * i; int cl = r[0], c = r[2], s0 = (int16_t)u16_(r + 4), s1 = (int16_t)u16_(r + 6);
         int m = c < 2 || s0 >= s1 ? 1 : c; float paso = m > 1 ? (float)(s1 - s0) / (float)(c - 1) : 0.0f;
         for (j = 0; j < m; j++) {
             mj_ent_t *x;
-            if (cl == 0 && M->na < NMAX) x = &M->a[M->na++];
-            else if (cl == 1 && M->nb < NMAX) x = &M->b[M->nb++];
+            if (cl == 0 && Q->na < NMAX) x = &Q->a[Q->na++];
+            else if (cl == 1 && Q->nb < NMAX) x = &Q->b[Q->nb++];
             else continue;
             memset(x->sim, 0xff, sizeof x->sim); x->pend = 1; x->buena = 0; x->n = r[1]; x->cl = (uint8_t)cl;
             x->sec = (int16_t)(s0 + (int)(paso * (float)j));
         }
     }
 #ifndef DIAG_SIN_MJ                                     /* (medida: sin los conos) */
-    for (i = 0; i < M->nb && camp_obj; i++)             /* 0x2a3778: conos rojos (6) en los bordes de los carriles */
-        for (j = 0; j <= M->b[i].n && M->b[i].n; j++) camp_obj(6, 2, (float)M->b[i].sec, (float)j / (float)M->b[i].n, 1.0f);
+    for (i = 0; i < Q->nb && camp_obj; i++)             /* 0x2a3778: conos rojos (6) en los bordes de los carriles */
+        for (j = 0; j <= Q->b[i].n && Q->b[i].n; j++) camp_obj(6, 2, (float)Q->b[i].sec, (float)j / (float)Q->b[i].n, 1.0f);
 #endif
-    dbglog(DBG_INFO, "MJ: peticion %d subtipo %d: %d avisos, %d puertas\n", pet, M->sub, M->na, M->nb);
+    MJLOG(DBG_INFO, "MJ: peticion %d subtipo %d: %d avisos, %d puertas\n", pet, Q->sub, Q->na, Q->nb);
+}
+/* los demas carriles de la puerta b: base + rand % dn, distintos del bueno y (dist) de los de antes, y (pos) > 0 */
+static void otros(mj_ent_t *b, int base, int dn, int dist, int pos)
+{
+    int s, i, v, g = b->sim[b->buena], malo, n = b->n > 6 ? 6 : b->n;
+    for (s = 0; s < n; s++) {
+        if (s == b->buena) continue;
+        do {
+            v = base + rand() % dn; malo = v == g || (pos && v <= 0);
+            for (i = 0; i < s && dist && !malo; i++) malo = b->sim[i] == v;
+            b->sim[s] = (int16_t)v;
+        } while (malo);
+    }
 }
 /* 0x2a1ba0: el subtipo 2 (el sonido) */
 static void prepara2(int rnd)
 {
-    int k, s, v;
-    for (k = 0; k < M->nb; k++) {
-        mj_ent_t *b = &M->b[k]; int n = b->n > 6 ? 6 : b->n, malo;
+    mj_t *const Q = M;
+    int k, v;
+    for (k = 0; k < Q->nb; k++) {
+        mj_ent_t *b = &Q->b[k]; int n = b->n > 6 ? 6 : b->n;
         if (!n) continue;
         b->buena = (uint8_t)(rand() % n);
         v = rnd >= 0 ? rnd % 7 : rand() % 7;
-        if (k < M->na) { M->a[k].sim[0] = (int16_t)v; M->a[k].n = 1; }
-        for (s = 0; s < n; s++) {
-            if (s == b->buena) { b->sim[s] = (int16_t)v; continue; }
-            do {                                        /* uno al azar distinto del bueno y de los de antes */
-                int i; b->sim[s] = (int16_t)(rand() % 7); malo = b->sim[s] == v;
-                for (i = 0; i < s && !malo; i++) malo = b->sim[i] == b->sim[s];
-            } while (malo);
-        }
+        if (k < Q->na) { Q->a[k].sim[0] = (int16_t)v; Q->a[k].n = 1; }
+        b->sim[b->buena] = (int16_t)v; otros(b, 0, 7, 1, 0);   /* (los demas al azar distintos del bueno y de los de antes) */
     }
 }
 /* 0x2a1150: el subtipo 0 (la memoria): el aviso k muestra a->n frutas al azar (de 6) y la puerta k dos filas de a->n: la
    buena (al azar) con las mismas y la otra con otras (al menos una distinta en su sitio) */
 static void prepara0(void)
 {
+    mj_t *const Q = M;
     int k, s, n;
-    for (k = 0; k < M->na && k < M->nb; k++) {
-        mj_ent_t *a = &M->a[k], *b = &M->b[k]; int iguales;
+    for (k = 0; k < Q->na && k < Q->nb; k++) {
+        mj_ent_t *a = &Q->a[k], *b = &Q->b[k]; int iguales;
         n = a->n > 3 ? 3 : a->n;
         b->n = (uint8_t)(2 * n);
         for (s = 0; s < n; s++) a->sim[s] = (int16_t)(rand() % 6);
@@ -171,109 +186,95 @@ static void prepara0(void)
    el carril bueno con uno de esa clase y los demas con otros distintos de la otra; el aviso k igual que la puerta */
 static void prepara1(void)
 {
-    int k, s, i, c0 = M->m[68], c1 = M->m[69];
-    for (k = 0; k < M->nb; k++) {
-        mj_ent_t *b = &M->b[k]; int n = b->n > 6 ? 6 : b->n, cl = rand() % 2, v, malo;
+    mj_t *const Q = M;
+    int k, c0 = Q->m[68], c1 = Q->m[69];
+    for (k = 0; k < Q->nb; k++) {
+        mj_ent_t *b = &Q->b[k]; int n = b->n > 6 ? 6 : b->n, cl = rand() % 2, v;
         if (!n || !c0 || !c1) continue;
         b->buena = (uint8_t)(rand() % n);
         v = cl ? c0 + rand() % c1 : rand() % c0;
-        for (s = 0; s < n; s++) {
-            if (s == b->buena) { b->sim[s] = (int16_t)v; continue; }
-            do {
-                b->sim[s] = (int16_t)(cl ? rand() % c0 : c0 + rand() % c1); malo = b->sim[s] == v;
-                for (i = 0; i < s && !malo; i++) malo = b->sim[i] == b->sim[s];
-            } while (malo);
-        }
+        b->sim[b->buena] = (int16_t)v; otros(b, cl ? 0 : c0, cl ? c0 : c1, 1, 0);
     }
-    for (k = 0; k < M->na && k < M->nb; k++) { M->a[k].n = M->b[k].n; memcpy(M->a[k].sim, M->b[k].sim, sizeof M->a[k].sim); }
+    for (k = 0; k < Q->na && k < Q->nb; k++) { Q->a[k].n = Q->b[k].n; memcpy(Q->a[k].sim, Q->b[k].sim, sizeof Q->a[k].sim); }
 }
 /* la puerta k cuenta lo de los avisos entre la puerta k - 1 y la k (estrictamente) */
 static int entre(int k, int sec) { return (k == 0 || M->b[k - 1].sec < sec) && sec < M->b[k].sec; }
-/* los demas carriles de la puerta b: bueno + d0 + rand % dn, distintos del bueno y (dist) de los de antes, y (pos) > 0 */
-static void otros(mj_ent_t *b, int d0, int dn, int dist, int pos)
-{
-    int s, i, v, g = b->sim[b->buena], malo, n = b->n > 6 ? 6 : b->n;
-    for (s = 0; s < n; s++) {
-        if (s == b->buena) continue;
-        do {
-            v = g + d0 + rand() % dn; malo = v == g || (pos && v <= 0);
-            for (i = 0; i < s && dist && !malo; i++) malo = b->sim[i] == v;
-            b->sim[s] = (int16_t)v;
-        } while (malo);
-    }
-}
 /* 0x2a2080: el subtipo 3 (la suma) */
 static void prepara3(void)
 {
+    mj_t *const Q = M;
     int k, j, nv, de, ha, v;
-    for (k = 0; k < M->na; k++) {
-        mj_ent_t *a = &M->a[k];
+    for (k = 0; k < Q->na; k++) {
+        mj_ent_t *a = &Q->a[k];
         nv = a->n > 2 ? 2 : a->n; a->n = 1;
-        memcpy(&de, M->m2 + 8 * nv, 4); memcpy(&ha, M->m2 + 8 * nv + 4, 4);
-        if ((!nv || rnd15() < 0.5f) && ha > de) v = rand() % (ha - de) + de;
+        memcpy(&de, Q->m2 + 8 * nv, 4); memcpy(&ha, Q->m2 + 8 * nv + 4, 4);
+        if ((!nv || rnd15() < 16384) && ha > de) v = rand() % (ha - de) + de;
         else if (ha > 0) { v = rand() % ha; if (!v) v = 1; }
         else v = 1;
         if ((nv == 1 && rand() % 5 == 0) || (nv == 2 && (rand() & 3) == 0)) v = -v;
         a->sim[0] = (int16_t)v;
     }
-    for (k = 0; k < M->nb; k++) {
-        mj_ent_t *b = &M->b[k]; int n = b->n > 6 ? 6 : b->n;
+    for (k = 0; k < Q->nb; k++) {
+        mj_ent_t *b = &Q->b[k]; int n = b->n > 6 ? 6 : b->n;
         if (!n) continue;
         b->buena = (uint8_t)(rand() % n);
         for (j = 0; j < n; j++) b->sim[j] = 0;
-        for (j = 0; j < M->na; j++) if (entre(k, M->a[j].sec)) b->sim[b->buena] += M->a[j].sim[0];
-        otros(b, -5, 10, 1, 0);
+        for (j = 0; j < Q->na; j++) if (entre(k, Q->a[j].sec)) b->sim[b->buena] += Q->a[j].sim[0];
+        otros(b, b->sim[b->buena] - 5, 10, 1, 0);
     }
 }
 /* 0x2a26d0: el subtipo 4 (los regalos); nk: +0x78 de los parametros (las clases en juego) */
 static void prepara4(int nk)
 {
+    mj_t *const Q = M;
     int perm[5] = { 0, 1, 2, 3, 4 }, k, j, s, t, cuantos;
     t = rand() % 5; s = perm[0]; perm[0] = perm[t]; perm[t] = s;
     for (k = 1; k < nk && k < 5; k++) { t = 1 + rand() % 4; s = perm[k]; perm[k] = perm[t]; perm[t] = s; }
     do {
-        for (cuantos = k = 0; k < M->na; k++) {
-            mj_ent_t *a = &M->a[k]; int n = a->n > 6 ? 6 : a->n;
+        for (cuantos = k = 0; k < Q->na; k++) {
+            mj_ent_t *a = &Q->a[k]; int n = a->n > 6 ? 6 : a->n;
             for (s = 0; s < n; s++) {
-                float r = rnd15();
-                if (r < 0.4f) { a->sim[s] = (int16_t)perm[0]; cuantos++; }
-                else a->sim[s] = (int16_t)(r > 0.8f && nk >= 2 ? perm[1 + rand() % (nk - 1)] : 5);
+                int r = rnd15();
+                if (r < 13108) { a->sim[s] = (int16_t)perm[0]; cuantos++; }
+                else a->sim[s] = (int16_t)(r > 26214 && nk >= 2 ? perm[1 + rand() % (nk - 1)] : 5);
             }
         }
-    } while (!cuantos && M->na);
-    for (k = 0; k < M->nb; k++) {
-        mj_ent_t *b = &M->b[k]; int n = b->n > 6 ? 6 : b->n;
+    } while (!cuantos && Q->na);
+    for (k = 0; k < Q->nb; k++) {
+        mj_ent_t *b = &Q->b[k]; int n = b->n > 6 ? 6 : b->n;
         if (!n) continue;
         b->buena = (uint8_t)(rand() % n);
         for (j = 0; j < n; j++) b->sim[j] = 0;
-        for (j = 0; j < M->na; j++)
-            if (entre(k, M->a[j].sec)) for (s = 0; s < M->a[j].n && s < 6; s++) b->sim[b->buena] += M->a[j].sim[s] == perm[0];
-        otros(b, -4, 8, 0, 1);
+        for (j = 0; j < Q->na; j++)
+            if (entre(k, Q->a[j].sec)) for (s = 0; s < Q->a[j].n && s < 6; s++) b->sim[b->buena] += Q->a[j].sim[s] == perm[0];
+        otros(b, b->sim[b->buena] - 4, 8, 0, 1);
     }
-    M->icono = perm[0]; M->t_ico = 0;                   /* 0x231fe0: el regalo a contar (0x423af8[perm[0]]) en el HUD */
+    Q->icono = perm[0]; Q->t_ico = 0;                   /* 0x231fe0: el regalo a contar (0x423af8[perm[0]]) en el HUD */
 }
 /* 0x2a2de8: el subtipo 5 (las ovejas): la puerta 0 con su carril bueno y a cero */
 static void prepara5(void)
 {
+    mj_t *const Q = M;
     int j;
-    memset(M->ov, 0, sizeof M->ov); M->t_ov = 0;
-    if (!M->nb || !M->b[0].n) return;
-    M->b[0].buena = (uint8_t)(rand() % M->b[0].n);
-    for (j = 0; j < M->b[0].n && j < 6; j++) M->b[0].sim[j] = 0;
+    memset(Q->ov, 0, sizeof Q->ov); Q->t_ov = 0;
+    if (!Q->nb || !Q->b[0].n) return;
+    Q->b[0].buena = (uint8_t)(rand() % Q->b[0].n);
+    for (j = 0; j < Q->b[0].n && j < 6; j++) Q->b[0].sim[j] = 0;
 }
 /* 0x2a2e80 (fases 1..4): las ovejas entre el aviso 0 y la puerta - 40; devuelve 1 si sale una */
 static int ovejas(int js)
 {
-    mj_ent_t *b = &M->b[0]; int k, sale = 0;
+    mj_t *const Q = M;
+    mj_ent_t *b = &Q->b[0]; int k, sale = 0;
     for (k = 0; k < 10; k++)                            /* 0x229120: avanzan y se van al acabar su escena */
-        if (M->ov[k].on && (M->ov[k].cu += M->ov[k].v) >= (float)M->n_ov) M->ov[k].on = 0;
-    if (!M->na || !M->nb || !b->n || js < M->a[0].sec || js >= b->sec - 40) return 0;
-    if (b->sim[b->buena] < 200) M->t_ov--;
-    if (M->t_ov > 0) return 0;
-    for (k = 0; k < 10; k++) if (!M->ov[k].on) {
-        M->ov[k].on = 1; M->ov[k].cu = 0; M->ov[k].v = (float)(rand() % 10) * 0.1f + 1.0f;   /* 0x228e60 / 0x229080 */
-        M->t_ov = rand() % 40 + 30;
-        b->sim[b->buena]++; otros(b, -4, 8, 0, 1);
+        if (Q->ov[k].on && (Q->ov[k].cu += Q->ov[k].v) >= (float)Q->n_ov) Q->ov[k].on = 0;
+    if (!Q->na || !Q->nb || !b->n || js < Q->a[0].sec || js >= b->sec - 40) return 0;
+    if (b->sim[b->buena] < 200) Q->t_ov--;
+    if (Q->t_ov > 0) return 0;
+    for (k = 0; k < 10; k++) if (!Q->ov[k].on) {
+        Q->ov[k].on = 1; Q->ov[k].cu = 0; Q->ov[k].v = (float)(rand() % 10) * 0.1f + 1.0f;   /* 0x228e60 / 0x229080 */
+        Q->t_ov = rand() % 40 + 30;
+        b->sim[b->buena]++; otros(b, b->sim[b->buena] - 4, 8, 0, 1);
         sale = 1; break;
     }
     return sale;
@@ -283,66 +284,69 @@ static int carril_ok(float lat, int n, int k) { return n > 0 && (float)k / (floa
 
 float mj_paso(int pet, int sub, int fase, int rnd, const camp_coche_t *c, void (*voz)(int id, int retardo, int prio))
 {
+    mj_t *const Q = M;
     float dm = 0.0f, lat = 1.0f - c->lat;               /* (c->lat: 0 el borde derecho; la de camp_obj, 0 el izquierdo) */
     int k, fase_ant;
     if (!M) return 0.0f;
-    memcpy(M->yo, c->xyz, sizeof M->yo); M->js = c->seccion;
-    if (M->destello > 0) M->destello++;
-    k = M->ant; M->ant = fase; fase_ant = k;            /* (+4: la fase del paso anterior) */
+    memcpy(Q->yo, c->xyz, sizeof Q->yo); Q->js = c->seccion;
+    if (Q->destello > 0) Q->destello++;
+    k = Q->ant; Q->ant = fase; fase_ant = k;            /* (+4: la fase del paso anterior) */
     if (fase == 1) {
-        M->sub = sub; reparte(pet); M->icono = M->zzz = -1;
+        Q->sub = sub; reparte(pet);
         if (sub == 0) prepara0(); else if (sub == 1) prepara1(); else if (sub == 2) prepara2(rnd);
-        else if (M->m2 && sub == 3) prepara3();
-        else if (M->m2 && sub == 4) prepara4(M->cpets && (uint32_t)pet < M->ncpet ? (int)M->cpets[52 * pet + 36] : 1);
-        else if (M->m2 && sub == 5) prepara5();
-        for (k = 0; k < M->nb && sub >= 3; k++)
-            dbglog(DBG_INFO, "MJ: puerta %d en la seccion %d: %d carriles, el bueno %d: %d %d %d%s\n", k, M->b[k].sec, M->b[k].n, M->b[k].buena,
-                   M->b[k].sim[0], M->b[k].sim[1], M->b[k].sim[2], sub == 4 ? " (los regalos de los avisos)" : "");
-        for (k = 0; k < M->na && (sub == 3 || sub == 4); k++)
-            dbglog(DBG_INFO, "MJ: aviso %d en la seccion %d: %d %d %d\n", k, M->a[k].sec, M->a[k].sim[0], M->a[k].sim[1], M->a[k].sim[2]);
+        else if (Q->m2) {
+            if (sub == 3) prepara3();
+            else if (sub == 4) prepara4(Q->cpets && (uint32_t)pet < Q->ncpet ? (int)Q->cpets[52 * pet + 36] : 1);
+            else if (sub == 5) prepara5();
+        }
+#ifdef PRUEBA_MJ                                        /* (prueba: lo preparado) */
+        for (k = 0; k < Q->nb && sub >= 3; k++)
+            dbglog(DBG_INFO, "MJ: puerta %d en la seccion %d: %d carriles, el bueno %d: %d %d %d%s\n", k, Q->b[k].sec, Q->b[k].n, Q->b[k].buena,
+                   Q->b[k].sim[0], Q->b[k].sim[1], Q->b[k].sim[2], sub == 4 ? " (los regalos de los avisos)" : "");
+        for (k = 0; k < Q->na && (sub == 3 || sub == 4); k++)
+            dbglog(DBG_INFO, "MJ: aviso %d en la seccion %d: %d %d %d\n", k, Q->a[k].sec, Q->a[k].sim[0], Q->a[k].sim[1], Q->a[k].sim[2]);
+#endif
         return 0.0f;
     }
-    if (M->pet != pet) return 0.0f;
-    if (fase >= 7) { M->pet = -1; M->icono = M->zzz = -1; return 0.0f; }
-    if (M->icono >= 0) M->t_ico++;
-    if (M->zzz >= 0) M->t_zzz++;
-    if (M->m2 && sub == 5) {                            /* 0x2a2e80 */
-        if (fase_ant == 3) { M->zzz = 0; M->t_zzz = 0; }   /* 0x2322a0 (y +0x160 del gestor = 1: SIN averiguar) */
-        else if (fase == 5) { memset(M->ov, 0, sizeof M->ov); M->zzz = -1; }   /* 0x229708 y 0x232330 */
+    if (Q->pet != pet) return 0.0f;
+    if (fase >= 7) { Q->pet = -1; Q->icono = Q->zzz = -1; return 0.0f; }
+    Q->t_ico++; Q->t_zzz++;                             /* (los tiempos del regalo y de zzz: se ponen a 0 al salir) */
+    if (Q->m2 && sub == 5) {                            /* 0x2a2e80 */
+        if (fase_ant == 3) { Q->zzz = 0; Q->t_zzz = 0; }   /* 0x2322a0 (y +0x160 del gestor = 1: SIN averiguar) */
+        else if (fase == 5) { memset(Q->ov, 0, sizeof Q->ov); Q->zzz = -1; }   /* 0x229708 y 0x232330 */
         else if (fase < 5 && ovejas(c->seccion) && camp_se) {
-            camp_se(u16_(M->m2 + M2_SE)); camp_se(u16_(M->m2 + M2_SE + 2 + 2 * (rand() % 3)));
+            camp_se(u16_(Q->m2 + M2_SE)); camp_se(u16_(Q->m2 + M2_SE + 2 + 2 * (rand() % 3)));
         }
     }
-    if (fase >= 5) M->icono = -1;                       /* (SUPUESTO: el regalo del HUD se va al acabar la peticion) */
+    if (fase >= 5) Q->icono = -1;                       /* (SUPUESTO: el regalo del HUD se va al acabar la peticion) */
     if (fase >= 4 && fase <= 6) {
-        if ((sub <= 2 || (M->m2 && sub <= 5)) && fase == 4) {   /* 0x2a13f8 / 0x2a1948 / 0x2a1e00 / 0x2a24d8 / 0x2a2be0 / 0x2a2e80 */
-            for (k = 0; k < M->na && (sub == 1 || sub == 2); k++) {   /* (los avisos: el 1 a 20 secciones, solo 0x232350; el 2 su voz) */
-                mj_ent_t *a = &M->a[k];
+        if ((sub <= 2 || (Q->m2 && sub <= 5)) && fase == 4) {   /* 0x2a13f8 / 0x2a1948 / 0x2a1e00 / 0x2a24d8 / 0x2a2be0 / 0x2a2e80 */
+            for (k = 0; k < Q->na && (sub == 1 || sub == 2); k++) {   /* (los avisos: el 1 a 20 secciones, solo 0x232350; el 2 su voz) */
+                mj_ent_t *a = &Q->a[k];
                 if (!a->pend || c->seccion < a->sec - (sub == 1 ? 20 : 0)) continue;
-                if (sub == 2 && a->sim[0] >= 0 && voz) voz(u16_(M->m + 2 * a->sim[0]), 0x3c, 0xb);
+                if (sub == 2 && a->sim[0] >= 0 && voz) voz(u16_(Q->m + 2 * a->sim[0]), 0x3c, 0xb);
                 a->pend = 0;
-                dbglog(DBG_INFO, "MJ: aviso %d en la seccion %d: animal %d\n", k, a->sec, a->sim[0]);
+                MJLOG(DBG_INFO, "MJ: aviso %d en la seccion %d: animal %d\n", k, a->sec, a->sim[0]);
             }
-            for (k = 0; k < M->nb; k++) {
-                mj_ent_t *b = &M->b[k];
+            for (k = 0; k < Q->nb; k++) {
+                mj_ent_t *b = &Q->b[k];
                 if (!b->pend || c->seccion < b->sec) continue;
 #ifdef PRUEBA_MJ
                 lat = ((float)b->buena + 0.5f) / (float)(sub == 0 ? 2 : b->n ? b->n : 1);   /* prueba: por el carril bueno (el piloto no elige) */
 #endif
-                if (carril_ok(lat, sub ? b->n : 2, b->buena)) { dm += 80.0f * 1.1f / (float)M->nb; M->destello = 1; }
+                if (carril_ok(lat, sub ? b->n : 2, b->buena)) { dm += 80.0f * 1.1f / (float)Q->nb; Q->destello = 1; }
                 else if (camp_se) camp_se(0xd4);
                 b->pend = 0;
-                dbglog(DBG_INFO, "MJ: puerta %d en la seccion %d: carril bueno %d de %d (%d %d %d), el jugador en %.2f: %s\n", k, b->sec, b->buena, b->n,
+                MJLOG(DBG_INFO, "MJ: puerta %d en la seccion %d: carril bueno %d de %d (%d %d %d), el jugador en %.2f: %s\n", k, b->sec, b->buena, b->n,
                        b->sim[0], b->sim[1], b->sim[2], (double)lat, dm > 0.0f ? "bien" : "mal");
             }
         }
-        if (++M->c13a0 % 600 == 0 && voz) {            /* el animo de los minijuegos (0x29f980..) */
-            int i = (int)(++M->c1398), id = sub < 2 ? u16_(M->m + 14 + 2 * (i % 2)) : sub == 2 ? u16_(M->m + 14 + 4 + 2 * (i % 3))
-                                                                                               : u16_(M->m + 14 + 12 + 2 * (i % 3));
-            voz(id, 0x3c, 0);
+        if (++Q->c13a0 % 600 == 0 && voz) {            /* el animo de los minijuegos (0x29f980..) */
+            int i = (int)(++Q->c1398);                  /* (0x4239c0[k % 2], 0x4239c8[k % 3] el 2, 0x4239d8[k % 3] los demas) */
+            voz(u16_(Q->m + 14 + (sub < 2 ? 2 * (i % 2) : (sub == 2 ? 4 : 12) + 2 * (i % 3))), 0x3c, 0);
         }
     }
-    if (fase >= 2 && fase <= 6 && ++M->t1204 >= 0x1f) M->t1204 = 0;
+    if (fase >= 2 && fase <= 6 && ++Q->t1204 >= 0x1f) Q->t1204 = 0;
     return dm;
 }
 
@@ -358,66 +362,65 @@ static int pon(haobj_s3d_t *v, int m, int max, int kk, const float *p, float esc
    signo: el + o el - delante (el aviso, y los negativos) */
 static int numero(haobj_s3d_t *v, int m, int max, int val, const float *p0, const float *r, float esc, int fila, int signo)
 {
-    int a = val < 0 ? -val : val, c[3], nc, k; float p[3], q[3], d, f = 0.0f, ancho, sp = esc * 1.25f, o;
-    if (a >= 100) { nc = 3; c[0] = a / 100; c[1] = (a - c[0] * 100) / 10; c[2] = a % 10; }
-    else if (a >= 10) { nc = 2; c[0] = a / 10; c[1] = a % 10; }
-    else { nc = 1; c[0] = a; }
-    if (c[0] > 9) c[0] = 9;
-    memcpy(p, p0, sizeof p);
-    d = sqrtf((p[0] - M->yo[0]) * (p[0] - M->yo[0]) + (p[1] - M->yo[1]) * (p[1] - M->yo[1]) + (p[2] - M->yo[2]) * (p[2] - M->yo[2]));
+    mj_t *const Q = M;
+    int a = val < 0 ? -val : val, c[3], nc = 0, k, j; float p[3], d = 0.0f, f, sp = esc * 1.25f, o;
+    do c[nc++] = a % 10; while ((a /= 10) && nc < 3);  /* (las cifras al reves: c[nc - 1] la de mas peso) */
+    for (j = 0; j < 3; j++) { p[j] = p0[j]; d += (p[j] - Q->yo[j]) * (p[j] - Q->yo[j]); }
+    d = sqrtf(d);                                       /* (signo: 0 o 1) */
     if (d > 125.0f) {                                   /* de lejos: las dos filas se apartan, suben y se separan las cifras */
         f = (d - 125.0f) / 100.0f; if (f > 1.0f) f = 1.0f;
-        if (fila == 1 || fila == 2) for (k = 0, o = f * (fila == 1 ? -1.5f : 1.5f) * (float)(nc + (signo ? 1 : 0)); k < 3; k++) p[k] += r[k] * o;
+        o = fila == 1 ? -1.5f : fila == 2 ? 1.5f : 0.0f;
+        for (j = 0; j < 3; j++) p[j] += r[j] * o * f * (float)(nc + signo);
         p[1] += 2.0f * f;
         if (esc < 2.6f) f *= 2.0f;
         sp += f * sp;
     }
-    ancho = (float)(nc + (signo ? 1 : 0)) * sp; o = ancho * 0.25f;
-    if (signo) {
-        for (k = 0; k < 3; k++) q[k] = p[k] - r[k] * o;
-        q[1] += 0.5f; m = pon(v, m, max, M->m2[M2_SIG + (val < 0)], q, esc, 0);
-    }
-    for (k = 0; k < nc; k++) {
-        float x = sp * (float)(k + (signo ? 1 : 0)) - o; int j;
+    o = (float)(nc + signo) * sp * 0.25f;               /* (ancho / 4) */
+    p[1] += 0.5f;
+    for (k = -signo; k < nc; k++) {                     /* el signo en -ancho / 4, la cifra k en paso x (k + signo) - ancho / 4 */
+        float q[3], x = k < 0 ? -o : sp * (float)(k + signo) - o;
         for (j = 0; j < 3; j++) q[j] = p[j] + r[j] * x;
-        q[1] += 0.5f; m = pon(v, m, max, M->m2[M2_CIF + (val < 0 ? 0 : 10) + c[k]], q, esc, 0);
+        m = pon(v, m, max, k < 0 ? Q->m2[M2_SIG + (val < 0)] : Q->m2[M2_CIF + (val < 0 ? 0 : 10) + c[nc - 1 - k]], q, esc, 0);
     }
     return m;
 }
 
 int mj_spr3d(haobj_s3d_t *v, int max, int (*cuadros)(const char *g))
 {
+    mj_t *const Q = M;
     int k, i, m = 0, sub;
-    if (!M || M->pet < 0) return 0;
+    if (!M || Q->pet < 0) return 0;
 #ifdef DIAG_SIN_MJ
     return 0;                                           /* medida: sin los sprites */
 #endif
-    if (M->destello > 0 && m < max) {                   /* 0x114b68(0x2c0002, 5, 3): el destello del acierto (SUPUESTO: sobre el coche) */
+    if (Q->destello > 0 && m < max) {                   /* 0x114b68(0x2c0002, 5, 3): el destello del acierto (SUPUESTO: sobre el coche) */
         int nc = cuadros ? cuadros("HA_S02") : 1;
-        if (M->destello > nc) M->destello = 0;
-        else { strcpy(v[m].g, "HA_S02"); v[m].cuadro = M->destello - 1; memcpy(v[m].p, M->yo, sizeof v[m].p); v[m].p[1] += 1.5f; v[m].esc = 0.7f; m++; }   /* (la de los arcos) */
+        if (Q->destello > nc) Q->destello = 0;
+        else { strcpy(v[m].g, "HA_S02"); v[m].cuadro = Q->destello - 1; memcpy(v[m].p, Q->yo, sizeof v[m].p); v[m].p[1] += 1.5f; v[m].esc = 0.7f; m++; }   /* (la de los arcos) */
     }
-    sub = M->sub;
-    if (sub > 5 || (sub > 2 && !M->m2) || !mj_mundo) return m;
+    sub = Q->sub;
+    if (sub > 5 || (sub > 2 && !Q->m2) || !mj_mundo) return m;
     if (sub == 5) {                                     /* las ovejas (0x228e60: capa 9, en (0, -50) a 0,55) y zzz */
         float p[3] = { 0.0f, -50.0f, 0.0f };
-        if (cuadros) { char g[8]; snprintf(g, sizeof g, "MJ_%02d", M->m2[M2_OVE]); if ((k = cuadros(g)) > 1) M->n_ov = k; }
-        for (k = 0; k < 10; k++) if (M->ov[k].on) m = pon(v, m, max, M->m2[M2_OVE], p, -0.55f, (int)M->ov[k].cu);
-        if (M->zzz >= 0) { p[0] = 176.0f; p[1] = 78.0f; m = pon(v, m, max, M->m2[M2_ZZZ], p, -1.0f, M->t_zzz % 120); }   /* (en el panel: SUPUESTO (176, 78)) */
+        for (k = 0; k < 10; k++) if (Q->ov[k].on) {
+            m = pon(v, m, max, Q->m2[M2_OVE], p, -0.55f, (int)Q->ov[k].cu);
+            if (cuadros && (i = cuadros(v[m - 1].g)) > 1) Q->n_ov = i;   /* (los cuadros de la escena: 100) */
+        }
+        if (Q->zzz >= 0) { p[0] = 176.0f; p[1] = 78.0f; m = pon(v, m, max, Q->m2[M2_ZZZ], p, -1.0f, Q->t_zzz % 120); }   /* (en el panel: SUPUESTO (176, 78)) */
     }
-    if (sub == 4 && M->icono >= 0 && M->icono < 5) {    /* 0x231fe0 / 0x2320d8: crece en el panel (0,35 s) y se va arriba (180, -110) a 0,75 */
-        float p[3] = { 176.0f, 78.0f, 0.0f }, e, t;     /* (SUPUESTO: el panel en (176, 78) y 2 s en el) */
-        if (M->t_ico < 120) { t = (float)M->t_ico / 21.0f; e = 0.5f * (t < 1.0f ? t : 1.0f); }
-        else { t = (float)(M->t_ico - 120) / 21.0f; if (t > 1.0f) t = 1.0f; p[0] += (180.0f - 176.0f) * t; p[1] += (-110.0f - 78.0f) * t; e = 0.5f + 0.25f * t; }
-        if (e > 0.01f) m = pon(v, m, max, M->m2[M2_REG + M->icono], p, -e, 0);
+    if (sub == 4 && Q->icono >= 0) {    /* 0x231fe0 / 0x2320d8: crece en el panel (0,35 s) y se va arriba (180, -110) a 0,75 */
+        float p[3] = { 176.0f, 78.0f, 0.0f }, t = (float)(Q->t_ico < 120 ? Q->t_ico : Q->t_ico - 120) / 21.0f;   /* (SUPUESTO: el */
+        if (t > 1.0f) t = 1.0f;                         /* panel en (176, 78) y 2 s en el) */
+        if (Q->t_ico >= 120) { p[0] += 4.0f * t; p[1] -= 188.0f * t; t = 2.0f + t; } else t *= 2.0f;
+        m = pon(v, m, max, Q->m2[M2_REG + Q->icono], p, -0.25f * t - 0.001f, 0);   /* (0..0,5 crece; 0,5..0,75 va arriba) */
     }
-    {   float bob = sinf((float)M->t1204 / 30.0f * 3.14159265f); int lista;
+    {   float bob = sinf((float)Q->t1204 / 30.0f * 3.14159265f); int lista;
         for (lista = 0; lista < 2; lista++)             /* 0x2a1548 / 0x2a1ae8 / 0x2a1fc8 / 0x2a2618 / 0x2a2d30 / 0x2a3280 (0x2a0138) */
-            for (k = 0; k < (lista ? M->nb : M->na); k++) {
-                mj_ent_t *e = lista ? &M->b[k] : &M->a[k];
-                int col = sub == 0 && k < M->na ? M->a[k].n : 1, filas, f, j;
+            for (k = 0; k < (lista ? Q->nb : Q->na); k++) {
+                mj_ent_t *e = lista ? &Q->b[k] : &Q->a[k];
+                int col = sub == 0 && k < Q->na ? Q->a[k].n : 1, filas, f, j;
                 if ((sub == 2 || sub == 5) && e->cl != 1) continue;   /* (el 2 y el 5: solo las puertas) */
-                if (e->sec < M->js - 2 || e->sec >= M->js + 50 || col < 1 || col > 3) continue;
+                if (e->sec < Q->js - 2 || e->sec >= Q->js + 50 || col < 1 || col > 3) continue;
                 filas = e->n / col;
                 for (f = 0; f < filas; f++) {
                     float w = 1.0f / (float)filas, l = w * (float)f + w * 0.5f, p[3], r[3];
@@ -428,19 +431,17 @@ int mj_spr3d(haobj_s3d_t *v, int max, int (*cuadros)(const char *g))
                         int sm = f * col + j < 6 ? e->sim[f * col + j] : -1, o = (col - 1) * 3 + j;
                         if (sub <= 2 && sm < 0) continue;
                         mj_mundo((float)e->sec, l, f32_(72 + 4 * o), p);
-                        p[1] += 2.5f + f32_(108 + 4 * o) + (e->cl == 1 || sub == 0 || sub == 1 || sub == 3 || sub == 4 ? bob : 0.0f);
-                        if (sub <= 2) { m = pon(v, m, max, M->m[(sub == 0 ? SPR0 : sub == 1 ? SPR1 : SPR2) + sm], p, 1.5f, 0); continue; }
+                        p[1] += 2.5f + f32_(108 + 4 * o) + bob;   /* (el vaiven: puertas y avisos de 0, 1, 3 y 4, los unicos que se ven) */
+                        if (sub <= 2) { m = pon(v, m, max, Q->m[(sub == 0 ? SPR0 : sub == 1 ? SPR1 : SPR2) + sm], p, 1.5f, 0); continue; }
                         if (sub == 4 && e->cl != 1) {   /* los regalos del aviso (0x423af8 a 1,3; 5: nada) */
-                            if (sm >= 0 && sm < 5) m = pon(v, m, max, M->m2[M2_REG + sm], p, 1.3f, 0);
+                            if (sm >= 0 && sm < 5) m = pon(v, m, max, Q->m2[M2_REG + sm], p, 1.3f, 0);
                             continue;
                         }
-                        mj_mundo((float)e->sec, l, 1.0f, r);   /* (el lateral de la carretera) */
-                        for (i = 0; i < 3; i++) r[i] -= p[i];
-                        r[1] = 0.0f;
-                        {   float n_ = sqrtf(r[0] * r[0] + r[2] * r[2]), esc = sub == 4 ? 3.5f : 3.0f; int s0 = e->sim[0], s1 = e->sim[1];
-                            if (n_ > 0.0f) { r[0] /= n_; r[2] /= n_; }
+                        mj_mundo((float)e->sec, l, f32_(72 + 4 * o) + 1.0f, r);   /* (el lateral de la carretera, 1 m en xz) */
+                        r[0] -= p[0]; r[1] = 0.0f; r[2] -= p[2];
+                        {   float esc = sub == 4 ? 3.5f : 3.0f; int s0 = e->sim[0], s1 = e->sim[1];   /* (r: ya de 1 m en xz) */
                             if (e->cl != 1) p[1] += 3.0f;   /* (el aviso del 3: 3 m mas arriba y siempre con signo) */
-                            else if (sub == 3 && (s0 < -9 || s0 >= 100 || s0 <= -100 || s1 < -9 || s1 >= 100 || s1 <= -100)) esc = 2.5f;
+                            else if (sub == 3 && (s0 < -9 || s0 >= 100 || s1 < -9 || s1 >= 100)) esc = 2.5f;
                             else if (sub == 5 && (s0 >= 100 || s1 >= 100)) esc = 2.5f;
                             m = numero(v, m, max, sm, p, r, esc, e->cl == 1 ? f + 1 : 0, e->cl != 1 || sm < 0);
                         }
@@ -450,7 +451,7 @@ int mj_spr3d(haobj_s3d_t *v, int max, int (*cuadros)(const char *g))
     }
 #ifdef PRUEBA_MJ
     {   static int t_; if (m && ++t_ % 60 == 0) dbglog(DBG_INFO, "MJ: %d sprites (%s) en %.0f %.0f %.0f, jugador en %.0f %.0f %.0f\n", m, v[m - 1].g,
-                                                     (double)v[m - 1].p[0], (double)v[m - 1].p[1], (double)v[m - 1].p[2], (double)M->yo[0], (double)M->yo[1], (double)M->yo[2]); }
+                                                     (double)v[m - 1].p[0], (double)v[m - 1].p[1], (double)v[m - 1].p[2], (double)Q->yo[0], (double)Q->yo[1], (double)Q->yo[2]); }
 #endif
     return m;
 }
