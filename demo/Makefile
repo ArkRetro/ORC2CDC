@@ -13,10 +13,14 @@ all: rm-elf $(TARGET)
 ../comun/menu.o ../comun/mision.o ../comun/rival.o ../comun/campeonato.o ../comun/vozmis.o ../comun/minijuego.o ../comun/infarto.o ../comun/haobj.o ../comun/fsp.o ../comun/vmuesc.o ../comun/sprani.o ../comun/rksp.o ../comun/modo_video.o ../comun/registro.o ../comun/voces.o ../comun/vmu.o ../comun/gd.o ../comun/musica.o pcarga.o meta.o sp.o fin.o final.o nombre.o: CFLAGS += -Os
 # pvr_state de KallistiOS (la presentacion a FPS_OBJETIVO esconde el render acabado hasta su campo: demo/main.c)
 main.o: CFLAGS += -I$(KOS_BASE)/kernel/arch/dreamcast/hardware/pvr
+# DIAG_MALLOC (demo/main.c): las peticiones de RAM que fallan o son grandes, con quien las pide
+ifneq (,$(findstring DIAG_MALLOC,$(KOS_CFLAGS)))
+LD_DIAG = -Wl,--wrap=malloc -Wl,--wrap=memalign -Wl,--wrap=realloc -Wl,--wrap=calloc
+endif
 include $(KOS_BASE)/Makefile.rules
 clean: rm-elf
 	-rm -f $(OBJS)
 rm-elf:
 	-rm -f $(TARGET)
 $(TARGET): $(OBJS)
-	kos-cc -o $(TARGET) $(OBJS) -Wl,--wrap=pvr_scene_finish -Wl,--wrap=pvr_poly_compile
+	kos-cc -o $(TARGET) $(OBJS) -Wl,--wrap=pvr_scene_finish -Wl,--wrap=pvr_poly_compile $(LD_DIAG)
