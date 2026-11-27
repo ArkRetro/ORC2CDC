@@ -341,7 +341,7 @@ def lee(ruta):
 # el peor caso de la zona del curso no empeora (944 KB antes: IMPE/49 + BK198; la zona es de 1056 KB en las misiones de
 # COAST 2 COAST con dos rivales). Las etapas primero (con las uniones de antes) y las uniones despues (con las etapas
 # nuevas). tools/vram.py; docs/PARIDAD.md
-TOPE_ETAPA = int(os.environ.get('REMIP_TOPE_ETAPA', '720')); TOPE_UNION = int(os.environ.get('REMIP_TOPE_UNION', '240'))
+TOPE_ETAPA = int(os.environ.get('REMIP_TOPE_ETAPA', '570')); TOPE_UNION = int(os.environ.get('REMIP_TOPE_UNION', '220'))
 PAREJA = int(os.environ.get('REMIP_PAREJA', '944'))
 PAQUETES = (('SEGS.PAK', 'SEG', ['--pak=SEGS.PAK', '--prefijo=SEG', '--tope=7842']), ('UNIONES.PAK', 'BK', []),
             ('UNIONESTA.PAK', 'BK', ['--pak=UNIONESTA.PAK']), ('UNIONESR.PAK', 'BK', ['--pak=UNIONESR.PAK']))

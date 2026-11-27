@@ -6652,3 +6652,125 @@ tools/prueba/final.sh (preset 0, meta D, final 18): "FINAL: FINCHR2C.DAT, 4219 m
 pareja en las capturas, modos 25 / 27 / 28 y vuelta al frontal. Datos sin cambios. PENDIENTE: que tools/regenera.py
 produzca ACTORES.PAK (hoy los datos regenerados desde la ISO, y los del programa de Windows, llevan los FIN sueltos, que
 tambien funcionan).
+
+## Mipmaps en lo lejano (2026-11-27; DESVIACION del port)
+
+Peticion: "arreglo de mipmapping". Hasta ahora solo llevaban mipmaps de la PowerVR las texturas cuadradas del suelo con
+MXL > 0 en el original (ver Suelos: estado del GS, mipmaps y capas); lo demas (paredes, edificios, vallas, vegetacion,
+carteles, el agua, la hierba y las texturas rectangulares, tambien las de la calzada) centelleaba de lejos. El original
+de PS2 tampoco los lleva en esas texturas (su LOD del GS es por distancia, TEX1 K / L): esto es una mejora del port.
+
+**Diagnostico** (`tools/remip.py --info [-v]`, datos de lgdat2; KB de VRAM; `cuad_*`: cuadradas sin mipmaps):
+
+| Fichero | con mip | cuadradas VQ sin | cuadradas 16 bits sin | rectangulares (sin) | cielo |
+|---|---|---|---|---|---|
+| PALM SEG00 | 28 / 107 | 44 / 93 | 5 / 2 | 91 / 242 | 2 / 7 |
+| LAKE SEG03 | 23 / 129 | 53 / 92 | 5 / 2 | 64 / 158 | 2 / 7 |
+| INDU SEG04 | 15 / 94 | 71 / 190 | 2 / 1 | 71 / 178 | 2 / 67 |
+| ALPI SEG05 | 18 / 68 | 58 / 93 | 22 / 11 | 65 / 234 | 2 / 67 |
+| SNOW SEG06 | 11 / 122 | 24 / 89 | 0 | 59 / 224 | 2 / 67 |
+| CLOU SEG07 | 11 / 73 | 12 / 68 | 0 | 40 / 260 | 2 / 19 |
+| CAST SEG08 | 8 / 62 | 32 / 82 | 9 / 4 | 41 / 183 | 2 / 67 |
+| GHOS SEG09 | 10 / 65 | 24 / 75 | 0 | 51 / 309 | 2 / 67 |
+| FORE SEG10 | 14 / 166 | 23 / 117 | 2 / 1 | 43 / 241 | 2 / 67 |
+| DESE SEG11 | 20 / 86 | 23 / 51 | 2 / 1 | 27 / 103 | 2 / 67 |
+| TULI SEG12 | 28 / 140 | 41 / 98 | 3 / 2 | 65 / 202 | 3 / 8 |
+| METR SEG13 | 13 / 79 | 61 / 128 | 1 / 0 | 58 / 164 | 2 / 7 |
+| RUIN SEG14 | 7 / 31 | 15 / 54 | 0 | 33 / 197 | 2 / 67 |
+| CAPE SEG15 | 31 / 141 | 35 / 102 | 0 | 59 / 150 | 2 / 67 |
+| IMPE SEG16 | 15 / 80 | 43 / 168 | 1 / 0 | 97 / 405 | 2 / 67 |
+| uniones BK00 / BK06 / BK09 | 5 / 21 | 8 / 34 | 0 | 13 / 88 | 2 |
+
+Por que no tenian: las rectangulares (la mitad de la VRAM de cada etapa: 128x64, 128x32, 64x32, 256x64...) porque la
+PowerVR solo admite mipmaps cuadrados; las cuadradas porque `modelo.ajusta_texturas` solo los pone en el suelo con MXL
+> 0; el umbral de la VQ (9) casi no cuenta (2 de 338 en la primera prueba de 4 etapas, 32 en todas). Casi todas se
+reducen dentro de la distancia de dibujo: con la focal de la carrera (426,7 px) un texel de 2-10 cm baja de 1 pixel
+a 9-45 m (`--info -v`: "reduce desde"). En las capturas (Flycast, cuadro congelado `-DDIAG_CONGELA=2400`, PALM / CLOU /
+GHOS / METR) lo que mas centellea: los arboles y vallas de recorte (GHOS, CLOU), las fachadas con ventanas (PALM,
+METR), el grano del asfalto, el agua y la hierba (PALM, CLOU), el empedrado de la plaza (METR) y los carteles.
+
+**Arreglo** (`tools/remip.py --datos`, sobre las etapas y uniones ya convertidas; `tools/regenera.py` lo pasa al final,
+una vez):
+
+- Cuadradas: niveles por promedio de 2x2 desde la imagen de ahora (la VQ decodificada) y VQ con un libro para todos los
+  niveles (`vq.codifica_mip`), aceptada con error RMS <= 9 frente a esa imagen y sus niveles (media ~5). Mantener el
+  libro y los indices de la base y codificar solo los niveles nuevos daba error 14 de media (48 en las de recorte): no.
+  Si la VQ no pasa, sin mipmaps (en 16 bits costarian 2,7 veces mas). Las de menos de 32x32 en 16 bits con niveles.
+  En las de recorte (ARGB1555) el alfa de cada nivel se corta por el umbral que guarda la cobertura de la base (si no,
+  vallas y hojas se vacian de lejos).
+- Rectangulares: estiradas al lado mayor (interpolacion lineal entre centros de texel; las UV normalizadas no cambian
+  y de cerca se ve igual). Al lado menor perdian 6-40 de RMS (tienen detalle en los dos ejes): nunca se usa (umbral
+  `PERDIDA` 3). Estirar un eje hace que la PowerVR elija el nivel por ese eje y el otro se vea un nivel mas borroso
+  (medido en Flycast: las fachadas de PALM quedaban lisas). Se compensa con el **D adjust** de la PowerVR por textura
+  (bits 24-27 del formato, `demo/main.c` compila_cab -> `mipmap_bias`): D = 2^-(niveles que se adelanta), con el
+  aspecto del texel en el mundo medido en la geometria (`remip.sesgo`): 0,5 en las 2:1, 0,25 en las 4:1, 1,0 si el
+  eje estirado era el mas grueso. PROBABLE: que la D de la consola multiplica la medida del nivel (documentacion de la
+  PowerVR); Flycast la aproxima con un sesgo de -4 / -2 / -1 niveles para 0,25 / 0,5 / 0,75 (rend/TexCache.cpp), asi
+  que las capturas se hicieron con `-DMIP_SESGO_FLYCAST` (pide a Flycast los niveles que pediria la consola).
+- Sesgo general y filtro: las demas van con D 1,0 y bilineal (nivel mas cercano, como MMIN del GS). Trilineal no: en la
+  PowerVR son dos pasadas por poligono (filtros TRILINEAR1 / 2 sumados), el doble de vertices de la escena en el TA
+  (24-28 mil por cuadro, medidos con DIAG_MS), y el bufer del TA es lo que limita la distancia de dibujo; Flycast
+  ademas no lo emula ("we ignore that for now", rend/gles/gldraw.cpp).
+- Orden y topes: por detalle fino (lo que quita el primer nivel) x area / coste, cada fichero hasta TOPE_ETAPA 570 KB /
+  TOPE_UNION 220 KB y sin que ninguna pareja de CURSO.DAT y CURSOTA.DAT (etapa + su union, union + la etapa de cada
+  rama) pase de 944 KB, el peor caso de antes: la zona del curso no empeora en ningun modo. Los topes salen del espacio
+  del GD (presupuesto: <= 8 MB en el Mod taxi): con 720 / 240 KB crecia 10,9 MB y con 640 / 225 8,6 MB. IMPE (748 KB
+  con BK198) no gana nada por el tope de pareja. El mayor SEG y el mayor BK no crecen (los huecos de la RAM son su
+  tamano). Determinista por contenido: la meta y su etapa siguen compartiendo texturas.
+
+Despues (mismas columnas, con los topes de la entrega):
+
+| Fichero | con mip | cuadradas VQ sin | cuadradas 16 bits sin | rectangulares (sin) |
+|---|---|---|---|---|
+| PALM | 107 / 387 | 11 / 29 | 4 / 2 | 46 / 146 |
+| LAKE | 127 / 512 | 2 / 6 | 1 / 0 | 15 / 41 |
+| INDU | 64 / 263 | 34 / 93 | 2 / 1 | 59 / 146 |
+| ALPI | 103 / 307 | 5 / 29 | 17 / 8 | 38 / 159 |
+| SNOW | 46 / 287 | 10 / 52 | 0 | 38 / 164 |
+| CLOU | 38 / 373 | 2 / 20 | 0 | 23 / 158 |
+| CAST | 82 / 398 | 1 / 1 | 1 / 0 | 6 / 76 |
+| GHOS | 24 / 186 | 15 / 42 | 0 | 46 / 276 |
+| FORE | 19 / 170 | 20 / 115 | 2 / 1 | 41 / 239 |
+| DESE | 67 / 446 | 0 | 0 | 5 / 15 |
+| TULI | 107 / 413 | 2 / 20 | 0 | 28 / 130 |
+| METR | 121 / 517 | 3 / 6 | 0 | 9 / 40 |
+| RUIN | 45 / 415 | 1 / 2 | 0 | 9 / 80 |
+| CAPE | 94 / 419 | 3 / 11 | 0 | 28 / 73 |
+| IMPE | 15 / 80 | 43 / 168 | 1 / 0 | 97 / 405 |
+| BK00 | 20 / 131 | 2 / 8 | 0 | 4 / 60 |
+| BK06 | 18 / 116 | 4 / 20 | 0 | 4 / 60 |
+| BK09 / BK02 | 13 / 51 | 4 / 20 | 0 | 9 / 80 |
+
+En todo: 2637 texturas nuevas con mipmaps en las 62 etapas y 5169 en las 498 uniones.
+
+**Medida** (Flycast; nada en la consola):
+
+- VRAM de la zona del curso (`tools/vram.py`, COCHE06; Flycast coincide a 1 KB: PALM + BK00 y GHOS + BK09): peor
+  combinacion de todos los arboles **944 KB antes y despues** (BK242 + IMPE/49); modo OutRun 928 -> 937 KB (BK09 +
+  IMPE). Zona 1312 KB (1280 con COCHE06): 336-368 KB libres en el peor caso; INFARTO 92 KB menos; misiones de COAST 2
+  COAST con dos rivales: zona de 1056 KB (nav3.sh, BEAC), 112 KB libres en el peor caso, como antes. Lo demas de la
+  VRAM (bufer del TA 2 x 1920 KB, OPB, imagenes, HUD, coche, trafico) no cambia. Una primera version con 780 / 240 KB
+  por fichero dejaba 36 KB en esas misiones: por eso el tope por pareja.
+- RAM: los huecos no cambian (etapa 8142 KB, union 1584 KB, colision aparte 220 KB: SEG13 pasa a usarlo, 208 KB);
+  nav3.sh: "VOZ: VOCES.DAT, 35 muestras", sin "Out of memory".
+- GD: SEGS.PAK +3,83 MB, UNIONES.PAK +0,68, UNIONESTA.PAK +0,58, UNIONESR.PAK +0,20, etapas sueltas y descriptores el
+  resto: **+6,30 MB (6,01 MiB)** en la clasica (930,6 -> 936,6 MiB) y **lo mismo en el Mod** (sus SEGS / UNIONES*.PAK y
+  sus SEG / BK son identicos byte a byte a los de la clasica: 956,9 -> 962,9 MiB). Presupuesto: <= 8 MB en el Mod.
+- FPS (`-DPRUEBA_AUTO -DPRUEBA_SIN_TIEMPO -DDIAG_MS`, 150 s desde la etapa, media de las lineas MS sin las 3 primeras),
+  antes / despues: PALM 38,9 / 38,9; INDU 39,4 / 39,4; CLOU 37,1 / 37,7; GHOS 38,4 / 38,4; METR 37,3 / 34,7; IMPE 39,7 /
+  39,7. Las ventanas no son iguales (la carga tarda distinto: 58-112 medidas antes, 100-163 despues, la de METR llega
+  mas lejos en la etapa) y en Flycast los mipmaps no cuestan CPU ni el emulador cuenta la cache de texturas de la
+  PowerVR: lo que ganaria la consola (de lejos lee niveles pequenos) no se puede medir aqui. PROBABLE: igual o mejor.
+- Capturas (cuadro congelado, mismo binario, datos de antes y de despues; energia de alta frecuencia del tercio lejano,
+  media del laplaciano): PALM el agua, la hierba, las rocas y las fachadas lejanas sin ruido (25,2 -> 19,4); METR el
+  empedrado de la plaza y las fachadas (22,9 -> 15,8); CLOU los montes y la hierba (29,1 -> 27,9; el grano del asfalto
+  sigue: su textura no entro con el tope del GD, con 720 KB si entraba y bajaba a 25,6); GHOS casi igual (25,0 -> 24,9):
+  lo que mas centellea alli son los arboles y vallas de recorte y Flycast no aplica mipmaps en la lista de recorte
+  (GL_LINEAR, rend/gles/gldraw.cpp); en la consola si (PROBABLE que mejoren, con la cobertura del alfa guardada). De
+  cerca, igual (22,9 / 22,4; 21,5 / 21,5).
+
+Codigo: tools/remip.py (nuevo), tools/regenera.py (paso remip), tools/vram.py (curso con CURSOTA.DAT), demo/main.c
+(`mip_sesgo` y una linea en compila_cab). Queda: los objetos de las uniones (BOnn), el trafico y los coches sin tocar;
+IMPE sin mipmaps nuevos (no cabe sin empeorar el peor caso de la zona); la calzada de CLOU y otras rectangulares 4:1
+caras no entran con el tope del GD (con mas sitio en el GD: subir REMIP_TOPE_ETAPA); verificar en la consola el D
+adjust y los de recorte.
