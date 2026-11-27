@@ -80,6 +80,9 @@ int menu_pausa_paso(unsigned botones_nuevos);
 void menu_pausa_dibuja(void);
 void menu_pausa_sale(void);
 unsigned menu_pausa_vram(void);                          /* VRAM que pedira la pausa (bytes; 0 si ya esta subida) */
+int menu_nota_camp(int tipo, int lista, int nota);   /* 0x22edd8: nota de la etapa del campeonato en su casilla */
+int menu_camp(int *lista);                  /* nodo del mapa del campeonato elegido (0 la salida) y su casilla; -1 ninguno */
+extern int (*menu_camp_puede)(int grupo);   /* 0 si el campeonato del grupo (0 SP, 1 OutRun 2, 2 mixto) se puede correr */
 int menu_campeonato(void);                /* campeonato de COAST 2 COAST elegido (46C520): 1 SP, 0 OutRun 2, 2 mixto; -1 ninguno */
 /* ficheros propios en la VMU (el fantasma de la CONTRARRELOJ): 0 bien o VE_* (comun/vmuesc.h); bytes leidos o -1 */
 int menu_vmu_guarda(const char *nombre, const char *desc, const uint8_t *datos, int n);

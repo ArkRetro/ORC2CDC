@@ -31,6 +31,8 @@
 #include "../comun/gho.h"
 #include "../comun/haobj.h"
 #include "../comun/rival.h"
+#include "../comun/mision.h"
+#include "../comun/campeonato.h"
 #include "../comun/vmu.h"
 #include "../comun/robot.h"
 #include "../comun/lbloste.h"
@@ -1127,7 +1129,7 @@ static void curso_error(const char *s);
    no subir ("HAHUD: sin VRAM") y su marco salia solo: un rectangulo blanco con bandas oscuras.
    ar_extra: lo que se guarda ademas de la reserva al reservar la zona (curso_reinicia) */
 #define HA_VRAM_RESERVA (92 * 1024)
-#define C2C_VRAM_RESERVA (168 * 1024)                           /* C2CHUD.DAT entero (COAST 2 COAST): 163 KB en VQ */
+#define C2C_VRAM_RESERVA (196 * 1024)                           /* C2CHUD.DAT entero (COAST 2 COAST): 187 KB en VQ */
 static uint32_t ar_extra;
 static pvr_ptr_t tex_gris;                                        /* 8x8 ARGB4444 gris: lo ultimo si nada cabe */
 #ifdef PRUEBA_VRAM_KB
@@ -1501,7 +1503,7 @@ static void refl_lee(int seg, int cual)
     if (gd_lee(refl_lba + refl_tab[seg][0], (n * REFL_TEX + 2047) / 2048, refl_reg[cual])) return;
     refl_hay[cual] = n;
 }
-static void *carga_hilo(void *p)
+FRIO static void *carga_hilo(void *p)
 {
     carga_t *c = p;
     c->r = lee_modelo_en(c->m, c->nombre, c->buf, c->cap);
@@ -3247,6 +3249,7 @@ static void modelo_coloca(modelo_t *m, const float *M)
 typedef struct { float s, x, a, v; float pos[3], fw[3], up[3]; int choque, derrape, t_derrape, t_muro; float deriva, freno_ant, gas_ant;
                  float pose_t[3], pose_r[3]; int y_ok; } coche_t;   /* y_ok: pos[1] es su suelo (referencia de 43EB60) */   /* pose: animacion de choque del original (solo al dibujar) */
 static coche_t yo;
+static float jug_escala = 1.0f;                                 /* car+0xDBC del jugador (misiones 1 / 6: 496A30) */
 /* la escena de la meta del original (demo/meta.c): con meta_pas el coche va por el guion (PasPlCar_Ctrl 475720, sin
    fisica) y la camara por su movimiento (4853D0) */
 static meta_t meta; static int meta_pas, meta_cam;
@@ -3374,19 +3377,21 @@ static float grua_s, grua_x; static int grua_on;
 static int variante = 1;
 static hud_dat_t *ha_hud;                                       /* HAHUD.DAT en el modo INFARTO */
 /* rotulo del INFARTO: sube las texturas del uso al verse y baja las del anterior (VRAM fuera de la zona: ~75 KB) */
-static void ha_rotulo_uso(int *actual, const char *nombre)
+static hud_dat_t *camp_hud;                                     /* CAMPHUD.DAT: los rotulos del banco 0x46 (campeonatos) */
+static void hud_rotulo_uso(hud_dat_t *h, int *actual, const char *nombre)
 {
     static uint32_t n;
-    int u = ha_hud ? hudd_uso(ha_hud, nombre) : -1;
+    int u = h ? hudd_uso(h, nombre) : -1;
     if (u == *actual) {                                         /* (si no subio: otra vez cada 30 cuadros) */
-        if (u >= 0 && !hudd_uso_residente(ha_hud, u) && ++n % 30 == 0) hudd_sube_uso(ha_hud, u);
+        if (u >= 0 && !hudd_uso_residente(h, u) && ++n % 30 == 0) hudd_sube_uso(h, u);
         return;
     }
-    hudd_baja_uso(ha_hud, *actual);
+    if (h) hudd_baja_uso(h, *actual);
     *actual = u;
-    if (hudd_sube_uso(ha_hud, u)) dbglog(DBG_ERROR, "HAHUD: sin VRAM para %s\n", nombre);
+    if (h && hudd_sube_uso(h, u)) dbglog(DBG_ERROR, "HUD: sin VRAM para %s\n", nombre);
 }
-static int ha_u_txt = -1, ha_u_mar = -1;
+static void ha_rotulo_uso(int *actual, const char *nombre) { hud_rotulo_uso(ha_hud, actual, nombre); }
+static int ha_u_txt = -1, ha_u_mar = -1, camp_u_txt = -1;
 /* (INFARTO 3) 4295D0 (PS2 0x115870): los sprites 3D del modo (infarto_spr3d) proyectados con la camara y escalados (esc x
    foco / z / 32), encima de la escena; cada grupo se sube al verse y se baja al dejar de verse */
 static int ha_cuadros(const char *g) { int u = ha_hud ? hudd_uso(ha_hud, g) : -1; return u < 0 ? 1 : hudd_cuadros(ha_hud, u); }
@@ -5730,8 +5735,8 @@ static void coche_paso(coche_t *c, float giro, float gas, float freno, float dt)
 #endif
         c->v = fis.velocidad; c->a = dif_ang(fis.rumbo_vel - th0); c->deriva = fis.beta;
         c->derrape = fis.temporizador > 0 ? (fis.beta >= 0 ? 1 : -1) : 0; c->t_derrape = fis.temporizador;
-        c->s += c->v * cosf(c->a) * dt;
-        c->x += c->v * sinf(c->a) * dt + fis.corr_lat;         /* + la correccion lateral del rebote */
+        c->s += c->v * cosf(c->a) * dt * jug_escala;           /* (x car+0xDBC: ActionForce2, las misiones 1 / 6) */
+        c->x += c->v * sinf(c->a) * dt * jug_escala + fis.corr_lat;   /* + la correccion lateral del rebote */
         fis.corr_lat = 0;
         if (fis.recolocar) { fis.recolocar = 0; grua_on = 0; c->s = grua_s; c->x = grua_x; c->y_ok = 0; suelo_g_ok = 0; }   /* fin de la grua */
         ruta_en(c->s, p, &th1, &iz, &de);
@@ -7040,6 +7045,7 @@ static int curso_id = -1;
 #ifndef PRUEBA_NODO
 #define PRUEBA_NODO 0                                           /* prueba: etapa de salida (clave del arbol) */
 #endif
+static int nodo_salida = PRUEBA_NODO;                          /* la salida (los campeonatos: el nodo del mapa - 1) */
 static modelo_t uni, uni_der, sig;                             /* union, ruta de su rama derecha, etapa siguiente */
 static modelo_t bo_mod; static char bo_fich[16];                /* objetos animados de la union (mas abajo) */
 static int bo_estado;
@@ -7246,7 +7252,7 @@ static void repsec_lee(void)
     free(b);
 }
 /* el arbol id (CURSO.DAT; los de la Contrarreloj, 200 + codigo, en CURSOTA.DAT) en curso[]; 0 bien */
-#define CURSO_FICH(id) ((id) >= 200 ? "CURSOTA.DAT" : "CURSO.DAT")
+#define CURSO_FICH(id) ((id) >= 200 && (id) < 300 ? "CURSOTA.DAT" : "CURSO.DAT")   /* (302: el campeonato mixto) */
 /* Rev 2.9.3 (el usuario: "en el modo contrarreloj al finalizar etapa el partenon queda encima de la bifurcacion"): la
    CONTRARRELOJ de una etapa (codigo < 0x3c) es el registro de 44D720 con la union 0 y los hijos 0 / 0 (conv_union.py
    arbol_ta): con hijos el modelo es el de la bifurcacion, y en las etapas finales (TULI, METR, RUIN, IMPE, CAPE y sus
@@ -7521,7 +7527,7 @@ FRIO static void curso_reinicia(void)
         etapa_nodo = -1;
         dbglog(DBG_INFO, "CURSO: arbol %d, %d etapas, salida %.4s\n", curso_id, ncurso, curso[0].zona);
     }
-    k = PRUEBA_NODO < ncurso ? PRUEBA_NODO : 0;
+    k = nodo_salida < ncurso ? nodo_salida : 0;
 #ifdef DIAG_NODOS
     {   int i; for (i = 0; i < ncurso; i++) printf("NODO: %d %.4s clima %x\n", i, curso[i].zona, (unsigned)curso[i].clima); }   /* medida */
 #endif
@@ -7889,6 +7895,29 @@ FRIO static int rc_abre(int i, int ebx, int delante, int parrilla)
            ebx, carril, (double)(v * 3.6f), parrilla ? " (parrilla)" : "");
     return slot;
 }
+/* 4763D0 + 440200 para 477430: el coche de un coche de carreras eliminado o pillado se cierra */
+static void rc_cierra(int slot) { if (slot >= 0 && slot < NTRAF && traf[slot].carril >= 0 && traf[slot].rc) traf_aparca(traf + slot); }
+/* 474990 / 474CDB (el giro de derrape +C2C del coche de carreras y la bandera +C 0x100000), SIMPLIFICADO: en las zonas de
+   derrape de la mision (MISION.DAT 'MIX2': nodo, etapa / union y secciones; los 6 factores +18, +C, +20, +10, +1C, +14)
+   y en curva (radio +B54 < 300 m) a mas de 80 km/h la carroceria se cruza hacia dentro de la curva hasta 0,25 rad x
+   +14 a 0,012 rad x +10 por cuadro y vuelve a 0,02 x +20; PROBABLE: sin el +162 del coche ni las constantes del
+   original (0x5b43fc, 0x5b43f8, 0x5a29f0, 0x5b43f4, 0x5afd30, que en la PS2 no se han localizado) */
+static int rc_trim(trafico_t *t)
+{
+    const rival_zona_t *z; int n = rival_zonas(&z), k, nodo, pos, u = traf_lugar(t->c.s, &nodo, &pos), en = 0;
+    float v[6] = { 1, 1, 1, 1, 1, 1 }, obj = 0.0f, d = t->c.deriva;
+    for (k = 0; k < n; k++)
+        if (z[k].nodo == nodo && z[k].en_union == u && pos >= z[k].desde && pos <= z[k].hasta) { en = 1; memcpy(v, z[k].v, sizeof v); break; }
+    if (en && fabsf(t->b54) < 300.0f && t->c.v * 3.6f > 80.0f && !t->b6c && t->golpe < 0) {
+        float p0[3], p1[3], th0, th1;
+        ruta_en(t->c.s, p0, &th0, NULL, NULL); ruta_en(t->c.s + 15.0f, p1, &th1, NULL, NULL);
+        obj = (dif_ang(th1 - th0) >= 0 ? 0.25f : -0.25f) * v[5];
+    }
+    if (obj != 0.0f) { float st = 0.012f * v[3]; d += d < obj ? st : -st; if (fabsf(d - obj) < st) d = obj; }
+    else { float st = 0.02f * v[2]; if (d > 0) { d -= st; if (d < 0) d = 0; } else if (d < 0) { d += st; if (d > 0) d = 0; } }
+    t->c.deriva = d;
+    return d != 0.0f;
+}
 static void rc_suelta_coche(trafico_t *t)
 {
     int k = t->rc - 1;
@@ -7940,12 +7969,38 @@ static void rc_marcha(trafico_t *t)
     t->marcha = g;
 }
 /* 47A7C0 (PS2 0x1e5dc0): el objetivo de velocidad (+10DC) y su ritmo (+10E0) del coche de carreras */
+/* 472B60 (PS2 0x1e5188): la velocidad que deja el coche o delante a uno de carreras: con la tabla de la clase del de
+   delante (MISION.DAT 'PAC1' = 0x40bcc8 del trafico, 0x40bde8 de los de carreras), a menos de la distancia de una fila y
+   con el angulo hacia el (65536 la vuelta, x (1 - |sen(derrape / 2)|)) menor que el de la fila: la del de delante x el
+   factor de la fila (si es < 1, x 0,99 con el jugador y 0,999 con los demas). Pasados 360,3 cuadros, si el de delante va
+   mas deprisa, nada. PROBABLE: la clase (+320 del original) es la +324 de la demo (tr_cls) y el termino de +BB8 falta */
+static int rc_pace_n;                                           /* (prueba: veces que 472B60 limita, en rc_diag) */
+static float rc_pace(int e, int o, float ps)
+{
+    trafico_t *t = traf + e; int car = o != TR_JUG && traf[o].rc, k; const float *T;
+    float d = tr_dist(o, e), vo = o == TR_JUG ? yo.v : traf[o].c.v, f, rel, ebx;
+    if (crono > 360 && vo > t->c.v) return ps;
+    if (!(T = rival_pace(car, car ? tr_cls(o) & 3 : tr_cls(o))) || !(d < T[18])) return ps;
+    f = fabsf(sinf(t->c.deriva * 0.5f));
+    if (car) f *= fabsf(sinf(traf[o].c.deriva * 0.5f));
+    rel = dif_ang(atan2f(tr_x(o) - tr_x(e), tr_s(o) - tr_s(e)) - (t->c.a + t->c.deriva));
+    ebx = fabsf(rel) * 10430.378f * (1.0f - f);
+    for (k = 0; k < 6; k++) {
+        if (!(T[3 * k] > d) || !(ebx < T[3 * k + 1])) continue;
+        rc_pace_n++;
+        if (T[3 * k + 2] < 1.0f) return vo * (o == TR_JUG ? 0.99f : 0.999f);
+        return vo * T[3 * k + 2];
+    }
+    return ps;
+}
 static float rc_objetivo(int e, int d, int *f0, int *f1, float *rate)
 {
     trafico_t *t = traf + e; rival_t *r = rival_reg(t->rc - 1); const rival_mision_t *mi = rival_mis();
     int cls = tr_cls(e), nodo, pos, k; float ps, v2, b, vmf = t->c.v / 60.0f;
     const float *C = rival_curva();
+    int bits = 0;                                               /* +C 0x40000 (rebufo), 0x100000 (derrape): 477090 */
     rc_radios(t); rc_marcha(t);                                 /* (479670 / 479830 y 474D30 antes del control) */
+    if (rc_trim(t)) bits |= 2;
     tr_rv = ntap ? traf_reg_velocidad(traf_lugar(t->c.s, &nodo, &pos), nodo, pos) : NULL;
     *f0 = *f1 = 0; *rate = 1.0f; t->freno = 0;                  /* +10D8 = +10D9 = 0, +10E0 = 1, +38 = 0 */
     b = fabsf(mi && (mi->cfg[12] & 3) == 3 ? t->bb4 : t->b54);  /* 4762E0 */
@@ -7972,6 +8027,14 @@ static float rc_objetivo(int e, int d, int *f0, int *f1, float *rate)
             break;
         }
         if (ps > v2) { ps = v2; *f0 = 1; *f1 = 0; }
+        {   /* 472E60 (PS2 0x1e55f8): el ritmo por el de delante (+314) y el de delante de ese (472B60); sin el empuje de
+               lado +BE4 (este trafico no lo lee). No con el jugador delante cambiando de carril (+C 0x600) */
+            int pv = tr_del[e], pp = pv >= 0 ? tr_del[pv] : -1; float r0, r1;
+            if (pv >= 0 && !(pv == TR_JUG && t->b14 > 0)) {
+                r1 = rc_pace(e, pv, ps); r0 = pp >= 0 ? rc_pace(e, pp, ps) : ps;
+                if (!(r0 < r1)) { if (ps > r1) ps = r1; } else if (ps > r0) ps = r0;
+            }
+        }
         {   /* el rebufo del jugador: detras de el a 4..60 m y de 4 a 12 m de lado, x 0,7 x su +1C4 */
             float sj = rc_j.v * 0.7f;                           /* 0x3f333333 */
             if (sj > 1.0f && vmf > sj) {
@@ -7979,8 +8042,30 @@ static float rc_objetivo(int e, int d, int *f0, int *f1, float *rate)
                 if (bb < 12.0f && bb > g) {
                     d0 = tr_dist(TR_JUG, e);
                     if (d0 < 100.0f) d0 = tr_delante(TR_JUG, e);  /* 46E250 */
-                    if (-4.0f > d0 && d0 > -60.0f) ps *= sj;
+                    if (-4.0f > d0 && d0 > -60.0f) { ps *= sj; bits |= 1; }
                 }
+            }
+            if (!(bits & 1) && mi && (mi->cfg[12] & 8)) {      /* 474080 (PS2 0x1e8090; con +C 0x20000, que aqui se toma
+                                                                   por cfg +0x30 & 8, PROBABLE): por los coches de delante en
+                                                                   orden (+314) hasta 60 m, con el suyo a menos de 15 grados
+                                                                   (|+162| x 360 / 65536), si el de delante va a mas de 0,7 x
+                                                                   su +1C4 (> 1) y a menos de 5 de lado: a mas de 10 el rebufo
+                                                                   (x 0,7 x +1C4 y +C 0x40000); si no, el siguiente */
+                float sv = vmf * 0.7f, dprev = 0.0f; int q;
+                if (sv > 1.0f && fabsf(t->c.deriva) * 57.29578f <= 15.0f)
+                    for (;;) {
+                        int mejor = -1; float dm = 60.0f + 1e-3f;
+                        for (q = 0; q < NTRAF; q++) {
+                            float dd;
+                            if (q == e || traf[q].carril < 0) continue;
+                            dd = traf[q].c.s - t->c.s;
+                            if (dd > dprev && dd < dm) { dm = dd; mejor = q; }
+                        }
+                        if (mejor < 0 || dm > 60.0f) break;
+                        dprev = dm;
+                        if (!(traf[mejor].c.v / 60.0f > sv)) continue;
+                        if (fabsf(traf[mejor].c.x - t->c.x) < 5.0f) { if (dm > 10.0f) { ps *= sv; bits |= 1; } break; }
+                    }
             }
         }
     }
@@ -7995,6 +8080,13 @@ static float rc_objetivo(int e, int d, int *f0, int *f1, float *rate)
     if (d >= 0 && d < traf_lejos_v && t->c.v > ps) {            /* justo delante del jugador */
         if (tr_aparte(e, TR_JUG) < 1 && d <= 3) { *f1 = 1; *f0 = 0; *rate *= 0.05f; }   /* 0x3d4ccccd */
         else { *rate *= (float)d / 3.0f; if (*rate > 1.0f) *rate = 1.0f; }
+    }
+    if (variante == 6 && mi) {                                  /* 477090: +0x71 (y el bit 3, 4960A0, con la mision elegida) */
+        int q = t->modelo - NMODTRAF;
+        float tope = q >= 0 && q < rc_nmod && rc_fis[q].ok ? (rc_fis[q].rel - 2.3f) * -131.38678f + 318.0f : 318.0f;
+        float kmh = vmf * 216.72f;
+        if (mi->tipo == 3 ? kmh > tope : kmh > tope * 0.95f) bits |= 8;
+        rival_banderas(t->rc - 1, bits);
     }
     return ps;
 }
@@ -8017,7 +8109,7 @@ static void rc_diag(void)
 {
     int i; static int n;
     if (++n % 60) return;
-    dbglog(DBG_INFO, "RIVAL: jugador pos %d puesto %d/%d %.0f km/h; ", rc_j.pos, rival_puesto() + 1, rival_total(), (double)(yo.v * 3.6f));
+    dbglog(DBG_INFO, "RIVAL: jugador pos %d puesto %d/%d %.0f km/h, 472B60 %d; ", rc_j.pos, rival_puesto() + 1, rival_total(), (double)(yo.v * 3.6f), rc_pace_n);
     for (i = 0; i < rival_n(); i++) {
         rival_t *r = rival_reg(i);
         if (r->dif < -20 || r->dif > 80) continue;
@@ -8026,86 +8118,252 @@ static void rc_diag(void)
     }
     dbglog(DBG_INFO, "\n");
 }
-/* ---------------------------------------------------------------- HUD de las misiones de COAST 2 COAST
-   NAVI_PUB 0x1bd6f4 de SLES-53998 (4BED13 del PC) en el modo 16 con la variante 6: el panel 2C0046 (capa 3), el
-   avance 0x1bfd78 (4B9B40: icono del curso por su profundidad, marcas del rival de 47DA80 y del jugador, posicion /
-   largo x 180) y en los tipos 0 y 1 el puesto 0x1c02d8 (4B9D80: 2B0061 y las cifras de 42D280 en sus sitios; idioma
-   del disco 4 = espanol: sufijo 0 en el primero y 3 en los demas, y = 0x38). Y los rotulos del principio de la
-   mision de 496A30 (PS2 0x1f8d0c): con la cuenta del gestor en 0x168 los elementos 2B0020 (capa 9, modo 3) y 2B003D
-   (capa 10, modo 3) en (170, 20) con escala (1, 4) que van en 0,2 s (12 cuadros, 465310 / 4653C0 y 465590 / 465460
-   con el paso de 449E30) a (170, -80) y escala (1, 1); en 0xB4 la voz del tipo (0x40c6b8: 0x1E7 en el 0) por la
-   cola de 45BD30 (prioridad 0xF) y otra vez 2B0020 (modo 5: se queda en su ultimo cuadro) y el rotulo del tipo
-   (0x36f3f8: 2B0065 en el 0, modo 3) con el mismo movimiento; la cuenta baja 2 por cuadro y en 0 se sueltan los dos.
-   Imagenes y escenas de C2CHUD.DAT (tools/conv_hud.py --c2c). */
-static hud_dat_t *c2c_hud;
-typedef struct { int u, modo, n, vivo, t; float f; } c2c_el_t;  /* elemento de 465860: uso, modo, cuadros, vida, cuadros de movimiento */
-static c2c_el_t c2c_el[2]; static int c2c_cd;
-static const uint16_t C2C_VOZ[8] = { 0x1e7, 0x219, 0x1e8, 0x1ea, 0x1ea, 0x1ea, 0x218, 0 };   /* PS2 0x40c6b8 */
-static void c2c_pon(c2c_el_t *e, const char *nombre, int modo)
+/* ---------------------------------------------------------------- misiones de COAST 2 COAST
+   El gestor (496A30: rotulos, reglas de los tipos 1, 2, 3 y 6, nota y marcas) y su HUD (NAVI_PUB 0x1bd6f4) estan en
+   comun/mision.c; aqui lo que lee del jugador (c2c_paso) y el dibujo (c2c_dibuja). C2CHUD.DAT y el fichero de su tipo
+   (C2CH1 / C2CH23 / C2CH6.DAT) de tools/conv_hud.py --c2c. */
+static hud_dat_t *c2c_hud, *c2c_hud2; static int c2c_tipo2 = -1, c2c_susp, c2c_falla;
+/* VRAM de C2CHUD.DAT y del fichero del tipo de la mision (C2CH1 110 KB, C2CH23 32 KB, C2CH6 108 KB en VQ) */
+static uint32_t c2c_reserva(void)
 {
-    e->u = c2c_hud ? hudd_uso(c2c_hud, nombre) : -1; e->modo = modo; e->f = 0; e->t = 0;
-    e->n = e->u >= 0 ? hudd_cuadros(c2c_hud, e->u) : 0; e->vivo = e->u >= 0;
+    const rival_mision_t *mi = rival_mis(); int t = mi ? mi->tipo : 0;
+    return C2C_VRAM_RESERVA + (t == 1 || t == 6 ? 116u * 1024 : t == 2 || t == 3 ? 36u * 1024 : 0);
 }
-/* 496A30: la cuenta de los rotulos (en el modo 16, sin pausa ni fin) */
-static void c2c_paso(void)
+static int c2c_prof(void)
 {
-    const rival_mision_t *mi = rival_mis(); int k;
-    if (!mi) return;
-    for (k = 0; k < 2; k++) {                                   /* 4659F0: el cuadro y el movimiento */
-        c2c_el_t *e = c2c_el + k;
-        if (!e->vivo) continue;
-        if (e->t < 12) e->t++;
-        e->f += 1.0f;
-        if (e->f >= e->n - 1) { if (e->modo == 3) e->vivo = 0; else e->f = (float)(e->n - 1); }   /* 3: se suelta; 5: el ultimo */
-    }
-    if (!c2c_cd) return;
-    if (c2c_cd == 0x168) { c2c_pon(c2c_el, "C2C_B20", 3); c2c_pon(c2c_el + 1, "C2C_B3D", 3); }
-    else if (c2c_cd == 0xb4) {
-        char n[16];
-        if (mi->tipo >= 0 && mi->tipo < 8 && C2C_VOZ[mi->tipo] && voz_ok) sfx_voz(C2C_VOZ[mi->tipo]);   /* 45BD30(voz, 0xB4, 0xF) */
-        c2c_pon(c2c_el, "C2C_B20", 5);
-        sprintf(n, "C2C_T%d", mi->tipo); c2c_pon(c2c_el + 1, n, 3);
-    }
-    c2c_cd -= 2;
-    if (c2c_cd <= 0) { c2c_cd = 0; c2c_el[0].vivo = c2c_el[1].vivo = 0; }
+    int k = 0, nd, prof = 0;
+    for (nd = 0; k >= 0 && k < ncurso && nd < CURSO_MAX; nd++) { prof++; k = curso[k].izq >= 0 ? curso[k].izq : curso[k].der; }
+    return prof;
 }
-static void c2c_cifra(const char *uso, int cuadro, float x, float y, float z)
+/* 495D90: el punto de las marcas (PS2 0x40c370 por modelo, con x - 0,7 en los tipos 2 / 3) en la pantalla, desde su centro */
+static void c2c_marca_punto(float *mx, float *my)
 {
-    hudd_dibuja(c2c_hud, hudd_uso(c2c_hud, uso), cuadro, x, y, 1, z, 0);
+    const float *c = rival_cabeza(modelo_jug); float d[3] = { 0.345f, 1.29f, 0.07f }, r[3], q[3], P[3]; int k, f;
+    if (c) memcpy(d, c, sizeof d);
+    r[0] = yo.up[1] * yo.fw[2] - yo.up[2] * yo.fw[1]; r[1] = yo.up[2] * yo.fw[0] - yo.up[0] * yo.fw[2]; r[2] = yo.up[0] * yo.fw[1] - yo.up[1] * yo.fw[0];
+    for (f = 0; f < 2; f++) {
+        float x = f ? d[0] - 0.7f : d[0];
+        for (k = 0; k < 3; k++) q[k] = yo.pos[k] - x * r[k] + d[1] * yo.up[k] - d[2] * yo.fw[k] - ojo[k];
+        P[0] = q[0] * der[0] + q[1] * der[1] + q[2] * der[2]; P[1] = q[0] * arr[0] + q[1] * arr[1] + q[2] * arr[2];
+        P[2] = q[0] * ade[0] + q[1] * ade[1] + q[2] * ade[2];
+        if (P[2] < 1e-3f) { mx[f] = my[f] = 0; continue; }
+        mx[f] = fx * P[0] / P[2]; my[f] = -fx * P[1] / P[2];
+    }
+}
+/* C2CHUD.DAT y el fichero del tipo de la mision: sus tablas (en el monton; las texturas, hudd_sube, despues de la zona) */
+static const char *c2c_abre(void)
+{
+    const rival_mision_t *mi = rival_mis(); int t = mi ? mi->tipo : 0;
+    const char *f2 = t == 1 ? "C2CH1.DAT" : t == 2 || t == 3 ? "C2CH23.DAT" : t == 6 ? "C2CH6.DAT" : NULL;
+    if (!mi) return NULL;
+    if (!c2c_hud && !(c2c_hud = hudd_abre("C2CHUD.DAT", 0, 1))) dbglog(DBG_ERROR, "C2CHUD: no se pudo abrir\n");
+    if (c2c_hud2 && (!f2 || c2c_tipo2 != t)) { hudd_cierra(c2c_hud2); c2c_hud2 = NULL; }
+    if (f2 && !c2c_hud2 && !(c2c_hud2 = hudd_abre(f2, 0, 1))) dbglog(DBG_ERROR, "C2CHUD: no se pudo abrir %s\n", f2);
+    c2c_tipo2 = t;
+    return f2;
+}
+/* sus texturas de una en una (hudd_sube lee del GD los sectores que cubren las que sube: todas a la vez pedian ~190 KB
+   seguidos del monton, que en la carrera no hay) */
+static int c2c_sube(hud_dat_t *h)
+{
+    int t, n = hudd_n_tex(h), e = 0;
+    for (t = 0; h && t < n; t++) if (hudd_sube(h, t, 1)) e = 1;
+    return e;
+}
+static void c2c_voz(int id) { if (voz_ok) sfx_voz(id); }
+static void c2c_se(int id) { if (id == 0x518d) { if (voz_ok) sfx_voz(id); } else if (sfx_ok && sfx_hay(id)) sfx_menu(id); }
+/* COAST 2 COAST, campeonatos (variante 5, comun/campeonato.c). El arbol del curso: Request_Course_SP y _OR2 son los 1
+   (OUTRUN2SP) y 0 (el modo OutRun; lo comprueba tools/conv_camp.py); Req_Course_MIX_PS2 el 302 de CURSO.DAT, si esta
+   (tools/conv_union.py) */
+#define CAMP_ARBOL(g) ((g) == 0 ? 1 : (g) == 1 ? 0 : 302)
+static int camp_g = -1;
+FRIO static int curso_tiene(int id)                                  /* el arbol id en CURSO.DAT (solo su indice: 16 KB, */
+{                                                               /* detras de los 15 registros del modo OutRun) */
+    uint32_t lba, tam, i, m, r0, e[3]; uint8_t *b; int r = -1;
+    if (gd_busca(CURSO_FICH(id), &lba, &tam) || !(b = memalign(32, 16384))) return -1;
+    if (!gd_lee(lba, tam < 16384 ? (int)((tam + 2047) >> 11) : 8, b) && !memcmp(b, "CUR1", 4)) {
+        memcpy(&m, b + 4, 4); memcpy(&r0, b + 8, 4); i = 12 + m * r0;
+        if (i + 8 <= 16384 && !memcmp(b + i, "CURS", 4))
+            for (memcpy(&m, b + i + 4, 4), i += 8; m-- && i + 12 <= 16384; i += 12) {
+                memcpy(e, b + i, 12);
+                if ((int)e[0] == id) { r = e[1] + e[2] * r0 <= tam ? 0 : -2; break; }
+            }
+    }
+    free(b); return r;
+}
+static int camp_puede(int g) { return g < 0 || g > 2 ? -1 : g < 2 ? 0 : curso_tiene(CAMP_ARBOL(g)); }
+static int camp_tipo_nodo(int nodo) { return camp_tipo(camp_g, nodo); }
+static void camp_voz_(int id) { if (voz_ok) sfx_voz(id); }
+static void camp_se_(int id) { if (voz_ok) sfx_voz_se(id); }
+static void camp_millas_(int m) { menu_suma_millas((uint32_t)m); }
+static void camp_obj_(int cl, int tipo, float sec, float lat, float esc);
+static void camp_chica_(int que, uint32_t v);
+static void camp_golpe_(void);
+/* al salir del menu: el campeonato elegido (menu_camp: nodo del mapa y casilla), su arbol, la salida y el gestor */
+FRIO static void camp_preparado(int auto_)
+{
+    int cl = 0, cn = auto_ ? -1 : menu_camp(&cl), cf = menu_campeonato(), g;
+#ifdef PRUEBA_CAMP
+    cf = PRUEBA_CAMP; variante = 5;                             /* prueba: 46C520 (1 SP, 0 OutRun 2, 2 mixto) con el piloto */
+#ifdef PRUEBA_CAMP_NODO
+    cn = PRUEBA_CAMP_NODO;
+#else
+    cn = 0;
+#endif
+#ifdef PRUEBA_CAMP_LISTA
+    cl = PRUEBA_CAMP_LISTA;
+#endif
+#endif
+    camp_libera(); nodo_salida = PRUEBA_NODO; camp_g = -1;
+    if (variante != 5) return;
+    g = cf == 1 ? 0 : cf == 0 ? 1 : 2;                          /* grupo 4 SP, 5 OutRun 2, 6 mixto */
+    if (cn < 0 || cf < 0 || camp_puede(g) || camp_inicia(g, cf, cn > 0, cl, 0)) {
+        dbglog(DBG_ERROR, "CAMP: el campeonato %d no se puede correr (nodo %d): el modo OutRun\n", g, cn); variante = 1; camp_libera(); return;
+    }
+    camp_g = g; curso_pedido = CAMP_ARBOL(g); nodo_salida = cn > 0 ? cn - 1 : 0;
+    if (g == 0) preset_curso = 0;                               /* el curso de OutRun 2 SP: el preset 0 (PROBABLE) */
+    camp_graba = menu_nota_camp; camp_voz = camp_voz_; camp_se = camp_se_; camp_millas = camp_millas_; camp_obj = camp_obj_; camp_chica = camp_chica_; camp_golpe = camp_golpe_;
+    dbglog(DBG_INFO, "CAMP: campeonato %d, arbol %d, salida nodo %d, casilla %d\n", g, curso_pedido, nodo_salida, cl);
+}
+/* los objetos de la peticion (comun/campeonato.c pon_objetos) en el mundo: la seccion sec de la etapa y la fraccion lat
+   del ancho del asfalto (0 el borde izquierdo: SUPUESTO, el 0x1909b8 del original da los dos puntos del borde sin
+   saber aqui cual es cual), a la altura de la calzada y girados con la carretera (el arco atraviesa la carretera) */
+static uint8_t *camp_chrh;                                      /* CHRH.DAT (las caras y movimientos de la acompanante) */
+FRIO static void camp_chica_(int que, uint32_t v)                    /* 0x205288 / 0x2052f8 / 0x205220 (comun/robot.c) */
+{
+    if (!camp_chrh) {                                           /* (la primera vez en la carrera: ~52 KB del monton) */
+        uint32_t lba, tam;
+        if (!gd_busca("CHRH.DAT", &lba, &tam) && tam < 131072 && (camp_chrh = memalign(32, (tam + 2047) & ~2047u))) {
+            if (gd_lee(lba, (int)((tam + 2047) >> 11), camp_chrh)) { free(camp_chrh); camp_chrh = NULL; }
+            else robot_extra(camp_chrh, tam);
+        }
+        if (!camp_chrh) return;
+    }
+    if (que < 0) return;                                        /* (solo leerlo: al empezar la etapa) */
+    dbglog(DBG_INFO, "CAMP: acompanante %s 0x%x\n", que == 0 ? "cara" : que == 1 ? "para" : "movimiento", (unsigned)v);
+    if (que == 0) robot_pide(0, 0, 1, (int)v, 0); else if (que == 1) robot_pide(0, 0, 0, 0, 1); else robot_pide(1, v, 0, 0, 0);
+}
+FRIO static void camp_obj_(int cl, int tipo, float sec, float lat, float esc)
+{
+    float p[3], th, iz, de, x, s;
+    if (cl < 0) {
+        if (cl == -2) { haobj_libera(); if (camp_chrh) { robot_extra(NULL, 0); free(camp_chrh); camp_chrh = NULL; } }
+        else haobj_pon(-1, 0, NULL, 0, 0, 0);
+        return;
+    }
+    haobj_inicia();                                             /* (la cabecera de HAOSO.DAT: clase -> modelo y escala; ya leida: nada) */
+    s = s_etapa + sec * m_pos; ruta_en(s, p, &th, &iz, &de);
+    x = -iz + lat * (iz + de);
+    p[0] += x * cosf(th); p[2] += x * sinf(th); p[1] = altura(s, x);
+    if (haobj_pon(cl, tipo, p, -th, esc, (int)sec)) dbglog(DBG_ERROR, "CAMP: el objeto de la clase %d no se pudo poner\n", cl);
+#ifdef DIAG_HA
+    dbglog(DBG_INFO, "DIAGHA camp: clase %d tipo %d seccion %.1f lat %.2f en (%.1f, %.1f, %.1f); coche (%.1f, %.1f, %.1f)\n", cl, tipo, (double)sec, (double)lat,
+           (double)p[0], (double)p[1], (double)p[2], (double)yo.pos[0], (double)yo.pos[1], (double)yo.pos[2]);
+#endif
+}
+FRIO static void camp_golpe_(void)                                   /* el meteorito: 0x182d38 (estado 7) y v x 0,9 */
+{
+    if (!fis_ok) return;
+    fis.vx *= 0.9f; fis.vy *= 0.9f; yo.v = sqrtf(fis.vx * fis.vx + fis.vy * fis.vy); voz_contacto = 1;
+}
+static int ha_seccion(float x, float z);
+/* (C2C) la zona del tipo 5 sobre la carretera: DESVIACION (el original la marca de otra forma, SIN averiguar): una tira
+   translucida de su color (el del rotulo del subtipo: rojo, azul, verde) entre los laterales lo..hi, de 6 en 6 m y solo de 2 a 150 m por delante del coche
+   (<= 50 triangulos), en la lista transparente */
+#define CZ_PASO 6.0f
+#define CZ_LEJOS 150.0f
+static void camp_zona_dibuja(void)
+{
+    static pvr_poly_hdr_t cab __attribute__((aligned(32))); static int cab_ok;
+    float lo, hi, s, s0, s1; int a, b, col = camp_zona(&lo, &hi, &a, &b), n = 0; uint32_t c;
+    if (!col) return;
+#ifdef DIAG_SIN_ZONA
+    return;                                                     /* medida: sin dibujarla */
+#endif
+    s0 = s_etapa + (float)a * m_pos; s1 = s_etapa + (float)b * m_pos;
+    if (s0 < yo.s + 2.0f) s0 = yo.s + 2.0f;
+    if (s1 > yo.s + CZ_LEJOS) s1 = yo.s + CZ_LEJOS;
+    if (s1 <= s0 || !ta_cabe(2 * (int)((s1 - s0) / CZ_PASO + 2))) return;
+    if (!cab_ok) {
+        pvr_poly_cxt_t cx; pvr_poly_cxt_col(&cx, PVR_LIST_TR_POLY);
+        cx.gen.culling = PVR_CULLING_NONE; cx.gen.fog_type = PVR_FOG_TABLE; cx.gen.alpha = PVR_ALPHA_ENABLE;
+        cx.blend.src = PVR_BLEND_SRCALPHA; cx.blend.dst = PVR_BLEND_INVSRCALPHA;
+        pvr_poly_compile(&cab, &cx); cab_ok = 1;
+    }
+    c = col == 2 ? 0x60ff4040u : col == 3 ? 0x603070ffu : 0x6040e040u;   /* (los rotulos: 0 rojo, 1 azul, 2 verde) */
+    mat_load(&vista); pvr_prim(&cab, sizeof cab);
+    for (s = s0; ; s += CZ_PASO) {
+        float p[3], th, iz, de; int k;
+        if (s > s1) s = s1;
+        ruta_en(s, p, &th, &iz, &de);
+        for (k = 0; k < 2; k++) {
+            float x = de - (k ? hi : lo) * (iz + de), X = p[0] + x * cosf(th), Y = altura(s, x) + 0.06f, Z = p[2] + x * sinf(th), w;
+            pvr_vertex_t v;
+            mat_trans_single3_nodivw(X, Y, Z, w);
+            if (!(w > cerca)) w = cerca;
+            v.flags = s >= s1 && k ? PVR_CMD_VERTEX_EOL : PVR_CMD_VERTEX; v.x = X / w; v.y = Y / w; v.z = 1.0f / w;
+            v.u = v.v = 0; v.argb = c; v.oargb = 0; pvr_prim(&v, sizeof v); n++;
+        }
+        if (s >= s1) break;
+    }
+    vtx_env += (uint32_t)n;
+}
+/* 0x22a048: lo que lee el gestor del coche del jugador (los mismos campos que el INFARTO) */
+FRIO static void camp_paso_jug(int toca)
+{
+    static float t_choque_ant, ant[3]; static int ant_ok, bola_n, bola_s = -1; camp_coche_t c; int tq[16], cr[8];
+    {   haobj_coche_t oc;                                       /* los objetos de la peticion: toques, cruces y vuelo */
+        memset(&oc, 0, sizeof oc); oc.suelo = ha_suelo; memcpy(oc.pos, yo.pos, sizeof oc.pos);
+        oc.fw[0] = yo.fw[0]; oc.fw[2] = yo.fw[2]; oc.v = yo.v;
+        if (!ant_ok || cur_en_union) { memcpy(ant, yo.pos, sizeof ant); ant_ok = 1; }
+        memcpy(oc.ant, ant, sizeof ant); haobj_paso(&oc); memcpy(ant, yo.pos, sizeof ant);
+        c.ntoq = haobj_toques(tq, 16); c.toq = tq; c.ncru = haobj_cruces(cr, 8); c.cru = cr; c.modelo = modelo_jug;
+    }
+    c.en_union = cur_en_union; c.pos = cur_en_union ? 0.0f : (yo.s - s_etapa) / m_pos; c.seccion = (int)floorf(c.pos);
+    {   float bp[3]; haobj_met_t mt;                            /* la pelota (su seccion al tocarla y cada 0,5 s) y los meteoritos */
+        if (haobj_bola(bp, &c.bola_toca)) { if (c.bola_toca || bola_s < 0 || ++bola_n % 30 == 0) bola_s = ha_seccion(bp[0], bp[2]); }
+        else bola_s = -1;
+        c.bola_sec = bola_s;
+        haobj_meteoros(c.seccion, &mt); c.met_caen = mt.caen; c.met_llegan = mt.llegan;
+    }
+    {   float p[3], th, iz, de; ruta_en(yo.s, p, &th, &iz, &de); c.lat = iz + de > 0.1f ? (de - yo.x) / (iz + de) : 0.5f; }   /* (0 el borde derecho: PROBABLE, el dibujo del rotulo) */
+    c.kmh = fis_ok ? fis.velocidad_hud : yo.v * 3.6f; c.pasados = pt_pasados;
+    c.choque = fis_ok ? fis.choque : 0;
+    c.choque_ini = fis_ok && fis.t_choque > 0.0f && t_choque_ant <= 0.0f; t_choque_ant = fis_ok ? fis.t_choque : 0;
+    c.impulso = ha_impulso; c.impulso_rapido = ha_rapido; c.roce = (toca & 2) != 0; c.muro = yo.choque == 1;
+    memcpy(c.sup, sup_rueda, sizeof c.sup); c.derrapa = yo.t_derrape != 0;
+    c.rebufo = fis_ok ? fis.rebufo : 0.0f; c.rebufo_ang = fis_ok ? (int)(fabsf(fis.beta) * 10430.3779f) : 0;
+#ifdef PRUEBA_CAMP_PASA
+    {   static int k, extra;                                    /* prueba: un adelantamiento cada 1,5 s; derrape, rebufo y */
+        if (!c.en_union && ++k % 90 == 0) extra++;              /* +60 km/h la mitad del tiempo (el piloto no lo hace) */
+        c.pasados += extra; c.derrapa |= (k % 240) < 120;
+        if ((k % 240) < 120) { c.rebufo = 0.5f; c.rebufo_ang = 0; c.kmh += 60.0f; } }   /* (rebufo y +60 km/h a ratos) */
+#endif
+    camp_paso(&c);
+}
+/* 496A30 en el modo 16 (sin pausa): lo que lee del jugador */
+FRIO static void c2c_paso(void)
+{
+    mision_jug_t j; static int8_t da4;
+    if (!rival_mis()) return;
+    memset(&j, 0, sizeof j);
+    da4 = fis_ok ? (int8_t)fis.da4 : 0;
+    j.d36 = fis_ok ? fis.d36 : 0; j.kmh = fis_ok ? fis.vel_mf * 216.72f : yo.v * 3.6f;
+    j.tope_kmh = (fpar.rel_final - 2.3f) * -131.38678f + 318.0f;
+    j.fuera = (sup_jug & 0x9cu) || yo.choque == 1; j.da4 = &da4; j.choque = bo_toca_coche && ha_impulso;
+    j.rebufo = fis_ok ? fis.rebufo : 0; j.beta = fis_ok ? (int)(fis.beta * 10430.3779f) : 0;
+    j.interior = cam_ok && cam.vista <= 1;
+    c2c_marca_punto(j.mx, j.my);
+#ifdef PRUEBA_PUNTOS
+    if ((crono / 240) & 1) { j.d36 = 1; j.rebufo = 1.0f; j.beta = 0; }   /* prueba: derrape / rebufo a ratos (el piloto no lo hace) */
+    if (crono % 900 == 450) j.choque = 1;                     /* prueba: un choque con otro coche (la marca 2B000E del tipo 3) */
+#endif
+    mision_ui_paso(); mision_paso(&j);
+    if (fis_ok && da4 != (int8_t)fis.da4) fis.da4 = da4;
 }
 static void c2c_dibuja(void)
 {
-    static const int8_t OD[10] = { 0, 18, 0, 0, 0, 0, 0, 0, 0, 0 }, OU[10] = { 0, 18, 0, 0, 0, 0, 0, 8, 0, 0 };   /* 0x369888 / 0x369878 */
-    const rival_mision_t *mi = rival_mis(); int k, ri, lar = rival_largo(), prof = 0, nd;
-    if (!c2c_hud || !mi) return;
-    hudd_dibuja(c2c_hud, hudd_uso(c2c_hud, "C2C_PANEL"), 0, 0, 0, 1, 30, 0);          /* 2C0046, capa 3 */
-    for (k = 0, nd = 0; k >= 0 && k < ncurso && nd < CURSO_MAX; nd++) { prof++; k = curso[k].izq >= 0 ? curso[k].izq : curso[k].der; }
-    if (prof >= 1 && prof <= 3) hudd_dibuja(c2c_hud, hudd_uso(c2c_hud, "C2C_ICONO"), prof - 1, 0, 0, 1, 10, 0);
-    else if (prof == 4 || prof == 14) hudd_dibuja(c2c_hud, hudd_uso(c2c_hud, "C2C_ICONO"), prof == 4 ? 3 : 4, 0, 0, 1, 10, 0);
-    if (lar > 0) {
-        if ((ri = rival_47da80()) >= 0)
-            hudd_dibuja(c2c_hud, hudd_uso(c2c_hud, "C2C_MARCA_R"), (int)((float)rival_reg(ri)->pos_i / (float)lar * 180.0f), 0, 0, 1, 5, 0);
-        hudd_dibuja(c2c_hud, hudd_uso(c2c_hud, "C2C_MARCA_J"), (int)((float)rc_j.pos / (float)lar * 180.0f), 0, 0, 1, 5.5f, 0);
-    }
-    if (mi->tipo == 0 || mi->tipo == 1) {                       /* 0x1c02d8 */
-        int n = rival_total(), p = rival_puesto() + 1, dec, uni, cd, cu;
-        hudd_dibuja(c2c_hud, hudd_uso(c2c_hud, "C2C_PUESTO"), 0, 0, 0, 1, 10, 0);
-        if (p > n) p = n;
-        dec = p / 10; uni = p % 10; cd = n / 10; cu = n % 10;
-        if (dec > 0) { c2c_cifra("C2C_DPOS", dec, OD[dec] + OU[uni] + 0x1be, 0x42, 92); c2c_cifra("C2C_DPOS", uni, OU[uni] + 0x1e6, 0x42, 92); }
-        else c2c_cifra("C2C_DPOS", uni, OU[uni] + 0x1e6, 0x42, 92);
-        c2c_cifra("C2C_SUF", p == 1 ? 0 : 3, 0x206 + 4, 0x38, 92);
-        if (cd > 0) { c2c_cifra("C2C_DN", cd, 0x22c, 0x46, 92); c2c_cifra("C2C_DN", cu, 0x23c, 0x46, 92); }
-        else c2c_cifra("C2C_DN", cu, 0x22c, 0x46, 92);
-        c2c_cifra("C2C_BARRA", 0, 0x21c, 0x44, 92);
-    }
-    for (k = 0; k < 2; k++) {                                   /* los rotulos: capas 9 / 10 */
-        c2c_el_t *e = c2c_el + k; float a = e->t / 12.0f;
-        if (!e->vivo) continue;
-        hudd_escala(1.0f, 4.0f + (1.0f - 4.0f) * a);
-        hudd_dibuja(c2c_hud, e->u, (int)e->f, 170.0f, 20.0f + (-80.0f - 20.0f) * a, 1, 110 + k, 0);
-        hudd_escala(1.0f, 1.0f);
-    }
+    mision_dibuja(c2c_prof(), rc_j.pos, !((sup_jug & 0x9cu) || yo.choque == 1) && !(fis_ok && fis.da4 > 0));
 }
 static void curso_al_menu(void)
 {
@@ -8235,7 +8493,7 @@ static void bo_cuenta(void)
     bo_toca_coche = bo_roce = 0;
     pos = (int)((yo.s - s_etapa) / m_pos);
     { int a4e = fis.s4e < 0 ? -fis.s4e : fis.s4e; sl = fis.kmh >= 100 && a4e > 0x1800 && a4e < 0x4000; }
-    if (!(cur_nodo == PRUEBA_NODO && pos < 0xa0) && !sl && (sup_jug & 0x9cu) && pos > bo_pos_ant) bo_c88++;
+    if (!(cur_nodo == nodo_salida && pos < 0xa0) && !sl && (sup_jug & 0x9cu) && pos > bo_pos_ant) bo_c88++;
     bo_pos_ant = pos;
     /* 7D30A4 (PC 44EDE0 al final): +E68 > 0,18 y |+162| < 0x5DC, el rebufo que senala el HUD */
     if (fis.rebufo > 0.180000007f && (int)(fabsf(fis.beta) * 10430.3779f) < 0x5dc) bo_ca4++;
@@ -8246,7 +8504,7 @@ static int bo_elige(void)
     float x, sec;
     if (variante == 6 && bo_hay6) {                             /* 0x174cd0: las variantes 5.. (fila de 0x35a738) */
         sec = (s_union - s_etapa) / m_pos;
-        if (cur_nodo == PRUEBA_NODO) sec -= 0xa0;
+        if (cur_nodo == nodo_salida) sec -= 0xa0;
         x = sec > 0 ? (float)bo_c88 / sec : 0.0f;
         if (bo_c74 || bo_c78) return (int)bo_var6[0];
         if (bo_c7c || 0.1f <= x) return (int)bo_var6[1];
@@ -8259,7 +8517,7 @@ static int bo_elige(void)
     if (bo_c74 || bo_c78) return (int)bo_var[0];
     if (bo_c7c) return (int)bo_var[1];
     sec = (s_union - s_etapa) / m_pos;                          /* 7D3094: posiciones de la etapa */
-    if (cur_nodo == PRUEBA_NODO) sec -= 0xa0;
+    if (cur_nodo == nodo_salida) sec -= 0xa0;
     x = sec > 0 ? (float)bo_c88 / sec : 0.0f;
     if (0.1f <= x) return (int)bo_var[1];
     if (x != 0.0f) return (int)bo_var[2];
@@ -8458,6 +8716,7 @@ static int ha_carriles(float x, float z)                        /* (+0xA4 de los
     return n;
 }
 static modelo_t ha_mod; static int ha_mod_ok; static uint32_t ha_obj_tri, ha_obj_vtx, ha_obj_n, ha_dg[4];
+static modelo_t camp_mod; static int camp_mod_ok;             /* CAMPOBJ.DAT (C2C: obj_tour_pmt, HAOBJ_TOUR | registro) */
 /* 45ECA0 / 45E9B0: lo que la mision de la etapa pinta sobre ella (HAMpqq.DAT: los carriles azul / rojo), en el marco de
    la etapa + (0, 0,1, 0); DESVIACION (poligonos): solo los trozos de tira (tools/conv_infarto.py trocea) a menos de
    HA_META_LEJOS del ojo y no detras, con el tope de los objetos de la union */
@@ -8507,7 +8766,7 @@ static void ha_meta_dibuja(int l)
 static void ha_obj_dibuja(int l)
 {
     static matrix_t W __attribute__((aligned(32))), Mo __attribute__((aligned(32)));
-    haobj_dib_t d[HA_OBJ_MAX]; int n, i, ult, reg; uint32_t k, j;
+    haobj_dib_t d[HA_OBJ_MAX]; int n, i, ult, reg; uint32_t k, j; modelo_t *mo;
     if (l == 0) { ha_obj_tri = ha_obj_vtx = 0; }
     ha_meta_dibuja(l);
 #ifdef DIAG_SIN_HAOBJ
@@ -8521,32 +8780,34 @@ static void ha_obj_dibuja(int l)
         if (zv < -4.0f) continue;                               /* detras de la camara */
         memcpy(Mo, d[i].M, sizeof Mo);
         reg = d[i].reg;                                         /* la moneda lejana (tools/conv_infarto.py aligera_monedas) */
+        mo = reg & HAOBJ_TOUR ? &camp_mod : &ha_mod;            /* (C2C: CAMPOBJ.DAT) */
+        if (reg & HAOBJ_TOUR) { if (!camp_mod_ok) continue; reg &= 0xff; }
         if ((reg == 0x1c || reg == 0x1d) && zv > 40.0f) reg |= 0x80;
         if (reg == 0x2a && zv > 30.0f) reg |= 0x80;            /* el corazon plano del tipo 11 (aligera_corazon) */
         if (reg == 0x30 && zv * zv > 625.0f * (Mo[0][0] * Mo[0][0] + Mo[0][1] * Mo[0][1] + Mo[0][2] * Mo[0][2])) reg |= 0x80;   /* la estrella plana: desde 25 m x escala */
-        for (k = 0; k < ha_mod.nnodos; k++) {
-            const nodo_t *nd = ha_mod.nodos + k; int g = nd->relleno[0] & 0xff; uint32_t cst = 0;
+        for (k = 0; k < mo->nnodos; k++) {
+            const nodo_t *nd = mo->nodos + k; int g = nd->relleno[0] & 0xff; uint32_t cst = 0;
             if ((int)(nd->fl & 0xffff) != reg) continue;
             if (d[i].reg == 0x2b && zv > 40.0f && (nd->fl >> 16) & 0x20) continue;   /* el arco lejano: solo los postes */
             ha_dg[0]++;
-            for (j = ha_mod.inicio[l]; j < ha_mod.inicio[l + 1]; j++) {
-                const malla_t *m = ha_mod.mallas + j;
+            for (j = mo->inicio[l]; j < mo->inicio[l + 1]; j++) {
+                const malla_t *m = mo->mallas + j;
                 if ((m->nodo & 0xff) == g && m->n >= 3) cst += (m->n <= 256 ? ta_teo_tab[ta_ofs != 0][m->n] : ta_teo(m->n, ta_ofs)) * ta_f >> 8;
             }
             if (!cst) { ha_dg[1]++; continue; }
             if (ta_bo + cst > ta_bo_tope || ta_vb + cst > ta_lim) { ta_bo_pide += cst; ha_dg[2]++; continue; }
-            memcpy(W, ha_mod.carteles[nd->cartel], sizeof W);
+            memcpy(W, mo->carteles[nd->cartel], sizeof W);
             mat_load(&vista); mat_apply(&Mo); mat_apply(&W);
             ult = -2;
-            for (j = ha_mod.inicio[l]; j < ha_mod.inicio[l + 1]; j++) {
-                const malla_t *m = ha_mod.mallas + j;
+            for (j = mo->inicio[l]; j < mo->inicio[l + 1]; j++) {
+                const malla_t *m = mo->mallas + j;
                 if ((m->nodo & 0xff) != g || m->n < 3) continue;
                 if (m->tex != ult) {
                     ult = m->tex;
-                    if (m->tex >= 0) pvr_prim(&ha_mod.cabs[0][m->tex], sizeof(pvr_poly_hdr_t));
+                    if (m->tex >= 0) pvr_prim(&mo->cabs[0][m->tex], sizeof(pvr_poly_hdr_t));
                     else pvr_prim(&cab_col[0][l], sizeof(pvr_poly_hdr_t));
                 }
-                dibuja_malla(&ha_mod, m); ha_obj_tri += m->n - 2; ha_obj_vtx += m->n;
+                dibuja_malla(mo, m); ha_obj_tri += m->n - 2; ha_obj_vtx += m->n;
             }
         }
     }
@@ -12988,7 +13249,8 @@ static int robot_pareja(int sp, int var, int foto, int *pil, int *aco)
     if (foto < 0 || foto > 5) return -2;                        /* (el PC: fuera de su lista de 6) */
     k = lista[foto];
     if (var == 5) {                                             /* 487F50: el campeonato (46C520 = [7F94D4]) elige la */
-        int c = menu_campeonato();                              /* acompanante: 0 -> 3, 1 -> 4, 2 -> 5 de la tabla */
+        int c = camp_g == 0 ? 1 : camp_g == 1 ? 0 : camp_g == 2 ? 2 : menu_campeonato();   /* acompanante: 0 -> 3, 1 -> 4, */
+                                                                /* 2 -> 5 de la tabla (el de camp_preparado: tambien el de PRUEBA_CAMP) */
         if (k > 5 || c < 0 || c > 2) return -3;                 /* (otro valor: el indice 6, fuera de la tabla) */
         *pil = (int)P[k]; *aco = (int)A[3 + c];
         return 0;
@@ -13331,6 +13593,14 @@ FRIO static void rc_modelos_carga(uint8_t *buf, uint32_t cap)
         usado[mejor] = 1; m = rival_reg(mejor)->modelo;
         for (k = 0; k < rc_nmod && rc_mod_id[k] != m; k++) ;
         if (k < rc_nmod) continue;
+        if (rc_nmod) {   /* (2026-11-27) el segundo y siguientes solo si despues queda en la cima seguida lo que se pide
+                            luego: las colisiones (col_reserva, 186 + 220 KB), las tablas del HUD de la mision (~180 KB), el
+                            modelo y lo que gasta la lectura del curso entre medias (~240 KB, medido): las misiones de 5 rivales de modelos distintos troceaban el monton y se quedaban sin
+                            colisiones ni HUD ("Out of memory"); los que no caben se dibujan con el primero (DESVIACION) */
+            unsigned u_, l_; ram_kb(&u_, &l_);
+            if (l_ < (unsigned)((cap_col + cap_col_e) >> 10) + 180u + 80u + 240u) { dbglog(DBG_ERROR, "RIVAL: sin RAM para mas modelos (libre %uK): %d cargados\n", l_, rc_nmod); break; }
+            dbglog(DBG_INFO, "RIVAL: RAM libre %uK antes del modelo %d\n", l_, rc_nmod + 1);
+        }
         k = rc_nmod; mo = &mtraf[NMODTRAF + k];
         sprintf(nom, "RC%02d.DAT", m);
         r = buf ? lee_modelo_en(mo, nom, buf, cap) : lee_modelo(mo, nom);
@@ -13988,7 +14258,7 @@ static void fin_empieza(int como)
     c.mis_meta = c.mis_tipo = c.mis_nota = c.mis_superada = 0; c.mis_ant = 7; c.mis_millas_nota = c.mis_millas_ant = 0;
     if (variante == 6 && rival_mis()) {                         /* COAST 2 COAST: 4EF550 y el modo 35 de la mision */
         const rival_mision_t *mi = rival_mis();
-        c.mis_meta = como == FIN_META; c.mis_tipo = mi->tipo; c.mis_nota = rival_nota(); c.mis_ant = c2c_nota_ant;
+        c.mis_meta = como == FIN_META; c.mis_tipo = mi->tipo; c.mis_nota = mision_nota(); c.mis_ant = c2c_nota_ant;
         c.mis_millas_nota = rival_millas(c.mis_nota); c.mis_millas_ant = rival_millas(c.mis_ant);
         { int g = menu_nota_de(mi->clave, mi->sub); c.mis_superada = g >= 4 && g != 7; }   /* 4959E0 */
     }
@@ -14058,7 +14328,8 @@ FRIO static void tabla_entra(void)
 #define GH_MAX 2400                                             /* muestras (5 min 20 s) */
 typedef struct { uint8_t nodo, fl; uint16_t d; int16_t x, a, der, v; } gh_m_t;   /* fl: bit 0 union, bits 1..2 rama + 1 */
 typedef struct { char marca[4]; uint16_t ver, clave; uint32_t n, total_ms, modelo; } gh_cab_t;
-static gh_m_t gh_rec[GH_MAX], gh_rep[GH_MAX];
+static gh_m_t *gh_rec, *gh_rep;                                 /* (C2C 4) la grabacion y el fantasma: en el monton solo en la */
+                                                                /* CONTRARRELOJ (2 x 28 KB menos de BSS: RAM del arranque) */
 static gh_cab_t gh_rep_cab; static int gh_nrec, gh_nrep, gh_clave = -1, gh_grabando, gh_ve, gh_lleno;
 /* 4A2BA0 con el modo de juego: la vista de carrera (interior 0x8000 o nada en la 0) solo vale en el modo 16 (carrera); en
    la salida (13 / 14), la meta (19), el fin del tiempo (20..22) y lo demas el coche va entero (0x4000: dl = 2, PC
@@ -14118,53 +14389,76 @@ static void coche_trasero_paso(int carrera)
 }
 static int gh_nodo_ant = -1, gh_rama_ant = -1; static float gh_union_ant = -1;   /* la union de la etapa anterior */
 static coche_t gh_c; static matrix_t gh_mat __attribute__((aligned(32)));
-static volatile int gh_guardando;
-static uint8_t gh_buf[sizeof(gh_cab_t) + sizeof gh_rep];        /* el fichero de la VMU (lectura y guardado) */
+static volatile int gh_guardando, gh_soltar;
+static uint32_t gh_gen;                                         /* (C2C 4) +1 cada vez que gh_rec / gh_rep se sueltan (para invalidar lo que apunte a ellos) */
+#define GH_BUF (sizeof(gh_cab_t) + GH_MAX * sizeof(gh_m_t))      /* el fichero de la VMU (lectura y guardado): en el */
+                                                                /* monton solo mientras se lee o se guarda (C2C 3: 28 KB de RAM del arranque) */
 #define GH_U (65536.0f / 6.2831853f)
 /* Rev 2.9.9.c (modos "sp"): el coche de la grabacion. gh_rep_cab.modelo = 0x80000000 | color << 8 | ficha del coche
    que la grabo (las grabaciones de antes llevan 0: el del jugador, como hasta ahora). Si es otro que el del jugador, su
-   GHO1 (comun/gho.c, del COCHEnnL.DAT del GD, ~4-11 KB) va al principio de gh_buf, que en carrera no se usa (la VMU
-   se lee al empezar y se escribe en gh_meta, que pasa al coche del jugador antes de escribir) */
+   GHO1 (comun/gho.c, del COCHEnnL.DAT del GD, ~4-11 KB) va a gh_gb, del monton (C2C 4 quito el gh_buf fijo: la VMU se
+   lee y se guarda en un malloc temporal): se reserva al cargarlo, se recorta a su tamano y se suelta con la grabacion
+   (gh_suelta) o cuando el fantasma pasa a ser el coche del jugador (gh_meta) */
 #define GH_GRABADO 0x80000000u
+#define GH_GCAP 16384u                                          /* tope del GHO1 (20 B por triangulo) */
 static const int16_t *gh_gt; static uint32_t gh_gn; static int gh_g_ficha = -1; static uint32_t gh_g_n;
+static uint8_t *gh_gb;                                          /* el GHO1 del coche de la grabacion (o NULL) */
+static void gh_suelta_modelo(void) { free(gh_gb); gh_gb = NULL; gh_g_ficha = -1; gh_gt = gho_t; gh_gn = gho_n; }
 static void gh_modelo(void)
 {
     int f = gh_nrep && (gh_rep_cab.modelo & GH_GRABADO) ? (int)(gh_rep_cab.modelo & 0xff) : -1, r = 0;
-    uint8_t *b = (uint8_t *)(((uintptr_t)gh_buf + 31) & ~(uintptr_t)31), *sec = b + ((sizeof gh_buf - 64 - 2048) & ~31u);
-    char nom[16];
+    uint8_t *sec; char nom[16];
     gh_gt = gho_t; gh_gn = gho_n;                               /* el del jugador */
-    if (f < 0 || f == coche_ficha || f >= N_FICHAS || ficha_modelo[f] >= 30) return;
-    if (f != gh_g_ficha) {
-        gh_g_ficha = -1;
+    if (f < 0 || f == coche_ficha || f >= N_FICHAS || ficha_modelo[f] >= 30) { gh_suelta_modelo(); return; }
+    if (f != gh_g_ficha || !gh_gb) {
+        gh_suelta_modelo();
+        gh_gb = memalign(32, GH_GCAP); sec = memalign(32, 2048);
+        if (!gh_gb || !sec) { free(sec); gh_suelta_modelo(); dbglog(DBG_ERROR, "FANTASMA: sin RAM para el coche de la grabacion\n"); return; }
         sprintf(nom, "COCHE%02dL.DAT", f);
         musica_pausa_lectura(1);
-        if ((r = gho_lee(nom, b, (uint32_t)(sec - b), sec, &gh_g_n))) { sprintf(nom, "COCHE%02d.DAT", f); r = gho_lee(nom, b, (uint32_t)(sec - b), sec, &gh_g_n); }
+        if ((r = gho_lee(nom, gh_gb, GH_GCAP, sec, &gh_g_n))) { sprintf(nom, "COCHE%02d.DAT", f); r = gho_lee(nom, gh_gb, GH_GCAP, sec, &gh_g_n); }
         musica_pausa_lectura(0);
+        free(sec);
         dbglog(r ? DBG_ERROR : DBG_INFO, "FANTASMA: coche de la grabacion ficha %d (color %u): %s %s, %u triangulos (%d)\n", f,
                (unsigned)((gh_rep_cab.modelo >> 8) & 0xff), r ? "sin el GHO1 de" : "GHO1 de", nom, (unsigned)gh_g_n, r);
-        if (r || !gh_g_n) return;                               /* (sin el: el del jugador) */
+        if (r || !gh_g_n) { gh_suelta_modelo(); return; }       /* (sin el: el del jugador) */
+        { uint8_t *c = realloc(gh_gb, 20 * gh_g_n); if (c && !((uintptr_t)c & 3)) gh_gb = c; }   /* (alineado a 4 basta) */
         gh_g_ficha = f;
     }
-    gh_gt = (const int16_t *)b; gh_gn = gh_g_n;
+    gh_gt = (const int16_t *)gh_gb; gh_gn = gh_g_n;
+}
+/* (C2C 4) fuera de la CONTRARRELOJ: sin grabacion ni fantasma en la RAM (si se esta guardando, al acabar gh_hilo) */
+static void gh_suelta(void)
+{
+    gh_suelta_modelo();
+    if (!gh_rec) return;
+    if (gh_guardando) { gh_soltar = 1; return; }
+    free(gh_rec); gh_rec = gh_rep = NULL; gh_nrep = gh_nrec = 0; gh_clave = -1; gh_grabando = 0; gh_soltar = 0; gh_gen++;
 }
 /* al empezar la carrera (y REINTENTAR): la grabacion a cero; en la CONTRARRELOJ la del curso, de la RAM o de la VMU */
 static void gh_empieza(void)
 {
     int clave = variante == 7 && ta_codigo >= 0 ? (preset_curso & 0xff) << 8 | (ta_codigo & 0xff) : -1;
     gh_nrec = 0; gh_lleno = 0; gh_grabando = clave >= 0; gh_ve = 0; gh_nodo_ant = gh_rama_ant = -1; gh_union_ant = -1;
-    if (clave < 0) { gh_nrep = 0; gh_clave = -1; return; }
+    if (clave < 0) { gh_suelta(); gh_nrep = 0; gh_clave = -1; return; }
+    gh_soltar = 0;
+    if (!gh_rec) {
+        if (!(gh_rec = malloc(2 * GH_MAX * sizeof(gh_m_t)))) {
+            dbglog(DBG_ERROR, "FANTASMA: sin RAM para la grabacion\n"); gh_grabando = 0; gh_nrep = 0; gh_clave = -1; return; }
+        gh_rep = gh_rec + GH_MAX; gh_nrep = 0; gh_clave = -1;
+    }
     if (clave != gh_clave) {                                    /* otro curso: el suyo de la VMU */
-        uint8_t *b = gh_buf; char nm[16]; int n;
+        uint8_t *b = gh_guardando ? NULL : malloc(GH_BUF); char nm[16]; int n;
         gh_nrep = 0; gh_clave = clave;
         sprintf(nm, "ORGH%04X", clave);
-        n = gh_guardando ? -1 : menu_vmu_lee(nm, b, sizeof gh_buf);
+        n = !b ? -1 : menu_vmu_lee(nm, b, GH_BUF);
         if (n >= (int)sizeof(gh_cab_t)) {
             gh_cab_t c; memcpy(&c, b, sizeof c);
             if (!memcmp(c.marca, "ORGH", 4) && c.ver == 1 && c.clave == clave && c.n <= GH_MAX && n >= (int)(sizeof c + c.n * sizeof(gh_m_t))) {
                 gh_rep_cab = c; memcpy(gh_rep, b + sizeof c, c.n * sizeof(gh_m_t)); gh_nrep = c.n;
             }
         }
-        gh_g_ficha = -1;                                        /* (gh_buf: lo de la VMU encima del GHO1 que hubiera) */
+        free(b);
         dbglog(DBG_INFO, "FANTASMA: curso %04X, %s (%d muestras, %u ms)\n", clave, gh_nrep ? "leido de la VMU" : "sin fantasma",
                gh_nrep, gh_nrep ? (unsigned)gh_rep_cab.total_ms : 0);
     } else dbglog(DBG_INFO, "FANTASMA: curso %04X, el de la RAM (%d muestras)\n", clave, gh_nrep);
@@ -14187,12 +14481,14 @@ static void gh_graba(void)
 }
 static void *gh_hilo(void *p)
 {
-    uint8_t *b = gh_buf; char nm[16]; int r, n = gh_rep_cab.n;
+    uint8_t *b = malloc(GH_BUF); char nm[16]; int r, n = gh_rep_cab.n;
+    if (!b) { dbglog(DBG_ERROR, "FANTASMA: sin RAM para guardarlo\n"); gh_guardando = 0; return NULL; }
     memcpy(b, &gh_rep_cab, sizeof gh_rep_cab); memcpy(b + sizeof gh_rep_cab, gh_rep, n * sizeof(gh_m_t));
     sprintf(nm, "ORGH%04X", gh_rep_cab.clave);
     r = menu_vmu_guarda(nm, "OutRun Fantasma", b, (int)(sizeof gh_rep_cab + n * sizeof(gh_m_t)));
     dbglog(r ? DBG_ERROR : DBG_INFO, "FANTASMA: guardado %s (%d muestras, %u ms): %d\n", nm, n, (unsigned)gh_rep_cab.total_ms, r);
-    gh_guardando = 0; (void)p;
+    free(b); gh_guardando = 0; (void)p;
+    if (gh_soltar) gh_suelta();                                 /* (ya fuera de la CONTRARRELOJ) */
     return NULL;
 }
 /* GOAL (4513C0): si mejora al que habia (o no habia) pasa a ser el fantasma del curso y se guarda en la VMU */
@@ -14208,7 +14504,7 @@ static void gh_meta(int total_ms)
     memcpy(gh_rep_cab.marca, "ORGH", 4); gh_rep_cab.ver = 1; gh_rep_cab.clave = (uint16_t)gh_clave;
     gh_rep_cab.n = gh_nrec; gh_rep_cab.total_ms = total_ms;
     gh_rep_cab.modelo = coche_ficha >= 0 ? GH_GRABADO | (uint32_t)(menu_color() & 0xff) << 8 | (uint32_t)coche_ficha : 0;   /* (Rev 2.9.9.c) */
-    gh_g_ficha = -1; gh_gt = gho_t; gh_gn = gho_n;              /* (el coche del jugador; gh_hilo escribe gh_buf) */
+    gh_suelta_modelo();                                         /* (el fantasma pasa a ser el coche del jugador) */
     gh_guardando = 1;
     if (!thd_create(1, gh_hilo, NULL)) gh_hilo(NULL);
 }
@@ -14797,6 +15093,7 @@ int main(int argc, char **argv)
     traf_medidas();
     traf_tablas();                                              /* clases y cajas del trafico (TRAFC.DAT) */
     bo_carga_datos();                                           /* objetos animados de las uniones (BO.DAT) */
+    menu_camp_puede = camp_puede;
     if ((r = rival_inicia())) dbglog(DBG_ERROR, "RIVAL: sin MISION.DAT (%d): COAST 2 COAST sin misiones\n", r);
     else {   /* COAST 2 COAST: todas las misiones al mapa; se corren las de carrera (tipo 0) cuyo curso cabe; los otros
                 tipos piden pantallas y HUD que no estan (puntos del derrape / de la conduccion limpia, eliminacion por
@@ -14805,7 +15102,7 @@ int main(int argc, char **argv)
         int n = 0, nj = 0, k, c_, s_, t_;
         for (k = 0; k < RIVAL_NMIS; k++)
             if (!rival_lista(k, &c_, &s_, &t_)) {
-                idx[n] = k; cl[n] = c_; sb[n] = s_; tp[n] = t_; jg[n] = t_ == 0 && !arbol_grande[k]; nj += jg[n]; n++;
+                idx[n] = k; cl[n] = c_; sb[n] = s_; tp[n] = t_; jg[n] = (t_ == 0 || t_ == 1 || t_ == 2 || t_ == 3 || t_ == 6) && !arbol_grande[k]; nj += jg[n]; n++;
             }
         menu_pon_misiones(n, idx, cl, sb, tp, jg);
         dbglog(DBG_INFO, "RIVAL: %d misiones de COAST 2 COAST en el menu (%d de carrera que se corren)\n", n, nj);
@@ -15087,8 +15384,11 @@ int main(int argc, char **argv)
                 rc_modelos_suelta();
             }
             if (ha_hud && !reintenta) { hudd_cierra(ha_hud); ha_hud = NULL; ha_u_txt = ha_u_mar = -1; }   /* INFARTO */
+            if (camp_hud && !reintenta) { hudd_cierra(camp_hud); camp_hud = NULL; camp_u_txt = -1; }   /* campeonatos */
             if (ha_mod_ok && !reintenta) { libera_modelo(&ha_mod); ha_mod_ok = 0; }
+            if (camp_mod_ok && !reintenta) { libera_modelo(&camp_mod); camp_mod_ok = 0; }
             if (c2c_hud && !reintenta) { hudd_cierra(c2c_hud); c2c_hud = NULL; }                       /* COAST 2 COAST */
+            if (c2c_hud2 && !reintenta) { hudd_cierra(c2c_hud2); c2c_hud2 = NULL; }
             presta_union(1);                                    /* (en cuanto el curso suelta la union) */
             /* el frontal de recreativa pone sus tablas (~850 KB) en el final del hueco de la union: tras la meta la union
                de la meta sigue alli hasta que curso_al_menu la suelta (unos cuadros); nunca en el monton */
@@ -15125,6 +15425,7 @@ int main(int argc, char **argv)
                 curso_al_menu_ya();
                 if (ha_hud) { hudd_baja(ha_hud, 0, -1); ha_u_txt = ha_u_mar = -1; }
                 if (c2c_hud) hudd_baja(c2c_hud, 0, -1);
+                if (c2c_hud2) hudd_baja(c2c_hud2, 0, -1);
                 presta_union(1);
                 auto_ = rm == MENU_DEMO;
                 if (!auto_) { manual_ = menu_manual(); pista = menu_pista(); rk_modelo = menu_modelo(); }
@@ -15176,6 +15477,7 @@ int main(int argc, char **argv)
                     }
                     else { if (variante == 6) variante = 1; rival_fuera(); }
                 }
+                camp_preparado(auto_);                          /* COAST 2 COAST, campeonatos (variante 5) */
                 {   /* INFARTO / CONTRARRELOJ: el curso del tablero (comun/menu.c, TABLERO.DAT). CONTRARRELOJ: el codigo
                        [656234] de 0x2a6758 -> el arbol 200 + codigo de CURSOTA.DAT (48B550: una etapa sola, las metas
                        A..E de OR2 / SP_goals y de las del reves, los cursos seguidos csc_data_*_ren). INFARTO: el juego
@@ -15226,7 +15528,7 @@ int main(int argc, char **argv)
                 if (sfx_ok && !voz_ok && union_prestable())            /* (Rev 2.9.9.b) no cupo al arrancar */
                     voz_ok = !voces_inicia_en(hueco_union, cap_union - union_fsp);
                 if (voz_ok && union_prestable())
-                    sfx_voces_juego(variante == 2 ? (infarto_preset(preset_curso), infarto_voces()) : variante == 6 ? "VOCESC.DAT" : "VOCES.DAT", hueco_union, cap_union - union_fsp);   /* (sin el final del frontal) */
+                    sfx_voces_juego(variante == 2 ? (infarto_preset(preset_curso), infarto_voces()) : variante == 5 ? "VOCESH.DAT" : variante == 6 ? "VOCESC.DAT" : "VOCES.DAT", hueco_union, cap_union - union_fsp);   /* (sin el final del frontal; C2C 4: el campeonato con VOCESH.DAT tal cual) */
                 if (variante == 2) { infarto_preset(preset_curso); if (infarto_inicia()) { dbglog(DBG_ERROR, "MODO: sin INFARTO.DAT\n"); variante = 1; } }
                 else infarto_libera();                          /* 64 KB de tablas: solo en su modo */
                 if (voz_ok) { voces_modo(variante == 2); if (variante != 2) sfx_voz_grupo(-1); }
@@ -15278,7 +15580,7 @@ int main(int argc, char **argv)
                 presta_union(0);                                /* el hueco de la union vuelve a la carrera */
                 /* (las tablas del mapa de OUTRUN2SP siguen en el final del hueco de la union, que curso_reinicia no usa;
                    pcarga_suelta las quita antes de la zona del curso) */
-                ar_extra = variante == 2 ? HA_VRAM_RESERVA : variante == 6 ? C2C_VRAM_RESERVA : 0;  /* (HAHUD.DAT, detras de la zona) */
+                ar_extra = variante == 2 || variante == 5 ? HA_VRAM_RESERVA : variante == 6 ? c2c_reserva() : 0;  /* (HAHUD.DAT, detras de la zona) */
                 curso_reinicia();                               /* la etapa de salida (otra vez, si hacia falta) */
                 bo_inicia();                                    /* sin objetos de union y las cuentas a cero */
                 salida_calcula();
@@ -15296,7 +15598,7 @@ int main(int argc, char **argv)
                 coche_paso(&yo, 0, 0, 0, 0); traf_inicia(SALIDA); efectos_borra();
                 if (rival_n()) {                                /* 47DAC0: los de delante que se ven, en la parrilla */
                     int k_;
-                    rc_bases(); rc_jug_actualiza(0); rival_abre = rc_abre; rival_salida(&rc_j);
+                    rc_bases(); rc_jug_actualiza(0); rival_abre = rc_abre; rival_cierra = rc_cierra; rival_salida(&rc_j);
                     for (k_ = 0; k_ < ncurso && k_ < RIVAL_NODOS; k_++)
                         dbglog(DBG_INFO, "RIVAL: etapa %d %.4s base %d largo %d + %d\n", k_, curso[k_].zona, rc_base[k_],
                                rival_mis()->largo_tramo[k_], rival_mis()->largo_union[k_]);
@@ -15311,17 +15613,30 @@ int main(int argc, char **argv)
                 tim_cuadros = tim_zona(cur_nodo, etapa_n); tiempo = tim_cuadros / TIM_HZ; estado = CUENTA; t_estado = 0; t_cuenta = -60; fac_on = 0; fac_base = 30001; salida_entra(); pausa = 0; crono = 0; pt_inicia(); fin_carrera_empieza(!juego_sp); etapas_empieza(); etapa_entra(cur_nodo); gh_empieza();
                 reintenta = 0;
                 if (voz_ok) voces_carrera();
-                if (variante == 6) {                            /* C2CHUD.DAT: sus tablas en la RAM y todas sus texturas */
-                    c2c_cd = 0x168; c2c_el[0].vivo = c2c_el[1].vivo = 0;
-                    if (!c2c_hud && !(c2c_hud = hudd_abre("C2CHUD.DAT", 0, 1))) dbglog(DBG_ERROR, "C2CHUD: no se pudo abrir\n");
-                    if (c2c_hud && hudd_sube(c2c_hud, 0, -1)) dbglog(DBG_ERROR, "C2CHUD: sin VRAM para sus texturas\n");
+                jug_escala = 1.0f; c2c_susp = c2c_falla = 0;
+                if (variante == 6) {                            /* C2CHUD.DAT (y el de su tipo): sus tablas en la RAM y sus texturas */
+                    const rival_mision_t *mi_ = rival_mis(); int t_ = mi_ ? mi_->tipo : 0;
+                    const char *f2_ = c2c_abre();
+                    if (c2c_sube(c2c_hud)) dbglog(DBG_ERROR, "C2CHUD: sin RAM o VRAM para sus texturas\n");
+                    if (c2c_sube(c2c_hud2)) dbglog(DBG_ERROR, "C2CHUD: sin RAM o VRAM para %s\n", f2_);
+                    mision_hud(c2c_hud, c2c_hud2); mision_voz = c2c_voz; mision_se = c2c_se; mision_graba = menu_nota_mision;
+                    mision_inicia();                            /* 495B90 / 4965A0 */
+                    dbglog(DBG_INFO, "C2CHUD: tipo %d, %s; VRAM libre %uK\n", t_, f2_ ? f2_ : "sin fichero del tipo", (unsigned)(pvr_mem_available() >> 10));
                 }
-                if (variante == 2) {
-                    infarto_carrera(cur_nodo, curso[cur_nodo].nivel);   /* 45E0F0 */
-                    ha_meta_carga();
+                if (variante == 5) camp_etapa(camp_tipo_nodo(cur_nodo));   /* 0x22ac00 */
+                if (variante == 2 || variante == 5) {
+                    if (variante == 2) { infarto_carrera(cur_nodo, curso[cur_nodo].nivel); ha_meta_carga(); }   /* 45E0F0 */
                     /* el medidor, el panel y las filas (HAHUD.DAT: solo sus tablas en la RAM, ~150 KB; las texturas VQ,
                        40 KB, se leen del GD al subirlas, ya con la zona del curso reservada) */
                     if (!ha_hud && !(ha_hud = hudd_abre("HAHUD.DAT", 0, 1))) dbglog(DBG_ERROR, "HAHUD: no se pudo abrir\n");
+                    if (variante == 5 && !camp_hud && !(camp_hud = hudd_abre("CAMPHUD.DAT", 0, 1))) dbglog(DBG_ERROR, "CAMPHUD: no se pudo abrir\n");
+                    if (variante == 5 && !camp_mod_ok) {        /* (C2C) la pelota y el meteorito (CAMPOBJ.DAT, ~27 KB) */
+                        const uint8_t *cv; int nc = camp_clases(&cv), q;
+                        camp_mod.relleno_propio = 1;
+                        if (!lee_modelo(&camp_mod, "CAMPOBJ.DAT")) { sube_tramo(&camp_mod, 0, NULL); camp_mod_ok = 1; }
+                        else dbglog(DBG_ERROR, "CAMPOBJ: no se pudo leer CAMPOBJ.DAT\n");
+                        for (q = 0; q < nc; q++) { float e; memcpy(&e, cv + 8 * q + 4, 4); haobj_clase(cv[8 * q], cv[8 * q + 1], e); }
+                    }
                     if (!ha_mod_ok) {                           /* los modelos de los objetos (HAOBJ.DAT, ~7 KB) */
                         ha_mod.relleno_propio = 1;              /* (como BOnn.DAT: relleno[0] = malla | animacion) */
                         if (!lee_modelo(&ha_mod, "HAOBJ.DAT")) { sube_tramo(&ha_mod, 0, NULL); ha_mod_ok = 1; }
@@ -15464,7 +15779,23 @@ int main(int argc, char **argv)
                 coche_paso(&yo, giro, gas, freno, 1.0f / 60);
                 mando.usa = 0;
                 if (rival_n()) { rc_jug_actualiza(1); rival_paso(&rc_j); rc_diag(); }   /* 47EC00: los coches de carreras */
-                if (variante == 6) c2c_paso();                  /* 496A30: los rotulos de la mision */
+                if (variante == 6) {                            /* 496A30: la mision (comun/mision.c) */
+                    c2c_paso(); jug_escala = mision_escala();
+#ifdef PRUEBA_ESCALA
+                    jug_escala *= PRUEBA_ESCALA;                /* prueba: el jugador mas deprisa (ganar las misiones con el piloto) */
+#endif
+                    if (mision_fin() == 1 && estado == CARRERA) {   /* 450230(1): la meta (19), sin su camara si acabo antes */
+                        c2c_susp = mision_suspende();
+                        if (cur_nodo >= 0 && cur_nodo < ncurso) etapa_acaba(curso[cur_nodo].nivel);
+                        estado = META; t_estado = 0; texto_centro("GOAL!");
+                        if (voz_ok) voces_meta();
+                        if (!c2c_susp) meta_entra();
+                        dbglog(DBG_INFO, "RIVAL: mision ganada antes de la meta (%s), nota %d\n", mision_rotulo_fin() ? mision_rotulo_fin() : "-", mision_nota());
+                    } else if (mision_fin() == 2 && !c2c_falla) {   /* 450230(2): el fin del tiempo (20) */
+                        c2c_falla = 1; tim_cuadros = 0;
+                        dbglog(DBG_INFO, "RIVAL: mision fallada, nota %d\n", mision_nota());
+                    }
+                }
                 traf_paso(1.0f / 60);
                 efectos_paso(&yo, 1.0f / 60);
                 tim_cuadros--; tiempo = tim_cuadros / TIM_HZ;  /* 450AC0: un cuadro de logica */
@@ -15534,6 +15865,7 @@ int main(int argc, char **argv)
                                        (double)traf[q].c.s, (double)yo.s, traf[q].carril, (double)traf[q].c.v, traf[q].c5c1, traf[q].b64); }
 #endif
                     }
+                    if (variante == 5) camp_paso_jug(toca);     /* 0x22a048: el gestor de los campeonatos */
                     ha_rapido = ha_impulso = 0;
                 }
                 {   /* el curso: union, bifurcacion y etapa siguiente sin parar (curso_paso) */
@@ -15599,6 +15931,7 @@ int main(int argc, char **argv)
                         pt_bonus_etapa(); tim_cuadros += amp; tiempo = tim_cuadros / TIM_HZ; t_ext = 0;
                         if (voz_ok) voces_checkpoint();         /* EXTEND TIME: efecto 0x4d y voz 0x16c */
                         if (variante == 2) { infarto_etapa(cur_nodo, curso[cur_nodo].nivel); ha_meta_carga(); }   /* stage clear */
+                        if (variante == 5) { camp_fin_etapa(); camp_etapa(camp_tipo_nodo(cur_nodo)); }   /* 0x1cec50, 0x22ac00 */
 #ifdef DIAG_VRAMLOG
                         vl_marca("checkpoint etapa %d", cur_nodo);
 #endif
@@ -15638,6 +15971,7 @@ int main(int argc, char **argv)
                         gh_meta(cuadros_ms(crono));             /* 467190 / 467880: el fantasma del curso */
                         estado = META; t_estado = 0; pt_bonus_etapa(); texto_centro("GOAL!");
                         if (variante == 2) infarto_meta();      /* 44FF10 */
+                        if (variante == 5) camp_fin_etapa();
                         if (voz_ok) voces_meta();
                         meta_entra();                           /* modo 19: la escena de la meta (demo/meta.c) */
                         dbglog(DBG_INFO, "CURSO: GOAL en %.4s (s %.0f), VRAM libre %uK (zona %uK), %u texturas rebajadas\n", curso[cur_nodo].zona,
@@ -15645,7 +15979,7 @@ int main(int argc, char **argv)
                     }
                 }
 #ifdef PRUEBA_SIN_TIEMPO
-                if (tim_cuadros < 600) tim_cuadros = 600;        /* prueba: el tiempo no se acaba (rutas enteras hasta GOAL) */
+                if (tim_cuadros < 600 && !c2c_falla) tim_cuadros = 600;   /* prueba: el tiempo no se acaba (rutas enteras hasta GOAL) */
 #ifdef PRUEBA_ORDEN
                 if (crono % 60 == 0 && (cur_rama >= 0 || s_union >= 0)) {   /* prueba: donde va el coche en la union */
                     float p_[3], th_; ruta_en(yo.s, p_, &th_, NULL, NULL);
@@ -15674,7 +16008,7 @@ int main(int argc, char **argv)
                suceso con 0x18: el coche y el trafico se quedan quietos donde estaban al acabarse el tiempo (sin
                fisica, sin giro de las ruedas). Hasta la demo 39 el coche seguia con el freno a 0,6 (PROVISIONAL) y
                seguia andando tras el fin del tiempo (el usuario en la demo 39) */
-            int fin_t = estado == META ? (meta_lista() ? META_CUADROS : 600) : variante == 2 || variante == 5 ? 0x258 : 0xf0;
+            int fin_t = estado == META ? (meta_lista() || c2c_susp ? META_CUADROS : 600) : variante == 2 || variante == 5 ? 0x258 : 0xf0;
 #ifdef PRUEBA_TABLA
 #define TABLA_AUTO 1                                            /* prueba: la tabla de la meta tambien con el piloto */
 #else
@@ -15695,7 +16029,7 @@ int main(int argc, char **argv)
                 if (lejos_obj > lejos_guion) lejos_obj = lejos_guion;
                 else if (lejos_guion >= LEJOS_MAX && lejos_obj < LEJOS_MAX) lejos_obj = lejos = LEJOS_MAX;
                 if (lejos > lejos_obj) lejos = lejos_obj;
-            } else if (estado == META) coche_paso(&yo, 0, 0, 0.6f, 1.0f / 60);
+            } else if (estado == META && !c2c_susp) coche_paso(&yo, 0, 0, 0.6f, 1.0f / 60);   /* (suspendida: quieto, 49C9C0) */
             if (estado != FIN) pt_msg_paso();
             if (!fin_on && FIN_ATRACCION && ((nuevo & CONT_START) || t_estado > (uint32_t)fin_t)) {   /* demo de atraccion: al menu */
                 meta_sale(); lejos_obj = lejos = LEJOS_MAX;
@@ -15735,9 +16069,9 @@ int main(int argc, char **argv)
                 menu_suma_tiempo(crono);                        /* salida de la meta / del fin del tiempo (PS2 0x1b96bc / 0x1b9b58) */
                 if (variante == 6 && rival_mis()) {             /* COAST 2 COAST: 49CFD0 (salida de la meta) guarda la nota
                                                                    (495A20) y 495C10 (495B80 = 1); el fin del tiempo no */
-                    if (estado == META) menu_nota_mision(rival_mis()->clave, rival_mis()->sub, rival_nota());
+                    if (estado == META) menu_nota_mision(rival_mis()->clave, rival_mis()->sub, mision_nota());
                     dbglog(DBG_INFO, "RIVAL: fin (%s), puesto %d/%d, nota %d (antes %d)\n", estado == META ? "meta" : "tiempo",
-                           rival_puesto() + 1, rival_total(), rival_nota(), c2c_nota_ant);
+                           rival_puesto() + 1, rival_total(), mision_nota(), c2c_nota_ant);
                 }
                 if (tabla_on) { fin_tabla_sale(); tabla_on = 0; }   /* salida del modo 19: la tabla de la meta fuera */
                 rk_un_jugador(estado == META, auto_);                  /* Rev 2.9.3: los records de UN JUGADOR */
@@ -15755,7 +16089,7 @@ int main(int argc, char **argv)
                 }
                 if (rf == FIN_REINTENTA) { estado = TITULO; mundo_fuera = 0; reintenta = 1; meta_suelta(); }   /* modo 30: la salida con lo elegido */
                 else if (rf == FIN_MENU) {                      /* 28 */
-                    estado = TITULO; mundo_fuera = 0; hud_baja_tex(); menu_entra(manual_, pista, NPISTAS);
+                    estado = TITULO; mundo_fuera = 0; hud_baja_tex(); camp_libera(); gh_suelta(); menu_entra(manual_, pista, NPISTAS);
                     /* 49AF90 estado 3: sin la consola (43F860 = 0) y sin [65994C] vuelve al frontal de recreativa (modo 10) */
                     if (juego_sp && !auto_) pide_fsp = 1;      /* (en TITULO, con el hueco de la union libre) */
                     auto_ = 0;
@@ -16030,7 +16364,7 @@ int main(int argc, char **argv)
                     ta_bo_tope = ta_bo + (ta_lim > ta_vb + resto ? ta_lim - ta_vb - resto : 0); }
                 ta_en_bo = 1;
                 bo_dibuja(l);                                   /* pajaros y demas de la union (4A9DF0) */
-                if (variante == 2) ha_obj_dibuja(l);            /* INFARTO: conos, monedas... (comun/haobj.c) */
+                if (variante == 2 || variante == 5) ha_obj_dibuja(l);   /* INFARTO y campeonatos: conos, monedas... (comun/haobj.c) */
                 ta_en_bo = 0;
                 POP_CAT(1);
             }
@@ -16047,6 +16381,7 @@ int main(int argc, char **argv)
                 coche_dibuja(l, &mod_coche, 1);                 /* la vista interior: el habitaculo (vm = 2) */
             if (l == 0) gh_ve = estado != TITULO && !mundo_fuera && !fin24 && gh_coloca();   /* el fantasma (Contrarreloj) */
             if (gh_ve) gh_dibuja(l);
+            if (variante == 5 && l == 2 && estado == CARRERA) camp_zona_dibuja();   /* (C2C) la zona del tipo 5 */
             POP_CAT(2);
             PRF(5);
             if (fin24) robot_dibuja(&rc_chr, l);              /* 514E60 de la pareja del final */
@@ -16106,7 +16441,7 @@ int main(int argc, char **argv)
                     he.kmh = fis_ok ? (int)fis.velocidad_hud : (int)(yo.v * 3.6f); he.marcha = fis_ok ? fis.marcha : 1;
                     he.etapa = etapa_n; he.cuadro = cuadro; he.rpm = fis_ok ? (float)fis.rpm_suave : 0;
                     he.rebufo = fis_ok && fis.rebufo > 0.18f; he.derrape = yo.t_derrape != 0; he.manual = manual_ && !auto_; he.rev_on = he.manual && fis_ok && fis.rpm_i > 7900 && fis.marcha < fpar.marchas; he.seis = fis_ok && fpar.marchas >= 6;
-                    he.infarto = variante == 2; he.mision = variante == 6;
+                    he.infarto = variante == 2 || variante == 5; he.mision = variante == 6;
                     /* 0x1be240: sin mapa con la Contrarreloj de una etapa ([0x373e50] y codigo < 0x3c) y en las misiones
                        ([0x36f3a4] sin la variante 4); el de 15 casillas con los presets 2 / 3, nada pasado el 4 */
                     he.ruta = (variante == 7 && ta_codigo >= 0 && ta_codigo < 0x3c) || variante == 6 || preset_curso > 4 ? 0 :
@@ -16120,11 +16455,11 @@ int main(int argc, char **argv)
                     navi = estado == CUENTA || estado == CARRERA || (estado == META && variante == 1 && t_estado < META_CUADROS - 0x3fc);
                     if (navi) hud_dibuja(&he);
                     if (navi && variante == 6 && estado == CARRERA && !pausa) c2c_dibuja();   /* NAVI_PUB 0x1bd6f4 */
-                    if (navi && variante != 2 && variante != 6) {
+                    if (navi && variante != 2 && variante != 5 && variante != 6) {
                         for (i = 0; i < PT_MSGS; i++)           /* mensajes de puntos (4BD480) */
                             if (pt_msg[i].edad > 0) hud_puntos_msg(pt_msg[i].pts, pt_msg[i].estilo, (float)pt_msg[i].y, pt_msg[i].alfa);
                     } else if (navi && !he.solo_puntos && ha_hud) {   /* NAVI_PUB 0x1bd544: panel 2C002A y 4BCD50 (PS2 0x1bda80) */
-                        int32_t fv[5]; int nf = infarto_filas(fv), k; char b[16];
+                        int32_t fv[5]; int nf = variante == 5 ? camp_filas(fv) : infarto_filas(fv), k; char b[16];
                         hudd_dibuja(ha_hud, hudd_uso(ha_hud, "HA_PANEL"), 0, 0, 0, 1, 30, 0);
                         for (k = 0; k <= nf; k++) {             /* 0x1bd920: fila 2C0037 + k (cuadro 1) en (60, 0) y "%3d" */
                             char n[16]; int32_t a = fv[k] < 0 ? -fv[k] : fv[k];
@@ -16132,7 +16467,7 @@ int main(int argc, char **argv)
                             sprintf(b, "%3d", (int)a);
                             hud_cifras("CRONO", b, 0x21d, k * 0x15 + 0x53, fv[k] < 0 ? 0xFF0000 : 0xFFFFFF);
                         }
-                        sprintf(b, "%4d", infarto_corazones()); hud_cifras("CRONO", b, 0x206, 0x1b2, 0xFFFFFF);
+                        sprintf(b, "%4d", variante == 5 ? camp_corazones() : infarto_corazones()); hud_cifras("CRONO", b, 0x206, 0x1b2, 0xFFFFFF);
                     }
                     if (t_cuenta >= 0 && t_cuenta < 300) {                       /* 3, 2, 1, GO! (la escena dura 5 s; GO a los 4) */
                         static const char *const CU[5] = { "CUENTA_PRE", "CUENTA_3", "CUENTA_2", "CUENTA_1", "CUENTA_GO" };
@@ -16140,24 +16475,27 @@ int main(int argc, char **argv)
                     }
                     if (estado == CARRERA && fac_on) hud_aviso("BIFURCA", t_bif % 60, 1);   /* 2B0000 (4BB890) */
                     if (t_ext < 240) hud_aviso("TIEMPO_EXT", t_ext / 5, 1);
-                    if (estado == META) hud_aviso("META", t_estado < 59 ? t_estado : 59, 1);
+                    if (estado == META && !(variante == 6 && mision_dibuja_fin((int)t_estado))) hud_aviso("META", t_estado < 59 ? t_estado : 59, 1);
                     if (estado == AGOTADO) hud_aviso("FIN_TIEMPO", t_estado < 40 ? t_estado : 40 + (t_estado - 40) % 8, 1);
                     if (he.rev_on) hud_aviso("CAMBIA", cuadro % 30, 1);
-                    if (variante == 2 && (estado == CARRERA || estado == META)) {   /* INFARTO: el medidor (45FB80) */
+                    if ((variante == 2 || variante == 5) && (estado == CARRERA || estado == META)) {   /* INFARTO: el medidor (45FB80) */
                         int rt, rm, rcu;
-                        if (ha_hud && infarto_rotulo(&rt, &rm, &rcu)) {   /* 460970 / 460AD0: marco y texto en (176, 78) */
-                            char n1[16], n2[16]; uint32_t ti = infarto_tinte();   /* 7F8B68: el marco, rojizo si se pierden */
-                            sprintf(n1, "HA_M%d", rm); sprintf(n2, "HA_T%02d", rt);
-                            ha_rotulo_uso(&ha_u_mar, n1); ha_rotulo_uso(&ha_u_txt, n2);
+                        if (ha_hud && (variante == 5 ? camp_rotulo(&rt, &rm, &rcu) : infarto_rotulo(&rt, &rm, &rcu))) {   /* 460970 / 460AD0: marco y texto en (176, 78) */
+                            char n1[16], n2[16]; uint32_t ti = variante == 5 ? camp_tinte() : infarto_tinte();   /* 7F8B68: el marco, rojizo si se pierden */
+                            hud_dat_t *ht = rt >= 0x40 ? camp_hud : ha_hud; int *ut = rt >= 0x40 ? &camp_u_txt : &ha_u_txt;   /* (0x40 + k: banco 0x46) */
+                            sprintf(n1, "HA_M%d", rm); sprintf(n2, rt >= 0x40 ? "CA_T%02d" : "HA_T%02d", rt & 0x3f);
+                            ha_rotulo_uso(&ha_u_mar, n1); hud_rotulo_uso(ht, ut, n2);
+                            if (ut != &ha_u_txt && ha_u_txt >= 0) { hudd_baja_uso(ha_hud, ha_u_txt); ha_u_txt = -1; }
+                            if (ut != &camp_u_txt && camp_u_txt >= 0 && camp_hud) { hudd_baja_uso(camp_hud, camp_u_txt); camp_u_txt = -1; }
                             /* el marco solo con su texto: sin el (sin VRAM) salia un rectangulo blanco */
-                            if (hudd_uso_residente(ha_hud, ha_u_mar) && hudd_uso_residente(ha_hud, ha_u_txt)) {
+                            if (ht && hudd_uso_residente(ha_hud, ha_u_mar) && hudd_uso_residente(ht, *ut)) {
                                 hudd_color((ti & 0xff) << 16 | (ti & 0xff00) | (ti >> 16 & 0xff));
                                 hudd_dibuja(ha_hud, ha_u_mar, rcu, 176, 78, 1, 118, 0);
                                 hudd_color(0xFFFFFF);
-                                hudd_dibuja(ha_hud, ha_u_txt, rcu, 176, 78, 1, 119, 0);
+                                hudd_dibuja(ht, *ut, rcu, 176, 78, 1, 119, 0);
                             }
                         }
-                        if (ha_hud) {                   /* 45FB80 / 45B950: corazones, roturas y efectos */
+                        if (ha_hud && variante == 2) {  /* 45FB80 / 45B950: corazones, roturas y efectos */
                             static const char *const G[8] = { "HA_C0", "HA_C1", "HA_C2", "HA_C3", "HA_C4", "HA_C5", "HA_CORAZON", "HA_ROTO" };
                             infarto_spr_t sv[64]; int ns = infarto_medidor(sv, 64);
                             for (i = 0; i < ns; i++)        /* HA_C0..HA_C5 empiezan en el cuadro 0x1F */
@@ -16315,6 +16653,7 @@ int main(int argc, char **argv)
                 if (DIAG_POP298) printf("SUBE: dma %d trozos %u us %u max %u esp %u dmas %u dmaK %u sqK %u\n", SUBE_DMA, (unsigned)sdma_dg_tr, (unsigned)sdma_dg_us,
                        (unsigned)sdma_dg_max, (unsigned)sdma_dg_esp, (unsigned)sdma_dg_n, (unsigned)(sdma_dg_b >> 10), (unsigned)(sdma_dg_sq >> 10));   /* (P4) */
                 sdma_dg_tr = sdma_dg_us = sdma_dg_max = sdma_dg_esp = sdma_dg_n = sdma_dg_b = sdma_dg_sq = 0;
+                if (variante == 5) printf("HAOBJMS: %u objetos, %u tri, %u vtx\n", (unsigned)ha_obj_n, (unsigned)ha_obj_tri, (unsigned)ha_obj_vtx);
                 printf("SALTOMS: nivel %.2f trabajo %.2f ms TA %u lejano %d\n", (double)salto_q, (double)salto_trab, (unsigned)salto_ta, (int)lejos);
                 printf("FAROSMS: us %u puntos sobre la COLI %u de %u\n", faros_dg_us, faros_dg_suelo, FAROS_NL * (2u * FAROS_NC - 1));
                 printf("FOCOSMS: mallas %u vtx %u us %u divisiones %u vtx, de espaldas %u tri, recortados %u tri, vertices de las mallas %u\n", focos_dg_m, focos_dg_v, focos_dg_us, focos_dg_sub, focos_dg_cara, focos_dg_poli, focos_dg_vm);

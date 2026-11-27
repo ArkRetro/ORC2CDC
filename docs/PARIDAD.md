@@ -4146,7 +4146,7 @@ peticion 14 (escoltas 45B5B0, +324 = 6: carrera contra ellos), que no esta en la
   mision superada (4959E0) con A = 495A60 (la subclave siguiente si la nota llega a +0x24 = 4) y REINTENTAR, el boton
   0x10 la misma y B al menu; si no 2B004A); FINC2C.DAT (conv_fin.py). El fin del tiempo: 34 y 35 sin nota. Fuera la
   vuelta directa al menu.
-- SIN PORTAR: los tipos 1, 2, 3 y 6 (los de su juego) (puntos 4BD230 / 4BD340, marcas
+- HECHO (2026-11-27, ver COAST 2 COAST: misiones de tipo 1, 2, 3 y 6): los tipos 1, 2, 3 y 6 y los vaivenes. Lo de antes: SIN PORTAR los tipos 1, 2, 3 y 6 (los de su juego) (puntos 4BD230 / 4BD340, marcas
   495E90, notas por umbrales) no estan en la lista. Tambien 472E60 / 474080 / los vaivenes, la espera de 474D30, 43EB60
   al abrir, el bit 0 de +0xF, el boton 0x10 del PS2 (la X de la Dreamcast, PROBABLE), los campeonatos y la variante 9.
 
@@ -6879,6 +6879,276 @@ al final, despues de ALEATORIO, en los dos lados.
   motor). ALEATORIO sigue sorteando entre los 7 (salio MUS2). "9 filas de musica" en el registro; sin "Out of memory".
 - **INFARTO y CONTRARRELOJ** (consola, la misma pantalla de musica que OUTRUN y C2C): la tarjeta se elige y suena
   (avance MUS71 y carrera con MUS70; correlacion 0,65 y 0,72 frente a 0,05 / 0,06 de MUS27). No probado en R.
+## COAST 2 COAST: misiones de tipo 1, 2, 3 y 6, vaivenes de los rivales (agente c2c, 2026-11-27)
+
+Se juegan las 18 misiones que faltaban (tipos de +0x20 de Races.bin: 1 eliminacion por tiempo, 3 misiones; 2 derrape,
+7; 3 rebufo, 5; 6 pillar al rival, 3) con sus reglas, su HUD, su nota y su resultado. Las 94 misiones abren desde el
+mapa del menu (antes A en ellas daba el sonido de bloqueado); solo siguen cerradas las de `arbol_grande` (no caben).
+
+**Gestor (comun/mision.c, nuevo).** 496A30 de SLES-53998 (PS2 0x1f8d0c, el mission_manager_control_496a30 del PC,
+comprobado en el ELF de PS2 tipo a tipo: 0x1f9050 tipo 3, 0x1f90d0 tipo 2, 0x1f9144 tipo 6, 0x1f91b0 tipo 1, 0x1f9428 la
+escala) y lo que llama: 477B60 (0x1f13c8), 477430 (0x1f0da8), 495C20 (0x1f85d0), 495E90 (0x1f8930), 4961F0 y 495A20. Se
+movieron aqui los rotulos del principio (antes en demo/main.c, c2c_paso).
+- Tipo 1: el reloj [836388] = segundos (+0x28) x 60; baja 1 por paso; en los ultimos 5 s el pitido 0x518D cada segundo;
+  a los 0x168 cuadros el rotulo 2B0064 ("¡KO! en 5, 4.."); con el jugador ultimo entre 0x3D y 0x168 la voz 0x1F2; en 0:
+  si el ultimo es el jugador, mision fallada (450230(2): el fin del tiempo, modo 20) con su nota guardada; si no, sale el
+  ultimo coche de carreras (477430: fuera de la clasificacion, su coche cerrado, los puestos de detras suben uno), el
+  rotulo del eliminado (0x36f418 por su +0x76: 2B0056..) y la voz 0x1F0; con 2 en carrera, ganada (meta sin camara).
+- Tipo 2: con el derrape (+D36 > 0) a mas de 10 km/h, en el asfalto y sin toque reciente (+DA4), 10 puntos por paso, 20
+  por encima del 95 % del tope del coche ((+134C - 2,3) x -131,39 + 318). Tipo 3: con rebufo (+E68 > 0,18 y |+162| <
+  0x5DC) lo mismo (20 por encima del tope); un choque con otro coche (+4 0x10000 y 0x4000000) quita 2000 y pone +DA4 =
+  0x1E. El rival suma 10 / 20 (bit 3 de +0x70) en 477B60 con su bandera (0x200 derrape, 0x100 rebufo).
+- Tipo 6: con el jugador ultimo baja su reloj (segundos x 60); en 0 fallada. El rival en el ultimo puesto gasta su +0x98
+  (el mismo tiempo, puesto en el montaje 47CF40) y en 0 esta pillado (rotulo 0x36f430: 2B0050..; con 2 en carrera,
+  ganada y su rotulo en vez de GOAL en la meta, 498670).
+- Tipos 1 y 6: car+0xDBC = [83638C] / 600 x 0,17 + 1 (sube con el jugador detras: ActionForce2 escala el avance; demo:
+  `jug_escala` en coche_paso).
+- Nota (495C20): 0 y 1 por el puesto; 2 y 3: por encima de los puntos del rival 4, 5 o 6 (umbrales +0x38 / +0x3C), si
+  no por la razon con 0,3 / 0,5 / 0,7 / 1 (PS2 0x36f450); 6: (reloj + 5) / 6 contra los umbrales, 0 si acaba ultimo. Se
+  guarda en la licencia (+0x1D7 + 5 clave + sub, menu_nota_mision) al salir de la meta (49CFD0) y en los finales de la
+  mision (495A20): la VMU la escribe como las de carrera.
+- Marcas (495E90): tipos 2 / 3 sobre el coche (495D90: el punto de la tabla PS2 0x40c370 por modelo, x - 0,7; con la
+  vista interior en (234, 108)) la nota de lo ganado desde la ultima (2B000F + (puntos x 0,014), cuadro 0x1F), a los 500
+  la grande 2B0015 (cuadros 0x3D..0x69, velocidad 2) que vuela a (210, -160) en 0,25 s con el efecto 0x52 y con el
+  choque (-2000) 2B000E; tipo 6: 2B000E cada 70 cuadros de reloj perdido.
+- Fin: `mision_fin()` 1 pasa a la meta (estado META sin la escena de la meta y con el coche quieto, `c2c_susp`, como el
+  suspend_race de 49C9C0 con 8363A4); 2 acaba el tiempo (estado AGOTADO).
+
+**HUD (NAVI_PUB 0x1bd6f4).** Panel 2C0029 en los tipos 2 / 3 / 6 (0x1bd748); puntos 4BD230 (0x1bf108: "%07d" del jugador
+en (0x1E1, 0x49), estilo 1 o 0xD fuera del asfalto / con +DA4; el rival en (0x1E1, 0x67) y su imagen 2C024F con el
+desplazamiento de 0x369838 / 0x36983c) y 4BD340 (0x1bf260: "%04d" de (reloj + 5) / 6, 2C00F1 delante, el estilo del que
+va primero); cifras de 0x1c3c68 (estilos de 0x404818: 1 = escena 2C00B9, 0xD = 2C00C0, cuadro = cifra, 0x10 px).
+Datos: tools/conv_hud.py --c2c escribe C2CHUD.DAT (lo de todos, 187 KB de VQ) y por tipo C2CH1.DAT (eliminados y
+2B0064, 110 KB), C2CH23.DAT (notas, solo sus cuadros dibujados, 32 KB) y C2CH6.DAT (pillados, 108 KB): solo se abre el
+del tipo de la mision. C2C_VRAM_RESERVA 196 KB + el del tipo. Las texturas se suben de una en una (antes todas: pedian
+~190 KB seguidos del monton para leer sus sectores).
+- SIN PORTAR: las etiquetas sobre los rivales (4BAD20 = PS2 0x1c4158: 2C00C5 en los tipos 2 / 3 / 6, 2B0046..48 o cifras
+  en los 0 / 1; la escena 2C00C5 ya esta en C2CHUD.DAT) y la lista de puestos 4BA8C0 de los tipos 1 / 6.
+
+**Rivales (comun/rival.c).** Vaivenes de los registros sin coche 476CA0 / 476DF0 (PS2 0x1ee8b0 / 0x1eea68: a, b, c de
++0x44 o 1/3, 1, 7 y 0,4, 2, 6; rachas de +28 hasta +24 = (b + azar x (c - b)) x 60 con la bandera de +0x70) y 476F40 (con
++0x48: ninguna mision la tiene), llamados como 47C8A0 / 47CA40 (cfg +0x30 & 8 / & 0x10). Con coche (477090): bit 0 del
+rebufo (el del jugador de 47A7C0 y 474080), bit 1 del derrape y bit 3 de 4960A0 (rapido) en `rc_objetivo`.
+- 474080 (rebufo del coche de delante, cfg +0x30 & 8): SIMPLIFICADO, PROBABLE: un coche delante a 4..60 m y menos de 2 m de
+  lado mas rapido que 0,7 x el suyo: x (v x 0,7) como el del jugador (las constantes 0x628138 / 0x628244 del PC sin buscar
+  en la PS2).
+- 474990 / 474D30 (el derrape del coche de carreras): SIMPLIFICADO, PROBABLE. Las zonas de derrape son del original
+  (MISION.DAT 'MIX2', de la lista del primer puntero de +0x44: nodo, etapa / union, secciones y sus 6 factores; 5
+  misiones, 66 zonas); en ellas, en curva (+B54 < 300 m) y a mas de 80 km/h la carroceria se cruza hacia dentro hasta
+  0,25 rad x factor y pone la bandera. Sin el +162 del coche, sin las constantes 0x5b43fc.. (no localizadas en la PS2) y
+  sin la espera de 0x78 cuadros (+C26) de 474D30.
+- SIN PORTAR: 472E60 (ritmo por los coches de alrededor, +BE4). La variante 9 (4B02B0): no aplica (solo el selector 3 de
+  la palabra del frontal, que el menu UN JUGADOR no da).
+- RAM: las misiones de 5 rivales de modelos distintos (tipo 1, y 18 de las 94 en total) troceaban el monton y se quedaban
+  sin colisiones ("COLI: sin RAM", tambien en 059fc97 con -DPRUEBA_MISION=21) y sin HUD. rc_modelos_carga solo carga el
+  segundo y siguientes con 906 KB libres (colisiones 406 + HUD 180 + modelo 80 + la lectura del curso 240, medido); los
+  demas se dibujan con el primero (DESVIACION, como ya pasaba con mas de 6). 12-1: 3 modelos, colisiones y HUD bien.
+- Poligonos (peticion del usuario): RCmm.DAT con `conv_trafico.py --rivales --ligero` (DESVIACION pedida, la de los
+  coches del trafico: LOD 0 -6..-10 % de triangulos; tools/regenera.py la pasa). No se dibujan mas coches que antes (el
+  tope c1c de la mision y los 16 del trafico).
+
+**RAM al arrancar.** mision.o y rival.o con -Os; los registros de los coches de carreras (rival.c: 100 x 0x7C y la
+clasificacion) pasan de la BSS al monton solo mientras hay mision (calloc en 47CF40): el programa ocupa 4 KB menos que
+059fc97 (text + data + bss 2946596 frente a 2950676). Medido en Flycast: "RAM: al arrancar ... libre 376K" con
+`-DPRUEBA_AUTO -DPRUEBA_MISION=21` (059fc97 igual: 372K); sin defines (nav3.sh, MODO_JUEGO=1): libre 356K, "VOZ:
+VOCES.DAT, 35 muestras", sin "Out of memory", carrera OutRun 647K libres. En la carrera: 12-1 (tipo 1) libre ~390 KB,
+tipos 2 / 3 / 6 ~480-640 KB tras las colisiones; VRAM libre tras el HUD 85-105 KB.
+
+**MISION.DAT** (tools/conv_mision.py): detras de las millas el bloque 'MIX2' (punto de las marcas 0x40c370 por modelo y
+las zonas de derrape por mision); lo anterior igual byte a byte (la demo de antes lo lee igual).
+
+**Verificado en Flycast (E, pantalla :93, `-DPRUEBA_AUTO -DPRUEBA_MISION=i -DPRUEBA_SIN_TIEMPO`):**
+- 12-1 (i 21, tipo 1; `-DPRUEBA_ESCALA=1.4f` para que el piloto no sea ultimo): "¡KO! en 5..1", eliminada Clarissa
+  ("¡KO! CLARISSA"), la posicion pasa de 5/6 a 5/5; tres eliminaciones seguidas cada 40 s; sin la escala, el piloto
+  ultimo a los 40 s: "mision fallada, nota 1" y el fin del tiempo.
+- 3-1 (i 5, tipo 2, `-DPRUEBA_PUNTOS`: derrape forzado a ratos, el piloto no derrapa): puntos del jugador y del rival
+  ("Rival", 7 cifras), notas sobre el coche y la grande que vuela a los puntos; el rival gana puntos con sus rachas; la
+  nota pasa de 3 a 4 cuando sus puntos pasan los del rival.
+- 9-1 (i 15, tipo 3, `-DPRUEBA_PUNTOS`): puntos, rebufo, estilo de las cifras cambiado fuera del asfalto.
+- 6-1 (i 9, tipo 6, `-DPRUEBA_ESCALA=1.4f`): corazones del jugador y del rival, el del rival baja con el detras, pillado:
+  "¡PLANTADO! WOLF" en lugar de GOAL con el coche quieto, nota 6.
+- Sin "Out of memory" en ninguna (059fc97 con la 12-1: sin colisiones). Capturas (fuera del repo, en el scratchpad de la sesion:
+  modos/c2c/cap/): tipo1_hud, tipo1_ko_cuenta, tipo1_eliminado, tipo2_derrape, tipo3_rebufo, tipo6_pillado.
+- Cuadros por segundo y poligonos (`-DDIAG_MS`, lineas MS, 60 medias de 30 cuadros, la misma mision con 059fc97 y lgdat2
+  frente a esta rama, el piloto igual): 12-1 (tipo 1) 39,25 -> 39,23 fps, triangulos por cuadro 13459 -> 13805 (+346),
+  vertices 20330 -> 20708 (+378: el HUD de la mision y los rotulos; 059fc97 ademas sin colisiones); 3-1 (tipo 2, con los
+  puntos y las marcas) 37,69 -> 37,61 fps (55 medias), triangulos 18814 -> 18490 (-324), vertices 29374 -> 29090 (-284: los
+  RC ligeros compensan el HUD). Menos de 0,1 fps en las dos.
+- PENDIENTE de ver en Flycast: la carrera entera hasta la meta de un tipo 2 / 3 y el modo 35 desde el menu real (el flujo
+  de la meta es el del tipo 0, sin cambios), la marca 2B000E del choque del tipo 3.
+
+**Sin hacer: los campeonatos (variante 5).** El gestor de peticiones (PC 7F9460, evento 0x190) no tiene fuente en la
+decompilacion (corre el x86 traducido) y en la PS2 esta hacia 0x22xxxx sin seguir; es un modulo entero (peticiones de
+Req_*.bin por curso, su HUD y sus resultados). El mapa de los campeonatos ya estaba (Rev 1.2); A en una casilla sigue
+dando el sonido de bloqueado.
+
+### C2C, segunda tanda (agente c2c, 2026-11-27): verificacion por el menu, 472E60, 474080 y la espera de 474D30
+
+**Verificado en Flycast por el menu real** (licencia nueva con `-DPRUEBA_NOTAS_C2C`, el piloto conduce:
+`-DPRUEBA_PILOTO_MENU -DPRUEBA_SIN_TIEMPO -DPRUEBA_PUNTOS`, salida cerca de la meta con `-DPRUEBA_NODO` / `-DPRUEBA_FIN`):
+- Tipo 2 entrando por el menu: UN JUGADOR -> COAST 2 COAST -> categorias -> mapa (dos a la derecha) -> detalle "3
+  PRINCIPIANTE" ("¡¡¡Derrapa para ganar puntos!!!") -> coche, cambio, musica -> `RIVAL: mision 3-1 tipo 2` -> META ->
+  `LICENCIA: mision 3-1 nota 3 (guardada 3)` -> modo 34 -> modo 35 "¡MISION FALLIDA!" (nota < 4: 2B0068) con REINTENTAR /
+  ABANDONAR.
+- Tipo 3 (9-1, `-DPRUEBA_MISION=15` con el menu real) hasta la meta: nota 4, `LICENCIA: mision 9-1 nota 4 (guardada 4)`
+  (antes 7, sin jugar), 830 millas, modo 35 "¡MISION SUPERADA!" con SIGUIENTE RONDA / REINTENTAR / ABANDONAR.
+- La marca 2B000E del choque del tipo 3 (el corazon roto que sale sobre el coche al restar 2000): vista con el choque
+  forzado cada 15 s de `-DPRUEBA_PUNTOS` (que el piloto choque de verdad con otro coche no se ha visto).
+- Capturas (scratchpad, modos/c2c/cap/): menu_tipo2_meta_35, menu_tipo3_meta_35, tipo3_marca_2B000E; registros
+  log_menu_tipo2.txt / log_menu_tipo3.txt / log_472b60.txt.
+
+**472E60 / 472B60 (PS2 0x1e55f8 / 0x1e5188), HECHO con lo que falta marcado.** El coche de carreras no pasa de la
+velocidad que le deja el de delante (+314, tr_del) ni el de delante de ese: con la tabla de la clase del de delante
+(MISION.DAT 'PAC1', del ELF: 0x40bcc8 los del trafico, 8 clases, y 0x40bde8 los coches de carreras, 4; 6 filas
+{distancia, angulo, factor} y un limite), a menos de la distancia de una fila y con el angulo hacia el menor que el de
+la fila (x (1 - |sen(derrape / 2)|)), su velocidad x el factor (con factor < 1: x 0,99 con el jugador, x 0,999 con los
+demas); pasados 360,3 cuadros, nada si el de delante va mas deprisa; no con el jugador delante cambiando de carril.
+PROBABLE: la clase (+320 del original) es la +324 de la demo; sin el termino de +BB8 ni el empuje de lado +BE4 (3,5 m, que
+este trafico no lee). Medido en la 12-1: limita (229 veces en ~80 s, `472B60 n` en la linea RIVAL), 39,23 fps como antes
+(triangulos por cuadro 13536, 059fc97 13459).
+
+**474080 (PS2 0x1e8090): constantes del original.** Sin rebufo con |+162| > 15 grados (0x3bb40000 = 360 / 65536); por
+los coches de delante en orden hasta 60 m; si el de delante va a mas de 0,7 x su +1C4 (> 1) y esta a menos de 5 de lado: a
+mas de 10 el rebufo (x 0,7 x +1C4, +C 0x40000) y si no nada; los de 5 de lado o mas (a mas de 15) solo apuntan el carril
+libre (+C08, que este trafico no usa). Sigue PROBABLE la condicion de entrada (+C 0x20000, tomada por cfg +0x30 & 8).
+
+**La espera de 474D30 (PS2 0x1e96a0): no ocurre en el original.** Tras subir de marcha (+208 > +1D8) y con mas de 0x384
+cuadros, con azar / 65535 < +BC8 (y sin +8 0x10000) +C26 = 0x78 y durante esos cuadros no se llama al cambio 502420. Pero
++BC8 no lo escribe nadie al abrir el coche de carreras (0x1ed360..0x1ed3dc copia del registro +B78..+B94, +BD0, +BCC y
++C36..+C38, nada en +BC8; en el PC tampoco hay quien lo escriba fuera de su borrado): vale 0 y la espera no salta. No se
+porta (seria codigo muerto).
+
+**RAM:** ver abajo (la medida final).
+
+**Campeonatos (variante 5): investigado, NO portado.** Lo averiguado en SLES-53998:
+- Es un suceso del juego como el gestor de misiones: la tabla de descriptores de sucesos (5 palabras: inicio, control,
+  dibujo, 0, fin) en 0x3ee900..; el de las misiones (0x191) en 0x3eea1c = {0x1f7ce0, 0x1f7d00, 0x1f7d20, 0, 0x1f7d40} y
+  justo antes (0x190) el de los campeonatos {0x22db28, 0x22db50, 0x22db70, 0, 0x22dbb0}: envoltorios que llaman a los
+  metodos de un objeto en la BSS 0x616238 (0x229e88 inicio, 0x22a048 control, 0x22a2b0 dibujo, 0x22a5b8, 0x22ac00,
+  0x22b470 fin).
+- Tamano: 0x229e88..~0x234000, unas 108 funciones (~40 KB de codigo MIPS, ~10 000 instrucciones), con su propio lector
+  de guion (0x21ba68, 60 llamadas: las peticiones de Req_*.bin), la cola de voces (0x1ac3d8), los coches (0x1e1910) y el
+  HUD de sprites (0x164xxx). En el PC (7F9460) no hay fuente: corre el x86 traducido.
+- Pantallas: el mapa de campeonatos ya portado (Rev 1.2, frontal 0x240d68..); en carrera las peticiones del guion del
+  curso (REQUEST_NORMAL / SPECIAL1..3) con su HUD; el resultado va a los cuartetos de la licencia (+0x36E).
+- Portarlo es un modulo del tamano del INFARTO (comun/infarto.c): no cabe en esta tanda. A en una casilla del mapa de
+  campeonatos sigue dando el sonido de bloqueado.
+
+**RAM al arrancar (medida otra vez, nav3.sh sin defines, MODO_JUEGO=1, los mismos datos):** 059fc97 "libre 352K"; esta
+rama "libre 357K". Para no bajarla: el punto de las marcas, las zonas de derrape y las tablas 'PAC1' van en el monton solo
+con la mision (calloc en rival_carrera, ~2,7 KB, fuera con rival_fuera) y fin.o, final.o y nombre.o (pantallas del fin,
+no de la carrera) se compilan con -Os como menu.o (text + data + bss 2941256; 059fc97 2950676). Comprobado despues el
+camino del fin con esos -Os por el menu real: 6-1 (tipo 6) fallada con el piloto (el jugador ultimo hasta acabar su
+tiempo): "Se acabo el tiempo", `LICENCIA: mision 6-1 nota 0 (guardada 0)`, modo 34 y modo 35 "¡MISION FALLIDA!".
+
+## COAST 2 COAST: los campeonatos (variante 5), agente c2c2 (2026-11-27)
+
+Los campeonatos (botones 4..6 de las categorias: Clarissa, Jennifer y Holly) se corren desde su mapa (Rev 1.2): A en
+la salida (nodo 0) o en una casilla hecha del detalle de una etapa ya no da el sonido de bloqueado, pasa al coche, el
+cambio y la musica y la carrera es la variante 5 con el gestor de peticiones portado (comun/campeonato.c, -Os, sus datos
+en el monton solo durante la carrera).
+
+**Lo que es (SLES-53998, averiguado en esta tanda).** El campeonato es un curso de 15 etapas (5 niveles, como el modo
+OutRun) con las peticiones de la acompanante en cada etapa; el mapa del menu es ese arbol (nodo i = registro i - 1).
+- Cursos: Request_Course_SP / _OR2 / Req_Course_MIX_PS2 (registros de 0x78 como csc_data). Comprobado en la conversion:
+  el de Clarissa (grupo 4) es el arbol de OUTRUN2SP (csc_data_cvt, el 1 de CURSO.DAT: BEAC..NEWY, BK15..29) y el de
+  Jennifer (grupo 5) el del modo OutRun (csc_data_2, el 0); solo cambian las metas (hijos 0 / -1 en vez de -1 / -1,
+  PROBABLE que el 0 no se use: la carrera acaba en la meta). El de Holly (grupo 6, etapas del reves y la union 76)
+  necesita 11 uniones nuevas: SIN HACER (ver abajo).
+- Configuracion (4EEB50 del PC = la palabra +0x208 del frontal): {curso, forzada = nodo != 0, etapa = nodo - 1, lista =
+  casilla, 46C520}. Desde la salida: la carrera entera desde la primera etapa; desde una casilla: la salida en esa etapa
+  (nodo_salida en demo/main.c) con su lista en todas.
+- Gestor (suceso 0x190, tabla 0x3ee900 {0x22db28, 0x22db50, 0x22db70, 0, 0x22dbb0}, objeto 0x616238; los
+  desplazamientos de comun/campeonato.c son los suyos). 0x21ba68 NO es un lector de guion: es el `new` del C++ (60
+  llamadas = los 24 objetos de los tipos de peticion de la fabrica 0x22a930, tabla 0x4151f0, y las listas). Las clases
+  de los tipos estan fuera del modulo (0x292788..0x2a4800, ~70 KB mas), cada una con su vtable (0x423110 tipo 2,
+  0x423718 tipo 1...): +0x24 el control (cada paso, los 24), +0x2c el dibujo, +0x34 y +0x3c.
+- Guion (0x22ac00 / 0x22b600): Req_<etapa>.bin (nombres 0x374010 por el tipo del descriptor) y su lista +0x1ff8
+  (REQUEST_NORMAL / SPECIAL1..3, 0x374138); peticiones de 0x74 {s16 inicio, s16 fin, ..., +0x58 parametros}; los
+  parametros son bloques de 0x88 con nombre propio en el guion {tipo 1..24, subtipo, +0x58 / +0x5c punteros a otras
+  categorias del guion (coches y objetos), +0x60.. enteros: +0x7c la velocidad del tipo 1, el % del tipo 12, +0x80 /
+  +0x84 los coches del tipo 3}.
+- Lista de la etapa siguiente (0x22e850, al entrar en la union): forzada, la del mapa; si no por el histograma de notas
+  de las etapas anteriores (0x22e808: ninguna nota menor que n): nivel 1 -> 2: SPECIAL1 sin notas < 4 en los niveles 0
+  y 1; nivel 2 -> 3: SPECIAL1 sin < 3, SPECIAL2 si venia de la 1 y sin < 4; nivel 3 -> 4: igual y SPECIAL3 si venia de
+  la 2 y sin < 5. Por eso las etapas de nivel k tienen k casillas (0x4172c8) y sus cuartetos se llenan corriendo bien.
+- Peticion en curso (0x22b7d0): la primera con inicio - 32 < seccion < fin + 30 (ninguna en la union). Fases
+  (0x232988): 1 anuncio (desde inicio - 30: 0x22f9d0 el rotulo, 0x2a6358 la voz), 2 espera, 3 empieza (voz 0x8e8),
+  4 en curso (velocidad media), 5 acaba (0x22e670 nota, 0x22e728 corazones), 6 a la etapa (0x22e498) con el rotulo de
+  la nota (0x22f7a0) y su voz (0x2a65a8, tabla 0x423df0 por la fila +0xf0 del gestor: PROBABLE = 46C520), 7 hecha.
+- Medidor +0x28 (0..80, lo llena cada tipo con el avance del coche mientras cumple) menos la penalizacion +0x2c
+  (0x22c818: choque, golpe de uno mas rapido, golpe, muro, ruedas fuera y roce por paso con la fila de 0x374240 que
+  elige 0x2323e8; tope 100): nota = el mayor k con medidor - penalizacion >= {0, 10, 20, 30, 45, 60, 80} (0x374190),
+  tope 4 con un golpe, -3 con uno mas rapido, -4 con un choque (0x22e6d8). Corazones (0x22e728): los del medidor
+  (tope 80, 0x3741c8) y con nota >= 4 {0, 20, 50, 100}[lista] (0x3741d0) + {0, 10, 20, 30, 50}[dificultad] (0x3741e0,
+  la DC pasa 0: PROBABLE) + v media x 0,2; con nota 6 cada tipo su bono (vtable +0x24 en la fase 5). Fuera de las
+  peticiones: choque -50 (voz 0x950), golpe de uno mas rapido -20 (0x14c), golpe -10.
+- Etapa: media de las notas de sus peticiones (0x22ebb0) en la casilla de su lista si se hicieron todas; al terminar
+  la etapa (0x1cec50 en 0x22c000) a los cuartetos de la licencia +0x36E + 2 tipo si mejora (0x22edd8, +3F4 |= 2) con
+  millas[nota] x (lista + 1) (0x3741f8: 100..1000) a la licencia. El desbloqueo de los grupos 5 y 6 y el porcentaje
+  salen de esos cuartetos como ya hacia el menu (0x242290 / 0x2420a0).
+- HUD (NAVI_PUB 0x1bd6f4, caso de la variante 5: el panel 2C002A y 0x22a5b8): las filas 0x1bd920 por nivel y el
+  contador "%4d" de los corazones en (0x206, 0x1b2): los del INFARTO (HAHUD.DAT); los rotulos del anuncio (marco
+  2B0020, el generico 2B003D y a los 30 cuadros el del tipo) y de la nota (2B001E / 2B001F y 2B002D..31), los de HAHUD.DAT.
+
+**Datos (tools/conv_camp.py -> CAMP.DAT, 20,8 KB):** las tablas del ELF de arriba (cada una comprobada por el codigo
+que la lee), las 371 peticiones de los 60 guiones (inicio, fin, tipo, subtipo, +0x60..+0x84), el rotulo y la voz del
+anuncio de cada una sacados ejecutando en la conversion los switch del original (0x22faec y 0x2a636c con ps2/mips.py),
+los textos de la nota (0x22f8b0) y los tipos de las etapas de los tres arboles. CURSO.DAT no cambia.
+
+**Tipos portados (su control de la vtable +0x24):** 1 pasar de una velocidad (0x29c828: voces 0xf0 / 0xf1, animo cada
+0x6f cuadros), 2 derrapar (0x298360: voz 0x8c6, el medidor en el 90 % de la peticion), 3 adelantar coches (0x29f038:
+80 / p80 por coche hasta p84, efecto 0xd8 del convoy), 4 no chocar (0x29ec18: el 90 %; los sucesos penalizan y topan
+la nota; con un suceso el gestor llama a 0x22e9a0, que calcula la nota y llena un HUD de 0x3d88: SIN PORTAR), 12 ir al
+rebufo (0x2a4198: p7c % de la peticion). SIN PORTAR (se anuncian con el rotulo generico y acaban con
+nota 0): 5 los colores, 6 conos, 7 monedas, 8 arcos, 9 (otra clase de derrape: se trata como el 2), 11 chocar con los
+coches, 13 alimentar a la chica, 14 el total, 15 la pelota, 16 los minijuegos (secuencia, sonido, suma, regalos,
+ovejas, coches), 19 meteoritos, 20 lineas, 21 OVNIs, 22 la bocina, 23 patos, 24 fotos: necesitan los objetos de las
+categorias del guion (+0x58 / +0x5c), los coches de la peticion (0x22d088 / 0x22d530 / 0x22d7a0, 0x1e1910) o sus
+sprites del banco 0x46 (no convertido). Tampoco: los rotulos del banco 0x46 (los de los tipos 1, 12 y los minijuegos:
+DESVIACION, sale el generico), el letrero 3D de inicio / fin de la peticion (0x232e60 con 0x1a7c80 / 0x1a7cb0), la
+silueta 2C0067 / 0x460064 que se llena (como en el INFARTO), las reacciones de la acompanante (0x205288 / 0x2a66a8) y
+la vibracion (0x2052f8).
+
+**Holly (grupo 6, Req_Course_MIX_PS2):** `tools/conv_union.py --arboles=...,302` ya sabe hacer su arbol (ARBOLES_REQ):
+EAST_R / BK262, LASV_R / BK263 ... PALM_R / BK95 (comprobado: los demas arboles de CURSO.DAT salen igual byte a byte),
+pero sus 11 uniones nuevas toman los numeros 262..272, que son los de las uniones de la Contrarreloj (CURSOTA.DAT,
+--bk-desde=262): hay que numerarlas detras de esas y meterlas en UNIONES.PAK (tools/regenera.py). Sin el arbol 302 en
+CURSO.DAT, A en su mapa da el sonido de bloqueado (menu_camp_puede).
+
+**Verificado en Flycast (E, pantalla :93; capturas y registros en el scratchpad de la sesion, modos/c2c/cap/camp_*):**
+- Por el menu real (licencia nueva, `-DPRUEBA_PILOTO_MENU -DPRUEBA_SIN_TIEMPO`): UN JUGADOR -> COAST 2 COAST -> abajo
+  (Clarissa) -> su mapa ("RECORRIDO OUTRUN2SP", camp_mapa_clarissa) -> A en la salida -> coche, cambio, musica ->
+  `MODO: variante 5`, `CURSO: arbol 1`, BEAC; el HUD del INFARTO (Tiempo total / Tiempo / Corazones, filas "Etapa n" y
+  el contador); las cinco etapas BEAC -> SANF -> NIAG -> LASV -> PRIN hasta la META con sus peticiones de la lista
+  NORMAL (BEAC 11/0 y 3/0; SANF 11, 15 y 4; NIAG 3, 15 y 4; LASV 11 x 3; PRIN 15 y 3); el anuncio generico (la bombilla,
+  camp_anuncio_generico) en los tipos sin portar y el del tipo ("¡Sigue adelantando a los coches!", camp_anuncio_tipo3),
+  el rotulo de la nota (camp_nota0; camp_tipo4_nota2_filas: no chocar en SANF, medidor 81 - 25, nota 2 por el tope
+  del choque, 56 corazones en la fila "Etapa 2"), y en cada etapa `LICENCIA: campeonato etapa tipo t casilla 0 nota n`
+  con sus millas (100 / 400: 800 en total), camp_meta_prin. Sin "Out of memory"; en carrera ~500 KB libres.
+- Salida forzada (`-DPRUEBA_AUTO -DPRUEBA_CAMP=1 -DPRUEBA_CAMP_NODO=5 -DPRUEBA_CAMP_LISTA=1 -DPRUEBA_CAMP_PASA`: el
+  nodo 5 del mapa con la casilla 1, y un adelantamiento cada 1,5 s y medio derrape de prueba porque el piloto apenas
+  adelanta): sale en el registro 4 (tipo 16) con la lista SPECIAL1 ("¡Choca con el fantasma!", 11/1, y 3/0;
+  camp_forzada_nodo5_lista1), el tipo 3 llena el medidor (133 - 0, nota 6, 80 + 126 corazones, la cara de corazones,
+  camp_tipo3_nota6), etapa nota 3 en la lista 1 y la siguiente (LASV) otra vez con SPECIAL1.
+- Jennifer (grupo 5, `-DPRUEBA_AUTO -DPRUEBA_CAMP=0 -DPRUEBA_CAMP_PASA`, que ademas da rebufo y +60 km/h la mitad del
+  tiempo): `CURSO: arbol 0`, PALM con 12/0 (145..410) y 1/0 (475..560) del guion de Palm_Beach; el rebufo llena el
+  medidor (91 - 3, nota 6, 80 + 34 corazones; camp_jennifer_palm_tipo12_nota6), la velocidad (pasar de 265 km/h) solo 8
+  (el piloto no llega), etapa nota 3. El +0x7c del tipo 12 es un flotante (lwc1 en 0x2a41f8): leido como entero el
+  medidor no subia (corregido).
+- El paso a SPECIAL1..3 por las notas sin forzar (0x22e850) no se ha visto: el piloto no saca notas de 4 o mas en todas
+  las peticiones de dos etapas seguidas. Tampoco se ha visto entero el camino de Jennifer desde el menu (se abre con
+  Clarissa en rango A: ver el desbloqueo arriba) ni B en el coche de vuelta al mapa de las peticiones.
+
+**RAM.** Al arrancar no se reserva nada del campeonato: CAMP.DAT (20,8 KB) y el estado (~1 KB) van en el monton desde que
+sale del menu hasta que vuelve (camp_inicia / camp_libera). campeonato.o con -Os (5,9 KB). Para no bajar la RAM del
+arranque (el codigo nuevo de main.c / menu.c / campeonato.c son ~8 KB) se compilan tambien con -Os modulos que no son
+el dibujo ni la fisica de la carrera: infarto, fsp, vmuesc, sprani, rksp, modo_video, registro, voces, vmu, sfx, gd,
+musica, pcarga, meta y sp (text + data + bss 2935336; 5b392f5 2941256). Medido con tools/prueba/nav3.sh (MODO_JUEGO=1,
+sin defines, los mismos datos): 5b392f5 "libre 357K", esta rama "libre 364K", "VOZ: VOCES.DAT, 35 muestras", sin "Out
+of memory" (el libre del arranque va a saltos: con 2 KB menos de programa salio 356K, por como queda la cima del monton).
+En el campeonato, ~500 KB libres en carrera.
+
 ## INFARTO: tipos de peticion, hoja de resultados, panel de la nota y la acompanante (Rev 1.1, 2026-11-27)
 
 Rama rev-1.1 (059fc97). Todo verificado en Flycast (nivel E), no en la consola. Ficheros nuevos de la conversion:
@@ -7154,6 +7424,116 @@ todo el -Os nuevo, hud.o incluido): 39,42 fps y dib 19,65 ms frente a 39,52 / 19
 PENDIENTE medirlo en la consola). Carrera del INFARTO con DIAG_HA: 258 K libres (mision 39) y 264 K (mision 29), sin
 "Out of memory" (no cambia con el escalon del arranque).
 
+## COAST 2 COAST: campeonatos, tercera tanda (agente c2c3, 2026-11-27)
+
+Sobre "COAST 2 COAST: los campeonatos (variante 5), agente c2c2". Todo verificado en Flycast (nivel E), no en la consola.
+
+### Holly (grupo 6, Req_Course_MIX_PS2): HECHO
+
+- tools/conv_union.py: las uniones nuevas de los arboles de ARBOLES_REQ (el 302) se numeran desde `BK_REQ = 498`
+  (detras de las de CURSOTA.DAT, 262..497) con su propio contador: EAST_R / BK498, LASV_R / BK499, METR_R / BK500,
+  DESE_R / BK501, NEWY_R / BK502, ALAS_R / BK503, ALPI_R / BK504, YOSE_R / BK505, GRAN_R / BK506, INDU_R / BK507 y la
+  meta CAST_R / BK508 (union 76, cs_BK_SUMOEND); las demas del arbol son de antes (BK42, BK231, BK133, BK95).
+- tools/pak_union.py: los BK desde `AL_FINAL = 498` van al final del paquete, asi UNIONES.PAK solo crece (22 750 247 ->
+  23 467 226 bytes, +0,7 MB por los trozos repetidos) y sus primeros 22 750 247 bytes y los 262 descriptores de antes salen
+  identicos byte a byte (comprobado: recompuestas las 262 de lgdat2 y reempaquetadas con las 11 nuevas, `cmp`).
+- tools/regenera.py: el paso `union` convierte ARBOLES + 302 (ARBOLES_CURSO; la Contrarreloj sigue con ARBOLES_TA sin el
+  302, CURSOTA.DAT no cambia) y se esperan 509 descriptores (NBK).
+- CURSO.DAT: los 96 arboles de antes identicos registro a registro (h2/cmpcurso.py), el 302 detras.
+- demo/main.c `curso_tiene`: leia 8 KB del principio de CURSO.DAT, pero el indice de los arboles va detras de los 15
+  registros del modo OutRun (12 + 15 x 684 = 10272 bytes): nunca encontraba el 302 ("el campeonato 2 no se puede
+  correr"); ahora lee 16 KB y comprueba el arbol contra el tamano del fichero.
+- GD-ROM: datos de prueba 476 947 sectores (931,5 MiB; lgdat2 476 393): quedan 27 171 sectores (53 MiB) menos el
+  1ST_READ.BIN (~3 MB).
+- E (`-DPRUEBA_AUTO -DPRUEBA_CAMP=2 -DPRUEBA_SIN_TIEMPO`, pantalla :93): `CURSO: arbol 302, 15 etapas, salida EAST`, las
+  cinco etapas EAST_R -> LASV_R -> DESE_R -> ALPI_R -> BEAC_R por BK498, BK499, BK501, BK504 (leidas del paquete en ~2,1
+  s) hasta `CURSO: GOAL en BEAC`, con las peticiones de sus guiones (16, 13, 14, 22: sin portar, nota 0). Sin "Out of
+  memory"; "VOZ: VOCES.DAT, 35 muestras". Capturas: modos/c2c/cap3/holly (r_*: una cada 15 s; r_225 en la union).
+
+### Merge de infarto2 y RAM del arranque
+
+- `git merge infarto2` (comun/haobj.c: los objetos de las peticiones del INFARTO, con sus modelos de HAOBJ.DAT y
+  HAOSO.DAT). Conflictos resueltos: demo/Makefile (la union de las dos listas de -Os, SIN camara.o, hud.o ni sfx.o, que
+  corren en cada cuadro; sfx.o vuelve a -O2), demo/main.c (los enganches de los dos modos), docs (las dos secciones).
+- Para la prueba, los datos de modos/infarto/dat copiados a modos/c2c/dat_inf (HAOBJ.DAT, HAOSO.DAT, INFARTOX.DAT,
+  HAHUD.DAT, CHRH.DAT, VOCESH.DAT, HAMnnn.DAT) y enlazados en datos2 (h3/datos2.sh).
+- RAM: con el merge el arranque bajaba a 345K. Se recupera con el FRIO de infarto3 (efe7f03, cherry-pick: infarto.o
+  con sus tablas al monton y `FRIO` = -Os en la carga de main.c), FRIO tambien en tapas_busca, rk_un_jugador,
+  curso_huecos, focos_carga, robot_carga, hueco_fin, final24_chr, camp_preparado y curso_tiene (solo corren al cargar
+  o al acabar), y el bufer del fichero del fantasma de la CONTRARRELOJ (gh_buf, 28 KB de BSS) al monton solo mientras
+  se lee o se guarda en la VMU. nav3.sh (MODO_JUEGO=1, sin defines): "RAMMAPA arranque: libre 381K", "VOZ: VOCES.DAT, 35
+  muestras", sin "Out of memory". Leer el fantasma comprobado en la CONTRARRELOJ (MODO_JUEGO=3: "FANTASMA: curso 013C,
+  sin fantasma"); guardarlo en la meta (malloc en gh_hilo) NO se ha visto: PROBABLE.
+
+### Tipos 6 (conos), 7 (monedas) y 8 (arcos): HECHO
+
+- Objetos (un sistema propio de C2C, tabla 0x61e8a0 de 250 x 0x2c, distinto del del INFARTO pero con los mismos
+  objetos del banco 0x57): cada tipo lee de sus parametros una lista de filas (0x293968: {cuantos, clase, +8, relativa,
+  seccion inicial, final, lateral inicial, final}: cuantos repartidos sin llegar a la final) y una de puntos (0x2938d0,
+  0x2c bytes); campos por tipo: 6 +0x74 / +0x78, 7 y 8 +0x78 / +0x7c (15 +0x70 / +0x74 y 19 +0x78 / +0x7c tambien se
+  convierten). La clase (0..14) da el control (0x297e20: 0..1 conos, 2..3 moneda / corazon, 4 arco...) y la clase del
+  banco (tabla 0x423080: 6 / 5 conos rojo / azul, 0x0a moneda, 0x39 corazon, 0x0b arco).
+- tools/conv_camp.py: CAMP.DAT lleva detras de las peticiones 'OBJ1' con 335 filas (28 884 bytes en total).
+- comun/campeonato.c `pon_objetos` en la fase 1 (el anuncio, como el original) y comun/haobj.c `haobj_pon` (nuevo):
+  el objeto ya en el mundo; demo/main.c `camp_obj_`: la seccion -> s de la ruta y el lateral como fraccion del asfalto
+  (SUPUESTO: 0 es el borde izquierdo; con el piloto los conos azules quedan en su linea), a la altura de la calzada y
+  girado con la carretera. Los toques y los cruces de arcos de haobj_paso llegan a cada tipo en camp_coche_t.
+- 6 (0x295a28 / 0x295d48): azul +80 / (azules x 0,99) al medidor (derrapando si +0x70 == 1), rojo 3 veces eso a la
+  penalizacion; nota 6: +70 x 0x22f090. 7 (0x2953b8 / 0x295740): moneda o corazon +80 / p70 (derrapando si +0x74 == 1);
+  nota 6: 70 x cogidas / todas + (cogidas + corazones - p70) / 2. 8 (0x29a330 / 0x29a670): arco cruzado +80 / (p70 x
+  0,99); nota 6: +70 x 0x22f090. SIMPLIFICADO: la voz de animo (0x2a6240) por cuenta de toques y velocidad, no con el
+  contador exacto 0x3b5528.
+- E (Jennifer, `-DPRUEBA_CAMP=0 -DPRUEBA_CAMP_NODO=7`, Cloudy Highland): lista 1 (8, 7, 8): 15 arcos cruzados solo con
+  el piloto, "peticion 8 hecha: 93 - 0, nota 6, 80 + 119"; monedas 28 - 3, nota 2 (con `-DPRUEBA_HA_TOQUE=-1`, que pone
+  los objetos en su linea: 76 de 75 + corazones, nota 5); lista 2 (6, 6, 6): conos azules tocados por el piloto 8 / 31
+  / 40, notas 0, 3, 3; la cara de la chica y el contador de corazones suben. Capturas cap3/obj_toque (arcos, monedas),
+  cap3/conos.
+- Poligonos y fps (los modelos ya aligerados del INFARTO; como mucho 24 objetos a menos de 160 m; DIAG_MS, las mismas
+  pasadas con y sin dibujarlos `DIAG_SIN_HAOBJ`, cap3/medidas): conos 94 triangulos de media (190 como mucho), 39,74
+  frente a 39,78 fps (-0,04); arcos y monedas 156 de media (464 como mucho), 37,87 frente a 38,03 (-0,16).
+
+### Reacciones de la acompanante (0x205288 / 0x2052f8 / 0x2a66a8): HECHO
+
+- Tipos 1 y 2 (0x29c828 / 0x298360): al empezar a cumplir (pasar de la velocidad, derrapar) 0x205288(1, fila) con la
+  fila por la nota (switch 0x4236f0 / 0x4230f0: 0..1 -> 0, 2..3 -> 5, 4 -> 3, 5..6 -> 4; aqui la nota de ese momento
+  sacada del medidor, PROBABLE: el original lee +0x24); al dejar de cumplir 0x2052f8 (para).
+- Fase 6 (la nota, 0x232de0 -> 0x2a66a8): para y el movimiento de la tabla 0x423e60 por la nota, o 0x423e80 con los
+  modelos de coche que elige el switch 0x423ec0 (por modelo - 2). tools/conv_camp.py: bloque 'CHI1' detras de 'OBJ1'
+  (las dos tablas y la eleccion por modelo). Los movimientos (0x60048, 0x260009, 0x6003f, 0x260003, 0x26000d) ya estan
+  en CHRH.DAT del INFARTO (comprobado: conv_chr.py con ellos da el mismo fichero byte a byte).
+- comun/robot.c robot_pide (el del INFARTO) desde demo/main.c `camp_chica_`; CHRH.DAT (~52 KB del monton) se lee al
+  empezar cada etapa del campeonato y se suelta al acabarlo.
+- La pareja no salia en las pruebas `-DPRUEBA_CAMP` ("CHR: sin pareja (-3 ...)": robot_pareja leia el campeonato del
+  menu); ahora lo lee del elegido en camp_preparado (camp_g; con el menu es el mismo).
+- E (Jennifer, `-DPRUEBA_CAMP=0 -DPRUEBA_CAMP_PASA -DDIAG_HA`): rebufo nota 6 -> "DIAGHA acompanante: movimiento
+  0x26000d (esta)", velocidad: "cara 0 (0x26000a, esta)" y nota 0 -> 0x60048; capturas cap3/chica (la acompanante se
+  mueve en el coche tras la nota). En carrera 303K libres con la pareja y CHRH.DAT, sin "Out of memory".
+
+### Rotulos del banco 0x46 (tipos 1, 12 y los demas): HECHO
+
+- tools/conv_camp.py hace CAMPHUD.DAT (196 KB, 19 texturas VQ de ~64 KB sin VQ cada una): los 19 rotulos del anuncio
+  del banco SPRANI 0x46 que piden las peticiones (460040 rebufo, 460041 velocidad, 460042 colores, 46002C, 46003E...
+  46005C), cada uno su escena entera (conv_hud.grupo_escena) en el grupo CA_Tkk; la peticion lleva el rotulo 0x40 + k.
+  Ya solo el tipo 20 se anuncia con el generico (no tiene rotulo propio en 0x22faec).
+- demo/main.c: CAMPHUD.DAT se abre con HAHUD.DAT en la carrera del campeonato (solo sus tablas; la textura de un
+  rotulo se sube mientras se ve y se baja despues, `hud_rotulo_uso`, como los HA_Tnn).
+- E (Jennifer, PALM): "¡Ve al rebufo de los coches!" con su dibujo (tipo 12) y "¡Excede la velocidad!" con el
+  velocimetro (tipo 1), cap3/rotulos (r_033, r_063, la ampliacion c2c3_rt_z.png).
+- SIN PORTAR: el letrero 3D de inicio / fin de la peticion (0x232e60 con 0x1a7c80 / 0x1a7cb0).
+
+### Medidas finales y lo que queda
+
+- RAM al arrancar (nav3.sh, MODO_JUEGO=1, sin defines, datos de prueba datos2): "RAMMAPA arranque: libre 373K" (4106ba2:
+  364K), "VOZ: VOCES.DAT, 35 muestras", sin "Out of memory" (cap3/log_nav3.txt). En la carrera del campeonato con la
+  pareja, CHRH.DAT y los objetos: ~300K libres.
+- Por el menu real (`-DPRUEBA_PILOTO_MENU -DPRUEBA_SIN_TIEMPO`, h3/camp.sh, Clarissa): mapa -> coche -> BEAC con la
+  peticion 11 anunciada con su rotulo del banco 0x46 y la reaccion de la acompanante a la nota; cap3/menu.
+- SIN PORTAR (por orden de lo que piden los guiones): 16 los minijuegos (104 peticiones, casi todas de Holly; clase
+  0x29f520 de 0x1860 bytes con 8 subtipos), 13 alimentar a la chica, 22 la bocina, 11 chocar con los coches de la
+  peticion (necesita los coches propios 0x22d088 / 0x1e1910), 5 colores (las franjas pintadas de +0x58 de los
+  parametros, 0x1f3a70, y el lateral 0x232768), 15 la pelota y 19 los meteoritos (sus objetos ya estan en CAMP.DAT
+  OBJ1, falta su control: 0x293190 / 0x29da88 y los objetos de tipos 0xb / 0xd / 0xe que haobj no mueve), 14, 20, 21,
+  23, 24; el letrero 3D de inicio / fin (0x232e60) y la silueta 2C0067 / 0x460064.
 ## INFARTO 3: tipos 11, 9, 14 y 20, sprites 3D de los objetos y RAM del arranque (Rev 1.1, 2026-11-27)
 
 Sobre "INFARTO 2" (rama infarto2, f0a330a). Todo en Flycast (nivel E), no en la consola. Datos nuevos o cambiados
@@ -7264,3 +7644,98 @@ PRUEBA_HA_MISION / PRUEBA_NODO / TB_JUEGO=1 (preset 0) como antes; scripts en $S
 **SIN PORTAR (PENDIENTE):** la IA de carreras de los escoltas del 14 (+B58 = 0x12) y sus modelos de coche del jugador; el
 registro de aparicion de la puesta del 9 (0x1f20e8) y del 22; la accion -19 (0x1abd10: [0x589d04] = w4, sin leer quien lo
 usa); el aspecto del coche fantasma; el giro de la estela 2C0007; los tipos 17, 18 y 21 (no los pide ninguna mision).
+
+## COAST 2 COAST: campeonatos, cuarta tanda (agente c2c4, 2026-11-27)
+
+Sobre "campeonatos, tercera tanda (agente c2c3)" con `git merge infarto3` (0375cc8). Todo en Flycast (nivel E), no en la
+consola. Datos de prueba: $S/modos/c2c/dat2 (CAMP.DAT, CAMPOBJ.DAT nuevos) y dat_inf (actualizado con modos/infarto/dat:
+HAHUD.DAT e INFARTOX.DAT de infarto3), carpeta montada con h4/datos2.sh; scripts en $S/modos/c2c/h4 (mk.sh, gdi.sh,
+auto.sh con INI=, medir.sh / mide.py para los fps con y sin dibujo, donde.py: en que grupo / nodo / lista sale un tipo).
+
+### Merge de infarto3
+- Conflictos: comun/haobj.h (las dos API), demo/main.c (hud_rotulo_uso de C2C y ha_spr3d del INFARTO), demo/Makefile (la
+  lista de -Os de c2c3, que ya era la de infarto3 mas mision.o y campeonato.o; hud, sfx y camara a -O2), docs. infarto.c
+  queda igual que en infarto3. Arranque: 379K.
+
+### HECHO: tipo 15, empujar la pelota (0x293190 / 0x2934e8)
+- La pelota es la clase 0x11 del banco de objetos = registro 1 de obj_tour_pmt (recurso 0x1ee, tabla 0x40a958; no es del
+  banco 0x57, por eso faltaba en HAOSO.DAT). tools/conv_camp.py: CAMP.DAT 'CLS1' (clase -> registro de CAMPOBJ.DAT y
+  escala) y CAMPOBJ.DAT (ORD7 como HAOBJ.DAT: la pelota 150 triangulos, el meteorito 159; 27 KB, se lee en la carrera del
+  campeonato). haobj_clase / HAOBJ_TOUR: haobj dibuja esos registros con el modelo de CAMPOBJ.DAT.
+- Control: fase 1 los objetos (0x293390 / 0x293448), +0xc = 80 / (largo x 0,85); fases 2..5 (0x2934e8) por cada pelota:
+  si se ha quedado 5 secciones atras y el jugador va antes de la mitad - 10, otra en la mitad (lateral 0,5, una vez); con
+  +3FC == 8 (tocada) el medidor suma lo que ha avanzado desde el toque anterior x +0xc (PROBABLE: 4 si no avanzo; el
+  original suma 4 con +3F8, que pone 0x1d1af0 / 0x1d2608 con el modelo 0x1ee0001); en la 4, pasado el final, lo ultimo
+  y hecha; nota 6: + 70 x 0x22f090. Efectos 0x422cd0[rand % 7] (CAMP.DAT 'SND1').
+- SIMPLIFICADO (DESVIACION): sin el cuerpo rigido 516E10 del original (control 2, el de los conos): la pelota (radio 1 x
+  escala 2, apoyada en el suelo) sale con la velocidad del coche + 5 m/s, rueda con 5 m/s2 de frenada y gira al rodar.
+- E (Clarissa nodo 8 lista 1, `-DPRUEBA_HA_TOQUE=0x11`): 5 toques (secciones 104..136), "peticion 15 hecha: 92 - 0, nota
+  6"; cap4/t15/pelota.png. fps (DIAG_MS, con / sin dibujar objetos): 35,72 / 35,74; 61 triangulos de media, 150 como mucho.
+
+### HECHO: tipo 19, los meteoritos (0x29da88 / 0x29e018)
+- Clase 0x3d = registro 4 de obj_tour_pmt (control 0x0d, objeto de 10 m de radio x escala). Fase 1: objetos y la voz 0x7f;
+  fases 2..4 (0x29e018): caen (+C0 / +BC / +B0, como la estrella del INFARTO: desde 200 m, 6 m por paso; empiezan a 40
+  secciones por delante, PROBABLE: el original mira [0x55cf38] & 3 == 2) y al llegar al suelo el efecto 0x423830; golpe
+  (+7C y +80 == 8, una vez por meteorito, +D0): penalizacion + p[5] (+0x74, flotante: 14 / 15 / 16...) y, sin choque, la
+  reaccion 0x182d38 con la velocidad x 0,9 (camp_golpe: solo la velocidad); en la 4 el medidor con el avance / (largo x
+  0,9); la 5 no da bono. SIN PORTAR: 0x22df58 (vibracion), el efecto 0x22c6c8 de la llegada y el HUD de 0x22e9a0.
+- E (Clarissa nodo 6 lista 1, `-DPRUEBA_HA_TOQUE=0x3d`): 10 golpes, penalizacion 100, nota 0 (cap4/t19/meteoritos.png);
+  sin forzar, 39,81 / 39,78 fps con / sin dibujarlos, 159 triangulos de media (318 como mucho).
+
+### HECHO: tipo 5, ir por la zona de color (0x2a3db0)
+- La zona NO esta en el guion (+0x10..+0x1c a cero; 'ZON1' de CAMP.DAT lo comprueba): la pone 0x2323e8 por el subtipo:
+  0 -> lateral 0..0,5 (color 2), 1 -> 0,5..1 (3), 2 -> 0,25..0,75 (4); 0x232768 la mira (fraccion del ancho de borde a
+  borde) entre el inicio y el final. Control: dentro (y derrapando si +0x78 == 1) el medidor con el avance / (largo x
+  0,9), animo por la velocidad; nota 6: el bono de 0x22f090 con 0,9.
+- 0x1f3a70 (los +0x58 de los parametros, en 0x2937f0 para todos los tipos) NO pinta franjas: copia una tabla de 12 bytes
+  por seccion a 0x5d5da8, la de la aparicion del trafico (0x1f3818). No esta portado (el trafico de la peticion).
+- DESVIACION: como lo marca el original sobre la carretera no esta averiguado; aqui una tira translucida del color del
+  rotulo (rojo, azul, verde) de 2 a 150 m por delante, <= 50 triangulos (camp_zona_dibuja). El lateral: 0 el borde
+  derecho (PROBABLE, el dibujo del rotulo "Circula por el azul" lleva el azul a la derecha; los objetos de c2c3 usan el
+  lateral al reves, SUPUESTO alli).
+- E (Jennifer nodo 5 lista 1: 5/1, 5/0, 5/2): notas 2, 5 y 6 con el piloto; cap4/t5_azul.png. fps 39,16 / 39,17 con / sin.
+
+### HECHO: el fantasma de la CONTRARRELOJ
+- gh_rec / gh_rep (2 x 28,8 KB de BSS) al monton solo en la CONTRARRELOJ (gh_empieza: malloc de 57,6 KB al empezar la
+  carrera con un codigo de curso; gh_suelta al volver al menu o al empezar otro modo; si gh_hilo esta guardando en la VMU,
+  al acabar el hilo; gh_gen + 1 en cada suelta). El fichero de la VMU (GH_BUF = 12 + 28,8 KB) va al monton solo mientras
+  se lee (gh_empieza) o se guarda (gh_hilo), como en c2c3.
+- E (`-DPRUEBA_VARIANTE=7 -DPRUEBA_TA_CODIGO=0`): GOAL en PALM -> "guardado ORGH0100 en a1 (5948 bytes, 12 bloques) ...
+  releido igual"; con la misma VMU otro arranque: "FANTASMA: curso 0100, leido de la VMU (398 muestras, 52890 ms)";
+  697K libres en la carrera. cap4/fantasma/log_vmu.txt.
+
+### RAM
+- Arranque (nav3.sh, MODO_JUEGO=1, sin defines): 426K libres (379K tras el merge; 370K con 15 / 19 antes del fantasma),
+  "VOZ: VOCES.DAT, 35 muestras", sin "Out of memory". FRIO en camp_*, c2c_paso y carga_hilo. Ningun modulo de cada cuadro
+  a -Os.
+
+### SIN PORTAR (lo averiguado)
+- 16, minijuegos (clase 0x29f520, 0x1860 bytes): fase 1 0x2a0d08 reparte los registros de 0x2c del guion de +0x7c
+  ({+0x20 clase 0 aviso / 1 puerta, +0x24 simbolo o carriles, +0x26 / +0x28 secciones, +0x2a cuantos}, +0x80: relativo
+  al inicio) en la lista A (+0xc, +0x70 cuantos) y B (+0x8a4, +0x72), y el subtipo (tabla 0x4239f0) los prepara; cada paso
+  (0x423a10) por el subtipo. Subtipo 2 (el mas usado, 22): avisos con la voz 0x423c30[simbolo] (0x1a7..0x1ad) y puertas de
+  n carriles con un simbolo cada uno (el bueno al azar, 0x2a1ba0); al pasar la seccion de la puerta 0x29fb28 mira el carril
+  (fraccion de borde a borde, k / n < f < (k + 1) / n): bien, + 88 / puertas y el destello 2C0002; mal, efecto 0xd4. El
+  dibujo (0x2a0138) son sprites 3D (0x115870, como ha_spr3d) del banco 0x46: tablas 0x423ae0 (subtipo 0), 0x423b10 (1),
+  0x423b68 (2), 0x423af8...; hay que convertirlos a CAMPHUD.DAT. Las voces de los minijuegos y de casi todos los tipos
+  estan en los bancos HAM_MIS\*.PAK (tabla 0x352840, entradas 54..77: SOUND*, MEMORY, MATH, CARS, FOOD*, GHOST, DUCK,
+  GATES, CONEHIT...), que no estan en VOCESH.DAT (solo HC.PAK, PERH.pak y los HAM de etapa): sin ellas las voces de los
+  tipos del campeonato no suenan.
+- 11 (0x294a90), 9, 22: los coches de la peticion salen del registro de aparicion 0x1f20e8 con la tabla de 0x46 bytes de
+  +0x10 de los parametros (0x1f1a88) y 0x22dac0; el mismo que el INFARTO dejo sin portar (9 / 22). 13, 14, 20, 21, 23, 24:
+  sin empezar. El letrero 3D (0x232e60) y el rotulo del 20: sin empezar.
+
+## Integracion (rama integra): SP + musica + INFARTO 3 + campeonatos c2c4 (2026-11-27)
+
+- Fantasma de la CONTRARRELOJ: c2c4 quito el gh_buf fijo (la VMU se lee y se guarda en un malloc temporal) y el coche
+  de la grabacion de los modos "sp" guardaba alli su GHO1. Ahora el GHO1 va a `gh_gb` (memalign de 16 KB recortado a
+  20 B por triangulo con realloc), que suelta `gh_suelta_modelo()`: al cambiar de ficha, al soltar la grabacion
+  (`gh_suelta`, fuera de la CONTRARRELOJ) y cuando el fantasma pasa a ser el coche del jugador (`gh_meta`).
+- Voces: variante 2 (INFARTO) con el banco de la etapa (`infarto_voces()`, modos "sp"); variante 5 (campeonato)
+  con VOCESH.DAT tal cual, hasta que haya bancos HAM_MIS propios.
+- Verificado en Flycast con los datos juntos (lgdat2 + modos infarto, sp, musica, c2c dat/dat2; VOCESH.DAT el de sp):
+  nav3.sh (MODO_JUEGO por defecto) "VOZ: VOCES.DAT, 35 muestras", "RAMMAPA arranque: libre 425K", sin "Out of memory",
+  carrera de COAST 2 COAST; fantasma: ficha 0 graba (`guardado ORGH0100, 407 muestras, 54102 ms`), segundo arranque
+  con la misma VMU y la ficha 5: `coche de la grabacion ficha 0: GHO1 de COCHE00L.DAT, 182 triangulos`, 64..73
+  triangulos por cuadro, la forma gris delante del F430; RAM en carrera 688K. Datos 940,9 MB, 43,7 MB libres en el GD
+  clasico (el Mod sin medir).

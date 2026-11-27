@@ -22,6 +22,9 @@ from concurrent.futures import ThreadPoolExecutor
 TOOLS = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, TOOLS)
 ARBOLES = '1,' + ','.join(str(i) for i in range(100, 194))       # OUTRUN2SP y los cursos de Races.bin (100 + registro)
+# CURSO.DAT lleva ademas el arbol 302, el campeonato de Holly de COAST 2 COAST (Req_Course_MIX_PS2, conv_union.ARBOLES_REQ),
+# con sus 11 uniones nuevas BK498..508 (conv_union.BK_REQ) al final de UNIONES.PAK (pak_union.AL_FINAL)
+ARBOLES_CURSO = ARBOLES + ',302'
 # CONTRARRELOJ (tableros de cursos, conv_union.arbol_ta): los arboles 200 + codigo (0..0x53) en CURSOTA.DAT y sus
 # uniones nuevas (BK262.. en UNIONESTA.PAK; las de los arboles de arriba conservan su numero)
 # y (revision 44) los cursos seguidos del OUTRUN de la consola (tablero 0x24, juegos 2 / 3: csc_data_2_ren_course y
@@ -31,7 +34,7 @@ ARBOLES_TA = ARBOLES + ',' + ','.join(str(200 + c) for c in range(0x54)) + ',290
 UNIONES_TA = ['UNIONESTA.PAK', 'CURSOTA.DAT']
 UNIONES_REN = ['UNIONESR.PAK']
 BK_REN = 470                                                     # la primera union de los arboles 290 / 291
-NBK = 498                                                        # descriptores BK0..497: 262 de UNIONES.PAK, 208 de UNIONESTA.PAK y 28 de UNIONESR.PAK
+NBK = 509                                                        # descriptores BK0..508: 262 + 11 (BK498..508) de UNIONES.PAK, 208 de UNIONESTA.PAK y 28 de UNIONESR.PAK
 # temas, resultados de OUTRUN2SP (28), menu, avances y metas (sin la 64: no la usa la meta)
 MUSICA = list(range(0, 29)) + [30] + list(range(33, 61)) + [61, 62, 63, 65, 66]
 PARTES = 4                                                       # conv_union.py --parte=k/n (al menos; o --jobs)
@@ -188,7 +191,7 @@ def paso(C, n, log):
         ej(T('conv_union.py'), ISO, os.path.join(W, 'uren'), '--arboles=' + ARBOLES_TA, '--bk-desde=%d' % BK_REN, '--curso=CURSOTA.DAT',
            '--parte=%s/%d' % (n[8:], C.partes))
     elif n.startswith('union'):
-        ej(T('conv_union.py'), ISO, os.path.join(W, 'u'), '--arboles=' + ARBOLES, '--parte=%s/%d' % (n[5:], C.partes))
+        ej(T('conv_union.py'), ISO, os.path.join(W, 'u'), '--arboles=' + ARBOLES_CURSO, '--parte=%s/%d' % (n[5:], C.partes))
     elif n == 'curso':                                   # BK00..14, BKD, SOL, COLBK*, CURSO del modo
         ej(T('conv_union.py'), ISO, t, '--sin-tramos')
         u0 = os.path.join(W, 'u0'); os.makedirs(u0, exist_ok=True)
@@ -231,10 +234,11 @@ def paso(C, n, log):
     elif n == 'bo': ej(T('conv_bo.py'), ISO, t); mueve(D, tj('BO*.DAT'))
     elif n == 'trafico': ej(T('conv_trafico.py'), ISO, t, '--ligero'); mueve(D, tj('TRAF*.DAT'), tj('TAPD.DAT'))   # (trafico -10 %: docs/PARIDAD.md)
     elif n == 'rivales':                                 # COAST 2 COAST: los coches de carreras (obj_rc, modelos 0..29)
-        ej(T('conv_trafico.py'), ISO, t, '--rivales=' + ','.join(str(k) for k in range(30))); mueve(D, tj('RC*.DAT'))
+        ej(T('conv_trafico.py'), ISO, t, '--rivales=' + ','.join(str(k) for k in range(30)), '--ligero'); mueve(D, tj('RC*.DAT'))
     elif n == 'mision': ej(T('conv_mision.py'), ISO, t); mueve(D, tj('MISION.DAT'))   # Races.bin y tablas de 47CF40
     elif n == 'c2chud': ej(T('conv_hud.py'), ISO, t, '--c2c'); mueve(D, tj('C2CHUD.DAT'))   # HUD de las misiones de C2C
     elif n == 'c2c': ej(T('conv_c2c.py'), ISO, t); mueve(D, tj('C2C.DAT'))   # pantallas de C2C (banco 0x44, menu.c)
+    elif n == 'camp': ej(T('conv_camp.py'), ISO, t); mueve(D, tj('CAMP.DAT'), tj('CAMPHUD.DAT'), tj('CAMPOBJ.DAT'))   # campeonatos de C2C (campeonato.c)
     elif n == 'salon': ej(T('conv_salon.py'), ISO, t); mueve(D, tj('SALON.DAT'))   # el SALON (showroom, banco 0x44, menu.c)
     elif n == 'tablero': ej(T('conv_tablero.py'), ISO, t); mueve(D, tj('TABLERO.DAT'))   # tableros de cursos (banco 0x44, menu.c)
     elif n == 'camiones':                                        # los camiones con remolque de OUTRUN2SP (39/40, 41, 43)
@@ -356,7 +360,7 @@ def regenera(iso, D, W, jobs=4, informe=print, extras=None):
                   (['TRAFC.DAT', 'TAPD.DAT'] + TRAF, 'trafico'), (['TRAFK0.DAT', 'TRAFK1.DAT', 'TRAFK2.DAT'], 'camiones'),
                   (['MVTS.VQV'], 'video_ts'), (['MVATTR.VQV'], 'video_attr'),
                   (['RC%02d.DAT' % k for k in range(30)], 'rivales'), (['MISION.DAT'], 'mision'), (['C2CHUD.DAT'], 'c2chud'),
-                  (['C2C.DAT'], 'c2c'), (['SALON.DAT'], 'salon'), (['TABLERO.DAT'], 'tablero')):
+                  (['C2C.DAT'], 'c2c'), (['CAMP.DAT'], 'camp'), (['SALON.DAT'], 'salon'), (['TABLERO.DAT'], 'tablero')):
         if not hay(D, *fs): falta.append(n)
     if 'fin' not in falta and hay(D, 'GOALT.DAT') and not tiene(D, 'GOALT.DAT', b'T_MEJOR'): falta.append('fin')
     if 'tablero' not in falta and hay(D, 'TABLERO.DAT') and not tiene(D, 'TABLERO.DAT', b'LST1'): falta.append('tablero')
@@ -504,7 +508,7 @@ def regenera(iso, D, W, jobs=4, informe=print, extras=None):
     informe('== comprobacion de %s' % D)
     ok = True
     nec = ['BAND.DAT', 'BAND1.DAT', 'BKD.DAT', 'BO.DAT'] + chrs + \
-          'COCHES.DAT COLBK.DAT COLLR.DAT CURSO.DAT EFECTOS.DAT FAROS.DAT FIN.DAT GOVER.DAT HAHUD.DAT HUD.DAT INFARTO.DAT MENU.DAT META.DAT MODOV.DAT MVATTR.VQV MVTS.VQV PARAM.DAT SFX.DAT SEGS.PAK SOL.DAT TAPD.DAT TRAFC.DAT UNIONES.PAK VMU.DAT VOCES.DAT VOCESH.DAT VOCESC.DAT MISION.DAT C2CHUD.DAT C2C.DAT SALON.DAT TABLERO.DAT CURSOTA.DAT UNIONESTA.PAK UNIONESR.PAK'.split() + ['RC%02d.DAT' % k for k in range(30)] + \
+          'COCHES.DAT COLBK.DAT COLLR.DAT CURSO.DAT EFECTOS.DAT FAROS.DAT FIN.DAT GOVER.DAT HAHUD.DAT HUD.DAT INFARTO.DAT MENU.DAT META.DAT MODOV.DAT MVATTR.VQV MVTS.VQV PARAM.DAT SFX.DAT SEGS.PAK SOL.DAT TAPD.DAT TRAFC.DAT UNIONES.PAK VMU.DAT VOCES.DAT VOCESH.DAT VOCESC.DAT MISION.DAT C2CHUD.DAT C2C.DAT CAMP.DAT CAMPHUD.DAT SALON.DAT TABLERO.DAT CURSOTA.DAT UNIONESTA.PAK UNIONESR.PAK'.split() + ['RC%02d.DAT' % k for k in range(30)] + \
           ['COCHE%02d.DAT' % k for k in range(15)] + ['COCHE%02dL.DAT' % k for k in range(15)] + ['MUS%d.ADP' % k for k in MUSICA] + SP + FINAL + \
           ['TRAFK%d.DAT' % k for k in range(3)] + FIN + TRAF + BO + COLBK + ['SALIDA.DAT', 'CHRPAR.DAT', 'VISO.DAT', 'INFARTOP.DAT', 'INFARTOX.DAT', 'CHRH.DAT', 'HAOSO.DAT', 'HAOBJ.DAT']
     for f in nec:

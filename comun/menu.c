@@ -1015,7 +1015,8 @@ void menu_suma_millas(uint32_t millas)
 /* variante de [780258] (PS2 0x443508) del modo elegido, como 4EEAD0 del PC (runtime_route_mode: 1 OutRun, 2 Heart
    Attack, 7 Time Attack, 6 las misiones de COAST 2 COAST) */
 static int mis_sel = -1;                                    /* COAST 2 COAST: la mision elegida (ver abajo) */
-int menu_modo(void) { return sp_sel ? fsp_variante() : modo_sel == 2 ? 2 : modo_sel == 3 ? 7 : modo_sel == 0 && mis_sel >= 0 ? 6 : 1; }
+static int camp_sel = -1, camp_lista;                       /* COAST 2 COAST: el campeonato elegido (nodo del mapa, casilla) */
+int menu_modo(void) { return sp_sel ? fsp_variante() : modo_sel == 2 ? 2 : modo_sel == 3 ? 7 : modo_sel == 0 && mis_sel >= 0 ? 6 : modo_sel == 0 && camp_sel >= 0 ? 5 : 1; }
 
 /* COAST 2 COAST: las misiones de Races.bin (variante 6 de 4EEAD0, selector 0). Pantallas del original (P_C2C, mas
    abajo): categorias (suceso 0x3a), mapa de misiones y detalle de la mision (suceso 0x3b); de ahi a la seleccion de
@@ -1050,6 +1051,23 @@ void menu_elige_mision(int idx) { mis_sel = idx; }
 int menu_mision(void) { return modo_sel == 0 && !sp_sel ? mis_sel : -1; }
 /* 495A20 (PS2 0x1f81cc): nota de la mision en la licencia +0x1D7 + 5 clave + subclave si mejora o la guardada es 7
    (sin jugar); +3F4 |= 2. Se guarda en la VMU al volver al menu (menu_entra) */
+/* 0x22edd8 (campeonatos): la nota de la etapa de tipo t en la casilla de su lista de los cuartetos +0x36E + 2 t si
+   mejora o no habia (7); +3F4 |= 2; 1 si la ha puesto (el gestor da entonces sus millas) */
+int menu_nota_camp(int t, int lista, int nota)
+{
+    uint8_t *p = activa(); unsigned w, ant; int r = 0;
+    if (!p || t < 0 || t >= 0x42 || lista < 0 || lista > 3 || nota < 0 || nota > 6) return 0;
+    w = p[0x36e + 2 * t] | (unsigned)p[0x36f + 2 * t] << 8; ant = (w >> (4 * lista)) & 15;
+    if (ant == 7 || ant < (unsigned)nota) {
+        w = (w & ~(15u << (4 * lista))) | (unsigned)nota << (4 * lista);
+        p[0x36e + 2 * t] = (uint8_t)w; p[0x36f + 2 * t] = (uint8_t)(w >> 8); p[0x3f4] |= 2; r = 1;
+    }
+    dbglog(DBG_INFO, "LICENCIA: campeonato etapa tipo %d casilla %d nota %d (guardada %d)\n", t, lista, nota, (int)((w >> (4 * lista)) & 15));
+    return r;
+}
+/* el campeonato elegido en el mapa de las peticiones: nodo (0 la salida, i la etapa i - 1) y casilla; -1 ninguno */
+int menu_camp(int *lista) { if (lista) *lista = camp_lista; return modo_sel == 0 && !sp_sel ? camp_sel : -1; }
+int (*menu_camp_puede)(int grupo);
 void menu_nota_mision(int clave, int sub, int nota)
 {
     uint8_t *p = activa(); int off = 0x1d7 + 5 * clave + sub, have;
@@ -1303,7 +1321,7 @@ static void control(unsigned n)
             } else if (c == 0) {                            /* COAST 2 COAST: categorias (P_C2C) */
                 if (mis_n && !c2_abre()) { modo_sel = 0; sale(P_C2C, 1); } else bloqueado();
             } else if (c <= 3) {                            /* OUTRUN, HEART ATTACK, TIME ATTACK: el tablero 0x24 (0x25dd58: */
-                modo_sel = c; mis_sel = -1;                 /* raiz +0x208 bits 5..7 = 0x20 / 0x40 / 0x80, tabla 0x375f58 */
+                modo_sel = c; mis_sel = -1; camp_sel = -1;  /* raiz +0x208 bits 5..7 = 0x20 / 0x40 / 0x80, tabla 0x375f58 */
                 /* = 0x3a, 0x24, 0x24, 0x24, 0x2b: OUTRUN tambien va a la 0x24, la de 4 posiciones; revision 44, antes
                    la DC lo llevaba directo al coche) */
                 tb_bits = (tb_bits & ~0xe0u) | (c == 1 ? 0x20u : c == 2 ? 0x40u : 0x80u); tb_sig = 0x24;
@@ -1342,7 +1360,7 @@ static void control(unsigned n)
             if (c_desbloqueado(i)) { int o = colores[i], c = o; do c = (c + 1) & 7; while (c != o && !c_color_ok(i, c)); colores[i] = c; }
         } else if (atras) {                                 /* (C2C: al detalle; OUTRUN / INFARTO / CONTRARRELOJ: al tablero) */
             if (!sp_sel && modo_sel >= 1 && modo_sel <= 3 && !tb_abre()) sale(P_TABLERO, 0);
-            else sale(sp_sel ? P_MENU : modo_sel == 0 && mis_sel >= 0 ? P_C2C : P_MODO, 0);
+            else sale(sp_sel ? P_MENU : modo_sel == 0 && (mis_sel >= 0 || camp_sel >= 0) ? P_C2C : P_MODO, 0);
         }
         break; }
     case P_CAMBIO:
@@ -1713,10 +1731,12 @@ static void c2_a_mapa(void)                                 /* 0x243698: init de
 {
     c2_suelta_cursores(); c2_mapa = 1; c2_det = 0; c2_cur = 0; c2_sel_mapa();
 }
+static void rq_cursor(void);
 /* al entrar en P_C2C: desde ELEGIR MODO, las categorias; de vuelta de la seleccion de coche, el detalle donde estaba */
 static void c2_entra(void)
 {
     if (entra_atras && c2_mapa == 1 && mis_sel >= 0) { c2_suelta_cursores(); c2_det = 1; c2_sel_mapa(); }
+    else if (entra_atras && c2_mapa == 2 && camp_sel >= 0 && RQ) { c2_suelta_cursores(); rq_cursor(); }   /* (el mapa de las peticiones) */
     else c2_a_categorias();
 }
 
@@ -1808,10 +1828,12 @@ static void rq_control(int ok, int atras, int act)          /* 0x240e20 */
     if (ok) {
         if (rq_sel && !hechos) { sfx_menu(SFX_BLOQUEADO); return; }
         if (rq_sel && !rq_det) { sfx_menu(SFX_ACEPTA); rq_det = 1; rq_cur = 0; rq_cursor(); return; }
-        /* root+0x208: nodo << 12, casilla << 18; suceso 0xa (coche, cambio, musica) y la carrera con la variante 5.
-           PENDIENTE: el gestor de peticiones de la variante 5 (PS2 0x22xxxx, evento 0x190) no esta portado: la carrera
-           no se puede correr todavia y A aqui da el sonido de bloqueado. */
-        bloqueado(); return;
+        /* root+0x208: nodo << 12, casilla << 18; suceso 0xa (coche, cambio, musica) y la carrera con la variante 5
+           (4EEB50: {curso, forzada = nodo != 0, etapa nodo - 1, lista = casilla}; comun/campeonato.c) */
+        if (menu_camp_puede && menu_camp_puede(c2_cat - 4)) { bloqueado(); return; }   /* (sin su arbol en CURSO.DAT) */
+        sfx_menu(SFX_ACEPTA); modo_sel = 0; mis_sel = -1; camp_sel = rq_sel; camp_lista = rq_det ? rq_cur : 0;
+        dbglog(DBG_INFO, "C2C: campeonato %d nodo %d casilla %d\n", c2_cat - 4, camp_sel, camp_lista);
+        GANCHO(P_C2C, 1, 0x100 + camp_sel); sale(P_COCHE, 1); return;
     }
     if (atras) {
         if (rq_det) { rq_det = 0; rq_cur = 0; rq_cursor(); }
@@ -1916,7 +1938,7 @@ static void c2_control(unsigned n)
             if (!c2_det) { c2_det = 1; c2_cur = 0; c2_sel_mapa(); return; }
             {   int m = mis_busca(c + 1, c2_cur + 1);       /* root+0x208: categoria << 12, carrera << 18; suceso 0xa */
                 if (m < 0 || !mis_jug[m]) { bloqueado(); return; }   /* (DESVIACION: solo las de carrera que caben) */
-                modo_sel = 0; mis_sel = mis_idx[m];
+                modo_sel = 0; mis_sel = mis_idx[m]; camp_sel = -1;
                 dbglog(DBG_INFO, "C2C: mision %d-%d (Races.bin %d)\n", c + 1, c2_cur + 1, mis_sel);
                 GANCHO(P_C2C, 1, mis_sel); sale(P_COCHE, 1);
             }
