@@ -224,7 +224,7 @@ def paso(C, n, log):
     elif n == 'final':                                   # el final de recreativa de OUTRUN2SP (modo 24, demo/final.c)
         ej(T('conv_final.py'), ISO, t); mueve(D, *[tj(f) for f in FINAL])
     elif n == 'bo': ej(T('conv_bo.py'), ISO, t); mueve(D, tj('BO*.DAT'))
-    elif n == 'trafico': ej(T('conv_trafico.py'), ISO, t); mueve(D, tj('TRAF*.DAT'), tj('TAPD.DAT'))
+    elif n == 'trafico': ej(T('conv_trafico.py'), ISO, t, '--ligero'); mueve(D, tj('TRAF*.DAT'), tj('TAPD.DAT'))   # (trafico -10 %: docs/PARIDAD.md)
     elif n == 'rivales':                                 # COAST 2 COAST: los coches de carreras (obj_rc, modelos 0..29)
         ej(T('conv_trafico.py'), ISO, t, '--rivales=' + ','.join(str(k) for k in range(30))); mueve(D, tj('RC*.DAT'))
     elif n == 'mision': ej(T('conv_mision.py'), ISO, t); mueve(D, tj('MISION.DAT'))   # Races.bin y tablas de 47CF40

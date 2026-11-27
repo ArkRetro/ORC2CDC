@@ -6589,3 +6589,55 @@ La "regresion" de la meta de RUIN, explicada con los registros de la medida fina
 
 Mod taxi: el cherry-pick de los cuatro commits sobre origin/rev-1.0 (46908c7), simulado con git merge-tree, entra sin
 conflictos y compila desde git archive con el mismo aviso de siempre (or_buf).
+## Trafico -10 % (tools/conv_trafico.py --ligero, DESVIACION pedida)
+
+Menos triangulos en los coches del trafico (TRAF0..8.DAT) y en los camiones de OUTRUN2SP (TRAFK0..2.DAT) sin que se
+note, para dejar margen de TA. No toca el coche del jugador ni los rivales (RCmm.DAT). El formato del fichero no cambia
+y la demo no cambia: solo el conversor (`--ligero[=tanto por ciento]`, por defecto 10) y `tools/regenera.py`, que lo
+pasa en los pasos `trafico` y `camiones` (el programa de Windows llama a regenera.py: genera lo mismo). Unos datos ya
+hechos no se rehacen solos: hay que borrar TRAF0-8.DAT / TRAFK0-2.DAT de la carpeta de datos y volver a llamarlo.
+
+- Por LOD (cada uno es un modelo aparte del original): 1) vaciado: fuera los triangulos que no ganan ningun pixel desde
+  ninguna camara (z-buffer de tools/c/visible.c; anillos alrededor del coche de 0,45 a 8 m de alto, de cerca, a media
+  distancia y con el coche entero; ruedas en 4 giros, remolque en 4 guinadas); 2) hasta el tanto por ciento, colapso
+  de aristas de `conv_coche.simplifica` (el del coche ligero de la 2.9.7) solo en lo opaco de carroceria, piezas,
+  ruedas y remolque, en los LOD 0 a 2, con el error acotado (LIG_DESV = 2,5 cm sobre 8 caras medias) y las UV con peso
+  3 (LIG_UV). Luces, cristales, recortes y sombra no se tocan. Los LOD 3 y 4 solo se vacian.
+- **El vaciado da poco**: estos modelos ya no traen bajos ni interior oculto (0 a 12 triangulos de 530-700 por coche,
+  2 % como mucho). Casi todo sale del colapso, y por eso **no se llega al 10 % en todos**: con el error suelto
+  (el VIS_TOPE del coche) se llegaba al 10 % pero se notaba de cerca (la calandra del modelo 35 deformada por una
+  textura en espejo, la banda del paragolpes trasero mas alta); con el error acotado, lo que da cada modelo:
+
+| fichero | triangulos LOD 0/1 | vertices LOD 0/1 | tiras LOD 0 | triangulos LOD 2 | bytes |
+|---|---|---|---|---|---|
+| TRAF0 | 576 -> 521 (-9,5 %) | 897 -> 832 (-7,2 %) | 126 -> 104 | 191 -> 189 | 87904 -> 85664 |
+| TRAF1 | 701 -> 631 (-10,0 %) | 1089 -> 1007 (-7,5 %) | 153 -> 134 | 255 -> 249 | 83328 -> 80384 |
+| TRAF2 | 578 -> 524 (-9,3 %) | 880 -> 839 (-4,7 %) | 112 -> 105 | 275 -> 259 | 77152 -> 75520 |
+| TRAF3 | 532 -> 509 (-4,3 %) | 887 -> 867 (-2,3 %) | 138 -> 121 | 240 -> 227 | 82048 -> 80448 |
+| TRAF4 | 672 -> 640 (-4,8 %) | 999 -> 962 (-3,7 %) | 134 -> 120 | 270 -> 257 | 94976 -> 91968 |
+| TRAF5 | 543 -> 500 (-7,9 %) | 823 -> 809 (-1,7 %) | 115 -> 101 | 250 -> 234 | 73984 -> 72704 |
+| TRAF6 | 534 -> 481 (-9,9 %) | 876 -> 796 (-9,1 %) | 126 -> 113 | 274 -> 254 | 74496 -> 71104 |
+| TRAF7 | 576 -> 542 (-5,9 %) | 886 -> 863 (-2,6 %) | 109 -> 103 | 287 -> 270 | 61792 -> 60736 |
+| TRAF8 | 594 -> 538 (-9,4 %) | 943 -> 892 (-5,4 %) | 142 -> 118 | 242 -> 226 | 90976 -> 88384 |
+| TRAFK0 | 1147 -> 1084 (-5,5 %) | 1828 -> 1816 (-0,7 %) | 320 -> 295 | 450 -> 441 | 127808 -> 128160 |
+| TRAFK1 | 1147 -> 1128 (-1,7 %) | 1878 -> 1899 (+1,1 %) | 328 -> 314 | 545 -> 536 | 133856 -> 135456 |
+| TRAFK2 | 1332 -> 1253 (-5,9 %) | 2094 -> 2075 (-0,9 %) | 348 -> 322 | 510 -> 494 | 159904 -> 159008 |
+
+  Los 9 del trafico: triangulos del LOD 0 5306 -> 4886 (**-7,9 %**), vertices 8280 -> 7867 (-5,0 %); LOD 2 -5,2 % y
+  -3,4 %. Triangulos = distintos y con area de lo que se dibuja de dia. Lo que cuenta en el TA de la PowerVR son los
+  vertices: bajan menos porque las tiras nuevas (`conv_coche.tiras` con `giro`: sigue la tira repitiendo un vertice en
+  lugar de empezar otra) cambian vertices por mallas. Sin el giro salian menos vertices (-8,4 % en la carrera) pero un
+  10 % mas de tiras y la demo tardaba un 3 % MAS en dibujar el trafico; con el giro, menos tiras que el original.
+  En los camiones casi no hay ganancia (cajas grandes ya minimas; el TRAFK1 sube 21 vertices).
+- Comprobacion offline (visor con z-buffer y texturas, 8 camaras por modelo, LOD 0 y 2, antes / despues / diferencia):
+  sin agujeros ni siluetas rotas; pixeles que cambian mas de 24 niveles: 0,6 % como mucho (trasera del TRAF3 y del
+  TRAF7: la textura se desplaza menos de un texel), el resto por debajo de 0,45 %.
+- **Medido en Flycast** (PRUEBA_AUTO, modo OutRun desde la etapa 1, la de mas trafico; 146 medidas de 30 cuadros hasta
+  s 10500, mismo recorrido): vertices del trafico por cuadro 1678 -> 1594 (**-5,0 %**; maximo 5240 -> 4968), tiempo de
+  dibujo del trafico 800 -> 754 us (-5,8 %); **fps iguales** (38,15 / 38,21) y dib 20,43 / 20,34 ms: el trafico es el 6 %
+  de los vertices del cuadro (27860), asi que el margen ganado es de un 0,3 % del cuadro. "trafico hasta" del TA al
+  arrancar: 1101 -> 1019 vertices. Sin "Out of memory". OUTRUN2SP (arbol 1) 200 s con los TRAFK nuevos: carga sin
+  errores y sin cuelgues (no se vio ningun camion en las capturas miradas).
+- Solo probado en Flycast, no en la consola.
+- Entrega (Rev 2.9.9.c): `--ligero` solo en el paso `trafico` (TRAF0..8). Los camiones (TRAFK0..2) se quedan como
+  estaban: casi no ganaban y no se llego a ver ninguno en el juego con los datos nuevos.
