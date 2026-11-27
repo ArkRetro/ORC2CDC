@@ -4195,7 +4195,8 @@ static void traf_infarto(void)
 {
     infarto_coche_nuevo_t n; int i, m, l; float s;
     {   haobj_auto_t v[NTRAF];                                  /* (INFARTO 3) 46D250 / 46DB60: las plazas para las peticiones */
-        for (i = 0; i < NTRAF; i++) { v[i].pos = traf[i].carril >= 0 ? traf[i].c.pos : NULL; v[i].fw = traf[i].c.fw; v[i].up = traf[i].c.up; v[i].marca = traf[i].ha_m; }
+        for (i = 0; i < NTRAF; i++) { v[i].pos = traf[i].carril >= 0 ? traf[i].c.pos : NULL; v[i].fw = traf[i].c.fw; v[i].up = traf[i].c.up; v[i].marca = traf[i].ha_m;
+            v[i].sec = (int)floorf((traf[i].c.s - s_etapa) / m_pos); }
         infarto_autos(v, NTRAF);
         for (i = 0; i < NTRAF; i++) traf[i].ha_m = v[i].marca;
     }

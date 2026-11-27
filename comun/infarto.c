@@ -124,7 +124,8 @@ static int k16_cl, k16_need, k16_n, a5_lo, a5_hi; static const infarto_coche_t *
 static int k19_lim, k19_n, k19_c, k19_rot, k19_act, k19_cb; static int8_t k19_cog;
 static float ant_pos[3]; static int ant_ok;
 /* tipos 8 y 23 (circula por el azul / el rojo; 23: derrapando) */
-static int k11_need, k11_c, k11_n, ani_on;         /* 0x5899bc.. (+8, +C, +A) y el anillo en marcha */
+static int k11_need, k11_c, k11_n, ani_on;         /* 0x5899bc.. (+8, +C, +A) y el anillo en marcha (11; el 9 en 0x5899e0..) */
+static int k9_lo, k9_hi, k9_cruces, par_on;        /* 0x5899e4 / 0x5899e6, los pares cruzados en infarto_autos */
 static int k8_a, k8_b, k8_lado, k8_ult, k8_dist, k8_max;   /* 7F2530, 7F2532, 7F2538, 7F253C, 7F2540, 7F2534 */
 /* reacciones de la acompanante que piden las peticiones (487D60 / 487D90 / 487DD0; robot 1: comun/robot.c robot_pide,
    con los movimientos de CHRH.DAT) */
@@ -550,7 +551,7 @@ static int sucesos(const uint8_t *t, const infarto_coche_t *c)
 
 /* ---- tipos de peticion: puesta en marcha (464350 / PS2 0x1ae768), control (464D20 / 0x1a7fe4), evaluacion
    (464350 / 0x1aea30) */
-static int portado(int k) { return k == 11 || k == 0 || k == 2 || k == 22 || k == 6 || k == 8 || k == 23 || k == 7 || k == 24 || k == 15 || k == 16 || k == 25 || k == 19; }
+static int portado(int k) { return k == 9 || k == 11 || k == 0 || k == 2 || k == 22 || k == 6 || k == 8 || k == 23 || k == 7 || k == 24 || k == 15 || k == 16 || k == 25 || k == 19; }
 static const uint8_t *pts(int k)                    /* la tabla de 45E2F0 del tipo k (INFARTOX.DAT PTS2) */
 {
     static const uint8_t cero[24];
@@ -601,6 +602,9 @@ static void puesta(const uint8_t *r, const infarto_coche_t *c)
     case 19: est_puesta(w0, w2, w6, w8, c); reinicia_res(); break;   /* 464350 (PS2 0x1ae928) */
     case 11:                                        /* 464350 (PS2 0x1ae854): 0x1aa358 y 0x1df060 (el anillo vacio) */
         k11_need = w6; k11_c = w8; k11_n = 0; reinicia_res(); haobj_anillo_vacia(); ani_on = 1; break;
+    case 9:                                         /* 464350 (PS2 0x1ae828): 0x1a9e08 (SIN PORTAR: el registro de
+                                                       aparicion que instala con 0x1f20e8) */
+        k9_lo = w0; k9_hi = w2; k11_need = w6; k11_c = w8; k11_n = 0; k9_cruces = 0; reinicia_res(); par_on = 1; break;
     case 8: case 23:                                /* 464350 caso 4 (PS2 0x1ae800) */
         k8_a = w0; k8_b = w2; k8_lado = w6; k8_ult = -1; k8_dist = 0; k8_max = 0; reinicia_res(); break;
     }
@@ -689,6 +693,15 @@ static void control(const infarto_coche_t *c)
         resultado((int)((float)(k15_a + k15_39) * (800000.0f / (float)(k15_need ? k15_need : 1))));
         break; }
     case 19: est_control(c); break;                 /* 0x1a80bc */
+    case 9:                                         /* 45EFB0 (PS2 0x1a9f68): los pares cruzados (infarto_autos) */
+        sucesos(pts(9), c);                         /* (0x3efcd0) */
+        for (; k9_cruces > 0; k9_cruces--) {
+            rob_mov(anima(c->modelo, 0x6003f));     /* (0x1aa080..0x1aa0f4) */
+            if (++k11_n > k11_need) sfx_voz_se(0x52);
+            dbglog(DBG_INFO, "INFARTO: linea cruzada (%d de %d)\n", k11_n, k11_need);
+        }
+        resultado(k11_n > k11_need ? 800000 : (int)((float)k11_n / (float)(k11_need ? k11_need : 1) * 800000.0f));
+        break;
     case 11: {                                      /* 45F180 (PS2 0x1aa3e8): los corazones del anillo a 4 m */
         float p[3] = { c->x, c->y, c->z }; int n, i;
         sucesos(pts(11), c);                        /* (0x3efce8) */
@@ -795,7 +808,7 @@ static void evalua(const infarto_coche_t *c)
             fin_peticion(nt, h / 10000);
         }
         break; }
-    case 11: {                                      /* 463470 (PS2 0x1aa780) */
+    case 9: case 11: {                              /* 463470 (PS2 0x1aa780) y 0x1aa1e0 (el 9: la misma cuenta) */
         int hs = res_pos() / 10000, nt = nota(hs), s1 = 0;
         if (nt == 7) {
             hs = 0x50;
@@ -1132,6 +1145,14 @@ void infarto_autos(struct haobj_auto_s *v, int n)
     uint32_t l = 0; const uint8_t *a;
     if (!dat) return;
     if (q == 11 && (a = xsec("ANI1", &l)) && l >= 24) haobj_anillo(v, n, (const float *)a);   /* 46DB60 */
+    if (q == 9 && c_act) {                          /* 46D250 y la linea de 45EFB0 */
+        float p[3] = { c_act->x, c_act->y, c_act->z };
+        haobj_pares(v, n, k9_lo, k9_hi, p);
+        k9_cruces += haobj_pares_cruza(v, n, p, c_act->fx, c_act->fz);
+    } else if (par_on) {                            /* fuera de la peticion 9: los pares se sueltan (46D250) */
+        int i; haobj_pares_vacia(); par_on = 0;
+        for (i = 0; i < n; i++) v[i].marca &= ~(HA_PAR | HA_SUELTO);
+    }
 }
 void infarto_libera(void) { free(dat); dat = NULL; free(mis1); mis1 = NULL; free(xdat); xdat = NULL; x_pts = NULL;
                           robot_extra(NULL, 0); free(chrh); chrh = NULL; haobj_libera(); inf_cargado = -1;

@@ -65,7 +65,7 @@ int haobj_inicia(void)
     if (gd_busca("HAOSO.DAT", &lba_o, &tam_o) || tam_o < 1024) { dbglog(DBG_ERROR, "HAOBJ: sin HAOSO.DAT\n"); return -1; }
     if (!(cab = memalign(32, 2048))) return -1;
     if (gd_lee(lba_o, 1, cab) || memcmp(cab, "HAO1", 4)) { free(cab); cab = NULL; return -1; }
-    haobj_anillo_vacia();
+    haobj_anillo_vacia(); haobj_pares_vacia();
     memcpy(&nfich, cab + 4, 4);
     if (8 + 84 + 512 + 8 * nfich > 2048) { free(cab); cab = NULL; return -1; }
     return 0;
@@ -373,20 +373,20 @@ void haobj_anillo(haobj_auto_t *v, int n, const float *l)
 {
     int i, k, j;
     for (i = 0; i < n; i++) {                           /* un registro por coche vivo sin marcar (+C5C 0x20000) */
-        if (!v[i].pos || v[i].marca) continue;
+        if (!v[i].pos || (v[i].marca & HA_SERIE)) continue;
         if (ani_vivos >= NANI) break;
         for (k = 0; k < NANI && ani[ani_cur].slot >= 0; k++) if (++ani_cur >= NANI) ani_cur = 0;
         if (k == NANI) break;
         j = ani_cur; ani_vivos++;
         if (++ani_cur >= NANI) ani_cur = 0;
-        if (++ani_serie <= 0) ani_serie = 1;
-        ani[j].slot = i; ani[j].marca = v[i].marca = ani_serie; ani[j].on[0] = ani[j].on[1] = 1; ani[j].edad = 0;
+        if (++ani_serie > HA_SERIE) ani_serie = 1;
+        ani[j].slot = i; ani[j].marca = ani_serie; v[i].marca |= ani_serie; ani[j].on[0] = ani[j].on[1] = 1; ani[j].edad = 0;
     }
     for (j = 0; j < NANI; j++) {                        /* los puntos en el mundo (el marco +B0 del coche) y la edad */
         const haobj_auto_t *c; int q, vis = 0;
         if (ani[j].slot < 0) continue;
         c = ani[j].slot < n ? v + ani[j].slot : NULL;
-        if (!c || !c->pos || c->marca != ani[j].marca) { ani[j].slot = -1; ani_vivos--; continue; }
+        if (!c || !c->pos || (c->marca & HA_SERIE) != ani[j].marca) { ani[j].slot = -1; ani_vivos--; continue; }
         {   float r[3] = { c->up[1] * c->fw[2] - c->up[2] * c->fw[1], c->up[2] * c->fw[0] - c->up[0] * c->fw[2],
                            c->up[0] * c->fw[1] - c->up[1] * c->fw[0] };   /* el eje x del coche (el signo da igual: +-x) */
             float m = sqrtf(r[0] * r[0] + r[1] * r[1] + r[2] * r[2]);
@@ -401,6 +401,82 @@ void haobj_anillo(haobj_auto_t *v, int n, const float *l)
         if (!vis) { ani[j].slot = -1; ani_vivos--; continue; }   /* sin puntos: fuera */
         ani[j].edad++;
     }
+}
+/* tipo 9: los pares (0x1dc3c0) */
+#define NPAR 10
+static struct { int8_t a, b; } par[NPAR];
+static float dist2(const float *a, const float *b) { float x = a[0] - b[0], z = a[2] - b[2], y = a[1] - b[1]; return x * x + y * y + z * z; }
+void haobj_pares_vacia(void) { int i; for (i = 0; i < NPAR; i++) par[i].a = par[i].b = -1; }
+void haobj_pares(haobj_auto_t *v, int n, int lo, int hi, const float jug[3])
+{
+    int i, j, k, left = NPAR, ord[32], no = 0;
+    for (i = 0; i < NPAR; i++) {                        /* los abiertos: se sueltan si falta uno o se separan (> 80 m) */
+        haobj_auto_t *A, *B;
+        if (par[i].a < 0) continue;
+        A = par[i].a < n ? v + par[i].a : NULL; B = par[i].b < n ? v + par[i].b : NULL;
+        if (!A || !B || !A->pos || !B->pos || !(A->marca & HA_PAR) || !(B->marca & HA_PAR) || dist2(A->pos, B->pos) > 6400.0f) {
+            if (A && A->pos) A->marca &= ~HA_PAR;
+            if (B && B->pos) B->marca &= ~HA_PAR;
+            par[i].a = par[i].b = -1; continue;
+        }
+        left--;
+    }
+    for (i = 0; i < n && no < 32; i++)                  /* la cadena +314 del jugador: los coches por distancia, < 250 m */
+        if (v[i].pos && dist2(v[i].pos, jug) < 62500.0f) {
+            float d = dist2(v[i].pos, jug);
+            for (j = no++; j > 0 && dist2(v[ord[j - 1]].pos, jug) > d; j--) ord[j] = ord[j - 1];
+            ord[j] = i;
+        }
+    for (k = 0; k < no && left > 0; k++) {
+        haobj_auto_t *c = v + ord[k]; int best = -1; float bd = 6400.0f;
+        if (c->sec < lo || c->sec > hi || (c->marca & (HA_PAR | HA_SUELTO))) continue;
+        for (j = 0; j < n; j++) {                       /* el vivo mas cercano (< 80 m) del tramo y no cruzado */
+            float d;
+            if (j == ord[k] || !v[j].pos || (v[j].marca & HA_SUELTO) || v[j].sec < lo || v[j].sec > hi) continue;
+            d = dist2(c->pos, v[j].pos);
+            if (d < bd) { bd = d; best = j; }
+        }
+        if (best < 0) continue;
+        for (i = 0; i < NPAR && par[i].a >= 0; i++) ;
+        if (i >= NPAR) break;
+        c->marca |= HA_PAR; v[best].marca |= HA_PAR; par[i].a = (int8_t)ord[k]; par[i].b = (int8_t)best; left--;
+#ifdef DIAG_HA
+        dbglog(DBG_INFO, "HAOBJ: par %d: plazas %d y %d a %.1f m (secciones %d / %d)\n", i, ord[k], best, (double)sqrtf(bd), c->sec, v[best].sec);
+#endif
+    }
+}
+static int corta(float ax, float az, float bx, float bz, float hx, float hz)   /* el segmento contra |x| <= hx, |z| <= hz */
+{
+    float t0 = 0.0f, t1 = 1.0f, d[2] = { bx - ax, bz - az }, p[2] = { ax, az }, h[2] = { hx, hz }; int e;
+    for (e = 0; e < 2; e++) {
+        if (fabsf(d[e]) < 1e-6f) { if (fabsf(p[e]) > h[e]) return 0; continue; }
+        {   float u = (-h[e] - p[e]) / d[e], w = (h[e] - p[e]) / d[e];
+            if (u > w) { float s = u; u = w; w = s; }
+            if (u > t0) t0 = u;
+            if (w < t1) t1 = w;
+            if (t0 > t1) return 0;
+        }
+    }
+    return 1;
+}
+int haobj_pares_cruza(haobj_auto_t *v, int n, const float pos[3], float fx, float fz)
+{
+    int i, r = 0; float l = sqrtf(fx * fx + fz * fz);
+    if (l < 1e-6f) return 0;
+    fx /= l; fz /= l;
+    for (i = 0; i < NPAR; i++) {
+        const float *a, *b; float ax, az, bx, bz;
+        if (par[i].a < 0 || par[i].a >= n || par[i].b >= n || !v[par[i].a].pos || !v[par[i].b].pos) continue;
+        a = v[par[i].a].pos; b = v[par[i].b].pos;
+        if (fabsf(a[1] + 1.0f - pos[1]) > 4.0f && fabsf(b[1] + 1.0f - pos[1]) > 4.0f) continue;
+        ax = (a[0] - pos[0]) * fz - (a[2] - pos[2]) * fx; az = (a[0] - pos[0]) * fx + (a[2] - pos[2]) * fz;   /* (lateral, adelante) */
+        bx = (b[0] - pos[0]) * fz - (b[2] - pos[2]) * fx; bz = (b[0] - pos[0]) * fx + (b[2] - pos[2]) * fz;
+        if (!corta(ax, az, bx, bz, 1.1f, 2.3f)) continue;
+        v[par[i].a].marca = (v[par[i].a].marca & ~HA_PAR) | HA_SUELTO;   /* 0x1def90 (46EE60) */
+        v[par[i].b].marca = (v[par[i].b].marca & ~HA_PAR) | HA_SUELTO;
+        par[i].a = par[i].b = -1; r++;
+    }
+    return r;
 }
 int haobj_anillo_toca(const float pos[3])
 {

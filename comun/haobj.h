@@ -53,8 +53,19 @@ int  haobj_lista(haobj_dib_t *v, int max, const float ojo[3]);
    (registro 0x2a del banco 0x57, 1aa5b8) en los puntos l[2][3] (INFARTOX.DAT ANI1) del marco de cada coche vivo.
    Por plaza de trafico: pos / fw / up del coche (pos NULL: plaza libre) y marca (+C5C 0x20000: 0 en un coche nuevo; la
    pone el modulo y la plaza la guarda). Un paso de logica mientras la peticion es del tipo 11 */
-typedef struct haobj_auto_s { const float *pos, *fw, *up; int marca; } haobj_auto_t;
+typedef struct haobj_auto_s { const float *pos, *fw, *up; int marca, sec; } haobj_auto_t;   /* sec: la seccion de la etapa */
 void haobj_anillo(haobj_auto_t *v, int n, const float *l);
 void haobj_anillo_vacia(void);           /* 0x1df060 (la puesta del 11) y al acabar la peticion: sin corazones */
 int  haobj_anillo_toca(const float pos[3]);   /* 0x1aa3e8: los corazones a 4 m (xz) del jugador se cogen; cuantos */
+/* tipo 9, "Cruza la linea" (0x1dc3c0 = 46D250: los pares 0x5d4fc0 de 10 x 0x38): cada coche vivo de las secciones lo..hi
+   a menos de 250 m del jugador (jug) se empareja con el vivo mas cercano a menos de 80 m (+C5C 0x8000 en la marca);
+   los pares se sueltan si un coche falta o se separan. Sin dibujo: en la PS2 el de la peticion 9 (0x1aa1d8) es vacio */
+#define HA_PAR    0x10000000             /* +C5C 0x8000 (en la marca de la plaza) */
+#define HA_SUELTO 0x20000000             /* +C5C 0x10000: el par ya cruzado (0x1def90) */
+#define HA_SERIE  0x0fffffff
+void haobj_pares(haobj_auto_t *v, int n, int lo, int hi, const float jug[3]);
+void haobj_pares_vacia(void);
+/* 0x1aa024..0x1aa078: la linea (los dos coches + 1 m en y) en el marco del jugador contra su caja (0x1978d8 con +338;
+   aqui 2,3 x 1,1 m en xz, PROBABLE); cuantos pares cruzados en este paso (se sueltan) */
+int  haobj_pares_cruza(haobj_auto_t *v, int n, const float pos[3], float fx, float fz);
 #endif
