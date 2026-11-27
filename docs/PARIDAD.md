@@ -8393,3 +8393,82 @@ esa linea; serie7.sh / serie8.sh las medidas). Capturas y registros en $S/modos/
   identicos (scratchpad modos/c2c/dat_int). nav3.sh: "VOZ: VOCES.DAT, 35 muestras", sin "Out of memory", libre **400K**
   al arrancar (justo el minimo: el codigo paso un escalon de 8 KB). PENDIENTE: recuperar RAM antes de anadir mas; el
   "Out of memory ... diff 40960" de hudd_sube en la META de la ultima etapa del campeonato (c2c7).
+
+## COAST 2 COAST: campeonatos, minijuegos 2 (agente c2c16b, 2026-11-27)
+
+Sobre integra (88630c1), continua "campeonatos, minijuegos (agente c2c16)". Todo en Flycast (nivel E), no en la consola.
+Datos de prueba: $S/modos/c2c/dat16b (CAMP.DAT con 'M162' detras de 'M161', cuyos 33 610 primeros bytes salen iguales
+byte a byte; MJHUD.DAT con 29 sprites mas detras de los 23 de antes: MJ_00..MJ_22 los mismos), carpeta montada con
+h16b/datos2.sh (enlaces a $S/dmip + dat16b en modos/c2c/datos16b). CAMPHUD.DAT, CAMPOBJ.DAT y VOCESM.DAT salen iguales.
+Scripts en $S/modos/c2c/h16b (los de h16 para este worktree; py/nodos.py: la etapa de cada nodo de los tres arboles,
+py/oveja.py: los cuadros de una escena del banco 0x46; serie4.sh: las medidas y nav3). Capturas en $S/modos/c2c/cap16b.
+
+### Lo averiguado (SLES-53998, clase 0x29f520)
+- 0x2a0838 (el numero): cifras de |v| (1..3, la de mas peso primero); de lejos (d al coche > 125: f = (d - 125) / 100
+  hasta 1) las filas 1 / 2 de la puerta se apartan -/+ 1,5 f x cifras por el eje x de la camara, suben 2 f y el paso de
+  las cifras (escala x 1,25) crece x (1 + f) (x (1 + 2 f) si la escala < 2,6); ancho w = cifras (+ 1 con signo) x paso;
+  el signo (0x423bdc el +, 0x423bd8 el -) en -w / 4 y la cifra k en paso x (k + signo) - w / 4, todo 0,5 m mas arriba;
+  cifras 0x423be0[d] (rojas) si v < 0 y 0x423c08[d] (verdes) si no. Signo: siempre en los avisos, en las puertas solo
+  los negativos.
+- Por subtipo en 0x2a0138: 3 el aviso 3 m mas arriba a escala 3, la puerta a 3 (2,5 si sim[0] o sim[1] tiene 3
+  caracteres); 4 el aviso con los regalos 0x423af8[sim] a 1,3 (5 nada) y la puerta con numeros a 3,5; 5 solo la puerta,
+  a 3 (2,5 con >= 100). El vaiven en las puertas y en los avisos de 0, 1, 3 y 4.
+- 3 (0x2a2080 / 0x2a24d8), 4 (0x2a26d0 / 0x2a2be0) y 5 (0x2a2de8 / 0x2a2e80): ver la cabecera de comun/minijuego.c.
+  El paso de la puerta es el de los demas (0x29fb28 y 80 x 1,1 / puertas); el 4 cuenta +0x76 (puertas pasadas).
+- 0x231fe0 (el regalo a contar del 4): objeto 2D del gestor (+0x2650) con 0x423af8[perm[0]] en el panel (+0x3e6c /
+  +0x3e70), crece a 0,5 en 0,35 s; 0x2320d8 cuando acaba el panel lo lleva a (180 - [0x374238], -110) a 0,75 y alli se
+  queda. 0x2322a0 (el 5, con la fase anterior +4 == 3): zzz 0x460027 en el panel (capa 5, escala 1); 0x232330 lo quita
+  en la fase 5. Las ovejas: 0x228e60(0x460028, capa 9, modo 3 -> una vez, (0, -50), 0,55, velocidad 1 + 0,1 x rand % 10):
+  la escena (100 cuadros, 78 distintos) ya lleva el salto de izquierda a derecha.
+- Las peticiones del tipo 16 solo estan en los guiones "_r" (los del arbol MIX, Req_Course_MIX_PS2). Del 4 no hay
+  ninguna en las etapas del arbol MIX (Deep_Lake_r, Snow_Mountain_r, Ghost_Forest_r, Imperial_Avenue_r, Niagara_r,
+  San_Francisco_r y Maya_r no estan en el): PROBABLE que el juego no las use, salvo otra forma de elegir la etapa que no
+  he visto.
+
+### HECHO: subtipos 3, 4 y 5 (comun/minijuego.c, -Os)
+- tools/conv_camp.py: el bloque 'M162' (64 bytes, cada tabla comprobada por el codigo que la lee: 0x3b5648, 0x423bd8 /
+  0x423bdc / 0x423be0 / 0x423c08, 0x423af8, 0x460028, 0x460027, 0x188 y 0x423a70) y los 29 sprites nuevos en MJHUD.DAT.
+  N del 4 (+0x78 de los parametros) se lee de las peticiones de CAMP.DAT (p[6]); la fase anterior (+4) la lleva
+  minijuego.c (sin tocar campeonato.c).
+- main.c (ha_spr3d): un sprite con esc < 0 se dibuja en la pantalla en (p[0], p[1]) desde el centro a escala -esc (las
+  ovejas, zzz y el regalo del HUD); 16 grupos a la vez (antes 8: las cifras) y 48 sprites; PRUEBA_MJ_TIPO=t (las
+  peticiones de la etapa t, 0..59, en la primera etapa: para probar el 4 sobre Alpine al reves).
+- E (PRUEBA_AUTO PRUEBA_CAMP=2 PRUEBA_CAMP_NODO=7 PRUEBA_SIN_TIEMPO PRUEBA_MJ, Alpine al reves):
+  - 3 (lista 2, 100..340): 12 avisos de nivel 0 (1..5, suma 39), la puerta "37 / 39" (el bueno el 1); cap16b/t3a
+    (r_045: el "+3" del aviso), zoom_t3a.png (37 y 39 entre los conos, de lejos separados), "88 - 2, nota 6".
+  - 4 (lista 0, PRUEBA_MJ_TIPO=55: Maya al reves 100..265, N = 2): 7 avisos de 3 huecos, la puerta "10 / 9" (9 los
+    regalos plateados, contados a mano en el registro); mos_t4a / mos_t4b: los regalos plateados y azules en la
+    carretera, el plateado arriba a la derecha en el HUD, "88 - 2, nota 6". Sin PRUEBA_MJ (medida m4_con) el piloto paso
+    por el carril bueno por azar: "bien" con el carril de verdad.
+  - 5 (lista 0, 160..380): 16 ovejas (efectos 0x188 x 16 y 0x173 / 0x1db / 0x1dc, "VOZ ... (peticion)"), la puerta
+    "16 / 12"; mos_t5b: las ovejas saltando por la pantalla, zoom_t5zzz: zzz en el panel; "88 - 2, nota 6".
+- Medidas (DIAG_MS, la misma pasada con / sin -DDIAG_SIN_MJ, sin PRUEBA_MJ, cap16b/medidas, h16b/mide.py de "peticion
+  16/n" a "peticion 16 hecha"): 3 39,51 / 39,60 fps (-0,09), 35 muestras; 4 39,67 / 39,73 (-0,06), 26; 5 39,45 / 39,63
+  (-0,18), 30. Triangulos: los conos 4..7 de media (57 como mucho, los de antes); los sprites son quads 2D (2 triangulos)
+  fuera de la escena: como mucho ~12 cifras / 8 regalos / 3 ovejas a la vez.
+- RAM al arrancar (h16b/nav3.sh, MODO_JUEGO=1, sin defines, compilado limpio): sobre integra 88630c1 el codigo nuevo
+  (+4 KB de .text) pasaba .init (alineado a 8 KB) al bloque siguiente: 408K -> 400K. Recortado minijuego.c (otros() para
+  los carriles malos de 1..5, numero() mas corto, el puntero local Q, las probabilidades con enteros y MJLOG: los
+  registros de cada aviso / puerta / peticion solo con PRUEBA_AUTO) hasta 0xba030 de .text: .init vuelve a 0x8c0ca000
+  (408K, medido sin el merge solo por el tamano, PROBABLE). Tras `git merge integra` (a0b2d19, con c2c7): .text 0xbac70,
+  .init en 0x8c0cc000 como integra sola; nav3 (cap16b/nav3_final.txt): "RAMMAPA arranque: en uso 13021K, libre 400K",
+  "VOZ: VOCES.DAT, 35 muestras", sin "Out of memory": igual que integra (400K segun el jefe; no medido aqui el tip de
+  integra solo). OJO: unos ~3 KB mas de .text en cualquier rama vuelven a saltar .init a 0x8c0ce000 (-8K).
+- Tras el merge (CAMP.DAT de tools/conv_camp.py: sus 35 678 primeros bytes iguales a $S/modos/c2c/dat_int/CAMP.DAT, y
+  'M162' detras de 'M161'; MJHUD.DAT igual): h16b/serie5.sh repite 16/3 (37 / 39), 16/4 (10 / 9), 16/5 (16 ovejas, 16 /
+  12) y 16/2 + 16/1 + 16/0 (prepara1 / prepara2 ahora con otros()): todas "bien" con PRUEBA_MJ, las mismas notas
+  (cap16b/t3b, t4b, t5b, t12b, repaso_merge.png).
+- Scripts: pgrep -c -f /opt/flycast/build/flycast (el proceso se llama Flycast-rend).
+- Datos nuevos: CAMP.DAT + 72 bytes ('M162'), MJHUD.DAT 149 -> 278 KB (+129 KB: 22 cifras de 64x64, 5 regalos de
+  128x128, la oveja 128x512 con 78 cuadros y zzz).
+- DESVIACION / SUPUESTO: las cifras se separan por el lateral de la carretera, no por el eje x de la camara; el panel de
+  la peticion en (176, 78) (donde main.c pinta el rotulo; zoom_t5zzz: zzz cae sobre el coche del panel, PROBABLE bien);
+  el regalo del HUD esta 2 s en el panel y va arriba en 0,35 s (el original espera a que acabe el panel, 0x2320d8) y se
+  va al acabar la peticion (SUPUESTO: no he visto quien llama al estado 4); +0x160 del gestor (el 5) SIN averiguar; las
+  ovejas avanzan con el paso de la logica.
+
+### Lo que queda
+- 6 (los coches): necesita el generador del trafico de la peticion 0x1f1a88 / 0x1f20e8 (otro agente).
+- Un carril elegido conduciendo (el piloto no elige; en el 4 acerto por azar), la voz y los efectos solo por el
+  registro (Flycast sin audio).
+- El cartel 3D de la puerta (0x1ee000b) y el 2B003D del aviso, como en c2c16.
