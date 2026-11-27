@@ -4440,6 +4440,9 @@ static void trafpet_pon(const camp_trafpet_t *r)
 {
     tp_on = r != NULL; tp_k = 0;
     if (r) tp = *r;
+#ifdef DIAG_TP_LOD0
+    tp.lod = 0;                                                 /* (medida: sin el LOD ligero) */
+#endif
     dbglog(DBG_INFO, "TRAFPET: %s (modelo %d, tope %d, lod %d)\n", r ? "puesto" : "quitado", r ? r->modelo[0] : -1, r ? r->tope : 0, r ? r->lod : 0);
 }
 static int trafpet_modelo(int def)                              /* el siguiente modelo del registro que tenga la DC; si no def */
