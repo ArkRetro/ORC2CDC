@@ -53,6 +53,7 @@ CAMP.DAT (little endian):
   detras, 'C241', u32 n y n x {u16 peticion, u8 cuantos, u8 relativa (+0x74 de los parametros: secciones desde el inicio)
      y cuantos x {f32 x, y, z (el objetivo en el marco de la etapa del PS2), s16 seccion desde, hasta}}: los objetivos de las
      fotos del tipo 24 (lista +0x70, filas de 0x20 hasta +0x18 == -1; 0x2a5fd8 / 0x2a60a0)
+  detras de 'M161', 'C131' (c2c8): los sprites y voces de las clases del tipo 13 y por peticion sus coches (ver main)
   detras, 'C221', u32 n y n x {u16 peticion, u8 cuantas, u8 0 y cuantas x {s16 seccion desde el inicio, hasta, f32 +8,
      +0xc (lo que se suma a cada una), i32 +0x10}}: las ventanas de la bocina del tipo 22 (lista +0x7c, filas de 0x18
      hasta -1; 0x29bfc0 / 0x29c058)
@@ -285,7 +286,7 @@ def main():
         d_ = bytes(As.datos(por_hash[hash_nombre('\\bin\\%s.bin' % n_)])); nn, oo = cm._r077(d_, n_)
         usadas.update(struct.unpack_from('<I', d_, oo + 0x78 * k + 0x1c)[0] for k in range(nn))
     PAR = mips.Mips.PILA - 0x8000                            # parametros en la memoria del interprete (la pila)
-    lista = []; pets = bytearray(); npet = 0; tipos = {}; objs = []; t46 = []; zon = []; c14 = []; m16 = []; c24 = []; c22 = []
+    lista = []; pets = bytearray(); npet = 0; tipos = {}; objs = []; t46 = []; zon = []; c14 = []; m16 = []; c24 = []; c22 = []; c13 = []
     # 0x297e20: +0x18 del objeto = 0x423080[clase] (la clase del banco 0x57); comprobado por el codigo que la lee
     assert par(0x29800c, 0x298014) == 0x423080, 'clases de los objetos (0x297e20)'
     banco = lambda c: u(0x423080 + 4 * c) & 0xff
@@ -339,6 +340,15 @@ def main():
                         if sc_ < 0 or lc_ < 0: break
                         cs14.append((sc_, lc_)); q_ += 0x14
                     c14.append(struct.pack('<H2B', npet, len(cs14), blk[0x74]) + b''.join(struct.pack('<hbx', *x) for x in cs14))
+                if tipo == 13 and pp + 0x5c in rel:           # (c2c8) los coches de la comida (0x299e80: +0x5c como el 14; +0x78
+                    q_ = rel[pp + 0x5c]; cs13 = []            # clases, +0x98 / +0x99 umbrales, +0x9a fases; +0x64 / +0x66)
+                    while len(cs13) < 100:
+                        sc_, lc_ = struct.unpack_from('<hb', d, q_ + 8)
+                        if sc_ < 0 or lc_ < 0: break
+                        cs13.append((sc_, lc_)); q_ += 0x14
+                    e_ = d[pp:pp + 0xa0]; m64, m66 = struct.unpack_from('<2h', e_, 0x64)
+                    c13.append(struct.pack('<H6B2h', npet, len(cs13), min(e_[0x78], 3), e_[0x98], e_[0x99], min(e_[0x9a], 3), 0, m64, m66) +
+                               b''.join(struct.pack('<hbx', *x) for x in cs13))
                 if tipo == 16:                                # los minijuegos (0x2a0d08: los registros de 0x2c de +0x7c, +0x80 relativos)
                     regs = []
                     if pp + 0x7c in rel:
@@ -430,6 +440,19 @@ def main():
     out += b'C221' + struct.pack('<I', len(c22)) + b''.join(c22)
     print('  tipo 22: %d peticiones, %s ventanas' % (len(c22), [x[2] for x in c22]))
     t16 = minijuegos(u, par, m16, out)
+    # (c2c8) el tipo 13 (0x2991b8, la comida): el sprite de cada clase (0x4231d8[+8 de los parametros][clase], 0x115ae0 en
+    # 0x299dd8 y 0x115870 en el dibujo) y su voz (0x423220, 0x11c090 al cambiar de objetivo); los sprites, grupos de
+    # MJHUD.DAT (los que no lleva el 16 van detras de los suyos). Bloque 'C131' (detras de 'M161'): u8 sprite[6][3], u8 0 x 2,
+    # u16 voz[6][3], u32 n y n x {u16 peticion, u8 coches, clases (+0x78), p98, p99, fases (+0x9a), 0, s16 +0x64, +0x66 y
+    # coches x {s16 seccion desde el inicio, s8 carril, u8 0}} (la lista +0x5c, filas de 0x14)
+    assert par(0x299e08, 0x299e10) == 0x4231d8 and par(0x29942c, 0x299434) == 0x423220, 'tablas del tipo 13 (0x2991b8)'
+    for k in range(18):
+        if u(0x4231d8 + 4 * k) not in t16: t16.append(u(0x4231d8 + 4 * k))
+    b13 = bytes(t16.index(u(0x4231d8 + 4 * k)) for k in range(18)) + b'\0\0' + struct.pack('<18H', *[u(0x423220 + 4 * k) for k in range(18)])
+    b13 += struct.pack('<I', len(c13)) + b''.join(c13)
+    while len(b13) % 4: b13 += b'\0'
+    out += b'C131' + struct.pack('<I', len(b13)) + b13
+    print('  tipo 13: %d peticiones, %s coches' % (len(c13), [x[2] for x in c13]))
     print('  tipo 16: %d peticiones, %d sprites del banco 0x46' % (len(m16), len(t16)))
     print('  zonas del tipo 5: %s' % ' '.join('%d:(%.2f..%.2f)-(%.2f..%.2f)' % ((struct.unpack('<2H4f', z)[0],) + tuple(struct.unpack('<2H4f', z)[2:])) for z in zon))
     print('  efectos de la pelota y los meteoritos: %s' % ' '.join('%x' % x for x in snd))
