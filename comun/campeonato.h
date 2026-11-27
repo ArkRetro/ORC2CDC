@@ -42,6 +42,9 @@ void camp_paso(const camp_coche_t *c);      /* 0x22a048, un paso de logica */
 /* graba la nota de la etapa: tipo de etapa, lista y nota (0..6); 1 si mejora (0x22edd8) */
 extern int (*camp_graba)(int tipo, int lista, int nota);
 extern void (*camp_voz)(int id);           /* voces (VOCESH.DAT) */
+/* los bancos de voces de la etapa (0x22ac00): n peticiones, su tipo y subtipo, la fila de RANK; rnd: el azar de cada una.
+   n = -1: el fin del campeonato */
+extern void (*camp_bancos)(int n, const uint8_t *tipo, const uint8_t *sub, int fila, int *rnd);
 extern void (*camp_se)(int id);            /* efectos del banco de voces */
 extern void (*camp_millas)(int m);         /* millas a la licencia */
 /* los objetos de la peticion (0x2938d0 / 0x293968 / 0x297e20): uno de la clase cl (banco 0x57) y tipo de control tipo
@@ -61,4 +64,9 @@ uint32_t camp_tinte(void);
 int  camp_filas(int32_t *v);                /* corazones de cada nivel hasta el actual; devuelve el ultimo indice */
 int  camp_corazones(void);                  /* el contador (+0x1fe8) */
 int  camp_total(void);                      /* +0x1fe4 */
+/* (tipo 11) las plazas del trafico en cada paso (antes de camp_paso): marca los coches de la peticion (HA_CAMP) y cuenta
+   sus golpes; camp_spr3d: sus sprites 3D (grupos de HAHUD.DAT) */
+struct haobj_auto_s; struct haobj_s3d_s;
+void camp_autos(struct haobj_auto_s *v, int n);
+int  camp_spr3d(struct haobj_s3d_s *v, int max, int (*cuadros)(const char *g));
 #endif

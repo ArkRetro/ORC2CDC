@@ -33,6 +33,9 @@ int  sfx_voces_juego(const char *fich, void *buf, uint32_t cap);
 void sfx_voz_grupo(int g);                 /* banco HAM de la etapa (-1: ninguno) */
 int  sfx_voz_grupo_ham(int mision, int clave);   /* (Rev 2.9.9.c) el grupo de VHG1 para esa mision y clave; -1 sin VHG1 */
 void sfx_voz_se(int id);                   /* un efecto del banco de voces por el canal de efectos */
+/* (C2C) otro juego de voces que se busca antes (10 bits de id): filas de 20 bytes como las de VOZ1 con el desplazamiento
+   desde base (en el AICA); NULL lo quita (y calla la voz si era de el). comun/vozmis.c */
+void sfx_voz_extra(const void *filas, int n, uint32_t base);
 /* una muestra suelta (ADPCM de Yamaha) por el canal de efectos de las voces (la escena de la meta, demo/meta.c) */
 uint32_t sfx_muestra_sube(const void *adpcm, uint32_t bytes);   /* direccion en el AICA o 0 */
 void sfx_muestra_baja(uint32_t a);

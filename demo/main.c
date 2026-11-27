@@ -33,6 +33,7 @@
 #include "../comun/rival.h"
 #include "../comun/mision.h"
 #include "../comun/campeonato.h"
+#include "../comun/vozmis.h"
 #include "../comun/vmu.h"
 #include "../comun/robot.h"
 #include "../comun/lbloste.h"
@@ -3398,7 +3399,10 @@ static int ha_cuadros(const char *g) { int u = ha_hud ? hudd_uso(ha_hud, g) : -1
 static void ha_spr3d(void)
 {
     static int sub[4], nsub;
-    infarto_s3d_t d[32]; int n = infarto_spr3d(d, 32, ha_cuadros), i, k, ahora[4], na = 0;
+    infarto_s3d_t d[32]; int n = variante == 5 ? camp_spr3d(d, 32, ha_cuadros) : infarto_spr3d(d, 32, ha_cuadros), i, k, ahora[4], na = 0;
+#ifdef PRUEBA_C11
+    { static int t_; if (n && ++t_ % 60 == 0) dbglog(DBG_INFO, "C11: %d sprites (%s uso %d cuadros %d) en %.0f %.0f %.0f\n", n, d[0].g, hudd_uso(ha_hud, d[0].g), ha_cuadros(d[0].g), (double)d[0].p[0], (double)d[0].p[1], (double)d[0].p[2]); }
+#endif
     for (i = 0; i < n; i++) {
         int u = hudd_uso(ha_hud, d[i].g); float dx = d[i].p[0] - ojo[0], dy = d[i].p[1] - ojo[1], dz = d[i].p[2] - ojo[2], zv, sc;
         if (u < 0) continue;
@@ -4266,6 +4270,13 @@ static void traf_aparece(void)
     int nodo, pos, u;
     traf_libera();
     if (variante == 0 || variante == 7 || variante == 8) return;   /* 479080: sin trafico en el Time Attack */
+    if (variante == 5) {                                        /* (C2C) los coches de la peticion del tipo 11 */
+        haobj_auto_t v[NTRAF]; int i;
+        for (i = 0; i < NTRAF; i++) { v[i].pos = traf[i].carril >= 0 ? traf[i].c.pos : NULL; v[i].marca = traf[i].ha_m;
+            v[i].sec = (int)floorf((traf[i].c.s - s_etapa) / m_pos); v[i].golpe = traf[i].b6c && !traf[i].n2f4; }
+        camp_autos(v, NTRAF);
+        for (i = 0; i < NTRAF; i++) traf[i].ha_m = v[i].marca;
+    }
     if (variante == 2) {
         static int vistas;
         if (infarto_sueltas() != vistas) {
@@ -8194,6 +8205,12 @@ FRIO static int curso_tiene(int id)                                  /* el arbol
 static int camp_puede(int g) { return g < 0 || g > 2 ? -1 : g < 2 ? 0 : curso_tiene(CAMP_ARBOL(g)); }
 static int camp_tipo_nodo(int nodo) { return camp_tipo(camp_g, nodo); }
 static void camp_voz_(int id) { if (voz_ok) sfx_voz(id); }
+FRIO static void camp_bancos_(int n, const uint8_t *t, const uint8_t *b, int f, int *r)   /* comun/vozmis.c */
+{
+    if (n < 0) vm_cierra();
+    else if (voz_ok && !vm_abre()) vm_etapa(n, t, b, f, r);
+    else for (; n > 0; n--) r[n - 1] = -1;
+}
 static void camp_se_(int id) { if (voz_ok) sfx_voz_se(id); }
 static void camp_millas_(int m) { menu_suma_millas((uint32_t)m); }
 static void camp_obj_(int cl, int tipo, float sec, float lat, float esc);
@@ -8222,7 +8239,7 @@ FRIO static void camp_preparado(int auto_)
     }
     camp_g = g; curso_pedido = CAMP_ARBOL(g); nodo_salida = cn > 0 ? cn - 1 : 0;
     if (g == 0) preset_curso = 0;                               /* el curso de OutRun 2 SP: el preset 0 (PROBABLE) */
-    camp_graba = menu_nota_camp; camp_voz = camp_voz_; camp_se = camp_se_; camp_millas = camp_millas_; camp_obj = camp_obj_; camp_chica = camp_chica_; camp_golpe = camp_golpe_;
+    camp_graba = menu_nota_camp; camp_voz = camp_voz_; camp_se = camp_se_; camp_millas = camp_millas_; camp_obj = camp_obj_; camp_chica = camp_chica_; camp_golpe = camp_golpe_; camp_bancos = camp_bancos_;
     dbglog(DBG_INFO, "CAMP: campeonato %d, arbol %d, salida nodo %d, casilla %d\n", g, curso_pedido, nodo_salida, cl);
 }
 /* los objetos de la peticion (comun/campeonato.c pon_objetos) en el mundo: la seccion sec de la etapa y la fraccion lat
@@ -16503,6 +16520,9 @@ int main(int argc, char **argv)
                             ha_dibujos();                   /* 45BDF0 y 4603F0 */
                             ha_spr3d();                     /* (INFARTO 3) 4295D0: los sprites en el mundo */
                         }
+#ifndef DIAG_SIN_C11                                            /* (medida: sin los sprites del tipo 11) */
+                        if (ha_hud && variante == 5) ha_spr3d();   /* (C2C) los de los coches de la peticion del tipo 11 */
+#endif
                     }
                 }
                 if (estado == META || estado == AGOTADO || estado == FIN) texto = 0;

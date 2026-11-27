@@ -45,6 +45,21 @@ CAMP.DAT (little endian):
      (0x423830) y golpea 3 + 3 (0x423840, 0x423850)
   detras, 'ZON1', u32 n y n x {u16 peticion, u16 0, f32 de0, de1, hasta0, hasta1}: la zona lateral de las peticiones del
      tipo 5 (+0x10..+0x1c del registro de 0x74 del guion; 0x232768 la interpola de la seccion inicial a la final)
+
+VOCESM.DAT (`voces_mision`; tambien solo con --solo-voces): las voces de los bancos que la carrera del campeonato
+  carga por etapa (0x22ac00, estado 0: por cada peticion de la lista, el switch 0x415280 por el tipo da el banco de la
+  tabla 0x352840 en los huecos 6, 7, 8 de 0x374180, sin repetir; estado 1: +0xf0 = rand % 4 la fila de las voces de la
+  nota; estado 2: 0x415268[+0xf0] = HAM_MIS\\RANK1..4 en el hueco 4). La variante 5 carga ademas COMMON.pak en el hueco 1
+  y PERH.pak en el 9 (0x1b7f74; el INFARTO: HC.PAK y PERH): VOCESH.DAT ya trae HC y PERH; de COMMON van aqui las voces que
+  no estan en HC.PAK. Little endian:
+  'VZM1', u32 n_bancos, u32 desplazamiento de la tabla de tipos, u32 tamano total
+  n_bancos x {char[12] nombre, u32 desplazamiento (de sus filas; datos detras, en un sector de 2048), u32 n, u32 bytes de
+     datos}: el 0 las de COMMON, 1..4 RANK1..4, despues los HAM_MIS de las peticiones
+  tabla de tipos: 25 x 8 x {u8 banco, u8 cuantos}: el del (tipo, subtipo); cuantos > 1: uno al azar de cuantos seguidos
+     (13 FOOD1..6 con rand % 6, 16/6 CARS con rand % 3 en +8 de los parametros; 16/2 SOUND con una peticion en la etapa
+     (0x22bd40 == 0x22bd60) y si no SOUND2..8 con rand % 7: {0xfe, el banco de SOUND}, los 7 detras); 0xff ninguno
+  cada banco: n filas de 20 bytes como VOZ1 {u16 id, u16 volumen, u32 desplazamiento en sus datos, u32 bytes, u32 Hz,
+     u32 muestras} y sus datos (ADPCM de Yamaha) desde el siguiente multiplo de 2048 del fichero
 """
 import os, struct, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -56,6 +71,113 @@ LISTAS = ['REQUEST_NORMAL', 'REQUEST_SPECIAL1', 'REQUEST_SPECIAL2', 'REQUEST_SPE
 # 0x295ca0 / 0x295bf0, 7 0x2956a0 / 0x2955f8, 8 0x29a5c8 / 0x29a518, 15 0x293448 / 0x293390, 19 0x29df78 / 0x29ded0
 OBJ_TIPOS = {6: (0x74, 0x78), 7: (0x78, 0x7c), 8: (0x78, 0x7c), 15: (0x70, 0x74), 19: (0x78, 0x7c)}
 REGS_TOUR = (1, 4)                                           # obj_tour_pmt: la pelota (tipo 15) y el meteorito (19)
+
+
+def tablas_banco(d):
+    """como conv_sonido.banco_tablas, pero las tablas pueden ir detras de un relleno de ceros hasta el siguiente
+    multiplo de 2048 (RANK3, ITEMS, PERR)"""
+    a, _, b, _ = struct.unpack_from('<4I', d, 0)
+    o = 16 + a + b
+    if o + 4 <= len(d) and struct.unpack_from('<I', d, o)[0] == 0 and any(d[o:]): o = (o + 2047) & ~2047
+    t = []
+    for _ in range(2):
+        n = struct.unpack_from('<I', d, o)[0] if o + 4 <= len(d) else 0
+        t.append(dict(struct.unpack_from('<2I', d, o + 4 + 8 * k) for k in range(n))); o += 4 + 8 * n
+    return d[16:16 + a], d[16 + a:16 + a + b], t
+
+
+def voces_mision(D, u, par, sal):
+    import conv_sonido as cs
+    iso = D.iso; V = lambda a: a - 0xfff80
+    irx = cs.fichero_paquete(iso, 'SYSTEM.PS2', '\\IRX\\SOUNDCD.IRX')
+    tb, td, _ = cs.elf_seccion_irx(irx)
+    se = lambda i: struct.unpack_from('<HH', irx, td + cs.IRX_SE - tb + 12 * i)
+    nombre = lambda k: bytes(D.elf[V(u(0x352840 + 4 * k)):V(u(0x352840 + 4 * k)) + 40]).split(b'\0')[0].decode()
+    # el switch de 0x22ac00 (estado 0): tipo - 1 -> 0x415280; los ori s1 = 0x80nn de cada caso (y sus switch de subtipo)
+    assert par(0x22adec, 0x22adf4) == 0x415280 and par(0x22aea0, 0x22aea8) == 0x4152e0 and par(0x22af08, 0x22af10) == 0x415300 \
+        and par(0x22af80, 0x22af88) == 0x415320 and par(0x22b178, 0x22b17c) == 0x415268, 'switch de los bancos (0x22ac00)'
+    assert [u(0x374180 + 2 * k) & 0xffff for k in range(3)] == [0x600, 0x700, 0x800], 'huecos de los bancos (0x374180)'
+    def caso(a):                                       # b 0x22b044 con ori s1 en el hueco (o ori s1 y b)
+        for q in (a, a + 4):
+            w = u(q)
+            if w >> 16 == 0x3411: return w & 0xff
+        return None
+    tipos = {}
+    for t in range(1, 25):
+        a = u(0x415280 + 4 * (t - 1))
+        if a == 0x22b044: continue
+        k = caso(a)
+        if k is not None: tipos[t] = {s: (k, 1) for s in range(8)}
+    tipos[11] = {0: (caso(0x22ae6c), 1), 1: (caso(0x22ae5c), 1)}          # +4 == 0 HCARS, 1 GHOST
+    assert nombre(tipos[11][0][0]).endswith('HCARS.pak') and nombre(tipos[11][1][0]).endswith('GHOST.PAK')
+    tipos[13] = {s: (caso(u(0x4152e0)), 6) for s in range(8)}             # FOOD1..6, rand % 6
+    assert [caso(u(0x4152e0 + 4 * k)) for k in range(6)] == list(range(tipos[13][0][0], tipos[13][0][0] + 6))
+    t16 = {}
+    for s in range(7):
+        a = u(0x415300 + 4 * s)
+        if a == 0x22af34: t16[s] = (0xfe, 8)                              # SOUND (sola) o SOUND2..8 (rand % 7)
+        elif a == 0x22afec: t16[s] = (u(0x22aff0) & 0xff, 3)              # CARS, rand % 3 en +8
+        else: t16[s] = (caso(a), 1)
+    tipos[16] = t16
+    sonido = [u(0x22af50) & 0xff] + [caso(u(0x415320 + 4 * k)) for k in range(7)]
+    rank = [u(0x415268 + 4 * k) & 0xff for k in range(4)]
+    assert [nombre(k) for k in rank] == ['HAM_MIS\\RANK%d.pak' % (i + 1) for i in range(4)]
+    # los bancos: 0 COMMON (sin lo de HC.PAK), 1..4 RANK, despues los de las peticiones
+    usados = []
+    for t in sorted(tipos):
+        for s, (b, n) in sorted(tipos[t].items()):
+            for k in (sonido if b == 0xfe else range(b, b + n)):
+                if k not in usados: usados.append(k)
+    lista = [0x96] + rank + usados
+    hc = tablas_banco(cs.fichero_paquete(iso, 'SOUND.PS2', '\\SPANISH\\HC.PAK'))[2]
+    en_hc = set(hc[0]) | set(hc[1])
+    bancos = []
+    for k in lista:
+        nm = nombre(k)
+        try: d = cs.fichero_paquete(iso, 'SOUND.PS2', '\\SPANISH\\' + nm)
+        except SystemExit: print('  VOCESM: no esta %s (tabla 0x%x)' % (nm, k)); bancos.append((nm, [])); continue
+        A_, B_, (ta, tbb) = tablas_banco(d); mu = {}
+        for datos, tt in ((A_, ta), (B_, tbb)):
+            for i, o in tt.items():
+                p, v = se(i)
+                if not (0x100 <= p <= 0x3fff) or v == 0 or i in mu or (k == 0x96 and i in en_hc): continue
+                m_ = cs.muestra_banco(datos, o)
+                if len(m_) >= 65536:                   # (el AICA no toca mas de 65535 muestras de una vez: fuera)
+                    print('  VOCESM: %s 0x%x de %d muestras (%.1f s): no cabe en un canal del AICA, fuera' % (nm, i, len(m_), len(m_) / cs.frecuencia(p))); continue
+                mu[i] = (m_, cs.frecuencia(p), v)
+        bancos.append((nm, [(i,) + mu[i] for i in sorted(mu)]))
+    idx = {k: j for j, k in enumerate(lista)}
+    assert [idx[k] for k in sonido] == list(range(idx[sonido[0]], idx[sonido[0]] + 8)), 'SOUND..SOUND8 seguidos'
+    tab = bytearray()
+    for t in range(25):
+        for s in range(8):
+            b, n = tipos.get(t, {}).get(s, (0xff, 0))
+            tab += bytes((0xfe, idx[sonido[0]]) if b == 0xfe else (idx[b] if b != 0xff else 0xff, n))
+    nb = len(bancos); cab = 16 + 24 * nb; off_t = cab; pos = off_t + len(tab)
+    filas = []; datos = []
+    for nm, mu in bancos:
+        pos = (pos + 3) & ~3; o_f = pos; pos += 20 * len(mu); pos = (pos + 2047) & ~2047
+        blob = bytearray(); fl = bytearray()
+        for i, pcm, f, v in mu:
+            while len(blob) % 32: blob.append(0)
+            e = cs.enc_yamaha(pcm); assert len(pcm) < 65536, 'voz 0x%x demasiado larga' % i
+            fl += struct.pack('<HH4I', i, v, len(blob), len(e), f, len(pcm)); blob += e
+        while len(blob) % 32: blob.append(0)
+        filas.append((nm, o_f, len(mu), fl, pos, blob)); pos += len(blob)
+    out = bytearray(pos)
+    out[0:16] = b'VZM1' + struct.pack('<3I', nb, off_t, pos)
+    for j, (nm, o_f, n, fl, od, blob) in enumerate(filas):
+        out[16 + 24 * j:40 + 24 * j] = nm.split('\\')[-1].encode()[:12].ljust(12, b'\0') + struct.pack('<3I', o_f, n, len(blob))
+        out[o_f:o_f + len(fl)] = fl; out[od:od + len(blob)] = blob
+    out[off_t:off_t + len(tab)] = tab
+    open(os.path.join(sal, 'VOCESM.DAT'), 'wb').write(out)
+    for nm, o_f, n, fl, od, blob in filas:
+        print('  VOCESM: %-12s %2d voces %4d KB  %s' % (nm.split('\\')[-1], n, len(blob) >> 10,
+              ' '.join('%x' % struct.unpack_from('<H', fl, 20 * q)[0] for q in range(n))))
+    # lo que mas ocupa una etapa en el AICA: la mayor de RANK + COMMON + los 3 mayores bancos distintos de peticion
+    tam = [len(f[5]) for f in filas]
+    print('VOCESM.DAT: %d bytes, %d bancos; COMMON %d KB, RANK hasta %d KB, el mayor de peticion %d KB' % (
+        len(out), nb, tam[0] >> 10, max(tam[1:5]) >> 10, max(tam[5:]) >> 10))
 
 
 def main():
@@ -78,6 +200,8 @@ def main():
     assert par(0x2a62e8, 0x2a62f0) == 0x423ee0 and par(0x2a6310, 0x2a6318) == 0x423ef8, 'voces de animo (0x2a6240)'
     assert par(0x22ac94, 0x22ac98) == 0x374010 and par(0x22b63c, 0x22b648) == 0x374138, 'nombres (0x22ac00 / 0x22b600)'
     assert u(0x3741a8) == 0x42a00000, 'medidor lleno 80 (0x3741a8)'
+    voces_mision(D, u, par, sal)
+    if '--solo-voces' in sys.argv: return
     out = bytearray(b'CMP1') + struct.pack('<3I', 1, 0, 0)
     W = lambda fmt, *v: out.extend(struct.pack('<' + fmt, *v))
     W('7f', *[f(0x374190 + 4 * k) for k in range(7)])
@@ -210,6 +334,10 @@ def main():
     snd = [u(0x422cd0 + 4 * k) for k in range(7)] + [u(t + 4 * k) for t in (0x423820, 0x423830, 0x423840, 0x423850) for k in range(3)]
     out += b'SND1' + struct.pack('<19H', *snd)
     out += b'ZON1' + struct.pack('<I', len(zon)) + b''.join(zon)
+    # el tipo 11 (0x294a90): los efectos de 0x422e00 (rand % 3, 0x11c090) con un coche de la peticion 7 secciones por
+    # delante y cada 60 pasos como poco
+    assert par(0x294d98 + 4, 0x294da4) == 0x422e00, 'efectos del tipo 11 (0x294a90)'
+    out += b'C111' + struct.pack('<3H2x', *[u(0x422e00 + 4 * k) for k in range(3)])
     print('  zonas del tipo 5: %s' % ' '.join('%d:(%.2f..%.2f)-(%.2f..%.2f)' % ((struct.unpack('<2H4f', z)[0],) + tuple(struct.unpack('<2H4f', z)[2:])) for z in zon))
     print('  efectos de la pelota y los meteoritos: %s' % ' '.join('%x' % x for x in snd))
     open(os.path.join(sal, 'CAMP.DAT'), 'wb').write(out)
