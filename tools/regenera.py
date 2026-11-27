@@ -218,7 +218,8 @@ def paso(C, n, log):
     elif n == 'meta': ej(T('conv_meta.py'), ISO, t); mueve(D, tj('META.DAT'))
     elif n == 'salida': ej(T('conv_salida.py'), ISO, t); mueve(D, tj('SALIDA.DAT'))
     elif n == 'infarto':
-        ej(T('conv_infarto.py'), ISO, t); mueve(D, tj('INFARTO.DAT'), tj('INFARTOP.DAT'), tj('HAHUD.DAT'), tj('VOCESH.DAT'))
+        ej(T('conv_infarto.py'), ISO, t); ej(T('conv_chr.py'), ISO, tj('CHRH.DAT'), '--infarto')
+        mueve(D, tj('INFARTO.DAT'), tj('INFARTOP.DAT'), tj('INFARTOX.DAT'), tj('CHRH.DAT'), tj('HAOSO.DAT'), tj('HAOBJ.DAT'), tj('HAHUD.DAT'), tj('VOCESH.DAT'))
     elif n == 'fin': ej(T('conv_fin.py'), ISO, t, prev('fin')); mueve(D, *[tj(f) for f in FIN])
     elif n == 'sp':
         ej(T('conv_sp.py'), ISO, t, prev('sp'))
@@ -342,7 +343,7 @@ def regenera(iso, D, W, jobs=4, informe=print):
     for fs, n in ((['EFECTOS.DAT'], 'efectos'), (['FAROS.DAT'], 'faros'), (chrs, 'chr'), (['BAND.DAT', 'BAND1.DAT'], 'band'), (['PARAM.DAT'], 'param'),
                   (['META.DAT'], 'meta'), (FIN, 'fin'),
                   (SP, 'sp'), (FINAL, 'final'),
-                  (['SALIDA.DAT'], 'salida'), (['INFARTO.DAT', 'INFARTOP.DAT', 'HAHUD.DAT', 'VOCESH.DAT'], 'infarto'), (['BO.DAT'] + BO, 'bo'),
+                  (['SALIDA.DAT'], 'salida'), (['INFARTO.DAT', 'INFARTOP.DAT', 'INFARTOX.DAT', 'CHRH.DAT', 'HAOSO.DAT', 'HAOBJ.DAT', 'HAHUD.DAT', 'VOCESH.DAT'], 'infarto'), (['BO.DAT'] + BO, 'bo'),
                   (['TRAFC.DAT', 'TAPD.DAT'] + TRAF, 'trafico'), (['TRAFK0.DAT', 'TRAFK1.DAT', 'TRAFK2.DAT'], 'camiones'),
                   (['MVTS.VQV'], 'video_ts'), (['MVATTR.VQV'], 'video_attr'),
                   (['RC%02d.DAT' % k for k in range(30)], 'rivales'), (['MISION.DAT'], 'mision'), (['C2CHUD.DAT'], 'c2chud'),
@@ -475,7 +476,7 @@ def regenera(iso, D, W, jobs=4, informe=print):
     nec = ['BAND.DAT', 'BAND1.DAT', 'BKD.DAT', 'BO.DAT'] + chrs + \
           'COCHES.DAT COLBK.DAT COLLR.DAT CURSO.DAT EFECTOS.DAT FAROS.DAT FIN.DAT GOVER.DAT HAHUD.DAT HUD.DAT INFARTO.DAT MENU.DAT META.DAT MODOV.DAT MVATTR.VQV MVTS.VQV PARAM.DAT SFX.DAT SEGS.PAK SOL.DAT TAPD.DAT TRAFC.DAT UNIONES.PAK VMU.DAT VOCES.DAT VOCESH.DAT VOCESC.DAT MISION.DAT C2CHUD.DAT C2C.DAT CAMP.DAT SALON.DAT TABLERO.DAT CURSOTA.DAT UNIONESTA.PAK UNIONESR.PAK'.split() + ['RC%02d.DAT' % k for k in range(30)] + \
           ['COCHE%02d.DAT' % k for k in range(15)] + ['COCHE%02dL.DAT' % k for k in range(15)] + ['MUS%d.ADP' % k for k in MUSICA] + SP + FINAL + \
-          ['TRAFK%d.DAT' % k for k in range(3)] + FIN + TRAF + BO + COLBK + ['SALIDA.DAT', 'CHRPAR.DAT', 'VISO.DAT', 'INFARTOP.DAT']
+          ['TRAFK%d.DAT' % k for k in range(3)] + FIN + TRAF + BO + COLBK + ['SALIDA.DAT', 'CHRPAR.DAT', 'VISO.DAT', 'INFARTOP.DAT', 'INFARTOX.DAT', 'CHRH.DAT', 'HAOSO.DAT', 'HAOBJ.DAT']
     for f in nec:
         if not hay(D, f): informe('FALTA %s' % f); ok = False
     ls = sorted(os.listdir(D))
