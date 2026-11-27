@@ -6548,3 +6548,44 @@ capturas A | B de YOSE -> GRAN, PALM -> ALPI y los menus, sh/ y py/).
 | tope (real) | 14,55 | 14,05 |
 | tramo (real) | 7,62 | 12,91 |
 
+
+## Rev 2.9.9.c (revision): repaso del diff 467dd28..adc6c06 (2026-11-27)
+
+Repaso de todo lo de la 2.9.9.c leyendo el codigo; sin tiradas nuevas (lo medido sale de los registros de la medida
+final). No ha hecho falta cambiar codigo.
+
+Comprobado leyendo (no medido):
+- TRAMO_LISTA: el bucle de tramos de dibuja_etapa no tiene salidas a medias, asi que la lista `dif` de la primera pasada
+  lleva todos los tramos de la segunda; `it` cabe en 16 bits (tramos_nodo no hace la tabla con mas de 65535 mallas). Los
+  2 KB de `dif` van en la pila del hilo principal (64 KB en KallistiOS).
+- ETAPA_FINO: en un tramo de nodo todas las mallas son de ese nodo (tramos_nodo), asi que mirar pvs_ent una vez por
+  tramo da lo mismo que por malla.
+- INDICES_FINO: las mismas cuentas que ta_cabe fuera de la etapa y de la reserva (ta_prim no toca ta_vb con las
+  cabeceras). El coche, el trafico y el fantasma no se dibujan con ta_en_etapa ni ta_en_bo.
+- RECORTE_TIRAS: los trozos de tira van por envia_tira, el mismo camino que ya usaban las mallas enteras delante; no hay
+  culling en ninguna cabecera. Si un trozo no cabe en el TA se queda fuera entero (antes, triangulo a triangulo).
+- PVS_RACHAS: los mismos bits que el bucle de antes (misma mascara, mismo padre del nodo lejano).
+- CIELO_TOPE: el cielo sigue bajo el tope del cuadro (ta_lim, que ya descuenta lo 2D): no puede desbordar el TA. Lo
+  que puede pasar es que en la lista transparente se coma parte de la reserva del coche y el trafico.
+- sig_pano_busca solo se llama con la etapa siguiente (rama `mo == &sig` de pvs_paso) y en el hilo principal, con el
+  modelo ya leido. SUPUESTO para la consola: con un candidato que es todo de recorte (GRAN 60) recorre todas las mallas
+  una vez (1 MB de malla_t): un cuadro largo en la union, que Flycast no cuenta.
+- Las opciones de vuelta atras compilan todas juntas (TRAMO_LISTA, INDICES_FINO, RECORTE_TIRAS, ETAPA_FINO, PVS_RACHAS,
+  GEO_RUMBO y FONDO_CIELO a 0, SIG_PANO_R=0, SIG_CUP_F=1e9, CIELO_TOPE=1).
+- Datos: el juego no abre ningun fichero nuevo; vale con los datos de la 2.9.9 / 2.9.9.b. tools/regenera.py solo usa
+  numpy y tools/pak_union.py (ya estaban en el paquete de Windows), sin rutas fijas ni programas nativos nuevos;
+  cielos_viejos da (False, False) con los datos de ahora y, si no puede leer, no borra nada.
+- AVISO: con datos de antes del arreglo de las UV, la herramienta (tambien la de Windows, que siempre pasa por
+  regenera) borra etapas o uniones y las rehace: horas. Para mirar el cielo lee SEGS.PAK entero (235 MB) una vez.
+
+La "regresion" de la meta de RUIN, explicada con los registros de la medida final (medido):
+- Los cuatro nodos (6, 8, 795, 796) no son carteles; salen con la razon "detras" (detras de la camara) en el segundo
+  del cambio de camara de la meta, junto con otros 120 ("detras +124/121/50"): es el corte de camara.
+- En A no cuentan porque en ese momento el reparto esta hundido: A llega a la meta con el nivel de salto a 3,2 y tras
+  el corte de camara queda "corte 1-4 m, falta 8-16 %" durante unos 3 s (la escena de la meta sin parte de la etapa). B
+  llega con el nivel a 0 y dibuja todo ("corte 3444 m, falta 0,0 %").
+- No es una falta nueva: en B la escena de la meta sale entera. SUPUESTO: en la consola, si se llega a la meta con el
+  salto alto, pasara lo de A (ya pasaba en la 2.9.9.b).
+
+Mod taxi: el cherry-pick de los cuatro commits sobre origin/rev-1.0 (46908c7), simulado con git merge-tree, entra sin
+conflictos y compila desde git archive con el mismo aviso de siempre (or_buf).
