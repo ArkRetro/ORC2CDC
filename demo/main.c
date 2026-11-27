@@ -4428,6 +4428,9 @@ static void traf_aparece(void)
                 for (j = 0; j < NTRAF && traf[j].carril >= 0; j++) ;
                 if (j >= NTRAF) break;
                 traf_abre(traf + j, s_etapa + (float)sc * m_pos, lc < NCARRIL ? lc : NCARRIL - 1, md, 0, traf_ult_pos); traf[j].ha_m = mk;
+                traf[j].ha = 1;                                 /* (c2c7: a la velocidad de la carretera, como los de la mision del
+                                                                   INFARTO; con la del trafico, 35..97 % de la del jugador, no se
+                                                                   les alcanzaba en la peticion. PROBABLE) */
 #ifdef PRUEBA_C14
                 dbglog(DBG_INFO, "C14: coche %d en la seccion %d carril %d (plaza %d)\n", mk & 0xff, sc, lc, j);
 #endif
@@ -6042,6 +6045,16 @@ static void piloto(const coche_t *c, float *giro, float *gas, float *freno)
         xc = xs[mejor];
 #ifdef PRUEBA_RAMA
         if (piloto_rama(c->s)) xc = PRUEBA_RAMA ? 9.0f : -9.0f;   /* prueba: hacia el lado de esa rama */
+#endif
+#ifdef PRUEBA_C14V
+        {   int o_, ob = -1; float od = 90.0f;                  /* prueba (C2C, tipo 14): hacia el coche con numero mas cercano por */
+            int o14, s14;                                       /* delante (por los carriles del trafico, que en LASV van por la */
+            if (variante == 5 && camp_cuenta14(&o14, &s14)) {   /* otra calzada) */
+                for (o_ = 0; o_ < NTRAF; o_++) if (traf[o_].carril >= 0 && (traf[o_].ha_m & HA_CAMP) && !(traf[o_].ha_m & HA_SUELTO) &&
+                                                   traf[o_].c.s > c->s + 4.0f && traf[o_].c.s - c->s < od) { od = traf[o_].c.s - c->s; ob = o_; }
+                xc = ob >= 0 && od < 80.0f ? traf[ob].c.x : carril_x(c->s + 40.0f, 2);
+            } else if (variante == 5) xc = carril_x(c->s + 40.0f, 2);   /* (y antes: por los carriles del trafico) */
+        }
 #endif
 #ifdef PRUEBA_HA_CONOS
         {   float lat;                                          /* prueba: hacia el objeto de la clase pedida (haobj.c) */

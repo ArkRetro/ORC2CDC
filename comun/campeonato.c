@@ -649,6 +649,9 @@ void camp_autos(haobj_auto_t *v, int n)
 #ifdef PRUEBA_C14
                 if (abs(v[i].sec - js) <= 1 && (rand() & 1)) v[i].golpe = 1;   /* prueba: la mitad de los que pasa a su lado */
 #endif
+#ifdef PRUEBA_C14V
+                {   static int t_; if (abs(v[i].sec - js) <= 2 && ++t_ % 10 == 0) dbglog(DBG_INFO, "C14V: coche %d a %.1f m (radio %.1f), seccion %d / %d\n", k + 1, (double)sqrtf(d2(v[i].pos, C->xyz)), (double)r, v[i].sec, js); }
+#endif
                 if (d2(v[i].pos, C->xyz) < r * r || v[i].golpe) {   /* +0x72 += valor (no baja de 0) */
                     int a = C->suma; C->suma += C->v14[k]; if (C->suma < 0) C->suma = 0;
                     C->k14_cambio += C->suma - a; C->k14_toq = 1;
