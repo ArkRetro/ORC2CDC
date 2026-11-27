@@ -103,6 +103,14 @@ def extra(elf, V, u32, par):
     # 0x1dcaf8: la tabla 0x40b9a0 de 0x1dcbb8, copiada en +4 del registro del anillo 0x5d51f8)
     ta = par(0x1dcb44, 0x1dcbb8); assert ta == 0x40b9a0, hex(ta)
     sec.append((b'ANI1', elf[V(ta):V(ta) + 24]))
+    # ESC1: 8 u32, el resultado de la carrera del tipo 14 por el puesto - 1 (45F7F0 = PS2 0x1ab6a0: la tabla 0x3f7328 de
+    # 0x1aba2c)
+    te = par(0x1aba2c, 0x1aba30); assert te == 0x3f7328, hex(te)
+    sec.append((b'ESC1', elf[V(te):V(te) + 32]))
+    # ESC2: 2 x 10 x 12 bytes, los escoltas de la accion -12 (0x1ab3c8: la tabla 0x368528 + w4 x 0x78; cada uno {u16
+    # seccion desde w6 (0xffff: fin), u8 carril, u8 0, u32 modelo, s8 +8, u8 +B74, u16 0}); solo hay 2 (w4 0 / 1)
+    tk = par(0x1ab3f4, 0x1ab404); assert tk == 0x368528, hex(tk)
+    sec.append((b'ESC2', elf[V(tk):V(tk) + 2 * 0x78]))
     cab = 8 + 12 * len(sec); out = bytearray(b'HRX1' + struct.pack('<I', len(sec))); datos = b''
     for tag, d in sec:
         out += tag + struct.pack('<2I', cab + len(datos), len(d)); datos += d
@@ -608,6 +616,10 @@ def main():
         assert tok >> 16 == 0x2b; escenas.append(('HA_HB%d' % i, tok & 0xffff, todos(0x2b, tok), 0x2b))
     assert [u32(a) & 0xffff for a in (0x1ad5e4, 0x1ad5f8, 0x1ad61c)] == [0x3f, 0x40, 0x41], 'misiones especiales 2B003F..41'
     for i in range(3): escenas.append(('HA_HS%d' % (i + 1), 0x3f + i, todos(0x2b, 0x2b003f + i), 0x2b))
+    # (INFARTO 3) el puesto de la carrera del tipo 14 (45B7D0 = PS2 0x1abca0): 2B0005 (cuadro 0) y 2B0006 (cuadro puesto - 1)
+    # en (0, 30), capa 1
+    assert u32(0x1abcb4) & 0xffff == 5 and u32(0x1abcec) & 0xffff == 6, 'puesto 2B0005 / 2B0006'
+    escenas.append(('HA_RK0', 5, range(1), 0x2b)); escenas.append(('HA_RK1', 6, todos(0x2b, 0x2b0006), 0x2b))
     # 429530 (x, y) con 4294C0 (la mitad del tamano de la escena, PS2 0x1156c0): el uso lleva (w / 2 - 320, h / 2 - 240)
     # y la demo pasa la x / y del original sin el 4294C0 (hud.c: escena centrada en (320, 240))
     desp = {}

@@ -948,6 +948,7 @@ uint32_t robot_movimiento(int p) { return MOT(p)->id; }
 int robot_personaje(int p) { return listo && p >= 0 && p < (int)nper ? (int)per[p].kind : -1; }
 float robot_cuadro(int p) { return MOT(p)->f0c; }
 int robot_estado(int p) { return p ? lg.a_est : lg.d_est; }
+int robot_fin(int p) { return fin_mov(MOT(p)); }
 
 /* ---------------------------------------------------------------- el banderero de la salida (ROB03)
    PS2 (SLES-53998): init 0x2046f0 (PC 488710), control 0x204888 (PC 488820), huida 0x204ca0 (PC 487A30), dibujo

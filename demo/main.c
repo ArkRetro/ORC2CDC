@@ -4196,7 +4196,7 @@ static void traf_infarto(void)
     infarto_coche_nuevo_t n; int i, m, l; float s;
     {   haobj_auto_t v[NTRAF];                                  /* (INFARTO 3) 46D250 / 46DB60: las plazas para las peticiones */
         for (i = 0; i < NTRAF; i++) { v[i].pos = traf[i].carril >= 0 ? traf[i].c.pos : NULL; v[i].fw = traf[i].c.fw; v[i].up = traf[i].c.up; v[i].marca = traf[i].ha_m;
-            v[i].sec = (int)floorf((traf[i].c.s - s_etapa) / m_pos); }
+            v[i].sec = (int)floorf((traf[i].c.s - s_etapa) / m_pos); v[i].clase = traf[i].ha - 1; v[i].v = &traf[i].c.v; v[i].v_des = &traf[i].v_des; }
         infarto_autos(v, NTRAF);
         for (i = 0; i < NTRAF; i++) traf[i].ha_m = v[i].marca;
     }
@@ -4223,7 +4223,7 @@ static void traf_infarto(void)
     if (i >= NTRAF) { infarto_coche_abierto(0); return; }
     l = n.carril < 0 ? 0 : n.carril >= NCARRIL ? NCARRIL - 1 : n.carril;
     traf_abre(traf + i, s, l, m, n.modelo == 0x26 || n.modelo == 0x2b ? n.id % 2 : n.id % 3, traf_ult_pos);
-    traf[i].ha = 1; traf[i].c.v = 0;                            /* 45D470: +1C4 = 0, +B58 = +B5C = 0x12 */
+    traf[i].ha = n.clase >= 0 ? 1 + n.clase : 1; traf[i].c.v = 0;                 /* 45D470: +1C4 = 0, +B58 = +B5C = 0x12 (ha: la clase + 1) */
     dbglog(DBG_INFO, "INFARTO: coche de la mision clase %d modelo %d seccion %d carril %d (jugador en %.0f m de la etapa)\n",
            n.clase, n.modelo, n.seccion, l, (double)(yo.s - s_etapa));
     infarto_coche_abierto(1);
@@ -5479,9 +5479,10 @@ static void traf_paso(float dt)
             }
             if (traf_otra_rama(t)) { traf_aparca(t); continue; }
         }
-        if (t->rc) {                                            /* 477F60 con +4 0x20 y 80FB14: -15 / 0x46 */
+        if (t->rc || t->ha == 7) {                              /* 477F60 con +4 0x20 y 80FB14: -15 / 0x46 (INFARTO 3: y los
+                                                                   escoltas del tipo 14, clase 6 = coches de carreras, PROBABLE) */
             int dd = (int)floorf((t->c.s - yo.s) / TR_POS);
-            if (dd < -15 || dd > 0x46 || t->c.s > longitud - 20.0f) { traf_aparca(t); continue; }
+            if ((dd < -15 && !(t->ha == 7 && infarto_hud()->tipo == 14)) || dd > 0x46 || t->c.s > longitud - 20.0f) { traf_aparca(t); continue; }
         } else if (t->c.s < yo.s - TR_CIERRA_ATRAS * m_pos || (!t->ha && t->c.s > yo.s + TR_CIERRA_DELANTE * m_pos) ||
             t->c.s > longitud - 20.0f) {                        /* los de la mision (+C5C 0x40000): por delante 0x270F */
             traf_aparca(t); continue;                           /* 477F60: cerrado */

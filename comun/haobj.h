@@ -53,7 +53,8 @@ int  haobj_lista(haobj_dib_t *v, int max, const float ojo[3]);
    (registro 0x2a del banco 0x57, 1aa5b8) en los puntos l[2][3] (INFARTOX.DAT ANI1) del marco de cada coche vivo.
    Por plaza de trafico: pos / fw / up del coche (pos NULL: plaza libre) y marca (+C5C 0x20000: 0 en un coche nuevo; la
    pone el modulo y la plaza la guarda). Un paso de logica mientras la peticion es del tipo 11 */
-typedef struct haobj_auto_s { const float *pos, *fw, *up; int marca, sec; } haobj_auto_t;   /* sec: la seccion de la etapa */
+typedef struct haobj_auto_s { const float *pos, *fw, *up; int marca, sec, clase; float *v, *v_des; } haobj_auto_t;
+/* sec: la seccion de la etapa; clase: +324 de los coches de la mision (-1 los otros); v / v_des: m/s (los escoltas del 14) */
 void haobj_anillo(haobj_auto_t *v, int n, const float *l);
 void haobj_anillo_vacia(void);           /* 0x1df060 (la puesta del 11) y al acabar la peticion: sin corazones */
 int  haobj_anillo_toca(const float pos[3]);   /* 0x1aa3e8: los corazones a 4 m (xz) del jugador se cogen; cuantos */
@@ -62,6 +63,7 @@ int  haobj_anillo_toca(const float pos[3]);   /* 0x1aa3e8: los corazones a 4 m (
    los pares se sueltan si un coche falta o se separan. Sin dibujo: en la PS2 el de la peticion 9 (0x1aa1d8) es vacio */
 #define HA_PAR    0x10000000             /* +C5C 0x8000 (en la marca de la plaza) */
 #define HA_SUELTO 0x20000000             /* +C5C 0x10000: el par ya cruzado (0x1def90) */
+#define HA_ESC    0x40000000             /* escolta de la carrera del tipo 14 (en la lista 0x589c48 de 0x1ab2d8) */
 #define HA_SERIE  0x0fffffff
 void haobj_pares(haobj_auto_t *v, int n, int lo, int hi, const float jug[3]);
 void haobj_pares_vacia(void);
