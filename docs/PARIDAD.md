@@ -8211,3 +8211,90 @@ adjust y los de recorte.
   BK498..508): 62 SEG (2637 texturas, +6044 KB de VRAM sumados) y 509 BK (5287 texturas); salida en scratchpad
   modos/mip/dint_out (575 ficheros), +6,03 MB en el GD: clasico con 35,9 MB libres. nav3.sh: "VOZ: VOCES.DAT, 35
   muestras", libre 408K al arrancar, zona del curso en BEAC con 371K libres (igual que sin mipmaps), sin "Out of memory".
+## COAST 2 COAST: campeonatos, minijuegos (agente c2c16, 2026-11-27)
+
+Sobre integra (658f329). El tipo de peticion 16 (104 peticiones, casi todas de Holly). Todo en Flycast (nivel E), no en la
+consola. Datos de prueba: $S/modos/c2c/dat16 (CAMP.DAT con 'M161' detras de lo de antes, cuyos 30 518 primeros bytes salen
+iguales byte a byte; MJHUD.DAT nuevo), carpeta montada con h16/datos2.sh (enlaces a $S/dint + dat16 en modos/c2c/datos16);
+scripts en $S/modos/c2c/h16 (los de h6 para este worktree, pantalla :94; py/r16.py lista los registros de +0x7c de cada
+peticion del 16, py/ver46.py pinta escenas del banco 0x46). Capturas y registros en $S/modos/c2c/cap16.
+
+### Lo averiguado (SLES-53998, clase 0x29f520 de 0x1860 bytes, vtable 0x423a80)
+- Lo que piden los guiones (py/r16.py): subtipo 2 x 22, 1 x 20, 0 x 16, 6 x 15, 3 x 13, 4 x 9, 5 x 9 (no hay subtipo 7: las
+  tablas 0x4239f0 / 0x423a10 / 0x423a30 tienen 7 entradas y un 0).
+- Control (+0x24, 0x29f7a0). Fase 1: 0x2a0d08 reparte los registros de 0x2c de +0x7c de los parametros ({+0x20 clase 0
+  aviso / 1 puerta, +0x24 simbolos / carriles, +0x26 / +0x28 secciones, relativas al inicio si +0x80, +0x2a cuantos: con 2 o
+  mas repartidos de +0x26 a +0x28}) en la lista A (+0xc, +0x70) y B (+0x8a4, +0x72) de 50 x 0x2c ({+0..+0x14 seis simbolos,
+  +0x18 por pasar, +0x1c el carril bueno, +0x1d el simbolo bueno, +0x24, +0x26 la seccion}); las secciones de las puertas a
+  +0x113c (+0x74) y por puerta 0x2a3778 pone en los n + 1 bordes de sus n carriles objetos de la clase 6 del banco (los
+  conos; 0x1d68f8 / 0x1d7748, +0x18 = 6); despues el subtipo (0x4239f0). Fases 4..6: el paso del subtipo (0x423a10) y cada
+  600 pasos (contador global 0x6213a0) una voz de animo 0x1ac3d8(id, 0x3c, 0): 0x4239c0[k % 2] (subtipos 0 / 1), 0x4239c8[k
+  % 3] (2), 0x4239d8[k % 3] (3..6). Fases 2..6: +0x1204 cuenta 0..30 (el vaiven). Sin bono de nota 6 (la fase 5 pasa por el
+  paso del subtipo, que solo actua en la 4).
+- La puerta (0x29fb28(n, k)): el jugador en k / n < f < (k + 1) / n (f de borde a borde en la seccion de la puerta); bien: el
+  medidor + 80 x 1,1 / puertas, +0x3d78 = 1 y 0x114b68(0x2c0002, 5, 3) (el destello); mal: el efecto 0xd4.
+- Dibujo de sprites (+0x34, 0x29fe00 -> por subtipo 0x423a30 -> 0x2a0138 por registro entre la seccion del jugador - 2 y
+  + 50): filas = +0x24 / columnas en los laterales (fila + 0,5) / filas, 0,1 de fila hacia fuera del centro; columnas: +-2,5 m
+  (0x423b88) y altura (0x423bb0: la del medio + 4 m con 3); a 2,5 m del suelo + sin(+0x1204 / 30 x pi) (puertas y los avisos
+  de 0, 1, 3, 4); sprite 3D 0x115870 a escala 1,5 de la tabla del subtipo: 0 0x423ae0 (6 frutas), 1 0x423b10 (9 frutas y 12
+  animales, cuantos en 0x423ad8), 2 0x423b68 (7 animales, solo en las puertas), 3 numeros con las cifras de 0x423bdc
+  (0x2a0838).
+- Dibujo 3D (+0x2c, 0x29fd50 -> 0x29fef8 con 1): en cada puerta el modelo de 0x1a7ce0 (tabla 0x368508 por idioma: 0x1ee000b,
+  el registro 11 de obj_tour_pmt, un quad con textura) con 0x232e60 a escala (5, 1,5, 2,5). SIN PORTAR.
+- Subtipo 2, el sonido (0x2a1ba0 / 0x2a1e00): por puerta el carril bueno rand % n y el animal +8 de los parametros (el azar
+  del banco SOUND2..8 de la quinta tanda: SOUNDn solo trae la voz 0x1a7 + n - 2) o rand % 7 (SOUND.PAK, una sola peticion en
+  la etapa), el mismo en el aviso k y en los demas carriles otros distintos; al pasar el aviso su voz 0x423c30[animal]
+  (0x1a7..0x1ad, prioridad 0xb) y 0x232350 (el 2B003D en +0x3e6c del gestor).
+- Subtipo 1, el distinto (0x2a1618 / 0x2a1948): por puerta una clase (rand % 2): el bueno de ella, los demas distintos de la
+  otra; el aviso k igual que la puerta (0x2a18a4 copia los simbolos); el aviso se da a 20 secciones (solo 0x232350).
+- Subtipo 0, la memoria (0x2a1150 / 0x2a13f8): el aviso k con +0x24 frutas rand % 6; la puerta k con 2 x +0x24 en dos filas,
+  la buena (rand % 2) igual que el aviso y la otra con al menos una distinta en su sitio; se mira en 2 (0x29fb28(+0x24 de la
+  puerta / +0x24 del aviso k)).
+- Subtipo 3, la suma (0x2a2080 / 0x2a24d8): el aviso con un numero por nivel (+0x24: 0x3b5648 pares {de, hasta}; con rand
+  < 0,5 de..hasta, si no 1..hasta; nivel 1 negativo con rand % 5 == 0, nivel 2 con rand & 3 == 0); en la puerta el carril
+  bueno lleva la suma de los avisos desde la puerta anterior y los demas la suma - 5 + rand % 10, distintos. SIN PORTAR (las
+  cifras 0x423bdc y 0x2a0838).
+- Subtipo 6, los coches (0x2a3300 / 0x2a3510): el trafico de la peticion (0x1f1a88 / 0x1f20e8 con la tabla de +0x10, +0x64 o
+  0x104 los modelos, 0x2a3bd0 con la lista +0x5c, 0x22dac0), el bueno es la cuenta +0x7a (la lleva otro codigo) y los demas
+  bueno - 1 + rand % 3; SIN PORTAR (necesita el generador 0x1f1a88, sin portar). 4 y 5: SIN EMPEZAR.
+
+### HECHO: subtipos 2, 1 y 0 (comun/minijuego.c, -Os)
+- tools/conv_camp.py `minijuegos`: el bloque 'M161' detras de CAMP.DAT (las voces 0x423c30, el animo 0x4239c0.., los 34
+  sprites de los subtipos 0..2 como grupos MJ_kk, 0x423ad8, 0x423b88 / 0x423bb0 y por peticion sus registros con las
+  secciones de la etapa) y MJHUD.DAT (los 23 sprites distintos del banco 0x46, conv_hud.grupo_escena, 149 KB); regenera.py
+  paso camp. CAMPHUD.DAT, CAMPOBJ.DAT y VOCESM.DAT salen iguales.
+- Enganches: campeonato.c (camp_inicia -> mj_inicia, camp_libera -> mj_libera, case 16 -> mj_paso), main.c (MJHUD.DAT con
+  CAMPHUD.DAT, `camp_mundo_` el punto de camp_obj_ con dx, ha_spr3d tambien con mj_spr3d y los grupos MJ_ de MJHUD.DAT).
+- Lateral: la fraccion de camp_obj (0 el borde -iz, SUPUESTO de c2c3) para los conos y los sprites, y 1 - c->lat para mirar
+  el carril: las dos con el mismo criterio (en cap16/mos_t2a el elefante bueno a la derecha y el coche a la izquierda: "mal").
+- DESVIACION / SIMPLIFICADO: sin el cartel 3D de la puerta (0x1ee000b) ni el 2B003D del aviso (0x232350); el destello
+  0x114b68(0x2c0002, 5, 3) es el HA_S02 de HAHUD.DAT sobre el coche a escala 0,7 (la de los arcos; SUPUESTO que 5 sea el
+  coche); los conos son los de la clase 6 de HAOSO.DAT (salen amarillos y negros); sin las bifurcaciones (0x176e20: dos
+  carreteras, no las hay dentro de una etapa de la DC).
+- E (`-DPRUEBA_AUTO -DPRUEBA_CAMP=2 -DPRUEBA_CAMP_NODO=7 -DPRUEBA_CAMP_LISTA=1 -DPRUEBA_SIN_TIEMPO`, Alpine al reves, 16/2
+  160..225 y 16/1 300..645): "aviso 0 en la seccion 170: animal 6", "VOZ 0x1ad (peticion)", el perro y el elefante sobre sus
+  carriles entre los conos (cap16/mos_t2a), el piloto por el otro: "mal", nota 0 (cap16/t2a). Con `-DPRUEBA_MJ` (la puerta
+  cuenta como pasada por el carril bueno; el piloto no elige carril): "bien", "peticion 16 hecha: 88 - 0, nota 6" (t2b); el
+  16/1 con sus 3 puertas de 3 (la bebida, la naranja y el mono en cap16/mos_t1) "88 - 34, nota 4" y la etapa nota 5. 16/0
+  (nodo 2 lista 0, Las Vegas al reves, 135..320, 3 avisos y 3 puertas): las frutas en dos filas de 2 (cap16/mos_t0b), "88 - 0,
+  nota 6". NO verificado: un carril bueno elegido conduciendo; la voz no escuchada (Flycast sin audio, por el registro).
+- Medidas (DIAG_MS, la misma pasada con y sin `-DDIAG_SIN_MJ`, cap16/medidas): 16/2 39,56 / 39,77 fps (-0,21), 12 muestras;
+  16/1 39,39 / 39,57 (-0,18), 41 muestras. Triangulos: los conos 10 de media (57 / 76 como mucho, los modelos del INFARTO);
+  los sprites son quads 2D fuera de la escena (como mucho 8 a la vez).
+- RAM al arrancar (h16/nav3.sh, MODO_JUEGO=1, sin defines, compilado limpio, datos16; cap16/nav3_flycast.txt): "RAMMAPA
+  arranque: libre 408K" (igual que integra), "VOZ: VOCES.DAT, 35 muestras", sin "Out of memory". El estado (1,3 KB) va al
+  monton solo en el campeonato; las tablas de MJHUD.DAT tambien, y sus texturas se suben al verse.
+- Datos nuevos: CAMP.DAT + 3,1 KB ('M161'), MJHUD.DAT 149 KB.
+- Pruebas nuevas: PRUEBA_MJ (la puerta por el carril bueno, y un registro de los sprites cada 60 cuadros), DIAG_SIN_MJ (sin
+  sprites ni conos).
+
+### Lo que queda
+- 3 (la suma): falta el numero con las cifras 0x423bdc (0x2a0838) y su conversion; la logica esta arriba.
+- 6 (los coches): necesita el generador del trafico de la peticion 0x1f1a88 / 0x1f20e8 (sin portar desde la quinta tanda).
+- 4 (los regalos, ITEMS: 0x2a26d0 / 0x2a2be0, dibujo 0x2a2d30) y 5 (las ovejas, SHEEP: 0x2a2de8 / 0x2a2e80, dibujo 0x2a3280;
+  la fase 3 no dice la voz 0x8e8): sin empezar.
+- El cartel 3D de la puerta (0x1ee000b de obj_tour_pmt: un quad, 6,4 KB mas en CAMPOBJ.DAT) y el 2B003D del aviso.
+- (c2c16 en integra, 2026-11-27) minijuegos (tipo 16, subtipos 0, 1 y 2) con los mipmaps: nav3.sh "VOZ: VOCES.DAT, 35
+  muestras", libre 408K al arrancar, sin "Out of memory"; CAMP.DAT de c2c/dat16 (bloque M161) y MJHUD.DAT (149 KB);
+  clasico con 35,7 MB libres. OJO al juntar c2c7: CAMP.DAT tiene que salir de tools/conv_camp.py con los bloques de
+  las dos tandas (minijuego.c busca M161 por su firma).

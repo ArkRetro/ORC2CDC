@@ -33,6 +33,7 @@
 #include "../comun/rival.h"
 #include "../comun/mision.h"
 #include "../comun/campeonato.h"
+#include "../comun/minijuego.h"
 #include "../comun/vozmis.h"
 #include "../comun/vmu.h"
 #include "../comun/robot.h"
@@ -3521,6 +3522,7 @@ static int variante = 1;
 static hud_dat_t *ha_hud;                                       /* HAHUD.DAT en el modo INFARTO */
 /* rotulo del INFARTO: sube las texturas del uso al verse y baja las del anterior (VRAM fuera de la zona: ~75 KB) */
 static hud_dat_t *camp_hud;                                     /* CAMPHUD.DAT: los rotulos del banco 0x46 (campeonatos) */
+static hud_dat_t *mj_hud;                                       /* MJHUD.DAT: los sprites de los minijuegos (tipo 16) */
 static void hud_rotulo_uso(hud_dat_t *h, int *actual, const char *nombre)
 {
     static uint32_t n;
@@ -3540,13 +3542,15 @@ static int ha_u_txt = -1, ha_u_mar = -1, camp_u_txt = -1;
 static int ha_cuadros(const char *g) { int u = ha_hud ? hudd_uso(ha_hud, g) : -1; return u < 0 ? 1 : hudd_cuadros(ha_hud, u); }
 static void ha_spr3d(void)
 {
-    static int sub[4], nsub;
-    infarto_s3d_t d[32]; int n = variante == 5 ? camp_spr3d(d, 32, ha_cuadros) : infarto_spr3d(d, 32, ha_cuadros), i, k, ahora[4], na = 0;
+    static int sub[8], nsub;
+    infarto_s3d_t d[32]; int n = variante == 5 ? camp_spr3d(d, 32, ha_cuadros) : infarto_spr3d(d, 32, ha_cuadros), i, k, ahora[8], na = 0;
+    if (variante == 5) n += mj_spr3d(d + n, 32 - n, ha_cuadros);   /* (C2C) los minijuegos: MJ_kk de MJHUD.DAT */
 #ifdef PRUEBA_C11
     { static int t_; if (n && ++t_ % 60 == 0) dbglog(DBG_INFO, "C11: %d sprites (%s uso %d cuadros %d) en %.0f %.0f %.0f\n", n, d[0].g, hudd_uso(ha_hud, d[0].g), ha_cuadros(d[0].g), (double)d[0].p[0], (double)d[0].p[1], (double)d[0].p[2]); }
 #endif
     for (i = 0; i < n; i++) {
-        int u = d[i].g[0] == '#' ? -1 : hudd_uso(ha_hud, d[i].g); float dx = d[i].p[0] - ojo[0], dy = d[i].p[1] - ojo[1], dz = d[i].p[2] - ojo[2], zv, sc;
+        hud_dat_t *h = d[i].g[0] == 'M' ? mj_hud : ha_hud;
+        int u = d[i].g[0] == '#' || !h ? -1 : hudd_uso(h, d[i].g), um; float dx = d[i].p[0] - ojo[0], dy = d[i].p[1] - ojo[1], dz = d[i].p[2] - ojo[2], zv, sc;
         if (d[i].g[0] == '#') {                                 /* (C2C, tipo 14) un numero con las cifras del HUD; rojo el negativo */
             zv = dx * ade[0] + dy * ade[1] + dz * ade[2];
 #ifdef PRUEBA_C14
@@ -3557,20 +3561,21 @@ static void ha_spr3d(void)
             continue;
         }
         if (u < 0) continue;
-        for (k = 0; k < na && ahora[k] != u; k++) ;
-        if (k == na && na < 4) ahora[na++] = u;
-        if (!hudd_uso_residente(ha_hud, u) && hudd_sube_uso(ha_hud, u)) continue;
+        um = h == mj_hud ? u | 0x10000 : u;
+        for (k = 0; k < na && ahora[k] != um; k++) ;
+        if (k == na && na < 8) ahora[na++] = um;
+        if (!hudd_uso_residente(h, u) && hudd_sube_uso(h, u)) continue;
         zv = dx * ade[0] + dy * ade[1] + dz * ade[2];
         if (zv < cerca * 2.0f) continue;
         sc = d[i].esc > 0.0f ? d[i].esc * fx / zv * 0.03125f : 1.0f;   /* (esc <= 0: 429530, sin escala) */
         hudd_escala(sc, sc);
-        hudd_dibuja(ha_hud, u, d[i].cuadro, (dx * der[0] + dy * der[1] + dz * der[2]) * fx / zv,
+        hudd_dibuja(h, u, d[i].cuadro, (dx * der[0] + dy * der[1] + dz * der[2]) * fx / zv,
                     -(dx * arr[0] + dy * arr[1] + dz * arr[2]) * fx / zv, 1, 110 + 0.01f * i, 0);
         hudd_escala(1, 1);
     }
     for (k = 0; k < nsub; k++) {
         for (i = 0; i < na && ahora[i] != sub[k]; i++) ;
-        if (i == na) hudd_baja_uso(ha_hud, sub[k]);
+        if (i == na) hudd_baja_uso(sub[k] & 0x10000 ? mj_hud : ha_hud, sub[k] & 0xffff);
     }
     memcpy(sub, ahora, sizeof(int) * (size_t)na); nsub = na;
 }
@@ -8388,6 +8393,7 @@ FRIO static void camp_bancos_(int n, const uint8_t *t, const uint8_t *b, int f, 
 static void camp_se_(int id) { if (voz_ok) sfx_voz_se(id); }
 static void camp_millas_(int m) { menu_suma_millas((uint32_t)m); }
 static void camp_obj_(int cl, int tipo, float sec, float lat, float esc);
+static void camp_mundo_(float sec, float lat, float dx, float p[3]);
 static void camp_chica_(int que, uint32_t v);
 static void camp_golpe_(void);
 static void ha_punto(int sec, float *p, float *fx, float *fz);
@@ -8414,7 +8420,7 @@ FRIO static void camp_preparado(int auto_)
     }
     camp_g = g; curso_pedido = CAMP_ARBOL(g); nodo_salida = cn > 0 ? cn - 1 : 0;
     if (g == 0) preset_curso = 0;                               /* el curso de OutRun 2 SP: el preset 0 (PROBABLE) */
-    camp_graba = menu_nota_camp; camp_voz = camp_voz_; camp_se = camp_se_; camp_millas = camp_millas_; camp_obj = camp_obj_; camp_chica = camp_chica_; camp_golpe = camp_golpe_; camp_bancos = camp_bancos_; camp_punto = ha_punto;
+    camp_graba = menu_nota_camp; camp_voz = camp_voz_; camp_se = camp_se_; camp_millas = camp_millas_; camp_obj = camp_obj_; camp_chica = camp_chica_; camp_golpe = camp_golpe_; camp_bancos = camp_bancos_; camp_punto = ha_punto; mj_mundo = camp_mundo_;
     dbglog(DBG_INFO, "CAMP: campeonato %d, arbol %d, salida nodo %d, casilla %d\n", g, curso_pedido, nodo_salida, cl);
 }
 /* los objetos de la peticion (comun/campeonato.c pon_objetos) en el mundo: la seccion sec de la etapa y la fraccion lat
@@ -8452,6 +8458,12 @@ FRIO static void camp_obj_(int cl, int tipo, float sec, float lat, float esc)
     dbglog(DBG_INFO, "DIAGHA camp: clase %d tipo %d seccion %.1f lat %.2f en (%.1f, %.1f, %.1f); coche (%.1f, %.1f, %.1f)\n", cl, tipo, (double)sec, (double)lat,
            (double)p[0], (double)p[1], (double)p[2], (double)yo.pos[0], (double)yo.pos[1], (double)yo.pos[2]);
 #endif
+}
+static void camp_mundo_(float sec, float lat, float dx, float p[3])   /* (minijuego.c) el punto de camp_obj_, sin el objeto */
+{
+    float th, iz, de, x, s = s_etapa + sec * m_pos;
+    ruta_en(s, p, &th, &iz, &de); x = -iz + lat * (iz + de) + dx;
+    p[0] += x * cosf(th); p[2] += x * sinf(th); p[1] = altura(s, x);
 }
 FRIO static void camp_golpe_(void)                                   /* el meteorito: 0x182d38 (estado 7) y v x 0,9 */
 {
@@ -15676,6 +15688,7 @@ int main(int argc, char **argv)
             }
             if (ha_hud && !reintenta) { hudd_cierra(ha_hud); ha_hud = NULL; ha_u_txt = ha_u_mar = -1; }   /* INFARTO */
             if (camp_hud && !reintenta) { hudd_cierra(camp_hud); camp_hud = NULL; camp_u_txt = -1; }   /* campeonatos */
+            if (mj_hud && !reintenta) { hudd_cierra(mj_hud); mj_hud = NULL; }
             if (ha_mod_ok && !reintenta) { libera_modelo(&ha_mod); ha_mod_ok = 0; }
             if (camp_mod_ok && !reintenta) { libera_modelo(&camp_mod); camp_mod_ok = 0; }
             if (c2c_hud && !reintenta) { hudd_cierra(c2c_hud); c2c_hud = NULL; }                       /* COAST 2 COAST */
@@ -15921,6 +15934,7 @@ int main(int argc, char **argv)
                        40 KB, se leen del GD al subirlas, ya con la zona del curso reservada) */
                     if (!ha_hud && !(ha_hud = hudd_abre("HAHUD.DAT", 0, 1))) dbglog(DBG_ERROR, "HAHUD: no se pudo abrir\n");
                     if (variante == 5 && !camp_hud && !(camp_hud = hudd_abre("CAMPHUD.DAT", 0, 1))) dbglog(DBG_ERROR, "CAMPHUD: no se pudo abrir\n");
+                    if (variante == 5 && !mj_hud && !(mj_hud = hudd_abre("MJHUD.DAT", 0, 1))) dbglog(DBG_ERROR, "MJHUD: no se pudo abrir\n");
                     if (variante == 5 && !camp_mod_ok) {        /* (C2C) la pelota y el meteorito (CAMPOBJ.DAT, ~27 KB) */
                         const uint8_t *cv; int nc = camp_clases(&cv), q;
                         camp_mod.relleno_propio = 1;
