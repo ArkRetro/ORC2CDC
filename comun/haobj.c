@@ -28,7 +28,7 @@ typedef struct {
 static uint8_t *cab;                     /* el primer sector de HAOSO.DAT */
 static uint32_t lba_o, tam_o, nfich;
 static obj_t *ob; static int nob;
-static int toq_cl[16], ntoq; static uint32_t reloj_obj;
+static int toq_cl[16], ntoq, cru_cl[8], ncru; static uint32_t reloj_obj;
 
 int haobj_inicia(void)
 {
@@ -78,7 +78,7 @@ static void euler(float R[3][3], const float *a, float yaw)   /* Ry(yaw) Ry(ay) 
 void haobj_paso(const haobj_coche_t *c)
 {
     int i; float fx = c->fw[0], fz = c->fw[2], fl = sqrtf(fx * fx + fz * fz);
-    ntoq = 0; reloj_obj++;
+    ntoq = 0; ncru = 0; reloj_obj++;
     if (!ob) return;
 #ifdef DIAG_HA
     {   static int t; float dm = 1e9f; int k, est = 0;
@@ -115,6 +115,20 @@ void haobj_paso(const haobj_coche_t *c)
             if (al > 25.0f && al < 40.0f && fabsf(la) < 25.0f && !o->rg) { o->p[0] = c->pos[0] + fx * al; o->p[2] = c->pos[2] + fz * al; o->rg = 1; }
         }
 #endif
+        if (o->est == 1 && o->tipo == 7) {              /* el arco (0x1d42f0): cruce del paso del coche entre los postes */
+            float ax, az, bx, bz, d1, d2, e1, e2, c0, s0, h = 3.0f * o->esc;
+            if (fabsf(o->p[0] - c->pos[0]) > 30.0f || fabsf(o->p[2] - c->pos[2]) > 30.0f) continue;
+            c0 = o->R[0][0]; s0 = -o->R[2][0];          /* el eje x del arco en el mundo: los postes en (+-h, 0, 0) */
+            ax = o->p[0] + c0 * h; az = o->p[2] - s0 * h; bx = o->p[0] - c0 * h; bz = o->p[2] + s0 * h;
+            d1 = (bx - ax) * (c->ant[2] - az) - (bz - az) * (c->ant[0] - ax); d2 = (bx - ax) * (c->pos[2] - az) - (bz - az) * (c->pos[0] - ax);
+            e1 = (c->pos[0] - c->ant[0]) * (az - c->ant[2]) - (c->pos[2] - c->ant[2]) * (ax - c->ant[0]);
+            e2 = (c->pos[0] - c->ant[0]) * (bz - c->ant[2]) - (c->pos[2] - c->ant[2]) * (bx - c->ant[0]);
+            if (d1 * d2 <= 0 && e1 * e2 <= 0 && (d1 != 0 || d2 != 0) && o->p[1] + h > c->pos[1]) {
+                if (ncru < 8) cru_cl[ncru++] = o->cl;
+                o->est = 2; o->t = 0; o->giro = 0;
+            }
+            continue;
+        }
         if (o->est == 1) {                              /* toque del jugador (0x1d3720) */
             float dx = o->p[0] - c->pos[0], dz = o->p[2] - c->pos[2], dy = o->p[1] - c->pos[1], al, la;
             if (fabsf(dx) > 4.0f || fabsf(dz) > 4.0f || fabsf(dy) > 3.0f) continue;
@@ -137,6 +151,9 @@ void haobj_paso(const haobj_coche_t *c)
                 o->v[0] = fx * c->v * 1.1f + (la >= 0 ? fz : -fz) * 3.0f; o->v[2] = fz * c->v * 1.1f - (la >= 0 ? fx : -fx) * 3.0f;
                 o->v[1] = 5.0f + c->v * 0.1f; o->giro = 0;
             }
+        } else if (o->est == 2 && o->tipo == 7) {       /* 0x1d4508: gira, y a los 3 s se cierra (parpadea el ultimo) */
+            o->giro += 0.2f;
+            if (++o->t >= 180) o->est = 3;
         } else if (o->est == 2 && o->tipo == 6) {
             float t = (float)++o->t / 60.0f;
             o->p[0] = c->pos[0]; o->p[2] = c->pos[2]; o->p[1] = o->v[0] + 25.0f * t - 39.2f * t * t;
@@ -149,6 +166,34 @@ void haobj_paso(const haobj_coche_t *c)
             if (++o->t > 120) o->est = 3;
         }
     }
+}
+int haobj_cruces(int *cl, int max) { int i; for (i = 0; i < ncru && i < max; i++) cl[i] = cru_cl[i]; return ncru; }
+void haobj_arcos(int lo, int hi, const float *t, int (*carriles)(float x, float z), int (*sec)(float x, float z),
+                 void (*dir)(float x, float z, float *fx, float *fz))
+{
+    static float T[64]; int i, n = 0, k = 0, n1, j;
+    if (!ob || !t || !sec) return;
+    for (i = 0; i < nob; i++) if (ob[i].cl == 0x0b && ob[i].est == 1 && (j = sec(ob[i].p[0], ob[i].p[2])) >= lo && j <= hi) n++;
+    if (n > 64) n = 64;
+    for (i = 0; i < nob && k < n; i++) {
+        obj_t *o = ob + i;
+        if (o->cl != 0x0b || o->est != 1) continue;
+        if (k == 0) {                                   /* los anchos de todos con los carriles del primero */
+            float w = carriles ? (float)carriles(o->p[0], o->p[2]) : 3.0f, st;
+            n1 = (int)((float)n * t[3]);
+            st = n1 ? (t[1] - t[0]) / (float)n1 : 0;
+            for (j = 0; j < n1; j++) T[j] = ((float)j * st + t[0]) * w;
+            st = n - n1 ? (t[2] - t[1]) / (float)(n - n1) : 0;
+            for (j = 0; j < n - n1; j++) T[n1 + j] = ((float)j * st + t[1]) * w;
+        }
+        o->esc = T[k];
+        if (dir) {                                      /* 45DB70: la clase 0x0B con el marco de la carretera (45D950) */
+            float fx, fz, a[3] = { 0, 0, 0 }; dir(o->p[0], o->p[2], &fx, &fz); a[1] = atan2f(fx, fz); euler(o->R, a, 0);
+        }
+        if (2.5f > o->esc * 3.0f) o->esc = 0.833333f;   /* 0x1afc7c..0x1afcb4 */
+        k++;
+    }
+    dbglog(DBG_INFO, "HAOBJ: %d arcos en %d..%d, anchos %.2f..%.2f\n", n, lo, hi, (double)(n ? T[0] : 0), (double)(n ? T[n - 1] : 0));
 }
 int haobj_toques(int *cl, int max) { int i; for (i = 0; i < ntoq && i < max; i++) cl[i] = toq_cl[i]; return ntoq; }
 int haobj_cercano(const float pos[3], const float fw[3], int cl, float *lat)
@@ -177,6 +222,7 @@ int haobj_lista(haobj_dib_t *v, int max, const float ojo[3])
     for (i = 0; i < nob; i++) {
         const obj_t *o = ob + i; float dx, dy, dz, d; haobj_dib_t *e;
         if (o->est != 1 && o->est != 2) continue;
+        if (o->est == 2 && o->tipo == 7 && o->t >= 120 && (o->t & 1)) continue;   /* parpadeo del ultimo segundo */
         dx = o->p[0] - ojo[0]; dy = o->p[1] - ojo[1]; dz = o->p[2] - ojo[2]; d = dx * dx + dy * dy + dz * dz;
         if (d > HAOBJ_LEJOS * HAOBJ_LEJOS) continue;
         if (n == max) {                                 /* lleno: sustituye al mas lejano si este esta mas cerca */
@@ -192,7 +238,11 @@ int haobj_lista(haobj_dib_t *v, int max, const float ojo[3])
                 { int q; for (q = 0; q < 3; q++) { T[q][0] = R[q][0] * c - R[q][2] * s; T[q][1] = R[q][1]; T[q][2] = R[q][0] * s + R[q][2] * c; } }
                 memcpy(R, T, sizeof R);
             }
-            if (o->est == 2 && o->tipo != 6) {          /* girando sobre su eje x local */
+            if (o->est == 2 && o->tipo == 7) {          /* el arco cruzado gira sobre la vertical */
+                float c = cosf(o->giro), s = sinf(o->giro), T[3][3]; int q;
+                for (q = 0; q < 3; q++) { T[q][0] = R[q][0] * c - R[q][2] * s; T[q][1] = R[q][1]; T[q][2] = R[q][0] * s + R[q][2] * c; }
+                memcpy(R, T, sizeof R);
+            } else if (o->est == 2 && o->tipo != 6) {   /* girando sobre su eje x local */
                 float c = cosf(o->giro), s = sinf(o->giro), T[3][3];
                 for (a = 0; a < 3; a++) { T[a][0] = R[a][0]; T[a][1] = R[a][1] * c + R[a][2] * s; T[a][2] = -R[a][1] * s + R[a][2] * c; }
                 memcpy(R, T, sizeof R);

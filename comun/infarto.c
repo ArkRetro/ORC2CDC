@@ -108,6 +108,10 @@ static int k6_a, k6_b, k6_max;                      /* 7F23BC, 7F23BE, 7F23C0 */
 static int k7_cl, k7_need, k7_ok, k7_mal;
 /* tipo 15 (recoge monedas): 7F1C9C / 7F1C9E secciones, 7F1CA0 cuantas, 7F1CA2 de la clase 0x0A en el tramo, 7F1CA3 / 7F1CA1 */
 static int k15_need, k15_tramo, k15_a, k15_39;
+/* tipos 16 y 25 (pasa por el arco; 25 derrapando): 7F1C74 clase, 7F1C70 cuantos, 7F1C71 cruzados; tramo de la accion -5
+   (7F24D0 / 7F24D4) para la -11 */
+static int k16_cl, k16_need, k16_n, a5_lo, a5_hi; static const infarto_coche_t *c_act;
+static float ant_pos[3]; static int ant_ok;
 /* tipos 8 y 23 (circula por el azul / el rojo; 23: derrapando) */
 static int k8_a, k8_b, k8_lado, k8_ult, k8_dist, k8_max;   /* 7F2530, 7F2532, 7F2538, 7F253C, 7F2540, 7F2534 */
 /* reacciones de la acompanante que piden las peticiones (487D60 / 487D90 / 487DD0; robot 1: comun/robot.c robot_pide,
@@ -527,7 +531,7 @@ static int sucesos(const uint8_t *t, const infarto_coche_t *c)
 
 /* ---- tipos de peticion: puesta en marcha (464350 / PS2 0x1ae768), control (464D20 / 0x1a7fe4), evaluacion
    (464350 / 0x1aea30) */
-static int portado(int k) { return k == 0 || k == 2 || k == 22 || k == 6 || k == 8 || k == 23 || k == 7 || k == 24 || k == 15; }
+static int portado(int k) { return k == 0 || k == 2 || k == 22 || k == 6 || k == 8 || k == 23 || k == 7 || k == 24 || k == 15 || k == 16 || k == 25; }
 static const uint8_t *pts(int k)                    /* la tabla de 45E2F0 del tipo k (INFARTOX.DAT PTS2) */
 {
     static const uint8_t cero[24];
@@ -544,6 +548,8 @@ static void puesta(const uint8_t *r, const infarto_coche_t *c)
     case 6: k6_a = w0; k6_b = w2; k6_max = 0; reinicia_res(); break;
     case 7: case 24:                                /* 464350 caso 3 (PS2 0x1ae7d0) */
         k7_cl = w6; k7_need = w8; k7_ok = k7_mal = 0; reinicia_res(); break;
+    case 16: case 25:                               /* 464350 caso 9 (PS2 0x1ae8d4) */
+        k16_cl = w6; k16_need = r[8]; k16_n = 0; reinicia_res(); break;
     case 15:                                        /* 464350 caso 8: 45C950 (PS2 0x1ae8a8) */
         k15_a = k15_39 = 0; k15_need = r[8];
         k15_tramo = haobj_cuenta_sec(0x0a, w0, w2, c->seccion_xz);
@@ -614,6 +620,17 @@ static void control(const infarto_coche_t *c)
         got = k7_ok - k7_mal * 3;
         resultado(got >= k7_need ? 800000 : (int)((float)got * (800000.0f / (float)k7_need)));
         break; }
+    case 16: case 25: {                             /* 461850 (PS2 0x1b0570): arcos cruzados, tabla 0x3f07d8 */
+        int tc[8], n = haobj_cruces(tc, 8), i; float v;
+        for (i = 0; i < n; i++) {
+            if (tc[i] != k16_cl || (q == 25 && !(c->d36 > 0))) continue;
+            k16_n = (int8_t)(k16_n + 1); rob_cara(4); rob_para();
+            dbglog(DBG_INFO, "INFARTO: arco cruzado (%d de %d)\n", k16_n, k16_need);
+        }
+        v = k16_n == k16_need ? 800000.0f : 800000.0f / (float)(k16_need ? k16_need : 1) * (float)k16_n;
+        sucesos(pts(16), c);
+        resultado((int)v);
+        break; }
     case 15: {                                      /* 4617A0 (PS2 0x1b0260): monedas tocadas, 0x3f07c0 */
         int tc[16], n = haobj_toques(tc, 16), i;
         sucesos(pts(15), c);
@@ -679,7 +696,8 @@ static void evalua(const infarto_coche_t *c)
             if (cap < hs) { hs = cap; edi = cap * 10000; }
         }
         cierra(nt, edi, hs); break; }
-    case 7: case 24: {                              /* 463150 (PS2 0x1a9470) */
+    case 7: case 24: case 16: case 25:              /* 463150 (PS2 0x1a9470) y 463F00 (0x1b0810, la misma cuenta) */
+    {
         int32_t edi = res_pos(); int hs = edi / 10000, nt = nota(hs);
         if (nt == 7) { float k = mantiene(v_ini - c->kmh); edi += k == 1.0f ? 700000 : (int)(k * 700000.0f); }
         {   int32_t h = corazones_res(edi, nt);
@@ -723,6 +741,13 @@ static int previa(const uint8_t *r, int sec)
     case 2: mueven = 1; break;                      /* -17: 45D830, los de la mision a la velocidad de la carretera */
     case 1: mueven = 1; break;                      /* -18: 45B520 (escoltas: a la del jugador; SIN PORTAR) */
     case 17: trafico = 1; break;                    /* -2: 46E4A0(1) */
+    case 14: a5_lo = w4; a5_hi = rd16(r + 6); break;  /* -5: las marcas de principio y fin (45B000; dibujo SIN PORTAR) */
+    case 8:                                         /* -11: 4611D0 (PS2 0x1afa48): los anchos de los arcos */
+        if (w4 == 0x10 && c_act) {
+            uint32_t l; const uint8_t *t = xsec("ARCO", &l); int tb = rd16(r + 6);
+            if (t && (uint32_t)(tb + 1) * 16 <= l) haobj_arcos(a5_lo, a5_hi, (const float *)(t + 16 * tb), c_act->carriles_xz, c_act->seccion_xz, c_act->dir_xz);
+        }
+        break;
     case 13:                                        /* -6: anuncio de la peticion (tabla 0x3f0280) */
         if (w4 >= 0 && w4 < 26 && portado(w4)) {
             int id = rd16(r + 6) == 1 ? (anu[w4 * 4 + 2] | anu[w4 * 4 + 3] << 8) : (anu[w4 * 4] | anu[w4 * 4 + 1] << 8);
@@ -918,11 +943,14 @@ void infarto_paso(const infarto_coche_t *c)         /* 464D20 */
     reloj++;
     if (!dat) return;
     if (vs_n < 0x57e3f) { vs_suma += c->vel_mf; vs_n++; }
-    hud_coche = c->hud; modelo_jug = c->modelo;
+    hud_coche = c->hud; modelo_jug = c->modelo; c_act = c;
     {   haobj_coche_t oc;                           /* los objetos de la mision: colocacion, toques, vuelo */
         oc.marco = c->marco; oc.suelo = c->suelo; oc.pos[0] = c->x; oc.pos[1] = c->y; oc.pos[2] = c->z;
         oc.fw[0] = c->fx; oc.fw[1] = 0; oc.fw[2] = c->fz; oc.v = c->kmh / 3.6f;
+        if (!ant_ok) { ant_pos[0] = c->x; ant_pos[1] = c->y; ant_pos[2] = c->z; ant_ok = 1; }
+        memcpy(oc.ant, ant_pos, sizeof ant_pos);
         haobj_paso(&oc);
+        ant_pos[0] = c->x; ant_pos[1] = c->y; ant_pos[2] = c->z;
     }
     if (c->en_union) { hoja_t++; hoja_paso(c); }    /* 464D20: 7F8B34 + 1 en la union */
     control(c);

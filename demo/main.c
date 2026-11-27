@@ -8384,20 +8384,36 @@ static void bo_dibuja_malla(const malla_t *ma, int g, uint32_t off, int k0, int 
 #define HA_OBJ_MAX 24
 /* 43F370 para los objetos (comun/haobj.c 45C8E0): la seccion de la etapa del punto de la ruta mas cercano en xz, de
    200 m por detras del coche a 1,6 km por delante (APROXIMADO: el original lee la seccion del poligono de la COLI) */
-static int ha_seccion(float x, float z)
+static float ha_s(float x, float z)
 {
     float s, sb = yo.s, db = 1e18f, p[3], th;
     for (s = yo.s - 200.0f; s < yo.s + 1600.0f; s += 4.0f) {
         float d; ruta_en(s, p, &th, NULL, NULL); d = (p[0] - x) * (p[0] - x) + (p[2] - z) * (p[2] - z);
         if (d < db) { db = d; sb = s; }
     }
-    return (int)floorf((sb - s_etapa) / m_pos);
+    return sb;
+}
+static int ha_seccion(float x, float z) { return (int)floorf((ha_s(x, z) - s_etapa) / m_pos); }
+static void ha_dir(float x, float z, float *fx, float *fz)       /* la direccion de la ruta en el punto mas cercano */
+{
+    float s = ha_s(x, z), a[3], b[3], th;
+    ruta_en(s, a, &th, NULL, NULL); ruta_en(s + 4.0f, b, &th, NULL, NULL); *fx = b[0] - a[0]; *fz = b[2] - a[2];
+}
+static int ha_carriles(float x, float z)                        /* (+0xA4 de los arcos): los carriles distintos del original */
+{
+    float s = ha_s(x, z), c[NCARRIL]; int k, j, n = 0;
+    for (k = 0; k < NCARRIL; k++) {
+        float v = carril_x(s, k);
+        for (j = 0; j < n && fabsf(c[j] - v) > 0.5f; j++) ;
+        if (j == n) c[n++] = v;
+    }
+    return n;
 }
 static modelo_t ha_mod; static int ha_mod_ok; static uint32_t ha_obj_tri, ha_obj_vtx, ha_obj_n, ha_dg[4];
 static void ha_obj_dibuja(int l)
 {
     static matrix_t W __attribute__((aligned(32))), Mo __attribute__((aligned(32)));
-    static haobj_dib_t d[HA_OBJ_MAX]; int n, i, ult; uint32_t k, j;
+    haobj_dib_t d[HA_OBJ_MAX]; int n, i, ult, reg; uint32_t k, j;
     if (l == 0) { ha_obj_tri = ha_obj_vtx = 0; }
 #ifdef DIAG_SIN_HAOBJ
     return;                                                     /* medida: sin dibujar los objetos (la logica sigue) */
@@ -8409,9 +8425,12 @@ static void ha_obj_dibuja(int l)
         float dx = d[i].M[3][0] - ojo[0], dy = d[i].M[3][1] - ojo[1], dz = d[i].M[3][2] - ojo[2], zv = dx * ade[0] + dy * ade[1] + dz * ade[2];
         if (zv < -4.0f) continue;                               /* detras de la camara */
         memcpy(Mo, d[i].M, sizeof Mo);
+        reg = d[i].reg;                                         /* la moneda lejana (tools/conv_infarto.py aligera_monedas) */
+        if ((reg == 0x1c || reg == 0x1d) && zv > 40.0f) reg |= 0x80;
         for (k = 0; k < ha_mod.nnodos; k++) {
             const nodo_t *nd = ha_mod.nodos + k; int g = nd->relleno[0] & 0xff; uint32_t cst = 0;
-            if ((int)(nd->fl & 0xffff) != d[i].reg) continue;
+            if ((int)(nd->fl & 0xffff) != reg) continue;
+            if (d[i].reg == 0x2b && zv > 40.0f && (nd->fl >> 16) & 0x20) continue;   /* el arco lejano: solo los postes */
             ha_dg[0]++;
             for (j = ha_mod.inicio[l]; j < ha_mod.inicio[l + 1]; j++) {
                 const malla_t *m = ha_mod.mallas + j;
@@ -15346,7 +15365,7 @@ int main(int argc, char **argv)
                         hc.d36 = fis_ok ? fis.d36 : 0; hc.seccion_union = cur_en_union ? (int)floorf((yo.s - s_union) / m_pos) : 0; hc.derrapa = yo.t_derrape != 0; hc.kmh = fis_ok ? fis.velocidad_hud : yo.v * 3.6f; hc.vel_mf = fis_ok ? fis.vel_mf : 0;
                         hc.hud = fis_ok ? fpar.hud : 0;
                         hc.ofs = fis_ok ? fis.ofs : 0; hc.d268 = vib_izq; hc.d264 = -vib_der; hc.modelo = modelo_jug;
-                        hc.x = yo.pos[0]; hc.y = yo.pos[1]; hc.z = yo.pos[2]; hc.marco = marco_et; hc.suelo = ha_suelo; hc.fx = yo.fw[0]; hc.fz = yo.fw[2]; hc.seccion_xz = ha_seccion; hc.sig = cur_en_union && cur_rama >= 0 ? cur_sig : -1;
+                        hc.x = yo.pos[0]; hc.y = yo.pos[1]; hc.z = yo.pos[2]; hc.marco = marco_et; hc.suelo = ha_suelo; hc.fx = yo.fw[0]; hc.fz = yo.fw[2]; hc.seccion_xz = ha_seccion; hc.carriles_xz = ha_carriles; hc.dir_xz = ha_dir; hc.sig = cur_en_union && cur_rama >= 0 ? cur_sig : -1;
                         infarto_paso(&hc);
 #ifdef DIAG_HA
                         if (crono % 120 == 0) { dbglog(DBG_INFO, "DIAGHA objetos: %u dibujados, %u triangulos, %u vertices (ultimo cuadro); nodos %u sin mallas %u tope %u, modelo %u nodos %u mallas inicio %u %u %u\n", (unsigned)ha_obj_n, (unsigned)ha_obj_tri, (unsigned)ha_obj_vtx,

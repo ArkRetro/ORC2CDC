@@ -8,6 +8,9 @@ all: rm-elf $(TARGET)
 # Rev 2.9.9.c: los menus compilados por tamano (-Os gana a -O2, que va antes): 19 KB menos de codigo, que son RAM del
 # monton; no son codigo de la carrera. Quitar esta linea vuelve a -O2
 ../comun/menu.o: CFLAGS += -Os
+# (INFARTO, Rev 1.1) lo mismo para el modo y sus objetos y para el frontal de OUTRUN2SP, su ranking y la pantalla de la
+# VMU (fuera de la carrera o sin peso en ella): compensan el codigo nuevo del modo y la RAM del arranque no baja
+../comun/infarto.o ../comun/haobj.o ../comun/fsp.o ../comun/rksp.o ../comun/vmuesc.o ../comun/vmu.o ../comun/registro.o ../comun/modo_video.o final.o nombre.o pcarga.o sp.o: CFLAGS += -Os
 # pvr_state de KallistiOS (la presentacion a FPS_OBJETIVO esconde el render acabado hasta su campo: demo/main.c)
 main.o: CFLAGS += -I$(KOS_BASE)/kernel/arch/dreamcast/hardware/pvr
 include $(KOS_BASE)/Makefile.rules

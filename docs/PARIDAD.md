@@ -6782,3 +6782,43 @@ linea del coche a 25..40 m: el piloto no apunta a ellos), DIAG_HA (registro), DI
 carteles + los postes de 42; la anchura por carril de la accion -11, 4611D0 con la tabla 0x3f7218, y el cruce
 0x1d42f0), 19 (cajas que caen y sueltan estrellas: 461940, tabla 64AAA8), lo visual de 8 / 23 (carriles pintados
 45ECA0 / 45E9B0 y marcas de la accion -5) y 11, 9, 14, 20.
+
+## INFARTO: poligonos de los objetos, RAM del arranque y arcos 16 / 25 (Rev 1.1, 2026-11-27)
+
+**Poligonos (DESVIACION pedida por el usuario: los objetos del modo, reducidos):**
+- Moneda y corazon (0x1c / 0x1d, un disco de 16 lados, 63 triangulos): tools/conv_infarto.py `aligera_monedas` los
+  rehace como un disco de 8 lados con el mismo radio, grosor, textura, UV y color: canto 16 + caras 6 + 6 = 28
+  triangulos / 34 vertices; y una version lejana (registro + 0x80) solo con las caras, 12 triangulos / 16 vertices, que
+  la demo usa desde 40 m (`ha_obj_dibuja`). En las capturas (cap/mon2) no se nota el octagono a la distancia de juego.
+- Arco (0x2b): `aligera_arco` deja los postes (nodo 5, 42 triangulos) y uno de los 4 nodos de destellos (cuadro 0, sin
+  la animacion de vertices ni la cara a la camara, y de sus tiras de 4 vertices solo las 10 primeras): 42 + 144 = 186
+  triangulos (antes 738); desde 40 m solo los postes (42).
+- Medido otra vez (SEQU, peticion 15 cargada, 11 muestras de 30 cuadros, Flycast): objetos 234..352 triangulos por
+  cuadro (antes 756..1260); media de la escena 15423 tri / 22960 vtx con objetos frente a 15036 / 22537 sin dibujarlos
+  (+387 tri, +423 vtx; antes +961 / +1090), dibujo 16,52 frente a 15,72 ms (+0,8), 39,85 frente a 39,86 fps.
+  Arcos (LASV, peticion 16): 213..624 triangulos de objetos por cuadro con 10..17 a la vista.
+
+**RAM del arranque:** -Os tambien en infarto.o, haobj.o y en lo que no es de la carrera o no pesa en ella (fsp.o,
+rksp.o, vmuesc.o, vmu.o, registro.o, modo_video.o del frontal / VMU, y final.o, nombre.o, pcarga.o, sp.o: el final de
+recreativa, el nombre del ranking, la pantalla de carga y el frontal de OUTRUN2SP) y la lista de dibujo de los objetos
+en la pila: el programa queda en 769 KB de texto (antes de la Rev 1.1, 770 KB). nav3.sh: "RAMMAPA arranque: libre
+350K" (antes de la Rev 1.1 344, con los objetos sin esto 333), "VOZ: VOCES.DAT, 35 muestras", sin "Out of memory".
+
+**Tipos 16 y 25 (arcos)** (461850 = PS2 0x1b0570 con la tabla 0x3f07d8; evaluacion 0x1b0810, la misma cuenta que la
+del 7): cuenta los arcos de la clase p6 (0x0B) cruzados (el 25 solo derrapando) con la cara 4; resultado 800000 x
+cruzados / p8.
+- Accion -11 (4611D0 con la clase 0x10 = PS2 0x1afa48): los anchos de la tabla 0x3f7218 (INFARTOX.DAT ARCO) {inicio,
+  medio, final, reparto} x los carriles del primer arco (+0xA4: aqui los carriles distintos de la ruta en ese punto,
+  PROBABLE), los n del tramo de la accion -5 repartidos; si 3 x ancho < 2,5, 0,8333 (0x3f555555).
+- Colocacion: la clase 0x0B con el marco de la carretera (45DB70 / 45D950): aqui el giro de la ruta en el punto mas
+  cercano (APROXIMADO: sin la inclinacion de la carretera).
+- Cruce (0x1d42f0): el paso del coche (posicion anterior -> actual, xz) contra el segmento de los postes en +-3 x ancho
+  y la altura del arco + 3 x ancho por encima del coche; despues el arco gira y se quita a los 3 s, parpadeando el
+  ultimo (0x1d4508). Sin el toque de los postes (1 / 2, efecto 0xCD) ni el sprite 2C0002.
+- E: mision 3 (preset 0) en la clave 7 (LASV): "20 arcos en 100..150, anchos 1,50" (4 carriles x 0,374), 2 cruzados
+  con PRUEBA_HA_TOQUE (el piloto no apunta), +7 corazones (cap/arc). PROBABLE: la colocacion se ve a los lados de la
+  carretera en las capturas; sin poder compararla con el original no se da por verificada.
+
+**SIN PORTAR (PENDIENTE):** 19 (cajas que caen y sueltan las estrellas: 461940, tabla 64AAA8), lo visual de 8 / 23
+(carriles pintados 45ECA0 / 45E9B0 con registros de obj_course_obj_cs_<zona> por mision; marcas de la accion -5
+45B000 / 45B2A0 con los modelos por idioma 64A9E8 / 64AA00) y los tipos 11, 9, 14 y 20.

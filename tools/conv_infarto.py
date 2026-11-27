@@ -81,6 +81,9 @@ def extra(elf, V, u32, par):
     tj = par(0x1af748, 0x1af750); assert tj == 0x3f06e0, hex(tj)
     caso = {0x1af764: 1, 0x1af76c: 2, 0x1af774: 3, 0x1af77c: 0}
     sec.append((b'CLAS', bytes(caso[u32(tj + 4 * i)] for i in range(26))))
+    # ARCO: 16 x 4 f32, los anchos de los arcos de la accion -11 (4611D0 con la clase 0x10 = PS2 0x1afa48: tabla 0x3f7218
+    # + tab x 16 {inicio, medio, final, reparto}, x los carriles del primer arco)
+    sec.append((b'ARCO', elf[V(0x3f7218):V(0x3f7218) + 256]))
     # RGIR: 2 x 8 u32, el movimiento de la acompanante por nota al acabar la peticion (45DED0 = PS2 0x1b3988: 0x3f0a68,
     # 0x3f0a88 con los coches de 45B380)
     ra = par(0x1b39c0, 0x1b39c8); rb_ = par(0x1b39f0, 0x1b39f4); assert (ra, rb_) == (0x3f0a68, 0x3f0a88), (hex(ra), hex(rb_))
@@ -93,7 +96,91 @@ def extra(elf, V, u32, par):
 
 # registros del banco 0x57 (obj_course_obj_common_pmt) que se convierten para los objetos de las peticiones: los
 # conos 0x19 / 0x1e / 0x1f (tipos 7 / 24), las monedas 0x1c / 0x1d (15), el arco 0x2b (16 / 25), la caja 0x30 (19)
-REGS_OBJ = (0x19, 0x1c, 0x1d, 0x1e, 0x1f, 0x30)
+REGS_OBJ = (0x19, 0x1c, 0x1d, 0x1e, 0x1f, 0x2b, 0x30)
+MONEDAS = (0x1c, 0x1d)
+def aligera_arco(mod, reg=0x2b, sueltos=10):
+    """DESVIACION pedida (poligonos): el arco 0x2b lleva los postes (nodo 5, 42 triangulos, opaco) y 4 nodos con la misma
+    malla de destellos (transparente, 174 triangulos, animacion de vertices de 4 cuadros y cara a la camara): queda el
+    primero de esos 4, solo su cuadro 0, y de sus tiras de 4 vertices (destellos sueltos) solo las `sueltos` primeras:
+    42 + 146 = 188 triangulos (antes 42 + 4 x 174 = 738)"""
+    import numpy as np
+    V = np.concatenate(mod.verts)
+    dest = [n for n in mod.nodos if (n[2] & 0xffff) == reg and (n[2] >> 16) & 0x20]
+    if not dest: return
+    cod = dest[0][4] & 0xff
+    fuera = set(id(n) for n in dest[1:]); mod.nodos = [n for n in mod.nodos if id(n) not in fuera]
+    nuevas = []; vs = []; k4 = 0
+    for x in mod.mallas:
+        if (x[7] & 0xff) == cod:
+            if (x[7] >> 8) & 3: continue                    # cuadros 1..3 fuera
+            if x[5] == 4:
+                k4 += 1
+                if k4 > sueltos: continue
+        nuevas.append(list(x)); vs.append(V[x[4]:x[4] + x[5]])
+    mod.mallas = []; mod.verts = []; mod.nv = 0
+    for y, v in zip(nuevas, vs):
+        y[4] = mod.nv; mod.mallas.append(y); mod.verts.append(v); mod.nv += len(v)
+    t = sum(x[5] - 2 for x in mod.mallas if (x[7] & 0xff) == cod)
+    print('  arco ligero: destellos %d triangulos (un nodo, cuadro 0)' % t)
+def aligera_monedas(mod):
+    """DESVIACION pedida (poligonos): la moneda y el corazon (registros 0x1c / 0x1d: un disco de 16 lados, canto en una
+    tira de 35 vertices y las dos caras en tiras de 16 / 18: 63 triangulos) se rehacen como un disco de 8 lados con las
+    mismas UV, radio, grosor, textura y color: canto 16 triangulos y caras 6 + 6 (28). Y una version lejana (registro +
+    0x80, desde 40 m en la demo) solo con las dos caras: 12 triangulos"""
+    import numpy as np
+    V = np.concatenate(mod.verts); nuevas = []; vs = []; nv = 0
+    cod_mon = {}
+    for nd in mod.nodos:
+        if (nd[2] & 0xffff) in MONEDAS: cod_mon[nd[4] & 0xff] = nd[2] & 0xffff
+    mallas_de = {}
+    for x in mod.mallas:
+        if (x[7] & 0xff) in cod_mon and not (x[7] >> 8) & 3: mallas_de.setdefault(x[7] & 0xff, []).append(x)
+    hecho = set(); lejos = {}
+    def octo(x0, R, t, c, cara):
+        ang = [np.pi - k * np.pi / 4 for k in range(8)]
+        P = [(R * np.cos(a), R * np.sin(a)) for a in ang]
+        if cara is None:                                # canto: pares (-t, +t) de 180 grados hacia abajo, cerrado
+            idx = list(range(8)) + [0]; v = np.zeros(18, dtype=V.dtype)
+            for j, k in enumerate(idx):
+                th = 180.0 - 45.0 * j; u = -0.048 - th * 0 - (180.0 - th) / 22.5 * 0.01465
+                for h, z in enumerate((-t, t)):
+                    q = v[2 * j + h]; q['x'], q['y'], q['z'] = P[k][0], P[k][1], z; q['u'], q['v'] = u, 0.081 if z < 0 else 0.008; q['c'] = c
+            return v
+        orden = [0, 1, 7, 2, 6, 3, 5, 4] if cara > 0 else [6, 5, 7, 4, 0, 3, 1, 2]
+        v = np.zeros(8, dtype=V.dtype)
+        for j, k in enumerate(orden):
+            q = v[j]; q['x'], q['y'], q['z'] = P[k][0], P[k][1], t * cara
+            q['u'], q['v'] = 0.5 + P[k][0] / R * 0.49, 0.5 + P[k][1] / R * 0.49; q['c'] = c
+        return v
+    for x in mod.mallas:
+        g = x[7] & 0xff
+        if g in cod_mon and not (x[7] >> 8) & 3:
+            if g in hecho: continue
+            hecho.add(g); M = mallas_de[g]
+            W = np.concatenate([V[m[4]:m[4] + m[5]] for m in M])
+            R = float(np.sqrt(W['x'] ** 2 + W['y'] ** 2).max()); t = float(np.abs(W['z']).max()); c = int(W['c'][0])
+            for cara in (None, 1, -1):
+                v = octo(0, R, t, c, cara); y = list(x); y[4] = nv; y[5] = len(v); nuevas.append(y); vs.append(v); nv += len(v)
+            lejos[g] = (x, R, t, c)
+            continue
+        y = list(x); v = V[x[4]:x[4] + x[5]]; y[4] = nv; y[5] = len(v); nuevas.append(y); vs.append(v); nv += len(v)
+    # la version lejana: otra malla (codigo nuevo) y otro nodo con el registro + 0x80
+    sig = max([n[4] & 0xff for n in mod.nodos] + [0]) + 1
+    for g, (x, R, t, c) in lejos.items():
+        cod = sig; sig += 1
+        for cara in (1, -1):
+            v = octo(0, R, t, c, cara); y = list(x); y[4] = nv; y[5] = len(v); y[7] = cod; nuevas.append(y); vs.append(v); nv += len(v)
+        nd = next(n for n in mod.nodos if (n[4] & 0xff) == g)
+        mod.nodos.append([nd[0], nd[1], (nd[2] & 0xffff0000) | (cod_mon[g] | 0x80), nd[3], cod | (nd[4] & 0xffff0000)])
+    nuevas.sort(key=lambda y: y[0])                     # (las mallas van por lista)
+    orden = sorted(range(len(nuevas)), key=lambda i: nuevas[i][0])
+    vs2 = []; nv = 0
+    for i in orden: pass
+    mod.mallas = []; mod.verts = []; mod.nv = 0
+    for y, v in sorted(zip([list(n) for n in nuevas], vs), key=lambda p: p[0][0]):
+        y[4] = mod.nv; mod.mallas.append(y); mod.verts.append(v); mod.nv += len(v)
+    print('  monedas ligeras: %d registros, %d triangulos cerca y %d lejos por moneda (antes 63)' % (len(lejos), 16 + 12, 12))
+
 def objetos(A, elf, V, u32, par, sal):
     """HAOSO.DAT y HAOBJ.DAT: los objetos de las peticiones (Rev 1.1).
     El fichero de objetos de la mision (45C470 = PS2 0x1af428, comprobado): preset 0 ([gp-0x7b64] == 0) y mision >= 15
@@ -146,7 +233,13 @@ def objetos(A, elf, V, u32, par, sal):
     print('HAOSO.DAT: %d ficheros (%s), %d objetos, el mayor %d; %d bytes' % (len(fich), ' '.join(nombres), sum(fich), max(fich), len(out)))
     E = A.elf; nombre = E.cadena(E.u32(conv_coche.recursos(A) + 4 * 0x57)).split('\\')[-1]
     blq = A.bloque(A.entrada('COMMON.PS2', nombre))
-    mod = conv_bo.modelo_conjunto(A, blq, set(REGS_OBJ), os.path.join(sal, 'HAOBJ.DAT'))
+    import modelo as _m
+    esc0 = _m.Modelo.escribe
+    def escribe(self, ruta):                            # las monedas ligeras (aligera_monedas) antes de escribir
+        aligera_arco(self); aligera_monedas(self); return esc0(self, ruta)
+    _m.Modelo.escribe = escribe
+    try: mod = conv_bo.modelo_conjunto(A, blq, set(REGS_OBJ), os.path.join(sal, 'HAOBJ.DAT'))
+    finally: _m.Modelo.escribe = esc0
     print('HAOBJ.DAT: %d mallas, %d vertices, %d nodos, %d texturas (%d KB), %d KB' % (len(mod.mallas), mod.nv, len(mod.nodos),
           len(mod.texs), len(mod.blob) >> 10, os.path.getsize(os.path.join(sal, 'HAOBJ.DAT')) >> 10))
 

@@ -9,6 +9,7 @@ typedef struct {
     int (*suelo)(float x, float z, float *y);   /* altura del suelo (y entra con la de referencia); < 0 sin suelo */
     float pos[3], fw[3];         /* coche del jugador: car+14 y su eje adelante */
     float v;                     /* m/s */
+    float ant[3];                /* car+14 del paso anterior (+16C / +174: el cruce de los arcos) */
 } haobj_coche_t;
 
 int  haobj_inicia(void);                 /* la cabecera de HAOSO.DAT; 0 bien */
@@ -17,6 +18,12 @@ void haobj_mision(int preset, int mision);   /* 45C470: los objetos de la mision
 void haobj_paso(const haobj_coche_t *c);     /* colocacion, toques y vuelo; un paso de logica */
 /* toques del jugador en este paso (+3F8 / +3FC == 8 del original): devuelve cuantos y su clase (+5C) en cl[] */
 int  haobj_toques(int *cl, int max);
+/* cruces de arcos en este paso (+7C == 3 del original, 0x1d42f0): cuantos y su clase */
+int  haobj_cruces(int *cl, int max);
+/* 4611D0 con la clase 0x10 (accion -11): el ancho de los arcos (clase 0x0B) del tramo lo..hi con la fila t {inicio,
+   medio, final, reparto} de 0x3f7218 y los carriles del primero (carriles(x, z), sec: la seccion de un punto) */
+void haobj_arcos(int lo, int hi, const float *t, int (*carriles)(float x, float z), int (*sec)(float x, float z),
+                 void (*dir)(float x, float z, float *fx, float *fz));   /* dir: la direccion de la carretera */
 /* cuantos objetos vivos de una clase hay (para contar los que pide la peticion) */
 int  haobj_cuenta(int clase);
 /* 45C8E0: los vivos de una clase en las secciones lo..hi (sec: la seccion de un punto, 43F370) */

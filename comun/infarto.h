@@ -30,6 +30,8 @@ typedef struct {
     int (*suelo)(float x, float z, float *y);   /* la consulta del suelo (43F2F0) */
     float fx, fz;           /* eje adelante del coche */
     int (*seccion_xz)(float x, float z);        /* 43F370: la seccion (car+0x64) de un punto del mundo */
+    int (*carriles_xz)(float x, float z);       /* los carriles de la carretera en un punto (+0xA4 de los arcos) */
+    void (*dir_xz)(float x, float z, float *fx, float *fz);   /* la direccion de la carretera en un punto */
     int   sig;              /* la clave de la etapa siguiente si ya se ha elegido la rama en la union (451350 != 2), si no -1 */
 } infarto_coche_t;
 
