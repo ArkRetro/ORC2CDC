@@ -14,7 +14,8 @@ es lo que mas tarda). Sale con error si falla cualquier paso.
 Las partes en C (tools/c: musica, pvs, visible) y ffmpeg: tools/nativo.py (en Windows, ya compiladas: OR2_NATIVO).
  - Paso OPCIONAL (--extras DIR; por defecto la carpeta extras/ al lado de datos/): si alli estan
    splash_wave_remaster.mp3 y supneo.jpg (los de tu disco no: los pones tu), tools/menu_musica.py anade al selector
-   de musica la tarjeta SPLASH WAVE REMASTER (MENU.DAT parcheado, MUS70.ADP y MUS71.ADP). Sin ellos no hace nada."""
+   de musica la tarjeta SPLASH WAVE REMASTER (MENU.DAT parcheado, MUS70.ADP y MUS71.ADP) y tools/fsp_musica.py la fila
+   de mas en "Elige la musica" de OUTRUN2SP (SPFE.DAT parcheado). Sin ellos no hace nada."""
 import struct, glob, os, shutil, subprocess, sys, threading, time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -290,6 +291,8 @@ def extras_hechos(D, fs):
     import menu_musica
     sal = [os.path.join(D, f) for f in ('MUS%d.ADP' % menu_musica.PISTA, 'MUS%d.ADP' % menu_musica.PISTA_AVANCE)]
     if not all(os.path.isfile(f) for f in sal) or not menu_musica.tiene(os.path.join(D, 'MENU.DAT')): return False
+    import fsp_musica
+    if os.path.isfile(os.path.join(D, 'SPFE.DAT')) and not fsp_musica.tiene(os.path.join(D, 'SPFE.DAT')): return False
     return min(os.path.getmtime(f) for f in sal) >= max(os.path.getmtime(f) for f in fs)
 
 def regenera(iso, D, W, jobs=4, informe=print, extras=None):
@@ -489,6 +492,11 @@ def regenera(iso, D, W, jobs=4, informe=print, extras=None):
             for f in ('MUS%d.ADP' % menu_musica.PISTA, 'MUS%d.ADP' % menu_musica.PISTA_AVANCE, 'MENU.DAT'):
                 os.replace(os.path.join(t, f), os.path.join(D, f))
             borra(t)
+            if hay(D, 'SPFE.DAT'):                       # la fila de mas en "Elige la musica" de OUTRUN2SP (fsp_musica.py)
+                post('extras_fsp', py(os.path.join(TOOLS, 'fsp_musica.py'), os.path.join(D, 'SPFE.DAT'),
+                                      os.path.join(D, 'MENU.DAT'), fs[1], t), 1)
+                os.replace(os.path.join(t, 'SPFE.DAT'), os.path.join(D, 'SPFE.DAT'))
+                borra(t)
     else: informe('== extras: sin %s (paso opcional: no se anade la tarjeta SPLASH WAVE REMASTER)' % ' / '.join(fs))
 
     # ------------------------------------------------------------ comprobacion

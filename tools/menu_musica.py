@@ -88,7 +88,9 @@ class Dat:
         s.taco = d[o_taco:o_taco + 16]
         ini = min(t[4] and struct.unpack_from('<I', d, o_t + 16 * i + 8)[0] for i, t in enumerate(s.tex))
         x = d[o_taco + 16:ini]
-        assert x[:4] == b'MNU1', 'sin bloque MNU1'
+        s.raw = None
+        if x[:4] != b'MNU1':                            # (otro bloque, p. ej. SPR1 de SPFE.DAT: tal cual)
+            s.raw = bytes(x); s.pan = []; s.tra = []; s.mnu2 = b''; return
         s.npan, s.ntra, s.o2 = struct.unpack_from('<3I', x, 4)
         s.pan = [list(struct.unpack_from('<16s6HI4I', x, 16 + 48 * i)) for i in range(s.npan)]
         o = 16 + 48 * s.npan
@@ -122,11 +124,13 @@ class Dat:
         for tam in (16 * n[0], 24 * n[1], 32 * n[2], 40 * n[3], 32 * n[4], 16):
             offs.append(o); o += tam
         o_taco = offs[5]
-        blq = bytearray(b'MNU1' + struct.pack('<3I', len(s.pan), len(s.tra), (16 + 48 * len(s.pan) + 32 * len(s.tra))
+        if s.raw is not None: blq = bytearray(s.raw)
+        else: blq = bytearray(b'MNU1' + struct.pack('<3I', len(s.pan), len(s.tra), (16 + 48 * len(s.pan) + 32 * len(s.tra))
                                               if s.mnu2 else 0))
-        for p in s.pan: blq += struct.pack('<16s6HI4I', *p)
-        for t in s.tra: blq += struct.pack('<16s4H2I', *t)
-        blq += s.mnu2
+        if s.raw is None:
+            for p in s.pan: blq += struct.pack('<16s6HI4I', *p)
+            for t in s.tra: blq += struct.pack('<16s4H2I', *t)
+            blq += s.mnu2
         ini = (o_taco + 16 + len(blq) + 31) & ~31
         out = bytearray(b'HUD1' + struct.pack('<11I', *n, *offs)); datos = bytearray()
         for W, H, fmt, li, b in s.tex:

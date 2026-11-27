@@ -6653,7 +6653,8 @@ disponible. La cancion y la imagen son del usuario y no van al repositorio (como
   (INFARTO y CONTRARRELOJ comparten el selector, no se puede tener en unos si y en otros no sin inventar). El OUTRUN2SP
   del menu principal no pasa por ella: va al frontal de recreativa (comun/fsp.c, "Elige la musica", funcion 9, lista
   0x2E0028 de 8 filas por lado con los registros 5C8D00 {tema, avance, 4 filas}; ver Frontal de recreativa de
-  OUTRUN2SP). Alli la tarjeta NO esta (SIN PORTAR). Como hacerlo sin inventar pantallas: una fila mas en esa lista
+  OUTRUN2SP). Alli va como una fila mas: HECHO, ver "Fila SPLASH WAVE REMASTER en Elige la musica de OUTRUN2SP" abajo
+  (lo que sigue era la propuesta). Como hacerlo sin inventar pantallas: una fila mas en esa lista
   (un 17.o registro de 5C8D00 en el bloque FSP1 de SPFE.DAT con el tema 28 y el avance 71, la lista de 9 filas en
   lista_4bee90 / lista_4c0eb0 de ese lado y las escenas de la fila nueva compuestas como aqui sobre las del banco 0x2E
   de SPFE.DAT, con un parche como menu_musica.py); el banco 0x2E se evalua en vivo (comun/sprani.c), asi que hay que
@@ -6704,4 +6705,47 @@ disponible. La cancion y la imagen son del usuario y no van al repositorio (como
   donde la emulacion va mas lenta que el audio: se quitan antes de correlacionar. "VOZ: VOCES.DAT, 35 muestras", RAM al
   arrancar 345 KB libres (la base no se midio aparte; el programa crece 236 bytes), sin "Out of memory"; nav3.sh
   (COAST 2 COAST) igual. INFARTO y CONTRARRELOJ usan la misma pantalla (no
-  probados aparte). No probado en R.
+  probados aparte; despues si, ver abajo). No probado en R.
+
+### Fila SPLASH WAVE REMASTER en "Elige la musica" de OUTRUN2SP (2026-11-27; DESVIACION pedida por el usuario)
+
+El frontal de recreativa (comun/fsp.c, funcion 9, PC 4C4880) lleva su propia lista: la escena 2E0028 del banco 0x2E
+(SPFE.DAT, evaluada en vivo por comun/sprani.c), 8 filas por lado (7 temas y ALEATORIO; lado 0 OutRun 2, lado 1 las de
+1986 / 1989 con el gatillo R), 90 cuadros por fila (t = (aa4 + aa0 + x2) x 2 = (10 + 5 + 30) x 2), con los registros
+5C8D00 {tema, avance, 4 filas}. Ahora tiene 9 filas por lado: la novena, SPLASH WAVE REMASTER (MUS70 / avance MUS71),
+al final, despues de ALEATORIO, en los dos lados.
+- **Datos**: `tools/fsp_musica.py <SPFE.DAT> <MENU.DAT> <imagen> <salida/>` parchea el SPFE.DAT que hay (SPFE.DAT si se
+  regenera desde la ISO con conv_sp.py; el paso opcional de extras de regenera.py lo parchea despues del MENU.DAT). Solo
+  anade al final de la animacion y cambia unos pocos campos (apuntados en el bloque para deshacerlos): repetible, dos
+  pasadas dan el mismo fichero byte a byte. Las capas de las 8 filas del original no se tocan.
+  - 2E0028: la raiz se alarga (lado 0: 30..870 en vez de 30..780; cambio de lado, lado 1 y vuelta corridos 90 / 180
+    cuadros; duracion 1780). Por cada capa de la raiz que dibuja un carrusel hay otra con la misma animacion y una
+    componente con la carta 9 (copias de las capas de la carta 8, ALEATORIO, a +61 px y +90 cuadros: carta pequena,
+    sombra, carta grande, marco y destello; la de "detras", la lista del otro lado, igual). DESVIACION de colocacion:
+    todo el carrusel va 24 px a la izquierda para que quepa la novena (las 8 cartas del original, mismas y en el mismo
+    orden, 24 px mas a la izquierda).
+  - 2E0029 / 2E002A (la eleccion, 30 cuadros por fila, salida 240..255): la carta 9 quieta en el carrusel y su eleccion
+    en 256..285 (copias de las capas de la raiz con su animacion de 210..239, el rotulo nuevo y el ecualizador de la
+    fila 0).
+  - 2E0027 (el visor): 1600..1689 con "SPLASH WAVE REMASTER" hecho con las letras de los rotulos del propio visor
+    (SPLASH WAVE + R, E, M, A, S, T de PASSING BREEZE / MAGICAL SOUND SHOWER / ALEATORIO) y el ecualizador de la fila 0.
+  - 2E0013 (el icono de la musica en el panel de la derecha, un cuadro por registro): el cuadro 16.
+  - Arte: las cartas e icono de SPLASH WAVE del original con la imagen del usuario en el disco y "REMASTER" (fuente 14 de
+    MENU.DAT) en la carta; una textura de 512 x 128 en 16 bits (128 KB de VRAM mientras se ve la lista).
+  - FSP1: detras, el bloque `MUSX`: filas 9, desfase del lado 1 830 (740 + 90), cuadros del cambio de lado en 2E0028
+    (870..889 y 1700..1719; en 2E0027 siguen los de antes), un registro por lado {70, 71, (2E0027 1600..1614),
+    (1615..1674), (2E0029 / 2E002A 256..285), (1675..1689)} y lo necesario para deshacer el parche.
+  - Tablas en la RAM (el hueco de 960 KB del frontal): 10 204 bytes de FSP1 + MUSX y ~15 KB mas de animacion
+    (874 KB en total, caben).
+- **Codigo** (comun/fsp.c): sin MUSX todo igual que antes. Con MUSX: lista_4bee90 con 9 filas y el desfase 830; la
+  posicion p (fila + lado x 9) va al registro del original (lado x 8 + fila) o al de MUSX (mus_idx / mus_campo /
+  mus_fila); ALEATORIO sigue siendo la fila 8 de cada lado y sortea entre los 7 temas del original (como el original:
+  la nueva no sale); la voz del tema (idioma 0, no suena en la PAL espanola) no se pide para la nueva; el icono del
+  panel, cuadro 16; el cambio de lado de 2E0028 con los cuadros de MUSX.
+- **Verificado en Flycast (E)**, OUTRUN2SP desde el menu principal (scratchpad modos/musica/herr/fsp.sh): lado 0 y lado
+  1 (R), las 9 filas (capturas: las 8 del original con sus rotulos y avances de siempre, MUS33..39 y MUS42..48, ALEATORIO
+  MUS30) y la novena con su visor y avance MUS71 (correlacion 0,99 frente a 0,08 con MUS33); A en ella: la eleccion, el
+  icono en el panel y la carrera con MUS70 ("FSP: carrera ... musica 70"; correlacion 0,67 frente a 0,08 con MUS2, con
+  motor). ALEATORIO sigue sorteando entre los 7 (salio MUS2). "9 filas de musica" en el registro; sin "Out of memory".
+- **INFARTO y CONTRARRELOJ** (consola, la misma pantalla de musica que OUTRUN y C2C): la tarjeta se elige y suena
+  (avance MUS71 y carrera con MUS70; correlacion 0,65 y 0,72 frente a 0,05 / 0,06 de MUS27). No probado en R.

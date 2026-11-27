@@ -8,7 +8,8 @@ Se puede cortar (cerrar la ventana o Ctrl+C) y volver a lanzar con la misma ISO 
 En la carpeta: <carpeta>/OutRun2006_DC/ con el GDI, y trabajo/ (datos/ convertidos, registros; los intermedios se
 borran al acabar). No hace falta nada del PC (ni la decompilacion ni el recomp): todo sale de la ISO.
 Opcional: con <carpeta>/OutRun2006_DC/extras/splash_wave_remaster.mp3 y supneo.jpg, el selector de musica lleva una
-tarjeta mas, SPLASH WAVE REMASTER (tools/menu_musica.py desde tools/regenera.py); sin ellos, nada."""
+tarjeta mas, SPLASH WAVE REMASTER (tools/menu_musica.py y, en OUTRUN2SP, tools/fsp_musica.py, desde
+tools/regenera.py); sin ellos, nada."""
 import os, shutil, subprocess, sys, time
 
 AQUI = os.path.dirname(os.path.abspath(__file__))
