@@ -2446,6 +2446,31 @@ static inline void focos_anota(const modelo_t *mo, const malla_t *m)
     }
     focos_l[focos_n].mo = mo; focos_l[focos_n].m = m; focos_n++;
 }
+/* Rev 2.9.9.d (FPS; -DFOCOS_LOTE=0: lo de antes): dibuja_etapa apunta en una lista las mallas que dibuja para los focos y
+   focos_anota las mira despues en un bucle corto con el proyector en registros, en el mismo orden (la misma lista
+   focos_l). En el bucle de las mallas costaba 0,7 ms por cuadro en METR (de noche) */
+#ifndef FOCOS_LOTE
+#define FOCOS_LOTE 1
+#endif
+#if FOCOS_LOTE
+#define FQ_N 64
+static __attribute__((noinline)) void focos_lote(const modelo_t *mo, const malla_t *M, const uint16_t *q, uint32_t n)
+{
+    const float e0 = focos_e[0], e1 = focos_e[1], e2 = focos_e[2]; uint32_t j, fn = focos_n;
+    if (mo == focos_fuera) return;
+    for (j = 0; j < n && fn < FOCOS_MAX; j++) {
+        const malla_t *m = M + q[j]; int i; float dx = m->cx - e0, dy = m->cy - e1, dz = m->cz - e2, lim = FOCOS_ANOTA_D + m->r;
+        if (dx * dx + dy * dy + dz * dz > lim * lim) continue;
+        for (i = 0; i < 5; i++) {
+            const float *p = focos_pl[i];
+            if (p[0] * m->cx + p[1] * m->cy + p[2] * m->cz + p[3] < -m->r) break;
+        }
+        if (i < 5) continue;
+        focos_l[fn].mo = mo; focos_l[fn].m = m; fn++;
+    }
+    focos_n = fn;
+}
+#endif
 static void dibuja_rango(const modelo_t *mo, int l, uint32_t k0, uint32_t k1, int recorta, int sin_niebla, int solo_lista)
 {
     float tanh = 320.0f / fx, tanv = 240.0f / fx, kh = sqrtf(1 + tanh * tanh), kv = sqrtf(1 + tanv * tanv);
@@ -2584,6 +2609,69 @@ static __attribute__((noinline)) uint32_t tramo_sig(const uint32_t *tr, uint32_t
     return it;
 }
 #endif
+/* Rev 2.9.9.d (FPS; -DETAPA_CULL=0: lo de antes). En dibuja_etapa las pruebas de cada malla (PVS y la esfera contra la
+   piramide de la vista) iban con el ojo, los tres ejes y siete constantes (19 floats) en un bucle que ademas lleva las
+   cuentas del TA: el compilador las tenia en la pila y releia una docena por malla, y se miran unas 6000-9000 mallas
+   por cuadro para dibujar 2500-3500 (METR). Ahora las elige etapa_mallas_vistas, un bucle corto que deja todo en registros
+   y pasa el centro de la esfera a la pantalla con un ftrv de la matriz ya cargada (la vista: X = 320 W + fx xv,
+   Y = 240 W - fx yv, W = zv), con las mismas pruebas multiplicadas por fx:
+     zv + r < cerca, zv - r > lejos; |xv| - zv tan > r k  =>  |X - 320 W| - 320 W > r k fx (y lo mismo con Y y 240);
+     seguro: (W - r) G > |X - 320 W| + r fx (esfera_en_guarda).
+   Solo en los tramos de un nodo, sin cartel, sin DETRAS_ENTRADA (la etapa siguiente antes de la entrada o creciendo:
+   alli la matriz cargada va escalada) y mientras quepa en el tope de vertices (si no, el camino de siempre, que corta).
+   Lo que cambia es el redondeo de las pruebas (la cuenta va por otro camino): solo puede cambiar una malla cuya esfera
+   roza el borde de la vista a menos de milimetros */
+#if !defined(ETAPA_CULL) && ETAPA_FINO && !defined(DIAG_TEX) && !defined(DIAG_SIGM)
+#define ETAPA_CULL 1
+#endif
+#ifndef ETAPA_CULL
+#define ETAPA_CULL 0
+#endif
+#if ETAPA_CULL
+/* las mallas de [k, kb) que pasan la PVS (pvs: NULL = todas) y la vista, hasta ETC_N: en lk el indice | 0x10000 si va
+   directa (seguro); *kn = la primera que queda por mirar. cu: cerca, lejos, kh fx, kv fx, fx, GUARDA_PX, 1,5 cerca. La
+   XMTRX es la vista. Devuelve cuantas */
+#define ETC_N 32
+static __attribute__((noinline)) uint32_t etapa_mallas_vistas(const malla_t *M, uint32_t k, uint32_t kb, const uint32_t *pvs, const float *cu, uint32_t *lk, uint32_t *kn)
+{
+    const float cer = cu[0], lej = cu[1], khfx = cu[2], kvfx = cu[3], fxx = cu[4], g = cu[5], cer15 = cu[6];
+    uint32_t n = 0;
+    for (; k < kb && n < ETC_N; k++) {
+        const malla_t *m = M + k;
+        __builtin_prefetch(m + 2);
+        if (m->n < 3) continue;
+#ifdef DIAG_MS
+        dg_mallas++;
+#endif
+        if (pvs && !(pvs[k >> 5] & (1u << (k & 31)))) continue;
+        {   register float x __asm__("fr4") = m->cx, y __asm__("fr5") = m->cy, z __asm__("fr6") = m->cz, w __asm__("fr7") = 1.0f;
+            const float r = m->r; float xc, yc, zr;
+            __asm__("ftrv xmtrx,fv4\n" : "+f"(x), "+f"(y), "+f"(z), "+f"(w));
+            if (z + r < cer || z - r > lej) goto fuera;
+            xc = fabsf(x - 320.0f * z); yc = fabsf(240.0f * z - y);
+            if (xc - 320.0f * z > r * khfx || yc - 240.0f * z > r * kvfx) goto fuera;
+            zr = z - r;
+            lk[n++] = k | (zr > cer15 && m->n <= 256 && zr * g > xc + r * fxx && zr * g > yc + r * fxx ? 0x10000u : 0);
+        }
+    fuera:
+#ifdef DIAG_CULL_CMP
+        {   /* (medida: la prueba de siempre, con el ojo y los ejes, frente a la del ftrv) */
+            static uint32_t nt, nv, nseg; const float tanh = 320.0f / fx, tanv = 240.0f / fx, kh = sqrtf(1 + tanh * tanh), kv = sqrtf(1 + tanv * tanv);
+            float dx = m->cx - ojo[0], dy = m->cy - ojo[1], dz = m->cz - ojo[2], zv, xv, yv; int vo, so = 0, vn, sn;
+            zv = dx * ade[0] + dy * ade[1] + dz * ade[2]; xv = dx * der[0] + dy * der[1] + dz * der[2]; yv = dx * arr[0] + dy * arr[1] + dz * arr[2];
+            vo = !(zv + m->r < cer || zv - m->r > lej) && !(fabsf(xv) - zv * tanh > m->r * kh || fabsf(yv) - zv * tanv > m->r * kv);
+            if (vo) so = zv - m->r > cer15 && m->n <= 256 && esfera_en_guarda(xv, yv, zv, m->r);
+            vn = n && (lk[n - 1] & 0xFFFF) == k; sn = vn && (lk[n - 1] >> 16);
+            nt++; if (vo != vn) nv++; else if (so != sn) nseg++;
+            if ((nt & 0x3FFFF) == 0) printf("CULLCMP: etapa %u mallas, %u distintas en la vista, %u en seguro\n", (unsigned)nt, (unsigned)nv, (unsigned)nseg);
+        }
+#endif
+        ;
+    }
+    *kn = k;
+    return n;
+}
+#endif
 static void dibuja_etapa(const modelo_t *mo, int l)
 {
     const float tanh = 320.0f / fx, tanv = 240.0f / fx, kh = sqrtf(1 + tanh * tanh), kv = sqrtf(1 + tanv * tanv);
@@ -2595,6 +2683,12 @@ static void dibuja_etapa(const modelo_t *mo, int l)
     uint32_t it, it0 = mo->tr_ini[l], it1 = mo->tr_ini[l + 1], vtx_et0 = vtx_env;
     int ult = -2, sol = l < 2 && (mo == &etapa || mo == &uni || mo == &sig);
     const int fo = focos_on && l == 0;                          /* (focos_anota: escena opaca) */
+#if FOCOS_LOTE
+    uint16_t fq[FQ_N]; uint32_t nfq = 0;                        /* (focos_lote: las dibujadas, en orden) */
+#define FO_ANOTA(m) do { if (nfq == FQ_N) { focos_lote(mo, M, fq, nfq); nfq = 0; } fq[nfq++] = (uint16_t)((m) - M); } while (0)
+#else
+#define FO_ANOTA(m) focos_anota(mo, m)
+#endif
     /* las cuentas del TA y de los vertices de las mallas directas (dibuja_malla_directa con ta_cabe) en variables
        locales: lo mismo que antes (mismas pruebas, mismos resultados), sin leer y escribir ~10 globales por malla. Se
        vuelcan antes de lo que las usa (dibuja_malla) y al final */
@@ -2617,6 +2711,15 @@ static void dibuja_etapa(const modelo_t *mo, int l)
        falta, y DETRAS_ENTRADA, que solo es de la etapa siguiente) */
     int sol_p = sol && sol_rayo_on && !sol_rayo_res;
     const int es_sig = mo == &sig && (sig_antes || sig_crece);
+#endif
+#if ETAPA_CULL
+    const int cull = !es_sig;                                   /* (la vista cargada sin escalar: etapa_mallas_vistas) */
+    const float cu[7] = { cer, lej, kh * fx, kv * fx, fx, GUARDA_PX, cer15 };
+#ifndef DIAG_SIN_TOPE
+#define ET_CABE() ((int32_t)(ve - vtx_et0) <= vres)
+#else
+#define ET_CABE() 1
+#endif
 #endif
     /* (Rev 2.9.9, CORTE_NODO: lo que cuesta cada nodo en este cuadro, para corte_nodos en el siguiente) */
     uint16_t *const cnu = mo == &etapa ? cn_ult[0] : mo == &uni ? cn_ult[1] : mo == &sig ? cn_ult[2] : NULL;
@@ -2675,8 +2778,27 @@ static void dibuja_etapa(const modelo_t *mo, int l)
         /* (en un tramo de un nodo todas las mallas son suyas: si el nodo esta en pvs_ent, la PVS no quita ninguna) */
         const uint32_t *const pvs_t = nd && pvs && ent && (ent[(nd - 1) >> 5] & (1u << ((nd - 1) & 31))) ? NULL : pvs;
 #endif
+#if ETAPA_CULL
+        uint32_t lk[ETC_N], ln = 0, li = 0, kn = ka; int lmodo = cull && nd && !cart && ET_CABE();
+#endif
         for (k = ka; k < kb; k++) {
-            const malla_t *m = M + k; int seguro = 0; uint32_t f;
+            const malla_t *m; int seguro = 0; uint32_t f;
+#if ETAPA_CULL
+            /* (etapa_mallas_vistas: la PVS y la vista en el bucle corto, ETC_N mallas por llamada. Si el tope de
+               vertices se pasa al dibujar una, lo que queda del tramo va por el camino de siempre desde la siguiente,
+               que es lo que hacia: k ya es la siguiente a la ultima dibujada) */
+            if (lmodo && !ET_CABE()) lmodo = 0;
+            if (lmodo) {
+                if (li >= ln) {
+                    if (kn >= kb) break;
+                    ln = etapa_mallas_vistas(M, kn, kb, pvs_t, cu, lk, &kn); li = 0;
+                    if (!ln) break;
+                }
+                k = lk[li] & 0xFFFF; seguro = lk[li] >> 16; li++;
+                m = M + k; goto et_vista;
+            }
+#endif
+            m = M + k;
             __builtin_prefetch(m + 2);
             if (!nd && m->nodo >= 0 && !(vis[m->nodo >> 5] & (1u << (m->nodo & 31)))) continue;
             if (m->n < 3) continue;
@@ -2716,6 +2838,9 @@ static void dibuja_etapa(const modelo_t *mo, int l)
                 if (fabsf(xv) - zv * tanh > m->r * kh || fabsf(yv) - zv * tanv > m->r * kv) continue;
                 seguro = zv - m->r > cer15 && m->n <= 256 && esfera_en_guarda(xv, yv, zv, m->r);
             }
+#if ETAPA_CULL
+        et_vista:
+#endif
 #ifdef DIAG_FALTA
             if (fm_cur) { fm_k = k; fm_cur[k] = 1; }
 #endif
@@ -2762,7 +2887,7 @@ static void dibuja_etapa(const modelo_t *mo, int l)
                 if ((int32_t)c > r) { ta_corto = 1; ta_et_corto |= ta_en_etapa; POP_MALLA(m); FM_PON(m, 2); continue; }
 #endif
                 r -= c; dvb += c; dt += tt; dn++;
-                if (fo) focos_anota(mo, m);                     /* (focos: se dibuja) */
+                if (fo) FO_ANOTA(m);                            /* (focos: se dibuja) */
 #ifdef DIAG_NO_ENVIA
                 if (ta_en_etapa) { ve += n; continue; }
 #endif
@@ -2778,7 +2903,7 @@ static void dibuja_etapa(const modelo_t *mo, int l)
             }
             else {
                 uint32_t vb0_;
-                ET_VUELCA(); vb0_ = ta_vb; dibuja_malla(mo, m); if (fo && !ta_corto) focos_anota(mo, m);
+                ET_VUELCA(); vb0_ = ta_vb; dibuja_malla(mo, m); if (fo && !ta_corto) FO_ANOTA(m);
                 cn_ns_real += ta_vb - vb0_; cn_ns_est += teo[m->n <= 256 ? m->n : 256] * tf >> 8;
                 ET_RECARGA();
             }
@@ -2791,8 +2916,13 @@ static void dibuja_etapa(const modelo_t *mo, int l)
     if (ndif < 0) dg_dif_desb++; else if ((unsigned)ndif > dg_dif_max) dg_dif_max = (unsigned)ndif;
 #endif
     ET_VUELCA();
+#if FOCOS_LOTE
+    if (nfq) focos_lote(mo, M, fq, nfq);
+#endif
+#undef FO_ANOTA
 #undef ET_VUELCA
 #undef ET_RECARGA
+#undef ET_CABE
     if (ta_en_etapa) vtx_et += vtx_env - vtx_et0;
     ta_ofs = 0;
 }
@@ -9454,6 +9584,40 @@ static float nv_xm[16] __attribute__((aligned(8)));             /* la XMTRX de q
 #ifdef DIAG_SIGV
 static float dg_sig_r; static int dg_sig_n, dg_sig_c;
 #endif
+/* Rev 2.9.9.d (FPS; -DNODOS_CULL=0: lo de antes). Como ETAPA_CULL en dibuja_etapa: las tres primeras pruebas de cada
+   nodo de nodos_visibles (lejos, detras del plano cercano y fuera de los laterales: las que quitan casi todos los
+   nodos de la lista de la seccion) en un bucle corto, nodos_candidatos, con todo en registros; el bucle de siempre solo
+   ve los que pasan (con su zv). Las mismas cuentas (el mismo ftrv con las mismas filas) y las mismas marcas (FF, POPR) */
+#if !defined(NODOS_CULL) && defined(LB_NODOS)
+#define NODOS_CULL 1
+#endif
+#ifndef NODOS_CULL
+#define NODOS_CULL 0
+#endif
+#if NODOS_CULL
+#define NC_N 32
+/* nodos L[j..n) (o j..n sin L) que pasan las tres pruebas, hasta NC_N: indice en oi y zv en oz; *jn = el siguiente j.
+   cu: ojo (3), cerca, lejos, tanh, tanv, kh, kv. La XMTRX son las filas der, arr, ade (LB_NODOS) */
+static __attribute__((noinline)) uint32_t nodos_candidatos(const nodo_t *ND, const uint16_t *L, uint32_t j, uint32_t n, uint32_t nnod,
+                                                           const float *cu, uint32_t *FF, uint32_t *oi, float *oz, uint32_t *jn)
+{
+    const float o0 = cu[0], o1 = cu[1], o2 = cu[2], cer = cu[3], lej = cu[4], tanh = cu[5], tanv = cu[6], kh = cu[7], kv = cu[8];
+    uint32_t c = 0;
+    for (; j < n && c < NC_N; j++) {
+        const uint32_t i = L ? L[j] : j; const nodo_t *d; float xv, yv, zv, w_ = 0.0f;
+        if (i >= nnod) continue;
+        d = ND + i;
+        xv = d->cx - o0; yv = d->cy - o1; zv = d->cz - o2;
+        lb_ftrv(&xv, &yv, &zv, &w_);
+        if (zv - d->r > lej) { POPR(i, PR_LEJOS); continue; }
+        if (zv + d->r < cer) { if (FF) FF[i >> 5] |= 1u << (i & 31); POPR(i, PR_DETRAS); continue; }
+        if (fabsf(xv) - zv * tanh > d->r * kh || fabsf(yv) - zv * tanv > d->r * kv) { if (FF) FF[i >> 5] |= 1u << (i & 31); POPR(i, PR_LADO); continue; }
+        oi[c] = i; oz[c] = zv; c++;
+    }
+    *jn = j;
+    return c;
+}
+#endif
 /* Rev 2.9.9 (LEJ_EN_TOPE, CORTE_NODO): las versiones lejanas puestas en lugar de un nodo que no cabia (lej_cambia,
    corte_nodos), por tramo, en este cuadro y en el anterior. En el cuadro siguiente no cuentan como "ya se dibujaba"
    para el nodo completo (la histeresis del reparto, REPARTO_HIST_*): si contaran, el completo entraria con la clase
@@ -9522,6 +9686,25 @@ static void nodos_visibles(modelo_t *mo)
     {   const float r0[4] = { d0, d1, d2, 0.0f }, r1[4] = { a0, a1, a2, 0.0f }, r2[4] = { e0, e1, e2, 0.0f }, r3[4] = { 0, 0, 0, 0 };
         lb_xmtrx_filas(r0, r1, r2, r3); }
 #endif
+#if NODOS_CULL
+    const float ncu[9] = { o0, o1, o2, cer, lej, tanh, tanv, kh, kv };
+    uint32_t nc_i[NC_N], nc_c = 0, nc_k = 0, nc_j = 0; float nc_z[NC_N];
+    (void)j;
+#ifdef DIAG_CULL_CMP
+    static uint32_t nc_bm[4096 / 32]; memset(nc_bm, 0, sizeof nc_bm);
+#endif
+    for (;;) {
+        uint32_t i, rama, u, c_teo, c_v, g, ya, ip; nodo_t *d; float zv, lim; int cp, cd, gracia;
+        if (nc_k >= nc_c) {                                     /* (nodos_candidatos: los que pasan lejos / detras / lado) */
+            if (nc_j >= n) break;
+            nc_c = nodos_candidatos(ND, L, nc_j, n, nnod, ncu, FF, nc_i, nc_z, &nc_j); nc_k = 0;
+            if (!nc_c) continue;
+        }
+        i = nc_i[nc_k]; zv = nc_z[nc_k]; nc_k++; d = ND + i;
+#ifdef DIAG_CULL_CMP
+        if (i < 4096) nc_bm[i >> 5] |= 1u << (i & 31);
+#endif
+#else
     for (j = 0; j < n; j++) {
         uint32_t i = L ? L[j] : j, rama, u, c_teo, c_v, g, ya, ip; nodo_t *d; float dx, dy, dz, zv, xv, yv, lim; int cp, cd, gracia;
         if (i >= nnod) continue;
@@ -9540,6 +9723,7 @@ static void nodos_visibles(modelo_t *mo)
         xv = dx * d0 + dy * d1 + dz * d2; yv = dx * a0 + dy * a1 + dz * a2;
 #endif
         if (fabsf(xv) - zv * tanh > d->r * kh || fabsf(yv) - zv * tanv > d->r * kv) { if (FF) FF[i >> 5] |= 1u << (i & 31); POPR(i, PR_LADO); continue; }
+#endif
         u = d->fl & 15;
         lim = d->r * lod * (float)(1u << ((u ? u : 6) - 1));
         if (u && zv > 0 && zv > lim * (float)(1 << REPARTO_LOD_MAS)) { POPR(i, PR_LOD); continue; }   /* LOD (y lo de mas) */
@@ -9662,6 +9846,20 @@ static void nodos_visibles(modelo_t *mo)
         }
         prio_coste[cd][cp] += c_teo; prio_vtx[cd][cp] += c_v;
     }
+#if defined(DIAG_CULL_CMP) && NODOS_CULL
+    {   /* (medida: las tres pruebas de siempre, aqui, frente a lo que dio nodos_candidatos) */
+        static uint32_t nt, nd_; uint32_t jj;
+        for (jj = 0; jj < n; jj++) {
+            uint32_t i = L ? L[jj] : jj; nodo_t *d; float dx, dy, dz, zv, xv, yv, w_ = 0.0f; int pasa;
+            if (i >= nnod || i >= 4096) continue;
+            d = ND + i; dx = d->cx - o0; dy = d->cy - o1; dz = d->cz - o2;
+            xv = dx; yv = dy; zv = dz; lb_ftrv(&xv, &yv, &zv, &w_);
+            pasa = !(zv - d->r > lej) && !(zv + d->r < cer) && !(fabsf(xv) - zv * tanh > d->r * kh || fabsf(yv) - zv * tanv > d->r * kv);
+            nt++; if (pasa != (int)((nc_bm[i >> 5] >> (i & 31)) & 1)) nd_++;
+        }
+        {   static uint32_t q; if ((++q & 1023) == 0) printf("CULLCMP: nodos %u, %u distintos\n", (unsigned)nt, (unsigned)nd_); }
+    }
+#endif
 #ifdef LB_NODOS
     lb_xmtrx_carga(nv_xm);
 #endif
