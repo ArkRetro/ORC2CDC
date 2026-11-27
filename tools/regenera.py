@@ -11,7 +11,11 @@ Linux y en Windows (el programa de windows/): mismos pasos, mismas salidas.
  - --gdi: despues, el GD-ROM (disc.gdi y las tres pistas) en esa carpeta con tools/gdi.py (sin herramientas externas).
 Lo que sale del disco no va al repositorio. Tiempo: unas horas en 4 nucleos (la visibilidad PVS de cada etapa y union
 es lo que mas tarda). Sale con error si falla cualquier paso.
-Las partes en C (tools/c: musica, pvs, visible) y ffmpeg: tools/nativo.py (en Windows, ya compiladas: OR2_NATIVO)."""
+Las partes en C (tools/c: musica, pvs, visible) y ffmpeg: tools/nativo.py (en Windows, ya compiladas: OR2_NATIVO).
+ - Paso OPCIONAL (--extras DIR; por defecto la carpeta extras/ al lado de datos/): si alli estan
+   splash_wave_remaster.mp3 y supneo.jpg (los de tu disco no: los pones tu), tools/menu_musica.py anade al selector
+   de musica la tarjeta SPLASH WAVE REMASTER (MENU.DAT parcheado, MUS70.ADP y MUS71.ADP) y tools/fsp_musica.py la fila
+   de mas en "Elige la musica" de OUTRUN2SP (SPFE.DAT parcheado). Sin ellos no hace nada."""
 import struct, glob, os, shutil, subprocess, sys, threading, time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -282,7 +286,16 @@ def interno(a):
     else: raise SystemExit('interno: %s' % a[0])
 
 # ---------------------------------------------------------------- principal
-def regenera(iso, D, W, jobs=4, informe=print):
+def extras_hechos(D, fs):
+    """la tarjeta de menu_musica.py ya esta en D y es de estos ficheros (no mas viejos que ellos)"""
+    import menu_musica
+    sal = [os.path.join(D, f) for f in ('MUS%d.ADP' % menu_musica.PISTA, 'MUS%d.ADP' % menu_musica.PISTA_AVANCE)]
+    if not all(os.path.isfile(f) for f in sal) or not menu_musica.tiene(os.path.join(D, 'MENU.DAT')): return False
+    import fsp_musica
+    if os.path.isfile(os.path.join(D, 'SPFE.DAT')) and not fsp_musica.tiene(os.path.join(D, 'SPFE.DAT')): return False
+    return min(os.path.getmtime(f) for f in sal) >= max(os.path.getmtime(f) for f in fs)
+
+def regenera(iso, D, W, jobs=4, informe=print, extras=None):
     """rehace lo que falta en D; devuelve True si los datos estan completos"""
     iso = os.path.abspath(iso)
     if not os.path.isfile(iso): raise SystemExit('no esta la ISO: %s' % iso)
@@ -465,6 +478,27 @@ def regenera(iso, D, W, jobs=4, informe=print):
     informe('== version lejana lowpoly de lo grande (tools/lod_grande.py; lo ya hecho no cambia)')
     post('lodgrande', py(os.path.join(TOOLS, 'regenera.py'), '--interno', 'lodgrande', D, os.path.join(W, 'lodgrande')))
 
+    # paso opcional: la tarjeta SPLASH WAVE REMASTER del selector de musica, solo con sus ficheros en extras/
+    # (tools/menu_musica.py: parche del MENU.DAT de D, que no se puede rehacer desde cero, y MUS70 / MUS71.ADP)
+    import menu_musica
+    E = os.path.abspath(extras or os.path.join(os.path.dirname(D), 'extras'))
+    fs = [os.path.join(E, f) for f in menu_musica.EXTRAS]
+    if all(os.path.isfile(f) for f in fs) and hay(D, 'MENU.DAT'):
+        informe('== extras: tarjeta SPLASH WAVE REMASTER en el selector de musica (menu_musica.py, %s)' % E)
+        if extras_hechos(D, fs): informe('  ya estaba')
+        else:
+            t = os.path.join(W, 'extras'); borra(t)
+            post('extras', py(os.path.join(TOOLS, 'menu_musica.py'), os.path.join(D, 'MENU.DAT'), fs[0], fs[1], t), 3)
+            for f in ('MUS%d.ADP' % menu_musica.PISTA, 'MUS%d.ADP' % menu_musica.PISTA_AVANCE, 'MENU.DAT'):
+                os.replace(os.path.join(t, f), os.path.join(D, f))
+            borra(t)
+            if hay(D, 'SPFE.DAT'):                       # la fila de mas en "Elige la musica" de OUTRUN2SP (fsp_musica.py)
+                post('extras_fsp', py(os.path.join(TOOLS, 'fsp_musica.py'), os.path.join(D, 'SPFE.DAT'),
+                                      os.path.join(D, 'MENU.DAT'), fs[1], t), 1)
+                os.replace(os.path.join(t, 'SPFE.DAT'), os.path.join(D, 'SPFE.DAT'))
+                borra(t)
+    else: informe('== extras: sin %s (paso opcional: no se anade la tarjeta SPLASH WAVE REMASTER)' % ' / '.join(fs))
+
     # ------------------------------------------------------------ comprobacion
     informe('== comprobacion de %s' % D)
     ok = True
@@ -502,7 +536,7 @@ def main():
     if a and a[0] == '--interno': return interno(a[1:])
     op = {}; pos = []; i = 0
     while i < len(a):
-        if a[i] in ('--jobs', '--gdi', '--bin', '--ip'): op[a[i][2:]] = a[i + 1]; i += 2
+        if a[i] in ('--jobs', '--gdi', '--bin', '--ip', '--extras'): op[a[i][2:]] = a[i + 1]; i += 2
         elif a[i] == '--limpia': op['limpia'] = True; i += 1
         else: pos.append(a[i]); i += 1
     if len(pos) < 2: raise SystemExit(__doc__)
@@ -510,7 +544,7 @@ def main():
     W = pos[2] if len(pos) > 2 else ('/dev/shm/or2_regenera' if os.path.isdir('/dev/shm') else
                                       os.path.join(os.path.dirname(os.path.abspath(D)), 'trabajo'))
     jobs = int(op.get('jobs') or os.environ.get('JOBS') or 4)
-    regenera(iso, D, W, jobs)
+    regenera(iso, D, W, jobs, extras=op.get('extras'))
     if op.get('limpia'): limpia(W)
     if op.get('gdi'):
         import gdi

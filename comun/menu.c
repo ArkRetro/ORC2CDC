@@ -26,8 +26,8 @@
    Sonido (como el original): efectos del frontal con sfx_menu (cursor, aceptar, bloqueado, cancelar); el titulo va
    sin musica (en el original suena la pelicula), al salir de el arranca la musica de menu (pista 30 de MUSIC.PS2,
    MUS30.ADP); en la musica cada tema suena con su avance (pista 33 + tema) y al confirmar empieza el tema elegido.
-   Musica: las 3 listas del original (9 / 7 / 12 temas;
-   una tarjeta mas, para cualquier coche), 29 en total; el gatillo R pasa a la siguiente (el bit 0x2000, R1 / R2 del
+   Musica: las 3 listas del original (9 / 7 / 12 temas; con el MENU.DAT de tools/menu_musica.py, una tarjeta mas al
+   final de la lista 2: SPLASH WAVE REMASTER, tema 28, ver musica.h); el gatillo R pasa a la siguiente (el bit 0x2000, R1 / R2 del
    PS2), candado y sonido 3 en los temas sin su bit de la licencia, RANDOM (Y) elige uno desbloqueado y sale a correr.
    VRAM: en la RAM solo las tablas de MENU.DAT; las texturas de cada pantalla se leen del GD al entrar y se quedan
    mientras quepan (se echa la pantalla usada hace mas tiempo). hud.c libera la VRAM unos cuadros despues de su ultimo
@@ -98,7 +98,7 @@ static const char *const UNOM[NU] = { "TITULO_FONDO", "TITULO_LOGO", "TITULO_STA
    k + 0x21; los temas 0..6 siempre estan y los demas con su bit de la licencia (5C9AB0). */
 #define N_LISTAS 3
 #define N_TEMAS 28
-static const int8_t TEMAS_LISTA[N_LISTAS] = { 9, 7, 12 };
+static int8_t TEMAS_LISTA[N_LISTAS] = { 9, 7, 12 };          /* (13 en la 2 con el tema de mas: menu_inicia) */
 static const uint8_t DESBLOQ_TEMA[N_TEMAS] = { 174, 174, 174, 174, 174, 174, 174, 172, 173, 174, 175, 176, 177, 178,
                                                179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192 };
 #define T_DEMO (8 * 60)                                     /* inactividad en el titulo hasta la demo */
@@ -765,6 +765,9 @@ int menu_inicia(void)
         if (h[5]) col_tarjeta = h[5];
         if (h[6] && !memcmp(mnu2 + h[6], "PRG1", 4)) prg = mnu2 + h[6] + 4;
     }
+    /* tema de mas (tools/menu_musica.py): la marca en MUSICA2 y su tarjeta (13 temas en la lista 2) */
+    if (pidx[V_MUS2] >= 0 && pan[pidx[V_MUS2]]._r[0] == MUSICA_MARCA_EXTRA) TEMAS_LISTA[2] = 13;
+    dbglog(DBG_INFO, "menu: lista 2 de la musica con %d temas\n", TEMAS_LISTA[2]);
     menu_sin_multi();
     return 0;
 }
@@ -852,7 +855,8 @@ static int pon_pista(int n)
 }
 static void pon_musica(int k)
 {
-    if (pista_sonando != PISTA_AVANCE + k && pista_sonando != k && pon_pista(PISTA_AVANCE + k) && k < n_ok) pon_pista(k);
+    int a = musica_avance_tema(k), p = musica_pista_tema(k);   /* (PISTA_AVANCE + k y k; el tema 28: 71 y 70) */
+    if (pista_sonando != a && pista_sonando != p && pon_pista(a) && (k < n_ok || k == MUSICA_TEMA_EXTRA)) pon_pista(p);
 }
 static void musica_menu(void)
 {
@@ -861,7 +865,7 @@ static void musica_menu(void)
 /* 4C9750: tema de la lista y el cursor actuales */
 static int tema_actual(void) { int k = curs[lista], l; for (l = 0; l < lista; l++) k += TEMAS_LISTA[l]; return k; }
 static int lic_bit(int b);
-static int tema_libre(int k) { return k <= 6 || lic_bit(DESBLOQ_TEMA[k]); }   /* 4474E0 solo por encima del 6 */
+static int tema_libre(int k) { return k <= 6 || k == MUSICA_TEMA_EXTRA || lic_bit(DESBLOQ_TEMA[k]); }   /* 4474E0 solo por encima del 6; el de mas siempre */
 static void musica_lista(void)                              /* carrusel y titulo de la lista actual en su tema */
 {
     static const int UL[N_LISTAS] = { U_L0, U_L1, U_L2 }, UT[N_LISTAS] = { U_T0, U_T1, U_T2 };
@@ -965,7 +969,8 @@ static void entra(int p, int atras)
 void menu_entra(int man, int pista, int npistas)
 {
     manual = man; pista_sonando = -2; n_ok = npistas < N_TEMAS ? npistas : N_TEMAS;
-    elegido = pista >= 0 && pista < N_TEMAS ? pista : 0;   /* las listas y sus cursores siguen como estaban */
+    pista = musica_tema_pista(pista);                      /* (la 70: el tema de mas) */
+    elegido = pista >= 0 && (pista < N_TEMAS || (pista == MUSICA_TEMA_EXTRA && TEMAS_LISTA[2] > 12)) ? pista : 0;   /* las listas y sus cursores siguen como estaban */
     inact = 0; a_cab.u = -1; pant = -1;
     /* vuelta a los menus: 4457B7 del PC guarda (416420) si la licencia activa tiene cambios (+3F4 bit 1), p. ej. el
        tiempo de juego que suma la carrera (menu_suma_tiempo) */
@@ -1063,6 +1068,7 @@ int menu_preset(void) { return sp_sel ? fsp_preset() : 0; }
 int menu_manual(void) { return sp_sel ? fsp_manual() : manual; }
 int menu_pista(void) {
     if (sp_sel) return fsp_musica();
+    if (elegido == MUSICA_TEMA_EXTRA) return MUSICA_PISTA_EXTRA;
     return elegido < n_ok ? elegido : 0;
 }
 int menu_coche3d(void)
