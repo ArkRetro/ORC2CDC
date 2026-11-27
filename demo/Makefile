@@ -10,7 +10,9 @@ all: rm-elf $(TARGET)
 ../comun/menu.o: CFLAGS += -Os
 # (INFARTO, Rev 1.1) lo mismo para el modo y sus objetos y para el frontal de OUTRUN2SP, su ranking y la pantalla de la
 # VMU (fuera de la carrera o sin peso en ella): compensan el codigo nuevo del modo y la RAM del arranque no baja
-../comun/infarto.o ../comun/haobj.o ../comun/fsp.o ../comun/rksp.o ../comun/vmuesc.o ../comun/vmu.o ../comun/registro.o ../comun/modo_video.o final.o nombre.o pcarga.o sp.o: CFLAGS += -Os
+# (INFARTO 2: estrellas, carriles, marcas y postes) y el fin de la carrera, la escena de la meta, los sprites de los menus,
+# los rivales de C2C, la camara, la cola de voces, los efectos, la lectura del GD y la musica: poco calculo por cuadro
+../comun/infarto.o ../comun/haobj.o ../comun/fsp.o ../comun/rksp.o ../comun/vmuesc.o ../comun/vmu.o ../comun/registro.o ../comun/modo_video.o final.o nombre.o pcarga.o sp.o fin.o meta.o ../comun/sprani.o ../comun/rival.o camara.o ../comun/voces.o ../comun/sfx.o ../comun/gd.o ../comun/musica.o ../comun/hud.o: CFLAGS += -Os
 # pvr_state de KallistiOS (la presentacion a FPS_OBJETIVO esconde el render acabado hasta su campo: demo/main.c)
 main.o: CFLAGS += -I$(KOS_BASE)/kernel/arch/dreamcast/hardware/pvr
 include $(KOS_BASE)/Makefile.rules

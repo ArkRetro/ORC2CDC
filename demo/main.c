@@ -648,7 +648,8 @@ static void tapas_paso(modelo_t *m)
         ma->n = d > 0 ? m->tapa_n[i] : 0;
     }
 }
-static int lee_modelo_en(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t cap)
+/* (INFARTO 2) por tamano: es carga (al cambiar de etapa o de menu, la manda el GD), no codigo de cada cuadro */
+__attribute__((optimize("Os"))) static int lee_modelo_en(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t cap)
 {
     uint32_t sz, h[13], i, v7; uint8_t *b = buf ? (gd_carga_en(nombre, buf, cap, &sz) ? NULL : buf) : gd_carga(nombre, &sz), *p;
     if (!b) return -1;
@@ -8383,11 +8384,16 @@ static void bo_dibuja_malla(const malla_t *ma, int g, uint32_t off, int k0, int 
    union (ta_bo_tope). ha_obj_tri / ha_obj_vtx: lo enviado en el ultimo cuadro (para medirlo) */
 #define HA_OBJ_MAX 24
 /* 43F370 para los objetos (comun/haobj.c 45C8E0): la seccion de la etapa del punto de la ruta mas cercano en xz, de
-   200 m por detras del coche a 1,6 km por delante (APROXIMADO: el original lee la seccion del poligono de la COLI) */
+   200 m por detras del coche a 5 km por delante, de 16 en 16 m y luego de 1 en 1 alrededor (APROXIMADO: el original lee
+   la seccion del poligono de la COLI) */
 static float ha_s(float x, float z)
 {
-    float s, sb = yo.s, db = 1e18f, p[3], th;
-    for (s = yo.s - 200.0f; s < yo.s + 1600.0f; s += 4.0f) {
+    float s, s0, sb = yo.s, db = 1e18f, p[3], th;
+    for (s = yo.s - 200.0f; s < yo.s + 5000.0f; s += 16.0f) {
+        float d; ruta_en(s, p, &th, NULL, NULL); d = (p[0] - x) * (p[0] - x) + (p[2] - z) * (p[2] - z);
+        if (d < db) { db = d; sb = s; }
+    }
+    for (s0 = sb, s = s0 - 16.0f; s <= s0 + 16.0f; s += 1.0f) {
         float d; ruta_en(s, p, &th, NULL, NULL); d = (p[0] - x) * (p[0] - x) + (p[2] - z) * (p[2] - z);
         if (d < db) { db = d; sb = s; }
     }
@@ -8398,6 +8404,11 @@ static void ha_dir(float x, float z, float *fx, float *fz)       /* la direccion
 {
     float s = ha_s(x, z), a[3], b[3], th;
     ruta_en(s, a, &th, NULL, NULL); ruta_en(s + 4.0f, b, &th, NULL, NULL); *fx = b[0] - a[0]; *fz = b[2] - a[2];
+}
+static void ha_punto(int sec, float *p, float *fx, float *fz)  /* 43E570 (45B000): el centro de la seccion y su direccion */
+{
+    float s = s_etapa + (float)sec * m_pos, b[3], th;
+    ruta_en(s, p, &th, NULL, NULL); ruta_en(s + 4.0f, b, &th, NULL, NULL); *fx = b[0] - p[0]; *fz = b[2] - p[2];
 }
 static int ha_carriles(float x, float z)                        /* (+0xA4 de los arcos): los carriles distintos del original */
 {
@@ -8410,11 +8421,58 @@ static int ha_carriles(float x, float z)                        /* (+0xA4 de los
     return n;
 }
 static modelo_t ha_mod; static int ha_mod_ok; static uint32_t ha_obj_tri, ha_obj_vtx, ha_obj_n, ha_dg[4];
+/* 45ECA0 / 45E9B0: lo que la mision de la etapa pinta sobre ella (HAMpqq.DAT: los carriles azul / rojo), en el marco de
+   la etapa + (0, 0,1, 0); DESVIACION (poligonos): solo los trozos de tira (tools/conv_infarto.py trocea) a menos de
+   HA_META_LEJOS del ojo y no detras, con el tope de los objetos de la union */
+#define HA_META_LEJOS 150.0f
+static modelo_t ha_meta; static int ha_meta_ok; static char ha_meta_nom[16]; static uint32_t ha_meta_tri, ha_meta_vtx;
+static void ha_meta_carga(void)                                 /* al empezar la carrera del modo y en cada etapa */
+{
+    char nom[16];
+    infarto_metas(nom);
+    if (!strcmp(nom, ha_meta_nom)) return;
+    if (ha_meta_ok) { libera_modelo(&ha_meta); ha_meta_ok = 0; }
+    strcpy(ha_meta_nom, nom);
+    if (!nom[0]) return;
+    if (!lee_modelo(&ha_meta, nom)) { sube_tramo(&ha_meta, 0, NULL); ha_meta_ok = 1; }
+    else dbglog(DBG_ERROR, "HAMETA: no se pudo leer %s\n", nom);
+    dbglog(DBG_INFO, "HAMETA: %s, %u mallas\n", nom, (unsigned)ha_meta.nmallas);
+}
+static void ha_meta_dibuja(int l)
+{
+    static matrix_t Me __attribute__((aligned(32)));
+    float c = cosf(marco_et[3]), sn = sinf(marco_et[3]); uint32_t j; int ult = -2;
+    if (l == 0) ha_meta_tri = ha_meta_vtx = 0;
+#ifdef DIAG_SIN_HAMETA
+    return;
+#endif
+    if (!ha_meta_ok) return;
+    memset(Me, 0, sizeof Me);
+    Me[0][0] = c; Me[0][2] = -sn; Me[1][1] = 1; Me[2][0] = sn; Me[2][2] = c;
+    Me[3][0] = marco_et[0]; Me[3][1] = marco_et[1] + 0.1f; Me[3][2] = marco_et[2]; Me[3][3] = 1;
+    mat_load(&vista); mat_apply(&Me);
+    for (j = ha_meta.inicio[l]; j < ha_meta.inicio[l + 1]; j++) {
+        const malla_t *m = ha_meta.mallas + j; uint32_t cst;
+        float wx = m->cx * c + m->cz * sn + marco_et[0], wy = m->cy + marco_et[1], wz = -m->cx * sn + m->cz * c + marco_et[2];
+        float dx = wx - ojo[0], dy = wy - ojo[1], dz = wz - ojo[2], zv = dx * ade[0] + dy * ade[1] + dz * ade[2], lim = HA_META_LEJOS + m->r;
+        if (m->n < 3 || zv < -m->r || dx * dx + dy * dy + dz * dz > lim * lim) continue;
+        cst = (m->n <= 256 ? ta_teo_tab[ta_ofs != 0][m->n] : ta_teo(m->n, ta_ofs)) * ta_f >> 8;
+        if (ta_bo + cst > ta_bo_tope || ta_vb + cst > ta_lim) { ta_bo_pide += cst; continue; }
+        if (m->tex != ult) {
+            ult = m->tex;
+            if (m->tex >= 0) pvr_prim(&ha_meta.cabs[0][m->tex], sizeof(pvr_poly_hdr_t));
+            else pvr_prim(&cab_col[0][l], sizeof(pvr_poly_hdr_t));
+        }
+        dibuja_malla(&ha_meta, m); ha_meta_tri += m->n - 2; ha_meta_vtx += m->n;
+    }
+    mat_load(&vista);
+}
 static void ha_obj_dibuja(int l)
 {
     static matrix_t W __attribute__((aligned(32))), Mo __attribute__((aligned(32)));
     haobj_dib_t d[HA_OBJ_MAX]; int n, i, ult, reg; uint32_t k, j;
     if (l == 0) { ha_obj_tri = ha_obj_vtx = 0; }
+    ha_meta_dibuja(l);
 #ifdef DIAG_SIN_HAOBJ
     return;                                                     /* medida: sin dibujar los objetos (la logica sigue) */
 #endif
@@ -8427,6 +8485,7 @@ static void ha_obj_dibuja(int l)
         memcpy(Mo, d[i].M, sizeof Mo);
         reg = d[i].reg;                                         /* la moneda lejana (tools/conv_infarto.py aligera_monedas) */
         if ((reg == 0x1c || reg == 0x1d) && zv > 40.0f) reg |= 0x80;
+        if (reg == 0x30 && zv * zv > 625.0f * (Mo[0][0] * Mo[0][0] + Mo[0][1] * Mo[0][1] + Mo[0][2] * Mo[0][2])) reg |= 0x80;   /* la estrella plana: desde 25 m x escala */
         for (k = 0; k < ha_mod.nnodos; k++) {
             const nodo_t *nd = ha_mod.nodos + k; int g = nd->relleno[0] & 0xff; uint32_t cst = 0;
             if ((int)(nd->fl & 0xffff) != reg) continue;
@@ -15165,6 +15224,7 @@ int main(int argc, char **argv)
                 }
                 if (variante == 2) {
                     infarto_carrera(cur_nodo, curso[cur_nodo].nivel);   /* 45E0F0 */
+                    ha_meta_carga();
                     /* el medidor, el panel y las filas (HAHUD.DAT: solo sus tablas en la RAM, ~150 KB; las texturas VQ,
                        40 KB, se leen del GD al subirlas, ya con la zona del curso reservada) */
                     if (!ha_hud && !(ha_hud = hudd_abre("HAHUD.DAT", 0, 1))) dbglog(DBG_ERROR, "HAHUD: no se pudo abrir\n");
@@ -15365,9 +15425,10 @@ int main(int argc, char **argv)
                         hc.d36 = fis_ok ? fis.d36 : 0; hc.seccion_union = cur_en_union ? (int)floorf((yo.s - s_union) / m_pos) : 0; hc.derrapa = yo.t_derrape != 0; hc.kmh = fis_ok ? fis.velocidad_hud : yo.v * 3.6f; hc.vel_mf = fis_ok ? fis.vel_mf : 0;
                         hc.hud = fis_ok ? fpar.hud : 0;
                         hc.ofs = fis_ok ? fis.ofs : 0; hc.d268 = vib_izq; hc.d264 = -vib_der; hc.modelo = modelo_jug;
-                        hc.x = yo.pos[0]; hc.y = yo.pos[1]; hc.z = yo.pos[2]; hc.marco = marco_et; hc.suelo = ha_suelo; hc.fx = yo.fw[0]; hc.fz = yo.fw[2]; hc.seccion_xz = ha_seccion; hc.carriles_xz = ha_carriles; hc.dir_xz = ha_dir; hc.sig = cur_en_union && cur_rama >= 0 ? cur_sig : -1;
+                        hc.x = yo.pos[0]; hc.y = yo.pos[1]; hc.z = yo.pos[2]; hc.marco = marco_et; hc.suelo = ha_suelo; hc.fx = yo.fw[0]; hc.fz = yo.fw[2]; hc.seccion_xz = ha_seccion; hc.carriles_xz = ha_carriles; hc.dir_xz = ha_dir; hc.punto_sec = ha_punto; hc.sig = cur_en_union && cur_rama >= 0 ? cur_sig : -1;
                         infarto_paso(&hc);
 #ifdef DIAG_HA
+                        if (crono % 120 == 60) dbglog(DBG_INFO, "DIAGHA metas %s: %u triangulos, %u vertices (ultimo cuadro)\n", ha_meta_nom, (unsigned)ha_meta_tri, (unsigned)ha_meta_vtx);
                         if (crono % 120 == 0) { dbglog(DBG_INFO, "DIAGHA objetos: %u dibujados, %u triangulos, %u vertices (ultimo cuadro); nodos %u sin mallas %u tope %u, modelo %u nodos %u mallas inicio %u %u %u\n", (unsigned)ha_obj_n, (unsigned)ha_obj_tri, (unsigned)ha_obj_vtx,
    (unsigned)ha_dg[0], (unsigned)ha_dg[1], (unsigned)ha_dg[2], (unsigned)ha_mod.nnodos, (unsigned)ha_mod.nmallas, (unsigned)ha_mod.inicio[0], (unsigned)ha_mod.inicio[1], (unsigned)ha_mod.inicio[2]);
   if (ha_mod.nnodos) dbglog(DBG_INFO, "DIAGHA nodo0 fl 0x%x relleno 0x%x malla0 nodo 0x%x\n", (unsigned)ha_mod.nodos[0].fl, (unsigned)ha_mod.nodos[0].relleno[0], (unsigned)ha_mod.mallas[0].nodo); memset(ha_dg, 0, sizeof ha_dg); }
@@ -15443,7 +15504,7 @@ int main(int argc, char **argv)
                         etapa_acaba(curso[cur_nodo].nivel - 1); etapa_entra(cur_nodo);   /* 44FF20: stage clear */
                         pt_bonus_etapa(); tim_cuadros += amp; tiempo = tim_cuadros / TIM_HZ; t_ext = 0;
                         if (voz_ok) voces_checkpoint();         /* EXTEND TIME: efecto 0x4d y voz 0x16c */
-                        if (variante == 2) infarto_etapa(cur_nodo, curso[cur_nodo].nivel);   /* stage clear */
+                        if (variante == 2) { infarto_etapa(cur_nodo, curso[cur_nodo].nivel); ha_meta_carga(); }   /* stage clear */
 #ifdef DIAG_VRAMLOG
                         vl_marca("checkpoint etapa %d", cur_nodo);
 #endif

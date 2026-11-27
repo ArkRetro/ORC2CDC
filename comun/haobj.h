@@ -10,6 +10,8 @@ typedef struct {
     float pos[3], fw[3];         /* coche del jugador: car+14 y su eje adelante */
     float v;                     /* m/s */
     float ant[3];                /* car+14 del paso anterior (+16C / +174: el cruce de los arcos) */
+    int (*sec)(float x, float z);                       /* 43F370: la seccion de un punto (las estrellas del 19) */
+    void (*dir)(float x, float z, float *fx, float *fz);   /* la direccion de la carretera (4AADC0) */
 } haobj_coche_t;
 
 int  haobj_inicia(void);                 /* la cabecera de HAOSO.DAT; 0 bien */
@@ -35,5 +37,14 @@ typedef struct { int reg; float M[4][4]; } haobj_dib_t;
 /* prueba: el objeto vivo de la clase cl (-1 cualquiera) mas cercano por delante del coche entre 4 y 70 m: 1 y su
    desvio lateral (m, > 0 a la derecha del eje adelante fw) */
 int  haobj_cercano(const float pos[3], const float fw[3], int cl, float *lat);
+/* tipo 19 (461940 = PS2 0x1b11c8): las estrellas (clase 0x12, tipo 8 de oso_qt, control 0x1d4d80) que llegan volando,
+   botan y sueltan 5 mas (los objetos 0x134.. de la tabla 0x3f7348 = piezas: 5 x {f32 desvio[3], angulos[3], escala}).
+   lim: 7F8ADC; *activas: 7F8AF0; devuelve en r lo de este paso */
+typedef struct { int rotas, cogidas, primera; } haobj_est_t;
+void haobj_est_paso(int sec_jug, int lim, int *activas, const float *piezas, haobj_est_t *r);
+void haobj_est_abre(int si);             /* 461080 / 45C880 con la clase 0x13 (-10 / -13): los 40 trozos */
+/* 45B000 / 45B2A0 (accion -5): las marcas de principio y fin (registros del banco 0x57) en el centro de la seccion + 4 m
+   con su direccion; n = 0 las quita */
+void haobj_marcas(int n, const int *reg, const float (*p)[3], const float *fx, const float *fz);
 int  haobj_lista(haobj_dib_t *v, int max, const float ojo[3]);
 #endif

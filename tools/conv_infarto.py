@@ -88,6 +88,17 @@ def extra(elf, V, u32, par):
     # 0x3f0a88 con los coches de 45B380)
     ra = par(0x1b39c0, 0x1b39c8); rb_ = par(0x1b39f0, 0x1b39f4); assert (ra, rb_) == (0x3f0a68, 0x3f0a88), (hex(ra), hex(rb_))
     sec.append((b'RGIR', elf[V(ra):V(ra) + 32] + elf[V(rb_):V(rb_) + 32]))
+    # EST1: 5 x 7 f32, los trozos de las estrellas del tipo 19 (461940 = PS2 0x1b11c8: la tabla 0x368630 por el carril
+    # +CE, 0..6, apunta en todos a 0x3f7348; cada trozo {desvio[3], angulos x / y / z, escala})
+    te = par(0x1b134c, 0x1b1360); assert te == 0x368630, hex(te)
+    pe = {u32(te + 4 * k) for k in range(7)}; assert pe == {0x3f7348}, [hex(x) for x in pe]
+    sec.append((b'EST1', elf[V(0x3f7348):V(0x3f7348) + 5 * 28]))
+    # MARC: u16 x 2, los registros del banco 0x57 de las marcas de principio y fin de la accion -5 (463950 = PS2 0x1af13c:
+    # 0x1a7c80 / 0x1a7cb0, tablas 0x3684d8 / 0x3684f0 por el idioma de 0x1f6548; el espanol, IDIOMA)
+    sec.append((b'MARC', struct.pack('<2H', *marcas(u32, par))))
+    # META: 2 x 41 u8, 1 si la mision (preset 0 / 1) tiene HAMpqq.DAT (lista_metas)
+    lm = lista_metas(u32, par)
+    sec.append((b'META', bytes(1 if (p, q) in lm else 0 for p in (0, 1) for q in range(41))))
     cab = 8 + 12 * len(sec); out = bytearray(b'HRX1' + struct.pack('<I', len(sec))); datos = b''
     for tag, d in sec:
         out += tag + struct.pack('<2I', cab + len(datos), len(d)); datos += d
@@ -172,14 +183,130 @@ def aligera_monedas(mod):
             v = octo(0, R, t, c, cara); y = list(x); y[4] = nv; y[5] = len(v); y[7] = cod; nuevas.append(y); vs.append(v); nv += len(v)
         nd = next(n for n in mod.nodos if (n[4] & 0xff) == g)
         mod.nodos.append([nd[0], nd[1], (nd[2] & 0xffff0000) | (cod_mon[g] | 0x80), nd[3], cod | (nd[4] & 0xffff0000)])
-    nuevas.sort(key=lambda y: y[0])                     # (las mallas van por lista)
-    orden = sorted(range(len(nuevas)), key=lambda i: nuevas[i][0])
-    vs2 = []; nv = 0
-    for i in orden: pass
+    # (las mallas van por lista: se ordenan junto con sus vertices; antes se ordenaba solo nuevas y varias mallas se
+    # quedaban con los vertices de otra)
     mod.mallas = []; mod.verts = []; mod.nv = 0
     for y, v in sorted(zip([list(n) for n in nuevas], vs), key=lambda p: p[0][0]):
         y[4] = mod.nv; mod.mallas.append(y); mod.verts.append(v); mod.nv += len(v)
     print('  monedas ligeras: %d registros, %d triangulos cerca y %d lejos por moneda (antes 63)' % (len(lejos), 16 + 12, 12))
+
+def sigue_dibujos(u32, pc, fin, dib=0x1118b8):
+    """los id (recurso << 16 | registro) que un caso del codigo pasa en a0 a 0x1118b8 (dibuja un objeto en la matriz de
+    la pila): lui / ori de a0, jal y b con su hueco de retardo, hasta fin"""
+    a0 = 0; ids = []; n = 0
+    def paso(x):
+        nonlocal a0
+        if x >> 26 == 15 and (x >> 16) & 31 == 4: a0 = (x & 0xffff) << 16
+        elif x >> 26 == 13 and (x >> 16) & 31 == 4 and (x >> 21) & 31 == 4: a0 |= x & 0xffff
+    while pc != fin and n < 64:
+        w = u32(pc); n += 1
+        if w >> 26 == 3:                                # jal
+            paso(u32(pc + 4))
+            if (w & 0x3ffffff) << 2 == dib: ids.append(a0)
+            pc += 8; continue
+        if w >> 26 == 4 and (w >> 16) & 0x3ff == 0:     # b (beq zero, zero)
+            paso(u32(pc + 4)); pc += 4 + ((w & 0xffff) - (0x10000 if w & 0x8000 else 0)) * 4; continue
+        paso(w); pc += 4
+    assert pc == fin, 'caso sin terminar en 0x%x' % pc
+    return ids
+def trocea(mod, maxv=18):
+    """DESVIACION (poligonos): las tiras largas en trozos de maxv vertices (los dos ultimos de uno abren el siguiente), con
+    su esfera: la demo dibuja solo los trozos cercanos y delante de la camara"""
+    import numpy as np
+    V = np.concatenate(mod.verts); M = []; vs = []
+    for x in mod.mallas:
+        n = x[5]; i0 = x[4]
+        for a in (range(0, n - 2, maxv - 2) if n > maxv else (0,)):
+            b = min(a + maxv, n) if n > maxv else n
+            v = V[i0 + a:i0 + b].copy(); P = np.stack([v['x'], v['y'], v['z']], 1)
+            c = (P.min(0) + P.max(0)) / 2; y = list(x); y[2] = c.astype(np.float32); y[3] = float(np.linalg.norm(P - c, axis=1).max())
+            M.append(y); vs.append(v)
+    mod.mallas = []; mod.verts = []; mod.nv = 0
+    for y, v in zip(M, vs):
+        y[4] = mod.nv; y[5] = len(v); mod.mallas.append(y); mod.verts.append(v); mod.nv += len(v)
+def lista_metas(u32, par):
+    """{(preset, mision): [id]} de 45ECA0 / 45E9B0 (ver metas)"""
+    assert u32(0x1a9a4c) == 0x3c020044 and u32(0x1a9a5c) >> 26 == 3 and u32(0x1a9a6c) >> 26 == 3
+    filtro = []
+    for a in range(0x1a95d0, 0x1a9640, 8):              # addiu v0, zero, q / beq s0, v0 (la ultima con bnel)
+        w = u32(a); assert w >> 16 == 0x2402, hex(a); filtro.append(w & 0xffff)
+    t1 = par(0x1a9688, 0x1a9690); t0 = par(0x1a98c0, 0x1a98c8); assert (t1, t0) == (0x3efbf0, 0x3efc60), (hex(t1), hex(t0))
+    assert u32(0x1a9680) == 0x2c62001a and u32(0x1a98b8) == 0x2c620016        # sltiu v0, v1, 26 / 22
+    r = {}
+    for pr, jt, n, fin in ((0, t0, 22, 0x1a9a24), (1, t1, 26, 0x1a982c)):
+        for k in range(n):
+            if pr == 1 and 15 + k not in filtro: continue
+            ids = sigue_dibujos(u32, u32(jt + 4 * k), fin)
+            if ids: r[(pr, 15 + k)] = ids
+    return r
+def metas(A, u32, par, sal):
+    """HAMpqq.DAT: los modelos de la mision qq del preset p que el original dibuja sobre la etapa (45ECA0 / 45E9B0 = PS2
+    0x1a9a48: [0x44350c] == 0 -> 0x1a9850, si no 0x1a95b0): los carriles pintados de azul y rojo de las misiones de los
+    tipos 8 / 23 (y algun otro), registros de obj_course_obj_cs_<zona> en el marco de la etapa + (0, 0,1, 0). Se lee
+    cada caso de las tablas de saltos 0x3efc60 (preset 0, misiones 15..36) y 0x3efbf0 (preset 1, 15..40, solo las de la
+    lista de 0x1a95d0). SIN las misiones < 15 del preset 0 (por la etapa de 0x176700: 0x14 / 0x19 / 0x1d). ORD7 sin
+    nodos, con las tiras en trozos (trocea)."""
+    import modelo, conv_coche
+    E = A.elf; tab = conv_coche.recursos(A); hechos = 0
+    for (pr, q), ids in sorted(lista_metas(u32, par).items()):
+        if True:
+            assert len({i >> 16 for i in ids}) == 1, ids
+            nombre = E.cadena(E.u32(tab + 4 * (ids[0] >> 16)))
+            ruta = nombre[len('\\Stage'):] if nombre.lower().startswith('\\stage\\') else nombre
+            blq = A.bloque(A.entrada('STAGE.PS2', ruta))
+            mod = modelo.Modelo(); mod.bloque(blq, registros={i & 0xffff for i in ids}, sin_textura='material', con_gs=True)
+            t0_ = sum(x[5] - 2 for x in mod.mallas); trocea(mod)
+            mod.recorta_texturas(); nom = 'HAM%d%02d.DAT' % (pr, q); mod.escribe(os.path.join(sal, nom)); hechos += 1
+            print('%s: %s %s: %d mallas, %d vertices, %d triangulos (%d antes de trocear), %d texturas, %d KB' % (nom, nombre.split('\\')[-1],
+                  ' '.join('%x' % i for i in ids), len(mod.mallas), mod.nv, sum(x[5] - 2 for x in mod.mallas), t0_, len(mod.texs),
+                  os.path.getsize(os.path.join(sal, nom)) >> 10))
+    print('HAMpqq.DAT: %d ficheros' % hechos)
+
+IDIOMA = 4                                              # 0x1f6548: el espanol (SPRACE, FRENCH, GERMAN, ITALIAN, SPANISH)
+def marcas(u32, par):
+    ta, tb = par(0x1a7c90, 0x1a7c98), par(0x1a7cc0, 0x1a7cc8); assert (ta, tb) == (0x3684d8, 0x3684f0), (hex(ta), hex(tb))
+    a, b = u32(ta + 4 * IDIOMA), u32(tb + 4 * IDIOMA); assert a >> 16 == 0x57 and b >> 16 == 0x57, (hex(a), hex(b))
+    return a & 0xffff, b & 0xffff
+
+ESTRELLA = 0x30
+def aligera_estrella(mod, reg=ESTRELLA):
+    """DESVIACION pedida (poligonos): la estrella 0x30 (clase 0x12, tipo 19: una bipiramide de 10 puntas, 20 triangulos
+    sueltos de 3 vertices) queda igual de cerca y lleva una version lejana (registro + 0x80) plana: las 5 puntas (un
+    triangulo cada una) y el pentagono del centro (una tira de 5): 8 triangulos / 20 vertices, con las UV y el color
+    medio de la original"""
+    import numpy as np
+    V = np.concatenate(mod.verts)
+    nd = next((n for n in mod.nodos if (n[2] & 0xffff) == reg), None)
+    if nd is None: return
+    g = nd[4] & 0xff
+    M = [x for x in mod.mallas if (x[7] & 0xff) == g and not (x[7] >> 8) & 3]
+    W = np.concatenate([V[m[4]:m[4] + m[5]] for m in M])
+    cuenta = {}
+    for v in W:
+        k = (round(float(v['x']), 3), round(float(v['y']), 3), round(float(v['z']), 3)); cuenta.setdefault(k, []).append(v)
+    aro = [l[0] for l in cuenta.values() if len(l) == 4]; vert = [k for k, l in cuenta.items() if len(l) == 10]
+    assert len(aro) == 10 and len(vert) == 2, (len(aro), len(vert))   # 10 puntas / huecos y los 2 vertices
+    C = np.mean(np.array(vert), axis=0); Q = [np.array([v['x'], v['y'], v['z']]) - C for v in aro]
+    r = [float(np.linalg.norm(q)) for q in Q]; e1 = Q[int(np.argmax(r))] / max(r)
+    nrm = np.array(vert[0]) - C; nrm /= np.linalg.norm(nrm); e2 = np.cross(nrm, e1)
+    orden = sorted(range(10), key=lambda i: np.arctan2(Q[i] @ e2, Q[i] @ e1) % (2 * np.pi))
+    P = [aro[i] for i in orden]                         # P[0] una punta, alternando punta / hueco
+    c = int(np.mean([((int(v['c']) >> 8) & 0xff) for v in W])); col = 0xff000000 | c << 16 | c << 8 | c
+    def vs(lista):
+        v = np.zeros(len(lista), dtype=V.dtype)
+        for i, q in enumerate(lista):
+            for n in ('x', 'y', 'z', 'u', 'v'): v[i][n] = q[n]
+            v[i]['c'] = col
+        return v
+    sig = max([n[4] & 0xff for n in mod.nodos] + [0]) + 1
+    nuevas = []
+    for k in range(5): nuevas.append(vs([P[(2 * k - 1) % 10], P[2 * k], P[(2 * k + 1) % 10]]))
+    i5 = [P[2 * k + 1] for k in range(5)]                # el pentagono interior: tira 0, 1, 4, 2, 3
+    nuevas.append(vs([i5[0], i5[1], i5[4], i5[2], i5[3]]))
+    for v in nuevas:
+        y = list(M[0]); y[4] = mod.nv; y[5] = len(v); y[7] = sig; mod.mallas.append(y); mod.verts.append(v); mod.nv += len(v)
+    mod.nodos.append([nd[0], nd[1], (nd[2] & 0xffff0000) | (reg | 0x80), nd[3], sig | (nd[4] & 0xffff0000)])
+    print('  estrella lejana: %d triangulos / %d vertices (cerca 20 / 60)' % (sum(len(v) - 2 for v in nuevas), sum(len(v) for v in nuevas)))
 
 def objetos(A, elf, V, u32, par, sal):
     """HAOSO.DAT y HAOBJ.DAT: los objetos de las peticiones (Rev 1.1).
@@ -236,9 +363,9 @@ def objetos(A, elf, V, u32, par, sal):
     import modelo as _m
     esc0 = _m.Modelo.escribe
     def escribe(self, ruta):                            # las monedas ligeras (aligera_monedas) antes de escribir
-        aligera_arco(self); aligera_monedas(self); return esc0(self, ruta)
+        aligera_estrella(self); aligera_arco(self); aligera_monedas(self); return esc0(self, ruta)
     _m.Modelo.escribe = escribe
-    try: mod = conv_bo.modelo_conjunto(A, blq, set(REGS_OBJ), os.path.join(sal, 'HAOBJ.DAT'))
+    try: mod = conv_bo.modelo_conjunto(A, blq, set(REGS_OBJ) | set(marcas(u32, par)), os.path.join(sal, 'HAOBJ.DAT'))
     finally: _m.Modelo.escribe = esc0
     print('HAOBJ.DAT: %d mallas, %d vertices, %d nodos, %d texturas (%d KB), %d KB' % (len(mod.mallas), mod.nv, len(mod.nodos),
           len(mod.texs), len(mod.blob) >> 10, os.path.getsize(os.path.join(sal, 'HAOBJ.DAT')) >> 10))
@@ -265,6 +392,9 @@ def main():
     if '--solo-obj' in sys.argv:                        # solo HAOSO.DAT y HAOBJ.DAT
         from ps2.assets import Assets
         objetos(Assets(sys.argv[1]), elf, V, u32, par, sal); return
+    if '--solo-metas' in sys.argv:                      # solo HAMpqq.DAT
+        from ps2.assets import Assets
+        metas(Assets(sys.argv[1]), u32, par, sal); return
 
     misiones = par(0x1a7bdc, 0x1a7be4)                  # 45E050 / quest_records: [0x44350c] == 0
     assert misiones == 0x3f0b98, hex(misiones)
@@ -381,6 +511,7 @@ def main():
     print('INFARTOP.DAT: %d bytes (misiones 0x%x, coches 0x%x)' % (len(outp), mis1, tt1))
     open(os.path.join(sal, 'INFARTOX.DAT'), 'wb').write(extra(elf, V, u32, par))
     objetos(A, elf, V, u32, par, sal)
+    metas(A, u32, par, sal)
     print('INFARTOX.DAT: %d bytes' % os.path.getsize(os.path.join(sal, 'INFARTOX.DAT')))
 
     # HAHUD.DAT

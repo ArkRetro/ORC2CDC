@@ -32,6 +32,7 @@ typedef struct {
     int (*seccion_xz)(float x, float z);        /* 43F370: la seccion (car+0x64) de un punto del mundo */
     int (*carriles_xz)(float x, float z);       /* los carriles de la carretera en un punto (+0xA4 de los arcos) */
     void (*dir_xz)(float x, float z, float *fx, float *fz);   /* la direccion de la carretera en un punto */
+    void (*punto_sec)(int sec, float *p, float *fx, float *fz);   /* 43E570: el centro de la seccion y su direccion */
     int   sig;              /* la clave de la etapa siguiente si ya se ha elegido la rama en la union (451350 != 2), si no -1 */
 } infarto_coche_t;
 
@@ -45,6 +46,9 @@ void infarto_libera(void);
 void infarto_carrera(int clave, int nivel); /* 45E0F0 al empezar la carrera en la etapa de esa clave */
 void infarto_etapa(int clave, int nivel);   /* stage clear (7D39F0 bit 1): la etapa nueva */
 void infarto_meta(void);                    /* 44FF10: GOAL */
+/* 45ECA0 / 45E9B0: el modelo que la mision de la etapa dibuja sobre ella (HAMpqq.DAT de tools/conv_infarto.py metas:
+   los carriles pintados de las peticiones 8 / 23): su nombre en nom (16) y 1, o 0 si no tiene */
+int  infarto_metas(char *nom);
 void infarto_paso(const infarto_coche_t *c);   /* 464D20, un paso de logica (modo 16) */
 int  infarto_corazones(void);               /* los que ensena el contador (7F1C80 / 10000) */
 int  infarto_total(void);                   /* 7F23C4 / 10000 */
