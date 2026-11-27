@@ -6345,3 +6345,96 @@ NO HECHO / DUDAS
   62 etapas hay alguna; en varias (ALPI, CLOU, CAPE, GRAN...) es una sola malla de 12 vertices que cubre un sector, y
   el resto de esa altura va en mallas que cruzan el horizonte, sin niebla. Solo se veria con el horizonte al
   descubierto; no se ha visto en los cruces y no se ha tocado.
+
+## Rev 2.9.9.c: optimizacion del dibujo (CPU y fps sin quitar nada) (2026-11-27)
+
+Pedido: "optimizacion de codigo + FPS sin perder elementos en pantalla". La 2.9.9 costo -0,85 fps de media. Todo lo de
+aqui esta medido en el Flycast de Linux (tres a la vez); nada en la consola ni en Android.
+
+OJO CON LA MEDIDA: el tiempo de CPU de Flycast sale de contar instrucciones (un ciclo por instruccion, mas 2 por cada
+uno de los tres primeros accesos a memoria de cada bloque; sh4_cycles.cpp). No cuenta fallos de cache. Lo que aqui gana
+es quitar instrucciones y bloques cortos con lecturas; en la consola real la ganancia sera otra (SUPUESTO: del mismo
+signo, porque todo lo hecho es hacer menos trabajo).
+
+PERFIL (`-DDIAG_PERFIL`, PALM y METR en carrera, antes de tocar nada)
+- `dibuja_etapa` 31-32 % del cuadro; de eso solo un tercio es enviar vertices (el bucle en ensamblador). Las mallas
+  son tiras cortas (5-6 vertices de media): manda el trabajo por malla y por tramo, no el vertice.
+- El recorrido de los tramos (dos pasadas por todos los tramos de la lista, miles, para dibujar unos cientos): 6 %.
+- El coche y el trafico (`dibuja_indices` + `ta_cabe` + `dibuja_malla_directa`): 6 % sin contar sus vertices.
+- La pareja (`robot_dibuja`): 7-8 % para 2898 vertices. `nodos_visibles`: 5 %. `pvs_recuerda`: 2 %.
+
+CAMBIOS (`demo/main.c`; cada uno con su -D para volver atras; no cambian que se dibuja)
+- `TRAMO_LISTA` (1): `tramo_sig` salta en un bucle corto los tramos de nodos sin dibujar, y la primera pasada de
+  `dibuja_etapa` apunta (`dif`, 1024 en la pila) los tramos visibles de la segunda, que solo recorre esos. Mismas
+  mallas en el mismo orden. Si no caben, la segunda pasada es la de antes (no ha pasado: maximo visto 282).
+- `INDICES_FINO` (1): el coche y el trafico por un bucle con las cuentas del TA en variables locales, tambien cuando
+  el modelo no esta entero delante (prueba de la esfera por malla, como antes).
+- `RECORTE_TIRAS` (1): en una malla que toca el plano cercano, los triangulos seguidos que estan enteros delante van
+  como un trozo de tira en vez de uno a uno. Mismos triangulos; menos vertices (PALM congelado: 16949 -> 16415) y menos
+  TA. UNICA DIFERENCIA DE IMAGEN: hasta 35 pixeles de 307200 cambian 1 nivel de 255 (el orden de los vertices del
+  triangulo cambia el redondeo de Flycast). Con `-DRECORTE_TIRAS=0` la imagen es identica pixel a pixel.
+- `ETAPA_FINO` (1): fuera del bucle de las mallas lo que es igual para el tramo o el modelo (pvs_ent del nodo, el rayo
+  del sol, DETRAS_ENTRADA).
+- `PVS_RACHAS` (1): `pvs_recuerda` copia de una vez los tramos seguidos cuyo nodo sigue en la PVS (`pvs_copia`).
+- `demo/Makefile`: `comun/menu.o` con `-Os`. No es por velocidad: lo de arriba anade 3,3 KB de codigo, que son RAM
+  del monton (con los -D de medida, la RAM libre al arrancar bajaba de 261K a 253K). Los menus por tamano dan 19 KB.
+  Compilacion normal: codigo 786488 -> 769120 bytes, RAM libre al arrancar 309K -> 333K (seguido en la cima 115K ->
+  139K). Menus comprobados con tools/prueba/nav3.sh antes y despues (titulo, licencia, menu principal, modo, mision,
+  coche, cambio, musica, carrera): iguales.
+- Medida: la linea "MAL:" lleva ademas el mayor `dif` y las llamadas de `dibuja_indices` por cada bucle.
+
+PROBADO Y QUITADO (no ganaba)
+- Saltar en la pareja la matriz que no pesa en ningun vertice de la malla: +0,33 ms (peor).
+- Ahorrar la prueba de la esfera de cada malla si la del nodo esta entera dentro de la vista: solo el 22 % de los
+  nodos contienen las esferas de sus mallas (PALM 614 de 2740) y 28 de 373 tramos estaban dentro: +0,14 ms (peor).
+- `-fno-math-errno`: 23,58 frente a 23,51 ms (nada).
+- No tocado: el bucle de vertices (ya esta en 27 instrucciones), `nodos_visibles`, la pareja, `coche_entorno`.
+
+MEDIDA 1: el mismo cuadro congelado (`-DDIAG_CONGELA=1500`, con `-DDIAG_FALTA`), ms de dibujo por cuadro (mediana)
+
+| Etapa | antes | despues | triangulos | vertices antes / despues | pixeles distintos (de 307200, 1 nivel) |
+|---|---|---|---|---|---|
+| PALM | 15,95 | 13,37 | 10989 = 10989 | 16949 / 16415 | 35 |
+| CLOU | 16,24 | 14,23 | 10752 = 10752 | 17322 / 17258 | 0 |
+| GHOS | 24,11 | 21,96 | 17780 = 17780 | 25856 / 25572 | 24 |
+| METR | 25,98 | 23,51 | 15721 = 15721 | 26261 / 26239 | 9 |
+
+Cada cambio por separado (misma compilacion con su -D a 0; ms del cuadro congelado):
+
+| Cambio | PALM | METR |
+|---|---|---|
+| TRAMO_LISTA | etapa 3,56 -> 2,20 (-1,36) | etapa 10,74 -> 9,30 (-1,44) |
+| INDICES_FINO | coche 2,68 -> 2,08, trafico 0,98 -> 0,85 (-0,73) | coche 2,89 -> 2,23 (-0,66) |
+| RECORTE_TIRAS | etapa 2,79 -> 2,20 (-0,59) | sin medir aparte |
+| ETAPA_FINO | etapa 2,23 -> 2,20 (-0,03) | etapa 9,66 -> 9,30 (-0,36) |
+| PVS_RACHAS | en carrera: vis 3,90 -> 3,77 (-0,13), +0,08 fps | sin medir |
+
+MEDIDA 2: carrera de 160 s con el piloto (`-DPRUEBA_AUTO -DPRUEBA_NODO=n -DPRUEBA_SIN_TIEMPO -DDIAG_MS -DDIAG_POPPING
+-DDIAG_FALTA`), en el tramo de s que recorren las dos. "Antes" = 239cc8d. cpu = dibujo + logica.
+
+| Etapa | fps antes | fps despues | dif | tarde antes / despues | cpu ms antes / despues | grandes que faltan antes | despues |
+|---|---|---|---|---|---|---|---|
+| PALM | 34,08 | 35,82 | +1,74 | 311 / 207 | 27,86 / 25,45 | 2,72 (tope 0,96, tramo 1,66, entrada 0,10) | 3,73 (tope 0,99, tramo 2,64, entrada 0,11) |
+| CAST | 36,52 | 37,61 | +1,09 | 207 / 143 | 25,35 / 23,49 | 1,56 (tope 0,68, tramo 0,88) | 1,61 (tope 0,74, tramo 0,87) |
+| CLOU | 33,34 | 34,72 | +1,38 | 391 / 310 | 28,90 / 26,81 | 5,18 (tope 2,84, tramo 2,28, entrada 0,05) | 4,73 (tope 2,80, tramo 1,87, entrada 0,06) |
+| INDU | 35,45 | 37,30 | +1,86 | 273 / 153 | 26,40 / 23,94 | 2,03 (tope 0,02, tramo 2,01) | 2,31 (tope 0,02, tramo 2,29) |
+| GHOS | 35,34 | 36,59 | +1,25 | 255 / 185 | 27,10 / 24,86 | 0,96 (tope 0,33, tramo 0,63) | 1,29 (tope 0,33, tramo 0,97) |
+| METR | 29,85 | 31,94 | +2,10 | 627 / 497 | 33,81 / 30,76 | 0,79 (tope 0,79) | 0,57 (tope 0,57) |
+| **Media / suma** | 34,10 | 35,66 | +1,57 | 2064 / 1495 (-28 %) | 28,24 / 25,89 | | |
+
+- La tabla es del codigo antes de los dos ultimos retoques (el bucle de reserva de `dibuja_indices` y el `-Os` de los
+  menus). PALM con el codigo final: 35,91 fps, 199 tarde, y el mismo cuadro congelado (13,37 ms, 35 pixeles).
+- "tope" (lo que no cabe) queda igual. "tramo" (la etapa siguiente a la vista antes de estar lista) sube en PALM, INDU
+  y GHOS y baja en CLOU: son 2-3 muestras por segundo en la ventana entre leer la etapa siguiente y tenerla subida.
+  La etapa siguiente queda lista en el mismo sitio (PALM: "SEG05.DAT en 6,49 s (s 5565)" antes, "6,53 s (s 5570)"
+  despues). SUPUESTO: es ruido del muestreo, no una falta nueva; no se ha medido con mas muestras.
+- RAM: "VOZ: VOCES.DAT, 35 muestras" en todas las tiradas. "Out of memory": 0 en carrera. En METR, al llegar a la meta
+  y volver al menu con los -D de medida, sale un "Out of memory" y "MENU: no se pudieron leer las piezas de MENU.DAT"
+  ANTES Y DESPUES (ya estaba; no se ha mirado con la compilacion normal). Con `-DDIAG_PERFIL` (64 KB de bss) tambien.
+
+NO HECHO / DUDAS
+- Consola real y Android: sin medir.
+- HUD, sombras y trafico (su logica): no salen en el perfil por encima del 1 %; sin tocar.
+- La pareja (2,5 ms por cuadro) y `nodos_visibles` (1 ms) son lo siguiente que queda.
+
+Ficheros: m29c/opt del directorio de trabajo (res/ las consolas, cap/ las capturas antes | despues, py/ y sh/).

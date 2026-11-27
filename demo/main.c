@@ -1613,6 +1613,8 @@ static uint64_t dg_ult_dib;                                     /* medida: us de
 #endif
 #ifdef DIAG_MS
 static unsigned dg_mallas, dg_dir, dg_mal, dg_vdir, dg_vmal;    /* medida: mallas recorridas y enviadas */
+static unsigned dg_ind[2];                                      /* (dibuja_indices: llamadas por el bucle fino y por el otro) */
+static unsigned dg_dif_max, dg_dif_desb;                        /* (TRAMO_LISTA: el mayor dif y las veces que no cupo) */
 #endif
 static uint32_t vtx_env, vtx_ult;                        /* vertices enviados en el cuadro (y en el anterior) */
 static uint32_t vtx_et, vtx_et_ult;                      /* los de la etapa */
@@ -2296,6 +2298,14 @@ static uint32_t texvram_mal, texvram_gris, texvram_n;
 #else
 #define TEXVRAM(mo, t) do { } while (0)
 #endif
+/* Rev 2.9.9.c (optimizacion; -DRECORTE_TIRAS=0: lo de antes). Una malla que toca el plano cercano (la calzada y los
+   muros junto a la camara) se enviaba triangulo a triangulo por tri_recortado, tambien los que estaban enteros
+   delante: 3 vertices y una cuenta del TA por triangulo. Ahora los triangulos seguidos que estan enteros delante y
+   dentro de la banda de guarda van como un trozo de la tira (los mismos triangulos con los mismos vertices; sin
+   culling el sentido da igual): menos vertices, menos TA y menos CPU. Los que cruzan el plano, como antes */
+#ifndef RECORTE_TIRAS
+#define RECORTE_TIRAS 1
+#endif
 static void dibuja_malla(const modelo_t *mo, const malla_t *m)
 {
     const vert_t *v = mo->verts + m->v0; uint32_t i, n = m->n; int detras = 0;
@@ -2331,10 +2341,25 @@ static void dibuja_malla(const modelo_t *mo, const malla_t *m)
         tri_enviados += n - 2;
         return;
     }
+#if RECORTE_TIRAS
+    {   uint8_t ok[256]; uint32_t j;                            /* el vertice esta delante y dentro de la banda de guarda */
+        for (i = 0; i < n; i++) ok[i] = pw[i].w >= cer && !fuera_guarda(pw + i);
+        for (i = 0; i + 2 < n; ) {
+            for (j = i; j + 2 < n && ok[j] && ok[j + 1] && ok[j + 2]; j++) ;
+            if (j > i) {                                        /* j - i triangulos enteros seguidos: una tira */
+                if (ta_cabe(j - i + 2)) { envia_tira(pw + i, j - i + 2); tri_enviados += j - i; }
+                i = j; continue;
+            }
+            if (!(pw[i].w < cerca && pw[i + 1].w < cerca && pw[i + 2].w < cerca)) tri_recortado(pw + i);
+            i++;
+        }
+    }
+#else
     for (i = 0; i + 2 < n; i++) {
         if (pw[i].w < cerca && pw[i + 1].w < cerca && pw[i + 2].w < cerca) continue;
         tri_recortado(pw + i);
     }
+#endif
 }
 
 /* un cartel orientado a la camara (bandera 0x800 del nodo, face_camera de 404D10 en la decompilacion del PC): giro R
@@ -2523,6 +2548,34 @@ static unsigned dg_tx[4]; static float dg_lej;
 static float dg_sm_r; static int dg_sm_k;
 #endif
 #define PRIMERO_CD 24                                           /* (dibuja_etapa: clase de distancia, 4 log2 m: unos 64 m) */
+/* Rev 2.9.9.c (optimizacion; -DTRAMO_LISTA=0: lo de antes). dibuja_etapa recorria dos veces todos los tramos de la lista
+   (miles; se dibujan unos cientos) con las variables del bucle en la pila: en PALM, el 6 % del cuadro. Ahora los que
+   son de un nodo sin dibujar los salta tramo_sig, un bucle corto con todo en registros, y la primera pasada apunta
+   en dif los tramos visibles que tocan a la segunda, que solo recorre esos. Mismas mallas en el mismo orden. Si no
+   caben en dif (TRAMO_DIF), la segunda pasada recorre la tabla entera como antes */
+#ifndef TRAMO_LISTA
+#define TRAMO_LISTA 1
+#endif
+/* Rev 2.9.9.c (optimizacion; -DETAPA_FINO=0: lo de antes): pruebas por malla de dibuja_etapa que son iguales para todo
+   el tramo o para todo el modelo, sacadas del bucle de las mallas (pvs_ent del nodo, el rayo del sol, DETRAS_ENTRADA) */
+#ifndef ETAPA_FINO
+#define ETAPA_FINO 1
+#endif
+#ifndef TRAMO_DIF
+#define TRAMO_DIF 1024                                          /* (2 KB en la pila de dibuja_etapa) */
+#endif
+#if TRAMO_LISTA
+static __attribute__((noinline)) uint32_t tramo_sig(const uint32_t *tr, uint32_t it, uint32_t it1, const uint32_t *vis)
+{
+    for (; it < it1; it++) {
+        uint32_t nd = tr[it] >> 16;
+        if (!nd) break;                                         /* mallas sueltas */
+        nd--;
+        if (vis[nd >> 5] & (1u << (nd & 31))) break;
+    }
+    return it;
+}
+#endif
 static void dibuja_etapa(const modelo_t *mo, int l)
 {
     const float tanh = 320.0f / fx, tanv = 240.0f / fx, kh = sqrtf(1 + tanh * tanh), kv = sqrtf(1 + tanv * tanv);
@@ -2548,6 +2601,15 @@ static void dibuja_etapa(const modelo_t *mo, int l)
 #define ET_RECARGA() do { ve = vtx_env; r = ta_resto(); } while (0)
     uint32_t kb = mo->inicio[l];                                /* fin del tramo anterior = principio del siguiente */
     int pase;
+#if TRAMO_LISTA
+    const uint32_t kb0 = mo->inicio[l]; uint16_t dif[TRAMO_DIF]; int ndif = 0; uint32_t idif = 0;
+#endif
+#if ETAPA_FINO
+    /* (lo que no cambia mientras se dibuja, fuera del bucle de las mallas: el rayo del sol ya resuelto o sin hacer
+       falta, y DETRAS_ENTRADA, que solo es de la etapa siguiente) */
+    int sol_p = sol && sol_rayo_on && !sol_rayo_res;
+    const int es_sig = mo == &sig && (sig_antes || sig_crece);
+#endif
     /* (Rev 2.9.9, CORTE_NODO: lo que cuesta cada nodo en este cuadro, para corte_nodos en el siguiente) */
     uint16_t *const cnu = mo == &etapa ? cn_ult[0] : mo == &uni ? cn_ult[1] : mo == &sig ? cn_ult[2] : NULL;
     uint16_t *const cnv = mo == &etapa ? cn_vult[0] : mo == &uni ? cn_vult[1] : mo == &sig ? cn_vult[2] : NULL;
@@ -2559,6 +2621,31 @@ static void dibuja_etapa(const modelo_t *mo, int l)
        fondo negro). La lista transparente la ordena la PowerVR por triangulo: el orden de envio no cambia lo que se ve */
     for (pase = 0; pase < 2; pase++) {
     kb = mo->inicio[l];
+#if TRAMO_LISTA
+    idif = 0;
+    for (it = it0; ; it++) {
+        uint32_t t, nd, ka, k, fv = 0; int cart = 0;
+        if (pase && ndif >= 0) {                                /* la segunda: solo los que dejo la primera, en su orden */
+            if (idif >= (uint32_t)ndif) break;
+            it = dif[idif++]; t = tr[it]; nd = t >> 16;
+        } else {
+            it = tramo_sig(tr, it, it1, vis);                   /* el siguiente que no es de un nodo sin dibujar */
+            if (it >= it1) break;
+            t = tr[it]; nd = t >> 16;
+            if (!nd && pase) continue;                          /* (mallas sueltas: en la primera) */
+            if (nd) {
+                uint32_t cl_ = N[nd - 1].relleno[1] & 4095u;
+                int primero = (cl_ >> 6) <= PRIMERO_CD || (cl_ & 63) == 0;
+                if (primero != (pase == 0)) {
+                    if (!pase && ndif >= 0) { if (ndif < TRAMO_DIF) dif[ndif++] = (uint16_t)it; else ndif = -1; }
+                    continue;
+                }
+            }
+        }
+        ka = it > it0 ? tr[it - 1] & 0xFFFF : kb0; kb = t & 0xFFFF;
+        if (nd) {
+            cart = N[nd - 1].cartel >= 0;                       /* (malla_de_cartel: nodo valido con cartel) */
+#else
     for (it = it0; it < it1; it++) {
         uint32_t t = tr[it], nd = t >> 16, ka = kb, k, fv = 0; int cart = 0;
         kb = t & 0xFFFF;
@@ -2569,12 +2656,17 @@ static void dibuja_etapa(const modelo_t *mo, int l)
                 int primero = (cl_ >> 6) <= PRIMERO_CD || (cl_ & 63) == 0;
                 if (primero != (pase == 0)) continue; }
             cart = N[nd - 1].cartel >= 0;                       /* (malla_de_cartel: nodo valido con cartel) */
+#endif
 #ifdef CON_FUNDIDO_ENTRADA
             if (mo->fe_n) fv = mo->fe_v[nd - 1];                /* el nodo se esta fundiendo (fe_paso) */
 #endif
         }
         __builtin_prefetch(M + ka);
         {   const uint32_t run_c0 = ta_vb + dvb, run_v0 = ve;       /* (lo que costo esta tira de mallas del nodo) */
+#if ETAPA_FINO
+        /* (en un tramo de un nodo todas las mallas son suyas: si el nodo esta en pvs_ent, la PVS no quita ninguna) */
+        const uint32_t *const pvs_t = nd && pvs && ent && (ent[(nd - 1) >> 5] & (1u << ((nd - 1) & 31))) ? NULL : pvs;
+#endif
         for (k = ka; k < kb; k++) {
             const malla_t *m = M + k; int seguro = 0; uint32_t f;
             __builtin_prefetch(m + 2);
@@ -2586,6 +2678,9 @@ static void dibuja_etapa(const modelo_t *mo, int l)
 #ifdef DIAG_TEX
             if (m->tex == DIAG_TEX && mo == &etapa) dg_tx[0]++;
 #endif
+#if ETAPA_FINO
+            if (nd) { if (pvs_t && !(pvs_t[k >> 5] & (1u << (k & 31)))) continue; } else
+#endif
             if (pvs && m->nodo >= 0 && !(pvs[k >> 5] & (1u << (k & 31))) && !(ent && ent[m->nodo >> 5] & (1u << (m->nodo & 31)))) continue;   /* PVS: no se ve (salvo lo cercano) */
 #ifdef DIAG_TEX
             if (m->tex == DIAG_TEX && mo == &etapa) dg_tx[1]++;
@@ -2596,7 +2691,11 @@ static void dibuja_etapa(const modelo_t *mo, int l)
 #ifdef DIAG_TEX
             if (m->tex == DIAG_TEX && mo == &etapa) { dg_tx[2]++; if (!cart) { float dx_ = m->cx - o0, dy_ = m->cy - o1, dz_ = m->cz - o2, z_ = dx_ * e0 + dy_ * e1 + dz_ * e2; if (z_ - m->r > lej) dg_tx[3]++; dg_lej = lej; } }
 #endif
+#if ETAPA_FINO
+            if (es_sig && DETRAS_ENTRADA(mo, m)) continue;       /* (sig_antes) */
+#else
             if (DETRAS_ENTRADA(mo, m)) continue;                 /* (sig_antes) */
+#endif
 #ifdef DIAG_SIGM
             if (mo == &sig && m->r > dg_sm_r) { dg_sm_r = m->r; dg_sm_k = (int)k; }
 #endif
@@ -2621,7 +2720,11 @@ static void dibuja_etapa(const modelo_t *mo, int l)
                 if (m->tex >= 0) { TEXVRAM(mo, mo->remap ? mo->remap[m->tex] : m->tex); pvr_prim(&mo->cabs[0][mo->remap ? mo->remap[m->tex] : m->tex], sizeof(pvr_poly_hdr_t)); }
                 else pvr_prim(&cab_col[0][l], sizeof(pvr_poly_hdr_t));
             }
+#if ETAPA_FINO
+            if (sol_p) { sol_rayo_res = sol_rayo_malla(mo, m, cart); sol_p = !sol_rayo_res; }   /* (sol_prepara) */
+#else
             if (sol && sol_rayo_on && !sol_rayo_res) sol_rayo_res = sol_rayo_malla(mo, m, cart);   /* (sol_prepara) */
+#endif
 #ifdef DIAG_MS
             if (seguro) { dg_dir++; dg_vdir += m->n; } else { dg_mal++; dg_vmal += m->n; }
 #endif
@@ -2676,6 +2779,9 @@ static void dibuja_etapa(const modelo_t *mo, int l)
         }
     }
     }
+#if TRAMO_LISTA && defined(DIAG_MS)
+    if (ndif < 0) dg_dif_desb++; else if ((unsigned)ndif > dg_dif_max) dg_dif_max = (unsigned)ndif;
+#endif
     ET_VUELCA();
 #undef ET_VUELCA
 #undef ET_RECARGA
@@ -2685,6 +2791,12 @@ static void dibuja_etapa(const modelo_t *mo, int l)
 /* las mallas idx[0..n) del modelo (las de una pieza animada en una lista: coche_dibuja, traf_dibuja), sin recorte, con
    la matriz ya cargada; respeta solo_lod y las apagadas como dibuja_rango */
 static int indices_delante;                                     /* el modelo entero delante del plano cercano */
+/* Rev 2.9.9.c (optimizacion; -DINDICES_FINO=0: lo de antes): el coche y el trafico enteros delante de la camara van por
+   un bucle con las cuentas del TA en variables locales; antes cada malla (de 5-8 vertices) pasaba por
+   dibuja_malla_directa y ta_cabe, que leen y escriben una docena de globales */
+#ifndef INDICES_FINO
+#define INDICES_FINO 1
+#endif
 /* radio del modelo alrededor de su origen (esferas de sus mallas), para indices_delante; con cache */
 static const void *mr_cl[16]; static float mr_cr[16]; static int mr_cn;
 static void modelo_radio_olvida(void) { mr_cn = 0; }             /* (modelos soltados: sus direcciones se reutilizan) */
@@ -2724,6 +2836,50 @@ static void dibuja_indices(const modelo_t *mo, int l, const uint16_t *idx, uint3
         x = 0; y = 0; z = 1; mat_trans_single3_nodivw(x, y, z, wz);
         wx -= w0; wy -= w0; wz -= w0; s = sqrtf(wx * wx + wy * wy + wz * wz) * 1.001f + 1e-4f;
     }
+#if INDICES_FINO
+    if ((dir || prueba) && !color_fijo && !fe_s && !ta_en_etapa && !ta_en_bo && !ta_en_cielo) {
+        /* fuera de la etapa y de la reserva: las mismas mallas por los mismos caminos y con las mismas cuentas que
+           dibuja_malla_directa y ta_cabe, en variables locales (como dibuja_etapa) */
+        const malla_t *const M = mo->mallas; const vert_t *const VV = mo->verts; const uint32_t *const OF = mo->ofs;
+        const uint32_t *const teo = ta_teo_tab[OF != NULL], tf = ta_f;
+        const pvr_poly_hdr_t *const cabs = mo->cabs[0]; const int32_t *const remap = mo->remap;
+        const int sc = sin_cerca, st = sin_trasero, sl = solo_lod; const uint32_t tl = traf_luces;
+        uint32_t dvb = 0, dt = 0, dn = 0, dtri = 0, ve = 0; int32_t r = (int32_t)ta_lim - (int32_t)ta_vb;
+#ifdef DIAG_MS
+        dg_ind[0]++;
+#endif
+#define IN_VUELCA() do { ta_vb += dvb; ta_teo_3d += dt; ta_tiras += dn; tri_enviados += dtri; vtx_env += ve; dvb = dt = dn = dtri = ve = 0; } while (0)
+        for (j = 0; j < n; j++) {
+            const malla_t *m = M + idx[j]; const uint32_t mn = m->n; const int32_t nd = m->nodo;
+            if (mn < 3) continue;
+            if (sc && nd >= 0 && (nd & NODO_CERCA)) continue;
+            if (st && nd >= 0 && (nd & NODO_TRASERO)) continue;
+            if (sl >= 0 && (!((nd >> sl) & 1) || !((tl >> TRAF_GRUPO(nd)) & 1))) continue;
+            if (m->tex != ult) {
+                ult = m->tex;
+                if (m->tex >= 0) { TEXVRAM(mo, remap ? remap[m->tex] : m->tex); pvr_prim(&cabs[remap ? remap[m->tex] : m->tex], sizeof(pvr_poly_hdr_t)); }
+                else pvr_prim(&cab_col[0][l], sizeof(pvr_poly_hdr_t));
+            }
+            if (mn <= 256 && (dir || ({ float x = m->cx, y = m->cy, z = m->cz, w;
+                                        mat_trans_single3_nodivw(x, y, z, w); w - s * m->r > lim; }))) {
+                const uint32_t tt = teo[mn], c = tt * tf >> 8;
+#ifndef DIAG_SIN_TOPE
+                if ((int32_t)c > r) { ta_corto = 1; continue; }   /* (ta_cabe: no cabe en el cuadro) */
+#endif
+                r -= (int32_t)c; dvb += c; dt += tt; dn++;
+                malla_sq(VV + m->v0, OF ? OF + m->v0 : NULL, mn, 0, 0);
+                dtri += mn - 2; ve += mn;
+            } else { IN_VUELCA(); dibuja_malla(mo, m); r = (int32_t)ta_lim - (int32_t)ta_vb; }
+        }
+        IN_VUELCA();
+#undef IN_VUELCA
+        ta_ofs = 0;
+        return;
+    }
+#endif
+#ifdef DIAG_MS
+    dg_ind[1]++;
+#endif
     for (j = 0; j < n; j++) {
         const malla_t *m = mo->mallas + idx[j];
         if (m->n < 3) continue;
@@ -2735,10 +2891,16 @@ static void dibuja_indices(const modelo_t *mo, int l, const uint16_t *idx, uint3
             if (m->tex >= 0) { TEXVRAM(mo, mo->remap ? mo->remap[m->tex] : m->tex); pvr_prim(&mo->cabs[0][mo->remap ? mo->remap[m->tex] : m->tex], sizeof(pvr_poly_hdr_t)); }
             else pvr_prim(&cab_col[0][l], sizeof(pvr_poly_hdr_t));
         }
+#if INDICES_FINO
+        /* (aqui solo se llega con color_mul, que ya iba por dibuja_malla, o con color fijo, fundido o dentro de la
+           etapa o la reserva, que con el coche y el trafico no pasa: todo por dibuja_malla, la misma imagen) */
+        dibuja_malla(mo, m);
+#else
         if (m->n <= 256 && (dir || (prueba && ({ float x = m->cx, y = m->cy, z = m->cz, w;
                                                    mat_trans_single3_nodivw(x, y, z, w); w - s * m->r > lim; }))))
             dibuja_malla_directa(mo, m);
         else dibuja_malla(mo, m);
+#endif
     }
     ta_ofs = 0;
 }
@@ -8629,10 +8791,58 @@ static inline uint32_t pvs_coste(const modelo_t *mo, uint32_t i)   /* bytes teor
 /* Aplicar la PVS de la seccion a las tiras que dibuja el motor. Si un nodo desaparece
    entero, conservar exactamente su ultimo subconjunto. nodos_visibles decide si sigue
    dentro de la gracia y del presupuesto. La mascara XOR se mantiene aparte e intacta. */
+/* Rev 2.9.9.c (optimizacion; -DPVS_RACHAS=0: lo de antes). Con la tabla de tramos, los tramos seguidos cuyo nodo sigue
+   en la PVS (casi todos) se copian de una vez, palabra a palabra; antes cada tramo (miles, de 1-3 mallas) hacia su
+   cuenta de bits. Mismos bits en pvs_dibujo. Se llama en cada cambio de seccion (unas 9 veces por s a 250 km/h) */
+#ifndef PVS_RACHAS
+#define PVS_RACHAS 1
+#endif
+#if PVS_RACHAS
+static void pvs_copia(modelo_t *mo, uint32_t k, uint32_t fin)   /* pvs_dibujo = mascara (con la ventana) en [k, fin) */
+{
+    const uint32_t pal = (mo->nmallas + 31) / 32; uint32_t *const D = mo->pvs_dibujo;
+    const uint32_t *const P = mo->pvs_m, *const V = mo->pvs_mv;
+    while (k < fin) {
+        uint32_t w = k >> 5, sig = (w + 1) << 5;
+        uint32_t hasta = fin < sig ? fin : sig;
+        uint32_t bits = (~0u << (k & 31)) & (~0u >> (31 - ((hasta - 1) & 31)));
+        uint32_t m = P[w] | (V ? V[w] | V[pal + w] : 0);
+#ifdef DIAG_POPPING
+        {   uint32_t cb = (D[w] ^ m) & bits;                    /* mallas que se encienden o apagan al dibujar */
+            while (cb && !precalentando && pop_ra) {
+                uint32_t q = (uint32_t)__builtin_ctz(cb), j = w * 32 + q; const malla_t *ma = mo->mallas + j; float px, z;
+                uint32_t nd = (uint32_t)ma->nodo, padre = nd >= mo->nn0 && mo->lej_de ? mo->lej_de[nd - mo->nn0] : nd;
+                cb &= cb - 1;
+                if (pop_ra[padre] == PR_DIB && ma->n >= 3 && pop_en_pantalla(ma->cx, ma->cy, ma->cz, ma->r, &px, &z) && px >= 2.0f)
+                    (m >> q & 1 ? pop_pvs_ap : pop_pvs_de)[px >= 32.0f ? 2 : px >= 8.0f ? 1 : 0]++;
+            }
+        }
+#endif
+        D[w] = (D[w] & ~bits) | (m & bits);
+        k = hasta;
+    }
+}
+#endif
 static void pvs_recuerda(modelo_t *mo)
 {
     uint32_t k = mo->inicio[0], fin, it = 0;
     if (!mo->pvs_gra) return;
+#if PVS_RACHAS
+    if (mo->tr) {
+        const uint32_t *const tr = mo->tr, nt = mo->tr_ini[3], nn = mo->nnodos, nn0 = mo->nn0; const uint16_t *const lej = mo->lej_de;
+        uint32_t k0 = k; int racha = 0;
+        if (mo->inicio[0] != 0 || !nt || (tr[nt - 1] & 0xffff) != mo->inicio[3]) goto viejo;   /* (no pasa: tramos_nodo) */
+        for (it = 0; it < nt; it++) {
+            uint32_t tramo = tr[it], nd = (tramo >> 16) - 1; int copia = 0;
+            if (nd < nn) copia = pvs_coste(mo, nd >= nn0 && lej ? lej[nd - nn0] : nd) != 0;
+            if (copia != racha) { if (racha) pvs_copia(mo, k0, k); else k0 = k; racha = copia; }
+            k = tramo & 0xffff;
+        }
+        if (racha) pvs_copia(mo, k0, k);
+        return;
+    }
+viejo:
+#endif
     while (k < mo->inicio[3]) {
         int32_t nd;
         if (mo->tr) {
@@ -15832,8 +16042,9 @@ int main(int argc, char **argv)
                     char t[200]; int n = 0, j;
                     for (j = 0; j < 10; j++) n += sprintf(t + n, " %s %u/%u", N[j], prf_us[j] / 30, prf_v[j] / 30);
                     printf("PRF:%s\n", t);
-                    printf("MAL: recorridas %u directas %u/%u v, recortables %u/%u v\n", dg_mallas / 30, dg_dir / 30, dg_vdir / 30, dg_mal / 30, dg_vmal / 30);
-                    dg_mallas = dg_dir = dg_vdir = dg_mal = dg_vmal = 0;
+                    printf("MAL: recorridas %u directas %u/%u v, recortables %u/%u v, dif %u desb %u, indices %u finos %u otros\n", dg_mallas / 30, dg_dir / 30, dg_vdir / 30, dg_mal / 30, dg_vmal / 30, dg_dif_max, dg_dif_desb, dg_ind[0], dg_ind[1]);
+                    dg_ind[0] = dg_ind[1] = 0;
+                    dg_mallas = dg_dir = dg_vdir = dg_mal = dg_vmal = dg_dif_max = dg_dif_desb = 0;
                 }
             }
             memset(prf_us, 0, sizeof prf_us); memset(prf_v, 0, sizeof prf_v);

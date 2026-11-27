@@ -5,6 +5,9 @@ all: rm-elf $(TARGET)
 # el HUD y los menus dibujan con pvr_prim: pasan por ta_prim (demo/main.c) para contar sus vertices en el presupuesto
 # del TA (docs/DREAMCAST.md)
 ../comun/hud.o ../comun/menu.o: CFLAGS += -Dpvr_prim=ta_prim
+# Rev 2.9.9.c: los menus compilados por tamano (-Os gana a -O2, que va antes): 19 KB menos de codigo, que son RAM del
+# monton; no son codigo de la carrera. Quitar esta linea vuelve a -O2
+../comun/menu.o: CFLAGS += -Os
 # pvr_state de KallistiOS (la presentacion a FPS_OBJETIVO esconde el render acabado hasta su campo: demo/main.c)
 main.o: CFLAGS += -I$(KOS_BASE)/kernel/arch/dreamcast/hardware/pvr
 include $(KOS_BASE)/Makefile.rules
