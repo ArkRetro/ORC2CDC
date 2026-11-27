@@ -49,6 +49,10 @@ void infarto_meta(void);                    /* 44FF10: GOAL */
 /* 45ECA0 / 45E9B0: el modelo que la mision de la etapa dibuja sobre ella (HAMpqq.DAT de tools/conv_infarto.py metas:
    los carriles pintados de las peticiones 8 / 23): su nombre en nom (16) y 1, o 0 si no tiene */
 int  infarto_metas(char *nom);
+/* (INFARTO 3) los coches del trafico para las peticiones que los usan (9: 46D250, 11: 46DB60; haobj_auto_t de haobj.h):
+   un paso de logica, con todas las plazas */
+struct haobj_auto_s;
+void infarto_autos(struct haobj_auto_s *v, int n);
 void infarto_paso(const infarto_coche_t *c);   /* 464D20, un paso de logica (modo 16) */
 int  infarto_corazones(void);               /* los que ensena el contador (7F1C80 / 10000) */
 int  infarto_total(void);                   /* 7F23C4 / 10000 */

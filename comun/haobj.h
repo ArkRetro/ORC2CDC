@@ -34,6 +34,7 @@ int  haobj_cuenta_sec(int clase, int lo, int hi, int (*sec)(float x, float z));
 /* lo que hay que dibujar: registro del banco 0x57 y matriz (filas: ejes y traslacion, en el mundo), los mas cercanos al
    ojo dentro de la distancia (HAOBJ_LEJOS), como mucho max */
 #define HAOBJ_LEJOS 160.0f
+#define HAOBJ_ANI_LEJOS 100.0f           /* (DESVIACION, poligonos) los corazones del tipo 11, solo hasta aqui */
 typedef struct { int reg; float M[4][4]; } haobj_dib_t;
 /* prueba: el objeto vivo de la clase cl (-1 cualquiera) mas cercano por delante del coche entre 4 y 70 m: 1 y su
    desvio lateral (m, > 0 a la derecha del eje adelante fw) */
@@ -48,4 +49,12 @@ void haobj_est_abre(int si);             /* 461080 / 45C880 con la clase 0x13 (-
    con su direccion; n = 0 las quita */
 void haobj_marcas(int n, const int *reg, const float (*p)[3], const float *fx, const float *fz);
 int  haobj_lista(haobj_dib_t *v, int max, const float ojo[3]);
+/* tipo 11, "Atrapa el corazon" (46DB60 = PS2 0x1dcaf8, el anillo 0x5d51f8 de 32 registros de 0x5C): dos corazones
+   (registro 0x2a del banco 0x57, 1aa5b8) en los puntos l[2][3] (INFARTOX.DAT ANI1) del marco de cada coche vivo.
+   Por plaza de trafico: pos / fw / up del coche (pos NULL: plaza libre) y marca (+C5C 0x20000: 0 en un coche nuevo; la
+   pone el modulo y la plaza la guarda). Un paso de logica mientras la peticion es del tipo 11 */
+typedef struct haobj_auto_s { const float *pos, *fw, *up; int marca; } haobj_auto_t;
+void haobj_anillo(haobj_auto_t *v, int n, const float *l);
+void haobj_anillo_vacia(void);           /* 0x1df060 (la puesta del 11) y al acabar la peticion: sin corazones */
+int  haobj_anillo_toca(const float pos[3]);   /* 0x1aa3e8: los corazones a 4 m (xz) del jugador se cogen; cuantos */
 #endif

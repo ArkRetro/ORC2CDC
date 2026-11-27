@@ -3642,7 +3642,7 @@ typedef struct { coche_t c; int carril, modelo, destino; float v_des;
                  int golpe, lado; float t_golpe, vlat;          /* golpe: estado de choque (16..19) o -1 */
                  float t_recup, wa[3]; int d22;                 /* +2F8, pose del cuadro anterior (mundo de or2), +D22 */
                  float b08; int b14, b18, dir, b58, b60, b64, b6c, b62, b53, c5c1, n2f4;
-                 int pt_marca, b72, color, ha;                  /* puntuacion: +C5C (PT_*) y +B72 (rebufo reciente); ha: INFARTO */
+                 int pt_marca, b72, color, ha, ha_m;            /* puntuacion: +C5C (PT_*) y +B72 (rebufo reciente); ha: INFARTO; ha_m: +C5C 0x20000 (infarto_autos) */
                  int toca, freno; float gv[2], gth;             /* toca: +4 0x10000 / +DD4 (el que le toco, TR_JUG el jugador); gv: +20 en el marco de la ruta en gth */
                  int rc, marcha, b52, c34; float b54, bb4;     /* rc: coche de carreras (registro + 1; 0 trafico);
                                                                    marcha +208; radios de la carretera +B54 / +BB4 */
@@ -4158,7 +4158,7 @@ static void traf_aparca(trafico_t *t)
 {
     if (t->rc) rc_suelta_coche(t);                              /* 4763D0: el registro del coche de carreras sigue solo */
     t->carril = t->destino = -1; t->c.s = -1.0e6f; t->c.v = 0; t->golpe = -1; t->b72 = 0; t->b6c = 0; t->b14 = 0;
-    t->c5c1 = 0; t->b64 = 0; t->b62 = 0; t->b53 = 0; t->ha = 0;
+    t->c5c1 = 0; t->b64 = 0; t->b62 = 0; t->b53 = 0; t->ha = 0; t->ha_m = 0;
 }
 static float traf_ult_s;                                        /* sin tablas: s del jugador en la ultima aparicion */
 static void traf_inicia(float s0)
@@ -4194,6 +4194,11 @@ static void traf_libera(void)
 static void traf_infarto(void)
 {
     infarto_coche_nuevo_t n; int i, m, l; float s;
+    {   haobj_auto_t v[NTRAF];                                  /* (INFARTO 3) 46D250 / 46DB60: las plazas para las peticiones */
+        for (i = 0; i < NTRAF; i++) { v[i].pos = traf[i].carril >= 0 ? traf[i].c.pos : NULL; v[i].fw = traf[i].c.fw; v[i].up = traf[i].c.up; v[i].marca = traf[i].ha_m; }
+        infarto_autos(v, NTRAF);
+        for (i = 0; i < NTRAF; i++) traf[i].ha_m = v[i].marca;
+    }
     if (!infarto_trafico() && !cur_en_union)
         for (i = 0; i < NTRAF; i++) {
             trafico_t *t = traf + i;
@@ -8487,6 +8492,7 @@ static void ha_obj_dibuja(int l)
         memcpy(Mo, d[i].M, sizeof Mo);
         reg = d[i].reg;                                         /* la moneda lejana (tools/conv_infarto.py aligera_monedas) */
         if ((reg == 0x1c || reg == 0x1d) && zv > 40.0f) reg |= 0x80;
+        if (reg == 0x2a && zv > 30.0f) reg |= 0x80;            /* el corazon plano del tipo 11 (aligera_corazon) */
         if (reg == 0x30 && zv * zv > 625.0f * (Mo[0][0] * Mo[0][0] + Mo[0][1] * Mo[0][1] + Mo[0][2] * Mo[0][2])) reg |= 0x80;   /* la estrella plana: desde 25 m x escala */
         for (k = 0; k < ha_mod.nnodos; k++) {
             const nodo_t *nd = ha_mod.nodos + k; int g = nd->relleno[0] & 0xff; uint32_t cst = 0;

@@ -65,11 +65,12 @@ int haobj_inicia(void)
     if (gd_busca("HAOSO.DAT", &lba_o, &tam_o) || tam_o < 1024) { dbglog(DBG_ERROR, "HAOBJ: sin HAOSO.DAT\n"); return -1; }
     if (!(cab = memalign(32, 2048))) return -1;
     if (gd_lee(lba_o, 1, cab) || memcmp(cab, "HAO1", 4)) { free(cab); cab = NULL; return -1; }
+    haobj_anillo_vacia();
     memcpy(&nfich, cab + 4, 4);
     if (8 + 84 + 512 + 8 * nfich > 2048) { free(cab); cab = NULL; return -1; }
     return 0;
 }
-void haobj_libera(void) { free(ob); ob = NULL; nob = 0; free(cab); cab = NULL; }
+void haobj_libera(void) { free(ob); ob = NULL; nob = 0; free(cab); cab = NULL; haobj_anillo_vacia(); }
 
 void haobj_mision(int preset, int mision)
 {
@@ -362,10 +363,78 @@ int haobj_cuenta_sec(int clase, int lo, int hi, int (*sec)(float x, float z))
     return n;
 }
 int haobj_cuenta(int clase) { int i, n = 0; for (i = 0; i < nob; i++) if (ob[i].cl == clase && ob[i].est < 2) n++; return n; }
+/* tipo 11: el anillo (46DB60 = PS2 0x1dcaf8; 46DB10 = 0x1dca70 el registro libre desde el cursor 0x5d5d78; 0x5d5d7c
+   los vivos) */
+#define NANI 32
+static int ani_vivos, ani_cur, ani_serie;
+static struct { int slot, marca; float w[2][3]; uint8_t on[2]; uint16_t edad; } ani[NANI];
+void haobj_anillo_vacia(void) { int i; for (i = 0; i < NANI; i++) ani[i].slot = -1; ani_vivos = ani_cur = 0; }
+void haobj_anillo(haobj_auto_t *v, int n, const float *l)
+{
+    int i, k, j;
+    for (i = 0; i < n; i++) {                           /* un registro por coche vivo sin marcar (+C5C 0x20000) */
+        if (!v[i].pos || v[i].marca) continue;
+        if (ani_vivos >= NANI) break;
+        for (k = 0; k < NANI && ani[ani_cur].slot >= 0; k++) if (++ani_cur >= NANI) ani_cur = 0;
+        if (k == NANI) break;
+        j = ani_cur; ani_vivos++;
+        if (++ani_cur >= NANI) ani_cur = 0;
+        if (++ani_serie <= 0) ani_serie = 1;
+        ani[j].slot = i; ani[j].marca = v[i].marca = ani_serie; ani[j].on[0] = ani[j].on[1] = 1; ani[j].edad = 0;
+    }
+    for (j = 0; j < NANI; j++) {                        /* los puntos en el mundo (el marco +B0 del coche) y la edad */
+        const haobj_auto_t *c; int q, vis = 0;
+        if (ani[j].slot < 0) continue;
+        c = ani[j].slot < n ? v + ani[j].slot : NULL;
+        if (!c || !c->pos || c->marca != ani[j].marca) { ani[j].slot = -1; ani_vivos--; continue; }
+        {   float r[3] = { c->up[1] * c->fw[2] - c->up[2] * c->fw[1], c->up[2] * c->fw[0] - c->up[0] * c->fw[2],
+                           c->up[0] * c->fw[1] - c->up[1] * c->fw[0] };   /* el eje x del coche (el signo da igual: +-x) */
+            float m = sqrtf(r[0] * r[0] + r[1] * r[1] + r[2] * r[2]);
+            if (m > 1e-6f) { r[0] /= m; r[1] /= m; r[2] /= m; }
+            for (q = 0; q < 2; q++) {
+                const float *p = l + 3 * q; int a;
+                if (!ani[j].on[q]) continue;
+                for (a = 0; a < 3; a++) ani[j].w[q][a] = c->pos[a] + r[a] * p[0] + c->up[a] * p[1] + c->fw[a] * p[2];
+                vis++;
+            }
+        }
+        if (!vis) { ani[j].slot = -1; ani_vivos--; continue; }   /* sin puntos: fuera */
+        ani[j].edad++;
+    }
+}
+int haobj_anillo_toca(const float pos[3])
+{
+    int j, q, n = 0;
+    for (j = 0; j < NANI; j++) {
+        if (ani[j].slot < 0) continue;
+        for (q = 0; q < 2; q++) {
+            float dx = ani[j].w[q][0] - pos[0], dz = ani[j].w[q][2] - pos[2];
+            if (!ani[j].on[q] || dx * dx + dz * dz > 16.0f) continue;   /* (0x1aa4a4: <= 16) */
+            ani[j].on[q] = 0; n++;
+        }
+    }
+    return n;
+}
 int haobj_lista(haobj_dib_t *v, int max, const float ojo[3])
 {
     static float dd[64]; int i, n = 0, j;
     if (max > 64) max = 64;
+    for (i = 0; i < NANI; i++) {                        /* 1aa5b8: el corazon 0x2a en cada punto, botando y girando */
+        int q;
+        if (ani[i].slot < 0) continue;
+        for (q = 0; q < 2; q++) {
+            float a = (float)(ani[i].edad * 0x444) * 9.58738e-5f, s = sinf(a) * 0.5f + 1.0f, k = 1.0f / s, c = cosf(a), sn = sinf(a);
+            float dx = ani[i].w[q][0] - ojo[0], dy = ani[i].w[q][1] - ojo[1], dz = ani[i].w[q][2] - ojo[2], d = dx * dx + dy * dy + dz * dz;
+            haobj_dib_t *e;
+            if (!ani[i].on[q] || d > HAOBJ_ANI_LEJOS * HAOBJ_ANI_LEJOS) continue;
+            if (n == max) { int m = 0; for (j = 1; j < n; j++) if (dd[j] > dd[m]) m = j; if (d >= dd[m]) continue; j = m; }
+            else j = n++;
+            dd[j] = d; e = v + j; e->reg = 0x2a;
+            memset(e->M, 0, sizeof e->M);               /* T(x, y + s, z) Ry(a) S(1 / s, 1, 1 / s) */
+            e->M[0][0] = c * k; e->M[0][2] = -sn * k; e->M[1][1] = 1; e->M[2][0] = sn * k; e->M[2][2] = c * k;
+            e->M[3][0] = ani[i].w[q][0]; e->M[3][1] = ani[i].w[q][1] + s; e->M[3][2] = ani[i].w[q][2]; e->M[3][3] = 1;
+        }
+    }
     for (i = 0; i < n_marca && n < max; i++) {         /* 45B200: + sen del vaiven en y */
         float dx = marca[i].p[0] - ojo[0], dz = marca[i].p[2] - ojo[2]; haobj_dib_t *e = v + n; int a, b;
         if (dx * dx + dz * dz > HAOBJ_LEJOS * HAOBJ_LEJOS) continue;

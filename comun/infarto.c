@@ -124,6 +124,7 @@ static int k16_cl, k16_need, k16_n, a5_lo, a5_hi; static const infarto_coche_t *
 static int k19_lim, k19_n, k19_c, k19_rot, k19_act, k19_cb; static int8_t k19_cog;
 static float ant_pos[3]; static int ant_ok;
 /* tipos 8 y 23 (circula por el azul / el rojo; 23: derrapando) */
+static int k11_need, k11_c, k11_n, ani_on;         /* 0x5899bc.. (+8, +C, +A) y el anillo en marcha */
 static int k8_a, k8_b, k8_lado, k8_ult, k8_dist, k8_max;   /* 7F2530, 7F2532, 7F2538, 7F253C, 7F2540, 7F2534 */
 /* reacciones de la acompanante que piden las peticiones (487D60 / 487D90 / 487DD0; robot 1: comun/robot.c robot_pide,
    con los movimientos de CHRH.DAT) */
@@ -549,7 +550,7 @@ static int sucesos(const uint8_t *t, const infarto_coche_t *c)
 
 /* ---- tipos de peticion: puesta en marcha (464350 / PS2 0x1ae768), control (464D20 / 0x1a7fe4), evaluacion
    (464350 / 0x1aea30) */
-static int portado(int k) { return k == 0 || k == 2 || k == 22 || k == 6 || k == 8 || k == 23 || k == 7 || k == 24 || k == 15 || k == 16 || k == 25 || k == 19; }
+static int portado(int k) { return k == 11 || k == 0 || k == 2 || k == 22 || k == 6 || k == 8 || k == 23 || k == 7 || k == 24 || k == 15 || k == 16 || k == 25 || k == 19; }
 static const uint8_t *pts(int k)                    /* la tabla de 45E2F0 del tipo k (INFARTOX.DAT PTS2) */
 {
     static const uint8_t cero[24];
@@ -598,6 +599,8 @@ static void puesta(const uint8_t *r, const infarto_coche_t *c)
         k15_tramo = haobj_cuenta_sec(0x0a, w0, w2, c->seccion_xz);
         reinicia_res(); break;
     case 19: est_puesta(w0, w2, w6, w8, c); reinicia_res(); break;   /* 464350 (PS2 0x1ae928) */
+    case 11:                                        /* 464350 (PS2 0x1ae854): 0x1aa358 y 0x1df060 (el anillo vacio) */
+        k11_need = w6; k11_c = w8; k11_n = 0; reinicia_res(); haobj_anillo_vacia(); ani_on = 1; break;
     case 8: case 23:                                /* 464350 caso 4 (PS2 0x1ae800) */
         k8_a = w0; k8_b = w2; k8_lado = w6; k8_ult = -1; k8_dist = 0; k8_max = 0; reinicia_res(); break;
     }
@@ -686,6 +689,16 @@ static void control(const infarto_coche_t *c)
         resultado((int)((float)(k15_a + k15_39) * (800000.0f / (float)(k15_need ? k15_need : 1))));
         break; }
     case 19: est_control(c); break;                 /* 0x1a80bc */
+    case 11: {                                      /* 45F180 (PS2 0x1aa3e8): los corazones del anillo a 4 m */
+        float p[3] = { c->x, c->y, c->z }; int n, i;
+        sucesos(pts(11), c);                        /* (0x3efce8) */
+        for (n = haobj_anillo_toca(p), i = 0; i < n; i++) {
+            if (!modelo_callado(c->modelo)) rob_mov(0x260003);
+            if (++k11_n > k11_need) sfx_voz_se(0x52);
+            dbglog(DBG_INFO, "INFARTO: corazon cogido (%d de %d)\n", k11_n, k11_need);
+        }
+        resultado(k11_n > k11_need ? 800000 : (int)((float)k11_n / (float)(k11_need ? k11_need : 1) * 800000.0f));
+        break; }
     case 8: case 23: {                              /* 45EEB0 (PS2 0x1a9af8) */
         float a = c->ofs * (float)k8_lado, b = c->d264 * c->d268; int ok = !(q == 23 && !(c->d36 > 0)), e;
         sucesos(pts(8), c);                         /* (0x1a9a80: la tabla 0x3efcb8) */
@@ -782,6 +795,18 @@ static void evalua(const infarto_coche_t *c)
             fin_peticion(nt, h / 10000);
         }
         break; }
+    case 11: {                                      /* 463470 (PS2 0x1aa780) */
+        int hs = res_pos() / 10000, nt = nota(hs), s1 = 0;
+        if (nt == 7) {
+            hs = 0x50;
+            if (!c_trompo && !c_ev) s1 = 400000;     /* (7F2504, 7F24EC) */
+            if (k11_n > k11_need) s1 += k11_n >= k11_c ? 300000 + (k11_n - k11_c) * 50000
+                                     : (int)((float)(k11_n - k11_need) / (float)(k11_c - k11_need) * 300000.0f);
+        }
+#ifdef DIAG_HA
+        dbglog(DBG_INFO, "INFARTO: corazones: %d (pide %d, %d)\n", k11_n, k11_need, k11_c);
+#endif
+        cierra(nt, hs * 10000 + s1, hs); break; }
     case 8: case 23: {                              /* 463250 (PS2 0x1a9c70) */
         int hs = res_pos() / 10000, nt = nota(hs), ebp = 0;
         if (nt == 7) {
@@ -1048,6 +1073,7 @@ void infarto_paso(const infarto_coche_t *c)         /* 464D20 */
     if (disp < 0) { score = disp = 0; }
     voz_bomba();
     if (c->en_union) sec_union_ult = c->seccion_union;
+    if (ani_on && q != 11) { haobj_anillo_vacia(); ani_on = 0; }   /* 1aa5b8 / 46DB60: solo con la peticion 11 */
     estadisticas(c);
     medidor_paso();
     cara_t--;                                       /* 45FB80 (PS2 0x1acf48): 7F8B28 - 1 */
@@ -1100,6 +1126,12 @@ void infarto_coche_abierto(int ok)
     if (!ok) return;                                /* sin plaza: se reintenta en el siguiente paso */
     ct_n++; ct_i = ct_pend + 1;
     if (ct_v & 0x80) { ct_pend = ct_i < 0x64 ? ct_i : -1; } else ct_pend = -1;
+}
+void infarto_autos(struct haobj_auto_s *v, int n)
+{
+    uint32_t l = 0; const uint8_t *a;
+    if (!dat) return;
+    if (q == 11 && (a = xsec("ANI1", &l)) && l >= 24) haobj_anillo(v, n, (const float *)a);   /* 46DB60 */
 }
 void infarto_libera(void) { free(dat); dat = NULL; free(mis1); mis1 = NULL; free(xdat); xdat = NULL; x_pts = NULL;
                           robot_extra(NULL, 0); free(chrh); chrh = NULL; haobj_libera(); inf_cargado = -1;
