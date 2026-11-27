@@ -470,7 +470,7 @@ static void fases(pet_t *p, const camp_coche_t *c)
     case 1:                                             /* el anuncio: 0x22f9d0 y la voz 0x2a6358 */
         if (e) e->idx++;
         if (d->rot != 0xff) rotulo_abre(0, d->rot, C->d->marco_anuncio, 30, -1);
-        else rotulo_abre(1, C->d->rot_generico, C->d->marco_anuncio, -1, -1);   /* (DESVIACION: el texto del banco 0x46, sin convertir) */
+        else rotulo_abre(1, C->d->rot_generico, C->d->marco_anuncio, -1, -1);   /* (el tipo 20: sin rotulo propio) */
         voz_calla(); if (d->voz && d->voz != 0xffff) voz(d->voz, 0x3c, 9);
         dbglog(DBG_INFO, "CAMP: peticion %d/%d (%d..%d)\n", d->tipo, d->sub, d->ini, d->fin);
         break;

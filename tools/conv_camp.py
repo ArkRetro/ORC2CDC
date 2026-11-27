@@ -24,7 +24,7 @@ CAMP.DAT (little endian):
   u16 voz_animo[2][5] (0x423ee0 tipos 1 y 2, 0x423ef8 los demas; 0x2a6240)
   u8  rot_nota[7]   (0x22f7a0: texto de la nota, indice HA_Tnn de HAHUD.DAT (tabla 0x3f0aa8) o 0xff)
   u8  marco_nota[2] (2B001F con nota < 4, 2B001E con 4 o mas: indice HA_Mn de 0x3f0b40)
-  u8  marco_anuncio (2B0020), u8 rot_generico (2B003D), u8 0
+  u8  marco_anuncio (2B0020), u8 rot_generico (2B003D), u8 0  (rotulos: 0x40 + k = el CA_Tkk de CAMPHUD.DAT, banco 0x46)
   u16 lista[60][4]  (por tipo de etapa (0x374010) y lista: primera peticion << 4 | cuenta; 0xffff sin guion)
   u8  arbol[3][15]  (el tipo de la etapa de cada registro de Request_Course_SP / _OR2 / Req_Course_MIX_PS2)
   peticiones de 52 bytes: s16 inicio, s16 fin, u8 tipo, u8 subtipo, u8 rotulo (HA_Tnn del anuncio, 0x22faec; 0xff
@@ -111,7 +111,7 @@ def main():
         d_ = bytes(As.datos(por_hash[hash_nombre('\\bin\\%s.bin' % n_)])); nn, oo = cm._r077(d_, n_)
         usadas.update(struct.unpack_from('<I', d_, oo + 0x78 * k + 0x1c)[0] for k in range(nn))
     PAR = mips.Mips.PILA - 0x8000                            # parametros en la memoria del interprete (la pila)
-    lista = []; pets = bytearray(); npet = 0; tipos = {}; objs = []
+    lista = []; pets = bytearray(); npet = 0; tipos = {}; objs = []; t46 = []
     # 0x297e20: +0x18 del objeto = 0x423080[clase] (la clase del banco 0x57); comprobado por el codigo que la lee
     assert par(0x29800c, 0x298014) == 0x423080, 'clases de los objetos (0x297e20)'
     banco = lambda c: u(0x423080 + 4 * c) & 0xff
@@ -137,7 +137,8 @@ def main():
                     voz = mv.r[4] & 0xffff if mv.r[3] == 1 else 0
                 except RuntimeError:                          # (la del tipo que la elige al azar: 0x21d3c8, sin portar)
                     voz = 0xffff
-                rot = ti(tok) if tok >> 16 == 0x2b else 0xff
+                if tok >> 16 == 0x46 and tok not in t46: t46.append(tok)
+                rot = ti(tok) if tok >> 16 == 0x2b else 0x40 + t46.index(tok) if tok >> 16 == 0x46 else 0xff
                 pets.extend(struct.pack('<2h4B2H10i', ini, fin, tipo, sub, rot, 1 if tok >> 16 == 0x46 else 0, voz, 0,
                                         *struct.unpack_from('<10i', blk, 0x60)))
                 tipos.setdefault(tipo, set()).add((sub, hex(tok), hex(voz)))
@@ -187,6 +188,18 @@ def main():
     print('  acompanante: %s / %s, tabla %s' % ([hex(u(0x423e60 + 4 * k)) for k in range(7)], [hex(u(0x423e80 + 4 * k)) for k in range(7)], sel))
     open(os.path.join(sal, 'CAMP.DAT'), 'wb').write(out)
     for t in sorted(tipos): print('  tipo %2d: %s' % (t, sorted(tipos[t])))
+    # CAMPHUD.DAT: los rotulos del anuncio del banco SPRANI 0x46 (el rotulo 0x40 + k de la peticion es el grupo CA_Tkk),
+    # cada uno con su escena entera, como los HA_Tnn de HAHUD.DAT (tools/conv_infarto.py)
+    import numpy as np
+    A46, T46, _ = D.banco(0x46); hud = ch.Hud(); hud.taco = [0xff] * 16
+    hud.vq = lambda i, a, fmt, l_: ch.vq_pequeno(i, a, fmt, l_, 'CAMPHUD: ')
+    for k_, tok in enumerate(t46):
+        sc = A46.escenas[tok & 0xffff]; nc, pc = struct.unpack_from('<2I', A46.a, sc); raiz = pc + (nc - 1) * 0x24
+        n_ = max(1, int(struct.unpack_from('<f', A46.a, raiz + 8)[0])); nm = 'CA_T%02d' % k_
+        g_ = ch.grupo_escena(hud, nm, A46, T46, 0x46, tok & 0xffff, n_, prefijo='ca_'); hud.uso(nm, g_, 0, 0, capa=4)
+    hud.escribe(os.path.join(sal, 'CAMPHUD.DAT'))
+    print('CAMPHUD.DAT: %d rotulos del banco 0x46 (%s), %d bytes, %d texturas' % (len(t46), ' '.join('%X' % t for t in t46),
+          os.path.getsize(os.path.join(sal, 'CAMPHUD.DAT')), len(hud.tex)))
     print('CAMP.DAT: %d peticiones, %d filas de objetos, %d bytes' % (npet, len(objs), len(out)))
 
 

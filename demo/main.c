@@ -3376,19 +3376,21 @@ static float grua_s, grua_x; static int grua_on;
 static int variante = 1;
 static hud_dat_t *ha_hud;                                       /* HAHUD.DAT en el modo INFARTO */
 /* rotulo del INFARTO: sube las texturas del uso al verse y baja las del anterior (VRAM fuera de la zona: ~75 KB) */
-static void ha_rotulo_uso(int *actual, const char *nombre)
+static hud_dat_t *camp_hud;                                     /* CAMPHUD.DAT: los rotulos del banco 0x46 (campeonatos) */
+static void hud_rotulo_uso(hud_dat_t *h, int *actual, const char *nombre)
 {
     static uint32_t n;
-    int u = ha_hud ? hudd_uso(ha_hud, nombre) : -1;
+    int u = h ? hudd_uso(h, nombre) : -1;
     if (u == *actual) {                                         /* (si no subio: otra vez cada 30 cuadros) */
-        if (u >= 0 && !hudd_uso_residente(ha_hud, u) && ++n % 30 == 0) hudd_sube_uso(ha_hud, u);
+        if (u >= 0 && !hudd_uso_residente(h, u) && ++n % 30 == 0) hudd_sube_uso(h, u);
         return;
     }
-    hudd_baja_uso(ha_hud, *actual);
+    if (h) hudd_baja_uso(h, *actual);
     *actual = u;
-    if (hudd_sube_uso(ha_hud, u)) dbglog(DBG_ERROR, "HAHUD: sin VRAM para %s\n", nombre);
+    if (h && hudd_sube_uso(h, u)) dbglog(DBG_ERROR, "HUD: sin VRAM para %s\n", nombre);
 }
-static int ha_u_txt = -1, ha_u_mar = -1;
+static void ha_rotulo_uso(int *actual, const char *nombre) { hud_rotulo_uso(ha_hud, actual, nombre); }
+static int ha_u_txt = -1, ha_u_mar = -1, camp_u_txt = -1;
 /* el panel de la nota y la hoja de resultados del INFARTO (comun/infarto.c infarto_dibujos): cada grupo se sube al verse
    y se baja cuando deja de verse (VRAM fuera de la zona, como los rotulos) */
 static void ha_dibujos(void)
@@ -15209,6 +15211,7 @@ int main(int argc, char **argv)
                 rc_modelos_suelta();
             }
             if (ha_hud && !reintenta) { hudd_cierra(ha_hud); ha_hud = NULL; ha_u_txt = ha_u_mar = -1; }   /* INFARTO */
+            if (camp_hud && !reintenta) { hudd_cierra(camp_hud); camp_hud = NULL; camp_u_txt = -1; }   /* campeonatos */
             if (ha_mod_ok && !reintenta) { libera_modelo(&ha_mod); ha_mod_ok = 0; }
             if (c2c_hud && !reintenta) { hudd_cierra(c2c_hud); c2c_hud = NULL; }                       /* COAST 2 COAST */
             if (c2c_hud2 && !reintenta) { hudd_cierra(c2c_hud2); c2c_hud2 = NULL; }
@@ -15452,6 +15455,7 @@ int main(int argc, char **argv)
                     /* el medidor, el panel y las filas (HAHUD.DAT: solo sus tablas en la RAM, ~150 KB; las texturas VQ,
                        40 KB, se leen del GD al subirlas, ya con la zona del curso reservada) */
                     if (!ha_hud && !(ha_hud = hudd_abre("HAHUD.DAT", 0, 1))) dbglog(DBG_ERROR, "HAHUD: no se pudo abrir\n");
+                    if (variante == 5 && !camp_hud && !(camp_hud = hudd_abre("CAMPHUD.DAT", 0, 1))) dbglog(DBG_ERROR, "CAMPHUD: no se pudo abrir\n");
                     if (!ha_mod_ok) {                           /* los modelos de los objetos (HAOBJ.DAT, ~7 KB) */
                         ha_mod.relleno_propio = 1;              /* (como BOnn.DAT: relleno[0] = malla | animacion) */
                         if (!lee_modelo(&ha_mod, "HAOBJ.DAT")) { sube_tramo(&ha_mod, 0, NULL); ha_mod_ok = 1; }
@@ -16293,14 +16297,17 @@ int main(int argc, char **argv)
                         int rt, rm, rcu;
                         if (ha_hud && (variante == 5 ? camp_rotulo(&rt, &rm, &rcu) : infarto_rotulo(&rt, &rm, &rcu))) {   /* 460970 / 460AD0: marco y texto en (176, 78) */
                             char n1[16], n2[16]; uint32_t ti = variante == 5 ? camp_tinte() : infarto_tinte();   /* 7F8B68: el marco, rojizo si se pierden */
-                            sprintf(n1, "HA_M%d", rm); sprintf(n2, "HA_T%02d", rt);
-                            ha_rotulo_uso(&ha_u_mar, n1); ha_rotulo_uso(&ha_u_txt, n2);
+                            hud_dat_t *ht = rt >= 0x40 ? camp_hud : ha_hud; int *ut = rt >= 0x40 ? &camp_u_txt : &ha_u_txt;   /* (0x40 + k: banco 0x46) */
+                            sprintf(n1, "HA_M%d", rm); sprintf(n2, rt >= 0x40 ? "CA_T%02d" : "HA_T%02d", rt & 0x3f);
+                            ha_rotulo_uso(&ha_u_mar, n1); hud_rotulo_uso(ht, ut, n2);
+                            if (ut != &ha_u_txt && ha_u_txt >= 0) { hudd_baja_uso(ha_hud, ha_u_txt); ha_u_txt = -1; }
+                            if (ut != &camp_u_txt && camp_u_txt >= 0 && camp_hud) { hudd_baja_uso(camp_hud, camp_u_txt); camp_u_txt = -1; }
                             /* el marco solo con su texto: sin el (sin VRAM) salia un rectangulo blanco */
-                            if (hudd_uso_residente(ha_hud, ha_u_mar) && hudd_uso_residente(ha_hud, ha_u_txt)) {
+                            if (ht && hudd_uso_residente(ha_hud, ha_u_mar) && hudd_uso_residente(ht, *ut)) {
                                 hudd_color((ti & 0xff) << 16 | (ti & 0xff00) | (ti >> 16 & 0xff));
                                 hudd_dibuja(ha_hud, ha_u_mar, rcu, 176, 78, 1, 118, 0);
                                 hudd_color(0xFFFFFF);
-                                hudd_dibuja(ha_hud, ha_u_txt, rcu, 176, 78, 1, 119, 0);
+                                hudd_dibuja(ht, *ut, rcu, 176, 78, 1, 119, 0);
                             }
                         }
                         if (ha_hud && variante == 2) {  /* 45FB80 / 45B950: corazones, roturas y efectos */

@@ -7272,3 +7272,15 @@ Sobre "COAST 2 COAST: los campeonatos (variante 5), agente c2c2". Todo verificad
 - E (Jennifer, `-DPRUEBA_CAMP=0 -DPRUEBA_CAMP_PASA -DDIAG_HA`): rebufo nota 6 -> "DIAGHA acompanante: movimiento
   0x26000d (esta)", velocidad: "cara 0 (0x26000a, esta)" y nota 0 -> 0x60048; capturas cap3/chica (la acompanante se
   mueve en el coche tras la nota). En carrera 303K libres con la pareja y CHRH.DAT, sin "Out of memory".
+
+### Rotulos del banco 0x46 (tipos 1, 12 y los demas): HECHO
+
+- tools/conv_camp.py hace CAMPHUD.DAT (196 KB, 19 texturas VQ de ~64 KB sin VQ cada una): los 19 rotulos del anuncio
+  del banco SPRANI 0x46 que piden las peticiones (460040 rebufo, 460041 velocidad, 460042 colores, 46002C, 46003E...
+  46005C), cada uno su escena entera (conv_hud.grupo_escena) en el grupo CA_Tkk; la peticion lleva el rotulo 0x40 + k.
+  Ya solo el tipo 20 se anuncia con el generico (no tiene rotulo propio en 0x22faec).
+- demo/main.c: CAMPHUD.DAT se abre con HAHUD.DAT en la carrera del campeonato (solo sus tablas; la textura de un
+  rotulo se sube mientras se ve y se baja despues, `hud_rotulo_uso`, como los HA_Tnn).
+- E (Jennifer, PALM): "¡Ve al rebufo de los coches!" con su dibujo (tipo 12) y "¡Excede la velocidad!" con el
+  velocimetro (tipo 1), cap3/rotulos (r_033, r_063, la ampliacion c2c3_rt_z.png).
+- SIN PORTAR: el letrero 3D de inicio / fin de la peticion (0x232e60 con 0x1a7c80 / 0x1a7cb0).
