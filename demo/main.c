@@ -3403,7 +3403,16 @@ static void ha_spr3d(void)
     { static int t_; if (n && ++t_ % 60 == 0) dbglog(DBG_INFO, "C11: %d sprites (%s uso %d cuadros %d) en %.0f %.0f %.0f\n", n, d[0].g, hudd_uso(ha_hud, d[0].g), ha_cuadros(d[0].g), (double)d[0].p[0], (double)d[0].p[1], (double)d[0].p[2]); }
 #endif
     for (i = 0; i < n; i++) {
-        int u = hudd_uso(ha_hud, d[i].g); float dx = d[i].p[0] - ojo[0], dy = d[i].p[1] - ojo[1], dz = d[i].p[2] - ojo[2], zv, sc;
+        int u = d[i].g[0] == '#' ? -1 : hudd_uso(ha_hud, d[i].g); float dx = d[i].p[0] - ojo[0], dy = d[i].p[1] - ojo[1], dz = d[i].p[2] - ojo[2], zv, sc;
+        if (d[i].g[0] == '#') {                                 /* (C2C, tipo 14) un numero con las cifras del HUD; rojo el negativo */
+            zv = dx * ade[0] + dy * ade[1] + dz * ade[2];
+#ifdef PRUEBA_C14
+            { static int t_; if (++t_ % 30 == 0) dbglog(DBG_INFO, "C14: numero %s a %.0f m\n", d[i].g + 1, (double)zv); }
+#endif
+            if (zv > cerca * 2.0f) hud_cifras("CRONO", d[i].g + 1, 320.0f + (dx * der[0] + dy * der[1] + dz * der[2]) * fx / zv,
+                                              240.0f - (dx * arr[0] + dy * arr[1] + dz * arr[2]) * fx / zv, d[i].cuadro ? 0xFF4040 : 0xFFFFFF);
+            continue;
+        }
         if (u < 0) continue;
         for (k = 0; k < na && ahora[k] != u; k++) ;
         if (k == na && na < 4) ahora[na++] = u;
@@ -4275,6 +4284,17 @@ static void traf_aparece(void)
             v[i].sec = (int)floorf((traf[i].c.s - s_etapa) / m_pos); v[i].golpe = traf[i].b6c && !traf[i].n2f4; nuevo[i] = v[i].pos && !(v[i].marca & HA_VISTO); }
         camp_autos(v, NTRAF);
         for (i = 0; i < NTRAF; i++) traf[i].ha_m = v[i].marca;
+        {   int sc, lc, mk, md = -1;                            /* (tipo 14) los coches con numero de la lista +0x5c (0x29d410), */
+            for (i = 0; i < NTRAF; i++) if (traf[i].carril >= 0) { md = traf[i].modelo; break; }   /* con un modelo del trafico */
+            while (md >= 0 && camp_coche14(&sc, &lc, &mk)) {
+                for (j = 0; j < NTRAF && traf[j].carril >= 0; j++) ;
+                if (j >= NTRAF) break;
+                traf_abre(traf + j, s_etapa + (float)sc * m_pos, lc < NCARRIL ? lc : NCARRIL - 1, md, 0, traf_ult_pos); traf[j].ha_m = mk;
+#ifdef PRUEBA_C14
+                dbglog(DBG_INFO, "C14: coche %d en la seccion %d carril %d (plaza %d)\n", mk & 0xff, sc, lc, j);
+#endif
+            }
+        }
         if (camp_pares_pide())                                  /* (tipo 20, DESVIACION: sin 0x1f1a88, a cada coche nuevo de la */
             for (i = 0; i < NTRAF; i++) {                       /* peticion otro al lado, en el carril de al lado: el par) */
                 if (!nuevo[i] || !(traf[i].ha_m & HA_CAMP)) continue;
@@ -16462,6 +16482,9 @@ int main(int argc, char **argv)
                             hud_cifras("CRONO", b, 0x21d, k * 0x15 + 0x53, fv[k] < 0 ? 0xFF0000 : 0xFFFFFF);
                         }
                         sprintf(b, "%4d", variante == 5 ? camp_corazones() : infarto_corazones()); hud_cifras("CRONO", b, 0x206, 0x1b2, 0xFFFFFF);
+                        if (variante == 5) { int ob, su; if (camp_cuenta14(&ob, &su)) {   /* (C2C, tipo 14: 0x231fe0 / 0x232290; DESVIACION: */
+                            sprintf(b, "%3d", su); hud_cifras("CRONO", b, 0x206, 0x150, su == ob ? 0x40FF40 : 0xFFFFFF);   /* sin su panel) */
+                            sprintf(b, "%3d", ob); hud_cifras("CRONO", b, 0x206, 0x180, 0xFFD040); } }
                     }
                     if (t_cuenta >= 0 && t_cuenta < 300) {                       /* 3, 2, 1, GO! (la escena dura 5 s; GO a los 4) */
                         static const char *const CU[5] = { "CUENTA_PRE", "CUENTA_3", "CUENTA_2", "CUENTA_1", "CUENTA_GO" };

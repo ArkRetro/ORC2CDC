@@ -74,5 +74,8 @@ void camp_autos(struct haobj_auto_s *v, int n);
 int  camp_spr3d(struct haobj_s3d_s *v, int max, int (*cuadros)(const char *g));
 /* (tipo 20) las lineas entre los coches de cada par abierto (0x296da0): a[k], b[k] los dos puntos (+1 m en y); cuantas */
 int  camp_lineas(float (*a)[3], float (*b)[3], int max);
-int  camp_pares_pide(void);                 /* (tipo 20) 1: a cada coche nuevo de la peticion, otro al lado (main.c) */
+int  camp_pares_pide(void);
+/* (tipo 14) el siguiente coche con numero que poner (seccion de la etapa, carril y la marca de su plaza); 0 ninguno */
+int  camp_coche14(int *sec, int *carril, int *marca);
+int  camp_cuenta14(int *objetivo, int *suma);  /* el objetivo y la suma de la peticion del 14 en curso; 0 sin ella */                 /* (tipo 20) 1: a cada coche nuevo de la peticion, otro al lado (main.c) */
 #endif

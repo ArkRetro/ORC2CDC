@@ -85,6 +85,10 @@ typedef struct {
     const uint16_t *let; int let_k;                     /* 'LET1': los letreros de inicio / fin (0x232e60) y el puesto */
     float xyz[3], fx, fz;                               /* el jugador (del paso anterior: camp_autos va antes) */
     int k20, k21_pl, k21_t;                             /* lineas cruzadas en el paso; el OVNI que lleva al jugador (+0x18) y +0xc */
+    const int32_t *t14; const uint8_t *c14; uint32_t n14;   /* 'C141': las tablas de valores y los coches de cada peticion */
+    const uint8_t *c14p; int n14c, nx14, objetivo, suma, k14_cambio, k14_toq;   /* la peticion del 14 en curso: sus coches, el siguiente */
+    int16_t v14[100];                                   /* el valor de cada coche (+0x10 de su registro de +0x5c) */
+    int16_t val11[24];                                  /* el valor del coche de cada plaza (su dibujo) */
 } camp_t;
 static camp_t *C;
 
@@ -123,7 +127,12 @@ int camp_inicia(int grupo, int fila, int forzada, int lista, int dificultad)
                 if (o + 8 <= tam && !memcmp((const uint8_t *)d + o, "ZON1", 4)) { memcpy(&n, (const uint8_t *)d + o + 4, 4); o += 8 + 20 * n; }
                 if (o + 12 <= tam && !memcmp((const uint8_t *)d + o, "C111", 4)) {
                     C->se11 = (const uint16_t *)((const uint8_t *)d + o + 4); o += 12;
-                    if (o + 8 <= tam && !memcmp((const uint8_t *)d + o, "LET1", 4)) C->let = (const uint16_t *)((const uint8_t *)d + o + 4);
+                    if (o + 8 <= tam && !memcmp((const uint8_t *)d + o, "LET1", 4)) {
+                        C->let = (const uint16_t *)((const uint8_t *)d + o + 4); o += 8;
+                        if (o + 8 + 264 <= tam && !memcmp((const uint8_t *)d + o, "C141", 4)) {
+                            memcpy(&C->n14, (const uint8_t *)d + o + 4, 4); C->t14 = (const int32_t *)((const uint8_t *)d + o + 8); C->c14 = (const uint8_t *)d + o + 8 + 264;
+                        }
+                    }
                 }
             } }
     }
@@ -527,6 +536,37 @@ static void tipo_paso(pet_t *p, const camp_coche_t *c, float dpos)
         }
         C->k11_golpes = 0;
         break;
+    case 14:                                            /* 0x29ccb8: la suma (tocar los coches con numero hasta el objetivo) */
+        if (p->fase == 1) {                             /* 0x29d410: el valor de cada coche y el objetivo (+0x70; la suma +0x72) */
+            uint32_t k; const uint8_t *e = C->c14; int pi = (int)(d - C->pets), i, L, sum = 0, r8, ronda;
+            C->c14p = NULL; C->n14c = C->nx14 = C->objetivo = C->suma = 0;
+            for (k = 0; e && k < C->n14; k++, e += 4 + 4 * e[2]) if ((e[0] | e[1] << 8) == pi) { C->c14p = e + 4; C->n14c = e[2] > 100 ? 100 : e[2]; break; }
+            if (!C->c14p) break;
+            L = e[3] > 2 ? 2 : e[3];                    /* (el nivel, lbu +0x74: algun guion lleva basura ahi; DESVIACION: tope 2) */
+            for (i = 0; i < C->n14c; i++) {             /* rand < 0,2: un negativo de la fila del nivel; si no un positivo */
+                const int32_t *t = C->t14 + ((float)(rand() & 0x7fff) * 3.0517578e-5f < 0.2f ? 0 : 33);
+                int n = t[L] > 0 && t[L] <= 10 ? (int)t[L] : 1;
+                C->v14[i] = (int16_t)t[3 + 10 * L + (rand() & 0x7fff) % n]; sum += C->v14[i];
+            }
+            r8 = (sum > -1 ? sum : sum + 7) >> 3;
+            for (ronda = 1; ronda <= 10; ronda++) {     /* rondas: cada valor con 0,7 (positivo) / 0,4; hasta pasar de suma / 8 */
+                for (i = 0; i < C->n14c; i++)
+                    if ((float)(rand() & 0x7fff) * 3.0517578e-5f < (C->v14[i] > 0 ? 0.7f : 0.4f)) C->objetivo += C->v14[i];
+                if (C->objetivo >= r8) break;
+            }
+            if (C->objetivo <= 0) C->objetivo = 1;
+            dbglog(DBG_INFO, "CAMP: suma: %d coches, nivel %d, objetivo %d\n", C->n14c, L, C->objetivo);
+        } else if (p->fase >= 2 && p->fase <= 4 && C->k14_toq) {   /* un coche tocado: el medidor (0x29d074) */
+            int a = abs(C->objetivo - C->suma), b = abs(C->objetivo - (C->suma - C->k14_cambio));
+            p->med = (float)(C->objetivo - (a < C->objetivo ? a : C->objetivo)) / (float)C->objetivo * C->d->umbral[6] * 1.15f;
+            if (a < b) animo(14, -1);                   /* (+0x3d78 / +0x3d74: mas cerca / mas lejos; SIMPLIFICADO) */
+            dbglog(DBG_INFO, "CAMP: suma %d (%+d) de %d, medidor %d\n", C->suma, C->k14_cambio, C->objetivo, (int)p->med);
+        } else if (p->fase == 5) {
+            C->c14p = NULL;
+            if (p->nota == 6) p->extra += (!p->c4c && !p->c54 ? 30 : 0) + (int)(40.0f * frena(p->v_ini, p->v_fin));
+        }
+        C->k14_cambio = C->k14_toq = 0;
+        break;
     case 20:                                            /* 0x296120: cruzar la linea entre los dos coches de un par (los de la */
         if (p->fase == 1) { p->h70 = 0; C->k20 = 0; haobj_pares_vacia(); }   /* peticion, 0x296560; el +0x70 de los parametros) */
         else if (p->fase == 4 && C->k20 > 0) {          /* 0x296f58: par cruzado, medidor + 80 / p74 (0x374190 + 0x18) */
@@ -573,7 +613,7 @@ static void tipo_paso(pet_t *p, const camp_coche_t *c, float dpos)
 static const pet_t *pet11(void)                         /* (y los tipos 20 y 21: los mismos coches de la peticion) */
 {
     const pet_t *p = C && C->cur >= 0 ? &C->pet[C->cur] : NULL;
-    return p && ((p->d->tipo == 11 && p->d->sub < 2) || p->d->tipo == 20 || p->d->tipo == 21) && p->fase >= 1 && p->fase <= 4 ? p : NULL;
+    return p && ((p->d->tipo == 11 && p->d->sub < 2) || p->d->tipo == 14 || p->d->tipo == 20 || p->d->tipo == 21) && p->fase >= 1 && p->fase <= 4 ? p : NULL;
 }
 static float d2(const float *a, const float *b) { float x = a[0] - b[0], y = a[1] - b[1], z = a[2] - b[2]; return x * x + y * y + z * z; }
 void camp_autos(haobj_auto_t *v, int n)
@@ -586,14 +626,14 @@ void camp_autos(haobj_auto_t *v, int n)
         if (!v[i].pos) continue;
         if (!(v[i].marca & HA_VISTO)) {                 /* (una plaza nueva: el coche acaba de aparecer) */
             v[i].marca |= HA_VISTO; C->fr11[i] = 0;
-            if (p && v[i].sec > js) v[i].marca |= HA_CAMP | (t == 11 && p->d->sub == 1 ? HA_FANT : 0);
+            if (p && v[i].sec > js && t != 14) v[i].marca |= HA_CAMP | (t == 11 && p->d->sub == 1 ? HA_FANT : 0);   /* (14: camp_coche14) */
         }
         if (!(v[i].marca & HA_CAMP)) continue;
-        if (!p) { v[i].marca &= ~(HA_CAMP | HA_FANT | HA_PAR | HA_SUELTO); continue; }   /* (0x1f20e8(0) en la fase 5) */
+        if (!p) { v[i].marca &= ~(HA_CAMP | HA_FANT | HA_PAR | HA_SUELTO | 0xff); continue; }   /* (0x1f20e8(0) en la fase 5) */
         memcpy(C->p11[i], v[i].pos, sizeof C->p11[i]);
         if (t == 21) {                                  /* 0x292d28: el OVNI toca al jugador (0x1d3a10 con radio 4: aqui 5 m, PROBABLE) */
             #ifdef PRUEBA_C21
-            if (abs(v[i].sec - js) <= 1) v[i].golpe = 1;   /* prueba: pasar a su lado cuenta como toque (el piloto no apunta) */
+            if (abs(v[i].sec - js) <= 8) v[i].golpe = 1;   /* prueba: a 8 secciones cuenta como toque (el piloto no los alcanza) */
 #endif
             if (!(v[i].marca & HA_SUELTO) && C->k21_pl < 0 && p->fase >= 2 && (d2(v[i].pos, C->xyz) < 25.0f || v[i].golpe)) {
                 v[i].marca |= HA_SUELTO; C->k21_pl = i; C->k21_t = 0;   /* (despues, +C5C 0x8000 y +B64 = 0x3c: se va) */
@@ -602,6 +642,22 @@ void camp_autos(haobj_auto_t *v, int n)
             continue;
         }
         if (t == 20) continue;
+        if (t == 14) {                                  /* 0x29cf18: los coches con numero (+0xd14 == 3; el indice + 1 en la marca) */
+            int k = (v[i].marca & 0xff) - 1;
+            if (k < 0 || k >= C->n14c || (v[i].marca & HA_SUELTO)) continue;
+            {   float r = abs(C->v14[k]) < 10 ? 3.0f : 4.0f; r += 1.5f;   /* 0x1d3a10 con radio 3 / 4 (+ el coche: PROBABLE) */
+#ifdef PRUEBA_C14
+                if (abs(v[i].sec - js) <= 1 && (rand() & 1)) v[i].golpe = 1;   /* prueba: la mitad de los que pasa a su lado */
+#endif
+                if (d2(v[i].pos, C->xyz) < r * r || v[i].golpe) {   /* +0x72 += valor (no baja de 0) */
+                    int a = C->suma; C->suma += C->v14[k]; if (C->suma < 0) C->suma = 0;
+                    C->k14_cambio += C->suma - a; C->k14_toq = 1;
+                    v[i].marca |= HA_SUELTO; if (camp_se) camp_se(C->v14[k] > 0 ? 0xd6 : 0xd4);   /* (efectos: SUPUESTO) */
+                } else if (v[i].sec < js - 1) v[i].marca |= HA_SUELTO;   /* 0x19c990: el que queda atras se va */
+            }
+            if (!(v[i].marca & HA_SUELTO) && v[i].sec - js < 10) { C->ver11[i] = 1; C->val11[i] = C->v14[k]; }
+            continue;
+        }
         if (v[i].sec - 7 == js && C->k11_tmr >= 0x3c) { /* 0x294e00: un coche 7 secciones por delante: 0x422e00[rand % 3] */
             if (C->se11 && camp_se) camp_se(C->se11[rand() % 3]);
             C->k11_tmr = 0;
@@ -630,6 +686,24 @@ void camp_autos(haobj_auto_t *v, int n)
     }
     if (p) C->k11_tmr++;
 }
+/* (tipo 14) el siguiente coche de la cuenta que hay que poner: su seccion de la etapa (inicio + la del guion) y carril,
+   cuando el jugador esta a menos de 40 secciones; *marca: la marca de su plaza. 0 si no hay */
+int camp_coche14(int *sec, int *carril, int *marca)
+{
+    const pet_t *p = pet11(); const uint8_t *e;
+    if (!p || p->d->tipo != 14 || !C->c14p || C->nx14 >= C->n14c) return 0;
+    e = C->c14p + 4 * C->nx14;
+    *sec = p->d->ini + (int16_t)(e[0] | e[1] << 8); *carril = (int8_t)e[2];
+    if (*sec - (int)floorf(C->pos) > 40) return 0;
+    *marca = (int)(HA_VISTO | HA_CAMP) | (C->nx14 + 1); C->nx14++;
+    return 1;
+}
+int camp_cuenta14(int *objetivo, int *suma)
+{
+    const pet_t *p = pet11();
+    if (!p || p->d->tipo != 14 || !C->c14p) return 0;
+    *objetivo = C->objetivo; *suma = C->suma; return 1;
+}
 int camp_pares_pide(void) { const pet_t *p = pet11(); return p && p->d->tipo == 20; }
 int camp_lineas(float (*a)[3], float (*b)[3], int max)
 {
@@ -649,6 +723,14 @@ int camp_spr3d(haobj_s3d_t *v, int max, int (*cuadros)(const char *g))
     const pet_t *p = pet11(); int i, k = 0, f, nc;
     if (!p) return 0;
     if (p->d->tipo == 20) return 0;
+    if (p->d->tipo == 14) {                             /* (DESVIACION: el numero con las cifras del HUD, rojo el negativo) */
+        for (i = 0; i < 24 && k < max; i++) {
+            if (!C->ver11[i]) continue;
+            snprintf(v[k].g, sizeof v[k].g, "#%d", abs(C->val11[i]) % 1000); v[k].cuadro = C->val11[i] < 0;
+            memcpy(v[k].p, C->p11[i], sizeof v[k].p); v[k].p[1] += 2.0f; v[k].esc = 0; k++;
+        }
+        return k;
+    }
     f = p->d->sub == 1 || p->d->tipo == 21; nc = cuadros ? cuadros(f ? "HA_S06" : "HA_C0") : 1;   /* (21: DESVIACION, sin el modelo del OVNI) */
     for (i = 0; i < 24 && k < max; i++) {
         if (!C->ver11[i]) continue;
