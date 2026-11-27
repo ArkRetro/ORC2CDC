@@ -29,6 +29,7 @@
 #include "../comun/fsp.h"
 #include "../comun/infarto.h"
 #include "../comun/gho.h"
+#include "../comun/haobj.h"
 #include "../comun/rival.h"
 #include "../comun/vmu.h"
 #include "../comun/robot.h"
@@ -45,6 +46,8 @@
 #endif
 #include "meta.h"
 #include "../comun/rksp.h"
+/* (INFARTO 3) FRIO: por tamano lo que solo corre al cargar (no en cada cuadro de la carrera) */
+#define FRIO __attribute__((optimize("Os")))
 
 /* Longitud de las tiras en las listas de objetos de la PowerVR (Strip_Len, bits 18-19 de la cabecera del poligono:
    1, 2, 4 o 6 triangulos de una tira por entrada de la lista de cada tile). KallistiOS la deja en 2 (PVR_CMD_POLYHDR
@@ -403,7 +406,7 @@ static int pila_cmp(const void *a, const void *b)
 #define DECOR_DETRAS 3                                          /* edificios tapados por otro de delante: fuera 1 de cada 3 */
 #define DECOR_FAROLA 20
 #define DECOR_PUBLICO 2
-static void decor_reduce(modelo_t *m, const char *nombre)
+FRIO static void decor_reduce(modelo_t *m, const char *nombre)
 {
 #ifndef SIN_DECOR_REDUCE
     static uint8_t ttipo[512]; int seg; uint32_t q;
@@ -590,7 +593,7 @@ static void decor_reduce(modelo_t *m, const char *nombre)
    dibujan con la camara delante de su plano: el descarte de la cara de atras, para esas mallas. En las 62 etapas y 498
    uniones: SEG23 (esta), SEG26, SEG52 y SEG58. -DSIN_TAPAS: como antes */
 static float ojo[3];                                             /* (la camara: mas abajo) */
-static void tapas_busca(modelo_t *m)
+FRIO static void tapas_busca(modelo_t *m)
 {
     uint32_t k, i, j, b; const float *R = m->ruta; uint32_t pr = m->paso_ruta;
     m->ntapas = 0;
@@ -648,7 +651,8 @@ static void tapas_paso(modelo_t *m)
         ma->n = d > 0 ? m->tapa_n[i] : 0;
     }
 }
-static int lee_modelo_en(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t cap)
+/* (INFARTO 2) por tamano: es carga (al cambiar de etapa o de menu, la manda el GD), no codigo de cada cuadro */
+__attribute__((optimize("Os"))) static int lee_modelo_en(modelo_t *m, const char *nombre, uint8_t *buf, uint32_t cap)
 {
     uint32_t sz, h[13], i, v7; uint8_t *b = buf ? (gd_carga_en(nombre, buf, cap, &sz) ? NULL : buf) : gd_carga(nombre, &sz), *p;
     if (!b) return -1;
@@ -835,7 +839,7 @@ static inline int malla_de_cartel(const modelo_t *m, const malla_t *ma)
    entradas del libro - 1. Una
    VQ con libro reducido (N < 256 entradas, las ultimas) se direcciona 2048 - 8 N bytes antes de sus datos: la PowerVR
    lee el libro en la direccion de la textura y los indices 2 KB despues, y nunca toca las entradas que faltan. */
-static void compila_cab(modelo_t *m, uint32_t i, int especular)   /* especular: 1 desplazamiento, 2 ademas sumada */
+FRIO static void compila_cab(modelo_t *m, uint32_t i, int especular)   /* especular: 1 desplazamiento, 2 ademas sumada */
 {
     pvr_poly_cxt_t cx; tex_t *t = m->texs + i; uint32_t f, fb = t->fmt & 0xff, vq = t->fmt & 0x100, n = ((t->fmt >> 16) & 0xff) + 1;
     pvr_ptr_t dir = vq ? (pvr_ptr_t)((uintptr_t)m->tv[i] - (2048 - 8 * n)) : m->tv[i];
@@ -2959,7 +2963,7 @@ static uint32_t ruta_n, ruta_cap, ruta_pr;                      /* puntos, capac
 #define PASO 4.0f
 #define PR ((int)ruta_pr)
 #define NPERF 16
-static void ruta_prepara(void)
+FRIO static void ruta_prepara(void)
 {
     uint32_t i, n = ruta_n; float ant = rumbo_ini;
     free(rumbo); rumbo = malloc(n * sizeof(float));
@@ -3046,6 +3050,7 @@ static int suelo_mundo(float x, float z, float *y, int spl, uint32_t *clase)
     if (clase) *clase = k;
     return pol;
 }
+static int ha_suelo(float x, float z, float *y) { return suelo_mundo(x, z, y, 0, NULL); }   /* 43F2F0 (haobj.c) */
 /* lo mismo en la distancia s y el desvio x de la ruta (la ruta solo da el sitio) */
 static int suelo_ruta(float s, float x, float *y, int spl, uint32_t *clase)
 {
@@ -3153,7 +3158,7 @@ static int ruta_pon(const modelo_t *m)
    saltos). Devuelve el primer punto de m en la ruta, o -1 */
 #define RECENTRA 25
 static uint32_t ruta_salto;                                     /* primer punto de m usado (la parte entera) */
-static int ruta_anade(const modelo_t *m)
+FRIO static int ruta_anade(const modelo_t *m)
 {
     const float *b = m->ruta; uint32_t j = 0, k, c, i0 = ruta_n, n; float ax, az, tx, tz, l, o0 = 0, d0 = 0, d1, f = 0;
     if ((int)m->paso_ruta != PR || m->nruta < 8 || !ruta_n) return -1;
@@ -3381,7 +3386,54 @@ static void ha_rotulo_uso(int *actual, const char *nombre)
     *actual = u;
     if (hudd_sube_uso(ha_hud, u)) dbglog(DBG_ERROR, "HAHUD: sin VRAM para %s\n", nombre);
 }
-static int ha_u_txt = -1, ha_u_mar = -1;                                        /* [780258] (PS2 0x443508) de la carrera */
+static int ha_u_txt = -1, ha_u_mar = -1;
+/* (INFARTO 3) 4295D0 (PS2 0x115870): los sprites 3D del modo (infarto_spr3d) proyectados con la camara y escalados (esc x
+   foco / z / 32), encima de la escena; cada grupo se sube al verse y se baja al dejar de verse */
+static int ha_cuadros(const char *g) { int u = ha_hud ? hudd_uso(ha_hud, g) : -1; return u < 0 ? 1 : hudd_cuadros(ha_hud, u); }
+static void ha_spr3d(void)
+{
+    static int sub[4], nsub;
+    infarto_s3d_t d[32]; int n = infarto_spr3d(d, 32, ha_cuadros), i, k, ahora[4], na = 0;
+    for (i = 0; i < n; i++) {
+        int u = hudd_uso(ha_hud, d[i].g); float dx = d[i].p[0] - ojo[0], dy = d[i].p[1] - ojo[1], dz = d[i].p[2] - ojo[2], zv, sc;
+        if (u < 0) continue;
+        for (k = 0; k < na && ahora[k] != u; k++) ;
+        if (k == na && na < 4) ahora[na++] = u;
+        if (!hudd_uso_residente(ha_hud, u) && hudd_sube_uso(ha_hud, u)) continue;
+        zv = dx * ade[0] + dy * ade[1] + dz * ade[2];
+        if (zv < cerca * 2.0f) continue;
+        sc = d[i].esc > 0.0f ? d[i].esc * fx / zv * 0.03125f : 1.0f;   /* (esc <= 0: 429530, sin escala) */
+        hudd_escala(sc, sc);
+        hudd_dibuja(ha_hud, u, d[i].cuadro, (dx * der[0] + dy * der[1] + dz * der[2]) * fx / zv,
+                    -(dx * arr[0] + dy * arr[1] + dz * arr[2]) * fx / zv, 1, 110 + 0.01f * i, 0);
+        hudd_escala(1, 1);
+    }
+    for (k = 0; k < nsub; k++) {
+        for (i = 0; i < na && ahora[i] != sub[k]; i++) ;
+        if (i == na) hudd_baja_uso(ha_hud, sub[k]);
+    }
+    memcpy(sub, ahora, sizeof(int) * (size_t)na); nsub = na;
+}
+/* el panel de la nota y la hoja de resultados del INFARTO (comun/infarto.c infarto_dibujos): cada grupo se sube al verse
+   y se baja cuando deja de verse (VRAM fuera de la zona, como los rotulos) */
+static void ha_dibujos(void)
+{
+    static int sub[24], nsub;
+    infarto_dib_t d[24]; infarto_num_t nv[5]; int nn = 0, n = infarto_dibujos(d, 24, nv, &nn), i, k, ahora[24], na = 0;
+    for (i = 0; i < n; i++) {
+        int u = hudd_uso(ha_hud, d[i].g);
+        if (u < 0) { static int av; if (!av++) dbglog(DBG_ERROR, "HAHUD: sin el grupo %s (HAHUD.DAT de antes de la Rev 1.1)\n", d[i].g); continue; }
+        ahora[na++] = u;
+        if (!hudd_uso_residente(ha_hud, u) && hudd_sube_uso(ha_hud, u)) dbglog(DBG_ERROR, "HAHUD: sin VRAM para %s\n", d[i].g);
+        if (hudd_uso_residente(ha_hud, u)) hudd_dibuja(ha_hud, u, d[i].cuadro, d[i].x, d[i].y, 1, 125 + 0.01f * i, 0);
+    }
+    for (k = 0; k < nsub; k++) {
+        for (i = 0; i < na && ahora[i] != sub[k]; i++) ;
+        if (i == na) hudd_baja_uso(ha_hud, sub[k]);
+    }
+    memcpy(sub, ahora, sizeof(int) * (size_t)na); nsub = na;
+    for (i = 0; i < nn; i++) { char b[16]; sprintf(b, "%3d", (int)nv[i].v); hud_cifras("CRONO", b, nv[i].x, nv[i].y, 0xFFFFFF); }
+}                                        /* [780258] (PS2 0x443508) de la carrera */
 /* Juego de la carrera (PS2 [0x59acac] = PC [780260], 0x1b4878 = 43F860): 1 el de la consola (SUMO_FE: el menu lo pone
    al entrar, 0x237e28), 0 el de OUTRUN2SP (el menu principal lo pone a 0 al elegirlo: 0x23aba0, opcion 2, y +21C = 7).
    Preset del curso (PS2 [0x44350c] = [gp-0x7b64] = PC [78024C]; gp = 0x44b070, 0x1012f8): START (0x1b63a0) lee el
@@ -3431,7 +3483,7 @@ static int tim_zona(int k, int nivel)
     return t;
 }
 static uint8_t cha_bloque[24];                                  /* 'CHA1' de PARAM.DAT (o 0) */
-static int fisica_carga(void)
+FRIO static int fisica_carga(void)
 {
     uint32_t sz; float *t = gd_carga("PARAM.DAT", &sz);
     if (!t || sz < (200 * 19 + 162 + 256) * 4) return -1;
@@ -3618,7 +3670,7 @@ typedef struct { coche_t c; int carril, modelo, destino; float v_des;
                  int golpe, lado; float t_golpe, vlat;          /* golpe: estado de choque (16..19) o -1 */
                  float t_recup, wa[3]; int d22;                 /* +2F8, pose del cuadro anterior (mundo de or2), +D22 */
                  float b08; int b14, b18, dir, b58, b60, b64, b6c, b62, b53, c5c1, n2f4;
-                 int pt_marca, b72, color, ha;                  /* puntuacion: +C5C (PT_*) y +B72 (rebufo reciente); ha: INFARTO */
+                 int pt_marca, b72, color, ha, ha_m;            /* puntuacion: +C5C (PT_*) y +B72 (rebufo reciente); ha: INFARTO; ha_m: +C5C 0x20000 (infarto_autos) */
                  int toca, freno; float gv[2], gth;             /* toca: +4 0x10000 / +DD4 (el que le toco, TR_JUG el jugador); gv: +20 en el marco de la ruta en gth */
                  int rc, marcha, b52, c34; float b54, bb4;     /* rc: coche de carreras (registro + 1; 0 trafico);
                                                                    marcha +208; radios de la carretera +B54 / +BB4 */
@@ -3743,7 +3795,7 @@ static void traf_tap_arbol(const uint8_t *seg, int n)
     ntap = n < TAP_ETAPAS ? n : TAP_ETAPAS;
     memset(tap_usado, 0, sizeof tap_usado);
 }
-static void traf_tablas(void)
+FRIO static void traf_tablas(void)
 {
     uint32_t sz, n, m; const uint8_t *d = gd_carga("TRAFC.DAT", &sz);
     if (!d || sz < 8 || memcmp(d, "TRC1", 4)) return;
@@ -4134,7 +4186,7 @@ static void traf_aparca(trafico_t *t)
 {
     if (t->rc) rc_suelta_coche(t);                              /* 4763D0: el registro del coche de carreras sigue solo */
     t->carril = t->destino = -1; t->c.s = -1.0e6f; t->c.v = 0; t->golpe = -1; t->b72 = 0; t->b6c = 0; t->b14 = 0;
-    t->c5c1 = 0; t->b64 = 0; t->b62 = 0; t->b53 = 0; t->ha = 0;
+    t->c5c1 = 0; t->b64 = 0; t->b62 = 0; t->b53 = 0; t->ha = 0; t->ha_m = 0;
 }
 static float traf_ult_s;                                        /* sin tablas: s del jugador en la ultima aparicion */
 static void traf_inicia(float s0)
@@ -4170,6 +4222,12 @@ static void traf_libera(void)
 static void traf_infarto(void)
 {
     infarto_coche_nuevo_t n; int i, m, l; float s;
+    {   haobj_auto_t v[NTRAF];                                  /* (INFARTO 3) 46D250 / 46DB60: las plazas para las peticiones */
+        for (i = 0; i < NTRAF; i++) { v[i].pos = traf[i].carril >= 0 ? traf[i].c.pos : NULL; v[i].fw = traf[i].c.fw; v[i].up = traf[i].c.up; v[i].marca = traf[i].ha_m;
+            v[i].sec = (int)floorf((traf[i].c.s - s_etapa) / m_pos); v[i].clase = traf[i].ha - 1; v[i].golpe = traf[i].b6c && !traf[i].n2f4; v[i].v = &traf[i].c.v; v[i].v_des = &traf[i].v_des; }
+        infarto_autos(v, NTRAF);
+        for (i = 0; i < NTRAF; i++) traf[i].ha_m = v[i].marca;
+    }
     if (!infarto_trafico() && !cur_en_union)
         for (i = 0; i < NTRAF; i++) {
             trafico_t *t = traf + i;
@@ -4193,7 +4251,7 @@ static void traf_infarto(void)
     if (i >= NTRAF) { infarto_coche_abierto(0); return; }
     l = n.carril < 0 ? 0 : n.carril >= NCARRIL ? NCARRIL - 1 : n.carril;
     traf_abre(traf + i, s, l, m, n.modelo == 0x26 || n.modelo == 0x2b ? n.id % 2 : n.id % 3, traf_ult_pos);
-    traf[i].ha = 1; traf[i].c.v = 0;                            /* 45D470: +1C4 = 0, +B58 = +B5C = 0x12 */
+    traf[i].ha = n.clase >= 0 ? 1 + n.clase : 1; traf[i].c.v = 0; traf[i].ha_m = n.fantasma ? HA_FANT : 0;                 /* 45D470: +1C4 = 0, +B58 = +B5C = 0x12 (ha: la clase + 1) */
     dbglog(DBG_INFO, "INFARTO: coche de la mision clase %d modelo %d seccion %d carril %d (jugador en %.0f m de la etapa)\n",
            n.clase, n.modelo, n.seccion, l, (double)(yo.s - s_etapa));
     infarto_coche_abierto(1);
@@ -5449,9 +5507,10 @@ static void traf_paso(float dt)
             }
             if (traf_otra_rama(t)) { traf_aparca(t); continue; }
         }
-        if (t->rc) {                                            /* 477F60 con +4 0x20 y 80FB14: -15 / 0x46 */
+        if (t->rc || t->ha == 7) {                              /* 477F60 con +4 0x20 y 80FB14: -15 / 0x46 (INFARTO 3: y los
+                                                                   escoltas del tipo 14, clase 6 = coches de carreras, PROBABLE) */
             int dd = (int)floorf((t->c.s - yo.s) / TR_POS);
-            if (dd < -15 || dd > 0x46 || t->c.s > longitud - 20.0f) { traf_aparca(t); continue; }
+            if ((dd < -15 && !(t->ha == 7 && infarto_hud()->tipo == 14)) || dd > 0x46 || t->c.s > longitud - 20.0f) { traf_aparca(t); continue; }
         } else if (t->c.s < yo.s - TR_CIERRA_ATRAS * m_pos || (!t->ha && t->c.s > yo.s + TR_CIERRA_DELANTE * m_pos) ||
             t->c.s > longitud - 20.0f) {                        /* los de la mision (+C5C 0x40000): por delante 0x270F */
             traf_aparca(t); continue;                           /* 477F60: cerrado */
@@ -5798,6 +5857,13 @@ static void piloto(const coche_t *c, float *giro, float *gas, float *freno)
         xc = xs[mejor];
 #ifdef PRUEBA_RAMA
         if (piloto_rama(c->s)) xc = PRUEBA_RAMA ? 9.0f : -9.0f;   /* prueba: hacia el lado de esa rama */
+#endif
+#ifdef PRUEBA_HA_CONOS
+        {   float lat;                                          /* prueba: hacia el objeto de la clase pedida (haobj.c) */
+            static int n_; int h_ = variante == 2 && haobj_cercano(c->pos, c->fw, PRUEBA_HA_CONOS, &lat);
+            if (h_) xc = c->x + lat * PRUEBA_HA_SIGNO;
+            if (++n_ % 60 == 0) dbglog(DBG_INFO, "DIAGHA piloto: objeto %d lat %.1f x %.1f xc %.1f\n", h_, (double)(h_ ? lat : 0), (double)c->x, (double)xc);
+        }
 #endif
 #ifdef PRUEBA_ARENA
 #ifndef PRUEBA_ARENA_S
@@ -6501,7 +6567,7 @@ static void part_recentra(float dx, float dz)
    su principio (antes tenia el suyo, y la mancha otro: 18 KB de RAM que ahora ocupan las chispas) */
 #define TAM_CEN (256 * 32 * 2)
 static uint16_t buf_arr[512 * 128] __attribute__((aligned(32)));
-static void efectos_inicia(void)
+FRIO static void efectos_inicia(void)
 {
     pvr_poly_cxt_t cx; uint32_t sz;
     uint8_t *e = gd_carga("EFECTOS.DAT", &sz); uint32_t o = 8;
@@ -7105,7 +7171,7 @@ static int curso_busca(const uint8_t *b, uint32_t sz, int id, uint32_t *o, uint3
    deja, 43D470(0); las listas cs_CS_<zona>_bin escriben bytes de una mascara de nodos, 0x1112f8 de SLES-53998): dos
    mascaras de bits por nodo del ORD7, seccion 0 y ultima. Solo las de las etapas del arbol cargado */
 static uint8_t *viso_dat; static const uint8_t *viso_m[CURSO_MAX]; static uint32_t viso_nn[CURSO_MAX];
-static void viso_lee(void)
+FRIO static void viso_lee(void)
 {
     uint32_t sz, n, i, k, tot = 0, s[3]; uint8_t *b, *p;
     free(viso_dat); viso_dat = NULL; memset(viso_m, 0, sizeof viso_m); memset(viso_nn, 0, sizeof viso_nn);
@@ -7187,7 +7253,7 @@ static void repsec_lee(void)
    variantes) el decorado de la meta de la etapa (el templo de CAPE) quedaba encima de ella. DESVIACION: en una etapa
    que en algun arbol es final (hijos -1), su union de meta de ese arbol (la del modo OutRun: meta, sin bifurcacion);
    la carrera acaba igual en la meta. Buscado en CURSO.DAT y CURSOTA.DAT sin rehacer datos */
-static int ta_meta_busca(const char *fich, int seg, etapa_t *e)
+FRIO static int ta_meta_busca(const char *fich, int seg, etapa_t *e)
 {
     uint32_t sz, n0, r, i, m, o, n, k; uint8_t *b = gd_carga(fich, &sz); int ok = 0;
     if (!b) return 0;
@@ -7233,7 +7299,7 @@ static int ta_codigo;                                            /* (definida ma
 static int rk_modelo;                                            /* Rev 2.9.4: menu_modelo() al empezar la carrera */
 static int ta_opcion_b;                                          /* (definida mas abajo) */
 static uint32_t l32_lic(const uint8_t *l, int o) { uint32_t v; memcpy(&v, l + o, 4); return v; }
-static void rk_un_jugador(int meta, int piloto)
+FRIO static void rk_un_jugador(int meta, int piloto)
 {
     const uint8_t *l = menu_licencia(); uint8_t rec[16]; uint32_t r0, r8, ms = meta ? (uint32_t)cuadros_ms(crono) : 0;
     int v, p = preset_curso & 3, c, ruta = 0, k, cambio = manual_ & 1, pos;
@@ -7274,7 +7340,7 @@ static void ta_meta_final(void)
     memcpy(curso[0].bk, e.bk, sizeof e.bk); memcpy(curso[0].rama, e.rama, sizeof e.rama);
     curso[0].trans_pos = e.trans_pos; curso[0].trans_seg = e.trans_seg; curso[0].trans_m = e.trans_m;
 }
-static int curso_lee_id(int id)
+FRIO static int curso_lee_id(int id)
 {
     uint32_t sz, o, n; int r; uint8_t *b = gd_carga(CURSO_FICH(id), &sz);
     if (!b) return -1;
@@ -7334,7 +7400,7 @@ static void col_en_hueco(int k, const float *M)
 #define HUECO_ETAPA_MAX (8400u << 10)
 #define HUECO_UNION_MAX (1800u << 10)
 static uint8_t arbol_grande[RIVAL_NMIS];                        /* el arbol 100 + i tiene una etapa o union que no cabe */
-static int curso_huecos(void)
+FRIO static int curso_huecos(void)
 {
     int n_grandes = 0, fta;
     uint32_t lba, t, tc, sz, o, m, a; int i; char n[16]; uint8_t *b;
@@ -7437,7 +7503,7 @@ static int po_k = PRUEBA_ORDEN_DESDE - 1, po_rep, po_fin, po_ult = -1, po_t;   /
 #endif
 static int ta_codigo = -1;                                      /* CONTRARRELOJ: [656234] (el arbol 200 + codigo) */
 static int ta_opcion_b;                                         /* Rev 2.9.4: la opcion B de la etapa (raiz +0x20c bit 0) */
-static void etapa_precalienta(void);                            /* (el reparto del TA antes del semaforo: abajo) */
+FRIO static void etapa_precalienta(void);                            /* (el reparto del TA antes del semaforo: abajo) */
 static volatile int meta_hilo;                                  /* META.DAT leyendose (hilo) */
 static void *meta_lee(void *p)
 {
@@ -7447,7 +7513,7 @@ static void *meta_lee(void *p)
     meta_hilo = 0;
     return NULL;
 }
-static void curso_reinicia(void)
+FRIO static void curso_reinicia(void)
 {
     int k;
     if (curso_pedido != curso_id) {                             /* otro arbol: sus indices son otros */
@@ -7788,7 +7854,7 @@ static int rc_slot_modelo(int m)
     return rc_nmod ? NMODTRAF : -1;                             /* DESVIACION: sin plaza para su modelo, el primero */
 }
 /* 47BC90 (final comun con 46E830): el coche del registro i a ebx posiciones del jugador. -1 si no se puede */
-static int rc_abre(int i, int ebx, int delante, int parrilla)
+FRIO static int rc_abre(int i, int ebx, int delante, int parrilla)
 {
     rival_t *r = rival_reg(i); const rival_mision_t *mi = rival_mis(); int k, n = 0, slot = -1, carril, m; float s, v;
     trafico_t *t;
@@ -8110,7 +8176,7 @@ static float bo_esc;                                            /* escala de las
 static int bo_c74, bo_c78, bo_c7c, bo_c80, bo_c84, bo_c88, bo_pos_ant;   /* cuentas de 44EDE0 */
 static int bo_sel = -1, bo_estado;                              /* 0 nada, 1 por leer, 2 leyendo, 3 subido, 4 fuera */
 static struct { float x, t, dur; int ini, loop; const uint8_t *tray; matrix_t M __attribute__((aligned(32))); } bo_obj[4];
-static void bo_carga_datos(void)
+FRIO static void bo_carga_datos(void)
 {
     uint32_t sz, n, i, o; uint8_t *d = gd_carga("BO.DAT", &sz);
     if (!d || sz < 8 + BO_N * 64 + 8 + 28 + 8 || memcmp(d, "BOT1", 4)) { free(d); return; }
@@ -8349,6 +8415,142 @@ static void bo_dibuja_malla(const malla_t *ma, int g, uint32_t off, int k0, int 
     }
     mt.verts = t; mt.ofs = NULL; m.v0 = 0; m.n = n;
     dibuja_malla(&mt, &m);
+}
+/* INFARTO: los objetos de las peticiones (comun/haobj.c) con los modelos de HAOBJ.DAT (registros del banco 0x57, como
+   BOnn.DAT); como mucho HA_OBJ_MAX a la vez, los mas cercanos dentro de HAOBJ_LEJOS, y con el tope de los objetos de la
+   union (ta_bo_tope). ha_obj_tri / ha_obj_vtx: lo enviado en el ultimo cuadro (para medirlo) */
+#define HA_OBJ_MAX 24
+/* 43F370 para los objetos (comun/haobj.c 45C8E0): la seccion de la etapa del punto de la ruta mas cercano en xz, de
+   200 m por detras del coche a 5 km por delante, de 16 en 16 m y luego de 1 en 1 alrededor (APROXIMADO: el original lee
+   la seccion del poligono de la COLI) */
+static float ha_s(float x, float z)
+{
+    float s, s0, sb = yo.s, db = 1e18f, p[3], th;
+    for (s = yo.s - 200.0f; s < yo.s + 5000.0f; s += 16.0f) {
+        float d; ruta_en(s, p, &th, NULL, NULL); d = (p[0] - x) * (p[0] - x) + (p[2] - z) * (p[2] - z);
+        if (d < db) { db = d; sb = s; }
+    }
+    for (s0 = sb, s = s0 - 16.0f; s <= s0 + 16.0f; s += 1.0f) {
+        float d; ruta_en(s, p, &th, NULL, NULL); d = (p[0] - x) * (p[0] - x) + (p[2] - z) * (p[2] - z);
+        if (d < db) { db = d; sb = s; }
+    }
+    return sb;
+}
+static int ha_seccion(float x, float z) { return (int)floorf((ha_s(x, z) - s_etapa) / m_pos); }
+static void ha_dir(float x, float z, float *fx, float *fz)       /* la direccion de la ruta en el punto mas cercano */
+{
+    float s = ha_s(x, z), a[3], b[3], th;
+    ruta_en(s, a, &th, NULL, NULL); ruta_en(s + 4.0f, b, &th, NULL, NULL); *fx = b[0] - a[0]; *fz = b[2] - a[2];
+}
+static void ha_punto(int sec, float *p, float *fx, float *fz)  /* 43E570 (45B000): el centro de la seccion y su direccion */
+{
+    float s = s_etapa + (float)sec * m_pos, b[3], th;
+    ruta_en(s, p, &th, NULL, NULL); ruta_en(s + 4.0f, b, &th, NULL, NULL); *fx = b[0] - p[0]; *fz = b[2] - p[2];
+}
+static int ha_carriles(float x, float z)                        /* (+0xA4 de los arcos): los carriles distintos del original */
+{
+    float s = ha_s(x, z), c[NCARRIL]; int k, j, n = 0;
+    for (k = 0; k < NCARRIL; k++) {
+        float v = carril_x(s, k);
+        for (j = 0; j < n && fabsf(c[j] - v) > 0.5f; j++) ;
+        if (j == n) c[n++] = v;
+    }
+    return n;
+}
+static modelo_t ha_mod; static int ha_mod_ok; static uint32_t ha_obj_tri, ha_obj_vtx, ha_obj_n, ha_dg[4];
+/* 45ECA0 / 45E9B0: lo que la mision de la etapa pinta sobre ella (HAMpqq.DAT: los carriles azul / rojo), en el marco de
+   la etapa + (0, 0,1, 0); DESVIACION (poligonos): solo los trozos de tira (tools/conv_infarto.py trocea) a menos de
+   HA_META_LEJOS del ojo y no detras, con el tope de los objetos de la union */
+#define HA_META_LEJOS 150.0f
+static modelo_t ha_meta; static int ha_meta_ok; static char ha_meta_nom[16]; static uint32_t ha_meta_tri, ha_meta_vtx;
+static void ha_meta_carga(void)                                 /* al empezar la carrera del modo y en cada etapa */
+{
+    char nom[16];
+    infarto_metas(nom);
+    if (!strcmp(nom, ha_meta_nom)) return;
+    if (ha_meta_ok) { libera_modelo(&ha_meta); ha_meta_ok = 0; }
+    strcpy(ha_meta_nom, nom);
+    if (!nom[0]) return;
+    if (!lee_modelo(&ha_meta, nom)) { sube_tramo(&ha_meta, 0, NULL); ha_meta_ok = 1; }
+    else dbglog(DBG_ERROR, "HAMETA: no se pudo leer %s\n", nom);
+    dbglog(DBG_INFO, "HAMETA: %s, %u mallas\n", nom, (unsigned)ha_meta.nmallas);
+}
+static void ha_meta_dibuja(int l)
+{
+    static matrix_t Me __attribute__((aligned(32)));
+    float c = cosf(marco_et[3]), sn = sinf(marco_et[3]); uint32_t j; int ult = -2;
+    if (l == 0) ha_meta_tri = ha_meta_vtx = 0;
+#ifdef DIAG_SIN_HAMETA
+    return;
+#endif
+    if (!ha_meta_ok) return;
+    memset(Me, 0, sizeof Me);
+    Me[0][0] = c; Me[0][2] = -sn; Me[1][1] = 1; Me[2][0] = sn; Me[2][2] = c;
+    Me[3][0] = marco_et[0]; Me[3][1] = marco_et[1] + 0.1f; Me[3][2] = marco_et[2]; Me[3][3] = 1;
+    mat_load(&vista); mat_apply(&Me);
+    for (j = ha_meta.inicio[l]; j < ha_meta.inicio[l + 1]; j++) {
+        const malla_t *m = ha_meta.mallas + j; uint32_t cst;
+        float wx = m->cx * c + m->cz * sn + marco_et[0], wy = m->cy + marco_et[1], wz = -m->cx * sn + m->cz * c + marco_et[2];
+        float dx = wx - ojo[0], dy = wy - ojo[1], dz = wz - ojo[2], zv = dx * ade[0] + dy * ade[1] + dz * ade[2], lim = HA_META_LEJOS + m->r;
+        if (m->n < 3 || zv < -m->r || dx * dx + dy * dy + dz * dz > lim * lim) continue;
+        cst = (m->n <= 256 ? ta_teo_tab[ta_ofs != 0][m->n] : ta_teo(m->n, ta_ofs)) * ta_f >> 8;
+        if (ta_bo + cst > ta_bo_tope || ta_vb + cst > ta_lim) { ta_bo_pide += cst; continue; }
+        if (m->tex != ult) {
+            ult = m->tex;
+            if (m->tex >= 0) pvr_prim(&ha_meta.cabs[0][m->tex], sizeof(pvr_poly_hdr_t));
+            else pvr_prim(&cab_col[0][l], sizeof(pvr_poly_hdr_t));
+        }
+        dibuja_malla(&ha_meta, m); ha_meta_tri += m->n - 2; ha_meta_vtx += m->n;
+    }
+    mat_load(&vista);
+}
+static void ha_obj_dibuja(int l)
+{
+    static matrix_t W __attribute__((aligned(32))), Mo __attribute__((aligned(32)));
+    haobj_dib_t d[HA_OBJ_MAX]; int n, i, ult, reg; uint32_t k, j;
+    if (l == 0) { ha_obj_tri = ha_obj_vtx = 0; }
+    ha_meta_dibuja(l);
+#ifdef DIAG_SIN_HAOBJ
+    return;                                                     /* medida: sin dibujar los objetos (la logica sigue) */
+#endif
+    if (!ha_mod_ok) { ha_obj_n = 999; return; }
+    n = haobj_lista(d, HA_OBJ_MAX, ojo);
+    if (l == 0) ha_obj_n = (uint32_t)n;
+    for (i = 0; i < n; i++) {
+        float dx = d[i].M[3][0] - ojo[0], dy = d[i].M[3][1] - ojo[1], dz = d[i].M[3][2] - ojo[2], zv = dx * ade[0] + dy * ade[1] + dz * ade[2];
+        if (zv < -4.0f) continue;                               /* detras de la camara */
+        memcpy(Mo, d[i].M, sizeof Mo);
+        reg = d[i].reg;                                         /* la moneda lejana (tools/conv_infarto.py aligera_monedas) */
+        if ((reg == 0x1c || reg == 0x1d) && zv > 40.0f) reg |= 0x80;
+        if (reg == 0x2a && zv > 30.0f) reg |= 0x80;            /* el corazon plano del tipo 11 (aligera_corazon) */
+        if (reg == 0x30 && zv * zv > 625.0f * (Mo[0][0] * Mo[0][0] + Mo[0][1] * Mo[0][1] + Mo[0][2] * Mo[0][2])) reg |= 0x80;   /* la estrella plana: desde 25 m x escala */
+        for (k = 0; k < ha_mod.nnodos; k++) {
+            const nodo_t *nd = ha_mod.nodos + k; int g = nd->relleno[0] & 0xff; uint32_t cst = 0;
+            if ((int)(nd->fl & 0xffff) != reg) continue;
+            if (d[i].reg == 0x2b && zv > 40.0f && (nd->fl >> 16) & 0x20) continue;   /* el arco lejano: solo los postes */
+            ha_dg[0]++;
+            for (j = ha_mod.inicio[l]; j < ha_mod.inicio[l + 1]; j++) {
+                const malla_t *m = ha_mod.mallas + j;
+                if ((m->nodo & 0xff) == g && m->n >= 3) cst += (m->n <= 256 ? ta_teo_tab[ta_ofs != 0][m->n] : ta_teo(m->n, ta_ofs)) * ta_f >> 8;
+            }
+            if (!cst) { ha_dg[1]++; continue; }
+            if (ta_bo + cst > ta_bo_tope || ta_vb + cst > ta_lim) { ta_bo_pide += cst; ha_dg[2]++; continue; }
+            memcpy(W, ha_mod.carteles[nd->cartel], sizeof W);
+            mat_load(&vista); mat_apply(&Mo); mat_apply(&W);
+            ult = -2;
+            for (j = ha_mod.inicio[l]; j < ha_mod.inicio[l + 1]; j++) {
+                const malla_t *m = ha_mod.mallas + j;
+                if ((m->nodo & 0xff) != g || m->n < 3) continue;
+                if (m->tex != ult) {
+                    ult = m->tex;
+                    if (m->tex >= 0) pvr_prim(&ha_mod.cabs[0][m->tex], sizeof(pvr_poly_hdr_t));
+                    else pvr_prim(&cab_col[0][l], sizeof(pvr_poly_hdr_t));
+                }
+                dibuja_malla(&ha_mod, m); ha_obj_tri += m->n - 2; ha_obj_vtx += m->n;
+            }
+        }
+    }
+    mat_load(&vista);
 }
 /* 4A9DF0: cada nodo de los registros de cada objeto con su matriz (umbral de LOD 8 de 4044E0, 7 con la bandera 0x40) */
 static void bo_dibuja(int l)
@@ -11125,7 +11327,7 @@ static void faros_punto(const vert_t *T, float c, float f, float *o)
     }
 }
 /* la rejilla de los dos lados (tiras 0..6 y 8..14 de FAROS.DAT); 0 bien */
-static int faros_rejilla(void)
+FRIO static int faros_rejilla(void)
 {
     int l, i, j, L, c;
     if (faros_m.nmallas != 16) return -1;
@@ -11146,7 +11348,7 @@ static int faros_rejilla(void)
     faros_col = (faros_col & 0xFFFFFFu) | (uint32_t)((float)(faros_col >> 24) * FAROS_BRILLO) << 24;
     return 0;
 }
-static void faros_carga(void)
+FRIO static void faros_carga(void)
 {
     pvr_poly_cxt_t cx; tex_t *t; uint32_t fb, vq, n; pvr_ptr_t dir;
     if (lee_modelo(&faros_m, "FAROS.DAT") || faros_m.ntex < 1 || sube_modelo(&faros_m)) { libera_modelo(&faros_m); return; }
@@ -11287,7 +11489,7 @@ static inline uint32_t twid(uint32_t x, uint32_t y)
 #define FOCOS_FUNDE 14.0f                                       /* m: desde aqui hasta FOCOS_LEJOS se apaga (focos_gris) */
 #endif
 static float focos_vl = 0.0f, focos_vf = 0.0f;                  /* v de los rayos que llegan a FOCOS_LEJOS y a FOCOS_FUNDE */
-static void focos_carga(const tex_t *t, const uint8_t *d, pvr_ptr_t dir)
+FRIO static void focos_carga(const tex_t *t, const uint8_t *d, pvr_ptr_t dir)
 {
     pvr_poly_cxt_t cx; uint32_t fb = t->fmt & 0xff, vq = t->fmt & 0x100, n = ((t->fmt >> 16) & 0xff) + 1, x, y, fila = 0;
     uint32_t x0 = t->w, x1 = 0, y0 = t->h;
@@ -11831,7 +12033,7 @@ static float salida_delante(float s)                            /* (0, -16) por 
     float p[3], th; ruta_en(s, p, &th, NULL, NULL);
     return (0.0f - p[0]) * sinf(th) + (-16.0f - p[2]) * -cosf(th);
 }
-static void salida_calcula(void)
+FRIO static void salida_calcula(void)
 {
     float s, p[3], th, a0 = 0, a, ss = 0, lo, hi; int k;
     for (s = s_base; s < s_base + 400.0f && s < longitud; s += 0.25f) {
@@ -11861,7 +12063,7 @@ static void salida_calcula(void)
    la que usara el primer cuadro (camara_paso con el coche en la parrilla; si no hay CAM1, 6,5 m detras y 1,6 m por
    encima, como pop_arranque.py). No toca la VRAM ni el modelo; pon_vista/camara_paso se vuelven a llamar igual en el
    bucle, asi que no hay salto de camara. */
-static void etapa_precalienta(void)
+FRIO static void etapa_precalienta(void)
 {
     float fw[3], up[3], o[3], m[3]; int k, n, quieto = 0, pd, pp, ed, ep;
     uint32_t i, vivos = 0; uint64_t t0 = timer_us_gettime64();
@@ -12322,7 +12524,7 @@ static void refl_compone(void)
 }
 /* el mapa propio del coche (la primera textura de entorno de su CEX2) reducido a 32x32, al leerlo (despues de subirlo
    a la VRAM se sueltan sus texeles de la RAM) */
-static void refl_fijo_lee(void)
+FRIO static void refl_fijo_lee(void)
 {
     const uint32_t *w = (const uint32_t *)coche.ruta; const cex_t *cm; const tex_t *t = NULL; uint32_t k, x, y, L;
     refl_fijo_ok = 0;
@@ -12399,7 +12601,7 @@ static int refl_elige(int carrera)
     return e;
 }
 /* cabeceras de las texturas de la pintura y el reflejo (con desplazamiento: especular 1, sumada 3) */
-static void coche_cab_cex(void)
+FRIO static void coche_cab_cex(void)
 {
     uint32_t k; int i;
     refl_ntex = 0; refl_est = 0; refl_activo = 0; refl_firma[0] = -1; refl_cab_ok = 0;
@@ -12422,7 +12624,7 @@ static void coche_cab_cex(void)
         }
     }
 }
-static void coche_cex(int c)
+FRIO static void coche_cex(int c)
 {
     const uint32_t *w = (const uint32_t *)coche.ruta; uint32_t k;
     cex_n = 0; cex_ngrp = 0; cex_color = 0; cex_luces = -1; free(cex_n0); cex_n0 = NULL; nsvol = 0;
@@ -12562,7 +12764,7 @@ static void coche_anima_reposo(void)
     ani.ban = ani.pz[PZ_FAROS][4] > 0 ? 0 : 0x800;              /* sin escamoteables: 0x800 siempre (46AE70) */
 }
 /* lee el bloque ANI1 del coche recien cargado (detras de los grupos y del SVL1 de CEX2) */
-static void coche_ani_lee(void)
+FRIO static void coche_ani_lee(void)
 {
     const uint32_t *w = (const uint32_t *)coche.ruta, *q, *fin; uint32_t j, n;
     free(ani.idx); memset(&ani, 0, sizeof ani);
@@ -12815,7 +13017,7 @@ static void robot_suelta(void)                                  /* la pareja fue
     memset(&chr, 0, sizeof chr); rc_chr.ok = 0; chr_par = -1;
     if (chr_ok) chr_ok = -1;
 }
-static int robot_carga(int pil, int aco)
+FRIO static int robot_carga(int pil, int aco)
 {
     char nom[16]; int k, n = 0, r; uint32_t i, t;
     if (chr_ok == 1 && chr_par == pil * 100 + aco) return 0;
@@ -13117,7 +13319,7 @@ static void rc_colores(int k)
 /* al empezar la carrera de la mision (con el hueco de la union prestado): los modelos de sus coches de carreras, de
    los de delante a los de detras, hasta RC_NMOD distintos (cada RCmm.DAT ~85 KB: sus texeles a la VRAM, ~25 KB, y el
    resto al monton, ~60 KB) */
-static void rc_modelos_carga(uint8_t *buf, uint32_t cap)
+FRIO static void rc_modelos_carga(uint8_t *buf, uint32_t cap)
 {
     int n = rival_n(), i, k, usado[RIVAL_MAX];
     rc_modelos_suelta();
@@ -13173,7 +13375,7 @@ static int cam_ram;                                             /* 1: los camion
 static pvr_ptr_t cam_tv[96]; static int cam_ntv;                /* su VRAM, hasta soltarla (camion_suelta_vram) */
 static uint32_t cam_ta_antes, cam_ta_min_antes;                 /* ta_traf_teo / ta_min_otros_teo sin los camiones */
 /* lee REM1 / TRK1 del fichero del modelo m (ya en mtraf[m] con TAN1) y pone trc / trem de sus modelos; 0 bien */
-static int camion_lee(int f)
+FRIO static int camion_lee(int f)
 {
     int m = CAMF[f].m[0], k; const uint32_t *w = (const uint32_t *)mtraf[m].ruta, *q, *e = w + mtraf[m].nruta;
     if (!tani[m].ok || tani[m].np != P_REM + 1 + NRREM) return -1;
@@ -13197,7 +13399,7 @@ static int camion_lee(int f)
    VRAM y lo demas (mallas y vertices, ~85-100 KB por fichero) a un bloque del monton de su tamano justo; el 40 usa los
    datos del 39. Se sueltan al volver al menu (camion_suelta_ram en el primer cuadro, como las colisiones;
    camion_suelta_vram con el curso, cuando la PowerVR ya no las lee) */
-static void camion_carga(uint8_t *buf, uint32_t cap)
+FRIO static void camion_carga(uint8_t *buf, uint32_t cap)
 {
     unsigned u0, l0, u1, l1; uint32_t v0 = pvr_mem_available(), ct = cam_ta_antes = ta_traf_teo; int f, i, j;
     if (cam_ram || cam_ntv) return;
@@ -13240,7 +13442,7 @@ static void camion_carga(uint8_t *buf, uint32_t cap)
     dbglog(DBG_INFO, "CAMION: modelos 39 40 41 43 cargados: RAM %uK (libre %uK -> %uK), VRAM %uK (libre %uK -> %uK)\n", u1 - u0, l0, l1,
            (unsigned)((v0 - pvr_mem_available()) >> 10), (unsigned)(v0 >> 10), (unsigned)(pvr_mem_available() >> 10));
 }
-static void camion_suelta_ram(void)
+FRIO static void camion_suelta_ram(void)
 {
     int f, i, m, a;
     if (!cam_ram) return;
@@ -13640,7 +13842,7 @@ static void coche_suelta(void)
    completo COCHEnn.DAT: los dos a la vez no caben en el bloque del coche (COCHE_RAM). coche_pide_ligero lo pone el
    arranque de la carrera y lo quita el menu; sin COCHEnnL.DAT (datos de antes) se queda el completo (coche_sin_ligero) */
 static int coche_ligero, coche_pide_ligero; static uint32_t coche_sin_ligero;
-static int coche_carga(int k)
+FRIO static int coche_carga(int k)
 {
     char nom[16]; int r, prest = union_prestable(), lig = coche_pide_ligero && ficha_modelo[k] < 30 && !((coche_sin_ligero >> k) & 1);
     uint32_t ct = 0, c, i;
@@ -13696,7 +13898,7 @@ static int coche_carga(int k)
    efectos) y el HUD ya no cabia en su sitio (32 KB de el detras de los efectos y huecos sueltos fuera de la zona, que
    cada cambio de coche podia trocear mas). Los texeles pasan por buf (el hueco de la union, aun prestado) y vuelven en
    el mismo orden; despues sus cabeceras. 0 bien; si no cabe en buf, nada se mueve */
-static int vram_ordena(uint8_t *buf, uint32_t cap)
+FRIO static int vram_ordena(uint8_t *buf, uint32_t cap)
 {
     modelo_t *const M[2] = { &chr, &coche }; uint32_t o = 0, i, k, n = 0, mal = 0;
     for (k = 0; k < 2; k++) if (M[k]->tv) for (i = 0; i < M[k]->ntex; i++) if (M[k]->tv[i]) o += (M[k]->texs[i].tam + 31) & ~31u;
@@ -13812,7 +14014,7 @@ static int tabla_solo(void) { return variante == 7 && ta_codigo >= 0 && ta_codig
 static int gh_mejor(int ms);                                    /* (mas abajo, con el fantasma) */
 static int tabla_hud_fuera;                                     /* solo: el HUD ya bajado (hud_baja_tex) */
 /* GAD de la meta (0x19e6d0): la tabla de tiempos en las variantes 1 y 7 (la 2 y la 6 tienen sus propias pantallas) */
-static void tabla_entra(void)
+FRIO static void tabla_entra(void)
 {
     fin_tabla_t t; int k;
     memset(&t, 0, sizeof t);
@@ -14196,7 +14398,7 @@ static void band_suelta(void)
     memset(&band, 0, sizeof band);
     dbglog(DBG_INFO, "BAND: suelto el hueco de la union\n");
 }
-static int band_carga(void)
+FRIO static int band_carga(void)
 {
     uint32_t mt = robot_band_motor_tam(), i, n = 0; int k;
     band_suelta();
@@ -14236,7 +14438,7 @@ static int band_carga(void)
      BKD.DAT (1,4-5 MB en el arbol 1; 174 KB con SEG13 en el 0).
    Un hueco con una lectura en marcha (el hilo de carga) no se usa (sin esperar: la otra lectura no puede estar a la
    vez). El mayor de los dos; NULL sin ninguno (el modo que no quepa se salta) */
-static uint8_t *hueco_fin(uint32_t *cap)
+FRIO static uint8_t *hueco_fin(uint32_t *cap)
 {
 #define A32(q) ((uint8_t *)(((uintptr_t)(q) + 31) & ~(uintptr_t)31))
     uint8_t *a = NULL, *b = NULL, *fa = NULL, *fb = NULL, *q; uint32_t t, lba; char n[16]; int k;
@@ -14281,7 +14483,7 @@ static uint8_t *hueco_fin(uint32_t *cap)
 static modelo_t fin_mod, fin_prop, fin_sky;
 static int fin_chr;                                             /* la pareja del final en chr (FINCHRgg.DAT) */
 /* la pareja del final en buf (el hueco de la etapa): como robot_carga sin copiar al bloque (sus texturas con sube_modelo) */
-static int final24_chr(int g, uint8_t *buf, uint32_t cap)
+FRIO static int final24_chr(int g, uint8_t *buf, uint32_t cap)
 {
     char nom[20]; int k, n = 0, r; uint32_t i;
     sprintf(nom, "FINCHR%02X.DAT", g & 0xff);
@@ -14325,7 +14527,7 @@ static void final24_suelta(void)
     libera_modelo(&fin_mod); libera_modelo(&fin_prop); libera_modelo(&fin_sky);
     fin24 = fin_rue = 0;
 }
-static int final24_entra(int como)
+FRIO static int final24_entra(int como)
 {
     int c = final_columna(variante, preset_curso, meta_g), r; char n[24]; uint32_t lba, t, o;
     uint8_t *a, *fa;
@@ -14377,7 +14579,7 @@ static int final24_paso(uint32_t nuevo)
     meta.s32 = V->s32; for (k = 0; k < 4; k++) meta.giro[k] = V->giro[k];
     return r;
 }
-static void final24_dibuja(int l)
+FRIO static void final24_dibuja(int l)
 {
     const final_vista_t *V = final_vista(); int i, ult; uint32_t k;
     static matrix_t M __attribute__((aligned(32)));
@@ -14885,6 +15087,7 @@ int main(int argc, char **argv)
                 rc_modelos_suelta();
             }
             if (ha_hud && !reintenta) { hudd_cierra(ha_hud); ha_hud = NULL; ha_u_txt = ha_u_mar = -1; }   /* INFARTO */
+            if (ha_mod_ok && !reintenta) { libera_modelo(&ha_mod); ha_mod_ok = 0; }
             if (c2c_hud && !reintenta) { hudd_cierra(c2c_hud); c2c_hud = NULL; }                       /* COAST 2 COAST */
             presta_union(1);                                    /* (en cuanto el curso suelta la union) */
             /* el frontal de recreativa pone sus tablas (~850 KB) en el final del hueco de la union: tras la meta la union
@@ -15115,9 +15318,15 @@ int main(int argc, char **argv)
                 }
                 if (variante == 2) {
                     infarto_carrera(cur_nodo, curso[cur_nodo].nivel);   /* 45E0F0 */
+                    ha_meta_carga();
                     /* el medidor, el panel y las filas (HAHUD.DAT: solo sus tablas en la RAM, ~150 KB; las texturas VQ,
                        40 KB, se leen del GD al subirlas, ya con la zona del curso reservada) */
                     if (!ha_hud && !(ha_hud = hudd_abre("HAHUD.DAT", 0, 1))) dbglog(DBG_ERROR, "HAHUD: no se pudo abrir\n");
+                    if (!ha_mod_ok) {                           /* los modelos de los objetos (HAOBJ.DAT, ~7 KB) */
+                        ha_mod.relleno_propio = 1;              /* (como BOnn.DAT: relleno[0] = malla | animacion) */
+                        if (!lee_modelo(&ha_mod, "HAOBJ.DAT")) { sube_tramo(&ha_mod, 0, NULL); ha_mod_ok = 1; }
+                        else dbglog(DBG_ERROR, "HAOBJ: no se pudo leer HAOBJ.DAT\n");
+                    }
                     if (ha_hud) {                               /* los corazones siempre; los rotulos al verse */
                         static const char *const C[8] = { "HA_CORAZON", "HA_ROTO", "HA_PANEL", "HA_FILA0", "HA_FILA1", "HA_FILA2", "HA_FILA3", "HA_FILA4" };
                         for (i = 0; i < 8; i++)
@@ -15309,7 +15518,15 @@ int main(int argc, char **argv)
                         hc.muro = yo.choque == 1; memcpy(hc.sup, sup_rueda, sizeof hc.sup);
                         hc.d36 = fis_ok ? fis.d36 : 0; hc.seccion_union = cur_en_union ? (int)floorf((yo.s - s_union) / m_pos) : 0; hc.derrapa = yo.t_derrape != 0; hc.kmh = fis_ok ? fis.velocidad_hud : yo.v * 3.6f; hc.vel_mf = fis_ok ? fis.vel_mf : 0;
                         hc.hud = fis_ok ? fpar.hud : 0;
+                        hc.ofs = fis_ok ? fis.ofs : 0; hc.d268 = vib_izq; hc.d264 = -vib_der; hc.modelo = modelo_jug;
+                        hc.x = yo.pos[0]; hc.y = yo.pos[1]; hc.z = yo.pos[2]; hc.marco = marco_et; hc.suelo = ha_suelo; hc.fx = yo.fw[0]; hc.fz = yo.fw[2]; hc.seccion_xz = ha_seccion; hc.carriles_xz = ha_carriles; hc.dir_xz = ha_dir; hc.punto_sec = ha_punto; hc.sig = cur_en_union && cur_rama >= 0 ? cur_sig : -1;
                         infarto_paso(&hc);
+#ifdef DIAG_HA
+                        if (crono % 120 == 60) dbglog(DBG_INFO, "DIAGHA metas %s: %u triangulos, %u vertices (ultimo cuadro)\n", ha_meta_nom, (unsigned)ha_meta_tri, (unsigned)ha_meta_vtx);
+                        if (crono % 120 == 0) { dbglog(DBG_INFO, "DIAGHA objetos: %u dibujados, %u triangulos, %u vertices (ultimo cuadro); nodos %u sin mallas %u tope %u, modelo %u nodos %u mallas inicio %u %u %u\n", (unsigned)ha_obj_n, (unsigned)ha_obj_tri, (unsigned)ha_obj_vtx,
+   (unsigned)ha_dg[0], (unsigned)ha_dg[1], (unsigned)ha_dg[2], (unsigned)ha_mod.nnodos, (unsigned)ha_mod.nmallas, (unsigned)ha_mod.inicio[0], (unsigned)ha_mod.inicio[1], (unsigned)ha_mod.inicio[2]);
+  if (ha_mod.nnodos) dbglog(DBG_INFO, "DIAGHA nodo0 fl 0x%x relleno 0x%x malla0 nodo 0x%x\n", (unsigned)ha_mod.nodos[0].fl, (unsigned)ha_mod.nodos[0].relleno[0], (unsigned)ha_mod.mallas[0].nodo); memset(ha_dg, 0, sizeof ha_dg); }
+#endif
 #ifdef DIAG_HA
                         if (crono % 60 == 0) { int q;
                             for (q = 0; q < NTRAF; q++) if (traf[q].carril >= 0)
@@ -15381,7 +15598,7 @@ int main(int argc, char **argv)
                         etapa_acaba(curso[cur_nodo].nivel - 1); etapa_entra(cur_nodo);   /* 44FF20: stage clear */
                         pt_bonus_etapa(); tim_cuadros += amp; tiempo = tim_cuadros / TIM_HZ; t_ext = 0;
                         if (voz_ok) voces_checkpoint();         /* EXTEND TIME: efecto 0x4d y voz 0x16c */
-                        if (variante == 2) infarto_etapa(cur_nodo, curso[cur_nodo].nivel);   /* stage clear */
+                        if (variante == 2) { infarto_etapa(cur_nodo, curso[cur_nodo].nivel); ha_meta_carga(); }   /* stage clear */
 #ifdef DIAG_VRAMLOG
                         vl_marca("checkpoint etapa %d", cur_nodo);
 #endif
@@ -15813,6 +16030,7 @@ int main(int argc, char **argv)
                     ta_bo_tope = ta_bo + (ta_lim > ta_vb + resto ? ta_lim - ta_vb - resto : 0); }
                 ta_en_bo = 1;
                 bo_dibuja(l);                                   /* pajaros y demas de la union (4A9DF0) */
+                if (variante == 2) ha_obj_dibuja(l);            /* INFARTO: conos, monedas... (comun/haobj.c) */
                 ta_en_bo = 0;
                 POP_CAT(1);
             }
@@ -15944,6 +16162,8 @@ int main(int argc, char **argv)
                             infarto_spr_t sv[64]; int ns = infarto_medidor(sv, 64);
                             for (i = 0; i < ns; i++)        /* HA_C0..HA_C5 empiezan en el cuadro 0x1F */
                                 hudd_dibuja(ha_hud, hudd_uso(ha_hud, G[sv[i].g & 7]), sv[i].cuadro - (sv[i].g < 6 ? 0x1f : 0), sv[i].x, sv[i].y, 1, 120 + 0.01f * i, 0);
+                            ha_dibujos();                   /* 45BDF0 y 4603F0 */
+                            ha_spr3d();                     /* (INFARTO 3) 4295D0: los sprites en el mundo */
                         }
                     }
                 }
