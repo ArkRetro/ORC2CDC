@@ -58,6 +58,7 @@ uint32_t robot_movimiento(int p);                          /* id del movimiento 
 int   robot_personaje(int p);                              /* indice de la tabla de personajes (work+8) o -1 */
 float robot_cuadro(int p);
 int   robot_estado(int p);
+int   robot_fin(int p);                                    /* 4F1E70 IsMotionEnd del movimiento puesto (487DF0 con p = 1) */
 /* el banderero de la salida (ROB03): BAND.DAT (su propio RBT1, un personaje), leido por quien llama en el hueco de la
    union; el mundo es el de la demo */
 typedef struct {

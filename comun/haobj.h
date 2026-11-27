@@ -34,6 +34,7 @@ int  haobj_cuenta_sec(int clase, int lo, int hi, int (*sec)(float x, float z));
 /* lo que hay que dibujar: registro del banco 0x57 y matriz (filas: ejes y traslacion, en el mundo), los mas cercanos al
    ojo dentro de la distancia (HAOBJ_LEJOS), como mucho max */
 #define HAOBJ_LEJOS 160.0f
+#define HAOBJ_ANI_LEJOS 100.0f           /* (DESVIACION, poligonos) los corazones del tipo 11, solo hasta aqui */
 typedef struct { int reg; float M[4][4]; } haobj_dib_t;
 /* prueba: el objeto vivo de la clase cl (-1 cualquiera) mas cercano por delante del coche entre 4 y 70 m: 1 y su
    desvio lateral (m, > 0 a la derecha del eje adelante fw) */
@@ -51,4 +52,33 @@ int  haobj_lista(haobj_dib_t *v, int max, const float ojo[3]);
 /* (C2C, campeonatos) un objeto de la clase cl (tipo de su control: 2 cono, 6 moneda, 7 arco) en p del mundo con giro
    yaw y escala de la clase x esc; cl < 0 quita todos. 0 bien */
 int  haobj_pon(int cl, int tipo, const float p[3], float yaw, float esc);
+/* sprites 3D (4295D0 = PS2 0x115870): grupo de HAHUD.DAT, cuadro, punto del mundo y escala (px = esc x foco / z / 32;
+   esc <= 0: sin escala, el sprite 2D de 429530 en el punto proyectado) */
+typedef struct haobj_s3d_s { char g[8]; int cuadro; float p[3], esc; } haobj_s3d_t;
+/* los de los objetos: 2C0002 del arco cruzado (0x1d4508, arc2: los 5 puntos de ARC2), 2C0007 de la estrella que llega
+   (0x1d4d80) y 2C0000 de la que sube (0x1d50e0); cuadros(g): los del grupo */
+int  haobj_spr3d(haobj_s3d_t *v, int max, int (*cuadros)(const char *g), const float *arc2);
+/* tipo 11, "Atrapa el corazon" (46DB60 = PS2 0x1dcaf8, el anillo 0x5d51f8 de 32 registros de 0x5C): dos corazones
+   (registro 0x2a del banco 0x57, 1aa5b8) en los puntos l[2][3] (INFARTOX.DAT ANI1) del marco de cada coche vivo.
+   Por plaza de trafico: pos / fw / up del coche (pos NULL: plaza libre) y marca (+C5C 0x20000: 0 en un coche nuevo; la
+   pone el modulo y la plaza la guarda). Un paso de logica mientras la peticion es del tipo 11 */
+typedef struct haobj_auto_s { const float *pos, *fw, *up; int marca, sec, clase, golpe; float *v, *v_des; } haobj_auto_t;
+/* golpe: +B6C y +2F4 == 0 (el jugador acaba de golpearlo); sec: la seccion de la etapa; clase: +324 de los coches de la mision (-1 los otros); v / v_des: m/s (los escoltas del 14) */
+void haobj_anillo(haobj_auto_t *v, int n, const float *l);
+void haobj_anillo_vacia(void);           /* 0x1df060 (la puesta del 11) y al acabar la peticion: sin corazones */
+int  haobj_anillo_toca(const float pos[3]);   /* 0x1aa3e8: los corazones a 4 m (xz) del jugador se cogen; cuantos */
+/* tipo 9, "Cruza la linea" (0x1dc3c0 = 46D250: los pares 0x5d4fc0 de 10 x 0x38): cada coche vivo de las secciones lo..hi
+   a menos de 250 m del jugador (jug) se empareja con el vivo mas cercano a menos de 80 m (+C5C 0x8000 en la marca);
+   los pares se sueltan si un coche falta o se separan. Sin dibujo: en la PS2 el de la peticion 9 (0x1aa1d8) es vacio */
+#define HA_PAR    0x10000000             /* +C5C 0x8000 (en la marca de la plaza) */
+#define HA_SUELTO 0x20000000             /* +C5C 0x10000: el par ya cruzado (0x1def90) */
+#define HA_ESC    0x40000000             /* escolta de la carrera del tipo 14 (en la lista 0x589c48 de 0x1ab2d8) */
+#define HA_FANT   0x08000000             /* +C5C 0x80000: fantasma (tipo 20; la tabla de coches con 0x40) */
+#define HA_VISTO  0x04000000             /* ya visto por el tipo 20 (+B66 a 0) */
+#define HA_SERIE  0x03ffffff
+void haobj_pares(haobj_auto_t *v, int n, int lo, int hi, const float jug[3]);
+void haobj_pares_vacia(void);
+/* 0x1aa024..0x1aa078: la linea (los dos coches + 1 m en y) en el marco del jugador contra su caja (0x1978d8 con +338;
+   aqui 2,3 x 1,1 m en xz, PROBABLE); cuantos pares cruzados en este paso (se sueltan) */
+int  haobj_pares_cruza(haobj_auto_t *v, int n, const float pos[3], float fx, float fz);
 #endif

@@ -26,7 +26,7 @@ typedef struct {
     float p[3], R[3][3], v[3], esc, giro;
     /* estrellas (tipo 8, control 0x1d4d80): +A4 reposo, +B0 paso del vuelo, +C0 activa, +BC volando, +74 tiempo del
        bote, +CC seccion (-32768: sin calcular); pieza: uno de los 40 trozos 0x134.. (est 4: abierto sin usar) */
-    float r0[3], b0[3], t74; uint8_t act, vuela, pieza; int16_t sec;
+    float r0[3], b0[3], t74; uint8_t act, vuela, pieza, tr; int16_t sec;   /* tr: cuadro de la estela 2C0007 (+98) */
 } obj_t;
 static uint8_t *cab;                     /* el primer sector de HAOSO.DAT */
 static uint32_t lba_o, tam_o, nfich;
@@ -65,11 +65,12 @@ int haobj_inicia(void)
     if (gd_busca("HAOSO.DAT", &lba_o, &tam_o) || tam_o < 1024) { dbglog(DBG_ERROR, "HAOBJ: sin HAOSO.DAT\n"); return -1; }
     if (!(cab = memalign(32, 2048))) return -1;
     if (gd_lee(lba_o, 1, cab) || memcmp(cab, "HAO1", 4)) { free(cab); cab = NULL; return -1; }
+    haobj_anillo_vacia(); haobj_pares_vacia();
     memcpy(&nfich, cab + 4, 4);
     if (8 + 84 + 512 + 8 * nfich > 2048) { free(cab); cab = NULL; return -1; }
     return 0;
 }
-void haobj_libera(void) { free(ob); ob = NULL; nob = 0; free(cab); cab = NULL; }
+void haobj_libera(void) { free(ob); ob = NULL; nob = 0; free(cab); cab = NULL; haobj_anillo_vacia(); }
 
 void haobj_mision(int preset, int mision)
 {
@@ -111,9 +112,11 @@ static void euler(float R[3][3], const float *a, float yaw)   /* Ry(yaw) Ry(ay) 
     for (i = 0; i < 3; i++) for (j = 0; j < 3; j++) { T[i][j] = 0; for (k = 0; k < 3; k++) T[i][j] += Y[i][k] * X[k][j]; }
     for (i = 0; i < 3; i++) for (j = 0; j < 3; j++) { R[i][j] = 0; for (k = 0; k < 3; k++) R[i][j] += T[i][k] * Z[k][j]; }
 }
+static float jug_p[3], jug_f[2];        /* el jugador del ultimo paso (los destellos del arco) */
 void haobj_paso(const haobj_coche_t *c)
 {
     int i; float fx = c->fw[0], fz = c->fw[2], fl = sqrtf(fx * fx + fz * fz);
+    memcpy(jug_p, c->pos, sizeof jug_p); jug_f[0] = c->fw[0]; jug_f[1] = c->fw[2];
     ntoq = 0; ncru = 0; reloj_obj++; toq_g = toq_p = 0; npos = 0; sec_cb = c->sec; suelo_cb = c->suelo;
     marca_a += 0.2094395f; if (marca_a > 3.14159274f) marca_a -= 6.28318548f;   /* 0x1a7f78: el vaiven de las marcas */
     if (!ob) return;
@@ -257,6 +260,7 @@ void haobj_est_paso(int sec_jug, int lim, int *activas, const float *pz, haobj_e
     for (i = 0; i < nob - n_pie; i++) {
         obj_t *o = ob + i;
         if (o->tipo != 8 || o->est == 0) continue;
+        if (o->act && o->tr < 250) o->tr += 2;          /* 0x1d4d80: +98 + 2 por paso (la estela 2C0007) */
         if (!o->act) {                                  /* +C0 = 0: hasta 40 secciones por delante (+CC) */
             if (o->sec == -32768) { if (calc < 4 && sec_cb) { o->sec = (int16_t)sec_cb(o->r0[0], o->r0[2]); calc++; } continue; }
             if (*activas < lim && sec_jug + 0x28 >= o->sec) { if (!*activas) r->primera = 1; o->act = 1; ++*activas; }
@@ -362,10 +366,177 @@ int haobj_cuenta_sec(int clase, int lo, int hi, int (*sec)(float x, float z))
     return n;
 }
 int haobj_cuenta(int clase) { int i, n = 0; for (i = 0; i < nob; i++) if (ob[i].cl == clase && ob[i].est < 2) n++; return n; }
+/* tipo 11: el anillo (46DB60 = PS2 0x1dcaf8; 46DB10 = 0x1dca70 el registro libre desde el cursor 0x5d5d78; 0x5d5d7c
+   los vivos) */
+#define NANI 32
+static int ani_vivos, ani_cur, ani_serie;
+static struct { int slot, marca; float w[2][3]; uint8_t on[2]; uint16_t edad; } ani[NANI];
+void haobj_anillo_vacia(void) { int i; for (i = 0; i < NANI; i++) ani[i].slot = -1; ani_vivos = ani_cur = 0; }
+void haobj_anillo(haobj_auto_t *v, int n, const float *l)
+{
+    int i, k, j;
+    for (i = 0; i < n; i++) {                           /* un registro por coche vivo sin marcar (+C5C 0x20000) */
+        if (!v[i].pos || (v[i].marca & HA_SERIE)) continue;
+        if (ani_vivos >= NANI) break;
+        for (k = 0; k < NANI && ani[ani_cur].slot >= 0; k++) if (++ani_cur >= NANI) ani_cur = 0;
+        if (k == NANI) break;
+        j = ani_cur; ani_vivos++;
+        if (++ani_cur >= NANI) ani_cur = 0;
+        if (++ani_serie > HA_SERIE) ani_serie = 1;
+        ani[j].slot = i; ani[j].marca = ani_serie; v[i].marca |= ani_serie; ani[j].on[0] = ani[j].on[1] = 1; ani[j].edad = 0;
+    }
+    for (j = 0; j < NANI; j++) {                        /* los puntos en el mundo (el marco +B0 del coche) y la edad */
+        const haobj_auto_t *c; int q, vis = 0;
+        if (ani[j].slot < 0) continue;
+        c = ani[j].slot < n ? v + ani[j].slot : NULL;
+        if (!c || !c->pos || (c->marca & HA_SERIE) != ani[j].marca) { ani[j].slot = -1; ani_vivos--; continue; }
+        {   float r[3] = { c->up[1] * c->fw[2] - c->up[2] * c->fw[1], c->up[2] * c->fw[0] - c->up[0] * c->fw[2],
+                           c->up[0] * c->fw[1] - c->up[1] * c->fw[0] };   /* el eje x del coche (el signo da igual: +-x) */
+            float m = sqrtf(r[0] * r[0] + r[1] * r[1] + r[2] * r[2]);
+            if (m > 1e-6f) { r[0] /= m; r[1] /= m; r[2] /= m; }
+            for (q = 0; q < 2; q++) {
+                const float *p = l + 3 * q; int a;
+                if (!ani[j].on[q]) continue;
+                for (a = 0; a < 3; a++) ani[j].w[q][a] = c->pos[a] + r[a] * p[0] + c->up[a] * p[1] + c->fw[a] * p[2];
+                vis++;
+            }
+        }
+        if (!vis) { ani[j].slot = -1; ani_vivos--; continue; }   /* sin puntos: fuera */
+        ani[j].edad++;
+    }
+}
+/* tipo 9: los pares (0x1dc3c0) */
+#define NPAR 10
+static struct { int8_t a, b; } par[NPAR];
+static float dist2(const float *a, const float *b) { float x = a[0] - b[0], z = a[2] - b[2], y = a[1] - b[1]; return x * x + y * y + z * z; }
+void haobj_pares_vacia(void) { int i; for (i = 0; i < NPAR; i++) par[i].a = par[i].b = -1; }
+void haobj_pares(haobj_auto_t *v, int n, int lo, int hi, const float jug[3])
+{
+    int i, j, k, left = NPAR, ord[32], no = 0;
+    for (i = 0; i < NPAR; i++) {                        /* los abiertos: se sueltan si falta uno o se separan (> 80 m) */
+        haobj_auto_t *A, *B;
+        if (par[i].a < 0) continue;
+        A = par[i].a < n ? v + par[i].a : NULL; B = par[i].b < n ? v + par[i].b : NULL;
+        if (!A || !B || !A->pos || !B->pos || !(A->marca & HA_PAR) || !(B->marca & HA_PAR) || dist2(A->pos, B->pos) > 6400.0f) {
+            if (A && A->pos) A->marca &= ~HA_PAR;
+            if (B && B->pos) B->marca &= ~HA_PAR;
+            par[i].a = par[i].b = -1; continue;
+        }
+        left--;
+    }
+    for (i = 0; i < n && no < 32; i++)                  /* la cadena +314 del jugador: los coches por distancia, < 250 m */
+        if (v[i].pos && dist2(v[i].pos, jug) < 62500.0f) {
+            float d = dist2(v[i].pos, jug);
+            for (j = no++; j > 0 && dist2(v[ord[j - 1]].pos, jug) > d; j--) ord[j] = ord[j - 1];
+            ord[j] = i;
+        }
+    for (k = 0; k < no && left > 0; k++) {
+        haobj_auto_t *c = v + ord[k]; int best = -1; float bd = 6400.0f;
+        if (c->sec < lo || c->sec > hi || (c->marca & (HA_PAR | HA_SUELTO))) continue;
+        for (j = 0; j < n; j++) {                       /* el vivo mas cercano (< 80 m) del tramo y no cruzado */
+            float d;
+            if (j == ord[k] || !v[j].pos || (v[j].marca & HA_SUELTO) || v[j].sec < lo || v[j].sec > hi) continue;
+            d = dist2(c->pos, v[j].pos);
+            if (d < bd) { bd = d; best = j; }
+        }
+        if (best < 0) continue;
+        for (i = 0; i < NPAR && par[i].a >= 0; i++) ;
+        if (i >= NPAR) break;
+        c->marca |= HA_PAR; v[best].marca |= HA_PAR; par[i].a = (int8_t)ord[k]; par[i].b = (int8_t)best; left--;
+#ifdef DIAG_HA
+        dbglog(DBG_INFO, "HAOBJ: par %d: plazas %d y %d a %.1f m (secciones %d / %d)\n", i, ord[k], best, (double)sqrtf(bd), c->sec, v[best].sec);
+#endif
+    }
+}
+static int corta(float ax, float az, float bx, float bz, float hx, float hz)   /* el segmento contra |x| <= hx, |z| <= hz */
+{
+    float t0 = 0.0f, t1 = 1.0f, d[2] = { bx - ax, bz - az }, p[2] = { ax, az }, h[2] = { hx, hz }; int e;
+    for (e = 0; e < 2; e++) {
+        if (fabsf(d[e]) < 1e-6f) { if (fabsf(p[e]) > h[e]) return 0; continue; }
+        {   float u = (-h[e] - p[e]) / d[e], w = (h[e] - p[e]) / d[e];
+            if (u > w) { float s = u; u = w; w = s; }
+            if (u > t0) t0 = u;
+            if (w < t1) t1 = w;
+            if (t0 > t1) return 0;
+        }
+    }
+    return 1;
+}
+int haobj_pares_cruza(haobj_auto_t *v, int n, const float pos[3], float fx, float fz)
+{
+    int i, r = 0; float l = sqrtf(fx * fx + fz * fz);
+    if (l < 1e-6f) return 0;
+    fx /= l; fz /= l;
+    for (i = 0; i < NPAR; i++) {
+        const float *a, *b; float ax, az, bx, bz;
+        if (par[i].a < 0 || par[i].a >= n || par[i].b >= n || !v[par[i].a].pos || !v[par[i].b].pos) continue;
+        a = v[par[i].a].pos; b = v[par[i].b].pos;
+        if (fabsf(a[1] + 1.0f - pos[1]) > 4.0f && fabsf(b[1] + 1.0f - pos[1]) > 4.0f) continue;
+        ax = (a[0] - pos[0]) * fz - (a[2] - pos[2]) * fx; az = (a[0] - pos[0]) * fx + (a[2] - pos[2]) * fz;   /* (lateral, adelante) */
+        bx = (b[0] - pos[0]) * fz - (b[2] - pos[2]) * fx; bz = (b[0] - pos[0]) * fx + (b[2] - pos[2]) * fz;
+        if (!corta(ax, az, bx, bz, 1.1f, 2.3f)) continue;
+        v[par[i].a].marca = (v[par[i].a].marca & ~HA_PAR) | HA_SUELTO;   /* 0x1def90 (46EE60) */
+        v[par[i].b].marca = (v[par[i].b].marca & ~HA_PAR) | HA_SUELTO;
+        par[i].a = par[i].b = -1; r++;
+    }
+    return r;
+}
+int haobj_anillo_toca(const float pos[3])
+{
+    int j, q, n = 0;
+    for (j = 0; j < NANI; j++) {
+        if (ani[j].slot < 0) continue;
+        for (q = 0; q < 2; q++) {
+            float dx = ani[j].w[q][0] - pos[0], dz = ani[j].w[q][2] - pos[2];
+            if (!ani[j].on[q] || dx * dx + dz * dz > 16.0f) continue;   /* (0x1aa4a4: <= 16) */
+            ani[j].on[q] = 0; n++;
+        }
+    }
+    return n;
+}
+int haobj_spr3d(haobj_s3d_t *v, int max, int (*cuadros)(const char *g), const float *arc2)
+{
+    int i, k, n = 0, n02 = cuadros("HA_S02"), n07 = cuadros("HA_S07"), n00 = cuadros("HA_S00");
+    for (i = 0; i < nob && n < max; i++) {
+        const obj_t *o = ob + i;
+        if (o->tipo == 7 && o->est == 2 && o->v[0] == 0 && arc2 && o->t < n02) {   /* 0x1d4508 con +94 == 0: 5 destellos */
+            float l = sqrtf(jug_f[0] * jug_f[0] + jug_f[1] * jug_f[1]), fx = l > 1e-4f ? jug_f[0] / l : 0, fz = l > 1e-4f ? jug_f[1] / l : 1;
+            float s = o->t < 7 ? (float)(6 - o->t) * 0.1f + 1.5f : 1.5f;   /* el radio: 2,1 -> 1,5 */
+            for (k = 0; k < 5 && n < max; k++) {        /* (+-x lateral, y arriba) en el marco del coche, 3 m por delante */
+                const float *q = arc2 + 3 * k;
+                strcpy(v[n].g, "HA_S02"); v[n].cuadro = o->t; v[n].esc = 0.7f;
+                v[n].p[0] = jug_p[0] + (fz * q[0] + fx * q[2]) * s + fx * 3.0f; v[n].p[1] = jug_p[1] + q[1] * s;
+                v[n].p[2] = jug_p[2] + (-fx * q[0] + fz * q[2]) * s + fz * 3.0f; n++;
+            }
+        } else if (o->tipo == 8 && o->est == 1 && o->act && !o->pieza && o->tr <= n07) {   /* 0x1d4d80: la estela, escala 3 */
+            strcpy(v[n].g, "HA_S07"); v[n].cuadro = o->tr; v[n].esc = 3.0f;
+            memcpy(v[n].p, o->vuela ? o->p : o->r0, sizeof v[n].p); n++;   /* (SIN el giro por la direccion del vuelo) */
+        } else if (o->tipo == 8 && o->est == 2 && !o->pieza && o->t < n00) {   /* 0x1d50e0: 2C0000 en el punto, sin escala */
+            strcpy(v[n].g, "HA_S00"); v[n].cuadro = o->t; v[n].esc = 0; memcpy(v[n].p, o->p, sizeof v[n].p); n++;
+        }
+    }
+    return n;
+}
 int haobj_lista(haobj_dib_t *v, int max, const float ojo[3])
 {
     static float dd[64]; int i, n = 0, j;
     if (max > 64) max = 64;
+    for (i = 0; i < NANI; i++) {                        /* 1aa5b8: el corazon 0x2a en cada punto, botando y girando */
+        int q;
+        if (ani[i].slot < 0) continue;
+        for (q = 0; q < 2; q++) {
+            float a = (float)(ani[i].edad * 0x444) * 9.58738e-5f, s = sinf(a) * 0.5f + 1.0f, k = 1.0f / s, c = cosf(a), sn = sinf(a);
+            float dx = ani[i].w[q][0] - ojo[0], dy = ani[i].w[q][1] - ojo[1], dz = ani[i].w[q][2] - ojo[2], d = dx * dx + dy * dy + dz * dz;
+            haobj_dib_t *e;
+            if (!ani[i].on[q] || d > HAOBJ_ANI_LEJOS * HAOBJ_ANI_LEJOS) continue;
+            if (n == max) { int m = 0; for (j = 1; j < n; j++) if (dd[j] > dd[m]) m = j; if (d >= dd[m]) continue; j = m; }
+            else j = n++;
+            dd[j] = d; e = v + j; e->reg = 0x2a;
+            memset(e->M, 0, sizeof e->M);               /* T(x, y + s, z) Ry(a) S(1 / s, 1, 1 / s) */
+            e->M[0][0] = c * k; e->M[0][2] = -sn * k; e->M[1][1] = 1; e->M[2][0] = sn * k; e->M[2][2] = c * k;
+            e->M[3][0] = ani[i].w[q][0]; e->M[3][1] = ani[i].w[q][1] + s; e->M[3][2] = ani[i].w[q][2]; e->M[3][3] = 1;
+        }
+    }
     for (i = 0; i < n_marca && n < max; i++) {         /* 45B200: + sen del vaiven en y */
         float dx = marca[i].p[0] - ojo[0], dz = marca[i].p[2] - ojo[2]; haobj_dib_t *e = v + n; int a, b;
         if (dx * dx + dz * dz > HAOBJ_LEJOS * HAOBJ_LEJOS) continue;

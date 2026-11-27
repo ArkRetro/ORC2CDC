@@ -99,6 +99,24 @@ def extra(elf, V, u32, par):
     # META: 2 x 41 u8, 1 si la mision (preset 0 / 1) tiene HAMpqq.DAT (lista_metas)
     lm = lista_metas(u32, par)
     sec.append((b'META', bytes(1 if (p, q) in lm else 0 for p in (0, 1) for q in range(41))))
+    # ANI1: 2 x 3 f32, los dos puntos de los corazones de cada coche del tipo 11 en el marco del coche (46DB60 = PS2
+    # 0x1dcaf8: la tabla 0x40b9a0 de 0x1dcbb8, copiada en +4 del registro del anillo 0x5d51f8)
+    ta = par(0x1dcb44, 0x1dcbb8); assert ta == 0x40b9a0, hex(ta)
+    sec.append((b'ANI1', elf[V(ta):V(ta) + 24]))
+    # ESC1: 8 u32, el resultado de la carrera del tipo 14 por el puesto - 1 (45F7F0 = PS2 0x1ab6a0: la tabla 0x3f7328 de
+    # 0x1aba2c)
+    te = par(0x1aba2c, 0x1aba30); assert te == 0x3f7328, hex(te)
+    sec.append((b'ESC1', elf[V(te):V(te) + 32]))
+    # ARC2: 5 x 3 f32, los destellos 2C0002 del arco cruzado alrededor del coche (0x1d4508: la tabla 0x36b9b0 de 0x1d4718)
+    ta2 = par(0x1d4710, 0x1d4718); assert ta2 == 0x36b9b0, hex(ta2)
+    sec.append((b'ARC2', elf[V(ta2):V(ta2) + 60]))
+    # FAN1: 3 u32, los efectos del fantasma a 7 secciones (tipo 20, 0x1b1f18: tabla 0x3f0840 por rand % 3)
+    tf_ = par(0x1b1f80, 0x1b1f84); assert tf_ == 0x3f0840, hex(tf_)
+    sec.append((b'FAN1', elf[V(tf_):V(tf_) + 12]))
+    # ESC2: 2 x 10 x 12 bytes, los escoltas de la accion -12 (0x1ab3c8: la tabla 0x368528 + w4 x 0x78; cada uno {u16
+    # seccion desde w6 (0xffff: fin), u8 carril, u8 0, u32 modelo, s8 +8, u8 +B74, u16 0}); solo hay 2 (w4 0 / 1)
+    tk = par(0x1ab3f4, 0x1ab404); assert tk == 0x368528, hex(tk)
+    sec.append((b'ESC2', elf[V(tk):V(tk) + 2 * 0x78]))
     cab = 8 + 12 * len(sec); out = bytearray(b'HRX1' + struct.pack('<I', len(sec))); datos = b''
     for tag, d in sec:
         out += tag + struct.pack('<2I', cab + len(datos), len(d)); datos += d
@@ -107,7 +125,7 @@ def extra(elf, V, u32, par):
 
 # registros del banco 0x57 (obj_course_obj_common_pmt) que se convierten para los objetos de las peticiones: los
 # conos 0x19 / 0x1e / 0x1f (tipos 7 / 24), las monedas 0x1c / 0x1d (15), el arco 0x2b (16 / 25), la caja 0x30 (19)
-REGS_OBJ = (0x19, 0x1c, 0x1d, 0x1e, 0x1f, 0x2b, 0x30)
+REGS_OBJ = (0x19, 0x1c, 0x1d, 0x1e, 0x1f, 0x2a, 0x2b, 0x30)   # (0x2a: el corazon de los coches del tipo 11)
 MONEDAS = (0x1c, 0x1d)
 def aligera_arco(mod, reg=0x2b, sueltos=10):
     """DESVIACION pedida (poligonos): el arco 0x2b lleva los postes (nodo 5, 42 triangulos, opaco) y 4 nodos con la misma
@@ -268,6 +286,41 @@ def marcas(u32, par):
     a, b = u32(ta + 4 * IDIOMA), u32(tb + 4 * IDIOMA); assert a >> 16 == 0x57 and b >> 16 == 0x57, (hex(a), hex(b))
     return a & 0xffff, b & 0xffff
 
+CORAZON = 0x2a
+def aligera_corazon(mod, reg=CORAZON):
+    """DESVIACION pedida (poligonos): el corazon 0x2a de los coches del tipo 11 (1aa5b8: dos por coche; 44 triangulos en 6
+    tiras, sin textura) lleva una version lejana (registro + 0x80) plana con su silueta (los vertices de z = 0): una tira
+    por mitad, 8 triangulos / 12 vertices, con el color medio del original"""
+    import numpy as np
+    V = np.concatenate(mod.verts)
+    nd = next((n for n in mod.nodos if (n[2] & 0xffff) == reg), None)
+    if nd is None: return
+    g = nd[4] & 0xff
+    M = [x for x in mod.mallas if (x[7] & 0xff) == g and not (x[7] >> 8) & 3]
+    W = np.concatenate([V[m[4]:m[4] + m[5]] for m in M])
+    sil = {}
+    for v in W:
+        if abs(float(v['z'])) < 1e-3: sil[(round(float(v['x']), 3), round(float(v['y']), 3))] = v
+    cen = [k for k in sil if abs(k[0]) < 1e-3]
+    assert len(cen) == 2, cen                           # la punta de abajo y la muesca de arriba
+    abajo, muesca = sorted(cen, key=lambda k: k[1])
+    c = [int(np.mean([(int(v['c']) >> s) & 0xff for v in W])) for s in (0, 8, 16)]
+    col = 0xff000000 | c[2] << 16 | c[1] << 8 | c[0]
+    sig = max([n[4] & 0xff for n in mod.nodos] + [0]) + 1; nt = nv = 0
+    for lado in (1, -1):                                # la mitad: muesca, el contorno por arriba y por fuera, la punta
+        P = sorted([k for k in sil if k[0] * lado > 1e-3], key=lambda k: np.arctan2(k[1] - 0.1, k[0] * lado))
+        P = [muesca] + P[::-1] + [abajo]                # (convexa: una tira de ida y vuelta)
+        orden = []; i, j = 0, len(P) - 1
+        while i <= j:
+            orden.append(P[i]); i += 1
+            if i <= j: orden.append(P[j]); j -= 1
+        v = np.zeros(len(orden), dtype=V.dtype)
+        for q, (x, y) in enumerate(orden): v[q]['x'], v[q]['y'], v[q]['z'], v[q]['c'] = x, y, 0.0, col
+        y_ = list(M[0]); y_[4] = mod.nv; y_[5] = len(v); y_[7] = sig; mod.mallas.append(y_); mod.verts.append(v); mod.nv += len(v)
+        nt += len(v) - 2; nv += len(v)
+    mod.nodos.append([nd[0], nd[1], (nd[2] & 0xffff0000) | (reg | 0x80), nd[3], sig | (nd[4] & 0xffff0000)])
+    print('  corazon lejano: %d triangulos / %d vertices (cerca %d)' % (nt, nv, sum(x[5] - 2 for x in M)))
+
 ESTRELLA = 0x30
 def aligera_estrella(mod, reg=ESTRELLA):
     """DESVIACION pedida (poligonos): la estrella 0x30 (clase 0x12, tipo 19: una bipiramide de 10 puntas, 20 triangulos
@@ -363,7 +416,7 @@ def objetos(A, elf, V, u32, par, sal):
     import modelo as _m
     esc0 = _m.Modelo.escribe
     def escribe(self, ruta):                            # las monedas ligeras (aligera_monedas) antes de escribir
-        aligera_estrella(self); aligera_arco(self); aligera_monedas(self); return esc0(self, ruta)
+        aligera_estrella(self); aligera_corazon(self); aligera_arco(self); aligera_monedas(self); return esc0(self, ruta)
     _m.Modelo.escribe = escribe
     try: mod = conv_bo.modelo_conjunto(A, blq, set(REGS_OBJ) | set(marcas(u32, par)), os.path.join(sal, 'HAOBJ.DAT'))
     finally: _m.Modelo.escribe = esc0
@@ -569,6 +622,15 @@ def main():
         assert tok >> 16 == 0x2b; escenas.append(('HA_HB%d' % i, tok & 0xffff, todos(0x2b, tok), 0x2b))
     assert [u32(a) & 0xffff for a in (0x1ad5e4, 0x1ad5f8, 0x1ad61c)] == [0x3f, 0x40, 0x41], 'misiones especiales 2B003F..41'
     for i in range(3): escenas.append(('HA_HS%d' % (i + 1), 0x3f + i, todos(0x2b, 0x2b003f + i), 0x2b))
+    # (INFARTO 3) el puesto de la carrera del tipo 14 (45B7D0 = PS2 0x1abca0): 2B0005 (cuadro 0) y 2B0006 (cuadro puesto - 1)
+    # en (0, 30), capa 1
+    assert u32(0x1abcb4) & 0xffff == 5 and u32(0x1abcec) & 0xffff == 6, 'puesto 2B0005 / 2B0006'
+    escenas.append(('HA_RK0', 5, range(1), 0x2b)); escenas.append(('HA_RK1', 6, todos(0x2b, 0x2b0006), 0x2b))
+    # (INFARTO 3) sprites 3D (4295D0 = PS2 0x115870, en el mundo con escala): 2C0006 los corazones sobre los coches del tipo
+    # 20 (0x1b2190), 2C0002 los destellos del arco cruzado (0x1d4508), 2C0007 / 2C0000 la estela de las estrellas (0x1d4d80 /
+    # 0x1d50e0), con todos sus cuadros
+    assert u32(0x1b22c8) & 0xffff == 6, 'corazones 2C0006 del tipo 20'
+    for k in (6, 2, 7, 0): escenas.append(('HA_S%02X' % k, k, todos(0x2c, 0x2c0000 + k), 0x2c))
     # 429530 (x, y) con 4294C0 (la mitad del tamano de la escena, PS2 0x1156c0): el uso lleva (w / 2 - 320, h / 2 - 240)
     # y la demo pasa la x / y del original sin el 4294C0 (hud.c: escena centrada en (320, 240))
     desp = {}

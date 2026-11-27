@@ -271,16 +271,17 @@ static uint8_t pal_n4[64];                                  /* entradas usadas d
 #define PAL_4 0x4000                                        /* pal[]: banco de 4 bits (si no, de 8); bits 0-9: entrada */
 
 /* colores distintos de la textura i (ordenados) en c[] si son <= 256; devuelve cuantos (257: mas) */
+static uint32_t *pal_visto;
 static int pal_colores(const hud_dat_t *h, int i, uint16_t *c)
 {
-    static uint32_t visto[2048];                            /* 65536 bits */
+    uint32_t *visto = pal_visto;                            /* 65536 bits (INFARTO 3: del monton, solo en pal_reparte) */
     const uint16_t *t = (const uint16_t *)((h->meta ? h->tx : h->dat) + h->tex[i].off); uint32_t k, n = 0, m = h->tex[i].w * h->tex[i].h;
     for (k = 0; k < m && n <= 256; k++) {
         uint16_t v = t[k];
         if (!(visto[v >> 5] & (1u << (v & 31)))) { visto[v >> 5] |= 1u << (v & 31); if (n < 256) c[n] = v; n++; }
     }
     for (k = 0; k < n && k < 256; k++) visto[c[k] >> 5] &= ~(1u << (c[k] & 31));
-    if (n > 256) { memset(visto, 0, sizeof visto); return 257; }
+    if (n > 256) { memset(visto, 0, 2048 * sizeof *visto); return 257; }
     for (k = 1; k < n; k++) { uint16_t v = c[k]; int j = k; while (j > 0 && c[j - 1] > v) { c[j] = c[j - 1]; j--; } c[j] = v; }
     return n;
 }
@@ -302,9 +303,9 @@ static void pal_reparte(hud_dat_t *h)
 {
     uint16_t *col, *nc, tmp[256]; int16_t *orden; uint32_t i, j, n = h->n_tex; int k, b, s;
     h->pal = malloc(n * sizeof *h->pal); h->con_pal = calloc(n, 1);
-    col = malloc(n * 256 * sizeof *col); nc = malloc(n * sizeof *nc); orden = malloc(n * sizeof *orden);
-    if (!h->pal || !h->con_pal || !col || !nc || !orden) {
-        free(h->pal); free(h->con_pal); h->pal = NULL; h->con_pal = NULL; free(col); free(nc); free(orden); return;
+    col = malloc(n * 256 * sizeof *col); nc = malloc(n * sizeof *nc); orden = malloc(n * sizeof *orden); pal_visto = calloc(2048, sizeof *pal_visto);
+    if (!h->pal || !h->con_pal || !col || !nc || !orden || !pal_visto) {
+        free(h->pal); free(h->con_pal); h->pal = NULL; h->con_pal = NULL; free(col); free(nc); free(orden); free(pal_visto); pal_visto = NULL; return;
     }
     memset(pal_n8, 0, sizeof pal_n8); memset(pal_n4, 0, sizeof pal_n4);
     for (i = 0; i < n; i++) {                               /* solo ARGB4444 sin VQ (las 1555 no caben exactas) */
@@ -350,7 +351,7 @@ static void pal_reparte(hud_dat_t *h)
         for (s = 0; s < 64; s++) n4 += pal_n4[s] > 0;
         dbglog(DBG_INFO, "HUD: paletas en %d bancos de 8 bits y %d de 4, %uK menos de VRAM\n", n8, n4, (unsigned)(ahorro >> 10));
     }
-    free(col); free(nc); free(orden);
+    free(col); free(nc); free(orden); free(pal_visto); pal_visto = NULL;
 }
 /* indice del texel v en el banco de la textura (busqueda en sus colores ordenados) */
 static inline uint32_t pal_idx(int16_t p, uint16_t v)
