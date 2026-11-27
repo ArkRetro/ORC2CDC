@@ -28,6 +28,7 @@
 #include "../comun/menu.h"
 #include "../comun/fsp.h"
 #include "../comun/infarto.h"
+#include "../comun/gho.h"
 #include "../comun/rival.h"
 #include "../comun/vmu.h"
 #include "../comun/robot.h"
@@ -13918,6 +13919,32 @@ static coche_t gh_c; static matrix_t gh_mat __attribute__((aligned(32)));
 static volatile int gh_guardando;
 static uint8_t gh_buf[sizeof(gh_cab_t) + sizeof gh_rep];        /* el fichero de la VMU (lectura y guardado) */
 #define GH_U (65536.0f / 6.2831853f)
+/* Rev 2.9.9.c (modos "sp"): el coche de la grabacion. gh_rep_cab.modelo = 0x80000000 | color << 8 | ficha del coche
+   que la grabo (las grabaciones de antes llevan 0: el del jugador, como hasta ahora). Si es otro que el del jugador, su
+   GHO1 (comun/gho.c, del COCHEnnL.DAT del GD, ~4-11 KB) va al principio de gh_buf, que en carrera no se usa (la VMU
+   se lee al empezar y se escribe en gh_meta, que pasa al coche del jugador antes de escribir) */
+#define GH_GRABADO 0x80000000u
+static const int16_t *gh_gt; static uint32_t gh_gn; static int gh_g_ficha = -1; static uint32_t gh_g_n;
+static void gh_modelo(void)
+{
+    int f = gh_nrep && (gh_rep_cab.modelo & GH_GRABADO) ? (int)(gh_rep_cab.modelo & 0xff) : -1, r = 0;
+    uint8_t *b = (uint8_t *)(((uintptr_t)gh_buf + 31) & ~(uintptr_t)31), *sec = b + ((sizeof gh_buf - 64 - 2048) & ~31u);
+    char nom[16];
+    gh_gt = gho_t; gh_gn = gho_n;                               /* el del jugador */
+    if (f < 0 || f == coche_ficha || f >= N_FICHAS || ficha_modelo[f] >= 30) return;
+    if (f != gh_g_ficha) {
+        gh_g_ficha = -1;
+        sprintf(nom, "COCHE%02dL.DAT", f);
+        musica_pausa_lectura(1);
+        if ((r = gho_lee(nom, b, (uint32_t)(sec - b), sec, &gh_g_n))) { sprintf(nom, "COCHE%02d.DAT", f); r = gho_lee(nom, b, (uint32_t)(sec - b), sec, &gh_g_n); }
+        musica_pausa_lectura(0);
+        dbglog(r ? DBG_ERROR : DBG_INFO, "FANTASMA: coche de la grabacion ficha %d (color %u): %s %s, %u triangulos (%d)\n", f,
+               (unsigned)((gh_rep_cab.modelo >> 8) & 0xff), r ? "sin el GHO1 de" : "GHO1 de", nom, (unsigned)gh_g_n, r);
+        if (r || !gh_g_n) return;                               /* (sin el: el del jugador) */
+        gh_g_ficha = f;
+    }
+    gh_gt = (const int16_t *)b; gh_gn = gh_g_n;
+}
 /* al empezar la carrera (y REINTENTAR): la grabacion a cero; en la CONTRARRELOJ la del curso, de la RAM o de la VMU */
 static void gh_empieza(void)
 {
@@ -13935,9 +13962,11 @@ static void gh_empieza(void)
                 gh_rep_cab = c; memcpy(gh_rep, b + sizeof c, c.n * sizeof(gh_m_t)); gh_nrep = c.n;
             }
         }
+        gh_g_ficha = -1;                                        /* (gh_buf: lo de la VMU encima del GHO1 que hubiera) */
         dbglog(DBG_INFO, "FANTASMA: curso %04X, %s (%d muestras, %u ms)\n", clave, gh_nrep ? "leido de la VMU" : "sin fantasma",
                gh_nrep, gh_nrep ? (unsigned)gh_rep_cab.total_ms : 0);
     } else dbglog(DBG_INFO, "FANTASMA: curso %04X, el de la RAM (%d muestras)\n", clave, gh_nrep);
+    gh_modelo();
 }
 /* la etapa pasa a la siguiente (curso_paso, CUR_SIGUIENTE): la union de la anterior sigue en la ruta */
 static void gh_cambia_etapa(int nodo_ant, float s_un, int rama) { gh_nodo_ant = nodo_ant; gh_union_ant = s_un; gh_rama_ant = rama; }
@@ -13975,7 +14004,9 @@ static void gh_meta(int total_ms)
     if (gh_guardando) { dbglog(DBG_ERROR, "FANTASMA: aun guardando el anterior\n"); return; }
     memcpy(gh_rep, gh_rec, gh_nrec * sizeof(gh_m_t)); gh_nrep = gh_nrec;
     memcpy(gh_rep_cab.marca, "ORGH", 4); gh_rep_cab.ver = 1; gh_rep_cab.clave = (uint16_t)gh_clave;
-    gh_rep_cab.n = gh_nrec; gh_rep_cab.total_ms = total_ms; gh_rep_cab.modelo = 0;
+    gh_rep_cab.n = gh_nrec; gh_rep_cab.total_ms = total_ms;
+    gh_rep_cab.modelo = coche_ficha >= 0 ? GH_GRABADO | (uint32_t)(menu_color() & 0xff) << 8 | (uint32_t)coche_ficha : 0;   /* (Rev 2.9.9.c) */
+    gh_g_ficha = -1; gh_gt = gho_t; gh_gn = gho_n;              /* (el coche del jugador; gh_hilo escribe gh_buf) */
     gh_guardando = 1;
     if (!thd_create(1, gh_hilo, NULL)) gh_hilo(NULL);
 }
@@ -14044,10 +14075,14 @@ static int gh_coloca(void)
    del coche) y alfa GH_ALFA. Sin GHO1 (coches de antes de la 2.9.2.a) no se dibuja. -DGH_COCHE: el coche entero de la
    2.9.2 */
 static pvr_poly_hdr_t gh_cab_col __attribute__((aligned(32))); static int gh_cab_ok;
+static float gh_ojo[3]; static uint32_t gh_tri, gh_cuad;   /* (Rev 2.9.9.c) el ojo en mm del coche; la cuenta */
 static void gh_dibuja(int lista)
 {
-    uint32_t i; int k;
-    if (lista != 2 || !gho_n) return;
+    uint32_t i, nt = 0; int k;
+#ifdef PRUEBA_GH_OCULTO
+    return;                                                     /* prueba: la medida sin el dibujo del fantasma */
+#endif
+    if (lista != 2 || !gh_gn || !gh_gt) return;
     if (!gh_cab_ok) {
         pvr_poly_cxt_t cx;
         pvr_poly_cxt_col(&cx, PVR_LIST_TR_POLY);
@@ -14055,11 +14090,27 @@ static void gh_dibuja(int lista)
         cx.blend.src = PVR_BLEND_SRCALPHA; cx.blend.dst = PVR_BLEND_INVSRCALPHA;
         pvr_poly_compile(&gh_cab_col, &cx); gh_cab_ok = 1;
     }
-    if (!ta_cabe(3 * gho_n)) return;
+    if (!ta_cabe(3 * gh_gn)) return;
+    /* (Rev 2.9.9.c, pedido: menos poligonos) el ojo en el marco del coche (gh_mat: ejes en las filas 0..2, origen en la
+       3; sin el cuerpo de ani_m[0], unos cm): solo las caras que lo miran. GHO1 son envolventes convexas con las caras
+       hacia fuera ((v1 - v0) x (v2 - v0) por la normal > 0, tools/conv_coche.py fantasma): las de detras se veian a
+       traves del translucido; ahora la mitad de triangulos y vertices al TA. -DGH_DOS_CARAS: las dos como antes */
+    {   float e[3]; int j;
+        for (j = 0; j < 3; j++) e[j] = ojo[j] - gh_mat[3][j];
+        for (j = 0; j < 3; j++) {
+            float a2 = gh_mat[j][0] * gh_mat[j][0] + gh_mat[j][1] * gh_mat[j][1] + gh_mat[j][2] * gh_mat[j][2];
+            gh_ojo[j] = 1000.0f * (e[0] * gh_mat[j][0] + e[1] * gh_mat[j][1] + e[2] * gh_mat[j][2]) / (a2 > 1e-6f ? a2 : 1.0f);
+        }
+    }
     mat_load(&vista); mat_apply(&gh_mat); if (ani.ok) mat_apply(&ani_m[0]);
     pvr_prim(&gh_cab_col, sizeof gh_cab_col);
-    for (i = 0; i < gho_n; i++) {
-        const int16_t *t = gho_t + 10 * i; float X[3], Y[3], W[3]; uint32_t c; int ok = 1;
+    for (i = 0; i < gh_gn; i++) {
+        const int16_t *t = gh_gt + 10 * i; float X[3], Y[3], W[3]; uint32_t c; int ok = 1;
+#ifndef GH_DOS_CARAS
+        {   float ax = t[3] - t[0], ay = t[4] - t[1], az = t[5] - t[2], bx = t[6] - t[0], by = t[7] - t[1], bz = t[8] - t[2];
+            float nx = ay * bz - az * by, ny = az * bx - ax * bz, nz = ax * by - ay * bx;
+            if (nx * (gh_ojo[0] - t[0]) + ny * (gh_ojo[1] - t[1]) + nz * (gh_ojo[2] - t[2]) <= 0) continue; }
+#endif
         for (k = 0; k < 3; k++) {
             float x = t[3 * k] * 0.001f, y = t[3 * k + 1] * 0.001f, z = t[3 * k + 2] * 0.001f, w;
             mat_trans_single3_nodivw(x, y, z, w);
@@ -14075,8 +14126,14 @@ static void gh_dibuja(int lista)
             v.x = X[k] * iw; v.y = Y[k] * iw; v.z = iw; v.u = v.v = 0; v.argb = c; v.oargb = 0;
             pvr_prim(&v, sizeof v);
         }
+        nt++;
     }
-    vtx_env += 3 * gho_n;
+    vtx_env += 3 * nt; gh_tri += nt;
+    if (++gh_cuad >= 300) {                                     /* (la medida del informe: triangulos por cuadro) */
+        dbglog(DBG_INFO, "FANTASMA: %u cuadros dibujado, %u triangulos (%u vertices) por cuadro de media, GHO1 %u\n", (unsigned)gh_cuad,
+               (unsigned)(gh_tri / gh_cuad), (unsigned)(3 * gh_tri / gh_cuad), (unsigned)gh_gn);
+        gh_cuad = 0; gh_tri = 0;
+    }
 }
 static void meta_sale(void)
 {
