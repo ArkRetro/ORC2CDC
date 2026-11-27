@@ -8108,11 +8108,18 @@ static void c2c_se(int id) { if (id == 0x518d) { if (voz_ok) sfx_voz(id); } else
    (tools/conv_union.py) */
 #define CAMP_ARBOL(g) ((g) == 0 ? 1 : (g) == 1 ? 0 : 302)
 static int camp_g = -1;
-static int curso_tiene(int id)                                  /* el arbol id en CURSO.DAT (solo su indice: 8 KB) */
-{
-    uint32_t lba, tam, o, n; uint8_t *b; int r = -1;
-    if (gd_busca(CURSO_FICH(id), &lba, &tam) || !(b = memalign(32, 8192))) return -1;
-    if (!gd_lee(lba, tam < 8192 ? (int)((tam + 2047) >> 11) : 4, b)) r = curso_busca(b, tam < 8192 ? tam : 8192, id, &o, &n);
+static int curso_tiene(int id)                                  /* el arbol id en CURSO.DAT (solo su indice: 16 KB, */
+{                                                               /* detras de los 15 registros del modo OutRun) */
+    uint32_t lba, tam, i, m, r0, e[3]; uint8_t *b; int r = -1;
+    if (gd_busca(CURSO_FICH(id), &lba, &tam) || !(b = memalign(32, 16384))) return -1;
+    if (!gd_lee(lba, tam < 16384 ? (int)((tam + 2047) >> 11) : 8, b) && !memcmp(b, "CUR1", 4)) {
+        memcpy(&m, b + 4, 4); memcpy(&r0, b + 8, 4); i = 12 + m * r0;
+        if (i + 8 <= 16384 && !memcmp(b + i, "CURS", 4))
+            for (memcpy(&m, b + i + 4, 4), i += 8; m-- && i + 12 <= 16384; i += 12) {
+                memcpy(e, b + i, 12);
+                if ((int)e[0] == id) { r = e[1] + e[2] * r0 <= tam ? 0 : -2; break; }
+            }
+    }
     free(b); return r;
 }
 static int camp_puede(int g) { return g < 0 || g > 2 ? -1 : g < 2 ? 0 : curso_tiene(CAMP_ARBOL(g)); }

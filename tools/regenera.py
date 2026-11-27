@@ -18,6 +18,9 @@ from concurrent.futures import ThreadPoolExecutor
 TOOLS = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, TOOLS)
 ARBOLES = '1,' + ','.join(str(i) for i in range(100, 194))       # OUTRUN2SP y los cursos de Races.bin (100 + registro)
+# CURSO.DAT lleva ademas el arbol 302, el campeonato de Holly de COAST 2 COAST (Req_Course_MIX_PS2, conv_union.ARBOLES_REQ),
+# con sus 11 uniones nuevas BK498..508 (conv_union.BK_REQ) al final de UNIONES.PAK (pak_union.AL_FINAL)
+ARBOLES_CURSO = ARBOLES + ',302'
 # CONTRARRELOJ (tableros de cursos, conv_union.arbol_ta): los arboles 200 + codigo (0..0x53) en CURSOTA.DAT y sus
 # uniones nuevas (BK262.. en UNIONESTA.PAK; las de los arboles de arriba conservan su numero)
 # y (revision 44) los cursos seguidos del OUTRUN de la consola (tablero 0x24, juegos 2 / 3: csc_data_2_ren_course y
@@ -27,7 +30,7 @@ ARBOLES_TA = ARBOLES + ',' + ','.join(str(200 + c) for c in range(0x54)) + ',290
 UNIONES_TA = ['UNIONESTA.PAK', 'CURSOTA.DAT']
 UNIONES_REN = ['UNIONESR.PAK']
 BK_REN = 470                                                     # la primera union de los arboles 290 / 291
-NBK = 498                                                        # descriptores BK0..497: 262 de UNIONES.PAK, 208 de UNIONESTA.PAK y 28 de UNIONESR.PAK
+NBK = 509                                                        # descriptores BK0..508: 262 + 11 (BK498..508) de UNIONES.PAK, 208 de UNIONESTA.PAK y 28 de UNIONESR.PAK
 # temas, resultados de OUTRUN2SP (28), menu, avances y metas (sin la 64: no la usa la meta)
 MUSICA = list(range(0, 29)) + [30] + list(range(33, 61)) + [61, 62, 63, 65, 66]
 PARTES = 4                                                       # conv_union.py --parte=k/n (al menos; o --jobs)
@@ -184,7 +187,7 @@ def paso(C, n, log):
         ej(T('conv_union.py'), ISO, os.path.join(W, 'uren'), '--arboles=' + ARBOLES_TA, '--bk-desde=%d' % BK_REN, '--curso=CURSOTA.DAT',
            '--parte=%s/%d' % (n[8:], C.partes))
     elif n.startswith('union'):
-        ej(T('conv_union.py'), ISO, os.path.join(W, 'u'), '--arboles=' + ARBOLES, '--parte=%s/%d' % (n[5:], C.partes))
+        ej(T('conv_union.py'), ISO, os.path.join(W, 'u'), '--arboles=' + ARBOLES_CURSO, '--parte=%s/%d' % (n[5:], C.partes))
     elif n == 'curso':                                   # BK00..14, BKD, SOL, COLBK*, CURSO del modo
         ej(T('conv_union.py'), ISO, t, '--sin-tramos')
         u0 = os.path.join(W, 'u0'); os.makedirs(u0, exist_ok=True)

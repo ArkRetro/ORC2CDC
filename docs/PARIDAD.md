@@ -6911,3 +6911,29 @@ musica, pcarga, meta y sp (text + data + bss 2935336; 5b392f5 2941256). Medido c
 sin defines, los mismos datos): 5b392f5 "libre 357K", esta rama "libre 364K", "VOZ: VOCES.DAT, 35 muestras", sin "Out
 of memory" (el libre del arranque va a saltos: con 2 KB menos de programa salio 356K, por como queda la cima del monton).
 En el campeonato, ~500 KB libres en carrera.
+
+## COAST 2 COAST: campeonatos, tercera tanda (agente c2c3, 2026-11-27)
+
+Sobre "COAST 2 COAST: los campeonatos (variante 5), agente c2c2". Todo verificado en Flycast (nivel E), no en la consola.
+
+### Holly (grupo 6, Req_Course_MIX_PS2): HECHO
+
+- tools/conv_union.py: las uniones nuevas de los arboles de ARBOLES_REQ (el 302) se numeran desde `BK_REQ = 498`
+  (detras de las de CURSOTA.DAT, 262..497) con su propio contador: EAST_R / BK498, LASV_R / BK499, METR_R / BK500,
+  DESE_R / BK501, NEWY_R / BK502, ALAS_R / BK503, ALPI_R / BK504, YOSE_R / BK505, GRAN_R / BK506, INDU_R / BK507 y la
+  meta CAST_R / BK508 (union 76, cs_BK_SUMOEND); las demas del arbol son de antes (BK42, BK231, BK133, BK95).
+- tools/pak_union.py: los BK desde `AL_FINAL = 498` van al final del paquete, asi UNIONES.PAK solo crece (22 750 247 ->
+  23 467 226 bytes, +0,7 MB por los trozos repetidos) y sus primeros 22 750 247 bytes y los 262 descriptores de antes salen
+  identicos byte a byte (comprobado: recompuestas las 262 de lgdat2 y reempaquetadas con las 11 nuevas, `cmp`).
+- tools/regenera.py: el paso `union` convierte ARBOLES + 302 (ARBOLES_CURSO; la Contrarreloj sigue con ARBOLES_TA sin el
+  302, CURSOTA.DAT no cambia) y se esperan 509 descriptores (NBK).
+- CURSO.DAT: los 96 arboles de antes identicos registro a registro (h2/cmpcurso.py), el 302 detras.
+- demo/main.c `curso_tiene`: leia 8 KB del principio de CURSO.DAT, pero el indice de los arboles va detras de los 15
+  registros del modo OutRun (12 + 15 x 684 = 10272 bytes): nunca encontraba el 302 ("el campeonato 2 no se puede
+  correr"); ahora lee 16 KB y comprueba el arbol contra el tamano del fichero.
+- GD-ROM: datos de prueba 476 947 sectores (931,5 MiB; lgdat2 476 393): quedan 27 171 sectores (53 MiB) menos el
+  1ST_READ.BIN (~3 MB).
+- E (`-DPRUEBA_AUTO -DPRUEBA_CAMP=2 -DPRUEBA_SIN_TIEMPO`, pantalla :93): `CURSO: arbol 302, 15 etapas, salida EAST`, las
+  cinco etapas EAST_R -> LASV_R -> DESE_R -> ALPI_R -> BEAC_R por BK498, BK499, BK501, BK504 (leidas del paquete en ~2,1
+  s) hasta `CURSO: GOAL en BEAC`, con las peticiones de sus guiones (16, 13, 14, 22: sin portar, nota 0). Sin "Out of
+  memory"; "VOZ: VOCES.DAT, 35 muestras". Capturas: modos/c2c/cap3/holly (r_*: una cada 15 s; r_225 en la union).

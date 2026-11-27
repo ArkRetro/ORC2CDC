@@ -645,9 +645,12 @@ def arbol_ren(A, i):
 
 # los campeonatos de COAST 2 COAST (variante 5, comun/campeonato.c; PS2 46C2F0 / 4EEB50: 64F040[cfg0]): los del grupo 4
 # (Request_Course_SP) y del 5 (Request_Course_OR2) son los arboles 1 (csc_data_cvt) y 0 (csc_data_2), lo comprueba
-# tools/conv_camp.py; el del 6 (Req_Course_MIX_PS2) seria el 302 (11 uniones nuevas: SIN HACER, ver docs/PARIDAD.md).
-# Sus metas llevan los hijos 0 / -1: como -1 / -1 (la meta)
+# tools/conv_camp.py; el del 6 (Req_Course_MIX_PS2) es el 302 de CURSO.DAT, con sus 11 uniones nuevas numeradas desde
+# BK_REQ (BK498..508, detras de las de la Contrarreloj y de los cursos seguidos, CURSOTA.DAT: 262..497) y metidas al
+# final de UNIONES.PAK (pak_union.py: AL_FINAL), para que lo demas no cambie. Sus metas llevan los hijos 0 / -1: como
+# -1 / -1 (la meta)
 ARBOLES_REQ = {302: 'Req_Course_MIX_PS2'}
+BK_REQ = 498
 
 def arbol_req(A, i):
     return [(q[1], q[7], q[8], q[11] if q[12] >= 0 else -1, q[12]) for q in crudos(A, i)]
@@ -759,8 +762,8 @@ def cursos(A, dsal, ids, con_uniones=True, con_tramos=False, parte=(0, 1), nombr
     for k, ti, ui, hi, hd in o2:                       # las del modo OutRun: BKkk / COLBKkk con kk = clave
         fich[combo(o2, k, False)] = k
         if hi < 0: colmeta[cadena(E, u32(E, base2 + 4 * ui) + 0x0c)] = k
-    sig = [max(fich.values()) + 1]
-    def registros(regs, especial):
+    sig = [max(fich.values()) + 1]; sig_req = [BK_REQ]
+    def registros(regs, especial, req=False):
         porclave = {r[0]: r for r in regs}; idx = {r[0]: i for i, r in enumerate(regs)}
         nivel = {regs[0][0]: 0}; cola = [regs[0][0]]
         while cola:
@@ -776,7 +779,8 @@ def cursos(A, dsal, ids, con_uniones=True, con_tramos=False, parte=(0, 1), nombr
             tx, ty, tz, rx, ry, rz = f32(E, d0 + 0x98, 6)
             assert abs(rx) < 1e-4 and abs(rz) < 1e-4, 'union con giro en x o z: no soportado'
             c = combo(regs, clave, especial)
-            if c not in fich: fich[c] = sig[0]; sig[0] += 1
+            if c not in fich:
+                s_ = sig_req if req else sig; fich[c] = s_[0]; s_[0] += 1
             if c[0] == 'META':
                 ct = cadena(E, u32(E, base2 + 4 * ui) + 0x0c)
                 fc = -1 if ct.endswith('coli_BK_PALM_bin') else colmeta.setdefault(ct, fich[c])
@@ -793,7 +797,7 @@ def cursos(A, dsal, ids, con_uniones=True, con_tramos=False, parte=(0, 1), nombr
     for i in ids:
         rs = registros(arbol(A, 0, 'csc_data_cvt.bin') if i == 1 else arbol_ren(A, i) if i in ARBOLES_REN else
                        arbol_req(A, i) if i in ARBOLES_REQ else
-                       arbol_ta(A, i - 200) if i >= 200 else arbol_mision(A, i - 100), 100 <= i < 200)
+                       arbol_ta(A, i - 200) if i >= 200 else arbol_mision(A, i - 100), 100 <= i < 200, i in ARBOLES_REQ)
         # +0x74 del registro: la casilla del mapa de ruta del HUD es +0x74 - 1 si no es 0 y si no la clave (0x1bd2a8;
         # solo las metas del reves de la Contrarreloj lo llevan)
         for r, q in zip(rs, crudos(A, i) or ()): r['m74'] = q[29]
