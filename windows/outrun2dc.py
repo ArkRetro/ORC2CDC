@@ -6,7 +6,9 @@ Uso: outrun2dc.py [tu.iso] [carpeta] [--jobs N] [--bin 1ST_READ.BIN --ip IP.BIN]
 Sin la ISO o la carpeta, las pide con los dialogos de Windows (PowerShell) o, si no hay, por teclado.
 Se puede cortar (cerrar la ventana o Ctrl+C) y volver a lanzar con la misma ISO y carpeta: sigue donde iba.
 En la carpeta: <carpeta>/OutRun2006_DC/ con el GDI, y trabajo/ (datos/ convertidos, registros; los intermedios se
-borran al acabar). No hace falta nada del PC (ni la decompilacion ni el recomp): todo sale de la ISO."""
+borran al acabar). No hace falta nada del PC (ni la decompilacion ni el recomp): todo sale de la ISO.
+Opcional: con <carpeta>/OutRun2006_DC/extras/splash_wave_remaster.mp3 y supneo.jpg, el selector de musica lleva una
+tarjeta mas, SPLASH WAVE REMASTER (tools/menu_musica.py desde tools/regenera.py); sin ellos, nada."""
 import os, shutil, subprocess, sys, time
 
 AQUI = os.path.dirname(os.path.abspath(__file__))
@@ -126,7 +128,7 @@ def main():
     informe('')
     import regenera, gdi
     t0 = time.time()
-    regenera.regenera(iso, D, W, jobs, informe=informe)
+    regenera.regenera(iso, D, W, jobs, informe=informe, extras=os.path.join(car, 'extras'))   # (paso opcional)
     regenera.limpia(W)
     informe('== GD-ROM en %s' % car)
     ultimo = [-1]

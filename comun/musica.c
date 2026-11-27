@@ -136,3 +136,8 @@ void musica_nivel(float n)
     volumen = v;
     mutex_lock(&m_poll); if (activa && !arranca) snd_stream_volume(hs, volumen); mutex_unlock(&m_poll);
 }
+
+/* el tema de mas del selector (musica.h) */
+int musica_pista_tema(int k) { return k == MUSICA_TEMA_EXTRA ? MUSICA_PISTA_EXTRA : k; }
+int musica_avance_tema(int k) { return k == MUSICA_TEMA_EXTRA ? MUSICA_AVANCE_EXTRA : 0x21 + k; }
+int musica_tema_pista(int n) { return n == MUSICA_PISTA_EXTRA ? MUSICA_TEMA_EXTRA : n; }

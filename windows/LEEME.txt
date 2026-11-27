@@ -61,6 +61,16 @@ Resultado
   GDMenu Card Manager / openMenu).
 El GD-ROM es para uso personal: no lo compartas (lleva los datos de tu disco).
 
+Tarjeta de musica extra (opcional)
+----------------------------------
+Si antes de lanzarlo creas la carpeta <carpeta>\OutRun2006_DC\extras y pones en ella
+   splash_wave_remaster.mp3   (la cancion)
+   supneo.jpg                 (la imagen de su tarjeta)
+el selector de musica lleva una tarjeta mas al final de la lista de remezclas:
+SPLASH WAVE REMASTER (siempre disponible). Sin esos ficheros no se anade nada.
+Si los pones despues, vuelve a lanzar el programa con la misma carpeta: solo hace
+ese paso y el GD-ROM.
+
 Si algo falla
 -------------
 La ventana dice que paso ha fallado y su registro (trabajo\registro\<paso>.txt).
