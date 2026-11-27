@@ -4411,6 +4411,7 @@ static void traf_infarto(void)
            n.clase, n.modelo, n.seccion, l, (double)(yo.s - s_etapa));
     infarto_coche_abierto(1);
 }
+#define CAMP14_VIVOS 4
 static void traf_aparece(void)
 {
     int nodo, pos, u;
@@ -4424,7 +4425,13 @@ static void traf_aparece(void)
         for (i = 0; i < NTRAF; i++) traf[i].ha_m = v[i].marca;
         {   int sc, lc, mk, md = -1;                            /* (tipo 14) los coches con numero de la lista +0x5c (0x29d410), */
             for (i = 0; i < NTRAF; i++) if (traf[i].carril >= 0) { md = traf[i].modelo; break; }   /* con un modelo del trafico */
-            while (md >= 0 && camp_coche14(&sc, &lc, &mk)) {
+#ifdef DIAG_SIN_C14
+            md = -1;                                            /* (medida: sin los coches del 14) */
+#endif
+            int vivos = 0;                                      /* (c2c7, DESVIACION por el polycount: como mucho CAMP14_VIVOS a la */
+            for (i = 0; i < NTRAF; i++) vivos += traf[i].carril >= 0 && (traf[i].ha_m & HA_CAMP) && !(traf[i].ha_m & HA_SUELTO);   /* vez) */
+            while (md >= 0 && vivos < CAMP14_VIVOS && camp_coche14(&sc, &lc, &mk)) {
+                vivos++;
                 for (j = 0; j < NTRAF && traf[j].carril >= 0; j++) ;
                 if (j >= NTRAF) break;
                 traf_abre(traf + j, s_etapa + (float)sc * m_pos, lc < NCARRIL ? lc : NCARRIL - 1, md, 0, traf_ult_pos); traf[j].ha_m = mk;
@@ -8411,6 +8418,11 @@ static void camp_millas_(int m) { menu_suma_millas((uint32_t)m); }
 static void camp_obj_(int cl, int tipo, float sec, float lat, float esc);
 static void camp_chica_(int que, uint32_t v);
 static void camp_golpe_(void);
+static void camp_marco_(const float *l, float *w)                /* (tipo 24) del marco de la etapa al mundo (marco_compone) */
+{
+    float c = cosf(marco_et[3]), sn = sinf(marco_et[3]);
+    w[0] = marco_et[0] + l[0] * c + l[2] * sn; w[1] = marco_et[1] + l[1]; w[2] = marco_et[2] - l[0] * sn + l[2] * c;
+}
 static void ha_punto(int sec, float *p, float *fx, float *fz);
 /* al salir del menu: el campeonato elegido (menu_camp: nodo del mapa y casilla), su arbol, la salida y el gestor */
 FRIO static void camp_preparado(int auto_)
@@ -8435,7 +8447,7 @@ FRIO static void camp_preparado(int auto_)
     }
     camp_g = g; curso_pedido = CAMP_ARBOL(g); nodo_salida = cn > 0 ? cn - 1 : 0;
     if (g == 0) preset_curso = 0;                               /* el curso de OutRun 2 SP: el preset 0 (PROBABLE) */
-    camp_graba = menu_nota_camp; camp_voz = camp_voz_; camp_se = camp_se_; camp_millas = camp_millas_; camp_obj = camp_obj_; camp_chica = camp_chica_; camp_golpe = camp_golpe_; camp_bancos = camp_bancos_; camp_punto = ha_punto;
+    camp_graba = menu_nota_camp; camp_voz = camp_voz_; camp_se = camp_se_; camp_millas = camp_millas_; camp_obj = camp_obj_; camp_chica = camp_chica_; camp_golpe = camp_golpe_; camp_bancos = camp_bancos_; camp_punto = ha_punto; camp_marco = camp_marco_;
     dbglog(DBG_INFO, "CAMP: campeonato %d, arbol %d, salida nodo %d, casilla %d\n", g, curso_pedido, nodo_salida, cl);
 }
 /* los objetos de la peticion (comun/campeonato.c pon_objetos) en el mundo: la seccion sec de la etapa y la fraccion lat
@@ -8523,6 +8535,29 @@ static void camp_zona_dibuja(void)
 }
 /* (C2C, tipo 20) las lineas de los pares (0x296da0): DESVIACION, sin los modelos 0x57002f / 0x57002a; una cinta vertical
    translucida de 0,3 m entre los dos coches (2 triangulos por par, como mucho 10) */
+/* (C2C, tipo 24) DESVIACION (sin el HUD de la camara del original, 0x2a4fa8: oculta el HUD y pone el visor): con un
+   objetivo activo, las cuatro esquinas del visor en el centro de la pantalla y una marca sobre el objetivo, amarilla
+   si esta en el angulo de la foto (28,8 grados, 0x3f00adfd) y blanca si no; 8 quads 2D (fuera de la escena) */
+static void camp_visor(void)
+{
+    float w[3], dx, dy, dz, zv, x, y, a; uint32_t col; int i;
+    if (!camp_foto(w)) return;
+    for (i = 0; i < 4; i++) {
+        float cx = i & 1 ? 470.0f : 170.0f, cy = i & 2 ? 350.0f : 130.0f, sx = i & 1 ? -1.0f : 1.0f, sy = i & 2 ? -1.0f : 1.0f;
+        caja(sx > 0 ? cx : cx - 30.0f, sy > 0 ? cy : cy - 3.0f, 30.0f, 3.0f, 0xC0FFFFFF);
+        caja(sx > 0 ? cx : cx - 3.0f, sy > 0 ? cy : cy - 30.0f, 3.0f, 30.0f, 0xC0FFFFFF);
+    }
+    dx = w[0] - ojo[0]; dy = w[1] - ojo[1]; dz = w[2] - ojo[2]; zv = dx * ade[0] + dy * ade[1] + dz * ade[2];
+    a = atan2f(w[0] - yo.pos[0], w[2] - yo.pos[2]) - atan2f(yo.fw[0], yo.fw[2]);
+    while (a < -3.14159265f) a += 6.28318531f;
+    while (a > 3.14159265f) a -= 6.28318531f;
+    col = fabsf(a) < 0.50265f ? 0xE0FFE040 : 0xC0FFFFFF;
+    if (zv < 1.0f) return;
+    x = 320.0f + (dx * der[0] + dy * der[1] + dz * der[2]) * fx / zv; y = 240.0f - (dx * arr[0] + dy * arr[1] + dz * arr[2]) * fx / zv;
+    if (x < 0.0f || x > 640.0f || y < 0.0f || y > 480.0f) return;
+    caja(x - 12.0f, y - 12.0f, 24.0f, 3.0f, col); caja(x - 12.0f, y + 9.0f, 24.0f, 3.0f, col);
+    caja(x - 12.0f, y - 9.0f, 3.0f, 18.0f, col); caja(x + 9.0f, y - 9.0f, 3.0f, 18.0f, col);
+}
 static void camp_lineas_dibuja(void)
 {
     static pvr_poly_hdr_t cab __attribute__((aligned(32))); static int cab_ok;
@@ -8577,6 +8612,20 @@ FRIO static void camp_paso_jug(int toca)
     memcpy(c.sup, sup_rueda, sizeof c.sup); c.derrapa = yo.t_derrape != 0;
     c.rebufo = fis_ok ? fis.rebufo : 0.0f; c.rebufo_ang = fis_ok ? (int)(fabsf(fis.beta) * 10430.3779f) : 0;
     memcpy(c.xyz, yo.pos, sizeof c.xyz); c.fx = yo.fw[0]; c.fz = yo.fw[2];
+    {   static int x_ant; c.foto = bocina_x && !x_ant; x_ant = bocina_x; }   /* (tipos 24 / 22: el boton de la bocina, X; */
+    c.bocina = bocina_x;                                        /* 0x1b4548 / 0x1b4518 con 0x10 / 8 en los dos: PROBABLE) */
+#ifdef PRUEBA_C22
+    c.bocina = camp_bocina22();                                 /* prueba: la bocina en cada ventana */
+#endif
+#ifdef PRUEBA_C24
+    {   float w_[3]; static int k_;                              /* prueba: dispara cuando el objetivo esta a menos de 10 grados */
+        if (camp_foto(w_)) { float a_ = atan2f(w_[0] - yo.pos[0], w_[2] - yo.pos[2]) - atan2f(yo.fw[0], yo.fw[2]);
+            while (a_ < -3.14159265f) a_ += 6.28318531f;
+            while (a_ > 3.14159265f) a_ -= 6.28318531f;
+            if (++k_ % 30 == 0) dbglog(DBG_INFO, "C24: objetivo a %.0f m, %.0f grados (%.0f %.0f %.0f)\n", (double)sqrtf((w_[0] - yo.pos[0]) * (w_[0] - yo.pos[0]) + (w_[2] - yo.pos[2]) * (w_[2] - yo.pos[2])),
+                                       (double)(a_ * 57.29578f), (double)w_[0], (double)w_[1], (double)w_[2]);
+            if (fabsf(a_) < 0.17f) c.foto = 1; } }
+#endif
 #ifdef PRUEBA_CAMP_PASA
     {   static int k, extra;                                    /* prueba: un adelantamiento cada 1,5 s; derrape, rebufo y */
         if (!c.en_union && ++k % 90 == 0) extra++;              /* +60 km/h la mitad del tiempo (el piloto no lo hace) */
@@ -16780,6 +16829,9 @@ int main(int argc, char **argv)
                             hud_cifras("CRONO", b, 0x21d, k * 0x15 + 0x53, fv[k] < 0 ? 0xFF0000 : 0xFFFFFF);
                         }
                         sprintf(b, "%4d", variante == 5 ? camp_corazones() : infarto_corazones()); hud_cifras("CRONO", b, 0x206, 0x1b2, 0xFFFFFF);
+#ifndef DIAG_SIN_C24
+                        if (variante == 5) camp_visor();        /* (tipo 24) el visor de la camara */
+#endif
                         if (variante == 5) { int ob, su; if (camp_cuenta14(&ob, &su)) {   /* (C2C, tipo 14: 0x231fe0 / 0x232290; DESVIACION: */
                             sprintf(b, "%3d", su); hud_cifras("CRONO", b, 0x206, 0x150, su == ob ? 0x40FF40 : 0xFFFFFF);   /* sin su panel) */
                             sprintf(b, "%3d", ob); hud_cifras("CRONO", b, 0x206, 0x180, 0xFFD040); } }

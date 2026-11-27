@@ -50,6 +50,12 @@ CAMP.DAT (little endian):
   detras, 'C141', u32 n, las tablas del tipo 14 (i32 cuantos[3], valores[3][10] los negativos (0x3b55c0 / 0x3b55d0) y lo
      mismo los positivos (0x3b5538 / 0x3b5548)) y n x {u16 peticion, u8 cuantos, u8 nivel (+0x74 de los parametros) y
      cuantos x {s16 seccion desde el inicio, s8 carril, u8 0}}: los coches de la lista +0x5c de los parametros (0x29d410)
+  detras, 'C241', u32 n y n x {u16 peticion, u8 cuantos, u8 relativa (+0x74 de los parametros: secciones desde el inicio)
+     y cuantos x {f32 x, y, z (el objetivo en el marco de la etapa del PS2), s16 seccion desde, hasta}}: los objetivos de las
+     fotos del tipo 24 (lista +0x70, filas de 0x20 hasta +0x18 == -1; 0x2a5fd8 / 0x2a60a0)
+  detras, 'C221', u32 n y n x {u16 peticion, u8 cuantas, u8 0 y cuantas x {s16 seccion desde el inicio, hasta, f32 +8,
+     +0xc (lo que se suma a cada una), i32 +0x10}}: las ventanas de la bocina del tipo 22 (lista +0x7c, filas de 0x18
+     hasta -1; 0x29bfc0 / 0x29c058)
 
 VOCESM.DAT (`voces_mision`; tambien solo con --solo-voces): las voces de los bancos que la carrera del campeonato
   carga por etapa (0x22ac00, estado 0: por cada peticion de la lista, el switch 0x415280 por el tipo da el banco de la
@@ -247,7 +253,7 @@ def main():
         d_ = bytes(As.datos(por_hash[hash_nombre('\\bin\\%s.bin' % n_)])); nn, oo = cm._r077(d_, n_)
         usadas.update(struct.unpack_from('<I', d_, oo + 0x78 * k + 0x1c)[0] for k in range(nn))
     PAR = mips.Mips.PILA - 0x8000                            # parametros en la memoria del interprete (la pila)
-    lista = []; pets = bytearray(); npet = 0; tipos = {}; objs = []; t46 = []; zon = []; c14 = []
+    lista = []; pets = bytearray(); npet = 0; tipos = {}; objs = []; t46 = []; zon = []; c14 = []; c24 = []; c22 = []
     # 0x297e20: +0x18 del objeto = 0x423080[clase] (la clase del banco 0x57); comprobado por el codigo que la lee
     assert par(0x29800c, 0x298014) == 0x423080, 'clases de los objetos (0x297e20)'
     banco = lambda c: u(0x423080 + 4 * c) & 0xff
@@ -301,6 +307,21 @@ def main():
                         if sc_ < 0 or lc_ < 0: break
                         cs14.append((sc_, lc_)); q_ += 0x14
                     c14.append(struct.pack('<H2B', npet, len(cs14), blk[0x74]) + b''.join(struct.pack('<hbx', *x) for x in cs14))
+                if tipo == 24 and pp + 0x70 in rel:           # los objetivos de las fotos (0x2a5fd8: +0x70, filas de 0x20 hasta
+                    q_ = rel[pp + 0x70]; cs24 = []            # +0x18 == -1; +0x74 != 0: las secciones desde el inicio)
+                    while len(cs24) < 16:
+                        x_, y_, z_, s0_, s1_ = struct.unpack_from('<3f2i', d, q_ + 0xc)
+                        if s0_ == -1: break
+                        cs24.append((x_, y_, z_, s0_, s1_)); q_ += 0x20
+                    c24.append(struct.pack('<H2B', npet, len(cs24), 1 if struct.unpack_from('<i', blk, 0x74)[0] else 0) +
+                               b''.join(struct.pack('<3f2h', *x) for x in cs24))
+                if tipo == 22 and pp + 0x7c in rel:           # las ventanas de la bocina (0x29c058: +0x7c, filas de 0x18 hasta -1)
+                    q_ = rel[pp + 0x7c]; cs22 = []
+                    while len(cs22) < 32:
+                        s0_, s1_, f8_, fc_, v_ = struct.unpack_from('<2i2fi', d, q_)
+                        if s0_ == -1: break
+                        cs22.append((s0_, s1_, f8_, fc_, v_)); q_ += 0x18
+                    c22.append(struct.pack('<H2B', npet, len(cs22), 0) + b''.join(struct.pack('<2h2fi', *x) for x in cs22))
                 if tipo == 5:                                 # la zona del 5 (0x232768: +0x10 / +0x14 de, +0x18 / +0x1c hasta)
                     zon.append(struct.pack('<2H4f', npet, 0, *struct.unpack_from('<4f', d, r + 0x10)))
                 npet += 1
@@ -363,6 +384,10 @@ def main():
                    for a, b in ((0x3b55c0, 0x3b55d0), (0x3b5538, 0x3b5548)))
     out += b'C141' + struct.pack('<I', len(c14)) + t14 + b''.join(c14)
     print('  tipo 14: %d peticiones, %s coches' % (len(c14), [x[2] for x in c14]))
+    out += b'C241' + struct.pack('<I', len(c24)) + b''.join(c24)
+    print('  tipo 24: %d peticiones, %s objetivos' % (len(c24), [x[2] for x in c24]))
+    out += b'C221' + struct.pack('<I', len(c22)) + b''.join(c22)
+    print('  tipo 22: %d peticiones, %s ventanas' % (len(c22), [x[2] for x in c22]))
     print('  zonas del tipo 5: %s' % ' '.join('%d:(%.2f..%.2f)-(%.2f..%.2f)' % ((struct.unpack('<2H4f', z)[0],) + tuple(struct.unpack('<2H4f', z)[2:])) for z in zon))
     print('  efectos de la pelota y los meteoritos: %s' % ' '.join('%x' % x for x in snd))
     open(os.path.join(sal, 'CAMP.DAT'), 'wb').write(out)

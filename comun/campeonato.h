@@ -29,6 +29,8 @@ typedef struct {
     int   met_caen, met_llegan;  /* meteoritos del tipo 19 que empiezan a caer / llegan al suelo en este paso      */
     float lat;              /* (tipo 5) el lateral del coche: fraccion del ancho de la carretera, 0 el borde derecho   */
     float xyz[3], fx, fz;   /* (tipos 20 / 21) la posicion del coche (car+0x14) y su direccion en xz                     */
+    int   foto;             /* (tipo 24) se pulsa el disparo de la camara en este paso (0x1b4548)                     */
+    int   bocina;           /* (tipo 22) el boton de la bocina pisado (0x1b4518)                                      */
 } camp_coche_t;
 
 /* al empezar la carrera: fila (46C520: 1 OutRun2 SP, 0 OutRun 2, 2 mixto), forzada (cfg1: se sale de una etapa del
@@ -58,6 +60,10 @@ extern void (*camp_chica)(int que, uint32_t v);
 extern void (*camp_golpe)(void);           /* el golpe del meteorito (0x182d38 con el estado 7 y la velocidad x 0,9) */
 /* el centro de la seccion sec de la etapa y su direccion en xz (43E570; el letrero de inicio / fin, 0x232e60) */
 extern void (*camp_punto)(int sec, float *p, float *fx, float *fz);
+/* (tipo 24) un punto del marco de la etapa del PS2 (los objetivos de las fotos) en el mundo de la carrera */
+extern void (*camp_marco)(const float *l, float *w);
+int  camp_foto(float *w);
+int  camp_bocina22(void);                   /* (tipo 22) 1 con una ventana de la bocina en curso */                   /* (tipo 24) el objetivo activo en el mundo; 0 ninguno */
 int  camp_clases(const uint8_t **v);
 /* la zona del tipo 5 de la peticion en curso (anuncio..final): lateral lo..hi y secciones s0..s1; su color (2..4) o 0 */
 int  camp_zona(float *lo, float *hi, int *s0, int *s1);       /* 'CLS1' de CAMP.DAT: n x {u8 clase, u8 registro de CAMPOBJ.DAT, u16, f32 escala} */
