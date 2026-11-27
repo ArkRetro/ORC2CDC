@@ -6725,3 +6725,60 @@ verse (`ha_dibujos`).
   45B5B0 tabla 64AAD8 y la carrera 45F7F0 con el contador 2B0005 / 2B0006), 20 (coches fantasma: tabla de coches con
   0x40, +C5C 0x80000, corazones 2C00E5 sobre ellos 45D190), 18: sin portar (tablas de puntos de 9, 11, 14 y 20 ya en
   PTS2). Prioridad por uso: 11 (10), 9 (4), 14 (3), 20 (1).
+
+## INFARTO: objetos de las peticiones, tipos 7 / 24 y 15 (Rev 1.1, 2026-11-27)
+
+Sobre la seccion anterior. Datos nuevos: HAOSO.DAT y HAOBJ.DAT (tools/conv_infarto.py `objetos`, tambien con
+`--solo-obj`; regenera.py paso `infarto`). Codigo: comun/haobj.c (objetos), comun/infarto.c (tipos), demo/main.c
+`ha_obj_dibuja` / `ha_suelo` / `ha_seccion` (dibujo, suelo y seccion de un punto). Verificado en Flycast (E).
+
+**Objetos (45C470 / 4F0D10 / 45DB70):**
+- Fichero por (preset, mision) de 45C470 = PS2 0x1af428 (comprobado): preset 0 y mision >= 15 tabla 0x3f05c0, preset 1
+  y mision >= 15 tabla 0x3f0630, mision < 15 solo con el preset 0 (tabla 0x3f06a0 por la mision base). 45 ficheros
+  oso_qt_* (2983 objetos, el mayor 249). Clase -> modelo y escala 0x40a958 (conos 0x57001e / 0x1f / 0x19, monedas
+  0x1c / 0x1d, arco 0x2b, caja 0x30). Las clases de otro recurso (la luz 56 de FLOR, la 3) no van.
+- Colocacion: el marco de la etapa (el mismo que el de la geometria: el coche sale en (0, 0, -16)); clases 0x0A / 0x22 /
+  0x39 a la altura del suelo bajo (x, 9999,9, z) con la consulta del suelo de la demo (coli_altura 0x100 = 43F2F0);
+  clases 5..9 + 0,65 en y; las monedas (tipo 6) a 1,2 (la 57 a 1,0) y girando 0,05 por paso (0x1d3d48).
+- Toque: solo el jugador; la caja del coche 2,3 x 1,1 m mas 0,3 (conos) / 0,8 (monedas) contra el punto del objeto
+  (PROBABLE: la caja +D28 del original no esta leida). Un paso (+3F8 / +3FC == 8).
+- SIMPLIFICADO (DESVIACION): los conos tocados salen volando (velocidad del coche, 5 m/s arriba, girando) y se quitan a
+  los 2 s, sin el cuerpo rigido 516E10; las monedas suben con el coche y se encogen como 0x1d3fc8. Las clases 5..9 sin
+  el marco de la carretera 45D950 (los angulos del fichero). La seccion de un objeto (43F370) sale del punto de la
+  ruta mas cercano (APROXIMADO: el original lee la seccion del poligono de la COLI).
+- Dibujo: HAOBJ.DAT (ORD7 de conv_bo.modelo_conjunto, registros 0x19, 0x1c, 0x1d, 0x1e, 0x1f, 0x30: 56 mallas, 315
+  vertices, 21 KB de texturas, 30 KB) leido al empezar la carrera del modo (texturas fuera de la zona, sube_tramo);
+  como mucho HA_OBJ_MAX = 24 objetos, los mas cercanos al ojo dentro de 160 m (HAOBJ_LEJOS), sin los de detras de la
+  camara, con el tope de los objetos de la union (ta_bo_tope). Por objeto (el modelo del original no tiene LOD; no se
+  simplifica): cono 19 triangulos / 39 vertices (10 tiras), moneda y corazon 63 / 69 (3 tiras), caja 20 / 60.
+  Por cuadro, medido (registro DIAGHA objetos): conos hasta 17 dibujados, 171 triangulos / 351 vertices; monedas 24
+  dibujados, 756..1260 triangulos / 828..1380 vertices.
+- fps (Flycast, DIAG_MS, SEQU con la peticion 15 cargada: monedas en la linea del coche, 11 muestras de 30 cuadros):
+  con objetos 39,85 fps, dib 16,73 ms, 15997 tri / 23627 vtx; la misma pasada sin dibujarlos (DIAG_SIN_HAOBJ) 39,86 fps,
+  dib 15,72 ms, 15036 / 22537. O sea +961 triangulos, +1 ms de dibujo y -0,01 fps (Flycast; en la consola el dibujo
+  cuenta mas: PENDIENTE medirlo alli).
+- RAM: al arrancar 333 K libres (antes 344: el codigo crece ~11 KB; el monton en uso igual, 13021 K; nav3.sh sin "Out of
+  memory" y con "VOZ: VOCES.DAT, 35 muestras"). Los objetos de la mision en el monton (~7 KB como mucho) y HAOBJ.DAT (~30
+  KB) en la carrera del modo. Medido
+  (carrera del INFARTO con DIAG): 311 K libres al empezar; sin "Out of memory" ni "sin VRAM".
+
+**HECHO: tipos 7 y 24** (45E8A0 = PS2 0x1a9290 y 463150 = 0x1a9470, comprobados): cuenta los toques de la clase p6 (el
+24 solo derrapando) con la cara 3 de la acompanante, menos 3 por cada cono de la clase 6; resultado 800000 x
+buenos / p8 (800000 con p8 o mas); nota 7 + 700000 x mantiene(v). E: mision 16 (preset 1) en la etapa de la clave 4
+(PRUEBA_NODO=4), 14 conos azules y 2 de la clase 6: (14 - 6) / 20 x 80 = 32 corazones, nota 4; capturas
+cap/o1/h_00*.png con los conos en la carretera y volando al tocarlos.
+
+**HECHO: tipo 15** (45C950 = PS2 0x1ae8a8, 4617A0 = 0x1b0260 con la tabla 0x3f07c0, 463DF0 = 0x1b03e0): las monedas
+0x0A y 0x39 tocadas (efecto 0xD6, cara 4), resultado cogidas x 800000 / p8; nota 7: 700000 x cogidas de la 0x0A / las
+del tramo (45C8E0) y + (cogidas - p8) / 2 corazones. E: mision 1 (preset 0, juego OutRun 2 SP, clave 4), 15 de 15
+monedas del tramo (capturas cap/o2/h_00*.png: suben y se encogen; el medidor recibe los corazones). La nota salio 1
+porque el piloto de prueba iba por la tierra (los puntos de 45E2F0 por rueda fuera del asfalto), no por las monedas.
+
+**Pruebas** (solo con defines; no cambian el juego): PRUEBA_HA_MISION=m (la mision de todas las etapas), PRUEBA_NODO=k
+con PRUEBA_PILOTO_MENU (la etapa de salida), PRUEBA_HA_TOQUE=clase (los objetos de esa clase, -1 todas, se ponen en la
+linea del coche a 25..40 m: el piloto no apunta a ellos), DIAG_HA (registro), DIAG_SIN_HAOBJ (sin dibujarlos).
+
+**SIN PORTAR (PENDIENTE):** 16 / 25 (arcos: modelo 0x2b de 4 nodos de 174 triangulos con animacion de vertices y
+carteles + los postes de 42; la anchura por carril de la accion -11, 4611D0 con la tabla 0x3f7218, y el cruce
+0x1d42f0), 19 (cajas que caen y sueltan estrellas: 461940, tabla 64AAA8), lo visual de 8 / 23 (carriles pintados
+45ECA0 / 45E9B0 y marcas de la accion -5) y 11, 9, 14, 20.
