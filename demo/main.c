@@ -4433,6 +4433,21 @@ static void traf_infarto(void)
     infarto_coche_abierto(1);
 }
 #define CAMP14_VIVOS 4
+/* (c2c8) el generador del trafico de la peticion (0x1f20e8 / 0x1f1a88; la interfaz en comun/campeonato.h): tp_on con
+   el registro puesto; tp_k el siguiente de sus 7 modelos */
+static camp_trafpet_t tp; static int tp_on, tp_k;
+static void trafpet_pon(const camp_trafpet_t *r)
+{
+    tp_on = r != NULL; tp_k = 0;
+    if (r) tp = *r;
+    dbglog(DBG_INFO, "TRAFPET: %s (modelo %d, tope %d, lod %d)\n", r ? "puesto" : "quitado", r ? r->modelo[0] : -1, r ? r->tope : 0, r ? r->lod : 0);
+}
+static int trafpet_modelo(int def)                              /* el siguiente modelo del registro que tenga la DC; si no def */
+{
+    int k, m;
+    for (k = 0; k < 7; k++) { int id = tp.modelo[tp_k]; tp_k = (tp_k + 1) % 7; if (id >= 0 && (m = traf_modelo_de(id)) >= 0) return m; }
+    return def;
+}
 static void traf_aparece(void)
 {
     int nodo, pos, u;
@@ -4442,16 +4457,23 @@ static void traf_aparece(void)
         haobj_auto_t v[NTRAF]; int i, j, l; uint8_t nuevo[NTRAF];
         for (i = 0; i < NTRAF; i++) { v[i].pos = traf[i].carril >= 0 ? traf[i].c.pos : NULL; v[i].marca = traf[i].ha_m;
             v[i].sec = (int)floorf((traf[i].c.s - s_etapa) / m_pos); v[i].golpe = traf[i].b6c && !traf[i].n2f4; nuevo[i] = v[i].pos && !(v[i].marca & HA_VISTO); }
+        if (tp_on)                                              /* (c2c8) los que nacen con el registro de la peticion */
+            for (i = 0; i < NTRAF; i++) if (nuevo[i] && !(traf[i].ha_m & HA_CAMP)) {
+                int mm = trafpet_modelo(-1);
+                if (mm >= 0 && mm != traf[i].modelo) { traf[i].modelo = mm; traf[i].color = traf[i].color < traf_ncol[mm] ? traf[i].color : 0; }
+                v[i].marca |= (int)tp.marca;
+            }
         camp_autos(v, NTRAF);
         for (i = 0; i < NTRAF; i++) traf[i].ha_m = v[i].marca;
         {   int sc, lc, mk, md = -1;                            /* (tipo 14) los coches con numero de la lista +0x5c (0x29d410), */
             for (i = 0; i < NTRAF; i++) if (traf[i].carril >= 0) { md = traf[i].modelo; break; }   /* con un modelo del trafico */
+            if (md >= 0 && tp_on) md = trafpet_modelo(md);       /* (o el del registro de la peticion: 13) */
 #ifdef DIAG_SIN_C14
             md = -1;                                            /* (medida: sin los coches del 14) */
 #endif
             int vivos = 0;                                      /* (c2c7, DESVIACION por el polycount: como mucho CAMP14_VIVOS a la */
             for (i = 0; i < NTRAF; i++) vivos += traf[i].carril >= 0 && (traf[i].ha_m & HA_CAMP) && !(traf[i].ha_m & HA_SUELTO);   /* vez) */
-            while (md >= 0 && vivos < CAMP14_VIVOS && camp_coche14(&sc, &lc, &mk)) {
+            while (md >= 0 && vivos < (tp_on && tp.tope > 0 ? tp.tope : CAMP14_VIVOS) && (camp_coche14(&sc, &lc, &mk) || camp_coche13(&sc, &lc, &mk))) {
                 vivos++;
                 for (j = 0; j < NTRAF && traf[j].carril >= 0; j++) ;
                 if (j >= NTRAF) break;
@@ -7038,7 +7060,7 @@ static void texto_arriba(const char *l1, const char *l2, const char *l3)
 static void texto_centro(const char *s)
 {
     int n = strlen(s);
-    memset(buf_arr, 0, TAM_CEN);
+    memset(buf_arr, 0, TAM_CEN / sizeof buf_arr[0] * sizeof buf_arr[0]);
     bfont_draw_str(buf_arr + 4 * 256 + (256 - 12 * n) / 2, 256, 1, s);
     pvr_txr_load(buf_arr, txt_cen, TAM_CEN);
 }
@@ -8480,7 +8502,7 @@ FRIO static void camp_preparado(int auto_)
     }
     camp_g = g; curso_pedido = CAMP_ARBOL(g); nodo_salida = cn > 0 ? cn - 1 : 0;
     if (g == 0) preset_curso = 0;                               /* el curso de OutRun 2 SP: el preset 0 (PROBABLE) */
-    camp_graba = menu_nota_camp; camp_voz = camp_voz_; camp_se = camp_se_; camp_millas = camp_millas_; camp_obj = camp_obj_; camp_chica = camp_chica_; camp_golpe = camp_golpe_; camp_bancos = camp_bancos_; camp_punto = ha_punto; mj_mundo = camp_mundo_; camp_marco = camp_marco_;
+    camp_graba = menu_nota_camp; camp_voz = camp_voz_; camp_se = camp_se_; camp_millas = camp_millas_; camp_obj = camp_obj_; camp_chica = camp_chica_; camp_golpe = camp_golpe_; camp_bancos = camp_bancos_; camp_trafpet = trafpet_pon; camp_punto = ha_punto; mj_mundo = camp_mundo_; camp_marco = camp_marco_;
     dbglog(DBG_INFO, "CAMP: campeonato %d, arbol %d, salida nodo %d, casilla %d\n", g, curso_pedido, nodo_salida, cl);
 }
 /* los objetos de la peticion (comun/campeonato.c pon_objetos) en el mundo: la seccion sec de la etapa y la fraccion lat
@@ -16814,6 +16836,7 @@ int main(int argc, char **argv)
                 mtraf[t->modelo].remap = t->rc ? rc_remap_de(t) :
                                          t->color > 0 && t->color < traf_ncol[t->modelo] ? traf_remap[t->modelo][t->color] : NULL;
                 solo_lod = traf_con_lod[t->modelo] ? traf_lod(t->modelo, zv) : -1;
+                if (tp_on && (t->ha_m & HA_CAMP) && solo_lod >= 0 && solo_lod < tp.lod) solo_lod = tp.lod;   /* (c2c8) el LOD ligero */
                 /* luces (4AD4D0 / second()): +8 con car+4 & 0x100; +14 (freno) con car+38 > 0, si no +10 con car+4 &
                    0x300 (noche o tunel de 4A25F0), si no +C */
                 traf_luces = 1u | (t->freno > 0 ? 1u << 3 : (coche_ban & 0x300) ? 1u << 2 : 1u << 1) | ((coche_ban & 0x100) ? 1u << 4 : 0);

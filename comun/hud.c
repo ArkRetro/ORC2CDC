@@ -410,6 +410,9 @@ static void cabeceras(hud_dat_t *h, int i)
    cuando KallistiOS escribe "Out of memory"; en un hueco podria caber igual, pero no se sabe sin probar) */
 static int cabe_seguido(uint32_t n)
 {
+#ifdef DIAG_HUD_TROZOS
+    if (n > HUDD_TROZO + 2048 + 32) return 0;                 /* prueba: siempre por trozos sin el prestado */
+#endif
     struct mallinfo mi = mallinfo(); uintptr_t tope = (uintptr_t)sbrk(0);
     return mi.keepcost + (0x8d000000u - 0x10000u - tope) >= n + 32768;
 }

@@ -84,4 +84,22 @@ int  camp_pares_pide(void);
 /* (tipo 14) el siguiente coche con numero que poner (seccion de la etapa, carril y la marca de su plaza); 0 ninguno */
 int  camp_coche14(int *sec, int *carril, int *marca);
 int  camp_cuenta14(int *objetivo, int *suma);  /* el objetivo y la suma de la peticion del 14 en curso; 0 sin ella */                 /* (tipo 20) 1: a cada coche nuevo de la peticion, otro al lado (main.c) */
+/* (c2c8) el generador del trafico de la peticion (0x1f20e8 / 0x1f1a88 de SLES-53998): con un registro puesto, 0x1f1a88
+   devuelve ese registro de aparicion de 0x46 bytes en vez del de la etapa (tabla 0x5d5e78) y el trafico que nace sale con
+   sus 7 modelos (+0xe..+0x1a; la peticion copia el de la etapa y pone en ellos el +0x64 de sus parametros, o uno fijo);
+   0x1f20e8(0) lo quita. Lo piden los tipos 11, 13, 14, 20, 21 y el subtipo 6 de los minijuegos (0x2a3300); el 22 no
+   (ninguna llamada en 0x29b3d0..0x29c3ff). Aqui, main.c lo atiende (camp_trafpet = trafpet_pon) con:
+     modelo[7]: los modelos del juego (ids del PS2, el campo +0x11 de TRAFn.DAT; -1 o uno que la DC no tiene: el del
+                trafico de siempre) que reparte en orden a los coches que nacen (y a los de la lista de la peticion, 13/14);
+     tope:      cuantos coches de la peticion (marca HA_CAMP) vivos a la vez como mucho (0: sin tope); sin sitio no nace
+                ninguno marcado mientras haya tope (DESVIACION por el polycount);
+     lod:       el LOD mas fino con que se dibujan los coches marcados (1 = ligero: nunca el LOD 0 de cerca; DESVIACION);
+     marca:     los bits que se ponen en la marca de la plaza de cada coche que nace (0: los coches que nacen no son de la
+                peticion; HA_CAMP y los del tipo los pone camp_autos, como hasta ahora).
+   NULL = 0x1f20e8(0). Para el subtipo 6 de minijuego.c: en su fase 1 camp_trafpet(&r) con sus modelos (+0x64 o 0x104) y
+   HA_CAMP en marca; en la 5 camp_trafpet(NULL); los coches con HA_CAMP en la marca de camp_autos son los suyos. */
+typedef struct { int16_t modelo[7]; int tope, lod; uint32_t marca; } camp_trafpet_t;
+extern void (*camp_trafpet)(const camp_trafpet_t *r);
+/* (tipo 13) el siguiente coche de la comida (como camp_coche14) */
+int  camp_coche13(int *sec, int *carril, int *marca);
 #endif
