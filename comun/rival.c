@@ -31,10 +31,11 @@ static uint8_t t_listas[8][16], t_fam[64], t_cla[64], t_col[240];
 static float t_acel[5], t_curva[12], t_marcha[6]; static int32_t t_millas[8];
 static int tab_ok;
 /* 'MIX2' (2026-11-27): el punto de las marcas por modelo y las zonas de derrape de cada mision */
-static float t_cabeza[16][3]; static uint32_t mix_off[RIVAL_NMIS], mix_base; static int mix_ok;
+static uint32_t mix_off[RIVAL_NMIS], mix_base, pac_base; static int mix_ok;
 #define NZONAS 24                                               /* (MISION.DAT de SLES-53998: 20 como mucho) */
-static rival_zona_t zonas[NZONAS]; static int nzonas;
-static float t_pace[12][19]; static int pace_ok;            /* 'PAC1': 472B60 (6 x {dist, angulo, factor}, limite) */
+/* lo de la mision en el monton (calloc en rival_carrera, fuera con rival_fuera): no ocupa al arrancar */
+typedef struct { float cabeza[16][3]; rival_zona_t zonas[NZONAS]; float pace[12][19]; int nzonas, pace_ok; } mixd_t;
+static mixd_t *mx;                                              /* pace: 'PAC1' de 472B60 (6 x {dist, angulo, factor}, limite) */
 
 static rival_mision_t mis; static int mis_ok;
 static int32_t esp_w[8][12]; static int nesp;                   /* especiales: e0..e18, e1c, e20, hay24, e24[2] */
@@ -69,25 +70,13 @@ int rival_inicia(void)
         t += 32;
         mix_ok = 0;
         if ((uint32_t)(t - b) + 8 + 192 + 4 * RIVAL_NMIS <= sz && !memcmp(t, "MIX2", 4) && u32le(t + 4) == RIVAL_NMIS) {
-            memcpy(t_cabeza, t + 8, 192); memcpy(mix_off, t + 200, 4 * RIVAL_NMIS);
+            memcpy(mix_off, t + 200, 4 * RIVAL_NMIS);
             mix_base = (uint32_t)(t - b); mix_ok = 1;
         }
-        pace_ok = 0;
+        pac_base = 0;
         if (mix_ok) {
             uint32_t q;
-            for (q = mix_base; q + 4 + 12 * 0x48 <= sz; q += 4)
-                if (!memcmp(b + q, "PAC1", 4)) {
-                    int c, k2;
-                    for (c = 0; c < 12; c++) {
-                        const uint8_t *e = b + q + 4 + 0x48 * c;
-                        for (k2 = 0; k2 < 6; k2++) {
-                            int16_t an; memcpy(&t_pace[c][3 * k2], e + 12 * k2, 4); memcpy(&an, e + 12 * k2 + 4, 2);
-                            t_pace[c][3 * k2 + 1] = an; memcpy(&t_pace[c][3 * k2 + 2], e + 12 * k2 + 8, 4);
-                        }
-                        memcpy(&t_pace[c][18], e + 0x3c, 4);
-                    }
-                    pace_ok = 1; break;
-                }
+            for (q = mix_base; q + 4 + 12 * 0x48 <= sz; q += 4) if (!memcmp(b + q, "PAC1", 4)) { pac_base = q; break; }
         }
     }
     lista_ok = tab_ok = 1;
@@ -100,7 +89,7 @@ int rival_lista(int i, int *clave, int *sub, int *tipo)
     *clave = lista_cl[i]; *sub = lista_sub[i]; *tipo = lista_tipo[i]; return 0;
 }
 static void suelta_regs(void) { free(rc); free(clas); rc = NULL; clas = NULL; nrc = 0; }
-void rival_fuera(void) { mis_ok = 0; suelta_regs(); }
+void rival_fuera(void) { mis_ok = 0; suelta_regs(); free(mx); mx = NULL; }
 const rival_mision_t *rival_mis(void) { return mis_ok ? &mis : NULL; }
 const float *rival_acel(void) { return t_acel; }
 const float *rival_curva(void) { return t_curva; }
@@ -125,11 +114,24 @@ int rival_carrera(int i)
     mis.largo = (uint16_t)(r[764] | r[765] << 8);
     mis.hay44 = (int)u32le(r + 204); memcpy(mis.t44, r + 208, 48);
     mis.hay48 = (int)u32le(r + 256); memcpy(mis.t48, r + 260, 48);
-    nzonas = 0;
-    if (mix_ok && mix_off[i] && mix_base + mix_off[i] + 4 <= sz) {
+    free(mx); mx = mix_ok ? calloc(1, sizeof *mx) : NULL;
+    if (mx) memcpy(mx->cabeza, b + mix_base + 8, 192);
+    if (mx && pac_base) {
+        int c, k2;
+        for (c = 0; c < 12; c++) {
+            const uint8_t *e = b + pac_base + 4 + 0x48 * c;
+            for (k2 = 0; k2 < 6; k2++) {
+                int16_t an; memcpy(&mx->pace[c][3 * k2], e + 12 * k2, 4); memcpy(&an, e + 12 * k2 + 4, 2);
+                mx->pace[c][3 * k2 + 1] = an; memcpy(&mx->pace[c][3 * k2 + 2], e + 12 * k2 + 8, 4);
+            }
+            memcpy(&mx->pace[c][18], e + 0x3c, 4);
+        }
+        mx->pace_ok = 1;
+    }
+    if (mx && mix_off[i] && mix_base + mix_off[i] + 4 <= sz) {
         const uint8_t *z = b + mix_base + mix_off[i]; uint32_t m = u32le(z), k2;
-        for (k2 = 0; k2 < m && nzonas < NZONAS && mix_base + mix_off[i] + 4 + (k2 + 1) * 32 <= sz; k2++) {
-            const uint8_t *q = z + 4 + 32 * k2; rival_zona_t *o = zonas + nzonas++;
+        for (k2 = 0; k2 < m && mx->nzonas < NZONAS && mix_base + mix_off[i] + 4 + (k2 + 1) * 32 <= sz; k2++) {
+            const uint8_t *q = z + 4 + 32 * k2; rival_zona_t *o = mx->zonas + mx->nzonas++;
             o->nodo = q[0]; o->en_union = q[1]; o->desde = (uint16_t)(q[2] | q[3] << 8); o->hasta = (uint16_t)(q[4] | q[5] << 8);
             o->pad = 0; memcpy(o->v, q + 8, 24);
         }
@@ -488,14 +490,14 @@ void rival_banderas(int i, int bits)
     rival_t *r = rival_reg(i);
     if (r) r->fl71 = (uint8_t)((r->fl71 & ~0xf) | (bits & 0xf));
 }
-int rival_zonas(const rival_zona_t **z) { *z = zonas; return nzonas; }
+int rival_zonas(const rival_zona_t **z) { if (!mx) return 0; *z = mx->zonas; return mx->nzonas; }
 const float *rival_pace(int carreras, int clase)
 {
-    if (!pace_ok) return NULL;
-    if (carreras) return clase >= 0 && clase < 4 ? t_pace[8 + clase] : NULL;
-    return clase >= 0 && clase < 8 ? t_pace[clase] : NULL;
+    if (!mx || !mx->pace_ok) return NULL;
+    if (carreras) return clase >= 0 && clase < 4 ? mx->pace[8 + clase] : NULL;
+    return clase >= 0 && clase < 8 ? mx->pace[clase] : NULL;
 }
-const float *rival_cabeza(int modelo) { return mix_ok ? t_cabeza[modelo >= 0 && modelo < 16 ? modelo : 0] : NULL; }
+const float *rival_cabeza(int modelo) { return mx ? mx->cabeza[modelo >= 0 && modelo < 16 ? modelo : 0] : NULL; }
 
 /* 47DA80 (PS2 0x1f0c60): el coche de carreras de referencia del HUD: el lider ([64E190]) o, si lidera el jugador, el
    segundo de la clasificacion; -1 sin coches */

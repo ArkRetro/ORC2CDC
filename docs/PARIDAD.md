@@ -6781,7 +6781,7 @@ cuadros, con azar / 65535 < +BC8 (y sin +8 0x10000) +C26 = 0x78 y durante esos c
 +C36..+C38, nada en +BC8; en el PC tampoco hay quien lo escriba fuera de su borrado): vale 0 y la espera no salta. No se
 porta (seria codigo muerto).
 
-**RAM:** text + data + bss 2949528 (059fc97: 2950676); 'PAC1' son 912 bytes de BSS en rival.c.
+**RAM:** ver abajo (la medida final).
 
 **Campeonatos (variante 5): investigado, NO portado.** Lo averiguado en SLES-53998:
 - Es un suceso del juego como el gestor de misiones: la tabla de descriptores de sucesos (5 palabras: inicio, control,
@@ -6796,3 +6796,10 @@ porta (seria codigo muerto).
   curso (REQUEST_NORMAL / SPECIAL1..3) con su HUD; el resultado va a los cuartetos de la licencia (+0x36E).
 - Portarlo es un modulo del tamano del INFARTO (comun/infarto.c): no cabe en esta tanda. A en una casilla del mapa de
   campeonatos sigue dando el sonido de bloqueado.
+
+**RAM al arrancar (medida otra vez, nav3.sh sin defines, MODO_JUEGO=1, los mismos datos):** 059fc97 "libre 352K"; esta
+rama "libre 357K". Para no bajarla: el punto de las marcas, las zonas de derrape y las tablas 'PAC1' van en el monton solo
+con la mision (calloc en rival_carrera, ~2,7 KB, fuera con rival_fuera) y fin.o, final.o y nombre.o (pantallas del fin,
+no de la carrera) se compilan con -Os como menu.o (text + data + bss 2941256; 059fc97 2950676). Comprobado despues el
+camino del fin con esos -Os por el menu real: 6-1 (tipo 6) fallada con el piloto (el jugador ultimo hasta acabar su
+tiempo): "Se acabo el tiempo", `LICENCIA: mision 6-1 nota 0 (guardada 0)`, modo 34 y modo 35 "¡MISION FALLIDA!".
