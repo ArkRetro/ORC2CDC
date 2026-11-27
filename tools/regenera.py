@@ -226,7 +226,7 @@ def paso(C, n, log):
     elif n == 'bo': ej(T('conv_bo.py'), ISO, t); mueve(D, tj('BO*.DAT'))
     elif n == 'trafico': ej(T('conv_trafico.py'), ISO, t, '--ligero'); mueve(D, tj('TRAF*.DAT'), tj('TAPD.DAT'))   # (trafico -10 %: docs/PARIDAD.md)
     elif n == 'rivales':                                 # COAST 2 COAST: los coches de carreras (obj_rc, modelos 0..29)
-        ej(T('conv_trafico.py'), ISO, t, '--rivales=' + ','.join(str(k) for k in range(30))); mueve(D, tj('RC*.DAT'))
+        ej(T('conv_trafico.py'), ISO, t, '--rivales=' + ','.join(str(k) for k in range(30)), '--ligero'); mueve(D, tj('RC*.DAT'))
     elif n == 'mision': ej(T('conv_mision.py'), ISO, t); mueve(D, tj('MISION.DAT'))   # Races.bin y tablas de 47CF40
     elif n == 'c2chud': ej(T('conv_hud.py'), ISO, t, '--c2c'); mueve(D, tj('C2CHUD.DAT'))   # HUD de las misiones de C2C
     elif n == 'c2c': ej(T('conv_c2c.py'), ISO, t); mueve(D, tj('C2C.DAT'))   # pantallas de C2C (banco 0x44, menu.c)
