@@ -137,6 +137,10 @@ def main():
     extrae(pista, base, tam, D, informe)
     for x in ('CURSO.DAT', 'COCHE07.DAT', 'EFECTOS.DAT'):
         if not os.path.isfile(os.path.join(D, x)): raise SystemExit('el GD-ROM no es de OutRun para Dreamcast (falta %s)' % x)
+    if os.path.isfile(os.path.join(D, 'COCHE15.DAT')):              # (Mod 2.5.1..2.5.9 dejaban el F50 en la ficha 7 y el
+        shutil.copyfile(os.path.join(D, 'COCHE15.DAT'), os.path.join(D, 'COCHE07.DAT'))   # taxi en COCHE15: vuelve a la 7)
+        informe('  el taxi de COCHE15.DAT vuelve a la ficha 7 (COCHE07.DAT)')
+    if os.path.isfile(os.path.join(D, 'COCHE07L.DAT')): os.remove(os.path.join(D, 'COCHE07L.DAT'))   # (el ligero era del F50)
     if iso:
         informe('== EFECTOS.DAT desde la ISO (con la textura del agua)')
         import subprocess
@@ -148,15 +152,17 @@ def main():
             informe('AVISO: no se pudo rehacer EFECTOS.DAT (se queda el del disco, sin agua):\n' + (r.stderr or r.stdout)[-2000:])
         else:
             shutil.move(nuevo, os.path.join(D, 'EFECTOS.DAT')); informe('  hecho')
-        # Mod 2.5.1: los 15 coches del menu con el habitaculo de la vista interior (COCHE00..14; el taxi es COCHE15 y
-        # COCHES.DAT se quedan los del disco) y GOALT.DAT (la tabla de tiempos de la meta), desde la ISO
+        # Mod 2.5.1: los coches del menu con el habitaculo de la vista interior y GOALT.DAT (la tabla de tiempos de la
+        # meta), desde la ISO. La ficha 7 NO: en el Mod su COCHE07.DAT es el taxi de Crazy Taxi (sale de tu GD-ROM con el
+        # taxi); rehacerla desde la ISO lo cambiaba por el F50 (fallo de Mod 2.5.1 a 2.5.9). COCHES.DAT, el del disco
         informe('== COCHE00..14.DAT (con el habitaculo) y GOALT.DAT desde la ISO (unos minutos)')
         tmp = os.path.join(W, 'nuevos'); os.makedirs(tmp, exist_ok=True)
-        for args in (['conv_coche.py', iso, '--todos', tmp, '--fichas', ','.join(str(i) for i in range(15)), '--visible'],   # (Mod 2.5.6; 2.5.7: y el ligero de carrera COCHEnnL)
+        FICHAS_ISO = [i for i in range(15) if i != 7]                 # (la 7 es el taxi)
+        for args in (['conv_coche.py', iso, '--todos', tmp, '--fichas', ','.join(str(i) for i in FICHAS_ISO), '--visible'],   # (Mod 2.5.6; 2.5.7: y el ligero de carrera COCHEnnL)
                      ['conv_fin.py', iso, tmp]):
             r = subprocess.run([sys.executable, os.path.join(o2.TOOLS, args[0])] + args[1:], capture_output=True, text=True, encoding='utf-8', errors='replace')
             if r.returncode: informe('AVISO: fallo %s (se quedan los del disco):\n%s' % (args[0], (r.stderr or r.stdout)[-2000:]))
-        for f in ['COCHE%02d.DAT' % i for i in range(15)] + ['COCHE%02dL.DAT' % i for i in range(15)] + ['GOALT.DAT']:
+        for f in ['COCHE%02d.DAT' % i for i in FICHAS_ISO] + ['COCHE%02dL.DAT' % i for i in FICHAS_ISO] + ['GOALT.DAT']:
             if os.path.isfile(os.path.join(tmp, f)): shutil.move(os.path.join(tmp, f), os.path.join(D, f))
         shutil.rmtree(tmp, ignore_errors=True); informe('  hecho')
     informe('== libros VQ reducidos de las texturas pequenas (tools/libros.py con pvrtex; si ya lo estan, sin cambios)')
