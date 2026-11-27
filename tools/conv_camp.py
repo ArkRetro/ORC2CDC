@@ -30,6 +30,12 @@ CAMP.DAT (little endian):
   peticiones de 52 bytes: s16 inicio, s16 fin, u8 tipo, u8 subtipo, u8 rotulo (HA_Tnn del anuncio, 0x22faec; 0xff
      ninguno), u8 banco46 (1: el rotulo es del banco 0x46, que no esta en la DC), u16 voz del anuncio (0x2a6358; 0 ninguna),
      u16 0, i32 p[10] (+0x60..+0x84 de sus parametros)
+  detras de las peticiones, los objetos de las peticiones de los tipos de OBJ_TIPOS (conos, monedas, arcos...):
+  'OBJ1', u32 n y n filas de 20 bytes {u16 peticion, s16 seccion inicial, s16 final, u8 cuantos, u8 clase de objeto
+     (0x297e20: 0 / 1 conos rojo / azul, 2 / 3 moneda / corazon, 4 arco...), f32 lateral inicial, final (fraccion del
+     ancho de la carretera), f32 +0x18 (el ancho del arco)}: las filas del guion (0x293968: cuantos objetos repartidos de
+     la seccion inicial a la final, con el lateral de una punta a otra, sin llegar a la final) y los puntos sueltos
+     (0x2938d0: cuantos = 1); las secciones ya con el inicio de la peticion sumado si el guion lo pide (+0xc / +8)
 """
 import os, struct, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -37,6 +43,9 @@ import conv_hud as ch
 import conv_menu as cm
 
 LISTAS = ['REQUEST_NORMAL', 'REQUEST_SPECIAL1', 'REQUEST_SPECIAL2', 'REQUEST_SPECIAL3']   # 0x374138
+# tipo -> (filas, puntos): los campos de sus parametros que leen sus funciones de objetos (0x293968 / 0x2938d0): 6
+# 0x295ca0 / 0x295bf0, 7 0x2956a0 / 0x2955f8, 8 0x29a5c8 / 0x29a518, 15 0x293448 / 0x293390, 19 0x29df78 / 0x29ded0
+OBJ_TIPOS = {6: (0x74, 0x78), 7: (0x78, 0x7c), 8: (0x78, 0x7c), 15: (0x70, 0x74), 19: (0x78, 0x7c)}
 
 
 def main():
@@ -99,7 +108,7 @@ def main():
         d_ = bytes(As.datos(por_hash[hash_nombre('\\bin\\%s.bin' % n_)])); nn, oo = cm._r077(d_, n_)
         usadas.update(struct.unpack_from('<I', d_, oo + 0x78 * k + 0x1c)[0] for k in range(nn))
     PAR = mips.Mips.PILA - 0x8000                            # parametros en la memoria del interprete (la pila)
-    lista = []; pets = bytearray(); npet = 0; tipos = {}
+    lista = []; pets = bytearray(); npet = 0; tipos = {}; objs = []
     for k in range(60):
         h_ = hash_nombre('\\bin\\%s.bin' % nombres[k])
         if h_ not in por_hash: assert k not in usadas, nombres[k]; lista += [0xffff] * 4; continue
@@ -126,6 +135,22 @@ def main():
                 pets.extend(struct.pack('<2h4B2H10i', ini, fin, tipo, sub, rot, 1 if tok >> 16 == 0x46 else 0, voz, 0,
                                         *struct.unpack_from('<10i', blk, 0x60)))
                 tipos.setdefault(tipo, set()).add((sub, hex(tok), hex(voz)))
+                if tipo in OBJ_TIPOS:
+                    fo, po = OBJ_TIPOS[tipo]
+                    if pp + fo in rel:                        # filas de 0x20 hasta cuantos == -1
+                        q_ = rel[pp + fo]
+                        while struct.unpack_from('<i', d, q_)[0] != -1:
+                            n_, cl_, f8, re_, s0, s1, l0, l1 = struct.unpack_from('<2ifi2i2f', d, q_)
+                            assert 0 < n_ < 256 and 0 <= cl_ < 15
+                            objs.append(struct.pack('<H2h2B3f', npet, s0 + (ini if re_ else 0), s1 + (ini if re_ else 0), n_, cl_, l0, l1, f8))
+                            q_ += 0x20
+                    if pp + po in rel:                        # puntos de 0x2c hasta seccion == -1
+                        q_ = rel[pp + po]
+                        while struct.unpack_from('<i', d, q_ + 4)[0] != -1:
+                            l0, s0, re_ = struct.unpack_from('<f2i', d, q_); cl_, = struct.unpack_from('<i', d, q_ + 0x10)
+                            f8, = struct.unpack_from('<f', d, q_ + 0x18); assert 0 <= cl_ < 15
+                            objs.append(struct.pack('<H2h2B3f', npet, s0 + (ini if re_ else 0), s0 + (ini if re_ else 0), 1, cl_, l0, l0, f8))
+                            q_ += 0x2c
                 npet += 1
     W('240H', *lista)
     # los tipos de las etapas de los tres arboles (grupos 4, 5, 6: registros de 0x78, +0x1c el descriptor de tramo; el
@@ -149,9 +174,10 @@ def main():
     assert [q(r) for r in c1] == [q(r) for r in arb[0]], 'Request_Course_SP no es csc_data_cvt'
     while len(out) % 4: out.append(0)
     struct.pack_into('<2I', out, 8, npet, len(out)); out += pets
+    out += b'OBJ1' + struct.pack('<I', len(objs)) + b''.join(objs)
     open(os.path.join(sal, 'CAMP.DAT'), 'wb').write(out)
     for t in sorted(tipos): print('  tipo %2d: %s' % (t, sorted(tipos[t])))
-    print('CAMP.DAT: %d peticiones, %d bytes' % (npet, len(out)))
+    print('CAMP.DAT: %d peticiones, %d filas de objetos, %d bytes' % (npet, len(objs), len(out)))
 
 
 if __name__ == '__main__':
