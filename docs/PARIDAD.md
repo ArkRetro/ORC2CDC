@@ -8074,7 +8074,7 @@ mismo con otro arbol, para la base c2c5). Capturas y registros en $S/modos/c2c/c
 - 24, las fotos (0x2a48a0; 6 peticiones): fase 1 0x2a5fd8 lee la lista +0x70 de los parametros (registros de 0x20 hasta
   +0x18 == -1, +0x74 relativa al inicio: los objetivos), fase 4 0x2a4fa8 (la camara: 0x2bb0a0 proyecta el objetivo; el
   disparo 0x2a60a0), fase 5 suelta (0x21bb48) y nota 6: min(1, (medidor - pen - 80) / (80 / 0,9 - 80)) x 30 + 40 x
-  0x22f090. SIN PORTAR: faltan los objetivos en CAMP.DAT y el HUD de la camara.
+  0x22f090. HECHO (SIMPLIFICADO; ver "campeonatos, septima tanda (agente c2c7)"): los objetivos en CAMP.DAT y un visor.
 - 23 (0x2987a0, los patos con el sistema de objetos 0x61e8a0): ningun guion lo pide.
 - 20: los modelos 0x57002f / 0x57002a del dibujo; 21: el acercamiento y el giro del jugador (0x292d28) y el sonido 0x1d8;
   14: verlo en pantalla, el panel 0x231fe0 / 0x232290 y las voces +0x3d74 / +0x3d78.
@@ -8085,3 +8085,94 @@ mismo con otro arbol, para la base c2c5). Capturas y registros en $S/modos/c2c/c
 - (FPS y c2c6 en integra, 2026-11-27) nav3.sh con los datos juntos (CAMP.DAT de c2c/dat4): "VOZ: VOCES.DAT, 35
   muestras", "RAMMAPA arranque: libre 408K", sin "Out of memory", carrera de COAST 2 COAST. PENDIENTE (c2c6, tambien en
   la base c2c5): "Out of memory ... diff 57344" en carrera al pasar de NIAG a LASV (Clarissa nodo 4).
+
+## COAST 2 COAST: campeonatos, septima tanda (agente c2c7, 2026-11-27)
+
+Sobre la rama integra (658f329). Todo en Flycast (nivel E), no en la consola. Datos de prueba: $S/modos/c2c/dat5/CAMP.DAT
+(lo de dat4 igual byte a byte y detras 'C241' y 'C221'), carpeta montada con h7/datos2.sh ($S/dint + dat5 en
+modos/c2c/datos7); scripts en $S/modos/c2c/h7 (los de h6 para este worktree; corre.sh con FOTOPAT: una captura cuando sale
+esa linea; serie7.sh / serie8.sh las medidas). Capturas y registros en $S/modos/c2c/cap7. El tipo 16 lo lleva otro agente.
+
+### HECHO: "Out of memory ... diff 57344" al cambiar de etapa en carrera (NIAG -> LASV, Clarissa nodo 4)
+- Causa (DIAG_MALLOC, nuevo: el Makefile envuelve malloc / memalign / realloc / calloc y se apunta cada peticion que
+  falla o de 32 KB o mas con quien la pide; cap7/oom1): `decor_reduce` (demo/main.c) al leer SEG22.DAT (LASV, 2955
+  nodos) pedia diez tablas temporales de 102 bytes por nodo (301 KB); con 325 KB libres pero troceados, `fr` (59 100 B)
+  no cabia: el aviso de KOS y se saltaba la quita de repetidos / edificios tapados de esa etapa (sin "DECOR: SEG22.DAT
+  repetidos" en el registro; no se colgaba).
+- Arreglo (703f461): `ct` se suelta en cuanto se clasifica y `bb` en cuanto `ub` esta hecha, antes de pedir `fr` (que cabe
+  en su hueco): 70 bytes por nodo en el pico, mismo resultado. Sin cambiar la RAM del arranque. No toca gh_* ni las voces.
+- E: cap7/oom2 (la misma prueba: sin "Out of memory", "DECOR: SEG22.DAT repetidos 39 (11 fuera)"); otra transicion de
+  campeonato, Holly nodo 5 (NEWY -> GRAN -> CAPE, cap7/n5_oom): sin aviso; CONTRARRELOJ (PRUEBA_VARIANTE=7, PALM -> LAKE ->
+  CAST, cap7/ta_oom): sin aviso. NO verificado: el fantasma en esa CONTRARRELOJ (el piloto no pasa por el tablero:
+  ta_codigo < 0 y gh_empieza no graba ni lee; DESVIACION de la prueba).
+- PENDIENTE (encontrado, sin arreglar): al llegar a la META de la ultima etapa del campeonato (Holly nodo 15, cap7/t22a y
+  cap7/fin_oom) "Out of memory ... diff 40960": `hudd_sube` (comun/hud.c) no consigue su bufer temporal de 40 KB para leer
+  del GD las texturas de un grupo del HUD (vuelve -3: ese grupo no se sube en ese cuadro). PROBABLE que ya estuviera en la
+  base (no se ha corrido alli).
+
+### HECHO: tipo 14, los coches con numero se ven (PENDIENTE de c2c6)
+- Lo que pasaba: los coches se dibujaban (563 triangulos, sin tope del TA, cap7/t14e) pero en ese tramo de LASV (Holly nodo
+  2) los carriles del trafico van por la otra calzada, 20..32 m a la derecha de la ruta (registro C14L), y el piloto de
+  pruebas iba por la de la ruta: los numeros (2D, encima de todo) salian sobre el muro. Ademas con la velocidad del trafico
+  (35..97 % de la del jugador, 472450) no se les alcanzaba dentro de la peticion.
+- Arreglo (7b3d540): los coches del 14 van a la velocidad de la carretera, como los de la mision del INFARTO (PROBABLE;
+  no se sabe la que les da el original); PRUEBA_C14V lleva al piloto por los carriles del trafico y hacia el coche con
+  numero mas cercano. 3c75848: como mucho 4 vivos a la vez (DESVIACION por el polycount, ver medidas) y los que se quedan
+  atras sin abrir se saltan.
+- E (cap7/t14m, cap7/t14k congelado con un coche a 44 m): los coches con su numero en la carretera, toques de verdad
+  conducidos: "suma 10 (+10) ... suma 10 (-10) ... suma 75 (+5) de 155, medidor 44", nota 3.
+
+### HECHO (SIMPLIFICADO): tipo 24, las fotos (0x2a48a0)
+- CAMP.DAT 'C241' (tools/conv_camp.py): por peticion los objetivos de la lista +0x70 {f32 x, y, z en el marco de la etapa
+  del PS2, s16 seccion desde, hasta; relativas al inicio con +0x74}: 10 peticiones, 21 objetivos, 384 bytes.
+- Lo averiguado: 0x2a60a0 activa (+0x10) el primero cuya seccion inicial se ha pasado (voz 0xf4 / 0xf3 al azar) y lo da
+  por perdido al pasar la final; 0x2a4fa8: con 0x2bb0a0 dos veces el angulo entre la camara y el objetivo; si es menor
+  que 0,50265 rad la nota de la foto es (1 - angulo / 0,50265) x 10 + 0,5 (+0x2c); el disparo es 0x1b4548 con 0x10 u 8
+  segun la configuracion (el mismo boton que lee el 22 para la bocina: aqui X, PROBABLE); efecto 0x174, oculta el HUD y al
+  acabar el disparo el medidor + nota / 10 x 80 / (n x 0,9). Nota 6: bono(0,9) como c2c6.
+- Portado: todo lo de arriba con el rumbo del coche en vez del de la camara (SIMPLIFICADO), el medidor al disparar (sin la
+  espera +0x18) y el objetivo del marco de la etapa al mundo con marco_et (camp_marco). DESVIACION: sin el HUD de la camara
+  (0x19d358 / 0x19d318 ocultan piezas del HUD): un visor de cuatro esquinas y una marca sobre el objetivo, amarilla dentro
+  del angulo (main.c camp_visor; 12 quads 2D).
+- E (Holly nodo 5 lista 1, New York, `-DPRUEBA_C24`: dispara a menos de 10 grados; cap7/t24b): "foto: 10 grados del
+  objetivo, nota 7, medidor 62", nota 5 y 44 corazones; la marca cae sobre un edificio de Times Square (cap7/t24b/q_072.png:
+  el marco de los objetivos es el bueno, PROBABLE). El segundo 24 (un objetivo a -62 grados todo el rato) sin foto.
+
+### HECHO (SIMPLIFICADO): tipo 22, la bocina (0x29b3d0)
+- CAMP.DAT 'C221': por peticion las ventanas de la lista +0x7c (filas de 0x18 {s16 desde, hasta (+ el inicio), f32 +8, +0xc,
+  i32 +0x10} hasta -1): 23 peticiones, 99 ventanas, 1 684 bytes.
+- Lo averiguado (0x29c058, fase 4): la ventana en curso (+0x24) entre inicio + desde + f8 e inicio + hasta + fc de la
+  posicion 0x182b40, o la siguiente (+0x28); al pisar la bocina (0x1b4518) el efecto 0x1bc y la ventana objetivo (+0x2c);
+  mientras se pisa, en su ventana y en la carretera el medidor + 80 x avance / +0x14 x 1,25 y fuera la penalizacion x
+  0,25; al soltarla 0x81bc. +0x14: PROBABLE la suma de los largos (0x29bfc0). Nota 6: bono(0,9).
+- Portado lo de arriba (case 22). DESVIACION: sin los coches de la clase +0x14 (0x29b798 / el generador 0x1f1a88) ni el
+  +0x10 de la ventana (+0x1058 del jugador); sin el 0x81bc (el 0x1bc es corto) ni HUD propio.
+- E (Holly nodo 15 lista 2, Palm Beach, `-DPRUEBA_C22`: la bocina en cada ventana; cap7/t22a): "bocina: 5 ventanas, 64
+  secciones", las tres "peticion 22 hecha: 96 / 96 / 87, nota 6".
+
+### SIN PORTAR: tipo 13 (0x2991b8)
+- Lo averiguado: la clase (0x44 bytes, vtable 0x423298, control +0x24 = 0x2991b8) en su fase 1 llama a 0x1f1a88 con la
+  posicion del jugador (+0x5c del coche, no de los parametros) y copia los 0x44 bytes que devuelve: necesita el generador
+  del trafico. Su lista +0x5c del guion existe (registros de 0x14 como el 14, con +0xc = 4 / 3), pero el camino corto de
+  c2c6 no basta. Sin empezar el puerto.
+
+### Medidas (Flycast, DIAG_MS; dos pasadas con y sin el elemento, misma prueba)
+| elemento | tramo | fps con / sin | triangulos de la escena con / sin | suyos |
+|---|---|---|---|---|
+| 24, visor | 24/0 160..260 (cap7/m24_con, m24_sin) | 39,13 / 39,15 | 16826 / 16811 | 12 quads 2D |
+| 14, todos los coches | 14/0 380..590 (m14_con, m14_sin) | 35,47 / 37,66 | 18662 / 17840 | 563 por coche (LOD 0) |
+| 14, tope de 4 | 14/0 380..590 (m14b_con, m14b_sin) | 38,13 / 37,86 | 18244 / 17934 | media +310, max 4 x 563 |
+| 22 | sin geometria | | | 0 |
+(14: las dos pasadas no conducen igual (los toques frenan): diferencia dentro del ruido con el tope.)
+
+### RAM
+- h7/nav3.sh (MODO_JUEGO=1, sin defines, compilado limpio, datos7; cap7/nav3): "VOZ: VOCES.DAT, 35 muestras", "RAMMAPA
+  arranque: libre 408K" (igual que integra), sin "Out of memory". Nada nuevo en el monton al arrancar; en el campeonato
+  ~0,1 KB mas del estado y 2 KB mas de CAMP.DAT ('C241' + 'C221'). Ningun modulo de cada cuadro a -Os.
+- Datos nuevos: solo CAMP.DAT (30 518 -> 32 586 bytes, +2 KB en el GD).
+- Pruebas nuevas (solo con defines): DIAG_MALLOC, PRUEBA_C14V, PRUEBA_C24, PRUEBA_C22, DIAG_SIN_C24, DIAG_SIN_C14.
+
+### Lo que queda
+- 13 y el generador 0x1f1a88 (arriba); 22 sin sus coches; 24 sin el HUD de la camara ni la espera del disparo.
+- El "Out of memory ... diff 40960" de hudd_sube en la META final del campeonato (arriba).
+- El fantasma de la CONTRARRELOJ sin probar en esta tanda (arriba).
