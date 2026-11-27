@@ -6641,3 +6641,14 @@ hechos no se rehacen solos: hay que borrar TRAF0-8.DAT / TRAFK0-2.DAT de la carp
 - Solo probado en Flycast, no en la consola.
 - Entrega (Rev 2.9.9.c): `--ligero` solo en el paso `trafico` (TRAF0..8). Los camiones (TRAFK0..2) se quedan como
   estaban: casi no ganaban y no se llego a ver ninguno en el juego con los datos nuevos.
+
+## La pareja del final de recreativa otra vez (2026-11-27)
+
+Los personajes de los finales (FINCHRgg.DAT, FINGgg.DAT, FINHgg.DAT) iban en los datos de las revisiones desde el
+2026-11-23 como descriptores de ACTORES.PAK (repiten modelo: 46 MB sueltos, 6,4 MB empaquetados), pero comun/gd.c solo
+recomponia BKnn y SEGnn: el final de recreativa de OUTRUN2SP salia sin la pareja ("FINAL: sin FINCHR11.DAT (-2)").
+`es_union` acepta ahora tambien FINC* / FING* / FINH* (un FIN suelto solo cuesta leer un sector). Verificado en E con
+tools/prueba/final.sh (preset 0, meta D, final 18): "FINAL: FINCHR2C.DAT, 4219 mallas, 35 texturas, 177 piezas", la
+pareja en las capturas, modos 25 / 27 / 28 y vuelta al frontal. Datos sin cambios. PENDIENTE: que tools/regenera.py
+produzca ACTORES.PAK (hoy los datos regenerados desde la ISO, y los del programa de Windows, llevan los FIN sueltos, que
+tambien funcionan).
