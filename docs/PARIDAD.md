@@ -3824,9 +3824,10 @@ peticion 14 (escoltas 45B5B0, +324 = 6: carrera contra ellos), que no esta en la
   carrera, leido en el hueco de la union; banco HAM de la etapa por clave (4 distintos: grupos 0,0,0,1,1,1,2,2,2,1,0,3,
   0,0,3; PROBABLE que el juego lo elija por la clave). La acompanante es el personaje 6 (487F50), sin comentarios de
   zona ni de derrapes (solo variante 1 / 1, 3, 4).
-- SIN PORTAR (PENDIENTE): tipos 7, 8, 11, 15, 16, 17, 19, 20, 21, 23, 24, 25 (no empiezan, sin anuncio ni nota), 14 /
-  18 (escoltas), la hoja de resultados de la etapa 4603F0, la cara de la acompanante (45BDF0) y las reacciones del robot
-  a las peticiones (487D60 / 487D90). La cuenta de
+- HECHO (Rev 1.1, ver "INFARTO: tipos de peticion, hoja de resultados, panel de la nota y la acompanante"): tipos 8 y
+  23, la hoja de resultados de la etapa 4603F0, el panel de la nota (45BDF0) y las reacciones de la acompanante a las
+  peticiones (487D60 / 487D90). SIN PORTAR (PENDIENTE): tipos 7, 9, 11, 15, 16, 17, 19, 20, 21, 24, 25 (no empiezan,
+  sin anuncio ni nota), 14 / 18 (escoltas). La cuenta de
   corazones y la nota ya no son texto bfont: ver INFARTO: medidor, efectos y contador (2026-11-10).
 
 **INFARTO: medidor, efectos y contador (2026-11-10)** (queja: "no aparece la animacion de los corazones"):
@@ -6641,3 +6642,86 @@ hechos no se rehacen solos: hay que borrar TRAF0-8.DAT / TRAFK0-2.DAT de la carp
 - Solo probado en Flycast, no en la consola.
 - Entrega (Rev 2.9.9.c): `--ligero` solo en el paso `trafico` (TRAF0..8). Los camiones (TRAFK0..2) se quedan como
   estaban: casi no ganaban y no se llego a ver ninguno en el juego con los datos nuevos.
+
+## INFARTO: tipos de peticion, hoja de resultados, panel de la nota y la acompanante (Rev 1.1, 2026-11-27)
+
+Rama rev-1.1 (059fc97). Todo verificado en Flycast (nivel E), no en la consola. Ficheros nuevos de la conversion:
+INFARTOX.DAT (tools/conv_infarto.py `extra`, tambien con `--solo-x`), CHRH.DAT (tools/conv_chr.py `--infarto`);
+HAHUD.DAT cambia (grupos nuevos). regenera.py los saca en el paso `infarto`.
+
+**Uso real de los tipos** (las 41 misiones de cada preset, INFARTO.DAT / INFARTOP.DAT): preset 0 (juego OutRun 2 SP)
+0 x16, 2 x9, 6 x9, 7 x13, 8 x8, 9 x3, 11 x4, 14 x3, 15 x16, 16 x15, 19 x1, 20 x1, 22 x1, 23 x5, 24 x4, 25 x1; preset 1
+(juego OutRun 2, el de por defecto del tablero) solo 0 x52, 2 x9, 6 x8, 7 x23, 8 x21, 9 x1, 11 x6. 17, 18 y 21 no los
+pide ninguna mision de ningun preset. Los rotulos de cada tipo (2B00xx de 0x3f0aa8, mirados en PNG): 8 "Circula por
+el azul" (p6 = 1) / "por el rojo" (p6 = -1), 23 "Derrapa y circula por el azul / rojo", 7 "Golpea el cono azul", 24
+"Derrapa y golpea el cono azul", 9 "Cruza la linea" (entre dos coches), 11 "Atrapa el corazon", 14 "Supera a ese
+coche", 15 "Recoge monedas", 16 "Pasa por el arco", 25 "Derrapa y pasa por el arco", 19 "Recoge las estrellas", 20
+"Choca con el fantasma".
+
+**HECHO: tipos 8 y 23** (comun/infarto.c; los mas pedidos sin objetos: 29 en los dos presets + 5):
+- Puesta en marcha 464350 caso 4 (PS2 0x1ae800): 7F2530 / 7F2532 secciones, 7F2538 = p6 (el lado), 7F253C = -1.
+- Control 45EEB0 (PS2 0x1a9af8, comprobado instruccion a instruccion): puntos de 45E2F0 con la tabla 0x3efcb8
+  {150000, 150000, 333, 0, 333, 0}; cuenta las secciones mientras p6 x car+0x26C > 0 (el lado de la carretera) y
+  +0x264 x +0x268 < 0 (dentro de los bordes) y, en el 23, derrapando (0x1b3b10: +D36 > 0); con ello la cara 5 de la
+  acompanante (487D90) y 487DD0; resultado = secciones / ((fin - inicio) x 0,9) x 800000 (0x1a9aa0), el mayor.
+  En la DC: +26C = fis.ofs, +268 = vib_izq, +264 = -vib_der (los que ya usaban la vibracion y 476040).
+- Evaluacion 463250 (PS2 0x1a9c70): nota 7 -> 80 corazones + min(1, secciones / (fin - inicio) / 0,1) x 300000 +
+  mantiene(v inicial - v) x 400000 (0x1b3b70), contador (h + h / 2) x 10 / 7 y el panel de la nota 0x78 cuadros.
+- E (Flycast, PRUEBA_HA_MISION=15 preset 1, piloto del menu): "peticion tipo 8 (250..315, p6 -1)" con el rotulo
+  "Circula por el rojo"; el piloto iba por la derecha: 0 secciones, nota 1; la segunda (584..622, p6 1) cuenta
+  secciones (k8 6/38 en el registro DIAGHA) y sigue en la etapa siguiente como el original (464350 no la cierra).
+  El 23 es el mismo codigo con el derrape (solo comprobado al compilar: ninguna prueba paso por la mision 16..32 del
+  preset 0).
+- SIN PORTAR: los carriles pintados de azul / rojo de esas misiones (45ECA0 / 45E9B0 goal_models: registros de
+  obj_course_obj_cs_<zona> por mision, p. ej. 0x5e0003 / 0x5e0004 de CAST en la mision 0x0F del preset 1, 0xfb0001
+  de NIAG en la 0x0F del preset 0) y las marcas de principio y fin de la accion -5 (45B000 / 45B2A0, modelos por
+  idioma 64A9E8 / 64AA00). Sin ellos el jugador solo tiene el dibujo del rotulo (mitad azul a la derecha).
+
+**HECHO: la hoja de resultados de la etapa** (4603F0 = PS2 0x1ad004, comprobada en el ELF; comun/infarto.c
+`hoja_paso` / `infarto_dibujos`, demo/main.c `ha_dibujos`): mientras el jugador esta en la union (7F8B34: cuadros en
+ella, a 0 en el stage clear) y no en el nivel 4: a los 0x78 el efecto 0xA9, el titulo del nivel (0x3eff60:
+2C0093..97), las peticiones del nivel (2C0090..92) y una fila por peticion cada 0x3C cuadros (y de 0x3eff98) con su
+nota (0x3eff78, primero corriendo por (t >> 2) & 7) y su voz (0x3f7308) y sus corazones "%3d" en (0x19D, 0x3effb0);
+a los 0x168 "Ranking en la etapa" 2C0081 con su animacion (0x3effc8); a los 0x1A4 la nota media: voz, rotulo
+2B0007..0D (0x3effe8, entero) y el movimiento de la acompanante (0x3f0b50 / 0x3f0b70); de 0x21C en adelante, con la
+rama ya elegida, la clase de la mision especial de la etapa siguiente (45C7E0 = 0x1af710, tabla 0x3f06e0) con 0xDB
+y 2B003F..41 a los 0x276 y las voces 0x1CC.. a los 0x294. Sprites: 429530 + 4294C0 (PS2 0x1156c0: la mitad del
+tamano de la escena) -> el uso de HAHUD.DAT lleva (w / 2 - 320, h / 2 - 240) y la demo pasa la x / y del original.
+E: "Etapa 1 Resultado", filas 1 y 2 con la nota corriendo y luego E, "Ranking en la etapa" y el rotulo "Ranking E"
+(capturas cap/t9/h_00xx). No visto: el rotulo de la mision especial (la union de la prueba acabo antes de 0x21C).
+
+**HECHO: el panel de la nota que entra** (45BDF0 = PS2 0x1ad6f4): 2C0080..7C (0x3f0010) por la nota 7F8B2C, 7F8B28 =
+0x78 al cerrar la peticion (baja 1 por paso en 45FB80, PS2 0x1acf48); x = (1 - (t - 0x5A) / 30) x 384 - 0x9C mientras
+t > 0x5A, luego 0xE4; y 0x5D. E: "Ranking E" entra por la izquierda bajo el tiempo (cap/t10).
+
+**HECHO: las reacciones de la acompanante** (comun/robot.c `robot_pide`, `robot_extra`): el work +68..+7C de 489A90
+(PS2 0x203760..0x20385c y 0x203f6c..0x204028, comprobado): +68 un movimiento (487D60: +78 = 2), +70 una fila de caras
+(487D90: +78 = 0, +7C = 1; filas {entrada, bucle, salida} de 0x40eac8; cerrado -> la fila 1), +7C = 0 (487DD0);
+estado Pose hasta el fin del movimiento con +78 = 2. Llamadas de las peticiones como el original: tipo 0 la cara por
+(7F8AA0 - 7F24E8) / 80000 (0x1a8e50, tabla 0x3efb40) y 487DD0 al acabar el impulso; 2 / 22 el animo (0x1aac60:
+coche 9 -> 0x6003D; si no rand x 2^-31 < 0,5 -> 0x6003F / 0x6003D, si no 0x6003E); 6 la cara 0 sin sucesos; 8 / 23
+la cara 5; al cerrar cada peticion 45DED0 (0x1b3988: tablas 0x3f0a68 / 0x3f0a88 por nota; el coche 9 con nota 5
+nada) y la nota media de la hoja. Los 35 movimientos que no lleva la pareja (0x6003D, 0x6006D, 0x230001, las filas de
+caras 0x25xxxx / 0x26xxxx / 0x27xxxx...) van en CHRH.DAT (52 KB), leido al empezar el modo y buscado detras de los de
+la pareja (las CHRppaa.DAT no: CHR_RAM va al limite con la mayor). E: registro DIAGHA "acompanante: movimiento
+0x60048 (esta)", "cara 5 (0x25000d, esta)", "movimiento 0x230003 (esta)". PROBABLE: al volver de la pose a reposo no
+se pone 0x6004B (el original sale con Exit::Reset, sin descifrar si eso lo hace).
+
+**RAM** (Flycast, menu real hasta el INFARTO): arranque igual (343 K libres, "VOZ: VOCES.DAT, 35 muestras"); menu al
+salir 262 K (antes 314: CHRH.DAT), carrera del INFARTO 289 K (antes 341), lecturas del curso 241..314 K, sin "Out of
+memory". En el AICA nada nuevo (VOCESH.DAT igual). Codigo +5 KB. HAHUD.DAT: 640 -> 1147 KB en el disco (sus tablas
+en la RAM crecen poco: solo los grupos nuevos); las texturas de cada grupo se suben al verse y se bajan al dejar de
+verse (`ha_dibujos`).
+
+**SIN PORTAR (PENDIENTE), con lo averiguado:**
+- Tipos con objetos de OSO.PS2 (7 / 24 conos, 15 monedas, 16 / 25 arcos, 19 estrellas en cajas que caen, 17 / 21):
+  siguen sin empezar (ni anuncio ni nota). Lo que falta esta en "Objetos de las peticiones" (arriba): ficheros por
+  mision (0x3f05c0 / 0x3f06a0), clase -> modelo 0x40a958 (la misma tabla que usan los objetos de la union, BO.DAT: el
+  formato de registro de 0x28 es el mismo), alturas 45DB70 y toque 0x1d3720. Se puede apoyar en el sistema de BO
+  (conv_bo.py / bo_dibuja) para los modelos del banco 0x57. Tablas de puntos ya en INFARTOX.DAT (PTS2: 15 0x3f07c0,
+  16 / 25 0x3f07d8, 19 0x3f0810). Controles y evaluaciones en el PC (race_traffic_heart*.inc) = PS2 0x1a9290 (7/24),
+  0x1b0260 (15), 0x1b0570 (16/25), 0x1b11c8 (19), 0x1b0c58 (17), 0x1b24e0 (21).
+- 9 (pares de coches 46D250 / 800AF8 del modulo del trafico), 11 (anillo de marcas 46DB60 / 8037C8), 14 (escoltas
+  45B5B0 tabla 64AAD8 y la carrera 45F7F0 con el contador 2B0005 / 2B0006), 20 (coches fantasma: tabla de coches con
+  0x40, +C5C 0x80000, corazones 2C00E5 sobre ellos 45D190), 18: sin portar (tablas de puntos de 9, 11, 14 y 20 ya en
+  PTS2). Prioridad por uso: 11 (10), 9 (4), 14 (3), 20 (1).
