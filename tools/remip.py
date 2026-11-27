@@ -10,7 +10,8 @@ lejano".
 
 Hasta ahora solo llevaban mipmaps las texturas cuadradas del suelo con MXL > 0 en el original (modelo.ajusta_texturas).
 Aqui, todas las de la escena que se ven reducidas (salvo el cielo y las que no se reducen antes de D_MAX m), por orden
-de detalle fino x area / coste y hasta el tope de VRAM de cada fichero:
+de detalle fino x area / coste y hasta el tope de VRAM de cada fichero (TOPE_ETAPA, TOPE_UNION y PAREJA: ninguna
+combinacion etapa + union del curso pasa del peor caso de antes, 944 KB):
  - cuadradas: sus niveles (promedio de 2x2; en las de recorte ARGB1555 el alfa de cada nivel se corta para guardar la
    cobertura de la base) desde la imagen de ahora (VQ decodificada o 16 bits) y VQ con un libro para todos los niveles
    (vq.codifica_mip) si el error RMS frente a esa imagen y sus niveles es <= UMBRAL; si no, sin mipmaps (en 16 bits
@@ -335,10 +336,13 @@ def lee(ruta):
     return b
 
 
-# VRAM de cada fichero con lo nuevo (KB): hasta el tope, y al menos lo minimo aunque ya lo pase (IMPE). Peor caso de la
-# zona del curso (1312 KB): etapa + union <= 780 + 240 o 748 + 64 + 240 (tools/vram.py; docs/PARIDAD.md)
-TOPE_ETAPA = int(os.environ.get('REMIP_TOPE_ETAPA', '780')); MIN_ETAPA = int(os.environ.get('REMIP_MIN_ETAPA', '64'))
-TOPE_UNION = int(os.environ.get('REMIP_TOPE_UNION', '240')); MIN_UNION = int(os.environ.get('REMIP_MIN_UNION', '24'))
+# VRAM de cada fichero con lo nuevo (KB): hasta el tope de su clase y sin que ninguna pareja del curso (etapa + su
+# union, union + la etapa de cada rama; CURSO.DAT y CURSOTA.DAT) pase de PAREJA, salvo las que ya pasaban (no crecen):
+# el peor caso de la zona del curso no empeora (944 KB antes: IMPE/49 + BK198; la zona es de 1056 KB en las misiones de
+# COAST 2 COAST con dos rivales). Las etapas primero (con las uniones de antes) y las uniones despues (con las etapas
+# nuevas). tools/vram.py; docs/PARIDAD.md
+TOPE_ETAPA = int(os.environ.get('REMIP_TOPE_ETAPA', '720')); TOPE_UNION = int(os.environ.get('REMIP_TOPE_UNION', '240'))
+PAREJA = int(os.environ.get('REMIP_PAREJA', '944'))
 PAQUETES = (('SEGS.PAK', 'SEG', ['--pak=SEGS.PAK', '--prefijo=SEG', '--tope=7842']), ('UNIONES.PAK', 'BK', []),
             ('UNIONESTA.PAK', 'BK', ['--pak=UNIONESTA.PAK']), ('UNIONESR.PAK', 'BK', ['--pak=UNIONESR.PAK']))
 SECT = lambda n: -(-n // 2048) * 2048
@@ -364,20 +368,35 @@ def datos(E, D, W, solo=None):
     num = lambda f: int(''.join(c for c in f if c.isdigit()))
     H = {pre: max(SECT(tam_recompuesto(os.path.join(E, f))) for f in os.listdir(E) if es_modelo(f, pre)) for pre in ('SEG', 'BK')}
     print('huecos: etapa %d KB, union %d KB' % (H['SEG'] >> 10, H['BK'] >> 10))
+    import vram as vr
+    pareja = {}                                             # fichero -> los que conviven con el en la zona
+    for cf in ('CURSO.DAT', 'CURSOTA.DAT'):
+        if not os.path.isfile(os.path.join(E, cf)): continue
+        for curs in vr.curso(E, cf).values():
+            for c in curs:
+                s_, u_ = 'SEG%02d.DAT' % c[1], 'BK%02d.DAT' % c[5]
+                for h in [c] + [curs[k] for k in (c[3], c[4]) if 0 <= k < len(curs)]:
+                    pareja.setdefault(u_, set()).add('SEG%02d.DAT' % h[1]); pareja.setdefault('SEG%02d.DAT' % h[1], set()).add(u_)
+    zona = {}                                               # VRAM de cada fichero (la de antes; la nueva al cambiarlo)
+    for f in os.listdir(E):
+        if es_modelo(f, 'SEG') or es_modelo(f, 'BK'):
+            zona[f] = sum(A32(x[5]) for x in parte(lee(os.path.join(E, f)))['texs'])
     tot = {'SEG': [0, 0, 0], 'BK': [0, 0, 0]}
     def tr(f, b):
         pre = 'SEG' if f.startswith('SEG') else 'BK'
         if solo is not None and f[:-4] not in solo: return b
         t0 = time.time(); d = parte(b)
         vram = sum(A32(x[5]) for x in d['texs'])
-        tope, mini = (TOPE_ETAPA, MIN_ETAPA) if pre == 'SEG' else (TOPE_UNION, MIN_UNION)
-        pres = max(0, min(max(tope << 10, vram + (mini << 10)) - vram, H[pre] - SECT(len(b))))
+        tope = (TOPE_ETAPA if pre == 'SEG' else TOPE_UNION) << 10
+        otro = max([zona.get(x, 0) for x in pareja.get(f, ())] or [0])     # la mayor con la que convive
+        pres = max(0, min(tope - vram, (PAREJA << 10) - otro - vram, H[pre] - SECT(len(b))))
         nb, lin, usado = transforma(b, pres, f)
         n = sum('->' in l and 'no pasa' not in l for l in lin)
         print('%s: VRAM %d KB, presupuesto %d KB, %d con mipmaps nuevos, %+.1f KB, %d sin sitio, %d sin VQ, %.0f s'
               % (f, vram >> 10, pres >> 10, n, usado / 1024, sum('sin sitio' in l for l in lin),
                  sum('no pasa' in l for l in lin), time.time() - t0))
         if os.environ.get('REMIP_DETALLE'): print('\n'.join(lin))
+        zona[f] = vram + usado
         tot[pre][0] += 1; tot[pre][1] += n; tot[pre][2] += usado
         return nb if nb is not None else b
     sueltos = sorted((f for f in os.listdir(E) if (es_modelo(f, 'SEG') or es_modelo(f, 'BK'))), key=lambda f: (f[0] != 'S', num(f)))
