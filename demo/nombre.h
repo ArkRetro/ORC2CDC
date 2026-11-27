@@ -11,6 +11,8 @@ typedef struct {
     int modelo, manual, config;   /* 48B140 / 48B180 / 48B1A0 (0x1bcfb0 / 0x1bcff0 / 0x1bd010) */
     int ruta;               /* 450320 (0x1ff718): bit n = derecha en el nivel n */
     int registro4;          /* indice del registro del arbol de la etapa del nivel 4 (450560(4)); -1 sin llegar */
+    int desc4p;             /* Rev 2.9.9.c: 1 + el descriptor (44DC50) de la etapa del nivel 4 en los 15 recorridos (presets
+                               2 / 3: los arboles 290 / 291 no estan en las tablas de RANKSP.DAT); 0 ninguno */
     uint8_t *ram; uint32_t ram_cap;   /* RAM fija para las tablas de sus bancos (fin_sp_t): sin ella no se entra */
     int consulta;           /* Rev 2.9.3: 0 la entrada de nombre; 1 consulta de las tablas de OUTRUN2SP, 2 las de UN JUGADOR
                                (sin registro ni fila del jugador; cuenta = la meta 0..4); 3 (Rev 2.9.4) la de tabla16 */

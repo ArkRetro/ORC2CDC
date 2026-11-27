@@ -26,6 +26,9 @@ import os, struct, sys, hashlib
 import numpy as np
 
 PAK = 'UNIONES.PAK'
+# las uniones del campeonato de Holly (conv_union.BK_REQ: BK498..) van al final del paquete, detras de todas las demas,
+# para que los trozos y los descriptores de las de antes no cambien (el orden de los nombres decide el del paquete)
+AL_FINAL = 498
 SECT = lambda n: -(-n // 2048) * 2048
 MIN, MAX, MASCARA, VENT = 256, 16384, (1 << 10) - 1, 32      # trozos de ~1,3 KB de media
 
@@ -81,7 +84,8 @@ def main():
     op = dict(x[2:].split('=', 1) for x in sys.argv[1:] if x.startswith('--') and '=' in x)
     PAK = op.get('pak', PAK); pre = op.get('prefijo', 'BK'); tope = int(op.get('tope', 0)) << 10
     ent, sal = a[0], a[1]
-    nombres = a[2:] or sorted(f for f in os.listdir(ent) if f.startswith(pre) and f[len(pre):len(pre) + 1].isdigit() and f.endswith('.DAT'))
+    nombres = a[2:] or sorted((f for f in os.listdir(ent) if f.startswith(pre) and f[len(pre):len(pre) + 1].isdigit() and f.endswith('.DAT')),
+                              key=lambda f: (pre == 'BK' and int(f[len(pre):-4]) >= AL_FINAL, f))
     if tope:                                                 # las que no dejan sitio a la ventana y al descriptor: sueltas
         sueltas = [nm for nm in nombres if SECT(os.path.getsize(os.path.join(ent, nm))) + 65536 + 131072 > tope]
         os.makedirs(sal, exist_ok=True)

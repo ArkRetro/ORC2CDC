@@ -602,14 +602,15 @@ def vq_pequeno(i, a, fmt, lista, pre=''):
 
 def visibles(ps): return [p for p in ps if p['alfa'] >= 0.004 and abs(np.linalg.det(p['M'][:2, :2])) >= 1e-6]
 
-def grupo_escena(hud, nombre, A, T, bk, k, n, prefijo='', cambia=None):
+def grupo_escena(hud, nombre, A, T, bk, k, n, prefijo='', cambia=None, desde=0):
     """hornea los cuadros 0..n-1 de la escena k del banco bk (A, T de Disco.banco) en el grupo nombre de hud, con su
     atlas (las texturas del grupo se suben solo mientras se ve; las piezas grandes con su textura de origen entera:
     fondos), y devuelve el grupo (los usos los pone quien llama). Solo se escriben los cuadros donde algo cambia: cada
     pieza guarda en flags >> 4 los cuadros que abarca y en el bit 2 la capa aditiva (+0x48 & 4). cambia(p): la pieza
-    que va en lugar de p (los iconos de los botones de conv_fin) o p"""
+    que va en lugar de p (los iconos de los botones de conv_fin) o p. desde: sin piezas en los cuadros de antes (no se
+    dibujan)"""
     lst = []; ant = None
-    for f in range(n):
+    for f in range(desde, n):
         ps = [hornea(p, T) if 'mascara' in p else p for p in escena(A, k, float(f))]
         if cambia: ps = [cambia(p) for p in ps]
         firma = [(str(p['tex']), tuple(np.round(p['M'].ravel(), 3)), round(p['alfa'], 3), tuple(p['src'])) for p in ps]
@@ -760,7 +761,7 @@ def c2c(iso, salida):
     def largo(t):
         a, _, _ = bk(t >> 16); sc = a.escenas[t & 0xffff]; nc, pc = struct.unpack_from('<2I', a.a, sc)
         return int(struct.unpack_from('<f', a.a, pc + (nc - 1) * 0x24 + 8)[0])
-    def imagenes(nombre, toks):
+    def imagenes(nombre, toks, x=0, y=0):
         g = hud.grupo(nombre, len(toks))
         for c, t in enumerate(toks):
             b = t >> 16
@@ -770,7 +771,7 @@ def c2c(iso, salida):
             ti, l, tp, r, bb = imagen_xst(xs, t & 0xffff)
             si = hud.sprite(hud.textura((b, ti), T[ti]), (l, tp, r, bb), r - l, bb - tp)
             hud.pie.append((g, c, si, 0, 0.0, 0.0, 0, 0, 0.0, 1.0, 1.0, 1.0))
-        hud.uso(nombre, g, 0, 0, capa=9); return g
+        hud.uso(nombre, g, x, y, capa=9); return g
     esc('C2C_PANEL', [0x2c0046])
     esc('C2C_ICONO', list(iconos))
     esc('C2C_MARCA_J', [marcas[0]], range(181)); esc('C2C_MARCA_R', [marcas[1]], range(181))
@@ -779,8 +780,48 @@ def c2c(iso, salida):
     esc('C2C_B20', [0x2b0020], range(largo(0x2b0020))); esc('C2C_B3D', [0x2b003d], range(largo(0x2b003d)))
     for k, t in enumerate(tags):
         if t not in (0, 0xffffffff): esc('C2C_T%d' % k, [t], range(largo(t)))
+    # (2026-11-27) los tipos 1, 2, 3 y 6 de su juego. Panel 2C0029 de los tipos 2 / 3 / 6 (0x1bd748); puntos 0x1bf108
+    # (4BD230, tipos 2 / 3) y 0x1bf260 (4BD340, tipo 6) con las cifras de 0x1c3c68 (estilos de 0x404818: el 1 escena
+    # 2C00B9, el 0xD 2C00C0, cuadro = cifra, avance 0x10), las imagenes 2C00F1 (tipo 6) y 2C024F (la del rival); las
+    # marcas de 495E90 (0x1f8930: 2B000E, la nota 0x36f470 = 2B000F..2B0015), los rotulos de 496A30 (eliminado 0x36f418,
+    # pillado 0x36f430, ultimos segundos 2B0064) y la etiqueta 2C00C5 del rival (0x1c4684)
+    assert ori(0x1bd748, 0x1bd74c) == 0x2c0029, 'panel 2C0029'
+    assert ori(0x1bf240 - 0x1c, 0x1bf240) == 0x2c024f and ori(0x1bf2bc, 0x1bf2cc) == 0x2c00f1, 'puntos'
+    assert ori(0x1f9270, 0x1f927c) == 0x2b0064, 'ultimos segundos'
+    est = par(0x1c3ca4, 0x1c3cb4); assert est == 0x404818
+    d1, dd = D.elf32(est + 16 * 1, 1)[0], D.elf32(est + 16 * 0xd, 1)[0]
+    assert (d1, dd) == (0x2c00b9, 0x2c00c0), 'estilos de las cifras'
+    notas, elim, pill = D.elf32(0x36f470, 7), D.elf32(0x36f418, 6), D.elf32(0x36f430, 6)
+    esc('C2C_PANEL2', [0x2c0029])
+    esc('C2C_D1', [d1], range(10)); esc('C2C_DD', [dd], range(10))
+    # 2C024F en (x + [0x369838], y + [0x36983c]) de 0x1bf218 / 0x1bf39c (el uso lleva ese desplazamiento)
+    def lw(lui, l):
+        a, b = w32(lui), w32(l); assert a >> 26 == 15 and b >> 26 == 35
+        return ((a & 0xffff) << 16) + (b & 0xffff) - (0x10000 if b & 0x8000 else 0)
+    assert lw(0x1bf218, 0x1bf220) == 0x369838 and lw(0x1bf21c, 0x1bf228) == 0x36983c
+    dx, dy = struct.unpack('<2i', struct.pack('<2I', *D.elf32(0x369838, 2)))
+    imagenes('C2C_ETQ', [0x2c00f1]); imagenes('C2C_RIV', [0x2c024f], dx, dy)
+    def anim(nombre, t):
+        """todos los cuadros de la escena t, solo los que cambian (grupo_escena) y con su atlas"""
+        a, T, _ = bk(t >> 16); g = grupo_escena(hud, nombre, a, T, t >> 16, t & 0xffff, largo(t) + 1, 'c2c_')
+        hud.uso(nombre, g, 0, 0, capa=3); return g
+    anim('C2C_MAS', 0x2b000e); anim('C2C_ETQR', 0x2c00c5)
     hud.vq = lambda i, a, fmt, lista: vq_pequeno(i, a, fmt, lista, 'C2CHUD: ')
     os.makedirs(salida, exist_ok=True)
+    # lo de cada tipo, aparte (se abre solo en sus misiones: RAM y VRAM): C2CH23.DAT las notas de 495E90 (de las 0..5
+    # solo se dibujan los cuadros 0x1F..0x3C; de la 6 tambien 0x3D..0x69, la grande), C2CH1.DAT los rotulos del
+    # eliminado y el de los ultimos segundos, C2CH6.DAT los del pillado
+    for nom, lst in (('C2CH23.DAT', [('C2C_G%d' % k, t, 0x1f, 0x3d if k < 6 else 0x6a) for k, t in enumerate(notas)]),
+                     ('C2CH1.DAT', [('C2C_E%d' % k, t, 0, 0) for k, t in enumerate(elim)] + [('C2C_ULT', 0x2b0064, 0, 0)]),
+                     ('C2CH6.DAT', [('C2C_P%d' % k, t, 0, 0) for k, t in enumerate(pill)])):
+        h2 = Hud(); h2.taco = [0xff] * 16
+        for nombre, t, f0, f1 in lst:
+            a, T, _ = bk(t >> 16); n_ = largo(t) + 1
+            if f1: n_ = min(n_, f1)
+            g = grupo_escena(h2, nombre, a, T, t >> 16, t & 0xffff, n_, 'c2c_', desde=f0); h2.uso(nombre, g, 0, 0, capa=3)
+        h2.vq = lambda i, a, fmt, lista, nom=nom: vq_pequeno(i, a, fmt, lista, nom + ': ')
+        tx2 = h2.escribe(os.path.join(salida, nom))
+        print('%s: %d texturas (%d bytes), %d grupos, %d piezas' % (nom, len(tx2), sum(len(t[4]) for t in tx2), len(h2.grp), len(h2.pie)))
     texs = hud.escribe(os.path.join(salida, 'C2CHUD.DAT'))
     print('C2CHUD.DAT: %d texturas (%d bytes), %d grupos, %d piezas; marcas %s, cifras %s, sufijos %s, tags %s' % (
         len(texs), sum(len(t[4]) for t in texs), len(hud.grp), len(hud.pie), [hex(x) for x in marcas],

@@ -45,10 +45,10 @@ def lee_dat(ruta):
 
 def kb(texs): return sum(bloque(t[5]) for t in texs) / 1024.0
 
-def curso(d):
+def curso(d, fichero='CURSO.DAT'):
     """{id del arbol: [(zona, SEGnn, nivel, izq, der, BKnn)]}: el del modo OutRun (0) y los de 'CURS' (conv_union.py
     escribe_curso; el fichero de la union en el byte 676 del registro, los 4 ultimos antes de las posiciones de la union)"""
-    b = open(os.path.join(d, 'CURSO.DAT'), 'rb').read()
+    b = open(os.path.join(d, fichero), 'rb').read()
     n, r = struct.unpack_from('<2I', b, 4)
     def regs(o, n):
         return [(b[o + r * i:o + 4 + r * i].decode().rstrip('\0'), b[o + 4 + r * i], b[o + 5 + r * i],

@@ -127,9 +127,57 @@ def main():
     em = [x for x in A.busca('*OutrunMiles.bin') if x.paquete.startswith('SCRIPTS')][0]; dm = bytes(A.datos(em))
     ns, os_ = conv_menu._r077(dm, 'SETUP'); setup = struct.unpack_from('<7i', dm, os_)
     tab += struct.pack('<8i', *[setup[6 - g] for g in range(7)], 0)
+    tab += extension(E, par, d, o, rel, cats, n)
     cab = 16; sal_b = b'MIS1' + struct.pack('<3I', n, tam, cab + n * tam) + b''.join(regs) + tab
     f = os.path.join(sal, 'MISION.DAT'); open(f, 'wb').write(sal_b)
     print('%s: %d misiones de %d bytes, %d bytes' % (f, n, tam, len(sal_b)))
+
+def extension(E, par, d, o, rel, cats, n):
+    """Bloque 'MIX2' detras de las millas (2026-11-27; la demo de antes no lo lee):
+      'MIX2', u32 n (94)
+      f32 cabeza[16][3]: el punto del coche del jugador de cada modelo donde salen las marcas de la mision (495E90 /
+        495D90: tabla PS2 0x40c370 de 0x1f8824 / 0x1f882c, 12 bytes por [0x369268])
+      u32 desplazamiento[n] (desde 'MIX2'; 0 sin lista): las zonas de derrape del coche de carreras (474990: la lista
+        del primer puntero de +0x44 del registro de 47CF40, solo en los de derrape: {clave de la etapa, puntero} hasta
+        una clave negativa y por clave {u16 seccion desde, hasta, u32 car+0x5C (0 etapa, 1 union), f32 x 6} hasta
+        0xFFFF), con la clave puesta como el nodo del arbol del curso que tiene ese tramo:
+        u32 m, m x {u8 nodo, u8 union, u16 desde, u16 hasta, u16 0, f32 v[6]} (v: +18, +C, +20, +10, +1C, +14 de 474990)"""
+    W = lambda a: struct.unpack_from('<I', d, a)[0]
+    cab = par(0x1f8824, 0x1f882c); assert cab == 0x40c370, 'ELF inesperado (0x40c370)'
+    out = b'MIX2' + struct.pack('<I', n) + bytes(E.lee(cab, 16 * 12))
+    tabla_o = len(out); out += b'\0' * (4 * n); listas = []
+    for i in range(n):
+        r = o + 0x44 * i; c = rel[r + 0x1c]
+        t = rel.get(c + 0x44); L = rel.get(t) if t is not None else None
+        if L is None: listas.append(None); continue
+        tq = rel[r + 0x18]; q = [struct.unpack_from('<30i', d, tq + 0x78 * k) for k in range(cats[tq])]
+        ent = []
+        for k in range(32):
+            clave = struct.unpack_from('<i', d, L + 8 * k)[0]
+            if clave < 0: break
+            p = rel.get(L + 8 * k + 4)
+            if p is None: continue
+            nodos = [j for j, x in enumerate(q) if x[7] == clave]
+            for _ in range(256):
+                lo, hi = struct.unpack_from('<HH', d, p)
+                if lo == 0xffff: break
+                v = struct.unpack_from('<6f', d, p + 8)
+                for j in nodos: ent.append(struct.pack('<BBHHH6f', j, W(p + 4) & 0xff, lo, hi, 0, *v))
+                p += 0x20
+        listas.append(struct.pack('<I', len(ent)) + b''.join(ent))
+    offs = []
+    for x in listas:
+        if x is None: offs.append(0)
+        else: offs.append(len(out)); out += x
+    out = out[:tabla_o] + struct.pack('<%dI' % n, *offs) + out[tabla_o + 4 * n:]
+    # 'PAC1' (detras): las tablas de 472B60 (el ritmo del coche de carreras detras de otro; PS2 0x1e5188): 8 clases de
+    # 0x48 bytes para los del trafico (0x40bcc8, por +0x320 del de delante) y 4 para los coches de carreras (0x40bde8);
+    # cada una 6 x {f32 distancia, i16 angulo, i16 0, f32 factor} y f32 limite en +0x3C
+    assert par(0x1e5408, 0x1e5410) == 0x40bcc8 and par(0x1e536c, 0x1e5374) == 0x40bde8, 'ELF inesperado (472B60)'
+    out += b'PAC1' + bytes(E.lee(0x40bcc8, 8 * 0x48)) + bytes(E.lee(0x40bde8, 4 * 0x48))
+    print('MIX2: %d misiones con zonas de derrape (%d zonas)' % (sum(1 for x in listas if x),
+          sum(struct.unpack_from('<I', x)[0] for x in listas if x)))
+    return out
 
 if __name__ == '__main__':
     main()

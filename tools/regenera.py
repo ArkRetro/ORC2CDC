@@ -11,13 +11,20 @@ Linux y en Windows (el programa de windows/): mismos pasos, mismas salidas.
  - --gdi: despues, el GD-ROM (disc.gdi y las tres pistas) en esa carpeta con tools/gdi.py (sin herramientas externas).
 Lo que sale del disco no va al repositorio. Tiempo: unas horas en 4 nucleos (la visibilidad PVS de cada etapa y union
 es lo que mas tarda). Sale con error si falla cualquier paso.
-Las partes en C (tools/c: musica, pvs, visible) y ffmpeg: tools/nativo.py (en Windows, ya compiladas: OR2_NATIVO)."""
+Las partes en C (tools/c: musica, pvs, visible) y ffmpeg: tools/nativo.py (en Windows, ya compiladas: OR2_NATIVO).
+ - Paso OPCIONAL (--extras DIR; por defecto la carpeta extras/ al lado de datos/): si alli estan
+   splash_wave_remaster.mp3 y supneo.jpg (los de tu disco no: los pones tu), tools/menu_musica.py anade al selector
+   de musica la tarjeta SPLASH WAVE REMASTER (MENU.DAT parcheado, MUS70.ADP y MUS71.ADP) y tools/fsp_musica.py la fila
+   de mas en "Elige la musica" de OUTRUN2SP (SPFE.DAT parcheado). Sin ellos no hace nada."""
 import struct, glob, os, shutil, subprocess, sys, threading, time
 from concurrent.futures import ThreadPoolExecutor
 
 TOOLS = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, TOOLS)
 ARBOLES = '1,' + ','.join(str(i) for i in range(100, 194))       # OUTRUN2SP y los cursos de Races.bin (100 + registro)
+# CURSO.DAT lleva ademas el arbol 302, el campeonato de Holly de COAST 2 COAST (Req_Course_MIX_PS2, conv_union.ARBOLES_REQ),
+# con sus 11 uniones nuevas BK498..508 (conv_union.BK_REQ) al final de UNIONES.PAK (pak_union.AL_FINAL)
+ARBOLES_CURSO = ARBOLES + ',302'
 # CONTRARRELOJ (tableros de cursos, conv_union.arbol_ta): los arboles 200 + codigo (0..0x53) en CURSOTA.DAT y sus
 # uniones nuevas (BK262.. en UNIONESTA.PAK; las de los arboles de arriba conservan su numero)
 # y (revision 44) los cursos seguidos del OUTRUN de la consola (tablero 0x24, juegos 2 / 3: csc_data_2_ren_course y
@@ -27,7 +34,7 @@ ARBOLES_TA = ARBOLES + ',' + ','.join(str(200 + c) for c in range(0x54)) + ',290
 UNIONES_TA = ['UNIONESTA.PAK', 'CURSOTA.DAT']
 UNIONES_REN = ['UNIONESR.PAK']
 BK_REN = 470                                                     # la primera union de los arboles 290 / 291
-NBK = 498                                                        # descriptores BK0..497: 262 de UNIONES.PAK, 208 de UNIONESTA.PAK y 28 de UNIONESR.PAK
+NBK = 509                                                        # descriptores BK0..508: 262 + 11 (BK498..508) de UNIONES.PAK, 208 de UNIONESTA.PAK y 28 de UNIONESR.PAK
 # temas, resultados de OUTRUN2SP (28), menu, avances y metas (sin la 64: no la usa la meta)
 MUSICA = list(range(0, 29)) + [30] + list(range(33, 61)) + [61, 62, 63, 65, 66]
 PARTES = 4                                                       # conv_union.py --parte=k/n (al menos; o --jobs)
@@ -184,7 +191,7 @@ def paso(C, n, log):
         ej(T('conv_union.py'), ISO, os.path.join(W, 'uren'), '--arboles=' + ARBOLES_TA, '--bk-desde=%d' % BK_REN, '--curso=CURSOTA.DAT',
            '--parte=%s/%d' % (n[8:], C.partes))
     elif n.startswith('union'):
-        ej(T('conv_union.py'), ISO, os.path.join(W, 'u'), '--arboles=' + ARBOLES, '--parte=%s/%d' % (n[5:], C.partes))
+        ej(T('conv_union.py'), ISO, os.path.join(W, 'u'), '--arboles=' + ARBOLES_CURSO, '--parte=%s/%d' % (n[5:], C.partes))
     elif n == 'curso':                                   # BK00..14, BKD, SOL, COLBK*, CURSO del modo
         ej(T('conv_union.py'), ISO, t, '--sin-tramos')
         u0 = os.path.join(W, 'u0'); os.makedirs(u0, exist_ok=True)
@@ -215,7 +222,8 @@ def paso(C, n, log):
     elif n == 'meta': ej(T('conv_meta.py'), ISO, t); mueve(D, tj('META.DAT'))
     elif n == 'salida': ej(T('conv_salida.py'), ISO, t); mueve(D, tj('SALIDA.DAT'))
     elif n == 'infarto':
-        ej(T('conv_infarto.py'), ISO, t); mueve(D, tj('INFARTO.DAT'), tj('INFARTOP.DAT'), tj('HAHUD.DAT'), tj('VOCESH.DAT'))
+        ej(T('conv_infarto.py'), ISO, t); ej(T('conv_chr.py'), ISO, tj('CHRH.DAT'), '--infarto')
+        mueve(D, tj('INFARTO.DAT'), tj('INFARTOP.DAT'), tj('INFARTOX.DAT'), tj('CHRH.DAT'), tj('HAOSO.DAT'), tj('HAOBJ.DAT'), tj('HAHUD.DAT'), tj('VOCESH.DAT'), tj('VOCESHC.DAT'))
     elif n == 'fin': ej(T('conv_fin.py'), ISO, t, prev('fin')); mueve(D, *[tj(f) for f in FIN])
     elif n == 'sp':
         ej(T('conv_sp.py'), ISO, t, prev('sp'))
@@ -226,10 +234,11 @@ def paso(C, n, log):
     elif n == 'bo': ej(T('conv_bo.py'), ISO, t); mueve(D, tj('BO*.DAT'))
     elif n == 'trafico': ej(T('conv_trafico.py'), ISO, t, '--ligero'); mueve(D, tj('TRAF*.DAT'), tj('TAPD.DAT'))   # (trafico -10 %: docs/PARIDAD.md)
     elif n == 'rivales':                                 # COAST 2 COAST: los coches de carreras (obj_rc, modelos 0..29)
-        ej(T('conv_trafico.py'), ISO, t, '--rivales=' + ','.join(str(k) for k in range(30))); mueve(D, tj('RC*.DAT'))
+        ej(T('conv_trafico.py'), ISO, t, '--rivales=' + ','.join(str(k) for k in range(30)), '--ligero'); mueve(D, tj('RC*.DAT'))
     elif n == 'mision': ej(T('conv_mision.py'), ISO, t); mueve(D, tj('MISION.DAT'))   # Races.bin y tablas de 47CF40
     elif n == 'c2chud': ej(T('conv_hud.py'), ISO, t, '--c2c'); mueve(D, tj('C2CHUD.DAT'))   # HUD de las misiones de C2C
     elif n == 'c2c': ej(T('conv_c2c.py'), ISO, t); mueve(D, tj('C2C.DAT'))   # pantallas de C2C (banco 0x44, menu.c)
+    elif n == 'camp': ej(T('conv_camp.py'), ISO, t); mueve(D, tj('CAMP.DAT'), tj('CAMPHUD.DAT'), tj('CAMPOBJ.DAT'), tj('VOCESM.DAT'))   # campeonatos de C2C (campeonato.c)
     elif n == 'salon': ej(T('conv_salon.py'), ISO, t); mueve(D, tj('SALON.DAT'))   # el SALON (showroom, banco 0x44, menu.c)
     elif n == 'tablero': ej(T('conv_tablero.py'), ISO, t); mueve(D, tj('TABLERO.DAT'))   # tableros de cursos (banco 0x44, menu.c)
     elif n == 'camiones':                                        # los camiones con remolque de OUTRUN2SP (39/40, 41, 43)
@@ -282,7 +291,16 @@ def interno(a):
     else: raise SystemExit('interno: %s' % a[0])
 
 # ---------------------------------------------------------------- principal
-def regenera(iso, D, W, jobs=4, informe=print):
+def extras_hechos(D, fs):
+    """la tarjeta de menu_musica.py ya esta en D y es de estos ficheros (no mas viejos que ellos)"""
+    import menu_musica
+    sal = [os.path.join(D, f) for f in ('MUS%d.ADP' % menu_musica.PISTA, 'MUS%d.ADP' % menu_musica.PISTA_AVANCE)]
+    if not all(os.path.isfile(f) for f in sal) or not menu_musica.tiene(os.path.join(D, 'MENU.DAT')): return False
+    import fsp_musica
+    if os.path.isfile(os.path.join(D, 'SPFE.DAT')) and not fsp_musica.tiene(os.path.join(D, 'SPFE.DAT')): return False
+    return min(os.path.getmtime(f) for f in sal) >= max(os.path.getmtime(f) for f in fs)
+
+def regenera(iso, D, W, jobs=4, informe=print, extras=None):
     """rehace lo que falta en D; devuelve True si los datos estan completos"""
     iso = os.path.abspath(iso)
     if not os.path.isfile(iso): raise SystemExit('no esta la ISO: %s' % iso)
@@ -338,11 +356,11 @@ def regenera(iso, D, W, jobs=4, informe=print):
     for fs, n in ((['EFECTOS.DAT'], 'efectos'), (['FAROS.DAT'], 'faros'), (chrs, 'chr'), (['BAND.DAT', 'BAND1.DAT'], 'band'), (['PARAM.DAT'], 'param'),
                   (['META.DAT'], 'meta'), (FIN, 'fin'),
                   (SP, 'sp'), (FINAL, 'final'),
-                  (['SALIDA.DAT'], 'salida'), (['INFARTO.DAT', 'INFARTOP.DAT', 'HAHUD.DAT', 'VOCESH.DAT'], 'infarto'), (['BO.DAT'] + BO, 'bo'),
+                  (['SALIDA.DAT'], 'salida'), (['INFARTO.DAT', 'INFARTOP.DAT', 'INFARTOX.DAT', 'CHRH.DAT', 'HAOSO.DAT', 'HAOBJ.DAT', 'HAHUD.DAT', 'VOCESH.DAT', 'VOCESHC.DAT'], 'infarto'), (['BO.DAT'] + BO, 'bo'),
                   (['TRAFC.DAT', 'TAPD.DAT'] + TRAF, 'trafico'), (['TRAFK0.DAT', 'TRAFK1.DAT', 'TRAFK2.DAT'], 'camiones'),
                   (['MVTS.VQV'], 'video_ts'), (['MVATTR.VQV'], 'video_attr'),
                   (['RC%02d.DAT' % k for k in range(30)], 'rivales'), (['MISION.DAT'], 'mision'), (['C2CHUD.DAT'], 'c2chud'),
-                  (['C2C.DAT'], 'c2c'), (['SALON.DAT'], 'salon'), (['TABLERO.DAT'], 'tablero')):
+                  (['C2C.DAT'], 'c2c'), (['CAMP.DAT', 'VOCESM.DAT'], 'camp'), (['SALON.DAT'], 'salon'), (['TABLERO.DAT'], 'tablero')):
         if not hay(D, *fs): falta.append(n)
     if 'fin' not in falta and hay(D, 'GOALT.DAT') and not tiene(D, 'GOALT.DAT', b'T_MEJOR'): falta.append('fin')
     if 'tablero' not in falta and hay(D, 'TABLERO.DAT') and not tiene(D, 'TABLERO.DAT', b'LST1'): falta.append('tablero')
@@ -464,14 +482,41 @@ def regenera(iso, D, W, jobs=4, informe=print):
                       ('TRAF*.DAT', 'CHR[0-9]*.DAT', 'BAND*.DAT', 'BO[0-9]*.DAT'))))
     informe('== version lejana lowpoly de lo grande (tools/lod_grande.py; lo ya hecho no cambia)')
     post('lodgrande', py(os.path.join(TOOLS, 'regenera.py'), '--interno', 'lodgrande', D, os.path.join(W, 'lodgrande')))
+    # mipmaps en lo lejano (tools/remip.py, docs/PARIDAD.md): sobre las etapas y uniones ya hechas, una vez (no es
+    # idempotente por si solo: cada pasada gastaria otra vez lo minimo de cada fichero; la marca va en trabajo/)
+    if not os.path.isfile(os.path.join(W, 'remip.hecho')):
+        informe('== mipmaps en lo lejano (tools/remip.py)')
+        post('remip', py(os.path.join(TOOLS, 'remip.py'), '--datos', D, D, os.path.join(W, 'remip')))
+        with open(os.path.join(W, 'remip.hecho'), 'w') as f: f.write('hecho\n')
+
+    # paso opcional: la tarjeta SPLASH WAVE REMASTER del selector de musica, solo con sus ficheros en extras/
+    # (tools/menu_musica.py: parche del MENU.DAT de D, que no se puede rehacer desde cero, y MUS70 / MUS71.ADP)
+    import menu_musica
+    E = os.path.abspath(extras or os.path.join(os.path.dirname(D), 'extras'))
+    fs = [os.path.join(E, f) for f in menu_musica.EXTRAS]
+    if all(os.path.isfile(f) for f in fs) and hay(D, 'MENU.DAT'):
+        informe('== extras: tarjeta SPLASH WAVE REMASTER en el selector de musica (menu_musica.py, %s)' % E)
+        if extras_hechos(D, fs): informe('  ya estaba')
+        else:
+            t = os.path.join(W, 'extras'); borra(t)
+            post('extras', py(os.path.join(TOOLS, 'menu_musica.py'), os.path.join(D, 'MENU.DAT'), fs[0], fs[1], t), 3)
+            for f in ('MUS%d.ADP' % menu_musica.PISTA, 'MUS%d.ADP' % menu_musica.PISTA_AVANCE, 'MENU.DAT'):
+                os.replace(os.path.join(t, f), os.path.join(D, f))
+            borra(t)
+            if hay(D, 'SPFE.DAT'):                       # la fila de mas en "Elige la musica" de OUTRUN2SP (fsp_musica.py)
+                post('extras_fsp', py(os.path.join(TOOLS, 'fsp_musica.py'), os.path.join(D, 'SPFE.DAT'),
+                                      os.path.join(D, 'MENU.DAT'), fs[1], t), 1)
+                os.replace(os.path.join(t, 'SPFE.DAT'), os.path.join(D, 'SPFE.DAT'))
+                borra(t)
+    else: informe('== extras: sin %s (paso opcional: no se anade la tarjeta SPLASH WAVE REMASTER)' % ' / '.join(fs))
 
     # ------------------------------------------------------------ comprobacion
     informe('== comprobacion de %s' % D)
     ok = True
     nec = ['BAND.DAT', 'BAND1.DAT', 'BKD.DAT', 'BO.DAT'] + chrs + \
-          'COCHES.DAT COLBK.DAT COLLR.DAT CURSO.DAT EFECTOS.DAT FAROS.DAT FIN.DAT GOVER.DAT HAHUD.DAT HUD.DAT INFARTO.DAT MENU.DAT META.DAT MODOV.DAT MVATTR.VQV MVTS.VQV PARAM.DAT SFX.DAT SEGS.PAK SOL.DAT TAPD.DAT TRAFC.DAT UNIONES.PAK VMU.DAT VOCES.DAT VOCESH.DAT VOCESC.DAT MISION.DAT C2CHUD.DAT C2C.DAT SALON.DAT TABLERO.DAT CURSOTA.DAT UNIONESTA.PAK UNIONESR.PAK'.split() + ['RC%02d.DAT' % k for k in range(30)] + \
+          'COCHES.DAT COLBK.DAT COLLR.DAT CURSO.DAT EFECTOS.DAT FAROS.DAT FIN.DAT GOVER.DAT HAHUD.DAT HUD.DAT INFARTO.DAT MENU.DAT META.DAT MODOV.DAT MVATTR.VQV MVTS.VQV PARAM.DAT SFX.DAT SEGS.PAK SOL.DAT TAPD.DAT TRAFC.DAT UNIONES.PAK VMU.DAT VOCES.DAT VOCESH.DAT VOCESC.DAT MISION.DAT C2CHUD.DAT C2C.DAT CAMP.DAT CAMPHUD.DAT VOCESM.DAT SALON.DAT TABLERO.DAT CURSOTA.DAT UNIONESTA.PAK UNIONESR.PAK'.split() + ['RC%02d.DAT' % k for k in range(30)] + \
           ['COCHE%02d.DAT' % k for k in range(15)] + ['COCHE%02dL.DAT' % k for k in range(15)] + ['MUS%d.ADP' % k for k in MUSICA] + SP + FINAL + \
-          ['TRAFK%d.DAT' % k for k in range(3)] + FIN + TRAF + BO + COLBK + ['SALIDA.DAT', 'CHRPAR.DAT', 'VISO.DAT', 'INFARTOP.DAT']
+          ['TRAFK%d.DAT' % k for k in range(3)] + FIN + TRAF + BO + COLBK + ['SALIDA.DAT', 'CHRPAR.DAT', 'VISO.DAT', 'INFARTOP.DAT', 'INFARTOX.DAT', 'CHRH.DAT', 'HAOSO.DAT', 'HAOBJ.DAT']
     for f in nec:
         if not hay(D, f): informe('FALTA %s' % f); ok = False
     ls = sorted(os.listdir(D))
@@ -502,7 +547,7 @@ def main():
     if a and a[0] == '--interno': return interno(a[1:])
     op = {}; pos = []; i = 0
     while i < len(a):
-        if a[i] in ('--jobs', '--gdi', '--bin', '--ip'): op[a[i][2:]] = a[i + 1]; i += 2
+        if a[i] in ('--jobs', '--gdi', '--bin', '--ip', '--extras'): op[a[i][2:]] = a[i + 1]; i += 2
         elif a[i] == '--limpia': op['limpia'] = True; i += 1
         else: pos.append(a[i]); i += 1
     if len(pos) < 2: raise SystemExit(__doc__)
@@ -510,7 +555,7 @@ def main():
     W = pos[2] if len(pos) > 2 else ('/dev/shm/or2_regenera' if os.path.isdir('/dev/shm') else
                                       os.path.join(os.path.dirname(os.path.abspath(D)), 'trabajo'))
     jobs = int(op.get('jobs') or os.environ.get('JOBS') or 4)
-    regenera(iso, D, W, jobs)
+    regenera(iso, D, W, jobs, extras=op.get('extras'))
     if op.get('limpia'): limpia(W)
     if op.get('gdi'):
         import gdi
