@@ -97,8 +97,12 @@ void vm_etapa(int n, const uint8_t *tipo, const uint8_t *sub, int fila, int *rnd
         if (e[0] == 0xff) continue;
         if (e[0] == 0xfe) {                             /* 16/2: SOUND con una sola peticion (0x22bd40 == 0x22bd60) */
             if (n == 1) pon(e[1]); else { rnd[i] = rand() % 7; pon(e[1] + 1 + rnd[i]); }
-        } else if (e[1] > 1) { rnd[i] = rand() % e[1]; pon(e[0] + rnd[i]); }   /* 13 FOOD, 16/6 CARS: +8 = rand % n */
-        else pon(e[0]);
+        } else if (e[1] > 1) {                          /* 13 FOOD, 16/6 CARS: +8 = rand % n */
+            rnd[i] = rand() % e[1];
+            /* FOOD1..6 son bancos seguidos (0x4152e0[rnd]); CARS es uno solo (0x22afec: el azar elige la voz y los
+               coches, no el banco; con + rnd salian UFO.pak o HOLDLINE.pak, vacio, y el minijuego sin voces) */
+            pon(tipo[i] == 16 ? e[0] : e[0] + rnd[i]);
+        } else pon(e[0]);
     }
     for (j = 0; j < V.nl; j++) { nf += (int)V.b[V.lista[j]].n; tam += (V.b[V.lista[j]].bytes + 31) & ~31u; }
     if (!nf || !(V.filas = malloc(20 * nf)) || !(V.aica = snd_mem_malloc(tam))) {
