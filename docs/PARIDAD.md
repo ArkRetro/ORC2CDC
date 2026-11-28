@@ -8969,3 +8969,12 @@ de caras) no se ponia y la acompanante se quedaba en la ultima postura de la rea
   Barchetta, datos de lgdat2): antes, la peticion 4 pide 0x26000d como la 3 y no sale "DIAGHA acompanante: movimiento"
   (no se pone); despues todas se ponen. PROBABLE, no visto: que esa postura que se queda sea la "de pie" del usuario; en
   las capturas (200 s) no se ve de pie ni antes ni despues.
+
+## copi: la acompanante de pie encima del coche (DESVIACION, 2026-11-28)
+- El usuario lo vio en INFARTO con el Dino 246 GT y en Flycast se reproduce (ficha 13, menu INFARTO). Los movimientos
+  0x26000d (final de la peticion tipo 2) y 0x260010 (hoja de resultados del nivel), de CHRH.DAT, la ponen de pie con las
+  piernas por encima del techo: la altura media de sus huesos sube 0,65-0,70 m, mientras que las reacciones sentada no
+  pasan de 0,09 m. Los filtros de las peticiones son los del PS2 (desensamblado, coches4); la causa exacta (el hueso
+  raiz de esos movimientos con T(asiento)) queda sin confirmar.
+- Arreglo provisional en comun/robot.c (acompanante): si esa altura se aleja mas de COPI_DE_PIE (0,3 m) de la de
+  sentada (0x6004b), vuelve a sentada en el mismo cuadro. Probado en Flycast: corta los dos (DIAGHA "de pie con ...").
