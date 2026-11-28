@@ -86,19 +86,21 @@ static void pon(int b)
 
 void vm_etapa(int n, const uint8_t *tipo, const uint8_t *sub, int fila, int *rnd)
 {
-    static const uint8_t NADA[2] = { 0xff, 0 };
     int i, j, nf = 0; uint32_t tam = 0;
-    for (i = 0; i < n; i++) rnd[i] = -1;
-    if (!V.cab) return;
-    suelta();
+    suelta();                                           /* (V.cab: vm_abre ya ha dicho que si; n <= 3, camp_etapa) */
     pon(0); pon(1 + (fila & 3));                        /* COMMON y RANK1..4 */
     for (i = 0; i < n && i < 3; i++) {                  /* 0x22ac00, estado 0: el de cada peticion (0x415280) */
-        const uint8_t *e = tipo[i] < 25 && sub[i] < 8 ? V.tab + 2 * (8 * tipo[i] + sub[i]) : NADA;
-        if (e[0] == 0xff) continue;
-        if (e[0] == 0xfe) {                             /* 16/2: SOUND con una sola peticion (0x22bd40 == 0x22bd60) */
-            if (n == 1) pon(e[1]); else { rnd[i] = rand() % 7; pon(e[1] + 1 + rnd[i]); }
-        } else if (e[1] > 1) { rnd[i] = rand() % e[1]; pon(e[0] + rnd[i]); }   /* 13 FOOD, 16/6 CARS: +8 = rand % n */
-        else pon(e[0]);
+        const uint8_t *e = V.tab + 2 * (8 * tipo[i] + sub[i]); int b = -1, k = -1;
+        if (tipo[i] >= 25 || sub[i] >= 8 || e[0] == 0xff) ;
+        else if (e[0] == 0xfe) {                        /* 16/2: SOUND con una sola peticion (0x22bd40 == 0x22bd60) */
+            b = e[1]; if (n > 1) { k = rand() % 7; b += 1 + k; }
+        } else {                                        /* 13 FOOD, 16/6 CARS: +8 = rand % n */
+            b = e[0]; if (e[1] > 1) { k = rand() % e[1]; if (e[1] == 6) b += k; }
+            /* FOOD1..6 son bancos seguidos (0x4152e0[rnd], n = 6); CARS (n = 3) es uno solo (0x22afec: el azar elige la
+               voz y los coches, no el banco; con + rnd salian UFO.pak o HOLDLINE.pak, vacio, y el minijuego sin voces) */
+        }
+        if (b >= 0) pon(b);
+        rnd[i] = k;
     }
     for (j = 0; j < V.nl; j++) { nf += (int)V.b[V.lista[j]].n; tam += (V.b[V.lista[j]].bytes + 31) & ~31u; }
     if (!nf || !(V.filas = malloc(20 * nf)) || !(V.aica = snd_mem_malloc(tam))) {

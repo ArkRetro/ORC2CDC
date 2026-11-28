@@ -8922,3 +8922,50 @@ decoracion -15 % y fachadas de PALM a la mitad de lado). Todo probado en Flycast
   aligerados (los rehace con `conv_coche.py --visible` sin los parametros del agente ferrari; regenera.py de la
   clasica tampoco los pasa). Hasta entonces esos ficheros se copian a mano (lista de modos/mod3/dat).
 - Nada en la consola real.
+## COAST 2 COAST: campeonatos, decima tanda (agente c2c10, 2026-11-28): voces del minijuego de los coches y nivel de SPLASH WAVE REMASTER
+
+Sobre integra 14bf114 (rama c2c10, sin push). Pruebas solo en Flycast (`-DPRUEBA_AUTO -DPRUEBA_CAMP=0/1/2 -DPRUEBA_SIN_TIEMPO`,
+datos $S/dmip). Afecta igual a la clasica y al Mod (el codigo de vozmis.c y menu_musica.py es comun).
+- FALLO (c2c9): vm_etapa sumaba el azar del 16/6 (rand % 3, 0x22afec) al banco: CARS + 0..2 = CARS, UFO.pak o HOLDLINE.pak
+  (vacio). El azar elige la voz y los coches, no el banco (solo FOOD1..6 del 13 son bancos seguidos). Antes: "VOZM: etapa con
+  4 bancos (COMMON.pak RANK3.pak HOLDLINE.pak FOOD1.PAK)" y el 16/6 sin las voces 0x18a / 0x15e; ahora CARS.PAK y suenan.
+  vm_etapa reescrita sin crecer: .text 0xbbff0 -> 0xbbfd0 (integra iba a 16 bytes del paso de 8 KB de .init; la primera
+  version del arreglo lo pasaba: 491K libres al arrancar en vez de 499K). _end igual que integra.
+- FALLO (mezcla): MUS70.ADP / MUS71.ADP (SPLASH WAVE REMASTER) a -18,5 / -18,9 dBFS RMS y los temas de carrera del original a
+  -11..-16 (mediana -13,6; pista entera decodificada del ADPCM de Yamaha): la cancion sonaba 5 dB por debajo y las voces
+  (-14,9 dBFS RMS mientras hablan, medido en Flycast con SDL disk y PRUEBA_MEZCLA=3) la tapaban. menu_musica.py la lleva a
+  -13,6 dBFS RMS con pico <= -0,5 dBFS (+5,0 dB). ALL I WANT del Mod (MUS67) ya esta en -11,8: sin cambio.
+- Sin cambio en el codigo de volumen (vol_se, musica_nivel, sfx_master) respecto de la Rev 2.9.9: no es una regresion del motor.
+## Ferrari aligerados: caras fuera de la carroceria (coches4, 2026-11-28)
+Fallo visto por el usuario en la Rev 3.0 y el Mod 2.6 ("los coches tienen poligonos fuera de sitio"). Causa medida (en
+los ficheros, Flycast solo para ver): la tanda "Ferrari con menos vertices" (`--razon 0.3 --error 0.05 --giro 0.3
+--borde 3 --cerca C`) deja en los COCHEnnL.DAT de carrera caras que se separan de la superficie original hasta 15-23 cm
+(fichas 0, 1, 3, 6, 12: entre 3 000 y 10 000 muestras a mas de 6 cm; los de lgdat2, con 0,6 y el tope 1e-3: 0-25
+muestras y un maximo de 3-9 cm); en las ruedas hasta 13 cm. No es un cambio de pieza ni de matriz: todos los vertices
+siguen en posiciones originales de su misma pieza (colapso u -> v a un vertice vecino de la misma pieza), ANI1 y los
+nodos (pieza << 8) salen identicos. Es el error que deja pasar `--error 0.05` (50 veces el tope, y el error es la
+cuadrica generalizada con UV, color y normal, no metros) junto con `--giro 0.3` (caras que giran hasta ~72 grados):
+puentes sobre huecos, esquinas cortadas y pliegues.
+- Arreglo en `tools/conv_coche.py`: `--dist d` (VIS_DIST; ligero y menu): un colapso solo vale si todas las caras nuevas
+  quedan a menos de d (m) de la superficie original de su pieza (muestras cada cm, 15 puntos por cara). Sin la opcion,
+  como antes. Con la llamada de la tanda y `--dist 0.025` (ficha 3): carrera 4430 vertices dibujados (4131 sin --dist),
+  maximo 3,2 cm (11 muestras > 3 cm, ninguna > 6 cm); menu 6463, maximo 2,4 cm. Ademas tarda la mitad.
+- Entregado: los Ferrari vuelven a los de lgdat2 (decision del coordinador). La llamada con `--dist 0.025` queda para
+  otra tanda; falta generar las 14 fichas y medir fps / triangulos en Flycast.
+- Medida: `$S/modos/coches4/sh/sup.py <completo.DAT> <x.DAT>...` (distancia de cada superficie a la del COCHEnn.DAT de
+  lgdat2, por pieza).
+
+## La acompanante y las peticiones: salida "Reset" de 489A90 (coches4, 2026-11-28)
+Fallo del usuario (Rev 3.0 y Mod 2.6): "la copiloto a veces se pone de pie en el coche". No viene de los datos: su sitio
+es T(asiento) de la tabla ASNT del RBT1 de la pareja por car+0x11 y ani_m[0] del bloque ANI1, que sale identico en los
+Ferrari aligerados (comprobado fichero a fichero); con los COCHE de lgdat2 tambien se ve igual. Lo nuevo desde la Rev
+2.9.9 (4b1c25b) es el estado R_POSE (c4fc1bc INFARTO, a8d040a C2C: robot_pide). Desensamblado de SLES-53998: cuando
+acaba la postura (0x203844..0x20385c: +78 == 2) el original pone Idle y salta a 0x203c98, que pone -1 en work+6C y +74
+(la salida Exit::Reset del PC, 48A647); igual en todas las reacciones salvo las de +68 / +70, la postura en curso y el
+giro con el coche cerrado. El port no lo hacia: una peticion que repetia el movimiento de la anterior (o la misma fila
+de caras) no se ponia y la acompanante se quedaba en la ultima postura de la reaccion anterior.
+- Arreglo: comun/robot.c acompanante(), `rs` y `lg.w6c = lg.w74 = -1` en esas salidas.
+- E (Flycast, `-DPRUEBA_AUTO -DPRUEBA_CAMP=1 -DPRUEBA_CAMP_PASA -DPRUEBA_SIN_TIEMPO -DDIAG_HA -DPRUEBA_FICHA=12`, 550
+  Barchetta, datos de lgdat2): antes, la peticion 4 pide 0x26000d como la 3 y no sale "DIAGHA acompanante: movimiento"
+  (no se pone); despues todas se ponen. PROBABLE, no visto: que esa postura que se queda sea la "de pie" del usuario; en
+  las capturas (200 s) no se ve de pie ni antes ni despues.

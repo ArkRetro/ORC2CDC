@@ -808,9 +808,11 @@ static void a_reposo(motor_t *m)                    /* 4886B0 */
 }
 static void acompanante(const robot_coche_t *c)     /* 489A90 (variante 1) */
 {
-    motor_t *m = MOT(1); uint32_t slide = c->sup & 0x10f407cu; int st = lg.a_est, k, a;
+    motor_t *m = MOT(1); uint32_t slide = c->sup & 0x10f407cu; int st = lg.a_est, k, a, rs = 1;
     static const uint8_t GRANDE[7] = { 0, 1, 0, 0, 1, 0, 0 };
-    /* reacciones */
+    /* reacciones (rs: la salida que en el original pone -1 en +6C y +74, PS2 0x203c98; sin ella, una peticion que
+       repite el movimiento o la fila de caras de la anterior no se ponia: la acompanante se quedaba en la ultima
+       postura, coches4) */
     do {
         if (st == R_START) { lg.a_est = R_IDLE; break; }
         if (c->fase == 2) { if (st != R_GOAL) { lg.a_est = R_GOAL; lg.a_fin = 0; } break; }
@@ -840,7 +842,7 @@ static void acompanante(const robot_coche_t *c)     /* 489A90 (variante 1) */
                 dbglog(DBG_INFO, "DIAGHA acompanante: movimiento 0x%x (%s)\n", (unsigned)lg.w68, busca_mov(m, (uint32_t)lg.w68) ? "esta" : "NO esta");
 #endif
             }
-            lg.w68 = -1; break;
+            lg.w68 = -1; rs = 0; break;
         }
         if (lg.w70 >= 0 && x_caras) {
             lg.a_est = R_POSE;
@@ -850,21 +852,22 @@ static void acompanante(const robot_coche_t *c)     /* 489A90 (variante 1) */
                 dbglog(DBG_INFO, "DIAGHA acompanante: cara %d (0x%x, %s)\n", lg.w70, (unsigned)x_caras[3 * (lg.w70 % 6)], busca_mov(m, x_caras[3 * (lg.w70 % 6)]) ? "esta" : "NO esta");
 #endif
             }
-            lg.w70 = -1; break;
+            lg.w70 = -1; rs = 0; break;
         }
-        if (st == R_POSE) { if (fin_mov(m) && lg.w78 == 2) { lg.a_est = R_IDLE; lg.a_tiempo = 0; } break; }
+        if (st == R_POSE) { if (fin_mov(m) && lg.w78 == 2) { lg.a_est = R_IDLE; lg.a_tiempo = 0; } else rs = 0; break; }
         if (c->kmh >= 100) {                        /* giro brusco */
             a = c->s4e < 0 ? -c->s4e : c->s4e;
             if (a > 0x2000 && a < 0x4000) {
-                if (st == R_TURN || lg.cerr) break;
+                if (st == R_TURN || lg.cerr) { rs = 0; break; }
                 lg.a_est = R_TURN; pon_mezcla(m, elige(&lg.pick_turn, 0x28), 0); avanza(&lg.pick_turn, 0x28);
                 break;
             }
         }
         if (lg.a_tiempo > 0xb4) {                   /* aburrida */
             lg.a_est = R_BORED; pon_mezcla(m, elige(&lg.pick_idle, 8), 0); avanza(&lg.pick_idle, 8); lg.a_tiempo = 0;
-        }
+        } else rs = 0;
     } while (0);
+    if (rs) lg.w6c = lg.w74 = -1;                   /* PS2 0x203c98 (el 48A647 del PC) */
     /* 48A6BC: la reaccion en curso */
     switch (lg.a_est) {
     case R_IDLE: lg.a_tiempo++; break;
