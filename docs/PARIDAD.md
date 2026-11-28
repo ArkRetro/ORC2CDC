@@ -8978,3 +8978,81 @@ de caras) no se ponia y la acompanante se quedaba en la ultima postura de la rea
   raiz de esos movimientos con T(asiento)) queda sin confirmar.
 - Arreglo provisional en comun/robot.c (acompanante): si esa altura se aleja mas de COPI_DE_PIE (0,3 m) de la de
   sentada (0x6004b), vuelve a sentada en el mismo cuadro. Probado en Flycast: corta los dos (DIAGHA "de pie con ...").
+
+## Recorte: farolas, carteles y muros de las bifurcaciones (agente recorte, 2026-11-28; DESVIACION pedida)
+
+Pedido del usuario (literal): "en todas las rutas en las bifurcaciones quites el 50% de las farolas, quiero que en
+todas las etapas quites el 50% de los carteles que están en los márgenes de carretera, quiero que en todas las etapas
+las texturas de los muros de las bifurcaciones estén en 32x32. en todas las etapas de outrun2 y outrun2sp". No esta en
+el original: es para aligerar. Solo datos (sin cambios en la demo), en `tools/aligera.py` (punto 3 de su docstring),
+sobre la rama integra (984f949). Probado solo en Flycast (no en consola real).
+
+**Herramienta**: `tools/aligera.py --datos entrada/ salida/ trabajo/` hace ahora tambien el recorte (`--sin-recorte`
+para no hacerlo, `--solo-recorte` para hacer solo el). `tools/regenera.py` lo pasa una vez detras de aligera (marca
+`trabajo/recorte.hecho`). Marca en los datos (`aligera.ya_recortado`): si los muros de BK00 ya son de 32, el recorte no
+se repite; la decoracion y PALM siguen con su marca de antes (`ya_hecho`), asi que pasar aligera sobre unos datos ya
+aligerados solo anade lo que falta. Determinista: los mismos nodos y mallas siempre (orden por la ruta y hashes de la
+posicion, como la decoracion).
+
+### 1. Carteles de la carretera -50 % (las 62 SEGnn.DAT)
+- Que es un cartel: el campo `cartel` de los nodos NO lo dice (>= 0 es la matriz de un cuadrilatero orientado a la
+  camara: los arboles lejanos de lod_veg.py; <= -2, la version lejana de un nodo). Los carteles se reconocen por la
+  textura del tablero: firma de 16x8 colores normalizada (media y contraste, para que salgan los de las zonas oscuras:
+  CAST, FORE, GHOS, FLOR) a menos de 20 de REF_CARTEL (flecha de curva amarilla en sus dos dibujos, SLOW DOWN, panel de
+  flechas rojas y blancas y flechas rojas de OR2SP; tambien en espejo) y mas cerca de ellas que de la pancarta CHECK
+  POINT (REF_NO_CARTEL). Distancias medidas: carteles <= 12,7; CHECK POINT <= 2,8 (de los otros); el resto de
+  texturas >= 27. Hoja de todas las elegidas (amarillo) y de las CHECK POINT descartadas (azul):
+  `$S/modos/recorte/an/tab2.png` (todas miradas: ninguna equivocada).
+- La unidad que se quita: en OR2SP (y en las flechas rojas de OutRun 2) cada cartel es un nodo propio de <= 30 m de
+  planta y <= 16 m de alto: el nodo entero con su version lejana. En OutRun 2 todos los carteles de la etapa y la
+  pancarta del checkpoint van en un solo nodo (el registro de obj_course_obj_cs_<zona>, conv_union.objetos_etapa): ahi
+  el cartel son sus tableros (a menos de 8 m entre si: flecha + SLOW DOWN) y sus postes (mallas de <= 3 m de planta a
+  menos de 7 m). Se quitan poniendo a 0 los vertices de sus mallas, como la decoracion.
+- Entran: flechas de curva, SLOW DOWN, paneles de flechas rojas y blancas de los quitamiedos, filas de flechas rojas.
+- No entran (se quedan): la pancarta CHECK POINT y sus postes, la salida y la meta, todo lo que esta a menos de 100 m
+  (PROTEGE) del principio o del final de la ruta, lo de mas de 30 m de ancho (porticos y arcos que cruzan la
+  carretera), los carteles de direccion de la bifurcacion (van en las uniones BKnn.DAT: el recorte no toca carteles
+  ahi) y las vallas publicitarias (su 15 % es de fps3).
+- Reparto: ordenados por su punto de la ruta y fuera uno de cada dos (el primero, el tercero...).
+- La demo no depende de estos nodos: demo/main.c usa `cartel` solo para dibujar (la matriz del nodo, malla_de_cartel)
+  y en los objetos de las peticiones y la union (otros ficheros); el aviso de la bifurcacion es la union.
+- Total (62 etapas): 1647 carteles, 831 fuera (50,5 %). OutRun 2 (carteles / fuera): PALM 8/4, LAKE 14/7, ALPI 18/9,
+  CAST 18/9, FORE 26/13, DESE 24/12, CLOU 8/4, INDU 64/32, SNOW 16/8, GHOS 22/11, TULI 18/9, METR 24/12, RUIN 24/12,
+  IMPE 41/21, CAPE 21/11. OR2SP: BEAC 10/5, SANF 65/33, YOSE 13/7, NIAG 20/10, SEQU 12/6, GRAN 21/11, MACH 12/6,
+  LASV 17/9, ALAS 29/15, AMAZ 25/13, EAST 28/14, MAYA 16/8, PRIN 25/13, FLOR 40/20, NEWY 22/11. El resto son las
+  copias de las misiones de C2C (las mismas etapas con otra luz); en SEG62 hay 270 (una fila de flechas rojas cada
+  8 m en la curva: cada panel cuenta como uno).
+
+### 2. Farolas de las bifurcaciones -50 % (las uniones BKnn.DAT)
+- Todas las bifurcaciones son la misma geometria (cs_BK_PALM con la luz de cada zona). Farola: nodo con las dos
+  texturas de la farola de BK00 (FAROLA_BK: el poste y la cabeza, por sus bytes: las mismas en todas las uniones) de
+  mas de 8 m de alto (15,3 m). 116 por bifurcacion (46 en las 39 uniones de otra variante); fuera una de cada dos por
+  ruta (la de la union, tronco y rama izquierda, o la de BKD.DAT, rama derecha: la mas cercana) y lado: 59 de 116.
+- Total: 489 uniones con farolas (OutRun 2 BK00-BK09, OR2SP BK15-BK24, las de las misiones y la Contrarreloj, en
+  UNIONES.PAK, UNIONESTA.PAK y UNIONESR.PAK): 53 994 farolas, 27 486 fuera (50,9 %). Las metas (BK10-14, BK25-29) no
+  tienen farolas de la bifurcacion y no cambian. No se tocan los destellos de las luces ni los porticos.
+
+### 3. Muros de las bifurcaciones a 32x32
+- MUROS_BK de BK00: textura 1 (128x128, muro de contencion inclinado gris con hierba arriba, los muros altos a los
+  lados de las ramas) y 12 (128x128, muro bajo de hormigon de 400 m). Elegidas en la hoja de BK00
+  (`$S/modos/recorte/an/bk00.png`) y por su uso (inclinacion de las caras). No entran: el quitamiedos (0, 256x256, es
+  una valla de 1 m), el hormigon del arcen (3: el 93 % en el suelo), las del suelo, cielo, vegetacion y carteles.
+- A 32x32 cuadradas con mipmaps, como los edificios de PALM (remip.remuestrea + remip.codifica, VQ con libro reducido
+  o 16 bits; D adjust el que tenian o el de remip.sesgo si eran rectangulares). En todas las uniones con los mismos
+  bytes y tambien con la misma imagen en otro tamano (firma < 3: en BK02..BK09 el muro bajo es de 128x32), para que la
+  VRAM las siga compartiendo: 978 texturas en 489 uniones, 2 por union. VRAM de cada bifurcacion: 205 -> 193 KB
+  (-12 KB; -5,2 MB sumando las 489 uniones). Las etapas no cambian de VRAM (sus carteles solo pierden mallas).
+
+### Datos (solo en scratchpad) y prueba
+- Clasica: `$S/modos/recorte/dat/` = aligera.py sobre `$S/fach/ent` (la entrada de fps3): SEGS.PAK con sus 62
+  SEGnn.DAT, UNIONES.PAK, UNIONESTA.PAK, UNIONESR.PAK y sus 509 BKnn.DAT. Comprobado: las etapas son las de
+  `$S/fach/dat` mas las mallas de los carteles a 0 (4135 mallas; ningun otro byte distinto); las uniones, las farolas a
+  0 y los dos muros. Carpeta de prueba: `$S/modos/recorte/datos` (enlaces a dmip + dat).
+- Mod Taxi: `$S/modos/recorte/mod/`, lo mismo desde lgmod2 (sin mipmaps); carpeta `$S/modos/recorte/datos_mod`
+  (enlaces a modos/mod3/datos + mod).
+- Pasar aligera.py otra vez sobre los datos ya hechos: "recorte ya aplicado", "nada que hacer".
+- Flycast (no consola real): nav3.sh con la clasica: RAM al arrancar libre 493K, "VOZ: VOCES.DAT, 35 muestras", sin
+  "Out of memory". Capturas congeladas (-DDIAG_CONGELA -DPRUEBA_S0) en `$S/modos/recorte/cap/`: A_* antes, B_*
+  despues; PALM a 700 m del final (carteles: el segundo de la fila de flechas de curva desaparece,
+  carteles_zoom_antes_despues.png) y la bifurcacion de PALM (A_bif / B_bif, bifurcacion_antes_despues.png: faltan farolas alternas; el registro da
+  zona libre de VRAM 607K -> 619K con la union subida, los 12 KB de los dos muros). El Mod no se ha arrancado aqui.
