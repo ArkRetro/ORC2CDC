@@ -8821,3 +8821,18 @@ puentes sobre huecos, esquinas cortadas y pliegues.
   otra tanda; falta generar las 14 fichas y medir fps / triangulos en Flycast.
 - Medida: `$S/modos/coches4/sh/sup.py <completo.DAT> <x.DAT>...` (distancia de cada superficie a la del COCHEnn.DAT de
   lgdat2, por pieza).
+
+## La acompanante y las peticiones: salida "Reset" de 489A90 (coches4, 2026-11-28)
+Fallo del usuario (Rev 3.0 y Mod 2.6): "la copiloto a veces se pone de pie en el coche". No viene de los datos: su sitio
+es T(asiento) de la tabla ASNT del RBT1 de la pareja por car+0x11 y ani_m[0] del bloque ANI1, que sale identico en los
+Ferrari aligerados (comprobado fichero a fichero); con los COCHE de lgdat2 tambien se ve igual. Lo nuevo desde la Rev
+2.9.9 (4b1c25b) es el estado R_POSE (c4fc1bc INFARTO, a8d040a C2C: robot_pide). Desensamblado de SLES-53998: cuando
+acaba la postura (0x203844..0x20385c: +78 == 2) el original pone Idle y salta a 0x203c98, que pone -1 en work+6C y +74
+(la salida Exit::Reset del PC, 48A647); igual en todas las reacciones salvo las de +68 / +70, la postura en curso y el
+giro con el coche cerrado. El port no lo hacia: una peticion que repetia el movimiento de la anterior (o la misma fila
+de caras) no se ponia y la acompanante se quedaba en la ultima postura de la reaccion anterior.
+- Arreglo: comun/robot.c acompanante(), `rs` y `lg.w6c = lg.w74 = -1` en esas salidas.
+- E (Flycast, `-DPRUEBA_AUTO -DPRUEBA_CAMP=1 -DPRUEBA_CAMP_PASA -DPRUEBA_SIN_TIEMPO -DDIAG_HA -DPRUEBA_FICHA=12`, 550
+  Barchetta, datos de lgdat2): antes, la peticion 4 pide 0x26000d como la 3 y no sale "DIAGHA acompanante: movimiento"
+  (no se pone); despues todas se ponen. PROBABLE, no visto: que esa postura que se queda sea la "de pie" del usuario; en
+  las capturas (200 s) no se ve de pie ni antes ni despues.
