@@ -445,13 +445,33 @@ def pcm(cancion, ruta, ini=None, dur=None):
     subprocess.run(cmd, check=True)
 
 
-def adp(cancion, salida, ini=None, dur=None, fundido=0.0):
+# Nivel: los temas del original (MUSn.ADP de carrera) van de -11 a -16 dBFS RMS (mediana -13,6; medido en la pista
+# entera ya en ADPCM de Yamaha, tal como la lee el AICA) y la cancion del usuario, tal cual sale del mp3, a -18,6 (pico
+# -5,6 dBFS): 5 dB por debajo de los temas del juego, con lo que las voces y el motor (que se mezclan contra el nivel
+# del original, docs/PARIDAD.md "Pausa y mezcla de audio") la tapaban. Se lleva la cancion entera (y su avance con la
+# misma ganancia) a NIVEL_DBFS RMS sin pasar el pico de PICO_DBFS (sin recortar).
+NIVEL_DBFS = -13.6
+PICO_DBFS = -0.5
+
+
+def ganancia(cancion):
+    """el factor que deja la cancion entera en NIVEL_DBFS RMS sin que el pico pase de PICO_DBFS"""
+    with tempfile.TemporaryDirectory() as tmp:
+        r = os.path.join(tmp, 'in.pcm'); pcm(cancion, r)
+        a = np.fromfile(r, '<i2').astype(np.float64)
+    if not len(a): return 1.0
+    rms = np.sqrt(np.mean(a * a)) / 32768; pico = np.abs(a).max() / 32768
+    if rms <= 0 or pico <= 0: return 1.0
+    return min(10 ** (NIVEL_DBFS / 20) / rms, 10 ** (PICO_DBFS / 20) / pico)
+
+
+def adp(cancion, salida, ini=None, dur=None, fundido=0.0, gan=1.0):
     import nativo
     with tempfile.TemporaryDirectory() as tmp:
         r = os.path.join(tmp, 'in.pcm'); pcm(cancion, r, ini, dur)
-        if fundido:
-            a = np.fromfile(r, '<i2').reshape(-1, 2).astype(np.float32); n = int(fundido * 44100)
-            if len(a) > 2 * n:
+        if fundido or gan != 1.0:
+            a = np.fromfile(r, '<i2').reshape(-1, 2).astype(np.float32) * np.float32(gan); n = int(fundido * 44100)
+            if fundido and len(a) > 2 * n:
                 e = np.linspace(0, 1, n, dtype=np.float32)[:, None]; a[:n] *= e; a[-n:] *= e[::-1]
             a.round().clip(-32768, 32767).astype('<i2').tofile(r)
         subprocess.run([nativo.programa('musica'), r, salida, '-', 'pcm'], check=True)
@@ -487,8 +507,10 @@ def main(a):
     print('MENU.DAT: %d bytes; texturas de una tarjeta anterior quitadas %s; MUSICA2 VRAM %d -> %d KB' % (
         n, quitadas, v0 // 1024, v1 // 1024))
     maqueta(Dat(os.path.join(sal, 'MENU.DAT')), os.path.join(sal, 'menu_musica2.png'))
-    adp(cancion, os.path.join(sal, 'MUS%d.ADP' % PISTA))
-    adp(cancion, os.path.join(sal, 'MUS%d.ADP' % PISTA_AVANCE), AVANCE_INI, AVANCE_S, FUNDIDO_S)
+    g = ganancia(cancion)
+    print('cancion: ganancia %.2f (%.1f dB) hasta %.1f dBFS RMS' % (g, 20 * np.log10(g), NIVEL_DBFS))
+    adp(cancion, os.path.join(sal, 'MUS%d.ADP' % PISTA), gan=g)
+    adp(cancion, os.path.join(sal, 'MUS%d.ADP' % PISTA_AVANCE), AVANCE_INI, AVANCE_S, FUNDIDO_S, gan=g)
     for k in (PISTA, PISTA_AVANCE):
         f = os.path.join(sal, 'MUS%d.ADP' % k); print('MUS%d.ADP: %d bytes (%.1f s a 44,1 kHz)' % (
             k, os.path.getsize(f), os.path.getsize(f) / 44100))
