@@ -27,7 +27,8 @@
    sin musica (en el original suena la pelicula), al salir de el arranca la musica de menu (pista 30 de MUSIC.PS2,
    MUS30.ADP); en la musica cada tema suena con su avance (pista 33 + tema) y al confirmar empieza el tema elegido.
    Musica: las 3 listas del original (9 / 7 / 12 temas) mas ALL I WANT al final de la lista 2 (tema 28, MUS67.ADP;
-   una tarjeta mas, para cualquier coche), 29 en total; el gatillo R pasa a la siguiente (el bit 0x2000, R1 / R2 del
+   una tarjeta mas, para cualquier coche) y, con el MENU.DAT de tools/menu_musica.py, otra detras: SPLASH WAVE
+   REMASTER (tema 29, ver musica.h); el gatillo R pasa a la siguiente (el bit 0x2000, R1 / R2 del
    PS2), candado y sonido 3 en los temas sin su bit de la licencia, RANDOM (Y) elige uno desbloqueado y sale a correr.
    VRAM: en la RAM solo las tablas de MENU.DAT; las texturas de cada pantalla se leen del GD al entrar y se quedan
    mientras quepan (se echa la pantalla usada hace mas tiempo). hud.c libera la VRAM unos cuadros despues de su ultimo
@@ -97,13 +98,14 @@ static const char *const UNOM[NU] = { "TITULO_FONDO", "TITULO_LOGO", "TITULO_STA
 /* musica (4C9790 / 4C9C20 del PC; tablas del PS2 0x375DA8 y 0x4191E8): 3 listas de 9 / 7 / 13 temas (68F36C), el
    tema k (0..28, 4C9750: lista 0, luego la 1 y la 2) es la pista k de MUSIC.PS2 (68F370: la misma) y su avance la
    k + 0x21; los temas 0..6 siempre estan y los demas con su bit de la licencia (5C9AB0). El 28 es ALL I WANT (Crazy
-   Taxi, MUS67.ADP): una tarjeta mas al final de la lista 2 y siempre disponible, para cualquier coche. */
+   Taxi, MUS67.ADP): una tarjeta mas al final de la lista 2 y siempre disponible, para cualquier coche; el 29, SPLASH
+   WAVE REMASTER (MUS70 / avance MUS71), detras, solo si MENU.DAT la lleva (musica.h). */
 #define N_LISTAS 3
-#define N_TEMAS 29
-static const int8_t TEMAS_LISTA[N_LISTAS] = { 9, 7, 13 };
+#define N_TEMAS 30
+static int8_t TEMAS_LISTA[N_LISTAS] = { 9, 7, 13 };          /* (14 en la 2 con SPLASH WAVE: menu_inicia) */
 static const uint8_t DESBLOQ_TEMA[N_TEMAS] = { 174, 174, 174, 174, 174, 174, 174, 172, 173, 174, 175, 176, 177, 178,
                                                179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192,
-                                               192 };
+                                               192, 192 };
 #define T_DEMO (8 * 60)                                     /* inactividad en el titulo hasta la demo */
 #define T_FUNDIDO 12
 #define T_CARGA_MAX 90                                      /* cuadros que se espera a la VRAM de una pantalla */
@@ -113,7 +115,7 @@ static const uint8_t DESBLOQ_TEMA[N_TEMAS] = { 174, 174, 174, 174, 174, 174, 174
 #define HOLGURA (256 * 1024)                                /* libre de mas antes de subir sin echar nada */
 #define PISTA_MENU 30                                       /* musica de los menus */
 #define PISTA_AVANCE 33                                     /* avance del tema k: pista 33 + k */
-/* ALL I WANT (tema 28): MUS67.ADP; la conversion de tema a pista la hace musica_pon (MUSICA_PISTA_ALL_I_WANT) */
+/* ALL I WANT (tema 28): MUS67.ADP; la conversion de tema a pista la hace musica_pista_tema (musica.h) */
 
 static hud_dat_t *md;
 /* la ficha de la portada de OutRunners y el credito (usos OR_PORTADA / OR_CREDITO de MENU.DAT; -1 sin ellos) */
@@ -228,6 +230,14 @@ static void lic_reinicia(uint8_t *p)
            Flagman 2): la 0 con 6 en todas, la 1 con 4 / 5, la 2 con 3 en la 1.a (la 2.a cerrada), las demas sin jugar */
         int c, i;
         for (c = 0; c < 6; c++) for (i = 0; i < 5; i++) p[0x1dd + 5 * c + i] = c == 0 ? 6 : c == 2 ? (i ? 7 : 3) : c == 5 ? 7 : 4 + (i & 1);
+    }
+#endif
+#ifdef PRUEBA_NOTAS_CAMP
+    {   /* prueba del mapa de las peticiones: Flagman 1 y 2 con nota 6 (abren el primer campeonato) y resultados en
+           dos de cada tres tipos de curso (dos resultados, 3 y 5, o los cuatro: 6, 6, 6 y 4) */
+        int t;
+        memset(p + 0x1dd, 6, 5 * 14);
+        for (t = 0; t < 60; t++) if (t % 3 != 2) { p[0x36e + 2 * t] = t % 3 ? 0x66 : 0x53; p[0x36f + 2 * t] = t % 3 ? 0x46 : 0x77; }
     }
 #endif
 }
@@ -812,6 +822,9 @@ int menu_inicia(void)
         if (h[5]) col_tarjeta = h[5];
         if (h[6] && !memcmp(mnu2 + h[6], "PRG1", 4)) prg = mnu2 + h[6] + 4;
     }
+    /* tema de mas (tools/menu_musica.py): la marca en MUSICA2 y su tarjeta detras de ALL I WANT (14 en la lista 2) */
+    if (pidx[V_MUS2] >= 0 && pan[pidx[V_MUS2]]._r[0] == MUSICA_MARCA_EXTRA) TEMAS_LISTA[2] = 14;
+    dbglog(DBG_INFO, "menu: lista 2 de la musica con %d temas\n", TEMAS_LISTA[2]);
 #ifdef PRUEBA_TAXI_DESBLOQUEO
     prueba_taxi_desbloqueo();
 #endif
@@ -912,8 +925,9 @@ static int pon_pista(int n)
 }
 static void pon_musica(int k)
 {
-    if (k == MUSICA_TEMA_ALL_I_WANT) { pon_pista(k); return; }   /* ALL I WANT: suena entero (musica_pon lo lleva a MUS67) */
-    if (pista_sonando != PISTA_AVANCE + k && pista_sonando != k && pon_pista(PISTA_AVANCE + k) && k < n_ok) pon_pista(k);
+    int a = musica_avance_tema(k), p = musica_pista_tema(k);   /* (PISTA_AVANCE + k y k; el 29: 71 y 70; el 28: 67) */
+    if (k == MUSICA_TEMA_ALL_I_WANT) { pon_pista(p); return; }   /* ALL I WANT: suena entero (MUS67, sin avance) */
+    if (pista_sonando != a && pista_sonando != p && pon_pista(a) && (k < n_ok || k == MUSICA_TEMA_EXTRA)) pon_pista(p);
 }
 static void musica_menu(void)
 {
@@ -922,7 +936,7 @@ static void musica_menu(void)
 /* 4C9750: tema de la lista y el cursor actuales */
 static int tema_actual(void) { int k = curs[lista], l; for (l = 0; l < lista; l++) k += TEMAS_LISTA[l]; return k; }
 static int lic_bit(int b);
-static int tema_libre(int k) { return k == MUSICA_TEMA_ALL_I_WANT || k <= 6 || lic_bit(DESBLOQ_TEMA[k]); }   /* 4474E0 */
+static int tema_libre(int k) { return k <= 6 || k == MUSICA_TEMA_ALL_I_WANT || k == MUSICA_TEMA_EXTRA || lic_bit(DESBLOQ_TEMA[k]); }   /* 4474E0 solo por encima del 6; los de mas siempre */
 static void musica_lista(void)                              /* carrusel y titulo de la lista actual en su tema */
 {
     static const int UL[N_LISTAS] = { U_L0, U_L1, U_L2 }, UT[N_LISTAS] = { U_T0, U_T1, U_T2 };
@@ -1026,7 +1040,8 @@ static void entra(int p, int atras)
 void menu_entra(int man, int pista, int npistas)
 {
     manual = man; pista_sonando = -2; n_ok = npistas < N_TEMAS ? npistas : N_TEMAS;
-    elegido = pista >= 0 && pista < N_TEMAS ? pista : 0;   /* las listas y sus cursores siguen como estaban */
+    pista = musica_tema_pista(pista);                      /* (la 70 y la 67: los temas de mas) */
+    elegido = pista >= 0 && (pista < MUSICA_TEMA_EXTRA || (pista == MUSICA_TEMA_EXTRA && TEMAS_LISTA[2] > 13)) ? pista : 0;   /* las listas y sus cursores siguen como estaban */
     inact = 0; a_cab.u = -1; pant = -1;
     /* vuelta a los menus: 4457B7 del PC guarda (416420) si la licencia activa tiene cambios (+3F4 bit 1), p. ej. el
        tiempo de juego que suma la carrera (menu_suma_tiempo) */
@@ -1071,7 +1086,8 @@ void menu_suma_millas(uint32_t millas)
 /* variante de [780258] (PS2 0x443508) del modo elegido, como 4EEAD0 del PC (runtime_route_mode: 1 OutRun, 2 Heart
    Attack, 7 Time Attack, 6 las misiones de COAST 2 COAST) */
 static int mis_sel = -1;                                    /* COAST 2 COAST: la mision elegida (ver abajo) */
-int menu_modo(void) { return sp_sel ? fsp_variante() : modo_sel == 2 ? 2 : modo_sel == 3 ? 7 : modo_sel == 0 && mis_sel >= 0 ? 6 : 1; }
+static int camp_sel = -1, camp_lista;                       /* COAST 2 COAST: el campeonato elegido (nodo del mapa, casilla) */
+int menu_modo(void) { return sp_sel ? fsp_variante() : modo_sel == 2 ? 2 : modo_sel == 3 ? 7 : modo_sel == 0 && mis_sel >= 0 ? 6 : modo_sel == 0 && camp_sel >= 0 ? 5 : 1; }
 
 /* COAST 2 COAST: las misiones de Races.bin (variante 6 de 4EEAD0, selector 0). Pantallas del original (P_C2C, mas
    abajo): categorias (suceso 0x3a), mapa de misiones y detalle de la mision (suceso 0x3b); de ahi a la seleccion de
@@ -1106,6 +1122,23 @@ void menu_elige_mision(int idx) { mis_sel = idx; }
 int menu_mision(void) { return modo_sel == 0 && !sp_sel ? mis_sel : -1; }
 /* 495A20 (PS2 0x1f81cc): nota de la mision en la licencia +0x1D7 + 5 clave + subclave si mejora o la guardada es 7
    (sin jugar); +3F4 |= 2. Se guarda en la VMU al volver al menu (menu_entra) */
+/* 0x22edd8 (campeonatos): la nota de la etapa de tipo t en la casilla de su lista de los cuartetos +0x36E + 2 t si
+   mejora o no habia (7); +3F4 |= 2; 1 si la ha puesto (el gestor da entonces sus millas) */
+int menu_nota_camp(int t, int lista, int nota)
+{
+    uint8_t *p = activa(); unsigned w, ant; int r = 0;
+    if (!p || t < 0 || t >= 0x42 || lista < 0 || lista > 3 || nota < 0 || nota > 6) return 0;
+    w = p[0x36e + 2 * t] | (unsigned)p[0x36f + 2 * t] << 8; ant = (w >> (4 * lista)) & 15;
+    if (ant == 7 || ant < (unsigned)nota) {
+        w = (w & ~(15u << (4 * lista))) | (unsigned)nota << (4 * lista);
+        p[0x36e + 2 * t] = (uint8_t)w; p[0x36f + 2 * t] = (uint8_t)(w >> 8); p[0x3f4] |= 2; r = 1;
+    }
+    dbglog(DBG_INFO, "LICENCIA: campeonato etapa tipo %d casilla %d nota %d (guardada %d)\n", t, lista, nota, (int)((w >> (4 * lista)) & 15));
+    return r;
+}
+/* el campeonato elegido en el mapa de las peticiones: nodo (0 la salida, i la etapa i - 1) y casilla; -1 ninguno */
+int menu_camp(int *lista) { if (lista) *lista = camp_lista; return modo_sel == 0 && !sp_sel ? camp_sel : -1; }
+int (*menu_camp_puede)(int grupo);
 void menu_nota_mision(int clave, int sub, int nota)
 {
     uint8_t *p = activa(); int off = 0x1d7 + 5 * clave + sub, have;
@@ -1124,7 +1157,8 @@ int menu_preset(void) { return sp_sel ? fsp_preset() : 0; }
 int menu_manual(void) { return sp_sel ? fsp_manual() : manual; }
 int menu_pista(void) {
     if (sp_sel) return fsp_musica();
-    return elegido < n_ok ? elegido : 0;                   /* 28 = ALL I WANT; musica_pon lo lleva a MUS67 */
+    if (elegido == MUSICA_TEMA_EXTRA || elegido == MUSICA_TEMA_ALL_I_WANT) return musica_pista_tema(elegido);   /* 70 / 67 */
+    return elegido < n_ok ? elegido : 0;
 }
 int menu_coche3d(void)
 {
@@ -1358,7 +1392,7 @@ static void control(unsigned n)
             } else if (c == 0) {                            /* COAST 2 COAST: categorias (P_C2C) */
                 if (mis_n && !c2_abre()) { modo_sel = 0; sale(P_C2C, 1); } else bloqueado();
             } else if (c <= 3) {                            /* OUTRUN, HEART ATTACK, TIME ATTACK: el tablero 0x24 (0x25dd58: */
-                modo_sel = c; mis_sel = -1;                 /* raiz +0x208 bits 5..7 = 0x20 / 0x40 / 0x80, tabla 0x375f58 */
+                modo_sel = c; mis_sel = -1; camp_sel = -1;  /* raiz +0x208 bits 5..7 = 0x20 / 0x40 / 0x80, tabla 0x375f58 */
                 /* = 0x3a, 0x24, 0x24, 0x24, 0x2b: OUTRUN tambien va a la 0x24, la de 4 posiciones; revision 44, antes
                    la DC lo llevaba directo al coche) */
                 tb_bits = (tb_bits & ~0xe0u) | (c == 1 ? 0x20u : c == 2 ? 0x40u : 0x80u); tb_sig = 0x24;
@@ -1397,7 +1431,7 @@ static void control(unsigned n)
             if (c_desbloqueado(i)) { int o = colores[i], c = o; do c = (c + 1) & 7; while (c != o && !c_color_ok(i, c)); colores[i] = c; }
         } else if (atras) {                                 /* (C2C: al detalle; OUTRUN / INFARTO / CONTRARRELOJ: al tablero) */
             if (!sp_sel && modo_sel >= 1 && modo_sel <= 3 && !tb_abre()) sale(P_TABLERO, 0);
-            else sale(sp_sel ? P_MENU : modo_sel == 0 && mis_sel >= 0 ? P_C2C : P_MODO, 0);
+            else sale(sp_sel ? P_MENU : modo_sel == 0 && (mis_sel >= 0 || camp_sel >= 0) ? P_C2C : P_MODO, 0);
         }
         break; }
     case P_CAMBIO:
@@ -1641,6 +1675,25 @@ static int c2_nodo;                                         /* nodo del mapa (PS
 static int c2_det, c2_cur;                                  /* detalle (+0x4c) y su carrera (+0x50) */
 static int c2_h_sel = -1, c2_h_cur = -1, c2_h_eleg = -1;    /* recursos +0x5ec (categorias), +0x194 y +0x234 (mapa) */
 static uint8_t c2_vacia[LIC_BYTES]; static int c2_vacia_ok; /* sin licencia: todas sin jugar */
+/* Peticiones: el mapa de 15 etapas de los campeonatos (botones 4..6 de las categorias, suceso 0x3c). PS2 0x240d68
+   inicio, 0x240e20 control, 0x241228 dibujo, 0x240bc8 cursor, 0x240948 resultados hechos = 4EA330 / 4EA3C0 / 4EA610 /
+   4EA210 / 4EA030 del PC (outrun2-decomp platform/frontend_requests.cpp): el mismo codigo; los tokens y las tablas
+   son los de PS2 (bloque REQ1 de C2C.DAT, tools/conv_c2c.py). Capas de los recursos: las de sus llamadas a 0x228e60. */
+typedef struct {
+    char m[4];
+    uint32_t t_fondo, t_encima, t_nodo, t_casilla, t_icono, t_panel, t_titulo, t_lista, t_cursor;
+    float cursor[16][2], etapa[16][2], rot_xy[3][2], casilla[8][2];
+    int32_t vec[16][4]; uint32_t res[16];
+    c2_d_t lista[4], nota[7], pie[3], titulo[3], tit_lista[4];
+    uint32_t icono[30], curso[30];
+    uint8_t tipo[3][15], _r[3];
+    uint32_t tx_inicio, tx_hecho, tx_nuevo, tx_pet[33];
+    uint8_t pet[60][16];                                    /* cuentas de las 4 listas y el rotulo de sus peticiones */
+} rq_t;
+static const rq_t *RQ;
+static int rq_sel;                                          /* nodo del mapa (PS2 0x3752e0 = 84B7F8): 0 la salida */
+static int rq_det, rq_cur;                                  /* detalle (+0x4c) y su casilla (+0x50) */
+static int rq_h_cur = -1, rq_h_lista = -1;                  /* recursos +0x194 y +0x234 */
 
 static int c2_activo(void) { return C2 != NULL; }
 static int c2_abre(void)
@@ -1658,7 +1711,9 @@ static int c2_abre(void)
     }
     c2_h = spr_hud(c2_bk); c2_uf = hudd_uso(c2_h, "F14");
     if (c2_uf >= 0 && hudd_sube_uso(c2_h, c2_uf)) dbglog(DBG_ERROR, "C2C: sin VRAM para los glifos\n");
-    c2_h_sel = c2_h_cur = c2_h_eleg = -1;
+    c2_h_sel = c2_h_cur = c2_h_eleg = -1; rq_h_cur = rq_h_lista = -1;
+    RQ = (const rq_t *)(C2 + 1);                            /* (un C2C.DAT de antes no lo lleva: los campeonatos, cerrados) */
+    if (sizeof(c2_t) + sizeof(rq_t) > C2->o_txt || memcmp(RQ->m, "REQ1", 4)) RQ = NULL;
     dbglog(DBG_INFO, "C2C: C2C.DAT (%u bytes de tablas en el hueco), VRAM libre %uK\n", (unsigned)hudd_tablas_ocupa(),
            (unsigned)(pvr_mem_available() >> 10));
     return 0;
@@ -1666,8 +1721,8 @@ static int c2_abre(void)
 static void c2_cierra(void)
 {
     if (!c2_bk) return;
-    spr_suelta_todas(); spr_cierra(c2_bk); c2_bk = NULL; C2 = NULL; c2_h = NULL; c2_uf = -1;
-    c2_h_sel = c2_h_cur = c2_h_eleg = -1;
+    spr_suelta_todas(); spr_cierra(c2_bk); c2_bk = NULL; C2 = NULL; RQ = NULL; c2_h = NULL; c2_uf = -1;
+    c2_h_sel = c2_h_cur = c2_h_eleg = -1; rq_h_cur = rq_h_lista = -1;
     if (menu_hueco) menu_hueco(0);
 }
 static const uint8_t *c2_lic(void)
@@ -1737,19 +1792,22 @@ static void c2_sel_mapa(void)
 static void c2_suelta_cursores(void)
 {
     spr_suelta(c2_h_sel); spr_suelta(c2_h_cur); spr_suelta(c2_h_eleg); c2_h_sel = c2_h_cur = c2_h_eleg = -1;
+    spr_suelta(rq_h_cur); spr_suelta(rq_h_lista); rq_h_cur = rq_h_lista = -1;
 }
 static void c2_a_categorias(void)                           /* 0x242648: init de las categorias (nodo 0) */
 {
-    c2_suelta_cursores(); c2_mapa = 0; c2_nodo = 0; c2_det = 0; c2_cur = 0; c2_sel_cat();
+    c2_suelta_cursores(); c2_mapa = 0; c2_nodo = 0; c2_det = 0; c2_cur = 0; rq_sel = 0; c2_sel_cat();   /* (0x242660 / 0x242668) */
 }
 static void c2_a_mapa(void)                                 /* 0x243698: init del mapa (sin detalle) */
 {
     c2_suelta_cursores(); c2_mapa = 1; c2_det = 0; c2_cur = 0; c2_sel_mapa();
 }
+static void rq_cursor(void);
 /* al entrar en P_C2C: desde ELEGIR MODO, las categorias; de vuelta de la seleccion de coche, el detalle donde estaba */
 static void c2_entra(void)
 {
-    if (entra_atras && c2_mapa && mis_sel >= 0) { c2_suelta_cursores(); c2_det = 1; c2_sel_mapa(); }
+    if (entra_atras && c2_mapa == 1 && mis_sel >= 0) { c2_suelta_cursores(); c2_det = 1; c2_sel_mapa(); }
+    else if (entra_atras && c2_mapa == 2 && camp_sel >= 0 && RQ) { c2_suelta_cursores(); rq_cursor(); }   /* (el mapa de las peticiones) */
     else c2_a_categorias();
 }
 
@@ -1802,6 +1860,124 @@ static void c2_parrafo(const char *s, float x, float y, int ancho, int alto, flo
     }
 }
 
+/* ---- peticiones (campeonatos) */
+static int rq_tipo(int etapa) { return RQ->tipo[c2_cat - 4][etapa]; }   /* 0x62a880[grupo - 4] + 0x78 etapa + 0x1c */
+/* 0x2406b0 (4E9DE0): el resultado j (0..3) del tipo de curso: los cuartetos de la licencia +0x36E + 2 tipo; 7 = sin el */
+static int rq_resultado(const uint8_t *p, int tipo, int j)
+{
+    unsigned w = p[0x36e + 2 * tipo] | (unsigned)p[0x36f + 2 * tipo] << 8;
+    return j == 1 ? (w >> 4) & 15 : j == 2 ? (w >> 8) & 15 : j == 3 ? w >> 12 : w & 15;
+}
+/* 0x240948 (4EA030): uno mas que el ultimo resultado hecho de la etapa */
+static int rq_hechos(const uint8_t *p, int etapa, int tipo)
+{
+    int j, n = 0;
+    for (j = 0; j < (int)RQ->res[etapa + 1]; j++) if (rq_resultado(p, tipo, j) != 7) n = j + 1;
+    return n;
+}
+static int rq_etapa(void) { return rq_sel > 0 ? rq_sel - 1 : 0; }
+/* 0x240bc8 (4EA210): el cursor: en un nodo del mapa o en la casilla, con la imagen de su lista */
+static void rq_cursor(void)
+{
+    spr_suelta(rq_h_lista); rq_h_lista = -1; spr_suelta(rq_h_cur);
+    if (!rq_det) {
+        rq_h_cur = spr_crea(RQ->t_cursor, 4, 0, 0, 0x34); spr_traslada(rq_h_cur, RQ->cursor[rq_sel][0], RQ->cursor[rq_sel][1]);
+        return;
+    }
+    rq_h_lista = spr_crea(RQ->lista[rq_cur].tok, 4, 0, (int)RQ->lista[rq_cur].pri, (int)RQ->lista[rq_cur].ult);
+    rq_h_cur = spr_crea(RQ->t_cursor, 5, 0, 0, 0x34);
+    spr_traslada(rq_h_cur, RQ->casilla[rq_cur][0] - 320, RQ->casilla[rq_cur][1] - 240);
+}
+static void rq_entra(void)                                  /* 0x240d68: sin detalle */
+{
+    c2_suelta_cursores(); c2_mapa = 2; rq_det = 0; rq_cur = 0; rq_cursor();
+}
+static void rq_control(int ok, int atras, int act)          /* 0x240e20 */
+{
+    const uint8_t *p = c2_lic();
+    int etapa = rq_etapa(), tipo = rq_tipo(etapa), hechos = rq_hechos(p, etapa, tipo), v;
+    if (ok) {
+        if (rq_sel && !hechos) { sfx_menu(SFX_BLOQUEADO); return; }
+        if (rq_sel && !rq_det) { sfx_menu(SFX_ACEPTA); rq_det = 1; rq_cur = 0; rq_cursor(); return; }
+        /* root+0x208: nodo << 12, casilla << 18; suceso 0xa (coche, cambio, musica) y la carrera con la variante 5
+           (4EEB50: {curso, forzada = nodo != 0, etapa nodo - 1, lista = casilla}; comun/campeonato.c) */
+        if (menu_camp_puede && menu_camp_puede(c2_cat - 4)) { bloqueado(); return; }   /* (sin su arbol en CURSO.DAT) */
+        sfx_menu(SFX_ACEPTA); modo_sel = 0; mis_sel = -1; camp_sel = rq_sel; camp_lista = rq_det ? rq_cur : 0;
+        dbglog(DBG_INFO, "C2C: campeonato %d nodo %d casilla %d\n", c2_cat - 4, camp_sel, camp_lista);
+        GANCHO(P_C2C, 1, 0x100 + camp_sel); sale(P_COCHE, 1); return;
+    }
+    if (atras) {
+        if (rq_det) { rq_det = 0; rq_cur = 0; rq_cursor(); }
+        else { c2_a_categorias(); sfx_menu(SFX_CANCELA); }
+        return;
+    }
+    if (act < 2) return;
+    if (rq_det) {
+        if (act == 5) { if (rq_cur >= hechos - 1) return; rq_cur++; }
+        else if (act == 3) { if (rq_cur <= 0) return; rq_cur--; }
+        else return;
+    } else {
+        static const int COL[4] = { 0, 3, 1, 2 };           /* tabla de saltos 0x417050: arriba, izquierda, abajo, derecha */
+        if ((v = RQ->vec[rq_sel][COL[act - 2]]) < 0) return;
+        rq_sel = v;
+    }
+    rq_cursor(); sfx_menu(SFX_CURSOR);
+}
+static void rq_dibuja(void)                                 /* 0x241228 */
+{
+    const uint8_t *p = c2_lic();
+    int g = c2_cat - 4, etapa = rq_etapa(), tipo = rq_tipo(etapa), hechos = rq_hechos(p, etapa, tipo);
+    int icono = tipo >= 30 && tipo < 60 ? tipo - 30 : tipo == 60 ? 0 : tipo == 61 ? 15 : tipo, i, j, casillas;
+    float z;
+    if (icono >= 30) icono = 0;
+    spr_inmediata(RQ->t_fondo, 0, 0, 1, rq_sel > 0); spr_inmediata(RQ->t_encima, 0, 0, 3, rq_sel > 0);
+    for (i = 0; i < 15; i++) {                              /* las etapas con algun resultado: el nodo y su nota */
+        int t = rq_tipo(i), n = (int)RQ->res[i + 1], ult = 0, suma = 0, q, nota;
+        for (j = 0; j < n; j++) { int r = rq_resultado(p, t, j); if (r != 7) { ult = j + 1; suma += r + 1; } }
+        if (!ult) continue;
+        spr_inmediata(RQ->t_nodo, RQ->etapa[i + 1][0], RQ->etapa[i + 1][1], 2, 0);
+        q = suma / n - 1; nota = q >= 0 ? q : suma ? 0 : 7;   /* 0x240748: la media de (resultado + 1), menos 1 */
+        if (nota < 7) spr_inmediata(RQ->nota[nota].tok, RQ->etapa[i + 1][0] + 2, RQ->etapa[i + 1][1], 3, (int)RQ->nota[nota].pri);
+    }
+    casillas = (int)RQ->res[rq_sel];                        /* las casillas de resultado del nodo elegido */
+    for (i = 0; i < casillas; i++) {
+        float x = RQ->casilla[i][0] - 320, y = RQ->casilla[i][1] - 240;
+        if (i < hechos) {
+            int r = rq_resultado(p, tipo, i);
+            spr_inmediata(RQ->t_casilla, x, y, 3, 3); spr_inmediata(RQ->t_icono, x, y, 2, (int)RQ->icono[icono]);
+            if (r < 7) spr_inmediata(RQ->nota[r].tok, RQ->casilla[i + 4][0] - 320, RQ->casilla[i + 4][1] - 240, 4, (int)RQ->nota[r].pri);
+        } else spr_inmediata(RQ->t_casilla, x, y, 2, 5);
+    }
+    spr_inmediata(RQ->t_panel, 0, 0, 2, 3);
+    {   const c2_d_t *d = rq_det ? &RQ->tit_lista[rq_cur] : rq_sel ? NULL : &RQ->titulo[g];
+        if (d) spr_inmediata(d->tok, -83, 148, 2, (int)d->pri);
+        else spr_inmediata(RQ->t_titulo, -83, 148, 2, (int)RQ->curso[icono]);
+    }
+    spr_inmediata(RQ->pie[g].tok, 0, 0, 1, (int)RQ->pie[g].pri);
+    if (rq_det) {                                           /* las peticiones de la lista de la casilla (del guion del curso) */
+        const uint8_t *q = tipo < 60 ? RQ->pet[tipo] : NULL;
+        int n = q && q[rq_cur] <= 3 ? q[rq_cur] : 0;
+        if (n) spr_inmediata(RQ->t_lista, 0, 0, 3, n - 1);
+        spr_dibuja(0, SPR_CAPAS, 3, 0); z = hudd_z();
+        for (i = 0; i < n; i++) {
+            int k = q[4 + 3 * rq_cur + i]; const char *s = k < 33 ? c2_txt(RQ->tx_pet[k]) : NULL;
+            if (s) { c2_texto(s, strlen(s), (int)RQ->rot_xy[i][0], (int)RQ->rot_xy[i][1], 1, z, 0x3F474A); z = hudd_z(); }
+        }
+        return;
+    }
+    spr_dibuja(0, SPR_CAPAS, 3, 0); z = hudd_z();
+    {   /* el cuadro de texto: en la salida 0x461; en una etapa 0x462 si tiene algun resultado y si no 0x380 */
+        const char *s = c2_txt(!rq_sel ? RQ->tx_inicio : hechos ? RQ->tx_hecho : RQ->tx_nuevo);
+        if (s) c2_parrafo(s, 300, 330, 570 - 300, 14, z, 0x3F474A);
+    }
+}
+
+/* la quinta palabra de la peticion del campeonato (PS2 0x2a6b08..0x2a6bc8, lo que lee 46C520 = [7F94D4]): 1 el de
+   OutRun2 SP (grupo 4), 0 el de OutRun 2 (grupo 5), 2 el mixto (grupo 6); -1 fuera de los campeonatos */
+int menu_campeonato(void)
+{
+    return c2_mapa == 2 && c2_cat >= 4 && c2_cat <= 6 ? (c2_cat == 4 ? 1 : c2_cat == 5 ? 0 : 2) : -1;
+}
 static void c2_control(unsigned n)
 {
     int ok = n & (CONT_A | CONT_START), atras = n & CONT_B, act = -1;
@@ -1811,7 +1987,10 @@ static void c2_control(unsigned n)
     if (!c2_mapa) {                                         /* 0x242680 */
         if (ok) {
             if (!c2_abierto(c2_cat)) { sfx_menu(SFX_BLOQUEADO); return; }
-            if (c2_cat >= 4) { bloqueado(); return; }       /* campeonatos (suceso 0x3c): no estan */
+            if (c2_cat >= 4) {                              /* campeonatos (suceso 0x3c): el mapa de las peticiones */
+                if (!RQ) { bloqueado(); return; }
+                sfx_menu(SFX_ACEPTA); rq_entra(); return;
+            }
             sfx_menu(SFX_ACEPTA); c2_a_mapa();
         } else if (atras) { c2_suelta_cursores(); sale(P_MODO, 0); }
         else if (act >= 2) {
@@ -1822,6 +2001,7 @@ static void c2_control(unsigned n)
         }
         return;
     }
+    if (c2_mapa == 2) { if (RQ) rq_control(ok, atras, act); return; }
     {   /* 0x243748 */
         int g = c2_grupo(), c = c2_categoria();
         const uint8_t *p = c2_lic();
@@ -1829,7 +2009,7 @@ static void c2_control(unsigned n)
             if (!c2_det) { c2_det = 1; c2_cur = 0; c2_sel_mapa(); return; }
             {   int m = mis_busca(c + 1, c2_cur + 1);       /* root+0x208: categoria << 12, carrera << 18; suceso 0xa */
                 if (m < 0 || !mis_jug[m]) { bloqueado(); return; }   /* (DESVIACION: solo las de carrera que caben) */
-                modo_sel = 0; mis_sel = mis_idx[m];
+                modo_sel = 0; mis_sel = mis_idx[m]; camp_sel = -1;
                 dbglog(DBG_INFO, "C2C: mision %d-%d (Races.bin %d)\n", c + 1, c2_cur + 1, mis_sel);
                 GANCHO(P_C2C, 1, mis_sel); sale(P_COCHE, 1);
             }
@@ -1883,6 +2063,7 @@ static void c2_dibuja(void)
         }
         return;
     }
+    if (c2_mapa == 2) { if (RQ) rq_dibuja(); return; }
     {   /* 0x243b88 */
         int g = c2_grupo(), c = c2_categoria(), nc = c2_carreras(c), t1 = 0, m;
         c2_inm(&C2->fondo[g], 1, 320, 240); c2_inm(&C2->encima[g], 3, 320, 240);
@@ -1989,7 +2170,8 @@ static int sa_lf0, sa_ln, sa_lsel, sa_lini, sa_llim, sa_lscroll;
 static int sa_cvis[110], sa_cn;
 /* orden visible de la pagina EXTRAS: los dos articulos (filas 0xfc y 0xfd) primero y despues los 14 extras de
    siempre (filas 0xee..0xfb). El objeto de la fila i sigue siendo 0xc1 + fila real, asi que los bits no cambian. */
-static const int sa_xorden[16] = { 14, 15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 };
+#define SA_NEXTRA 16                                        /* filas de EXTRAS que se ven (sin el arte: SA_NEXTRA - SA_NITEM) */
+static const int sa_xorden[SA_NEXTRA] = { 14, 15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 };
 /* tira (0x238798 = 446710): activa, escena, ultimo indice, paso, base, el objeto */
 static int sa_ton, sa_tult, sa_tpaso, sa_tb0, sa_ti; static uint32_t sa_ttok;
 /* registros de las paginas de coches y colores (+0x4c: 30 x 0x20) */
@@ -2072,12 +2254,15 @@ static int sa_compra(int b, uint32_t precio)
 }
 /* 0x25d170 (4D4200): la fila de la tabla que se ve en la posicion i de la lista */
 static int sa_crow(int i) { return sa_base == 0x1c && i >= 0 && i < sa_cn ? sa_cvis[i] : i; }
+/* el articulo OUTRUNNERS solo si SALON.DAT trae su arte (tools/conv_salon.py deja la fila vacia: el arte y
+   OUTRUNNERS.BIN no salen del disco de PS2); sin el, las 14 filas del original en su orden */
+static int sa_articulo(void) { return SA && SA->fila[SA_FITEM].tok != 0; }
 static int sa_fila_de(int i)
 {
-    if (sa_base == 0xc1 && i >= 0 && i < 16) return sa_xorden[i];
+    if (sa_base == 0xc1 && sa_articulo() && i >= 0 && i < SA_NEXTRA) return sa_xorden[i];
     return sa_crow(i);
 }
-static int sa_item_nuevo(void) { return sa_base == 0xc1 && sa_lsel >= 0 && sa_lsel < SA_NITEM; }
+static int sa_item_nuevo(void) { return sa_base == 0xc1 && sa_articulo() && sa_lsel >= 0 && sa_lsel < SA_NITEM; }
 /* el objeto de la fila elegida */
 static int sa_objeto(void)
 {
@@ -2150,7 +2335,7 @@ static void sa_tira_inicia(uint32_t tok, int ult, int paso, int b0)
 }
 static void sa_tira_deja(void) {
     int i;
-    if (sa_base == 0xc1 && sa_ti >= 0 && sa_ti < SA_NITEM) return;   /* el articulo no usa la tira */
+    if (sa_base == 0xc1 && sa_articulo() && sa_ti >= 0 && sa_ti < SA_NITEM) return;   /* el articulo no usa la tira */
     i = sa_fila_de(sa_ti);
     sa_tira_pon(sa_tcuadro(sa_ti), sa_tpaso * (i + 1), 3);
 }
@@ -2246,12 +2431,14 @@ static void sa_pagina(int p)                                /* init (0x25bce8, 0
     if (p != 5) sa_arte_suelta();
     sa_lista(g->f0, g->f1, p ? 7 : 0x60, p != 0);
     if (p == 4) sa_ln = sa_cn;
+    if (p == 5) sa_ln = sa_articulo() ? SA_NEXTRA : SA_NEXTRA - SA_NITEM;
     if (p == 5)                                             /* EXTRAS: los dos articulos tienen que estar en la lista */
         dbglog(DBG_INFO, "SALON EXTRAS: fila %02x tok %08x precio %u; fila %02x tok %08x precio %u\n",
                SA_FITEM, (unsigned)SA->fila[SA_FITEM].tok, (unsigned)sa_precio(0xcf),
                SA_FITEM + 1, (unsigned)SA->fila[SA_FITEM + 1].tok, (unsigned)sa_precio(0xd0));
     sa_tira_inicia(g->tira, g->ult, g->paso, g->b0);
     if (p == 4 && sa_cn > 0) sa_tult = sa_cn - 1;
+    if (p == 5) sa_tult = (sa_articulo() ? SA_NEXTRA : SA_NEXTRA - SA_NITEM) - 1;
     if (p == 5) sa_prev_actualiza();
     if (g->tit >= 0) sa_tit_entra(g->tit);
     sa_est++;

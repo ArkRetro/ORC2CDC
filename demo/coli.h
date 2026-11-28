@@ -17,6 +17,7 @@ typedef struct {
     float marco[4];                          /* colocacion en el marco de la carrera (x, y, z, giro y; modelo_coloca) */
     int ok;
     int mat;                                 /* 1: los bits 4-7 de banderas son el codigo de superficie (seccion 4) */
+    float m_ang, m_cs, m_sn;                 /* (c2c9) cosf / sinf de marco[3] guardados (m_ang: el angulo de esos) */
 } coli_t;
 typedef struct { uint32_t recent[16], cursor, easy; } coli_pred_t;   /* EasyLctPredictionState */
 

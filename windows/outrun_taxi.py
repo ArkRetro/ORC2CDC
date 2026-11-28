@@ -178,6 +178,13 @@ def main():
                        capture_output=True, text=True, encoding='utf-8', errors='replace')
     if r.returncode: raise SystemExit('fallo tools/lod_grande.py:\n' + (r.stderr or r.stdout)[-2000:])
     informe('  ' + (r.stdout.strip().splitlines() or ['hecho'])[-1])
+    # fps3 (tools/aligera.py, como regenera.py en la clasica): decoracion -15 % en las etapas y fachadas de PALM a la
+    # mitad de lado (128 -> 64, 64 -> 32). Solo SEGS.PAK / SEGnn.DAT: los coches (y la ficha 7, el taxi) no se tocan
+    informe('== fps3: decoracion -15 % y edificios de PALM a la mitad (tools/aligera.py; un par de minutos)')
+    r = subprocess.run([sys.executable, os.path.join(o2.TOOLS, 'aligera.py'), '--datos', D, D, os.path.join(W, 'aligera')],
+                       capture_output=True, text=True, encoding='utf-8', errors='replace')
+    if r.returncode: informe('AVISO: fallo tools/aligera.py (se quedan las etapas del disco):\n' + (r.stderr or r.stdout)[-2000:])
+    else: informe('  ' + (r.stdout.strip().splitlines() or ['hecho'])[-1])
     if os.path.isfile(os.path.join(D, 'REFLEJO.DAT')): os.remove(os.path.join(D, 'REFLEJO.DAT'))   # (Mod 2.3: sin reflejo)
     import gdi
     informe('== GD-ROM en %s' % car)

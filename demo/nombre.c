@@ -38,7 +38,7 @@
      (el del PC, 42CCA0) y el orden dentro de la capa (los sprites de las escenas antes que los textos).
    SIN PORTAR: el deslizamiento de las filas (0x1fe780 = 4B0970: solo mueve +0x24.. de las filas, que el tablero no lee
    sin el teclado); el banco 0x36 NAME_CMN y los de sprites 0x12 / 0x14 (solo los usa el teclado de letras, que la
-   entrada de nombre no ensena); los 15 recorridos continuos (presets 2 / 3). DESVIACION: fuera del ranking (puesto -1)
+   entrada de nombre no ensena). Los 15 recorridos continuos (presets 2 / 3): HECHOS en la Rev 2.9.9.c. DESVIACION: fuera del ranking (puesto -1)
    el original guarda el nombre en el registro de antes de la tabla (0x1fb970(.., -1)): la Dreamcast no lo hace. */
 #include <kos.h>
 #include <string.h>
@@ -143,6 +143,7 @@ int nombre_entra(const nombre_t *d)
        0x37000D, para cualquier etapa que no sea una meta) */
     /* desc[0] del arbol 0 (csc_data_2), desc[1] del 1 (csc_data_cvt): el del preset (0x1760c0: 1 -> csc_data_2) */
     curso = desc[(preset & 1) ? 0 : 1][d->registro4 >= 0 && d->registro4 < 16 ? d->registro4 : 0];
+    if (preset >= 2 && d->desc4p > 0) curso = d->desc4p - 1;   /* (Rev 2.9.9.c: los 15 recorridos, arboles 290 / 291) */
     if (curso >= 60) curso = 0;
     sprintf(n, "NOM5%c.DAT", 'A' + (int)((fondo[curso] >> 16) - 0x37));
     if ((fb = spr_abre_en(n, r_ram + r_o, r_cap - r_o))) avanza();
@@ -335,10 +336,17 @@ static void marcas(int x, int y, int capa, int ruta, uint32_t tok)   /* 0x1ff878
 static int tablero(void)                                /* 0x200398 con [0x424] = 0: 1 si dibuja la banda */
 {
     const uint32_t *t = tt + (k34c + preset * 6) * 9; const uint32_t *L; int i, base;
-    /* presets 0 / 1 (0x2004d8..): los presets 2 / 3 (0x200400..: 3D001D / 3D001E, linea 6) no salen */
+    if (preset == 2 || preset == 3) {                   /* 0x200400..0x2004d4 (Rev 2.9.9.c: los 15 recorridos) */
+        if (h_tit < 0) h_tit = spr_crea(t[1], 4, 1, 0, 0x1e);   /* (con el teclado, [0x424], 3D001B: no sale aqui) */
+        if (h_tab < 0) h_tab = spr_crea(preset == 2 ? 0x3d001d : 0x3d001e, 4, 1, 0, 0x14);   /* 0x114d00(.., 4, 1, 0, 0x14) */
+        if (spr_estado(h_tit) != 3) return 0;
+        linea = 6;                                      /* [0x360] = 6: sin la linea de la meta ([0x434] < 0 -> 0: el foco
+                                                           del teclado, sin portar) */
+    } else {                                            /* presets 0 / 1 (0x2004d8..) */
     if (h_tit < 0) h_tit = spr_crea(t[1], 4, 1, 0, 0x1e);   /* 0x114d00(t + 4, 4, 1, 0, 0x1E) */
     if (h_tab < 0) h_tab = spr_crea_entera(t[0], 4, 1);  /* 0x114b68(t + 0, 4, 1) */
     if (spr_estado(h_tit) != 3) return 0;
+    }
     if (linea >= 0 && linea < 7 && linea != 6) spr_inmediata(t[2 + linea], 0, 0, 2, 0);
     if (pagina < 5) spr_inmediata(0x3d0015, 0, 0, 2, CUADRO_FILAS);
     else for (i = 4; i >= 0; i--) spr_inmediata(0x3d0016, 0, y16[4 - i], 2, CUADRO_FILAS);

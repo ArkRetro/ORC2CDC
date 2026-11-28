@@ -1,6 +1,8 @@
 /* musica.c entrada salida.adp [wav] [desplazamiento] [intercalado] (con PCM=1 en el entorno, PCM de 16 bits): una pista de MUSIC.PS2 (ADPCM de PS2, estereo
    intercalado por bloques) a ADPCM de Yamaha para el AICA de la Dreamcast, estereo intercalado por nibbles como lo
    espera snd_stream de KallistiOS (nibble bajo: derecho, alto: izquierdo). Con wav, tambien un WAV de 16 bits.
+   Con desplazamiento "pcm" la entrada es PCM de 16 bits estereo intercalado (s16le, ya a la frecuencia con la que
+   suena: 44,1 kHz; tools/menu_musica.py, la cancion del usuario) en vez de ADPCM de PS2.
    Sale de tu disco: no se distribuye. */
 #include <stdio.h>
 #include <stdlib.h>
@@ -53,7 +55,13 @@ int main(int argc, char **argv)
     if (argc < 3) { fprintf(stderr, "uso: musica entrada salida.adp [wav] [desplazamiento] [intercalado]\n"); return 1; }
     f = fopen(argv[1], "rb"); fseek(f, 0, SEEK_END); n = ftell(f); fseek(f, 0, SEEK_SET);
     d = malloc(n); fread(d, 1, n, f); fclose(f);
-    cap = (n / 16) * 28; L = malloc(cap * 2); R = malloc(cap * 2);
+    cap = (n / 16) * 28; if (cap < n / 4) cap = n / 4; L = malloc(cap * 2); R = malloc(cap * 2);
+    if (argc > 4 && !strcmp(argv[4], "pcm")) {             /* PCM s16le estereo: tal cual */
+        for (p = 0; p + 4 <= n; p += 4) {
+            L[ns] = (int16_t)(d[p] | d[p + 1] << 8); R[ns] = (int16_t)(d[p + 2] | d[p + 3] << 8); ns++;
+        }
+        ini = n;                                            /* (sin bloques de PS2) */
+    }
     for (p = ini; p + 2 * inter <= n; p += 2 * inter) {
         long k;
         for (k = 0; k < inter; k += 16) {

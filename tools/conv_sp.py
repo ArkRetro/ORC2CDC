@@ -157,6 +157,25 @@ def tablas_ruta(D):
     out.extend(struct.pack('<62f', *[f(0x40fd70 + 4 * k) for k in range(62)]))   # 31 puntos
     # constantes en el codigo: -10000 (0x2092c4: lui 0xc61c, ori 0x4000) y -9000 (0x209554: lui 0xc60c, ori 0xa000)
     assert cf.lui_ori(elf, 0x2092c4, 0x2092c8) == 0xc61c4000 and cf.lui_ori(elf, 0x209554, 0x209558) == 0xc60ca000
+    # Rev 2.9.9.c (modos "sp"): la funcion 0x50 del suceso 0x188 (fila 0x4f de 0x3ee7b4: 0x209ad8 / 0x209cc8 / 0x209d08 =
+    # PC 4AED50 / 4AEEC0 / 4AEEE0), el resultado de los 15 recorridos (presets 2 / 3, 1b4a90): el coche del mapa de 15
+    # = [0x410048 + modelo x 4] (lui 0x41 / addiu 0x48 en 0x209ba0 / 0x209c78; 0x1bcfb0 = 48B140), escenas 340001 /
+    # 34000C con el preset 2 (0x209b18: [0x44350c] == 2) o 340000 / 34000B, y 34001D; los cuadros por nivel de 0x209a40
+    # (0x3C en los niveles 5 y 10, si no 0x1E), 0x209a68 (46 / 23) y 0x209aa0 (14 / 7), 30 (0x41f0) en el nivel 14 y
+    # 0x1FE con la meta (0x1cff70(0xE)). Bloque 'TA50' detras del RSP1 (demo/fin.c: sin el, el mapa de la 0x15)
+    fn = 0x3ee7b4 + 0x4f * 0x14
+    assert (u(fn), u(fn + 4), u(fn + 0x10)) == (0x209ad8, 0x209cc8, 0x209d08), [hex(u(fn + 4 * k)) for k in range(5)]
+    assert u(0x209ba0) == 0x3c150041 and u(0x209c78) == 0x26a20048 and u(0x209b00) == 0x0c06f3ec
+    assert u(0x209b18) == 0x24030002 and cf.lui_ori(elf, 0x209b24, 0x209b2c) == 0x340001 and cf.lui_ori(elf, 0x209b38, 0x209b40) == 0x34000c
+    assert u(0x209b54) == 0x3c040034 and u(0x209b58) == 0x24050001 and cf.lui_ori(elf, 0x209b64, 0x209b6c) == 0x34000b
+    assert u(0x209a58) == 0x2402003c and u(0x209a60) == 0x2402001e and u(0x209b9c) == 0x241201fe and u(0x209b90) == 0x2404000e
+    assert u(0x209a7c) == 0x3c014238 and u(0x209a8c) == 0x3c0141b8 and u(0x209ab4) == 0x3c014160 and u(0x209ac4) == 0x3c0140e0
+    assert u(0x209c08) == 0x3c0141f0 and u(0x209bfc) == 0x2402000e
+    ta = [u(0x410048 + 4 * k) for k in range(30)]
+    assert all(t >> 16 == 0x34 for t in ta), [hex(t) for t in ta]
+    out += b'TA50'; W(*ta)
+    W(0x340001, 0x34000c, 0x340000, 0x34000b, 0x34001d, 0x3c, 0x1e, 0x1fe, 14)
+    out.extend(struct.pack('<5f', 46.0, 23.0, 14.0, 7.0, 30.0))
     return bytes(out)
 
 def rutas(D, sal):

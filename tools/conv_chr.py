@@ -897,12 +897,44 @@ def info(A):
                                                                    ' '.join('%08x' % x for x in T['mira'][m])))
     print('agarre', ' '.join(nombre(x) for x in T['agarre']))
 
+def infarto(A, sal):
+    """CHRH.DAT: los movimientos de la acompanante que piden las peticiones del INFARTO y su hoja de resultados (Rev 1.1;
+    no van en las CHRppaa.DAT: el bloque CHR_RAM de demo/main.c ya va al limite con la mayor pareja). La demo los lee al
+    empezar la carrera del modo (comun/robot.c robot_extra). 'RBH1', u32 n, 6 x 3 u32 las filas de caras de 487D90 (PS2
+    0x40eac8: {entrada, bucle, salida}; 489A90 = 0x203804 / 0x203fe8 / 0x204018), n x {u32 id, u16 cuadros, u16
+    banderas, u32 desp. canales, u32 bytes, u32 desp. claves, u32 bytes} (desde el principio) y los datos. Que
+    movimientos: las filas de caras, los de las peticiones (487D60 en 45E610.. del PC: 0x6003d / 0x6003e / 0x6003f,
+    0x260003 / 0x260007 / 0x260009, 0x60025, 0x250003, 0x220000 / 0x220003 / 0x220011), los del resultado (45DED0 =
+    PS2 0x1b3988: tablas 0x3f0a68 / 0x3f0a88) y los de la hoja (4603F0 = PS2 0x1ad3f8: 0x3f0b50 / 0x3f0b70)"""
+    E = elf(A)
+    assert E.u32(0x2037e4) >> 16 == 0x3c03 and E.u32(0x2037ec) & 0xffff == 0xeac8 - 0x10000 + 0x10000, 'filas de caras 0x40eac8'
+    caras = list(E.u32(0x40eac8, 18))
+    ids = set(caras) | set(E.u32(0x3f0a68, 8)) | set(E.u32(0x3f0a88, 8)) | set(E.u32(0x3f0b50, 8)) | set(E.u32(0x3f0b70, 8))
+    ids |= {0x6003d, 0x6003e, 0x6003f, 0x260003, 0x260007, 0x260009, 0x60025, 0x250003, 0x220000, 0x220003, 0x220011}
+    grupos = {}
+    def grupo(k):
+        if k not in grupos: grupos[k] = Grupo(A.datos(A.paquete('ANIMS.PS2')[k]))
+        return grupos[k]
+    ids = sorted(x for x in ids if x not in (0, 0xffffffff))
+    cab = 8 + 72 + 20 * len(ids); blob = bytearray(); ent = b''
+    for mid in ids:
+        fr, fl, can, cla = datos_movimiento(grupo(mid >> 16), mid & 0x7fff)
+        while len(blob) % 4: blob.append(0)
+        oc = cab + len(blob); blob += can
+        while len(blob) % 2: blob.append(0)
+        ok = cab + len(blob); blob += cla
+        ent += struct.pack('<IHHIIII', mid, fr, fl, oc, len(can), ok, len(cla))
+    out = b'RBH1' + struct.pack('<I', len(ids)) + struct.pack('<18I', *caras) + ent + bytes(blob)
+    open(sal, 'wb').write(out)
+    print('CHRH.DAT: %d movimientos, %d bytes' % (len(ids), len(out)))
+
 if __name__ == '__main__':
     a = sys.argv[1:]
     if not a: print(__doc__); sys.exit(1)
     A = Assets(a[0])
     if '--info' in a: info(A); sys.exit(0)
     if BANDERERO: convierte(A, a[1]); sys.exit(0)
+    if '--infarto' in a: infarto(A, a[1]); sys.exit(0)
     E = elf(A)
     def par(d, c): return ((d, esqueleto_de(E, d), 0), (c, esqueleto_de(E, c), 1))
     if '--lista' in a: print(' '.join(['CHRPAR.DAT'] + [nombre_par(p) for p in pares(A)])); sys.exit(0)

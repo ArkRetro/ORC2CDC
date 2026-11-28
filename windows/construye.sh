@@ -63,6 +63,7 @@ git -C "$REPO" log -1 --format='demo de orc2cdc %h (%cs)' > "$G/dc/VERSION.txt"
 
 echo "== codigo"
 cp "$REPO"/tools/*.py "$G/tools/"; cp "$REPO"/tools/ps2/*.py "$G/tools/ps2/"
+cp "$REPO/demo/decor_tabla.h" "$G/tools/"                       # (tools/aligera.py: la tabla de la demo)
 mkdir -p "$G/tools/c"; cp "$REPO"/tools/c/{pvs,visible,musica,reflejo}.c "$G/tools/c/"
 cp "$REPO/windows/outrun2dc.py" "$G/"
 [ "$PROGRAMA" = taxi ] && cp "$REPO/windows/outrun_taxi.py" "$G/"

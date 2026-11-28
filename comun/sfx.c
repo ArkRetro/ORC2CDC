@@ -103,6 +103,10 @@ typedef struct {                /* como en VOCES.DAT */
 } voz_dat_t;
 
 static voz_dat_t voz[MAX_VOCES];
+/* Rev 2.9.9.c (modos "sp"): bloque 'VHG1' de VOCESH.DAT / VOCESHC.DAT (tools/conv_infarto.py vocesh): la mascara de
+   los grupos (bancos HAM distintos) de cada muestra (0 = HC / PERH), el grupo por clase de mision y clave y la clase de
+   cada mision (0x1af710). Sin el (ficheros de antes): id + 0x200 (grupo + 1) */
+static uint64_t voz_msk[MAX_VOCES]; static uint8_t voz_ghk[4][15], voz_cls[48]; static int voz_vhg;
 static uint32_t voz_spu, voz_tablas_tam;
 static uint8_t *voz_tablas;
 static int n_voz, canal_voz = -1, canal_voz_se = -1;
@@ -225,7 +229,8 @@ static void calla_grupo(int g)
     }
 }
 
-int sfx_inicia(void)
+/* (c2c9) frio, solo al cargar: -Os (el codigo cuenta en pasos de 8 KB de RAM) */
+__attribute__((optimize("Os"))) int sfx_inicia(void)
 {
     uint32_t tam, h[8], off, total, *cab;
     int g, i;
@@ -362,7 +367,8 @@ void sfx_menu(int id)
 /* ---------------------------------------------------------------- voces */
 /* lee un VOZ1 (VOCES.DAT o VOCESH.DAT) en el AICA; buf/cap: RAM prestada para el fichero (NULL: del monton). Las
    tablas de cuando habla se quedan con las del primero que las traiga (VOCESH.DAT no lleva) */
-static int voces_lee(const char *fich, void *buf, uint32_t cap)
+/* (c2c9) frio, solo al cargar: -Os (el codigo cuenta en pasos de 8 KB de RAM) */
+__attribute__((optimize("Os"))) static int voces_lee(const char *fich, void *buf, uint32_t cap)
 {
     uint32_t tam = 0, h[8], i, n;
     uint8_t *d;
@@ -382,10 +388,15 @@ static int voces_lee(const char *fich, void *buf, uint32_t cap)
     spu_memload(voz_spu, d + h[4], (h[5] - h[4] + 3) & ~3u);
     n = h[1];
     for (i = 0; i < n; i++) memcpy(&voz[i], d + h[2] + 20 * i, 20);
+    voz_vhg = 0;
+    if (tam >= h[5] + 8 + 8 * n + 60 + 48 && !memcmp(d + h[5], "VHG1", 4) && !memcmp(d + h[5] + 4, &n, 4)) {
+        memcpy(voz_msk, d + h[5] + 8, 8 * n); memcpy(voz_ghk, d + h[5] + 8 + 8 * n, 60); memcpy(voz_cls, d + h[5] + 8 + 8 * n + 60, 48);
+        voz_vhg = 1;
+    }
     memcpy(voz_idioma, d + 24, 8); voz_idioma[8] = 0;
     n_voz = n;
     if (!buf) free(d);
-    dbglog(DBG_INFO, "VOZ: %s, %u muestras, %u KB en el AICA\n", fich, (unsigned)n, (unsigned)((h[5] - h[4]) >> 10));
+    dbglog(DBG_INFO, "VOZ: %s, %u muestras, %u KB en el AICA%s\n", fich, (unsigned)n, (unsigned)((h[5] - h[4]) >> 10), voz_vhg ? " (bancos HAM por clase y clave)" : "");
     return 0;
 }
 static const char *voz_fich;
@@ -414,17 +425,50 @@ int sfx_voces_juego(const char *fich, void *buf, uint32_t cap)
 int sfx_voces_inicia(void) { return sfx_voces_inicia_en(NULL, 0); }
 static int voz_grupo = -1;
 void sfx_voz_grupo(int g) { voz_grupo = g; }
+/* (VHG1) el grupo del banco que pide el cargador de la etapa del PS2 (0x173a6c: 0x1b3be8 / 0x1b3c70) para la mision m y
+   la clave k: base[0x1af710(m)] + k; -1 sin VHG1 */
+int sfx_voz_grupo_ham(int m, int k)
+{
+    int c;
+    if (!voz_vhg || k < 0 || k >= 15) return -1;
+    c = m >= 0 && m < 48 ? voz_cls[m] & 3 : 0;
+    return voz_ghk[c][k] == 0xff ? -1 : voz_ghk[c][k];
+}
 
 const void *sfx_voces_tablas(uint32_t *tam) { if (tam) *tam = voz_tablas_tam; return voz_tablas; }
 const char *sfx_voces_idioma(void) { return voz_idioma; }
 
+/* (C2C, campeonatos) las voces de los bancos de las peticiones de la etapa (comun/vozmis.c, VOCESM.DAT): se buscan
+   antes que las de VOCESH.DAT con 10 bits de id (UFO.pak: 0x23f) */
+static const voz_dat_t *voz_x; static volatile int n_voz_x; static uint32_t voz_x_spu; static int voz_x_suena;
+void sfx_voz_extra(const void *filas, int n, uint32_t base)
+{
+    if (voz_x_suena && n_voz_x) sfx_voz_calla();               /* (su memoria del AICA se va a reescribir) */
+    n_voz_x = 0; voz_x = filas; voz_x_spu = base; n_voz_x = filas ? n : 0; voz_x_suena = 0;
+}
 static void toca_voz(int id, int canal)
 {
     int i, vol;
     muestra_dat_t m;
     if (canal < 0) return;
+    for (i = 0; i < n_voz_x && voz_x[i].id != (id & 0x3ff); i++) ;
+    if (i < n_voz_x) {
+        vol = (int)(vol_se(voz_x[i].vol) * vol_general + 0.5f);
+        if (vol > 255) vol = 255;
+        if (vol <= 0) return;
+        dbglog(DBG_INFO, "VOZ 0x%x (peticion)\n", id & 0x3ff);
+        memset(&m, 0, sizeof m);
+        m.formato = 2; m.fin = voz_x[i].n;
+        snd_sfx_stop(canal); voz_x_suena = 1;
+        manda(canal, AICA_CH_CMD_START, &m, voz_x_spu + voz_x[i].desp, voz_x[i].frec, vol, 128);
+        return;
+    }
     i = n_voz;
-    if (voz_grupo >= 0) {                                       /* la del banco de la etapa (HAM: id + 0x200 (g + 1)) */
+    if (voz_vhg) {                                              /* (VHG1) la del banco de la etapa, si no la de siempre */
+        uint64_t b = voz_grupo >= 0 && voz_grupo < 64 ? (uint64_t)1 << voz_grupo : 0;
+        if (b) for (i = 0; i < n_voz && !(voz[i].id == (id & 0x1ff) && (voz_msk[i] & b)); i++) ;
+        if (i >= n_voz) for (i = 0; i < n_voz && !(voz[i].id == (id & 0x1ff) && !voz_msk[i]); i++) ;
+    } else if (voz_grupo >= 0) {                                /* la del banco de la etapa (HAM: id + 0x200 (g + 1)) */
         int k = (id & 0x1ff) + 0x200 * (voz_grupo + 1);
         for (i = 0; i < n_voz && voz[i].id != k; i++) ;
     }
@@ -440,8 +484,8 @@ static void toca_voz(int id, int canal)
     manda(canal, AICA_CH_CMD_START, &m, voz_spu + voz[i].desp, voz[i].frec, vol, 128);
 }
 
-void sfx_voz(int id) { if (n_voz) toca_voz(id, (id & 0x1ff) == 0x4d || (id & 0x1ff) == 0x18d ? canal_voz_se : canal_voz); }
-void sfx_voz_se(int id) { if (n_voz) toca_voz(id, canal_voz_se); }   /* efectos de los bancos de voz (424940 directo) */
+void sfx_voz(int id) { if (n_voz || n_voz_x) toca_voz(id, (id & 0x1ff) == 0x4d || (id & 0x1ff) == 0x18d ? canal_voz_se : canal_voz); }
+void sfx_voz_se(int id) { if (n_voz || n_voz_x) toca_voz(id, canal_voz_se); }   /* efectos de los bancos de voz (424940 directo) */
 
 /* una muestra suelta (ADPCM de Yamaha) por el canal de efectos de las voces: el efecto 0x96 de la escena de la meta
    (demo/meta.c). sfx_muestra_sube la deja en el AICA (0 si no cabe); vol: el de la tabla SE del IRX */

@@ -84,7 +84,6 @@ int musica_pon_una(int n)
 int musica_pon(int n)
 {
     char nom[16];
-    if (n == MUSICA_TEMA_ALL_I_WANT) n = MUSICA_PISTA_ALL_I_WANT;   /* ALL I WANT (Crazy Taxi): MUS67.ADP, una sola pista */
     musica_para();
     una = 0; leida = 0;
     thd_sleep(30);
@@ -136,4 +135,15 @@ void musica_nivel(float n)
     if (v == volumen) return;
     volumen = v;
     mutex_lock(&m_poll); if (activa && !arranca) snd_stream_volume(hs, volumen); mutex_unlock(&m_poll);
+}
+
+/* el tema de mas del selector (musica.h) */
+int musica_pista_tema(int k)
+{
+    return k == MUSICA_TEMA_EXTRA ? MUSICA_PISTA_EXTRA : k == MUSICA_TEMA_ALL_I_WANT ? MUSICA_PISTA_ALL_I_WANT : k;
+}
+int musica_avance_tema(int k) { return k == MUSICA_TEMA_EXTRA ? MUSICA_AVANCE_EXTRA : 0x21 + k; }
+int musica_tema_pista(int n)
+{
+    return n == MUSICA_PISTA_EXTRA ? MUSICA_TEMA_EXTRA : n == MUSICA_PISTA_ALL_I_WANT ? MUSICA_TEMA_ALL_I_WANT : n;
 }

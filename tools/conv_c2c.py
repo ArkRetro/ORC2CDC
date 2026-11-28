@@ -31,6 +31,20 @@ con solo=True: la animacion entera son 1,1 MB; con las 22 escenas, ~43 KB), para
        u32 token del cursor (0x375960 = 0x4400d8, cuadros 0..0x34: 0x2430c0), token del nombre (0x4400d6, lui / ori
          0x244240 / 0x244268) y su primer cuadro (categoria + 0x1e, 0x243d50); f32 su posicion (-83, 148: 0x24424c /
          0x244258)
+     peticiones (los campeonatos de los grupos 4..6, suceso 0x3c; PS2 0x240d68 inicio, 0x240e20 control, 0x241228
+     dibujo, 0x240bc8 cursor = 4EA330 / 4EA3C0 / 4EA610 / 4EA210 del PC, outrun2-decomp platform/frontend_requests.cpp:
+     el mismo codigo con otros tokens y los textos una posicion antes), bloque 'REQ1' detras del mapa:
+       'REQ1', u32 tokens[9]: fondo 0x4400cc, encima 0x4400cd, nodo 0x4400df, casilla 0x4400d5, icono 0x4400d3, panel
+         0x4400d2, titulo 0x4400d6, lista 0x4400e1 (lui / ori del dibujo) y cursor ([0x375328])
+       f32 cursor[16][2] (0x4170b0), etapa[16][2] (0x417130: la etapa i usa la i + 1), rotulo[3][2] (0x4171b0),
+         casilla[8][2] (0x3752e8: 4 casillas y 4 notas, en pantalla: el dibujo resta (320, 240))
+       i32 vecinos[16][4] (0x4171c8: arriba, abajo, derecha, izquierda), u32 resultados[16] (0x4172c8, por nodo)
+       desc listas[4] (0x417308), notas[7] (0x417338), pies[3] (0x417480), titulos[3] (0x4174b0), tit_lista[4] (0x4174e0)
+       u32 iconos[30] (0x417390), cursos[30] (0x417408)
+       u8 tipo[3][15] (+0x1c de los registros de 0x78 de Request_Course_SP / _OR2 / Req_Course_MIX_PS2: 0x62a880), 3 x 0
+       u32 textos: inicio (0x461), con resultado (0x462), sin el (0x380) y los 33 rotulos de peticion (0x417510)
+       u8 pet[60][16]: por tipo de curso (su guion Req_*.bin, nombres 0x374010), las cuentas de REQUEST_NORMAL /
+         SPECIAL1..3 (4 bytes; 0xff sin guion) y el rotulo de cada peticion (4 x 3 bytes: 0x240a08 con su tipo y subtipo)
      textos: cadenas de bytes (codigos de la fuente 14, '\\n' = salto de linea) acabadas en 0
 Valores que van en el codigo (las instrucciones se comprueban aqui): texto de la categoria en (65, 210) (0x242d80 /
 0x242d78) color 0xFF3F474A (0x242d64), rango en (520, 363) (0x242e34 / 0x242e2c) centrado (0x242e3c) color 0xFF4D5559
@@ -46,6 +60,8 @@ import conv_sprani as cs
 BANCO = 0x44
 CATEG = [0xce, 0xcf, 0xd0, 0xd1, 0xf1]
 MAPA = [0xca, 0xcb, 0xd2, 0xd3, 0xd4, 0xd5, 0xd6, 0xd8, 0xd9, 0xda, 0xdb, 0xdc, 0xdd, 0xde, 0xdf, 0xe0, 0xf0]
+PETIC = [0xcc, 0xcd, 0xe1]                                  # las demas escenas de las peticiones ya van en MAPA
+LISTAS_REQ = ['REQUEST_NORMAL', 'REQUEST_SPECIAL1', 'REQUEST_SPECIAL2', 'REQUEST_SPECIAL3']   # 0x374138
 FUENTE = 14
 
 
@@ -147,6 +163,74 @@ def main():
     assert u(0x375960) == 0x4400d8 and u(0x375930) == 0x375430 and u(0x375940) == 0x375570 and u(0x375950) == 0x3756b0
     tn = lui_ori(0x244240, 0x244268); assert tn == 0x4400d6
     W(u(0x375960), tn, 0x1e); F(-83.0, 148.0)
+    # ---- peticiones (campeonatos)
+    assert par(0x240c0c, 0x240c14) == 0x4170b0 and par(0x2413fc, 0x241404) == 0x417130
+    assert par(0x241ac8, 0x241ad4) == 0x4171b0 and par(0x2410c8, 0x2410cc) == 0x4171c8
+    assert par(0x2415c4, 0x2415cc) == 0x4172c8 and par(0x240c74, 0x240c80) == 0x417308
+    assert par(0x241400, 0x241408) == 0x417338 and par(0x2419d4, 0x2419dc) == 0x417480
+    assert par(0x241960, 0x241968) == 0x4174b0 and par(0x24189c, 0x2418a8) == 0x4174e0
+    assert par(0x2415e8, 0x2415ec) == 0x417390 and par(0x2418f8, 0x241900) == 0x417408
+    assert par(0x241acc, 0x241ad0) == 0x417510 and par(0x240ce0, 0x240ce4) == 0x3752e8
+    assert par(0x240e90, 0x240e98) == 0x62a880 and par(0x240a0c, 0x240a1c) == 0x374138
+    out.extend(b'REQ1')
+    tk = [lui_ori(a, b) for a, b in ((0x241354, 0x24135c), (0x2413b8, 0x2413c4), (0x2414a0, 0x2414c8), (0x24162c, 0x24163c),
+                                     (0x241688, 0x241690), (0x24180c, 0x241814), (0x24190c, 0x24192c), (0x241a90, 0x241a98))]
+    assert tk == [0x4400cc, 0x4400cd, 0x4400df, 0x4400d5, 0x4400d3, 0x4400d2, 0x4400d6, 0x4400e1], [hex(x) for x in tk]
+    assert u(0x375328) == 0x4400d8; W(*tk, u(0x375328))
+    inm(0x240c44, 0x34); inm(0x241644, 3); inm(0x241780, 5); inm(0x241818, 3)   # cursor 0..0x34; casilla 3 / 5; panel 3
+    lui(0x2418ac, 0xc2a6); lui(0x2418b8, 0x4314)             # titulo en (-83, 148)
+    inm(0x241b50, 0x461); inm(0x241bf4, 0x462); inm(0x241bf0, 0x380)
+    for a, n in ((0x4170b0, 16), (0x417130, 16), (0x4171b0, 3), (0x3752e8, 8)):
+        for k in range(n): F(f(a + 8 * k), f(a + 8 * k + 4))
+    vec = [[i(0x4171c8 + 16 * s + 4 * k) for k in range(4)] for s in range(16)]
+    assert vec[0] == [-1, -1, 1, -1] and vec[15] == [14, -1, -1, 10], vec
+    for v in vec: W(*v)
+    res = [u(0x4172c8 + 4 * k) for k in range(16)]            # por nodo: el 0 (la salida) no tiene; la etapa i, el i + 1
+    assert res == [0, 1, 1, 1, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 4]; W(*res)
+    for a, n in ((0x417308, 4), (0x417338, 7), (0x417480, 3), (0x4174b0, 3), (0x4174e0, 4)): desc(a, n)
+    assert u(0x417308) == 0x4400d4 and u(0x417338) == 0x4400e0 and u(0x417480) == 0x4400f0 and u(0x4174b0) == 0x4400d6
+    W(*[u(0x417390 + 4 * k) for k in range(30)]); W(*[u(0x417408 + 4 * k) for k in range(30)])
+    # por el hash del nombre: Req_Desert_r.bin esta en el paquete pero no en la lista de nombres
+    from ps2.assets import hash_nombre
+    por_hash = {x.hash: x for x in As.paquete('SCRIPTS.PS2')}
+    guion = lambda n_: bytes(As.datos(por_hash[hash_nombre('\\bin\\%s.bin' % n_)]))
+    tipos = []
+    for n_ in cm.CURSOS_REQ:
+        d_ = guion(n_); nn, oo = cm._r077(d_, n_); assert nn == 15, n_
+        tipos.append([struct.unpack_from('<I', d_, oo + 0x78 * k + 0x1c)[0] for k in range(15)])
+    assert all(t < 60 for l in tipos for t in l), tipos
+    for l in tipos: out.extend(bytes(l))
+    out.extend(bytes(3))
+    for t in (0x461, 0x462, 0x380): texto(cad[t])
+    for k in range(33): texto(cad[u(0x417510 + 4 * k)])
+    # el rotulo de una peticion: el trozo de 0x240a08 que mira su tipo (v0) y subtipo (a1), ejecutado tal cual
+    from ps2 import mips
+    def rotulo(tipo, sub):
+        m = mips.Mips(As.elf); m.r[2] = tipo; m.r[5] = sub; m.r[29] = m.PILA - 0x100; m.r[31] = 0xDEAD0000
+        m.escribe(m.r[29] + 8, struct.pack('<Q', 0xDEAD0000))
+        m._corre(0x240a58, 2000); return m.r[2] & 0xffffffff
+    assert u(0x240a58) == 0x2444ffff and rotulo(1, 0) == 0xd and rotulo(16, 4) == 0x1a and rotulo(5, 2) == 0xb
+    nombres = []; a = 0x374010
+    assert u(0x374138) and par(0x240a0c, 0x240a1c) - a == 4 * 74, 'tabla de nombres de los guiones'
+    for k in range(60):
+        p = u(a + 4 * k); nombres.append(bytes(E[p - 0xfff80:p - 0xfff80 + 40]).split(b'\0')[0].decode())
+    assert nombres[0] == 'Req_Palm_Beach' and nombres[30] == 'Req_Palm_Beach_r' and nombres[59] == 'Req_Easter_Island_r', nombres
+    usadas = set(t for l in tipos for t in l)
+    for k in range(60):
+        r_ = bytearray(b'\xff' * 16)
+        if hash_nombre('\\bin\\%s.bin' % nombres[k]) in por_hash:
+            d_ = guion(nombres[k]); nc, nr = struct.unpack_from('<2I', d_, 0)
+            rel = dict(struct.unpack_from('<2I', d_, 8 + 8 * q) for q in range(nr))
+            for li, nom in enumerate(LISTAS_REQ):
+                try: c_, o_ = cm._r077(d_, nom)
+                except SystemExit: c_, o_ = 0, 0
+                assert c_ <= 3, (nombres[k], nom, c_); r_[li] = c_
+                for q in range(c_):
+                    t_ = rel[o_ + 0x74 * q + 0x58]; r_[4 + 3 * li + q] = rotulo(*struct.unpack_from('<2I', d_, t_))
+                    assert r_[4 + 3 * li + q] < 33
+        else: assert k not in usadas, 'falta el guion %s' % nombres[k]
+        out.extend(r_)
+    print('  peticiones: tipos %s' % tipos)
     # ---- textos (el primer byte es un 0: el desplazamiento 0 queda para "ninguno")
     t0 = len(out); struct.pack_into('<I', out, 4, t0)
     pool = bytearray(b'\0')
@@ -178,7 +262,7 @@ def main():
         print('  F14: %d glifos en una textura de %dx%d' % (len(chars), img.shape[1], img.shape[0]))
     vq = lambda k, a, fmt, lista: None if k in sin_vq else ch.vq_pequeno(k, a, fmt, lista)
     ruta = os.path.join(sal, 'C2C.DAT')
-    cs.escribe(D, BANCO, ruta, [('CATEGORIAS', CATEG), ('MAPA', MAPA)], bytes(out), vq=vq, solo=True, antes=antes)
+    cs.escribe(D, BANCO, ruta, [('CATEGORIAS', CATEG), ('MAPA', MAPA), ('PETICIONES', PETIC)], bytes(out), vq=vq, solo=True, antes=antes)
     print('C2C.DAT: %d bytes (tablas C2C1 %d bytes, %d textos)' % (os.path.getsize(ruta), len(out), len(ref)))
 
 

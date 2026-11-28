@@ -26,6 +26,7 @@ typedef struct {
     int clave, sub, b14, tipo; float segundos; int32_t umbral[3];
     int32_t cfg[13]; float c20;                 /* (cfg[8] es el float c20) */
     float perfil[16], c3c[2], luces[12];
+    int hay44, hay48; float t44[12], t48[12];   /* +0x44 / +0x48 del registro de 47CF40 (vaivenes 476CA0..476F40) */
     uint32_t nnodos; uint16_t largo_tramo[RIVAL_NODOS], largo_union[RIVAL_NODOS], largo;
 } rival_mision_t;
 
@@ -60,11 +61,21 @@ int  rival_puesto(void);                        /* car+0xC36 del jugador (0 el p
 int  rival_total(void);                         /* 80FB2C: en la clasificacion (con el jugador) */
 int  rival_47da80(void);                        /* el de referencia del HUD (lider o segundo); -1 sin coches */
 int  rival_largo(void);                         /* 803710: largo del curso en posiciones */
-int  rival_nota(void);
 int  rival_millas(int nota);                    /* 84B900 + 4 nota (OutrunMiles.bin SETUP; 0 la 7) */
-int  rival_siguiente(int i);                    /* 495A60: el registro de la subclave siguiente o -1 */                          /* 495C20 (tipo 0): 6 - puesto, 0 el ultimo */
+int  rival_siguiente(int i);                    /* 495A60: el registro de la subclave siguiente o -1 */
 /* la carrera (demo/main.c) abre el coche del registro i a ebx posiciones del jugador (delante: ebx > 0; parrilla:
    fuera del modo 16, al montar: en el carril 2 o 3 por +77 & 1). Devuelve la plaza del trafico o -1 si no puede (y el
    registro sigue sin coche: 476480 / 4764D0) */
 extern int (*rival_abre)(int i, int ebx, int delante, int parrilla);
+/* (2026-11-27, los tipos 1, 2, 3 y 6) */
+extern void (*rival_cierra)(int coche);         /* 4763D0 / 440200: la carrera cierra ese coche del trafico */
+int  rival_ultimo(void);                        /* 64E194 (477350): el ultimo de la clasificacion (-1: el jugador) */
+void rival_elimina(int i);                      /* 477430: fuera de la carrera (eliminado o pillado) */
+void rival_banderas(int i, int bits);           /* 477090: +0x71 bits 0..2 del coche abierto (y el 3 con 4960A0) */
+typedef struct { uint8_t nodo, en_union; uint16_t desde, hasta, pad; float v[6]; } rival_zona_t;
+int  rival_zonas(const rival_zona_t **z);
+/* 472B60: la tabla del de delante (coche de carreras o del trafico) de su clase: 6 x {distancia, angulo (65536 = vuelta),
+   factor} y el limite (MISION.DAT 'PAC1' = PS2 0x40bcc8 / 0x40bde8); NULL sin ella */
+const float *rival_pace(int carreras, int clase);       /* 474990: las zonas de derrape de la mision (MISION.DAT 'MIX2') */
+const float *rival_cabeza(int modelo);          /* 495D90: el punto de las marcas del coche del jugador (PS2 0x40c370) */
 #endif

@@ -102,6 +102,31 @@ static int pista_sonando = -1;
 #define H(a) ((int)U32(a))
 static int crea(uint32_t tok, int capa, int modo, int a, int b) { return spr_crea(tok, capa, modo, a, b); }
 static int crea_fila(int r, int capa, int modo) { return spr_crea(T->fila[r][0], capa, modo, T->fila[r][1], T->fila[r][2]); }
+/* "Elige la musica" con la fila de mas (SPLASH WAVE REMASTER; tools/fsp_musica.py y docs/PARIDAD.md): el bloque MUSX
+   detras de FSP1 (o NULL): u32 filas por lado (9), desfase del lado 1 en 2E0028 (830), cuadros del cambio de lado en
+   2E0028 (870..889 y 1700..1719), 2, 0, 0; y por lado {tema, avance, 4 x {escena, primero, ultimo}} (como 5C8D00). La
+   posicion p de la lista (fila + lado x filas) va al registro del original lado x 8 + fila o, la fila 9, al de MUSX */
+static const uint32_t *mx;
+static int mus_n(void) { return mx ? (int)mx[2] : 8; }
+static int mus_idx(int p)                               /* registro de 5C8D00 o -1 (el de MUSX) */
+{
+    int n = mus_n(), lado = p >= n, r = p - lado * n;
+    if (!mx) return p & 15;
+    return r >= 8 ? -1 : (lado * 8 + r) & 15;
+}
+static const uint32_t *mus_x(int p) { return mx + 10 + 14 * (p >= mus_n()); }
+static uint32_t mus_campo(int p, int k)                 /* 0 tema, 1 avance */
+{
+    int i = mus_idx(p);
+    return i >= 0 ? T->mus[i][k] : mus_x(p)[k];
+}
+static int mus_fila(int p, int k, int capa, int modo)  /* k = 2..5: las filas del registro */
+{
+    int i = mus_idx(p); const uint32_t *f;
+    if (i >= 0) return crea_fila(T->mus[i][k], capa, modo);
+    f = mus_x(p) + 2 + 3 * (k - 2);
+    return spr_crea(f[0], capa, modo, f[1], f[2]);
+}
 static void suelta(uint32_t a) { spr_suelta(H(a)); }
 static int estado_h(int h) { return h < 0 ? 0 : spr_estado(h); }
 static void inm(uint32_t tok, float x, float y, int capa, int cuadro) { spr_inmediata(tok, x, y, capa, cuadro); }
@@ -432,8 +457,13 @@ static void paso4_4c0110(void)
 {
     /* 453320 = [0x54c108] (PS2 0x178478) = el byte +0x13 de los ajustes de 0x5493d0 (0x178108, copiado por 0x178338),
        2 por defecto (0x177310 / 0x177440, nadie lo cambia): 5 filas con los 15 recorridos continuos (presets 2 / 3,
-       arboles csc_data_cvt_ren / csc_data_2_ren). Esos arboles no estan convertidos: DESVIACION, 0 (3 filas) */
+       arboles csc_data_cvt_ren / csc_data_2_ren = 291 / 290 de CURSOTA.DAT). Desde la Rev 2.9.9.c (modos "sp") como
+       el original; -DFSP_FILAS3: 0 (3 filas, la DESVIACION de antes) */
+#ifdef FSP_FILAS3
     int r = 0;
+#else
+    int r = 2;
+#endif
     P32(0x8449e0, (uint32_t)r);
     if (r == 0) P32(0x844944, 0); else if (r > 0 && r <= 2) P32(0x844944, 1);
     P32(0x84a24c, T->m60[0]); P32(0x84a23c, 0x2e0022);
@@ -480,7 +510,7 @@ static void panel_4c0a10(void)
         inm(0x2e0012, 580.0f, Y_(esi), 5, ebx); ++esi;
     }
     if (WU8(0x23) != 0xff) { inm(0x2e0015, 580.0f, Y_(esi), 5, WI8(0x23)); ++esi; }
-    if (WU8(0x20) != 0xff) inm(0x2e0013, 580.0f, Y_(esi), 5, WI8(0x20));
+    if (WU8(0x20) != 0xff) inm(0x2e0013, 580.0f, Y_(esi), 5, mus_idx(WI8(0x20)) >= 0 ? mus_idx(WI8(0x20)) : 16);   /* (MUSX: cuadro 16) */
 #undef Y_
 }
 static int palanca_4c0bd0(int arg)
@@ -791,7 +821,7 @@ static void fn9_init_4c04d0(void)
     P32(0x8449f4, 3);
     if (WU32(0x54) == 0) {
         P32(0x844950, 0);
-        lista_4bee90(0x2e0028, 8, T->f70[3], T->f70[2], 740.0f, 7);
+        lista_4bee90(0x2e0028, (int8_t)mus_n(), T->f70[3], T->f70[2], mx ? (float)mx[3] : 740.0f, 7);
         WP8(8, WU8(8) & 0xfc); WP8(0xa, WU8(0xa) & 0xfc);
         WP16(0x10, 0x4b0); WP16(0x12, 0x3c);
         WP8(0x19, 0); WP8(0x1a, 0); WP8(0x48, 0); WP32(0x3c, 0); WP32(0x44, 0);
@@ -820,10 +850,12 @@ static void fn11_init_4c05f0(void)
     {   uint32_t kind = T->coche[k][0];
         if ((kind == 6 || kind == 5 || kind == 3 || kind == 9) && WU8(0x1e) == 4) WP8(0x1e, 5); }
     mu = WU8(0x20);
-    if (mu == 7) p = rand() % 7;
-    else if (mu == 0xf) p = rand() % 7 + 8;
-    else p = (int8_t)mu;
-    musica_fsp = (int)(T->mus[p & 15][0] & 0xff);
+    p = mus_idx(mu);
+    if (p == 7) p = rand() % 7;
+    else if (p == 0xf) p = rand() % 7 + 8;
+    else if (p < 0) p = -1;                             /* (la fila de mas: su tema) */
+    else p = mx ? p : (int8_t)mu;
+    musica_fsp = (int)((p >= 0 ? T->mus[p & 15][0] : mus_x(mu)[0]) & 0xff);
     if (WU8(0x1f) == 0xff) WP8(0x1f, 1);
 }
 static void disp6_4c1e80(void)
@@ -1284,7 +1316,7 @@ static void fn9_ctrl_4c4880(void)
     if ((WU8(8) & 3) <= 1 && I32(0x8449cc) >= 0 && estado_h(H(0x8449cc)) == 3) {
         int h;
         suelta(0x8449cc);
-        h = crea_fila(T->mus[MUS() & 15][3], 4, 0);
+        h = mus_fila(MUS(), 3, 4, 0);
         P32(0x8449cc, (uint32_t)h); spr_velocidad(h, 1.0f);
         if (U32(0x844958)) {
             int y = cvtt(F32(0x84a284)), x = cvtt(F32(0x84a280));
@@ -1304,7 +1336,7 @@ static void fn9_ctrl_4c4880(void)
             P32(0x8449bc, 0xffffffffu); P32(0x8449c0, 0xffffffffu); P16(0x84494c, 1);
             spr_suelta(h);
             P32(0x8449c4, 0xffffffffu);
-            P32(0x8449c4, crea_fila(WI8(0x19) >= 8 ? 0x178 : 0x16f, 4, 1));
+            P32(0x8449c4, crea_fila(WI8(0x19) >= mus_n() ? 0x178 : 0x16f, 4, 1));
             WP8(0x4b, WU8(0x4b) + 1);
             COLA();
             return;
@@ -1350,18 +1382,18 @@ static void fn9_ctrl_4c4880(void)
             if (k <= 1) {
                 int h;
                 suelta(0x8449cc);
-                h = crea_fila(T->mus[MUS() & 15][2], 4, 1);
+                h = mus_fila(MUS(), 2, 4, 1);
                 P32(0x8449cc, (uint32_t)h); spr_velocidad(h, 1.0f);
             } else if (k == 2 || k == 3) {
                 uint32_t a = k == 2 ? 0x30c : 0x5f0, b = k == 2 ? 0x31f : 0x603;
                 suelta(0x8449c4); suelta(0x8449cc);
-                P32(0x8449c4, crea(U32(0x84a298), 7, 1, a, b));
+                P32(0x8449c4, crea(U32(0x84a298), 7, 1, mx ? mx[k == 2 ? 4 : 6] : a, mx ? mx[k == 2 ? 5 : 7] : b));   /* (MUSX: 2E0028 mas larga) */
                 P32(0x8449cc, crea(0x2e0027, 4, 1, a, b));
                 spr_velocidad(H(0x8449c4), 1.0f);
                 if (k == 2) spr_velocidad(H(0x8449cc), 1.0f);
                 P8(0x84a293, 1); P32(0x8449e8, 0);
             }
-            P32(0x844a00, T->mus[MUS() & 15][1]);
+            P32(0x844a00, mus_campo(MUS(), 1));
             sonido(3);
         }
     }
@@ -1372,11 +1404,11 @@ static void fn9_ctrl_4c4880(void)
         P32(0x8449cc, 0xffffffffu);
         if (WU8(0x48) == 0) { WP8(0x20, a); p = (int8_t)a; }
         else { uint8_t cl = U8(0x84a291); WP8(0x20, (uint8_t)(a + cl)); p = (int8_t)a + (int8_t)cl; }
-        P32(0x8449c4, crea_fila(T->mus[p & 15][4], 4, 1));
+        P32(0x8449c4, mus_fila(p, 4, 4, 1));
         P32(0x8449e8, 0);
         if (pulsa(8)) { WP8(8, WU8(8) | 3); WP32(0x54, 0); }
         else {
-            sonido_4bee60(T->son[(0xac / 4 + WI8(0x20)) & 63]);
+            if (mus_idx(WI8(0x20)) >= 0) sonido_4bee60(T->son[(0xac / 4 + mus_idx(WI8(0x20))) & 63]);   /* (la de mas: sin voz) */
             WP16(8, (uint16_t)((WU16(8) & 0xfffe) | 2));
         }
         WP16(0x10, 0);
@@ -1458,6 +1490,11 @@ int fsp_entra(void)
     if (!T || tam < sizeof(tab_t) || memcmp(T->m, "FSP1", 4)) {
         dbglog(DBG_ERROR, "FSP: SPFE.DAT sin tablas\n"); spr_cierra(bk); bk = NULL; if (fsp_hueco) fsp_hueco(0); return -1;
     }
+    {   uint32_t o; mx = NULL;                          /* MUSX (fsp_musica.py) detras de FSP1 */
+        for (o = (sizeof(tab_t) + 3) & ~3u; o + 8 + 4 * 38 <= tam; o += 4)
+            if (!memcmp((const uint8_t *)T + o, "MUSX", 4)) { mx = (const uint32_t *)((const uint8_t *)T + o); break; }
+        if (mx && mx[2] != 9) mx = NULL;
+    }
     memset(mm, 0, sizeof mm); memset(wk, 0, sizeof wk);
     umbral_mas = T->fb4; umbral_menos = T->fb8; suave_84a314 = 0; (void)fb_;
     pista_sonando = -1; colores_84a208 = -1; ta_84a240 = -1; musica_fsp = 0;
@@ -1465,7 +1502,7 @@ int fsp_entra(void)
     /* 48B210 / 48AE90: estados 0..6 (bancos y coche del frontal) y el suceso 4 con la funcion [655B5C] = 1 */
     modo10 = 7; estado_ev = 2; activo = 1; salida = FSP_SIGUE; fn_actual = 0;
     pon_funcion(1);
-    dbglog(DBG_INFO, "FSP: frontal de recreativa (SPFE.DAT, %u bytes de tablas), VRAM libre %uK\n", (unsigned)tam,
+    dbglog(DBG_INFO, "FSP: frontal de recreativa (SPFE.DAT, %u bytes de tablas, %d filas de musica), VRAM libre %uK\n", (unsigned)tam, mus_n(),
            (unsigned)(pvr_mem_available() >> 10));
     return 0;
 }
