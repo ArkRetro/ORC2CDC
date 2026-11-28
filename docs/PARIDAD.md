@@ -8868,3 +8868,57 @@ libre de la zona al subir la etapa, nodos de la precarga):
 - Probado y descartado: el D adjust 0,5 en las fachadas (un nivel de mip mas nitido para las paredes vistas de canto).
   En Flycast no cambia nada visible y en la consola real puede centellear. La pared grande de la derecha ya se veia
   algo borrosa en el original: la PowerVR no tiene filtro anisotropico.
+
+## Mod taxi con todo lo de la clasica: integra 14bf114 en mod-integra (agente mod3, 2026-11-28)
+
+Rama local `mod-integra` (78d9450) + integra (14bf114: c2c9 con los minijuegos, Ferrari con menos vertices, fps3
+decoracion -15 % y fachadas de PALM a la mitad de lado). Todo probado en Flycast (nivel E), nada en la consola real.
+
+### Merge (5b57ffe)
+- Conflictos: demo/Makefile (OBJS = los de mod-integra con turbo_taxi.o + minijuego.o; la linea -Os de integra, con
+  minijuego.o; turbo_taxi.o sigue en -O2 porque corre en cada cuadro; LD_DIAG de DIAG_MALLOC) y docs/PARIDAD.md (union).
+  demo/main.c sin conflictos: el taxi (turbo_taxi, cex_taxi, ficha 7) queda igual (las mismas 32 referencias).
+- windows/outrun_taxi.py: pasa tools/aligera.py al final (como regenera.py en la clasica) sobre las etapas del GD-ROM
+  del usuario. Los coches no se tocan (la ficha 7 es el taxi del disco).
+
+### RAM al arrancar (compilacion sin defines, los mismos datos de modos/mod3/datos)
+| binario | text | bss | RAMMAPA arranque |
+|---|---|---|---|
+| rev-1.0 (medida del usuario, consola serie de Flycast) | | | 344K |
+| mod-integra 78d9450 | 819 396 | 2 064 452 | libre 411K |
+| mod-integra 5b57ffe (este merge) | 835 976 | 1 966 404 | libre 490K |
+| integra 14bf114 (referencia) | 831 440 | 1 966 308 | (clasica: 495K) |
+- Por que el Mod tenia menos: no por el taxi. En el codigo el Mod solo lleva 4,5 KB mas que integra (turbo_taxi.o y lo
+  del taxi). Lo que faltaba eran las tandas de integra posteriores a becdad1, sobre todo el
+  `buf_arr` de c2c8 (el bufer de los textos de 512x128 a 512x32: -96 KB de BSS). De rev-1.0 (344K) a 78d9450 (411K) ya
+  habia entrado integra becdad1 (FRIO, -Os de los modulos frios). Con el merge: 490K, "VOZ: VOCES.DAT, 35 muestras", sin "Out of memory". No ha hecho falta marcar nada mas
+  como FRIO ni quitar nada.
+- Con PRUEBA_AUTO (otros defines) se arranca con 509..541K. En carrera: 816..829K libres.
+
+### Datos del Mod (solo scratchpad: modos/mod3)
+- dat/ (92 ficheros): SEGS.PAK y las 61 SEGnn.DAT de `python3 -I tools/aligera.py --datos lgmod2 dat w` (el Mod va sin
+  mipmaps; el SEGS.PAK de lgmod2 es el de lgdat2). Vegetacion 12306 / 1845 fuera (15,0 %), vallas 329 / 50 (15,2 %),
+  56 etapas cambian, 48 trozos de SEGS.PAK. SEG00: 30 fachadas, VRAM 451 -> 430 KB (con 32x32 eran 412).
+  Registro: res/aligera_mod3.txt. Ademas, enlaces a modos/ferrari/dat COCHE00..14 y COCHE00L..14L SIN la ficha 7
+  (COCHE07.DAT del Mod = el taxi, el de lgmod2; no hay COCHE07L.DAT) y CAMP.DAT / MJHUD.DAT de la clasica (dint ->
+  modos/c2c/dat_int).
+- datos/: carpeta de prueba (sh/datos.sh: lgmod2 + lo de dint que sale de modos/ + modos/mod/dat + dat/), 978
+  ficheros, 966,9 MB (antes 970,4: los Ferrari ocupan menos); cabe en la pista 3.
+- Scripts: sh/dat.sh, sh/datos.sh, sh/compila.sh, sh/arranque.sh, sh/taxi_prueba.sh, sh/fer_prueba.sh, sh/jen_prueba.sh
+  (estos tres, de los de $S adaptados a mod3; pantalla :95; como mucho 1 Flycast a la vez).
+
+### Verificado en Flycast (nivel E)
+- Arranque (sh/arranque.sh): "RAMMAPA arranque: libre 490K", "VOZ: VOCES.DAT, 35 muestras", sin "Out of memory".
+- Taxi (PRUEBA_AUTO PRUEBA_FICHA=7): "coche: ficha 7 COCHE07.DAT modelo 0, 3666 vertices, 37 texturas", "TURBO taxi",
+  el taxi en 3D en la playa de PALM (cap/taxi_t2.png).
+- Ferrari (PRUEBA_AUTO PRUEBA_FICHA=0): 360 Spider con COCHE00L.DAT (6183 vertices) en PALM; precarga 426 nodos (como
+  fps3 en la clasica); edificios de la salida con sus ventanas (cap/palm_edificios_salida.png, cap/fer_palm_hoja.png).
+- C2C (PRUEBA_AUTO PRUEBA_CAMP=0 PRUEBA_SIN_TIEMPO, Jennifer, como mucho 6 min): "RAMMAPA arranque: libre 509K", VOCESH.DAT 75
+  muestras; 3 etapas (niveles 0, 1 y 2: tipos 0, 3 y 9) con sus bancos VOZM, 7 peticiones hechas (12, 1, 8, 5...), el
+  selector de musica entre etapas, 0 "Out of memory" (cap/jen/, cap/jen_hoja.png). No se llego a la meta (6 min).
+
+### Queda
+- El programa de Windows del Mod (outrun_taxi.py) sigue sin generar CAMP* / VOCESM / MJHUD / HAOBJ... ni los Ferrari
+  aligerados (los rehace con `conv_coche.py --visible` sin los parametros del agente ferrari; regenera.py de la
+  clasica tampoco los pasa). Hasta entonces esos ficheros se copian a mano (lista de modos/mod3/dat).
+- Nada en la consola real.
