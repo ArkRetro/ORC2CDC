@@ -13,6 +13,14 @@ Uso:
       'visible'); con --modelo, solo el ligero en <salida.dat>. Rev 2.9.7, DESVIACION. Rev 2.9.8 (P3, DESVIACION): en el
       ligero, ademas, lo que no se ve desde el cono trasero en tiras aparte con NODO_TRASERO (parte_trasera; --sin-trasero:
       sin eso, como en la 2.9.7)
+  --razon r (con --visible): parte de los triangulos simplificables que queda en el ligero (VIS_RAZON, 0,6); --menu-razon
+      r: el del menu (COCHEnn.DAT) tambien simplificado con esa razon (sin la opcion, entero como antes); --error e: el error
+      maximo de un colapso (VIS_TOPE, 1e-3: con el, en el 360 Spider la simplificacion para en el 60 % con cualquier razon); --giro g / --borde b /
+      --cerca c (solo el ligero): VIS_GIRO (0,8), VIS_BORDE (10) y VIS_CERCA (0,04). Lo de la Rev 2.9.9.e: --visible --razon
+      0.3 --error 0.05 --giro 0.3 --borde 3 --cerca 0.02 --menu-razon 0.6 (360 Spider en carrera: 7464 -> 5782 vertices). Rev 2.9.9.e (fps2,
+      pedido: "quitar vertices a todos los Ferrari", 20-25 % menos en carrera), DESVIACION. Lo entregado (agente ferrari,
+      docs/PARIDAD.md "Ferrari con menos vertices"): las fichas 1, 3, 8, 12 y 13 con esa llamada; las 0, 2, 4, 5, 6, 9, 10,
+      11 y 14 con --cerca 0.005 en vez de 0.02 (con 0.02 se quedaban en -12..-19 % en carrera). La 7 del Mod (taxi), nunca
 
 Montaje (todo se lee del disco al convertir; aqui no hay datos del juego): el de 46A560 (el coche en la seleccion; en
 carrera 46AE70 / 469600 hacen lo mismo) portado tal cual en llamadas(): pila de matrices del PC (Pila), piezas en su
@@ -1427,7 +1435,7 @@ def sombra_clamp(A, mod, m):
         w, h, fmt, li, off, tam = mod.texs[ti]; mod.texs[ti] = (w, h, fmt | bits, li, off, tam)
     print('   sombra plana: CLAMP %s%s (texturas %s)' % ('u' if ms else '-', 'v' if mt else '-', sorted(sus - otras)))
 
-def convierte(A, m, sal, tope=TOPE, vista=None, rebaja=False, carrera=False, visible=False, trasero=False):
+def convierte(A, m, sal, tope=TOPE, vista=None, rebaja=False, carrera=False, visible=False, trasero=False, razon=VIS_RAZON, menu_razon=None, error=VIS_TOPE, giro=None, borde=None, cerca=None):
     """el coche montado como el original (llamadas) y, si lo que se dibuja a la vez pasa del tope del TA, sin lo que
     no se ve desde las camaras del juego (con la vuelta baja de los choques y, si aun no cabe, sin ella). No se tapa,
     no se anade y no se cambia ninguna pieza. rebaja: variante A (rebaja_texturas); carrera: variante B (parte_carrera);
@@ -1452,9 +1460,18 @@ def convierte(A, m, sal, tope=TOPE, vista=None, rebaja=False, carrera=False, vis
             print("   %s: %d vertices" % (nota, vertices_dibujados(mod)))
             vacia_interior(A, mod, m)
         td1, vd1 = triangulos_dibujados(mod), vertices_dibujados(mod)
-        a, b = simplifica(mod); nota += ', simplificado'
+        g = globals(); viejo = g['VIS_GIRO'], g['VIS_BORDE'], g['VIS_CERCA']   # (--giro / --borde / --cerca: solo en el ligero)
+        if giro is not None: g['VIS_GIRO'] = giro
+        if borde is not None: g['VIS_BORDE'] = borde
+        if cerca is not None: g['VIS_CERCA'] = cerca
+        try: a, b = simplifica(mod, razon, error)
+        finally: g['VIS_GIRO'], g['VIS_BORDE'], g['VIS_CERCA'] = viejo
+        nota += ', simplificado' + ('' if razon == VIS_RAZON else ' %.2f' % razon)
         print('   simplificado: %d -> %d triangulos simplificables; dibujados %d -> %d (vaciado) -> %d; vertices %d -> %d'
               % (a, b, td0, td1, triangulos_dibujados(mod), vd1, vertices_dibujados(mod)))
+    if menu_razon is not None and not visible:              # (Rev 2.9.9.e, fps2) el del menu tambien simplificado
+        a, b = simplifica(mod, menu_razon, error); nota += ', simplificado %.2f' % menu_razon
+        print('   menu simplificado: %d -> %d triangulos simplificables; vertices %d' % (a, b, vertices_dibujados(mod)))
     if rebaja or visible: rebaja_texturas(mod, visible, cl)
     if carrera: parte_carrera(A, mod, m)
     tras = None
@@ -1517,6 +1534,8 @@ def main():
         return defecto
     tope = int(op('--tope', TOPE)); vista = op('--vista'); todos = op('--todos'); m = op('--modelo')
     solo = op('--fichas'); solo = None if solo is None else [int(x) for x in solo.split(',')]
+    razon = float(op('--razon', VIS_RAZON)); error = float(op('--error', VIS_TOPE)); giro = op('--giro'); borde = op('--borde'); cerca = op('--cerca'); cerca = None if cerca is None else float(cerca)
+    giro = None if giro is None else float(giro); borde = None if borde is None else float(borde); menu_razon = op('--menu-razon'); menu_razon = None if menu_razon is None else float(menu_razon)
     rebaja = '--rebaja' in a; carrera = '--carrera' in a; visible = '--visible' in a; trasero = '--sin-trasero' not in a
     a = [x for x in a if x not in ('--rebaja', '--carrera', '--visible', '--sin-trasero')]
     A = Assets(a[0] if a else None)
@@ -1525,14 +1544,14 @@ def main():
         hechos = bytearray(b'\xff' * len(FICHA_MODELO))
         for k, mm in enumerate(FICHA_MODELO):
             if solo is not None and k not in solo: continue
-            convierte(A, mm, os.path.join(todos, 'COCHE%02d.DAT' % k), tope, vista, rebaja or visible, carrera)
+            convierte(A, mm, os.path.join(todos, 'COCHE%02d.DAT' % k), tope, vista, rebaja or visible, carrera, menu_razon=menu_razon, error=error)
             if visible:                                         # (Rev 2.9.7) el ligero de la carrera, aparte
-                convierte(A, mm, os.path.join(todos, 'COCHE%02dL.DAT' % k), tope, vista, True, False, True, trasero)
+                convierte(A, mm, os.path.join(todos, 'COCHE%02dL.DAT' % k), tope, vista, True, False, True, trasero, razon=razon, error=error, giro=giro, borde=borde, cerca=cerca)
         for k, mm in enumerate(FICHA_MODELO):
             if os.path.exists(os.path.join(todos, 'COCHE%02d.DAT' % k)): hechos[k] = mm   # (COCHEnnL.DAT: opcional)
         with open(os.path.join(todos, 'COCHES.DAT'), 'wb') as f: f.write(b'CCH1' + bytes(hechos))
     elif m is not None:
-        convierte(A, int(m), a[1], tope, vista, rebaja, carrera, visible, visible and trasero)
+        convierte(A, int(m), a[1], tope, vista, rebaja, carrera, visible, visible and trasero, razon=razon, menu_razon=menu_razon, error=error, giro=giro, borde=borde, cerca=cerca)
     else:
         print(__doc__)
 
