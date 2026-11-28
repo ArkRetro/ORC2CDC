@@ -8802,3 +8802,22 @@ libre de la zona al subir la etapa, nodos de la precarga):
 - Probado y descartado: el D adjust 0,5 en las fachadas (un nivel de mip mas nitido para las paredes vistas de canto).
   En Flycast no cambia nada visible y en la consola real puede centellear. La pared grande de la derecha ya se veia
   algo borrosa en el original: la PowerVR no tiene filtro anisotropico.
+
+## Ferrari aligerados: caras fuera de la carroceria (coches4, 2026-11-28)
+Fallo visto por el usuario en la Rev 3.0 y el Mod 2.6 ("los coches tienen poligonos fuera de sitio"). Causa medida (en
+los ficheros, Flycast solo para ver): la tanda "Ferrari con menos vertices" (`--razon 0.3 --error 0.05 --giro 0.3
+--borde 3 --cerca C`) deja en los COCHEnnL.DAT de carrera caras que se separan de la superficie original hasta 15-23 cm
+(fichas 0, 1, 3, 6, 12: entre 3 000 y 10 000 muestras a mas de 6 cm; los de lgdat2, con 0,6 y el tope 1e-3: 0-25
+muestras y un maximo de 3-9 cm); en las ruedas hasta 13 cm. No es un cambio de pieza ni de matriz: todos los vertices
+siguen en posiciones originales de su misma pieza (colapso u -> v a un vertice vecino de la misma pieza), ANI1 y los
+nodos (pieza << 8) salen identicos. Es el error que deja pasar `--error 0.05` (50 veces el tope, y el error es la
+cuadrica generalizada con UV, color y normal, no metros) junto con `--giro 0.3` (caras que giran hasta ~72 grados):
+puentes sobre huecos, esquinas cortadas y pliegues.
+- Arreglo en `tools/conv_coche.py`: `--dist d` (VIS_DIST; ligero y menu): un colapso solo vale si todas las caras nuevas
+  quedan a menos de d (m) de la superficie original de su pieza (muestras cada cm, 15 puntos por cara). Sin la opcion,
+  como antes. Con la llamada de la tanda y `--dist 0.025` (ficha 3): carrera 4430 vertices dibujados (4131 sin --dist),
+  maximo 3,2 cm (11 muestras > 3 cm, ninguna > 6 cm); menu 6463, maximo 2,4 cm. Ademas tarda la mitad.
+- Entregado: los Ferrari vuelven a los de lgdat2 (decision del coordinador). La llamada con `--dist 0.025` queda para
+  otra tanda; falta generar las 14 fichas y medir fps / triangulos en Flycast.
+- Medida: `$S/modos/coches4/sh/sup.py <completo.DAT> <x.DAT>...` (distancia de cada superficie a la del COCHEnn.DAT de
+  lgdat2, por pieza).
