@@ -8981,3 +8981,12 @@ posicion, como la decoracion).
   PALM: 499 -> 578 KB (clasica) y 430 -> 481 KB (Mod).
 - La pared grande y gris de la derecha en la primera curva no es de EDIF_PALM. Es, PROBABLE, la textura 46 (32x16 en
   16 bits, igual en el disco de PS2): estirada sobre toda la pared, no tiene mas detalle que dar.
+
+## Cielos de las uniones a 64x32 VQ (pedido del usuario, 2026-11-28; DESVIACION)
+- tools/cielos_bk.py: las texturas de la lista del cielo de las 509 uniones con algun lado de mas de 64 (512x512,
+  512x256, 256x256, 128x128...) pasan a 64x32 en VQ de 128 entradas, sin mipmaps. Las de 64 o menos no cambian. Son
+  605 texturas (36 distintas) y las uniones usan 18 MB menos de VRAM en total. El usuario las prueba: aqui solo el
+  arranque.
+- En el Mod, las uniones de las misiones C2C (BK498..BK508) eran descriptores PAKD que apuntaban al UNIONES.PAK de la
+  clasica, y con el del Mod leian datos que no eran suyos. Ahora van enteras (ORD7 sueltas, con los recortes y los
+  cielos nuevos).
