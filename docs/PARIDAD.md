@@ -8937,3 +8937,15 @@ posicion, como la decoracion).
   despues; PALM a 700 m del final (carteles: el segundo de la fila de flechas de curva desaparece,
   carteles_zoom_antes_despues.png) y la bifurcacion de PALM (A_bif / B_bif, bifurcacion_antes_despues.png: faltan farolas alternas; el registro da
   zona libre de VRAM 607K -> 619K con la union subida, los 12 KB de los dos muros). El Mod no se ha arrancado aqui.
+
+## Carroceria -25 % y fachadas de PALM nitidas (pedido del usuario, 2026-11-28; DESVIACION)
+- "Bajar un 25 % el brillo de la carroceria de los coches": demo/main.c CARRO_BRILLO 0,75 en la pintura de las mallas
+  de tipo 1 y 2 del CEX2 (coche_color) y en el especular del reflejo de las de tipo 2 (coche_reflejo). Los cristales
+  (tipo 3) no cambian. Vale para el menu y la carrera.
+- "Los edificios de la primera curva de la primera etapa, en VQ pero que se aprecie detalle; las paredes parecen
+  borrones": aligera.nitidas (por defecto; ALIGERA_PALM=mitad para volver a lado_de). Las 30 de EDIF_PALM vuelven a su
+  lado de antes, en VQ con el libro de 256 entradas (antes 128) y SIN mipmaps, como antes de los mipmaps de la
+  Rev 2.9.9: la PowerVR elige el mip por el eje mas fino y en una pared vista de lado bajaba 2-3 niveles. VRAM de
+  PALM: 499 -> 578 KB (clasica) y 430 -> 481 KB (Mod).
+- La pared grande y gris de la derecha en la primera curva no es de EDIF_PALM. Es, PROBABLE, la textura 46 (32x16 en
+  16 bits, igual en el disco de PS2): estirada sobre toda la pared, no tiene mas detalle que dar.
