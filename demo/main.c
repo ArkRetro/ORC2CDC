@@ -7659,7 +7659,7 @@ FRIO static void rk_un_jugador(int meta, int piloto)
     dbglog(DBG_INFO, "RANKING: un jugador variante %d preset %d meta %c ruta %x: %d puntos, %u ms, puesto %d\n",
            v, p, 'A' + c, ruta, puntos, (unsigned)ms, pos + 1);
 }
-static void ta_meta_final(void)
+FRIO static void ta_meta_final(void)                            /* (c2c9: FRIO, al leer el curso) */
 {
     etapa_t e;
     if (ncurso != 1 || !(ta_meta_busca("CURSO.DAT", curso[0].seg, &e) || ta_meta_busca("CURSOTA.DAT", curso[0].seg, &e))) return;
@@ -14291,7 +14291,8 @@ static int traf_asienta(coche_t *c, float yref, float g)
     pesado = trc_ok && (trc[m].k320 == 0 || trc[m].k320 == 1);
     if (!(-zv >= -100.0f) && !pesado) return 0;                 /* lejos: 46E740 */
     lod = traf_lod(m, zv);
-    rt[0] = cosf(g); rt[1] = 0; rt[2] = sinf(g); at[0] = -sinf(g); at[1] = 0; at[2] = cosf(g);   /* x y z (atras) del coche */
+    if (tp_on && (t->ha_m & HA_CAMP) && lod < tp.lod) lod = tp.lod;   /* (c2c9) el LOD ligero de los de la peticion (traf_dibuja): */
+    rt[0] = cosf(g);                                            /* 0x100 como el original fuera del LOD 0 */ rt[1] = 0; rt[2] = sinf(g); at[0] = -sinf(g); at[1] = 0; at[2] = cosf(g);   /* x y z (atras) del coche */
     for (k = 0; k < 3; k++) {
         const float *w = tani[m].r[k * 2]; float lx = k ? w[0] : 0.0f, h; int j;
         for (j = 0; j < 3; j++) q[k][j] = c->pos[j] + rt[j] * lx + at[j] * w[2];
