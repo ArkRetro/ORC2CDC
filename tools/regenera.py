@@ -488,9 +488,9 @@ def regenera(iso, D, W, jobs=4, informe=print, extras=None):
         informe('== mipmaps en lo lejano (tools/remip.py)')
         post('remip', py(os.path.join(TOOLS, 'remip.py'), '--datos', D, D, os.path.join(W, 'remip')))
         with open(os.path.join(W, 'remip.hecho'), 'w') as f: f.write('hecho\n')
-    # fps3 (tools/aligera.py, docs/PARIDAD.md): decoracion -15 % en las etapas y edificios de PALM a 32x32, una vez
+    # fps3 (tools/aligera.py, docs/PARIDAD.md): decoracion -15 % en las etapas y edificios de PALM a la mitad (64->32, 128->64), una vez
     if not os.path.isfile(os.path.join(W, 'aligera.hecho')):
-        informe('== fps3: decoracion -15 % y edificios de PALM a 32x32 (tools/aligera.py)')
+        informe('== fps3: decoracion -15 % y edificios de PALM a la mitad (tools/aligera.py)')
         post('aligera', py(os.path.join(TOOLS, 'aligera.py'), '--datos', D, D, os.path.join(W, 'aligera')))
         with open(os.path.join(W, 'aligera.hecho'), 'w') as f: f.write('hecho\n')
 

@@ -8790,3 +8790,15 @@ libre de la zona al subir la etapa, nodos de la precarga):
 ### Queda
 - Medir en la consola real (Y en la pausa: PowerVR y TA) PALM y una etapa de bosque (CLOU, FORE) con y sin fps3.
 - Si se quiere que Flycast muestre algo: el 15 % solo baja los triangulos con un tope del TA mas alto o fijo.
+
+### Auditoria de las fachadas de PALM ("no tienen detalle", 2026-11-28)
+- De las 30 texturas de EDIF_PALM, 17 eran de 64x64 y 13 de 128x128 (o 128x64): 63, 66, 67, 69, 72, 73, 82, 83, 85, 86,
+  87, 89 y 90, casi todas rejillas de ventanas de rascacielos con un periodo de 3-4 texeles. Reducidas a 32x32 por
+  promedio, cada ventana quedaba por debajo de un texel y la fachada se fundia en una mancha gris (comparativa con
+  filtro Lanczos y enfoque: no lo arregla y rompe los recortes con alfa).
+- Ahora cada fachada pasa a la mitad de lado (`aligera.lado_de`): las de 64 a 32x32 y las de 128 a 64x64. En Flycast,
+  PALM a 1200 m se ve como el original. Las 54 etapas restantes y la decoracion -15 % no cambian (mismos bytes
+  recompuestos). La VRAM de PALM baja de 569 a 499 KB.
+- Probado y descartado: el D adjust 0,5 en las fachadas (un nivel de mip mas nitido para las paredes vistas de canto).
+  En Flycast no cambia nada visible y en la consola real puede centellear. La pared grande de la derecha ya se veia
+  algo borrosa en el original: la PowerVR no tiene filtro anisotropico.

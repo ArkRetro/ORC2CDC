@@ -1,4 +1,4 @@
-"""aligera.py: menos decoracion en todas las etapas y los edificios de PALM a 32x32 (fps3; DESVIACION pedida por el
+"""aligera.py: menos decoracion en todas las etapas y los edificios de PALM a la mitad (64->32, 128->64) (fps3; DESVIACION pedida por el
 usuario para ganar fps; ver docs/PARIDAD.md, "fps3: decoracion -15 % y edificios de PALM 32x32").
 
  aligera.py --datos entrada/ salida/ trabajo/ [--solo SEG00,...] [--sin-decor] [--sin-palm]: sobre una carpeta de
@@ -23,13 +23,14 @@ usuario para ganar fps; ver docs/PARIDAD.md, "fps3: decoracion -15 % y edificios
    edificios. Los objetos de las peticiones y de los campeonatos (HAOBJ, CAMPOBJ, INFARTOP...) y la meta (META.DAT) son
    otros ficheros.
 2. PALM (SEG00): las texturas de las fachadas de los edificios (EDIF_PALM, elegidas a mano en la hoja de sus
-   texturas: ni carretera, ni suelo, ni muros, ni cielo, ni vegetacion, ni carteles ni anuncios) a 32x32, cuadradas
+   texturas: ni carretera, ni suelo, ni muros, ni cielo, ni vegetacion, ni carteles ni anuncios) a la mitad de lado
+   (lado_de: las 17 de 64x64 a 32x32; las 13 de 128, rejillas de ventanas que a 32 se funden, a 64x64), cuadradas
    y con mipmaps (la PowerVR solo los admite cuadrados): la imagen de ahora (el nivel mayor si ya tenia mipmaps)
    reducida por promedio (o estirada por interpolacion si un lado era menor), en VQ con niveles y libro reducido
    (remip.codifica: el primer libro con error <= remip.UMBRAL) o, si la VQ no pasa, en 16 bits con niveles. El D adjust
    (bits 24-27) se queda; si era rectangular sin el, el de remip.sesgo. Las uniones del curso de PALM (CURSO.DAT y
    CURSOTA.DAT) con la misma textura (mismos bytes) la cambian igual, para que la VRAM la siga compartiendo.
-   Idempotente: si en SEG00 ya no queda ninguna de EDIF_PALM de mas de 32 de lado, no hace nada (la decoracion se
+   Idempotente: si en SEG00 las de EDIF_PALM ya estan reducidas (ninguna de mas de 64 y alguna de 32), no hace nada (la decoracion se
    aplico con ella); con --sin-palm no hay esa marca y regenera.py lleva la suya (aligera.hecho).
 
 Los numeros de etapa y textura son los de la conversion de SLES-53998 de este repositorio (como decor_tabla.h)."""
@@ -47,7 +48,14 @@ REF_ANUNCIO = [(0, t) for t in (96, 97, 99, 100, 101, 102, 122, 93, 127, 129, 13
 # fachadas de PALM (SEG00): ventanas, paredes de los edificios, rascacielos del fondo, almacenes del puerto
 EDIF_PALM = [14, 40, 41, 44, 45, 48, 50, 53, 54, 62, 63, 64, 66, 67, 69, 72, 73, 77, 80, 81, 82, 83, 85, 86, 87, 88,
              89, 90, 91, 124]
-LADO = 32
+LADO = 32                                                        # las de 64 de lado
+LADO_MAX = 64                                                    # las de 128 (rejillas de ventanas): a 32 no caben
+
+
+def lado_de(w, h):
+    """la mitad del lado mayor, entre LADO y LADO_MAX: las de 64 a 32 y las de 128 a 64 (a 32 las ventanas de los
+    rascacielos, de 3-4 texeles de periodo, se funden en una mancha; auditoria del usuario: "no tienen detalle")"""
+    return min(LADO_MAX, max(LADO, max(w, h) // 2))
 NODO = np.dtype([('c', '<f4', 3), ('r', '<f4'), ('fl', '<u4'), ('cartel', '<i4'), ('rel', '<u4', 2)])
 NODO_LEJ = 0x20
 
@@ -200,17 +208,18 @@ def edificios(b, d, lista, hechas=None):
     for t in lista:
         if t >= len(texs): continue
         w, h, fmt, li, off, tam = texs[t]
-        if (w <= LADO and h <= LADO) or (fmt & 0xff) > 2: continue
+        L = lado_de(w, h)
+        if (w <= L and h <= L) or (fmt & 0xff) > 2: continue
         dat = b[d['blob0'] + off:d['blob0'] + off + tam]; hu = remip.huella(texs[t], dat)
         if hechas is not None and hu in hechas: res[t] = hechas[hu]; continue
         a = base(dat, w, h, fmt); fb = fmt & 0xff
-        a32 = remip.remuestrea(a, LADO, LADO, fmt)
+        a32 = remip.remuestrea(a, L, L, fmt)
         n0 = ((fmt >> 16) & 0xff) + 1 if fmt & 0x100 else 256
         dd, nf, err = remip.codifica(a32, fmt, n0)
         if dd is None: dd, nf = modelo.datos_mip(a32, fb), fb | 0x200
         dj = (fmt >> 24) & 0xF
-        if not dj and w != h: dj = remip.sesgo(w, h, LADO, asp[t]); dj = 0 if dj == 4 else dj
-        res[t] = (LADO, LADO, (nf & 0x00FF03FF) | (fmt & 0xFC00) | dj << 24, dd, err)
+        if not dj and w != h: dj = remip.sesgo(w, h, L, asp[t]); dj = 0 if dj == 4 else dj
+        res[t] = (L, L, (nf & 0x00FF03FF) | (fmt & 0xFC00) | dj << 24, dd, err)
         if hechas is not None and hu not in hechas: hechas[hu] = res[t]
     return res
 
@@ -258,12 +267,13 @@ def ya_hecho(E):
     f = os.path.join(E, 'SEG00.DAT')
     if not os.path.isfile(f): return False
     d = parte(remip.lee(f))
-    return all(not (t < len(d['texs']) and max(d['texs'][t][:2]) > LADO) for t in EDIF_PALM)
+    ts = [max(d['texs'][t][:2]) for t in EDIF_PALM if t < len(d['texs'])]
+    return bool(ts) and max(ts) <= LADO_MAX and min(ts) <= LADO      # (sin tocar: todas de 64 o 128)
 
 
 def datos(E, D, W, solo=None, con_decor=True, con_palm=True, info_solo=False):
     import shutil, subprocess, pak_union, mmap, time
-    if con_palm and ya_hecho(E): print('aligera: SEG00 ya tiene los edificios a %dx%d: ya aplicado, nada que hacer' % (LADO, LADO)); return
+    if con_palm and ya_hecho(E): print('aligera: SEG00 ya tiene los edificios reducidos (%d/%d): ya aplicado, nada que hacer' % (LADO, LADO_MAX)); return
     tdec = tabla_decor() if con_decor else {}
     refs = refs_de(E) if con_decor else None
     print('anuncios de referencia: %d firmas' % (0 if refs is None else len(refs)))
@@ -294,7 +304,7 @@ def datos(E, D, W, solo=None, con_decor=True, con_palm=True, info_solo=False):
                 dat = b[d['blob0'] + x[4]:d['blob0'] + x[4] + x[5]]; hu = remip.huella(x, dat)
                 if hu in hechas: nuevas[t] = hechas[hu]
             if nuevas:
-                print('%s: %d texturas de los edificios de PALM a %dx%d' % (f, len(nuevas), LADO, LADO))
+                print('%s: %d texturas de los edificios de PALM reducidas' % (f, len(nuevas)))
                 return reescribe(b, d, [], nuevas)
         return b
     num = lambda f: int(''.join(c for c in f if c.isdigit()))
