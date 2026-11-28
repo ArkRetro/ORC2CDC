@@ -202,13 +202,14 @@ def mascaras(d, usadas):
         ofs[i] = p; ws[i] = w; hs[i] = h; buf.append(m.astype(np.uint8).ravel()); p += w * h
     return np.ascontiguousarray(np.concatenate(buf)), ofs, ws, hs
 
-def calcula(d, extras=(), hilos=os.cpu_count() or 4, informe=True, quita=False):
+def calcula(d, extras=(), hilos=os.cpu_count() or 4, informe=True, quita=False, no_tapan=None, una_pasada=False):
     """visibilidad del modelo d (lee) por seccion y por triangulo (los de cada malla del fichero, tira: v, v + 1,
     v + 2; las de los nodos del original). extras: rutas (arrays) de mas por las que puede ir el ojo (la rama derecha
     de la bifurcacion). quita: tambien las muestras del volumen ancho (QUITA_LADO, QUITA_ALTURAS) para saber lo que no
     se ve nunca. Devuelve dict: sec (nsecciones x nmallas, con las vecinas), tri (nsecciones x ntriangulos, idem),
     nunca (triangulos sin ver desde ninguna muestra, la del volumen ancho incluida), t0 (primer triangulo de cada
-    malla), util, muestras, segundos; None si no hay ruta o nodos"""
+    malla), util, muestras, segundos; None si no hay ruta o nodos. no_tapan: mascara de mallas que no tapan (las que
+    la demo no dibuja nunca); una_pasada: sin la segunda pasada (Rev 2.9.9.e)"""
     t0 = time.time()
     M, V, N, R = d['M'], d['V'], d['N'], d['R']; h = d['h']; nn = len(N); nm = len(M); ini_l = h[5:10]
     if nn == 0 or nm == 0 or len(R) < 2 * SEC_PUNTOS: return None
@@ -248,6 +249,7 @@ def calcula(d, extras=(), hilos=os.cpu_count() or 4, informe=True, quita=False):
     # la malla tapa si su nodo se dibuja seguro: distancia al centro de la malla + la de los centros
     dcn = np.linalg.norm(esf[:, :3] - N['c'][gg], axis=1)
     occ = np.ascontiguousarray(np.where(util, (occ_n[gg] - dcn).clip(0), 0), np.float32)
+    if no_tapan is not None: fl[no_tapan] &= ~np.uint8(2); occ[no_tapan] = 0
     pos = [muestras(R)] + [muestras(x) for x in extras]; pos = np.concatenate(pos)
     # la seccion de cada muestra: la del punto de la ruta mas cercano (como la demo con el ojo)
     from scipy.spatial import cKDTree
@@ -264,10 +266,24 @@ def calcula(d, extras=(), hilos=os.cpu_count() or 4, informe=True, quita=False):
     L.pvs.argtypes = [fp, vp, fp, vp, vp, vp, vp, vp, vp, ctypes.c_int, fp, vp, fp, fp, vp, ctypes.c_int, ctypes.c_int,
                       ctypes.c_float, ctypes.c_float, ctypes.c_int, vp, vp]
     c = lambda a: a.ctypes.data_as(fp)
-    L.pvs(c(T), O.ctypes.data, c(TUV), tt.ctypes.data, mas[0].ctypes.data, mas[1].ctypes.data, mas[2].ctypes.data,
-          mas[3].ctypes.data, t0n.ctypes.data, nm, c(esf), fl.ctypes.data, c(occ), c(pos), sp.ctypes.data, len(pos),
-          nsec + 1, K, EPS, hilos, st.ctypes.data if quita else None, sm.ctypes.data)
-    secm = np.unpackbits(sm.view(np.uint8), axis=1, bitorder='little')[:, :nm].astype(bool)
+    def pasada():
+        L.pvs(c(T), O.ctypes.data, c(TUV), tt.ctypes.data, mas[0].ctypes.data, mas[1].ctypes.data, mas[2].ctypes.data,
+              mas[3].ctypes.data, t0n.ctypes.data, nm, c(esf), fl.ctypes.data, c(occ), c(pos), sp.ctypes.data, len(pos),
+              nsec + 1, K, EPS, hilos, st.ctypes.data if quita else None, sm.ctypes.data)
+        return np.unpackbits(sm.view(np.uint8), axis=1, bitorder='little')[:, :nm].astype(bool)
+    secm = pasada()
+    # Rev 2.9.9.e: lo que no se ve desde ninguna seccion no se dibuja nunca, asi que no puede tapar: fuera de los
+    # oclusores y otra pasada (hasta 3). Si no, tapa en la PVS y en la pantalla no esta (MAYA, SEG29: con el nodo 194,
+    # losas de piedra de 45 a 280 m, fuera de la PVS y tapando, de la piramide del cerro, el nodo 1417, solo salian
+    # sueltos en el cielo los escalones de arriba; docs/PARIDAD.md). PVS_SIN_2=1: una sola pasada, como antes
+    nunca_v = (fl & 2).astype(bool) & ~secm[:nsec].any(0)
+    pasadas = 1
+    while nunca_v.any() and not una_pasada and os.environ.get('PVS_SIN_2', '0') != '1' and pasadas < 3:
+        fl[nunca_v] &= ~np.uint8(2); occ[nunca_v] = 0
+        sm[:] = 0
+        if st is not None: st[:] = 0
+        secm = pasada(); pasadas += 1
+        nunca_v = (fl & 2).astype(bool) & ~secm[:nsec].any(0)
     if quita:
         sect = np.unpackbits(st.view(np.uint8), axis=1, bitorder='little')[:, :ntri].astype(bool)
         nunca = ~sect.any(0)                                    # (con la fila del volumen ancho)

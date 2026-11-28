@@ -10159,6 +10159,9 @@ static void nodos_visibles(modelo_t *mo)
             }
         }
     }
+#ifdef DIAG_OCULTA_A                                             /* medida: nodos [A, B) de la etapa sin dibujar (Rev 2.9.9.e) */
+    if (mo == &etapa) { uint32_t i_; for (i_ = DIAG_OCULTA_A; i_ < DIAG_OCULTA_B && i_ < mo->nnodos; i_++) mo->vis[i_ >> 5] &= ~(1u << (i_ & 31)); }
+#endif
 }
 /* Rev 2.9.9 (DESVIACION, LEJ_EN_TOPE): lo que el reparto quita y tiene version lejana (tools/lod_grande.py: lowpoly de lo
    grande; tools/lod_veg.py: cartel de la vegetacion) no desaparece: va su version lejana mientras quepa en lo que le
