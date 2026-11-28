@@ -493,6 +493,12 @@ def regenera(iso, D, W, jobs=4, informe=print, extras=None):
         informe('== fps3: decoracion -15 % y edificios de PALM a la mitad (tools/aligera.py)')
         post('aligera', py(os.path.join(TOOLS, 'aligera.py'), '--datos', D, D, os.path.join(W, 'aligera')))
         with open(os.path.join(W, 'aligera.hecho'), 'w') as f: f.write('hecho\n')
+    # recorte (tools/aligera.py, docs/PARIDAD.md "Recorte"): carteles de la carretera y farolas de las bifurcaciones -50 %,
+    # muros de las bifurcaciones a 32x32 (con su marca en los datos: si aligera ya lo hizo arriba, no hace nada)
+    if not os.path.isfile(os.path.join(W, 'recorte.hecho')):
+        informe('== recorte: carteles y farolas -50 %, muros de las bifurcaciones a 32x32 (tools/aligera.py --solo-recorte)')
+        post('recorte', py(os.path.join(TOOLS, 'aligera.py'), '--datos', D, D, os.path.join(W, 'recorte'), '--solo-recorte'))
+        with open(os.path.join(W, 'recorte.hecho'), 'w') as f: f.write('hecho\n')
 
     # paso opcional: la tarjeta SPLASH WAVE REMASTER del selector de musica, solo con sus ficheros en extras/
     # (tools/menu_musica.py: parche del MENU.DAT de D, que no se puede rehacer desde cero, y MUS70 / MUS71.ADP)
