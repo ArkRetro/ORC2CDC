@@ -8256,7 +8256,7 @@ peticion del 16, py/ver46.py pinta escenas del banco 0x46). Capturas y registros
   cifras 0x423bdc y 0x2a0838).
 - Subtipo 6, los coches (0x2a3300 / 0x2a3510): el trafico de la peticion (0x1f1a88 / 0x1f20e8 con la tabla de +0x10, +0x64 o
   0x104 los modelos, 0x2a3bd0 con la lista +0x5c, 0x22dac0), el bueno es la cuenta +0x7a (la lleva otro codigo) y los demas
-  bueno - 1 + rand % 3; SIN PORTAR (necesita el generador 0x1f1a88, sin portar). 4 y 5: SIN EMPEZAR.
+  bueno - 1 + rand % 3; SIN PORTAR -> HECHO (ver "campeonatos, novena tanda (agente c2c9)"). 4 y 5: SIN EMPEZAR.
 
 ### HECHO: subtipos 2, 1 y 0 (comun/minijuego.c, -Os)
 - tools/conv_camp.py `minijuegos`: el bloque 'M161' detras de CAMP.DAT (las voces 0x423c30, el animo 0x4239c0.., los 34
@@ -8565,3 +8565,105 @@ p13.py: los parametros del 13 en los guiones). Capturas y registros en $S/modos/
   porte el 6). El 22 no tiene coches en el original.
 - Pruebas nuevas (solo con defines): PRUEBA_C13, DIAG_TP_LOD0, DIAG_HUD_TROZOS, DIAG_RESERVA. Datos nuevos: CAMP.DAT +2 936 bytes
   ('C131'), MJHUD.DAT +6,3 KB (285 056 -> 291 360).
+
+## COAST 2 COAST: campeonatos, novena tanda (agente c2c9, 2026-11-28)
+
+Sobre integra b41fb8c (con c2c8). Rama local c2c9, sin push. Todo en Flycast (nivel E), no en la consola. Datos de prueba:
+$S/modos/c2c/dat9 (CAMP.DAT de `python3 -I tools/conv_camp.py $S/ps2/or2.iso $S/modos/c2c/dat9`: sus 38 686 primeros bytes
+iguales byte a byte a los de dat8, C131 incluido, y detras 'M163', 600 bytes; MJHUD.DAT, CAMPHUD.DAT, CAMPOBJ.DAT y VOCESM.DAT
+iguales a los de datos8) montados con h9/datos2.sh ($S/dmip + dat_int + dat9 en modos/c2c/datos9). Scripts en $S/modos/c2c/h9
+(los de h8 para este worktree; corte.py: fps, cpu, triangulos y partes de PRF entre dos lineas del registro, todos los
+registros cortados al mismo s; corrA.sh / mkA9.sh: lo mismo con la base b41fb8c en modos/c2c/A9; p166.py: las peticiones de
+un tipo / subtipo en los guiones con su lista +0x5c). Capturas y registros en $S/modos/c2c/cap9.
+
+### HECHO: tipo 13, el tiron y el coste
+- De donde salia el coste (Palm Beach 13/0, -DDIAG_MS, PRF y -DDIAG_C13T): ~0,7 ms por cuadro en la parte 2D (l2 1167 us
+  frente a 436): ha_spr3d bajaba de la VRAM los grupos que no se veian en el cuadro y los volvia a leer del GD al verse
+  otra vez (cada lectura 12..17 ms, -DDIAG_SPR13), y el primero el cuadro de 22 fps; +0,35 ms de logica: los coches de la
+  lista (4,8 coches de media, 120 us por coche y paso; coche_coloca 67 us, de ellos 4 coli_altura con 3 en modo 0x400 de
+  cerca); los triangulos (+112 de media) apenas.
+- Arreglos: (1) camp_spr3d da los 3 sprites de la peticion con cuadro -1 desde el anuncio (fase 1) y ha_spr3d los sube (uno
+  cada 16 cuadros) y no los baja hasta que acaba: sin el tiron ni las relecturas; (2) coli_altura guarda cosf / sinf del giro
+  del marco (los mismos valores; se calculaban 2 por consulta con la libreria, lenta) y coche_coloca no calcula ca / sa
+  cuando el coche se asienta con traf_asienta (afecta a todo el trafico, la misma imagen); (3) los coches de la peticion con
+  el LOD ligero (tp.lod = 1, c2c8) se asientan con 0x100 en vez de 0x400 (el original usa 0x400 solo en el LOD 0, que estos
+  no dibujan: PROBABLE igual al original para el LOD que se ve).
+- HECHO (SIMPLIFICADO): el icono del objetivo (0x2994ac / 0x2998b4 -> 0x231fe0 con 0,5 y 0x2320d8): el sprite de la clase
+  pedida crece en el panel (176, 78) y a los 2 s sube a (180, -110) a 0,75, como el regalo del 16/4; otra vez al cambiar
+  +0x1d (15 secciones antes del cambio de objetivo). SUPUESTO el sitio y los tiempos (los de c2c16b). Sin el vaiven
+  (0x136d60). cap9/t13p/mos_t13p.png: la sandia arriba a la derecha y sobre los coches.
+
+### HECHO: subtipo 6 de los minijuegos, los coches (0x2a3300 / 0x2a3510; comun/minijuego.c, -Os)
+- Lo averiguado: 0x2a3300 (fase 1): +0x78 = +8 de los parametros (el azar del banco CARS, 0..2), +0x7a = 0, la puerta 0 con
+  el carril bueno rand % n y sus simbolos a -1; 0x2a3bd0(lista +0x5c, +0x78 + 3) pone en +0xb de cada coche de la lista
+  (filas de 0x14 hasta +8 < 0 o +0xa < 0) la clase pedida con rand < 0,5 o una de las otras dos (3..5); 0x1f1a88 / 0x1f20e8
+  con los modelos +0x64 o 0x104 y 0x22dac0(+0x66 o 0x14). 0x22d0a0 (abre un coche de la lista; el mismo del 13 y el 14):
+  con el 16/6 en curso, si su +0xb es +0x78 + 3, +0x7a + 1 (0x22d278) y el modelo 0x415500[plaza % 3] (33, 34, 38); si no
+  0x415510 / 0x415530 [plaza % 7] (por la clave de la etapa); +0xd10 = la clase. 0x19c6f0 tine el coche por +0xd10 (3
+  rojo, 4 verde, 5 azul: el vector 0x577a48 que lee 0x19c488 para 0x111bb0). 0x2a3510 (fase 4): si el carril bueno de la
+  puerta 0 no tiene la cuenta, se la pone y los demas cuenta - 1 + rand % 3 (> 0 y distintos); la puerta como los demas
+  (0x29fb28, + 80 x 1,1 / puertas, el destello). Dibujo 0x2a36f8 -> 0x2a0138 / 0x2a0788: solo las puertas, numeros a 3.
+- tools/conv_camp.py: 'M163' detras de 'C131' (u8 contados[3] 0x415500, otros[7] 0x415510, otros_1a[7] 0x415530, u32 n y por
+  peticion {u16 peticion, u8 coches, 0, s16 +0x64, +0x66, coches x {s16 seccion desde el inicio, s8 carril, 0}}): 15
+  peticiones, 5..12 coches. Cada tabla comprobada por el codigo que la lee.
+- Portado: prepara6 (fase 1; camp_trafpet(&r) con +0x64 o 0x104, tope 4, LOD 1 y marca 0: los coches de la peticion son los
+  de la lista), mj_coche (main.c traf_aparece los abre como los del 13 / 14: 40 secciones por delante, la cuenta al abrirlos,
+  el modelo del juego si la DC lo tiene en la marca), la cuenta en la puerta 0 en la fase 4 y camp_trafpet(NULL) en la 5
+  (y en mj_libera). campeonato.c: pet11 / camp_autos con el 16/6 (los de atras salen del tope, HA_SUELTO), sin sprites.
+- DESVIACION: (1) el tinte: el color del coche x 0,5 + rojo / verde / azul por el color especular (sq_vtx_fe del fundido,
+  en el camino rapido de dibuja_indices; con color_mul por dibuja_malla costaba +1,5 ms de dibujo en la tercera peticion:
+  -0,6 fps); 0x111bb0 SIN averiguar (PROBABLE que multiplique). (2) Tope de 4 coches de la lista vivos (los del 13 / 14): de 7
+  coches salen 4 y la cuenta solo cuenta los que salen (el original los abre todos). (3) El modelo de los demas al azar de
+  0x415510 (sin 0x415530 ni plaza % 7); 0x104 no es un modelo de la DC (el trafico de siempre). (4) Sin 0x22dac0.
+- E (Industrial Complex al reves, PRUEBA_CAMP=2 PRUEBA_CAMP_NODO=10 PRUEBA_CAMP_LISTA=0, 16/6 135..255, 325..460, 530..610;
+  cap9/t6a, t6b): "MJ: coches: 7 en la lista, la clase 5 (azar 2)", "MJ: coche 3 ...: clase 5, modelo 38, cuenta 1", la
+  puerta "carril bueno 0 de 2 (1 2)", con PRUEBA_MJ "bien" y "peticion 16 hecha: 88 - 0, nota 6" en las tres; sin
+  PRUEBA_MJ (m6_con2) las mismas notas (el piloto acerto por azar). Capturas: t6a/r_080.png (el "1" y el "2" verdes de la
+  puerta entre los conos), t6a/r_050.png y t6b/zoom_t6b.png (coches rojo, verde y azul). NO verificado: el carril elegido
+  conduciendo; la voz del banco CARS (Flycast sin audio, por el registro).
+
+### HECHO: el generador en el 11, 20 y 21 (campeonato.c trafpet_fijo)
+- Lo averiguado: 11 (0x294c50): +0x64 o, sin el, 0xa5 con el subtipo 1 y 0x96 con el 0; 20 (0x296290): +0x64 o 0x104; 21
+  (0x2929bc): +0x64 o 0xb4; los tres con 0x22dac0 y 0x1f20e8(0) en la fase 5.
+- Portado: camp_trafpet(&r) en la fase 1 con esos modelos (tope 0, LOD 0, marca 0: camp_autos sigue marcando los que nacen
+  por delante, como hasta ahora) y NULL en la 5. Ninguno de esos modelos esta en la DC: el trafico sale como antes
+  (SIMPLIFICADO: lo que cambia es que el registro esta puesto mientras dura la peticion).
+- E: Clarissa nodo 4 lista 1 (cap9/t2021w): "TRAFPET: puesto (modelo 260 ...)" en los dos 20 y "(modelo 180 ...)" en el 21,
+  "quitado" en cada fase 5, "peticion 21 hecha: 94 - 0, nota 6, 80 + 90 corazones" (lo mismo que c2c6); BEAC 11/0 con
+  PRUEBA_C11 (cap9/t11w): "(modelo 150 ...)", 4 de 10 golpes y "peticion 11 hecha: 32 - 0, nota 3", igual que la base
+  (cap9/t11a).
+
+### Medidas (Flycast, DIAG_MS, la misma prueba con y sin; corte.py, cortadas al mismo s)
+| elemento | tramo | fps con / sin | cpu (dib + log) con / sin |
+|---|---|---|---|
+| 13 de c2c8 (base) | PALM 13/0, s 885..3988 | 37,83 / 38,81 (-0,98; min 21,5) | 23,89 / 22,92 |
+| 13 ahora (sprites fijos, coli) | el mismo | 38,27 / 38,56 (-0,29; min 33,9) | 23,34 / 22,97 |
+| 13 ahora, antes del asiento 0x100 | CAST 13/0, s 2209..3534 | 39,36 / 39,74 (-0,38) | 22,52 / 20,35 |
+| 13 final (asiento 0x100) | el mismo | 39,59 / 39,74 (-0,15) | 22,63 / 20,35 |
+| 16/6 con color_mul | IND_r 16/6 x 3, s 882..4863 | 38,97 / 39,26 (-0,29; la tercera -0,61) | |
+| 16/6 final (tinte especular) | el mismo, s 882..4841 | 39,16 / 39,27 (-0,11; -0,10 / +0,93 / -0,16) | 23,41 / 22,27 |
+| 11 / 20 / 21 (generador) | BEAC 11/0, s 506..2297 (base / c2c9) | 38,91 / 39,30 | |
+| 20 / 21 (generador) | Clarissa nodo 4 lista 1, s 536..7185 (base / c2c9) | 38,90 / 38,88 | 20,78 / 20,80 |
+("sin" del 13: -DDIAG_SIN_C14, sin los coches ni sus sprites; del 16/6: -DDIAG_SIN_MJ6, sin los coches de la lista.) El cuadro
+de 22 fps ya no sale (el minimo de la peticion 33,9 en PALM, 37,8 en CAST); las tres subidas fijas al anunciar cuestan un
+cuadro cada una (12..17 ms, separadas 16 cuadros). En el 13 queda ~1 ms de logica y ~0,5 ms de dibujo por los 4 coches de
+la lista (el original los tiene; tope y LOD ligero de c2c8).
+
+### A/B general y RAM
+- h9/ab.sh (PRUEBA_AUTO, 140 s, nodos 0 y 1; A = la base b41fb8c en modos/c2c/A9, B = c2c9; RES=cap9/res tabla2.py A B):
+  PALM 38,52 / 38,51 (s comun 2722), LAKE 39,45 / 39,36, media 38,99 / 38,94 (ruido); 4 de 4 con la voz, 0 "Out of memory".
+- RAM al arrancar (h9/nav3.sh, MODO_JUEGO=1, sin defines, compilado limpio, datos9; cap9/nav3f): "VOZ: VOCES.DAT, 35
+  muestras", "RAMMAPA arranque: libre 495K" (igual que c2c8), menu 496K, carrera OutRun 786K, sin "Out of memory".
+- El codigo nuevo (+2,9 KB de .text) pasaba .init de 0x8c0cc000 a 0x8c0ce000 (-8K). Recuperado con -Os (FRIO) en funciones que
+  solo corren al cargar o en un suceso: main.c gh_empieza, meta_entra, fin_empieza, ha_meta_carga, sol_carga, traf_ani_lee,
+  curso_lee_etapa, meta_lee, repsec_lee, hueco_pcarga, curso_busca, coche_color, sube_inicia, libera_modelo, trafpet_pon,
+  ta_meta_final; hud.c hudd_abre, pal_reparte, hudd_grupos_carga; sfx.c sfx_inicia, voces_lee; robot.c robot_inicia,
+  robot_band_inicia; or2_fisica.c or2_carga_param; gho.c gho_lee (ninguna del dibujo ni de la fisica por cuadro). .text
+  0xbbff0: OJO, quedan 16 bytes hasta el siguiente paso de 8 KB.
+
+### Lo que queda
+- 13: el vaiven del sprite (0x136d60); ~0,15..0,3 fps por los 4 coches de la lista (logica y dibujo).
+- 16/6: los 7..12 coches de la lista enteros (tope 4), 0x415530 / plaza % 7, 0x22dac0, el tinte exacto de 0x111bb0.
+- 11 / 20 / 21: sus modelos (0x96 / 0xa5 / 0x104 / 0xb4) no estan en la DC.
+- Pruebas nuevas (solo con defines): DIAG_SPR13 (cada subida de los sprites del 13 con su tiempo), DIAG_SIN_SPR13, DIAG_C13T
+  (us por paso de aparecer / mover / choques / gestor del trafico), DIAG_SIN_MJ6. Datos nuevos: CAMP.DAT +600 bytes ('M163').
