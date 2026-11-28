@@ -8922,3 +8922,17 @@ decoracion -15 % y fachadas de PALM a la mitad de lado). Todo probado en Flycast
   aligerados (los rehace con `conv_coche.py --visible` sin los parametros del agente ferrari; regenera.py de la
   clasica tampoco los pasa). Hasta entonces esos ficheros se copian a mano (lista de modos/mod3/dat).
 - Nada en la consola real.
+## COAST 2 COAST: campeonatos, decima tanda (agente c2c10, 2026-11-28): voces del minijuego de los coches y nivel de SPLASH WAVE REMASTER
+
+Sobre integra 14bf114 (rama c2c10, sin push). Pruebas solo en Flycast (`-DPRUEBA_AUTO -DPRUEBA_CAMP=0/1/2 -DPRUEBA_SIN_TIEMPO`,
+datos $S/dmip). Afecta igual a la clasica y al Mod (el codigo de vozmis.c y menu_musica.py es comun).
+- FALLO (c2c9): vm_etapa sumaba el azar del 16/6 (rand % 3, 0x22afec) al banco: CARS + 0..2 = CARS, UFO.pak o HOLDLINE.pak
+  (vacio). El azar elige la voz y los coches, no el banco (solo FOOD1..6 del 13 son bancos seguidos). Antes: "VOZM: etapa con
+  4 bancos (COMMON.pak RANK3.pak HOLDLINE.pak FOOD1.PAK)" y el 16/6 sin las voces 0x18a / 0x15e; ahora CARS.PAK y suenan.
+  vm_etapa reescrita sin crecer: .text 0xbbff0 -> 0xbbfd0 (integra iba a 16 bytes del paso de 8 KB de .init; la primera
+  version del arreglo lo pasaba: 491K libres al arrancar en vez de 499K). _end igual que integra.
+- FALLO (mezcla): MUS70.ADP / MUS71.ADP (SPLASH WAVE REMASTER) a -18,5 / -18,9 dBFS RMS y los temas de carrera del original a
+  -11..-16 (mediana -13,6; pista entera decodificada del ADPCM de Yamaha): la cancion sonaba 5 dB por debajo y las voces
+  (-14,9 dBFS RMS mientras hablan, medido en Flycast con SDL disk y PRUEBA_MEZCLA=3) la tapaban. menu_musica.py la lleva a
+  -13,6 dBFS RMS con pico <= -0,5 dBFS (+5,0 dB). ALL I WANT del Mod (MUS67) ya esta en -11,8: sin cambio.
+- Sin cambio en el codigo de volumen (vol_se, musica_nivel, sfx_master) respecto de la Rev 2.9.9: no es una regresion del motor.
