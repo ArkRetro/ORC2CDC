@@ -21,6 +21,7 @@
 #include "rival.h"
 
 int (*rival_abre)(int i, int ebx, int delante, int parrilla);
+void (*rival_cierra)(int coche);
 
 #define REG_BYTES 768
 static uint8_t lista_cl[RIVAL_NMIS], lista_sub[RIVAL_NMIS], lista_tipo[RIVAL_NMIS];
@@ -29,17 +30,23 @@ static int lista_ok;
 static uint8_t t_listas[8][16], t_fam[64], t_cla[64], t_col[240];
 static float t_acel[5], t_curva[12], t_marcha[6]; static int32_t t_millas[8];
 static int tab_ok;
+/* 'MIX2' (2026-11-27): el punto de las marcas por modelo y las zonas de derrape de cada mision */
+static uint32_t mix_off[RIVAL_NMIS], mix_base, pac_base; static int mix_ok;
+#define NZONAS 24                                               /* (MISION.DAT de SLES-53998: 20 como mucho) */
+/* lo de la mision en el monton (calloc en rival_carrera, fuera con rival_fuera): no ocupa al arrancar */
+typedef struct { float cabeza[16][3]; rival_zona_t zonas[NZONAS]; float pace[12][19]; int nzonas, pace_ok; } mixd_t;
+static mixd_t *mx;                                              /* pace: 'PAC1' de 472B60 (6 x {dist, angulo, factor}, limite) */
 
 static rival_mision_t mis; static int mis_ok;
 static int32_t esp_w[8][12]; static int nesp;                   /* especiales: e0..e18, e1c, e20, hay24, e24[2] */
 
-static rival_t rc[RIVAL_MAX]; static int nrc;
+static rival_t *rc; static int nrc;                            /* (en el monton solo en la mision: 12 KB menos al arrancar) */
 static uint32_t semilla;                                        /* 6A4E2C[0] (PS2 [0x5c80b8]) */
 static int largo;                                               /* 803710: largo del curso en posiciones */
 static int clas_n, lider = -1, ultimo = -1, jug_puesto, jug_puesto_ant, lejos_8037b8, clas_hecha_80fb18;
 static int paso_802e08, bulk_80fb09, sin_vaiven_80fb08, cd_delante_800d98, cd_detras_80a5a0;
 typedef struct { int32_t pos; float frac, pf; int32_t dif; int idx; } entrada_t;   /* registro de 0x14 de 80FB1C */
-static entrada_t clas[RIVAL_MAX + 1];
+static entrada_t *clas;
 
 static uint32_t u32le(const uint8_t *p) { return (uint32_t)p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24; }
 
@@ -60,6 +67,17 @@ int rival_inicia(void)
         t += 128; memcpy(t_fam, t, 64); t += 64; memcpy(t_cla, t, 64); t += 64; memcpy(t_col, t, 240); t += 240;
         memcpy(t_acel, t, 20); t += 20; memcpy(t_curva, t, 48); t += 48; memcpy(t_marcha, t, 24); t += 24;
         if ((uint32_t)(t - b) + 32 <= sz) memcpy(t_millas, t, 32);
+        t += 32;
+        mix_ok = 0;
+        if ((uint32_t)(t - b) + 8 + 192 + 4 * RIVAL_NMIS <= sz && !memcmp(t, "MIX2", 4) && u32le(t + 4) == RIVAL_NMIS) {
+            memcpy(mix_off, t + 200, 4 * RIVAL_NMIS);
+            mix_base = (uint32_t)(t - b); mix_ok = 1;
+        }
+        pac_base = 0;
+        if (mix_ok) {
+            uint32_t q;
+            for (q = mix_base; q + 4 + 12 * 0x48 <= sz; q += 4) if (!memcmp(b + q, "PAC1", 4)) { pac_base = q; break; }
+        }
     }
     lista_ok = tab_ok = 1;
     free(b);
@@ -70,7 +88,8 @@ int rival_lista(int i, int *clave, int *sub, int *tipo)
     if (!lista_ok || i < 0 || i >= RIVAL_NMIS) return -1;
     *clave = lista_cl[i]; *sub = lista_sub[i]; *tipo = lista_tipo[i]; return 0;
 }
-void rival_fuera(void) { mis_ok = 0; nrc = 0; }
+static void suelta_regs(void) { free(rc); free(clas); rc = NULL; clas = NULL; nrc = 0; }
+void rival_fuera(void) { mis_ok = 0; suelta_regs(); free(mx); mx = NULL; }
 const rival_mision_t *rival_mis(void) { return mis_ok ? &mis : NULL; }
 const float *rival_acel(void) { return t_acel; }
 const float *rival_curva(void) { return t_curva; }
@@ -79,7 +98,7 @@ const float *rival_marcha(void) { return t_marcha; }
 int rival_carrera(int i)
 {
     uint32_t sz; uint8_t *b; const uint8_t *r; int k;
-    mis_ok = 0; nrc = 0;
+    mis_ok = 0; suelta_regs();
     if (!tab_ok || i < 0 || i >= RIVAL_NMIS) return -1;
     if (!(b = gd_carga("MISION.DAT", &sz))) return -2;
     if (sz < 16 + (uint32_t)(i + 1) * REG_BYTES) { free(b); return -3; }
@@ -93,6 +112,30 @@ int rival_carrera(int i)
     mis.nnodos = u32le(r + 696); if (mis.nnodos > RIVAL_NODOS) mis.nnodos = RIVAL_NODOS;
     memcpy(mis.largo_tramo, r + 700, 32); memcpy(mis.largo_union, r + 732, 32);
     mis.largo = (uint16_t)(r[764] | r[765] << 8);
+    mis.hay44 = (int)u32le(r + 204); memcpy(mis.t44, r + 208, 48);
+    mis.hay48 = (int)u32le(r + 256); memcpy(mis.t48, r + 260, 48);
+    free(mx); mx = mix_ok ? calloc(1, sizeof *mx) : NULL;
+    if (mx) memcpy(mx->cabeza, b + mix_base + 8, 192);
+    if (mx && pac_base) {
+        int c, k2;
+        for (c = 0; c < 12; c++) {
+            const uint8_t *e = b + pac_base + 4 + 0x48 * c;
+            for (k2 = 0; k2 < 6; k2++) {
+                int16_t an; memcpy(&mx->pace[c][3 * k2], e + 12 * k2, 4); memcpy(&an, e + 12 * k2 + 4, 2);
+                mx->pace[c][3 * k2 + 1] = an; memcpy(&mx->pace[c][3 * k2 + 2], e + 12 * k2 + 8, 4);
+            }
+            memcpy(&mx->pace[c][18], e + 0x3c, 4);
+        }
+        mx->pace_ok = 1;
+    }
+    if (mx && mix_off[i] && mix_base + mix_off[i] + 4 <= sz) {
+        const uint8_t *z = b + mix_base + mix_off[i]; uint32_t m = u32le(z), k2;
+        for (k2 = 0; k2 < m && mx->nzonas < NZONAS && mix_base + mix_off[i] + 4 + (k2 + 1) * 32 <= sz; k2++) {
+            const uint8_t *q = z + 4 + 32 * k2; rival_zona_t *o = mx->zonas + mx->nzonas++;
+            o->nodo = q[0]; o->en_union = q[1]; o->desde = (uint16_t)(q[2] | q[3] << 8); o->hasta = (uint16_t)(q[4] | q[5] << 8);
+            o->pad = 0; memcpy(o->v, q + 8, 24);
+        }
+    }
     free(b);
     mis_ok = 1;
     return 0;
@@ -138,7 +181,10 @@ static void monta_47cf40(void)
     semilla = c[11] ? (uint32_t)c[11] & 0xffffu : 0xa5deu;
     if (count < 1) count = 1;
     if (count > RIVAL_MAX) count = RIVAL_MAX;
-    nrc = count; memset(rc, 0, sizeof rc);
+    suelta_regs();
+    rc = calloc(count, sizeof *rc); clas = calloc(count + 1, sizeof *clas);
+    if (!rc || !clas) { suelta_regs(); return; }
+    nrc = count;
     sin_vaiven_80fb08 = 0; bulk_80fb09 = 0;
     lider = ultimo = -1; clas_n = 0; lejos_8037b8 = 0; clas_hecha_80fb18 = 0;   /* 4774B0 */
     edi = mis.largo;                                            /* 0x1724e0(c18 = -1): todo el curso */
@@ -160,7 +206,7 @@ static void monta_47cf40(void)
             r->color = col;
         }
         r->idx = (uint8_t)i; r->coche = -1; r->delante = 1;
-        r->d98 = 0;                                             /* (tipo 6: el tiempo de 4961F0) */
+        r->d98 = mis.tipo == 6 ? (int32_t)(mis.segundos * 60.0f) : 0;   /* (tipo 6: el tiempo de 4961F0) */
         r->d9c = 0;
         r->pos = f14; r->pos_i = (int32_t)f14 & 0xffff;
         f1c = f20 - f14;
@@ -282,6 +328,32 @@ static void avanza_47bc90(int i, const rival_jug_t *j, float ritmo, float arranq
     cd_detras_80a5a0 = 0x5a;
 }
 
+/* Los vaivenes de los registros sin coche (PS2 0x1ee8b0 = 476CA0, 0x1eea68 = 476DF0; 476F40 con la tabla +0x48):
+   rachas con la bandera de +0x70 (0x100 rebufo, 0x200 derrape, 0x800 rapido) que gasta 477B60 en los tipos 3 y 2. +28
+   sube 2a (a < 0,5) o 2 / a por llamada hasta +24 (de b a c segundos al azar, x 60) y luego baja de 2 en 2 con la
+   bandera puesta. a, b, c: los de +0x44 (desde +0 en 476CA0, +4 en 476DF0 y 476F40) que no sean 0, o 1/3, 1, 7 (476CA0)
+   y 0,4, 2, 6 (476DF0); el azar es el generador de 46C570 */
+static float azar_0_1(void) { return (float)paso_semilla() * (1.0f / 65536.0f); }
+static void vaiven(rival_t *r, int bit, float a, float b, float c, const float *tab, float *acum, int32_t *activo)
+{
+    if (r->d6c || r->pos_i > largo) { r->fl71 &= (uint8_t)~bit; return; }
+    if (tab) { if (tab[0] != 0.0f) a = tab[0]; if (tab[1] != 0.0f) b = tab[1]; if (tab[2] != 0.0f) c = tab[2]; }
+    if (*activo) {
+        if (*acum > 0.0f) { *acum -= 2.0f; r->fl71 |= (uint8_t)bit; return; }
+        *acum = 0.0f; *activo = 0;
+        r->f24 = (azar_0_1() * (c - b) + b) * 60.0f;
+    } else if (!(*acum < r->f24)) { *activo = 1; return; }
+    *acum += a < 0.5f ? a * 2.0f : 2.0f / a;
+    r->fl71 &= (uint8_t)~bit;
+}
+static void vaivenes(rival_t *r, int con_f40)
+{
+    int c30 = mis.cfg[12];
+    if (c30 & 8) vaiven(r, 1, 1.0f / 3.0f, 1.0f, 7.0f, mis.hay44 ? mis.t44 : NULL, &r->f28, &r->d64);
+    if (c30 & 0x10) vaiven(r, 2, 0.4f, 2.0f, 6.0f, mis.hay44 ? mis.t44 + 1 : NULL, &r->f28, &r->d64);
+    if (con_f40 && mis.hay48) vaiven(r, 8, 0.4f, 2.0f, 6.0f, mis.hay44 ? mis.t48 : NULL, &r->f30, &r->d68);
+}
+
 /* 47C8A0 / 47CA40: escala y arranque comunes */
 static void escalas(const rival_jug_t *j, float *escala, float *arranque)
 {
@@ -307,6 +379,7 @@ static void aparecen_47c8a0(const rival_jug_t *j, int modo16)
     escalas(j, &esc, &arr);
     for (i = 0; i < nrc; i++) {
         if (rc[i].coche >= 0 || !rc[i].vivo) continue;          /* (los de coche: 477090 en la carrera) */
+        vaivenes(rc + i, 1);
         avanza_47bc90(i, j, rival_ritmo(i) * esc, arr, modo16);
     }
 }
@@ -328,10 +401,12 @@ static void aparecen_47ca40(const rival_jug_t *j)
             for (; k < clas_n; k++) {
                 int q = clas[k].idx; float x;
                 if (q < 0) continue;
+                if (!sin_vaiven_80fb08) vaivenes(rc + q, 1);
                 x = rival_ritmo(q) * rc[q].ritmo * comb + rc[q].pos; rc[q].pos = x; rc[q].pos_i = (int32_t)x & 0xffff;
             }
             break;
         }
+        vaivenes(r, 1);
         avanza_47bc90(i, j, rival_ritmo(i) * esc, arr, 1);
     }
     for (k = c36 - 1; k >= 0; k--) {                            /* los de delante */
@@ -344,10 +419,12 @@ static void aparecen_47ca40(const rival_jug_t *j)
             for (; k >= 0; k--) {
                 int q = clas[k].idx; float x;
                 if (q < 0) continue;
+                if (!sin_vaiven_80fb08) vaivenes(rc + q, 1);
                 x = rival_ritmo(q) * rc[q].ritmo * comb + rc[q].pos; rc[q].pos = x; rc[q].pos_i = (int32_t)x & 0xffff;
             }
             return;
         }
+        vaivenes(r, 1);
         avanza_47bc90(i, j, rival_ritmo(i) * esc, arr, 1);
     }
 }
@@ -395,14 +472,32 @@ void rival_suelta(int i, int jug_pos)
     cd_delante_800d98 = 0; cd_detras_80a5a0 = 0;
 }
 
-/* 495C20, tipo 0: 6 - puesto (0 el ultimo) */
-int rival_nota(void)
+int rival_ultimo(void) { return nrc ? ultimo : -1; }
+/* 477430 (PS2 0x1f0da8): fuera de la carrera; los puestos de detras suben uno */
+void rival_elimina(int i)
 {
-    int v = 6 - jug_puesto;
-    if (v <= 0) v = 0;
-    if (jug_puesto == clas_n - 1) v = 0;
-    return v;
+    rival_t *r = rival_reg(i); int k, mio;
+    if (!r || !r->vivo) return;
+    r->vivo = 0; r->d58 = 1;
+    if (r->coche >= 0) { int c = r->coche; if (rival_cierra) rival_cierra(c); r->coche = -1; }
+    mio = r->puesto;
+    if (mio < jug_puesto) jug_puesto--;
+    for (k = 0; k < nrc; k++) if (mio < rc[k].puesto) rc[k].puesto--;
 }
+/* 477090: las banderas del coche abierto (bits 0..2 de su +0xC; el 3, 4960A0, con la mision elegida) */
+void rival_banderas(int i, int bits)
+{
+    rival_t *r = rival_reg(i);
+    if (r) r->fl71 = (uint8_t)((r->fl71 & ~0xf) | (bits & 0xf));
+}
+int rival_zonas(const rival_zona_t **z) { if (!mx) return 0; *z = mx->zonas; return mx->nzonas; }
+const float *rival_pace(int carreras, int clase)
+{
+    if (!mx || !mx->pace_ok) return NULL;
+    if (carreras) return clase >= 0 && clase < 4 ? mx->pace[8 + clase] : NULL;
+    return clase >= 0 && clase < 8 ? mx->pace[clase] : NULL;
+}
+const float *rival_cabeza(int modelo) { return mx ? mx->cabeza[modelo >= 0 && modelo < 16 ? modelo : 0] : NULL; }
 
 /* 47DA80 (PS2 0x1f0c60): el coche de carreras de referencia del HUD: el lider ([64E190]) o, si lidera el jugador, el
    segundo de la clasificacion; -1 sin coches */

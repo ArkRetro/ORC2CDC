@@ -40,8 +40,10 @@ def main():
         filas[seg] = b''.join(E.lee(t + 64 * ti, 64) for t in (0x3dee58, 0x3dfed8, 0x3d2f38))
     sal.append(b'ATR1' + struct.pack('<I', n) + b''.join(filas))
     print('tramos de choque: %d etapas, %d con atrapamiento' % (n, sum(f[:2] != b'\xff\xff' for f in filas)))
-    sal.append(b'PAR1' + struct.pack('<I', 3))
-    for k in (0x2a, 0x2b, 0x2d):                          # grava, hierba, humo (race_particles: fuentes 1, 2 y 4)
+    sal.append(b'PAR1' + struct.pack('<I', 4))
+    # grava, hierba, humo (race_particles: fuentes 1, 2 y 4) y el agua de las ruedas sobre mojado (fuente 6: SLES-53998
+    # 0x10c8b8 la crea con la textura 0x57002c; la demo lee las tres primeras si el fichero es de antes)
+    for k in (0x2a, 0x2b, 0x2d, 0x2c):
         a = tex.imagen(b, hs[k]); fmt, lista, d = modelo.textura_dc(a)
         sal.append(struct.pack('<4I', a.shape[1], a.shape[0], fmt, len(d)) + d)
         print('particula %#x: %dx%d formato %d lista %d, %d bytes' % (k, a.shape[1], a.shape[0], fmt, lista, len(d)))

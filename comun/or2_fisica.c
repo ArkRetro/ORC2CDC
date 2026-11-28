@@ -59,7 +59,8 @@ static float angw(float a)
 }
 
 /* --------------------------------------------------------- carga de tabla */
-int or2_carga_param(const float *t, int filas, int col, or2_param_t *p)
+/* (c2c9) frio, solo al cargar: -Os (el codigo cuenta en pasos de 8 KB de RAM) */
+__attribute__((optimize("Os"))) int or2_carga_param(const float *t, int filas, int col, or2_param_t *p)
 {
     int g;
     float k;
@@ -1479,19 +1480,8 @@ static void tick(or2_coche_t *c, const or2_param_t *p, const or2_entrada_t *e)
         asiste_tierra(c, &vw);
         nx = vp.x + cl.x * DT + (vw.x - v0.x); ny = vp.y + cl.y * DT + (vw.y - v0.y);
         l = sqrtf(nx * nx + ny * ny);
-        /* turbo del taxi (ficha 7 / modelo 0): aceleracion longitudinal de la capa arcade y tope
-           temporal.  Va en la direccion de la velocidad (o del morro si esta parado) y solo llega
-           aqui si el que llama lo pide; los demas coches llevan turbo_acel = 0. */
-        if (e->turbo_acel != 0.0f && e->en_suelo && c->t_choque <= 0.0f && c->grua <= 0) {
-            float dx, dy, dv = e->turbo_acel * DT;
-            if (l > 0.1f) { dx = nx / l; dy = ny / l; } else { dx = -sinf(c->psi); dy = cosf(c->psi); }
-            if (dv < 0.0f && l + dv < 0.0f) { nx = 0.0f; ny = 0.0f; }
-            else { nx += dx * dv; ny += dy * dv; }
-            l = sqrtf(nx * nx + ny * ny);
-        }
         {
             float lim = 166.666672f;
-            if (e->turbo_tope > lim) lim = e->turbo_tope;
             if (l > lim) { nx *= lim / l; ny *= lim / l; }
         }
         wn = clampf(wn, -60.2f, 60.2f);

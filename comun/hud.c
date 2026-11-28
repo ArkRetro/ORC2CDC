@@ -191,7 +191,8 @@ mal:
     return NULL;
 }
 
-hud_dat_t *hudd_abre(const char *fich, int modelo, int parcial)
+/* (c2c9) frio, solo al cargar: -Os (el codigo cuenta en pasos de 8 KB de RAM) */
+__attribute__((optimize("Os"))) hud_dat_t *hudd_abre(const char *fich, int modelo, int parcial)
 {
     uint32_t sz, *c, i, j; hud_dat_t *h = calloc(1, sizeof *h);
     if (!h || !parcial) hudd_tablas_en(NULL, 0);            /* (la RAM de hudd_tablas_en solo vale para este) */
@@ -271,16 +272,17 @@ static uint8_t pal_n4[64];                                  /* entradas usadas d
 #define PAL_4 0x4000                                        /* pal[]: banco de 4 bits (si no, de 8); bits 0-9: entrada */
 
 /* colores distintos de la textura i (ordenados) en c[] si son <= 256; devuelve cuantos (257: mas) */
+static uint32_t *pal_visto;
 static int pal_colores(const hud_dat_t *h, int i, uint16_t *c)
 {
-    static uint32_t visto[2048];                            /* 65536 bits */
+    uint32_t *visto = pal_visto;                            /* 65536 bits (INFARTO 3: del monton, solo en pal_reparte) */
     const uint16_t *t = (const uint16_t *)((h->meta ? h->tx : h->dat) + h->tex[i].off); uint32_t k, n = 0, m = h->tex[i].w * h->tex[i].h;
     for (k = 0; k < m && n <= 256; k++) {
         uint16_t v = t[k];
         if (!(visto[v >> 5] & (1u << (v & 31)))) { visto[v >> 5] |= 1u << (v & 31); if (n < 256) c[n] = v; n++; }
     }
     for (k = 0; k < n && k < 256; k++) visto[c[k] >> 5] &= ~(1u << (c[k] & 31));
-    if (n > 256) { memset(visto, 0, sizeof visto); return 257; }
+    if (n > 256) { memset(visto, 0, 2048 * sizeof *visto); return 257; }
     for (k = 1; k < n; k++) { uint16_t v = c[k]; int j = k; while (j > 0 && c[j - 1] > v) { c[j] = c[j - 1]; j--; } c[j] = v; }
     return n;
 }
@@ -298,13 +300,14 @@ static int pal_une(const uint16_t *a, int na, const uint16_t *b, int nb, uint16_
     return n;
 }
 static uint32_t tam_vram(const hud_dat_t *h, int i);
-static void pal_reparte(hud_dat_t *h)
+/* (c2c9) frio, solo al cargar: -Os (el codigo cuenta en pasos de 8 KB de RAM) */
+__attribute__((optimize("Os"))) static void pal_reparte(hud_dat_t *h)
 {
     uint16_t *col, *nc, tmp[256]; int16_t *orden; uint32_t i, j, n = h->n_tex; int k, b, s;
     h->pal = malloc(n * sizeof *h->pal); h->con_pal = calloc(n, 1);
-    col = malloc(n * 256 * sizeof *col); nc = malloc(n * sizeof *nc); orden = malloc(n * sizeof *orden);
-    if (!h->pal || !h->con_pal || !col || !nc || !orden) {
-        free(h->pal); free(h->con_pal); h->pal = NULL; h->con_pal = NULL; free(col); free(nc); free(orden); return;
+    col = malloc(n * 256 * sizeof *col); nc = malloc(n * sizeof *nc); orden = malloc(n * sizeof *orden); pal_visto = calloc(2048, sizeof *pal_visto);
+    if (!h->pal || !h->con_pal || !col || !nc || !orden || !pal_visto) {
+        free(h->pal); free(h->con_pal); h->pal = NULL; h->con_pal = NULL; free(col); free(nc); free(orden); free(pal_visto); pal_visto = NULL; return;
     }
     memset(pal_n8, 0, sizeof pal_n8); memset(pal_n4, 0, sizeof pal_n4);
     for (i = 0; i < n; i++) {                               /* solo ARGB4444 sin VQ (las 1555 no caben exactas) */
@@ -350,7 +353,7 @@ static void pal_reparte(hud_dat_t *h)
         for (s = 0; s < 64; s++) n4 += pal_n4[s] > 0;
         dbglog(DBG_INFO, "HUD: paletas en %d bancos de 8 bits y %d de 4, %uK menos de VRAM\n", n8, n4, (unsigned)(ahorro >> 10));
     }
-    free(col); free(nc); free(orden);
+    free(col); free(nc); free(orden); free(pal_visto); pal_visto = NULL;
 }
 /* indice del texel v en el banco de la textura (busqueda en sus colores ordenados) */
 static inline uint32_t pal_idx(int16_t p, uint16_t v)
@@ -400,9 +403,44 @@ static void cabeceras(hud_dat_t *h, int i)
     cx.blend.src = PVR_BLEND_SRCALPHA; cx.blend.dst = PVR_BLEND_ONE; pvr_poly_compile(h->caba + i, &cx);
 }
 
+/* (c2c8) la textura i de un fichero parcial leida del GD por trozos (HUDD_TROZO de texeles leidos a la vez, con su
+   paleta si la tiene) en vez de todos los sectores de golpe: para cuando no hay bufer prestado y el monton no tiene
+   un bloque seguido para todo (la META de la ultima etapa del campeonato pedia 40 KB: "Out of memory ... diff 40960").
+   b: bufer de HUDD_TROZO + 2048 + 32 bytes. Devuelve 1 con paleta, 0 sin ella, -4 error del GD */
+#define HUDD_TROZO 8192
+/* n bytes caben en la cima del monton (con 32 KB de margen): memalign no tiene que crecer mas alla de la RAM (que es
+   cuando KallistiOS escribe "Out of memory"; en un hueco podria caber igual, pero no se sabe sin probar) */
+static int cabe_seguido(uint32_t n)
+{
+#ifdef DIAG_HUD_TROZOS
+    if (n > HUDD_TROZO + 2048 + 32) return 0;                 /* prueba: siempre por trozos sin el prestado */
+#endif
+    struct mallinfo mi = mallinfo(); uintptr_t tope = (uintptr_t)sbrk(0);
+    return mi.keepcost + (0x8d000000u - 0x10000u - tope) >= n + 32768;
+}
+static int sube_trozos(hud_dat_t *h, int i, uint8_t *b, pvr_ptr_t v)
+{
+    int16_t p = h->pal ? h->pal[i] : -1; uint32_t r = p < 0 ? 1 : (p & PAL_4) ? 4 : 2;
+    uint32_t sal = p < 0 ? h->tex[i].tam : tam_vram(h, i), co = HUDD_TROZO / r, q;
+    for (q = 0; q < sal; q += co) {
+        uint32_t on = sal - q < co ? sal - q : co, ip = h->tex[i].off + q * r, in = h->tex[i].tam - q * r, s, k; uint8_t *d;
+        if (in > on * r) in = on * r;
+        s = ip / 2048;
+        if (lee_sect(h->lba + s, (ip + in + 2047) / 2048 - s, b)) return -4;
+        d = b + (ip - s * 2048);
+        if (p >= 0) {                                       /* los indices encima de los texeles, como sube_tex */
+            const uint16_t *t = (const uint16_t *)d; uint32_t m = in / 2;
+            if (p & PAL_4) for (k = 0; k + 1 < m; k += 2) d[k >> 1] = pal_idx(p, t[k]) | pal_idx(p, t[k + 1]) << 4;
+            else for (k = 0; k < m; k++) d[k] = pal_idx(p, t[k]);
+        }
+        pvr_txr_load(d, (uint8_t *)v + q, on);
+    }
+    return p >= 0;
+}
+
 int hudd_sube(hud_dat_t *h, int t0, int nt)
 {
-    int i, fin; uint32_t lo = 0xffffffffu, hi = 0, s0 = 0, ns; uint8_t *b = NULL;
+    int i, fin, trozos = 0; uint32_t lo = 0xffffffffu, hi = 0, s0 = 0, ns; uint8_t *b = NULL;
     if (!h) return -1;
     if (nt < 0) nt = h->n_tex - t0;
     fin = t0 + nt; if (fin > (int)h->n_tex) fin = h->n_tex;
@@ -419,8 +457,13 @@ int hudd_sube(hud_dat_t *h, int t0, int nt)
     }
     if (h->meta && !h->tx) {                                /* del GD: los sectores que cubren esas texturas */
         s0 = lo / 2048; ns = (hi + 2047) / 2048 - s0;
-        if (!(b = toma(ns * 2048))) return -3;
-        if (lee_sect(h->lba + s0, ns, b)) { deja(b); return -4; }
+        if ((pres && !pres_ocupado && ns * 2048 <= pres_tam) || ns * 2048 <= HUDD_TROZO + 2048 + 32 || cabe_seguido(ns * 2048)) {
+            if (!(b = toma(ns * 2048))) return -3;
+            if (lee_sect(h->lba + s0, ns, b)) { deja(b); return -4; }
+        } else {                                            /* (c2c8) mas de 10 KB sin el prestado: por trozos */
+            if (!(b = toma(HUDD_TROZO + 2048 + 32))) return -3;
+            trozos = 1; dbglog(DBG_INFO, "HUD: texturas %d..%d del GD por trozos (%uK seguidos sin bufer)\n", t0, fin - 1, (unsigned)(ns * 2));
+        }
     }
     for (i = t0; i < fin; i++) {
         if (!h->usada[i] || h->vtex[i]) continue;
@@ -430,7 +473,12 @@ int hudd_sube(hud_dat_t *h, int t0, int nt)
 #else
         if (!(h->vtex[i] = pvr_mem_malloc(tam_vram(h, i)))) { deja(b); hudd_baja(h, t0, nt); return -2; }
 #endif
-        {   uint8_t *d = h->tx ? h->tx + h->tex[i].off : h->meta ? b + (h->tex[i].off - s0 * 2048) : h->dat + h->tex[i].off;
+        if (trozos) {
+            int r = sube_trozos(h, i, b, h->vtex[i]);
+            if (r < 0) { deja(b); hudd_baja(h, t0, nt); return r; }
+            if (h->con_pal) h->con_pal[i] = r;
+        } else {
+            uint8_t *d = h->tx ? h->tx + h->tex[i].off : h->meta ? b + (h->tex[i].off - s0 * 2048) : h->dat + h->tex[i].off;
             if (h->con_pal) h->con_pal[i] = sube_tex(h, i, d, h->vtex[i], h->meta != 0);
             else pvr_txr_load(d, h->vtex[i], h->tex[i].tam);
         }
@@ -468,7 +516,8 @@ uint32_t hudd_grupos_suelta2(hud_dat_t *h, int t0, int nt, int t1, int n1)
     }
     return b;
 }
-int hudd_grupos_carga(hud_dat_t *h)
+/* (c2c9) frio, solo al cargar: -Os (el codigo cuenta en pasos de 8 KB de RAM) */
+__attribute__((optimize("Os"))) int hudd_grupos_carga(hud_dat_t *h)
 {
     enum { TROZO = 8 };
     uint32_t ini, fin, pos, sec, k, j, g = 0, ip = 0, npz = 0, falta = 0; uint8_t *t, *nuevo, pz_[sizeof(h_pie_t)];
@@ -732,6 +781,12 @@ void hudd_capa(hud_dat_t *h, float z, int fondo)
 float hudd_z(void) { return zcapa; }
 int hudd_sprite_tex(const hud_dat_t *h, int s) { return h && s >= 0 && (uint32_t)s < h->n_spr ? h->spr[s].tex : -1; }
 int hudd_n_spr(const hud_dat_t *h) { return h ? (int)h->n_spr : 0; }
+void hudd_spr_tam(const hud_dat_t *h, int s, float *w, float *hh)
+{
+    *w = *hh = 0;
+    if (h && s >= 0 && (uint32_t)s < h->n_spr) { *w = h->spr[s].w; *hh = h->spr[s].h; }
+}
+int hudd_uso_x(const hud_dat_t *h, int u) { return h && u >= 0 && u < (int)h->n_uso ? h->uso[u].x : 0; }
 void hudd_sprite(int s, const float *m, const float *q, float alfa, int aditiva)
 {
     const h_spr_t *sp; int k; pvr_vertex_t v;

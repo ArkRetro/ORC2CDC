@@ -198,6 +198,9 @@ colgo la consola costaria 56 bytes por vertice, el mismo margen que antes (1,3 x
 mejor (tiras de 8) cuesta menos y lo que guarda peor (triangulos sueltos del recorte cercano, tiras de 9-13) mas. Lo 2D
 cuesta `ta_bpv` = 56 bytes por vertice. En la consola, `ta_f` sube solo si el TA gasta mas (registro
 `TA_ITP_CURRENT` del cuadro anterior / lo teorico x 1,2; `ta_bpv` en proporcion); Flycast no lo actualiza.
+Rev 2.9.9 (PARIDAD.md, Rev 2.9.9: que no falten edificios): `ta_f` = 400 (1,5625) por defecto y solo sigue al
+registro con cuadros que llenan el 25 % del bufer o mas, con un 10 % de margen (`TA_F_SEGURO`); el tope de vertices de
+la etapa es 24000 y, si el reparto no cabe, `corte_nodos` quita nodos enteros (no mallas sueltas).
 Para medirlo en la consola sin cable serie (revision 44): en la pausa, Y (la pantalla de medidas) escribe en la
 primera linea `TA <real>K/<teorico>K x<real / teorico> max<el mayor desde el arranque> f<ta_f>`; en Flycast sale
 "TA sin registro". Medido hasta ahora: solo el 1,34 de abajo (demo 12c). Con `-DTA_F_MIN=n` (n / 256 = el factor) se
@@ -1191,6 +1194,9 @@ vertice), el coche (2,7 ms) y el principio del cuadro (1,6 ms: `coche_entorno` ~
 vertice).
 
 ### Rendimiento: SH4ZAM (2026-11-13)
+
+**Desde la Rev 2.9.2.c ya no se usa ni se instala: lo sustituye Little Bloste (comun/lbloste.h, codigo propio; docs/LBLOSTE.md),
+con las mismas cuentas en los mismos tres sitios. Lo de abajo queda como historia.**
 
 [SH4ZAM](https://github.com/gyrovorbis/sh4zam) (libreria de matematicas del SH-4 de Falco Girgis, licencia MIT;
 v0.10.0+10, commit 7e57d5c) se instala de kos-ports: `cd /opt/toolchains/dc/kos-ports/sh4zam && make install

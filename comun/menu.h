@@ -20,6 +20,7 @@ int menu_inicia(void);                      /* abre MENU.DAT (solo tablas en la 
 /* entra en el titulo: texturas a la VRAM bajo demanda (antes hay que dejar el hueco: hud_baja_tex) */
 void menu_entra(int manual, int pista, int npistas);
 void menu_suma_tiempo(int cuadros);           /* licencia +0x10C += crono total de la carrera (4505D0) */
+void menu_marca_cambios(void);              /* Rev 2.9.4: +3F4 |= 2 de la licencia activa */
 void menu_suma_millas(uint32_t millas);       /* licencia +0x24 += millas OutRun de la carrera (4EF510) */
 int menu_paso(unsigned botones_nuevos);     /* una vez por paso de logica (60 Hz); MENU_CARRERA / MENU_DEMO al acabar */
 void menu_dibuja(void);                     /* dentro de la lista TR */
@@ -57,7 +58,6 @@ int menu_vista(void);                       /* 0 parachoques, 1 interior, 2 exte
 int menu_mph(void);                         /* 0 km/h, 1 mph */
 int menu_dificultad(void);                  /* 0 muy facil .. 4 muy dificil (licencia +E0, TIM_DIF) */
 const uint8_t *menu_licencia(void);         /* la licencia activa (registro de 0x40C) o NULL */
-int menu_taxi_comprado(void);               /* 1 si el taxi esta disponible: bit 0xd0 o nombre ENTIRETY */
 int menu_guarda_vmu(void);                  /* licencias y rankings de OUTRUN2SP a la VMU; 0 bien */
 int menu_foto(void);                        /* licencia +0x20 (la foto: PC [7C2400], el piloto y la acompanante) */
 /* ganchos para otros modulos (voces del locutor, video): se llaman al entrar en cada pantalla (evento 0) y al elegir
@@ -80,4 +80,11 @@ int menu_pausa_paso(unsigned botones_nuevos);
 void menu_pausa_dibuja(void);
 void menu_pausa_sale(void);
 unsigned menu_pausa_vram(void);                          /* VRAM que pedira la pausa (bytes; 0 si ya esta subida) */
+int menu_nota_camp(int tipo, int lista, int nota);   /* 0x22edd8: nota de la etapa del campeonato en su casilla */
+int menu_camp(int *lista);                  /* nodo del mapa del campeonato elegido (0 la salida) y su casilla; -1 ninguno */
+extern int (*menu_camp_puede)(int grupo);   /* 0 si el campeonato del grupo (0 SP, 1 OutRun 2, 2 mixto) se puede correr */
+int menu_campeonato(void);                /* campeonato de COAST 2 COAST elegido (46C520): 1 SP, 0 OutRun 2, 2 mixto; -1 ninguno */
+/* ficheros propios en la VMU (el fantasma de la CONTRARRELOJ): 0 bien o VE_* (comun/vmuesc.h); bytes leidos o -1 */
+int menu_vmu_guarda(const char *nombre, const char *desc, const uint8_t *datos, int n);
+int menu_vmu_lee(const char *nombre, uint8_t *buf, int cap);
 #endif

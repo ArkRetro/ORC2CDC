@@ -186,8 +186,8 @@ void fin_game_over(int c)
    PS2 0x1ba6c0 / 0x1ba748 / 0x1ba910 (tabla de modos 0x3f8e50 + 25 x 16; PC 49A790 / 49A800 / 49A920): temporizador
    0xB4 (1b4a10), el banco 0x34 ROUTE_CVT (1183d0 / 115d78), la musica 401000(0, 0x1C, 1) (\music\28.ps2 en bucle,
    MUS28.ADP), 0x5a2030 = 1a7180(preset) solo en la variante 0 (el record de la Contrarreloj) y la animacion de carga
-   (288d20(1)). Con el banco leido el suceso 0x188 con la funcion 0x15 (el mapa de la ruta; la 0x50, resultado de la
-   Contrarreloj de los presets 2 / 3, si 1b4a90: esos presets no salen, SIN PORTAR) y fuera la animacion de carga. Despues
+   (288d20(1)). Con el banco leido el suceso 0x188 con la funcion 0x15 (el mapa de la ruta; la 0x50, resultado de los
+   15 recorridos de los presets 2 / 3, si 1b4a90: ta_init, abajo) y fuera la animacion de carga. Despues
    A o START (210c58: 210988(1) / (4)) o el mapa acabado (209d50 = [0x370dc8]) y entonces el temporizador o A / START
    piden el modo siguiente (1ba7f0..1ba848): 26 (entrada de nombre) con 450240 = 1 (fin del tiempo) o en la variante 0
    con el record; si no, 27. Las variantes 3 / 4 piden antes el 27. En la Dreamcast el banco se lee de un tiron al
@@ -292,10 +292,54 @@ static void ruta_control(void)                          /* 0x209518 */
         spr_traslada(ru.h, ru.p[ru.step][0], -ru.p[ru.step][1]);
     }
 }
+/* Rev 2.9.9.c (modos "sp"): la funcion 0x50 del suceso 0x188 (PS2 0x209ad8 / 0x209cc8 / 0x209d08 = PC 4AED50 /
+   4AEEC0 / 4AEEE0), el resultado de los 15 recorridos continuos (presets 2 / 3: 1b4a90 = 0x1ba7b4 la elige en vez de la
+   0x15): el mapa de 15 (340001 / 34000C con el preset 2, si no 340000 / 34000B; capas 1 / 5, modo 0), el rotulo 34001D
+   (capa 6, modo 1) y el coche del modelo ([0x410048 + 48B140 x 4]: 340002..34001E) en la capa 4, modo 1, de su cuadro
+   0 al de la posicion: la meta (0x1cff70(0xE)) 0x1FE; si no, por cada nivel acabado 0x1E (0x3C en los niveles 5 y
+   10, 0x209a40) y en el nivel n + 1 (4AEEF0: [0x370dd0] nivel, [0x370dcc] etapa / union, [0x370dd4] razon) la razon x
+   23 (46 en los niveles 5 y 10) por la etapa, 23 + razon x 7 (46 + razon x 14) por la union, y razon x 30 en la etapa
+   del nivel 14. Acaba (0x209cc8: [0x370dc8] = 1) cuando el coche llega a su ultimo cuadro (115230 == 3). Tablas: el
+   bloque 'TA50' de RUTASP.DAT (tools/conv_sp.py tablas_ruta, comprobadas en el codigo) */
+typedef struct {
+    char id[4];                                         /* 'TA50' */
+    uint32_t tok[30];                                   /* 0x410048: el coche por modelo */
+    uint32_t mapa[4], rotulo;                           /* 340001 / 34000C (preset 2), 340000 / 34000B; 34001D */
+    uint32_t c_ext, c_nor, c_meta, n_ult;               /* 0x3C / 0x1E por nivel, 0x1FE la meta, 14 el ultimo nivel */
+    float b_ext, b_nor, e_ext, e_nor, ult;              /* 46 / 23, 14 / 7, 30 */
+} rta_t;
+static const rta_t *RT;
+static int ta_h = -1;                                   /* 0x5dfa10 */
+static void ta_init(void)                               /* 0x209ad8 */
+{
+    const fin_sp_t *d = &sp_d; int last = 0, i, n, ext;
+    ru_hecho = 0;                                       /* [0x370dc8] = 0 */
+    if (d->preset == 2) { spr_crea_entera(RT->mapa[0], 1, 0); spr_crea_entera(RT->mapa[1], 5, 0); }
+    else { spr_crea_entera(RT->mapa[2], 1, 0); spr_crea_entera(RT->mapa[3], 5, 0); }
+    spr_crea_entera(RT->rotulo, 6, 1);
+    if (ru_nivel < 0) last = (int)RT->c_meta;          /* 0x1cff70(0xE): la meta (ru_nivel -1: FIN_META) */
+    else {
+        for (i = 0; i < ru_nivel; i++) last += i == 5 || i == 10 ? (int)RT->c_ext : (int)RT->c_nor;
+        n = ru_nivel + 1; ext = n == 5 || n == 10;
+        if (ru_lado == 0) {
+            if (ru_nivel == (int)RT->n_ult) last += (int)(ru_razon * RT->ult);
+            else last += (int)(ru_razon * (ext ? RT->b_ext : RT->b_nor));
+        } else last += (int)((ext ? RT->b_ext : RT->b_nor) + ru_razon * (ext ? RT->e_ext : RT->e_nor));
+    }
+    if (last < 0) last = 0;
+    ta_h = spr_crea(RT->tok[d->modelo >= 0 && d->modelo < 30 ? d->modelo : 0], 4, 1, 0, last);
+    dbglog(DBG_INFO, "FIN: modo 25, funcion 0x50 (15 recorridos, preset %d): coche %06x hasta el cuadro %d\n", d->preset,
+           (unsigned)RT->tok[d->modelo >= 0 && d->modelo < 30 ? d->modelo : 0], last);
+}
+static void ta_control(void)                            /* 0x209cc8 */
+{
+    if (ta_h >= 0 && spr_estado(ta_h) == 3) ru_hecho = 1;
+}
+static int ta_on;                                       /* el modo 25 con la funcion 0x50 */
 static void ruta_suelta(void)                           /* 0x2099f8 */
 {
     spr_suelta_todas();
-    ru_nivel = -1; ru_razon = -1; ru_hecho = 0; ru_lado = -1;
+    ru_nivel = -1; ru_razon = -1; ru_hecho = 0; ru_lado = -1; ta_h = -1; ta_on = 0;   /* (0x209d08: lo mismo) */
 }
 static void a_game_over(void);
 static void sp_siguiente(void)                          /* 1ba7f0..1ba848 (PC result_next) */
@@ -306,9 +350,10 @@ static void sp_siguiente(void)                          /* 1ba7f0..1ba848 (PC re
     /* 450240 = 1 o (variante 0 y record [0x5a2030]: 47EF30, los records de la Contrarreloj, SIN PORTAR) -> 26; si no 27 */
     if (como == FIN_TIEMPO) {
         nombre_t n;
+        memset(&n, 0, sizeof n);                        /* (consulta = 0: la entrada de nombre) */
         n.variante = sp_d.variante; n.preset = sp_d.preset; n.puntos = sp_d.puntos; n.corazones = sp_d.corazones;
         n.tiempo = 0;                                   /* 451180(0): [0x5c60f0], -1 sin acabar -> 0 (PROBABLE) */
-        n.modelo = sp_d.modelo; n.manual = sp_d.manual; n.config = sp_d.config; n.registro4 = sp_d.registro4;
+        n.modelo = sp_d.modelo; n.manual = sp_d.manual; n.config = sp_d.config; n.registro4 = sp_d.registro4; n.desc4p = sp_d.desc4p;
         n.ram = f_ram; n.ram_cap = f_cap;
         n.ruta = 0;                                     /* 450320: bit n = derecha en el nivel n */
         { int k; for (k = 0; k < 4; k++) if (sp_d.rama[k] == 1) n.ruta |= 1 << k; }
@@ -332,6 +377,8 @@ void fin_sp_resultados(int c, const fin_sp_t *d)
     musica_pausa_lectura(0);
     R = rb ? (const rsp_t *)spr_extra(rb, &tam) : NULL;
     if (R && (tam < sizeof *R || memcmp(R->id, "RSP1", 4))) R = NULL;
+    RT = R && tam >= sizeof *R + sizeof *RT && !memcmp((const uint8_t *)R + sizeof *R, "TA50", 4) ? (const rta_t *)((const uint8_t *)R + sizeof *R) : NULL;
+    ta_on = RT && (d->preset == 2 || d->preset == 3);  /* 1b4a90 (sin el bloque TA50, RUTASP.DAT de antes: la 0x15) */
     if (!R) {                                           /* sin el modo 25: el siguiente (26 o 27) */
         dbglog(DBG_ERROR, "FIN: sin RUTASP.DAT (RAM fija %uK): sin el modo 25\n", (unsigned)(f_cap >> 10));
         if (rb) spr_cierra(rb);
@@ -384,14 +431,15 @@ int fin_paso(uint32_t nuevo)
         int in = (nuevo & (CONT_START | BOTON_A)) != 0; /* 210c58: 210988(1) START, (4) la cruz */
         if (t_temp > 0) t_temp--;                       /* el temporizador del modo (1b4a48) */
         if (s25 == 0) {                                 /* 118500 / 115ea8: el banco leido */
-            ruta_init(); s25 = 1;                       /* 19c870(0x188, 0x15), 288dd8 */
+            if (ta_on) ta_init(); else ruta_init();     /* 19c870(0x188, 1b4a90 ? 0x50 : 0x15), 288dd8 */
+            s25 = 1;
         } else {
             if (s25 == 1) {
                 if (in) { sp_siguiente(); in = 0; }
                 else if (ru_hecho) s25 = 2;             /* 209d50 */
             }
             if (fase == 25 && s25 == 2 && (t_temp < 1 || in)) sp_siguiente();
-            if (fase == 25) ruta_control();             /* el suceso 0x188 (tras el modo) */
+            if (fase == 25) { if (ta_on) ta_control(); else ruta_control(); }   /* el suceso 0x188 (tras el modo) */
         }
         if (fase == 25) spr_paso();
     } else if (fase == 26) {                            /* 0x1baaf8 / 49AA60 */
@@ -445,3 +493,187 @@ void fin_sale(void)
 }
 
 int fin_activo(void) { return fase >= 0; }
+
+/* ---------------------------------------------------------------- la tabla de tiempos por etapa de la meta
+   GAD de la meta (PS2 0x19e6d0, PC 498670) en las variantes 1 y 7 de la consola, cuando el temporizador del modo 19
+   baja de 0x3FC (variante 1) y la voz de GOAL ha acabado: 0x1a05f8 (4979E0) y, al acabar, el panel de la variante.
+   Tabla (contador 0x577cdc = TB.cnt, +1 por paso desde 0):
+     filas = cnt / 30 (0x35c7a0) sin pasar de las superadas (las primeras seguidas con 4506A0); a la vista las 5
+     (0x35c7a4) que acaban en la ultima: primera = max(0, filas - 4); por fila a la vista el fondo 2C000D y el rotulo
+     0x3ef430[fila] en (0, y0 + 38 k);
+     de la primera a la ultima fila: mientras se llena (30 cuadros si esta superada, si no 30 x car+102C) la barra
+     (imagen 0x30002 en (344, y0 + 195 + 38 k) y 0x30003 en (346, y0 + 199 + 38 k) estirada por el porcentaje
+     (cnt % 30) x 100 / 30) y el porcentaje (fuente 4, "%02d%%" o "100%%", en (470, y0 + 195 + 38 k)); llena: el tiempo
+     de la etapa (4505A0: "% 2d'%02d\"%03d", blanco, en (338, y0 + 195 + 38 k)) o, sin superar, la barra con car+102C;
+     siempre el nombre de la etapa (2C0047, cuadro = 0x35c7b0[descriptor de la zona]) en (267, y0 + 206 + 38 k);
+     acaba cuando cnt pasa de (superadas + 1) x 30.
+   Paneles (0x19eb00 / 0x19ebe4): variante 1, 2C00AE en (0, y0), el tiempo total en (338, y0 + 385) y la puntuacion
+   ("%07d", amarilla) en (x, y0 + 428); variante 7, 2C00AF en (0, 0) y el tiempo total amarillo en (x, 385). La x de
+   lo amarillo se desliza (0x19fb08): empieza en 520 (puntuacion) o 500 (tiempo) a -20 px por paso con un ancho de 3
+   (gad init 4970F0); fase 0 velocidad x 1,02 hasta pasar de largo el primer umbral (408 / 388), fase 1 x 0,7 hasta el
+   destino (358 / 338), fase 2 x 1; por debajo del destino yendo a la izquierda, o por encima de destino + ancho yendo a
+   la derecha, rebota (v = -v x 0,7) y el ancho x 0,7; se queda en el destino con |v| y |x - destino| < 1 (0x35c79c).
+   Texto: la fuente 4 a escala 1 alineada a la derecha del punto (0x117558(0)), un caracter cada 20 px (0x1be3c8).
+   SIN PORTAR: los efectos 0xAD / 0x80AD (barra) y 0xB0 (fin de la tabla) y la espera de la voz de GOAL (49A190): los
+   bancos de sonido que los traen dependen de la etapa (sin localizar cual carga la meta) y comun/sfx.c no dice si una voz
+   suena; la variante 0 (records, 47EE70: el tiempo en verde y 2C00B7) y la 9.
+   Rev 2.9.4, la Contrarreloj de una etapa (TB.d.solo): 0x19e918 `if (v == 7 && 0x21cb28())` (21cb28 = 48B350: codigo
+   del curso [0x373e54] < 0x3C) va antes de la tabla, que alli no sale (ni el panel 2C00AF). Maquina de pasos
+   [0x577c86] (0x3ef290):
+     paso 0 (0x19e960): 0x20a010(2) (465F70: el registro 2 del fantasma tiene 'NHOT'); sin el, 0x1b4a10(0) (el modo
+       acaba); con el, h = 0x114d00(0x2B0063, capa 0, modo 1, cuadro 0, ultimo 0x46) ("MEJOR TIEMPO:", T_MEJOR);
+     paso 1 (0x19e9ac): mientras 0x115230(h) == 1 (la escena en curso, cuadros 0..0x46) sostiene el temporizador en 0xB4;
+     paso 2 (0x19e9cc): mientras suene la voz de GOAL (0x1b8e10 = 49A190), lo mismo; despues, una vez, el efecto 0xB0
+       ([0x35c790]) y en cada paso 0x19fe08(0xCD, 0xF5, blanco) (= 497430: 466190(2), el mejor del curso en ms, fuente
+       4, "% 2d'%02d\"%03d", 20 px por caracter: texto() / tiempo_txt()) hasta 0x1b4a20() < 10;
+     paso 3 (0x19ea24): 0x114eb0(h) (la escena fuera: fin_tabla_quita); paso 4: nada.
+   DESVIACION: como la tabla, sin la espera de la voz de GOAL (el tiempo sale al acabar la escena, cuadro 0x46) ni el
+   efecto 0xB0. Con un GOALT.DAT de antes de la 2.9.4 (sin T_MEJOR): solo el tiempo (DESVIACION, con log). */
+#define TB_FILA_CUADROS 30                              /* [0x35c7a0] */
+#define TB_FILAS 5                                      /* [0x35c7a4] */
+#define TB_ALTO 38                                      /* 0x1a0770: addiu 0x26 */
+static const char TB_CH[] = "0123456789'\"% ";          /* tools/conv_fin.py TABLA_CH: cuadros de T_CH */
+static struct {
+    hud_dat_t *h; fin_tabla_t d; int on, cnt, sup, panel;
+    int u_mejor, quitado;                               /* solo: T_MEJOR (2B0063, [0x577c78]) y el paso 3 (0x114eb0) */
+    int u_fila, u_e[15], u_nombre, u_panel, u_b0, u_b1, u_ch, nombre[15], s_b1; float b1_w, b1_h;
+    float x, v, w;                                      /* 0x577ce0.. / 0x577cf0..: deslizamiento (x, ancho, v) */
+} TB;
+
+int fin_tabla_entra(const fin_tabla_t *t)
+{
+    int i; char n[16]; hudd_pz_t pz[2];
+    fin_tabla_sale();
+    memset(&TB, 0, sizeof TB); TB.d = *t;
+    if (TB.d.n > 15) TB.d.n = 15;
+    if (!(TB.h = hudd_abre_gd("GOALT.DAT"))) { dbglog(DBG_ERROR, "FIN: sin GOALT.DAT\n"); return -1; }
+    if (TB.d.solo) {                                    /* 0x19e918: sin tabla ni panel; 2B0063 y el tiempo (T_CH) */
+        TB.u_mejor = hudd_uso(TB.h, "T_MEJOR"); TB.u_ch = hudd_uso(TB.h, "T_CH");
+        if (TB.u_mejor < 0) dbglog(DBG_ERROR, "FIN: GOALT.DAT sin T_MEJOR (anterior a la 2.9.4): solo el tiempo\n");
+        else hudd_sube_uso(TB.h, TB.u_mejor);
+        hudd_sube_uso(TB.h, TB.u_ch);
+        TB.on = 1;
+        dbglog(DBG_INFO, "FIN: Contrarreloj de una etapa, MEJOR TIEMPO %d ms, VRAM libre %uK\n", TB.d.mejor_ms,
+               (unsigned)(pvr_mem_available() >> 10));
+        return 0;
+    }
+    TB.u_fila = hudd_uso(TB.h, "T_FILA"); TB.u_nombre = hudd_uso(TB.h, "T_NOMBRE");
+    TB.u_panel = hudd_uso(TB.h, t->variante == 1 ? "T_PANEL" : "T_PANEL7");
+    TB.u_b0 = hudd_uso(TB.h, "T_BARRA0"); TB.u_b1 = hudd_uso(TB.h, "T_BARRA1"); TB.u_ch = hudd_uso(TB.h, "T_CH");
+    for (i = 0; i < 15; i++) { sprintf(n, "T_E%d", i); TB.u_e[i] = hudd_uso(TB.h, n); }
+    for (i = 0; i < TB.d.n; i++) {                       /* NZ_<zona>: x = el cuadro de 2C0047 */
+        int u; memcpy(n, "NZ_", 3); memcpy(n + 3, t->zona[i], 4); n[7] = 0;
+        u = hudd_uso(TB.h, n); TB.nombre[i] = u >= 0 ? hudd_uso_x(TB.h, u) : -1;
+    }
+    TB.s_b1 = hudd_piezas(TB.h, TB.u_b1, 0, pz, 2) > 0 ? pz[0].spr : -1;
+    if (TB.s_b1 >= 0) hudd_spr_tam(TB.h, TB.s_b1, &TB.b1_w, &TB.b1_h);
+    while (TB.sup < TB.d.n && TB.d.ok[TB.sup]) TB.sup++;   /* 4506A0 de las primeras seguidas */
+    hudd_sube_uso(TB.h, TB.u_fila); hudd_sube_uso(TB.h, TB.u_nombre); hudd_sube_uso(TB.h, TB.u_b0); hudd_sube_uso(TB.h, TB.u_ch);
+    TB.x = t->variante == 1 ? 520.0f : 500.0f; TB.v = -20.0f; TB.w = 3.0f;   /* 4970F0 */
+    TB.on = 1;
+    dbglog(DBG_INFO, "FIN: tabla de la meta (variante %d, %d etapas, %d superadas), VRAM libre %uK\n", t->variante, TB.d.n,
+           TB.sup, (unsigned)(pvr_mem_available() >> 10));
+    return 0;
+}
+
+static void desliza(float destino, float umbral)        /* 0x19fb08 */
+{
+    if (TB.x < umbral && TB.panel == 1) TB.panel = 2;
+    if (TB.x < destino && TB.panel == 2) TB.panel = 3;
+    TB.v *= TB.panel == 1 ? 1.02f : TB.panel == 2 ? 0.7f : 1.0f;
+    if (TB.x < destino && TB.v < 0) { TB.v = -TB.v * 0.7f; TB.w *= 0.7f; }
+    if (TB.x > destino + TB.w && TB.v > 0) { TB.v = -TB.v * 0.7f; TB.w *= 0.7f; }
+    TB.x += TB.v;
+    if (TB.v > -1 && TB.v < 1 && TB.x > destino - 1 && TB.x < destino + 1) { TB.x = destino; TB.v = 0; }
+}
+
+void fin_tabla_paso(void)
+{
+    if (!TB.on) return;
+    if (TB.d.solo) { TB.cnt++; return; }                /* sin panel ni deslizamiento */
+    if (!TB.panel) {
+        TB.cnt++;
+        if (TB.cnt > (TB.sup + 1) * TB_FILA_CUADROS) { TB.panel = 1; hudd_sube_uso(TB.h, TB.u_panel); }
+    } else if (TB.d.variante == 1) desliza(358, 408);  /* 0x19eb38.. */
+    else desliza(338, 388);                            /* 0x19ec14.. */
+}
+
+static void texto(const char *s, float x, float y, uint32_t rgb, float z)   /* 0x1be3c8: 20 px por caracter */
+{
+    hudd_color(rgb);
+    for (; *s; s++, x += 20) {
+        const char *p = strchr(TB_CH, *s);
+        if (p && *s != ' ') hudd_dibuja(TB.h, TB.u_ch, (int)(p - TB_CH), x, y, 1, z, 0);
+    }
+    hudd_color(0xFFFFFF);
+}
+static void tiempo_txt(char *b, int ms)                 /* "% 2d'%02d\"%03d" */
+{
+    if (ms < 0) ms = 0;
+    sprintf(b, "%2d'%02d\"%03d", ms / 60000 % 100, ms / 1000 % 60, ms % 1000);
+}
+static void barra(float y, float pc, float z)           /* 0x117ac0 / 0x1179e0 */
+{
+    hudd_dibuja(TB.h, TB.u_b0, 0, 344, y + 195, 1, z, 0);
+    if (TB.s_b1 >= 0 && pc > 0) {
+        const float m[6] = { pc, 0, 0, 1, 346, y + 199 }, q[4] = { 0, 0, 1, TB.b1_h };
+        hudd_capa(TB.h, z + 0.5f, 0); hudd_sprite(TB.s_b1, m, q, 1, 0);
+    }
+}
+static void porcentaje(float y, int pc, float z)       /* 0x19ffb0 */
+{
+    char b[8];
+    if (pc != 100) sprintf(b, "%02d%%", pc); else strcpy(b, "100%");
+    texto(b, 470, y + 195, 0xFFFFFF, z);
+}
+
+void fin_tabla_dibuja(void)
+{
+    int filas, pri, k, f; float y0, z = 140; char b[24];
+    if (!TB.on || !TB.h) return;
+    if (TB.d.solo) {                                    /* pasos 0..2 de 0x19e960 (0x114d00 / 0x19fe08) */
+        if (TB.quitado) return;                         /* paso 3: 0x114eb0 */
+        hudd_dibuja(TB.h, TB.u_mejor, TB.cnt < 0x46 ? TB.cnt : 0x46, 0, 0, 1, z, 0);
+        if ((TB.cnt > 0x46 || TB.u_mejor < 0) && TB.d.mejor_ms >= 0) {   /* paso 2: 0x115230(h) != 1 */
+            tiempo_txt(b, TB.d.mejor_ms); texto(b, 205, 245, 0xFFFFFF, z + 4);   /* (0xCD, 0xF5), blanco */
+        }
+        return;
+    }
+    y0 = TB.d.variante == 1 ? -20.0f : 0.0f;
+    filas = TB.cnt / TB_FILA_CUADROS; if (filas > TB.sup) filas = TB.sup;
+    pri = filas - TB_FILAS + 1; if (pri < 0) pri = 0;
+    for (k = 0; k < TB_FILAS && pri + k < 15; k++) {   /* fondo y rotulo de las filas a la vista */
+        hudd_dibuja(TB.h, TB.u_fila, 0, 0, y0 + TB_ALTO * k, 1, z, 0);
+        hudd_dibuja(TB.h, TB.u_e[pri + k], 0, 0, y0 + TB_ALTO * k, 1, z + 1, 0);
+    }
+    for (f = pri; f <= filas && f < TB.d.n; f++) {
+        float y = y0 + TB_ALTO * (f - pri);
+        int largo = TB.d.ok[f] ? TB_FILA_CUADROS : (int)(TB_FILA_CUADROS * TB.d.avance);
+        if (TB_FILA_CUADROS * f <= TB.cnt && TB.cnt < TB_FILA_CUADROS * f + largo) {   /* llenandose */
+            float pc = (float)(TB.cnt % TB_FILA_CUADROS) * (100.0f / TB_FILA_CUADROS);
+            barra(y, pc, z + 2); porcentaje(y, (int)pc, z + 4);
+        }
+        if (TB.cnt >= TB_FILA_CUADROS * f + largo) {    /* llena */
+            if (TB.d.ok[f]) { tiempo_txt(b, TB.d.ms[f]); texto(b, 338, y + 195, 0xFFFFFF, z + 4); }
+            else { barra(y, TB.d.avance * 100, z + 2); porcentaje(y, (int)(TB.d.avance * 100), z + 4); }
+        }
+        if (TB.nombre[f] >= 0) hudd_dibuja(TB.h, TB.u_nombre, TB.nombre[f], 0, y, 1, z + 3, 0);
+    }
+    if (TB.panel) {
+        hudd_dibuja(TB.h, TB.u_panel, 0, 0, TB.d.variante == 1 ? y0 : 0, 1, z + 6, 0);
+        tiempo_txt(b, TB.d.total_ms);
+        if (TB.d.variante == 1) {
+            int p = TB.d.puntos > 9999999 ? 9999999 : TB.d.puntos < 0 ? 0 : TB.d.puntos;
+            texto(b, 338, y0 + 385, 0xFFFFFF, z + 7);
+            sprintf(b, "%07d", p); texto(b, TB.x, y0 + 428, 0xFFFF00, z + 7);
+        } else texto(b, TB.x, 385, 0xFFFF00, z + 7);
+    }
+}
+
+void fin_tabla_quita(void) { TB.quitado = 1; }     /* 0x19ea24: 0x114eb0(h) */
+
+void fin_tabla_sale(void)
+{
+    if (TB.h) { pvr_wait_ready(); hudd_cierra(TB.h); }
+    TB.h = NULL; TB.on = 0;
+}

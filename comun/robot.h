@@ -41,7 +41,9 @@ const uint32_t *robot_tabla(const char *k, uint32_t *n);  /* una tabla del RBT1 
 uint32_t robot_fin_bytes(void);
 void  robot_fin_ram(void *ram);                            /* RAM por hueso de la pareja del final (NULL: la de la carrera) */
 void  robot_carrera(int modelo);                           /* init de los dos (salida) */
-void  robot_paso(const robot_coche_t *c);                  /* un paso de logica (60 por segundo) */
+void  robot_paso(const robot_coche_t *c);
+void  robot_extra(const void *chrh, uint32_t bytes);       /* CHRH.DAT del INFARTO (NULL: ninguno) */
+void  robot_pide(int mov, uint32_t id, int cara, int fila, int para);   /* 487D60 / 487D90 / 487DD0 (acompanante) */                  /* un paso de logica (60 por segundo) */
 const float (*robot_huesos(int p))[4][4];                  /* matrices de hueso en el marco del personaje */
 const float (*robot_inversa(int p, int i))[4];             /* matriz inversa de enlace i del personaje p */
 int   robot_mano_gu(int p);                                /* 1: el puno (513A30), 0: la mano abierta (513BA0) */
@@ -56,6 +58,7 @@ uint32_t robot_movimiento(int p);                          /* id del movimiento 
 int   robot_personaje(int p);                              /* indice de la tabla de personajes (work+8) o -1 */
 float robot_cuadro(int p);
 int   robot_estado(int p);
+int   robot_fin(int p);                                    /* 4F1E70 IsMotionEnd del movimiento puesto (487DF0 con p = 1) */
 /* el banderero de la salida (ROB03): BAND.DAT (su propio RBT1, un personaje), leido por quien llama en el hueco de la
    union; el mundo es el de la demo */
 typedef struct {

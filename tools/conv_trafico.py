@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""conv_trafico.py tu.iso carpeta [--solo-tablas | --camiones]: los coches del trafico (CARS.PS2, \\CARS\\obj_othcar_pmt.sz y la
+"""conv_trafico.py tu.iso carpeta [--solo-tablas | --camiones] [--ligero[=10]]: los coches del trafico (CARS.PS2, \\CARS\\obj_othcar_pmt.sz y la
 sombra de \\COMMON\\obj_vshadow_pmt.sz) a TRAFn.DAT (formato de modelo.py) montados como el original los dibuja de
 cerca (llamadas: 4AE0F0 / 4ADBC0 del PC con el LOD 0 del registro de 4866C0): carroceria, sombra (subida 0,1 m) y las
 cuatro ruedas de su descriptor (las del otro lado giradas pi en y), parado y sin luces; solo las texturas que usa.
@@ -41,7 +41,11 @@ Con --camiones solo los camiones con remolque de OUTRUN2SP (camiones(): TRAFK0.D
 sola; TRAFK1.DAT el 41; TRAFK2.DAT el 43): la cabeza como los coches y el remolque (el segundo descriptor de cada LOD
 de 4866C0, llamadas_remolque) en su marco, que la demo pone con car+C90 (470360); mismas mallas y LOD que el original
 y las texturas en VQ como el resto; detras de TAN1 los bloques REM1 (bloque_rem: enganche, ruedas y segunda caja de
-choque) y TRK1 (los registros de TRC1 de los modelos del fichero). Sale de tu disco: no se distribuye."""
+choque) y TRK1 (los registros de TRC1 de los modelos del fichero).
+Con --ligero[=tanto por ciento] (DESVIACION pedida; lo pasa tools/regenera.py): menos triangulos en cada modelo sin que
+se note (aligera, mas abajo: lo que no se ve desde ninguna camara y un colapso de aristas con el error acotado); el
+formato no cambia. Sin el, las mallas del original enteras.
+Sale de tu disco: no se distribuye."""
 import os, struct, sys, zlib
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -449,7 +453,168 @@ def tablas(iso, dest, cajas_malla=None):
     open(os.path.join(dest, 'TAPD.DAT'), 'wb').write(TAPD)
     print('TRAFC.DAT: modelos en 0x%x, cajas en 0x%x, tabla por clase en 0x%x' % (tm, tc, tk))
 
-def convierte(A, E, tm, m, claves, ruta_fich, remolque=False, extra=b'', riv=False):
+# ---------------------------------------------------------------- trafico mas ligero (--ligero, DESVIACION pedida)
+# --ligero[=tanto por ciento, 10]: menos triangulos en los coches del trafico sin que se note, para dejar TA a la etapa.
+# El formato del fichero no cambia (la demo no sabe nada). Por LOD (cada uno es un modelo aparte del original; el 0 y el
+# 1 solo difieren en la sombra y salen iguales, asi que siguen yendo una vez en el fichero):
+#  1. Vaciado (lig_visibles + conv_coche.vacia): fuera los triangulos que no ganan ningun pixel desde ninguna camara
+#     (z-buffer de tools/c/visible.c): anillos alrededor del coche a LIG_ALTOS metros del suelo, de cerca (a LIG_CERCA
+#     del costado, mirando a puntos repartidos a lo largo), a media distancia y con el coche entero en el cuadro; las
+#     ruedas en LIG_POSES giros (4AD530 las gira) y el remolque en varias guinadas (car+C90). La camara mas baja va a
+#     LIG_ALTOS[0] del suelo: los bajos del coche solo se verian desde mas abajo (un cambio de rasante con el coche
+#     lejos y arriba: 1 o 2 pixeles a 40 m). Lo transparente o de recorte no tapa (lo que se ve por los cristales se
+#     queda) y las luces (grupos) y la sombra ni tapan ni se quitan. Coste visual: ninguno desde esas camaras.
+#  2. Si con eso no se llega al tanto por ciento: conv_coche.simplifica (colapso de aristas con el error cuadrico de
+#     posicion, UV, color y normal; bordes, costuras de UV y limites de material con su plano; fijo lo que toca a luces,
+#     cristales y recortes) solo en lo opaco con color o textura propia de carroceria, piezas +9C, ruedas y remolque
+#     (lig_vale), en los LOD 0 a LIG_LOD_MAX, hasta quitar lo que falta y sin pasar del error de LIG_DESV. Los LOD mas
+#     lejanos (de 10 a 150 triangulos) solo se vacian.
+# Lo simplificable sale en tiras nuevas (conv_coche.tiras con giro: sin el salian mas tiras, mas cortas, que las del VU1
+# y la demo tardaba un 3 % mas en recorrer el trafico): lo que cuenta en el TA de la PowerVR son los vertices.
+LIG_ALTOS = (0.45, 0.8, 1.3, 2.0, 3.0, 4.5, 8.0)               # alturas de las camaras sobre el suelo (m)
+LIG_CERCA, LIG_MEDIA = 2.2, 6.0 # distancia de los anillos cercano y medio al costado del coche (m)
+LIG_AZ = 30                     # camaras por anillo
+LIG_POSES = 4                   # posturas (giro de las ruedas y guinada del remolque)
+LIG_GUINADA = (0.0, 14.0, -14.0, 28.0)                          # guinada del remolque en cada postura (grados)
+LIG_RES = (640, 480)
+LIG_LOD_MAX = 2                 # ultimo LOD que se simplifica (los demas solo se vacian)
+LIG_DESV = float(os.environ.get('LIG_DESV', '0.025'))   # desviacion (m) que da el error maximo de un colapso: LIG_DESV^2 x
+LIG_CARAS = 8.0                 # LIG_CARAS x area media de las caras simplificables (el error de conv_coche.simplifica es
+                                # m2 de area x m2 de distancia; por area media: un autobus no es mas delicado que un coche)
+LIG_UV = 3.0                    # peso de las UV en el error (conv_coche.VIS_UV es 0,5: 1 = 3 m, un texel de 128 = 2,3 cm)
+LIG_SIMPLIFICA = ('carroceria', 'lista', 'rueda', 'rem_carroceria', 'rem_lista', 'remrueda')
+
+class _Sub:
+    """las mallas de un LOD como un modelo aparte (lo que usan conv_coche.vacia y simplifica: mallas, verts, nv)"""
+    def __init__(self, mallas, verts):
+        self.mallas = []; self.verts = list(verts); self.nv = 0
+        for x, v in zip(mallas, verts): y = list(x); y[4] = self.nv; self.nv += len(v); self.mallas.append(y)
+
+def lig_vale(x):
+    """mallas que se pueden simplificar: opacas, sin grupo de luces, de carroceria, piezas, ruedas o remolque y sin
+    el mapa de entorno fijo de los cristales (sus UV salen de la normal)"""
+    import conv_coche as cc
+    ex = x[9]
+    return x[0] == 0 and ex.get('grupo', cc.NADA) == cc.NADA and ex.get('mat') != 'entorno' and \
+        x[8].rstrip('0123456789') in LIG_SIMPLIFICA
+
+def lig_triangulos(sub, vale=None):
+    """triangulos distintos con area de lo que se dibuja de dia (sin las luces de noche, de freno ni el faro) [y que cumplen vale]"""
+    import conv_coche as cc
+    n = 0
+    for x, v in zip(sub.mallas, sub.verts):
+        if x[9].get('grupo', cc.NADA) not in (cc.NADA, cc.G_PILOTOS) or len(v) < 3: continue
+        if vale is not None and not vale(x): continue
+        P = np.stack([v['x'], v['y'], v['z']], 1).astype(float)
+        a = np.linalg.norm(np.cross(P[1:-1] - P[:-2], P[2:] - P[:-2]), axis=1) > 1e-9
+        a[1:] &= (P[3:] != P[:-3]).any(1)                       # (el triangulo repetido de un giro de conv_coche.tiras)
+        n += int(a.sum())
+    return n
+
+def lig_area(sub, vale):
+    """area media (m2) de los triangulos con area de las mallas que cumplen vale"""
+    A = []
+    for x, v in zip(sub.mallas, sub.verts):
+        if len(v) < 3 or not vale(x): continue
+        P = np.stack([v['x'], v['y'], v['z']], 1).astype(float)
+        a = 0.5 * np.linalg.norm(np.cross(P[1:-1] - P[:-2], P[2:] - P[:-2]), axis=1); A += list(a[a > 1e-9])
+    return float(np.mean(A)) if A else 0.0
+
+def lig_camaras(lo, hi):
+    """camaras alrededor de la caja lo..hi del coche montado (el suelo en y = 0)"""
+    import conv_coche as cc
+    C = []; az = 2 * np.pi * np.arange(LIG_AZ) / LIG_AZ
+    cx = 0.5 * (lo[0] + hi[0]); cz = 0.5 * (lo[2] + hi[2]); largo = hi[2] - lo[2]; ancho = 0.5 * (hi[0] - lo[0])
+    R = 0.5 * float(np.linalg.norm(hi - lo))
+    miras = [min(1.0, 0.5 * hi[1])] + ([hi[1] - 1.0] if hi[1] > 2.4 else [])
+    for r, paso, ys in ((ancho + LIG_CERCA, 2.5, miras), (ancho + LIG_MEDIA, 5.0, miras[:1])):
+        n = max(1, int(np.ceil(largo / paso)))
+        for zk in cz + (np.arange(n) - 0.5 * (n - 1)) * (largo / n):   # a lo largo del coche
+            for h in LIG_ALTOS:
+                for a in az:
+                    o = np.array([cx + r * np.sin(a), h, zk + r * np.cos(a)])
+                    for y in ys: C.append(cc.mira(o, [cx, y, zk]))
+    d = 2.3 * R + 1.0                                            # el coche entero en el cuadro
+    for h in LIG_ALTOS + (15.0,):
+        for a in az: C.append(cc.mira(np.array([cx + d * np.sin(a), h, cz + d * np.cos(a)]), [cx, 0.5 * hi[1], cz]))
+    return np.array(C, np.float32)
+
+def lig_posa(sub, k, enganche):
+    """posiciones (n, 3) de los vertices de sub con la postura k: las ruedas giradas en x en su marco (4AD530 / 4AD8F0)
+    y el remolque (piezas >= P_REM, en su marco) en el enganche con su guinada (car+C90)"""
+    import conv_coche as cc
+    V = np.concatenate(sub.verts); P = np.stack([V['x'], V['y'], V['z']], 1).astype(float)
+    g = 2 * np.pi * k / LIG_POSES + 0.3; Rx = np.array([[1, 0, 0], [0, np.cos(g), np.sin(g)], [0, -np.sin(g), np.cos(g)]])
+    s = cc.Pila(); s.push()
+    if enganche is not None: s.translate(np.array(enganche, float)); s.rot_y(np.radians(LIG_GUINADA[k % len(LIG_GUINADA)]))
+    Mr = s.m[-1]
+    for x in sub.mallas:
+        pz = x[9].get('pieza', 0)
+        if not pz: continue
+        q = P[x[4]:x[4] + x[5]]
+        if pz != P_REM:
+            M = x[9]['M']; q = ((q - M[3, :3]) @ np.linalg.inv(M[:3, :3])) @ Rx @ M[:3, :3] + M[3, :3]
+        if pz >= P_REM: q = q @ Mr[:3, :3] + Mr[3, :3]
+        P[x[4]:x[4] + x[5]] = q
+    return P
+
+def lig_visibles(sub, enganche, con_ruedas):
+    """(visible por triangulo de tira, malla de cada uno, camaras): los que ganan algun pixel desde alguna camara en
+    alguna postura; las luces (grupos) y la sombra enteras"""
+    import ctypes
+    import conv_coche as cc
+    idx = []; dueno = []
+    for k, x in enumerate(sub.mallas):
+        for j in range(x[5] - 2): idx.append((x[4] + j, x[4] + j + 1, x[4] + j + 2)); dueno.append(k)
+    idx = np.array(idx).reshape(-1, 3); dueno = np.array(dueno, int)
+    fijo = np.array([sub.mallas[k][9].get('grupo', cc.NADA) != cc.NADA or 'sombra' in sub.mallas[k][8] for k in dueno], bool)
+    op = np.array([1 if sub.mallas[k][0] == 0 and not fijo[i] else 0 for i, k in enumerate(dueno)], np.uint8)
+    vis = fijo.copy(); lib = cc._lib(); f = ctypes.POINTER(ctypes.c_float)
+    Ps = [lig_posa(sub, k, enganche) for k in range(LIG_POSES if con_ruedas or enganche is not None else 1)]
+    C = lig_camaras(Ps[0].min(0), Ps[0].max(0))
+    def una(P):                                                 # (ctypes suelta el GIL: una postura por hilo)
+        T = np.ascontiguousarray(P[idx].reshape(-1, 9), np.float32); cuenta = np.zeros(len(T), np.int32)
+        lib.visibles(T.ctypes.data_as(f), len(T), op.ctypes.data_as(ctypes.POINTER(ctypes.c_ubyte)), C.ctypes.data_as(f),
+                     len(C), LIG_RES[0], LIG_RES[1], cuenta.ctypes.data_as(ctypes.POINTER(ctypes.c_int)))
+        return cuenta > 0
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(min(len(Ps), os.cpu_count() or 1)) as ex:
+        for v in ex.map(una, Ps): vis |= v
+    return vis, dueno, len(C)
+
+def aligera(mod, tanto, enganche=None):
+    """--ligero (ver arriba): mod.mallas con el LOD en x[7] y el extra en x[9]; tanto: parte de los triangulos a quitar"""
+    import conv_coche as cc
+    mallas = []; verts = []; res = []; hecho = {}
+    for lod in range(5):
+        ks = [k for k, x in enumerate(mod.mallas) if x[7] == lod]
+        if not ks: continue
+        sub = _Sub([mod.mallas[k] for k in ks], [mod.verts[k] for k in ks])
+        t0, v0 = lig_triangulos(sub), sub.nv
+        # (el LOD 1 es el 0 con la sombra 0,1 m mas abajo, y la sombra ni tapa ni se quita: la misma visibilidad)
+        clave = b''.join(v.tobytes() if 'sombra' not in x[8] else b'S%d,' % len(v) for x, v in zip(sub.mallas, sub.verts))
+        if clave not in hecho:
+            hecho[clave] = lig_visibles(sub, enganche, any(x[9].get('pieza', 0) not in (0, P_REM) for x in sub.mallas))
+        vis, dueno, nc = hecho[clave]
+        cc.vacia(sub, vis, dueno)
+        t1 = lig_triangulos(sub); nota = ''
+        if lod <= LIG_LOD_MAX:
+            fijos = t1 - lig_triangulos(sub, lig_vale)
+            tope = LIG_DESV ** 2 * LIG_CARAS * lig_area(sub, lig_vale)
+            uv0, cc.VIS_UV = cc.VIS_UV, LIG_UV
+            try: a, b = cc.simplifica(sub, tope=tope, vale=lig_vale, objetivo=int(round(t0 * (1 - tanto))) - fijos, giro=True)
+            finally: cc.VIS_UV = uv0
+            nota = ' (simplificables %d -> %d, error maximo %.2g)' % (a, b, tope)
+        t2 = lig_triangulos(sub)
+        print('   ligero LOD %d: %d -> %d (vaciado, %d camaras) -> %d triangulos (%.1f %%)%s; vertices %d -> %d'
+              % (lod, t0, t1, nc, t2, 100.0 * (t2 - t0) / max(t0, 1), nota, v0, sub.nv))
+        mallas += sub.mallas; verts += sub.verts; res.append((lod, t0, t1, t2, v0, sub.nv))
+    mod.nv = 0
+    for x, v in zip(mallas, verts): x[4] = mod.nv; mod.nv += len(v)
+    mod.mallas, mod.verts = mallas, verts
+    return res
+
+def convierte(A, E, tm, m, claves, ruta_fich, remolque=False, extra=b'', riv=False, ligero=0.0):
     """un modelo de trafico m a ruta_fich (TRAFn.DAT / TRAFKn.DAT); con remolque, el segundo descriptor (llamadas_remolque)
     y detras de TAN1 los bloques extra (REM1, TRK1); riv: un rival (RCmm.DAT, los 8 colores de TCX9). Devuelve la caja
     de la carroceria del LOD 0"""
@@ -475,6 +640,7 @@ def convierte(A, E, tm, m, claves, ruta_fich, remolque=False, extra=b'', riv=Fal
     for x, v in zip(mod.mallas, mod.verts):
         q = x[-1]
         if q is None: continue
+        x[9]['mat'] = q[0]
         if q[0] == 'color': v['c'] = q[1]; x[0] = 2 if q[2] else 0
         else:
             _, uvs, alfa, esp = q; tr = alfa < 250
@@ -495,6 +661,8 @@ def convierte(A, E, tm, m, claves, ruta_fich, remolque=False, extra=b'', riv=Fal
             mod.texs.append((a.shape[1], a.shape[0], fmt | 0xC00, 2, len(mod.blob), len(dd))); mod.blob += dd; mod.rgba.append(a)
             aditivas[x[1]] = len(mod.texs) - 1
         x[1] = aditivas[x[1]]; x[0] = 2
+    if ligero:                                                  # --ligero: con las ruedas aun montadas en el coche
+        aligera(mod, ligero, E.f32(E.u32(E.u32(E.u32(tm + 0x44 * m)) + 4) + 4, 3) if remolque else None)
     # ruedas: los vertices a su marco (antes de su giro de reposo: la inversa de su matriz), la demo pone la matriz; lo
     # que no gira del remolque (pieza 7) se queda en el marco del remolque (la demo pone car+C90)
     for x, v in zip(mod.mallas, mod.verts):
@@ -557,7 +725,7 @@ def claves_de(E, T, m, n=3):
 # 0x2B; puntos fijos de STAGE: 39, 40, 41 y 43) y no se escribe.
 CAMIONES = [('TRAFK0.DAT', 39, (39, 40)), ('TRAFK1.DAT', 41, (41,)), ('TRAFK2.DAT', 43, (43,))]
 
-def camiones(iso, A, dest):
+def camiones(iso, A, dest, ligero=0.0):
     """TRAFK0..2.DAT: los camiones con remolque (modelos 39, 41 y 43; el 40 es la cabeza del 39 sola): cabeza como los
     coches (llamadas), el remolque en su marco (llamadas_remolque, pieza 7 y ruedas 8..11) y detras de TAN1 los bloques
     REM1 (bloque_rem) y TRK1: 'TRK1', u32 n y por modelo del fichero el registro de TRC1 (48 bytes) y u32 1 si se
@@ -575,16 +743,20 @@ def camiones(iso, A, dest):
             con = 1 if E.u32(E.u32(E.u32(tm + 0x44 * mm)) + 4) else 0
             trk.append(struct.pack('<4i', mm, clase, se, k320) + struct.pack('<8f', radio, *cj) + struct.pack('<I', con))
             print('camion %d: clase %d, +320 %d, se %d, radio %.2f, cajas %d, remolque %d' % (mm, clase, k320, se, radio, d[tc + mm * 0x3c], con))
-        convierte(A, E, tm, m, claves_de(E, T, m), os.path.join(dest, fich), True, bloque_rem(E, tm, m, tc, d) + b''.join(trk))
+        convierte(A, E, tm, m, claves_de(E, T, m), os.path.join(dest, fich), True, bloque_rem(E, tm, m, tc, d) + b''.join(trk),
+                  ligero=ligero)
 
 def main():
     iso = isomod.Iso(sys.argv[1]); dest = sys.argv[2]
+    lig = next((a for a in sys.argv[3:] if a == '--ligero' or a.startswith('--ligero=')), None)
+    ligero = (float(lig.split('=', 1)[1]) if '=' in lig else 10.0) / 100.0 if lig else 0.0
+    solo = next((a for a in sys.argv[3:] if a.startswith('--solo=')), None)   # --solo=n,n: solo esos TRAFn (pruebas)
     if '--solo-tablas' in sys.argv[3:]:
         tablas(iso, dest); return
     from ps2.assets import Assets
     A = Assets(sys.argv[1]); E = A.elf
     if '--camiones' in sys.argv[3:]:
-        camiones(iso, A, dest); return
+        camiones(iso, A, dest, ligero); return
     T, rec = tabla_colores(A)
     # --rivales m,m,..: los coches de carreras de las misiones de COAST 2 COAST (el rival: suceso 0x55 de 46E830 con el
     # modelo 0..29, que el trafico dibuja con su registro de 4866C0 como cualquier otro: obj_rc_<coche>, 5 LOD) a
@@ -595,9 +767,9 @@ def main():
     nombre = next(k for k in iso.fich if k.startswith('SLES') or k.startswith('SLUS') or k.startswith('SLPM'))
     o, s = iso.fich[nombre]; tm = E.va(tabla_modelos(bytes(iso.m[o:o + s])))
     medidas = [convierte(A, E, tm, m, claves_de(E, T, m, 9 if riv else 3),
-                         os.path.join(dest, ('RC%02d.DAT' % m) if riv else ('TRAF%d.DAT' % n)), riv=bool(riv))
-               for n, m in enumerate(lista)]
-    if not riv: tablas(iso, dest, medidas)
+                         os.path.join(dest, ('RC%02d.DAT' % m) if riv else ('TRAF%d.DAT' % n)), riv=bool(riv), ligero=ligero)
+               for n, m in enumerate(lista) if not solo or str(n) in solo.split('=', 1)[1].split(',')]
+    if not riv and not solo: tablas(iso, dest, medidas)
 
 if __name__ == '__main__':
     main()

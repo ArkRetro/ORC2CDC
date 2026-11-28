@@ -22,18 +22,42 @@ typedef struct {
     float kmh;              /* car+0x1F8 (km/h del velocimetro)                                                 */
     float vel_mf;           /* car+0x1C4 (m por cuadro)                                                         */
     float hud;              /* parametro +0x2438 del coche (+0x2B4): factor del velocimetro                     */
+    float ofs;              /* car+0x26C: distancia lateral al centro de la carretera (> 0 a la derecha)       */
+    float d268, d264;       /* car+0x268 / +0x264 (4A4010): hasta el borde izquierdo (> 0 dentro) y el derecho (< 0) */
+    float x, y, z;          /* car+0x14 (marco del mundo de la demo)                                            */
+    int   modelo;           /* car+0x11                                                                         */
+    const float *marco;     /* colocacion de la etapa (x, y, z, giro y) para los objetos de la mision (haobj.c) */
+    int (*suelo)(float x, float z, float *y);   /* la consulta del suelo (43F2F0) */
+    float fx, fz;           /* eje adelante del coche */
+    int (*seccion_xz)(float x, float z);        /* 43F370: la seccion (car+0x64) de un punto del mundo */
+    int (*carriles_xz)(float x, float z);       /* los carriles de la carretera en un punto (+0xA4 de los arcos) */
+    void (*dir_xz)(float x, float z, float *fx, float *fz);   /* la direccion de la carretera en un punto */
+    void (*punto_sec)(int sec, float *p, float *fx, float *fz);   /* 43E570: el centro de la seccion y su direccion */
+    int   sig;              /* la clave de la etapa siguiente si ya se ha elegido la rama en la union (451350 != 2), si no -1 */
 } infarto_coche_t;
 
 /* coche que pide abrir el gestor (45D470): clase (+324), seccion de la etapa, carril, modelo del juego */
-typedef struct { int clase, seccion, carril, modelo, id; } infarto_coche_nuevo_t;
+typedef struct { int clase, seccion, carril, modelo, id, fantasma; } infarto_coche_nuevo_t;   /* fantasma: +C5C 0x80000 */
 
 int  infarto_inicia(void);                  /* lee INFARTO.DAT; 0 bien */
 void infarto_preset(int preset);            /* el preset [0x44350c] de la carrera, antes de infarto_inicia */
+const char *infarto_voces(void);           /* (Rev 2.9.9.c) VOCESHC.DAT (HAM.CVT) con el preset 0 si esta, si no VOCESH.DAT */
 void infarto_tramo_1a(int si);              /* 1: el jugador en la etapa del descriptor 0x1a (NEWY) */
 void infarto_libera(void);
 void infarto_carrera(int clave, int nivel); /* 45E0F0 al empezar la carrera en la etapa de esa clave */
 void infarto_etapa(int clave, int nivel);   /* stage clear (7D39F0 bit 1): la etapa nueva */
 void infarto_meta(void);                    /* 44FF10: GOAL */
+/* 45ECA0 / 45E9B0: el modelo que la mision de la etapa dibuja sobre ella (HAMpqq.DAT de tools/conv_infarto.py metas:
+   los carriles pintados de las peticiones 8 / 23): su nombre en nom (16) y 1, o 0 si no tiene */
+int  infarto_metas(char *nom);
+/* (INFARTO 3) los coches del trafico para las peticiones que los usan (9: 46D250, 11: 46DB60; haobj_auto_t de haobj.h):
+   un paso de logica, con todas las plazas */
+struct haobj_auto_s;
+void infarto_autos(struct haobj_auto_s *v, int n);
+/* sprites 3D (4295D0 = PS2 0x115870): grupo de HAHUD.DAT, cuadro, punto del mundo y escala (px = esc x foco / z / 32);
+   cuadros(g): los del grupo (para recortar) */
+typedef struct haobj_s3d_s infarto_s3d_t;   /* (= haobj_s3d_t de haobj.h) */
+int  infarto_spr3d(infarto_s3d_t *v, int max, int (*cuadros)(const char *g));
 void infarto_paso(const infarto_coche_t *c);   /* 464D20, un paso de logica (modo 16) */
 int  infarto_corazones(void);               /* los que ensena el contador (7F1C80 / 10000) */
 int  infarto_total(void);                   /* 7F23C4 / 10000 */
@@ -56,6 +80,12 @@ int infarto_rotulo(int *texto, int *marco, int *cuadro);
 typedef struct { int g, cuadro; float x, y; } infarto_spr_t;
 int infarto_medidor(infarto_spr_t *v, int max);
 uint32_t infarto_tinte(void);
+/* lo 2D del modo que no es el medidor: el panel de la nota que entra (45BDF0) y la hoja de resultados de la etapa (4603F0):
+   grupos de HAHUD.DAT (nombre), su cuadro y (x, y) de hudd_dibuja (el uso ya lleva el 4294C0 del original); cifras "%3d"
+   en (x, y) de 4BC990 */
+typedef struct { char g[12]; int cuadro; float x, y; } infarto_dib_t;
+typedef struct { int x, y; int32_t v; } infarto_num_t;
+int infarto_dibujos(infarto_dib_t *v, int max, infarto_num_t *nv, int *nn);
 /* 4BCD50: filas de los niveles terminados (7F244C, hasta 4) y la de la etapa (7F2464) en v[n]; devuelve n */
 int infarto_filas(int32_t *v);
 #endif

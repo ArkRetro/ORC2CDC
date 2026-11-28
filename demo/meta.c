@@ -274,7 +274,9 @@ static void salida_efecto(uint32_t id)    /* 4249F0 (op 5) */
 {
     uint32_t i; int c;
     if (id == 0x16a && !sal_ingles) return;                 /* 4493C0 */
-    if (sal_variante == 6 || sal_variante == 7) return;     /* 450240 */
+    /* Rev 2.9.3 (el usuario: "en contrarreloj no se escucha el derrape inicial"): aqui se callaban los efectos con la
+       variante 6 / 7, pero 450240 no es la variante sino el estado del fin de la carrera ([7D38F0] del PC, 0 durante la
+       salida; 450230 lo pone al acabar): en la salida suenan en todos los modos */
     for (i = 0; i < sef_n && sef[i].id != id; i++) ;
     if (i == sef_n || !sef_a[i]) { dbglog(DBG_INFO, "SALIDA: efecto 0x%x sin muestra\n", (unsigned)id); return; }
     c = sal_sig; sal_sig = (sal_sig + 1) % SAL_CANALES;     /* cada efecto en su canal (los del IRX no se cortan) */

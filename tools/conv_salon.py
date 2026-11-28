@@ -16,7 +16,7 @@ solo=True), un grupo de atlas por pagina (las texturas de cada escena se suben a
      desc filas[259] (0x41ae20 + los 2 articulos del Salon en 0xfc/0xfd, vacios hasta que
                        salon_compras_parche.py les pone el arte; detras los 5 textos de la ventana)
      u32 precio[0xd1] (0x629ee0 que rellena 0x1f3c90: 10 x i y los pares {objeto, precio} de PRICES de
-                       \\Scripts\\bin\\OutrunMiles.bin; 0x1f4198; 0xcf/0xd0 = OUTRUNNERS/TAXI a 50000)
+                       \\Scripts\\bin\\OutrunMiles.bin; 0x1f4198; 0xcf = OUTRUNNERS a 50000; 0xd0 queda sin uso)
      i32 fuera[26]    (0x41ad38: los objetos que no se venden en esta version; 0x25d790)
      coches: i32 modelo[30], bit[30], ficha[30] (0x41bda0: {modelo, bit}; ficha = indice del modelo en 0x375968, como
                        0x25bf68), i8 color[30] (0x3d4b80 por modelo: 0x18a110), 2 de relleno
@@ -100,9 +100,10 @@ def main():
     for cod, base, (f0, f1), tira, ult, paso, b0, tit in PAGINAS:
         assert hay(cod, 0x80, 0x24000000 | (base & 0xffff), ADDIU), 'base %x' % cod
         assert hay(cod, 0x300, 0x24000000 | f0, ADDIU), 'primera fila %x' % cod
-        assert hay(cod, 0x300, 0x28020000 | f1, 0xfc1fffff), 'ultima fila %x' % cod     # slti v0, rs, f1
+        mas = 2 if cod == 0x25cf00 else 0                    # extras: el ELF no tiene los 2 articulos del Salon
+        assert hay(cod, 0x300, 0x28020000 | (f1 - mas), 0xfc1fffff), 'ultima fila %x' % cod     # slti v0, rs, f1
         assert hay(cod, 0x300, 0x34a50000 | (tira & 0xffff)), 'tira %x' % cod
-        assert hay(cod, 0x300, 0x24060000 | ult) and hay(cod, 0x300, 0x24070000 | paso) and \
+        assert hay(cod, 0x300, 0x24060000 | (ult - mas)) and hay(cod, 0x300, 0x24070000 | paso) and \
             hay(cod, 0x300, 0x24080000 | b0), 'tira %x' % cod
         if tit is not None: assert hay(cod, 0x300, 0x24050000 | tit), 'titulo %x' % cod
     # lista: 19 de paso, (-180, -50), capa 1, limite 7 (0x60 la principal)
@@ -130,7 +131,7 @@ def main():
     n, o = cm._r077(dm, 'PRICES')
     for k in range(n):
         it, pr = struct.unpack_from('<2I', dm, o + 8 * k); assert it < 0xcf; precio[it] = pr
-    precio += [50000, 50000]                               # OUTRUNNERS y TAXI CRAZY TAXI
+    precio += [50000, 0]                                   # OUTRUNNERS; el 0xd0 queda sin uso (el tamano de la tabla no cambia)
     assert len(precio) == 0xd1
     print('  PRICES: %d precios (%s)' % (n, ', '.join('%d:%d' % (k, precio[k]) for k in (0, 1, 2, 28, 138, 172, 193))))
     fuera = [i(0x41ad38 + 4 * k) for k in range(26)]
@@ -183,7 +184,7 @@ def main():
     # ---- escenas por pagina (un grupo de atlas cada una)
     toks = lambda f0, f1: sorted(set(filas[k][0] & 0xffff for k in range(f0, f1)))
     comun = sorted(set(filas[k][0] & 0xffff for k in list(range(0, 34)) + list(range(252, 257))))
-    grupos = [('COMUN', comun + [0x7d] + toks(0x28, 0x2d))]
+    grupos = [('COMUN', comun + [0x7d, 0x77] + toks(0x28, 0x2d))]   # 0x77: la cabecera "showroom" (Rev 2.9.3)
     for nom, (cod, base, (f0, f1), tira, *_r) in zip(['COCHES', 'ESCENARIOS', 'MUSICA', 'COLORES', 'EXTRAS'], PAGINAS[1:]):
         grupos.append((nom, sorted(set(toks(f0, f1) + [tira & 0xffff]) - set(k for _, ks in grupos for k in ks))))
     for nom, ks in grupos: print('  grupo %s: %s' % (nom, ' '.join('%x' % k for k in ks)))

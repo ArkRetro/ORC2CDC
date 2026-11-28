@@ -36,7 +36,7 @@ en las cargas del curso (sin huecos fijos) y 5 combinaciones "union + LASV" que 
    SELECTOR_CVT HECHO 2026-11-11 (comun/fsp.c, PARIDAD.md) y la vuelta a el tras el GAME OVER; los resultados (modo 25, el
    mapa de la ruta) HECHOS 2026-11-11; la entrada de nombre (26) y los rankings de OUTRUN2SP (VMU) HECHOS 2026-11-11; el final (24) HECHO en parte 2026-11-13 (el
    sitio, la camara del guion, el coche y los creditos; sin la pareja del final); los 15
-   recorridos continuos (presets 2 / 3: el PS2 los ensena, [0x54c108] = 2) siguen SIN PORTAR: PARIDAD.md, OUTRUN2SP; la pantalla de carga, el GAME OVER (27) de la pausa, la meta y el fin del
+   recorridos continuos (presets 2 / 3: el PS2 los ensena, [0x54c108] = 2) HECHOS en la Rev 2.9.9.c: PARIDAD.md, Modos "sp"; la pantalla de carga, el GAME OVER (27) de la pausa, la meta y el fin del
    tiempo, la salida en (0, -16) con el banderero visible y el trafico de las etapas al reves, HECHOS). Vista interior. Saltos. Bonus de puntuacion que faltan.
 
 ## Fase 4. COAST 2 COAST
@@ -537,9 +537,6 @@ que se puede quitar son las peliculas (MVTS.VQV 7,6 MB + MVATTR.VQV 23,8 MB = 31
   verla en la zona de informacion al seleccionar la entrada.
 - P3 (desbloqueo y guardado): `millas >= 50.000` (licencia +0x24, `menu_suma_millas`) **o** nombre `ENTIRETY` (la
   regla que ya usa `lic_desbloquea`). No hace falta fichero nuevo: el estado va implicito en la licencia.
-  El taxi de Crazy Taxi sigue la misma regla con la compra del Salon: bit 0xd0 por 50.000 millas **o** nombre
-  `ENTIRETY`; `c_desbloqueado`, el frontal de OUTRUN2SP y el Salon lo respetan (sin candado ni precio/venta con
-  `ENTIRETY`).
 - P4 (GDI): su ELF pasa a un fichero de la raiz (`OUTRUN.BIN` o similar) y sus datos se copian con el resto;
   `tools/mkgdi.py` no cambia; el menu decide que programa se ejecuta.
 

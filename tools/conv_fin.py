@@ -114,10 +114,112 @@ def convierte(iso, sal, previas=None):
         g = ch.grupo_escena(hud, nombre, ag, Tg, 0x2b, k & 0xffff, duracion(ag, k & 0xffff), 'fin_',
                             boton if nombre == 'CONT_ELIGE_M' else None)
         hud.uso(nombre, g, 0, 0, capa=1)
+    huds['GOALT.DAT'] = tabla(D, elf, iso)
     for fich, hud in huds.items():
         hud.escribe(os.path.join(sal, fich))
         print('%s: %d bytes, %d texturas, %d piezas' % (fich, os.path.getsize(os.path.join(sal, fich)), len(hud.tex), len(hud.pie)))
     if previas: maquetas(huds, previas)
+
+# caracteres de la fuente 4 que escribe la tabla de la meta (formatos 0x3ef3c8 "% 2d'%02d\"%03d", 0x3ef3e0 "%02d%%",
+# 0x3ef3e8 "100%%"; la puntuacion 0x19ff08: cifras): cada uno es un cuadro del grupo T_CH (demo/fin.c TABLA_CH)
+TABLA_CH = b"0123456789'\"% "
+
+def tabla(D, elf, iso):
+    """GOALT.DAT: la tabla de tiempos por etapa de la meta (GAD de la meta 0x19e6d0 = 498670 del PC: en las variantes
+    0/1/7/8/9, cuando la voz de GOAL acaba, 0x1a05f8 = 4979E0 y despues los paneles de tiempo y puntuacion). Del codigo
+    de 0x1a05f8 (comprobado aqui; la demo usa esos numeros: demo/fin.c TABLA_*):
+     - una fila cada [0x35c7a0] = 30 cuadros, [0x35c7a4] = 5 filas a la vista, 38 px entre filas, y0 = -20 en la
+       variante 1 (0 en las demas); por fila la escena 2C000D (fondo) y la de 0x3ef430[fila] (2C000E.. "Etapa n") en
+       (0, y0 + 38 k) -> grupos T_FILA y T_E0..T_E14;
+     - la barra: imagen 0x30002 (spr_etc, imagen 2) en (344, y0 + 195 + 38 k) y 0x30003 (imagen 3) en (346, y0 + 199 +
+       38 k) estirada en x por el porcentaje (0x1179e0 = 42D200) -> T_BARRA0 / T_BARRA1; el porcentaje (0x19ffb0, fuente
+       4, "%02d%%" o "100%%") en (470, misma y);
+     - el tiempo de la etapa (0x19fc88: 4505A0 -> 0x3ef3c8, fuente 4, paso de 20 px) en (338, y0 + 195 + 38 k);
+     - el nombre de la etapa: la escena 2C0047 en (267, y0 + 206 + 38 k) con el cuadro 0x35c7b0[descriptor de la zona]
+       (44C8D0 de la clave de la etapa del nivel: su palabra 0 = el indice del descriptor de tramo) -> T_NOMBRE y los
+       usos NZ_<zona> (x = cuadro);
+     - variante 1, al acabar la tabla (0x19eb00): la escena 2C00AE en (0, y0) -> T_PANEL, el tiempo total (0x19fd68)
+       en (338, y0 + 385) y la puntuacion (0x19ff08, "%07d", amarilla) en (x, y0 + 428) con x deslizandose (0x19fb08);
+       variantes 0 / 7 / 8 (0x19ebe4): la escena 2C00AF en (0, 0) -> T_PANEL7 y el tiempo total amarillo en (x, 385).
+     - Rev 2.9.4, la Contrarreloj de una etapa (0x19e918: variante 7 y 0x21cb28, codigo < 0x3C): sin tabla ni panel,
+       la escena 2B0063 ("MEJOR TIEMPO:", banco 0x2B, cuadros 0..0x46) -> T_MEJOR, y el mejor tiempo del curso
+       (0x19fe08 = 497430: registro 2 del fantasma, 466190) en (205, 245) con T_CH.
+    Glifos: fuente 4 (escala 1, modo 0 de 0x117558: alineada a la derecha del punto) -> T_CH, un cuadro por caracter de
+    TABLA_CH"""
+    import conv_union as cu
+    from ps2.assets import Assets
+    i32 = lambda v: v - (1 << 32) if v >> 31 else v
+    # constantes de 0x1a05f8 / 0x19e6d0 que la demo lleva escritas: si el ejecutable es otro, se para aqui
+    assert (u32(elf, 0x35c7a0), u32(elf, 0x35c7a4)) == (30, 5)
+    assert lui_ori(elf, 0x1a0754, 0x1a0758) == 0x2c000d and lui_ori(elf, 0x1a0b04, 0x1a0b20) == 0x2c0047
+    assert lui_ori(elf, 0x1a0880, 0x1a0894) == 0x30002 and lui_ori(elf, 0x1a08c0, 0x1a08c8) == 0x30003
+    assert lui_ori(elf, 0x19eb1c, 0x19eb20) == 0x2c00ae
+    assert [u32(elf, a) & 0xffff for a in (0x1a0898, 0x1a08cc, 0x1a0a30, 0x1a0900)] == [0x158, 0x15a, 0x152, 0x1d6]
+    assert u32(elf, 0x1a0654) & 0xffff == 0xc1a0 and u32(elf, 0x1a0770) & 0xffff == 0x26
+    assert [u32(elf, a) & 0xffff for a in (0x1a07c4, 0x1a07e4, 0x1a0ae4, 0x1a0b0c)] == [0x4343, 0x4347, 0x434e, 0x4385]
+    assert u32(elf, 0x19ffdc) & 0xffff == 4 and u32(elf, 0x19fcf0) & 0xffff == 4     # fuente 4
+    ac, Tc, _ = D.banco(0x2c)
+    etiq = [u32(elf, 0x3ef430 + 4 * i) for i in range(15)]
+    assert all(t >> 16 == 0x2c for t in etiq), [hex(t) for t in etiq]
+    hud = ch.Hud(); hud.taco = [0xff] * 16; hud.vq = ch.vq_pequeno
+    g = ch.grupo_escena(hud, 'T_FILA', ac, Tc, 0x2c, 0xd, 1, 'tab_'); hud.uso('T_FILA', g, 0, 0, capa=1)
+    for i, t in enumerate(etiq):
+        g = ch.grupo_escena(hud, 'T_E%d' % i, ac, Tc, 0x2c, t & 0xffff, 1, 'tab_'); hud.uso('T_E%d' % i, g, 0, 0, capa=1)
+    A = Assets(iso)
+    base, n, _ = cu.tablas(A)
+    zonas = {}
+    for i in range(n):
+        try: z = cu.zona_de(cu.cadena(A.elf, cu.u32(A.elf, base + 4 * i) + 0xc))
+        except Exception: continue
+        if len(z) == 4 and z not in zonas: zonas[z] = u32(elf, 0x35c7b0 + 4 * i)
+    nf = max(zonas.values()) + 1
+    g = ch.grupo_escena(hud, 'T_NOMBRE', ac, Tc, 0x2c, 0x47, nf, 'tab_'); hud.uso('T_NOMBRE', g, 267, 206, capa=1)
+    for z, f in sorted(zonas.items(), key=lambda v: v[1]): hud.uso('NZ_' + z, g, f, 0)
+    g = ch.grupo_escena(hud, 'T_PANEL', ac, Tc, 0x2c, 0xae, 1, 'tab_'); hud.uso('T_PANEL', g, 0, 0, capa=1)
+    assert lui_ori(elf, 0x19ebe8, 0x19ebfc) == 0x2c00af         # variantes 0 / 7 / 8 (0x19ebe4): el panel del tiempo
+    g = ch.grupo_escena(hud, 'T_PANEL7', ac, Tc, 0x2c, 0xaf, 1, 'tab_'); hud.uso('T_PANEL7', g, 0, 0, capa=1)
+    etc = D._ent(D.p_spr, D.n_spr.index('spr_etc_xst.sz')); Te = ch.texturas(etc)
+    for i, im in ((0, 2), (1, 3)):                              # 42D280 / 42D200: la imagen con su (0, 0) en (x, y)
+        t, l, tp, r, b = ch.imagen_xst(etc, im)                 # (recortada: spr_etc es una textura de 512x512)
+        l, tp, r, b = (int(round(v)) for v in (l, tp, r, b))
+        ti = hud.textura(('TBARRA', im), np.ascontiguousarray(Te[t][tp:b, l:r])); si = hud.sprite(ti, (0, 0, r - l, b - tp), r - l, b - tp)
+        g = hud.grupo('T_BARRA%d' % i, 1); hud.pie.append((g, 0, si, 0, 0.0, 0.0, 0, 0, 0.0, 1.0, 1.0, 1.0))
+        hud.uso('T_BARRA%d' % i, g, 0, 0, capa=1)
+        print('  T_BARRA%d: imagen %d de spr_etc, %dx%d' % (i, im, r - l, b - tp))
+    F = cm.Fuente(D, 4, cm.fuentes_xst(D))
+    g = hud.grupo('T_CH', len(TABLA_CH))                       # los glifos en una tira (la textura de la fuente es grande)
+    ps = [F.piezas(bytes([c]), 0, 0, 0) for c in TABLA_CH]
+    W = sum(int(p['w']) for q in ps for p in q); H = max([int(p['h']) for q in ps for p in q] + [1])
+    tira = np.zeros((H, max(W, 1), 4), np.uint8); x0 = 0; pos = []
+    for q in ps:
+        for p in q:
+            l, tp, r, b = (int(round(v)) for v in p['src'])
+            tira[:b - tp, x0:x0 + r - l] = F.T[p['tex']][tp:b, l:r]; pos.append((x0, r - l, b - tp)); x0 += r - l
+    ti = hud.textura(('TCH', 4), tira); j = 0
+    hud.vq = lambda i, a, fmt, lista: None if i == ti else ch.vq_pequeno(i, a, fmt, lista)   # cifras: sin VQ (las emborrona)
+    for k, q in enumerate(ps):
+        for p in q:
+            x0, w, h = pos[j]; j += 1
+            si = hud.sprite(ti, (x0, 0, x0 + w, h), w, h)
+            hud.pie.append((g, k, si, 0, float(p['M'][2, 0]), float(p['M'][2, 1]), 0, 0, 0.0, 1.0, 1.0, 1.0))
+    hud.uso('T_CH', g, 0, 0, capa=1)
+    print('  T_CH: %d glifos de la fuente 4 (%dx%d)' % (j, W, H))
+    # Rev 2.9.4: la Contrarreloj de una etapa (0x19e918: variante 7 y 0x21cb28 = 48B350, codigo del curso [0x373e54] <
+    # 0x3C) no ensena la tabla: la escena 2B0063 ("MEJOR TIEMPO:", capa 0, modo 1, cuadros 0..0x46 con 0x114d00) y el
+    # tiempo del registro 2 del fantasma (0x19fe08 = 497430: 466190(2), fuente 4, "% 2d'%02d\"%03d" en (0xCD, 0xF5),
+    # blanco; con T_CH). La copia de los modos 20 / 21 (GAD 0x19f2f8) crea la misma escena. Ojo: en el PS2 es 2B0063;
+    # la 2B0061 del PS2 es el rotulo "Posicion" (la del PC es otra numeracion)
+    assert lui_ori(elf, 0x19e96c, 0x19e984) == 0x2b0063 and lui_ori(elf, 0x19f57c, 0x19f594) == 0x2b0063
+    assert u32(elf, 0x19e994) & 0xffff == 0x46                  # ultimo cuadro (t0 de 0x114d00)
+    assert (u32(elf, 0x19e9f8) & 0xffff, u32(elf, 0x19e9fc) & 0xffff) == (0xcd, 0xf5)   # x, y del tiempo
+    assert u32(elf, 0x19fe90) & 0xffff == 4 and u32(elf, 0x19fec4) & 0xffff == 0xf3c8   # fuente 4, formato 0x3ef3c8
+    assert u32(elf, 0x21cb34) & 0xffff == 0x3c                  # 48B350: codigo < 0x3C
+    assert u32(elf, 0x19ea10) & 0xffff == 0xa                   # paso 2 -> 3 con 0x1b4a20() < 10
+    ag, Tg, _ = D.banco(0x2b)
+    g = ch.grupo_escena(hud, 'T_MEJOR', ag, Tg, 0x2b, 0x63, 0x47, 'tab_')
+    hud.uso('T_MEJOR', g, 0, 0, capa=1)                         # (capa 0 en el original; en la DC basta la z)
+    print('GOALT.DAT: %d zonas con nombre (%d cuadros), %d etiquetas' % (len(zonas), nf, len(etiq)))
+    return hud
 
 def maquetas(huds, d):
     """PNG de comprobacion: millas 01234567 al acabar la cuenta, la pregunta con la eleccion y GAME OVER (cuadro 100)"""
@@ -130,6 +232,13 @@ def maquetas(huds, d):
         for n, c in cosas:
             u = next(u for u in hud.lay if u[0] == n); ch.dibuja_grupo(img, hud, u[1], c, u[3], u[4])
         img.save(os.path.join(d, nombre + '.png'))
+    # Rev 2.9.4: la Contrarreloj de una etapa, T_MEJOR (cuadro 70) y " 1'23\"456" con T_CH en (205, 245) a 20 px
+    hud = huds['GOALT.DAT']; img = Image.new('RGBA', (640, 480), (40, 60, 90, 255))
+    u = next(u for u in hud.lay if u[0] == 'T_MEJOR'); ch.dibuja_grupo(img, hud, u[1], 70, u[3], u[4])
+    u = next(u for u in hud.lay if u[0] == 'T_CH')
+    for i, c in enumerate(b" 1'23\"456"):
+        if c != 0x20: ch.dibuja_grupo(img, hud, u[1], TABLA_CH.index(bytes([c])), 205 + 20 * i, 245)
+    img.save(os.path.join(d, 'tabla_mejor.png'))
 
 if __name__ == '__main__':
     if len(sys.argv) < 3: raise SystemExit(__doc__)

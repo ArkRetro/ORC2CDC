@@ -44,16 +44,16 @@ Estado: OK (conectado y verificado al nivel indicado), PARCIAL, PROVISIONAL (apr
 | Direccion, derrape (inicio/mantenimiento/salida) | SlipAngleCtrl / RearGripCtrl / CorneringCtrl; temporizador 40 cuadros | OK | decompilacion + banco | ninguna conocida | trazas de entrada comparables con PS2 | H, E |
 | Adherencia por superficie | get_road_mu 500B30, running_resistance 502120, COLI0200 | OK | coli por rueda; medido en la arena de PALM (2026-11-13, ver Arena, grava y polvo) | ninguna conocida | — | H, E |
 | Choques coche-coche y muro, choque fuerte, grua | 4F9450/4F9000/4F8490/4F6FE0/4F76E0/4F7BF0/476040/473F30 (ver Choques entre coches), CarBodyWallColiCheck 504CE0 y cbw_coli_wall (la forma de la carroceria contra la COLI: ver Muros y suelo de la carroceria del original), 5038D0, PlWrecker | PARCIAL | CHQ1/POS1 de PARAM.DAT, CJM1/SEC1 de TRAFC.DAT, efectos de IGC.PAK en SFX.DAT | coche-coche: ver Choques entre coches (PROVISIONALES alli; golpeados: parpadeo y cierre del original); vibracion del mando de PS2 (0x1d0420) completa, superficie incluida (2026-11-13; verificado contra el original 2026-11-19, PENDIENTE el termino de +D34 y las banderas +8 0x40/0x100); grua recoloca en el centro de la fila de poligonos de la carretera (CORREGIDO 2026-11-11: la ruta es ese centro, ver Muros y suelo de la carroceria del original; antes el carril del asfalto mas cercano); avance 10 posiciones x m_pos (CONFIRMADO, antes 25 m supuestos); angulo del choque fuerte por nivel de etapa (CORREGIDO 2026-11-11: 45 grados solo en la primera, 25 / 18 en las demas, PS2 0x1994c4: antes siempre 45 y el vuelco casi no salia); tramos de atrapamiento y de desvio 1 -> 5 por etapa HECHOS (2026-11-11, ver Choque fuerte contra el muro); sin el SE 0x43 de los estados 1 y 5 ni el SE por material (pc_collision_material_sound), sin el handicap +DB4; chispas del muro y de los coches hechas (ver Sombras y marcas) | — | H, E |
-| Camara de carrera | evento CAMERA 385: 4858D0, 484810, 483110, 4A1680 SetCarCamera, 485590/483CE0/4834A0/483600, 4832F0/484A40, 483C10/484BD0 (PS2 0x178500..0x17b540, 0x1817c0) | PARCIAL | demo/camara.c con las tablas CAM1 de PARAM.DAT (vistas 0x2ccd88, por vista y modelo 0x2cd3d8, por modelo 0x2d2838 del fichero SLES) | vista 1 sin interior (no se dibuja el coche); camara de salida (485250) con el ojo y la mira de la escena de la salida los 120 cuadros de START (ver Escena de la salida); sin vista 0x1D (780258 = 0) ni camara de fin (485830); la de la meta (4853D0) en demo/meta.c (ver Escena de la meta) | ver seccion Camara de carrera | E |
+| Camara de carrera | evento CAMERA 385: 4858D0, 484810, 483110, 4A1680 SetCarCamera, 485590/483CE0/4834A0/483600, 4832F0/484A40, 483C10/484BD0 (PS2 0x178500..0x17b540, 0x1817c0) | PARCIAL | demo/camara.c con las tablas CAM1 de PARAM.DAT (vistas 0x2ccd88, por vista y modelo 0x2cd3d8, por modelo 0x2d2838 del fichero SLES) | vista 1 con el habitaculo desde la Rev 2.9.1 (sin el desvanecido +EA0 de la 1 a la 0); camara de salida (485250) con el ojo y la mira de la escena de la salida los 120 cuadros de START (ver Escena de la salida); sin vista 0x1D (780258 = 0) ni camara de fin (485830); la de la meta (4853D0) en demo/meta.c (ver Escena de la meta) | ver seccion Camara de carrera | E |
 | Trafico (clases, IA, reaccion) | 472090, 472450, 472A50, 47DC10, 4736D0, hit_476040; aparicion 479080 (PS2 0x1dcdd0): 478B90 (0x1dbba0), 4787E0 (0x1db6d0), 4EFB90 (0x1f3818), 4F0030 (0x1f1a88), 46CE30, 478430, 46CC10; cierre 477F60 | PARCIAL | TRAFC.DAT (TRC1, ACL1 y TAP1: tablas de aparicion, velocidad y puntos fijos por etapa); colores (tabla 0x36bc18, modelos 30..43) y materiales en TRAFn.DAT (TCX1) | camino "Lead" de 472450 portado (velocidad por clase y del jugador, ver Choques entre coches: velocidad del trafico de delante) salvo 472320 / 471F90; 478640/46CDA0 en la union simplificados; puntos fijos de coches de carreras sin coche; camiones 39/40/41/43 solo en OUTRUN2SP (en el juego de la consola sin coche; ver OUTRUN2SP: camiones) | ver Trafico: densidad del original | E |
 | Piloto y acompanante | ROB01 / ROB02: PS2 0x201b10 / 0x201c40 / 0x202bf0 y 0x202c58 / 0x202de0; pareja 0x205518 / 0x2055b8; CHR.PS2 (CHR_DR_M00 / S00 / W00 / L00 / G00 / H00, G00_USA), bone.bin, ANIMS.PS2 | PARCIAL | CHRPAR.DAT y CHRppaa.DAT (conv_chr.py --pares), comun/robot.c (con el osage de G00): motor de movimientos, conducir con el volante, codo en la puerta, choque, fuera del asfalto, aburrida, META y TIME OVER (ver Coches: el piloto y la acompanante) | cambio de area, asustada, trompo ni poses pedidas (la meta del piloto, estado 9, hecha: ver Escena de la meta) | - | H, E |
 | Rivales | 47CF40 (PS2 0x1ef900) solo desde el gestor de misiones de C2C (496A30, PS2 0x1f9e4c) y la variante 9 (4B02B0, PS2 0x1f7a50 -> 0x1f0910); coches de carreras 47C8A0 / 47BC90 / 477090 / 477510 del modulo del trafico | PARCIAL (2026-11-13): en las misiones de carrera de C2C (ver COAST 2 COAST: misiones de carrera y el rival) | MISION.DAT (conv_mision.py), RC00-29.DAT (conv_trafico.py --rivales), comun/rival.c | no hay rivales en OUTRUN, INFARTO ni CONTRARRELOJ (el original tampoco); SIN PORTAR 472E60, 474080, vaivenes 476CA0..476F40 (ninguna mision de tipo 0 los pide), variante 9 | ver la seccion | E (Flycast) |
 | Carretera, pendientes, bifurcacion | STAGE.PS2, BK.PS2 cs_BK_PALM, COMMON obj_course_obj_bk_palm + obj_OBJ_<ZONA>_BUNKI_TX, descriptores 0xb0, csc_data_2 | OK | conv_tramo/conv_union, CURSO.DAT | arbol entero (15 etapas, 10 bifurcaciones con sus carteles, 5 metas); cielo, niebla, luz y sol de la union como el original (ver Entorno); bifurcaciones = las de PALM (las demas no estan en el disco) | objetos animados de BK (ANIMS) | E |
 | Temporizador (inicial y ampliacion) | 44DC70 = PS2 0x176730, 450CC0 = PS2 0x1cee40, 450AC0 = PS2 0x1ce1f8 (-1 por paso en 0x5c5f44, crono +1 en 0x5c5f48); cuenta atras t / 60,2 + 0,34 (4BDA30 = PS2 0x1bfff8); crono con CalcFrame2Time (449B30 = PS2 0x1f6d70: t / 60,2, milesimas truncadas); paso real 59,94 Hz: HUD 0,43 % mas lento que el reloj, como el original; tabla 7D2E98 = PS2 0x3cb708 copiada por 0x176040; k636904 = PS2 0x35a938 | OK | TIM1 y KTE1 de PARAM.DAT | formula y tablas CONFIRMADAS en el ELF; variante 1 (fila 0) y dificultad 0 PROBABLES (frontal del PC); preset CONFIRMADO (ver Preset del curso) | trazar el frontal de PS2 | E |
-| Checkpoints, meta, resultados | 44FF20 / 4515B0 (branch_state 7D38E8) con las banderas +0x3C de COLI0200; 4513C0 meta | OK | ampliacion al pasar la pancarta CHECK POINT del principio de la etapa siguiente (ver Checkpoint); meta del original en las 5 etapas finales (z = 0 de la union); voz y efecto de EXTEND TIME, GOAL y TIME OVER (voces.c) | escena de la meta del original (modo 19: guion, camara, coche, piloto, efecto y musica; ver Escena de la meta); millas OutRun, continuar (REINTENTAR / ABANDONAR) y GAME OVER del original (modos 34 / 35 / 27, ver Fin de la carrera); sin la tabla de tiempos de 498670 ni el ranking | — | E |
+| Checkpoints, meta, resultados | 44FF20 / 4515B0 (branch_state 7D38E8) con las banderas +0x3C de COLI0200; 4513C0 meta | OK | ampliacion al pasar la pancarta CHECK POINT del principio de la etapa siguiente (ver Checkpoint); meta del original en las 5 etapas finales (z = 0 de la union); voz y efecto de EXTEND TIME, GOAL y TIME OVER (voces.c) | escena de la meta del original (modo 19: guion, camara, coche, piloto, efecto y musica; ver Escena de la meta); millas OutRun, continuar (REINTENTAR / ABANDONAR) y GAME OVER del original (modos 34 / 35 / 27, ver Fin de la carrera); tabla de tiempos por etapa de 498670 / 4979E0 desde la Rev 2.9.1 (variantes 1 y 7, sin sus efectos); sin el ranking | — | E |
 | Puntuacion modo OutRun | 4F2DF0, 4F2660, 4F2B20, 4B9770 | PARCIAL | main.c pt_* | posicion de carretera = m_pos de CURSO.DAT (CONFIRMADO; antes 2,5 m supuestos, 3,2 veces los puntos por avance); bonus de etapa en el checkpoint | el salto de +64 al cambiar de curso (PENDIENTE) | E |
 | Eventos, scripts, progresion, misiones | SCRIPTS.PS2 (Races, RaceAttack, OutrunMiles, Req_*) | FALTA | — | — | — | — |
-| Modos de un jugador (INFARTO, CONTRARRELOJ) | 464350 / 464D20 (PS2 0x1ae440 / 0x1a7f28), 44DC70, 479080 | PARCIAL | ver Modos de un jugador | tipos de peticion con objetos, fantasma | — | E |
+| Modos de un jugador (INFARTO, CONTRARRELOJ) | 464350 / 464D20 (PS2 0x1ae440 / 0x1a7f28), 44DC70, 479080 | PARCIAL | ver Modos de un jugador | tipos de peticion con objetos; fantasma desde la Rev 2.9.2 (con el coche del jugador, formato propio) | — | E |
 | Coches del jugador | CARS.PS2 1-32 / 33-63, disposicion 0x3d3ff0; materiales tabla 4/5 del bloque; colores 0x35ad48 (PC 64D120/408C80); mapa de entorno del bloque | PARCIAL | 15 coches montados como 46A560 (port comprobado), con interior, 9320-11195 vertices dibujados; pintura, 8 colores (Y en la seleccion), reflejo y luces (+7C/+80/+84/+60, CEX2) del original con los bits de noche / tunel de 4A25F0 y la luz de los faros en el suelo (0x188680); piezas animadas (ruedas, volante, aleron, faros, disco caliente, car+F0 y el cuerpo de la fisica; ANI1) | UV de entorno con la formula esferica clasica (la del microcodigo VU1 sin leer); focos de los faros sobre la escena (0x20e1b8 / 40C550) sin portar | ver secciones Coches | E |
 | Escenarios, texturas, materiales | STAGE.PS2, VQ, scn_env_fog_<zona> | PARCIAL | 15 tramos + 15 uniones; mallas con su material (tabla 5) y la luz del entorno 1 de la zona; niebla, cielo y sol del original (ver Entorno); tiras (ADC), nodos, LOD y planos del original | objetos de tramo: el registro de obj_course_obj_cs_<zona> que dibuja la etapa (pancarta CHECK POINT y carteles, ver Checkpoint: la pancarta); objetos animados de las uniones (ver Objetos animados de las uniones); cs_ENV_* no es de la escena (es del reflejo del coche); destello con oclusion aproximada por rayos (ver Entorno); luces locales (maya_spl) sin portar | — | E |
 | HUD, menus, transiciones | SPRANI/XST, TEXT.PS2 (espanol: SPANISH.bin y XST _sxst) | PARCIAL | HUD.DAT, MENU.DAT; todas las pantallas del menu principal y de un jugador, licencia con VMU (icono, eyecatch y LCD: VMU.DAT, ver VMU), seleccion de coche del original, menu de pausa con AUDIO (ver Menus y Pausa y mezcla) | titulo es un cuadro del video (la pelicula de titulo en bucle detras del rotulo, sin hacer); textos bfont antiguos en la demo automatica y el aviso de rama; rotulos de las filas de opciones (sprites sin localizar) | quitar textos bfont | E |
@@ -386,26 +386,10 @@ del menu 30). Ahora como el original (4C9790 / 4C9C20 del PC, frontend_music.cpp
   carrera con NIGHT FLIGHT (MUS5; correlacion 0,4-0,75 en ventanas de 4 s); en la pausa, AUDIO con la musica a 0 la
   quita (0,03; el flujo sigue avanzando) y a 10 vuelve (0,4-0,5), guardado en la VMU. No probado en R (GDEMU): solo cambia el tamano del disco y el numero de ficheros.
 
-### ALL I WANT: una tarjeta mas en la lista 2 (DESVIACION, 2026-11-16)
+### ALL I WANT (retirada en la Rev 1.1, 2026-11-20)
 
-La lista 2 tiene una tarjeta mas, **ALL I WANT** (Crazy Taxi), al final: 13 temas en la lista 2 y 29 en total
-(`TEMAS_LISTA = { 9, 7, 13 }`, `N_TEMAS 29`). Es el tema 28 y su pista es `MUS67.ADP` (`musica_pon` lo lleva a la
-67); no es exclusiva del taxi: `tema_libre(28)` es siempre cierto y la pantalla `P_MUSICA` no mira la ficha, asi
-que se puede elegir con cualquier coche, como los temas normales de OutRun. `PISTA_TAXI` ya no existe; la
-correspondencia esta en `musica.h` (`MUSICA_TEMA_ALL_I_WANT` / `MUSICA_PISTA_ALL_I_WANT`).
-
-Arte (`tools/menu_musica.py`, llamado por `tools/conv_menu.py` al convertir la lista 2): como ALL I WANT no
-existe en el arte del PS2, se compone con la fuente 14 del propio MENU.DAT y seis piezas: rotulo (234x31),
-etiqueta CRAZY TAXI (112x19), icono/escudo (62x49), visor de la radio (134x15), caratula (136x126) y tira
-inferior (271x18). Se anaden al cuadro 500 del carrusel (`MUSICA_L2`, 20 + 40 x 12) y al 1320 del titulo
-(`MUSICA_T2`, 110 x 12), con `TEMA12`, `MUEVE1112` y `MUEVE1211`; los 12 temas originales y sus tramos no se
-tocan. Las texturas nuevas van en el rango de MUSICA2 (detras de las suyas) y sin VQ, para que el texto no se
-coma el borde; la pantalla pasa de 808 a ~960 KB de VRAM.
-
-Datos: `MUS67.ADP` sale de SONG01.AFS, indice 7 (104,81 s, 4.622.048 B, ADPCM de Yamaha 44,1 kHz estereo).
-Comprobacion sin emulador (`tools/prueba_musica.py <MENU.DAT> <MUS67.ADP> --adx SONG07.adx`): la tarjeta esta en
-MUSICA2 con sus seis piezas, los 12 temas siguen, el flujo de los 15 coches elige el tema 28 y el audio
-decodificado correlaciona 0,9994 con la pista original. Render de la tarjeta: `_trabajo/musica_all4/render/`.
+La tarjeta ALL I WANT (Crazy Taxi, tema 28, `MUS67.ADP`) que se habia anadido a la lista 2 ya no existe: la lista 2
+vuelve a sus 12 temas del original (`TEMAS_LISTA = { 9, 7, 12 }`, `N_TEMAS 28`) y `tools/menu_musica.py` se ha quitado.
 
 ## Pausa y mezcla de audio (2026-11-08)
 
@@ -1452,6 +1436,1675 @@ Ahora (tools/conv_coche.py `materiales`, `extension`; tools/conv_trafico.py; dem
 - PENDIENTE: capa 2 de las mallas con textura propia (mismo mapa: haria falta una segunda pasada); el estado de la
   tabla 7 (mezclas del GS); leer el microcodigo VU1 para la formula exacta del reflejo; reflejo del trafico por cuadro.
 
+### Estructuras descolocadas y popping cercano (Rev 1.4, 2026-11-20)
+
+Queja: en MAYA, IMPE (Paris) y NEWY estructuras de los margenes salen en el cielo o cruzando la carretera, y popping a
+corta y media distancia.
+- Reproduccion en Flycast (`-DPRUEBA_AUTO`, salida en MAYA / IMPE / NEWY y el arbol 1 entero hasta NEWY por la derecha
+  con `-DPRUEBA_RAMA=1 -DPRUEBA_RAMA_FIJA=1 -DPRUEBA_SALTO=900`): nada descolocado. La causa probable es de la consola:
+  la PowerVR no recorta en la pantalla y un vertice proyectado a decenas de miles de pixeles (delante del plano
+  cercano, pero muy cerca de la camara y muy a un lado: muros, pilares, paredes que se pasan rozando) estropea la tira
+  (sale estirada hacia el cielo o cruzando la calzada); Flycast la dibuja bien. El arreglo de 7dfe8a9 solo recortaba a
+  la pantalla los vertices nuevos del plano cercano (tri_recortado).
+- Banda de guarda (CORREGIDO, sin verificar en consola real): `fuera_guarda` / `esfera_en_guarda` (GUARDA_PX 4096): la
+  via directa (malla_sq, `seguro`) solo con la esfera de la malla entera dentro de la banda; `dibuja_malla` recorta a
+  la pantalla (envia_recorte_lateral) las tiras enteras delante del plano cercano con algun vertice fuera; y
+  tri_recortado mira todos sus vertices, no solo los recortados. Medido (`-DDIAG_GUARDA`, arbol 1 hasta NEWY): ~11300
+  tiras en toda la carrera (~1 por cuadro, mas en NEWY) que antes iban a la PowerVR con vertices fuera de la banda.
+- PVS cerca de la camara (DECISION DEL PORT): los nodos pequenos (radio < PVS_CERCA_R = 80 m) con el centro a menos de
+  PVS_CERCA = 120 m se dibujan enteros aunque la tabla de tools/pvs.py de alguna de sus tiras por tapada (lo que las
+  tapaba puede haberse quitado por el tope del TA). Coste medido en NEWY (DIAG_POPPING): el mismo reparto (corte y
+  falta iguales); sin el limite de radio, el suelo y la calzada (radios de cientos de m) contaban enteros y el corte
+  bajaba a 1 m.
+- Lo que queda del popping es el tope del TA (falta 13-31 % en partes de NEWY con el coche 608 KB y la pareja 149 KB por
+  cuadro) y el LOD del original: no se ha cambiado el reparto.
+
+### LASV -> MAYA, la meta de MAYA y el agua de LASV (Rev 1.4, 2026-11-20)
+
+Queja: en OutRun 2 (arbol 1), de LASV a MAYA, al salir de la bifurcacion una estructura tapa la vista; al principio de
+MAYA cosas flotando en el aire; en la meta lineas blancas en el suelo y la piramide mal hecha; quitar el brillo del cielo
+de la carroceria; y en LASV el suelo mojado sin agua de las ruedas. Reproducido en Flycast (`-DPRUEBA_AUTO
+-DPRUEBA_SIN_TIEMPO -DPRUEBA_CURSO=1 -DPRUEBA_NODO=7 -DPRUEBA_RAMA=0 -DPRUEBA_RAMA_FIJA=0`) y comparado con un video
+de OutRun 2 SP (las 15 etapas seguidas) que dio el usuario.
+- La pared negra de la union (1'23"-1'25" de carrera; al final la camara la atravesaba: pantalla negra): MAYA (la etapa
+  siguiente) desde la union. `-DDIAG_SIN_TRAMO=2` la quita y `-DDIAG_SIGV` dio los nodos: el 1460 de SEG29 es un anillo
+  de cartones de selva de 164 m de alto que rodea la etapa y pasa 400 m por detras de su entrada (cruza la carretera de
+  la union) y el 195 una panoramica de 2,4 km de radio. DESVIACION (CORREGIDO): con la camara antes de la entrada de la
+  etapa siguiente (`sig_antes`, pvs_paso) no se dibujan sus mallas con el centro detras de la entrada
+  (DETRAS_ENTRADA: ese sitio es de la union). En el original los aplasta el crecimiento (44C530); en el video la
+  entrada a MAYA es una autovia despejada.
+- La losa flotante sobre la union: los nodos que VISO.DAT da para la seccion 0 de MAYA con la camara fuera (el 194 de
+  SEG29) y que desde dentro no se ven nunca. CORREGIDO: antes de la entrada (y < 0, sin mirar el desvio lateral: la
+  carretera de la union no sigue la ruta prolongada y fuera de PVS_LADO no habia PVS) la PVS de la seccion 0
+  (`-DPVS_ANTES_VISO`: lo de antes).
+- El crecimiento de la etapa siguiente (geo_vista) se apago en la Rev 1.4 y vuelve en la Rev 1.5 (`-DSIN_GEO_CRECE`
+  lo quita): sin el, en todas las bifurcaciones la etapa siguiente aparecia de golpe y entera. Lo que hacia de lamina
+  encima de la union era lo de detras de la entrada, que ya no se dibuja (DETRAS_ENTRADA).
+- La mancha amarilla que tapaba la pantalla en el CHECK POINT de MAYA y las franjas blancas del suelo de la meta: la
+  textura 101 de SEG29 son tiras de polvo translucidas en la salida y en la meta, ocho fotogramas de una animacion de
+  nodos del original (pilas de 4 nodos iguales en el mismo sitio y la tira corriendo por la calzada) que la demo
+  dibujaba todos a la vez (Rev 1.5: la regla contaba mallas y no nodos y quitaba tambien las cascadas de NIAG, SEG21
+  texturas 105 / 106 / 107 / 111, y cosas de LASV, AMAZ y SEG53 / 54 / 58; ahora cuenta nodos distintos y solo queda
+  la de MAYA; y la prueba era de todas las parejas de mallas, hasta 33 millones de comparaciones en el hilo de carga
+  en mitad de la union, que quitaba tiempo a los cuadros: ahora ordenada, n log n). `-DDIAG_SIN_L2` y `-DDIAG_CICLO` (apaga por turnos el sol, los efectos y la etapa) llevaron
+  hasta ellas; no era el humo (`-DDIAG_SIN_HUMO`) ni z-fighting (subirlas 4 cm no cambiaba nada). DESVIACION
+  (CORREGIDO): una textura de la lista translucida con al menos 16 mallas en pilas de 3 o mas nodos en el mismo centro
+  no se dibuja (lee_modelo_en; con los datos de hoy solo esa: las pilas de 2 de la textura 16 de las uniones no
+  llegan). PENDIENTE: la animacion de nodos del original (+18 del PmtNode) para sacarlas como en la PS2.
+- La piramide de la meta (BK26, nodo 4): un render de los datos fuera de la demo (scratchpad rtex.py) da la misma
+  forma que Flycast: la "cupula" gris de detras es geometria del disco (texturas 7 y 14, x +-400 m, hasta 271 m de
+  alto), no un fallo de dibujo. Sin referencia de la meta del original (el video es el modo de 15 etapas, sin meta en
+  MAYA): sin cambios.
+- Brillo del cielo en la carroceria (Rev 1.3): quitado a peticion (refl_busca; `-DCON_REFLEJO_CIELO` lo vuelve a poner).
+  El reflejo del tunel tambien depende de esa tabla y se va con el; el coche usa su mapa de entorno fijo.
+- Agua de las ruedas sobre mojado (NUEVO): la fuente 6 de las particulas del SLES-53998 (0x10c8b8 / 0x10c988 /
+  0x10cc80 / 0x10cd58, textura 0x57002c, que tools/conv_efectos.py anade a EFECTOS.DAT como cuarta de PAR1), con la
+  superficie +40 & 0x400080: LASV usa la 0x400000 en casi toda la etapa (`-DDIAG_PARTICULAS`). Detalle en agua_pide.
+  PROVISIONAL: el tamano crece car+1C4 x AGUA_CRECE (0,25) por cuadro; con x 1, lo leido, las gotas llegaban a 20 m de
+  lado y tapaban media pantalla, y en el video la estela es baja y pegada a las ruedas (el dibujo del tipo 3, 0x108d30,
+  no esta leido). Sin EFECTOS.DAT nuevo, sin agua (como antes).
+- NO verificado en consola real.
+
+### MAYA: trozos de la piramide sueltos en el cielo (Rev 2.9.9.e / Mod 2.5.9.e, 2026-11-28)
+
+Queja: al principio de la etapa MAYA (SEG29) trozos de la estructura de la piramide flotando en el cielo, desde
+siempre. Reproducido solo en Flycast (`-DPRUEBA_AUTO -DPRUEBA_SIN_TIEMPO -DPRUEBA_CURSO=1 -DPRUEBA_NODO=11
+-DDIAG_CONGELA=300`, salida en MAYA, crono 300): bloques oscuros escalonados encima de los arboles, al fondo de la recta.
+- Que son: el nodo 1417 de SEG29 (81 mallas opacas, texturas 38 / 49 / 52 / 53, de 114 a 260 m de alto: lo de arriba
+  de la piramide del cerro, x 13..200, z -956..-745) y algo del 1396 (la base). Con `-DDIAG_OCULTA_A=1417
+  -DDIAG_OCULTA_B=1418` (nuevo, medida: nodos [A, B) de la etapa sin dibujar) desaparecen. No era el cielo (lista 3:
+  solo las cupulas, grupos 0 / 1, y el agua), ni un cartel (nodos con matriz: los 103 son palmeras e impostores de
+  lod_veg), ni el lowpoly lejano (`-DLOD_GRANDE_D=100000` igual), ni la matriz del nodo (todas las tiras dentro de la
+  esfera de su nodo).
+- Causa: la PVS por mallas (tools/pvs.py). `-DDIAG_POPPING -DDIAG_FALTA` en el cuadro congelado: 53 de las 81 mallas
+  del 1417 y 4 del 1396 faltan por `pvsm` (la mascara de la PVS). Un rayo desde la camara (resuelta de las posiciones
+  en pantalla de FALTAM) a cada una de esas mallas solo cruza el nodo 194: 13 mallas, losas de piedra (texturas 4 y 7)
+  de 45 a 280 m de alto sobre la carretera, que la PVS guardada no deja ver desde ninguna seccion (el original tampoco
+  lo dibuja desde dentro: VISO.DAT, Rev 1.4) pero que en el calculo tapaba. Lo tapado no se dibujaba, lo que tapaba
+  tampoco: de la piramide solo quedaban los escalones que asomaban por encima, sueltos contra el cielo. El 239 (el
+  cerro de al lado) igual. Mismo dato en lgdat2 (2026-11-23): es de la conversion, no de los recortes de despues.
+- La PVS calculada otra vez sobre la geometria de ahora (tools/rehace_pvs.py, nuevo) ve el 194: dibujado es una roca
+  enorme colgando sobre la salida (captura desp_300), asi que no vale; y el 194 si se ve en mas del 10 % de las
+  secciones de mas adelante, asi que tampoco vale quitarlo de los oclusores por "no se ve nunca".
+- CORREGIDO (datos, herramienta): tools/pvs_nodo_entero.py (nuevo): en la PVS que ya trae la etapa, cada nodo grande
+  (radio >= 40 m, ni carteles ni lejanos NODO_LEJ) se ve entero en las secciones en las que se ve alguna de sus mallas.
+  Sin tocar nada mas del fichero (recortes y aligerado como estaban). SEG29: +21,4 % de mallas-seccion, listas
+  264 -> 287 KB. Medido en Flycast: la piramide entera en su cerro, sin trozos sueltos (desp2_300); "VOZ: VOCES.DAT, 35
+  muestras", sin "Out of memory". SEG29 va suelto (ORD7, no esta en SEGS.PAK): solo cambia SEG29.DAT. El del Mod Taxi
+  (modos/mod3/datos, misma geometria y misma PVS, otras texturas): lo mismo.
+- Ademas (para conversiones nuevas): tools/pvs.py `calcula` quita de los oclusores lo que no se ve desde ninguna
+  seccion y repite (hasta 3 pasadas; `PVS_SIN_2=1` lo de antes); `no_tapan` y `una_pasada` para rehace_pvs.py.
+  PENDIENTE: la PVS por seccion con los oclusores de cada seccion (lo que esa seccion dibuja), para no tener que
+  ensanchar a nodos enteros; las demas etapas no se han revisado.
+
+### Rev 2.9.8: lecciones de Crazy Taxi
+
+Comparacion tecnica con Crazy Taxi de Dreamcast (material de referencia: de el se toma la TECNICA, nunca codigo ni
+datos) y cambios P1..P7 propuestos a partir de ella. El principio que se aplica: lo que se dibuja depende de la
+posicion y de la vista, no de la carga del cuadro anterior (Crazy Taxi tiene bufers de tamano fijo por lista, lejanos
+por tramo y listas precalculadas, y no se le ha encontrado ningun tope dinamico). Todo medido en Flycast, NO en la
+consola real (Flycast no da el tiempo de la PowerVR ni llena el TA como la consola).
+
+#### P1. Tope de la etapa estable (`-DTOPE_FIJO`, `-DTOPE_RES_KB`)
+
+DESVIACION (`demo/main.c`: `TOPE_FIJO`, `tope_fijo_paso`, `ta_inicia_cuadro`). Antes el tope del TA de la etapa salia
+cada cuadro de lo que gasto el anterior (2D, coche, pareja, trafico y efectos + 2 coches de trafico con LOD 0) y de
+`salto_ta`, interpolado con el nivel del salto (que se mueve un poco en cada cuadro): cambiaba unas 19-38 veces por
+segundo (medido, linea `POPTOPE` de `-DDIAG_POPPING`), y el reparto quitaba y devolvia clases (razon "tope", 2.9.5).
+Con `TOPE_FIJO` (1 por defecto):
+- La reserva de lo que no es la etapa y la de lo 2D son fijas por etapa (y por union): el mayor valor visto en ella,
+  en pasos de 16 KB, como minimo `TOPE_RES_KB` (0 por defecto). Sube en el acto si hace falta (el coche y el trafico
+  van despues de la etapa; si no cupieran se cortarian por `ta_lim`) y solo baja al cruzar una seccion de la PVS, si
+  en las ultimas `TOPE_BAJA_SEC` (16) secciones no ha pasado del `TOPE_BAJA_PCT` (90) % de ella (`TOPE_MARGEN`: margen
+  opcional de 1/n; 0).
+- `salto_ta` va en los 4 escalones de `SALTO_TA` (256, 240, 222, 205), sin interpolar, y solo cambia de escalon al
+  cruzar una seccion de la PVS (o cada `TOPE_SIN_SEC`, 60, cuadros sin cambiar de seccion), con histeresis: sube al
+  llegar el nivel al escalon siguiente y baja si queda medio escalon por debajo.
+- Los objetos de la union (`bo`), `ta_freno` y `ta_cabe` siguen como antes; el tope total del TA no cambia.
+- `-DTOPE_FIJO=0`: lo de antes. `-DDIAG_POPPING` anade la linea `POPTOPE:` (cambios del tope por s, los que no
+  coinciden con un cruce de seccion, minimo y maximo, reservas y `salto_ta`).
+
+Medida: `-DPRUEBA_AUTO -DPRUEBA_NODO=n -DPRUEBA_SIN_TIEMPO -DDIAG_MS -DDIAG_POPPING` con `-DTOPE_FIJO=0` y `=1` (el
+mismo codigo), datos lgdat2 (sin datos nuevos), 140 s con el piloto automatico (paso 10), tres Flycast a la vez.
+Saltos por s de 8 px o mas / de 32 px o mas (todas las razones; "tope" aparte), solo las lineas de la zona del nodo.
+Valores definitivos (reserva en pasos de 16 KB, bajada tras 16 secciones al 90 %):
+
+| Etapa | TOPE_FIJO | fps | tarde (%) | 8 px+ | 32 px+ | tope +8/32 -8/32 | cambios del tope / s | reserva media |
+|---|---|---|---|---|---|---|---|---|
+| GHOS (9) | 0 | 37,46 | 113 (4,7) | 22,9 | 3,5 | +10,5/0,8 -3,8/0,1 | 37,9 | (variable) |
+| GHOS (9) | 1 | 37,58 | 105 (4,3) | 21,7 | 3,2 | +9,9/0,7 -3,5/0,1 | 0,4 | 817 KB |
+| METR (11) | 0 | 33,83 | 337 (13,4) | 22,2 | 6,9 | +8,0/1,7 -2,1/0,3 | 33,1 | (variable) |
+| METR (11) | 1 | 34,08 | 290 (12,4) | 20,9 | 5,3 | +8,3/1,6 -2,2/0,4 | 0,7 | 863 KB |
+| PALM (0) | 0 | 37,44 | 120 (4,7) | 25,4 | 5,6 | +16,0/4,1 -4,8/0,5 | 19,2 | (variable) |
+| PALM (0) | 1 | 37,42 | 123 (4,8) | 26,9 | 6,0 | +16,8/4,5 -4,7/0,4 | 0,7 | 817 KB |
+| INDU (7) | 0 | 37,99 | 121 (3,6) | 21,0 | 5,2 | +8,6/1,4 -4,7/0,5 | 18,8 | (variable) |
+| INDU (7) | 1 | 37,99 | 119 (3,5) | 20,0 | 5,0 | +8,2/1,4 -4,5/0,4 | 1,2 | 791 KB |
+| Suma de las 4 | 0 | | | 91,5 | 21,2 | | | |
+| Suma de las 4 | 1 | | | 89,5 | 19,5 | | | |
+
+- Medido: el tope ya no cambia en cada cuadro (de 19-38 cambios por s a 0,4-1,2). El total de saltos baja un 2 % en
+  8 px (91,5 -> 89,5) y un 8 % en 32 px (21,2 -> 19,5); por etapa baja en GHOS, METR e INDU y sube en PALM (+1,5 / +0,4).
+  fps: +0,12, +0,25, -0,02 y 0,00; cuadros tarde: -7 %, -14 %, +2,5 % y -2 %. Criterio (bajar el total de 8 px o de
+  32 px sin perder mas de 0,3 fps ni subir mas de un 10 % los cuadros tarde en ninguna): cumplido, queda ACTIVO.
+- Primera version (descartada): reserva con 1/16 de margen y bajada solo tras 64 secciones por debajo del 80 %. En PALM
+  la reserva de la salida (1096 KB) tardaba en bajar; suma 90,4 -> 90,8 (8 px) y 19,6 -> 20,6 (32 px), PALM 24,5 ->
+  27,7. No cumplia.
+- Ruido: con `TOPE_FIJO=0` las dos tandas dan 23,3 / 22,9 (GHOS), 22,3 / 22,2 (METR), 24,5 / 25,4 (PALM) y 20,3 /
+  21,0 (INDU) saltos de 8 px por s: la carrera no se repite del todo (el trafico y la razon "detras" cambian). La
+  mejora de la suma (-2,0 en 8 px) es del orden de ese ruido, y casi toda la de 32 px (-1,7) viene de la razon
+  "detras" de METR (+2,1/1,5 por s con `TOPE_FIJO=0`, que la otra tanda y `TOPE_FIJO=1` no tienen): sin ella las sumas
+  quedan 89,4 / 19,7 frente a 89,5 / 19,5, practicamente iguales. Se deja activo porque cumple el criterio, el tope es
+  estable de verdad (la columna de cambios) y fps y cuadros tarde no empeoran, pero la mejora del popping en Flycast es
+  marginal. SUPUESTO: en la consola
+  real, donde el TA si limita, el tope estable deberia notarse mas; sin medir.
+- La razon "tope" casi no cambia (desapariciones de 8 px: 3,8 -> 3,5, 2,1 -> 2,2, 4,8 -> 4,7 y 4,7 -> 4,5 por s): la
+  estimacion de la propuesta (un tercio a la mitad menos) no se cumple en Flycast; lo que baja es sobre todo lo de 32 px
+  de otras razones. Las apariciones del "tope" al acercarse siguen (el reparto sigue cortando por coste): P2/P3.
+- Ficheros de la medida: `m298/p1/` del directorio de trabajo (medidas.txt, res/flycast_p1b_<nodo>_<0|1>.txt).
+
+#### P2. Corte del reparto precalculado por seccion (`-DREPARTO_SEC`, apagado por defecto)
+
+DESVIACION (`tools/reparto_sec.py`, nuevo; `tools/regenera.py`, paso `repsec`; `demo/main.c`: `REPARTO_SEC`,
+`repsec_lee`, `rsec_corte`, `prio_sube_sec`, `nodos_visibles_todos`). Tecnica de Crazy Taxi (el conjunto dibujado es
+una funcion de la posicion, decidida fuera de linea para un presupuesto fijo): solo la idea, nada de su codigo ni de
+sus datos. El original no tiene reparto del TA (lo dibuja todo).
+- Herramienta: lee los SEGnn.DAT ya convertidos (sueltos o recompuestos de SEGS.PAK; no regenera nada ni toca ningun
+  fichero) y escribe REPSEC.DAT ('RSC1': por etapa SEG, secciones y desplazamiento; 2 bytes con signo por seccion de la
+  PVS: `prio_d` -1..47 y `prio_p` -1..63). Por cada punto de la ruta de la seccion, una camara de persecucion nominal
+  (6 m detras, 2,5 m arriba, horizontal, fov 50) y lo que deja ver la PVS de la seccion y de s -+ 3 (el mayor coste de
+  los tres, como `pvs_coste`), repite lo de `nodos_visibles` (lejos, cercano, laterales, LOD de 404B00, lejanos de
+  `lod_veg.py` / `lod_grande.py`, nodos cercanos enteros, clases con el coste por vertices, grupos) y el reparto de
+  `nodos_visibles_todos` con un tope nominal (800 KB al 95 %, k = ta_f 1,75 x alfa). No repite la niebla, la
+  histeresis por nodo, la gracia de la PVS, `decor_reduce` ni `PVS_GRANDE`. El corte es el menor de los puntos de la
+  seccion y luego el menor de `--suave` secciones a cada lado. 61 etapas, 79 KB (en la RAM solo las 15 del arbol: 19 KB,
+  como VISO.DAT); 48 s.
+- Demo, con `REPARTO_SEC` 1 y la tabla de la etapa (no en la union; la cuenta de secciones tiene que coincidir): el
+  corte de la seccion del ojo es el objetivo si lo que dibuja cabe en el tope entero (el 100 % de `REPARTO_SCHMITT`);
+  si no cabe (emergencia) el reparto de siempre sin pasar de la tabla. Con la tabla no se usa la histeresis de
+  `REPARTO_SCHMITT`; el corte sube hacia la tabla una clase cada `REPARTO_SEC_SUBE` (4) cuadros y baja en el acto;
+  `prio_ajusta` (cuadro que no cabe de verdad) sigue igual. Sin REPSEC.DAT, o con `REPARTO_SEC` 0, lo de antes (con 0 y
+  sin `-DDIAG_POPPING` ni se lee el fichero). `-DDIAG_POPPING`: linea `POPSEC:` por s (cuadros con tabla, emergencias,
+  cuadros con el corte igual a la tabla, cambios de la tabla, corte de siempre menos tabla, lo pedido y el tope).
+- Calibracion (medida): con alfa 0,75 (el `prio_alfa` de carrera) lo pedido fuera de linea salia ~1,4 veces menor
+  que en carrera y la tabla quedaba 8-9 clases de distancia y 4-13 de LOD por encima del corte de siempre (GHOS, METR,
+  PALM). Se midieron dos tablas: v1 (alfa 1,10, suave 1) y v2 (alfa 1,00, suave 8; la que dan los valores por defecto).
+- Datos nuevos: REPSEC.DAT (en d298 del directorio de trabajo, la v2; las tres en m298/P2/tablas). Es opcional: no
+  esta en la comprobacion de `regenera.py`.
+
+Medida: `-DPRUEBA_AUTO -DPRUEBA_NODO=n -DPRUEBA_SIN_TIEMPO -DDIAG_MS -DDIAG_POPPING` con `-DREPARTO_SEC=0` y `=1` (el
+mismo codigo y los mismos datos d298 con REPSEC.DAT; con 0 la tabla solo se mide), 140 s con el piloto automatico
+(paso 10), tres Flycast a la vez. Las de 0 son una tanda y las de 1 otra (v2, la tercera). "corte = tabla": cuadros
+con tabla en los que el corte final es el de la tabla; "emerg.": cuadros con tabla en los que no cabe.
+
+| Etapa | SEC | fps | tarde (%) | 8 px+ | 32 px+ | tope +8/32 -8/32 | corte = tabla | emerg. | cambios de la tabla / s | siempre - tabla (d / p) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| GHOS (9) | 0 | 36,56 | 191 (6,4) | 18,3 | 2,8 | +8,5/0,6 -2,8/0,0 | 0 % | - | 0,67 | -9,0 / -12,6 |
+| GHOS (9) | 1 | 37,04 | 159 (5,2) | 20,2 | 3,9 | +11,9/1,9 -2,6/0,1 | 55 % | 9 % | 0,99 | -3,4 / +0,8 |
+| METR (11) | 0 | 33,26 | 336 (13,7) | 22,9 | 7,0 | +8,1/1,7 -2,2/0,4 | 16 % | - | 1,77 | -8,9 / -4,4 |
+| METR (11) | 1 | 34,29 | 261 (10,5) | 23,4 | 7,6 | +11,6/3,2 -1,9/0,6 | 57 % | 7 % | 1,25 | +7,2 / +8,7 |
+| PALM (0) | 0 | 36,82 | 147 (5,4) | 26,3 | 5,4 | +15,3/3,8 -3,8/0,3 | 0 % | - | 1,62 | -7,7 / -8,4 |
+| PALM (0) | 1 | 37,32 | 125 (4,5) | 23,9 | 8,4 | +17,9/7,0 -3,8/0,8 | 53 % | 13 % | 1,23 | +12,0 / +13,1 |
+| INDU (7) | 0 | 37,45 | 131 (4,0) | 20,5 | 5,2 | +9,0/1,5 -4,5/0,5 | 13 % | - | 2,42 | -3,9 / -0,4 |
+| INDU (7) | 1 | 37,70 | 122 (3,7) | 20,1 | 6,0 | +9,9/2,3 -3,2/0,5 | 49 % | 14 % | 1,28 | -1,0 / +3,4 |
+| Suma de las 4 | 0 | | | 88,0 | 20,4 | | | | | |
+| Suma de las 4 | 1 | | | 87,6 | 25,9 | | | | | |
+
+(Con 0 la tabla solo se mide y las columnas de la tabla son de la que habia en los datos: la de calibracion, alfa 0,75
+y suave 1, en GHOS, METR y PALM, y la v1 en INDU; con 1, "siempre - tabla" es el corte que pediria el reparto de
+siempre en ese cuadro menos la tabla.)
+- Medido: fps +0,48, +1,03, +0,50 y +0,25; cuadros tarde -17 %, -22 %, -15 % y -7 %. Los saltos de 8 px quedan igual
+  (88,0 -> 87,6, dentro del ruido de 1-2 por etapa entre tandas, P1) y los de 32 px suben un 27 % (20,4 -> 25,9; PALM
+  5,4 -> 8,4), casi todo apariciones del "tope" (+3,1 en 32 px en las cuatro): el corte de la tabla cambia al cruzar
+  secciones (1-1,3 veces por s) y lo que entra, entra a la vez; con el reparto de siempre entraba de clase en clase.
+  En METR y PALM la tabla queda 7-13 clases por debajo de lo que cabria (el lejano adaptativo, 1600-2300 m de media,
+  quita lo lejano y la tabla, calculada con 3800 m, no lo sabe): se dibuja menos y de ahi salen los fps. En GHOS e
+  INDU queda 1-3 por encima y hay emergencia en el 9-14 % de los cuadros.
+- v1 (alfa 1,10, suave 1; descartada): suma 88,0 -> 89,4 (8 px) y 20,4 -> 24,8 (32 px), fps +0,31, +0,47, +0,40 y
+  +0,13, la tabla cambiaba 1,8-2,4 veces por s.
+- Criterio (bajar el total de 8 px o de 32 px sin perder mas de 0,3 fps ni subir mas de un 10 % los cuadros tarde en
+  ninguna): a la letra la v2 lo cumple por 0,4 saltos de 8 px por s, menos que el ruido, mientras los de 32 px suben un
+  27 % y en la mitad de los cuadros el corte no es el de la tabla. DECISION: queda APAGADO por defecto (`REPARTO_SEC`
+  0): no baja el popping, que es para lo que se propuso; la mejora de fps es por dibujar menos en METR y PALM.
+- SUPUESTO, sin medir: una tabla que supiera el lejano adaptativo (o que guardara el corte relativo a lo que hay que
+  repartir) y que cambiara solo de una clase por seccion quedaria mas cerca del corte de siempre; en la consola real
+  el tope nominal no se ha comparado con `ta_f` real.
+- Todas las pruebas dan el "Out of memory ... diff 217088" de newlib al arrancar, el conocido.
+- Ficheros: `m298/P2/` del directorio de trabajo (medidas.txt, res/, tablas/, sh/, py/sec.py).
+
+#### P3. Coche trasero segun la camara (`-DCOCHE_TRASERO`, apagado por defecto)
+
+DESVIACION (`tools/conv_coche.py`: `parte_trasera`, `camaras_trasero`, `comprueba_trasero`, `separa`; `demo/main.c`:
+`NODO_TRASERO`, `coche_trasero_paso`, `sin_trasero`). Tecnica de Crazy Taxi (con la camara detras dibuja un cuerpo sin
+el frontal): solo la idea, nada de su codigo ni de sus datos. El original dibuja el coche entero.
+- Herramienta (con `--visible`, en el ligero COCHEnnL.DAT; `--sin-trasero`: como en la 2.9.7): los triangulos que no
+  se ven desde ningun ojo del cono trasero van en tiras aparte con el bit `NODO_TRASERO` (0x20000) en el campo del
+  nodo, al final de su lista y textura (no al final de la lista: `escribe` vuelve a ordenar por lista y textura y CEX2
+  va por numero de malla; con las traseras al final de la lista la pintura, el reflejo y las luces caian en otras
+  mallas, visto en las capturas congeladas de una primera version, descartada con sus medidas). Cono, en el marco del
+  coche y desde su origen: guinada del ojo 180 +- 35 grados del morro, cabeceo de la camara -65..+5 (el ojo de 5
+  grados por debajo a 65 por encima), alabeo +-35, ojo a 3 m o mas. Lo que se ve desde un ojo no depende de hacia donde
+  mire la camara si el coche cabe en la imagen: camaras que miran al coche con el campo justo, a 3-60 m, cada 5 grados,
+  alabeo 0 y +-35 en los bordes, por las 6 posturas de `poses()`, con el z-buffer por software de tools/c/visible.c a
+  960x720. Despues: fuera del oculto el borde (el triangulo que comparte un vertice con uno visible) y 4 rondas de 240
+  camaras y 4 posturas al azar (giro de ruedas, direccion, aleron, faros) a 1280x960; lo que asoma pasa a visible.
+  `comprueba_trasero`: otras ~940 camaras x posturas al azar.
+- Sin el borde se separaba el 4,6-6,8 % de los vertices de carrera, pero la comprobacion encontraba 1-8 triangulos
+  traseros que asomaban (astillas de la carroceria entre los angulos de la rejilla), aun con las rondas; con el borde
+  por aristas, 2,3 % y 5 que asomaban (modelo 9); con el borde por vertices queda en 0-5,2 % por coche (media 1,7 %):
+  el 360 Spider (ficha 0) 7456 -> 7351, la ficha 14 7179 -> 6805 (-5,2 %), la 12 -4,5 %, la 11 -3,5 %, la ficha 9 (la de
+  las pruebas automaticas) 0 (su COCHE09L.DAT sale igual que antes). Comprobacion: 0 triangulos traseros que ganan un
+  pixel en 13 coches y 1 en dos (fichas 6 y 13). Lo que solo se ve desde el cono es poco: el vaciado de la 2.9.6/2.9.7
+  ya quito lo que no se ve desde ninguna camara, y desde 65 grados por encima se ve casi todo el frontal.
+- Demo: `coche_trasero_paso` (una vez por cuadro, tras `pon_coche`): el ojo en el marco de `mod_coche`, guinada,
+  cabeceo y alabeo (el arriba del coche frente al de la pantalla) y distancia. Histeresis de 4 grados (Crazy Taxi no
+  tiene): se entra con 4 grados dentro del cono (y 0,25 m mas lejos) y se sale al salir del cono comprobado. Solo donde
+  `coche_sin_cerca` (carrera, sin la escena de la salida ni la de la meta, sin mezcla de vistas, no en los finales) y
+  en las vistas exteriores; nunca en la vista interior, el salon ni la seleccion (COCHEnn.DAT, sin el bit). El coche no
+  se dibuja en ningun reflejo (el reflejo es el mapa de entorno de la pintura, que sigue igual) y la sombra no cambia.
+  `-DDIAG_POPPING`: linea `POPTRAS:` (cuadros dentro del cono, cambios, vertices traseros) y con `-DDIAG_CONGELA` la
+  linea `TRASCONG:` con los angulos del cuadro congelado. Sin el bit (los ficheros de antes) no cambia nada.
+- Datos nuevos: los 15 COCHEnnL.DAT (en el directorio de trabajo, d298 y m298/P3/coches); COCHE09L.DAT igual que antes.
+
+Medida: `-DPRUEBA_AUTO -DPRUEBA_NODO=n -DPRUEBA_SIN_TIEMPO -DDIAG_MS -DDIAG_POPPING -DPRUEBA_FICHA=14` con
+`-DCOCHE_TRASERO=0` y `=1` (el mismo codigo y los mismos datos d298), 140 s con el piloto automatico (paso 10), tres
+Flycast a la vez. La ficha 14 es la que mas separa; con la ficha 9 de siempre no hay nada que separar (tanda aparte:
+sirve de medida del ruido). "TA coche": KB por cuadro del coche (POPTA).
+
+| Etapa | TRASERO | fps | tarde (%) | 8 px+ | 32 px+ | tope +8/32 -8/32 | en el cono | TA coche |
+|---|---|---|---|---|---|---|---|---|
+| GHOS (9) | 0 | 37,41 | 109 (4,5) | 21,5 | 3,2 | +10,1/0,8 -3,4/0,1 | - | 397 KB |
+| GHOS (9) | 1 | 37,28 | 116 (4,8) | 22,9 | 3,3 | +11,0/1,0 -3,9/0,0 | 100 % | 372 KB |
+| METR (11) | 0 | 34,57 | 235 (11,0) | 20,0 | 5,3 | +7,3/1,6 -2,2/0,4 | - | 397 KB |
+| METR (11) | 1 | 34,47 | 241 (11,2) | 21,1 | 6,0 | +7,7/2,0 -2,5/0,5 | 100 % | 372 KB |
+| PALM (0) | 0 | 37,99 | 73 (3,1) | 27,9 | 6,3 | +17,5/4,5 -3,2/0,5 | - | 394 KB |
+| PALM (0) | 1 | 37,52 | 104 (4,3) | 25,9 | 5,6 | +17,6/4,4 -3,4/0,3 | 100 % | 369 KB |
+| INDU (7) | 0 | 38,11 | 83 (3,0) | 24,2 | 6,2 | +10,3/1,6 -5,8/0,6 | - | 394 KB |
+| INDU (7) | 1 | 38,04 | 78 (3,2) | 25,2 | 6,8 | +10,2/1,7 -6,0/0,7 | 100 % | 369 KB |
+| Suma de las 4 | 0 | | | 93,6 | 21,0 | | | |
+| Suma de las 4 | 1 | | | 95,1 | 21,7 | | | |
+
+- Medido: con la camara de persecucion el ojo esta siempre en el cono (100 % de los cuadros de la zona, 0 cambios; en
+  los cuadros congelados guinada 0,0-0,3, cabeceo -20,4 / -28,9, alabeo 0, 5,9-6,2 m) y se dejan de enviar 410
+  vertices por cuadro: el TA del coche baja 25 KB por cuadro (-6 %). Pero la suma de saltos sube (8 px 93,6 -> 95,1, 32
+  px 21,0 -> 21,7), los fps bajan en las cuatro (-0,13, -0,10, -0,47 y -0,07) y los cuadros tarde suben un 42 % en
+  PALM (73 -> 104) y un 6 % en GHOS. Criterio (bajar el total de 8 px o de 32 px sin perder mas de 0,3 fps ni subir
+  mas de un 10 % los cuadros tarde en ninguna): NO se cumple. Queda APAGADO por defecto (`COCHE_TRASERO` 0).
+- Ruido (tanda con la ficha 9, sin mallas traseras: las dos compilaciones hacen lo mismo): sumas 89,3 / 89,6 (8 px) y
+  19,2 / 19,2 (32 px); fps -0,26, -0,14, -0,13 y -0,01; cuadros tarde +10 %, +2 %, +6 % y +2 %. Las diferencias de la
+  ficha 14 son de ese orden salvo PALM (-0,47 fps, +42 % tarde; su prueba con 0 salio con una desviacion de 1,59
+  frente a 2,3-2,8 de las demas: probablemente es la de 0 la que salio buena). Lo que deja libre el coche (25 KB de
+  unos 1000 por cuadro) lo vuelve a ocupar la etapa, como con la variante B de la 2.9.6.
+- Capturas congeladas (`-DDIAG_CONGELA`, GHOS, ficha 14, en el cono): crono 2100, 0 pixeles distintos en el coche
+  entre `COCHE_TRASERO` 1 y 0, y 0 pixeles entre los datos nuevos con 0 y los de antes (lgdat2) con 0 (el reparto en
+  tiras no cambia la imagen); fuera del coche 1730 que tambien cambian entre dos capturas de la misma prueba. Crono 3300:
+  0 pixeles en toda la captura en las tres comparaciones.
+  En el crono 900 la lluvia y el humo cambian la imagen entre capturas de la misma prueba (25-30 mil pixeles en la
+  caja del coche): no sirve. No se han hecho capturas en derrape fuerte ni en el borde del cono: el piloto no sale del
+  cono; lo del borde lo cubre la comprobacion por software.
+- SUPUESTO, sin medir: en la consola real, si el TA limita, 25 KB menos por cuadro podrian notarse algo.
+- Ficheros: `m298/P3/` del directorio de trabajo (medidas.txt, res/, cong/, coches/, conv/ y v1_orden_roto/).
+
+#### P4. Subida de texturas por DMA (`-DSUBE_DMA`, apagado por defecto)
+
+DESVIACION (`demo/main.c`: `SUBE_DMA`, `tex_carga`, `sdma_lanza`, `sdma_hecho`, `sdma_espera`). Tecnica de Crazy Taxi
+(sube las texturas por el DMA del canal 2 por la ruta de texturas del TA cuando origen, destino y tamano son multiplos
+de 32): solo la idea, nada de su codigo ni de sus datos. Con `SUBE_DMA` 1 las texturas de `sube_trozo` (en carrera, 32 KB
+por cuadro, y de una vez en las cargas de etapa y union de `sube_tramo`), `sube_modelo` y `tex_rebaja` van por
+`pvr_txr_load_dma` en vez de por las Store Queues (`pvr_txr_load`):
+- Alineacion: no hace falta tocar las herramientas. `tools/modelo.py` ya escribe cada textura del blob en multiplo de 32
+  y con el tamano en multiplo de 32; el blob va a 32 dentro de su bufer (`memalign(32)`), `vram_pide` y `pvr_mem_malloc`
+  dan direcciones de 32 y los trozos de una textura grande van en multiplos de 32. Medido: 0 subidas por SQ en carrera
+  con `SUBE_DMA` 1 (linea `SUBE`, columna `sqK`); lo que no este alineado iria por SQ.
+- Cola de 64 subidas: la interrupcion del fin de cada DMA de la PVR lanza la siguiente (el DMA de la PVR va de una en
+  una) y la CPU sigue con el cuadro. `sdma_espera` vacia la cola antes de soltar un origen o una textura (`tex_suelta`,
+  `compacta_modelo_de`, `carga_pide`, `tex_muda`), antes de dar al modelo sus tablas (fin de `sube_trozo` y de
+  `sube_modelo`) y antes de cualquier subida por SQ de estas funciones. KOS vacia la cache del origen (`dma_map_src`).
+  La PVR va con `dma_enabled` 0: nadie mas usa el canal 2 (con P7 habria que poner la subida en cola con los vertices).
+- `-DDIAG_MS`: linea `SUBE:` cada 30 cuadros (trozos, us dentro de `sube_trozo`, el trozo mayor, us esperando a la
+  cola, DMAs, KB por DMA y por SQ). `-DDIAG_SUBE_CMP`: al acabar cada subida compara lo leido de la VRAM con el blob
+  (linea `SUBECMP:`).
+- Con `SUBE_DMA` 0 todo va como antes (las esperas no hacen nada). Datos: ninguno nuevo (lgdat2).
+
+Medida: `-DPRUEBA_AUTO -DPRUEBA_NODO=n -DPRUEBA_SIN_TIEMPO -DDIAG_MS -DDIAG_POPPING` con `-DSUBE_DMA=0` y `=1` (el
+mismo codigo y los mismos datos lgdat2), 140 s con el piloto automatico (paso 10), dos tandas (la segunda con los
+carriles cambiados), dos o tres Flycast a la vez. La tabla es la media de las dos tandas (tarde: suma de las dos y
+media de los porcentajes). "us subida": us de CPU dentro de `sube_trozo` en carrera en la prueba (lo mismo en las dos
+tandas salvo PALM con 0 en la segunda, que no llego a subir ALPI), y entre parentesis el trozo mayor.
+
+| Etapa | SUBE_DMA | fps | tarde (%) | 8 px+ | 32 px+ | us subida (trozo max) |
+|---|---|---|---|---|---|---|
+| GHOS (9) | 0 | 36,24 | 241 (6,4) | 27,2 | 3,7 | 8497 (6975) |
+| GHOS (9) | 1 | 36,25 | 233 (6,4) | 28,4 | 4,0 | 1755 (1041) |
+| METR (11) | 0 | 33,45 | 553 (12,9) | 19,7 | 5,3 | 3491 (1791) |
+| METR (11) | 1 | 33,84 | 491 (12,2) | 20,9 | 5,8 | 3429 (1810) |
+| PALM (0) | 0 | 36,72 | 258 (5,1) | 28,5 | 6,0 | 11504 (7791) |
+| PALM (0) | 1 | 36,73 | 241 (4,9) | 26,9 | 5,2 | 3800 (684) |
+| INDU (7) | 0 | 37,25 | 186 (4,3) | 24,4 | 6,4 | 2193 (1071) |
+| INDU (7) | 1 | 37,39 | 169 (3,8) | 25,9 | 6,8 | 2024 (1042) |
+| Suma de las 4 | 0 | | | 99,7 | 21,3 | |
+| Suma de las 4 | 1 | | | 102,1 | 21,7 | |
+
+- Por tanda: la primera da sumas 95,1 -> 100,3 (8 px) y 21,3 -> 21,2 (32 px); la segunda 104,3 -> 103,8 y 21,2 ->
+  22,1. Entre las dos tandas con el mismo valor la suma de 8 px cambia 9 por s (95,1 / 104,3): las diferencias de
+  la tabla son ruido. El cambio solo actua en 1-5 ventanas de 30 cuadros de unas 70-90 por etapa (las de subida) y no
+  toca lo que se dibuja: no puede mover el popping.
+- Criterio (bajar el total de 8 px o de 32 px sin perder mas de 0,3 fps ni subir mas de un 10 % los cuadros tarde en
+  ninguna): con la media de las dos tandas NO se cumple (los dos totales suben, dentro del ruido); los fps no bajan en
+  ninguna (+0,01, +0,39, +0,01 y +0,14) y los cuadros tarde bajan en las cuatro. A la letra, la primera tanda sola
+  pasaria (32 px -0,1) y la segunda no (PALM +18 % de cuadros tarde). Queda APAGADO por defecto (`SUBE_DMA` 0); poner
+  1 no cambia la imagen y quita CPU en las subidas.
+- Tramos de union (medido en Flycast, todas las pruebas de las dos tandas y LASV -> MAYA con `-DPRUEBA_CURSO=1
+  -DPRUEBA_NODO=7 -DPRUEBA_RAMA=0 -DPRUEBA_RAMA_FIJA=0`, 230 s): en las ventanas con subida la CPU de `sube_trozo` baja
+  de 24,8 a 9,9 us por KB (51,9 ms para 2099 KB con 0, 25,4 ms para 2570 KB con 1) y el trozo mayor de 7791 a 1810 us;
+  esas ventanas pasan de 32,16 a 32,70 fps, de 29,91 a 29,23 ms de CPU (dib + log) y de 4,13 a 3,32 cuadros tarde por
+  ventana (15 y 19 ventanas: pocas muestras). PALM -> union (141 KB en 5 trozos): 1171 -> 998 us; la subida de ALPI en la
+  union (416 / 473 KB): 1955 + 8254 -> 82 + 2611 us. LASV -> union (141 KB): 1577 -> 1400 us; la de MAYA en la union
+  (535 KB, 17 trozos): 9106 us (el mayor 6916) -> 1885 us (el mayor 395). La carga de la etapa de salida de una vez
+  (1088-1122 KB): 13642 -> 13353 us y 13373 -> 12873 us (de una vez la CPU espera a la cola). La espera medida en
+  `sdma_espera` es 0 us en todas: en Flycast el DMA acaba enseguida.
+- Texturas identicas: `-DDIAG_SUBE_CMP` en 6 pruebas de PALM -> union -> ALPI (36 subidas, 3060 texturas): 0 distintas
+  entre la VRAM y el blob, con 0 y con 1. Capturas congeladas (`-DDIAG_CONGELA`, PALM) en los cronos 1800 y 2300
+  (PALM), 3900 (union, con ALPI ya subida) y 6600 (ALPI): 0, 0, 3 y 0 pixeles distintos entre 1 y 0 de 786432; los 3 del
+  crono 3900 tambien cambian entre dos capturas de la misma prueba con 1 (ruido).
+- Las pruebas dan el "Out of memory ... diff 217088" de newlib al arrancar, el ya conocido.
+- SUPUESTO, sin medir: en la consola real el DMA corre en paralelo con la CPU, y la copia por SQ de 32 KB cuesta del
+  orden de 0,1-0,3 ms; la ganancia seria de ese orden por cuadro de subida. No se ha comprobado en la consola que la
+  subida por DMA a la ruta de texturas del TA mientras se envian vertices por SQ al TA no de problemas.
+- Ficheros: `m298/P4/` del directorio de trabajo (medidas.txt, union.txt, res/, cong/, sh/, py/sube.py, py/tabla.py,
+  py/difcong.py).
+
+#### P5. Lejano por seccion, solo hacia abajo (`-DLEJ_SEC`, apagado por defecto)
+
+DESVIACION (`tools/reparto_sec.py` `lejanos`; `demo/main.c`: `LEJ_SEC`, `LEJ_SEC_MARGEN`, `LEJ_SEC_MIN`, `lej_base`,
+`lsec_objetivo`, `lejsec_paso`, `repsec_lee`). Tecnica de Crazy Taxi (un lejano distinto por tramo): solo la idea, nada
+de su codigo ni de sus datos.
+- Fuera de linea, en el mismo fichero de P2 (REPSEC.DAT, ahora 'RSC2': entradas de 16 bytes con el desplazamiento del
+  lejano; 'RSC1' se sigue leyendo; el corte de P2 sale identico byte a byte en las 61 etapas): por seccion de la PVS un
+  u16 con la mayor distancia de un punto de la ruta de la seccion a la cara de atras de la esfera de cada malla que la
+  PVS deja ver desde la seccion o sus dos vecinas (|c - p| + r: lo grande, el mar y los montes por su esfera), mas las
+  mallas que no son de un nodo y las de la version lejana de un nodo visible (el cielo, lista 3, no lo corta el lejano).
+  Despues se adelanta lo que hara falta mas adelante: lej[s] = max(lej[s], lej[k] - 1,25 x (ruta de s a k)), para que el
+  lejano, que sube 16 m cada 4 cuadros, llegue a tiempo a una seccion abierta yendo a unos 120 m/s (`--ritmo`). 61
+  etapas, 158 KB, 85 s.
+- En la demo, solo en la etapa (no en la union), en CARRERA y con el ojo dentro de lo que muestrea la PVS: objetivo =
+  lej[seccion del ojo] + `LEJ_SEC_MARGEN` (200 m), como poco `LEJ_SEC_MIN` (400) y, con la union o la etapa siguiente en
+  la vista, como poco lo mas lejano de sus nodos. Se sigue con `SALTO_LEJ_BAJA` / `SALTO_LEJ_SUBE` cada 4 cuadros y
+  lejos = min(lejano del salto, ese). Nunca sube el lejano.
+- La franja del limite (`NLIM_FRANJA`) va con el lejano cortado; el velo tenue (`NLIM_INI`, `NLIM_ANCHO`), el recorte de
+  la franja a 0,55 y el LOD de lo grande (`LOD_GRANDE_FR`) siguen con el lejano del salto (`lej_base`), para no cambiar lo
+  de delante.
+- `-DDIAG_POPPING`: linea `POPLEJ:` por segundo (cuadros, cuantos corta, objetivo, seccion, salto, lejos).
+  `-DDIAG_NLIM`: solo la franja del limite, en magenta y a toda fuerza (sin la niebla del original ni el velo).
+- Con `LEJ_SEC` 0 todo va como antes. Datos nuevos: solo REPSEC.DAT 'RSC2' en d298 (sustituye a la v2 de P2).
+
+Lejano de la seccion (salida de la herramienta, con el adelanto): PALM 3477 m de media (2854..4063), GHOS 1805
+(1200..2468), METR 2604 (1944..3351), INDU 2333 (1783..3025), CAST 1848 (1231..2623), RUIN 1601 (1167..2068). En CAST lo
+que lo fija son los montes y los lejanos lowpoly de lo grande a 1-2,5 km que la PVS deja ver, no los 550 m de la
+distancia efectiva que se estimaba.
+
+Medida: `-DPRUEBA_AUTO -DPRUEBA_NODO=n -DPRUEBA_SIN_TIEMPO -DDIAG_MS -DDIAG_POPPING` con `-DLEJ_SEC=0` y `=1` (el mismo
+codigo y los mismos datos d298), 140 s con el piloto (paso 10), dos tandas con los carriles cambiados, tres Flycast a la
+vez (:92, :93, :94). La tabla es la media de las dos tandas (tarde: la suma). "corta": cuadros en que el lejano de la
+seccion queda por debajo del del salto.
+
+| Etapa | LEJ_SEC | fps | tarde (%) | 8 px+ | 32 px+ | lejos +8/32 -8/32 | lejano medio | corta |
+|---|---|---|---|---|---|---|---|---|
+| GHOS (9) | 0 | 36,38 | 244 (6,0) | 26,5 | 3,65 | +0,0/0,0 -0,8/0,0 | 1702 | - |
+| GHOS (9) | 1 | 36,27 | 257 (6,1) | 25,2 | 3,40 | +0,0/0,0 -0,8/0,0 | 1613 | 24 % |
+| METR (11) | 0 | 32,74 | 743 (14,6) | 19,1 | 5,20 | +0,7/0,3 -0,6/0,2 | 1880 | - |
+| METR (11) | 1 | 32,05 | 901 (16,7) | 18,4 | 5,15 | +0,6/0,2 -0,5/0,2 | 1752 | 21 % |
+| PALM (0) | 0 | 36,56 | 300 (5,6) | 26,7 | 5,90 | +1,6/0,3 -2,9/0,4 | 1632 | - |
+| PALM (0) | 1 | 36,38 | 289 (5,7) | 27,0 | 5,35 | +1,4/0,3 -2,8/0,3 | 1653 | 0 % |
+| INDU (7) | 0 | 37,38 | 200 (3,9) | 25,2 | 6,60 | +0,0/0,0 -0,2/0,0 | 2055 | - |
+| INDU (7) | 1 | 37,15 | 205 (4,1) | 24,0 | 6,50 | +0,0/0,0 -0,2/0,0 | 1833 | 29 % |
+| Suma de las 4 | 0 | | | 97,4 | 21,35 | | | |
+| Suma de las 4 | 1 | | | 94,5 | 20,40 | | | |
+
+- Criterio: NO se cumple. Las sumas bajan (8 px -3,0 %, 32 px -4,4 %), pero METR pierde 0,69 fps y sube un 21 % los
+  cuadros tarde (primera tanda -1,28 fps y +55 %; segunda -0,10 y +1 %). Queda APAGADO por defecto (`LEJ_SEC` 0).
+- Es ruido: entre las dos tandas con el mismo valor la suma de 8 px cambia 8,6 por s (101,7 / 93,1). En PALM el lejano
+  del salto ya esta por debajo del de la seccion en todos los cuadros (corta el 0 %) y aun asi la prueba con 1 sale
+  distinta. La razon "lejos" no se mueve (0,0-1,6 por s en las dos): lo que corta el lejano de la seccion la PVS ya no
+  lo dejaba ver.
+- Cuando corta, poco: 70-240 m de media (hasta 1309 m en INDU). En las etapas pesadas el salto ya lleva el lejano a
+  1200-2000 m (GHOS 1649-1755, METR 1835-1925 de media), por debajo de lo que pide la seccion; solo corta al empezar la
+  etapa o tras bajar el nivel. Los fps no suben en ninguna (-0,10 a -0,69).
+- Capturas congeladas (`-DDIAG_CONGELA`, el salto fijo en 0 con `-DSALTO_OBS=0`, lejos 3800 frente a 1592 en CAST crono
+  900 y 2397 en METR crono 600; tambien con el salto libre en CAST, 2100 frente a 1592). Con `-DDIAG_NLIM` hay 0 pixeles
+  magenta con 0 y con 1: la franja cae en las dos sobre nada visible (con 1 de 1353 a 1592 m en CAST y de 2037 a 2397 en
+  METR). Entre 0 y 1 hay 0 pixeles distintos en la escena; solo cambian 196, el cuadro de diagnostico que pinta el
+  lejano en color. La imagen no cambia.
+- Las pruebas dan el "Out of memory ... diff 217088" de newlib al arrancar, el ya conocido.
+- SUPUESTO, sin medir: en la consola real, donde el lejano si ahorra por debajo de ~1000 m, solo se notaria en las
+  secciones de lejano corto (RUIN, CAST, FORE: 1167-1431 m como minimo), y solo con el salto por encima.
+- Ficheros: `m298/P5/` del directorio de trabajo (medidas.txt, res/, cong/, tablas/, sh/, py/lej.py, py/tabla.py,
+  py/quien.py).
+
+#### Medida final de la Rev 2.9.8 (las 15 etapas; `-DDIAG_POP298`)
+
+Medida final de la Rev 2.9.8 en las 15 etapas de m298/etapas.txt, todo en Flycast (NO en la consola). Flags de la
+referencia: -DPRUEBA_AUTO -DPRUEBA_NODO=n -DPRUEBA_SIN_TIEMPO -DDIAG_MS -DDIAG_POPPING; 140 s de piloto automatico,
+paso 10; mide.py (fps294) y pop.py (np295), solo las lineas de la zona del nodo.
+
+**Rondas con la misma carga (la tabla que cuenta).** Por cada nodo, tres Flycast a la vez (:90, :91, :92):
+A = 060dc9a (Rev 2.9.7) con lgdat2 (la referencia rehecha), B = la 2.9.8 por defecto con d298, C = la 2.9.8 con
+lgdat2 (para separar los datos nuevos del codigo). La referencia de m298/ (2 Flycast a la vez) va en la columna "fps
+ref": con 3 Flycast el anfitrion (4 nucleos) va mas cargado y no es comparable cuadro a cuadro.
+
+| Etapa (nodo) | fps A | fps B | B-A | fps C | tarde % A / B / C | salto A / B / C | lejano A / B / C | 8 px+ A / B / C | 32 px+ A / B / C | fps ref (2 Fc) | fps fin (3 Fc) |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| PALM (0) | 37,74 | 37,77 | +0,03 | 37,56 | 4,3 / 4,2 / 4,6 | 7,48 / 7,61 / 7,67 | 1779 / 1721 / 1702 | 22,6 / 24,8 / 25,8 | 4,8 / 4,9 / 5,3 | 37,73 | 36,56 |
+| LAKE (1) | 39,54 | 39,49 | -0,05 | 39,35 | 0,7 / 0,7 / 1,0 | 2,25 / 2,13 / 2,13 | 3651 / 3725 / 3729 | 6,3 / 6,1 / 6,3 | 1,3 / 1,4 / 1,4 | 38,78 | 37,70 |
+| ALPI (2) | 39,47 | 39,37 | -0,10 | 39,39 | 0,7 / 0,9 / 0,9 | 0,57 / 0,93 / 0,89 | 3800 / 3800 / 3800 | 8,4 / 9,0 / 9,0 | 1,9 / 1,7 / 1,8 | 39,41 | 38,07 |
+| CAST (3) | 39,34 | 39,23 | -0,11 | 39,18 | 1,0 / 1,2 / 1,3 | 3,90 / 4,19 / 4,29 | 3128 / 3018 / 3007 | 17,8 / 18,0 / 17,9 | 5,3 / 5,2 / 5,4 | 38,70 | 38,30 |
+| FORE (4) | 39,60 | 39,58 | -0,02 | 39,52 | 0,5 / 0,5 / 0,6 | 0,32 / 0,57 / 0,58 | 3800 / 3800 / 3800 | 12,0 / 12,2 / 11,8 | 2,5 / 2,5 / 2,4 | 39,10 | 38,38 |
+| DESE (5) | 39,32 | 39,37 | +0,05 | 39,36 | 1,0 / 0,9 / 0,9 | 1,91 / 1,85 / 1,80 | 3561 / 3601 / 3610 | 9,5 / 9,4 / 9,7 | 3,0 / 2,9 / 3,2 | 38,97 | 38,13 |
+| CLOU (6) | 36,99 | 36,98 | -0,01 | 36,93 | 6,2 / 6,2 / 6,4 | 7,53 / 7,45 / 7,54 | 1773 / 1806 / 1772 | 28,0 / 29,7 / 28,8 | 3,8 / 3,5 / 3,7 | 36,47 | 35,42 |
+| INDU (7) | 38,48 | 38,41 | -0,07 | 38,47 | 2,6 / 2,6 / 2,5 | 5,69 / 5,72 / 5,82 | 2329 / 2317 / 2283 | 24,9 / 25,7 / 25,5 | 6,5 / 6,6 / 6,6 | 38,28 | 37,18 |
+| SNOW (8) | 39,51 | 39,51 | +0,00 | 39,47 | 0,7 / 0,7 / 0,7 | 0,98 / 1,16 / 1,20 | 3800 / 3785 / 3778 | 3,5 / 3,4 / 3,3 | 1,3 / 1,3 / 1,2 | 38,95 | 38,04 |
+| GHOS (9) | 37,48 | 37,62 | +0,14 | 37,58 | 4,8 / 4,4 / 4,5 | 7,80 / 7,68 / 7,77 | 1712 / 1744 / 1708 | 24,6 / 25,4 / 24,9 | 3,7 / 3,8 / 3,6 | 37,32 | 36,66 |
+| TULI (10) | 38,73 | 38,60 | -0,13 | 38,62 | 2,1 / 2,4 / 2,3 | 6,28 / 6,38 / 6,32 | 2247 / 2207 / 2227 | 34,0 / 30,2 / 30,2 | 4,3 / 3,4 / 3,4 | 38,70 | 37,69 |
+| METR (11) | 34,76 | 34,57 | -0,19 | 34,57 | 11,0 / 11,5 / 11,4 | 7,49 / 7,50 / 7,49 | 1823 / 1826 / 1827 | 20,4 / 19,3 / 19,6 | 5,9 / 5,2 / 5,3 | 33,30 | 33,24 |
+| RUIN (12) | 39,03 | 39,08 | +0,05 | 39,06 | 1,6 / 1,5 / 1,6 | 2,84 / 3,09 / 3,07 | 3432 / 3424 / 3403 | 9,9 / 9,3 / 8,6 | 1,8 / 1,7 / 1,3 | 38,85 | 38,14 |
+| IMPE (13) | 39,18 | 39,09 | -0,09 | 39,04 | 1,2 / 1,4 / 1,5 | 3,50 / 4,20 / 4,35 | 3264 / 2952 / 2897 | 18,3 / 17,4 / 18,7 | 4,5 / 4,0 / 3,9 | 39,06 | 38,10 |
+| CAPE (14) | 39,42 | 39,35 | -0,07 | 39,40 | 0,8 / 1,0 / 0,8 | 1,20 / 1,63 / 1,53 | 3791 / 3768 / 3739 | 15,8 / 15,8 / 15,8 | 4,6 / 4,5 / 4,6 | 39,19 | 38,39 |
+| **Total** | 38,57 | 38,53 | -0,04 | 38,50 | cuadros 946.0 / 950.0 / 993.0 | | | 256,0 / 255,7 / 255,9 | 55,2 / 52,6 / 53,1 | 38,19 | 37,33 |
+
+Saltos sumados en las 15 etapas, por razon (por s, +8/32 apariciones, -8/32 desapariciones):
+
+| razon | A (2.9.7) | B (2.9.8, d298) | C (2.9.8, lgdat2) |
+|---|---|---|---|
+| tope | +103,8/18,3 -39,9/3,6 | +102,2/17,2 -40,4/3,6 | +102,5/17,1 -40,6/3,6 |
+| pvs | +94,2/28,2 -3,6/1,0 | +95,4/28,2 -3,6/1,0 | +94,7/28,2 -3,7/1,0 |
+| lejos | +3,4/0,4 -3,0/0,4 | +3,5/0,4 -4,1/0,3 | +3,7/0,5 -4,5/0,5 |
+| lado | +4,6/1,0 | +4,4/0,5 | +3,7/0,5 |
+| detras | +1,4/0,5 | 0 | 0 |
+| rama | +2,1/1,6 | +2,2/1,6 | +2,1/1,5 |
+| lod, tramo | ~0 | ~0 | ~0 |
+
+**Medido**
+- Media de fps de las 15: A 38,57, B 38,53 (-0,04), C 38,50. Por etapa B-A va de -0,19 (METR) a +0,14 (GHOS);
+  ninguna pierde mas de 0,3 fps. Cuadros tarde sumados: A 946, B 950, C 993.
+- Saltos sumados: 8 px o mas A 256,0, B 255,7, C 255,9 (igual); 32 px o mas A 55,2, B 52,6 (-4,7 %), C 53,1. Lo de
+  32 px que baja es sobre todo "detras" de METR/TULI (solo sale en A) y "lado"; "tope" baja algo (+18,3 a +17,2 en
+  32 px) y "lejos" sube un poco en las desapariciones (-3,0 a -4,1 en 8 px, casi todo PALM).
+- Mayor subida de 8 px: PALM 22,6 -> 24,8 (+9,7 %, justo por debajo del 10 %), de "lejos" (-0,6 -> -1,7) y "tope".
+  Con lgdat2 (C) 25,8: no es de los datos nuevos. TULI baja 34,0 -> 30,2 y METR 20,4 -> 19,3.
+- Salto medio: igual o un poco mas alto en B (IMPE 3,50 -> 4,20, CAPE 1,20 -> 1,63, ALPI 0,57 -> 0,93), lejano medio
+  algo menor alli (IMPE 3264 -> 2952 m).
+- Out of memory: las 45 pruebas de las rondas (y las 15 de la tanda suelta) dan solo el "Out of memory ... diff 217088"
+  de newlib al arrancar, el ya conocido; ninguno nuevo. Ningun cuelgue: todas escriben lineas MS hasta el final de los
+  140 s y avanzan lo mismo que A (s final de la etapa a +-6 %). Todas las etapas cargan (75-97 muestras MS por prueba).
+  Ninguna linea "No se pud", panic, assert ni excepcion.
+
+**Lo que encontro la medida: el diagnostico nuevo bajaba ~1 fps (corregido).** La primera tanda (punta de c298 tal
+cual, d298, 3 Flycast en carriles) y la primera ronda A/B/C daban en TODAS las etapas ~1 fps menos (media 37,47 frente
+a 38,56, de -0,84 a -1,39 por etapa), un 50 % mas de cuadros tarde (1450 frente a 928) y el salto mucho mas alto en las
+ligeras (ALPI 0,56 -> 4,37, FORE 0,30 -> 4,96, SNOW 0,95 -> 4,96). Igual con d298 que con lgdat2.
+- Sin -DDIAG_POPPING no habia diferencia (ALPI: 39,82 / 39,81 / 39,82 fps con 2.9.7, 2.9.8+lgdat2 y 2.9.8+d298).
+- Por commits (ALPI, todos con -DTOPE_FIJO=0): 060dc9a 39,45, P1 39,22, P1+P3 38,90, P1..P4 38,40: cada P sumaba un poco.
+  TOPE_FIJO=0 en la punta no lo arreglaba (38,26).
+- La causa: las lineas nuevas por segundo (POPTOPE, POPTRAS, POPSEC y la SUBE de DIAG_MS cada 30 cuadros) llevan ~35 %
+  mas de texto por la consola serie (117 frente a 87 KB en ALPI); la CPU del cuadro sube ~0,5-0,6 ms y el salto
+  adaptativo lo amplifica. Es solo de la medida: el juego sin diagnostico no cambia.
+- Arreglo (commit de esta medida): esas lineas, y POPLEJ, solo se escriben con -DDIAG_POP298 (los contadores siguen);
+  coche_trasero_paso no mira el cono con COCHE_TRASERO=0 (salvo con DIAG_CONGELA). Con solo las POP* fuera quedaba
+  -0,3 fps (ALPI 39,18, PALM 37,30); con SUBE y el cono tambien fuera, -0,1..0,2 en las pruebas sueltas y la tabla de
+  arriba.
+- Las tablas antes/despues de P1..P5 se hicieron con las dos variantes compiladas con el mismo diagnostico, asi que su
+  comparacion vale; pero sus cifras absolutas (fps, salto) estan ~0,5-1 fps por debajo de la referencia por esto.
+- Para usar topes.py, tras.py, sec.py, lej.py o sube.py hay que compilar con -DDIAG_POP298.
+
+**Tanda suelta (m298/fin/res/, punta sin el arreglo, 3 Flycast en carriles):** media 37,33 fps frente a 38,19 de la
+referencia de 2 Flycast; saltos 8 px 244,5 frente a 235,6. No cuenta para la comparacion (otra carga y el diagnostico
+caro), solo como deteccion del problema.
+
+**Supuesto (no comprobado)**
+- Que la consola serie de Flycast bloquee al ritmo del puerto (~11 KB/s) se deduce de las cifras (~215 B/s mas, ~19 ms
+  por s, ~0,5 ms por cuadro), no se ha medido el tiempo de printf.
+- En la consola real la 2.9.8 por defecto solo difiere de la 2.9.7 en TOPE_FIJO=1 (P1) y el orden de mallas del coche
+  ligero (P3, datos d298); no se ha medido en la consola.
+- Ficheros: `m298/fin/` y `m298/final.md` del directorio de trabajo (res4/ las rondas definitivas, res3/ la primera
+  ronda, res/ la tanda suelta, bis/ la biseccion, sh/, py/comp4.py).
+
+### Rev 2.9.9 (diagnostico): edificios enteros que faltan (`-DDIAG_FALTA`)
+
+Queja: en la salida de la playa (captura del usuario en Flycast de Android: parado, 0'10"963, F50) faltan edificios
+enteros, un trozo del edificio blanco de la izquierda flota sin su parte de abajo y a la derecha hay huecos. Solo
+medida (nada cambia sin los -D): todo en el Flycast de aqui, NO en la consola ni en Android.
+
+Herramientas nuevas (`demo/main.c`):
+- `-DDIAG_FALTA` (con `-DDIAG_POPPING`): `falta_mide` / `falta_prepara` y las marcas por malla `fm_buf` (FM_PON en
+  `dibuja_etapa`, `dibuja_rango` y `ta_cabe`). Lo que esta en la vista (esfera contra la piramide, hasta LEJOS_MAX) y NO
+  se dibuja, con la razon: por nodo lejos, lod, rama, pvs, tope (corte prio_d / prio_p), tramo, lista; por malla de un
+  nodo dibujado ta_cabe, vtx, pvsm (mascara de la PVS), m_lejos, ltope, entrada; y tex0 / texg (enviada sin su
+  textura). Linea `FALTA:` por s (cada `FALTA_CADA` cuadros una muestra; cuenta lo de `FALTA_GRANDE_PX` = 24 px o mas
+  de radio en la pantalla) y con `-DDIAG_CONGELA` el listado del cuadro congelado (`FALTAINI`, `FALTAN`, `FALTAM`,
+  `FALTAP`, `FALTAFIN`).
+- `-DPRUEBA_PARADO` (el piloto no acelera), `-DPRUEBA_PARA_S=m` (conduce hasta m metros de la etapa y se para en seco),
+  `-DPRUEBA_PARA_GIRA=rad`, `-DPRUEBA_GIRA=rad`.
+
+La captura es del arbol 1 (preset de OutRun 2 SP: BEAC, la playa de salida), no de PALM del arbol 0: se reproduce con
+`-DPRUEBA_CURSO=1 -DPRUEBA_NODO=0 -DPRUEBA_FICHA=7 -DPRUEBA_PARADO -DPRUEBA_PARA_S=95 -DDIAG_CONGELA=658`.
+
+Medido (cuadro congelado, BEAC s 95, 24 px o mas):
+- Con el Flycast de aqui (ta_f 448): 19 nodos por el corte del reparto (tope, hasta 36 px), 16 por el lejano (salto 7,4:
+  lejano 1853 m), 0 mallas por ta_cabe; la imagen sale entera salvo lo lejano.
+- Con `-DTA_F_MIN=576` (el TA medido 2,25 veces lo teorico): prio_d 0, 28 nodos por el tope (hasta 124 px) y 86 mallas por
+  ta_cabe (hasta 247 px), de nodos a 60-150 m: el edificio blanco de la izquierda (nodos 1132-1148) pierde su parte de
+  abajo y el de la derecha (484) se queda en las ventanas. Es la captura del usuario. Con 768: 91 nodos y 100 mallas.
+- La razon: `ta_f` sube con lo que diga el registro del TA (`ta_fin_cuadro`, con 20 % de margen) y no baja nunca; el
+  reparto se queda en su minimo (prio_d 0, la clase de LOD 0 siempre) y lo que aun no cabe lo tira `ta_cabe` en el orden
+  de envio de `dibuja_etapa` (por textura): trozos de edificios cercanos.
+- El salto adaptativo: con el coche parado el trabajo del cuadro (24-26 ms en Flycast) lo lleva a 7-9 y el lejano a
+  1200-1850 m (en PALM de la carrera, nivel 9 desde los 1150 m). Con `-DSALTO_OBS=0` en la carrera de 140 s: PALM 35,17
+  frente a 36,00 fps y de 20,7 a 3,4 elementos grandes que faltan por muestra (lejos 10,2 -> 0, tope 8,2 -> 3,4); METR
+  31,34 frente a 31,67 fps.
+
+Resultados en m299/diag del directorio de trabajo (capturas, tablas, consolas).
+
+### Rev 2.9.9: que no falten edificios
+
+Queja (captura del usuario en el Flycast de Android, parado en la salida, 0'10"963, F50): "faltan edificios enteros,
+no cargan bien, lo estas gestionando mal". El diagnostico (seccion de arriba, `-DDIAG_FALTA`) encontro tres causas:
+el salto adaptativo recortaba el lejano y el tope del TA segun el tiempo del cuadro; cuando el reparto no cabia,
+`ta_cabe` tiraba mallas sueltas en el orden de envio (por textura), y de un edificio quedaba el piso de arriba
+flotando; y el reparto quitaba antes lo grande con muchos vertices que lo pequeno y barato. Principio (Crazy Taxi, Rev
+2.9.8): lo que se dibuja depende de la posicion y de la vista, no del tiempo medido ni de la carga del cuadro
+anterior; si no cabe, se quita lo pequeno y lejano por nodos enteros y lo grande que tiene version lejana se cambia
+por ella. Todo es DESVIACION (el original no tiene tope del TA). Todo medido en el Flycast de aqui, NO en la consola
+ni en Android.
+
+#### Cambios (`demo/main.c`)
+
+- `SALTO_GEOM` (0 por defecto; 1 = lo de antes): el nivel del salto adaptativo ya no toca lo que se dibuja (ni
+  `salto_ta`, el tope del TA al 94/87/80 %, ni el lejano, que bajaba hasta 1200 m). Queda la cadencia de presentacion
+  (`pres_espera`) y la logica a 59,94 pasos por segundo. Con el coche parado el cuadro de Flycast cuesta 24-26 ms y el
+  nivel subia a 7-9: en una maquina lenta (Android) el reparto se quedaba en su minimo.
+- `CORTE_NODO` (1): `corte_nodos`, despues del reparto y antes de enviar nada, suma lo que va a costar cada nodo
+  visible (TA y vertices): lo que costo de verdad en el cuadro anterior si se dibujo (`dibuja_etapa` lo apunta en
+  `cn_ult` / `cn_vult`, por nodo y tramo) o, si es nuevo, su coste teorico de lo que deja la PVS por `ta_f` y por lo que
+  la vista recorta de media (`prio_alfa` x 1,1; cerca de la camara, por el factor de lo que no va por la directa medido,
+  `cn_ns_f`). Si no cabe en el tope de la etapa (las tres listas, sin el cielo del cuadro anterior y con un 3 % de
+  margen, `CORTE_MARGEN`) quita NODOS ENTEROS por la clase de LOD del reparto (tamano en la pantalla: lo pequeno y
+  lejano primero); lo de menos de 16 m (`CORTE_CERCA_CD`) nunca, salvo que ni eso quepa (entonces solo por la clase de
+  LOD). Los de un grupo (`tools/grupos_nodos.py`, los pisos de un edificio) llevan la misma clase y van o se quitan
+  juntos. Con el corte hecho, `dibuja_etapa` ya no reparte el tope entre las listas (`cn_activo`: sin la reserva de
+  las listas 1 y 2) y el tope de vertices tiene un 12,5 % de holgura (`CORTE_VTX_HOLGURA`; es tiempo de CPU, no
+  cuelga nada): `ta_cabe` no parte edificios. Una primera version que contaba las mallas una a una costaba ~3 ms por
+  cuadro en PALM (descartada).
+- Presupuesto de lo pequeno (`CORTE_GRANDE_PX` 24, `CORTE_PEQ_TA`, `CORTE_PEQ_VTX`): lo que mide menos de 24 px de
+  radio en la pantalla (y no es de un grupo) solo cabe en el tope de la 2.9.8 (`ta_f` 448 y 20000 vertices); el sitio
+  de mas solo lo gasta lo grande. Sin esto la geometria pequena y lejana crecia y el cuadro costaba ~0,4 fps mas (PALM,
+  CLOU).
+- `LEJ_EN_TOPE` (1): lo que el reparto (`nodos_quita`) o `corte_nodos` quitan y tiene version lejana (lowpoly de lo
+  grande de `tools/lod_grande.py`, cartel de la vegetacion de `tools/lod_veg.py`) va con ella si cabe en lo que sobra,
+  de lo mayor a lo menor; no los de un grupo (el lowpoly de un piso sin la base quedaba flotando: visto con `ta_f`
+  576). Esas versiones no cuentan como "ya se dibujaba" para el nodo completo en el cuadro siguiente (`lq_marca` /
+  `lq_ant`): si contaran, el completo entraba con la clase rebajada y el reparto se hundia (medido: `prio_p` -1).
+- Reparto (`nodos_visibles`): lo de 24 px o mas (`REPARTO_COSTE_PX`) no se penaliza por sus vertices
+  (`REPARTO_COSTE`), y si su umbral de LOD es bajo va con la clase de su tamano (umbral 6): un edificio grande ya no se
+  quita antes que lo pequeno y barato.
+- `TA_F_MIN` 400 (1,5625; antes 448 = 1,75) y `TA_F_SEGURO` (1): `ta_f` solo sigue al registro de la consola
+  (`TA_ITP_CURRENT`) con cuadros que llenan al menos el 25 % del bufer (`TA_F_LLENO`), con un 10 % de margen
+  (`TA_F_MARGEN`, antes 20 %) y sin bajar. En Flycast (sin el registro: `TA_ITP_CURRENT` = `TA_ISP_BASE`, comprobado en
+  su codigo, pvr_regs.cpp) se queda en 400.
+- `VTX_ETAPA_MAX` 24000 (antes 20000): en la salida de BEAC parado, con `ta_f` 400, los vertices eran lo primero que se
+  acababa.
+
+#### Medida
+
+Flags: `-DPRUEBA_AUTO -DPRUEBA_NODO=n -DPRUEBA_SIN_TIEMPO -DDIAG_MS -DDIAG_POPPING -DDIAG_FALTA`, 140 s con el piloto
+automatico (paso 10), tres Flycast a la vez (:90 :91 :92, como la tanda del diagnostico). "Antes" = faa81ea (2.9.8 con
+el diagnostico; m299/diag/etapas/flycast_f*), "despues" = la punta. "Grandes que faltan" = media por muestra de
+nodos y mallas de 24 px o mas de radio que estan en la vista (hasta LEJOS_MAX) y no se dibujan, por las razones que
+son faltas de verdad (lejos, tope, tramo, ta_cabe, vtx, m_lejos, ltope...). No cuenta "rama" (registros de la union que
+el original tampoco dibuja), ni "pvs" / "pvsm" (oclusion precalculada; SUPUESTO que es correcta, no se ha comprobado
+pixel a pixel): esas dos van en la ultima columna. "999 px": la esfera envuelve la camara.
+
+| Etapa | fps antes | fps despues | dif | tarde antes / despues | lejano antes / despues | grandes que faltan antes | despues (razon) | mayor antes / despues (px) | pvs+rama antes / despues |
+|---|---|---|---|---|---|---|---|---|---|
+| PALM (0) | 36,18 | 34,35 | -1,82 | 189 / 295 | 1592 / 3800 | 22,78 (lejos 10,22, tope 8,16, tramo 1,93, ta_cabe 0,31, m_lejos 1,98, entrada 0,17) | 2,02 (tope 0,92, tramo 0,94, entrada 0,16) | 999 / 999 | 36,5 / 43,9 |
+| LAKE (1) | 38,55 | 37,24 | -1,31 | 61 / 141 | 2578 / 3800 | 3,68 (lejos 0,17, tope 2,33, ta_cabe 0,55, vtx 0,04, m_lejos 0,60) | 0,86 (tope 0,21, tramo 0,65) | 135 / 999 | 29,1 / 28,4 |
+| ALPI (2) | 38,29 | 38,18 | -0,11 | 97 / 84 | 2653 / 3800 | 3,12 (lejos 0,00, tope 1,44, tramo 1,42, ta_cabe 0,23, m_lejos 0,02) | 0,03 (tope 0,03) | 999 / 27 | 53,3 / 61,4 |
+| CAST (3) | 38,00 | 36,53 | -1,48 | 108 / 201 | 1907 / 3800 | 10,67 (lejos 3,69, tope 5,76, tramo 0,39, ta_cabe 0,82) | 1,59 (tope 0,76, tramo 0,81, entrada 0,02) | 209 / 999 | 88,5 / 87,4 |
+| FORE (4) | 38,95 | 38,61 | -0,35 | 39 / 56 | 2914 / 3800 | 0,20 (tope 0,10, tramo 0,10) | 0,42 (tramo 0,42) | 999 / 210 | 101,3 / 100,0 |
+| DESE (5) | 38,49 | 38,04 | -0,45 | 86 / 105 | 3082 / 3800 | 5,68 (tope 2,48, tramo 2,19, ta_cabe 0,01, vtx 0,87, entrada 0,12) | 1,67 (tope 0,01, tramo 1,66) | 999 / 999 | 61,6 / 65,9 |
+| CLOU (6) | 35,56 | 33,45 | -2,11 | 202 / 397 | 1684 / 3800 | 13,15 (lejos 5,27, tope 7,43, ta_cabe 0,27, vtx 0,01, m_lejos 0,17) | 4,35 (tope 3,05, tramo 1,22, entrada 0,08) | 172 / 999 | 33,1 / 30,2 |
+| INDU (7) | 37,20 | 35,54 | -1,65 | 107 / 212 | 2057 / 3800 | 17,78 (lejos 13,53, tope 1,83, ta_cabe 2,41, m_lejos 0,01) | 0,03 (tope 0,03) | 176 / 61 | 113,9 / 117,5 |
+| SNOW (8) | 38,22 | 38,52 | +0,30 | 103 / 70 | 2905 / 3800 | 7,39 (lejos 0,01, tope 4,79, tramo 2,04, ta_cabe 0,46, vtx 0,07, entrada 0,01) | 3,95 (tope 3,82, tramo 0,13) | 310 / 217 | 39,5 / 43,9 |
+| GHOS (9) | 36,68 | 36,09 | -0,59 | 130 / 205 | 1687 / 3800 | 10,50 (lejos 6,72, tope 2,16, ta_cabe 1,62) | 0,77 (tope 0,34, tramo 0,43) | 114 / 136 | 51,8 / 52,0 |
+| TULI (10) | 37,39 | 36,25 | -1,14 | 103 / 188 | 1737 / 3686 | 6,10 (lejos 0,08, tope 3,50, tramo 0,01, ta_cabe 2,52) | 0,11 (tope 0,11) | 999 / 38 | 49,9 / 45,4 |
+| METR (11) | 31,87 | 31,34 | -0,53 | 538 / 430 | 1937 / 3722 | 8,55 (lejos 2,09, tope 3,42, tramo 0,10, ta_cabe 0,40, m_lejos 2,55) | 0,42 (tope 0,42) | 256 / 99 | 97,6 / 94,2 |
+| RUIN (12) | 38,54 | 38,41 | -0,13 | 65 / 85 | 2727 / 3573 | 12,93 (tope 2,19, tramo 0,07, ta_cabe 9,83, vtx 0,83) | 3,74 (tope 3,49, ta_cabe 0,24) | 999 / 999 | 13,2 / 14,2 |
+| IMPE (13) | 38,10 | 37,12 | -0,98 | 79 / 146 | 2255 / 3596 | 4,61 (tope 3,10, ta_cabe 1,45, vtx 0,06) | 0,21 (tope 0,21) | 282 / 51 | 46,1 / 45,4 |
+| CAPE (14) | 38,75 | 38,31 | -0,44 | 85 / 92 | 2750 / 3599 | 1,60 (tope 1,40, ta_cabe 0,06, vtx 0,01, m_lejos 0,13) | 0,01 (tramo 0,01) | 164 / 255 | 109,3 / 105,3 |
+| **Media / suma** | 37,38 | 36,53 | -0,85 | 1992 / 2707 (+36 %) | | 128,73 (suma) | 20,19 (suma) | | |
+
+Cuadro congelado de la captura del usuario (BEAC, arbol 1, F50, parado en s 95: `-DPRUEBA_CURSO=1 -DPRUEBA_NODO=0
+-DPRUEBA_FICHA=7 -DPRUEBA_PARADO -DPRUEBA_PARA_S=95 -DDIAG_CONGELA=658`; lo de 24 px o mas que falta en el cuadro):
+
+| Variante | ta_f | tope de la etapa | nodos que faltan (tope / lejos) | mallas (ta_cabe / m_lejos) | pvs / pvsm |
+|---|---|---|---|---|---|
+| 2.9.8 aqui (salto 7,4: lejano 1853 m, TA al 80 %) | 448 | 794K | 19 (hasta 36 px) / 16 (hasta 58 px) | 0 / 7 | 12 / 13 |
+| 2.9.8 con `-DTA_F_MIN=576` | 576 | 720K | 28 (hasta 124 px) / 0 | 85 (hasta 247 px) / 0 | 12 / 11 |
+| 2.9.8 con 640 y la maquina lenta | 640 | 512K | 30 (hasta 197 px) / 30 (hasta 155 px) | 1 / 6 | 8 / 9 |
+| **2.9.9 por defecto** | 400 | 1088K | **0 / 0** | **0 / 0** | 8 / 11 |
+| 2.9.9 con la maquina lenta (`-DDIAG_RETARDO=12000`) | 400 | 1088K | 0 / 0 (la misma imagen) | 0 / 0 | 8 / 11 |
+| 2.9.9 en s 75 (cerca de donde estaba el usuario; 09c2bde) | 400 | 1088K | 0 / 0 | 0 / 0 | 14 / 16 |
+| 2.9.9 con `-DTA_F_MIN=576` | 576 | 800K | 129 (hasta 111 px) / 0 | 0 / 0 | 12 / 3 |
+
+Imagenes: m299/fix/comp_final_beac_s95.jpg (usuario, 2.9.8 aqui, 2.9.8 con ta_f 576; 2.9.9 por defecto, con la
+maquina lenta y con ta_f 576).
+
+**Medido**
+- Los grandes que faltan bajan de 128,7 a 20,2 por muestra (suma de las 15 etapas). Desaparecen del todo
+  lejos (41,8), m_lejos (5,5), ta_cabe (21,0: nunca mas un piso flotando) y vtx (1,9).
+- Lo que queda: "tope" (lo que no cabe ni con la version lejana: sobre todo SNOW y RUIN al salir, donde la vista pide
+  mas de 24000 vertices) y "tramo" (la union o la etapa siguiente a la vista antes de acabar de subir; depende de la
+  carga del GD, no del reparto).
+- En la captura del usuario: ningun edificio que falte por el reparto (1 nodo de 24 px, el skyline lejano) y la imagen
+  es la misma con la maquina lenta (`-DDIAG_RETARDO=12000`): ya no depende del tiempo. En la carrera con la maquina
+  lenta (PALM y METR, 12 ms mas por cuadro; 09c2bde) faltan lo mismo que a velocidad normal (PALM 2,40: tope 1,58,
+  tramo 0,67; METR 0,34: tope), frente a 23,0 y 8,1 de la 2.9.8 lenta (lejos, tope, ta_cabe y m_lejos); fps 24,27 y
+  21,75 frente a 25,17 y 22,30.
+- Con `-DTA_F_MIN=576` (una consola que gastara 2,25 veces la cuenta) no cabe: faltan nodos enteros (129 de hasta 111
+  px) y ninguna malla suelta (ta_cabe 0, antes 85 de hasta 247 px). Pero queda un caso de trozo flotando: el tejado de
+  la torre gris de detras del edificio amarillo es un nodo aparte y sus pisos (nodos 572-575, sin grupo en los datos:
+  `tools/grupos_nodos.py` no los junta) se quitan uno a uno; el tejado, que cabe, se queda en el aire
+  (m299/fix/g576_vs_nl.jpg; con `-DLEJ_EN_TOPE=0` cabe la torre y no pasa). Con el `ta_f` por defecto no ocurre.
+  Arreglarlo del todo pide juntar esos pisos en los datos (`tools/regenera.py --interno grupos`), no hecho aqui.
+- Coste: -0,85 fps de media (37,38 -> 36,53; de +0,30 en SNOW a -2,11 en CLOU) y +36 % de cuadros tarde (1992 -> 2707); lo que mas pierde son las etapas en las que el salto quitaba mas (PALM, CLOU, INDU, CAST, LAKE: -1,3 a -2,1). Por partes (PALM, ms por cuadro, PRF de DIAG_MS): el reparto y `corte_nodos` 3,84 frente a 3,79,
+  la etapa 9,22 frente a 7,87 (8,75 con solo el salto quitado, `-DSALTO_OBS=0` del diagnostico): ~0,9 ms es dibujar
+  lo que el salto quitaba y ~0,5 ms lo grande que antes no cabia.
+- El objetivo era no perder mas de 0,5 fps de media ni subir los cuadros tarde mas de un 15 %: NO se cumple. Se ha
+  elegido que no falten edificios, lo que pidio el usuario: con el salto quitando geometria otra vez se recuperaria
+  ~0,9 fps en las etapas cargadas a costa de volver a perder el lejano y el tope en las maquinas lentas.
+
+**Supuesto (no comprobado)**
+- Que en el Flycast de Android pase lo mismo que aqui: se supone que el registro del TA tampoco se lleva (mismo
+  codigo de Flycast) y que lo que veia el usuario era el salto (maquina lenta: tope al 80 % y lejano a 1200-1850 m) mas
+  `ta_cabe`. No se ha probado en Android.
+- La consola real: `ta_f` 1,5625 deja un 16 % sobre el 1,34 medido en la demo 12c (que era "al menos"); si la consola
+  gastara mas de ~1,6 veces la cuenta, el primer cuadro cargado antes de que `ta_f` suba podria llenar el bufer. Hace
+  falta la foto de la linea TA de la pausa (Y) en la consola. 24000 vertices: mas CPU por cuadro en la consola, sin
+  medir alli.
+- Que "pvs" / "pvsm" sea oclusion correcta.
+- Los interruptores de la 2.9.8 que estaban apagados (REPARTO_SEC, LEJ_SEC, COCHE_TRASERO, SUBE_DMA) siguen apagados:
+  no se han medido con estos cambios. LEJ_SEC bajaria el lejano (faltas "lejos" otra vez); REPARTO_SEC daria un corte
+  fijo por seccion, pero el que manda ahora es `corte_nodos`.
+
+Ficheros: m299/fix/ del directorio de trabajo (tabla_final.md, comp_final_beac_s95.jpg, etapas/ las consolas de la
+tanda final, res/ las de los congelados, sh/ y py/: comp.py, cong.py, prf.py).
+
+#### Medida final de la 2.9.9 (A/B en las 15 etapas, 3 Flycast a la vez)
+
+Todo en el Flycast de aqui (NO en la consola ni en Android). Flags: `-DPRUEBA_AUTO -DPRUEBA_NODO=n -DPRUEBA_SIN_TIEMPO
+-DDIAG_MS -DDIAG_POPPING`, 140 s de piloto, paso 10, lgdat2; mide.py y pop.py solo con las lineas de la zona. Por cada
+etapa una ronda de tres Flycast a la vez (:90 :91 :92), como la medida final de la 2.9.8.
+- Pasada 1 (con el contador `-DDIAG_FALTA`): A = faa81ea (rev-1.1 39509d3 + solo el contador, que sin el -D no cambia
+  el juego), B = punta de c299 (d1f8600), Bz = la punta sin el contador.
+- Pasada 2 (sin el contador): A = 39509d3 (rev-1.1 tal cual), B = la punta, Ag = faa81ea con el contador (repeticion
+  de la A de la pasada 1).
+
+**Lo que encontro la medida: la 2.9.9 se quedaba sin efectos ni musica con el diagnostico (corregido, d1f8600).** Con
+`-DDIAG_MS -DDIAG_POPPING` la 2.9.9 (109K mas de bss que la 2.9.8: cn_ult, cn_vult, cn_lista, lq_*) no cabia al
+arrancar: "Out of memory ... diff 61440" (EFECTOS: marcas 0 chispas 0 particulas 0 agua 0) y "Out of memory ... diff
+65536" + "snd_stream_init_ex(): memory allocation failed" (sin musica). Pasaba en todas las tandas de m299/fix
+(flycast_e*, h*, j*, m*: 15 de 15), asi que la tabla de la seccion de arriba midio la 2.9.9 sin chispas, marcas,
+particulas ni agua. La compilacion por defecto si arrancaba con todo, pero con 84K libres bajo la pila del nucleo
+(`_arch_mem_top - THD_KERNEL_STACK_SIZE`) frente a 192K de la 2.9.8. Arreglo: cn_ult en 16 bits (bytes / 32), una
+lista para los tres tramos en cn_lista y lq_* (mismo orden y mismos topes por tramo), y en la medida REPSEC.DAT solo
+con `-DDIAG_POP298`, vr / vt en 16 bits y mv_* de falta_mide del monton. Por defecto 38K menos (2.966.716 bytes de
+imagen frente a 3.004.636). Tras el arreglo las 90 pruebas arrancan con EFECTOS 3/1/1/1/1/1 y sin el fallo de
+snd_stream; el unico "Out of memory" es el "diff 217088" de siempre (90 de 90, tambien en A).
+
+| Etapa | fps A0 | fps B0 | B-A | tarde % A0 / B0 | salto A0 / B0 | lejano A0 / B0 | 8 px+ A0 / B0 | 32 px+ A0 / B0 | grandes que faltan Af / Bf | fps Af / Bf / Bz |
+|---|---|---|---|---|---|---|---|---|---|---|
+| PALM | 37,67 | 35,72 | -1,95 | 4,4 / 9,1 | 7,68 / 8,14 | 1696 / 3800 | 24,6 / 9,9 | 4,9 / 0,9 | 22,78 / 3,19 | 36,18 / 34,27 / 35,72 |
+| LAKE | 38,81 | 37,98 | -0,83 | 2,4 / 4,0 | 2,15 / 5,93 | 3722 / 3800 | 5,8 / 2,8 | 1,4 / 0,2 | 3,79 / 0,56 | 38,10 / 37,02 / 38,14 |
+| ALPI | 38,98 | 38,89 | -0,09 | 1,8 / 1,9 | 1,07 / 3,65 | 3792 / 3800 | 7,8 / 7,0 | 1,5 / 1,2 | 1,63 / 0,25 | 38,78 / 37,97 / 39,14 |
+| CAST | 38,60 | 38,48 | -0,12 | 3,0 / 2,7 | 3,79 / 6,99 | 3153 / 3800 | 14,9 / 14,6 | 4,5 / 2,6 | 10,88 / 0,83 | 38,36 / 37,07 / 38,45 |
+| FORE | 39,60 | 39,29 | -0,31 | 0,5 / 1,1 | 0,50 / 3,68 | 3800 / 3800 | 11,1 / 11,2 | 2,2 / 2,2 | 0,19 / 0,00 | 38,94 / 38,71 / 39,32 |
+| DESE | 39,21 | 38,73 | -0,48 | 1,3 / 2,4 | 1,50 / 3,14 | 3640 / 3800 | 8,2 / 4,8 | 2,5 / 1,8 | 3,11 / 0,22 | 38,71 / 38,21 / 38,86 |
+| CLOU | 37,10 | 35,13 | -1,97 | 5,9 / 10,8 | 7,61 / 7,95 | 1744 / 3800 | 28,4 / 21,7 | 3,6 / 2,2 | 12,62 / 3,94 | 35,76 / 33,77 / 35,08 |
+| INDU | 38,43 | 37,05 | -1,38 | 2,7 / 5,7 | 5,98 / 6,66 | 2233 / 3800 | 25,4 / 11,1 | 6,5 / 4,2 | 16,95 / 0,03 | 37,10 / 35,51 / 37,01 |
+| SNOW | 39,59 | 39,35 | -0,24 | 0,6 / 1,0 | 1,01 / 4,03 | 3782 / 3800 | 3,0 / 3,4 | 1,1 / 0,8 | 1,80 / 3,96 | 38,89 / 38,36 / 39,30 |
+| GHOS | 37,75 | 36,45 | -1,30 | 4,1 / 7,3 | 7,77 / 8,03 | 1708 / 3800 | 23,6 / 15,6 | 3,5 / 2,7 | 10,81 / 0,93 | 36,70 / 35,35 / 36,37 |
+| TULI | 38,60 | 37,26 | -1,34 | 2,3 / 5,4 | 6,47 / 7,70 | 2171 / 3754 | 29,6 / 23,0 | 3,5 / 3,2 | 6,38 / 0,07 | 37,39 / 36,00 / 37,37 |
+| METR | 34,09 | 32,86 | -1,23 | 12,6 / 17,1 | 7,60 / 7,65 | 1787 / 3800 | 22,0 / 11,8 | 6,4 / 3,1 | 8,98 / 0,49 | 32,39 / 30,99 / 32,72 |
+| RUIN | 39,08 | 38,91 | -0,17 | 1,5 / 1,7 | 2,73 / 5,03 | 3395 / 3800 | 8,6 / 10,5 | 1,6 / 1,6 | 12,93 / 4,26 | 38,55 / 38,21 / 38,89 |
+| IMPE | 39,02 | 38,00 | -1,02 | 1,5 / 3,6 | 4,22 / 6,13 | 2943 / 3800 | 18,6 / 15,5 | 4,0 / 2,7 | 4,61 / 0,15 | 38,13 / 36,79 / 37,96 |
+| CAPE | 39,34 | 38,85 | -0,49 | 1,0 / 1,9 | 1,56 / 4,71 | 3764 / 3800 | 16,4 / 12,4 | 4,7 / 4,2 | 1,40 / 0,00 | 38,77 / 38,16 / 38,83 |
+| **Total** | 38,39 | 37,53 | -0,86 | cuadros 1184 / 1851 | | | 248,0 / 175,3 | 51,9 / 33,6 | 118,8 / 18,9 | 37,52 / 36,43 / 37,54 |
+
+"grandes que faltan": nodos y mallas de 24 px o mas dentro de la vista que no se dibujan, por las razones reales
+(lejos, tope, tramo, ta_cabe, vtx, m_lejos, entrada; no rama, pvs ni pvsm), suma por muestra. La repeticion Ag da
+120,3 (A de la pasada 1: 118,8).
+
+Saltos por segundo sumados en las 15 (8 px+ / 32 px+, apariciones + desapariciones):
+
+| razon | A0 (rev-1.1) | B0 (2.9.9) |
+|---|---|---|
+| tope | 138,9 / 19,6 | 31,1 / 1,0 |
+| lejos | 7,9 / 1,0 | 0 / 0 |
+| pvs | 91,3 / 27,1 | 131,0 / 29,1 |
+| lado | 4,9 / 0,8 | 6,3 / 1,1 |
+| rama | 2,2 / 1,5 | 4,1 / 1,7 |
+| detras, lod, tramo | 2,6 / 1,6 | 2,1 / 0,7 |
+
+Grandes que faltan por razon (Af / Bf): lejos 41,50 / 0; tope 45,17 / 15,03; ta_cabe 20,84 / 0; m_lejos 5,53 / 0;
+vtx 2,02 / 0; tramo 3,62 / 3,70; entrada 0,17 / 0,16. De diseno: rama 126,6 / 157,7; pvs 341 / 342; pvsm 453 / 453.
+
+**Medido**
+- Lo que pidio el usuario: los grandes que faltan bajan de 118,8 a 18,9 (-84 %); "lejos", "ta_cabe", "m_lejos" y
+  "vtx" desaparecen; "tope" baja de 45,2 a 15,0. El lejano medio pasa a 3730-3800 m en todas (A: 1696 en PALM, 1744 en
+  CLOU). Los saltos de 8 px o mas bajan de 248,0 a 175,3 por s (-29 %) y los de 32 px de 51,9 a 33,6 (-35 %).
+- Coste: -0,86 fps de media sin el contador (38,39 -> 37,53) y +56 % de cuadros tarde (1184 -> 1851); con el
+  contador -1,09 (37,52 -> 36,43). Las cargadas pierden mas: PALM -1,95, CLOU -1,97, INDU -1,38, TULI -1,34, GHOS
+  -1,30, METR -1,23, IMPE -1,02; ALPI, CAST, RUIN, SNOW y FORE menos de 0,35. La desviacion de los fps sube en casi
+  todas (PALM 3,07 -> 3,98, IMPE 1,24 -> 2,62).
+- Ya con efectos y musica en B (la medida de m299/fix los tenia apagados en B): -0,86 aqui frente a -0,85 alli, la
+  misma cifra, pero aquella era con A con efectos y B sin ellos.
+- Capturas lado a lado A | B con la imagen congelada y parado (F50; m299/capturas/): la salida de BEAC s 95 (la del
+  usuario), tambien con la maquina lenta (`-DDIAG_RETARDO=12000`), INDU s 2297, CAST s 2864, PALM s 2618, DESE s 3188 y
+  CLOU s 517. En A faltan por lejos / tope / m_lejos: BEAC 16 + 19 nodos y 7 mallas (lenta: 26 nodos por lejos, hasta
+  155 px, y el cielo sin lo de detras de las palmeras), INDU 40 + 10 nodos (la refineria y la grua de la izquierda),
+  PALM s 2618 66 nodos y 14 mallas (toda la ciudad del fondo); en B ninguno por esas razones. CAST y DESE congelados
+  casi no tienen huecos ni en A (tope 1 y 3 nodos). CLOU s 517 sigue igual en las dos: 50 y 48 nodos por tope (hasta
+  133 px, tapados por la niebla en la imagen).
+- Cuelgues: ninguno. Las 90 pruebas escriben lineas MS hasta el final (72-106 por prueba) y llegan a la misma s
+  final que A (+-6 %); ninguna linea "No se pud", panic, assert ni excepcion.
+
+**Regresiones (B frente a A)**
+- fps y cuadros tarde (arriba): el objetivo de -0,5 fps / +15 % de cuadros tarde no se cumple.
+- Saltos "pvs" +43 % (91,3 -> 131,0 de 8 px por s): con el lejano a 3800 m entra mas lejos y la PVS lo pone y lo quita
+  al cambiar de seccion. Los de 32 px "pvs" casi igual (27,1 -> 29,1).
+- SNOW: grandes que faltan 1,80 -> 3,96 (por "tope", en la salida) y 8 px 3,0 -> 3,4. RUIN: 8 px 8,6 -> 10,5 (aunque
+  los grandes que faltan bajan de 12,9 a 4,3).
+- "rama" (lo de la otra rama de la union, que el original tampoco dibuja) 126,6 -> 157,7: no es un fallo, mas lejano.
+- RAM (corregida en d1f8600): sin el arreglo, la 2.9.9 con el diagnostico se quedaba sin efectos ni musica, y por
+  defecto con 84K de margen. Con el arreglo, por defecto queda ~122K de margen (sin medir el margen exacto por defecto
+  tras el arreglo; si medido que la de diagnostico arranca con todo).
+
+**Supuesto (no comprobado)**
+- Android y la consola: lo de arriba de esta seccion. El coste en fps puede ser mayor en una maquina mas lenta: el
+  salto ya no quita geometria, asi que alli se dibuja todo y bajan los fps.
+- Que el contador (DIAG_FALTA) no cambie lo que falta: cuesta ~0,9-1,1 fps a los dos y las dos pasadas dan lo mismo
+  en A (118,8 / 120,3).
+
+Ficheros: m299/final/ del directorio de trabajo (final.md, tablas.md, res/ las consolas y medida_<n>.txt, cap/ los
+congelados, sh/ y py/), m299/capturas/*.png (recorte 192,144..832,624 de 1024x768).
+
+#### Revision de la 2.9.9: costes viejos en corte_nodos
+
+- **Salida (medido en Flycast, BEAC, linea CN1 temporal):** en la cuenta atras no hay corte, pero `dibuja_etapa` seguia
+  sumando en `cn_ult` cada cuadro. En el primer cuadro de la carrera el corte veia 52 MB para un tope de 1041K, pasaba
+  al modo 1 y quitaba 139 nodos, tambien los cercanos: un cuadro con la etapa casi vacia justo en la salida. Con la
+  estimacion de lo nuevo en vez de lo viejo aun quitaba 101 (1091K estimado frente a 846K medido en el cuadro
+  siguiente).
+- **Cambio de etapa (`etapa = sig`):** el tramo 0 leia los costes de la etapa vieja por numero de nodo. En BEAC s 6666
+  daba 425K frente a 822K en el cuadro siguiente.
+- **Arreglo:** `cn_ult` solo vale si `corte_nodos` corrio en el cuadro anterior con el mismo modelo en el tramo. Si no,
+  ese cuadro no corta y va como antes de la 2.9.9 (tope por listas y `ta_cabe`). Tras el arreglo, el primer cuadro con
+  corte en la salida ya da 852K y 33 nodos, como los siguientes.
+
+
+### Coche visible mas ligero (Rev 2.9.7)
+
+Pedido del usuario (variante "C2", para reducir los saltos): menos poligonos y texturas en las partes VISIBLES de los
+Ferrari sin perder estetica: ~35-40 % menos triangulos dibujados por coche simplificando la geometria visible con
+contornos, siluetas y aristas vivas; luces, emblemas y matriculas sin tocar; la pintura, el reflejo y los emblemas sin
+tocar y las demas texturas visibles de 256 a la mitad, con VQ; si de cerca se nota, el modelo completo en la seleccion
+y el ligero en carrera. DESVIACION (el original lleva el coche entero). Medido en Flycast, no en la consola real.
+
+- tools/conv_coche.py `--visible` (implica `--rebaja`; sin ella sale lo mismo que antes, comprobado byte a byte en los
+  15): escribe el COCHEnn.DAT de siempre (el de `--rebaja`, Rev 2.9.6, identico) y ademas COCHEnnL.DAT, el ligero:
+  - siempre sin lo oculto (el vaciado de cuando se pasa del tope, con la vuelta baja: no cambia la imagen desde las
+    camaras del juego);
+  - simplifica(): colapso de aristas por error cuadrico (Garland-Heckbert) de posicion, UV, color (la luz cocida) y
+    normal (de ella sale el reflejo de la pintura), con el area de peso, en las mallas opacas de carroceria, extra,
+    puertas, volante, palanca, aleron, ruedas (llanta y neumatico), pinzas y discos. Colapsos u -> v sin vertices
+    nuevos (cada "cuna" de u, sus atributos en un grupo de material, pasa a la de v del otro lado de la arista);
+    bordes abiertos, costuras de UV / normal / color y limites de material solo se acortan a lo largo de si mismos (con
+    planos de arista de peso VIS_BORDE) y sus esquinas quedan; fijas las posiciones de lo que no se simplifica (luces,
+    cristales, emblemas, matriculas, sombra) y las que estan a menos de 4 cm de ello (VIS_CERCA: sin esto la carroceria
+    de alrededor de la matricula del 360 se aplanaba y la tapaba a medias); fuera el colapso que gire una cara mas de
+    37 grados (VIS_GIRO 0,8) o rompa la variedad. Hasta el 60 % de los triangulos simplificables (VIS_RAZON) o el
+    error VIS_TOPE. Las tiras de las mismas posiciones traen normales y luz algo distintas (0xBE / 0xC0): se juntan
+    (media) si la UV, el color (12 por canal) y la normal (~25 grados) casi coinciden. Re-estripificado voraz (tiras de
+    hasta 256 vertices; sin descarte de caras el sentido da igual);
+  - texturas: las de `--rebaja` y ademas (clase 'visible') las opacas de fuera con un lado de 256, sin pintura,
+    reflejo, luces ni sombra, a la mitad en el lado en que menos se nota (menor error RMS al ampliarla otra vez) o en
+    los dos si ese error es de 3 o menos; si aun la mejor mitad pasa de 8 (VIS_TEX_MAX: los atlas de motor y
+    salpicadero del 360, 575, F430 y 550, que en carrera se notaban: el motor del 360 se ve bajo el cristal) se queda.
+    Bajan sobre todo los bajos (256x128 -> 128x128 o 256x64) y un atlas de 256x256 (Testarossa, a 256x128). Todas
+    con VQ (comprobado en los 15).
+- demo/main.c coche_carga: en carrera el ligero COCHEnnL.DAT (coche_pide_ligero, al empezar la carrera; al
+  reintentar se queda) y en el menu el completo COCHEnn.DAT (cuando el menu ensena el coche, menu_coche3d, lo vuelve a
+  cargar si esta el ligero). Compatible: sin COCHEnnL.DAT (datos de antes, el taxi) se queda el completo (coche_sin_ligero, sin volver a
+  pedirlo). De cerca SI se notaba (capturas de la seleccion con el ligero: reflejos a facetas en el capo y el
+  paragolpes, la toma lateral del 360), y los dos modelos en un fichero con NODO_CERCA (como la variante B) no caben en
+  el bloque del coche (COCHE_RAM 496 KB: saldrian 660-740 KB): por eso dos ficheros. Coste: en la carga de cada carrera
+  se lee el ligero (300-380 KB del GD) y al volver a la seleccion el completo. La salida y la meta (escenas de cerca
+  dentro de la carrera) usan el ligero.
+- tools/regenera.py: los pasos cocheN usan `--visible` y la comprobacion pide COCHE00..14L.DAT; coches_visibles()
+  rehace los coches de unos datos sin COCHE00L.DAT (o con uno de mas de 10500 vertices).
+- comun/menu.c `-DDIAG_GIRO_FIJO=angulo` (medida): el coche de la seleccion quieto, para capturas comparables.
+
+Triangulos dibujados a la vez en carrera (con area: lo fijo, el faro, el mayor juego de pilotos y de discos), vertices
+del TA del coche en carrera y VRAM de sus texturas (base = la Rev 2.9.6, COCHEnn.DAT):
+
+| ficha | coche | triangulos base / C2 | vertices en carrera base / C2 | VRAM KB base / C2 |
+|---|---|---|---|---|
+| 00 | 360sp | 7351 / 4665 (-37 %) | 10910 / 7456 (-32 %) | 182 / 178 |
+| 01 | 575sa | 8256 / 5255 (-36 %) | 11674 / 7832 (-33 %) | 141 / 138 |
+| 02 | gto | 7003 / 4420 (-37 %) | 10916 / 7516 (-31 %) | 161 / 154 |
+| 03 | 250gto | 6587 / 4093 (-38 %) | 9374 / 6345 (-32 %) | 158 / 154 |
+| 04 | f40 | 7584 / 5186 (-32 %) | 11511 / 8484 (-26 %) | 183 / 179 |
+| 05 | f430 | 7580 / 4704 (-38 %) | 11288 / 7535 (-33 %) | 127 / 123 |
+| 06 | fx | 7569 / 5004 (-34 %) | 11212 / 8092 (-28 %) | 186 / 178 |
+| 07 | f50 | 7594 / 4869 (-36 %) | 10921 / 7466 (-32 %) | 147 / 143 |
+| 08 | f355sp | 7178 / 4490 (-37 %) | 10746 / 7468 (-31 %) | 165 / 149 |
+| 09 | testa | 6971 / 4786 (-31 %) | 10585 / 7939 (-25 %) | 151 / 139 |
+| 10 | 328gts | 6941 / 4160 (-40 %) | 10882 / 7195 (-34 %) | 153 / 145 |
+| 11 | 512bb | 6435 / 3772 (-41 %) | 10035 / 6680 (-33 %) | 180 / 176 |
+| 12 | 550b | 7743 / 4788 (-38 %) | 11091 / 7364 (-34 %) | 133 / 125 |
+| 13 | dino | 6940 / 4097 (-41 %) | 10089 / 6329 (-37 %) | 140 / 136 |
+| 14 | dayts | 7110 / 4435 (-38 %) | 10502 / 7179 (-32 %) | 148 / 141 |
+| | total | 108842 / 68724 (-37 %) | 161736 / 110880 (-31 %) | 2354 / 2255 (-4,2 %) |
+
+Medidas (Flycast, piloto, `-DPRUEBA_AUTO -DPRUEBA_SIN_TIEMPO -DDIAG_MS -DDIAG_POPPING -DPRUEBA_NODO=n -DPRUEBA_FICHA=f`,
+140 s, tres Flycast a la vez; el mismo tramo de s de las dos pruebas: lineas MS desde s 200, POP del tramo comun;
+coche = us de CPU y vertices de la linea PRF; saltos por segundo de 8 px o mas / de 32 px o mas, total y por razon):
+
+| prueba | fps | tarde | salto | lejano | coche us / vtx | saltos 8 / 32 px | tope (+ / -) | pvs (+ / -) |
+|---|---|---|---|---|---|---|---|---|
+| Dino PALM base | 38,33 | 47 | 6,27 | 2246 | 2406 / 10054 | 33,6 / 7,8 | +25,4/6,6 -5,3/0,5 | +2,3/0,4 -0,1/0,1 |
+| Dino PALM C2 | 38,37 | 45 | 6,85 | 2099 | 1930 / 6294 | 27,9 / 4,9 | +19,9/4,1 -4,4/0,3 | +3,1/0,3 -0,1/0,1 |
+| Dino GHOS base | 37,64 | 51 | 7,63 | 1864 | 2423 / 10081 | 27,8 / 4,2 | +16,1/1,5 -3,4/0,0 | +7,1/1,7 -1,2/0,9 |
+| Dino GHOS C2 | 37,39 | 59 | 7,95 | 1668 | 1952 / 6321 | 29,3 / 3,8 | +14,0/0,9 -5,3/0,1 | +8,7/1,8 -1,2/0,8 |
+| Dino METR base | 34,22 | 160 | 8,34 | 1644 | 2407 / 10081 | 22,5 / 6,8 | +7,7/2,2 -1,9/0,4 | +11,4/3,5 -0,1/0,0 |
+| Dino METR C2 | 34,80 | 143 | 8,17 | 1695 | 1944 / 6321 | 23,8 / 6,7 | +7,7/1,9 -2,6/0,6 | +11,4/3,5 -0,1/0,0 |
+| 360 PALM base | 38,15 | 48 | 6,92 | 2052 | 2685 / 10615 | 33,0 / 7,1 | +23,8/5,9 -5,7/0,5 | +1,7/0,2 -0,1/0,1 |
+| 360 PALM C2 | 38,24 | 47 | 6,78 | 2101 | 2279 / 7161 | 29,4 / 5,3 | +19,0/4,0 -5,6/0,3 | +2,5/0,2 -0,1/0,1 |
+| 360 GHOS base | 37,59 | 57 | 7,97 | 1634 | 2772 / 10888 | 27,4 / 4,5 | +14,8/1,6 -4,2/0,1 | +7,2/1,9 -1,1/0,8 |
+| 360 GHOS C2 | 37,61 | 57 | 7,98 | 1647 | 2363 / 7434 | 30,1 / 3,9 | +14,2/0,9 -5,7/0,1 | +8,7/2,0 -1,3/0,9 |
+| 360 METR base | 35,24 | 157 | 8,44 | 1579 | 2765 / 10887 | 21,0 / 6,2 | +7,8/2,1 -2,4/0,5 | +9,3/3,2 -0,1/0,0 |
+| 360 METR C2 | 35,50 | 148 | 8,27 | 1621 | 2365 / 7433 | 19,8 / 5,6 | +6,2/1,4 -2,4/0,5 | +9,6/3,2 -0,1/0,0 |
+- El coche cuesta un 15-20 % menos de CPU (2400 -> 1950 us el Dino, 2770 -> 2370 el 360) y un 31-37 % menos de vertices
+  del TA. Los fps y los cuadros tarde casi no cambian (+-0,3 fps, como en la variante B: lo que deja libre el coche lo
+  ocupa la etapa, cuyo tope sale de lo que gasto lo demas). En PALM bajan los saltos (8 px 33 -> 28 / 29 por s, 32 px
+  7,8 -> 4,9 y 7,1 -> 5,3, casi todos de "tope"); en GHOS suben los de 8 px (27,8 -> 29,3 y 27,4 -> 30,1: mas
+  apariciones "pvs" y desapariciones "tope"; el lejano del Dino baja 1864 -> 1668) y bajan los de 32 px; en METR casi
+  igual (22,5 -> 23,8 y 21,0 -> 19,8 de 8 px; 6,8 -> 6,7 y 6,2 -> 5,6 de 32 px) con algo menos de cuadros tarde.
+  Flycast repite la carrera casi igual (una primera version de C2, con otros ajustes, dio los mismos fps a +-0,2 y los
+  mismos saltos a +-1 por s): diferencias de ese orden son ruido. VRAM: -4 KB por coche de
+  media (-99 KB los 15): poca, porque la pintura, los reflejos, las luces, los emblemas y los atlas con detalle se
+  quedan.
+- Lo que se pierde a la vista (capturas con la imagen congelada, `-DDIAG_CONGELA=1500`, el mismo cuadro): en carrera
+  las curvas de las aletas traseras y del paragolpes salen algo mas poligonales en el contorno (1-2 pixeles a 640x480)
+  y el reflejo de la pintura en la tapa del motor y las aletas sale a facetas (zonas mas planas, mas visible en el 360);
+  las llantas y los neumaticos no se distinguen. Los bajos con la mitad de resolucion. Matriculas, pilotos, emblemas y
+  el motor del 360 igual. La seleccion de coche, igual pixel a pixel (el completo).
+- No verificado en la consola real (alli el TA puede pesar mas que en Flycast y los vertices de menos rendir mas), ni
+  la vuelta al menu tras una carrera en Flycast (la recarga del completo: el mismo camino que el cambio de ficha).
+
+### Coches mas ligeros (Rev 2.9.6)
+
+Pedido del usuario: optimizar los 15 coches del jugador (COCHE00..14.DAT) para ganar rendimiento sin perder estetica,
+midiendo dos variantes y con capturas lado a lado antes de decidir. DESVIACION (las dos): el original lleva el coche
+entero y las texturas a su tamano. Las dos son opciones de tools/conv_coche.py; sin ellas sale lo mismo que antes (el
+COCHE00.DAT de ahora sale igual: 1425 mallas, 12307 vertices). Medido en Flycast, no en la consola real.
+
+- Variante A, `--rebaja` (rebaja_texturas / clasifica_texturas): menos resolucion en las texturas que no se ven de
+  cerca. Regla por las piezas de llamadas() que usan cada textura, ya vaciado el coche: FIJA (no se toca) la de una
+  malla con pintura o reflejo (CEX2), con luz (G_PILOTOS..G_FARO, faros, faro_luz, pilotos*, aleron_freno), la sombra y
+  las de recorte o transparentes (emblemas, letras, matriculas, rejillas); RUEDA (solo buje, pinza y discos): 64 de lado
+  como mucho; INTERIOR (solo el habitaculo +04, que solo dibuja la vista interior): la mitad; OCULTA (opaca, de
+  carroceria / puertas / volante / palanca / habitaculo, con el 85 % o mas de su area sin ver desde las camaras del
+  vaciado contando cristales y rejillas como opacos: bajos, motor bajo cristal o rejilla, lo que solo se ve por las
+  ventanillas): la mitad si la comparte el habitaculo, volante o palanca, si no 64 de lado. Las de 64 o menos no
+  cambian. Filtro de caja con el alfa premultiplicado, y la VQ de siempre. En los 15 coches: 53 de ruedas y discos, 3
+  del interior (la 512x256 del 360 Spider es el salpicadero: solo la usa el habitaculo, queda en 256x128, no en
+  256x256), 4 ocultas (motor y bajos del Enzo, F50, 328 y Dino) y 2 ocultas del habitaculo (Dino y Daytona). Lo de la carroceria, faros, pilotos,
+  emblemas y matriculas no cambia; los bajos del 360 (256x128) y el atlas de motor y habitaculo del 360 (256x256)
+  quedan FIJA porque se ven (spider). VRAM de los 15: 2618 KB -> 2354 KB (360 Spider 229 -> 182 KB, Dino 177 -> 140).
+- Variante B, `--carrera` (parte_carrera): las tiras que no se ven desde la persecucion van aparte con el bit
+  NODO_CERCA (0x10000) en el campo del nodo y la demo no las dibuja en carrera con la camara de persecucion
+  (coche_sin_cerca: estado CARRERA, sin la escena de la salida ni la de la meta, sin mezcla de vistas, no en los
+  finales); la seleccion, el salon, la salida, la meta y la vista interior dibujan todo (el habitaculo ya solo se
+  enviaba con la vista 1: coche_dibuja salta PZ_INTERIOR en las demas, comprobado). Criterio: el del vaciado con otras
+  camaras: se queda en carrera el triangulo que gana algun pixel a 640x480 en 4 o mas de las camaras de carrera de
+  camaras() (detras con +-100 grados de deriva, 1,9-2,9 m de alto, 4,5-6,5 m) por las 6 posturas de las piezas
+  animadas; las luces siempre. Sale lo que solo se ve de lado o de frente desde cerca, desde abajo o desde la
+  seleccion, y lo que asoma en un pixel de 1 a 3 camaras (piezas pequenas a esa distancia). Las tiras se parten como
+  en vacia (huecos de 2); 1 o 2 triangulos sueltos en las puntas se quedan en carrera (partir cuesta 2 vertices). El
+  minimo reservado del TA para el coche (ta_min_otros_teo) cuenta solo lo de carrera (coche_teo_carrera). Compatible:
+  sin el bit (los ficheros de antes) se dibuja y se reserva todo, como hasta ahora. En carrera: 360 Spider 10910 ->
+  9998 vertices, Dino 10089 -> 8631 (todos: -5 % a -15 %); en la seleccion suben 100-300 por los cortes.
+
+PROVISIONAL (pendiente de que el usuario elija con las capturas). Medidas en Flycast (piloto automatico, `-DPRUEBA_AUTO
+-DPRUEBA_SIN_TIEMPO -DDIAG_MS -DPRUEBA_NODO=n -DPRUEBA_FICHA=f`, 140 s; Flycast repite la misma carrera, asi que se
+comparan las lineas MS del mismo tramo de s, de 200 al final comun; coche = us de CPU y vertices de la linea PRF;
+VRAM: textura del coche, libre al cargarlo y zona libre minima de la carrera):
+
+| prueba | fps | tarde | lejano | salto | coche us / vtx | VRAM coche / libre / zona libre |
+|---|---|---|---|---|---|---|
+| 360 PALM base | 39,72 | 7 | 3227 | 3,75 | 2578 / 10616 | 229 / 1594 / 594 KB |
+| 360 PALM A | 39,75 | 6 | 3301 | 3,58 | 2588 / 10616 | 182 / 1641 / 658 KB |
+| 360 PALM B | 39,60 | 13 | 2890 | 4,86 | 2521 / 9704 | 229 / 1594 / 622 KB |
+| Dino PALM base | 39,19 | 35 | 3697 | 2,31 | 2381 / 10054 | 177 / 1646 / 686 KB |
+| Dino PALM A | 39,22 | 33 | 3732 | 2,22 | 2391 / 10054 | 140 / 1683 / 718 KB |
+| Dino PALM B | 39,04 | 41 | 2990 | 4,57 | 2215 / 8596 | 177 / 1646 / 686 KB |
+| 360 METR base | 36,27 | 168 | 1562 | 8,32 | 2655 / 10888 | zona libre 779 KB |
+| 360 METR A | 36,31 | 167 | 1571 | 8,29 | 2653 / 10888 | 843 KB |
+| 360 METR B | 35,98 | 180 | 1550 | 8,37 | 2605 / 9976 | 779 KB |
+| Dino METR base | 35,82 | 198 | 1543 | 8,37 | 2320 / 10081 | 843 KB |
+| Dino METR A | 35,85 | 196 | 1541 | 8,38 | 2322 / 10081 | 875 KB |
+| Dino METR B | 35,78 | 202 | 1556 | 8,33 | 2140 / 8623 | 843 KB |
+
+- A: los fps y los cuadros tarde no cambian (el TA y la CPU son los mismos); la VRAM que deja el coche (37-47 KB) va
+  a la zona del curso (+32 / +64 KB) y en PALM el lejano sube un poco (3227 -> 3301, 3697 -> 3732). Capturas con la
+  imagen congelada (`-DDIAG_CONGELA=1500`, el mismo cuadro pixel a pixel): en carrera no se distingue (diferencias de
+  1-2 niveles de color en las ruedas); en la seleccion las llantas se ven algo mas blandas.
+- B: el coche cuesta menos (-9 % y -14 % de vertices, -2 % y -7 % de CPU) y la imagen congelada en carrera es la misma
+  (4 y 10 pixeles distintos, ninguno del contorno del coche), pero la carrera no va mejor: el TA que deja libre lo
+  ocupa la etapa (el tope de la etapa sale de lo que gasto lo demas en el cuadro anterior), que cuesta mas CPU, y el
+  salto adaptativo sube (PALM: lejano 3227 -> 2890 y 3697 -> 2990; METR igual). Con la reserva de antes
+  (coche_teo_carrera = modelo_teo) sale lo mismo (360 PALM: lejano 2931, salto 4,67): no es la reserva. En la consola
+  real, si el limite es el TA y no la CPU, podria ser al reves: sin medir.
+- Recomendacion (pendiente del usuario): A si; B no en Flycast (el codigo de la demo no cambia nada sin el bit).
+
+### Saltos en las etapas de noche (Rev 2.9.5, 2026-11-23)
+
+Queja (Rev 2.9.4): "las fases de noche tienen elementos que aparecen y desaparecen". DESVIACION. Verificado en Flycast
+(no en consola real: Flycast no da el tiempo del SH4 ni llena el TA como la consola). Medido con `-DPRUEBA_AUTO
+-DPRUEBA_SIN_TIEMPO -DDIAG_MS -DDIAG_POPPING` (lineas POP: saltos por segundo de 8 px o mas / de 32 px o mas, por razon;
+Flycast con la misma compilacion repite la carrera igual, asi que antes y despues se comparan en el mismo tramo).
+- Causas, por razon de DIAG_POPPING:
+  - "pvs" (GHOS: 12,4 apariciones y 12,1 desapariciones por s de 8 px o mas, igual con y sin faros): la PVS de
+    tools/pvs.py, no un fallo de la demo. Sin lowpoly (`-DLOD_GRANDE_D=1e9f`) y sin `decor_reduce` (`-DSIN_DECOR_REDUCE`)
+    sale lo mismo; con `-DSIN_PVS` desaparecen (y no cambian los fps en Flycast). Mirando la tabla de SEG09 (las
+    mascaras de las 634 secciones), nodos enteros como el monte 1 (r 715 m) o los bloques de bosque 193 / 194 / 27
+    (r ~100 m, 40-60 px a 500-900 m) se encienden en rachas de 3 secciones (una sola muestra del ojo los ve por un hueco
+    entre los troncos, mas sus dos vecinas) y se apagan en rachas de 9-30 secciones (1,5-4 s a 200 km/h); la gracia
+    (PVS_GRACIA, 15 cuadros) era mucho mas corta. Y como las muestras van cada 4 m a lo largo y a lo ancho y a 0,6 /
+    3,3 / 6 m de alto, desde la camara entre muestras se ve a veces lo que la tabla da por tapado: aparece al entrar en
+    la primera seccion que lo ve.
+  - "lejos" (METR: 3,1 / 2,0 por s): la emergencia del salto adaptativo (nivel 6..9) bajaba el lejano a 600 m y de ahi
+    subia y bajaba; de noche la franja de niebla del limite es debil (cielo mas oscuro que la niebla).
+  - "tope" (GHOS +12,5 / -5,7, METR +5,6 / -1,7): el reparto del TA; el corte bajaba en el mismo cuadro en cuanto el
+    objetivo, con el 95 % del tope, pedia una clase menos, y el tope cambia cada cuadro (coche, trafico y el nivel del
+    salto, que se mueve un poco en cada cuadro de carrera). Muchas de GHOS a 1155 m son lo tapado 63/64 por la niebla
+    (va a la ultima clase): en GHOS el horizonte es del color de la niebla y no se ven. Probado no tratarlo asi de
+    noche (silueta clara contra el cielo negro): en METR no habia saltos ahi y el TA de mas quitaba cosas cercanas;
+    descartado.
+- Cambios (demo/main.c; cada uno con su `-D` para volver a lo de antes):
+  - PVS_GRACIA 15 -> 240 cuadros (6 s): el nodo que la PVS apaga sigue dibujandose con su ultimo coste. Medido en GHOS:
+    120 cuadros, desapariciones "pvs" 2,4 por s; 200, 1,3; sin coste de fps.
+  - Ventana de la PVS (PVS_VENTANA 3, pvs_ventana / pvs_aplica_v / pvs_coste): ademas de la mascara de la seccion del
+    ojo, las de s - 3 y s + 3 (como las rachas de la tabla son de 3 o mas, lo de toda la ventana, +-24 m); lo que va a
+    verse ya esta dibujado (tapado) antes de verse. 2 mascaras y 8 bytes por nodo mas por modelo (~12 KB en GHOS). En
+    el reparto, el mayor coste de los tres. La medida de las mallas de la PVS (POP "pvs" de despues de "falta") mira
+    ahora lo que se dibuja (pvs_dibujo en pvs_recuerda) y no la mascara.
+  - Histeresis del corte del reparto (REPARTO_SCHMITT, reparto_cabe): el corte de antes se queda mientras lo que dibuja
+    quepa en el 100 % del tope (del TA de la etapa y de los vertices); el objetivo sigue con el 95 %. Lo que se envia
+    sigue limitado por ta_cabe.
+  - SALTO_LEJ_SUELO 1200 m: la emergencia baja el lejano de 2400 a 1200 y no a 600. Probado 1700 (lo que se pedia,
+    1600-1800): en METR 0,2 saltos del limite por s pero mas del tope cerca (20,3 en total frente a 18,7 con 1200), en
+    las demas igual y los mismos fps.
+  - Focos de los faros: FOCOS_ANOTA_D 40 -> 30 m (el haz acaba a FOCOS_LEJOS, 28 m: misma imagen); FOCOSMS en METR
+    713 -> 611 us por cuadro, en GHOS 784 -> 676. FOCOS_VSUB sin tocar (las divisiones son las del haz de cerca). Los
+    faros siguen encendidos toda la etapa.
+- Medido (Flycast, piloto, 140 s por prueba, tres a la vez; mismas medias de mide.py; saltos por s de 8 px o mas / de
+  32 px o mas). "Antes" es la 2.9.4 (`-DREPARTO_SCHMITT=0 -DSALTO_LEJ_SUELO=600.0f -DPVS_GRACIA=15 -DPVS_VENTANA=0
+  -DFOCOS_ANOTA_D=40.0f`):
+
+| Etapa | fps antes / despues | tarde | lejano medio (min) | nivel | saltos 8 px / 32 px | pvs | tope | lejos |
+|---|---|---|---|---|---|---|---|---|
+| GHOS | 38,12 / 37,71 | 106 / 138 | 1578 (600) / 1600 (1200) | 7,17 / 7,98 | 31,3 / 9,1 -> 16,8 / 3,4 | +8,4 -7,5 -> +4,7 -0,5 | +9,0 -3,9 -> +8,0 -3,1 | +0,8 -1,3 -> +0,1 -0,0 |
+| METR | 35,26 / 33,54 | 304 / 414 | 1552 (600) / 1909 (1200) | 7,46 / 7,54 | 23,3 / 7,8 -> 18,7 / 5,3 | +6,2 -2,1 -> +5,4 -0,1 | +6,5 -1,9 -> +8,4 -2,2 | +3,0 -1,6 -> +0,4 -0,4 |
+| PALM | 38,17 / 38,10 | 96 / 104 | 1983 (600) / 1971 (1200) | 6,22 / 7,00 | 31,9 / 9,3 -> 22,8 / 5,9 | +4,9 -3,5 -> +2,2 -0,1 | +16,8 -4,3 -> +15,7 -4,0 | +0,9 -1,3 -> +0,3 -0,3 |
+| INDU | 38,62 / 38,54 | 86 / 90 | 2260 (886) / 2149 (1200) | 5,53 / 6,27 | 29,8 / 12,1 -> 21,7 / 5,8 | +9,5 -6,6 -> +6,0 -0,1 | +9,4 -3,9 -> +10,6 -4,5 | +0,1 -0,1 -> +0,1 -0,3 |
+
+  Los de 32 px o mas bajan a la mitad o menos en todas. METR pierde 1,7 fps (cada parte ~0,4-0,5: la ventana, la
+  histeresis del reparto y el suelo del lejano; la gracia no cuesta): es la que ya no llegaba (la ciudad cercana,
+  ~28 ms de CPU por cuadro en Flycast) y se eligio menos saltos (pedido). Lo que queda: apariciones del tope al
+  acercarse (lo que entra por la clase de distancia o de LOD) y las mallas de la PVS dentro de nodos que ya se dibujan
+  (METR ~40 por s de 8 px o mas, casi todas de cosas que salen de detras de otras). `-DPVS_VENTANA=0`,
+  `-DREPARTO_SCHMITT=0`, `-DPVS_GRACIA=15`, `-DSALTO_LEJ_SUELO=600.0f`, `-DFOCOS_ANOTA_D=40.0f`: lo de antes.
+- NO verificado en consola real (alli el TA y la CPU pesan distinto: la ventana y la gracia dibujan algo mas).
+
+- RAM (comprobado en el GDI de la 2.9.5): la ventana de la PVS guarda los costes de sus dos secciones en 16 bits
+  (unidades de 32 bytes; con 32 bits el menu perdia 54 KB). Aun asi el menu queda con ~383 KB libres (426 KB en la 2.9.3:
+  los records de la 2.9.4 y la ventana) y al arrancar sale una vez "Out of memory ... diff 217088": es newlib, que pide
+  al monton el bloque con su margen y no cabe; la peticion se sirve con lo que ya hay (SALIDA.DAT y lo demas se leen
+  bien, nav3 llega a la carrera sin errores en el clasico y en el taxi). Hay menos margen: vigilarlo en la consola.
+### 40 fps adaptativos y lejano 3800 (Rev 2.9.4, 2026-11-23)
+
+Pedido: "que mantenga los 40 fps con frameskip progresivo adaptativo y que aumente la distancia de dibujado a 3800".
+DESVIACION. Verificado en Flycast (no en consola real: Flycast no da el tiempo del SH4 ni llena el TA como la consola).
+- LEJOS_MAX 3200 -> 3800 (demo/main.c): el arranque, el lejano de la carrera, lejos_guion y los topes de la meta, la
+  franja de niebla del limite y el lowpoly de lo grande (LOD_GRANDE_FR 0,8: el completo hasta 3040 m). LEJOS_PS2 (4000)
+  sigue para el proyector de los faros (40A950). Revisado: ninguna tabla depende del lejano; el cielo va a 1/w 1,2e-4
+  (8333 m), mas alla; la niebla (129 entradas, a lejano / t) se rehace sola al cambiar el lejano.
+- Salto progresivo ADAPTATIVO (SALTO_*; antes, 2.9.2.e/f, un contador de cuadros tarde con 4 niveles y el recorte por
+  CPU aparte de 50 m cada 30 cuadros): un nivel continuo salto_q 0..9 que cada cuadro de carrera sigue al trabajo medio
+  del cuadro (pres_trab: de pres_espera a pres_espera sin la espera al campo; media de 1/16) contra los 25 ms de un
+  cuadro a 40 fps: sube por encima de 24 ms en proporcion a lo que falte (como mucho 0,03 por cuadro) y +0,08 por cuadro
+  tarde; baja por debajo de 22 ms (como mucho 0,012 por cuadro) si no hubo ninguno tarde en 1 s; entre 22 y 24 ms no se
+  mueve (histeresis). Leyendo del GD no se mueve. Tramos, lineales (sin escalones):
+  0..3 el tope del TA de la etapa y de los vertices del reparto al 94 / 87 / 80 %; 3..6 el lejano 3800 -> 3200 -> 2800
+  -> 2400 m; 6..9 emergencia, el lejano a 600 m (lo que hacia el recorte por CPU, 4 veces mas despacio). El lejano sigue
+  al del nivel a 240 m/s al bajar y 160 m/s al subir, dentro de la franja de niebla del limite (que ya no salta de 0,85
+  a 0,55: 0,85 hasta 2400 m y de ahi a 0,55 en 600 m, seguido). Al cambiar de etapa el nivel vuelve como mucho a 3 (el
+  lejano entero). La logica sigue a 59,94 pasos por segundo. `-DSIN_SALTO`: sin el, con el recorte por CPU de antes.
+- Por que primero el TA: medido en METR (mismos tramos de la carrera) con el lejano fijo, 3800 m 35,2 fps (355 cuadros
+  tarde), 2400 m 35,6 (447) y 3800 m con el TA al 80 %, 36,5 (269): el reparto del TA ya limita lo que se envia y el
+  lejano solo ahorra por debajo de ~1000 m. En PALM, 3800 m fijos sin recorte: 39,13 fps (51 tarde), lo mismo que 3200
+  con el recorte de antes (39,12, 53).
+- Medido (Flycast, piloto, -DDIAG_MS, -DPRUEBA_NODO=n, 150 s; medias de toda la etapa; "comun": solo los tramos de 500 m
+  que recorren las dos pruebas):
+
+| Etapa | 2.9.3 (3200, salto 2.9.2.f): fps / desv. / tarde / lejano | 2.9.4 (3800 + adaptativo): fps / desv. / tarde / lejano / nivel | comun fps / tarde |
+|---|---|---|---|
+| PALM | 39,12 / 2,73 / 53 (1,8 %) / 2565 m | 39,15 / 2,68 / 49 (1,7 %) / 3714 m / 1,39 | 38,90 / 53 -> 38,92 / 49 |
+| INDU | 39,38 / 2,07 / 38 (1,1 %) / 2748 m | 39,59 / 1,46 / 17 (0,6 %) / 3800 m / 1,02 | 39,06 / 34 -> 39,25 / 17 |
+| METR | 37,20 / 4,09 / 238 (5,7 %) / 2112 m | 37,27 / 3,51 / 194 (6,0 %) / 1664 m / 7,21 | 36,98 / 238 -> 36,99 / 194 |
+| RUIN | 39,61 / 2,33 / 8 (0,2 %) / 3044 m | 39,80 / 0,57 / 4 (0,1 %) / 3577 m / 0,31 | 39,40 / 8 -> 39,49 / 4 |
+
+  En PALM, INDU y RUIN el lejano queda en 3800 casi siempre con los mismos fps o mejores. METR (noche) no llega a 25 ms
+  ni con todo recortado (la geometria cercana de la ciudad, ~10 ms de etapa con 600 m): el nivel acaba en la emergencia
+  y el lejano baja mas que antes (de noche casi no se ve); sin la llegada (la escena de la meta, ~130 tarde en las dos),
+  63 cuadros tarde frente a 109. Pendiente aparte: en PALM, tras leer SEG05, los objetos de la union (bo_dibuja) gastan
+  14-18 ms durante ~2 s (32 fps con cualquier nivel); el tope de subida evita que ese pico se lleve el lejano al fondo.
+
+### Rankings y records (Rev 2.9.4)
+
+Tres cambios de paridad (SLES-53998, analisis estatico del ELF). Sin verificar en Flycast ni en consola real en esta
+entrega: compilado; la logica nueva de comun/rksp.c probada en el anfitrion (insercion, RKTA <-> 16 bytes, RKU2 de ida
+y vuelta). Datos de prueba nuevos (no van al repo): GOALT.DAT y TABLERO.DAT regenerados en /dev/shm/datos294/ (pasos
+`fin` y `tablero` de tools/regenera.py, o `python3 -I tools/conv_fin.py <iso> <dir>` y
+`python3 -I tools/conv_tablero.py <iso> <dir>`). Con los ficheros de antes todo sigue funcionando sin lo nuevo.
+
+**1. Tiempo del fantasma en la meta de la Contrarreloj de una etapa** (demo/fin.c fin_tabla_*, demo/main.c
+tabla_entra / modo 19, tools/conv_fin.py tabla()):
+- Original: el GAD de la meta 0x19e6d0 (= 498670 del PC; modos 19 y 22; 0x19f2f8 en los 20 / 21) tiene, antes de la
+  tabla de etapas, la rama 0x19e918 `if (v == 7 && 0x21cb28())` con 0x21cb28 = 48B350 = `[0x373e54] < 0x3C` (el codigo
+  del curso): en la CONTRARRELOJ DE UNA ETAPA no hay tabla 0x1a05f8 ni panel 2C00AF, sino la escena 2B0063 ("MEJOR
+  TIEMPO:", banco 0x2B, cuadros 0..0x46) y el tiempo del registro 2 del fantasma. Pasos [0x577c86] (0x3ef290): 0
+  (0x19e960) 0x20a010(2) ('NHOT' en el registro 2; sin el, 0x1b4a10(0): el modo acaba) y 0x114d00(0x2B0063, capa 0,
+  modo 1, 0, 0x46); 1 (0x19e9ac) mientras 0x115230(h) == 1 el temporizador a 0xB4; 2 (0x19e9cc) mientras suene la voz de
+  GOAL (0x1b8e10 = 49A190) lo mismo, despues el efecto 0xB0 una vez y en cada paso 0x19fe08(0xCD, 0xF5, blanco)
+  (= 497430: 466190(2) en ms, fuente 4, "% 2d'%02d\"%03d", 20 px por caracter) hasta 0x1b4a20() < 10; 3 (0x19ea24)
+  0x114eb0(h). El registro 2 lo pone 467C60 en cada stage clear si la vuelta mejora: en la meta es min(record anterior,
+  esta carrera).
+- Correccion: la escena es la **2B0063**; la 2B0061 del PS2 es el rotulo "Posicion" del puesto (0x1c02d8). La 2B0061 del
+  PC es otra numeracion. (Lo que decia la seccion del fantasma, Rev 2.9.2, queda corregido.)
+- La DC ensenaba en la contrarreloj de una etapa la tabla de etapas y T_PANEL7: **fallo de paridad corregido (cambio
+  visible)**. Ahora (fin_tabla_t.solo = variante 7 y codigo < 0x3C): GOALT.DAT trae el grupo T_MEJOR (2B0063, 71
+  cuadros, una textura de 64 KB); fin_tabla_entra entra en el primer paso de la meta (no a los 0xB4), sube solo
+  T_MEJOR y T_CH y dibuja la escena (cuadros 0..0x46) y, acabada, el mejor tiempo en (205, 245) en blanco con T_CH;
+  fin_tabla_quita (paso 3) la quita cuando al modo le quedan 10 cuadros. mejor_ms = min(gh_rep_cab.total_ms, esta
+  carrera) (gh_mejor), el equivalente del registro 2 (tambien cuando gh_meta no guardo por gh_lleno). Con solo, el HUD
+  (hud_aviso("META")) no se baja al entrar sino a los 0xB4 cuadros, como antes. Las metas A..E, las del reves y los
+  cursos seguidos (codigo >= 0x3C) y la variante 1 siguen igual.
+- DESVIACION: sin la espera de la voz de GOAL (el tiempo sale al acabar la escena, quiza antes que en el PS2) ni el
+  efecto 0xB0. Con un GOALT.DAT de antes (sin T_MEJOR) se ensena solo el tiempo y sale un aviso en el registro.
+  SIN PORTAR: la copia de los modos 20 / 21 (GAD 0x19f2f8, fin del tiempo: PROBABLE que no se llegue nunca).
+- tools/conv_fin.py comprueba el codigo del PS2 (0x19e96c / 0x19e984 y 0x19f57c / 0x19f594 = 2B0063, 0x46, 0xCD / 0xF5,
+  fuente 4, formato 0x3ef3c8, 0x3C de 48B350, < 10 de 0x19ea10) y, con dir_previas, hace la maqueta tabla_mejor.png.
+- Probar: `-DPRUEBA_AUTO -DPRUEBA_VARIANTE=7 -DPRUEBA_TA_CODIGO=0 -DPRUEBA_MILLAS -DPRUEBA_TABLA` con el GOALT.DAT nuevo:
+  dos carreras (REINTENTAR); la primera ensena su tiempo, la segunda el menor; con `-DPRUEBA_TA_CODIGO=0x3c` (meta A)
+  la tabla de siempre; con `-DPRUEBA_VARIANTE=1` sin cambios. En el registro: "FIN: Contrarreloj de una etapa, MEJOR
+  TIEMPO n ms, VRAM libre nK".
+
+**2. Lista de records en los tableros de la CONTRARRELOJ** (comun/menu.c tb_lista_*, tools/conv_tablero.py):
+- Original: la lista 0x267120 (= 51E080 / 51C050 del PC; registros de 0x14A4 bytes): 0x267210 reset (modo 1: 5 filas a
+  la vista y las flechas 0x440034 cuadros 0..0xa, capa 8, modo 3), 0x2674d8 anade, 0x269880 rellena, 0x268910 dibuja
+  y 0x268d88 da el cuadro de cada columna con la tabla 0x41dcb8 (150 x {token, primero, ultimo}, = 5E70F8 del PC con
+  los tokens del PS2) y las locales 0x41db18 (B30), 0x41db38 (B16) y 0x41db48 (D30). Tablero 0x26 (0x24f620 /
+  0x250c80 / 0x250e2c): 10 filas de clase 6; 0x27 (0x2582d8..0x258388): 10 de clase 7. Cada fila en (99, i x 36 -
+  100): fondo 0x440035 (0..10 de entrada, capa 4, luego el 10), puesto 0x440040, cambio 0x440037, bandera 0x440038,
+  configuracion 0x440039, coche 0x44003a (D30), ruta 0x440041 (B16; cuadro 31 con el curso seguido); nombre (fuente
+  0xe) en (316, 124 + 36 i) y tiempo "%2d'%.2d'%.3d" en (484, misma y). Datos sin red: las tablas 0x2804 / 0x9154 /
+  0x4d84 de la partida (0x269b60 = 51D0F0).
+- DC: TABLERO.DAT lleva el grupo de atlas 'L' (escenas 0x35, 0x40, 0x37, 0x38, 0x39, 0x3a, 0x41, 0x34: una textura VQ
+  de 512x256) y, detras de 'TAB1', el bloque 'LST1' (la tabla 0x41dcb8, B30 / B16 / D30 y las constantes 99, -100, 36,
+  124, 484, 316, 5 y 82, todas comprobadas en el codigo por el conversor). tb_abre lo usa si esta (con un TABLERO.DAT de
+  antes: sin lista, como en la 2.9.3). TABLERO.DAT pasa de 959680 a 1023872 bytes (animacion recortada 134 KB); medir en
+  Flycast el dbglog de tb_abre (tablas en el hueco de 256 KB y VRAM libre: antes 481..516 KB).
+- Que lista: metas A..E (0x3c..0x45) de rkuj (las dos tablas de cambio mezcladas por tiempo, las 10 mejores);
+  metas del reves, cursos seguidos y etapas de RKTA (ver 3). La lista sigue a la posicion del carrusel, a R y al juego.
+- Control: abajo lleva el foco a la flecha de abajo y luego a la de arriba (cuadros 0xb / 0xc; 0xa sin foco), arriba lo
+  deshace, A con el foco en una flecha pasa de pagina (puestos 1..5 / 6..10); con el foco en la lista el carrusel no se
+  mueve y el cursor 0x4400f2 no se ve; B vuelve el foco al carrusel (PROBABLE). En la etapa 0 de 0x27, abajo sigue
+  siendo la opcion B si esta desbloqueada; DESVIACION: abajo con la opcion B puesta la quita y lleva el foco a la lista
+  (el original solo la alterna y las filas 6..10 de la etapa 0 no se podian ver).
+- DESVIACIONES: el cambio mezclado (el PS2 tiene una tabla por meta con el cambio en el registro), nombre de 4
+  caracteres, filas vacias con fondo y puesto sin texto, sin la fila resaltada (cuadro 11), sin el deslizamiento al pasar
+  de pagina (51C220), columnas sin la entrada animada (solo el fondo); el tick de cada fila no esta desensamblado en el
+  PS2 (se toma el 51DB70 del PC). Los textos de las filas (0x268a74..0x268b00 / 0x26b758): fuente 14 en (316 / 484,
+  124 + 36 x fila) con las banderas 1 de 0x116aa8 (sin alinear, la y arriba de las letras; antes 9, centrado en
+  vertical, y salian subidas y cortadas por el borde de la fila). La bandera de la fila se limita a 0..25 (0x41dcb8:
+  26 cuadros de 0x440038; DESVIACION, como tarjeta()). SIN PORTAR: la barra de ayuda con lista, la lista con red (0x226df8 / 0x5f8598), "Total players", filtros,
+  rotulos (60, 342) / (60, 82), las listas del tablero 0x25 (0x440065 / 0x4400a4) y la del OUTRUN (0x24).
+- Probar: con el TABLERO.DAT nuevo, UN JUGADOR -> CONTRARRELOJ -> CURSO / ETAPA; mover el carrusel, R, abajo y A.
+  `-DPRUEBA_TABLERO_TODO` desbloquea las ETAPAS y METAS.
+
+**3. rk_un_jugador revisado y records de la CONTRARRELOJ por codigo** (demo/main.c, comun/rksp.c, comun/menu.c,
+demo/nombre.c):
+- Correccion de atribucion: 0x5f8598 / 0x2270a8 / 0x226df8 / 0x227310 son el cliente de los rankings EN RED (DNAS; una
+  cola de 16 peticiones de 0x14 bytes que despacha 0x227128; 0x226fc0 acepta los id 0x21..0x74, uno por codigo de la
+  Contrarreloj 0x00..0x53; 0x1bbcac..0x1bbfb8 sube el registro al acabar). Las tablas locales del PS2 son
+  \Common\def_orhiscores.bin (0x3ef798), cargadas por 0x1a18e8 / 0x1a1910 en 0x577d44 (PROBABLE, formato sin leer).
+  0x1a65c8 / 0x1a7180 (47EE70 / 47EF30) son los records por etapa de la variante 0 de OUTRUN2SP (QHOT), no los de la
+  consola.
+- rk_un_jugador: los corazones saturan a 0xfff (antes `& 0xfff` daba la vuelta pasados 4095; tambien en demo/nombre.c;
+  DESVIACION: el original guarda 12 bits); sin la variante 2 con los presets 2 / 3 (pisaria las tablas de la variante
+  0); el coche es el de la salida (rk_modelo = menu_modelo() junto a manual_; antes se leia al final y dependia del
+  estado del menu); tras insertar marca la licencia con cambios sin guardar (menu_marca_cambios, +3F4 |= 2).
+- RKTA (nuevo): los records de la CONTRARRELOJ de las etapas sueltas (0x00..0x3b), metas del reves (0x46..0x4f) y cursos
+  seguidos (0x50..0x53): 74 tablas de 10 filas de 8 bytes (u32 ms en los bits 0..22, modelo << 23, bandera << 27;
+  nombre de 4 con el cambio en el bit 7 del primero), insercion con < estricto. rk_un_jugador los registra al llegar a la
+  meta (no con la opcion B de la etapa: corre la etapa normal). Las metas A..E siguen en rkuj.
+- VMU, fichero version 4: 'RKSP' (igual), 'RKU2' (los records de UN JUGADOR compactos: solo las 42 tablas usadas,
+  6720 bytes en lugar de las 0x2bc0 de 'RKUJ') y 'RKTA' (5924 bytes), los dos con u32 de tamano detras de la marca. Se
+  siguen leyendo 'RKUJ' y los ficheros de antes; los lectores de la 2.9.3 paran en 'RKU2' (conservan 'RKSP', pierden
+  los records de UN JUGADOR). Tamano con VMU.DAT: 66 bloques con todo (64 la 2.9.3, 42 la version 2).
+- RANKINGS: con UN JUGADOR, R pasa por un cuarto modo CONTRARRELOJ ETAPA (izquierda / derecha: 15 etapas, metas del
+  reves A..E y curso seguido; X el sentido; Y el juego) con el tablero de la entrada de nombre (nombre_t consulta 3 con
+  tabla16 = rkta_fila16) y el fondo del registro de la etapa: solo distingue las metas (RANKSP.DAT 0x40d248: las
+  etapas que no son meta llevan todas el 0x37000C / 0x37000D de la meta A), asi que la posicion va en un rotulo de la
+  banda ("ETAPA n NORMAL / REVES", "META x REVES", "CURSO ...") y el titulo va sin la linea "META A". DESVIACION (el
+  original los ensena en la lista de los tableros y en la red).
+- Meta de la Contrarreloj de una etapa (tabla_solo): la escena MEJOR TIEMPO se abre una vez por carrera (tabla_hecha):
+  antes se volvia a abrir en las millas (fin_tabla_sale la quitaba y con solo el umbral es el cuadro 0) y sin GOALT.DAT
+  se reintentaba en cada paso; el HUD se baja a los 0xB4 cuadros tambien si la tabla no se pudo abrir. Medir en la
+  consola: entre el cuadro 0 y el 0xB4 la VRAM libre baja a 45..57K (HUD y MEJOR TIEMPO a la vez).
+- Probar: con licencia, `-DPRUEBA_VARIANTE=7 -DPRUEBA_TA_CODIGO=0 -DPRUEBA_MILLAS` sin `-DPRUEBA_AUTO` no registra con el
+  piloto: correr con el mando una etapa (registro: "RANKING: contrarreloj codigo 0x00: n ms, puesto 1 (RKTA)"),
+  guardar (Y), reiniciar y ver la fila en el tablero de ETAPAS y en RANKINGS -> UN JUGADOR -> R x 3. `-DPRUEBA_FIN=m`
+  y `-DPRUEBA_SIN_TIEMPO` para acabar antes / llegar a la meta.
+
+### Auditoria del usuario (Rev 2.9.3 / Mod 2.5.3, 2026-11-23)
+
+Pedido: "audita revisa y corrige" (lista de fallos de la 2.9.2.f). Verificado en Flycast (no en consola real).
+- Faros de noche que se encendian y apagaban solos: el salto progresivo (2.9.2.e) quitaba los faros y los focos desde el
+  nivel 1, que sube y baja durante la carrera. Ahora no dependen del salto (demo/main.c faros_dibuja / focos_prepara).
+- "Zonas azules" en INDUSTRIAL COMPLEX y "bloques blancos" en ANCIENT RUINS: la version lejana lowpoly de la 2.9.2.d (12 %
+  de los triangulos, el color medio de cada textura) desde 900 m se veia como bloques planos oscuros (forzada de cerca:
+  fachadas negras y gris azuladas) o, con la niebla, claros. LOD_GRANDE_FR (0,8): el completo hasta el 80 % del lejano
+  (2560 m con 3200) y el lowpoly solo en el ultimo tramo, dentro de la franja de niebla. LOD_GRANDE_D (900) queda como
+  minimo. El hueco blanco al fondo del desfiladero de RUIN sale igual sin lowpoly y sin franja: es el limite de 3200 m.
+- CONTRARRELOJ sin el derrape de la salida: demo/meta.c callaba los efectos de la escena de salida (op 5) con la
+  variante 6 / 7 tomando 450240 por la variante; 450240 es el estado del fin de la carrera ([7D38F0] del PC, 0 en la
+  salida, 450230 lo pone al acabar): los efectos suenan en todos los modos.
+- SALON, COLORES DEL COCHE: el coche que se ensena es el de 0x41ba30[fila] (0x25ce50: [+0x410] x 8); la DC sumaba el
+  0x49 de la tabla de rotulos y ensenaba el coche y el color de 73 filas mas abajo. Comprobado fila a fila (DINO 246 GTS,
+  365 GTS/4 DAYTONA, F50 en sus colores).
+- SALON, cabecera: el original pone la de la clave 0x2B de 0x416B70 (0x23D5B8 -> 0x440077, "showroom"); la DC dejaba la
+  de ELEGIR MODO. Va en SALON.DAT (grupo COMUN de tools/conv_salon.py; MENU.DAT lleva el arte de OUTRUNNERS hecho
+  aparte y no se rehace); con un SALON.DAT de antes, la de ELEGIR MODO.
+- Ecualizador de la radio (MUSICA): la escena 0x4400A7 es una sola pieza de un cuadro y los titulos (0x44002E..30)
+  solo mueven las letras (que la DC ya animaba); el usuario ensena en un video del PS2 la rejilla de puntos de la radio
+  encendida por columnas. No encontrado donde lo dibuja el PS2 (PROBABLE: la capa de 640x480 sin cuadros, n = 0, de la
+  escena de la lista 0x4400C6, que rellena el codigo). DESVIACION (comun/menu.c eq_dibuja): la rejilla (20 columnas de
+  3 px cada 4 desde x = 267, 5 filas de 1 px cada 2 desde y = 252, medida en la escena) se enciende en el azul de los
+  titulos (66, 150, 204) con alturas al azar (mas altas en los graves), no sacadas de la musica.
+- Bocina en X (pedido): el PS2 no tiene bocina; el PC si (boton 2, [82F23C] -> la acompanante dice la voz 0x163 en el
+  modo OutRun, 489A90). DESVIACION: X ya no frena (B y el gatillo L si) y es la bocina: sonido propio sintetizado
+  (comun/sfx.c sfx_bocina, dos tonos de 400 / 500 Hz en PCM de 16 bits en bucle mientras se pulsa) y en el modo OutRun
+  la voz 0x163, que esta en HC.PAK del PS2 (tools/conv_sonido.py la anade a VOCES.DAT; tools/regenera.py rehace el
+  sonido si VOCES.DAT no la tiene). Probado en Flycast (sin sonido en la prueba): 18 bocinazos en 90 s sin fallos.
+- Todas las voces de la acompanante (pedido): asustada (al pasar rozando el trafico a mas de 120 km/h) y trompo (choque
+  del estado 7), que el original solo dice en COAST 2 COAST, y 0x71 / 0x78 (en ORC.PAK sin uso en las tablas) en el
+  sorteo de los derrapes. DESVIACION.
+- CONTRARRELOJ de una etapa final (el "partenon encima de la bifurcacion", captura del usuario en CAPE): el registro de
+  44D720 lleva la union 0 con hijos 0 / 0 (la bifurcacion) y el decorado de la meta de la etapa quedaba encima.
+  DESVIACION (demo/main.c ta_meta_final): en una etapa que es final en algun arbol de CURSO.DAT / CURSOTA.DAT, su union
+  de meta (CAPE: BK14 en vez de BK276), sin rehacer datos. Verificado en CAPE: la meta con el templo detras del GOAL.
+  Las etapas no finales (1..12) acaban en la recta de la union 0 como antes; las metas A..E (meta C por el menu) sin
+  cambios.
+- INFARTO, corazones al adelantar: funcionan (prueba con el piloto: peticion de adelantar, +217 y +247 corazones, anillo
+  y corazones volando). En el modo OutRun el original no da corazones.
+- (Anadido en la Rev 2.9.4, ver Rankings y records) La Contrarreloj de una etapa no ensena la tabla de etapas en la meta
+  (0x19e918 / 0x21cb28) sino 2B0063 "MEJOR TIEMPO:" y el tiempo del fantasma; los records de UN JUGADOR de la 2.9.3
+  atribuian a 0x5f8598 / 0x2270a8 la base local y son los rankings en red; los corazones de INFARTO daban la vuelta
+  pasados 4095.
+
+### Franja de niebla en el limite y edificios lejanos (Rev 2.9.2.f / Mod 2.5.2.f, 2026-11-23)
+
+Pedido: "se aprecian calvas al final de la distancia de dibujado ... como una niebla en el limite de dibujado" y "hay
+algunos edificios que no renderizan ahora y antes si".
+- Niebla del limite (niebla_pon): con el lejano en su maximo (LEJOS_MAX, 3200 m) no habia fundido (la condicion venia de
+  cuando el maximo era el 4000 del original): el corte se veia seco. Ahora siempre una franja del NLIM_FRANJA (0,85) x
+  lejano al lejano que lleva lo de la escena al color de la niebla de la etapa (acortado por la CPU, desde 0,55 como
+  antes); de noche (cielo mas oscuro que la niebla) con la fuerza de la luminancia del horizonte / la de la niebla.
+- Edificios: tools/lod_grande.py dejaba en la version lejana solo los triangulos opacos; en las etapas de ciudad las
+  fachadas con ventanas van en la lista de recorte y de lejos el edificio se quedaba en el esqueleto o casi vacio (en
+  NEWY 53 de 364). Ahora opacas y de recorte, con la textura reducida a la media de sus texeles opacos. En las 560
+  etapas y uniones: 22836 nodos, 6.551.544 -> 466.476 triangulos.
+- Salto progresivo mas suave: tope del TA al 94 / 87 / 80 % (antes 90 / 80 / 70 %), que en lo pesado dejaba fuera
+  edificios lejanos.
+
+### 40 fps fijos y salto progresivo (Rev 2.9.2.e / Mod 2.5.2.e, 2026-11-23)
+
+Pedido: "frameskip progresivo e intentar que los fps se mantengan fijos a 40". DESVIACION. FPS_OBJETIVO 45 -> 40 (a 60 Hz
+un cuadro cada 1 y 2 campos alternos; a 50 Hz 4 cada 5), CPU_MS_CORTA / ALARGA 21 / 17 -> 24 / 20 ms (cuadro de 25 ms).
+Salto progresivo (demo/main.c, SALTO_*): cada 40 cuadros dibujados en carrera, con 2 o mas que empezaron tarde un nivel
+mas, con 3 ventanas seguidas sin ninguno uno menos; nivel 1 sin los focos de los faros sobre la escena ni la luz del
+suelo y el tope del TA de la etapa al 90 %, nivel 2 al 80 %, nivel 3 al 70 % y el lejano como mucho a 2400 m. La logica
+sigue a 59,94 pasos por segundo (un cuadro tarde no frena el juego). Medido (Flycast, piloto, ~100 medidas):
+PALM 41,8 fps (desviacion 3,80, 178 cuadros tarde) con 45 sin salto -> 39,2 (2,63, 53); LASV 41,4 (4,00, 196) -> 39,4
+(1,41, 30). `-DSIN_SALTO`, `-DFPS_OBJETIVO=45`: como antes.
+
+### Version lejana lowpoly de lo grande (Rev 2.9.2.d / Mod 2.5.2.d, 2026-11-23)
+
+Pedido: "modelos lowpoly y texturas de baja resolucion para los elementos grandes como puentes, montanas, bloques de
+edificios, ruinas, piramides ... cuando el coche este a 900 m cargara completo". DESVIACION. tools/lod_grande.py (detras
+de lod_veg.py en conv_tramo / conv_union; en una carpeta ya hecha `regenera.py --interno lodgrande`, que el programa de
+Windows clasico pasa al final y el del taxi sobre los datos de tu GD):
+- candidatos: nodos de radio >= 40 m, al menos el 60 % de sus vertices en la lista opaca, >= 6000 bytes teoricos del
+  TA, no carteles ni con version lejana de vegetacion;
+- version lejana: solo sus triangulos opacos, agrupados en una rejilla que crece hasta el 12 % de los triangulos
+  (24..400), en tiras voraces, sin textura: la textura reducida a 8x8 cocida en el color de los vertices (textura x
+  color / 255, como MODULATE): 0 KB de VRAM;
+- en el fichero como los lejanos de lod_veg.py (NODO_LEJ + NODO_LEJ3D 0x40, cartel -1, el completo con cartel = -2 -
+  lejano; la PVS reindexada).
+En las 560 etapas y uniones: 18725 nodos grandes, 5.500.137 -> 451.643 triangulos (8,2 %); como mucho 89 por fichero y
+~100 KB de vertices mas (el hueco de la etapa crece: RAM libre en el menu 575 -> 444 KB, OUTRUN2SP 505 KB, sin "Out of
+memory"). demo/main.c nodos_visibles: con NODO_LEJ3D el lejano si lo mas cercano del nodo esta a mas de LOD_GRANDE_D
+(900 m) por delante, el completo al acercarse (histeresis 50 m). Medido (Flycast, piloto, OR2 rama derecha, PRUEBA_SALTO
+1500): 5-11 grandes en lowpoly por cuadro en PALM; apariciones por el tope del reparto 1566 -> 1369 (-12,6 %); 42,7 fps
+igual (lo que se ahorra de lejos lo gasta lo que antes no cabia). `-DLOD_GRANDE_D=m`: otra distancia.
+
+### Little Bloste y lejano a 3200 m (Rev 2.9.2.c / Mod 2.5.2.c, 2026-11-23)
+
+Pedido: quitar SH4ZAM y hacer las cuentas con una herramienta propia, Little Bloste, documentada; y el lejano maximo a
+3200 m. comun/lbloste.h (docs/LBLOSTE.md): carga / guarda de la XMTRX con FRCHG y FMOV.S, FTRV y el producto de matrices
+de filas, con su version en C (-DSIN_LBLOSTE). Los tres usos de antes (recorte de nodos, UV del entorno del coche,
+matrices de los personajes) con las mismas cuentas. Autoprueba (-DLBLOSTE_PRUEBA, 4000 casos): XMTRX exacta al guardar
+lo cargado, error maximo ~2e-7 de la suma de los terminos (como la cuenta en C). PALM: 41,50 fps (C: 41,31). LEJOS_MAX
+3500 -> 3200 m. SH4ZAM fuera de tools/instala_entorno.sh y de windows/construye.sh (y su licencia del paquete).
+
+### Lejano a 3500 m (Rev 2.9.2.b / Mod 2.5.2.b, 2026-11-23)
+
+Pedido: "reducir la distancia de dibujado maxima de 4000 a 3500 de forma global". DESVIACION. LEJOS_MAX (3500) es el techo
+del plano lejano en la carrera, la salida, la meta (el op 20 del guion de la meta, 4000, se recorta) y al volver de cada
+escena; LEJOS_PS2 (4000) queda como el del original para el proyector de los faros (40A950) y las cuentas. El recorte
+por CPU sigue igual (minimo 600 m, -50 m por cuadro por encima de 21 ms, +50 m por debajo de 17 ms). Medido en PALM
+(Flycast, piloto, 95 muestras): lejano medio 2203 -> 1750 m, 41,5 -> 41,7 fps (dentro de lo que varia una prueba).
+`-DLEJOS_MAX=4000.0f`: como antes.
+
+### Fantasma simplificado, menos repetidos, menos trafico y la meta desde la vista 1 (Rev 2.9.2.a / Mod 2.5.2.a, 2026-11-23)
+
+Pedido del usuario (todo DESVIACION salvo la meta):
+- **Fantasma**: "que no tengan color, menos poligonos sin textura, que conserven su traslucidez" (con el coche entero el
+  TA no daba para la etapa). tools/conv_coche.py `fantasma`: bloque GHO1 con las caras de las envolventes de los trozos
+  convexos de los volumenes de sombra sin las interiores (182-566 triangulos segun el coche); demo/main.c gh_dibuja: sin
+  textura, gris azulado con la luz de la normal, alfa 0,44, lista transparente. PALM (piloto): 42,8 -> 42,2 fps con el
+  fantasma a la vista (con el coche entero de la 2.9.2: 41,2). Los COCHEnn.DAT sin GHO1 (de antes) no dibujan fantasma.
+  GHO1 con los vertices en mm (i16, 20 bytes por triangulo) y COCHE_RAM 480 -> 496 KB: el mayor, COCHE13, pide 480 KB
+  (con GHO1 en f32 no cabia en el bloque y la musica del menu daba "Out of memory").
+- **Repetidos y segunda fila** (decor_reduce, todas las etapas, al leer): vegetacion 15 -> 30 % ("10 palmeras -> 7");
+  objetos iguales repetidos fuera de la calzada (misma firma: vertices, texturas y medidas; no pegados a otro igual ni
+  con algo grande encima) 1 de cada 3 ("3 carteles -> 2"); edificios tapados por otro del mismo lado mas cerca de la ruta
+  (80 % de su tramo, 70 % de su alto) 1 de cada 3. Medido (OR2, rama derecha): PALM 37 de 109 repetidos y 1 de 3
+  edificios, ALPI 1 / 1, DESE 10 de 39, GHOS 4 de 10, CAPE 2 de 6 y 1 de 3. Capturas del recorrido: sin huecos.
+- **Trafico -5 %**: 1 de cada 20 aperturas del trafico de la calle (478B90) se gasta sin coche (TRAF_MENOS; no los
+  puntos fijos ni los coches de mision).
+- **Meta desde la vista 1** (fallo): 4A2BA0 solo usa la vista de carrera en el modo 16; en la salida, la meta y el fin
+  del tiempo el coche va entero (coche_modo). Antes la escena de la meta desde la vista 1 dibujaba el habitaculo.
+  Verificado en E (`-DPRUEBA_VISTA=1`, meta en IMPE): el derrape entero.
+
+### Coche fantasma de la CONTRARRELOJ (Rev 2.9.2 / Mod 2.5.2, 2026-11-22)
+
+El original (PC 465F30..4687C0; SLES-53998 GHOST.PS2 y la tarjeta de memoria) graba en la Contrarreloj el coche del
+jugador (4671D0 / 466E50), en la meta guarda el mejor por curso (467880 / 467960) y en la carrera siguiente de ese curso
+lo reproduce (467E30) con un coche translucido (4AE0F0: alfa +B68). En la Dreamcast (demo/main.c gh_*):
+- Grabacion propia (DESVIACION del formato): una muestra de 12 bytes cada 8 pasos de logica en el marco de la carretera
+  (etapa del arbol, etapa o union y rama, distancia desde el principio de esa parte, x lateral, rumbo, deriva, velocidad);
+  se reproduce interpolando y se coloca como el trafico (coche_coloca / pon_coche). PALM entera: 533 muestras (6,4 KB).
+- El mejor por curso (codigo del tablero + preset) en la RAM y en la VMU: fichero ORGHppcc (9 bloques una etapa; sin la
+  imagen de presentacion), escrito en un hilo durante la escena de la meta si mejora el tiempo; al empezar una carrera
+  de otro curso se lee de la VMU. comun/menu.c menu_vmu_guarda / menu_vmu_lee.
+- Dibujo (DESVIACION): con el modelo del coche del jugador (un segundo COCHEnn.DAT no cabe en la RAM ni la VRAM), sus
+  piezas animadas, en la lista transparente con alfa 0,5 (cabeceras recompiladas para esa lista; el alfa se pone en los
+  vertices durante su dibujo para que vaya por la ruta directa). Medido en PALM (Flycast, piloto): 42,7 -> 41,2 fps con el
+  fantasma a la vista (33,8 con el alfa por color_mul, descartado).
+- Solo se ve en la parte de la ruta cargada (la etapa o union actual, la siguiente o la union anterior) y por la misma
+  rama del jugador.
+- Verificado en E (`-DPRUEBA_AUTO -DPRUEBA_VARIANTE=7 -DPRUEBA_TA_CODIGO=0 -DPRUEBA_MILLAS -DPRUEBA_GH_ADELANTO=15`,
+  REINTENTAR con el mando): primera carrera graba y guarda ORGH0100 (releido igual), la segunda lo reproduce delante.
+  `-DDIAG_GH`: donde lo pone; `-DGH_OPACO`: opaco.
+- HECHO (Rev 2.9.9.c, ver Modos "sp" 3): el coche de la grabacion. SIN PORTAR: el fantasma de la red, la escena 2B0063 (no
+  2B0061: esa es "Posicion" en el PS2) y el tiempo del fantasma en la meta (497430): portados en la Rev 2.9.4 (Rankings y
+  records); la pantalla RANKINGS (siguiente revision).
+
+### Vista interior y tabla de tiempos de la meta (Rev 2.9.1 / Mod 2.5.1, 2026-11-22)
+
+Pedido: de la lista de lo que falta respecto a PS2, "1 y 2" (el fantasma y el ranking / la tabla de tiempos, y la vista
+interior); numeracion 2.9.1 en adelante, 3.0 cuando este todo.
+
+**Vista interior (vista 1).** El original (4A2BA0, PC driving/pc_camera.cpp) pone car+4 & 0xC000 segun la vista: 0x4000
+(vm = 1, el coche entero) en las vistas 2.., 0x8000 (vm = 2) en la 1 y en la mezcla de vistas si el ojo esta dentro de la
+caja del coche (482E80), nada en la 0. Con vm = 2 el dibujo del coche (46AE70 / 469600) no dibuja la carroceria ni las
+ruedas: solo la pieza +04 de la disposicion del modelo (el habitaculo: salpicadero, cuadro de instrumentos y capo;
+1224-4347 vertices segun el coche), con la matriz local identidad (sin car+F0), y los faros escamoteables +64; sin
+pilotos, sombra ni la pareja (487880 solo con 0x4000). Antes la demo no dibujaba nada en la vista 1.
+- tools/conv_coche.py: la pieza +04 entra en el modelo como pieza P_INTERIOR (13) del grupo G_INTERIOR (7): no tapa en el
+  vaciado y no cuenta en el tope de vertices (va sola); `vacia_interior` le quita lo que no se ve desde el ojo de la
+  vista interior (tabla CAM1 por modelo; camaras a +-0,15 m girando +-50 grados y de -25 a +15: 4347 -> 3588 vertices en
+  el Dino). Texturas: 0-34 KB mas por coche. RAM: el bloque fijo del coche (COCHE_RAM) pasa de 424 a 480 KB (el mayor,
+  COCHE13, pide 474 KB); antes de agrandarlo el coche se salia del bloque al monton y la musica del menu daba "Out of
+  memory". Medido con nav3 y sp: libre en el menu 684 KB, 675-835 KB tras las lecturas, sin "Out of memory".
+- demo/camara.c `cam_coche_modo` (4A2BA0, sin el desvanecido +EA0 / +E9C al pasar de la 1 a la 0); demo/main.c
+  `coche_dibuja(l, mc, interior)`: con 1 solo PZ_INTERIOR y PZ_FAROS; con 0 todo menos PZ_INTERIOR.
+- Verificado en E (Flycast, `-DPRUEBA_VISTA=1`, piloto en PALM): capo y salpicadero desde el asiento, sin "Out of memory".
+
+**Tabla de tiempos de la meta.** El GAD de la meta (PS2 0x19e6d0 = 498670) en las variantes 0/1/7/8/9: cuando el
+temporizador del modo 19 baja de 0x3FC (variante 1) y acaba la voz de GOAL, 0x1a05f8 (= 4979E0): una fila por etapa
+cada 30 cuadros (5 a la vista, 38 px) con el fondo 2C000D, el rotulo "Etapa n" (0x3ef430), el icono y nombre de la etapa
+(2C0047, cuadro = 0x35c7b0[descriptor de la zona]), la barra (imagenes 2 y 3 de spr_etc) y el porcentaje mientras se
+llena y despues el tiempo de la etapa (4505A0: el crono al superarla menos lo de las anteriores, "% 2d'%02d\"%03d" con
+la fuente 4); al acabar, el panel: variante 1 2C00AE con el tiempo total y la puntuacion amarilla deslizandose, variante
+7 2C00AF con el tiempo. Detalle en demo/fin.c (fin_tabla_*) y tools/conv_fin.py (`tabla`: GOALT.DAT, con asserts de cada
+constante del codigo de PS2 que la demo lleva escrita).
+- demo/main.c: `etapa_acaba` en el stage clear (44FF20) y en GOAL (4513C0), `tabla_entra` en el modo 19 (variantes 1 y
+  7 de la consola) a los 0xB4 cuadros; el HUD se baja de la VRAM al abrirla (el NAVI ya no dibuja).
+- SIN PORTAR: los efectos 0xAD / 0x80AD (barra) y 0xB0 (fin de la tabla): estan en bancos de sonido de SOUND.PS2 que
+  dependen de la etapa (sin localizar cual carga la meta); la espera de la voz de GOAL (49A190: comun/sfx.c no dice si
+  suena); la variante 0 (records QHOT: el tiempo en verde y 2C00B7) y la 9.
+- Siguiente (Rev 2.9.2): el coche fantasma de la CONTRARRELOJ y los rankings.
+
+### El muro a la salida del tunel de ALAS (Rev 2.9 / Mod 2.5, 2026-11-22)
+
+Queja: "un muro que se ve al final de la etapa de nieve en outrun2sp ... una zona de tunel, al final del tunel".
+Reproducido en Flycast (piloto, arbol 1, nodo 8 = ALAS, SEG23, capturas cada 0,25 s): al salir del primer tunel el
+hueco de la salida se tapaba con una pared con el ladrillo del tunel hasta pasarla. Es la malla 8147 del nodo 227
+(textura 89): una placa de 24 x 8 m desde el asfalto que cruza la calzada en s 1100, cuya cara (la de la primera de su
+tira) mira hacia delante: desde el tunel se ve por detras. La demo dibuja todo sin descartar caras (PVR_CULLING_NONE);
+en el original no sale. No se borra: `tapas_busca` (al leer) marca las placas de una cara asi (4-8 vertices, planas,
+verticales, que cruzan el centro de la calzada desde el suelo hasta mas de 3 m, con la normal a menos de ~37 grados
+del sentido de la ruta, a mas de 8 m de su principio, no carteles ni versiones lejanas) y `tapas_paso` (cada cuadro)
+solo las dibuja con la camara delante de su plano. En las 62 etapas y 498 uniones: SEG23 (esta), SEG26, SEG52 y SEG58
+(estas tres no comprobadas en pantalla). `-DSIN_TAPAS`: como antes. Encontrada con tools/invasion.py y una busqueda de
+placas perpendiculares a la ruta (docs/AUDITORIA_MOTOR.md).
+
+### Huecos de RUIN y framerate de LASV (Rev 2.8 / Mod 2.4, 2026-11-22)
+
+Pedido: texturas de los puentes y de RUIN a 8x8 / 16x16 de lejos y 32x32 de cerca ("ahi se crean zonas sin dibujar") y
+mejorar el framerate de LASV. Medido antes de tocar nada (Flycast, piloto, RUIN 110 s): VRAM de sobra (793 KB libres,
+0 texturas rebajadas) y el TA casi nunca lleno (1 % de media sin caber); de los 10 saltos grandes por s, 9,4 eran de la
+PVS, de nodos de 84-288 m de radio (estructuras). Las texturas no eran la causa (bajarlas no cierra huecos; mipmaps
+gastarian un tercio mas de VRAM): no se cambian.
+- PVS_GRANDE (nodos_visibles): en las zonas de PVS_GRANDE_ZONAS ("RUIN") los nodos de 60 m de radio o mas no se
+  recortan con la PVS (ni enteros ni por tiras) a menos de 800 m. RUIN: saltos grandes 10,0 -> 4,8 por s (PVS 9,4 ->
+  3,3), 44,4 -> 43,7 fps. Para todas las etapas no: en LASV 41,3 -> 39,7 fps y lo que no cabe 3 -> 27 %; en MAYA los
+  saltos por el tope 0,1 -> 3,4 por s; encenderla sola con holgura del TA o costaba en esas o se apagaba en RUIN.
+- LASV (perfil del SH4 de noche: dibuja_etapa 25 %, envio de vertices 13 %, piloto y pareja 6 %, faros 5 %). Medido
+  quitando cada cosa: agua 0, objetos 0, focos de los faros 0,65 ms, la luz de los faros en el suelo ~1 ms. La rejilla
+  de la luz de los faros consulta la altura del suelo en 156 puntos por cuadro (1,34 ms): ahora la mitad de las lineas
+  por cuadro, alternas, y las otras con la altura sobre el plano del coche del cuadro anterior (0,79 ms;
+  `-DFAROS_TODAS` como antes); focos_anota descarta por distancia antes de los 5 planos. LASV 41,1 -> 41,7 fps, 20,3 ->
+  19,8 ms de CPU. Bajar el tope del TA al 85 % en LASV (PRESUP_ZONAS) solo daba 40,1 -> 40,4 fps con el doble de saltos
+  por el tope: queda apagado.
+- NO verificado en consola real.
+
+### Sin reflejo del entorno y con tiras de 6 (Rev 2.7 / Mod 2.3, 2026-11-22)
+
+El usuario: "hay muchos tirones en etapas de noche como en las vegas, creo que el efecto reflejo ha sido
+contraproducente, asi que vamos a deshacerlo ... y nos quedamos con T6". Medido en Flycast (piloto, LASV -> MAYA
+150 s, mismas opciones): con el reflejo 38,5 fps de media, 22,1 ms de CPU y 607 cuadros tarde; sin el 41,4 fps,
+20,1 ms y 386. Ahora:
+- el reflejo solo con `-DCON_REFLEJO` (refl_busca no busca REFLEJO.DAT): la carroceria con el mapa fijo de cada coche,
+  como la Rev 2.3; sin los ~118 KB de RAM de los mapas. tools/regenera.py y el programa del taxi ya no hacen
+  REFLEJO.DAT (tools/conv_reflejo.py se queda para -DCON_REFLEJO);
+- las tiras de la PowerVR en 6 por defecto (`-DTIRA_2`: como KallistiOS).
+
+### Longitud de las tiras en las listas de objetos (prueba -DTIRA_6, 2026-11-22)
+
+Pregunta: "si estamos poniendo el tamano de strip en 6". No: todas las cabeceras salen de pvr_poly_compile de
+KallistiOS, que parte de PVR_CMD_POLYHDR (0x80840000): Strip_Len (bits 18-19) = 1, 2 triangulos por entrada de la lista
+de objetos de cada tile. -DTIRA_6 la pone en 6 envolviendo pvr_poly_compile en el enlazado (demo/Makefile, como
+pvr_scene_finish). Flycast no lo distingue (41,2 frente a 41,3 fps, PowerVR 7,5 ms, imagen igual): se mide en la
+consola con la linea de diagnostico (Y en la pausa: fps, CPU, PowerVR y TA; "T2" / "T6" al final). Por defecto, 2.
+
+### Un 5 % mas de decoracion de los margenes y sin deslumbramiento (Rev 2.6 / Mod 2.2 definitivas, 2026-11-22; DESVIACION pedida)
+
+Pedido: "eliminar un 5 % de los arboles, arbustos, farolas, arboles con nieve, arbustos de desierto, palmeras, son
+elementos que estan en los margenes de todas las etapas" (ademas del 10 % de la Rev 2.1) y quitar el deslumbramiento
+("no esta logrando el resultado que espero"). Se publica con el mismo nombre, Rev 2.6 (y Mod 2.2).
+- tools/decor_tabla.py: la vegetacion que el color no reconocia (nevada, de invierno sin hojas, de zonas secas,
+  palmeras y arboles verdes oscuros) elegida a mano en una hoja de las texturas de recorte sin clasificar de las 62
+  etapas (VEG_REF, por su contenido: tambien en sus copias), y las farolas (tipo 3, FAROLA_REF) elegidas por su silueta
+  entre los nodos opacos finos (planta < 2,5 m, 5-16 m de alto) repetidos en cada etapa: de brazo, de doble globo, de
+  farol. No: postes de vallas, troncos sueltos, rocas, mastiles ni columnas con algo encima. Tabla: 247 texturas de
+  vegetacion (antes 213), 16 de farolas.
+- demo/main.c decor_reduce: vegetacion 3 de cada 20 (15 %), farolas 1 de cada 20 (5 %, otros bits de la posicion), y
+  con cada arbol quitado su tronco si va en otro nodo (no queda un palo solo).
+- Medido (Flycast, piloto, PALM -> ALPI 150 s): PALM 86 de 575 de vegetacion fuera (antes 55) y 1 de 37 farolas; ALPI
+  103 de 763 (antes 60 de 730). fps iguales (41,3 / 20,0 ms de CPU frente a 41,2 / 20,0: la escena va por el tope del
+  TA); popping de PALM por el tope 2,1 -> 2,0 por s, presupuesto que no cabe 16 -> 15 % de media (155 -> 152 % el
+  peor); ALPI igual.
+- Deslumbramiento: fuera (`-DCON_DESLUMBRA` lo vuelve a poner).
+
+### Lacado con brillos, deslumbramiento del sol y registro de la VRAM (Rev 2.6 / Mod 2.2, 2026-11-22; DESVIACION pedida)
+
+Pedido: la opcion A del reflejo (mas contraste), "que los coches conserven su lacado con reflejo, aplicando brillos no
+cambios de color, no quiero que los ferrari se vean mate", el efecto del original "cuando sale el sol y un haz se dirige
+a la vision del jugador" sin bajar los fps, y el plan del material de investigacion de VRAM que paso el usuario.
+- Reflejo (refl_compone): el mapa propio del coche a peso 1 (el lacado de la Rev 2.3) y del entorno solo lo que pasa de
+  REFL_UMBRAL 150 de luminancia, como brillo blanco (cielo claro, horizonte, sol); lo medio y lo oscuro ya no tine la
+  pintura. Textura de 32x32, horizonte nitido (x 1,5 arriba, x 0,25 abajo), sol cos^160 x 2, Fresnel 0,6 + 0,4
+  (1 - |N.I|)^2 con la vista hasta cada vertice. Medido (pixeles rojos del Testarossa): saturacion 146-169 frente a
+  108-131 del mapa fijo, brillo 115-134 / percentil 99 160-216 (mapa fijo 115-125 / 181-192): rojo mas vivo y brillos.
+- Deslumbramiento (sol_deslumbra): en el video de referencia la imagen se blanquea, mas arriba que abajo, al ir hacia el
+  sol aunque su disco quede por encima de la pantalla (el destello del original solo sale con el sol en pantalla, casi
+  nunca con la inclinacion de las etapas). Un rectangulo de toda la pantalla en la lista translucida, blanco tenido del
+  sol, alfa 0,45 x intensidad del sol x ((rumbo hacia el sol - 0,75) / 0,23)^2 x la altura (x 1 hasta 30 grados, x 0,3
+  a 60) x lo que se ve del sol x el cielo (menos bajo techo); abajo x 0,3; suavizado (~0,2 s). Medido: PALM 27-33 s de
+  carrera hacia el sol, alfa 0,19-0,35. -DSIN_DESLUMBRA.
+- Rendimiento (Flycast, PRUEBA_AUTO, PALM y ALPI 150 s, media de cuadros > 30 fps): sin reflejo ni deslumbramiento 43,5
+  fps / 18,0 ms de CPU; Rev 2.5 40,6 / 20,6; primer intento 35,3 / 24,8 (la mezcla casi cada cuadro con ~24000 divisiones
+  enteras y 1024 powf); con tablas (sin divisiones), mezcla en pasos de 1/8, FSRRA y textura / vertices en cuadros
+  alternos: **41,2 / 20,0** (PowerVR 7,5 ms en todos: el deslumbramiento no se nota). Mas rapido que la Rev 2.5.
+- Registro de la VRAM (`-DDIAG_VRAMLOG`, docs/REGISTRO_VRAM.md): eventos alloc / free / fail / mark con el contrato del
+  material del usuario. Captura PALM -> ALPI 150 s: 1020 eventos, 0 fallos, 0 avisos del analizador del usuario
+  (AnalizarRegistroVram.ps1, PowerShell 7 en Linux); pico de reservas registradas 1643 KB en el cuadro 2583 (al leer
+  SEG05 con SEG00 aun en la zona): pvr_mem fuera de la zona 662 KB (HUD 278, coche y modelos fijos 186, efectos 49...),
+  etapas 473, trafico 322, uniones 148. La zona del curso (1280 KB) llego a 599 KB con SEG00 y 621 con SEG05: no se
+  lleno. El libro reducido se reserva tal cual (demo/main.c sube_modelo, vram_pide; el dibujo apunta 2048 - 8 N antes).
+- NO verificado en consola real.
+
+### Reflejo del entorno en la carroceria (Rev 2.4 / Mod 2.0 y Rev 2.5 / Mod 2.1, 2026-11-22; DESVIACION pedida)
+
+Peticion: volver a poner el reflejo en la carroceria, muy simplificado. Lo que no gusto de la Rev 1.3: "un cambio de
+color muy abrupto y no se apreciaba bien el reflejo" (el mapa era solo el cielo x 0,3 sobre toda la pintura, con un
+suelo inventado de borde duro, y el mapa del tunel entraba de golpe). Referencia: el video de OutRun 2 SP del usuario
+(el original dibuja un cubo del entorno por cuadro con cs_ENV_<zona>: ver Reflejo del cielo y de los tuneles): bandas
+suaves del color del cielo en lo que mira arriba y en los cantos (rejillas, tapa trasera, aleron, aletas), naranja al
+atardecer, gris con luces en el tunel; de frente casi solo la pintura.
+- Datos (`tools/conv_reflejo.py`, REFLEJO.DAT 'RFL2'): por etapa, un mapa de 16x16 (RGB565 twiddled, 512 bytes) cada
+  12 puntos de su ruta (48 m) visto desde 1 m sobre ella: rayos (32 x 32, tools/c/reflejo.c) contra los triangulos de
+  las listas 0 y 1 de la etapa a menos de 300 m (sin las versiones lejanas), cada uno con el color medio de su textura
+  por el de sus vertices, y el cielo (el grupo 0) donde no chocan; desenfocado y reducido a 16x16, x 0,85. La misma
+  proyeccion que antes (u = 0,5 + 0,4 dx / (1 + dy)). Sin tabla de tuneles: el techo de las galerias esta en los mapas.
+- Demo (`refl_elige`, `refl_mezcla`, `coche_reflejo`): cada cuadro, la mezcla lineal de los dos mapas de alrededor
+  (solo se rehace si cambia en 1/32), en el marco del mundo (cada mapa girado desde el de su etapa); en la union, del
+  ultimo de la etapa al primero de la siguiente entre el 25 % y el final de lo andado. Dos texturas de 16x16 que se
+  alternan (RGB565 y ARGB1555 para los cristales: 2 KB de VRAM), con una curva de contraste (REFL_GAMMA 2,2: el
+  suelo oscuro, el cielo claro). Fresnel: el especular de cada vertice por 0,04 + 0,96 (1 - |N.I|)^3. Sin pasadas ni
+  vertices de mas en el TA. Primer ajuste (0,15 + (1 - |N.I|)^2, sin curva): la tapa trasera salia lechosa, como un
+  velo claro; con el de ahora el rojo queda profundo y el reflejo va en los cantos y costados (Flycast, PALM y las
+  galerias de ALPI con el piloto: capturas scratchpad vt/cmp_refl2.png y vt/r2_gal.png).
+- Rev 2.5 / Mod 2.1 (queja: "la carroceria tiene color opaco sin brillos"; medido en Flycast, brillo de los pixeles
+  rojos del coche, media / percentil 99: el mapa fijo del coche 110-132 / 181-202, la Rev 2.4 58-82 / 92-140): el
+  brillo de siempre lo daba el mapa propio de cada coche (esferico, visto desde la camara). Ahora la textura de 16x16
+  se compone cada cuadro (`refl_compone`) con ese mapa (reducido a 32x32 al leer el coche, refl_fijo_lee; muestreado
+  con la normal que refleja hacia cada texel, N ~ R - I) x 0,9 x la luz de lo de arriba en el entorno (1 a cielo
+  abierto, hasta 0,3 bajo techo) mas el entorno x 0,6, con el destello del sol (la luz del entorno 2: cos^24 x su
+  color) y la curva 1,5; Fresnel 0,5 + 0,5 (1 - |N.I|)^2. Medido: 99-130 / 153-186 (como el mapa fijo) y con el
+  entorno encima (capturas scratchpad vt/cmp_refl4.png).
+- INVENTADO: los pesos (0,9 / 0,6), la ganancia (0,85), el Fresnel, la curva, el sol, la altura del punto de vista
+  (1 m) y el desenfoque.
+- Coste: RAM, dos bufers del tamano de la etapa con mas mapas (malloc al buscar REFLEJO.DAT); CPU, la mezcla (256
+  texeles, solo al cambiar) y el Fresnel por vertice de entorno. `-DSIN_REFLEJO`: el mapa fijo del coche.
+- NO verificado en consola real.
+
+### La pancarta CHECK POINT otra vez (Rev 2.3 / Mod 1.9, 2026-11-22)
+
+Queja del usuario: "han desaparecido las marcas de checkpoint". La pancarta (objetos de la etapa, ver Checkpoint) esta
+en z = 0 y el punto 0 de la ruta, 5,9..7,8 m mas adelante (medido en SEG01/03/05/16/38/49): con la regla de la Rev 1.4b
+(DETRAS_ENTRADA: lo de la etapa siguiente con el centro detras de la entrada no se dibuja mientras se va por la union)
+quedaba fuera hasta cruzar la entrada, ya debajo de ella; en todas las etapas. Ahora con un margen de DETRAS_MARGEN
+40 m (lo de SEG29 que motivo la regla queda 400 m por detras). Comprobado en Flycast (PALM -> ALPI con el piloto):
+la pancarta al llegar, antes no. Tambien los TRAFK*.DAT (trafico) pasan por tools/libros.py (el patron TRAF[0-9]* los
+dejaba fuera): 17 texturas, 17 KB.
+
+### Libros VQ reducidos (Rev 2.2 / Mod 1.8, 2026-11-22)
+
+Plan de VRAM tras el estudio del flujo por tramo: las texturas de las etapas ya van casi todas en VQ (31,8 MB frente a
+152 MB sin comprimir) y los libros son el 36 % de lo que ocupan: una VQ de 32x32 lleva 2 KB de libro y 256 bytes de
+indices. La PowerVR acepta libros de N < 256 entradas (las ultimas; demo/main.c ya los dibuja: elige16 los hacia en
+algunas), asi que `tools/libros.py` vuelve a codificar con pvrtex (utils/pvrtex de KallistiOS, ELBG de FFmpeg) las
+texturas usadas, en VQ con libro de 256 y sin mipmaps: 64 entradas hasta 32x32, 128 hasta 128x64, si el error RMS contra
+la imagen de ahora es <= 8 (de 255) y el alfa de recorte cambia en <= 1 % de los texeles. Comparado antes con 28
+texturas de 6 etapas: con 128 entradas pvrtex da 5,2 de RMS y el k-means de tools/vq.py 5,9 (27 de 28 mejor).
+- Datos: SEG16 (IMPE) 82 de 85 candidatas, 82 KB menos, RMS media 4,7 (maxima 7,5); a la vista, iguales
+  (scratchpad lib/comparacion.png). Todas las etapas y uniones (los cuatro paquetes reempaquetados con pak_union.py) y
+  los modelos sueltos (trafico, personajes, banderero, objetos: 381 KB menos; lo fijo de la carrera 617 -> 586 KB).
+- VRAM libre en la zona del curso (tools/vram.py --zona 1248, 496 combinaciones): media 573 -> **624 KB** (+51; de +20
+  a +96), peor caso BK242 + IMPE 219 -> **304 KB**; PALM 530 -> 614, BEAC 400 -> 454, LASV 495 -> 549.
+- No cambia el popping por si solo: los saltos medidos son del tope del TA (el bufer de parametros), no de la VRAM. Es
+  margen para lo siguiente (versiones lejanas de los edificios, soltar texturas al entrar en la union).
+- `tools/regenera.py` lo hace despues de cada revq (uniones, uniones de la Contrarreloj y del OUTRUN, etapas y modelos
+  sueltos). En Windows, `pvrtex.exe` compilado con mingw-w64 (windows/construye.sh, su fuente LGPL en el paquete).
+  Sin pvrtex, sin cambios (lo dice). Determinista (las mismas entradas dan los mismos bytes).
+- NO verificado en consola real.
+
+### Menos vegetacion y publico con sus gradas (Rev 2.1 / Mod 1.7, 2026-11-21; DESVIACION pedida)
+
+El usuario no quiere el fundido ni el velo reforzado de la Rev 2.0 ("se hace incomodo"): vuelven a como en la Rev 1.9
+(fundido solo con `-DCON_FUNDIDO_ENTRADA`, NLIM_A 0,3). En su lugar pide bajar el coste: quitar el 10 % de las palmeras,
+arboles y arbustos de decoracion de los margenes y simplificar el publico de las gradas para que cargue con ellas.
+- tools/decor_tabla.py hace demo/decor_tabla.h (numeros de textura por SEGnn: 1 vegetacion, 2 publico) con el color y
+  los bordes del alfa de cada textura de recorte, revisado a mano en todas las etapas (fuera, a mano: almenas de CAST,
+  una verja de METR, la barandilla con jardineras de BEAC, el cartel a rayas de FLOR y una estructura y una palmera con
+  tronco de EAST). Las 62 SEGnn.DAT del clasico y del GD-ROM del taxi son identicas: la misma tabla.
+- decor_reduce (al leer la etapa): fuera uno de cada DECOR_VEG (10) nodos de vegetacion (planta < 25 m, 1,5-35 m de alto),
+  elegidos por un hash de su posicion (siempre los mismos, repartidos), con su version lejana; el publico sobre una
+  grada va al grupo de la grada y se queda con una de cada DECOR_PUBLICO (2) tiras. PALM: 55 de 575 plantas fuera y 30
+  nodos de publico (3 por bloque de gradas) con su grada. El publico de pie en el arcen (BEAC, NIAG, LASV, SANF) no se toca.
+- `-DSIN_DECOR_REDUCE`: como antes.
+- Medido (`-DDIAG_POPPING`, Flycast, las mismas pruebas que la auditoria de la Rev 2.0): PALM, saltos por el tope del TA
+  2,8 -> 2,3 por segundo y el reparto en su minimo (corte 1 m) el 44 -> 35 % del tiempo; CAST 3,0 -> 2,9; BEAC, SANF y
+  LAKE igual. La vegetacion lejana ya va como impostor (lod_veg.py) y cuesta poco: lo que no cabe es sobre todo
+  edificios y terreno.
+
+### Auditoria del popping, fundido de entrada y velo del fondo (Rev 2.0 / Mod 1.6, 2026-11-21)
+
+Auditoria (Rev 1.9, Flycast con el piloto, `-DDIAG_POPPING`, 5 etapas de cada modo; scratchpad auditoria.py): saltos de
+nodos de 32 px o mas por segundo 3,5-12,3 segun la etapa; de ellos por el reparto del TA ("tope", los que se ven) 0,9-3,0
+y por la PVS ("pvs") 1,0-9,3, que casi nunca se ven (el contador mira el centro del nodo en la pantalla, no si esta
+tapado): dibujando los datos desde la carretera (pvs_audit.py) la PVS quita de lo visible 0,00 % de pixeles en BEAC, 0,01 %
+en MACH, 0,11 % en SANF y 1,29 % en PALM, con dos huecos reales: SANF nodo 177 (terreno, s ~2370) y PALM nodos 493-510 y
+569 (fachada, s ~4300) (PENDIENTE). Los saltos del reparto estan a 280-400 m de mediana y el 90 % antes de ~900 m; la
+distancia de dibujo esta en 2650-3200 m: una niebla solo en el limite no los tapa (y la de media distancia la quito el
+usuario en la demo 40).
+Cambios (pedidos: "opcion 2" y "algo de niebla en el fondo"): el fundido de entrada vuelve por defecto
+(`-DSIN_FUNDIDO_ENTRADA` lo quita; se quito tras la demo 35) y el velo del limite NLIM_A pasa de 0,3 a 0,45 en el mismo
+tramo. Medido en SANF (61 s): los saltos son los mismos (12,9 frente a 12,5 por segundo: el fundido no los evita, los
+suaviza) y el coste del fundido en el TA es pequeno (saltos por el tope 4,8 frente a 4,5 por segundo). Comprobado con
+`-DDIAG_FUNDIDO` (lo que se funde, en magenta) que funciona con el envio en dos pasadas y la reserva por listas.
+
+### Torres del puente de SANF y laminas en la union hacia MACH (Rev 1.8 / Mod 1.4, 2026-11-21)
+
+Queja: en OutRun 2 SP, SANF y MACH, "elementos importantes que no cargan dejando huecos". Comparado con el video de
+referencia y con `-DDIAG_POPPING -DDIAG_NODO=n` (por que se quita un nodo cada cuadro) y `-DDIAG_SIGM` (la malla mayor de
+la etapa siguiente que se dibuja).
+- SANF, el Golden Gate (CORREGIDO en la Rev 1.9): las torres (nodos 765 y 775 de SEG25, 323 m de alto) van en un grupo
+  (tools/grupos_nodos.py) con piezas pequenas del puente y el grupo toma la clase de LOD mas alta de los suyos: el reparto
+  del TA las quitaba ("tope") y se veian los cables colgando sin torres. La Rev 1.8 lo decidia cada cuadro por el tamano
+  en la pantalla y ponia esos nodos en la clase 0 (la que no se quita): la clase 0 no cabia, el reparto se quedaba en su
+  minimo (corte 1 m, clase -1) y lo de alrededor del umbral cambiaba de clase: el suelo y el puente parpadeaban (queja
+  del usuario). Rev 1.9: al leer la etapa los nodos de radio >= GRUPO_RMAX 150 m salen de su grupo y llevan su propia
+  clase. Medido con -DDIAG_POPPING en los primeros 18 s de SANF (puente): saltos de 32 px o mas por segundo 11,6 (Rev
+  1.7), 16,4 (1.8), 12,1 (1.9); el corte del principio 45 m / clase 23 como en la 1.7 (1 m / -1 en la 1.8).
+- Union hacia MACH (CORREGIDO): mientras crece la etapa siguiente (geo_vista) no se dibujan sus nubes (mallas enteras
+  mas de SIG_NUBES 600 m por encima de lo mas alto de su carretera) ni sus cupulas de cielo (nodos de radio mayor que
+  SIG_CUPULA_R 2000 m: el degradado azul de MACH, nodos 1069 / 1072 de SEG27, lista opaca). Aplastadas hacia la base de
+  su marco eran laminas azul marino y siluetas palidas en el cielo de la union. Y los paneles lisos azul marino de las
+  nubes de MACH (textura 43 de SEG27 / SEG59, 32x32, 17 tiras a 900-1650 m) no se dibujan nunca: el video del original
+  no los saca; seran una mascara o un estado del GS que la demo no tiene (PENDIENTE: leerlo en el MIPS).
+- Lo que queda en la union hacia MACH es la silueta de sus montes en la niebla con el cielo aun de la etapa anterior; el
+  original tambien los ensena ahi.
+
+### Edificios en esqueleto y palmeras sin hojas (Rev 1.7 / Mod 1.3, 2026-11-21)
+
+Captura del usuario en la salida de PALM con el coche girado a la derecha: edificios sin fachada (solo forjados y
+pilares) y palmeras sin hojas. Propuesta del usuario: quitar el esqueleto interior y dejar las fachadas. Los datos
+(vista cenital y render de los datos con la camara de la captura, scratchpad) muestran que las fachadas y las hojas
+estan en el disco: son de la lista de recorte (texturas con transparencia: ventanas, hojas), que va detras de la opaca
+(forjados, pilares, troncos). Mirando de lado a toda la manzana lo opaco llenaba el tope del TA y la lista de recorte
+no cabia. No se quita geometria (el esqueleto se ve a traves de las ventanas: el original es asi). CORREGIDO: cada lista
+deja a las de detras lo que gastaron en el cuadro anterior (x 1,1, o x 1,5 si no cupieron), entre RESERVA_MIN 4 % por
+lista y RESERVA_MAX 60 % en total (sustituye al RESERVA_L2 fijo de la Rev 1.6). Lo que se queda fuera es lo lejano de
+la lista opaca (dibuja_etapa manda lo cercano primero). Prueba: `-DPRUEBA_CAM_FIJA -DPV_X=-14 -DPV_Y=3.2 -DPV_Z=-40
+-DPV_DX=1 -DPV_DZ=0` (camara fija en el mundo) y `-DDIAG_VTX` (linea LISTAS: lo de cada lista).
+
+### Carga, suelo de LASV, faros, agua y cascadas de NIAG (Rev 1.6 / Mod 1.2, 2026-11-21)
+
+Queja: carga irregular de elementos en general; en LASV bajadas de cuadros con el agua de las ruedas y el suelo que
+desaparece; faros de noche que no apuntan al suelo y demasiado brillantes; las cascadas de NIAG aparecen y desaparecen
+y su agua parece una capa solida turquesa. Medido en Flycast (`-DDIAG_VTX`, `-DDIAG_TEX=n`, `-DDIAG_SIN_TOPE`).
+- Suelo de LASV (CORREGIDO): la calzada mojada es translucida (textura 3 de SEG22, lista 2) sobre una capa opaca con
+  los edificios reflejados. Las listas van en orden (0, 1, 2) y en los tramos cargados (s 450-650) lo opaco llenaba el
+  tope del TA: la calzada no cabia y se veia el reflejo sobre negro. Ahora las listas 0 y 1 dejan RESERVA_L2 (15 %)
+  del tope del TA y de vertices de la etapa a la translucida.
+- Envio de lo cercano primero (dibuja_etapa, dos pasadas por lista): la clase de distancia <= PRIMERO_CD (unos 64 m)
+  o la de LOD 0 y despues el resto: si un cuadro no cabe, se queda fuera lo lejano. Y un cuadro suelto que no cabe ya
+  no baja el corte del reparto (prio_ajusta: dos seguidos si): antes un solo cuadro llevaba el corte de 4000 m a 5 m
+  y los edificios volvian a golpes durante segundos (la "carga irregular").
+- Esferas de los nodos (CORREGIDO): al leer cada etapa el radio de cada nodo crece hasta cubrir todos sus vertices
+  (lee_modelo_en). En unos pocos nodos del disco la esfera no los contiene (NIAG 984, la cascada de la derecha, 85 m
+  corta; LASV 2177, 432 m) y el recorte por la vista los quitaba enteros con sus tiras en la pantalla.
+- Agua de las ruedas: como mucho NAGUA 128 gotas (el original 256), AGUA_TAM_MAX 1,2 m y AGUA_PANTALLAS 0,5
+  pantallas de area entre todas (cada gota es un cuadrado translucido: la PowerVR paga por pixel y ordena por triangulo).
+- Faros (DESVIACION pedida): la luz del suelo (FAROS.DAT) x FAROS_BRILLO 0,4 de alfa y los focos proyectados x
+  FOCOS_BRILLO 0,55. Era un parche blanco delante del coche que en el video del original casi no se ve.
+- Agua de NIAG (DESVIACION pedida): color por vertice entre el fondo (0x1A4470, mirando hacia abajo) y el cielo
+  reflejado (0x6A9AC6, rasante), con (1 - cos)^3 del angulo con la vertical (agua_malla, agua_fresnel). Colores del
+  video del original. Las demas zonas siguen con su color solido.
+- NO verificado en consola real; los cuadros por segundo de Flycast no son los de la Dreamcast.
+
+### Reflejo del cielo y de los tuneles (Rev 1.3, 2026-11-20; DESVIACION pedida)
+
+- El original (SLES-53998 0x103dc8 -> 0x1040e0 -> 0x172f30 = 414340 / 414050 / 44CD30 del PC): cada cuadro, con el coche
+  del jugador en marcha, dibuja el entorno desde el coche en un cubo de caras de 64x64 (proyeccion de 90 grados, cerca
+  0,1 y lejos 2000; la cara 3 todos los cuadros y otra por turno, [0x448a60]: 0, 1, 2, 4, 5) con el modelo simplificado
+  de la etapa (cs_ENV_<zona>: 8000-14000 vertices y 20-40 texturas, ~500 KB en el disco de PS2) y su cielo, y lo usa de
+  mapa de entorno. CONFIRMADO en el MIPS (la cadena de llamadas y las constantes); no se ha leido 0x1047c8 (como pasa
+  el cubo a la textura del coche).
+- En la Dreamcast (peticion: "solo el cielo y los tuneles"): el cubo no cabe (una pasada mas por cuadro con un sistema
+  de presentacion ajustado en consola, y ~250 KB de RAM por etapa para cs_ENV). Como el cielo de una etapa no cambia,
+  `tools/conv_reflejo.py` calcula una vez por etapa un mapa de 32x32 de su cielo (el grupo 0 de SEGnn.DAT, en el marco
+  del fichero; u = 0,5 + 0,4 dx / (1 + dy), v = 0,5 + 0,4 dz / (1 + dy)) y la tabla de puntos de la ruta bajo techo
+  (geometria de la etapa entre 3 y 14 m sobre el centro de la calzada y a +-2,5 m, en 24 m seguidos o mas):
+  REFLEJO.DAT, 2 sectores por etapa, leidos con la etapa (el hilo de carga). En carrera `refl_elige` cambia la textura
+  de entorno del coche (tipos 2 y 3 de CEX2) por ese mapa, o por el del tunel bajo techo, y `coche_reflejo` pone las UV
+  con el vector reflejado de cada vertice (R = I - 2 (N.I) N, I del ojo al coche) en el marco del mapa: el de la etapa
+  (marco_et[3]) para el cielo, el del coche para el tunel. Sin vertices ni pasadas de mas: el mismo color de
+  desplazamiento de antes; 8 KB de VRAM y 8 KB de RAM. Fuera de la carrera, o sin REFLEJO.DAT, el mapa fijo del coche.
+- INVENTADO (no sale del disco): la intensidad del cielo en el mapa (x 0,30: a plena luz quemaba la pintura; el original
+  atenua su cubo con [8A8BD4] / [8A8BD8], sin leer), el color del suelo bajo el horizonte (el del horizonte x 0,45) y el
+  mapa del tunel (penumbra con dos filas de lamparas). El original reflejaria ahi cs_ENV (edificios, montes, la boveda).
+- Verificado en Flycast (`-DPRUEBA_AUTO -DPRUEBA_SIN_TIEMPO -DDIAG_REFLEJO`, arbol 0): PALM a cielo abierto (mapa 1) y
+  las dos galerias de ALPI (mapa 2 en s 3132-3348 y 3678-3945 de la etapa, y de vuelta al cielo); `nav3.sh` normal.
+  NO verificado en consola real (el coste por cuadro es el de `coche_entorno` mas una division por vertice).
+
 ## Coches: montaje y luces (como el original)
 
 Queja del probador: "diseno de coches mal". Se comparo cada coche con un render de referencia montado con el codigo de
@@ -2203,9 +3856,10 @@ peticion 14 (escoltas 45B5B0, +324 = 6: carrera contra ellos), que no esta en la
   carrera, leido en el hueco de la union; banco HAM de la etapa por clave (4 distintos: grupos 0,0,0,1,1,1,2,2,2,1,0,3,
   0,0,3; PROBABLE que el juego lo elija por la clave). La acompanante es el personaje 6 (487F50), sin comentarios de
   zona ni de derrapes (solo variante 1 / 1, 3, 4).
-- SIN PORTAR (PENDIENTE): tipos 7, 8, 11, 15, 16, 17, 19, 20, 21, 23, 24, 25 (no empiezan, sin anuncio ni nota), 14 /
-  18 (escoltas), la hoja de resultados de la etapa 4603F0, la cara de la acompanante (45BDF0) y las reacciones del robot
-  a las peticiones (487D60 / 487D90). La cuenta de
+- HECHO (Rev 1.1, ver "INFARTO: tipos de peticion, hoja de resultados, panel de la nota y la acompanante"): tipos 8 y
+  23, la hoja de resultados de la etapa 4603F0, el panel de la nota (45BDF0) y las reacciones de la acompanante a las
+  peticiones (487D60 / 487D90). SIN PORTAR (PENDIENTE): tipos 7, 9, 11, 15, 16, 17, 19, 20, 21, 24, 25 (no empiezan,
+  sin anuncio ni nota), 14 / 18 (escoltas). La cuenta de
   corazones y la nota ya no son texto bfont: ver INFARTO: medidor, efectos y contador (2026-11-10).
 
 **INFARTO: medidor, efectos y contador (2026-11-10)** (queja: "no aparece la animacion de los corazones"):
@@ -2427,7 +4081,27 @@ peticion 14 (escoltas 45B5B0, +324 = 6: carrera contra ellos), que no esta en la
   - DESVIACION: solo se corren las misiones de carrera (tipo 0, 76 de 94) cuyo arbol cabe en los huecos
     (`arbol_grande` de curso_huecos); las de los tipos 1, 2, 3 y 6 se ven en el mapa y en el detalle como en el
     original (boton, icono del tipo, nota, rotulo) pero A en ellas da el sonido de bloqueado. Los campeonatos (botones
-    4..6, suceso 0x3c, variante 5) tampoco estan: A en ellos, bloqueado (en el original, sonido 0x40 y su pantalla).
+    4..6, suceso 0x3c, variante 5): ver el punto siguiente.
+  - Peticiones: el mapa de los campeonatos (Rev 1.2, 2026-11-20). A en los botones 4..6 abiertos abre la pantalla del
+    original (PS2 0x240d68 inicio, 0x240e20 control, 0x241228 dibujo, 0x240bc8 cursor, 0x240948 resultados hechos =
+    4EA330 / 4EA3C0 / 4EA610 / 4EA210 / 4EA030 del PC, outrun2-decomp platform/frontend_requests.cpp: el mismo codigo
+    con los tokens de PS2 y los textos una posicion antes): fondo 0x4400cc / encima 0x4400cd (cuadro 1 fuera de la
+    salida), los 16 nodos (cursor 0x4400d8 en 0x4170b0, vecinos 0x4171c8), el nodo 0x4400df y la nota 0x4400e0 de
+    las etapas con resultado (media de sus resultados, 0x240748), las casillas del nodo (0x4172c8 por nodo: 0, 1, 1,
+    1, 2, 2, 2, 3 x 4, 4 x 5; 0x4400d5 cuadro 3 hecha / 5 sin hacer, icono 0x4400d3 del curso, nota), el titulo
+    0x4400d6 (campeonato / curso / lista), el pie 0x4400f0 (la chica) y el cuadro de texto (0x461 en la salida, 0x462
+    con resultado, 0x380 sin el). Detalle (A en un nodo con resultado): el cursor en la casilla, la imagen de su
+    lista (0x4400d4) y las peticiones de REQUEST_NORMAL / SPECIAL1..3 del guion del curso (Req_*.bin, registros de
+    0x74; el rotulo de cada una por su tipo y subtipo, 0x240a08, textos 0x353..). Resultados: los cuartetos de la
+    licencia +0x36E + 2 tipo de curso (0x2406b0). Datos: bloque REQ1 de C2C.DAT (tools/conv_c2c.py, con las
+    direcciones comprobadas en el codigo). Verificado en Flycast: licencia nueva (Clarissa abierta, mapa, 15 nodos,
+    textos, B a las categorias, el mapa de Flagman igual que antes) y con `-DPRUEBA_NOTAS_CAMP` (nodos con nota,
+    casillas con icono y nota, detalle con las listas SOLICITUD / SOLICITUD ESPECIAL 1..3 y sus peticiones).
+    PENDIENTE (lo que falta para correrlos): el gestor de peticiones de la variante 5 (PC 7F9460, evento 0x190; PS2
+    0x22xxxx) no esta portado ni tiene fuente en la decompilacion del PC (alli corre el x86 traducido), asi que A en
+    la salida o en una casilla da el sonido de bloqueado en vez de pasar al coche. La acompanante de la variante 5
+    ya se elige como 487F50 (`robot_pareja` con `menu_campeonato`: 46C520 = la quinta palabra de 0x2a6b08: grupo 4
+    -> CHR_DR_G00, 5 -> CHR_DR_L00, 6 -> CHR_DR_H00); sin carrera aun no se ve.
   - PROBABLE: el salto de linea de los textos de las categorias ('\n' en TEXT.PS2) baja el alto de la celda (17) como
     42C610 del PC (el printf de PS2 0x117640 no se ha seguido); el orden entre el texto y las capas de sprites (el texto
     va encima de todas). Sin el fundido de entrada / salida de los recursos (las escenas aparecen y se van de golpe).
@@ -2504,7 +4178,7 @@ peticion 14 (escoltas 45B5B0, +324 = 6: carrera contra ellos), que no esta en la
   mision superada (4959E0) con A = 495A60 (la subclave siguiente si la nota llega a +0x24 = 4) y REINTENTAR, el boton
   0x10 la misma y B al menu; si no 2B004A); FINC2C.DAT (conv_fin.py). El fin del tiempo: 34 y 35 sin nota. Fuera la
   vuelta directa al menu.
-- SIN PORTAR: los tipos 1, 2, 3 y 6 (los de su juego) (puntos 4BD230 / 4BD340, marcas
+- HECHO (2026-11-27, ver COAST 2 COAST: misiones de tipo 1, 2, 3 y 6): los tipos 1, 2, 3 y 6 y los vaivenes. Lo de antes: SIN PORTAR los tipos 1, 2, 3 y 6 (los de su juego) (puntos 4BD230 / 4BD340, marcas
   495E90, notas por umbrales) no estan en la lista. Tambien 472E60 / 474080 / los vaivenes, la espera de 474D30, 43EB60
   al abrir, el bit 0 de +0xF, el boton 0x10 del PS2 (la X de la Dreamcast, PROBABLE), los campeonatos y la variante 9.
 
@@ -2647,20 +4321,15 @@ datos: SALON.DAT (tools/conv_salon.py, paso `salon` de tools/regenera.py).
   con su cabecera roja, X en el salon abre ELEGIR CARNET y B vuelve a la pagina principal del salon; los mismos
   desbloqueos tras reiniciar; sin "Out of memory" ni "pvr_mem: ERROR".
 
-### Articulos OUTRUNNERS y TAXI CRAZY TAXI (2026-11-16)
+### Articulo OUTRUNNERS (2026-11-16; el del taxi, retirado en la Rev 1.1, 2026-11-20)
 
-- EXTRAS vende OUTRUNNERS (objeto 0xcf) y TAXI CRAZY TAXI (objeto 0xd0) por 50.000 millas cada uno; la compra es la
-  normal de `sa_compra` (pone el bit de la licencia +0x28, resta las millas, +0x3F4 |= 2 y guarda en la VMU). El precio
-  no cambia.
-- Desbloqueo del taxi: el bit comprado **o** el nombre `ENTIRETY` de la licencia, la misma regla que la entrada
-  OUTRUNNERS. `menu_taxi_comprado()` (menu.c) devuelve 1 con cualquiera de los dos; lo usan `c_desbloqueado()` (la
-  ficha del taxi en la seleccion de coche y en el Salon: sin candado) y `fsp.c` (el frontal de OUTRUN2SP deja aceptar
-  el taxi). `sa_tiene()` da el objeto 0xd0 por comprado con `ENTIRETY`: el Salon enseña el icono de comprado y no el
-  precio ni la ventana de compra. Con el bit 0xd0 la compra y el guardado siguen igual.
-- Prueba: `-DPRUEBA_TAXI_DESBLOQUEO` (solo prueba) registra por la consola serie los dos caminos al arrancar: bit
-  0xd0 sin ENTIRETY, nombre ENTIRETY sin el bit y un control con ninguno de los dos. Las tres lineas dan
-  `comprado/fsp=1 c_desbloqueado(2)=1 salon=1` en los dos caminos y `0 0 0` en el control (ficha 2 = modelo 0 = taxi).
-  Log y reproduccion: `_trabajo/TAXI_ENTIRETY_INFORME.md`.
+- METAS vende OUTRUNNERS (objeto 0xcf) por 50.000 millas; la compra es la normal de `sa_compra` (pone el bit de la
+  licencia +0x28, resta las millas, +0x3F4 |= 2 y guarda en la VMU). El nombre `ENTIRETY` de la licencia tambien lo
+  desbloquea.
+- El articulo TAXI CRAZY TAXI (objeto 0xd0), la ficha del taxi (que ocupaba la del F50: ficha 7, modelo 0), su turbo
+  y su piloto se han quitado: la ficha 7 vuelve a ser el F50 del original, con su bit de la licencia, sus colores y
+  su columna de PARAM.DAT. SALON.DAT conserva el sitio de la fila 0xfd y del precio 0xd0 (sin uso) para no cambiar
+  el formato.
 
 ## Tableros de cursos de INFARTO y CONTRARRELOJ (2026-11-13)
 
@@ -2727,9 +4396,9 @@ tools/regenera.py), CURSOTA.DAT y las uniones BK262..BK469 en UNIONESTA.PAK (con
   "pvr_mem: ERROR"; TABLERO.DAT 124 KB de tablas en el hueco, VRAM libre al abrir el
   tablero 481..516 KB (1009 KB de vuelta del salon). No probado en R.
 - SIN PORTAR / BLOQUEADO:
-  - La lista de records de cada curso (0x267210 / 0x2674d8 / 0x269880, el foco hacia abajo, los textos de (60, 342) /
-    (60, 82) y el titulo de filtro 0x4400b6 / 0x4400de): la DC no guarda records de la Contrarreloj (48B3D0, la tabla
-    de 7B17F8). La barra de ayuda es la de sin lista.
+  - La lista de records de cada curso (0x267210 / 0x2674d8 / 0x269880) y el foco hacia abajo: PORTADOS en la Rev 2.9.4
+    (Rankings y records). Siguen sin portar los textos de (60, 342) / (60, 82), el titulo de filtro 0x4400b6 / 0x4400de
+    y la barra de ayuda con lista.
   - La opcion B de la etapa 0 (PALM_BT, BEAC_BT, PALM_BR, BEAC_BR: descriptores 0x3e..0x41, bandera 830395 = +0x20c
     bit 0): el tablero la deja poner (con su bit), pero sus etapas no estan convertidas (SEG de los descriptores
     62..65): la carrera corre la etapa normal (aviso en la consola serie). PENDIENTE.
@@ -2738,7 +4407,7 @@ tools/regenera.py), CURSOTA.DAT y las uniones BK262..BK469 en UNIONESTA.PAK (con
     Preset del curso.
   - INFARTO en OutRun 2 SP: corre el arbol 1 con el preset 0; las misiones, los coches y las misiones base por el
     preset / arbol estan HECHOS (2026-11-13, ver Preset del curso). PENDIENTE: los objetos (OSO, 45C470 con [78024C])
-    y los bancos de voz HAM.CVT de ese curso.
+    y los bancos de voz HAM.CVT de ese curso (HECHOS en la Rev 2.9.9.c, ver Modos "sp" 2).
   - La escena de la meta de los arboles de la Contrarreloj: la letra sale del codigo (GOAL_A..E; PROBABLE: 450380(8)
     lee la clave del registro, que en los del reves no es 10..14); la etapa sola usa la de la meta A.
 
@@ -2865,7 +4534,7 @@ Lo que lee el preset (todas las lecturas de [0x44350c] del ELF revisadas) y como
     0x36bf90 (0x25 x 6, 0x21, 0x22, 0x23) en vez de la de 7. No se veia antes (el preset 0 nunca corria el arbol 1
     salvo el INFARTO de OutRun 2 SP del 2026-11-13).
 - SIN PORTAR (lecturas del preset de partes que la DC no tiene): los bancos de voz HAM.CVT del INFARTO de OutRun 2 SP
-  (0x173a6c; VOCESH.DAT solo lleva los HAM del preset 1, PENDIENTE), los sonidos 0x841a / 0x8443 de 0x173cbc, el
+  (0x173a6c: HECHO en la Rev 2.9.9.c, ver Modos "sp" 2), los sonidos 0x841a / 0x8443 de 0x173cbc, el
   recurso 0x12b / 0xc3 de 0x1736b0 / 0x1b7ac8 / 0x206cac / 0x287e98 (el personaje del banderero, que la DC lee con
   BAND / BAND1), el mapa de ruta del HUD (0x1be240 / 0x1bfb60 / 0x1c36f8 / 0x1cc0d0: tablas por preset, presets 0 y 1
   iguales), la camara de 0x17c018 / 0x17e860 (presets 0 / 2 frente a 1 / 3: sin portar), la lista de 7 de 0x22d0a0, los
@@ -2982,7 +4651,7 @@ etapas, salida BEAC`, BAND1.DAT en el hueco de la union; RAM libre 1419..1490 KB
   0x1ba968 / 0x1baaf8 / 0x1babe8), comprobado instruccion a instruccion con race_end_modes.cpp:
   - 25: temporizador 0xB4, banco 0x34, musica 100050(0, 0x1C, 1) = sprintf("\music\%02d.ps2", 0x1C) en bucle (MUS28),
     en la variante 0 0x5a2030 = 1a7180(preset); con el banco el suceso 0x188 con la funcion 0x15 (1b4a90 = preset 2 / 3
-    -> la 0x50, resultado de la Contrarreloj de 15 etapas: esos presets no salen, SIN PORTAR); A o START (210c58:
+    -> la 0x50, resultado de los 15 recorridos: HECHO en la Rev 2.9.9.c, ver Modos "sp" 1); A o START (210c58:
     210988(1) / (4)) o el mapa acabado ([0x370dc8]) y despues el temporizador o A / START: 26 con 450240 = 1 o en la
     variante 0 con el record ([0x5a2030]), si no 27 (las variantes 3 / 4 piden antes el 27). Sin el 26: al 27. La
     animacion de carga del banco 0x33 (288d20(1) mientras se lee el banco) no sale: la Dreamcast lo lee de un tiron.
@@ -3153,9 +4822,8 @@ memory", RAM del menu igual que antes (939 KB libres).
 - 453320 = [0x54c108] (PS2 0x178478, su unica lectura 0x214e00): lo copia 0x178338 del byte +0x13 de los ajustes de
   [0x35a9e8] = 0x5493d0 (0x178108); 0x177310 / 0x177440 (al arrancar, 0x1077c4) lo ponen a 2 y nada mas lo escribe: en
   el PS2 sale 2 -> 8449E0 = 2, 844944 = 1 y la lista de 5 filas con los 15 recorridos continuos (presets 2 / 3: arboles
-  csc_data_cvt_ren / csc_data_2_ren, 0x1760c0). Esos arboles, el resultado de la Contrarreloj de 15 etapas (funcion
-  0x50 del suceso 0x188, 4AED50) y sus metas no estan convertidos: DESVIACION, la Dreamcast toma 0 (3 filas) hasta
-  portarlos.
+  csc_data_cvt_ren / csc_data_2_ren, 0x1760c0). HECHO en la Rev 2.9.9.c (ver Modos "sp" 1): las 5 filas, los
+  arboles 291 / 290 y el resultado de la funcion 0x50 del suceso 0x188 (4AED50).
 - Balance musica / motor (+21, 48B1B0 = PS2 0x1bd020 -> 0x5a2079, leido por 0x1bd030): en las carreras (modos 13 / 0x10,
   0x11f148 / 0x11f570) elige el registro de mezcla 0x3c15d0 + balance x 0x1C (7 floats: 1,0 0,5 0,5 0,8 1,0 0,8 0,7 /
   0,9 0,7 0,7 0,8 1,0 0,8 0,7 / 0,8 1,5 1,0 0,8 1,0 0,8 0,7; fuera de carrera 0x3c15b0: 0,9 0,7 0,7 0,7 1,0 0,8 0,7) que
@@ -3551,6 +5219,8 @@ ENCONTRADO Y ARREGLADO EN EL CODIGO
   la imagen es la misma.
 
 ENCONTRADO, ARREGLADO EN EL CONVERSOR, FALTA REGENERAR LOS DATOS
+(Rev 2.9.9.c: tools/regenera.py detecta los datos de antes de este arreglo y los rehace; ver "Rev 2.9.9.c: bandas en el
+cielo en las bifurcaciones")
 - Franjas lisas en la cupula del fundido (lo que se ve en las capturas: rectangulos y arcos de un color en el cielo
   intermedio de los tercios 2 y 3, en todos los cambios desde o hacia una etapa con la cupula de PALM: SEG00, 01, 03,
   17, 18, 26...). No es del dibujo: dos de las cinco tiras de esa cupula (grupo 1 del cielo, objeto +0x54) salian del
@@ -4561,3 +6231,2762 @@ en docs/PLAN.md (Popping, 8).
   MB (antes 955: SEGS.PAK ya no lleva los trozos sin uso de las cinco etapas de la revision 45). Probado con esa carpeta
   (PALM y BEAC, 448): las mismas cifras, hueco de la etapa 8160 KB, 0 "Out of memory". En una regeneracion completa
   conv_tramo / conv_union ya lo hacen.
+
+## Rev 2.9.9.b: las voces de la copiloto otra vez (correccion)
+
+El "Out of memory ... diff 217088" que desde la 2.9.5 se daba por inofensivo en estas notas NO lo era: 217088 es
+VOCES.DAT (216990 bytes) redondeado a 4 KB. Al arrancar ya no cabia seguido en el monton, `voces_inicia` fallaba,
+`voz_ok` quedaba a 0 y en la carrera no sonaba ninguna voz de la copiloto (lo noto el usuario). Arreglo: VOCES.DAT se
+lee en el hueco de la union (como ya hacia `sfx_voces_juego` con VOCESH/VOCESC), y si al arrancar no se puede, se
+reintenta al empezar la carrera (`voces_inicia_en`). Medido en Flycast: "VOZ: VOCES.DAT, 35 muestras, 210 KB en el
+AICA" al arrancar y ningun "Out of memory". Las notas anteriores que llaman "conocido" a ese aviso estan equivocadas.
+
+## Rev 2.9.9.c: huecos al entrar en las etapas (el crecimiento espera a ver la etapa de frente)
+
+Queja: "corregir el crecimiento de las etapas para que no se aprecien la falta de elementos (huecos) como en la
+montana del gran canon". Todo medido en el Flycast de aqui (NO en la consola ni en Android).
+
+### Causa (medida)
+
+- No falta nada por cargar. Con el modelo entero de SEG24 dibujado fuera de la consola (todas las mallas, sin PVS, sin
+  reparto y sin recorte) desde la camara del juego en la union YOSE -> GRAN, sale el mismo trozo: es toda la geometria
+  que hay. (La camara se saco del cuadro congelado, `-DDIAG_CONGELA=4400 -DDIAG_FALTA`, y luego de la linea `GEOC:`
+  de `-DDIAG_GEO`: la camara en el marco de la etapa siguiente.)
+- Las dos ramas de la bifurcacion (la misma geometria en todas las uniones de los arboles 0 y 1: medido en 16 entradas)
+  llegan a la etapa siguiente por una curva de 90 grados. Entre las posiciones 133 y ~215 de la union el coche va
+  PERPENDICULAR al eje de la etapa siguiente, de 770 a 100 m a un lado y ~300 m antes de la entrada. El original
+  (44C530) hace crecer la etapa entre la posicion 0x84 y ~157: desde ahi hasta la entrada (~posicion 243, unos 700 m)
+  la etapa, entera, se ve DE LADO Y POR FUERA. Su decorado solo esta hecho para verse desde su carretera.
+  - GRAN: las paredes del canon vistas por detras, acabadas de golpe donde acaba la etapa, encima de los muros de la
+    union; y lo de arriba de la meseta (SEG24 nodo 60, 31 mallas de recorte entre 219 y 484 m de alto) visto por
+    debajo: una losa oscura (cortada, ademas, por DETRAS_ENTRADA en el plano de la entrada).
+  - MACH (arbol 1, rama izquierda desde NIAG): sus fondos de cielo (SEG27 nodos 1069-1073, cilindros azules de 2,1 a
+    2,7 km) vistos a medias: una raya vertical que parte el cielo en dos (el de la union a un lado, azul liso al otro)
+    y una silueta palida gigante. Es la queja de las "bandas dividiendo el cielo en las bifurcaciones" en esa union.
+- SUPUESTO: el original ensena lo mismo en GRAN (la lista de VISO.DAT da la misma imagen, medido por el agente
+  anterior; no hay video de esa union para compararlo).
+- Lo que NO era: texturas sin subir, reparto del TA, lejano, LOD ni la PVS de la seccion 0 (rellenar los nodos
+  enteros, `PVS_ANTES` del WIP, no cambiaba la imagen y costaba TA: 526K -> 570K en GRAN; QUITADO).
+
+### Arreglo (`demo/main.c`, todo DESVIACION)
+
+- `GEO_RUMBO` (1): el factor del crecimiento (7D3184, `geo_paso`) no pasa del que da el rumbo del coche a un punto 200 m
+  dentro de la etapa siguiente por su eje (`geo_rumbo_f`): 0 con mas de 32 grados, 1 con menos de 14, y no baja. En la
+  bifurcacion la etapa empieza a verse en la posicion ~183 (antes ~135) y esta entera en la ~209, unos 280 m antes de
+  la entrada (antes en la ~157): crece en ~210 m, como los 200 del original, pero cuando el coche ya gira hacia ella.
+  Mientras tanto el cielo de la union queda limpio. En una union recta el rumbo es ~0 y queda el factor del original.
+  `-DGEO_RUMBO=0`: lo de antes.
+- `SIG_PANO_R` / `SIG_PANO_ALTO`: con la camara antes de la entrada no se dibujan los "techos" de la etapa siguiente:
+  nodos de 600 m de radio o mas, todo de recorte, cuya esfera pasa por detras de la entrada y con todos sus vertices
+  150 m o mas por encima de ella. En las 30 etapas de los arboles 0 y 1 solo cae GRAN 60 (comprobado con los datos). Desde
+  la entrada, mirando por el eje, ninguna de sus mallas toca la pantalla: al pasarla no salta nada. (La regla del WIP,
+  sin la altura, cogia tambien fondos que si se ven desde la entrada: YOSE 233-235, CLOU 1469, SNOW 182 con 617 mallas,
+  IMPE 1208 / 1226...; estrechada.)
+- `SIG_CUP_F`: tampoco salen hasta pasar la entrada los fondos de cielo que rodean la etapa por delante (nodos de mas de
+  2000 m de radio con el centro medio radio o mas por delante de la entrada: solo MACH 1069-1073 y SNOW 176). Una
+  primera version los dibujaba enteros (sin el corte de DETRAS_ENTRADA): la raya seguia (DESCARTADA).
+- `DETRAS_X` / `DETRAS_Z`: DETRAS_ENTRADA usa en los carteles el centro de su nodo (sus mallas van en el marco del
+  nodo y su centro no dice donde estan: en SANF 96 nodos-cartel a 1,6-3,1 km por delante de la entrada se quitaban en
+  toda la union).
+- `-DDIAG_GEO` escribe ademas `GEOC:` (camara, rumbo y factor en el marco de la etapa siguiente).
+
+### Medida
+
+Flycast de aqui, tres a la vez, piloto automatico. "Antes" = 467dd28 (Rev 2.9.9.b). Capturas (antes | despues) y
+registros en el scratchpad, `m29c/huecos/`.
+
+- Lo que se ve:
+  - YOSE -> GRAN (`gran_1m13..1m17_antes_despues.jpg`): antes, de 1'12" a 1'17", el trozo de pared y la losa oscura en
+    el cielo; despues el cielo limpio hasta 1'15", el monte creciendo detras del muro de 1'15" a 1'16"4 y el canon
+    entero a 1'17"4, igual que antes.
+  - NIAG -> MACH (`mach_1m19..1m21_antes_despues.jpg`): antes, la raya vertical y el azul liso de 1'19" a 1'21"5;
+    despues no salen.
+  - Otras 14 entradas (arbol 0: ALPI, DESE, GHOS, CAPE, LAKE, CAST, CLOU, TULI; arbol 1: SANF, NIAG, EAST, YOSE, AMAZ,
+    NEWY), con una captura por segundo en la union: sin trozos sueltos antes ni despues; despues la etapa sale ~1,5 s
+    mas tarde. (AMAZ y NEWY solo se miraron con el WIP.)
+- fps y cuadros tarde, sin los -D de diagnostico (`-DDIAG_MS -DDIAG_POPPING` solo; el emulador es determinista: dos
+  tiradas iguales dan las mismas cifras):
+
+| Tramo | fps antes | fps despues | tarde antes | tarde despues | segundos con el reparto hundido (corte < 1000 m) antes / despues |
+|---|---|---|---|---|---|
+| YOSE entera (hasta GRAN) | 39,12 | 39,18 | 47 | 44 | 3 / 0 |
+| YOSE, la union (s >= 6000) | 38,11 | 38,51 | 12 | 10 | |
+
+- Con `-DDIAG_GEO -DDIAG_FALTA -DPRUEBA_SALTO=3000` (los del barrido de las uniones; con ellos la logica cuesta 2-3 ms
+  mas en la union por las lineas que escribe, y "despues" escribe el doble): PALM 33,90 -> 33,66 fps (tarde 322 -> 328),
+  LAKE 36,21 -> 36,15 (146 -> 147), CAST 36,13 -> 35,91 (167 -> 188), CLOU 32,87 -> 32,90 (275 -> 265), ALPI 37,14 ->
+  37,19 (114 -> 111), DESE 37,46 -> 37,25 (111 -> 118), GHOS 35,27 -> 35,04 (200 -> 209). Segundos con el reparto
+  hundido: PALM 18 -> 13 y 20 -> 15 (dos tiradas), ALPI 7 -> 4, DESE 8 -> 4, GHOS 2 -> 0, CAST 21 -> 16, CLOU 13 -> 7,
+  LAKE 7 -> 8. SUPUESTO: la diferencia de "tarde" de estas tiradas es de las lineas de diagnostico (en la tirada
+  limpia de YOSE no la hay); no se repitieron limpias.
+- RAM: "VOZ: VOCES.DAT, 35 muestras" y ningun "Out of memory" en todas las tiradas. Lo nuevo son 16 int32 y 4 int de bss.
+- Pendiente / no medido: las uniones de las misiones y de C2C (otros arboles), la meta, y la consola real. En la
+  entrada de MACH no se ha mirado cuadro a cuadro si los fondos de cielo saltan al pasarla (en las capturas, una por
+  segundo, no se nota).
+
+## Rev 2.9.9.c: bandas en el cielo en las bifurcaciones (2026-11-27)
+
+Queja del usuario (Flycast de Android): "fallos graficos en el cielo (aparecen bandas dividiendo el cielo) en las
+bifurcaciones". Todo lo de aqui esta medido en el Flycast de Linux; nada en la consola ni en Android.
+
+LO QUE SE HA MIRADO (9 cruces de union con capturas cada 0,5-0,7 s: PALM -> LAKE, YOSE -> GRAN, GRAN -> AMAZ, LAKE -> FORE,
+CAST -> INDU, CLOU -> METR, INDU -> RUIN, SNOW -> IMPE, AMAZ -> NEWY; y GRAN -> AMAZ y AMAZ -> NEWY cuadro a cuadro con
+`-DDIAG_TRANS`)
+- Datos: los cielos de la carpeta de datos de las pruebas ya estan hechos con el conversor arreglado (ps2/vif.py, ver
+  "Cambios de etapa: cielo del fundido"). En las 62 etapas y las uniones no queda ninguna malla del cielo con textura
+  y todas las UV a 0 (antes: dos de las cinco tiras de la cupula del fundido de PALM y las etapas con su cupula). En
+  todo el modelo quedan 6286 mallas con UV a 0 (eran 28965); no son del cielo y no se han mirado.
+- PERO tools/regenera.py no rehacia unos datos viejos: es idempotente y lo que ya esta en datos/ no se repite. Quien
+  convirtio su ISO antes del arreglo del conversor sigue con las franjas lisas en la cupula del fundido, que solo se
+  ve en las uniones (los tercios 2 y 3 del cambio de cielo): es la causa mas probable de lo que ve el usuario
+  (SUPUESTO: no hay captura suya ni se sabe la fecha de sus datos). Ahora regenera.py lo detecta (`cielo_liso`: alguna
+  malla del cielo de SEG00.DAT o de BK00.DAT, sueltos o en su paquete, con textura y todas las UV a 0) y, si es asi,
+  avisa, quita las etapas (SEGnn.DAT, SEGS.PAK, VISO.DAT, REPSEC.DAT) o las uniones (BKnn.DAT, los tres UNIONES*.PAK y
+  los intermedios de trabajo/) y sus pasos vuelven a la lista. Es Python con numpy, igual en Linux y en Windows.
+  Probado con los datos de las pruebas (no los toca) y con una copia de SEG00 / BK00 con las UV de una malla del cielo
+  a 0 (los detecta y quita lo dicho). La conversion entera detras de eso (horas) NO se ha vuelto a pasar.
+- En los 9 cruces, con los datos buenos, no ha salido ninguna banda: el fundido va liso cuadro a cuadro. Lo unico
+  parecido es del original: la cupula del fundido de NEWY (SEG30, grupo 1) lleva el color en los vertices (naranja a un
+  lado, blanco al otro, gajos de 18 grados) y durante el tercio 3 (0,7 s) se ve un borde inclinado entre los dos tonos.
+  Sin tocar.
+- Mallas del cielo que no caben en el TA (`-DDIAG_CIELO`, linea "CIELO:"): 0 en todos los cruces, antes y despues.
+- Fondo de la PowerVR a la vista (`-DDIAG_FONDO`, magenta, en PALM -> LAKE, YOSE -> GRAN y GRAN -> AMAZ): como mucho 217
+  pixeles de 307200 en una captura (GRAN, en la etapa) y 115 dentro de las uniones (rendijas y trozos sueltos). Con la union quitada
+  (`-DDIAG_SIN_TRAMO=1`) si se ve: por debajo del borde de la cupula (1,6 a 18 grados bajo el horizonte segun el cielo)
+  quedaba el azul fijo del fondo con el borde recto del horizonte.
+
+CAMBIOS EN EL CODIGO (DESVIACION los dos; son prevencion: en el Flycast de Linux la imagen de los cruces es la misma)
+- CIELO_TOPE 0 (`-DCIELO_TOPE=1`: como antes): el cielo no obedece el tope de TA de la etapa (`ta_en_cielo` en
+  `ta_cabe`), solo el del cuadro (`ta_lim`). La capa que se funde va entera a la lista transparente, la ultima, y
+  llegaba con el tope de la etapa gastado por las listas anteriores; ademas `corte_nodos` aparta para el cielo lo que
+  costo en el cuadro anterior (`cn_cielo`) y lo que no cabia no se contaba, asi que no se curaba solo. Ahora
+  `cn_cielo` cuenta tambien lo que no cupo. No se ha visto fallar (0 mallas fuera en las medidas); en la consola
+  `ta_f` y los topes son otros. `-DDIAG_CIELO` (o `-DDIAG_TRANS`) escribe "CIELO: ..." cada 30 cuadros si alguna
+  malla del cielo no cupo.
+- FONDO_CIELO 1 (`-DFONDO_CIELO=0`: el azul fijo): el color de fondo de la PowerVR es el del horizonte del cielo del
+  momento (`fondo_pon`: `horizonte_de`, y en el fundido de la union mezclado del viejo al nuevo como la niebla). Donde
+  el escenario no tapa lo de debajo de la cupula, o en las rendijas, ya no sale azul claro bajo un cielo naranja o de
+  noche.
+- Prueba: `-DPRUEBA_S0=<m>` empieza la carrera a esos metros del final de la etapa (para llegar a la union en 20 s).
+
+NO HECHO / DUDAS
+- Android: no se ha podido mirar. Si con los datos rehechos siguen las bandas hace falta una captura.
+- En el fundido cada capa pasa de la lista opaca a la transparente al bajar de alfa 0,9 y deja de dibujarse por debajo
+  de 0,1 (como el original, 452080): dos escalones del 10 % por tercio. No se ha tocado.
+- Las mallas del cielo enteras por debajo del horizonte llevan niebla (cielo_grupo, por el mar de BEAC). En 43 de las
+  62 etapas hay alguna; en varias (ALPI, CLOU, CAPE, GRAN...) es una sola malla de 12 vertices que cubre un sector, y
+  el resto de esa altura va en mallas que cruzan el horizonte, sin niebla. Solo se veria con el horizonte al
+  descubierto; no se ha visto en los cruces y no se ha tocado.
+
+## Rev 2.9.9.c: optimizacion del dibujo (CPU y fps sin quitar nada) (2026-11-27)
+
+Pedido: "optimizacion de codigo + FPS sin perder elementos en pantalla". La 2.9.9 costo -0,85 fps de media. Todo lo de
+aqui esta medido en el Flycast de Linux (tres a la vez); nada en la consola ni en Android.
+
+OJO CON LA MEDIDA: el tiempo de CPU de Flycast sale de contar instrucciones (un ciclo por instruccion, mas 2 por cada
+uno de los tres primeros accesos a memoria de cada bloque; sh4_cycles.cpp). No cuenta fallos de cache. Lo que aqui gana
+es quitar instrucciones y bloques cortos con lecturas; en la consola real la ganancia sera otra (SUPUESTO: del mismo
+signo, porque todo lo hecho es hacer menos trabajo).
+
+PERFIL (`-DDIAG_PERFIL`, PALM y METR en carrera, antes de tocar nada)
+- `dibuja_etapa` 31-32 % del cuadro; de eso solo un tercio es enviar vertices (el bucle en ensamblador). Las mallas
+  son tiras cortas (5-6 vertices de media): manda el trabajo por malla y por tramo, no el vertice.
+- El recorrido de los tramos (dos pasadas por todos los tramos de la lista, miles, para dibujar unos cientos): 6 %.
+- El coche y el trafico (`dibuja_indices` + `ta_cabe` + `dibuja_malla_directa`): 6 % sin contar sus vertices.
+- La pareja (`robot_dibuja`): 7-8 % para 2898 vertices. `nodos_visibles`: 5 %. `pvs_recuerda`: 2 %.
+
+CAMBIOS (`demo/main.c`; cada uno con su -D para volver atras; no cambian que se dibuja)
+- `TRAMO_LISTA` (1): `tramo_sig` salta en un bucle corto los tramos de nodos sin dibujar, y la primera pasada de
+  `dibuja_etapa` apunta (`dif`, 1024 en la pila) los tramos visibles de la segunda, que solo recorre esos. Mismas
+  mallas en el mismo orden. Si no caben, la segunda pasada es la de antes (no ha pasado: maximo visto 282).
+- `INDICES_FINO` (1): el coche y el trafico por un bucle con las cuentas del TA en variables locales, tambien cuando
+  el modelo no esta entero delante (prueba de la esfera por malla, como antes).
+- `RECORTE_TIRAS` (1): en una malla que toca el plano cercano, los triangulos seguidos que estan enteros delante van
+  como un trozo de tira en vez de uno a uno. Mismos triangulos; menos vertices (PALM congelado: 16949 -> 16415) y menos
+  TA. UNICA DIFERENCIA DE IMAGEN: hasta 35 pixeles de 307200 cambian 1 nivel de 255 (el orden de los vertices del
+  triangulo cambia el redondeo de Flycast). Con `-DRECORTE_TIRAS=0` la imagen es identica pixel a pixel.
+- `ETAPA_FINO` (1): fuera del bucle de las mallas lo que es igual para el tramo o el modelo (pvs_ent del nodo, el rayo
+  del sol, DETRAS_ENTRADA).
+- `PVS_RACHAS` (1): `pvs_recuerda` copia de una vez los tramos seguidos cuyo nodo sigue en la PVS (`pvs_copia`).
+- `demo/Makefile`: `comun/menu.o` con `-Os`. No es por velocidad: lo de arriba anade 3,3 KB de codigo, que son RAM
+  del monton (con los -D de medida, la RAM libre al arrancar bajaba de 261K a 253K). Los menus por tamano dan 19 KB.
+  Compilacion normal: codigo 786488 -> 769120 bytes, RAM libre al arrancar 309K -> 333K (seguido en la cima 115K ->
+  139K). Menus comprobados con tools/prueba/nav3.sh antes y despues (titulo, licencia, menu principal, modo, mision,
+  coche, cambio, musica, carrera): iguales.
+- Medida: la linea "MAL:" lleva ademas el mayor `dif` y las llamadas de `dibuja_indices` por cada bucle.
+
+PROBADO Y QUITADO (no ganaba)
+- Saltar en la pareja la matriz que no pesa en ningun vertice de la malla: +0,33 ms (peor).
+- Ahorrar la prueba de la esfera de cada malla si la del nodo esta entera dentro de la vista: solo el 22 % de los
+  nodos contienen las esferas de sus mallas (PALM 614 de 2740) y 28 de 373 tramos estaban dentro: +0,14 ms (peor).
+- `-fno-math-errno`: 23,58 frente a 23,51 ms (nada).
+- No tocado: el bucle de vertices (ya esta en 27 instrucciones), `nodos_visibles`, la pareja, `coche_entorno`.
+
+MEDIDA 1: el mismo cuadro congelado (`-DDIAG_CONGELA=1500`, con `-DDIAG_FALTA`), ms de dibujo por cuadro (mediana)
+
+| Etapa | antes | despues | triangulos | vertices antes / despues | pixeles distintos (de 307200, 1 nivel) |
+|---|---|---|---|---|---|
+| PALM | 15,95 | 13,37 | 10989 = 10989 | 16949 / 16415 | 35 |
+| CLOU | 16,24 | 14,23 | 10752 = 10752 | 17322 / 17258 | 0 |
+| GHOS | 24,11 | 21,96 | 17780 = 17780 | 25856 / 25572 | 24 |
+| METR | 25,98 | 23,51 | 15721 = 15721 | 26261 / 26239 | 9 |
+
+Cada cambio por separado (misma compilacion con su -D a 0; ms del cuadro congelado):
+
+| Cambio | PALM | METR |
+|---|---|---|
+| TRAMO_LISTA | etapa 3,56 -> 2,20 (-1,36) | etapa 10,74 -> 9,30 (-1,44) |
+| INDICES_FINO | coche 2,68 -> 2,08, trafico 0,98 -> 0,85 (-0,73) | coche 2,89 -> 2,23 (-0,66) |
+| RECORTE_TIRAS | etapa 2,79 -> 2,20 (-0,59) | sin medir aparte |
+| ETAPA_FINO | etapa 2,23 -> 2,20 (-0,03) | etapa 9,66 -> 9,30 (-0,36) |
+| PVS_RACHAS | en carrera: vis 3,90 -> 3,77 (-0,13), +0,08 fps | sin medir |
+
+MEDIDA 2: carrera de 160 s con el piloto (`-DPRUEBA_AUTO -DPRUEBA_NODO=n -DPRUEBA_SIN_TIEMPO -DDIAG_MS -DDIAG_POPPING
+-DDIAG_FALTA`), en el tramo de s que recorren las dos. "Antes" = 239cc8d. cpu = dibujo + logica.
+
+| Etapa | fps antes | fps despues | dif | tarde antes / despues | cpu ms antes / despues | grandes que faltan antes | despues |
+|---|---|---|---|---|---|---|---|
+| PALM | 34,08 | 35,82 | +1,74 | 311 / 207 | 27,86 / 25,45 | 2,72 (tope 0,96, tramo 1,66, entrada 0,10) | 3,73 (tope 0,99, tramo 2,64, entrada 0,11) |
+| CAST | 36,52 | 37,61 | +1,09 | 207 / 143 | 25,35 / 23,49 | 1,56 (tope 0,68, tramo 0,88) | 1,61 (tope 0,74, tramo 0,87) |
+| CLOU | 33,34 | 34,72 | +1,38 | 391 / 310 | 28,90 / 26,81 | 5,18 (tope 2,84, tramo 2,28, entrada 0,05) | 4,73 (tope 2,80, tramo 1,87, entrada 0,06) |
+| INDU | 35,45 | 37,30 | +1,86 | 273 / 153 | 26,40 / 23,94 | 2,03 (tope 0,02, tramo 2,01) | 2,31 (tope 0,02, tramo 2,29) |
+| GHOS | 35,34 | 36,59 | +1,25 | 255 / 185 | 27,10 / 24,86 | 0,96 (tope 0,33, tramo 0,63) | 1,29 (tope 0,33, tramo 0,97) |
+| METR | 29,85 | 31,94 | +2,10 | 627 / 497 | 33,81 / 30,76 | 0,79 (tope 0,79) | 0,57 (tope 0,57) |
+| **Media / suma** | 34,10 | 35,66 | +1,57 | 2064 / 1495 (-28 %) | 28,24 / 25,89 | | |
+
+- La tabla es del codigo antes de los dos ultimos retoques (el bucle de reserva de `dibuja_indices` y el `-Os` de los
+  menus). PALM con el codigo final: 35,91 fps, 199 tarde, y el mismo cuadro congelado (13,37 ms, 35 pixeles).
+- "tope" (lo que no cabe) queda igual. "tramo" (la etapa siguiente a la vista antes de estar lista) sube en PALM, INDU
+  y GHOS y baja en CLOU: son 2-3 muestras por segundo en la ventana entre leer la etapa siguiente y tenerla subida.
+  La etapa siguiente queda lista en el mismo sitio (PALM: "SEG05.DAT en 6,49 s (s 5565)" antes, "6,53 s (s 5570)"
+  despues). SUPUESTO: es ruido del muestreo, no una falta nueva; no se ha medido con mas muestras.
+- RAM: "VOZ: VOCES.DAT, 35 muestras" en todas las tiradas. "Out of memory": 0 en carrera. En METR, al llegar a la meta
+  y volver al menu con los -D de medida, sale un "Out of memory" y "MENU: no se pudieron leer las piezas de MENU.DAT"
+  ANTES Y DESPUES (ya estaba; no se ha mirado con la compilacion normal). Con `-DDIAG_PERFIL` (64 KB de bss) tambien.
+
+NO HECHO / DUDAS
+- Consola real y Android: sin medir.
+- HUD, sombras y trafico (su logica): no salen en el perfil por encima del 1 %; sin tocar.
+- La pareja (2,5 ms por cuadro) y `nodos_visibles` (1 ms) son lo siguiente que queda.
+
+Ficheros: m29c/opt del directorio de trabajo (res/ las consolas, cap/ las capturas antes | despues, py/ y sh/).
+
+## Rev 2.9.9.c: medida final A/B en las 15 etapas (2026-11-27)
+
+Todo en el Flycast de aqui (NO en la consola ni en Android). A = 467dd28 (Rev 2.9.9.b), B = f0fc01c (Rev 2.9.9.c: huecos
++ cielo + optimizacion). Los dos con los mismos datos (lgdat2: la 2.9.9.c no trae ficheros de datos nuevos). Flags:
+`-DPRUEBA_AUTO -DPRUEBA_NODO=n -DPRUEBA_SIN_TIEMPO -DDIAG_MS -DDIAG_POPPING`, 140 s de piloto, paso 10; mide.py y pop.py
+solo con las lineas de la zona. Tres Flycast a la vez (:90 :91 :92), como la medida final de la 2.9.9.
+- Pasada 1, una ronda por etapa: A0 y B0 sin el contador, Bf = B con `-DDIAG_FALTA`.
+- Pasada 2: Af = A con `-DDIAG_FALTA`, tres etapas distintas a la vez.
+
+| Etapa | fps A0 | fps B0 | B-A | tarde A0 / B0 | salto A0 / B0 | lejano A0 / B0 | 8 px+ A0 / B0 | 32 px+ A0 / B0 | grandes que faltan Af / Bf | fps Af / Bf |
+|---|---|---|---|---|---|---|---|---|---|---|
+| PALM | 35,63 | 37,24 | +1,61 | 242 / 146 | 8,15 / 7,86 | 3800 / 3800 | 9,6 / 8,6 | 0,9 / 0,8 | 2,22 / 3,78 | 34,23 / 35,92 |
+| LAKE | 37,86 | 38,65 | +0,79 | 130 / 73 | 6,04 / 4,34 | 3800 / 3800 | 3,2 / 2,2 | 0,2 / 0,1 | 1,14 / 1,80 | 36,97 / 37,69 |
+| ALPI | 38,76 | 39,03 | +0,27 | 69 / 51 | 3,91 / 0,72 | 3800 / 3800 | 7,0 / 6,6 | 1,2 / 1,2 | 1,34 / 2,06 | 37,85 / 38,55 |
+| CAST | 37,93 | 38,98 | +1,05 | 120 / 55 | 6,94 / 3,48 | 3800 / 3800 | 14,3 / 15,2 | 2,8 / 3,1 | 0,82 / 1,05 | 36,98 / 37,50 |
+| FORE | 39,32 | 39,43 | +0,11 | 29 / 21 | 2,33 / 0,26 | 3800 / 3800 | 9,8 / 10,4 | 2,0 / 2,1 | 0,37 / 0,00 | 38,84 / 38,97 |
+| DESE | 38,63 | 38,97 | +0,34 | 83 / 56 | 3,35 / 1,40 | 3800 / 3800 | 5,6 / 4,3 | 1,8 / 1,7 | 1,91 / 3,55 | 37,88 / 38,45 |
+| CLOU | 34,50 | 36,40 | +1,90 | 321 / 188 | 8,07 / 7,45 | 3800 / 3800 | 20,0 / 21,2 | 2,1 / 2,0 | 4,57 / 5,01 | 33,37 / 34,70 |
+| INDU | 37,16 | 38,63 | +1,47 | 151 / 59 | 6,85 / 5,24 | 3800 / 3800 | 10,3 / 11,1 | 3,9 / 4,3 | 0,26 / 0,02 | 35,73 / 37,20 |
+| SNOW | 38,92 | 38,97 | +0,05 | 60 / 56 | 3,82 / 0,53 | 3800 / 3800 | 3,2 / 3,2 | 0,7 / 0,7 | 3,68 / 3,84 | 38,16 / 38,39 |
+| GHOS | 36,71 | 37,82 | +1,11 | 167 / 93 | 8,10 / 7,12 | 3800 / 3800 | 14,3 / 15,4 | 2,4 / 2,7 | 0,80 / 0,83 | 36,01 / 36,79 |
+| TULI | 37,43 | 38,45 | +1,02 | 138 / 70 | 7,84 / 5,64 | 3573 / 3693 | 21,0 / 21,1 | 2,7 / 2,7 | 0,10 / 0,10 | 36,37 / 37,29 |
+| METR | 32,68 | 34,49 | +1,81 | 407 / 285 | 7,76 / 7,01 | 3680 / 3776 | 13,6 / 13,8 | 4,7 / 4,6 | 0,70 / 0,52 | 30,83 / 32,96 |
+| RUIN | 38,94 | 39,29 | +0,35 | 50 / 28 | 4,83 / 0,76 | 3565 / 3722 | 9,5 / 11,8 | 1,4 / 2,1 | 4,44 / 4,41 | 38,21 / 38,90 |
+| IMPE | 38,00 | 38,89 | +0,89 | 101 / 45 | 6,56 / 4,33 | 3618 / 3717 | 19,0 / 22,3 | 5,5 / 5,5 | 0,21 / 0,13 | 36,98 / 37,89 |
+| CAPE | 38,89 | 39,18 | +0,29 | 54 / 35 | 4,08 / 0,95 | 3705 / 3761 | 16,6 / 11,3 | 6,4 / 3,8 | 0,01 / 0,00 | 38,18 / 38,80 |
+| **Media / suma** | 37,42 | 38,29 | +0,87 | 2122 / 1261 | 5,91 / 3,81 | 3743 / 3778 | 177,0 / 178,5 | 38,7 / 37,4 | 22,6 / 27,1 | 36,44 / 37,33 |
+
+"tarde": cuadros que empiezan tarde. "salto": nivel medio del reparto adaptativo (salto_q). "8 px+ / 32 px+": apariciones
++ desapariciones por segundo. "grandes que faltan": nodos y mallas de 24 px o mas en la vista que no se dibujan por
+razones reales (tope, tramo, entrada; no rama, pvs ni pvsm), suma por muestra.
+
+**Medido**
+- fps: +0,87 de media sin el contador (37,42 -> 38,29) y +0,89 con el (36,44 -> 37,33). Suben las 15 etapas en las dos
+  pasadas. Las cargadas ganan mas: CLOU +1,90, METR +1,81, PALM +1,61, INDU +1,47. La 2.9.9 habia costado -0,86.
+- Cuadros tarde: 2122 -> 1261 (-41 %) sin el contador; 2871 -> 2017 (-30 %) con el. Bajan en las 15.
+- La desviacion de los fps baja en las 15 sin el contador (PALM 3,98 -> 3,01; IMPE 2,54 -> 1,41).
+- El nivel del reparto ("salto") baja de 5,91 a 3,81 y el lejano medio sube de 3743 a 3778 m: se recorta menos.
+- Saltos de 8 px o mas: 177,0 -> 178,5 por s (+0,8 %); de 32 px: 38,7 -> 37,4. Con el contador 170,8 -> 169,6 y
+  35,6 -> 35,1. Sin cambio apreciable. La razon "tramo" desaparece (2,0 / 0,9 -> 0).
+- Grandes que faltan: 22,6 -> 27,1. "tope" igual (14,55 -> 14,05), "entrada" 0,38 -> 0,14, "tramo" 7,62 -> 12,91.
+- RAM: "VOZ: VOCES.DAT, 35 muestras" en las 60 tiradas y 0 lineas "Out of memory". Con los -D de medida la RAM libre
+  al arrancar es 262K en A y 278K en B.
+- Menus + carrera con la compilacion normal de B (tools/prueba/nav3.sh, sin -D): "VOZ: VOCES.DAT, 35 muestras, 210 KB
+  en el AICA", "VOZ 0x1e7" en carrera, 0 "Out of memory", EFECTOS 3/1/1/1/1/1, RAM libre al arrancar 333K (seguido en
+  la cima 139K). Las 14 pantallas salen.
+- YOSE -> GRAN (arbol 1, nodo 2, rama 1), una captura por segundo: en A el trozo de pared suelto y la losa oscura
+  sobre el muro de 1'12"6 a 1'17"3; en B cielo limpio hasta 1'14"5, la pared crece de 1'15"5 a 1'16"4 (cortada por
+  la derecha ~1 s) y a 1'17"3 esta como en A sin la losa. Despues de la entrada, igual en las dos.
+- PALM -> ALPI (arbol 0, la rama que coge el piloto), una captura por segundo: sin bandas en el cielo, sin trozos
+  sueltos y sin huecos, en A y en B (hojas alpi_01 a alpi_03, de 1'07" a 1'15"; las otras cuatro sin abrir).
+- Compila con los mismos 4 avisos que A (los -D de medida); 1 en la compilacion normal.
+- Cuelgues: ninguno. Las 60 tiradas escriben lineas MS hasta el final (80-112 por tirada).
+
+**Regresiones (B frente a A)**
+- Grandes que faltan por "tramo" (la etapa siguiente esta en la vista y aun no se dibuja): 7,62 -> 12,91. Sube en PALM
+  (1,09 -> 2,67), DESE (1,75 -> 3,54), LAKE (0,84 -> 1,63), ALPI (1,31 -> 2,06), CLOU (1,24 -> 2,08) y CAST (0 -> 0,23);
+  baja en FORE e INDU. Es el arreglo de los huecos (GEO_RUMBO): la etapa siguiente espera a que el coche gire hacia
+  ella. En DESE las lineas con "tramo" van de s 5968 a 6611 en B y de s 6000 a 6288 en A.
+- RUIN: saltos de 8 px 9,5 -> 11,8 y de 32 px 1,4 -> 2,1, igual en las dos pasadas (9,4 -> 11,5 y 1,3 -> 2,1). Toda
+  la diferencia es la razon "detras" (+1,7 / 0,7): cuatro nodos (6, 8, 795, 796; 71 m de radio, a 42 m) que aparecen
+  al cruzar la meta (s 5053). En A no salen en RUIN en ninguna de las dos pasadas; en METR, IMPE y TULI salen tambien
+  en A. Causa sin determinar.
+- IMPE: 8 px 19,0 -> 22,3 sin el contador ("lado" +2,3); con el contador 18,7 -> 19,6. INDU: 32 px +0,3 o +0,4 en
+  las dos pasadas (3,9 -> 4,3 y 3,7 -> 4,0).
+- Saltos "pvs": 117,9 -> 124,9 de 8 px por s (+6 %) sin el contador y 116,5 -> 120,0 (+3 %) con el.
+- Ninguna etapa pierde fps ni gana cuadros tarde.
+
+**Supuesto (no comprobado)**
+- Android y la consola. Flycast cuenta instrucciones y no los fallos de cache: la ganancia sera del mismo signo y de
+  otro tamano.
+- Que el "detras" de RUIN sea el cambio de camara de la meta cayendo en otro cuadro, y no algo que falte antes. No
+  hay captura de ese momento.
+- Que el +3-6 % de "pvs" venga de que B recorta menos (lejano mas alto) y no de PVS_RACHAS.
+
+**Avisos sobre la medida**
+- En los mismos 140 s cada tirada emula un tiempo distinto (65-71 s de etapa en INDU), asi que B0 recorre entre un 9 % menos y
+  un 2 % mas de etapa que A0; Bf y Af quedan a +-8 %. Las medias son de tramos algo distintos.
+- PALM -> LAKE con `-DPRUEBA_RAMA_FIJA=0`: el piloto se atasca en la bifurcacion (s 5257) en A y en B. Sin capturas
+  de esa union; se cambio por PALM -> ALPI.
+- Las capturas de las uniones van emparejadas por la s del registro, que llega con retraso: mirar el crono del HUD.
+- Fuera de la tarea: en ALPI (s ~6700, a la izquierda) hay un tronco de conifera sin copa. Sale igual en A, en B y
+  en B con `-DRECORTE_TIRAS=0` (cuadro congelado 4410): no es de la 2.9.9.c.
+
+Ficheros: m29c/final/ del directorio de trabajo (final.md, tablas.md, res/ las consolas y medida_<n>.txt, cap/ las
+capturas A | B de YOSE -> GRAN, PALM -> ALPI y los menus, sh/ y py/).
+
+### Saltos por s sumados en las etapas medidas, por razon (8 px+ / 32 px+, apariciones + desapariciones)
+| razon | A0 | B0 | Af | Bf |
+|---|---|---|---|---|
+| detras | 3,0 / 2,2 | 4,8 / 2,6 | 3,6 / 2,1 | 2,9 / 1,7 |
+| lado | 13,4 / 5,4 | 11,4 / 3,5 | 9,7 / 3,7 | 9,4 / 3,1 |
+| lejos | 0,0 / 0,0 | 0,0 / 0,0 | 0,0 / 0,0 | 0,0 / 0,0 |
+| lod | 0,2 / 0,0 | 0,2 / 0,0 | 0,4 / 0,0 | 0,4 / 0,0 |
+| pvs | 117,9 / 26,1 | 124,9 / 27,7 | 116,5 / 25,7 | 120,0 / 26,5 |
+| rama | 3,6 / 1,4 | 3,9 / 1,6 | 3,4 / 1,4 | 3,8 / 1,5 |
+| tope | 36,1 / 2,5 | 33,2 / 1,8 | 35,0 / 2,0 | 33,1 / 2,2 |
+| tramo | 2,0 / 0,9 | 0,0 / 0,0 | 1,9 / 0,8 | 0,0 / 0,0 |
+
+### Grandes que faltan (24 px+, suma por muestra de las etapas medidas), por razon
+| razon | Af | Bf |
+|---|---|---|
+| entrada (real) | 0,38 | 0,14 |
+| pvs | 321,42 | 333,13 |
+| pvsm | 433,60 | 441,09 |
+| rama | 158,47 | 158,10 |
+| tope (real) | 14,55 | 14,05 |
+| tramo (real) | 7,62 | 12,91 |
+
+
+## Rev 2.9.9.c (revision): repaso del diff 467dd28..adc6c06 (2026-11-27)
+
+Repaso de todo lo de la 2.9.9.c leyendo el codigo; sin tiradas nuevas (lo medido sale de los registros de la medida
+final). No ha hecho falta cambiar codigo.
+
+Comprobado leyendo (no medido):
+- TRAMO_LISTA: el bucle de tramos de dibuja_etapa no tiene salidas a medias, asi que la lista `dif` de la primera pasada
+  lleva todos los tramos de la segunda; `it` cabe en 16 bits (tramos_nodo no hace la tabla con mas de 65535 mallas). Los
+  2 KB de `dif` van en la pila del hilo principal (64 KB en KallistiOS).
+- ETAPA_FINO: en un tramo de nodo todas las mallas son de ese nodo (tramos_nodo), asi que mirar pvs_ent una vez por
+  tramo da lo mismo que por malla.
+- INDICES_FINO: las mismas cuentas que ta_cabe fuera de la etapa y de la reserva (ta_prim no toca ta_vb con las
+  cabeceras). El coche, el trafico y el fantasma no se dibujan con ta_en_etapa ni ta_en_bo.
+- RECORTE_TIRAS: los trozos de tira van por envia_tira, el mismo camino que ya usaban las mallas enteras delante; no hay
+  culling en ninguna cabecera. Si un trozo no cabe en el TA se queda fuera entero (antes, triangulo a triangulo).
+- PVS_RACHAS: los mismos bits que el bucle de antes (misma mascara, mismo padre del nodo lejano).
+- CIELO_TOPE: el cielo sigue bajo el tope del cuadro (ta_lim, que ya descuenta lo 2D): no puede desbordar el TA. Lo
+  que puede pasar es que en la lista transparente se coma parte de la reserva del coche y el trafico.
+- sig_pano_busca solo se llama con la etapa siguiente (rama `mo == &sig` de pvs_paso) y en el hilo principal, con el
+  modelo ya leido. SUPUESTO para la consola: con un candidato que es todo de recorte (GRAN 60) recorre todas las mallas
+  una vez (1 MB de malla_t): un cuadro largo en la union, que Flycast no cuenta.
+- Las opciones de vuelta atras compilan todas juntas (TRAMO_LISTA, INDICES_FINO, RECORTE_TIRAS, ETAPA_FINO, PVS_RACHAS,
+  GEO_RUMBO y FONDO_CIELO a 0, SIG_PANO_R=0, SIG_CUP_F=1e9, CIELO_TOPE=1).
+- Datos: el juego no abre ningun fichero nuevo; vale con los datos de la 2.9.9 / 2.9.9.b. tools/regenera.py solo usa
+  numpy y tools/pak_union.py (ya estaban en el paquete de Windows), sin rutas fijas ni programas nativos nuevos;
+  cielos_viejos da (False, False) con los datos de ahora y, si no puede leer, no borra nada.
+- AVISO: con datos de antes del arreglo de las UV, la herramienta (tambien la de Windows, que siempre pasa por
+  regenera) borra etapas o uniones y las rehace: horas. Para mirar el cielo lee SEGS.PAK entero (235 MB) una vez.
+
+La "regresion" de la meta de RUIN, explicada con los registros de la medida final (medido):
+- Los cuatro nodos (6, 8, 795, 796) no son carteles; salen con la razon "detras" (detras de la camara) en el segundo
+  del cambio de camara de la meta, junto con otros 120 ("detras +124/121/50"): es el corte de camara.
+- En A no cuentan porque en ese momento el reparto esta hundido: A llega a la meta con el nivel de salto a 3,2 y tras
+  el corte de camara queda "corte 1-4 m, falta 8-16 %" durante unos 3 s (la escena de la meta sin parte de la etapa). B
+  llega con el nivel a 0 y dibuja todo ("corte 3444 m, falta 0,0 %").
+- No es una falta nueva: en B la escena de la meta sale entera. SUPUESTO: en la consola, si se llega a la meta con el
+  salto alto, pasara lo de A (ya pasaba en la 2.9.9.b).
+
+Mod taxi: el cherry-pick de los cuatro commits sobre origin/rev-1.0 (46908c7), simulado con git merge-tree, entra sin
+conflictos y compila desde git archive con el mismo aviso de siempre (or_buf).
+## Trafico -10 % (tools/conv_trafico.py --ligero, DESVIACION pedida)
+
+Menos triangulos en los coches del trafico (TRAF0..8.DAT) y en los camiones de OUTRUN2SP (TRAFK0..2.DAT) sin que se
+note, para dejar margen de TA. No toca el coche del jugador ni los rivales (RCmm.DAT). El formato del fichero no cambia
+y la demo no cambia: solo el conversor (`--ligero[=tanto por ciento]`, por defecto 10) y `tools/regenera.py`, que lo
+pasa en los pasos `trafico` y `camiones` (el programa de Windows llama a regenera.py: genera lo mismo). Unos datos ya
+hechos no se rehacen solos: hay que borrar TRAF0-8.DAT / TRAFK0-2.DAT de la carpeta de datos y volver a llamarlo.
+
+- Por LOD (cada uno es un modelo aparte del original): 1) vaciado: fuera los triangulos que no ganan ningun pixel desde
+  ninguna camara (z-buffer de tools/c/visible.c; anillos alrededor del coche de 0,45 a 8 m de alto, de cerca, a media
+  distancia y con el coche entero; ruedas en 4 giros, remolque en 4 guinadas); 2) hasta el tanto por ciento, colapso
+  de aristas de `conv_coche.simplifica` (el del coche ligero de la 2.9.7) solo en lo opaco de carroceria, piezas,
+  ruedas y remolque, en los LOD 0 a 2, con el error acotado (LIG_DESV = 2,5 cm sobre 8 caras medias) y las UV con peso
+  3 (LIG_UV). Luces, cristales, recortes y sombra no se tocan. Los LOD 3 y 4 solo se vacian.
+- **El vaciado da poco**: estos modelos ya no traen bajos ni interior oculto (0 a 12 triangulos de 530-700 por coche,
+  2 % como mucho). Casi todo sale del colapso, y por eso **no se llega al 10 % en todos**: con el error suelto
+  (el VIS_TOPE del coche) se llegaba al 10 % pero se notaba de cerca (la calandra del modelo 35 deformada por una
+  textura en espejo, la banda del paragolpes trasero mas alta); con el error acotado, lo que da cada modelo:
+
+| fichero | triangulos LOD 0/1 | vertices LOD 0/1 | tiras LOD 0 | triangulos LOD 2 | bytes |
+|---|---|---|---|---|---|
+| TRAF0 | 576 -> 521 (-9,5 %) | 897 -> 832 (-7,2 %) | 126 -> 104 | 191 -> 189 | 87904 -> 85664 |
+| TRAF1 | 701 -> 631 (-10,0 %) | 1089 -> 1007 (-7,5 %) | 153 -> 134 | 255 -> 249 | 83328 -> 80384 |
+| TRAF2 | 578 -> 524 (-9,3 %) | 880 -> 839 (-4,7 %) | 112 -> 105 | 275 -> 259 | 77152 -> 75520 |
+| TRAF3 | 532 -> 509 (-4,3 %) | 887 -> 867 (-2,3 %) | 138 -> 121 | 240 -> 227 | 82048 -> 80448 |
+| TRAF4 | 672 -> 640 (-4,8 %) | 999 -> 962 (-3,7 %) | 134 -> 120 | 270 -> 257 | 94976 -> 91968 |
+| TRAF5 | 543 -> 500 (-7,9 %) | 823 -> 809 (-1,7 %) | 115 -> 101 | 250 -> 234 | 73984 -> 72704 |
+| TRAF6 | 534 -> 481 (-9,9 %) | 876 -> 796 (-9,1 %) | 126 -> 113 | 274 -> 254 | 74496 -> 71104 |
+| TRAF7 | 576 -> 542 (-5,9 %) | 886 -> 863 (-2,6 %) | 109 -> 103 | 287 -> 270 | 61792 -> 60736 |
+| TRAF8 | 594 -> 538 (-9,4 %) | 943 -> 892 (-5,4 %) | 142 -> 118 | 242 -> 226 | 90976 -> 88384 |
+| TRAFK0 | 1147 -> 1084 (-5,5 %) | 1828 -> 1816 (-0,7 %) | 320 -> 295 | 450 -> 441 | 127808 -> 128160 |
+| TRAFK1 | 1147 -> 1128 (-1,7 %) | 1878 -> 1899 (+1,1 %) | 328 -> 314 | 545 -> 536 | 133856 -> 135456 |
+| TRAFK2 | 1332 -> 1253 (-5,9 %) | 2094 -> 2075 (-0,9 %) | 348 -> 322 | 510 -> 494 | 159904 -> 159008 |
+
+  Los 9 del trafico: triangulos del LOD 0 5306 -> 4886 (**-7,9 %**), vertices 8280 -> 7867 (-5,0 %); LOD 2 -5,2 % y
+  -3,4 %. Triangulos = distintos y con area de lo que se dibuja de dia. Lo que cuenta en el TA de la PowerVR son los
+  vertices: bajan menos porque las tiras nuevas (`conv_coche.tiras` con `giro`: sigue la tira repitiendo un vertice en
+  lugar de empezar otra) cambian vertices por mallas. Sin el giro salian menos vertices (-8,4 % en la carrera) pero un
+  10 % mas de tiras y la demo tardaba un 3 % MAS en dibujar el trafico; con el giro, menos tiras que el original.
+  En los camiones casi no hay ganancia (cajas grandes ya minimas; el TRAFK1 sube 21 vertices).
+- Comprobacion offline (visor con z-buffer y texturas, 8 camaras por modelo, LOD 0 y 2, antes / despues / diferencia):
+  sin agujeros ni siluetas rotas; pixeles que cambian mas de 24 niveles: 0,6 % como mucho (trasera del TRAF3 y del
+  TRAF7: la textura se desplaza menos de un texel), el resto por debajo de 0,45 %.
+- **Medido en Flycast** (PRUEBA_AUTO, modo OutRun desde la etapa 1, la de mas trafico; 146 medidas de 30 cuadros hasta
+  s 10500, mismo recorrido): vertices del trafico por cuadro 1678 -> 1594 (**-5,0 %**; maximo 5240 -> 4968), tiempo de
+  dibujo del trafico 800 -> 754 us (-5,8 %); **fps iguales** (38,15 / 38,21) y dib 20,43 / 20,34 ms: el trafico es el 6 %
+  de los vertices del cuadro (27860), asi que el margen ganado es de un 0,3 % del cuadro. "trafico hasta" del TA al
+  arrancar: 1101 -> 1019 vertices. Sin "Out of memory". OUTRUN2SP (arbol 1) 200 s con los TRAFK nuevos: carga sin
+  errores y sin cuelgues (no se vio ningun camion en las capturas miradas).
+- Solo probado en Flycast, no en la consola.
+- Entrega (Rev 2.9.9.c): `--ligero` solo en el paso `trafico` (TRAF0..8). Los camiones (TRAFK0..2) se quedan como
+  estaban: casi no ganaban y no se llego a ver ninguno en el juego con los datos nuevos.
+
+## La pareja del final de recreativa otra vez (2026-11-27)
+
+Los personajes de los finales (FINCHRgg.DAT, FINGgg.DAT, FINHgg.DAT) iban en los datos de las revisiones desde el
+2026-11-23 como descriptores de ACTORES.PAK (repiten modelo: 46 MB sueltos, 6,4 MB empaquetados), pero comun/gd.c solo
+recomponia BKnn y SEGnn: el final de recreativa de OUTRUN2SP salia sin la pareja ("FINAL: sin FINCHR11.DAT (-2)").
+`es_union` acepta ahora tambien FINC* / FING* / FINH* (un FIN suelto solo cuesta leer un sector). Verificado en E con
+tools/prueba/final.sh (preset 0, meta D, final 18): "FINAL: FINCHR2C.DAT, 4219 mallas, 35 texturas, 177 piezas", la
+pareja en las capturas, modos 25 / 27 / 28 y vuelta al frontal. Datos sin cambios. PENDIENTE: que tools/regenera.py
+produzca ACTORES.PAK (hoy los datos regenerados desde la ISO, y los del programa de Windows, llevan los FIN sueltos, que
+tambien funcionan).
+## Modos "sp" (Rev 2.9.9.c): 15 recorridos de OUTRUN2SP, voces HAM.CVT del INFARTO y coche de la grabacion del fantasma (2026-11-27)
+
+### 1. Los 15 recorridos continuos de OUTRUN2SP (presets 2 / 3)
+
+- Original: [0x54c108] = 2 (0x177310 / 0x177440 al arrancar; nadie lo cambia) -> 8449E0 = 2 y la lista de 5 filas del
+  frontal ("Modo OutRun / Modo contrarreloj 15 recorridos continuos"; 4C3DC0 filas 3 / 4: +1F = 1 / 0, +27 = 2 / 3 con
+  el lado 0 / 1 del gatillo R) -> START 0x1760c0(5 / 6) con "%s_course": csc_data_cvt_ren / csc_data_2_ren = arboles
+  291 / 290 de CURSOTA.DAT (los de los cursos seguidos del OUTRUN de la consola, revision 44, ya en el disco y
+  comprobados con orden.sh). La Dreamcast tomaba 0 (3 filas): HECHO como el original (comun/fsp.c paso4;
+  `-DFSP_FILAS3` vuelve a las 3 filas).
+- Resultado (modo 25): con los presets 2 / 3 (1b4a90 en 0x1ba7b4) el suceso 0x188 lleva la funcion 0x50 (PS2 0x209ad8 /
+  0x209cc8 / 0x209d08 = PC 4AED50 / 4AEEC0 / 4AEEE0), no la 0x15: el mapa de 15 (340001 / 34000C con el preset 2, si no
+  340000 / 34000B; capas 1 y 5), 34001D (capa 6) y el coche del modelo ([0x410048 + 48B140 x 4]) en la capa 4, modo 1,
+  de su cuadro 0 al de la posicion: meta (0x1cff70(0xE)) 0x1FE; si no, 0x1E por nivel acabado (0x3C en los niveles 5 y
+  10, 0x209a40) y en el siguiente razon x 23 (46) en la etapa, 23 + razon x 7 (46 + razon x 14) en la union y razon x 30
+  en la etapa 14 (0x209a68 / 0x209aa0 / 0x41f0). Acaba cuando el coche llega a su ultimo cuadro. demo/fin.c ta_init /
+  ta_control; tablas en el bloque 'TA50' detras de RSP1 en RUTASP.DAT (tools/conv_sp.py tablas_ruta: cada constante
+  comprobada en el codigo; con el RUTASP.DAT de antes sale el mapa de la 0x15).
+- Entrada de nombre (modo 26) con los presets 2 / 3 (0x200400..0x2004d4): la tabla 3D001D / 3D001E (cuadros 0..0x14)
+  en lugar de t + 0, sin la linea de la meta ([0x360] = 6) (demo/nombre.c tablero). El fondo, 44DC50(450560(4)): el
+  descriptor de la etapa del nivel 4 de su arbol (desc4p de demo/main.c: RANKSP.DAT solo trae los de los arboles 0 /
+  1). Los rankings de esos presets ya estaban en comun/rksp.c.
+- Ya iban por preset sin cambios: CARGASP2 / 3, tiempos TIM1 2 / 3, mapa de 15 del HUD, banderero, choques, la meta E
+  (clave 14) y el final de recreativa.
+- Espacio del GD y presupuestos: los 15 recorridos usan las SEGnn / COLnn de los arboles 0 / 1 y las uniones
+  BK470..497 (UNIONESR.PAK, 7,1 MiB) que ya estaban en el disco; ninguna es SEG46 ni de las uniones con el cielo de
+  FLOR_R (las que no caben en los huecos): caben todos. Las 28 uniones frente a las 30 bifurcaciones de los arboles 0 / 1
+  (tools/vram.py lee_dat y la cabecera ORD7 de los LGDAT2, script scratchpad modos/sp/scr/uni.py): texturas media 179 /
+  max 221 KB frente a 172 / 209 KB; vertices del modelo media 41306 / max 42295 frente a 41141 / 41591 (+0,4 % / +1,7 %:
+  los mismos LRBK con otros carteles). El TA no sube (el tope del TA es global, demo/main.c ta_*, y la etapa es la misma
+  SEGnn); la VRAM, como mucho +12 KB en una union, dentro de la zona del curso. Medido en Flycast (arbol 290): huecos
+  8142K / 1584K al arrancar, RAM libre en carrera 331..463K, VRAM libre de la zona 558..1003K, SEG03 en 7,09 s, BK470 /
+  471 en 1,7..1,9 s; modo 25 con 3154..4572K de RAM fija.
+- Verificado en E (Flycast, display 97; tools/prueba/resultados.sh con SP_FILA=n (pulsaciones cortas a la derecha) y
+  SP_CONF=1 para la configuracion de la Contrarreloj):
+  - "Modo contrarreloj 15 recorridos", lado 0: `FSP: carrera (... variante 0, preset 2 ...)`, `CURSO: arbol 291, 15
+    etapas, salida BEAC`, fin del tiempo en SANF -> `FIN: modo 25, funcion 0x50 (15 recorridos, preset 2): coche 340009
+    hasta el cuadro 53` (mapa de 15 con el coche en la segunda etapa), `NOMBRE: modo 26, variante 0 preset 2` (tabla de
+    la Contrarreloj de 15), GAME OVER y vuelta al frontal.
+  - "Modo OutRun 15 recorridos", lado 1 (gatillo R): `variante 1 ... preset 3`, `CURSO: arbol 290, 15 etapas, salida
+    PALM`, funcion 0x50 hasta el cuadro 52 (30 + 0,969 x 23), la tabla de OutRun de 15 (PUNTUACION 75680), GAME OVER y
+    frontal. 0 "Out of memory", 0 "pvr_mem: ERROR".
+  - Capturas: scratchpad modos/sp/cap/t15/ (re_8c la lista de 5 filas, re_2 el mapa de 15, re_n* el ranking) y
+    modos/sp/cap/o15/ (re_8c, re_3, re_n1).
+- Recorridos enteros hasta la meta desde el frontal (Flycast, :97, GDI con -DPRUEBA_PILOTO_MENU -DPRUEBA_SIN_TIEMPO,
+  scratchpad modos/sp/scr/s15.sh = final.sh con espera larga; capturas modos/sp/cap/s15o/ y s15t/):
+  - OutRun de 15 (lado R, preset 3, arbol 290): las 14 uniones BK470..483 leidas (1,7..2,4 s), GOAL en CAPE, meta E
+    (escena 5, musica 63), final de recreativa (modo 24, FINE4), modo 25 con la funcion 0x50 hasta el cuadro 510 (0x1FE,
+    la meta), GAME OVER y vuelta al frontal. RAM libre minima en carrera 235K (BKD.DAT detras de BK481).
+  - Contrarreloj de 15 (lado 0, preset 2, arbol 291): BK484..497 (BK497, la de la meta, 14,4 s en Flycast con
+    META.DAT), GOAL en NEWY, meta E (escena 34), modo 25 hasta el cuadro 510, GAME OVER y frontal (sin modo 24: la
+    Contrarreloj no tiene final en la DC, final_columna). RAM libre minima 249K (META.DAT con la union de la meta).
+  - Sin cuelgues, sin "Out of memory", "pvr_mem: ERROR" ni "No se pudo". Aviso visto, que no es de estos cambios:
+    "FINAL: sin FINCHR11.DAT (-2)": en los datos de prueba (LGDAT2) los FINCHRgg.DAT son descriptores PAKD de un
+    ACTORES.PAK que rev-1.1 no recompone (comun/gd.c es_union solo BK / SEG): el final sale sin la pareja.
+- Los records de la Contrarreloj de 15 tras la meta (26 en
+  la variante 0 con record, [0x5a2030]) siguen como antes (SIN PORTAR en todas las Contrarrelojes de OUTRUN2SP).
+
+### 2. Voces del INFARTO: HAM.CVT (preset 0) y HAM_SR
+
+- Original (SLES-53998): el cargador de la etapa (0x173a54..0x173aa4, variante 2) pide con 11ed40 un banco por etapa:
+  con el preset 1 ([0x44350c], 0x173a6c) 0x1b3be8(clave), si no 0x1b3c70(clave); id = base[c] + clave con c =
+  0x1af710(clave) = la clase de la mision de su nivel (0x1aeff0: < 15 -> 0; 15..40 por la tabla de saltos 0x3f06e0 -> 1,
+  2 o 3) y base 0x8443 / 0x844f / 0x8458 / 0x845d (HAM\1A.., HAM_SR\3A1.., HAM_SR\4A2.., HAM_SR\5A3..; el byte bajo es la
+  entrada de la tabla de bancos 0x352840) o 0x841a / 0x8426 / 0x842f / 0x8434 (HAM.CVT y HAM_SR.CVT). La Dreamcast
+  llevaba solo HAM\ (la clase 0 del preset 1), tambien con el preset 0, y sin HAM_SR (misiones >= 15, niveles 2..4).
+- Conversion (tools/conv_infarto.py vocesh): VOCESH.DAT (preset 1: HAM y HAM_SR, 26 bancos distintos) y VOCESHC.DAT
+  (nuevo, preset 0: HAM.CVT y HAM_SR.CVT, 35 bancos distintos). Cada muestra distinta (por id y datos) una sola vez con
+  la mascara de los bancos que la llevan (bloque 'VHG1' detras de los datos: mascaras u64, grupo por clase y clave,
+  clase de cada mision 0..47); las de HC.PAK / PERH.pak como siempre. HAM.CVT\2A, \3A y HAM_SR\5D2 llevan las tablas
+  al principio del sector siguiente (banco_tablas_ham; conv_sonido.banco_tablas no las veia y salian vacios). AICA:
+  VOCESH.DAT 740 -> 511 KB (75 muestras), VOCESHC.DAT 653 KB (90). Tres muestras de HAM_SR.CVT pasan de 65535 (el
+  largo maximo del AICA) y no van: suena la de HC / PERH si la hay (0xd8 de 5D3; 0x16e y 0xdc de 5E3).
+- Demo: comun/sfx.c lee VHG1 (sin el, con los ficheros de antes, id + 0x200 (grupo + 1) como hasta ahora) y
+  sfx_voz_grupo_ham(mision, clave); comun/infarto.c voz_banco (al empezar y en cada stage clear, con la mision de
+  mision()) e infarto_voces() (VOCESHC.DAT con el preset 0 si esta en el disco); demo/main.c pone el preset antes.
+- DESVIACION que queda: el PS2 elige el banco al cargar la etapa (la mision de 1aeff0 queda fijada entonces); la DC en
+  el stage clear, con la mision que ya elegia alli.
+- Verificado en E: OUTRUN2SP lado 0, Infarto (sp.sh SP_FILA=1 SP_LADO=0): `VOZ: VOCESHC.DAT, 90 muestras, 653 KB en el
+  AICA (bancos HAM por clase y clave)`, `INFARTO: voces del banco 0 (clave 0, mision 0, preset 0)` y las voces de la
+  copiloto (0xe7, 0xe8, 0xc8, 0xd7...). INFARTO de la consola (nav3.sh MODO_JUEGO=2, preset 1): `VOZ: VOCESH.DAT, 75
+  muestras, 511 KB` y el banco 0. Con el piloto (-DPRUEBA_AUTO -DPRUEBA_VARIANTE=2
+  -DPRUEBA_JUEGO=1 -DPRUEBA_SALTO=600 -DPRUEBA_RAMA=1, preset 0, arbol 1): el banco cambia en cada stage clear como en
+  la tabla de VHG1 (clave 0 -> 0, 2 -> 2, 5 -> 5, 9 -> 8, 14 -> 10). En esa carrera todas las misiones fueron < 15
+  (clase 0): los HAM_SR (clases 1..3) no se han visto elegir en Flycast.
+- PENDIENTE: oirlo (Flycast va sin audio en las pruebas: se comprueba por la consola serie que la voz pedida existe).
+
+### 3. El fantasma de la CONTRARRELOJ con el coche de la grabacion
+
+- Original: 467E30 / 4AE0F0 dibujan el fantasma con el modelo grabado. La Dreamcast lo dibujaba siempre con la forma
+  del coche del jugador. Ahora (demo/main.c gh_*, comun/gho.c):
+  - ORGH guarda en `modelo` 0x80000000 | color << 8 | ficha del coche que grabo (mismo formato ORGH 'ver' 1; las
+    grabaciones de antes llevan 0 y se ven con el coche del jugador, como antes; una version vieja de la demo lee las
+    nuevas igual).
+  - Si la ficha grabada no es la del jugador, gho_lee saca del GD el bloque GHO1 (la forma simplificada sin textura de
+    la Rev 2.9.2.a) de su COCHEnnL.DAT (el ligero; si no esta, COCHEnn.DAT) sin leer el fichero: la cabecera ORD7 da
+    donde empieza CEX2 y se recorren CEX2 / SVL1 / ANI1 sector a sector (un sector de cache) hasta GHO1. Va en gh_buf
+    (el bufer del fichero de la VMU, libre en carrera; gh_meta vuelve al coche del jugador antes de escribir alli):
+    0 KB de monton y 0 KB de VRAM (sin texturas). COCHE00L: 182 triangulos (3,6 KB).
+  - Translucido como antes (gris azulado, alfa 0,44). Pedido del usuario (menos poligonos, <= 0,3 fps): solo las caras
+    que miran al ojo (GHO1 son envolventes convexas con las caras hacia fuera; el ojo pasado al marco del coche): de
+    182 triangulos / 546 vertices por cuadro a ~68 / ~205 (medias de 300 cuadros: 64..72 triangulos, 194..218
+    vertices). `-DGH_DOS_CARAS` las dos caras como antes.
+  - Medido en Flycast (PALM_T, codigo 0, piloto con -DPRUEBA_FICHA=5 contra la grabacion de la ficha 0,
+    -DPRUEBA_GH_ADELANTO=15 -DDIAG_MS, 77..78 medidas de 30 cuadros, misma carrera): sin dibujar el fantasma
+    (-DPRUEBA_GH_OCULTO) 39,21 fps / dib 19,83 ms / 27059 vtx; con el fantasma de una cara 39,16 fps / 20,03 ms /
+    27402 vtx (**-0,05 fps**); con las dos caras 38,98 fps / 20,22 ms / 27664 vtx (-0,23 fps). Flycast, no la consola.
+- Verificado en E: primera carrera con la ficha 0 (`FANTASMA: guardado ORGH0100 (407 muestras, 54102 ms)`), segunda
+  arrancada con la misma VMU y la ficha 5: `FANTASMA: coche de la grabacion ficha 0 (color 1): GHO1 de COCHE00L.DAT,
+  182 triangulos`, la forma gris del F50 delante del F430 del jugador (scratchpad modos/sp/cap/ghc/gh_b*.png y
+  modos/sp/cap/ghc_zoom.png; con las dos caras gh/ y gh_zoom.png). Sin "Out of memory".
+- DESVIACION que queda: el fantasma usa el cuerpo de la fisica del jugador (ani_m[0], unos cm), como antes; sin el
+  color de la grabacion (guardado, pero el fantasma sigue sin pintura por la peticion de la 2.9.2.a).
+
+### Medidas generales
+
+- RAM: binario + BSS +5,3 KB (text 769120 -> 772892, bss 2174628 -> 2176100: 1,3 KB de las mascaras de las voces);
+  al arrancar "en uso 13021K, libre 342K" (nav3.sh), "VOZ: VOCES.DAT, 35 muestras"; ninguna prueba con "Out of memory".
+- Datos nuevos / cambiados (scratchpad modos/sp/dat): RUTASP.DAT (bloque TA50, +192 bytes), VOCESH.DAT (526 KB),
+  VOCESHC.DAT (672 KB, nuevo; regenera.py paso `infarto`).
+## Tarjeta SPLASH WAVE REMASTER en el selector de musica (2026-11-27; DESVIACION pedida por el usuario)
+
+Una tarjeta mas, la ultima de la lista 2 (las remezclas): SPLASH WAVE REMASTER de SUPNEO, tema 28, siempre
+disponible. La cancion y la imagen son del usuario y no van al repositorio (como los datos del juego): se anaden con
+`tools/menu_musica.py` solo si estan.
+- **Por que pantalla pasa la musica en cada modo**: COAST 2 COAST (misiones -> coche -> cambio -> musica), OUTRUN (tablero
+  0x24 con los juegos OutRun 2 y OutRun 2 SP -> coche -> cambio -> musica), INFARTO y CONTRARRELOJ pasan todos por la
+  misma pantalla de musica de la consola (P_MUSICA de comun/menu.c, 4C9C20 del PC): la tarjeta sale en los cuatro
+  (INFARTO y CONTRARRELOJ comparten el selector, no se puede tener en unos si y en otros no sin inventar). El OUTRUN2SP
+  del menu principal no pasa por ella: va al frontal de recreativa (comun/fsp.c, "Elige la musica", funcion 9, lista
+  0x2E0028 de 8 filas por lado con los registros 5C8D00 {tema, avance, 4 filas}; ver Frontal de recreativa de
+  OUTRUN2SP). Alli va como una fila mas: HECHO, ver "Fila SPLASH WAVE REMASTER en Elige la musica de OUTRUN2SP" abajo
+  (lo que sigue era la propuesta). Como hacerlo sin inventar pantallas: una fila mas en esa lista
+  (un 17.o registro de 5C8D00 en el bloque FSP1 de SPFE.DAT con el tema 28 y el avance 71, la lista de 9 filas en
+  lista_4bee90 / lista_4c0eb0 de ese lado y las escenas de la fila nueva compuestas como aqui sobre las del banco 0x2E
+  de SPFE.DAT, con un parche como menu_musica.py); el banco 0x2E se evalua en vivo (comun/sprani.c), asi que hay que
+  anadir cuadros a sus escenas, no piezas horneadas: trabajo aparte. Mientras, quien quiera el tema en los cursos de
+  OUTRUN2SP lo tiene en OUTRUN de la consola con el juego "OutRun 2 SP" del tablero (verificado abajo).
+- **Datos** (`tools/menu_musica.py <MENU.DAT> <cancion> <imagen> <salida/>`): MENU.DAT no se puede regenerar (lleva el
+  arte de OutRunners), asi que se parchea el que hay: se lee entero (HUD1 + MNU1 + MNU2), se anade una textura de
+  512 x 128 en 16 bits (128 KB, sin VQ) al final de las de MUSICA2 (las de las pantallas de detras se corren; los
+  indices de sprites, grupos y usos no cambian), seis sprites al final, las piezas de los cuadros 499 y 500 del carrusel
+  MUSICA_L2 y 1320..1429 del titulo MUSICA_T2, y los tramos TEMA12 (500, quieto; titulo 1320..1429 en bucle) y
+  MUEVE1112 (499 -> 500: un movimiento de 0 cuadros no avisa al menu de que ha acabado y no sonaba el avance). Marca
+  `SWR1` en el primer campo libre de MUSICA2 en MNU1: el menu solo ofrece la tarjeta con ella. Repetible: si ya hay
+  una tarjeta de mas (la suya o la ALL I WANT, cuyo arte seguia en el MENU.DAT de los datos aunque el codigo ya no la
+  usaba: 6 texturas, cuadro 500) la quita antes; dos pasadas dan el mismo fichero byte a byte.
+- **La tarjeta**, en los sitios de la del tema 11 (NIGHT FLIGHT INSTRUMENTAL): rotulo "SPLASH WAVE" (234x31) y tira
+  inferior "SPLASH WAVE - REMASTER BY SUPNEO -" con la fuente 14 del propio MENU.DAT (grupo FUENTE + metricas de MNU2,
+  engordada y espaciada para parecerse al rotulo del original; sin fuentes del sistema), colores medidos en las piezas
+  del tema 11; etiqueta "REMASTER BY SUPNEO" en una pastilla azul como las de genero; el icono de la lista 2 (el mismo de
+  sus 12 temas); visor de la radio en azul de puntos alternando "SPLASH WAVE" / "(REMASTER BY SUPNEO)" cada 55 cuadros
+  como los del original; portada = la caja de CD de la portada del tema 11 con la imagen del usuario (recortada al
+  centro y escalada, sin retocar) en el sitio del dibujo; 13 puntos de lista (uno mas, a 16 px) con el encendido en el
+  13. El rotulo de la lista (MUSICA DE FONDO: REMIX 1) se repite del cuadro del tema 11.
+- **Audio**: el mp3 se decodifica con el ffmpeg de imageio-ffmpeg (tools/nativo.ffmpeg) a PCM a 44 100 Hz y
+  `tools/c/musica.c` (entrada nueva "pcm") lo pasa a ADPCM de Yamaha estereo como los MUSn.ADP. 44,1 kHz y no 48: la
+  demo reproduce todas las pistas a 44 100 Hz (musica.c, el pitch 0xEB3 del original); a 48 kHz sonaria un 8 % lenta.
+  MUS70.ADP = el tema entero (2:59, 7,6 MB); MUS71.ADP = el avance (26 s desde el segundo 30, fundidos de 1,5 s; los del
+  original son trozos de ~25 s). Pistas 70 / 71 porque la 28 (final de recreativa, fin.c) y la 61 (0x21 + 28,
+  resultados de OUTRUN2SP) ya son del original. comun/musica.h: MUSICA_TEMA_EXTRA, musica_pista_tema /
+  musica_avance_tema / musica_tema_pista.
+- **Codigo** (comun/menu.c, diff pequeno): TEMAS_LISTA[2] = 13 con la marca; pon_musica pide avance y tema con las
+  funciones de musica.h; tema_libre: el 28 siempre; menu_pista devuelve la pista 70 y menu_entra la vuelve a tema 28
+  (demo/main.c sin tocar: NPISTAS sigue en 28, el tema de mas no depende de el). **ALEATORIO (Y)**: igual que el
+  original, `(rand & 0x1F) * 27 >> 5` = 0..26: la tarjeta nueva no sale nunca (tampoco el 27 en el original); se
+  decide no tocarlo para no cambiar lo que hace el boton del original. Programa: +236 bytes de .text.
+- **Paso opcional**: tools/regenera.py, despues de lo demas, si en `extras/` (por defecto al lado de datos/; `--extras
+  DIR`) estan `splash_wave_remaster.mp3` y `supneo.jpg` (menu_musica.EXTRAS) parchea el MENU.DAT de datos/ y deja
+  MUS70.ADP / MUS71.ADP; no lo repite si ya esta y no son mas viejos que los ficheros de extras/. El programa de Windows
+  (windows/outrun2dc.py) usa `<carpeta>/OutRun2006_DC/extras/` (LEEME.txt); construye.sh ya lleva menu_musica.py y
+  musica.exe. Sin esos ficheros, nada cambia.
+- **VRAM**: MUSICA2 800 KB con la tarjeta (808 en el MENU.DAT de antes con el arte de ALL I WANT sin usar; 274 + 800
+  con la comun MUSICA). RAM: +2 piezas en las tablas de MENU.DAT (las de ALL I WANT se quitan), nada mas.
+- **Verificado en Flycast (E)**, recorrido real del menu con una licencia nueva (herramienta de prueba en el
+  scratchpad: modos/musica/herr/musica.sh; audio de Flycast con SDL_AUDIODRIVER=disk): la tarjeta se ve (capturas
+  mu_tema12), sin candado; el avance MUS71.ADP suena al llegar a ella (correlacion con MUS71 0,98 frente a 0,06 /
+  0,13 con MUS60 / MUS27); al elegirla suena MUS70.ADP en la carrera: OUTRUN juego OutRun 2 (0,67 / 0,61 frente a
+  0,06 de MUS27, con motor y voces), OUTRUN juego OutRun 2 SP (arbol 1, preset 0: 0,67 / 0,58 frente a 0,05) y COAST 2
+  COAST (con -DPRUEBA_MEZCLA=6, solo la musica: 0,98 frente a 0,08). La grabacion de Flycast en carrera lleva silencios
+  donde la emulacion va mas lenta que el audio: se quitan antes de correlacionar. "VOZ: VOCES.DAT, 35 muestras", RAM al
+  arrancar 345 KB libres (la base no se midio aparte; el programa crece 236 bytes), sin "Out of memory"; nav3.sh
+  (COAST 2 COAST) igual. INFARTO y CONTRARRELOJ usan la misma pantalla (no
+  probados aparte; despues si, ver abajo). No probado en R.
+
+### Fila SPLASH WAVE REMASTER en "Elige la musica" de OUTRUN2SP (2026-11-27; DESVIACION pedida por el usuario)
+
+El frontal de recreativa (comun/fsp.c, funcion 9, PC 4C4880) lleva su propia lista: la escena 2E0028 del banco 0x2E
+(SPFE.DAT, evaluada en vivo por comun/sprani.c), 8 filas por lado (7 temas y ALEATORIO; lado 0 OutRun 2, lado 1 las de
+1986 / 1989 con el gatillo R), 90 cuadros por fila (t = (aa4 + aa0 + x2) x 2 = (10 + 5 + 30) x 2), con los registros
+5C8D00 {tema, avance, 4 filas}. Ahora tiene 9 filas por lado: la novena, SPLASH WAVE REMASTER (MUS70 / avance MUS71),
+al final, despues de ALEATORIO, en los dos lados.
+- **Datos**: `tools/fsp_musica.py <SPFE.DAT> <MENU.DAT> <imagen> <salida/>` parchea el SPFE.DAT que hay (SPFE.DAT si se
+  regenera desde la ISO con conv_sp.py; el paso opcional de extras de regenera.py lo parchea despues del MENU.DAT). Solo
+  anade al final de la animacion y cambia unos pocos campos (apuntados en el bloque para deshacerlos): repetible, dos
+  pasadas dan el mismo fichero byte a byte. Las capas de las 8 filas del original no se tocan.
+  - 2E0028: la raiz se alarga (lado 0: 30..870 en vez de 30..780; cambio de lado, lado 1 y vuelta corridos 90 / 180
+    cuadros; duracion 1780). Por cada capa de la raiz que dibuja un carrusel hay otra con la misma animacion y una
+    componente con la carta 9 (copias de las capas de la carta 8, ALEATORIO, a +61 px y +90 cuadros: carta pequena,
+    sombra, carta grande, marco y destello; la de "detras", la lista del otro lado, igual). DESVIACION de colocacion:
+    todo el carrusel va 24 px a la izquierda para que quepa la novena (las 8 cartas del original, mismas y en el mismo
+    orden, 24 px mas a la izquierda).
+  - 2E0029 / 2E002A (la eleccion, 30 cuadros por fila, salida 240..255): la carta 9 quieta en el carrusel y su eleccion
+    en 256..285 (copias de las capas de la raiz con su animacion de 210..239, el rotulo nuevo y el ecualizador de la
+    fila 0).
+  - 2E0027 (el visor): 1600..1689 con "SPLASH WAVE REMASTER" hecho con las letras de los rotulos del propio visor
+    (SPLASH WAVE + R, E, M, A, S, T de PASSING BREEZE / MAGICAL SOUND SHOWER / ALEATORIO) y el ecualizador de la fila 0.
+  - 2E0013 (el icono de la musica en el panel de la derecha, un cuadro por registro): el cuadro 16.
+  - Arte: las cartas e icono de SPLASH WAVE del original con la imagen del usuario en el disco y "REMASTER" (fuente 14 de
+    MENU.DAT) en la carta; una textura de 512 x 128 en 16 bits (128 KB de VRAM mientras se ve la lista).
+  - FSP1: detras, el bloque `MUSX`: filas 9, desfase del lado 1 830 (740 + 90), cuadros del cambio de lado en 2E0028
+    (870..889 y 1700..1719; en 2E0027 siguen los de antes), un registro por lado {70, 71, (2E0027 1600..1614),
+    (1615..1674), (2E0029 / 2E002A 256..285), (1675..1689)} y lo necesario para deshacer el parche.
+  - Tablas en la RAM (el hueco de 960 KB del frontal): 10 204 bytes de FSP1 + MUSX y ~15 KB mas de animacion
+    (874 KB en total, caben).
+- **Codigo** (comun/fsp.c): sin MUSX todo igual que antes. Con MUSX: lista_4bee90 con 9 filas y el desfase 830; la
+  posicion p (fila + lado x 9) va al registro del original (lado x 8 + fila) o al de MUSX (mus_idx / mus_campo /
+  mus_fila); ALEATORIO sigue siendo la fila 8 de cada lado y sortea entre los 7 temas del original (como el original:
+  la nueva no sale); la voz del tema (idioma 0, no suena en la PAL espanola) no se pide para la nueva; el icono del
+  panel, cuadro 16; el cambio de lado de 2E0028 con los cuadros de MUSX.
+- **Verificado en Flycast (E)**, OUTRUN2SP desde el menu principal (scratchpad modos/musica/herr/fsp.sh): lado 0 y lado
+  1 (R), las 9 filas (capturas: las 8 del original con sus rotulos y avances de siempre, MUS33..39 y MUS42..48, ALEATORIO
+  MUS30) y la novena con su visor y avance MUS71 (correlacion 0,99 frente a 0,08 con MUS33); A en ella: la eleccion, el
+  icono en el panel y la carrera con MUS70 ("FSP: carrera ... musica 70"; correlacion 0,67 frente a 0,08 con MUS2, con
+  motor). ALEATORIO sigue sorteando entre los 7 (salio MUS2). "9 filas de musica" en el registro; sin "Out of memory".
+- **INFARTO y CONTRARRELOJ** (consola, la misma pantalla de musica que OUTRUN y C2C): la tarjeta se elige y suena
+  (avance MUS71 y carrera con MUS70; correlacion 0,65 y 0,72 frente a 0,05 / 0,06 de MUS27). No probado en R.
+## COAST 2 COAST: misiones de tipo 1, 2, 3 y 6, vaivenes de los rivales (agente c2c, 2026-11-27)
+
+Se juegan las 18 misiones que faltaban (tipos de +0x20 de Races.bin: 1 eliminacion por tiempo, 3 misiones; 2 derrape,
+7; 3 rebufo, 5; 6 pillar al rival, 3) con sus reglas, su HUD, su nota y su resultado. Las 94 misiones abren desde el
+mapa del menu (antes A en ellas daba el sonido de bloqueado); solo siguen cerradas las de `arbol_grande` (no caben).
+
+**Gestor (comun/mision.c, nuevo).** 496A30 de SLES-53998 (PS2 0x1f8d0c, el mission_manager_control_496a30 del PC,
+comprobado en el ELF de PS2 tipo a tipo: 0x1f9050 tipo 3, 0x1f90d0 tipo 2, 0x1f9144 tipo 6, 0x1f91b0 tipo 1, 0x1f9428 la
+escala) y lo que llama: 477B60 (0x1f13c8), 477430 (0x1f0da8), 495C20 (0x1f85d0), 495E90 (0x1f8930), 4961F0 y 495A20. Se
+movieron aqui los rotulos del principio (antes en demo/main.c, c2c_paso).
+- Tipo 1: el reloj [836388] = segundos (+0x28) x 60; baja 1 por paso; en los ultimos 5 s el pitido 0x518D cada segundo;
+  a los 0x168 cuadros el rotulo 2B0064 ("¡KO! en 5, 4.."); con el jugador ultimo entre 0x3D y 0x168 la voz 0x1F2; en 0:
+  si el ultimo es el jugador, mision fallada (450230(2): el fin del tiempo, modo 20) con su nota guardada; si no, sale el
+  ultimo coche de carreras (477430: fuera de la clasificacion, su coche cerrado, los puestos de detras suben uno), el
+  rotulo del eliminado (0x36f418 por su +0x76: 2B0056..) y la voz 0x1F0; con 2 en carrera, ganada (meta sin camara).
+- Tipo 2: con el derrape (+D36 > 0) a mas de 10 km/h, en el asfalto y sin toque reciente (+DA4), 10 puntos por paso, 20
+  por encima del 95 % del tope del coche ((+134C - 2,3) x -131,39 + 318). Tipo 3: con rebufo (+E68 > 0,18 y |+162| <
+  0x5DC) lo mismo (20 por encima del tope); un choque con otro coche (+4 0x10000 y 0x4000000) quita 2000 y pone +DA4 =
+  0x1E. El rival suma 10 / 20 (bit 3 de +0x70) en 477B60 con su bandera (0x200 derrape, 0x100 rebufo).
+- Tipo 6: con el jugador ultimo baja su reloj (segundos x 60); en 0 fallada. El rival en el ultimo puesto gasta su +0x98
+  (el mismo tiempo, puesto en el montaje 47CF40) y en 0 esta pillado (rotulo 0x36f430: 2B0050..; con 2 en carrera,
+  ganada y su rotulo en vez de GOAL en la meta, 498670).
+- Tipos 1 y 6: car+0xDBC = [83638C] / 600 x 0,17 + 1 (sube con el jugador detras: ActionForce2 escala el avance; demo:
+  `jug_escala` en coche_paso).
+- Nota (495C20): 0 y 1 por el puesto; 2 y 3: por encima de los puntos del rival 4, 5 o 6 (umbrales +0x38 / +0x3C), si
+  no por la razon con 0,3 / 0,5 / 0,7 / 1 (PS2 0x36f450); 6: (reloj + 5) / 6 contra los umbrales, 0 si acaba ultimo. Se
+  guarda en la licencia (+0x1D7 + 5 clave + sub, menu_nota_mision) al salir de la meta (49CFD0) y en los finales de la
+  mision (495A20): la VMU la escribe como las de carrera.
+- Marcas (495E90): tipos 2 / 3 sobre el coche (495D90: el punto de la tabla PS2 0x40c370 por modelo, x - 0,7; con la
+  vista interior en (234, 108)) la nota de lo ganado desde la ultima (2B000F + (puntos x 0,014), cuadro 0x1F), a los 500
+  la grande 2B0015 (cuadros 0x3D..0x69, velocidad 2) que vuela a (210, -160) en 0,25 s con el efecto 0x52 y con el
+  choque (-2000) 2B000E; tipo 6: 2B000E cada 70 cuadros de reloj perdido.
+- Fin: `mision_fin()` 1 pasa a la meta (estado META sin la escena de la meta y con el coche quieto, `c2c_susp`, como el
+  suspend_race de 49C9C0 con 8363A4); 2 acaba el tiempo (estado AGOTADO).
+
+**HUD (NAVI_PUB 0x1bd6f4).** Panel 2C0029 en los tipos 2 / 3 / 6 (0x1bd748); puntos 4BD230 (0x1bf108: "%07d" del jugador
+en (0x1E1, 0x49), estilo 1 o 0xD fuera del asfalto / con +DA4; el rival en (0x1E1, 0x67) y su imagen 2C024F con el
+desplazamiento de 0x369838 / 0x36983c) y 4BD340 (0x1bf260: "%04d" de (reloj + 5) / 6, 2C00F1 delante, el estilo del que
+va primero); cifras de 0x1c3c68 (estilos de 0x404818: 1 = escena 2C00B9, 0xD = 2C00C0, cuadro = cifra, 0x10 px).
+Datos: tools/conv_hud.py --c2c escribe C2CHUD.DAT (lo de todos, 187 KB de VQ) y por tipo C2CH1.DAT (eliminados y
+2B0064, 110 KB), C2CH23.DAT (notas, solo sus cuadros dibujados, 32 KB) y C2CH6.DAT (pillados, 108 KB): solo se abre el
+del tipo de la mision. C2C_VRAM_RESERVA 196 KB + el del tipo. Las texturas se suben de una en una (antes todas: pedian
+~190 KB seguidos del monton para leer sus sectores).
+- SIN PORTAR: las etiquetas sobre los rivales (4BAD20 = PS2 0x1c4158: 2C00C5 en los tipos 2 / 3 / 6, 2B0046..48 o cifras
+  en los 0 / 1; la escena 2C00C5 ya esta en C2CHUD.DAT) y la lista de puestos 4BA8C0 de los tipos 1 / 6.
+
+**Rivales (comun/rival.c).** Vaivenes de los registros sin coche 476CA0 / 476DF0 (PS2 0x1ee8b0 / 0x1eea68: a, b, c de
++0x44 o 1/3, 1, 7 y 0,4, 2, 6; rachas de +28 hasta +24 = (b + azar x (c - b)) x 60 con la bandera de +0x70) y 476F40 (con
++0x48: ninguna mision la tiene), llamados como 47C8A0 / 47CA40 (cfg +0x30 & 8 / & 0x10). Con coche (477090): bit 0 del
+rebufo (el del jugador de 47A7C0 y 474080), bit 1 del derrape y bit 3 de 4960A0 (rapido) en `rc_objetivo`.
+- 474080 (rebufo del coche de delante, cfg +0x30 & 8): SIMPLIFICADO, PROBABLE: un coche delante a 4..60 m y menos de 2 m de
+  lado mas rapido que 0,7 x el suyo: x (v x 0,7) como el del jugador (las constantes 0x628138 / 0x628244 del PC sin buscar
+  en la PS2).
+- 474990 / 474D30 (el derrape del coche de carreras): SIMPLIFICADO, PROBABLE. Las zonas de derrape son del original
+  (MISION.DAT 'MIX2', de la lista del primer puntero de +0x44: nodo, etapa / union, secciones y sus 6 factores; 5
+  misiones, 66 zonas); en ellas, en curva (+B54 < 300 m) y a mas de 80 km/h la carroceria se cruza hacia dentro hasta
+  0,25 rad x factor y pone la bandera. Sin el +162 del coche, sin las constantes 0x5b43fc.. (no localizadas en la PS2) y
+  sin la espera de 0x78 cuadros (+C26) de 474D30.
+- SIN PORTAR: 472E60 (ritmo por los coches de alrededor, +BE4). La variante 9 (4B02B0): no aplica (solo el selector 3 de
+  la palabra del frontal, que el menu UN JUGADOR no da).
+- RAM: las misiones de 5 rivales de modelos distintos (tipo 1, y 18 de las 94 en total) troceaban el monton y se quedaban
+  sin colisiones ("COLI: sin RAM", tambien en 059fc97 con -DPRUEBA_MISION=21) y sin HUD. rc_modelos_carga solo carga el
+  segundo y siguientes con 906 KB libres (colisiones 406 + HUD 180 + modelo 80 + la lectura del curso 240, medido); los
+  demas se dibujan con el primero (DESVIACION, como ya pasaba con mas de 6). 12-1: 3 modelos, colisiones y HUD bien.
+- Poligonos (peticion del usuario): RCmm.DAT con `conv_trafico.py --rivales --ligero` (DESVIACION pedida, la de los
+  coches del trafico: LOD 0 -6..-10 % de triangulos; tools/regenera.py la pasa). No se dibujan mas coches que antes (el
+  tope c1c de la mision y los 16 del trafico).
+
+**RAM al arrancar.** mision.o y rival.o con -Os; los registros de los coches de carreras (rival.c: 100 x 0x7C y la
+clasificacion) pasan de la BSS al monton solo mientras hay mision (calloc en 47CF40): el programa ocupa 4 KB menos que
+059fc97 (text + data + bss 2946596 frente a 2950676). Medido en Flycast: "RAM: al arrancar ... libre 376K" con
+`-DPRUEBA_AUTO -DPRUEBA_MISION=21` (059fc97 igual: 372K); sin defines (nav3.sh, MODO_JUEGO=1): libre 356K, "VOZ:
+VOCES.DAT, 35 muestras", sin "Out of memory", carrera OutRun 647K libres. En la carrera: 12-1 (tipo 1) libre ~390 KB,
+tipos 2 / 3 / 6 ~480-640 KB tras las colisiones; VRAM libre tras el HUD 85-105 KB.
+
+**MISION.DAT** (tools/conv_mision.py): detras de las millas el bloque 'MIX2' (punto de las marcas 0x40c370 por modelo y
+las zonas de derrape por mision); lo anterior igual byte a byte (la demo de antes lo lee igual).
+
+**Verificado en Flycast (E, pantalla :93, `-DPRUEBA_AUTO -DPRUEBA_MISION=i -DPRUEBA_SIN_TIEMPO`):**
+- 12-1 (i 21, tipo 1; `-DPRUEBA_ESCALA=1.4f` para que el piloto no sea ultimo): "¡KO! en 5..1", eliminada Clarissa
+  ("¡KO! CLARISSA"), la posicion pasa de 5/6 a 5/5; tres eliminaciones seguidas cada 40 s; sin la escala, el piloto
+  ultimo a los 40 s: "mision fallada, nota 1" y el fin del tiempo.
+- 3-1 (i 5, tipo 2, `-DPRUEBA_PUNTOS`: derrape forzado a ratos, el piloto no derrapa): puntos del jugador y del rival
+  ("Rival", 7 cifras), notas sobre el coche y la grande que vuela a los puntos; el rival gana puntos con sus rachas; la
+  nota pasa de 3 a 4 cuando sus puntos pasan los del rival.
+- 9-1 (i 15, tipo 3, `-DPRUEBA_PUNTOS`): puntos, rebufo, estilo de las cifras cambiado fuera del asfalto.
+- 6-1 (i 9, tipo 6, `-DPRUEBA_ESCALA=1.4f`): corazones del jugador y del rival, el del rival baja con el detras, pillado:
+  "¡PLANTADO! WOLF" en lugar de GOAL con el coche quieto, nota 6.
+- Sin "Out of memory" en ninguna (059fc97 con la 12-1: sin colisiones). Capturas (fuera del repo, en el scratchpad de la sesion:
+  modos/c2c/cap/): tipo1_hud, tipo1_ko_cuenta, tipo1_eliminado, tipo2_derrape, tipo3_rebufo, tipo6_pillado.
+- Cuadros por segundo y poligonos (`-DDIAG_MS`, lineas MS, 60 medias de 30 cuadros, la misma mision con 059fc97 y lgdat2
+  frente a esta rama, el piloto igual): 12-1 (tipo 1) 39,25 -> 39,23 fps, triangulos por cuadro 13459 -> 13805 (+346),
+  vertices 20330 -> 20708 (+378: el HUD de la mision y los rotulos; 059fc97 ademas sin colisiones); 3-1 (tipo 2, con los
+  puntos y las marcas) 37,69 -> 37,61 fps (55 medias), triangulos 18814 -> 18490 (-324), vertices 29374 -> 29090 (-284: los
+  RC ligeros compensan el HUD). Menos de 0,1 fps en las dos.
+- PENDIENTE de ver en Flycast: la carrera entera hasta la meta de un tipo 2 / 3 y el modo 35 desde el menu real (el flujo
+  de la meta es el del tipo 0, sin cambios), la marca 2B000E del choque del tipo 3.
+
+**Sin hacer: los campeonatos (variante 5).** El gestor de peticiones (PC 7F9460, evento 0x190) no tiene fuente en la
+decompilacion (corre el x86 traducido) y en la PS2 esta hacia 0x22xxxx sin seguir; es un modulo entero (peticiones de
+Req_*.bin por curso, su HUD y sus resultados). El mapa de los campeonatos ya estaba (Rev 1.2); A en una casilla sigue
+dando el sonido de bloqueado.
+
+### C2C, segunda tanda (agente c2c, 2026-11-27): verificacion por el menu, 472E60, 474080 y la espera de 474D30
+
+**Verificado en Flycast por el menu real** (licencia nueva con `-DPRUEBA_NOTAS_C2C`, el piloto conduce:
+`-DPRUEBA_PILOTO_MENU -DPRUEBA_SIN_TIEMPO -DPRUEBA_PUNTOS`, salida cerca de la meta con `-DPRUEBA_NODO` / `-DPRUEBA_FIN`):
+- Tipo 2 entrando por el menu: UN JUGADOR -> COAST 2 COAST -> categorias -> mapa (dos a la derecha) -> detalle "3
+  PRINCIPIANTE" ("¡¡¡Derrapa para ganar puntos!!!") -> coche, cambio, musica -> `RIVAL: mision 3-1 tipo 2` -> META ->
+  `LICENCIA: mision 3-1 nota 3 (guardada 3)` -> modo 34 -> modo 35 "¡MISION FALLIDA!" (nota < 4: 2B0068) con REINTENTAR /
+  ABANDONAR.
+- Tipo 3 (9-1, `-DPRUEBA_MISION=15` con el menu real) hasta la meta: nota 4, `LICENCIA: mision 9-1 nota 4 (guardada 4)`
+  (antes 7, sin jugar), 830 millas, modo 35 "¡MISION SUPERADA!" con SIGUIENTE RONDA / REINTENTAR / ABANDONAR.
+- La marca 2B000E del choque del tipo 3 (el corazon roto que sale sobre el coche al restar 2000): vista con el choque
+  forzado cada 15 s de `-DPRUEBA_PUNTOS` (que el piloto choque de verdad con otro coche no se ha visto).
+- Capturas (scratchpad, modos/c2c/cap/): menu_tipo2_meta_35, menu_tipo3_meta_35, tipo3_marca_2B000E; registros
+  log_menu_tipo2.txt / log_menu_tipo3.txt / log_472b60.txt.
+
+**472E60 / 472B60 (PS2 0x1e55f8 / 0x1e5188), HECHO con lo que falta marcado.** El coche de carreras no pasa de la
+velocidad que le deja el de delante (+314, tr_del) ni el de delante de ese: con la tabla de la clase del de delante
+(MISION.DAT 'PAC1', del ELF: 0x40bcc8 los del trafico, 8 clases, y 0x40bde8 los coches de carreras, 4; 6 filas
+{distancia, angulo, factor} y un limite), a menos de la distancia de una fila y con el angulo hacia el menor que el de
+la fila (x (1 - |sen(derrape / 2)|)), su velocidad x el factor (con factor < 1: x 0,99 con el jugador, x 0,999 con los
+demas); pasados 360,3 cuadros, nada si el de delante va mas deprisa; no con el jugador delante cambiando de carril.
+PROBABLE: la clase (+320 del original) es la +324 de la demo; sin el termino de +BB8 ni el empuje de lado +BE4 (3,5 m, que
+este trafico no lee). Medido en la 12-1: limita (229 veces en ~80 s, `472B60 n` en la linea RIVAL), 39,23 fps como antes
+(triangulos por cuadro 13536, 059fc97 13459).
+
+**474080 (PS2 0x1e8090): constantes del original.** Sin rebufo con |+162| > 15 grados (0x3bb40000 = 360 / 65536); por
+los coches de delante en orden hasta 60 m; si el de delante va a mas de 0,7 x su +1C4 (> 1) y esta a menos de 5 de lado: a
+mas de 10 el rebufo (x 0,7 x +1C4, +C 0x40000) y si no nada; los de 5 de lado o mas (a mas de 15) solo apuntan el carril
+libre (+C08, que este trafico no usa). Sigue PROBABLE la condicion de entrada (+C 0x20000, tomada por cfg +0x30 & 8).
+
+**La espera de 474D30 (PS2 0x1e96a0): no ocurre en el original.** Tras subir de marcha (+208 > +1D8) y con mas de 0x384
+cuadros, con azar / 65535 < +BC8 (y sin +8 0x10000) +C26 = 0x78 y durante esos cuadros no se llama al cambio 502420. Pero
++BC8 no lo escribe nadie al abrir el coche de carreras (0x1ed360..0x1ed3dc copia del registro +B78..+B94, +BD0, +BCC y
++C36..+C38, nada en +BC8; en el PC tampoco hay quien lo escriba fuera de su borrado): vale 0 y la espera no salta. No se
+porta (seria codigo muerto).
+
+**RAM:** ver abajo (la medida final).
+
+**Campeonatos (variante 5): investigado, NO portado.** Lo averiguado en SLES-53998:
+- Es un suceso del juego como el gestor de misiones: la tabla de descriptores de sucesos (5 palabras: inicio, control,
+  dibujo, 0, fin) en 0x3ee900..; el de las misiones (0x191) en 0x3eea1c = {0x1f7ce0, 0x1f7d00, 0x1f7d20, 0, 0x1f7d40} y
+  justo antes (0x190) el de los campeonatos {0x22db28, 0x22db50, 0x22db70, 0, 0x22dbb0}: envoltorios que llaman a los
+  metodos de un objeto en la BSS 0x616238 (0x229e88 inicio, 0x22a048 control, 0x22a2b0 dibujo, 0x22a5b8, 0x22ac00,
+  0x22b470 fin).
+- Tamano: 0x229e88..~0x234000, unas 108 funciones (~40 KB de codigo MIPS, ~10 000 instrucciones), con su propio lector
+  de guion (0x21ba68, 60 llamadas: las peticiones de Req_*.bin), la cola de voces (0x1ac3d8), los coches (0x1e1910) y el
+  HUD de sprites (0x164xxx). En el PC (7F9460) no hay fuente: corre el x86 traducido.
+- Pantallas: el mapa de campeonatos ya portado (Rev 1.2, frontal 0x240d68..); en carrera las peticiones del guion del
+  curso (REQUEST_NORMAL / SPECIAL1..3) con su HUD; el resultado va a los cuartetos de la licencia (+0x36E).
+- Portarlo es un modulo del tamano del INFARTO (comun/infarto.c): no cabe en esta tanda. A en una casilla del mapa de
+  campeonatos sigue dando el sonido de bloqueado.
+
+**RAM al arrancar (medida otra vez, nav3.sh sin defines, MODO_JUEGO=1, los mismos datos):** 059fc97 "libre 352K"; esta
+rama "libre 357K". Para no bajarla: el punto de las marcas, las zonas de derrape y las tablas 'PAC1' van en el monton solo
+con la mision (calloc en rival_carrera, ~2,7 KB, fuera con rival_fuera) y fin.o, final.o y nombre.o (pantallas del fin,
+no de la carrera) se compilan con -Os como menu.o (text + data + bss 2941256; 059fc97 2950676). Comprobado despues el
+camino del fin con esos -Os por el menu real: 6-1 (tipo 6) fallada con el piloto (el jugador ultimo hasta acabar su
+tiempo): "Se acabo el tiempo", `LICENCIA: mision 6-1 nota 0 (guardada 0)`, modo 34 y modo 35 "¡MISION FALLIDA!".
+
+## COAST 2 COAST: los campeonatos (variante 5), agente c2c2 (2026-11-27)
+
+Los campeonatos (botones 4..6 de las categorias: Clarissa, Jennifer y Holly) se corren desde su mapa (Rev 1.2): A en
+la salida (nodo 0) o en una casilla hecha del detalle de una etapa ya no da el sonido de bloqueado, pasa al coche, el
+cambio y la musica y la carrera es la variante 5 con el gestor de peticiones portado (comun/campeonato.c, -Os, sus datos
+en el monton solo durante la carrera).
+
+**Lo que es (SLES-53998, averiguado en esta tanda).** El campeonato es un curso de 15 etapas (5 niveles, como el modo
+OutRun) con las peticiones de la acompanante en cada etapa; el mapa del menu es ese arbol (nodo i = registro i - 1).
+- Cursos: Request_Course_SP / _OR2 / Req_Course_MIX_PS2 (registros de 0x78 como csc_data). Comprobado en la conversion:
+  el de Clarissa (grupo 4) es el arbol de OUTRUN2SP (csc_data_cvt, el 1 de CURSO.DAT: BEAC..NEWY, BK15..29) y el de
+  Jennifer (grupo 5) el del modo OutRun (csc_data_2, el 0); solo cambian las metas (hijos 0 / -1 en vez de -1 / -1,
+  PROBABLE que el 0 no se use: la carrera acaba en la meta). El de Holly (grupo 6, etapas del reves y la union 76)
+  necesita 11 uniones nuevas: SIN HACER (ver abajo).
+- Configuracion (4EEB50 del PC = la palabra +0x208 del frontal): {curso, forzada = nodo != 0, etapa = nodo - 1, lista =
+  casilla, 46C520}. Desde la salida: la carrera entera desde la primera etapa; desde una casilla: la salida en esa etapa
+  (nodo_salida en demo/main.c) con su lista en todas.
+- Gestor (suceso 0x190, tabla 0x3ee900 {0x22db28, 0x22db50, 0x22db70, 0, 0x22dbb0}, objeto 0x616238; los
+  desplazamientos de comun/campeonato.c son los suyos). 0x21ba68 NO es un lector de guion: es el `new` del C++ (60
+  llamadas = los 24 objetos de los tipos de peticion de la fabrica 0x22a930, tabla 0x4151f0, y las listas). Las clases
+  de los tipos estan fuera del modulo (0x292788..0x2a4800, ~70 KB mas), cada una con su vtable (0x423110 tipo 2,
+  0x423718 tipo 1...): +0x24 el control (cada paso, los 24), +0x2c el dibujo, +0x34 y +0x3c.
+- Guion (0x22ac00 / 0x22b600): Req_<etapa>.bin (nombres 0x374010 por el tipo del descriptor) y su lista +0x1ff8
+  (REQUEST_NORMAL / SPECIAL1..3, 0x374138); peticiones de 0x74 {s16 inicio, s16 fin, ..., +0x58 parametros}; los
+  parametros son bloques de 0x88 con nombre propio en el guion {tipo 1..24, subtipo, +0x58 / +0x5c punteros a otras
+  categorias del guion (coches y objetos), +0x60.. enteros: +0x7c la velocidad del tipo 1, el % del tipo 12, +0x80 /
+  +0x84 los coches del tipo 3}.
+- Lista de la etapa siguiente (0x22e850, al entrar en la union): forzada, la del mapa; si no por el histograma de notas
+  de las etapas anteriores (0x22e808: ninguna nota menor que n): nivel 1 -> 2: SPECIAL1 sin notas < 4 en los niveles 0
+  y 1; nivel 2 -> 3: SPECIAL1 sin < 3, SPECIAL2 si venia de la 1 y sin < 4; nivel 3 -> 4: igual y SPECIAL3 si venia de
+  la 2 y sin < 5. Por eso las etapas de nivel k tienen k casillas (0x4172c8) y sus cuartetos se llenan corriendo bien.
+- Peticion en curso (0x22b7d0): la primera con inicio - 32 < seccion < fin + 30 (ninguna en la union). Fases
+  (0x232988): 1 anuncio (desde inicio - 30: 0x22f9d0 el rotulo, 0x2a6358 la voz), 2 espera, 3 empieza (voz 0x8e8),
+  4 en curso (velocidad media), 5 acaba (0x22e670 nota, 0x22e728 corazones), 6 a la etapa (0x22e498) con el rotulo de
+  la nota (0x22f7a0) y su voz (0x2a65a8, tabla 0x423df0 por la fila +0xf0 del gestor: PROBABLE = 46C520), 7 hecha.
+- Medidor +0x28 (0..80, lo llena cada tipo con el avance del coche mientras cumple) menos la penalizacion +0x2c
+  (0x22c818: choque, golpe de uno mas rapido, golpe, muro, ruedas fuera y roce por paso con la fila de 0x374240 que
+  elige 0x2323e8; tope 100): nota = el mayor k con medidor - penalizacion >= {0, 10, 20, 30, 45, 60, 80} (0x374190),
+  tope 4 con un golpe, -3 con uno mas rapido, -4 con un choque (0x22e6d8). Corazones (0x22e728): los del medidor
+  (tope 80, 0x3741c8) y con nota >= 4 {0, 20, 50, 100}[lista] (0x3741d0) + {0, 10, 20, 30, 50}[dificultad] (0x3741e0,
+  la DC pasa 0: PROBABLE) + v media x 0,2; con nota 6 cada tipo su bono (vtable +0x24 en la fase 5). Fuera de las
+  peticiones: choque -50 (voz 0x950), golpe de uno mas rapido -20 (0x14c), golpe -10.
+- Etapa: media de las notas de sus peticiones (0x22ebb0) en la casilla de su lista si se hicieron todas; al terminar
+  la etapa (0x1cec50 en 0x22c000) a los cuartetos de la licencia +0x36E + 2 tipo si mejora (0x22edd8, +3F4 |= 2) con
+  millas[nota] x (lista + 1) (0x3741f8: 100..1000) a la licencia. El desbloqueo de los grupos 5 y 6 y el porcentaje
+  salen de esos cuartetos como ya hacia el menu (0x242290 / 0x2420a0).
+- HUD (NAVI_PUB 0x1bd6f4, caso de la variante 5: el panel 2C002A y 0x22a5b8): las filas 0x1bd920 por nivel y el
+  contador "%4d" de los corazones en (0x206, 0x1b2): los del INFARTO (HAHUD.DAT); los rotulos del anuncio (marco
+  2B0020, el generico 2B003D y a los 30 cuadros el del tipo) y de la nota (2B001E / 2B001F y 2B002D..31), los de HAHUD.DAT.
+
+**Datos (tools/conv_camp.py -> CAMP.DAT, 20,8 KB):** las tablas del ELF de arriba (cada una comprobada por el codigo
+que la lee), las 371 peticiones de los 60 guiones (inicio, fin, tipo, subtipo, +0x60..+0x84), el rotulo y la voz del
+anuncio de cada una sacados ejecutando en la conversion los switch del original (0x22faec y 0x2a636c con ps2/mips.py),
+los textos de la nota (0x22f8b0) y los tipos de las etapas de los tres arboles. CURSO.DAT no cambia.
+
+**Tipos portados (su control de la vtable +0x24):** 1 pasar de una velocidad (0x29c828: voces 0xf0 / 0xf1, animo cada
+0x6f cuadros), 2 derrapar (0x298360: voz 0x8c6, el medidor en el 90 % de la peticion), 3 adelantar coches (0x29f038:
+80 / p80 por coche hasta p84, efecto 0xd8 del convoy), 4 no chocar (0x29ec18: el 90 %; los sucesos penalizan y topan
+la nota; con un suceso el gestor llama a 0x22e9a0, que calcula la nota y llena un HUD de 0x3d88: SIN PORTAR), 12 ir al
+rebufo (0x2a4198: p7c % de la peticion). SIN PORTAR (se anuncian con el rotulo generico y acaban con
+nota 0): 5 los colores, 6 conos, 7 monedas, 8 arcos, 9 (otra clase de derrape: se trata como el 2), 11 chocar con los
+coches, 13 alimentar a la chica, 14 el total, 15 la pelota, 16 los minijuegos (secuencia, sonido, suma, regalos,
+ovejas, coches), 19 meteoritos, 20 lineas, 21 OVNIs, 22 la bocina, 23 patos, 24 fotos: necesitan los objetos de las
+categorias del guion (+0x58 / +0x5c), los coches de la peticion (0x22d088 / 0x22d530 / 0x22d7a0, 0x1e1910) o sus
+sprites del banco 0x46 (no convertido). Tampoco: los rotulos del banco 0x46 (los de los tipos 1, 12 y los minijuegos:
+DESVIACION, sale el generico), el letrero 3D de inicio / fin de la peticion (0x232e60 con 0x1a7c80 / 0x1a7cb0), la
+silueta 2C0067 / 0x460064 que se llena (como en el INFARTO), las reacciones de la acompanante (0x205288 / 0x2a66a8) y
+la vibracion (0x2052f8). -> HECHO despues: 6, 7, 8, los rotulos del banco 0x46 y las reacciones (ver "tercera tanda"),
+15, 19 y 5 (ver "cuarta tanda"), 11 (subtipos 0 y 1) y las voces de las peticiones (ver "quinta tanda"), 20, 21, 14
+  (PARCIAL) y el letrero 3D de inicio / fin (ver "sexta tanda").
+
+**Holly (grupo 6, Req_Course_MIX_PS2):** `tools/conv_union.py --arboles=...,302` ya sabe hacer su arbol (ARBOLES_REQ):
+EAST_R / BK262, LASV_R / BK263 ... PALM_R / BK95 (comprobado: los demas arboles de CURSO.DAT salen igual byte a byte),
+pero sus 11 uniones nuevas toman los numeros 262..272, que son los de las uniones de la Contrarreloj (CURSOTA.DAT,
+--bk-desde=262): hay que numerarlas detras de esas y meterlas en UNIONES.PAK (tools/regenera.py). Sin el arbol 302 en
+CURSO.DAT, A en su mapa da el sonido de bloqueado (menu_camp_puede).
+
+**Verificado en Flycast (E, pantalla :93; capturas y registros en el scratchpad de la sesion, modos/c2c/cap/camp_*):**
+- Por el menu real (licencia nueva, `-DPRUEBA_PILOTO_MENU -DPRUEBA_SIN_TIEMPO`): UN JUGADOR -> COAST 2 COAST -> abajo
+  (Clarissa) -> su mapa ("RECORRIDO OUTRUN2SP", camp_mapa_clarissa) -> A en la salida -> coche, cambio, musica ->
+  `MODO: variante 5`, `CURSO: arbol 1`, BEAC; el HUD del INFARTO (Tiempo total / Tiempo / Corazones, filas "Etapa n" y
+  el contador); las cinco etapas BEAC -> SANF -> NIAG -> LASV -> PRIN hasta la META con sus peticiones de la lista
+  NORMAL (BEAC 11/0 y 3/0; SANF 11, 15 y 4; NIAG 3, 15 y 4; LASV 11 x 3; PRIN 15 y 3); el anuncio generico (la bombilla,
+  camp_anuncio_generico) en los tipos sin portar y el del tipo ("¡Sigue adelantando a los coches!", camp_anuncio_tipo3),
+  el rotulo de la nota (camp_nota0; camp_tipo4_nota2_filas: no chocar en SANF, medidor 81 - 25, nota 2 por el tope
+  del choque, 56 corazones en la fila "Etapa 2"), y en cada etapa `LICENCIA: campeonato etapa tipo t casilla 0 nota n`
+  con sus millas (100 / 400: 800 en total), camp_meta_prin. Sin "Out of memory"; en carrera ~500 KB libres.
+- Salida forzada (`-DPRUEBA_AUTO -DPRUEBA_CAMP=1 -DPRUEBA_CAMP_NODO=5 -DPRUEBA_CAMP_LISTA=1 -DPRUEBA_CAMP_PASA`: el
+  nodo 5 del mapa con la casilla 1, y un adelantamiento cada 1,5 s y medio derrape de prueba porque el piloto apenas
+  adelanta): sale en el registro 4 (tipo 16) con la lista SPECIAL1 ("¡Choca con el fantasma!", 11/1, y 3/0;
+  camp_forzada_nodo5_lista1), el tipo 3 llena el medidor (133 - 0, nota 6, 80 + 126 corazones, la cara de corazones,
+  camp_tipo3_nota6), etapa nota 3 en la lista 1 y la siguiente (LASV) otra vez con SPECIAL1.
+- Jennifer (grupo 5, `-DPRUEBA_AUTO -DPRUEBA_CAMP=0 -DPRUEBA_CAMP_PASA`, que ademas da rebufo y +60 km/h la mitad del
+  tiempo): `CURSO: arbol 0`, PALM con 12/0 (145..410) y 1/0 (475..560) del guion de Palm_Beach; el rebufo llena el
+  medidor (91 - 3, nota 6, 80 + 34 corazones; camp_jennifer_palm_tipo12_nota6), la velocidad (pasar de 265 km/h) solo 8
+  (el piloto no llega), etapa nota 3. El +0x7c del tipo 12 es un flotante (lwc1 en 0x2a41f8): leido como entero el
+  medidor no subia (corregido).
+- El paso a SPECIAL1..3 por las notas sin forzar (0x22e850) no se ha visto: el piloto no saca notas de 4 o mas en todas
+  las peticiones de dos etapas seguidas. Tampoco se ha visto entero el camino de Jennifer desde el menu (se abre con
+  Clarissa en rango A: ver el desbloqueo arriba) ni B en el coche de vuelta al mapa de las peticiones.
+
+**RAM.** Al arrancar no se reserva nada del campeonato: CAMP.DAT (20,8 KB) y el estado (~1 KB) van en el monton desde que
+sale del menu hasta que vuelve (camp_inicia / camp_libera). campeonato.o con -Os (5,9 KB). Para no bajar la RAM del
+arranque (el codigo nuevo de main.c / menu.c / campeonato.c son ~8 KB) se compilan tambien con -Os modulos que no son
+el dibujo ni la fisica de la carrera: infarto, fsp, vmuesc, sprani, rksp, modo_video, registro, voces, vmu, sfx, gd,
+musica, pcarga, meta y sp (text + data + bss 2935336; 5b392f5 2941256). Medido con tools/prueba/nav3.sh (MODO_JUEGO=1,
+sin defines, los mismos datos): 5b392f5 "libre 357K", esta rama "libre 364K", "VOZ: VOCES.DAT, 35 muestras", sin "Out
+of memory" (el libre del arranque va a saltos: con 2 KB menos de programa salio 356K, por como queda la cima del monton).
+En el campeonato, ~500 KB libres en carrera.
+
+## INFARTO: tipos de peticion, hoja de resultados, panel de la nota y la acompanante (Rev 1.1, 2026-11-27)
+
+Rama rev-1.1 (059fc97). Todo verificado en Flycast (nivel E), no en la consola. Ficheros nuevos de la conversion:
+INFARTOX.DAT (tools/conv_infarto.py `extra`, tambien con `--solo-x`), CHRH.DAT (tools/conv_chr.py `--infarto`);
+HAHUD.DAT cambia (grupos nuevos). regenera.py los saca en el paso `infarto`.
+
+**Uso real de los tipos** (las 41 misiones de cada preset, INFARTO.DAT / INFARTOP.DAT): preset 0 (juego OutRun 2 SP)
+0 x16, 2 x9, 6 x9, 7 x13, 8 x8, 9 x3, 11 x4, 14 x3, 15 x16, 16 x15, 19 x1, 20 x1, 22 x1, 23 x5, 24 x4, 25 x1; preset 1
+(juego OutRun 2, el de por defecto del tablero) solo 0 x52, 2 x9, 6 x8, 7 x23, 8 x21, 9 x1, 11 x6. 17, 18 y 21 no los
+pide ninguna mision de ningun preset. Los rotulos de cada tipo (2B00xx de 0x3f0aa8, mirados en PNG): 8 "Circula por
+el azul" (p6 = 1) / "por el rojo" (p6 = -1), 23 "Derrapa y circula por el azul / rojo", 7 "Golpea el cono azul", 24
+"Derrapa y golpea el cono azul", 9 "Cruza la linea" (entre dos coches), 11 "Atrapa el corazon", 14 "Supera a ese
+coche", 15 "Recoge monedas", 16 "Pasa por el arco", 25 "Derrapa y pasa por el arco", 19 "Recoge las estrellas", 20
+"Choca con el fantasma".
+
+**HECHO: tipos 8 y 23** (comun/infarto.c; los mas pedidos sin objetos: 29 en los dos presets + 5):
+- Puesta en marcha 464350 caso 4 (PS2 0x1ae800): 7F2530 / 7F2532 secciones, 7F2538 = p6 (el lado), 7F253C = -1.
+- Control 45EEB0 (PS2 0x1a9af8, comprobado instruccion a instruccion): puntos de 45E2F0 con la tabla 0x3efcb8
+  {150000, 150000, 333, 0, 333, 0}; cuenta las secciones mientras p6 x car+0x26C > 0 (el lado de la carretera) y
+  +0x264 x +0x268 < 0 (dentro de los bordes) y, en el 23, derrapando (0x1b3b10: +D36 > 0); con ello la cara 5 de la
+  acompanante (487D90) y 487DD0; resultado = secciones / ((fin - inicio) x 0,9) x 800000 (0x1a9aa0), el mayor.
+  En la DC: +26C = fis.ofs, +268 = vib_izq, +264 = -vib_der (los que ya usaban la vibracion y 476040).
+- Evaluacion 463250 (PS2 0x1a9c70): nota 7 -> 80 corazones + min(1, secciones / (fin - inicio) / 0,1) x 300000 +
+  mantiene(v inicial - v) x 400000 (0x1b3b70), contador (h + h / 2) x 10 / 7 y el panel de la nota 0x78 cuadros.
+- E (Flycast, PRUEBA_HA_MISION=15 preset 1, piloto del menu): "peticion tipo 8 (250..315, p6 -1)" con el rotulo
+  "Circula por el rojo"; el piloto iba por la derecha: 0 secciones, nota 1; la segunda (584..622, p6 1) cuenta
+  secciones (k8 6/38 en el registro DIAGHA) y sigue en la etapa siguiente como el original (464350 no la cierra).
+  El 23 es el mismo codigo con el derrape (solo comprobado al compilar: ninguna prueba paso por la mision 16..32 del
+  preset 0).
+- SIN PORTAR: los carriles pintados de azul / rojo de esas misiones (45ECA0 / 45E9B0 goal_models: registros de
+  obj_course_obj_cs_<zona> por mision, p. ej. 0x5e0003 / 0x5e0004 de CAST en la mision 0x0F del preset 1, 0xfb0001
+  de NIAG en la 0x0F del preset 0) y las marcas de principio y fin de la accion -5 (45B000 / 45B2A0, modelos por
+  idioma 64A9E8 / 64AA00). Sin ellos el jugador solo tiene el dibujo del rotulo (mitad azul a la derecha).
+
+**HECHO: la hoja de resultados de la etapa** (4603F0 = PS2 0x1ad004, comprobada en el ELF; comun/infarto.c
+`hoja_paso` / `infarto_dibujos`, demo/main.c `ha_dibujos`): mientras el jugador esta en la union (7F8B34: cuadros en
+ella, a 0 en el stage clear) y no en el nivel 4: a los 0x78 el efecto 0xA9, el titulo del nivel (0x3eff60:
+2C0093..97), las peticiones del nivel (2C0090..92) y una fila por peticion cada 0x3C cuadros (y de 0x3eff98) con su
+nota (0x3eff78, primero corriendo por (t >> 2) & 7) y su voz (0x3f7308) y sus corazones "%3d" en (0x19D, 0x3effb0);
+a los 0x168 "Ranking en la etapa" 2C0081 con su animacion (0x3effc8); a los 0x1A4 la nota media: voz, rotulo
+2B0007..0D (0x3effe8, entero) y el movimiento de la acompanante (0x3f0b50 / 0x3f0b70); de 0x21C en adelante, con la
+rama ya elegida, la clase de la mision especial de la etapa siguiente (45C7E0 = 0x1af710, tabla 0x3f06e0) con 0xDB
+y 2B003F..41 a los 0x276 y las voces 0x1CC.. a los 0x294. Sprites: 429530 + 4294C0 (PS2 0x1156c0: la mitad del
+tamano de la escena) -> el uso de HAHUD.DAT lleva (w / 2 - 320, h / 2 - 240) y la demo pasa la x / y del original.
+E: "Etapa 1 Resultado", filas 1 y 2 con la nota corriendo y luego E, "Ranking en la etapa" y el rotulo "Ranking E"
+(capturas cap/t9/h_00xx). No visto: el rotulo de la mision especial (la union de la prueba acabo antes de 0x21C).
+
+**HECHO: el panel de la nota que entra** (45BDF0 = PS2 0x1ad6f4): 2C0080..7C (0x3f0010) por la nota 7F8B2C, 7F8B28 =
+0x78 al cerrar la peticion (baja 1 por paso en 45FB80, PS2 0x1acf48); x = (1 - (t - 0x5A) / 30) x 384 - 0x9C mientras
+t > 0x5A, luego 0xE4; y 0x5D. E: "Ranking E" entra por la izquierda bajo el tiempo (cap/t10).
+
+**HECHO: las reacciones de la acompanante** (comun/robot.c `robot_pide`, `robot_extra`): el work +68..+7C de 489A90
+(PS2 0x203760..0x20385c y 0x203f6c..0x204028, comprobado): +68 un movimiento (487D60: +78 = 2), +70 una fila de caras
+(487D90: +78 = 0, +7C = 1; filas {entrada, bucle, salida} de 0x40eac8; cerrado -> la fila 1), +7C = 0 (487DD0);
+estado Pose hasta el fin del movimiento con +78 = 2. Llamadas de las peticiones como el original: tipo 0 la cara por
+(7F8AA0 - 7F24E8) / 80000 (0x1a8e50, tabla 0x3efb40) y 487DD0 al acabar el impulso; 2 / 22 el animo (0x1aac60:
+coche 9 -> 0x6003D; si no rand x 2^-31 < 0,5 -> 0x6003F / 0x6003D, si no 0x6003E); 6 la cara 0 sin sucesos; 8 / 23
+la cara 5; al cerrar cada peticion 45DED0 (0x1b3988: tablas 0x3f0a68 / 0x3f0a88 por nota; el coche 9 con nota 5
+nada) y la nota media de la hoja. Los 35 movimientos que no lleva la pareja (0x6003D, 0x6006D, 0x230001, las filas de
+caras 0x25xxxx / 0x26xxxx / 0x27xxxx...) van en CHRH.DAT (52 KB), leido al empezar el modo y buscado detras de los de
+la pareja (las CHRppaa.DAT no: CHR_RAM va al limite con la mayor). E: registro DIAGHA "acompanante: movimiento
+0x60048 (esta)", "cara 5 (0x25000d, esta)", "movimiento 0x230003 (esta)". PROBABLE: al volver de la pose a reposo no
+se pone 0x6004B (el original sale con Exit::Reset, sin descifrar si eso lo hace).
+
+**RAM** (Flycast, menu real hasta el INFARTO): arranque igual (343 K libres, "VOZ: VOCES.DAT, 35 muestras"); menu al
+salir 262 K (antes 314: CHRH.DAT), carrera del INFARTO 289 K (antes 341), lecturas del curso 241..314 K, sin "Out of
+memory". En el AICA nada nuevo (VOCESH.DAT igual). Codigo +5 KB. HAHUD.DAT: 640 -> 1147 KB en el disco (sus tablas
+en la RAM crecen poco: solo los grupos nuevos); las texturas de cada grupo se suben al verse y se bajan al dejar de
+verse (`ha_dibujos`).
+
+**SIN PORTAR (PENDIENTE), con lo averiguado:**
+- Tipos con objetos de OSO.PS2 (7 / 24 conos, 15 monedas, 16 / 25 arcos, 19 estrellas en cajas que caen, 17 / 21):
+  siguen sin empezar (ni anuncio ni nota). Lo que falta esta en "Objetos de las peticiones" (arriba): ficheros por
+  mision (0x3f05c0 / 0x3f06a0), clase -> modelo 0x40a958 (la misma tabla que usan los objetos de la union, BO.DAT: el
+  formato de registro de 0x28 es el mismo), alturas 45DB70 y toque 0x1d3720. Se puede apoyar en el sistema de BO
+  (conv_bo.py / bo_dibuja) para los modelos del banco 0x57. Tablas de puntos ya en INFARTOX.DAT (PTS2: 15 0x3f07c0,
+  16 / 25 0x3f07d8, 19 0x3f0810). Controles y evaluaciones en el PC (race_traffic_heart*.inc) = PS2 0x1a9290 (7/24),
+  0x1b0260 (15), 0x1b0570 (16/25), 0x1b11c8 (19), 0x1b0c58 (17), 0x1b24e0 (21).
+- 9 (pares de coches 46D250 / 800AF8 del modulo del trafico), 11 (anillo de marcas 46DB60 / 8037C8), 14 (escoltas
+  45B5B0 tabla 64AAD8 y la carrera 45F7F0 con el contador 2B0005 / 2B0006), 20 (coches fantasma: tabla de coches con
+  0x40, +C5C 0x80000, corazones 2C00E5 sobre ellos 45D190), 18: sin portar (tablas de puntos de 9, 11, 14 y 20 ya en
+  PTS2). Prioridad por uso: 11 (10), 9 (4), 14 (3), 20 (1).
+
+## INFARTO: objetos de las peticiones, tipos 7 / 24 y 15 (Rev 1.1, 2026-11-27)
+
+Sobre la seccion anterior. Datos nuevos: HAOSO.DAT y HAOBJ.DAT (tools/conv_infarto.py `objetos`, tambien con
+`--solo-obj`; regenera.py paso `infarto`). Codigo: comun/haobj.c (objetos), comun/infarto.c (tipos), demo/main.c
+`ha_obj_dibuja` / `ha_suelo` / `ha_seccion` (dibujo, suelo y seccion de un punto). Verificado en Flycast (E).
+
+**Objetos (45C470 / 4F0D10 / 45DB70):**
+- Fichero por (preset, mision) de 45C470 = PS2 0x1af428 (comprobado): preset 0 y mision >= 15 tabla 0x3f05c0, preset 1
+  y mision >= 15 tabla 0x3f0630, mision < 15 solo con el preset 0 (tabla 0x3f06a0 por la mision base). 45 ficheros
+  oso_qt_* (2983 objetos, el mayor 249). Clase -> modelo y escala 0x40a958 (conos 0x57001e / 0x1f / 0x19, monedas
+  0x1c / 0x1d, arco 0x2b, caja 0x30). Las clases de otro recurso (la luz 56 de FLOR, la 3) no van.
+- Colocacion: el marco de la etapa (el mismo que el de la geometria: el coche sale en (0, 0, -16)); clases 0x0A / 0x22 /
+  0x39 a la altura del suelo bajo (x, 9999,9, z) con la consulta del suelo de la demo (coli_altura 0x100 = 43F2F0);
+  clases 5..9 + 0,65 en y; las monedas (tipo 6) a 1,2 (la 57 a 1,0) y girando 0,05 por paso (0x1d3d48).
+- Toque: solo el jugador; la caja del coche 2,3 x 1,1 m mas 0,3 (conos) / 0,8 (monedas) contra el punto del objeto
+  (PROBABLE: la caja +D28 del original no esta leida). Un paso (+3F8 / +3FC == 8).
+- SIMPLIFICADO (DESVIACION): los conos tocados salen volando (velocidad del coche, 5 m/s arriba, girando) y se quitan a
+  los 2 s, sin el cuerpo rigido 516E10; las monedas suben con el coche y se encogen como 0x1d3fc8. Las clases 5..9 sin
+  el marco de la carretera 45D950 (los angulos del fichero). La seccion de un objeto (43F370) sale del punto de la
+  ruta mas cercano (APROXIMADO: el original lee la seccion del poligono de la COLI).
+- Dibujo: HAOBJ.DAT (ORD7 de conv_bo.modelo_conjunto, registros 0x19, 0x1c, 0x1d, 0x1e, 0x1f, 0x30: 56 mallas, 315
+  vertices, 21 KB de texturas, 30 KB) leido al empezar la carrera del modo (texturas fuera de la zona, sube_tramo);
+  como mucho HA_OBJ_MAX = 24 objetos, los mas cercanos al ojo dentro de 160 m (HAOBJ_LEJOS), sin los de detras de la
+  camara, con el tope de los objetos de la union (ta_bo_tope). Por objeto (el modelo del original no tiene LOD; no se
+  simplifica): cono 19 triangulos / 39 vertices (10 tiras), moneda y corazon 63 / 69 (3 tiras), caja 20 / 60.
+  Por cuadro, medido (registro DIAGHA objetos): conos hasta 17 dibujados, 171 triangulos / 351 vertices; monedas 24
+  dibujados, 756..1260 triangulos / 828..1380 vertices.
+- fps (Flycast, DIAG_MS, SEQU con la peticion 15 cargada: monedas en la linea del coche, 11 muestras de 30 cuadros):
+  con objetos 39,85 fps, dib 16,73 ms, 15997 tri / 23627 vtx; la misma pasada sin dibujarlos (DIAG_SIN_HAOBJ) 39,86 fps,
+  dib 15,72 ms, 15036 / 22537. O sea +961 triangulos, +1 ms de dibujo y -0,01 fps (Flycast; en la consola el dibujo
+  cuenta mas: PENDIENTE medirlo alli).
+- RAM: al arrancar 333 K libres (antes 344: el codigo crece ~11 KB; el monton en uso igual, 13021 K; nav3.sh sin "Out of
+  memory" y con "VOZ: VOCES.DAT, 35 muestras"). Los objetos de la mision en el monton (~7 KB como mucho) y HAOBJ.DAT (~30
+  KB) en la carrera del modo. Medido
+  (carrera del INFARTO con DIAG): 311 K libres al empezar; sin "Out of memory" ni "sin VRAM".
+
+**HECHO: tipos 7 y 24** (45E8A0 = PS2 0x1a9290 y 463150 = 0x1a9470, comprobados): cuenta los toques de la clase p6 (el
+24 solo derrapando) con la cara 3 de la acompanante, menos 3 por cada cono de la clase 6; resultado 800000 x
+buenos / p8 (800000 con p8 o mas); nota 7 + 700000 x mantiene(v). E: mision 16 (preset 1) en la etapa de la clave 4
+(PRUEBA_NODO=4), 14 conos azules y 2 de la clase 6: (14 - 6) / 20 x 80 = 32 corazones, nota 4; capturas
+cap/o1/h_00*.png con los conos en la carretera y volando al tocarlos.
+
+**HECHO: tipo 15** (45C950 = PS2 0x1ae8a8, 4617A0 = 0x1b0260 con la tabla 0x3f07c0, 463DF0 = 0x1b03e0): las monedas
+0x0A y 0x39 tocadas (efecto 0xD6, cara 4), resultado cogidas x 800000 / p8; nota 7: 700000 x cogidas de la 0x0A / las
+del tramo (45C8E0) y + (cogidas - p8) / 2 corazones. E: mision 1 (preset 0, juego OutRun 2 SP, clave 4), 15 de 15
+monedas del tramo (capturas cap/o2/h_00*.png: suben y se encogen; el medidor recibe los corazones). La nota salio 1
+porque el piloto de prueba iba por la tierra (los puntos de 45E2F0 por rueda fuera del asfalto), no por las monedas.
+
+**Pruebas** (solo con defines; no cambian el juego): PRUEBA_HA_MISION=m (la mision de todas las etapas), PRUEBA_NODO=k
+con PRUEBA_PILOTO_MENU (la etapa de salida), PRUEBA_HA_TOQUE=clase (los objetos de esa clase, -1 todas, se ponen en la
+linea del coche a 25..40 m: el piloto no apunta a ellos), DIAG_HA (registro), DIAG_SIN_HAOBJ (sin dibujarlos).
+
+**SIN PORTAR (PENDIENTE):** 16 / 25 (arcos: modelo 0x2b de 4 nodos de 174 triangulos con animacion de vertices y
+carteles + los postes de 42; la anchura por carril de la accion -11, 4611D0 con la tabla 0x3f7218, y el cruce
+0x1d42f0), 19 (cajas que caen y sueltan estrellas: 461940, tabla 64AAA8), lo visual de 8 / 23 (carriles pintados
+45ECA0 / 45E9B0 y marcas de la accion -5) y 11, 9, 14, 20.
+
+## INFARTO: poligonos de los objetos, RAM del arranque y arcos 16 / 25 (Rev 1.1, 2026-11-27)
+
+**Poligonos (DESVIACION pedida por el usuario: los objetos del modo, reducidos):**
+- Moneda y corazon (0x1c / 0x1d, un disco de 16 lados, 63 triangulos): tools/conv_infarto.py `aligera_monedas` los
+  rehace como un disco de 8 lados con el mismo radio, grosor, textura, UV y color: canto 16 + caras 6 + 6 = 28
+  triangulos / 34 vertices; y una version lejana (registro + 0x80) solo con las caras, 12 triangulos / 16 vertices, que
+  la demo usa desde 40 m (`ha_obj_dibuja`). En las capturas (cap/mon2) no se nota el octagono a la distancia de juego.
+- Arco (0x2b): `aligera_arco` deja los postes (nodo 5, 42 triangulos) y uno de los 4 nodos de destellos (cuadro 0, sin
+  la animacion de vertices ni la cara a la camara, y de sus tiras de 4 vertices solo las 10 primeras): 42 + 144 = 186
+  triangulos (antes 738); desde 40 m solo los postes (42).
+- Medido otra vez (SEQU, peticion 15 cargada, 11 muestras de 30 cuadros, Flycast): objetos 234..352 triangulos por
+  cuadro (antes 756..1260); media de la escena 15423 tri / 22960 vtx con objetos frente a 15036 / 22537 sin dibujarlos
+  (+387 tri, +423 vtx; antes +961 / +1090), dibujo 16,52 frente a 15,72 ms (+0,8), 39,85 frente a 39,86 fps.
+  Arcos (LASV, peticion 16): 213..624 triangulos de objetos por cuadro con 10..17 a la vista.
+
+**RAM del arranque:** -Os tambien en infarto.o, haobj.o y en lo que no es de la carrera o no pesa en ella (fsp.o,
+rksp.o, vmuesc.o, vmu.o, registro.o, modo_video.o del frontal / VMU, y final.o, nombre.o, pcarga.o, sp.o: el final de
+recreativa, el nombre del ranking, la pantalla de carga y el frontal de OUTRUN2SP) y la lista de dibujo de los objetos
+en la pila: el programa queda en 769 KB de texto (antes de la Rev 1.1, 770 KB). nav3.sh: "RAMMAPA arranque: libre
+350K" (antes de la Rev 1.1 344, con los objetos sin esto 333), "VOZ: VOCES.DAT, 35 muestras", sin "Out of memory".
+
+**Tipos 16 y 25 (arcos)** (461850 = PS2 0x1b0570 con la tabla 0x3f07d8; evaluacion 0x1b0810, la misma cuenta que la
+del 7): cuenta los arcos de la clase p6 (0x0B) cruzados (el 25 solo derrapando) con la cara 4; resultado 800000 x
+cruzados / p8.
+- Accion -11 (4611D0 con la clase 0x10 = PS2 0x1afa48): los anchos de la tabla 0x3f7218 (INFARTOX.DAT ARCO) {inicio,
+  medio, final, reparto} x los carriles del primer arco (+0xA4: aqui los carriles distintos de la ruta en ese punto,
+  PROBABLE), los n del tramo de la accion -5 repartidos; si 3 x ancho < 2,5, 0,8333 (0x3f555555).
+- Colocacion: la clase 0x0B con el marco de la carretera (45DB70 / 45D950): aqui el giro de la ruta en el punto mas
+  cercano (APROXIMADO: sin la inclinacion de la carretera).
+- Cruce (0x1d42f0): el paso del coche (posicion anterior -> actual, xz) contra el segmento de los postes en +-3 x ancho
+  y la altura del arco + 3 x ancho por encima del coche; despues el arco gira y se quita a los 3 s, parpadeando el
+  ultimo (0x1d4508). Sin el toque de los postes (1 / 2, efecto 0xCD) ni el sprite 2C0002.
+- E: mision 3 (preset 0) en la clave 7 (LASV): "20 arcos en 100..150, anchos 1,50" (4 carriles x 0,374), 2 cruzados
+  con PRUEBA_HA_TOQUE (el piloto no apunta), +7 corazones (cap/arc). PROBABLE: la colocacion se ve a los lados de la
+  carretera en las capturas; sin poder compararla con el original no se da por verificada.
+
+**SIN PORTAR (PENDIENTE):** 19 (cajas que caen y sueltan las estrellas: 461940, tabla 64AAA8), lo visual de 8 / 23
+(carriles pintados 45ECA0 / 45E9B0 con registros de obj_course_obj_cs_<zona> por mision; marcas de la accion -5
+45B000 / 45B2A0 con los modelos por idioma 64A9E8 / 64AA00) y los tipos 11, 9, 14 y 20. -> HECHO el 19, los carriles,
+las marcas y el toque de los postes: ver "INFARTO 2" (abajo); siguen sin portar 11, 9, 14 y 20. -> HECHO: ver "INFARTO 3".
+
+## INFARTO 2: estrellas (tipo 19), carriles pintados, marcas de la accion -5 y postes de los arcos (Rev 1.1, 2026-11-27)
+
+Sobre las tres secciones INFARTO anteriores (rama de 6fd5886). Todo verificado en Flycast (nivel E), no en la consola.
+Datos nuevos o cambiados (tools/conv_infarto.py): INFARTOX.DAT con las secciones EST1, MARC y META; HAOBJ.DAT con la
+estrella lejana y las dos marcas; HAMpqq.DAT (24 ficheros, `--solo-metas`; tambien en la conversion entera).
+
+**HECHO: tipo 19, "Recoge las estrellas"** (comun/haobj.c `haobj_est_paso`, comun/infarto.c `est_*`; solo lo pide la
+mision 39 del preset 0, FLOR). Lo averiguado (PS2, comprobado instruccion a instruccion):
+- Lo que el PC llama "cajas" son estrellas: la clase 0x12 es el modelo 0x570030 del banco 0x57, una estrella de 5 puntas
+  en bipiramide (20 triangulos sueltos); los objetos de oso_qt con clase 0x12 llevan el tipo 8 = suceso 0x61 (inicio
+  0x1d4b60, control 0x1d4d80, = PC 4AADC0 / 4AC440).
+- Inicio 0x1d4b60: reposo +A4 = el suelo bajo el punto (0x18dfc8 modo 0x100); +CC la seccion, +CE el carril; D = el eje
+  lateral de la seccion (0x190028: +24 - +30), y = 0, normalizado, y = -0,5 - rand x 2^-31; la mitad de las veces x / z
+  al reves; normalizado; +B0 = 6 D; la estrella sale de reposo - 200 D (llega de un lado y desde arriba). 0x1d4a58: +50 =
+  1, +90 = 1,5 (radio del toque), +78 = 0xD6, +94 = 1, +BC = 1, +C0 = 0, +C4 = 1, sprite 2C0007.
+- Control 0x1d4d80: +6C + 0,1 por paso; se dibuja en pos + (0, 2, 0) con escala +50 x 1,5; al tocarla (0x1d3720) +7C = 1,
+  escala x 0,7 y control 0x1d50e0 (sube con el coche: y = coche + 25 t - 39,2 t^2, desde t > 0,319 la escala - 0,03, giro
+  + 20).
+- Peticion 0x1b11c8 (461940; puntos 0x3f0810; tambien como llamada [7F2528] fuera de la peticion desde la accion -15):
+  cada estrella sin +C0 se activa si las activas (0x589d74) < el tope (0x589d60) y seccion del jugador + 0x28 >= +CC (la
+  primera: movimiento 0x220011 de la acompanante); con +BC avanza +B0 por paso hasta el suelo (alli y = reposo + 0,05,
+  +BC = 0); despues bota y = reposo + 0,05 + 20 t - 39,2 t^2 (t + 1/60) y al caer suelta 5 trozos de la tabla 0x3f7348
+  (0x368630 por el carril: los 7 apuntan a la misma; {desvio, angulos, escala 0,3}) en los objetos 0x134 + base + j
+  (base 0x589d6c, a 0 desde 40), cada uno en el suelo de su punto + 0,05, botando igual. Estrella tocada (+7C == 1 y +80
+  == 8): rotas + 1 (0x589d66) y movimiento 0x260009; trozo tocado: cogidos + 1 (0x589d68). Resultado = 800000 / n x
+  rotas - bono.
+- Puesta 0x1b1150 (464350 y la accion -15 = 0x1b0030 con n 0x28 y c 0x32): n = p6, c = p8, rotas = activas = 0, tope =
+  45C8E0 de la clase 0x12 en el tramo. Accion -10 (0x1af790): abre los 40 trozos (suceso 0x61); -13 (0x1af990) los
+  cierra; -16 (0x1b00b8) quita la llamada.
+- Evaluacion 0x1b1778: nota 7 -> 800000 + (rotas >= c ? (rotas - c) x 10000 + 0x46 : (int)(70 / (c - n) x (rotas - n)))
+  + cogidos x 10000 x 0,1 (el PC resta; la PS2 suma); si no, el tope de corazones de la nota (0x1b07f0); medidor h x 20 / 7.
+- SIMPLIFICADO / PROBABLE: el toque con la caja aproximada del coche (2,3 x 1,1 m + 1,5) de haobj.c; el eje lateral por la
+  direccion de la ruta de la demo (ha_dir); la seccion de cada estrella se calcula al vuelo (4 por paso) con ha_s.
+  SIN PORTAR (-> HECHO, ver "INFARTO 3"): el sprite 2C0007 (la estela de la estrella al llegar: 0x1d4d80 entre +A4 / pos y +B0, cuadro + 2 por paso,
+  efectos 0x216E / 0x10DC del PC) y el 2C0000 de la que sube.
+- Poligonos (DESVIACION pedida): la estrella cercana es la del original (20 triangulos / 60 vertices, ya ligera); desde
+  25 m x escala (37 m la grande, 11 m los trozos) una plana de 8 triangulos / 20 vertices (las 5 puntas y el pentagono:
+  tools/conv_infarto.py `aligera_estrella`); como mucho 24 objetos (los mas cercanos, HA_OBJ_MAX) dentro de 160 m; 70
+  estrellas y 40 trozos como mucho.
+- E: mision 39 en la clave 13 (FLOR, PRUEBA_HA_MISION=39 PRUEBA_NODO=13, TB_JUEGO=1): "estrellas 100..555: 70 en el
+  tramo, n 40 c 50", las estrellas llegan de lado, botan y sueltan 5 trozos (capturas cap/e19a/h_0030, h_0035,
+  cap/e19b/h_0040: estrellas en la carretera y subiendo sobre el coche al cogerlas); con PRUEBA_HA_TOQUE=0x12 y
+  PRUEBA_SIN_TIEMPO: "29 grandes (n 40, c 50) y 77 trozos", fin de la peticion con nota 1 (el bono del piloto por salirse
+  del asfalto se come el resultado; cap/e19c).
+- Corregido de paso: tools/conv_infarto.py `aligera_monedas` ordenaba la lista de mallas sin sus vertices (varias
+  mallas de HAOBJ.DAT se quedaban con los vertices de otra); ahora van juntas.
+
+**HECHO: los carriles pintados de las misiones** (45ECA0 / 45E9B0 = PS2 0x1a9a48: [0x44350c] == 0 -> 0x1a9850, si no
+0x1a95b0). Cada caso de las tablas de saltos 0x3efc60 (preset 0, misiones 15..36) y 0x3efbf0 (preset 1, 15..40, solo las
+14 de la lista de 0x1a95d0) pasa a 0x1118b8 uno o dos registros de obj_course_obj_cs_<zona>, dibujados en el marco de la
+etapa + (0, 0,1, 0). La conversion los lee del codigo (`sigue_dibujos`: lui / ori de a0, jal y b con su hueco) y no de
+las tablas del PC, que no coinciden en varios (PS2: 0x5a0006 / 0x5a0003, 0xfa0005, 0x100000b...). 24 ficheros
+HAMpqq.DAT (p = 0 / 1, qq la mision), sin texturas (el color de su material), de 50 a 1199 triangulos.
+- DESVIACION (poligonos): las tiras van en trozos de 18 vertices (`trocea`) y la demo dibuja solo los trozos a menos de
+  150 m del ojo y no detras (main.c `ha_meta_dibuja`), con el tope de los objetos de la union. Se lee al empezar la
+  carrera del modo y en cada etapa (`ha_meta_carga`, el nombre de `infarto_metas` con la seccion META de INFARTOX.DAT).
+- SIN PORTAR: las misiones < 15 del preset 0 (0x1a9998: por la etapa de 0x176700, 0x14 -> 0x1020001, 0x19 -> 0xfa0002,
+  0x1d -> 0x1020003).
+- E: mision 29 del preset 0 en FLOR (1010003 + 1010004): el carril rojo de "Derrapa y circula por el rojo" pintado a la
+  izquierda de la carretera (cap/m29/h_0080, h_0085).
+
+**HECHO: las marcas de principio y fin de la accion -5** (463950 caso 14 = PS2 0x1af13c, 45B000 = 0x1a8648, 45B2A0 /
+45B200 = 0x1a8840): los modelos por idioma de 0x1a7c80 / 0x1a7cb0 (tablas 0x3684d8 / 0x3684f0 por 0x1f6548; el espanol,
+indice 4: 0x570035 "INICIO" y 0x570024), una pancarta de 16 x 2,7 m (2 triangulos), en el centro de la seccion + 4 m
+(0x1a868c) con su direccion, + sen(a) en y con a + 0,2094 por paso (0x1a7f78, [0x58a144]). En HAOBJ.DAT (registros de
+MARC); la demo las pone con `punto_sec` (main.c `ha_punto`). PROBABLE: la orientacion (con el eje +z del modelo por la
+carretera el texto salia al reves en las capturas: va girada 180 grados, cap/arc2/h_0004 antes, cap/arc3/h_0005 despues).
+SIN PORTAR: las marcas de la etapa siguiente (0x176e48: 7F24D8 / 7F24DC cuando la seccion cae en otra etapa).
+
+**HECHO: el toque de los postes de los arcos** (0x1d42f0 / 0x1d4434): sin cruce, cada poste (+-h, y + 0,3) con radio
+0,3 x escala y efecto 0xCD -> +7C 1 (el de -h) / 2 (el de +h) -> 0x1d4508 con giro -0,2 / +0,2 por paso. Corregido: el
+arco cruzado (+7C = 3) no gira (+94 = 0 desde 0x1d41d0; antes giraba 0,2). E: mision 3 en la clave 7 con
+PRUEBA_HA_TOQUE=0x0b y la prueba nueva PRUEBA_HA_POSTE (un poste en la linea del coche): "poste 1 del arco 24 tocado
+(giro -0.2)" (cap/arc3). SIN PORTAR (-> HECHO, ver "INFARTO 3"): el sprite 2C0002 (0x1d4508 con +94 == 0: 5 destellos alrededor del coche, puntos de
+la tabla del PC 681CAC en el marco de car+D28 por la escala (6 - cuadro) x K + 1,5, proyectados, capa 5, cuadro + 1 por
+paso hasta el final de la escena): necesita un grupo de HAHUD.DAT del banco 0x2C, la proyeccion en main.c y el dibujo con
+escala en hud.c.
+
+**Medidas** (Flycast, -DDIAG_MS -DDIAG_HA, piloto del menu, muestras de 30 cuadros en el mismo tramo de las dos pasadas):
+- Estrellas (mision 39, FLOR, s 830..4420, 91 muestras): 39,52 fps, dib 19,55 ms, 13255 tri / 20884 vtx por cuadro;
+  sin dibujar los objetos (DIAG_SIN_HAOBJ) 39,63 fps, 18,36 ms, 13128 / 20613: -0,11 fps, +127 triangulos y +271
+  vertices de media; los objetos, 23 dibujados de media, 137 triangulos (como mucho 299) y 359 vertices (755).
+- Carriles (mision 29, FLOR, s 3700..4824): 39,73 fps frente a 39,69 sin ellos (DIAG_SIN_HAMETA), +85 triangulos de
+  media; los carriles: 79 triangulos de media (como mucho 142) y 90 vertices (164).
+
+**RAM:** al arrancar 357 K libres (nav3.sh, "VOZ: VOCES.DAT, 35 muestras", sin "Out of memory"; la punta de partida,
+350 K con los mismos datos). El .init del programa va alineado a 8 KB: el codigo solo baja la RAM al pasar de un multiplo
+a otro. Para compensar lo nuevo (+5 KB de codigo y +0,6 KB de bss) y bajar un escalon: -Os tambien en fin.o, meta.o,
+sprani.o, rival.o, camara.o, voces.o, sfx.o, gd.o, musica.o y hud.o (demo/Makefile) y en lee_modelo_en (main.c): el
+programa queda en 702 KB de .text (antes 712). Coste de ese -Os en la carrera (la misma pasada de las estrellas con
+todo el -Os nuevo, hud.o incluido): 39,42 fps y dib 19,65 ms frente a 39,52 / 19,55 (-0,10 fps, en el ruido de Flycast;
+PENDIENTE medirlo en la consola). Carrera del INFARTO con DIAG_HA: 258 K libres (mision 39) y 264 K (mision 29), sin
+"Out of memory" (no cambia con el escalon del arranque).
+
+## COAST 2 COAST: campeonatos, tercera tanda (agente c2c3, 2026-11-27)
+
+Sobre "COAST 2 COAST: los campeonatos (variante 5), agente c2c2". Todo verificado en Flycast (nivel E), no en la consola.
+
+### Holly (grupo 6, Req_Course_MIX_PS2): HECHO
+
+- tools/conv_union.py: las uniones nuevas de los arboles de ARBOLES_REQ (el 302) se numeran desde `BK_REQ = 498`
+  (detras de las de CURSOTA.DAT, 262..497) con su propio contador: EAST_R / BK498, LASV_R / BK499, METR_R / BK500,
+  DESE_R / BK501, NEWY_R / BK502, ALAS_R / BK503, ALPI_R / BK504, YOSE_R / BK505, GRAN_R / BK506, INDU_R / BK507 y la
+  meta CAST_R / BK508 (union 76, cs_BK_SUMOEND); las demas del arbol son de antes (BK42, BK231, BK133, BK95).
+- tools/pak_union.py: los BK desde `AL_FINAL = 498` van al final del paquete, asi UNIONES.PAK solo crece (22 750 247 ->
+  23 467 226 bytes, +0,7 MB por los trozos repetidos) y sus primeros 22 750 247 bytes y los 262 descriptores de antes salen
+  identicos byte a byte (comprobado: recompuestas las 262 de lgdat2 y reempaquetadas con las 11 nuevas, `cmp`).
+- tools/regenera.py: el paso `union` convierte ARBOLES + 302 (ARBOLES_CURSO; la Contrarreloj sigue con ARBOLES_TA sin el
+  302, CURSOTA.DAT no cambia) y se esperan 509 descriptores (NBK).
+- CURSO.DAT: los 96 arboles de antes identicos registro a registro (h2/cmpcurso.py), el 302 detras.
+- demo/main.c `curso_tiene`: leia 8 KB del principio de CURSO.DAT, pero el indice de los arboles va detras de los 15
+  registros del modo OutRun (12 + 15 x 684 = 10272 bytes): nunca encontraba el 302 ("el campeonato 2 no se puede
+  correr"); ahora lee 16 KB y comprueba el arbol contra el tamano del fichero.
+- GD-ROM: datos de prueba 476 947 sectores (931,5 MiB; lgdat2 476 393): quedan 27 171 sectores (53 MiB) menos el
+  1ST_READ.BIN (~3 MB).
+- E (`-DPRUEBA_AUTO -DPRUEBA_CAMP=2 -DPRUEBA_SIN_TIEMPO`, pantalla :93): `CURSO: arbol 302, 15 etapas, salida EAST`, las
+  cinco etapas EAST_R -> LASV_R -> DESE_R -> ALPI_R -> BEAC_R por BK498, BK499, BK501, BK504 (leidas del paquete en ~2,1
+  s) hasta `CURSO: GOAL en BEAC`, con las peticiones de sus guiones (16, 13, 14, 22: sin portar, nota 0). Sin "Out of
+  memory"; "VOZ: VOCES.DAT, 35 muestras". Capturas: modos/c2c/cap3/holly (r_*: una cada 15 s; r_225 en la union).
+
+### Merge de infarto2 y RAM del arranque
+
+- `git merge infarto2` (comun/haobj.c: los objetos de las peticiones del INFARTO, con sus modelos de HAOBJ.DAT y
+  HAOSO.DAT). Conflictos resueltos: demo/Makefile (la union de las dos listas de -Os, SIN camara.o, hud.o ni sfx.o, que
+  corren en cada cuadro; sfx.o vuelve a -O2), demo/main.c (los enganches de los dos modos), docs (las dos secciones).
+- Para la prueba, los datos de modos/infarto/dat copiados a modos/c2c/dat_inf (HAOBJ.DAT, HAOSO.DAT, INFARTOX.DAT,
+  HAHUD.DAT, CHRH.DAT, VOCESH.DAT, HAMnnn.DAT) y enlazados en datos2 (h3/datos2.sh).
+- RAM: con el merge el arranque bajaba a 345K. Se recupera con el FRIO de infarto3 (efe7f03, cherry-pick: infarto.o
+  con sus tablas al monton y `FRIO` = -Os en la carga de main.c), FRIO tambien en tapas_busca, rk_un_jugador,
+  curso_huecos, focos_carga, robot_carga, hueco_fin, final24_chr, camp_preparado y curso_tiene (solo corren al cargar
+  o al acabar), y el bufer del fichero del fantasma de la CONTRARRELOJ (gh_buf, 28 KB de BSS) al monton solo mientras
+  se lee o se guarda en la VMU. nav3.sh (MODO_JUEGO=1, sin defines): "RAMMAPA arranque: libre 381K", "VOZ: VOCES.DAT, 35
+  muestras", sin "Out of memory". Leer el fantasma comprobado en la CONTRARRELOJ (MODO_JUEGO=3: "FANTASMA: curso 013C,
+  sin fantasma"); guardarlo en la meta (malloc en gh_hilo) NO se ha visto: PROBABLE.
+
+### Tipos 6 (conos), 7 (monedas) y 8 (arcos): HECHO
+
+- Objetos (un sistema propio de C2C, tabla 0x61e8a0 de 250 x 0x2c, distinto del del INFARTO pero con los mismos
+  objetos del banco 0x57): cada tipo lee de sus parametros una lista de filas (0x293968: {cuantos, clase, +8, relativa,
+  seccion inicial, final, lateral inicial, final}: cuantos repartidos sin llegar a la final) y una de puntos (0x2938d0,
+  0x2c bytes); campos por tipo: 6 +0x74 / +0x78, 7 y 8 +0x78 / +0x7c (15 +0x70 / +0x74 y 19 +0x78 / +0x7c tambien se
+  convierten). La clase (0..14) da el control (0x297e20: 0..1 conos, 2..3 moneda / corazon, 4 arco...) y la clase del
+  banco (tabla 0x423080: 6 / 5 conos rojo / azul, 0x0a moneda, 0x39 corazon, 0x0b arco).
+- tools/conv_camp.py: CAMP.DAT lleva detras de las peticiones 'OBJ1' con 335 filas (28 884 bytes en total).
+- comun/campeonato.c `pon_objetos` en la fase 1 (el anuncio, como el original) y comun/haobj.c `haobj_pon` (nuevo):
+  el objeto ya en el mundo; demo/main.c `camp_obj_`: la seccion -> s de la ruta y el lateral como fraccion del asfalto
+  (SUPUESTO: 0 es el borde izquierdo; con el piloto los conos azules quedan en su linea), a la altura de la calzada y
+  girado con la carretera. Los toques y los cruces de arcos de haobj_paso llegan a cada tipo en camp_coche_t.
+- 6 (0x295a28 / 0x295d48): azul +80 / (azules x 0,99) al medidor (derrapando si +0x70 == 1), rojo 3 veces eso a la
+  penalizacion; nota 6: +70 x 0x22f090. 7 (0x2953b8 / 0x295740): moneda o corazon +80 / p70 (derrapando si +0x74 == 1);
+  nota 6: 70 x cogidas / todas + (cogidas + corazones - p70) / 2. 8 (0x29a330 / 0x29a670): arco cruzado +80 / (p70 x
+  0,99); nota 6: +70 x 0x22f090. SIMPLIFICADO: la voz de animo (0x2a6240) por cuenta de toques y velocidad, no con el
+  contador exacto 0x3b5528.
+- E (Jennifer, `-DPRUEBA_CAMP=0 -DPRUEBA_CAMP_NODO=7`, Cloudy Highland): lista 1 (8, 7, 8): 15 arcos cruzados solo con
+  el piloto, "peticion 8 hecha: 93 - 0, nota 6, 80 + 119"; monedas 28 - 3, nota 2 (con `-DPRUEBA_HA_TOQUE=-1`, que pone
+  los objetos en su linea: 76 de 75 + corazones, nota 5); lista 2 (6, 6, 6): conos azules tocados por el piloto 8 / 31
+  / 40, notas 0, 3, 3; la cara de la chica y el contador de corazones suben. Capturas cap3/obj_toque (arcos, monedas),
+  cap3/conos.
+- Poligonos y fps (los modelos ya aligerados del INFARTO; como mucho 24 objetos a menos de 160 m; DIAG_MS, las mismas
+  pasadas con y sin dibujarlos `DIAG_SIN_HAOBJ`, cap3/medidas): conos 94 triangulos de media (190 como mucho), 39,74
+  frente a 39,78 fps (-0,04); arcos y monedas 156 de media (464 como mucho), 37,87 frente a 38,03 (-0,16).
+
+### Reacciones de la acompanante (0x205288 / 0x2052f8 / 0x2a66a8): HECHO
+
+- Tipos 1 y 2 (0x29c828 / 0x298360): al empezar a cumplir (pasar de la velocidad, derrapar) 0x205288(1, fila) con la
+  fila por la nota (switch 0x4236f0 / 0x4230f0: 0..1 -> 0, 2..3 -> 5, 4 -> 3, 5..6 -> 4; aqui la nota de ese momento
+  sacada del medidor, PROBABLE: el original lee +0x24); al dejar de cumplir 0x2052f8 (para).
+- Fase 6 (la nota, 0x232de0 -> 0x2a66a8): para y el movimiento de la tabla 0x423e60 por la nota, o 0x423e80 con los
+  modelos de coche que elige el switch 0x423ec0 (por modelo - 2). tools/conv_camp.py: bloque 'CHI1' detras de 'OBJ1'
+  (las dos tablas y la eleccion por modelo). Los movimientos (0x60048, 0x260009, 0x6003f, 0x260003, 0x26000d) ya estan
+  en CHRH.DAT del INFARTO (comprobado: conv_chr.py con ellos da el mismo fichero byte a byte).
+- comun/robot.c robot_pide (el del INFARTO) desde demo/main.c `camp_chica_`; CHRH.DAT (~52 KB del monton) se lee al
+  empezar cada etapa del campeonato y se suelta al acabarlo.
+- La pareja no salia en las pruebas `-DPRUEBA_CAMP` ("CHR: sin pareja (-3 ...)": robot_pareja leia el campeonato del
+  menu); ahora lo lee del elegido en camp_preparado (camp_g; con el menu es el mismo).
+- E (Jennifer, `-DPRUEBA_CAMP=0 -DPRUEBA_CAMP_PASA -DDIAG_HA`): rebufo nota 6 -> "DIAGHA acompanante: movimiento
+  0x26000d (esta)", velocidad: "cara 0 (0x26000a, esta)" y nota 0 -> 0x60048; capturas cap3/chica (la acompanante se
+  mueve en el coche tras la nota). En carrera 303K libres con la pareja y CHRH.DAT, sin "Out of memory".
+
+### Rotulos del banco 0x46 (tipos 1, 12 y los demas): HECHO
+
+- tools/conv_camp.py hace CAMPHUD.DAT (196 KB, 19 texturas VQ de ~64 KB sin VQ cada una): los 19 rotulos del anuncio
+  del banco SPRANI 0x46 que piden las peticiones (460040 rebufo, 460041 velocidad, 460042 colores, 46002C, 46003E...
+  46005C), cada uno su escena entera (conv_hud.grupo_escena) en el grupo CA_Tkk; la peticion lleva el rotulo 0x40 + k.
+  Ya solo el tipo 20 se anuncia con el generico (no tiene rotulo propio en 0x22faec).
+- demo/main.c: CAMPHUD.DAT se abre con HAHUD.DAT en la carrera del campeonato (solo sus tablas; la textura de un
+  rotulo se sube mientras se ve y se baja despues, `hud_rotulo_uso`, como los HA_Tnn).
+- E (Jennifer, PALM): "¡Ve al rebufo de los coches!" con su dibujo (tipo 12) y "¡Excede la velocidad!" con el
+  velocimetro (tipo 1), cap3/rotulos (r_033, r_063, la ampliacion c2c3_rt_z.png).
+- SIN PORTAR: el letrero 3D de inicio / fin de la peticion (0x232e60 con 0x1a7c80 / 0x1a7cb0). -> HECHO (ver "sexta tanda").
+
+### Medidas finales y lo que queda
+
+- RAM al arrancar (nav3.sh, MODO_JUEGO=1, sin defines, datos de prueba datos2): "RAMMAPA arranque: libre 373K" (4106ba2:
+  364K), "VOZ: VOCES.DAT, 35 muestras", sin "Out of memory" (cap3/log_nav3.txt). En la carrera del campeonato con la
+  pareja, CHRH.DAT y los objetos: ~300K libres.
+- Por el menu real (`-DPRUEBA_PILOTO_MENU -DPRUEBA_SIN_TIEMPO`, h3/camp.sh, Clarissa): mapa -> coche -> BEAC con la
+  peticion 11 anunciada con su rotulo del banco 0x46 y la reaccion de la acompanante a la nota; cap3/menu.
+- SIN PORTAR (por orden de lo que piden los guiones): 16 los minijuegos (104 peticiones, casi todas de Holly; clase
+  0x29f520 de 0x1860 bytes con 8 subtipos), 13 alimentar a la chica, 22 la bocina, 11 chocar con los coches de la
+  peticion (necesita los coches propios 0x22d088 / 0x1e1910), 5 colores (las franjas pintadas de +0x58 de los
+  parametros, 0x1f3a70, y el lateral 0x232768), 15 la pelota y 19 los meteoritos (sus objetos ya estan en CAMP.DAT
+  OBJ1, falta su control: 0x293190 / 0x29da88 y los objetos de tipos 0xb / 0xd / 0xe que haobj no mueve), 14, 20, 21,
+  23, 24; el letrero 3D de inicio / fin (0x232e60) y la silueta 2C0067 / 0x460064. -> HECHO: 15, 19 y 5 (ver "cuarta
+  tanda"); 11 subtipos 0 / 1 (ver "quinta tanda").
+## INFARTO 3: tipos 11, 9, 14 y 20, sprites 3D de los objetos y RAM del arranque (Rev 1.1, 2026-11-27)
+
+Sobre "INFARTO 2" (rama infarto2, f0a330a). Todo en Flycast (nivel E), no en la consola. Datos nuevos o cambiados
+(tools/conv_infarto.py): INFARTOX.DAT con ANI1, ESC1, ESC2, ARC2 y FAN1; HAOBJ.DAT con el corazon 0x2a y su version
+plana; HAHUD.DAT con HA_RK0 / HA_RK1 (2B0005 / 2B0006) y HA_S06 / HA_S02 / HA_S07 / HA_S00 (2C0006 / 2 / 7 / 0, todos sus
+cuadros). Codigo: comun/haobj.c (anillo, pares, sprites 3D de los objetos), comun/infarto.c (tipos, `infarto_autos`,
+`infarto_spr3d`), demo/main.c (enganches: `traf_infarto` pasa las plazas del trafico a `infarto_autos`, `ha_spr3d`
+dibuja los sprites 3D, la clase del coche de la mision en `ha`, la marca `ha_m` de la plaza). Pruebas con
+PRUEBA_HA_MISION / PRUEBA_NODO / TB_JUEGO=1 (preset 0) como antes; scripts en $S/modos/infarto/c_*.sh.
+
+**HECHO: tipo 11, "Atrapa el corazon"** (10 peticiones: mision 4 del preset 0 y 28, 29, 33, 34, 38, 39 del preset 1).
+- Puesta 464350 = PS2 0x1ae854: 0x1aa358 (+4 / +6 tramo, +8 = p6, +C = p8, +A = 0) y 0x1df060 (el anillo vacio).
+- El anillo 0x5d51f8 (PC 8037C8, 32 registros de 0x5C; 46DB60 = PS2 0x1dcaf8, el registro libre 0x1dca70 desde el cursor
+  0x5d5d78): mientras la peticion es la 11, cada coche vivo sin +C5C 0x20000 recibe un registro con los dos puntos de
+  0x40b9a0 (INFARTOX.DAT ANI1: (+-2,6, 1, 0) en el marco del coche) y la marca; cada paso los puntos al mundo y la edad
+  +58 + 1; sin coche o sin puntos, fuera. Aqui la marca es `ha_m` de la plaza (un numero de serie: una plaza reusada no
+  hereda el registro).
+- Control 0x1aa3e8 (= PC 45F180): puntos de 45E2F0 (0x3efce8); cada punto a dx^2 + dz^2 <= 16 del jugador se coge
+  (+4C = 0), movimiento 0x260003 de la acompanante (salvo los coches "callados" de 45B380), +A + 1 y el efecto 0x52 si
+  pasa de p6; resultado = +A > p6 ? 800000 : +A / p6 x 800000.
+- Evaluacion 0x1aa780 (y la del 9, 0x1aa1e0, la misma cuenta): nota 7 -> 80 corazones + 400000 si no hubo sucesos ni
+  trompos (7F24EC / 7F2504) + (+A > p6: +A >= p8 ? 300000 + (+A - p8) x 50000 : (+A - p6) / (p8 - p6) x 300000);
+  contador (h + h / 2) x 10 / 7.
+- Dibujo 0x1aa5b8 (solo con la peticion 11): el modelo 0x57002A (en la PS2; el PC usa 0x2F) en cada punto con y +
+  (sen(a) x 0,5 + 1), a = edad x 0x444 (2 pi / 65536), girando a sobre la vertical y con escala (1 / s, 1, 1 / s).
+- DESVIACION (poligonos): el corazon es de 44 triangulos en 6 tiras; desde 30 m una version plana con su silueta
+  (tools/conv_infarto.py `aligera_corazon`: 10 triangulos / 14 vertices, el color medio) y solo hasta 100 m
+  (HAOBJ_ANI_LEJOS), con el tope de HA_OBJ_MAX objetos (los mas cercanos).
+- E: mision 28 del preset 1 (PRUEBA_HA_MISION=28): corazones a los dos lados de los coches (cap/t11b/h_0022, h_0024), 3
+  cogidos de 6, nota 3, +20 corazones.
+- Medido (Flycast, DIAG_MS, el mismo tramo s 580..2250, 31 / 30 muestras): 38,71 fps, dib 18,87 ms, 16204 tri con los
+  corazones; sin dibujar objetos (DIAG_SIN_HAOBJ) 38,67 fps, 18,78 ms, 16055 tri: +149 triangulos de media, +0,09 ms,
+  sin perdida de fps medible; corazones dibujados: 2,6 de media, como mucho 152 triangulos.
+
+**HECHO: tipo 9, "Cruza la linea"** (4 peticiones: 17, 20, 31 del preset 0 y 24 del preset 1).
+- Pares 0x5d4fc0 (PC 800AF8, 10 x 0x38; 46D250 = PS2 0x1dc3c0): los abiertos se sueltan si falta un coche, se separan
+  mas de 80 m o la peticion ya no es la 9; luego, por la cadena del jugador (+314: aqui las plazas por distancia, < 250
+  m), cada coche del tramo (+4..+6 de la peticion) sin +C5C 0x18000 se empareja con el vivo mas cercano a menos de 80 m
+  del tramo y sin 0x10000 (los dos: +C5C 0x8000). Las clases y puntuaciones del par (+30..+36) solo las usa el dibujo
+  del PC: en la PS2 el dibujo de la peticion 9 (0x1aa1d8) es `jr ra`, sin nada.
+- Control 0x1a9f68: puntos (0x3efcd0); la linea entre los dos coches (+ 1 m en y) en el marco del jugador contra su caja
+  (0x1978d8 con +338; aqui 2,3 x 1,1 m en xz, PROBABLE): el par se suelta (0x1def90: +C5C 0x10000), movimiento (coche
+  9: 0x6003D; si no rand < 0,5 ? 0x6003F : 0x6003E), +A + 1 (efecto 0x52 si pasa de p6) y el resultado del 11.
+- SIN PORTAR: el registro de aparicion que la puesta 0x1a9e08 instala con 0x1f20e8 (como el del 22).
+- E: mision 24 del preset 1: pares formados en el tramo 268..530 (registro DIAGHA "par n: plazas a y b"), 3 lineas
+  cruzadas, nota 1 (cap/t9a; otra vez cap/t9b tras corregir c_act).
+
+**HECHO: tipo 14, "Supera a ese coche"** (3 peticiones: 19, 22, 25 del preset 0).
+- Accion -12 (0x1ab3c8 = 45B5B0): hasta 8 escoltas de la tabla 0x368528 + w4 x 0x78 (INFARTOX.DAT ESC2: {seccion desde
+  w6, carril, modelo, +8, +B74}), clase 6 (+324), +C5C 0x40000, +B58 = +B5C = 0x12, parados. Aqui se abren por la misma
+  via que los coches de la mision (`infarto_coche_pide` con la clase 6). DESVIACION: la tabla pide coches del jugador
+  (modelos 2, 5, 8: sin cargar en el modo); van modelos del trafico de la lista de las clases 3 / 4.
+- Accion -18 y la puesta (0x1ab1d0 = 45B520): los escoltas a la velocidad del jugador, como poco 0x3fb12fea (1,384 m por
+  cuadro, 300 km/h), y 7F250C = 1. PROBABLE: despues su IA de carreras (sin portar) -> aqui vuelven a la de la
+  carretera (v_des), y mientras dura la peticion no se cierran por detras (main.c, la regla de los coches de carreras de
+  477F60 sin el -15): sin eso el jugador los adelantaba, se cerraban y contaban como "por delante" (+98).
+- Puesta 0x1ab2d8: la lista de los escoltas vivos (+40..), puesto = n + 1. Control 0x1ab6a0 (puntos 0x3efdc0): puesto =
+  los que faltan (+98) + los que van por delante (+260: aqui la seccion) + 1; si sube, el efecto 0x5C y se guarda 15
+  pasos (+B6); resultado = 0x3f7328[puesto - 1] (ESC1: 800000, 600000, 450000, 300000, 200000, 160000, 120000, 0);
+  acompanante: al subir 0x220000 / 0x220003 (rand), si no y no va primero 0x220011 (con 487DF0 = `robot_fin(1)`, nuevo
+  en robot.c). Evaluacion 0x1abb30: nota 7 -> 80 + (sin sucesos 200000) + (60 - trompos) / 60 x 200000 + (60 - ruedas
+  fuera) / 60 x 300000. Dibujo 0x1abca0: 2B0005 (cuadro 0) y 2B0006 (cuadro puesto - 1) en (0, 30), capa 1.
+- E: mision 19 del preset 0 (TB_JUEGO=1): "7 escoltas de la tabla 0", el puesto en pantalla de 8/8 a 1/8
+  (cap/t14g/h_0042..h_0057), fin con el puesto 1, nota 6, +231 corazones. PROBABLE: la posicion del rotulo del puesto
+  (sale encima del bocadillo de la peticion).
+- Corregido: `c_act` (el coche del jugador para las acciones) apuntaba a la pila de `infarto_paso`; ahora es una copia.
+
+**HECHO: tipo 20, "Choca con el fantasma"** (1 peticion: 16 del preset 0).
+- La tabla de coches de la -14 con w4 & 0x40 (0x1b2e04: [+E0] & 0x40) abre fantasmas (+C5C 0x80000; aqui la marca
+  HA_FANT de la plaza).
+- Puesta 0x1b1e10 (tramo, p6, p8; +B66 = 0). Control 0x1b1f18 (puntos 0x3f0828): cada fantasma a 7 secciones por
+  delante: un efecto de 0x3f0840 (FAN1: 0xD1..0xD3, rand % 3) cada 60 pasos; golpeado (+B6C y +2F4 == 0): +10 + 1,
+  resultado +10 / p6 x 800000; acompanante 0x260007 / 0x60025 / 0x250003. PROBABLE: aqui un golpe por coche (el
+  original cuenta los pasos con esa condicion). Evaluacion 0x1b2348: nota 7 -> 80 + (+10 > p6: +10 < p8 ? (+10 - p6) x
+  700000 / (p8 - p6) : 700000 + (+10 - p8) x 50000); contador h x 20 / 7.
+- Dibujo 0x1b2190: el sprite 3D 2C0006 (4295D0 = PS2 0x115870) en +14 de cada coche vivo sin golpe a menos de 10
+  secciones, cuadro +B66 (+ 1 por cuadro, tope el ultimo), escala 1,68 hasta el cuadro 25 y luego - 0,2 por cuadro.
+  main.c `ha_spr3d`: el punto con la camara de la demo, px = escala x foco / z / 32 (4295D0: escala x a1 / -z / 32),
+  hudd_escala + hudd_dibuja encima de la escena (SIN el sesgo de profundidad). SIN PORTAR: como se ve el coche fantasma
+  (si el original lo dibuja distinto por 0x80000).
+- E: mision 16 del preset 0: fantasmas abiertos, 3 golpeados, nota 1; el sprite sobre el coche (cap/t20a/h_0024).
+
+**HECHO: los sprites 3D de los objetos** (haobj.c `haobj_spr3d`, por `infarto_spr3d`):
+- 2C0002 del arco cruzado (0x1d4508 con +94 == 0): 5 destellos en los puntos de 0x36b9b0 (ARC2: un semicirculo de radio
+  3 en (x, y) del coche) x (cuadro < 7 ? (6 - cuadro) x 0,1 + 1,5 : 1,5), 3 m por delante del coche, escala 0,7, cuadro
+  +A8 + 1 por paso hasta el ultimo. E: cap/t5a/h_0012 (LASV, mision 3, PRUEBA_HA_TOQUE=0x0b).
+- 2C0007 de la estrella que llega (0x1d4d80): en su punto (volando) o en su reposo, escala 3, cuadro +98 + 2 por paso
+  hasta el ultimo. SIN el giro por la direccion del vuelo en la pantalla (0x2bb0a0) ni los efectos 0x216E / 0x10DC.
+- 2C0000 de la que sube (0x1d50e0): sprite 2D (429530, sin escala) en el punto proyectado, cuadro + 1 por paso.
+  E: cap/t5b/h_0050 (FLOR, mision 39, PRUEBA_HA_TOQUE=0x12).
+- Coste: quads 2D (5 por arco, 1 por estrella o coche): sin medida aparte (dentro del ruido de las de arriba).
+
+**RAM** (nav3.sh, build sin defines): al arrancar 355 K libres, "VOZ: VOCES.DAT, 35 muestras", sin "Out of memory".
+- hud.o, sfx.o y camara.o otra vez a -O2 (corren en cada cuadro de la carrera): +7,7 KB de codigo.
+- Para compensarlo y lo nuevo (~5 KB de codigo): las tablas grandes de infarto.c (la tabla de coches de 4 KB, los
+  niveles, los sprites del medidor y sus efectos: ~9 KB) en el monton solo mientras dura el modo (`hm`, infarto_inicia
+  / infarto_libera); el mapa de 8 KB de `pal_colores` (hud.c) en el monton solo dentro de `pal_reparte` (la carga del
+  HUD); y FRIO (`__attribute__((optimize("Os")))`, demo/main.c) en las funciones que solo corren al cargar:
+  decor_reduce, curso_reinicia, etapa_precalienta, efectos_inicia, ruta_anade, curso_lee_id, coche_carga, camion_carga,
+  faros_carga, rc_modelos_carga, final24_entra, bo_carga_datos, traf_tablas, camion_lee, final24_dibuja, tabla_entra,
+  band_carga, refl_fijo_lee, rc_abre, viso_lee, final24_chr, robot_carga, focos_carga, curso_huecos, hueco_fin,
+  tapas_busca, rk_un_jugador, fisica_carga, coche_ani_lee, ruta_prepara, vram_ordena, compila_cab, camion_suelta_ram,
+  coche_cab_cex, salida_calcula, ta_meta_busca, faros_rejilla, coche_cex. El .init va alineado a 8 KB y el codigo queda
+  0x450 bytes por encima de un escalon: lo que el siguiente agente quite de codigo hasta ahi vale 8 KB del arranque.
+- Carrera del INFARTO (DIAG_HA, mision 19): 259 K libres al empezar, sin "Out of memory" ni "sin VRAM". Los grupos
+  nuevos de HAHUD.DAT se suben a la VRAM solo mientras se ven.
+
+**SIN PORTAR (PENDIENTE):** la IA de carreras de los escoltas del 14 (+B58 = 0x12) y sus modelos de coche del jugador; el
+registro de aparicion de la puesta del 9 (0x1f20e8) y del 22; la accion -19 (0x1abd10: [0x589d04] = w4, sin leer quien lo
+usa); el aspecto del coche fantasma; el giro de la estela 2C0007; los tipos 17, 18 y 21 (no los pide ninguna mision).
+
+## COAST 2 COAST: campeonatos, cuarta tanda (agente c2c4, 2026-11-27)
+
+Sobre "campeonatos, tercera tanda (agente c2c3)" con `git merge infarto3` (0375cc8). Todo en Flycast (nivel E), no en la
+consola. Datos de prueba: $S/modos/c2c/dat2 (CAMP.DAT, CAMPOBJ.DAT nuevos) y dat_inf (actualizado con modos/infarto/dat:
+HAHUD.DAT e INFARTOX.DAT de infarto3), carpeta montada con h4/datos2.sh; scripts en $S/modos/c2c/h4 (mk.sh, gdi.sh,
+auto.sh con INI=, medir.sh / mide.py para los fps con y sin dibujo, donde.py: en que grupo / nodo / lista sale un tipo).
+
+### Merge de infarto3
+- Conflictos: comun/haobj.h (las dos API), demo/main.c (hud_rotulo_uso de C2C y ha_spr3d del INFARTO), demo/Makefile (la
+  lista de -Os de c2c3, que ya era la de infarto3 mas mision.o y campeonato.o; hud, sfx y camara a -O2), docs. infarto.c
+  queda igual que en infarto3. Arranque: 379K.
+
+### HECHO: tipo 15, empujar la pelota (0x293190 / 0x2934e8)
+- La pelota es la clase 0x11 del banco de objetos = registro 1 de obj_tour_pmt (recurso 0x1ee, tabla 0x40a958; no es del
+  banco 0x57, por eso faltaba en HAOSO.DAT). tools/conv_camp.py: CAMP.DAT 'CLS1' (clase -> registro de CAMPOBJ.DAT y
+  escala) y CAMPOBJ.DAT (ORD7 como HAOBJ.DAT: la pelota 150 triangulos, el meteorito 159; 27 KB, se lee en la carrera del
+  campeonato). haobj_clase / HAOBJ_TOUR: haobj dibuja esos registros con el modelo de CAMPOBJ.DAT.
+- Control: fase 1 los objetos (0x293390 / 0x293448), +0xc = 80 / (largo x 0,85); fases 2..5 (0x2934e8) por cada pelota:
+  si se ha quedado 5 secciones atras y el jugador va antes de la mitad - 10, otra en la mitad (lateral 0,5, una vez); con
+  +3FC == 8 (tocada) el medidor suma lo que ha avanzado desde el toque anterior x +0xc (PROBABLE: 4 si no avanzo; el
+  original suma 4 con +3F8, que pone 0x1d1af0 / 0x1d2608 con el modelo 0x1ee0001); en la 4, pasado el final, lo ultimo
+  y hecha; nota 6: + 70 x 0x22f090. Efectos 0x422cd0[rand % 7] (CAMP.DAT 'SND1').
+- SIMPLIFICADO (DESVIACION): sin el cuerpo rigido 516E10 del original (control 2, el de los conos): la pelota (radio 1 x
+  escala 2, apoyada en el suelo) sale con la velocidad del coche + 5 m/s, rueda con 5 m/s2 de frenada y gira al rodar.
+- E (Clarissa nodo 8 lista 1, `-DPRUEBA_HA_TOQUE=0x11`): 5 toques (secciones 104..136), "peticion 15 hecha: 92 - 0, nota
+  6"; cap4/t15/pelota.png. fps (DIAG_MS, con / sin dibujar objetos): 35,72 / 35,74; 61 triangulos de media, 150 como mucho.
+
+### HECHO: tipo 19, los meteoritos (0x29da88 / 0x29e018)
+- Clase 0x3d = registro 4 de obj_tour_pmt (control 0x0d, objeto de 10 m de radio x escala). Fase 1: objetos y la voz 0x7f;
+  fases 2..4 (0x29e018): caen (+C0 / +BC / +B0, como la estrella del INFARTO: desde 200 m, 6 m por paso; empiezan a 40
+  secciones por delante, PROBABLE: el original mira [0x55cf38] & 3 == 2) y al llegar al suelo el efecto 0x423830; golpe
+  (+7C y +80 == 8, una vez por meteorito, +D0): penalizacion + p[5] (+0x74, flotante: 14 / 15 / 16...) y, sin choque, la
+  reaccion 0x182d38 con la velocidad x 0,9 (camp_golpe: solo la velocidad); en la 4 el medidor con el avance / (largo x
+  0,9); la 5 no da bono. SIN PORTAR: 0x22df58 (vibracion), el efecto 0x22c6c8 de la llegada y el HUD de 0x22e9a0.
+- E (Clarissa nodo 6 lista 1, `-DPRUEBA_HA_TOQUE=0x3d`): 10 golpes, penalizacion 100, nota 0 (cap4/t19/meteoritos.png);
+  sin forzar, 39,81 / 39,78 fps con / sin dibujarlos, 159 triangulos de media (318 como mucho).
+
+### HECHO: tipo 5, ir por la zona de color (0x2a3db0)
+- La zona NO esta en el guion (+0x10..+0x1c a cero; 'ZON1' de CAMP.DAT lo comprueba): la pone 0x2323e8 por el subtipo:
+  0 -> lateral 0..0,5 (color 2), 1 -> 0,5..1 (3), 2 -> 0,25..0,75 (4); 0x232768 la mira (fraccion del ancho de borde a
+  borde) entre el inicio y el final. Control: dentro (y derrapando si +0x78 == 1) el medidor con el avance / (largo x
+  0,9), animo por la velocidad; nota 6: el bono de 0x22f090 con 0,9.
+- 0x1f3a70 (los +0x58 de los parametros, en 0x2937f0 para todos los tipos) NO pinta franjas: copia una tabla de 12 bytes
+  por seccion a 0x5d5da8, la de la aparicion del trafico (0x1f3818). No esta portado (el trafico de la peticion).
+- DESVIACION: como lo marca el original sobre la carretera no esta averiguado; aqui una tira translucida del color del
+  rotulo (rojo, azul, verde) de 2 a 150 m por delante, <= 50 triangulos (camp_zona_dibuja). El lateral: 0 el borde
+  derecho (PROBABLE, el dibujo del rotulo "Circula por el azul" lleva el azul a la derecha; los objetos de c2c3 usan el
+  lateral al reves, SUPUESTO alli).
+- E (Jennifer nodo 5 lista 1: 5/1, 5/0, 5/2): notas 2, 5 y 6 con el piloto; cap4/t5_azul.png. fps 39,16 / 39,17 con / sin.
+
+### HECHO: el fantasma de la CONTRARRELOJ
+- gh_rec / gh_rep (2 x 28,8 KB de BSS) al monton solo en la CONTRARRELOJ (gh_empieza: malloc de 57,6 KB al empezar la
+  carrera con un codigo de curso; gh_suelta al volver al menu o al empezar otro modo; si gh_hilo esta guardando en la VMU,
+  al acabar el hilo; gh_gen + 1 en cada suelta). El fichero de la VMU (GH_BUF = 12 + 28,8 KB) va al monton solo mientras
+  se lee (gh_empieza) o se guarda (gh_hilo), como en c2c3.
+- E (`-DPRUEBA_VARIANTE=7 -DPRUEBA_TA_CODIGO=0`): GOAL en PALM -> "guardado ORGH0100 en a1 (5948 bytes, 12 bloques) ...
+  releido igual"; con la misma VMU otro arranque: "FANTASMA: curso 0100, leido de la VMU (398 muestras, 52890 ms)";
+  697K libres en la carrera. cap4/fantasma/log_vmu.txt.
+
+### RAM
+- Arranque (nav3.sh, MODO_JUEGO=1, sin defines): 426K libres (379K tras el merge; 370K con 15 / 19 antes del fantasma),
+  "VOZ: VOCES.DAT, 35 muestras", sin "Out of memory". FRIO en camp_*, c2c_paso y carga_hilo. Ningun modulo de cada cuadro
+  a -Os.
+
+### SIN PORTAR (lo averiguado)
+- 16, minijuegos (clase 0x29f520, 0x1860 bytes): fase 1 0x2a0d08 reparte los registros de 0x2c del guion de +0x7c
+  ({+0x20 clase 0 aviso / 1 puerta, +0x24 simbolo o carriles, +0x26 / +0x28 secciones, +0x2a cuantos}, +0x80: relativo
+  al inicio) en la lista A (+0xc, +0x70 cuantos) y B (+0x8a4, +0x72), y el subtipo (tabla 0x4239f0) los prepara; cada paso
+  (0x423a10) por el subtipo. Subtipo 2 (el mas usado, 22): avisos con la voz 0x423c30[simbolo] (0x1a7..0x1ad) y puertas de
+  n carriles con un simbolo cada uno (el bueno al azar, 0x2a1ba0); al pasar la seccion de la puerta 0x29fb28 mira el carril
+  (fraccion de borde a borde, k / n < f < (k + 1) / n): bien, + 88 / puertas y el destello 2C0002; mal, efecto 0xd4. El
+  dibujo (0x2a0138) son sprites 3D (0x115870, como ha_spr3d) del banco 0x46: tablas 0x423ae0 (subtipo 0), 0x423b10 (1),
+  0x423b68 (2), 0x423af8...; hay que convertirlos a CAMPHUD.DAT. Las voces de los minijuegos y de casi todos los tipos
+  estan en los bancos HAM_MIS\*.PAK (tabla 0x352840, entradas 54..77: SOUND*, MEMORY, MATH, CARS, FOOD*, GHOST, DUCK,
+  GATES, CONEHIT...), que no estan en VOCESH.DAT (solo HC.PAK, PERH.pak y los HAM de etapa): sin ellas las voces de los
+  tipos del campeonato no suenan.
+- 11 (0x294a90), 9, 22: los coches de la peticion salen del registro de aparicion 0x1f20e8 con la tabla de 0x46 bytes de
+  +0x10 de los parametros (0x1f1a88) y 0x22dac0; el mismo que el INFARTO dejo sin portar (9 / 22). 13, 14, 20, 21, 23, 24:
+  sin empezar. El letrero 3D (0x232e60) y el rotulo del 20: sin empezar. -> HECHO 20, 21, el letrero y el rotulo del 20; 14
+  PARCIAL; 23 no lo pide ningun guion (ver "sexta tanda").
+
+## Integracion (rama integra): SP + musica + INFARTO 3 + campeonatos c2c4 (2026-11-27)
+
+- Fantasma de la CONTRARRELOJ: c2c4 quito el gh_buf fijo (la VMU se lee y se guarda en un malloc temporal) y el coche
+  de la grabacion de los modos "sp" guardaba alli su GHO1. Ahora el GHO1 va a `gh_gb` (memalign de 16 KB recortado a
+  20 B por triangulo con realloc), que suelta `gh_suelta_modelo()`: al cambiar de ficha, al soltar la grabacion
+  (`gh_suelta`, fuera de la CONTRARRELOJ) y cuando el fantasma pasa a ser el coche del jugador (`gh_meta`).
+- Voces: variante 2 (INFARTO) con el banco de la etapa (`infarto_voces()`, modos "sp"); variante 5 (campeonato)
+  con VOCESH.DAT tal cual, hasta que haya bancos HAM_MIS propios.
+- Verificado en Flycast con los datos juntos (lgdat2 + modos infarto, sp, musica, c2c dat/dat2; VOCESH.DAT el de sp):
+  nav3.sh (MODO_JUEGO por defecto) "VOZ: VOCES.DAT, 35 muestras", "RAMMAPA arranque: libre 425K", sin "Out of memory",
+  carrera de COAST 2 COAST; fantasma: ficha 0 graba (`guardado ORGH0100, 407 muestras, 54102 ms`), segundo arranque
+  con la misma VMU y la ficha 5: `coche de la grabacion ficha 0: GHO1 de COCHE00L.DAT, 182 triangulos`, 64..73
+  triangulos por cuadro, la forma gris delante del F430; RAM en carrera 688K. Datos 940,9 MB, 43,7 MB libres en el GD
+  clasico (el Mod sin medir).
+## COAST 2 COAST: campeonatos, quinta tanda (agente c2c5, 2026-11-27)
+
+Sobre "campeonatos, cuarta tanda (agente c2c4)" (rama c2c4, b7958da). Todo en Flycast (nivel E), no en la consola.
+Datos de prueba: $S/modos/c2c/dat3 (VOCESM.DAT nuevo y CAMP.DAT con 'C111' detras de lo de antes, que sale igual byte a
+byte; CAMPHUD.DAT y CAMPOBJ.DAT salen iguales que los de dat2), carpeta montada con h5/datos2.sh (lgdat2 + dat + dat_inf
++ dat2 + dat3); scripts en $S/modos/c2c/h5 (los de h4 para este worktree; gdi.sh con GD= para tener varios GDI a la
+vez; py/bancos.py lista la tabla 0x352840 con los id de cada banco, py/peor.py lo que pide cada etapa en el AICA).
+Capturas y registros en $S/modos/c2c/cap5.
+
+### HECHO: las voces de las peticiones (bancos HAM_MIS de 0x352840)
+
+Lo averiguado (SLES-53998):
+- El metodo de la etapa del gestor (0x22ac00, maquina de estados +0xe8): estado 0, por cada peticion de la lista el
+  switch 0x415280 (tipo - 1) da el banco 0x80nn de la tabla 0x352840 (las entradas 0x6c..0x96 y 0xa5 son HAM_MIS\...;
+  las "54..77" de la cuarta tanda son HAM_SR\ y HAM\ de las etapas): 1 MATCH, 2 DRIFT, 3 PASS, 4 COLLIDE, 5 ZONE, 6
+  CONEHIT, 7 COIN, 8 GATES, 9 ninguno, 10 NITRO, 11 HCARS (subtipo 0) / GHOST (1), 12 SLIP, 13 FOOD1..6 (rand % 6 a +8
+  de los parametros), 14 MTOTAL, 15 BALL, 16 por el subtipo (0x415300: 0 MEMORY, 1 ODD_ONE, 2 SOUND si la etapa solo
+  tiene esa peticion (0x22bd40 == 0x22bd60) y si no SOUND2..8 con rand % 7 (0x415320), 3 MATH, 4 ITEMS, 5 SHEEP, 6 CARS
+  con rand % 3 a +8), 17 HOLDLINE, 18 KEEPCONT (no estan en el disco en espanol; ningun guion los pide), 19 METEOR, 20
+  CUTLINE, 21 UFO, 22 HHORN, 23 DUCK, 24 PHOTO. Cada banco va al hueco 0x600 / 0x700 / 0x800 de 0x374180 si no lo lleva
+  ya otro (+0xf4) y 0x11ed40 los carga. Estado 1: +0xf0 = rand % 4 (0x22b148): la fila de las voces de la nota
+  (0x2a65a8) es al azar en cada etapa (la segunda tanda la tenia por PROBABLE = 46C520: corregido en camp_etapa).
+  Estado 2: el banco RANK1..4 de 0x415268[+0xf0] en el hueco 4 (las voces de la nota 0xb3..0xc7 y 0x151..0x153, que
+  tampoco sonaban).
+- La variante 5 carga al empezar COMMON.pak (hueco 1) y PERH.pak (hueco 9) (0x1b7f74; el INFARTO: HC.PAK y PERH).
+  COMMON es HC.PAK sin 0x14a / 0x14b / 0x163 y con 0xc6..0xcb (0x8c6, la voz del derrape del tipo 2, no sonaba).
+- Las tablas de algunos bancos (RANK3, ITEMS, PERR) van detras de un relleno de ceros hasta el siguiente multiplo de 2048
+  (tools/conv_camp.py `tablas_banco`; conv_sonido.banco_tablas no lo sabe: PERR.pak sigue SIN PORTAR en VOCESC.DAT).
+- Los id de voz son de 10 bits (UFO.pak 0x23f): sfx.c busca los de la etapa con 10 (VOCESH.DAT sigue con 9).
+
+Conversion (tools/conv_camp.py `voces_mision`, tambien solo con `--solo-voces`; regenera.py paso camp): VOCESM.DAT
+(1,9 MB en el disco, 47 bancos: COMMON 6 voces 34 KB, RANK 37..43 KB, los de las peticiones de 5 a 138 KB) y la tabla
+(tipo, subtipo) -> (banco, cuantos al azar). Fuera (DESVIACION): tres muestras de mas de 65535 muestras que un canal del
+AICA no toca de una vez: PASS 0xd8 (el efecto del convoy del 3/1, 3,4 s), NITRO 0x17d (6,7 s) y DUCK 0x1e1 (5,8 s).
+
+Codigo: comun/vozmis.c (-Os: solo corre al cambiar de etapa) y el enganche `camp_bancos` (campeonato.c lo llama en
+camp_etapa con las peticiones de la lista; main.c `camp_bancos_` abre VOCESM.DAT la primera vez: ~2 KB de indice en el
+monton durante el campeonato). Por etapa: suelta el bloque anterior del AICA, pide uno con COMMON + RANK + los bancos de
+las peticiones sin repetir, y un hilo (thd_create) lo lee de 32 KB en 32 KB (malloc solo mientras lee) y lo sube con
+spu_memload; al acabar, sfx_voz_extra pasa las filas a sfx.c, que las busca antes que las de VOCESH.DAT (por el canal de
+voz y por el de efectos: camp_se tambien). La variante 5 sigue con VOCESH.DAT (sfx_voces_juego), sin infarto_voces().
+
+AICA: con VOCESH.DAT quedan ~294 KB libres (824 KB con VOCES.DAT; VOCESH ocupa 740 KB, VOCES 210 KB); lo que mas pide
+una etapa de los tres arboles con el peor azar (py/peor.py) son 280 KB (tres 13/0 con FOOD distintos); las etapas de
+las pruebas piden 83..123 KB. Si no cabe: "VOZM: sin sitio" y esa etapa sin esas voces (no se ha visto).
+
+E (Flycast; el Flycast de las pruebas va con audio:backend=null: verificado por el registro "VOZ 0x... (peticion)", no
+escuchado; PROBABLE que el volumen sea el de la consola, la tabla SE del IRX como en VOCESH.DAT):
+- Jennifer entera hasta la meta (`-DPRUEBA_AUTO -DPRUEBA_CAMP=0 -DPRUEBA_SIN_TIEMPO`, cap5/voces/jennifer_goal.txt):
+  cinco etapas, cinco juegos de bancos (p. ej. "VOZM: etapa con 5 bancos (COMMON.pak RANK1.pak GATES.pak ZONE.pak
+  COIN.pak), 20 voces, 123 KB en el AICA" y "20 voces de la etapa en el AICA" poco despues), 43 voces de peticion
+  tocadas: anuncios (0x197 SLIP, 0x177 MATCH, 0x195 GATES), animo de COMMON (0xc6..0xca), nota de RANK (0xb8, 0xbe,
+  0x152) y de los tipos (0xf1); "CURSO: GOAL en IMPE", sin "Out of memory".
+- Clarissa BEAC (11/0 y 3/0): HCARS + PASS y la voz 0x1a6 del anuncio del 11 (cap5/t11c/flycast.txt).
+- Sin probar: los bancos al azar (FOOD, SOUND2..8, CARS) en una carrera (ningun piloto paso por 13 / 16 en esta tanda).
+
+### HECHO (SIMPLIFICADO): tipo 11, chocar con los coches de la peticion (subtipos 0 y 1)
+
+Lo averiguado: el control 0x294a90 (vtable 0x422ec0 +0x24). Fase 1: copia a +0x10 de los parametros la tabla de
+aparicion de 0x46 bytes que da 0x1f1a88, pone en +0x1e..+0x2a los 7 modelos (+0x64, o 0x96 con el subtipo 0 / 0xa5 con
+el 1 si +0x64 == -1) y 0x1f20e8(+0x10) la deja en [0x5d5fd8], que 0x1f1a88 (el generador del trafico, tabla 0x5d5e78
+de 5 x 0x46) usa mientras no sea 0; con el subtipo 1 prepara el sprite 2C0006 (0x115ae0); +0x74 = 80 / p78; 0x22dac0
+llena 24 enteros con rand % 0x19 (o % p66). Fase 4: por las plazas 1..23 del trafico (0x556f28) con [0x55cf38 + 8 + i] &
+3 == 2: con el coche 7 secciones por delante del jugador y 60 pasos desde el anterior, un efecto de 0x422e00 (0xd1..0xd3,
+de GHOST.pak; CAMP.DAT 'C111'); golpeado (+0xb6c y +0x2f4 == 0), medidor + p74 y +0x10 + 1. Fase 5: 0x1f20e8(0); con
+nota 6, +0x10 > p78 ? (< p7c ? (n - p78) / (p7c - p78) x 70 : (n - p7c) x 5 + 70) : 0. El subtipo 2 (0x295298) no lo pide
+ningun guion.
+
+Portado (comun/campeonato.c `camp_autos` / `camp_spr3d`; main.c traf_aparece y ha_spr3d en la variante 5):
+- SIMPLIFICADO / DESVIACION: sin 0x1f1a88 (el generador con la tabla de la peticion): los coches del trafico que
+  aparecen por delante del jugador entre el anuncio y el final son los de la peticion (marca HA_CAMP de la plaza), con
+  los modelos del trafico (0x96 / 0xa5 no son modelos que tenga la DC; no se ha averiguado a que coche corresponden, asi
+  que tampoco se usa RCmm.DAT). El golpe: b6c && !n2f4, una vez por coche (PROBABLE, como el 20 del INFARTO).
+- Dibujo: 11/1 el 2C0006 de HAHUD.DAT (HA_S06) sobre el coche, como el 0x1b2190 del INFARTO; 11/0 (DESVIACION: sin su
+  modelo) el icono del corazon del medidor (HA_C0) a escala 2 sobre el coche, a menos de 10 secciones. Un quad por coche
+  (no son triangulos de la escena).
+- E (`-DPRUEBA_AUTO -DPRUEBA_CAMP=1 -DPRUEBA_SIN_TIEMPO -DPRUEBA_C11`; PRUEBA_C11 cuenta como golpe pasar por la seccion
+  del coche, porque el piloto no apunta a ellos): BEAC 11/0 (90..290): "coche de la peticion golpeado (1 de 10), medidor
+  8" ... 4 de 10, "peticion 11 hecha: 32 - 0, nota 3"; el corazon sobre un coche de la peticion en cap5/t11c/z42.png
+  (ampliacion de r_042). NO verificado: golpes de verdad (sin PRUEBA_C11) ni el 11/1 en pantalla.
+
+### Medidas
+
+- Tipo 11 (BEAC 11/0, la misma pasada con y sin los sprites `-DDIAG_SIN_C11`, DIAG_MS, 21 muestras de 30 cuadros entre
+  el anuncio y el final; cap5/medidas/c11_con.txt y c11_sin.txt): 38,69 frente a 38,89 fps (-0,20), dibujo 19,68 frente
+  a 19,59 ms, 17822 frente a 17818 triangulos de media (+4: un quad por coche marcado, 1..2 a la vez). Los coches son los
+  del trafico (ninguno de mas).
+- Voces: nada por cuadro; al cambiar de etapa un hilo lee 83..123 KB (las pruebas) del GD; sin tirones apreciables en
+  Flycast (no medido aparte).
+- RAM al arrancar (nav3.sh, MODO_JUEGO=1, sin defines, datos3; cap5/nav3_final.txt): "RAMMAPA arranque: libre 426K"
+  (igual que c2c4), "VOZ: VOCES.DAT, 35 muestras", sin "Out of memory". El programa crece 4,3 KB (2 869 688 -> 2 874 128
+  de text + data + bss) sin pasar de escalon de 8 KB (queda a ~1,1 KB del siguiente); vozmis.o y lo nuevo de
+  campeonato.c a -Os, sfx.c sigue a -O2 (corre en cada cuadro). En la carrera del campeonato: ~2 KB del indice de
+  VOCESM.DAT y las filas de la etapa (< 2 KB); 32 KB mas solo mientras el hilo lee.
+
+### SIN PORTAR (lo averiguado en esta tanda)
+
+- 0x1f1a88 / 0x1f20e8 (el generador del trafico con la tabla de la peticion): el 11 va SIMPLIFICADO (arriba); 13 y 22
+  lo necesitan de verdad (los coches que se acercan / a los que se toca la bocina). Tampoco el 9 / 22 del INFARTO
+  (0x1a9e08). Lo que falta: el formato de los 0x46 bytes (hay 5 en 0x5d5e78, de 0x158 bytes cada 5; +0xe..+0x1c los 7
+  modelos) y que son los modelos 0x96 / 0xa5.
+- 22 la bocina (0x29b3d0, clase de 0x38): fase 1 0x29b798 (con +0x78 == 1) y por la clase +0x14 (vtable de 0x29b330);
+  fase 3 0x29bfc0(+0x7c) y [+0x1ec] / [+0x1e8] del gestor; fase 4 +0x70 += el avance y 0x29c058; fase 5 el efecto 0x1bc
+  (HHORN.pak, que ya suena con VOCESM.DAT) y con nota 6 30 x min(1, (medidor - pen - 80) / (80 / 0,9 - 80)) + 40 x
+  0x22f090.
+- 13 (FOOD: el azar del banco ya queda en pet_t.rnd, el +8 que lee el tipo), 14, 16 (los minijuegos: sus bancos de voz
+  ya se cargan), 20, 21, 23, 24; el rotulo propio del 20; el letrero 3D de inicio / fin (0x232e60): sin empezar en esta
+  tanda (el tiempo se fue en las voces y el 11).
+- (c2c5 en integra) Jennifer entera hasta la meta con los datos juntos (VOCESH.DAT de sp, 511 KB en el AICA, y
+  VOCESM.DAT; `-DPRUEBA_AUTO -DPRUEBA_CAMP=0 -DPRUEBA_SIN_TIEMPO`): las 5 etapas cargan sus bancos (81..123 KB),
+  43 voces de peticion tocadas, ningun "VOZM: sin sitio", "CURSO: GOAL en IMPE", sin "Out of memory"; al arrancar 444K
+  libres. GD clasico 41,9 MB libres; Mod (lgmod2 + lo mismo) 15,6 MB libres, sin los mipmaps.
+
+## Rev 2.9.9.d: arreglo de FPS (culling en bucles cortos, sin quitar nada) (2026-11-27)
+
+Pedido: subir los fps (sobre todo METR, CLOU y PALM) y bajar los cuadros tarde sin perder nada en pantalla. Todo en el
+Flycast de Linux, una sola instancia; nada en la consola ni en Android. Flycast cuenta instrucciones (1 ciclo, emparejadas
+si son de unidades distintas, +2 por cada uno de los tres primeros accesos a memoria de cada bloque) y no fallos de cache.
+
+PERFIL (`-DDIAG_PERFIL`, METR, cuadro congelado 1500): dibuja_etapa 21-30 %, dibuja_indices (coche y trafico) 11 %,
+robot_dibuja 9 %, nodos_visibles 8 %, coche_entorno 3 %. En dibuja_etapa el envio de vertices es un tercio; el resto es
+la prueba de cada malla: el ojo, los ejes y las constantes (19 floats) no cabian en los registros y se releian de la pila.
+
+HECHO (`demo/main.c`, cada uno con su -D; no cambian que se dibuja)
+- `ETAPA_CULL` (1): `etapa_mallas_vistas` elige en un bucle corto las mallas de un tramo de nodo que pasan la PVS y la
+  vista, 32 por llamada; el centro va a la pantalla con un ftrv de la vista ya cargada (X = 320 W + fx xv,
+  Y = 240 W - fx yv, W = zv) y las pruebas de siempre multiplicadas por fx. No en los carteles, ni en la etapa siguiente
+  antes de la entrada o creciendo (alli la vista va escalada), ni pasado el tope de vertices (ahi sigue el camino de
+  siempre desde la malla siguiente, lo mismo que hacia).
+- `NODOS_CULL` (1): `nodos_candidatos` hace las tres primeras pruebas de cada nodo de nodos_visibles (lejos, detras,
+  lado) en un bucle corto, con el mismo ftrv y las mismas marcas (FF, POPR); el bucle de siempre solo ve los que pasan.
+- `FOCOS_LOTE` (1): las mallas dibujadas se apuntan y `focos_lote` las mira para los focos al final, en el mismo orden.
+- `demo/Makefile`: `comun/vmuesc.o` con -Os (como en la rama de integracion): devuelve la RAM del codigo nuevo.
+- Medida: `-DDIAG_CULL_CMP` hace en cada cuadro las pruebas de siempre al lado de las nuevas y escribe "CULLCMP:".
+
+PROBADO Y QUITADO
+- Dos vertices por vuelta en los bucles de la SQ (sq_vtx, sq_vtx_ofs, sq_pt): METR congelado coche 2,27 -> 2,49 ms,
+  etapa 9,30 -> 9,71 (peor en Flycast).
+- La primera version de ETAPA_CULL, una llamada por malla visible: etapa 9,30 -> 9,50 (la entrada y salida de la
+  funcion costaba lo que ahorraba).
+- Los bucles por vertice de robot_dibuja en funciones aparte: 2,49 -> 2,51 ms (nada).
+
+MEDIDA 1: cuadro congelado (`-DDIAG_CONGELA=1500 -DDIAG_FALTA`), ms (mediana); imagen comparada pixel a pixel con la base
+
+| Etapa | dib base | dib nuevo | vis | etapa | pixeles distintos |
+|---|---|---|---|---|---|
+| METR | 23,56 | 22,21 | 3,17 -> 2,36 | 9,30 -> 8,76 | 0 |
+| PALM | 13,29 | 12,42 | 2,25 -> 1,55 | 2,20 -> 2,06 | 0 |
+| CLOU | 14,25 | 13,49 | 2,37 -> 1,80 | 3,46 -> 3,31 | 0 |
+
+(PALM y CLOU sin FOCOS_LOTE.) Por separado (METR): ETAPA_CULL etapa 9,30 -> 8,84; NODOS_CULL vis 3,23 -> 2,36;
+FOCOS_LOTE etapa 8,84 -> 8,76. Las mismas mallas recorridas y dibujadas (linea MAL) y la misma lista de focos (FOCOSMS).
+
+MEDIDA 2: `-DDIAG_CULL_CMP` con el piloto (METR, CLOU, SNOW -> IMPE, INDU -> FORE; 140 s): de 30,4 millones de mallas
+miradas, 2 distintas en la vista y 1 en seguro (el redondeo de una esfera que roza el borde de la vista); de 20,1
+millones de nodos, 0 distintos.
+
+MEDIDA 3: A/B en las 15 etapas. A = 4b1c25b, B = ca8c459 (ETAPA_CULL + NODOS_CULL; sin FOCOS_LOTE, que es de despues).
+`-DPRUEBA_AUTO -DPRUEBA_NODO=n -DPRUEBA_SIN_TIEMPO -DDIAG_MS -DDIAG_POPPING`, 140 s de piloto, paso 10, una sola
+instancia (la 2.9.9.c se midio con tres a la vez: las cifras de A no son las de su tabla). Sin -DDIAG_FALTA: la columna
+de grandes que faltan queda vacia (no dio tiempo a la segunda pasada).
+
+| Etapa | fps A | fps B | B-A | tarde A / B | cpu ms A / B | salto A / B | lejano A / B | 8 px+ A / B | 32 px+ A / B | grandes que faltan A / B |
+|---|---|---|---|---|---|---|---|---|---|---|
+| PALM | 37,30 | 37,99 | +0,69 | 146 / 93 | 24,00 / 23,09 | 7,86 / 6,77 | 3800 / 3800 | 8,2 / 8,8 | 0,8 / 0,8 | - / - |
+| LAKE | 38,73 | 38,75 | +0,02 | 72 / 71 | 21,65 / 21,13 | 3,93 / 2,76 | 3800 / 3800 | 2,3 / 2,5 | 0,1 / 0,1 | - / - |
+| ALPI | 38,99 | 38,99 | +0,00 | 53 / 55 | 20,33 / 20,00 | 0,56 / 0,27 | 3800 / 3800 | 6,6 / 6,5 | 1,2 / 1,1 | - / - |
+| CAST | 38,71 | 38,99 | +0,28 | 83 / 53 | 21,96 / 20,89 | 3,20 / 2,24 | 3800 / 3800 | 13,1 / 14,7 | 2,4 / 2,6 | - / - |
+| FORE | 39,00 | 39,41 | +0,41 | 58 / 20 | 20,05 / 19,37 | 0,29 / 0,30 | 3800 / 3800 | 8,3 / 11,9 | 1,6 / 2,3 | - / - |
+| DESE | 38,91 | 39,19 | +0,28 | 37 / 31 | 20,10 / 19,01 | 1,22 / 1,18 | 3800 / 3800 | 6,8 / 5,7 | 2,5 / 2,2 | - / - |
+| CLOU | 36,00 | 36,61 | +0,61 | 237 / 208 | 25,35 / 24,61 | 7,61 / 6,91 | 3800 / 3800 | 18,9 / 18,4 | 1,8 / 1,8 | - / - |
+| INDU | 38,29 | 38,70 | +0,41 | 53 / 31 | 23,01 / 22,15 | 4,27 / 2,72 | 3800 / 3800 | 13,6 / 14,4 | 5,1 / 5,1 | - / - |
+| SNOW | 39,36 | 38,91 | -0,45 | 25 / 64 | 20,17 / 19,97 | 0,59 / 0,29 | 3800 / 3800 | 3,8 / 9,2 | 0,9 / 1,3 | - / - |
+| GHOS | 37,60 | 37,74 | +0,14 | 143 / 126 | 23,76 / 23,33 | 6,99 / 6,55 | 3800 / 3800 | 11,9 / 12,4 | 2,1 / 2,2 | - / - |
+| TULI | 38,52 | 38,74 | +0,22 | 69 / 54 | 22,20 / 21,72 | 5,78 / 4,21 | 3598 / 3694 | 19,6 / 21,2 | 2,6 / 2,7 | - / - |
+| METR | 35,32 | 35,76 | +0,44 | 221 / 207 | 27,00 / 26,25 | 6,84 / 6,58 | 3800 / 3800 | 12,2 / 12,2 | 3,2 / 3,3 | - / - |
+| RUIN | 39,28 | 39,31 | +0,03 | 37 / 31 | 19,00 / 18,77 | 0,81 / 0,29 | 3576 / 3573 | 8,7 / 9,1 | 1,2 / 1,3 | - / - |
+| IMPE | 38,92 | 39,01 | +0,09 | 43 / 28 | 21,46 / 20,77 | 4,33 / 3,09 | 3717 / 3800 | 15,8 / 17,5 | 3,4 / 2,8 | - / - |
+| CAPE | 39,13 | 39,28 | +0,15 | 28 / 24 | 20,20 / 18,96 | 1,34 / 0,31 | 3800 / 3800 | 12,6 / 11,8 | 4,0 / 3,7 | - / - |
+| **Media / suma (15)** | 38,27 | 38,49 | +0,22 | 1305 / 1096 | | 3,71 / 2,96 | 3766 / 3778 | 162,4 / 176,3 | 32,9 / 33,3 | 0,00 / 0,00 |
+
+tiradas con 'VOZ: VOCES.DAT, 35 muestras': 30 de 30; lineas 'Out of memory': 0
+
+Saltos por s sumados en las 15 (apariciones + / desapariciones -, 8 px / 32 px), por razon:
+
+| razon | A +8/32 -8/32 | B +8/32 -8/32 |
+|---|---|---|
+| lado | +6.3/1.7 -0.0/0.0 | +5.4/0.8 -0.0/0.0 |
+| lod | +0.1/0.0 -0.0/0.0 | +0.1/0.0 -0.0/0.0 |
+| pvs | +104.3/27.2 -18.3/1.1 | +109.8/28.3 -20.0/1.3 |
+| rama | +2.7/1.0 -0.0/0.0 | +2.6/1.1 -0.0/0.0 |
+| tope | +19.8/1.1 -10.7/0.3 | +23.7/1.2 -13.6/0.4 |
+| tramo | +0.3/0.1 -0.0/0.0 | +1.3/0.6 -0.0/0.0 |
+
+- fps: +0,22 de media; las peores suben (PALM +0,69, CLOU +0,61, METR +0,44); SNOW -0,45 (25 -> 64 cuadros tarde).
+  Cuadros tarde 1305 -> 1096 (-16 %). El nivel del reparto baja (3,71 -> 2,96): se recorta menos.
+- Saltos de 8 px: 162,4 -> 176,3 por s (+8,5 %), sobre todo "pvs" (+5,5: FORE, IMPE, CAST) y "tope" (+3,9: SNOW).
+  SUPUESTO: es la variacion entre tiradas (el piloto no hace dos veces la misma carrera; en la 2.9.8 dos tiradas iguales
+  daban hasta 9 por s de diferencia): el cuadro congelado sale identico pixel a pixel con las mismas mallas, y la
+  comparacion en cada cuadro (MEDIDA 2) no encuentra diferencias que cambien lo que se dibuja. No se ha repetido la
+  tanda para separarlo del ruido.
+- RAM (compilacion normal, tools/prueba/nav3.sh): libre al arrancar 352K en la base y 352K con todo (sin el -Os de
+  vmuesc.o, 344K). "VOZ: VOCES.DAT, 35 muestras" en las 30 tiradas y en las nav3, 0 "Out of memory", guardado en la VMU.
+
+Variante -O2 de la rama de integracion (8e2a856, pedida): mision.o, rival.o, campeonato.o, infarto.o y haobj.o fuera de
+la linea -Os. Codigo 809024 -> 822296 bytes. RAM libre al arrancar (nav3): 416K -> 408K. C2C (`-DPRUEBA_MISION=0`, BEAC,
+140 s): 37,52 -> 37,51 fps, 122 -> 123 tarde. INFARTO (`-DPRUEBA_VARIANTE=2`, PALM): 37,26 -> 37,13 fps. Sin ganancia
+medible en Flycast; VOZ 35 muestras y 0 Out of memory en las dos. En rev-1.1 (4b1c25b) esos ficheros ya van con -O2
+(solo menu.o va con -Os) y haobj.o no existe.
+
+NO HECHO / QUEDA
+- La pareja (2,5 ms por cuadro para 2898 vertices) y el coche (2,3 ms): sin tocar (lo probado no ganaba).
+- Cuadros tarde en cambios de seccion y cargas, salto_q, tiras unidas con degenerados: sin estudiar.
+- Store queues y prefetch: sin cambios.
+- Consola real y Android: sin medir.
+
+Ficheros: modos/fps/ del directorio de trabajo (res/ las consolas, cap/ las comparaciones, sh/ y py/).
+  tanda (el tiempo se fue en las voces y el 11). -> HECHO 20, 21, el rotulo del 20 y el letrero; 14 PARCIAL (ver "sexta
+  tanda").
+
+## COAST 2 COAST: campeonatos, sexta tanda (agente c2c6, 2026-11-27)
+
+Sobre "campeonatos, quinta tanda (agente c2c5)" (7e5b270). Todo en Flycast (nivel E), no en la consola. Datos de prueba:
+$S/modos/c2c/dat4/CAMP.DAT (lo de antes igual byte a byte salvo el rotulo de las 9 peticiones del tipo 20, y detras 'LET1'
+y 'C141'; CAMPHUD.DAT, CAMPOBJ.DAT y VOCESM.DAT salen iguales que los de dat2 / dat3), carpeta montada con h6/datos2.sh
+(lgdat2 + dat + dat_inf + dat2 + dat3 + dat4 en modos/c2c/datos4); scripts en $S/modos/c2c/h6 (los de h5 para este
+worktree; corre.sh: compila con los defines, GDI propio, auto.sh y copia registro y capturas a cap6/<nombre>; correw.sh lo
+mismo con otro arbol, para la base c2c5). Capturas y registros en $S/modos/c2c/cap6.
+
+### Lo que piden los guiones (CAMP.DAT, h6/donde.py)
+- 14: 7 peticiones (Holly); 20: 9 (Clarissa); 21: 8 (Clarissa); 24: 6 (Holly); 23: NINGUNA (ningun guion de los tres
+  arboles la pide: no se porta). 13: 10 y 22: 7 (Holly).
+
+### HECHO: tipo 20, cruzar la linea entre dos coches (0x296120) y su rotulo
+- Lo averiguado: la clase (0x474 bytes) lleva 20 pares de 0x38 en +0xc {plaza a, plaza b (0x19a ninguna), punto a + 1 m,
+  punto b + 1 m, ...}. Fase 1: como el 11 (0x1f1a88 / 0x1f20e8 con los modelos +0x64 o 0x104; 0x22dac0); +0x70 de los
+  parametros = 0. Fases 2..4 (0x296560): suelta los pares con un coche que falta; empareja los coches de la peticion
+  ([0x55cf38 + 8 + i] & 3 == 2) de la cadena +0x314 del jugador (< 250 m) dentro de [inicio, fin] con el mas cercano a
+  menos de 6 secciones que no este emparejado ni cruzado (+C5C 0xc000 << 33). Fase 4 (0x296f58): la linea en el marco del
+  jugador contra su caja (0x1978d8 con +0x338, como el 9 del INFARTO); cruzada: 0x296cc0 la suelta, movimiento 0x6003d
+  (coche 9) o 0x6003e / 0x6003f (rand < 0,5), +0x70 + 1 y el medidor + 80 / p74 (0x374190 + 0x18). Fase 5: suelta los 20 y
+  0x1f20e8(0); nota 6: (+0x50 == 0 ? 40 : 0) + min(1, (n - p74) / (p78 - p74)) x 30 si n > p74, + (n - p78) x 5 si n > p78.
+  Dibujo (0x296da0, fases 2..4): los modelos 0x57002f y 0x57002a en los pares (SIN PORTAR, ver abajo).
+- El rotulo: el switch 0x4155b0 lleva el 20 a 0x22fe08, que es 2B0039 ("¡Cruza la linea!" con los dos coches, el HA_T17 de
+  HAHUD.DAT; con a2 = 0, el del banco 0x2B). tools/conv_camp.py paraba alli el interprete como si fuera el caso 0 (sin
+  rotulo): ya no, y las 9 peticiones del 20 salen con su rotulo.
+- Portado: comun/campeonato.c (case 20, camp_autos, camp_lineas) con los pares del INFARTO (comun/haobj.c haobj_pares /
+  haobj_pares_cruza, con la mascara nueva haobj_pares_mascara(HA_CAMP): solo los coches de la peticion y sin emparejar uno
+  ya emparejado). DESVIACION (sin 0x1f1a88): como el 11, los coches del trafico que aparecen por delante desde el anuncio son
+  los de la peticion, y a cada uno main.c le abre otro al lado (`camp_pares_pide`: dos carriles mas alla si los hay, para
+  dejar uno libre entre los dos); 10 pares como mucho (los del INFARTO), con 80 m en vez de 6 secciones.
+- Dibujo (DESVIACION, sin los modelos 0x57002f / 0x57002a): una cinta translucida amarilla de 0,3 m entre los dos coches
+  (+1 m), 2 triangulos por par (main.c camp_lineas_dibuja).
+- E (Clarissa nodo 4 lista 1: 20/0 90..240, 21/0 348..490, 20/0 565..640; `-DPRUEBA_AUTO -DPRUEBA_CAMP=1
+  -DPRUEBA_CAMP_NODO=4 -DPRUEBA_CAMP_LISTA=1 -DPRUEBA_SIN_TIEMPO`): el rotulo "¡Cruza la linea!" (cap6/t20d/mos.png), los
+  pares (registro "HAOBJ: par 0: plazas 4 y 3 a 10.4 m") y la linea amarilla entre dos coches (cap6/t20d/z42.png). El
+  piloto no pasa entre ellos: con `-DPRUEBA_C20` (un par a 3 secciones cuenta como cruzado) "linea cruzada (1 de 6),
+  medidor 13", la reaccion 0x6003e y la nota 1 (cap6/t2021p). NO verificado: un cruce de verdad conducido.
+
+### HECHO (SIMPLIFICADO): tipo 21, los OVNIs (0x292840)
+- Lo averiguado: fase 1 como el 11 con los modelos +0x64 o 0xb4 y 0x22dac0(10); fase 3 el sonido 0x1d8, fase 5 0x81d8 (lo
+  para). Fase 4: +0x70 += el avance; con mas de 100 km/h, dentro de la carretera (0x2325a0(0, 1)) y sin OVNI encima (+0x18
+  == 0) el medidor + avance x 80 / (largo x 0,85) y cada 0xb4 pasos la voz (0x2a6240 o la de 0x422c70 alternando, 0x3b5520 /
+  0x3b5522). Fases 2 y 4, 0x292d28: por los coches de la peticion con +0xd14 == 4 y sin +C5C 0x8000 el toque 0x1d3a10 (radio
+  4); tocado: +0x18 = el coche, efecto 0x23f (UFO.pak), 0x2052f8 y el movimiento 0x60048; despues 0x1f pasos que lo acerca
+  (+0xd18 del jugador), 50 de giro (+0xc, angulo al azar) en los que cada 10 la penalizacion + 3, y lo suelta (+C5C 0x8000 y
+  +0xb64 = 0x3c). Nota 6: (sin roces, ruedas fuera ni muro 30) + 40 x 0x22f090.
+- Portado (case 21 y camp_autos): el medidor y el bono como el original; el toque a 5 m del coche (PROBABLE) o al
+  golpearlo; la penalizacion de 3 cada 10 pasos en los 30 ultimos (3 veces), la voz 0x23f, la reaccion 0x60048 y camp_golpe
+  (v x 0,9) al empezar. DESVIACION: el jugador no se acerca ni gira con el OVNI; sin el sonido continuo 0x1d8; sin el modelo
+  del OVNI (0xb4: no esta en la DC), los coches de la peticion con el sprite 2C0006 encima (el de 11/1, HA_S06).
+- E (la misma etapa): "peticion 21 hecha: 94 - 0, nota 6, 80 + 90 corazones" (con c2c5, nota 0). NO verificado: el toque
+  (ni con `-DPRUEBA_C21`, que lo da a 8 secciones: los coches de la peticion van por delante y el piloto no los alcanza).
+
+### PARCIAL: tipo 14, la suma (0x29ccb8)
+- Lo averiguado: fase 1 +0x70 = +0x72 = 0 y 0x29d410: los coches de la lista +0x5c de los parametros (registros de 0x14
+  {+8 s16 seccion desde el inicio, +0xa s8 carril, +0xc = 3, +0x10 el valor}, 0x298268 los cuenta hasta uno negativo, 100
+  como mucho); valor: con rand < 0,2 uno de 0x3b55d0 + 0x28 x nivel entre los 0x3b55c0[nivel] primeros (negativos: -10,
+  -5...), si no de 0x3b5548 / 0x3b5538 (5, 10; 2..10...); nivel = +0x74 (byte) de los parametros; objetivo +0x70: por rondas
+  (hasta 10) cada valor con 0,7 (positivo) / 0,4 (negativo), hasta pasar de la suma de todos / 8. Fase 4: por los coches con
+  +0xd14 == 3 el toque 0x1d3a10 (radio 3, o 4 si |valor| >= 10): +0x72 += valor (no baja de 0), medidor = (objetivo -
+  |objetivo - suma|) / objetivo x 80 x 1,15, +0x3d78 / +0x3d74 (mas cerca / mas lejos) y 0x232290 (el HUD); el que se queda
+  atras sale (0x19c990). Nota 6: (sin ruedas fuera ni muro 30) + 40 x 0x22f090. HUD 0x231fe0 (objetivo) / 0x232290 (suma).
+- tools/conv_camp.py: 'C141' (las tablas y los coches de las 7 peticiones: 68, 20, 25, 32, 15, 27 y 26).
+- Portado: el valor de cada coche y el objetivo como 0x29d410, el toque (radio + 1,5 m, PROBABLE), la suma, el medidor y el
+  bono; main.c pone los coches de la lista 40 secciones antes de la suya en su carril, con el modelo de un coche del trafico
+  (DESVIACION: no se sabe que modelo y velocidad les da el original; aqui los del trafico). DESVIACION: el numero sobre el
+  coche con las cifras del HUD (rojo el negativo, sin signo) y la suma y el objetivo bajo el contador de corazones, sin el
+  panel del original; el nivel de un guion con basura en +0x74 (0x87, Las Vegas) se topa a 2.
+- E (Holly nodo 2 lista 0: 16/0, 14/0 380..590, `-DPRUEBA_CAMP=2 -DPRUEBA_CAMP_NODO=2 -DPRUEBA_CAMP_LISTA=0
+  -DPRUEBA_C14`, que da por tocados la mitad de los coches a 1 seccion): "suma: 32 coches, nivel 0, objetivo 155", los 23
+  primeros puestos en sus secciones y carriles, "suma 10 (+10) de 155, medidor 5", el rotulo "¡Consigue el total!" y el
+  objetivo en pantalla (cap6/t14b/mos.png). NO verificado: los coches y sus numeros en pantalla (el registro dice que se
+  dibujan a 25..75 m, pero en las capturas de LASV no se ve ningun coche en la carretera: PENDIENTE).
+
+### HECHO: el letrero 3D de inicio / fin de la peticion (0x232e60)
+- Lo averiguado: el dibujo del gestor (0x22a2b0) por cada peticion de la lista de la etapa: en su inicio el modelo de
+  0x1a7c80 y en su fin el de 0x1a7cb0 (salvo los minijuegos, tipo 0x10), mientras la seccion del jugador esta entre la del
+  letrero - 100 y + 2; 0x232e60 lo pone en el centro de la seccion (0x22c500) + 4 m + [+0x18c] (con 0x22b880), con escala
+  (1, 1), si el jugador esta entre - 50 y + 2 (y en la etapa siguiente si cae alli: 0x176e20 / 0x176e48, SIN PORTAR). Son
+  los mismos modelos por idioma que las marcas del INFARTO (0x570035 "INICIO" y 0x570024 en espanol).
+- CAMP.DAT 'LET1' (los dos registros, conv_infarto.marcas); comun/campeonato.c `letrero` con haobj_marcas (el vaiven del
+  INFARTO en vez de [+0x18c]: PROBABLE) y el punto de main.c (ha_punto, `camp_punto`). 2 triangulos por letrero.
+- E: "HAOBJ: 1 marcas (registros 0x35 / 0x0)" al anunciar cada peticion y 0x24 al acabar; INICIO sobre la carretera
+  (cap6/t14b/mos.png, cap6/t20d/mos.png) y FIN (cap6/t14/mos2.png). PROBABLE: la posicion (en una curva de NIAG sale al
+  lado de la carretera, como en el INFARTO).
+
+### Medidas (Flycast, DIAG_MS, la misma pasada con y sin `-DDIAG_SIN_C20 -DDIAG_SIN_C11 -DDIAG_SIN_LET`; cap6/m_con, m_sin)
+| elemento | tramo | fps con / sin | triangulos de la escena con / sin | suyos (media / max por cuadro) |
+|---|---|---|---|---|
+| 20, lineas | 20/0 90..240, 19 muestras | 39,76 / 39,76 | 16394 / 16388 | 3,25 / 4 |
+| 21, sprites | 21/0 348..490, 21 muestras | 38,57 / 38,52 | 17434 / 17430 | quads 2D (fuera de la escena) |
+| letreros | la etapa entera, 113 muestras | 38,66 / 38,66 | 15872 / 15865 | 2 / 2 |
+| 14, numeros | sin medir (cifras 2D del HUD; los coches de la lista ocupan plazas del trafico, ninguno de mas) | | | |
+
+### RAM
+- Arranque (h6/nav3.sh, MODO_JUEGO=1, sin defines, compilado limpio, datos4; cap6/nav3_final.txt): "RAMMAPA arranque:
+  libre 418K" (c2c5: 426K), "VOZ: VOCES.DAT, 35 muestras", sin "Out of memory". El programa crece 5,3 KB (2 874 128 ->
+  2 879 452 de text + data + bss) y pasa un escalon de 8 KB del .init: de ahi los 8 KB. Nada nuevo en el monton al arrancar
+  ni en la carrera (los pares y el 14 van en el estado del campeonato, ~0,3 KB mas del monton solo en el campeonato; 'C141'
+  + 'LET1' 1,2 KB de CAMP.DAT). Ningun modulo de cada cuadro a -Os (campeonato.o ya lo estaba).
+- Pruebas nuevas (solo con defines): PRUEBA_C20 (un par a 3 secciones cuenta como cruzado), PRUEBA_C21 (un OVNI a 8
+  secciones cuenta como toque), PRUEBA_C14 (la mitad de los coches con numero a 1 seccion cuentan como tocados);
+  DIAG_SIN_C20 / DIAG_SIN_LET (medidas sin las lineas / los letreros).
+
+### Lo que queda (con lo averiguado)
+- Ajeno a esta tanda: "Out of memory ... diff 57344" al pasar de NIAG a LASV en la prueba de Clarissa nodo 4: sale igual con
+  la base c2c5 (cap6/base_n4b), la carrera sigue (PENDIENTE: que lectura es).
+- 24, las fotos (0x2a48a0; 6 peticiones): fase 1 0x2a5fd8 lee la lista +0x70 de los parametros (registros de 0x20 hasta
+  +0x18 == -1, +0x74 relativa al inicio: los objetivos), fase 4 0x2a4fa8 (la camara: 0x2bb0a0 proyecta el objetivo; el
+  disparo 0x2a60a0), fase 5 suelta (0x21bb48) y nota 6: min(1, (medidor - pen - 80) / (80 / 0,9 - 80)) x 30 + 40 x
+  0x22f090. HECHO (SIMPLIFICADO; ver "campeonatos, septima tanda (agente c2c7)"): los objetivos en CAMP.DAT y un visor.
+- 23 (0x2987a0, los patos con el sistema de objetos 0x61e8a0): ningun guion lo pide.
+- 20: los modelos 0x57002f / 0x57002a del dibujo; 21: el acercamiento y el giro del jugador (0x292d28) y el sonido 0x1d8;
+  14: verlo en pantalla, el panel 0x231fe0 / 0x232290 y las voces +0x3d74 / +0x3d78.
+- 0x1f1a88 / 0x1f20e8 (el generador del trafico de la peticion, la tabla de 0x46 bytes) y con el los tipos 13 y 22: sin
+  empezar en esta tanda. El 14 no lo necesita: sus coches son la lista +0x5c del guion ('C141'); PROBABLE que el 13 y el 22
+  tambien lleven su lista +0x5c (mirarlo con h6/objs.py).
+- 16 (minijuegos): sin empezar en esta tanda.
+- (FPS y c2c6 en integra, 2026-11-27) nav3.sh con los datos juntos (CAMP.DAT de c2c/dat4): "VOZ: VOCES.DAT, 35
+  muestras", "RAMMAPA arranque: libre 408K", sin "Out of memory", carrera de COAST 2 COAST. PENDIENTE (c2c6, tambien en
+  la base c2c5): "Out of memory ... diff 57344" en carrera al pasar de NIAG a LASV (Clarissa nodo 4).
+
+## Mipmaps en lo lejano (2026-11-27; DESVIACION del port)
+
+Peticion: "arreglo de mipmapping". Hasta ahora solo llevaban mipmaps de la PowerVR las texturas cuadradas del suelo con
+MXL > 0 en el original (ver Suelos: estado del GS, mipmaps y capas); lo demas (paredes, edificios, vallas, vegetacion,
+carteles, el agua, la hierba y las texturas rectangulares, tambien las de la calzada) centelleaba de lejos. El original
+de PS2 tampoco los lleva en esas texturas (su LOD del GS es por distancia, TEX1 K / L): esto es una mejora del port.
+
+**Diagnostico** (`tools/remip.py --info [-v]`, datos de lgdat2; KB de VRAM; `cuad_*`: cuadradas sin mipmaps):
+
+| Fichero | con mip | cuadradas VQ sin | cuadradas 16 bits sin | rectangulares (sin) | cielo |
+|---|---|---|---|---|---|
+| PALM SEG00 | 28 / 107 | 44 / 93 | 5 / 2 | 91 / 242 | 2 / 7 |
+| LAKE SEG03 | 23 / 129 | 53 / 92 | 5 / 2 | 64 / 158 | 2 / 7 |
+| INDU SEG04 | 15 / 94 | 71 / 190 | 2 / 1 | 71 / 178 | 2 / 67 |
+| ALPI SEG05 | 18 / 68 | 58 / 93 | 22 / 11 | 65 / 234 | 2 / 67 |
+| SNOW SEG06 | 11 / 122 | 24 / 89 | 0 | 59 / 224 | 2 / 67 |
+| CLOU SEG07 | 11 / 73 | 12 / 68 | 0 | 40 / 260 | 2 / 19 |
+| CAST SEG08 | 8 / 62 | 32 / 82 | 9 / 4 | 41 / 183 | 2 / 67 |
+| GHOS SEG09 | 10 / 65 | 24 / 75 | 0 | 51 / 309 | 2 / 67 |
+| FORE SEG10 | 14 / 166 | 23 / 117 | 2 / 1 | 43 / 241 | 2 / 67 |
+| DESE SEG11 | 20 / 86 | 23 / 51 | 2 / 1 | 27 / 103 | 2 / 67 |
+| TULI SEG12 | 28 / 140 | 41 / 98 | 3 / 2 | 65 / 202 | 3 / 8 |
+| METR SEG13 | 13 / 79 | 61 / 128 | 1 / 0 | 58 / 164 | 2 / 7 |
+| RUIN SEG14 | 7 / 31 | 15 / 54 | 0 | 33 / 197 | 2 / 67 |
+| CAPE SEG15 | 31 / 141 | 35 / 102 | 0 | 59 / 150 | 2 / 67 |
+| IMPE SEG16 | 15 / 80 | 43 / 168 | 1 / 0 | 97 / 405 | 2 / 67 |
+| uniones BK00 / BK06 / BK09 | 5 / 21 | 8 / 34 | 0 | 13 / 88 | 2 |
+
+Por que no tenian: las rectangulares (la mitad de la VRAM de cada etapa: 128x64, 128x32, 64x32, 256x64...) porque la
+PowerVR solo admite mipmaps cuadrados; las cuadradas porque `modelo.ajusta_texturas` solo los pone en el suelo con MXL
+> 0; el umbral de la VQ (9) casi no cuenta (2 de 338 en la primera prueba de 4 etapas, 32 en todas). Casi todas se
+reducen dentro de la distancia de dibujo: con la focal de la carrera (426,7 px) un texel de 2-10 cm baja de 1 pixel
+a 9-45 m (`--info -v`: "reduce desde"). En las capturas (Flycast, cuadro congelado `-DDIAG_CONGELA=2400`, PALM / CLOU /
+GHOS / METR) lo que mas centellea: los arboles y vallas de recorte (GHOS, CLOU), las fachadas con ventanas (PALM,
+METR), el grano del asfalto, el agua y la hierba (PALM, CLOU), el empedrado de la plaza (METR) y los carteles.
+
+**Arreglo** (`tools/remip.py --datos`, sobre las etapas y uniones ya convertidas; `tools/regenera.py` lo pasa al final,
+una vez):
+
+- Cuadradas: niveles por promedio de 2x2 desde la imagen de ahora (la VQ decodificada) y VQ con un libro para todos los
+  niveles (`vq.codifica_mip`), aceptada con error RMS <= 9 frente a esa imagen y sus niveles (media ~5). Mantener el
+  libro y los indices de la base y codificar solo los niveles nuevos daba error 14 de media (48 en las de recorte): no.
+  Si la VQ no pasa, sin mipmaps (en 16 bits costarian 2,7 veces mas). Las de menos de 32x32 en 16 bits con niveles.
+  En las de recorte (ARGB1555) el alfa de cada nivel se corta por el umbral que guarda la cobertura de la base (si no,
+  vallas y hojas se vacian de lejos).
+- Rectangulares: estiradas al lado mayor (interpolacion lineal entre centros de texel; las UV normalizadas no cambian
+  y de cerca se ve igual). Al lado menor perdian 6-40 de RMS (tienen detalle en los dos ejes): nunca se usa (umbral
+  `PERDIDA` 3). Estirar un eje hace que la PowerVR elija el nivel por ese eje y el otro se vea un nivel mas borroso
+  (medido en Flycast: las fachadas de PALM quedaban lisas). Se compensa con el **D adjust** de la PowerVR por textura
+  (bits 24-27 del formato, `demo/main.c` compila_cab -> `mipmap_bias`): D = 2^-(niveles que se adelanta), con el
+  aspecto del texel en el mundo medido en la geometria (`remip.sesgo`): 0,5 en las 2:1, 0,25 en las 4:1, 1,0 si el
+  eje estirado era el mas grueso. PROBABLE: que la D de la consola multiplica la medida del nivel (documentacion de la
+  PowerVR); Flycast la aproxima con un sesgo de -4 / -2 / -1 niveles para 0,25 / 0,5 / 0,75 (rend/TexCache.cpp), asi
+  que las capturas se hicieron con `-DMIP_SESGO_FLYCAST` (pide a Flycast los niveles que pediria la consola).
+- Sesgo general y filtro: las demas van con D 1,0 y bilineal (nivel mas cercano, como MMIN del GS). Trilineal no: en la
+  PowerVR son dos pasadas por poligono (filtros TRILINEAR1 / 2 sumados), el doble de vertices de la escena en el TA
+  (24-28 mil por cuadro, medidos con DIAG_MS), y el bufer del TA es lo que limita la distancia de dibujo; Flycast
+  ademas no lo emula ("we ignore that for now", rend/gles/gldraw.cpp).
+- Orden y topes: por detalle fino (lo que quita el primer nivel) x area / coste, cada fichero hasta TOPE_ETAPA 570 KB /
+  TOPE_UNION 220 KB y sin que ninguna pareja de CURSO.DAT y CURSOTA.DAT (etapa + su union, union + la etapa de cada
+  rama) pase de 944 KB, el peor caso de antes: la zona del curso no empeora en ningun modo. Los topes salen del espacio
+  del GD (presupuesto: <= 8 MB en el Mod taxi): con 720 / 240 KB crecia 10,9 MB y con 640 / 225 8,6 MB. IMPE (748 KB
+  con BK198) no gana nada por el tope de pareja. El mayor SEG y el mayor BK no crecen (los huecos de la RAM son su
+  tamano). Determinista por contenido: la meta y su etapa siguen compartiendo texturas.
+
+Despues (mismas columnas, con los topes de la entrega):
+
+| Fichero | con mip | cuadradas VQ sin | cuadradas 16 bits sin | rectangulares (sin) |
+|---|---|---|---|---|
+| PALM | 107 / 387 | 11 / 29 | 4 / 2 | 46 / 146 |
+| LAKE | 127 / 512 | 2 / 6 | 1 / 0 | 15 / 41 |
+| INDU | 64 / 263 | 34 / 93 | 2 / 1 | 59 / 146 |
+| ALPI | 103 / 307 | 5 / 29 | 17 / 8 | 38 / 159 |
+| SNOW | 46 / 287 | 10 / 52 | 0 | 38 / 164 |
+| CLOU | 38 / 373 | 2 / 20 | 0 | 23 / 158 |
+| CAST | 82 / 398 | 1 / 1 | 1 / 0 | 6 / 76 |
+| GHOS | 24 / 186 | 15 / 42 | 0 | 46 / 276 |
+| FORE | 19 / 170 | 20 / 115 | 2 / 1 | 41 / 239 |
+| DESE | 67 / 446 | 0 | 0 | 5 / 15 |
+| TULI | 107 / 413 | 2 / 20 | 0 | 28 / 130 |
+| METR | 121 / 517 | 3 / 6 | 0 | 9 / 40 |
+| RUIN | 45 / 415 | 1 / 2 | 0 | 9 / 80 |
+| CAPE | 94 / 419 | 3 / 11 | 0 | 28 / 73 |
+| IMPE | 15 / 80 | 43 / 168 | 1 / 0 | 97 / 405 |
+| BK00 | 20 / 131 | 2 / 8 | 0 | 4 / 60 |
+| BK06 | 18 / 116 | 4 / 20 | 0 | 4 / 60 |
+| BK09 / BK02 | 13 / 51 | 4 / 20 | 0 | 9 / 80 |
+
+En todo: 2637 texturas nuevas con mipmaps en las 62 etapas y 5169 en las 498 uniones.
+
+**Medida** (Flycast; nada en la consola):
+
+- VRAM de la zona del curso (`tools/vram.py`, COCHE06; Flycast coincide a 1 KB: PALM + BK00 y GHOS + BK09): peor
+  combinacion de todos los arboles **944 KB antes y despues** (BK242 + IMPE/49); modo OutRun 928 -> 937 KB (BK09 +
+  IMPE). Zona 1312 KB (1280 con COCHE06): 336-368 KB libres en el peor caso; INFARTO 92 KB menos; misiones de COAST 2
+  COAST con dos rivales: zona de 1056 KB (nav3.sh, BEAC), 112 KB libres en el peor caso, como antes. Lo demas de la
+  VRAM (bufer del TA 2 x 1920 KB, OPB, imagenes, HUD, coche, trafico) no cambia. Una primera version con 780 / 240 KB
+  por fichero dejaba 36 KB en esas misiones: por eso el tope por pareja.
+- RAM: los huecos no cambian (etapa 8142 KB, union 1584 KB, colision aparte 220 KB: SEG13 pasa a usarlo, 208 KB);
+  nav3.sh: "VOZ: VOCES.DAT, 35 muestras", sin "Out of memory".
+- GD: SEGS.PAK +3,83 MB, UNIONES.PAK +0,68, UNIONESTA.PAK +0,58, UNIONESR.PAK +0,20, etapas sueltas y descriptores el
+  resto: **+6,30 MB (6,01 MiB)** en la clasica (930,6 -> 936,6 MiB) y **lo mismo en el Mod** (sus SEGS / UNIONES*.PAK y
+  sus SEG / BK son identicos byte a byte a los de la clasica: 956,9 -> 962,9 MiB). Presupuesto: <= 8 MB en el Mod.
+- FPS (`-DPRUEBA_AUTO -DPRUEBA_SIN_TIEMPO -DDIAG_MS`, 150 s desde la etapa, media de las lineas MS sin las 3 primeras),
+  antes / despues: PALM 38,9 / 38,9; INDU 39,4 / 39,4; CLOU 37,1 / 37,7; GHOS 38,4 / 38,4; METR 37,3 / 34,7; IMPE 39,7 /
+  39,7. Las ventanas no son iguales (la carga tarda distinto: 58-112 medidas antes, 100-163 despues, la de METR llega
+  mas lejos en la etapa) y en Flycast los mipmaps no cuestan CPU ni el emulador cuenta la cache de texturas de la
+  PowerVR: lo que ganaria la consola (de lejos lee niveles pequenos) no se puede medir aqui. PROBABLE: igual o mejor.
+- Capturas (cuadro congelado, mismo binario, datos de antes y de despues; energia de alta frecuencia del tercio lejano,
+  media del laplaciano): PALM el agua, la hierba, las rocas y las fachadas lejanas sin ruido (25,2 -> 19,4); METR el
+  empedrado de la plaza y las fachadas (22,9 -> 15,8); CLOU los montes y la hierba (29,1 -> 27,9; el grano del asfalto
+  sigue: su textura no entro con el tope del GD, con 720 KB si entraba y bajaba a 25,6); GHOS casi igual (25,0 -> 24,9):
+  lo que mas centellea alli son los arboles y vallas de recorte y Flycast no aplica mipmaps en la lista de recorte
+  (GL_LINEAR, rend/gles/gldraw.cpp); en la consola si (PROBABLE que mejoren, con la cobertura del alfa guardada). De
+  cerca, igual (22,9 / 22,4; 21,5 / 21,5).
+
+Codigo: tools/remip.py (nuevo), tools/regenera.py (paso remip), tools/vram.py (curso con CURSOTA.DAT), demo/main.c
+(`mip_sesgo` y una linea en compila_cab). Queda: los objetos de las uniones (BOnn), el trafico y los coches sin tocar;
+IMPE sin mipmaps nuevos (no cabe sin empeorar el peor caso de la zona); la calzada de CLOU y otras rectangulares 4:1
+caras no entran con el tope del GD (con mas sitio en el GD: subir REMIP_TOPE_ETAPA); verificar en la consola el D
+adjust y los de recorte.
+- (mipmaps en integra, 2026-11-27) remip.py --datos sobre la carpeta integrada (incluye las uniones nuevas de Holly,
+  BK498..508): 62 SEG (2637 texturas, +6044 KB de VRAM sumados) y 509 BK (5287 texturas); salida en scratchpad
+  modos/mip/dint_out (575 ficheros), +6,03 MB en el GD: clasico con 35,9 MB libres. nav3.sh: "VOZ: VOCES.DAT, 35
+  muestras", libre 408K al arrancar, zona del curso en BEAC con 371K libres (igual que sin mipmaps), sin "Out of memory".
+## COAST 2 COAST: campeonatos, minijuegos (agente c2c16, 2026-11-27)
+
+Sobre integra (658f329). El tipo de peticion 16 (104 peticiones, casi todas de Holly). Todo en Flycast (nivel E), no en la
+consola. Datos de prueba: $S/modos/c2c/dat16 (CAMP.DAT con 'M161' detras de lo de antes, cuyos 30 518 primeros bytes salen
+iguales byte a byte; MJHUD.DAT nuevo), carpeta montada con h16/datos2.sh (enlaces a $S/dint + dat16 en modos/c2c/datos16);
+scripts en $S/modos/c2c/h16 (los de h6 para este worktree, pantalla :94; py/r16.py lista los registros de +0x7c de cada
+peticion del 16, py/ver46.py pinta escenas del banco 0x46). Capturas y registros en $S/modos/c2c/cap16.
+
+### Lo averiguado (SLES-53998, clase 0x29f520 de 0x1860 bytes, vtable 0x423a80)
+- Lo que piden los guiones (py/r16.py): subtipo 2 x 22, 1 x 20, 0 x 16, 6 x 15, 3 x 13, 4 x 9, 5 x 9 (no hay subtipo 7: las
+  tablas 0x4239f0 / 0x423a10 / 0x423a30 tienen 7 entradas y un 0).
+- Control (+0x24, 0x29f7a0). Fase 1: 0x2a0d08 reparte los registros de 0x2c de +0x7c de los parametros ({+0x20 clase 0
+  aviso / 1 puerta, +0x24 simbolos / carriles, +0x26 / +0x28 secciones, relativas al inicio si +0x80, +0x2a cuantos: con 2 o
+  mas repartidos de +0x26 a +0x28}) en la lista A (+0xc, +0x70) y B (+0x8a4, +0x72) de 50 x 0x2c ({+0..+0x14 seis simbolos,
+  +0x18 por pasar, +0x1c el carril bueno, +0x1d el simbolo bueno, +0x24, +0x26 la seccion}); las secciones de las puertas a
+  +0x113c (+0x74) y por puerta 0x2a3778 pone en los n + 1 bordes de sus n carriles objetos de la clase 6 del banco (los
+  conos; 0x1d68f8 / 0x1d7748, +0x18 = 6); despues el subtipo (0x4239f0). Fases 4..6: el paso del subtipo (0x423a10) y cada
+  600 pasos (contador global 0x6213a0) una voz de animo 0x1ac3d8(id, 0x3c, 0): 0x4239c0[k % 2] (subtipos 0 / 1), 0x4239c8[k
+  % 3] (2), 0x4239d8[k % 3] (3..6). Fases 2..6: +0x1204 cuenta 0..30 (el vaiven). Sin bono de nota 6 (la fase 5 pasa por el
+  paso del subtipo, que solo actua en la 4).
+- La puerta (0x29fb28(n, k)): el jugador en k / n < f < (k + 1) / n (f de borde a borde en la seccion de la puerta); bien: el
+  medidor + 80 x 1,1 / puertas, +0x3d78 = 1 y 0x114b68(0x2c0002, 5, 3) (el destello); mal: el efecto 0xd4.
+- Dibujo de sprites (+0x34, 0x29fe00 -> por subtipo 0x423a30 -> 0x2a0138 por registro entre la seccion del jugador - 2 y
+  + 50): filas = +0x24 / columnas en los laterales (fila + 0,5) / filas, 0,1 de fila hacia fuera del centro; columnas: +-2,5 m
+  (0x423b88) y altura (0x423bb0: la del medio + 4 m con 3); a 2,5 m del suelo + sin(+0x1204 / 30 x pi) (puertas y los avisos
+  de 0, 1, 3, 4); sprite 3D 0x115870 a escala 1,5 de la tabla del subtipo: 0 0x423ae0 (6 frutas), 1 0x423b10 (9 frutas y 12
+  animales, cuantos en 0x423ad8), 2 0x423b68 (7 animales, solo en las puertas), 3 numeros con las cifras de 0x423bdc
+  (0x2a0838).
+- Dibujo 3D (+0x2c, 0x29fd50 -> 0x29fef8 con 1): en cada puerta el modelo de 0x1a7ce0 (tabla 0x368508 por idioma: 0x1ee000b,
+  el registro 11 de obj_tour_pmt, un quad con textura) con 0x232e60 a escala (5, 1,5, 2,5). SIN PORTAR.
+- Subtipo 2, el sonido (0x2a1ba0 / 0x2a1e00): por puerta el carril bueno rand % n y el animal +8 de los parametros (el azar
+  del banco SOUND2..8 de la quinta tanda: SOUNDn solo trae la voz 0x1a7 + n - 2) o rand % 7 (SOUND.PAK, una sola peticion en
+  la etapa), el mismo en el aviso k y en los demas carriles otros distintos; al pasar el aviso su voz 0x423c30[animal]
+  (0x1a7..0x1ad, prioridad 0xb) y 0x232350 (el 2B003D en +0x3e6c del gestor).
+- Subtipo 1, el distinto (0x2a1618 / 0x2a1948): por puerta una clase (rand % 2): el bueno de ella, los demas distintos de la
+  otra; el aviso k igual que la puerta (0x2a18a4 copia los simbolos); el aviso se da a 20 secciones (solo 0x232350).
+- Subtipo 0, la memoria (0x2a1150 / 0x2a13f8): el aviso k con +0x24 frutas rand % 6; la puerta k con 2 x +0x24 en dos filas,
+  la buena (rand % 2) igual que el aviso y la otra con al menos una distinta en su sitio; se mira en 2 (0x29fb28(+0x24 de la
+  puerta / +0x24 del aviso k)).
+- Subtipo 3, la suma (0x2a2080 / 0x2a24d8): el aviso con un numero por nivel (+0x24: 0x3b5648 pares {de, hasta}; con rand
+  < 0,5 de..hasta, si no 1..hasta; nivel 1 negativo con rand % 5 == 0, nivel 2 con rand & 3 == 0); en la puerta el carril
+  bueno lleva la suma de los avisos desde la puerta anterior y los demas la suma - 5 + rand % 10, distintos. SIN PORTAR (las
+  cifras 0x423bdc y 0x2a0838).
+- Subtipo 6, los coches (0x2a3300 / 0x2a3510): el trafico de la peticion (0x1f1a88 / 0x1f20e8 con la tabla de +0x10, +0x64 o
+  0x104 los modelos, 0x2a3bd0 con la lista +0x5c, 0x22dac0), el bueno es la cuenta +0x7a (la lleva otro codigo) y los demas
+  bueno - 1 + rand % 3; SIN PORTAR -> HECHO (ver "campeonatos, novena tanda (agente c2c9)"). 4 y 5: SIN EMPEZAR.
+
+### HECHO: subtipos 2, 1 y 0 (comun/minijuego.c, -Os)
+- tools/conv_camp.py `minijuegos`: el bloque 'M161' detras de CAMP.DAT (las voces 0x423c30, el animo 0x4239c0.., los 34
+  sprites de los subtipos 0..2 como grupos MJ_kk, 0x423ad8, 0x423b88 / 0x423bb0 y por peticion sus registros con las
+  secciones de la etapa) y MJHUD.DAT (los 23 sprites distintos del banco 0x46, conv_hud.grupo_escena, 149 KB); regenera.py
+  paso camp. CAMPHUD.DAT, CAMPOBJ.DAT y VOCESM.DAT salen iguales.
+- Enganches: campeonato.c (camp_inicia -> mj_inicia, camp_libera -> mj_libera, case 16 -> mj_paso), main.c (MJHUD.DAT con
+  CAMPHUD.DAT, `camp_mundo_` el punto de camp_obj_ con dx, ha_spr3d tambien con mj_spr3d y los grupos MJ_ de MJHUD.DAT).
+- Lateral: la fraccion de camp_obj (0 el borde -iz, SUPUESTO de c2c3) para los conos y los sprites, y 1 - c->lat para mirar
+  el carril: las dos con el mismo criterio (en cap16/mos_t2a el elefante bueno a la derecha y el coche a la izquierda: "mal").
+- DESVIACION / SIMPLIFICADO: sin el cartel 3D de la puerta (0x1ee000b) ni el 2B003D del aviso (0x232350); el destello
+  0x114b68(0x2c0002, 5, 3) es el HA_S02 de HAHUD.DAT sobre el coche a escala 0,7 (la de los arcos; SUPUESTO que 5 sea el
+  coche); los conos son los de la clase 6 de HAOSO.DAT (salen amarillos y negros); sin las bifurcaciones (0x176e20: dos
+  carreteras, no las hay dentro de una etapa de la DC).
+- E (`-DPRUEBA_AUTO -DPRUEBA_CAMP=2 -DPRUEBA_CAMP_NODO=7 -DPRUEBA_CAMP_LISTA=1 -DPRUEBA_SIN_TIEMPO`, Alpine al reves, 16/2
+  160..225 y 16/1 300..645): "aviso 0 en la seccion 170: animal 6", "VOZ 0x1ad (peticion)", el perro y el elefante sobre sus
+  carriles entre los conos (cap16/mos_t2a), el piloto por el otro: "mal", nota 0 (cap16/t2a). Con `-DPRUEBA_MJ` (la puerta
+  cuenta como pasada por el carril bueno; el piloto no elige carril): "bien", "peticion 16 hecha: 88 - 0, nota 6" (t2b); el
+  16/1 con sus 3 puertas de 3 (la bebida, la naranja y el mono en cap16/mos_t1) "88 - 34, nota 4" y la etapa nota 5. 16/0
+  (nodo 2 lista 0, Las Vegas al reves, 135..320, 3 avisos y 3 puertas): las frutas en dos filas de 2 (cap16/mos_t0b), "88 - 0,
+  nota 6". NO verificado: un carril bueno elegido conduciendo; la voz no escuchada (Flycast sin audio, por el registro).
+- Medidas (DIAG_MS, la misma pasada con y sin `-DDIAG_SIN_MJ`, cap16/medidas): 16/2 39,56 / 39,77 fps (-0,21), 12 muestras;
+  16/1 39,39 / 39,57 (-0,18), 41 muestras. Triangulos: los conos 10 de media (57 / 76 como mucho, los modelos del INFARTO);
+  los sprites son quads 2D fuera de la escena (como mucho 8 a la vez).
+- RAM al arrancar (h16/nav3.sh, MODO_JUEGO=1, sin defines, compilado limpio, datos16; cap16/nav3_flycast.txt): "RAMMAPA
+  arranque: libre 408K" (igual que integra), "VOZ: VOCES.DAT, 35 muestras", sin "Out of memory". El estado (1,3 KB) va al
+  monton solo en el campeonato; las tablas de MJHUD.DAT tambien, y sus texturas se suben al verse.
+- Datos nuevos: CAMP.DAT + 3,1 KB ('M161'), MJHUD.DAT 149 KB.
+- Pruebas nuevas: PRUEBA_MJ (la puerta por el carril bueno, y un registro de los sprites cada 60 cuadros), DIAG_SIN_MJ (sin
+  sprites ni conos).
+
+### Lo que queda
+- 3 (la suma): falta el numero con las cifras 0x423bdc (0x2a0838) y su conversion; la logica esta arriba.
+- 6 (los coches): necesita el generador del trafico de la peticion 0x1f1a88 / 0x1f20e8 (sin portar desde la quinta tanda).
+- 4 (los regalos, ITEMS: 0x2a26d0 / 0x2a2be0, dibujo 0x2a2d30) y 5 (las ovejas, SHEEP: 0x2a2de8 / 0x2a2e80, dibujo 0x2a3280;
+  la fase 3 no dice la voz 0x8e8): sin empezar.
+- El cartel 3D de la puerta (0x1ee000b de obj_tour_pmt: un quad, 6,4 KB mas en CAMPOBJ.DAT) y el 2B003D del aviso.
+- (c2c16 en integra, 2026-11-27) minijuegos (tipo 16, subtipos 0, 1 y 2) con los mipmaps: nav3.sh "VOZ: VOCES.DAT, 35
+  muestras", libre 408K al arrancar, sin "Out of memory"; CAMP.DAT de c2c/dat16 (bloque M161) y MJHUD.DAT (149 KB);
+  clasico con 35,7 MB libres. OJO al juntar c2c7: CAMP.DAT tiene que salir de tools/conv_camp.py con los bloques de
+  las dos tandas (minijuego.c busca M161 por su firma).
+## COAST 2 COAST: campeonatos, septima tanda (agente c2c7, 2026-11-27)
+
+Sobre la rama integra (658f329). Todo en Flycast (nivel E), no en la consola. Datos de prueba: $S/modos/c2c/dat5/CAMP.DAT
+(lo de dat4 igual byte a byte y detras 'C241' y 'C221'), carpeta montada con h7/datos2.sh ($S/dint + dat5 en
+modos/c2c/datos7); scripts en $S/modos/c2c/h7 (los de h6 para este worktree; corre.sh con FOTOPAT: una captura cuando sale
+esa linea; serie7.sh / serie8.sh las medidas). Capturas y registros en $S/modos/c2c/cap7. El tipo 16 lo lleva otro agente.
+
+### HECHO: "Out of memory ... diff 57344" al cambiar de etapa en carrera (NIAG -> LASV, Clarissa nodo 4)
+- Causa (DIAG_MALLOC, nuevo: el Makefile envuelve malloc / memalign / realloc / calloc y se apunta cada peticion que
+  falla o de 32 KB o mas con quien la pide; cap7/oom1): `decor_reduce` (demo/main.c) al leer SEG22.DAT (LASV, 2955
+  nodos) pedia diez tablas temporales de 102 bytes por nodo (301 KB); con 325 KB libres pero troceados, `fr` (59 100 B)
+  no cabia: el aviso de KOS y se saltaba la quita de repetidos / edificios tapados de esa etapa (sin "DECOR: SEG22.DAT
+  repetidos" en el registro; no se colgaba).
+- Arreglo (703f461): `ct` se suelta en cuanto se clasifica y `bb` en cuanto `ub` esta hecha, antes de pedir `fr` (que cabe
+  en su hueco): 70 bytes por nodo en el pico, mismo resultado. Sin cambiar la RAM del arranque. No toca gh_* ni las voces.
+- E: cap7/oom2 (la misma prueba: sin "Out of memory", "DECOR: SEG22.DAT repetidos 39 (11 fuera)"); otra transicion de
+  campeonato, Holly nodo 5 (NEWY -> GRAN -> CAPE, cap7/n5_oom): sin aviso; CONTRARRELOJ (PRUEBA_VARIANTE=7, PALM -> LAKE ->
+  CAST, cap7/ta_oom): sin aviso. NO verificado: el fantasma en esa CONTRARRELOJ (el piloto no pasa por el tablero:
+  ta_codigo < 0 y gh_empieza no graba ni lee; DESVIACION de la prueba).
+- PENDIENTE -> HECHO (ver "campeonatos, octava tanda (agente c2c8)"): al llegar a la META de la ultima etapa del campeonato (Holly nodo 15, cap7/t22a y
+  cap7/fin_oom) "Out of memory ... diff 40960": `hudd_sube` (comun/hud.c) no consigue su bufer temporal de 40 KB para leer
+  del GD las texturas de un grupo del HUD (vuelve -3: ese grupo no se sube en ese cuadro). PROBABLE que ya estuviera en la
+  base (no se ha corrido alli).
+
+### HECHO: tipo 14, los coches con numero se ven (PENDIENTE de c2c6)
+- Lo que pasaba: los coches se dibujaban (563 triangulos, sin tope del TA, cap7/t14e) pero en ese tramo de LASV (Holly nodo
+  2) los carriles del trafico van por la otra calzada, 20..32 m a la derecha de la ruta (registro C14L), y el piloto de
+  pruebas iba por la de la ruta: los numeros (2D, encima de todo) salian sobre el muro. Ademas con la velocidad del trafico
+  (35..97 % de la del jugador, 472450) no se les alcanzaba dentro de la peticion.
+- Arreglo (7b3d540): los coches del 14 van a la velocidad de la carretera, como los de la mision del INFARTO (PROBABLE;
+  no se sabe la que les da el original); PRUEBA_C14V lleva al piloto por los carriles del trafico y hacia el coche con
+  numero mas cercano. 3c75848: como mucho 4 vivos a la vez (DESVIACION por el polycount, ver medidas) y los que se quedan
+  atras sin abrir se saltan.
+- E (cap7/t14m, cap7/t14k congelado con un coche a 44 m): los coches con su numero en la carretera, toques de verdad
+  conducidos: "suma 10 (+10) ... suma 10 (-10) ... suma 75 (+5) de 155, medidor 44", nota 3.
+
+### HECHO (SIMPLIFICADO): tipo 24, las fotos (0x2a48a0)
+- CAMP.DAT 'C241' (tools/conv_camp.py): por peticion los objetivos de la lista +0x70 {f32 x, y, z en el marco de la etapa
+  del PS2, s16 seccion desde, hasta; relativas al inicio con +0x74}: 10 peticiones, 21 objetivos, 384 bytes.
+- Lo averiguado: 0x2a60a0 activa (+0x10) el primero cuya seccion inicial se ha pasado (voz 0xf4 / 0xf3 al azar) y lo da
+  por perdido al pasar la final; 0x2a4fa8: con 0x2bb0a0 dos veces el angulo entre la camara y el objetivo; si es menor
+  que 0,50265 rad la nota de la foto es (1 - angulo / 0,50265) x 10 + 0,5 (+0x2c); el disparo es 0x1b4548 con 0x10 u 8
+  segun la configuracion (el mismo boton que lee el 22 para la bocina: aqui X, PROBABLE); efecto 0x174, oculta el HUD y al
+  acabar el disparo el medidor + nota / 10 x 80 / (n x 0,9). Nota 6: bono(0,9) como c2c6.
+- Portado: todo lo de arriba con el rumbo del coche en vez del de la camara (SIMPLIFICADO), el medidor al disparar (sin la
+  espera +0x18) y el objetivo del marco de la etapa al mundo con marco_et (camp_marco). DESVIACION: sin el HUD de la camara
+  (0x19d358 / 0x19d318 ocultan piezas del HUD): un visor de cuatro esquinas y una marca sobre el objetivo, amarilla dentro
+  del angulo (main.c camp_visor; 12 quads 2D).
+- E (Holly nodo 5 lista 1, New York, `-DPRUEBA_C24`: dispara a menos de 10 grados; cap7/t24b): "foto: 10 grados del
+  objetivo, nota 7, medidor 62", nota 5 y 44 corazones; la marca cae sobre un edificio de Times Square (cap7/t24b/q_072.png:
+  el marco de los objetivos es el bueno, PROBABLE). El segundo 24 (un objetivo a -62 grados todo el rato) sin foto.
+
+### HECHO (SIMPLIFICADO): tipo 22, la bocina (0x29b3d0)
+- CAMP.DAT 'C221': por peticion las ventanas de la lista +0x7c (filas de 0x18 {s16 desde, hasta (+ el inicio), f32 +8, +0xc,
+  i32 +0x10} hasta -1): 23 peticiones, 99 ventanas, 1 684 bytes.
+- Lo averiguado (0x29c058, fase 4): la ventana en curso (+0x24) entre inicio + desde + f8 e inicio + hasta + fc de la
+  posicion 0x182b40, o la siguiente (+0x28); al pisar la bocina (0x1b4518) el efecto 0x1bc y la ventana objetivo (+0x2c);
+  mientras se pisa, en su ventana y en la carretera el medidor + 80 x avance / +0x14 x 1,25 y fuera la penalizacion x
+  0,25; al soltarla 0x81bc. +0x14: PROBABLE la suma de los largos (0x29bfc0). Nota 6: bono(0,9).
+- Portado lo de arriba (case 22). DESVIACION: sin los coches de la clase +0x14 (0x29b798 / el generador 0x1f1a88) ni el
+  +0x10 de la ventana (+0x1058 del jugador); sin el 0x81bc (el 0x1bc es corto) ni HUD propio.
+- E (Holly nodo 15 lista 2, Palm Beach, `-DPRUEBA_C22`: la bocina en cada ventana; cap7/t22a): "bocina: 5 ventanas, 64
+  secciones", las tres "peticion 22 hecha: 96 / 96 / 87, nota 6".
+
+### SIN PORTAR: tipo 13 (0x2991b8) -> HECHO (SIMPLIFICADO), ver "campeonatos, octava tanda (agente c2c8)"
+- Lo averiguado: la clase (0x44 bytes, vtable 0x423298, control +0x24 = 0x2991b8) en su fase 1 llama a 0x1f1a88 con la
+  posicion del jugador (+0x5c del coche, no de los parametros) y copia los 0x44 bytes que devuelve: necesita el generador
+  del trafico. Su lista +0x5c del guion existe (registros de 0x14 como el 14, con +0xc = 4 / 3), pero el camino corto de
+  c2c6 no basta. Sin empezar el puerto.
+
+### Medidas (Flycast, DIAG_MS; dos pasadas con y sin el elemento, misma prueba)
+| elemento | tramo | fps con / sin | triangulos de la escena con / sin | suyos |
+|---|---|---|---|---|
+| 24, visor | 24/0 160..260 (cap7/m24_con, m24_sin) | 39,13 / 39,15 | 16826 / 16811 | 12 quads 2D |
+| 14, todos los coches | 14/0 380..590 (m14_con, m14_sin) | 35,47 / 37,66 | 18662 / 17840 | 563 por coche (LOD 0) |
+| 14, tope de 4 | 14/0 380..590 (m14b_con, m14b_sin) | 38,13 / 37,86 | 18244 / 17934 | media +310, max 4 x 563 |
+| 22 | sin geometria | | | 0 |
+(14: las dos pasadas no conducen igual (los toques frenan): diferencia dentro del ruido con el tope.)
+
+### RAM
+- h7/nav3.sh (MODO_JUEGO=1, sin defines, compilado limpio, datos7; cap7/nav3): "VOZ: VOCES.DAT, 35 muestras", "RAMMAPA
+  arranque: libre 408K" (igual que integra), sin "Out of memory". Nada nuevo en el monton al arrancar; en el campeonato
+  ~0,1 KB mas del estado y 2 KB mas de CAMP.DAT ('C241' + 'C221'). Ningun modulo de cada cuadro a -Os.
+- Datos nuevos: solo CAMP.DAT (30 518 -> 32 586 bytes, +2 KB en el GD).
+- Pruebas nuevas (solo con defines): DIAG_MALLOC, PRUEBA_C14V, PRUEBA_C24, PRUEBA_C22, DIAG_SIN_C24, DIAG_SIN_C14.
+
+### Lo que queda
+- 13 y el generador 0x1f1a88 (arriba); 22 sin sus coches; 24 sin el HUD de la camara ni la espera del disparo.
+- El "Out of memory ... diff 40960" de hudd_sube en la META final del campeonato (arriba).
+- El fantasma de la CONTRARRELOJ sin probar en esta tanda (arriba).
+- (c2c7 en integra, 2026-11-27) CAMP.DAT unico con los bloques de c2c7 (C241, C221) y de c2c16 (M161): conv_camp.py
+  de integra sobre la ISO, 35 678 bytes; los 30 518 primeros iguales a los de antes; CAMPHUD, CAMPOBJ, MJHUD y VOCESM
+  identicos (scratchpad modos/c2c/dat_int). nav3.sh: "VOZ: VOCES.DAT, 35 muestras", sin "Out of memory", libre **400K**
+  al arrancar (justo el minimo: el codigo paso un escalon de 8 KB). PENDIENTE: recuperar RAM antes de anadir mas; el
+  "Out of memory ... diff 40960" de hudd_sube en la META de la ultima etapa del campeonato (c2c7).
+
+## COAST 2 COAST: campeonatos, minijuegos 2 (agente c2c16b, 2026-11-27)
+
+Sobre integra (88630c1), continua "campeonatos, minijuegos (agente c2c16)". Todo en Flycast (nivel E), no en la consola.
+Datos de prueba: $S/modos/c2c/dat16b (CAMP.DAT con 'M162' detras de 'M161', cuyos 33 610 primeros bytes salen iguales
+byte a byte; MJHUD.DAT con 29 sprites mas detras de los 23 de antes: MJ_00..MJ_22 los mismos), carpeta montada con
+h16b/datos2.sh (enlaces a $S/dmip + dat16b en modos/c2c/datos16b). CAMPHUD.DAT, CAMPOBJ.DAT y VOCESM.DAT salen iguales.
+Scripts en $S/modos/c2c/h16b (los de h16 para este worktree; py/nodos.py: la etapa de cada nodo de los tres arboles,
+py/oveja.py: los cuadros de una escena del banco 0x46; serie4.sh: las medidas y nav3). Capturas en $S/modos/c2c/cap16b.
+
+### Lo averiguado (SLES-53998, clase 0x29f520)
+- 0x2a0838 (el numero): cifras de |v| (1..3, la de mas peso primero); de lejos (d al coche > 125: f = (d - 125) / 100
+  hasta 1) las filas 1 / 2 de la puerta se apartan -/+ 1,5 f x cifras por el eje x de la camara, suben 2 f y el paso de
+  las cifras (escala x 1,25) crece x (1 + f) (x (1 + 2 f) si la escala < 2,6); ancho w = cifras (+ 1 con signo) x paso;
+  el signo (0x423bdc el +, 0x423bd8 el -) en -w / 4 y la cifra k en paso x (k + signo) - w / 4, todo 0,5 m mas arriba;
+  cifras 0x423be0[d] (rojas) si v < 0 y 0x423c08[d] (verdes) si no. Signo: siempre en los avisos, en las puertas solo
+  los negativos.
+- Por subtipo en 0x2a0138: 3 el aviso 3 m mas arriba a escala 3, la puerta a 3 (2,5 si sim[0] o sim[1] tiene 3
+  caracteres); 4 el aviso con los regalos 0x423af8[sim] a 1,3 (5 nada) y la puerta con numeros a 3,5; 5 solo la puerta,
+  a 3 (2,5 con >= 100). El vaiven en las puertas y en los avisos de 0, 1, 3 y 4.
+- 3 (0x2a2080 / 0x2a24d8), 4 (0x2a26d0 / 0x2a2be0) y 5 (0x2a2de8 / 0x2a2e80): ver la cabecera de comun/minijuego.c.
+  El paso de la puerta es el de los demas (0x29fb28 y 80 x 1,1 / puertas); el 4 cuenta +0x76 (puertas pasadas).
+- 0x231fe0 (el regalo a contar del 4): objeto 2D del gestor (+0x2650) con 0x423af8[perm[0]] en el panel (+0x3e6c /
+  +0x3e70), crece a 0,5 en 0,35 s; 0x2320d8 cuando acaba el panel lo lleva a (180 - [0x374238], -110) a 0,75 y alli se
+  queda. 0x2322a0 (el 5, con la fase anterior +4 == 3): zzz 0x460027 en el panel (capa 5, escala 1); 0x232330 lo quita
+  en la fase 5. Las ovejas: 0x228e60(0x460028, capa 9, modo 3 -> una vez, (0, -50), 0,55, velocidad 1 + 0,1 x rand % 10):
+  la escena (100 cuadros, 78 distintos) ya lleva el salto de izquierda a derecha.
+- Las peticiones del tipo 16 solo estan en los guiones "_r" (los del arbol MIX, Req_Course_MIX_PS2). Del 4 no hay
+  ninguna en las etapas del arbol MIX (Deep_Lake_r, Snow_Mountain_r, Ghost_Forest_r, Imperial_Avenue_r, Niagara_r,
+  San_Francisco_r y Maya_r no estan en el): PROBABLE que el juego no las use, salvo otra forma de elegir la etapa que no
+  he visto.
+
+### HECHO: subtipos 3, 4 y 5 (comun/minijuego.c, -Os)
+- tools/conv_camp.py: el bloque 'M162' (64 bytes, cada tabla comprobada por el codigo que la lee: 0x3b5648, 0x423bd8 /
+  0x423bdc / 0x423be0 / 0x423c08, 0x423af8, 0x460028, 0x460027, 0x188 y 0x423a70) y los 29 sprites nuevos en MJHUD.DAT.
+  N del 4 (+0x78 de los parametros) se lee de las peticiones de CAMP.DAT (p[6]); la fase anterior (+4) la lleva
+  minijuego.c (sin tocar campeonato.c).
+- main.c (ha_spr3d): un sprite con esc < 0 se dibuja en la pantalla en (p[0], p[1]) desde el centro a escala -esc (las
+  ovejas, zzz y el regalo del HUD); 16 grupos a la vez (antes 8: las cifras) y 48 sprites; PRUEBA_MJ_TIPO=t (las
+  peticiones de la etapa t, 0..59, en la primera etapa: para probar el 4 sobre Alpine al reves).
+- E (PRUEBA_AUTO PRUEBA_CAMP=2 PRUEBA_CAMP_NODO=7 PRUEBA_SIN_TIEMPO PRUEBA_MJ, Alpine al reves):
+  - 3 (lista 2, 100..340): 12 avisos de nivel 0 (1..5, suma 39), la puerta "37 / 39" (el bueno el 1); cap16b/t3a
+    (r_045: el "+3" del aviso), zoom_t3a.png (37 y 39 entre los conos, de lejos separados), "88 - 2, nota 6".
+  - 4 (lista 0, PRUEBA_MJ_TIPO=55: Maya al reves 100..265, N = 2): 7 avisos de 3 huecos, la puerta "10 / 9" (9 los
+    regalos plateados, contados a mano en el registro); mos_t4a / mos_t4b: los regalos plateados y azules en la
+    carretera, el plateado arriba a la derecha en el HUD, "88 - 2, nota 6". Sin PRUEBA_MJ (medida m4_con) el piloto paso
+    por el carril bueno por azar: "bien" con el carril de verdad.
+  - 5 (lista 0, 160..380): 16 ovejas (efectos 0x188 x 16 y 0x173 / 0x1db / 0x1dc, "VOZ ... (peticion)"), la puerta
+    "16 / 12"; mos_t5b: las ovejas saltando por la pantalla, zoom_t5zzz: zzz en el panel; "88 - 2, nota 6".
+- Medidas (DIAG_MS, la misma pasada con / sin -DDIAG_SIN_MJ, sin PRUEBA_MJ, cap16b/medidas, h16b/mide.py de "peticion
+  16/n" a "peticion 16 hecha"): 3 39,51 / 39,60 fps (-0,09), 35 muestras; 4 39,67 / 39,73 (-0,06), 26; 5 39,45 / 39,63
+  (-0,18), 30. Triangulos: los conos 4..7 de media (57 como mucho, los de antes); los sprites son quads 2D (2 triangulos)
+  fuera de la escena: como mucho ~12 cifras / 8 regalos / 3 ovejas a la vez.
+- RAM al arrancar (h16b/nav3.sh, MODO_JUEGO=1, sin defines, compilado limpio): sobre integra 88630c1 el codigo nuevo
+  (+4 KB de .text) pasaba .init (alineado a 8 KB) al bloque siguiente: 408K -> 400K. Recortado minijuego.c (otros() para
+  los carriles malos de 1..5, numero() mas corto, el puntero local Q, las probabilidades con enteros y MJLOG: los
+  registros de cada aviso / puerta / peticion solo con PRUEBA_AUTO) hasta 0xba030 de .text: .init vuelve a 0x8c0ca000
+  (408K, medido sin el merge solo por el tamano, PROBABLE). Tras `git merge integra` (a0b2d19, con c2c7): .text 0xbac70,
+  .init en 0x8c0cc000 como integra sola; nav3 (cap16b/nav3_final.txt): "RAMMAPA arranque: en uso 13021K, libre 400K",
+  "VOZ: VOCES.DAT, 35 muestras", sin "Out of memory": igual que integra (400K segun el jefe; no medido aqui el tip de
+  integra solo). OJO: unos ~3 KB mas de .text en cualquier rama vuelven a saltar .init a 0x8c0ce000 (-8K).
+- Tras el merge (CAMP.DAT de tools/conv_camp.py: sus 35 678 primeros bytes iguales a $S/modos/c2c/dat_int/CAMP.DAT, y
+  'M162' detras de 'M161'; MJHUD.DAT igual): h16b/serie5.sh repite 16/3 (37 / 39), 16/4 (10 / 9), 16/5 (16 ovejas, 16 /
+  12) y 16/2 + 16/1 + 16/0 (prepara1 / prepara2 ahora con otros()): todas "bien" con PRUEBA_MJ, las mismas notas
+  (cap16b/t3b, t4b, t5b, t12b, repaso_merge.png).
+- Scripts: pgrep -c -f /opt/flycast/build/flycast (el proceso se llama Flycast-rend).
+- Datos nuevos: CAMP.DAT + 72 bytes ('M162'), MJHUD.DAT 149 -> 278 KB (+129 KB: 22 cifras de 64x64, 5 regalos de
+  128x128, la oveja 128x512 con 78 cuadros y zzz).
+- DESVIACION / SUPUESTO: las cifras se separan por el lateral de la carretera, no por el eje x de la camara; el panel de
+  la peticion en (176, 78) (donde main.c pinta el rotulo; zoom_t5zzz: zzz cae sobre el coche del panel, PROBABLE bien);
+  el regalo del HUD esta 2 s en el panel y va arriba en 0,35 s (el original espera a que acabe el panel, 0x2320d8) y se
+  va al acabar la peticion (SUPUESTO: no he visto quien llama al estado 4); +0x160 del gestor (el 5) SIN averiguar; las
+  ovejas avanzan con el paso de la logica.
+
+### Lo que queda
+- 6 (los coches): necesita el generador del trafico de la peticion 0x1f1a88 / 0x1f20e8 (otro agente).
+- Un carril elegido conduciendo (el piloto no elige; en el 4 acerto por azar), la voz y los efectos solo por el
+  registro (Flycast sin audio).
+- El cartel 3D de la puerta (0x1ee000b) y el 2B003D del aviso, como en c2c16.
+
+## COAST 2 COAST: campeonatos, octava tanda (agente c2c8, 2026-11-27)
+
+Sobre integra (a0b2d19, con el merge de 5cb94a3). Todo en Flycast (nivel E), no en la consola. Datos de prueba:
+$S/modos/c2c/dat8 (CAMP.DAT: los 35 750 bytes de dat_int iguales byte a byte y detras 'C131'; MJHUD.DAT: el de integra con
+un sprite mas detras, 460006) montados con h8/datos2.sh ($S/dmip + dat_int + dat8 en modos/c2c/datos8). Scripts en
+$S/modos/c2c/h8 (los de h7 para este worktree; ab.sh: A/B de fps con datos8; mide8.py: fps y triangulos entre dos lineas;
+p13.py: los parametros del 13 en los guiones). Capturas y registros en $S/modos/c2c/cap8.
+
+### HECHO: RAM del arranque (+95 KB)
+| que | KB | coste en fps |
+|---|---|---|
+| `buf_arr` (demo/main.c): el bufer de paso de los textos de 512 x 128 texeles (128 KB de BSS) a 512 x 32; texto_arriba sube la textura de 128 filas en 5 franjas con cada linea entera en la suya (texto_centro ya usaba 16 KB) | 96 | ninguno: solo corre con el marcador de depuracion (`ver`) o sin HUD; con `-DVER=1` las tres lineas salen como antes (cap8/ver_texto/a_003.png) |
+| el resto de esta tanda (el 13, el generador, hudd_sube por trozos): +7 KB de codigo, sin escalon | -1 | |
+- nav3.sh (h8/nav3.sh, MODO_JUEGO=1, sin defines, compilado limpio, datos8; cap8/nav3): "VOZ: VOCES.DAT, 35 muestras",
+  "RAMMAPA arranque: libre 495K" (integra 400K; solo buf_arr: 496K, cap8/nav3_arr), menu 496K, carrera OutRun 786K, sin
+  "Out of memory". Sin -Os ni FRIO nuevos: no hizo falta.
+- fps (h8/ab.sh, PRUEBA_AUTO, 140 s por etapa, nodos 0 y 1, recortado al mismo s con tabla2.py; cap8/res A0 A1 = integra
+  5cb94a3, B0 B1 = c2c8): PALM 38,55 / 38,54, LAKE 39,42 / 39,32, media 38,99 / 38,93 (ruido); 0 "Out of memory", la voz en
+  las 4.
+
+### HECHO: "Out of memory ... diff 40960" de hudd_sube en la META final del campeonato
+- Causa (c2c7, cap7/fin_oom): hudd_sube (comun/hud.c) lee del GD de una vez todos los sectores de las texturas que suben (el
+  grupo del rotulo META, texturas 0..2 de su fichero parcial: 40 KB) en un memalign; en la carrera no hay bufer prestado y la
+  cima del monton tenia 28 KB: KallistiOS no podia crecer, el aviso y el grupo sin subir en ese cuadro (se reintentaba).
+- Arreglo (54a250a): si no hay bufer prestado que quepa, la lectura pasa de 10 KB y la cima del monton no tiene la lectura +
+  32 KB (cabe_seguido, mallinfo), cada textura se lee y se sube por trozos de 8 KB (sube_trozos, con su paleta de 4 / 8 bits
+  como sube_tex) con un bufer de 10 KB. Sin RAM nueva al arrancar; la lectura grande de antes sigue igual cuando cabe.
+- E: con la RAM de ahora la lectura cabe (Holly nodo 15 lista 2, cap8/fin_h: "MALLOC memalign 40960 -> ..." sin aviso); con
+  `-DDIAG_HUD_TROZOS` (siempre por trozos; cap8/fin_tz) "HUD: texturas 0..2 del GD por trozos (40K seguidos sin bufer)" tras el
+  GOAL y el rotulo META entero (cap8/fin_tz/mos_meta.png). Metas finales de Clarissa (NEWY, cap8/fin_cla) y Jennifer (CAPE,
+  cap8/fin_jen): GOAL sin "Out of memory" (DIAG_MALLOC). NO reproducido el caso de c2c7 tal cual (con la RAM nueva no falta;
+  DIAG_RESERVA=98304 tampoco lo reprodujo: la cima de la META no depende de lo que se toma al arrancar).
+
+### HECHO: el generador del trafico de la peticion (0x1f20e8 / 0x1f1a88)
+- Lo averiguado: 0x1f20e8(r) solo guarda r en [0x5d5fd8]; 0x1f1a88 (el registro de 0x46 bytes del sitio, PC 4F0030) con
+  [0x5d5fd8] != 0 devuelve ese registro en vez de copiar el de la etapa (tabla 0x5d5e78, 5 x 0x46, por la posicion +8) a
+  0x5d5fe0 y pisar +0xe..+0x18 (250, 250, 250, 290, 290, 310), +0x1c..+0x26 (270,9..473 x 0,8 en los modos 3 / 4), +0x2a..+0x42
+  y +4 (7 / 10). La peticion copia el de la etapa, pone sus 7 modelos en +0xe..+0x1a (+0x64 de sus parametros o un valor fijo:
+  0x6e en el 13, 0x96 / 0xa5 en el 11) y lo instala; el aparecedor del trafico (0x1dbba0 / 0x1db6d0) lo lee al abrir cada
+  coche. Llamadas: 11 (0x294b6c), 13 (0x2992e0), 14 (0x29cd60), 20 (0x2961b4), 21 (0x2928e0), 0x29ecb8 / 0x29f0b8 y el
+  subtipo 6 de los minijuegos (0x2a3398). El 22 NO lo llama (nada en 0x29b3d0..0x29c3ff): sus "coches" no existen (la clase
+  +0x14 de c2c7 es la bocina, 0x29b798 lee el boton 0x10 / 8 con 0x1b4518).
+- Portado (main.c trafpet_pon; interfaz en comun/campeonato.h `camp_trafpet_t` / `camp_trafpet`): modelo[7] (ids del PS2,
+  repartidos en orden a los coches que nacen y a los de la lista de la peticion; los que la DC no tiene se quedan con el del
+  trafico), tope de vivos marcados, el LOD mas fino de los coches marcados y una marca para los que nacen; NULL lo quita. Lo
+  usan el 13 y el 14 (tope 4, LOD 1, sin marca: sus coches son los de la lista). Para el subtipo 6 de minijuego.c (sin tocar):
+  en su fase 1 `camp_trafpet(&r)` con sus modelos y HA_CAMP en marca, en la 5 `camp_trafpet(NULL)`; sus coches son los de
+  camp_autos con HA_CAMP.
+- DESVIACION / PROBABLE: el 0x6e del 13 no es un modelo que tenga la DC (se quedan los del trafico); el LOD ligero y el tope
+  son del port (por el polycount). El 11, 20 y 21 siguen con su camino SIMPLIFICADO (los coches que aparecen son los suyos).
+
+### HECHO (SIMPLIFICADO): tipo 13, la comida (0x2991b8)
+- Lo averiguado (0x2991b8 / 0x299dd8 / 0x299e80 / 0x29a0c8 / 0x299b58): el rotulo es "¡Alimenta a la chica!"; los coches son
+  la lista +0x5c de los parametros (como el 14: +8 seccion desde el inicio, +0xa carril; 0x22d4c0 pone +0xc en +0xd14 = 2 y
+  +0x10 en +0xd18 = la clase). +0x78 clases (3 como mucho) distintas al azar entre 3 (+0x8c), +0x9a fases (3 como mucho) que
+  parten [inicio, fin] a partes iguales (+0x7a); el objetivo de la fase k es la clase k. 0x29a0c8 da la clase a los que faltan
+  por poner: tras uno del objetivo con rand < 0,15 otro, tras otro con rand < 0,85 el objetivo, si no una al azar; se repite
+  0x87 secciones antes de cada cambio. Fase 4: cada coche de la peticion a menos de 4 posiciones por detras y 3 m (0x164f6c), o
+  golpeado: el bueno + 80 / p98 al medidor y +0x79 + 1, el otro la penalizacion + 40 / p98; se va (0x19c990); los que se quedan
+  atras se van (+0x38). Al pasar el cambio de fase, la voz 0x423220[fila][clase] (0x11c090). Dibujo: sobre cada coche el
+  sprite 0x4231d8[fila][clase] del banco 0x46 (comida), x 1,5 el del objetivo y x 0,75 los demas; fila = +8 de los parametros
+  (el azar del banco FOOD, 0x22ac00). Nota 6: n = +0x79 > p98 ? (n < p99 ? (n - p98) / (p99 - p98) x 30 : (n - p99) x 5 + 30)
+  : 0, + 40 x 0x22f090. p98 / p99 / +0x9a son bytes de +0x98..+0x9a de los parametros.
+- tools/conv_camp.py: 'C131' detras de 'M161' (u8 sprite[6][3] = el grupo MJ_kk de MJHUD.DAT, u16 voz[6][3]; por peticion
+  coches, clases, p98, p99, fases, +0x64, +0x66 y la lista): 25 peticiones, 14..76 coches, 2 936 bytes; los sprites que el
+  16 no tenia van detras en MJHUD.DAT (solo 460006).
+- Portado: comun/campeonato.c (case 13, reparte13, camp_coche13, camp_autos, camp_spr3d) y main.c (los coches de la lista
+  con los del 14). SIMPLIFICADO: sin el panel del objetivo (0x231fe0) ni el vaiven del sprite (0x136d60); efectos del toque
+  0xd6 / 0xd4 (SUPUESTO, los del 14); la voz de la fase 1 por la cola de voces (0x1ac3d8 con 0x3c, 0xb).
+- E (Holly nodo 15 lista 0, Palm Beach 13/0 140..565, `-DPRUEBA_C13`: los del objetivo a 1 seccion cuentan como tocados;
+  cap8/t13b): "comida: 68 coches, 3 clases (0 2 1), 3 fases, umbrales 20 / 26, fila 5", los dos cambios de objetivo (secciones
+  282 y 424), 22 buenas y 2 malas (de verdad: los otros a menos de 3 m), "peticion 13 hecha: 88 - 4, nota 6, 80 + 50
+  corazones"; el rotulo "¡Alimenta a la chica!" y los sprites de comida sobre los coches (cap8/t13b/q_056.png,
+  z_q_056.png). NO verificado: toques sin PRUEBA_C13 (el piloto no apunta a los coches; sin ella 8 buenas y 7 malas, nota 0).
+
+### Medidas (Flycast, DIAG_MS, la misma pasada; medidas entre "TRAFPET: puesto" y "peticion 13 hecha")
+| elemento | tramo | fps con / sin | triangulos de la escena con / sin | suyos |
+|---|---|---|---|---|
+| 13, coches y sprites (sin `-DDIAG_SIN_C14`) | 13/0 140..565, 49 / 45 muestras (cap8/m13_con, m13_sin) | 37,78 / 38,56 (mediana 38,70 / 39,30) | 18117 / 18005 | 4 coches como mucho (LOD 1) y sus sprites |
+| 13 con el LOD 0 (`-DDIAG_TP_LOD0`) | el mismo (m13_l0) | 37,73 | 17960 | |
+- Por encima del ~0,3 que se pedia: -0,6 fps de mediana. Un cuadro de 22 fps (la primera subida de los sprites de MJHUD.DAT
+  al aparecer, que lee del GD en el cuadro) y +0,35 ms de logica / +0,44 ms de dibujo. El LOD ligero no se nota en los
+  triangulos (el LOD 0 solo va a menos de ~70 m y con el tope de 4 apenas hay coches tan cerca): PENDIENTE subir los 3
+  sprites de la peticion en su fase 1 y medir con mas pasadas.
+
+### Lo que queda
+- 13: el panel del objetivo, el vaiven del sprite, la subida de sus sprites al anunciar la peticion (el tiron de un cuadro) y
+  bajar su coste (arriba).
+- El generador en el 11, 20 y 21 (siguen SIMPLIFICADOS) y en el subtipo 6 de los minijuegos (la interfaz esta; lo llama quien
+  porte el 6). El 22 no tiene coches en el original.
+- Pruebas nuevas (solo con defines): PRUEBA_C13, DIAG_TP_LOD0, DIAG_HUD_TROZOS, DIAG_RESERVA. Datos nuevos: CAMP.DAT +2 936 bytes
+  ('C131'), MJHUD.DAT +6,3 KB (285 056 -> 291 360).
+
+## COAST 2 COAST: campeonatos, novena tanda (agente c2c9, 2026-11-28)
+
+Sobre integra b41fb8c (con c2c8). Rama local c2c9, sin push. Todo en Flycast (nivel E), no en la consola. Datos de prueba:
+$S/modos/c2c/dat9 (CAMP.DAT de `python3 -I tools/conv_camp.py $S/ps2/or2.iso $S/modos/c2c/dat9`: sus 38 686 primeros bytes
+iguales byte a byte a los de dat8, C131 incluido, y detras 'M163', 600 bytes; MJHUD.DAT, CAMPHUD.DAT, CAMPOBJ.DAT y VOCESM.DAT
+iguales a los de datos8) montados con h9/datos2.sh ($S/dmip + dat_int + dat9 en modos/c2c/datos9). Scripts en $S/modos/c2c/h9
+(los de h8 para este worktree; corte.py: fps, cpu, triangulos y partes de PRF entre dos lineas del registro, todos los
+registros cortados al mismo s; corrA.sh / mkA9.sh: lo mismo con la base b41fb8c en modos/c2c/A9; p166.py: las peticiones de
+un tipo / subtipo en los guiones con su lista +0x5c). Capturas y registros en $S/modos/c2c/cap9.
+
+### HECHO: tipo 13, el tiron y el coste
+- De donde salia el coste (Palm Beach 13/0, -DDIAG_MS, PRF y -DDIAG_C13T): ~0,7 ms por cuadro en la parte 2D (l2 1167 us
+  frente a 436): ha_spr3d bajaba de la VRAM los grupos que no se veian en el cuadro y los volvia a leer del GD al verse
+  otra vez (cada lectura 12..17 ms, -DDIAG_SPR13), y el primero el cuadro de 22 fps; +0,35 ms de logica: los coches de la
+  lista (4,8 coches de media, 120 us por coche y paso; coche_coloca 67 us, de ellos 4 coli_altura con 3 en modo 0x400 de
+  cerca); los triangulos (+112 de media) apenas.
+- Arreglos: (1) camp_spr3d da los 3 sprites de la peticion con cuadro -1 desde el anuncio (fase 1) y ha_spr3d los sube (uno
+  cada 16 cuadros) y no los baja hasta que acaba: sin el tiron ni las relecturas; (2) coli_altura guarda cosf / sinf del giro
+  del marco (los mismos valores; se calculaban 2 por consulta con la libreria, lenta) y coche_coloca no calcula ca / sa
+  cuando el coche se asienta con traf_asienta (afecta a todo el trafico, la misma imagen); (3) los coches de la peticion con
+  el LOD ligero (tp.lod = 1, c2c8) se asientan con 0x100 en vez de 0x400 (el original usa 0x400 solo en el LOD 0, que estos
+  no dibujan: PROBABLE igual al original para el LOD que se ve).
+- HECHO (SIMPLIFICADO): el icono del objetivo (0x2994ac / 0x2998b4 -> 0x231fe0 con 0,5 y 0x2320d8): el sprite de la clase
+  pedida crece en el panel (176, 78) y a los 2 s sube a (180, -110) a 0,75, como el regalo del 16/4; otra vez al cambiar
+  +0x1d (15 secciones antes del cambio de objetivo). SUPUESTO el sitio y los tiempos (los de c2c16b). Sin el vaiven
+  (0x136d60). cap9/t13p/mos_t13p.png: la sandia arriba a la derecha y sobre los coches.
+
+### HECHO: subtipo 6 de los minijuegos, los coches (0x2a3300 / 0x2a3510; comun/minijuego.c, -Os)
+- Lo averiguado: 0x2a3300 (fase 1): +0x78 = +8 de los parametros (el azar del banco CARS, 0..2), +0x7a = 0, la puerta 0 con
+  el carril bueno rand % n y sus simbolos a -1; 0x2a3bd0(lista +0x5c, +0x78 + 3) pone en +0xb de cada coche de la lista
+  (filas de 0x14 hasta +8 < 0 o +0xa < 0) la clase pedida con rand < 0,5 o una de las otras dos (3..5); 0x1f1a88 / 0x1f20e8
+  con los modelos +0x64 o 0x104 y 0x22dac0(+0x66 o 0x14). 0x22d0a0 (abre un coche de la lista; el mismo del 13 y el 14):
+  con el 16/6 en curso, si su +0xb es +0x78 + 3, +0x7a + 1 (0x22d278) y el modelo 0x415500[plaza % 3] (33, 34, 38); si no
+  0x415510 / 0x415530 [plaza % 7] (por la clave de la etapa); +0xd10 = la clase. 0x19c6f0 tine el coche por +0xd10 (3
+  rojo, 4 verde, 5 azul: el vector 0x577a48 que lee 0x19c488 para 0x111bb0). 0x2a3510 (fase 4): si el carril bueno de la
+  puerta 0 no tiene la cuenta, se la pone y los demas cuenta - 1 + rand % 3 (> 0 y distintos); la puerta como los demas
+  (0x29fb28, + 80 x 1,1 / puertas, el destello). Dibujo 0x2a36f8 -> 0x2a0138 / 0x2a0788: solo las puertas, numeros a 3.
+- tools/conv_camp.py: 'M163' detras de 'C131' (u8 contados[3] 0x415500, otros[7] 0x415510, otros_1a[7] 0x415530, u32 n y por
+  peticion {u16 peticion, u8 coches, 0, s16 +0x64, +0x66, coches x {s16 seccion desde el inicio, s8 carril, 0}}): 15
+  peticiones, 5..12 coches. Cada tabla comprobada por el codigo que la lee.
+- Portado: prepara6 (fase 1; camp_trafpet(&r) con +0x64 o 0x104, tope 4, LOD 1 y marca 0: los coches de la peticion son los
+  de la lista), mj_coche (main.c traf_aparece los abre como los del 13 / 14: 40 secciones por delante, la cuenta al abrirlos,
+  el modelo del juego si la DC lo tiene en la marca), la cuenta en la puerta 0 en la fase 4 y camp_trafpet(NULL) en la 5
+  (y en mj_libera). campeonato.c: pet11 / camp_autos con el 16/6 (los de atras salen del tope, HA_SUELTO), sin sprites.
+- DESVIACION: (1) el tinte: el color del coche x 0,5 + rojo / verde / azul por el color especular (sq_vtx_fe del fundido,
+  en el camino rapido de dibuja_indices; con color_mul por dibuja_malla costaba +1,5 ms de dibujo en la tercera peticion:
+  -0,6 fps); 0x111bb0 SIN averiguar (PROBABLE que multiplique). (2) Tope de 4 coches de la lista vivos (los del 13 / 14): de 7
+  coches salen 4 y la cuenta solo cuenta los que salen (el original los abre todos). (3) El modelo de los demas al azar de
+  0x415510 (sin 0x415530 ni plaza % 7); 0x104 no es un modelo de la DC (el trafico de siempre). (4) Sin 0x22dac0.
+- E (Industrial Complex al reves, PRUEBA_CAMP=2 PRUEBA_CAMP_NODO=10 PRUEBA_CAMP_LISTA=0, 16/6 135..255, 325..460, 530..610;
+  cap9/t6a, t6b): "MJ: coches: 7 en la lista, la clase 5 (azar 2)", "MJ: coche 3 ...: clase 5, modelo 38, cuenta 1", la
+  puerta "carril bueno 0 de 2 (1 2)", con PRUEBA_MJ "bien" y "peticion 16 hecha: 88 - 0, nota 6" en las tres; sin
+  PRUEBA_MJ (m6_con2) las mismas notas (el piloto acerto por azar). Capturas: t6a/r_080.png (el "1" y el "2" verdes de la
+  puerta entre los conos), t6a/r_050.png y t6b/zoom_t6b.png (coches rojo, verde y azul). NO verificado: el carril elegido
+  conduciendo; la voz del banco CARS (Flycast sin audio, por el registro).
+
+### HECHO: el generador en el 11, 20 y 21 (campeonato.c trafpet_fijo)
+- Lo averiguado: 11 (0x294c50): +0x64 o, sin el, 0xa5 con el subtipo 1 y 0x96 con el 0; 20 (0x296290): +0x64 o 0x104; 21
+  (0x2929bc): +0x64 o 0xb4; los tres con 0x22dac0 y 0x1f20e8(0) en la fase 5.
+- Portado: camp_trafpet(&r) en la fase 1 con esos modelos (tope 0, LOD 0, marca 0: camp_autos sigue marcando los que nacen
+  por delante, como hasta ahora) y NULL en la 5. Ninguno de esos modelos esta en la DC: el trafico sale como antes
+  (SIMPLIFICADO: lo que cambia es que el registro esta puesto mientras dura la peticion).
+- E: Clarissa nodo 4 lista 1 (cap9/t2021w): "TRAFPET: puesto (modelo 260 ...)" en los dos 20 y "(modelo 180 ...)" en el 21,
+  "quitado" en cada fase 5, "peticion 21 hecha: 94 - 0, nota 6, 80 + 90 corazones" (lo mismo que c2c6); BEAC 11/0 con
+  PRUEBA_C11 (cap9/t11w): "(modelo 150 ...)", 4 de 10 golpes y "peticion 11 hecha: 32 - 0, nota 3", igual que la base
+  (cap9/t11a).
+
+### Medidas (Flycast, DIAG_MS, la misma prueba con y sin; corte.py, cortadas al mismo s)
+| elemento | tramo | fps con / sin | cpu (dib + log) con / sin |
+|---|---|---|---|
+| 13 de c2c8 (base) | PALM 13/0, s 885..3988 | 37,83 / 38,81 (-0,98; min 21,5) | 23,89 / 22,92 |
+| 13 ahora (sprites fijos, coli) | el mismo | 38,27 / 38,56 (-0,29; min 33,9) | 23,34 / 22,97 |
+| 13 ahora, antes del asiento 0x100 | CAST 13/0, s 2209..3534 | 39,36 / 39,74 (-0,38) | 22,52 / 20,35 |
+| 13 final (asiento 0x100) | el mismo | 39,59 / 39,74 (-0,15) | 22,63 / 20,35 |
+| 16/6 con color_mul | IND_r 16/6 x 3, s 882..4863 | 38,97 / 39,26 (-0,29; la tercera -0,61) | |
+| 16/6 final (tinte especular) | el mismo, s 882..4841 | 39,16 / 39,27 (-0,11; -0,10 / +0,93 / -0,16) | 23,41 / 22,27 |
+| 11 / 20 / 21 (generador) | BEAC 11/0, s 506..2297 (base / c2c9) | 38,91 / 39,30 | |
+| 20 / 21 (generador) | Clarissa nodo 4 lista 1, s 536..7185 (base / c2c9) | 38,90 / 38,88 | 20,78 / 20,80 |
+("sin" del 13: -DDIAG_SIN_C14, sin los coches ni sus sprites; del 16/6: -DDIAG_SIN_MJ6, sin los coches de la lista.) El cuadro
+de 22 fps ya no sale (el minimo de la peticion 33,9 en PALM, 37,8 en CAST); las tres subidas fijas al anunciar cuestan un
+cuadro cada una (12..17 ms, separadas 16 cuadros). En el 13 queda ~1 ms de logica y ~0,5 ms de dibujo por los 4 coches de
+la lista (el original los tiene; tope y LOD ligero de c2c8).
+
+### A/B general y RAM
+- h9/ab.sh (PRUEBA_AUTO, 140 s, nodos 0 y 1; A = la base b41fb8c en modos/c2c/A9, B = c2c9; RES=cap9/res tabla2.py A B):
+  PALM 38,52 / 38,51 (s comun 2722), LAKE 39,45 / 39,36, media 38,99 / 38,94 (ruido); 4 de 4 con la voz, 0 "Out of memory".
+- RAM al arrancar (h9/nav3.sh, MODO_JUEGO=1, sin defines, compilado limpio, datos9; cap9/nav3f): "VOZ: VOCES.DAT, 35
+  muestras", "RAMMAPA arranque: libre 495K" (igual que c2c8), menu 496K, carrera OutRun 786K, sin "Out of memory".
+- El codigo nuevo (+2,9 KB de .text) pasaba .init de 0x8c0cc000 a 0x8c0ce000 (-8K). Recuperado con -Os (FRIO) en funciones que
+  solo corren al cargar o en un suceso: main.c gh_empieza, meta_entra, fin_empieza, ha_meta_carga, sol_carga, traf_ani_lee,
+  curso_lee_etapa, meta_lee, repsec_lee, hueco_pcarga, curso_busca, coche_color, sube_inicia, libera_modelo, trafpet_pon,
+  ta_meta_final; hud.c hudd_abre, pal_reparte, hudd_grupos_carga; sfx.c sfx_inicia, voces_lee; robot.c robot_inicia,
+  robot_band_inicia; or2_fisica.c or2_carga_param; gho.c gho_lee (ninguna del dibujo ni de la fisica por cuadro). .text
+  0xbbff0: OJO, quedan 16 bytes hasta el siguiente paso de 8 KB.
+
+### Lo que queda
+- 13: el vaiven del sprite (0x136d60); ~0,15..0,3 fps por los 4 coches de la lista (logica y dibujo).
+- 16/6: los 7..12 coches de la lista enteros (tope 4), 0x415530 / plaza % 7, 0x22dac0, el tinte exacto de 0x111bb0.
+- 11 / 20 / 21: sus modelos (0x96 / 0xa5 / 0x104 / 0xb4) no estan en la DC.
+- Pruebas nuevas (solo con defines): DIAG_SPR13 (cada subida de los sprites del 13 con su tiempo), DIAG_SIN_SPR13, DIAG_C13T
+  (us por paso de aparecer / mover / choques / gestor del trafico), DIAG_SIN_MJ6. Datos nuevos: CAMP.DAT +600 bytes ('M163').
+## Ferrari con menos vertices (agente ferrari, 2026-11-28; DESVIACION del port)
+Menos vertices en los coches del jugador, en el menu (COCHEnn.DAT) y en la carrera (COCHEnnL.DAT), con el colapso de
+aristas de `tools/conv_coche.py` (simplifica) y los parametros nuevos de la linea de ordenes (--razon, --menu-razon,
+--error, --giro, --borde, --cerca; el parche del agente fps2, terminado). Silueta, ruedas, luces, habitaculo de la vista
+interior y el bloque CEX2/ANI1 salen como antes: lo que no es simplificable no se toca. La ficha 7 del Mod (taxi) no se
+genera nunca.
+- Llamada (por ficha k, la del paso `coche<k>` de tools/regenera.py, anadiendo a `--visible`):
+  `conv_coche.py <iso> --todos <dir> --fichas k --visible --razon 0.3 --error 0.05 --giro 0.3 --borde 3 --cerca C --menu-razon 0.6`
+  con C = 0.02 en las fichas 1, 3, 8, 12 y 13 y C = 0.005 en las 0, 2, 4, 5, 6, 9, 10, 11 y 14.
+- Vertices en el fichero (antes = lgdat2): menu -23 % a -30 % en las 14; carrera -16 % a -28 % (0, 1, 3, 5, 8, 11, 12, 13,
+  14 por encima del -20 %; 2, 4, 6, 9 y 10 entre -16 % y -20 %: con --cerca 0.005 no dan mas sin quitar el limite de giro).
+- A/B en Flycast (PRUEBA_AUTO, coche ficha 0, mismo s): PALM 38,80 -> 38,96 fps, CLOU 36,37 -> 36,80, METR 37,03 -> 36,98;
+  triangulos por cuadro 18622 -> 17076, 17598 -> 16039, 15448 -> 13820 (-1550 de media). RAM al arrancar: libre 495K antes, 500K despues;
+  VOZ 35 muestras, sin Out of memory. Mejora pequena en fps (+0,2 de media): el coche no es lo que limita.
+- PENDIENTE: integrar la llamada en tools/regenera.py y en el programa de Windows (FICHAS_ISO sin la 7).
+## fps3: decoracion -15 % y edificios de PALM 32x32 (agente fps3, 2026-11-28; DESVIACION pedida)
+
+Pedido del usuario, para ganar fps en todas las etapas: (1) quitar un 15 % de los arboles, arbustos y vallas
+publicitarias de cada etapa, repartido de forma uniforme y determinista, respetando lo que tiene funcion (lo de las
+peticiones y campeonatos, la meta, los checkpoints y las bifurcaciones); (2) en PALM, las texturas de los edificios a
+32x32, cuadradas y compatibles con los mipmaps y los libros VQ. Sobre la rama integra (b41fb8c). Sin cambios en el
+codigo de la demo: todo en los datos, con una herramienta que el programa de Windows rehace desde los discos.
+
+**Herramienta**: `tools/aligera.py --datos entrada/ salida/ trabajo/` (y `--info entrada/ [SEGnn...]`, `--solo`,
+`--sin-decor`, `--sin-palm`), sobre una carpeta de datos ya hecha, como `tools/remip.py` (recompone las SEG de SEGS.PAK
+y reempaqueta con pak_union.py). `tools/regenera.py` la pasa al final, una vez, detras de remip (marca
+`trabajo/aligera.hecho`); `windows/construye.sh` copia `demo/decor_tabla.h` junto a las tools del programa (la tabla de
+vegetacion de la demo). Determinista: los mismos nodos y los mismos bytes en dmip (con mipmaps) y en lgmod2 (sin ellos;
+mismas cuentas en las 62 etapas).
+
+### 1. Decoracion -15 % (las 62 SEGnn.DAT)
+- Que se quita: las mallas del nodo con 0 vertices (la demo no dibuja las de menos de 3), con su version lejana de
+  lod_veg.py y, en los arboles, su tronco si va en otro nodo (la misma regla que decor_reduce).
+- Vegetacion: los nodos que `decor_reduce` (demo/main.c) toma por vegetacion (decor_tabla.h y sus medidas) y que el
+  no quita ya (su hash: 6 de cada 20). El 15 % es de lo que se veia: PALM 399 a la vista, 60 fuera; en el registro
+  de la demo "DECOR: 575 de vegetacion" pasa a 515 y lo que quita ella sigue igual (176).
+- Vallas publicitarias: nodos con una malla de un anuncio. Los anuncios se reconocen por la firma de su textura
+  (16x8 colores, RMS < 15; con o sin mipmaps, tambien en espejo) frente a los patrocinadores de PALM y TULI
+  (REF_ANUNCIO, numeros de textura: se rehacen desde el disco). En las 62 etapas salen 285 texturas parecidas, todas
+  anuncios mirados a mano (cap/anuncios.png: <= 8,3 de distancia; lo siguiente, 23,8). Solo la valla entera (de 8
+  a 64 vertices, <= 16 m de planta, >= 2,5 m de alto: el cartel con su marco), fuera del asfalto (mas de 1 m) y a
+  mas de 100 m del principio y del final de la ruta. No: los paneles sueltos de las gradas y del muro de la salida
+  de PALM (un cuadrilatero pegado a la estructura: quedaria el hueco).
+- Reparto: los candidatos de cada clase ordenados por su punto de la ruta (en el mismo sitio, por un hash de la
+  posicion) y fuera uno de cada 1 / 0,15 seguidos: el 15 % exacto y a lo largo de toda la etapa, nunca un tramo.
+- Lo que no se toca: carteles de la carretera (flechas, SLOW DOWN, la pancarta CHECK POINT), farolas, publico,
+  edificios. Los objetos de las peticiones y de los campeonatos (HAOBJ, CAMPOBJ, INFARTOP...) y la meta (META.DAT) son
+  otros ficheros: ninguna valla de las etapas forma parte de una peticion.
+- Total (62 etapas): vegetacion 12 306 a la vista, 1 845 fuera (15,0 %); vallas 329, 50 fuera (15,2 %); 56 etapas
+  cambian (en SEG04 INDU, SEG28, SEG37 y SEG64 no hay vegetacion en la tabla ni vallas). Por etapa del modo OutRun
+  (vegetacion vista / fuera, vallas / fuera): PALM 399/60, 33/5; LAKE 239/36, 6/1; ALPI 547/82, 12/2; CAST 86/13;
+  FORE 555/83; DESE 203/30; CLOU 960/144, 18/3; INDU 0; SNOW 284/43; GHOS 146/22; TULI 119/18, 28/4; METR 124/19;
+  RUIN 52/8; IMPE 282/42; CAPE 322/48.
+
+### 2. PALM: fachadas a 32x32
+- Elegidas a mano en la hoja de las 170 texturas de SEG00 y su uso (cara vertical, alto de los nodos): 30 de ventanas,
+  paredes de edificios, rascacielos del fondo y almacenes del puerto (EDIF_PALM: 14, 40, 41, 44, 45, 48, 50, 53, 54,
+  62-64, 66, 67, 69, 72, 73, 77, 80-83, 85-91, 124). No: carretera, aceras, empedrado, muros de piedra del paseo,
+  rocas, cielo, palmeras (troncos y hojas), plantas colgantes, publico, coches aparcados, letreros de los hoteles
+  (43, 47, 52, 56, 75, 76), anuncios, farolas, la noria (95).
+- Cada una: el nivel mayor de ahora reducido por promedio (128 o 64 -> 32; 82 era de 128x64) a 32x32 cuadrada con
+  mipmaps; VQ con niveles y libro reducido (remip.codifica: 88 entradas, error RMS 1,5-8,2, todas en VQ) y el D adjust
+  de remip se queda. En recorte (ARGB1555), el alfa de cada nivel guarda la cobertura. En las uniones del curso de PALM
+  no hay ninguna con los mismos bytes (no cambia ninguna BK).
+- VRAM de SEG00: 569 -> 482 KB con mipmaps (dmip; -87 KB); en la Mod (lgmod2, sin mipmaps) 451 -> 412 KB.
+- Capturas (cuadro congelado `-DDIAG_CONGELA=1200`, PRUEBA_NODO=0, mismo binario, dmip / fps3):
+  scratchpad modos/fps3/cap/palm_1200_antes_despues.png (falta la valla de AMD de la fila de la izquierda y alguna
+  planta; los edificios mas lisos), palm_1200_edificios_zoom.png (la fachada grande de la derecha pierde casi todo el
+  detalle de las ventanas), palm_2400_antes_despues.png (los rascacielos del fondo: casi igual, ya usaban niveles
+  pequenos de lejos) y edif_texturas_antes_despues.png (las 30 texturas antes y despues).
+
+### Medida (Flycast; NO emula el coste de relleno de la PowerVR)
+`-DPRUEBA_AUTO -DPRUEBA_SIN_TIEMPO -DDIAG_MS -DDIAG_POPPING -DPRUEBA_NODO=n`, 140 s, el mismo binario con dmip (A) y con
+dmip + fps3 (B), cada etapa cortada al mismo s (tabla2.py de fps2 y tabla3.py: triangulos y vertices por cuadro, VRAM
+libre de la zona al subir la etapa, nodos de la precarga):
+
+| Etapa | s comun | fps A / B | tri/cuadro A / B | vtx/cuadro A / B | cpu ms A / B | VRAM libre zona tras la etapa (K) A / B | nodos de la precarga A / B |
+|---|---|---|---|---|---|---|---|
+| PALM | 3508 | 38,2 / 38,3 (0,03) | 18595 / 18616 (+0,1 %) | 29027 / 29049 | 23,55 / 23,52 | 742 / 829 | 402 / 426 |
+| LAKE | 2116 | 39,4 / 39,4 (0,07) | 19718 / 19939 (+1,1 %) | 31195 / 30638 | 21,51 / 21,42 | 742 / 742 | 158 / 149 |
+| ALPI | 2272 | 39,4 / 39,4 (-0,06) | 17104 / 16950 (-0,9 %) | 27074 / 26901 | 20,51 / 20,41 | 742 / 742 | 361 / 347 |
+| CAST | 1883 | 39,1 / 39,2 (0,05) | 20498 / 20443 (-0,3 %) | 30939 / 30944 | 23,18 / 23,21 | 769 / 769 | 340 / 340 |
+| FORE | 3283 | 39,3 / 39,4 (0,16) | 13831 / 13811 (-0,1 %) | 21895 / 21831 | 19,62 / 19,50 | 720 / 720 | 686 / 649 |
+| DESE | 4290 | 39,0 / 39,0 (-0,06) | 16227 / 16302 (+0,5 %) | 24215 / 24370 | 19,39 / 19,41 | 784 / 784 | 253 / 243 |
+| CLOU | 7280 | 36,9 / 36,9 (0,00) | 16906 / 17009 (+0,6 %) | 27371 / 27431 | 24,14 / 24,15 | 742 / 742 | 303 / 301 |
+| INDU | 1282 | 39,3 / 39,2 (-0,08) | 15112 / 15051 (-0,4 %) | 23975 / 23828 | 20,90 / 20,85 | 742 / 742 | 233 / 233 |
+| SNOW | 5878 | 39,5 / 39,5 (-0,08) | 14860 / 14847 (-0,1 %) | 23263 / 23248 | 19,04 / 18,97 | 742 / 742 | 183 / 181 |
+| GHOS | 4627 | 37,9 / 37,8 (-0,06) | 18013 / 18055 (+0,2 %) | 26281 / 26332 | 23,55 / 23,52 | 742 / 742 | 496 / 492 |
+| TULI | 5174 | 38,8 / 38,8 (-0,01) | 17003 / 16841 (-1,0 %) | 26759 / 26597 | 22,05 / 22,01 | 742 / 742 | 468 / 455 |
+| METR | 2555 | 36,8 / 37,0 (0,21) | 16033 / 15974 (-0,4 %) | 26464 / 26199 | 25,11 / 24,81 | 742 / 742 | 255 / 254 |
+| RUIN | 5172 | 39,1 / 39,3 (0,20) | 15674 / 16124 (+2,9 %) | 23701 / 24449 | 19,07 / 19,31 | 748 / 748 | 442 / 439 |
+| IMPE | 5348 | 39,1 / 39,1 (-0,01) | 13853 / 15053 (+8,7 %) | 21950 / 23678 | 19,19 / 19,74 | 592 / 592 | 237 / 233 |
+| CAPE | 4764 | 39,2 / 39,1 (-0,08) | 11386 / 12718 (+11.7 %) | 18413 / 20364 | 17,68 / 18,33 | 742 / 742 | 350 / 341 |
+| **Media (15)** | | 38,7 / 38,8 | 16321 / 16515 (+1,2 %) | 25502 / 25724 | | | |
+
+- Lo que se ve: en Flycast **los fps no cambian** (media 38,74 / 38,76; las diferencias por etapa, +-0,2, son ruido de
+  la carga de la maquina) y los triangulos por cuadro tampoco bajan (+1,2 % de media). La escena va por el tope del TA
+  (reparto de nodos_visibles): lo que se quita lo gasta el reparto en dibujar mas de lo que antes no cabia (PALM: 402
+  -> 426 nodos en la precarga, estimado 1198 -> 1286 K; IMPE +8,7 % y CAPE +11,7 % de triangulos: mas distancia de
+  dibujo). El popping por el tope, igual (8 px+ por s, sumado en las 15: 205,7 / 207,8; 32 px+ 43,8 / 45,2). En la consola, menos relleno de recorte (hojas y vallas) y texturas de PALM 4-16 veces menores en la
+  cache de texturas de la PowerVR: PROBABLE que gane algo en las zonas que van por el relleno; NO medido.
+- VRAM: solo PALM, +87 KB libres en la zona tras subir la etapa (742 -> 829 K).
+- RAM: el codigo no cambia. nav3.sh (compilacion normal, datos fps3): "RAM: al arrancar ... libre 495K", "VOZ:
+  VOCES.DAT, 35 muestras", sin "Out of memory"; en las 30 tiradas de prueba (15 etapas x 2), 35 muestras y ningun "Out of memory"
+  (las de PRUEBA_AUTO arrancan con 449K: lo mismo en A y en B, son los defines de la prueba).
+- GD: SEGS.PAK 239 342 308 -> 239 397 190 bytes (+54 KB: los trozos de pak_union cambian donde hay mallas a 0);
+  ningun SEG crece (el hueco de la etapa no cambia).
+
+### DESVIACIONES respecto al original
+- Faltan el 15 % de los arboles, arbustos y palmeras que se veian (ademas del 30 % de la Rev 2.9.2.a) y el 15 % de
+  las vallas de patrocinadores (ademas de 1 de cada 3 repetidas iguales de decor_reduce: si al quitar una quedan
+  menos de 3 iguales, la demo ya no quita otra de esas).
+- PALM: 30 texturas de fachadas a 32x32: de cerca las ventanas y los rascacielos se ven borrosos o lisos.
+- No se ha medido en la consola; Flycast no puede mostrar la ganancia (no emula el coste de relleno).
+
+### Datos (solo en scratchpad)
+- modos/fps3/dat: SEGS.PAK y 61 descriptores / sueltas SEGnn.DAT (la clasica, desde dmip); modos/fps3/datos: carpeta
+  de prueba (enlaces a dmip con lo de dat encima). modos/fps3/mod: lo mismo desde lgmod2 (la Mod; la ficha 7, el taxi,
+  no se toca: solo etapas). Registros: modos/fps3/res (aligera_dmip.txt, aligera_mod.txt, A*/B*, nav).
+
+### Queda
+- Medir en la consola real (Y en la pausa: PowerVR y TA) PALM y una etapa de bosque (CLOU, FORE) con y sin fps3.
+- Si se quiere que Flycast muestre algo: el 15 % solo baja los triangulos con un tope del TA mas alto o fijo.
+
+### Auditoria de las fachadas de PALM ("no tienen detalle", 2026-11-28)
+- De las 30 texturas de EDIF_PALM, 17 eran de 64x64 y 13 de 128x128 (o 128x64): 63, 66, 67, 69, 72, 73, 82, 83, 85, 86,
+  87, 89 y 90, casi todas rejillas de ventanas de rascacielos con un periodo de 3-4 texeles. Reducidas a 32x32 por
+  promedio, cada ventana quedaba por debajo de un texel y la fachada se fundia en una mancha gris (comparativa con
+  filtro Lanczos y enfoque: no lo arregla y rompe los recortes con alfa).
+- Ahora cada fachada pasa a la mitad de lado (`aligera.lado_de`): las de 64 a 32x32 y las de 128 a 64x64. En Flycast,
+  PALM a 1200 m se ve como el original. Las 54 etapas restantes y la decoracion -15 % no cambian (mismos bytes
+  recompuestos). La VRAM de PALM baja de 569 a 499 KB.
+- Probado y descartado: el D adjust 0,5 en las fachadas (un nivel de mip mas nitido para las paredes vistas de canto).
+  En Flycast no cambia nada visible y en la consola real puede centellear. La pared grande de la derecha ya se veia
+  algo borrosa en el original: la PowerVR no tiene filtro anisotropico.
+
+## COAST 2 COAST: campeonatos, decima tanda (agente c2c10, 2026-11-28): voces del minijuego de los coches y nivel de SPLASH WAVE REMASTER
+
+Sobre integra 14bf114 (rama c2c10, sin push). Pruebas solo en Flycast (`-DPRUEBA_AUTO -DPRUEBA_CAMP=0/1/2 -DPRUEBA_SIN_TIEMPO`,
+datos $S/dmip). Afecta igual a la clasica y al Mod (el codigo de vozmis.c y menu_musica.py es comun).
+- FALLO (c2c9): vm_etapa sumaba el azar del 16/6 (rand % 3, 0x22afec) al banco: CARS + 0..2 = CARS, UFO.pak o HOLDLINE.pak
+  (vacio). El azar elige la voz y los coches, no el banco (solo FOOD1..6 del 13 son bancos seguidos). Antes: "VOZM: etapa con
+  4 bancos (COMMON.pak RANK3.pak HOLDLINE.pak FOOD1.PAK)" y el 16/6 sin las voces 0x18a / 0x15e; ahora CARS.PAK y suenan.
+  vm_etapa reescrita sin crecer: .text 0xbbff0 -> 0xbbfd0 (integra iba a 16 bytes del paso de 8 KB de .init; la primera
+  version del arreglo lo pasaba: 491K libres al arrancar en vez de 499K). _end igual que integra.
+- FALLO (mezcla): MUS70.ADP / MUS71.ADP (SPLASH WAVE REMASTER) a -18,5 / -18,9 dBFS RMS y los temas de carrera del original a
+  -11..-16 (mediana -13,6; pista entera decodificada del ADPCM de Yamaha): la cancion sonaba 5 dB por debajo y las voces
+  (-14,9 dBFS RMS mientras hablan, medido en Flycast con SDL disk y PRUEBA_MEZCLA=3) la tapaban. menu_musica.py la lleva a
+  -13,6 dBFS RMS con pico <= -0,5 dBFS (+5,0 dB). ALL I WANT del Mod (MUS67) ya esta en -11,8: sin cambio.
+- Sin cambio en el codigo de volumen (vol_se, musica_nivel, sfx_master) respecto de la Rev 2.9.9: no es una regresion del motor.
+## Ferrari aligerados: caras fuera de la carroceria (coches4, 2026-11-28)
+Fallo visto por el usuario en la Rev 3.0 y el Mod 2.6 ("los coches tienen poligonos fuera de sitio"). Causa medida (en
+los ficheros, Flycast solo para ver): la tanda "Ferrari con menos vertices" (`--razon 0.3 --error 0.05 --giro 0.3
+--borde 3 --cerca C`) deja en los COCHEnnL.DAT de carrera caras que se separan de la superficie original hasta 15-23 cm
+(fichas 0, 1, 3, 6, 12: entre 3 000 y 10 000 muestras a mas de 6 cm; los de lgdat2, con 0,6 y el tope 1e-3: 0-25
+muestras y un maximo de 3-9 cm); en las ruedas hasta 13 cm. No es un cambio de pieza ni de matriz: todos los vertices
+siguen en posiciones originales de su misma pieza (colapso u -> v a un vertice vecino de la misma pieza), ANI1 y los
+nodos (pieza << 8) salen identicos. Es el error que deja pasar `--error 0.05` (50 veces el tope, y el error es la
+cuadrica generalizada con UV, color y normal, no metros) junto con `--giro 0.3` (caras que giran hasta ~72 grados):
+puentes sobre huecos, esquinas cortadas y pliegues.
+- Arreglo en `tools/conv_coche.py`: `--dist d` (VIS_DIST; ligero y menu): un colapso solo vale si todas las caras nuevas
+  quedan a menos de d (m) de la superficie original de su pieza (muestras cada cm, 15 puntos por cara). Sin la opcion,
+  como antes. Con la llamada de la tanda y `--dist 0.025` (ficha 3): carrera 4430 vertices dibujados (4131 sin --dist),
+  maximo 3,2 cm (11 muestras > 3 cm, ninguna > 6 cm); menu 6463, maximo 2,4 cm. Ademas tarda la mitad.
+- Entregado: los Ferrari vuelven a los de lgdat2 (decision del coordinador). La llamada con `--dist 0.025` queda para
+  otra tanda; falta generar las 14 fichas y medir fps / triangulos en Flycast.
+- Medida: `$S/modos/coches4/sh/sup.py <completo.DAT> <x.DAT>...` (distancia de cada superficie a la del COCHEnn.DAT de
+  lgdat2, por pieza).
+
+## La acompanante y las peticiones: salida "Reset" de 489A90 (coches4, 2026-11-28)
+Fallo del usuario (Rev 3.0 y Mod 2.6): "la copiloto a veces se pone de pie en el coche". No viene de los datos: su sitio
+es T(asiento) de la tabla ASNT del RBT1 de la pareja por car+0x11 y ani_m[0] del bloque ANI1, que sale identico en los
+Ferrari aligerados (comprobado fichero a fichero); con los COCHE de lgdat2 tambien se ve igual. Lo nuevo desde la Rev
+2.9.9 (4b1c25b) es el estado R_POSE (c4fc1bc INFARTO, a8d040a C2C: robot_pide). Desensamblado de SLES-53998: cuando
+acaba la postura (0x203844..0x20385c: +78 == 2) el original pone Idle y salta a 0x203c98, que pone -1 en work+6C y +74
+(la salida Exit::Reset del PC, 48A647); igual en todas las reacciones salvo las de +68 / +70, la postura en curso y el
+giro con el coche cerrado. El port no lo hacia: una peticion que repetia el movimiento de la anterior (o la misma fila
+de caras) no se ponia y la acompanante se quedaba en la ultima postura de la reaccion anterior.
+- Arreglo: comun/robot.c acompanante(), `rs` y `lg.w6c = lg.w74 = -1` en esas salidas.
+- E (Flycast, `-DPRUEBA_AUTO -DPRUEBA_CAMP=1 -DPRUEBA_CAMP_PASA -DPRUEBA_SIN_TIEMPO -DDIAG_HA -DPRUEBA_FICHA=12`, 550
+  Barchetta, datos de lgdat2): antes, la peticion 4 pide 0x26000d como la 3 y no sale "DIAGHA acompanante: movimiento"
+  (no se pone); despues todas se ponen. PROBABLE, no visto: que esa postura que se queda sea la "de pie" del usuario; en
+  las capturas (200 s) no se ve de pie ni antes ni despues.
+
+## copi: la acompanante de pie encima del coche (DESVIACION, 2026-11-28)
+- El usuario lo vio en INFARTO con el Dino 246 GT y en Flycast se reproduce (ficha 13, menu INFARTO). Los movimientos
+  0x26000d (final de la peticion tipo 2) y 0x260010 (hoja de resultados del nivel), de CHRH.DAT, la ponen de pie con las
+  piernas por encima del techo: la altura media de sus huesos sube 0,65-0,70 m, mientras que las reacciones sentada no
+  pasan de 0,09 m. Los filtros de las peticiones son los del PS2 (desensamblado, coches4); la causa exacta (el hueso
+  raiz de esos movimientos con T(asiento)) queda sin confirmar.
+- Arreglo provisional en comun/robot.c (acompanante): si esa altura se aleja mas de COPI_DE_PIE (0,3 m) de la de
+  sentada (0x6004b), vuelve a sentada en el mismo cuadro. Probado en Flycast: corta los dos (DIAGHA "de pie con ...").
+
+## Recorte: farolas, carteles y muros de las bifurcaciones (agente recorte, 2026-11-28; DESVIACION pedida)
+
+Pedido del usuario (literal): "en todas las rutas en las bifurcaciones quites el 50% de las farolas, quiero que en
+todas las etapas quites el 50% de los carteles que están en los márgenes de carretera, quiero que en todas las etapas
+las texturas de los muros de las bifurcaciones estén en 32x32. en todas las etapas de outrun2 y outrun2sp". No esta en
+el original: es para aligerar. Solo datos (sin cambios en la demo), en `tools/aligera.py` (punto 3 de su docstring),
+sobre la rama integra (984f949). Probado solo en Flycast (no en consola real).
+
+**Herramienta**: `tools/aligera.py --datos entrada/ salida/ trabajo/` hace ahora tambien el recorte (`--sin-recorte`
+para no hacerlo, `--solo-recorte` para hacer solo el). `tools/regenera.py` lo pasa una vez detras de aligera (marca
+`trabajo/recorte.hecho`). Marca en los datos (`aligera.ya_recortado`): si los muros de BK00 ya son de 32, el recorte no
+se repite; la decoracion y PALM siguen con su marca de antes (`ya_hecho`), asi que pasar aligera sobre unos datos ya
+aligerados solo anade lo que falta. Determinista: los mismos nodos y mallas siempre (orden por la ruta y hashes de la
+posicion, como la decoracion).
+
+### 1. Carteles de la carretera -50 % (las 62 SEGnn.DAT)
+- Que es un cartel: el campo `cartel` de los nodos NO lo dice (>= 0 es la matriz de un cuadrilatero orientado a la
+  camara: los arboles lejanos de lod_veg.py; <= -2, la version lejana de un nodo). Los carteles se reconocen por la
+  textura del tablero: firma de 16x8 colores normalizada (media y contraste, para que salgan los de las zonas oscuras:
+  CAST, FORE, GHOS, FLOR) a menos de 20 de REF_CARTEL (flecha de curva amarilla en sus dos dibujos, SLOW DOWN, panel de
+  flechas rojas y blancas y flechas rojas de OR2SP; tambien en espejo) y mas cerca de ellas que de la pancarta CHECK
+  POINT (REF_NO_CARTEL). Distancias medidas: carteles <= 12,7; CHECK POINT <= 2,8 (de los otros); el resto de
+  texturas >= 27. Hoja de todas las elegidas (amarillo) y de las CHECK POINT descartadas (azul):
+  `$S/modos/recorte/an/tab2.png` (todas miradas: ninguna equivocada).
+- La unidad que se quita: en OR2SP (y en las flechas rojas de OutRun 2) cada cartel es un nodo propio de <= 30 m de
+  planta y <= 16 m de alto: el nodo entero con su version lejana. En OutRun 2 todos los carteles de la etapa y la
+  pancarta del checkpoint van en un solo nodo (el registro de obj_course_obj_cs_<zona>, conv_union.objetos_etapa): ahi
+  el cartel son sus tableros (a menos de 8 m entre si: flecha + SLOW DOWN) y sus postes (mallas de <= 3 m de planta a
+  menos de 7 m). Se quitan poniendo a 0 los vertices de sus mallas, como la decoracion.
+- Entran: flechas de curva, SLOW DOWN, paneles de flechas rojas y blancas de los quitamiedos, filas de flechas rojas.
+- No entran (se quedan): la pancarta CHECK POINT y sus postes, la salida y la meta, todo lo que esta a menos de 100 m
+  (PROTEGE) del principio o del final de la ruta, lo de mas de 30 m de ancho (porticos y arcos que cruzan la
+  carretera), los carteles de direccion de la bifurcacion (van en las uniones BKnn.DAT: el recorte no toca carteles
+  ahi) y las vallas publicitarias (su 15 % es de fps3).
+- Reparto: ordenados por su punto de la ruta y fuera uno de cada dos (el primero, el tercero...).
+- La demo no depende de estos nodos: demo/main.c usa `cartel` solo para dibujar (la matriz del nodo, malla_de_cartel)
+  y en los objetos de las peticiones y la union (otros ficheros); el aviso de la bifurcacion es la union.
+- Total (62 etapas): 1647 carteles, 831 fuera (50,5 %). OutRun 2 (carteles / fuera): PALM 8/4, LAKE 14/7, ALPI 18/9,
+  CAST 18/9, FORE 26/13, DESE 24/12, CLOU 8/4, INDU 64/32, SNOW 16/8, GHOS 22/11, TULI 18/9, METR 24/12, RUIN 24/12,
+  IMPE 41/21, CAPE 21/11. OR2SP: BEAC 10/5, SANF 65/33, YOSE 13/7, NIAG 20/10, SEQU 12/6, GRAN 21/11, MACH 12/6,
+  LASV 17/9, ALAS 29/15, AMAZ 25/13, EAST 28/14, MAYA 16/8, PRIN 25/13, FLOR 40/20, NEWY 22/11. El resto son las
+  copias de las misiones de C2C (las mismas etapas con otra luz); en SEG62 hay 270 (una fila de flechas rojas cada
+  8 m en la curva: cada panel cuenta como uno).
+
+### 2. Farolas de las bifurcaciones -50 % (las uniones BKnn.DAT)
+- Todas las bifurcaciones son la misma geometria (cs_BK_PALM con la luz de cada zona). Farola: nodo con las dos
+  texturas de la farola de BK00 (FAROLA_BK: el poste y la cabeza, por sus bytes: las mismas en todas las uniones) de
+  mas de 8 m de alto (15,3 m). 116 por bifurcacion (46 en las 39 uniones de otra variante); fuera una de cada dos por
+  ruta (la de la union, tronco y rama izquierda, o la de BKD.DAT, rama derecha: la mas cercana) y lado: 59 de 116.
+- Total: 489 uniones con farolas (OutRun 2 BK00-BK09, OR2SP BK15-BK24, las de las misiones y la Contrarreloj, en
+  UNIONES.PAK, UNIONESTA.PAK y UNIONESR.PAK): 53 994 farolas, 27 486 fuera (50,9 %). Las metas (BK10-14, BK25-29) no
+  tienen farolas de la bifurcacion y no cambian. No se tocan los destellos de las luces ni los porticos.
+
+### 3. Muros de las bifurcaciones a 32x32
+- MUROS_BK de BK00: textura 1 (128x128, muro de contencion inclinado gris con hierba arriba, los muros altos a los
+  lados de las ramas) y 12 (128x128, muro bajo de hormigon de 400 m). Elegidas en la hoja de BK00
+  (`$S/modos/recorte/an/bk00.png`) y por su uso (inclinacion de las caras). No entran: el quitamiedos (0, 256x256, es
+  una valla de 1 m), el hormigon del arcen (3: el 93 % en el suelo), las del suelo, cielo, vegetacion y carteles.
+- A 32x32 cuadradas con mipmaps, como los edificios de PALM (remip.remuestrea + remip.codifica, VQ con libro reducido
+  o 16 bits; D adjust el que tenian o el de remip.sesgo si eran rectangulares). En todas las uniones con los mismos
+  bytes y tambien con la misma imagen en otro tamano (firma < 3: en BK02..BK09 el muro bajo es de 128x32), para que la
+  VRAM las siga compartiendo: 978 texturas en 489 uniones, 2 por union. VRAM de cada bifurcacion: 205 -> 193 KB
+  (-12 KB; -5,2 MB sumando las 489 uniones). Las etapas no cambian de VRAM (sus carteles solo pierden mallas).
+
+### Datos (solo en scratchpad) y prueba
+- Clasica: `$S/modos/recorte/dat/` = aligera.py sobre `$S/fach/ent` (la entrada de fps3): SEGS.PAK con sus 62
+  SEGnn.DAT, UNIONES.PAK, UNIONESTA.PAK, UNIONESR.PAK y sus 509 BKnn.DAT. Comprobado: las etapas son las de
+  `$S/fach/dat` mas las mallas de los carteles a 0 (4135 mallas; ningun otro byte distinto); las uniones, las farolas a
+  0 y los dos muros. Carpeta de prueba: `$S/modos/recorte/datos` (enlaces a dmip + dat).
+- Mod Taxi: `$S/modos/recorte/mod/`, lo mismo desde lgmod2 (sin mipmaps); carpeta `$S/modos/recorte/datos_mod`
+  (enlaces a modos/mod3/datos + mod).
+- Pasar aligera.py otra vez sobre los datos ya hechos: "recorte ya aplicado", "nada que hacer".
+- Flycast (no consola real): nav3.sh con la clasica: RAM al arrancar libre 493K, "VOZ: VOCES.DAT, 35 muestras", sin
+  "Out of memory". Capturas congeladas (-DDIAG_CONGELA -DPRUEBA_S0) en `$S/modos/recorte/cap/`: A_* antes, B_*
+  despues; PALM a 700 m del final (carteles: el segundo de la fila de flechas de curva desaparece,
+  carteles_zoom_antes_despues.png) y la bifurcacion de PALM (A_bif / B_bif, bifurcacion_antes_despues.png: faltan farolas alternas; el registro da
+  zona libre de VRAM 607K -> 619K con la union subida, los 12 KB de los dos muros). El Mod no se ha arrancado aqui.
+
+## Carroceria -25 % y fachadas de PALM nitidas (pedido del usuario, 2026-11-28; DESVIACION)
+- "Bajar un 25 % el brillo de la carroceria de los coches": demo/main.c CARRO_BRILLO 0,75 en la pintura de las mallas
+  de tipo 1 y 2 del CEX2 (coche_color) y en el especular del reflejo de las de tipo 2 (coche_reflejo). Los cristales
+  (tipo 3) no cambian. Vale para el menu y la carrera.
+- "Los edificios de la primera curva de la primera etapa, en VQ pero que se aprecie detalle; las paredes parecen
+  borrones": aligera.nitidas (por defecto; ALIGERA_PALM=mitad para volver a lado_de). Las 30 de EDIF_PALM vuelven a su
+  lado de antes, en VQ con el libro de 256 entradas (antes 128) y SIN mipmaps, como antes de los mipmaps de la
+  Rev 2.9.9: la PowerVR elige el mip por el eje mas fino y en una pared vista de lado bajaba 2-3 niveles. VRAM de
+  PALM: 499 -> 578 KB (clasica) y 430 -> 481 KB (Mod).
+- La pared grande y gris de la derecha en la primera curva no es de EDIF_PALM. Es, PROBABLE, la textura 46 (32x16 en
+  16 bits, igual en el disco de PS2): estirada sobre toda la pared, no tiene mas detalle que dar.
+
+## Cielos de las uniones a 64x32 VQ (pedido del usuario, 2026-11-28; DESVIACION)
+- tools/cielos_bk.py: las texturas de la lista del cielo de las 509 uniones con algun lado de mas de 64 (512x512,
+  512x256, 256x256, 128x128...) pasan a 64x32 en VQ de 128 entradas, sin mipmaps. Las de 64 o menos no cambian. Son
+  605 texturas (36 distintas) y las uniones usan 18 MB menos de VRAM en total. El usuario las prueba: aqui solo el
+  arranque.
+- En el Mod, las uniones de las misiones C2C (BK498..BK508) eran descriptores PAKD que apuntaban al UNIONES.PAK de la
+  clasica, y con el del Mod leian datos que no eran suyos. Ahora van enteras (ORD7 sueltas, con los recortes y los
+  cielos nuevos).

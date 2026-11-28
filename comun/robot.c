@@ -43,7 +43,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include "robot.h"
-#include "shz.h"
+#ifdef DIAG_HA
+#include <kos/dbglog.h>
+#endif
+#include "lbloste.h"
 
 #define SEXAG (1.0f / 60.0f)
 typedef float mat_t[4][4];
@@ -102,12 +105,12 @@ static const uint32_t *t_band, *t_btex, *t_bmate; static uint32_t n_bmate;   /* 
 static const rpieza_t *bpz; static const rmalla_t *bml; static const rvert_t *bvt; static uint32_t bnpz;
 
 /* ---------------------------------------------------------------- matrices de fila: M = op M (pila del PC) */
-#if defined(CON_SH4ZAM) && !defined(SIN_SHZ_ROBOT)
-/* o = a b con FTRV (SH4ZAM): en columnas (lo que ve la XMTRX) la memoria de una matriz de filas es su traspuesta, asi
-   que (a b)^T = b^T a^T: se carga b y se le aplica a. o puede ser a o b (se escribe al final) */
+#if defined(CON_LBLOSTE) && !defined(SIN_LB_ROBOT)
+/* o = a b con FTRV (Little Bloste, comun/lbloste.h lb_mat_mul): XMTRX = b y cada fila de a por FTRV. o puede ser a o b
+   (se escribe al final) */
 static void m_mul(mat_t o, const mat_t a, const mat_t b)
 {
-    shz_xmtrx_load_unaligned_4x4(&b[0][0]); shz_xmtrx_apply_unaligned_4x4(&a[0][0]); shz_xmtrx_store_unaligned_4x4(&o[0][0]);
+    lb_mat_mul(o, a, b);
 }
 #else
 static void m_mul(mat_t o, const mat_t a, const mat_t b)       /* o = a b */
@@ -203,19 +206,29 @@ static void evalua3(const motor_t *m, int i, int k0, float t, float *o)   /* 519
     for (k = 0; k < 3; k++) { canal_t *c = &((motor_t *)m)->can[i][k0 + k]; o[k] = c->keys ? evalua(m, c, t) : c->rest; }
 }
 
-static const rmov_t *busca_mov(const motor_t *m, uint32_t id)
+/* CHRH.DAT (robot_extra): los movimientos de la acompanante del INFARTO que no lleva la pareja; se buscan detras */
+static const uint8_t *x_B; static const rmov_t *x_mv; static uint32_t x_nmv; static const uint32_t *x_caras;
+static const rmov_t *busca_en(const rmov_t *mv, uint32_t n, uint32_t id)
 {
-    uint32_t a = 0, b = m->nmv;
-    while (a < b) { uint32_t c = (a + b) / 2; if (m->mv[c].id < id) a = c + 1; else b = c; }
-    return a < m->nmv && m->mv[a].id == id ? m->mv + a : NULL;
+    uint32_t a = 0, b = n;
+    while (a < b) { uint32_t c = (a + b) / 2; if (mv[c].id < id) a = c + 1; else b = c; }
+    return a < n && mv[a].id == id ? mv + a : NULL;
 }
+static const rmov_t *busca_mov_b(const motor_t *m, uint32_t id, const uint8_t **base)
+{
+    const rmov_t *v = busca_en(m->mv, m->nmv, id);
+    *base = m->B;
+    if (!v && x_mv) { v = busca_en(x_mv, x_nmv, id); *base = x_B; }
+    return v;
+}
+static const rmov_t *busca_mov(const motor_t *m, uint32_t id) { const uint8_t *b; return busca_mov_b(m, id, &b); }
 /* 520750 / 522F70 / 522EE0: los canales del movimiento (sin tocar el cuadro) */
 static int pon_claves(motor_t *m, uint32_t id)
 {
     static const uint16_t MASK[9] = { 0x20, 0x10, 0x8, 0x4, 0x2, 0x1, 0x100, 0x80, 0x40 };
-    const rmov_t *v = busca_mov(m, id); const uint8_t *can; int i, k, ancho; uint32_t c = 0, p = 0, nc;
+    const uint8_t *base; const rmov_t *v = busca_mov_b(m, id, &base); const uint8_t *can; int i, k, ancho; uint32_t c = 0, p = 0, nc;
     if (!v) return 0;
-    m->mov = v; m->cla = m->B + v->ocla; can = m->B + v->ocan; nc = v->ncan; m->bflags = v->banderas;
+    m->mov = v; m->cla = base + v->ocla; can = base + v->ocan; nc = v->ncan; m->bflags = v->banderas;
     ancho = (v->banderas & 2) != 0;
     for (i = 0; i < m->n; i++) {
         uint32_t mask = 0;
@@ -468,7 +481,8 @@ static const uint32_t *tabla_de(const uint8_t *B, uint32_t Bn, const char *k, ui
 }
 static const uint32_t *tabla(const char *k, uint32_t *n) { return tabla_de(B, Bn, k, n); }
 static int osage_lee(int p, const uint32_t *w, uint32_t n);
-int robot_inicia(const void *rbt, uint32_t bytes)
+/* (c2c9) frio, solo al cargar: -Os (el codigo cuenta en pasos de 8 KB de RAM) */
+__attribute__((optimize("Os"))) int robot_inicia(const void *rbt, uint32_t bytes)
 {
     const uint32_t *w = rbt; uint32_t i, n;
     listo = 0;
@@ -689,6 +703,8 @@ static struct {
     int m_sub, m_t; const uint32_t *m_ent;          /* 82F590, 82F594, 82F598 (la meta del piloto) */
     int a_est, a_tiempo, a_fin;                     /* 82F5A4, 82F5A8, 82F5B0 */
     int8_t pick_idle, pick_turn, pick_jump, pick_land;   /* 82F5AA.., 82F2F8 / 82F2F9 */
+    int32_t w68, w6c, w70, w74, w78, w7c;           /* work +68..+7C de la acompanante (487D60 / 487D90 / 487DD0) */
+    float y_base; int y_ok;                         /* (DESVIACION, copi: la altura media de sus huesos sentada) */
 } lg;
 
 static const uint32_t *lista(int off, int *n)       /* {lista, cuenta} de +off: 8 x {cuenta, 4 ids} en LISA / LISC */
@@ -707,6 +723,7 @@ void robot_carrera(int modelo)
     if (modelo < 0 || modelo >= 30) modelo = 6;
     memset(&lg, 0, sizeof lg);
     lg.modelo = modelo; lg.cerr = t_cerr[modelo] != 0;
+    lg.w68 = lg.w6c = lg.w70 = lg.w74 = -1;
     /* 4884D0 */
     d->fl = 0; d->mov = NULL;
     pon_mov(d, t_modc[modelo]); pon_cuadro(d, 0); calc(d); pon_cuadro(d, 85.0f); d->bucles = 0;
@@ -785,6 +802,7 @@ static void piloto(const robot_coche_t *c)          /* 488DD0 (variante 1) */
     osage_control(0, m);                                        /* 488450: Calc y luego 515040 */
 }
 
+#define COPI_DE_PIE 0.3f                            /* m (copi: de pie 0,65-0,70; las reacciones sentada <= 0,09) */
 static void a_reposo(motor_t *m)                    /* 4886B0 */
 {
     if (!fin_mov(m)) return;
@@ -792,9 +810,11 @@ static void a_reposo(motor_t *m)                    /* 4886B0 */
 }
 static void acompanante(const robot_coche_t *c)     /* 489A90 (variante 1) */
 {
-    motor_t *m = MOT(1); uint32_t slide = c->sup & 0x10f407cu; int st = lg.a_est, k, a;
+    motor_t *m = MOT(1); uint32_t slide = c->sup & 0x10f407cu; int st = lg.a_est, k, a, rs = 1;
     static const uint8_t GRANDE[7] = { 0, 1, 0, 0, 1, 0, 0 };
-    /* reacciones */
+    /* reacciones (rs: la salida que en el original pone -1 en +6C y +74, PS2 0x203c98; sin ella, una peticion que
+       repite el movimiento o la fila de caras de la anterior no se ponia: la acompanante se quedaba en la ultima
+       postura, coches4) */
     do {
         if (st == R_START) { lg.a_est = R_IDLE; break; }
         if (c->fase == 2) { if (st != R_GOAL) { lg.a_est = R_GOAL; lg.a_fin = 0; } break; }
@@ -816,21 +836,54 @@ static void acompanante(const robot_coche_t *c)     /* 489A90 (variante 1) */
         }
         if (st == R_LAND || st == R_JUMP) break;
         if (slide && st != R_HIT) { pon_mezcla(m, !(slide & 4) ? 0x220007 : 0x230003, 0); lg.a_est = R_HIT; break; }
+        /* las peticiones del INFARTO (PS2 0x203760..0x20385c): +68 un movimiento, +70 una fila de caras (0x40eac8) */
+        if (lg.w68 >= 0) {
+            lg.a_est = R_POSE;
+            if (lg.w68 != lg.w6c) { conecta(m, (uint32_t)lg.w68, 0, 20.0f); m->bucles = 0; lg.w6c = lg.w68;
+#ifdef DIAG_HA
+                dbglog(DBG_INFO, "DIAGHA acompanante: movimiento 0x%x (%s)\n", (unsigned)lg.w68, busca_mov(m, (uint32_t)lg.w68) ? "esta" : "NO esta");
+#endif
+            }
+            lg.w68 = -1; rs = 0; break;
+        }
+        if (lg.w70 >= 0 && x_caras) {
+            lg.a_est = R_POSE;
+            if (lg.cerr) lg.w70 = 1;
+            if (lg.w70 != lg.w74) { conecta(m, x_caras[3 * (lg.w70 % 6)], 0, 20.0f); m->bucles = 0; lg.w74 = lg.w70;
+#ifdef DIAG_HA
+                dbglog(DBG_INFO, "DIAGHA acompanante: cara %d (0x%x, %s)\n", lg.w70, (unsigned)x_caras[3 * (lg.w70 % 6)], busca_mov(m, x_caras[3 * (lg.w70 % 6)]) ? "esta" : "NO esta");
+#endif
+            }
+            lg.w70 = -1; rs = 0; break;
+        }
+        if (st == R_POSE) { if (fin_mov(m) && lg.w78 == 2) { lg.a_est = R_IDLE; lg.a_tiempo = 0; } else rs = 0; break; }
         if (c->kmh >= 100) {                        /* giro brusco */
             a = c->s4e < 0 ? -c->s4e : c->s4e;
             if (a > 0x2000 && a < 0x4000) {
-                if (st == R_TURN || lg.cerr) break;
+                if (st == R_TURN || lg.cerr) { rs = 0; break; }
                 lg.a_est = R_TURN; pon_mezcla(m, elige(&lg.pick_turn, 0x28), 0); avanza(&lg.pick_turn, 0x28);
                 break;
             }
         }
         if (lg.a_tiempo > 0xb4) {                   /* aburrida */
             lg.a_est = R_BORED; pon_mezcla(m, elige(&lg.pick_idle, 8), 0); avanza(&lg.pick_idle, 8); lg.a_tiempo = 0;
-        }
+        } else rs = 0;
     } while (0);
+    if (rs) lg.w6c = lg.w74 = -1;                   /* PS2 0x203c98 (el 48A647 del PC) */
     /* 48A6BC: la reaccion en curso */
     switch (lg.a_est) {
     case R_IDLE: lg.a_tiempo++; break;
+    case R_POSE:                                    /* PS2 0x203f6c..0x204028: entrada, bucle mientras +7C, salida */
+        if (!fin_mov(m) || lg.w74 < 0 || !x_caras) break;
+        {   const uint32_t *f = x_caras + 3 * (lg.w74 % 6);
+            if (lg.w78 == 0) { lg.w78 = 1; conecta(m, f[1], 0, 2.0f); }
+            else if (lg.w78 == 1) {
+                if (lg.w7c) conecta(m, f[1], 0, 2.0f);
+                else { conecta(m, f[2], 0, 2.0f); lg.w78 = 2; }
+            }
+            m->bucles = 0;
+        }
+        break;
     case R_BORED: case R_SCARED: case R_SPIN: case R_LAND: case R_JUMP: case R_AREA: a_reposo(m); break;
     case R_TURN:
         if (!fin_mov(m)) break;
@@ -856,9 +909,45 @@ static void acompanante(const robot_coche_t *c)     /* 489A90 (variante 1) */
     }
     manos(m);
     calc(m);
+    /* DESVIACION (copi, auditoria del usuario: "la copiloto a veces se pone de pie en el coche", INFARTO con el Dino):
+       algunos movimientos de las peticiones (CHRH.DAT) la ponen de pie con las piernas por encima del techo, quiza
+       porque su hueso raiz es el de una escena fuera del coche (sin confirmar contra el original). Si la altura media
+       de sus huesos sube mas de COPI_DE_PIE sobre la de sentada, vuelve a sentada en el acto. */
+    if (m->n > 0) {
+        float y = 0.0f; int i;
+        for (i = 0; i < m->n; i++) y += m->M[i][3][1];
+        y /= (float)m->n;
+        if (lg.a_est == R_IDLE && m->id == 0x6004b) { lg.y_base = lg.y_ok ? lg.y_base * 0.9f + y * 0.1f : y; lg.y_ok = 1; }
+        else if (lg.y_ok && lg.a_est != R_GOAL && lg.a_est != R_OVER && (y - lg.y_base > COPI_DE_PIE || lg.y_base - y > COPI_DE_PIE)) {
+#ifdef DIAG_HA
+            dbglog(DBG_INFO, "DIAGHA acompanante: de pie con 0x%x (altura %.2f, sentada %.2f): a sentada\n", (unsigned)m->id, (double)y, (double)lg.y_base);
+#endif
+            conecta(m, 0x6004b, 0, 1.0f); m->bucles = -1; lg.a_est = R_IDLE; lg.a_tiempo = 0; lg.w6c = lg.w74 = -1;
+            calc(m);
+        }
+#ifdef DIAG_HA
+        { static int n; if (++n % 30 == 0) dbglog(DBG_INFO, "DIAGHA altura 0x%x %.2f (sentada %.2f, estado %d)\n", (unsigned)m->id, (double)y, (double)lg.y_base, lg.a_est); }
+#endif
+    }
     osage_control(1, m);
 }
 
+void robot_extra(const void *d, uint32_t n)
+{
+    const uint8_t *b = d; uint32_t k;
+    x_B = NULL; x_mv = NULL; x_nmv = 0; x_caras = NULL;
+    if (!d || n < 80 || memcmp(b, "RBH1", 4)) return;
+    memcpy(&k, b + 4, 4);
+    if (80 + 20 * k > n) return;
+    x_B = b; x_caras = (const uint32_t *)(b + 8); x_mv = (const rmov_t *)(b + 80); x_nmv = k;
+}
+/* 487D60 (+68 = id, +78 = 2), 487D90 (+70 = fila, +78 = 0, +7C = 1), 487DD0 (+7C = 0): la acompanante */
+void robot_pide(int mov, uint32_t id, int cara, int fila, int para)
+{
+    if (cara) { lg.w70 = fila; lg.w78 = 0; lg.w7c = 1; }
+    if (mov) { lg.w68 = (int32_t)id; lg.w78 = 2; }
+    if (para) lg.w7c = 0;
+}
 void robot_paso(const robot_coche_t *c)
 {
     if (!listo) return;
@@ -885,6 +974,7 @@ uint32_t robot_movimiento(int p) { return MOT(p)->id; }
 int robot_personaje(int p) { return listo && p >= 0 && p < (int)nper ? (int)per[p].kind : -1; }
 float robot_cuadro(int p) { return MOT(p)->f0c; }
 int robot_estado(int p) { return p ? lg.a_est : lg.d_est; }
+int robot_fin(int p) { return fin_mov(MOT(p)); }
 
 /* ---------------------------------------------------------------- el banderero de la salida (ROB03)
    PS2 (SLES-53998): init 0x2046f0 (PC 488710), control 0x204888 (PC 488820), huida 0x204ca0 (PC 487A30), dibujo
@@ -1008,7 +1098,8 @@ int robot_b_nmat(void) { return (int)n_bmate; }
 const float *robot_b_material(int i) { return (const float *)(t_bmate + 9 * i); }
 const float (*robot_b_huesos(void))[4][4] { return (const float (*)[4][4])mot_b->M; }
 const float (*robot_b_inversa(int i))[4] { return mot_b->inv[i]; }
-void robot_band_inicia(int preset, const float *marco)  /* 0x2046f0 */
+/* (c2c9) frio, solo al cargar: -Os (el codigo cuenta en pasos de 8 KB de RAM) */
+__attribute__((optimize("Os"))) void robot_band_inicia(int preset, const float *marco)  /* 0x2046f0 */
 {
     static const float A[3] = { 0.14599999785f, 0.18000000715f, 0.00700000022f }, Bp[3] = { 0.17499999702f, 0.68000000715f, 0.01499999966f };
     motor_t *m = MOT(2); const uint32_t *f; int k;

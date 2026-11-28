@@ -87,3 +87,8 @@ Medidas de los cambios de etapa (defines de demo/main.c y comun/gd.c; make -C de
   DIAG_TRANS=<ms>        camara lenta (un paso de logica por cuadro y esa espera) en los 6 cuadros de alrededor de cada
                          suceso del cambio de etapa (union, rama, soltar, etapa leida, tercios del fundido del cielo,
                          etapa nueva); "TR: cuadro ..." con el estado del fundido, para capturar cuadro a cuadro.
+  DIAG_CIELO             "CIELO: ..." cada 30 cuadros si alguna malla del cielo no cupo en el TA (tambien con DIAG_TRANS).
+  PRUEBA_S0=<m>          la carrera empieza a esos metros del final de la etapa (para llegar pronto a la union).
+  TRAMO_LISTA=0 INDICES_FINO=0 RECORTE_TIRAS=0 ETAPA_FINO=0 PVS_RACHAS=0
+                         (Rev 2.9.9.c) cada optimizacion del dibujo apagada, para medirla (docs/PARIDAD.md); con
+                         RECORTE_TIRAS=0 la imagen es identica pixel a pixel a la de antes.

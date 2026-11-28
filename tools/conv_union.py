@@ -35,7 +35,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ps2.assets import Assets, hash_nombre
 from ps2 import stage
-import modelo, conv_tramo, pvs, grupos_nodos, lod_veg
+import modelo, conv_tramo, pvs, grupos_nodos, lod_veg, lod_grande
 from conv_tramo import NPERF, NCARRIL, NEXT, NBANDA
 
 DESC = 0xb0                                         # tamano de un descriptor (tramo o union)
@@ -520,6 +520,7 @@ def curso(A, dsal, con_tramos=True, solo_curso=False):
         # visibilidad precalculada (tools/pvs.py): en la bifurcacion el ojo tambien va por la rama derecha (BKD.DAT)
         pvs.anade(f, [rd] if hi >= 0 else [])
         lod_veg.aplica(f)                                      # version lejana de la vegetacion (revision 46, DESVIACION)
+        lod_grande.aplica(f)                                     # version lejana lowpoly de lo grande (Rev 2.9.2.d, DESVIACION)
         print('triangulos de las tiras del VU1: %d, sin dibujar por la bandera ADC: %d' % (mod.tri_total, mod.tri_adc))
         r = dict(zona=z, seg=n, nivel=nivel[clave], izq=hi, der=hd, bk=(tx, ty, tz, ry), ramas=ramas,
                  m_pos=m_por_posicion(segs[n]), meta=meta, niebla=niebla(A, z), sol=sol(A, z), f_bk=clave,
@@ -623,6 +624,7 @@ def crudos(A, i):
     if i == 0: return cat('csc_data_2', 'csc_data_2_course')
     if i == 1: return cat('csc_data_cvt', 'csc_data_cvt_course')
     if i in ARBOLES_REN: return cat(*ARBOLES_REN[i])
+    if i in ARBOLES_REQ: return cat(ARBOLES_REQ[i], ARBOLES_REQ[i])
     if 100 <= i < 200:
         e = [x for x in A.busca('*Races.bin') if x.paquete.startswith('SCRIPTS')][0]; d = A.datos(e)
         n, o = conv_menu._r077(d, 'Races'); nc, nrel = struct.unpack_from('<2I', d, 0)
@@ -640,6 +642,18 @@ def crudos(A, i):
 def arbol_ren(A, i):
     """registros (como arbol) del curso seguido del OUTRUN de la consola (ARBOLES_REN)"""
     return [(q[1], q[7], q[8], q[11], q[12]) for q in crudos(A, i)]
+
+# los campeonatos de COAST 2 COAST (variante 5, comun/campeonato.c; PS2 46C2F0 / 4EEB50: 64F040[cfg0]): los del grupo 4
+# (Request_Course_SP) y del 5 (Request_Course_OR2) son los arboles 1 (csc_data_cvt) y 0 (csc_data_2), lo comprueba
+# tools/conv_camp.py; el del 6 (Req_Course_MIX_PS2) es el 302 de CURSO.DAT, con sus 11 uniones nuevas numeradas desde
+# BK_REQ (BK498..508, detras de las de la Contrarreloj y de los cursos seguidos, CURSOTA.DAT: 262..497) y metidas al
+# final de UNIONES.PAK (pak_union.py: AL_FINAL), para que lo demas no cambie. Sus metas llevan los hijos 0 / -1: como
+# -1 / -1 (la meta)
+ARBOLES_REQ = {302: 'Req_Course_MIX_PS2'}
+BK_REQ = 498
+
+def arbol_req(A, i):
+    return [(q[1], q[7], q[8], q[11] if q[12] >= 0 else -1, q[12]) for q in crudos(A, i)]
 
 def tabla_bunki(A):
     """tabla de los carteles de destino por tipo de registro (PS2 0x3f9da0, PC 5D4FD8: 16 bytes por tipo = el +0 del
@@ -705,6 +719,7 @@ def union_fichero(A, combo, f, d0, ri, rd, so):
     finally: vq.UMBRAL = umbral
     pvs.anade(f, [rd] if combo[0] != 'META' else [])
     lod_veg.aplica(f)                                          # version lejana de la vegetacion (revision 46, DESVIACION)
+    lod_grande.aplica(f)                                     # version lejana lowpoly de lo grande (Rev 2.9.2.d, DESVIACION)
     print('%s %s: %d mallas, %d texturas, %d KB' % (os.path.basename(f), combo, len(mod.mallas), len(mod.texs), os.path.getsize(f) >> 10))
 
 def convierte_descriptor(A, d0, seg, n, sal, mundo=None):
@@ -747,8 +762,8 @@ def cursos(A, dsal, ids, con_uniones=True, con_tramos=False, parte=(0, 1), nombr
     for k, ti, ui, hi, hd in o2:                       # las del modo OutRun: BKkk / COLBKkk con kk = clave
         fich[combo(o2, k, False)] = k
         if hi < 0: colmeta[cadena(E, u32(E, base2 + 4 * ui) + 0x0c)] = k
-    sig = [max(fich.values()) + 1]
-    def registros(regs, especial):
+    sig = [max(fich.values()) + 1]; sig_req = [BK_REQ]
+    def registros(regs, especial, req=False):
         porclave = {r[0]: r for r in regs}; idx = {r[0]: i for i, r in enumerate(regs)}
         nivel = {regs[0][0]: 0}; cola = [regs[0][0]]
         while cola:
@@ -764,7 +779,8 @@ def cursos(A, dsal, ids, con_uniones=True, con_tramos=False, parte=(0, 1), nombr
             tx, ty, tz, rx, ry, rz = f32(E, d0 + 0x98, 6)
             assert abs(rx) < 1e-4 and abs(rz) < 1e-4, 'union con giro en x o z: no soportado'
             c = combo(regs, clave, especial)
-            if c not in fich: fich[c] = sig[0]; sig[0] += 1
+            if c not in fich:
+                s_ = sig_req if req else sig; fich[c] = s_[0]; s_[0] += 1
             if c[0] == 'META':
                 ct = cadena(E, u32(E, base2 + 4 * ui) + 0x0c)
                 fc = -1 if ct.endswith('coli_BK_PALM_bin') else colmeta.setdefault(ct, fich[c])
@@ -780,7 +796,8 @@ def cursos(A, dsal, ids, con_uniones=True, con_tramos=False, parte=(0, 1), nombr
     extras = []
     for i in ids:
         rs = registros(arbol(A, 0, 'csc_data_cvt.bin') if i == 1 else arbol_ren(A, i) if i in ARBOLES_REN else
-                       arbol_ta(A, i - 200) if i >= 200 else arbol_mision(A, i - 100), 100 <= i < 200)
+                       arbol_req(A, i) if i in ARBOLES_REQ else
+                       arbol_ta(A, i - 200) if i >= 200 else arbol_mision(A, i - 100), 100 <= i < 200, i in ARBOLES_REQ)
         # +0x74 del registro: la casilla del mapa de ruta del HUD es +0x74 - 1 si no es 0 y si no la clave (0x1bd2a8;
         # solo las metas del reves de la Contrarreloj lo llevan)
         for r, q in zip(rs, crudos(A, i) or ()): r['m74'] = q[29]

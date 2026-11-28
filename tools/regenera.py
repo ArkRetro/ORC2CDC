@@ -11,13 +11,20 @@ Linux y en Windows (el programa de windows/): mismos pasos, mismas salidas.
  - --gdi: despues, el GD-ROM (disc.gdi y las tres pistas) en esa carpeta con tools/gdi.py (sin herramientas externas).
 Lo que sale del disco no va al repositorio. Tiempo: unas horas en 4 nucleos (la visibilidad PVS de cada etapa y union
 es lo que mas tarda). Sale con error si falla cualquier paso.
-Las partes en C (tools/c: musica, pvs, visible) y ffmpeg: tools/nativo.py (en Windows, ya compiladas: OR2_NATIVO)."""
-import glob, os, shutil, subprocess, sys, threading, time
+Las partes en C (tools/c: musica, pvs, visible) y ffmpeg: tools/nativo.py (en Windows, ya compiladas: OR2_NATIVO).
+ - Paso OPCIONAL (--extras DIR; por defecto la carpeta extras/ al lado de datos/): si alli estan
+   splash_wave_remaster.mp3 y supneo.jpg (los de tu disco no: los pones tu), tools/menu_musica.py anade al selector
+   de musica la tarjeta SPLASH WAVE REMASTER (MENU.DAT parcheado, MUS70.ADP y MUS71.ADP) y tools/fsp_musica.py la fila
+   de mas en "Elige la musica" de OUTRUN2SP (SPFE.DAT parcheado). Sin ellos no hace nada."""
+import struct, glob, os, shutil, subprocess, sys, threading, time
 from concurrent.futures import ThreadPoolExecutor
 
 TOOLS = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, TOOLS)
 ARBOLES = '1,' + ','.join(str(i) for i in range(100, 194))       # OUTRUN2SP y los cursos de Races.bin (100 + registro)
+# CURSO.DAT lleva ademas el arbol 302, el campeonato de Holly de COAST 2 COAST (Req_Course_MIX_PS2, conv_union.ARBOLES_REQ),
+# con sus 11 uniones nuevas BK498..508 (conv_union.BK_REQ) al final de UNIONES.PAK (pak_union.AL_FINAL)
+ARBOLES_CURSO = ARBOLES + ',302'
 # CONTRARRELOJ (tableros de cursos, conv_union.arbol_ta): los arboles 200 + codigo (0..0x53) en CURSOTA.DAT y sus
 # uniones nuevas (BK262.. en UNIONESTA.PAK; las de los arboles de arriba conservan su numero)
 # y (revision 44) los cursos seguidos del OUTRUN de la consola (tablero 0x24, juegos 2 / 3: csc_data_2_ren_course y
@@ -27,7 +34,7 @@ ARBOLES_TA = ARBOLES + ',' + ','.join(str(200 + c) for c in range(0x54)) + ',290
 UNIONES_TA = ['UNIONESTA.PAK', 'CURSOTA.DAT']
 UNIONES_REN = ['UNIONESR.PAK']
 BK_REN = 470                                                     # la primera union de los arboles 290 / 291
-NBK = 498                                                        # descriptores BK0..497: 262 de UNIONES.PAK, 208 de UNIONESTA.PAK y 28 de UNIONESR.PAK
+NBK = 509                                                        # descriptores BK0..508: 262 + 11 (BK498..508) de UNIONES.PAK, 208 de UNIONESTA.PAK y 28 de UNIONESR.PAK
 # temas, resultados de OUTRUN2SP (28), menu, avances y metas (sin la 64: no la usa la meta)
 MUSICA = list(range(0, 29)) + [30] + list(range(33, 61)) + [61, 62, 63, 65, 66]
 PARTES = 4                                                       # conv_union.py --parte=k/n (al menos; o --jobs)
@@ -42,7 +49,7 @@ UNIONES = ['UNIONES.PAK', 'CURSO.DAT', 'COLLR.DAT', 'COLBK.DAT', 'BKD.DAT', 'SOL
 TRAF = ['TRAF%d.DAT' % n for n in range(9)]
 BO = ['BO%02d.DAT' % c for c in range(14)]   # (filas 1 y 6 de 0x35a738: OutRun y misiones de C2C, conv_bo.py)
 COLBK = ['COLBK%02d.DAT' % k for k in (10, 11, 12, 13, 14, 25, 26, 27, 28, 29)]
-FIN = ['FIN.DAT', 'GOVER.DAT', 'FINC2C.DAT']                    # (conv_fin.py; FINC2C: el modo 35 de una mision de C2C)
+FIN = ['FIN.DAT', 'GOVER.DAT', 'FINC2C.DAT', 'GOALT.DAT']       # (conv_fin.py; FINC2C: el modo 35 de una mision de C2C; GOALT: la tabla de la meta)
 # segundos aproximados de cada paso en un nucleo (para el porcentaje y el tiempo que queda; medidos en Linux)
 PESO = {'union': 4500, 'unionta': 3000, 'unionren': 600, 'curso': 650, 'seg': 450, 'video_ts': 150, 'video_attr': 450, 'mus': 20, 'coche': 15,
         'menu': 40, 'trafico': 30, 'camiones': 25}
@@ -55,6 +62,73 @@ def peso(n):
 
 # ---------------------------------------------------------------- utilidades
 def py(*a): return [sys.executable, '-u'] + [str(x) for x in a]
+
+def voces_163(D):
+    """Rev 2.9.3: VOCES.DAT con la voz 0x163 (la respuesta a la bocina, de HC.PAK); los de antes se rehacen"""
+    try:
+        d = open(os.path.join(D, 'VOCES.DAT'), 'rb').read(); n, om = struct.unpack_from('<2I', d, 4)
+        return any(struct.unpack_from('<H', d, om + 20 * k)[0] == 0x163 for k in range(n))
+    except (OSError, struct.error): return False
+
+def tiene(D, f, marca):
+    """Rev 2.9.4: el fichero f de D lleva la marca (los de antes se rehacen: GOALT.DAT sin T_MEJOR, TABLERO.DAT sin LST1)"""
+    try: return marca in open(os.path.join(D, f), 'rb').read()
+    except OSError: return False
+
+def coches_rebajados(D):
+    """Rev 2.9.6: COCHE00.DAT (el 360 Spider) sin la 512x256 del salpicadero = convertido con --rebaja; los de antes se
+    rehacen (el unico coche con una textura de ese tamano es ese)"""
+    try:
+        b = open(os.path.join(D, 'COCHE00.DAT'), 'rb').read()
+        if b[:4] != b'ORD7': return True
+        import pvs
+        d = pvs.lee(os.path.join(D, 'COCHE00.DAT'))
+        return not any(struct.unpack_from('<2I', d['texs'], 24 * i) == (512, 256) for i in range(len(d['texs']) // 24))
+    except Exception: return True
+
+def coches_visibles(D):
+    """Rev 2.9.7: los coches ligeros de la carrera (COCHEnnL.DAT de conv_coche.py --visible, C2: el 360 Spider con unos
+    8900 vertices en el fichero; el completo COCHEnn.DAT, 12307): sin ellos (datos de antes) se rehacen los coches"""
+    try:
+        b = open(os.path.join(D, 'COCHE00L.DAT'), 'rb').read(12)
+        return b[:4] == b'ORD7' and struct.unpack_from('<I', b, 8)[0] < 10500
+    except (OSError, struct.error): return False
+
+def cielo_liso(D, f):
+    """Rev 2.9.9.c: el ORD7 f de D (suelto o descriptor PAKD de SEGS.PAK / UNIONES.PAK) tiene en el cielo (lista 3) alguna
+    malla con textura y todas las UV a 0: es de antes del arreglo de ps2/vif.py (tiras con las UV en varios UNPACK: la
+    cupula del fundido del cielo salia a franjas de un color en los cambios de etapa). None si no se puede leer"""
+    try:
+        import numpy as np, pak_union
+        b = open(os.path.join(D, f), 'rb').read()
+        if b[:4] == b'PAKD':
+            b = pak_union.recompone(b, open(os.path.join(D, b[20:36].rstrip(b'\0').decode()), 'rb').read())
+        if b[:4] != b'ORD7': return None
+        h = struct.unpack_from('<13I', b, 4); nm, nv, nt = h[0], h[1], h[4]; c0, c1 = h[8], h[9]
+        M = np.frombuffer(b, np.dtype([('c', '<f4', 4), ('v0', '<u4'), ('n', '<u4'), ('t', '<i4'), ('nodo', '<i4')]), nm, 56 + 24 * nt)
+        V = np.frombuffer(b, '<f4', nv * 6, 56 + 24 * nt + 32 * nm).reshape(nv, 6)
+        return any(m['t'] >= 0 and m['n'] >= 3 and not V[m['v0']:m['v0'] + m['n'], 3:5].any() for m in M[c0:c1])
+    except Exception: return None
+
+def cielos_viejos(D):
+    """Rev 2.9.9.c: (etapas, uniones) de D hechas con el conversor de antes: cielo_liso en la etapa y en la union de PALM,
+    cuya cupula del fundido era la que salia a franjas"""
+    return cielo_liso(D, 'SEG00.DAT') is True, cielo_liso(D, 'BK00.DAT') is True
+
+def quita_viejos(D, W, segs, uniones, informe=print):
+    """quita de D y de trabajo/ las etapas o las uniones viejas para que sus pasos vuelvan a la lista (horas: la PVS)"""
+    n = 0
+    if segs:
+        informe('AVISO: las etapas (SEGnn.DAT) son de antes del arreglo de las UV del cielo (franjas en los cambios de etapa): se rehacen')
+        for f in glob.glob(os.path.join(D, 'SEG[0-9]*.DAT')) + [os.path.join(D, x) for x in ('SEGS.PAK', 'VISO.DAT', 'REPSEC.DAT')]:
+            if os.path.isfile(f): os.remove(f); n += 1
+    if uniones:
+        informe('AVISO: las uniones (BKnn.DAT) son de antes del arreglo de las UV del cielo (franjas en los cambios de etapa): se rehacen')
+        fs = glob.glob(os.path.join(D, 'BK[0-9]*.DAT')) + [os.path.join(D, x) for x in ('UNIONES.PAK', 'UNIONESTA.PAK', 'UNIONESR.PAK')]
+        for d in ('u', 'u0', 'uta', 'uren'): fs += glob.glob(os.path.join(W, d, 'BK[0-9]*.DAT')) + [os.path.join(W, d, '.hecho')]
+        for f in fs:
+            if os.path.isfile(f): os.remove(f); n += 1
+    return n
 
 def hay(D, *fs): return all(os.path.isfile(os.path.join(D, f)) and os.path.getsize(os.path.join(D, f)) > 0 for f in fs)
 
@@ -85,7 +159,7 @@ class Contexto:
         # un hilo por paso: numpy / scipy (OMP, OpenBLAS, MKL) y os.cpu_count() de Python 3.13 (hilos de pvs.py, Pool
         # de conv_video.py)
         self.env.update(OR2_ISO=iso, TOOLS=TOOLS, PYTHONDONTWRITEBYTECODE='1', OMP_NUM_THREADS='1',
-                        OPENBLAS_NUM_THREADS='1', MKL_NUM_THREADS='1', PYTHON_CPU_COUNT='1', PYTHONIOENCODING='utf-8',
+                        OPENBLAS_NUM_THREADS='1', MKL_NUM_THREADS='1', PYTHON_CPU_COUNT='1', PYTHONIOENCODING='utf-8', PYTHONUTF8='1',
                         PYTHONHASHSEED='0')               # (conv_sp.py recorre conjuntos de cadenas: sin esto cambia
                                                           # de una vez a otra; con 0, los mismos bytes en Linux y Windows)
         self.env.setdefault('OR2_CACHE', os.path.join(W, 'cache'))
@@ -96,7 +170,7 @@ class Contexto:
         if r.returncode: raise Fallo('%s: salida %d' % (os.path.basename(cmd[2]) if len(cmd) > 2 else cmd[0], r.returncode))
 
     def saca(self, cmd):
-        r = subprocess.run(cmd, capture_output=True, text=True, env=self.env, cwd=self.W)
+        r = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', env=self.env, cwd=self.W)
         if r.returncode: raise Fallo('%s\n%s' % (' '.join(cmd), r.stdout + r.stderr))
         return r.stdout
 
@@ -117,7 +191,7 @@ def paso(C, n, log):
         ej(T('conv_union.py'), ISO, os.path.join(W, 'uren'), '--arboles=' + ARBOLES_TA, '--bk-desde=%d' % BK_REN, '--curso=CURSOTA.DAT',
            '--parte=%s/%d' % (n[8:], C.partes))
     elif n.startswith('union'):
-        ej(T('conv_union.py'), ISO, os.path.join(W, 'u'), '--arboles=' + ARBOLES, '--parte=%s/%d' % (n[5:], C.partes))
+        ej(T('conv_union.py'), ISO, os.path.join(W, 'u'), '--arboles=' + ARBOLES_CURSO, '--parte=%s/%d' % (n[5:], C.partes))
     elif n == 'curso':                                   # BK00..14, BKD, SOL, COLBK*, CURSO del modo
         ej(T('conv_union.py'), ISO, t, '--sin-tramos')
         u0 = os.path.join(W, 'u0'); os.makedirs(u0, exist_ok=True)
@@ -148,7 +222,8 @@ def paso(C, n, log):
     elif n == 'meta': ej(T('conv_meta.py'), ISO, t); mueve(D, tj('META.DAT'))
     elif n == 'salida': ej(T('conv_salida.py'), ISO, t); mueve(D, tj('SALIDA.DAT'))
     elif n == 'infarto':
-        ej(T('conv_infarto.py'), ISO, t); mueve(D, tj('INFARTO.DAT'), tj('INFARTOP.DAT'), tj('HAHUD.DAT'), tj('VOCESH.DAT'))
+        ej(T('conv_infarto.py'), ISO, t); ej(T('conv_chr.py'), ISO, tj('CHRH.DAT'), '--infarto')
+        mueve(D, tj('INFARTO.DAT'), tj('INFARTOP.DAT'), tj('INFARTOX.DAT'), tj('CHRH.DAT'), tj('HAOSO.DAT'), tj('HAOBJ.DAT'), tj('HAHUD.DAT'), tj('VOCESH.DAT'), tj('VOCESHC.DAT'))
     elif n == 'fin': ej(T('conv_fin.py'), ISO, t, prev('fin')); mueve(D, *[tj(f) for f in FIN])
     elif n == 'sp':
         ej(T('conv_sp.py'), ISO, t, prev('sp'))
@@ -157,18 +232,19 @@ def paso(C, n, log):
     elif n == 'final':                                   # el final de recreativa de OUTRUN2SP (modo 24, demo/final.c)
         ej(T('conv_final.py'), ISO, t); mueve(D, *[tj(f) for f in FINAL])
     elif n == 'bo': ej(T('conv_bo.py'), ISO, t); mueve(D, tj('BO*.DAT'))
-    elif n == 'trafico': ej(T('conv_trafico.py'), ISO, t); mueve(D, tj('TRAF*.DAT'), tj('TAPD.DAT'))
+    elif n == 'trafico': ej(T('conv_trafico.py'), ISO, t, '--ligero'); mueve(D, tj('TRAF*.DAT'), tj('TAPD.DAT'))   # (trafico -10 %: docs/PARIDAD.md)
     elif n == 'rivales':                                 # COAST 2 COAST: los coches de carreras (obj_rc, modelos 0..29)
-        ej(T('conv_trafico.py'), ISO, t, '--rivales=' + ','.join(str(k) for k in range(30))); mueve(D, tj('RC*.DAT'))
+        ej(T('conv_trafico.py'), ISO, t, '--rivales=' + ','.join(str(k) for k in range(30)), '--ligero'); mueve(D, tj('RC*.DAT'))
     elif n == 'mision': ej(T('conv_mision.py'), ISO, t); mueve(D, tj('MISION.DAT'))   # Races.bin y tablas de 47CF40
     elif n == 'c2chud': ej(T('conv_hud.py'), ISO, t, '--c2c'); mueve(D, tj('C2CHUD.DAT'))   # HUD de las misiones de C2C
     elif n == 'c2c': ej(T('conv_c2c.py'), ISO, t); mueve(D, tj('C2C.DAT'))   # pantallas de C2C (banco 0x44, menu.c)
+    elif n == 'camp': ej(T('conv_camp.py'), ISO, t); mueve(D, tj('CAMP.DAT'), tj('CAMPHUD.DAT'), tj('CAMPOBJ.DAT'), tj('VOCESM.DAT'), tj('MJHUD.DAT'))   # campeonatos de C2C (campeonato.c)
     elif n == 'salon': ej(T('conv_salon.py'), ISO, t); mueve(D, tj('SALON.DAT'))   # el SALON (showroom, banco 0x44, menu.c)
     elif n == 'tablero': ej(T('conv_tablero.py'), ISO, t); mueve(D, tj('TABLERO.DAT'))   # tableros de cursos (banco 0x44, menu.c)
     elif n == 'camiones':                                        # los camiones con remolque de OUTRUN2SP (39/40, 41, 43)
         ej(T('conv_trafico.py'), ISO, t, '--camiones'); mueve(D, tj('TRAFK0.DAT'), tj('TRAFK1.DAT'), tj('TRAFK2.DAT'))
     elif n.startswith('coche'):
-        ej(T('conv_coche.py'), ISO, '--todos', t, '--fichas', n[5:])
+        ej(T('conv_coche.py'), ISO, '--todos', t, '--fichas', n[5:], '--visible')   # (Rev 2.9.7: COCHEnn.DAT con --rebaja y el ligero COCHEnnL.DAT, C2)
         c = os.path.join(W, 'coche'); os.makedirs(c, exist_ok=True)
         for f in glob.glob(tj('COCHE[0-9]*.DAT')): os.replace(f, os.path.join(c, os.path.basename(f)))
     else: raise Fallo('paso desconocido: %s' % n)
@@ -205,13 +281,26 @@ def interno(a):
         W = a[2] if len(a) > 2 else os.path.join(a[1], '..', 'trabajo_lodveg'); os.makedirs(W, exist_ok=True)   # conv_union
         grupos_nodos.datos(a[1], W, lod_veg.aplica_bytes)   # de ahora ya lo hacen): SEG / BK sueltos y los paquetes,
                                                          # reempaquetados (PYTHONHASHSEED=0, como todos los pasos)
+    elif a[0] == 'lodgrande':                            # lodgrande <datos/> [trabajo/]: version lejana lowpoly de lo grande
+        import lod_grande, grupos_nodos                  # (Rev 2.9.2.d; conv_tramo y conv_union ya lo hacen: aqui para las
+        W = a[2] if len(a) > 2 else os.path.join(a[1], '..', 'trabajo_lodgrande'); os.makedirs(W, exist_ok=True)   # hechas
+        grupos_nodos.datos(a[1], W, lod_grande.aplica_bytes)   # antes; idempotente)
     elif a[0] == 'revq':                                 # revq <patron>...: tools/revq.py con los ficheros de los patrones
         import revq
         sys.argv = ['revq.py'] + sorted(f for p in a[1:] for f in glob.glob(p)); revq.main()
     else: raise SystemExit('interno: %s' % a[0])
 
 # ---------------------------------------------------------------- principal
-def regenera(iso, D, W, jobs=4, informe=print):
+def extras_hechos(D, fs):
+    """la tarjeta de menu_musica.py ya esta en D y es de estos ficheros (no mas viejos que ellos)"""
+    import menu_musica
+    sal = [os.path.join(D, f) for f in ('MUS%d.ADP' % menu_musica.PISTA, 'MUS%d.ADP' % menu_musica.PISTA_AVANCE)]
+    if not all(os.path.isfile(f) for f in sal) or not menu_musica.tiene(os.path.join(D, 'MENU.DAT')): return False
+    import fsp_musica
+    if os.path.isfile(os.path.join(D, 'SPFE.DAT')) and not fsp_musica.tiene(os.path.join(D, 'SPFE.DAT')): return False
+    return min(os.path.getmtime(f) for f in sal) >= max(os.path.getmtime(f) for f in fs)
+
+def regenera(iso, D, W, jobs=4, informe=print, extras=None):
     """rehace lo que falta en D; devuelve True si los datos estan completos"""
     iso = os.path.abspath(iso)
     if not os.path.isfile(iso): raise SystemExit('no esta la ISO: %s' % iso)
@@ -237,6 +326,9 @@ def regenera(iso, D, W, jobs=4, informe=print):
     os.environ.setdefault('OR2_CACHE', C.env['OR2_CACHE'])
     C.musica = nativo.programa('musica')
 
+    # Rev 2.9.9.c: las etapas y uniones del conversor de antes (cupula del cielo con UV a 0) se quitan y se rehacen
+    sv, uv = cielos_viejos(D)
+    if sv or uv: quita_viejos(D, W, sv, uv, informe)
     # lista de pasos que faltan (lo hecho no se repite)
     falta = []
     if not hay(D, *UNIONES):                             # (conv_union.py no rehace las uniones sueltas que ya estan)
@@ -245,11 +337,17 @@ def regenera(iso, D, W, jobs=4, informe=print):
     if not hay(D, *UNIONES_TA): falta += ['unionta%d' % k for k in range(C.partes)]
     if not hay(D, *UNIONES_REN): falta += ['unionren%d' % k for k in range(C.partes)]
     # primero lo que hace falta para arrancar y correr (coches, HUD, menus, sonido, musica, etapas); las peliculas al final
+    viejos = hay(D, 'COCHE00.DAT') and not (coches_rebajados(D) and coches_visibles(D))
+    if viejos:                                           # (las copias intermedias de antes no valen; las de D se cambian al acabar)
+        for k in range(15):
+            for f in ('COCHE%02d.DAT' % k, 'COCHE%02dL.DAT' % k):
+                if os.path.isfile(os.path.join(W, 'coche', f)): os.remove(os.path.join(W, 'coche', f))
     for k in range(15):
-        if not hay(D, 'COCHES.DAT') and not hay(os.path.join(W, 'coche'), 'COCHE%02d.DAT' % k): falta.append('coche%d' % k)
+        if (viejos or not hay(D, 'COCHES.DAT')) and not hay(os.path.join(W, 'coche'), 'COCHE%02d.DAT' % k, 'COCHE%02dL.DAT' % k):
+            falta.append('coche%d' % k)
     for f, n in (('MENU.DAT', 'menu'), ('HUD.DAT', 'hud'), ('VMU.DAT', 'vmu'), ('MODOV.DAT', 'modov')):
         if not hay(D, f): falta.append(n)
-    if not hay(D, 'SFX.DAT', 'VOCES.DAT', 'VOCESC.DAT'): falta.append('sonido')
+    if not hay(D, 'SFX.DAT', 'VOCES.DAT', 'VOCESC.DAT') or not voces_163(D): falta.append('sonido')
     falta += ['mus%d' % k for k in MUSICA if not hay(D, 'MUS%d.ADP' % k)]
     for l in C.saca(py(os.path.join(TOOLS, 'regenera.py'), '--interno', 'segs', iso)).split():
         ti, n = l.split(':')
@@ -258,12 +356,14 @@ def regenera(iso, D, W, jobs=4, informe=print):
     for fs, n in ((['EFECTOS.DAT'], 'efectos'), (['FAROS.DAT'], 'faros'), (chrs, 'chr'), (['BAND.DAT', 'BAND1.DAT'], 'band'), (['PARAM.DAT'], 'param'),
                   (['META.DAT'], 'meta'), (FIN, 'fin'),
                   (SP, 'sp'), (FINAL, 'final'),
-                  (['SALIDA.DAT'], 'salida'), (['INFARTO.DAT', 'INFARTOP.DAT', 'HAHUD.DAT', 'VOCESH.DAT'], 'infarto'), (['BO.DAT'] + BO, 'bo'),
+                  (['SALIDA.DAT'], 'salida'), (['INFARTO.DAT', 'INFARTOP.DAT', 'INFARTOX.DAT', 'CHRH.DAT', 'HAOSO.DAT', 'HAOBJ.DAT', 'HAHUD.DAT', 'VOCESH.DAT', 'VOCESHC.DAT'], 'infarto'), (['BO.DAT'] + BO, 'bo'),
                   (['TRAFC.DAT', 'TAPD.DAT'] + TRAF, 'trafico'), (['TRAFK0.DAT', 'TRAFK1.DAT', 'TRAFK2.DAT'], 'camiones'),
                   (['MVTS.VQV'], 'video_ts'), (['MVATTR.VQV'], 'video_attr'),
                   (['RC%02d.DAT' % k for k in range(30)], 'rivales'), (['MISION.DAT'], 'mision'), (['C2CHUD.DAT'], 'c2chud'),
-                  (['C2C.DAT'], 'c2c'), (['SALON.DAT'], 'salon'), (['TABLERO.DAT'], 'tablero')):
+                  (['C2C.DAT'], 'c2c'), (['CAMP.DAT', 'VOCESM.DAT', 'MJHUD.DAT'], 'camp'), (['SALON.DAT'], 'salon'), (['TABLERO.DAT'], 'tablero')):
         if not hay(D, *fs): falta.append(n)
+    if 'fin' not in falta and hay(D, 'GOALT.DAT') and not tiene(D, 'GOALT.DAT', b'T_MEJOR'): falta.append('fin')
+    if 'tablero' not in falta and hay(D, 'TABLERO.DAT') and not tiene(D, 'TABLERO.DAT', b'LST1'): falta.append('tablero')
 
     informe('== %d pasos en %d a la vez (registros en %s)' % (len(falta), jobs, os.path.join(W, 'registro')))
     total = sum(peso(n) for n in falta) + PESO_FIN; hecho = [0.0]; t1 = time.time(); mal = []
@@ -316,6 +416,8 @@ def regenera(iso, D, W, jobs=4, informe=print):
             enlaza(f, os.path.join(bk, os.path.basename(f)))
         # segunda pasada de la VQ (tools/revq.py; sin nada que hacer si las uniones se convirtieron con el modelo.py de ahora)
         post('revq_bk', py(os.path.join(TOOLS, 'regenera.py'), '--interno', 'revq', os.path.join(bk, 'BK[0-9]*.DAT')))
+        # libros VQ reducidos de las texturas pequenas (tools/libros.py, con pvrtex; Rev 2.2)
+        post('libros_bk', py(os.path.join(TOOLS, 'libros.py'), os.path.join(bk, 'BK[0-9]*.DAT')))
         C.env['PYTHON_CPU_COUNT'] = str(jobs)
         try: post('pak', py(os.path.join(TOOLS, 'pak_union.py'), bk, pak), 3)
         finally: C.env['PYTHON_CPU_COUNT'] = '1'
@@ -330,6 +432,7 @@ def regenera(iso, D, W, jobs=4, informe=print):
         bk, pak = os.path.join(W, 'bkta'), os.path.join(W, 'pakta')
         borra(bk); borra(pak); os.makedirs(bk); os.makedirs(pak)
         for f in glob.glob(os.path.join(W, 'uta', 'BK[0-9]*.DAT')): enlaza(f, os.path.join(bk, os.path.basename(f)))
+        post('libros_ta', py(os.path.join(TOOLS, 'libros.py'), os.path.join(bk, 'BK[0-9]*.DAT')))
         C.env['PYTHON_CPU_COUNT'] = str(jobs)
         try: post('pakta', py(os.path.join(TOOLS, 'pak_union.py'), bk, pak, '--pak=UNIONESTA.PAK'), 3)
         finally: C.env['PYTHON_CPU_COUNT'] = '1'
@@ -342,6 +445,7 @@ def regenera(iso, D, W, jobs=4, informe=print):
         bk, pak = os.path.join(W, 'bkren'), os.path.join(W, 'pakren')
         borra(bk); borra(pak); os.makedirs(bk); os.makedirs(pak)
         for f in glob.glob(os.path.join(W, 'uren', 'BK[0-9]*.DAT')): enlaza(f, os.path.join(bk, os.path.basename(f)))
+        post('libros_ren', py(os.path.join(TOOLS, 'libros.py'), os.path.join(bk, 'BK[0-9]*.DAT')))
         C.env['PYTHON_CPU_COUNT'] = str(jobs)
         try: post('pakren', py(os.path.join(TOOLS, 'pak_union.py'), bk, pak, '--pak=UNIONESR.PAK'), 3)
         finally: C.env['PYTHON_CPU_COUNT'] = '1'
@@ -353,10 +457,20 @@ def regenera(iso, D, W, jobs=4, informe=print):
         borra(seg); borra(segpak); os.makedirs(seg); os.makedirs(segpak)
         for f in glob.glob(os.path.join(D, 'SEG[0-9]*.DAT')): enlaza(f, os.path.join(seg, os.path.basename(f)))
         post('revq_seg', py(os.path.join(TOOLS, 'regenera.py'), '--interno', 'revq', os.path.join(seg, 'SEG[0-9]*.DAT')))
+        post('libros_seg', py(os.path.join(TOOLS, 'libros.py'), os.path.join(seg, 'SEG[0-9]*.DAT')))
         post('segpak', py(os.path.join(TOOLS, 'pak_union.py'), seg, segpak, '--pak=SEGS.PAK', '--prefijo=SEG', '--tope=7842'))
         for f in os.listdir(segpak): os.replace(os.path.join(segpak, f), os.path.join(D, f))
     if not hay(D, 'VISO.DAT'):                           # nodos del original en la seccion 0 y la ultima de cada etapa
         post('viso', py(os.path.join(TOOLS, 'conv_viso.py'), iso, D))   # (conv_viso.py: lee SEGnn.DAT y SEGS.PAK)
+    if not hay(D, 'REPSEC.DAT'):                         # Rev 2.9.8 P2: corte del reparto del TA por seccion de la PVS
+        # (lee SEGnn.DAT y SEGS.PAK; opcional en la demo: por defecto, con REPARTO_SEC y LEJ_SEC a 0, ni se lee. Si
+        #  falla no para la conversion: sin el fichero la demo hace lo de siempre; fuera el temporal, que iria al GD-ROM)
+        try: post('repsec', py(os.path.join(TOOLS, 'reparto_sec.py'), D))
+        except SystemExit as e:
+            if os.path.isfile(os.path.join(D, 'REPSEC.DAT.tmp')): os.remove(os.path.join(D, 'REPSEC.DAT.tmp'))
+            informe('AVISO: %s; sigue sin REPSEC.DAT (opcional)' % e)
+    # (Rev 2.7: sin REFLEJO.DAT: el reflejo del entorno se quito, daba tirones de noche; tools/conv_reflejo.py lo sigue
+    #  haciendo a mano para -DCON_REFLEJO)
     if not hay(D, 'COCHES.DAT'):
         for f in glob.glob(os.path.join(W, 'coche', 'COCHE[0-9]*.DAT')): os.replace(f, os.path.join(D, os.path.basename(f)))
         post('coches', py(os.path.join(TOOLS, 'conv_coche.py'), iso, '--todos', D, '--fichas', '99'), 0)   # solo COCHES.DAT
@@ -364,14 +478,56 @@ def regenera(iso, D, W, jobs=4, informe=print):
     informe('== segunda pasada de la VQ en los modelos sueltos (revq.py: trafico, personajes, banderero, objetos; no los coches)')
     post('revq', py(os.path.join(TOOLS, 'regenera.py'), '--interno', 'revq', *(os.path.join(D, p) for p in
                     ('TRAF[0-9]*.DAT', 'CHR[0-9]*.DAT', 'BAND*.DAT', 'BO[0-9]*.DAT'))))
+    post('libros', py(os.path.join(TOOLS, 'libros.py'), *(os.path.join(D, p) for p in
+                      ('TRAF*.DAT', 'CHR[0-9]*.DAT', 'BAND*.DAT', 'BO[0-9]*.DAT'))))
+    informe('== version lejana lowpoly de lo grande (tools/lod_grande.py; lo ya hecho no cambia)')
+    post('lodgrande', py(os.path.join(TOOLS, 'regenera.py'), '--interno', 'lodgrande', D, os.path.join(W, 'lodgrande')))
+    # mipmaps en lo lejano (tools/remip.py, docs/PARIDAD.md): sobre las etapas y uniones ya hechas, una vez (no es
+    # idempotente por si solo: cada pasada gastaria otra vez lo minimo de cada fichero; la marca va en trabajo/)
+    if not os.path.isfile(os.path.join(W, 'remip.hecho')):
+        informe('== mipmaps en lo lejano (tools/remip.py)')
+        post('remip', py(os.path.join(TOOLS, 'remip.py'), '--datos', D, D, os.path.join(W, 'remip')))
+        with open(os.path.join(W, 'remip.hecho'), 'w') as f: f.write('hecho\n')
+    # fps3 (tools/aligera.py, docs/PARIDAD.md): decoracion -15 % en las etapas y edificios de PALM a la mitad (64->32, 128->64), una vez
+    if not os.path.isfile(os.path.join(W, 'aligera.hecho')):
+        informe('== fps3: decoracion -15 % y edificios de PALM a la mitad (tools/aligera.py)')
+        post('aligera', py(os.path.join(TOOLS, 'aligera.py'), '--datos', D, D, os.path.join(W, 'aligera')))
+        with open(os.path.join(W, 'aligera.hecho'), 'w') as f: f.write('hecho\n')
+    # recorte (tools/aligera.py, docs/PARIDAD.md "Recorte"): carteles de la carretera y farolas de las bifurcaciones -50 %,
+    # muros de las bifurcaciones a 32x32 (con su marca en los datos: si aligera ya lo hizo arriba, no hace nada)
+    if not os.path.isfile(os.path.join(W, 'recorte.hecho')):
+        informe('== recorte: carteles y farolas -50 %, muros de las bifurcaciones a 32x32 (tools/aligera.py --solo-recorte)')
+        post('recorte', py(os.path.join(TOOLS, 'aligera.py'), '--datos', D, D, os.path.join(W, 'recorte'), '--solo-recorte'))
+        with open(os.path.join(W, 'recorte.hecho'), 'w') as f: f.write('hecho\n')
+
+    # paso opcional: la tarjeta SPLASH WAVE REMASTER del selector de musica, solo con sus ficheros en extras/
+    # (tools/menu_musica.py: parche del MENU.DAT de D, que no se puede rehacer desde cero, y MUS70 / MUS71.ADP)
+    import menu_musica
+    E = os.path.abspath(extras or os.path.join(os.path.dirname(D), 'extras'))
+    fs = [os.path.join(E, f) for f in menu_musica.EXTRAS]
+    if all(os.path.isfile(f) for f in fs) and hay(D, 'MENU.DAT'):
+        informe('== extras: tarjeta SPLASH WAVE REMASTER en el selector de musica (menu_musica.py, %s)' % E)
+        if extras_hechos(D, fs): informe('  ya estaba')
+        else:
+            t = os.path.join(W, 'extras'); borra(t)
+            post('extras', py(os.path.join(TOOLS, 'menu_musica.py'), os.path.join(D, 'MENU.DAT'), fs[0], fs[1], t), 3)
+            for f in ('MUS%d.ADP' % menu_musica.PISTA, 'MUS%d.ADP' % menu_musica.PISTA_AVANCE, 'MENU.DAT'):
+                os.replace(os.path.join(t, f), os.path.join(D, f))
+            borra(t)
+            if hay(D, 'SPFE.DAT'):                       # la fila de mas en "Elige la musica" de OUTRUN2SP (fsp_musica.py)
+                post('extras_fsp', py(os.path.join(TOOLS, 'fsp_musica.py'), os.path.join(D, 'SPFE.DAT'),
+                                      os.path.join(D, 'MENU.DAT'), fs[1], t), 1)
+                os.replace(os.path.join(t, 'SPFE.DAT'), os.path.join(D, 'SPFE.DAT'))
+                borra(t)
+    else: informe('== extras: sin %s (paso opcional: no se anade la tarjeta SPLASH WAVE REMASTER)' % ' / '.join(fs))
 
     # ------------------------------------------------------------ comprobacion
     informe('== comprobacion de %s' % D)
     ok = True
     nec = ['BAND.DAT', 'BAND1.DAT', 'BKD.DAT', 'BO.DAT'] + chrs + \
-          'COCHES.DAT COLBK.DAT COLLR.DAT CURSO.DAT EFECTOS.DAT FAROS.DAT FIN.DAT GOVER.DAT HAHUD.DAT HUD.DAT INFARTO.DAT MENU.DAT META.DAT MODOV.DAT MVATTR.VQV MVTS.VQV PARAM.DAT SFX.DAT SEGS.PAK SOL.DAT TAPD.DAT TRAFC.DAT UNIONES.PAK VMU.DAT VOCES.DAT VOCESH.DAT VOCESC.DAT MISION.DAT C2CHUD.DAT C2C.DAT SALON.DAT TABLERO.DAT CURSOTA.DAT UNIONESTA.PAK UNIONESR.PAK'.split() + ['RC%02d.DAT' % k for k in range(30)] + \
-          ['COCHE%02d.DAT' % k for k in range(15)] + ['MUS%d.ADP' % k for k in MUSICA] + SP + FINAL + \
-          ['TRAFK%d.DAT' % k for k in range(3)] + FIN + TRAF + BO + COLBK + ['SALIDA.DAT', 'CHRPAR.DAT', 'VISO.DAT', 'INFARTOP.DAT']
+          'COCHES.DAT COLBK.DAT COLLR.DAT CURSO.DAT EFECTOS.DAT FAROS.DAT FIN.DAT GOVER.DAT HAHUD.DAT HUD.DAT INFARTO.DAT MENU.DAT META.DAT MODOV.DAT MVATTR.VQV MVTS.VQV PARAM.DAT SFX.DAT SEGS.PAK SOL.DAT TAPD.DAT TRAFC.DAT UNIONES.PAK VMU.DAT VOCES.DAT VOCESH.DAT VOCESC.DAT MISION.DAT C2CHUD.DAT C2C.DAT CAMP.DAT CAMPHUD.DAT VOCESM.DAT MJHUD.DAT SALON.DAT TABLERO.DAT CURSOTA.DAT UNIONESTA.PAK UNIONESR.PAK'.split() + ['RC%02d.DAT' % k for k in range(30)] + \
+          ['COCHE%02d.DAT' % k for k in range(15)] + ['COCHE%02dL.DAT' % k for k in range(15)] + ['MUS%d.ADP' % k for k in MUSICA] + SP + FINAL + \
+          ['TRAFK%d.DAT' % k for k in range(3)] + FIN + TRAF + BO + COLBK + ['SALIDA.DAT', 'CHRPAR.DAT', 'VISO.DAT', 'INFARTOP.DAT', 'INFARTOX.DAT', 'CHRH.DAT', 'HAOSO.DAT', 'HAOBJ.DAT']
     for f in nec:
         if not hay(D, f): informe('FALTA %s' % f); ok = False
     ls = sorted(os.listdir(D))
@@ -402,7 +558,7 @@ def main():
     if a and a[0] == '--interno': return interno(a[1:])
     op = {}; pos = []; i = 0
     while i < len(a):
-        if a[i] in ('--jobs', '--gdi', '--bin', '--ip'): op[a[i][2:]] = a[i + 1]; i += 2
+        if a[i] in ('--jobs', '--gdi', '--bin', '--ip', '--extras'): op[a[i][2:]] = a[i + 1]; i += 2
         elif a[i] == '--limpia': op['limpia'] = True; i += 1
         else: pos.append(a[i]); i += 1
     if len(pos) < 2: raise SystemExit(__doc__)
@@ -410,7 +566,7 @@ def main():
     W = pos[2] if len(pos) > 2 else ('/dev/shm/or2_regenera' if os.path.isdir('/dev/shm') else
                                       os.path.join(os.path.dirname(os.path.abspath(D)), 'trabajo'))
     jobs = int(op.get('jobs') or os.environ.get('JOBS') or 4)
-    regenera(iso, D, W, jobs)
+    regenera(iso, D, W, jobs, extras=op.get('extras'))
     if op.get('limpia'): limpia(W)
     if op.get('gdi'):
         import gdi

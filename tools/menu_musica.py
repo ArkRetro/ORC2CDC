@@ -1,339 +1,520 @@
-"""menu_musica.py: la tarjeta ALL I WANT del selector de musica (MUSICA2).
+"""menu_musica.py MENU.DAT cancion imagen salida/ : una tarjeta mas (SPLASH WAVE REMASTER) en el selector de musica.
 
-El selector del original trae 12 temas en la lista 2 (MUSICA_L2 / MUSICA_T2, escenas 0x440033 y 0x44002E) y
-cada tema es un cuadro quieto del carrusel (20 + 40 k) y su titulo (110 k).  ALL I WANT no existe en el arte
-del PS2: aqui se compone una tarjeta mas con la fuente 14 del propio MENU.DAT, en el mismo sitio y con el
-mismo tratamiento (rotulo, etiqueta de genero, icono, visor de la radio, caratula y tira inferior), y se
-anaden el cuadro 20 + 40 * 12 = 500 del carrusel y el 110 * 12 = 1320 del titulo, con sus tramos TEMA12.
+Uso: python3 -I tools/menu_musica.py <MENU.DAT de entrada> <cancion.mp3|.wav|...> <imagen.jpg|.png> <dir de salida>
+Escribe en <dir de salida> el MENU.DAT parcheado, MUS70.ADP (el tema entero, para la carrera) y MUS71.ADP (su avance,
+el que suena en el selector), y menu_musica2.png (maqueta de la pantalla MUSICA2 con la tarjeta, para mirarla).
 
-`genera` solo produce las imagenes (lo usan conv_menu.py y el parche de datos); `anade` las mete en un
-Menu de conv_menu.py antes de escribirlo.  No depende de fuentes del sistema: usa los glifos F14 que ya
-lleva MENU.DAT.
-"""
+Por que un parche y no conv_menu.py: el MENU.DAT de los datos lleva arte que no sale de la ISO (la portada de
+OutRunners: usos OR_PORTADA / OR_CREDITO), asi que no se puede regenerar desde cero. Aqui se lee el MENU.DAT que hay
+(formato HUD1 de conv_hud.Hud.escribe con el bloque MNU1 de conv_menu.escribe), se le anaden texturas, sprites,
+piezas y tramos, y se vuelve a escribir con la misma disposicion. Nada mas cambia (los indices de sprites, grupos y
+usos que ya habia se quedan igual; las texturas de las pantallas que van detras de MUSICA2 se corren). Si el MENU.DAT
+ya lleva la tarjeta (tramo TEMA12 del uso MUSICA_L2), se quita antes y se pone otra vez: el parche es repetible.
+
+La tarjeta (tema 28 de comun/menu.c, la ultima de la lista 2, la de las remezclas): el selector del original lleva
+12 temas en la lista 2 (escenas 0x440033 / 0x44002E: grupos MUSICA_L2 / MUSICA_T2) y cada tema es un cuadro quieto
+del carrusel (20 + 40 k) y su titulo de la radio (110 cuadros desde 110 k). Se compone una tarjeta mas en los mismos
+sitios que las del original (las del tema 11, NIGHT FLIGHT INSTRUMENTAL): rotulo "SPLASH WAVE" con la fuente 14 del
+propio MENU.DAT (grupo FUENTE y metricas de MNU2; sin fuentes del sistema), etiqueta tipo genero "REMASTER BY SUPNEO",
+icono, visor LCD de la radio, portada = la imagen del usuario (recortada al cuadro y escalada, sin redibujarla) y la
+tira inferior; los puntos de la lista (13: se anade uno) y el rotulo de la lista se copian del cuadro del tema 11. Se
+anaden los cuadros 499 y 500 del carrusel y 1320..1429 del titulo y los tramos TEMA12 y MUEVE1112 (499 -> 500).
+
+Audio: el mp3 se decodifica con el ffmpeg de imageio-ffmpeg (tools/nativo.ffmpeg) a PCM estereo de 16 bits a
+44 100 Hz (musica.c de la demo reproduce todos los temas a 44,1 kHz, como el original con el pitch 0xEB3 de
+SOUNDCD.IRX) y tools/c/musica.c (entrada "pcm") lo pasa a ADPCM de Yamaha estereo, el mismo formato que MUSn.ADP.
+El avance: AVANCE_S segundos desde AVANCE_INI con fundido de entrada y de salida (los del original son trozos de
+~25 s del tema que el selector repite en bucle).
+
+Los ficheros del usuario (cancion e imagen) no van al repo: tools/regenera.py corre este paso solo si estan en la
+carpeta extras/ (EXTRAS), y el programa de Windows igual."""
+import os, struct, subprocess, sys, tempfile
 import numpy as np
-from PIL import Image, ImageDraw, ImageFilter
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-TEMA = 12
+TEMA = 12                                 # cuadro del tema en la lista 2 (los 12 del original son 0..11)
 CUADRO_CARRUSEL = 20 + 40 * TEMA          # 500
+# la tarjeta se pone en los cuadros 499 y 500 y MUEVE1112 va del 499 al 500: un movimiento de 1 cuadro (con uno de 0,
+# 500 -> 500, el menu da el movimiento por acabado en el mismo paso, no pone el tramo TEMA12 ni pide el avance)
+C0 = CUADRO_CARRUSEL - 1
 CUADRO_TITULO = 110 * TEMA                # 1320
-NOMBRE = b'ALL I WANT'
-GENERO = b'CRAZY TAXI'
+PISTA = 70                                # MUS70.ADP: el tema (comun/musica.h MUSICA_PISTA_EXTRA)
+PISTA_AVANCE = 71                         # MUS71.ADP: el avance (MUSICA_AVANCE_EXTRA)
+NOMBRE = b'SPLASH WAVE'
+GENERO = b'REMASTER BY SUPNEO'
+AVANCE_INI, AVANCE_S, FUNDIDO_S = 30.0, 26.0, 1.5
+EXTRAS = ('splash_wave_remaster.mp3', 'supneo.jpg')   # nombres en extras/ (regenera.py, windows/outrun2dc.py)
 
-AZUL = (52, 76, 72, 255)                  # el verde-azulado de los rotulos de las otras tarjetas
-AMARILLO = (255, 214, 0, 255)
-NEGRO = (14, 14, 14, 255)
+# colores medidos en las piezas del tema 11 (mediana de los texeles opacos): rotulo, tira y visor
+COL_ROTULO = (68, 102, 102, 255)
+COL_TIRA = (85, 102, 102, 255)
+COL_LCD = (68, 187, 255, 255)
+COL_TAG = (0, 136, 204, 255)              # (las del original: rojo, naranja, morado, verde; esta, azul)
 BLANCO = (255, 255, 255, 255)
-ROJO = (196, 36, 32, 255)
-MODO_TAXI = 'emoji'                       # 'emoji' (peticion) o 'negro' (antiguo)
-_EMOJI = None
+TAG_MAX = 150
+PORTADA_DIBUJO = (13, 3, 132, 123)        # el dibujo dentro de la caja de CD de las portadas (136x126)
 
-
-def _emoji_taxi():
-    """🚕 de Segoe UI Emoji, recortado a su tinta."""
-    global _EMOJI
-    if _EMOJI is None:
-        from PIL import ImageFont
-        f = ImageFont.truetype(r'C:\Windows\Fonts\seguiemj.ttf', 512)
-        im = Image.new('RGBA', (768, 768), (0, 0, 0, 0))
-        ImageDraw.Draw(im).text((128, 128), '🚕', font=f, embedded_color=True)
-        bb = im.getbbox()
-        if not bb:
-            raise RuntimeError('Segoe UI Emoji no ha dibujado el taxi')
-        _EMOJI = im.crop(bb)
-    return _EMOJI
-
-
-def _emoji_fit(w, h):
-    e = _emoji_taxi()
-    s = min(w / e.width, h / e.height)
-    return e.resize((max(1, int(round(e.width * s))), max(1, int(round(e.height * s)))), Image.LANCZOS)
-
-# tamano de cada pieza y su sitio en la tarjeta (los mismos que los temas del original: tema 11 / NIGHT FLIGHT)
+# (pieza, ancho, alto, x, y, ancla x, ancla y): los sitios de las piezas del tema 11 en el cuadro 460
 PIEZAS = (
     ('logo', 234, 31, 363.5, 113.0, 243.0, 15.0),
-    ('tag', 112, 19, 210.0, 142.0, 87.5, 9.5),
-    ('icono', 62, 49, 83.0, 118.0, 31.0, 25.0),
+    ('tag', 112, 19, 210.0, 142.0, 87.5, 9.5),            # (ancla x 87,5: el borde izquierdo en 122,5 como todas)
     ('portada', 136, 126, 507.0, 265.0, 68.0, 63.0),
     ('tira', 271, 18, 217.0, 370.9, 151.1, 8.0),
 )
-LCD = ('lcd', 134, 15, 342.1, 271.0, 171.0, 7.0)
+LCD = ('lcd', 134, 15, 342.1, 271.0, 171.0, 7.0)   # (el visor alterna: nombre / etiqueta, 55 cuadros cada uno)
+TITULO_CUADROS = 110                      # cuadros del titulo de cada tema (en bucle, como los del original)
 
 
-def _g(g):
-    return (g['nombre'], g['n'], g['pri']) if isinstance(g, dict) else (g[0], g[1], g[2])
+# ---------------------------------------------------------------- MENU.DAT (HUD1 + MNU1)
+class Dat:
+    """MENU.DAT leido: tablas como listas de tuplas, texturas como (W, H, fmt, lista, bytes)"""
+
+    def __init__(s, ruta):
+        d = open(ruta, 'rb').read()
+        assert d[:4] == b'HUD1', '%s: no es un HUD1' % ruta
+        c = struct.unpack_from('<11I', d, 4)
+        nt, ns, ng, npz, nl = c[:5]; o_t, o_s, o_g, o_p, o_l, o_taco = c[5:]
+        s.tex = []
+        for i in range(nt):
+            W, H, fmt, li, off, tam = struct.unpack_from('<4H2I', d, o_t + 16 * i)
+            s.tex.append((W, H, fmt, li, d[off:off + tam]))
+        s.spr = [struct.unpack_from('<4H4f', d, o_s + 24 * i) for i in range(ns)]
+        s.grp = []
+        for i in range(ng):
+            nom, n, pri, cnt, z, paso, z2 = struct.unpack_from('<16s4HfI', d, o_g + 32 * i)
+            s.grp.append([nom.rstrip(b'\0').decode(), n, pri, cnt, paso])
+        s.pie = [struct.unpack_from('<4H8f', d, o_p + 40 * i) for i in range(npz)]
+        s.lay = [struct.unpack_from('<16s2H4h2H', d, o_l + 32 * i) for i in range(nl)]
+        s.taco = d[o_taco:o_taco + 16]
+        ini = min(t[4] and struct.unpack_from('<I', d, o_t + 16 * i + 8)[0] for i, t in enumerate(s.tex))
+        x = d[o_taco + 16:ini]
+        s.raw = None
+        if x[:4] != b'MNU1':                            # (otro bloque, p. ej. SPR1 de SPFE.DAT: tal cual)
+            s.raw = bytes(x); s.pan = []; s.tra = []; s.mnu2 = b''; return
+        s.npan, s.ntra, s.o2 = struct.unpack_from('<3I', x, 4)
+        s.pan = [list(struct.unpack_from('<16s6HI4I', x, 16 + 48 * i)) for i in range(s.npan)]
+        o = 16 + 48 * s.npan
+        s.tra = [list(struct.unpack_from('<16s4H2I', x, o + 32 * i)) for i in range(s.ntra)]
+        s.mnu2 = bytes(x[s.o2:]) if s.o2 else b''
+
+    # nombres
+    def g(s, nombre): return next(i for i, g in enumerate(s.grp) if g[0] == nombre)
+    def u(s, nombre): return next(i for i, u in enumerate(s.lay) if u[0].rstrip(b'\0').decode() == nombre)
+    def p(s, nombre): return next(i for i, p in enumerate(s.pan) if p[0].rstrip(b'\0').decode() == nombre)
+
+    def rgba(s, ti):
+        import vq
+        W, H, fmt, li, b = s.tex[ti]
+        if fmt & 0x300: return vq.decodifica(b, W, H, fmt & 0xff, ((fmt >> 16) & 0xff) + 1 if fmt >> 16 else 256)
+        return vq.decodifica16(b, W, H, fmt & 0xff)
+
+    def fuente(s):
+        """metricas de la fuente 14 (MNU2: u16 ancho, alto, primero, n; i16 espaciado, u16 hay interletraje;
+        i8 metricas[2n]; i8 inter[n*n])"""
+        h = struct.unpack_from('<8I', s.mnu2, 0); f = h[3]
+        w, hh, pri, n, esp, ker = struct.unpack_from('<4HhH', s.mnu2, f)
+        met = np.frombuffer(s.mnu2, np.int8, 2 * n, f + 12).reshape(-1, 2).astype(int)
+        inter = np.frombuffer(s.mnu2, np.int8, n * n, f + 12 + 2 * n).astype(int) if ker else None
+        return _F(w, hh, pri, n, esp, met, inter, s.g('FUENTE'))
+
+    def escribe(s, ruta):
+        """la misma disposicion que conv_hud.Hud.escribe + conv_menu.escribe"""
+        n = [len(s.tex), len(s.spr), len(s.grp), len(s.pie), len(s.lay)]
+        offs = []; o = 48
+        for tam in (16 * n[0], 24 * n[1], 32 * n[2], 40 * n[3], 32 * n[4], 16):
+            offs.append(o); o += tam
+        o_taco = offs[5]
+        if s.raw is not None: blq = bytearray(s.raw)
+        else: blq = bytearray(b'MNU1' + struct.pack('<3I', len(s.pan), len(s.tra), (16 + 48 * len(s.pan) + 32 * len(s.tra))
+                                              if s.mnu2 else 0))
+        if s.raw is None:
+            for p in s.pan: blq += struct.pack('<16s6HI4I', *p)
+            for t in s.tra: blq += struct.pack('<16s4H2I', *t)
+            blq += s.mnu2
+        ini = (o_taco + 16 + len(blq) + 31) & ~31
+        out = bytearray(b'HUD1' + struct.pack('<11I', *n, *offs)); datos = bytearray()
+        for W, H, fmt, li, b in s.tex:
+            out += struct.pack('<4H2I', W, H, fmt, li, ini + len(datos), len(b)); datos += b; datos += bytes((-len(datos)) % 32)
+        for x in s.spr: out += struct.pack('<4H4f', *x)
+        cuenta = {}
+        for p in s.pie: cuenta[p[0]] = cuenta.get(p[0], 0) + 1
+        for i, (nom, nn, pri, _, paso) in enumerate(s.grp):
+            out += struct.pack('<16s4HfI', nom.encode(), nn, pri, cuenta.get(i, 0), 0, paso, 0)
+        for p in s.pie: out += struct.pack('<4H8f', *p)
+        for u in s.lay: out += struct.pack('<16s2H4h2H', *u)
+        out += s.taco; assert len(out) == o_taco + 16
+        out += blq; out += bytes(ini - len(out)); out += datos
+        open(ruta, 'wb').write(out)
+        return len(out)
 
 
-def grupo(grp, nombre):
-    for i, g in enumerate(grp):
-        if _g(g)[0] == nombre: return i
-    return -1
+class _F:
+    def __init__(s, w, h, pri, n, esp, met, ker, gf):
+        s.w, s.h, s.pri, s.n, s.esp, s.met, s.ker, s.gf = w, h, pri, n, esp, met, ker, gf
 
 
-def _piezas(pie):
-    d = {}
-    for p in pie: d.setdefault((p[0], p[1]), []).append(p)
-    return d
+class Vista:
+    """adaptador para conv_hud.dibuja_grupo (texturas RGBA y sprites en pixeles)"""
+    def __init__(s, D):
+        s.D = D; s._t = {}
+        s.grp = [dict(nombre=g[0], n=g[1], pri=g[2], paso=g[4]) for g in D.grp]
+        s.pie = D.pie
+        s.spr = []
+        for ti, w, h, _, u0, v0, u1, v1 in D.spr:
+            W, H = D.tex[ti][:2]; s.spr.append((ti, (u0 * W, v0 * H, u1 * W, v1 * H), w, h))
+        s.tex = _Texs(s)
 
 
+class _Texs:
+    def __init__(s, v): s.v = v
+    def __getitem__(s, i):
+        if i not in s.v._t: s.v._t[i] = s.v.D.rgba(i)
+        return s.v._t[i]
+
+
+# ---------------------------------------------------------------- texto con la fuente 14 del MENU.DAT
 def _par(F, c, sig):
     i = c - F.pri
-    if F.ker and sig and 0 <= sig - F.pri < F.n:
-        return F.met[i][1] - F.ker[i * F.n + sig - F.pri]
-    return F.met[i][1] + F.esp
+    if F.ker is not None and sig and 0 <= sig - F.pri < F.n: return int(F.met[i][1] - F.ker[i * F.n + sig - F.pri])
+    return int(F.met[i][1] + F.esp)
 
 
-def ancho(F, s):
+def ancho(F, s, track=0.0):
     a = 0
     for i, c in enumerate(s):
         sig = s[i + 1] if i + 1 < len(s) else 0
         if c == 32: a += int(F.w * 0.3); continue
-        a = _par(F, c, 0 if sig == 32 else sig) + a + F.esp
+        a = _par(F, c, 0 if sig == 32 else sig) + a + F.esp + track
     return a
 
 
-def _ref(tex, spr, si):
-    """(ti,w,h,u0,v0,u1,v1) tanto de un MENU.DAT (7 campos) como de un Menu de conv_menu (sprite recortado)"""
-    s = spr[si]
-    if len(s) == 7: return s
-    ti, (l, t, r, b), w, h = s
-    H, W = tex[ti].shape[:2]
-    return ti, w, h, l / W, t / H, r / W, b / H
-
-
-def _glifos(tex, spr, pie, F):
-    """un RGBA de la celda F14 de cada caracter, ya con el desplazamiento -metrica de MENU.DAT"""
-    d = _piezas(pie); out = {}
-    for code in range(F.pri, F.pri + F.n):
-        im = Image.new('RGBA', (F.w, F.h), (0, 0, 0, 0))
-        for p in d.get((F.gf, code - F.pri), []):
-            gg, fr, si, fl, x, y, ax, ay, ang, sx, sy, al = p
-            ti, w, h, u0, v0, u1, v1 = _ref(tex, spr, si)
-            a = tex[ti]; H, W = a.shape[:2]
-            L, T, R, B = int(round(u0 * W)), int(round(v0 * H)), int(round(u1 * W)), int(round(v1 * H))
-            g = Image.fromarray(a[T:B, L:R], 'RGBA').resize((max(1, w), max(1, h)))
-            if al < 1:
-                ar = np.array(g); ar[..., 3] = (ar[..., 3] * al).astype(np.uint8); g = Image.fromarray(ar)
-            im.alpha_composite(g, (int(round(x - ax)), int(round(y - ay))))
-        out[code] = im
+def glifos(D, F):
+    """RGBA de la celda de cada caracter del grupo FUENTE (cuadro = codigo - primero), con su desplazamiento"""
+    from PIL import Image
+    V = Vista(D); out = {}
+    G = D.grp[F.gf]
+    for p in D.pie[G[2]:G[2] + G[3]]:
+        gg, fr, si, fl, x, y, ax, ay, ang, sx, sy, al = p
+        ti, (l, t, r, b), w, h = V.spr[si]
+        a = V.tex[ti]
+        g = Image.fromarray(a[int(round(t)):int(round(b)), int(round(l)):int(round(r))], 'RGBA').resize((max(1, w), max(1, h)))
+        im = out.setdefault(F.pri + fr, Image.new('RGBA', (F.w, F.h), (0, 0, 0, 0)))
+        im.alpha_composite(g, (int(round(x - ax)), int(round(y - ay))))
     return out
 
 
-def texto_rgba(s, escala, color, glifos, F, contorno=1, sombra=0, SS=4, bold=0, escala_x=1.0):
-    """texto F14 a la escala pedida (escala_x solo estira en horizontal), con contorno y sombra"""
-    w = max(1, int(np.ceil(ancho(F, s) * escala * escala_x)))
-    h = max(1, int(np.ceil(F.h * escala)))
+def texto_rgba(s, escala, color, gl, F, contorno=1, sombra=0, SS=4, bold=0, escala_x=1.0, track=0.0):
+    """texto F14 a la escala pedida (escala_x solo estira en horizontal; track: pixeles de mas entre letras, a escala
+    1; bold: engorde en pixeles de la salida), con contorno blanco y sombra"""
+    from PIL import Image, ImageFilter
+    w = max(1, int(np.ceil(ancho(F, s, track) * escala * escala_x))); h = max(1, int(np.ceil(F.h * escala)))
     pad = max(1, contorno + (1 if sombra else 0)) + 1
     W, H = (w + 2 * pad) * SS, (h + 2 * pad) * SS
-    cap = Image.new('RGBA', (W, H), (0, 0, 0, 0))
-    x = pad
+    cap = Image.new('RGBA', (W, H), (0, 0, 0, 0)); x = pad
     for i, c in enumerate(s):
         sig = s[i + 1] if i + 1 < len(s) else 0
-        if c == 32:
-            x += int(F.w * 0.3 * escala * escala_x)
-            continue
-        g = glifos.get(c)
+        if c == 32: x += int(F.w * 0.3 * escala * escala_x); continue
+        g = gl.get(c)
         if g is not None:
             gw, gh = max(1, int(round(F.w * escala * escala_x * SS))), max(1, int(round(F.h * escala * SS)))
             cap.alpha_composite(g.resize((gw, gh), Image.LANCZOS), (int(round(x * SS)), pad * SS))
-        x += _par(F, c, 0 if sig == 32 else sig) * escala * escala_x
-    fill = Image.new('RGBA', (W, H), color)
-    fill.putalpha(cap.getchannel('A'))
-    if bold:
-        fill.putalpha(fill.getchannel('A').filter(ImageFilter.MaxFilter(2 * bold * SS + 1)))
+        x += (_par(F, c, 0 if sig == 32 else sig) + track) * escala * escala_x
+    fill = Image.new('RGBA', (W, H), color); fill.putalpha(cap.getchannel('A'))
+    if bold: fill.putalpha(fill.getchannel('A').filter(ImageFilter.MaxFilter(int(2 * bold * SS) | 1)))
     out = Image.new('RGBA', (W, H), (0, 0, 0, 0))
     if sombra:
-        sh = Image.new('RGBA', (W, H), (0, 0, 0, 0))
-        sh.paste(fill, (SS * max(1, sombra), SS * max(1, sombra)))
-        sh.putalpha(sh.getchannel('A').point(lambda v: int(v * 0.55)))
-        out.alpha_composite(sh)
+        sh = Image.new('RGBA', (W, H), (0, 0, 0, 0)); sh.paste(fill, (SS * sombra, SS * sombra))
+        sh.putalpha(sh.getchannel('A').point(lambda v: int(v * 0.55))); out.alpha_composite(sh)
     if contorno:
-        o = Image.new('RGBA', (W, H), (0, 0, 0, 0)); m = Image.new('L', (W, H), 0)
-        m.paste(fill.getchannel('A'), (0, 0)); m = m.filter(ImageFilter.MaxFilter(2 * contorno * SS + 1))
-        o.putalpha(m); o.paste(BLANCO, (0, 0), m); out.alpha_composite(o)
+        m = fill.getchannel('A').filter(ImageFilter.MaxFilter(2 * contorno * SS + 1))
+        o = Image.new('RGBA', (W, H), BLANCO); o.putalpha(m); out.alpha_composite(o)
     out.alpha_composite(fill)
     return out.resize((w + 2 * pad, h + 2 * pad), Image.LANCZOS)
 
 
-def escudo(w, h, modo=None, texto=False):
-    """escudo amarillo/negro con el taxi: emoji 🚕 por defecto o la
-    aproximacion negra antigua (modo='negro'), para comparar."""
-    modo = modo or MODO_TAXI
-    k = 6; W, H = w * k, h * k
-    im = Image.new('RGBA', (W, H), (0, 0, 0, 0)); d = ImageDraw.Draw(im)
-    d.polygon([(2*k, 3*k), (W-2*k, 3*k), (W-2*k, int(H*0.78)), (W//2, H-2*k), (2*k, int(H*0.78))],
-              fill=AMARILLO, outline=NEGRO)
-    d.line([(2*k, 3*k), (W-2*k, 3*k), (W-2*k, int(H*0.78)), (W//2, H-2*k), (2*k, int(H*0.78)), (2*k, 3*k)],
-           fill=NEGRO, width=2*k)
-    n = max(4, w // 6)
-    for j in range(n):
-        x = int(4*k + j * (W - 8*k) / n); ww = max(1, int((W - 8*k) / n))
-        d.rectangle([x, 6*k, x + ww - 1, 9*k], fill=(NEGRO if j % 2 == 0 else AMARILLO))
-        d.rectangle([x, int(H*0.72), x + ww - 1, int(H*0.72)+3*k], fill=(AMARILLO if j % 2 == 0 else NEGRO))
-    if modo == 'negro':
-        d.rectangle([int(W*0.16), int(H*0.40), int(W*0.84), int(H*0.58)], fill=NEGRO)
-        d.rectangle([int(W*0.30), int(H*0.29), int(W*0.70), int(H*0.41)], fill=NEGRO)
-        d.rectangle([int(W*0.35), int(H*0.32), int(W*0.48), int(H*0.41)], fill=BLANCO)
-        d.rectangle([int(W*0.52), int(H*0.32), int(W*0.65), int(H*0.41)], fill=BLANCO)
-        for cx in (int(W*0.30), int(W*0.70)):
-            d.ellipse([cx-5*k, int(H*0.53), cx+5*k, int(H*0.63)], fill=NEGRO)
-            d.ellipse([cx-2*k, int(H*0.55), cx+2*k, int(H*0.61)], fill=BLANCO)
-    else:
-        if texto:
-            area = (int(W*0.10), int(H*0.18), int(W*0.90), int(H*0.63))
-        else:
-            area = (int(W*0.10), int(H*0.14), int(W*0.90), int(H*0.70))
-        aw, ah = area[2]-area[0], area[3]-area[1]
-        taxi = _emoji_fit(aw, ah)
-        cx = (area[0] + area[2]) // 2; cy = (area[1] + area[3]) // 2
-        d.ellipse([cx-int(aw*0.40), area[3]-5*k, cx+int(aw*0.40), area[3]+k], fill=(0, 0, 0, 70))
-        im.alpha_composite(taxi, (cx - taxi.width//2, cy - taxi.height//2))
-    if texto:
-        from PIL import ImageFont
-        f = ImageFont.truetype(r'C:\Windows\Fonts\arialnb.ttf', max(8, int(h*0.18)))
-        d.text((W//2, int(H*0.66)), 'TAXI', font=f, fill=NEGRO, anchor='mm')
+# ---------------------------------------------------------------- las piezas de la tarjeta
+def _cuadrada(img, w, h):
+    """la imagen del usuario recortada al centro con la proporcion w:h y escalada (sin retocarla)"""
+    from PIL import Image
+    im = img.convert('RGBA'); W, H = im.size
+    if W * h > H * w: nw = H * w // h; im = im.crop(((W - nw) // 2, 0, (W - nw) // 2 + nw, H))
+    else: nh = W * h // w; im = im.crop((0, (H - nh) // 2, W, (H - nh) // 2 + nh))
     return im.resize((w, h), Image.LANCZOS)
 
 
-def _banda(d, x, y, w, h, n):
-    for j in range(n):
-        xx = x + j * w // n
-        d.rectangle([xx, y, xx + max(1, w // n) - 1, y + h - 1], fill=(NEGRO if j % 2 == 0 else AMARILLO))
+def _ajusta(t, w):
+    from PIL import Image
+    return t.resize((w, t.height), Image.LANCZOS) if t.width > w else t
 
 
-def _logo(glifos, F):
+def _logo(gl, F):
+    """el rotulo: como los del original (sprite 234x31, texto del color de los rotulos pegado a la izquierda)"""
+    from PIL import Image
     im = Image.new('RGBA', (234, 31), (0, 0, 0, 0))
-    t = texto_rgba(NOMBRE, 1.55, AZUL, glifos, F, contorno=1, sombra=1, bold=1, escala_x=1.5)
-    im.alpha_composite(t, (4, 0))
-    _banda(ImageDraw.Draw(im), 4, 28, 212, 3, 42)
+    t = texto_rgba(NOMBRE, 1.75, COL_ROTULO, gl, F, contorno=0, bold=0.75, track=1.5)
+    im.alpha_composite(_ajusta(t, 234), (0, (31 - t.height) // 2 + 1))
     return im
 
 
-def _tag(glifos, F):
-    im = Image.new('RGBA', (112, 19), (0, 0, 0, 0)); d = ImageDraw.Draw(im)
-    d.rounded_rectangle([0, 0, 111, 18], radius=9, fill=ROJO, outline=BLANCO, width=1)
-    t = texto_rgba(GENERO, 1.0, BLANCO, glifos, F, contorno=0, sombra=0)
-    im.alpha_composite(t, ((112 - t.width) // 2, (19 - t.height) // 2))
+def _tag(gl, F):
+    """la etiqueta (la del genero en las del original: pastilla de color con el texto en blanco); ancho segun el texto"""
+    from PIL import Image, ImageDraw
+    t = texto_rgba(GENERO, 0.8, BLANCO, gl, F, contorno=0, bold=0.3, track=1.0)
+    w = min(TAG_MAX, t.width + 10)
+    im = Image.new('RGBA', (w, 19), (0, 0, 0, 0)); d = ImageDraw.Draw(im)
+    d.rounded_rectangle([0, 1, w - 1, 17], radius=8, fill=COL_TAG)
+    t = _ajusta(t, w - 8)
+    im.alpha_composite(t, ((w - t.width) // 2, (19 - t.height) // 2))
     return im
 
 
-def _icono():
-    return escudo(62, 49)
-
-
-def _lcd(glifos, F):
+def _lcd(gl, F, txt):
+    """el visor de la radio: texto azul claro de puntos, como el del original (MUSICA_T2)"""
+    from PIL import Image
     im = Image.new('RGBA', (134, 15), (0, 0, 0, 0))
-    t = texto_rgba(NOMBRE, 0.86, (36, 54, 44, 255), glifos, F, contorno=0, sombra=0, escala_x=1.3)
+    t = _ajusta(texto_rgba(txt, 0.85, COL_LCD, gl, F, contorno=0, escala_x=1.1, track=1.0), 134)
     im.alpha_composite(t, ((134 - t.width) // 2, (15 - t.height) // 2))
-    return im
+    a = np.array(im); yy, xx = np.mgrid[:15, :134]
+    a[..., 3] = np.where((xx % 2 == 0) & (yy % 2 == 1), a[..., 3], (a[..., 3] * 0.25).astype(np.uint8))
+    return Image.fromarray(a)
 
 
-def _tira(glifos, F):
+def _tira(gl, F):
+    """la tira de abajo: el nombre grande y "- etiqueta -" mas pequeno, del color de la del original"""
+    from PIL import Image
     im = Image.new('RGBA', (271, 18), (0, 0, 0, 0))
-    t = texto_rgba(NOMBRE + b' - ' + GENERO + b' -', 0.98, AZUL, glifos, F, contorno=1, sombra=0, escala_x=1.15)
-    im.alpha_composite(t, (2, (18 - t.height) // 2))
+    a = texto_rgba(NOMBRE, 1.1, COL_TIRA, gl, F, contorno=0, bold=0.5, track=1.0)
+    b = texto_rgba(b' - ' + GENERO + b' -', 0.75, COL_TIRA, gl, F, contorno=0, bold=0.3, track=1.0)
+    x = 0; im.alpha_composite(a, (x, 18 - a.height + 1 if a.height < 19 else 0)); x += a.width - 6
+    b = _ajusta(b, 271 - x)
+    im.alpha_composite(b, (x, 18 - b.height))
     return im
 
 
-def _portada(glifos, F):
-    """caratula de la radio: funda, cielo, sol, calzada, taxi y pegatina (136x126)"""
-    W, H = 136, 126
-    im = Image.new('RGBA', (W, H), (0, 0, 0, 0)); d = ImageDraw.Draw(im)
-    d.rectangle([4, 4, W-1, H-1], fill=(0, 0, 0, 110))
-    d.rectangle([0, 0, W-8, H-8], fill=(190, 194, 198, 255), outline=(70, 72, 76, 255))
-    d.rectangle([5, 5, W-13, H-13], fill=(18, 18, 18, 255), outline=BLANCO)
-    x0, y0, x1, y1 = 9, 9, W-17, H-17
-    for yy in range(y0, y1):
-        t = (yy - y0) / max(1, y1 - y0)
-        d.line([(x0, yy), (x1, yy)], fill=(int(28 + 40*t), int(60 + 60*t), int(96 - 30*t), 255))
-    d.ellipse([x1-40, y0+8, x1-12, y0+36], fill=AMARILLO)
-    d.polygon([(x0+20, y1-8), (x0+44, y0+52), (x0+64, y0+52), (x0+92, y1-8)], fill=(30, 30, 34, 255))
-    for yy in range(y0+54, y1-6, 8):
-        d.line([(x0+50, yy), (x0+58, yy)], fill=AMARILLO, width=2)
-    for j in range(14):
-        d.rectangle([x0+j*7, y1-22, x0+j*7+6, y1-14], fill=(NEGRO if j % 2 == 0 else AMARILLO))
-    if MODO_TAXI == 'negro':
-        d.rectangle([x0+18, y1-38, x0+72, y1-24], fill=NEGRO)
-        d.rectangle([x0+27, y1-47, x0+63, y1-37], fill=NEGRO)
-        d.rectangle([x0+31, y1-44, x0+43, y1-37], fill=BLANCO)
-        d.rectangle([x0+47, y1-44, x0+59, y1-37], fill=BLANCO)
-        for cx in (x0+28, x0+62):
-            d.ellipse([cx-5, y1-27, cx+5, y1-17], fill=NEGRO)
-            d.ellipse([cx-2, y1-25, cx+2, y1-19], fill=(200, 200, 200, 255))
-    else:
-        area = (x0 + 10, y1 - 58, x0 + 80, y1 - 22)
-        taxi = _emoji_fit(area[2]-area[0], area[3]-area[1])
-        cx = (area[0] + area[2]) // 2; cy = (area[1] + area[3]) // 2
-        d.ellipse([cx-28, area[3]-3, cx+28, area[3]+3], fill=(0, 0, 0, 70))
-        im.alpha_composite(taxi, (cx - taxi.width//2, cy - taxi.height//2))
-    t = texto_rgba(GENERO, 0.92, AMARILLO, glifos, F, contorno=1, sombra=1)
-    im.alpha_composite(t, (x0+3, y0+2))
-    t = texto_rgba(NOMBRE, 1.25, BLANCO, glifos, F, contorno=1, sombra=1)
-    im.alpha_composite(t, (x0+4, y1-78))
-    d.ellipse([x0-1, y1-28, x0+30, y1+1], fill=AMARILLO, outline=NEGRO, width=1)
-    t = texto_rgba(b'ALL I', 0.68, NEGRO, glifos, F, contorno=0, sombra=0)
-    im.alpha_composite(t, (x0+5, y1-24))
-    t = texto_rgba(b'WANT', 0.68, NEGRO, glifos, F, contorno=0, sombra=0)
-    im.alpha_composite(t, (x0+3, y1-15))
+def _portada(D, img):
+    """la caratula de la radio: la caja de CD de la del tema 11 (sprite del cuadro 460, 136x126) con la imagen del
+    usuario en el sitio del dibujo (13..132 x 3..123)"""
+    from PIL import Image
+    V = Vista(D); g = D.g('MUSICA_L2'); c11 = CUADRO_CARRUSEL - 40
+    si = next(p[2] for p in D.pie if p[0] == g and p[1] <= c11 < p[1] + max(1, p[3] >> 4)
+              and abs(p[4] - 507.0) < 0.5 and abs(p[5] - 265.0) < 0.5)
+    ti, (l, t, r, b), w, h = V.spr[si]
+    assert (w, h) == (136, 126), 'portada del tema 11: %dx%d' % (w, h)
+    im = Image.fromarray(V.tex[ti][int(round(t)):int(round(b)), int(round(l)):int(round(r))].copy(), 'RGBA')
+    x0, y0, x1, y1 = PORTADA_DIBUJO
+    im.paste(_cuadrada(img, x1 - x0, y1 - y0), (x0, y0))
     return im
 
 
-def genera(tex, spr, grp, pie, F):
-    """{nombre: RGBA} de las seis piezas de la tarjeta; F necesita w, h, pri, n, esp, ker, met y gf (grupo FUENTE)"""
-    F = _Fuente(F, grupo(grp, 'FUENTE'))
-    gl = _glifos(tex, spr, pie, F)
-    return {'logo': _logo(gl, F), 'tag': _tag(gl, F), 'icono': _icono(), 'lcd': _lcd(gl, F),
-            'tira': _tira(gl, F), 'portada': _portada(gl, F)}
+def genera(D, img):
+    """{nombre: RGBA} de las piezas nuevas de la tarjeta (el icono es el de la lista 2, el del original)"""
+    F = D.fuente(); gl = glifos(D, F)
+    return {'logo': _logo(gl, F), 'tag': _tag(gl, F), 'lcd': _lcd(gl, F, NOMBRE), 'lcd2': _lcd(gl, F, b'(' + GENERO + b')'),
+            'tira': _tira(gl, F), 'portada': _portada(D, img)}
 
 
-class _Fuente:
-    """adapta la F14 de conv_menu (atributos) o la de un MENU.DAT ya hecho"""
-    def __init__(s, F, gf):
-        s.w, s.h, s.pri, s.n = F.w, F.h, F.pri, F.n
-        s.esp, s.ker, s.met, s.gf = F.esp, F.ker, F.met, gf
+# ---------------------------------------------------------------- el parche
+MARCA = 0x31525753                       # 'SWR1' en el primer campo libre de MUSICA2 en MNU1: la tarjeta esta (menu.c)
 
 
-def _pon(m, g, cuadro, si, x, y, ax, ay, sx=1.0, sy=1.0, al=1.0):
-    m.pie.append((g, cuadro, si, 1 << 4, x, y, ax, ay, 0.0, sx, sy, al))   # duracion 1 cuadro (flags >> 4)
+def quita(D):
+    """quita la tarjeta de mas si ya la hay (un MENU.DAT parcheado antes, o la ALL I WANT que quedo en los datos de
+    la Rev 1.1): las piezas de los cuadros 500.. y 1320.., sus tramos, las texturas de MUSICA2 que solo usaban esas
+    piezas y los sprites de esas texturas (al final de la tabla). Devuelve las texturas quitadas"""
+    g_l2, g_t2 = D.g('MUSICA_L2'), D.g('MUSICA_T2')
+    u_l2, u_t2 = D.u('MUSICA_L2'), D.u('MUSICA_T2')
+    pm = D.p('MUSICA2'); t0, nt = D.pan[pm][5], D.pan[pm][6]
+    mas = lambda p: (p[0] == g_l2 and p[1] >= C0) or (p[0] == g_t2 and p[1] >= CUADRO_TITULO)
+    suyas = {D.spr[p[2]][0] for p in D.pie if mas(p)}
+    otras = {D.spr[p[2]][0] for p in D.pie if not mas(p)}
+    ts = sorted(t for t in suyas - otras if t0 <= t < t0 + nt)
+    D.pie = [p for p in D.pie if not mas(p)]
+    D.grp[g_l2][1] = min(D.grp[g_l2][1], CUADRO_CARRUSEL - 40 + 1); D.grp[g_t2][1] = min(D.grp[g_t2][1], CUADRO_TITULO)
+    fuera = {b'TEMA%d' % TEMA, b'MUEVE%d%d' % (TEMA - 1, TEMA), b'MUEVE%d%d' % (TEMA, TEMA - 1)}
+    D.tra = [t for t in D.tra if not (t[1] in (u_l2, u_t2) and t[0].rstrip(b'\0') in fuera)]
+    _reordena(D)
+    for t in reversed(ts): _quita_tex(D, t)
+    D.pan[pm][8] = 0
+    return ts
 
 
-def anade(m, F):
-    """anade la tarjeta al Menu de conv_menu.py (antes de escribe); devuelve los sprites nuevos"""
-    art = genera(m.tex, m.spr, m.grp, m.pie, F)
-    spr = {}
-    for k, im in art.items():
-        ti = m.textura(('menu', 'MUSICA2', 'all_i_want_' + k), np.array(im))
-        spr[k] = m.sprite(ti, (0, 0, im.width, im.height), im.width, im.height)
-    g_l2, g_t2 = grupo(m.grp, 'MUSICA_L2'), grupo(m.grp, 'MUSICA_T2')
-    for k, w, h, x, y, ax, ay in PIEZAS:
-        _pon(m, g_l2, CUADRO_CARRUSEL, spr[k], x, y, ax, ay)
-    k, w, h, x, y, ax, ay = LCD
-    _pon(m, g_t2, CUADRO_TITULO, spr[k], x, y, ax, ay)
-    # los puntos de la lista (los 12 fijos del cuadro 0 y el resaltado del 460) y el rotulo "MUSICA DE FONDO
-    # REMIX 1" (cuadro 18) no llegan al cuadro 500: se repiten alli para que la tarjeta nueva salga como las demas
-    for p in list(m.pie):
-        if p[0] != g_l2 or p[1] >= CUADRO_CARRUSEL: continue
-        _, fr, si, _, x, y, ax, ay, ang, sx, sy, al = p
-        ti, _, w, h = m.spr[si]
-        if abs(y - 391.5) < 0.2 and fr in (0, 460):
-            m.pie.append((g_l2, CUADRO_CARRUSEL, si, 1 << 4, x, y, ax, ay, ang, sx, sy, al))
-        elif abs(y - 350.0) < 0.2 and w == 126 and h == 17:
-            m.pie.append((g_l2, CUADRO_CARRUSEL, si, 1 << 4, x, y, ax, ay, ang, sx, sy, al))
-    m.grp[g_l2]['n'] = CUADRO_CARRUSEL + 1
-    m.grp[g_t2]['n'] = CUADRO_TITULO + 1
-    # las piezas de un grupo tienen que ir seguidas (hud.c dibuja desde grp.pri hasta el siguiente grupo): se
-    # reordenan todas al final, conservando el orden de los grupos y el de las piezas dentro de cada uno
+def _quita_tex(D, a):
+    """quita la textura a: sus sprites tienen que estar al final de la tabla (los indices de los demas no cambian)"""
+    while D.spr and D.spr[-1][0] == a: D.spr.pop()
+    assert not any(s[0] == a for s in D.spr), 'textura %d: sprites suyos en medio de la tabla' % a
+    assert not any(D.spr[p[2]][0] == a for p in D.pie)
+    D.spr = [tuple([s[0] - 1 if s[0] > a else s[0]] + list(s[1:])) for s in D.spr]
+    D.pan[D.p('MUSICA2')][7] -= len(D.tex[a][4])
+    del D.tex[a]
+    for p in D.pan:
+        if p[5] > a: p[5] -= 1
+        elif p[5] <= a < p[5] + p[6]: p[6] -= 1
+
+
+def _reordena(D):
+    """las piezas de cada grupo seguidas y en el orden de los grupos (hud.c dibuja desde pri, cuenta piezas)"""
     orden = []
-    for g in range(len(m.grp)):
-        m.grp[g]['pri'] = len(orden)
-        orden += [p for p in m.pie if p[0] == g]
-    m.pie = orden
-    u_l2 = next(i for i, u in enumerate(m.lay) if u[0] == 'MUSICA_L2')
-    u_t2 = next(i for i, u in enumerate(m.lay) if u[0] == 'MUSICA_T2')
-    m.tramos += [('TEMA%d' % TEMA, u_l2, CUADRO_CARRUSEL, CUADRO_CARRUSEL, 2),
-                 ('MUEVE1112', u_l2, CUADRO_CARRUSEL, CUADRO_CARRUSEL, 0),
-                 ('MUEVE1211', u_l2, CUADRO_CARRUSEL, CUADRO_CARRUSEL, 0),
-                 ('TEMA%d' % TEMA, u_t2, CUADRO_TITULO, CUADRO_TITULO, 2)]
-    if m.pant:
-        p = next((x for x in m.pant if x.get('nombre') == 'MUSICA2'), m.pant[-1])
-        p['nt'] = len(m.tex) - p['t0']
-    return spr
+    for g in range(len(D.grp)):
+        D.grp[g][2] = len(orden); ps = [p for p in D.pie if p[0] == g]; orden += ps; D.grp[g][3] = len(ps)
+    D.pie = orden
+
+
+def _pon(D, g, cuadro, si, x, y, ax, ay, sx=1.0, sy=1.0, al=1.0, ang=0.0, dura=1):
+    D.pie.append((g, cuadro, si, dura << 4, x, y, ax, ay, ang, sx, sy, al))   # dura: cuadros (flags >> 4)
+
+
+def anade(D, img):
+    """anade la tarjeta al MENU.DAT leido; devuelve el arte, las texturas quitadas y la VRAM de MUSICA2 (antes, despues)"""
+    from modelo import textura_dc
+    pm = D.p('MUSICA2'); vram0 = D.pan[pm][7]
+    quitadas = quita(D)
+    art = genera(D, img)
+    t0, nt0 = D.pan[pm][5], D.pan[pm][6]
+    # una textura (atlas de 512 x 128) con las seis piezas, en 16 bits sin VQ (texto y foto se ven de cerca): la
+    # portada a la izquierda y las demas en filas a su derecha
+    W = 512; pos = {'portada': (0, 0)}; x0 = art['portada'].width; x, y, fila = x0, 0, 0
+    for k in ('tira', 'logo', 'lcd', 'lcd2', 'tag'):
+        im = art[k]
+        if x + im.width > W: x, y, fila = x0, y + fila, 0
+        pos[k] = (x, y); x += im.width; fila = max(fila, im.height)
+    y = max(art['portada'].height, y + fila); fila = 0
+    H = 1 << (y + fila - 1).bit_length()
+    atlas = np.zeros((H, W, 4), np.uint8)
+    for k, (x, y) in pos.items(): atlas[y:y + art[k].height, x:x + art[k].width] = np.array(art[k])
+    fmt, li, datos = textura_dc(atlas)
+    ti = t0 + nt0
+    D.tex.insert(ti, (W, H, fmt, li, bytes(datos)))
+    D.spr = [tuple([s[0] + 1 if s[0] >= ti else s[0]] + list(s[1:])) for s in D.spr]
+    for i, p in enumerate(D.pan):
+        if i != pm and p[5] >= ti: p[5] += 1
+    D.pan[pm][6] += 1; D.pan[pm][7] += len(datos); D.pan[pm][8] = MARCA
+    spr = {}
+    for k, (x, y) in pos.items():
+        w, h = art[k].size; spr[k] = len(D.spr)
+        D.spr.append((ti, w, h, 0, x / W, y / H, (x + w) / W, (y + h) / H))
+    g_l2, g_t2 = D.g('MUSICA_L2'), D.g('MUSICA_T2')
+    c11 = CUADRO_CARRUSEL - 40
+    # lo que no es de la tarjeta en el cuadro del tema 11: el rotulo de la lista (126x17 en y = 350) y los puntos de
+    # la lista (y = 391,5: 12 apagados cada 16 px y el encendido en el del tema); con 13 temas, uno mas y el encendido
+    # en el nuevo
+    puntos = []
+    for p in list(D.pie):
+        if p[0] != g_l2 or not (p[1] <= c11 < p[1] + max(1, p[3] >> 4)): continue
+        _, fr, si, fl, x, y, ax, ay, ang, sx, sy, al = p
+        w, h = D.spr[si][1:3]
+        if abs(y - 391.5) < 0.3 and al > 0.5: puntos.append(p)
+        elif (abs(y - 350.0) < 0.3 and w == 126 and h == 17) or (abs(x - 83.0) < 0.3 and abs(y - 118.0) < 0.3):
+            # (el rotulo de la lista y el icono de la lista 2, el mismo en sus 12 temas)
+            D.pie.append((g_l2, C0, si, (fl & 15) | 2 << 4, x, y, ax, ay, ang, sx, sy, al))
+    from collections import Counter
+    cnt = Counter(p[2] for p in puntos)
+    apagado = max(cnt, key=cnt.get) if cnt else None
+    encendido = [p for p in puntos if p[2] != apagado]
+    xs = sorted(p[4] for p in puntos if p[2] == apagado)
+    assert len(xs) == 12 and len(encendido) == 1, 'puntos de la lista: %d apagados, %d encendidos' % (len(xs), len(encendido))
+    paso = (xs[-1] - xs[0]) / 11; x13 = xs[-1] + paso
+    for p in puntos:
+        if p[2] == apagado: D.pie.append((g_l2, C0, p[2], (p[3] & 15) | 2 << 4) + tuple(p[4:]))
+    q = [p for p in puntos if p[2] == apagado][0]
+    D.pie.append((g_l2, C0, apagado, (q[3] & 15) | 2 << 4, x13) + tuple(q[5:]))
+    e = encendido[0]
+    D.pie.append((g_l2, C0, e[2], (e[3] & 15) | 2 << 4, x13) + tuple(e[5:]))
+    for k, w, h, x, y, ax, ay in PIEZAS: _pon(D, g_l2, C0, spr[k], x, y, ax, ay, dura=2)
+    k, w, h, x, y, ax, ay = LCD
+    m = TITULO_CUADROS // 2
+    D.pie.append((g_t2, CUADRO_TITULO, spr['lcd'], m << 4, x, y, ax, ay, 0.0, 1.0, 1.0, 1.0))
+    D.pie.append((g_t2, CUADRO_TITULO + m, spr['lcd2'], (TITULO_CUADROS - m) << 4, x, y, ax, ay, 0.0, 1.0, 1.0, 1.0))
+    D.grp[g_l2][1] = CUADRO_CARRUSEL + 1; D.grp[g_t2][1] = CUADRO_TITULO + TITULO_CUADROS
+    _reordena(D)
+    u_l2, u_t2 = D.u('MUSICA_L2'), D.u('MUSICA_T2')
+    for n, u, a, b, modo in (('TEMA%d' % TEMA, u_l2, CUADRO_CARRUSEL, CUADRO_CARRUSEL, 2),
+                             ('MUEVE%d%d' % (TEMA - 1, TEMA), u_l2, C0, CUADRO_CARRUSEL, 0),
+                             ('TEMA%d' % TEMA, u_t2, CUADRO_TITULO, CUADRO_TITULO + TITULO_CUADROS - 1, 1)):
+        D.tra.append([n.encode(), u, a, b, modo, 0, 0])
+    return art, quitadas, (vram0, D.pan[pm][7])
+
+
+# ---------------------------------------------------------------- audio
+def pcm(cancion, ruta, ini=None, dur=None):
+    """la cancion a PCM s16le estereo a 44,1 kHz con el ffmpeg de imageio-ffmpeg"""
+    import nativo
+    cmd = [nativo.ffmpeg(), '-hide_banner', '-loglevel', 'error', '-y']
+    if ini is not None: cmd += ['-ss', '%.3f' % ini]
+    if dur is not None: cmd += ['-t', '%.3f' % dur]
+    cmd += ['-i', cancion, '-vn', '-ac', '2', '-ar', '44100', '-f', 's16le', ruta]
+    subprocess.run(cmd, check=True)
+
+
+# Nivel: los temas del original (MUSn.ADP de carrera) van de -11 a -16 dBFS RMS (mediana -13,6; medido en la pista
+# entera ya en ADPCM de Yamaha, tal como la lee el AICA) y la cancion del usuario, tal cual sale del mp3, a -18,6 (pico
+# -5,6 dBFS): 5 dB por debajo de los temas del juego, con lo que las voces y el motor (que se mezclan contra el nivel
+# del original, docs/PARIDAD.md "Pausa y mezcla de audio") la tapaban. Se lleva la cancion entera (y su avance con la
+# misma ganancia) a NIVEL_DBFS RMS sin pasar el pico de PICO_DBFS (sin recortar).
+NIVEL_DBFS = -13.6
+PICO_DBFS = -0.5
+
+
+def ganancia(cancion):
+    """el factor que deja la cancion entera en NIVEL_DBFS RMS sin que el pico pase de PICO_DBFS"""
+    with tempfile.TemporaryDirectory() as tmp:
+        r = os.path.join(tmp, 'in.pcm'); pcm(cancion, r)
+        a = np.fromfile(r, '<i2').astype(np.float64)
+    if not len(a): return 1.0
+    rms = np.sqrt(np.mean(a * a)) / 32768; pico = np.abs(a).max() / 32768
+    if rms <= 0 or pico <= 0: return 1.0
+    return min(10 ** (NIVEL_DBFS / 20) / rms, 10 ** (PICO_DBFS / 20) / pico)
+
+
+def adp(cancion, salida, ini=None, dur=None, fundido=0.0, gan=1.0):
+    import nativo
+    with tempfile.TemporaryDirectory() as tmp:
+        r = os.path.join(tmp, 'in.pcm'); pcm(cancion, r, ini, dur)
+        if fundido or gan != 1.0:
+            a = np.fromfile(r, '<i2').reshape(-1, 2).astype(np.float32) * np.float32(gan); n = int(fundido * 44100)
+            if fundido and len(a) > 2 * n:
+                e = np.linspace(0, 1, n, dtype=np.float32)[:, None]; a[:n] *= e; a[-n:] *= e[::-1]
+            a.round().clip(-32768, 32767).astype('<i2').tofile(r)
+        subprocess.run([nativo.programa('musica'), r, salida, '-', 'pcm'], check=True)
+
+
+def tiene(ruta):
+    """1 si el MENU.DAT ya lleva la tarjeta (la marca de MUSICA2)"""
+    try: D = Dat(ruta); return D.pan[D.p('MUSICA2')][8] == MARCA
+    except (OSError, AssertionError, StopIteration, struct.error): return False
+
+
+def maqueta(D, ruta):
+    """pantalla MUSICA2 con la tarjeta (como conv_menu.maquetas) y el titulo de la radio"""
+    from PIL import Image
+    from conv_hud import dibuja_grupo
+    V = Vista(D); img = Image.new('RGBA', (640, 480), (54, 62, 74, 255))
+    lst = [('FONDO', 0), ('CABECERA_MUSICA', 90), ('MUSICA_RADIO', 25), ('MUSICA_AYUDA', 35),
+           ('MUSICA_L2', CUADRO_CARRUSEL), ('MUSICA_T2', CUADRO_TITULO + 55), ('MUSICA_LISTA', 0), ('AYUDA_MUSICA', 0)]
+    lay = {u[0].rstrip(b'\0').decode(): u for u in D.lay}
+    for n, c in sorted(lst, key=lambda x: lay[x[0]][6]):
+        u = lay[n]; G = V.grp[u[1]]; dibuja_grupo(img, V, u[1], min(c, G['n'] - 1), u[3], u[4])
+    img.save(ruta)
+
+
+def main(a):
+    if len(a) < 4: sys.exit(__doc__)
+    from PIL import Image
+    menu, cancion, imagen, sal = a[:4]
+    os.makedirs(sal, exist_ok=True)
+    D = Dat(menu); img = Image.open(imagen)
+    art, quitadas, (v0, v1) = anade(D, img)
+    n = D.escribe(os.path.join(sal, 'MENU.DAT'))
+    print('MENU.DAT: %d bytes; texturas de una tarjeta anterior quitadas %s; MUSICA2 VRAM %d -> %d KB' % (
+        n, quitadas, v0 // 1024, v1 // 1024))
+    maqueta(Dat(os.path.join(sal, 'MENU.DAT')), os.path.join(sal, 'menu_musica2.png'))
+    g = ganancia(cancion)
+    print('cancion: ganancia %.2f (%.1f dB) hasta %.1f dBFS RMS' % (g, 20 * np.log10(g), NIVEL_DBFS))
+    adp(cancion, os.path.join(sal, 'MUS%d.ADP' % PISTA), gan=g)
+    adp(cancion, os.path.join(sal, 'MUS%d.ADP' % PISTA_AVANCE), AVANCE_INI, AVANCE_S, FUNDIDO_S, gan=g)
+    for k in (PISTA, PISTA_AVANCE):
+        f = os.path.join(sal, 'MUS%d.ADP' % k); print('MUS%d.ADP: %d bytes (%.1f s a 44,1 kHz)' % (
+            k, os.path.getsize(f), os.path.getsize(f) / 44100))
+
+
+if __name__ == '__main__':
+    main(sys.argv[1:])

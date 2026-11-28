@@ -14,7 +14,7 @@ PYVER=3.13.17                                            # (la ultima 3.13 con e
 # las mismas versiones que el entorno de Linux donde se prueban los conversores (tools/instala_entorno.sh)
 RUEDAS="numpy==2.5.3 scipy==1.18.1 pillow==12.3.0 imageio-ffmpeg==0.8.1"
 KOS=${KOS_BASE:-/opt/toolchains/dc/kos}
-NOMBRE="OUTRUN DC PRUEBA"                                # (el titulo del IP.BIN, el de tools/mkgdi.py)
+NOMBRE=${NOMBRE:-"OUTRUN DC PRUEBA"}                              # (el titulo del IP.BIN, el de tools/mkgdi.py)
 DL=$SAL/descargas; P=$SAL/OutRun2DC; G=$P/programa
 rm -rf "$P"; mkdir -p "$DL/ruedas" "$G/python" "$G/tools/ps2" "$G/nativo" "$G/dc"
 
@@ -34,18 +34,23 @@ find "$SP" -type d \( -name tests -o -name __pycache__ \) -prune -exec rm -rf {}
 PTH=$(ls "$G"/python/python3*._pth)
 printf '%s\r\n' "$(basename "$(ls "$G"/python/python3*.zip)")" . 'Lib\site-packages' '..\tools' '..' 'import site' > "$PTH"
 
-echo "== partes en C (mingw-w64): pvs.dll, visible.dll, musica.exe"
+echo "== partes en C (mingw-w64): pvs.dll, visible.dll, reflejo.dll, musica.exe, pvrtex.exe"
 CCW=x86_64-w64-mingw32-gcc
 # (sin -march: cualquier x86-64; -ffp-contract=off: sin FMA, las mismas cuentas en todos los PC)
 $CCW -O3 -ffp-contract=off -shared -static -o "$G/nativo/pvs.dll" "$REPO/tools/c/pvs.c" -lpthread -lm
 $CCW -O2 -ffp-contract=off -shared -static -o "$G/nativo/visible.dll" "$REPO/tools/c/visible.c" -lm
+$CCW -O2 -ffp-contract=off -shared -static -o "$G/nativo/reflejo.dll" "$REPO/tools/c/reflejo.c" -lm
 $CCW -O2 -w -static -o "$G/nativo/musica.exe" "$REPO/tools/c/musica.c"
+# pvrtex de KallistiOS (utils/pvrtex: libros VQ reducidos, tools/libros.py); LGPL (codigo de FFmpeg): va su fuente
+PVT=$(mktemp -d); (cd "$KOS/utils/pvrtex" && tar cf - --exclude='*.o' --exclude=./pvrtex .) | tar xf - -C "$PVT"
+make -s -C "$PVT" CC=$CCW CXX=x86_64-w64-mingw32-g++ TARGET=pvrtex.exe CXXFLAGS="-O3 -w -static" \
+    CFLAGS="-O3 -w -static -std=gnu17" pvrtex.exe > /dev/null
+cp "$PVT/pvrtex.exe" "$G/nativo/"; rm -rf "$PVT"
+mkdir -p "$G/fuentes"; (cd "$KOS/utils" && zip -qr "$G/fuentes/pvrtex.zip" pvrtex -x '*.o' 'pvrtex/pvrtex')
 
-echo "== 1ST_READ.BIN (demo/ con KallistiOS y SH4ZAM) e IP.BIN (makeip)"
+echo "== 1ST_READ.BIN (demo/ con KallistiOS y Little Bloste) e IP.BIN (makeip)"
 set +u; . "$KOS/environ.sh"; set -u
-# la licencia MIT de SH4ZAM (va en el 1ST_READ.BIN): la del codigo que bajo kos-ports (tools/instala_entorno.sh)
-SHZ_LIC=$(ls "$KOS_PORTS"/sh4zam/build/sh4zam-*/LICENSE "$KOS_PORTS"/sh4zam/dist/sh4zam-*/LICENSE 2> /dev/null | head -1)
-[ -n "$SHZ_LIC" ] || { echo "falta SH4ZAM (kos-ports/sh4zam: tools/instala_entorno.sh)" >&2; exit 1; }
+# (desde la Rev 2.9.2.c sin SH4ZAM: las matematicas del SH-4 son Little Bloste, comun/lbloste.h, codigo propio)
 make -s -C "$REPO/demo" > /dev/null
 "$KOS_CC_BASE/bin/sh-elf-objcopy" -R .stack -O binary "$REPO/demo/demo.elf" "$G/dc/1ST_READ.BIN"
 "$KOS/utils/makeip/makeip" -g "$NOMBRE" -c HOMEBREW -n ORC2CDC -f "$G/dc/IP.BIN" > /dev/null
@@ -53,21 +58,23 @@ git -C "$REPO" log -1 --format='demo de orc2cdc %h (%cs)' > "$G/dc/VERSION.txt"
 
 echo "== codigo"
 cp "$REPO"/tools/*.py "$G/tools/"; cp "$REPO"/tools/ps2/*.py "$G/tools/ps2/"
-mkdir -p "$G/tools/c"; cp "$REPO"/tools/c/{pvs,visible,musica}.c "$G/tools/c/"
+cp "$REPO/demo/decor_tabla.h" "$G/tools/"                       # (tools/aligera.py: la tabla de la demo)
+mkdir -p "$G/tools/c"; cp "$REPO"/tools/c/{pvs,visible,musica,reflejo}.c "$G/tools/c/"
 cp "$REPO/windows/outrun2dc.py" "$G/"
 for f in OutRun2DC.bat LEEME.txt; do sed 's/\r*$/\r/' "$REPO/windows/$f" > "$P/$f"; done
 {
     printf 'Componentes de este paquete y sus licencias\r\n\r\n'
     printf ' - programa/tools, programa/outrun2dc.py, OutRun2DC.bat: orc2cdc (codigo propio).\r\n'
-    printf ' - programa/dc/1ST_READ.BIN: la demo de orc2cdc compilada con KallistiOS y SH4ZAM (sus licencias abajo).\r\n'
+    printf ' - programa/dc/1ST_READ.BIN: la demo de orc2cdc compilada con KallistiOS (su licencia abajo); las matematicas\r\n'
+    printf '   del SH-4 son Little Bloste (codigo propio de orc2cdc, comun/lbloste.h).\r\n'
     printf ' - programa/dc/IP.BIN: makeip de KallistiOS.\r\n'
     printf ' - programa/python: Python %s embebido de python.org (licencia en programa/python/LICENSE.txt).\r\n' $PYVER
     printf ' - programa/python/Lib/site-packages: %s, de PyPI; cada uno con su licencia en\r\n' "$RUEDAS"
     printf '   su carpeta *.dist-info. ffmpeg (imageio_ffmpeg/binaries) es software libre (GPL/LGPL, ffmpeg.org).\r\n'
-    printf ' - programa/nativo: tools/c de orc2cdc compilado con mingw-w64 (estatico, con winpthreads).\r\n\r\n'
+    printf ' - programa/nativo: tools/c de orc2cdc compilado con mingw-w64 (estatico, con winpthreads).\r\n'
+    printf ' - programa/nativo/pvrtex.exe: pvrtex de KallistiOS (utils/pvrtex), LGPL por el codigo de FFmpeg que lleva;\r\n'
+    printf '   su codigo fuente, tal cual se compila, en programa/fuentes/pvrtex.zip.\r\n\r\n'
     printf '==== Licencia de KallistiOS ====\r\n'; sed 's/\r*$/\r/' "$KOS/doc/LICENSE.md"
-    printf '\r\n==== Licencia de SH4ZAM (https://github.com/gyrovorbis/sh4zam, por kos-ports) ====\r\n'
-    sed 's/\r*$/\r/' "$SHZ_LIC"
 } > "$P/LICENCIAS.txt"
 # comprobacion: en el paquete no hay nada del disco (ni datos convertidos ni la ISO)
 if find "$P" \( -iname '*.iso' -o -iname '*.DAT' -o -iname '*.ADP' -o -iname '*.VQV' -o -iname '*.PAK' -o -iname '*.gdi' \) | grep -q .; then

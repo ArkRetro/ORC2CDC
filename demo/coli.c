@@ -231,7 +231,10 @@ int coli_altura(coli_t *const raices[2], coli_pred_t *pr, uint32_t modo, float x
         tipo = intento ? seg : prim;
         c = raices[tipo];
         if (!c || !c->ok) continue;
-        cs = cosf(c->marco[3]); sn = sinf(c->marco[3]);
+        if (c->m_ang != c->marco[3] || (c->m_cs == 0.0f && c->m_sn == 0.0f)) {   /* (c2c9) el giro del marco solo cambia al */
+            coli_t *w = (coli_t *)c; w->m_ang = c->marco[3]; w->m_cs = cosf(c->marco[3]); w->m_sn = sinf(c->marco[3]);   /* colocarlo: */
+        }                                               /* sus cosf / sinf (de la libreria, lentos) una vez; los mismos valores */
+        cs = c->m_cs; sn = c->m_sn;
         dx = x - c->marco[0]; dz = z - c->marco[2];
         lx = dx * cs - dz * sn; lz = dx * sn + dz * cs; ly = *y - c->marco[1];   /* inverso de modelo_coloca */
         lista = celda(c, lx, lz);

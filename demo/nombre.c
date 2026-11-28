@@ -38,7 +38,7 @@
      (el del PC, 42CCA0) y el orden dentro de la capa (los sprites de las escenas antes que los textos).
    SIN PORTAR: el deslizamiento de las filas (0x1fe780 = 4B0970: solo mueve +0x24.. de las filas, que el tablero no lee
    sin el teclado); el banco 0x36 NAME_CMN y los de sprites 0x12 / 0x14 (solo los usa el teclado de letras, que la
-   entrada de nombre no ensena); los 15 recorridos continuos (presets 2 / 3). DESVIACION: fuera del ranking (puesto -1)
+   entrada de nombre no ensena). Los 15 recorridos continuos (presets 2 / 3): HECHOS en la Rev 2.9.9.c. DESVIACION: fuera del ranking (puesto -1)
    el original guarda el nombre en el registro de antes de la tabla (0x1fb970(.., -1)): la Dreamcast no lo hace. */
 #include <kos.h>
 #include <string.h>
@@ -99,9 +99,12 @@ static int lee_nom1(const uint8_t *b, uint32_t tam)
 static float lf(const uint32_t *l, int i) { float f; memcpy(&f, l + i, 4); return f; }
 
 /* 0x2012a8 / 0x2013e8 / 0x201528 (PC 4B2080 / 4B2150 / 4B2220): las 10 filas de la tabla */
+static int consulta;                                    /* Rev 2.9.3: la consulta de RANKINGS (sin registro del jugador) */
+static const uint8_t *tablas_de;                        /* las tablas que se ensenan (rksp o, en la consulta, rkuj) */
+static char rot3[16];                                   /* Rev 2.9.4: el rotulo de la consulta 3 */
 static void filas(uint32_t t, int tipo)
 {
-    int i; const uint8_t *r = rksp_tablas() + t;
+    int i; const uint8_t *r = (tablas_de ? tablas_de : rksp_tablas()) + t;
     for (i = 0; i < 10; i++, r += 16) {
         uint32_t r0 = rd32(r), r8 = rd32(r + 8); fila_t *f = fila + i;
         memset(f, 0, sizeof *f);
@@ -120,6 +123,8 @@ int nombre_entra(const nombre_t *d)
 {
     uint32_t tam, curso, t; const uint8_t *x; uint8_t rec[16]; char n[16]; int ruta, sel_t; fila_t *e;
     nombre_sale();
+    consulta = d->consulta; tablas_de = d->consulta == 2 ? rkuj_tablas() : d->consulta == 3 ? d->tabla16 : NULL;
+    if (consulta == 3 && !tablas_de) { consulta = 1; tablas_de = NULL; }   /* (Rev 2.9.4: sin tabla, la de OUTRUN2SP) */
     /* las tablas de los tres bancos, una detras de otra en la RAM fija (nunca en el monton: 86 + 110..113 + 6 KB, que
        quedarian bajo lo que se pida hasta volver al frontal); lo que sobra, para los sectores de las subidas de texturas */
     r_ram = d->ram; r_cap = d->ram ? d->ram_cap : 0; r_o = 0;
@@ -138,6 +143,7 @@ int nombre_entra(const nombre_t *d)
        0x37000D, para cualquier etapa que no sea una meta) */
     /* desc[0] del arbol 0 (csc_data_2), desc[1] del 1 (csc_data_cvt): el del preset (0x1760c0: 1 -> csc_data_2) */
     curso = desc[(preset & 1) ? 0 : 1][d->registro4 >= 0 && d->registro4 < 16 ? d->registro4 : 0];
+    if (preset >= 2 && d->desc4p > 0) curso = d->desc4p - 1;   /* (Rev 2.9.9.c: los 15 recorridos, arboles 290 / 291) */
     if (curso >= 60) curso = 0;
     sprintf(n, "NOM5%c.DAT", 'A' + (int)((fondo[curso] >> 16) - 0x37));
     if ((fb = spr_abre_en(n, r_ram + r_o, r_cap - r_o))) avanza();
@@ -157,14 +163,17 @@ int nombre_entra(const nombre_t *d)
     /* el registro de la carrera (0x1fc69c..0x1fc7a8) */
     {
         uint32_t r0 = ((uint32_t)d->puntos & 0xffffff) | ((uint32_t)(d->modelo & 0xf) << 28) | ((uint32_t)ruta << 24);
-        uint32_t r8 = variante == 2 ? (uint32_t)d->corazones & 0xfff : 0;
+        /* Rev 2.9.4: los corazones saturan a 0xfff (DESVIACION: el original los enmascara a 12 bits, 0x1fc69c, y una
+           carrera de mas de 4095 daba la vuelta y acababa al final de la tabla) */
+        uint32_t r8 = variante == 2 && d->corazones > 0 ? (d->corazones > 0xfff ? 0xfffu : (uint32_t)d->corazones) : 0;
         r8 = (r8 & 0xfff9ffffu) | (uint32_t)(cambio & 1) << 17 | (uint32_t)(conf & 1) << 18;
         memcpy(rec, &r0, 4); memcpy(rec + 4, &d->tiempo, 4); memcpy(rec + 8, &r8, 4); memset(rec + 11, 0, 5);
     }
-    puesto = variante == 0 && d->tiempo == 0 ? 10 : rksp_inserta(rec, variante, preset, cuenta, cambio, conf);
+    puesto = consulta || (variante == 0 && d->tiempo == 0) ? 10 : rksp_inserta(rec, variante, preset, cuenta, cambio, conf);
     if (!(puesto < 10)) puesto = -1;
     k34c = (int)t34c[(cambio + conf * 2 + variante * 4) & 15];
-    t = rksp_tabla(variante, preset, cuenta, cambio, conf);
+    t = consulta == 3 ? 0 : rksp_tabla(variante, preset, cuenta, cambio, conf);   /* (3: tabla16 de 160 bytes: el
+                                                           desplazamiento de rksp no vale, leeria fuera de ella) */
     if (variante >= 0 && variante <= 2) filas(t, variante);
     else memset(fila, 0, sizeof fila);
     e = puesto >= 0 ? fila + puesto : &fj;              /* la fila del jugador */
@@ -173,6 +182,13 @@ int nombre_entra(const nombre_t *d)
     e->coche = (int8_t)d->modelo; e->score = d->puntos; e->cuenta = variante == 2 ? (int16_t)d->corazones : 0;
     e->ruta = ruta; e->tipo = variante; e->tiempo = d->tiempo; e->cambio = (int8_t)cambio; e->conf = (int8_t)conf;
     pagina = puesto < 0 ? 5 : puesto / 5 * 5;
+    if (consulta) { pagina = 0; fj.tipo = -1; cuenta = linea = d->cuenta; k34c = (int)t34c[(cambio + conf * 2 + variante * 4) & 15];
+                    t = consulta == 3 ? 0 : rksp_tabla(variante, preset, cuenta, cambio, conf);   /* (3: tabla16) */
+                    if (variante >= 0 && variante <= 2) filas(t, variante);
+                    /* Rev 2.9.4: consulta 3 sin la linea de la meta (t[2 + linea]: "META A" no es la posicion) y con su
+                       rotulo en la banda (DESVIACION, como toda la consulta 3) */
+                    if (consulta == 3) linea = -1; }
+    snprintf(rot3, sizeof rot3, "%s", consulta == 3 ? d->rotulo3 : "");
     h_tit = h_tab = h_puesto = -1;
     primero = 1; est = 0; hecho = 0; voz = 1;
     sel_t = k34c + preset * 6;
@@ -229,6 +245,7 @@ int nombre_paso(uint32_t nuevo)
 {
     if (!activo) return 0;
     spr_paso();
+    if (consulta) return 0;                             /* (la consulta la lleva comun/menu.c) */
     if (voz) {                                          /* 0x1fcd64: 0x80A2 sin sonar y el idioma 0 -> 0x158 */
         voz = 0;
         if (sfx_voces_idioma() && !strcmp(sfx_voces_idioma(), "ENGLISHC")) sfx_menu(0x158);
@@ -319,10 +336,17 @@ static void marcas(int x, int y, int capa, int ruta, uint32_t tok)   /* 0x1ff878
 static int tablero(void)                                /* 0x200398 con [0x424] = 0: 1 si dibuja la banda */
 {
     const uint32_t *t = tt + (k34c + preset * 6) * 9; const uint32_t *L; int i, base;
-    /* presets 0 / 1 (0x2004d8..): los presets 2 / 3 (0x200400..: 3D001D / 3D001E, linea 6) no salen */
+    if (preset == 2 || preset == 3) {                   /* 0x200400..0x2004d4 (Rev 2.9.9.c: los 15 recorridos) */
+        if (h_tit < 0) h_tit = spr_crea(t[1], 4, 1, 0, 0x1e);   /* (con el teclado, [0x424], 3D001B: no sale aqui) */
+        if (h_tab < 0) h_tab = spr_crea(preset == 2 ? 0x3d001d : 0x3d001e, 4, 1, 0, 0x14);   /* 0x114d00(.., 4, 1, 0, 0x14) */
+        if (spr_estado(h_tit) != 3) return 0;
+        linea = 6;                                      /* [0x360] = 6: sin la linea de la meta ([0x434] < 0 -> 0: el foco
+                                                           del teclado, sin portar) */
+    } else {                                            /* presets 0 / 1 (0x2004d8..) */
     if (h_tit < 0) h_tit = spr_crea(t[1], 4, 1, 0, 0x1e);   /* 0x114d00(t + 4, 4, 1, 0, 0x1E) */
     if (h_tab < 0) h_tab = spr_crea_entera(t[0], 4, 1);  /* 0x114b68(t + 0, 4, 1) */
     if (spr_estado(h_tit) != 3) return 0;
+    }
     if (linea >= 0 && linea < 7 && linea != 6) spr_inmediata(t[2 + linea], 0, 0, 2, 0);
     if (pagina < 5) spr_inmediata(0x3d0015, 0, 0, 2, CUADRO_FILAS);
     else for (i = 4; i >= 0; i--) spr_inmediata(0x3d0016, 0, y16[4 - i], 2, CUADRO_FILAS);
@@ -330,6 +354,7 @@ static int tablero(void)                                /* 0x200398 con [0x424] 
     L = lay[pagina < 5 ? 0 : 1]; base = pagina / 5 * 5;
     for (i = 0; i < 5; i++) {
         const fila_t *f = fila + base + (4 - i); const uint32_t *a = L + i * 15; char b[8]; int k;
+        if (consulta && !f->nom[0]) continue;           /* (consulta: fila vacia de los records de UN JUGADOR) */
         for (k = 0; k < 6 && f->nom[k]; k++) b[k] = (char)filtro[(uint8_t)f->nom[k]];   /* 0x200308(.., 6) */
         b[k] = 0;
         texto(0, (int)lf(a, 1), (int)lf(a, 2), 0xffff00, b);
@@ -338,7 +363,8 @@ static int tablero(void)                                /* 0x200398 con [0x424] 
             sprintf(nb, "%2d", pagina + i + 1); cifras(3, nb, (int)lf(m, 11), (int)lf(m, 12), 3);
             spr_inmediata(0x3d0026, lf(m, 11) + 46.0f, lf(m, 12), 3, 10);
         }
-        spr_inmediata(0x3d0024, lf(a, 5), lf(a, 6), 3, f->coche >= 0 && f->coche < 10 ? (int)f_coche[(int)f->coche] : 0);
+        if (!consulta || (f->coche >= 0 && f->coche < 10))   /* (consulta: sin icono para los coches de fuera de OUTRUN2SP) */
+            spr_inmediata(0x3d0024, lf(a, 5), lf(a, 6), 3, f->coche >= 0 && f->coche < 10 ? (int)f_coche[(int)f->coche] : 0);
         spr_inmediata(0x3d0027, lf(a, 3), lf(a, 4), 3, f->cambio);
         marcas((int)lf(a, 7), (int)lf(a, 8), 3, f->ruta, preset == 2 || preset == 3 ? 0x3d0011 : 0x3d0014);
         if (f->tipo == 0) {
@@ -352,6 +378,7 @@ static int tablero(void)                                /* 0x200398 con [0x424] 
     else if (fj.tipo == 1) puntos(&fj, 0x144, 0x1a3);
     else if (fj.tipo == 2) corazones(&fj, 0x144, 0x1a3);
     if (fj.tipo >= 0 && fj.tipo <= 2) texto(1, 0x32, 0x1a3, 0xffffff, rotulo[fj.tipo]);
+    if (consulta == 3 && rot3[0]) texto(1, 0x32, 0x1a3, 0xffffff, rot3);   /* (Rev 2.9.4: donde va el rotulo 0x443) */
     return 1;
 }
 static void escribe(const txt_t *q, float z)            /* 0x1175a8: 0x116fa0 / 0x116e10 por caracter */
@@ -381,6 +408,9 @@ void nombre_dibuja(float z)
     spr_dibuja(5, SPR_CAPAS, hudd_z(), 0);
 }
 
+/* consulta: la pagina (0: puestos 1..5, 5: 6..10) */
+void nombre_pagina(int p) { if (activo && consulta) pagina = p ? 5 : 0; }
+int nombre_activo(void) { return activo; }
 void nombre_sale(void)                                  /* 0x1fd528 (4B0950: 428600) y 49AAE0 */
 {
     spr_suelta_todas();
