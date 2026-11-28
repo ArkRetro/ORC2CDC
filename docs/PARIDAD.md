@@ -8095,7 +8095,7 @@ mismo con otro arbol, para la base c2c5). Capturas y registros en $S/modos/c2c/c
 - 24, las fotos (0x2a48a0; 6 peticiones): fase 1 0x2a5fd8 lee la lista +0x70 de los parametros (registros de 0x20 hasta
   +0x18 == -1, +0x74 relativa al inicio: los objetivos), fase 4 0x2a4fa8 (la camara: 0x2bb0a0 proyecta el objetivo; el
   disparo 0x2a60a0), fase 5 suelta (0x21bb48) y nota 6: min(1, (medidor - pen - 80) / (80 / 0,9 - 80)) x 30 + 40 x
-  0x22f090. SIN PORTAR: faltan los objetivos en CAMP.DAT y el HUD de la camara.
+  0x22f090. HECHO (SIMPLIFICADO; ver "campeonatos, septima tanda (agente c2c7)"): los objetivos en CAMP.DAT y un visor.
 - 23 (0x2987a0, los patos con el sistema de objetos 0x61e8a0): ningun guion lo pide.
 - 20: los modelos 0x57002f / 0x57002a del dibujo; 21: el acercamiento y el giro del jugador (0x292d28) y el sonido 0x1d8;
   14: verlo en pantalla, el panel 0x231fe0 / 0x232290 y las voces +0x3d74 / +0x3d78.
@@ -8277,3 +8277,594 @@ FPS, fantasma con coche grabado y mipmaps). Un solo commit de merge con esos dos
   (MUEVE1112 de 0 cuadros del MENU.DAT del Mod; ya pasaba en rev-1.0); desde la derecha si. Un COCHE07L.DAT del F50 en
   el disco haria que la carrera cargara el F50 en vez del taxi (coche_pide_ligero, ya en rev-1.0). No probados en el
   Mod: INFARTO, CONTRARRELOJ con fantasma, campeonatos, los 15 recorridos SP, la fila de OUTRUN2SP; nada en consola real.
+## COAST 2 COAST: campeonatos, minijuegos (agente c2c16, 2026-11-27)
+
+Sobre integra (658f329). El tipo de peticion 16 (104 peticiones, casi todas de Holly). Todo en Flycast (nivel E), no en la
+consola. Datos de prueba: $S/modos/c2c/dat16 (CAMP.DAT con 'M161' detras de lo de antes, cuyos 30 518 primeros bytes salen
+iguales byte a byte; MJHUD.DAT nuevo), carpeta montada con h16/datos2.sh (enlaces a $S/dint + dat16 en modos/c2c/datos16);
+scripts en $S/modos/c2c/h16 (los de h6 para este worktree, pantalla :94; py/r16.py lista los registros de +0x7c de cada
+peticion del 16, py/ver46.py pinta escenas del banco 0x46). Capturas y registros en $S/modos/c2c/cap16.
+
+### Lo averiguado (SLES-53998, clase 0x29f520 de 0x1860 bytes, vtable 0x423a80)
+- Lo que piden los guiones (py/r16.py): subtipo 2 x 22, 1 x 20, 0 x 16, 6 x 15, 3 x 13, 4 x 9, 5 x 9 (no hay subtipo 7: las
+  tablas 0x4239f0 / 0x423a10 / 0x423a30 tienen 7 entradas y un 0).
+- Control (+0x24, 0x29f7a0). Fase 1: 0x2a0d08 reparte los registros de 0x2c de +0x7c de los parametros ({+0x20 clase 0
+  aviso / 1 puerta, +0x24 simbolos / carriles, +0x26 / +0x28 secciones, relativas al inicio si +0x80, +0x2a cuantos: con 2 o
+  mas repartidos de +0x26 a +0x28}) en la lista A (+0xc, +0x70) y B (+0x8a4, +0x72) de 50 x 0x2c ({+0..+0x14 seis simbolos,
+  +0x18 por pasar, +0x1c el carril bueno, +0x1d el simbolo bueno, +0x24, +0x26 la seccion}); las secciones de las puertas a
+  +0x113c (+0x74) y por puerta 0x2a3778 pone en los n + 1 bordes de sus n carriles objetos de la clase 6 del banco (los
+  conos; 0x1d68f8 / 0x1d7748, +0x18 = 6); despues el subtipo (0x4239f0). Fases 4..6: el paso del subtipo (0x423a10) y cada
+  600 pasos (contador global 0x6213a0) una voz de animo 0x1ac3d8(id, 0x3c, 0): 0x4239c0[k % 2] (subtipos 0 / 1), 0x4239c8[k
+  % 3] (2), 0x4239d8[k % 3] (3..6). Fases 2..6: +0x1204 cuenta 0..30 (el vaiven). Sin bono de nota 6 (la fase 5 pasa por el
+  paso del subtipo, que solo actua en la 4).
+- La puerta (0x29fb28(n, k)): el jugador en k / n < f < (k + 1) / n (f de borde a borde en la seccion de la puerta); bien: el
+  medidor + 80 x 1,1 / puertas, +0x3d78 = 1 y 0x114b68(0x2c0002, 5, 3) (el destello); mal: el efecto 0xd4.
+- Dibujo de sprites (+0x34, 0x29fe00 -> por subtipo 0x423a30 -> 0x2a0138 por registro entre la seccion del jugador - 2 y
+  + 50): filas = +0x24 / columnas en los laterales (fila + 0,5) / filas, 0,1 de fila hacia fuera del centro; columnas: +-2,5 m
+  (0x423b88) y altura (0x423bb0: la del medio + 4 m con 3); a 2,5 m del suelo + sin(+0x1204 / 30 x pi) (puertas y los avisos
+  de 0, 1, 3, 4); sprite 3D 0x115870 a escala 1,5 de la tabla del subtipo: 0 0x423ae0 (6 frutas), 1 0x423b10 (9 frutas y 12
+  animales, cuantos en 0x423ad8), 2 0x423b68 (7 animales, solo en las puertas), 3 numeros con las cifras de 0x423bdc
+  (0x2a0838).
+- Dibujo 3D (+0x2c, 0x29fd50 -> 0x29fef8 con 1): en cada puerta el modelo de 0x1a7ce0 (tabla 0x368508 por idioma: 0x1ee000b,
+  el registro 11 de obj_tour_pmt, un quad con textura) con 0x232e60 a escala (5, 1,5, 2,5). SIN PORTAR.
+- Subtipo 2, el sonido (0x2a1ba0 / 0x2a1e00): por puerta el carril bueno rand % n y el animal +8 de los parametros (el azar
+  del banco SOUND2..8 de la quinta tanda: SOUNDn solo trae la voz 0x1a7 + n - 2) o rand % 7 (SOUND.PAK, una sola peticion en
+  la etapa), el mismo en el aviso k y en los demas carriles otros distintos; al pasar el aviso su voz 0x423c30[animal]
+  (0x1a7..0x1ad, prioridad 0xb) y 0x232350 (el 2B003D en +0x3e6c del gestor).
+- Subtipo 1, el distinto (0x2a1618 / 0x2a1948): por puerta una clase (rand % 2): el bueno de ella, los demas distintos de la
+  otra; el aviso k igual que la puerta (0x2a18a4 copia los simbolos); el aviso se da a 20 secciones (solo 0x232350).
+- Subtipo 0, la memoria (0x2a1150 / 0x2a13f8): el aviso k con +0x24 frutas rand % 6; la puerta k con 2 x +0x24 en dos filas,
+  la buena (rand % 2) igual que el aviso y la otra con al menos una distinta en su sitio; se mira en 2 (0x29fb28(+0x24 de la
+  puerta / +0x24 del aviso k)).
+- Subtipo 3, la suma (0x2a2080 / 0x2a24d8): el aviso con un numero por nivel (+0x24: 0x3b5648 pares {de, hasta}; con rand
+  < 0,5 de..hasta, si no 1..hasta; nivel 1 negativo con rand % 5 == 0, nivel 2 con rand & 3 == 0); en la puerta el carril
+  bueno lleva la suma de los avisos desde la puerta anterior y los demas la suma - 5 + rand % 10, distintos. SIN PORTAR (las
+  cifras 0x423bdc y 0x2a0838).
+- Subtipo 6, los coches (0x2a3300 / 0x2a3510): el trafico de la peticion (0x1f1a88 / 0x1f20e8 con la tabla de +0x10, +0x64 o
+  0x104 los modelos, 0x2a3bd0 con la lista +0x5c, 0x22dac0), el bueno es la cuenta +0x7a (la lleva otro codigo) y los demas
+  bueno - 1 + rand % 3; SIN PORTAR -> HECHO (ver "campeonatos, novena tanda (agente c2c9)"). 4 y 5: SIN EMPEZAR.
+
+### HECHO: subtipos 2, 1 y 0 (comun/minijuego.c, -Os)
+- tools/conv_camp.py `minijuegos`: el bloque 'M161' detras de CAMP.DAT (las voces 0x423c30, el animo 0x4239c0.., los 34
+  sprites de los subtipos 0..2 como grupos MJ_kk, 0x423ad8, 0x423b88 / 0x423bb0 y por peticion sus registros con las
+  secciones de la etapa) y MJHUD.DAT (los 23 sprites distintos del banco 0x46, conv_hud.grupo_escena, 149 KB); regenera.py
+  paso camp. CAMPHUD.DAT, CAMPOBJ.DAT y VOCESM.DAT salen iguales.
+- Enganches: campeonato.c (camp_inicia -> mj_inicia, camp_libera -> mj_libera, case 16 -> mj_paso), main.c (MJHUD.DAT con
+  CAMPHUD.DAT, `camp_mundo_` el punto de camp_obj_ con dx, ha_spr3d tambien con mj_spr3d y los grupos MJ_ de MJHUD.DAT).
+- Lateral: la fraccion de camp_obj (0 el borde -iz, SUPUESTO de c2c3) para los conos y los sprites, y 1 - c->lat para mirar
+  el carril: las dos con el mismo criterio (en cap16/mos_t2a el elefante bueno a la derecha y el coche a la izquierda: "mal").
+- DESVIACION / SIMPLIFICADO: sin el cartel 3D de la puerta (0x1ee000b) ni el 2B003D del aviso (0x232350); el destello
+  0x114b68(0x2c0002, 5, 3) es el HA_S02 de HAHUD.DAT sobre el coche a escala 0,7 (la de los arcos; SUPUESTO que 5 sea el
+  coche); los conos son los de la clase 6 de HAOSO.DAT (salen amarillos y negros); sin las bifurcaciones (0x176e20: dos
+  carreteras, no las hay dentro de una etapa de la DC).
+- E (`-DPRUEBA_AUTO -DPRUEBA_CAMP=2 -DPRUEBA_CAMP_NODO=7 -DPRUEBA_CAMP_LISTA=1 -DPRUEBA_SIN_TIEMPO`, Alpine al reves, 16/2
+  160..225 y 16/1 300..645): "aviso 0 en la seccion 170: animal 6", "VOZ 0x1ad (peticion)", el perro y el elefante sobre sus
+  carriles entre los conos (cap16/mos_t2a), el piloto por el otro: "mal", nota 0 (cap16/t2a). Con `-DPRUEBA_MJ` (la puerta
+  cuenta como pasada por el carril bueno; el piloto no elige carril): "bien", "peticion 16 hecha: 88 - 0, nota 6" (t2b); el
+  16/1 con sus 3 puertas de 3 (la bebida, la naranja y el mono en cap16/mos_t1) "88 - 34, nota 4" y la etapa nota 5. 16/0
+  (nodo 2 lista 0, Las Vegas al reves, 135..320, 3 avisos y 3 puertas): las frutas en dos filas de 2 (cap16/mos_t0b), "88 - 0,
+  nota 6". NO verificado: un carril bueno elegido conduciendo; la voz no escuchada (Flycast sin audio, por el registro).
+- Medidas (DIAG_MS, la misma pasada con y sin `-DDIAG_SIN_MJ`, cap16/medidas): 16/2 39,56 / 39,77 fps (-0,21), 12 muestras;
+  16/1 39,39 / 39,57 (-0,18), 41 muestras. Triangulos: los conos 10 de media (57 / 76 como mucho, los modelos del INFARTO);
+  los sprites son quads 2D fuera de la escena (como mucho 8 a la vez).
+- RAM al arrancar (h16/nav3.sh, MODO_JUEGO=1, sin defines, compilado limpio, datos16; cap16/nav3_flycast.txt): "RAMMAPA
+  arranque: libre 408K" (igual que integra), "VOZ: VOCES.DAT, 35 muestras", sin "Out of memory". El estado (1,3 KB) va al
+  monton solo en el campeonato; las tablas de MJHUD.DAT tambien, y sus texturas se suben al verse.
+- Datos nuevos: CAMP.DAT + 3,1 KB ('M161'), MJHUD.DAT 149 KB.
+- Pruebas nuevas: PRUEBA_MJ (la puerta por el carril bueno, y un registro de los sprites cada 60 cuadros), DIAG_SIN_MJ (sin
+  sprites ni conos).
+
+### Lo que queda
+- 3 (la suma): falta el numero con las cifras 0x423bdc (0x2a0838) y su conversion; la logica esta arriba.
+- 6 (los coches): necesita el generador del trafico de la peticion 0x1f1a88 / 0x1f20e8 (sin portar desde la quinta tanda).
+- 4 (los regalos, ITEMS: 0x2a26d0 / 0x2a2be0, dibujo 0x2a2d30) y 5 (las ovejas, SHEEP: 0x2a2de8 / 0x2a2e80, dibujo 0x2a3280;
+  la fase 3 no dice la voz 0x8e8): sin empezar.
+- El cartel 3D de la puerta (0x1ee000b de obj_tour_pmt: un quad, 6,4 KB mas en CAMPOBJ.DAT) y el 2B003D del aviso.
+- (c2c16 en integra, 2026-11-27) minijuegos (tipo 16, subtipos 0, 1 y 2) con los mipmaps: nav3.sh "VOZ: VOCES.DAT, 35
+  muestras", libre 408K al arrancar, sin "Out of memory"; CAMP.DAT de c2c/dat16 (bloque M161) y MJHUD.DAT (149 KB);
+  clasico con 35,7 MB libres. OJO al juntar c2c7: CAMP.DAT tiene que salir de tools/conv_camp.py con los bloques de
+  las dos tandas (minijuego.c busca M161 por su firma).
+## COAST 2 COAST: campeonatos, septima tanda (agente c2c7, 2026-11-27)
+
+Sobre la rama integra (658f329). Todo en Flycast (nivel E), no en la consola. Datos de prueba: $S/modos/c2c/dat5/CAMP.DAT
+(lo de dat4 igual byte a byte y detras 'C241' y 'C221'), carpeta montada con h7/datos2.sh ($S/dint + dat5 en
+modos/c2c/datos7); scripts en $S/modos/c2c/h7 (los de h6 para este worktree; corre.sh con FOTOPAT: una captura cuando sale
+esa linea; serie7.sh / serie8.sh las medidas). Capturas y registros en $S/modos/c2c/cap7. El tipo 16 lo lleva otro agente.
+
+### HECHO: "Out of memory ... diff 57344" al cambiar de etapa en carrera (NIAG -> LASV, Clarissa nodo 4)
+- Causa (DIAG_MALLOC, nuevo: el Makefile envuelve malloc / memalign / realloc / calloc y se apunta cada peticion que
+  falla o de 32 KB o mas con quien la pide; cap7/oom1): `decor_reduce` (demo/main.c) al leer SEG22.DAT (LASV, 2955
+  nodos) pedia diez tablas temporales de 102 bytes por nodo (301 KB); con 325 KB libres pero troceados, `fr` (59 100 B)
+  no cabia: el aviso de KOS y se saltaba la quita de repetidos / edificios tapados de esa etapa (sin "DECOR: SEG22.DAT
+  repetidos" en el registro; no se colgaba).
+- Arreglo (703f461): `ct` se suelta en cuanto se clasifica y `bb` en cuanto `ub` esta hecha, antes de pedir `fr` (que cabe
+  en su hueco): 70 bytes por nodo en el pico, mismo resultado. Sin cambiar la RAM del arranque. No toca gh_* ni las voces.
+- E: cap7/oom2 (la misma prueba: sin "Out of memory", "DECOR: SEG22.DAT repetidos 39 (11 fuera)"); otra transicion de
+  campeonato, Holly nodo 5 (NEWY -> GRAN -> CAPE, cap7/n5_oom): sin aviso; CONTRARRELOJ (PRUEBA_VARIANTE=7, PALM -> LAKE ->
+  CAST, cap7/ta_oom): sin aviso. NO verificado: el fantasma en esa CONTRARRELOJ (el piloto no pasa por el tablero:
+  ta_codigo < 0 y gh_empieza no graba ni lee; DESVIACION de la prueba).
+- PENDIENTE -> HECHO (ver "campeonatos, octava tanda (agente c2c8)"): al llegar a la META de la ultima etapa del campeonato (Holly nodo 15, cap7/t22a y
+  cap7/fin_oom) "Out of memory ... diff 40960": `hudd_sube` (comun/hud.c) no consigue su bufer temporal de 40 KB para leer
+  del GD las texturas de un grupo del HUD (vuelve -3: ese grupo no se sube en ese cuadro). PROBABLE que ya estuviera en la
+  base (no se ha corrido alli).
+
+### HECHO: tipo 14, los coches con numero se ven (PENDIENTE de c2c6)
+- Lo que pasaba: los coches se dibujaban (563 triangulos, sin tope del TA, cap7/t14e) pero en ese tramo de LASV (Holly nodo
+  2) los carriles del trafico van por la otra calzada, 20..32 m a la derecha de la ruta (registro C14L), y el piloto de
+  pruebas iba por la de la ruta: los numeros (2D, encima de todo) salian sobre el muro. Ademas con la velocidad del trafico
+  (35..97 % de la del jugador, 472450) no se les alcanzaba dentro de la peticion.
+- Arreglo (7b3d540): los coches del 14 van a la velocidad de la carretera, como los de la mision del INFARTO (PROBABLE;
+  no se sabe la que les da el original); PRUEBA_C14V lleva al piloto por los carriles del trafico y hacia el coche con
+  numero mas cercano. 3c75848: como mucho 4 vivos a la vez (DESVIACION por el polycount, ver medidas) y los que se quedan
+  atras sin abrir se saltan.
+- E (cap7/t14m, cap7/t14k congelado con un coche a 44 m): los coches con su numero en la carretera, toques de verdad
+  conducidos: "suma 10 (+10) ... suma 10 (-10) ... suma 75 (+5) de 155, medidor 44", nota 3.
+
+### HECHO (SIMPLIFICADO): tipo 24, las fotos (0x2a48a0)
+- CAMP.DAT 'C241' (tools/conv_camp.py): por peticion los objetivos de la lista +0x70 {f32 x, y, z en el marco de la etapa
+  del PS2, s16 seccion desde, hasta; relativas al inicio con +0x74}: 10 peticiones, 21 objetivos, 384 bytes.
+- Lo averiguado: 0x2a60a0 activa (+0x10) el primero cuya seccion inicial se ha pasado (voz 0xf4 / 0xf3 al azar) y lo da
+  por perdido al pasar la final; 0x2a4fa8: con 0x2bb0a0 dos veces el angulo entre la camara y el objetivo; si es menor
+  que 0,50265 rad la nota de la foto es (1 - angulo / 0,50265) x 10 + 0,5 (+0x2c); el disparo es 0x1b4548 con 0x10 u 8
+  segun la configuracion (el mismo boton que lee el 22 para la bocina: aqui X, PROBABLE); efecto 0x174, oculta el HUD y al
+  acabar el disparo el medidor + nota / 10 x 80 / (n x 0,9). Nota 6: bono(0,9) como c2c6.
+- Portado: todo lo de arriba con el rumbo del coche en vez del de la camara (SIMPLIFICADO), el medidor al disparar (sin la
+  espera +0x18) y el objetivo del marco de la etapa al mundo con marco_et (camp_marco). DESVIACION: sin el HUD de la camara
+  (0x19d358 / 0x19d318 ocultan piezas del HUD): un visor de cuatro esquinas y una marca sobre el objetivo, amarilla dentro
+  del angulo (main.c camp_visor; 12 quads 2D).
+- E (Holly nodo 5 lista 1, New York, `-DPRUEBA_C24`: dispara a menos de 10 grados; cap7/t24b): "foto: 10 grados del
+  objetivo, nota 7, medidor 62", nota 5 y 44 corazones; la marca cae sobre un edificio de Times Square (cap7/t24b/q_072.png:
+  el marco de los objetivos es el bueno, PROBABLE). El segundo 24 (un objetivo a -62 grados todo el rato) sin foto.
+
+### HECHO (SIMPLIFICADO): tipo 22, la bocina (0x29b3d0)
+- CAMP.DAT 'C221': por peticion las ventanas de la lista +0x7c (filas de 0x18 {s16 desde, hasta (+ el inicio), f32 +8, +0xc,
+  i32 +0x10} hasta -1): 23 peticiones, 99 ventanas, 1 684 bytes.
+- Lo averiguado (0x29c058, fase 4): la ventana en curso (+0x24) entre inicio + desde + f8 e inicio + hasta + fc de la
+  posicion 0x182b40, o la siguiente (+0x28); al pisar la bocina (0x1b4518) el efecto 0x1bc y la ventana objetivo (+0x2c);
+  mientras se pisa, en su ventana y en la carretera el medidor + 80 x avance / +0x14 x 1,25 y fuera la penalizacion x
+  0,25; al soltarla 0x81bc. +0x14: PROBABLE la suma de los largos (0x29bfc0). Nota 6: bono(0,9).
+- Portado lo de arriba (case 22). DESVIACION: sin los coches de la clase +0x14 (0x29b798 / el generador 0x1f1a88) ni el
+  +0x10 de la ventana (+0x1058 del jugador); sin el 0x81bc (el 0x1bc es corto) ni HUD propio.
+- E (Holly nodo 15 lista 2, Palm Beach, `-DPRUEBA_C22`: la bocina en cada ventana; cap7/t22a): "bocina: 5 ventanas, 64
+  secciones", las tres "peticion 22 hecha: 96 / 96 / 87, nota 6".
+
+### SIN PORTAR: tipo 13 (0x2991b8) -> HECHO (SIMPLIFICADO), ver "campeonatos, octava tanda (agente c2c8)"
+- Lo averiguado: la clase (0x44 bytes, vtable 0x423298, control +0x24 = 0x2991b8) en su fase 1 llama a 0x1f1a88 con la
+  posicion del jugador (+0x5c del coche, no de los parametros) y copia los 0x44 bytes que devuelve: necesita el generador
+  del trafico. Su lista +0x5c del guion existe (registros de 0x14 como el 14, con +0xc = 4 / 3), pero el camino corto de
+  c2c6 no basta. Sin empezar el puerto.
+
+### Medidas (Flycast, DIAG_MS; dos pasadas con y sin el elemento, misma prueba)
+| elemento | tramo | fps con / sin | triangulos de la escena con / sin | suyos |
+|---|---|---|---|---|
+| 24, visor | 24/0 160..260 (cap7/m24_con, m24_sin) | 39,13 / 39,15 | 16826 / 16811 | 12 quads 2D |
+| 14, todos los coches | 14/0 380..590 (m14_con, m14_sin) | 35,47 / 37,66 | 18662 / 17840 | 563 por coche (LOD 0) |
+| 14, tope de 4 | 14/0 380..590 (m14b_con, m14b_sin) | 38,13 / 37,86 | 18244 / 17934 | media +310, max 4 x 563 |
+| 22 | sin geometria | | | 0 |
+(14: las dos pasadas no conducen igual (los toques frenan): diferencia dentro del ruido con el tope.)
+
+### RAM
+- h7/nav3.sh (MODO_JUEGO=1, sin defines, compilado limpio, datos7; cap7/nav3): "VOZ: VOCES.DAT, 35 muestras", "RAMMAPA
+  arranque: libre 408K" (igual que integra), sin "Out of memory". Nada nuevo en el monton al arrancar; en el campeonato
+  ~0,1 KB mas del estado y 2 KB mas de CAMP.DAT ('C241' + 'C221'). Ningun modulo de cada cuadro a -Os.
+- Datos nuevos: solo CAMP.DAT (30 518 -> 32 586 bytes, +2 KB en el GD).
+- Pruebas nuevas (solo con defines): DIAG_MALLOC, PRUEBA_C14V, PRUEBA_C24, PRUEBA_C22, DIAG_SIN_C24, DIAG_SIN_C14.
+
+### Lo que queda
+- 13 y el generador 0x1f1a88 (arriba); 22 sin sus coches; 24 sin el HUD de la camara ni la espera del disparo.
+- El "Out of memory ... diff 40960" de hudd_sube en la META final del campeonato (arriba).
+- El fantasma de la CONTRARRELOJ sin probar en esta tanda (arriba).
+- (c2c7 en integra, 2026-11-27) CAMP.DAT unico con los bloques de c2c7 (C241, C221) y de c2c16 (M161): conv_camp.py
+  de integra sobre la ISO, 35 678 bytes; los 30 518 primeros iguales a los de antes; CAMPHUD, CAMPOBJ, MJHUD y VOCESM
+  identicos (scratchpad modos/c2c/dat_int). nav3.sh: "VOZ: VOCES.DAT, 35 muestras", sin "Out of memory", libre **400K**
+  al arrancar (justo el minimo: el codigo paso un escalon de 8 KB). PENDIENTE: recuperar RAM antes de anadir mas; el
+  "Out of memory ... diff 40960" de hudd_sube en la META de la ultima etapa del campeonato (c2c7).
+
+## COAST 2 COAST: campeonatos, minijuegos 2 (agente c2c16b, 2026-11-27)
+
+Sobre integra (88630c1), continua "campeonatos, minijuegos (agente c2c16)". Todo en Flycast (nivel E), no en la consola.
+Datos de prueba: $S/modos/c2c/dat16b (CAMP.DAT con 'M162' detras de 'M161', cuyos 33 610 primeros bytes salen iguales
+byte a byte; MJHUD.DAT con 29 sprites mas detras de los 23 de antes: MJ_00..MJ_22 los mismos), carpeta montada con
+h16b/datos2.sh (enlaces a $S/dmip + dat16b en modos/c2c/datos16b). CAMPHUD.DAT, CAMPOBJ.DAT y VOCESM.DAT salen iguales.
+Scripts en $S/modos/c2c/h16b (los de h16 para este worktree; py/nodos.py: la etapa de cada nodo de los tres arboles,
+py/oveja.py: los cuadros de una escena del banco 0x46; serie4.sh: las medidas y nav3). Capturas en $S/modos/c2c/cap16b.
+
+### Lo averiguado (SLES-53998, clase 0x29f520)
+- 0x2a0838 (el numero): cifras de |v| (1..3, la de mas peso primero); de lejos (d al coche > 125: f = (d - 125) / 100
+  hasta 1) las filas 1 / 2 de la puerta se apartan -/+ 1,5 f x cifras por el eje x de la camara, suben 2 f y el paso de
+  las cifras (escala x 1,25) crece x (1 + f) (x (1 + 2 f) si la escala < 2,6); ancho w = cifras (+ 1 con signo) x paso;
+  el signo (0x423bdc el +, 0x423bd8 el -) en -w / 4 y la cifra k en paso x (k + signo) - w / 4, todo 0,5 m mas arriba;
+  cifras 0x423be0[d] (rojas) si v < 0 y 0x423c08[d] (verdes) si no. Signo: siempre en los avisos, en las puertas solo
+  los negativos.
+- Por subtipo en 0x2a0138: 3 el aviso 3 m mas arriba a escala 3, la puerta a 3 (2,5 si sim[0] o sim[1] tiene 3
+  caracteres); 4 el aviso con los regalos 0x423af8[sim] a 1,3 (5 nada) y la puerta con numeros a 3,5; 5 solo la puerta,
+  a 3 (2,5 con >= 100). El vaiven en las puertas y en los avisos de 0, 1, 3 y 4.
+- 3 (0x2a2080 / 0x2a24d8), 4 (0x2a26d0 / 0x2a2be0) y 5 (0x2a2de8 / 0x2a2e80): ver la cabecera de comun/minijuego.c.
+  El paso de la puerta es el de los demas (0x29fb28 y 80 x 1,1 / puertas); el 4 cuenta +0x76 (puertas pasadas).
+- 0x231fe0 (el regalo a contar del 4): objeto 2D del gestor (+0x2650) con 0x423af8[perm[0]] en el panel (+0x3e6c /
+  +0x3e70), crece a 0,5 en 0,35 s; 0x2320d8 cuando acaba el panel lo lleva a (180 - [0x374238], -110) a 0,75 y alli se
+  queda. 0x2322a0 (el 5, con la fase anterior +4 == 3): zzz 0x460027 en el panel (capa 5, escala 1); 0x232330 lo quita
+  en la fase 5. Las ovejas: 0x228e60(0x460028, capa 9, modo 3 -> una vez, (0, -50), 0,55, velocidad 1 + 0,1 x rand % 10):
+  la escena (100 cuadros, 78 distintos) ya lleva el salto de izquierda a derecha.
+- Las peticiones del tipo 16 solo estan en los guiones "_r" (los del arbol MIX, Req_Course_MIX_PS2). Del 4 no hay
+  ninguna en las etapas del arbol MIX (Deep_Lake_r, Snow_Mountain_r, Ghost_Forest_r, Imperial_Avenue_r, Niagara_r,
+  San_Francisco_r y Maya_r no estan en el): PROBABLE que el juego no las use, salvo otra forma de elegir la etapa que no
+  he visto.
+
+### HECHO: subtipos 3, 4 y 5 (comun/minijuego.c, -Os)
+- tools/conv_camp.py: el bloque 'M162' (64 bytes, cada tabla comprobada por el codigo que la lee: 0x3b5648, 0x423bd8 /
+  0x423bdc / 0x423be0 / 0x423c08, 0x423af8, 0x460028, 0x460027, 0x188 y 0x423a70) y los 29 sprites nuevos en MJHUD.DAT.
+  N del 4 (+0x78 de los parametros) se lee de las peticiones de CAMP.DAT (p[6]); la fase anterior (+4) la lleva
+  minijuego.c (sin tocar campeonato.c).
+- main.c (ha_spr3d): un sprite con esc < 0 se dibuja en la pantalla en (p[0], p[1]) desde el centro a escala -esc (las
+  ovejas, zzz y el regalo del HUD); 16 grupos a la vez (antes 8: las cifras) y 48 sprites; PRUEBA_MJ_TIPO=t (las
+  peticiones de la etapa t, 0..59, en la primera etapa: para probar el 4 sobre Alpine al reves).
+- E (PRUEBA_AUTO PRUEBA_CAMP=2 PRUEBA_CAMP_NODO=7 PRUEBA_SIN_TIEMPO PRUEBA_MJ, Alpine al reves):
+  - 3 (lista 2, 100..340): 12 avisos de nivel 0 (1..5, suma 39), la puerta "37 / 39" (el bueno el 1); cap16b/t3a
+    (r_045: el "+3" del aviso), zoom_t3a.png (37 y 39 entre los conos, de lejos separados), "88 - 2, nota 6".
+  - 4 (lista 0, PRUEBA_MJ_TIPO=55: Maya al reves 100..265, N = 2): 7 avisos de 3 huecos, la puerta "10 / 9" (9 los
+    regalos plateados, contados a mano en el registro); mos_t4a / mos_t4b: los regalos plateados y azules en la
+    carretera, el plateado arriba a la derecha en el HUD, "88 - 2, nota 6". Sin PRUEBA_MJ (medida m4_con) el piloto paso
+    por el carril bueno por azar: "bien" con el carril de verdad.
+  - 5 (lista 0, 160..380): 16 ovejas (efectos 0x188 x 16 y 0x173 / 0x1db / 0x1dc, "VOZ ... (peticion)"), la puerta
+    "16 / 12"; mos_t5b: las ovejas saltando por la pantalla, zoom_t5zzz: zzz en el panel; "88 - 2, nota 6".
+- Medidas (DIAG_MS, la misma pasada con / sin -DDIAG_SIN_MJ, sin PRUEBA_MJ, cap16b/medidas, h16b/mide.py de "peticion
+  16/n" a "peticion 16 hecha"): 3 39,51 / 39,60 fps (-0,09), 35 muestras; 4 39,67 / 39,73 (-0,06), 26; 5 39,45 / 39,63
+  (-0,18), 30. Triangulos: los conos 4..7 de media (57 como mucho, los de antes); los sprites son quads 2D (2 triangulos)
+  fuera de la escena: como mucho ~12 cifras / 8 regalos / 3 ovejas a la vez.
+- RAM al arrancar (h16b/nav3.sh, MODO_JUEGO=1, sin defines, compilado limpio): sobre integra 88630c1 el codigo nuevo
+  (+4 KB de .text) pasaba .init (alineado a 8 KB) al bloque siguiente: 408K -> 400K. Recortado minijuego.c (otros() para
+  los carriles malos de 1..5, numero() mas corto, el puntero local Q, las probabilidades con enteros y MJLOG: los
+  registros de cada aviso / puerta / peticion solo con PRUEBA_AUTO) hasta 0xba030 de .text: .init vuelve a 0x8c0ca000
+  (408K, medido sin el merge solo por el tamano, PROBABLE). Tras `git merge integra` (a0b2d19, con c2c7): .text 0xbac70,
+  .init en 0x8c0cc000 como integra sola; nav3 (cap16b/nav3_final.txt): "RAMMAPA arranque: en uso 13021K, libre 400K",
+  "VOZ: VOCES.DAT, 35 muestras", sin "Out of memory": igual que integra (400K segun el jefe; no medido aqui el tip de
+  integra solo). OJO: unos ~3 KB mas de .text en cualquier rama vuelven a saltar .init a 0x8c0ce000 (-8K).
+- Tras el merge (CAMP.DAT de tools/conv_camp.py: sus 35 678 primeros bytes iguales a $S/modos/c2c/dat_int/CAMP.DAT, y
+  'M162' detras de 'M161'; MJHUD.DAT igual): h16b/serie5.sh repite 16/3 (37 / 39), 16/4 (10 / 9), 16/5 (16 ovejas, 16 /
+  12) y 16/2 + 16/1 + 16/0 (prepara1 / prepara2 ahora con otros()): todas "bien" con PRUEBA_MJ, las mismas notas
+  (cap16b/t3b, t4b, t5b, t12b, repaso_merge.png).
+- Scripts: pgrep -c -f /opt/flycast/build/flycast (el proceso se llama Flycast-rend).
+- Datos nuevos: CAMP.DAT + 72 bytes ('M162'), MJHUD.DAT 149 -> 278 KB (+129 KB: 22 cifras de 64x64, 5 regalos de
+  128x128, la oveja 128x512 con 78 cuadros y zzz).
+- DESVIACION / SUPUESTO: las cifras se separan por el lateral de la carretera, no por el eje x de la camara; el panel de
+  la peticion en (176, 78) (donde main.c pinta el rotulo; zoom_t5zzz: zzz cae sobre el coche del panel, PROBABLE bien);
+  el regalo del HUD esta 2 s en el panel y va arriba en 0,35 s (el original espera a que acabe el panel, 0x2320d8) y se
+  va al acabar la peticion (SUPUESTO: no he visto quien llama al estado 4); +0x160 del gestor (el 5) SIN averiguar; las
+  ovejas avanzan con el paso de la logica.
+
+### Lo que queda
+- 6 (los coches): necesita el generador del trafico de la peticion 0x1f1a88 / 0x1f20e8 (otro agente).
+- Un carril elegido conduciendo (el piloto no elige; en el 4 acerto por azar), la voz y los efectos solo por el
+  registro (Flycast sin audio).
+- El cartel 3D de la puerta (0x1ee000b) y el 2B003D del aviso, como en c2c16.
+
+## COAST 2 COAST: campeonatos, octava tanda (agente c2c8, 2026-11-27)
+
+Sobre integra (a0b2d19, con el merge de 5cb94a3). Todo en Flycast (nivel E), no en la consola. Datos de prueba:
+$S/modos/c2c/dat8 (CAMP.DAT: los 35 750 bytes de dat_int iguales byte a byte y detras 'C131'; MJHUD.DAT: el de integra con
+un sprite mas detras, 460006) montados con h8/datos2.sh ($S/dmip + dat_int + dat8 en modos/c2c/datos8). Scripts en
+$S/modos/c2c/h8 (los de h7 para este worktree; ab.sh: A/B de fps con datos8; mide8.py: fps y triangulos entre dos lineas;
+p13.py: los parametros del 13 en los guiones). Capturas y registros en $S/modos/c2c/cap8.
+
+### HECHO: RAM del arranque (+95 KB)
+| que | KB | coste en fps |
+|---|---|---|
+| `buf_arr` (demo/main.c): el bufer de paso de los textos de 512 x 128 texeles (128 KB de BSS) a 512 x 32; texto_arriba sube la textura de 128 filas en 5 franjas con cada linea entera en la suya (texto_centro ya usaba 16 KB) | 96 | ninguno: solo corre con el marcador de depuracion (`ver`) o sin HUD; con `-DVER=1` las tres lineas salen como antes (cap8/ver_texto/a_003.png) |
+| el resto de esta tanda (el 13, el generador, hudd_sube por trozos): +7 KB de codigo, sin escalon | -1 | |
+- nav3.sh (h8/nav3.sh, MODO_JUEGO=1, sin defines, compilado limpio, datos8; cap8/nav3): "VOZ: VOCES.DAT, 35 muestras",
+  "RAMMAPA arranque: libre 495K" (integra 400K; solo buf_arr: 496K, cap8/nav3_arr), menu 496K, carrera OutRun 786K, sin
+  "Out of memory". Sin -Os ni FRIO nuevos: no hizo falta.
+- fps (h8/ab.sh, PRUEBA_AUTO, 140 s por etapa, nodos 0 y 1, recortado al mismo s con tabla2.py; cap8/res A0 A1 = integra
+  5cb94a3, B0 B1 = c2c8): PALM 38,55 / 38,54, LAKE 39,42 / 39,32, media 38,99 / 38,93 (ruido); 0 "Out of memory", la voz en
+  las 4.
+
+### HECHO: "Out of memory ... diff 40960" de hudd_sube en la META final del campeonato
+- Causa (c2c7, cap7/fin_oom): hudd_sube (comun/hud.c) lee del GD de una vez todos los sectores de las texturas que suben (el
+  grupo del rotulo META, texturas 0..2 de su fichero parcial: 40 KB) en un memalign; en la carrera no hay bufer prestado y la
+  cima del monton tenia 28 KB: KallistiOS no podia crecer, el aviso y el grupo sin subir en ese cuadro (se reintentaba).
+- Arreglo (54a250a): si no hay bufer prestado que quepa, la lectura pasa de 10 KB y la cima del monton no tiene la lectura +
+  32 KB (cabe_seguido, mallinfo), cada textura se lee y se sube por trozos de 8 KB (sube_trozos, con su paleta de 4 / 8 bits
+  como sube_tex) con un bufer de 10 KB. Sin RAM nueva al arrancar; la lectura grande de antes sigue igual cuando cabe.
+- E: con la RAM de ahora la lectura cabe (Holly nodo 15 lista 2, cap8/fin_h: "MALLOC memalign 40960 -> ..." sin aviso); con
+  `-DDIAG_HUD_TROZOS` (siempre por trozos; cap8/fin_tz) "HUD: texturas 0..2 del GD por trozos (40K seguidos sin bufer)" tras el
+  GOAL y el rotulo META entero (cap8/fin_tz/mos_meta.png). Metas finales de Clarissa (NEWY, cap8/fin_cla) y Jennifer (CAPE,
+  cap8/fin_jen): GOAL sin "Out of memory" (DIAG_MALLOC). NO reproducido el caso de c2c7 tal cual (con la RAM nueva no falta;
+  DIAG_RESERVA=98304 tampoco lo reprodujo: la cima de la META no depende de lo que se toma al arrancar).
+
+### HECHO: el generador del trafico de la peticion (0x1f20e8 / 0x1f1a88)
+- Lo averiguado: 0x1f20e8(r) solo guarda r en [0x5d5fd8]; 0x1f1a88 (el registro de 0x46 bytes del sitio, PC 4F0030) con
+  [0x5d5fd8] != 0 devuelve ese registro en vez de copiar el de la etapa (tabla 0x5d5e78, 5 x 0x46, por la posicion +8) a
+  0x5d5fe0 y pisar +0xe..+0x18 (250, 250, 250, 290, 290, 310), +0x1c..+0x26 (270,9..473 x 0,8 en los modos 3 / 4), +0x2a..+0x42
+  y +4 (7 / 10). La peticion copia el de la etapa, pone sus 7 modelos en +0xe..+0x1a (+0x64 de sus parametros o un valor fijo:
+  0x6e en el 13, 0x96 / 0xa5 en el 11) y lo instala; el aparecedor del trafico (0x1dbba0 / 0x1db6d0) lo lee al abrir cada
+  coche. Llamadas: 11 (0x294b6c), 13 (0x2992e0), 14 (0x29cd60), 20 (0x2961b4), 21 (0x2928e0), 0x29ecb8 / 0x29f0b8 y el
+  subtipo 6 de los minijuegos (0x2a3398). El 22 NO lo llama (nada en 0x29b3d0..0x29c3ff): sus "coches" no existen (la clase
+  +0x14 de c2c7 es la bocina, 0x29b798 lee el boton 0x10 / 8 con 0x1b4518).
+- Portado (main.c trafpet_pon; interfaz en comun/campeonato.h `camp_trafpet_t` / `camp_trafpet`): modelo[7] (ids del PS2,
+  repartidos en orden a los coches que nacen y a los de la lista de la peticion; los que la DC no tiene se quedan con el del
+  trafico), tope de vivos marcados, el LOD mas fino de los coches marcados y una marca para los que nacen; NULL lo quita. Lo
+  usan el 13 y el 14 (tope 4, LOD 1, sin marca: sus coches son los de la lista). Para el subtipo 6 de minijuego.c (sin tocar):
+  en su fase 1 `camp_trafpet(&r)` con sus modelos y HA_CAMP en marca, en la 5 `camp_trafpet(NULL)`; sus coches son los de
+  camp_autos con HA_CAMP.
+- DESVIACION / PROBABLE: el 0x6e del 13 no es un modelo que tenga la DC (se quedan los del trafico); el LOD ligero y el tope
+  son del port (por el polycount). El 11, 20 y 21 siguen con su camino SIMPLIFICADO (los coches que aparecen son los suyos).
+
+### HECHO (SIMPLIFICADO): tipo 13, la comida (0x2991b8)
+- Lo averiguado (0x2991b8 / 0x299dd8 / 0x299e80 / 0x29a0c8 / 0x299b58): el rotulo es "¡Alimenta a la chica!"; los coches son
+  la lista +0x5c de los parametros (como el 14: +8 seccion desde el inicio, +0xa carril; 0x22d4c0 pone +0xc en +0xd14 = 2 y
+  +0x10 en +0xd18 = la clase). +0x78 clases (3 como mucho) distintas al azar entre 3 (+0x8c), +0x9a fases (3 como mucho) que
+  parten [inicio, fin] a partes iguales (+0x7a); el objetivo de la fase k es la clase k. 0x29a0c8 da la clase a los que faltan
+  por poner: tras uno del objetivo con rand < 0,15 otro, tras otro con rand < 0,85 el objetivo, si no una al azar; se repite
+  0x87 secciones antes de cada cambio. Fase 4: cada coche de la peticion a menos de 4 posiciones por detras y 3 m (0x164f6c), o
+  golpeado: el bueno + 80 / p98 al medidor y +0x79 + 1, el otro la penalizacion + 40 / p98; se va (0x19c990); los que se quedan
+  atras se van (+0x38). Al pasar el cambio de fase, la voz 0x423220[fila][clase] (0x11c090). Dibujo: sobre cada coche el
+  sprite 0x4231d8[fila][clase] del banco 0x46 (comida), x 1,5 el del objetivo y x 0,75 los demas; fila = +8 de los parametros
+  (el azar del banco FOOD, 0x22ac00). Nota 6: n = +0x79 > p98 ? (n < p99 ? (n - p98) / (p99 - p98) x 30 : (n - p99) x 5 + 30)
+  : 0, + 40 x 0x22f090. p98 / p99 / +0x9a son bytes de +0x98..+0x9a de los parametros.
+- tools/conv_camp.py: 'C131' detras de 'M161' (u8 sprite[6][3] = el grupo MJ_kk de MJHUD.DAT, u16 voz[6][3]; por peticion
+  coches, clases, p98, p99, fases, +0x64, +0x66 y la lista): 25 peticiones, 14..76 coches, 2 936 bytes; los sprites que el
+  16 no tenia van detras en MJHUD.DAT (solo 460006).
+- Portado: comun/campeonato.c (case 13, reparte13, camp_coche13, camp_autos, camp_spr3d) y main.c (los coches de la lista
+  con los del 14). SIMPLIFICADO: sin el panel del objetivo (0x231fe0) ni el vaiven del sprite (0x136d60); efectos del toque
+  0xd6 / 0xd4 (SUPUESTO, los del 14); la voz de la fase 1 por la cola de voces (0x1ac3d8 con 0x3c, 0xb).
+- E (Holly nodo 15 lista 0, Palm Beach 13/0 140..565, `-DPRUEBA_C13`: los del objetivo a 1 seccion cuentan como tocados;
+  cap8/t13b): "comida: 68 coches, 3 clases (0 2 1), 3 fases, umbrales 20 / 26, fila 5", los dos cambios de objetivo (secciones
+  282 y 424), 22 buenas y 2 malas (de verdad: los otros a menos de 3 m), "peticion 13 hecha: 88 - 4, nota 6, 80 + 50
+  corazones"; el rotulo "¡Alimenta a la chica!" y los sprites de comida sobre los coches (cap8/t13b/q_056.png,
+  z_q_056.png). NO verificado: toques sin PRUEBA_C13 (el piloto no apunta a los coches; sin ella 8 buenas y 7 malas, nota 0).
+
+### Medidas (Flycast, DIAG_MS, la misma pasada; medidas entre "TRAFPET: puesto" y "peticion 13 hecha")
+| elemento | tramo | fps con / sin | triangulos de la escena con / sin | suyos |
+|---|---|---|---|---|
+| 13, coches y sprites (sin `-DDIAG_SIN_C14`) | 13/0 140..565, 49 / 45 muestras (cap8/m13_con, m13_sin) | 37,78 / 38,56 (mediana 38,70 / 39,30) | 18117 / 18005 | 4 coches como mucho (LOD 1) y sus sprites |
+| 13 con el LOD 0 (`-DDIAG_TP_LOD0`) | el mismo (m13_l0) | 37,73 | 17960 | |
+- Por encima del ~0,3 que se pedia: -0,6 fps de mediana. Un cuadro de 22 fps (la primera subida de los sprites de MJHUD.DAT
+  al aparecer, que lee del GD en el cuadro) y +0,35 ms de logica / +0,44 ms de dibujo. El LOD ligero no se nota en los
+  triangulos (el LOD 0 solo va a menos de ~70 m y con el tope de 4 apenas hay coches tan cerca): PENDIENTE subir los 3
+  sprites de la peticion en su fase 1 y medir con mas pasadas.
+
+### Lo que queda
+- 13: el panel del objetivo, el vaiven del sprite, la subida de sus sprites al anunciar la peticion (el tiron de un cuadro) y
+  bajar su coste (arriba).
+- El generador en el 11, 20 y 21 (siguen SIMPLIFICADOS) y en el subtipo 6 de los minijuegos (la interfaz esta; lo llama quien
+  porte el 6). El 22 no tiene coches en el original.
+- Pruebas nuevas (solo con defines): PRUEBA_C13, DIAG_TP_LOD0, DIAG_HUD_TROZOS, DIAG_RESERVA. Datos nuevos: CAMP.DAT +2 936 bytes
+  ('C131'), MJHUD.DAT +6,3 KB (285 056 -> 291 360).
+
+## COAST 2 COAST: campeonatos, novena tanda (agente c2c9, 2026-11-28)
+
+Sobre integra b41fb8c (con c2c8). Rama local c2c9, sin push. Todo en Flycast (nivel E), no en la consola. Datos de prueba:
+$S/modos/c2c/dat9 (CAMP.DAT de `python3 -I tools/conv_camp.py $S/ps2/or2.iso $S/modos/c2c/dat9`: sus 38 686 primeros bytes
+iguales byte a byte a los de dat8, C131 incluido, y detras 'M163', 600 bytes; MJHUD.DAT, CAMPHUD.DAT, CAMPOBJ.DAT y VOCESM.DAT
+iguales a los de datos8) montados con h9/datos2.sh ($S/dmip + dat_int + dat9 en modos/c2c/datos9). Scripts en $S/modos/c2c/h9
+(los de h8 para este worktree; corte.py: fps, cpu, triangulos y partes de PRF entre dos lineas del registro, todos los
+registros cortados al mismo s; corrA.sh / mkA9.sh: lo mismo con la base b41fb8c en modos/c2c/A9; p166.py: las peticiones de
+un tipo / subtipo en los guiones con su lista +0x5c). Capturas y registros en $S/modos/c2c/cap9.
+
+### HECHO: tipo 13, el tiron y el coste
+- De donde salia el coste (Palm Beach 13/0, -DDIAG_MS, PRF y -DDIAG_C13T): ~0,7 ms por cuadro en la parte 2D (l2 1167 us
+  frente a 436): ha_spr3d bajaba de la VRAM los grupos que no se veian en el cuadro y los volvia a leer del GD al verse
+  otra vez (cada lectura 12..17 ms, -DDIAG_SPR13), y el primero el cuadro de 22 fps; +0,35 ms de logica: los coches de la
+  lista (4,8 coches de media, 120 us por coche y paso; coche_coloca 67 us, de ellos 4 coli_altura con 3 en modo 0x400 de
+  cerca); los triangulos (+112 de media) apenas.
+- Arreglos: (1) camp_spr3d da los 3 sprites de la peticion con cuadro -1 desde el anuncio (fase 1) y ha_spr3d los sube (uno
+  cada 16 cuadros) y no los baja hasta que acaba: sin el tiron ni las relecturas; (2) coli_altura guarda cosf / sinf del giro
+  del marco (los mismos valores; se calculaban 2 por consulta con la libreria, lenta) y coche_coloca no calcula ca / sa
+  cuando el coche se asienta con traf_asienta (afecta a todo el trafico, la misma imagen); (3) los coches de la peticion con
+  el LOD ligero (tp.lod = 1, c2c8) se asientan con 0x100 en vez de 0x400 (el original usa 0x400 solo en el LOD 0, que estos
+  no dibujan: PROBABLE igual al original para el LOD que se ve).
+- HECHO (SIMPLIFICADO): el icono del objetivo (0x2994ac / 0x2998b4 -> 0x231fe0 con 0,5 y 0x2320d8): el sprite de la clase
+  pedida crece en el panel (176, 78) y a los 2 s sube a (180, -110) a 0,75, como el regalo del 16/4; otra vez al cambiar
+  +0x1d (15 secciones antes del cambio de objetivo). SUPUESTO el sitio y los tiempos (los de c2c16b). Sin el vaiven
+  (0x136d60). cap9/t13p/mos_t13p.png: la sandia arriba a la derecha y sobre los coches.
+
+### HECHO: subtipo 6 de los minijuegos, los coches (0x2a3300 / 0x2a3510; comun/minijuego.c, -Os)
+- Lo averiguado: 0x2a3300 (fase 1): +0x78 = +8 de los parametros (el azar del banco CARS, 0..2), +0x7a = 0, la puerta 0 con
+  el carril bueno rand % n y sus simbolos a -1; 0x2a3bd0(lista +0x5c, +0x78 + 3) pone en +0xb de cada coche de la lista
+  (filas de 0x14 hasta +8 < 0 o +0xa < 0) la clase pedida con rand < 0,5 o una de las otras dos (3..5); 0x1f1a88 / 0x1f20e8
+  con los modelos +0x64 o 0x104 y 0x22dac0(+0x66 o 0x14). 0x22d0a0 (abre un coche de la lista; el mismo del 13 y el 14):
+  con el 16/6 en curso, si su +0xb es +0x78 + 3, +0x7a + 1 (0x22d278) y el modelo 0x415500[plaza % 3] (33, 34, 38); si no
+  0x415510 / 0x415530 [plaza % 7] (por la clave de la etapa); +0xd10 = la clase. 0x19c6f0 tine el coche por +0xd10 (3
+  rojo, 4 verde, 5 azul: el vector 0x577a48 que lee 0x19c488 para 0x111bb0). 0x2a3510 (fase 4): si el carril bueno de la
+  puerta 0 no tiene la cuenta, se la pone y los demas cuenta - 1 + rand % 3 (> 0 y distintos); la puerta como los demas
+  (0x29fb28, + 80 x 1,1 / puertas, el destello). Dibujo 0x2a36f8 -> 0x2a0138 / 0x2a0788: solo las puertas, numeros a 3.
+- tools/conv_camp.py: 'M163' detras de 'C131' (u8 contados[3] 0x415500, otros[7] 0x415510, otros_1a[7] 0x415530, u32 n y por
+  peticion {u16 peticion, u8 coches, 0, s16 +0x64, +0x66, coches x {s16 seccion desde el inicio, s8 carril, 0}}): 15
+  peticiones, 5..12 coches. Cada tabla comprobada por el codigo que la lee.
+- Portado: prepara6 (fase 1; camp_trafpet(&r) con +0x64 o 0x104, tope 4, LOD 1 y marca 0: los coches de la peticion son los
+  de la lista), mj_coche (main.c traf_aparece los abre como los del 13 / 14: 40 secciones por delante, la cuenta al abrirlos,
+  el modelo del juego si la DC lo tiene en la marca), la cuenta en la puerta 0 en la fase 4 y camp_trafpet(NULL) en la 5
+  (y en mj_libera). campeonato.c: pet11 / camp_autos con el 16/6 (los de atras salen del tope, HA_SUELTO), sin sprites.
+- DESVIACION: (1) el tinte: el color del coche x 0,5 + rojo / verde / azul por el color especular (sq_vtx_fe del fundido,
+  en el camino rapido de dibuja_indices; con color_mul por dibuja_malla costaba +1,5 ms de dibujo en la tercera peticion:
+  -0,6 fps); 0x111bb0 SIN averiguar (PROBABLE que multiplique). (2) Tope de 4 coches de la lista vivos (los del 13 / 14): de 7
+  coches salen 4 y la cuenta solo cuenta los que salen (el original los abre todos). (3) El modelo de los demas al azar de
+  0x415510 (sin 0x415530 ni plaza % 7); 0x104 no es un modelo de la DC (el trafico de siempre). (4) Sin 0x22dac0.
+- E (Industrial Complex al reves, PRUEBA_CAMP=2 PRUEBA_CAMP_NODO=10 PRUEBA_CAMP_LISTA=0, 16/6 135..255, 325..460, 530..610;
+  cap9/t6a, t6b): "MJ: coches: 7 en la lista, la clase 5 (azar 2)", "MJ: coche 3 ...: clase 5, modelo 38, cuenta 1", la
+  puerta "carril bueno 0 de 2 (1 2)", con PRUEBA_MJ "bien" y "peticion 16 hecha: 88 - 0, nota 6" en las tres; sin
+  PRUEBA_MJ (m6_con2) las mismas notas (el piloto acerto por azar). Capturas: t6a/r_080.png (el "1" y el "2" verdes de la
+  puerta entre los conos), t6a/r_050.png y t6b/zoom_t6b.png (coches rojo, verde y azul). NO verificado: el carril elegido
+  conduciendo; la voz del banco CARS (Flycast sin audio, por el registro).
+
+### HECHO: el generador en el 11, 20 y 21 (campeonato.c trafpet_fijo)
+- Lo averiguado: 11 (0x294c50): +0x64 o, sin el, 0xa5 con el subtipo 1 y 0x96 con el 0; 20 (0x296290): +0x64 o 0x104; 21
+  (0x2929bc): +0x64 o 0xb4; los tres con 0x22dac0 y 0x1f20e8(0) en la fase 5.
+- Portado: camp_trafpet(&r) en la fase 1 con esos modelos (tope 0, LOD 0, marca 0: camp_autos sigue marcando los que nacen
+  por delante, como hasta ahora) y NULL en la 5. Ninguno de esos modelos esta en la DC: el trafico sale como antes
+  (SIMPLIFICADO: lo que cambia es que el registro esta puesto mientras dura la peticion).
+- E: Clarissa nodo 4 lista 1 (cap9/t2021w): "TRAFPET: puesto (modelo 260 ...)" en los dos 20 y "(modelo 180 ...)" en el 21,
+  "quitado" en cada fase 5, "peticion 21 hecha: 94 - 0, nota 6, 80 + 90 corazones" (lo mismo que c2c6); BEAC 11/0 con
+  PRUEBA_C11 (cap9/t11w): "(modelo 150 ...)", 4 de 10 golpes y "peticion 11 hecha: 32 - 0, nota 3", igual que la base
+  (cap9/t11a).
+
+### Medidas (Flycast, DIAG_MS, la misma prueba con y sin; corte.py, cortadas al mismo s)
+| elemento | tramo | fps con / sin | cpu (dib + log) con / sin |
+|---|---|---|---|
+| 13 de c2c8 (base) | PALM 13/0, s 885..3988 | 37,83 / 38,81 (-0,98; min 21,5) | 23,89 / 22,92 |
+| 13 ahora (sprites fijos, coli) | el mismo | 38,27 / 38,56 (-0,29; min 33,9) | 23,34 / 22,97 |
+| 13 ahora, antes del asiento 0x100 | CAST 13/0, s 2209..3534 | 39,36 / 39,74 (-0,38) | 22,52 / 20,35 |
+| 13 final (asiento 0x100) | el mismo | 39,59 / 39,74 (-0,15) | 22,63 / 20,35 |
+| 16/6 con color_mul | IND_r 16/6 x 3, s 882..4863 | 38,97 / 39,26 (-0,29; la tercera -0,61) | |
+| 16/6 final (tinte especular) | el mismo, s 882..4841 | 39,16 / 39,27 (-0,11; -0,10 / +0,93 / -0,16) | 23,41 / 22,27 |
+| 11 / 20 / 21 (generador) | BEAC 11/0, s 506..2297 (base / c2c9) | 38,91 / 39,30 | |
+| 20 / 21 (generador) | Clarissa nodo 4 lista 1, s 536..7185 (base / c2c9) | 38,90 / 38,88 | 20,78 / 20,80 |
+("sin" del 13: -DDIAG_SIN_C14, sin los coches ni sus sprites; del 16/6: -DDIAG_SIN_MJ6, sin los coches de la lista.) El cuadro
+de 22 fps ya no sale (el minimo de la peticion 33,9 en PALM, 37,8 en CAST); las tres subidas fijas al anunciar cuestan un
+cuadro cada una (12..17 ms, separadas 16 cuadros). En el 13 queda ~1 ms de logica y ~0,5 ms de dibujo por los 4 coches de
+la lista (el original los tiene; tope y LOD ligero de c2c8).
+
+### A/B general y RAM
+- h9/ab.sh (PRUEBA_AUTO, 140 s, nodos 0 y 1; A = la base b41fb8c en modos/c2c/A9, B = c2c9; RES=cap9/res tabla2.py A B):
+  PALM 38,52 / 38,51 (s comun 2722), LAKE 39,45 / 39,36, media 38,99 / 38,94 (ruido); 4 de 4 con la voz, 0 "Out of memory".
+- RAM al arrancar (h9/nav3.sh, MODO_JUEGO=1, sin defines, compilado limpio, datos9; cap9/nav3f): "VOZ: VOCES.DAT, 35
+  muestras", "RAMMAPA arranque: libre 495K" (igual que c2c8), menu 496K, carrera OutRun 786K, sin "Out of memory".
+- El codigo nuevo (+2,9 KB de .text) pasaba .init de 0x8c0cc000 a 0x8c0ce000 (-8K). Recuperado con -Os (FRIO) en funciones que
+  solo corren al cargar o en un suceso: main.c gh_empieza, meta_entra, fin_empieza, ha_meta_carga, sol_carga, traf_ani_lee,
+  curso_lee_etapa, meta_lee, repsec_lee, hueco_pcarga, curso_busca, coche_color, sube_inicia, libera_modelo, trafpet_pon,
+  ta_meta_final; hud.c hudd_abre, pal_reparte, hudd_grupos_carga; sfx.c sfx_inicia, voces_lee; robot.c robot_inicia,
+  robot_band_inicia; or2_fisica.c or2_carga_param; gho.c gho_lee (ninguna del dibujo ni de la fisica por cuadro). .text
+  0xbbff0: OJO, quedan 16 bytes hasta el siguiente paso de 8 KB.
+
+### Lo que queda
+- 13: el vaiven del sprite (0x136d60); ~0,15..0,3 fps por los 4 coches de la lista (logica y dibujo).
+- 16/6: los 7..12 coches de la lista enteros (tope 4), 0x415530 / plaza % 7, 0x22dac0, el tinte exacto de 0x111bb0.
+- 11 / 20 / 21: sus modelos (0x96 / 0xa5 / 0x104 / 0xb4) no estan en la DC.
+- Pruebas nuevas (solo con defines): DIAG_SPR13 (cada subida de los sprites del 13 con su tiempo), DIAG_SIN_SPR13, DIAG_C13T
+  (us por paso de aparecer / mover / choques / gestor del trafico), DIAG_SIN_MJ6. Datos nuevos: CAMP.DAT +600 bytes ('M163').
+## Ferrari con menos vertices (agente ferrari, 2026-11-28; DESVIACION del port)
+Menos vertices en los coches del jugador, en el menu (COCHEnn.DAT) y en la carrera (COCHEnnL.DAT), con el colapso de
+aristas de `tools/conv_coche.py` (simplifica) y los parametros nuevos de la linea de ordenes (--razon, --menu-razon,
+--error, --giro, --borde, --cerca; el parche del agente fps2, terminado). Silueta, ruedas, luces, habitaculo de la vista
+interior y el bloque CEX2/ANI1 salen como antes: lo que no es simplificable no se toca. La ficha 7 del Mod (taxi) no se
+genera nunca.
+- Llamada (por ficha k, la del paso `coche<k>` de tools/regenera.py, anadiendo a `--visible`):
+  `conv_coche.py <iso> --todos <dir> --fichas k --visible --razon 0.3 --error 0.05 --giro 0.3 --borde 3 --cerca C --menu-razon 0.6`
+  con C = 0.02 en las fichas 1, 3, 8, 12 y 13 y C = 0.005 en las 0, 2, 4, 5, 6, 9, 10, 11 y 14.
+- Vertices en el fichero (antes = lgdat2): menu -23 % a -30 % en las 14; carrera -16 % a -28 % (0, 1, 3, 5, 8, 11, 12, 13,
+  14 por encima del -20 %; 2, 4, 6, 9 y 10 entre -16 % y -20 %: con --cerca 0.005 no dan mas sin quitar el limite de giro).
+- A/B en Flycast (PRUEBA_AUTO, coche ficha 0, mismo s): PALM 38,80 -> 38,96 fps, CLOU 36,37 -> 36,80, METR 37,03 -> 36,98;
+  triangulos por cuadro 18622 -> 17076, 17598 -> 16039, 15448 -> 13820 (-1550 de media). RAM al arrancar: libre 495K antes, 500K despues;
+  VOZ 35 muestras, sin Out of memory. Mejora pequena en fps (+0,2 de media): el coche no es lo que limita.
+- PENDIENTE: integrar la llamada en tools/regenera.py y en el programa de Windows (FICHAS_ISO sin la 7).
+## fps3: decoracion -15 % y edificios de PALM 32x32 (agente fps3, 2026-11-28; DESVIACION pedida)
+
+Pedido del usuario, para ganar fps en todas las etapas: (1) quitar un 15 % de los arboles, arbustos y vallas
+publicitarias de cada etapa, repartido de forma uniforme y determinista, respetando lo que tiene funcion (lo de las
+peticiones y campeonatos, la meta, los checkpoints y las bifurcaciones); (2) en PALM, las texturas de los edificios a
+32x32, cuadradas y compatibles con los mipmaps y los libros VQ. Sobre la rama integra (b41fb8c). Sin cambios en el
+codigo de la demo: todo en los datos, con una herramienta que el programa de Windows rehace desde los discos.
+
+**Herramienta**: `tools/aligera.py --datos entrada/ salida/ trabajo/` (y `--info entrada/ [SEGnn...]`, `--solo`,
+`--sin-decor`, `--sin-palm`), sobre una carpeta de datos ya hecha, como `tools/remip.py` (recompone las SEG de SEGS.PAK
+y reempaqueta con pak_union.py). `tools/regenera.py` la pasa al final, una vez, detras de remip (marca
+`trabajo/aligera.hecho`); `windows/construye.sh` copia `demo/decor_tabla.h` junto a las tools del programa (la tabla de
+vegetacion de la demo). Determinista: los mismos nodos y los mismos bytes en dmip (con mipmaps) y en lgmod2 (sin ellos;
+mismas cuentas en las 62 etapas).
+
+### 1. Decoracion -15 % (las 62 SEGnn.DAT)
+- Que se quita: las mallas del nodo con 0 vertices (la demo no dibuja las de menos de 3), con su version lejana de
+  lod_veg.py y, en los arboles, su tronco si va en otro nodo (la misma regla que decor_reduce).
+- Vegetacion: los nodos que `decor_reduce` (demo/main.c) toma por vegetacion (decor_tabla.h y sus medidas) y que el
+  no quita ya (su hash: 6 de cada 20). El 15 % es de lo que se veia: PALM 399 a la vista, 60 fuera; en el registro
+  de la demo "DECOR: 575 de vegetacion" pasa a 515 y lo que quita ella sigue igual (176).
+- Vallas publicitarias: nodos con una malla de un anuncio. Los anuncios se reconocen por la firma de su textura
+  (16x8 colores, RMS < 15; con o sin mipmaps, tambien en espejo) frente a los patrocinadores de PALM y TULI
+  (REF_ANUNCIO, numeros de textura: se rehacen desde el disco). En las 62 etapas salen 285 texturas parecidas, todas
+  anuncios mirados a mano (cap/anuncios.png: <= 8,3 de distancia; lo siguiente, 23,8). Solo la valla entera (de 8
+  a 64 vertices, <= 16 m de planta, >= 2,5 m de alto: el cartel con su marco), fuera del asfalto (mas de 1 m) y a
+  mas de 100 m del principio y del final de la ruta. No: los paneles sueltos de las gradas y del muro de la salida
+  de PALM (un cuadrilatero pegado a la estructura: quedaria el hueco).
+- Reparto: los candidatos de cada clase ordenados por su punto de la ruta (en el mismo sitio, por un hash de la
+  posicion) y fuera uno de cada 1 / 0,15 seguidos: el 15 % exacto y a lo largo de toda la etapa, nunca un tramo.
+- Lo que no se toca: carteles de la carretera (flechas, SLOW DOWN, la pancarta CHECK POINT), farolas, publico,
+  edificios. Los objetos de las peticiones y de los campeonatos (HAOBJ, CAMPOBJ, INFARTOP...) y la meta (META.DAT) son
+  otros ficheros: ninguna valla de las etapas forma parte de una peticion.
+- Total (62 etapas): vegetacion 12 306 a la vista, 1 845 fuera (15,0 %); vallas 329, 50 fuera (15,2 %); 56 etapas
+  cambian (en SEG04 INDU, SEG28, SEG37 y SEG64 no hay vegetacion en la tabla ni vallas). Por etapa del modo OutRun
+  (vegetacion vista / fuera, vallas / fuera): PALM 399/60, 33/5; LAKE 239/36, 6/1; ALPI 547/82, 12/2; CAST 86/13;
+  FORE 555/83; DESE 203/30; CLOU 960/144, 18/3; INDU 0; SNOW 284/43; GHOS 146/22; TULI 119/18, 28/4; METR 124/19;
+  RUIN 52/8; IMPE 282/42; CAPE 322/48.
+
+### 2. PALM: fachadas a 32x32
+- Elegidas a mano en la hoja de las 170 texturas de SEG00 y su uso (cara vertical, alto de los nodos): 30 de ventanas,
+  paredes de edificios, rascacielos del fondo y almacenes del puerto (EDIF_PALM: 14, 40, 41, 44, 45, 48, 50, 53, 54,
+  62-64, 66, 67, 69, 72, 73, 77, 80-83, 85-91, 124). No: carretera, aceras, empedrado, muros de piedra del paseo,
+  rocas, cielo, palmeras (troncos y hojas), plantas colgantes, publico, coches aparcados, letreros de los hoteles
+  (43, 47, 52, 56, 75, 76), anuncios, farolas, la noria (95).
+- Cada una: el nivel mayor de ahora reducido por promedio (128 o 64 -> 32; 82 era de 128x64) a 32x32 cuadrada con
+  mipmaps; VQ con niveles y libro reducido (remip.codifica: 88 entradas, error RMS 1,5-8,2, todas en VQ) y el D adjust
+  de remip se queda. En recorte (ARGB1555), el alfa de cada nivel guarda la cobertura. En las uniones del curso de PALM
+  no hay ninguna con los mismos bytes (no cambia ninguna BK).
+- VRAM de SEG00: 569 -> 482 KB con mipmaps (dmip; -87 KB); en la Mod (lgmod2, sin mipmaps) 451 -> 412 KB.
+- Capturas (cuadro congelado `-DDIAG_CONGELA=1200`, PRUEBA_NODO=0, mismo binario, dmip / fps3):
+  scratchpad modos/fps3/cap/palm_1200_antes_despues.png (falta la valla de AMD de la fila de la izquierda y alguna
+  planta; los edificios mas lisos), palm_1200_edificios_zoom.png (la fachada grande de la derecha pierde casi todo el
+  detalle de las ventanas), palm_2400_antes_despues.png (los rascacielos del fondo: casi igual, ya usaban niveles
+  pequenos de lejos) y edif_texturas_antes_despues.png (las 30 texturas antes y despues).
+
+### Medida (Flycast; NO emula el coste de relleno de la PowerVR)
+`-DPRUEBA_AUTO -DPRUEBA_SIN_TIEMPO -DDIAG_MS -DDIAG_POPPING -DPRUEBA_NODO=n`, 140 s, el mismo binario con dmip (A) y con
+dmip + fps3 (B), cada etapa cortada al mismo s (tabla2.py de fps2 y tabla3.py: triangulos y vertices por cuadro, VRAM
+libre de la zona al subir la etapa, nodos de la precarga):
+
+| Etapa | s comun | fps A / B | tri/cuadro A / B | vtx/cuadro A / B | cpu ms A / B | VRAM libre zona tras la etapa (K) A / B | nodos de la precarga A / B |
+|---|---|---|---|---|---|---|---|
+| PALM | 3508 | 38,2 / 38,3 (0,03) | 18595 / 18616 (+0,1 %) | 29027 / 29049 | 23,55 / 23,52 | 742 / 829 | 402 / 426 |
+| LAKE | 2116 | 39,4 / 39,4 (0,07) | 19718 / 19939 (+1,1 %) | 31195 / 30638 | 21,51 / 21,42 | 742 / 742 | 158 / 149 |
+| ALPI | 2272 | 39,4 / 39,4 (-0,06) | 17104 / 16950 (-0,9 %) | 27074 / 26901 | 20,51 / 20,41 | 742 / 742 | 361 / 347 |
+| CAST | 1883 | 39,1 / 39,2 (0,05) | 20498 / 20443 (-0,3 %) | 30939 / 30944 | 23,18 / 23,21 | 769 / 769 | 340 / 340 |
+| FORE | 3283 | 39,3 / 39,4 (0,16) | 13831 / 13811 (-0,1 %) | 21895 / 21831 | 19,62 / 19,50 | 720 / 720 | 686 / 649 |
+| DESE | 4290 | 39,0 / 39,0 (-0,06) | 16227 / 16302 (+0,5 %) | 24215 / 24370 | 19,39 / 19,41 | 784 / 784 | 253 / 243 |
+| CLOU | 7280 | 36,9 / 36,9 (0,00) | 16906 / 17009 (+0,6 %) | 27371 / 27431 | 24,14 / 24,15 | 742 / 742 | 303 / 301 |
+| INDU | 1282 | 39,3 / 39,2 (-0,08) | 15112 / 15051 (-0,4 %) | 23975 / 23828 | 20,90 / 20,85 | 742 / 742 | 233 / 233 |
+| SNOW | 5878 | 39,5 / 39,5 (-0,08) | 14860 / 14847 (-0,1 %) | 23263 / 23248 | 19,04 / 18,97 | 742 / 742 | 183 / 181 |
+| GHOS | 4627 | 37,9 / 37,8 (-0,06) | 18013 / 18055 (+0,2 %) | 26281 / 26332 | 23,55 / 23,52 | 742 / 742 | 496 / 492 |
+| TULI | 5174 | 38,8 / 38,8 (-0,01) | 17003 / 16841 (-1,0 %) | 26759 / 26597 | 22,05 / 22,01 | 742 / 742 | 468 / 455 |
+| METR | 2555 | 36,8 / 37,0 (0,21) | 16033 / 15974 (-0,4 %) | 26464 / 26199 | 25,11 / 24,81 | 742 / 742 | 255 / 254 |
+| RUIN | 5172 | 39,1 / 39,3 (0,20) | 15674 / 16124 (+2,9 %) | 23701 / 24449 | 19,07 / 19,31 | 748 / 748 | 442 / 439 |
+| IMPE | 5348 | 39,1 / 39,1 (-0,01) | 13853 / 15053 (+8,7 %) | 21950 / 23678 | 19,19 / 19,74 | 592 / 592 | 237 / 233 |
+| CAPE | 4764 | 39,2 / 39,1 (-0,08) | 11386 / 12718 (+11.7 %) | 18413 / 20364 | 17,68 / 18,33 | 742 / 742 | 350 / 341 |
+| **Media (15)** | | 38,7 / 38,8 | 16321 / 16515 (+1,2 %) | 25502 / 25724 | | | |
+
+- Lo que se ve: en Flycast **los fps no cambian** (media 38,74 / 38,76; las diferencias por etapa, +-0,2, son ruido de
+  la carga de la maquina) y los triangulos por cuadro tampoco bajan (+1,2 % de media). La escena va por el tope del TA
+  (reparto de nodos_visibles): lo que se quita lo gasta el reparto en dibujar mas de lo que antes no cabia (PALM: 402
+  -> 426 nodos en la precarga, estimado 1198 -> 1286 K; IMPE +8,7 % y CAPE +11,7 % de triangulos: mas distancia de
+  dibujo). El popping por el tope, igual (8 px+ por s, sumado en las 15: 205,7 / 207,8; 32 px+ 43,8 / 45,2). En la consola, menos relleno de recorte (hojas y vallas) y texturas de PALM 4-16 veces menores en la
+  cache de texturas de la PowerVR: PROBABLE que gane algo en las zonas que van por el relleno; NO medido.
+- VRAM: solo PALM, +87 KB libres en la zona tras subir la etapa (742 -> 829 K).
+- RAM: el codigo no cambia. nav3.sh (compilacion normal, datos fps3): "RAM: al arrancar ... libre 495K", "VOZ:
+  VOCES.DAT, 35 muestras", sin "Out of memory"; en las 30 tiradas de prueba (15 etapas x 2), 35 muestras y ningun "Out of memory"
+  (las de PRUEBA_AUTO arrancan con 449K: lo mismo en A y en B, son los defines de la prueba).
+- GD: SEGS.PAK 239 342 308 -> 239 397 190 bytes (+54 KB: los trozos de pak_union cambian donde hay mallas a 0);
+  ningun SEG crece (el hueco de la etapa no cambia).
+
+### DESVIACIONES respecto al original
+- Faltan el 15 % de los arboles, arbustos y palmeras que se veian (ademas del 30 % de la Rev 2.9.2.a) y el 15 % de
+  las vallas de patrocinadores (ademas de 1 de cada 3 repetidas iguales de decor_reduce: si al quitar una quedan
+  menos de 3 iguales, la demo ya no quita otra de esas).
+- PALM: 30 texturas de fachadas a 32x32: de cerca las ventanas y los rascacielos se ven borrosos o lisos.
+- No se ha medido en la consola; Flycast no puede mostrar la ganancia (no emula el coste de relleno).
+
+### Datos (solo en scratchpad)
+- modos/fps3/dat: SEGS.PAK y 61 descriptores / sueltas SEGnn.DAT (la clasica, desde dmip); modos/fps3/datos: carpeta
+  de prueba (enlaces a dmip con lo de dat encima). modos/fps3/mod: lo mismo desde lgmod2 (la Mod; la ficha 7, el taxi,
+  no se toca: solo etapas). Registros: modos/fps3/res (aligera_dmip.txt, aligera_mod.txt, A*/B*, nav).
+
+### Queda
+- Medir en la consola real (Y en la pausa: PowerVR y TA) PALM y una etapa de bosque (CLOU, FORE) con y sin fps3.
+- Si se quiere que Flycast muestre algo: el 15 % solo baja los triangulos con un tope del TA mas alto o fijo.
+
+### Auditoria de las fachadas de PALM ("no tienen detalle", 2026-11-28)
+- De las 30 texturas de EDIF_PALM, 17 eran de 64x64 y 13 de 128x128 (o 128x64): 63, 66, 67, 69, 72, 73, 82, 83, 85, 86,
+  87, 89 y 90, casi todas rejillas de ventanas de rascacielos con un periodo de 3-4 texeles. Reducidas a 32x32 por
+  promedio, cada ventana quedaba por debajo de un texel y la fachada se fundia en una mancha gris (comparativa con
+  filtro Lanczos y enfoque: no lo arregla y rompe los recortes con alfa).
+- Ahora cada fachada pasa a la mitad de lado (`aligera.lado_de`): las de 64 a 32x32 y las de 128 a 64x64. En Flycast,
+  PALM a 1200 m se ve como el original. Las 54 etapas restantes y la decoracion -15 % no cambian (mismos bytes
+  recompuestos). La VRAM de PALM baja de 569 a 499 KB.
+- Probado y descartado: el D adjust 0,5 en las fachadas (un nivel de mip mas nitido para las paredes vistas de canto).
+  En Flycast no cambia nada visible y en la consola real puede centellear. La pared grande de la derecha ya se veia
+  algo borrosa en el original: la PowerVR no tiene filtro anisotropico.

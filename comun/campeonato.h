@@ -29,6 +29,8 @@ typedef struct {
     int   met_caen, met_llegan;  /* meteoritos del tipo 19 que empiezan a caer / llegan al suelo en este paso      */
     float lat;              /* (tipo 5) el lateral del coche: fraccion del ancho de la carretera, 0 el borde derecho   */
     float xyz[3], fx, fz;   /* (tipos 20 / 21) la posicion del coche (car+0x14) y su direccion en xz                     */
+    int   foto;             /* (tipo 24) se pulsa el disparo de la camara en este paso (0x1b4548)                     */
+    int   bocina;           /* (tipo 22) el boton de la bocina pisado (0x1b4518)                                      */
 } camp_coche_t;
 
 /* al empezar la carrera: fila (46C520: 1 OutRun2 SP, 0 OutRun 2, 2 mixto), forzada (cfg1: se sale de una etapa del
@@ -58,6 +60,10 @@ extern void (*camp_chica)(int que, uint32_t v);
 extern void (*camp_golpe)(void);           /* el golpe del meteorito (0x182d38 con el estado 7 y la velocidad x 0,9) */
 /* el centro de la seccion sec de la etapa y su direccion en xz (43E570; el letrero de inicio / fin, 0x232e60) */
 extern void (*camp_punto)(int sec, float *p, float *fx, float *fz);
+/* (tipo 24) un punto del marco de la etapa del PS2 (los objetivos de las fotos) en el mundo de la carrera */
+extern void (*camp_marco)(const float *l, float *w);
+int  camp_foto(float *w);
+int  camp_bocina22(void);                   /* (tipo 22) 1 con una ventana de la bocina en curso */                   /* (tipo 24) el objetivo activo en el mundo; 0 ninguno */
 int  camp_clases(const uint8_t **v);
 /* la zona del tipo 5 de la peticion en curso (anuncio..final): lateral lo..hi y secciones s0..s1; su color (2..4) o 0 */
 int  camp_zona(float *lo, float *hi, int *s0, int *s1);       /* 'CLS1' de CAMP.DAT: n x {u8 clase, u8 registro de CAMPOBJ.DAT, u16, f32 escala} */
@@ -78,4 +84,22 @@ int  camp_pares_pide(void);
 /* (tipo 14) el siguiente coche con numero que poner (seccion de la etapa, carril y la marca de su plaza); 0 ninguno */
 int  camp_coche14(int *sec, int *carril, int *marca);
 int  camp_cuenta14(int *objetivo, int *suma);  /* el objetivo y la suma de la peticion del 14 en curso; 0 sin ella */                 /* (tipo 20) 1: a cada coche nuevo de la peticion, otro al lado (main.c) */
+/* (c2c8) el generador del trafico de la peticion (0x1f20e8 / 0x1f1a88 de SLES-53998): con un registro puesto, 0x1f1a88
+   devuelve ese registro de aparicion de 0x46 bytes en vez del de la etapa (tabla 0x5d5e78) y el trafico que nace sale con
+   sus 7 modelos (+0xe..+0x1a; la peticion copia el de la etapa y pone en ellos el +0x64 de sus parametros, o uno fijo);
+   0x1f20e8(0) lo quita. Lo piden los tipos 11, 13, 14, 20, 21 y el subtipo 6 de los minijuegos (0x2a3300); el 22 no
+   (ninguna llamada en 0x29b3d0..0x29c3ff). Aqui, main.c lo atiende (camp_trafpet = trafpet_pon) con:
+     modelo[7]: los modelos del juego (ids del PS2, el campo +0x11 de TRAFn.DAT; -1 o uno que la DC no tiene: el del
+                trafico de siempre) que reparte en orden a los coches que nacen (y a los de la lista de la peticion, 13/14);
+     tope:      cuantos coches de la peticion (marca HA_CAMP) vivos a la vez como mucho (0: sin tope); sin sitio no nace
+                ninguno marcado mientras haya tope (DESVIACION por el polycount);
+     lod:       el LOD mas fino con que se dibujan los coches marcados (1 = ligero: nunca el LOD 0 de cerca; DESVIACION);
+     marca:     los bits que se ponen en la marca de la plaza de cada coche que nace (0: los coches que nacen no son de la
+                peticion; HA_CAMP y los del tipo los pone camp_autos, como hasta ahora).
+   NULL = 0x1f20e8(0). Para el subtipo 6 de minijuego.c: en su fase 1 camp_trafpet(&r) con sus modelos (+0x64 o 0x104) y
+   HA_CAMP en marca; en la 5 camp_trafpet(NULL); los coches con HA_CAMP en la marca de camp_autos son los suyos. */
+typedef struct { int16_t modelo[7]; int tope, lod; uint32_t marca; } camp_trafpet_t;
+extern void (*camp_trafpet)(const camp_trafpet_t *r);
+/* (tipo 13) el siguiente coche de la comida (como camp_coche14) */
+int  camp_coche13(int *sec, int *carril, int *marca);
 #endif

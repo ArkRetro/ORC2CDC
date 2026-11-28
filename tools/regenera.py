@@ -238,7 +238,7 @@ def paso(C, n, log):
     elif n == 'mision': ej(T('conv_mision.py'), ISO, t); mueve(D, tj('MISION.DAT'))   # Races.bin y tablas de 47CF40
     elif n == 'c2chud': ej(T('conv_hud.py'), ISO, t, '--c2c'); mueve(D, tj('C2CHUD.DAT'))   # HUD de las misiones de C2C
     elif n == 'c2c': ej(T('conv_c2c.py'), ISO, t); mueve(D, tj('C2C.DAT'))   # pantallas de C2C (banco 0x44, menu.c)
-    elif n == 'camp': ej(T('conv_camp.py'), ISO, t); mueve(D, tj('CAMP.DAT'), tj('CAMPHUD.DAT'), tj('CAMPOBJ.DAT'), tj('VOCESM.DAT'))   # campeonatos de C2C (campeonato.c)
+    elif n == 'camp': ej(T('conv_camp.py'), ISO, t); mueve(D, tj('CAMP.DAT'), tj('CAMPHUD.DAT'), tj('CAMPOBJ.DAT'), tj('VOCESM.DAT'), tj('MJHUD.DAT'))   # campeonatos de C2C (campeonato.c)
     elif n == 'salon': ej(T('conv_salon.py'), ISO, t); mueve(D, tj('SALON.DAT'))   # el SALON (showroom, banco 0x44, menu.c)
     elif n == 'tablero': ej(T('conv_tablero.py'), ISO, t); mueve(D, tj('TABLERO.DAT'))   # tableros de cursos (banco 0x44, menu.c)
     elif n == 'camiones':                                        # los camiones con remolque de OUTRUN2SP (39/40, 41, 43)
@@ -360,7 +360,7 @@ def regenera(iso, D, W, jobs=4, informe=print, extras=None):
                   (['TRAFC.DAT', 'TAPD.DAT'] + TRAF, 'trafico'), (['TRAFK0.DAT', 'TRAFK1.DAT', 'TRAFK2.DAT'], 'camiones'),
                   (['MVTS.VQV'], 'video_ts'), (['MVATTR.VQV'], 'video_attr'),
                   (['RC%02d.DAT' % k for k in range(30)], 'rivales'), (['MISION.DAT'], 'mision'), (['C2CHUD.DAT'], 'c2chud'),
-                  (['C2C.DAT'], 'c2c'), (['CAMP.DAT', 'VOCESM.DAT'], 'camp'), (['SALON.DAT'], 'salon'), (['TABLERO.DAT'], 'tablero')):
+                  (['C2C.DAT'], 'c2c'), (['CAMP.DAT', 'VOCESM.DAT', 'MJHUD.DAT'], 'camp'), (['SALON.DAT'], 'salon'), (['TABLERO.DAT'], 'tablero')):
         if not hay(D, *fs): falta.append(n)
     if 'fin' not in falta and hay(D, 'GOALT.DAT') and not tiene(D, 'GOALT.DAT', b'T_MEJOR'): falta.append('fin')
     if 'tablero' not in falta and hay(D, 'TABLERO.DAT') and not tiene(D, 'TABLERO.DAT', b'LST1'): falta.append('tablero')
@@ -488,6 +488,11 @@ def regenera(iso, D, W, jobs=4, informe=print, extras=None):
         informe('== mipmaps en lo lejano (tools/remip.py)')
         post('remip', py(os.path.join(TOOLS, 'remip.py'), '--datos', D, D, os.path.join(W, 'remip')))
         with open(os.path.join(W, 'remip.hecho'), 'w') as f: f.write('hecho\n')
+    # fps3 (tools/aligera.py, docs/PARIDAD.md): decoracion -15 % en las etapas y edificios de PALM a la mitad (64->32, 128->64), una vez
+    if not os.path.isfile(os.path.join(W, 'aligera.hecho')):
+        informe('== fps3: decoracion -15 % y edificios de PALM a la mitad (tools/aligera.py)')
+        post('aligera', py(os.path.join(TOOLS, 'aligera.py'), '--datos', D, D, os.path.join(W, 'aligera')))
+        with open(os.path.join(W, 'aligera.hecho'), 'w') as f: f.write('hecho\n')
 
     # paso opcional: la tarjeta SPLASH WAVE REMASTER del selector de musica, solo con sus ficheros en extras/
     # (tools/menu_musica.py: parche del MENU.DAT de D, que no se puede rehacer desde cero, y MUS70 / MUS71.ADP)
@@ -514,7 +519,7 @@ def regenera(iso, D, W, jobs=4, informe=print, extras=None):
     informe('== comprobacion de %s' % D)
     ok = True
     nec = ['BAND.DAT', 'BAND1.DAT', 'BKD.DAT', 'BO.DAT'] + chrs + \
-          'COCHES.DAT COLBK.DAT COLLR.DAT CURSO.DAT EFECTOS.DAT FAROS.DAT FIN.DAT GOVER.DAT HAHUD.DAT HUD.DAT INFARTO.DAT MENU.DAT META.DAT MODOV.DAT MVATTR.VQV MVTS.VQV PARAM.DAT SFX.DAT SEGS.PAK SOL.DAT TAPD.DAT TRAFC.DAT UNIONES.PAK VMU.DAT VOCES.DAT VOCESH.DAT VOCESC.DAT MISION.DAT C2CHUD.DAT C2C.DAT CAMP.DAT CAMPHUD.DAT VOCESM.DAT SALON.DAT TABLERO.DAT CURSOTA.DAT UNIONESTA.PAK UNIONESR.PAK'.split() + ['RC%02d.DAT' % k for k in range(30)] + \
+          'COCHES.DAT COLBK.DAT COLLR.DAT CURSO.DAT EFECTOS.DAT FAROS.DAT FIN.DAT GOVER.DAT HAHUD.DAT HUD.DAT INFARTO.DAT MENU.DAT META.DAT MODOV.DAT MVATTR.VQV MVTS.VQV PARAM.DAT SFX.DAT SEGS.PAK SOL.DAT TAPD.DAT TRAFC.DAT UNIONES.PAK VMU.DAT VOCES.DAT VOCESH.DAT VOCESC.DAT MISION.DAT C2CHUD.DAT C2C.DAT CAMP.DAT CAMPHUD.DAT VOCESM.DAT MJHUD.DAT SALON.DAT TABLERO.DAT CURSOTA.DAT UNIONESTA.PAK UNIONESR.PAK'.split() + ['RC%02d.DAT' % k for k in range(30)] + \
           ['COCHE%02d.DAT' % k for k in range(15)] + ['COCHE%02dL.DAT' % k for k in range(15)] + ['MUS%d.ADP' % k for k in MUSICA] + SP + FINAL + \
           ['TRAFK%d.DAT' % k for k in range(3)] + FIN + TRAF + BO + COLBK + ['SALIDA.DAT', 'CHRPAR.DAT', 'VISO.DAT', 'INFARTOP.DAT', 'INFARTOX.DAT', 'CHRH.DAT', 'HAOSO.DAT', 'HAOBJ.DAT']
     for f in nec:

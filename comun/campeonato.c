@@ -30,6 +30,7 @@
 #include "gd.h"
 #include "campeonato.h"
 #include "haobj.h"
+#include "minijuego.h"
 
 int (*camp_graba)(int tipo, int lista, int nota);
 void (*camp_voz)(int id);
@@ -39,7 +40,9 @@ void (*camp_obj)(int cl, int tipo, float sec, float lat, float esc);
 void (*camp_chica)(int que, uint32_t v);
 void (*camp_golpe)(void);
 void (*camp_punto)(int sec, float *p, float *fx, float *fz);
+void (*camp_marco)(const float *l, float *w);
 void (*camp_bancos)(int n, const uint8_t *tipo, const uint8_t *sub, int fila, int *rnd);
+void (*camp_trafpet)(const camp_trafpet_t *r);
 
 #define DT 0.016611295f                                 /* +0x180 (0x3c881469) */
 #define LLENO 80.0f                                     /* 0x3741a8 */
@@ -89,6 +92,15 @@ typedef struct {
     const uint8_t *c14p; int n14c, nx14, objetivo, suma, k14_cambio, k14_toq;   /* la peticion del 14 en curso: sus coches, el siguiente */
     int16_t v14[100];                                   /* el valor de cada coche (+0x10 de su registro de +0x5c) */
     int16_t val11[24];                                  /* el valor del coche de cada plaza (su dibujo) */
+    const uint8_t *c24; uint32_t n24;                   /* 'C241': los objetivos de las fotos de cada peticion */
+    const uint8_t *c24p; int n24c, rel24, act24, nota24; uint16_t hecho24;   /* la del 24 en curso; el activo (+0x10, -1) */
+    const uint8_t *c22; uint32_t n22;                   /* 'C221': las ventanas de la bocina de cada peticion */
+    const uint8_t *c22p; int n22c, est22, obj22, cur22; uint32_t hecho22; float tot22, ant22;   /* +0xc, +0x18, +0x2c, +0x24; +0x14, +0x1c */
+    const uint8_t *c13t, *c13; uint32_t n13;            /* (c2c8) 'C131': sprite[6][3] y voz[6][3] de las clases; las peticiones */
+    const uint8_t *c13p; int n13c, nx13, nk13, nf13, p98, p99, fila13;   /* la del 13 en curso: sus coches, el siguiente, +0x78, +0x9a */
+    int k13[3], s13[3], obj13, hud13, re13, n79, n38, tocado13, t13ant;   /* +0x8c, +0x7a, +0x1c, +0x1d, +0x10.., +0x79, +0x38 */
+    int t13ico;                                         /* (c2c9) los pasos del icono del objetivo en el panel (0x231fe0) */
+    int8_t cl13[100];                                   /* la clase de cada coche (+0x10 de su registro de +0x5c) */
 } camp_t;
 static camp_t *C;
 
@@ -103,6 +115,7 @@ void camp_libera(void)
     if (!C) return;
     if (camp_obj) camp_obj(-2, 0, 0, 0, 0);
     if (camp_bancos) camp_bancos(-1, NULL, NULL, 0, NULL);
+    mj_libera();
     free(C->d); free(C); C = NULL;
 }
 int camp_inicia(int grupo, int fila, int forzada, int lista, int dificultad)
@@ -131,11 +144,23 @@ int camp_inicia(int grupo, int fila, int forzada, int lista, int dificultad)
                         C->let = (const uint16_t *)((const uint8_t *)d + o + 4); o += 8;
                         if (o + 8 + 264 <= tam && !memcmp((const uint8_t *)d + o, "C141", 4)) {
                             memcpy(&C->n14, (const uint8_t *)d + o + 4, 4); C->t14 = (const int32_t *)((const uint8_t *)d + o + 8); C->c14 = (const uint8_t *)d + o + 8 + 264;
+                            {   const uint8_t *e = C->c14; uint32_t k;   /* detras, 'C241' (los objetivos del 24) */
+                                for (k = 0; k < C->n14 && e + 4 <= (const uint8_t *)d + tam; k++) e += 4 + 4 * e[2];
+                                if (e + 8 <= (const uint8_t *)d + tam && !memcmp(e, "C241", 4)) { memcpy(&C->n24, e + 4, 4); C->c24 = e + 8;
+                                    for (e += 8, k = 0; k < C->n24 && e + 4 <= (const uint8_t *)d + tam; k++) e += 4 + 16 * e[2];
+                                    if (e + 8 <= (const uint8_t *)d + tam && !memcmp(e, "C221", 4)) { memcpy(&C->n22, e + 4, 4); C->c22 = e + 8; } }
+                            }
                         }
                     }
                 }
             } }
     }
+    {   uint32_t o, l, n;                                 /* (c2c8) 'C131' (detras de 'M161'; se busca su firma, como minijuego.c) */
+        for (o = 0; o + 8 + 60 <= tam; o++)
+            if (!memcmp((const uint8_t *)d + o, "C131", 4) && (memcpy(&l, (const uint8_t *)d + o + 4, 4), l >= 60 && o + 8 + l <= tam)) {
+                C->c13t = (const uint8_t *)d + o + 8; memcpy(&n, C->c13t + 56, 4); C->n13 = n; C->c13 = C->c13t + 60; break; }
+    }
+    mj_inicia((const uint8_t *)d, tam);               /* (el tipo 16: comun/minijuego.c) */
     C->fila = fila >= 0 && fila < 4 ? fila : 0; C->forzada = forzada; C->lista_cfg = lista & 3;
     C->dif = dificultad < 0 ? 0 : dificultad > 4 ? 4 : dificultad;
     C->lista = 0; C->nivel = -1; C->cur = -1; C->reloj = 0x10000; C->animo_ult = -1; C->let_k = -1; C->k21_pl = -1;
@@ -371,6 +396,34 @@ static void cara_nota(const pet_t *p)
     if (camp_chica) camp_chica(0, n < 2 ? 0 : n < 4 ? 5 : n == 4 ? 3 : 4);
 }
 static void chica_para(void) { if (camp_chica) camp_chica(1, 0); }
+static void ventana22(int i, float *a, float *b)       /* (tipo 22) la ventana i en secciones de la etapa (+0 + 8 / +4 + 0xc) */
+{
+    const uint8_t *o = C->c22p + 16 * i; float f8, fc; int ini = C->pet[C->cur].d->ini;
+    memcpy(&f8, o + 4, 4); memcpy(&fc, o + 8, 4);
+    *a = (float)(ini + (int16_t)(o[0] | o[1] << 8)) + f8; *b = (float)(ini + (int16_t)(o[2] | o[3] << 8)) + fc;
+}
+/* (tipo 13) 0x29a0c8: la clase de los coches que faltan por poner, para el objetivo k: tras uno del objetivo, con rand <
+   0,15 otro del objetivo y si no una al azar de las +0x78; tras otro, con rand < 0,85 el objetivo */
+static void reparte13(int k)
+{
+    int i, bueno = C->t13ant;
+    for (i = C->nx13; i < C->n13c; i++) {
+        float r = (float)(rand() & 0x7fff) * 3.0517578e-5f;
+        C->cl13[i] = (int8_t)(r < (bueno ? 0.15f : 0.85f) ? C->k13[k] : C->k13[rand() % C->nk13]);
+        bueno = C->cl13[i] == C->k13[k];
+    }
+}
+/* (c2c9) 0x1f1a88 / 0x1f20e8 en los tipos 11 (0x294b6c), 20 (0x2961b4) y 21 (0x2928e0): el trafico de la peticion con los
+   modelos +0x64 o uno fijo (def); los coches que nacen los sigue marcando camp_autos (sin tope ni LOD ligero); 0 lo quita */
+static void trafpet_fijo(const cpet_t *d, int def)
+{
+    camp_trafpet_t r; int i; int16_t m64 = (int16_t)(d->p[1] & 0xffff);
+    if (!camp_trafpet) return;
+    if (!def) { camp_trafpet(NULL); return; }
+    for (i = 0; i < 7; i++) r.modelo[i] = m64 != -1 ? m64 : (int16_t)def;
+    r.tope = 0; r.lod = 0; r.marca = 0; camp_trafpet(&r);
+}
+static int voz13(int cl) { int q = 3 * C->fila13 + cl; return C->c13t[20 + 2 * q] | C->c13t[21 + 2 * q] << 8; }   /* 0x423220 */
 static void tipo_paso(pet_t *p, const camp_coche_t *c, float dpos)
 {
     const cpet_t *d = p->d; float largo = (float)(d->fin - d->ini);
@@ -527,6 +580,7 @@ static void tipo_paso(pet_t *p, const camp_coche_t *c, float dpos)
     case 11:                                            /* 0x294a90: chocar con los coches de la peticion (subtipos 0 y 1) */
         if (p->fase == 1) {                             /* 0x1f20e8(+0x10 de los parametros): los coches nuevos son de la peticion */
             p->h70 = 0; p->h7c = d->p[6] > 0 ? LLENO / (float)d->p[6] : 0.0f; C->k11_tmr = 0x1a;   /* +0x74 = 80 / p78; +0x18 = 0x1a */
+            if (d->sub < 2) trafpet_fijo(d, d->sub == 1 ? 0xa5 : 0x96);   /* (c2c9) 0x294c50 */
         } else if (p->fase == 4 && C->k11_golpes > 0) { /* +0xb6c y +0x2f4 == 0: el medidor + p74 (y +0x10 + 1) */
             p->med += p->h7c * (float)C->k11_golpes; p->h70 += C->k11_golpes;
             dbglog(DBG_INFO, "CAMP: coche de la peticion golpeado (%d de %d), medidor %d\n", p->h70, d->p[6], (int)p->med);
@@ -534,6 +588,7 @@ static void tipo_paso(pet_t *p, const camp_coche_t *c, float dpos)
             int n = p->h70, a = d->p[6], b = d->p[7];
             p->extra += n <= a ? 0 : n < b ? (int)((float)(n - a) / (float)(b - a) * 70.0f) : (n - b) * 5 + 70;
         }
+        if (p->fase == 5 && d->sub < 2) trafpet_fijo(d, 0);   /* (c2c9) 0x1f20e8(0) */
         C->k11_golpes = 0;
         break;
     case 14:                                            /* 0x29ccb8: la suma (tocar los coches con numero hasta el objetivo) */
@@ -556,25 +611,31 @@ static void tipo_paso(pet_t *p, const camp_coche_t *c, float dpos)
             }
             if (C->objetivo <= 0) C->objetivo = 1;
             dbglog(DBG_INFO, "CAMP: suma: %d coches, nivel %d, objetivo %d\n", C->n14c, L, C->objetivo);
+            if (camp_trafpet) {                         /* (c2c8) 0x29cd60: el generador (aqui sin cambiar los modelos) */
+                camp_trafpet_t r; for (i = 0; i < 7; i++) r.modelo[i] = -1;
+                r.tope = 4; r.lod = 1; r.marca = 0; camp_trafpet(&r);
+            }
         } else if (p->fase >= 2 && p->fase <= 4 && C->k14_toq) {   /* un coche tocado: el medidor (0x29d074) */
             int a = abs(C->objetivo - C->suma), b = abs(C->objetivo - (C->suma - C->k14_cambio));
             p->med = (float)(C->objetivo - (a < C->objetivo ? a : C->objetivo)) / (float)C->objetivo * C->d->umbral[6] * 1.15f;
             if (a < b) animo(14, -1);                   /* (+0x3d78 / +0x3d74: mas cerca / mas lejos; SIMPLIFICADO) */
             dbglog(DBG_INFO, "CAMP: suma %d (%+d) de %d, medidor %d\n", C->suma, C->k14_cambio, C->objetivo, (int)p->med);
         } else if (p->fase == 5) {
+            if (camp_trafpet && C->c14p) camp_trafpet(NULL);
             C->c14p = NULL;
             if (p->nota == 6) p->extra += (!p->c4c && !p->c54 ? 30 : 0) + (int)(40.0f * frena(p->v_ini, p->v_fin));
         }
         C->k14_cambio = C->k14_toq = 0;
         break;
     case 20:                                            /* 0x296120: cruzar la linea entre los dos coches de un par (los de la */
-        if (p->fase == 1) { p->h70 = 0; C->k20 = 0; haobj_pares_vacia(); }   /* peticion, 0x296560; el +0x70 de los parametros) */
+        if (p->fase == 1) { p->h70 = 0; C->k20 = 0; haobj_pares_vacia(); trafpet_fijo(d, 0x104); }   /* peticion, 0x296560; el +0x70 de
+                                                                                                     los parametros; c2c9: 0x296290) */
         else if (p->fase == 4 && C->k20 > 0) {          /* 0x296f58: par cruzado, medidor + 80 / p74 (0x374190 + 0x18) */
             p->med += (float)C->k20 * (d->p[5] > 0 ? C->d->umbral[6] / (float)d->p[5] : 0.0f); p->h70 += C->k20;
             if (camp_chica) camp_chica(2, c->modelo == 9 ? 0x6003d : (float)rand() * 4.656613e-10f >= 0.5f ? 0x6003e : 0x6003f);
             dbglog(DBG_INFO, "CAMP: linea cruzada (%d de %d), medidor %d\n", p->h70, (int)d->p[5], (int)p->med);
         } else if (p->fase == 5) {
-            haobj_pares_vacia();                        /* 0x296cc0 x 20 y 0x1f20e8(0) */
+            haobj_pares_vacia(); trafpet_fijo(d, 0);    /* 0x296cc0 x 20 y 0x1f20e8(0) */
             if (p->nota == 6) {                         /* (+0x50 == 0: 40) + min(1, (n - p74) / (p78 - p74)) x 30 + (n - p78) x 5 */
                 int n = p->h70, a = d->p[5], b = d->p[6], x = p->c50 ? 0 : 0x28;
                 if (a < n) { float f = b > a ? (float)(n - a) / (float)(b - a) : 1.0f; x += (int)(fminf(1.0f, f) * 30.0f); if (b < n) x += (n - b) * 5; }
@@ -584,7 +645,7 @@ static void tipo_paso(pet_t *p, const camp_coche_t *c, float dpos)
         C->k20 = 0;
         break;
     case 21:                                            /* 0x292840: los OVNIs (los coches de la peticion): no dejar que te lleven */
-        if (p->fase == 1) { p->h70 = p->tmr = 0; C->k21_pl = -1; C->k21_t = 0; }
+        if (p->fase == 1) { p->h70 = p->tmr = 0; C->k21_pl = -1; C->k21_t = 0; trafpet_fijo(d, 0xb4); }   /* (c2c9: 0x2929bc) */
         else if (p->fase == 2 || p->fase == 4) {        /* (0x11c090(0x1d8) en la 3 y 0x81d8 en la 5: SIN, el sonido continuo) */
             if (p->fase == 4 && c->kmh > 100.0f && c->lat >= 0.0f && c->lat <= 1.0f && C->k21_pl < 0) {   /* 0x2325a0(0, 1) y +0x18 == 0 */
                 p->med += dpos * (LLENO / (largo * 0.85f));
@@ -598,12 +659,132 @@ static void tipo_paso(pet_t *p, const camp_coche_t *c, float dpos)
                 if (k == 1) dbglog(DBG_INFO, "CAMP: el OVNI se lleva al jugador en la seccion %d\n", c->seccion);
             }
         } else if (p->fase == 5) {
-            C->k21_pl = -1;
+            C->k21_pl = -1; trafpet_fijo(d, 0);
             if (p->nota == 6) p->extra += (!p->c50 && !p->c4c && !p->c54 ? 30 : 0) + (int)(40.0f * frena(p->v_ini, p->v_fin));
+        }
+        break;
+    case 13:                                            /* (c2c8) 0x2991b8: tocar los coches de la comida que se pide */
+        if (p->fase == 1) {                             /* 0x299dd8 / 0x299e80 / 0x29a0c8 y el generador (0x1f1a88 / 0x1f20e8) */
+            uint32_t k; const uint8_t *e = C->c13; int pi = (int)(d - C->pets), i, j;
+            C->c13p = NULL; C->n13c = C->nx13 = C->n79 = C->n38 = C->obj13 = C->hud13 = C->re13 = C->tocado13 = C->t13ico = 0; C->t13ant = 1;
+            for (k = 0; e && k < C->n13; k++, e += 12 + 4 * e[2]) if ((e[0] | e[1] << 8) == pi) { C->c13p = e + 12; C->n13c = e[2] > 100 ? 100 : e[2]; break; }
+            if (!C->c13p) break;
+            C->nk13 = e[3] < 1 ? 1 : e[3]; C->p98 = e[4]; C->p99 = e[5]; C->nf13 = e[6] < 1 ? 1 : e[6];
+            C->fila13 = p->rnd >= 0 && p->rnd < 6 ? p->rnd : 0;
+            for (i = 0; i < C->nk13; i++) {             /* las clases (+0x8c): distintas, rand % 3 (+0x3c del objeto) */
+                do { C->k13[i] = rand() % 3; for (j = 0; j < i && C->k13[j] != C->k13[i]; j++) ; } while (j < i);
+            }
+            for (i = 0; i < C->nf13; i++) C->s13[i] = d->ini + i * (d->fin - d->ini) / C->nf13;   /* +0x7a: el cambio de objetivo */
+            reparte13(0);
+            p->h7c = C->p98 > 0 ? LLENO / (float)C->p98 : 0.0f;   /* (en la fase 3: +0x74 = 80 / p98) */
+            if (camp_trafpet) {                         /* 0x1f20e8(+0x10): los modelos +0x64 (o 0x6e) */
+                camp_trafpet_t r; int16_t m64 = (int16_t)(e[8] | e[9] << 8);
+                for (i = 0; i < 7; i++) r.modelo[i] = m64 == -1 ? 0x6e : m64;
+                r.tope = 4; r.lod = 1; r.marca = 0; camp_trafpet(&r);
+            }
+            if (C->c13t) voz(voz13(C->k13[0]), 0x3c, 0xb);
+            dbglog(DBG_INFO, "CAMP: comida: %d coches, %d clases (%d %d %d), %d fases, umbrales %d / %d, fila %d\n", C->n13c, C->nk13,
+                   C->k13[0], C->nk13 > 1 ? C->k13[1] : -1, C->nk13 > 2 ? C->k13[2] : -1, C->nf13, C->p98, C->p99, C->fila13);
+        } else if (p->fase >= 2 && p->fase <= 4 && C->c13p) {   /* 0x2994f8 (la 4) y los cambios de objetivo */
+            if (C->t13ico < 1000) C->t13ico++;          /* (c2c9) el icono del panel */
+            int k;
+            for (k = 1; k < C->nf13; k++) {
+                if (!(C->re13 >> k & 1) && C->s13[k] - 0x87 < c->seccion) { C->re13 |= 1 << k; reparte13(k); }
+                if (C->s13[k] - 0xf < c->seccion && C->hud13 < k) { C->hud13 = k; C->t13ico = 0; }   /* (0x2994ac: el icono nuevo) */
+                if (C->s13[k] < c->seccion && C->obj13 < k) {   /* 0x11c090(0x423220[fila][clase]) */
+                    C->obj13 = k; if (C->c13t && camp_se) camp_se(voz13(C->k13[k]));
+                    dbglog(DBG_INFO, "CAMP: comida: objetivo %d (clase %d) en la seccion %d\n", k, C->k13[k], c->seccion);
+                }
+            }
+            if (p->fase == 4 && C->tocado13) {          /* la buena: medidor + p74 (+0x79 + 1); otra: la penalizacion + p74 / 2 */
+                if (C->tocado13 > 0) { p->med += p->h7c * (float)C->tocado13; C->n79 += C->tocado13; }
+                else { p->pen += p->h7c * 0.5f * (float)-C->tocado13; if (p->pen > 100.0f) p->pen = 100.0f; }
+                dbglog(DBG_INFO, "CAMP: comida %s (%d buenas), medidor %d, penalizacion %d\n", C->tocado13 > 0 ? "buena" : "mala", C->n79, (int)p->med, (int)p->pen);
+            }
+        } else if (p->fase == 5) {                      /* 0x1f20e8(0); nota 6: +0x79 > p98 ? (< p99 ? x 30 : (n - p99) x 5 + 30) */
+            int n = C->n79, a = C->p98, b = C->p99;
+            if (camp_trafpet) camp_trafpet(NULL);
+            if (p->nota == 6 && C->c13p) p->extra += (n <= a ? 0 : n < b && b > a ? (int)((float)(n - a) / (float)(b - a) * 30.0f) : (n - b) * 5 + 30)
+                                                     + (int)(40.0f * frena(p->v_ini, p->v_fin));
+            C->c13p = NULL;
+        }
+        C->tocado13 = 0;
+        break;
+    case 16: p->med += mj_paso((int)(d - C->pets), d->sub, p->fase, p->rnd, c, voz); break;   /* los minijuegos (minijuego.c) */
+    case 22:                                            /* 0x29b3d0: la bocina (pulsarla en las ventanas de la lista +0x7c) */
+        if (p->fase == 1) {                             /* 0x29bfc0: las ventanas y su largo total (+0x14; PROBABLE la suma) */
+            uint32_t k; const uint8_t *e = C->c22; int pi = (int)(d - C->pets), i;
+            C->c22p = NULL; C->n22c = 0; C->est22 = 0; C->obj22 = -2; C->hecho22 = 0; C->tot22 = 0;
+            for (k = 0; e && k < C->n22; k++, e += 4 + 16 * e[2]) if ((e[0] | e[1] << 8) == pi) { C->c22p = e + 4; C->n22c = e[2] > 32 ? 32 : e[2]; break; }
+            for (i = 0; i < C->n22c; i++) { float a, b; ventana22(i, &a, &b); C->tot22 += b - a; }
+            if (C->tot22 <= 0) C->tot22 = 1;
+            dbglog(DBG_INFO, "CAMP: bocina: %d ventanas, %.0f secciones\n", C->n22c, (double)C->tot22);
+        } else if (p->fase == 4 && C->c22p) {           /* 0x29c058: la ventana (+0x24) o la siguiente (+0x28) */
+            int i, nx = -1; float a, b, f = c->pos;
+            C->cur22 = -1;
+            for (i = 0; i < C->n22c; i++) {
+                if (C->hecho22 >> i & 1) continue;
+                ventana22(i, &a, &b);
+                if (a <= f && f <= b) { C->cur22 = i; break; }
+                if (b < f) C->hecho22 |= 1u << i;
+            }
+            if (C->cur22 < 0) for (i = 0; i < C->n22c && nx < 0; i++) { ventana22(i, &a, &b); if (!(C->hecho22 >> i & 1) && f <= a) nx = i; }
+            if (C->est22 == 0) {                        /* (0x1b4518: el boton de la bocina) */
+                if (c->bocina) { C->est22 = 1; if (camp_se) camp_se(0x1bc); C->obj22 = nx >= 0 ? nx : C->cur22 >= 0 ? C->cur22 : -2; }
+            } else if (!c->bocina) C->est22 = 0;        /* (el 0x81bc que la para: SIN, el efecto es corto) */
+            else if (C->obj22 == C->cur22) {            /* sonando en su ventana: medidor + 80 x avance / largo x 1,25 en la carretera */
+                if (c->lat >= 0.0f && c->lat <= 1.0f) p->med += LLENO * (f - C->ant22) / C->tot22 * 1.25f;   /* (0x2325a0(0, 1)) */
+            } else { p->pen += LLENO * (f - C->ant22) / C->tot22 * 0.25f; if (p->pen > 100.0f) p->pen = 100.0f; }   /* fuera: x 0,25 */
+            C->ant22 = f;
+        } else if (p->fase == 5) {
+            C->c22p = NULL;
+            if (p->nota == 6) p->extra += bono(p, 0.9f);
+        }
+        if (p->fase != 4) C->ant22 = c->pos;
+        break;
+    case 24:                                            /* 0x2a48a0: las fotos (los objetivos de la lista +0x70 del guion) */
+        if (p->fase == 1) {                             /* 0x2a5fd8: los objetivos (+0x14 cuantos) */
+            uint32_t k; const uint8_t *e = C->c24; int pi = (int)(d - C->pets);
+            C->c24p = NULL; C->n24c = 0; C->act24 = -1; C->hecho24 = 0; C->nota24 = -1;
+            for (k = 0; e && k < C->n24; k++, e += 4 + 16 * e[2]) if ((e[0] | e[1] << 8) == pi) { C->c24p = e + 4; C->n24c = e[2] > 16 ? 16 : e[2]; C->rel24 = e[3] ? d->ini : 0; break; }
+            dbglog(DBG_INFO, "CAMP: fotos: %d objetivos\n", C->n24c);
+        } else if (p->fase >= 2 && p->fase <= 4 && C->c24p) {
+            int i;                                      /* 0x2a60a0: el objetivo de la seccion; pasado su final, perdido */
+            for (i = 0; i < C->n24c; i++) {
+                const uint8_t *o = C->c24p + 16 * i; int s0 = (int16_t)(o[12] | o[13] << 8) + C->rel24, s1 = (int16_t)(o[14] | o[15] << 8) + C->rel24;
+                if (C->hecho24 >> i & 1) continue;
+                if (C->act24 == i) { if (s1 < c->seccion) { C->hecho24 |= (uint16_t)(1u << i); C->act24 = -1; } }
+                else if (C->act24 < 0 && s0 < c->seccion) { C->act24 = i; voz(rand() & 1 ? 0xf4 : 0xf3, 0x3c, 4);
+                    dbglog(DBG_INFO, "CAMP: foto %d: el objetivo (secciones %d..%d)\n", i, s0, s1); }
+            }
+            if (p->fase == 4 && C->act24 >= 0 && c->foto && camp_marco) {   /* 0x2a4fa8: el disparo (+0x2c la nota de la foto) */
+                const uint8_t *o = C->c24p + 16 * C->act24; float l[3], w[3], a, b, df; int nf = 0;
+                memcpy(l, o, 12); camp_marco(l, w);
+                a = atan2f(w[0] - c->xyz[0], w[2] - c->xyz[2]); b = atan2f(c->fx, c->fz); df = a - b;   /* (0x2bb0a0 x 2) */
+                if (df < -3.14159265f) df += 6.28318531f;
+                if (df > 3.14159265f) df -= 6.28318531f;
+                if (fabsf(df) < 0.50265f) nf = (int)((1.0f - fabsf(df) / 0.50265f) * 10.0f + 0.5f);   /* (+0x24: el 0,5; SIMPLIFICADO) */
+                p->med += (float)nf / 10.0f * (LLENO / ((float)C->n24c * 0.9f));   /* (0x2a5074, al acabar el disparo) */
+                if (camp_se) camp_se(0x174);
+                C->nota24 = nf; C->hecho24 |= (uint16_t)(1u << C->act24); C->act24 = -1;
+                dbglog(DBG_INFO, "CAMP: foto: %.0f grados del objetivo, nota %d, medidor %d\n", (double)(df * 57.29578f), nf, (int)p->med);
+            }
+        } else if (p->fase == 5) {
+            C->c24p = NULL; C->act24 = -1;
+            if (p->nota == 6) p->extra += bono(p, 0.9f);
         }
         break;
     default: break;                                     /* SIN PORTAR */
     }
+}
+/* (tipo 22) 1 con una ventana de la bocina en curso (las pruebas) */
+int camp_bocina22(void) { return C && C->c22p && C->cur22 >= 0; }
+/* (tipo 24) el objetivo de la foto activo, en el mundo (camp_marco); 0 ninguno */
+int camp_foto(float *w)
+{
+    const pet_t *p = C && C->cur >= 0 ? &C->pet[C->cur] : NULL; float l[3];
+    if (!p || p->d->tipo != 24 || !C->c24p || C->act24 < 0 || !camp_marco) return 0;
+    memcpy(l, C->c24p + 16 * C->act24, 12); camp_marco(l, w); return 1;
 }
 
 /* ---- los coches de la peticion del tipo 11 (0x1f20e8 / 0x1f1a88: el trafico sale con la tabla de 0x46 bytes de
@@ -613,7 +794,8 @@ static void tipo_paso(pet_t *p, const camp_coche_t *c, float dpos)
 static const pet_t *pet11(void)                         /* (y los tipos 20 y 21: los mismos coches de la peticion) */
 {
     const pet_t *p = C && C->cur >= 0 ? &C->pet[C->cur] : NULL;
-    return p && ((p->d->tipo == 11 && p->d->sub < 2) || p->d->tipo == 14 || p->d->tipo == 20 || p->d->tipo == 21) && p->fase >= 1 && p->fase <= 4 ? p : NULL;
+    return p && ((p->d->tipo == 11 && p->d->sub < 2) || p->d->tipo == 13 || p->d->tipo == 14 || p->d->tipo == 20 || p->d->tipo == 21 ||
+                 (p->d->tipo == 16 && p->d->sub == 6)) && p->fase >= 1 && p->fase <= 4 ? p : NULL;   /* (c2c9: y el 16/6, minijuego.c) */
 }
 static float d2(const float *a, const float *b) { float x = a[0] - b[0], y = a[1] - b[1], z = a[2] - b[2]; return x * x + y * y + z * z; }
 void camp_autos(haobj_auto_t *v, int n)
@@ -626,7 +808,7 @@ void camp_autos(haobj_auto_t *v, int n)
         if (!v[i].pos) continue;
         if (!(v[i].marca & HA_VISTO)) {                 /* (una plaza nueva: el coche acaba de aparecer) */
             v[i].marca |= HA_VISTO; C->fr11[i] = 0;
-            if (p && v[i].sec > js && t != 14) v[i].marca |= HA_CAMP | (t == 11 && p->d->sub == 1 ? HA_FANT : 0);   /* (14: camp_coche14) */
+            if (p && v[i].sec > js && t != 14 && t != 13 && t != 16) v[i].marca |= HA_CAMP | (t == 11 && p->d->sub == 1 ? HA_FANT : 0);   /* (14: camp_coche14) */
         }
         if (!(v[i].marca & HA_CAMP)) continue;
         if (!p) { v[i].marca &= ~(HA_CAMP | HA_FANT | HA_PAR | HA_SUELTO | 0xff); continue; }   /* (0x1f20e8(0) en la fase 5) */
@@ -642,12 +824,29 @@ void camp_autos(haobj_auto_t *v, int n)
             continue;
         }
         if (t == 20) continue;
+        if (t == 16) { if (v[i].sec < js - 1) v[i].marca |= HA_SUELTO; continue; }   /* (16/6: los de mj_coche; atras, fuera del tope) */
+        if (t == 13) {                                  /* 0x2994f8: el coche a menos de 4 secciones y 3 m (0x164f6c), o golpeado */
+            int k = (v[i].marca & 0xff) - 1;
+            if (k < 0 || k >= C->n13c || (v[i].marca & HA_SUELTO)) continue;
+#ifdef PRUEBA_C13
+            if (abs(v[i].sec - js) <= 1 && C->cl13[k] == C->k13[C->obj13]) v[i].golpe = 1;   /* prueba: los del objetivo a 1 seccion */
+#endif
+            if ((js - v[i].sec < 4 && d2(v[i].pos, C->xyz) < 3.0f * 3.0f) || v[i].golpe) {   /* (0x19c990: se va) */
+                v[i].marca |= HA_SUELTO; C->tocado13 += C->cl13[k] == C->k13[C->obj13] ? 1 : -1;
+                if (camp_se) camp_se(C->cl13[k] == C->k13[C->obj13] ? 0xd6 : 0xd4);   /* (efectos: SUPUESTO, los del 14) */
+            } else if (v[i].sec < js) { v[i].marca |= HA_SUELTO; C->n38++; }   /* atras: se va (+0x38) */
+            if (!(v[i].marca & HA_SUELTO) && v[i].sec - js < 10) { C->ver11[i] = 1; C->val11[i] = C->cl13[k]; }
+            continue;
+        }
         if (t == 14) {                                  /* 0x29cf18: los coches con numero (+0xd14 == 3; el indice + 1 en la marca) */
             int k = (v[i].marca & 0xff) - 1;
             if (k < 0 || k >= C->n14c || (v[i].marca & HA_SUELTO)) continue;
             {   float r = abs(C->v14[k]) < 10 ? 3.0f : 4.0f; r += 1.5f;   /* 0x1d3a10 con radio 3 / 4 (+ el coche: PROBABLE) */
 #ifdef PRUEBA_C14
                 if (abs(v[i].sec - js) <= 1 && (rand() & 1)) v[i].golpe = 1;   /* prueba: la mitad de los que pasa a su lado */
+#endif
+#ifdef PRUEBA_C14V
+                {   static int t_; if (abs(v[i].sec - js) <= 2 && ++t_ % 10 == 0) dbglog(DBG_INFO, "C14V: coche %d a %.1f m (radio %.1f), seccion %d / %d\n", k + 1, (double)sqrtf(d2(v[i].pos, C->xyz)), (double)r, v[i].sec, js); }
 #endif
                 if (d2(v[i].pos, C->xyz) < r * r || v[i].golpe) {   /* +0x72 += valor (no baja de 0) */
                     int a = C->suma; C->suma += C->v14[k]; if (C->suma < 0) C->suma = 0;
@@ -692,10 +891,28 @@ int camp_coche14(int *sec, int *carril, int *marca)
 {
     const pet_t *p = pet11(); const uint8_t *e;
     if (!p || p->d->tipo != 14 || !C->c14p || C->nx14 >= C->n14c) return 0;
-    e = C->c14p + 4 * C->nx14;
-    *sec = p->d->ini + (int16_t)(e[0] | e[1] << 8); *carril = (int8_t)e[2];
+    for (;;) {                                          /* (c2c7: los que el tope de main.c deja pasar sin abrir, fuera) */
+        e = C->c14p + 4 * C->nx14;
+        *sec = p->d->ini + (int16_t)(e[0] | e[1] << 8); *carril = (int8_t)e[2];
+        if (*sec >= (int)floorf(C->pos) + 5 || ++C->nx14 >= C->n14c) break;
+    }
+    if (C->nx14 >= C->n14c) return 0;
     if (*sec - (int)floorf(C->pos) > 40) return 0;
     *marca = (int)(HA_VISTO | HA_CAMP) | (C->nx14 + 1); C->nx14++;
+    return 1;
+}
+int camp_coche13(int *sec, int *carril, int *marca)   /* (c2c8) como camp_coche14 con los coches de 'C131' */
+{
+    const pet_t *p = pet11(); const uint8_t *e;
+    if (!p || p->d->tipo != 13 || !C->c13p || C->nx13 >= C->n13c) return 0;
+    for (;;) {
+        e = C->c13p + 4 * C->nx13;
+        *sec = p->d->ini + (int16_t)(e[0] | e[1] << 8); *carril = (int8_t)e[2];
+        if (*sec >= (int)floorf(C->pos) + 5 || ++C->nx13 >= C->n13c) break;
+    }
+    if (C->nx13 >= C->n13c) return 0;
+    if (*sec - (int)floorf(C->pos) > 40) return 0;
+    *marca = (int)(HA_VISTO | HA_CAMP) | (C->nx13 + 1); C->t13ant = C->cl13[C->nx13] == C->k13[C->obj13]; C->nx13++;
     return 1;
 }
 int camp_cuenta14(int *objetivo, int *suma)
@@ -718,11 +935,41 @@ int camp_lineas(float (*a)[3], float (*b)[3], int max)
 /* el dibujo: 11/1 el 2C0006 de los fantasmas (0x294b18 lo prepara; como el 0x1b2190 del INFARTO: escala 1,68 hasta el
    cuadro 25, luego - 0,2 por cuadro); 11/0 DESVIACION: sin el modelo de los coches de la peticion, el icono del
    corazon del medidor (HA_C0, 2B000F) sobre ellos */
+static void nom13(char *g, int cl)                      /* (tipo 13) el grupo MJ_kk del sprite de la clase cl */
+{
+    int t = C->c13t[3 * C->fila13 + cl];                 /* (MJHUD.DAT: menos de 100 grupos) */
+    g[0] = 'M'; g[1] = 'J'; g[2] = '_'; g[3] = (char)('0' + t / 10); g[4] = (char)('0' + t % 10); g[5] = 0;
+}
 int camp_spr3d(haobj_s3d_t *v, int max, int (*cuadros)(const char *g))
 {
     const pet_t *p = pet11(); int i, k = 0, f, nc;
     if (!p) return 0;
-    if (p->d->tipo == 20) return 0;
+    if (p->d->tipo == 20 || p->d->tipo == 16) return 0;   /* (16/6: sin sprites en los coches, los tine main.c) */
+    if (p->d->tipo == 13) {                             /* 0x299b58: el sprite de su clase (0x115870), x 1,5 el del objetivo y x 0,75 */
+#ifdef DIAG_SIN_SPR13
+        return 0;                                       /* (medida: los coches del 13 sin sus sprites) */
+#endif
+        for (i = 0; i < 24 && k < max && C->c13t; i++) {   /* los demas (sin el vaiven de 0x136d60) */
+            int cl = C->val11[i] < 0 || C->val11[i] > 2 ? 0 : C->val11[i];
+            if (!C->ver11[i]) continue;
+            nom13(v[k].g, cl);
+            nc = cuadros ? cuadros(v[k].g) : 1; v[k].cuadro = (int)(C->reloj % (uint32_t)(nc > 0 ? nc : 1));
+            memcpy(v[k].p, C->p11[i], sizeof v[k].p); v[k].p[1] += 2.0f; v[k].esc = cl == C->k13[C->obj13] ? 1.5f : 0.75f; k++;
+        }
+        if (k < max && C->c13t && C->c13p) {           /* (c2c9) 0x231fe0 (escala 0,5) / 0x2320d8: el objetivo en el panel, como el */
+            float t = (float)(C->t13ico < 120 ? C->t13ico : C->t13ico - 120) / 21.0f;   /* regalo del 16/4 (minijuego.c; SUPUESTO: */
+            if (t > 1.0f) t = 1.0f;                     /* 2 s en (176, 78) y arriba a (180, -110) a 0,75) */
+            nom13(v[k].g, C->k13[C->hud13]);
+            v[k].p[0] = 176.0f; v[k].p[1] = 78.0f; v[k].p[2] = 0.0f; v[k].cuadro = 0;
+            if (C->t13ico >= 120) { v[k].p[0] += 4.0f * t; v[k].p[1] -= 188.0f * t; t = 2.0f + t; } else t *= 2.0f;
+            v[k].esc = -0.25f * t - 0.001f; k++;
+        }
+        for (i = 0; i < C->nk13 && k < max && C->c13t && C->c13p; i++) {   /* (c2c9) los 3 de la peticion fijos en la VRAM desde */
+            nom13(v[k].g, C->k13[i]);                                            /* el anuncio (cuadro -1: */
+            v[k].cuadro = -1; k++;                                                /* no se dibuja; main.c ha_spr3d) */
+        }
+        return k;
+    }
     if (p->d->tipo == 14) {                             /* (DESVIACION: el numero con las cifras del HUD, rojo el negativo) */
         for (i = 0; i < 24 && k < max; i++) {
             if (!C->ver11[i]) continue;
