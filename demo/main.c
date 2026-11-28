@@ -10239,6 +10239,9 @@ static void nodos_visibles(modelo_t *mo)
             }
         }
     }
+#ifdef DIAG_OCULTA_A                                             /* medida: nodos [A, B) de la etapa sin dibujar (Rev 2.9.9.e) */
+    if (mo == &etapa) { uint32_t i_; for (i_ = DIAG_OCULTA_A; i_ < DIAG_OCULTA_B && i_ < mo->nnodos; i_++) mo->vis[i_ >> 5] &= ~(1u << (i_ & 31)); }
+#endif
 }
 /* Rev 2.9.9 (DESVIACION, LEJ_EN_TOPE): lo que el reparto quita y tiene version lejana (tools/lod_grande.py: lowpoly de lo
    grande; tools/lod_veg.py: cartel de la vegetacion) no desaparece: va su version lejana mientras quepa en lo que le
@@ -13001,6 +13004,9 @@ static uint32_t *cex_n0; static int cex_color, cex_luces = -1, cex_taxi, cex_fre
 static int refl_activo;                                          /* el reflejo pone la pintura de los vertices de entorno */
 static uint32_t *refl_ofs0, *refl_pos;                          /* la pintura (desplazamiento) de los vertices de entorno y
                                                                    donde empieza cada malla (Rev 2.6: coche_reflejo la mezcla) */
+/* DESVIACION (pedido del usuario, 2026-11-28: "bajar un 25 % el brillo de la carroceria de los coches"): la pintura y el
+   reflejo de las mallas de la carroceria (tipo 2 del CEX2) x 0,75, en carrera y en el menu */
+#define CARRO_BRILLO 0.75f
 static uint32_t cex_mul(uint32_t c, uint32_t luz)
 {
     return 0xFF000000u | ((((c >> 16) & 255) * luz / 255) << 16) | ((((c >> 8) & 255) * luz / 255) << 8) | ((c & 255) * luz / 255);
@@ -13026,6 +13032,7 @@ FRIO static void coche_color(int c)                             /* (c2c9: FRIO, 
                 }
                 col = 0xFF000000u | (uint32_t)(((p >> 16) & 255) * lr[0]) << 16 | (uint32_t)(((p >> 8) & 255) * lr[1]) << 8 | (uint32_t)((p & 255) * lr[2]);
             } else col = cex_mul(p, q >> 24);
+            if (e->tipo <= 2) col = cex_mul(col, (uint32_t)(255.0f * CARRO_BRILLO));   /* la pintura (1 y 2; no los cristales) */
             if (e->tipo == 1) coche.verts[m->v0 + i].c = (coche.verts[m->v0 + i].c & 0xFF000000u) | (col & 0xFFFFFF);
             else {
                 if (refl_ofs0 && refl_pos) refl_ofs0[refl_pos[k] + i] = col;
@@ -13568,7 +13575,8 @@ static void coche_reflejo(matrix_t mc, int mapa)
     for (k = 0; k < cex_n; k++) {
         const cex_t *e = cex_m + k; const malla_t *m = coche.mallas + e->malla; vert_t *v = coche.verts + m->v0;
         const uint32_t *vd = cex_vd + e->v0; const uint32_t nv = m->n, c0 = refl_esp ? refl_esp[k] : 0xFFFFFFFFu;
-        const float er = (float)((c0 >> 16) & 255), eg = (float)((c0 >> 8) & 255), eb = (float)(c0 & 255); const uint32_t ea = c0 & 0xFF000000u;
+        const float br = e->tipo == 2 ? CARRO_BRILLO : 1.0f;    /* (la carroceria: tipo 2; los cristales, 3) */
+        const float er = br * (float)((c0 >> 16) & 255), eg = br * (float)((c0 >> 8) & 255), eb = br * (float)(c0 & 255); const uint32_t ea = c0 & 0xFF000000u;
         const uint32_t *o0 = refl_ofs0 && refl_pos && coche.ofs ? refl_ofs0 + refl_pos[k] : NULL; uint32_t *ofs = coche.ofs ? coche.ofs + m->v0 : NULL;
         if (e->tipo < 2) continue;
         p = m->nodo < 0 ? 0 : (m->nodo >> 8) & 0xFF; if (p >= NPZ) p = 0;

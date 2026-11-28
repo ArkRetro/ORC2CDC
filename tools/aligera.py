@@ -66,6 +66,7 @@ REF_ANUNCIO = [(0, t) for t in (96, 97, 99, 100, 101, 102, 122, 93, 127, 129, 13
 # fachadas de PALM (SEG00): ventanas, paredes de los edificios, rascacielos del fondo, almacenes del puerto
 EDIF_PALM = [14, 40, 41, 44, 45, 48, 50, 53, 54, 62, 63, 64, 66, 67, 69, 72, 73, 77, 80, 81, 82, 83, 85, 86, 87, 88,
              89, 90, 91, 124]
+PALM_NITIDAS = os.environ.get('ALIGERA_PALM', 'nitidas') == 'nitidas'   # (si no, 'mitad': lado_de, la Rev 2.9.9.e)
 LADO = 32                                                        # las de 64 de lado
 LADO_MAX = 64                                                    # las de 128 (rejillas de ventanas): a 32 no caben
 # recorte (DESVIACION pedida por el usuario: farolas de las bifurcaciones y carteles de la carretera -50 %, muros de
@@ -233,6 +234,25 @@ def decor(b, d, seg, tdec, refs, info=None):
     mallas = [k for k in range(len(M)) if 0 <= int(M['nodo'][k]) < nn and int(M['nodo'][k]) in quita and int(M['n'][k]) > 0]
     if info is not None: info.append('  anuncios: texturas %s' % sorted(anun))
     return mallas, nveg, len(fveg), nval, len(fval)
+
+
+def nitidas(b, d, lista, hechas=None):
+    """PALM (pedido del usuario, 2026-11-28: "comprimidos VQ pero que se aprecie detalle, las paredes parecen
+    borrones"): las fachadas a su lado de antes (sin reducir), en VQ de 256 entradas y SIN mipmaps, como antes de la
+    Rev 2.9.9 (la PowerVR elige el mip por el eje mas fino: en una pared vista de lado bajaba 2-3 niveles). Devuelve lo
+    mismo que edificios"""
+    texs = d['texs']; res = {}
+    for t in lista:
+        if t >= len(texs): continue
+        w, h, fmt, li, off, tam = texs[t]
+        if (not (fmt & 0x200) and (fmt >> 16 & 0xff) == 255) or (fmt & 0xff) > 2: continue   # (ya hecha)
+        dat = b[d['blob0'] + off:d['blob0'] + off + tam]; hu = remip.huella(texs[t], dat)
+        if hechas is not None and hu in hechas: res[t] = hechas[hu]; continue
+        a = base(dat, w, h, fmt); fb = fmt & 0xff
+        dd, err = vq.codifica(np.ascontiguousarray(a), fb, 256)
+        res[t] = (w, h, fb | 0x100 | 255 << 16 | (fmt & 0xFC00), dd, err)
+        if hechas is not None and hu not in hechas: hechas[hu] = res[t]
+    return res
 
 
 def edificios(b, d, lista, hechas=None, lado_fijo=None):
@@ -472,6 +492,8 @@ def ya_hecho(E):
     f = os.path.join(E, 'SEG00.DAT')
     if not os.path.isfile(f): return False
     d = parte(remip.lee(f))
+    if PALM_NITIDAS:                                    # (todas sin mipmaps y con el libro de 256: las de nitidas)
+        return all(t < len(d['texs']) and not (d['texs'][t][2] & 0x200) and (d['texs'][t][2] >> 16 & 0xff) == 255 for t in EDIF_PALM)
     ts = [max(d['texs'][t][:2]) for t in EDIF_PALM if t < len(d['texs'])]
     return bool(ts) and max(ts) <= LADO_MAX and min(ts) <= LADO      # (sin tocar: todas de 64 o 128)
 
@@ -500,7 +522,7 @@ def datos(E, D, W, solo=None, con_decor=True, con_palm=True, info_solo=False, co
             seg = int(f[3:-4]); mallas = []; nuevas = {}
             if con_decor: mallas, nv, qv, na, qa = decor(b, d, seg, tdec, refs, lin); tot[0] += nv; tot[1] += qv; tot[2] += na; tot[3] += qa
             else: nv = qv = na = qa = 0
-            if con_palm and seg == 0: nuevas = edificios(b, d, EDIF_PALM, hechas)
+            if con_palm and seg == 0: nuevas = nitidas(b, d, EDIF_PALM, hechas) if PALM_NITIDAS else edificios(b, d, EDIF_PALM, hechas)
             if con_rec:
                 mc, nc, qc = carteles(b, d, rcar, lin); rt[0] += nc; rt[1] += qc; mallas = sorted(set(mallas) | set(mc))
                 print('%s: carteles %d, %d fuera (%d mallas)' % (f, nc, qc, len(mc)))

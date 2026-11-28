@@ -1521,6 +1521,38 @@ de OutRun 2 SP (las 15 etapas seguidas) que dio el usuario.
   no esta leido). Sin EFECTOS.DAT nuevo, sin agua (como antes).
 - NO verificado en consola real.
 
+### MAYA: trozos de la piramide sueltos en el cielo (Rev 2.9.9.e / Mod 2.5.9.e, 2026-11-28)
+
+Queja: al principio de la etapa MAYA (SEG29) trozos de la estructura de la piramide flotando en el cielo, desde
+siempre. Reproducido solo en Flycast (`-DPRUEBA_AUTO -DPRUEBA_SIN_TIEMPO -DPRUEBA_CURSO=1 -DPRUEBA_NODO=11
+-DDIAG_CONGELA=300`, salida en MAYA, crono 300): bloques oscuros escalonados encima de los arboles, al fondo de la recta.
+- Que son: el nodo 1417 de SEG29 (81 mallas opacas, texturas 38 / 49 / 52 / 53, de 114 a 260 m de alto: lo de arriba
+  de la piramide del cerro, x 13..200, z -956..-745) y algo del 1396 (la base). Con `-DDIAG_OCULTA_A=1417
+  -DDIAG_OCULTA_B=1418` (nuevo, medida: nodos [A, B) de la etapa sin dibujar) desaparecen. No era el cielo (lista 3:
+  solo las cupulas, grupos 0 / 1, y el agua), ni un cartel (nodos con matriz: los 103 son palmeras e impostores de
+  lod_veg), ni el lowpoly lejano (`-DLOD_GRANDE_D=100000` igual), ni la matriz del nodo (todas las tiras dentro de la
+  esfera de su nodo).
+- Causa: la PVS por mallas (tools/pvs.py). `-DDIAG_POPPING -DDIAG_FALTA` en el cuadro congelado: 53 de las 81 mallas
+  del 1417 y 4 del 1396 faltan por `pvsm` (la mascara de la PVS). Un rayo desde la camara (resuelta de las posiciones
+  en pantalla de FALTAM) a cada una de esas mallas solo cruza el nodo 194: 13 mallas, losas de piedra (texturas 4 y 7)
+  de 45 a 280 m de alto sobre la carretera, que la PVS guardada no deja ver desde ninguna seccion (el original tampoco
+  lo dibuja desde dentro: VISO.DAT, Rev 1.4) pero que en el calculo tapaba. Lo tapado no se dibujaba, lo que tapaba
+  tampoco: de la piramide solo quedaban los escalones que asomaban por encima, sueltos contra el cielo. El 239 (el
+  cerro de al lado) igual. Mismo dato en lgdat2 (2026-11-23): es de la conversion, no de los recortes de despues.
+- La PVS calculada otra vez sobre la geometria de ahora (tools/rehace_pvs.py, nuevo) ve el 194: dibujado es una roca
+  enorme colgando sobre la salida (captura desp_300), asi que no vale; y el 194 si se ve en mas del 10 % de las
+  secciones de mas adelante, asi que tampoco vale quitarlo de los oclusores por "no se ve nunca".
+- CORREGIDO (datos, herramienta): tools/pvs_nodo_entero.py (nuevo): en la PVS que ya trae la etapa, cada nodo grande
+  (radio >= 40 m, ni carteles ni lejanos NODO_LEJ) se ve entero en las secciones en las que se ve alguna de sus mallas.
+  Sin tocar nada mas del fichero (recortes y aligerado como estaban). SEG29: +21,4 % de mallas-seccion, listas
+  264 -> 287 KB. Medido en Flycast: la piramide entera en su cerro, sin trozos sueltos (desp2_300); "VOZ: VOCES.DAT, 35
+  muestras", sin "Out of memory". SEG29 va suelto (ORD7, no esta en SEGS.PAK): solo cambia SEG29.DAT. El del Mod Taxi
+  (modos/mod3/datos, misma geometria y misma PVS, otras texturas): lo mismo.
+- Ademas (para conversiones nuevas): tools/pvs.py `calcula` quita de los oclusores lo que no se ve desde ninguna
+  seccion y repite (hasta 3 pasadas; `PVS_SIN_2=1` lo de antes); `no_tapan` y `una_pasada` para rehace_pvs.py.
+  PENDIENTE: la PVS por seccion con los oclusores de cada seccion (lo que esa seccion dibuja), para no tener que
+  ensanchar a nodos enteros; las demas etapas no se han revisado.
+
 ### Rev 2.9.8: lecciones de Crazy Taxi
 
 Comparacion tecnica con Crazy Taxi de Dreamcast (material de referencia: de el se toma la TECNICA, nunca codigo ni
@@ -9056,3 +9088,15 @@ posicion, como la decoracion).
   despues; PALM a 700 m del final (carteles: el segundo de la fila de flechas de curva desaparece,
   carteles_zoom_antes_despues.png) y la bifurcacion de PALM (A_bif / B_bif, bifurcacion_antes_despues.png: faltan farolas alternas; el registro da
   zona libre de VRAM 607K -> 619K con la union subida, los 12 KB de los dos muros). El Mod no se ha arrancado aqui.
+
+## Carroceria -25 % y fachadas de PALM nitidas (pedido del usuario, 2026-11-28; DESVIACION)
+- "Bajar un 25 % el brillo de la carroceria de los coches": demo/main.c CARRO_BRILLO 0,75 en la pintura de las mallas
+  de tipo 1 y 2 del CEX2 (coche_color) y en el especular del reflejo de las de tipo 2 (coche_reflejo). Los cristales
+  (tipo 3) no cambian. Vale para el menu y la carrera.
+- "Los edificios de la primera curva de la primera etapa, en VQ pero que se aprecie detalle; las paredes parecen
+  borrones": aligera.nitidas (por defecto; ALIGERA_PALM=mitad para volver a lado_de). Las 30 de EDIF_PALM vuelven a su
+  lado de antes, en VQ con el libro de 256 entradas (antes 128) y SIN mipmaps, como antes de los mipmaps de la
+  Rev 2.9.9: la PowerVR elige el mip por el eje mas fino y en una pared vista de lado bajaba 2-3 niveles. VRAM de
+  PALM: 499 -> 578 KB (clasica) y 430 -> 481 KB (Mod).
+- La pared grande y gris de la derecha en la primera curva no es de EDIF_PALM. Es, PROBABLE, la textura 46 (32x16 en
+  16 bits, igual en el disco de PS2): estirada sobre toda la pared, no tiene mas detalle que dar.
