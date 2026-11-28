@@ -8667,3 +8667,18 @@ la lista (el original los tiene; tope y LOD ligero de c2c8).
 - 11 / 20 / 21: sus modelos (0x96 / 0xa5 / 0x104 / 0xb4) no estan en la DC.
 - Pruebas nuevas (solo con defines): DIAG_SPR13 (cada subida de los sprites del 13 con su tiempo), DIAG_SIN_SPR13, DIAG_C13T
   (us por paso de aparecer / mover / choques / gestor del trafico), DIAG_SIN_MJ6. Datos nuevos: CAMP.DAT +600 bytes ('M163').
+## Ferrari con menos vertices (agente ferrari, 2026-11-28; DESVIACION del port)
+Menos vertices en los coches del jugador, en el menu (COCHEnn.DAT) y en la carrera (COCHEnnL.DAT), con el colapso de
+aristas de `tools/conv_coche.py` (simplifica) y los parametros nuevos de la linea de ordenes (--razon, --menu-razon,
+--error, --giro, --borde, --cerca; el parche del agente fps2, terminado). Silueta, ruedas, luces, habitaculo de la vista
+interior y el bloque CEX2/ANI1 salen como antes: lo que no es simplificable no se toca. La ficha 7 del Mod (taxi) no se
+genera nunca.
+- Llamada (por ficha k, la del paso `coche<k>` de tools/regenera.py, anadiendo a `--visible`):
+  `conv_coche.py <iso> --todos <dir> --fichas k --visible --razon 0.3 --error 0.05 --giro 0.3 --borde 3 --cerca C --menu-razon 0.6`
+  con C = 0.02 en las fichas 1, 3, 8, 12 y 13 y C = 0.005 en las 0, 2, 4, 5, 6, 9, 10, 11 y 14.
+- Vertices en el fichero (antes = lgdat2): menu -23 % a -30 % en las 14; carrera -16 % a -28 % (0, 1, 3, 5, 8, 11, 12, 13,
+  14 por encima del -20 %; 2, 4, 6, 9 y 10 entre -16 % y -20 %: con --cerca 0.005 no dan mas sin quitar el limite de giro).
+- A/B en Flycast (PRUEBA_AUTO, coche ficha 0, mismo s): PALM 38,80 -> 38,96 fps, CLOU 36,37 -> 36,80, METR 37,03 -> 36,98;
+  triangulos por cuadro 18622 -> 17076, 17598 -> 16039, 15448 -> 13820 (-1550 de media). RAM al arrancar: libre 495K antes, 500K despues;
+  VOZ 35 muestras, sin Out of memory. Mejora pequena en fps (+0,2 de media): el coche no es lo que limita.
+- PENDIENTE: integrar la llamada en tools/regenera.py y en el programa de Windows (FICHAS_ISO sin la 7).
