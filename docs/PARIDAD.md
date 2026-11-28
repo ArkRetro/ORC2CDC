@@ -8565,3 +8565,112 @@ p13.py: los parametros del 13 en los guiones). Capturas y registros en $S/modos/
   porte el 6). El 22 no tiene coches en el original.
 - Pruebas nuevas (solo con defines): PRUEBA_C13, DIAG_TP_LOD0, DIAG_HUD_TROZOS, DIAG_RESERVA. Datos nuevos: CAMP.DAT +2 936 bytes
   ('C131'), MJHUD.DAT +6,3 KB (285 056 -> 291 360).
+
+## fps3: decoracion -15 % y edificios de PALM 32x32 (agente fps3, 2026-11-28; DESVIACION pedida)
+
+Pedido del usuario, para ganar fps en todas las etapas: (1) quitar un 15 % de los arboles, arbustos y vallas
+publicitarias de cada etapa, repartido de forma uniforme y determinista, respetando lo que tiene funcion (lo de las
+peticiones y campeonatos, la meta, los checkpoints y las bifurcaciones); (2) en PALM, las texturas de los edificios a
+32x32, cuadradas y compatibles con los mipmaps y los libros VQ. Sobre la rama integra (b41fb8c). Sin cambios en el
+codigo de la demo: todo en los datos, con una herramienta que el programa de Windows rehace desde los discos.
+
+**Herramienta**: `tools/aligera.py --datos entrada/ salida/ trabajo/` (y `--info entrada/ [SEGnn...]`, `--solo`,
+`--sin-decor`, `--sin-palm`), sobre una carpeta de datos ya hecha, como `tools/remip.py` (recompone las SEG de SEGS.PAK
+y reempaqueta con pak_union.py). `tools/regenera.py` la pasa al final, una vez, detras de remip (marca
+`trabajo/aligera.hecho`); `windows/construye.sh` copia `demo/decor_tabla.h` junto a las tools del programa (la tabla de
+vegetacion de la demo). Determinista: los mismos nodos y los mismos bytes en dmip (con mipmaps) y en lgmod2 (sin ellos;
+mismas cuentas en las 62 etapas).
+
+### 1. Decoracion -15 % (las 62 SEGnn.DAT)
+- Que se quita: las mallas del nodo con 0 vertices (la demo no dibuja las de menos de 3), con su version lejana de
+  lod_veg.py y, en los arboles, su tronco si va en otro nodo (la misma regla que decor_reduce).
+- Vegetacion: los nodos que `decor_reduce` (demo/main.c) toma por vegetacion (decor_tabla.h y sus medidas) y que el
+  no quita ya (su hash: 6 de cada 20). El 15 % es de lo que se veia: PALM 399 a la vista, 60 fuera; en el registro
+  de la demo "DECOR: 575 de vegetacion" pasa a 515 y lo que quita ella sigue igual (176).
+- Vallas publicitarias: nodos con una malla de un anuncio. Los anuncios se reconocen por la firma de su textura
+  (16x8 colores, RMS < 15; con o sin mipmaps, tambien en espejo) frente a los patrocinadores de PALM y TULI
+  (REF_ANUNCIO, numeros de textura: se rehacen desde el disco). En las 62 etapas salen 285 texturas parecidas, todas
+  anuncios mirados a mano (cap/anuncios.png: <= 8,3 de distancia; lo siguiente, 23,8). Solo la valla entera (de 8
+  a 64 vertices, <= 16 m de planta, >= 2,5 m de alto: el cartel con su marco), fuera del asfalto (mas de 1 m) y a
+  mas de 100 m del principio y del final de la ruta. No: los paneles sueltos de las gradas y del muro de la salida
+  de PALM (un cuadrilatero pegado a la estructura: quedaria el hueco).
+- Reparto: los candidatos de cada clase ordenados por su punto de la ruta (en el mismo sitio, por un hash de la
+  posicion) y fuera uno de cada 1 / 0,15 seguidos: el 15 % exacto y a lo largo de toda la etapa, nunca un tramo.
+- Lo que no se toca: carteles de la carretera (flechas, SLOW DOWN, la pancarta CHECK POINT), farolas, publico,
+  edificios. Los objetos de las peticiones y de los campeonatos (HAOBJ, CAMPOBJ, INFARTOP...) y la meta (META.DAT) son
+  otros ficheros: ninguna valla de las etapas forma parte de una peticion.
+- Total (62 etapas): vegetacion 12 306 a la vista, 1 845 fuera (15,0 %); vallas 329, 50 fuera (15,2 %); 56 etapas
+  cambian (en SEG04 INDU, SEG28, SEG37 y SEG64 no hay vegetacion en la tabla ni vallas). Por etapa del modo OutRun
+  (vegetacion vista / fuera, vallas / fuera): PALM 399/60, 33/5; LAKE 239/36, 6/1; ALPI 547/82, 12/2; CAST 86/13;
+  FORE 555/83; DESE 203/30; CLOU 960/144, 18/3; INDU 0; SNOW 284/43; GHOS 146/22; TULI 119/18, 28/4; METR 124/19;
+  RUIN 52/8; IMPE 282/42; CAPE 322/48.
+
+### 2. PALM: fachadas a 32x32
+- Elegidas a mano en la hoja de las 170 texturas de SEG00 y su uso (cara vertical, alto de los nodos): 30 de ventanas,
+  paredes de edificios, rascacielos del fondo y almacenes del puerto (EDIF_PALM: 14, 40, 41, 44, 45, 48, 50, 53, 54,
+  62-64, 66, 67, 69, 72, 73, 77, 80-83, 85-91, 124). No: carretera, aceras, empedrado, muros de piedra del paseo,
+  rocas, cielo, palmeras (troncos y hojas), plantas colgantes, publico, coches aparcados, letreros de los hoteles
+  (43, 47, 52, 56, 75, 76), anuncios, farolas, la noria (95).
+- Cada una: el nivel mayor de ahora reducido por promedio (128 o 64 -> 32; 82 era de 128x64) a 32x32 cuadrada con
+  mipmaps; VQ con niveles y libro reducido (remip.codifica: 88 entradas, error RMS 1,5-8,2, todas en VQ) y el D adjust
+  de remip se queda. En recorte (ARGB1555), el alfa de cada nivel guarda la cobertura. En las uniones del curso de PALM
+  no hay ninguna con los mismos bytes (no cambia ninguna BK).
+- VRAM de SEG00: 569 -> 482 KB con mipmaps (dmip; -87 KB); en la Mod (lgmod2, sin mipmaps) 451 -> 412 KB.
+- Capturas (cuadro congelado `-DDIAG_CONGELA=1200`, PRUEBA_NODO=0, mismo binario, dmip / fps3):
+  scratchpad modos/fps3/cap/palm_1200_antes_despues.png (falta la valla de AMD de la fila de la izquierda y alguna
+  planta; los edificios mas lisos), palm_1200_edificios_zoom.png (la fachada grande de la derecha pierde casi todo el
+  detalle de las ventanas), palm_2400_antes_despues.png (los rascacielos del fondo: casi igual, ya usaban niveles
+  pequenos de lejos) y edif_texturas_antes_despues.png (las 30 texturas antes y despues).
+
+### Medida (Flycast; NO emula el coste de relleno de la PowerVR)
+`-DPRUEBA_AUTO -DPRUEBA_SIN_TIEMPO -DDIAG_MS -DDIAG_POPPING -DPRUEBA_NODO=n`, 140 s, el mismo binario con dmip (A) y con
+dmip + fps3 (B), cada etapa cortada al mismo s (tabla2.py de fps2 y tabla3.py: triangulos y vertices por cuadro, VRAM
+libre de la zona al subir la etapa, nodos de la precarga):
+
+| Etapa | s comun | fps A / B | tri/cuadro A / B | vtx/cuadro A / B | cpu ms A / B | VRAM libre zona tras la etapa (K) A / B | nodos de la precarga A / B |
+|---|---|---|---|---|---|---|---|
+| PALM | 3508 | 38,2 / 38,3 (0,03) | 18595 / 18616 (+0,1 %) | 29027 / 29049 | 23,55 / 23,52 | 742 / 829 | 402 / 426 |
+| LAKE | 2116 | 39,4 / 39,4 (0,07) | 19718 / 19939 (+1,1 %) | 31195 / 30638 | 21,51 / 21,42 | 742 / 742 | 158 / 149 |
+| ALPI | 2272 | 39,4 / 39,4 (-0,06) | 17104 / 16950 (-0,9 %) | 27074 / 26901 | 20,51 / 20,41 | 742 / 742 | 361 / 347 |
+| CAST | 1883 | 39,1 / 39,2 (0,05) | 20498 / 20443 (-0,3 %) | 30939 / 30944 | 23,18 / 23,21 | 769 / 769 | 340 / 340 |
+| FORE | 3283 | 39,3 / 39,4 (0,16) | 13831 / 13811 (-0,1 %) | 21895 / 21831 | 19,62 / 19,50 | 720 / 720 | 686 / 649 |
+| DESE | 4290 | 39,0 / 39,0 (-0,06) | 16227 / 16302 (+0,5 %) | 24215 / 24370 | 19,39 / 19,41 | 784 / 784 | 253 / 243 |
+| CLOU | 7280 | 36,9 / 36,9 (0,00) | 16906 / 17009 (+0,6 %) | 27371 / 27431 | 24,14 / 24,15 | 742 / 742 | 303 / 301 |
+| INDU | 1282 | 39,3 / 39,2 (-0,08) | 15112 / 15051 (-0,4 %) | 23975 / 23828 | 20,90 / 20,85 | 742 / 742 | 233 / 233 |
+| SNOW | 5878 | 39,5 / 39,5 (-0,08) | 14860 / 14847 (-0,1 %) | 23263 / 23248 | 19,04 / 18,97 | 742 / 742 | 183 / 181 |
+| GHOS | 4627 | 37,9 / 37,8 (-0,06) | 18013 / 18055 (+0,2 %) | 26281 / 26332 | 23,55 / 23,52 | 742 / 742 | 496 / 492 |
+| TULI | 5174 | 38,8 / 38,8 (-0,01) | 17003 / 16841 (-1,0 %) | 26759 / 26597 | 22,05 / 22,01 | 742 / 742 | 468 / 455 |
+| METR | 2555 | 36,8 / 37,0 (0,21) | 16033 / 15974 (-0,4 %) | 26464 / 26199 | 25,11 / 24,81 | 742 / 742 | 255 / 254 |
+| RUIN | 5172 | 39,1 / 39,3 (0,20) | 15674 / 16124 (+2,9 %) | 23701 / 24449 | 19,07 / 19,31 | 748 / 748 | 442 / 439 |
+| IMPE | 5348 | 39,1 / 39,1 (-0,01) | 13853 / 15053 (+8,7 %) | 21950 / 23678 | 19,19 / 19,74 | 592 / 592 | 237 / 233 |
+| CAPE | 4764 | 39,2 / 39,1 (-0,08) | 11386 / 12718 (+11.7 %) | 18413 / 20364 | 17,68 / 18,33 | 742 / 742 | 350 / 341 |
+| **Media (15)** | | 38,7 / 38,8 | 16321 / 16515 (+1,2 %) | 25502 / 25724 | | | |
+
+- Lo que se ve: en Flycast **los fps no cambian** (media 38,74 / 38,76; las diferencias por etapa, +-0,2, son ruido de
+  la carga de la maquina) y los triangulos por cuadro tampoco bajan (+1,2 % de media). La escena va por el tope del TA
+  (reparto de nodos_visibles): lo que se quita lo gasta el reparto en dibujar mas de lo que antes no cabia (PALM: 402
+  -> 426 nodos en la precarga, estimado 1198 -> 1286 K; IMPE +8,7 % y CAPE +11,7 % de triangulos: mas distancia de
+  dibujo). El popping por el tope, igual (8 px+ por s, sumado en las 15: 205,7 / 207,8; 32 px+ 43,8 / 45,2). En la consola, menos relleno de recorte (hojas y vallas) y texturas de PALM 4-16 veces menores en la
+  cache de texturas de la PowerVR: PROBABLE que gane algo en las zonas que van por el relleno; NO medido.
+- VRAM: solo PALM, +87 KB libres en la zona tras subir la etapa (742 -> 829 K).
+- RAM: el codigo no cambia. nav3.sh (compilacion normal, datos fps3): "RAM: al arrancar ... libre 495K", "VOZ:
+  VOCES.DAT, 35 muestras", sin "Out of memory"; en las 30 tiradas de prueba (15 etapas x 2), 35 muestras y ningun "Out of memory"
+  (las de PRUEBA_AUTO arrancan con 449K: lo mismo en A y en B, son los defines de la prueba).
+- GD: SEGS.PAK 239 342 308 -> 239 397 190 bytes (+54 KB: los trozos de pak_union cambian donde hay mallas a 0);
+  ningun SEG crece (el hueco de la etapa no cambia).
+
+### DESVIACIONES respecto al original
+- Faltan el 15 % de los arboles, arbustos y palmeras que se veian (ademas del 30 % de la Rev 2.9.2.a) y el 15 % de
+  las vallas de patrocinadores (ademas de 1 de cada 3 repetidas iguales de decor_reduce: si al quitar una quedan
+  menos de 3 iguales, la demo ya no quita otra de esas).
+- PALM: 30 texturas de fachadas a 32x32: de cerca las ventanas y los rascacielos se ven borrosos o lisos.
+- No se ha medido en la consola; Flycast no puede mostrar la ganancia (no emula el coste de relleno).
+
+### Datos (solo en scratchpad)
+- modos/fps3/dat: SEGS.PAK y 61 descriptores / sueltas SEGnn.DAT (la clasica, desde dmip); modos/fps3/datos: carpeta
+  de prueba (enlaces a dmip con lo de dat encima). modos/fps3/mod: lo mismo desde lgmod2 (la Mod; la ficha 7, el taxi,
+  no se toca: solo etapas). Registros: modos/fps3/res (aligera_dmip.txt, aligera_mod.txt, A*/B*, nav).
+
+### Queda
+- Medir en la consola real (Y en la pausa: PowerVR y TA) PALM y una etapa de bosque (CLOU, FORE) con y sin fps3.
+- Si se quiere que Flycast muestre algo: el 15 % solo baja los triangulos con un tope del TA mas alto o fijo.
