@@ -704,6 +704,7 @@ static struct {
     int a_est, a_tiempo, a_fin;                     /* 82F5A4, 82F5A8, 82F5B0 */
     int8_t pick_idle, pick_turn, pick_jump, pick_land;   /* 82F5AA.., 82F2F8 / 82F2F9 */
     int32_t w68, w6c, w70, w74, w78, w7c;           /* work +68..+7C de la acompanante (487D60 / 487D90 / 487DD0) */
+    float y_base; int y_ok;                         /* (DESVIACION, copi: la altura media de sus huesos sentada) */
 } lg;
 
 static const uint32_t *lista(int off, int *n)       /* {lista, cuenta} de +off: 8 x {cuenta, 4 ids} en LISA / LISC */
@@ -801,6 +802,7 @@ static void piloto(const robot_coche_t *c)          /* 488DD0 (variante 1) */
     osage_control(0, m);                                        /* 488450: Calc y luego 515040 */
 }
 
+#define COPI_DE_PIE 0.3f                            /* m (copi: de pie 0,65-0,70; las reacciones sentada <= 0,09) */
 static void a_reposo(motor_t *m)                    /* 4886B0 */
 {
     if (!fin_mov(m)) return;
@@ -907,6 +909,26 @@ static void acompanante(const robot_coche_t *c)     /* 489A90 (variante 1) */
     }
     manos(m);
     calc(m);
+    /* DESVIACION (copi, auditoria del usuario: "la copiloto a veces se pone de pie en el coche", INFARTO con el Dino):
+       algunos movimientos de las peticiones (CHRH.DAT) la ponen de pie con las piernas por encima del techo, quiza
+       porque su hueso raiz es el de una escena fuera del coche (sin confirmar contra el original). Si la altura media
+       de sus huesos sube mas de COPI_DE_PIE sobre la de sentada, vuelve a sentada en el acto. */
+    if (m->n > 0) {
+        float y = 0.0f; int i;
+        for (i = 0; i < m->n; i++) y += m->M[i][3][1];
+        y /= (float)m->n;
+        if (lg.a_est == R_IDLE && m->id == 0x6004b) { lg.y_base = lg.y_ok ? lg.y_base * 0.9f + y * 0.1f : y; lg.y_ok = 1; }
+        else if (lg.y_ok && lg.a_est != R_GOAL && lg.a_est != R_OVER && (y - lg.y_base > COPI_DE_PIE || lg.y_base - y > COPI_DE_PIE)) {
+#ifdef DIAG_HA
+            dbglog(DBG_INFO, "DIAGHA acompanante: de pie con 0x%x (altura %.2f, sentada %.2f): a sentada\n", (unsigned)m->id, (double)y, (double)lg.y_base);
+#endif
+            conecta(m, 0x6004b, 0, 1.0f); m->bucles = -1; lg.a_est = R_IDLE; lg.a_tiempo = 0; lg.w6c = lg.w74 = -1;
+            calc(m);
+        }
+#ifdef DIAG_HA
+        { static int n; if (++n % 30 == 0) dbglog(DBG_INFO, "DIAGHA altura 0x%x %.2f (sentada %.2f, estado %d)\n", (unsigned)m->id, (double)y, (double)lg.y_base, lg.a_est); }
+#endif
+    }
     osage_control(1, m);
 }
 
